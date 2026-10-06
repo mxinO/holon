@@ -9,28 +9,33 @@ Status: draft for review · Date: 2026-10-06 · Branch: `design-doc`
 plug-serve is a microkernel LLM inference engine. A small core (~5k LOC Python, hard cap 6k) fixes only the
 timing structure of a step, memory accounting, the plugin resolver and a handful of typed contracts. **Models,
 layer types, quantization formats, kernels, cache/offload policies, speculative decoding, sampling, grammars,
-schedulers, frontends and parallelism are all plugins.** A trusted judge and a supervisor let an agent — including
-an agent *served by the engine itself* — propose, verify, benchmark, promote and roll back improvements.
+schedulers, frontends and parallelism are all plugins.** Every supported (model, GPU class) ships with
+best-known, human-tuned defaults. Optionally, a trusted judge and a supervisor let a capable agent — including one
+*served by the engine itself* — propose, verify, benchmark, promote and roll back improvements.
 
 ### Goals
 
 1. **Isolation with reuse** — adding or changing one model never changes another model's output, while code is
    shared in small units. Enforced by per-model lockfiles that change only through that model's judged transition
-   (§4.6) and model-scoped Registry rows (§4.4).
+   (§4.6) and per-model lock histories (§4.4).
 2. **Extensibility** — features in §9 land as plugins with an empty `git diff core/`.
-3. **Self-improvement** — an agent using the engine can tune and replace plugins under a judge it cannot edit,
-   with automatic rollback.
-4. **Small and legible** — every plugin is small enough for a coding agent to hold in context.
-5. **Competitive single-GPU performance** — within 10% of mini-sglang decode throughput on the same GPU for M0.
+3. **Best-known defaults** — every supported (model, GPU class) ships tuned by us; the engine performs at its best
+   with no agent involved.
+4. **Optional self-improvement** — when a capable agent and the user choose to, the agent can tune and replace
+   plugins under a judge it cannot edit, with automatic rollback (§10). Nothing else depends on this layer.
+5. **Small and legible** — every plugin is small enough for a coding agent to hold in context (measured: plan
+   M0.3 legibility benchmark).
+6. **Competitive single-GPU performance** — within 10% of mini-sglang on decode and on mixed agent traffic, on the
+   same GPU, for M0.
 
 ### Non-goals (v0)
 
 Multi-node serving, non-NVIDIA platforms, training, a model zoo. These must remain *possible* without core
 rewrites (§8) but are not built in v0.
 
-Scope note (D1 × D5): on a host with **one** GPU, v0 self-improvement covers host-side policy plugins and
-`apply="live"` tunables (in-process A/B, §10.4). Kernel and graph-path variants need a spare GPU (the dev box has
-8) or the drain-window mode, which is a v0 stretch goal and hardened in v1.
+The optional self-improvement layer (§10) is not part of v0; v0 builds the test/benchmark harness it will reuse.
+Its first version evaluates candidates on a spare GPU only (accepted 2026-10-06: on single-GPU hosts it is limited
+to host-side policies and live tunables).
 
 ### Decisions taken (2026-10-06)
 
@@ -40,7 +45,10 @@ Scope note (D1 × D5): on a host with **one** GPU, v0 self-improvement covers ho
 | D2 | Model ladder: Qwen3 dense → Qwen3-MoE → Qwen3.5 GDN hybrid ([plan §2](plan.md)). |
 | D3 | Borrow existing kernels first (FlashInfer, flash-linear-attention, Triton MoE, …) **only if they fit the plugin contract** (§5.6); otherwise write our own. |
 | D4 | Python control plane; native/Triton kernels; CUDA graphs on the hot path. The plugin API stays Python; hot core structures and the frontend may later be replaced by Rust modules behind unchanged interfaces, only when profiling triggers it (§12). |
-| D5 | Self-improvement is driven by agents that *use* the engine (e.g. a Qwen3 agent served by plug-serve). Auto-promotion is allowed inside policy/kernel/tunable scope under the judge; core, judge, ABI and `approx` numerics need a human (§10.5). |
+| D5 | Self-improvement is an **optional capability** for capable agents and explicit user intent (e.g. a strong agent served by plug-serve). The engine itself ships best-known, human-tuned defaults and never depends on it. When used, auto-promotion is limited to policy/kernel/tunable scope under the judge; core, judge, ABI and `approx` numerics need a human (§10.5). |
+| D6 | References (mini-sglang, nano-vllm, vLLM Model Runner V2, SGLang, FreeToken, Strata) are studied, not copied: control-plane code is our own plugin-native implementation. Only kernels may be borrowed, under §5.6. |
+| D7 | Hardware: development on 8× RTX A5000 (sm_86). Consumer performance evidence on consumer desktop machines — RTX 5080 16 GB and RTX 5090 32 GB (sm_120), RTX 4090 (sm_89). Datacenter path on datacenter GPUs (H100, GB200) later. |
+| D8 | Expert caching/offload arrives in v1, but its core seams (device SeqTable, MemOps, `quiesce`, stream-memop CPU handshake) are built and spiked in M0 so it lands without core changes. |
 
 ---
 
@@ -48,8 +56,9 @@ Scope note (D1 × D5): on a host with **one** GPU, v0 self-improvement covers ho
 
 1. The core contains no model name, layer-type name, quant-format name, or feature-specific field.
    (CI: denylist grep over `plugserve/core` — `mamba|gdn|mla|dsa|nvfp4|eagle|qwen|deepseek|lora|…`.)
-2. Plugins import only `plugserve.api`, std units (one live version, referenced via `Ref`), their own package, and third-party
-   libraries declared in their manifest `[dependencies]` (e.g. `triton`, `flashinfer`). Model packages never
+2. Plugins import only `plugserve.api`, their own package, and third-party libraries declared in their manifest
+   `[dependencies]` (e.g. `triton`, `flashinfer`). Other units (incl. std) are referenced with `Ref` and injected,
+   never imported (§4.6). Model packages never
    import other model packages. (CI: import-linter contracts + manifest dependency check.)
 3. Plugins never import `plugserve.core._*` or `plugserve_judge`. (CI: import-linter.)
 4. No module-level mutable state in `plugserve.*`; all state hangs off an explicit `Engine`/`ctx`. (lint)
@@ -62,7 +71,7 @@ Scope note (D1 × D5): on a host with **one** GPU, v0 self-improvement covers ho
 10. No `model_type`/architecture branches in std or any shared unit; model-specific code lives in the model's own
     package (`fast/`, §5.7). (lint)
 11. One version of each unit per Plan, one Plan per process. Lockfiles and snapshots are written only by
-    `plugserve propagate` and the supervisor (§4.6); CI's `isolation-check` re-runs propagate on a trusted GPU
+    `plugserve propagate` (incl. `--new-model`), `plugserve tune` and the supervisor (§4.4, §4.6); CI's `isolation-check` re-runs propagate on a trusted GPU
     runner and rejects any lock or snapshot it cannot reproduce byte for byte.
 
 ---
@@ -80,7 +89,7 @@ Scope note (D1 × D5): on a host with **one** GPU, v0 self-improvement covers ho
  └──────▲───────┘                                      ▼
         │ OpenAI/Anthropic             ┌──────────────────────────────┐
         │                              │  Supervisor (trusted)        │
-   clients / agents ─── improve API ──►│  Registry · Evidence ledger  │
+   clients / agents ─── improve API ──►│  Lock history · Evidence     │
    (incl. an agent served by           │  lifecycle · rollback · MCP  │
     this very engine)                  └──────────────┬───────────────┘
                                                       │ spawns
@@ -93,12 +102,13 @@ Scope note (D1 × D5): on a host with **one** GPU, v0 self-improvement covers ho
 - **Frontend** — HTTP APIs, tokenization/detokenization, chat templates, stop strings. Talks to the engine in
   token ids. Plugins: API dialects; the tokenizer/template/parser bundle comes from the model plugin.
 - **Engine** — runs one resolved `Plan`. Single process per GPU group in v0 (rank 0 only, through the SPMD path).
-- **Supervisor** — small trusted process. Owns the Registry, the evidence ledger, engine lifecycle (start, drain,
-  restart on a new Plan), health checks, automatic rollback, and the improve API (§10). Never imports agent code.
-- **Sandbox engine** — a separate engine process started by the supervisor with a candidate Plan, under a
-  restricted OS identity (§10.6). It may run agent-written code.
-- **Judge** — a separate trusted process that drives engines (the sandbox, and the live engine during in-process
-  A/B) **only as a client** (HTTP/IPC), never in-process with candidate code. Verdict-relevant measurements are taken on the judge side (§10.3).
+- **Supervisor** — small trusted process: engine lifecycle (start, drain, restart on a lock), health checks,
+  crash attribution (§7.7) and rollback. With the optional self-improvement layer (§10) it also owns promotions,
+  evidence and the improve API. Never imports agent code.
+- **Sandbox engine** (optional layer) — a separate engine process with a candidate Plan in a restricted sandbox
+  (§10.6). It may run agent-written code.
+- **Judge** — the test/benchmark harness (goldens, snapshots, op oracles, perf). It drives engines **only as a
+  client** (HTTP/IPC), never in-process with candidate code. Used in v0 for our own development and CI. Verdict-relevant measurements are taken on the judge side (§10.3).
 
 ### 2.2 Packages (one uv workspace)
 
@@ -108,8 +118,8 @@ Scope note (D1 × D5): on a host with **one** GPU, v0 self-improvement covers ho
 | `plugserve-std-*` (`std/`) | reviewed | Shared units: `std.ops` (linear, norm, rope, act), `std.blocks` (residual wiring), `std.mixers.gqa`, `std.ffn`, `std.state.paged_kv`, `std.tiered` (TieredStore library), `std.sampling`. One live version each; recipes reference them via `Ref("name@major")`; locks pin `src` + `sem`; changes reach models only through propagation (§4.6). |
 | `plugins/*` | reviewed or agent | First-party plugins: models, kernels, dialects, policies, frontends. Each is its own dist package with entry points. |
 | `plugserve-judge` (`judge/`) | trusted, read-only to agents | Oracles harness, tolerance budgets, goldens, traces, perf timer. |
-| `plugserve-supervisor` (`supervisor/`) | trusted | Registry, evidence ledger, lifecycle, improve API (MCP + HTTP). |
-| `workspace/` | agent | Git worktree where agent variants are written (gitignored). Promoted variant code is copied by the supervisor into the content-addressed `registry/units/<src>/` (never into the source tree) and referenced from deployment records (§4.6). |
+| `plugserve-supervisor` (`supervisor/`) | trusted | Lifecycle, crash attribution, rollback; with the optional layer (§10): promotions, evidence, improve API (MCP + HTTP). |
+| `workspace/` | agent (optional layer) | Git worktree where agent variants are written (gitignored). A promoted variant is committed by the supervisor to its own branch together with the new lock (§4.4). |
 
 ---
 
@@ -121,7 +131,7 @@ Sixteen nouns. Each is a type in `plugserve.api` (the plugin ABI) with its runti
 |---|---|---|---|
 | 1 | Manifest | Declarative plugin description, readable without import | 4.1 |
 | 2 | Plan | Resolved, serializable deployment: plugins, bindings, tunables, fingerprint | 4.3 |
-| 3 | Registry | `(scope, site, fingerprint) → (variant, tunables, evidence)`; autotune DB + promotion table | 4.4 |
+| 3 | Registry | Git-backed lock history per (model, fingerprint class) + evidence; holds tuned defaults | 4.4 |
 | 4 | ModelSpec | A model's declaration (emitted by a pure recipe): layers, taps, draft heads, encoders | 5.1 |
 | 5 | Op | Typed signature + reference implementation | 5.3 |
 | 6 | Kernel | One implementation of an Op with constraints and properties | 5.4 |
@@ -129,7 +139,7 @@ Sixteen nouns. Each is a type in `plugserve.api` (the plugin ABI) with its runti
 | 8 | StateSpec / StateKind | Per-layer state allocation shape + open-registry meaning | 6.2 |
 | 9 | Ledger / Pool | Byte budget over named pools with stable addresses | 6.1 |
 | 10 | PrefixIndex | Content-addressed reuse of state across requests | 6.3 |
-| 11 | Seq | One request's lifecycle and committed tokens | 7.1 |
+| 11 | Seq / SeqTable | One request's lifecycle (host) + device-authoritative per-slot state | 7.1 |
 | 12 | Batch | One step: host plan (SoA) + static device mirror | 7.2 |
 | 13 | Rewindable | Device-side commit/rollback contract for per-sequence state | 7.5 |
 | 14 | StepLoop | Fixed timing regions, overlap depth, graphs, control plane | 7.3 |
@@ -155,7 +165,7 @@ name      = "expert_cache.lfu_decay"
 version   = "0.3.1"
 variant_of = "expert_cache.lfu@src:aa10"  # optional; set for forks (lineage)
 implements = "placement_policy@1"         # numeric units: "<unit>@sem:<hash>" — the judge loads that oracle
-derived_from = ""                         # optional; copied recipes / legacy holdback forks (lineage only)
+derived_from = ""                         # optional; copied recipes / explicit old-version copies (lineage only)
 entry     = "lfu_decay:Plugin"            # imported only if selected
 slot      = "placement_policy"
 license   = "Apache-2.0"                  # SPDX; provenance hash for borrowed code in [provenance]
@@ -204,13 +214,13 @@ Every slot has an ABI version and a judge-owned contract suite (§10.3).
 ### 4.3 Resolution → Plan
 
 1. Discover manifests (entry points + `plugins/` + `workspace/` if the supervisor enables it).
-2. Read the deployment file (model path, pins, budgets, determinism flag).
+2. Read the deployment file (model path, pins, budgets).
 3. The model plugin's `ModelSpec` enumerates **sites** (each mixer, op, state spec, draft head).
 4. For each site: filter candidates by resources, platform/fingerprint constraints, `supports(shape)`, layout
-   reachability (§5.5); then pick by deployment pin → Registry row for this fingerprint → default priority.
+   reachability (§5.5); then pick by deployment pin → the model's lock for this fingerprint class → default priority.
 5. Check `ShapeKey` axes are finite; compute graph policy per ShapeKey class (weakest wins).
 6. Emit the **Plan** (TOML lockfile): recipe hash, per-unit `src`/`sem` (`[units]`, one version each), site
-   bindings + kernel configs, tunables, fingerprint, determinism flag, `[deploy]` and `[snapshot]` (§4.6).
+   bindings + kernel configs, tunables, fingerprint class, `[deploy]` and `[snapshot]` (§4.6).
    `plan_id = sha256(plan)`.
 7. Import only the selected entries; each plugin registers its kernels/converters/kinds into explicit registries
    passed to `Plugin.register(regs)` (no module-level registries, invariant 4); construct; bind callables. The hot
@@ -219,31 +229,34 @@ Every slot has an ABI version and a judge-owned contract suite (§10.3).
 The Plan is the unit of deployment, A/B, promotion and rollback. It is serializable so every rank of a future
 SPMD deployment can load the identical Plan (§8).
 
-**Model isolation via lockfiles.** Each served model has a reviewed, checked-in **baseline** lockfile per
-fingerprint (`plans/<model_id>/<fingerprint>.lock`). Promotions write **promoted** lockfiles under
-`registry/plans/<model_id>/<fingerprint>/<n>.lock` (outside the source tree). The engine starts from the newest
-active promoted lockfile, else the baseline — never from a fresh resolve. A fresh
+**Model isolation via lockfiles.** Each served model has a lock history per fingerprint class
+(`plans/<model_id>/<class>/<n>.lock`, §4.4). The engine starts from the newest lock — never from a fresh
+resolve. A fresh
 resolve that differs from the lockfile (e.g. because a new, higher-priority kernel was installed for another model)
 is reported as a diff and only adopted through `plugserve propagate` (§4.6). Adding a plugin
 for model B can therefore never change model A's binding silently.
 
-### 4.4 Registry
+### 4.4 Registry = lock history (git-backed)
 
-One SQLite table owned by the supervisor (read-only to the engine):
+There is no separate database. The **Registry** is the git history of lockfiles plus evidence records:
 
-```
-scope | site_key | fingerprint | variant_hash | tunables_json | evidence_id | promoted_at | status(active|retired|quarantined)
-```
-
-- `scope` = `model_id` (v0). A promotion applies only to the model whose goldens/traces were judged. Promoting the
-  same variant for another model is a separate judged promotion (v1 may add `shape_class` scopes that require the
-  goldens of every model in the class).
-- `site_key` examples: `kernel:linear:w=gptq4.tri,x=bf16`, `placement_policy:expert`, `tunable:draft_policy.k`.
-- `fingerprint`: **static facts only** — GPU SKU/UUID, SM, VRAM, driver, CUDA, torch, Triton, CPU ISA. Measured
-  values (H2D bandwidth, clocks) are recorded in evidence, never in the key, so lookups are deterministic. v0
-  lookup is exact-or-default; fallback hierarchy is v1.
-- History is append-only. A promotion writes the new row **and** a new promoted lockfile; rollback restarts on the
-  previous active lockfile (or the baseline) and marks the row `retired` (§10.4).
+- **One linear history per (model, fingerprint class):** `plans/<model_id>/<class>/<n>.lock`. The newest lock is
+  what the engine runs. Rollback = restart on the previous lock in the history. With the optional layer (§10), a host's history is
+  main's locks plus host-local promotion commits on top; when the host pulls a new main, the supervisor re-runs
+  propagation from its own newest lock (so promotions are carried forward or dropped by the same checked
+  transition), or a promotion is upstreamed to main by PR.
+- **Tuned defaults live in the lock.** Kernel configs and tunables are tuned by us per fingerprint class
+  (benchmarking tools such as `plugserve tune`, in the spirit of FreeToken's `ft bench bw`), so every class ships
+  at the best configuration we know — no agent is involved.
+- **Fingerprint class** = GPU SKU + SM + VRAM class + toolchain majors (CUDA, torch, Triton). GPU UUID, driver
+  build and measured bandwidths are recorded in evidence only. Classes maintained first: `rtx-5080` and
+  `rtx-5090` (sm_120), `rtx-4090` (sm_89), `a5000`/`rtx-3090` (sm_86); evidence is produced on those cards
+  (consumer desktop machines, plan §1).
+- **Missing or outdated lock for a class** (an outdated lock pins unit `src`s that the deployed commit does not
+  contain) → the nearest class's current lock (same SM preferred) is used, flagged `unverified`, with an alert. The engine **never refuses to serve** for lack of a lock; `plugserve tune` on the host produces a
+  verified lock for its class.
+- Evidence records (command, fingerprint, plan_id, raw numbers) point at lock hashes and are written after the
+  lock commit.
 
 ### 4.5 Versioning
 
@@ -258,96 +271,71 @@ scope | site_key | fingerprint | variant_hash | tunables_json | evidence_id | pr
 ### 4.6 Reuse and propagation
 
 **Principle.** Code is shared only in small leaf **units**; models are **data** (recipes, §5.1) that reference
-units; and **a model's lockfile changes only through a judged transition of that model**. Hash pins give
+units; and **a model's lockfile changes only through a checked transition of that model**. Hash pins give
 reproducibility and exact rollback; isolation comes from the transition rule. (Rationale and evidence:
-internal design reviews.)
+internal design reviews; simplified after an adversarial review.)
 
 **Units.** A unit is one small package: a component (mixer, op, router, norm, block, policy …), its kernels, and a
 separate `reference.py` holding its oracle.
 
 | Field | Meaning |
 |---|---|
-| `src` | hash of the normalized source tree + manifest |
+| `src` | git tree hash of the unit's directory |
 | `sem` | hash of `reference.py` + parameter schema — the unit's *semantic identity* |
 | `iface@major` | interface version; minors are additive only |
 
-- Units receive dependencies through constructor ports; they never import sibling units and never inherit across
-  plugins (no `extends`, mixins or monkeypatching).
+- Unit code imports only `plugserve.api`, its own package and declared third-party libraries; other units are
+  **injected** through constructor ports (recipes reference them with `Ref`), never imported or inherited (no
+  `extends`, mixins or monkeypatching).
 - **Defaults never change.** New behaviour is a new knob whose default reproduces the old behaviour, or a new unit.
-  This keeps most shared changes in the cheap "output unchanged" class below.
+  Bug fixes are the one sanctioned exception, and they go through approval below.
 - Interface majors: "breaker pays" — the change ships a codemod and updates all first-party dependants.
+- The oracle for `sem` h is the `reference.py` blob at a reviewed commit (git); the judge never takes an oracle
+  from the candidate under test.
 
-**One version per Plan.** A Plan contains exactly one version of each unit; one Plan runs per process. Two versions
-coexist only across processes, via deployment records. There is no hash-namespaced side-by-side loading in v0/v1.
+**One version per Plan.** A Plan contains exactly one version of each unit; one Plan runs per process.
 
-**Lockfile and deployment record.** In addition to §4.3, every lock carries:
+**Lockfile = deployment record.** In addition to §4.3, every lock carries:
 
 ```toml
-plan_id = "sha256:…"   recipe = "sha256:…"              # canonical hash of the emitted ModelSpec term
+plan_id = "sha256:…"   recipe = "sha256:…"      # canonical hash of the emitted ModelSpec term
 [deploy]   commit = "9e1c…"   uv_lock = "sha256:…"
-[units]    "std.mixers.gqa" = { version = "1.3.0", src = "sha256:3f9a…", sem = "sha256:77b2…" }
-[snapshot] regression = "sha256:…"                      # bit hash of teacher-forced logits, regression Plan
+[units]    "std.mixers.gqa" = { version = "1.3.0", src = "<git tree>", sem = "sha256:77b2…" }
+[snapshot] trace = "sha256:…"   uncovered = ["kernel:moe:…"]   # §7.10
 ```
 
-A **deployment record** is `(commit, uv.lock, lockfile, variant unit srcs)` — the single definition used
-throughout. The supervisor materializes a worktree + venv per record
-(cached by uv); rollback = restart on the previous record.
+`(commit, lock)` fully defines a deployment; promoted variant code is part of the commit.
 
-**Propagation.** `plugserve impact <unit>` is a reverse index over all locks. `plugserve propagate` runs inside the
-PR that changes shared code (synchronous in v0) and classifies every affected model:
+**Propagation.** `plugserve impact <unit>` lists the locks whose closures contain it. `plugserve propagate` runs
+inside the PR that changes shared code; CI's `isolation-check` re-runs it on a trusted GPU runner and rejects any
+lock or snapshot it cannot reproduce byte for byte. Each affected (model, fingerprint class) gets one of three
+outcomes:
 
-| Change class | Proof | Effect on that model's lock | Human |
+| Outcome | Condition | Effect | Human |
 |---|---|---|---|
-| Not in the model's closures, or both effective closures (production and regression Plan) unchanged | lock diff empty | nothing (early cutoff) | 0 |
-| Refactor / no-numerics change | regression-Plan snapshot bit-identical **and** the change touches no `uncovered` site (§7.10); changed-line coverage of covered sites reported | rewritten in the PR | 0 (normal PR review) |
-| Change touching an `uncovered` site (production-only, non-deterministic kernel) | bounded L0 on every ShapeKey + L2, enforced 100% changed-line coverage (bitwise proof is impossible for a non-deterministic kernel, so there is no zero-human path) | rewritten | 1 approval |
-| Exact perf change (re-layout, same reduction order) | bitwise L0 on every ShapeKey of the Plan + snapshot bit-identical | rewritten | 0 |
-| New kernel with different numerics | not a shared change — a per-model Registry binding | per §10.5 | per §10.5 |
-| Output-changing bug fix (the sanctioned exception to "defaults never change") | L2 vs the HF reference passes **and** no metric regresses beyond δ (the L2 budget) vs the current snapshot; one `expected-delta` note per change | rewritten; snapshot re-recorded | 1 approval per change |
-| New behaviour (additive knob/unit with old default) | `sem` changes, recipe term unchanged, snapshot bit-identical, and touches no `uncovered` site (else the uncovered row applies) | rewritten (new `src`/`sem`), auto-advance; the behaviour reaches a model only when its recipe opts in (a model-local change) | 0 |
-| Interface major | contract suite; breaker ships the codemod | rewritten | yes |
-| Toolchain / third-party bump (torch, Triton, FlashInfer, driver) | full sweep under the new fingerprint | new per-fingerprint locks; failures stay on the previous deployment record | approve failures |
-| Urgent / security fix | same path, preempts the evaluation queue; old `src` yanked | supervisor refuses records containing a yanked hash | on failures |
+| **Auto-advance** | model's closure unaffected, or snapshot trace byte-identical **and** no `uncovered` site touched **and** every changed line inside the model's closure executed during its snapshot trace | lock rewritten in the PR | 0 |
+| **Approve** | otherwise, L2 vs the HF reference passes and no L2 metric regresses beyond δ vs the current snapshot | lock rewritten, snapshot re-recorded | 1 approval for the whole change (all affected models listed) |
+| **Fail** | L2 fails | the PR fixes it, or the model keeps the previous unit version through an explicit copy in its own package (visible in the diff, `derived_from` set) | — |
 
-A model that fails is **held back visibly**: a `plugins/legacy/<unit>_<model>` fork with `derived_from`, bound
-only in that model's lock, listed in `registry.status()`. After 14 days the holdback **blocks new deployments and promotions** of that
-model and raises an alert until a human fixes the model or explicitly accepts (pins) the holdback. It never
-prevents restarting the last running deployment record.
+Toolchain bumps (torch, Triton, FlashInfer, CUDA majors) produce a new fingerprint class and run the same sweep.
+New models get their first lock from `plugserve propagate --new-model` (L2 vs reference + snapshot, approved).
+Maintained consumer classes (`rtx-5080`, `rtx-5090`, `rtx-4090`) are refreshed by remote `isolation-check`
+runners on consumer desktops — on shared-change PRs where capacity allows, and nightly at least; a release commit requires
+every maintained class refreshed. Until refreshed, an outdated lock is treated as missing (§4.4).
 
-New models get their first lock from `plugserve propagate --new-model` (L2 vs reference + snapshot recording,
-human-approved). Locks for fingerprints with no CI runner (e.g. a user's own consumer GPU) are marked `stale` when propagation
-advances other fingerprints. Before adopting a new commit, the host's supervisor runs a local
-`plugserve propagate --fingerprint=self` (regression snapshot on its own GPU + L2 against the immutable reference
-goldens) and auto-advances its own stale locks under the same change-class rules; only failures need a human.
-Like holdbacks, `stale` blocks new deployments and promotions and alerts — it never prevents restarting the last
-running deployment record.
+**Deferred machinery, each added only when its trigger fires:**
 
-**Promoted locks follow propagation.** After propagate advances a model's baseline lock, the supervisor rebases
-each active promoted lock of that model: it re-applies the promoted `bind`/`set` delta onto the new baseline and
-runs the same change-class check — snapshot unchanged → auto-advance; otherwise re-judge, or retire the variant
-(falling back to the new baseline). Promoted variant code lives content-addressed in `registry/units/<src>/`; a
-deployment record includes their srcs, so every record is reproducible.
-
-**Agent variants are leaves.** A variant is bound in one model's lock only, is never a dependency of anything,
-and expires after 7 days unless promoted. A submission is a Plan delta of exactly two operations keyed by existing
-`site_key`s — `bind` and `set`. `bind` may also add an entry to a `multi`/`ordered_multi` slot already present in
-the lock; an unknown *slot* or unknown `set` key is an error. Additions are agent-auto-promotable only for slots
-that cannot change outputs by contract (drafter — verified outputs are unchanged; exporter; connector;
-checkpoint_policy); additions to output-affecting slots (logits_processor, plan_transform, …) are proposals. In v0 agents do not edit std units; a good variant is
-upstreamed by a human proposal, which then goes through propagation.
-
-**Lineage and GC.** `variant_of`, `derived_from` and `implements` plus Registry history form the lineage graph.
-GC roots: baseline locks, active promoted locks, the last 2 retired locks per model, open jobs, live holdbacks.
-Git keeps everything else.
-
-**Health metric and triggers.**
-
-| Signal | Action |
+| Trigger | Add |
 |---|---|
-| Exception rate f (share of shared-change × affected-model pairs that did not auto-advance) > 10% for a unit | its fan-out is too broad: split it, or demote it to copied code |
-| > 2 holdbacks per unit, or any older than 30 days | introduce a unit store (`store/<src>/` on a per-Plan `sys.path`; still one version per process) |
-| Full propagation sweep > 30 min wall time, or > 1 re-baseline/day | switch propagate to an async merge queue + nightly batch (scheduling change only; formats unchanged) |
-| First model needing sandwich norm / embedding scale / similar glue | add a closed hook set to `std.blocks` (minor version) |
+| Full propagation sweep > 30 min wall time, or > 1 approval/day | async merge queue + nightly batch (scheduling change only) |
+| > 2 models stuck on explicit old-version copies of one unit, or any older than 30 days | holdback tracking with expiry, exception-rate metric per unit |
+| Multi-model-per-process serving (v2) | content-addressed unit store with side-by-side loading |
+| First model needing sandwich norm / embedding scale / similar glue | closed hook set in `std.blocks` (minor version) |
+
+**Agent variants** (optional layer, §10) are leaves: bound in one model's lock only, never a dependency, expire after
+7 days unless promoted. A submission is a Plan delta of `bind`/`set` on existing site keys; `bind` may add an entry
+to a `multi`/`ordered_multi` slot already present (auto-promotable only for drafter, exporter, connector,
+checkpoint_policy; output-affecting slots are proposals). In v0 agents never edit std units.
 
 ---
 
@@ -386,8 +374,8 @@ class ModelSpec:
   refactoring `recipe.py` without changing the term changes nothing. Checkpoint layout lives only in `weights`.
 - **Derivation = copy with lineage.** A new model copies an existing recipe and records `derived_from`; there is
   no model-to-model link or inheritance (e.g. Qwen3.5 differs from Qwen3 in ~10 recipe lines: GDN mixer for
-  linear layers, `output_gate=True`, `rotary_dim=64`, `rmsnorm offset=1.0`, MTP draft head). `plugserve drift`
-  reports how copied recipes diverge (informational).
+  linear layers, `output_gate=True`, `rotary_dim=64`, `rmsnorm offset=1.0`, MTP draft head). `git diff` against
+  the `derived_from` source shows how copied recipes diverge.
 - **Escape hatch.** A model may ship its own `build` (full Python or native forward) that still composes units
   through `BuildCtx` (§5.7 level 5).
 - `forward(ids, ctx)` receives an explicit `StepCtx` (no global forward context). Mixers get their bound state
@@ -414,12 +402,14 @@ class Mixer(Protocol):
     @classmethod
     def graph_policy(cls) -> GraphPolicy
     class Planner:                                   # one per (mixer kind, state group), shared across layers
-        def plan(self, batch: Batch) -> Meta         # host side
-        def prepare(self, meta: Meta, arena: Arena)  # writes static device buffers (graph-safe)
+        needs_host_lens: ClassVar[bool] = False      # True if a kernel needs exact host-side lengths (§7.3)
+        def plan_bounds(self, batch: Batch) -> Meta  # host: shapes and upper bounds only
+        def prepare_device(self, meta: Meta, seq_table: SeqTable, arena: Arena)
+                                                     # graph-capturable: exact lengths/positions from SeqTable
     def finalize_weights(self, params, ctx) -> None  # optional, after load (§5.1)
     def forward(self, x, state: StateHandle, meta: Meta) -> Tensor   # prefill / decode / verify (num_draft>0)
     # oracle: slow pure-torch implementation in the unit's reference.py (sem hash, §4.6) — not a method the
-    # candidate could edit; the judge loads it from the parent unit in its own checkout
+    # candidate could edit; the judge loads the `reference.py` blob named by `sem` at a reviewed commit (§4.6)
 ```
 
 The state semantics (rollback, prefix hits) live in the mixer's `StateKind` (§6.2), usually shipped in the same
@@ -465,8 +455,9 @@ class Plugin(Protocol):
 Registries are explicit objects owned by the engine instance (open registry, no per-format tables, no module-
 level state).
 
-Selection happens once, at plan time (§4.3). No startup autotune sweeps: the Registry holds tuned configs per
-fingerprint; missing rows fall back to the default config deterministically.
+Selection happens once, at plan time (§4.3). No startup autotune sweeps: tuned configs live in the model's lock for
+its fingerprint class (§4.4, produced by `plugserve tune`); without a lock for the class, the nearest class's
+configs are used (`unverified`).
 
 ### 5.5 Quantization and weight loading
 
@@ -506,15 +497,15 @@ A third-party kernel is wrapped as a kernel plugin only if **all** hold; otherwi
 
 1. **Functional**: callable as a pure function over tensors we allocate; no hidden global registries, no
    allocator of its own outside the Ledger (workspaces are declared and allocated from a Pool).
-2. **Graph-safe** for its declared `graph_policy` (no host syncs on the captured path; host-side "plan" steps must
-   run in `Planner.prepare`, e.g. FlashInfer `plan()`).
+2. **Graph-safe** for its declared `graph_policy` (no host syncs on the captured path; host-side "plan" steps run in
+   `Planner.plan_bounds`, e.g. FlashInfer `plan()`; device-side metadata in `prepare_device`).
 3. **Layout-declarable**: its weight/KV/activation layouts can be expressed as `Layout`s.
 4. **Packaging**: installable without pulling in an engine (no `vllm`/`sglang` wheel dependency); version
    conflicts with other selected kernels are detectable from manifests. Prefer vendoring Triton sources.
 5. **License** compatible (Apache-2.0/MIT/BSD) with provenance recorded.
 6. **Verifiable**: passes L0 against our reference within judge budgets on our target shapes.
 7. **Pinned configuration**: no run-time autotuning. `@triton.autotune` is stripped or reduced to the config
-   pinned in `KernelSpec.config` (from the Registry, else a deterministic default). JIT caches (FlashInfer, Triton)
+   pinned in `KernelSpec.config` (from the model's lock, else a deterministic default). JIT caches (FlashInfer, Triton)
    are pre-built at install time and their directories are declared, so the sandbox can mount them read-only.
 
 Initial candidates (v0), with findings from the 2026-10-06 review on sm_86 / torch 2.11 / Triton 3.6:
@@ -545,8 +536,8 @@ plugins/models/<model>/
 
 | Level | Example | Mechanism | Judged |
 |---|---|---|---|
-| 1 Tunables | PCIe/CPU miss split, swap interval, draft k | per-model Registry, per fingerprint | by owning plugin's class |
-| 2 Shape-specialized kernels | GEMV/MoE kernels with constexpr dims | kernel under `fast/kernels`, `implements` the generic op's `sem` **at that site** | bounded (L0 vs the oracle store's reference); agent may auto-promote |
+| 1 Tunables | PCIe/CPU miss split, swap interval, draft k | the model's lock, per fingerprint class | by owning plugin's class |
+| 2 Shape-specialized kernels | GEMV/MoE kernels with constexpr dims | kernel under `fast/kernels`, `implements` the generic op's `sem` **at that site** | bounded (L0 vs the `sem`-named `reference.py` at a reviewed commit); agent may auto-promote |
 | 3 Fused composites | whole decoder layer or verify window in one kernel | composite under `fast/composites` that declares **which sites it replaces**; the judge builds the reference itself from the recipe term (the `sem`-pinned references of those sites) — the composite's own decomposition is never used for judging | L0/L1.5/L2 vs the judge-built path; **human proposal in v0** |
 | 4 Model-specific policies and data | expert placement profile, PLE row layout, MTP-vs-lookup cost model | policy plugins + `fast/data` | policy rules (§10.3); agent may auto-promote |
 | 5 Hand-written forward | full model-owned `build`/`weights`, possibly native | escape hatch; still uses core scheduler, ledger, prefix index, frontends, judge | L2 vs HF + L1.5; **human** |
@@ -584,7 +575,8 @@ class Pool:
 - Budget split (v0, deterministic): (1) weights + workspaces + graph memory; (2) `Slot` pools sized exactly
   `max_seqs × (1 + draft_slots)` from the deployment file; (3) plugin pools at their declared `pref_units`, or
   `min_units` if short (e.g. checkpoint pool: a byte budget from the deployment file, with its own eviction);
-  (4) all remaining memory to `Paged` pools, divided in proportion to bytes-per-token of each spec. Startup fails
+  (4) all remaining memory to `Paged` pools, divided in proportion to bytes-per-token of each spec; specs in one
+  page group (`co_index`) get one shared unit count. Startup fails
   with a per-pool report if any `min_units` cannot be met.
 - v0 implements `fixed`. The **contract** (stable base, device capacity scalar, declared resize mode) exists from
   day 1 so `vmm` (cuMem-backed live resize, Strata-style) lands in v1 without changing users of `Pool`.
@@ -604,18 +596,22 @@ class StateSpec:
     layout: Layout                  # dtype/arrangement, negotiated with kernels
     alignment: int = 1              # prefix-hit granularity only when intrinsic (e.g. compressed-KV ratio);
                                     # GDN uses 1 — its kernels accept an initial state at any offset
-    co_index: str | None = None     # share page ids with another spec (DSA indexer ↔ MLA KV)
+    co_index: str | None = None     # page group: specs sharing page ids, one page table and one unit count,
+                                    # allocated/evicted jointly (DSA indexer ↔ MLA KV; drafter KV ↔ target KV)
     draft_slots: int = 0            # Slot: extra slots for verify intermediates
     retention: str | None = None    # retention policy id (sliding window freeing)
 
 class StateKind(Protocol):          # e.g. paged_kv, ssm_checkpoint, ring, dsa_index (plugins)
     def units_needed(self, spec, seq: SeqView, new_tokens: int) -> int
     def reclaimable(self, spec, seq: SeqView) -> list[UnitRef]
-    def hit_length(self, spec, idx: PrefixView, upto: int) -> int
-    def publish(self, spec, seq: SeqView, upto: int) -> Payload | None
-    def adopt(self, spec, seq: SeqView, payload: Payload) -> None
+    def hit_length(self, spec, idx: PrefixView, upto: int) -> HitLen          # (length, tier cost)
+    def publish(self, spec, seq: SeqView, upto: int) -> tuple[Payload, list[MemOp]] | None
+    def adopt(self, spec, seq: SeqView, payload: Payload) -> list[MemOp]
     def metadata(self, spec, batch: Batch) -> dict[str, Tensor]       # page tables, slot ids, positions
-    # rollback: StateKinds are Rewindable (§7.5)
+    def fork(self, spec, src: SeqView, dsts: list[SeqView]) -> list[MemOp]   # n>1, parallel tool branches:
+                                    # copy-on-write pages, copied Slot state
+    # publish/adopt return MemOps (§6.3); rollback: StateKinds are Rewindable (§7.5). Callbacks are per request
+    # and are vectorised over SoA arrays where the core calls them per step.
 ```
 
 Ring buffers = `Slot` sized to the window, or `Paged` + `reclaimable`. A new mixer with a novel state shape
@@ -631,30 +627,43 @@ v0 decision: **one pool per StateSpec**. Shared padded pools are an opt-in v1 ex
   each payload records its tier.
 - `namespace = hash(model_id, weight_version, adapter_id, mm_salt, statekind_versions)` — prevents silent
   corruption across weight updates, adapters, multimodal inputs and StateKind upgrades.
-- Hit length is a fixed point over all specs (no `isinstance`):
+- Hit length is a fixed point over all specs (no `isinstance`); `hit_length` returns `(length, cost)` so a hit
+  that lives on SSD is not scored like a VRAM hit:
 
 ```python
 L = upto
 while True:
-    L2 = align_down(min(k.hit_length(s, idx, L) for s, k in specs), lcm_alignment)
+    L2 = align_down(min(k.hit_length(s, idx, L).length for s, k in specs), lcm_alignment)
     if L2 == L: break
     L = L2
 ```
 
-- What to publish (checkpoint policies: every-N, turn/tool-call anchors) and what to evict are plugins. v0: hash
-  chain over full KV pages (nano-vllm style), LRU eviction. Radix tree is v1 if lookup cost warrants it.
-- Because the index is page-granular, recurrent checkpoints are taken at page boundaries: an anchor at token `a`
-  makes the anchor PlanTransform cut the prefill chunk at `floor(a / page) · page` and publish there.
-- Eviction-policy contract (v0 signatures, v1 use): `victims()` may return **demote** actions (move a payload to a
-  lower tier and keep the index entry) as well as drops; payloads with an in-flight async store stay pinned
-  (refcounted) until the store completes.
+- Drafter state (e.g. MTP draft-layer KV) takes part in the fixed point like any other spec, so a prefix hit
+  restores the draft layer too.
+- What to publish (checkpoint policies) and what to evict are plugins. v0: hash chain over full KV pages
+  (nano-vllm style). **Eviction is joint per chain**: evicting a recurrent checkpoint also releases the KV pages that
+  only it made reachable, so KV and checkpoint LRUs cannot strand each other.
+- **Publish and adopt are device MemOps** (§7.3), not host reads of live state: `publish` emits "copy slot →
+  checkpoint" ordered after the device commit (in the sample graph) of the step that ends at the boundary — so with
+  `replay` verify the copied state is the post-accept state — and the checkpoint is
+  registered in the index by `host_commit` only if `n_accept` covers that boundary; `adopt` emits "copy checkpoint →
+  active slot" before the forward that uses it; source checkpoints stay pinned until the copy completes. The spec
+  transform caps verify windows at checkpoint boundaries.
+- Because the index is page-granular, recurrent checkpoints are taken at page boundaries. For agent traffic the
+  default policy checkpoints at the **end of each prompt** (chat templates may re-render earlier turns, e.g. strip
+  reasoning, so anchors on sampled tool-call tokens are unreliable); the chunk is cut at `floor(end / page) · page`.
+- Eviction-policy contract: `victims()` may return **demote** actions (move a payload to a lower tier, keep the
+  index entry) as well as drops; payloads with an in-flight async store stay pinned until the store completes.
 
 ### 6.4 Async loading
 
-- Request status `BLOCKED(future)`: a Seq waits for state to arrive (offload tier, PD transfer) and is skipped by
-  the scheduler until resolved.
-- Per-layer ready events: an op may wait on `ctx.ready(spec, layer)` so layer-wise loading overlaps compute.
-- Both exist in v0 (unused by v0 plugins) — retrofitting them is what made vLLM's connector API ~45 methods wide.
+- When a prefix hit lives below VRAM (offload tier, PD transfer), the **connector/tier plugin chooses** per request
+  between (a) `BLOCKED(future)` — the Seq is skipped until all its state has arrived — and (b) layer-wise loading —
+  the Seq runs while ops wait on per-layer ready events `ctx.ready(spec, layer)`.
+- Load futures **reserve their destination pages** in the ledger when issued and are **cancellable**: abort and
+  preemption cancel the future and release its pages.
+- Both mechanisms exist in v0 (unused by v0 plugins) — retrofitting them is what made vLLM's connector API ~45
+  methods wide.
 
 ### 6.5 TieredStore (std library, not core)
 
@@ -662,12 +671,13 @@ while True:
 `PlacementPolicy` plugins, with two resolver styles:
 
 - `HostPlannedResolver` — misses known before the step (KV prefix/offload, KVMem-style window selection); runs in
-  `Planner.prepare`; emits transfers + per-layer events.
+  `Planner.plan_bounds`; emits transfers (MemOps) + per-layer events.
 - `DeviceResolver` — misses known only inside the step (experts, sparse-KV); fixed-shape, in-graph lookup
-  `ids → slot | -1`; host-side `adapt(stats)` between replays (decayed-LFU, profile-seeded, LRU).
+  `ids → slot | -1`; host-side `adapt(stats)` (decayed-LFU, profile-seeded, LRU) writes a double-buffered residency map that is swapped
+  in between steps (or under `quiesce`, §7.3), never under an in-flight graph.
 
-What to do with a miss is the consumer's decision: the MoE op computes `-1` experts on CPU via a graph host node
-(FreeToken) or fetches them over PCIe (Strata's `pcie_frac` split). The MoE op declares `placement_invariant`;
+What to do with a miss is the consumer's decision: the MoE op computes `-1` experts on CPU through the stream-memop
+handshake with a native CPU worker (§7.4, FreeToken) or fetches them over PCIe (Strata's `pcie_frac` split). The MoE op declares `placement_invariant`;
 if false, residency policies are judged `bounded` rather than `exact` (§10.3).
 
 ---
@@ -686,8 +696,16 @@ class Seq:
     ext: dict[str, Any]                          # namespaced plugin state; core never reads
 ```
 
-Scheduling is phase-free (vLLM v1 idea): each Seq wants `len(tokens) + drafts − num_computed` tokens; a token
-budget covers prefill chunks, decode and verify uniformly.
+**SeqTable (core, device-authoritative).** Per-slot device tensors — `num_computed`, `last_token`, `n_accept`,
+`draft_tokens` — are the source of truth and are updated only inside the sample graph (by `Rewindable.commit`).
+The host `Seq.num_computed` is an optimistic mirror: an upper bound that lags by at most `inflight_depth` steps and
+becomes exact at commit (the pattern of vLLM Model Runner V2's `states.py`, implemented natively here). This is what
+lets overlap and speculative decoding coexist: the host never needs `n_accept` of step N−1 to launch step N.
+
+Scheduling mechanism is phase-free (vLLM v1 idea): each Seq wants `len(tokens) + drafts − num_computed` tokens and
+a token budget covers prefill chunks, decode and verify uniformly. The v0 FCFS **policy** never mixes prefill and
+decode rows in one step, so decode steps always run in a FULL graph (mini-sglang's choice); a mixing policy is a v1
+plugin together with PIECEWISE graphs.
 
 ### 7.2 Batch
 
@@ -695,7 +713,8 @@ budget covers prefill chunks, decode and verify uniformly.
 @dataclass
 class BatchPlan:                     # host, struct-of-arrays, mutable by scheduler + transforms
     step: int
-    slots, start, n_query, n_logits: np.ndarray
+    slots, n_query, n_logits: np.ndarray
+    start_upper: np.ndarray          # upper bound on first query position; exact value lives in SeqTable
     token_src: np.ndarray            # HOST | DEVICE_LAST | DEVICE_DRAFT  (overlap-safe placeholders)
     host_tokens: np.ndarray
     parents: np.ndarray | None       # tree verify (v2)
@@ -744,6 +763,20 @@ def commit(self, h):                                                    # CPU af
 | 1 | schedule step N while step N−1's sample is still on the GPU; N−1 is committed during step N's forward | default; grammar `host_input` works (it runs after N−1's commit) |
 | 2 | two uncommitted steps (deeper pipelining; PP uses N) | v1 perf option |
 
+**MemOps and quiesce.** The plan carries an ordered list of device memory operations (copy, swap, load, checkpoint
+publish/adopt, fork) with pins on their sources; the core executes them in-stream at defined points (before the
+forward, after the sample). `StepLoop.quiesce(callback)` drains all in-flight steps (commits them), runs the
+callback, then resumes — used for VMM resize, `update_weights`, `flush_prefix`, residency-map swaps and binding
+swaps, so nothing ever mutates state under an in-flight graph. Resolver maps updated between steps (expert
+residency) are double-buffered.
+
+**Host lengths.** For non-speculative Seqs the host mirror is exact (it advances by one per step), so host-side
+planning such as FlashInfer `plan()` (run in `plan_bounds`) works at depth 1. The host mirror is inexact only for
+Seqs with an uncommitted speculative step (`n_accept` unknown). Planners whose kernels need exact host lengths
+declare `needs_host_lens`, and **only those inexact Seqs** are gated to depth 0 for them. Spec-decode paths
+therefore use an attention kernel that reads lengths on the device (from the SeqTable) — a device-length path of
+FlashInfer or our own Triton paged attention; spike S1 names the kernel per fingerprint class.
+
 Plugins declare the maximum depth they tolerate (`overlap_safe` = tolerates ≥ 1). Per-Seq depth: the scheduler
 skips any Seq that has more uncommitted steps in flight than the minimum depth tolerated by the plugins attached
 to it, so a CPU prompt-lookup Seq runs every other step while others keep overlapping. Device-side
@@ -758,9 +791,11 @@ device inputs (`DEVICE_LAST`/`DEVICE_DRAFT`) are already consistent.
 - Each plugin declares `graph_policy` ∈ {`full`, `piecewise`, `eager`, `host`}; the resolver takes the weakest
   per ShapeKey class. `host` means the plugin never runs inside a graph — it runs on the CPU between replays
   (placement-policy `adapt()`, schedulers). v0 implements FULL (decode/verify) and EAGER (prefill); PIECEWISE is v1.
-- **Host-function nodes are allowed inside FULL graphs** (CPU expert compute, Strata/FreeToken style), with the
-  contract that the plugin supplies a **native function pointer** (`cudaLaunchHostFunc`-compatible, no Python, no
-  GIL) — a Python callback would deadlock against the waiting main thread. Spike before v1 expert offload.
+- **CPU work inside a FULL graph** (CPU expert compute, Strata/FreeToken style) uses **stream memory operations**:
+  the graph writes a flag (`cuStreamWriteValue`) that a persistent native CPU worker polls, and waits on the
+  worker's completion flag (`cuStreamWaitValue`). `Platform` exposes these memops. Per-call `cudaLaunchHostFunc`
+  is not used: FreeToken measured 30–50 µs per call (≈ 6 ms per step on a 75-layer model) and replaced it. No
+  Python or GIL on this path. Spike S6 in M0 validates the seam before v1 expert offload builds on it.
 - All dynamic inputs go through static buffers requested at startup with `ctx.static(name, max_shape)`.
 
 ### 7.5 Rewindable
@@ -788,7 +823,8 @@ it stays `None` until tree verification (v2).
   - `Drafter` (EAGLE-3, MTP, draft model, GPU n-gram, CPU prompt lookup); declares required taps/shared modules.
   - `DraftPolicy` (single): per-Seq `(source, k)` from a finite set; `observe()` for adaptive cost models (Strata).
   - `Verifier` (single): replaces the Sampler during verify (greedy-exact, rejection, typical; tree in v2).
-  - `PlanTransform`: appends `DEVICE_DRAFT` rows and sets the `spec.q` ShapeKey axis.
+  - `PlanTransform`: appends `DEVICE_DRAFT` rows and sets the `spec.q` ShapeKey axis. Seqs with different k in one
+    step are padded to the step's `spec.q` (the max k); the DraftPolicy chooses k from a finite declared set.
 - Rollback = core commit fan-out to all Rewindables.
 
 ### 7.7 Control plane and errors
@@ -798,8 +834,14 @@ it stays `None` until tree verification (v2).
   bumps `weight_version`) is specified now because it fixes the namespace design, but implemented in v1 (RL weight
   sync, LoRA merges).
 - Per-request error isolation: a plugin exception tied to one Seq (grammar, parser) → `FINISHED(error)` for that
-  Seq. A step-level plugin exception or device fault → engine exits non-zero; the supervisor restarts it on the
-  last-known-good Plan and the frontend resubmits in-flight requests from committed tokens.
+  Seq.
+- Step-level exception or device fault → engine exits non-zero; the supervisor restarts it **on the same lock**.
+  **Crash attribution first:** in-flight requests are resubmitted from committed tokens, rate-limited; a request
+  implicated in two crashes is quarantined (`FINISHED(error)`). Only repeated crashes without a poison request lead
+  to rollback to the previous lock. Restart time (weights, graph capture, JIT caches) is measured and has an SLO
+  set in M0.
+- Sampling API coverage in v0 includes `n > 1` (via `StateKind.fork`), output logprobs/top-k logprobs and **prompt
+  logprobs** (the judge's teacher-forced re-scoring also uses them).
 
 ### 7.8 Frontend
 
@@ -826,39 +868,27 @@ frontend stays Python.
 ```
 
 Phase timings are measured by the core with CUDA events for **diagnosis and agent guidance**. Verdicts and canaries
-never rely on them, because candidate code shares the engine process: the judge measures performance client-side
-(§10.3) and the canary uses per-request TTFT/TPOT measured in the frontend process, which runs no agent code
-(§10.4).
+never rely on them, because candidate code may share the engine process: the judge measures performance
+client-side and checks outputs by teacher-forced re-scoring out of process (§10.3, §10.4).
 
-### 7.10 Determinism
+### 7.10 Determinism and snapshots
 
-Three acceptance modes are used throughout (plan and judge):
+Two acceptance modes are used in v0 (plan and judge):
 
-| Mode | Plan | Kernel props required | Meaning |
-|---|---|---|---|
-| **run-identical** | regression Plan | `deterministic` | byte-identical output run to run with the **same batch composition** (one Seq at a time, depth 0). Used for "goldens unchanged" / model isolation. Resolves for every model. |
-| **det-identical** | deterministic Plan | `deterministic` + `batch_invariant` | byte-identical between two configurations that change batch shape, chunking or path (prefix on/off, depth, spec vs non-spec). Only claimed if this Plan resolves for the model. |
-| **bounded** | production Plan | — | within judge L2 budgets |
+| Mode | How | Meaning |
+|---|---|---|
+| **run-identical** | production Plan replaying the model's **snapshot trace**: a fixed multi-Seq, teacher-forced trace with fixed arrival order and batch composition that covers every captured graph bucket, chunked prefill, depth 1, a prefix hit, `n > 1`, prompt logprobs and — where the deployment enables them — spec decoding and grammar; sampling seeded per (Seq, position); adaptive policies frozen; changed-line coverage recorded | byte-identical output run to run. Used for model isolation ("goldens unchanged") and for auto-advance in propagation (§4.6) |
+| **bounded** | production Plan | within judge L2 budgets |
 
-- `deterministic` is verified, not assumed: spikes S1/S3/S4 and judge L1 check run-to-run byte identity, and pinned
-  configs used by these Plans must not use split-K or atomic accumulation.
-- The **regression Plan** is the production Plan's bindings run at batch 1, depth 0, wherever the production
-  kernel is `deterministic`; only where it is not is another kernel substituted, and those sites are recorded as
-  `uncovered` in the lock. Snapshots therefore exercise production code wherever possible, and changes to
-  `uncovered` sites cannot pass as refactors (§4.6).
-- The regression and deterministic Plans select only kernels with the required props and pinned configs, seed
-  sampling per (Seq, position), freeze adaptive policies (placement `adapt()`, cost-model draft policies), and
-  default to depth 0 (a test overrides depth when depth itself is the thing compared).
-- Rule: a comparison is judged det-identical when the model's deterministic Plan resolves, otherwise bounded. This
-  applies uniformly to state invariants, `policy` plugins and spec decoding.
-- det-identical comparisons are only claimed where a deterministic kernel exists for **every** op on the path. The
-  v0 deterministic kernel set (plan M0-H): batch-invariant Triton GEMM (persistent, fixed tiles — vendored from
-  vLLM `batch_invariant`), attention with a fixed KV split and identical reduction order for decode, verify and
-  prefill rows, pinned-config W8A16/W4A16 GEMM and fused MoE with fixed reduction order. v0 has no batch-invariant
-  GDN kernel, so Qwen3.5 models have a regression Plan (run-identical) but no deterministic Plan: their
-  comparisons are **bounded**.
-- The determinism flag is visible only to the resolver; plugin code cannot read it, so a variant cannot behave
-  differently under judging than in production.
+- run-identical needs kernels that are deterministic **run to run** (no split-K or atomic accumulation in pinned
+  configs; verified by the spikes and judge L1), not batch-invariant ones. Sites whose production kernel is not
+  deterministic are recorded as `uncovered` in the lock; a change touching them can never auto-advance.
+- Comparisons that change batch shape, chunking or path — prefix cache on/off, depth 0 vs 1, spec vs non-spec,
+  graph replay vs eager (padding changes tile selection; FlashInfer splits KV differently in graph mode) — are
+  **bounded**. Spec decoding additionally checks greedy self-consistency: every accepted token equals the argmax of
+  the target logits computed in that verify step.
+- **Deferred:** a batch-invariant "deterministic Plan" (det-identical comparisons across batch shapes, vLLM
+  `batch_invariant`-style kernels). It is added only if a concrete validation need appears.
 
 ---
 
@@ -886,7 +916,7 @@ The dev machine has 8× RTX A5000; v1 includes a **TP=2 milestone** to prove the
 |---|---|---|
 | KV offload (RAM/SSD, remote) | tiers, mover, placement policy, connector | PrefixIndex tier payloads, BLOCKED, per-layer events |
 | KVMem-style bounded window | `windowed_retrieval` StateKind, HostPlannedResolver, re-RoPE prepare kernel | StateKind emits positions; namespace |
-| Expert cache / offload | expert TieredStore, DeviceResolver, placement policies, MoE op with CPU miss compute | stable Pools, host nodes in graphs, VMM resize (v1) |
+| Expert cache / offload | expert TieredStore, DeviceResolver, placement policies, MoE op with CPU miss compute | stable Pools, stream-memop CPU handshake, `quiesce`, VMM resize (v1) |
 | Quant formats | dialect, scheme, layout, converter, kernels | kernel registry, layout negotiation |
 | Linear attention (GDN, KDA, Mamba2) | mixer + `Slot` state (`draft_slots`), page-boundary checkpoints, checkpoint policy + codec | fixed-point prefix hits, device Rewindable |
 | DeepSeek sparse attention / V4 compressed KV | `dsa_mla` mixer: MLA `Paged` + indexer `Paged(co_index)` + compressed `Paged(tokens_per_unit)` | `co_index`, `tokens_per_unit`, `alignment` |
@@ -900,151 +930,113 @@ through during the design reviews.
 
 ---
 
-## 10. Self-improvement (D5)
+## 10. Optional self-improvement layer (D5)
+
+**Status:** not part of v0, and nothing else depends on it. The engine ships best-known, human-tuned defaults
+(§4.4). v0 builds the judge harness (L0–L2, L4) for our own development and CI; this layer reuses it and is added
+after the core feature milestones (plan §10), for capable agents and explicit user intent.
 
 ### 10.1 Actors
 
-- **Agent** — any client using the engine: a Qwen3/Qwen3.5 agent served by this very engine, or an external
-  coding agent. Untrusted. Its harness runs under the `ps-agent` OS identity (§10.6) and can write only
-  `workspace/`.
-- **Supervisor** — trusted; exposes the improve API; owns Registry, lockfiles, evidence, lifecycle, rollback.
-- **Sandbox engine** — runs candidate Plans (possibly containing agent code) under the `ps-sandbox` identity.
-- **Judge** — trusted, hash-pinned, separate process under the `ps-judge` identity; drives the sandbox engine as a
-  client only.
+- **Agent** — a capable agent the user chooses to involve: an external coding agent, or a strong model served by
+  plug-serve itself. Untrusted. Writes code only inside `workspace/`.
+- **Supervisor** — trusted; serves the improve API, records promotions as lock commits, restarts and rolls back.
+- **Sandbox engine** — runs candidate Plans (possibly with agent code) in a restricted sandbox (§10.6).
+- **Judge** — trusted, out of process, drives engines only as a client.
 
 ### 10.2 Improve API (MCP + HTTP, served by the supervisor, localhost-only, token-authenticated)
 
 | Tool | Purpose |
 |---|---|
 | `telemetry.query(window, fields)` | Event aggregates for the live Plan (diagnostic) |
-| `plan.describe()` / `site.explain(site)` | Which plugin/kernel is bound where, and why (constraints, registry row, lockfile) |
+| `plan.describe()` / `site.explain(site)` | Which plugin/kernel is bound where, and why |
 | `plugins.list(slot)` / `plugin.source(name)` | Read manifests and sources |
 | `traces.list()` | List **dev** traces (holdout is never listed or readable) |
-| `tunables.get(site)` / `tune.submit(site, space?)` | Request a tunable search inside the declared space |
-| `variant.fork(plugin, new_name)` | Create a variant package in `workspace/` (copy-on-fork) |
-| `variant.test(name, tiers=[L0, L1, L1.5])` | Cheap correctness iteration on a spare GPU or CPU, run as `ps-sandbox`; no promotion |
-| `variant.submit(name)` | Queue full judging (L0–L4); returns a job id |
-| `job.status(id)` / `job.cancel(id)` / `evidence.get(id)` | Judge progress, raw numbers, verdict |
-| `registry.status()` / `registry.rollback(scope, site)` | Inspect promotions; the agent may roll back, never force-promote |
+| `tunables.get(site)` / `tune.submit(site, space?)` | Tunable search inside the declared space |
+| `variant.fork(plugin, new_name)` | Create a variant in `workspace/` (copy-on-fork; sets `variant_of`, `implements`) |
+| `variant.test(name, tiers)` | Cheap correctness iteration in the sandbox; no promotion |
+| `variant.submit(name)` / `job.status` / `job.cancel` / `evidence.get` | Full judging and its results |
+| `registry.status()` / `registry.rollback(model)` | Inspect promotions; roll back to the previous lock (never force-promote) |
 | `proposal.open(title, diff, rationale)` | Human-review proposal for out-of-scope changes (§10.5) |
 
-The token is issued to the agent harness, not to ordinary API clients, so an arbitrary OpenAI/Anthropic client of
-the engine is not an "agent". File editing happens through the harness's own tools under `ps-agent` permissions.
-Because the agent may be served by the engine under test, the supervisor (not the engine) serves this API, and
-**rollback never depends on the agent** (§10.4).
+First version: `telemetry.query`, `plan.describe`, `variant.fork`, `variant.test`, `variant.submit`, `job.status`,
+`registry.rollback`. The token is issued to the agent harness, not to ordinary API clients. Rollback never depends
+on the agent: the supervisor reverts on its own (§10.4).
 
 ### 10.3 Judge tiers and numerics classes
 
 | Tier | Check | Pass rule |
 |---|---|---|
-| L0 op oracle | vs Op reference / `dequant_ref` on the Plan's real shapes + fuzzed edges | budget = f(dtype, reduction length), held in the judge |
-| L0-dist | samplers, verifiers, logits processors: fixed logits, ~10⁶ draws vs the reference sampler (verifiers vs plain target sampling) | TV distance / χ² bound |
-| L1 contract | slot conformance, ledger leaks/accounting, graph-capture safety, declared props verified (batch-invariant, deterministic, depth tolerance) | pass/fail |
-| L1.5 state invariants | chunked == one-shot prefill; prefix-hit resume == recompute; verify+commit(k) == k decode steps; graph replay == eager | det-identical where a deterministic kernel path exists (§7.10), else bounded |
-| L2 model golden | teacher-forced logits vs reference recording on frozen prompts | calibrated noise floor = HF in the model's activation dtype (bf16; fp16 for fp16-activation checkpoints such as GPTQ) vs HF fp32 on the same prompts. Pass: top-1 agreement ≥ floor − δ; KL p50/p99 ≤ floor + δ; ΔPPL ≤ floor + δ. Model-isolation checks are run-identical (§7.10) |
-| L4 perf | judge-side client measurements (TTFT, TPOT, throughput, peak memory) replaying a trace portfolio, production Plan, interleaved ABAB, N ≥ 5, bootstrap CI. Output check by **teacher-forced re-scoring**: a sample of the candidate's outputs (with its returned logits) is re-run through the reference Plan with teacher forcing (production arms legitimately diverge, so stream checksums are not used) | per trace: CI lower bound of perf ratio ≥ 1 − ε; target metric gain CI excludes 0; at re-scored positions KL and top-1 agreement within L2 budgets; every greedy token equals the argmax of the candidate's own logits; response counts/lengths match the trace requests |
-| L4-confirm | one fresh run on **holdout** traces after a dev-trace pass | same rule; avoids selecting on noise across repeated submissions |
-| L3 quality (v2) | held-out evals, rotated holdouts | sequential test excludes regression threshold |
+| L0 op oracle | vs the unit's `reference.py` / `dequant_ref` on the Plan's real shapes + fuzzed edges | budget = f(dtype, reduction length), held in the judge |
+| L0-dist | samplers, verifiers, logits processors: fixed logits, ~10⁶ draws vs the reference sampler | TV distance / χ² bound |
+| L1 contract | slot conformance, ledger leaks/accounting, graph-capture safety, declared props verified (run-to-run determinism, depth tolerance) | pass/fail |
+| L1.5 state invariants | chunked vs one-shot prefill; prefix-hit resume vs recompute; verify+commit(k) vs k decode steps; graph replay vs eager | bounded (§7.10); spec greedy self-consistency exact |
+| L2 model golden | teacher-forced logits vs HF fp32 recording on frozen prompts | calibrated noise floor = HF in the model's activation dtype vs HF fp32. Pass: top-1 agreement ≥ floor − δ; KL p50/p99 ≤ floor + δ; ΔPPL ≤ floor + δ |
+| Snapshot | the model's snapshot trace (§7.10) | run-identical (isolation, auto-advance) |
+| L4 perf | judge-side client measurements (TTFT, TPOT, throughput, peak memory) on a trace portfolio incl. mixed agent traffic, production Plan, interleaved ABAB, N ≥ 5, bootstrap CI; outputs checked by teacher-forced re-scoring against the reference Plan | per trace: CI lower bound of perf ratio ≥ 1 − ε; target gain CI excludes 0; re-scored KL/top-1 within L2 budgets; greedy tokens equal the candidate's own argmax |
+| L4-confirm | one fresh run on **holdout** traces after a dev-trace pass | same rule |
 
-- Numerics classes: `policy` (must not change math → det-identical against the parent when the model's
-  deterministic Plan resolves, else bounded — §7.10), `exact` (numeric plugin
-  claiming det-identical results to its reference path, e.g. a pure re-layout), `bounded` (judge budgets), `approx`
-  (human gate). The plugin declares its class; **the judge chooses tests and budgets** — plugin-shipped tests are
-  additional, never sufficient.
-- A `policy` plugin whose consumer is not `placement_invariant` (e.g. MoE with CPU miss compute) is judged
-  `bounded`.
-- Holdout traces exclude any trace generated by the agent (poisoning). Agent-session traces may enter the dev set.
-- **Oracle provenance.** The judge owns a content-addressed **oracle store** (`sem → reference.py` + param
-  schema), filled only from reviewed commits. A numeric unit's oracle is resolved by the `sem` hash named in
-  `implements`, from that store — not from the candidate and not from HEAD (so in-flight variants keep their
-  oracle when the unit gains a knob). A candidate whose `reference.py` differs from its `implements` is rejected.
-- **Reference goldens vs engine snapshots.** Reference goldens are recorded from HF, immutable and human-owned.
-  Engine snapshots (`[snapshot]` in the lock) are run-identical hashes of the current Plan, updated by
-  propagation; every re-recorded snapshot must still pass L2 against the reference (ratchet — no drift).
-- **Closure-diff classification** of an **agent submission** (before anything runs), comparing parent and
-  candidate Plans **site by site**:
-  - recipe hash changed, or at any site the candidate's `implements` `sem` differs from the parent binding's `sem`
-    at that same site → model change (human);
-  - any `model` slot binding, `build`/`weights` override, or composite spanning more than one site → model change
-    (human), even if all hashes match;
-  - `uv.lock` or fingerprint changed → toolchain change (human);
-  - otherwise only impl, policy or tunable bindings changed → §10.5 table.
-  Every other model's lock must be byte-unchanged. (Shared-code changes by humans follow §4.6 instead, where an
-  additive knob may change `sem` and still auto-advance.)
+- Numerics classes: `policy` — run-identical vs its parent on the snapshot trace only if it leaves batch composition
+  and execution paths unchanged (e.g. eviction or placement on traces without memory pressure, with a
+  placement-invariant consumer); scheduler, draft and cache-admission policies change batch composition or paths
+  and are judged bounded + L4 re-scoring; `exact` (claims run-identical vs its reference path), `bounded`,
+  `approx` (human gate). **The judge chooses tests and budgets**; plugin-shipped tests are additional only.
+- **Oracle provenance:** oracles are the `reference.py` blobs at reviewed commits named by `sem` (§4.6), never the
+  candidate's. **Closure-diff classification** of a submission, site by site: recipe hash changed, or a site's
+  `implements` `sem` differs from the parent binding's `sem` at that same site, or any `model` slot binding,
+  `build`/`weights` override, or multi-site composite → model change (human); toolchain change → human; otherwise
+  §10.5. Every other model's lock must be byte-unchanged.
+- Holdout traces exclude anything generated by the agent.
 
 ### 10.4 Episode lifecycle
 
-1. Agent reads telemetry and sources; tunes declared tunables first (`tune.submit`).
-2. If tuning plateaus: `variant.fork` (sets `variant_of` and `implements`) → edit in `workspace/` →
-   `variant.test` (cheap, repeatable) → `variant.submit`. A submission is a `bind`/`set` Plan delta on existing
-   site keys of one model (§4.6).
-3. The supervisor schedules evaluation, choosing the cheapest valid mode:
-   - **Spare GPU (default on the 8-GPU dev box)**: sandbox engine on another GPU of the same SKU; the live engine
-     keeps serving.
-   - **In-process A/B (single GPU, host-side only)**: for `graph_policy="host"` policy plugins and tunables marked
-     `apply="live"`. **Precondition:** L0–L1.5 have passed in the sandbox (CPU or tiny-shape GPU runs) before the
-     variant is ever loaded into the live engine. The live engine (identity `ps-engine`, §10.6) then loads both
-     bindings and alternates them between benchmark runs (same weights, no restart). The judge drives dedicated
-     replay traffic and measures client-side; other requests, including the agent's own, are held in the frontend
-     queue during measured runs so they neither perturb nor contaminate the arms. After every in-process A/B the
-     live engine **restarts from its current lockfile** (one restart per evaluation), so a rejected variant cannot
-     leave modified state behind. Holdout traces are never sent to the live engine: L4-confirm runs in the
-     sandbox, except for pure tunables (no agent code) on a live lockfile that contains no agent-authored plugins,
-     which may confirm in-process.
-   - **Drain window (single GPU, everything else)**: drain the live engine (frontend holds new requests with
-     keepalive), run sandbox + judge on the full GPU, restart the live engine. Windows are rate-limited and capped
-     in duration; ABAB requires ~2N restarts, so this mode is reserved for kernel variants and is a v0 stretch goal.
-4. Verdict pass → new Registry row (scope = model) + new lockfile + evidence record → live engine restarts on the
-   new lockfile → **canary**: golden smoke test, then per-request TTFT/TPOT measured **in the frontend process**
-   (no agent code), bucketed by request shape (prompt length, output length, spec on/off), compared against the
-   evidence for the same buckets during a probation period. Engine `forward_us`/`sample_us` are diagnostic only.
-5. Canary failure, crash loop or health-check failure → the supervisor restarts on the **last-known-good
-   lockfile**, marks the row `retired`, quarantines the variant for this fingerprint. No agent action needed.
-6. One promotion at a time per model; the next candidate's baseline includes the previous promotion.
+1. The agent reads telemetry and sources; tunes declared tunables first.
+2. If tuning plateaus: `variant.fork` → edit in `workspace/` → `variant.test` → `variant.submit`.
+3. Evaluation runs in the sandbox engine on a **spare GPU of the same fingerprint class** (first version). On
+   single-GPU hosts only host-side policies and live tunables are in scope. In-process A/B and drain-window
+   evaluation are deferred.
+4. Pass → the supervisor commits the variant and a new lock to its branch (§4.4) and restarts the live engine on it
+   → **canary**: golden smoke test, crash-loop detection, and **sampled live re-scoring** — the judge re-scores a
+   sample of live outputs with teacher forcing, out of process. This is the check that does not depend on the
+   variant being unaware it is judged. (A bucketed TTFT/TPOT canary is added later.)
+5. Canary failure or crash loop (after poison-request attribution, §7.7) → restart on the previous lock, variant
+   quarantined for this fingerprint class. No agent action needed.
+6. One promotion at a time per model.
 
 ### 10.5 Scope of autonomy
 
 | Change | Agent may auto-promote? |
 |---|---|
 | Tunable values within declared ranges | yes |
-| New variant of a `policy` plugin (scheduler, cache, placement, draft policy) | yes — det-identical vs parent when the model's deterministic Plan resolves and the consumer is placement-invariant, else bounded |
-| New kernel variant for an existing Op at a site, incl. model-specific `fast/` kernels whose `implements` matches that site's `sem` (§5.7 level 2) | yes — bounded |
-| Multi-site composites (§5.7 level 3), model-owned `build`/`weights` (level 5), `model` slot bindings | proposal (human) |
-| New plugin added to an existing engine-side slot | yes, only for drafter / exporter / connector / checkpoint_policy (§4.6), if `numerics ≠ approx`, slot ABI unchanged, no new dependency (frontend-side slots: see below) |
+| New variant of a `policy` plugin (scheduler, cache, placement, draft policy) | yes — run-identical vs parent where batch composition and paths are unchanged, else bounded + L4 re-scoring (§10.3) |
+| New kernel variant for an existing Op at a site whose `sem` it implements (incl. model-specific `fast/` kernels, §5.7 level 2) | yes — bounded |
+| New plugin added to an existing engine-side slot | only drafter / exporter / connector / checkpoint_policy, if `numerics ≠ approx`, slot ABI unchanged, no new dependency |
 | New plugin added to an output-affecting slot (logits_processor, plan_transform, …) | proposal (human) |
+| Multi-site composites (§5.7 level 3), model-owned `build`/`weights` (level 5), `model` slot bindings | proposal (human) |
 | Model plugin changes that alter goldens; new tap points | proposal (human) |
-| Core, judge, std ABI, `approx` numerics, new third-party dependencies | proposal (human) |
-| Frontend-side plugins (frontend/API dialects, tokenizer/template bundles, reasoning/tool parsers) | proposal (human) — the frontend must stay free of agent code (canary trust, §10.6) |
+| Core, judge, std units, `approx` numerics, new third-party dependencies | proposal (human) |
+| Frontend-side plugins (API dialects, tokenizer/template bundles, parsers) | proposal (human) |
 
-Scope is decided mechanically by the closure diff (§10.3), not by what the variant claims. In v0 agents do not
-edit std units directly; upstreaming a variant into std is a human proposal followed by propagation (§4.6).
+Limits: per-variant diff-size budget, promotions per model per day capped.
 
-Limits (v0): per-variant diff-size budget, promotions per model per day capped, evaluation windows per day capped.
+### 10.6 Trust enforcement
 
-### 10.6 Trust enforcement (OS level, v0)
+Static rules (import contracts, no core-internal imports) are hygiene, not security, and hiding the determinism
+setting from plugins is not a control either — a variant can infer it is being judged. The controls are process
+and OS boundaries plus judge-owned oracles and sampled live re-scoring (§10.4).
 
-Static rules (import-linter, no core-internal imports) are hygiene, not security: agent code in a Python process
-can monkeypatch anything in that process. Enforcement therefore relies on process and OS boundaries:
+First version:
 
-| Identity | Can write | Can read | Network |
+| Boundary | Can write | Can read | Network |
 |---|---|---|---|
-| `ps-agent` (agent harness) | `workspace/` only | repo (read-only), dev traces, evidence summaries | the frontend's and the improve API's localhost ports only |
-| `ps-sandbox` (sandbox engine) | a per-run scratch dir (deleted after the run, never readable by `ps-agent`) | repo + `workspace/` variant + `registry/units/` (read-only), model weights, pre-built JIT caches | none (separate network namespace; IPC socket to the judge only) |
-| `ps-engine` (live engine) | a scratch dir only | repo + `registry/units/` promoted variants (read-only), model weights, pre-built JIT caches; **not** holdout, judge or registry write paths | IPC to the frontend |
-| `ps-frontend` (frontend; runs only reviewed, baseline-lockfile frontend plugins — never agent code) | none | tokenizer/template bundle (read-only) | localhost serving ports; IPC to the engine |
-| `ps-judge` | evidence store | judge package, goldens, dev + holdout traces | IPC to the sandbox; the frontend's localhost ports for in-process A/B |
-| `ps-supervisor` | registry (incl. `registry/units/`), lockfiles, evidence, deployment-record worktrees/venvs | everything | localhost |
+| Agent harness | `workspace/` only | repo (read-only), dev traces, evidence summaries | the frontend's and improve API's localhost ports |
+| Sandbox container (sandbox engine) | per-run scratch (tmpfs, discarded) | repo + `workspace/` variant (read-only), weights, pre-built JIT caches | none (own network namespace; IPC to the judge only) |
+| Live engine (runs promoted agent code) | per-run scratch only | repo + promoted commit (read-only), weights, pre-built JIT caches; **not** holdout, locks or evidence | serving IPC to the frontend only |
+| Trusted host processes (supervisor, judge, frontend) | locks/branch, evidence | everything | localhost |
 
-Deployment-record worktrees and venvs are written only by `ps-supervisor` and are read-only to `ps-engine`,
-`ps-sandbox` and `ps-judge`.
-
-- Yama `ptrace_scope ≥ 2`, so no identity can attach to or read another process's memory (protects the
-  frontend's canary measurements from engine-side variant code).
-- `judge/`, `registry/`, `plans/` and the holdout store are not writable by `ps-agent`, `ps-sandbox` or `ps-engine`; the
-  holdout store is readable only by `ps-judge`. The sandbox sees holdout prompts only as requests during a run;
-  it has no network and no persistent writable storage, so it cannot exfiltrate or memorise them across runs.
-- Verdict perf numbers are measured by the judge as a client; in-engine timers are diagnostic only.
-- M0.6 acceptance includes OS-level tests that each forbidden write/read/network action fails.
+- Yama `ptrace_scope ≥ 2`; the holdout store is readable only by the judge.
+- Later: a per-instance network namespace for each engine process, and a separate identity per promoted variant
+  if several run concurrently.
 
 ---
 
@@ -1055,15 +1047,15 @@ plug-serve/
   core/            plugserve/{api,core}/          # ≤ 6k LOC
   std/             ops/ blocks/ ffn/(swiglu, moe_topk) mixers_gqa/ state_paged_kv/ tiered/ sampling/
   plugins/         models/<m>/{recipe.py, fast/, bundle/}  for qwen3, qwen3_moe, qwen3_5
-                   mixers/{gdn}/  state/{ssm_checkpoint}/  legacy/   # time-boxed holdback forks (§4.6)
-                   kernels/{flashinfer,fla_gdn,triton_moe,triton_wxa16,det}/  dialects/{gptq,fp8_block}/
+                   mixers/{gdn}/  state/{ssm_checkpoint}/
+                   kernels/{flashinfer,fla_gdn,triton_moe,triton_wxa16}/  dialects/{gptq,fp8_block}/
                    frontends/{openai,anthropic}/  policies/  drafters/  verifiers/  grammar/
-  plans/           <model_id>/<fingerprint>.lock  # per-model Plan lockfiles (model isolation, rollback)
-  judge/           plugserve_judge/  goldens/  snapshots/  traces/dev/   # holdout stored outside the repo (ps-judge only)
+  plans/           <model_id>/<class>/<n>.lock     # lock history per (model, fingerprint class) (§4.4)
+  judge/           plugserve_judge/  goldens/  snapshots/  traces/dev/   # holdout stored outside the repo (judge only)
   supervisor/      plugserve_supervisor/
   bench/           trace replay, baselines (separate pinned venvs)
-  workspace/       (gitignored) agent variants
-  registry/        registry.sqlite  evidence/  plans/(promoted locks)  units/<src>/(promoted variant code)
+  evidence/        evidence records (command, fingerprint, plan_id, raw numbers)
+  workspace/       (gitignored) agent variants — optional layer
   docs/
 ```
 
@@ -1076,14 +1068,17 @@ plug-serve/
 | Python per-step overhead at large batch | overlap (depth 1) hides CPU work shorter than the GPU step; M0 measures CPU time per step at B=256 vs nano-vllm; if worse, move per-token input prep to GPU kernels (vLLM Model Runner V2 style) |
 | Control-plane CPU still a bottleneck after GPU-side input prep (CPU step > ~50% of GPU step at target batch) | replace the profiled hot structure (PrefixIndex, allocator, per-request scheduling) with a Rust/PyO3 module behind its existing interface (§3); plugin API stays Python |
 | Frontend bottleneck (tokenization/streaming under many connections) or multi-instance routing needed | native (Rust) frontend/router over the language-neutral IPC schema (§7.8), following vLLM/SGLang |
-| Shared-change sweep cost / re-baseline churn | early cutoff + bit-identical auto-advance (§4.6); async propagation when the sweep exceeds 30 min or re-baselines exceed 1/day |
-| Holdback accumulation (models stuck on old units) | 14-day expiry; exception-rate metric f per unit; split or demote units with f > 10% (§4.6) |
+| Shared-change sweep cost / approval churn | auto-advance on byte-identical snapshot traces (§4.6); async propagation when the sweep exceeds 30 min or approvals exceed 1/day |
+| Models stuck on explicit old-version copies | visible in diffs; holdback tracking added at the §4.6 trigger |
+| Overlap + speculative decoding need exact lengths on the host | device-authoritative SeqTable + `prepare_device` + `needs_host_lens` gating (§7.1, §7.3) — built in M0 |
+| CPU work inside graphs too slow (host functions) | stream-memop handshake with a persistent native worker (§7.4); spike S6 in M0 |
 | Abstractions too generic → slow | composites + direct bound callables; FULL graphs on decode; perf gate vs mini-sglang |
 | Wrong core abstraction discovered late | each v0 milestone is chosen to stress one seam (plan §2); seam-breaking discoveries are fixed while v0 is pre-1.0 |
 | Borrowed kernels violate contract | adoption rule §5.6; write our own Triton fallback |
-| Agent reward hacking / self-harm | §10.5 scope, §10.6 OS-level identities, judge-side measurement, holdout confirm, supervisor-owned rollback |
-| Single-GPU evaluation windows disrupt serving | spare-GPU default on dev box; in-process A/B for host-side policies/live tunables; drain windows rate-limited and capped (stretch); KV offload (v1) to cheapen restarts |
-| sm_86 dev GPUs lack FP8/FP4 tensor cores | v0 quant on sm_86 uses weight-only (W4A16/W8A16) kernels; native FP8/NVFP4 kernels are added and verified when sm_89+/sm_120 hardware is available |
-| Determinism claims unachievable with borrowed kernels | §7.10: det-identical only where a deterministic kernel path exists; deterministic kernel set is an M0 work item; otherwise bounded |
+| Agent reward hacking / self-harm (optional layer) | §10.5 scope, §10.6 sandbox, judge-owned oracles, client-side measurement, holdout confirm, sampled live re-scoring, supervisor-owned rollback |
+| Dev GPUs (A5000, sm_86, 16-channel server host) misrepresent consumer GPUs | perf/tunable evidence only from real consumer desktops: RTX 5080/5090 (sm_120), 4090 (sm_89); A5000 for development and functional tests |
+| sm_86 lacks FP8/FP4 tensor cores | weight-only (W8A16/W4A16) kernels on sm_86; native FP8 on sm_89/sm_120 and NVFP4 on sm_120, verified on consumer desktops |
+| Determinism claims unachievable with borrowed kernels | §7.10: only run-to-run determinism is required (no batch invariance); non-deterministic sites recorded as `uncovered` |
+| Poison requests trigger restart loops and wrong rollbacks | crash attribution before rollback, request quarantine, restart SLO (§7.7) |
 | Kernel breakage on sm_86 / torch 2.11 / Triton 3.6 | M0 spikes: uint8-decoded FP8 W8A16, vendored vLLM GDN ops, FlashInfer JIT pre-build |
 | Golden recording does not fit one GPU | record on CPU fp32 (251 GB RAM) or across GPUs; quantized models via `dequant_ref` into the dense HF class |
