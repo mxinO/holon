@@ -1,0 +1,147 @@
+extension ready in 0s
+{
+ "host": "rtx-5090-desktop",
+ "gpu": "NVIDIA GeForce RTX 5090",
+ "sm": "12.0",
+ "driver": "<version>",
+ "torch": "2.11.0+cu130",
+ "torch_cuda": "13.0",
+ "nvcc": "Build cuda_13.0.r13.0/compiler.36260728_0",
+ "python": "3.12.12",
+ "cpu": "AMD <cpu>",
+ "cpu_count": 16,
+ "mem": "124 GiB",
+ "cores_used": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6
+ ],
+ "cuda_visible_devices": "0",
+ "memop_caps": {
+  "can_flush_remote_writes": 0,
+  "can_use_64_bit_stream_mem_ops": 1,
+  "can_use_host_pointer_for_registered_mem": 1,
+  "can_use_stream_wait_value_nor": 1,
+  "host_native_atomic_supported": 0,
+  "pageable_memory_access": 1
+ },
+ "kernel": "6.17.0-35-generic",
+ "kernel_exec_timeout": 0,
+ "display_active": "Disabled, [Requested functionality has been deprecated], 600.00 W, 5, 16"
+}
+cpu task threads= 1 hot=   58.1us sweep=   61.3us (51.4 GB/s)
+cpu task threads= 2 hot=   25.0us sweep=   45.6us (69.0 GB/s)
+cpu task threads= 4 hot=   12.6us sweep=   42.8us (73.5 GB/s)
+cpu task threads= 8 hot=   12.7us sweep=   47.1us (66.7 GB/s)
+latency data=none n=  1 none     p50=     6.1us p99=     6.8us per-hs=  0.00us
+latency data=none n=  1 memop    p50=     8.2us p99=     9.9us per-hs=  2.05us
+latency data=none n=  1 kernel   p50=     8.2us p99=    10.2us per-hs=  2.05us
+latency data=none n=  1 hybrid   p50=    10.2us p99=    12.3us per-hs=  4.10us
+latency data=none n=  1 hostfunc p50=    22.5us p99=    32.7us per-hs= 16.38us
+latency data=none n= 24 none     p50=    92.2us p99=    92.7us per-hs=  0.00us
+latency data=none n= 24 memop    p50=   191.6us p99=   205.6us per-hs=  4.14us
+latency data=none n= 24 kernel   p50=   139.3us p99=   143.4us per-hs=  1.96us
+latency data=none n= 24 hybrid   p50=   184.2us p99=   196.6us per-hs=  3.83us
+latency data=none n= 24 hostfunc p50=   395.2us p99=   636.8us per-hs= 12.63us
+latency data=none n= 48 none     p50=   180.2us p99=   181.3us per-hs=  0.00us
+latency data=none n= 48 memop    p50=   388.2us p99=   406.7us per-hs=  4.33us
+latency data=none n= 48 kernel   p50=   274.7us p99=   282.6us per-hs=  1.97us
+latency data=none n= 48 hybrid   p50=   350.2us p99=   382.4us per-hs=  3.54us
+latency data=none n= 48 hostfunc p50=   813.9us p99=  1251.3us per-hs= 13.20us
+latency data=none n= 75 none     p50=   280.6us p99=   281.0us per-hs=  0.00us
+latency data=none n= 75 memop    p50=   589.8us p99=   606.4us per-hs=  4.12us
+latency data=none n= 75 kernel   p50=   428.1us p99=   434.2us per-hs=  1.97us
+latency data=none n= 75 hybrid   p50=   569.3us p99=   615.7us per-hs=  3.85us
+latency data=none n= 75 hostfunc p50=  1240.3us p99=  1937.6us per-hs= 12.80us
+latency data=copy n=  1 none     p50=    16.4us p99=    24.8us per-hs=  0.00us
+latency data=copy n=  1 memop    p50=    24.4us p99=    24.8us per-hs=  7.97us
+latency data=copy n=  1 kernel   p50=    24.6us p99=    28.8us per-hs=  8.16us
+latency data=copy n=  1 hybrid   p50=    26.6us p99=    26.9us per-hs= 10.21us
+latency data=copy n=  1 hostfunc p50=    34.6us p99=    38.8us per-hs= 18.18us
+latency data=copy n= 24 none     p50=   348.3us p99=   393.2us per-hs=  0.00us
+latency data=copy n= 24 memop    p50=   470.9us p99=   490.5us per-hs=  5.11us
+latency data=copy n= 24 kernel   p50=   452.6us p99=   593.9us per-hs=  4.35us
+latency data=copy n= 24 hybrid   p50=   412.7us p99=   639.0us per-hs=  2.68us
+latency data=copy n= 24 hostfunc p50=   825.5us p99=   886.8us per-hs= 19.88us
+latency data=copy n= 48 none     p50=   694.5us p99=   827.4us per-hs=  0.00us
+latency data=copy n= 48 memop    p50=   942.2us p99=   979.5us per-hs=  5.16us
+latency data=copy n= 48 kernel   p50=   890.9us p99=  1181.8us per-hs=  4.09us
+latency data=copy n= 48 hybrid   p50=   817.0us p99=  1278.0us per-hs=  2.55us
+latency data=copy n= 48 hostfunc p50=  1680.4us p99=  2011.0us per-hs= 20.54us
+latency data=copy n= 75 none     p50=  1083.4us p99=  1229.0us per-hs=  0.00us
+latency data=copy n= 75 memop    p50=  1471.5us p99=  1517.2us per-hs=  5.18us
+latency data=copy n= 75 kernel   p50=  1399.9us p99=  1843.2us per-hs=  4.22us
+latency data=copy n= 75 hybrid   p50=  1272.4us p99=  1996.8us per-hs=  2.52us
+latency data=copy n= 75 hostfunc p50=  2975.9us p99=  3146.0us per-hs= 25.23us
+latency data=zc   n=  1 none     p50=     8.2us p99=     8.8us per-hs=  0.00us
+latency data=zc   n=  1 memop    p50=    10.2us p99=    14.1us per-hs=  2.05us
+latency data=zc   n=  1 kernel   p50=    10.2us p99=    10.7us per-hs=  2.05us
+latency data=zc   n=  1 hybrid   p50=    10.2us p99=    14.1us per-hs=  2.05us
+latency data=zc   n=  1 hostfunc p50=    24.6us p99=    33.8us per-hs= 16.38us
+latency data=zc   n= 24 none     p50=   127.0us p99=   127.8us per-hs=  0.00us
+latency data=zc   n= 24 memop    p50=   209.0us p99=   225.3us per-hs=  3.42us
+latency data=zc   n= 24 kernel   p50=   174.1us p99=   178.2us per-hs=  1.96us
+latency data=zc   n= 24 hybrid   p50=   199.0us p99=   208.5us per-hs=  3.00us
+latency data=zc   n= 24 hostfunc p50=   826.4us p99=   869.4us per-hs= 29.14us
+latency data=zc   n= 48 none     p50=   249.9us p99=   252.3us per-hs=  0.00us
+latency data=zc   n= 48 memop    p50=   401.4us p99=   413.7us per-hs=  3.16us
+latency data=zc   n= 48 kernel   p50=   346.1us p99=   352.3us per-hs=  2.00us
+latency data=zc   n= 48 hybrid   p50=   396.9us p99=   405.9us per-hs=  3.06us
+latency data=zc   n= 48 hostfunc p50=  1629.0us p99=  1690.6us per-hs= 28.73us
+latency data=zc   n= 75 none     p50=   389.1us p99=   391.6us per-hs=  0.00us
+latency data=zc   n= 75 memop    p50=   618.5us p99=   630.8us per-hs=  3.06us
+latency data=zc   n= 75 kernel   p50=   538.7us p99=   546.8us per-hs=  1.99us
+latency data=zc   n= 75 hybrid   p50=   619.6us p99=   636.7us per-hs=  3.07us
+latency data=zc   n= 75 hostfunc p50=  2545.8us p99=  2718.7us per-hs= 28.76us
+slopes us/handshake {'memop/none': 4.18, 'kernel/none': 1.97, 'hybrid/none': 3.8, 'hostfunc/none': 12.84, 'memop/copy': 5.15, 'kernel/copy': 4.14, 'hybrid/copy': 2.42, 'hostfunc/copy': 25.05, 'memop/zc': 3.05, 'kernel/zc': 2.0, 'hybrid/zc': 3.09, 'hostfunc/zc': 28.86}
+wakeup memop    spin=   0us step=   212.4us per-hs=  3.55us
+wakeup memop    spin=   2us step=   261.6us per-hs=  3.57us
+wakeup memop    spin=   5us step=   361.7us per-hs=  4.73us
+wakeup memop    spin=  10us step=   539.6us per-hs=  7.15us
+wakeup memop    spin=  20us step=   834.0us per-hs=  9.41us
+wakeup memop    spin=  50us step=  1429.7us per-hs=  4.20us
+wakeup memop    spin= 100us step=  2655.9us per-hs=  5.32us
+wakeup memop    spin= 200us step=  5024.1us per-hs=  3.97us
+wakeup kernel   spin=   0us step=   174.8us per-hs=  1.99us
+wakeup kernel   spin=   2us step=   224.0us per-hs=  1.99us
+wakeup kernel   spin=   5us step=   297.4us per-hs=  2.05us
+wakeup kernel   spin=  10us step=   416.9us per-hs=  2.03us
+wakeup kernel   spin=  20us step=   654.3us per-hs=  1.92us
+wakeup kernel   spin=  50us step=  1379.7us per-hs=  2.13us
+wakeup kernel   spin= 100us step=  2580.7us per-hs=  2.18us
+wakeup kernel   spin= 200us step=  4979.0us per-hs=  2.10us
+wakeup hybrid   spin=   0us step=   201.3us per-hs=  3.09us
+wakeup hybrid   spin=   2us step=   248.8us per-hs=  3.03us
+wakeup hybrid   spin=   5us step=   312.5us per-hs=  2.68us
+wakeup hybrid   spin=  10us step=   445.0us per-hs=  3.21us
+wakeup hybrid   spin=  20us step=   690.5us per-hs=  3.43us
+wakeup hybrid   spin=  50us step=  1407.7us per-hs=  3.31us
+wakeup hybrid   spin= 100us step=  2607.6us per-hs=  3.30us
+wakeup hybrid   spin= 200us step=  5014.0us per-hs=  3.56us
+wakeup hostfunc spin=   0us step=   792.9us per-hs= 27.74us
+wakeup hostfunc spin=   2us step=   788.7us per-hs= 25.53us
+wakeup hostfunc spin=   5us step=   883.9us per-hs= 26.50us
+wakeup hostfunc spin=  10us step=  1077.7us per-hs= 29.57us
+wakeup hostfunc spin=  20us step=  1359.3us per-hs= 31.30us
+wakeup hostfunc spin=  50us step=  2027.6us per-hs= 29.15us
+wakeup hostfunc spin= 100us step=  3249.1us per-hs= 30.04us
+wakeup hostfunc spin= 200us step=  5574.8us per-hs= 26.94us
+work n=75 data=copy none     mean=  1084.0us p99=  1228.8us cpu=     0.0us per-hs=  0.00us
+work n=75 data=copy memop    mean=  5538.0us p99=  5686.0us cpu=  3740.7us per-hs=  9.51us
+work n=75 data=copy kernel   mean=  5305.3us p99=  5561.3us cpu=  3779.0us per-hs=  5.90us
+work n=75 data=copy hybrid   mean=  5202.9us p99=  5355.6us cpu=  3682.4us per-hs=  5.82us
+work n=75 data=copy hostfunc mean=  6432.7us p99=  6978.8us cpu=  3424.6us per-hs= 25.65us
+work n=75 data=zc   none     mean=   391.0us p99=   392.2us cpu=     0.0us per-hs=  0.00us
+work n=75 data=zc   memop    mean=  4693.3us p99=  4848.6us cpu=  3824.2us per-hs=  6.38us
+work n=75 data=zc   kernel   mean=  3918.0us p99=  4004.2us cpu=  3371.7us per-hs=  2.07us
+work n=75 data=zc   hybrid   mean=  4326.5us p99=  4419.3us cpu=  3706.4us per-hs=  3.05us
+work n=75 data=zc   hostfunc mean=  5744.9us p99=  6343.7us cpu=  3431.6us per-hs= 25.63us
+pcie {'read_device': 0.93, 'read_mapped': 1.46, 'write_device': 0.93, 'write_mapped': 0.95, 'read_extra_us': 0.53, 'write_extra_us': 0.02}
+pyloop none    py_work p50=  189.2us p99=  208.6us step p50=   389.3us (alone p50=176.2us)
+pyloop kernel  py_work p50=  355.0us p99=  421.5us step p50=  3938.5us (alone p50=176.2us)
+pyloop memop   py_work p50=  339.9us p99=  399.9us step p50=  4302.7us (alone p50=176.2us)
+done

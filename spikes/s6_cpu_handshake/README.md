@@ -251,3 +251,166 @@ graph sharing a worker concurrently (the per-slot words assume one in-flight req
 serialized replays on one stream), `cuStreamBatchMemOp` to fuse the write and wait into one node, and the
 coordinator's idle doze latency (≤ 50 µs for the first layer after 100 ms of idle; not measured).
 The numbers above come from a busy shared host, and p99 tails (for example hostfunc 13.6 ms) partly reflect that noise.
+
+## Consumer cards (RTX 4090 / 5080 / 5090 desktops), 2026-10-06
+
+Answers Q5. One desktop per class, everything inside one persistent container per desktop (CUDA 13.0.0 devel image,
+nvcc 13.0.48, g++ 13; uv venv with torch 2.11.0+cu130, Python 3.12.12). GPUs are headless.
+
+| | rtx-4090 | rtx-5080 | rtx-5090 |
+|---|---|---|---|
+| GPU | RTX 4090 (sm_89), PCIe 4.0 x16 | RTX 5080 (sm_120), PCIe 5.0 x16 | RTX 5090 (sm_120), PCIe 5.0 x16 |
+| CPU | <cpu> (<cpu>, 8C/16T, 2 CCX, AVX2), 128 GB <memory> | <cpu> (<cpu>, 8C/16T, 1 CCD, 96 MB L3), 128 GB <memory> | same as 5080 |
+| driver (all: Linux <version>) | <version> | <version> | <version> |
+| memop caps | 64-bit 1, wait NOR 1, flush-remote-writes 0, host-native-atomics 0 | same | same |
+| `KERNEL_EXEC_TIMEOUT` | 0 | 0 | 0 |
+
+Runs per class (`results/<class>_*.json` + `.log`): `--threads 7` (`_t7`), `--threads 8` (`_t8`), a repeat of the
+latency/wake-up/work/pyloop experiments at 7 threads (`_t7_rep2`), and 7 threads with the Python thread pinned to
+the remaining physical core (`_t7_pinmain`, new flag `--pin-main`). `S6_BUILD_DIR=build/<class>` keeps one
+`-march=native` build per CPU. Worker cores are 0–6 (or 0–7); CPUs 8–15 are their SMT siblings.
+
+New experiments in `bench.py` (all in the JSON): `pyloop` (Python step loop under a hot worker), `pcie` (GPU access
+latency to mapped pinned memory), `power` (NVML power/clock/util while graphs wait on the CPU, and during a 3 s
+park), plus `kernel_exec_timeout` / display state in `env`.
+
+### Handshake cost (empty CPU task, zero-copy data path), µs per handshake (slope over N = 1/24/48/75)
+
+Three runs per class: t7 / t8 / t7 repeat.
+
+| mode | rtx-4090 | rtx-5080 | rtx-5090 | A5000 (above) |
+|---|---|---|---|---|
+| memop | 4.49 / 4.50 / 4.50 | 4.36 / 4.28 / 3.53 | 3.01 / 3.02 / 3.05 | 5.35 |
+| **kernel** | **2.83 / 2.83 / 2.81** | **2.05 / 2.05 / 1.96** | **1.97 / 1.97 / 2.00** | 2.97 |
+| hybrid | 4.40 / 4.40 / 4.38 | 4.05 / 4.05 / 3.39 | 3.05 / 3.06 / 3.09 | 5.22 |
+| hostfunc | 23.8 / 24.0 / 25.5 | 24.2 / 32.6 / 23.8 | 20.7 / 28.4 / 28.9 | 40.3 |
+
+Per-step overhead at N = 75 (zc, p50, t7): memop 337 / 332 / 227 µs, kernel 212 / 154 / 148 µs, hostfunc
+1792 / 1796 / 1613 µs (4090 / 5080 / 5090). With the two memcpy nodes (`copy`) instead of zero-copy, a GPU-only
+75-layer graph costs 1325 / 1114 / 1084 µs vs 398 / 381 / 391 µs: zero-copy stays mandatory on desktops.
+
+**Wake-up vs CPU task length** (N = 24, CPU task = pure spin of S µs; µs per handshake, t7; the repeat run agrees
+within 0.3 µs for memop/kernel/hybrid):
+
+| S (µs) | 0 | 2 | 5 | 10 | 20 | 50 | 100 | 200 |
+|---|---|---|---|---|---|---|---|---|
+| 4090 memop | 4.4 | 4.7 | 9.7 | 4.9 | 5.0 | 8.1 | 7.6 | 8.8 |
+| 4090 kernel | 2.8 | 2.6 | 2.7 | 2.8 | 2.2 | 2.7 | 2.8 | 2.3 |
+| 5080 memop | 3.3 | 3.7 | 4.8 | 7.3 | 9.5 | 4.4 | 5.4 | 4.0 |
+| 5080 kernel | 1.9 | 1.9 | 2.0 | 2.1 | 1.9 | 1.9 | 1.9 | 2.1 |
+| 5090 memop | 3.5 | 3.6 | 4.8 | 7.2 | 9.4 | 4.2 | 5.3 | 4.0 |
+| 5090 kernel | 2.0 | 2.0 | 2.1 | 2.0 | 1.9 | 2.2 | 2.2 | 2.1 |
+| hybrid (all) | 3.1–4.1 | | | | | | | 3.2–3.6 |
+| hostfunc (all) | 21–35 | | | | | | | |
+
+The A5000 pattern holds on GeForce Ada and Blackwell: the front-end memop wait is non-monotonic in the CPU time
+(up to 9.5–9.7 µs), the 1-thread spin kernel is flat at 1.9–2.2 µs (Blackwell) / 2.2–2.8 µs (Ada).
+
+**With the real CPU task** (N = 75, bf16 GEMV 768 × 2048 per layer, 225 MiB sweep; zc; mean step / CPU compute
+measured in the worker / overhead per handshake):
+
+| class | run | memop | kernel | hybrid | hostfunc |
+|---|---|---|---|---|---|
+| rtx-4090 | t7 | 8094 / 7027 / 8.8 | **7617 / 6996 / 2.8** | 7698 / 7037 / 3.4 | 9839 / 6984 / 32.6 |
+| | t8 | 8235 / 7154 / 8.9 | 7647 / 7026 / 2.8 | 7814 / 7154 / 3.3 | 9739 / 7020 / 30.8 |
+| | t7 pinned main | 8061 / 6930 / 9.7 | 7540 / 6921 / 2.9 | 7619 / 6959 / 3.4 | 9588 / 6962 / 29.7 |
+| rtx-5080 | t7 | 5421 / 4367 / 9.0 | **3985 / 3443 / 2.1** | 4882 / 4190 / 4.1 | 6805 / 3531 / 38.6 |
+| | t8 | 5146 / 4147 / 8.2 | 4007 / 3464 / 2.1 | 4628 / 3943 / 4.0 | 6447 / 3544 / 33.6 |
+| | t7 pinned main | 4417 / 3353 / 9.1 | 3889 / 3356 / 2.0 | 3961 / 3353 / 3.0 | 5965 / 3451 / 28.4 |
+| rtx-5090 | t7 | 4703 / 3836 / 6.3 | **3966 / 3419 / 2.1** | 4371 / 3751 / 3.0 | 6208 / 3453 / 31.5 |
+| | t8 | 4658 / 3776 / 6.5 | 3999 / 3453 / 2.1 | 4299 / 3679 / 3.1 | 5776 / 3536 / 24.6 |
+| | t7 pinned main | 4408 / 3342 / 9.0 | 3879 / 3332 / 2.1 | 3978 / 3355 / 3.1 | 5587 / 3433 / 23.5 |
+
+GPU-only step: 403–411 (4090), 381–383 (5080), 391 (5090) µs. The spin-kernel wait saves 0.5–1.4 ms per 75-layer
+step over memop on every class.
+
+### CPU side on an 8-core desktop
+
+GEMV bandwidth (`cpu_task`, 225 MiB sweep, per-layer µs / GB/s; 1 / 2 / 4 / 8 threads):
+
+| host | 1 | 2 | 4 | 8 |
+|---|---|---|---|---|
+| <cpu> + <memory> (4090 desktop) | 160 / 19.7 | 98 / 32.2 | 89 / 35.5 | 93 / 34.0 |
+| <cpu> + <memory> (5080 desktop) | 64 / 49.5 | 46 / 68.0 | 47 / 67.7 | 48 / 66.2 |
+| <cpu> + <memory> (5090 desktop) | 61 / 51.7 | 45 / 69.8 | 43 / 73.4 | 46 / 67.8 |
+
+Dual-channel <memory> saturates at **66–73 GB/s with 2–4 threads**; <memory> at **32–36 GB/s**. More than 4 threads buys
+nothing for a bandwidth-bound expert GEMV, so a desktop CPU-expert pool needs ≤ 4 compute threads. The 96 MB L3
+of the <cpu> matters: in `overlap` (N = 24, 72 MiB of weights) the per-layer CPU task drops to 12–15 µs
+(L3-resident) vs 43–47 µs from DRAM; the <cpu> (2 × 16 MB L3) stays at ~94 µs.
+
+**Does a hot worker starve the Python loop?** `pyloop`: each step runs a fixed pure-Python workload (`py_work`,
+p50 µs), then replays the 75-layer graph (≤ 2 in flight). Alone = same workload, no GPU, worker idle:
+
+| class | run | main thread CPUs | alone | GPU-only graph | kernel wait | memop wait |
+|---|---|---|---|---|---|---|
+| rtx-4090 | t7 | 7–15 | 417 | 431 | 584 | 570 |
+| | t8 | 8–15 | 419 | 439 | 599 | 585 |
+| | t7 pinned | 7, 15 | 332 | 311 | 330 | 333 |
+| rtx-5080 | t7 | 7–15 | 189 | 196 | 377 | 355 |
+| | t8 | 8–15 | 186 | 193 | 423 | 414 |
+| | t7 pinned | 7, 15 | 188 | 189 | 191 | 195 |
+| rtx-5090 | t7 | 7–15 | 184 | 183 | 401 | 330 |
+| | t8 | 8–15 | 180 | 186 | 420 | 405 |
+| | t7 pinned | 7, 15 | 176 | 178 | 181 | 184 |
+
+Yes: whenever the Python thread can land on the SMT sibling of a spinning worker it runs **1.4× (<cpu>) to 2.3×
+(<cpu>) slower** — with 8 workers it has no other choice, and with 7 workers the scheduler still puts it there
+(repeat run: 373 / 341 µs on the 5080, 355 / 340 on the 5090). Pinning it to the free physical core (both SMT
+threads of core 7) removes the effect entirely (≤ 5 % over alone), and also speeds up the worker itself (CPU
+compute 3350 vs 3440–4370 µs per step on <cpu>, because the main thread no longer competes with a worker's SMT
+sibling). Step time p50 with kernel waits: 5080 4309 (t7) / 4266 (t8) / 3858 µs (pinned), 5090 4390 / 4435 /
+3866, 4090 7791 / 7733 / 7537.
+
+### PCIe and mapped memory
+
+`pcie`: a kernel that reads 768 fp32 from mapped pinned memory costs **+0.50–0.56 µs** over the same kernel on
+device memory, on all three (PCIe 4.0 4090: +0.55; PCIe 5.0 5080/5090: +0.50/+0.53); posted writes to mapped
+memory cost +0.00–0.02 µs. That is the whole zero-copy read penalty per layer, and it bounds how fast a spin kernel
+can observe DONE: the 1.9–2.8 µs spin-kernel handshake (GPU write → CPU sees → CPU write → GPU poll sees) is a
+few such round trips plus the coordinator's poll.
+
+### Power, clocks and the display watchdog
+
+NVML, 10 s windows; "waiting" = N = 24 graphs whose CPU task is a 200 µs spin (GPU parked in a wait ~95 % of the
+time); "parked 3 s" = one handshake stalled for 3 s. W (mean) / SM MHz / reported util %:
+
+| class | idle (context open) | waiting, memop | waiting, kernel | parked 3 s, memop | parked 3 s, kernel |
+|---|---|---|---|---|---|
+| rtx-4090 | 58.9 / 2520 / 0 | 60.5 / 2520 / 4 | 81.1 / 2700 / 100 | 59.0 / 2520 / 0 | 81.6 / 2700 / 100 |
+| rtx-5080 | 49.0 / 2610 / 0 | 50.5 / 2790 / 3 | 62.8 / 2790 / 100 | 49.1 / 2617 / 0 | 62.6 / 2790 / 100 |
+| rtx-5090 | 78.8 / 2393 / 0 | 96.5 / 2685 / 3 | 113.7 / 2685 / 100 | 82.1 / 2408 / 0 | 114.2 / 2685 / 98 |
+
+(hybrid = kernel within 1 W; t8 run within 0.5 W.) A resident 1-thread spin kernel costs **+12–14 W (5080), +17–32 W
+(5090), +21–23 W (4090)** over a memop wait, keeps the SM clock at boost and shows the GPU as 100 % utilized; GPU
+temperatures stayed ≤ 56 °C, no clock throttling. On a desktop that is a cost, not a hazard; for laptops (power-
+capped) memop stays the right choice.
+
+Watchdog: `CU_DEVICE_ATTRIBUTE_KERNEL_EXEC_TIMEOUT` = 0 and no display is attached on all three desktops, so the
+Linux display watchdog cannot fire; a 2 s stall of one handshake simply takes 2.007–2.016 s with no error. A
+**display-attached** GeForce (timeout = 1) was not available — a graph parked in a spin kernel there is untested and
+must keep stalls under the X/Wayland watchdog (seconds); the memop wait occupies no SM and is the safe choice when
+`KERNEL_EXEC_TIMEOUT` = 1.
+
+### Robustness (all classes, t7 and t8)
+
+Identical outcome to the A5000: all four flavours capture (memop 4 `batch_mem_op` nodes, max err ≤ 4.8e-7 over 50
+replays); long runs memop/zc 1.5 M, memop/copy 750 k, kernel/zc 750 k, hostfunc/zc 375 k handshakes = expected,
+max err 7.2e-7; slow worker exact; abort with 20 replays queued drains in 8–10 ms (334 fail-open, 0 stranded),
+restart exact; `quiesce` / `ordered` map swaps 0 violations, `unsafe` 300. A 1 ms kernel on another stream finishes
+in 1.03 ms while a graph is parked 300 ms. Overlap (N = 24, GPU work matched to the CPU task) is complete with
+kernel waits (5080: 509 µs on a branch vs 498 GPU-only; 4090: 2460 vs 2413).
+
+### Decision for the consumer classes
+
+1. **Default wait backend on all three GeForce classes: spin kernel** (`kernel` mode, or `hybrid` if the signal
+   must not occupy an SM): 1.9–2.8 µs per handshake flat, 2.0–2.9 µs under the real CPU task, vs memop 3.0–4.5 µs
+   empty and 6.3–9.7 µs under real work. Signal side: memop write or 1-thread release store are within 1 µs; keep
+   the flag-pair primitive with both backends. Fall back to memop when `KERNEL_EXEC_TIMEOUT` = 1 (display GPU) or
+   on power-capped parts. Never `cudaLaunchHostFunc` (21–39 µs, ×10).
+2. **Worker threads on an 8-core desktop: 7, plus the Python step loop pinned to the 8th physical core (both SMT
+   threads).** 8 workers (or 7 without pinning) slow the Python loop 1.4–2.3×; pinned, there is no measurable
+   interference. Of the 7, ≤ 4 compute threads saturate DRAM for GEMV; the rest are wasted spinning.
+3. Zero-copy payloads (+0.5 µs per mapped read) and the single-word REQ/DONE protocol carry over unchanged.
+4. Budget: on the 5080 desktop a 75-layer CPU-expert step at 3 MiB/layer is DRAM-bound at ≈ 3.35 ms of CPU time
+   (68 GB/s); on <cpu> / <memory> it is 2× that. Handshakes add only 0.15 ms (kernel waits).

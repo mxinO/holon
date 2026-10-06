@@ -13,7 +13,7 @@ import time
 
 import torch
 
-from common import OUT, save
+from common import OUT, class_name, save
 
 # (name, python expression returning a JitSpec); evaluated in a child with flashinfer imported.
 BF16, FP8, I32 = "torch.bfloat16", "torch.float8_e4m3fn", "torch.int32"
@@ -65,7 +65,7 @@ def du(path) -> int:
 
 
 def main():
-    root = OUT / "jit_cold"
+    root = OUT / f"jit_cold_{class_name()}"   # per class: several hosts may share this directory
     shutil.rmtree(root, ignore_errors=True)
     res = {"per_module": [], "prebuild": {}, "nproc": os.cpu_count()}
     for name, expr in SPECS.items():

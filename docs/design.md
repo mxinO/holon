@@ -568,8 +568,14 @@ Adopted kernels, decided by the M0 spikes (evidence and raw numbers in `spikes/s
   W8A16/W4A16 GEMM written by us — on sm_86 Triton rejects `fp8e4nv`, so FP8 weights are loaded as `uint8` and
   decoded to bf16 with exact bit operations in the K-loop; Marlin only if it builds standalone.
 
-Consumer-card numbers (RTX 4090/5080/5090 desktops) are still to be recorded for S1, S2 and S6; the RTX PRO
-6000 (128 MB L2, 188 SMs) is not a consumer proxy.
+Consumer cards (RTX 4090 / 5080 / 5090 desktops; "Consumer cards" in the spike READMEs) confirm these choices;
+the RTX PRO 6000 (128 MB L2, 188 SMs) is not a consumer proxy:
+- attention: our Triton paged attention stays at parity with FlashInfer on every class (median time ratio
+  0.99–1.01×) with configs pinned per class; fp8 verify on sm_120 uses XQA; q8_0 KV still needs a tuning pass on
+  sm_120 (1.1–1.7× FlashInfer fp8 time; at the memory roofline on the 4090);
+- GGUF: dequantize + cuBLAS cannot stand in for quantized prefill on GeForce cards, whose int8 tensor throughput
+  is ≈ 4× their bf16 (0.44–0.73× llama.cpp prefill), so llama.cpp's int8 `mmq` is needed from M0.1 on, not later;
+  the ported kernels are correct and graph-safe for all 10 types on sm_89 and sm_120.
 
 ### 5.7 Model-specific specialization
 
@@ -842,9 +848,12 @@ device inputs (`DEVICE_LAST`/`DEVICE_DRAFT`) are already consistent.
 - **CPU work inside a FULL graph** (CPU expert compute, Strata/FreeToken style) uses a one-word handshake per
   layer with a persistent native CPU worker (spike S6): the graph signals REQ, the worker computes on pinned
   memory and answers DONE, the graph waits. `Platform` exposes this as a signal/wait pair with two
-  implementations chosen per fingerprint class by measurement — a one-thread spin kernel (2.8 µs per handshake on
-  A5000) and stream memory operations (`cuStreamWriteValue`/`WaitValue`, 9.7 µs; kept for power-sensitive hosts
-  where a resident spinner triggers CPU power capping). `cudaLaunchHostFunc` is not used (31.7 µs). Expert inputs
+  implementations chosen per fingerprint class by measurement — a one-thread spin kernel (1.9–2.8 µs per
+  handshake on the A5000 server and RTX 4090/5080/5090 desktops; the default) and stream memory operations
+  (`cuStreamWriteValue`/`WaitValue`, 6–10 µs under load; for display GPUs with a kernel watchdog, laptops and
+  power-sensitive hosts — a resident spinner draws 12–32 W). `cudaLaunchHostFunc` is not used (21–39 µs). The
+  CPU worker pool takes one physical core fewer than the host has and the Python loop is pinned to the free core:
+  sharing a core with a spinning worker slows the loop 1.4–2.3× on 8-core desktops. Expert inputs
   and outputs are read and written in pinned memory directly (no memcpy nodes, which cost ≈ 14 µs per layer). GPU
   work between signal and wait overlaps the CPU. Contract: stop the worker only after draining in-flight replays
   (or abort, drain, stop); residency-map swaps are written to the inactive buffer and flipped **on the replay

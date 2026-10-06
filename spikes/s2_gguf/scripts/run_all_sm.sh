@@ -3,11 +3,11 @@
 set -euo pipefail
 SM=$1
 HERE=$(cd "$(dirname "$0")/.." && pwd)
-PY=.venv/bin/python
+PY=${S2_PY:-$HERE/../../.venv/bin/python}
 : "${CUDA_VISIBLE_DEVICES:?pin the GPU}"
 cd "$HERE"
 nvidia-smi -i "$CUDA_VISIBLE_DEVICES" --query-gpu=name,memory.used,utilization.gpu --format=csv
-export PATH="$(python3 -c 'import sys; print(sys.base_prefix)')/bin:$PATH"  # ninja for torch cpp_extension
+# ninja must be on PATH for torch cpp_extension
 $PY scripts/build_ext.py "$SM"
 $PY scripts/correctness.py
 $PY scripts/graph_check.py

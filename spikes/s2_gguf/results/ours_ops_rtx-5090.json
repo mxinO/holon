@@ -1,0 +1,3868 @@
+{
+ "device": "NVIDIA GeForce RTX 5090",
+ "torch": "2.11.0+cu130",
+ "act_dtype": "bf16",
+ "rows": [
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 6.165440082550049
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 44.9324225500432
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 29.833152770996094
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 50.05833807955967
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 110.92430882199982
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 43.141726443642064
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 87.65531267438617
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.041088104248047
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 16.264192581176758
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 9.821632385253906
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 15.10860824584961
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 30.722816467285156
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 14.87929630279541
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 28.91155242919922
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 13.09670352935791
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 117.06706623972198
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 84.03871740613666
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 121.46995933192551
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 326.34986241658527
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 126.97002410888672
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 286.4183538100299
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 1,
+   "path": "mmvq",
+   "us": 14.489343643188477
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 117.90350209111753
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "mmvq",
+   "us": 84.90638045577316
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 144.38666719378847
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "mmvq",
+   "us": 325.4090627034505
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 120.05610405644283
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 295.8928599502101
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.5880961418151855
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 24.848127365112305
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "mmvq",
+   "us": 18.407615661621094
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 26.66214370727539
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "mmvq",
+   "us": 65.57862918705486
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 27.545856475830078
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 46.054254328538924
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 1,
+   "path": "mmvq",
+   "us": 3.035520076751709
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 7.92633581161499
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "mmvq",
+   "us": 4.62886381149292
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 8.873023986816406
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "mmvq",
+   "us": 10.681856155395508
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 10.154560089111328
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 14.022272109985352
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.4759039878845215
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 25.882816314697266
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 16.402111053466797
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 32.82553482055664
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 57.901471022850956
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 24.451135635375977
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 47.555603823819006
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 1,
+   "path": "moe_vec",
+   "us": 5.998208045959473
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 8,
+   "path": "moe_vec",
+   "us": 26.332672119140625
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 32,
+   "path": "moe_vec",
+   "us": 97.35283255577087
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 512,
+   "path": "moe_vec",
+   "us": 1514.4640115591196
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 1,
+   "path": "moe_vec",
+   "us": 9.958016395568848
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 8,
+   "path": "moe_vec",
+   "us": 65.32211436165704
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 32,
+   "path": "moe_vec",
+   "us": 255.36955796278917
+  },
+  {
+   "type": "IQ3_XXS",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 512,
+   "path": "moe_vec",
+   "us": 4057.040214538574
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 6.516863822937012
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 58.95350763972956
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 30.235136032104492
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 64.08687473572407
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 112.88152422223773
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 57.107160156621035
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 102.18660727791165
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.514560222625732
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 19.22208023071289
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 10.274944305419922
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 18.00204849243164
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 31.524799346923828
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 17.801599502563477
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 31.688512802124023
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 13.41158390045166
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 160.24416434664687
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 84.24072965569452
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 164.6524133353398
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 331.8993308327415
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 170.15165143308386
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 315.58141400737145
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 1,
+   "path": "mmvq",
+   "us": 16.02720069885254
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 160.96161593910026
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "mmvq",
+   "us": 86.14116934842842
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 187.61412302652994
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "mmvq",
+   "us": 333.2943423040982
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 158.4653531090688
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 323.12812179815575
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.998208045959473
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 31.52979278564453
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "mmvq",
+   "us": 18.698688507080078
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 33.49407958984375
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "mmvq",
+   "us": 65.8925351229581
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 34.320323697982296
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 52.48960759754559
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 1,
+   "path": "mmvq",
+   "us": 3.593535900115967
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 7.283071994781494
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "mmvq",
+   "us": 4.962751865386963
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 8.31328010559082
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "mmvq",
+   "us": 10.918335914611816
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 9.662336349487305
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 13.523391723632812
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.8869757652282715
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 32.50707244873047
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 16.85196876525879
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 39.59566641062108
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 58.64632781295531
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 31.102720260620117
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 54.303134780332265
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 1,
+   "path": "moe_vec",
+   "us": 5.764863967895508
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 8,
+   "path": "moe_vec",
+   "us": 26.50009536743164
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 32,
+   "path": "moe_vec",
+   "us": 97.48642679323187
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 512,
+   "path": "moe_vec",
+   "us": 1534.0612729390461
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 1,
+   "path": "moe_vec",
+   "us": 9.982848167419434
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 8,
+   "path": "moe_vec",
+   "us": 65.56656278412918
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 32,
+   "path": "moe_vec",
+   "us": 256.1687370399376
+  },
+  {
+   "type": "IQ3_S",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 512,
+   "path": "moe_vec",
+   "us": 4056.6720962524414
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 6.6538238525390625
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 43.87781953928805
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 32.28633499145508
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 48.908112457444
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 122.27958127071983
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 42.00118908779227
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 86.6422211682355
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.336639881134033
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 15.161727905273438
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 10.730112075805664
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 13.883008003234863
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 33.3164176940918
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 13.72383975982666
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 27.46918487548828
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 14.037504196166992
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 116.20377616648294
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 92.76229556244199
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 120.62512537476364
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 365.74309726931017
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 125.96484234458522
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 284.6223858819492
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 1,
+   "path": "mmvq",
+   "us": 16.973119735717773
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 119.29780732160845
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "mmvq",
+   "us": 91.86297123975093
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 159.52291567463521
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "mmvq",
+   "us": 358.09513438831675
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 119.57180500030518
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 296.3500745368726
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.7202558517456055
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 23.603328704833984
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "mmvq",
+   "us": 18.34284782409668
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 25.59609603881836
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "mmvq",
+   "us": 65.81945939497514
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 26.57414436340332
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 44.9216625478008
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 1,
+   "path": "mmvq",
+   "us": 3.1926400661468506
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 5.5155839920043945
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "mmvq",
+   "us": 4.719168186187744
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 6.641983985900879
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "mmvq",
+   "us": 10.911808013916016
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 7.860288143157959
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 11.81657600402832
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.89247989654541
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 24.634944915771484
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 17.78144073486328
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 31.696575164794922
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 62.8086845215677
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 23.31667137145996
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 46.46665895140016
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 1,
+   "path": "moe_vec",
+   "us": 6.4824957847595215
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 8,
+   "path": "moe_vec",
+   "us": 27.252479553222656
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 32,
+   "path": "moe_vec",
+   "us": 103.12354629104202
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 512,
+   "path": "moe_vec",
+   "us": 1622.597376505534
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 1,
+   "path": "moe_vec",
+   "us": 10.055551528930664
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 8,
+   "path": "moe_vec",
+   "us": 65.6135531931161
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 32,
+   "path": "moe_vec",
+   "us": 256.32464258294357
+  },
+  {
+   "type": "IQ4_XS",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 512,
+   "path": "moe_vec",
+   "us": 4071.9680786132812
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 9.082048416137695
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 43.25116817409077
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 43.21538834344773
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "mmq",
+   "us": 39.25903303395882
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 48.29429565592015
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 154.87923160676033
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "mmq",
+   "us": 98.16775070993523
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 41.52597260365288
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 512,
+   "path": "mmq",
+   "us": 1181.1039447784424
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 86.37656628246039
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 6.259136199951172
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 14.960384368896484
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 14.5797758102417
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "mmq",
+   "us": 33.333824157714844
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 13.764800071716309
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 42.82138439325186
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "mmq",
+   "us": 39.443632400712595
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 13.527680397033691
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 512,
+   "path": "mmq",
+   "us": 319.72616226946724
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 27.437183380126953
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 16.689983367919922
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 116.9991081143603
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 96.0621482447574
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "mmq",
+   "us": 74.21202922430564
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 120.99483345128313
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 374.1230597862831
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "mmq",
+   "us": 248.0631627534565
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 124.18252543399208
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 512,
+   "path": "mmq",
+   "us": 3492.9534912109375
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 284.2660306104973
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 1,
+   "path": "mmvq",
+   "us": 25.050111770629883
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 117.98124956938386
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "mmvq",
+   "us": 117.56203929830042
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "mmq",
+   "us": 114.50390643384083
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 158.8646597113491
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "mmvq",
+   "us": 439.0883551703559
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "mmq",
+   "us": 298.3744107759916
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 117.17385780520556
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 512,
+   "path": "mmq",
+   "us": 3541.5359497070312
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 293.7929887038011
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 1,
+   "path": "mmvq",
+   "us": 5.726719856262207
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 23.385791778564453
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "mmvq",
+   "us": 25.20921516418457
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "mmq",
+   "us": 20.631040573120117
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 25.358272552490234
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "mmvq",
+   "us": 87.9849473091021
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "mmq",
+   "us": 50.222664187860616
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 26.292287826538086
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 512,
+   "path": "mmq",
+   "us": 598.5027660023082
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 44.66630912121431
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.0531840324401855
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 4.8908162117004395
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "mmvq",
+   "us": 5.572927951812744
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "mmq",
+   "us": 17.485824584960938
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 5.974207878112793
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "mmvq",
+   "us": 14.043007850646973
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "mmq",
+   "us": 17.55615997314453
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 7.165696144104004
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 512,
+   "path": "mmq",
+   "us": 87.32424095762727
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 11.233535766601562
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 6.604351997375488
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 24.42540740966797
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 23.80454444885254
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "mmq",
+   "us": 33.335872650146484
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 31.426048278808594
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 81.7282737569606
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "mmq",
+   "us": 60.811578659784224
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 22.989952087402344
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 512,
+   "path": "mmq",
+   "us": 610.3559732437134
+  },
+  {
+   "type": "Q3_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 46.298975719831375
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 1,
+   "path": "moe_vec",
+   "us": 6.8373122215271
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 1,
+   "path": "moe_mmq",
+   "us": 21.107839584350586
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 8,
+   "path": "moe_vec",
+   "us": 27.809728622436523
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 8,
+   "path": "moe_mmq",
+   "us": 57.1537971496582
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 32,
+   "path": "moe_vec",
+   "us": 104.1402281000373
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 32,
+   "path": "moe_mmq",
+   "us": 114.97455988174829
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 512,
+   "path": "moe_vec",
+   "us": 1662.2895327481356
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 512,
+   "path": "moe_mmq",
+   "us": 976.1919975280762
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 1,
+   "path": "moe_vec",
+   "us": 10.035455703735352
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 1,
+   "path": "moe_mmq",
+   "us": 14.860799789428711
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 8,
+   "path": "moe_vec",
+   "us": 65.63367411650016
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 8,
+   "path": "moe_mmq",
+   "us": 50.22624905189771
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 32,
+   "path": "moe_vec",
+   "us": 256.4425217477899
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 32,
+   "path": "moe_mmq",
+   "us": 117.49366567104677
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 512,
+   "path": "moe_vec",
+   "us": 4073.103904724121
+  },
+  {
+   "type": "Q3_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 512,
+   "path": "moe_mmq",
+   "us": 988.1216049194336
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 6.576255798339844
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 43.92810312266314
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 28.969152450561523
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "mmq",
+   "us": 19.65510368347168
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 48.867743066016665
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 100.67287299150978
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "mmq",
+   "us": 60.63756185864646
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 42.22907655847955
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 512,
+   "path": "mmq",
+   "us": 779.8041534423828
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 86.78022420631265
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.932928085327148
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 15.242624282836914
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 9.858431816101074
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "mmq",
+   "us": 13.346879959106445
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 14.034432411193848
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 28.96121597290039
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "mmq",
+   "us": 19.91481590270996
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 13.917119979858398
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 512,
+   "path": "mmq",
+   "us": 209.48546560187089
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 27.722623825073242
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 11.968640327453613
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 116.4728045463562
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 69.06557805610426
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "mmq",
+   "us": 44.54741466134121
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 120.96342650599449
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 268.6924404568142
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "mmq",
+   "us": 156.8197700066295
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 126.2423281638038
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 512,
+   "path": "mmq",
+   "us": 2327.440023422241
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 289.75764442892637
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 1,
+   "path": "mmvq",
+   "us": 15.61843204498291
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 117.28968443693938
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "mmvq",
+   "us": 71.08659123095516
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "mmq",
+   "us": 56.003428640819735
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 144.32697726371592
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "mmvq",
+   "us": 267.08643201371314
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "mmq",
+   "us": 177.71453500908112
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 119.10279989242554
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 512,
+   "path": "mmq",
+   "us": 2337.212085723877
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 298.5580617731268
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.896768093109131
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 23.72697639465332
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "mmvq",
+   "us": 18.371904373168945
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "mmq",
+   "us": 10.912256240844727
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 25.677120208740234
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "mmvq",
+   "us": 62.42004315333383
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "mmq",
+   "us": 31.3702392578125
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 26.800384521484375
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 512,
+   "path": "mmq",
+   "us": 398.2373840954839
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 44.97903751421578
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 1,
+   "path": "mmvq",
+   "us": 3.815808057785034
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 5.977151870727539
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "mmvq",
+   "us": 5.134975910186768
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "mmq",
+   "us": 7.542848110198975
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 7.054080009460449
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "mmvq",
+   "us": 11.775168418884277
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "mmq",
+   "us": 7.6156158447265625
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 8.438783645629883
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 512,
+   "path": "mmq",
+   "us": 57.282802201469856
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 12.29644775390625
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 5.214655876159668
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 24.77471923828125
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 16.32294464111328
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "mmq",
+   "us": 13.505855560302734
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 31.740095138549805
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 54.363331896193486
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "mmq",
+   "us": 36.33356857299805
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 23.297216415405273
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 512,
+   "path": "mmq",
+   "us": 402.5266997668208
+  },
+  {
+   "type": "Q4_K",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 46.65206966543556
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 1,
+   "path": "moe_vec",
+   "us": 5.5878400802612305
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 1,
+   "path": "moe_mmq",
+   "us": 13.756095886230469
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 8,
+   "path": "moe_vec",
+   "us": 26.294208526611328
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 8,
+   "path": "moe_mmq",
+   "us": 37.28949949913418
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 32,
+   "path": "moe_vec",
+   "us": 97.87055928871115
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 32,
+   "path": "moe_mmq",
+   "us": 73.56271218127154
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 512,
+   "path": "moe_vec",
+   "us": 1527.6627173790564
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 512,
+   "path": "moe_mmq",
+   "us": 617.9670095443726
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 1,
+   "path": "moe_vec",
+   "us": 10.056127548217773
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 1,
+   "path": "moe_mmq",
+   "us": 8.63475227355957
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 8,
+   "path": "moe_vec",
+   "us": 65.69577587975397
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 8,
+   "path": "moe_mmq",
+   "us": 30.023744583129883
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 32,
+   "path": "moe_vec",
+   "us": 256.58946288259403
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 32,
+   "path": "moe_mmq",
+   "us": 66.77495569422625
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 512,
+   "path": "moe_vec",
+   "us": 4059.9842071533203
+  },
+  {
+   "type": "Q4_K",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 512,
+   "path": "moe_mmq",
+   "us": 593.9995158802379
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 6.481344223022461
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 28.295167922973633
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 27.95302391052246
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "mmq",
+   "us": 22.114368438720703
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 33.43360137939453
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 101.06771500384221
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "mmq",
+   "us": 61.60179616594472
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 26.5098876953125
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 512,
+   "path": "mmq",
+   "us": 775.203857421875
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 72.28950799680224
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.017983913421631
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 10.968832015991211
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 9.973183631896973
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "mmq",
+   "us": 19.128576278686523
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 10.125247955322266
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 29.5927677154541
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "mmq",
+   "us": 22.304832458496094
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 9.953727722167969
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 512,
+   "path": "mmq",
+   "us": 207.42990659630817
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 1024,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 23.865663528442383
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 13.059455871582031
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 90.38400187075717
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 76.353306673011
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "mmq",
+   "us": 46.66428688244942
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 122.47630877372546
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 290.9234744399341
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "mmq",
+   "us": 157.7319625980598
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 126.81662957399887
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 512,
+   "path": "mmq",
+   "us": 2290.1999950408936
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 12288,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 288.88469583847944
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 1,
+   "path": "mmvq",
+   "us": 15.196415901184082
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 91.65897369384766
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "mmvq",
+   "us": 75.8407891041948
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "mmq",
+   "us": 63.013225996575386
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 160.41734839687828
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "mmvq",
+   "us": 286.51559174950444
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "mmq",
+   "us": 184.21965663872876
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 113.81814537978754
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 512,
+   "path": "mmq",
+   "us": 2316.092014312744
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 12288,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 294.22546155524975
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.814464092254639
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 16.131200790405273
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "mmvq",
+   "us": 18.4453125
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "mmq",
+   "us": 11.989824295043945
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 17.895488739013672
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "mmvq",
+   "us": 65.87698839712834
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "mmq",
+   "us": 31.91417694091797
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 18.755584716796875
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 512,
+   "path": "mmq",
+   "us": 390.23937225341797
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 4096,
+   "k": 2048,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 37.68663324861445
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 1,
+   "path": "mmvq",
+   "us": 2.8876800537109375
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 4.005568027496338
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "mmvq",
+   "us": 4.830912113189697
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "mmq",
+   "us": 10.369471549987793
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 5.097472190856934
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "mmvq",
+   "us": 10.726719856262207
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "mmq",
+   "us": 10.478912353515625
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 6.285247802734375
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 512,
+   "path": "mmq",
+   "us": 57.15603755070613
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 512,
+   "k": 2048,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 10.330368041992188
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 1,
+   "path": "mmvq",
+   "us": 4.621632099151611
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 1,
+   "path": "dequant_gemm",
+   "us": 16.66092872619629
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "mmvq",
+   "us": 17.166719436645508
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "mmq",
+   "us": 19.208768844604492
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 8,
+   "path": "dequant_gemm",
+   "us": 24.03411293029785
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "mmvq",
+   "us": 53.73299515641129
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "mmq",
+   "us": 37.34238041557281
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 32,
+   "path": "dequant_gemm",
+   "us": 15.542271614074707
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 512,
+   "path": "mmq",
+   "us": 396.94824997259644
+  },
+  {
+   "type": "Q8_0",
+   "kind": "dense",
+   "m": 2048,
+   "k": 4096,
+   "n": 512,
+   "path": "dequant_gemm",
+   "us": 39.188827480281795
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 1,
+   "path": "moe_vec",
+   "us": 5.970047950744629
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 1,
+   "path": "moe_mmq",
+   "us": 17.012096405029297
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 8,
+   "path": "moe_vec",
+   "us": 26.94393539428711
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 8,
+   "path": "moe_mmq",
+   "us": 42.02931283534258
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 32,
+   "path": "moe_vec",
+   "us": 127.79675303278742
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 32,
+   "path": "moe_mmq",
+   "us": 128.48761941299958
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 512,
+   "path": "moe_vec",
+   "us": 2075.3279791937935
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_gate_up",
+   "m": 768,
+   "k": 2048,
+   "n": 512,
+   "path": "moe_mmq",
+   "us": 679.0719713483538
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 1,
+   "path": "moe_vec",
+   "us": 9.949055671691895
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 1,
+   "path": "moe_mmq",
+   "us": 8.737600326538086
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 8,
+   "path": "moe_vec",
+   "us": 65.62232971191406
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 8,
+   "path": "moe_mmq",
+   "us": 33.67289733886719
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 32,
+   "path": "moe_vec",
+   "us": 257.43446350097656
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 32,
+   "path": "moe_mmq",
+   "us": 120.13161857173128
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 512,
+   "path": "moe_vec",
+   "us": 4069.888114929199
+  },
+  {
+   "type": "Q8_0",
+   "kind": "moe_down",
+   "m": 2048,
+   "k": 768,
+   "n": 512,
+   "path": "moe_mmq",
+   "us": 649.9882380167643
+  }
+ ]
+}

@@ -16,7 +16,8 @@ def load_ext(sm: int | None = None):
     if sm is None:
         major, minor = torch.cuda.get_device_capability()
         sm = major * 10 + minor
-    build = HERE / "out" / f"ext-sm{sm}"
+    # S2_TAG (e.g. rtx-5080): per-class build dir, so same-SM hosts sharing this directory do not race one build
+    build = HERE / "out" / f"ext-{os.environ.get('S2_TAG') or f'sm{sm}'}"
     build.mkdir(parents=True, exist_ok=True)
     os.environ["TORCH_CUDA_ARCH_LIST"] = f"{sm // 10}.{sm % 10}"
     return load(

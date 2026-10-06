@@ -6,6 +6,7 @@ Timed ops include the q8_1 activation quantization, as in llama.cpp's MUL_MAT. M
 precomputed and not timed.
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -103,7 +104,7 @@ def main() -> None:
             del w
     sm = "".join(map(str, torch.cuda.get_device_capability()))
     out = {"device": torch.cuda.get_device_name(), "torch": torch.__version__, "act_dtype": "bf16", "rows": rows_out}
-    (HERE / "results" / f"ours_ops_sm{sm}.json").write_text(json.dumps(out, indent=1))
+    (HERE / "results" / f"ours_ops_{os.environ.get('S2_TAG') or 'sm' + sm}.json").write_text(json.dumps(out, indent=1))
 
 
 if __name__ == "__main__":

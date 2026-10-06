@@ -5,6 +5,7 @@ eager == graph replay (bytewise), 20 replays bytewise identical, and a different
 graph equals its eager result (the graph really reads the static input buffer).
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -89,7 +90,7 @@ def main() -> None:
     sm = "".join(map(str, torch.cuda.get_device_capability()))
     out = {"device": torch.cuda.get_device_name(), "all_ok": all(all(all(v.values()) for v in r.values())
                                                                   for r in res.values()), "types": res}
-    (HERE / "results" / f"graph_sm{sm}.json").write_text(json.dumps(out, indent=1))
+    (HERE / "results" / f"graph_{os.environ.get('S2_TAG') or 'sm' + sm}.json").write_text(json.dumps(out, indent=1))
     print("all_ok", out["all_ok"])
 
 

@@ -1,0 +1,81 @@
+extension ready in 0s
+{
+ "host": "rtx-5090-desktop",
+ "gpu": "NVIDIA GeForce RTX 5090",
+ "sm": "12.0",
+ "driver": "<version>",
+ "torch": "2.11.0+cu130",
+ "torch_cuda": "13.0",
+ "nvcc": "Build cuda_13.0.r13.0/compiler.36260728_0",
+ "python": "3.12.12",
+ "cpu": "AMD <cpu>",
+ "cpu_count": 16,
+ "mem": "124 GiB",
+ "cores_used": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6
+ ],
+ "cuda_visible_devices": "0",
+ "memop_caps": {
+  "can_flush_remote_writes": 0,
+  "can_use_64_bit_stream_mem_ops": 1,
+  "can_use_host_pointer_for_registered_mem": 1,
+  "can_use_stream_wait_value_nor": 1,
+  "host_native_atomic_supported": 0,
+  "pageable_memory_access": 1
+ },
+ "kernel": "6.17.0-35-generic",
+ "kernel_exec_timeout": 0,
+ "display_active": "Disabled, [Requested functionality has been deprecated], 600.00 W, 5, 16"
+}
+pyloop none    py_work p50=  177.9us p99=  198.8us step p50=   389.3us (alone p50=175.8us)
+pyloop kernel  py_work p50=  180.9us p99=  206.7us step p50=  3865.6us (alone p50=175.8us)
+pyloop memop   py_work p50=  183.7us p99=  211.0us step p50=  4289.3us (alone p50=175.8us)
+work n=75 data=copy none     mean=  1083.7us p99=  1277.9us cpu=     0.0us per-hs=  0.00us
+work n=75 data=copy memop    mean=  5029.4us p99=  5277.6us cpu=  3351.1us per-hs=  7.93us
+work n=75 data=copy kernel   mean=  5129.7us p99=  5443.4us cpu=  3342.7us per-hs=  9.38us
+work n=75 data=copy hybrid   mean=  4750.5us p99=  4960.3us cpu=  3372.3us per-hs=  3.93us
+work n=75 data=copy hostfunc mean=  6195.7us p99=  6980.7us cpu=  3494.9us per-hs= 21.56us
+work n=75 data=zc   none     mean=   390.5us p99=   392.2us cpu=     0.0us per-hs=  0.00us
+work n=75 data=zc   memop    mean=  4407.6us p99=  4485.1us cpu=  3341.6us per-hs=  9.01us
+work n=75 data=zc   kernel   mean=  3878.9us p99=  3999.7us cpu=  3332.3us per-hs=  2.08us
+work n=75 data=zc   hybrid   mean=  3977.6us p99=  4224.9us cpu=  3355.0us per-hs=  3.09us
+work n=75 data=zc   hostfunc mean=  5587.3us p99=  6262.8us cpu=  3433.1us per-hs= 23.52us
+wakeup memop    spin=   0us step=   210.2us per-hs=  3.46us
+wakeup memop    spin=   2us step=   261.6us per-hs=  3.56us
+wakeup memop    spin=   5us step=   362.6us per-hs=  4.77us
+wakeup memop    spin=  10us step=   539.7us per-hs=  7.14us
+wakeup memop    spin=  20us step=   834.5us per-hs=  9.43us
+wakeup memop    spin=  50us step=  1429.4us per-hs=  4.22us
+wakeup memop    spin= 100us step=  2656.1us per-hs=  5.32us
+wakeup memop    spin= 200us step=  5023.8us per-hs=  3.98us
+wakeup kernel   spin=   0us step=   174.7us per-hs=  1.99us
+wakeup kernel   spin=   2us step=   224.1us per-hs=  2.00us
+wakeup kernel   spin=   5us step=   297.4us per-hs=  2.05us
+wakeup kernel   spin=  10us step=   416.8us per-hs=  2.03us
+wakeup kernel   spin=  20us step=   654.5us per-hs=  1.93us
+wakeup kernel   spin=  50us step=  1379.2us per-hs=  2.13us
+wakeup kernel   spin= 100us step=  2580.4us per-hs=  2.17us
+wakeup kernel   spin= 200us step=  4978.8us per-hs=  2.11us
+wakeup hybrid   spin=   0us step=   200.3us per-hs=  3.05us
+wakeup hybrid   spin=   2us step=   248.7us per-hs=  3.03us
+wakeup hybrid   spin=   5us step=   312.7us per-hs=  2.69us
+wakeup hybrid   spin=  10us step=   445.1us per-hs=  3.21us
+wakeup hybrid   spin=  20us step=   690.6us per-hs=  3.43us
+wakeup hybrid   spin=  50us step=  1407.9us per-hs=  3.32us
+wakeup hybrid   spin= 100us step=  2606.9us per-hs=  3.28us
+wakeup hybrid   spin= 200us step=  5013.7us per-hs=  3.56us
+wakeup hostfunc spin=   0us step=   768.7us per-hs= 26.74us
+wakeup hostfunc spin=   2us step=   776.2us per-hs= 25.01us
+wakeup hostfunc spin=   5us step=   826.4us per-hs= 24.11us
+wakeup hostfunc spin=  10us step=  1012.7us per-hs= 26.84us
+wakeup hostfunc spin=  20us step=  1131.1us per-hs= 21.80us
+wakeup hostfunc spin=  50us step=  1916.5us per-hs= 24.52us
+wakeup hostfunc spin= 100us step=  3130.5us per-hs= 25.11us
+wakeup hostfunc spin= 200us step=  5505.1us per-hs= 24.03us
+done

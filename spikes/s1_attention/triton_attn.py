@@ -122,8 +122,20 @@ PINNED = {
 }
 
 
+# Per fingerprint class (overrides PINNED): consumer cards re-swept on the desktops (README "Consumer cards").
+PINNED_CLASS = {
+    ("rtx-4090", 128): {"BLOCK_N": 64, "num_warps": 8, "num_stages": 1},   # worst 1.02x (sm_8x default 64/4/1: 1.07x)
+    ("rtx-4090", 256): {"BLOCK_N": 32, "num_warps": 4, "num_stages": 3},   # 1.02x (= sm_8x default)
+    ("rtx-5080", 128): {"BLOCK_N": 32, "num_warps": 4, "num_stages": 3},   # worst 1.09x of per-shape best
+    ("rtx-5080", 256): {"BLOCK_N": 64, "num_warps": 8, "num_stages": 3},   # 1.10x
+    ("rtx-5090", 128): {"BLOCK_N": 64, "num_warps": 4, "num_stages": 3},   # 1.09x (sm_120 default 64/4/1: 1.20x)
+    ("rtx-5090", 256): {"BLOCK_N": 64, "num_warps": 4, "num_stages": 3},   # 1.08x
+}
+
+
 def default_config(d: int) -> dict:
-    return PINNED[(torch.cuda.get_device_capability()[0], d)]
+    from common import class_name
+    return PINNED_CLASS.get((class_name(), d)) or PINNED[(torch.cuda.get_device_capability()[0], d)]
 
 
 class TritonPagedAttention:

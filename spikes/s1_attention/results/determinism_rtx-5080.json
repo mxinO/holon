@@ -1,0 +1,545 @@
+{
+ "fingerprint": {
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "sm": "120",
+  "num_sms": 84,
+  "host": "rtx-5080-desktop",
+  "torch": "2.11.0+cu130",
+  "cuda": "13.0",
+  "triton": "3.6.0",
+  "flashinfer": "0.6.12",
+  "driver": "<version>"
+ },
+ "rows": [
+  {
+   "geom": "qwen3_8b",
+   "kernel": "fi_decode_cudacore",
+   "nq": 1,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "fi_decode_tc",
+   "nq": 1,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "fi_decode_tc_devmeta",
+   "nq": 1,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "triton",
+   "nq": 1,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "xqa",
+   "nq": 1,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "fi_paged_prefill",
+   "nq": 3,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "fi_paged_prefill_devmeta",
+   "nq": 3,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "triton",
+   "nq": 3,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "xqa",
+   "nq": 3,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "fi_decode_cudacore",
+   "nq": 1,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": false
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "fi_decode_tc",
+   "nq": 1,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": false
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "fi_decode_tc_devmeta",
+   "nq": 1,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": true
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "triton",
+   "nq": 1,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": false
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "xqa",
+   "nq": 1,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": false
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "fi_paged_prefill",
+   "nq": 3,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": false
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "fi_paged_prefill_devmeta",
+   "nq": 3,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": true
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "triton",
+   "nq": 3,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": false
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "xqa",
+   "nq": 3,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": false
+  },
+  {
+   "geom": "qwen3_8b",
+   "kernel": "fi_ragged_prefill",
+   "lens": [
+    4096,
+    300,
+    77
+   ],
+   "eager_run_to_run": true
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "fi_decode_tc",
+   "nq": 1,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "fi_decode_tc_devmeta",
+   "nq": 1,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "triton",
+   "nq": 1,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "xqa",
+   "nq": 1,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "fi_paged_prefill",
+   "nq": 3,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "fi_paged_prefill_devmeta",
+   "nq": 3,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "triton",
+   "nq": 3,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "xqa",
+   "nq": 3,
+   "lens": [
+    32768
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "fi_decode_tc",
+   "nq": 1,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": false
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "fi_decode_tc_devmeta",
+   "nq": 1,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": true
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "triton",
+   "nq": 1,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": false
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "xqa",
+   "nq": 1,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": false
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "fi_paged_prefill",
+   "nq": 3,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": false
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "fi_paged_prefill_devmeta",
+   "nq": 3,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": true
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "triton",
+   "nq": 3,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": false
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "xqa",
+   "nq": 3,
+   "lens": [
+    8192,
+    100,
+    3000,
+    17,
+    32768,
+    5000,
+    64,
+    1024
+   ],
+   "eager_run_to_run": true,
+   "graph_run_to_run": true,
+   "eager_vs_graph_identical": true,
+   "batch_invariant_seq0": false
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "kernel": "fi_ragged_prefill",
+   "lens": [
+    4096,
+    300,
+    77
+   ],
+   "eager_run_to_run": true
+  }
+ ]
+}

@@ -345,3 +345,217 @@ anyway.
 6. FA2 fp8 verify with split-KV is slower than bf16 on both classes (e.g. qwen3_8b 64 × 32K: 18.5 ms vs 14.6 ms
    bf16 on A5000); with group 6 on sm_86 even the no-split path is not faster than bf16.
 7. a7 GPU 6 is shared; the sm_120 run waited for the S2 spike to be idle, noise measured above.
+
+## Consumer cards (RTX 4090 / 5080 / 5090), 2026-10-06
+
+Closes open issue 1. Same scripts, same matrix, one desktop per class; the class name now comes from the GPU name
+(`common.class_name`), so the two sm_120 GeForce cards no longer collide with `rtx-pro-6000`.
+
+| | rtx-4090 | rtx-5080 | rtx-5090 |
+|---|---|---|---|
+| GPU | RTX 4090 24 GB, sm_89, 128 SMs, 72 MB L2, ~1.0 TB/s | RTX 5080 16 GB, sm_120, 84 SMs, 64 MB L2, ~0.96 TB/s | RTX 5090 32 GB, sm_120, 170 SMs, 96 MB L2, ~1.8 TB/s |
+| host | <cpu> (<cpu>, 8C/16T), 128 GB <memory>, PCIe 4.0 x16 | <cpu> (<cpu>, 8C/16T), 128 GB <memory>, PCIe 5.0 x16 | <cpu>, 128 GB <memory>, PCIe 5.0 x16 |
+| driver | <version> | <version> | <version> |
+
+Software: the desktops have a driver but no CUDA toolkit, so everything ran in one persistent container per
+desktop (public CUDA 13.0.0 devel Ubuntu 24.04 image, nvcc 13.0.48 = the dev-host toolkit) with a fresh
+uv-managed Python 3.12.12 venv holding the same wheels as the repo `.venv`: torch 2.11.0+cu130, Triton 3.6.0,
+flashinfer-python/-cubin 0.6.12, apache-tvm-ffi 0.1.9. Headless GPUs (no display attached).
+Commands: `S1_PER_CLASS_CACHE=1 S1_PY=<venv python> ./run_all.sh 0 <class> jit prebuild sweep`, pin the configs,
+then `... graph det prep bf16 bf16rep fp8 q8` (`bf16rep` = second decode/verify run → `bench_bf16_rep2_<class>.json`).
+`S1_PER_CLASS_CACHE=1` gives each class its own `out/fi_ws_<class>` / `out/triton_cache_<class>`.
+Tables: `python out/consumer_tables.py rtx-4090 rtx-5080 rtx-5090` (gitignored helper in `out/`).
+
+Noise (two full bf16 decode/verify runs, |run1/run2 − 1| over all cells): rtx-4090 median 0.1 %, p90 3.9 %,
+max 13.9 % (684 cells); rtx-5080 0.1 / 0.6 / 1.8 % (900); rtx-5090 0.2 / 0.8 / 2.9 % (900). The sweep ran while
+llama.cpp compiled on the same desktop (CPU load only; graph-timed GPU work), and the configs were re-checked by the
+full benchmark afterwards.
+
+### Triton configs re-tuned per class (`sweep_triton.py`, 36 configs × 16 shapes)
+
+Score = worst ratio to the per-shape best over the 8 decode/verify shapes of a head_dim (lower is better).
+Now pinned in `triton_attn.PINNED_CLASS` (overrides the per-arch `PINNED`):
+
+| class | hd128 chosen (worst) | hd128 old per-arch pin (worst) | hd256 chosen (worst) | hd256 old pin (worst) |
+|---|---|---|---|---|
+| rtx-4090 | `64/8/1` (1.02) | `64/4/1` (1.07) | `32/4/3` (1.02) | same |
+| rtx-5080 | `32/4/3` (1.09) | `64/4/1` (1.11) | `64/8/3` (1.10) | `64/4/2` (1.12) |
+| rtx-5090 | `64/4/3` (1.09) | `64/4/1` (**1.20**) | `64/4/3` (1.08) | `64/4/2` (1.10) |
+
+(`BLOCK_N/num_warps/num_stages`.) On the 4090 every config is within ~2 % at B ≥ 8 (memory-bound); the spread is
+at B = 1. The split heuristic needs no change: `min_tokens` 64 is best or within noise of the best (≤ 0.5 %) at every
+B ≥ 8 or long-context shape, and clearly best at B = 1 × 1K (e.g. 5080 qwen3_8b: 7.5 µs at 64, 7.8 at 128,
+31 at 1024; 4090 qwen3_8_27b nq 5: 10.7 / 13.1 / 63.6).
+
+### Decode, bf16 KV, page 16, µs per layer call
+
+| geom | B | ctx | 4090 FI tc | 4090 triton | 5080 FI tc | 5080 triton | 5080 xqa | 5090 FI tc | 5090 triton | 5090 xqa |
+|---|---|---|---|---|---|---|---|---|---|---|
+| qwen3_8b | 1 | 1K | 12.1 | 8.2 | 10.8 | 7.9 | 10.0 | 9.1 | 6.0 | 9.1 |
+| qwen3_8b | 1 | 8K | 47.5 | 43.6 | 44.0 | 41.0 | 43.8 | 26.7 | 25.4 | 27.0 |
+| qwen3_8b | 1 | 32K | 168 | 164 | 156 | 153 | 156 | 87.6 | 89.4 | 89.0 |
+| qwen3_8b | 8 | 1K | 46.8 | 43.4 | 44.0 | 41.6 | 41.1 | 26.5 | 24.0 | 25.2 |
+| qwen3_8b | 8 | 8K | 327 | 324 | 304 | 303 | 301 | 167 | 176 | 169 |
+| qwen3_8b | 8 | 32K | 1264 | 1261 | 1182 | 1187 | 1183 | 641 | 690 | 656 |
+| qwen3_8b | 64 | 1K | 329 | 326 | 314 | 301 | 307 | 168 | 164 | 166 |
+| qwen3_8b | 64 | 8K | 2511 | 2525 | 2457 | 2387 | 2375 | 1287 | 1289 | 1301 |
+| qwen3_8b | 64 | 32K | 9997 | 10049 | 9785 | 9526 | 9548 | 5145 | 5152 | 5154 |
+| qwen3_5_9b | 1 | 1K | 12.4 | 9.3 | 11.0 | 8.8 | 12.9 | 9.5 | 6.9 | 12.9 |
+| qwen3_5_9b | 1 | 32K | 170 | 167 | 159 | 156 | 160 | 91.2 | 86.0 | 94.0 |
+| qwen3_5_9b | 8 | 32K | 1264 | 1259 | 1213 | 1227 | 1190 | 649 | 707 | 657 |
+| qwen3_5_9b | 64 | 8K | 2512 | 2502 | 2525 | 2626 | 2455 | 1289 | 1392 | 1294 |
+| qwen3_5_9b | 64 | 32K | 10001 | 9975 | 9928 | 10353 | 9751 | 5140 | 5551 | 5186 |
+| qwen3_8_27b | 1 | 1K | 11.9 | 9.0 | 11.0 | 8.9 | 13.0 | 9.6 | 6.8 | 12.8 |
+| qwen3_8_27b | 1 | 8K | 48.6 | 45.5 | 47.6 | 43.0 | 44.8 | 29.6 | 25.7 | 29.8 |
+| qwen3_8_27b | 1 | 32K | 170 | 168 | 159 | 156 | 160 | 91.3 | 86.6 | 94.0 |
+| qwen3_8_27b | 8 | 8K | 329 | 326 | 307 | 313 | 302 | 170 | 174 | 168 |
+| qwen3_8_27b | 8 | 32K | 1265 | 1260 | 1209 | 1232 | 1187 | 651 | 707 | 658 |
+| qwen3_8_27b | 64 | 8K | 2514 | 2503 | 2530 | 2633 | 2452 | 1289 | 1388 | 1295 |
+| qwen3_8_27b | 64 | 32K | 10002 | 9973 | 9937 | 10389 | 9723 | 5142 | 5547 | 5185 |
+
+XQA is SM90+ only, so none on the 4090. Roofline: 64 × 32K reads 8.6 GB per layer → 0.86 TB/s (4090), 0.90 TB/s
+(5080), 1.67 TB/s (5090), i.e. 85–94 % of peak. All three classes: `fi_decode_cudacore` still rejects group 6.
+
+### Verify (nq = 3), bf16 KV, page 16, µs
+
+| geom | B | ctx | 4090 FI paged | 4090 triton | 5080 FI paged | 5080 triton | 5080 xqa | 5090 FI paged | 5090 triton | 5090 xqa |
+|---|---|---|---|---|---|---|---|---|---|---|
+| qwen3_8b | 1 | 1K | 12.1 | 8.3 | 11.0 | 8.5 | 12.3 | 9.3 | 6.1 | 10.7 |
+| qwen3_8b | 1 | 32K | 169 | 166 | 157 | 155 | 159 | 87.5 | 90.0 | 93.3 |
+| qwen3_8b | 8 | 8K | 334 | 327 | 444 | 305 | 305 | 172 | 178 | 172 |
+| qwen3_8b | 64 | 8K | 2541 | 2534 | 2951 | 2388 | 2418 | 1381 | 1292 | 1308 |
+| qwen3_8b | 64 | 32K | 10043 | 10187 | 11730 | 9528 | 9702 | 5511 | 5157 | 5202 |
+| qwen3_5_9b | 1 | 1K | 12.5 | 9.5 | 11.0 | 9.1 | 19.1 | 9.6 | 7.1 | 17.6 |
+| qwen3_5_9b | 64 | 32K | 10016 | 9980 | 10155 | 10380 | 10040 | 5115 | 5560 | 5204 |
+| qwen3_8_27b | 1 | 1K | 19.2 | 10.1 | 18.7 | 10.3 | 19.1 | 13.6 | 7.9 | 17.8 |
+| qwen3_8_27b | 1 | 32K | 173 | 174 | 158 | 160 | 170 | 88.8 | 87.9 | 102 |
+| qwen3_8_27b | 8 | 8K | 332 | 337 | 309 | 326 | 310 | 172 | 180 | 173 |
+| qwen3_8_27b | 64 | 8K | 2522 | 2512 | 2582 | 2713 | 2551 | 1286 | 1423 | 1303 |
+| qwen3_8_27b | 64 | 32K | 10009 | 9991 | 10157 | 10686 | 10050 | 5114 | 5655 | 5206 |
+
+nq = 5 has the same shape (`out/consumer_tables.md`); e.g. qwen3_8b 64 × 32K: 4090 10073 / 10049, 5080 11847 /
+10426 / xqa 9714, 5090 5506 / 5178 / 5161 (FI paged / triton).
+
+**Aggregate over all 216 decode + verify cells (time / best host-plan FlashInfer path of the same cell; "≥ 0.9×"
+= cells where Triton reaches at least 0.9× FlashInfer speed):**
+
+| kernel | rtx-4090 median [min, max] | rtx-5080 | rtx-5090 |
+|---|---|---|---|
+| `triton` (run 1) | 0.99 [0.51, 1.03], ≥ 0.9× in 216/216 | 1.00 [0.54, 1.11], 215/216 | 1.01 [0.57, 1.12], 212/216 |
+| `triton` (run 2) | 0.99 [0.52, 1.03], 216/216 | 0.99 [0.54, 1.10], 216/216 | 1.01 [0.57, 1.12], 209/216 |
+| `triton` decode only / verify only | 0.99 / 0.99 | 1.00 / 0.99 | 1.01 / 1.00 |
+| `xqa` | — | 1.00 [0.66, 1.73] | 1.01 [0.90, 1.85] |
+| `fi_decode_tc_devmeta` (no split) | 1.00 [0.94, 3.98] | 1.02 [0.90, 3.95] | 1.03 [0.94, 6.55] |
+| `fi_paged_prefill_devmeta` (no split) | 1.00 [0.87, 12.1] | 1.00 [0.65, 12.3] | 1.06 [0.85, 18.0] |
+
+The Triton kernel stays at parity on every class. Its weak spot is the same as on the RTX PRO 6000: head_dim 256
+at B ≥ 8 on the big Blackwell part (5090: up to 1.12× FlashInfer's time, e.g. 8 × 32K 707 vs 649 µs; 64 × 8K hd256
+1388–1423 vs 1286–1289); on the 5080 the worst cell is 1.11× (hd256, 64 × 8K). It is 1.3–1.9× faster at B = 1 and
+short context, and on the 5080 FlashInfer's split-KV paged-prefill verify path is slow for group 4 at B ≥ 8
+(qwen3_8b 64 × 32K: 11730 µs vs 9528 Triton), the same pattern as before.
+
+### Graphs, determinism, host plan, JIT
+
+- `graph_test.py`: PASS for every path on all three classes (22/26/26 checks: host plan, upper-bound plan,
+  device-length Triton/devmeta/XQA). The `use_cuda_graph=True` + `disable_split_kv=True` hazard reproduces on all
+  three: padded batch 32 (4090) / 21 (5080) / 42 (5090) CTAs for B = 1; poisoned staging → illegal memory access.
+- `determinism.py`: 28 (4090) / 36 (5080, 5090) path × case rows, all eager run-to-run, graph run-to-run and
+  eager == graph byte-identical; `batch_invariant_seq0` false for every split path, as before.
+- `prep_cost.py` (device CSR rewrite): 1.2–2.6 µs per step on all three.
+- Host `plan()` from pinned CSR (ctx 8K), µs — the desktop CPU matters:
+
+| B | 4090 (<cpu>) tc / verify / CUDA-core | 5080 (<cpu>) | 5090 (<cpu>) |
+|---|---|---|---|
+| 1 | 81 / 107 / 78 | 39 / 52–68 / 54 | 39 / 52 / 39 |
+| 8 | 105 / 152 / 79 | 57–60 / 76 / 39 | 50–52 / 71–74 / 39 |
+| 64 | 253 / 439 / 90 | 123 / 209–235 / 44 | 126–128 / 214–216 / 45 |
+
+- JIT, cold compile per module (16 threads; `jit_time.py`), warm load 0.03–0.5 s:
+
+| module | rtx-4090 | rtx-5080 | rtx-5090 |
+|---|---|---|---|
+| CUDA-core decode bf16 / fp8 (hd128) | 11.0 / 10.2 s | 7.8 / 7.2 s | 7.6 / 7.0 s |
+| FA2 prefill bf16 hd128 / hd256 | 25.2 / 26.0 s | 15.4 / 15.7 s | 16.0 / 15.6 s |
+| FA2 prefill fp8 hd128 / hd256 | 28.6 / 61.0 s | 15.8 / 17.2 s | 15.9 / 16.7 s |
+| XQA (each) | — | 4.0–4.1 s | 3.8–3.9 s |
+| `prebuild.py` (all specs, one ninja run) | 8 modules 122.8 s | 56 modules 101.1 s | 56 modules 96.7 s |
+
+  sm_89 has native fp8 conversion, so the fp8 CUDA-core decode no longer costs 3.6× the bf16 compile as on sm_86.
+  The 5080 and 5090 cache directories are both `120f`: one sm_120 pre-build serves both GeForce cards.
+
+### KV layouts
+
+fp8-e4m3 KV, µs, page 16:
+
+| geom | B | ctx | 4090 FI cudacore | 4090 FI tc | 5080 FI tc | 5080 xqa | 5090 FI tc | 5090 xqa |
+|---|---|---|---|---|---|---|---|---|
+| qwen3_8b | 1 | 1K | 18.8 | 11.3 | 9.8 | 8.7 | 8.3 | 8.3 |
+| qwen3_8b | 1 | 32K | 87.7 | 89.3 | 85.5 | 81.1 | 49.6 | 50.2 |
+| qwen3_8b | 8 | 8K | 169 | 170 | 162 | 156 | 89.2 | 87.3 |
+| qwen3_8b | 64 | 32K | 5582 | 5556 | 5121 | 4977 | 2600 | 2729 |
+| qwen3_8_27b | 1 | 32K | — | 93.4 | 88.1 | 84.7 | 53.0 | 54.4 |
+| qwen3_8_27b | 64 | 32K | — | 5617 | 5460 | 5198 | 2650 | 2598 |
+
+fp8 verify (nq = 3), µs:
+
+| geom | B | ctx | 4090 FI paged | 4090 FI paged devmeta | 5080 FI paged | 5080 devmeta | 5080 xqa | 5090 FI paged | 5090 devmeta | 5090 xqa |
+|---|---|---|---|---|---|---|---|---|---|---|
+| qwen3_8b | 1 | 32K | 89.3 | 425 | 85.9 | 367 | 84.7 | 49.7 | 344 | 53.0 |
+| qwen3_8b | 8 | 8K | 261 | 193 | 494 | 162 | 159 | 154 | 105 | 89.8 |
+| qwen3_8b | 64 | 32K | 7806 | 5045 | 13072 | 5105 | 5183 | 5558 | 2599 | 2792 |
+| qwen3_8_27b | 1 | 32K | 93.2 | 2758 | 107 | 2115 | 91.4 | 53.4 | 1895 | 60.7 |
+| qwen3_8_27b | 8 | 8K | 182 | 695 | 212 | 535 | 162 | 108 | 482 | 91.5 |
+| qwen3_8_27b | 64 | 32K | 5132 | 5110 | 7827 | 7804 | 5636 | 3340 | 3546 | 2622 |
+
+fp8 / bf16 time, median over cells: FI tc decode 0.56 / 0.54 / 0.54 (4090/5080/5090); FI CUDA-core decode
+0.55 / 0.55 / 0.56 (sm_89 converts fp8 in hardware: no 4–5× penalty as on sm_86); FI paged verify (split)
+0.61 / 0.80 / 0.68 with max 1.27 / 1.12 / 1.23; XQA 0.55 / 0.55 (5080/5090).
+
+q8_0 KV in the Triton kernel (bf16-tuned configs, not re-tuned for q8_0):
+
+| class | geom | B | ctx | nq | Triton bf16 µs | Triton q8_0 µs | FI fp8 µs | q8_0 max-abs |
+|---|---|---|---|---|---|---|---|---|
+| rtx-4090 | qwen3_8b | 1 | 32K | 1 | 165 | 93.7 | 90.6 | 0.0001 |
+| rtx-4090 | qwen3_8b | 64 | 8K | 1 | 2776 | 1357 | 1280 | — |
+| rtx-4090 | qwen3_8b | 64 | 8K | 3 | 2537 | 1362 | 1958 | — |
+| rtx-4090 | qwen3_8_27b | 8 | 8K | 3 | 356 | 198 | 186 | 0.0003 |
+| rtx-4090 | qwen3_8_27b | 64 | 8K | 3 | 2513 | 1422 | 1304 | — |
+| rtx-5080 | qwen3_8b | 1 | 32K | 1 | 154 | 111 | 86.6 | 0.0001 |
+| rtx-5080 | qwen3_8b | 64 | 8K | 1 | 2388 | 1443 | 1284 | — |
+| rtx-5080 | qwen3_8b | 64 | 8K | 3 | 2390 | 1457 | 3234 | — |
+| rtx-5080 | qwen3_8_27b | 8 | 8K | 3 | 327 | 295 | 214 | 0.0004 |
+| rtx-5080 | qwen3_8_27b | 64 | 8K | 3 | 2695 | 2277 | 1961 | — |
+| rtx-5090 | qwen3_8b | 1 | 32K | 1 | 89.2 | 57.8 | 49.8 | 0.0001 |
+| rtx-5090 | qwen3_8b | 64 | 8K | 1 | 1298 | 982 | 660 | — |
+| rtx-5090 | qwen3_8b | 64 | 8K | 3 | 1301 | 990 | 1394 | — |
+| rtx-5090 | qwen3_8_27b | 8 | 8K | 3 | 180 | 156 | 107 | 0.0004 |
+| rtx-5090 | qwen3_8_27b | 64 | 8K | 3 | 1426 | 1235 | 834 | — |
+
+On the 4090 q8_0 reaches the memory roofline (0.49–0.57× of bf16 time at ≥ 32K tokens, within 3–9 % of FlashInfer
+fp8, faster than FI fp8 split verify). On sm_120 it is ALU-bound at 0.60–0.90× of bf16 (≈ 1.0× at 1 × 1K), i.e.
+1.1–1.7× FlashInfer fp8's time — the q8_0 tuning gap (open issue 5) matters on Blackwell GeForce, not on Ada.
+
+Prefill (FA2 paged, causal, page 16), attention TFLOPS at 1 × 32K for qwen3_8b / qwen3_8_27b: 4090 159 / 156,
+5080 107 / 105, 5090 345 / 274 (5080 1 × 1K: 139 µs; 5090: 68 µs). That is each card's bf16 tensor ceiling: a plain
+8192³ bf16 `torch.matmul` reaches 161.9 (4090), 116.6 (5080) and 309.0 TFLOPS (5090) (S2 "Consumer cards"), so the
+5080's prefill is 3× slower than the 5090's, not 2× as the SM count would suggest.
+
+Correctness (bf16 and fp8, ragged lengths, vs fp32 reference): worst max-abs 0.0100 / 0.0104 / 0.0106 bf16 and
+≤ 0.0096 fp8 on 4090 / 5080 / 5090; no NaN. The only failures are the expected `fi_decode_cudacore` group-6
+rejections.
+
+### Decision (consumer classes)
+
+| | **rtx-4090 (sm_89)** | **rtx-5080 (sm_120)** | **rtx-5090 (sm_120)** |
+|---|---|---|---|
+| prefill | FlashInfer FA2 paged | same | same |
+| non-spec decode | FlashInfer FA2 tc decode (host plan) — or Triton, which is at parity (0.99×) and needs no plan | same (Triton 1.00×) | same (Triton 1.01×; FI tc better for hd256 at B ≥ 8 by ≤ 10 %) |
+| spec at depth 1 | **Triton** (0.51–1.03×, ≥ 0.9× in all 216 cells), config `64/8/1` hd128, `32/4/3` hd256 | **Triton** (0.54–1.11×), `32/4/3` / `64/8/3` | **Triton** (0.57–1.12×), `64/4/3` / `64/4/3` |
+| fp8 KV | FA2 tc decode (0.56×); verify: FA2 split path 0.61× (sm_89 is fine, unlike sm_86) | FA2 tc decode; verify → **XQA** (FA2 split path 2.5–3.1× XQA's time for group 4 at B ≥ 8) | FA2 tc decode; verify → XQA |
+| quantized KV for spec | **Triton q8_0** ≈ FI fp8 speed | Triton q8_0 works but needs q8_0 tuning (or native fp8 in Triton) to match XQA | same |
+| fallback, spec depth 1 | FI upper-bound plan + device CSR | XQA | XQA |
+
+The ≥ 0.9× bar holds at the median on every class (0.99–1.01× FlashInfer time); the few cells over 1.11× are
+5090 hd256 at B ≥ 8 (max 1.12×). Nothing in these numbers changes the S1 design: one Triton kernel for spec
+verify on every class, FlashInfer for prefill and plan-based decode, XQA on sm_120 for fp8 verify; the pinned
+configs are a per-class tunable as planned.

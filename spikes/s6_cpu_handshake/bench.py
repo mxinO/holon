@@ -32,8 +32,9 @@ def load_ext():
     os.environ.setdefault("TORCH_CUDA_ARCH_LIST", f"{major}.{minor}")
     from torch.utils.cpp_extension import load
 
-    build = HERE / "build"
-    build.mkdir(exist_ok=True)
+    # S6_BUILD_DIR: one build per host class (-march=native differs, e.g. <cpu> vs <cpu> desktops)
+    build = HERE / os.environ.get("S6_BUILD_DIR", "build")
+    build.mkdir(parents=True, exist_ok=True)
     return load(
         "s6_handshake",
         [str(HERE / "csrc" / "worker.cpp"), str(HERE / "csrc" / "kernels.cu")],
@@ -72,6 +73,11 @@ def pick_cores(n: int) -> list[int]:
     return cores[:n]
 
 
+def sibling_key(c: int) -> str:
+    sib = Path(f"/sys/devices/system/cpu/cpu{c}/topology/thread_siblings_list")
+    return sib.read_text().strip() if sib.exists() else str(c)
+
+
 def sh(cmd: str) -> str:
     try:
         return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10).stdout.strip()
@@ -97,6 +103,8 @@ def host_facts(ext, cores) -> dict:
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
         "memop_caps": ext.memop_caps(),
         "kernel": platform.release(),
+        "kernel_exec_timeout": kernel_exec_timeout(),
+        "display_active": sh("nvidia-smi -i $CUDA_VISIBLE_DEVICES --query-gpu=display_active,display_mode,power.limit,pcie.link.gen.max,pcie.link.width.max --format=csv,noheader"),
     }
 
 
@@ -567,6 +575,175 @@ def exp_quiesce(ext, cores, steps) -> dict:
     return out
 
 
+# ---------------------------------------------------------------------------------------------- desktop extras
+# Added for the consumer desktops (README "Consumer cards"): Python-loop starvation, PCIe latency to
+# mapped pinned memory, power/clocks with resident spin waits, kernel-exec-timeout (display watchdog) attribute.
+
+
+def py_work(n: int = 3000) -> float:
+    """Fixed pure-Python stand-in for the StepLoop's per-step scheduling work; returns its wall time in us."""
+    t0 = time.perf_counter()
+    d = {}
+    for i in range(n):
+        d[i & 255] = d.get(i & 255, 0) + i * 3 % 7
+    sorted(d.values())
+    return (time.perf_counter() - t0) * 1e6
+
+
+def exp_pyloop(ext, cores, steps) -> dict:
+    """Does a hot worker (coordinator + pool spinning) starve the Python step loop? StepLoop-like: per step the
+    main thread does py_work(), replays the N=75 graph, keeps <= 2 replays in flight. Compared with the same loop
+    on a GPU-only graph (worker idle/dozing) and with py_work alone (no GPU)."""
+    out = {"main_thread_cpus": sorted(os.sched_getaffinity(0)), "worker_cores": cores}
+    idle = [py_work() for _ in range(steps)]
+    out["py_work_alone_us"] = summarize(idle)
+    rig = Rig(ext, 75, cores)
+    for mode in ("none", "kernel", "memop"):
+        g = rig.capture(75, mode, data="zc")
+        torch.cuda.synchronize()
+        work, step, done = [], [], []
+        t_prev = time.perf_counter()
+        with Watchdog(600, f"pyloop {mode}"):
+            for i in range(steps):
+                work.append(py_work())
+                if len(done) >= 2:
+                    done.pop(0).synchronize()
+                g.replay()
+                done.append(torch.cuda.Event())
+                done[-1].record()
+                t = time.perf_counter()
+                step.append((t - t_prev) * 1e6)
+                t_prev = t
+            torch.cuda.synchronize()
+        out[mode] = {"py_work_us": summarize(work), "step_us": summarize(step[10:])}
+        print(f"pyloop {mode:7s} py_work p50={out[mode]['py_work_us']['p50']:7.1f}us "
+              f"p99={out[mode]['py_work_us']['p99']:7.1f}us step p50={out[mode]['step_us']['p50']:8.1f}us "
+              f"(alone p50={out['py_work_alone_us']['p50']:.1f}us)", flush=True)
+        del g
+    rig.close()
+    return out
+
+
+def exp_pcie(ext, cores, reps) -> dict:
+    """GPU access latency to mapped pinned memory: a graph of R tiny kernels that each read (or write) 768 fp32
+    over PCIe vs the same kernels on device memory; the per-kernel difference ~ one PCIe round trip (all loads of
+    a kernel are in flight together). Also the CPU->GPU->CPU flag round trip is the handshake itself (latency)."""
+    R = 200
+    host = torch.zeros(R, ROWS).pin_memory()
+    hv = ext.device_view(host)
+    dev = torch.zeros(R, ROWS, device="cuda")
+    dst = torch.zeros(R, ROWS, device="cuda")
+    out = {}
+    for name, src, to in (("read_device", dev, dst), ("read_mapped", hv, dst),
+                          ("write_device", dst, dev), ("write_mapped", dst, hv)):
+        g = torch.cuda.CUDAGraph()
+        for i in range(R):  # warm-up
+            torch.mul(src[i], 1.0, out=to[i])
+        torch.cuda.synchronize()
+        with torch.cuda.graph(g):
+            for i in range(R):
+                torch.mul(src[i], 1.0, out=to[i])
+        t = time_replays(ext, g, reps)
+        out[name] = {"us_per_kernel_p50": t["p50"] / R, "step_us": t}
+        del g
+    out["read_extra_us"] = out["read_mapped"]["us_per_kernel_p50"] - out["read_device"]["us_per_kernel_p50"]
+    out["write_extra_us"] = out["write_mapped"]["us_per_kernel_p50"] - out["write_device"]["us_per_kernel_p50"]
+    print("pcie", {k: (round(v["us_per_kernel_p50"], 2) if isinstance(v, dict) else round(v, 2))
+                   for k, v in out.items()}, flush=True)
+    return out
+
+
+class Nvml:
+    """Background NVML sampler (power W, SM clock MHz, GPU util %, temperature C) at ~100 ms."""
+
+    def __init__(self):
+        import pynvml
+        pynvml.nvmlInit()
+        self.nv = pynvml
+        idx = int(os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0])
+        self.h = pynvml.nvmlDeviceGetHandleByIndex(idx)
+        self.rows, self.on = [], False
+
+    def sample(self):
+        nv, h = self.nv, self.h
+        return (nv.nvmlDeviceGetPowerUsage(h) / 1e3, nv.nvmlDeviceGetClockInfo(h, nv.NVML_CLOCK_SM),
+                nv.nvmlDeviceGetUtilizationRates(h).gpu, nv.nvmlDeviceGetTemperature(h, nv.NVML_TEMPERATURE_GPU))
+
+    def _loop(self):
+        while self.on:
+            self.rows.append(self.sample())
+            time.sleep(0.1)
+
+    def __enter__(self):
+        self.rows, self.on = [], True
+        self.t = threading.Thread(target=self._loop, daemon=True)
+        self.t.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.on = False
+        self.t.join()
+
+    def stats(self, skip: int = 10) -> dict:
+        rows = self.rows[skip:] or self.rows
+        cols = list(zip(*rows))
+        return {k: {"mean": statistics.fmean(c), "max": max(c)} for k, c in
+                zip(("power_w", "sm_mhz", "util_pct", "temp_c"), cols)} | {"samples": len(rows)}
+
+
+def exp_power(ext, cores, seconds) -> dict:
+    """GPU power/clocks while graphs mostly *wait* for the CPU: N=24, the CPU task is a 200 us spin per layer, so
+    the GPU sits in a wait ~95 % of the time (memop: front-end, no SM; kernel/hybrid: a resident 1-thread spin
+    kernel). Plus one 3 s park on a single stalled handshake per mode, and the idle GPU as a reference."""
+    nv = Nvml()
+    out = {}
+    time.sleep(2)
+    with nv:
+        time.sleep(seconds)
+    out["idle"] = nv.stats()
+    rig = Rig(ext, 24, cores)
+    rig.worker.set_compute(False)
+    for mode in ("memop", "kernel", "hybrid"):
+        g = rig.capture(24, mode)
+        rig.worker.set_spin(200)
+        n = 0
+        with Watchdog(seconds * 4 + 60, f"power {mode}"), nv:
+            t0 = time.perf_counter()
+            while time.perf_counter() - t0 < seconds:
+                for _ in range(20):
+                    g.replay()
+                n += 20
+                torch.cuda.synchronize()
+            dt = time.perf_counter() - t0
+        rig.worker.set_spin(0)
+        out[f"waiting_{mode}"] = nv.stats() | {"step_us": dt / n * 1e6}
+        rig.worker.set_delay(3_000_000, 10**12)  # next task stalls 3 s: the graph is parked on one wait
+        with Watchdog(60, f"park {mode}"), nv:
+            g.replay()
+            torch.cuda.synchronize()
+        rig.worker.set_delay(0, 0)
+        out[f"parked3s_{mode}"] = nv.stats(skip=5)
+        print("power", mode, {k: out[k] for k in (f"waiting_{mode}", f"parked3s_{mode}")}, flush=True)
+        del g
+    print("power idle", out["idle"], flush=True)
+    rig.close()
+    return out
+
+
+def kernel_exec_timeout() -> int | None:
+    """CU_DEVICE_ATTRIBUTE_KERNEL_EXEC_TIMEOUT (1 = display watchdog active on this GPU)."""
+    import ctypes
+    try:
+        cu = ctypes.CDLL("libcuda.so.1")
+        dev, v = ctypes.c_int(), ctypes.c_int()
+        cu.cuInit(0)
+        cu.cuDeviceGet(ctypes.byref(dev), 0)
+        cu.cuDeviceGetAttribute(ctypes.byref(v), 17, dev)
+        return v.value
+    except OSError:
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", type=Path, default=None)
@@ -575,6 +752,7 @@ def main():
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--only", type=str, default=None, help="comma list of experiments")
     ap.add_argument("--build-only", action="store_true")
+    ap.add_argument("--pin-main", action="store_true", help="pin the Python thread to cores free of worker threads")
     args = ap.parse_args()
     assert os.environ.get("CUDA_VISIBLE_DEVICES"), "pin the GPU explicitly with CUDA_VISIBLE_DEVICES"
     torch.cuda.init()
@@ -586,7 +764,11 @@ def main():
     sweep = parse_cpus(args.cores) if args.cores else pick_cores(16)
     cores = sweep[: args.threads]
     torch.set_num_threads(1)
-    os.sched_setaffinity(0, [c for c in os.sched_getaffinity(0) if c not in cores] or os.sched_getaffinity(0))
+    others = [c for c in os.sched_getaffinity(0) if c not in cores]
+    if args.pin_main:  # main thread only on physical cores without a worker thread (not on a worker's SMT sibling)
+        busy = {sibling_key(c) for c in cores}
+        others = [c for c in others if sibling_key(c) not in busy] or others
+    os.sched_setaffinity(0, others or os.sched_getaffinity(0))
     reps = 200 if args.quick else 1000
     res = {"env": host_facts(ext, cores), "args": vars(args) | {"out": str(args.out)}}
     print(json.dumps(res["env"], indent=1), flush=True)
@@ -599,6 +781,9 @@ def main():
         "overlap": lambda: exp_overlap(ext, cores, reps),
         "robust": lambda: exp_robust(ext, cores, 2000 if args.quick else 20000),
         "quiesce": lambda: exp_quiesce(ext, cores, 300 if args.quick else 3000),
+        "pyloop": lambda: exp_pyloop(ext, cores, 500 if args.quick else 3000),
+        "pcie": lambda: exp_pcie(ext, cores, reps),
+        "power": lambda: exp_power(ext, cores, 3 if args.quick else 10),
     }
     only = args.only.split(",") if args.only else list(exps)
     for name in only:

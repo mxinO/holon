@@ -49,8 +49,14 @@ def fingerprint() -> dict:
 
 
 def class_name() -> str:
+    """Fingerprint class of GPU 0, by product name (5080/5090/PRO 6000 all report sm_120)."""
+    name = torch.cuda.get_device_properties(0).name
+    for key, cls in (("A5000", "a5000"), ("RTX PRO 6000", "rtx-pro-6000"), ("RTX 4090", "rtx-4090"),
+                     ("RTX 5080", "rtx-5080"), ("RTX 5090", "rtx-5090")):
+        if key in name:
+            return cls
     major, minor = torch.cuda.get_device_capability(0)
-    return {(8, 6): "a5000", (12, 0): "rtx-pro-6000"}.get((major, minor), f"sm{major}{minor}")
+    return f"sm{major}{minor}"
 
 
 def save(name: str, payload: dict) -> Path:

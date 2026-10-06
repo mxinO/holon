@@ -1,15 +1,17 @@
 #!/bin/sh
 # Spike S1 end to end on one GPU.  Usage: run_all.sh <gpu index> <log suffix> [step ...]
 #   A5000 host:  spikes/s1_attention/run_all.sh 0 a5000
-#   the Blackwell workstation:   S1_WAIT_FOR_IDLE=s2_gguf spikes/s1_attention/run_all.sh 6 sm120
+#   shared host: S1_WAIT_FOR_IDLE=s2_gguf spikes/s1_attention/run_all.sh 6 sm120
 # Results: results/*_<class>.json; logs: out/*_<suffix>.log.
 set -u
 cd "$(dirname "$0")"
-export CUDA_VISIBLE_DEVICES=$1 FLASHINFER_WORKSPACE_BASE=$PWD/out/fi_ws TRITON_CACHE_DIR=$PWD/out/triton_cache
-export PATH="$(python3 -c 'import sys; print(sys.base_prefix)')/bin:$PATH"          # ninja for the FlashInfer JIT
 suffix=$2
+# S1_PER_CLASS_CACHE=1: one JIT/Triton cache per class, so hosts sharing this directory do not race.
+if [ -n "${S1_PER_CLASS_CACHE:-}" ]; then fi_ws=$PWD/out/fi_ws_$suffix tri=$PWD/out/triton_cache_$suffix; else fi_ws=$PWD/out/fi_ws tri=$PWD/out/triton_cache; fi
+export CUDA_VISIBLE_DEVICES=$1 FLASHINFER_WORKSPACE_BASE=$fi_ws TRITON_CACHE_DIR=$tri
+# ninja must be on PATH for the FlashInfer JIT; S1_PY overrides the interpreter
+PY=${S1_PY:-../../.venv/bin/python}
 shift 2
-PY=../../.venv/bin/python
 
 run() {   # run <log name> <script> [args]
     if [ -n "${S1_WAIT_FOR_IDLE:-}" ]; then          # shared GPU: wait while another job benchmarks on it
@@ -32,6 +34,7 @@ for s in $steps; do
         det) run det determinism.py ;;
         prep) run prep prep_cost.py ;;
         bf16) run bench_bf16 bench.py --kv bf16 ;;
+        bf16rep) run bench_bf16_rep2 bench.py --kv bf16 --modes decode verify --tag _rep2 ;;
         fp8) run bench_fp8 bench.py --kv fp8 --modes decode verify ;;
         q8) run bench_q8 bench_q8.py ;;
     esac

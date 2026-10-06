@@ -1,0 +1,576 @@
+{
+ "device": "NVIDIA GeForce RTX 5080",
+ "all_ok": true,
+ "types": {
+  "Q8_0": {
+   "mmvq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   }
+  },
+  "Q3_K": {
+   "mmvq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   }
+  },
+  "Q4_K": {
+   "mmvq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   }
+  },
+  "Q5_K": {
+   "mmvq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   }
+  },
+  "Q6_K": {
+   "mmvq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_mmq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   }
+  },
+  "IQ4_XS": {
+   "mmvq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   }
+  },
+  "IQ3_XXS": {
+   "mmvq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   }
+  },
+  "IQ3_S": {
+   "mmvq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   }
+  },
+  "IQ2_S": {
+   "mmvq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   }
+  },
+  "IQ2_XS": {
+   "mmvq_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n1": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n8": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "mmvq_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "dequant_gemm_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   },
+   "moe_vec_n32": {
+    "graph_eq_eager": true,
+    "replays_identical": true,
+    "new_input_eq_eager": true
+   }
+  }
+ }
+}

@@ -1,6 +1,6 @@
 """Join llama.cpp and our per-kernel numbers -> results/compare_sm*.json + markdown tables on stdout.
 
-usage: python scripts/report.py <sm>
+usage: python scripts/report.py <sm | tag>   (tag e.g. rtx-5080 -> results/*_rtx-5080.*)
 Ratios are llama_us / ours_us (>= 1: we are faster; the M0.1/M0.2 bar is >= 0.8).
 """
 import json
@@ -23,7 +23,7 @@ LAYERS = {
 
 def load_llama(sm: str) -> dict:
     out = {}
-    for line in (HERE / "results" / f"llamacpp_ops_sm{sm}.sql").read_text().splitlines():
+    for line in (HERE / "results" / f"llamacpp_ops_{sm}.sql").read_text().splitlines():
         if not line.startswith("INSERT"):
             continue
         vals = re.findall(r"'([^']*)'", line.split("VALUES", 1)[1])
@@ -40,9 +40,9 @@ def load_llama(sm: str) -> dict:
 
 
 def main() -> None:
-    sm = sys.argv[1]
+    sm = sys.argv[1] if not sys.argv[1].isdigit() else "sm" + sys.argv[1]   # file tag
     llama = load_llama(sm)
-    ours = json.loads((HERE / "results" / f"ours_ops_sm{sm}.json").read_text())
+    ours = json.loads((HERE / "results" / f"ours_ops_{sm}.json").read_text())
     paths = defaultdict(dict)
     for r in ours["rows"]:
         paths[(r["type"], r["kind"], r["m"], r["k"], r["n"])][r["path"]] = r["us"]
@@ -82,9 +82,9 @@ def main() -> None:
                     per_path[f"{g}|{t}|{n}|{pth}"] = {"llama_us": l_us, "ours_us": o_us, "ratio": l_us / o_us}
 
     out = {"device": ours["device"], "cases": cases, "layer": layer, "per_path": per_path}
-    (HERE / "results" / f"compare_sm{sm}.json").write_text(json.dumps(out, indent=1))
+    (HERE / "results" / f"compare_{sm}.json").write_text(json.dumps(out, indent=1))
 
-    print(f"### Per-layer linear time, sm_{sm} ({ours['device']}): llama.cpp us / ours (best path) us = ratio\n")
+    print(f"### Per-layer linear time, {sm} ({ours['device']}): llama.cpp us / ours (best path) us = ratio\n")
     for model in LAYERS:
         print(f"{model} | " + " | ".join(f"n={n}" for n in NS))
         print("---|" + "---|" * len(NS))
@@ -96,7 +96,7 @@ def main() -> None:
             print(f"{t} | " + " | ".join(cells))
         print()
 
-    print(f"### Per path, sm_{sm}: ratio llama.cpp / ours (>= 0.8 meets the bar)\n")
+    print(f"### Per path, {sm}: ratio llama.cpp / ours (>= 0.8 meets the bar)\n")
     path_names = ["mmvq", "mmq", "dequant_gemm", "moe_vec", "moe_mmq"]
     for g in groups:
         print(f"{g} | path | " + " | ".join(f"n={n}" for n in NS))
@@ -108,7 +108,7 @@ def main() -> None:
                     print(f"{t} | {pth} | " + " | ".join(f"{c['ratio']:.2f}" if c else "-" for c in cells))
         print()
 
-    print(f"### Per-op detail, sm_{sm}: llama.cpp us | ours us per path (ratio llama/ours)\n")
+    print(f"### Per-op detail, {sm}: llama.cpp us | ours us per path (ratio llama/ours)\n")
     print("type | op (m x k) | n | llama.cpp | mmvq | mmq | dequant+GEMM | moe_vec | moe_mmq")
     print("---|---|---|---|---|---|---|---|---")
     for c in cases:

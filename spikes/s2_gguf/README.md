@@ -331,3 +331,97 @@ Risks:
 - The IQ3_S fix should be reported upstream to SGLang.
 - Still untested: IQ1_S/IQ1_M/IQ2_XXS/IQ4_NL/Q2_K/Q5_0/1 (not present in the S2 files), sm_89, and fp16
   activations (compiled, not exercised).
+
+## Consumer cards (RTX 4090 / 5080 / 5090), 2026-10-06
+
+Closes the "consumer evidence" open issue. Same pinned commits, same scripts, one desktop per class:
+
+| class | GPU | host | driver |
+|---|---|---|---|
+| rtx-4090 | RTX 4090 24 GB, sm_89, 128 SMs, 72 MB L2 | <cpu>, 128 GB <memory>, PCIe 4.0 x16 | <version> |
+| rtx-5080 | RTX 5080 16 GB, sm_120, 84 SMs, 64 MB L2 | <cpu>, 128 GB <memory>, PCIe 5.0 x16 | <version> |
+| rtx-5090 | RTX 5090 32 GB, sm_120, 170 SMs, 96 MB L2 | <cpu>, 128 GB <memory>, PCIe 5.0 x16 | <version> |
+
+Toolchain: a persistent CUDA 13.0.0 devel container (nvcc 13.0.48, g++ 13, cmake/ninja from pip) per desktop and
+a uv venv with torch 2.11.0+cu130 and gguf-py 0.19.0, i.e. the same versions as above. Both our extension and
+llama.cpp (`51ce9c11`) were built **on each desktop** (llama.cpp `CMAKE_CUDA_ARCHITECTURES=89` resp. `120`).
+
+New knob: `S2_TAG=<class>` names the build directories (`out/ext-<tag>`, `out/llama-<tag>`) and every result file
+(`results/*_<tag>.*`), so the two sm_120 cards do not overwrite each other or the RTX PRO 6000's `sm120` files;
+`python scripts/report.py <tag>` accepts a tag as well as an SM. Commands per desktop:
+`S2_TAG=<class> S2_JOBS=14 scripts/build_llamacpp.sh <sm>`, then
+`S2_TAG=<class> S2_PY=<venv python> CUDA_VISIBLE_DEVICES=0 scripts/run_all_sm.sh <sm>` and `scripts/report.py <class>`.
+
+**Correctness and graphs:** all 10 types pass on all three classes (`results/correctness_rtx-*.json`, NMSE budget
+5e-4), and `graph_check.py` reports `all_ok = true` on all three (`results/graph_rtx-*.json`).
+
+### End-to-end llama.cpp baselines (llama-bench `-p 512 -n 128 -ngl 99 -fa on -r 5`)
+
+Two independent llama-bench runs per class (`results/llama_bench_*_<class>.json`, `..._<class>_rep2.json`), t/s,
+mean ± sd over the 5 repetitions. The pp512 sd is inflated by the first repetition, which is 8–25 % slow in every
+run (warm-up); the median of repetitions 2–5 is given in brackets. Run 1 vs run 2 agree within 1 %.
+
+| model (size) | class | pp512 run 1 | pp512 run 2 | tg128 run 1 | tg128 run 2 |
+|---|---|---|---|---|---|
+| Qwen3-8B Q4_K_M (4.7 GiB) | rtx-4090 | 11906 ± 1093 [12401] | 11962 ± 1100 [12457] | 146.9 ± 0.2 | 147.0 ± 0.2 |
+| | rtx-5080 | 7975 ± 327 [8120] | 7982 ± 355 [8140] | 159.0 ± 0.2 | 159.0 ± 0.2 |
+| | rtx-5090 | 13562 ± 910 [13952] | 13663 ± 937 [14061] | 253.7 ± 0.3 | 253.9 ± 0.3 |
+| Qwen3-8B UD-IQ3_XXS (3.2 GiB) | rtx-4090 | 11598 ± 1018 [12050] | 11610 ± 1041 [12073] | 199.9 ± 0.4 | 200.3 ± 0.4 |
+| | rtx-5080 | 8051 ± 349 [8202] | 8056 ± 357 [8211] | 211.6 ± 0.1 | 211.9 ± 0.3 |
+| | rtx-5090 | 13675 ± 942 [14086] | 13722 ± 925 [14136] | 324.6 ± 0.3 | 325.3 ± 0.5 |
+| Qwen3-30B-A3B UD-IQ3_XXS (12.0 GiB) | rtx-4090 | 10133 ± 1225 [10673] | 10168 ± 1202 [10696] | 257.0 ± 0.9 | 257.7 ± 0.9 |
+| | rtx-5080 | 7247 ± 460 [7462] | 7242 ± 446 [7454] | 248.2 ± 0.4 | 248.1 ± 0.4 |
+| | rtx-5090 | 11905 ± 1088 [12408] | 11946 ± 1068 [12422] | 341.5 ± 1.0 | 341.4 ± 1.0 |
+
+The 30B-A3B UD-IQ3_XXS file (12.0 GiB) fits the 16 GB RTX 5080 with all layers on the GPU at this context.
+These are the M0.1/M0.2 bars (≥ 0.8×): e.g. on the RTX 5080, 8B Q4_K_M ≥ 6380 t/s pp512 and ≥ 127 t/s tg128;
+30B-A3B UD-IQ3_XXS ≥ 5800 / ≥ 199 t/s.
+
+Decode on the GeForce cards scales with memory bandwidth and is i-quant friendly: UD-IQ3_XXS decodes 1.33× (5080),
+1.28× (5090), 1.36× (4090) faster than Q4_K_M (A5000: 1.03×, PRO 6000: 1.19×).
+
+### Per-layer linear time ratio (llama.cpp µs / ours µs, best of our paths per op; cells = 4090 · 5080 · 5090)
+
+| Qwen3-8B | n=1 | n=8 | n=32 | n=512 |
+|---|---|---|---|---|
+| IQ3_XXS | 0.90 · 0.90 · 0.82 | 0.29 · 0.28 · 0.33 | 0.18 · 0.21 · 0.27 | 0.50 · 0.54 · 0.69 |
+| IQ3_S | 0.95 · 1.00 · 0.92 | 0.30 · 0.30 · 0.35 | 0.21 · 0.17 · 0.23 | 0.50 · 0.48 · 0.65 |
+| IQ4_XS | 0.69 · 0.69 · 0.65 | 0.26 · 0.24 · 0.27 | 0.15 · 0.19 · 0.26 | 0.44 · 0.53 · 0.71 |
+| Q3_K | 0.75 · 0.77 · 0.73 | 0.28 · 0.22 · 0.24 | 0.16 · 0.24 · 0.29 | 0.57 · 0.73 · 1.07 |
+| Q4_K | 0.98 · 0.89 · 0.80 | 0.65 · 0.34 · 0.43 | 0.19 · 0.20 · 0.26 | 0.49 · 0.59 · 0.88 |
+| Q8_0 | 0.89 · 0.97 · 0.86 | 0.61 · 0.53 · 0.68 | 0.21 · 0.19 · 0.31 | 0.51 · 0.56 · 0.91 |
+
+| Qwen3-30B-A3B | n=1 | n=8 | n=32 | n=512 |
+|---|---|---|---|---|
+| IQ3_XXS | 1.20 · 1.22 · 0.93 | 0.63 · 0.58 · 0.51 | 0.65 · 0.72 · 0.55 | 0.12 · 0.13 · 0.10 |
+| IQ3_S | 1.14 · 1.30 · 1.05 | 0.66 · 0.73 · 0.58 | 0.88 · 0.80 · 0.59 | 0.12 · 0.13 · 0.11 |
+| IQ4_XS | 0.79 · 0.71 · 0.66 | 0.46 · 0.46 · 0.41 | 0.72 · 0.61 · 0.50 | 0.09 · 0.11 · 0.10 |
+| Q3_K | 0.94 · 0.88 · 0.77 | 0.77 · 0.60 · 0.69 | 0.65 · 0.81 · 0.81 | 0.27 · 0.31 · 0.32 |
+| Q4_K | 0.96 · 0.88 · 0.78 | 0.69 · 0.63 · 0.73 | 1.10 · 0.98 · 0.98 | 0.38 · 0.39 · 0.44 |
+| Q8_0 | 1.00 · 0.94 · 0.84 | 0.87 · 0.93 · 0.67 | 0.81 · 0.98 · 0.99 | 0.47 · 0.37 · 0.41 |
+
+Absolute per-layer µs (llama.cpp / ours), e.g. Qwen3-8B IQ3_XXS n = 1 / 8 / 32 / 512: 4090 69/77, 133/460,
+159/897, 837/1686; 5080 84/94, 176/619, 196/939, 1325/2461; 5090 50/61, 108/332, 134/490, 759/1102. Per-path and
+per-op tables: `python scripts/report.py rtx-4090` (etc.); joined data in `results/compare_rtx-*.json`. As on the
+PRO 6000, single weights (≤ 54 MB for the largest, 12288×4096 Q8_0; ~19 MB as IQ3_XXS) fit the 64–96 MB L2 of these cards in
+both harnesses, so absolute µs are L2-flattered; the ratios are like for like.
+
+**The dense prefill fallback is much worse on GeForce.** Dequant + cuBLAS bf16 at n = 512 reaches 0.95–1.08× on
+the A5000 and 0.71–0.76× on the PRO 6000, but only **0.44–0.57× (4090)**, **0.48–0.73× (5080)** and 0.65–1.07×
+(5090). A plain GEMM probe (8192³, torch 2.11) shows why: bf16 `matmul` 116.6 TFLOPS vs int8 `_int_mm` 420.8 TOPS
+on the 5080 (3.6×), 309.0 vs 721.0 on the 5090 (2.3×), 161.9 vs 641.1 on the 4090 (4.0×). GeForce bf16 tensor throughput
+with fp32 accumulation is the bottleneck; llama.cpp's int8-MMA `mmq` is not.
+
+### Decision on the consumer classes
+
+Nothing changes the S2 decision; the consumer numbers make it stronger:
+- **Port llama.cpp's `mmvq`/`mmq`/`mmid`** for every type. The vendored kernels miss the bar on all three
+  classes except single-row decode of IQ3_XXS/IQ3_S/Q4_K/Q8_0 (0.80–1.00 dense; MoE 0.78–1.30).
+  IQ4_XS (0.65–0.79) and Q3_K (0.73–0.77 dense) single-row decode already fail, dense n = 8/32 is 0.15–0.68 on
+  every type, and MoE n = 512 is 0.09–0.47.
+- **No dequant+cuBLAS fallback for prefill on GeForce**: at 0.44–0.73× on 4090/5080 it cannot be a stopgap; the
+  int8 `mmq` port is required for M0.1 on the RTX 5080 class (A5000 could live with the fallback, GeForce cannot).
+- The M0.1 bar on the RTX 5080: Qwen3-8B Q4_K_M ≥ 0.8 × (7975 pp512, 159.0 tg128), UD-IQ3_XXS ≥ 0.8 × (8051,
+  211.6), 30B-A3B UD-IQ3_XXS ≥ 0.8 × (7247, 248.2) t/s.
+- Builds: llama.cpp for sm_89 and sm_120 builds unmodified with CUDA 13.0 in the container; one sm_120 build
+  serves both GeForce Blackwell cards (they were built separately here only to keep the per-class outputs apart).

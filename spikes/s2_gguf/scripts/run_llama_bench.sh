@@ -5,9 +5,10 @@ set -euo pipefail
 SM=$1
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 : "${CUDA_VISIBLE_DEVICES:?pin the GPU}"
-PY=.venv/bin/python
-for key in 8B-Q4_K_M 8B-UD-IQ3_XXS 30B-A3B-UD-IQ3_XXS; do
+PY=${S2_PY:-$HERE/../../.venv/bin/python}
+TAG=${S2_TAG:-sm$SM}
+for key in ${S2_BENCH_MODELS:-8B-Q4_K_M 8B-UD-IQ3_XXS 30B-A3B-UD-IQ3_XXS}; do
   model=$(cd "$HERE" && $PY -c "from models import path; print(path('$key'))")
-  "$HERE/out/llama-sm$SM/bin/llama-bench" -m "$model" -p 512 -n 128 -ngl 99 -fa on -r 5 -o json \
-    > "$HERE/results/llama_bench_${key}_sm$SM.json"
+  "$HERE/out/llama-$TAG/bin/llama-bench" -m "$model" -p 512 -n 128 -ngl 99 -fa on -r 5 -o json \
+    > "$HERE/results/llama_bench_${key}_$TAG.json"
 done

@@ -111,8 +111,12 @@ Global acceptance for every milestone ≥ M0.1:
 | S5 | Top-20 fp32 CPU golden (Qwen3-8B: 4–8 min, 49 GB RAM, 5.4 MB); prompt set v1 (24 prompts, 4 categories); budgets per design §10.3 with KL p99 as the discriminating metric; injected RoPE bug caught, legit variants pass |
 | S6 | Handshake seam sound: spin-kernel wait 2.8 µs / memop 9.7 µs / host func 31.7 µs per handshake; zero-copy pinned I/O; overlap works; 1.5 M handshakes without deadlock; stream-ordered map swaps need no quiesce |
 
-Follow-up (before M0 closes): run the S1, S2 and S6 benchmarks on RTX 4090 / 5080 / 5090 desktops inside
-one persistent container per class, re-tune the Triton attention configs, and record the consumer evidence.
+Consumer evidence (RTX 4090 / 5080 / 5090 desktops, 2026-10-06; "Consumer cards" in the spike READMEs):
+S1 decisions hold (Triton ≈ FlashInfer, median 0.99–1.01× time; configs pinned per class; q8_0 KV tuning still
+open on sm_120). S2: all 10 types pass on sm_89/sm_120; dequant + cuBLAS reaches only 0.44–0.73× llama.cpp prefill
+on GeForce (int8 ≈ 4× bf16 throughput), so the int8 `mmq` port comes first in M0.1; llama-bench baselines recorded
+per class. S6: spin-kernel wait by default (1.9–2.8 µs), memop fallback for watchdog/laptop GPUs; CPU workers =
+physical cores − 1 with the Python loop pinned to the free core.
 
 ### 3.2 Work items
 
@@ -221,7 +225,8 @@ Work:
   structs as stored, no repack).
 - `kernels/ggml_cuda`: llama.cpp's current ggml-cuda quantized kernels (`mmvq`, `mmq` incl. i-quants) ported behind
   a ≈ 200-line shim that allocates from our workspaces (per S2, ≈ 5 developer-days across M0.1–M0.2), as our own
-  Torch extension; parity tests against llama.cpp on the same shapes.
+  Torch extension; parity tests against llama.cpp on the same shapes. The int8 `mmq` prefill path is ported first:
+  on GeForce cards a dequantize + cuBLAS fallback is too slow even as a stopgap (S2 consumer results).
 
 Acceptance: `git diff plugins/models/qwen3` limited to adding `gguf_weights` to the recipe; L0 for every
 supported type vs `dequant_ref`; L2 bounded vs a golden recorded from `dequant_ref` weights in the dense HF class

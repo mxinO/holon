@@ -6,6 +6,7 @@ matmuls: NMSE vs x.float() @ dequant_ref(W).T, budget 5e-4 (llama.cpp test-backe
 "fallback" = our dequant to bf16 + torch bf16 GEMM, "bf16_ref" = gguf-py dequant rounded to bf16 + torch GEMM.
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -91,7 +92,7 @@ def main() -> None:
         print(name, json.dumps({k: (round(v, 8) if isinstance(v, float) else v) for k, v in r.items()}))
 
     sm = "".join(map(str, torch.cuda.get_device_capability()))
-    (HERE / "results" / f"correctness_sm{sm}.json").write_text(json.dumps(report, indent=1))
+    (HERE / "results" / f"correctness_{os.environ.get('S2_TAG') or 'sm' + sm}.json").write_text(json.dumps(report, indent=1))
 
 
 if __name__ == "__main__":
