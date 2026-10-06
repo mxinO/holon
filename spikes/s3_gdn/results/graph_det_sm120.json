@@ -1,0 +1,135 @@
+{
+ "device": {
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "sm": "sm_120",
+  "torch": "2.11.0+cu130",
+  "triton": "3.6.0",
+  "cuda_visible_devices": "6"
+ },
+ "graph_decode_fused_recurrent": {
+  "n_seqs": 8,
+  "tokens_per_seq": 1,
+  "replays": [
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 1
+   },
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 2
+   },
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 0
+   },
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 1
+   },
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 2
+   }
+  ]
+ },
+ "graph_decode_fused_sigmoid": {
+  "n_seqs": 8,
+  "tokens_per_seq": 1,
+  "replays": [
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 1
+   },
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 2
+   },
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 0
+   },
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 1
+   },
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 2
+   }
+  ]
+ },
+ "graph_verify_k3_fused_sigmoid": {
+  "n_seqs": 8,
+  "tokens_per_seq": 4,
+  "replays": [
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 1
+   },
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 0
+   },
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 0
+   },
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 0
+   },
+   {
+    "output_bitwise_equal": true,
+    "pool_bitwise_equal": true,
+    "padded_seqs": 1
+   }
+  ]
+ },
+ "graph_chunk_prefill": {
+  "captured": true,
+  "lens": [
+   300,
+   1000,
+   64,
+   2048
+  ],
+  "output_bitwise_equal": true,
+  "state_bitwise_equal": true
+ },
+ "in_process_10_runs_identical": {
+  "chunk_T8192": true,
+  "chunk_varlen": true,
+  "fused_recurrent_decode": true,
+  "fused_sigmoid_decode": true,
+  "fused_sigmoid_verify_k3": true
+ },
+ "process_hashes_pinned": {
+  "chunk_T8192": "fd80c2c9814feeb164a3a35bc084667f8ab39d0d4a69f1846e26777e143b2ceb",
+  "chunk_varlen": "4d40cac6c1ad8e54b3f5d0bde36c5c5a66a15428f5e8d39113bed71dc836d016",
+  "fused_recurrent_decode": "e87613f4e5f0799db7af93327354a95100106b64b9c1337e3fb2cc7d9ac061bb",
+  "fused_sigmoid_decode": "43943ab2ec456b0431346ff7f8870c6c5573d570303c50c81ebd57c14b2c1a76",
+  "fused_sigmoid_verify_k3": "b72f46bafffe9636aa398245d33cd1a15151753d778fcd12e5f309c60cf76f04"
+ },
+ "two_processes_identical": true,
+ "autotuned_process_equal_to_pinned": {
+  "chunk_T8192": true,
+  "chunk_varlen": true,
+  "fused_recurrent_decode": true,
+  "fused_sigmoid_decode": true,
+  "fused_sigmoid_verify_k3": true
+ }
+}

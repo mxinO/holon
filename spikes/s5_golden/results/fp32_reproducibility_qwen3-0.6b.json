@@ -1,0 +1,30 @@
+{
+ "model": "Qwen/Qwen3-0.6B",
+ "note": "fp32 CPU golden reproducibility; reference = 44 threads",
+ "rerun_44_threads": {
+  "bitwise_identical": true,
+  "wall_s": 37.56
+ },
+ "threads_24": {
+  "bitwise_identical": false,
+  "max_abs_logprob_diff": 6.866455078125e-05,
+  "wall_s": 47.59,
+  "l2": {
+   "n": 32783,
+   "top1": 1.0,
+   "top1_flips_near_tie": 0.0,
+   "kl_mean": 7.374359747960812e-10,
+   "kl_p50": 2.6090672591155828e-12,
+   "kl_p99": 1.6302217820118871e-09,
+   "kl_max": 3.825009571301052e-06,
+   "dnll": 2.078444409444101e-08,
+   "dnll_se": 2.099955994786453e-08,
+   "dppl": 0.0,
+   "dppl_se": 2.099955994786453e-08,
+   "ppl_golden": 4.606073778686455,
+   "missing": 0.0,
+   "passed": null,
+   "failures": []
+  }
+ }
+}

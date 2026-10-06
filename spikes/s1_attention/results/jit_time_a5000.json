@@ -1,0 +1,83 @@
+{
+ "fingerprint": {
+  "gpu": "NVIDIA RTX A5000",
+  "sm": "86",
+  "num_sms": 64,
+  "host": "a5000-server",
+  "torch": "2.11.0+cu130",
+  "cuda": "13.0",
+  "triton": "3.6.0",
+  "flashinfer": "0.6.12",
+  "driver": "<version>"
+ },
+ "per_module": [
+  {
+   "module": "decode_cudacore_bf16_hd128",
+   "cold_s": 9.959550235420465,
+   "warm_s": 0.028649311512708664,
+   "cache_bytes": 1186426
+  },
+  {
+   "module": "decode_cudacore_bf16_hd256",
+   "cold_s": 9.591717325150967,
+   "warm_s": 0.025166578590869904,
+   "cache_bytes": 1186122
+  },
+  {
+   "module": "decode_cudacore_fp8_hd128",
+   "cold_s": 36.36952135711908,
+   "warm_s": 0.03046729788184166,
+   "cache_bytes": 1424476
+  },
+  {
+   "module": "decode_cudacore_fp8_hd256",
+   "cold_s": 24.10583120211959,
+   "warm_s": 0.020699873566627502,
+   "cache_bytes": 1405788
+  },
+  {
+   "module": "prefill_fa2_bf16_hd128",
+   "cold_s": 13.033433888107538,
+   "warm_s": 0.02630322426557541,
+   "cache_bytes": 5422475
+  },
+  {
+   "module": "prefill_fa2_bf16_hd256",
+   "cold_s": 12.482263069599867,
+   "warm_s": 0.027874726802110672,
+   "cache_bytes": 5309538
+  },
+  {
+   "module": "prefill_fa2_fp8_hd128",
+   "cold_s": 16.336431931704283,
+   "warm_s": 0.027436956763267517,
+   "cache_bytes": 6684264
+  },
+  {
+   "module": "prefill_fa2_fp8_hd256",
+   "cold_s": 25.460124969482422,
+   "warm_s": 0.02557475119829178,
+   "cache_bytes": 7655977
+  }
+ ],
+ "prebuild": {
+  "modules": 8,
+  "build_jit_specs_s": 28.029921907931566,
+  "wall_s": 30.884085178375244,
+  "cache_bytes": 29659227,
+  "layout": [
+   ".cache/flashinfer/0.6.12/86/cached_ops/.ninja_deps",
+   ".cache/flashinfer/0.6.12/86/cached_ops/.ninja_log",
+   ".cache/flashinfer/0.6.12/86/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/86/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/86/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/86/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/86/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/86/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/86/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/86/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/86/cached_ops/tmp"
+  ]
+ },
+ "nproc": 96
+}

@@ -1,0 +1,9 @@
+{
+ "model": "Qwen/Qwen3-8B",
+ "note": "second fp32 CPU recording, same 44 threads, measured with /usr/bin/time -v",
+ "bitwise_identical": true,
+ "wall_s_first": 458.45,
+ "wall_s_rerun": 248.11,
+ "peak_rss_gb": 48.957024,
+ "cpu": "2x AMD <cpu> (shared host)"
+}

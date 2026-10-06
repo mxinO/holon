@@ -1,0 +1,32 @@
+diff --git a/tests/test-backend-ops.cpp b/tests/test-backend-ops.cpp
+index cbe5917..01fccb8 100644
+--- a/tests/test-backend-ops.cpp
++++ b/tests/test-backend-ops.cpp
+@@ -11619,6 +11619,27 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
+ static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
+     std::vector<std::unique_ptr<test_case>> test_cases;
+ 
++    // plug-serve spike S2: only the Qwen3-8B / Qwen3-30B-A3B layer shapes when S2_SHAPES is set
++    if (getenv("S2_SHAPES")) {
++        const ggml_type s2_types[] = {GGML_TYPE_IQ3_XXS, GGML_TYPE_IQ3_S, GGML_TYPE_IQ4_XS,
++                                      GGML_TYPE_Q3_K, GGML_TYPE_Q4_K, GGML_TYPE_Q8_0};
++        const int64_t s2_dense[][2] = {  // {m = out rows, k}
++            {4096, 4096}, {1024, 4096}, {12288, 4096}, {4096, 12288},   // Qwen3-8B q/o, k/v, gate/up, down
++            {4096, 2048}, {512, 2048}, {2048, 4096},                    // Qwen3-30B-A3B q, k/v, o
++        };
++        for (ggml_type t : s2_types) {
++            for (int n : {1, 8, 32, 512}) {
++                for (const auto & mk : s2_dense) {
++                    test_cases.emplace_back(new test_mul_mat(t, GGML_TYPE_F32, mk[0], n, mk[1], {1, 1}, {1, 1}));
++                }
++                // Qwen3-30B-A3B experts: gate/up (input broadcast over the 8 slots), down (one input per slot)
++                test_cases.emplace_back(new test_mul_mat_id(t, GGML_TYPE_F32, 128, 8, true, 768, n, 2048));
++                test_cases.emplace_back(new test_mul_mat_id(t, GGML_TYPE_F32, 128, 8, false, 2048, n, 768));
++            }
++        }
++        return test_cases;
++    }
++
+     // SWIGLU at a 27B-class FFN width, fused [gate|up] vs split operands
+     // note: same bytes either way, so a backend that indexes them differently shows it here
+     for (ggml_type type : {GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_BF16}) {

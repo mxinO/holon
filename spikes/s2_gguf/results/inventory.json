@@ -1,0 +1,405 @@
+{
+ "8B-Q8_0": {
+  "file": "Qwen3-8B-Q8_0.gguf",
+  "tensors_by_type": {
+   "Q8_0": 254,
+   "F32": 145
+  },
+  "gib_by_type": {
+   "Q8_0": 8.105,
+   "F32": 0.001
+  },
+  "types_by_role": {
+   "blk.N.attn_k.weight": {
+    "Q8_0": 36
+   },
+   "blk.N.attn_k_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_output.weight": {
+    "Q8_0": 36
+   },
+   "blk.N.attn_q.weight": {
+    "Q8_0": 36
+   },
+   "blk.N.attn_q_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_v.weight": {
+    "Q8_0": 36
+   },
+   "blk.N.ffn_down.weight": {
+    "Q8_0": 36
+   },
+   "blk.N.ffn_gate.weight": {
+    "Q8_0": 36
+   },
+   "blk.N.ffn_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.ffn_up.weight": {
+    "Q8_0": 36
+   },
+   "output.weight": {
+    "Q8_0": 1
+   },
+   "output_norm.weight": {
+    "F32": 1
+   },
+   "token_embd.weight": {
+    "Q8_0": 1
+   }
+  }
+ },
+ "8B-Q4_K_M": {
+  "file": "Qwen3-8B-Q4_K_M.gguf",
+  "tensors_by_type": {
+   "Q6_K": 37,
+   "F32": 145,
+   "Q4_K": 217
+  },
+  "gib_by_type": {
+   "Q6_K": 1.225,
+   "F32": 0.001,
+   "Q4_K": 3.451
+  },
+  "types_by_role": {
+   "blk.N.attn_k.weight": {
+    "Q4_K": 36
+   },
+   "blk.N.attn_k_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_output.weight": {
+    "Q4_K": 36
+   },
+   "blk.N.attn_q.weight": {
+    "Q4_K": 36
+   },
+   "blk.N.attn_q_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_v.weight": {
+    "Q6_K": 18,
+    "Q4_K": 18
+   },
+   "blk.N.ffn_down.weight": {
+    "Q6_K": 18,
+    "Q4_K": 18
+   },
+   "blk.N.ffn_gate.weight": {
+    "Q4_K": 36
+   },
+   "blk.N.ffn_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.ffn_up.weight": {
+    "Q4_K": 36
+   },
+   "output.weight": {
+    "Q6_K": 1
+   },
+   "output_norm.weight": {
+    "F32": 1
+   },
+   "token_embd.weight": {
+    "Q4_K": 1
+   }
+  }
+ },
+ "8B-IQ4_XS": {
+  "file": "Qwen3-8B-IQ4_XS.gguf",
+  "tensors_by_type": {
+   "Q6_K": 1,
+   "F32": 145,
+   "Q4_K": 1,
+   "IQ4_XS": 216,
+   "Q5_K": 36
+  },
+  "gib_by_type": {
+   "Q6_K": 0.475,
+   "F32": 0.001,
+   "Q4_K": 0.326,
+   "IQ4_XS": 3.362,
+   "Q5_K": 0.097
+  },
+  "types_by_role": {
+   "blk.N.attn_k.weight": {
+    "IQ4_XS": 36
+   },
+   "blk.N.attn_k_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_output.weight": {
+    "IQ4_XS": 36
+   },
+   "blk.N.attn_q.weight": {
+    "IQ4_XS": 36
+   },
+   "blk.N.attn_q_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_v.weight": {
+    "Q5_K": 36
+   },
+   "blk.N.ffn_down.weight": {
+    "IQ4_XS": 36
+   },
+   "blk.N.ffn_gate.weight": {
+    "IQ4_XS": 36
+   },
+   "blk.N.ffn_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.ffn_up.weight": {
+    "IQ4_XS": 36
+   },
+   "output.weight": {
+    "Q6_K": 1
+   },
+   "output_norm.weight": {
+    "F32": 1
+   },
+   "token_embd.weight": {
+    "Q4_K": 1
+   }
+  }
+ },
+ "8B-UD-IQ3_XXS": {
+  "file": "Qwen3-8B-UD-IQ3_XXS.gguf",
+  "tensors_by_type": {
+   "Q5_K": 1,
+   "F32": 145,
+   "Q3_K": 1,
+   "IQ3_XXS": 113,
+   "IQ3_S": 36,
+   "Q4_K": 36,
+   "IQ4_XS": 5,
+   "IQ2_S": 52,
+   "IQ2_XS": 10
+  },
+  "gib_by_type": {
+   "Q5_K": 0.398,
+   "F32": 0.001,
+   "Q3_K": 0.249,
+   "IQ3_XXS": 1.886,
+   "IQ3_S": 0.242,
+   "Q4_K": 0.079,
+   "IQ4_XS": 0.125,
+   "IQ2_S": 0.163,
+   "IQ2_XS": 0.028
+  },
+  "types_by_role": {
+   "blk.N.attn_k.weight": {
+    "IQ3_XXS": 5,
+    "IQ2_S": 26,
+    "IQ2_XS": 5
+   },
+   "blk.N.attn_k_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_output.weight": {
+    "IQ3_S": 36
+   },
+   "blk.N.attn_q.weight": {
+    "IQ3_XXS": 5,
+    "IQ2_S": 26,
+    "IQ2_XS": 5
+   },
+   "blk.N.attn_q_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_v.weight": {
+    "Q4_K": 36
+   },
+   "blk.N.ffn_down.weight": {
+    "IQ4_XS": 5,
+    "IQ3_XXS": 31
+   },
+   "blk.N.ffn_gate.weight": {
+    "IQ3_XXS": 36
+   },
+   "blk.N.ffn_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.ffn_up.weight": {
+    "IQ3_XXS": 36
+   },
+   "output.weight": {
+    "Q5_K": 1
+   },
+   "output_norm.weight": {
+    "F32": 1
+   },
+   "token_embd.weight": {
+    "Q3_K": 1
+   }
+  }
+ },
+ "8B-UD-Q3_K_XL": {
+  "file": "Qwen3-8B-UD-Q3_K_XL.gguf",
+  "tensors_by_type": {
+   "Q6_K": 2,
+   "F32": 145,
+   "Q4_K": 68,
+   "IQ4_XS": 20,
+   "Q5_K": 40,
+   "Q3_K": 104,
+   "IQ3_XXS": 10,
+   "IQ3_S": 10
+  },
+  "gib_by_type": {
+   "Q6_K": 0.514,
+   "F32": 0.001,
+   "Q4_K": 1.46,
+   "IQ4_XS": 0.301,
+   "Q5_K": 0.226,
+   "Q3_K": 1.266,
+   "IQ3_XXS": 0.037,
+   "IQ3_S": 0.201
+  },
+  "types_by_role": {
+   "blk.N.attn_k.weight": {
+    "IQ4_XS": 5,
+    "Q3_K": 26,
+    "IQ3_XXS": 5
+   },
+   "blk.N.attn_k_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_output.weight": {
+    "Q4_K": 36
+   },
+   "blk.N.attn_q.weight": {
+    "IQ4_XS": 5,
+    "Q3_K": 26,
+    "IQ3_XXS": 5
+   },
+   "blk.N.attn_q_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.attn_v.weight": {
+    "Q5_K": 36
+   },
+   "blk.N.ffn_down.weight": {
+    "Q5_K": 4,
+    "Q4_K": 31,
+    "Q6_K": 1
+   },
+   "blk.N.ffn_gate.weight": {
+    "IQ4_XS": 5,
+    "Q3_K": 26,
+    "IQ3_S": 5
+   },
+   "blk.N.ffn_norm.weight": {
+    "F32": 36
+   },
+   "blk.N.ffn_up.weight": {
+    "IQ4_XS": 5,
+    "Q3_K": 26,
+    "IQ3_S": 5
+   },
+   "output.weight": {
+    "Q6_K": 1
+   },
+   "output_norm.weight": {
+    "F32": 1
+   },
+   "token_embd.weight": {
+    "Q4_K": 1
+   }
+  }
+ },
+ "30B-A3B-UD-IQ3_XXS": {
+  "file": "Qwen3-30B-A3B-UD-IQ3_XXS.gguf",
+  "tensors_by_type": {
+   "Q6_K": 11,
+   "F32": 241,
+   "Q4_K": 1,
+   "IQ4_XS": 177,
+   "IQ3_XXS": 89,
+   "Q5_K": 18,
+   "IQ3_S": 42
+  },
+  "gib_by_type": {
+   "Q6_K": 0.302,
+   "F32": 0.048,
+   "Q4_K": 0.163,
+   "IQ4_XS": 1.663,
+   "IQ3_XXS": 6.388,
+   "Q5_K": 0.05,
+   "IQ3_S": 3.384
+  },
+  "types_by_role": {
+   "blk.N.attn_k.weight": {
+    "IQ4_XS": 43,
+    "Q5_K": 5
+   },
+   "blk.N.attn_k_norm.weight": {
+    "F32": 48
+   },
+   "blk.N.attn_norm.weight": {
+    "F32": 48
+   },
+   "blk.N.attn_output.weight": {
+    "IQ4_XS": 35,
+    "Q5_K": 3,
+    "Q6_K": 10
+   },
+   "blk.N.attn_q.weight": {
+    "IQ4_XS": 43,
+    "Q5_K": 5
+   },
+   "blk.N.attn_q_norm.weight": {
+    "F32": 48
+   },
+   "blk.N.attn_v.weight": {
+    "IQ4_XS": 43,
+    "Q5_K": 5
+   },
+   "blk.N.ffn_down_exps.weight": {
+    "IQ3_XXS": 25,
+    "IQ4_XS": 13,
+    "IQ3_S": 10
+   },
+   "blk.N.ffn_gate_exps.weight": {
+    "IQ3_XXS": 32,
+    "IQ3_S": 16
+   },
+   "blk.N.ffn_gate_inp.weight": {
+    "F32": 48
+   },
+   "blk.N.ffn_norm.weight": {
+    "F32": 48
+   },
+   "blk.N.ffn_up_exps.weight": {
+    "IQ3_XXS": 32,
+    "IQ3_S": 16
+   },
+   "output.weight": {
+    "Q6_K": 1
+   },
+   "output_norm.weight": {
+    "F32": 1
+   },
+   "token_embd.weight": {
+    "Q4_K": 1
+   }
+  }
+ }
+}

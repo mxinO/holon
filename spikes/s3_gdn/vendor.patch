@@ -1,0 +1,1026 @@
+diff -ruN -x __pycache__ fla_ops_pristine/chunk_delta_h.py fla_ops/chunk_delta_h.py
+--- fla_ops_pristine/chunk_delta_h.py	2026-10-06 20:06:56.551280678 +0000
++++ fla_ops/chunk_delta_h.py	2026-10-06 20:08:25.539229531 +0000
+@@ -10,11 +10,12 @@
+ 
+ import torch
+ 
+-from vllm.triton_utils import tl, triton
++import triton
++import triton.language as tl
+ 
+ from .index import prepare_chunk_indices, prepare_chunk_offsets
+ from .op import exp, exp2
+-from .utils import FLA_CHUNK_SIZE, use_cuda_graph
++from .utils import FLA_CHUNK_SIZE, autotune
+ 
+ NUM_WARPS = [2, 4, 8, 16]
+ # Triton's AMD backend fails to lower this kernel with num_stages=4.
+@@ -31,7 +32,7 @@
+         "IS_VARLEN": lambda args: args["cu_seqlens"] is not None,
+     }
+ )
+-@triton.autotune(
++@autotune(
+     configs=[
+         triton.Config({"BV": BV}, num_warps=num_warps, num_stages=num_stages)
+         for num_warps in [2, 4]
+@@ -39,7 +40,6 @@
+         for BV in [32, 64]
+     ],
+     key=["H", "K", "V", "BT"],
+-    use_cuda_graph=use_cuda_graph,
+ )
+ @triton.jit(do_not_specialize=["T"])
+ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
+@@ -68,9 +68,11 @@
+     SAVE_NEW_VALUE: tl.constexpr,
+     IS_VARLEN: tl.constexpr,
+     USE_EXP2: tl.constexpr,
++    V_HEAD_TILED: tl.constexpr,  # plug-serve: GGUF value-head order, v head j reads q/k head j % Hg
+ ):
+     i_v, i_nh = tl.program_id(0), tl.program_id(1)
+     i_n, i_h = i_nh // H, i_nh % H
++    i_hk = i_h % Hg if V_HEAD_TILED else i_h // (H // Hg)
+     if IS_VARLEN:
+         bos, eos = (
+             tl.load(cu_seqlens + i_n).to(tl.int32),
+@@ -96,7 +98,7 @@
+     # calculate offset
+     h += ((boh * H + i_h) * V * K).to(tl.int64)
+     v += ((bos * H + i_h) * V).to(tl.int64)
+-    k += ((bos * Hg + i_h // (H // Hg)) * K).to(tl.int64)
++    k += ((bos * Hg + i_hk) * K).to(tl.int64)
+     w += ((bos * H + i_h) * K).to(tl.int64)
+     if SAVE_NEW_VALUE:
+         v_new += ((bos * H + i_h) * V).to(tl.int64)
+@@ -331,6 +333,7 @@
+     chunk_indices: torch.Tensor | None = None,
+     chunk_offsets: torch.Tensor | None = None,
+     use_exp2: bool = False,
++    v_head_tiled: bool = False,
+ ) -> tuple[torch.Tensor, torch.Tensor]:
+     # This kernel is slightly different from fla to support Q/K with different head numbers.
+     # In fla, Q/K always have the same head number, so Hg is always equal to H.
+@@ -378,5 +381,6 @@
+         V=V,
+         BT=BT,
+         USE_EXP2=use_exp2,
++        V_HEAD_TILED=v_head_tiled,
+     )
+     return h, v_new, final_state
+diff -ruN -x __pycache__ fla_ops_pristine/chunk_o.py fla_ops/chunk_o.py
+--- fla_ops_pristine/chunk_o.py	2026-10-06 20:06:56.553876307 +0000
++++ fla_ops/chunk_o.py	2026-10-06 20:08:25.534227313 +0000
+@@ -12,11 +12,12 @@
+ 
+ import torch
+ 
+-from vllm.triton_utils import tl, triton
++import triton
++import triton.language as tl
+ 
+ from .index import prepare_chunk_indices
+ from .op import exp
+-from .utils import FLA_CHUNK_SIZE, check_shared_mem, is_nvidia_hopper
++from .utils import FLA_CHUNK_SIZE, autotune, check_shared_mem, is_nvidia_hopper
+ 
+ BKV_LIST = [64, 128] if check_shared_mem() else [32, 64]
+ NUM_WARPS = [2, 4] if is_nvidia_hopper else [2, 4, 8]
+@@ -28,7 +29,7 @@
+         "IS_VARLEN": lambda args: args["cu_seqlens"] is not None,
+     }
+ )
+-@triton.autotune(
++@autotune(
+     configs=[
+         triton.Config({"BK": BK, "BV": BV}, num_warps=num_warps, num_stages=num_stages)
+         for BK in BKV_LIST
+@@ -59,9 +60,11 @@
+     BV: tl.constexpr,
+     USE_G: tl.constexpr,
+     IS_VARLEN: tl.constexpr,
++    V_HEAD_TILED: tl.constexpr,  # plug-serve: GGUF value-head order, v head j reads q/k head j % Hg
+ ):
+     i_v, i_t, i_bh = tl.program_id(0), tl.program_id(1), tl.program_id(2)
+     i_b, i_h = i_bh // H, i_bh % H
++    i_hk = i_h % Hg if V_HEAD_TILED else i_h // (H // Hg)
+ 
+     if IS_VARLEN:
+         i_tg = i_t
+@@ -81,8 +84,8 @@
+         bos, eos = i_b * T, i_b * T + T
+ 
+     # offset calculation
+-    q += (bos * Hg + i_h // (H // Hg)) * K
+-    k += (bos * Hg + i_h // (H // Hg)) * K
++    q += (bos * Hg + i_hk) * K
++    k += (bos * Hg + i_hk) * K
+     v += (bos * H + i_h) * V
+     o += (bos * H + i_h) * V
+     h += (i_tg * H + i_h).to(tl.int64) * V * K
+@@ -149,6 +152,7 @@
+     chunk_indices: torch.Tensor | None = None,
+     chunk_size: int = FLA_CHUNK_SIZE,
+     core_attn_out: torch.Tensor | None = None,
++    v_head_tiled: bool = False,
+ ) -> torch.Tensor:
+     B, T, Hg, K, V = *q.shape, v.shape[-1]
+     H = v.shape[-2]
+@@ -186,5 +190,6 @@
+         K=K,
+         V=V,
+         BT=BT,
++        V_HEAD_TILED=v_head_tiled,
+     )
+     return o
+diff -ruN -x __pycache__ fla_ops_pristine/chunk.py fla_ops/chunk.py
+--- fla_ops_pristine/chunk.py	2026-10-06 20:06:56.548278672 +0000
++++ fla_ops/chunk.py	2026-10-06 20:08:25.543227675 +0000
+@@ -16,7 +16,7 @@
+ from .cumsum import chunk_local_cumsum
+ from .l2norm import l2norm_fwd
+ from .solve_tril import solve_tril
+-from .utils import FLA_CHUNK_SIZE, SUPPRESS_LEVEL, input_guard
++from .utils import FLA_CHUNK_SIZE, input_guard
+ from .wy_fast import recompute_w_u_fwd
+ 
+ 
+@@ -33,6 +33,7 @@
+     chunk_indices: torch.Tensor | None = None,
+     chunk_offsets: torch.Tensor | None = None,
+     core_attn_out: torch.Tensor | None = None,
++    v_head_tiled: bool = False,
+ ):
+     g = chunk_local_cumsum(
+         g, chunk_size=FLA_CHUNK_SIZE, cu_seqlens=cu_seqlens, chunk_indices=chunk_indices
+@@ -45,6 +46,7 @@
+         cu_seqlens=cu_seqlens,
+         chunk_indices=chunk_indices,
+         output_dtype=torch.float32,
++        v_head_tiled=v_head_tiled,
+     )
+     A = solve_tril(
+         A=A, cu_seqlens=cu_seqlens, chunk_indices=chunk_indices, output_dtype=k.dtype
+@@ -57,6 +59,7 @@
+         g_cumsum=g,
+         cu_seqlens=cu_seqlens,
+         chunk_indices=chunk_indices,
++        v_head_tiled=v_head_tiled,
+     )
+     h, v_new, final_state = chunk_gated_delta_rule_fwd_h(
+         k=k,
+@@ -68,6 +71,7 @@
+         cu_seqlens=cu_seqlens,
+         chunk_indices=chunk_indices,
+         chunk_offsets=chunk_offsets,
++        v_head_tiled=v_head_tiled,
+     )
+     o = chunk_fwd_o(
+         q=q,
+@@ -79,11 +83,9 @@
+         cu_seqlens=cu_seqlens,
+         chunk_indices=chunk_indices,
+         core_attn_out=core_attn_out,
++        v_head_tiled=v_head_tiled,
+     )
+-    if SUPPRESS_LEVEL < 3:
+-        return g, o, A, final_state, None, None, None
+-    elif SUPPRESS_LEVEL >= 3:
+-        return g, o, A, final_state, w, h, v_new
++    return g, o, A, final_state, None, None, None
+ 
+ 
+ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
+@@ -105,6 +107,7 @@
+         chunk_offsets: torch.Tensor | None = None,
+         use_qk_l2norm_in_kernel: bool = False,
+         core_attn_out: torch.Tensor | None = None,
++        v_head_tiled: bool = False,
+     ):
+         if use_qk_l2norm_in_kernel:
+             q = l2norm_fwd(q)
+@@ -123,6 +126,7 @@
+             chunk_indices=chunk_indices,
+             chunk_offsets=chunk_offsets,
+             core_attn_out=core_attn_out,
++            v_head_tiled=v_head_tiled,
+         )
+         ctx.scale = scale
+         ctx.use_qk_l2norm_in_kernel = use_qk_l2norm_in_kernel
+@@ -149,6 +153,7 @@
+     chunk_offsets: torch.Tensor | None = None,
+     use_qk_l2norm_in_kernel: bool = False,
+     core_attn_out: torch.Tensor | None = None,
++    v_head_tiled: bool = False,
+ ):
+     r"""
+     Args:
+@@ -241,5 +246,6 @@
+         chunk_offsets,
+         use_qk_l2norm_in_kernel,
+         core_attn_out,
++        v_head_tiled,
+     )
+     return o, final_state
+diff -ruN -x __pycache__ fla_ops_pristine/chunk_scaled_dot_kkt.py fla_ops/chunk_scaled_dot_kkt.py
+--- fla_ops_pristine/chunk_scaled_dot_kkt.py	2026-10-06 20:06:56.556280947 +0000
++++ fla_ops/chunk_scaled_dot_kkt.py	2026-10-06 20:08:25.536227357 +0000
+@@ -10,22 +10,18 @@
+ 
+ import torch
+ 
+-from vllm.platforms import current_platform
+-from vllm.triton_utils import tl, triton
++import triton
++import triton.language as tl
+ 
+ from .index import prepare_chunk_indices
+ from .op import exp
+-from .utils import FLA_CHUNK_SIZE
++from .utils import FLA_CHUNK_SIZE, autotune
+ 
+ # On RDNA (gfx11xx/gfx12xx) WMMA only
+ # accepts 16-bit/int inputs, so a widened (e.g. fp32) tl.dot is lowered to a
+ # software matmul (~190x amdgcn-stage blowup). There we cast both operands down
+ # to k's native storage dtype (bf16/fp16) so fast WMMA is used instead.
+ _CAST_DOT_TO_K_DTYPE = False
+-if current_platform.is_rocm():
+-    from vllm.platforms.rocm import on_gfx1x
+-
+-    _CAST_DOT_TO_K_DTYPE = on_gfx1x()
+ 
+ 
+ @triton.heuristics(
+@@ -34,7 +30,7 @@
+         "IS_VARLEN": lambda args: args["cu_seqlens"] is not None,
+     }
+ )
+-@triton.autotune(
++@autotune(
+     configs=[
+         triton.Config({"BK": BK}, num_warps=num_warps, num_stages=num_stages)
+         for BK in [32, 64, 128]
+@@ -60,9 +56,11 @@
+     IS_VARLEN: tl.constexpr,
+     USE_G: tl.constexpr,
+     CAST_DOT_TO_K_DTYPE: tl.constexpr,
++    V_HEAD_TILED: tl.constexpr,  # plug-serve: GGUF value-head order, v head j reads q/k head j % Hg
+ ):
+     i_t, i_bh = tl.program_id(0), tl.program_id(1)
+     i_b, i_h = i_bh // H, i_bh % H
++    i_hk = i_h % Hg if V_HEAD_TILED else i_h // (H // Hg)
+     if IS_VARLEN:
+         i_n, i_t = (
+             tl.load(chunk_indices + i_t * 2).to(tl.int32),
+@@ -86,7 +84,7 @@
+     b_A = tl.zeros([BT, BT], dtype=tl.float32)
+     for i_k in range(tl.cdiv(K, BK)):
+         p_k = tl.make_block_ptr(
+-            k + (bos * Hg + i_h // (H // Hg)) * K,
++            k + (bos * Hg + i_hk) * K,
+             (T, K),
+             (Hg * K, 1),
+             (i_t * BT, i_k * BK),
+@@ -124,6 +122,7 @@
+     chunk_indices: torch.Tensor | None = None,
+     chunk_size: int = FLA_CHUNK_SIZE,
+     output_dtype: torch.dtype = torch.float32,
++    v_head_tiled: bool = False,
+ ) -> torch.Tensor:
+     r"""
+     Compute beta * K * K^T.
+@@ -172,5 +171,6 @@
+         K=K,
+         BT=BT,
+         CAST_DOT_TO_K_DTYPE=_CAST_DOT_TO_K_DTYPE,
++        V_HEAD_TILED=v_head_tiled,
+     )
+     return A
+diff -ruN -x __pycache__ fla_ops_pristine/cumsum.py fla_ops/cumsum.py
+--- fla_ops_pristine/cumsum.py	2026-10-06 20:06:56.559278497 +0000
++++ fla_ops/cumsum.py	2026-10-06 20:07:19.271266798 +0000
+@@ -10,16 +10,17 @@
+ 
+ import torch
+ 
+-from vllm.triton_utils import tl, triton
++import triton
++import triton.language as tl
+ 
+ from .index import prepare_chunk_indices
+-from .utils import check_shared_mem, input_guard
++from .utils import autotune, check_shared_mem, input_guard
+ 
+ BS_LIST = [32, 64] if check_shared_mem() else [16, 32]
+ 
+ 
+ @triton.heuristics({"IS_VARLEN": lambda args: args["cu_seqlens"] is not None})
+-@triton.autotune(
++@autotune(
+     configs=[triton.Config({}, num_warps=num_warps) for num_warps in [1, 2, 4, 8]],
+     key=["B", "H", "BT", "IS_VARLEN", "REVERSE"],
+ )
+@@ -72,7 +73,7 @@
+ 
+ 
+ @triton.heuristics({"IS_VARLEN": lambda args: args["cu_seqlens"] is not None})
+-@triton.autotune(
++@autotune(
+     configs=[
+         triton.Config({"BS": BS}, num_warps=num_warps)
+         for BS in BS_LIST
+diff -ruN -x __pycache__ fla_ops_pristine/fused_recurrent.py fla_ops/fused_recurrent.py
+--- fla_ops_pristine/fused_recurrent.py	2026-10-06 20:06:56.561278567 +0000
++++ fla_ops/fused_recurrent.py	2026-10-06 20:08:25.540227311 +0000
+@@ -10,7 +10,8 @@
+ 
+ import torch
+ 
+-from vllm.triton_utils import tl, triton
++import triton
++import triton.language as tl
+ 
+ from .op import exp, log
+ 
+@@ -58,10 +59,11 @@
+     IS_CONTINUOUS_BATCHING: tl.constexpr,
+     IS_SPEC_DECODING: tl.constexpr,
+     IS_KDA: tl.constexpr,
++    V_HEAD_TILED: tl.constexpr,  # plug-serve: GGUF value-head order, v head j reads q/k head j % H
+ ):
+     i_k, i_v, i_nh = tl.program_id(0), tl.program_id(1), tl.program_id(2)
+     i_n, i_hv = i_nh // HV, i_nh % HV
+-    i_h = i_hv // (HV // H)
++    i_h = i_hv % H if V_HEAD_TILED else i_hv // (HV // H)
+     if IS_VARLEN:
+         bos, eos = (
+             tl.load(cu_seqlens + i_n).to(tl.int64),
+@@ -188,6 +190,7 @@
+     ssm_state_indices: torch.Tensor | None = None,
+     num_accepted_tokens: torch.Tensor | None = None,
+     use_qk_l2norm_in_kernel: bool = False,
++    v_head_tiled: bool = False,
+ ) -> tuple[torch.Tensor, torch.Tensor]:
+     B, T, H, K, V = *k.shape, v.shape[-1]
+     HV = v.shape[2]
+@@ -245,6 +248,7 @@
+         USE_QK_L2NORM_IN_KERNEL=use_qk_l2norm_in_kernel,
+         INPLACE_FINAL_STATE=inplace_final_state,
+         IS_KDA=False,
++        V_HEAD_TILED=v_head_tiled,
+         num_warps=num_warps,
+         num_stages=num_stages,
+     )
+@@ -279,13 +283,14 @@
+     SOFTPLUS_THRESHOLD: tl.constexpr,
+     USE_QK_L2NORM_IN_KERNEL: tl.constexpr,
+     SPLIT_BATCH_HEAD_GRID: tl.constexpr,
++    V_HEAD_TILED: tl.constexpr,  # plug-serve: GGUF value-head order, v head j reads q/k head j % H
+ ):
+     if SPLIT_BATCH_HEAD_GRID:
+         i_v, i_hv, i_n = tl.program_id(0), tl.program_id(1), tl.program_id(2)
+     else:
+         i_v, i_nh = tl.program_id(0), tl.program_id(1)
+         i_n, i_hv = i_nh // HV, i_nh % HV
+-    i_h = i_hv // (HV // H)
++    i_h = i_hv % H if V_HEAD_TILED else i_hv // (HV // H)
+ 
+     o_k = tl.arange(0, BK)
+     o_v = i_v * BV + tl.arange(0, BV)
+@@ -351,6 +356,7 @@
+     out: torch.Tensor,
+     ssm_state_indices: torch.Tensor,
+     use_qk_l2norm_in_kernel: bool = False,
++    v_head_tiled: bool = False,
+ ) -> tuple[torch.Tensor, torch.Tensor]:
+     if mixed_qkv.ndim != 2:
+         raise ValueError(
+@@ -479,6 +485,7 @@
+         SOFTPLUS_THRESHOLD=20.0,
+         USE_QK_L2NORM_IN_KERNEL=use_qk_l2norm_in_kernel,
+         SPLIT_BATCH_HEAD_GRID=split_batch_head_grid,
++        V_HEAD_TILED=v_head_tiled,
+         num_warps=num_warps,
+         num_stages=num_stages,
+     )
+@@ -501,6 +508,7 @@
+         ssm_state_indices: torch.Tensor | None = None,
+         num_accepted_tokens: torch.Tensor | None = None,
+         use_qk_l2norm_in_kernel: bool = False,
++        v_head_tiled: bool = False,
+     ):
+         o, final_state = fused_recurrent_gated_delta_rule_fwd(
+             q=q.contiguous(),
+@@ -515,6 +523,7 @@
+             ssm_state_indices=ssm_state_indices,
+             num_accepted_tokens=num_accepted_tokens,
+             use_qk_l2norm_in_kernel=use_qk_l2norm_in_kernel,
++            v_head_tiled=v_head_tiled,
+         )
+ 
+         return o, final_state
+@@ -533,6 +542,7 @@
+     ssm_state_indices: torch.Tensor | None = None,
+     num_accepted_tokens: torch.Tensor | None = None,
+     use_qk_l2norm_in_kernel: bool = False,
++    v_head_tiled: bool = False,
+ ) -> tuple[torch.Tensor, torch.Tensor]:
+     r"""
+     Args:
+@@ -622,5 +632,6 @@
+         ssm_state_indices,
+         num_accepted_tokens,
+         use_qk_l2norm_in_kernel,
++        v_head_tiled,
+     )
+     return o, final_state
+diff -ruN -x __pycache__ fla_ops_pristine/fused_sigmoid_gating.py fla_ops/fused_sigmoid_gating.py
+--- fla_ops_pristine/fused_sigmoid_gating.py	2026-10-06 20:06:56.564279472 +0000
++++ fla_ops/fused_sigmoid_gating.py	2026-10-06 20:08:25.542228582 +0000
+@@ -9,7 +9,8 @@
+ 
+ import torch
+ 
+-from vllm.triton_utils import tl, triton
++import triton
++import triton.language as tl
+ 
+ 
+ @triton.heuristics(
+@@ -58,10 +59,11 @@
+     IS_CONTINUOUS_BATCHING: tl.constexpr,
+     IS_SPEC_DECODING: tl.constexpr,
+     IS_KDA: tl.constexpr,
++    V_HEAD_TILED: tl.constexpr,  # plug-serve: GGUF value-head order, v head j reads q/k head j % H
+ ):
+     i_k, i_v, i_nh = tl.program_id(0), tl.program_id(1), tl.program_id(2)
+     i_n, i_hv = i_nh // HV, i_nh % HV
+-    i_h = i_hv // (HV // H)
++    i_h = i_hv % H if V_HEAD_TILED else i_hv // (HV // H)
+     if IS_VARLEN:
+         bos, eos = (
+             tl.load(cu_seqlens + i_n).to(tl.int64),
+@@ -196,6 +198,7 @@
+     num_accepted_tokens: torch.Tensor | None = None,
+     use_qk_l2norm_in_kernel: bool = False,
+     is_kda: bool = False,
++    v_head_tiled: bool = False,
+ ):
+     """
+     Fused triton implementation of sigmoid gating delta rule update.
+@@ -272,6 +275,7 @@
+         INPLACE_FINAL_STATE=inplace_final_state,
+         USE_QK_L2NORM_IN_KERNEL=use_qk_l2norm_in_kernel,
+         IS_KDA=is_kda,
++        V_HEAD_TILED=v_head_tiled,
+         num_warps=num_warps,
+         num_stages=num_stages,
+     )
+diff -ruN -x __pycache__ fla_ops_pristine/index.py fla_ops/index.py
+--- fla_ops_pristine/index.py	2026-10-06 20:06:56.567279333 +0000
++++ fla_ops/index.py	2026-10-06 20:07:33.230257650 +0000
+@@ -9,31 +9,21 @@
+ # ruff: noqa: E501
+ import torch
+ 
+-from vllm.utils.gpu_sync_debug import gpu_sync_allowed
+-from vllm.utils.torch_utils import async_tensor_h2d
+-from vllm.triton_utils import triton
++import triton
+ 
+-from .utils import tensor_cache
+ 
+-
+-@tensor_cache
+ def prepare_lens(cu_seqlens: torch.Tensor) -> torch.Tensor:
+     return cu_seqlens[1:] - cu_seqlens[:-1]
+ 
+ 
+-@tensor_cache
+ def prepare_chunk_indices(cu_seqlens: torch.Tensor, chunk_size: int) -> torch.Tensor:
+-    # This will be fixed by https://github.com/vllm-project/vllm/pull/51540.
+-    with gpu_sync_allowed():
+-        chunk_counts = triton.cdiv(prepare_lens(cu_seqlens), chunk_size).tolist()
++    # Host sync: callers should build chunk indices on the host (planner) and pass them in.
++    chunk_counts = triton.cdiv(prepare_lens(cu_seqlens), chunk_size).tolist()
+     indices = torch.cat([torch.arange(n) for n in chunk_counts])
+     chunk_indices = torch.stack([indices.eq(0).cumsum(0) - 1, indices], 1)
+-    return async_tensor_h2d(
+-        chunk_indices, device=cu_seqlens.device, dtype=cu_seqlens.dtype
+-    )
++    return chunk_indices.to(device=cu_seqlens.device, dtype=cu_seqlens.dtype)
+ 
+ 
+-@tensor_cache
+ def prepare_chunk_offsets(cu_seqlens: torch.Tensor, chunk_size: int) -> torch.Tensor:
+     return torch.cat(
+         [cu_seqlens.new_zeros(1), triton.cdiv(prepare_lens(cu_seqlens), chunk_size)]
+diff -ruN -x __pycache__ fla_ops_pristine/__init__.py fla_ops/__init__.py
+--- fla_ops_pristine/__init__.py	2026-10-06 20:06:56.545278556 +0000
++++ fla_ops/__init__.py	2026-10-06 20:07:39.324254530 +0000
+@@ -7,19 +7,17 @@
+ # the following copyright notice:
+ # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
+ from .chunk import chunk_gated_delta_rule
+-from .fused_gdn_prefill_post_conv import fused_post_conv_prep
+ from .fused_recurrent import (
+     fused_recurrent_gated_delta_rule,
+     fused_recurrent_gated_delta_rule_packed_decode,
+ )
+ from .fused_sigmoid_gating import fused_sigmoid_gating_delta_rule_update
+-from .layernorm_guard import RMSNormGated
++from .l2norm import l2norm_fwd
+ 
+ __all__ = [
+-    "RMSNormGated",
+     "chunk_gated_delta_rule",
+     "fused_recurrent_gated_delta_rule",
+     "fused_recurrent_gated_delta_rule_packed_decode",
+-    "fused_post_conv_prep",
+     "fused_sigmoid_gating_delta_rule_update",
++    "l2norm_fwd",
+ ]
+diff -ruN -x __pycache__ fla_ops_pristine/l2norm.py fla_ops/l2norm.py
+--- fla_ops_pristine/l2norm.py	2026-10-06 20:06:56.569278454 +0000
++++ fla_ops/l2norm.py	2026-10-06 20:07:45.447255405 +0000
+@@ -7,72 +7,11 @@
+ # the following copyright notice:
+ # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
+ 
+-import os
++# plug-serve S3: only vLLM's default path (l2norm_fwd_kernel2, no autotune) is kept.
+ 
+ import torch
+-
+-from vllm.triton_utils import tl, triton
+-
+-BT_LIST = [8, 16, 32, 64, 128]
+-
+-USE_DEFAULT_FLA_NORM = int(os.getenv("USE_DEFAULT_FLA_NORM", "0"))
+-
+-
+-@triton.autotune(
+-    configs=[
+-        triton.Config({}, num_warps=num_warps) for num_warps in [1, 2, 4, 8, 16, 32]
+-    ],
+-    key=["D"],
+-)
+-@triton.jit
+-def l2norm_fwd_kernel1(
+-    x,
+-    y,
+-    D,
+-    BD: tl.constexpr,
+-    eps,
+-):
+-    i_t = tl.program_id(0)
+-    x += i_t * D
+-    y += i_t * D
+-    # Compute mean and variance
+-    cols = tl.arange(0, BD)
+-    mask = cols < D
+-    b_x = tl.load(x + cols, mask=mask, other=0.0).to(tl.float32)
+-    b_var = tl.sum(b_x * b_x, axis=0)
+-    b_rstd = 1 / tl.sqrt(b_var + eps)
+-    # tl.store(Rstd + i_t, rstd)
+-    # Normalize and apply linear transformation
+-    b_y = b_x * b_rstd
+-    tl.store(y + cols, b_y, mask=mask)
+-
+-
+-@triton.autotune(
+-    configs=[
+-        triton.Config({"BT": BT}, num_warps=num_warps)
+-        for num_warps in [1, 2, 4, 8, 16]
+-        for BT in BT_LIST
+-    ],
+-    key=["D"],
+-)
+-@triton.jit(do_not_specialize=["NB"])
+-def l2norm_fwd_kernel(
+-    x,
+-    y,
+-    eps,
+-    NB,
+-    T,
+-    D: tl.constexpr,
+-    BT: tl.constexpr,
+-    BD: tl.constexpr,
+-):
+-    i_t = tl.program_id(0)
+-    p_x = tl.make_block_ptr(x, (T, D), (D, 1), (i_t * BT, 0), (BT, BD), (1, 0))
+-    b_x = tl.load(p_x, boundary_check=(0, 1)).to(tl.float32)
+-    b_var = tl.sum(b_x * b_x, axis=1)
+-    b_y = b_x / tl.sqrt(b_var + eps)[:, None]
+-    p_y = tl.make_block_ptr(y, (T, D), (D, 1), (i_t * BT, 0), (BT, BD), (1, 0))
+-    tl.store(p_y, b_y.to(p_y.dtype.element_ty), boundary_check=(0, 1))
++import triton
++import triton.language as tl
+ 
+ 
+ @triton.jit
+@@ -104,48 +43,20 @@
+         y = torch.empty_like(x, dtype=output_dtype)
+     assert y.stride(-1) == 1
+     T, D = x.shape[0], x.shape[-1]
+-    # rstd = torch.empty((T,), dtype=torch.float32, device=x.device)
+     # Less than 64KB per feature: enqueue fused kernel
+     MAX_FUSED_SIZE = 65536 // x.element_size()
+     BD = min(MAX_FUSED_SIZE, triton.next_power_of_2(D))
+     if D > BD:
+         raise RuntimeError("This layer doesn't support feature dim >= 64KB.")
+ 
+-    if not USE_DEFAULT_FLA_NORM:
+-        MBLOCK = 32
+-        # M, N = x.shape
+-        l2norm_fwd_kernel2[(triton.cdiv(T, MBLOCK),)](
+-            x,
+-            y,
+-            eps,
+-            T,
+-            D,
+-            BD,
+-            MBLOCK,
+-        )
+-    else:
+-        if D <= 512:
+-            NB = triton.cdiv(T, 2048)
+-
+-            def grid(meta):
+-                return (triton.cdiv(T, meta["BT"]),)
+-
+-            l2norm_fwd_kernel[grid](
+-                x,
+-                y,
+-                eps,
+-                NB=NB,
+-                T=T,
+-                D=D,
+-                BD=BD,
+-            )
+-        else:
+-            l2norm_fwd_kernel1[(T,)](
+-                x,
+-                y,
+-                eps=eps,
+-                D=D,
+-                BD=BD,
+-            )
+-
++    MBLOCK = 32
++    l2norm_fwd_kernel2[(triton.cdiv(T, MBLOCK),)](
++        x,
++        y,
++        eps,
++        T,
++        D,
++        BD,
++        MBLOCK,
++    )
+     return y.view(x_shape_og)
+diff -ruN -x __pycache__ fla_ops_pristine/op.py fla_ops/op.py
+--- fla_ops_pristine/op.py	2026-10-06 20:06:56.572278346 +0000
++++ fla_ops/op.py	2026-10-06 20:07:33.227258449 +0000
+@@ -7,22 +7,15 @@
+ # the following copyright notice:
+ # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
+ 
+-import os
+-
+-from vllm.triton_utils import tl, tldevice, triton
++import triton
++import triton.language as tl
+ 
+ from .utils import is_gather_supported
+ 
+-if os.environ.get("FLA_USE_FAST_OPS", "0") == "1":
+-    exp = tldevice.fast_expf
+-    exp2 = tl.exp2
+-    log = tldevice.fast_logf
+-    log2 = tldevice.fast_log2f
+-else:
+-    exp = tl.exp
+-    exp2 = tl.exp2
+-    log = tl.log
+-    log2 = tl.log2
++exp = tl.exp
++exp2 = tl.exp2
++log = tl.log
++log2 = tl.log2
+ 
+ 
+ if not is_gather_supported:
+diff -ruN -x __pycache__ fla_ops_pristine/solve_tril.py fla_ops/solve_tril.py
+--- fla_ops_pristine/solve_tril.py	2026-10-06 20:06:56.574278736 +0000
++++ fla_ops/solve_tril.py	2026-10-06 20:07:39.321254246 +0000
+@@ -8,25 +8,20 @@
+ # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
+ # ruff: noqa: E501
+ 
+-import os
+-
+ import torch
+ 
+-from vllm.triton_utils import tl, triton
++import triton
++import triton.language as tl
+ 
+ from .index import prepare_chunk_indices
+ from .op import make_tensor_descriptor
+-from .utils import input_guard, is_amd, is_tma_supported
++from .utils import autotune, input_guard, is_tma_supported
+ 
+-FLA_TRIL_PRECISION = os.environ.get("FLA_TRIL_PRECISION", "ieee")
+-ALLOWED_TRIL_PRECISIONS = ["ieee", "tf32"] if is_amd else ["ieee", "tf32", "tf32x3"]
+-assert FLA_TRIL_PRECISION in ALLOWED_TRIL_PRECISIONS, (
+-    f"FLA_TRIL_PRECISION must be one of {ALLOWED_TRIL_PRECISIONS}, but got {FLA_TRIL_PRECISION}"
+-)
++FLA_TRIL_PRECISION = "ieee"
+ 
+ 
+ @triton.heuristics({"IS_VARLEN": lambda args: args["cu_seqlens"] is not None})
+-@triton.autotune(
++@autotune(
+     configs=[
+         triton.Config({}, num_warps=num_warps, num_stages=num_stages)
+         for num_warps in [1, 2, 4, 8]
+@@ -101,7 +96,7 @@
+ 
+ 
+ @triton.heuristics({"IS_VARLEN": lambda args: args["cu_seqlens"] is not None})
+-@triton.autotune(
++@autotune(
+     configs=[
+         triton.Config({}, num_warps=num_warps, num_stages=num_stages)
+         for num_warps in [1, 2, 4, 8]
+@@ -226,7 +221,7 @@
+ 
+ 
+ @triton.heuristics({"IS_VARLEN": lambda args: args["cu_seqlens"] is not None})
+-@triton.autotune(
++@autotune(
+     configs=[
+         triton.Config({}, num_warps=num_warps, num_stages=num_stages)
+         for num_warps in [2, 4, 8]
+diff -ruN -x __pycache__ fla_ops_pristine/utils.py fla_ops/utils.py
+--- fla_ops_pristine/utils.py	2026-10-06 20:06:56.577279948 +0000
++++ fla_ops/utils.py	2026-10-06 20:14:37.471994774 +0000
+@@ -7,77 +7,51 @@
+ # the following copyright notice:
+ # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
+ # ruff: noqa: E501
++#
++# plug-serve S3: vllm.platforms / env-var switches removed (NVIDIA only, TMA off, no FLA_* env), tensor_cache
++# removed, and triton.autotune replaced by `autotune` below (design §5.6 rule 7).
+ import contextlib
+ import functools
+-import logging
+ import os
+ from collections.abc import Callable
+-from enum import Enum
+-from typing import Any, Literal
+ 
+ import torch
++import triton
+ 
+-from vllm.platforms import current_platform
+-from vllm.triton_utils import triton
+-
+-logger = logging.getLogger(__name__)
+-
+-COMPILER_MODE = os.getenv("FLA_COMPILER_MODE") == "1"
+-FLA_CI_ENV = os.getenv("FLA_CI_ENV") == "1"
+-
+-SUPPRESS_LEVEL = int(os.getenv("GDN_RECOMPUTE_SUPPRESS_LEVEL", "0"))
+-
+-# Default chunk size used across FLA triton kernels (kda, chunk, chunk_o, etc.)
++# Default chunk size used across FLA triton kernels (chunk, chunk_o, etc.)
+ FLA_CHUNK_SIZE = 64
+ 
++is_amd = False
++is_nvidia_hopper = False  # only consulted for chunk_o's warp list; Hopper is not a plug-serve v0 target
++is_tma_supported = False
++is_gather_supported = hasattr(triton.language, "gather")
+ 
+-def tensor_cache(fn: Callable[..., torch.Tensor]) -> Callable[..., torch.Tensor]:
+-    """
+-    A decorator that caches the most recent results of a function with tensor inputs.
+-
+-    This decorator will store the output of the decorated function for the most recent set of input tensors.
+-    The cache is limited to a fixed size (default is 4). When the cache is full, the oldest entry will be removed.
+-
+-    Args:
+-        fn (Callable[..., torch.Tensor]):
+-            The function to be decorated. It should take tensor inputs and return tensor outputs.
+-
+-    Returns:
+-        Callable[..., torch.Tensor]:
+-            A wrapped version of the input function with single-entry caching.
+-    """
+-
+-    cache_entries: tuple[tuple | None, dict | None, Any] = []
+-    cache_size = 8
+-
+-    @functools.wraps(fn)
+-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+-        nonlocal cache_entries, cache_size
+-        for i, entry in enumerate(cache_entries):
+-            last_args, last_kwargs, last_result = entry
+-            if (
+-                len(args) == len(last_args)
+-                and len(kwargs) == len(last_kwargs)
+-                and all(a is b for a, b in zip(args, last_args))
+-                and all(
+-                    k in last_kwargs and v is last_kwargs[k] for k, v in kwargs.items()
+-                )
+-            ):
+-                cache_entries = (
+-                    cache_entries[:i]
+-                    + cache_entries[i + 1 :]
+-                    + [(args, kwargs, last_result)]
+-                )
+-                return last_result
+-
+-        result = fn(*args, **kwargs)
+-
+-        if len(cache_entries) >= cache_size:
+-            cache_entries = cache_entries[1:]
+-        cache_entries.append((args, kwargs, result))
+-        return result
++# Spike-only switch: spikes/s3_gdn/tune.py sets S3_FLA_AUTOTUNE=1 to search vLLM's original config space. Otherwise
++# every kernel launches with exactly one pinned config (no benchmarking at first call, run-to-run stable).
++AUTOTUNE = os.environ.get("S3_FLA_AUTOTUNE") == "1"
++
++# Pinned configs: one table for sm_86 and sm_120, picked from the per-arch winners of S3's tune.py
++# (spikes/s3_gdn/results/tune_*.json) at Qwen3.5-9B / Qwen3.8-27B shapes, T=8192.
++PINNED: dict[str, dict] = {
++    "chunk_local_cumsum_scalar_kernel": dict(kwargs={}, num_warps=2, num_stages=3),
++    "chunk_scaled_dot_kkt_fwd_kernel": dict(kwargs={"BK": 64}, num_warps=4, num_stages=2),
++    "merge_16x16_to_64x64_inverse_kernel": dict(kwargs={}, num_warps=2, num_stages=3),
++    "recompute_w_u_fwd_kernel": dict(kwargs={}, num_warps=2, num_stages=3),
++    "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": dict(kwargs={"BV": 32}, num_warps=4, num_stages=3),
++    "chunk_fwd_kernel_o": dict(kwargs={"BK": 64, "BV": 64}, num_warps=4, num_stages=2),
++}
++
++
++def autotune(configs: list, key: list[str], **_: object):
++    """Drop-in for `triton.autotune`: one config (PINNED, else the first listed) unless the spike tuner runs."""
++
++    def wrap(fn):
++        if AUTOTUNE:
++            return triton.autotune(configs=configs, key=key)(fn)
++        pinned = PINNED.get(fn.__name__)
++        return triton.autotune(configs=[triton.Config(**pinned) if pinned else configs[0]], key=key)(fn)
+ 
+-    return wrapper
++    return wrap
+ 
+ 
+ def input_guard(fn: Callable[..., torch.Tensor]) -> Callable[..., torch.Tensor]:
+@@ -118,83 +92,11 @@
+ 
+ 
+ @functools.cache
+-def get_available_device() -> str:
+-    try:
+-        return triton.runtime.driver.active.get_current_target().backend
+-    except (RuntimeError, AttributeError):
+-        return "cpu"
+-
+-
+-@functools.cache
+-def _check_platform() -> Literal["nvidia", "amd", "intel", "musa"]:
+-    device = get_available_device()
+-    mapping = {
+-        "cuda": "nvidia",
+-        "hip": "amd",
+-        "xpu": "intel",
+-    }
+-    # return the mapped value, or the original if not found
+-    return mapping.get(device, device)
+-
+-
+-# For AMD GPUs, the triton backend is 'hip', while for Nvidia GPUs, the triton backend is 'cuda'.
+-# However, the torch backend is 'cuda' for both Nvidia and AMD GPUs.
+-# Therefore, we need to check the triton backend to determine the actual GPU vendor.
+-device = "cuda" if current_platform.is_cuda_alike() else get_available_device()
+-device_torch_lib = getattr(torch, device, None)
+-device_platform = _check_platform()
+-
+-is_amd = device_platform == "amd"
+-is_intel = device_platform == "intel"
+-is_nvidia = device_platform == "nvidia"
+-is_intel_alchemist = is_intel and "Intel(R) Arc(TM) A" in torch.xpu.get_device_name(0)
+-is_nvidia_hopper = is_nvidia and (
+-    "NVIDIA H" in torch.cuda.get_device_name(0)
+-    or torch.cuda.get_device_capability()[0] >= 9
+-)
+-use_cuda_graph = is_nvidia and os.environ.get("FLA_USE_CUDA_GRAPH", "0") == "1"
+-is_gather_supported = hasattr(triton.language, "gather")
+-is_tma_supported = (
+-    is_nvidia_hopper
+-    and os.getenv("FLA_USE_TMA", "0") == "1"
+-    and (
+-        hasattr(triton.language, "_experimental_make_tensor_descriptor")
+-        or hasattr(triton.language, "make_tensor_descriptor")
+-    )
+-)
+-
+-
+-def get_all_max_shared_mem():
+-    try:
+-        return [
+-            triton.runtime.driver.active.utils.get_device_properties(i)[
+-                "max_shared_mem"
+-            ]
+-            for i in range(device_torch_lib.device_count())
+-        ]
+-    except BaseException:
+-        return [-1]
+-
+-
+-class Backend(Enum):
+-    ADA = 101376  # RTX 4090
+-    AMPERE = 166912  # A100
+-    HOPPER = 232448  # H100
+-    DEFAULT = 102400  # Default
+-
+-    @classmethod
+-    def get_shared_memory(cls, arch: str) -> int:
+-        try:
+-            return cls[arch.upper()].value
+-        except KeyError:
+-            return cls.DEFAULT.value
+-
+-
+-@functools.cache
+ def check_shared_mem(arch: str = "none", tensor_idx: int = 0) -> bool:
++    # vLLM's per-arch table reduced to the arch="none" threshold it is always called with (102400 B). False on
++    # both sm_86 and sm_120 (99 KiB opt-in shared memory), which selects the smaller BKV_LIST / BS_LIST.
+     try:
+-        device_shared_mem_list = get_all_max_shared_mem()
+-        max_shared_memory = device_shared_mem_list[tensor_idx]
+-        return max_shared_memory >= Backend.get_shared_memory(arch)
++        max_shared = triton.runtime.driver.active.utils.get_device_properties(tensor_idx)["max_shared_mem"]
++        return max_shared >= 102400
+     except Exception:
+         return False
+diff -ruN -x __pycache__ fla_ops_pristine/wy_fast.py fla_ops/wy_fast.py
+--- fla_ops_pristine/wy_fast.py	2026-10-06 20:06:56.579279425 +0000
++++ fla_ops/wy_fast.py	2026-10-06 20:08:25.537227310 +0000
+@@ -11,13 +11,16 @@
+ 
+ import torch
+ 
+-from vllm.triton_utils import tl, triton
++import triton
++import triton.language as tl
++
++from .utils import autotune
+ 
+ from .index import prepare_chunk_indices
+ 
+ 
+ @triton.heuristics({"IS_VARLEN": lambda args: args["cu_seqlens"] is not None})
+-@triton.autotune(
++@autotune(
+     configs=[
+         triton.Config({}, num_warps=num_warps, num_stages=num_stages)
+         for num_warps in [2, 4, 8]
+@@ -45,9 +48,11 @@
+     BK: tl.constexpr,
+     BV: tl.constexpr,
+     IS_VARLEN: tl.constexpr,
++    V_HEAD_TILED: tl.constexpr,  # plug-serve: GGUF value-head order, v head j reads q/k head j % Hg
+ ):
+     i_t, i_bh = tl.program_id(0), tl.program_id(1)
+     i_b, i_h = i_bh // H, i_bh % H
++    i_hk = i_h % Hg if V_HEAD_TILED else i_h // (H // Hg)
+     if IS_VARLEN:
+         i_n, i_t = (
+             tl.load(chunk_indices + i_t * 2).to(tl.int32),
+@@ -95,7 +100,7 @@
+ 
+     for i_k in range(tl.cdiv(K, BK)):
+         p_k = tl.make_block_ptr(
+-            k + (bos * Hg + i_h // (H // Hg)) * K,
++            k + (bos * Hg + i_hk) * K,
+             (T, K),
+             (Hg * K, 1),
+             (i_t * BT, i_k * BK),
+@@ -124,6 +129,7 @@
+     A: torch.Tensor,
+     cu_seqlens: torch.Tensor | None,
+     chunk_indices: torch.Tensor | None = None,
++    v_head_tiled: bool = False,
+ ) -> tuple[torch.Tensor, torch.Tensor]:
+     B, T, Hg, K, V = *k.shape, v.shape[-1]
+     H = v.shape[-2]
+@@ -154,5 +160,6 @@
+         BT=BT,
+         BK=BK,
+         BV=BV,
++        V_HEAD_TILED=v_head_tiled,
+     )
+     return w, u

@@ -1,0 +1,481 @@
+{
+ "device": {
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "sm": "sm_120",
+  "torch": "2.11.0+cu130",
+  "triton": "3.6.0",
+  "cuda_visible_devices": "6"
+ },
+ "autotune": false,
+ "models": {
+  "9b": {
+   "shape": {
+    "Hg": 16,
+    "H": 32,
+    "K": 128,
+    "V": 128,
+    "gdn_layers": 24
+   },
+   "prefill": [
+    {
+     "lens": [
+      64
+     ],
+     "tokens": 64,
+     "ms_per_layer": 0.4575359970331192,
+     "graph_ms_per_layer": 0.04699200019240379,
+     "workspace_mib": 5.7578125,
+     "tok_s_per_layer": 139879.70436207514,
+     "tok_s_all_gdn_layers": 5828.321015086464
+    },
+    {
+     "lens": [
+      512
+     ],
+     "tokens": 512,
+     "ms_per_layer": 0.4345120042562485,
+     "graph_ms_per_layer": 0.07355200126767159,
+     "workspace_mib": 32.0625,
+     "tok_s_per_layer": 1178333.3831625371,
+     "tok_s_all_gdn_layers": 49097.22429843905
+    },
+    {
+     "lens": [
+      2048
+     ],
+     "tokens": 2048,
+     "ms_per_layer": 0.47547200322151184,
+     "graph_ms_per_layer": 0.2211040034890175,
+     "workspace_mib": 122.25,
+     "tok_s_per_layer": 4307298.8233250035,
+     "tok_s_all_gdn_layers": 179470.78430520848
+    },
+    {
+     "lens": [
+      8192
+     ],
+     "tokens": 8192,
+     "ms_per_layer": 1.0631200075149536,
+     "graph_ms_per_layer": 0.9319039881229401,
+     "workspace_mib": 483.0,
+     "tok_s_per_layer": 7705621.13598899,
+     "tok_s_all_gdn_layers": 321067.54733287456
+    },
+    {
+     "lens": [
+      32768
+     ],
+     "tokens": 32768,
+     "ms_per_layer": 4.139775991439819,
+     "graph_ms_per_layer": 4.09224009513855,
+     "workspace_mib": 1926.0,
+     "tok_s_per_layer": 7915404.134851086,
+     "tok_s_all_gdn_layers": 329808.5056187953
+    },
+    {
+     "lens": [
+      2048,
+      2048,
+      2048,
+      2048
+     ],
+     "tokens": 8192,
+     "ms_per_layer": 1.1149439811706543,
+     "graph_ms_per_layer": 0.982560008764267,
+     "workspace_mib": 489.0,
+     "tok_s_per_layer": 7347454.346001017,
+     "tok_s_all_gdn_layers": 306143.9310833757
+    }
+   ],
+   "decode": [
+    {
+     "kind": "fused_recurrent",
+     "n_seqs": 1,
+     "tokens_per_seq": 1,
+     "n_pools": 24,
+     "graph_us_per_layer": 4.756666564693053,
+     "eager_us_per_layer": 87.12533116340637,
+     "graph_us_all_gdn_layers": 114.15999755263329,
+     "state_GBps": 881.7738100737901
+    },
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 1,
+     "tokens_per_seq": 1,
+     "n_pools": 24,
+     "graph_us_per_layer": 4.335333437969287,
+     "eager_us_per_layer": 55.74066688617071,
+     "graph_us_all_gdn_layers": 104.0480025112629,
+     "state_GBps": 967.4697598265138
+    },
+    {
+     "kind": "packed_decode",
+     "n_seqs": 1,
+     "tokens_per_seq": 1,
+     "n_pools": 24,
+     "graph_us_per_layer": 5.192666780203581,
+     "eager_us_per_layer": 39.92266704638799,
+     "graph_us_all_gdn_layers": 124.62400272488594,
+     "state_GBps": 807.7360203412784
+    },
+    {
+     "kind": "fused_recurrent",
+     "n_seqs": 4,
+     "tokens_per_seq": 1,
+     "n_pools": 24,
+     "graph_us_per_layer": 11.696000273029009,
+     "eager_us_per_layer": 85.79066395759583,
+     "graph_us_all_gdn_layers": 280.7040065526962,
+     "state_GBps": 1434.440458990778
+    },
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 4,
+     "tokens_per_seq": 1,
+     "n_pools": 24,
+     "graph_us_per_layer": 11.947333191831907,
+     "eager_us_per_layer": 54.090000689029694,
+     "graph_us_all_gdn_layers": 286.73599660396576,
+     "state_GBps": 1404.2645108006332
+    },
+    {
+     "kind": "packed_decode",
+     "n_seqs": 4,
+     "tokens_per_seq": 1,
+     "n_pools": 24,
+     "graph_us_per_layer": 12.064666797717413,
+     "eager_us_per_layer": 40.28133302927017,
+     "graph_us_all_gdn_layers": 289.5520031452179,
+     "state_GBps": 1390.6074889009103
+    },
+    {
+     "kind": "fused_recurrent",
+     "n_seqs": 16,
+     "tokens_per_seq": 1,
+     "n_pools": 16,
+     "graph_us_per_layer": 45.15000060200691,
+     "eager_us_per_layer": 87.72899955511093,
+     "graph_us_all_gdn_layers": 1083.600014448166,
+     "state_GBps": 1486.3535571473951
+    },
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 16,
+     "tokens_per_seq": 1,
+     "n_pools": 16,
+     "graph_us_per_layer": 44.828999787569046,
+     "eager_us_per_layer": 57.83400125801563,
+     "graph_us_all_gdn_layers": 1075.895994901657,
+     "state_GBps": 1496.9966833524823
+    },
+    {
+     "kind": "packed_decode",
+     "n_seqs": 16,
+     "tokens_per_seq": 1,
+     "n_pools": 16,
+     "graph_us_per_layer": 46.13200016319752,
+     "eager_us_per_layer": 47.38899879157543,
+     "graph_us_all_gdn_layers": 1107.1680039167404,
+     "state_GBps": 1454.7139461240417
+    },
+    {
+     "kind": "fused_recurrent",
+     "n_seqs": 64,
+     "tokens_per_seq": 1,
+     "n_pools": 4,
+     "graph_us_per_layer": 184.67599898576736,
+     "eager_us_per_layer": 201.9679993391037,
+     "graph_us_all_gdn_layers": 4432.223975658417,
+     "state_GBps": 1453.5481463440617
+    },
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 64,
+     "tokens_per_seq": 1,
+     "n_pools": 4,
+     "graph_us_per_layer": 183.6640015244484,
+     "eager_us_per_layer": 196.93199545145035,
+     "graph_us_all_gdn_layers": 4407.9360365867615,
+     "state_GBps": 1461.5572663773596
+    },
+    {
+     "kind": "packed_decode",
+     "n_seqs": 64,
+     "tokens_per_seq": 1,
+     "n_pools": 4,
+     "graph_us_per_layer": 185.01999974250793,
+     "eager_us_per_layer": 194.24400478601456,
+     "graph_us_all_gdn_layers": 4440.47999382019,
+     "state_GBps": 1450.8456187092272
+    }
+   ],
+   "verify": [
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 1,
+     "tokens_per_seq": 4,
+     "n_pools": 24,
+     "graph_us_per_layer": 12.566666429241499,
+     "eager_us_per_layer": 56.36200060447057,
+     "graph_us_all_gdn_layers": 301.59999430179596,
+     "state_GBps": 333.7642503377214
+    },
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 4,
+     "tokens_per_seq": 4,
+     "n_pools": 16,
+     "graph_us_per_layer": 26.775999926030636,
+     "eager_us_per_layer": 56.324999779462814,
+     "graph_us_all_gdn_layers": 642.6239982247353,
+     "state_GBps": 626.5766375241811
+    },
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 16,
+     "tokens_per_seq": 4,
+     "n_pools": 4,
+     "graph_us_per_layer": 117.1879991889,
+     "eager_us_per_layer": 130.90000301599503,
+     "graph_us_all_gdn_layers": 2812.5119805336,
+     "state_GBps": 572.659866748169
+    }
+   ]
+  },
+  "27b": {
+   "shape": {
+    "Hg": 16,
+    "H": 48,
+    "K": 128,
+    "V": 128,
+    "gdn_layers": 48
+   },
+   "prefill": [
+    {
+     "lens": [
+      64
+     ],
+     "tokens": 64,
+     "ms_per_layer": 0.4447679966688156,
+     "graph_ms_per_layer": 0.052639998495578766,
+     "workspace_mib": 8.38671875,
+     "tok_s_per_layer": 143895.24533991114,
+     "tok_s_all_gdn_layers": 2997.8176112481483
+    },
+    {
+     "lens": [
+      512
+     ],
+     "tokens": 512,
+     "ms_per_layer": 0.4386560022830963,
+     "graph_ms_per_layer": 0.10601599887013435,
+     "workspace_mib": 48.09375,
+     "tok_s_per_layer": 1167201.628007291,
+     "tok_s_all_gdn_layers": 24316.700583485228
+    },
+    {
+     "lens": [
+      2048
+     ],
+     "tokens": 2048,
+     "ms_per_layer": 0.5478399991989136,
+     "graph_ms_per_layer": 0.343968003988266,
+     "workspace_mib": 176.375,
+     "tok_s_per_layer": 3738317.7624757513,
+     "tok_s_all_gdn_layers": 77881.62005157815
+    },
+    {
+     "lens": [
+      8192
+     ],
+     "tokens": 8192,
+     "ms_per_layer": 1.6922399997711182,
+     "graph_ms_per_layer": 1.5566559433937073,
+     "workspace_mib": 692.5,
+     "tok_s_per_layer": 4840920.910218407,
+     "tok_s_all_gdn_layers": 100852.5189628835
+    },
+    {
+     "lens": [
+      32768
+     ],
+     "tokens": 32768,
+     "ms_per_layer": 6.623183965682983,
+     "graph_ms_per_layer": 6.546816110610962,
+     "workspace_mib": 2761.0,
+     "tok_s_per_layer": 4947469.399881143,
+     "tok_s_all_gdn_layers": 103072.27916419048
+    },
+    {
+     "lens": [
+      2048,
+      2048,
+      2048,
+      2048
+     ],
+     "tokens": 8192,
+     "ms_per_layer": 1.6074399948120117,
+     "graph_ms_per_layer": 1.4356800317764282,
+     "workspace_mib": 701.5,
+     "tok_s_per_layer": 5096302.211242445,
+     "tok_s_all_gdn_layers": 106172.96273421761
+    }
+   ],
+   "decode": [
+    {
+     "kind": "fused_recurrent",
+     "n_seqs": 1,
+     "tokens_per_seq": 1,
+     "n_pools": 48,
+     "graph_us_per_layer": 6.40466654052337,
+     "eager_us_per_layer": 88.14733723799388,
+     "graph_us_all_gdn_layers": 307.42399394512177,
+     "state_GBps": 982.3237416332188
+    },
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 1,
+     "tokens_per_seq": 1,
+     "n_pools": 48,
+     "graph_us_per_layer": 6.470999990900357,
+     "eager_us_per_layer": 56.12299839655558,
+     "graph_us_all_gdn_layers": 310.60799956321716,
+     "state_GBps": 972.2540579272392
+    },
+    {
+     "kind": "packed_decode",
+     "n_seqs": 1,
+     "tokens_per_seq": 1,
+     "n_pools": 48,
+     "graph_us_per_layer": 7.399666743973891,
+     "eager_us_per_layer": 40.39366667469343,
+     "graph_us_all_gdn_layers": 355.18400371074677,
+     "state_GBps": 850.2350467503971
+    },
+    {
+     "kind": "fused_recurrent",
+     "n_seqs": 4,
+     "tokens_per_seq": 1,
+     "n_pools": 35,
+     "graph_us_per_layer": 15.802513701575142,
+     "eager_us_per_layer": 86.5567990711757,
+     "graph_us_all_gdn_layers": 758.5206576756068,
+     "state_GBps": 1592.520308809576
+    },
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 4,
+     "tokens_per_seq": 1,
+     "n_pools": 35,
+     "graph_us_per_layer": 15.912228822708132,
+     "eager_us_per_layer": 56.34514263698033,
+     "graph_us_all_gdn_layers": 763.7869834899903,
+     "state_GBps": 1581.5398509155539
+    },
+    {
+     "kind": "packed_decode",
+     "n_seqs": 4,
+     "tokens_per_seq": 1,
+     "n_pools": 35,
+     "graph_us_per_layer": 16.442971570151194,
+     "eager_us_per_layer": 40.67565713609968,
+     "graph_us_all_gdn_layers": 789.2626353672573,
+     "state_GBps": 1530.491243181575
+    },
+    {
+     "kind": "fused_recurrent",
+     "n_seqs": 16,
+     "tokens_per_seq": 1,
+     "n_pools": 11,
+     "graph_us_per_layer": 67.74400039152665,
+     "eager_us_per_layer": 91.03127230297434,
+     "graph_us_all_gdn_layers": 3251.7120187932796,
+     "state_GBps": 1485.9366942934603
+    },
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 16,
+     "tokens_per_seq": 1,
+     "n_pools": 11,
+     "graph_us_per_layer": 67.99272786487234,
+     "eager_us_per_layer": 72.09018143740568,
+     "graph_us_all_gdn_layers": 3263.650937513872,
+     "state_GBps": 1480.5009176872068
+    },
+    {
+     "kind": "packed_decode",
+     "n_seqs": 16,
+     "tokens_per_seq": 1,
+     "n_pools": 11,
+     "graph_us_per_layer": 68.38399984619835,
+     "eager_us_per_layer": 71.01236148314042,
+     "graph_us_all_gdn_layers": 3282.431992617521,
+     "state_GBps": 1472.0299518366962
+    },
+    {
+     "kind": "fused_recurrent",
+     "n_seqs": 64,
+     "tokens_per_seq": 1,
+     "n_pools": 3,
+     "graph_us_per_layer": 276.63999795913696,
+     "eager_us_per_layer": 300.9813328584035,
+     "graph_us_all_gdn_layers": 13278.719902038574,
+     "state_GBps": 1455.5132553878805
+    },
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 64,
+     "tokens_per_seq": 1,
+     "n_pools": 3,
+     "graph_us_per_layer": 276.8266598383586,
+     "eager_us_per_layer": 294.4266696770986,
+     "graph_us_all_gdn_layers": 13287.679672241211,
+     "state_GBps": 1454.531815090037
+    },
+    {
+     "kind": "packed_decode",
+     "n_seqs": 64,
+     "tokens_per_seq": 1,
+     "n_pools": 3,
+     "graph_us_per_layer": 275.4933337370555,
+     "eager_us_per_layer": 291.157325108846,
+     "graph_us_all_gdn_layers": 13223.680019378662,
+     "state_GBps": 1461.5714236639649
+    }
+   ],
+   "verify": [
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 1,
+     "tokens_per_seq": 4,
+     "n_pools": 35,
+     "graph_us_per_layer": 14.449828863143921,
+     "eager_us_per_layer": 57.675884451184956,
+     "graph_us_all_gdn_layers": 693.5917854309082,
+     "state_GBps": 435.4000355012604
+    },
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 4,
+     "tokens_per_seq": 4,
+     "n_pools": 11,
+     "graph_us_per_layer": 40.465453808957875,
+     "eager_us_per_layer": 59.229089455171064,
+     "graph_us_all_gdn_layers": 1942.341782829978,
+     "state_GBps": 621.9088538784413
+    },
+    {
+     "kind": "fused_sigmoid_gating",
+     "n_seqs": 16,
+     "tokens_per_seq": 4,
+     "n_pools": 3,
+     "graph_us_per_layer": 177.99466848373413,
+     "eager_us_per_layer": 198.2133388519287,
+     "graph_us_all_gdn_layers": 8543.744087219238,
+     "state_GBps": 565.5410741091889
+    }
+   ]
+  }
+ },
+ "max_memory_allocated_gib": 1.141183853149414
+}

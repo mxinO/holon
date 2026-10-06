@@ -1,0 +1,173 @@
+{
+ "device": {
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "sm": "sm_120",
+  "torch": "2.11.0+cu130",
+  "triton": "3.6.0",
+  "cuda_visible_devices": "6"
+ },
+ "autotune": true,
+ "models": {
+  "9b": {
+   "shape": {
+    "Hg": 16,
+    "H": 32,
+    "K": 128,
+    "V": 128,
+    "gdn_layers": 24
+   },
+   "prefill": [
+    {
+     "lens": [
+      64
+     ],
+     "tokens": 64,
+     "ms_per_layer": 0.4946559965610504,
+     "graph_ms_per_layer": 0.04907200112938881,
+     "workspace_mib": 5.7578125,
+     "tok_s_per_layer": 129382.84473440348,
+     "tok_s_all_gdn_layers": 5390.951863933478
+    },
+    {
+     "lens": [
+      512
+     ],
+     "tokens": 512,
+     "ms_per_layer": 0.49476800858974457,
+     "graph_ms_per_layer": 0.07321599870920181,
+     "workspace_mib": 32.0625,
+     "tok_s_per_layer": 1034828.4268810597,
+     "tok_s_all_gdn_layers": 43117.85112004415
+    },
+    {
+     "lens": [
+      2048
+     ],
+     "tokens": 2048,
+     "ms_per_layer": 0.5161439776420593,
+     "graph_ms_per_layer": 0.2234880030155182,
+     "workspace_mib": 122.25,
+     "tok_s_per_layer": 3967885.103214877,
+     "tok_s_all_gdn_layers": 165328.54596728657
+    },
+    {
+     "lens": [
+      8192
+     ],
+     "tokens": 8192,
+     "ms_per_layer": 1.0850880146026611,
+     "graph_ms_per_layer": 0.9196479916572571,
+     "workspace_mib": 483.0,
+     "tok_s_per_layer": 7549617.993891266,
+     "tok_s_all_gdn_layers": 314567.4164121361
+    },
+    {
+     "lens": [
+      32768
+     ],
+     "tokens": 32768,
+     "ms_per_layer": 4.157904148101807,
+     "graph_ms_per_layer": 4.105760097503662,
+     "workspace_mib": 1926.0,
+     "tok_s_per_layer": 7880893.554258451,
+     "tok_s_all_gdn_layers": 328370.5647607687
+    },
+    {
+     "lens": [
+      2048,
+      2048,
+      2048,
+      2048
+     ],
+     "tokens": 8192,
+     "ms_per_layer": 0.9593279957771301,
+     "graph_ms_per_layer": 0.9656800031661987,
+     "workspace_mib": 489.0,
+     "tok_s_per_layer": 8539310.888518212,
+     "tok_s_all_gdn_layers": 355804.62035492546
+    }
+   ]
+  },
+  "27b": {
+   "shape": {
+    "Hg": 16,
+    "H": 48,
+    "K": 128,
+    "V": 128,
+    "gdn_layers": 48
+   },
+   "prefill": [
+    {
+     "lens": [
+      64
+     ],
+     "tokens": 64,
+     "ms_per_layer": 0.49593600630760193,
+     "graph_ms_per_layer": 0.04907200112938881,
+     "workspace_mib": 8.38671875,
+     "tok_s_per_layer": 129048.9078953955,
+     "tok_s_all_gdn_layers": 2688.518914487406
+    },
+    {
+     "lens": [
+      512
+     ],
+     "tokens": 512,
+     "ms_per_layer": 0.5201919972896576,
+     "graph_ms_per_layer": 0.09772799909114838,
+     "workspace_mib": 46.59375,
+     "tok_s_per_layer": 984251.9736321586,
+     "tok_s_all_gdn_layers": 20505.249450669973
+    },
+    {
+     "lens": [
+      2048
+     ],
+     "tokens": 2048,
+     "ms_per_layer": 0.5601920187473297,
+     "graph_ms_per_layer": 0.3136959969997406,
+     "workspace_mib": 175.375,
+     "tok_s_per_layer": 3655889.28699774,
+     "tok_s_all_gdn_layers": 76164.36014578627
+    },
+    {
+     "lens": [
+      8192
+     ],
+     "tokens": 8192,
+     "ms_per_layer": 1.5262719988822937,
+     "graph_ms_per_layer": 1.3815360069274902,
+     "workspace_mib": 692.5,
+     "tok_s_per_layer": 5367326.404467287,
+     "tok_s_all_gdn_layers": 111819.30009306848
+    },
+    {
+     "lens": [
+      32768
+     ],
+     "tokens": 32768,
+     "ms_per_layer": 5.932896137237549,
+     "graph_ms_per_layer": 6.0485920906066895,
+     "workspace_mib": 2761.0,
+     "tok_s_per_layer": 5523103.597639804,
+     "tok_s_all_gdn_layers": 115064.65828416258
+    },
+    {
+     "lens": [
+      2048,
+      2048,
+      2048,
+      2048
+     ],
+     "tokens": 8192,
+     "ms_per_layer": 1.71206396818161,
+     "graph_ms_per_layer": 1.4880799651145935,
+     "workspace_mib": 701.5,
+     "tok_s_per_layer": 4784867.944333152,
+     "tok_s_all_gdn_layers": 99684.748840274
+    }
+   ]
+  }
+ },
+ "max_memory_allocated_gib": 0.8566923141479492
+}

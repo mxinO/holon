@@ -1,0 +1,133 @@
+{
+ "device": {
+  "gpu": "NVIDIA RTX A5000",
+  "sm": "sm_86",
+  "torch": "2.11.0+cu130",
+  "triton": "3.6.0",
+  "cuda_visible_devices": "3"
+ },
+ "shapes": {
+  "9b": {
+   "shape": {
+    "Hg": 16,
+    "H": 32,
+    "K": 128,
+    "V": 128,
+    "gdn_layers": 24
+   },
+   "T": 8192,
+   "best": {
+    "chunk_local_cumsum_scalar_kernel": {
+     "(1, 32, 64, True, False, 'torch.float32', 'torch.float32', 'torch.int32', 'torch.int32')": {
+      "kwargs": {},
+      "num_warps": 2,
+      "num_stages": 3
+     }
+    },
+    "chunk_scaled_dot_kkt_fwd_kernel": {
+     "(32, 128, 64, True, 'torch.bfloat16', 'torch.float32', 'torch.bfloat16', 'torch.float32', 'torch.int32', 'torch.int32')": {
+      "kwargs": {
+       "BK": 64
+      },
+      "num_warps": 4,
+      "num_stages": 2
+     }
+    },
+    "merge_16x16_to_64x64_inverse_kernel": {
+     "(32, 64, True, 'torch.float32', 'torch.bfloat16', 'torch.int32', 'torch.int32')": {
+      "kwargs": {},
+      "num_warps": 2,
+      "num_stages": 3
+     }
+    },
+    "recompute_w_u_fwd_kernel": {
+     "(32, 128, 128, 64, 64, 64, True, 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.int32', 'torch.int32')": {
+      "kwargs": {},
+      "num_warps": 2,
+      "num_stages": 2
+     }
+    },
+    "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": {
+     "(32, 128, 128, 64, 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.bfloat16', 'torch.float32', 'torch.float32', 'torch.int32', 'torch.int64')": {
+      "kwargs": {
+       "BV": 64
+      },
+      "num_warps": 4,
+      "num_stages": 2
+     }
+    },
+    "chunk_fwd_kernel_o": {
+     "(32, 128, 128, 64, 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.bfloat16', 'torch.int32', 'torch.int32')": {
+      "kwargs": {
+       "BK": 64,
+       "BV": 64
+      },
+      "num_warps": 2,
+      "num_stages": 2
+     }
+    }
+   }
+  },
+  "27b": {
+   "shape": {
+    "Hg": 16,
+    "H": 48,
+    "K": 128,
+    "V": 128,
+    "gdn_layers": 48
+   },
+   "T": 8192,
+   "best": {
+    "chunk_local_cumsum_scalar_kernel": {
+     "(1, 48, 64, True, False, 'torch.float32', 'torch.float32', 'torch.int32', 'torch.int32')": {
+      "kwargs": {},
+      "num_warps": 2,
+      "num_stages": 3
+     }
+    },
+    "chunk_scaled_dot_kkt_fwd_kernel": {
+     "(48, 128, 64, True, 'torch.bfloat16', 'torch.float32', 'torch.bfloat16', 'torch.float32', 'torch.int32', 'torch.int32')": {
+      "kwargs": {
+       "BK": 32
+      },
+      "num_warps": 4,
+      "num_stages": 2
+     }
+    },
+    "merge_16x16_to_64x64_inverse_kernel": {
+     "(48, 64, True, 'torch.float32', 'torch.bfloat16', 'torch.int32', 'torch.int32')": {
+      "kwargs": {},
+      "num_warps": 2,
+      "num_stages": 5
+     }
+    },
+    "recompute_w_u_fwd_kernel": {
+     "(48, 128, 128, 64, 64, 64, True, 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.int32', 'torch.int32')": {
+      "kwargs": {},
+      "num_warps": 2,
+      "num_stages": 3
+     }
+    },
+    "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": {
+     "(48, 128, 128, 64, 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.bfloat16', 'torch.float32', 'torch.float32', 'torch.int32', 'torch.int64')": {
+      "kwargs": {
+       "BV": 32
+      },
+      "num_warps": 4,
+      "num_stages": 3
+     }
+    },
+    "chunk_fwd_kernel_o": {
+     "(48, 128, 128, 64, 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.bfloat16', 'torch.int32', 'torch.int32')": {
+      "kwargs": {
+       "BK": 64,
+       "BV": 64
+      },
+      "num_warps": 2,
+      "num_stages": 2
+     }
+    }
+   }
+  }
+ }
+}

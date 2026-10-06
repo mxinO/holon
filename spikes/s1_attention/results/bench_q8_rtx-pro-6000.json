@@ -1,0 +1,295 @@
+{
+ "fingerprint": {
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "sm": "120",
+  "num_sms": 188,
+  "host": "rtx-pro-6000-workstation",
+  "torch": "2.11.0+cu130",
+  "cuda": "13.0",
+  "triton": "3.6.0",
+  "flashinfer": "0.6.12",
+  "driver": "<version>"
+ },
+ "rows": [
+  {
+   "geom": "qwen3_8b",
+   "batch": 1,
+   "ctx": 1024,
+   "nq": 1,
+   "layers": 64,
+   "triton_bf16_us": 7.750499993562698,
+   "triton_q8_0_us": 7.688499987125397,
+   "fi_fp8_us": 12.0235001668334,
+   "q8_0_err": {
+    "max_abs": 0.000753253698348999,
+    "mean_abs": 0.00012030833750031888,
+    "nan": false
+   },
+   "q8_0_vs_bf16_cache_err": {
+    "max_abs": 0.0016186460852622986,
+    "mean_abs": 0.00032362129422836006,
+    "nan": false
+   }
+  },
+  {
+   "geom": "qwen3_8b",
+   "batch": 1,
+   "ctx": 1024,
+   "nq": 3,
+   "layers": 64,
+   "triton_bf16_us": 7.945500314235687,
+   "triton_q8_0_us": 8.001499809324741,
+   "fi_fp8_us": 12.2894998639822,
+   "q8_0_err": {
+    "max_abs": 0.0007424652576446533,
+    "mean_abs": 0.00011922103294637054,
+    "nan": false
+   },
+   "q8_0_vs_bf16_cache_err": {
+    "max_abs": 0.0017495332285761833,
+    "mean_abs": 0.0003381171263754368,
+    "nan": false
+   }
+  },
+  {
+   "geom": "qwen3_8b",
+   "batch": 1,
+   "ctx": 32768,
+   "nq": 1,
+   "layers": 3,
+   "triton_bf16_us": 97.04533219337463,
+   "triton_q8_0_us": 66.31466746330261,
+   "fi_fp8_us": 61.792001128196716,
+   "q8_0_err": {
+    "max_abs": 0.00012937188148498535,
+    "mean_abs": 2.2442271074396558e-05,
+    "nan": false
+   },
+   "q8_0_vs_bf16_cache_err": {
+    "max_abs": 0.00029354821890592575,
+    "mean_abs": 6.056120037101209e-05,
+    "nan": false
+   }
+  },
+  {
+   "geom": "qwen3_8b",
+   "batch": 1,
+   "ctx": 32768,
+   "nq": 3,
+   "layers": 3,
+   "triton_bf16_us": 97.58933385213216,
+   "triton_q8_0_us": 67.71199901898702,
+   "fi_fp8_us": 62.38933404286703,
+   "q8_0_err": {
+    "max_abs": 0.00011671334505081177,
+    "mean_abs": 2.238988054159563e-05,
+    "nan": false
+   },
+   "q8_0_vs_bf16_cache_err": {
+    "max_abs": 0.00027997721917927265,
+    "mean_abs": 5.9849422541446984e-05,
+    "nan": false
+   }
+  },
+  {
+   "geom": "qwen3_8b",
+   "batch": 8,
+   "ctx": 8192,
+   "nq": 1,
+   "layers": 2,
+   "triton_bf16_us": 190.92799723148346,
+   "triton_q8_0_us": 125.03999471664429,
+   "fi_fp8_us": 109.36000198125839,
+   "q8_0_err": {
+    "max_abs": 0.0003022998571395874,
+    "mean_abs": 4.473026638152078e-05,
+    "nan": false
+   },
+   "q8_0_vs_bf16_cache_err": {
+    "max_abs": 0.0008264519274234772,
+    "mean_abs": 0.0001187593734357506,
+    "nan": false
+   }
+  },
+  {
+   "geom": "qwen3_8b",
+   "batch": 8,
+   "ctx": 8192,
+   "nq": 3,
+   "layers": 2,
+   "triton_bf16_us": 192.83199310302734,
+   "triton_q8_0_us": 128.14399600028992,
+   "fi_fp8_us": 228.09599339962006,
+   "q8_0_err": {
+    "max_abs": 0.00036960840225219727,
+    "mean_abs": 4.4866232201457024e-05,
+    "nan": false
+   },
+   "q8_0_vs_bf16_cache_err": {
+    "max_abs": 0.0007313676178455353,
+    "mean_abs": 0.0001206781598739326,
+    "nan": false
+   }
+  },
+  {
+   "geom": "qwen3_8b",
+   "batch": 64,
+   "ctx": 8192,
+   "nq": 1,
+   "layers": 1,
+   "triton_bf16_us": 1413.375973701477,
+   "triton_q8_0_us": 827.7119994163513,
+   "fi_fp8_us": 778.6239981651306
+  },
+  {
+   "geom": "qwen3_8b",
+   "batch": 64,
+   "ctx": 8192,
+   "nq": 3,
+   "layers": 1,
+   "triton_bf16_us": 1415.3920412063599,
+   "triton_q8_0_us": 833.2480192184448,
+   "fi_fp8_us": 1750.3039836883545
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "batch": 1,
+   "ctx": 1024,
+   "nq": 1,
+   "layers": 64,
+   "triton_bf16_us": 9.080500341951847,
+   "triton_q8_0_us": 9.614000096917152,
+   "fi_fp8_us": 12.242499738931656,
+   "q8_0_err": {
+    "max_abs": 0.0007968544960021973,
+    "mean_abs": 0.00012088421499356627,
+    "nan": false
+   },
+   "q8_0_vs_bf16_cache_err": {
+    "max_abs": 0.0016768909990787506,
+    "mean_abs": 0.0003356505185365677,
+    "nan": false
+   }
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "batch": 1,
+   "ctx": 1024,
+   "nq": 3,
+   "layers": 64,
+   "triton_bf16_us": 10.496499948203564,
+   "triton_q8_0_us": 11.126999743282795,
+   "fi_fp8_us": 23.22950027883053,
+   "q8_0_err": {
+    "max_abs": 0.000831112265586853,
+    "mean_abs": 0.0001196826997329481,
+    "nan": false
+   },
+   "q8_0_vs_bf16_cache_err": {
+    "max_abs": 0.0018351171165704727,
+    "mean_abs": 0.00033192988485097885,
+    "nan": false
+   }
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "batch": 1,
+   "ctx": 32768,
+   "nq": 1,
+   "layers": 3,
+   "triton_bf16_us": 98.65599870681763,
+   "triton_q8_0_us": 85.3760043780009,
+   "fi_fp8_us": 65.62133133411407,
+   "q8_0_err": {
+    "max_abs": 0.00012907572090625763,
+    "mean_abs": 2.1658444893546402e-05,
+    "nan": false
+   },
+   "q8_0_vs_bf16_cache_err": {
+    "max_abs": 0.00036951154470443726,
+    "mean_abs": 5.792575393570587e-05,
+    "nan": false
+   }
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "batch": 1,
+   "ctx": 32768,
+   "nq": 3,
+   "layers": 3,
+   "triton_bf16_us": 101.35466853777568,
+   "triton_q8_0_us": 90.11200070381165,
+   "fi_fp8_us": 82.67733454704285,
+   "q8_0_err": {
+    "max_abs": 0.0001503191888332367,
+    "mean_abs": 2.173114990000613e-05,
+    "nan": false
+   },
+   "q8_0_vs_bf16_cache_err": {
+    "max_abs": 0.0003160890191793442,
+    "mean_abs": 5.834660987602547e-05,
+    "nan": false
+   }
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "batch": 8,
+   "ctx": 8192,
+   "nq": 1,
+   "layers": 2,
+   "triton_bf16_us": 193.231999874115,
+   "triton_q8_0_us": 162.1759980916977,
+   "fi_fp8_us": 107.88799822330475,
+   "q8_0_err": {
+    "max_abs": 0.0002857521176338196,
+    "mean_abs": 4.419397373567335e-05,
+    "nan": false
+   },
+   "q8_0_vs_bf16_cache_err": {
+    "max_abs": 0.0007431106641888618,
+    "mean_abs": 0.00011982547584921122,
+    "nan": false
+   }
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "batch": 8,
+   "ctx": 8192,
+   "nq": 3,
+   "layers": 2,
+   "triton_bf16_us": 202.57599651813507,
+   "triton_q8_0_us": 175.74399709701538,
+   "fi_fp8_us": 151.2320041656494,
+   "q8_0_err": {
+    "max_abs": 0.00032310187816619873,
+    "mean_abs": 4.44308971054852e-05,
+    "nan": false
+   },
+   "q8_0_vs_bf16_cache_err": {
+    "max_abs": 0.0007411092519760132,
+    "mean_abs": 0.00011989901395281777,
+    "nan": false
+   }
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "batch": 64,
+   "ctx": 8192,
+   "nq": 1,
+   "layers": 1,
+   "triton_bf16_us": 1410.1120233535767,
+   "triton_q8_0_us": 1046.6560125350952,
+   "fi_fp8_us": 793.2159900665283
+  },
+  {
+   "geom": "qwen3_8_27b",
+   "batch": 64,
+   "ctx": 8192,
+   "nq": 3,
+   "layers": 1,
+   "triton_bf16_us": 1416.1280393600464,
+   "triton_q8_0_us": 1152.2879600524902,
+   "fi_fp8_us": 1318.0160522460938
+  }
+ ]
+}

@@ -1,0 +1,173 @@
+{
+ "device": {
+  "gpu": "NVIDIA RTX A5000",
+  "sm": "sm_86",
+  "torch": "2.11.0+cu130",
+  "triton": "3.6.0",
+  "cuda_visible_devices": "3"
+ },
+ "autotune": true,
+ "models": {
+  "9b": {
+   "shape": {
+    "Hg": 16,
+    "H": 32,
+    "K": 128,
+    "V": 128,
+    "gdn_layers": 24
+   },
+   "prefill": [
+    {
+     "lens": [
+      64
+     ],
+     "tokens": 64,
+     "ms_per_layer": 0.7485440075397491,
+     "graph_ms_per_layer": 0.062463998794555664,
+     "workspace_mib": 5.7578125,
+     "tok_s_per_layer": 85499.31514427558,
+     "tok_s_all_gdn_layers": 3562.4714643448156
+    },
+    {
+     "lens": [
+      512
+     ],
+     "tokens": 512,
+     "ms_per_layer": 0.7178239822387695,
+     "graph_ms_per_layer": 0.16281600296497345,
+     "workspace_mib": 32.0625,
+     "tok_s_per_layer": 713266.7794173721,
+     "tok_s_all_gdn_layers": 29719.449142390502
+    },
+    {
+     "lens": [
+      2048
+     ],
+     "tokens": 2048,
+     "ms_per_layer": 0.8908639848232269,
+     "graph_ms_per_layer": 0.5959680080413818,
+     "workspace_mib": 122.25,
+     "tok_s_per_layer": 2298891.901445968,
+     "tok_s_all_gdn_layers": 95787.16256024866
+    },
+    {
+     "lens": [
+      8192
+     ],
+     "tokens": 8192,
+     "ms_per_layer": 2.6705920696258545,
+     "graph_ms_per_layer": 2.5251519680023193,
+     "workspace_mib": 483.0,
+     "tok_s_per_layer": 3067484.5826033195,
+     "tok_s_all_gdn_layers": 127811.85760847165
+    },
+    {
+     "lens": [
+      32768
+     ],
+     "tokens": 32768,
+     "ms_per_layer": 10.579455852508545,
+     "graph_ms_per_layer": 10.322432041168213,
+     "workspace_mib": 1926.0,
+     "tok_s_per_layer": 3097323.7619050345,
+     "tok_s_all_gdn_layers": 129055.15674604311
+    },
+    {
+     "lens": [
+      2048,
+      2048,
+      2048,
+      2048
+     ],
+     "tokens": 8192,
+     "ms_per_layer": 2.687999963760376,
+     "graph_ms_per_layer": 2.6936320066452026,
+     "workspace_mib": 489.0,
+     "tok_s_per_layer": 3047619.0887070573,
+     "tok_s_all_gdn_layers": 126984.12869612739
+    }
+   ]
+  },
+  "27b": {
+   "shape": {
+    "Hg": 16,
+    "H": 48,
+    "K": 128,
+    "V": 128,
+    "gdn_layers": 48
+   },
+   "prefill": [
+    {
+     "lens": [
+      64
+     ],
+     "tokens": 64,
+     "ms_per_layer": 0.506879985332489,
+     "graph_ms_per_layer": 0.07475200295448303,
+     "workspace_mib": 8.38671875,
+     "tok_s_per_layer": 126262.62991626916,
+     "tok_s_all_gdn_layers": 2630.471456588941
+    },
+    {
+     "lens": [
+      512
+     ],
+     "tokens": 512,
+     "ms_per_layer": 0.5344800055027008,
+     "graph_ms_per_layer": 0.24166400730609894,
+     "workspace_mib": 46.59375,
+     "tok_s_per_layer": 957940.4182172214,
+     "tok_s_all_gdn_layers": 19957.092046192112
+    },
+    {
+     "lens": [
+      2048
+     ],
+     "tokens": 2048,
+     "ms_per_layer": 1.04038405418396,
+     "graph_ms_per_layer": 0.8663039803504944,
+     "workspace_mib": 175.375,
+     "tok_s_per_layer": 1968503.834486754,
+     "tok_s_all_gdn_layers": 41010.49655180737
+    },
+    {
+     "lens": [
+      8192
+     ],
+     "tokens": 8192,
+     "ms_per_layer": 3.8850560188293457,
+     "graph_ms_per_layer": 3.780079960823059,
+     "workspace_mib": 692.5,
+     "tok_s_per_layer": 2108592.504277051,
+     "tok_s_all_gdn_layers": 43929.0105057719
+    },
+    {
+     "lens": [
+      32768
+     ],
+     "tokens": 32768,
+     "ms_per_layer": 17.18779182434082,
+     "graph_ms_per_layer": 16.995840072631836,
+     "workspace_mib": 2761.0,
+     "tok_s_per_layer": 1906469.4484834853,
+     "tok_s_all_gdn_layers": 39718.1135100726
+    },
+    {
+     "lens": [
+      2048,
+      2048,
+      2048,
+      2048
+     ],
+     "tokens": 8192,
+     "ms_per_layer": 3.8359040021896362,
+     "graph_ms_per_layer": 3.953152060508728,
+     "workspace_mib": 701.5,
+     "tok_s_per_layer": 2135611.3175209253,
+     "tok_s_all_gdn_layers": 44491.90244835261
+    }
+   ]
+  }
+ },
+ "max_memory_allocated_gib": 0.8566923141479492
+}

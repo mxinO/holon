@@ -1,0 +1,51 @@
+{
+ "fingerprint": {
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "sm": "120",
+  "num_sms": 188,
+  "host": "rtx-pro-6000-workstation",
+  "torch": "2.11.0+cu130",
+  "cuda": "13.0",
+  "triton": "3.6.0",
+  "flashinfer": "0.6.12",
+  "driver": "<version>"
+ },
+ "rows": [
+  {
+   "page": 16,
+   "batch": 1,
+   "ctx": 32768,
+   "us": 3.1389999203383923
+  },
+  {
+   "page": 16,
+   "batch": 8,
+   "ctx": 32768,
+   "us": 3.4409998916089535
+  },
+  {
+   "page": 16,
+   "batch": 64,
+   "ctx": 32768,
+   "us": 3.558000084012747
+  },
+  {
+   "page": 64,
+   "batch": 1,
+   "ctx": 32768,
+   "us": 1.7130000051110983
+  },
+  {
+   "page": 64,
+   "batch": 8,
+   "ctx": 32768,
+   "us": 1.858999952673912
+  },
+  {
+   "page": 64,
+   "batch": 64,
+   "ctx": 32768,
+   "us": 2.019000006839633
+  }
+ ]
+}

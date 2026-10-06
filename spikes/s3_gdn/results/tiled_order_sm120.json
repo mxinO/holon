@@ -1,0 +1,95 @@
+{
+ "device": {
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "sm": "sm_120",
+  "torch": "2.11.0+cu130",
+  "triton": "3.6.0",
+  "cuda_visible_devices": "6"
+ },
+ "models": [
+  {
+   "model": "4b",
+   "T": 1000,
+   "decode_steps": 8,
+   "v_head_tiled=True": {
+    "core_outputs_bitwise_equal": true,
+    "final_state_bitwise_equal": true,
+    "out_proj_input_bitwise_equal": true,
+    "layer_output": {
+     "max_abs": 0.125,
+     "max_rel": 0.002631578947368421,
+     "fro_rel": 0.002487660605323815,
+     "finite": true
+    }
+   },
+   "v_head_tiled=False": {
+    "core_outputs_bitwise_equal": false,
+    "final_state_bitwise_equal": false,
+    "out_proj_input_bitwise_equal": false,
+    "layer_output": {
+     "max_abs": 16.75,
+     "max_rel": 0.3526315789473684,
+     "fro_rel": 0.8227299137741958,
+     "finite": true
+    }
+   }
+  },
+  {
+   "model": "27b",
+   "T": 1000,
+   "decode_steps": 8,
+   "v_head_tiled=True": {
+    "core_outputs_bitwise_equal": true,
+    "final_state_bitwise_equal": true,
+    "out_proj_input_bitwise_equal": true,
+    "layer_output": {
+     "max_abs": 2.0,
+     "max_rel": 0.0030120481927710845,
+     "fro_rel": 0.004285034092483942,
+     "finite": true
+    }
+   },
+   "v_head_tiled=False": {
+    "core_outputs_bitwise_equal": false,
+    "final_state_bitwise_equal": false,
+    "out_proj_input_bitwise_equal": false,
+    "layer_output": {
+     "max_abs": 216.0,
+     "max_rel": 0.3253012048192771,
+     "fro_rel": 0.5748034676098505,
+     "finite": true
+    }
+   }
+  }
+ ],
+ "recurrent_kernels": {
+  "4b": {
+   "fused_recurrent": {
+    "outputs_bitwise_equal": true,
+    "state_bitwise_equal": true
+   },
+   "fused_sigmoid_gating": {
+    "outputs_bitwise_equal": true,
+    "state_bitwise_equal": true
+   },
+   "packed_decode": {
+    "outputs_bitwise_equal": true,
+    "state_bitwise_equal": true
+   }
+  },
+  "27b": {
+   "fused_recurrent": {
+    "outputs_bitwise_equal": true,
+    "state_bitwise_equal": true
+   },
+   "fused_sigmoid_gating": {
+    "outputs_bitwise_equal": true,
+    "state_bitwise_equal": true
+   },
+   "packed_decode": {
+    "outputs_bitwise_equal": true,
+    "state_bitwise_equal": true
+   }
+  }
+ }
+}

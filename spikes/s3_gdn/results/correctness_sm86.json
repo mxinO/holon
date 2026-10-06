@@ -1,0 +1,1756 @@
+{
+ "device": {
+  "gpu": "NVIDIA RTX A5000",
+  "sm": "sm_86",
+  "torch": "2.11.0+cu130",
+  "triton": "3.6.0",
+  "cuda_visible_devices": "3"
+ },
+ "models": {
+  "4b": {
+   "shape": {
+    "Hg": 16,
+    "H": 32,
+    "K": 128,
+    "V": 128,
+    "gdn_layers": 24
+   },
+   "prefill_one_shot": [
+    {
+     "T": 1,
+     "kernel_o": {
+      "max_abs": 3.478882717899978e-06,
+      "max_rel": 0.002249004149124647,
+      "fro_rel": 0.002279134761958625,
+      "finite": true
+     },
+     "kernel_state": {
+      "max_abs": 0.00022105500102043152,
+      "max_rel": 0.002559451973019626,
+      "fro_rel": 0.0020525473955182545,
+      "finite": true
+     },
+     "hf_bf16_o": {
+      "max_abs": 2.2437889128923416e-06,
+      "max_rel": 0.001450549209057827,
+      "fro_rel": 0.0016173996135402005,
+      "finite": true
+     },
+     "hf_bf16_state": {
+      "max_abs": 0.00029705464839935303,
+      "max_rel": 0.003439402422160552,
+      "fro_rel": 0.002685467278373798,
+      "finite": true
+     },
+     "hf_fp32_chunk_o": {
+      "max_abs": 2.9103830456733704e-10,
+      "max_rel": 1.88148439485554e-07,
+      "fro_rel": 1.889337857149999e-07,
+      "finite": true
+     },
+     "hf_fp32_chunk_state": {
+      "max_abs": 0.0,
+      "max_rel": 0.0,
+      "fro_rel": 0.0,
+      "finite": true
+     }
+    },
+    {
+     "T": 16,
+     "kernel_o": {
+      "max_abs": 0.0001629367470741272,
+      "max_rel": 0.0034494308376025345,
+      "fro_rel": 0.0032416487633869194,
+      "finite": true
+     },
+     "kernel_state": {
+      "max_abs": 0.0027647018432617188,
+      "max_rel": 0.002570534812447498,
+      "fro_rel": 0.00346021068108282,
+      "finite": true
+     },
+     "hf_bf16_o": {
+      "max_abs": 0.0001629367470741272,
+      "max_rel": 0.0034494308376025345,
+      "fro_rel": 0.0036203511803066363,
+      "finite": true
+     },
+     "hf_bf16_state": {
+      "max_abs": 0.0017315447330474854,
+      "max_rel": 0.0016099370810841245,
+      "fro_rel": 0.002348380330853897,
+      "finite": true
+     },
+     "hf_fp32_chunk_o": {
+      "max_abs": 1.4901161193847656e-08,
+      "max_rel": 3.1546306073460465e-07,
+      "fro_rel": 2.668200572037677e-07,
+      "finite": true
+     },
+     "hf_fp32_chunk_state": {
+      "max_abs": 1.7881393432617188e-07,
+      "max_rel": 1.662557010465353e-07,
+      "fro_rel": 1.8776556584826668e-07,
+      "finite": true
+     }
+    },
+    {
+     "T": 64,
+     "kernel_o": {
+      "max_abs": 0.00023085623979568481,
+      "max_rel": 0.004261464246541901,
+      "fro_rel": 0.003843430383402268,
+      "finite": true
+     },
+     "kernel_state": {
+      "max_abs": 0.0028679966926574707,
+      "max_rel": 0.0046097518425068035,
+      "fro_rel": 0.0038365259690148093,
+      "finite": true
+     },
+     "hf_bf16_o": {
+      "max_abs": 0.00023245811462402344,
+      "max_rel": 0.004291033870973288,
+      "fro_rel": 0.003427052440735232,
+      "finite": true
+     },
+     "hf_bf16_state": {
+      "max_abs": 0.0013840794563293457,
+      "max_rel": 0.00222464092804727,
+      "fro_rel": 0.0029548306636306607,
+      "finite": true
+     },
+     "hf_fp32_chunk_o": {
+      "max_abs": 1.4901161193847656e-08,
+      "max_rel": 2.7506627378033897e-07,
+      "fro_rel": 3.3932866400590883e-07,
+      "finite": true
+     },
+     "hf_fp32_chunk_state": {
+      "max_abs": 2.980232238769531e-07,
+      "max_rel": 4.790148848127277e-07,
+      "fro_rel": 5.729727148030953e-07,
+      "finite": true
+     }
+    },
+    {
+     "T": 512,
+     "kernel_o": {
+      "max_abs": 0.0008339285850524902,
+      "max_rel": 0.007455361615145399,
+      "fro_rel": 0.0036663078630563162,
+      "finite": true
+     },
+     "kernel_state": {
+      "max_abs": 0.005829915404319763,
+      "max_rel": 0.0040267725687367015,
+      "fro_rel": 0.0034516997872043225,
+      "finite": true
+     },
+     "hf_bf16_o": {
+      "max_abs": 0.0005668923258781433,
+      "max_rel": 0.005068044628793224,
+      "fro_rel": 0.0033863192454476193,
+      "finite": true
+     },
+     "hf_bf16_state": {
+      "max_abs": 0.0033457279205322266,
+      "max_rel": 0.0023109229686031152,
+      "fro_rel": 0.002521967046746424,
+      "finite": true
+     },
+     "hf_fp32_chunk_o": {
+      "max_abs": 2.3096799850463867e-07,
+      "max_rel": 2.0648650031226086e-06,
+      "fro_rel": 1.1278040788262777e-06,
+      "finite": true
+     },
+     "hf_fp32_chunk_state": {
+      "max_abs": 2.86102294921875e-06,
+      "max_rel": 1.9761330879524965e-06,
+      "fro_rel": 1.6875665521072896e-06,
+      "finite": true
+     }
+    },
+    {
+     "T": 2048,
+     "kernel_o": {
+      "max_abs": 0.0006799846887588501,
+      "max_rel": 0.0037011803580249015,
+      "fro_rel": 0.003273399666356876,
+      "finite": true
+     },
+     "kernel_state": {
+      "max_abs": 0.004284072667360306,
+      "max_rel": 0.0026579211433879622,
+      "fro_rel": 0.003315691103580931,
+      "finite": true
+     },
+     "hf_bf16_o": {
+      "max_abs": 0.0007626116275787354,
+      "max_rel": 0.004150921665527106,
+      "fro_rel": 0.0032038978130149434,
+      "finite": true
+     },
+     "hf_bf16_state": {
+      "max_abs": 0.0024645626544952393,
+      "max_rel": 0.0015290621091690105,
+      "fro_rel": 0.0024898513663188303,
+      "finite": true
+     },
+     "hf_fp32_chunk_o": {
+      "max_abs": 1.2814998626708984e-06,
+      "max_rel": 6.975248412117142e-06,
+      "fro_rel": 3.7695765161420455e-06,
+      "finite": true
+     },
+     "hf_fp32_chunk_state": {
+      "max_abs": 1.239776611328125e-05,
+      "max_rel": 7.691812730985506e-06,
+      "fro_rel": 3.814974682181435e-06,
+      "finite": true
+     }
+    },
+    {
+     "T": 8192,
+     "kernel_o": {
+      "max_abs": 0.0012534260749816895,
+      "max_rel": 0.004137974867740354,
+      "fro_rel": 0.0030402729397618258,
+      "finite": true
+     },
+     "kernel_state": {
+      "max_abs": 0.005783379077911377,
+      "max_rel": 0.0024752558598581044,
+      "fro_rel": 0.0032614623574368944,
+      "finite": true
+     },
+     "hf_bf16_o": {
+      "max_abs": 0.0018668174743652344,
+      "max_rel": 0.006162983159333678,
+      "fro_rel": 0.0031271658239586117,
+      "finite": true
+     },
+     "hf_bf16_state": {
+      "max_abs": 0.00275576114654541,
+      "max_rel": 0.0011794512921361614,
+      "fro_rel": 0.002327930098387678,
+      "finite": true
+     },
+     "hf_fp32_chunk_o": {
+      "max_abs": 6.496906280517578e-06,
+      "max_rel": 2.1448440752470334e-05,
+      "fro_rel": 1.367301246264522e-05,
+      "finite": true
+     },
+     "hf_fp32_chunk_state": {
+      "max_abs": 5.7697296142578125e-05,
+      "max_rel": 2.4694139611277506e-05,
+      "fro_rel": 1.0804170517167152e-05,
+      "finite": true
+     }
+    }
+   ],
+   "prefill_batch4_varlen": [
+    {
+     "T": 1,
+     "h0_nonzero": false,
+     "o": {
+      "max_abs": 2.666376531124115e-05,
+      "max_rel": 0.00614747850315018,
+      "fro_rel": 0.00384800123415393,
+      "finite": true
+     },
+     "state": {
+      "max_abs": 0.00041322410106658936,
+      "max_rel": 0.0035207150361358593,
+      "fro_rel": 0.0022589360432946756,
+      "finite": true
+     }
+    },
+    {
+     "T": 63,
+     "h0_nonzero": false,
+     "o": {
+      "max_abs": 0.0002554096281528473,
+      "max_rel": 0.004323995212392985,
+      "fro_rel": 0.0037058430362335516,
+      "finite": true
+     },
+     "state": {
+      "max_abs": 0.007032871246337891,
+      "max_rel": 0.00521092885363275,
+      "fro_rel": 0.0036608111124364945,
+      "finite": true
+     }
+    },
+    {
+     "T": 777,
+     "h0_nonzero": true,
+     "o": {
+      "max_abs": 0.0006502866744995117,
+      "max_rel": 0.004277710033210086,
+      "fro_rel": 0.0032849754414633835,
+      "finite": true
+     },
+     "state": {
+      "max_abs": 0.003376305103302002,
+      "max_rel": 0.002356834916955531,
+      "fro_rel": 0.003249555035951314,
+      "finite": true
+     }
+    },
+    {
+     "T": 2048,
+     "h0_nonzero": true,
+     "o": {
+      "max_abs": 0.0012069493532180786,
+      "max_rel": 0.005150534721612826,
+      "fro_rel": 0.0031189177833320066,
+      "finite": true
+     },
+     "state": {
+      "max_abs": 0.005394577980041504,
+      "max_rel": 0.0028162575097296022,
+      "fro_rel": 0.0033179496241298556,
+      "finite": true
+     }
+    }
+   ],
+   "prefill_resume": {
+    "unaligned": {
+     "cuts": [
+      0,
+      37,
+      600,
+      1500,
+      2048
+     ],
+     "resumed_vs_one_shot_o": {
+      "max_abs": 0.0009765625,
+      "max_rel": 0.005555555555555556,
+      "fro_rel": 0.003614306424350129,
+      "finite": true
+     },
+     "resumed_vs_one_shot_state": {
+      "max_abs": 0.009547602385282516,
+      "max_rel": 0.006343486237856338,
+      "fro_rel": 0.003747048939993705,
+      "finite": true
+     },
+     "bitwise_equal": false,
+     "resumed_o": {
+      "max_abs": 0.0008312538266181946,
+      "max_rel": 0.004709256022895707,
+      "fro_rel": 0.003277186353829037,
+      "finite": true
+     },
+     "resumed_state": {
+      "max_abs": 0.004024986177682877,
+      "max_rel": 0.002670246968354313,
+      "fro_rel": 0.0034685413379732153,
+      "finite": true
+     },
+     "one_shot_o": {
+      "max_abs": 0.0007796883583068848,
+      "max_rel": 0.004417125046240354,
+      "fro_rel": 0.00334857759255437,
+      "finite": true
+     },
+     "one_shot_state": {
+      "max_abs": 0.006363987922668457,
+      "max_rel": 0.0042219820657699155,
+      "fro_rel": 0.003676193678411989,
+      "finite": true
+     }
+    },
+    "aligned_64": {
+     "cuts": [
+      0,
+      64,
+      1024,
+      1536,
+      2048
+     ],
+     "resumed_vs_one_shot_o": {
+      "max_abs": 0.0,
+      "max_rel": 0.0,
+      "fro_rel": 0.0,
+      "finite": true
+     },
+     "resumed_vs_one_shot_state": {
+      "max_abs": 0.0,
+      "max_rel": 0.0,
+      "fro_rel": 0.0,
+      "finite": true
+     },
+     "bitwise_equal": true,
+     "resumed_o": {
+      "max_abs": 0.0007796883583068848,
+      "max_rel": 0.004417125046240354,
+      "fro_rel": 0.00334857759255437,
+      "finite": true
+     },
+     "resumed_state": {
+      "max_abs": 0.006363987922668457,
+      "max_rel": 0.0042219820657699155,
+      "fro_rel": 0.003676193678411989,
+      "finite": true
+     },
+     "one_shot_o": {
+      "max_abs": 0.0007796883583068848,
+      "max_rel": 0.004417125046240354,
+      "fro_rel": 0.00334857759255437,
+      "finite": true
+     },
+     "one_shot_state": {
+      "max_abs": 0.006363987922668457,
+      "max_rel": 0.0042219820657699155,
+      "fro_rel": 0.003676193678411989,
+      "finite": true
+     }
+    }
+   },
+   "decode_after_prefill": {
+    "fused_recurrent": {
+     "rows": [
+      {
+       "prefix": 5,
+       "o": {
+        "max_abs": 0.0001360662281513214,
+        "max_rel": 0.0036533607317884094,
+        "fro_rel": 0.002038653266494618,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.0012151598930358887,
+        "max_rel": 0.0013296361530594023,
+        "fro_rel": 0.001313352648559373,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 100,
+       "o": {
+        "max_abs": 0.00013314560055732727,
+        "max_rel": 0.0030082441595698415,
+        "fro_rel": 0.00274322861580369,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.0025245994329452515,
+        "max_rel": 0.00241211607428924,
+        "fro_rel": 0.0028862778556932177,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 512,
+       "o": {
+        "max_abs": 0.0002567097544670105,
+        "max_rel": 0.002724691996325007,
+        "fro_rel": 0.002121163471630757,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.004369538277387619,
+        "max_rel": 0.002075124283232843,
+        "fro_rel": 0.002707506596897777,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 1000,
+       "o": {
+        "max_abs": 0.00021208077669143677,
+        "max_rel": 0.002009949976147511,
+        "fro_rel": 0.002203250968488173,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.003587663173675537,
+        "max_rel": 0.0018751736430544928,
+        "fro_rel": 0.0029299154944415037,
+        "finite": true
+       }
+      }
+     ],
+     "other_slots_untouched": true,
+     "finite": true
+    },
+    "fused_sigmoid_gating": {
+     "rows": [
+      {
+       "prefix": 5,
+       "o": {
+        "max_abs": 0.00016776472330093384,
+        "max_rel": 0.004504461251070752,
+        "fro_rel": 0.002300523202066109,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.0011007487773895264,
+        "max_rel": 0.001204446738442366,
+        "fro_rel": 0.0019395852160620476,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 100,
+       "o": {
+        "max_abs": 0.00013314560055732727,
+        "max_rel": 0.0030082441595698415,
+        "fro_rel": 0.002765290952921361,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.002849072217941284,
+        "max_rel": 0.0027221319960805445,
+        "fro_rel": 0.003079197350460309,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 512,
+       "o": {
+        "max_abs": 0.0002315714955329895,
+        "max_rel": 0.0024578769971782773,
+        "fro_rel": 0.0022061414561268594,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.004454266279935837,
+        "max_rel": 0.0021153622041288553,
+        "fro_rel": 0.002804601896620959,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 1000,
+       "o": {
+        "max_abs": 0.00028343498706817627,
+        "max_rel": 0.0026861941680169895,
+        "fro_rel": 0.002286594796947149,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.0037125349044799805,
+        "max_rel": 0.0019404406893271775,
+        "fro_rel": 0.0030451619255594062,
+        "finite": true
+       }
+      }
+     ],
+     "other_slots_untouched": true,
+     "finite": true
+    },
+    "packed_decode": {
+     "rows": [
+      {
+       "prefix": 5,
+       "o": {
+        "max_abs": 0.00016776472330093384,
+        "max_rel": 0.004504461251070752,
+        "fro_rel": 0.002300523186808354,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.001100778579711914,
+        "max_rel": 0.0012044793483445844,
+        "fro_rel": 0.001939585218333318,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 100,
+       "o": {
+        "max_abs": 0.00013314560055732727,
+        "max_rel": 0.0030082441595698415,
+        "fro_rel": 0.0027652909146168095,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.002849012613296509,
+        "max_rel": 0.002722075047116725,
+        "fro_rel": 0.0030791987904503007,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 512,
+       "o": {
+        "max_abs": 0.0002315714955329895,
+        "max_rel": 0.0024578769971782773,
+        "fro_rel": 0.0022061414570145404,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.004454284906387329,
+        "max_rel": 0.00211537104996092,
+        "fro_rel": 0.00280459872023302,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 1000,
+       "o": {
+        "max_abs": 0.00028343498706817627,
+        "max_rel": 0.0026861941680169895,
+        "fro_rel": 0.0022865942329311374,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.0037125349044799805,
+        "max_rel": 0.0019404406893271775,
+        "fro_rel": 0.0030451607666381556,
+        "finite": true
+       }
+      }
+     ],
+     "other_slots_untouched": true,
+     "finite": true
+    }
+   },
+   "verify_k": {
+    "k": 3,
+    "n_accept": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "checkpoint_slots": {
+     "step_a": {
+      "o_vs_sequential": {
+       "max_abs": 0.0,
+       "max_rel": 0.0,
+       "fro_rel": 0.0,
+       "finite": true
+      },
+      "o_bitwise_equal_sequential": true,
+      "slot_states_bitwise_equal_sequential": true
+     },
+     "step_b": {
+      "rows": [
+       {
+        "n_accept": 1,
+        "o": {
+         "max_abs": 0.00013455376029014587,
+         "max_rel": 0.003612898243784758,
+         "fro_rel": 0.0027921301918697825,
+         "finite": true
+        },
+        "state": {
+         "max_abs": 0.0016510486602783203,
+         "max_rel": 0.002407833438426136,
+         "fro_rel": 0.0025066035724601574,
+         "finite": true
+        }
+       },
+       {
+        "n_accept": 2,
+        "o": {
+         "max_abs": 0.00013314560055732727,
+         "max_rel": 0.005125011139847876,
+         "fro_rel": 0.0030580628311355634,
+         "finite": true
+        },
+        "state": {
+         "max_abs": 0.003069493919610977,
+         "max_rel": 0.003797145171141009,
+         "fro_rel": 0.0035405966485280117,
+         "finite": true
+        }
+       },
+       {
+        "n_accept": 3,
+        "o": {
+         "max_abs": 0.0001861918717622757,
+         "max_rel": 0.004704419427457741,
+         "fro_rel": 0.003180595960881854,
+         "finite": true
+        },
+        "state": {
+         "max_abs": 0.004956364631652832,
+         "max_rel": 0.002165991295400015,
+         "fro_rel": 0.0033145714346873452,
+         "finite": true
+        }
+       },
+       {
+        "n_accept": 4,
+        "o": {
+         "max_abs": 0.00014919042587280273,
+         "max_rel": 0.0023158192754252067,
+         "fro_rel": 0.002324464082158569,
+         "finite": true
+        },
+        "state": {
+         "max_abs": 0.003858320415019989,
+         "max_rel": 0.0019205253382139115,
+         "fro_rel": 0.003334367028557938,
+         "finite": true
+        }
+       }
+      ],
+      "o_bitwise_equal_sequential": true
+     }
+    },
+    "replay": {
+     "verify_o_bitwise_equal_checkpoint_slots": true,
+     "committed_state_bitwise_equal_sequential": true,
+     "rows": [
+      {
+       "n_accept": 1,
+       "state": {
+        "max_abs": 0.0027260780334472656,
+        "max_rel": 0.0036682757748386407,
+        "fro_rel": 0.002580312570830139,
+        "finite": true
+       }
+      },
+      {
+       "n_accept": 2,
+       "state": {
+        "max_abs": 0.0031134746968746185,
+        "max_rel": 0.003620352225058089,
+        "fro_rel": 0.003797250264738759,
+        "finite": true
+       }
+      },
+      {
+       "n_accept": 3,
+       "state": {
+        "max_abs": 0.005206644535064697,
+        "max_rel": 0.0022298982660130555,
+        "fro_rel": 0.003388154116723109,
+        "finite": true
+       }
+      },
+      {
+       "n_accept": 4,
+       "state": {
+        "max_abs": 0.003835119307041168,
+        "max_rel": 0.0018978320468873403,
+        "fro_rel": 0.003272127276145702,
+        "finite": true
+       }
+      }
+     ]
+    },
+    "finite": true
+   },
+   "layer_level": [
+    {
+     "T": 16,
+     "decode_steps": 16,
+     "prefill": {
+      "ours": {
+       "max_abs": 0.02101874351501465,
+       "max_rel": 0.005987851505846949,
+       "fro_rel": 0.007626646627281895,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 0.008834362030029297,
+       "max_rel": 0.0025167464433313996,
+       "fro_rel": 0.006379496567535586,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 1.1954934917737694
+     },
+     "decode": {
+      "ours": {
+       "max_abs": 0.022481441497802734,
+       "max_rel": 0.0015354175132625853,
+       "fro_rel": 0.0046298254154984,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 0.022481441497802734,
+       "max_rel": 0.0015354175132625853,
+       "fro_rel": 0.00495990913948099,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 0.9334496429873854
+     }
+    },
+    {
+     "T": 512,
+     "decode_steps": 16,
+     "prefill": {
+      "ours": {
+       "max_abs": 0.15562820434570312,
+       "max_rel": 0.004667300535737963,
+       "fro_rel": 0.005452088133515802,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 0.09723663330078125,
+       "max_rel": 0.002916133310193413,
+       "fro_rel": 0.00525265869185711,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 1.037967332994214
+     },
+     "decode": {
+      "ours": {
+       "max_abs": 0.027024269104003906,
+       "max_rel": 0.001626495699317385,
+       "fro_rel": 0.0047943651198654865,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 0.035475730895996094,
+       "max_rel": 0.002135159456502361,
+       "fro_rel": 0.00696839802019461,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 0.6880153954999821
+     }
+    },
+    {
+     "T": 2048,
+     "decode_steps": 16,
+     "prefill": {
+      "ours": {
+       "max_abs": 0.19024658203125,
+       "max_rel": 0.0038528777339405292,
+       "fro_rel": 0.005277640640536929,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 0.13682174682617188,
+       "max_rel": 0.0027709168608286206,
+       "fro_rel": 0.004989398486886239,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 1.0577709225687795
+     },
+     "decode": {
+      "ours": {
+       "max_abs": 0.03320884704589844,
+       "max_rel": 0.0021823817329221515,
+       "fro_rel": 0.00549056451649558,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 0.03159046173095703,
+       "max_rel": 0.002076026503447426,
+       "fro_rel": 0.006425899051870188,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 0.8544430082351839
+     }
+    },
+    {
+     "T": 8192,
+     "decode_steps": 16,
+     "prefill": {
+      "ours": {
+       "max_abs": 0.24180221557617188,
+       "max_rel": 0.0038090846190428633,
+       "fro_rel": 0.005222239260911573,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 0.199676513671875,
+       "max_rel": 0.003145482911309569,
+       "fro_rel": 0.005042290618338411,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 1.0356878760456016
+     },
+     "decode": {
+      "ours": {
+       "max_abs": 0.039292335510253906,
+       "max_rel": 0.003217858996372577,
+       "fro_rel": 0.004808862177948843,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 0.039292335510253906,
+       "max_rel": 0.003217858996372577,
+       "fro_rel": 0.004882677826059606,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 0.9848821382978009
+     }
+    }
+   ]
+  },
+  "27b": {
+   "shape": {
+    "Hg": 16,
+    "H": 48,
+    "K": 128,
+    "V": 128,
+    "gdn_layers": 48
+   },
+   "prefill_one_shot": [
+    {
+     "T": 1,
+     "kernel_o": {
+      "max_abs": 5.360227078199387e-06,
+      "max_rel": 0.001798236631443974,
+      "fro_rel": 0.002415858080938802,
+      "finite": true
+     },
+     "kernel_state": {
+      "max_abs": 0.000735163688659668,
+      "max_rel": 0.0035168983773480266,
+      "fro_rel": 0.0025678274105616194,
+      "finite": true
+     },
+     "hf_bf16_o": {
+      "max_abs": 5.360227078199387e-06,
+      "max_rel": 0.001798236631443974,
+      "fro_rel": 0.0019913311249215517,
+      "finite": true
+     },
+     "hf_bf16_state": {
+      "max_abs": 0.0009770691394805908,
+      "max_rel": 0.004674133018540419,
+      "fro_rel": 0.00244973275040918,
+      "finite": true
+     },
+     "hf_fp32_chunk_o": {
+      "max_abs": 2.3283064365386963e-10,
+      "max_rel": 7.810948794387864e-08,
+      "fro_rel": 1.2987348955010196e-07,
+      "finite": true
+     },
+     "hf_fp32_chunk_state": {
+      "max_abs": 0.0,
+      "max_rel": 0.0,
+      "fro_rel": 0.0,
+      "finite": true
+     }
+    },
+    {
+     "T": 16,
+     "kernel_o": {
+      "max_abs": 0.00022501498460769653,
+      "max_rel": 0.004930736064315567,
+      "fro_rel": 0.004147876133344142,
+      "finite": true
+     },
+     "kernel_state": {
+      "max_abs": 0.00671812891960144,
+      "max_rel": 0.004719448020772497,
+      "fro_rel": 0.003599663427103803,
+      "finite": true
+     },
+     "hf_bf16_o": {
+      "max_abs": 0.00022501498460769653,
+      "max_rel": 0.004930736064315567,
+      "fro_rel": 0.003291047582113515,
+      "finite": true
+     },
+     "hf_bf16_state": {
+      "max_abs": 0.003815293312072754,
+      "max_rel": 0.0026802222294055843,
+      "fro_rel": 0.0026594218863080403,
+      "finite": true
+     },
+     "hf_fp32_chunk_o": {
+      "max_abs": 1.1175870895385742e-08,
+      "max_rel": 2.4489600001567336e-07,
+      "fro_rel": 2.5512546253917526e-07,
+      "finite": true
+     },
+     "hf_fp32_chunk_state": {
+      "max_abs": 2.384185791015625e-07,
+      "max_rel": 1.6748771938169564e-07,
+      "fro_rel": 1.7843762232028026e-07,
+      "finite": true
+     }
+    },
+    {
+     "T": 64,
+     "kernel_o": {
+      "max_abs": 0.0006360635161399841,
+      "max_rel": 0.004556254703235826,
+      "fro_rel": 0.0036152673118087257,
+      "finite": true
+     },
+     "kernel_state": {
+      "max_abs": 0.007827579975128174,
+      "max_rel": 0.0037695430679444888,
+      "fro_rel": 0.003765169961953962,
+      "finite": true
+     },
+     "hf_bf16_o": {
+      "max_abs": 0.0003852173686027527,
+      "max_rel": 0.0027593917948882164,
+      "fro_rel": 0.00339693230177775,
+      "finite": true
+     },
+     "hf_bf16_state": {
+      "max_abs": 0.006817042827606201,
+      "max_rel": 0.003282896708348594,
+      "fro_rel": 0.00274061890588327,
+      "finite": true
+     },
+     "hf_fp32_chunk_o": {
+      "max_abs": 7.450580596923828e-08,
+      "max_rel": 5.337005192906053e-07,
+      "fro_rel": 3.659747471629432e-07,
+      "finite": true
+     },
+     "hf_fp32_chunk_state": {
+      "max_abs": 1.5497207641601562e-06,
+      "max_rel": 7.463020732271595e-07,
+      "fro_rel": 4.4995554968095307e-07,
+      "finite": true
+     }
+    },
+    {
+     "T": 512,
+     "kernel_o": {
+      "max_abs": 0.0011136233806610107,
+      "max_rel": 0.004090467788072456,
+      "fro_rel": 0.0035243529938144354,
+      "finite": true
+     },
+     "kernel_state": {
+      "max_abs": 0.006244540214538574,
+      "max_rel": 0.0026883707066284097,
+      "fro_rel": 0.00401829003489168,
+      "finite": true
+     },
+     "hf_bf16_o": {
+      "max_abs": 0.0012255460023880005,
+      "max_rel": 0.00450157255372413,
+      "fro_rel": 0.0032655323614259628,
+      "finite": true
+     },
+     "hf_bf16_state": {
+      "max_abs": 0.005253538489341736,
+      "max_rel": 0.0022617292059403946,
+      "fro_rel": 0.0031601094241203685,
+      "finite": true
+     },
+     "hf_fp32_chunk_o": {
+      "max_abs": 4.76837158203125e-07,
+      "max_rel": 1.7514781654711186e-06,
+      "fro_rel": 1.7227373625609425e-06,
+      "finite": true
+     },
+     "hf_fp32_chunk_state": {
+      "max_abs": 6.4373016357421875e-06,
+      "max_rel": 2.77135746631415e-06,
+      "fro_rel": 2.6425196060428403e-06,
+      "finite": true
+     }
+    },
+    {
+     "T": 2048,
+     "kernel_o": {
+      "max_abs": 0.0014472007751464844,
+      "max_rel": 0.004464047685148584,
+      "fro_rel": 0.003182873547124817,
+      "finite": true
+     },
+     "kernel_state": {
+      "max_abs": 0.00956052541732788,
+      "max_rel": 0.0022363868997996496,
+      "fro_rel": 0.0035226462344334513,
+      "finite": true
+     },
+     "hf_bf16_o": {
+      "max_abs": 0.0019246339797973633,
+      "max_rel": 0.0059367421644747845,
+      "fro_rel": 0.0032088105009482424,
+      "finite": true
+     },
+     "hf_bf16_state": {
+      "max_abs": 0.005499362945556641,
+      "max_rel": 0.0012864045344616543,
+      "fro_rel": 0.0026725614018692835,
+      "finite": true
+     },
+     "hf_fp32_chunk_o": {
+      "max_abs": 3.337860107421875e-06,
+      "max_rel": 1.0295991366075812e-05,
+      "fro_rel": 5.804800421364791e-06,
+      "finite": true
+     },
+     "hf_fp32_chunk_state": {
+      "max_abs": 5.14984130859375e-05,
+      "max_rel": 1.2046448428150408e-05,
+      "fro_rel": 6.013395558354383e-06,
+      "finite": true
+     }
+    },
+    {
+     "T": 8192,
+     "kernel_o": {
+      "max_abs": 0.002525031566619873,
+      "max_rel": 0.004536121772752752,
+      "fro_rel": 0.0029141652148750663,
+      "finite": true
+     },
+     "kernel_state": {
+      "max_abs": 0.009857892990112305,
+      "max_rel": 0.001260457680240845,
+      "fro_rel": 0.0032597563784201844,
+      "finite": true
+     },
+     "hf_bf16_o": {
+      "max_abs": 0.0035530924797058105,
+      "max_rel": 0.006382993531986977,
+      "fro_rel": 0.0030040935469863965,
+      "finite": true
+     },
+     "hf_bf16_state": {
+      "max_abs": 0.006469979882240295,
+      "max_rel": 0.0008272696652066856,
+      "fro_rel": 0.002422632472441937,
+      "finite": true
+     },
+     "hf_fp32_chunk_o": {
+      "max_abs": 1.5735626220703125e-05,
+      "max_rel": 2.8268445294401403e-05,
+      "fro_rel": 1.4814261973105566e-05,
+      "finite": true
+     },
+     "hf_fp32_chunk_state": {
+      "max_abs": 0.00026798248291015625,
+      "max_rel": 3.4264987365243184e-05,
+      "fro_rel": 1.6116819003732535e-05,
+      "finite": true
+     }
+    }
+   ],
+   "prefill_batch4_varlen": [
+    {
+     "T": 1,
+     "h0_nonzero": false,
+     "o": {
+      "max_abs": 7.99517147243023e-06,
+      "max_rel": 0.0037163862340352538,
+      "fro_rel": 0.0033148563243843893,
+      "finite": true
+     },
+     "state": {
+      "max_abs": 0.000332072377204895,
+      "max_rel": 0.00234985819130408,
+      "fro_rel": 0.0021452708462300772,
+      "finite": true
+     }
+    },
+    {
+     "T": 63,
+     "h0_nonzero": false,
+     "o": {
+      "max_abs": 0.000445537269115448,
+      "max_rel": 0.004937121649574418,
+      "fro_rel": 0.004504806084712761,
+      "finite": true
+     },
+     "state": {
+      "max_abs": 0.0068898797035217285,
+      "max_rel": 0.006810728182814785,
+      "fro_rel": 0.0042707088851109,
+      "finite": true
+     }
+    },
+    {
+     "T": 777,
+     "h0_nonzero": true,
+     "o": {
+      "max_abs": 0.0011169612407684326,
+      "max_rel": 0.004815510778333478,
+      "fro_rel": 0.0031851480528142864,
+      "finite": true
+     },
+     "state": {
+      "max_abs": 0.005942106246948242,
+      "max_rel": 0.0020384839398333568,
+      "fro_rel": 0.0035893794984634777,
+      "finite": true
+     }
+    },
+    {
+     "T": 2048,
+     "h0_nonzero": true,
+     "o": {
+      "max_abs": 0.0016034841537475586,
+      "max_rel": 0.00425419503211797,
+      "fro_rel": 0.0030668589024768766,
+      "finite": true
+     },
+     "state": {
+      "max_abs": 0.00752846896648407,
+      "max_rel": 0.0017271844967671787,
+      "fro_rel": 0.0035697405939686976,
+      "finite": true
+     }
+    }
+   ],
+   "prefill_resume": {
+    "unaligned": {
+     "cuts": [
+      0,
+      37,
+      600,
+      1500,
+      2048
+     ],
+     "resumed_vs_one_shot_o": {
+      "max_abs": 0.001953125,
+      "max_rel": 0.005747126436781609,
+      "fro_rel": 0.0034988042779074864,
+      "finite": true
+     },
+     "resumed_vs_one_shot_state": {
+      "max_abs": 0.006789103150367737,
+      "max_rel": 0.0016647687119230046,
+      "fro_rel": 0.0036431718927689514,
+      "finite": true
+     },
+     "bitwise_equal": false,
+     "resumed_o": {
+      "max_abs": 0.0014863312244415283,
+      "max_rel": 0.004373236386084352,
+      "fro_rel": 0.0032131650400041667,
+      "finite": true
+     },
+     "resumed_state": {
+      "max_abs": 0.006757646799087524,
+      "max_rel": 0.0016569668943642738,
+      "fro_rel": 0.0035154519409108438,
+      "finite": true
+     },
+     "one_shot_o": {
+      "max_abs": 0.001476377248764038,
+      "max_rel": 0.004343948776496956,
+      "fro_rel": 0.003192552774919518,
+      "finite": true
+     },
+     "one_shot_state": {
+      "max_abs": 0.007158249616622925,
+      "max_rel": 0.001755194224998784,
+      "fro_rel": 0.0035488352969628456,
+      "finite": true
+     }
+    },
+    "aligned_64": {
+     "cuts": [
+      0,
+      64,
+      1024,
+      1536,
+      2048
+     ],
+     "resumed_vs_one_shot_o": {
+      "max_abs": 0.0,
+      "max_rel": 0.0,
+      "fro_rel": 0.0,
+      "finite": true
+     },
+     "resumed_vs_one_shot_state": {
+      "max_abs": 0.0,
+      "max_rel": 0.0,
+      "fro_rel": 0.0,
+      "finite": true
+     },
+     "bitwise_equal": true,
+     "resumed_o": {
+      "max_abs": 0.001476377248764038,
+      "max_rel": 0.004343948776496956,
+      "fro_rel": 0.003192552774919518,
+      "finite": true
+     },
+     "resumed_state": {
+      "max_abs": 0.007158249616622925,
+      "max_rel": 0.001755194224998784,
+      "fro_rel": 0.0035488352969628456,
+      "finite": true
+     },
+     "one_shot_o": {
+      "max_abs": 0.001476377248764038,
+      "max_rel": 0.004343948776496956,
+      "fro_rel": 0.003192552774919518,
+      "finite": true
+     },
+     "one_shot_state": {
+      "max_abs": 0.007158249616622925,
+      "max_rel": 0.001755194224998784,
+      "fro_rel": 0.0035488352969628456,
+      "finite": true
+     }
+    }
+   },
+   "decode_after_prefill": {
+    "fused_recurrent": {
+     "rows": [
+      {
+       "prefix": 5,
+       "o": {
+        "max_abs": 0.0001407340168952942,
+        "max_rel": 0.0016580562847302838,
+        "fro_rel": 0.0018201997548593525,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.0014889352023601532,
+        "max_rel": 0.0007757516240819073,
+        "fro_rel": 0.000868660047777287,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 100,
+       "o": {
+        "max_abs": 0.00026540644466876984,
+        "max_rel": 0.004369717293959131,
+        "fro_rel": 0.0035006070086100764,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.0038031786680221558,
+        "max_rel": 0.0023332604662721556,
+        "fro_rel": 0.0031185668001755882,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 512,
+       "o": {
+        "max_abs": 0.00048291683197021484,
+        "max_rel": 0.0026193366987273003,
+        "fro_rel": 0.0027413832784164752,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.005439504981040955,
+        "max_rel": 0.0019291140594454553,
+        "fro_rel": 0.0029804567001536723,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 1000,
+       "o": {
+        "max_abs": 0.0009376108646392822,
+        "max_rel": 0.0042818080523469105,
+        "fro_rel": 0.002444432859881847,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.006143808364868164,
+        "max_rel": 0.0020956512857079656,
+        "fro_rel": 0.0032430243124400102,
+        "finite": true
+       }
+      }
+     ],
+     "other_slots_untouched": true,
+     "finite": true
+    },
+    "fused_sigmoid_gating": {
+     "rows": [
+      {
+       "prefix": 5,
+       "o": {
+        "max_abs": 0.0001551397144794464,
+        "max_rel": 0.0018277768536606668,
+        "fro_rel": 0.002326123072182525,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.002824068069458008,
+        "max_rel": 0.0014713705391122772,
+        "fro_rel": 0.001928640111266369,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 100,
+       "o": {
+        "max_abs": 0.00026540644466876984,
+        "max_rel": 0.004369717293959131,
+        "fro_rel": 0.003571818435441924,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.004372894763946533,
+        "max_rel": 0.002682782842066971,
+        "fro_rel": 0.0032865300539680897,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 512,
+       "o": {
+        "max_abs": 0.000514686107635498,
+        "max_rel": 0.002791652973773172,
+        "fro_rel": 0.002738045234475992,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.005655072629451752,
+        "max_rel": 0.002005564873032408,
+        "fro_rel": 0.003138070131903421,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 1000,
+       "o": {
+        "max_abs": 0.0009376108646392822,
+        "max_rel": 0.0042818080523469105,
+        "fro_rel": 0.0024730262621576755,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.0058065056800842285,
+        "max_rel": 0.0019805974358707446,
+        "fro_rel": 0.0033356504888608033,
+        "finite": true
+       }
+      }
+     ],
+     "other_slots_untouched": true,
+     "finite": true
+    },
+    "packed_decode": {
+     "rows": [
+      {
+       "prefix": 5,
+       "o": {
+        "max_abs": 0.0001551397144794464,
+        "max_rel": 0.0018277768536606668,
+        "fro_rel": 0.002326129607364608,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.0028241872787475586,
+        "max_rel": 0.001471432648463865,
+        "fro_rel": 0.0019286452761263493,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 100,
+       "o": {
+        "max_abs": 0.00026540644466876984,
+        "max_rel": 0.004369717293959131,
+        "fro_rel": 0.003571820500541557,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.0043728649616241455,
+        "max_rel": 0.002682764558261055,
+        "fro_rel": 0.0032865329152541533,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 512,
+       "o": {
+        "max_abs": 0.000514686107635498,
+        "max_rel": 0.002791652973773172,
+        "fro_rel": 0.0027380452464367483,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.005655080080032349,
+        "max_rel": 0.002005567515372075,
+        "fro_rel": 0.003138069192328246,
+        "finite": true
+       }
+      },
+      {
+       "prefix": 1000,
+       "o": {
+        "max_abs": 0.0009376108646392822,
+        "max_rel": 0.0042818080523469105,
+        "fro_rel": 0.0024730265569404184,
+        "finite": true
+       },
+       "state": {
+        "max_abs": 0.005806565284729004,
+        "max_rel": 0.0019806177669981235,
+        "fro_rel": 0.00333564907074222,
+        "finite": true
+       }
+      }
+     ],
+     "other_slots_untouched": true,
+     "finite": true
+    }
+   },
+   "verify_k": {
+    "k": 3,
+    "n_accept": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "checkpoint_slots": {
+     "step_a": {
+      "o_vs_sequential": {
+       "max_abs": 0.0,
+       "max_rel": 0.0,
+       "fro_rel": 0.0,
+       "finite": true
+      },
+      "o_bitwise_equal_sequential": true,
+      "slot_states_bitwise_equal_sequential": true
+     },
+     "step_b": {
+      "rows": [
+       {
+        "n_accept": 1,
+        "o": {
+         "max_abs": 5.250750109553337e-05,
+         "max_rel": 0.004046763429050162,
+         "fro_rel": 0.003420830712498306,
+         "finite": true
+        },
+        "state": {
+         "max_abs": 0.0024680495262145996,
+         "max_rel": 0.005302733282581692,
+         "fro_rel": 0.003704189068792811,
+         "finite": true
+        }
+       },
+       {
+        "n_accept": 2,
+        "o": {
+         "max_abs": 0.00015868060290813446,
+         "max_rel": 0.002609519503624307,
+         "fro_rel": 0.0030564408051831035,
+         "finite": true
+        },
+        "state": {
+         "max_abs": 0.004822403192520142,
+         "max_rel": 0.0030069683215135645,
+         "fro_rel": 0.0036795147681650386,
+         "finite": true
+        }
+       },
+       {
+        "n_accept": 3,
+        "o": {
+         "max_abs": 0.0004093870520591736,
+         "max_rel": 0.0031107278017214047,
+         "fro_rel": 0.003140898414620839,
+         "finite": true
+        },
+        "state": {
+         "max_abs": 0.005482345819473267,
+         "max_rel": 0.0024411720492229843,
+         "fro_rel": 0.0036491451925462536,
+         "finite": true
+        }
+       },
+       {
+        "n_accept": 4,
+        "o": {
+         "max_abs": 0.0006002597510814667,
+         "max_rel": 0.003388248995412382,
+         "fro_rel": 0.002773499972892782,
+         "finite": true
+        },
+        "state": {
+         "max_abs": 0.00920948851853609,
+         "max_rel": 0.0031334001478508155,
+         "fro_rel": 0.0036601953419488444,
+         "finite": true
+        }
+       }
+      ],
+      "o_bitwise_equal_sequential": true
+     }
+    },
+    "replay": {
+     "verify_o_bitwise_equal_checkpoint_slots": true,
+     "committed_state_bitwise_equal_sequential": true,
+     "rows": [
+      {
+       "n_accept": 1,
+       "state": {
+        "max_abs": 0.002425849437713623,
+        "max_rel": 0.004728810024394055,
+        "fro_rel": 0.003811728111128406,
+        "finite": true
+       }
+      },
+      {
+       "n_accept": 2,
+       "state": {
+        "max_abs": 0.006207764148712158,
+        "max_rel": 0.003876912305821224,
+        "fro_rel": 0.003905799366050666,
+        "finite": true
+       }
+      },
+      {
+       "n_accept": 3,
+       "state": {
+        "max_abs": 0.005652241408824921,
+        "max_rel": 0.0025263996308103887,
+        "fro_rel": 0.0036779045493544,
+        "finite": true
+       }
+      },
+      {
+       "n_accept": 4,
+       "state": {
+        "max_abs": 0.01005128026008606,
+        "max_rel": 0.003396894861508738,
+        "fro_rel": 0.0036812788744630892,
+        "finite": true
+       }
+      }
+     ]
+    },
+    "finite": true
+   },
+   "layer_level": [
+    {
+     "T": 16,
+     "decode_steps": 16,
+     "prefill": {
+      "ours": {
+       "max_abs": 0.268585205078125,
+       "max_rel": 0.0021634432055291325,
+       "fro_rel": 0.003375419456033844,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 0.35289764404296875,
+       "max_rel": 0.002842576567201171,
+       "fro_rel": 0.003906979385860193,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 0.8639460623339541
+     },
+     "decode": {
+      "ours": {
+       "max_abs": 0.24241256713867188,
+       "max_rel": 0.00367987011964225,
+       "fro_rel": 0.004902464856582687,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 0.24241256713867188,
+       "max_rel": 0.00367987011964225,
+       "fro_rel": 0.005377986973920938,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 0.9115799053355532
+     }
+    },
+    {
+     "T": 512,
+     "decode_steps": 16,
+     "prefill": {
+      "ours": {
+       "max_abs": 2.334716796875,
+       "max_rel": 0.005058470882385263,
+       "fro_rel": 0.004566380370715615,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 2.334716796875,
+       "max_rel": 0.005058470882385263,
+       "fro_rel": 0.004486905084942688,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 1.0177127182920882
+     },
+     "decode": {
+      "ours": {
+       "max_abs": 0.3936634063720703,
+       "max_rel": 0.0015274429229097093,
+       "fro_rel": 0.00305722425895917,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 0.4685497283935547,
+       "max_rel": 0.0018180073511571838,
+       "fro_rel": 0.0036639136310967807,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 0.8344149362614751
+     }
+    },
+    {
+     "T": 2048,
+     "decode_steps": 16,
+     "prefill": {
+      "ours": {
+       "max_abs": 2.6773223876953125,
+       "max_rel": 0.0057290806161224405,
+       "fro_rel": 0.0040801520281664215,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 1.680206298828125,
+       "max_rel": 0.003595397170674432,
+       "fro_rel": 0.0038308788419382776,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 1.065069451818534
+     },
+     "decode": {
+      "ours": {
+       "max_abs": 0.249237060546875,
+       "max_rel": 0.0033714198788278586,
+       "fro_rel": 0.004708544605582584,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 0.5735626220703125,
+       "max_rel": 0.007758558946079367,
+       "fro_rel": 0.007416441018724159,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 0.6348792626672287
+     }
+    },
+    {
+     "T": 8192,
+     "decode_steps": 16,
+     "prefill": {
+      "ours": {
+       "max_abs": 2.596832275390625,
+       "max_rel": 0.004159009825943584,
+       "fro_rel": 0.0036338406858357135,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 2.42730712890625,
+       "max_rel": 0.003887503361450422,
+       "fro_rel": 0.003513344710525763,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 1.0342966561034994
+     },
+     "decode": {
+      "ours": {
+       "max_abs": 0.3737335205078125,
+       "max_rel": 0.0016418734370511837,
+       "fro_rel": 0.004537505483244758,
+       "finite": true
+      },
+      "hf_bf16": {
+       "max_abs": 1.3737335205078125,
+       "max_rel": 0.0060350395486171975,
+       "fro_rel": 0.007640571858077346,
+       "finite": true
+      },
+      "fro_ratio_ours_over_hf_bf16": 0.5938698787902722
+     }
+    }
+   ]
+  }
+ },
+ "max_memory_allocated_gib": 3.9056873321533203
+}
