@@ -10,13 +10,12 @@ Companion to [design.md](design.md)
 | Role | Hardware | Use |
 |---|---|---|
 | Development | 8× RTX A5000 24 GB (**sm_86**), 96 cores, 251 GB RAM; CUDA 13.0, Python 3.12, torch 2.11.0+cu130, Triton 3.6, uv | coding, functional tests, golden recording (CPU fp32 fits in RAM) |
-| Consumer evidence | consumer desktop machines (AMD B650, 8 cores, 128 GB RAM, 1 GPU): **RTX 5080 16 GB** and **RTX 5090 32 GB** (sm_120), **RTX 4090 24 GB** (sm_89), RTX 3090 (sm_86) | all performance numbers, tuned defaults per fingerprint class, consumer memory-fit checks |
-| Blackwell dev (optional) | workstation with 8× RTX PRO 6000 Blackwell Max-Q 96 GB (sm_120), 96 cores; direct ssh, same filesystem, no batch scheduler | sm_120 kernel development and debugging (S1–S3 on Blackwell), large-memory work (GPU golden recording, large models), NVFP4 later; not a consumer-performance proxy |
+| Consumer evidence | consumer desktop machines (AM5 desktop, 8 cores, 1 GPU): **RTX 5080 16 GB** and **RTX 5090 32 GB** (sm_120), **RTX 4090 24 GB** (sm_89), RTX 3090 (sm_86) | all performance numbers, tuned defaults per fingerprint class, consumer memory-fit checks |
+| Blackwell dev (optional) | workstation with RTX PRO 6000 Blackwell Max-Q 96 GB (sm_120) | sm_120 kernel development and debugging (S1–S3 on Blackwell), large-memory work (GPU golden recording, large models), NVFP4 later; not a consumer-performance proxy |
 | Datacenter (later) | H100/H200, GB200/GB300 | v2 datacenter path (TP/EP/PD, NVFP4) |
 
-Shared dev pools with many card types are used when
-needed. **Working method:** allocate a node with the needed card once, start a persistent container on it, and run
-builds, tests and benchmarks inside that container repeatedly — no per-test batch jobs. The A5000 host (16 memory channels, server CPUs) is not a
+**Working method:** on a shared test machine, start one persistent container and run builds, tests and benchmarks
+inside it repeatedly rather than as many short batch jobs. The A5000 host (16 memory channels, server CPUs) is not a
 faithful consumer proxy — CPU-side and PCIe-bound tunables are only measured on consumer desktops.
 
 **Quantization priority (D9):** for consumer and edge GPUs the formats that matter are llama.cpp's GGUF sub-4-bit
@@ -99,7 +98,7 @@ Global acceptance for every milestone ≥ M0.1:
 | S3 GDN | vendored chunk + recurrent kernels on sm_86/sm_120 vs HF torch reference; no `vllm` imports | within budget, no NaN at T=1..8192, run-to-run identical |
 | S4 Determinism | every production kernel candidate is run-to-run deterministic with pinned configs (no split-K/atomics); which sites must be `uncovered` | list of deterministic kernels + uncovered sites |
 | S5 Golden | HF fp32 recording on CPU (or `device_map` over GPUs) for 8B; noise floor HF bf16 vs fp32 on frozen prompts | τ and KL/ΔPPL budgets calibrated |
-| S6 CPU handshake | stream-memop flags (`cuStreamWriteValue`/`WaitValue`) + persistent native CPU worker inside a FULL graph; `quiesce()` + double-buffered resolver map under depth 1 (learning from FreeToken's `cpu_executor`) | per-step overhead measured on a desktop host (consumer desktops); seam confirmed before the ABI freezes |
+| S6 CPU handshake | stream-memop flags (`cuStreamWriteValue`/`WaitValue`) + persistent native CPU worker inside a FULL graph; `quiesce()` + double-buffered resolver map under depth 1 (learning from FreeToken's `cpu_executor`) | per-step overhead measured on a desktop host; seam confirmed before the ABI freezes |
 
 **Spike outcomes (2026-10-07; details in `spikes/s*/README.md`, design §5.6, §7.4, §10.3):**
 
@@ -112,15 +111,15 @@ Global acceptance for every milestone ≥ M0.1:
 | S5 | Top-20 fp32 CPU golden (Qwen3-8B: 4–8 min, 49 GB RAM, 5.4 MB); prompt set v1 (24 prompts, 4 categories); budgets per design §10.3 with KL p99 as the discriminating metric; injected RoPE bug caught, legit variants pass |
 | S6 | Handshake seam sound: spin-kernel wait 2.8 µs / memop 9.7 µs / host func 31.7 µs per handshake; zero-copy pinned I/O; overlap works; 1.5 M handshakes without deadlock; stream-ordered map swaps need no quiesce |
 
-Follow-up (before M0 closes): run the S1, S2 and S6 benchmarks on RTX 4090 / 5080 / 5090 nodes inside
+Follow-up (before M0 closes): run the S1, S2 and S6 benchmarks on RTX 4090 / 5080 / 5090 desktops inside
 one persistent container per class, re-tune the Triton attention configs, and record the consumer evidence.
 
 ### 3.2 Work items
 
 **A. Repo bootstrap** — uv workspace (`core/`, `std/*`, `plugins/*`, `judge/`, `supervisor/`, `bench/`, `plans/`);
 CI scripts (§3.5); `AGENTS.md` (no claims without measurement; failing-then-passing test per bug fix; never edit
-`judge/` or locks by hand); a pinned container image for builds/tests and scripts to run it on an allocated
-shared test machine (one allocation, persistent container, repeated runs inside — D7).
+`judge/` or locks by hand); a pinned container image for builds/tests and scripts to run it on a shared
+test machine (one persistent container, repeated runs inside — D7).
 
 **B. `holon.api`** — dataclasses/Protocols only: Manifest schema, resources, slots + cardinality, Plan + lock
 format (`recipe`, `[units]` src/sem, `[deploy]`, `[snapshot]`), recipe terms (`Ref`, `ModelSpec` with
@@ -166,13 +165,13 @@ via `dequant_ref` into the dense HF class) + comparator with calibrated budgets;
 oracle provenance (`reference.py` at reviewed commits).
 
 **G. bench** — trace replay (ShareGPT-like + **mixed agent multi-turn tool traces**), TTFT/TPOT/throughput,
-interleaved ABAB, client-side timing; runs inside the persistent container on allocated consumer desktops nodes; baselines
+interleaved ABAB, client-side timing; runs inside the persistent container on consumer desktops; baselines
 in pinned environments; container image digest recorded in evidence.
 
 **H. propagation tooling** (outside core, ~400 LOC; changed-line coverage captured during snapshot traces) — `holon impact`, `holon propagate` (3 outcomes,
 design §4.6), `propagate --new-model`, `holon tune` (benchmarks tunables/kernel configs per fingerprint class
-into the lock); CI `isolation-check` re-runs propagate on a trusted GPU runner (A5000) and on remote
-consumer-desktop runners for the maintained consumer classes: a scheduled, renewable allocation per class running the
+into the lock); CI `isolation-check` re-runs propagate on a trusted GPU runner (A5000) and on consumer-desktop
+runners for the maintained consumer classes: a scheduled, renewable allocation per class running the
 pinned container (on shared-change PRs where capacity allows, nightly at least).
 
 **I. supervisor (v0 part)** (~0.5–0.8k) — engine lifecycle on the newest lock, health checks, restart on the same

@@ -1,6 +1,6 @@
 # Holon — Design
 
-Status: draft for review · Date: 2026-10-06 · Branch: `design-doc`
+Status: draft for review · Date: 2026-10-06
 
 ---
 
@@ -47,7 +47,7 @@ to host-side policies and live tunables).
 | D4 | Python control plane; native/Triton kernels; CUDA graphs on the hot path. The plugin API stays Python; hot core structures and the frontend may later be replaced by Rust modules behind unchanged interfaces, only when profiling triggers it (§12). |
 | D5 | Self-improvement is an **optional capability** for capable agents and explicit user intent (e.g. a strong agent served by Holon). The engine itself ships best-known, human-tuned defaults and never depends on it. When used, auto-promotion is limited to policy/kernel/tunable scope under the judge; core, judge, ABI and `approx` numerics need a human (§10.5). |
 | D6 | References (mini-sglang, nano-vllm, vLLM Model Runner V2, SGLang, FreeToken, Strata) are studied, not copied: control-plane code is our own plugin-native implementation. Only kernels may be borrowed, under §5.6. |
-| D7 | Hardware: development on 8× RTX A5000 (sm_86). Consumer performance evidence on consumer desktop machines — RTX 5080 16 GB and RTX 5090 32 GB (sm_120), RTX 4090 (sm_89). Optional Blackwell workstation (8× RTX PRO 6000 96 GB, sm_120, direct access) for sm_120 kernel work and large-memory tasks. Datacenter path on datacenter GPUs (H100, GB200) later. Shared test machines are used used when needed: allocate a node once, run a persistent container on it, and build/test/benchmark inside it rather than submitting many batch jobs. |
+| D7 | Hardware: development on 8× RTX A5000 (sm_86). Consumer performance evidence on consumer desktop machines — RTX 5080 16 GB and RTX 5090 32 GB (sm_120), RTX 4090 (sm_89). Optional Blackwell workstation (RTX PRO 6000 96 GB, sm_120) for sm_120 kernel work and large-memory tasks. Datacenter path (H100, GB200) later. Shared test machines are used through one persistent container per machine: builds, tests and benchmarks run inside it repeatedly rather than as many short batch jobs. |
 | D8 | Expert caching/offload arrives in v1, but its core seams (device SeqTable, MemOps, `quiesce`, stream-memop CPU handshake) are built and spiked in M0 so it lands without core changes. |
 | D9 | Quantization priority follows the deployment target. Consumer/edge GPUs: llama.cpp GGUF sub-4-bit formats (k-quants, i-quants, e.g. `unsloth/Qwen3.8-27B-GGUF`) — v0. HF-ecosystem GPTQ/AWQ INT4 and FP8 — v1. NVFP4/MXFP4, which mainly serve large-memory datacenter GPUs — v2. |
 
@@ -328,8 +328,8 @@ outcomes:
 Toolchain bumps (torch, Triton, FlashInfer, CUDA majors) produce a new fingerprint class and run the same sweep.
 New models get their first lock from `holon propagate --new-model` (L2 vs reference + snapshot, approved).
 Maintained consumer classes (`rtx-5080`, `rtx-5090`, `rtx-4090`) are refreshed by `isolation-check` runners on
-consumer desktops — a scheduled (renewable) allocation per class that starts the pinned container image and runs the
-queued checks inside it (D7 working method); the image digest is recorded in evidence as part of the toolchain —
+consumer desktop machines — a scheduled (renewable) allocation per class that starts the pinned container image
+and runs the queued checks inside it (D7 working method); the image digest is recorded in evidence as part of the toolchain —
 on shared-change PRs where capacity allows, and nightly at least; a release commit requires
 every maintained class refreshed. Until refreshed, an outdated lock is treated as missing (§4.4).
 
@@ -568,7 +568,7 @@ Adopted kernels, decided by the M0 spikes (evidence and raw numbers in `spikes/s
   W8A16/W4A16 GEMM written by us — on sm_86 Triton rejects `fp8e4nv`, so FP8 weights are loaded as `uint8` and
   decoded to bf16 with exact bit operations in the K-loop; Marlin only if it builds standalone.
 
-Consumer-card numbers (RTX 4090/5080/5090 on consumer desktops) are still to be recorded for S1, S2 and S6; the RTX PRO
+Consumer-card numbers (RTX 4090/5080/5090 desktops) are still to be recorded for S1, S2 and S6; the RTX PRO
 6000 (128 MB L2, 188 SMs) is not a consumer proxy.
 
 ### 5.7 Model-specific specialization

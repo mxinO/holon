@@ -11,3 +11,11 @@ spikes/*/build/
 spikes/*/third_party/
 spikes/*/out/
 *.so
+
+# Local only, never published: private machine notes and helpers, internal design discussions.
+AGENTS.local.md
+.private-patterns
+local/
+spikes/*/.phase*.sh
+docs/brainstorm/
+docs/design-brainstorm.md

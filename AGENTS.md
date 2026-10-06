@@ -32,7 +32,9 @@ Read `docs/design.md` (architecture) and `docs/plan.md` (milestones) first.
 
 - Python env: `.venv` (uv, `--system-site-packages` over the conda torch 2.11+cu130 stack). Activate with
   `. .venv/bin/activate`. Do not install into it ad hoc — add dependencies to the relevant `pyproject.toml`.
-- Dev GPUs: 8× A5000 (sm_86) on this host. Blackwell workstation (8× RTX PRO 6000, sm_120, shared filesystem,
-  GPUs shared with other users — keep memory small). Consumer evidence: RTX 5080/5090/4090 nodes —
-  allocate once, run a persistent container, build and test inside it; no per-test batch jobs.
+- Machine-specific notes (hosts, clusters, paths) live in `AGENTS.local.md`, which is not tracked; read it if
+  present. Never commit private infrastructure details — host or cluster names, usernames, absolute paths — to
+  tracked files, results included (`scripts/ci/check_private.py`).
+- Consumer performance evidence comes from consumer desktops (RTX 5080/5090/4090); on shared test machines, run
+  one persistent container and build/test inside it rather than many short batch jobs.
 - Always pin GPUs explicitly (`CUDA_VISIBLE_DEVICES`) in scripts and spikes so parallel work does not collide.
