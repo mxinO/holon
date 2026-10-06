@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+workspace/
+spikes/*/build/
+spikes/*/third_party/
+spikes/*/out/
+*.so

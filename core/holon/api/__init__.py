@@ -1,0 +1,63 @@
+"""Plugin ABI: dataclasses and Protocols only (design §3). No runtime state and no device calls.
+
+Importing `holon.api` must not import torch or numpy, so that model recipes stay pure data.
+"""
+from .batch import (
+    Batch,
+    BatchPlan,
+    DeviceBatch,
+    SamplingParams,
+    Seq,
+    SeqTable,
+    ShapeKey,
+    Status,
+    StepCtx,
+    TokenSrc,
+)
+from .decoding import (
+    Drafter,
+    DraftPolicy,
+    LogitsProcessor,
+    PlanTransform,
+    SampleOut,
+    Sampler,
+    SchedulePolicy,
+    Verifier,
+)
+from .frontend import Abort, EngineRequest, FrontendBundle, Logprobs, Parser, TokenDelta, Tokenizer
+from .manifest import SLOTS, Cardinality, Manifest, Provenance, Resource, Tunable
+from .memory import Ledger, Pool
+from .mixer import Mixer, Planner
+from .model import BuildCtx, DraftHeadDecl, LayerDecl, ModelPlugin, ModelSpec, Unit, WeightMap, WeightRule, WeightSource
+from .ops import Constraint, KernelRegistry, KernelSpec, Plugin, Registries, Registry
+from .plan import Binding, Lock, Plan, UnitPin
+from .platform import Fingerprint, Platform
+from .quant import Converter, Dialect, Layout, QTensor, Scale, Scheme, SchemeImpl
+from .state import (
+    CommitView,
+    HitLen,
+    MemOp,
+    Paged,
+    Payload,
+    PrefixView,
+    Rewindable,
+    SeqView,
+    Slot,
+    StateKind,
+    StateKindFactory,
+    StateSpec,
+)
+from .telemetry import Event
+from .terms import Ref, canonical_hash, parse_versioned, to_term
+
+__all__ = [
+    "SLOTS", "Abort", "Batch", "BatchPlan", "Binding", "BuildCtx", "Cardinality", "CommitView", "Constraint",
+    "Converter", "DeviceBatch", "Dialect", "DraftHeadDecl", "DraftPolicy", "Drafter", "EngineRequest", "Event",
+    "Fingerprint", "FrontendBundle", "HitLen", "KernelRegistry", "KernelSpec", "LayerDecl", "Layout", "Ledger",
+    "Lock", "Logprobs", "LogitsProcessor", "Manifest", "MemOp", "Mixer", "ModelPlugin", "ModelSpec", "Paged",
+    "Parser", "Payload", "Plan", "PlanTransform", "Planner", "Platform", "Plugin", "Pool", "Provenance", "PrefixView",
+    "QTensor", "Ref", "Registries", "Registry", "Resource", "Rewindable", "SampleOut", "Sampler", "SamplingParams",
+    "Scale", "SchedulePolicy", "Scheme", "SchemeImpl", "Seq", "SeqTable", "SeqView", "ShapeKey", "Slot", "StateKind",
+    "StateKindFactory", "StateSpec", "Status", "StepCtx", "TokenDelta", "TokenSrc", "Tokenizer", "Tunable", "Unit",
+    "UnitPin", "Verifier", "WeightMap", "WeightRule", "WeightSource", "canonical_hash", "parse_versioned", "to_term",
+]

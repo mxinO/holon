@@ -1,4 +1,4 @@
-# plug-serve — Design
+# Holon — Design
 
 Status: draft for review · Date: 2026-10-06 · Branch: `design-doc`
 
@@ -6,7 +6,7 @@ Status: draft for review · Date: 2026-10-06 · Branch: `design-doc`
 
 ## 0. Summary
 
-plug-serve is a microkernel LLM inference engine. A small core (~5k LOC Python, hard cap 6k) fixes only the
+Holon is a microkernel LLM inference engine. A small core (~5k LOC Python, hard cap 6k) fixes only the
 timing structure of a step, memory accounting, the plugin resolver and a handful of typed contracts. **Models,
 layer types, quantization formats, kernels, cache/offload policies, speculative decoding, sampling, grammars,
 schedulers, frontends and parallelism are all plugins.** Every supported (model, GPU class) ships with
@@ -45,7 +45,7 @@ to host-side policies and live tunables).
 | D2 | Model ladder: Qwen3 dense → Qwen3-MoE → Qwen3.5 GDN hybrid ([plan §2](plan.md)). |
 | D3 | Borrow existing kernels first (FlashInfer, flash-linear-attention, Triton MoE, …) **only if they fit the plugin contract** (§5.6); otherwise write our own. |
 | D4 | Python control plane; native/Triton kernels; CUDA graphs on the hot path. The plugin API stays Python; hot core structures and the frontend may later be replaced by Rust modules behind unchanged interfaces, only when profiling triggers it (§12). |
-| D5 | Self-improvement is an **optional capability** for capable agents and explicit user intent (e.g. a strong agent served by plug-serve). The engine itself ships best-known, human-tuned defaults and never depends on it. When used, auto-promotion is limited to policy/kernel/tunable scope under the judge; core, judge, ABI and `approx` numerics need a human (§10.5). |
+| D5 | Self-improvement is an **optional capability** for capable agents and explicit user intent (e.g. a strong agent served by Holon). The engine itself ships best-known, human-tuned defaults and never depends on it. When used, auto-promotion is limited to policy/kernel/tunable scope under the judge; core, judge, ABI and `approx` numerics need a human (§10.5). |
 | D6 | References (mini-sglang, nano-vllm, vLLM Model Runner V2, SGLang, FreeToken, Strata) are studied, not copied: control-plane code is our own plugin-native implementation. Only kernels may be borrowed, under §5.6. |
 | D7 | Hardware: development on 8× RTX A5000 (sm_86). Consumer performance evidence on consumer desktop machines — RTX 5080 16 GB and RTX 5090 32 GB (sm_120), RTX 4090 (sm_89). Optional Blackwell workstation (8× RTX PRO 6000 96 GB, sm_120, direct access) for sm_120 kernel work and large-memory tasks. Datacenter path on datacenter GPUs (H100, GB200) later. Shared test machines are used used when needed: allocate a node once, run a persistent container on it, and build/test/benchmark inside it rather than submitting many batch jobs. |
 | D8 | Expert caching/offload arrives in v1, but its core seams (device SeqTable, MemOps, `quiesce`, stream-memop CPU handshake) are built and spiked in M0 so it lands without core changes. |
@@ -56,15 +56,15 @@ to host-side policies and live tunables).
 ## 1. Invariants (lint/CI-enforced)
 
 1. The core contains no model name, layer-type name, quant-format name, or feature-specific field.
-   (CI: denylist grep over `plugserve/core` — `mamba|gdn|mla|dsa|nvfp4|eagle|qwen|deepseek|lora|…`.)
-2. Plugins import only `plugserve.api`, their own package, and third-party libraries declared in their manifest
+   (CI: denylist grep over `holon/core` — `mamba|gdn|mla|dsa|nvfp4|eagle|qwen|deepseek|lora|…`.)
+2. Plugins import only `holon.api`, their own package, and third-party libraries declared in their manifest
    `[dependencies]` (e.g. `triton`, `flashinfer`). Other units (incl. std) are referenced with `Ref` and injected,
    never imported (§4.6). Model packages never
    import other model packages. (CI: import-linter contracts + manifest dependency check.)
-3. Plugins never import `plugserve.core._*` or `plugserve_judge`. (CI: import-linter.)
-4. No module-level mutable state in `plugserve.*`; all state hangs off an explicit `Engine`/`ctx`. (lint)
+3. Plugins never import `holon.core._*` or `holon_judge`. (CI: import-linter.)
+4. No module-level mutable state in `holon.*`; all state hangs off an explicit `Engine`/`ctx`. (lint)
 5. No environment-variable configuration. One typed deployment file feeds the resolver. (lint: no `os.environ` in core/std)
-6. No `torch.cuda.*` outside `plugserve.core.platform` and kernel plugins. (lint)
+6. No `torch.cuda.*` outside `holon.core.platform` and kernel plugins. (lint)
 7. Plugin load failure, unresolved requirement, or duplicate provider for a `single` slot is a startup error —
    never a logged warning.
 8. Core LOC ≤ 6000 (CI). Growing past it requires a design note.
@@ -72,7 +72,7 @@ to host-side policies and live tunables).
 10. No `model_type`/architecture branches in std or any shared unit; model-specific code lives in the model's own
     package (`fast/`, §5.7). (lint)
 11. One version of each unit per Plan, one Plan per process. Lockfiles and snapshots are written only by
-    `plugserve propagate` (incl. `--new-model`), `plugserve tune` and the supervisor (§4.4, §4.6); CI's `isolation-check` re-runs propagate on a trusted GPU
+    `holon propagate` (incl. `--new-model`), `holon tune` and the supervisor (§4.4, §4.6); CI's `isolation-check` re-runs propagate on a trusted GPU
     runner and rejects any lock or snapshot it cannot reproduce byte for byte.
 
 ---
@@ -115,18 +115,18 @@ to host-side policies and live tunables).
 
 | Package | Trust | Content |
 |---|---|---|
-| `plugserve` (`core/`) | core | `plugserve.api` (protocols, dataclasses — the plugin ABI) + `plugserve.core` (runtime). ≤ 6k LOC. |
-| `plugserve-std-*` (`std/`) | reviewed | Shared units: `std.ops` (linear, norm, rope, act), `std.blocks` (residual wiring), `std.mixers.gqa`, `std.ffn`, `std.state.paged_kv`, `std.tiered` (TieredStore library), `std.sampling`. One live version each; recipes reference them via `Ref("name@major")`; locks pin `src` + `sem`; changes reach models only through propagation (§4.6). |
+| `holon` (`core/`) | core | `holon.api` (protocols, dataclasses — the plugin ABI) + `holon.core` (runtime). ≤ 6k LOC. |
+| `holonlm-std-*` (`std/`) | reviewed | Shared units: `std.ops` (linear, norm, rope, act), `std.blocks` (residual wiring), `std.mixers.gqa`, `std.ffn`, `std.state.paged_kv`, `std.tiered` (TieredStore library), `std.sampling`. One live version each; recipes reference them via `Ref("name@major")`; locks pin `src` + `sem`; changes reach models only through propagation (§4.6). |
 | `plugins/*` | reviewed or agent | First-party plugins: models, kernels, dialects, policies, frontends. Each is its own dist package with entry points. |
-| `plugserve-judge` (`judge/`) | trusted, read-only to agents | Oracles harness, tolerance budgets, goldens, traces, perf timer. |
-| `plugserve-supervisor` (`supervisor/`) | trusted | Lifecycle, crash attribution, rollback; with the optional layer (§10): promotions, evidence, improve API (MCP + HTTP). |
+| `holonlm-judge` (`judge/`) | trusted, read-only to agents | Oracles harness, tolerance budgets, goldens, traces, perf timer. |
+| `holon-supervisor` (`supervisor/`) | trusted | Lifecycle, crash attribution, rollback; with the optional layer (§10): promotions, evidence, improve API (MCP + HTTP). |
 | `workspace/` | agent (optional layer) | Git worktree where agent variants are written (gitignored). A promoted variant is committed by the supervisor to its own branch together with the new lock (§4.4). |
 
 ---
 
 ## 3. Core vocabulary
 
-Sixteen nouns. Each is a type in `plugserve.api` (the plugin ABI) with its runtime in `plugserve.core`.
+Sixteen nouns. Each is a type in `holon.api` (the plugin ABI) with its runtime in `holon.core`.
 
 | # | Noun | One-line definition | § |
 |---|---|---|---|
@@ -158,7 +158,7 @@ request, never per token, so a native implementation pays the Python callback co
 
 ### 4.1 Manifest
 
-`plugin.toml` at the package root; registered via entry point group `plugserve.plugins` (value = path to manifest).
+`plugin.toml` at the package root; registered via entry point group `holon.plugins` (value = path to manifest).
 
 ```toml
 [plugin]
@@ -171,16 +171,16 @@ entry     = "lfu_decay:Plugin"            # imported only if selected
 slot      = "placement_policy"
 license   = "Apache-2.0"                  # SPDX; provenance hash for borrowed code in [provenance]
 core_abi  = ">=0.1,<0.2"
-slot_abi  = "^1"
+slot_abi  = "1"
 
 [resources]
 provides = ["placement.expert@1"]
-requires = ["store.tiered@^1", "telemetry.router_hist@^1"]
+requires = ["store.tiered@1", "telemetry.router_hist@1"]   # matching major = compatible
 
 [properties]
 numerics    = "policy"     # policy | exact | bounded | approx   (§10.3)
 graph_policy = "host"      # full | piecewise | eager | host   (§7.4)
-overlap_safe = true
+max_depth = 1             # overlap depth tolerated (§7.3); also after/before, shape_axes
 
 [dependencies]             # third-party imports allowed for this plugin (invariant 2)
 python = []
@@ -197,7 +197,7 @@ swap_cap  = { type = "int",   range = [0, 512],     default = 96, log = true, ap
 platforms = ["cuda>=sm_80"]
 ```
 
-Resource names are **typed**: each `ns.name@major` is registered in `plugserve.api.resources` and bound to a
+Resource names are **typed**: each `ns.name@major` is registered in `holon.api.resources` and bound to a
 Protocol. The resolver matches strings without importing plugins; after import it checks each provider object
 against the Protocol (`runtime_checkable` + signature check).
 
@@ -206,9 +206,14 @@ against the Protocol (`runtime_checkable` + signature check).
 | Cardinality | Meaning | Slots |
 |---|---|---|
 | `single` | exactly one per Plan | model, platform, launcher, schedule_policy, sampler, verifier, draft_policy, eviction_policy (prefix index) |
-| `per_site` | one binding per site (layer, op instance, state spec, store) | mixer, op/kernel, state_kind, moe_op, placement_policy, codec, weight_source |
-| `ordered_multi` | ordered list, `after=/before=` constraints | plan_transform, logits_processor, checkpoint_policy |
-| `multi` | any number, keyed by name | frontend, dialect, scheme, layout, converter, tier, mover, drafter, encoder, connector, exporter |
+| `per_site` | bound per site (layer, op instance, state spec, store) | unit (mixers, ffn/MoE, norms, blocks, ops — anything a recipe names by `Ref`), kernel, state_kind, placement_policy, codec, weight_source |
+| `ordered_multi` | ordered list, `after`/`before` in the manifest | plan_transform, logits_processor, checkpoint_policy |
+| `multi` | any number, keyed by name | frontend, dialect, converter, tier, mover, drafter, encoder, connector, exporter |
+
+A `Ref("a.b.c@1")` is served by the installed plugin whose name is the longest prefix of the unit name (e.g.
+`std.ops` serves `std.ops.rmsnorm`), and whose version major equals the Ref's major. Everything the resolver needs
+(resources, numerics, graph policy, depth, ordering, shape axes) lives in the manifest; runtime classes never repeat
+it.
 
 Every slot has an ABI version and a judge-owned contract suite (§10.3).
 
@@ -220,9 +225,11 @@ Every slot has an ABI version and a judge-owned contract suite (§10.3).
 4. For each site: filter candidates by resources, platform/fingerprint constraints, `supports(shape)`, layout
    reachability (§5.5); then pick by deployment pin → the model's lock for this fingerprint class → default priority.
 5. Check `ShapeKey` axes are finite; compute graph policy per ShapeKey class (weakest wins).
-6. Emit the **Plan** (TOML lockfile): recipe hash, per-unit `src`/`sem` (`[units]`, one version each), site
-   bindings + kernel configs, tunables, fingerprint class, `[deploy]` and `[snapshot]` (§4.6).
-   `plan_id = sha256(plan)`.
+6. Emit the **Plan**: model_id, fingerprint class, recipe hash, commit, uv.lock hash, per-unit `src`/`sem` (one
+   version each) and per-site bindings with pinned configs and tunables; `plan_id = canonical_hash(plan)`. The
+   **Lock** file stores the Plan plus its verification results (`snapshot`, `uncovered` sites), which may be
+   re-recorded without changing `plan_id` (§4.6). Whether a lock was borrowed from the nearest class (`unverified`)
+   is decided when the engine starts, not stored.
 7. Import only the selected entries; each plugin registers its kernels/converters/kinds into explicit registries
    passed to `Plugin.register(regs)` (no module-level registries, invariant 4); construct; bind callables. The hot
    path never does a registry lookup.
@@ -234,7 +241,7 @@ SPMD deployment can load the identical Plan (§8).
 (`plans/<model_id>/<class>/<n>.lock`, §4.4). The engine starts from the newest lock — never from a fresh
 resolve. A fresh
 resolve that differs from the lockfile (e.g. because a new, higher-priority kernel was installed for another model)
-is reported as a diff and only adopted through `plugserve propagate` (§4.6). Adding a plugin
+is reported as a diff and only adopted through `holon propagate` (§4.6). Adding a plugin
 for model B can therefore never change model A's binding silently.
 
 ### 4.4 Registry = lock history (git-backed)
@@ -247,14 +254,14 @@ There is no separate database. The **Registry** is the git history of lockfiles 
   propagation from its own newest lock (so promotions are carried forward or dropped by the same checked
   transition), or a promotion is upstreamed to main by PR.
 - **Tuned defaults live in the lock.** Kernel configs and tunables are tuned by us per fingerprint class
-  (benchmarking tools such as `plugserve tune`, in the spirit of FreeToken's `ft bench bw`), so every class ships
+  (benchmarking tools such as `holon tune`, in the spirit of FreeToken's `ft bench bw`), so every class ships
   at the best configuration we know — no agent is involved.
 - **Fingerprint class** = GPU SKU + SM + VRAM class + toolchain majors (CUDA, torch, Triton). GPU UUID, driver
   build and measured bandwidths are recorded in evidence only. Classes maintained first: `rtx-5080` and
   `rtx-5090` (sm_120), `rtx-4090` (sm_89), `a5000`/`rtx-3090` (sm_86); evidence is produced on those cards
   (consumer desktop machines, plan §1).
 - **Missing or outdated lock for a class** (an outdated lock pins unit `src`s that the deployed commit does not
-  contain) → the nearest class's current lock (same SM preferred) is used, flagged `unverified`, with an alert. The engine **never refuses to serve** for lack of a lock; `plugserve tune` on the host produces a
+  contain) → the nearest class's current lock (same SM preferred) is used, flagged `unverified`, with an alert. The engine **never refuses to serve** for lack of a lock; `holon tune` on the host produces a
   verified lock for its class.
 - Evidence records (command, fingerprint, plan_id, raw numbers) point at lock hashes and are written after the
   lock commit.
@@ -267,7 +274,7 @@ There is no separate database. The **Registry** is the git history of lockfiles 
   "breaker pays" majors; changes reach each model only through propagation (§4.6) — models do not individually
   adopt std versions.
 - Core ABI minors keep one-minor compatibility shims (v1+). v0 is pre-1.0: ABI may break, but every break runs
-  the full `plugserve check` over first-party plugins.
+  the full `holon check` over first-party plugins.
 
 ### 4.6 Reuse and propagation
 
@@ -285,7 +292,7 @@ separate `reference.py` holding its oracle.
 | `sem` | hash of `reference.py` + parameter schema — the unit's *semantic identity* |
 | `iface@major` | interface version; minors are additive only |
 
-- Unit code imports only `plugserve.api`, its own package and declared third-party libraries; other units are
+- Unit code imports only `holon.api`, its own package and declared third-party libraries; other units are
   **injected** through constructor ports (recipes reference them with `Ref`), never imported or inherited (no
   `extends`, mixins or monkeypatching).
 - **Defaults never change.** New behaviour is a new knob whose default reproduces the old behaviour, or a new unit.
@@ -307,7 +314,7 @@ plan_id = "sha256:…"   recipe = "sha256:…"      # canonical hash of the emit
 
 `(commit, lock)` fully defines a deployment; promoted variant code is part of the commit.
 
-**Propagation.** `plugserve impact <unit>` lists the locks whose closures contain it. `plugserve propagate` runs
+**Propagation.** `holon impact <unit>` lists the locks whose closures contain it. `holon propagate` runs
 inside the PR that changes shared code; CI's `isolation-check` re-runs it on a trusted GPU runner and rejects any
 lock or snapshot it cannot reproduce byte for byte. Each affected (model, fingerprint class) gets one of three
 outcomes:
@@ -319,7 +326,7 @@ outcomes:
 | **Fail** | L2 fails | the PR fixes it, or the model keeps the previous unit version through an explicit copy in its own package (visible in the diff, `derived_from` set) | — |
 
 Toolchain bumps (torch, Triton, FlashInfer, CUDA majors) produce a new fingerprint class and run the same sweep.
-New models get their first lock from `plugserve propagate --new-model` (L2 vs reference + snapshot, approved).
+New models get their first lock from `holon propagate --new-model` (L2 vs reference + snapshot, approved).
 Maintained consumer classes (`rtx-5080`, `rtx-5090`, `rtx-4090`) are refreshed by `isolation-check` runners on
 consumer desktops — a scheduled (renewable) allocation per class that starts the pinned container image and runs the
 queued checks inside it (D7 working method); the image digest is recorded in evidence as part of the toolchain —
@@ -374,7 +381,7 @@ class ModelSpec:
 ```
 
 - **Recipes.** A model is primarily a pure function `recipe(cfg) -> ModelSpec` in `recipe.py` that imports only
-  `plugserve.api` (no torch). It composes units with `Ref("std.mixers.gqa@1", heads=…, …)`; `ModelSpec` gains
+  `holon.api` (no torch). It composes units with `Ref("std.mixers.gqa@1", heads=…, …)`; `ModelSpec` gains
   `block` (e.g. `std.blocks.prenorm@1`) and `weights` (e.g. `hf_weights("qwen3_5", root="model.language_model")`),
   and `build`/`weights` default to them. The recipe's identity is the canonical hash of the **emitted term**, so
   refactoring `recipe.py` without changing the term changes nothing. Checkpoint layout lives only in `weights`.
@@ -477,7 +484,7 @@ Registries are explicit objects owned by the engine instance (open registry, no 
 level state).
 
 Selection happens once, at plan time (§4.3). No startup autotune sweeps: tuned configs live in the model's lock for
-its fingerprint class (§4.4, produced by `plugserve tune`); without a lock for the class, the nearest class's
+its fingerprint class (§4.4, produced by `holon tune`); without a lock for the class, the nearest class's
 configs are used (`unverified`).
 
 ### 5.5 Quantization and weight loading
@@ -529,26 +536,40 @@ A third-party kernel is wrapped as a kernel plugin only if **all** hold; otherwi
    pinned in `KernelSpec.config` (from the model's lock, else a deterministic default). JIT caches (FlashInfer, Triton)
    are pre-built at install time and their directories are declared, so the sandbox can mount them read-only.
 
-Initial candidates, with findings from the 2026-10-06 review on sm_86 / torch 2.11 / Triton 3.6:
-- **GGUF (v0):** the ggml-derived CUDA kernels carried by SGLang (`kernels/aot/csrc/quantization/gguf`, ≈ 7.5k
-  lines, adapted via vLLM from llama.cpp ggml-cuda, MIT/Apache-2.0): dequantize and matrix-vector `mmvq` for all
-  types (k-quants, i-quants IQ1–IQ4, Q4_0–Q8_0); batched `mmq` and batched MoE **only for legacy and k-quant
-  types** — for i-quants they provide only the vector kernels (`mmvq`, per-token `moe_a8_vec`). Built as our own
-  Torch extension (no sgl-kernel dependency); the wrappers are rewritten to take Ledger/static buffers (outputs,
-  q8_1 activation buffers, the dequant-fallback workspace declared as a kernel workspace) per rule 1; SGLang's
-  Python per-token MoE fallback is excluded (not graph-safe — a resolve-time error). For the i-quants the target
-  models use (IQ3_XXS, IQ3_S, IQ4_XS) we port llama.cpp's newer i-quant `mmq` / MoE `mmq` (MIT) or write our own
-  Triton kernels — sized by spike S2. Reference dequantization: llama.cpp's gguf-py (all IQ types, grid tables
-  embedded). vLLM moved its GGUF support out of tree and calls it "highly experimental and under-optimized" —
-  performance is measured against llama.cpp on the same card, for prefill and decode.
-- FlashInfer 0.7 paged attention (decode verified for head_dim 128 and 256; JIT ≈ 8 s/module on first use → pre-build).
-- GDN: **vendor the flash-linear-attention ops copy from vLLM** (`vllm/model_executor/layers/fla/ops`, Apache-2.0),
-  which works on sm_86 and already supports `ssm_state_indices`/`num_accepted_tokens`. Vendoring strips its
-  `vllm.*` imports (e.g. `vllm.triton_utils`) to satisfy rule 4. pip `fla-core` 0.5.2's
-  recurrent kernel returns NaN on sm_86 — not adopted.
+Adopted kernels, decided by the M0 spikes (evidence and raw numbers in `spikes/s*/README.md`):
+
+- **Attention** (spike S1, FlashInfer 0.6.12; sm_86 and sm_120):
+  - prefill: FlashInfer FA2 paged prefill;
+  - non-speculative decode: FlashInfer tensor-core decode, host `plan()` in `plan_bounds` (exact at depth 1 —
+    non-spec host lengths are exact). At overlap depth ≥ 1, two wrappers per head geometry are alternated
+    because a wrapper reuses one pinned staging buffer;
+  - speculative decode at depth 1 and quantized KV: **our own Triton paged attention** reading lengths from the
+    SeqTable (median 0.95–0.98× FlashInfer's time over 216 decode/verify configurations; bf16 and q8_0 KV; fp8 and
+    prefill rows still to add); XQA is a borrowed alternative on sm_120;
+  - not adopted: FlashInfer CUDA-core decode (rejects GQA group 6, up to 3.4× slower at batch 1); FlashInfer's
+    graph wrapper with `disable_split_kv=True` (reads unwritten indices in 0.6.12);
+  - JIT modules are pre-built per class (≈ 30 s with `prebuild.py`; `ninja` on PATH).
+- **GGUF** (spike S2): **port llama.cpp's current ggml-cuda quantized kernels** (`mmvq`, `mmq` incl. i-quants,
+  `mul_mat_id` for MoE; MIT) behind a ≈ 200-line shim that supplies the ggml helpers and allocates from our
+  workspaces (≈ 5 developer-days; same code as the baseline, so parity is direct). The SGLang-carried set was
+  measured and not adopted: it decodes IQ3_S with an obsolete grid (4.3% of weights wrong) and is far behind
+  llama.cpp for multi-row decode (0.2–0.8×) and batched/MoE prefill (0.05–0.45×). Types needed for the unsloth UD
+  builds: Q8_0, Q3_K–Q6_K, IQ4_XS, IQ3_XXS, IQ3_S, IQ2_S, IQ2_XS. A tied `lm_head` is dequantized in chunks.
+  Reference dequantization: llama.cpp's gguf-py.
+- **GDN** (spike S3): vendored subset of vLLM's flash-linear-attention copy (commit `6dd813e0`, 14 files,
+  ≈ 2.75k code lines, Apache-2.0 over MIT), rebuilt by `vendor.sh` + `vendor.patch`: `vllm.*` imports and env
+  switches removed, identity-keyed `tensor_cache` removed (stale with reused static buffers), autotune replaced by
+  one pinned config per kernel, and a `v_head_tiled` switch added (GGUF order without repacking, bit-identical).
+  Contract details: slot 0 is reserved as null; verify uses `[N, k+1]` slot indices; prefill takes no slot
+  indices (the mixer gathers initial and scatters final states); outputs and prefill scratch move to our buffers;
+  conv1d and gated RMSNorm kernels still to add. Eager prefill pays ≈ 0.5 ms launch overhead per GDN layer, so
+  GDN prefill steps are graph-captured per length bucket. pip `fla-core` is not used (NaN on sm_86).
 - (v1, HF-ecosystem formats) Triton fused-MoE (vendored from vLLM/SGLang, Apache-2.0) with a W4A16 path; Triton
   W8A16/W4A16 GEMM written by us — on sm_86 Triton rejects `fp8e4nv`, so FP8 weights are loaded as `uint8` and
   decoded to bf16 with exact bit operations in the K-loop; Marlin only if it builds standalone.
+
+Consumer-card numbers (RTX 4090/5080/5090 on consumer desktops) are still to be recorded for S1, S2 and S6; the RTX PRO
+6000 (128 MB L2, 188 SMs) is not a consumer proxy.
 
 ### 5.7 Model-specific specialization
 
@@ -607,7 +628,7 @@ class Pool:
   `max_seqs × (1 + draft_slots)` from the deployment file; (3) plugin pools at their declared `pref_units`, or
   `min_units` if short (e.g. checkpoint pool: a byte budget from the deployment file, with its own eviction);
   (4) all remaining memory to `Paged` pools, divided in proportion to bytes-per-token of each spec; specs in one
-  page group (`co_index`) get one shared unit count. Startup fails
+  page group (`page_group`) get one shared unit count. Startup fails
   with a per-pool report if any `min_units` cannot be met.
 - v0 implements `fixed`. The **contract** (stable base, device capacity scalar, declared resize mode) exists from
   day 1 so `vmm` (cuMem-backed live resize, Strata-style) lands in v1 without changing users of `Pool`.
@@ -624,25 +645,23 @@ class StateSpec:
     kind: str                       # StateKind registry key
     shape: Paged | Slot             # Paged(unit_bytes, tokens_per_unit) | Slot(unit_bytes)
     layers: tuple[int, ...]
-    layout: Layout                  # dtype/arrangement, negotiated with kernels
+    layout: str                     # dtype/arrangement, negotiated with kernels (format settled by spike S1)
     alignment: int = 1              # prefix-hit granularity only when intrinsic (e.g. compressed-KV ratio);
                                     # GDN uses 1 — its kernels accept an initial state at any offset
-    co_index: str | None = None     # page group: specs sharing page ids, one page table and one unit count,
-                                    # allocated/evicted jointly (DSA indexer ↔ MLA KV; drafter KV ↔ target KV)
-    draft_slots: int = 0            # Slot: extra slots for verify intermediates
-    retention: str | None = None    # retention policy id (sliding window freeing)
+    page_group: str | None = None   # specs sharing page ids, one page table and one unit count, allocated and
+                                    # evicted jointly (DSA indexer ↔ MLA KV; drafter KV ↔ target KV)
+# Slot(unit_bytes, draft_slots=0): draft_slots = extra slots for verify intermediates
 
-class StateKind(Protocol):          # e.g. paged_kv, ssm_checkpoint, ring, dsa_index (plugins)
-    def units_needed(self, spec, seq: SeqView, new_tokens: int) -> int
-    def reclaimable(self, spec, seq: SeqView) -> list[UnitRef]
-    def hit_length(self, spec, idx: PrefixView, upto: int) -> HitLen          # (length, tier cost)
-    def publish(self, spec, seq: SeqView, upto: int) -> tuple[Payload, list[MemOp]] | None
-    def adopt(self, spec, seq: SeqView, payload: Payload) -> list[MemOp]
-    def metadata(self, spec, batch: Batch) -> dict[str, Tensor]       # page tables, slot ids, positions
-    def fork(self, spec, src: SeqView, dsts: list[SeqView]) -> list[MemOp]   # n>1, parallel tool branches:
-                                    # copy-on-write pages, copied Slot state
-    # publish/adopt return MemOps (§6.3); rollback: StateKinds are Rewindable (§7.5). Callbacks are per request
-    # and are vectorised over SoA arrays where the core calls them per step.
+class StateKind(Rewindable, Protocol):   # e.g. paged_kv, ssm_checkpoint (plugins); bound by the core to ONE spec
+                                         # and its pool: factory(spec, pool, ctx) -> StateKind
+    def units_needed(self, seq: SeqView, new_tokens: int) -> int
+    def reclaimable(self, seq: SeqView) -> list[int]
+    def hit_length(self, idx: PrefixView, upto: int) -> HitLen               # (length, tier cost)
+    def publish(self, seq: SeqView, upto: int) -> tuple[Payload, list[MemOp]] | None
+    def adopt(self, seq: SeqView, payload: Payload) -> list[MemOp]
+    def fork(self, src: SeqView, dsts: list[SeqView]) -> list[MemOp]         # n>1, parallel tool branches
+    # Page tables and slot indices are filled into DeviceBatch by the core (it owns allocation); mixer planners
+    # read them. publish/adopt return MemOps (§6.3). Callbacks are per request; the core vectorises them.
 ```
 
 Ring buffers = `Slot` sized to the window, or `Paged` + `reclaimable`. A new mixer with a novel state shape
@@ -698,7 +717,7 @@ while True:
 
 ### 6.5 TieredStore (std library, not core)
 
-`plugserve-std-tiered`: `TieredStore[K]` over `Tier`s (vram/pinned/ram/ssd/remote), a `ResidencyMap`, `Mover`s and
+`holonlm-std-tiered`: `TieredStore[K]` over `Tier`s (vram/pinned/ram/ssd/remote), a `ResidencyMap`, `Mover`s and
 `PlacementPolicy` plugins, with two resolver styles:
 
 - `HostPlannedResolver` — misses known before the step (KV prefix/offload, KVMem-style window selection); runs in
@@ -748,8 +767,6 @@ class BatchPlan:                     # host, struct-of-arrays, mutable by schedu
     start_upper: np.ndarray          # upper bound on first query position; exact value lives in SeqTable
     token_src: np.ndarray            # HOST | DEVICE_LAST | DEVICE_DRAFT  (overlap-safe placeholders)
     host_tokens: np.ndarray
-    parents: np.ndarray | None       # tree verify (v2)
-    seq_len_upper: np.ndarray
     mem_ops: list[MemOp]
     shape: ShapeKey                  # padded bucket + open plugin axes
     ext: dict[str, Any]
@@ -808,7 +825,7 @@ declare `needs_host_lens`, and **only those inexact Seqs** are gated to depth 0 
 therefore use an attention kernel that reads lengths on the device (from the SeqTable) — a device-length path of
 FlashInfer or our own Triton paged attention; spike S1 names the kernel per fingerprint class.
 
-Plugins declare the maximum depth they tolerate (`overlap_safe` = tolerates ≥ 1). Per-Seq depth: the scheduler
+Plugins declare the maximum depth they tolerate (`max_depth` in the manifest). Per-Seq depth: the scheduler
 skips any Seq that has more uncommitted steps in flight than the minimum depth tolerated by the plugins attached
 to it, so a CPU prompt-lookup Seq runs every other step while others keep overlapping. Device-side
 `Rewindable.commit` runs **inside** the `launch_sample` graph, right after the Sampler/Verifier, so the next step's
@@ -822,11 +839,17 @@ device inputs (`DEVICE_LAST`/`DEVICE_DRAFT`) are already consistent.
 - Each plugin declares `graph_policy` ∈ {`full`, `piecewise`, `eager`, `host`}; the resolver takes the weakest
   per ShapeKey class. `host` means the plugin never runs inside a graph — it runs on the CPU between replays
   (placement-policy `adapt()`, schedulers). v0 implements FULL (decode/verify) and EAGER (prefill); PIECEWISE is v1.
-- **CPU work inside a FULL graph** (CPU expert compute, Strata/FreeToken style) uses **stream memory operations**:
-  the graph writes a flag (`cuStreamWriteValue`) that a persistent native CPU worker polls, and waits on the
-  worker's completion flag (`cuStreamWaitValue`). `Platform` exposes these memops. Per-call `cudaLaunchHostFunc`
-  is not used: FreeToken measured 30–50 µs per call (≈ 6 ms per step on a 75-layer model) and replaced it. No
-  Python or GIL on this path. Spike S6 in M0 validates the seam before v1 expert offload builds on it.
+- **CPU work inside a FULL graph** (CPU expert compute, Strata/FreeToken style) uses a one-word handshake per
+  layer with a persistent native CPU worker (spike S6): the graph signals REQ, the worker computes on pinned
+  memory and answers DONE, the graph waits. `Platform` exposes this as a signal/wait pair with two
+  implementations chosen per fingerprint class by measurement — a one-thread spin kernel (2.8 µs per handshake on
+  A5000) and stream memory operations (`cuStreamWriteValue`/`WaitValue`, 9.7 µs; kept for power-sensitive hosts
+  where a resident spinner triggers CPU power capping). `cudaLaunchHostFunc` is not used (31.7 µs). Expert inputs
+  and outputs are read and written in pinned memory directly (no memcpy nodes, which cost ≈ 14 µs per layer). GPU
+  work between signal and wait overlaps the CPU. Contract: stop the worker only after draining in-flight replays
+  (or abort, drain, stop); residency-map swaps are written to the inactive buffer and flipped **on the replay
+  stream between replays** — no `quiesce` needed; `quiesce` is for changes not ordered on the stream (host or
+  worker state, side-stream VRAM refills, worker restarts). No Python or GIL on this path.
 - All dynamic inputs go through static buffers requested at startup with `ctx.static(name, max_shape)`.
 
 ### 7.5 Rewindable
@@ -950,7 +973,7 @@ The dev machine has 8× RTX A5000; v1 includes a **TP=2 milestone** to prove the
 | Expert cache / offload | expert TieredStore, DeviceResolver, placement policies, MoE op with CPU miss compute | stable Pools, stream-memop CPU handshake, `quiesce`, VMM resize (v1) |
 | Quant formats | dialect, scheme, layout, converter, kernels | kernel registry, layout negotiation |
 | Linear attention (GDN, KDA, Mamba2) | mixer + `Slot` state (`draft_slots`), page-boundary checkpoints, checkpoint policy + codec | fixed-point prefix hits, device Rewindable |
-| DeepSeek sparse attention / V4 compressed KV | `dsa_mla` mixer: MLA `Paged` + indexer `Paged(co_index)` + compressed `Paged(tokens_per_unit)` | `co_index`, `tokens_per_unit`, `alignment` |
+| DeepSeek sparse attention / V4 compressed KV | `dsa_mla` mixer: MLA `Paged` + indexer `Paged(page_group)` + compressed `Paged(tokens_per_unit)` | `page_group`, `tokens_per_unit`, `alignment` |
 | Speculative decoding | drafter, draft policy, verifier, plan transform | taps, shared modules, Rewindable, ShapeKey axis, forward/sample split |
 | Structured output / tool calls | xgrammar logits processor (Rewindable matcher), parser `channel()` | `host_input` region |
 | LoRA (v1) | adapter op context, ShapeKey axis | namespace, ops read `Batch.dev`/`ext` |
@@ -970,7 +993,7 @@ after the core feature milestones (plan §10), for capable agents and explicit u
 ### 10.1 Actors
 
 - **Agent** — a capable agent the user chooses to involve: an external coding agent, or a strong model served by
-  plug-serve itself. Untrusted. Writes code only inside `workspace/`.
+  Holon itself. Untrusted. Writes code only inside `workspace/`.
 - **Supervisor** — trusted; serves the improve API, records promotions as lock commits, restarts and rolls back.
 - **Sandbox engine** — runs candidate Plans (possibly with agent code) in a restricted sandbox (§10.6).
 - **Judge** — trusted, out of process, drives engines only as a client.
@@ -1002,7 +1025,7 @@ on the agent: the supervisor reverts on its own (§10.4).
 | L0-dist | samplers, verifiers, logits processors: fixed logits, ~10⁶ draws vs the reference sampler | TV distance / χ² bound |
 | L1 contract | slot conformance, ledger leaks/accounting, graph-capture safety, declared props verified (run-to-run determinism, depth tolerance) | pass/fail |
 | L1.5 state invariants | chunked vs one-shot prefill; prefix-hit resume vs recompute; verify+commit(k) vs k decode steps; graph replay vs eager | bounded (§7.10); spec greedy self-consistency exact |
-| L2 model golden | teacher-forced logits vs HF fp32 recording on frozen prompts | calibrated noise floor = HF in the model's activation dtype vs HF fp32. Pass: top-1 agreement ≥ floor − δ; KL p50/p99 ≤ floor + δ; ΔPPL ≤ floor + δ |
+| L2 model golden | teacher-forced top-20 logprobs vs an HF fp32 CPU recording (pinned thread count) on the frozen prompt set v1 (chat, code, long-context recall, agent/tool transcripts; spike S5) | floor = HF in the model's activation dtype vs fp32. Pass: KL p99 ≤ 2× floor (the discriminating metric), KL p50 ≤ 2× floor, top-1 agreement ≥ floor − 0.25 points, \|ΔPPL\| ≤ \|floor\| + 0.25%. δ is re-checked on the first real-engine run. Bugs below bf16 noise are L0's job. Quantized models: golden from dequantized weights; floor calibrated per quant type |
 | Snapshot | the model's snapshot trace (§7.10) | run-identical (isolation, auto-advance) |
 | L4 perf | judge-side client measurements (TTFT, TPOT, throughput, peak memory) on a trace portfolio incl. mixed agent traffic, production Plan, interleaved ABAB, N ≥ 5, bootstrap CI; outputs checked by teacher-forced re-scoring against the reference Plan | per trace: CI lower bound of perf ratio ≥ 1 − ε; target gain CI excludes 0; re-scored KL/top-1 within L2 budgets; greedy tokens equal the candidate's own argmax |
 | L4-confirm | one fresh run on **holdout** traces after a dev-trace pass | same rule |
@@ -1074,16 +1097,16 @@ First version:
 ## 11. Repository layout
 
 ```
-plug-serve/
-  core/            plugserve/{api,core}/          # ≤ 6k LOC
+holon/           (repository root)
+  core/            holon/{api,core}/          # ≤ 6k LOC
   std/             ops/ blocks/ ffn/(swiglu, moe_topk) mixers_gqa/ state_paged_kv/ tiered/ sampling/
   plugins/         models/<m>/{recipe.py, fast/, bundle/}  for qwen3, qwen3_moe, qwen3_5, qwen3_8
                    mixers/{gdn}/  state/{ssm_checkpoint}/
                    kernels/{flashinfer,fla_gdn,ggml_cuda}/  weight_sources/{safetensors,gguf}/  dialects/{ggml}/
                    frontends/{openai,anthropic}/  policies/  drafters/  verifiers/  grammar/
   plans/           <model_id>/<class>/<n>.lock     # lock history per (model, fingerprint class) (§4.4)
-  judge/           plugserve_judge/  goldens/  snapshots/  traces/dev/   # holdout stored outside the repo (judge only)
-  supervisor/      plugserve_supervisor/
+  judge/           holon_judge/  goldens/  snapshots/  traces/dev/   # holdout stored outside the repo (judge only)
+  supervisor/      holon_supervisor/
   bench/           trace replay, baselines (separate pinned venvs)
   evidence/        evidence records (command, fingerprint, plan_id, raw numbers)
   workspace/       (gitignored) agent variants — optional layer

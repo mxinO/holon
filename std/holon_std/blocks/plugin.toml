@@ -1,0 +1,15 @@
+[plugin]
+name = "std.blocks"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "unit"
+license = "Apache-2.0"
+
+[resources]
+provides = [
+    "unit.std.blocks.prenorm@1",
+]
+
+[properties]
+numerics = "exact"
+

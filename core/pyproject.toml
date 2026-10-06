@@ -1,0 +1,13 @@
+[project]
+name = "holonlm"
+version = "0.0.1"
+requires-python = ">=3.12"
+description = "Holon core: plugin ABI (holon.api) and runtime (holon.core)"
+dependencies = []  # torch/triton come from the environment (see README)
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["holon"]

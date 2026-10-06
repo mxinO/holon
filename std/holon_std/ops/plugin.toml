@@ -1,0 +1,21 @@
+[plugin]
+name = "std.ops"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "unit"
+license = "Apache-2.0"
+
+[resources]
+provides = [
+    "unit.std.ops.rmsnorm@1",
+    "unit.std.ops.rope@1",
+    "unit.std.ops.linear@1",
+    "unit.std.ops.embedding@1",
+    "unit.std.ops.lm_head@1",
+]
+
+[properties]
+numerics = "exact"
+
+[reference]
+module = "reference"

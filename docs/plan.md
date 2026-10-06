@@ -1,4 +1,4 @@
-# plug-serve — Implementation plan
+# Holon — Implementation plan
 
 Status: rev 3 (after an adversarial review) · Date: 2026-10-06 ·
 Companion to [design.md](design.md)
@@ -66,7 +66,7 @@ L2 budgets. Every criterion names its mode.
 | Qwen3.8-27B GGUF UD-IQ3_S / UD-IQ4_XS | 11.2 / 13.3 GiB | 64 KiB (16 full-attn layers; ≈ 34 KiB q8_0) + GDN state ≈ 147 MiB/Seq | ✓ (UD-Q4_K_M 15.3 GiB) | ✓ | 4 Seqs: IQ3_S ≈ 43K tokens bf16 KV / ≈ 80K q8_0; IQ4_XS ≈ 9K / ≈ 17K |
 
 Global acceptance for every milestone ≥ M0.1:
-- Every earlier model's lock is byte-unchanged, or advanced by `plugserve propagate` (auto-advance on a
+- Every earlier model's lock is byte-unchanged, or advanced by `holon propagate` (auto-advance on a
   run-identical snapshot, or one approval) — design §4.6.
 - New plugins pass judge L0–L2 (+ L0-dist for samplers/verifiers/processors, + L1.5 where state is involved).
 - Memory fit met; perf numbers recorded on the relevant consumer classes; CI lints green.
@@ -101,6 +101,20 @@ Global acceptance for every milestone ≥ M0.1:
 | S5 Golden | HF fp32 recording on CPU (or `device_map` over GPUs) for 8B; noise floor HF bf16 vs fp32 on frozen prompts | τ and KL/ΔPPL budgets calibrated |
 | S6 CPU handshake | stream-memop flags (`cuStreamWriteValue`/`WaitValue`) + persistent native CPU worker inside a FULL graph; `quiesce()` + double-buffered resolver map under depth 1 (learning from FreeToken's `cpu_executor`) | per-step overhead measured on a desktop host (consumer desktops); seam confirmed before the ABI freezes |
 
+**Spike outcomes (2026-10-07; details in `spikes/s*/README.md`, design §5.6, §7.4, §10.3):**
+
+| Spike | Outcome |
+|---|---|
+| S1 | FlashInfer 0.6.12: FA2 paged prefill + tensor-core decode (host `plan()`, two wrappers alternated per geometry at depth ≥ 1); own Triton paged attention for spec-at-depth-1 and q8_0 KV (≈ parity with FlashInfer); CUDA-core decode and the no-split graph wrapper rejected; all paths run-to-run deterministic |
+| S2 | Port llama.cpp's current ggml-cuda quantized kernels via a ≈ 200-line shim (≈ 5 days, M0.1–M0.2); SGLang set rejected (IQ3_S grid bug; 0.05–0.8× llama.cpp off single-row decode); 10 ggml types needed; llama-bench baselines recorded |
+| S3 | Vendored GDN subset (vLLM `6dd813e0`, ≈ 2.75k code lines) passes on sm_86/sm_120: error ≈ HF bf16, no NaN to 8K, resume at 64-multiples and verify bitwise exact; `v_head_tiled` switch for GGUF; GDN prefill needs graph capture (≈ 0.5 ms/layer eager launch overhead) |
+| S4 | Folded into S1–S3: every adopted kernel is run-to-run deterministic with pinned configs; none is batch-invariant (as designed) |
+| S5 | Top-20 fp32 CPU golden (Qwen3-8B: 4–8 min, 49 GB RAM, 5.4 MB); prompt set v1 (24 prompts, 4 categories); budgets per design §10.3 with KL p99 as the discriminating metric; injected RoPE bug caught, legit variants pass |
+| S6 | Handshake seam sound: spin-kernel wait 2.8 µs / memop 9.7 µs / host func 31.7 µs per handshake; zero-copy pinned I/O; overlap works; 1.5 M handshakes without deadlock; stream-ordered map swaps need no quiesce |
+
+Follow-up (before M0 closes): run the S1, S2 and S6 benchmarks on RTX 4090 / 5080 / 5090 nodes inside
+one persistent container per class, re-tune the Triton attention configs, and record the consumer evidence.
+
 ### 3.2 Work items
 
 **A. Repo bootstrap** — uv workspace (`core/`, `std/*`, `plugins/*`, `judge/`, `supervisor/`, `bench/`, `plans/`);
@@ -108,7 +122,7 @@ CI scripts (§3.5); `AGENTS.md` (no claims without measurement; failing-then-pas
 `judge/` or locks by hand); a pinned container image for builds/tests and scripts to run it on an allocated
 shared test machine (one allocation, persistent container, repeated runs inside — D7).
 
-**B. `plugserve.api`** — dataclasses/Protocols only: Manifest schema, resources, slots + cardinality, Plan + lock
+**B. `holon.api`** — dataclasses/Protocols only: Manifest schema, resources, slots + cardinality, Plan + lock
 format (`recipe`, `[units]` src/sem, `[deploy]`, `[snapshot]`), recipe terms (`Ref`, `ModelSpec` with
 `block`/`weights`) + canonical hash, `Plugin.register(regs)`, ParamSpec, `finalize_weights`, Op/composite markers,
 KernelSpec/Constraint, Scheme/Layout/QTensor/Dialect/converter, StateSpec/StateKind (incl. `fork`, `HitLen`,
@@ -117,7 +131,7 @@ SamplingParams, BatchPlan (bounds) / ShapeKey / DeviceBatch, Planner (`plan_boun
 `needs_host_lens`), MemOp, Rewindable, LogitsProcessor, Drafter/DraftPolicy/Verifier/PlanTransform,
 FrontendBundle, Event, Platform (incl. stream memops), launcher slot.
 
-**C. `plugserve.core` runtime** (our own implementation; learns from mini-sglang's overlap loop and graph runner,
+**C. `holon.core` runtime** (our own implementation; learns from mini-sglang's overlap loop and graph runner,
 vLLM Model Runner V2's device-side state, nano-vllm's minimal loop)
 1. `plugins/`: manifest loading, discovery, resource matching, resolver → Plan (recipe hash, per-unit src/sem, one
    version per unit), lock history read/write/diff, fingerprint classes + nearest-class `unverified` fallback, lazy
@@ -143,7 +157,8 @@ vLLM Model Runner V2's device-side state, nano-vllm's minimal loop)
   `prepare_device`; `output_gate` knob added in M0.3); `std.state.paged_kv` (truncate, fork); `std.sampling`
   (greedy/temperature/top-k/top-p/min-p, n>1, logprobs incl. prompt logprobs; seeded per (Seq, position)).
 
-**E. plugins** — `models/qwen3` (`recipe.py` ≤ 80 LOC + `bundle/`), attention kernel plugin per S1, `frontends/openai`.
+**E. plugins** — `models/qwen3` (`recipe.py` ≤ 80 LOC + `bundle/`); `kernels/flashinfer` (prefill + non-spec decode)
+and `kernels/triton_attn` (spec-at-depth-1, quantized KV) per S1; `frontends/openai`.
 
 **F. judge harness** (separate process, client of the engine) — L0 + `budget(dtype, K)`; L0-dist for the sampler;
 L1 contracts (incl. run-to-run determinism of bound kernels); L2 recorder (CPU fp32 / multi-GPU; quantized models
@@ -154,8 +169,8 @@ oracle provenance (`reference.py` at reviewed commits).
 interleaved ABAB, client-side timing; runs inside the persistent container on allocated consumer desktops nodes; baselines
 in pinned environments; container image digest recorded in evidence.
 
-**H. propagation tooling** (outside core, ~400 LOC; changed-line coverage captured during snapshot traces) — `plugserve impact`, `plugserve propagate` (3 outcomes,
-design §4.6), `propagate --new-model`, `plugserve tune` (benchmarks tunables/kernel configs per fingerprint class
+**H. propagation tooling** (outside core, ~400 LOC; changed-line coverage captured during snapshot traces) — `holon impact`, `holon propagate` (3 outcomes,
+design §4.6), `propagate --new-model`, `holon tune` (benchmarks tunables/kernel configs per fingerprint class
 into the lock); CI `isolation-check` re-runs propagate on a trusted GPU runner (A5000) and on remote
 consumer-desktop runners for the maintained consumer classes: a scheduled, renewable allocation per class running the
 pinned container (on shared-change PRs where capacity allows, nightly at least).
@@ -205,9 +220,9 @@ Work:
 - `dialects/ggml`: ggml tensor types → `Scheme`s for k-quants (Q2_K…Q6_K), i-quants (IQ1_S…IQ4_XS, IQ4_NL) and
   Q4_0/Q4_1/Q5_x/Q8_0, with `dequant_ref` following llama.cpp's gguf-py reference; layouts `gguf.native` (block
   structs as stored, no repack).
-- `kernels/ggml_cuda`: the ggml-derived CUDA kernels (dequantize, matrix-vector `mmvq`, matrix-matrix `mmq`) as our
-  own Torch extension (per S2), selected per fingerprint class; a dequantize-then-GEMM fallback for prefill shapes
-  where `mmq` is slower.
+- `kernels/ggml_cuda`: llama.cpp's current ggml-cuda quantized kernels (`mmvq`, `mmq` incl. i-quants) ported behind
+  a ≈ 200-line shim that allocates from our workspaces (per S2, ≈ 5 developer-days across M0.1–M0.2), as our own
+  Torch extension; parity tests against llama.cpp on the same shapes.
 
 Acceptance: `git diff plugins/models/qwen3` limited to adding `gguf_weights` to the recipe; L0 for every
 supported type vs `dequant_ref`; L2 bounded vs a golden recorded from `dequant_ref` weights in the dense HF class
@@ -219,9 +234,8 @@ tok/s vs llama.cpp (`llama-server`) on the same card and quant recorded.
 
 Work: `models/qwen3_moe` — `recipe.py` copied from qwen3 with `derived_from` (diff ≤ ~15 lines: MoE ffn via
 `Ref("std.ffn.moe_topk@1", …)`, `mlp_only_layers`, expert weight map); `std.ffn.moe_topk` coarse Op (router, top-k,
-experts, combine; reference); GGUF MoE kernels from the same ggml-derived set (batched MoE `mmq` for k-quants;
-for i-quants the vendored set has only the per-token vector path, so a batched i-quant MoE kernel — ported from
-llama.cpp's `mul_mat_id` mmq or our own Triton — is built as sized by S2); pinned configs, provenance.
+experts, combine; reference); GGUF MoE through the ported llama.cpp `mul_mat_id` path (batched for all types,
+incl. i-quants); pinned configs, provenance.
 
 Acceptance: qwen3 locks unchanged or advanced only by propagate; MoE L0 vs reference; L2 bounded vs a golden from
 `dequant_ref` weights (CPU fp32, ≈ 122 GB in RAM); **30B MoE on a 16 GB card**: UD-IQ3_XXS / UD-Q3_K_XL on RTX 5080
@@ -241,7 +255,8 @@ Qwen3.5 specifics (from HF config/modeling; record deviations found during imple
 - MTP (used in M0.4): `mtp.{fc, pre_fc_norm_hidden, pre_fc_norm_embedding, layers.0, norm}`; its KV joins the target
   KV's page group.
 
-Work: `models/qwen3_5` (recipe copied from qwen3 with `derived_from`); `mixers/gdn` (vendored kernels per S3;
+Work: `models/qwen3_5` (recipe copied from qwen3 with `derived_from`); `mixers/gdn` (vendored kernels per S3, plus
+conv1d and gated RMSNorm kernels; GDN prefill graph-captured per length bucket;
 pure-torch recurrent `reference.py`); `state/ssm_checkpoint` (`Slot`, `hit_length` = deepest checkpoint ≤ L,
 publish/adopt as MemOps, ledger-budgeted checkpoint pool, joint chain eviction); `policies/checkpoint_prompt_end`
 (default for agent traffic) and `policies/checkpoint_every_n`.
@@ -254,7 +269,7 @@ Acceptance:
 - New std knobs (`gqa.output_gate`, `rope.rotary_dim`, `rmsnorm.offset`) land with old defaults and `propagate`
   auto-advances Qwen3 and Qwen3-MoE (run-identical snapshots, zero approvals) — first real test of reuse.
 - Qwen3.5-4B on RTX 5080, 9B on 5090/4090/A5000; memory fit recorded.
-- **Legibility benchmark:** a fixed coding agent adds Qwen3.5 in plug-serve vs in a mini-sglang fork (≥ 3 runs per
+- **Legibility benchmark:** a fixed coding agent adds Qwen3.5 in Holon vs in a mini-sglang fork (≥ 3 runs per
   side, same agent and prompt, from a branch point before `qwen3_5` exists); measure agent time/tokens, lines
   outside the model package, human interventions.
 - Core diff target zero.
@@ -324,7 +339,7 @@ without spec bounded; core diff target zero.
 | S6 spike | CPU handshake inside a FULL graph on a desktop host | seam does not hold → redesign the graph/CPU seam before the core ABI freezes |
 | M0 | decode + mixed-trace TTFT/TPOT vs mini-sglang; CPU/step vs nano-vllm; core LOC | < 0.9× after two weeks of perf work, or core > 6k → move per-token input prep to GPU kernels and cut core scope before continuing |
 | M0.2 | core changes needed for MoE; approvals per week from propagation | > 1 core ABI change, or > 3 approvals/week → abstraction or machinery is wrong; simplify |
-| M0.3 | legibility benchmark: ≥ 3 runs per side, same agent and prompt, both starting from a branch point before `qwen3_5` exists | plug-serve not ≥ 30% cheaper for the agent than a mini-sglang fork → collapse slots and nouns |
+| M0.3 | legibility benchmark: ≥ 3 runs per side, same agent and prompt, both starting from a branch point before `qwen3_5` exists | Holon not ≥ 30% cheaper for the agent than a mini-sglang fork → collapse slots and nouns |
 | Any | propagation sweep time; approvals/day | > 30 min or > 1/day → async propagation (design §4.6 trigger) |
 | M0.1 / M0.2 / M0.3b | GGUF decode **and prefill** tok/s vs llama.cpp on the same card and quant (RTX 5080), dense and MoE | < 0.8× on either after a perf pass → fix the GGUF kernel path (ported i-quant `mmq` or own Triton kernels for the slow types) before adding features |
 | v1 offload | MoE larger than VRAM on RTX 5080: decode tok/s vs FreeToken and Strata on the same node | < 0.8× → rework the offload path before adding features |
@@ -369,4 +384,4 @@ without spec bounded; core diff target zero.
 - Every perf claim comes with an evidence record (command, fingerprint class, plan_id, raw numbers); consumer
   claims only from consumer desktops.
 - Every bug fix comes with a test that fails before and passes after.
-- A PR that changes shared code includes the `plugserve propagate` output.
+- A PR that changes shared code includes the `holon propagate` output.

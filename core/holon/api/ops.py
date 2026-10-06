@@ -1,0 +1,81 @@
+"""Ops, kernels and plugin registration (design §5.3, §5.4, §4.3).
+
+An Op is a reference implementation registered under a name; a Kernel is one implementation of an Op with
+constraints and properties. A plugin's `register(regs)` adds its objects explicitly; nothing registers at import.
+"""
+from __future__ import annotations
+
+import dataclasses
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    from .quant import Converter, Dialect, SchemeImpl
+    from .state import StateKindFactory
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Constraint:
+    """Where a kernel may run. Empty fields mean "no constraint"."""
+
+    sm_min: int | None = None              # compute capability as 10*major+minor, e.g. 86, 89, 120
+    sm_max: int | None = None
+    devices: frozenset[str] = frozenset({"cuda"})
+    cpu_isa: frozenset[str] = frozenset()  # e.g. {"avx2"}
+    libs: frozenset[str] = frozenset()     # third-party libraries that must import
+
+    def allows(self, device: str, sm: int | None, isa: frozenset[str] = frozenset()) -> bool:
+        if device not in self.devices:
+            return False
+        if sm is not None and ((self.sm_min and sm < self.sm_min) or (self.sm_max and sm > self.sm_max)):
+            return False
+        return self.cpu_isa <= isa
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class KernelSpec:
+    op: str
+    provider: str
+    impl: Callable[..., Any]
+    in_layouts: dict[str, str] = dataclasses.field(default_factory=dict)   # role -> layout pattern
+    out_layouts: dict[str, str] = dataclasses.field(default_factory=dict)
+    requires: Constraint = Constraint()
+    supports: Callable[[Any], bool] | None = None  # shape predicate, evaluated at plan time
+    props: frozenset[str] = frozenset()            # graph_safe, deterministic, batch_invariant, needs_host_lens
+    config: dict[str, Any] = dataclasses.field(default_factory=dict)       # pinned launch config (no autotune)
+    priority: int = 0                               # agent variants register < 0 until promoted
+
+
+class Registry[T](Protocol):
+    def add(self, key: str, value: T) -> None: ...
+
+    def get(self, key: str) -> T: ...
+
+    def items(self) -> Iterable[tuple[str, T]]: ...
+
+
+class KernelRegistry(Protocol):
+    """Many kernels per op: `add(op, spec)` appends; `get(op)` returns all candidates."""
+
+    def add(self, op: str, spec: KernelSpec) -> None: ...
+
+    def get(self, op: str) -> list[KernelSpec]: ...
+
+
+class Registries(Protocol):
+    """Engine-owned registries a plugin adds to. Named entries must be declared in the plugin's manifest
+    (`provides = ["unit.<name>@<major>", …]`); duplicates are errors."""
+
+    ops: Registry[Callable[..., Any]]           # op name -> reference implementation
+    kernels: KernelRegistry
+    units: Registry[Callable[..., Any]]         # unit name -> factory(ctx, **params)
+    state_kinds: Registry[StateKindFactory]
+    schemes: Registry[SchemeImpl]
+    converters: Registry[Converter]
+    dialects: Registry[Dialect]
+    transforms: Registry[Callable[[Any], Any]]  # weight value transforms, e.g. "neg_exp"
+
+
+class Plugin(Protocol):
+    def register(self, regs: Registries) -> None: ...
