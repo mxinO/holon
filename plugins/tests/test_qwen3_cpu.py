@@ -1,6 +1,6 @@
 """CPU check without downloads: a tiny random Qwen3 built from our recipe equals HF transformers in fp32."""
 import torch
-from holon.core.build import EagerStepCtx, build_model, load_weights
+from holon.core.build import BuildContext, StepContext, build_model, load_weights
 from holon.core.plugins import PluginSet, discover
 from transformers import Qwen3Config, Qwen3ForCausalLM
 
@@ -13,11 +13,12 @@ def test_tiny_qwen3_matches_hf_fp32():
     hf = Qwen3ForCausalLM(cfg).eval()
     plugins = PluginSet(discover())
     spec = plugins.load("models.qwen3").recipe(cfg.to_dict(), "hf_safetensors")
-    model, ctx = build_model(spec, plugins, torch.device("cpu"), torch.float32)
+    ctx = BuildContext(plugins, torch.device("cpu"), torch.float32)
+    model = build_model(spec, ctx)
     load_weights(model, ctx, hf.state_dict().items())
 
     ids = [torch.randint(0, 512, (n,)).tolist() for n in (5, 9)]
     with torch.no_grad():
-        ours = model(EagerStepCtx.whole_sequences(ids, "cpu"))
+        ours = model(StepContext.whole_sequences(ids, "cpu"))
         ref = torch.cat([hf(torch.tensor([s])).logits[0] for s in ids])
     torch.testing.assert_close(ours, ref, rtol=1e-4, atol=1e-4)

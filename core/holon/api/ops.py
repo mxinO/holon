@@ -75,6 +75,7 @@ class Registries(Protocol):
     converters: Registry[Converter]
     dialects: Registry[Dialect]
     transforms: Registry[Callable[[Any], Any]]  # weight value transforms, e.g. "neg_exp"
+    weight_sources: Registry[Callable[..., Any]]  # source kind -> factory(path) -> WeightSource
 
 
 class Plugin(Protocol):

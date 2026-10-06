@@ -60,4 +60,5 @@ forbidden_modules = ["holon_std"]
 [[tool.importlinter.contracts]]
 name = "std units are injected, never imported by each other"
 type = "independence"
-modules = ["holon_std.ops", "holon_std.blocks", "holon_std.ffn", "holon_std.mixers.gqa"]
+modules = ["holon_std.ops", "holon_std.blocks", "holon_std.ffn", "holon_std.mixers.gqa", "holon_std.state.paged",
+           "holon_std.sampling", "holon_std.weights.hf"]

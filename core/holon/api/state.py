@@ -32,12 +32,33 @@ class Slot:
 @dataclasses.dataclass(frozen=True, slots=True)
 class StateSpec:
     name: str                    # unique within the model, e.g. "attn.kv", "linear.state"
-    kind: str                    # StateKind registry key
+    kind: str                    # versioned StateKind, e.g. "paged@1"
     shape: Paged | Slot
     layers: tuple[int, ...]
-    layout: str                  # negotiated with kernels; format settled with spike S1
+    layout: str                  # negotiated with kernels
+    segments: int = 1            # a unit is split into this many equal chunks, segment-major (e.g. one per layer)
     alignment: int = 1           # prefix-hit granularity when intrinsic (e.g. compressed-KV ratio)
     page_group: str | None = None  # specs sharing page ids, one page table and one unit count
+
+    @property
+    def group(self) -> str:
+        """The key of this spec's page table and planner metadata (`StepCtx.meta`)."""
+        return self.page_group or self.name
+
+
+@dataclasses.dataclass(eq=False)
+class Pages:
+    """The core's view of one page group for one step (design §6.2).
+
+    `table` is persistent — one row per request slot, a stable device address — and is what kernels index; the
+    host mirror lets planners build kernel-specific metadata on the CPU (e.g. a CSR page list).
+    """
+
+    page: int                    # tokens per unit
+    table: torch.Tensor          # [max_seqs, max_pages] int32 unit ids, row = request slot
+    host_table: np.ndarray       # host mirror of `table`
+    lens: torch.Tensor           # [B] tokens held per batch row after this step
+    write_index: torch.Tensor    # [T] flat slot (unit * page + offset) where each new token's state is written
 
 
 @dataclasses.dataclass(frozen=True, eq=False)

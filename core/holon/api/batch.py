@@ -58,11 +58,16 @@ class Seq:
     rid: str
     tokens: list[int]                    # committed tokens only
     params: SamplingParams
+    prompt_len: int = 0
     slot: int = -1                       # persistent device row
     num_computed: int = 0                # host mirror; exact after commit
     status: Status = Status.WAITING
     finish_reason: str | None = None
     ext: dict[str, Any] = dataclasses.field(default_factory=dict)  # namespaced plugin state; core never reads
+
+    def __post_init__(self) -> None:
+        if not self.prompt_len:
+            self.prompt_len = len(self.tokens)
 
 
 @dataclasses.dataclass(slots=True, eq=False)

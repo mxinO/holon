@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 if TYPE_CHECKING:
     import torch
 
-    from .batch import BatchPlan, Seq, StepCtx
+    from .batch import BatchPlan, SamplingParams, Seq, StepCtx
 
 
 @dataclasses.dataclass(slots=True, eq=False)
@@ -49,7 +49,19 @@ class LogitsProcessor(Protocol):
 
 
 class Sampler(Protocol):
-    def sample(self, logits: torch.Tensor, ctx: StepCtx) -> SampleOut: ...
+    """One per engine, holding per-slot parameters (device rows once sampling is graph-captured)."""
+
+    def admit(self, slot: int, params: SamplingParams) -> None:
+        """A request now owns `slot`."""
+
+    def sample(self, logits: torch.Tensor, ctx: StepCtx) -> SampleOut:
+        """`logits` [R, V] fp32 for the plan rows with `n_logits > 0`, in row order."""
+
+
+class SamplerPlugin(Protocol):
+    """The `sampler` slot's plugin object."""
+
+    def sampler(self, max_seqs: int, device: torch.device) -> Sampler: ...
 
 
 class Verifier(Protocol):

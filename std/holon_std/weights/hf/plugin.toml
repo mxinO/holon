@@ -1,0 +1,12 @@
+[plugin]
+name = "std.weights.hf"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "weight_source"
+license = "Apache-2.0"
+
+[resources]
+provides = ["weight_source.hf_safetensors@1"]
+
+[dependencies]
+python = ["safetensors"]

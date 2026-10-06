@@ -17,13 +17,14 @@ if TYPE_CHECKING:
 
     from .batch import Batch, StepCtx
     from .model import BuildCtx
-    from .state import StateSpec
+    from .state import Pages, StateSpec
 
 
 class Planner(Protocol):
-    """One per (mixer, state group), shared by all layers of that mixer."""
+    """One per (mixer, state group), shared by all layers of that mixer. Its metadata is `StepCtx.meta(group)`;
+    a mixer without a `planner` gets the core's `Pages` (or None for slot state) as its metadata."""
 
-    def plan_bounds(self, batch: Batch) -> Any:
+    def plan_bounds(self, batch: Batch, pages: Pages | None) -> Any:
         """Host side: shapes and upper bounds only (e.g. a kernel library's `plan()`); returns planner metadata."""
 
     def prepare_device(self, meta: Any, ctx: StepCtx) -> None:
@@ -35,7 +36,7 @@ class Mixer(Unit, Protocol):
     def state_specs(cls, params: Mapping[str, Any], layers: tuple[int, ...], ctx: BuildCtx) -> list[StateSpec]: ...
 
     @classmethod
-    def planner(cls, specs: list[StateSpec], ctx: BuildCtx) -> Planner: ...
+    def planner(cls, params: Mapping[str, Any], specs: list[StateSpec], ctx: BuildCtx) -> Planner: ...
 
     def forward(self, x: torch.Tensor, ctx: StepCtx) -> torch.Tensor:
         """Prefill, decode and verify rows of one step."""

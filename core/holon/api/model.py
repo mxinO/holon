@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     from .frontend import FrontendBundle
     from .memory import Pool
+    from .state import StateSpec
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -75,11 +76,13 @@ class BuildCtx(Protocol):
     """Everything a unit may use while building. Units get other units only through `unit` (invariant 2)."""
 
     dtype: torch.dtype
+    options: Mapping[str, Any]   # deployment options units may read (e.g. "page_size"); unknown keys → defaults
 
     def unit(self, ref: Ref, **site: Any) -> Unit: ...
 
-    def state(self, spec_name: str) -> Pool:
-        """The pool holding one of this unit's declared state specs (e.g. its KV pages)."""
+    def state(self, spec_name: str, layer: int) -> tuple[StateSpec, Pool] | None:
+        """The spec and pool holding state `spec_name` for `layer` (e.g. its KV pages); None in a model-only build,
+        where units run their stateless reference path."""
 
     def static(self, name: str, shape: tuple[int, ...], dtype: torch.dtype) -> torch.Tensor:
         """A static device buffer, stable across graph replays (design §7.4)."""
@@ -102,6 +105,8 @@ class WeightSource(Protocol):
     """Provisional (settled with spike S2 / M0.1): raw checkpoint tensors plus their metadata."""
 
     kind: str
+    arch: str                          # resolved to the model plugin providing `arch.<arch>`
+    eos_token_ids: frozenset[int]
 
     def config(self) -> Mapping[str, Any]: ...
 
@@ -109,7 +114,7 @@ class WeightSource(Protocol):
 
 
 class ModelPlugin(Protocol):
-    archs: tuple[str, ...]
+    """Declares the architectures it builds as `arch.<name>@1` resources in its manifest."""
 
     def recipe(self, cfg: Mapping[str, Any], source: str) -> ModelSpec: ...
 

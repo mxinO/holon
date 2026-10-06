@@ -1,0 +1,12 @@
+[plugin]
+name = "std.state.paged"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "state_kind"
+license = "Apache-2.0"
+
+[resources]
+provides = ["state_kind.paged@1"]
+
+[properties]
+numerics = "exact"

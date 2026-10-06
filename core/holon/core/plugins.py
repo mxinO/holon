@@ -64,7 +64,8 @@ class KernelRegistry:
 
 # Registry field -> resource namespace a plugin must declare to add to it.
 _DECLARED = {"ops": "op", "units": "unit", "state_kinds": "state_kind", "schemes": "scheme",
-             "converters": "converter", "dialects": "dialect", "transforms": "transform"}
+             "converters": "converter", "dialects": "dialect", "transforms": "transform",
+             "weight_sources": "weight_source"}
 
 
 @dataclasses.dataclass
@@ -77,6 +78,7 @@ class Registries:
     converters: Registry = dataclasses.field(default_factory=lambda: Registry("converter"))
     dialects: Registry = dataclasses.field(default_factory=lambda: Registry("dialect"))
     transforms: Registry = dataclasses.field(default_factory=lambda: Registry("weight transform"))
+    weight_sources: Registry = dataclasses.field(default_factory=lambda: Registry("weight source"))
 
 
 class _Declared:
@@ -160,9 +162,9 @@ class PluginSet:
         self.regs = Registries()
         self._loaded: dict[str, Any] = {}
         # Interface resources (e.g. "kernel.attention") may have several providers for the resolver to choose
-        # from; registered names (units, ops, state kinds, …) must have exactly one.
+        # from; registered names (units, ops, state kinds, …) and architectures must have exactly one.
         self._providers: dict[str, list[tuple[str, int]]] = {}
-        unique = set(_DECLARED.values())
+        unique = {*_DECLARED.values(), "arch"}
         for name, inst in installed.items():
             for r in inst.manifest.provides:
                 others = self._providers.setdefault(r.name, [])
@@ -173,13 +175,24 @@ class PluginSet:
     def by_slot(self, slot: str) -> Iterator[Manifest]:
         return (i.manifest for i in self.installed.values() if i.manifest.slot == slot)
 
-    def provider(self, namespace: str, ref: Ref) -> str:
-        """The plugin declaring `<namespace>.<ref.name>` at `ref.major`."""
-        resource = f"{namespace}.{ref.name}"
+    def single(self, slot: str) -> str:
+        """The one installed plugin of a `single` slot (e.g. the sampler)."""
+        names = [m.name for m in self.by_slot(slot)]
+        if len(names) != 1:
+            raise PluginError(f"slot {slot!r} needs exactly one installed plugin, found {names}")
+        return names[0]
+
+    def owner(self, resource: str) -> tuple[str, int]:
+        """The one plugin providing `resource` (e.g. "arch.<checkpoint architecture>"), and its major."""
         found = self._providers.get(resource, [])
         if len(found) != 1:
             raise PluginError(f"{resource!r} needs exactly one provider, found {[p for p, _ in found]}")
-        plugin, major = found[0]
+        return found[0]
+
+    def provider(self, namespace: str, ref: Ref) -> str:
+        """The plugin declaring `<namespace>.<ref.name>` at `ref.major`."""
+        resource = f"{namespace}.{ref.name}"
+        plugin, major = self.owner(resource)
         if major != ref.major:
             raise PluginError(f"{ref.target}: {plugin!r} provides {resource}@{major}")
         return plugin

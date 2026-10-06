@@ -5,7 +5,7 @@ import pathlib
 import pytest
 import torch
 from holon.api import canonical_hash
-from holon.core.build import EagerStepCtx, build_model, load_weights
+from holon.core.build import BuildContext, StepContext, build_model, load_weights
 from holon.core.plugins import PluginSet, discover
 
 SNAP = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
@@ -23,7 +23,8 @@ def test_qwen3_matches_hf():
     spec = model_plugin.recipe(cfg, "hf_safetensors")
     assert canonical_hash(spec) == canonical_hash(model_plugin.recipe(cfg, "hf_safetensors"))
 
-    model, ctx = build_model(spec, plugins, device)
+    ctx = BuildContext(plugins, device)
+    model = build_model(spec, ctx)
     with safe_open(SNAP / "model.safetensors", "pt", device="cuda") as f:
         load_weights(model, ctx, ((k, f.get_tensor(k)) for k in f.keys()))
 
@@ -41,7 +42,7 @@ def test_qwen3_matches_hf():
         return out
 
     with torch.no_grad():
-        ours = model(EagerStepCtx.whole_sequences(ids, device))
+        ours = model(StepContext.whole_sequences(ids, device))
         gold, hf_bf16 = hf_logits(torch.float32), hf_logits(torch.bfloat16)
 
     def metrics(x):

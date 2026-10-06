@@ -14,37 +14,34 @@ import numpy as np
 import torch
 from torch import nn
 
-from holon.api import (
-    Batch,
-    BatchPlan,
-    DeviceBatch,
-    ModelSpec,
-    Ref,
-    SeqTable,
-    ShapeKey,
-    StepCtx,
-    TokenSrc,
-    WeightMap,
-)
+from holon.api import Batch, DeviceBatch, ModelSpec, Ref, SeqTable, StepCtx, WeightMap
 
+from .batching import host_plan
 from .plugins import PluginError, PluginSet
 
 
 class BuildContext:
     """Instantiates units by Ref; the only way models and units obtain other units (invariant 2)."""
 
-    def __init__(self, plugins: PluginSet, device: torch.device, dtype: torch.dtype = torch.bfloat16) -> None:
+    def __init__(self, plugins: PluginSet, device: torch.device, dtype: torch.dtype = torch.bfloat16,
+                 options: dict[str, Any] | None = None) -> None:
         self.plugins = plugins
         self.device = device
         self.dtype = dtype                 # parameter dtype for units that do not override it
+        self.options = options or {}
         self.used: dict[str, str] = {}     # unit name -> providing plugin (for the lock)
+        self.states: dict[tuple[str, int], tuple[Any, Any]] = {}  # (local spec name, layer) -> (spec, pool)
         self._buffers: dict[str, torch.Tensor] = {}
 
-    def unit(self, ref: Ref, **site: Any) -> nn.Module:
+    def unit_factory(self, ref: Ref) -> Any:
+        """The registered factory (usually the unit class) serving `ref`, loading its plugin if needed."""
         plugin = self.plugins.provider("unit", ref)
         self.plugins.load(plugin)
         self.used[ref.name] = plugin
-        return self.plugins.regs.units.get(ref.name)(self, **dict(ref.params), **site)
+        return self.plugins.regs.units.get(ref.name)
+
+    def unit(self, ref: Ref, **site: Any) -> nn.Module:
+        return self.unit_factory(ref)(self, **dict(ref.params), **site)
 
     def static(self, name: str, shape: tuple[int, ...], dtype: torch.dtype) -> torch.Tensor:
         """A named buffer allocated once and reused (a stable address for graph capture)."""
@@ -58,29 +55,35 @@ class BuildContext:
     def workspace(self, name: str, nbytes: int) -> torch.Tensor:
         return self.static(f"workspace.{name}", (nbytes,), torch.uint8)
 
-    def state(self, spec_name: str) -> Any:
-        raise PluginError("state pools are bound by the engine; a model-only build has none")
+    def bind_state(self, spec: Any, pool: Any) -> None:
+        """Make `pool` the state of `spec` for its layers (engine builds; model-only builds bind nothing)."""
+        for layer in spec.layers:
+            if (spec.name, layer) in self.states:
+                raise PluginError(f"state {spec.name!r} bound twice for layer {layer}")
+            self.states[(spec.name, layer)] = (spec, pool)
+
+    def state(self, spec_name: str, layer: int) -> tuple[Any, Any] | None:
+        return self.states.get((spec_name, layer))
 
 
 @dataclasses.dataclass
-class EagerStepCtx:
-    """A minimal StepCtx for stateless reference runs: whole sequences from position 0, no KV cache."""
+class StepContext:
+    """The core's StepCtx: the step's batch plus each state group's planner metadata."""
 
     batch: Batch
-    seq_table: SeqTable | None = None
     metas: dict[str, Any] = dataclasses.field(default_factory=dict)
+    seq_table: SeqTable | None = None
 
     def meta(self, group: str) -> Any:
         return self.metas[group]
 
     @classmethod
-    def whole_sequences(cls, ids: list[list[int]], device: torch.device | str) -> EagerStepCtx:
-        """One step that prefills every sequence in `ids` and returns logits for every token."""
+    def whole_sequences(cls, ids: list[list[int]], device: torch.device | str) -> StepContext:
+        """A stateless step that prefills every sequence in `ids` and returns logits for every token (reference
+        runs of a model built without state)."""
         lens = np.array([len(s) for s in ids], dtype=np.int32)
         flat = np.concatenate([np.asarray(s, dtype=np.int64) for s in ids])
-        plan = BatchPlan(step=0, slots=np.arange(len(ids), dtype=np.int32), n_query=lens, n_logits=lens,
-                         start_upper=np.zeros_like(lens), token_src=np.full_like(lens, TokenSrc.HOST),
-                         host_tokens=flat, shape=ShapeKey(int(lens.sum()), len(ids)))
+        plan = host_plan(0, np.arange(len(ids), dtype=np.int32), np.zeros_like(lens), lens, lens, flat)
         starts = np.concatenate([[0], lens.cumsum()])
         dev = DeviceBatch(input_ids=torch.as_tensor(flat, device=device),
                           positions=torch.as_tensor(np.concatenate([np.arange(n) for n in lens]), device=device),
@@ -112,13 +115,11 @@ class Model(nn.Module):
         return self.lm_head(self.norm(h[dev.logits_index]))
 
 
-def build_model(spec: ModelSpec, plugins: PluginSet, device: torch.device,
-                dtype: torch.dtype = torch.bfloat16) -> tuple[Model, BuildContext]:
-    """Build on the meta device (no memory), then materialize parameters directly on `device`."""
-    ctx = BuildContext(plugins, device, dtype)
+def build_model(spec: ModelSpec, ctx: BuildContext) -> Model:
+    """Build on the meta device (no memory), then materialize parameters directly on the context's device."""
     with torch.device("meta"):
         model = Model(spec, ctx)
-    return model.to_empty(device=device).eval(), ctx
+    return model.to_empty(device=ctx.device).eval()
 
 
 @functools.lru_cache(maxsize=256)

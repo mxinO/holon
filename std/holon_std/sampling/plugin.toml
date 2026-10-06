@@ -1,0 +1,15 @@
+[plugin]
+name = "std.sampling"
+version = "1.0.0"
+entry = "sampler:Plugin"
+slot = "sampler"
+license = "Apache-2.0"
+
+[resources]
+provides = ["sampler.default@1"]
+
+[properties]
+numerics = "exact"
+
+[reference]
+module = "sampler"
