@@ -47,8 +47,9 @@ to host-side policies and live tunables).
 | D4 | Python control plane; native/Triton kernels; CUDA graphs on the hot path. The plugin API stays Python; hot core structures and the frontend may later be replaced by Rust modules behind unchanged interfaces, only when profiling triggers it (§12). |
 | D5 | Self-improvement is an **optional capability** for capable agents and explicit user intent (e.g. a strong agent served by plug-serve). The engine itself ships best-known, human-tuned defaults and never depends on it. When used, auto-promotion is limited to policy/kernel/tunable scope under the judge; core, judge, ABI and `approx` numerics need a human (§10.5). |
 | D6 | References (mini-sglang, nano-vllm, vLLM Model Runner V2, SGLang, FreeToken, Strata) are studied, not copied: control-plane code is our own plugin-native implementation. Only kernels may be borrowed, under §5.6. |
-| D7 | Hardware: development on 8× RTX A5000 (sm_86). Consumer performance evidence on consumer desktop machines — RTX 5080 16 GB and RTX 5090 32 GB (sm_120), RTX 4090 (sm_89). Datacenter path on datacenter GPUs (H100, GB200) later. |
+| D7 | Hardware: development on 8× RTX A5000 (sm_86). Consumer performance evidence on consumer desktop machines — RTX 5080 16 GB and RTX 5090 32 GB (sm_120), RTX 4090 (sm_89). Datacenter path on datacenter GPUs (H100, GB200) later. Shared test machines are used used when needed: allocate a node once, run a persistent container on it, and build/test/benchmark inside it rather than submitting many batch jobs. |
 | D8 | Expert caching/offload arrives in v1, but its core seams (device SeqTable, MemOps, `quiesce`, stream-memop CPU handshake) are built and spiked in M0 so it lands without core changes. |
+| D9 | Quantization priority follows the deployment target. Consumer/edge GPUs: llama.cpp GGUF sub-4-bit formats (k-quants, i-quants, e.g. `unsloth/Qwen3.8-27B-GGUF`) — v0. HF-ecosystem GPTQ/AWQ INT4 and FP8 — v1. NVFP4/MXFP4, which mainly serve large-memory datacenter GPUs — v2. |
 
 ---
 
@@ -319,8 +320,10 @@ outcomes:
 
 Toolchain bumps (torch, Triton, FlashInfer, CUDA majors) produce a new fingerprint class and run the same sweep.
 New models get their first lock from `plugserve propagate --new-model` (L2 vs reference + snapshot, approved).
-Maintained consumer classes (`rtx-5080`, `rtx-5090`, `rtx-4090`) are refreshed by remote `isolation-check`
-runners on consumer desktops — on shared-change PRs where capacity allows, and nightly at least; a release commit requires
+Maintained consumer classes (`rtx-5080`, `rtx-5090`, `rtx-4090`) are refreshed by `isolation-check` runners on
+consumer desktops — a scheduled (renewable) allocation per class that starts the pinned container image and runs the
+queued checks inside it (D7 working method); the image digest is recorded in evidence as part of the toolchain —
+on shared-change PRs where capacity allows, and nightly at least; a release commit requires
 every maintained class refreshed. Until refreshed, an outdated lock is treated as missing (§4.4).
 
 **Deferred machinery, each added only when its trigger fires:**
@@ -361,7 +364,10 @@ class ModelSpec:
     draft_heads: list[DraftHeadDecl] # MTP layers, their own LayerDecls, taps consumed
     encoders: list[EncoderDecl]      # VLM towers (v1)
     position_fn: str | None          # e.g. "mrope"; default arange
-    params: list[ParamSpec]          # shapes + sharding semantics (col/row/expert/replicated, fused groups)
+    params: list[ParamSpec]          # shapes + sharding semantics (col/row/expert/replicated, fused groups);
+                                     # a fused group (qkv, gate/up) is legal only if all members share one
+                                     # source Layout — mixed-type GGUF files ("UD" builds) fall back to separate
+                                     # GEMMs per site, and bindings may differ per layer
     block: Ref                       # residual wiring unit, e.g. Ref("std.blocks.prenorm@1")
     norm: Ref; lm_head: Ref          # final norm, output head
     weights: WeightMap               # checkpoint layout, e.g. hf_weights("qwen3_5", root="model.language_model")
@@ -372,6 +378,21 @@ class ModelSpec:
   `block` (e.g. `std.blocks.prenorm@1`) and `weights` (e.g. `hf_weights("qwen3_5", root="model.language_model")`),
   and `build`/`weights` default to them. The recipe's identity is the canonical hash of the **emitted term**, so
   refactoring `recipe.py` without changing the term changes nothing. Checkpoint layout lives only in `weights`.
+- **Weight sources and model identity.** The signature is `recipe(cfg, source) -> ModelSpec`, where `source` is
+  the detected weight source (`hf_safetensors`, `gguf`); the recipe selects the matching weight map
+  (`hf_weights(...)` / `gguf_weights(...)`), so the bf16 term is unchanged when a GGUF map is added. `model_id`
+  includes the checkpoint build (repo + file hash): every GGUF quant has its own lock history. A weight map carries
+  **value transforms** as well as names — e.g. Qwen3.5/3.8 GGUF stores zero-centred norms as `w+1` (except
+  `ssm_norm`), `ssm_a` as `-exp(A_log)`, conv1d squeezed to 2D, and GDN value heads in *tiled* rather than grouped
+  order. The GDN mixer therefore has a `v_head_order = grouped | tiled` knob (q/k use `repeat` instead of
+  `repeat_interleave` when tiled, and `out_proj`'s input activations are permuted rather than its packed weights),
+  and norm offset / `A_log` handling follow the source. A second weight source can feed `draft_heads` (e.g. a
+  separate MTP GGUF file).
+- **GGUF tokenizer, template, config.** The HF base model's tokenizer is used, with a load-time check that the GGUF
+  token table matches it (hash of tokens + special ids). A chat template embedded in the GGUF takes precedence (GGUF
+  publishers often ship fixed templates); differences from HF are logged. The HF `config.json` is authoritative for
+  fields GGUF metadata lacks (e.g. `mrope_section`, `partial_rotary_factor`) and is cross-checked against GGUF
+  metadata. `mmproj-*.gguf` is ignored when `text_only`; v1 VLM support loads it as the encoder's weight source.
 - **Derivation = copy with lineage.** A new model copies an existing recipe and records `derived_from`; there is
   no model-to-model link or inheritance (e.g. Qwen3.5 differs from Qwen3 in ~10 recipe lines: GDN mixer for
   linear layers, `output_gate=True`, `rotary_dim=64`, `rmsnorm offset=1.0`, MTP draft head). `git diff` against
@@ -480,8 +501,8 @@ class Dialect(Protocol):         # gptq, awq, modelopt, compressed-tensors, gguf
     def group(self, names) -> dict[str, dict[str, str]]       # param -> {role: ckpt tensor name}
     def source_layout(self, param: ParamSpec, roles) -> Layout
 
-@register_converter(src="gptq4.rowmajor", dst="gptq4.marlin", lossless=True, cost=1.0)
-def to_marlin(q: QTensor, *, shard: ShardInfo) -> QTensor: ...
+@register_converter(src="gguf.q4_k.native", dst="gguf.q4_k.mmq_tiled", lossless=True, cost=1.0)
+def to_mmq_tiles(q: QTensor, *, shard: ShardInfo) -> QTensor: ...   # GGUF kernels usually read gguf.native directly
 ```
 
 - Repacking is owned by **converters**, registered by the plugin that defines the destination layout.
@@ -508,16 +529,26 @@ A third-party kernel is wrapped as a kernel plugin only if **all** hold; otherwi
    pinned in `KernelSpec.config` (from the model's lock, else a deterministic default). JIT caches (FlashInfer, Triton)
    are pre-built at install time and their directories are declared, so the sandbox can mount them read-only.
 
-Initial candidates (v0), with findings from the 2026-10-06 review on sm_86 / torch 2.11 / Triton 3.6:
+Initial candidates, with findings from the 2026-10-06 review on sm_86 / torch 2.11 / Triton 3.6:
+- **GGUF (v0):** the ggml-derived CUDA kernels carried by SGLang (`kernels/aot/csrc/quantization/gguf`, ≈ 7.5k
+  lines, adapted via vLLM from llama.cpp ggml-cuda, MIT/Apache-2.0): dequantize and matrix-vector `mmvq` for all
+  types (k-quants, i-quants IQ1–IQ4, Q4_0–Q8_0); batched `mmq` and batched MoE **only for legacy and k-quant
+  types** — for i-quants they provide only the vector kernels (`mmvq`, per-token `moe_a8_vec`). Built as our own
+  Torch extension (no sgl-kernel dependency); the wrappers are rewritten to take Ledger/static buffers (outputs,
+  q8_1 activation buffers, the dequant-fallback workspace declared as a kernel workspace) per rule 1; SGLang's
+  Python per-token MoE fallback is excluded (not graph-safe — a resolve-time error). For the i-quants the target
+  models use (IQ3_XXS, IQ3_S, IQ4_XS) we port llama.cpp's newer i-quant `mmq` / MoE `mmq` (MIT) or write our own
+  Triton kernels — sized by spike S2. Reference dequantization: llama.cpp's gguf-py (all IQ types, grid tables
+  embedded). vLLM moved its GGUF support out of tree and calls it "highly experimental and under-optimized" —
+  performance is measured against llama.cpp on the same card, for prefill and decode.
 - FlashInfer 0.7 paged attention (decode verified for head_dim 128 and 256; JIT ≈ 8 s/module on first use → pre-build).
 - GDN: **vendor the flash-linear-attention ops copy from vLLM** (`vllm/model_executor/layers/fla/ops`, Apache-2.0),
   which works on sm_86 and already supports `ssm_state_indices`/`num_accepted_tokens`. Vendoring strips its
   `vllm.*` imports (e.g. `vllm.triton_utils`) to satisfy rule 4. pip `fla-core` 0.5.2's
   recurrent kernel returns NaN on sm_86 — not adopted.
-- Triton fused-MoE (vendored from vLLM/SGLang, Apache-2.0) with W4A16 path.
-- Triton W8A16/W4A16 GEMM — written by us. On sm_86 Triton rejects `fp8e4nv`, so FP8 weights are loaded as `uint8`
-  and decoded to bf16 with exact bit operations in the K-loop.
-- Marlin CUDA needs a compiled extension — adopt only if it builds standalone; else Triton.
+- (v1, HF-ecosystem formats) Triton fused-MoE (vendored from vLLM/SGLang, Apache-2.0) with a W4A16 path; Triton
+  W8A16/W4A16 GEMM written by us — on sm_86 Triton rejects `fp8e4nv`, so FP8 weights are loaded as `uint8` and
+  decoded to bf16 with exact bit operations in the K-loop; Marlin only if it builds standalone.
 
 ### 5.7 Model-specific specialization
 
@@ -1046,9 +1077,9 @@ First version:
 plug-serve/
   core/            plugserve/{api,core}/          # ≤ 6k LOC
   std/             ops/ blocks/ ffn/(swiglu, moe_topk) mixers_gqa/ state_paged_kv/ tiered/ sampling/
-  plugins/         models/<m>/{recipe.py, fast/, bundle/}  for qwen3, qwen3_moe, qwen3_5
+  plugins/         models/<m>/{recipe.py, fast/, bundle/}  for qwen3, qwen3_moe, qwen3_5, qwen3_8
                    mixers/{gdn}/  state/{ssm_checkpoint}/
-                   kernels/{flashinfer,fla_gdn,triton_moe,triton_wxa16}/  dialects/{gptq,fp8_block}/
+                   kernels/{flashinfer,fla_gdn,ggml_cuda}/  weight_sources/{safetensors,gguf}/  dialects/{ggml}/
                    frontends/{openai,anthropic}/  policies/  drafters/  verifiers/  grammar/
   plans/           <model_id>/<class>/<n>.lock     # lock history per (model, fingerprint class) (§4.4)
   judge/           plugserve_judge/  goldens/  snapshots/  traces/dev/   # holdout stored outside the repo (judge only)
@@ -1077,8 +1108,9 @@ plug-serve/
 | Borrowed kernels violate contract | adoption rule §5.6; write our own Triton fallback |
 | Agent reward hacking / self-harm (optional layer) | §10.5 scope, §10.6 sandbox, judge-owned oracles, client-side measurement, holdout confirm, sampled live re-scoring, supervisor-owned rollback |
 | Dev GPUs (A5000, sm_86, 16-channel server host) misrepresent consumer GPUs | perf/tunable evidence only from real consumer desktops: RTX 5080/5090 (sm_120), 4090 (sm_89); A5000 for development and functional tests |
-| sm_86 lacks FP8/FP4 tensor cores | weight-only (W8A16/W4A16) kernels on sm_86; native FP8 on sm_89/sm_120 and NVFP4 on sm_120, verified on consumer desktops |
+| GGUF kernel performance lags llama.cpp | borrowed ggml kernels measured against llama.cpp on the same card and quant from M0.1; types that lag get our own Triton kernels (kill/pivot criterion, plan §9) |
+| sm_86 lacks FP8/FP4 tensor cores | not a v0 issue (GGUF kernels run on all classes); v1 FP8 uses W8A16 on sm_86 and native FP8 on sm_89/sm_120 |
 | Determinism claims unachievable with borrowed kernels | §7.10: only run-to-run determinism is required (no batch invariance); non-deterministic sites recorded as `uncovered` |
 | Poison requests trigger restart loops and wrong rollbacks | crash attribution before rollback, request quarantine, restart SLO (§7.7) |
-| Kernel breakage on sm_86 / torch 2.11 / Triton 3.6 | M0 spikes: uint8-decoded FP8 W8A16, vendored vLLM GDN ops, FlashInfer JIT pre-build |
+| Kernel breakage on sm_86 / torch 2.11 / Triton 3.6 | M0 spikes: standalone GGUF kernel build (S2), vendored vLLM GDN ops, FlashInfer JIT pre-build |
 | Golden recording does not fit one GPU | record on CPU fp32 (251 GB RAM) or across GPUs; quantized models via `dequant_ref` into the dense HF class |

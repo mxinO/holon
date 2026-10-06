@@ -11,19 +11,25 @@ Companion to [design.md](design.md)
 |---|---|---|
 | Development | 8× RTX A5000 24 GB (**sm_86**), 96 cores, 251 GB RAM; CUDA 13.0, Python 3.12, torch 2.11.0+cu130, Triton 3.6, uv | coding, functional tests, golden recording (CPU fp32 fits in RAM) |
 | Consumer evidence | consumer desktop machines (AMD B650, 8 cores, 128 GB RAM, 1 GPU): **RTX 5080 16 GB** and **RTX 5090 32 GB** (sm_120), **RTX 4090 24 GB** (sm_89), RTX 3090 (sm_86) | all performance numbers, tuned defaults per fingerprint class, consumer memory-fit checks |
-| Datacenter (later) | H100/H200, GB200/GB300 | v2 datacenter path (TP/EP/PD) |
+| Datacenter (later) | H100/H200, GB200/GB300 | v2 datacenter path (TP/EP/PD, NVFP4) |
 
-The A5000 host (16 memory channels, server CPUs) is not a
+Shared dev pools with many card types are used when
+needed. **Working method:** allocate a node with the needed card once, start a persistent container on it, and run
+builds, tests and benchmarks inside that container repeatedly — no per-test batch jobs. The A5000 host (16 memory channels, server CPUs) is not a
 faithful consumer proxy — CPU-side and PCIe-bound tunables are only measured on consumer desktops.
 
-Consequences: sm_86 has no FP8/FP4 tensor cores and Triton rejects `fp8e4nv` there → weight-only W8A16 (uint8
-bit-decode) / W4A16 on sm_86; native FP8 on sm_89/sm_120 and NVFP4 on sm_120 are verified on consumer desktops.
+**Quantization priority (D9):** for consumer and edge GPUs the formats that matter are llama.cpp's GGUF sub-4-bit
+types (k-quants Q2_K–Q6_K, i-quants IQ1–IQ4, e.g. `unsloth/Qwen3.8-27B-GGUF`); they are v0. HF-ecosystem formats
+(GPTQ/AWQ INT4, FP8) follow in v1; NVFP4/MXFP4 are datacenter formats (large-memory GPUs) in v2.
 
 Runtime dependencies (v0): `torch`, `triton`, `safetensors`, `tokenizers`, `jinja2`, `flashinfer` (JIT caches
 pre-built), vendored GDN ops from vLLM's `third_party/flash_linear_attention` (subset, Apache-2.0, `vllm.*` imports
-stripped; **not** pip `fla-core`), vendored Triton fused-MoE, `xgrammar`, `fastapi`/`uvicorn`, `pyzmq` + `msgspec`.
+stripped; **not** pip `fla-core`), ggml-derived GGUF CUDA kernels (dequant, mmvq, mmq, MoE — from SGLang's
+copy of vLLM's adaptation of llama.cpp ggml-cuda, MIT/Apache-2.0, built as our own Torch extension),
+`gguf` (reader reference), `xgrammar`, `fastapi`/`uvicorn`, `pyzmq` + `msgspec`.
 Judge/test only: `transformers` (golden recording, in an environment **without** fla), `hypothesis`, `numpy`,
-`scipy`. Baselines (mini-sglang, nano-vllm, vLLM) in separate pinned venvs under `bench/venvs/`.
+`scipy`. Baselines in separate pinned environments under `bench/`: mini-sglang, nano-vllm, vLLM (bf16 paths) and
+llama.cpp `llama-server` + kvmem-llama.cpp (GGUF paths).
 
 **Implementation policy (D6):** references are studied, not copied. Each work item names what it learns from;
 the code is our own plugin-native implementation. Only kernels may be borrowed, under design §5.6.
@@ -33,10 +39,11 @@ the code is our own plugin-native implementation. Only kernels may be borrowed, 
 | Milestone | Model | Seam proven | Key plugins added |
 |---|---|---|---|
 | M0 | Qwen3-8B bf16 | core end to end: overlap, graphs, prefix cache, device SeqTable, MemOps/quiesce, locks, snapshots, judge L0–L2 | qwen3, gqa, paged_kv, flashinfer attn, std ops, sampler, FCFS, openai frontend |
-| M0.1 | Qwen3-8B-FP8 (block 128×128) | quant pipeline; per-class kernel selection (W8A16 on sm_86, native FP8 on sm_89/120); first 16 GB consumer data point (RTX 5080) | fp8_block dialect, triton W8A16, native FP8 GEMM |
-| M0.2 | Qwen3-30B-A3B-GPTQ-Int4 (16.9 GB, `desc_act=False`) | model isolation + coarse MoE op + 2nd quant format | qwen3_moe recipe, moe op, gptq dialect, W4A16 + fused MoE |
+| M0.1 | Qwen3-8B GGUF (Q8_0, Q4_K_M, IQ4_XS, IQ3_XXS) | quant pipeline: GGUF weight source, ggml dialect, borrowed ggml kernels chosen per class; first 16 GB consumer data point (RTX 5080) | gguf weight source, ggml dialect, ggml_cuda kernels |
+| M0.2 | Qwen3-30B-A3B GGUF (UD-IQ3_XXS 12.0 GiB, UD-Q3_K_XL, Q4_K_M) | model isolation + coarse MoE op; a 30B MoE on a 16 GB card | qwen3_moe recipe, moe op, GGUF MoE kernels |
 | M0.3 | Qwen3.5-4B → 9B, bf16, text-only | heterogeneous state, page groups, publish/adopt MemOps, checkpoint prefix reuse; legibility benchmark | qwen3_5 recipe, gdn mixer, ssm_checkpoint kind, checkpoint policy |
-| M0.4 | Qwen3.5 (built-in MTP) + Qwen3-8B | spec decoding at depth 1 on the device SeqTable; Rewindable incl. GDN rollback | mtp drafter, gpu n-gram drafter, verifiers, draft policies |
+| M0.3b | Qwen3.8-27B GGUF (UD-IQ3_S 11.2 GiB, UD-IQ4_XS 13.3 GiB) | large-model target on 16 GB; quantized KV cache (fp8 via FlashInfer, then q8_0/q4_0 via our own kernel; per-class support set by S1) | qwen3_8 recipe, quantized-KV layouts |
+| M0.4 | Qwen3.5 / Qwen3.8 (built-in MTP) + Qwen3-8B | spec decoding at depth 1 on the device SeqTable; Rewindable incl. GDN rollback | mtp drafter, gpu n-gram drafter, verifiers, draft policies |
 | M0.5 | Qwen3-8B, Qwen3.5-9B | forward/sample split, host_input, Rewindable grammar | xgrammar processor, parsers, anthropic + responses frontends |
 
 Expert caching/offload, KV offload, VMM and the optional self-improvement layer follow in v1 (§10); their core
@@ -51,10 +58,11 @@ L2 budgets. Every criterion names its mode.
 | Model | Weights | KV / token | A5000 / 4090 (24 GB) | RTX 5090 (32 GB) | RTX 5080 (16 GB) |
 |---|---|---|---|---|---|
 | Qwen3-8B bf16 | 15.26 GiB | 144 KiB | 32K tokens ≈ 21.3 GiB ✓ | ✓ (more KV) | ✗ |
-| Qwen3-8B-FP8 | 8.79 GiB | 144 KiB | 64K ≈ 19.3 GiB ✓ | ✓ | 32K ≈ 14.8 GiB ✓ |
-| Qwen3-30B-A3B-GPTQ-Int4 | 15.8 GiB | 96 KiB | 32K ≈ 20.3 GiB ✓ | ✓ | ✗ (v1 expert offload) |
+| Qwen3-8B GGUF Q4_K_M | 4.7 GiB | 144 KiB | ✓ | ✓ | 64K ≈ 15.2 GiB ✓ |
+| Qwen3-30B-A3B GGUF UD-IQ3_XXS | 12.0 GiB | 96 KiB | ✓ (Q4_K_M 17.3 GiB) | ✓ | 16K ≈ 15.0 GiB ✓ (more with q8_0 KV) |
 | Qwen3.5-4B bf16 text + MTP | ≈ 8.5 GiB | full-attn layers only | ✓ | ✓ | ✓ (exact numbers in M0.3) |
-| Qwen3.5-9B bf16 text + MTP | 17.13 GiB | full-attn layers only | ≈ 21–22 GiB ✓ | ✓ | ✗ |
+| Qwen3.5-9B bf16 text + MTP | 17.13 GiB | full-attn layers only | ≈ 21–22 GiB ✓ | ✓ | ✗ (GGUF builds ✓) |
+| Qwen3.8-27B GGUF UD-IQ3_S / UD-IQ4_XS | 11.2 / 13.3 GiB | 64 KiB (16 full-attn layers; ≈ 34 KiB q8_0) + GDN state ≈ 147 MiB/Seq | ✓ (UD-Q4_K_M 15.3 GiB) | ✓ | 4 Seqs: IQ3_S ≈ 43K tokens bf16 KV / ≈ 80K q8_0; IQ4_XS ≈ 9K / ≈ 17K |
 
 Global acceptance for every milestone ≥ M0.1:
 - Every earlier model's lock is byte-unchanged, or advanced by `plugserve propagate` (auto-advance on a
@@ -69,13 +77,13 @@ Global acceptance for every milestone ≥ M0.1:
 | Core runtime + plugin API | 3.5–5k (cap 6k) |
 | std units (ops, gqa, paged KV, sampling, blocks, ffn, moe) incl. `reference.py` | 2–2.5k |
 | Model recipes + Qwen bundles (templates, reasoning/tool parsers) | ~0.9k |
-| Own kernels + kernel adapters | 1.5–2k |
+| Own kernels + kernel adapters, GGUF reader + ggml dialect, i-quant batched kernels, quantized-KV attention (ggml CUDA kernels vendored, not counted) | 2.5–3.5k |
 | GDN mixer/state/policies, spec decoding, grammar | ~2.1k |
 | Frontends (OpenAI chat/completions, Responses, Anthropic) | ~1.5k |
 | Judge harness (L0, L0-dist, L1, L2 recorder/comparator, snapshot traces, oracle provenance) | ~2–2.5k |
 | Propagation + tune tooling, bench (trace replay, ABAB, remote runners), CI lints | ~1.5–2k |
 | Supervisor (v0 part: lifecycle, crash attribution) | 0.5–0.8k |
-| **v0 total** | **≈ 15–19k** (tests typically +0.5–1×; vendored kernels separate) |
+| **v0 total** | **≈ 16–20k** (tests typically +0.5–1×; vendored kernels separate) |
 
 ---
 
@@ -85,8 +93,8 @@ Global acceptance for every milestone ≥ M0.1:
 
 | Spike | Question | Exit |
 |---|---|---|
-| S1 Attention | FlashInfer paged prefill/decode on sm_86/sm_89/sm_120 + cu130 + torch 2.11, head_dim 128/256; JIT pre-build; graph capture; run-to-run byte identity; an attention path that reads lengths **on the device** from the SeqTable (for spec Seqs at depth 1) | names, per fingerprint class, the non-spec kernel (FlashInfer with host `plan()` in `plan_bounds`) and the spec-at-depth-1 kernel (FlashInfer device-length path or our own Triton paged attention) |
-| S2 W8A16 | Triton GEMM loading FP8 e4m3fn as `uint8`, exact bit-decode to bf16 in the K-loop (sm_86) | L0 exact decode vs torch `float8_e4m3fn` cast |
+| S1 Attention | FlashInfer paged prefill/decode on sm_86/sm_89/sm_120 + cu130 + torch 2.11, head_dim 128/256; JIT pre-build; graph capture; run-to-run byte identity; an attention path that reads lengths **on the device** from the SeqTable (for spec Seqs at depth 1) | names, per fingerprint class, the non-spec kernel (FlashInfer with host `plan()` in `plan_bounds`), the spec-at-depth-1 kernel (FlashInfer device-length path or our own Triton paged attention), and which KV layouts each kernel supports (bf16, fp8; q8_0/q4_0 need our own kernel) |
+| S2 GGUF kernels | build the ggml-derived CUDA kernels (dequant, mmvq, mmq, MoE) standalone as our own Torch extension, wrappers on Ledger buffers, on sm_86/sm_89/sm_120; correctness vs gguf-py for every type; speed vs llama.cpp on the same card measured **separately for decode (1 and many Seqs) and prefill, dense and MoE, per type** (IQ3_XXS, IQ3_S, IQ4_XS, Q3_K, Q4_K, Q8_0); graph capture | per type and path: adopt, port llama.cpp's newer i-quant `mmq` / MoE `mmq`, or write our own Triton kernel — with the effort sized for M0.1/M0.2 |
 | S3 GDN | vendored chunk + recurrent kernels on sm_86/sm_120 vs HF torch reference; no `vllm` imports | within budget, no NaN at T=1..8192, run-to-run identical |
 | S4 Determinism | every production kernel candidate is run-to-run deterministic with pinned configs (no split-K/atomics); which sites must be `uncovered` | list of deterministic kernels + uncovered sites |
 | S5 Golden | HF fp32 recording on CPU (or `device_map` over GPUs) for 8B; noise floor HF bf16 vs fp32 on frozen prompts | τ and KL/ΔPPL budgets calibrated |
@@ -96,7 +104,8 @@ Global acceptance for every milestone ≥ M0.1:
 
 **A. Repo bootstrap** — uv workspace (`core/`, `std/*`, `plugins/*`, `judge/`, `supervisor/`, `bench/`, `plans/`);
 CI scripts (§3.5); `AGENTS.md` (no claims without measurement; failing-then-passing test per bug fix; never edit
-`judge/` or locks by hand); job templates for consumer classes.
+`judge/` or locks by hand); a pinned container image for builds/tests and scripts to run it on an allocated
+shared test machine (one allocation, persistent container, repeated runs inside — D7).
 
 **B. `plugserve.api`** — dataclasses/Protocols only: Manifest schema, resources, slots + cardinality, Plan + lock
 format (`recipe`, `[units]` src/sem, `[deploy]`, `[snapshot]`), recipe terms (`Ref`, `ModelSpec` with
@@ -141,13 +150,14 @@ via `dequant_ref` into the dense HF class) + comparator with calibrated budgets;
 oracle provenance (`reference.py` at reviewed commits).
 
 **G. bench** — trace replay (ShareGPT-like + **mixed agent multi-turn tool traces**), TTFT/TPOT/throughput,
-interleaved ABAB, client-side timing; remote runners for consumer classes; baselines in pinned venvs.
+interleaved ABAB, client-side timing; runs inside the persistent container on allocated consumer desktops nodes; baselines
+in pinned environments; container image digest recorded in evidence.
 
 **H. propagation tooling** (outside core, ~400 LOC; changed-line coverage captured during snapshot traces) — `plugserve impact`, `plugserve propagate` (3 outcomes,
 design §4.6), `propagate --new-model`, `plugserve tune` (benchmarks tunables/kernel configs per fingerprint class
 into the lock); CI `isolation-check` re-runs propagate on a trusted GPU runner (A5000) and on remote
-consumer-desktop runners for the maintained consumer classes (on shared-change PRs where capacity allows, nightly at
-least).
+consumer-desktop runners for the maintained consumer classes: a scheduled, renewable allocation per class running the
+pinned container (on shared-change PRs where capacity allows, nightly at least).
 
 **I. supervisor (v0 part)** (~0.5–0.8k) — engine lifecycle on the newest lock, health checks, restart on the same
 lock, crash attribution with poison-request quarantine, rate-limited resubmission from committed tokens, rollback to
@@ -171,7 +181,7 @@ H (propagate, tune) → I (supervisor) → tuned default locks for each class.
    depth 0) — before any real drafter exists.
 6. Robustness: restart time measured and an SLO set; a poison-request test is quarantined without rollback;
    `n > 1` and prompt logprobs served.
-7. Memory fit per §2; tuned default locks for `a5000`, `rtx-4090`, `rtx-5090`.
+7. Memory fit per §2; tuned default locks for `a5000`, `rtx-4090`, `rtx-5090` (and `rtx-5080` from M0.1).
 8. Core LOC ≤ 6000; lints green.
 
 ### 3.5 CI checks (from M0)
@@ -183,28 +193,39 @@ H (propagate, tune) → I (supervisor) → tuned default locks for each class.
 
 ---
 
-## 4. M0.1 — quant seam (Qwen3-8B-FP8)
+## 4. M0.1 — quant pipeline with GGUF (Qwen3-8B GGUF)
 
-Work: `dialects/fp8_block` (roles `weight`/`weight_scale_inv`; source layout `fp8_block.rowmajor`),
-`Scheme(elem="e4m3fn", scales=(block 128×128,))` with `dequant_ref`; `kernels/triton_wxa16` W8A16 (uint8 load +
-bit-decode, S2) for sm_86; a native FP8 GEMM kernel for sm_89/sm_120 (borrowed under §5.6 or our own Triton).
+Work:
+- `weight_sources/gguf`: memory-mapped GGUF reader; model config from GGUF metadata (cross-checked against the HF
+  config, which is authoritative for fields GGUF lacks); `recipe(cfg, source)` selects `gguf_weights` (names +
+  value transforms) so the bf16 recipe term is unchanged; `model_id` includes the checkpoint build, so each quant
+  has its own lock history. Tokenizer from the HF base bundle with a token-table hash check; a GGUF-embedded chat
+  template takes precedence (differences logged).
+- `dialects/ggml`: ggml tensor types → `Scheme`s for k-quants (Q2_K…Q6_K), i-quants (IQ1_S…IQ4_XS, IQ4_NL) and
+  Q4_0/Q4_1/Q5_x/Q8_0, with `dequant_ref` following llama.cpp's gguf-py reference; layouts `gguf.native` (block
+  structs as stored, no repack).
+- `kernels/ggml_cuda`: the ggml-derived CUDA kernels (dequantize, matrix-vector `mmvq`, matrix-matrix `mmq`) as our
+  own Torch extension (per S2), selected per fingerprint class; a dequantize-then-GEMM fallback for prefill shapes
+  where `mmq` is slower.
 
-Acceptance: `git diff plugins/models/qwen3` empty; L0 for both kernels; the resolver picks W8A16 on `a5000` and
-native FP8 on `rtx-4090`/`rtx-5080`/`rtx-5090` from the same lock format; L2 bounded vs the golden recorded from
-`dequant_ref` weights; Qwen3-8B bf16 locks unchanged; **first 16 GB consumer data point**: Qwen3-8B-FP8 on RTX 5080
-with ≥ 32K KV tokens, perf recorded.
+Acceptance: `git diff plugins/models/qwen3` limited to adding `gguf_weights` to the recipe; L0 for every
+supported type vs `dequant_ref`; L2 bounded vs a golden recorded from `dequant_ref` weights in the dense HF class
+(CPU fp32), with quantization error vs the bf16 model reported separately; Qwen3-8B bf16 locks unchanged;
+**first 16 GB consumer data point**: Qwen3-8B Q4_K_M and IQ3_XXS on RTX 5080 with ≥ 64K KV tokens; decode
+tok/s vs llama.cpp (`llama-server`) on the same card and quant recorded.
 
-## 5. M0.2 — model isolation + MoE (Qwen3-30B-A3B-GPTQ-Int4)
+## 5. M0.2 — model isolation + MoE (Qwen3-30B-A3B GGUF)
 
 Work: `models/qwen3_moe` — `recipe.py` copied from qwen3 with `derived_from` (diff ≤ ~15 lines: MoE ffn via
 `Ref("std.ffn.moe_topk@1", …)`, `mlp_only_layers`, expert weight map); `std.ffn.moe_topk` coarse Op (router, top-k,
-experts, combine; reference); `dialects/gptq` (`desc_act=False` only; GPTQ v1 `qzeros` +1 convention in
-`dequant_ref`; fp16 scales); `kernels/triton_wxa16` W4A16; `kernels/triton_moe` (vendored fused MoE W4A16 path,
-pinned configs, provenance).
+experts, combine; reference); GGUF MoE kernels from the same ggml-derived set (batched MoE `mmq` for k-quants;
+for i-quants the vendored set has only the per-token vector path, so a batched i-quant MoE kernel — ported from
+llama.cpp's `mul_mat_id` mmq or our own Triton — is built as sized by S2); pinned configs, provenance.
 
-Acceptance: qwen3 locks unchanged (no shared unit changed) or advanced only by propagate; MoE L0 vs reference; L2
-bounded vs a golden recorded on CPU from `dequant_ref` weights (≈ 122 GB fp32 in RAM); memory fit per §2; perf on
-A5000, 4090, 5090; core diff target zero.
+Acceptance: qwen3 locks unchanged or advanced only by propagate; MoE L0 vs reference; L2 bounded vs a golden from
+`dequant_ref` weights (CPU fp32, ≈ 122 GB in RAM); **30B MoE on a 16 GB card**: UD-IQ3_XXS / UD-Q3_K_XL on RTX 5080
+with ≥ 16K KV tokens, Q4_K_M on 4090/5090/A5000; decode tok/s vs llama.cpp on the same card and quant recorded;
+core diff target zero.
 
 ## 6. M0.3 — heterogeneous state (Qwen3.5-4B → 9B, text-only)
 
@@ -237,6 +258,34 @@ Acceptance:
   outside the model package, human interventions.
 - Core diff target zero.
 
+## 6b. M0.3b — large-model target (Qwen3.8-27B GGUF) + quantized KV cache
+
+GGUF builds of Qwen3.5/3.8 differ from HF: norms stored as `w+1` (except `ssm_norm`), `ssm_a` = `-exp(A_log)`,
+conv1d squeezed, and GDN value heads in tiled order (affects in_proj qkv/z/a/b, dt_bias, A_log, conv1d rows and the
+input columns of `out_proj`). `gguf_weights` carries these value transforms and the GDN mixer uses
+`v_head_order="tiled"` (design §5.1). GGUF goldens are additionally recorded through transformers' own GGUF loader
+as an independent check of the mapping.
+
+Qwen3.8-27B: dense GDN hybrid, 64 layers (48 GDN + 16 full attention), hidden 5120, one MTP layer — the model kvmem
+targets on 16 GB cards. unsloth GGUF builds: UD-IQ3_S 11.2 GiB, UD-IQ4_XS 13.3 GiB, UD-Q4_K_M 15.3 GiB.
+
+Work: `models/qwen3_8` recipe (copied from qwen3_5 with `derived_from`); quantized KV cache as a KV `Layout`
+negotiated with the attention kernel — first `fp8` through FlashInfer (dequantized in-kernel; whether this path
+applies on sm_86 classes is decided per fingerprint class by S1), then `q8_0` (and
+`q4_0` for V, as kvmem uses) through **our own Triton paged attention for quantized KV** (head_dim 256; decode,
+prefill and verify; reads lengths on the device for spec at depth 1; L0 reference); GGUF builds of the Qwen3.5
+models; GDN `v_head_order="tiled"`; a checkpoint pool budgeted explicitly (≈ 7 GDN checkpoints per GiB for 27B).
+
+Acceptance:
+- Qwen3.8-27B UD-IQ3_S / UD-IQ4_XS on RTX 5080 16 GB and UD-Q4_K_M on 4090/5090; memory fit per the §2 table
+  (weights + overhead + GDN state ≈ 147 MiB/Seq + KV 64 KiB/token bf16, ≈ 34 KiB q8_0) recorded; quantized KV at
+  least doubles the KV tokens that fit vs bf16 KV.
+- GGUF weight-map transforms verified: golden via `dequant_ref` and via transformers' GGUF loader agree.
+- L2 bounded vs the `dequant_ref` golden; KV quantization error reported separately (bf16 vs q8_0 KV, same weights).
+- Decode tok/s and prefill tok/s vs llama.cpp and vs kvmem-llama.cpp on the same RTX 5080 and quant, short and long
+  context.
+- Core diff target zero.
+
 ## 7. M0.4 — speculative decoding
 
 Work: `drafters/mtp` (consumes ModelSpec `draft_heads`), `drafters/ngram_gpu`, `drafters/lookup_cpu` (depth
@@ -246,6 +295,9 @@ tolerance 0 — exercises per-Seq gating), `verifiers/greedy_exact`, `verifiers/
 `"checkpoint_slots"` (opt-in, `draft_slots ≤ 2`); drafter KV as a Rewindable in the target's page group.
 
 Acceptance:
+- MTP is exercised on Qwen3.5 and on Qwen3.8-27B GGUF, loading the separate MTP GGUF (`MTP/mtp-Qwen3.8-27B-Q4_0.gguf`,
+  1.28 GiB; gguf-py's QWEN35 list has no NEXTN tensors) as a second weight source into `draft_heads`. On RTX 5080
+  only with UD-IQ3_S (MTP takes ~half of the remaining ≈ 2.6 GiB); UD-IQ4_XS + MTP on 4090/5090.
 - MTP and n-gram Seqs actually run at **depth 1** on the device SeqTable, using the spec-at-depth-1 attention
   kernel named by S1 (measured: fraction of spec steps at depth 1).
 - Spec vs non-spec greedy **bounded** on Qwen3-8B (n-gram) and Qwen3.5 (MTP); greedy self-consistency exact
@@ -273,7 +325,8 @@ without spec bounded; core diff target zero.
 | M0.2 | core changes needed for MoE; approvals per week from propagation | > 1 core ABI change, or > 3 approvals/week → abstraction or machinery is wrong; simplify |
 | M0.3 | legibility benchmark: ≥ 3 runs per side, same agent and prompt, both starting from a branch point before `qwen3_5` exists | plug-serve not ≥ 30% cheaper for the agent than a mini-sglang fork → collapse slots and nouns |
 | Any | propagation sweep time; approvals/day | > 30 min or > 1/day → async propagation (design §4.6 trigger) |
-| v1 offload | Qwen3-30B-A3B decode tok/s on RTX 5080 vs FreeToken on the same node and settings | < 0.8× → rework the offload path before adding features |
+| M0.1 / M0.2 / M0.3b | GGUF decode **and prefill** tok/s vs llama.cpp on the same card and quant (RTX 5080), dense and MoE | < 0.8× on either after a perf pass → fix the GGUF kernel path (ported i-quant `mmq` or own Triton kernels for the slow types) before adding features |
+| v1 offload | MoE larger than VRAM on RTX 5080: decode tok/s vs FreeToken and Strata on the same node | < 0.8× → rework the offload path before adding features |
 
 ---
 
@@ -282,12 +335,14 @@ without spec bounded; core diff target zero.
 **v1 — consumer-GPU story**
 - **Expert caching/offload** on the M0 seams (SeqTable, MemOps, `quiesce`, S6 stream-memop CPU worker):
   TieredStore, in-graph DeviceResolver with double-buffered residency, placement policies (LRU, profile-seeded
-  decayed LFU), CPU miss compute — Qwen3-30B-A3B on RTX 5080 16 GB (consumer desktop) and bf16 on a 24 GB card;
-  then Qwen3.5-35B-A3B. Compared with FreeToken on the same nodes.
+  decayed LFU), CPU miss compute (GGUF experts computed on the CPU, Strata-style, with ggml CPU kernels) — MoE
+  models larger than VRAM on RTX 5080 16 GB (consumer desktop): Qwen3.5-35B-A3B at Q4_K_M and above, then larger
+  MoE (e.g. Qwen3.5-122B-A10B, Qwen3.8-Flash-Next) — compared with FreeToken and Strata on the same nodes.
 - KV offload to pinned RAM / SSD (connector-chosen BLOCKED vs layer-wise, cancellable futures, demote/pin eviction).
 - VMM ledger + live rebalance KV ↔ experts through `quiesce` (run-identical after shrink/regrow).
 - Mixed prefill/decode scheduling policy + PIECEWISE graphs; depth 2; radix PrefixIndex if profiles warrant.
-- NVFP4 (sm_120) and GGUF dialects; TP=2 on 2× A5000 (zero core diff); `update_weights`; LoRA; Qwen3.5 VLM.
+- HF-ecosystem quantization: GPTQ/AWQ INT4 (W4A16) and FP8 (W8A16 via uint8 bit-decode on sm_86, native FP8 on
+  sm_89/120); TP=2 on 2× A5000 (zero core diff); `update_weights`; LoRA; Qwen3.5 VLM.
 - **Optional self-improvement layer** (design §10): supervisor, improve API (first-version tool set), sandbox
   container, spare-GPU evaluation, L4 + L4-confirm, canary with sampled live re-scoring. Acceptance: (1) a scripted
   or external agent promotes a tunable and a policy variant with evidence whose gain CI excludes 0; (2) a served-agent
@@ -299,7 +354,8 @@ without spec bounded; core diff target zero.
 **v2 — breadth**
 - DeepSeek-class: DSA indexer (page groups), V4 compressed KV (`tokens_per_unit`) — correctness on reduced-layer
   configs locally, performance on datacenter GPUs.
-- PD disaggregation, EP, DP-attention, PP on datacenter GPUs (H100/GB200); draft-model drafter (nested ModelPlugin).
+- PD disaggregation, EP, DP-attention, PP on datacenter GPUs (H100/GB200); NVFP4 and MXFP4 for large-memory datacenter
+  GPUs; draft-model drafter (nested ModelPlugin).
 - Tree verification, KVMem-style retrieval window, batch-invariant deterministic Plan (if needed), L3 quality judge,
   ROCm/CPU platforms, multi-model serving.
 
