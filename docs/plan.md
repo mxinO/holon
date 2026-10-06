@@ -11,6 +11,7 @@ Companion to [design.md](design.md)
 |---|---|---|
 | Development | 8× RTX A5000 24 GB (**sm_86**), 96 cores, 251 GB RAM; CUDA 13.0, Python 3.12, torch 2.11.0+cu130, Triton 3.6, uv | coding, functional tests, golden recording (CPU fp32 fits in RAM) |
 | Consumer evidence | consumer desktop machines (AMD B650, 8 cores, 128 GB RAM, 1 GPU): **RTX 5080 16 GB** and **RTX 5090 32 GB** (sm_120), **RTX 4090 24 GB** (sm_89), RTX 3090 (sm_86) | all performance numbers, tuned defaults per fingerprint class, consumer memory-fit checks |
+| Blackwell dev (optional) | workstation with 8× RTX PRO 6000 Blackwell Max-Q 96 GB (sm_120), 96 cores; direct ssh, same filesystem, no batch scheduler | sm_120 kernel development and debugging (S1–S3 on Blackwell), large-memory work (GPU golden recording, large models), NVFP4 later; not a consumer-performance proxy |
 | Datacenter (later) | H100/H200, GB200/GB300 | v2 datacenter path (TP/EP/PD, NVFP4) |
 
 Shared dev pools with many card types are used when
