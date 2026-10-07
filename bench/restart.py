@@ -28,7 +28,7 @@ async def measure(model: str, kills: int, every: int) -> dict:
 
     params = SamplingParams(temperature=0.0, max_tokens=every * (kills + 1), ignore_eos=True)
     prompt = list(range(1000, 1064))
-    policy = Policy(max_restarts=kills + 1, rollback_crashes=kills + 1)     # deliberate kills: never give up
+    policy = Policy(max_crashes=kills + 1)              # deliberate kills: the stream must survive them all
     async with supervised([EngineConfig(model=model)], policy) as sup:
         reference = [t async for d in sup.generate(prompt, params) for t in d.token_ids]
         tokens, stalls, restarts, killed_at = [], [], [], None
