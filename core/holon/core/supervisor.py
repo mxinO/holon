@@ -8,12 +8,13 @@ function of (seed, position), so the stream goes on exactly where it stopped: th
 missing tokens, only a pause.
 
 Attribution. Each crash strikes the requests in flight. Most crashes are transient, so requests are resubmitted
-together. A request with `poison_crashes` strikes is a repeat suspect. If it is the only one in a crash and other
-requests have completed since its first strike (others survive), it is poison: it fails with an error, nothing rolls
-back, and the crashes it was in stop counting against the configuration. Repeat suspects that cannot be told apart go
-on probation — they rerun one at a time beside other requests, so a later crash isolates the culprit. Whatever the
-attribution, a request that has lived through `max_crashes` crashes (in flight or waiting) fails rather than wait for
-another restart: that bounds how long any request can stall.
+together. A request with `poison_crashes` strikes is a repeat suspect and goes on probation: suspects rerun one at a
+time beside other requests, and only once the configuration has shown it serves — a request completed on it since it
+became current; on a quiet server the supervisor sends a tiny canary request to find out. A probe that crashes the
+engine again, with no other repeat suspect in flight, is poison: it fails with an error, nothing rolls back, and the
+crashes it was in stop counting against the configuration. Whatever the attribution, a request that has lived through
+`max_crashes` crashes (in flight or waiting) fails rather than wait for another restart: that bounds how long any
+request can stall.
 
 Rollback. Every crash no quarantine explains is charged to the configuration. `rollback_crashes` charges, or as many
 failed starts in a row, restart the engine on the previous entry of its config history (rollback = restart on the
@@ -44,6 +45,8 @@ from holon.api import SamplingParams, TokenDelta
 from .engine import sequence_seed
 from .ipc import EngineProcess, engine_main
 
+_CANARY = [1, 2, 3, 4], SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True)
+
 
 @dataclasses.dataclass(frozen=True)
 class Policy:
@@ -51,7 +54,7 @@ class Policy:
     ping_timeout: float = 60.0       # the engine answers between steps: no answer this long means it hangs
     start_timeout: float = 600.0     # a start (weights, pool sizing, graph capture) taking longer has failed
     stable_s: float = 60.0           # uptime without a crash after which strikes and charges are forgotten
-    poison_crashes: int = 2          # strikes that make a request a quarantine suspect
+    poison_crashes: int = 2          # strikes that put a request on probation
     max_crashes: int = 5             # crashes a request lives through before it fails instead of waiting again
     rollback_crashes: int = 4        # unexplained crashes (or failed starts in a row) that roll back
 
@@ -68,7 +71,6 @@ class _Request:
     pumps: dict[str, asyncio.Task[None]] = dataclasses.field(default_factory=dict)   # engine rid -> task
     strikes: int = 0                         # crashes it was in flight for
     crashes: int = 0                         # crashes it lived through, in flight or waiting
-    survivors_before: int = 0                # requests completed before its first strike
     attempt: int = 0
 
     @property
@@ -107,7 +109,8 @@ class Supervisor:
         self._waiting: list[_Request] = []              # to submit once an engine is ready
         self._probation: collections.deque[_Request] = collections.deque()
         self._probe: _Request | None = None             # the one repeat suspect allowed on the engine
-        self._survivors = 0                             # requests completed so far
+        self._served: int | None = None                 # the latest config version that completed a request
+        self._canary: str | None = None                 # the request id of the canary out, if one is
         self._charged: list[frozenset[str]] = []        # unexplained crashes: the requests in flight at each
         self._up_since = 0.0                            # when the current engine became ready
         self._failure: str | None = None
@@ -187,19 +190,33 @@ class Supervisor:
 
     # -- requests on the engine -----------------------------------------------------------------------------------
     def _dispatch(self) -> None:
-        """Submit what waits, and the next suspect on probation if none is on the engine."""
+        """Submit what waits, and the next suspect on probation if none is on the engine and the configuration has
+        shown it serves (else a canary finds out first)."""
         if self._engine is None:
             return
         if self._probe is None and self._probation:
-            self._probe = self._probation.popleft()
-            self._waiting.append(self._probe)
+            if self._served == self.version:
+                self._probe = self._probation.popleft()
+                self._waiting.append(self._probe)
+            elif self._canary is None:
+                self._canary = f"canary-{uuid.uuid4().hex}"
+                self._spawn(self._send_canary(self._canary))
         for req in self._waiting:
             req.engine = self._engine
             if req.attempt:
                 self.counters["resubmitted"] += 1
             for rid, tokens, params, index in req.submissions():
-                req.pumps[rid] = asyncio.create_task(self._pump(req, self._engine, rid, tokens, params, index))
+                req.pumps[rid] = self._spawn(self._pump(req, self._engine, rid, tokens, params, index))
         self._waiting.clear()
+
+    async def _send_canary(self, rid: str) -> None:
+        try:
+            async for _ in self.generate(*_CANARY, rid):   # a completion marks the configuration as serving
+                pass
+        except RuntimeError:                              # the supervisor gave up
+            pass
+        finally:
+            self._canary = None
 
     async def _pump(self, req: _Request, engine: EngineProcess, rid: str, tokens: list[int], params: SamplingParams,
                     index: int | None) -> None:
@@ -214,9 +231,10 @@ class Supervisor:
                 if d.finish_reason is not None:
                     req.done.update(range(req.params.n) if d.finish_reason == "error" else (d.index,))
                     if req.finished:
-                        if d.finish_reason != "error":
-                            self._survivors += 1
                         self._leave(req)
+                        if d.finish_reason != "error" and self._served != self.version:
+                            self._served = self.version
+                            self._dispatch()                      # probation may proceed
         except Exception as e:  # noqa: BLE001 — a dead engine refuses new requests; anything else ends this one
             if engine.client.failure is None:
                 self._end(req, "error", f"supervisor failed: {type(e).__name__}: {e}")
@@ -257,27 +275,24 @@ class Supervisor:
                 task.cancel()
             req.pumps.clear()
             req.engine = None
-        if self._probe in inflight:
-            self._probe = None
+        probe, self._probe = (self._probe, None) if self._probe in inflight else (None, self._probe)
         for req in self._requests.values():
             req.crashes += 1
         await engine.stop(graceful=False)
         self.counters["crashes"] += 1
-        self._attribute([r for r in inflight if not r.finished], reason)        # some may have left meanwhile
+        self._attribute([r for r in inflight if not r.finished], reason, probe)  # some may have left meanwhile
         await self._launch()
 
-    def _attribute(self, inflight: list[_Request], reason: str) -> None:
+    def _attribute(self, inflight: list[_Request], reason: str, probe: _Request | None) -> None:
         for req in inflight:
-            if not req.strikes:
-                req.survivors_before = self._survivors
-            req.strikes += 1
+            req.strikes += req.rid != self._canary        # a canary is never a suspect: it must keep running
         repeat = [r for r in inflight if r.strikes >= self.policy.poison_crashes]
-        if len(repeat) == 1 and self._survivors > repeat[0].survivors_before:
-            poison = repeat[0]
+        if probe is not None and repeat == [probe]:           # probes run only on a configuration that serves
+            poison = probe
             self.counters["quarantined"] += 1
             self._charged = [rids for rids in self._charged if poison.rid not in rids]    # it explains them
-            self._end(poison, "error", f"request quarantined: in flight at {poison.strikes} engine crashes while "
-                                       f"other requests completed (last: {reason})")
+            self._end(poison, "error", f"request quarantined: in flight at {poison.strikes} engine crashes, the last "
+                                       f"alone on probation (last: {reason})")
         else:
             self._charge(inflight)
         for req in list(self._requests.values()):       # waiting ones too: probation must not stall anyone forever
@@ -361,10 +376,11 @@ class Supervisor:
         self._ready.set()
         self._gave_up.set()
 
-    def _spawn(self, coro: Coroutine[Any, Any, None]) -> None:
+    def _spawn(self, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
         task = asyncio.get_running_loop().create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._done)
+        return task
 
     def _done(self, task: asyncio.Task[None]) -> None:
         self._tasks.discard(task)

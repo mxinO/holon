@@ -208,3 +208,19 @@ def test_failed_starts_roll_back_and_an_exhausted_history_gives_up(tiny_checkpoi
 
     result, stats = asyncio.run(asyncio.wait_for(run(), timeout=240))
     assert result[0][0] == expected[0] and stats["rollbacks"] == 1 and stats["config"] == 0
+
+
+def test_a_lone_poison_request_on_a_quiet_server_is_quarantined(tiny_checkpoint, tiny_case):  # noqa: F811
+    prompts, expected = tiny_case
+    config = _config(tiny_checkpoint)
+
+    async def run():
+        async with supervised([config, dataclasses.replace(config)], FAST, target=_poisoned_engine) as sup:
+            poison = await _collect(sup, [MARKER] + prompts[0], GREEDY)       # nothing else ever completed
+            after = await _collect(sup, prompts[0], GREEDY)
+            return poison, after, await sup.stats()
+
+    poison, after, stats = asyncio.run(asyncio.wait_for(run(), timeout=240))
+    assert poison[1].finish_reason == "error" and "quarantined" in poison[1].error
+    assert after[0][0] == expected[0]
+    assert stats["quarantined"] == 1 and stats["rollbacks"] == 0 and stats["config"] == 1 and stats["crashes"] == 3
