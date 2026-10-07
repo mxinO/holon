@@ -7,9 +7,11 @@ Requests are ranked running (oldest first), then waiting (queue order). When a r
 needs, and releasing the admitted requests below it would make room, the lowest-ranked of them is preempted by
 recompute, repeatedly; otherwise a running request preempts itself and a waiting one ends the step's prefill.
 
-Liveness: the pools always hold one request of the engine's maximum length, and every unit is held by some request,
-so the top-ranked request fits once everything below it is preempted, and every step makes progress. (Prefix
-caching, E4, adds units no request owns; it must evict those before preempting to keep this argument.)
+A waiting request is first admitted (a slot, plus its longest cached prefix), then reserves state for its chunk.
+
+Liveness: the pools always hold one request of the engine's maximum length, and every unit is held by some request
+or only by the prefix cache, which evicts such units before anyone is preempted. So the top-ranked request fits once
+everything below it is preempted, and every step makes progress.
 """
 from __future__ import annotations
 
@@ -31,9 +33,12 @@ class Scheduler:
         self.preemptions = 0
         self._step = 0
 
-    def add(self, seq: Seq) -> None:
+    def add(self, seq: Seq, front: bool = False) -> None:
         seq.status = Status.WAITING
-        self.waiting.append(seq)
+        if front:
+            self.waiting.appendleft(seq)
+        else:
+            self.waiting.append(seq)
 
     def schedule(self) -> tuple[BatchPlan, list[Seq]] | None:
         rows = self._prefill() or self._decode()
@@ -51,8 +56,10 @@ class Scheduler:
     def _prefill(self) -> list[tuple[Seq, int]]:
         rows, budget = [], self.max_step_tokens
         for seq in list(self.waiting):
-            n = min(len(seq.tokens) - seq.num_computed, budget)
-            if n == 0 or not self._fit(seq, n):
+            if budget == 0 or (seq.slot < 0 and not self._fit(seq, None)):
+                break
+            n = min(len(seq.tokens) - seq.num_computed, budget)       # after admission: a prefix hit counts
+            if not self._fit(seq, n):
                 break
             rows.append((seq, n))
             budget -= n
@@ -69,12 +76,13 @@ class Scheduler:
                 self._preempt(seq)
         return rows
 
-    def _fit(self, seq: Seq, n: int) -> bool:
-        """Reserve state for `n` more tokens of `seq`, preempting lower-ranked admitted requests, lowest first."""
-        while not self.state.reserve(seq, n):
+    def _fit(self, seq: Seq, n: int | None) -> bool:
+        """Admit `seq` (n None) or reserve state for `n` more of its tokens, preempting lower-ranked admitted
+        requests, lowest first, while releasing them can make room."""
+        while not (self.state.admit(seq) if n is None else self.state.reserve(seq, n)):
             ranked = self.running + list(self.waiting)
             below = [s for s in ranked[ranked.index(seq) + 1:] if s.slot >= 0]
-            if not below or not self.state.could_fit(seq, n, below):
+            if not below or not self.state.could_fit(seq, n or 0, below):
                 return False
             self._preempt(below[-1])
         return True

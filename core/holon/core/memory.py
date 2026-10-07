@@ -63,6 +63,9 @@ class Pool:
         self._refs[units] = 1
         return units
 
+    def refcount(self, units: np.ndarray) -> np.ndarray:
+        return self._refs[units]
+
     def incref(self, units: np.ndarray) -> None:
         np.add.at(self._refs, units, 1)
 

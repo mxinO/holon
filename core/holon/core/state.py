@@ -7,6 +7,7 @@ own the specs decide what a unit holds.
 """
 from __future__ import annotations
 
+import collections
 import dataclasses
 from collections.abc import Callable
 from typing import Any
@@ -17,6 +18,7 @@ import torch
 from holon.api import BatchPlan, Paged, Pages, Seq, StateSpec
 
 from .memory import OutOfUnits, Pool
+from .prefix import PrefixIndex
 
 
 @dataclasses.dataclass
@@ -60,10 +62,19 @@ class _View:
 
 
 class StateManager:
+    """Slots, units and block tables of admitted requests, plus the prefix cache (when given an index).
+
+    v0 prefix caching covers paged state only: pages are shared by reference, so a hit adopts whole cached blocks
+    and publishing a completed block hands its pages to the index. Checkpointed state (recurrent mixers) joins
+    through StateKind publish/adopt MemOps in M0.3.
+    """
+
     def __init__(self, bound: list[BoundSpec], max_seqs: int, max_tokens: int, device: torch.device,
-                 on_admit: Callable[[Seq], None] = lambda seq: None) -> None:
-        self.bound, self.device, self.on_admit = bound, device, on_admit
-        self.held: dict[int, dict[str, list[int]]] = {}       # slot -> spec name -> unit ids (exclusive)
+                 on_admit: Callable[[Seq], None] = lambda seq: None, index: PrefixIndex | None = None) -> None:
+        self.bound, self.device, self.on_admit, self.index = bound, device, on_admit, index
+        self.held: dict[int, dict[str, list[int]]] = {}       # slot -> spec name -> unit ids
+        self.chain: dict[int, list[int] | None] = {}          # slot -> keys of its published blocks (None: broken)
+        self.tokens_saved = 0                                  # prefix-hit tokens not recomputed
         self._free_slots = list(range(max_seqs - 1, -1, -1))
         self.tables: dict[str, BlockTable] = {}
         self._table_of: dict[str, BlockTable] = {}            # paged spec name -> its group's table
@@ -76,63 +87,106 @@ class StateManager:
             table = BlockTable(page, max_seqs, -(-max_tokens // page), device)
             self.tables[b.spec.group] = self._table_of[b.spec.name] = table
 
+    def admit(self, seq: Seq) -> bool:
+        """Give `seq` a slot and adopt its longest cached prefix (always leaving one token to compute); sets
+        `seq.num_computed` to the hit length. False if no slot is free."""
+        if not self._free_slots:
+            return False
+        seq.slot = self._free_slots.pop()
+        self.held[seq.slot], self.chain[seq.slot] = {}, []
+        entries = []
+        if self.index is not None:
+            keys = self.index.keys(seq.tokens, 0, (len(seq.tokens) - 1) // self.index.block, None)
+            entries = self.index.match(keys, seq.tokens)
+            for e in entries:
+                for name, units in e.units.items():
+                    self._take(seq.slot, name, np.asarray(units, dtype=np.int32), shared=True)
+            self.chain[seq.slot] = [e.key for e in entries]
+        seq.num_computed = len(entries) * (self.index.block if self.index else 0)
+        try:
+            self.on_admit(seq)
+        except BaseException:
+            self.release(seq)
+            seq.num_computed = 0
+            raise
+        self.tokens_saved += seq.num_computed
+        return True
+
     def reserve(self, seq: Seq, new_tokens: int) -> bool:
-        """Give `seq` a slot (if it has none) and the units it needs for `new_tokens` more tokens; all-or-nothing."""
-        fresh = seq.slot < 0
-        if fresh:
-            if not self._free_slots:
-                return False
-            seq.slot = self._free_slots.pop()
-            self.held[seq.slot] = {}
-        held = self.held[seq.slot]
-        view = _View(seq, held)
+        """The units admitted `seq` needs for `new_tokens` more tokens, evicting unused cached blocks if a pool is
+        short; all-or-nothing."""
+        view = _View(seq, self.held[seq.slot])
         taken: list[tuple[BoundSpec, np.ndarray]] = []
         try:
             for b in self.bound:
                 if n := b.kind.units_needed(view, new_tokens):
+                    if b.pool.num_free < n and self.index is not None:
+                        self.index.evict(b.spec.name, n)
                     taken.append((b, b.pool.alloc(n)))
-            if fresh:
-                self.on_admit(seq)
-        except BaseException as e:
+        except OutOfUnits:
             for b, units in taken:
                 b.pool.decref(units)
-            if fresh:
-                self._free_slot(seq)
-            if isinstance(e, OutOfUnits):
-                return False
-            raise
+            return False
         for b, units in taken:
-            mine = held.setdefault(b.spec.name, [])
-            if table := self._table_of.get(b.spec.name):
-                table.write(seq.slot, len(mine), units)
-            mine.extend(units.tolist())
+            self._take(seq.slot, b.spec.name, units, shared=False)
         return True
 
+    def _take(self, slot: int, spec: str, units: np.ndarray, shared: bool) -> None:
+        if shared:
+            self._pool(spec).incref(units)
+        mine = self.held[slot].setdefault(spec, [])
+        if table := self._table_of.get(spec):
+            table.write(slot, len(mine), units)
+        mine.extend(units.tolist())
+
+    def publish(self, seq: Seq) -> None:
+        """Hand `seq`'s newly completed blocks to the prefix index (after the step that computed them)."""
+        chain = self.chain.get(seq.slot)
+        if self.index is None or chain is None:
+            return
+        block = self.index.block
+        for i in range(len(chain), seq.num_computed // block):
+            prev = chain[-1] if chain else None
+            key = self.index.keys(seq.tokens, i, i + 1, prev)[0]
+            units = {name: tuple(us[i * block // self._page(name):(i + 1) * block // self._page(name)])
+                     for name, us in self.held[seq.slot].items()}
+            if key not in self.index.entries and not self.index.insert(
+                    key, prev, tuple(seq.tokens[i * block:(i + 1) * block]), units):
+                self.chain[seq.slot] = None                  # its parent was evicted: stop publishing
+                return
+            chain.append(key)
+
     def could_fit(self, seq: Seq, new_tokens: int, releasing: list[Seq]) -> bool:
-        """Whether `reserve(seq, new_tokens)` would succeed once every request in `releasing` is released.
-        Assumes requests own their units exclusively (true until prefix sharing, E4)."""
+        """Whether `seq` could be admitted (if it has no slot) and get units for `new_tokens` more tokens once every
+        request in `releasing` is released and unused cached blocks are evicted."""
         if seq.slot < 0 and not self._free_slots and not any(s.slot >= 0 for s in releasing):
             return False
         view = _View(seq, self.held.get(seq.slot, {}))
         for b in self.bound:
-            freed = sum(len(self.held[s.slot].get(b.spec.name, ())) for s in releasing if s.slot >= 0)
-            if b.kind.units_needed(view, new_tokens) > b.pool.num_free + freed:
+            name = b.spec.name
+            dropped = collections.Counter(u for s in releasing if s.slot >= 0 for u in self.held[s.slot].get(name, ()))
+            cached = self.index.owned(name) if self.index is not None else set()
+            after = {u: int(b.pool.refcount(np.int32(u))) - dropped[u] for u in dropped.keys() | cached}
+            available = b.pool.num_free + sum(1 for u, r in after.items() if r == 0 or (r == 1 and u in cached))
+            if b.kind.units_needed(view, new_tokens) > available:
                 return False
         return True
 
     def release(self, seq: Seq) -> None:
-        """Free everything `seq` holds, including its slot; no-op if it holds nothing."""
+        """Drop everything `seq` holds, including its slot (published blocks stay cached); no-op if it holds nothing."""
         if seq.slot < 0:
             return
-        pools = {b.spec.name: b.pool for b in self.bound}
-        for name, units in self.held[seq.slot].items():
-            pools[name].decref(np.asarray(units, dtype=np.int32))
-        self._free_slot(seq)
-
-    def _free_slot(self, seq: Seq) -> None:
-        del self.held[seq.slot]
+        for name, units in self.held.pop(seq.slot).items():
+            self._pool(name).decref(np.asarray(units, dtype=np.int32))
+        del self.chain[seq.slot]
         self._free_slots.append(seq.slot)
         seq.slot = -1
+
+    def _pool(self, spec: str) -> Pool:
+        return next(b.pool for b in self.bound if b.spec.name == spec)
+
+    def _page(self, spec: str) -> int:
+        return self._table_of[spec].page
 
     def pages(self, plan: BatchPlan, positions: np.ndarray) -> dict[str, Pages]:
         """This step's view of every page group; `positions` are the step's token positions, flat."""

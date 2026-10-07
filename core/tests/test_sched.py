@@ -15,12 +15,16 @@ class FakeState:
     def __init__(self, capacity: int, slots: int) -> None:
         self.free, self.slots, self.held = capacity, list(range(slots)), {}
 
-    def reserve(self, seq: Seq, n: int) -> bool:
-        if n > self.free or (seq.slot < 0 and not self.slots):
+    def admit(self, seq: Seq) -> bool:
+        if not self.slots:
             return False
-        if seq.slot < 0:
-            seq.slot = self.slots.pop()
-            self.held[seq.slot] = 0
+        seq.slot = self.slots.pop()
+        self.held[seq.slot] = 0
+        return True
+
+    def reserve(self, seq: Seq, n: int) -> bool:
+        if n > self.free:
+            return False
         self.free -= n
         self.held[seq.slot] += n
         return True
@@ -153,7 +157,7 @@ def test_hopeless_preemption_is_skipped():
     _commit(*sched.schedule(), sched)     # running holds 6
     head = _seq(2, 8, 1)
     sched.add(partial)
-    assert state.reserve(partial, 2)      # a partial prefill holding 2, then a head needing 8 jumps the queue
+    assert state.admit(partial) and state.reserve(partial, 2)   # a partial prefill holding 2; a head needing 8 jumps it
     partial.num_computed = 2
     sched.waiting.appendleft(head)
     plan, rows = sched.schedule()         # 2 free + 2 below < 8: nothing is preempted, decode runs

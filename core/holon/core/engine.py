@@ -13,6 +13,7 @@ from __future__ import annotations
 import collections
 import dataclasses
 import itertools
+import math
 import secrets
 from typing import Any
 
@@ -32,6 +33,7 @@ from holon.api import (
     StateSpec,
     Status,
     TokenDelta,
+    canonical_hash,
 )
 
 from . import platform
@@ -39,6 +41,7 @@ from .batching import host_plan
 from .build import BuildContext, StepContext, build_model, load_weights
 from .memory import Ledger
 from .plugins import PluginError, PluginSet, discover
+from .prefix import PrefixIndex
 from .sched import Scheduler
 from .state import BoundSpec, StateManager
 
@@ -66,6 +69,7 @@ class EngineConfig:
     max_step_tokens: int = 4096
     memory_fraction: float = 0.9             # of the memory left after weights, for activations and state
     state_memory: int | None = None          # bytes for state pools; None: measure (GPU only)
+    prefix_cache: bool = True                # reuse cached prompt blocks across requests (paged state only)
     kernels: dict[str, str] = dataclasses.field(default_factory=dict)   # op name -> pinned kernel provider
 
     def __post_init__(self) -> None:
@@ -102,11 +106,21 @@ class Engine:
 
         self.sampler = sampler = p.load(p.single("sampler")).sampler(cfg.max_seqs, self.device)
         self.state = StateManager(bound, cfg.max_seqs, cfg.max_model_len, self.device,
-                                  on_admit=lambda seq: sampler.admit(seq.slot, seq.params))
+                                  on_admit=lambda seq: sampler.admit(seq.slot, seq.params), index=self._index(bound))
         self.sched = Scheduler(self.state, cfg.max_step_tokens)
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None else self._measure_state_memory())
         self._ids = itertools.count()
         self._prompt_lp: dict[Seq, Logprobs] = {}         # sequences still accumulating prompt logprobs
+        self._siblings: dict[Seq, list[Seq]] = {}         # n > 1: waiting for the first sequence's prefill
+
+    def _index(self, bound: list[BoundSpec]) -> PrefixIndex | None:
+        """A prefix index over blocks every paged spec can share whole pages of; None when disabled or when some
+        state is not paged (checkpointed recurrent state joins in M0.3)."""
+        if not self.cfg.prefix_cache or not bound or not all(isinstance(b.spec.shape, Paged) for b in bound):
+            return None
+        block = math.lcm(*(b.spec.shape.tokens_per_unit for b in bound), *(b.spec.alignment for b in bound))
+        namespace = int(canonical_hash(self.spec).removeprefix("sha256:")[:16], 16)   # model + recipe identity
+        return PrefixIndex(namespace, block, {b.spec.name: b.pool for b in bound})
 
     def _bind_state(self) -> tuple[list[BoundSpec], dict[str, Any]]:
         """Each mixer group's state specs → pools and bound state kinds; one planner per state group."""
@@ -191,7 +205,11 @@ class Engine:
             seq = Seq(rid=rid, tokens=list(token_ids), params=child, index=i)
             if child.prompt_logprobs is not None:
                 self._prompt_lp[seq] = Logprobs([], [], [])
-            self.sched.add(seq)
+            if i == 0 or self.state.index is None:
+                self.sched.add(seq)
+                first = seq
+            else:   # siblings wait until the first sequence's prompt is cached, then adopt it
+                self._siblings.setdefault(first, []).append(seq)
         return rid
 
     def has_work(self) -> bool:
@@ -278,12 +296,15 @@ class Engine:
             out.logprobs.tolist(), out.top_ids.tolist(), out.top_logprobs.tolist())     # one transfer per step
         for seq, n, has_logits in zip(seqs, plan.n_query, plan.n_logits, strict=True):
             seq.num_computed += int(n)
+            self.state.publish(seq)
             if not has_logits:
                 continue
             token = tokens[row]
             seq.tokens.append(token)
             if seq.status is not Status.RUNNING:
                 self.sched.finished_prefill(seq)
+                for sibling in reversed(self._siblings.pop(seq, [])):
+                    self.sched.add(sibling, front=True)
             reason = self._finish_reason(seq, token)
             if reason:
                 self.sched.finish(seq, reason)

@@ -116,7 +116,7 @@ class DeviceBatch:
     query_start: torch.Tensor            # [B+1]
     slots: torch.Tensor                  # [B]
     logits_index: torch.Tensor           # tokens whose logits are computed (the last of each sampled row)
-    logits_rows: torch.Tensor | None = None   # [R] batch row of each logits_index entry
+    logits_rows: torch.Tensor            # [R] batch row of each logits_index entry
     meta: dict[str, Any] = dataclasses.field(default_factory=dict)  # per planner
 
 

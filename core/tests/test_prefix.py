@@ -1,0 +1,54 @@
+"""PrefixIndex: chain keys, verified matches, leaf-first LRU eviction that never touches units still in use."""
+import numpy as np
+import torch
+from holon.core.memory import Ledger
+from holon.core.prefix import PrefixIndex
+
+
+def _index(units: int = 16, block: int = 4):
+    ledger = Ledger(torch.device("cpu"))
+    pool = ledger.request("kv", unit_bytes=8, min_units=units, tokens_per_unit=block)
+    ledger.materialize(None)
+    return PrefixIndex(7, block, {"kv": pool}), pool
+
+
+def _publish(index, pool, tokens):
+    """Publish every full block of `tokens` the way a request would (its own units, then released)."""
+    keys = index.keys(tokens, 0, len(tokens) // index.block, None)
+    units = pool.alloc(len(keys))
+    for i, key in enumerate(keys):
+        index.insert(key, keys[i - 1] if i else None, tuple(tokens[i * 4:(i + 1) * 4]), {"kv": (int(units[i]),)})
+    pool.decref(units)                     # the request finishes; only the index holds the blocks
+    return keys
+
+
+def test_keys_identify_the_whole_prefix():
+    index, _ = _index()
+    a = index.keys(list(range(12)), 0, 3, None)
+    assert index.keys(list(range(12)), 1, 3, a[0]) == a[1:]                  # resumable chain
+    assert index.keys([9] + list(range(1, 12)), 0, 3, None)[2] != a[2]       # an early change changes later keys
+
+
+def test_match_returns_the_longest_cached_prefix_and_verifies_tokens():
+    index, pool = _index()
+    keys = _publish(index, pool, list(range(12)))
+    assert len(index.match(keys, list(range(12)))) == 3
+    assert len(index.match(index.keys(list(range(8)) + [0, 0, 0, 0], 0, 3, None), list(range(8)) + [0] * 4)) == 2
+    index.entries[keys[1]].tokens = (99, 99, 99, 99)                         # a forged collision is a miss
+    assert len(index.match(keys, list(range(12)))) == 1
+
+
+def test_eviction_takes_unused_leaves_least_recently_used_first():
+    index, pool = _index(units=6)
+    a = _publish(index, pool, list(range(8)))                                  # chain a0 -> a1
+    b = _publish(index, pool, [50, 51, 52, 53, 60, 61, 62, 63])               # chain b0 -> b1
+    index.match(a, list(range(8)))                                            # a is now more recent than b
+    in_use = np.asarray(index.entries[b[1]].units["kv"], dtype=np.int32)
+    pool.incref(in_use)                                                       # a running request adopted b1
+    index.evict("kv", pool.num_free + 2)
+    assert set(index.entries) == {b[0], b[1]}                                 # a went (leaf a1, then a0); b in use
+    index.evict("kv", pool.capacity)
+    assert set(index.entries) == {b[0], b[1]}                                 # nothing in use is ever dropped
+    pool.decref(in_use)
+    index.clear()
+    assert pool.num_free == pool.capacity and not index.entries

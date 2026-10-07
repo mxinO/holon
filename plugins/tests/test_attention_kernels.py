@@ -29,7 +29,7 @@ def _case(rows: list[tuple[int, int]], heads: int, kv_heads: int, head_dim: int,
     plan = host_plan(0, slots, starts, n_query, np.ones_like(n_query), np.zeros(int(n_query.sum()), np.int64))
     qstart = np.concatenate([[0], np.cumsum(n_query)])
     dev = DeviceBatch(input_ids=None, positions=None, query_start=torch.as_tensor(qstart).cuda(),
-                      slots=torch.as_tensor(slots).cuda(), logits_index=None)
+                      slots=torch.as_tensor(slots).cuda(), logits_index=None, logits_rows=None)
     lens = torch.as_tensor(starts + n_query).cuda()
     pages = Pages(PAGE, table.cuda(), table.numpy(), lens, write_index=None)
     q = torch.randn(int(n_query.sum()), heads, head_dim, generator=g).to(dtype).cuda()

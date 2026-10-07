@@ -2,6 +2,7 @@
 import dataclasses
 import pathlib
 
+import numpy as np
 import pytest
 import torch
 from holon.api import SamplingParams
@@ -48,7 +49,13 @@ def tiny_case(tiny_checkpoint):
 
 
 def _released(engine):
-    return engine.state.held == {} and all(p.num_free == p.capacity for p in engine.ledger.pools.values())
+    """No request holds anything; every unit is free or held only by the prefix cache."""
+    index = engine.state.index
+    cached = {name: index.owned(name) if index else set() for name in (b.spec.name for b in engine.state.bound)}
+    return engine.state.held == {} and all(
+        b.pool.num_free + len(cached[b.spec.name]) == b.pool.capacity
+        and all(b.pool.refcount(np.int32(u)) == 1 for u in cached[b.spec.name])
+        for b in engine.state.bound)
 
 
 def test_engine_matches_hf_greedy_on_cpu(tiny_checkpoint, tiny_case):
@@ -189,3 +196,58 @@ def test_n_sequences_per_request(tiny_checkpoint, tiny_case):
     sampled = SamplingParams(temperature=1.0, n=3, seed=5, max_tokens=12, ignore_eos=True)
     first = run(sampled)
     assert first == run(sampled) and len({tuple(s) for s in first}) > 1
+
+
+def test_prefix_cache_hits_are_exact_across_turns(tiny_checkpoint, tiny_case):
+    prompts, _ = tiny_case
+    hf = AutoModelForCausalLM.from_pretrained(tiny_checkpoint, dtype=torch.float32).eval()
+    engine = _tiny_engine(tiny_checkpoint, max_model_len=96)
+    first = engine.generate([prompts[3]], GREEDY)[0]
+    saved = engine.state.tokens_saved
+    second_turn = prompts[3] + first + prompts[1]                 # a follow-up: history plus a new message
+    assert engine.generate([second_turn], GREEDY) == _hf_greedy(hf, [second_turn], GREEDY.max_tokens)
+    assert engine.state.tokens_saved - saved == (len(prompts[3] + first) - 1) // 4 * 4   # whole cached blocks
+    assert engine.generate([prompts[3]], GREEDY) == [first] and _released(engine)
+
+
+def test_prefix_cache_under_memory_pressure(tiny_checkpoint, tiny_case):
+    # 12 pages: cached blocks must be evicted (and requests preempted) without changing any output.
+    prompts, expected = tiny_case
+    engine = _tiny_engine(tiny_checkpoint, state_memory=12 * 2048)
+    for _ in range(2):
+        assert engine.generate(prompts, GREEDY) == expected
+    assert engine.state.tokens_saved > 0 and _released(engine)
+
+
+def test_siblings_adopt_the_first_sequence_prompt(tiny_checkpoint, tiny_case):
+    prompts, expected = tiny_case
+    engine = _tiny_engine(tiny_checkpoint)
+    rid = engine.add(prompts[3], dataclasses.replace(GREEDY, n=3))
+    seqs: dict[int, list[int]] = {}
+    while engine.has_work():
+        for d in engine.step():
+            seqs.setdefault(d.index, []).extend(d.token_ids)
+    assert [seqs[i] for i in range(3)] == [expected[3]] * 3 and rid == "0"
+    assert engine.state.tokens_saved == 2 * ((len(prompts[3]) - 1) // 4 * 4)
+
+
+@pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
+def test_prefix_cache_on_vs_off_is_bounded_bf16():
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(SNAP)
+    system = ("You are a careful assistant. Answer briefly and precisely, show units, and never invent facts. "
+              "If a question is ambiguous, say what you assume. ") * 4
+    questions = ["How far is the Moon?", "What is 17 times 23?", "Name a prime above 100.", "Who wrote Hamlet?"]
+    prompts = [tok(system + q)["input_ids"] for q in questions]
+    params = SamplingParams(temperature=0.0, max_tokens=16, ignore_eos=True)
+    outs, saved = {}, {}
+    for cache in (False, True):
+        engine = Engine(EngineConfig(model=str(SNAP), dtype=torch.bfloat16, max_model_len=1024, prefix_cache=cache))
+        outs[cache] = [engine.generate([p], params)[0] for p in prompts]       # one after another: later ones hit
+        saved[cache] = engine.state.tokens_saved
+        del engine
+    assert saved[False] == 0 and saved[True] >= 3 * (len(tok(system)["input_ids"]) // 16 * 16)
+    agree = [next((i for i, (a, b) in enumerate(zip(x, y, strict=True)) if a != b), len(x))
+             for x, y in zip(outs[False], outs[True], strict=True)]
+    assert all(n >= 1 for n in agree) and sum(agree) >= 0.75 * len(agree) * params.max_tokens, agree

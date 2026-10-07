@@ -120,7 +120,8 @@ class StepContext:
                           positions=torch.as_tensor(np.concatenate([np.arange(n) for n in lens]), device=device),
                           query_start=torch.as_tensor(starts, device=device),
                           slots=torch.as_tensor(plan.slots, device=device),
-                          logits_index=torch.arange(int(lens.sum()), device=device))
+                          logits_index=torch.arange(int(lens.sum()), device=device),
+                          logits_rows=torch.repeat_interleave(torch.arange(len(ids)), torch.as_tensor(lens)).to(device))
         return cls(Batch(plan, dev))
 
 

@@ -724,6 +724,16 @@ while True:
   reasoning, so anchors on sampled tool-call tokens are unreliable); the chunk is cut at `floor(end / page) · page`.
 - Eviction-policy contract: `victims()` may return **demote** actions (move a payload to a lower tier, keep the
   index entry) as well as drops; payloads with an in-flight async store stay pinned until the store completes.
+- **v0 (implemented in E4)**: paged state only (the index is off when any spec is not paged; checkpoints arrive in
+  M0.3). Blocks are `lcm(tokens_per_unit, alignment)` tokens; keys chain from a namespace derived from the model's
+  canonical hash; entries verify their tokens, so a hash collision is a miss. Pages are shared by refcount — the
+  index holds one reference per published unit, an adopting request one more — so publish and adopt need no MemOps.
+  Admission adopts the longest cached prefix, always leaving one token to compute; every completed block,
+  generated tokens included, is published after the step that computed it (so the next turn of a conversation
+  hits). Eviction drops least-recently-used leaves whose units only the index holds, and runs before any
+  preemption; `could_fit` counts such units as available, which keeps the scheduler's liveness argument. `n > 1`
+  siblings wait until the first sequence's prompt is published and then adopt it (each recomputes at most one
+  partial block); `fork` with a partial-page copy replaces this when MemOps land.
 
 ### 6.4 Async loading
 
