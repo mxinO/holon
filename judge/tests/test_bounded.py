@@ -31,16 +31,19 @@ def test_agreement_may_fall_by_the_l2_slack_or_the_noise():
     floor = _agreement(0.98, 0.995)
     assert all(ok for ok, _ in _agreement(0.978, 0.993).checks(floor).values())
     assert not any(ok for ok, _ in _agreement(0.97, 0.99).checks(floor).values())
-    ok, margin = _agreement(0.97, 0.995, se=0.004).checks(_agreement(0.98, 0.995, se=0.003))["top1"]
-    assert ok and math.isclose(margin, 2.5 * 0.005)
+    ok, margin = _agreement(0.97, 0.995, se=0.0).checks(_agreement(0.98, 0.995, se=0.003))["top1"]
+    assert ok and math.isclose(margin, 2.5 * math.sqrt(2) * 0.003)          # the floor's noise only
+    assert not _agreement(0.97, 0.995, se=0.05).checks(floor)["top1"][0]     # a noisy candidate earns no margin
 
 
 def test_kl_quantiles_may_double_or_exceed_by_the_noise():
     floor = Divergence(Mean(0.0, 0.0, 1), 1e-5, 1e-2, 1e-7, 1e-4)
     assert Divergence(Mean(0.0, 0.0, 1), 1.9e-5, 1.9e-2, 1e-7, 1e-4).checks(floor) == {
         "kl_p50": (True, 1e-5), "kl_p99": (True, 1e-2)}
-    noisy = Divergence(Mean(0.0, 0.0, 1), 3e-5, 1e-2, 1e-5, 1e-4).checks(floor)["kl_p50"]
-    assert noisy[0] and math.isclose(noisy[1], 2.5 * math.hypot(1e-5, 1e-7))
+    noisy_floor = Divergence(Mean(0.0, 0.0, 1), 1e-5, 1e-2, 1e-5, 1e-4)
+    ok, margin = Divergence(Mean(0.0, 0.0, 1), 3e-5, 1e-2, 0.0, 1e-4).checks(noisy_floor)["kl_p50"]
+    assert ok and math.isclose(margin, 2.5 * math.sqrt(2) * 1e-5)
+    assert not Divergence(Mean(0.0, 0.0, 1), 3e-5, 1e-2, 1e-4, 1e-4).checks(floor)["kl_p50"][0]
 
 
 def test_kl_quantile_standard_errors_resample_whole_clusters():

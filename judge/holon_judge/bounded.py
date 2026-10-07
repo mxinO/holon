@@ -13,9 +13,10 @@ As in L2, the floor is the same comparison without the thing under test: the bas
 off, depth 0, graphs on) re-scored the same way. Two bf16 paths (decode vs prefill kernels) disagree at near-ties no
 matter what, and generated text has more near-ties than the L2 prompt set, so the L2 floor does not transfer. A
 configuration passes if its agreement is within `margin` of the floor's, where `margin` is the L2 slack
-(`compare.TOP1_DELTA`) or 2.5 standard errors of the difference, whichever is larger (sessions are the clusters),
-and its KL p50 and p99 are at most `compare.KL_FACTOR` times the floor's, as in L2, or above it by 2.5 standard
-errors of the difference (a session bootstrap), whichever is larger. Planted bugs in prefix adoption and in the
+(`compare.TOP1_DELTA`) or 2.5 standard errors of the difference, whichever is larger, and its KL p50 and p99 are at
+most `compare.KL_FACTOR` times the floor's, as in L2, or above it by 2.5 standard errors of the difference, whichever
+is larger. The standard errors are the floor's (sessions as clusters; a session bootstrap for the KL quantiles), so
+the noise is that of two runs without the change. Planted bugs in prefix adoption and in the
 depth-1 token feed fail it (`planted`; tested in judge/tests/test_bounded.py and calibrated on Qwen3-8B in the
 evidence).
 
@@ -110,10 +111,9 @@ class Mean:
         se = math.sqrt(s / (s - 1) * ((v_s - mean * n_s) ** 2).sum().item()) / n if s > 1 else math.nan
         return cls(mean, se, n)
 
-    def noise(self, floor: Mean) -> float:
-        """SE_FACTOR standard errors of the difference from the floor (0 when unknown)."""
-        x = SE_FACTOR * math.hypot(self.se, floor.se)
-        return 0.0 if math.isnan(x) else x
+    def noise(self) -> float:
+        """As a floor: SE_FACTOR standard errors of the difference between two runs like it (0 when unknown)."""
+        return _noise(self.se)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -128,7 +128,7 @@ class Agreement:
         out = {}
         for name in ("top1", "confident"):
             mine, theirs = getattr(self, name), getattr(floor, name)
-            margin = max(TOP1_DELTA, mine.noise(theirs))
+            margin = max(TOP1_DELTA, theirs.noise())
             out[name] = (mine.value >= theirs.value - margin, margin)
         return out
 
@@ -145,10 +145,16 @@ class Divergence:
         out = {}
         for name in ("p50", "p99"):
             mine, theirs = getattr(self, name), getattr(floor, name)
-            noise = SE_FACTOR * math.hypot(getattr(self, f"{name}_se"), getattr(floor, f"{name}_se"))
-            margin = max((KL_FACTOR - 1) * theirs, noise, KL_EPS)
+            margin = max((KL_FACTOR - 1) * theirs, _noise(getattr(floor, f"{name}_se")), KL_EPS)
             out[f"kl_{name}"] = (mine <= theirs + margin, margin)
         return out
+
+
+def _noise(floor_se: float) -> float:
+    """SE_FACTOR standard errors of the difference between two independent runs that behave like the floor: the
+    null hypothesis. (A configuration's own SE would let a bug that hits some sessions widen its own margin.)"""
+    x = SE_FACTOR * math.sqrt(2) * floor_se
+    return 0.0 if math.isnan(x) else x
 
 
 def _quantiles(values: torch.Tensor, clusters: torch.Tensor, q: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
