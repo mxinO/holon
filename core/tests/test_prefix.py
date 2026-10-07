@@ -52,3 +52,11 @@ def test_eviction_takes_unused_leaves_least_recently_used_first():
     pool.decref(in_use)
     index.clear()
     assert pool.num_free == pool.capacity and not index.entries
+
+
+def test_a_collision_with_another_prefix_is_a_miss():
+    index, pool = _index()
+    p_keys = _publish(index, pool, list(range(8)))                 # P: blocks (0,1,2,3) -> (4,5,6,7)
+    other = [9, 9, 9, 9, 4, 5, 6, 7]                                 # Q: same second block, different first
+    q_keys = _publish(index, pool, other[:4]) + [p_keys[1]]          # Q's block 0 cached; its block-1 key collides
+    assert len(index.match(q_keys, other)) == 1                      # P's block 1 has the right tokens, wrong parent

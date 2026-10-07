@@ -119,7 +119,9 @@ class Engine:
         if not self.cfg.prefix_cache or not bound or not all(isinstance(b.spec.shape, Paged) for b in bound):
             return None
         block = math.lcm(*(b.spec.shape.tokens_per_unit for b in bound), *(b.spec.alignment for b in bound))
-        namespace = int(canonical_hash(self.spec).removeprefix("sha256:")[:16], 16)   # model + recipe identity
+        # Model + recipe identity. Enough within one process; weight updates (v1) and persistent tiers must add the
+        # checkpoint identity and weight version (design §6.3).
+        namespace = int(canonical_hash(self.spec).removeprefix("sha256:")[:16], 16)
         return PrefixIndex(namespace, block, {b.spec.name: b.pool for b in bound})
 
     def _bind_state(self) -> tuple[list[BoundSpec], dict[str, Any]]:

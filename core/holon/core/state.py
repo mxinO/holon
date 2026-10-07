@@ -7,7 +7,6 @@ own the specs decide what a unit holds.
 """
 from __future__ import annotations
 
-import collections
 import dataclasses
 from collections.abc import Callable
 from typing import Any
@@ -140,21 +139,43 @@ class StateManager:
         mine.extend(units.tolist())
 
     def publish(self, seq: Seq) -> None:
-        """Hand `seq`'s newly completed blocks to the prefix index (after the step that computed them)."""
+        """Hand `seq`'s newly completed blocks to the prefix index (after the step that computed them). A block
+        another request already cached replaces `seq`'s own copy, so `seq` holds exactly the units of the chain it
+        follows (the index's eviction invariant) and duplicate state is freed."""
         chain = self.chain.get(seq.slot)
         if self.index is None or chain is None:
             return
         block = self.index.block
-        for i in range(len(chain), seq.num_computed // block):
+        for i in range(len(chain), min(seq.num_computed, len(seq.tokens)) // block):
             prev = chain[-1] if chain else None
             key = self.index.keys(seq.tokens, i, i + 1, prev)[0]
-            units = {name: tuple(us[i * block // self._page(name):(i + 1) * block // self._page(name)])
-                     for name, us in self.held[seq.slot].items()}
-            if key not in self.index.entries and not self.index.insert(
-                    key, prev, tuple(seq.tokens[i * block:(i + 1) * block]), units):
-                self.chain[seq.slot] = None                  # its parent was evicted: stop publishing
+            tokens = tuple(seq.tokens[i * block:(i + 1) * block])
+            e = self.index.entries.get(key)
+            if e is None:
+                self.index.insert(key, prev, tokens, {name: tuple(us[self._span(name, i)])
+                                                      for name, us in self.held[seq.slot].items()})
+            elif e.parent == prev and e.tokens == tokens:
+                for name, units in e.units.items():
+                    self._swap(seq.slot, name, self._span(name, i), units)
+            else:                                            # a hash collision: stop publishing this chain
+                self.chain[seq.slot] = None
                 return
             chain.append(key)
+
+    def _span(self, spec: str, block_index: int) -> slice:
+        per = self.index.block // self._page(spec)
+        return slice(block_index * per, (block_index + 1) * per)
+
+    def _swap(self, slot: int, spec: str, span: slice, units: tuple[int, ...]) -> None:
+        mine = self.held[slot][spec]
+        if tuple(mine[span]) == units:
+            return
+        new, old = np.asarray(units, dtype=np.int32), np.asarray(mine[span], dtype=np.int32)
+        self._pool(spec).incref(new)
+        mine[span] = units
+        if table := self._table_of.get(spec):
+            table.write(slot, span.start, new)
+        self._pool(spec).decref(old)
 
     def could_fit(self, seq: Seq, new_tokens: int, releasing: list[Seq]) -> bool:
         """Whether `seq` could be admitted (if it has no slot) and get units for `new_tokens` more tokens once every
@@ -163,12 +184,17 @@ class StateManager:
             return False
         view = _View(seq, self.held.get(seq.slot, {}))
         for b in self.bound:
-            name = b.spec.name
-            dropped = collections.Counter(u for s in releasing if s.slot >= 0 for u in self.held[s.slot].get(name, ()))
-            cached = self.index.owned(name) if self.index is not None else set()
-            after = {u: int(b.pool.refcount(np.int32(u))) - dropped[u] for u in dropped.keys() | cached}
-            available = b.pool.num_free + sum(1 for u, r in after.items() if r == 0 or (r == 1 and u in cached))
-            if b.kind.units_needed(view, new_tokens) > available:
+            need = b.kind.units_needed(view, new_tokens)
+            if need <= b.pool.num_free:
+                continue
+            cap, name = b.pool.capacity, b.spec.name
+            dropped = np.bincount(np.asarray([u for s in releasing if s.slot >= 0
+                                              for u in self.held[s.slot].get(name, ())], dtype=np.int64),
+                                  minlength=cap)
+            left = b.pool.refcount(np.arange(cap)) - dropped           # references once `releasing` is gone
+            cached = self.index.cached(name) if self.index is not None else np.zeros(cap, dtype=bool)
+            freed = np.count_nonzero(cached & (left == 1)) + np.count_nonzero(~cached & (dropped > 0) & (left == 0))
+            if need > b.pool.num_free + freed:
                 return False
         return True
 

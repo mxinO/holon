@@ -51,11 +51,12 @@ def tiny_case(tiny_checkpoint):
 def _released(engine):
     """No request holds anything; every unit is free or held only by the prefix cache."""
     index = engine.state.index
-    cached = {name: index.owned(name) if index else set() for name in (b.spec.name for b in engine.state.bound)}
-    return engine.state.held == {} and all(
-        b.pool.num_free + len(cached[b.spec.name]) == b.pool.capacity
-        and all(b.pool.refcount(np.int32(u)) == 1 for u in cached[b.spec.name])
-        for b in engine.state.bound)
+    ok = engine.state.held == {}
+    for b in engine.state.bound:
+        cached = index.cached(b.spec.name) if index else np.zeros(b.pool.capacity, dtype=bool)
+        refs = b.pool.refcount(np.arange(b.pool.capacity))
+        ok &= b.pool.num_free + int(cached.sum()) == b.pool.capacity and bool((refs[cached] == 1).all())
+    return ok
 
 
 def test_engine_matches_hf_greedy_on_cpu(tiny_checkpoint, tiny_case):
@@ -251,3 +252,19 @@ def test_prefix_cache_on_vs_off_is_bounded_bf16():
     agree = [next((i for i, (a, b) in enumerate(zip(x, y, strict=True)) if a != b), len(x))
              for x, y in zip(outs[False], outs[True], strict=True)]
     assert all(n >= 1 for n in agree) and sum(agree) >= 0.75 * len(agree) * params.max_tokens, agree
+
+
+def test_continuing_another_requests_cached_block_cannot_stall(tiny_checkpoint):
+    # Regression: B recomputes the prefix A just cached, then publishes under it; A finishes. B must still fit.
+    torch.manual_seed(2)
+    shared = torch.randint(0, 512, (8,)).tolist()
+    a, b = shared + [7], shared + torch.randint(0, 512, (31,)).tolist()
+    engine = _tiny_engine(tiny_checkpoint, state_memory=10 * 2048, max_step_tokens=21)
+    one = SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True)
+    hf = AutoModelForCausalLM.from_pretrained(tiny_checkpoint, dtype=torch.float32).eval()
+    ra, rb = engine.add(a, one), engine.add(b, one)
+    out = {ra: [], rb: []}
+    while engine.has_work():
+        for d in engine.step():
+            out[d.rid] += d.token_ids
+    assert [out[ra], out[rb]] == _hf_greedy(hf, [a, b], 1) and _released(engine)
