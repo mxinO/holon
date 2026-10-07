@@ -2,8 +2,8 @@
 
 Op contracts are documented next to their references (std.ops.kernels, std.ffn.kernels). FlashInfer's norms take
 2-D input, so leading dimensions are flattened. RoPE uses a cos/sin cache computed with the reference's formula, so
-the angles match the oracle; it is built once per instance on first use (outside any graph capture, because every
-graph key runs eagerly once before it is captured).
+the angles match the oracle; it is a named static buffer, so every layer with the same rope shares one copy and it
+is allocated (and accounted) at build time.
 """
 from __future__ import annotations
 
@@ -32,21 +32,18 @@ class AddRMSNorm:
 
 class Rope:
     def __init__(self, ctx, *, head_dim: int, rotary_dim: int, theta: float, max_positions: int, dtype: str) -> None:
-        self.head_dim, self.rotary_dim, self.theta, self.max_positions = head_dim, rotary_dim, theta, max_positions
-        self._cache: torch.Tensor | None = None
-
-    def _cos_sin(self, device: torch.device) -> torch.Tensor:
-        if self._cache is None:
-            rd = self.rotary_dim
-            inv_freq = 1.0 / (self.theta ** (torch.arange(0, rd, 2, device=device, dtype=torch.float32) / rd))
-            angles = torch.arange(self.max_positions, device=device, dtype=torch.float32)[:, None] * inv_freq[None, :]
-            self._cache = torch.cat([angles.cos(), angles.sin()], dim=-1)
-        return self._cache
+        self.head_dim = head_dim
+        self.cache = ctx.static(f"rope.cos_sin[{theta},{rotary_dim},{max_positions}]", (max_positions, rotary_dim),
+                                torch.float32)
+        dims = torch.arange(0, rotary_dim, 2, device=ctx.device, dtype=torch.float32)
+        inv_freq = 1.0 / (theta ** (dims / rotary_dim))
+        angles = torch.arange(max_positions, device=ctx.device, dtype=torch.float32)[:, None] * inv_freq[None, :]
+        self.cache.copy_(torch.cat([angles.cos(), angles.sin()], dim=-1))
 
     def __call__(self, q: torch.Tensor, k: torch.Tensor, positions: torch.Tensor):
         q, k = q.contiguous(), k.contiguous()
         flashinfer.apply_rope_with_cos_sin_cache_inplace(positions, q.view(len(q), -1), k.view(len(k), -1),
-                                                         self.head_dim, self._cos_sin(q.device), is_neox=True)
+                                                         self.head_dim, self.cache, is_neox=True)
         return q, k
 
 

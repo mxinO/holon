@@ -8,9 +8,9 @@ from . import kernels
 from . import reference as ref
 
 
-def _kernel(ctx, op: str, **facts):
+def _kernel(ctx, op: str, site: str, **facts):
     """This op's kernel for these facts (chosen by the core; the reference unless a faster one is installed)."""
-    return ctx.select_kernel(op, site=f"std.ops/{op}", **facts).impl(ctx, **facts)
+    return ctx.select_kernel(op, site=site, **facts).impl(ctx, **facts)
 
 
 class RMSNorm(nn.Module):
@@ -18,7 +18,9 @@ class RMSNorm(nn.Module):
         super().__init__()
         self.weight = nn.Parameter(torch.empty(dim, dtype=ctx.dtype), requires_grad=False)
         facts = {"dim": dim, "eps": eps, "offset": offset, "dtype": str(ctx.dtype).removeprefix("torch.")}
-        self._norm, self._add_norm = _kernel(ctx, kernels.RMSNORM, **facts), _kernel(ctx, kernels.ADD_RMSNORM, **facts)
+        site = f"std.ops.rmsnorm[dim={dim}]"
+        self._norm = _kernel(ctx, kernels.RMSNORM, site, **facts)
+        self._add_norm = _kernel(ctx, kernels.ADD_RMSNORM, site, **facts)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self._norm(x, self.weight)
@@ -38,7 +40,8 @@ class Rope(nn.Module):
             raise ValueError(f"unsupported rope style {style!r}")
         if head_dim is None:
             raise ValueError("rope needs the head_dim of the site that uses it")
-        self._rope = _kernel(ctx, kernels.ROPE, head_dim=head_dim, rotary_dim=rotary_dim or head_dim, theta=theta,
+        self._rope = _kernel(ctx, kernels.ROPE, f"std.ops.rope[head_dim={head_dim}]", head_dim=head_dim,
+                             rotary_dim=rotary_dim or head_dim, theta=theta,
                              max_positions=ctx.options.get("max_model_len", 8192),
                              dtype=str(ctx.dtype).removeprefix("torch."))
 
@@ -58,7 +61,11 @@ class Linear(nn.Module):
     @staticmethod
     def merge(*units: Linear) -> torch.Tensor | None:
         """One weight for several projections of the same input (one GEMM instead of several): the units' weights
-        become views into it. None if they cannot share one (biases, mixed dtypes)."""
+        become views into it. None if they cannot share one (biases, mixed dtypes).
+
+        Optional capability of every `unit.std.ops.linear@1` provider, used duck-typed by composites (attention q/k/v,
+        gate/up) in `finalize_weights`: return a dense weight `[sum(out), in]` whose rows are the units' weights in
+        order and rebind each unit to its slice, or return None (e.g. quantized weights a plain GEMM cannot read)."""
         if any(u.bias is not None for u in units) or len({u.weight.dtype for u in units}) > 1:
             return None
         merged = torch.cat([u.weight.data for u in units])

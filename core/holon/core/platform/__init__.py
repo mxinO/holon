@@ -41,8 +41,9 @@ def check_expandable(t: torch.Tensor) -> None:
     address = t.data_ptr()
     segment = next(s for s in torch.cuda.memory_snapshot() if s["address"] <= address < s["address"] + s["total_size"])
     if not segment.get("is_expandable"):
-        raise RuntimeError("could not enable expandable CUDA allocator segments; set "
-                           "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True before starting")
+        raise RuntimeError("could not enable expandable CUDA allocator segments, which the engine requires (the "
+                           "ledger's budget assumes no fragmentation); set PYTORCH_CUDA_ALLOC_CONF="
+                           "expandable_segments:True before starting, on a platform with CUDA virtual memory support")
 
 
 def free_memory(device: torch.device) -> int:

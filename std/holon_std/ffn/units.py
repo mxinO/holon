@@ -17,7 +17,8 @@ class SwiGLU(nn.Module):
         self.up_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=inter))
         self.down_proj = ctx.unit(Ref(LINEAR, in_features=inter, out_features=hidden))
         facts = {"inter": inter, "dtype": str(ctx.dtype).removeprefix("torch.")}
-        self._act = ctx.select_kernel(kernels.SILU_MUL, site="std.ffn/silu_mul", **facts).impl(ctx, **facts)
+        spec = ctx.select_kernel(kernels.SILU_MUL, site=f"std.ffn.swiglu[inter={inter}]", **facts)
+        self._act = spec.impl(ctx, **facts)
         self._gate_up: torch.Tensor | None = None
 
     def finalize_weights(self, ctx) -> None:
