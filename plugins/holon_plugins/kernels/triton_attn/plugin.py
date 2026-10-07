@@ -21,8 +21,6 @@ class _Handle:
 
 
 class Decode:
-    nq = 1
-
     """One query row per sequence. The block table and lengths are read on the device from buffers this instance
     owns (stable addresses for graph capture); the only host decision is the split count, taken from the batch size
     and the table's capacity, so one graph per batch bucket serves every length (splits past a sequence's end are

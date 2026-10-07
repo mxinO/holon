@@ -127,6 +127,9 @@ class StateKind(Rewindable, Protocol):
 
     def units_needed(self, seq: SeqView, new_tokens: int) -> int: ...
 
+    # Optional: `capacity(seq) -> int`, the tokens the request's current units hold. When every bound kind offers it,
+    # the core skips `units_needed` for steps that fit (most decode steps), which keeps per-request host work O(1).
+
     def reclaimable(self, seq: SeqView) -> list[int]: ...
 
     def hit_length(self, idx: PrefixView, upto: int) -> HitLen: ...

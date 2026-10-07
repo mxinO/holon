@@ -14,6 +14,7 @@ class FakeState:
 
     def __init__(self, capacity: int, slots: int) -> None:
         self.free, self.slots, self.held = capacity, list(range(slots)), {}
+        self.capacity: dict[int, int] = {}       # no fast path: every reservation is checked
 
     def admit(self, seq: Seq) -> bool:
         if not self.slots:

@@ -17,6 +17,9 @@ class Paged:
     def units_needed(self, seq, new_tokens: int) -> int:
         return max(0, math.ceil((seq.num_computed + new_tokens) / self.page) - len(seq.units(self.spec.name)))
 
+    def capacity(self, seq) -> int:
+        return len(seq.units(self.spec.name)) * self.page
+
     def reclaimable(self, seq) -> list[int]:
         return []
 

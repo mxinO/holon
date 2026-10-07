@@ -64,17 +64,19 @@ class Scheduler:
         rows = self._prefill() or self._decode()
         if not rows:
             return None
-        seqs = [s for s, _, _ in rows]
-        n_query = np.array([n for _, n, _ in rows], dtype=np.int32)
-        n_logits = np.array([m for _, _, m in rows], dtype=np.int32)
-        starts = np.array([s.num_computed for s in seqs], dtype=np.int32)
-        device = np.array([s.pending > 0 for s in seqs])                   # decode input still on the device
-        tokens = np.concatenate([_host_tokens(s, st, n, dev)
-                                 for s, st, n, dev in zip(seqs, starts, n_query, device, strict=True)])
+        seqs, n_query, n_logits = (list(c) for c in zip(*rows, strict=True))
+        starts = [s.num_computed for s in seqs]
+        device = [s.pending > 0 for s in seqs]                             # decode input still on the device
+        if all(n == 1 for n in n_query):          # the common decode step: one input per row
+            tokens = [0 if dev else s.tokens[st] for s, st, dev in zip(seqs, starts, device, strict=True)]
+        else:
+            tokens = [t for s, st, n, dev in zip(seqs, starts, n_query, device, strict=True)
+                      for t in _host_tokens(s, st, n, dev)]
         src = np.where(device, TokenSrc.DEVICE_LAST, TokenSrc.HOST).astype(np.int8)
-        slots = np.array([s.slot for s in seqs], dtype=np.int32)
         self._step += 1
-        return host_plan(self._step, slots, starts, n_query, n_logits, tokens.astype(np.int64), src), seqs
+        return host_plan(self._step, np.array([s.slot for s in seqs], dtype=np.int32), np.array(starts, np.int32),
+                         np.array(n_query, np.int32), np.array(n_logits, np.int32), np.array(tokens, np.int64),
+                         src), seqs
 
     def _prefill(self) -> list[tuple[Seq, int, int]]:
         rows, budget = [], self.max_step_tokens
@@ -93,11 +95,11 @@ class Scheduler:
     def _decode(self) -> list[tuple[Seq, int, int]]:
         ready = {s for s in self.running if not self._at_limit(s) and not (self.host_lens_only and s.inexact)}
         k = min((self._drafts(s) for s in ready), default=0) if self.draft_k is not None else 0
-        rows = []
+        rows, capacity = [], self.state.capacity
         for seq in list(self.running):
             if seq.status is not Status.RUNNING or seq not in ready:     # preempted, finishing, or waiting on a commit
                 continue
-            if self._fit(seq, 1 + k):
+            if seq.num_computed + 1 + k <= capacity.get(seq.slot, -1) or self._fit(seq, 1 + k):   # fits: no call
                 rows.append((seq, 1 + k, 1 + k if k else 1))
             else:
                 self._preempt(seq)

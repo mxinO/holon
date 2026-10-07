@@ -50,7 +50,8 @@ class BlockTable:
         if self._dirty:
             rows = np.fromiter(sorted(self._dirty), dtype=np.int64)
             data = up.put(f"{name}.data", self.host[rows].ravel()).view(len(rows), self.max_pages)
-            self.dev[up.put(f"{name}.rows", rows)] = data
+            index = up.put(f"{name}.rows", rows)
+            up.after(lambda: self.dev.index_copy_(0, index, data))          # once the staged rows are on the device
             self._dirty.clear()
 
 
@@ -93,6 +94,8 @@ class StateManager:
         self.held: dict[int, dict[str, list[int]]] = {}       # slot -> spec name -> unit ids
         self.chain: dict[int, list[int] | None] = {}          # slot -> keys of its published blocks (None: broken)
         self.tokens_saved = 0                                  # prefix-hit tokens not recomputed
+        self.capacity: dict[int, int] = {}                     # slot -> tokens its units hold (fast-path reserve)
+        self._sized = all(hasattr(b.kind, "capacity") for b in bound)
         self._free_slots = list(range(max_seqs - 1, -1, -1))
         self.tables: dict[str, BlockTable] = {}
         self._table_of: dict[str, BlockTable] = {}            # paged spec name -> its group's table
@@ -121,6 +124,7 @@ class StateManager:
                     self._take(seq.slot, name, np.asarray(units, dtype=np.int32), shared=True)
             self.chain[seq.slot] = [e.key for e in entries]
         seq.num_computed = len(entries) * (self.index.block if self.index else 0)
+        self._resize(seq)
         try:
             self.on_admit(seq)
         except BaseException:
@@ -133,6 +137,8 @@ class StateManager:
     def reserve(self, seq: Seq, new_tokens: int) -> bool:
         """The units admitted `seq` needs for `new_tokens` more tokens, evicting unused cached blocks if a pool is
         short; all-or-nothing."""
+        if seq.num_computed + new_tokens <= self.capacity.get(seq.slot, -1):
+            return True                          # its units already hold these tokens
         view = _View(seq, self.held[seq.slot])
         taken: list[tuple[BoundSpec, np.ndarray]] = []
         try:
@@ -147,7 +153,13 @@ class StateManager:
             return False
         for b, units in taken:
             self._take(seq.slot, b.spec.name, units, shared=False)
+        self._resize(seq)
         return True
+
+    def _resize(self, seq: Seq) -> None:
+        if self._sized:
+            view = _View(seq, self.held[seq.slot])
+            self.capacity[seq.slot] = min((b.kind.capacity(view) for b in self.bound), default=1 << 62)
 
     def _take(self, slot: int, spec: str, units: np.ndarray, shared: bool) -> None:
         if shared:
@@ -224,6 +236,7 @@ class StateManager:
         for name, units in self.held.pop(seq.slot).items():
             self._pool(name).decref(np.asarray(units, dtype=np.int32))
         del self.chain[seq.slot]
+        self.capacity.pop(seq.slot, None)
         self._free_slots.append(seq.slot)
         seq.slot = -1
 

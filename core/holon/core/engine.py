@@ -178,12 +178,11 @@ class Engine:
         tokens = max(cfg.max_step_tokens, seqs * (1 + cfg.max_draft_tokens))     # a verify step: 1 + k per row
         self.uploader = Uploader(self.device, self.state.upload_fields(seqs, tokens) | {
             "input_ids": (tokens, torch.int64), "positions": (tokens, torch.int64),
-            "query_start": (seqs + 1, torch.int64), "slots": (seqs, torch.int64), "logits_index": (seqs, torch.int64),
-            "logits_rows": (seqs, torch.int64), "row_of_token": (tokens, torch.int64), "offset": (tokens, torch.int64),
-            "n_query": (seqs, torch.int64), "exact": (seqs, torch.bool), "start": (seqs, torch.int64),
-            "from_device": (seqs, torch.bool), "draft_index": (tokens, torch.int64),
-            "draft_from": (tokens, torch.int64)} | {
-            "logits_index": (tokens, torch.int64), "logits_rows": (tokens, torch.int64)})   # verify rows: 1+k each
+            "query_start": (seqs + 1, torch.int64), "slots": (seqs, torch.int64),
+            "logits_index": (tokens, torch.int64), "logits_rows": (tokens, torch.int64),   # verify rows: 1 + k each
+            "row_of_token": (tokens, torch.int64), "offset": (tokens, torch.int64), "n_query": (seqs, torch.int64),
+            "exact": (seqs, torch.bool), "start": (seqs, torch.int64), "from_device": (seqs, torch.bool),
+            "draft_index": (tokens, torch.int64), "draft_from": (tokens, torch.int64)})
         # The device SeqTable (one row per slot, plus the padding slot): authoritative while steps are in flight.
         self.last_token = torch.zeros(seqs + 1, dtype=torch.int64, device=self.device)
         self.num_computed = torch.zeros(seqs + 1, dtype=torch.int64, device=self.device)
@@ -285,7 +284,8 @@ class Engine:
         return int(platform.free_memory(self.device) * cfg.memory_fraction) - peak
 
     def _worst_step(self, plan: BatchPlan) -> None:
-        """The largest prefill, a prompt-logprob chunk, and a filtered sampling step over every slot with logprobs."""
+        """The largest prefill, a prompt-logprob chunk, a filtered sampling step over every slot with logprobs, and
+        (when drafting) a verify step's logits over every slot's 1 + k rows."""
         ctx = self._context(plan)
         self._prepare(ctx)
         h = self.model.trunk(ctx)
@@ -300,6 +300,9 @@ class Engine:
         ctx = self._context(decode)
         self._prepare(ctx)
         self.sampler.sample(torch.zeros(n, self.spec.vocab, device=self.device), ctx)
+        if self.cfg.max_draft_tokens:
+            rows = n * (1 + self.cfg.max_draft_tokens)
+            torch.zeros(rows, self.spec.vocab, device=self.device).argmax(-1)
 
     def _capture_graphs(self) -> None:
         """Capture every decode bucket for each sampler variant at startup, so serving never stops to capture."""
@@ -490,12 +493,14 @@ class Engine:
             self._out_turn ^= 1
         done = platform.Event(self.device)
         done.record()
+        running = Status.RUNNING
         for seq, n, m in rows:
             seq.num_computed += n                   # an upper bound for verify rows until their commit
             if m:
                 seq.pending += m
-                seq.inexact += m > 1
-                if seq.status is not Status.RUNNING:
+                if m > 1:
+                    seq.inexact += 1
+                if seq.status is not running:
                     self.sched.finished_prefill(seq)
         return _Inflight(rows, out, tokens, accepts, done, sync)
 
@@ -607,10 +612,10 @@ class Engine:
         deltas, row = [], 0
         for seq, _, m in step.rows:
             if not m:
-                if seq.status is not Status.FINISHED:
+                if seq.status is not Status.FINISHED and self._completes_block(seq):
                     self.state.publish(seq)
                 continue
-            emitted, at = tokens[row: row + 1], row
+            at = row
             if m > 1:                                # a verify row: the accepted drafts, then the target's token
                 accepted = next(accepts)
                 emitted = tokens[row: row + accepted + 1]
@@ -621,15 +626,22 @@ class Engine:
             seq.pending -= m
             if seq.status is Status.FINISHED:      # finished at an earlier commit; this row was extra
                 continue
-            reason, out = None, []
-            for token in emitted:
-                seq.tokens.append(token)
-                out.append(token)
-                if reason := self._finish_reason(seq, token):
-                    break
-            self.state.publish(seq)
-            for sibling in reversed(self._siblings.pop(seq, [])):     # its prompt is cached now
-                self.sched.add(sibling, front=True)
+            if m == 1:                               # the common case, without the per-token loop
+                out = [tokens[at]]
+                seq.tokens.append(out[0])
+                reason = self._finish_reason(seq, out[0])
+            else:
+                reason, out = None, []
+                for token in emitted:
+                    seq.tokens.append(token)
+                    out.append(token)
+                    if reason := self._finish_reason(seq, token):
+                        break
+            if self._completes_block(seq):
+                self.state.publish(seq)
+            if self._siblings:
+                for sibling in reversed(self._siblings.pop(seq, [])):     # its prompt is cached now
+                    self.sched.add(sibling, front=True)
             if reason:
                 self.sched.finish(seq, reason)
                 live = self._live.get(seq.rid, [])
@@ -642,6 +654,12 @@ class Engine:
             deltas.append(TokenDelta(seq.rid, out, index=seq.index, logprobs=logprobs,
                                      prompt_logprobs=self._prompt_lp.pop(seq, None), finish_reason=reason))
         return deltas
+
+    def _completes_block(self, seq: Seq) -> bool:
+        """Whether `seq` has a computed block it has not published yet (a cheap check for the common no case)."""
+        index, chain = self.state.index, self.state.chain.get(seq.slot)
+        return (index is not None and chain is not None
+                and min(seq.num_computed, len(seq.tokens)) // index.block > len(chain))
 
     def _finish_reason(self, seq: Seq, token: int) -> str | None:
         p = seq.params
