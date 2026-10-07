@@ -153,13 +153,13 @@ class StateManager:
             return False
         for b, units in taken:
             self._take(seq.slot, b.spec.name, units, shared=False)
-        self._resize(seq)
+        self._resize(seq, view)
         return True
 
-    def _resize(self, seq: Seq) -> None:
+    def _resize(self, seq: Seq, view: _View | None = None) -> None:
         if self._sized:
-            view = _View(seq, self.held[seq.slot])
-            self.capacity[seq.slot] = min((b.kind.capacity(view) for b in self.bound), default=1 << 62)
+            view = view or _View(seq, self.held[seq.slot])
+            self.capacity[seq.slot] = min([b.kind.capacity(view) for b in self.bound], default=1 << 62)
 
     def _take(self, slot: int, spec: str, units: np.ndarray, shared: bool) -> None:
         if shared:
@@ -179,8 +179,8 @@ class StateManager:
         block = self.index.block
         for i in range(len(chain), min(seq.num_computed, len(seq.tokens)) // block):
             prev = chain[-1] if chain else None
-            key = self.index.keys(seq.tokens, i, i + 1, prev)[0]
             tokens = tuple(seq.tokens[i * block:(i + 1) * block])
+            key = self.index.key(prev, tokens)
             e = self.index.entries.get(key)
             if e is None:
                 self.index.insert(key, prev, tokens, {name: tuple(us[self._span(name, i)])

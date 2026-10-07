@@ -63,15 +63,23 @@ class Pool:
     def alloc(self, n: int) -> np.ndarray:
         if n > len(self._free):
             raise OutOfUnits(f"pool {self.name!r}: need {n} units, {len(self._free)} free")
-        units = np.array([self._free.pop() for _ in range(n)], dtype=np.int32)
+        if n == 1:                                # the common case: one page more
+            unit = self._free.pop()
+            self._refs[unit] = 1
+            return np.array((unit,), dtype=np.int32)
+        units = np.array(self._free[len(self._free) - n:][::-1], dtype=np.int32)    # as n pops would
+        del self._free[len(self._free) - n:]
         self._refs[units] = 1
         return units
 
     def refcount(self, units: np.ndarray) -> np.ndarray:
         return self._refs[units]
 
-    def incref(self, units: np.ndarray) -> None:
-        np.add.at(self._refs, units, 1)
+    def incref(self, units: np.ndarray | tuple[int, ...]) -> None:
+        if len(units) == 1:                       # a block of one page: skip the slow ufunc.at
+            self._refs[units[0]] += 1
+        else:
+            np.add.at(self._refs, np.asarray(units, dtype=np.int64), 1)
 
     def decref(self, units: np.ndarray) -> None:
         np.subtract.at(self._refs, units, 1)

@@ -36,11 +36,15 @@ class PrefixIndex:
 
     def keys(self, tokens: list[int], start: int, n_blocks: int, prev: int | None) -> list[int]:
         """Chain keys of blocks start … n_blocks-1 of `tokens`, continuing from the key of block start-1."""
-        out, key = [], self.namespace if prev is None else prev
+        out = []
         for i in range(start, n_blocks):
-            key = hash((key, *tokens[i * self.block:(i + 1) * self.block]))
-            out.append(key)
+            prev = self.key(prev, tokens[i * self.block:(i + 1) * self.block])
+            out.append(prev)
         return out
+
+    def key(self, prev: int | None, block_tokens) -> int:
+        """The chain key of one block after the block keyed `prev` (None: the first block)."""
+        return hash((self.namespace if prev is None else prev, *block_tokens))
 
     def match(self, keys: list[int], tokens: list[int]) -> list[Entry]:
         """The cached entries for the longest prefix of `keys`; marks them recently used."""
@@ -58,9 +62,8 @@ class PrefixIndex:
     def insert(self, key: int, parent: int | None, tokens: tuple[int, ...], units: dict[str, tuple[int, ...]]) -> None:
         """Publish one block (the key must be new and the parent cached)."""
         for name, us in units.items():
-            arr = np.asarray(us, dtype=np.int32)
-            self.pools[name].incref(arr)
-            self.cached(name)[arr] = True
+            self.pools[name].incref(us)
+            self.cached(name)[us if len(us) > 1 else us[0]] = True
         self.entries[key] = Entry(key, parent, tokens, units)
         if parent is not None:
             self.entries[parent].children += 1
