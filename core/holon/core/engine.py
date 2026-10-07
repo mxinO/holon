@@ -82,6 +82,11 @@ class EngineConfig:
                 raise ValueError(f"EngineConfig.{name} must be >= 1")
 
 
+# Sampler variants captured at startup: greedy, sampled, sampled with filters (logprob steps run eagerly).
+_VARIANTS = (SamplingParams(temperature=0.0, seed=0), SamplingParams(temperature=1.0, seed=0),
+             SamplingParams(temperature=1.0, top_p=0.9, seed=0))
+
+
 @dataclasses.dataclass
 class _Inflight:
     """A launched step: per-row snapshots (seq, tokens computed, sampled) taken at launch, the sampled tokens'
@@ -107,6 +112,7 @@ class _PagesPlanner:
 class Engine:
     def __init__(self, cfg: EngineConfig, plugins: PluginSet | None = None) -> None:
         self.cfg, self.device = cfg, torch.device(cfg.device)
+        platform.configure_allocator(self.device)
         self.plugins = p = plugins or PluginSet(discover())
         p.load(p.owner(f"weight_source.{cfg.source}")[0])
         source = p.regs.weight_sources.get(cfg.source)(cfg.model)
@@ -132,13 +138,15 @@ class Engine:
             "logits_rows": (seqs, torch.int64), "device_tokens": (seqs, torch.int64),
             "device_slots": (seqs, torch.int64)})
         self.last_token = torch.zeros(seqs + 1, dtype=torch.int64, device=self.device)  # device SeqTable column
-        self.graphs = platform.Graphs(self.device) if cfg.cuda_graphs else None
+        self.graphs = platform.Graphs(self.device) if cfg.cuda_graphs and self.device.type == "cuda" else None
         self._buckets = sorted({min(b, seqs) for b in (1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256)} | {seqs})
         self._out_tokens = [platform.pinned_empty(seqs, torch.int64, self.device) for _ in range(2)]
         self._out_turn = 0
         self._inflight: _Inflight | None = None
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None else self._measure_state_memory())
         self.state.reset_padding()
+        if self.graphs is not None:          # captured graphs bake in pool addresses: after the final materialize
+            self._capture_graphs()
         self._ids = itertools.count()
         self._prompt_lp: dict[Seq, Logprobs] = {}         # sequences still accumulating prompt logprobs
         self._siblings: dict[Seq, list[Seq]] = {}         # n > 1: waiting for the first sequence's prefill
@@ -198,8 +206,16 @@ class Engine:
         plan = host_plan(0, np.arange(len(n), dtype=np.int32), np.zeros_like(n), n, np.ones_like(n),
                          np.zeros(int(n.sum()), dtype=np.int64))
         self.ledger.materialize(None)
+        self.state.reset_padding()
         with torch.no_grad():
             peak = platform.peak_memory(self.device, lambda: self._worst_step(plan))
+            if self.graphs is not None:
+                # The graphs' private pool comes on top. Captured largest bucket first, the smaller ones reuse its
+                # blocks, so the pool is what the largest bucket's variants leave reserved.
+                graphs, self.graphs = self.graphs, platform.Graphs(self.device)
+                peak += platform.reserved_growth(self.device, lambda: [
+                    self._graph_step(self._buckets[-1], params) for params in _VARIANTS])
+                self.graphs = graphs
         self.ledger.free()
         return int(platform.free_memory(self.device) * cfg.memory_fraction) - peak
 
@@ -215,6 +231,31 @@ class Engine:
         decode = host_plan(0, np.arange(n, dtype=np.int32), np.zeros(n, dtype=np.int32), ones, ones,
                            np.zeros(n, dtype=np.int64))
         self.sampler.sample(torch.zeros(n, self.spec.vocab, device=self.device), self._context(decode))
+
+    def _capture_graphs(self) -> None:
+        """Capture every decode bucket for each sampler variant at startup, so serving never stops to capture."""
+        for rows in reversed(self._buckets):         # largest first: smaller graphs reuse its pool blocks
+            for params in _VARIANTS:
+                if not self._graph_step(rows, params):
+                    self.graphs = None              # some planner's kernel cannot be captured: stay eager
+                    return
+        self.sampler.admit(self.state.padding_slot, _VARIANTS[0])
+
+    @torch.no_grad()
+    def _graph_step(self, rows: int, params: SamplingParams) -> bool:
+        """Warm up and capture one decode graph with every row on the padding slot (null unit, `params`)."""
+        self.sampler.admit(self.state.padding_slot, params)
+        empty = np.zeros(0, dtype=np.int32)
+        plan = padded(host_plan(0, empty, empty, empty, empty, np.zeros(0, dtype=np.int64)), rows,
+                      self.state.padding_slot)
+        ctx = self._context(plan)
+        keys = [getattr(meta, "graph_key", None) for meta in ctx.metas.values()]
+        if None in keys:
+            return False
+        key = (rows, self.sampler.variant(plan.slots), *keys)
+        for _ in range(2):                          # warm-up, then capture
+            self.graphs.run(key, lambda: self._decode(ctx))
+        return True
 
     # -- requests -------------------------------------------------------------------------------------------------
     def add(self, token_ids: list[int], params: SamplingParams | None = None) -> str:
@@ -293,13 +334,13 @@ class Engine:
         sync = any(seq in self._prompt_lp or seq.params.logprobs is not None for seq, _, k in rows if k) or any(
             seq in self._prompt_lp for seq, _, _ in rows)
         decode = bool((plan.n_query == 1).all())
-        graphed = self.graphs is not None and decode and not sync and len(seqs) <= self._buckets[-1]
+        graphed = self.graphs is not None and decode and not sync and len(seqs) <= self._buckets[-1]   # all captured
         if graphed:
             plan = padded(plan, next(b for b in self._buckets if b >= len(seqs)), self.state.padding_slot)
         ctx = self._context(plan)
-        keys = [getattr(meta, "graph_key", None) for meta in ctx.metas.values()]
         out = sampled = tokens = None
-        if graphed and None not in keys:
+        if graphed:
+            keys = [meta.graph_key for meta in ctx.metas.values()]
             key = (len(plan.slots), self.sampler.variant(plan.slots), *keys)
             sampled = self.graphs.run(key, lambda: self._decode(ctx))
         else:

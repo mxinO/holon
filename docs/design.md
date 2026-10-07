@@ -884,9 +884,12 @@ device inputs (`DEVICE_LAST`/`DEVICE_DRAFT`) are already consistent.
   host-side branches —, each planner's `graph_key`). A planner whose kernel offers no `graph_key` keeps the step
   eager. The graph covers forward, sampling and the SeqTable write; inputs are staged into the static buffers and
   results copied out around the replay. Padding rows use a dedicated slot whose block-table row points at each
-  paged pool's reserved, zeroed null unit, so they read and write nothing real. The first occurrence of a key runs
-  eagerly (kernel compilation, allocator warm-up), the second is captured; all graphs share one memory pool. Graph
-  memory comes out of the `memory_fraction` headroom (an explicit graph reserve in the ledger is a later step).
+  paged pool's reserved, zeroed null unit, so they read and write nothing real. Every bucket × sampler variant
+  (greedy, sampled, filtered) is captured at startup, largest bucket first so smaller graphs reuse its blocks of
+  the one shared pool; kernels keep their graph keys independent of per-step lengths (Triton's split count follows
+  the batch and the table width), so serving never stops to capture. The memory profile subtracts the pool the
+  largest bucket's graphs leave reserved, and the CUDA allocator uses expandable segments so a long mix of large
+  prefill activations and the graph pool does not fragment the budget.
 - **CPU work inside a FULL graph** (CPU expert compute, Strata/FreeToken style) uses a one-word handshake per
   layer with a persistent native CPU worker (spike S6): the graph signals REQ, the worker computes on pinned
   memory and answers DONE, the graph waits. `Platform` exposes this as a signal/wait pair with two

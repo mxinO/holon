@@ -62,7 +62,7 @@ class Sampler:
         # Host mirrors decide which work a step needs (shapes and branches stay host-side).
         self._greedy = np.ones(max_seqs, dtype=bool)
         self._filtered = np.zeros(max_seqs, dtype=bool)
-        self._logprobs = np.zeros(max_seqs, dtype=np.int64)
+        self._logprobs = np.full(max_seqs, -1, dtype=np.int64)     # -1: no logprobs
 
     def admit(self, slot: int, params: SamplingParams) -> None:
         if params.seed is None:

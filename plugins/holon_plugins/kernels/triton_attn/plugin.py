@@ -21,8 +21,9 @@ class _Handle:
 
 class Decode:
     """One query row per sequence. The block table and lengths are read on the device from buffers this instance
-    owns (stable addresses for graph capture); the only host decision is the split count, taken from a
-    power-of-two bound on the lengths so it stays constant within a graph bucket."""
+    owns (stable addresses for graph capture); the only host decision is the split count, taken from the batch size
+    and the table's capacity, so one graph per batch bucket serves every length (splits past a sequence's end are
+    empty)."""
 
     def __init__(self, ctx, *, heads: int, kv_heads: int, head_dim: int, page: int, q_dtype: str, kv_dtype: str,
                  layout: str, max_seqs: int) -> None:
@@ -36,9 +37,8 @@ class Decode:
         b = len(batch.plan.slots)
         self.rows[:b].copy_(batch.dev.slots, non_blocking=True)
         self.lens[:b].copy_(pages.lens, non_blocking=True)
-        self.lens[b:].zero_()                    # rows past the batch (graph padding) attend to nothing
-        bound = int((batch.plan.start_upper + batch.plan.n_query).max())
-        splits = splits_for(b, self.kv_heads, 1 << (bound - 1).bit_length(), self.num_sms)
+        self.lens[b:].zero_()                    # rows the instance holds beyond this batch: no stale lengths
+        splits = splits_for(b, self.kv_heads, pages.table.shape[1] * pages.page, self.num_sms)
         return _Handle(pages.table, self.rows[:b], self.lens[:b], splits)
 
     def graph_key(self, h: _Handle) -> tuple:

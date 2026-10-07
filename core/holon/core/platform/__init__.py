@@ -25,6 +25,13 @@ def _cuda(device: torch.device, what: str) -> None:
         raise ValueError(f"{what} is only measured on CUDA devices (device {device}); configure it explicitly")
 
 
+def configure_allocator(device: torch.device) -> None:
+    """Expandable segments: freed memory is reused across allocation sizes, so long-running mixes of large prefill
+    activations and graph pools do not fragment the budget the ledger computed."""
+    if device.type == "cuda":
+        torch._C._accelerator_setAllocatorSettings("expandable_segments:True")
+
+
 def free_memory(device: torch.device) -> int:
     """Bytes free on `device` after returning cached allocator blocks to the driver."""
     _cuda(device, "free memory")
@@ -41,6 +48,17 @@ def peak_memory(device: torch.device, fn: Callable[[], object]) -> int:
     fn()
     synchronize(device)
     return torch.cuda.max_memory_allocated(device) - before
+
+
+def reserved_growth(device: torch.device, fn: Callable[[], object]) -> int:
+    """Bytes the allocator still reserves after `fn()` beyond before it (e.g. a CUDA-graph pool `fn` creates)."""
+    _cuda(device, "reserved memory")
+    synchronize(device)
+    torch.cuda.empty_cache()
+    before = torch.cuda.memory_reserved(device)
+    fn()
+    synchronize(device)
+    return torch.cuda.memory_reserved(device) - before
 
 
 def synchronize(device: torch.device) -> None:
