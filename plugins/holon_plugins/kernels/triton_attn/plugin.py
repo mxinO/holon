@@ -17,6 +17,7 @@ class _Handle:
     rows: torch.Tensor
     lens: torch.Tensor
     splits: int
+    source_lens: torch.Tensor
 
 
 class Decode:
@@ -36,10 +37,12 @@ class Decode:
     def plan(self, batch, pages) -> _Handle:
         b = len(batch.plan.slots)
         self.rows[:b].copy_(batch.dev.slots, non_blocking=True)
-        self.lens[:b].copy_(pages.lens, non_blocking=True)
         self.lens[b:].zero_()                    # rows the instance holds beyond this batch: no stale lengths
         splits = splits_for(b, self.kv_heads, pages.table.shape[1] * pages.page, self.num_sms)
-        return _Handle(pages.table, self.rows[:b], self.lens[:b], splits)
+        return _Handle(pages.table, self.rows[:b], self.lens[:b], splits, pages.lens)
+
+    def prepare(self, h: _Handle) -> None:
+        h.lens.copy_(h.source_lens)             # exact device lengths of this step
 
     def graph_key(self, h: _Handle) -> tuple:
         return ("triton_attn.decode", len(h.rows), h.splits)

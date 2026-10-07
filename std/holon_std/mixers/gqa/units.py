@@ -39,7 +39,9 @@ class Planner:
         return AttnMeta(kernel, kernel.plan(batch, pages), pages)
 
     def prepare_device(self, meta: AttnMeta, ctx) -> None:
-        pass
+        prepare = getattr(meta.kernel, "prepare", None)          # in-graph part of a kernel's plan (optional)
+        if prepare is not None:
+            prepare(meta.handle)
 
 
 class GQA(nn.Module):

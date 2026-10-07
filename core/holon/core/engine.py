@@ -88,6 +88,19 @@ _VARIANTS = (SamplingParams(temperature=0.0, seed=0), SamplingParams(temperature
 
 
 @dataclasses.dataclass
+class _Prep:
+    """Static device inputs of a step's device prep (`Engine._prepare`)."""
+
+    row_of_token: torch.Tensor     # [T] batch row of each token
+    offset: torch.Tensor           # [T] index of each token within its row
+    n_query: torch.Tensor          # [B]
+    exact: torch.Tensor            # [B] the host knows this row's start exactly
+    start: torch.Tensor            # [B] that start (ignored where not exact)
+    from_device: torch.Tensor      # [B] the row's first input token is the device's last token
+    lens: torch.Tensor             # [B] out: tokens held after the step (shared with every page group's Pages)
+
+
+@dataclasses.dataclass
 class _Inflight:
     """A launched step: per-row snapshots (seq, tokens computed, sampled) taken at launch, the sampled tokens'
     pinned host copy and the event that says it has landed."""
@@ -142,9 +155,12 @@ class Engine:
         self.uploader = Uploader(self.device, self.state.upload_fields(seqs, tokens) | {
             "input_ids": (tokens, torch.int64), "positions": (tokens, torch.int64),
             "query_start": (seqs + 1, torch.int64), "slots": (seqs, torch.int64), "logits_index": (seqs, torch.int64),
-            "logits_rows": (seqs, torch.int64), "device_tokens": (seqs, torch.int64),
-            "device_slots": (seqs, torch.int64)})
-        self.last_token = torch.zeros(seqs + 1, dtype=torch.int64, device=self.device)  # device SeqTable column
+            "logits_rows": (seqs, torch.int64), "row_of_token": (tokens, torch.int64), "offset": (tokens, torch.int64),
+            "n_query": (seqs, torch.int64), "exact": (seqs, torch.bool), "start": (seqs, torch.int64),
+            "from_device": (seqs, torch.bool)})
+        # The device SeqTable (one row per slot, plus the padding slot): authoritative while steps are in flight.
+        self.last_token = torch.zeros(seqs + 1, dtype=torch.int64, device=self.device)
+        self.num_computed = torch.zeros(seqs + 1, dtype=torch.int64, device=self.device)
         self.graphs = platform.Graphs(self.device) if cfg.cuda_graphs and self.device.type == "cuda" else None
         self._buckets = sorted({min(b, seqs) for b in (1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256)} | {seqs})
         self._out_tokens = [platform.pinned_empty(seqs, torch.int64, self.device) for _ in range(2)]
@@ -231,7 +247,9 @@ class Engine:
 
     def _worst_step(self, plan: BatchPlan) -> None:
         """The largest prefill, a prompt-logprob chunk, and a filtered sampling step over every slot with logprobs."""
-        h = self.model.trunk(self._context(plan))
+        ctx = self._context(plan)
+        self._prepare(ctx)
+        h = self.model.trunk(ctx)
         self.model.head(h[:PROMPT_LOGPROB_CHUNK]).float().log_softmax(-1)
         del h
         n = self.cfg.max_seqs
@@ -240,7 +258,9 @@ class Engine:
         ones = np.ones(n, dtype=np.int32)
         decode = host_plan(0, np.arange(n, dtype=np.int32), np.zeros(n, dtype=np.int32), ones, ones,
                            np.zeros(n, dtype=np.int64))
-        self.sampler.sample(torch.zeros(n, self.spec.vocab, device=self.device), self._context(decode))
+        ctx = self._context(decode)
+        self._prepare(ctx)
+        self.sampler.sample(torch.zeros(n, self.spec.vocab, device=self.device), ctx)
 
     def _capture_graphs(self) -> None:
         """Capture every decode bucket for each sampler variant at startup, so serving never stops to capture."""
@@ -396,6 +416,7 @@ class Engine:
             key = (len(plan.slots), self.sampler.variant(plan.slots), *keys)
             sampled = self.graphs.run(key, lambda: self._decode(ctx))
         else:
+            self._prepare(ctx)
             if any(seq in self._prompt_lp for seq in seqs):
                 h = self.model.trunk(ctx)
                 logits = self.model.head(h[ctx.batch.dev.logits_index])
@@ -422,38 +443,62 @@ class Engine:
 
     def _decode(self, ctx: StepContext) -> torch.Tensor:
         """A decode step's device work from inputs to sampled tokens — the part captured in a graph."""
+        self._prepare(ctx)
         return self._store(ctx, self.sampler.sample(self.model(ctx).float(), ctx).tokens)
 
     def _store(self, ctx: StepContext, tokens: torch.Tensor) -> torch.Tensor:
+        """Advance the device SeqTable for the sampled rows: their new last token and computed length."""
         dev = ctx.batch.dev
-        self.last_token[dev.slots[dev.logits_rows]] = tokens               # the device SeqTable
+        slots = dev.slots[dev.logits_rows]
+        self.last_token[slots] = tokens
+        self.num_computed[slots] = ctx.prep.lens[dev.logits_rows].long()
         return tokens
 
-    def _context(self, plan: BatchPlan) -> StepContext:
-        """The step's device inputs, staged through pinned memory with asynchronous copies (no host sync)."""
+    def _context(self, plan: BatchPlan, exact: np.ndarray | None = None) -> StepContext:
+        """The host half of a step's inputs: index arrays and the starts the host knows exactly (`exact` rows; all by
+        default), staged into static device buffers with asynchronous copies, plus host-side planning. Positions,
+        lengths and write indices are derived on the device by `_prepare`."""
         n = plan.n_query
+        rows, tokens = len(n), int(n.sum())
         qstart = np.concatenate([[0], np.cumsum(n)])
-        positions = np.arange(qstart[-1]) + np.repeat(plan.start_upper - qstart[:-1], n)
         up = self.uploader
         up.begin()
-        on_device = np.flatnonzero(plan.token_src == TokenSrc.DEVICE_LAST)
         batch = Batch(plan, DeviceBatch(
             input_ids=up.put("input_ids", plan.host_tokens),
-            positions=up.put("positions", positions),
+            positions=up.dev["positions"][:tokens],
             query_start=up.put("query_start", qstart),
             slots=up.put("slots", plan.slots.astype(np.int64)),
             logits_index=up.put("logits_index", qstart[1:][plan.n_logits > 0] - 1),
             logits_rows=up.put("logits_rows", np.flatnonzero(plan.n_logits > 0)),
         ))
-        if len(on_device):        # decode inputs sampled by the previous step, still only on the device
-            idx = up.put("device_tokens", qstart[on_device])
-            batch.dev.input_ids[idx] = self.last_token[up.put("device_slots", plan.slots[on_device].astype(np.int64))]
-        pages = self.state.pages(plan, positions, up)
+        prep = _Prep(row_of_token=up.put("row_of_token", np.repeat(np.arange(rows), n)),
+                     offset=up.put("offset", np.arange(tokens) - np.repeat(qstart[:-1], n)),
+                     n_query=up.put("n_query", n.astype(np.int64)),
+                     exact=up.put("exact", np.ones(rows, dtype=bool) if exact is None else exact),
+                     start=up.put("start", plan.start_upper.astype(np.int64)),
+                     from_device=up.put("from_device", plan.token_src == TokenSrc.DEVICE_LAST),
+                     lens=up.dev["pages.lens"][:rows])
+        pages = self.state.pages(plan, up)
         up.end()
-        ctx = StepContext(batch, {g: p.plan_bounds(batch, pages.get(g)) for g, p in self.planners.items()})
+        metas = {g: p.plan_bounds(batch, pages.get(g)) for g, p in self.planners.items()}
+        return StepContext(batch, metas, pages=pages, prep=prep)
+
+    def _prepare(self, ctx: StepContext) -> None:
+        """The device half: the SeqTable's starts for host-exact rows, then positions, lengths, write indices and
+        inputs still on the device — all into static buffers, so this runs inside a captured graph too."""
+        dev, prep = ctx.batch.dev, ctx.prep
+        self.num_computed[dev.slots] = torch.where(prep.exact, prep.start, self.num_computed[dev.slots])
+        start = self.num_computed[dev.slots]
+        dev.positions.copy_(start[prep.row_of_token] + prep.offset)
+        prep.lens.copy_(start + prep.n_query)
+        first = dev.query_start[:-1]
+        dev.input_ids[first] = torch.where(prep.from_device, self.last_token[dev.slots], dev.input_ids[first])
+        slot_of_token = dev.slots[prep.row_of_token]
+        for pages in ctx.pages.values():
+            unit = pages.table[slot_of_token, dev.positions // pages.page].long()
+            pages.write_index.copy_(unit * pages.page + dev.positions % pages.page)
         for group, planner in self.planners.items():
             planner.prepare_device(ctx.metas[group], ctx)
-        return ctx
 
     def _record_prompt_logprobs(self, h: torch.Tensor, plan: BatchPlan, seqs: list[Seq],
                                 chunk: int = PROMPT_LOGPROB_CHUNK) -> None:

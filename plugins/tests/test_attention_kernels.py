@@ -44,7 +44,10 @@ def _kernel(op: str, provider: str, heads: int, kv_heads: int, head_dim: int, dt
 
 
 def _run(kernel, q, kv, batch, pages):
-    return kernel.run(q, kv, kernel.plan(batch, pages))
+    handle = kernel.plan(batch, pages)
+    if hasattr(kernel, "prepare"):          # the device half of the plan (the engine runs it after its device prep)
+        kernel.prepare(handle)
+    return kernel.run(q, kv, handle)
 
 
 PREFILL_ROWS = [(0, 1), (0, 17), (5, 16), (31, 33), (0, 64), (100, 7), (16, 16)]

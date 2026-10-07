@@ -104,6 +104,8 @@ class StepContext:
     batch: Batch
     metas: dict[str, Any] = dataclasses.field(default_factory=dict)
     seq_table: SeqTable | None = None
+    pages: dict[str, Any] = dataclasses.field(default_factory=dict)    # the core's page views (engine steps)
+    prep: Any = None                                                    # the engine's device-prep inputs
 
     def meta(self, group: str) -> Any:
         return self.metas[group]
