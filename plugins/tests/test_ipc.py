@@ -1,5 +1,6 @@
 """The engine behind a process boundary: concurrent streams, n > 1, rejections, aborts, stats, failures."""
 import asyncio
+import contextlib
 import multiprocessing
 
 import pytest
@@ -88,6 +89,9 @@ def test_a_killed_engine_ends_open_streams(tiny_checkpoint, tiny_case):  # noqa:
             stream = client.generate(prompts[3], SamplingParams(temperature=0.0, max_tokens=30, ignore_eos=True))
             await anext(stream)
             stats = await asyncio.gather(client.stats(), client.stats())          # concurrent stats both answer
+            with contextlib.suppress(asyncio.TimeoutError):                        # a caller that gives up early
+                await asyncio.wait_for(client.stats(), timeout=0)
+            stats.append(await client.stats())                                     # the reader survived it
             first = client.generate([1, 2], SamplingParams(temperature=0.0, max_tokens=30, ignore_eos=True), rid="same")
             await anext(first)
             with pytest.raises(ValueError, match="in flight"):
@@ -101,4 +105,4 @@ def test_a_killed_engine_ends_open_streams(tiny_checkpoint, tiny_case):  # noqa:
             return stats, rest
 
     stats, rest = asyncio.run(asyncio.wait_for(run(), timeout=60))
-    assert len(stats) == 2 and rest[-1].finish_reason == "error" and "exited" in rest[-1].error
+    assert len(stats) == 3 and rest[-1].finish_reason == "error" and "exited" in rest[-1].error

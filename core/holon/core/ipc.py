@@ -91,7 +91,11 @@ def serve(engine_factory: Callable[[], Any], endpoints: Endpoints) -> None:
                 deltas += engine.step()
         except Exception as e:  # noqa: BLE001 — every live request learns why before the process exits
             error = f"engine failed: {type(e).__name__}: {e}"
-            outbox.send_multipart([b"deltas", _encode(deltas + engine.fail_all(error))])
+            try:
+                deltas += engine.fail_all(error)
+            except Exception:  # noqa: BLE001 — the engine is broken: name its requests without its help
+                deltas += [TokenDelta(rid, [], finish_reason="error", error=error) for rid in list(engine._live)]
+            outbox.send_multipart([b"deltas", _encode(deltas)])
             raise
         if deltas:
             outbox.send_multipart([b"deltas", _encode(deltas)])
@@ -159,19 +163,25 @@ class Client:
         await self._requests.send_multipart([b"control", _encode(op)])
 
     async def _read(self) -> None:
-        while True:
-            if not await self._results.poll(_POLL_MS):
-                if not self._alive():
-                    self._fail("engine process exited")
-                    return
-                continue
-            kind, payload = await self._results.recv_multipart()
-            if kind == b"stats":
-                self._stats.popleft().set_result(_DECODE[kind].decode(payload))
-                continue
-            for delta in _DECODE[kind].decode(payload):
-                if (queue := self._queues.get(delta.rid)) is not None:
-                    queue.put_nowait(delta)
+        try:
+            while True:
+                if not await self._results.poll(_POLL_MS):
+                    if not self._alive():
+                        self._fail("engine process exited")
+                        return
+                    continue
+                kind, payload = await self._results.recv_multipart()
+                if kind == b"stats":
+                    if self._stats and not (future := self._stats.popleft()).done():    # its caller may have left
+                        future.set_result(_DECODE[kind].decode(payload))
+                    continue
+                for delta in _DECODE[kind].decode(payload):
+                    if (queue := self._queues.get(delta.rid)) is not None:
+                        queue.put_nowait(delta)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — nothing may be left waiting on a reader that is gone
+            self._fail(f"client reader failed: {type(e).__name__}: {e}")
 
     def _fail(self, reason: str) -> None:
         """End every open request and pending stats call; refuse new ones."""
@@ -179,7 +189,8 @@ class Client:
         for rid, queue in self._queues.items():
             queue.put_nowait(TokenDelta(rid, [], finish_reason="error", error=reason))
         while self._stats:
-            self._stats.popleft().set_exception(RuntimeError(reason))
+            if not (future := self._stats.popleft()).done():
+                future.set_exception(RuntimeError(reason))
 
     def close(self) -> None:
         if self._reader is not None:
