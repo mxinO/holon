@@ -894,7 +894,11 @@ it stays `None` until tree verification (v2).
 ### 7.6 Sampling and decoding
 
 - `LogitsProcessor` chain (ordered multi): `argmax_invariant`, per-slot device params, optional `host_input()`.
-  The default sampler is a builtin plugin. Sampler, processors and verifiers declare whether they accept
+  The default sampler is a builtin plugin (`std.sampling`, implemented in E3): per-slot parameter tensors set on
+  admission; temperature → top-k → top-p over the renormalized remainder → min-p; one counter-based uniform per row,
+  a hash of (seed, position), picks the token by inverse CDF, so samples depend on neither batching nor preemption
+  and the step needs no generator state. The engine gives every sequence a concrete seed (`n > 1` siblings derive
+  theirs from the request's), and computes prompt logprobs from the trunk's hidden states in row chunks. Sampler, processors and verifiers declare whether they accept
   vocab-sharded logits or need gathered logits (TP seam, §8).
 - Speculative decoding = four roles:
   - `Drafter` (EAGLE-3, MTP, draft model, GPU n-gram, CPU prompt lookup); declares required taps/shared modules.

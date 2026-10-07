@@ -139,11 +139,18 @@ class Model(nn.Module):
         self.lm_head = ctx.unit(spec.lm_head, vocab=spec.vocab, hidden=spec.hidden, embed=self.embed)
 
     def forward(self, ctx: StepCtx) -> torch.Tensor:
-        dev = ctx.batch.dev
-        h = self.embed(dev.input_ids)
+        """Logits of the step's `logits_index` rows."""
+        return self.head(self.trunk(ctx)[ctx.batch.dev.logits_index])
+
+    def trunk(self, ctx: StepCtx) -> torch.Tensor:
+        """Final hidden states of every token of the step, before the norm."""
+        h = self.embed(ctx.batch.dev.input_ids)
         for layer in self.layers:
             h = layer(h, ctx)
-        return self.lm_head(self.norm(h[dev.logits_index]))
+        return h
+
+    def head(self, h: torch.Tensor) -> torch.Tensor:
+        return self.lm_head(self.norm(h))
 
 
 def build_model(spec: ModelSpec, ctx: BuildContext) -> Model:

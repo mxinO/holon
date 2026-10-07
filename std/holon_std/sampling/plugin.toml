@@ -12,4 +12,4 @@ provides = ["sampler.default@1"]
 numerics = "exact"
 
 [reference]
-module = "sampler"
+module = "reference"

@@ -1,53 +1,98 @@
-"""Default sampler: greedy, or temperature with top-k / top-p / min-p filtering, plus requested logprobs."""
+"""Default sampler: vectorized over rows, with per-slot parameters held in device tensors.
+
+Random draws are counter-based: one uniform per row, a hash of (seed, position), picks the token by inverse CDF
+over the row's (filtered) distribution. A request's samples therefore depend on neither batching nor preemption,
+there is no generator state, and the step is capturable in a graph. Semantics: `reference.probs`.
+"""
 from __future__ import annotations
 
+import numpy as np
 import torch
 from holon.api import SampleOut, SamplingParams
 
+_M32 = 0xFFFFFFFF
 
-def _filter(logits: torch.Tensor, p: SamplingParams) -> torch.Tensor:
-    if p.top_k > 0:
-        kth = logits.topk(min(p.top_k, logits.shape[-1])).values[-1]
-        logits = logits.masked_fill(logits < kth, float("-inf"))
-    probs = logits.softmax(-1)
-    if p.min_p > 0:
-        logits = logits.masked_fill(probs < p.min_p * probs.max(), float("-inf"))
-    if p.top_p < 1:
-        sorted_probs, order = probs.sort(descending=True)
-        drop = sorted_probs.cumsum(-1) - sorted_probs > p.top_p
-        logits = logits.masked_fill(drop.scatter(-1, order, drop), float("-inf"))
-    return logits
+
+def _mix32(x: torch.Tensor) -> torch.Tensor:
+    """A 32-bit integer hash (lowbias32) on int64 tensors holding values below 2**32."""
+    x = x ^ (x >> 16)
+    x = (x * 0x7FEB352D) & _M32
+    x = x ^ (x >> 15)
+    x = (x * 0x846CA68B) & _M32
+    return x ^ (x >> 16)
+
+
+def uniform(seeds: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
+    """One uniform in (0, 1) per row, a pure function of (seed, position)."""
+    h = _mix32(_mix32(seeds & _M32) ^ (seeds >> 32 & _M32) ^ _mix32(positions & _M32))
+    return ((h >> 8).float() + 0.5) * 2.0**-24
+
+
+def _distribution(x: torch.Tensor, top_k: torch.Tensor | None, top_p: torch.Tensor | None,
+                  min_p: torch.Tensor | None) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """(probabilities, token order): unfiltered rows keep vocabulary order (order None); filtered rows are sorted
+    by logit, with dropped tokens at probability 0 (rows of temperature-scaled logits [R, V])."""
+    if top_k is None:
+        return x.softmax(-1), None
+    sorted_x, order = x.sort(-1, descending=True)
+    rank = torch.arange(x.shape[-1], device=x.device)[None, :]
+    sorted_x = sorted_x.masked_fill((top_k[:, None] > 0) & (rank >= top_k[:, None]), float("-inf"))
+    q = sorted_x.softmax(-1)
+    drop = (q.cumsum(-1) - q > top_p[:, None]) | (q < min_p[:, None] * q[:, :1])
+    return q.masked_fill(drop, 0.0), order
+
+
+def draw(q: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+    """Inverse CDF: the first index whose cumulative mass exceeds u × total (zero-mass entries are never chosen)."""
+    c = q.cumsum(-1)
+    idx = torch.searchsorted(c, (u * c[:, -1])[:, None], right=True)[:, 0]
+    return idx.clamp_(max=q.shape[-1] - 1)
 
 
 class Sampler:
-    """Per-slot parameters, set on admission. A seeded request draws its token at position `p` from a generator
-    seeded by (seed, p), so its samples depend neither on batching nor on preemption."""
-
     def __init__(self, max_seqs: int, device: torch.device) -> None:
-        self.params: list[SamplingParams | None] = [None] * max_seqs
+        self.temperature = torch.zeros(max_seqs, dtype=torch.float32, device=device)
+        self.top_k = torch.zeros(max_seqs, dtype=torch.int64, device=device)
+        self.top_p = torch.ones(max_seqs, dtype=torch.float32, device=device)
+        self.min_p = torch.zeros(max_seqs, dtype=torch.float32, device=device)
+        self.seed = torch.zeros(max_seqs, dtype=torch.int64, device=device)
+        # Host mirrors decide which work a step needs (shapes and branches stay host-side).
+        self._greedy = np.ones(max_seqs, dtype=bool)
+        self._filtered = np.zeros(max_seqs, dtype=bool)
+        self._logprobs = np.zeros(max_seqs, dtype=np.int64)
 
     def admit(self, slot: int, params: SamplingParams) -> None:
-        self.params[slot] = params
+        if params.seed is None:
+            raise ValueError("the engine gives every request a concrete seed")
+        self.temperature[slot], self.top_k[slot] = params.temperature, params.top_k
+        self.top_p[slot], self.min_p[slot] = params.top_p, params.min_p
+        self.seed[slot] = params.seed
+        self._greedy[slot] = params.temperature == 0
+        self._filtered[slot] = params.top_k > 0 or params.top_p < 1 or params.min_p > 0
+        self._logprobs[slot] = -1 if params.logprobs is None else params.logprobs
 
     def sample(self, logits: torch.Tensor, ctx) -> SampleOut:
         plan = ctx.batch.plan
         sampled = plan.n_logits > 0
-        params = [self.params[s] for s in plan.slots[sampled]]
-        positions = (plan.start_upper + plan.n_query)[sampled].tolist()
-        tokens = torch.empty(logits.shape[0], dtype=torch.long, device=logits.device)
-        for i, (p, pos) in enumerate(zip(params, positions, strict=True)):
-            if p.temperature == 0:
-                tokens[i] = logits[i].argmax()
-                continue
-            gen = None
-            if p.seed is not None:
-                gen = torch.Generator(logits.device).manual_seed(hash((p.seed, pos)) & (2**63 - 1))
-            probs = _filter(logits[i] / p.temperature, p).softmax(-1)
-            tokens[i] = torch.multinomial(probs, 1, generator=gen)[0]
-        if not any(p.logprobs is not None for p in params):
+        slots = plan.slots[sampled]
+        rows = torch.as_tensor(slots, device=logits.device)
+        tokens = logits.argmax(-1)
+        if not self._greedy[slots].all():
+            t = self.temperature[rows]
+            x = logits / torch.where(t == 0, 1.0, t)[:, None]
+            filters = (self.top_k[rows], self.top_p[rows], self.min_p[rows]) if self._filtered[slots].any() else (
+                None, None, None)
+            q, order = _distribution(x, *filters)
+            positions = torch.as_tensor((plan.start_upper + plan.n_query)[sampled], device=logits.device)
+            drawn = draw(q, uniform(self.seed[rows], positions.long()))
+            if order is not None:
+                drawn = order.gather(-1, drawn[:, None])[:, 0]
+            tokens = torch.where(t == 0, tokens, drawn)
+        k = int(self._logprobs[slots].max())
+        if k < 0:
             return SampleOut(tokens)
         logprobs = logits.log_softmax(-1)
-        top = logprobs.topk(max(max(p.logprobs or 0 for p in params), 1))
+        top = logprobs.topk(max(k, 1))
         return SampleOut(tokens, logprobs.gather(-1, tokens[:, None])[:, 0], top.indices, top.values)
 
 

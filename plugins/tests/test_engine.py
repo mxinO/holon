@@ -1,4 +1,5 @@
 """Engine end to end: paged KV, chunked prefill and continuous batching reproduce HF greedy generation."""
+import dataclasses
 import pathlib
 
 import pytest
@@ -73,8 +74,8 @@ def test_engine_rejects_what_it_cannot_serve(tiny_checkpoint):
         engine.add(list(range(40)))
     with pytest.raises(ValueError, match="empty"):
         engine.add([])
-    with pytest.raises(NotImplementedError, match="n > 1"):
-        engine.add([1, 2], SamplingParams(n=2))
+    with pytest.raises(NotImplementedError, match="penalties"):
+        engine.add([1, 2], SamplingParams(repetition_penalty=1.1))
     with pytest.raises(OutOfUnits, match="state.kv"):
         _tiny_engine(tiny_checkpoint, state_memory=9 * 2048)  # under one max-length request (10 pages)
 
@@ -139,3 +140,49 @@ def test_fast_kernels_agree_with_reference_and_are_run_identical_bf16():
     agree = [next((i for i, (a, b) in enumerate(zip(x, y, strict=True)) if a != b), len(x))
              for x, y in zip(first, ref, strict=True)]
     assert all(n >= 1 for n in agree) and sum(agree) >= 0.75 * len(agree) * params.max_tokens, agree
+
+
+def test_prompt_and_sampled_logprobs_match_hf(tiny_checkpoint, tiny_case):
+    # Chunked prefill (budget 10) and preemption (12 pages) must not change or duplicate prompt logprobs.
+    prompts, _ = tiny_case
+    hf = AutoModelForCausalLM.from_pretrained(tiny_checkpoint, dtype=torch.float32).eval()
+    for engine in (_tiny_engine(tiny_checkpoint), _tiny_engine(tiny_checkpoint, state_memory=12 * 2048)):
+        rids = [engine.add(p, SamplingParams(temperature=0.0, max_tokens=4, ignore_eos=True, prompt_logprobs=3,
+                                             logprobs=2)) for p in prompts]
+        deltas = {r: [] for r in rids}
+        while engine.has_work():
+            for d in engine.step():
+                deltas[d.rid].append(d)
+        for p, r in zip(prompts, rids, strict=True):
+            ds = deltas[r]
+            full = p + [t for d in ds for t in d.token_ids]
+            with torch.no_grad():
+                lp = hf(torch.tensor([full])).logits[0].log_softmax(-1)
+            plp = ds[0].prompt_logprobs
+            assert all(d.prompt_logprobs is None for d in ds[1:]) and len(plp.token) == len(p) - 1
+            want = lp[:len(p) - 1].gather(-1, torch.tensor(p[1:])[:, None])[:, 0]
+            torch.testing.assert_close(torch.tensor(plp.token), want, atol=1e-4, rtol=1e-4)
+            assert plp.top_ids == lp[:len(p) - 1].topk(3).indices.tolist()
+            gen = torch.tensor([d.logprobs.token[0] for d in ds])
+            want = lp[len(p) - 1: len(full) - 1].gather(-1, torch.tensor(full[len(p):])[:, None])[:, 0]
+            torch.testing.assert_close(gen, want, atol=1e-4, rtol=1e-4)
+            assert all(len(d.logprobs.top_ids[0]) == 2 for d in ds)
+
+
+def test_n_sequences_per_request(tiny_checkpoint, tiny_case):
+    prompts, expected = tiny_case
+    engine = _tiny_engine(tiny_checkpoint, state_memory=12 * 2048)
+
+    def run(params):
+        rid = engine.add(prompts[1], params)
+        seqs: dict[int, list[int]] = {}
+        while engine.has_work():
+            for d in engine.step():
+                assert d.rid == rid
+                seqs.setdefault(d.index, []).extend(d.token_ids)
+        return [seqs[i] for i in sorted(seqs)]
+
+    assert run(dataclasses.replace(GREEDY, n=3)) == [expected[1]] * 3
+    sampled = SamplingParams(temperature=1.0, n=3, seed=5, max_tokens=12, ignore_eos=True)
+    first = run(sampled)
+    assert first == run(sampled) and len({tuple(s) for s in first}) > 1

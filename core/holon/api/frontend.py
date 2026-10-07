@@ -23,7 +23,8 @@ class EngineRequest:
 
 @dataclasses.dataclass(slots=True)
 class Logprobs:
-    """Per position: the chosen token's logprob and the ranked top-k (ids and logprobs as parallel lists)."""
+    """Per position: the chosen token's logprob and the ranked top-k (ids and logprobs as parallel lists).
+    Prompt logprobs cover prompt positions 1 … n-1 (the first token has no context)."""
 
     token: list[float]
     top_ids: list[list[int]]
@@ -34,6 +35,7 @@ class Logprobs:
 class TokenDelta:
     rid: str
     token_ids: list[int]
+    index: int = 0                     # which of the request's `n` sequences
     logprobs: Logprobs | None = None
     prompt_logprobs: Logprobs | None = None
     finish_reason: str | None = None

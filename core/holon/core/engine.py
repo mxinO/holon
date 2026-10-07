@@ -13,12 +13,26 @@ from __future__ import annotations
 import collections
 import dataclasses
 import itertools
+import secrets
 from typing import Any
 
 import numpy as np
 import torch
 
-from holon.api import Batch, BatchPlan, DeviceBatch, Paged, Ref, SamplingParams, Seq, StateSpec, Status, TokenDelta
+from holon.api import (
+    Batch,
+    BatchPlan,
+    DeviceBatch,
+    Logprobs,
+    Paged,
+    Ref,
+    SampleOut,
+    SamplingParams,
+    Seq,
+    StateSpec,
+    Status,
+    TokenDelta,
+)
 
 from . import platform
 from .batching import host_plan
@@ -81,6 +95,8 @@ class Engine:
         self.sched = Scheduler(self.state, cfg.max_step_tokens)
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None else self._measure_state_memory())
         self._ids = itertools.count()
+        self._index: dict[Seq, int] = {}                  # sequence -> its index among the request's n
+        self._prompt_lp: dict[Seq, Logprobs] = {}         # sequences still accumulating prompt logprobs
 
     def _bind_state(self) -> tuple[list[BoundSpec], dict[str, Any]]:
         """Each mixer group's state specs → pools and bound state kinds; one planner per state group."""
@@ -126,32 +142,47 @@ class Engine:
                          np.zeros(int(n.sum()), dtype=np.int64))
         self.ledger.materialize(None)
         with torch.no_grad():
-            peak = platform.peak_memory(self.device, lambda: self.model(self._context(plan)))
+            peak = platform.peak_memory(self.device, lambda: self._worst_step(plan))
         self.ledger.free()
         return int(platform.free_memory(self.device) * cfg.memory_fraction) - peak
 
+    def _worst_step(self, plan: BatchPlan) -> None:
+        h = self.model.trunk(self._context(plan))
+        self.model.head(h[:256]).float().log_softmax(-1)      # a prompt-logprob chunk
+
     # -- requests -------------------------------------------------------------------------------------------------
     def add(self, token_ids: list[int], params: SamplingParams | None = None) -> str:
+        """Queue a request; its `params.n` sequences stream as TokenDeltas with `index` 0 … n-1."""
         p = params or SamplingParams()
         if not token_ids:
             raise ValueError("empty prompt")
         if len(token_ids) >= self.cfg.max_model_len:
             raise ValueError(f"prompt of {len(token_ids)} tokens leaves no room under max_model_len "
                              f"{self.cfg.max_model_len}")
-        unsupported = [name for name, used in (
-            ("n > 1", p.n != 1), ("logprobs", p.logprobs is not None),
-            ("prompt_logprobs", p.prompt_logprobs is not None),
-            ("penalties", p.presence_penalty or p.frequency_penalty or p.repetition_penalty != 1)) if used]
-        if unsupported:
-            raise NotImplementedError(f"sampling options not supported yet: {', '.join(unsupported)}")
-        seq = Seq(rid=str(next(self._ids)), tokens=list(token_ids), params=p, prompt_len=len(token_ids))
-        self.sched.add(seq)
-        return seq.rid
+        if p.n < 1:
+            raise ValueError(f"n must be >= 1, got {p.n}")
+        if p.presence_penalty or p.frequency_penalty or p.repetition_penalty != 1:
+            raise NotImplementedError("sampling penalties are not supported yet")
+        rid = str(next(self._ids))
+        base = p.seed if p.seed is not None else secrets.randbits(63)
+        for i in range(p.n):
+            # A concrete seed per sequence keeps sampling reproducible across batching and preemption.
+            seed = base if i == 0 else hash((base, i)) & (2**63 - 1)
+            child = dataclasses.replace(p, seed=seed, prompt_logprobs=p.prompt_logprobs if i == 0 else None)
+            seq = Seq(rid=rid, tokens=list(token_ids), params=child)
+            self._index[seq] = i
+            if child.prompt_logprobs is not None:
+                self._prompt_lp[seq] = Logprobs([], [], [])
+            self.sched.add(seq)
+        return rid
 
     def has_work(self) -> bool:
         return bool(self.sched.waiting or self.sched.running)
 
     def generate(self, prompts: list[list[int]], params: SamplingParams | None = None) -> list[list[int]]:
+        """Token ids generated for each prompt (one sequence per prompt)."""
+        if params is not None and params.n != 1:
+            raise ValueError("generate() returns one sequence per prompt; step() streams n > 1")
         rids = [self.add(p, params) for p in prompts]
         out: dict[str, list[int]] = {r: [] for r in rids}
         while self.has_work():
@@ -169,9 +200,14 @@ class Engine:
             raise RuntimeError("the scheduler made no progress with requests pending")
         plan, seqs = scheduled
         ctx = self._context(plan)
-        logits = self.model(ctx)
-        sampled = self.sampler.sample(logits, ctx).tokens.tolist() if plan.n_logits.any() else []
-        return self._commit(plan, seqs, sampled)
+        if any(seq in self._prompt_lp for seq in seqs):
+            h = self.model.trunk(ctx)
+            logits = self.model.head(h[ctx.batch.dev.logits_index])
+            self._record_prompt_logprobs(h, plan, seqs)
+        else:
+            logits = self.model(ctx)
+        out = self.sampler.sample(logits.float(), ctx) if plan.n_logits.any() else None
+        return self._commit(plan, seqs, out)
 
     def _context(self, plan: BatchPlan) -> StepContext:
         n = plan.n_query
@@ -191,21 +227,54 @@ class Engine:
             planner.prepare_device(ctx.metas[group], ctx)
         return ctx
 
-    def _commit(self, plan: BatchPlan, seqs: list[Seq], sampled: list[int]) -> list[TokenDelta]:
-        deltas, it = [], iter(sampled)
+    def _record_prompt_logprobs(self, h: torch.Tensor, plan: BatchPlan, seqs: list[Seq], chunk: int = 256) -> None:
+        """Logprobs of the prompt tokens this step's rows predict, in row chunks (no full-vocab logits for long
+        prompts); positions recomputed after a preemption are not recorded twice."""
+        qstart = np.concatenate([[0], np.cumsum(plan.n_query)])
+        for i, seq in enumerate(seqs):
+            acc = self._prompt_lp.get(seq)
+            if acc is None:
+                continue
+            start = int(plan.start_upper[i])
+            lo, hi = max(start, len(acc.token)), min(start + int(plan.n_query[i]), seq.prompt_len - 1)
+            k = max(seq.params.prompt_logprobs, 1)
+            for a in range(lo, hi, chunk):
+                b = min(a + chunk, hi)
+                lp = self.model.head(h[qstart[i] + a - start: qstart[i] + b - start]).float().log_softmax(-1)
+                target = torch.as_tensor(seq.tokens[a + 1: b + 1], device=lp.device)
+                top = lp.topk(k)
+                acc.token += lp.gather(-1, target[:, None])[:, 0].tolist()
+                acc.top_ids += top.indices.tolist()
+                acc.top += top.values.tolist()
+
+    def _commit(self, plan: BatchPlan, seqs: list[Seq], out: SampleOut | None) -> list[TokenDelta]:
+        deltas, row = [], 0
+        tokens = out.tokens.tolist() if out is not None else []
         for seq, n, has_logits in zip(seqs, plan.n_query, plan.n_logits, strict=True):
             seq.num_computed += int(n)
             if not has_logits:
                 continue
-            token = next(it)
+            token = tokens[row]
             seq.tokens.append(token)
             if seq.status is not Status.RUNNING:
                 self.sched.finished_prefill(seq)
             reason = self._finish_reason(seq, token)
             if reason:
                 self.sched.finish(seq, reason)
-            deltas.append(TokenDelta(seq.rid, [token], finish_reason=reason))
+            deltas.append(TokenDelta(seq.rid, [token], index=self._index[seq], logprobs=self._logprobs(seq, out, row),
+                                     prompt_logprobs=self._prompt_lp.pop(seq, None), finish_reason=reason))
+            if reason:
+                del self._index[seq]
+            row += 1
         return deltas
+
+    @staticmethod
+    def _logprobs(seq: Seq, out: SampleOut, row: int) -> Logprobs | None:
+        k = seq.params.logprobs
+        if k is None:
+            return None
+        return Logprobs([float(out.logprobs[row])], [out.top_ids[row, :k].tolist()],
+                        [out.top_logprobs[row, :k].tolist()])
 
     def _finish_reason(self, seq: Seq, token: int) -> str | None:
         p = seq.params
