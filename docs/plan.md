@@ -221,7 +221,7 @@ Measured on Qwen3-8B bf16 unless noted; records in `evidence/` and `judge/result
 | 3 | CPU per step at B256 (A5000, blocking sync): 2.45 ms vs nano-vllm 2.98 ms |
 | 4 | Snapshot trace (every graph bucket to 64, a 2048-token prefix hit, n = 2, logprobs, prompt logprobs) run-identical across 3 fresh engines. Prefix cache on/off and depth 1 vs 0 bounded (`holon_judge bounded`, design §7.10): all configurations within margin of the baseline; planted bugs in prefix adoption and the depth-1 token feed fail exactly the configurations using their path. Prefix cache saves 155K tokens on the 48-session multi-turn trace |
 | 5 | SeqTable seam: a fixed-token test drafter runs at depth 1 with correct positions and lengths (`plugins/tests/test_spec.py`) |
-| 6 | Restart (A5000, 5 kills mid-stream, every stream whole): median 11.5 s, max 11.6 s for Qwen3-8B (6.7 s for 0.6B). **SLO: restart ≤ 15 s for models up to 8B on a 24 GB card.** A poison request is quarantined without rollback, also alone on a quiet server; `n > 1` and prompt logprobs are served |
+| 6 | Restart (A5000, 5 kills mid-stream, every stream completes; exact continuation is tested in fp32): median 11.5 s, max 11.6 s for Qwen3-8B (6.7 s for 0.6B). **SLO: restart ≤ 15 s for models up to 8B on a 24 GB card.** A poison request is quarantined without rollback, also alone on a quiet server; `n > 1` and prompt logprobs are served |
 | 7 | Memory fit per §2 (Qwen3-8B on a 24 GB A5000: 42K KV tokens at the default budget, mini-sglang 37K). Tuned default locks for rtx-a5000, rtx-4090, rtx-5090 (`holon_tools tune`: Triton paged decode/verify, FlashInfer prefill and fused per-token ops on all three) |
 | 8 | Core 2038 / 6000 lines; lints, import contracts and the static checks green |
 

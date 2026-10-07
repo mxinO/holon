@@ -3,9 +3,9 @@
 A greedy stream runs under the supervisor (default engine config: overlap, CUDA graphs); every `--every` tokens the
 engine process is killed. Recorded per kill: the supervisor's restart time (engine process launch → ready: weights,
 pool sizing, graph capture) and the stall the client sees (last token before the kill → first token after it). The
-stream must arrive whole: every token of its budget, once. (That it continues exactly as an uninterrupted stream would
-is tested in fp32 on the CPU; in bf16 a restart recomputes the streamed tokens' state by prefill, which may flip a
-later greedy near-tie.)
+stream must complete: its whole token budget arrives. (That it continues exactly as an uninterrupted stream would, with
+no token duplicated or lost, is tested in fp32 on the CPU; in bf16 a restart recomputes the streamed tokens' state by
+prefill, which may flip a later greedy near-tie.)
 
 Usage (from the repository root, inside Holon's .venv):
   python bench/restart.py --gpu 6 --model <checkpoint dir> --kills 5
@@ -50,7 +50,7 @@ async def measure(model: str, kills: int, every: int) -> dict:
     return {"start_s": round(stats["start_s"], 2), "restart_s": [round(s, 2) for s in restarts],
             "stall_s": [round(s, 2) for s in stalls], "restart_median_s": round(statistics.median(restarts), 2),
             "restart_max_s": round(max(restarts), 2),
-            "crashes": stats["crashes"], "tokens": len(tokens), "whole": len(tokens) == params.max_tokens}
+            "crashes": stats["crashes"], "tokens": len(tokens), "complete": len(tokens) == params.max_tokens}
 
 
 def main() -> None:
