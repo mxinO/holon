@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import dataclasses
 import multiprocessing
+import os
 import pathlib
 import tempfile
 import uuid
@@ -53,9 +54,14 @@ def serve(engine_factory: Any, endpoints: Endpoints) -> None:
         outbox.send_multipart([b"failed", _encode(f"{type(e).__name__}: {e}")])
         raise
     outbox.send_multipart([b"ready", _encode("ready")])
+    parent = os.getppid()
     while True:
         deltas: list[TokenDelta] = []
-        timeout = 0 if engine.has_work() else None                   # block only when idle
+        if not engine.has_work() and not inbox.poll(1000):
+            if os.getppid() != parent:           # the launcher died without shutting us down: free the GPU
+                return
+            continue
+        timeout = 0
         while inbox.poll(timeout):
             kind, payload = inbox.recv_multipart()
             msg = _DECODE[kind].decode(payload)
