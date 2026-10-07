@@ -21,6 +21,8 @@ class _Handle:
 
 
 class Decode:
+    nq = 1
+
     """One query row per sequence. The block table and lengths are read on the device from buffers this instance
     owns (stable addresses for graph capture); the only host decision is the split count, taken from the batch size
     and the table's capacity, so one graph per batch bucket serves every length (splits past a sequence's end are
@@ -48,7 +50,14 @@ class Decode:
         return ("triton_attn.decode", len(h.rows), h.splits)
 
     def run(self, q: torch.Tensor, kv: torch.Tensor, h: _Handle) -> torch.Tensor:
-        return paged_attention(q, kv, h.table, h.rows, h.lens, nq=1, splits=h.splits, cfg=self.cfg)
+        return paged_attention(q, kv, h.table, h.rows, h.lens, nq=len(q) // len(h.rows), splits=h.splits, cfg=self.cfg)
+
+
+class Verify(Decode):
+    """1 + k query rows per sequence (the same k for all), causal among themselves; lengths from the device."""
+
+    def graph_key(self, h: _Handle) -> tuple:
+        return ("triton_attn.verify", len(h.rows), h.splits)
 
 
 def _supports(f: dict) -> bool:
@@ -58,7 +67,8 @@ def _supports(f: dict) -> bool:
 
 class Plugin:
     def register(self, regs) -> None:
-        regs.kernels.add(OP, KernelSpec(
-            op=OP, provider="kernels.triton_attn", impl=Decode, in_layouts={"kv": "kv.hnd"},
-            requires=Constraint(sm_min=80, sm_max=129), supports=_supports,
-            props=frozenset({"graph_safe", "deterministic"}), priority=10))
+        for op, impl in ((OP, Decode), ("attention.paged_verify", Verify)):
+            regs.kernels.add(op, KernelSpec(
+                op=op, provider="kernels.triton_attn", impl=impl, in_layouts={"kv": "kv.hnd"},
+                requires=Constraint(sm_min=80, sm_max=129), supports=_supports,
+                props=frozenset({"graph_safe", "deterministic"}), priority=10))

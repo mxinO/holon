@@ -14,6 +14,11 @@ its committed ones plus `pending` sampled ones not yet committed. A decode row t
 device (TokenSrc.DEVICE_LAST); a waiting request with a pending token (preempted in flight) waits for its commit; a
 request that reaches its length limit with its pending tokens is not scheduled again — its commit finishes it.
 
+Speculative decoding: a decode step may carry k drafts per request (`draft_k`, the same k for the whole step —
+the smallest any row allows), as verify rows of 1 + k tokens that all produce logits. A request with an
+uncommitted verify row knows its length only on the device; steps whose decode kernel plans from host lengths
+(`host_lens_only`) leave it out until that row commits.
+
 Liveness: the pools always hold one request of the engine's maximum length, and every unit is held by some request
 or only by the prefix cache, which evicts such units before anyone is preempted. So the top-ranked request fits once
 everything below it is preempted, and every step makes progress.
@@ -21,6 +26,7 @@ everything below it is preempted, and every step makes progress.
 from __future__ import annotations
 
 import collections
+from collections.abc import Callable
 
 import numpy as np
 
@@ -30,9 +36,18 @@ from .batching import host_plan
 from .state import StateManager
 
 
+def _host_tokens(seq: Seq, start: int, n: int, on_device: bool) -> list[int]:
+    """A row's input tokens as far as the host knows them; the rest (the last sampled token while it is pending,
+    a verify row's drafts) are placeholders the device fills in."""
+    known = [] if on_device else seq.tokens[start:start + n]
+    return known + [0] * (n - len(known))
+
+
 class Scheduler:
-    def __init__(self, state: StateManager, max_step_tokens: int, max_model_len: int) -> None:
+    def __init__(self, state: StateManager, max_step_tokens: int, max_model_len: int,
+                 draft_k: Callable[[Seq], int] = lambda seq: 0, host_lens_only: bool = False) -> None:
         self.state, self.max_step_tokens, self.max_model_len = state, max_step_tokens, max_model_len
+        self.draft_k, self.host_lens_only = draft_k, host_lens_only
         self.waiting: collections.deque[Seq] = collections.deque()
         self.running: list[Seq] = []
         self.preemptions = 0
@@ -49,19 +64,19 @@ class Scheduler:
         rows = self._prefill() or self._decode()
         if not rows:
             return None
-        seqs = [s for s, _ in rows]
-        n_query = np.array([n for _, n in rows], dtype=np.int32)
+        seqs = [s for s, _, _ in rows]
+        n_query = np.array([n for _, n, _ in rows], dtype=np.int32)
+        n_logits = np.array([m for _, _, m in rows], dtype=np.int32)
         starts = np.array([s.num_computed for s in seqs], dtype=np.int32)
-        n_logits = (starts + n_query == np.array([len(s.tokens) + s.pending for s in seqs])).astype(np.int32)
         device = np.array([s.pending > 0 for s in seqs])                   # decode input still on the device
-        tokens = np.concatenate([[0] if dev else s.tokens[st:st + n]
+        tokens = np.concatenate([_host_tokens(s, st, n, dev)
                                  for s, st, n, dev in zip(seqs, starts, n_query, device, strict=True)])
         src = np.where(device, TokenSrc.DEVICE_LAST, TokenSrc.HOST).astype(np.int8)
         slots = np.array([s.slot for s in seqs], dtype=np.int32)
         self._step += 1
         return host_plan(self._step, slots, starts, n_query, n_logits, tokens.astype(np.int64), src), seqs
 
-    def _prefill(self) -> list[tuple[Seq, int]]:
+    def _prefill(self) -> list[tuple[Seq, int, int]]:
         rows, budget = [], self.max_step_tokens
         for seq in list(self.waiting):
             if seq.pending:                       # preempted while its decode was in flight: wait for the commit
@@ -71,20 +86,26 @@ class Scheduler:
             n = min(len(seq.tokens) - seq.num_computed, budget)       # after admission: a prefix hit counts
             if not self._fit(seq, n):
                 break
-            rows.append((seq, n))
+            rows.append((seq, n, int(seq.num_computed + n == len(seq.tokens))))
             budget -= n
         return rows
 
-    def _decode(self) -> list[tuple[Seq, int]]:
+    def _decode(self) -> list[tuple[Seq, int, int]]:
+        ready = [s for s in self.running if not self._at_limit(s) and not (self.host_lens_only and s.inexact)]
+        k = min((self._drafts(s) for s in ready), default=0)
         rows = []
         for seq in list(self.running):
-            if seq.status is not Status.RUNNING or self._at_limit(seq):   # preempted, or finishing at its commit
+            if seq.status is not Status.RUNNING or seq not in ready:     # preempted, finishing, or waiting on a commit
                 continue
-            if self._fit(seq, 1):
-                rows.append((seq, 1))
+            if self._fit(seq, 1 + k):
+                rows.append((seq, 1 + k, 1 + k if k else 1))
             else:
                 self._preempt(seq)
         return rows
+
+    def _drafts(self, seq: Seq) -> int:
+        """Drafts for `seq` this step, kept within max_model_len: a verify row writes positions up to length + k."""
+        return max(0, min(self.draft_k(seq), self.max_model_len - (len(seq.tokens) + seq.pending) - 1))
 
     def _at_limit(self, seq: Seq) -> bool:
         length = len(seq.tokens) + seq.pending

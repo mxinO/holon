@@ -1,0 +1,6 @@
+[plugin]
+name = "tests.oracle.policy"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "draft_policy"
+license = "Apache-2.0"

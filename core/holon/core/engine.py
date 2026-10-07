@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import gc
 import itertools
 import math
 import secrets
@@ -30,6 +31,7 @@ from holon.api import (
     SampleOut,
     SamplingParams,
     Seq,
+    SeqTable,
     StateSpec,
     Status,
     TokenDelta,
@@ -74,17 +76,26 @@ class EngineConfig:
     prefix_cache: bool = True                # reuse cached prompt blocks across requests (paged state only)
     overlap: bool = True                     # schedule step N while step N-1 runs (depth 1); False: depth 0
     cuda_graphs: bool = True                 # replay decode steps from CUDA graphs, per batch-size bucket
+    max_draft_tokens: int = 0                # speculative decoding: drafts per verify row at most (0: off)
     kernels: dict[str, str] = dataclasses.field(default_factory=dict)   # op name -> pinned kernel provider
 
     def __post_init__(self) -> None:
         for name in ("page_size", "max_seqs", "max_model_len", "max_step_tokens"):
             if getattr(self, name) < 1:
                 raise ValueError(f"EngineConfig.{name} must be >= 1")
+        if self.max_draft_tokens < 0:
+            raise ValueError("EngineConfig.max_draft_tokens must be >= 0")
 
 
 # Sampler variants captured at startup: greedy, sampled, sampled with filters (logprob steps run eagerly).
 _VARIANTS = (SamplingParams(temperature=0.0, seed=0), SamplingParams(temperature=1.0, seed=0),
              SamplingParams(temperature=1.0, top_p=0.9, seed=0))
+
+
+def _last_tokens(qstart: np.ndarray, n_logits: np.ndarray) -> np.ndarray:
+    """Flat indices of each row's last `n_logits` tokens (the tokens whose logits a step computes)."""
+    ends = np.repeat(qstart[1:], n_logits)
+    return ends - np.concatenate([np.arange(m, 0, -1) for m in n_logits]) if n_logits.any() else ends
 
 
 @dataclasses.dataclass
@@ -98,6 +109,8 @@ class _Prep:
     start: torch.Tensor            # [B] that start (ignored where not exact)
     from_device: torch.Tensor      # [B] the row's first input token is the device's last token
     lens: torch.Tensor             # [B] out: tokens held after the step (shared with every page group's Pages)
+    draft_index: torch.Tensor | None = None   # [R*k] verify rows: input positions of the drafts
+    draft_from: torch.Tensor | None = None    # [R*k] where each draft is in the SeqTable (flat)
 
 
 @dataclasses.dataclass
@@ -105,9 +118,10 @@ class _Inflight:
     """A launched step: per-row snapshots (seq, tokens computed, sampled) taken at launch, the sampled tokens'
     pinned host copy and the event that says it has landed."""
 
-    rows: list[tuple[Seq, int, bool]]
+    rows: list[tuple[Seq, int, int]]          # (seq, tokens computed, logits rows: 0 | 1 | 1 + k)
     out: SampleOut | None
     tokens: torch.Tensor | None
+    accepts: torch.Tensor | None             # verify rows' accepted draft counts (pinned host copy)
     done: platform.Event
     sync: bool                               # commit at once (its logprobs need the host)
 
@@ -150,20 +164,37 @@ class Engine:
         self.sampler = sampler = p.load(p.single("sampler")).sampler(cfg.max_seqs + 1, self.device)
         self.state = StateManager(bound, cfg.max_seqs, cfg.max_model_len, self.device,
                                   on_admit=lambda seq: sampler.admit(seq.slot, seq.params), index=self._index(bound))
-        self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len)
-        tokens, seqs = max(cfg.max_step_tokens, cfg.max_seqs), cfg.max_seqs
+        # Speculative decoding (design §7.6): a draft policy picks k per request, one drafter proposes, the verifier
+        # checks; all three are plugins, used only when drafts are enabled and a policy is installed.
+        self.policy = self.drafter = self.verifier = None
+        if cfg.max_draft_tokens and any(True for _ in p.by_slot("draft_policy")):
+            self.policy, self.drafter = p.load(p.single("draft_policy")), p.load(p.single("drafter"))
+            self.verifier = p.load(p.single("verifier"))
+        host_lens = any(getattr(planner, "needs_host_lens", False) for planner in self.planners.values())
+        self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len, draft_k=self._draft_k,
+                               host_lens_only=host_lens)
+        seqs = cfg.max_seqs
+        tokens = max(cfg.max_step_tokens, seqs * (1 + cfg.max_draft_tokens))     # a verify step: 1 + k per row
         self.uploader = Uploader(self.device, self.state.upload_fields(seqs, tokens) | {
             "input_ids": (tokens, torch.int64), "positions": (tokens, torch.int64),
             "query_start": (seqs + 1, torch.int64), "slots": (seqs, torch.int64), "logits_index": (seqs, torch.int64),
             "logits_rows": (seqs, torch.int64), "row_of_token": (tokens, torch.int64), "offset": (tokens, torch.int64),
             "n_query": (seqs, torch.int64), "exact": (seqs, torch.bool), "start": (seqs, torch.int64),
-            "from_device": (seqs, torch.bool)})
+            "from_device": (seqs, torch.bool), "draft_index": (tokens, torch.int64),
+            "draft_from": (tokens, torch.int64)} | {
+            "logits_index": (tokens, torch.int64), "logits_rows": (tokens, torch.int64)})   # verify rows: 1+k each
         # The device SeqTable (one row per slot, plus the padding slot): authoritative while steps are in flight.
         self.last_token = torch.zeros(seqs + 1, dtype=torch.int64, device=self.device)
         self.num_computed = torch.zeros(seqs + 1, dtype=torch.int64, device=self.device)
+        self.seq_table = SeqTable(self.num_computed, self.last_token,
+                                  n_accept=torch.zeros(seqs + 1, dtype=torch.int64, device=self.device),
+                                  draft_tokens=torch.zeros(seqs + 1, max(cfg.max_draft_tokens, 1), dtype=torch.int64,
+                                                           device=self.device))
         self.graphs = platform.Graphs(self.device) if cfg.cuda_graphs and self.device.type == "cuda" else None
         self._buckets = sorted({min(b, seqs) for b in (1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256)} | {seqs})
-        self._out_tokens = [platform.pinned_empty(seqs, torch.int64, self.device) for _ in range(2)]
+        width = 1 + cfg.max_draft_tokens
+        self._out_tokens = [platform.pinned_empty(seqs * width, torch.int64, self.device) for _ in range(2)]
+        self._out_accepts = [platform.pinned_empty(seqs, torch.int64, self.device) for _ in range(2)]
         self._out_turn = 0
         self._inflight: _Inflight | None = None
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None else self._measure_state_memory())
@@ -176,6 +207,13 @@ class Engine:
         self._prompt_lp: dict[Seq, Logprobs] = {}         # sequences still accumulating prompt logprobs
         self._siblings: dict[Seq, list[Seq]] = {}         # n > 1: waiting for the first sequence's prefill
         self._live: dict[str, list[Seq]] = {}              # request id -> its unfinished sequences
+
+    def _draft_k(self, seq: Seq) -> int:
+        """Drafts the policy wants for `seq` this step. Only greedy requests without logprobs are drafted: the
+        verifier is greedy-exact and logprob steps run synchronously."""
+        if self.policy is None or seq.params.temperature != 0 or seq.params.logprobs is not None:
+            return 0
+        return min(self.policy.choose(seq)[1], self.cfg.max_draft_tokens)
 
     def _index(self, bound: list[BoundSpec]) -> PrefixIndex | None:
         """A prefix index over blocks every paged spec can share whole pages of; None when disabled or when some
@@ -355,6 +393,15 @@ class Engine:
             self.state.index.clear()
         return deltas
 
+    def close(self) -> None:
+        """Release the device memory now (graphs, state pools, weights) instead of whenever the garbage collector
+        breaks the engine's reference cycles; the engine is unusable afterwards."""
+        self.drain()
+        self.graphs = self.model = self._inflight = None
+        self.ledger.free()
+        gc.collect()
+        platform.release_cache(self.device)
+
     def stats(self) -> dict[str, int]:
         return {"waiting": len(self.sched.waiting), "running": len(self.sched.running),
                 "preemptions": self.sched.preemptions, "prefix_tokens_saved": self.state.tokens_saved,
@@ -402,15 +449,16 @@ class Engine:
 
     def _launch(self, plan: BatchPlan, seqs: list[Seq]) -> _Inflight:
         """Enqueue the step's device work without waiting for the device, then advance the host mirrors."""
-        rows = [(seq, int(n), bool(k)) for seq, n, k in zip(seqs, plan.n_query, plan.n_logits, strict=True)]
-        sync = any(seq in self._prompt_lp or seq.params.logprobs is not None for seq, _, k in rows if k) or any(
-            seq in self._prompt_lp for seq, _, _ in rows)
+        rows = [(seq, int(n), int(m)) for seq, n, m in zip(seqs, plan.n_query, plan.n_logits, strict=True)]
+        sync = any(seq in self._prompt_lp or (m and seq.params.logprobs is not None) for seq, _, m in rows)
         decode = bool((plan.n_query == 1).all())
+        exact = np.array([seq.inexact == 0 for seq in seqs], dtype=bool)
         graphed = self.graphs is not None and decode and not sync and len(seqs) <= self._buckets[-1]   # all captured
         if graphed:
             plan = padded(plan, next(b for b in self._buckets if b >= len(seqs)), self.state.padding_slot)
-        ctx = self._context(plan)
-        out = sampled = tokens = None
+            exact = np.concatenate([exact, np.ones(len(plan.slots) - len(seqs), dtype=bool)])   # padding: start 0
+        ctx = self._context(plan, exact)
+        out = sampled = accepts = None
         if graphed:
             keys = [meta.graph_key for meta in ctx.metas.values()]
             key = (len(plan.slots), self.sampler.variant(plan.slots), *keys)
@@ -423,35 +471,53 @@ class Engine:
                 self._record_prompt_logprobs(h, plan, seqs)
             else:
                 logits = self.model(ctx)            # always: chunks without sampled rows still write their state
-            if plan.n_logits.any():
+            if (plan.n_logits > 1).any():           # verify rows
+                out, accepts = self.verifier.verify(logits.float(), ctx)
+                sampled = self._store(ctx, out.tokens, accepts)
+            elif plan.n_logits.any():
                 out = self.sampler.sample(logits.float(), ctx)
                 sampled = self._store(ctx, out.tokens)
+        if sampled is not None and self.drafter is not None:
+            self.drafter.propose(ctx)               # drafts for the next step, from the advanced SeqTable
+        tokens = None
         if sampled is not None:
-            n_sampled = sum(k for _, _, k in rows)
+            n_sampled = sum(m for _, _, m in rows)
             tokens = self._out_tokens[self._out_turn][:n_sampled]
             tokens.copy_(sampled[:n_sampled], non_blocking=True)
+            if accepts is not None:
+                accepts = self._out_accepts[self._out_turn][: len(accepts)].copy_(accepts, non_blocking=True)
             self._out_turn ^= 1
         done = platform.Event(self.device)
         done.record()
-        for seq, n, sampled in rows:
-            seq.num_computed += n
-            if sampled:
-                seq.pending += 1
+        for seq, n, m in rows:
+            seq.num_computed += n                   # an upper bound for verify rows until their commit
+            if m:
+                seq.pending += m
+                seq.inexact += m > 1
                 if seq.status is not Status.RUNNING:
                     self.sched.finished_prefill(seq)
-        return _Inflight(rows, out, tokens, done, sync)
+        return _Inflight(rows, out, tokens, accepts, done, sync)
 
     def _decode(self, ctx: StepContext) -> torch.Tensor:
         """A decode step's device work from inputs to sampled tokens — the part captured in a graph."""
         self._prepare(ctx)
         return self._store(ctx, self.sampler.sample(self.model(ctx).float(), ctx).tokens)
 
-    def _store(self, ctx: StepContext, tokens: torch.Tensor) -> torch.Tensor:
-        """Advance the device SeqTable for the sampled rows: their new last token and computed length."""
+    def _store(self, ctx: StepContext, tokens: torch.Tensor, accepts: torch.Tensor | None = None) -> torch.Tensor:
+        """Advance the device SeqTable for the sampled rows: the next input token and the computed length — for a
+        verify row, only up to the drafts it accepted (the state its rejected drafts wrote is past that length)."""
         dev = ctx.batch.dev
-        slots = dev.slots[dev.logits_rows]
-        self.last_token[slots] = tokens
-        self.num_computed[slots] = ctx.prep.lens[dev.logits_rows].long()
+        if accepts is None:
+            slots = dev.slots[dev.logits_rows]
+            self.last_token[slots] = tokens
+            self.num_computed[slots] = ctx.prep.lens[dev.logits_rows].long()
+            return tokens
+        width = int(ctx.batch.plan.n_logits.max())
+        rows = dev.logits_rows.view(-1, width)[:, 0]
+        slots = dev.slots[rows]
+        self.last_token[slots] = tokens.view(-1, width).gather(1, accepts[:, None])[:, 0]
+        self.num_computed[slots] = ctx.prep.lens[rows].long() - (width - 1) + accepts
+        self.seq_table.n_accept[slots] = accepts
         return tokens
 
     def _context(self, plan: BatchPlan, exact: np.ndarray | None = None) -> StepContext:
@@ -468,8 +534,8 @@ class Engine:
             positions=up.dev["positions"][:tokens],
             query_start=up.put("query_start", qstart),
             slots=up.put("slots", plan.slots.astype(np.int64)),
-            logits_index=up.put("logits_index", qstart[1:][plan.n_logits > 0] - 1),
-            logits_rows=up.put("logits_rows", np.flatnonzero(plan.n_logits > 0)),
+            logits_index=up.put("logits_index", _last_tokens(qstart, plan.n_logits)),
+            logits_rows=up.put("logits_rows", np.repeat(np.arange(rows), plan.n_logits)),
         ))
         prep = _Prep(row_of_token=up.put("row_of_token", np.repeat(np.arange(rows), n)),
                      offset=up.put("offset", np.arange(tokens) - np.repeat(qstart[:-1], n)),
@@ -478,10 +544,17 @@ class Engine:
                      start=up.put("start", plan.start_upper.astype(np.int64)),
                      from_device=up.put("from_device", plan.token_src == TokenSrc.DEVICE_LAST),
                      lens=up.dev["pages.lens"][:rows])
+        verify = np.flatnonzero(plan.n_logits > 1)
+        if len(verify):                          # a verify row's inputs after the first are its drafts (on device)
+            k = int(n[verify[0]]) - 1
+            j = np.tile(np.arange(k), len(verify))
+            prep.draft_index = up.put("draft_index", np.repeat(qstart[verify] + 1, k) + j)
+            cols = self.seq_table.draft_tokens.shape[1]
+            prep.draft_from = up.put("draft_from", np.repeat(plan.slots[verify].astype(np.int64) * cols, k) + j)
         pages = self.state.pages(plan, up)
         up.end()
         metas = {g: p.plan_bounds(batch, pages.get(g)) for g, p in self.planners.items()}
-        return StepContext(batch, metas, pages=pages, prep=prep)
+        return StepContext(batch, metas, seq_table=self.seq_table, pages=pages, prep=prep)
 
     def _prepare(self, ctx: StepContext) -> None:
         """The device half: the SeqTable's starts for host-exact rows, then positions, lengths, write indices and
@@ -493,6 +566,8 @@ class Engine:
         prep.lens.copy_(start + prep.n_query)
         first = dev.query_start[:-1]
         dev.input_ids[first] = torch.where(prep.from_device, self.last_token[dev.slots], dev.input_ids[first])
+        if prep.draft_index is not None:
+            dev.input_ids[prep.draft_index] = self.seq_table.draft_tokens.view(-1)[prep.draft_from]
         slot_of_token = dev.slots[prep.row_of_token]
         for pages in ctx.pages.values():
             unit = pages.table[slot_of_token, dev.positions // pages.page].long()
@@ -525,23 +600,35 @@ class Engine:
         """Host bookkeeping once a step's results are on the host: tokens, finishing, publishing, streaming."""
         step.done.synchronize()
         tokens = step.tokens.tolist() if step.tokens is not None else []
+        accepts = iter(step.accepts.tolist() if step.accepts is not None else [])
         lps = None if step.out is None or step.out.logprobs is None else (
             step.out.logprobs.tolist(), step.out.top_ids.tolist(), step.out.top_logprobs.tolist())
         deltas, row = [], 0
-        for seq, _, sampled in step.rows:
-            if not sampled:
+        for seq, _, m in step.rows:
+            if not m:
                 if seq.status is not Status.FINISHED:
                     self.state.publish(seq)
                 continue
-            token, row = tokens[row], row + 1
-            seq.pending -= 1
-            if seq.status is Status.FINISHED:          # finished at an earlier commit; this row was extra
+            emitted, at = tokens[row: row + 1], row
+            if m > 1:                                # a verify row: the accepted drafts, then the target's token
+                accepted = next(accepts)
+                emitted = tokens[row: row + accepted + 1]
+                seq.inexact -= 1
+                if seq.status is Status.RUNNING:     # the host length is exact again (preempted ones restart at 0)
+                    seq.num_computed -= m - 1 - accepted
+            row += m
+            seq.pending -= m
+            if seq.status is Status.FINISHED:      # finished at an earlier commit; this row was extra
                 continue
-            seq.tokens.append(token)
+            reason, out = None, []
+            for token in emitted:
+                seq.tokens.append(token)
+                out.append(token)
+                if reason := self._finish_reason(seq, token):
+                    break
             self.state.publish(seq)
             for sibling in reversed(self._siblings.pop(seq, [])):     # its prompt is cached now
                 self.sched.add(sibling, front=True)
-            reason = self._finish_reason(seq, token)
             if reason:
                 self.sched.finish(seq, reason)
                 live = self._live.get(seq.rid, [])
@@ -549,10 +636,9 @@ class Engine:
                     live.remove(seq)
                 if not live:
                     self._live.pop(seq.rid, None)
-            k = seq.params.logprobs
-            logprobs = None if k is None else Logprobs([lps[0][row - 1]], [lps[1][row - 1][:k]],
-                                                       [lps[2][row - 1][:k]])
-            deltas.append(TokenDelta(seq.rid, [token], index=seq.index, logprobs=logprobs,
+            k = seq.params.logprobs                  # logprob requests are never drafted: one token per row
+            logprobs = None if k is None else Logprobs([lps[0][at]], [lps[1][at][:k]], [lps[2][at][:k]])
+            deltas.append(TokenDelta(seq.rid, out, index=seq.index, logprobs=logprobs,
                                      prompt_logprobs=self._prompt_lp.pop(seq, None), finish_reason=reason))
         return deltas
 

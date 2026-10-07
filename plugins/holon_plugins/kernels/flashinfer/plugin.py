@@ -88,7 +88,8 @@ class Plugin:
         for op, impl in (("attention.paged_prefill", Prefill), ("attention.paged_decode", Decode)):
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="kernels.flashinfer", impl=impl, in_layouts={"kv": "kv.hnd"},
-                requires=Constraint(sm_min=80, sm_max=129), supports=_supports, props=frozenset({"deterministic"}),
+                requires=Constraint(sm_min=80, sm_max=129), supports=_supports,
+                props=frozenset({"deterministic", "needs_host_lens"}),
                 priority=10 if op == "attention.paged_prefill" else 5))
         for op, impl, supports in (("rmsnorm", ops.RMSNorm, _half), ("add_rmsnorm", ops.AddRMSNorm, _half),
                                    ("rope", ops.Rope, _rope), ("silu_mul", ops.SiluMul, _half)):

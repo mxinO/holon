@@ -73,12 +73,15 @@ class SamplerPlugin(Protocol):
 
 class Verifier(Protocol):
     def verify(self, logits: torch.Tensor, ctx: StepCtx) -> tuple[SampleOut, torch.Tensor]:
-        """Check the drafts in the SeqTable; return the emitted tokens and `n_accept` per row (device)."""
+        """`logits` [R * (1+k), V]: the 1+k rows of each verify row in order (its last input token, then its k drafts,
+        which the SeqTable's draft_tokens hold). Returns tokens [R * (1+k)] — position j is the token to emit after
+        accepting j drafts — and `n_accept` [R] (device)."""
 
 
 class Drafter(Protocol):
     def propose(self, ctx: StepCtx) -> None:
-        """Write draft tokens into the SeqTable's draft buffers."""
+        """After each sample stage: write `seq_table.draft_tokens[slot, :k_max]` for the sampled rows' slots, the
+        drafts for positions `num_computed[slot] + 1 + j` (num_computed is already advanced)."""
 
 
 class DraftPolicy(Protocol):

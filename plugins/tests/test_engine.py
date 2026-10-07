@@ -143,11 +143,12 @@ def test_fast_kernels_agree_with_reference_and_are_run_identical_bf16():
     fast = Engine(EngineConfig(**cfg))
     assert {k.split("/")[-1]: v["provider"] for k, v in fast.ctx.kernels.items()} == {
         "attention.paged_prefill@1": "kernels.flashinfer", "attention.paged_decode@1": "kernels.triton_attn",
-        "rmsnorm@1": "kernels.flashinfer", "add_rmsnorm@1": "kernels.flashinfer", "rope@1": "kernels.flashinfer",
-        "silu_mul@1": "kernels.flashinfer"}
+        "attention.paged_verify@1": "kernels.triton_attn", "rmsnorm@1": "kernels.flashinfer",
+        "add_rmsnorm@1": "kernels.flashinfer", "rope@1": "kernels.flashinfer", "silu_mul@1": "kernels.flashinfer"}
     first, again = fast.generate(prompts, params), fast.generate(prompts, params)
     del fast
     oracles = {"attention.paged_prefill": "std.mixers.gqa", "attention.paged_decode": "std.mixers.gqa",
+               "attention.paged_verify": "std.mixers.gqa",
                "rmsnorm": "std.ops", "add_rmsnorm": "std.ops", "rope": "std.ops", "silu_mul": "std.ffn"}
     ref = Engine(EngineConfig(**cfg, kernels=oracles)).generate(prompts, params)
 

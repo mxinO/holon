@@ -1,6 +1,8 @@
 """The attention op contract this mixer owns, and its reference kernel.
 
-Ops `attention.paged_prefill@1` (ragged chunk rows) and `attention.paged_decode@1` (one row per sequence). A kernel
+Ops `attention.paged_prefill@1` (ragged chunk rows), `attention.paged_decode@1` (one row per sequence) and
+`attention.paged_verify@1` (the same number of rows, 1 + k, for every sequence: the last input token and k drafts;
+lengths only on the device, so verify kernels must not plan from host lengths). A kernel
 plugin registers a `KernelSpec` whose `impl(ctx, **facts)` returns an instance with:
 
 - `plan(batch, pages) -> handle`: host side, once per step (e.g. a library's `plan()`), writing what it can into
@@ -21,7 +23,7 @@ from __future__ import annotations
 
 from . import reference as ref
 
-PREFILL, DECODE = "attention.paged_prefill@1", "attention.paged_decode@1"
+PREFILL, DECODE, VERIFY = "attention.paged_prefill@1", "attention.paged_decode@1", "attention.paged_verify@1"
 LAYOUT = "kv.hnd"
 
 

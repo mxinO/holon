@@ -76,6 +76,12 @@ def reserved_growth(device: torch.device, fn: Callable[[], object]) -> int:
     return torch.cuda.memory_reserved(device) - before
 
 
+def release_cache(device: torch.device) -> None:
+    """Return cached, unused allocator blocks to the driver."""
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
+
 def synchronize(device: torch.device) -> None:
     if device.type == "cuda":
         torch.cuda.synchronize(device)

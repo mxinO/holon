@@ -944,6 +944,18 @@ it stays `None` until tree verification (v2).
   - `PlanTransform`: appends `DEVICE_DRAFT` rows and sets the `spec.q` ShapeKey axis. Seqs with different k in one
     step are padded to the step's `spec.q` (the max k); the DraftPolicy chooses k from a finite declared set.
 - Rollback = core commit fan-out to all Rewindables.
+- **The SeqTable seam (implemented, M0 acceptance §3.4-5).** Every step's positions, lengths and page write indices
+  are derived on the device from the SeqTable's `num_computed` (`Engine._prepare`, inside the graph for decode); the
+  host writes the starts it knows exactly (prefill chunks, padding rows, requests without an uncommitted verify
+  row) through a per-row mask, so a verify row's outcome never has to reach the host before the next step is
+  planned. A draft policy (`draft_policy` slot) picks k per request; the step takes the smallest k any row allows,
+  clamped so drafts stay below `max_model_len`; verify rows (1 + k tokens, all producing logits) read their drafts
+  from `SeqTable.draft_tokens`; the verifier (`verifier` slot; `std.spec.greedy`, greedy-exact) returns the tokens
+  and `n_accept`; the sample stage writes `last_token`, `num_computed = start + 1 + n_accept` and `n_accept`, and the
+  drafter (`drafter` slot) proposes the next drafts from there. Commit appends the accepted tokens (stopping at a
+  stop token or length) and makes the host length exact again. Requests with an uncommitted verify row skip steps
+  whose decode kernel plans from host lengths (`Planner.needs_host_lens`). Spec steps run eagerly in v0; real
+  drafters, sampled verification and spec graphs are M0.4.
 
 ### 7.7 Control plane and errors
 

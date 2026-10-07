@@ -24,5 +24,5 @@ docs/design-brainstorm.md
 .claude/worktrees/
 
 # Benchmark baselines (own venvs and sources) and raw run outputs.
-bench/.envs/
+bench/.envs
 bench/.out/

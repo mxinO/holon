@@ -39,6 +39,6 @@ for provider in ("kernels.triton_attn", "kernels.flashinfer"):
         results.append({"kernel": provider, "batch": b, "ctx": args.ctx, "step_ms": round(ms, 3),
                         "tok_s": round(b / ms * 1e3, 1)})
         print(results[-1], flush=True)
-    del eng
+    eng.close()
 if args.out:
     pathlib.Path(args.out).write_text(json.dumps({"gpu": torch.cuda.get_device_name(), "results": results}, indent=1))

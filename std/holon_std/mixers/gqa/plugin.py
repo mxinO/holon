@@ -7,7 +7,7 @@ from . import reference as ref
 class Plugin:
     def register(self, regs) -> None:
         regs.units.add("std.mixers.gqa", units.GQA)
-        for target in (kernels.PREFILL, kernels.DECODE):
+        for target in (kernels.PREFILL, kernels.DECODE, kernels.VERIFY):
             op = target.split("@")[0]
             regs.ops.add(op, ref.paged_attention)
             regs.kernels.add(op, KernelSpec(

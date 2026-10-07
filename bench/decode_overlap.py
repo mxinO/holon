@@ -37,7 +37,7 @@ for overlap in (False, True):
         results.append({"overlap": overlap, "batch": b, "step_ms": round(wall / n * 1e3, 3),
                         "cpu_ms_per_step": round(cpu / n * 1e3, 3), "tok_s": round(b * n / wall, 1)})
         print(results[-1], flush=True)
-    del eng
+    eng.close()
 if args.out:
     command = f"bench/decode_overlap.py --ctx {args.ctx} --steps {args.steps}"
     record = {"gpu": torch.cuda.get_device_name(), "command": command, "results": results}

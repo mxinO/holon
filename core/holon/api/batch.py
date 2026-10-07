@@ -63,6 +63,7 @@ class Seq:
     slot: int = -1                       # persistent device row
     num_computed: int = 0                # host mirror; exact after commit
     pending: int = 0                     # tokens sampled on the device, not yet committed (an upper bound)
+    inexact: int = 0                     # uncommitted verify rows: num_computed is then only an upper bound
     status: Status = Status.WAITING
     finish_reason: str | None = None
     ext: dict[str, Any] = dataclasses.field(default_factory=dict)  # namespaced plugin state; core never reads
@@ -74,13 +75,14 @@ class Seq:
 
 @dataclasses.dataclass(slots=True, eq=False)
 class SeqTable:
-    """Device-authoritative per-slot state, updated only inside the sample graph. Draft probabilities are added
-    with speculative decoding (M0.4)."""
+    """Device-authoritative per-slot state, written by the step's sample stage (inside the graph when captured):
+    while steps are in flight it, not the host mirror, holds the true lengths. Draft probabilities are added with
+    sampled verification (M0.4)."""
 
-    num_computed: torch.Tensor           # [S] int32
-    last_token: torch.Tensor             # [S] int64
-    n_accept: torch.Tensor               # [S] int32
-    draft_tokens: torch.Tensor           # [S, k_max] int64
+    num_computed: torch.Tensor           # [S] int64: tokens whose state is computed; the next input's position
+    last_token: torch.Tensor             # [S] int64: the next input token
+    n_accept: torch.Tensor               # [S] int64: drafts accepted by the last verify row
+    draft_tokens: torch.Tensor           # [S, k_max] int64: drafts for positions num_computed + 1 + j
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

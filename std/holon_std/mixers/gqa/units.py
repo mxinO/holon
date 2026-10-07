@@ -29,13 +29,23 @@ class AttnMeta:
 
 
 class Planner:
-    """Owns this group's kernel instances; each step is all prefill chunks or all decode rows (v0 scheduler)."""
+    """Owns this group's kernel instances; each step is all prefill chunks, all decode rows or all verify rows of one
+    width (v0 scheduler)."""
 
-    def __init__(self, prefill: Any, decode: Any) -> None:
-        self.prefill, self.decode = prefill, decode
+    def __init__(self, prefill: Any, decode: Any, verify: Any, needs_host_lens: bool) -> None:
+        self.prefill, self.decode, self.verify = prefill, decode, verify
+        # Decode steps plan from host lengths (e.g. FlashInfer), so a request whose length is only known on the
+        # device (an uncommitted verify row) must sit them out; the core reads this (design §7.3).
+        self.needs_host_lens = needs_host_lens
 
     def plan_bounds(self, batch, pages) -> AttnMeta:
-        kernel = self.decode if (batch.plan.n_query == 1).all() else self.prefill
+        n_query, n_logits = batch.plan.n_query, batch.plan.n_logits
+        if (n_query == 1).all():
+            kernel = self.decode
+        elif (n_logits == n_query).all() and (n_query == n_query[0]).all():
+            kernel = self.verify
+        else:
+            kernel = self.prefill
         return AttnMeta(kernel, kernel.plan(batch, pages), pages)
 
     def prepare_device(self, meta: AttnMeta, ctx) -> None:
@@ -66,9 +76,10 @@ class GQA(nn.Module):
         facts = {"heads": params["heads"], "kv_heads": params["kv_heads"], "head_dim": params["head_dim"],
                  "page": specs[0].shape.tokens_per_unit, "q_dtype": dtype, "kv_dtype": dtype,
                  "layout": kernels.LAYOUT, "max_seqs": ctx.options["max_seqs"]}
-        prefill, decode = (ctx.select_kernel(op, site=specs[0].group, **facts).impl(ctx, **facts)
-                           for op in (kernels.PREFILL, kernels.DECODE))
-        return Planner(prefill, decode)
+        ops = (kernels.PREFILL, kernels.DECODE, kernels.VERIFY)
+        chosen = [ctx.select_kernel(op, site=specs[0].group, **facts) for op in ops]
+        decode_props = chosen[1].props
+        return Planner(*(spec.impl(ctx, **facts) for spec in chosen), needs_host_lens="needs_host_lens" in decode_props)
 
     def __init__(self, ctx, *, layer: int, hidden: int, heads: int, kv_heads: int, head_dim: int, rope: Ref,
                  qk_norm: Ref | None = None) -> None:
