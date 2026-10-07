@@ -5,9 +5,10 @@ requests, aborts and control messages go in over one ZeroMQ socket, and each eng
 message over another. Messages are two frames — a kind and a msgspec/msgpack payload of the API's plain records — so
 a native frontend could speak the same protocol.
 
-Failure model: if the engine fails inside a step it reports an error for every live request before exiting; if it
-dies outright the client notices (the process is gone) and ends every open request with an error. Either way no
-frontend waits forever; restarting the engine is the supervisor's job (design §7.7).
+Failure model: if the engine fails inside a step it sends a `failed` message before exiting; if it dies outright the
+client notices (the process is gone). Either way the client ends every open request with an error, refuses new ones
+and names the reason in `failure` — so no frontend waits forever, and the supervisor can tell an engine failure from
+a rejected request. Restarting the engine is the supervisor's job (design §7.7, `supervisor.py`).
 """
 from __future__ import annotations
 
@@ -89,13 +90,10 @@ def serve(engine_factory: Callable[[], Any], endpoints: Endpoints) -> None:
         try:
             if engine.has_work():
                 deltas += engine.step()
-        except Exception as e:  # noqa: BLE001 — every live request learns why before the process exits
-            error = f"engine failed: {type(e).__name__}: {e}"
-            try:
-                deltas += engine.fail_all(error)
-            except Exception:  # noqa: BLE001 — the engine is broken: name its requests without its help
-                deltas += [TokenDelta(rid, [], finish_reason="error", error=error) for rid in list(engine._live)]
-            outbox.send_multipart([b"deltas", _encode(deltas)])
+        except Exception as e:  # noqa: BLE001 — the client ends every open request with this reason
+            if deltas:
+                outbox.send_multipart([b"deltas", _encode(deltas)])
+            outbox.send_multipart([b"failed", _encode(f"engine failed: {type(e).__name__}: {e}")])
             raise
         if deltas:
             outbox.send_multipart([b"deltas", _encode(deltas)])
@@ -115,6 +113,11 @@ class Client:
         self._stats: collections.deque[asyncio.Future[dict[str, Any]]] = collections.deque()
         self._reader: asyncio.Task[None] | None = None
         self._dead: str | None = None             # why the engine is gone, once it is
+
+    @property
+    def failure(self) -> str | None:
+        """Why the engine is gone (it failed, exited, or the reader broke); None while it serves."""
+        return self._dead
 
     async def wait_ready(self) -> None:
         while not await self._results.poll(_POLL_MS):
@@ -171,6 +174,9 @@ class Client:
                         return
                     continue
                 kind, payload = await self._results.recv_multipart()
+                if kind == b"failed":
+                    self._fail(_DECODE[kind].decode(payload))
+                    return
                 if kind == b"stats":
                     if self._stats and not (future := self._stats.popleft()).done():    # its caller may have left
                         future.set_result(_DECODE[kind].decode(payload))
@@ -185,6 +191,8 @@ class Client:
 
     def _fail(self, reason: str) -> None:
         """End every open request and pending stats call; refuse new ones."""
+        if self._dead is not None:
+            return
         self._dead = reason
         for rid, queue in self._queues.items():
             queue.put_nowait(TokenDelta(rid, [], finish_reason="error", error=reason))
@@ -193,18 +201,20 @@ class Client:
                 future.set_exception(RuntimeError(reason))
 
     def close(self) -> None:
+        self._fail("client closed")               # nothing may be left waiting on a closed client
         if self._reader is not None:
             self._reader.cancel()
         self._ctx.destroy(linger=0)
 
 
-def _engine_main(config: Any, endpoints: Endpoints) -> None:
+def engine_main(config: Any, endpoints: Endpoints) -> None:
+    """The engine process's default target."""
     from .engine import Engine  # imported in the child: CUDA initializes only there
 
     serve(lambda: Engine(config), endpoints)
 
 
-def launch(config: Any, target: Callable[..., None] = _engine_main
+def launch(config: Any, target: Callable[..., None] = engine_main
            ) -> tuple[multiprocessing.process.BaseProcess, Endpoints]:
     """Start an engine process for `config` (an EngineConfig); connect a `Client` to the returned endpoints."""
     endpoints = Endpoints.local()
@@ -213,20 +223,47 @@ def launch(config: Any, target: Callable[..., None] = _engine_main
     return proc, endpoints
 
 
+@dataclasses.dataclass
+class EngineProcess:
+    """A running engine process and its ready client."""
+
+    proc: multiprocessing.process.BaseProcess
+    endpoints: Endpoints
+    client: Client
+
+    @classmethod
+    async def start(cls, config: Any, target: Callable[..., None] = engine_main) -> EngineProcess:
+        """Launch an engine for `config` and wait until it is ready; raises RuntimeError if it fails to start.
+        `target` runs in the child (tests substitute engines that fail on purpose)."""
+        proc, endpoints = launch(config, target)
+        engine = cls(proc, endpoints, Client(endpoints, alive=proc.is_alive))
+        try:
+            await engine.client.wait_ready()
+        except BaseException:
+            await engine.stop(graceful=False)
+            raise
+        return engine
+
+    async def stop(self, graceful: bool = True) -> None:
+        """Shut the engine down (`graceful`: let it finish the step in flight, else kill it) and clean up."""
+        try:
+            if graceful and self.client.failure is None:
+                with contextlib.suppress(Exception):
+                    await self.client.control("shutdown")
+                await asyncio.to_thread(self.proc.join, 30)
+        finally:                                  # even when cancelled: no process or socket directory is left
+            self.client.close()
+            if self.proc.is_alive():
+                self.proc.kill()
+            shutil.rmtree(self.endpoints.directory, ignore_errors=True)
+        await asyncio.to_thread(self.proc.join)   # its device memory is free before anything starts again
+
+
 @contextlib.asynccontextmanager
-async def engine_process(config: Any, target: Callable[..., None] = _engine_main) -> AsyncIterator[Client]:
-    """An engine process and a ready client for it; shuts the engine down on exit. `target` runs in the child
-    (tests substitute engines that fail on purpose)."""
-    proc, endpoints = launch(config, target)
-    client = Client(endpoints, alive=proc.is_alive)
+async def engine_process(config: Any, target: Callable[..., None] = engine_main) -> AsyncIterator[Client]:
+    """An engine process and a ready client for it; shuts the engine down on exit."""
+    engine = await EngineProcess.start(config, target)
     try:
-        await client.wait_ready()
-        yield client
+        yield engine.client
     finally:
-        with contextlib.suppress(Exception):
-            await client.control("shutdown")
-        client.close()
-        proc.join(timeout=30)
-        if proc.is_alive():
-            proc.kill()
-        shutil.rmtree(endpoints.directory, ignore_errors=True)
+        await engine.stop()

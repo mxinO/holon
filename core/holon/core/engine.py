@@ -61,6 +61,12 @@ def _splitmix64(x: int) -> int:
     return x ^ (x >> 31)
 
 
+def sequence_seed(seed: int, index: int) -> int:
+    """The seed of sequence `index` of a request seeded `seed` (the supervisor resubmits sequences one by one)."""
+    base = seed & _SEED_MASK
+    return base if index == 0 else _splitmix64(base + index) & _SEED_MASK
+
+
 @dataclasses.dataclass
 class EngineConfig:
     model: str                               # checkpoint directory
@@ -346,11 +352,11 @@ class Engine:
         rid = rid if rid is not None else str(next(self._ids))
         if rid in self._live:
             raise ValueError(f"request id {rid!r} is already in flight")
-        base = (p.seed if p.seed is not None else secrets.randbits(63)) & _SEED_MASK
+        base = p.seed if p.seed is not None else secrets.randbits(63)
         for i in range(p.n):
             # A concrete seed per sequence keeps sampling reproducible across batching and preemption.
-            seed = base if i == 0 else _splitmix64(base + i) & _SEED_MASK
-            child = dataclasses.replace(p, seed=seed, prompt_logprobs=p.prompt_logprobs if i == 0 else None)
+            child = dataclasses.replace(p, seed=sequence_seed(base, i),
+                                        prompt_logprobs=p.prompt_logprobs if i == 0 else None)
             seq = Seq(rid=rid, tokens=list(token_ids), params=child, index=i)
             self._live.setdefault(rid, []).append(seq)       # siblings too: abort must account for them
             if child.prompt_logprobs is not None:
@@ -380,10 +386,6 @@ class Engine:
             self._prompt_lp.pop(seq, None)
             deltas.append(TokenDelta(rid, [], index=seq.index, finish_reason=reason, error=error))
         return deltas
-
-    def fail_all(self, error: str) -> list[TokenDelta]:
-        """An error delta for every live request (the engine is going down)."""
-        return [d for rid in list(self._live) for d in self.abort(rid, "error", error)]
 
     def drain(self) -> list[TokenDelta]:
         """Commit the step in flight (the quiesce point: nothing runs on the device afterwards)."""

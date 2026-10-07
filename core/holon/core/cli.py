@@ -1,4 +1,5 @@
-"""`python -m holon serve`: the engine in its own process behind a frontend plugin (design §7.8)."""
+"""`python -m holon serve`: the engine in its own process, kept serving by the supervisor, behind a frontend plugin
+(design §7.7, §7.8)."""
 from __future__ import annotations
 
 import argparse
@@ -11,6 +12,7 @@ import torch
 from .engine import EngineConfig, resolve_model
 from .ipc import engine_process
 from .plugins import PluginError, PluginSet, discover
+from .supervisor import supervised
 
 
 def _engine_flags(parser: argparse.ArgumentParser) -> None:
@@ -36,6 +38,8 @@ def main(argv: list[str] | None = None) -> None:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--frontend", default=None, help="frontend plugin name (default: the one installed)")
+    serve.add_argument("--supervised", action=argparse.BooleanOptionalAction, default=True,
+                       help="restart a failed engine and resubmit its requests (default: on)")
     _engine_flags(serve)
     args = parser.parse_args(argv)
     fields = {f.name for f in dataclasses.fields(EngineConfig)}
@@ -51,7 +55,19 @@ def main(argv: list[str] | None = None) -> None:
     frontend = plugins.load(name)
 
     async def run() -> None:
-        async with engine_process(config) as client:
-            await frontend.serve(client, bundle, args.host, args.port)
+        if not args.supervised:
+            async with engine_process(config) as client:
+                await frontend.serve(client, bundle, args.host, args.port)
+            return
+        async with supervised([config]) as supervisor:      # the lock history arrives with the registry (§4.4)
+            serving = asyncio.ensure_future(frontend.serve(supervisor, bundle, args.host, args.port))
+            gave_up = asyncio.ensure_future(supervisor.failed())
+            done, _ = await asyncio.wait({serving, gave_up}, return_when=asyncio.FIRST_COMPLETED)
+            serving.cancel()
+            gave_up.cancel()
+            await asyncio.gather(serving, gave_up, return_exceptions=True)   # the frontend stops before the engine
+            if gave_up in done:
+                raise SystemExit(f"holon: {gave_up.result()}")
+            serving.result()                                  # re-raises whatever stopped the frontend
 
     asyncio.run(run())

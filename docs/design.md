@@ -973,6 +973,37 @@ it stays `None` until tree verification (v2).
 - Sampling API coverage in v0 includes `n > 1` (via `StateKind.fork`), output logprobs/top-k logprobs and **prompt
   logprobs** (the judge's teacher-forced re-scoring also uses them).
 
+**Implemented (M0).** The v0 supervisor is `holon.core.supervisor` (the core owns the engine lifecycle; the
+`supervisor/` package keeps the optional layer of §10). It is the frontends' `EngineClient` (`holon serve
+--supervised`, the default). Health: the IPC client notices a dead process (the engine also sends `failed` when a
+step raises), and a periodic `stats` ping with a timeout catches a hung one. After a crash the engine restarts on the
+same config and every in-flight request is resubmitted from its committed tokens — each unfinished sequence as
+prompt + tokens streamed, its own seed (`sequence_seed`), the remaining `max_tokens`; since sampling is a pure
+function of (seed, position), the stream continues without duplicate or missing tokens. Attribution: each crash
+strikes the requests in flight; a request with `poison_crashes` (2) strikes that is the only such request in a crash,
+with other requests completed since its first strike, is quarantined, and the crashes it was in no longer count
+against the config. Several repeat suspects go on probation (rerun one at a time beside other requests) so a later
+crash isolates the culprit. Resubmission is bounded per request rather than by restarts per minute (a restart takes
+seconds, so such a rate would rarely trigger): a request that has lived through `max_crashes` (5) crashes, in flight
+or waiting, fails with an error. Every crash no quarantine explains is charged to the config: `rollback_crashes` (4)
+charges, or as many failed starts in a row, roll back to the previous entry of the config history. On the oldest
+entry the engine keeps restarting; the supervisor gives up (and `serve` exits) only when the engine cannot start.
+Strikes and charges are forgotten after `stable_s` (60 s) of engine uptime without a crash — uptime, not wall time, so
+slow restarts or hang timeouts do not make repeated crashes look unrelated. The history is a plain list of
+`EngineConfig`s, oldest first — the seam where the lock registry (§4.4) plugs in. Limits of v0 attribution: a poison
+request alone on an idle server cannot be told from a broken config (it fails by `max_crashes`, and its crashes count
+toward rollback); two poison requests submitted together can be probed before any survivor exists and charge enough
+crashes to roll back (rollback is permanent until restart); a crash caused by a fresh request while a suspect is on
+probation is blamed on the suspect; one long probe holds the other suspects back until it finishes, and several
+poison requests probed first can push innocent suspects past `max_crashes`; a config that crashes only after
+`stable_s` of uptime is treated as flaky and never rolls back.
+Measured (`bench/restart.py`, Qwen3-0.6B, rtx-a5000, overlap + CUDA graphs, 5 kills): restart (process launch →
+ready) 6.7–6.8 s, of which ~1.3 s imports and ~5.5 s engine init (weights, pool sizing, 27 graph captures); the
+stall a client sees is 7.7–7.8 s (≤ 1 s detection, teardown, restart); the continued greedy stream equals the
+uninterrupted one. **SLO (M0):** restart ≤ 10 s and client-visible stall ≤ 12 s for Qwen3-0.6B on every maintained
+class, re-measured with each class's tuned lock; larger models add their weight-load time, measured and recorded
+the same way before an SLO is set for them.
+
 ### 7.8 Frontend
 
 Separate process. API plugins (`openai.chat`, `openai.responses`, `anthropic.messages`) implement
