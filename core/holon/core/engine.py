@@ -99,6 +99,13 @@ class _Inflight:
     sync: bool                               # commit at once (its logprobs need the host)
 
 
+def resolve_model(plugins: PluginSet, cfg: EngineConfig) -> tuple[Any, Any]:
+    """The checkpoint's weight source and the model plugin that provides its architecture."""
+    plugins.load(plugins.owner(f"weight_source.{cfg.source}")[0])
+    source = plugins.regs.weight_sources.get(cfg.source)(cfg.model)
+    return source, plugins.load(plugins.owner(f"arch.{source.arch}")[0])
+
+
 class _PagesPlanner:
     """Default planner: kernels read the core's `Pages` directly."""
 
@@ -114,9 +121,8 @@ class Engine:
         self.cfg, self.device = cfg, torch.device(cfg.device)
         platform.configure_allocator(self.device)
         self.plugins = p = plugins or PluginSet(discover())
-        p.load(p.owner(f"weight_source.{cfg.source}")[0])
-        source = p.regs.weight_sources.get(cfg.source)(cfg.model)
-        self.spec = p.load(p.owner(f"arch.{source.arch}")[0]).recipe(source.config(), source.kind)
+        source, model_plugin = resolve_model(p, cfg)
+        self.spec = model_plugin.recipe(source.config(), source.kind)
         self.eos = source.eos_token_ids
 
         self.ledger = Ledger(self.device)
