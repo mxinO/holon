@@ -1,0 +1,28 @@
+{
+ "workload": "restart",
+ "date": "2026-10-07",
+ "gpu_class": "rtx-a5000",
+ "model": "Qwen/Qwen3-8B@b968826d9c46",
+ "command": "python bench/restart.py --gpu 3 --model Qwen/Qwen3-8B@b968826d9c46 --kills 5 --every 64",
+ "commit": "52f0f1a4fa598afd9d0e6c2682b4c0d47ed4e63b",
+ "start_s": 11.05,
+ "restart_s": [
+  11.59,
+  11.55,
+  11.25,
+  11.14,
+  11.47
+ ],
+ "stall_s": [
+  12.62,
+  12.61,
+  12.31,
+  12.22,
+  12.55
+ ],
+ "restart_median_s": 11.47,
+ "restart_max_s": 11.59,
+ "crashes": 5,
+ "tokens": 384,
+ "whole": true
+}
