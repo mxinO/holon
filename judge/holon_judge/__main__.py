@@ -6,8 +6,10 @@
     python -m holon_judge l2       --model <hf dir or id> --prompts <jsonl> --golden <file> --floor <file>
                                    [--dtype bfloat16] [--k 20] [--save <file>] [--json <file>]
     python -m holon_judge snapshot-diff <a.json> <b.json>
+    python -m holon_judge bounded  --model <hf dir or id> --prompts <jsonl> [--json <file>]
+                                   # prefix cache on/off x overlap depth 1/0 on a multi-turn trace
 
-`compare`, `l2` and `snapshot-diff` exit with status 1 on a failed check.
+`compare`, `l2`, `snapshot-diff` and `bounded` exit with status 1 on a failed check.
 """
 from __future__ import annotations
 
@@ -62,6 +64,30 @@ def _snapshot_diff(a: argparse.Namespace) -> int:
     return 1 if where else 0
 
 
+def _bounded(a: argparse.Namespace) -> int:
+    from holon.core.engine import Engine, EngineConfig
+
+    from . import bounded
+
+    path = golden.resolve_model(a.model)
+    trace = bounded.Trace.from_prompts(PromptSet.load(a.prompts))
+
+    def build(**overrides):
+        return Engine(EngineConfig(model=str(path), dtype=golden.DTYPES[a.dtype], max_model_len=trace.max_len,
+                                   **overrides))
+
+    configs = {f"prefix {'on' if p else 'off'}, depth {int(o)}": {"prefix_cache": p, "overlap": o}
+               for p, o in ((True, True), (True, False), (False, True))}       # the baseline is off, 0
+    report = bounded.compare_configs(build, configs, trace, a.k)
+    report |= {"model": golden.model_meta(path)["model"], "dtype": a.dtype,
+               "hardware": golden.hardware(torch.device("cuda")), "torch": torch.__version__}
+    print(bounded.table(report))
+    if a.json:
+        pathlib.Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+        pathlib.Path(a.json).write_text(json.dumps(report, indent=1) + "\n")
+    return 0 if report["passed"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m holon_judge")
     sub = ap.add_subparsers(required=True)
@@ -99,6 +125,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("a")
     s.add_argument("b")
     s.set_defaults(run=_snapshot_diff)
+
+    b = sub.add_parser("bounded", help="judge engine configurations against the reference on a multi-turn trace")
+    b.add_argument("--model", required=True, help="HF checkpoint directory or hub id")
+    b.add_argument("--prompts", required=True)
+    b.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
+    b.add_argument("--k", type=int, default=20)
+    b.add_argument("--json", help="write the machine-readable report here")
+    b.set_defaults(run=_bounded)
 
     a = ap.parse_args(argv)
     return a.run(a)
