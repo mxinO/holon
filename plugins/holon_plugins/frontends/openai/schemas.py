@@ -6,7 +6,7 @@ stop_token_ids, ignore_eos, chat_template_kwargs).
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, get_args
 
 from holon.api import SamplingParams
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -38,12 +38,16 @@ class GenerationRequest(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _reject_unsupported(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            for key, unused in _UNSUPPORTED.items():
-                if data.get(key) not in (None, unused, {}):
-                    raise ValueError(f"{key!r} is not supported")
-        return data
+    def _normalize(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        for key, unused in _UNSUPPORTED.items():
+            if data.get(key) not in (None, unused, {}):
+                raise ValueError(f"{key!r} is not supported")
+        # Clients send null for "unset": a field that cannot be null takes its default instead.
+        fields = cls.model_fields
+        return {k: v for k, v in data.items()
+                if v is not None or k not in fields or type(None) in get_args(fields[k].annotation)}
 
     @property
     def stops(self) -> list[str]:

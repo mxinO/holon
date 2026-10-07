@@ -98,6 +98,7 @@ class FakeEngine:
         return Logprobs([-0.5] * len(ids), [[t, 0][:k] for t in ids], [[-0.5, -2.0][:k] for _ in ids])
 
     async def abort(self, rid):
+        await asyncio.sleep(0.01)          # a real client awaits IPC: the abort must survive cancellation
         self.aborted.append(rid)
 
     async def stats(self):
@@ -194,6 +195,14 @@ def test_stop_string_in_one_choice_keeps_the_other(http, engine):
     r = http.post("/v1/completions", json={"prompt": "Hi", "n": 2, "stop": "ond", "max_tokens": 100})
     assert [c["text"] for c in r.json()["choices"]] == [OUTPUTS[0], "Sec"]
     assert engine.aborted == []                        # the engine had finished both by the time we stopped reading
+
+
+def test_null_means_default(http, engine):
+    r = http.post("/v1/completions", json={"prompt": "Hi", "temperature": None, "n": None, "stream": None,
+                                           "stop_token_ids": None, "max_tokens": None, "stop": None})
+    assert r.status_code == 200
+    p = engine.requests[0][1]
+    assert (p.temperature, p.n, p.stop_token_ids, p.max_tokens) == (1.0, 1, (), None)
 
 
 def test_stop_token_ids_and_params(http, engine):
@@ -303,37 +312,50 @@ def test_models_health_metrics(http):
 
 # -- client disconnect ------------------------------------------------------------------------------------------------
 
-def _asgi_call(app, path, payload, disconnect_after_body: bool):
-    """Drive the app directly: Starlette's TestClient buffers whole responses and never disconnects."""
+def _asgi_call(app, path, payload, disconnect=None):
+    """Drive the app directly (Starlette's TestClient buffers whole responses and never disconnects). The client
+    disconnects after the first body chunk ("after_body"), shortly after sending ("soon"), or never (None).
+    Returns the response status."""
     scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"}, "http_version": "1.1",
              "method": "POST", "scheme": "http", "path": path, "raw_path": path.encode(), "root_path": "",
              "query_string": b"", "headers": [(b"content-type", b"application/json")],
              "server": ("test", 80), "client": ("test", 1)}
     messages = [{"type": "http.request", "body": json.dumps(payload).encode(), "more_body": False}]
-    got_body = asyncio.Event()
+    got_body, status = asyncio.Event(), []
 
     async def receive():
         if messages:
             return messages.pop()
-        if disconnect_after_body:
-            await got_body.wait()
-        else:
+        if disconnect == "soon":
             await asyncio.sleep(0.05)
+        else:
+            await got_body.wait()
+            if disconnect is None:
+                await asyncio.Event().wait()
         return {"type": "http.disconnect"}
 
     async def send(message):
+        if message["type"] == "http.response.start":
+            status.append(message["status"])
         if message["type"] == "http.response.body" and message.get("body"):
             got_body.set()
 
     asyncio.run(asyncio.wait_for(app(scope, receive, send), 5))
+    return status[0]
 
 
 @pytest.mark.parametrize("stream", [False, True])
 def test_disconnect_aborts(bundle, stream):
     engine = FakeEngine(endless=True)
     _asgi_call(build_app(engine, bundle), "/v1/completions", {"prompt": "Hi", "stream": stream, "max_tokens": None},
-               disconnect_after_body=stream)
+               disconnect="after_body" if stream else "soon")
     assert len(engine.requests) == 1 and engine.aborted == [engine.requests[0][2]]
+
+
+def test_rejected_prompt_in_batch_aborts_the_others(bundle):
+    engine = FakeEngine(endless=True)
+    status = _asgi_call(build_app(engine, bundle), "/v1/completions", {"prompt": ["x" * 100, "Hi"], "max_tokens": None})
+    assert status == 400 and engine.aborted == [engine.requests[1][2]]
 
 
 def test_plugin_manifest():

@@ -1,7 +1,6 @@
 """The HTTP app: OpenAI chat and text completions over an EngineClient, plus /v1/models, /health and /metrics."""
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 import uuid
@@ -92,9 +91,7 @@ def build_app(client: EngineClient, bundle: FrontendBundle) -> FastAPI:
                              n_prompt if req.include_usage else None)
             return _EventStream(events, media_type="text/event-stream")
 
-        async def collect(gen: AsyncIterator[Piece]) -> list[Piece]:
-            return [p async for p in gen]
-        results = await _unless_disconnected(request, asyncio.gather(*map(collect, gens)))
+        results = await _unless_disconnected(request, _collect(gens))
         if results is None:
             return Response(status_code=499)
         if errors := [p.error for pieces in results for p in pieces if p.finish_reason == "error"]:
@@ -105,6 +102,24 @@ def build_app(client: EngineClient, bundle: FrontendBundle) -> FastAPI:
         return JSONResponse({**envelope, "choices": choices, "usage": responses.usage(n_prompt, n_completion)})
 
     return app
+
+
+async def _collect(gens: list[AsyncIterator[Piece]]) -> list[list[Piece]]:
+    """Every piece of each prompt of a batch, generated concurrently. A rejected prompt fails the whole batch, so it
+    cancels the others (which aborts them). An anyio task group, unlike `asyncio.gather`, lets their shielded aborts
+    complete when the client disconnects."""
+    results: list[list[Piece]] = [[] for _ in gens]
+
+    async def fill(pieces: list[Piece], gen: AsyncIterator[Piece]) -> None:
+        async for p in gen:
+            pieces.append(p)
+            if p.finish_reason == "error":
+                tg.cancel_scope.cancel()
+
+    async with anyio.create_task_group() as tg:
+        for pieces, gen in zip(results, gens, strict=True):
+            tg.start_soon(fill, pieces, gen)
+    return results
 
 
 async def _events(fmt: responses.Chat | responses.Completion, envelope: dict[str, Any], first: Piece,

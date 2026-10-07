@@ -56,8 +56,9 @@ async def generate(client: EngineClient, tokenizer: Tokenizer, prompt_ids: list[
     the consumer went away (cancellation, `aclose`) — the request is aborted."""
     choices = [Choice(tokenizer, prompt_ids, stop) for _ in range(params.n)]
     running = set(range(params.n))     # sequences the engine has not finished
+    deltas = client.generate(prompt_ids, params, rid)
     try:
-        async for d in client.generate(prompt_ids, params, rid):
+        async for d in deltas:
             if d.finish_reason == "error":
                 running.clear()
                 yield Piece(d.index, "", [], finish_reason="error", error=d.error or "request rejected")
@@ -70,7 +71,9 @@ async def generate(client: EngineClient, tokenizer: Tokenizer, prompt_ids: list[
             if all(c.finish_reason for c in choices):
                 return
     finally:
-        if running:
-            # Shielded: a client disconnect cancels this task, and the abort must still reach the engine.
-            with anyio.CancelScope(shield=True):
+        # Shielded: a client disconnect cancels this task, and the engine must still hear of it. The client's own
+        # abort-on-close is not enough under that cancellation, hence the explicit one.
+        with anyio.CancelScope(shield=True):
+            await deltas.aclose()   # type: ignore[attr-defined]  # an async generator in practice
+            if running:
                 await client.abort(rid)

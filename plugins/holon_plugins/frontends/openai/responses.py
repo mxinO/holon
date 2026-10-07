@@ -77,8 +77,10 @@ class Completion:
         if p.logprobs is not None:
             rows = _rows(self.tok, p.token_ids, p.logprobs)
             if echo:
-                head: list[Row] = [(self.tok.decode(ids[:1]), None, None)]
-                rows = head + _rows(self.tok, ids[1:], self.prompt_lp[prompt]) + rows
+                # The engine scores the prompt on sequence 0; a sibling streamed ahead of it shows it unscored.
+                lp = self.prompt_lp.get(prompt)
+                scored = _rows(self.tok, ids[1:], lp) if lp else [(self.tok.decode([t]), None, None) for t in ids[1:]]
+                rows = [(self.tok.decode(ids[:1]), None, None), *scored, *rows]
             logprobs = self._logprobs(index, rows)
         return {"index": index, "text": text + p.text if echo else p.text, "logprobs": logprobs,
                 "finish_reason": p.finish_reason}
