@@ -22,3 +22,7 @@ docs/design-brainstorm.md
 
 # Agent worktrees (local)
 .claude/worktrees/
+
+# Benchmark baselines (own venvs and sources) and raw run outputs.
+bench/.envs/
+bench/.out/
