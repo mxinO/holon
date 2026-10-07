@@ -23,8 +23,9 @@ class EngineRequest:
 
 @dataclasses.dataclass(slots=True)
 class Logprobs:
-    """Per position: the chosen token's logprob and the ranked top-k (ids and logprobs as parallel lists).
-    Prompt logprobs cover prompt positions 1 … n-1 (the first token has no context)."""
+    """Per position: the chosen token's logprob and the ranked top-k (ids and logprobs as parallel lists), from the
+    raw logits (before temperature and filters). Prompt logprobs cover prompt positions 1 … n-1 (the first token
+    has no context)."""
 
     token: list[float]
     top_ids: list[list[int]]

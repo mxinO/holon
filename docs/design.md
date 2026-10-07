@@ -897,7 +897,8 @@ it stays `None` until tree verification (v2).
   The default sampler is a builtin plugin (`std.sampling`, implemented in E3): per-slot parameter tensors set on
   admission; temperature → top-k → top-p over the renormalized remainder → min-p; one counter-based uniform per row,
   a hash of (seed, position), picks the token by inverse CDF, so samples depend on neither batching nor preemption
-  and the step needs no generator state. The engine gives every sequence a concrete seed (`n > 1` siblings derive
+  and the step needs no generator state (resolution ≈ 1e-7 absolute probability: 24-bit uniform, fp32 CDF). The
+  engine gives every sequence a concrete seed (`n > 1` siblings derive
   theirs from the request's), and computes prompt logprobs from the trunk's hidden states in row chunks. Sampler, processors and verifiers declare whether they accept
   vocab-sharded logits or need gathered logits (TP seam, §8).
 - Speculative decoding = four roles:

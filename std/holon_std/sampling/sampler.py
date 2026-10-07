@@ -3,6 +3,9 @@
 Random draws are counter-based: one uniform per row, a hash of (seed, position), picks the token by inverse CDF
 over the row's (filtered) distribution. A request's samples therefore depend on neither batching nor preemption,
 there is no generator state, and the step is capturable in a graph. Semantics: `reference.probs`.
+
+Resolution: the uniform has 24 bits and the CDF is an fp32 cumulative sum, so tokens are drawn with their oracle
+probability up to about 1e-7 absolute (one fp32 step of the running sum); rarer tokens may be over- or under-drawn.
 """
 from __future__ import annotations
 
@@ -38,7 +41,7 @@ def _distribution(x: torch.Tensor, top_k: torch.Tensor | None, top_p: torch.Tens
     rank = torch.arange(x.shape[-1], device=x.device)[None, :]
     sorted_x = sorted_x.masked_fill((top_k[:, None] > 0) & (rank >= top_k[:, None]), float("-inf"))
     q = sorted_x.softmax(-1)
-    drop = (q.cumsum(-1) - q > top_p[:, None]) | (q < min_p[:, None] * q[:, :1])
+    drop = ((top_p[:, None] < 1) & (q.cumsum(-1) - q > top_p[:, None])) | (q < min_p[:, None] * q[:, :1])
     return q.masked_fill(drop, 0.0), order
 
 
@@ -72,10 +75,9 @@ class Sampler:
         self._logprobs[slot] = -1 if params.logprobs is None else params.logprobs
 
     def sample(self, logits: torch.Tensor, ctx) -> SampleOut:
-        plan = ctx.batch.plan
-        sampled = plan.n_logits > 0
-        slots = plan.slots[sampled]
-        rows = torch.as_tensor(slots, device=logits.device)
+        plan, dev = ctx.batch.plan, ctx.batch.dev
+        slots = plan.slots[plan.n_logits > 0]           # host mirror: which work this step needs
+        rows = dev.slots[dev.logits_rows]                # device: parameter rows (graph-capturable)
         tokens = logits.argmax(-1)
         if not self._greedy[slots].all():
             t = self.temperature[rows]
@@ -83,8 +85,8 @@ class Sampler:
             filters = (self.top_k[rows], self.top_p[rows], self.min_p[rows]) if self._filtered[slots].any() else (
                 None, None, None)
             q, order = _distribution(x, *filters)
-            positions = torch.as_tensor((plan.start_upper + plan.n_query)[sampled], device=logits.device)
-            drawn = draw(q, uniform(self.seed[rows], positions.long()))
+            positions = dev.positions[dev.logits_index].long() + 1     # the position of the token being drawn
+            drawn = draw(q, uniform(self.seed[rows], positions))
             if order is not None:
                 drawn = order.gather(-1, drawn[:, None])[:, 0]
             tokens = torch.where(t == 0, tokens, drawn)

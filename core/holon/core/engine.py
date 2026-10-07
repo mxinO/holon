@@ -42,6 +42,17 @@ from .plugins import PluginError, PluginSet, discover
 from .sched import Scheduler
 from .state import BoundSpec, StateManager
 
+PROMPT_LOGPROB_CHUNK = 256     # rows of full-vocabulary logits materialized at once for prompt logprobs
+_SEED_MASK = 2**63 - 1
+
+
+def _splitmix64(x: int) -> int:
+    """A fixed 64-bit mixer (sibling seeds must not depend on the interpreter's hash function)."""
+    x = (x + 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9 & 0xFFFFFFFFFFFFFFFF
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EB & 0xFFFFFFFFFFFFFFFF
+    return x ^ (x >> 31)
+
 
 @dataclasses.dataclass
 class EngineConfig:
@@ -95,7 +106,6 @@ class Engine:
         self.sched = Scheduler(self.state, cfg.max_step_tokens)
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None else self._measure_state_memory())
         self._ids = itertools.count()
-        self._index: dict[Seq, int] = {}                  # sequence -> its index among the request's n
         self._prompt_lp: dict[Seq, Logprobs] = {}         # sequences still accumulating prompt logprobs
 
     def _bind_state(self) -> tuple[list[BoundSpec], dict[str, Any]]:
@@ -147,8 +157,17 @@ class Engine:
         return int(platform.free_memory(self.device) * cfg.memory_fraction) - peak
 
     def _worst_step(self, plan: BatchPlan) -> None:
+        """The largest prefill, a prompt-logprob chunk, and a filtered sampling step over every slot with logprobs."""
         h = self.model.trunk(self._context(plan))
-        self.model.head(h[:256]).float().log_softmax(-1)      # a prompt-logprob chunk
+        self.model.head(h[:PROMPT_LOGPROB_CHUNK]).float().log_softmax(-1)
+        del h
+        n = self.cfg.max_seqs
+        for slot in range(n):
+            self.sampler.admit(slot, SamplingParams(temperature=1.0, top_p=0.9, seed=0, logprobs=20))
+        ones = np.ones(n, dtype=np.int32)
+        decode = host_plan(0, np.arange(n, dtype=np.int32), np.zeros(n, dtype=np.int32), ones, ones,
+                           np.zeros(n, dtype=np.int64))
+        self.sampler.sample(torch.zeros(n, self.spec.vocab, device=self.device), self._context(decode))
 
     # -- requests -------------------------------------------------------------------------------------------------
     def add(self, token_ids: list[int], params: SamplingParams | None = None) -> str:
@@ -164,13 +183,12 @@ class Engine:
         if p.presence_penalty or p.frequency_penalty or p.repetition_penalty != 1:
             raise NotImplementedError("sampling penalties are not supported yet")
         rid = str(next(self._ids))
-        base = p.seed if p.seed is not None else secrets.randbits(63)
+        base = (p.seed if p.seed is not None else secrets.randbits(63)) & _SEED_MASK
         for i in range(p.n):
             # A concrete seed per sequence keeps sampling reproducible across batching and preemption.
-            seed = base if i == 0 else hash((base, i)) & (2**63 - 1)
+            seed = base if i == 0 else _splitmix64(base + i) & _SEED_MASK
             child = dataclasses.replace(p, seed=seed, prompt_logprobs=p.prompt_logprobs if i == 0 else None)
-            seq = Seq(rid=rid, tokens=list(token_ids), params=child)
-            self._index[seq] = i
+            seq = Seq(rid=rid, tokens=list(token_ids), params=child, index=i)
             if child.prompt_logprobs is not None:
                 self._prompt_lp[seq] = Logprobs([], [], [])
             self.sched.add(seq)
@@ -185,9 +203,13 @@ class Engine:
             raise ValueError("generate() returns one sequence per prompt; step() streams n > 1")
         rids = [self.add(p, params) for p in prompts]
         out: dict[str, list[int]] = {r: [] for r in rids}
-        while self.has_work():
+        pending = set(rids)
+        while pending:
             for d in self.step():
-                out[d.rid].extend(d.token_ids)
+                if d.rid in out:                     # other requests may be in flight too
+                    out[d.rid].extend(d.token_ids)
+                    if d.finish_reason:
+                        pending.discard(d.rid)
         return [out[r] for r in rids]
 
     # -- one step -------------------------------------------------------------------------------------------------
@@ -220,6 +242,7 @@ class Engine:
             query_start=torch.as_tensor(qstart, device=d),
             slots=torch.as_tensor(plan.slots, device=d),
             logits_index=torch.as_tensor(qstart[1:][plan.n_logits > 0] - 1, device=d),
+            logits_rows=torch.as_tensor(np.flatnonzero(plan.n_logits > 0), device=d),
         ))
         pages = self.state.pages(plan, positions)
         ctx = StepContext(batch, {g: p.plan_bounds(batch, pages.get(g)) for g, p in self.planners.items()})
@@ -227,7 +250,8 @@ class Engine:
             planner.prepare_device(ctx.metas[group], ctx)
         return ctx
 
-    def _record_prompt_logprobs(self, h: torch.Tensor, plan: BatchPlan, seqs: list[Seq], chunk: int = 256) -> None:
+    def _record_prompt_logprobs(self, h: torch.Tensor, plan: BatchPlan, seqs: list[Seq],
+                                chunk: int = PROMPT_LOGPROB_CHUNK) -> None:
         """Logprobs of the prompt tokens this step's rows predict, in row chunks (no full-vocab logits for long
         prompts); positions recomputed after a preemption are not recorded twice."""
         qstart = np.concatenate([[0], np.cumsum(plan.n_query)])
@@ -250,6 +274,8 @@ class Engine:
     def _commit(self, plan: BatchPlan, seqs: list[Seq], out: SampleOut | None) -> list[TokenDelta]:
         deltas, row = [], 0
         tokens = out.tokens.tolist() if out is not None else []
+        lps = None if out is None or out.logprobs is None else (
+            out.logprobs.tolist(), out.top_ids.tolist(), out.top_logprobs.tolist())     # one transfer per step
         for seq, n, has_logits in zip(seqs, plan.n_query, plan.n_logits, strict=True):
             seq.num_computed += int(n)
             if not has_logits:
@@ -261,20 +287,12 @@ class Engine:
             reason = self._finish_reason(seq, token)
             if reason:
                 self.sched.finish(seq, reason)
-            deltas.append(TokenDelta(seq.rid, [token], index=self._index[seq], logprobs=self._logprobs(seq, out, row),
+            k = seq.params.logprobs
+            logprobs = None if k is None else Logprobs([lps[0][row]], [lps[1][row][:k]], [lps[2][row][:k]])
+            deltas.append(TokenDelta(seq.rid, [token], index=seq.index, logprobs=logprobs,
                                      prompt_logprobs=self._prompt_lp.pop(seq, None), finish_reason=reason))
-            if reason:
-                del self._index[seq]
             row += 1
         return deltas
-
-    @staticmethod
-    def _logprobs(seq: Seq, out: SampleOut, row: int) -> Logprobs | None:
-        k = seq.params.logprobs
-        if k is None:
-            return None
-        return Logprobs([float(out.logprobs[row])], [out.top_ids[row, :k].tolist()],
-                        [out.top_logprobs[row, :k].tolist()])
 
     def _finish_reason(self, seq: Seq, token: int) -> str | None:
         p = seq.params

@@ -59,6 +59,7 @@ class Seq:
     tokens: list[int]                    # committed tokens only
     params: SamplingParams
     prompt_len: int = 0
+    index: int = 0                       # which of the request's `n` sequences
     slot: int = -1                       # persistent device row
     num_computed: int = 0                # host mirror; exact after commit
     status: Status = Status.WAITING
@@ -114,7 +115,8 @@ class DeviceBatch:
     positions: torch.Tensor
     query_start: torch.Tensor            # [B+1]
     slots: torch.Tensor                  # [B]
-    logits_index: torch.Tensor           # rows whose logits are computed
+    logits_index: torch.Tensor           # tokens whose logits are computed (the last of each sampled row)
+    logits_rows: torch.Tensor | None = None   # [R] batch row of each logits_index entry
     meta: dict[str, Any] = dataclasses.field(default_factory=dict)  # per planner
 
 

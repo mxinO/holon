@@ -23,11 +23,21 @@ class _Ctx:
     batch: object
 
 
+@dataclasses.dataclass
+class _Dev:
+    slots: torch.Tensor
+    positions: torch.Tensor
+    logits_index: torch.Tensor
+    logits_rows: torch.Tensor
+
+
 def _ctx(slots, positions):
+    """One sampled decode row per entry: the token drawn at `positions[i]` for slot `slots[i]`."""
     n = len(slots)
     plan = _Plan(np.asarray(slots, np.int32), np.ones(n, np.int32), np.asarray(positions, np.int64) - 1,
                  np.ones(n, np.int32))
-    return _Ctx(dataclasses.make_dataclass("B", ["plan"])(plan))
+    dev = _Dev(torch.as_tensor(plan.slots), torch.as_tensor(plan.start_upper), torch.arange(n), torch.arange(n))
+    return _Ctx(dataclasses.make_dataclass("B", ["plan", "dev"])(plan, dev))
 
 
 @pytest.fixture(scope="module")
@@ -81,3 +91,16 @@ def test_greedy_and_logprobs(std):
     lp = logits.log_softmax(-1)
     torch.testing.assert_close(out.logprobs, lp.gather(-1, out.tokens[:, None])[:, 0])
     assert out.top_ids[0].tolist() == lp[0].topk(3).indices.tolist()
+
+
+def test_inverse_cdf_matches_the_oracle_cdf_at_full_vocabulary():
+    # Deterministic: for a grid of uniforms, the drawn token is the one whose float64 CDF interval contains u.
+    import importlib
+    sampler = importlib.import_module("holon_std.sampling.sampler")
+    v = 151_936
+    q = (torch.randn(1, v, generator=torch.Generator().manual_seed(3)) * 3).softmax(-1)
+    cdf = q[0].double().cumsum(0)
+    for u in torch.linspace(1e-4, 1 - 1e-4, 257):
+        t = int(sampler.draw(q, u.reshape(1).float())[0])
+        lo, hi = (cdf[t - 1] if t else 0.0), cdf[t]
+        assert lo - 1e-6 <= u.item() * cdf[-1] < hi + 1e-6

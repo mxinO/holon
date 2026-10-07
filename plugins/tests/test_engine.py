@@ -74,6 +74,9 @@ def test_engine_rejects_what_it_cannot_serve(tiny_checkpoint):
         engine.add(list(range(40)))
     with pytest.raises(ValueError, match="empty"):
         engine.add([])
+    engine.add([1, 2], SamplingParams(seed=2**64 - 1, max_tokens=1))   # any int seed is accepted (masked)
+    engine.add([1, 2], SamplingParams(seed=-5, max_tokens=1))
+    assert len(engine.generate([[3, 4]], SamplingParams(temperature=1.0, max_tokens=2))) == 1
     with pytest.raises(NotImplementedError, match="penalties"):
         engine.add([1, 2], SamplingParams(repetition_penalty=1.1))
     with pytest.raises(OutOfUnits, match="state.kv"):
