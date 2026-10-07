@@ -74,6 +74,11 @@ class Sampler:
         self._filtered[slot] = params.top_k > 0 or params.top_p < 1 or params.min_p > 0
         self._logprobs[slot] = -1 if params.logprobs is None else params.logprobs
 
+    def variant(self, slots: np.ndarray) -> tuple:
+        if self._greedy[slots].all():
+            return ("greedy", int(self._logprobs[slots].max()))
+        return ("sample", bool(self._filtered[slots].any()), int(self._logprobs[slots].max()))
+
     def sample(self, logits: torch.Tensor, ctx) -> SampleOut:
         plan, dev = ctx.batch.plan, ctx.batch.dev
         slots = plan.slots[plan.n_logits > 0]           # host mirror: which work this step needs

@@ -21,6 +21,12 @@ class AttnMeta:
     handle: Any
     pages: Any
 
+    @property
+    def graph_key(self) -> Any:
+        """Hashable if this step's attention may be replayed from a captured graph, else None."""
+        key = getattr(self.kernel, "graph_key", None)
+        return None if key is None else key(self.handle)
+
 
 class Planner:
     """Owns this group's kernel instances; each step is all prefill chunks or all decode rows (v0 scheduler)."""

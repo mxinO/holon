@@ -76,6 +76,7 @@ class StateManager:
     def __init__(self, bound: list[BoundSpec], max_seqs: int, max_tokens: int, device: torch.device,
                  on_admit: Callable[[Seq], None] = lambda seq: None, index: PrefixIndex | None = None) -> None:
         self.bound, self.device, self.on_admit, self.index = bound, device, on_admit, index
+        self.padding_slot = max_seqs                           # graph padding rows use this table row
         self.held: dict[int, dict[str, list[int]]] = {}       # slot -> spec name -> unit ids
         self.chain: dict[int, list[int] | None] = {}          # slot -> keys of its published blocks (None: broken)
         self.tokens_saved = 0                                  # prefix-hit tokens not recomputed
@@ -88,7 +89,7 @@ class StateManager:
             if b.spec.group in self.tables:
                 raise NotImplementedError(f"page group {b.spec.group!r} shared by several specs")
             page = b.spec.shape.tokens_per_unit
-            table = BlockTable(page, max_seqs, -(-max_tokens // page), device)
+            table = BlockTable(page, max_seqs + 1, -(-max_tokens // page), device)
             self.tables[b.spec.group] = self._table_of[b.spec.name] = table
 
     def admit(self, seq: Seq) -> bool:
@@ -218,6 +219,12 @@ class StateManager:
 
     def _page(self, spec: str) -> int:
         return self._table_of[spec].page
+
+    def reset_padding(self) -> None:
+        """Point the padding slot at every pool's null unit (after the pools are allocated)."""
+        for b in self.bound:
+            if table := self._table_of.get(b.spec.name):
+                table.write(self.padding_slot, 0, np.full(table.max_pages, b.pool.null, dtype=np.int32))
 
     def upload_fields(self, max_seqs: int, max_tokens: int) -> dict[str, tuple[int, torch.dtype]]:
         """The per-step device inputs `pages` stages through the engine's uploader."""

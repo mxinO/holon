@@ -8,6 +8,9 @@ plugin registers a `KernelSpec` whose `impl(ctx, **facts)` returns an instance w
 - `run(q [T, Hq, D], kv [units, 2, Hkv, page, D], handle) -> [T, Hq, D]`: one layer; this step's K/V are already
   written; rows of length 0 (graph padding) must be harmless.
 
+Optional: `graph_key(handle) -> hashable`, offered only by kernels whose `run` may be captured in a CUDA graph and
+replayed for every step with the same key (all buffers it reads are stable; the key covers its launch shapes).
+
 Facts: heads, kv_heads, head_dim, page, q_dtype, kv_dtype (torch dtype names), layout ("kv.hnd"), max_seqs.
 Kernel instances hold plans, so each planner creates its own.
 """

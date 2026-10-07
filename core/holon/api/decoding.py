@@ -10,6 +10,9 @@ import dataclasses
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Hashable
+
+    import numpy as np
     import torch
 
     from .batch import BatchPlan, SamplingParams, Seq, StepCtx
@@ -56,6 +59,10 @@ class Sampler(Protocol):
 
     def sample(self, logits: torch.Tensor, ctx: StepCtx) -> SampleOut:
         """`logits` [R, V] fp32 for the plan rows with `n_logits > 0`, in row order."""
+
+    def variant(self, slots: np.ndarray) -> Hashable:
+        """The host-side choices `sample` makes for these slots — a step with the same variant runs the same device
+        work, so it may replay a captured graph."""
 
 
 class SamplerPlugin(Protocol):

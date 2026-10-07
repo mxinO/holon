@@ -879,6 +879,14 @@ device inputs (`DEVICE_LAST`/`DEVICE_DRAFT`) are already consistent.
 - Each plugin declares `graph_policy` ∈ {`full`, `piecewise`, `eager`, `host`}; the resolver takes the weakest
   per ShapeKey class. `host` means the plugin never runs inside a graph — it runs on the CPU between replays
   (placement-policy `adapt()`, schedulers). v0 implements FULL (decode/verify) and EAGER (prefill); PIECEWISE is v1.
+- **v0 (implemented in E6)**: decode-only steps without logprobs are padded to a batch-size bucket (1, 2, 4, 8, 16,
+  24, 32, 48, 64, … up to `max_seqs`) and replayed from a graph keyed by (bucket, the sampler's `variant` — its
+  host-side branches —, each planner's `graph_key`). A planner whose kernel offers no `graph_key` keeps the step
+  eager. The graph covers forward, sampling and the SeqTable write; inputs are staged into the static buffers and
+  results copied out around the replay. Padding rows use a dedicated slot whose block-table row points at each
+  paged pool's reserved, zeroed null unit, so they read and write nothing real. The first occurrence of a key runs
+  eagerly (kernel compilation, allocator warm-up), the second is captured; all graphs share one memory pool. Graph
+  memory comes out of the `memory_fraction` headroom (an explicit graph reserve in the ledger is a later step).
 - **CPU work inside a FULL graph** (CPU expert compute, Strata/FreeToken style) uses a one-word handshake per
   layer with a persistent native CPU worker (spike S6): the graph signals REQ, the worker computes on pinned
   memory and answers DONE, the graph waits. `Platform` exposes this as a signal/wait pair with two

@@ -41,6 +41,9 @@ class Decode:
         splits = splits_for(b, self.kv_heads, 1 << (bound - 1).bit_length(), self.num_sms)
         return _Handle(pages.table, self.rows[:b], self.lens[:b], splits)
 
+    def graph_key(self, h: _Handle) -> tuple:
+        return ("triton_attn.decode", len(h.rows), h.splits)
+
     def run(self, q: torch.Tensor, kv: torch.Tensor, h: _Handle) -> torch.Tensor:
         return paged_attention(q, kv, h.table, h.rows, h.lens, nq=1, splits=h.splits, cfg=self.cfg)
 

@@ -81,3 +81,31 @@ class no_host_sync:  # noqa: N801 — used as a context manager
     def __exit__(self, *exc: object) -> None:
         if self.cuda:
             torch.cuda.set_sync_debug_mode("default")
+
+
+class Graphs:
+    """Captured CUDA graphs by key, sharing one memory pool. The first time a key is seen its function runs eagerly
+    (a warm-up: kernel compilation, allocator growth); the second time it is captured; afterwards it is replayed.
+    Outputs live in the shared pool, so read them before the next replay."""
+
+    def __init__(self, device: torch.device) -> None:
+        self.enabled = device.type == "cuda"
+        self._graphs: dict[object, tuple[torch.cuda.CUDAGraph, object]] = {}
+        self._seen: set[object] = set()
+        self._pool = torch.cuda.graph_pool_handle() if self.enabled else None
+
+    def __len__(self) -> int:
+        return len(self._graphs)
+
+    def run(self, key: object, fn: Callable[[], object]) -> object:
+        entry = self._graphs.get(key)
+        if entry is None:
+            if not self.enabled or key not in self._seen:
+                self._seen.add(key)
+                return fn()
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, pool=self._pool):
+                out = fn()
+            entry = self._graphs[key] = (graph, out)
+        entry[0].replay()
+        return entry[1]

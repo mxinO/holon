@@ -1,0 +1,48 @@
+{
+ "gpu": "NVIDIA RTX A5000",
+ "command": "bench/decode_overlap.py --ctx 1024 --steps 64",
+ "results": [
+  {
+   "overlap": false,
+   "batch": 1,
+   "step_ms": 35.784,
+   "cpu_ms_per_step": 35.253,
+   "tok_s": 27.9
+  },
+  {
+   "overlap": false,
+   "batch": 8,
+   "step_ms": 32.695,
+   "cpu_ms_per_step": 32.585,
+   "tok_s": 244.7
+  },
+  {
+   "overlap": false,
+   "batch": 64,
+   "step_ms": 39.764,
+   "cpu_ms_per_step": 39.78,
+   "tok_s": 1609.5
+  },
+  {
+   "overlap": true,
+   "batch": 1,
+   "step_ms": 29.28,
+   "cpu_ms_per_step": 29.292,
+   "tok_s": 34.2
+  },
+  {
+   "overlap": true,
+   "batch": 8,
+   "step_ms": 31.708,
+   "cpu_ms_per_step": 31.717,
+   "tok_s": 252.3
+  },
+  {
+   "overlap": true,
+   "batch": 64,
+   "step_ms": 38.841,
+   "cpu_ms_per_step": 38.853,
+   "tok_s": 1647.8
+  }
+ ]
+}

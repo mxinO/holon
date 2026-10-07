@@ -6,6 +6,16 @@ import numpy as np
 from holon.api import BatchPlan, ShapeKey, TokenSrc
 
 
+def padded(plan: BatchPlan, rows: int, slot: int) -> BatchPlan:
+    """`plan` with decode rows appended up to `rows`, all on `slot` at position 0 (graph padding)."""
+    extra = rows - len(plan.slots)
+    if extra == 0:
+        return plan
+    pad = lambda a, v: np.concatenate([a, np.full(extra, v, dtype=a.dtype)])   # noqa: E731
+    return host_plan(plan.step, pad(plan.slots, slot), pad(plan.start_upper, 0), pad(plan.n_query, 1),
+                     pad(plan.n_logits, 1), pad(plan.host_tokens, 0), pad(plan.token_src, TokenSrc.HOST))
+
+
 def host_plan(step: int, slots: np.ndarray, starts: np.ndarray, n_query: np.ndarray, n_logits: np.ndarray,
               tokens: np.ndarray, token_src: np.ndarray | None = None) -> BatchPlan:
     """A step's plan; input tokens come from the host unless `token_src` says otherwise per row."""

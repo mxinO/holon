@@ -38,7 +38,7 @@ from holon.api import (
 )
 
 from . import platform
-from .batching import host_plan
+from .batching import host_plan, padded
 from .build import BuildContext, StepContext, build_model, load_weights
 from .inputs import Uploader
 from .memory import Ledger
@@ -73,6 +73,7 @@ class EngineConfig:
     state_memory: int | None = None          # bytes for state pools; None: measure (GPU only)
     prefix_cache: bool = True                # reuse cached prompt blocks across requests (paged state only)
     overlap: bool = True                     # schedule step N while step N-1 runs (depth 1); False: depth 0
+    cuda_graphs: bool = True                 # replay decode steps from CUDA graphs, per batch-size bucket
     kernels: dict[str, str] = dataclasses.field(default_factory=dict)   # op name -> pinned kernel provider
 
     def __post_init__(self) -> None:
@@ -119,7 +120,8 @@ class Engine:
         self.model = build_model(self.spec, self.ctx)
         load_weights(self.model, self.ctx, source.tensors())
 
-        self.sampler = sampler = p.load(p.single("sampler")).sampler(cfg.max_seqs, self.device)
+        # One extra slot (max_seqs) is the padding slot of graph-captured steps.
+        self.sampler = sampler = p.load(p.single("sampler")).sampler(cfg.max_seqs + 1, self.device)
         self.state = StateManager(bound, cfg.max_seqs, cfg.max_model_len, self.device,
                                   on_admit=lambda seq: sampler.admit(seq.slot, seq.params), index=self._index(bound))
         self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len)
@@ -129,11 +131,14 @@ class Engine:
             "query_start": (seqs + 1, torch.int64), "slots": (seqs, torch.int64), "logits_index": (seqs, torch.int64),
             "logits_rows": (seqs, torch.int64), "device_tokens": (seqs, torch.int64),
             "device_slots": (seqs, torch.int64)})
-        self.last_token = torch.zeros(seqs, dtype=torch.int64, device=self.device)   # device SeqTable column
+        self.last_token = torch.zeros(seqs + 1, dtype=torch.int64, device=self.device)  # device SeqTable column
+        self.graphs = platform.Graphs(self.device) if cfg.cuda_graphs else None
+        self._buckets = sorted({min(b, seqs) for b in (1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256)} | {seqs})
         self._out_tokens = [platform.pinned_empty(seqs, torch.int64, self.device) for _ in range(2)]
         self._out_turn = 0
         self._inflight: _Inflight | None = None
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None else self._measure_state_memory())
+        self.state.reset_padding()
         self._ids = itertools.count()
         self._prompt_lp: dict[Seq, Logprobs] = {}         # sequences still accumulating prompt logprobs
         self._siblings: dict[Seq, list[Seq]] = {}         # n > 1: waiting for the first sequence's prefill
@@ -176,6 +181,7 @@ class Engine:
             n = cfg.max_seqs * (1 + shape.draft_slots)
             sizing = {"min_units": n, "pref_units": n}
         pool = self.ledger.request(f"state.{spec.name}", unit_bytes=shape.unit_bytes, segments=spec.segments,
+                                   null_unit=isinstance(shape, Paged),
                                    **sizing)
         kind = Ref(spec.kind)
         self.plugins.load(self.plugins.provider("state_kind", kind))
@@ -283,23 +289,33 @@ class Engine:
 
     def _launch(self, plan: BatchPlan, seqs: list[Seq]) -> _Inflight:
         """Enqueue the step's device work without waiting for the device, then advance the host mirrors."""
-        ctx = self._context(plan)
         rows = [(seq, int(n), bool(k)) for seq, n, k in zip(seqs, plan.n_query, plan.n_logits, strict=True)]
         sync = any(seq in self._prompt_lp or seq.params.logprobs is not None for seq, _, k in rows if k) or any(
             seq in self._prompt_lp for seq, _, _ in rows)
-        if any(seq in self._prompt_lp for seq in seqs):
-            h = self.model.trunk(ctx)
-            logits = self.model.head(h[ctx.batch.dev.logits_index])
-            self._record_prompt_logprobs(h, plan, seqs)
+        decode = bool((plan.n_query == 1).all())
+        graphed = self.graphs is not None and decode and not sync and len(seqs) <= self._buckets[-1]
+        if graphed:
+            plan = padded(plan, next(b for b in self._buckets if b >= len(seqs)), self.state.padding_slot)
+        ctx = self._context(plan)
+        keys = [getattr(meta, "graph_key", None) for meta in ctx.metas.values()]
+        out = sampled = tokens = None
+        if graphed and None not in keys:
+            key = (len(plan.slots), self.sampler.variant(plan.slots), *keys)
+            sampled = self.graphs.run(key, lambda: self._decode(ctx))
         else:
-            logits = self.model(ctx)
-        out, tokens = None, None
-        if plan.n_logits.any():
-            out = self.sampler.sample(logits.float(), ctx)
-            dev = ctx.batch.dev
-            self.last_token[dev.slots[dev.logits_rows]] = out.tokens        # the device SeqTable
-            tokens = self._out_tokens[self._out_turn][: len(out.tokens)]
-            tokens.copy_(out.tokens, non_blocking=True)
+            if any(seq in self._prompt_lp for seq in seqs):
+                h = self.model.trunk(ctx)
+                logits = self.model.head(h[ctx.batch.dev.logits_index])
+                self._record_prompt_logprobs(h, plan, seqs)
+            else:
+                logits = self.model(ctx)            # always: chunks without sampled rows still write their state
+            if plan.n_logits.any():
+                out = self.sampler.sample(logits.float(), ctx)
+                sampled = self._store(ctx, out.tokens)
+        if sampled is not None:
+            n_sampled = sum(k for _, _, k in rows)
+            tokens = self._out_tokens[self._out_turn][:n_sampled]
+            tokens.copy_(sampled[:n_sampled], non_blocking=True)
             self._out_turn ^= 1
         done = platform.Event(self.device)
         done.record()
@@ -310,6 +326,15 @@ class Engine:
                 if seq.status is not Status.RUNNING:
                     self.sched.finished_prefill(seq)
         return _Inflight(rows, out, tokens, done, sync)
+
+    def _decode(self, ctx: StepContext) -> torch.Tensor:
+        """A decode step's device work from inputs to sampled tokens — the part captured in a graph."""
+        return self._store(ctx, self.sampler.sample(self.model(ctx).float(), ctx).tokens)
+
+    def _store(self, ctx: StepContext, tokens: torch.Tensor) -> torch.Tensor:
+        dev = ctx.batch.dev
+        self.last_token[dev.slots[dev.logits_rows]] = tokens               # the device SeqTable
+        return tokens
 
     def _context(self, plan: BatchPlan) -> StepContext:
         """The step's device inputs, staged through pinned memory with asynchronous copies (no host sync)."""

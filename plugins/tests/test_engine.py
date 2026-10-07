@@ -55,7 +55,8 @@ def _released(engine):
     for b in engine.state.bound:
         cached = index.cached(b.spec.name) if index else np.zeros(b.pool.capacity, dtype=bool)
         refs = b.pool.refcount(np.arange(b.pool.capacity))
-        ok &= b.pool.num_free + int(cached.sum()) == b.pool.capacity and bool((refs[cached] == 1).all())
+        null = b.pool.null is not None                      # the graph padding unit, never handed out
+        ok &= b.pool.num_free + int(cached.sum()) + null == b.pool.capacity and bool((refs[cached] == 1).all())
     return ok
 
 
@@ -259,7 +260,7 @@ def test_continuing_another_requests_cached_block_cannot_stall(tiny_checkpoint):
     torch.manual_seed(2)
     shared = torch.randint(0, 512, (8,)).tolist()
     a, b = shared + [7], shared + torch.randint(0, 512, (31,)).tolist()
-    engine = _tiny_engine(tiny_checkpoint, state_memory=10 * 2048, max_step_tokens=21)
+    engine = _tiny_engine(tiny_checkpoint, state_memory=11 * 2048, max_step_tokens=21)   # 10 pages + the null unit
     one = SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True)
     hf = AutoModelForCausalLM.from_pretrained(tiny_checkpoint, dtype=torch.float32).eval()
     ra, rb = engine.add(a, one), engine.add(b, one)
@@ -314,3 +315,26 @@ def test_prompt_logprobs_are_complete_after_a_prefix_hit(tiny_checkpoint, tiny_c
     rid = engine.add(prompts[3], SamplingParams(temperature=0.0, max_tokens=1, prompt_logprobs=1))
     deltas = [d for _ in iter(engine.has_work, False) for d in engine.step() if d.rid == rid]
     assert len(deltas[0].prompt_logprobs.token) == len(prompts[3]) - 1
+
+
+@pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
+def test_cuda_graphs_are_bounded_and_run_identical_bf16():
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(SNAP)
+    texts = ["The capital of France is", "def quicksort(xs):", "List three prime numbers:", "Water boils at",
+             "In 1969, astronauts first"]                                    # 5 rows: padded to the 8-row bucket
+    prompts = [tok(t)["input_ids"] for t in texts]
+    params = SamplingParams(temperature=0.0, max_tokens=24, ignore_eos=True)
+    sampled = SamplingParams(temperature=0.8, top_p=0.9, seed=3, max_tokens=24, ignore_eos=True)
+    outs = {}
+    for graphs in (False, True):
+        engine = Engine(EngineConfig(model=str(SNAP), dtype=torch.bfloat16, max_model_len=1024, cuda_graphs=graphs))
+        outs[graphs] = [engine.generate(prompts, params), engine.generate(prompts, sampled)]
+        assert outs[graphs][0] == engine.generate(prompts, params)              # run-identical
+        assert (engine.graphs is not None and len(engine.graphs) > 0) == graphs
+        del engine
+    for a, b in zip(outs[False], outs[True], strict=True):
+        agree = [next((i for i, (x, y) in enumerate(zip(u, v, strict=True)) if x != y), len(u))
+                 for u, v in zip(a, b, strict=True)]
+        assert all(n >= 1 for n in agree) and sum(agree) >= 0.75 * len(agree) * 24, agree

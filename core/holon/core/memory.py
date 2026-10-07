@@ -24,14 +24,14 @@ class OutOfUnits(RuntimeError):
 
 class Pool:
     def __init__(self, name: str, *, unit_bytes: int, segments: int, min_units: int, pref_units: int | None,
-                 tokens_per_unit: int | None, priority: int, device: torch.device) -> None:
+                 tokens_per_unit: int | None, priority: int, device: torch.device, null_unit: bool = False) -> None:
         if unit_bytes % segments:
             raise ValueError(f"pool {name!r}: unit_bytes {unit_bytes} not divisible by {segments} segments")
         if (pref_units is None) == (tokens_per_unit is None):
             raise ValueError(f"pool {name!r}: give exactly one of pref_units (fixed) or tokens_per_unit (fill)")
         self.name, self.unit_bytes, self.segments, self.device = name, unit_bytes, segments, device
         self.min_units, self.pref_units, self.tokens_per_unit = min_units, pref_units, tokens_per_unit
-        self.priority = priority
+        self.priority, self.has_null = priority, null_unit
         self._set(0)
 
     def _set(self, capacity: int) -> None:
@@ -39,8 +39,12 @@ class Pool:
         self.buffer = (torch.empty(capacity * self.unit_bytes, dtype=torch.uint8, device=self.device)
                        if capacity else None)
         self.capacity_dev = torch.tensor(capacity, dtype=torch.int32, device=self.device)
-        self._free = list(range(capacity - 1, -1, -1))  # pop() hands out low ids first
+        # The null unit (the last one, never handed out) is where padding rows of a captured graph write.
+        self.null = capacity - 1 if self.has_null and capacity else None
+        self._free = list(range(capacity - (self.null is not None) - 1, -1, -1))  # pop() hands out low ids first
         self._refs = np.zeros(capacity, dtype=np.int32)
+        if self.null is not None:   # zeroed, so what padding rows read is finite
+            self.buffer.view(self.segments, capacity, self.unit_bytes // self.segments)[:, self.null] = 0
 
     @property
     def base(self) -> int:
@@ -88,13 +92,15 @@ class Ledger:
 
     def request(self, name: str, *, unit_bytes: int, min_units: int, pref_units: int | None = None,
                 tokens_per_unit: int | None = None, segments: int = 1, priority: int = 0, resize: str = "fixed",
-                device: torch.device | None = None) -> Pool:
+                device: torch.device | None = None, null_unit: bool = False) -> Pool:
+        """`null_unit`: reserve one unit that is never allocated (counted in `min_units`)."""
         if name in self.pools:
             raise ValueError(f"pool {name!r} requested twice")
         if resize != "fixed":
             raise NotImplementedError(f"resize mode {resize!r} (v1)")
-        pool = Pool(name, unit_bytes=unit_bytes, segments=segments, min_units=min_units, pref_units=pref_units,
-                    tokens_per_unit=tokens_per_unit, priority=priority, device=device or self.device)
+        pool = Pool(name, unit_bytes=unit_bytes, segments=segments, min_units=min_units + null_unit,
+                    pref_units=pref_units, tokens_per_unit=tokens_per_unit, priority=priority,
+                    device=device or self.device, null_unit=null_unit)
         self.pools[name] = pool
         return pool
 
