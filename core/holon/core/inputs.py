@@ -3,9 +3,10 @@
 Every per-step input lives at a fixed offset of one static device arena, so its address is stable for graph capture.
 A step writes its inputs into a pinned host arena with plain memory copies and `end()` moves exactly the written byte
 ranges to the device (ranges a small gap apart are merged, so a step costs a copy or two). Fields the device computes
-itself are never written, so never copied. Two host arenas alternate, and an event per arena guards its reuse, so
-preparing step N+1 never waits for step N's copy unless it is still pending. Device work that reads staged inputs is
-queued with `after()` and runs once the copy is enqueued.
+itself are never written, so never copied (a merged gap may still cover them): each step must rewrite them in full
+before reading them. Two host arenas alternate, and an event per arena guards its reuse, so preparing step N+1 never
+waits for step N's copy unless it is still pending. Device work that reads staged inputs is queued with `after()` and
+runs once the copy is enqueued.
 """
 from __future__ import annotations
 
