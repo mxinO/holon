@@ -55,14 +55,27 @@ class BlockTable:
 
 
 class _View:
-    """The SeqView a StateKind sees."""
+    """The SeqView a StateKind sees: a read-only window on the request (no copies; this runs per request per step)."""
+
+    __slots__ = ("_seq", "_units")
 
     def __init__(self, seq: Seq, units: dict[str, list[int]]) -> None:
-        self.slot, self.num_computed, self.tokens = seq.slot, seq.num_computed, tuple(seq.tokens)
-        self._units = units
+        self._seq, self._units = seq, units
 
-    def units(self, spec: str) -> tuple[int, ...]:
-        return tuple(self._units.get(spec, ()))
+    @property
+    def slot(self) -> int:
+        return self._seq.slot
+
+    @property
+    def num_computed(self) -> int:
+        return self._seq.num_computed
+
+    @property
+    def tokens(self) -> list[int]:
+        return self._seq.tokens
+
+    def units(self, spec: str) -> list[int]:
+        return self._units.get(spec, [])
 
 
 class StateManager:

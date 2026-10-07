@@ -95,7 +95,8 @@ _VARIANTS = (SamplingParams(temperature=0.0, seed=0), SamplingParams(temperature
 def _last_tokens(qstart: np.ndarray, n_logits: np.ndarray) -> np.ndarray:
     """Flat indices of each row's last `n_logits` tokens (the tokens whose logits a step computes)."""
     ends = np.repeat(qstart[1:], n_logits)
-    return ends - np.concatenate([np.arange(m, 0, -1) for m in n_logits]) if n_logits.any() else ends
+    first = np.repeat(np.cumsum(n_logits) - n_logits, n_logits)          # where each row's run starts in `ends`
+    return ends - n_logits.repeat(n_logits) + (np.arange(len(ends)) - first)
 
 
 @dataclasses.dataclass
@@ -171,8 +172,8 @@ class Engine:
             self.policy, self.drafter = p.load(p.single("draft_policy")), p.load(p.single("drafter"))
             self.verifier = p.load(p.single("verifier"))
         host_lens = any(getattr(planner, "needs_host_lens", False) for planner in self.planners.values())
-        self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len, draft_k=self._draft_k,
-                               host_lens_only=host_lens)
+        self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len,
+                               draft_k=self._draft_k if self.policy is not None else None, host_lens_only=host_lens)
         seqs = cfg.max_seqs
         tokens = max(cfg.max_step_tokens, seqs * (1 + cfg.max_draft_tokens))     # a verify step: 1 + k per row
         self.uploader = Uploader(self.device, self.state.upload_fields(seqs, tokens) | {

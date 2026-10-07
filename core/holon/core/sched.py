@@ -45,7 +45,7 @@ def _host_tokens(seq: Seq, start: int, n: int, on_device: bool) -> list[int]:
 
 class Scheduler:
     def __init__(self, state: StateManager, max_step_tokens: int, max_model_len: int,
-                 draft_k: Callable[[Seq], int] = lambda seq: 0, host_lens_only: bool = False) -> None:
+                 draft_k: Callable[[Seq], int] | None = None, host_lens_only: bool = False) -> None:
         self.state, self.max_step_tokens, self.max_model_len = state, max_step_tokens, max_model_len
         self.draft_k, self.host_lens_only = draft_k, host_lens_only
         self.waiting: collections.deque[Seq] = collections.deque()
@@ -91,8 +91,8 @@ class Scheduler:
         return rows
 
     def _decode(self) -> list[tuple[Seq, int, int]]:
-        ready = [s for s in self.running if not self._at_limit(s) and not (self.host_lens_only and s.inexact)]
-        k = min((self._drafts(s) for s in ready), default=0)
+        ready = {s for s in self.running if not self._at_limit(s) and not (self.host_lens_only and s.inexact)}
+        k = min((self._drafts(s) for s in ready), default=0) if self.draft_k is not None else 0
         rows = []
         for seq in list(self.running):
             if seq.status is not Status.RUNNING or seq not in ready:     # preempted, finishing, or waiting on a commit
