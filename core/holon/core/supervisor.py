@@ -10,11 +10,12 @@ missing tokens, only a pause.
 Attribution. Each crash strikes the requests in flight. Most crashes are transient, so requests are resubmitted
 together. A request with `poison_crashes` strikes is a repeat suspect and goes on probation: suspects rerun one at a
 time beside other requests, and only once the configuration has shown it serves — a request completed on it since it
-became current; on a quiet server the supervisor sends a tiny canary request to find out. A probe that crashes the
-engine again, with no other repeat suspect in flight, is poison: it fails with an error, nothing rolls back, and the
-crashes it was in stop counting against the configuration. Whatever the attribution, a request that has lived through
-`max_crashes` crashes (in flight or waiting) fails rather than wait for another restart: that bounds how long any
-request can stall.
+became current; on a quiet server the supervisor sends a tiny canary request to find out (a heuristic: a configuration
+that fails only on longer or particular inputs passes it, and an innocent suspect may then take the blame). A probe that
+crashes the engine again, with no other repeat suspect in flight, is poison: it fails with an error, nothing rolls back,
+and the crashes it was in stop counting against the configuration. Whatever the attribution, a request that has lived
+through `max_crashes` crashes (in flight or waiting) fails rather than wait for another restart: that bounds how long
+any request can stall.
 
 Rollback. Every crash no quarantine explains is charged to the configuration. `rollback_crashes` charges, or as many
 failed starts in a row, restart the engine on the previous entry of its config history (rollback = restart on the
