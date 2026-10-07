@@ -1,0 +1,24 @@
+[plugin]
+name = "kernels.flashinfer"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+
+[resources]
+provides = ["kernel.attention.paged_prefill@1", "kernel.attention.paged_decode@1"]
+requires = ["op.attention.paged_prefill@1", "op.attention.paged_decode@1"]
+
+[properties]
+numerics = "bounded"
+
+[dependencies]
+python = ["flashinfer"]
+
+[support]
+platforms = ["cuda"]
+
+[provenance]
+source = "https://github.com/flashinfer-ai/flashinfer"
+commit = "v0.6.12"
+license = "Apache-2.0"

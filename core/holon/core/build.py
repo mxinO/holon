@@ -14,8 +14,9 @@ import numpy as np
 import torch
 from torch import nn
 
-from holon.api import Batch, DeviceBatch, ModelSpec, Ref, SeqTable, StepCtx, WeightMap
+from holon.api import Batch, DeviceBatch, KernelSpec, ModelSpec, Ref, SeqTable, StepCtx, WeightMap, parse_versioned
 
+from . import platform
 from .batching import host_plan
 from .plugins import PluginError, PluginSet
 
@@ -28,8 +29,11 @@ class BuildContext:
         self.plugins = plugins
         self.device = device
         self.dtype = dtype                 # parameter dtype for units that do not override it
+        self.fingerprint = platform.fingerprint(device)
         self.options = options or {}
         self.used: dict[str, str] = {}     # unit name -> providing plugin (for the lock)
+        self.kernels: dict[str, dict[str, Any]] = {}   # "<site>/<op>" -> provider, facts, props (for the lock)
+        self._selected: dict[tuple, KernelSpec] = {}
         self.states: dict[tuple[str, int], tuple[Any, Any]] = {}  # (local spec name, layer) -> (spec, pool)
         self._buffers: dict[str, torch.Tensor] = {}
 
@@ -42,6 +46,33 @@ class BuildContext:
 
     def unit(self, ref: Ref, **site: Any) -> nn.Module:
         return self.unit_factory(ref)(self, **dict(ref.params), **site)
+
+    def select_kernel(self, op: str, *, site: str, **facts: Any) -> KernelSpec:
+        key = (op, tuple(sorted(facts.items())))
+        spec = self._selected.get(key)
+        if spec is None:
+            spec = self._selected[key] = self._choose(op, facts)
+        self.kernels[f"{site}/{op}"] = {"provider": spec.provider, "facts": facts, "props": sorted(spec.props)}
+        return spec
+
+    def _choose(self, op: str, facts: dict[str, Any]) -> KernelSpec:
+        name, major = parse_versioned(op)
+        for plugin in self.plugins.providers(f"kernel.{name}", major):
+            if self.plugins.available(plugin, self.device.type):
+                self.plugins.load(plugin)
+        pinned = self.options.get("kernels", {}).get(name)
+        sm = self.fingerprint.sm or None
+        found = [s for s in self.plugins.regs.kernels.get(name)
+                 if s.requires.allows(self.device.type, sm) and (s.supports is None or s.supports(facts))
+                 and pinned in (None, s.provider)]
+        if not found:
+            raise PluginError(f"no kernel for {op} on {self.device.type} sm {sm} with {facts}"
+                              + (f" from pinned provider {pinned!r}" if pinned else ""))
+        best = max(s.priority for s in found)
+        top = [s for s in found if s.priority == best]
+        if len(top) > 1:
+            raise PluginError(f"{op}: providers {[s.provider for s in top]} tie at priority {best}")
+        return top[0]
 
     def static(self, name: str, shape: tuple[int, ...], dtype: torch.dtype) -> torch.Tensor:
         """A named buffer allocated once and reused (a stable address for graph capture)."""

@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
     from .frontend import FrontendBundle
     from .memory import Pool
+    from .ops import KernelSpec
+    from .platform import Fingerprint
     from .state import StateSpec
 
 
@@ -75,10 +77,18 @@ class ModelSpec:
 class BuildCtx(Protocol):
     """Everything a unit may use while building. Units get other units only through `unit` (invariant 2)."""
 
+    device: torch.device
     dtype: torch.dtype
+    fingerprint: Fingerprint
     options: Mapping[str, Any]   # deployment options units may read (e.g. "page_size"); unknown keys → defaults
 
     def unit(self, ref: Ref, **site: Any) -> Unit: ...
+
+    def select_kernel(self, op: str, *, site: str, **facts: Any) -> KernelSpec:
+        """The kernel for versioned `op` (e.g. "attention.paged_decode@1") given canonical `facts` (shapes,
+        dtypes and layouts as plain values): chosen among available kernel plugins by device, `supports(facts)`
+        and priority, or pinned by the deployment; recorded for the lock under `site` (design §5.4). The caller
+        creates its own instances with `spec.impl(ctx, **facts)` — instances hold plans, so they are not shared."""
 
     def state(self, spec_name: str, layer: int) -> tuple[StateSpec, Pool] | None:
         """The spec and pool holding state `spec_name` for `layer` (e.g. its KV pages); None in a model-only build,

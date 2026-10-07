@@ -1,0 +1,19 @@
+[plugin]
+name = "kernels.triton_attn"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+
+[resources]
+provides = ["kernel.attention.paged_decode@1"]
+requires = ["op.attention.paged_decode@1"]
+
+[properties]
+numerics = "bounded"
+
+[dependencies]
+python = ["triton"]
+
+[support]
+platforms = ["cuda"]

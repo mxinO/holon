@@ -112,3 +112,30 @@ def test_engine_matches_hf_greedy_qwen3_0_6b():
                                  max_model_len=4096))
     assert engine.ledger.pool("state.kv").capacity * 16 >= 4096
     assert engine.generate(prompts, GREEDY) == expected
+
+
+@pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
+def test_fast_kernels_agree_with_reference_and_are_run_identical_bf16():
+    # bf16 rounding differs between kernels, so greedy paths may legitimately split late; exact checks are L0's.
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(SNAP)
+    texts = ["The capital of France is", "def quicksort(xs):", "List three prime numbers:",
+             "In 1969, astronauts first", "Water boils at", "The quick brown fox", "import numpy as np\n",
+             "Photosynthesis converts"]
+    prompts = [tok(t)["input_ids"] for t in texts]
+    params = SamplingParams(temperature=0.0, max_tokens=16, ignore_eos=True)
+    cfg = dict(model=str(SNAP), dtype=torch.bfloat16, page_size=16, max_step_tokens=64, max_model_len=2048)
+
+    fast = Engine(EngineConfig(**cfg))
+    assert {k.split("/")[1]: v["provider"] for k, v in fast.ctx.kernels.items()} == {
+        "attention.paged_prefill@1": "kernels.flashinfer", "attention.paged_decode@1": "kernels.triton_attn"}
+    first, again = fast.generate(prompts, params), fast.generate(prompts, params)
+    del fast
+    ref = Engine(EngineConfig(**cfg, kernels={"attention.paged_prefill": "std.mixers.gqa",
+                                              "attention.paged_decode": "std.mixers.gqa"})).generate(prompts, params)
+
+    assert first == again                                   # run-identical with the fast kernels
+    agree = [next((i for i, (a, b) in enumerate(zip(x, y, strict=True)) if a != b), len(x))
+             for x, y in zip(first, ref, strict=True)]
+    assert all(n >= 1 for n in agree) and sum(agree) >= 0.75 * len(agree) * params.max_tokens, agree

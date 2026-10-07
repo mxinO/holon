@@ -19,3 +19,6 @@ local/
 spikes/*/.phase*.sh
 docs/brainstorm/
 docs/design-brainstorm.md
+
+# Agent worktrees (local)
+.claude/worktrees/

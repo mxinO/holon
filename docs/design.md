@@ -194,7 +194,7 @@ swap_cap  = { type = "int",   range = [0, 512],     default = 96, log = true, ap
 # A tunable is judged under the numerics class of the plugin that owns it.
 
 [support]
-platforms = ["cuda>=sm_80"]
+platforms = ["cuda"]                  # device names only; SM limits live in KernelSpec.requires
 ```
 
 Resource names are **typed**: each `ns.name@major` is registered in `holon.api.resources` and bound to a
@@ -256,9 +256,10 @@ There is no separate database. The **Registry** is the git history of lockfiles 
 - **Tuned defaults live in the lock.** Kernel configs and tunables are tuned by us per fingerprint class
   (benchmarking tools such as `holon tune`, in the spirit of FreeToken's `ft bench bw`), so every class ships
   at the best configuration we know — no agent is involved.
-- **Fingerprint class** = GPU SKU + SM + VRAM class + toolchain majors (CUDA, torch, Triton). GPU UUID, driver
+- **Fingerprint class** = GPU SKU (a slug of the product name, e.g. `rtx-5090`, which fixes SM and VRAM) +
+  toolchain majors (CUDA, torch; the torch pin implies Triton), e.g. `rtx-5090/cu130-torch2.11`. GPU UUID, driver
   build and measured bandwidths are recorded in evidence only. Classes maintained first: `rtx-5080` and
-  `rtx-5090` (sm_120), `rtx-4090` (sm_89), `a5000`/`rtx-3090` (sm_86); evidence is produced on those cards
+  `rtx-5090` (sm_120), `rtx-4090` (sm_89), `rtx-a5000`/`rtx-3090` (sm_86); evidence is produced on those cards
   (consumer desktop machines, plan §1).
 - **Missing or outdated lock for a class** (an outdated lock pins unit `src`s that the deployed commit does not
   contain) → the nearest class's current lock (same SM preferred) is used, flagged `unverified`, with an alert. The engine **never refuses to serve** for lack of a lock; `holon tune` on the host produces a
@@ -486,6 +487,19 @@ level state).
 Selection happens once, at plan time (§4.3). No startup autotune sweeps: tuned configs live in the model's lock for
 its fingerprint class (§4.4, produced by `holon tune`); without a lock for the class, the nearest class's
 configs are used (`unverified`).
+
+**Selection contract (implemented in E2).** An op is owned by the unit that defines it: it is declared as a versioned
+resource (`op.attention.paged_decode@1`), its `reference.py` implementation is registered in `regs.ops` as the L0
+oracle, and its instance API is documented next to it (kernel plugins cannot import std, so the contract is
+duck-typed). Kernel plugins provide `kernel.<op>@<major>`. `BuildCtx.select_kernel(op, site=…, **facts)` takes
+canonical facts (shapes, `q_dtype`/`kv_dtype`, layout, …): it imports only the providers whose manifest
+dependencies are installed and whose platforms match the device (no import attempts), filters by
+`requires.allows(device, sm)` and `supports(facts)`, takes the highest priority (a tie is an error), honours a
+deployment pin (`kernels = {op: provider}`, later the lock), and records provider, facts and props per site for the
+lock. It returns the `KernelSpec`; the caller — a mixer's planner — creates and owns its instances with
+`spec.impl(ctx, **facts)`, because instances hold per-step plans (FlashInfer wrappers) and depth 1 needs two of
+them. Layouts are facts the unit passes in (GQA: `kv.hnd`), so every kernel of one state group agrees by
+construction; rows of length 0 (graph padding) must be harmless.
 
 ### 5.5 Quantization and weight loading
 

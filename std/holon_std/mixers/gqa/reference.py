@@ -18,23 +18,27 @@ def causal_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, query_st
     return out
 
 
-def paged_attention(q: torch.Tensor, kv: torch.Tensor, block_table: torch.Tensor, rows: torch.Tensor,
-                    lens: torch.Tensor, query_start: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
-    """Attention of new rows over paged KV.
+def paged_attention(q: torch.Tensor, kv: torch.Tensor, table: torch.Tensor, rows: torch.Tensor,
+                    lens: torch.Tensor, query_start: torch.Tensor) -> torch.Tensor:
+    """The `attention.paged_prefill@1` / `attention.paged_decode@1` oracle: new rows attend over paged KV.
 
-    q [T, Hq, D]; kv [units, 2, page, Hkv, D] (one layer); `block_table` [slots, max_pages] unit ids; batch row b
-    uses table row `rows[b]` and holds `lens[b]` tokens, including this step's. Each query attends to keys at
-    positions ≤ its own.
+    q [T, Hq, D]; kv [units, 2, Hkv, page, D] (one layer, HND); `table` [slots, max_pages] unit ids; batch row b
+    uses table row `rows[b]`, holds `lens[b]` tokens including this step's, and owns query rows
+    `query_start[b]:query_start[b+1]`, the last ones of its sequence (bottom-right causal). Rows with length 0
+    (graph padding) produce zeros.
     """
-    rep, page = q.shape[1] // kv.shape[3], kv.shape[2]
-    out = torch.empty_like(q)
+    rep, page = q.shape[1] // kv.shape[2], kv.shape[3]
+    out = torch.zeros_like(q)
     bounds = zip(query_start[:-1].tolist(), query_start[1:].tolist(), rows.tolist(), lens.tolist(), strict=True)
     for s, e, row, n in bounds:
-        units = block_table[row, : -(-n // page)].long()
-        k = kv[units, 0].reshape(-1, *kv.shape[3:])[:n].float().repeat_interleave(rep, dim=1)
-        v = kv[units, 1].reshape(-1, *kv.shape[3:])[:n].float().repeat_interleave(rep, dim=1)
+        if n == 0 or s == e:
+            continue
+        units = table[row, : -(-n // page)].long()
+        k, v = (kv[units, i].transpose(1, 2).reshape(-1, *kv.shape[2:3], kv.shape[4])[:n].float()
+                .repeat_interleave(rep, dim=1) for i in (0, 1))
         scores = torch.einsum("qhd,khd->hqk", q[s:e].float(), k) / q.shape[-1] ** 0.5
-        future = torch.arange(n, device=q.device)[None, :] > positions[s:e, None]
+        pos = torch.arange(n - (e - s), n, device=q.device)
+        future = torch.arange(n, device=q.device)[None, :] > pos[:, None]
         probs = scores.masked_fill(future, float("-inf")).softmax(-1)
         out[s:e] = torch.einsum("hqk,khd->qhd", probs, v).to(q.dtype)
     return out

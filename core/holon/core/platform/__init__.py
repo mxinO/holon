@@ -1,9 +1,23 @@
 """Device abstraction (design §8). The only place in the core allowed to touch `torch.cuda` (invariant 6)."""
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 import torch
+
+from holon.api import Fingerprint
+
+
+def fingerprint(device: torch.device) -> Fingerprint:
+    """Static facts of `device`; the GPU class is the product name without vendor words, e.g. "rtx-5090"."""
+    toolchain = f"cu{(torch.version.cuda or 'none').replace('.', '')}-torch{'.'.join(torch.__version__.split('.')[:2])}"
+    if device.type != "cuda":
+        return Fingerprint(gpu="cpu", sm=0, vram_gib=0, toolchain=toolchain)
+    p = torch.cuda.get_device_properties(device)
+    words = [w for w in re.split(r"[\s_]+", p.name.lower()) if w not in ("nvidia", "geforce")]
+    return Fingerprint(gpu="-".join(words), sm=10 * p.major + p.minor, vram_gib=round(p.total_memory / 2**30),
+                       toolchain=toolchain, num_sms=p.multi_processor_count)
 
 
 def _cuda(device: torch.device, what: str) -> None:

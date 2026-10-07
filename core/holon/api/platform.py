@@ -14,10 +14,11 @@ if TYPE_CHECKING:
 class Fingerprint:
     """Static facts that select tuned locks (design §4.4). UUIDs and measured numbers go to evidence only."""
 
-    gpu: str                 # SKU class, e.g. "rtx-5080", "a5000" — implies SM and VRAM
-    sm: int                  # 10*major + minor
+    gpu: str                 # SKU class from the product name, e.g. "rtx-5080", "rtx-a5000"; "cpu" without a GPU
+    sm: int                  # 10*major + minor (0 on CPU)
     vram_gib: int
-    toolchain: str           # e.g. "cu130-torch2.11-triton3.6"
+    toolchain: str           # e.g. "cu130-torch2.11"
+    num_sms: int = 0         # implied by the SKU; kernels size their grids with it
 
     @property
     def cls(self) -> str:

@@ -182,6 +182,17 @@ class PluginSet:
             raise PluginError(f"slot {slot!r} needs exactly one installed plugin, found {names}")
         return names[0]
 
+    def providers(self, resource: str, major: int) -> list[str]:
+        """Every installed plugin providing `resource` at `major` (interface resources may have several)."""
+        return [p for p, m in self._providers.get(resource, []) if m == major]
+
+    def available(self, name: str, device: str) -> bool:
+        """Whether a plugin can run here, judged from its manifest without importing it: its declared
+        third-party modules are installed and its platforms (if declared) include `device`."""
+        m = self.installed[name].manifest
+        return (not m.platforms or device in m.platforms) and all(
+            importlib.util.find_spec(dep) is not None for dep in m.dependencies)
+
     def owner(self, resource: str) -> tuple[str, int]:
         """The one plugin providing `resource` (e.g. "arch.<checkpoint architecture>"), and its major."""
         found = self._providers.get(resource, [])

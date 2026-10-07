@@ -41,6 +41,7 @@ class EngineConfig:
     max_step_tokens: int = 4096
     memory_fraction: float = 0.9             # of the memory left after weights, for activations and state
     state_memory: int | None = None          # bytes for state pools; None: measure (GPU only)
+    kernels: dict[str, str] = dataclasses.field(default_factory=dict)   # op name -> pinned kernel provider
 
     def __post_init__(self) -> None:
         for name in ("page_size", "max_seqs", "max_model_len", "max_step_tokens"):
@@ -68,7 +69,8 @@ class Engine:
         self.eos = source.eos_token_ids
 
         self.ledger = Ledger(self.device)
-        self.ctx = BuildContext(p, self.device, cfg.dtype, {"page_size": cfg.page_size})
+        self.ctx = BuildContext(p, self.device, cfg.dtype, {"page_size": cfg.page_size, "max_seqs": cfg.max_seqs,
+                                                            "kernels": cfg.kernels})
         bound, self.planners = self._bind_state()
         self.model = build_model(self.spec, self.ctx)
         load_weights(self.model, self.ctx, source.tensors())

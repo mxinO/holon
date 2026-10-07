@@ -200,7 +200,7 @@ H (propagate, tune) → I (supervisor) → tuned default locks for each class.
    depth 0) — before any real drafter exists.
 6. Robustness: restart time measured and an SLO set; a poison-request test is quarantined without rollback;
    `n > 1` and prompt logprobs served.
-7. Memory fit per §2; tuned default locks for `a5000`, `rtx-4090`, `rtx-5090` (and `rtx-5080` from M0.1).
+7. Memory fit per §2; tuned default locks for `rtx-a5000`, `rtx-4090`, `rtx-5090` (and `rtx-5080` from M0.1).
 8. Core LOC ≤ 6000; lints green.
 
 ### 3.5 CI checks (from M0)

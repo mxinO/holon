@@ -1,28 +1,66 @@
 from __future__ import annotations
 
+import dataclasses
+from typing import Any
+
 import torch
 from holon.api import Paged, Ref, StateSpec
 from torch import nn
 
+from . import kernels
 from . import reference as ref
 
 LINEAR = "std.ops.linear@1"
+
+
+@dataclasses.dataclass(frozen=True)
+class AttnMeta:
+    """One step's attention metadata for every layer of the group: the kernel this step uses and its plan."""
+
+    kernel: Any
+    handle: Any
+    pages: Any
+
+
+class Planner:
+    """Owns this group's kernel instances; each step is all prefill chunks or all decode rows (v0 scheduler)."""
+
+    def __init__(self, prefill: Any, decode: Any) -> None:
+        self.prefill, self.decode = prefill, decode
+
+    def plan_bounds(self, batch, pages) -> AttnMeta:
+        kernel = self.decode if (batch.plan.n_query == 1).all() else self.prefill
+        return AttnMeta(kernel, kernel.plan(batch, pages), pages)
+
+    def prepare_device(self, meta: AttnMeta, ctx) -> None:
+        pass
 
 
 class GQA(nn.Module):
     """Grouped-query attention with optional per-head q/k norm. Rope and norms are injected units.
 
     With engine state bound, keys and values live in a paged pool shared by all layers of this mixer, one pool
-    segment per layer — [layers, units, 2 (k/v), page, kv_heads, head_dim] — so each layer's slice is contiguous
-    for kernels. In a model-only build (no state) it runs the stateless whole-sequence reference path.
+    segment per layer — [layers, units, 2 (k/v), kv_heads, page, head_dim] (HND, the layout every selected
+    attention kernel must read) — so each layer's slice is contiguous for kernels. In a model-only build (no
+    state) it runs the stateless whole-sequence reference path.
     """
 
     @classmethod
     def state_specs(cls, params: dict, layers: tuple[int, ...], ctx) -> list[StateSpec]:
         page = ctx.options.get("page_size", 16)
         per_layer = 2 * page * params["kv_heads"] * params["head_dim"] * ctx.dtype.itemsize
-        return [StateSpec("kv", "paged@1", Paged(per_layer * len(layers), page), layers, "kv.nhd",
+        return [StateSpec("kv", "paged@1", Paged(per_layer * len(layers), page), layers, kernels.LAYOUT,
                           segments=len(layers))]
+
+    @classmethod
+    def planner(cls, params: dict, specs: list[StateSpec], ctx) -> Planner:
+        dtype = str(ctx.dtype).removeprefix("torch.")
+        facts = {"heads": params["heads"], "kv_heads": params["kv_heads"], "head_dim": params["head_dim"],
+                 "page": specs[0].shape.tokens_per_unit, "q_dtype": dtype, "kv_dtype": dtype,
+                 "layout": kernels.LAYOUT, "max_seqs": ctx.options["max_seqs"]}
+        prefill, decode = (ctx.select_kernel(op, site=specs[0].group, **facts).impl(ctx, **facts)
+                           for op in (kernels.PREFILL, kernels.DECODE))
+        return Planner(prefill, decode)
 
     def __init__(self, ctx, *, layer: int, hidden: int, heads: int, kv_heads: int, head_dim: int, rope: Ref,
                  qk_norm: Ref | None = None) -> None:
@@ -41,7 +79,7 @@ class GQA(nn.Module):
 
     def _kv_layer(self) -> torch.Tensor:
         pool, index, n_layers, page, dtype = self._kv
-        shape = (n_layers, pool.capacity, 2, page, self.kv_heads, self.head_dim)
+        shape = (n_layers, pool.capacity, 2, self.kv_heads, page, self.head_dim)
         return pool.view(dtype, shape)[index]
 
     def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
@@ -56,8 +94,8 @@ class GQA(nn.Module):
         if self._kv is None:
             o = ref.causal_attention(q, k, v, dev.query_start)
         else:
-            pages, kv = ctx.meta("kv"), self._kv_layer()
-            unit, off = pages.write_index // pages.page, pages.write_index % pages.page
-            kv[unit, 0, off], kv[unit, 1, off] = k, v
-            o = ref.paged_attention(q, kv, pages.table, dev.slots, pages.lens, dev.query_start, dev.positions)
+            meta, kv = ctx.meta("kv"), self._kv_layer()
+            unit, off = meta.pages.write_index // meta.pages.page, meta.pages.write_index % meta.pages.page
+            kv[unit, 0, :, off], kv[unit, 1, :, off] = k, v       # advanced indices around a slice: [T, Hkv, D]
+            o = meta.kernel.run(q, kv, meta.handle)
         return self.o_proj(o.reshape(t, self.heads * self.head_dim))

@@ -122,7 +122,7 @@ class Manifest:
     after: tuple[str, ...] = ()        # ordering for ordered_multi slots
     before: tuple[str, ...] = ()
     shape_axes: dict[str, tuple[Any, ...]] = dataclasses.field(default_factory=dict)  # finite graph-capture axes
-    dependencies: tuple[str, ...] = ()  # third-party imports allowed (invariant 2)
+    dependencies: tuple[str, ...] = ()  # third-party top-level modules it imports (invariant 2)
     reference: str | None = None       # oracle module of a numeric unit
     tunables: dict[str, Tunable] = dataclasses.field(default_factory=dict)
     platforms: tuple[str, ...] = ()
