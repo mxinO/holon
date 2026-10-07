@@ -894,7 +894,9 @@ rows read their input from the device SeqTable (`last_token`), a request preempt
 waits for that commit, and requests reaching a length limit are not scheduled again. Everything a commit releases
 — finished requests' slots, pages and sampler rows, `_swap`ped prefix pages, preempted requests' pages — is reused
 only by launches enqueued later on the same stream, so an in-flight step never sees it change. An extra row for a
-request that stopped at the previous commit is discarded. Steps that report logprobs commit at once.
+request that stopped at the previous commit is discarded. Sampled-token logprobs come back like the tokens (pinned
+host copies read at commit), so those steps run at depth 1, eagerly; steps that report prompt logprobs, which are
+extracted on the host, commit at once.
 
 Plugins declare the maximum depth they tolerate (`max_depth` in the manifest). Per-Seq depth: the scheduler
 skips any Seq that has more uncommitted steps in flight than the minimum depth tolerated by the plugins attached
@@ -1074,6 +1076,18 @@ Two acceptance modes are used in v0 (plan and judge):
   graph replay vs eager (padding changes tile selection; FlashInfer splits KV differently in graph mode) — are
   **bounded**. Spec decoding additionally checks greedy self-consistency: every accepted token equals the argmax of
   the target logits computed in that verify step.
+- The bounded check for prefix cache on/off and depth 1 vs 0 (`python -m holon_judge bounded`, v0): every
+  configuration runs a multi-turn trace (sessions sharing a system prompt, each turn resending the history) twice —
+  greedy without logprobs on its production path (graphs, depth 1), and with logprobs — and a reference engine
+  (prefix cache off, depth 0, eager) re-scores the generated tokens teacher-forced. The first run is judged by
+  argmax agreement (overall and at confident positions), the second by the paired KL(reference ‖ configuration) at
+  the same positions, as in L2. The floor is the baseline configuration (prefix off, depth 0) measured the same way
+  — two bf16 paths disagree at near-ties whatever the change, so the L2 floor does not transfer — and the margins
+  are L2's (`TOP1_DELTA`, `KL_FACTOR`) or 2.5 standard errors of a difference between two runs like the floor
+  (sessions as clusters), whichever is larger. Planted bugs (`holon_judge.planted`: a prefix hit claiming one token
+  too many, a wrong adopted block, a stale device token at depth 1, also at ~1% of steps) must fail exactly the
+  configurations using their path; that is tested on CPU and calibrated on Qwen3-8B. Graph replay with logprobs is
+  not covered (logprob steps run eagerly): graph replay vs eager is its own comparison.
 - **Deferred:** a batch-invariant "deterministic Plan" (det-identical comparisons across batch shapes, vLLM
   `batch_invariant`-style kernels). It is added only if a concrete validation need appears.
 
