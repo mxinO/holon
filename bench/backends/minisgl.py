@@ -32,8 +32,10 @@ class Backend:
         self.llm = _Offline(model, **self.config)
         self.llm.inbox, self.llm.outbox = [], []
         self._last = None                         # the batch in flight (overlap loop state)
+        self._left: dict[int, int] = {}           # tokens still due per request
 
     def add(self, rid: int, prompt: list[int], max_tokens: int) -> None:
+        self._left[rid] = max_tokens
         params = SamplingParams(temperature=0.0, ignore_eos=True, max_tokens=max_tokens)
         self.llm.inbox.append(UserMsg(uid=rid, input_ids=torch.tensor(prompt, dtype=torch.int32),
                                       sampling_params=params))
@@ -42,7 +44,17 @@ class Backend:
     def step(self) -> list[Delta]:
         self._last = self.llm.overlap_loop(self._last)
         out, self.llm.outbox = self.llm.outbox, []
-        return [(m.uid, [m.next_token], m.finished) for m in out]
+        # Under overlap scheduling mini-sglang flags `finished` one token early: the last token comes from the batch
+        # already in flight, and its own offline generate() keeps it. With ignore_eos the length alone ends a request.
+        deltas = []
+        for m in out:
+            if m.uid in self._left:
+                self._left[m.uid] -= 1
+                done = not self._left[m.uid]
+                if done:
+                    del self._left[m.uid]
+                deltas.append((m.uid, [m.next_token], done))
+        return deltas
 
     def has_work(self) -> bool:
         s = self.llm
