@@ -290,7 +290,7 @@ class Engine:
             seed = base if i == 0 else _splitmix64(base + i) & _SEED_MASK
             child = dataclasses.replace(p, seed=seed, prompt_logprobs=p.prompt_logprobs if i == 0 else None)
             seq = Seq(rid=rid, tokens=list(token_ids), params=child, index=i)
-            self._live.setdefault(rid, []).append(seq)
+            self._live.setdefault(rid, []).append(seq)       # siblings too: abort must account for them
             if child.prompt_logprobs is not None:
                 self._prompt_lp[seq] = Logprobs([], [], [])
             if i == 0 or self.state.index is None:
@@ -304,18 +304,24 @@ class Engine:
         return bool(self.sched.waiting or self.sched.running or self._inflight)
 
     # -- control (design §7.7) -------------------------------------------------------------------------------------
-    def abort(self, rid: str) -> list[TokenDelta]:
-        """Finish every sequence of request `rid` now; a row already in flight is discarded at its commit."""
+    def abort(self, rid: str, reason: str = "abort", error: str | None = None) -> list[TokenDelta]:
+        """Finish every sequence of request `rid` now — one delta each, siblings that never started included; a row
+        already in flight is discarded at its commit."""
         deltas = []
         for seq in self._live.pop(rid, []):
-            for sibling in self._siblings.pop(seq, []):             # never started: just drop them
+            for sibling in self._siblings.pop(seq, []):             # never started: nothing to release
                 sibling.status = Status.FINISHED
+                deltas.append(TokenDelta(rid, [], index=sibling.index, finish_reason=reason, error=error))
             if seq.status is Status.FINISHED:
                 continue
-            self.sched.finish(seq, "abort")
+            self.sched.finish(seq, reason)
             self._prompt_lp.pop(seq, None)
-            deltas.append(TokenDelta(rid, [], index=seq.index, finish_reason="abort"))
+            deltas.append(TokenDelta(rid, [], index=seq.index, finish_reason=reason, error=error))
         return deltas
+
+    def fail_all(self, error: str) -> list[TokenDelta]:
+        """An error delta for every live request (the engine is going down)."""
+        return [d for rid in list(self._live) for d in self.abort(rid, "error", error)]
 
     def drain(self) -> list[TokenDelta]:
         """Commit the step in flight (the quiesce point: nothing runs on the device afterwards)."""

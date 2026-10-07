@@ -1,6 +1,8 @@
-"""The engine behind a process boundary: concurrent streams, n > 1, rejections, aborts, stats."""
+"""The engine behind a process boundary: concurrent streams, n > 1, rejections, aborts, stats, failures."""
 import asyncio
+import multiprocessing
 
+import pytest
 import torch
 from holon.api import SamplingParams
 from holon.core.engine import EngineConfig
@@ -41,3 +43,62 @@ def test_engine_process_serves_concurrent_streams(tiny_checkpoint, tiny_case):  
     assert results[4][0] == {0: expected[1], 1: expected[1]}
     assert results[5][1].finish_reason == "error" and "max_model_len" in results[5][1].error
     assert first.token_ids and stats["running"] + stats["waiting"] == 0
+
+
+def _failing_engine(config, endpoints):
+    """Engine-process target whose third step raises (runs in the spawned child)."""
+    from holon.core.engine import Engine
+    from holon.core.ipc import serve
+
+    def factory():
+        engine, calls = Engine(config), [0]
+        step = engine.step
+
+        def failing_step():
+            calls[0] += 1
+            if calls[0] == 3:
+                raise RuntimeError("boom")
+            return step()
+        engine.step = failing_step
+        return engine
+    serve(factory, endpoints)
+
+
+def test_a_failing_step_ends_every_request_with_an_error(tiny_checkpoint, tiny_case):  # noqa: F811
+    prompts, _ = tiny_case
+
+    async def run():
+        async with engine_process(_config(tiny_checkpoint), target=_failing_engine) as client:
+            async def last(prompt):
+                async for d in client.generate(prompt, SamplingParams(temperature=0.0, max_tokens=30,
+                                                                      ignore_eos=True, n=2)):
+                    final = d
+                return final
+            return await asyncio.gather(*(last(p) for p in prompts[:3]))
+
+    finals = asyncio.run(run())
+    assert all(d.finish_reason == "error" and "boom" in d.error for d in finals)
+
+
+def test_a_killed_engine_ends_open_streams(tiny_checkpoint, tiny_case):  # noqa: F811
+    prompts, _ = tiny_case
+
+    async def run():
+        async with engine_process(_config(tiny_checkpoint)) as client:
+            stream = client.generate(prompts[3], SamplingParams(temperature=0.0, max_tokens=30, ignore_eos=True))
+            await anext(stream)
+            stats = await asyncio.gather(client.stats(), client.stats())          # concurrent stats both answer
+            first = client.generate([1, 2], SamplingParams(temperature=0.0, max_tokens=30, ignore_eos=True), rid="same")
+            await anext(first)
+            with pytest.raises(ValueError, match="in flight"):
+                await anext(client.generate([1, 2], GREEDY, rid="same"))
+            await first.aclose()
+            for proc in multiprocessing.active_children():
+                proc.kill()
+            rest = [d async for d in stream]
+            with pytest.raises(RuntimeError, match="exited"):
+                await anext(client.generate([1, 2], GREEDY))
+            return stats, rest
+
+    stats, rest = asyncio.run(asyncio.wait_for(run(), timeout=60))
+    assert len(stats) == 2 and rest[-1].finish_reason == "error" and "exited" in rest[-1].error
