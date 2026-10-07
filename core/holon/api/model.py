@@ -122,6 +122,10 @@ class WeightSource(Protocol):
 
     def tensors(self) -> Iterator[tuple[str, torch.Tensor]]: ...
 
+    def identity(self) -> str:
+        """The checkpoint's identity for plans and lock histories (design §4.3): `<name>@<build>`, the build a
+        hash of the files that define the weights. Path segments joined by "/" (e.g. a hub id) are allowed."""
+
 
 class ModelPlugin(Protocol):
     """Declares the architectures it builds as `arch.<name>@1` resources in its manifest."""

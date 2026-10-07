@@ -15,7 +15,7 @@ from .plugins import PluginError, PluginSet, discover
 from .supervisor import supervised
 
 
-def _engine_flags(parser: argparse.ArgumentParser) -> None:
+def engine_flags(parser: argparse.ArgumentParser) -> None:
     """One flag per EngineConfig field (bool fields as --x / --no-x; dtype by name)."""
     hints = typing.get_type_hints(EngineConfig)
     for f in dataclasses.fields(EngineConfig):
@@ -30,6 +30,12 @@ def _engine_flags(parser: argparse.ArgumentParser) -> None:
             parser.add_argument(flag, type=int if kind == int | None else kind, default=f.default)
 
 
+def engine_config(model: str, args: argparse.Namespace) -> EngineConfig:
+    """The EngineConfig of `model` from the flags `engine_flags` added."""
+    fields = {f.name for f in dataclasses.fields(EngineConfig)} - {"model"}
+    return EngineConfig(model=model, **{k: v for k, v in vars(args).items() if k in fields})
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="holon")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -40,10 +46,9 @@ def main(argv: list[str] | None = None) -> None:
     serve.add_argument("--frontend", default=None, help="frontend plugin name (default: the one installed)")
     serve.add_argument("--supervised", action=argparse.BooleanOptionalAction, default=True,
                        help="restart a failed engine and resubmit its requests (default: on)")
-    _engine_flags(serve)
+    engine_flags(serve)
     args = parser.parse_args(argv)
-    fields = {f.name for f in dataclasses.fields(EngineConfig)}
-    config = EngineConfig(model=args.model, **{k: v for k, v in vars(args).items() if k in fields and k != "model"})
+    config = engine_config(args.model, args)
 
     plugins = PluginSet(discover())
     _, model_plugin = resolve_model(plugins, config)

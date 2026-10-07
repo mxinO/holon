@@ -32,7 +32,7 @@ class BuildContext:
         self.fingerprint = platform.fingerprint(device)
         self.options = options or {}
         self.used: dict[str, str] = {}     # unit name -> providing plugin (for the lock)
-        self.kernels: dict[str, dict[str, Any]] = {}   # "<site>/<op>" -> provider, facts, props (for the lock)
+        self.kernels: dict[str, dict[str, Any]] = {}   # "<site>/<op>" -> provider, facts, props, config (lock)
         self._selected: dict[tuple, KernelSpec] = {}
         self.states: dict[tuple[str, int], tuple[Any, Any]] = {}  # (local spec name, layer) -> (spec, pool)
         self._buffers: dict[str, torch.Tensor] = {}
@@ -52,21 +52,25 @@ class BuildContext:
         spec = self._selected.get(key)
         if spec is None:
             spec = self._selected[key] = self._choose(op, facts)
-        self.kernels[f"{site}/{op}"] = {"provider": spec.provider, "facts": facts, "props": sorted(spec.props)}
+        self.kernels[f"{site}/{op}"] = {"provider": spec.provider, "facts": facts, "props": sorted(spec.props),
+                                        "config": spec.config}
         return spec
 
-    def _choose(self, op: str, facts: dict[str, Any]) -> KernelSpec:
+    def candidates(self, op: str, facts: dict[str, Any]) -> list[KernelSpec]:
+        """Every kernel for versioned `op` that runs here and supports `facts`, loading its available providers."""
         name, major = parse_versioned(op)
         for plugin in self.plugins.providers(f"kernel.{name}", major):
             if self.plugins.available(plugin, self.device.type):
                 self.plugins.load(plugin)
-        pinned = self.options.get("kernels", {}).get(name)
         sm = self.fingerprint.sm or None
-        found = [s for s in self.plugins.regs.kernels.get(name)
-                 if s.requires.allows(self.device.type, sm) and (s.supports is None or s.supports(facts))
-                 and pinned in (None, s.provider)]
+        return [s for s in self.plugins.regs.kernels.get(name)
+                if s.requires.allows(self.device.type, sm) and (s.supports is None or s.supports(facts))]
+
+    def _choose(self, op: str, facts: dict[str, Any]) -> KernelSpec:
+        pinned = self.options.get("kernels", {}).get(parse_versioned(op)[0])
+        found = [s for s in self.candidates(op, facts) if pinned in (None, s.provider)]
         if not found:
-            raise PluginError(f"no kernel for {op} on {self.device.type} sm {sm} with {facts}"
+            raise PluginError(f"no kernel for {op} on {self.device.type} sm {self.fingerprint.sm} with {facts}"
                               + (f" from pinned provider {pinned!r}" if pinned else ""))
         best = max(s.priority for s in found)
         top = [s for s in found if s.priority == best]

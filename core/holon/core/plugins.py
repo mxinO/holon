@@ -126,18 +126,20 @@ def _scoped(regs: Registries, manifest: Manifest) -> Registries:
 class Installed:
     manifest: Manifest
     package: str             # the plugin's package; `manifest.entry` is relative to it
+    path: pathlib.Path       # its directory: the unit's source (design §4.6)
 
 
 def discover(group: str = ENTRY_GROUP) -> dict[str, Installed]:
     """Find all installed plugins and read their manifests (no plugin code is executed)."""
     found: dict[str, Installed] = {}
     for ep in importlib.metadata.entry_points(group=group):
-        manifest = Manifest.load(_package_dir(ep.value) / "plugin.toml")
+        path = _package_dir(ep.value)
+        manifest = Manifest.load(path / "plugin.toml")
         if manifest.name != ep.name:
             raise PluginError(f"entry point {ep.name!r} points at manifest named {manifest.name!r}")
         if manifest.name in found:
             raise PluginError(f"plugin {manifest.name!r} installed twice")
-        found[manifest.name] = Installed(manifest, ep.value)
+        found[manifest.name] = Installed(manifest, ep.value, path)
     return found
 
 
@@ -207,6 +209,11 @@ class PluginSet:
         if major != ref.major:
             raise PluginError(f"{ref.target}: {plugin!r} provides {resource}@{major}")
         return plugin
+
+    @property
+    def loaded(self) -> tuple[str, ...]:
+        """The plugins imported so far: every plugin whose code a built engine can run (its closure, design §4.6)."""
+        return tuple(self._loaded)
 
     def load(self, name: str) -> Any:
         """Import a plugin's entry class, instantiate it and let it register; idempotent."""

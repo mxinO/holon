@@ -1,8 +1,10 @@
 """Hugging Face checkpoint directory: config.json + one or more .safetensors files."""
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
+import re
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -33,3 +35,21 @@ class HFSafetensors:
             with safe_open(file, "pt", device=str(self.device)) as f:
                 for name in f.keys():
                     yield name, f.get_tensor(name)
+
+    def identity(self) -> str:
+        """`<name>@<build>`: the hub id for a hub-cache snapshot, else the directory name, and a hash of config.json
+        and every weight file — content, not the hub revision, which also moves with README edits."""
+        name = self.path.name
+        if self.path.parent.name == "snapshots" and self.path.parent.parent.name.startswith("models--"):
+            name = self.path.parent.parent.name.removeprefix("models--").replace("--", "/")
+        files = {f.name: _sha256(f) for f in [self.path / "config.json", *sorted(self.path.glob("*.safetensors"))]}
+        return f"{name}@{hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()[:16]}"
+
+
+def _sha256(f: pathlib.Path) -> str:
+    """A file's sha256. Free for large hub-cache files: their symlink target is the blob named by it (small files
+    are named by another hash and are read)."""
+    if f.is_symlink() and re.fullmatch(r"[0-9a-f]{64}", blob := f.readlink().name):
+        return blob
+    with open(f, "rb") as fh:
+        return hashlib.file_digest(fh, "sha256").hexdigest()

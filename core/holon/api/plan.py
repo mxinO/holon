@@ -37,6 +37,8 @@ class Plan:
     uv_lock: str
     units: dict[str, UnitPin]
     sites: dict[str, Binding]
+    # Core settings that shape outputs (step budget, page size, graphs, overlap, dtype …); budgets are per host.
+    engine: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     @property
     def plan_id(self) -> str:
@@ -46,5 +48,6 @@ class Plan:
 @dataclasses.dataclass(frozen=True, eq=False)
 class Lock:
     plan: Plan
-    snapshot: str | None = None        # bit hash of the snapshot trace (design §7.10)
+    snapshot: str | None = None        # bit hash of the snapshot trace (design §7.10); None: not run-identical
     uncovered: tuple[str, ...] = ()    # sites whose production kernel is not run-to-run deterministic
+    sm: int = 0                        # SM of the class (implied by its SKU), for the nearest-class fallback
