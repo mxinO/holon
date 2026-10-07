@@ -998,8 +998,8 @@ probation is blamed on the suspect; one long probe holds the other suspects back
 poison requests probed first can push innocent suspects past `max_crashes`; a config that crashes only after
 `stable_s` of uptime is treated as flaky and never rolls back.
 Measured (`bench/restart.py`, Qwen3-0.6B, rtx-a5000, overlap + CUDA graphs, 5 kills): restart (process launch →
-ready) 6.7–6.8 s, of which ~1.3 s imports and ~5.5 s engine init (weights, pool sizing, 27 graph captures); the
-stall a client sees is 7.7–7.8 s (≤ 1 s detection, teardown, restart); the continued greedy stream equals the
+ready) 6.6–7.1 s (median 6.75 s), of which ~1.3 s imports and ~5.5 s engine init (weights, pool sizing, 27 graph captures); the
+stall a client sees is 7.6–8.1 s (≤ 1 s detection, teardown, restart); the continued greedy stream equals the
 uninterrupted one. **SLO (M0):** restart ≤ 10 s and client-visible stall ≤ 12 s for Qwen3-0.6B on every maintained
 class, re-measured with each class's tuned lock; larger models add their weight-load time, measured and recorded
 the same way before an SLO is set for them.
