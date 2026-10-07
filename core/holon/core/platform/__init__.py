@@ -46,3 +46,38 @@ def peak_memory(device: torch.device, fn: Callable[[], object]) -> int:
 def synchronize(device: torch.device) -> None:
     if device.type == "cuda":
         torch.cuda.synchronize(device)
+
+
+def pinned_empty(n: int, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+    """Host staging memory for `device`: page-locked for CUDA (async copies need it), plain memory otherwise."""
+    return torch.empty(n, dtype=dtype, pin_memory=device.type == "cuda")
+
+
+class Event:
+    """Orders host work after device work: `record()` in stream order, `synchronize()` waits for it on the host."""
+
+    def __init__(self, device: torch.device) -> None:
+        self._event = torch.cuda.Event() if device.type == "cuda" else None
+
+    def record(self) -> None:
+        if self._event is not None:
+            self._event.record()
+
+    def synchronize(self) -> None:
+        if self._event is not None:
+            self._event.synchronize()
+
+
+class no_host_sync:  # noqa: N801 — used as a context manager
+    """Make any implicit device→host synchronization an error inside the block (CUDA only; a test tripwire)."""
+
+    def __init__(self, device: torch.device) -> None:
+        self.cuda = device.type == "cuda"
+
+    def __enter__(self) -> None:
+        if self.cuda:
+            torch.cuda.set_sync_debug_mode("error")
+
+    def __exit__(self, *exc: object) -> None:
+        if self.cuda:
+            torch.cuda.set_sync_debug_mode("default")

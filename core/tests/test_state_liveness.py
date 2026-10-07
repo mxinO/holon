@@ -63,7 +63,7 @@ def test_shared_prefix_traffic_always_finishes(seed):
         prompt = (rng.choice(prefixes) + [rng.randrange(3) for _ in range(rng.randrange(1, 12))])[: MAX_LEN - 2]
         seqs.append(Seq(str(i), prompt, SamplingParams(max_tokens=rng.randint(1, MAX_LEN - len(prompt)))))
     state = _state(units=rng.randint(MAX_LEN // PAGE, 3 * MAX_LEN // PAGE), slots=rng.randint(1, 4))
-    _run(state, Scheduler(state, max_step_tokens=rng.randint(4, 30)), seqs, rng)
+    _run(state, Scheduler(state, max_step_tokens=rng.randint(4, 30), max_model_len=MAX_LEN), seqs, rng)
     assert all(s.status is Status.FINISHED for s in seqs) and state.held == {}
     pool = state.bound[0].pool
     cached = state.index.cached("kv")

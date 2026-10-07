@@ -33,12 +33,14 @@ from holon.api import (
     StateSpec,
     Status,
     TokenDelta,
+    TokenSrc,
     canonical_hash,
 )
 
 from . import platform
 from .batching import host_plan
 from .build import BuildContext, StepContext, build_model, load_weights
+from .inputs import Uploader
 from .memory import Ledger
 from .plugins import PluginError, PluginSet, discover
 from .prefix import PrefixIndex
@@ -70,12 +72,25 @@ class EngineConfig:
     memory_fraction: float = 0.9             # of the memory left after weights, for activations and state
     state_memory: int | None = None          # bytes for state pools; None: measure (GPU only)
     prefix_cache: bool = True                # reuse cached prompt blocks across requests (paged state only)
+    overlap: bool = True                     # schedule step N while step N-1 runs (depth 1); False: depth 0
     kernels: dict[str, str] = dataclasses.field(default_factory=dict)   # op name -> pinned kernel provider
 
     def __post_init__(self) -> None:
         for name in ("page_size", "max_seqs", "max_model_len", "max_step_tokens"):
             if getattr(self, name) < 1:
                 raise ValueError(f"EngineConfig.{name} must be >= 1")
+
+
+@dataclasses.dataclass
+class _Inflight:
+    """A launched step: per-row snapshots (seq, tokens computed, sampled) taken at launch, the sampled tokens'
+    pinned host copy and the event that says it has landed."""
+
+    rows: list[tuple[Seq, int, bool]]
+    out: SampleOut | None
+    tokens: torch.Tensor | None
+    done: platform.Event
+    sync: bool                               # commit at once (its logprobs need the host)
 
 
 class _PagesPlanner:
@@ -107,7 +122,17 @@ class Engine:
         self.sampler = sampler = p.load(p.single("sampler")).sampler(cfg.max_seqs, self.device)
         self.state = StateManager(bound, cfg.max_seqs, cfg.max_model_len, self.device,
                                   on_admit=lambda seq: sampler.admit(seq.slot, seq.params), index=self._index(bound))
-        self.sched = Scheduler(self.state, cfg.max_step_tokens)
+        self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len)
+        tokens, seqs = max(cfg.max_step_tokens, cfg.max_seqs), cfg.max_seqs
+        self.uploader = Uploader(self.device, self.state.upload_fields(seqs, tokens) | {
+            "input_ids": (tokens, torch.int64), "positions": (tokens, torch.int64),
+            "query_start": (seqs + 1, torch.int64), "slots": (seqs, torch.int64), "logits_index": (seqs, torch.int64),
+            "logits_rows": (seqs, torch.int64), "device_tokens": (seqs, torch.int64),
+            "device_slots": (seqs, torch.int64)})
+        self.last_token = torch.zeros(seqs, dtype=torch.int64, device=self.device)   # device SeqTable column
+        self._out_tokens = [platform.pinned_empty(seqs, torch.int64, self.device) for _ in range(2)]
+        self._out_turn = 0
+        self._inflight: _Inflight | None = None
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None else self._measure_state_memory())
         self._ids = itertools.count()
         self._prompt_lp: dict[Seq, Logprobs] = {}         # sequences still accumulating prompt logprobs
@@ -215,7 +240,7 @@ class Engine:
         return rid
 
     def has_work(self) -> bool:
-        return bool(self.sched.waiting or self.sched.running)
+        return bool(self.sched.waiting or self.sched.running or self._inflight)
 
     def generate(self, prompts: list[list[int]], params: SamplingParams | None = None) -> list[list[int]]:
         """Token ids generated for each prompt (one sequence per prompt)."""
@@ -235,36 +260,78 @@ class Engine:
     # -- one step -------------------------------------------------------------------------------------------------
     @torch.no_grad()
     def step(self) -> list[TokenDelta]:
-        if not self.has_work():
-            return []
+        """Schedule and launch one step; commit the previous one while this one runs (overlap), or this one at
+        once (depth 0, and steps that report logprobs, whose extraction needs the host)."""
+        prev, self._inflight = self._inflight, None
+        deltas: list[TokenDelta] = []
         scheduled = self.sched.schedule()
+        if scheduled is None and prev is not None:      # what is left waits on the in-flight step's tokens
+            deltas, prev = self._commit(prev), None
+            scheduled = self.sched.schedule()
         if scheduled is None:
-            raise RuntimeError("the scheduler made no progress with requests pending")
-        plan, seqs = scheduled
+            if self.has_work():
+                raise RuntimeError("the scheduler made no progress with requests pending")
+            return deltas
+        step = self._launch(*scheduled)
+        if prev is not None:
+            deltas += self._commit(prev)
+        if self.cfg.overlap and not step.sync:
+            self._inflight = step
+        else:
+            deltas += self._commit(step)
+        return deltas
+
+    def _launch(self, plan: BatchPlan, seqs: list[Seq]) -> _Inflight:
+        """Enqueue the step's device work without waiting for the device, then advance the host mirrors."""
         ctx = self._context(plan)
+        rows = [(seq, int(n), bool(k)) for seq, n, k in zip(seqs, plan.n_query, plan.n_logits, strict=True)]
+        sync = any(seq in self._prompt_lp or seq.params.logprobs is not None for seq, _, k in rows if k) or any(
+            seq in self._prompt_lp for seq, _, _ in rows)
         if any(seq in self._prompt_lp for seq in seqs):
             h = self.model.trunk(ctx)
             logits = self.model.head(h[ctx.batch.dev.logits_index])
             self._record_prompt_logprobs(h, plan, seqs)
         else:
             logits = self.model(ctx)
-        out = self.sampler.sample(logits.float(), ctx) if plan.n_logits.any() else None
-        return self._commit(plan, seqs, out)
+        out, tokens = None, None
+        if plan.n_logits.any():
+            out = self.sampler.sample(logits.float(), ctx)
+            dev = ctx.batch.dev
+            self.last_token[dev.slots[dev.logits_rows]] = out.tokens        # the device SeqTable
+            tokens = self._out_tokens[self._out_turn][: len(out.tokens)]
+            tokens.copy_(out.tokens, non_blocking=True)
+            self._out_turn ^= 1
+        done = platform.Event(self.device)
+        done.record()
+        for seq, n, sampled in rows:
+            seq.num_computed += n
+            if sampled:
+                seq.pending += 1
+                if seq.status is not Status.RUNNING:
+                    self.sched.finished_prefill(seq)
+        return _Inflight(rows, out, tokens, done, sync)
 
     def _context(self, plan: BatchPlan) -> StepContext:
+        """The step's device inputs, staged through pinned memory with asynchronous copies (no host sync)."""
         n = plan.n_query
         qstart = np.concatenate([[0], np.cumsum(n)])
         positions = np.arange(qstart[-1]) + np.repeat(plan.start_upper - qstart[:-1], n)
-        d = self.device
+        up = self.uploader
+        up.begin()
+        on_device = np.flatnonzero(plan.token_src == TokenSrc.DEVICE_LAST)
         batch = Batch(plan, DeviceBatch(
-            input_ids=torch.as_tensor(plan.host_tokens, device=d),
-            positions=torch.as_tensor(positions, device=d),
-            query_start=torch.as_tensor(qstart, device=d),
-            slots=torch.as_tensor(plan.slots, device=d),
-            logits_index=torch.as_tensor(qstart[1:][plan.n_logits > 0] - 1, device=d),
-            logits_rows=torch.as_tensor(np.flatnonzero(plan.n_logits > 0), device=d),
+            input_ids=up.put("input_ids", plan.host_tokens),
+            positions=up.put("positions", positions),
+            query_start=up.put("query_start", qstart),
+            slots=up.put("slots", plan.slots.astype(np.int64)),
+            logits_index=up.put("logits_index", qstart[1:][plan.n_logits > 0] - 1),
+            logits_rows=up.put("logits_rows", np.flatnonzero(plan.n_logits > 0)),
         ))
-        pages = self.state.pages(plan, positions)
+        if len(on_device):        # decode inputs sampled by the previous step, still only on the device
+            idx = up.put("device_tokens", qstart[on_device])
+            batch.dev.input_ids[idx] = self.last_token[up.put("device_slots", plan.slots[on_device].astype(np.int64))]
+        pages = self.state.pages(plan, positions, up)
+        up.end()
         ctx = StepContext(batch, {g: p.plan_bounds(batch, pages.get(g)) for g, p in self.planners.items()})
         for group, planner in self.planners.items():
             planner.prepare_device(ctx.metas[group], ctx)
@@ -291,30 +358,34 @@ class Engine:
                 acc.top_ids += top.indices.tolist()
                 acc.top += top.values.tolist()
 
-    def _commit(self, plan: BatchPlan, seqs: list[Seq], out: SampleOut | None) -> list[TokenDelta]:
+    def _commit(self, step: _Inflight) -> list[TokenDelta]:
+        """Host bookkeeping once a step's results are on the host: tokens, finishing, publishing, streaming."""
+        step.done.synchronize()
+        tokens = step.tokens.tolist() if step.tokens is not None else []
+        lps = None if step.out is None or step.out.logprobs is None else (
+            step.out.logprobs.tolist(), step.out.top_ids.tolist(), step.out.top_logprobs.tolist())
         deltas, row = [], 0
-        tokens = out.tokens.tolist() if out is not None else []
-        lps = None if out is None or out.logprobs is None else (
-            out.logprobs.tolist(), out.top_ids.tolist(), out.top_logprobs.tolist())     # one transfer per step
-        for seq, n, has_logits in zip(seqs, plan.n_query, plan.n_logits, strict=True):
-            seq.num_computed += int(n)
-            self.state.publish(seq)
-            if not has_logits:
+        for seq, _, sampled in step.rows:
+            if not sampled:
+                if seq.status is not Status.FINISHED:
+                    self.state.publish(seq)
                 continue
-            token = tokens[row]
+            token, row = tokens[row], row + 1
+            seq.pending -= 1
+            if seq.status is Status.FINISHED:          # finished at an earlier commit; this row was extra
+                continue
             seq.tokens.append(token)
-            if seq.status is not Status.RUNNING:
-                self.sched.finished_prefill(seq)
-                for sibling in reversed(self._siblings.pop(seq, [])):
-                    self.sched.add(sibling, front=True)
+            self.state.publish(seq)
+            for sibling in reversed(self._siblings.pop(seq, [])):     # its prompt is cached now
+                self.sched.add(sibling, front=True)
             reason = self._finish_reason(seq, token)
             if reason:
                 self.sched.finish(seq, reason)
             k = seq.params.logprobs
-            logprobs = None if k is None else Logprobs([lps[0][row]], [lps[1][row][:k]], [lps[2][row][:k]])
+            logprobs = None if k is None else Logprobs([lps[0][row - 1]], [lps[1][row - 1][:k]],
+                                                       [lps[2][row - 1][:k]])
             deltas.append(TokenDelta(seq.rid, [token], index=seq.index, logprobs=logprobs,
                                      prompt_logprobs=self._prompt_lp.pop(seq, None), finish_reason=reason))
-            row += 1
         return deltas
 
     def _finish_reason(self, seq: Seq, token: int) -> str | None:

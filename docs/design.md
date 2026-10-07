@@ -855,6 +855,16 @@ declare `needs_host_lens`, and **only those inexact Seqs** are gated to depth 0 
 therefore use an attention kernel that reads lengths on the device (from the SeqTable) — a device-length path of
 FlashInfer or our own Triton paged attention; spike S1 names the kernel per fingerprint class.
 
+**Overlap invariant (implemented in E5).** All engine device work runs on one stream and the launch path never
+waits for the device: per-step inputs (batch fields, page lengths and write indices, block-table rows) are staged
+in two alternating pinned buffers and copied asynchronously into static device buffers; sampled tokens come back
+the same way, with an event per step. The host mirror `Seq.pending` counts tokens sampled but not committed: decode
+rows read their input from the device SeqTable (`last_token`), a request preempted while its decode is in flight
+waits for that commit, and requests reaching a length limit are not scheduled again. Everything a commit releases
+— finished requests' slots, pages and sampler rows, `_swap`ped prefix pages, preempted requests' pages — is reused
+only by launches enqueued later on the same stream, so an in-flight step never sees it change. An extra row for a
+request that stopped at the previous commit is discarded. Steps that report logprobs commit at once.
+
 Plugins declare the maximum depth they tolerate (`max_depth` in the manifest). Per-Seq depth: the scheduler
 skips any Seq that has more uncommitted steps in flight than the minimum depth tolerated by the plugins attached
 to it, so a CPU prompt-lookup Seq runs every other step while others keep overlapping. Device-side

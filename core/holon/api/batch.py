@@ -62,6 +62,7 @@ class Seq:
     index: int = 0                       # which of the request's `n` sequences
     slot: int = -1                       # persistent device row
     num_computed: int = 0                # host mirror; exact after commit
+    pending: int = 0                     # tokens sampled on the device, not yet committed (an upper bound)
     status: Status = Status.WAITING
     finish_reason: str | None = None
     ext: dict[str, Any] = dataclasses.field(default_factory=dict)  # namespaced plugin state; core never reads

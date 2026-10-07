@@ -1,0 +1,49 @@
+{
+ "gpu": "NVIDIA RTX A5000",
+ "command": "bench/decode_overlap.py --ctx 1024 --steps 64",
+ "results": [
+  {
+   "overlap": false,
+   "batch": 1,
+   "step_ms": 54.721,
+   "cpu_ms_per_step": 54.22,
+   "tok_s": 18.3
+  },
+  {
+   "overlap": false,
+   "batch": 8,
+   "step_ms": 48.392,
+   "cpu_ms_per_step": 48.307,
+   "tok_s": 165.3
+  },
+  {
+   "overlap": false,
+   "batch": 64,
+   "step_ms": 48.472,
+   "cpu_ms_per_step": 48.489,
+   "tok_s": 1320.4
+  },
+  {
+   "overlap": true,
+   "batch": 1,
+   "step_ms": 46.018,
+   "cpu_ms_per_step": 46.03,
+   "tok_s": 21.7
+  },
+  {
+   "overlap": true,
+   "batch": 8,
+   "step_ms": 50.949,
+   "cpu_ms_per_step": 50.966,
+   "tok_s": 157.0
+  },
+  {
+   "overlap": true,
+   "batch": 64,
+   "step_ms": 45.562,
+   "cpu_ms_per_step": 45.571,
+   "tok_s": 1404.7
+  }
+ ],
+ "note": "Eager engine: CPU time per step (46-54 ms, ~1k kernel launches) exceeds the GPU step (~21 ms of weight reads), so overlap cannot help yet; CUDA graphs (E6) remove the launch cost."
+}

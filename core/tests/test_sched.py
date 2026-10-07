@@ -70,7 +70,7 @@ def test_every_request_finishes_when_one_max_request_fits(seed):
     max_len = 40
     seqs = [_seq(i, p := rng.randint(1, max_len - 1), rng.randint(1, max_len - p)) for i in range(rng.randint(1, 12))]
     state = FakeState(capacity=rng.randint(max_len, 3 * max_len), slots=rng.randint(1, 4))
-    _run(Scheduler(state, max_step_tokens=rng.randint(1, 50)), seqs)
+    _run(Scheduler(state, max_step_tokens=rng.randint(1, 50), max_model_len=10**9), seqs)
     assert all(s.status is Status.FINISHED for s in seqs)
     assert state.held == {} and len(state.slots) > 0
 
@@ -87,7 +87,7 @@ def _commit(plan, rows, sched):
 def test_waiting_head_preempts_partial_prefill_behind_it():
     # B is mid-prefill holding most of the memory when preempted A returns to the head: B must yield, not deadlock.
     state = FakeState(capacity=8, slots=3)
-    sched = Scheduler(state, max_step_tokens=8)
+    sched = Scheduler(state, max_step_tokens=8, max_model_len=10**9)
     a, b = _seq(0, 2, 8), _seq(1, 9, 1)
     sched.add(a)
     sched.add(b)
@@ -102,7 +102,7 @@ def test_waiting_head_preempts_partial_prefill_behind_it():
 
 def test_decode_preempts_lowest_ranked_first():
     state = FakeState(capacity=6, slots=3)
-    sched = Scheduler(state, max_step_tokens=100)
+    sched = Scheduler(state, max_step_tokens=100, max_model_len=10**9)
     seqs = [_seq(i, 2, 5) for i in range(3)]
     for s in seqs:
         sched.add(s)
@@ -116,7 +116,7 @@ def test_decode_preempts_lowest_ranked_first():
 
 
 def test_no_progress_returns_none():
-    sched = Scheduler(FakeState(capacity=3, slots=1), max_step_tokens=8)
+    sched = Scheduler(FakeState(capacity=3, slots=1), max_step_tokens=8, max_model_len=10**9)
     sched.add(_seq(0, 5, 1))
     assert sched.schedule() is None
 
@@ -151,7 +151,7 @@ def test_pool_refcounts_and_copy():
 def test_hopeless_preemption_is_skipped():
     # The waiting head needs more than the waiting requests below it could free: they keep their work.
     state = FakeState(capacity=10, slots=4)
-    sched = Scheduler(state, max_step_tokens=100)
+    sched = Scheduler(state, max_step_tokens=100, max_model_len=10**9)
     running, partial = _seq(0, 6, 4), _seq(1, 3, 1)
     sched.add(running)
     _commit(*sched.schedule(), sched)     # running holds 6

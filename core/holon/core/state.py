@@ -16,6 +16,7 @@ import torch
 
 from holon.api import BatchPlan, Paged, Pages, Seq, StateSpec
 
+from .inputs import Uploader
 from .memory import OutOfUnits, Pool
 from .prefix import PrefixIndex
 
@@ -31,7 +32,7 @@ class BlockTable:
     """Unit ids per slot for one page group: `[max_seqs, max_pages]` on the host, mirrored to the device."""
 
     def __init__(self, page: int, max_seqs: int, max_pages: int, device: torch.device) -> None:
-        self.page = page
+        self.page, self.max_seqs, self.max_pages = page, max_seqs, max_pages
         self.host = np.zeros((max_seqs, max_pages), dtype=np.int32)
         self.dev = torch.zeros((max_seqs, max_pages), dtype=torch.int32, device=device)
         self._dirty: set[int] = set()
@@ -40,12 +41,16 @@ class BlockTable:
         self.host[slot, start:start + len(units)] = units
         self._dirty.add(slot)
 
-    def sync(self) -> None:
-        """Copy rows changed since the last step to the device."""
+    def fields(self, name: str) -> dict[str, tuple[int, torch.dtype]]:
+        return {f"{name}.rows": (self.max_seqs, torch.int64),
+                f"{name}.data": (self.max_seqs * self.max_pages, torch.int32)}
+
+    def sync(self, up: Uploader, name: str) -> None:
+        """Copy rows changed since the last step to the device, asynchronously and in stream order."""
         if self._dirty:
             rows = np.fromiter(sorted(self._dirty), dtype=np.int64)
-            self.dev[torch.as_tensor(rows, device=self.dev.device)] = torch.as_tensor(self.host[rows],
-                                                                                      device=self.dev.device)
+            data = up.put(f"{name}.data", self.host[rows].ravel()).view(len(rows), self.max_pages)
+            self.dev[up.put(f"{name}.rows", rows)] = data
             self._dirty.clear()
 
 
@@ -94,7 +99,7 @@ class StateManager:
         seq.slot = self._free_slots.pop()
         self.held[seq.slot], self.chain[seq.slot] = {}, []
         entries = []
-        if self.index is not None:
+        if self.index is not None and seq.params.prompt_logprobs is None:   # those need every position computed
             keys = self.index.keys(seq.tokens, 0, (len(seq.tokens) - 1) // self.index.block, None)
             entries = self.index.match(keys, seq.tokens)
             for e in entries:
@@ -214,13 +219,20 @@ class StateManager:
     def _page(self, spec: str) -> int:
         return self._table_of[spec].page
 
-    def pages(self, plan: BatchPlan, positions: np.ndarray) -> dict[str, Pages]:
+    def upload_fields(self, max_seqs: int, max_tokens: int) -> dict[str, tuple[int, torch.dtype]]:
+        """The per-step device inputs `pages` stages through the engine's uploader."""
+        fields = {"pages.lens": (max_seqs, torch.int32)}
+        for group, t in self.tables.items():
+            fields |= t.fields(f"{group}.table") | {f"{group}.write": (max_tokens, torch.int64)}
+        return fields
+
+    def pages(self, plan: BatchPlan, positions: np.ndarray, up: Uploader) -> dict[str, Pages]:
         """This step's view of every page group; `positions` are the step's token positions, flat."""
         rows = np.repeat(plan.slots, plan.n_query)
-        lens = torch.as_tensor(plan.start_upper + plan.n_query, device=self.device)
+        lens = up.put("pages.lens", (plan.start_upper + plan.n_query).astype(np.int32))
         out = {}
         for group, t in self.tables.items():
-            t.sync()
+            t.sync(up, f"{group}.table")
             write = t.host[rows, positions // t.page].astype(np.int64) * t.page + positions % t.page
-            out[group] = Pages(t.page, t.dev, t.host, lens, torch.as_tensor(write, device=self.device))
+            out[group] = Pages(t.page, t.dev, t.host, lens, up.put(f"{group}.write", write))
         return out

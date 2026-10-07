@@ -36,7 +36,7 @@ def tiny_checkpoint(tmp_path_factory) -> pathlib.Path:
 def _tiny_engine(path, **kw):
     # Pages of 4 tokens; one page holds 2 (k/v) × 4 tokens × 2 heads × 16 dims × 4 B × 2 layers = 2 KiB.
     cfg = dict(model=str(path), device="cpu", dtype=torch.float32, page_size=4, max_seqs=3, max_step_tokens=10,
-               max_model_len=40, state_memory=1 << 20)
+               max_model_len=40, state_memory=1 << 20, overlap=True)
     return Engine(EngineConfig(**cfg | kw))
 
 
@@ -268,3 +268,49 @@ def test_continuing_another_requests_cached_block_cannot_stall(tiny_checkpoint):
         for d in engine.step():
             out[d.rid] += d.token_ids
     assert [out[ra], out[rb]] == _hf_greedy(hf, [a, b], 1) and _released(engine)
+
+
+@pytest.mark.parametrize("state_memory", [1 << 20, 12 * 2048], ids=["roomy", "preempting"])
+def test_overlap_matches_depth_0_with_stops_mid_batch(tiny_checkpoint, tiny_case, state_memory):
+    # A stop token ends some sequences while their next decode row is already in flight: that row is discarded.
+    prompts, expected = tiny_case
+    stop = expected[1][3]                                    # a token sequence 1 emits early
+    params = SamplingParams(temperature=0.0, max_tokens=12, ignore_eos=True, stop_token_ids=(stop,))
+    outs = {}
+    for overlap in (False, True):
+        engine = _tiny_engine(tiny_checkpoint, state_memory=state_memory, overlap=overlap)
+        outs[overlap] = engine.generate(prompts, params)
+        assert _released(engine) and all(s.pending == 0 for s in engine.sched.waiting)
+    assert outs[True] == outs[False]
+    assert any(len(o) < 12 and o[-1] == stop for o in outs[True])
+
+
+@pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
+def test_decode_launch_never_waits_for_the_device():
+    from holon.core import platform
+
+    engine = Engine(EngineConfig(model=str(SNAP), dtype=torch.bfloat16, max_model_len=4096, max_seqs=64))
+    for i in range(64):
+        engine.add([100 + i] * 2000, SamplingParams(temperature=0.0, max_tokens=64, ignore_eos=True))
+    while engine.sched.waiting or engine._inflight is None or engine._inflight.rows[0][1] != 1:
+        engine.step()                                        # through prefill, into steady decode
+    for _ in range(3):
+        prev, engine._inflight = engine._inflight, None
+        scheduled = engine.sched.schedule()
+        with platform.no_host_sync(engine.device):           # any implicit device->host sync raises here
+            step = engine._launch(*scheduled)
+        assert not step.done._event.query()                  # a long step: the host got ahead of the device
+        engine._commit(prev)
+        engine._inflight = step
+    while engine.has_work():
+        engine.step()
+
+
+def test_prompt_logprobs_are_complete_after_a_prefix_hit(tiny_checkpoint, tiny_case):
+    # Regression: a request asking for prompt logprobs must not skip cached positions.
+    prompts, _ = tiny_case
+    engine = _tiny_engine(tiny_checkpoint)
+    engine.generate([prompts[3]], GREEDY)                                   # caches the prompt's blocks
+    rid = engine.add(prompts[3], SamplingParams(temperature=0.0, max_tokens=1, prompt_logprobs=1))
+    deltas = [d for _ in iter(engine.has_work, False) for d in engine.step() if d.rid == rid]
+    assert len(deltas[0].prompt_logprobs.token) == len(prompts[3]) - 1

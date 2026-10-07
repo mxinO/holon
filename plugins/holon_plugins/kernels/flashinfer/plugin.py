@@ -3,8 +3,9 @@
 
 Prefill uses the FA2 paged-prefill wrapper (bottom-right causal, so a chunk attends to the context before it);
 decode uses the tensor-core decode wrapper. Both plan on the host every step from the block table's host mirror.
-Non-graph wrappers for now: CUDA-graph wrappers and two alternating wrappers per geometry (a wrapper reuses one
-pinned staging buffer, so depth 1 needs two) come with graphs and overlap.
+Each instance alternates two wrappers: a wrapper stages its plan through one pinned buffer with an asynchronous
+copy, so with overlap the next step's plan() must not overwrite the buffer the previous step's copy still reads
+(spike S1).
 """
 from __future__ import annotations
 
@@ -43,25 +44,28 @@ class _Paged:
 class Prefill(_Paged):
     def __init__(self, ctx, **facts) -> None:
         super().__init__(ctx, **facts)
-        self.wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(self.workspace, "HND")
+        self.wrappers = [flashinfer.BatchPrefillWithPagedKVCacheWrapper(self.workspace, "HND") for _ in range(2)]
 
     def plan(self, batch, pages):
+        self.wrappers.reverse()
         qo_indptr = torch.from_numpy(np.concatenate([[0], np.cumsum(batch.plan.n_query)]).astype(np.int32))
         heads, kv_heads, head_dim, page = self.geometry
-        self.wrapper.plan(qo_indptr, *self._pages(batch, pages), heads, kv_heads, head_dim, page, causal=True,
-                          **self.dtypes)
-        return self.wrapper
+        self.wrappers[0].plan(qo_indptr, *self._pages(batch, pages), heads, kv_heads, head_dim, page, causal=True,
+                              **self.dtypes)
+        return self.wrappers[0]
 
 
 class Decode(_Paged):
     def __init__(self, ctx, **facts) -> None:
         super().__init__(ctx, **facts)
-        self.wrapper = flashinfer.BatchDecodeWithPagedKVCacheWrapper(self.workspace, "HND", use_tensor_cores=True)
+        self.wrappers = [flashinfer.BatchDecodeWithPagedKVCacheWrapper(self.workspace, "HND", use_tensor_cores=True)
+                         for _ in range(2)]
 
     def plan(self, batch, pages):
+        self.wrappers.reverse()
         heads, kv_heads, head_dim, page = self.geometry
-        self.wrapper.plan(*self._pages(batch, pages), heads, kv_heads, head_dim, page, **self.dtypes)
-        return self.wrapper
+        self.wrappers[0].plan(*self._pages(batch, pages), heads, kv_heads, head_dim, page, **self.dtypes)
+        return self.wrappers[0]
 
 
 def _supports(f: dict) -> bool:
