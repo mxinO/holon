@@ -2,21 +2,22 @@
 
 Configurations that change batch shape, chunking or path (prefix cache on vs off, overlap depth 1 vs 0) are not
 compared token for token: greedy decoding may take either side of a near-tie. Each configuration instead generates
-greedily on its own production path, without logprobs (logprob steps commit synchronously and run eagerly, which
-would hide depth 1 and graph replay), and one reference engine (prefix cache off, depth 0, eager) re-scores the
-generated tokens teacher-forced: how often its argmax is the generated token, overall and at confident positions,
-and the regret. Agreement is coarse, though: a bug that perturbs the state a little (one prefix token's state never
-computed) moves it by less than the noise. So each configuration also runs the trace with logprobs, a pass that still
-adopts cached prefixes, and is judged as L2 judges an engine: KL(reference ‖ configuration) at the same positions.
+greedily on its own production path, without logprobs (logprob steps run eagerly, which would hide graph replay),
+and one reference engine (prefix cache off, depth 0, eager) re-scores the generated tokens teacher-forced: how often
+its argmax is the generated token, overall and at confident positions. Agreement is coarse, though: a bug that
+perturbs the state a little (one prefix token's state never computed) moves it by less than the noise. So each
+configuration also runs the trace with logprobs (eager, but at its own depth and with its own prefix cache) and is
+judged as L2 judges an engine: KL(reference ‖ configuration) at the same positions.
 
 As in L2, the floor is the same comparison without the thing under test: the baseline configuration (prefix cache
 off, depth 0, graphs on) re-scored the same way. Two bf16 paths (decode vs prefill kernels) disagree at near-ties no
 matter what, and generated text has more near-ties than the L2 prompt set, so the L2 floor does not transfer. A
 configuration passes if its agreement is within `margin` of the floor's, where `margin` is the L2 slack
-(`compare.TOP1_DELTA`) or 2.5 standard errors of the difference, whichever is larger (sessions are the clusters);
-its mean regret at most doubles the floor's; and its KL p50 and p99 are at most `compare.KL_FACTOR` times the
-floor's, as in L2. Planted bugs in prefix adoption and in the depth-1 token feed fail it (`planted`; tested in
-judge/tests/test_bounded.py and calibrated on Qwen3-8B in the evidence).
+(`compare.TOP1_DELTA`) or 2.5 standard errors of the difference, whichever is larger (sessions are the clusters),
+and its KL p50 and p99 are at most `compare.KL_FACTOR` times the floor's, as in L2, or above it by 2.5 standard
+errors of the difference (a session bootstrap), whichever is larger. Planted bugs in prefix adoption and in the
+depth-1 token feed fail it (`planted`; tested in judge/tests/test_bounded.py and calibrated on Qwen3-8B in the
+evidence).
 
 The trace: sessions share a system prompt and every turn resends the whole history, generated tokens included, plus
 a new user chunk, so later turns hit the prefix cache (`tokens_saved`).
@@ -37,8 +38,8 @@ from .recording import Prompt, PromptSet, Recording, tail_from_topk
 Turn = tuple[list[int], list[int], list[Logprobs]]   # prompt ids, generated ids, their logprobs (if asked for)
 BASELINE = {"prefix_cache": False, "overlap": False}
 SE_FACTOR = 2.5
-REGRET_MIN = 1e-3         # nats: the regret margin when the baseline's is ~0 (fp32 tests)
-KL_MIN = 1e-5             # nats: the KL margin when the baseline's is ~0
+KL_EPS = 1e-9             # nats: the KL margin when the baseline's and the noise are ~0 (fp32 tests)
+BOOTSTRAP = 200           # session resamples for the standard error of a KL quantile
 
 
 @dataclasses.dataclass(frozen=True)
@@ -119,18 +120,16 @@ class Mean:
 class Agreement:
     top1: Mean                # the reference's argmax is the generated token
     confident: Mean           # the same where the reference's top-2 gap >= CONFIDENT_GAP
-    regret: Mean              # nats: reference logprob of its argmax minus that of the generated token
+    regret: Mean              # nats: reference logprob of its argmax minus that of the generated token (reported:
+                              # heavy-tailed, its noise is too large to judge by)
 
     def checks(self, floor: Agreement) -> dict[str, tuple[bool, float]]:
-        """name -> (passed, margin). Agreement may fall below the floor's by the L2 slack or the noise; regret may
-        at most double the floor's (beyond the noise), which catches few but confident disagreements."""
+        """name -> (passed, margin): agreement may fall below the floor's by the L2 slack or the noise."""
         out = {}
         for name in ("top1", "confident"):
             mine, theirs = getattr(self, name), getattr(floor, name)
             margin = max(TOP1_DELTA, mine.noise(theirs))
             out[name] = (mine.value >= theirs.value - margin, margin)
-        margin = max(floor.regret.value, REGRET_MIN, self.regret.noise(floor.regret))
-        out["regret"] = (self.regret.value <= floor.regret.value + margin, margin)
         return out
 
 
@@ -139,14 +138,28 @@ class Divergence:
     kl: Mean                  # KL(reference ‖ configuration) at the generated positions, top-k bucketed as in L2
     p50: float
     p99: float
+    p50_se: float             # session-bootstrap standard errors of the quantiles
+    p99_se: float
 
     def checks(self, floor: Divergence) -> dict[str, tuple[bool, float]]:
         out = {}
         for name in ("p50", "p99"):
             mine, theirs = getattr(self, name), getattr(floor, name)
-            margin = max((KL_FACTOR - 1) * theirs, KL_MIN)
+            noise = SE_FACTOR * math.hypot(getattr(self, f"{name}_se"), getattr(floor, f"{name}_se"))
+            margin = max((KL_FACTOR - 1) * theirs, noise, KL_EPS)
             out[f"kl_{name}"] = (mine <= theirs + margin, margin)
         return out
+
+
+def _quantiles(values: torch.Tensor, clusters: torch.Tensor, q: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Quantiles `q` of `values` and their standard errors, by resampling whole clusters (a fixed seed)."""
+    order = torch.argsort(clusters, stable=True)
+    groups = torch.split(values[order], torch.unique_consecutive(clusters[order], return_counts=True)[1].tolist())
+    gen = torch.Generator().manual_seed(0)
+    draws = torch.stack([torch.quantile(torch.cat([groups[i] for i in torch.randint(len(groups), (len(groups),),
+                                                                                       generator=gen).tolist()]), q)
+                         for _ in range(BOOTSTRAP)])
+    return torch.quantile(values, q), draws.std(0)
 
 
 def _reference(reference, turns: list[Turn], sessions: int, k: int) -> tuple[Recording, torch.Tensor]:
@@ -178,8 +191,9 @@ def divergence(reference, turns: list[Turn], sessions: int, k: int) -> Divergenc
     top = torch.tensor([x[:k] for _, _, lps in turns for lp in lps for x in lp.top], dtype=torch.float32)
     cand = Recording(ids, top, top[:, 0], tail_from_topk(top), ref.offsets, {})
     kl, _ = kl_topk(ref, cand)
-    p50, p99 = torch.quantile(kl, torch.tensor([0.5, 0.99], dtype=torch.float64)).tolist()
-    return Divergence(Mean.of(kl, session), p50, p99)
+    (p50, p99), (p50_se, p99_se) = (t.tolist() for t in _quantiles(kl, session, torch.tensor([0.5, 0.99],
+                                                                                              dtype=torch.float64)))
+    return Divergence(Mean.of(kl, session), p50, p99, p50_se, p99_se)
 
 
 def compare_configs(build, configs: dict[str, dict], trace: Trace, k: int = 20) -> dict:
@@ -202,8 +216,7 @@ def compare_configs(build, configs: dict[str, dict], trace: Trace, k: int = 20) 
     results = {}
     for name, (agree, div, stats) in scored.items():
         checks = agree.checks(floor_a) | div.checks(floor_d)
-        values = {"top1": agree.top1.value, "confident": agree.confident.value, "regret": agree.regret.value,
-                  "kl_p50": div.p50, "kl_p99": div.p99}
+        values = {"top1": agree.top1.value, "confident": agree.confident.value, "kl_p50": div.p50, "kl_p99": div.p99}
         failures = [f"{what} {values[what]:.4g} beyond {margin:.3g} of the baseline"
                     for what, (ok, margin) in checks.items() if not ok]
         results[name] = {"config": {"cuda_graphs": True} | (BASELINE if name == "baseline" else configs[name]),

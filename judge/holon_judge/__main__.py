@@ -6,10 +6,12 @@
     python -m holon_judge l2       --model <hf dir or id> --prompts <jsonl> --golden <file> --floor <file>
                                    [--dtype bfloat16] [--k 20] [--save <file>] [--json <file>]
     python -m holon_judge snapshot-diff <a.json> <b.json>
+    python -m holon_judge snapshot --model <hf dir or id> --prompts <jsonl> [--runs 3] [--json <file>]
+                                   # the snapshot trace on fresh engines: run-identical?
     python -m holon_judge bounded  --model <hf dir or id> --prompts <jsonl> [--json <file>] [--plant <bug>]
                                    # prefix cache on/off x overlap depth 1/0 on a multi-turn trace
 
-`compare`, `l2`, `snapshot-diff` and `bounded` exit with status 1 on a failed check.
+`compare`, `l2`, `snapshot-diff`, `snapshot` and `bounded` exit with status 1 on a failed check.
 """
 from __future__ import annotations
 
@@ -64,6 +66,34 @@ def _snapshot_diff(a: argparse.Namespace) -> int:
     where = diff(Snapshot.load(a.a), Snapshot.load(a.b))
     print(where or "identical")
     return 1 if where else 0
+
+
+def _snapshot(a: argparse.Namespace) -> int:
+    import gc
+
+    from holon.api import canonical_hash
+    from holon.core.engine import Engine, EngineConfig
+
+    from . import snapshot
+
+    path = golden.resolve_model(a.model)
+    requests = snapshot.trace(PromptSet.load(a.prompts))
+    runs = []
+    for _ in range(a.runs):
+        engine = Engine(EngineConfig(model=str(path), dtype=golden.DTYPES[a.dtype]))
+        runs.append(snapshot.record(engine, requests))
+        engine.close()
+        gc.collect()
+    diffs = [snapshot.diff(runs[0], run) for run in runs[1:]]
+    report = {"model": golden.model_meta(path)["model"], "dtype": a.dtype, "runs": a.runs,
+              "hardware": golden.hardware(torch.device("cuda")), "torch": torch.__version__,
+              "trace": canonical_hash([[r.ids, r.params, r.after] for r in requests]),
+              "steps": len(runs[0].steps), "diffs": diffs, "run_identical": not any(diffs), **runs[0].meta}
+    print(json.dumps(report, indent=1, default=str))
+    if a.json:
+        pathlib.Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+        pathlib.Path(a.json).write_text(json.dumps(report, indent=1, default=str) + "\n")
+    return 0 if report["run_identical"] else 1
 
 
 def _bounded(a: argparse.Namespace) -> int:
@@ -128,6 +158,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("a")
     s.add_argument("b")
     s.set_defaults(run=_snapshot_diff)
+
+    t = sub.add_parser("snapshot", help="run the snapshot trace on fresh engines and check it is run-identical")
+    t.add_argument("--model", required=True, help="HF checkpoint directory or hub id")
+    t.add_argument("--prompts", required=True)
+    t.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
+    t.add_argument("--runs", type=int, default=3)
+    t.add_argument("--json", help="write the machine-readable report here")
+    t.set_defaults(run=_snapshot)
 
     b = sub.add_parser("bounded", help="judge engine configurations against the reference on a multi-turn trace")
     b.add_argument("--model", required=True, help="HF checkpoint directory or hub id")

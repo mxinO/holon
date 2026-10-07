@@ -6,7 +6,7 @@ import pytest
 import torch
 from holon.core.engine import Engine, EngineConfig
 from holon_judge import bounded
-from holon_judge.bounded import Agreement, Mean, Trace
+from holon_judge.bounded import Agreement, Divergence, Mean, Trace
 from holon_judge.planted import PLANTS
 
 CONFIGS = {"prefix on, depth 1": {"prefix_cache": True, "overlap": True},
@@ -23,17 +23,32 @@ def test_mean_has_a_cluster_robust_standard_error():
     assert math.isnan(Mean.of(hits[:0], clusters[:0]).value)
 
 
-def _agreement(top1, confident, regret, se=0.0):
-    return Agreement(Mean(top1, se, 1000), Mean(confident, se, 1000), Mean(regret, se, 1000))
+def _agreement(top1, confident, se=0.0):
+    return Agreement(Mean(top1, se, 1000), Mean(confident, se, 1000), Mean(0.0, se, 1000))
 
 
-def test_checks_allow_the_l2_slack_or_the_noise_and_twice_the_regret():
-    floor = _agreement(0.98, 0.995, 0.01)
-    assert all(ok for ok, _ in _agreement(0.978, 0.993, 0.019).checks(floor).values())
-    failed = {name for name, (ok, _) in _agreement(0.97, 0.99, 0.021).checks(floor).items() if not ok}
-    assert failed == {"top1", "confident", "regret"}
-    ok, margin = _agreement(0.97, 0.995, 0.01, se=0.004).checks(_agreement(0.98, 0.995, 0.01, se=0.003))["top1"]
+def test_agreement_may_fall_by_the_l2_slack_or_the_noise():
+    floor = _agreement(0.98, 0.995)
+    assert all(ok for ok, _ in _agreement(0.978, 0.993).checks(floor).values())
+    assert not any(ok for ok, _ in _agreement(0.97, 0.99).checks(floor).values())
+    ok, margin = _agreement(0.97, 0.995, se=0.004).checks(_agreement(0.98, 0.995, se=0.003))["top1"]
     assert ok and math.isclose(margin, 2.5 * 0.005)
+
+
+def test_kl_quantiles_may_double_or_exceed_by_the_noise():
+    floor = Divergence(Mean(0.0, 0.0, 1), 1e-5, 1e-2, 1e-7, 1e-4)
+    assert Divergence(Mean(0.0, 0.0, 1), 1.9e-5, 1.9e-2, 1e-7, 1e-4).checks(floor) == {
+        "kl_p50": (True, 1e-5), "kl_p99": (True, 1e-2)}
+    noisy = Divergence(Mean(0.0, 0.0, 1), 3e-5, 1e-2, 1e-5, 1e-4).checks(floor)["kl_p50"]
+    assert noisy[0] and math.isclose(noisy[1], 2.5 * math.hypot(1e-5, 1e-7))
+
+
+def test_kl_quantile_standard_errors_resample_whole_clusters():
+    values = torch.tensor([1.0, 1.0, 1.0, 5.0, 5.0, 5.0], dtype=torch.float64)
+    q = torch.tensor([0.5], dtype=torch.float64)
+    _, same = bounded._quantiles(values, torch.tensor([0, 1, 2, 0, 1, 2]), q)    # every cluster holds both values
+    _, apart = bounded._quantiles(values, torch.tensor([0, 0, 0, 1, 1, 1]), q)   # clusters differ
+    assert same.item() == 0 and apart.item() > 1
 
 
 @pytest.fixture(scope="module")
@@ -65,7 +80,7 @@ def test_configurations_agree_with_the_reference_and_the_prefix_cache_saves(run)
 @pytest.mark.parametrize("plant, broken", [
     ("adoption-off-by-one", {"prefix on, depth 1", "prefix on, depth 0"}),
     ("wrong-block", {"prefix on, depth 1", "prefix on, depth 0"}),
-    ("stale-device-token", {"prefix on, depth 1", "prefix off, depth 1"})])
+    ("stale-device-token", {"prefix on, depth 1", "prefix off, depth 1"})])     # the rare one needs a long trace
 def test_a_planted_bug_fails_exactly_the_configurations_using_its_path(run, plant, broken):
     report = run(plant)
     assert {name for name, r in report["results"].items() if not r["passed"]} == broken, bounded.table(report)

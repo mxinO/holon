@@ -49,8 +49,8 @@ def wrong_block() -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def stale_device_token() -> Iterator[None]:
-    """After a sampled token id divisible by 7, the next step's device-sourced input (depth 1) is the previous
+def stale_device_token(every: int = 7) -> Iterator[None]:
+    """After a sampled token id divisible by `every`, the next step's device-sourced input (depth 1) is the previous
     token."""
     from holon.core.engine import Engine
 
@@ -62,7 +62,7 @@ def stale_device_token() -> Iterator[None]:
         slots = ctx.batch.dev.slots[ctx.batch.dev.logits_rows]
         before = self.last_token[slots]
         out = store(self, ctx, tokens, accepts)
-        self.last_token[slots] = torch.where(tokens % 7 == 0, before, tokens)
+        self.last_token[slots] = torch.where(tokens % every == 0, before, tokens)
         return out
     with mock.patch.object(Engine, "_store", planted):
         yield
@@ -70,4 +70,4 @@ def stale_device_token() -> Iterator[None]:
 
 PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "adoption-off-by-one": adoption_off_by_one, "wrong-block": wrong_block,
-    "stale-device-token": stale_device_token}
+    "stale-device-token": stale_device_token, "rare-stale-device-token": lambda: stale_device_token(every=101)}

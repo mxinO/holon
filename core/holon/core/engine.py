@@ -28,7 +28,6 @@ from holon.api import (
     Logprobs,
     Paged,
     Ref,
-    SampleOut,
     SamplingParams,
     Seq,
     SeqTable,
@@ -122,15 +121,15 @@ class _Prep:
 
 @dataclasses.dataclass
 class _Inflight:
-    """A launched step: per-row snapshots (seq, tokens computed, sampled) taken at launch, the sampled tokens'
-    pinned host copy and the event that says it has landed."""
+    """A launched step: per-row snapshots (seq, tokens computed, sampled) taken at launch, the pinned host copies of
+    its results and the event that says they have landed."""
 
     rows: list[tuple[Seq, int, int]]          # (seq, tokens computed, logits rows: 0 | 1 | 1 + k)
-    out: SampleOut | None
     tokens: torch.Tensor | None
-    accepts: torch.Tensor | None             # verify rows' accepted draft counts (pinned host copy)
+    accepts: torch.Tensor | None             # verify rows' accepted draft counts
+    logprobs: tuple[torch.Tensor, ...] | None   # sampled tokens' logprob, top ids, top logprobs
     done: platform.Event
-    sync: bool                               # commit at once (its logprobs need the host)
+    sync: bool                               # commit at once (prompt logprobs were extracted on the host)
 
 
 def resolve_model(plugins: PluginSet, cfg: EngineConfig) -> tuple[Any, Any]:
@@ -216,7 +215,7 @@ class Engine:
 
     def _draft_k(self, seq: Seq) -> int:
         """Drafts the policy wants for `seq` this step. Only greedy requests without logprobs are drafted: the
-        verifier is greedy-exact and logprob steps run synchronously."""
+        verifier is greedy-exact and reports no logprobs."""
         if self.policy is None or seq.params.temperature != 0 or seq.params.logprobs is not None:
             return 0
         return min(self.policy.choose(seq)[1], self.cfg.max_draft_tokens)
@@ -433,7 +432,7 @@ class Engine:
     @torch.no_grad()
     def step(self) -> list[TokenDelta]:
         """Schedule and launch one step; commit the previous one while this one runs (overlap), or this one at
-        once (depth 0, and steps that report logprobs, whose extraction needs the host)."""
+        once (depth 0, and steps that report prompt logprobs, whose extraction needs the host)."""
         prev, self._inflight = self._inflight, None
         deltas: list[TokenDelta] = []
         scheduled = self.sched.schedule()
@@ -456,10 +455,12 @@ class Engine:
     def _launch(self, plan: BatchPlan, seqs: list[Seq]) -> _Inflight:
         """Enqueue the step's device work without waiting for the device, then advance the host mirrors."""
         rows = [(seq, int(n), int(m)) for seq, n, m in zip(seqs, plan.n_query, plan.n_logits, strict=True)]
-        sync = any(seq in self._prompt_lp or (m and seq.params.logprobs is not None) for seq, _, m in rows)
+        sync = any(seq in self._prompt_lp for seq in seqs)
+        logprobs = any(m and seq.params.logprobs is not None for seq, _, m in rows)
         decode = bool((plan.n_query == 1).all())
         exact = np.array([seq.inexact == 0 for seq in seqs], dtype=bool)
-        graphed = self.graphs is not None and decode and not sync and len(seqs) <= self._buckets[-1]   # all captured
+        graphed = (self.graphs is not None and decode and not sync and not logprobs     # graphs return tokens only
+                   and len(seqs) <= self._buckets[-1])                                  # every bucket is captured
         if graphed:
             plan = padded(plan, next(b for b in self._buckets if b >= len(seqs)), self.state.padding_slot)
             exact = np.concatenate([exact, np.ones(len(plan.slots) - len(seqs), dtype=bool)])   # padding: start 0
@@ -485,7 +486,10 @@ class Engine:
                 sampled = self._store(ctx, out.tokens)
         if sampled is not None and self.drafter is not None:
             self.drafter.propose(ctx)               # drafts for the next step, from the advanced SeqTable
-        tokens = None
+        tokens = lps = None
+        if out is not None and out.logprobs is not None:   # pinned copies, read at commit: no host sync at launch
+            lps = tuple(platform.pinned_empty(t.numel(), t.dtype, self.device).view(t.shape).copy_(t, non_blocking=True)
+                        for t in (out.logprobs, out.top_ids, out.top_logprobs))
         if sampled is not None:
             n_sampled = sum(m for _, _, m in rows)
             tokens = self._out_tokens[self._out_turn][:n_sampled]
@@ -504,7 +508,7 @@ class Engine:
                     seq.inexact += 1
                 if seq.status is not running:
                     self.sched.finished_prefill(seq)
-        return _Inflight(rows, out, tokens, accepts, done, sync)
+        return _Inflight(rows, tokens, accepts, lps, done, sync)
 
     def _decode(self, ctx: StepContext) -> torch.Tensor:
         """A decode step's device work from inputs to sampled tokens — the part captured in a graph."""
@@ -609,8 +613,7 @@ class Engine:
         step.done.synchronize()
         tokens = step.tokens.tolist() if step.tokens is not None else []
         accepts = iter(step.accepts.tolist() if step.accepts is not None else [])
-        lps = None if step.out is None or step.out.logprobs is None else (
-            step.out.logprobs.tolist(), step.out.top_ids.tolist(), step.out.top_logprobs.tolist())
+        lps = None if step.logprobs is None else [t.tolist() for t in step.logprobs]
         deltas, row = [], 0
         for seq, _, m in step.rows:
             if not m:
