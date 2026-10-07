@@ -27,9 +27,9 @@ from holon.core.engine import Engine, EngineConfig, resolve_model
 from holon.core.plugins import PluginSet, discover
 from holon_judge.golden import resolve_model as checkpoint_dir
 from holon_judge.recording import PromptSet
-from holon_judge.snapshot import Snapshot
+from holon_judge.snapshot import Snapshot, trace
 
-from . import impact, propagate, tune
+from . import impact, locks, propagate, tune
 
 DEFAULT_PROMPTS = pathlib.Path(__file__).resolve().parents[2] / "judge" / "prompts" / "v1.jsonl"
 
@@ -40,7 +40,7 @@ def _impact(a: argparse.Namespace) -> int:
     except ValueError as e:
         raise SystemExit(str(e)) from None
     print(f"changed units: {', '.join(sorted(units)) or '-'}")
-    for lock, hit in impact.impact(plans.heads(a.plans), units):
+    for lock, hit in impact.impact(locks.heads(a.plans), units):
         print(f"{lock.plan.model_id}  {lock.plan.fingerprint_class}: {', '.join(hit)}")
     return 0
 
@@ -82,10 +82,11 @@ def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig) -> int
     """Check `config` against `start` and write the new lock if the outcome allows."""
     prompts = PromptSet.load(a.prompts)
     l2 = propagate.L2Inputs(prompts, a.golden, a.floor) if a.golden and a.floor else None
-    checks = propagate.EngineChecks(config, propagate.snapshot_trace(prompts), l2)
+    checks = propagate.EngineChecks(config, trace(prompts), l2)
     stored = start and start.snapshot and propagate.snapshot_path(a.plans, start.plan, start.snapshot)
     previous = Snapshot.load(stored) if stored and stored.is_file() else None
-    outcome = propagate.decide(start, checks, platform.fingerprint(torch.device(config.device)).sm, previous)
+    sm = platform.fingerprint(torch.device(config.device)).sm
+    outcome = propagate.decide(start, checks, sm, previous, a.allow_uncovered_advance)
     print(propagate.report(outcome))
     if outcome.verdict == "advance" or (outcome.verdict == "approve" and a.approve):
         print(f"wrote {propagate.write(a.plans, outcome)}")
@@ -104,7 +105,7 @@ def _tune(a: argparse.Namespace) -> int:
     start, pins = _start(a, config)
     base = dataclasses.replace(config, kernels=pins)
     engine = Engine(base)
-    resolved = _pins(Lock(plans.plan_of(engine)))  # every tuned op starts pinned to what the base resolves to
+    resolved = _pins(Lock(locks.plan_of(engine)))  # every tuned op starts pinned to what the base resolves to
     ops = tune.candidates(engine, tuple(a.ops))
     del engine
 
@@ -134,6 +135,9 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--class", dest="cls", help="start from this fingerprint class's newest lock")
         p.add_argument("--new-model", action="store_true", help="write the model's first lock")
         p.add_argument("--approve", action="store_true", help="write a lock that needs an approval")
+        p.add_argument("--allow-uncovered-advance", action="store_true",
+                       help="advance without approval on a byte-identical snapshot trace, although changed-line "
+                            "coverage is not checked yet")
         p.add_argument("--prompts", default=str(DEFAULT_PROMPTS), help="prompt set of L2 and the snapshot trace")
         p.add_argument("--golden", type=pathlib.Path, help="fp32 reference recording (judge golden)")
         p.add_argument("--floor", type=pathlib.Path, help="judge floor recording for the activation dtype")

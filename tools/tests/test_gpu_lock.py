@@ -3,7 +3,8 @@ import pathlib
 
 import pytest
 import torch
-from holon.core import plans, platform
+from holon.core import platform
+from holon_tools import locks
 from holon_tools.__main__ import main
 
 SNAP = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
@@ -16,7 +17,7 @@ def test_first_lock_for_qwen3_0_6b(tmp_path, capsys):
              "--floor", str(GOLDENS / "v1-bfloat16-floor.safetensors")]
     assert main(["propagate", *flags, "--new-model", "--approve"]) == 0
     assert "PASS" in capsys.readouterr().out
-    (lock,) = plans.heads(tmp_path)
+    (lock,) = locks.heads(tmp_path)
     assert lock.plan.model_id.startswith("Qwen/Qwen3-0.6B@") and lock.snapshot and lock.sm > 0
     assert lock.plan.fingerprint_class == platform.fingerprint(torch.device("cuda")).cls
     assert main(["propagate", *flags]) == 0

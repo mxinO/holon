@@ -1,115 +1,39 @@
-"""Lock files and lock history (design §4.4): format round trip, append/newest/heads, nearest-class fallback."""
-import dataclasses
+"""Reading side of the lock history: unit source hashes and engine overrides (writing is tested with the tools)."""
+import shutil
 
-import pytest
 import torch
-from holon.api import Binding, Fingerprint, Lock, Plan, UnitPin
+from holon.api import Binding, Lock, Plan
 from holon.core import plans
 
-MODEL = "org/model@0123456789abcdef"
 
-
-def _plan(cls="rtx-a5000/cu130-torch2.11", decode="kernels.fast", src="aaaa", commit="c1", step=4096) -> Plan:
-    facts = {"heads": 4, "eps": 1e-6, "theta": 1e6, "dtype": "bfloat16", "quoted \"key\"": True}
-    return Plan(model_id=MODEL, fingerprint_class=cls, recipe="sha256:r", commit=commit, uv_lock="none",
-                units={"holon": UnitPin("0.0.1", "core"), "std.ops": UnitPin("1.0.0", src, "sha256:sem"),
-                       "kernels.fast": UnitPin("1.0.0", "ffff")},
-                sites={"kv/attention.paged_decode@1": Binding(decode, {"facts": facts, "props": ["deterministic"]}),
-                       "std.ops.rmsnorm[dim=64]/rmsnorm@1": Binding("std.ops", {"facts": facts, "props": []})},
-                engine={"dtype": "bfloat16", "max_step_tokens": step, "cuda_graphs": True})
-
-
-def test_lock_round_trip_is_exact():
-    lock = Lock(_plan(), "sha256:snap", ("std.ops.rmsnorm[dim=64]/rmsnorm@1",), sm=86)
-    text = plans.dumps(lock)
-    back = plans.loads(text)
-    assert back.plan.plan_id == lock.plan.plan_id and plans.dumps(back) == text
-    assert (back.snapshot, back.uncovered, back.sm) == (lock.snapshot, lock.uncovered, 86)
-    assert plans.loads(plans.dumps(Lock(_plan()))).snapshot is None
-
-
-def test_round_trip_of_nested_tuples_and_unicode():
-    plan = _plan()
-    odd = Binding("kernels.fast", {"facts": {"shape": (1, (2, 3)), "név": "ünï\tcode", "neg": -1.5e-300},
-                                   "launch": {"tiles": [64, 128], "split": {"k": 2}}}, {"warps": 4})
-    plan = dataclasses.replace(plan, sites=plan.sites | {"ü site/rmsnorm@1": odd})
-    back = plans.loads(plans.dumps(Lock(plan)))
-    assert back.plan.plan_id == plan.plan_id
-    assert back.plan.sites["ü site/rmsnorm@1"].tunables == {"warps": 4}
-
-
-def test_hand_edits_are_rejected(tmp_path):
-    path = tmp_path / "1.lock"
-    path.write_text(plans.dumps(Lock(_plan())).replace('"kernels.fast" }', '"std.mixers.gqa" }'))
-    with pytest.raises(ValueError, match="edited by hand"):
-        plans.read(path)
-
-
-def test_unwritable_values_fail_loudly():
-    bad = dataclasses.replace(_plan(), sites={"s/rmsnorm@1": Binding("x", {"facts": {"none": None}})})
-    with pytest.raises(TypeError, match="NoneType"):
-        plans.dumps(Lock(bad))
-
-
-def test_history_append_newest_heads(tmp_path):
-    cls = "rtx-a5000/cu130-torch2.11"
-    assert plans.newest(tmp_path, MODEL, cls) is None
-    first = plans.append(tmp_path, Lock(_plan()))
-    second = plans.append(tmp_path, Lock(_plan(decode="std.mixers.gqa")))
-    assert (first.name, second.name) == ("1.lock", "2.lock")
-    assert first.relative_to(tmp_path).as_posix() == f"{MODEL}/{cls}/1.lock"
-    assert plans.newest(tmp_path, MODEL, cls).plan.sites["kv/attention.paged_decode@1"].impl == "std.mixers.gqa"
-    assert plans.history(tmp_path, MODEL, cls) == [first, second]      # rollback = the one before the newest
-    plans.append(tmp_path, Lock(_plan(cls="rtx-4090/cu130-torch2.11")))
-    assert sorted(lk.plan.fingerprint_class for lk in plans.heads(tmp_path)) == ["rtx-4090/cu130-torch2.11", cls]
-    with pytest.raises(ValueError, match="not a model id"):
-        plans.history(tmp_path, "../escape", cls)
-
-
-def test_nearest_class_prefers_own_then_same_gpu_then_same_sm(tmp_path):
-    fp = Fingerprint(gpu="rtx-3090", sm=86, vram_gib=24, toolchain="cu130-torch2.11")
-    assert plans.nearest_class(tmp_path, MODEL, fp) is None
-    plans.append(tmp_path, Lock(_plan(cls="rtx-5090/cu130-torch2.11"), sm=120))
-    assert plans.nearest_class(tmp_path, MODEL, fp)[0].plan.fingerprint_class == "rtx-5090/cu130-torch2.11"
-    plans.append(tmp_path, Lock(_plan(cls="rtx-a5000/cu128-torch2.10"), sm=86))
-    lock, unverified = plans.nearest_class(tmp_path, MODEL, fp)
-    assert lock.plan.fingerprint_class == "rtx-a5000/cu128-torch2.10" and unverified       # same SM beats toolchain
-    plans.append(tmp_path, Lock(_plan(cls="rtx-3090/cu128-torch2.10"), sm=86))
-    assert plans.nearest_class(tmp_path, MODEL, fp)[0].plan.fingerprint_class == "rtx-3090/cu128-torch2.10"
-    plans.append(tmp_path, Lock(_plan(cls=fp.cls), sm=86))
-    lock, unverified = plans.nearest_class(tmp_path, MODEL, fp)
-    assert lock.plan.fingerprint_class == fp.cls and not unverified
-
-
-def test_outdated_locks_are_treated_as_missing(tmp_path):
-    fp = Fingerprint(gpu="rtx-a5000", sm=86, vram_gib=24, toolchain="cu130-torch2.11")
-    plans.append(tmp_path, Lock(_plan(src="old"), sm=86))
-    plans.append(tmp_path, Lock(_plan(cls="rtx-3090/cu130-torch2.11", src="new"), sm=86))
-    current = {"holon": "core", "std.ops": "new", "kernels.fast": "ffff"}
-    lock, unverified = plans.nearest_class(tmp_path, MODEL, fp, current)
-    assert lock.plan.fingerprint_class == "rtx-3090/cu130-torch2.11" and unverified
-    assert plans.nearest_class(tmp_path, MODEL, fp, current | {"std.ops": "newer"}) is None
-
-
-def test_diff_lists_changed_units_and_sites():
-    a, b = _plan(), _plan(decode="std.mixers.gqa", src="bbbb", commit="c2", step=512)
-    d = plans.diff(a, b)
-    assert sorted(d) == ["commit", "engine:max_step_tokens", "site:kv/attention.paged_decode@1", "unit:std.ops"]
-    assert d["unit:std.ops"][1].src == "bbbb" and d["engine:max_step_tokens"] == (4096, 512)
-    smaller = dataclasses.replace(a, units={k: v for k, v in a.units.items() if k != "kernels.fast"})
-    assert plans.diff(a, smaller) == {"unit:kernels.fast": (a.units["kernels.fast"], None)}
-    assert plans.diff(a, a) == {}
+def test_src_hash_is_content_only(tmp_path):
+    unit = tmp_path / "unit"
+    (unit / "sub").mkdir(parents=True)
+    (unit / "a.py").write_text("x = 1\n")
+    (unit / "sub" / "b.py").write_text("y = 2\n")
+    first = plans.src_hash(unit)
+    assert first.startswith("sha256:")
+    # caches, build products and hidden files are not source
+    for junk in ("__pycache__/a.cpython-312.pyc", "build/lib/a.py", "x.egg-info/PKG-INFO", ".hidden/f", "k.so",
+                 "sub/c.pyc"):
+        (unit / junk).parent.mkdir(parents=True, exist_ok=True)
+        (unit / junk).write_text("junk")
+    assert plans.src_hash(unit) == first
+    copy = tmp_path / "installed" / "unit"                 # an installed copy elsewhere hashes the same
+    shutil.copytree(unit, copy)
+    assert plans.src_hash(copy) == first
+    (unit / "sub" / "b.py").write_text("y = 3\n")
+    assert plans.src_hash(unit) != first
+    (unit / "sub" / "b.py").write_text("y = 2\n")
+    assert plans.src_hash(unit) == first
+    (unit / "sub" / "b.py").rename(unit / "b.py")           # paths count, not only contents
+    assert plans.src_hash(unit) != first
 
 
 def test_lock_overrides_rebuild_settings_and_pin_each_op():
-    assert plans.lock_overrides(Lock(_plan())) == {
-        "dtype": torch.bfloat16, "max_step_tokens": 4096, "cuda_graphs": True,
+    plan = Plan("org/m@1", "rtx-a5000/cu130-torch2.11", "sha256:r", "c", "none", {},
+                {"kv/attention.paged_decode@1": Binding("kernels.fast"), "s/rmsnorm@1": Binding("std.ops")},
+                engine={"dtype": "bfloat16", "max_step_tokens": 512})
+    assert plans.lock_overrides(Lock(plan)) == {
+        "dtype": torch.bfloat16, "max_step_tokens": 512,
         "kernels": {"attention.paged_decode": "kernels.fast", "rmsnorm": "std.ops"}}
-    plan = _plan()
-    split = dataclasses.replace(plan, sites=plan.sites | {"other/rmsnorm@1": Binding("kernels.fast")})
-    with pytest.raises(ValueError, match="pins are per op"):
-        plans.lock_overrides(Lock(split))
-
-
-def test_uncovered_sites_lack_determinism():
-    assert plans.uncovered(_plan()) == ("std.ops.rmsnorm[dim=64]/rmsnorm@1",)

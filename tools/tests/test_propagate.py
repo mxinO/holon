@@ -7,7 +7,7 @@ from holon.api import Binding, Lock, Plan, UnitPin
 from holon.core import plans
 from holon_judge import golden
 from holon_judge.snapshot import Snapshot
-from holon_tools import propagate
+from holon_tools import locks, propagate
 from holon_tools.__main__ import main
 
 SITE = "kv/attention.paged_decode@1"
@@ -56,9 +56,17 @@ def test_unchanged_closure_writes_nothing(current):
     assert out.verdict == "unchanged" and out.lock is None and checks.calls == ["plan"]
 
 
-def test_identical_snapshot_advances(current):
+def test_identical_snapshot_is_evidence_for_an_approval(current):
+    # Without changed-line coverage a byte-identical trace does not prove the change unexercised.
     checks = Scripted(_plan(src="bbbb", commit="c2"), [_snap(), _snap()])
     out = propagate.decide(current, checks, 86)
+    assert out.verdict == "approve" and checks.calls == ["plan", "snapshot", "snapshot", "l2"]
+    assert out.evidence[0].startswith("snapshot trace byte-identical") and out.lock.snapshot == current.snapshot
+
+
+def test_identical_snapshot_advances_when_allowed(current):
+    checks = Scripted(_plan(src="bbbb", commit="c2"), [_snap(), _snap()])
+    out = propagate.decide(current, checks, 86, allow_advance=True)
     assert out.verdict == "advance" and checks.calls == ["plan", "snapshot", "snapshot"]
     assert out.lock.snapshot == current.snapshot and out.lock.plan.units["kern"].src == "bbbb"
     assert list(out.changes) == ["commit", "unit:kern"]
@@ -68,7 +76,7 @@ def test_bounded_change_needs_approval(current):
     out = propagate.decide(current, Scripted(_plan(src="bbbb"), [_snap(9), _snap(9)]), 86, previous=_snap())
     assert out.verdict == "approve" and out.lock.snapshot == propagate.trace_hash(_snap(9))
     assert out.evidence == ["snapshot trace differs from the lock's: step 1: deltas differ for (request, sequence) "
-                            "[(0, 0)]", "L2 PASS"]
+                            "[(0, 0)]", "trace covered step widths -, prefix tokens saved -", "L2 PASS"]
 
 
 def test_l2_failure_fails(current):
@@ -84,13 +92,14 @@ def test_a_snapshot_that_is_not_run_identical_fails(current):
 
 def test_changed_uncovered_site_never_advances():
     racy = _plan(props=())
-    current = Lock(racy, propagate.trace_hash(_snap()), plans.uncovered(racy), sm=86)
-    out = propagate.decide(current, Scripted(_plan(src="bbbb", props=()), [_snap(), _snap()]), 86)
+    current = Lock(racy, propagate.trace_hash(_snap()), locks.uncovered(racy), sm=86)
+    out = propagate.decide(current, Scripted(_plan(src="bbbb", props=()), [_snap(), _snap()]), 86,
+                           allow_advance=True)
     assert out.verdict == "approve" and "uncovered sites changed" in out.evidence[0]
 
 
 def test_newly_nondeterministic_site_never_advances(current):
-    out = propagate.decide(current, Scripted(_plan(props=()), [_snap(), _snap()]), 86)
+    out = propagate.decide(current, Scripted(_plan(props=()), [_snap(), _snap()]), 86, allow_advance=True)
     assert out.verdict == "approve" and out.evidence[0].endswith(f"uncovered sites changed: ['{SITE}']")
 
 
@@ -99,7 +108,7 @@ def test_unstable_snapshot_with_uncovered_sites_goes_to_l2(current, tmp_path):
     assert out.verdict == "approve" and out.lock.snapshot is None and out.snapshot is None
     assert "not run-identical" in out.evidence[0] and SITE in out.evidence[0]
     propagate.write(tmp_path, out)
-    assert plans.heads(tmp_path)[0].snapshot is None and not list(tmp_path.rglob("snapshots"))
+    assert locks.heads(tmp_path)[0].snapshot is None and not list(tmp_path.rglob("snapshots"))
 
 
 def test_a_changed_trace_is_named(current):
@@ -111,7 +120,7 @@ def test_a_changed_trace_is_named(current):
 
 def test_new_model_always_needs_approval():
     out = propagate.decide(None, Scripted(_plan(), [_snap(), _snap()]), 86)
-    assert out.verdict == "approve" and out.evidence == ["new model: first lock", "L2 PASS"]
+    assert out.verdict == "approve" and out.evidence[0] == "new model: first lock" and out.evidence[-1] == "L2 PASS"
 
 
 def test_write_stores_lock_and_snapshot(tmp_path, current):
@@ -130,7 +139,9 @@ def test_cli_on_cpu(tiny_checkpoint, tiny_prompts, tiny_prompts_file, cpu_flags,
     golden.record(str(tiny_checkpoint), tiny_prompts, dtype=torch.bfloat16).save(floor)
 
     def run(plans_dir, *extra, **engine):
-        flags = [f"--{k.replace('_', '-')}={str(v).removeprefix('torch.')}" for k, v in (cpu_flags | engine).items()]
+        # Room for the snapshot trace: 62 short requests of up to 32 + 65 tokens, queued four at a time.
+        engine = cpu_flags | {"max_model_len": 128, "state_memory": 4 << 20} | engine
+        flags = [f"--{k.replace('_', '-')}={str(v).removeprefix('torch.')}" for k, v in engine.items()]
         return main(["propagate", str(tiny_checkpoint), "--plans", str(plans_dir), "--prompts", str(tiny_prompts_file),
                      "--golden", str(gold), "--floor", str(floor), *flags, *extra])
 
@@ -148,15 +159,18 @@ def test_cli_on_cpu(tiny_checkpoint, tiny_prompts, tiny_prompts_file, cpu_flags,
     assert "engine:max_step_tokens: 16 -> 8" in capsys.readouterr().out
     assert len(list(home.rglob("*.lock"))) == 1
 
-    # Another class's lock, verified here: the trace is byte-identical, so it advances into this class.
+    # Another class's lock, verified here: the trace is byte-identical, which needs an approval, or the opt-in.
     lock = plans.read(first)
     other = dataclasses.replace(lock.plan, fingerprint_class="cpu/other-toolchain")
     away = tmp_path / "away"
-    plans.append(away, dataclasses.replace(lock, plan=other))
+    locks.append(away, dataclasses.replace(lock, plan=other))
     stored = propagate.snapshot_path(away, other, lock.snapshot)
     stored.parent.mkdir(parents=True)
     stored.write_bytes(propagate.snapshot_path(home, lock.plan, lock.snapshot).read_bytes())
-    assert run(away) == 0
+    assert run(away) == 2
     out = capsys.readouterr().out
-    assert "starting from cpu/other-toolchain's" in out and "verdict: advance" in out
+    assert "starting from cpu/other-toolchain's" in out and "snapshot trace byte-identical" in out
+    assert "prefix tokens saved 0" not in out
+    assert run(away, "--allow-uncovered-advance") == 0
+    assert "verdict: advance" in capsys.readouterr().out
     assert plans.newest(away, lock.plan.model_id, lock.plan.fingerprint_class).snapshot == lock.snapshot

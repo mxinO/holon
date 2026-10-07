@@ -1,18 +1,22 @@
 """`propagate`: carry a model's lock to the code checked out now, by one of the outcomes of design §4.6.
 
     unchanged  the closure is what the lock pins (only the commit differs): nothing to write
-    advance    the snapshot trace is byte-identical to the lock's and no uncovered site changed: appended, no human
-    approve    otherwise, judge L2 vs the reference passes: the new lock (and its snapshot) needs one approval
+    approve    judge L2 vs the reference passes: the new lock (and its snapshot) needs one approval
     fail       L2 fails, or the new snapshot trace is not run-identical although every kernel claims determinism
+    advance    only with `allow_advance`: the snapshot trace is byte-identical to the lock's and no uncovered site
+               changed — appended without a human
+
+Auto-advance also needs changed-line coverage (every changed line in the model's closure ran during the trace,
+design §4.6), which is not recorded yet; until it is, a byte-identical trace is evidence for the approval, and
+advancing without it is an explicit opt-in.
 
 A plan with uncovered sites (kernels that are not run-to-run deterministic) may have no run-identical snapshot; its
 lock then records none, and every change to it goes through L2 and approval (design §7.10).
 
 The commit is recorded in the lock but does not make a plan "changed": a lock committed in commit C can never name
 C, so counting it would make every re-run (CI's isolation-check) write another lock. The core is pinned as a unit
-instead, so core changes are seen. Not yet checked: changed-line coverage of the snapshot trace (auto-advance should
-also require every changed line in the closure to have run) and "no L2 metric regresses beyond δ vs the current
-lock" for approval, which needs the lock's L2 metrics recorded.
+instead, so core changes are seen. Not yet checked for approval: "no L2 metric regresses beyond δ vs the current
+lock", which needs the lock's L2 metrics recorded.
 """
 from __future__ import annotations
 
@@ -21,23 +25,22 @@ import gc
 import pathlib
 from typing import Any, Protocol
 
-from holon.api import Binding, Lock, Plan, SamplingParams, UnitPin, canonical_hash
-from holon.core import plans
+from holon.api import Binding, Lock, Plan, UnitPin, canonical_hash
 from holon.core.engine import Engine, EngineConfig
 from holon_judge import snapshot
 from holon_judge.compare import compare
 from holon_judge.engine import score
 from holon_judge.golden import model_meta
 from holon_judge.recording import PromptSet, Recording
-from holon_judge.snapshot import Snapshot
+from holon_judge.snapshot import Request, Snapshot
 
-Trace = list[tuple[list[int], SamplingParams]]
+from . import locks
 
 
 @dataclasses.dataclass(frozen=True)
 class Outcome:
     verdict: str                       # unchanged | advance | approve | fail
-    changes: dict[str, tuple[Any, Any]]  # plans.diff(current lock's plan, new plan)
+    changes: dict[str, tuple[Any, Any]]  # locks.diff(current lock's plan, new plan)
     evidence: list[str]
     lock: Lock | None = None           # what to append (advance; approve once approved)
     snapshot: Snapshot | None = None   # the new lock's snapshot trace (None: not run-identical)
@@ -58,15 +61,16 @@ def trace_hash(snap: Snapshot) -> str:
     return canonical_hash({"streams": snap.streams, "steps": snap.steps})
 
 
-def decide(current: Lock | None, checks: Checks, sm: int, previous: Snapshot | None = None) -> Outcome:
+def decide(current: Lock | None, checks: Checks, sm: int, previous: Snapshot | None = None,
+           allow_advance: bool = False) -> Outcome:
     """The outcome for a model whose newest lock is `current` (None: a new model; its first lock always needs an
     approval). `previous` is `current`'s stored snapshot, used only to locate a divergence."""
     plan = checks.plan()
-    changes = plans.diff(current.plan, plan) if current else {}
+    changes = locks.diff(current.plan, plan) if current else {}
     if current is not None and changes.keys() <= {"commit"}:
         return Outcome("unchanged", changes, [f"closure unchanged since commit {current.plan.commit}"])
     first, again = checks.snapshot(), checks.snapshot()
-    racy = plans.uncovered(plan)
+    racy = locks.uncovered(plan)
     if (unstable := snapshot.diff(first, again)) and not racy:
         return Outcome("fail", changes, [f"snapshot trace is not run-identical: {unstable}"])
     lock = Lock(plan, None if unstable else trace_hash(first), racy, sm)
@@ -78,8 +82,12 @@ def decide(current: Lock | None, checks: Checks, sm: int, previous: Snapshot | N
         evidence = [f"snapshot trace differs from the lock's: {_divergence(previous, first)}"]
     elif touched := _touched(current, plan, changes):
         evidence = [f"snapshot trace identical, but uncovered sites changed: {touched}"]
-    else:
+    elif allow_advance:
         return Outcome("advance", changes, ["snapshot trace byte-identical"], lock, first)
+    else:
+        evidence = ["snapshot trace byte-identical (auto-advance awaits changed-line coverage)"]
+    evidence.append(f"trace covered step widths {_widths(first.meta)}, prefix tokens saved "
+                    f"{first.meta.get('tokens_saved', '-')}")
     passed, report = checks.l2()
     return Outcome("approve" if passed else "fail", changes, [*evidence, report], lock if passed else None,
                    None if unstable else first)
@@ -99,22 +107,18 @@ def _touched(current: Lock, plan: Plan, changes: dict[str, tuple[Any, Any]]) -> 
     def changed(site: str) -> bool:
         return f"site:{site}" in changes or any(f"unit:{p.sites[site].impl}" in changes
                                                 for p in (current.plan, plan) if site in p.sites)
-    return sorted(filter(changed, set(current.uncovered) | set(plans.uncovered(plan))))
+    return sorted(filter(changed, set(current.uncovered) | set(locks.uncovered(plan))))
 
 
-def snapshot_trace(prompts: PromptSet, n: int = 8, prompt_len: int = 128) -> Trace:
-    """The snapshot trace (design §7.10) as far as M0 serves it: greedy requests, seeded sampling with n = 2 and
-    logprobs, prompt logprobs, and staggered lengths so the decode batch shrinks through several graph buckets;
-    the engine's step budget chunks the prefill. Changing it re-records every model's snapshot (one approval)."""
-    trace = []
-    for i, p in enumerate(prompts.prompts[:n]):
-        params = SamplingParams(temperature=0.0, max_tokens=8 + 2 * i, ignore_eos=True)
-        if i % 3 == 1:
-            params = dataclasses.replace(params, temperature=0.8, top_p=0.9, seed=i, n=2, logprobs=5)
-        elif i % 3 == 2:
-            params = dataclasses.replace(params, prompt_logprobs=5)
-        trace.append((p.ids[:prompt_len], params))
-    return trace
+def _widths(meta: dict) -> str:
+    """Step widths as ranges, e.g. "1-49, 51-57"."""
+    runs: list[list[int]] = []
+    for w in meta.get("step_widths", []):
+        if runs and w == runs[-1][-1] + 1:
+            runs[-1].append(w)
+        else:
+            runs.append([w])
+    return ", ".join(f"{r[0]}-{r[-1]}" if len(r) > 1 else str(r[0]) for r in runs) or "-"
 
 
 @dataclasses.dataclass
@@ -127,13 +131,13 @@ class L2Inputs:
 class EngineChecks:
     """The real checks, on engines built in this process from `config` (model, device, dtype, kernel pins)."""
 
-    def __init__(self, config: EngineConfig, trace: Trace, l2: L2Inputs | None) -> None:
+    def __init__(self, config: EngineConfig, trace: list[Request], l2: L2Inputs | None) -> None:
         self.config, self.trace, self.inputs = config, trace, l2
         self._built: Engine | None = None
 
     def plan(self) -> Plan:
         self._built = self._fresh(self.config)
-        return plans.plan_of(self._built)
+        return locks.plan_of(self._built)
 
     def snapshot(self) -> Snapshot:
         engine, self._built = self._built, None       # the plan's engine runs the first trace: one build fewer
@@ -170,7 +174,7 @@ def write(plans_dir: str | pathlib.Path, outcome: Outcome) -> pathlib.Path:
         path = snapshot_path(plans_dir, lock.plan, lock.snapshot)
         if not path.exists():
             dataclasses.replace(snap, meta=snap.meta | {"plan_id": lock.plan.plan_id}).save(path)
-    return plans.append(plans_dir, lock)
+    return locks.append(plans_dir, lock)
 
 
 def report(outcome: Outcome) -> str:

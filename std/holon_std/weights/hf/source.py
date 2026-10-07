@@ -11,6 +11,8 @@ from typing import Any
 import torch
 from safetensors import safe_open
 
+_DIGESTS = ".holon-sha256.json"            # weight-file digests remembered across restarts
+
 
 class HFSafetensors:
     kind = "hf_safetensors"
@@ -39,17 +41,36 @@ class HFSafetensors:
     def identity(self) -> str:
         """`<name>@<build>`: the hub id for a hub-cache snapshot, else the directory name, and a hash of config.json
         and every weight file — content, not the hub revision, which also moves with README edits."""
-        name = self.path.name
+        name, hub = self.path.name, False
         if self.path.parent.name == "snapshots" and self.path.parent.parent.name.startswith("models--"):
-            name = self.path.parent.parent.name.removeprefix("models--").replace("--", "/")
-        files = {f.name: _sha256(f) for f in [self.path / "config.json", *sorted(self.path.glob("*.safetensors"))]}
+            name, hub = self.path.parent.parent.name.removeprefix("models--").replace("--", "/"), True
+        files = self._digests([self.path / "config.json", *sorted(self.path.glob("*.safetensors"))], remember=not hub)
         return f"{name}@{hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()[:16]}"
 
+    def _digests(self, files: list[pathlib.Path], remember: bool) -> dict[str, str]:
+        """sha256 per file. Large hub-cache files are free: their symlink target is the blob named by it. Others are
+        read; with `remember` (not in the shared hub cache, whose weights are free anyway) their digests are kept in a
+        sidecar keyed by (size, mtime), so restarts do not rehash a checkpoint."""
+        sidecar = self.path / _DIGESTS
+        try:
+            known = json.loads(sidecar.read_text()) if remember else {}
+        except (OSError, ValueError):
+            known = {}
+        out, fresh = {}, False
+        for f in files:
+            if f.is_symlink() and re.fullmatch(r"[0-9a-f]{64}", blob := f.readlink().name):
+                out[f.name] = blob
+                continue
+            st = f.stat()
+            key = [st.st_size, st.st_mtime_ns]
+            if known.get(f.name, [])[:2] != key:
+                with open(f, "rb") as fh:
+                    known[f.name], fresh = [*key, hashlib.file_digest(fh, "sha256").hexdigest()], True
+            out[f.name] = known[f.name][2]
+        if fresh and remember:
+            try:
+                sidecar.write_text(json.dumps(known, sort_keys=True))
+            except OSError:                # a read-only checkpoint: hash again next time
+                pass
+        return out
 
-def _sha256(f: pathlib.Path) -> str:
-    """A file's sha256. Free for large hub-cache files: their symlink target is the blob named by it (small files
-    are named by another hash and are read)."""
-    if f.is_symlink() and re.fullmatch(r"[0-9a-f]{64}", blob := f.readlink().name):
-        return blob
-    with open(f, "rb") as fh:
-        return hashlib.file_digest(fh, "sha256").hexdigest()

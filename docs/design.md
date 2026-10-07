@@ -268,26 +268,30 @@ There is no separate database. The **Registry** is the git history of lockfiles 
 - Evidence records (command, fingerprint, plan_id, raw numbers) point at lock hashes and are written after the
   lock commit.
 
-**Implemented (M0).** `holon.core.plans`: `plan_of(engine)` reads the Plan off a built engine — `model_id` from the
-weight source (`<hub id or directory name>@<16 hex of config + weight file hashes>`), the class from
-`platform.fingerprint`, `recipe = canonical_hash(spec)`, `commit` (`git rev-parse HEAD`), `uv_lock` (sha256 or
-`none`), one `[units]` pin per loaded plugin plus the core itself as unit `holon` (`src` = git tree hash of the
-directory when it matches HEAD, else a content hash; `sem` = sha256 of the manifest's reference module), one
-`[sites]` binding per kernel site (`<site>/<op>` → provider, facts, props, launch config) and `[engine]`, the
-EngineConfig settings that shape outputs (dtype, page size, step budget, graphs, overlap, prefix cache …; memory
-budgets are per host and not recorded). Lock files are TOML read with `tomllib` and written canonically (top-level
-keys, `[deploy]`, `[engine]`, `[snapshot]`, then `[units]`/`[sites]` one sorted line per entry, so a changed binding
-is one changed line); `plan_id` is stored and re-checked on read (hand edits fail), and `sm` is recorded for the
-same-SM preference. A lock whose plan has uncovered sites and no run-identical trace records no snapshot. History
-helpers: `history`/`newest`/`append` (`<n+1>.lock`, exclusive create)/`heads`,
-`nearest_class(plans, model_id, fingerprint, current_srcs)` → `(lock, unverified)` (own class, then same GPU, same SM,
-same toolchain; with `current_srcs`, locks pinning other code are skipped — for engine start), `diff`, and
-`lock_overrides(lock)` → EngineConfig overrides (engine settings and a kernel pin per op; per-site pins are not
-expressible yet). Lock snapshots are stored by content next to the history (`<class>/snapshots/<hash>.json`). The
-commands live in `tools/`
-(`python -m holon_tools impact | propagate | tune`, see `tools/README.md`). Not yet: the engine starting from the lock
-(the supervisor's job, with `unverified` pins as soft preferences), changed-line coverage of the snapshot trace,
-L2-regression-vs-current-lock for approvals, and the `isolation-check` CI job.
+**Implemented (M0).** The core reads locks (`holon.core.plans`: `read`/`loads`, `history`/`newest`,
+`nearest_class(plans, model_id, fingerprint, current_srcs)` → `(lock, unverified)` — own class, then same GPU, same
+SM, same toolchain; with `current_srcs`, locks pinning other code are skipped — and `lock_overrides(lock)` →
+EngineConfig overrides: the engine settings and a kernel pin per op, as per-site pins are not expressible yet). The
+tools compute and write them (`holon_tools.locks`): `plan_of(engine)` reads the Plan off a built engine — `model_id`
+from the weight source (`<hub id or directory name>@<16 hex of config + weight file hashes>`), the class from
+`platform.fingerprint`, `recipe = canonical_hash(spec)`, `commit`, `uv_lock`, a `[units]` pin for the core (unit
+`holon`) and every plugin whose code runs (the units built, the kernels bound, model, weight source, sampler, state
+kinds …; not kernel providers loaded only as candidates), one `[sites]` binding per kernel site (`<site>/<op>` →
+provider, facts, props, launch config) and `[engine]`, the EngineConfig settings that shape outputs (memory budgets
+are per host and not recorded). `src` is sha256 over a unit directory's sorted relative paths and contents (no hidden
+files, caches or build products), so a checkout and an installed copy agree; `sem` is sha256 of the manifest's
+reference module. Lock files are canonical TOML (`[deploy]`, `[engine]`, `[snapshot]`, then `[units]`/`[sites]` one
+sorted line per entry, so a changed binding is one changed line) carrying a `digest` of the whole content and the
+`plan_id`, both re-checked on read, so a hand edit fails to load; `sm` is recorded for the same-SM preference. A
+lock whose plan has uncovered sites and no run-identical trace records no snapshot. Snapshots are stored by content
+next to the history (`<class>/snapshots/<hash>.json`). The snapshot trace is the judge's
+(`holon_judge.snapshot.trace`: long context, a prefix hit, the decode batch shrinking through every graph bucket up
+to 64, seeded n > 1, logprobs, prompt logprobs; each run records the step widths and prefix tokens saved). The
+commands are `python -m holon_tools impact | propagate | tune` (`tools/README.md`). Until changed-line coverage is
+recorded, every changed plan needs one approval with the byte-identical trace as evidence; auto-advance is an explicit
+opt-in (`--allow-uncovered-advance`). Not yet: changed-line coverage, the engine starting from the lock (the
+supervisor's job, with `unverified` pins as soft preferences), L2-regression-vs-current-lock for approvals, and the
+`isolation-check` CI job.
 
 ### 4.5 Versioning
 

@@ -3,8 +3,7 @@ import subprocess
 
 import pytest
 from holon.api import Binding, Lock, Plan, UnitPin
-from holon.core import plans
-from holon_tools import impact
+from holon_tools import impact, locks
 from holon_tools.__main__ import main
 
 
@@ -52,11 +51,11 @@ def _lock(model, units):
 
 
 def test_impact_lists_the_newest_locks_pinning_a_unit(tmp_path, capsys):
-    plans.append(tmp_path, _lock("org/a@1", ["holon", "std.a"]))
-    plans.append(tmp_path, _lock("org/b@2", ["holon", "kern.b"]))
-    hits = impact.impact(plans.heads(tmp_path), {"kern.b", "unrelated"})
+    locks.append(tmp_path, _lock("org/a@1", ["holon", "std.a"]))
+    locks.append(tmp_path, _lock("org/b@2", ["holon", "kern.b"]))
+    hits = impact.impact(locks.heads(tmp_path), {"kern.b", "unrelated"})
     assert [(lock.plan.model_id, units) for lock, units in hits] == [("org/b@2", ["kern.b"])]
-    assert len(impact.impact(plans.heads(tmp_path), {"holon"})) == 2
+    assert len(impact.impact(locks.heads(tmp_path), {"holon"})) == 2
     # the command line, on the units installed here
     assert main(["impact", "std.ops", "--plans", str(tmp_path)]) == 0
     assert capsys.readouterr().out.splitlines() == ["changed units: std.ops"]
