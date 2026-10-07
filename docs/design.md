@@ -119,6 +119,7 @@ to host-side policies and live tunables).
 | `holonlm-std-*` (`std/`) | reviewed | Shared units: `std.ops` (linear, norm, rope, act), `std.blocks` (residual wiring), `std.mixers.gqa`, `std.ffn`, `std.state.paged_kv`, `std.tiered` (TieredStore library), `std.sampling`. One live version each; recipes reference them via `Ref("name@major")`; locks pin `src` + `sem`; changes reach models only through propagation (§4.6). |
 | `plugins/*` | reviewed or agent | First-party plugins: models, kernels, dialects, policies, frontends. Each is its own dist package with entry points. |
 | `holonlm-judge` (`judge/`) | trusted, read-only to agents | Oracles harness, tolerance budgets, goldens, traces, perf timer. |
+| `holonlm-tools` (`tools/`) | trusted | Lock-history commands: `holon impact`, `propagate`, `tune` (§4.4, §4.6); drives engines and the judge. |
 | `holon-supervisor` (`supervisor/`) | trusted | Lifecycle, crash attribution, rollback; with the optional layer (§10): promotions, evidence, improve API (MCP + HTTP). |
 | `workspace/` | agent (optional layer) | Git worktree where agent variants are written (gitignored). A promoted variant is committed by the supervisor to its own branch together with the new lock (§4.4). |
 
@@ -266,6 +267,27 @@ There is no separate database. The **Registry** is the git history of lockfiles 
   verified lock for its class.
 - Evidence records (command, fingerprint, plan_id, raw numbers) point at lock hashes and are written after the
   lock commit.
+
+**Implemented (M0).** `holon.core.plans`: `plan_of(engine)` reads the Plan off a built engine — `model_id` from the
+weight source (`<hub id or directory name>@<16 hex of config + weight file hashes>`), the class from
+`platform.fingerprint`, `recipe = canonical_hash(spec)`, `commit` (`git rev-parse HEAD`), `uv_lock` (sha256 or
+`none`), one `[units]` pin per loaded plugin plus the core itself as unit `holon` (`src` = git tree hash of the
+directory when it matches HEAD, else a content hash; `sem` = sha256 of the manifest's reference module), one
+`[sites]` binding per kernel site (`<site>/<op>` → provider, facts, props, launch config) and `[engine]`, the
+EngineConfig settings that shape outputs (dtype, page size, step budget, graphs, overlap, prefix cache …; memory
+budgets are per host and not recorded). Lock files are TOML read with `tomllib` and written canonically (top-level
+keys, `[deploy]`, `[engine]`, `[snapshot]`, then `[units]`/`[sites]` one sorted line per entry, so a changed binding
+is one changed line); `plan_id` is stored and re-checked on read (hand edits fail), and `sm` is recorded for the
+same-SM preference. A lock whose plan has uncovered sites and no run-identical trace records no snapshot. History
+helpers: `history`/`newest`/`append` (`<n+1>.lock`, exclusive create)/`heads`,
+`nearest_class(plans, model_id, fingerprint, current_srcs)` → `(lock, unverified)` (own class, then same GPU, same SM,
+same toolchain; with `current_srcs`, locks pinning other code are skipped — for engine start), `diff`, and
+`lock_overrides(lock)` → EngineConfig overrides (engine settings and a kernel pin per op; per-site pins are not
+expressible yet). Lock snapshots are stored by content next to the history (`<class>/snapshots/<hash>.json`). The
+commands live in `tools/`
+(`python -m holon_tools impact | propagate | tune`, see `tools/README.md`). Not yet: the engine starting from the lock
+(the supervisor's job, with `unverified` pins as soft preferences), changed-line coverage of the snapshot trace,
+L2-regression-vs-current-lock for approvals, and the `isolation-check` CI job.
 
 ### 4.5 Versioning
 
@@ -1213,6 +1235,7 @@ holon/           (repository root)
                    frontends/{openai,anthropic}/  policies/  drafters/  verifiers/  grammar/
   plans/           <model_id>/<class>/<n>.lock     # lock history per (model, fingerprint class) (§4.4)
   judge/           holon_judge/  goldens/  snapshots/  traces/dev/   # holdout stored outside the repo (judge only)
+  tools/           holon_tools/                    # impact, propagate, tune (lock history tooling)
   supervisor/      holon_supervisor/
   bench/           trace replay, baselines (separate pinned venvs)
   evidence/        evidence records (command, fingerprint, plan_id, raw numbers)

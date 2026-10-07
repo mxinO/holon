@@ -5,13 +5,14 @@ requires-python = ">=3.12"
 description = "Holon uv workspace root (not a distributable package)"
 
 [tool.uv.workspace]
-members = ["core", "judge", "std", "plugins"]
+members = ["core", "judge", "std", "plugins", "tools"]
 
 [tool.uv.sources]
 holonlm = { workspace = true }
 holonlm-judge = { workspace = true }
 holonlm-std = { workspace = true }
 holonlm-plugins = { workspace = true }
+holonlm-tools = { workspace = true }
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6", "import-linter>=2.1", "httpx"]  # httpx: FastAPI's TestClient
@@ -25,30 +26,36 @@ extend-exclude = ["spikes"]  # throwaway spike code; reviewed per spike README, 
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
-testpaths = ["core/tests", "judge/tests", "plugins/tests"]
+testpaths = ["core/tests", "judge/tests", "plugins/tests", "tools/tests"]
 addopts = "-p no:libtmux"
 
 # Design §1 invariants 2–3: import contracts (plugins added as they appear).
 [tool.importlinter]
-root_packages = ["holon", "holon_judge", "holon_std", "holon_plugins"]
+root_packages = ["holon", "holon_judge", "holon_std", "holon_plugins", "holon_tools"]
 
 [[tool.importlinter.contracts]]
 name = "holon.api depends on nothing in the runtime core"
 type = "forbidden"
 source_modules = ["holon.api"]
-forbidden_modules = ["holon.core", "holon_judge"]
+forbidden_modules = ["holon.core", "holon_judge", "holon_tools"]
 
 [[tool.importlinter.contracts]]
-name = "core never imports the judge"
+name = "core never imports the judge or the tools"
 type = "forbidden"
 source_modules = ["holon.core"]
-forbidden_modules = ["holon_judge"]
+forbidden_modules = ["holon_judge", "holon_tools"]
 
 [[tool.importlinter.contracts]]
-name = "plugins see only the ABI: std and first-party plugins never import the core runtime or the judge"
+name = "the judge never imports the tools that drive it"
+type = "forbidden"
+source_modules = ["holon_judge"]
+forbidden_modules = ["holon_tools"]
+
+[[tool.importlinter.contracts]]
+name = "plugins see only the ABI: std and first-party plugins never import the core runtime, judge or tools"
 type = "forbidden"
 source_modules = ["holon_std", "holon_plugins"]
-forbidden_modules = ["holon.core", "holon_judge"]
+forbidden_modules = ["holon.core", "holon_judge", "holon_tools"]
 
 [[tool.importlinter.contracts]]
 name = "models reach units only through Ref: first-party plugins never import std"
