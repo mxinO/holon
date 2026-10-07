@@ -88,23 +88,30 @@ def test_lock_overrides_rebuild_the_same_plan(tiny_engine, with_fake_kernel):
     assert rebuilt.plan_id == pinned.plan_id
 
 
-def test_identity_remembers_weight_digests(tiny_checkpoint, tmp_path):
-    from holon_std.weights.hf.source import HFSafetensors
+def test_identity_remembers_weight_digests(tiny_checkpoint, tmp_path, monkeypatch):
+    from holon_std.weights.hf import source
 
+    monkeypatch.setattr(source, "_CACHE", tmp_path / "cache")
     copy = tmp_path / "ckpt"
     copy.mkdir()
     for f in tiny_checkpoint.glob("*.*"):
         (copy / f.name).write_bytes(f.read_bytes())
-    first = HFSafetensors(copy).identity()
-    sidecar = json.loads((copy / ".holon-sha256.json").read_text())
-    assert set(sidecar) == {"config.json", "model.safetensors"}
-    # a restart trusts the sidecar while size and mtime match, and rehashes once they do not
-    sidecar["model.safetensors"][2] = "0" * 64
-    (copy / ".holon-sha256.json").write_text(json.dumps(sidecar))
-    assert HFSafetensors(copy).identity() != first
+    before = sorted(p.name for p in copy.iterdir())
+    first = source.HFSafetensors(copy).identity()
+    assert sorted(p.name for p in copy.iterdir()) == before                     # the checkpoint is never written
+    (cache,) = (tmp_path / "cache").iterdir()
+    known = json.loads(cache.read_text())
+    assert set(known) == {"config.json", "model.safetensors"}
+    # a restart trusts the cache while the file is unchanged, and rehashes once it is replaced, even with its size
+    # and mtime kept (ctime moves)
+    known["model.safetensors"][-1] = "0" * 64
+    cache.write_text(json.dumps(known))
+    assert source.HFSafetensors(copy).identity() != first
     weights = copy / "model.safetensors"
-    os.utime(weights, ns=(weights.stat().st_atime_ns, weights.stat().st_mtime_ns + 10**9))
-    assert HFSafetensors(copy).identity() == first
+    st = weights.stat()
+    weights.write_bytes(weights.read_bytes())
+    os.utime(weights, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert source.HFSafetensors(copy).identity() == first
 
 
 def test_weight_changes_change_the_model_id(tiny_engine, tiny_checkpoint, tmp_path):

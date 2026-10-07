@@ -46,8 +46,8 @@ engine's other plugins (model, weight source, sampler, state kinds …); kernel 
 are not pinned. `src` is sha256 over a unit directory's sorted relative paths and file contents, without hidden
 files, `__pycache__`, `*.pyc`/`*.pyo`/`*.so`, `build/`, `dist/` and `*.egg-info`: content only, so a git checkout
 and an installed copy agree. `model_id` hashes the weight files: free for hub-cache snapshots (their blobs are named
-by sha256); other checkpoint directories are read once and remembered in a `.holon-sha256.json` sidecar keyed by
-(size, mtime).
+by sha256); other checkpoint directories are read once and remembered in the user's cache (`~/.cache/holon/weights`,
+never the checkpoint), keyed by each file's device, inode, size, mtime and ctime.
 
 ## Commands
 

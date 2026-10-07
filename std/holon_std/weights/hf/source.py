@@ -3,15 +3,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
 import re
+import tempfile
 from collections.abc import Iterator, Mapping
 from typing import Any
 
 import torch
 from safetensors import safe_open
 
-_DIGESTS = ".holon-sha256.json"            # weight-file digests remembered across restarts
+_CACHE = pathlib.Path.home() / ".cache" / "holon" / "weights"     # weight-file digests remembered across restarts
 
 
 class HFSafetensors:
@@ -49,11 +51,12 @@ class HFSafetensors:
 
     def _digests(self, files: list[pathlib.Path], remember: bool) -> dict[str, str]:
         """sha256 per file. Large hub-cache files are free: their symlink target is the blob named by it. Others are
-        read; with `remember` (not in the shared hub cache, whose weights are free anyway) their digests are kept in a
-        sidecar keyed by (size, mtime), so restarts do not rehash a checkpoint."""
-        sidecar = self.path / _DIGESTS
+        read; with `remember` (not in the shared hub cache, whose weights are free anyway) their digests are kept in
+        the user's cache, never in the checkpoint, keyed by the file's identity and change times (ctime moves on any
+        replacement and cannot be set back), so restarts do not rehash a checkpoint."""
+        cache = _CACHE / f"{hashlib.sha256(str(self.path.resolve()).encode()).hexdigest()}.json"
         try:
-            known = json.loads(sidecar.read_text()) if remember else {}
+            known = json.loads(cache.read_text()) if remember else {}
         except (OSError, ValueError):
             known = {}
         out, fresh = {}, False
@@ -62,15 +65,18 @@ class HFSafetensors:
                 out[f.name] = blob
                 continue
             st = f.stat()
-            key = [st.st_size, st.st_mtime_ns]
-            if known.get(f.name, [])[:2] != key:
+            key = [st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns]
+            if known.get(f.name, [])[:-1] != key:
                 with open(f, "rb") as fh:
                     known[f.name], fresh = [*key, hashlib.file_digest(fh, "sha256").hexdigest()], True
-            out[f.name] = known[f.name][2]
+            out[f.name] = known[f.name][-1]
         if fresh and remember:
-            try:
-                sidecar.write_text(json.dumps(known, sort_keys=True))
-            except OSError:                # a read-only checkpoint: hash again next time
+            try:                           # atomically: engines may start side by side
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile("w", dir=cache.parent, delete=False) as tmp:
+                    tmp.write(json.dumps(known, sort_keys=True))
+                os.replace(tmp.name, cache)
+            except OSError:                # no writable cache: hash again next time
                 pass
         return out
 
