@@ -80,4 +80,39 @@ rounds are meant to have the GPU to themselves (check `nvidia-smi` first).
 
 ## First results (RTX A5000, 2026-10-07)
 
-RESULTS
+Holon at commit 826e467 (E4): **eager, depth 0** — no CUDA graphs, no overlap — against mini-sglang's defaults, so
+the gap is expected: these are baseline numbers for the harness, not a verdict on the design. 2 ABAB rounds each,
+GPU idle before every run; pooled over rounds. Evidence: `evidence/bench_{decode,agent,cpu_step}_rtx-a5000_2026-10-07.json`.
+
+**Decode throughput, Qwen3-8B bf16, prompt 256 + output 256** (acceptance §3.4-2: within 10% of mini-sglang)
+
+| batch | Holon decode tok/s | mini-sglang decode tok/s | Holon / mini-sglang | Holon TPOT p50 | mini-sglang TPOT p50 |
+|---|---|---|---|---|---|
+| 1 | 19.5 | 41.6 | 0.47 | 51.4 ms | 24.1 ms |
+| 8 | 161.3 | 315.7 | 0.51 | 49.6 ms | 25.3 ms |
+| 64 | 1289.3 | 2047.0 | 0.63 | 53.1 ms | 34.0 ms |
+
+mini-sglang's step at batch 1 (24 ms) is near the weight-read floor (16.4 GB at ~768 GB/s ≈ 21 ms); Holon's ~47–52
+ms is host-bound (see CPU time below), flat from batch 1 to 64. Holon's two rounds differed by ~13% (47.8 vs 55.0 ms
+TPOT at batch 1) — a host-bound engine feels host noise; mini-sglang's rounds agreed within 0.2%.
+
+**Mixed agent trace, Qwen3-8B** (126 requests over 24 sessions; acceptance §3.4-2: TTFT/TPOT within 10%)
+
+| engine | TTFT p50 / p90 / p99 ms | TPOT p50 / p90 / p99 ms | out tok/s |
+|---|---|---|---|
+| Holon | 130.5 / 271.7 / 458.1 | 49.4 / 54.9 / 57.4 | 64.8 |
+| mini-sglang | 109.0 / 235.1 / 458.3 | 27.4 / 29.9 / 33.4 | 71.0 |
+
+The trace is arrival-bound (output tok/s close for both); TTFT p50 is +20% and TPOT p50 +80% for Holon.
+
+**Host CPU time per decode step at batch 256** (acceptance §3.4-3: ≤ nano-vllm's). Qwen3-0.6B, prompt 256 +
+output 256, `--blocking-sync`: Qwen3-8B cannot hold 256 sequences on 24 GB (nano-vllm's 256-token KV blocks alone
+would need 9.6 GB), and with CUDA graphs the baseline's host cost does not depend on model size.
+
+| engine | CPU ms/step p50 (mean) | wall ms/step p50 | decode tok/s |
+|---|---|---|---|
+| Holon | 37.7 (39.7) | 39.4 | 6175 |
+| nano-vllm | 2.8 (2.4) | 25.3 | 10059 |
+
+Holon's step is CPU work end to end (eager launches plus host-side input preparation), ~13× nano-vllm's; this is the
+gap E5/E6 (overlap, CUDA graphs) and §3.4-3's "move per-token input prep to GPU kernels" target.
