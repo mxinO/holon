@@ -19,7 +19,7 @@ def _plugins() -> PluginSet:
     found = discover()
     for name in ("oracle_policy", "oracle_drafter"):
         manifest = Manifest.load(FIXTURES / name / "plugin.toml")
-        found[manifest.name] = Installed(manifest, f"tests.fixtures.{name}")
+        found[manifest.name] = Installed(manifest, f"tests.fixtures.{name}", FIXTURES / name)
     return PluginSet(found)
 
 
