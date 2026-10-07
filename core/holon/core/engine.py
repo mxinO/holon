@@ -120,8 +120,9 @@ class Engine:
         self.eos = source.eos_token_ids
 
         self.ledger = Ledger(self.device)
-        self.ctx = BuildContext(p, self.device, cfg.dtype, {"page_size": cfg.page_size, "max_seqs": cfg.max_seqs,
-                                                            "kernels": cfg.kernels})
+        options = {"page_size": cfg.page_size, "max_seqs": cfg.max_seqs, "max_model_len": cfg.max_model_len,
+                   "kernels": cfg.kernels}
+        self.ctx = BuildContext(p, self.device, cfg.dtype, options)
         bound, self.planners = self._bind_state()
         self.model = build_model(self.spec, self.ctx)
         load_weights(self.model, self.ctx, source.tensors())
@@ -145,6 +146,8 @@ class Engine:
         self._inflight: _Inflight | None = None
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None else self._measure_state_memory())
         self.state.reset_padding()
+        for pool in self.ledger.pools.values():          # fresh segments, so they show the allocator setting
+            platform.check_expandable(pool.buffer)
         if self.graphs is not None:          # captured graphs bake in pool addresses: after the final materialize
             self._capture_graphs()
         self._ids = itertools.count()

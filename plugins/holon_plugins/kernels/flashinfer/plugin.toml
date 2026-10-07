@@ -6,8 +6,10 @@ slot = "kernel"
 license = "Apache-2.0"
 
 [resources]
-provides = ["kernel.attention.paged_prefill@1", "kernel.attention.paged_decode@1"]
-requires = ["op.attention.paged_prefill@1", "op.attention.paged_decode@1"]
+provides = ["kernel.attention.paged_prefill@1", "kernel.attention.paged_decode@1", "kernel.rmsnorm@1",
+            "kernel.add_rmsnorm@1", "kernel.rope@1", "kernel.silu_mul@1"]
+requires = ["op.attention.paged_prefill@1", "op.attention.paged_decode@1", "op.rmsnorm@1", "op.add_rmsnorm@1",
+            "op.rope@1", "op.silu_mul@1"]
 
 [properties]
 numerics = "bounded"

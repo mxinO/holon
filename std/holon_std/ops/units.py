@@ -4,28 +4,46 @@ from __future__ import annotations
 import torch
 from torch import nn
 
+from . import kernels
 from . import reference as ref
+
+
+def _kernel(ctx, op: str, **facts):
+    """This op's kernel for these facts (chosen by the core; the reference unless a faster one is installed)."""
+    return ctx.select_kernel(op, site=f"std.ops/{op}", **facts).impl(ctx, **facts)
 
 
 class RMSNorm(nn.Module):
     def __init__(self, ctx, *, dim: int, eps: float, offset: float = 0.0) -> None:
         super().__init__()
         self.weight = nn.Parameter(torch.empty(dim, dtype=ctx.dtype), requires_grad=False)
-        self.eps, self.offset = eps, offset
+        facts = {"dim": dim, "eps": eps, "offset": offset, "dtype": str(ctx.dtype).removeprefix("torch.")}
+        self._norm, self._add_norm = _kernel(ctx, kernels.RMSNORM, **facts), _kernel(ctx, kernels.ADD_RMSNORM, **facts)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return ref.rmsnorm(x, self.weight, self.eps, self.offset)
+        return self._norm(x, self.weight)
+
+    def add(self, x: torch.Tensor, residual: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """(norm(residual + x), residual + x), fused where the kernel allows; `x` and `residual` may be reused."""
+        return self._add_norm(x, residual, self.weight)
 
 
 class Rope(nn.Module):
-    def __init__(self, ctx, *, theta: float, style: str = "neox", rotary_dim: int | None = None) -> None:
+    """Rotates queries and keys together (neox layout)."""
+
+    def __init__(self, ctx, *, theta: float, style: str = "neox", rotary_dim: int | None = None,
+                 head_dim: int | None = None) -> None:
         super().__init__()
         if style != "neox":
             raise ValueError(f"unsupported rope style {style!r}")
-        self.theta, self.rotary_dim = theta, rotary_dim
+        if head_dim is None:
+            raise ValueError("rope needs the head_dim of the site that uses it")
+        self._rope = _kernel(ctx, kernels.ROPE, head_dim=head_dim, rotary_dim=rotary_dim or head_dim, theta=theta,
+                             max_positions=ctx.options.get("max_model_len", 8192),
+                             dtype=str(ctx.dtype).removeprefix("torch."))
 
-    def forward(self, x: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
-        return ref.rope_neox(x, positions, self.theta, self.rotary_dim)
+    def forward(self, q: torch.Tensor, k: torch.Tensor, positions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return self._rope(q, k, positions)
 
 
 class Linear(nn.Module):
@@ -36,6 +54,20 @@ class Linear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return ref.linear(x, self.weight, self.bias)
+
+    @staticmethod
+    def merge(*units: Linear) -> torch.Tensor | None:
+        """One weight for several projections of the same input (one GEMM instead of several): the units' weights
+        become views into it. None if they cannot share one (biases, mixed dtypes)."""
+        if any(u.bias is not None for u in units) or len({u.weight.dtype for u in units}) > 1:
+            return None
+        merged = torch.cat([u.weight.data for u in units])
+        start = 0
+        for u in units:
+            n = u.weight.shape[0]
+            u.weight.data = merged[start:start + n]
+            start += n
+        return merged
 
 
 class Embedding(nn.Module):

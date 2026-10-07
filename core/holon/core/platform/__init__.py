@@ -27,9 +27,22 @@ def _cuda(device: torch.device, what: str) -> None:
 
 def configure_allocator(device: torch.device) -> None:
     """Expandable segments: freed memory is reused across allocation sizes, so long-running mixes of large prefill
-    activations and graph pools do not fragment the budget the ledger computed."""
+    activations and graph pools do not fragment the budget the ledger computed. Launchers should set it before CUDA
+    starts (PYTORCH_CUDA_ALLOC_CONF); this is the in-process fallback, checked by `check_expandable`."""
     if device.type == "cuda":
         torch._C._accelerator_setAllocatorSettings("expandable_segments:True")
+
+
+def check_expandable(t: torch.Tensor) -> None:
+    """Fail loudly unless `t` (allocated after `configure_allocator`) lives in an expandable segment — torch offers no
+    getter for the setting, and its API for it is private, so the effect is checked instead."""
+    if t.device.type != "cuda":
+        return
+    address = t.data_ptr()
+    segment = next(s for s in torch.cuda.memory_snapshot() if s["address"] <= address < s["address"] + s["total_size"])
+    if not segment.get("is_expandable"):
+        raise RuntimeError("could not enable expandable CUDA allocator segments; set "
+                           "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True before starting")
 
 
 def free_memory(device: torch.device) -> int:
@@ -58,6 +71,7 @@ def reserved_growth(device: torch.device, fn: Callable[[], object]) -> int:
     before = torch.cuda.memory_reserved(device)
     fn()
     synchronize(device)
+    torch.cuda.empty_cache()                 # only what `fn` keeps (live graph pools are not released)
     return torch.cuda.memory_reserved(device) - before
 
 

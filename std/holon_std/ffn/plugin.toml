@@ -8,6 +8,8 @@ license = "Apache-2.0"
 [resources]
 provides = [
     "unit.std.ffn.swiglu@1",
+    "op.silu_mul@1",
+    "kernel.silu_mul@1",
 ]
 
 [properties]

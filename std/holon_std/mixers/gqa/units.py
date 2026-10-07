@@ -78,7 +78,8 @@ class GQA(nn.Module):
         self.o_proj = ctx.unit(Ref(LINEAR, in_features=heads * head_dim, out_features=hidden))
         self.q_norm = ctx.unit(qk_norm, dim=head_dim) if qk_norm else None
         self.k_norm = ctx.unit(qk_norm, dim=head_dim) if qk_norm else None
-        self.rope = ctx.unit(rope)
+        self.rope = ctx.unit(rope, head_dim=head_dim)
+        self._qkv: torch.Tensor | None = None
         bound = ctx.state("kv", layer)
         self._kv = None if bound is None else (bound[1], bound[0].layers.index(layer), len(bound[0].layers),
                                                 bound[0].shape.tokens_per_unit, ctx.dtype)
@@ -88,15 +89,24 @@ class GQA(nn.Module):
         shape = (n_layers, pool.capacity, 2, self.kv_heads, page, self.head_dim)
         return pool.view(dtype, shape)[index]
 
+    def finalize_weights(self, ctx) -> None:
+        merge = getattr(type(self.q_proj), "merge", None)          # one GEMM for q, k, v where the linears allow
+        self._qkv = merge(self.q_proj, self.k_proj, self.v_proj) if merge else None
+
     def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
         dev = ctx.batch.dev
         t = x.shape[0]
-        q = self.q_proj(x).view(t, self.heads, self.head_dim)
-        k = self.k_proj(x).view(t, self.kv_heads, self.head_dim)
-        v = self.v_proj(x).view(t, self.kv_heads, self.head_dim)
+        if self._qkv is not None:
+            q, k, v = torch.nn.functional.linear(x, self._qkv).split(
+                [self.heads * self.head_dim, self.kv_heads * self.head_dim, self.kv_heads * self.head_dim], dim=-1)
+        else:
+            q, k, v = self.q_proj(x), self.k_proj(x), self.v_proj(x)
+        q = q.reshape(t, self.heads, self.head_dim)
+        k = k.reshape(t, self.kv_heads, self.head_dim)
+        v = v.reshape(t, self.kv_heads, self.head_dim)
         if self.q_norm is not None:
             q, k = self.q_norm(q), self.k_norm(k)
-        q, k = self.rope(q, dev.positions), self.rope(k, dev.positions)
+        q, k = self.rope(q, k, dev.positions)
         if self._kv is None:
             o = ref.causal_attention(q, k, v, dev.query_start)
         else:

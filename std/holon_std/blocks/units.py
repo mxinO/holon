@@ -16,5 +16,5 @@ class PreNorm(nn.Module):
         self.ffn = ctx.unit(ffn, layer=layer, hidden=hidden)
 
     def forward(self, h: torch.Tensor, ctx) -> torch.Tensor:
-        h = h + self.mixer(self.input_norm(h), ctx)
-        return h + self.ffn(self.post_norm(h))
+        x, h = self.post_norm.add(self.mixer(self.input_norm(h), ctx), h)   # fused residual add + norm
+        return h + self.ffn(x)

@@ -14,6 +14,8 @@ import numpy as np
 import torch
 from holon.api import Constraint, KernelSpec
 
+from . import ops
+
 # Float workspace for split-KV partials. It is only touched inside `run`, in stream order, so every instance shares
 # one (allocated by the core, zero-initialized as FlashInfer requires); each wrapper keeps its own plan buffers.
 WORKSPACE_BYTES = 128 << 20
@@ -73,6 +75,14 @@ def _supports(f: dict) -> bool:
             and f["head_dim"] in (64, 128, 256))
 
 
+def _half(f: dict) -> bool:
+    return f["dtype"] in ("bfloat16", "float16")
+
+
+def _rope(f: dict) -> bool:
+    return _half(f) and f["rotary_dim"] == f["head_dim"] and f["head_dim"] in (64, 128, 256)
+
+
 class Plugin:
     def register(self, regs) -> None:
         for op, impl in (("attention.paged_prefill", Prefill), ("attention.paged_decode", Decode)):
@@ -80,3 +90,8 @@ class Plugin:
                 op=op, provider="kernels.flashinfer", impl=impl, in_layouts={"kv": "kv.hnd"},
                 requires=Constraint(sm_min=80, sm_max=129), supports=_supports, props=frozenset({"deterministic"}),
                 priority=10 if op == "attention.paged_prefill" else 5))
+        for op, impl, supports in (("rmsnorm", ops.RMSNorm, _half), ("add_rmsnorm", ops.AddRMSNorm, _half),
+                                   ("rope", ops.Rope, _rope), ("silu_mul", ops.SiluMul, _half)):
+            regs.kernels.add(op, KernelSpec(
+                op=op, provider="kernels.flashinfer", impl=impl, requires=Constraint(sm_min=80, sm_max=129),
+                supports=supports, props=frozenset({"deterministic", "graph_safe"}), priority=10))

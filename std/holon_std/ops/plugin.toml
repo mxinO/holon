@@ -12,6 +12,12 @@ provides = [
     "unit.std.ops.linear@1",
     "unit.std.ops.embedding@1",
     "unit.std.ops.lm_head@1",
+    "op.rmsnorm@1",
+    "op.add_rmsnorm@1",
+    "op.rope@1",
+    "kernel.rmsnorm@1",
+    "kernel.add_rmsnorm@1",
+    "kernel.rope@1",
 ]
 
 [properties]

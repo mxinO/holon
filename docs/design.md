@@ -499,7 +499,12 @@ deployment pin (`kernels = {op: provider}`, later the lock), and records provide
 lock. It returns the `KernelSpec`; the caller — a mixer's planner — creates and owns its instances with
 `spec.impl(ctx, **facts)`, because instances hold per-step plans (FlashInfer wrappers) and depth 1 needs two of
 them. Layouts are facts the unit passes in (GQA: `kv.hnd`), so every kernel of one state group agrees by
-construction; rows of length 0 (graph padding) must be harmless.
+construction; rows of length 0 (graph padding) must be harmless. The same mechanism serves the small per-token ops: std.ops owns
+`rmsnorm@1`, `add_rmsnorm@1` (residual add fused into the norm) and `rope@1`, std.ffn owns `silu_mul@1`, each with
+its reference registered as the lowest-priority kernel; units pick their kernel once at build. Projections that
+read the same input (q/k/v, gate/up) are merged into one GEMM in `finalize_weights` when the linear units allow it
+(`Linear.merge` rebinds each unit's weight as a view of the merged buffer, so recipes and weight maps stay as they
+are).
 
 ### 5.5 Quantization and weight loading
 
