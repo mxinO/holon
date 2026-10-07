@@ -6,7 +6,7 @@
     python -m holon_judge l2       --model <hf dir or id> --prompts <jsonl> --golden <file> --floor <file>
                                    [--dtype bfloat16] [--k 20] [--save <file>] [--json <file>]
     python -m holon_judge snapshot-diff <a.json> <b.json>
-    python -m holon_judge bounded  --model <hf dir or id> --prompts <jsonl> [--json <file>]
+    python -m holon_judge bounded  --model <hf dir or id> --prompts <jsonl> [--json <file>] [--plant <bug>]
                                    # prefix cache on/off x overlap depth 1/0 on a multi-turn trace
 
 `compare`, `l2`, `snapshot-diff` and `bounded` exit with status 1 on a failed check.
@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import pathlib
 import sys
@@ -22,6 +23,7 @@ import torch
 
 from . import golden
 from .compare import Result, compare
+from .planted import PLANTS
 from .recording import PromptSet, Recording
 
 
@@ -78,9 +80,10 @@ def _bounded(a: argparse.Namespace) -> int:
 
     configs = {f"prefix {'on' if p else 'off'}, depth {int(o)}": {"prefix_cache": p, "overlap": o}
                for p, o in ((True, True), (True, False), (False, True))}       # the baseline is off, 0
-    report = bounded.compare_configs(build, configs, trace, a.k)
+    with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
+        report = bounded.compare_configs(build, configs, trace, a.k)
     report |= {"model": golden.model_meta(path)["model"], "dtype": a.dtype,
-               "hardware": golden.hardware(torch.device("cuda")), "torch": torch.__version__}
+               "hardware": golden.hardware(torch.device("cuda")), "torch": torch.__version__, "plant": a.plant}
     print(bounded.table(report))
     if a.json:
         pathlib.Path(a.json).parent.mkdir(parents=True, exist_ok=True)
@@ -132,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
     b.add_argument("--k", type=int, default=20)
     b.add_argument("--json", help="write the machine-readable report here")
+    b.add_argument("--plant", choices=sorted(PLANTS), help="calibration: run with a planted bug (must fail)")
     b.set_defaults(run=_bounded)
 
     a = ap.parse_args(argv)

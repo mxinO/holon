@@ -1,39 +1,71 @@
-"""Bounded comparison of engine configurations: cluster standard errors, the margin, and a CPU run end to end."""
+"""Bounded comparison of engine configurations: cluster standard errors, the checks, a clean CPU run end to end, and
+planted bugs it must catch."""
 import math
 
+import pytest
 import torch
 from holon.core.engine import Engine, EngineConfig
 from holon_judge import bounded
-from holon_judge.bounded import Rate, Trace
+from holon_judge.bounded import Agreement, Mean, Trace
+from holon_judge.planted import PLANTS
+
+CONFIGS = {"prefix on, depth 1": {"prefix_cache": True, "overlap": True},
+           "prefix on, depth 0": {"prefix_cache": True, "overlap": False},
+           "prefix off, depth 1": {"prefix_cache": False, "overlap": True}}
 
 
-def test_rate_has_a_cluster_robust_standard_error():
+def test_mean_has_a_cluster_robust_standard_error():
     hits = torch.tensor([1, 1, 1, 1, 0, 0, 1, 1], dtype=torch.bool)
-    seq = torch.tensor([0, 0, 0, 0, 1, 1, 2, 2])
-    r = Rate.of(hits, seq)
-    # per sequence: hits (4, 0, 2), sizes (4, 2, 2); p = 6/8; residuals (1, -1.5, 0.5)
-    assert r.value == 0.75 and r.n == 8 and math.isclose(r.se, math.sqrt(1.5 * 3.5) / 8)
+    clusters = torch.tensor([0, 0, 0, 0, 5, 5, 2, 2])
+    m = Mean.of(hits, clusters)
+    # per cluster: sums (4, 0, 2), sizes (4, 2, 2); mean 6/8; residuals (1, -1.5, 0.5)
+    assert m.value == 0.75 and m.n == 8 and math.isclose(m.se, math.sqrt(1.5 * 3.5) / 8)
+    assert math.isnan(Mean.of(hits[:0], clusters[:0]).value)
 
 
-def test_the_margin_is_the_l2_slack_or_the_noise_whichever_is_larger():
-    floor = Rate(0.98, 0.0, 1000)
-    assert Rate(0.978, 0.0, 1000).within(floor) == (True, bounded.TOP1_DELTA)
-    assert not Rate(0.97, 0.0, 1000).within(floor)[0]
-    ok, margin = Rate(0.97, 0.004, 1000).within(Rate(0.98, 0.003, 1000))
+def _agreement(top1, confident, regret, se=0.0):
+    return Agreement(Mean(top1, se, 1000), Mean(confident, se, 1000), Mean(regret, se, 1000))
+
+
+def test_checks_allow_the_l2_slack_or_the_noise_and_twice_the_regret():
+    floor = _agreement(0.98, 0.995, 0.01)
+    assert all(ok for ok, _ in _agreement(0.978, 0.993, 0.019).checks(floor).values())
+    failed = {name for name, (ok, _) in _agreement(0.97, 0.99, 0.021).checks(floor).items() if not ok}
+    assert failed == {"top1", "confident", "regret"}
+    ok, margin = _agreement(0.97, 0.995, 0.01, se=0.004).checks(_agreement(0.98, 0.995, 0.01, se=0.003))["top1"]
     assert ok and math.isclose(margin, 2.5 * 0.005)
 
 
-def test_configurations_agree_with_the_reference_and_the_prefix_cache_saves(tiny_checkpoint, tiny_prompts):
-    trace = Trace.from_prompts(tiny_prompts, sessions=3, turns=2, system_len=12, chunk_len=4, max_tokens=6)
+@pytest.fixture(scope="module")
+def run(tiny_checkpoint, tiny_prompts):
+    trace = Trace.from_prompts(tiny_prompts, sessions=8, turns=3, system_len=24, chunk_len=5, max_tokens=12)
 
     def build(**overrides):
         return Engine(EngineConfig(model=str(tiny_checkpoint), device="cpu", dtype=torch.float32, page_size=4,
-                                   max_seqs=4, max_model_len=trace.max_len, state_memory=1 << 20,
-                                   **{"max_step_tokens": 16} | overrides))
+                                   max_seqs=4, max_model_len=trace.max_len, state_memory=1 << 21,
+                                   **{"max_step_tokens": 32} | overrides))
 
-    configs = {"prefix on, depth 1": {"prefix_cache": True, "overlap": True}}
-    report = bounded.compare_configs(build, configs, trace, k=5)
+    def compare(plant=None):
+        if plant is None:
+            return bounded.compare_configs(build, CONFIGS, trace, k=5)
+        with PLANTS[plant]():
+            return bounded.compare_configs(build, CONFIGS, trace, k=5)
+    return compare
+
+
+def test_configurations_agree_with_the_reference_and_the_prefix_cache_saves(run):
+    report = run()
     assert report["passed"], bounded.table(report)
-    base, cand = report["results"]["baseline"], report["results"]["prefix on, depth 1"]
-    assert base["top1"]["n"] == cand["top1"]["n"] == 3 * 2 * 6
-    assert cand["top1"]["value"] > 0.99 and base["tokens_saved"] == 0 and cand["tokens_saved"] > 0
+    results = report["results"]
+    assert results["baseline"]["top1"]["n"] == results["prefix on, depth 1"]["top1"]["n"] == 8 * 3 * 12
+    assert results["prefix on, depth 1"]["top1"]["value"] > 0.99
+    assert results["baseline"]["tokens_saved"] == 0 and results["prefix on, depth 1"]["tokens_saved"] > 0
+
+
+@pytest.mark.parametrize("plant, broken", [
+    ("adoption-off-by-one", {"prefix on, depth 1", "prefix on, depth 0"}),
+    ("wrong-block", {"prefix on, depth 1", "prefix on, depth 0"}),
+    ("stale-device-token", {"prefix on, depth 1", "prefix off, depth 1"})])
+def test_a_planted_bug_fails_exactly_the_configurations_using_its_path(run, plant, broken):
+    report = run(plant)
+    assert {name for name, r in report["results"].items() if not r["passed"]} == broken, bounded.table(report)

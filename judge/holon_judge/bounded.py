@@ -4,13 +4,19 @@ Configurations that change batch shape, chunking or path (prefix cache on vs off
 compared token for token: greedy decoding may take either side of a near-tie. Each configuration instead generates
 greedily on its own production path, without logprobs (logprob steps commit synchronously and run eagerly, which
 would hide depth 1 and graph replay), and one reference engine (prefix cache off, depth 0, eager) re-scores the
-generated tokens teacher-forced: how often its argmax is the generated token, overall and at confident positions.
+generated tokens teacher-forced: how often its argmax is the generated token, overall and at confident positions,
+and the regret. Agreement is coarse, though: a bug that perturbs the state a little (one prefix token's state never
+computed) moves it by less than the noise. So each configuration also runs the trace with logprobs, a pass that still
+adopts cached prefixes, and is judged as L2 judges an engine: KL(reference ‖ configuration) at the same positions.
 
 As in L2, the floor is the same comparison without the thing under test: the baseline configuration (prefix cache
 off, depth 0, graphs on) re-scored the same way. Two bf16 paths (decode vs prefill kernels) disagree at near-ties no
 matter what, and generated text has more near-ties than the L2 prompt set, so the L2 floor does not transfer. A
 configuration passes if its agreement is within `margin` of the floor's, where `margin` is the L2 slack
-(`compare.TOP1_DELTA`) or 2.5 standard errors of the difference, whichever is larger (sequences are the clusters).
+(`compare.TOP1_DELTA`) or 2.5 standard errors of the difference, whichever is larger (sessions are the clusters);
+its mean regret at most doubles the floor's; and its KL p50 and p99 are at most `compare.KL_FACTOR` times the
+floor's, as in L2. Planted bugs in prefix adoption and in the depth-1 token feed fail it (`planted`; tested in
+judge/tests/test_bounded.py and calibrated on Qwen3-8B in the evidence).
 
 The trace: sessions share a system prompt and every turn resends the whole history, generated tokens included, plus
 a new user chunk, so later turns hit the prefix cache (`tokens_saved`).
@@ -22,15 +28,17 @@ import gc
 import math
 
 import torch
-from holon.api import SamplingParams
+from holon.api import Logprobs, SamplingParams
 
-from .compare import CONFIDENT_GAP, TOP1_DELTA
+from .compare import CONFIDENT_GAP, KL_FACTOR, TOP1_DELTA, kl_topk
 from .engine import score
-from .recording import Prompt, PromptSet
+from .recording import Prompt, PromptSet, Recording, tail_from_topk
 
-Turn = tuple[list[int], list[int]]          # prompt ids, generated ids
+Turn = tuple[list[int], list[int], list[Logprobs]]   # prompt ids, generated ids, their logprobs (if asked for)
 BASELINE = {"prefix_cache": False, "overlap": False}
 SE_FACTOR = 2.5
+REGRET_MIN = 1e-3         # nats: the regret margin when the baseline's is ~0 (fp32 tests)
+KL_MIN = 1e-5             # nats: the KL margin when the baseline's is ~0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -57,90 +65,153 @@ class Trace:
         return len(self.system) + sum(max(len(c[t]) for c in self.chunks) + self.max_tokens
                                       for t in range(len(self.chunks[0]))) + 1
 
-    def run(self, engine) -> list[Turn]:
+    def run(self, engine, logprobs: int | None = None) -> list[Turn]:
         """Every session's turns, generated greedily; one wave per turn."""
-        params = SamplingParams(temperature=0.0, max_tokens=self.max_tokens, ignore_eos=True)
+        params = SamplingParams(temperature=0.0, max_tokens=self.max_tokens, ignore_eos=True, logprobs=logprobs)
         history = [list(self.system) for _ in self.chunks]
         turns: list[Turn] = []
         for t in range(len(self.chunks[0])):
             prompts = [h + c[t] for h, c in zip(history, self.chunks, strict=True)]
-            for s, (prompt, out) in enumerate(zip(prompts, engine.generate(prompts, params), strict=True)):
-                turns.append((prompt, out))
+            for s, (prompt, (out, lps)) in enumerate(zip(prompts, _generate(engine, prompts, params), strict=True)):
+                turns.append((prompt, out, lps))
                 history[s] = prompt + out
         return turns
 
 
+def _generate(engine, prompts: list[list[int]], params: SamplingParams) -> list[tuple[list[int], list[Logprobs]]]:
+    index = {engine.add(p, params): i for i, p in enumerate(prompts)}
+    out: list[tuple[list[int], list[Logprobs]]] = [([], []) for _ in prompts]
+    while engine.has_work():
+        for d in engine.step():
+            tokens, lps = out[index[d.rid]]
+            tokens += d.token_ids
+            if d.logprobs is not None:
+                lps.append(d.logprobs)
+    return out
+
+
 @dataclasses.dataclass(frozen=True)
-class Rate:
+class Mean:
     value: float
-    se: float                 # cluster-robust standard error, sequences as clusters
+    se: float                 # cluster-robust standard error, sessions as clusters (turns of one session correlate)
     n: int
 
     @classmethod
-    def of(cls, hits: torch.Tensor, seq: torch.Tensor) -> Rate:
-        n = len(hits)
+    def of(cls, values: torch.Tensor, clusters: torch.Tensor) -> Mean:
+        n = len(values)
         if n == 0:
             return cls(math.nan, math.nan, 0)          # fails every check
-        _, seq = seq.unique(return_inverse=True)
-        s = int(seq.max()) + 1
-        h_s = torch.zeros(s, dtype=torch.float64).index_add_(0, seq, hits.double())
-        n_s = torch.zeros(s, dtype=torch.float64).index_add_(0, seq, torch.ones(n, dtype=torch.float64))
-        p = h_s.sum().item() / n
-        se = math.sqrt(s / (s - 1) * ((h_s - p * n_s) ** 2).sum().item()) / n if s > 1 else math.nan
-        return cls(p, se, n)
+        _, clusters = clusters.unique(return_inverse=True)
+        s = int(clusters.max()) + 1
+        v_s = torch.zeros(s, dtype=torch.float64).index_add_(0, clusters, values.double())
+        n_s = torch.zeros(s, dtype=torch.float64).index_add_(0, clusters, torch.ones(n, dtype=torch.float64))
+        mean = v_s.sum().item() / n
+        se = math.sqrt(s / (s - 1) * ((v_s - mean * n_s) ** 2).sum().item()) / n if s > 1 else math.nan
+        return cls(mean, se, n)
 
-    def within(self, floor: Rate) -> tuple[bool, float]:
-        """Whether this rate is at most `margin` below the floor's; the margin."""
-        noise = SE_FACTOR * math.hypot(self.se, floor.se)
-        margin = TOP1_DELTA if math.isnan(noise) else max(TOP1_DELTA, noise)
-        return self.value >= floor.value - margin, margin
+    def noise(self, floor: Mean) -> float:
+        """SE_FACTOR standard errors of the difference from the floor (0 when unknown)."""
+        x = SE_FACTOR * math.hypot(self.se, floor.se)
+        return 0.0 if math.isnan(x) else x
 
 
 @dataclasses.dataclass(frozen=True)
 class Agreement:
-    top1: Rate                # the reference's argmax is the generated token
-    confident: Rate           # the same where the reference's top-2 gap >= CONFIDENT_GAP
-    regret: float             # mean nats: reference logprob of its argmax minus that of the generated token
+    top1: Mean                # the reference's argmax is the generated token
+    confident: Mean           # the same where the reference's top-2 gap >= CONFIDENT_GAP
+    regret: Mean              # nats: reference logprob of its argmax minus that of the generated token
+
+    def checks(self, floor: Agreement) -> dict[str, tuple[bool, float]]:
+        """name -> (passed, margin). Agreement may fall below the floor's by the L2 slack or the noise; regret may
+        at most double the floor's (beyond the noise), which catches few but confident disagreements."""
+        out = {}
+        for name in ("top1", "confident"):
+            mine, theirs = getattr(self, name), getattr(floor, name)
+            margin = max(TOP1_DELTA, mine.noise(theirs))
+            out[name] = (mine.value >= theirs.value - margin, margin)
+        margin = max(floor.regret.value, REGRET_MIN, self.regret.noise(floor.regret))
+        out["regret"] = (self.regret.value <= floor.regret.value + margin, margin)
+        return out
 
 
-def rescore(reference, turns: list[Turn], k: int) -> Agreement:
-    """Teacher-force every turn's prompt + output through `reference` and judge the generated tokens."""
-    prompts = PromptSet("bounded", "", [Prompt(str(i), "turn", p + o) for i, (p, o) in enumerate(turns)])
+@dataclasses.dataclass(frozen=True)
+class Divergence:
+    kl: Mean                  # KL(reference ‖ configuration) at the generated positions, top-k bucketed as in L2
+    p50: float
+    p99: float
+
+    def checks(self, floor: Divergence) -> dict[str, tuple[bool, float]]:
+        out = {}
+        for name in ("p50", "p99"):
+            mine, theirs = getattr(self, name), getattr(floor, name)
+            margin = max((KL_FACTOR - 1) * theirs, KL_MIN)
+            out[f"kl_{name}"] = (mine <= theirs + margin, margin)
+        return out
+
+
+def _reference(reference, turns: list[Turn], sessions: int, k: int) -> tuple[Recording, torch.Tensor]:
+    """The reference's teacher-forced rows at every turn's generated positions (`turns` in `Trace.run` order: turn i
+    belongs to session i % sessions), and each row's session."""
+    prompts = PromptSet("bounded", "", [Prompt(str(i), "turn", p + o) for i, (p, o, _) in enumerate(turns)])
     rec = score(reference, prompts, k)
     # Row j of a sequence predicts its token j + 1: the generated tokens are predicted by its last len(out) rows.
     rows = torch.cat([torch.arange(int(rec.offsets[i + 1]) - len(o), int(rec.offsets[i + 1]))
-                      for i, (_, o) in enumerate(turns)])
-    seq = torch.repeat_interleave(torch.arange(len(turns)), torch.tensor([len(o) for _, o in turns]))
-    agree = rec.topk_ids[rows, 0] == torch.tensor([t for _, o in turns for t in o])
-    sure = rec.topk_lp[rows, 0] - rec.topk_lp[rows, 1] >= CONFIDENT_GAP
-    return Agreement(Rate.of(agree, seq), Rate.of(agree[sure], seq[sure]),
-                     (rec.topk_lp[rows, 0] - rec.target_lp[rows]).double().mean().item())
+                      for i, (_, o, _) in enumerate(turns)])
+    session = torch.repeat_interleave(torch.arange(len(turns)) % sessions, torch.tensor([len(o) for _, o, _ in turns]))
+    sliced = Recording(rec.topk_ids[rows], rec.topk_lp[rows], rec.target_lp[rows], rec.tail_lp[rows], rec.offsets, {})
+    return sliced, session
+
+
+def agreement(reference, turns: list[Turn], sessions: int, k: int) -> Agreement:
+    """How the reference, teacher-forced, judges the generated tokens."""
+    ref, session = _reference(reference, turns, sessions, k)
+    agree = ref.topk_ids[:, 0] == torch.tensor([t for _, o, _ in turns for t in o])
+    sure = ref.topk_lp[:, 0] - ref.topk_lp[:, 1] >= CONFIDENT_GAP
+    regret = ref.topk_lp[:, 0] - ref.target_lp
+    return Agreement(Mean.of(agree, session), Mean.of(agree[sure], session[sure]), Mean.of(regret, session))
+
+
+def divergence(reference, turns: list[Turn], sessions: int, k: int) -> Divergence:
+    """KL(reference ‖ configuration) at the generated positions, from the logprobs the configuration emitted."""
+    ref, session = _reference(reference, turns, sessions, k)
+    ids = torch.tensor([x[:k] for _, _, lps in turns for lp in lps for x in lp.top_ids])
+    top = torch.tensor([x[:k] for _, _, lps in turns for lp in lps for x in lp.top], dtype=torch.float32)
+    cand = Recording(ids, top, top[:, 0], tail_from_topk(top), ref.offsets, {})
+    kl, _ = kl_topk(ref, cand)
+    p50, p99 = torch.quantile(kl, torch.tensor([0.5, 0.99], dtype=torch.float64)).tolist()
+    return Divergence(Mean.of(kl, session), p50, p99)
 
 
 def compare_configs(build, configs: dict[str, dict], trace: Trace, k: int = 20) -> dict:
-    """Run `trace` under the baseline and every configuration (EngineConfig overrides by name), re-score each with
-    the reference engine and judge it against the baseline. `build(**overrides)` returns an engine."""
-    outputs: dict[str, tuple[list[Turn], dict]] = {}
+    """Run `trace` under the baseline and every configuration (EngineConfig overrides by name), without and with
+    logprobs, re-score each run with the reference engine and judge it against the baseline. `build(**overrides)`
+    returns an engine."""
+    runs: dict[str, tuple[list[Turn], list[Turn], dict]] = {}
     for name, overrides in {"baseline": BASELINE, **configs}.items():
         engine = build(**overrides)
-        outputs[name] = trace.run(engine), engine.stats()
+        plain = trace.run(engine)
+        stats = engine.stats()
+        runs[name] = plain, trace.run(engine, logprobs=k), stats
         _free(engine)
     reference = build(**BASELINE, cuda_graphs=False, max_step_tokens=max(trace.max_len, 4096))
-    scored = {name: (rescore(reference, turns, k), stats) for name, (turns, stats) in outputs.items()}
+    sessions = len(trace.chunks)
+    scored = {name: (agreement(reference, plain, sessions, k), divergence(reference, lp, sessions, k), stats)
+              for name, (plain, lp, stats) in runs.items()}
     _free(reference)
-    floor = scored["baseline"][0]
+    floor_a, floor_d, _ = scored["baseline"]
     results = {}
-    for name, (agreement, stats) in scored.items():
-        checks = {"top-1": agreement.top1.within(floor.top1),
-                  "confident top-1": agreement.confident.within(floor.confident)}
-        failures = [f"{what} {getattr(agreement, attr).value:.3%} more than {margin:.3%} below the baseline"
-                    for (what, (ok, margin)), attr in zip(checks.items(), ("top1", "confident"), strict=True)
-                    if not ok]
+    for name, (agree, div, stats) in scored.items():
+        checks = agree.checks(floor_a) | div.checks(floor_d)
+        values = {"top1": agree.top1.value, "confident": agree.confident.value, "regret": agree.regret.value,
+                  "kl_p50": div.p50, "kl_p99": div.p99}
+        failures = [f"{what} {values[what]:.4g} beyond {margin:.3g} of the baseline"
+                    for what, (ok, margin) in checks.items() if not ok]
         results[name] = {"config": {"cuda_graphs": True} | (BASELINE if name == "baseline" else configs[name]),
-                         **dataclasses.asdict(agreement), "tokens_saved": stats["prefix_tokens_saved"],
+                         **dataclasses.asdict(agree), "kl": dataclasses.asdict(div),
+                         "tokens_saved": stats["prefix_tokens_saved"],
                          "margins": {what: margin for what, (_, margin) in checks.items()},
                          "failures": failures, "passed": not failures}
-    return {"sessions": len(trace.chunks), "turns": len(trace.chunks[0]), "system_len": len(trace.system),
+    return {"sessions": sessions, "turns": len(trace.chunks[0]), "system_len": len(trace.system),
             "max_tokens": trace.max_tokens, "results": results,
             "passed": all(r["passed"] for r in results.values())}
 
@@ -151,11 +222,12 @@ def _free(engine) -> None:
 
 
 def table(report: dict) -> str:
-    rows = [f"{'config':22s} {'n':>6s} {'top-1 ± SE':>17s} {'confident ± SE':>17s} {'regret':>8s} {'saved':>7s}  "
-            f"verdict"]
+    rows = [f"{'config':22s} {'n':>6s} {'top-1 ± SE':>17s} {'confident ± SE':>17s} {'regret':>8s} {'KL p50':>9s} "
+            f"{'KL p99':>9s} {'saved':>7s}  verdict"]
     for name, r in report["results"].items():
         verdict = "PASS" if r["passed"] else "FAIL: " + "; ".join(r["failures"])
         t, c = r["top1"], r["confident"]
         rows.append(f"{name:22s} {t['n']:6d} {t['value']:9.3%} ± {t['se']:.3%} {c['value']:9.3%} ± {c['se']:.3%} "
-                    f"{r['regret']:8.4f} {r['tokens_saved']:7d}  {verdict}")
+                    f"{r['regret']['value']:8.4f} {r['kl']['p50']:9.2e} {r['kl']['p99']:9.2e} {r['tokens_saved']:7d}  "
+                    f"{verdict}")
     return "\n".join(rows)
