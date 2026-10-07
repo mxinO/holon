@@ -153,6 +153,7 @@ class Engine:
         self._ids = itertools.count()
         self._prompt_lp: dict[Seq, Logprobs] = {}         # sequences still accumulating prompt logprobs
         self._siblings: dict[Seq, list[Seq]] = {}         # n > 1: waiting for the first sequence's prefill
+        self._live: dict[str, list[Seq]] = {}              # request id -> its unfinished sequences
 
     def _index(self, bound: list[BoundSpec]) -> PrefixIndex | None:
         """A prefix index over blocks every paged spec can share whole pages of; None when disabled or when some
@@ -261,8 +262,9 @@ class Engine:
         return True
 
     # -- requests -------------------------------------------------------------------------------------------------
-    def add(self, token_ids: list[int], params: SamplingParams | None = None) -> str:
-        """Queue a request; its `params.n` sequences stream as TokenDeltas with `index` 0 … n-1."""
+    def add(self, token_ids: list[int], params: SamplingParams | None = None, rid: str | None = None) -> str:
+        """Queue a request; its `params.n` sequences stream as TokenDeltas with `index` 0 … n-1. `rid` defaults to a
+        fresh id; callers that route results themselves (frontends) choose it."""
         p = params or SamplingParams()
         if not token_ids:
             raise ValueError("empty prompt")
@@ -273,13 +275,16 @@ class Engine:
             raise ValueError(f"n must be >= 1, got {p.n}")
         if p.presence_penalty or p.frequency_penalty or p.repetition_penalty != 1:
             raise NotImplementedError("sampling penalties are not supported yet")
-        rid = str(next(self._ids))
+        rid = rid if rid is not None else str(next(self._ids))
+        if rid in self._live:
+            raise ValueError(f"request id {rid!r} is already in flight")
         base = (p.seed if p.seed is not None else secrets.randbits(63)) & _SEED_MASK
         for i in range(p.n):
             # A concrete seed per sequence keeps sampling reproducible across batching and preemption.
             seed = base if i == 0 else _splitmix64(base + i) & _SEED_MASK
             child = dataclasses.replace(p, seed=seed, prompt_logprobs=p.prompt_logprobs if i == 0 else None)
             seq = Seq(rid=rid, tokens=list(token_ids), params=child, index=i)
+            self._live.setdefault(rid, []).append(seq)
             if child.prompt_logprobs is not None:
                 self._prompt_lp[seq] = Logprobs([], [], [])
             if i == 0 or self.state.index is None:
@@ -291,6 +296,38 @@ class Engine:
 
     def has_work(self) -> bool:
         return bool(self.sched.waiting or self.sched.running or self._inflight)
+
+    # -- control (design §7.7) -------------------------------------------------------------------------------------
+    def abort(self, rid: str) -> list[TokenDelta]:
+        """Finish every sequence of request `rid` now; a row already in flight is discarded at its commit."""
+        deltas = []
+        for seq in self._live.pop(rid, []):
+            for sibling in self._siblings.pop(seq, []):             # never started: just drop them
+                sibling.status = Status.FINISHED
+            if seq.status is Status.FINISHED:
+                continue
+            self.sched.finish(seq, "abort")
+            self._prompt_lp.pop(seq, None)
+            deltas.append(TokenDelta(rid, [], index=seq.index, finish_reason="abort"))
+        return deltas
+
+    def drain(self) -> list[TokenDelta]:
+        """Commit the step in flight (the quiesce point: nothing runs on the device afterwards)."""
+        prev, self._inflight = self._inflight, None
+        return self._commit(prev) if prev is not None else []
+
+    def flush_prefix(self) -> list[TokenDelta]:
+        """Drop the prefix cache (e.g. after a weight update); requests keep the blocks they hold."""
+        deltas = self.drain()
+        if self.state.index is not None:
+            self.state.index.clear()
+        return deltas
+
+    def stats(self) -> dict[str, int]:
+        return {"waiting": len(self.sched.waiting), "running": len(self.sched.running),
+                "preemptions": self.sched.preemptions, "prefix_tokens_saved": self.state.tokens_saved,
+                "cached_blocks": len(self.state.index.entries) if self.state.index is not None else 0,
+                "graphs": len(self.graphs) if self.graphs is not None else 0}
 
     def generate(self, prompts: list[list[int]], params: SamplingParams | None = None) -> list[list[int]]:
         """Token ids generated for each prompt (one sequence per prompt)."""
@@ -450,6 +487,11 @@ class Engine:
             reason = self._finish_reason(seq, token)
             if reason:
                 self.sched.finish(seq, reason)
+                live = self._live.get(seq.rid, [])
+                if seq in live:
+                    live.remove(seq)
+                if not live:
+                    self._live.pop(seq.rid, None)
             k = seq.params.logprobs
             logprobs = None if k is None else Logprobs([lps[0][row - 1]], [lps[1][row - 1][:k]],
                                                        [lps[2][row - 1][:k]])

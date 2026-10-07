@@ -128,4 +128,5 @@ class ModelPlugin(Protocol):
 
     def recipe(self, cfg: Mapping[str, Any], source: str) -> ModelSpec: ...
 
-    def bundle(self) -> FrontendBundle: ...
+    def bundle(self, checkpoint: str) -> FrontendBundle:
+        """Tokenizer, chat template and parsers for the checkpoint at `checkpoint`."""

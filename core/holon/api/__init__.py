@@ -25,7 +25,17 @@ from .decoding import (
     SchedulePolicy,
     Verifier,
 )
-from .frontend import Abort, EngineRequest, FrontendBundle, Logprobs, Parser, TokenDelta, Tokenizer
+from .frontend import (
+    Abort,
+    EngineClient,
+    EngineRequest,
+    FrontendBundle,
+    FrontendPlugin,
+    Logprobs,
+    Parser,
+    TokenDelta,
+    Tokenizer,
+)
 from .manifest import SLOTS, Cardinality, Manifest, Provenance, Resource, Tunable
 from .memory import Ledger, Pool
 from .mixer import Mixer, Planner
@@ -54,13 +64,13 @@ from .terms import Ref, canonical_hash, parse_versioned, to_term
 
 __all__ = [
     "SLOTS", "Abort", "Batch", "BatchPlan", "Binding", "BuildCtx", "Cardinality", "CommitView", "Constraint",
-    "Converter", "DeviceBatch", "Dialect", "DraftHeadDecl", "DraftPolicy", "Drafter", "EngineRequest", "Event",
-    "Fingerprint", "FrontendBundle", "HitLen", "KernelRegistry", "KernelSpec", "LayerDecl", "Layout", "Ledger",
-    "Lock", "LogitsProcessor", "Logprobs", "Manifest", "MemOp", "Mixer", "ModelPlugin", "ModelSpec", "Paged", "Pages",
-    "Parser", "Payload", "Plan", "PlanTransform", "Planner", "Platform", "Plugin", "Pool", "PrefixView", "Provenance",
-    "QTensor", "Ref", "Registries", "Registry", "Resource", "Rewindable", "SampleOut", "Sampler", "SamplerPlugin",
-    "SamplingParams", "Scale", "SchedulePolicy", "Scheme", "SchemeImpl", "Seq", "SeqTable", "SeqView", "ShapeKey",
-    "Slot", "StateKind", "StateKindFactory", "StateSpec", "Status", "StepCtx", "TokenDelta", "TokenSrc", "Tokenizer",
-    "Tunable", "Unit", "UnitPin", "Verifier", "WeightMap", "WeightRule", "WeightSource", "canonical_hash",
-    "parse_versioned", "to_term",
+    "Converter", "DeviceBatch", "Dialect", "DraftHeadDecl", "DraftPolicy", "Drafter", "EngineClient", "EngineRequest",
+    "Event", "Fingerprint", "FrontendBundle", "FrontendPlugin", "HitLen", "KernelRegistry", "KernelSpec", "LayerDecl",
+    "Layout", "Ledger", "Lock", "LogitsProcessor", "Logprobs", "Manifest", "MemOp", "Mixer", "ModelPlugin",
+    "ModelSpec", "Paged", "Pages", "Parser", "Payload", "Plan", "PlanTransform", "Planner", "Platform", "Plugin",
+    "Pool", "PrefixView", "Provenance", "QTensor", "Ref", "Registries", "Registry", "Resource", "Rewindable",
+    "SampleOut", "Sampler", "SamplerPlugin", "SamplingParams", "Scale", "SchedulePolicy", "Scheme", "SchemeImpl",
+    "Seq", "SeqTable", "SeqView", "ShapeKey", "Slot", "StateKind", "StateKindFactory", "StateSpec", "Status",
+    "StepCtx", "TokenDelta", "TokenSrc", "Tokenizer", "Tunable", "Unit", "UnitPin", "Verifier", "WeightMap",
+    "WeightRule", "WeightSource", "canonical_hash", "parse_versioned", "to_term",
 ]
