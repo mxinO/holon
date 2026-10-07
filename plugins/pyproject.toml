@@ -5,10 +5,14 @@ requires-python = ">=3.12"
 description = "Holon first-party plugins: models, kernels, dialects, frontends"
 dependencies = ["holonlm"]  # std units are reached through Ref, never imported
 
+[project.optional-dependencies]
+openai = ["fastapi", "uvicorn"]   # frontends.openai (anyio and pydantic come with fastapi)
+
 [project.entry-points."holon.plugins"]
 "models.qwen3" = "holon_plugins.models.qwen3"
 "kernels.flashinfer" = "holon_plugins.kernels.flashinfer"
 "kernels.triton_attn" = "holon_plugins.kernels.triton_attn"
+"frontends.openai" = "holon_plugins.frontends.openai"
 
 [build-system]
 requires = ["hatchling"]

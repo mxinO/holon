@@ -14,7 +14,7 @@ holonlm-std = { workspace = true }
 holonlm-plugins = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "import-linter>=2.1"]
+dev = ["pytest>=8", "ruff>=0.6", "import-linter>=2.1", "httpx"]  # httpx: FastAPI's TestClient
 
 [tool.ruff]
 line-length = 120
