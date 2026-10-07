@@ -210,6 +210,30 @@ H (propagate, tune) → I (supervisor) → tuned default locks for each class.
 `core-diff` (informational in v0, enforcing from v1), `unit`, `judge-L0`, `judge-L2-goldens` (GPU runner),
 `snapshot` (GPU runner).
 
+### 3.6 Status (2026-10-07): acceptance met
+
+Measured on Qwen3-8B bf16 unless noted; records in `evidence/` and `judge/results/`, locks in `plans/`.
+
+| # | Result |
+|---|---|
+| 1 | L2 passes for Qwen3-0.6B and Qwen3-8B on the final engine (`judge/results/l2-52f0f1a-*`), and for Qwen3-8B on rtx-a5000, rtx-4090 and rtx-5090 when their locks were written |
+| 2 | Decode tok/s Holon vs mini-sglang — A5000: B1 40.9 / 41.5, B8 311.8 / 315.2, B64 2042.2 / 2042.9; RTX 5090: B1 99.0 / 97.8, B8 708.3 / 725.9, B64 4707.7 / 3905.3. Agent trace TTFT / TPOT p50 — A5000: 109.9 / 28.3 ms vs 106.4 / 27.5 ms; RTX 5090: 40.4 / 11.2 ms vs 42.4 / 10.9 ms. All within 10% |
+| 3 | CPU per step at B256 (A5000, blocking sync): 2.45 ms vs nano-vllm 2.98 ms |
+| 4 | Snapshot trace (every graph bucket to 64, a 2048-token prefix hit, n = 2, logprobs, prompt logprobs) run-identical across 3 fresh engines. Prefix cache on/off and depth 1 vs 0 bounded (`holon_judge bounded`, design §7.10): all configurations within margin of the baseline; planted bugs in prefix adoption and the depth-1 token feed fail exactly the configurations using their path. Prefix cache saves 155K tokens on the 48-session multi-turn trace |
+| 5 | SeqTable seam: a fixed-token test drafter runs at depth 1 with correct positions and lengths (`plugins/tests/test_spec.py`) |
+| 6 | Restart (A5000, 5 kills mid-stream, every stream whole): median 11.5 s, max 11.6 s for Qwen3-8B (6.7 s for 0.6B). **SLO: restart ≤ 15 s for models up to 8B on a 24 GB card.** A poison request is quarantined without rollback, also alone on a quiet server; `n > 1` and prompt logprobs are served |
+| 7 | Memory fit per §2 (Qwen3-8B on a 24 GB A5000: 42K KV tokens at the default budget, mini-sglang 37K). Tuned default locks for rtx-a5000, rtx-4090, rtx-5090 (`holon_tools tune`: Triton paged decode/verify, FlashInfer prefill and fused per-token ops on all three) |
+| 8 | Core 2038 / 6000 lines; lints, import contracts and the static checks green |
+
+Carried into M0.1 and later:
+- CI jobs: `manifest-deps`, `no-arch-branches`, `reference-provenance` and the GPU-runner jobs (`isolation-check`,
+  `judge-L2-goldens`, `snapshot`) exist as commands (`holon_tools propagate`, `holon_judge l2 | snapshot`), not yet as
+  CI jobs on scheduled runners.
+- Propagation: changed-line coverage (auto-advance stays opt-in until then); approval's "no L2 regression vs the
+  current lock" (needs L2 metrics in the lock); the engine/supervisor starting from the newest lock.
+- Graph replay with logprobs (logprob steps run eagerly at depth 1) and the graph-vs-eager bounded comparison.
+- rtx-5080 lock (M0.1, per §3.4 item 7).
+
 ---
 
 ## 4. M0.1 — quant pipeline with GGUF (Qwen3-8B GGUF)

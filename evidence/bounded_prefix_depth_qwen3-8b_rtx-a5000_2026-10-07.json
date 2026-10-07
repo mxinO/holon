@@ -32,14 +32,15 @@
      "n": 24576
     },
     "p50": 8.281155121483112e-06,
-    "p99": 0.007143676778584773
+    "p99": 0.007143676778584773,
+    "p50_se": 3.964644339193893e-06,
+    "p99_se": 0.00017416161265667088
    },
    "tokens_saved": 0,
    "margins": {
-    "top1": 0.003005889247713577,
+    "top1": 0.0030058892477135774,
     "confident": 0.0025,
-    "regret": 0.001,
-    "kl_p50": 1e-05,
+    "kl_p50": 1.4017134486184302e-05,
     "kl_p99": 0.007143676778584773
    },
    "failures": [],
@@ -68,19 +69,20 @@
    },
    "kl": {
     "kl": {
-     "value": 0.0006251838054592752,
-     "se": 3.465452631440324e-05,
+     "value": 0.0006184821935794935,
+     "se": 3.2811517437100614e-05,
      "n": 24576
     },
-    "p50": 9.933875626254724e-06,
-    "p99": 0.007443543537653528
+    "p50": 9.713039543305897e-06,
+    "p99": 0.007382307709569363,
+    "p50_se": 4.833368909735771e-06,
+    "p99_se": 0.00013296424661461302
    },
    "tokens_saved": 154752,
    "margins": {
-    "top1": 0.0032062432569939575,
+    "top1": 0.0030058892477135774,
     "confident": 0.0025,
-    "regret": 0.001,
-    "kl_p50": 1e-05,
+    "kl_p50": 1.4017134486184302e-05,
     "kl_p99": 0.007143676778584773
    },
    "failures": [],
@@ -114,14 +116,15 @@
      "n": 24576
     },
     "p50": 1.1278514879850994e-05,
-    "p99": 0.007451811527181358
+    "p99": 0.007451811527181358,
+    "p50_se": 5.494042089214092e-06,
+    "p99_se": 0.00010309968969461244
    },
    "tokens_saved": 161616,
    "margins": {
-    "top1": 0.003281178598723211,
+    "top1": 0.0030058892477135774,
     "confident": 0.0025,
-    "regret": 0.001,
-    "kl_p50": 1e-05,
+    "kl_p50": 1.4017134486184302e-05,
     "kl_p99": 0.007143676778584773
    },
    "failures": [],
@@ -155,14 +158,15 @@
      "n": 24576
     },
     "p50": 8.488049937311489e-06,
-    "p99": 0.0071793187647001535
+    "p99": 0.0071793187647001535,
+    "p50_se": 4.050607257009293e-06,
+    "p99_se": 0.0001887675899656294
    },
    "tokens_saved": 0,
    "margins": {
-    "top1": 0.003058495984918195,
+    "top1": 0.0030058892477135774,
     "confident": 0.0025,
-    "regret": 0.001,
-    "kl_p50": 1e-05,
+    "kl_p50": 1.4017134486184302e-05,
     "kl_p99": 0.007143676778584773
    },
    "failures": [],
@@ -181,28 +185,28 @@
     "passed": true,
     "failures": [],
     "top1": 0.9894612630208334,
-    "regret": 0.0005238850838698758,
+    "confident": 0.9965297860034702,
     "kl_p50": 8.281155121483112e-06,
     "kl_p99": 0.007143676778584773
    },
    "prefix on, depth 1": {
     "passed": false,
     "failures": [
-     "kl_p50 2.654e-05 beyond 1e-05 of the baseline"
+     "kl_p50 2.721e-05 beyond 1.4e-05 of the baseline"
     ],
     "top1": 0.9872233072916666,
-    "regret": 0.003331502271369876,
-    "kl_p50": 2.6535414521917153e-05,
-    "kl_p99": 0.008158945782334195
+    "confident": 0.9950370155920427,
+    "kl_p50": 2.7210052003512833e-05,
+    "kl_p99": 0.013852431610226573
    },
    "prefix on, depth 0": {
     "passed": false,
     "failures": [
-     "regret 0.01234 beyond 0.00816 of the baseline",
-     "kl_p50 2.515e-05 beyond 1e-05 of the baseline"
+     "top1 0.986 beyond 0.00301 of the baseline",
+     "kl_p50 2.515e-05 beyond 1.4e-05 of the baseline"
     ],
     "top1": 0.9860432942708334,
-    "regret": 0.012339274090966986,
+    "confident": 0.994571073352673,
     "kl_p50": 2.5151474152627016e-05,
     "kl_p99": 0.010803593808318976
    },
@@ -210,7 +214,7 @@
     "passed": true,
     "failures": [],
     "top1": 0.9894205729166666,
-    "regret": 0.0005086262948073758,
+    "confident": 0.9966951708183583,
     "kl_p50": 8.488049937311489e-06,
     "kl_p99": 0.0071793187647001535
    }
@@ -220,35 +224,33 @@
     "passed": true,
     "failures": [],
     "top1": 0.9894612630208334,
-    "regret": 0.0005238850838698758,
+    "confident": 0.9965297860034702,
     "kl_p50": 8.281155121483112e-06,
     "kl_p99": 0.007143676778584773
    },
    "prefix on, depth 1": {
     "passed": false,
     "failures": [
-     "top1 0.9527 beyond 0.00644 of the baseline",
-     "confident 0.9609 beyond 0.00508 of the baseline",
-     "regret 0.04666 beyond 0.0157 of the baseline",
-     "kl_p50 0.002867 beyond 1e-05 of the baseline",
-     "kl_p99 0.6756 beyond 0.00714 of the baseline"
+     "top1 0.9527 beyond 0.00301 of the baseline",
+     "confident 0.9609 beyond 0.0025 of the baseline",
+     "kl_p50 0.00302 beyond 1.4e-05 of the baseline",
+     "kl_p99 0.6241 beyond 0.00714 of the baseline"
     ],
     "top1": 0.9526774088541666,
-    "regret": 0.04665629058581544,
-    "kl_p50": 0.002867313104615587,
-    "kl_p99": 0.6756218908412964
+    "confident": 0.9608607322028276,
+    "kl_p50": 0.0030204278950745097,
+    "kl_p99": 0.6241344308111153
    },
    "prefix on, depth 0": {
     "passed": false,
     "failures": [
-     "top1 0.951 beyond 0.00825 of the baseline",
-     "confident 0.9612 beyond 0.00704 of the baseline",
-     "regret 0.0304 beyond 0.00964 of the baseline",
-     "kl_p50 0.002405 beyond 1e-05 of the baseline",
+     "top1 0.951 beyond 0.00301 of the baseline",
+     "confident 0.9612 beyond 0.0025 of the baseline",
+     "kl_p50 0.002405 beyond 1.4e-05 of the baseline",
      "kl_p99 0.6856 beyond 0.00714 of the baseline"
     ],
     "top1": 0.9510091145833334,
-    "regret": 0.030400594080371473,
+    "confident": 0.9612049292560475,
     "kl_p50": 0.002405055503335895,
     "kl_p99": 0.6855854044145352
    },
@@ -256,7 +258,7 @@
     "passed": true,
     "failures": [],
     "top1": 0.9894205729166666,
-    "regret": 0.0005086262948073758,
+    "confident": 0.9966951708183583,
     "kl_p50": 8.488049937311489e-06,
     "kl_p99": 0.0071793187647001535
    }
@@ -266,42 +268,89 @@
     "passed": true,
     "failures": [],
     "top1": 0.9894612630208334,
-    "regret": 0.0005238850838698758,
+    "confident": 0.9965297860034702,
     "kl_p50": 8.281155121483112e-06,
     "kl_p99": 0.007143676778584773
    },
    "prefix on, depth 1": {
     "passed": false,
     "failures": [
-     "top1 0.9603 beyond 0.00544 of the baseline",
-     "confident 0.9615 beyond 0.00495 of the baseline",
-     "regret 0.4434 beyond 0.0501 of the baseline"
+     "top1 0.9603 beyond 0.00301 of the baseline",
+     "confident 0.9615 beyond 0.0025 of the baseline",
+     "kl_p50 9.514e-05 beyond 1.4e-05 of the baseline",
+     "kl_p99 7.59 beyond 0.00714 of the baseline"
     ],
     "top1": 0.9602864583333334,
-    "regret": 0.44340342272820027,
-    "kl_p50": 9.934143640500598e-06,
-    "kl_p99": 0.007437130796569801
+    "confident": 0.9615400301806762,
+    "kl_p50": 9.513775899802718e-05,
+    "kl_p99": 7.590245544566891
    },
    "prefix on, depth 0": {
     "passed": true,
     "failures": [],
     "top1": 0.989013671875,
-    "regret": 0.0008087158251631384,
+    "confident": 0.9953334709890563,
     "kl_p50": 1.1278514879850994e-05,
     "kl_p99": 0.007451811527181358
    },
    "prefix off, depth 1": {
     "passed": false,
     "failures": [
-     "top1 0.9592 beyond 0.00544 of the baseline",
-     "confident 0.9604 beyond 0.00506 of the baseline",
-     "regret 0.4557 beyond 0.0561 of the baseline"
+     "top1 0.9592 beyond 0.00301 of the baseline",
+     "confident 0.9604 beyond 0.0025 of the baseline",
+     "kl_p50 6.609e-05 beyond 1.4e-05 of the baseline",
+     "kl_p99 7.695 beyond 0.00714 of the baseline"
     ],
     "top1": 0.959228515625,
-    "regret": 0.4557485878249281,
-    "kl_p50": 8.488049937311489e-06,
-    "kl_p99": 0.0071793187647001535
+    "confident": 0.9603883653571574,
+    "kl_p50": 6.609381006366269e-05,
+    "kl_p99": 7.694732979620216
+   }
+  },
+  "rare-stale-device-token": {
+   "baseline": {
+    "passed": true,
+    "failures": [],
+    "top1": 0.9894612630208334,
+    "confident": 0.9965297860034702,
+    "kl_p50": 8.281155121483112e-06,
+    "kl_p99": 0.007143676778584773
+   },
+   "prefix on, depth 1": {
+    "passed": false,
+    "failures": [
+     "top1 0.9705 beyond 0.00301 of the baseline",
+     "confident 0.9776 beyond 0.0025 of the baseline",
+     "kl_p50 5.4e-05 beyond 1.4e-05 of the baseline",
+     "kl_p99 4.828 beyond 0.00714 of the baseline"
+    ],
+    "top1": 0.9704996744791666,
+    "confident": 0.9776353865233568,
+    "kl_p50": 5.400322859144304e-05,
+    "kl_p99": 4.828370417712985
+   },
+   "prefix on, depth 0": {
+    "passed": true,
+    "failures": [],
+    "top1": 0.989013671875,
+    "confident": 0.9953334709890563,
+    "kl_p50": 1.1278514879850994e-05,
+    "kl_p99": 0.007451811527181358
+   },
+   "prefix off, depth 1": {
+    "passed": false,
+    "failures": [
+     "top1 0.9709 beyond 0.00301 of the baseline",
+     "confident 0.9787 beyond 0.0025 of the baseline",
+     "kl_p50 4.365e-05 beyond 1.4e-05 of the baseline",
+     "kl_p99 4.244 beyond 0.00714 of the baseline"
+    ],
+    "top1": 0.9709065755208334,
+    "confident": 0.9787409700722394,
+    "kl_p50": 4.3652698274840776e-05,
+    "kl_p99": 4.24435019306576
    }
   }
- }
+ },
+ "commit": "a302e9ec5c16f4bf5cb8892fe011935abd67cd02"
 }
