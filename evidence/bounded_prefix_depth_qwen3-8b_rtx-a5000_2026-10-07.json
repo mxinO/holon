@@ -1,0 +1,113 @@
+{
+ "sessions": 48,
+ "turns": 4,
+ "system_len": 512,
+ "max_tokens": 128,
+ "results": {
+  "baseline": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": false,
+    "overlap": false
+   },
+   "top1": {
+    "value": 0.9894612630208334,
+    "se": 0.0007584414055905039,
+    "n": 24576
+   },
+   "confident": {
+    "value": 0.9965297860034702,
+    "se": 0.0003962370086807259,
+    "n": 24206
+   },
+   "regret": 0.0005238850838698758,
+   "tokens_saved": 0,
+   "margins": {
+    "top-1": 0.00268149530512851,
+    "confident top-1": 0.0025
+   },
+   "failures": [],
+   "passed": true
+  },
+  "prefix on, depth 1": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": true,
+    "overlap": true
+   },
+   "top1": {
+    "value": 0.988525390625,
+    "se": 0.0008378812175424932,
+    "n": 24576
+   },
+   "confident": {
+    "value": 0.9959087527894868,
+    "se": 0.0004395901485406688,
+    "n": 24198
+   },
+   "regret": 0.0007069905598958334,
+   "tokens_saved": 154752,
+   "margins": {
+    "top-1": 0.0028254184429308323,
+    "confident top-1": 0.0025
+   },
+   "failures": [],
+   "passed": true
+  },
+  "prefix on, depth 0": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": true,
+    "overlap": false
+   },
+   "top1": {
+    "value": 0.989013671875,
+    "se": 0.0008121600403250512,
+    "n": 24576
+   },
+   "confident": {
+    "value": 0.9953334709890563,
+    "se": 0.0004883597775398649,
+    "n": 24215
+   },
+   "regret": 0.0008087158251631384,
+   "tokens_saved": 161616,
+   "margins": {
+    "top-1": 0.002778080831274182,
+    "confident top-1": 0.0025
+   },
+   "failures": [],
+   "passed": true
+  },
+  "prefix off, depth 1": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": false,
+    "overlap": true
+   },
+   "top1": {
+    "value": 0.9894205729166666,
+    "se": 0.0007718158507884744,
+    "n": 24576
+   },
+   "confident": {
+    "value": 0.9966951708183583,
+    "se": 0.00038169140928337225,
+    "n": 24207
+   },
+   "regret": 0.0005086262948073758,
+   "tokens_saved": 0,
+   "margins": {
+    "top-1": 0.0027052415248486087,
+    "confident top-1": 0.0025
+   },
+   "failures": [],
+   "passed": true
+  }
+ },
+ "passed": true,
+ "model": "Qwen/Qwen3-8B",
+ "dtype": "bfloat16",
+ "hardware": "NVIDIA RTX A5000",
+ "torch": "2.11.0+cu130"
+}
