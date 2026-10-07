@@ -1,10 +1,11 @@
 """Per-step device inputs without host synchronization (design §7.3, §7.4).
 
 Every per-step input lives at a fixed offset of one static device arena, so its address is stable for graph capture.
-A step writes its inputs into a pinned host arena with plain memory copies and `end()` moves the whole arena to the
-device with one asynchronous copy. Two host arenas alternate, and an event per arena guards its reuse, so preparing
-step N+1 never waits for step N's copy unless it is still pending. Device work that reads staged inputs is queued with
-`after()` and runs once the copy is enqueued.
+A step writes its inputs into a pinned host arena with plain memory copies and `end()` moves exactly the written byte
+ranges to the device (ranges a small gap apart are merged, so a step costs a copy or two). Fields the device computes
+itself are never written, so never copied. Two host arenas alternate, and an event per arena guards its reuse, so
+preparing step N+1 never waits for step N's copy unless it is still pending. Device work that reads staged inputs is
+queued with `after()` and runs once the copy is enqueued.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ import torch
 from . import platform
 
 _ALIGN = 64
+_MERGE_GAP = 4096        # bytes: copying a small unwritten gap is cheaper than another copy launch
 
 
 class Uploader:
@@ -32,7 +34,7 @@ class Uploader:
         self._host = [{name: self._view(arena, name).numpy() for name in fields} for arena in self._host_arenas]
         self._done = [platform.Event(device), platform.Event(device)]
         self._after: list[Callable[[], None]] = []
-        self._used = 0
+        self._written: list[tuple[int, int]] = []
         self._turn = 0
 
     def _view(self, arena: torch.Tensor, name: str) -> torch.Tensor:
@@ -43,14 +45,15 @@ class Uploader:
         """Start a step: switch to the other host arena once its previous copy has landed."""
         self._turn ^= 1
         self._done[self._turn].synchronize()
-        self._used = 0
+        self._written.clear()
 
     def put(self, name: str, values: np.ndarray) -> torch.Tensor:
         """Stage `values`; returns the device view that holds them once `end()` has run."""
         n = len(values)
         self._host[self._turn][name][:n] = values
         offset, _, dtype = self._layout[name]
-        self._used = max(self._used, offset + n * dtype.itemsize)
+        if n:
+            self._written.append((offset, offset + n * dtype.itemsize))
         return self.dev[name][:n]
 
     def after(self, fn: Callable[[], None]) -> None:
@@ -58,9 +61,20 @@ class Uploader:
         self._after.append(fn)
 
     def end(self) -> None:
-        if self._used:
-            self._device_arena[: self._used].copy_(self._host_arenas[self._turn][: self._used], non_blocking=True)
+        host = self._host_arenas[self._turn]
+        for lo, hi in _merged(self._written):
+            self._device_arena[lo:hi].copy_(host[lo:hi], non_blocking=True)
         self._done[self._turn].record()
         for fn in self._after:
             fn()
         self._after.clear()
+
+
+def _merged(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    out: list[list[int]] = []
+    for lo, hi in sorted(ranges):
+        if out and lo - out[-1][1] <= _MERGE_GAP:
+            out[-1][1] = max(out[-1][1], hi)
+        else:
+            out.append([lo, hi])
+    return [(lo, hi) for lo, hi in out]

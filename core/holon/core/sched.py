@@ -99,7 +99,8 @@ class Scheduler:
         for seq in list(self.running):
             if seq.status is not Status.RUNNING or seq not in ready:     # preempted, finishing, or waiting on a commit
                 continue
-            if seq.num_computed + 1 + k <= capacity.get(seq.slot, -1) or self._fit(seq, 1 + k):   # fits: no call
+            # StateManager.reserve's own fast path, inline: no call for the many rows whose units already fit.
+            if seq.num_computed + 1 + k <= capacity.get(seq.slot, -1) or self._fit(seq, 1 + k):
                 rows.append((seq, 1 + k, 1 + k if k else 1))
             else:
                 self._preempt(seq)

@@ -87,7 +87,8 @@ class Payload:
 
 
 class SeqView(Protocol):
-    """Read-only view of one request, as state kinds see it."""
+    """Read-only view of one request, as state kinds see it. `tokens` and `units()` are the live lists (no copies,
+    this runs per request per step): kinds must not mutate them."""
 
     slot: int
     num_computed: int            # host mirror (upper bound while a step is in flight)
