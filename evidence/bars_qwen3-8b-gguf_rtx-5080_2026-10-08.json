@@ -39,9 +39,10 @@
       7987.23,
       7974.73,
       8004.17
-     ]
+     ],
+     "median_reps_2_5": 7995.7
     },
-    "ratio": 1.057
+    "ratio": 1.037
    },
    "tg128": {
     "holon": {
@@ -65,7 +66,8 @@
       158.65,
       158.62,
       158.63
-     ]
+     ],
+     "median_reps_2_5": 158.64
     },
     "ratio": 0.977
    },
@@ -91,7 +93,8 @@
       157.2,
       157.2,
       157.23
-     ]
+     ],
+     "median_reps_2_5": 157.2
     },
     "ratio": 0.977
    },
@@ -141,9 +144,10 @@
       8140.98,
       8103.04,
       8094.57
-     ]
+     ],
+     "median_reps_2_5": 8122.01
     },
-    "ratio": 1.078
+    "ratio": 1.058
    },
    "tg128": {
     "holon": {
@@ -167,9 +171,10 @@
       211.87,
       211.92,
       211.87
-     ]
+     ],
+     "median_reps_2_5": 211.88
     },
-    "ratio": 0.973
+    "ratio": 0.972
    },
    "tg128 @ d256": {
     "holon": {
@@ -193,9 +198,10 @@
       209.51,
       209.5,
       209.49
-     ]
+     ],
+     "median_reps_2_5": 209.5
     },
-    "ratio": 0.971
+    "ratio": 0.97
    },
    "pp512 @ d256": {
     "holon": null,
@@ -213,5 +219,6 @@
    }
   }
  },
- "result": "Both bars pass with margin: prefill above llama.cpp (Q4_K_M 1.06x, UD-IQ3_XXS 1.08x at pp512), decode within 3% (tg128 0.977x and 0.972x; the same at depth 256). Host CPU 0.33-0.37 ms per decode step (blocking sync)."
+ "result": "Both bars pass with margin: prefill above llama.cpp (pp512 1.04x Q4_K_M, 1.06x UD-IQ3_XXS), decode within 3% (tg128 0.977x and 0.972x; the same at depth 256). Host CPU 0.33-0.37 ms per decode step (blocking sync).",
+ "comparison": "ratio = Holon mean (warm-up run excluded) / llama-bench median of repetitions 2-5: llama-bench's first repetition is its warm-up (about 10% slow at pp512), which its mean includes"
 }

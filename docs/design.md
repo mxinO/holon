@@ -626,8 +626,8 @@ Adopted kernels, decided by the M0 spikes (evidence and raw numbers in `spikes/s
   **Built in M0.1** (`kernels.ggml_cuda`): llama.cpp `51ce9c11` vendored with a mechanical `vendor.patch` (bf16
   activations in, bf16 or f32 out, no environment reads), 18 types, `mmvq` up to llama.cpp's row threshold and `mmq`
   in 512-row chunks above it, the q8_1 workspace declared to the ledger, no weight padding (`in` % 256 = 0; checked
-  under compute-sanitizer). On the RTX 5080 Qwen3-8B Q4_K_M prefills at 1.06× and decodes at 0.98× llama.cpp
-  (UD-IQ3_XXS: 1.08×, 0.97×).
+  under compute-sanitizer). On the RTX 5080 Qwen3-8B Q4_K_M prefills at 1.04× and decodes at 0.98× llama.cpp
+  (UD-IQ3_XXS: 1.06×, 0.97×).
   Reference dequantization: llama.cpp's gguf-py.
 - **GDN** (spike S3): vendored subset of vLLM's flash-linear-attention copy (commit `6dd813e0`, 14 files,
   ≈ 2.75k code lines, Apache-2.0 over MIT), rebuilt by `vendor.sh` + `vendor.patch`: `vllm.*` imports and env
