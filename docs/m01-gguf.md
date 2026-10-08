@@ -202,7 +202,7 @@ layouts (the Q4_K/Q5_K min-term from the unquantized sum `ds8.y`, `vecdotq.cuh:5
 - *Inputs*: real tensors; random-byte blocks for every type with realistic fp16 `d`/`dmin` (negative, zero,
   subnormal, ≤ 1); activation rows all-zero and with one large outlier; `in` ∈ {768, 2304, 4096, 12288} with
   poisoned bytes past the tensor; `out` not a multiple of the mmq tile.
-- *Rows* per (type, cc) from `ggml_cuda_should_use_mmvq`: {1, t, t+1, 8, 9, 64, 128, 256, 512, `max_step_tokens`};
+- *Rows* per (type, cc) from `ggml_cuda_should_use_mmvq`: {1, t, t+1, 8, 9, 64, 128, 256, 512, 513, 1025, `max_step_tokens`} (513 and 1025 exercise the 512-row chunk remainder);
   stream-k with and without fixup.
 - *Checks*: `qlinear` vs the q8_1-emulated reference of the path taken, per element with `l0.check(bf16, in)` (the
   bf16 budget absorbs the fp16 `d` and fast-math rounding; it catches a single wrong row or block); NMSE ≤ 5e-4 vs
