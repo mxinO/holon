@@ -615,9 +615,11 @@ class Engine:
         accepts = iter(step.accepts.tolist() if step.accepts is not None else [])
         lps = None if step.logprobs is None else [t.tolist() for t in step.logprobs]
         deltas, row = [], 0
+        index, chains, finished = self.state.index, self.state.chain, Status.FINISHED
+        block = index.block if index is not None else 0
         for seq, _, m in step.rows:
             if not m:
-                if seq.status is not Status.FINISHED and self._completes_block(seq):
+                if seq.status is not finished and self._completes_block(seq):
                     self.state.publish(seq)
                 continue
             at = row
@@ -629,7 +631,7 @@ class Engine:
                     seq.num_computed -= m - 1 - accepted
             row += m
             seq.pending -= m
-            if seq.status is Status.FINISHED:      # finished at an earlier commit; this row was extra
+            if seq.status is finished:             # finished at an earlier commit; this row was extra
                 continue
             if m == 1:                               # the common case, without the per-token loop
                 out = [tokens[at]]
@@ -642,7 +644,9 @@ class Engine:
                     out.append(token)
                     if reason := self._finish_reason(seq, token):
                         break
-            if self._completes_block(seq):
+            # _completes_block, inline: this runs per row per step
+            if block and (chain := chains.get(seq.slot)) is not None and \
+                    min(seq.num_computed, len(seq.tokens)) // block > len(chain):
                 self.state.publish(seq)
             if self._siblings:
                 for sibling in reversed(self._siblings.pop(seq, [])):     # its prompt is cached now
@@ -656,8 +660,8 @@ class Engine:
                     self._live.pop(seq.rid, None)
             k = seq.params.logprobs                  # logprob requests are never drafted: one token per row
             logprobs = None if k is None else Logprobs([lps[0][at]], [lps[1][at][:k]], [lps[2][at][:k]])
-            deltas.append(TokenDelta(seq.rid, out, index=seq.index, logprobs=logprobs,
-                                     prompt_logprobs=self._prompt_lp.pop(seq, None), finish_reason=reason))
+            prompt_lp = self._prompt_lp.pop(seq, None) if self._prompt_lp else None
+            deltas.append(TokenDelta(seq.rid, out, seq.index, logprobs, prompt_lp, reason))
         return deltas
 
     def _completes_block(self, seq: Seq) -> bool:
