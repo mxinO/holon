@@ -14,7 +14,8 @@ from tokenizers import AddedToken, Regex, Tokenizer, decoders, models, normalize
 
 CONTROL, USER_DEFINED = 3, 4                     # llama.cpp token types
 
-_PRE = {   # tokenizer.ggml.pre -> (normalizer, split regex), as in the original tokenizer.json
+_PRE = {   # tokenizer.ggml.pre -> (normalizer, split regex), copied from the model's own tokenizer.json
+          # (qwen2: Qwen2/Qwen3, Apache-2.0)
     "qwen2": (normalizers.NFC(), r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}"
                                  r"| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"),
 }

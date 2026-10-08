@@ -19,4 +19,4 @@ platforms = ["cuda"]
 source = "https://github.com/ggml-org/llama.cpp"
 commit = "51ce9c11a6f2dfa895696c0048c4333e8953b728"
 license = "MIT"
-files = ["vendor/", "vendor.patch", "SHA256SUMS", "vendor.sh"]
+files = ["vendor/", "vendor.patch", "SHA256SUMS", "vendor.sh", "csrc/shim.cu", "csrc/api.cu"]   # csrc: adapted

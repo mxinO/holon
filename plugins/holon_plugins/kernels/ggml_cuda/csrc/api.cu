@@ -1,5 +1,8 @@
 // The C API (ggml_cuda_api.h): llama.cpp's own entry points, called with ggml tensors built on the stack over the
 // caller's pointers, a context that borrows the caller's stream and a pool over the caller's workspace.
+//
+// The dispatch rules and the mmq schedule mirror llama.cpp 51ce9c11 (ggml/src/ggml-cuda/ggml-cuda.cu, mmq.cuh,
+// mmq.cu), MIT License, Copyright (c) 2023-2026 The ggml authors; the license is in ../vendor/LICENSE.
 #include "ggml_cuda_api.h"
 
 #include "common.cuh"

@@ -1,5 +1,8 @@
 // What the vendored llama.cpp kernels need from the rest of ggml (ggml-base, ggml-cuda.cu), and nothing more:
 // type traits and tensor helpers, logging/abort, the device table, and the backend context's destructor.
+//
+// Adapted from ggml in llama.cpp 51ce9c11 (ggml/src/ggml.c, ggml/src/ggml-cuda/ggml-cuda.cu), MIT License,
+// Copyright (c) 2023-2026 The ggml authors; the license is in ../vendor/LICENSE.
 #include "common.cuh"
 
 #include <cstdarg>
