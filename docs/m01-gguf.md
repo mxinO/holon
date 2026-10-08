@@ -58,8 +58,8 @@ oracle/L0 tests that pin the references — get them from a fixture plugin `plug
 - `build_model` builds on meta without `to_empty`.
 - `load_weights`: a dense value is copied into a device tensor bound in place (`param.data = …`, the Parameter
   object kept); a `QTensor` value goes to `owner.adopt(ctx, leaf_name, qtensor)` on the owning module, which uploads
-  the parts as its own uint8 parameters (rows padded to 512 elements as llama.cpp does, tail zeroed), records the
-  layout and selects its kernel. No `adopt`, or `False`: load error naming path, unit and layout. A parameter still
+  the parts as its own uint8 parameters (rows padded to 512 elements as llama.cpp does, tail zeroed), and records the
+  layout (the kernel is selected in `finalize_weights`, §4.3). No `adopt`, or `False`: load error naming path, unit and layout. A parameter still
   on meta afterwards: "not loaded". `WeightRule.transform` on a `QTensor`: error.
 - The core never iterates parts or knows formats; `QTensor` is a loader-time value. Several checkpoint tensors per
   parameter (GPTQ/AWQ, v1) are grouped by their source; M0.2 expert stacks are one 3-D `QTensor`.
@@ -119,10 +119,11 @@ and L0 call gguf-py directly.
   `embedding_length`, `feed_forward_length`, `attention.head_count{,_kv}`, `attention.key_length`, `rope.freq_base`,
   `attention.layer_norm_rms_epsilon`, `context_length`, vocab from the token table, tie = no `output.weight`), floats
   at their shortest float32 form (`9.999999974752427e-07` → `1e-06`), plus the raw arch-prefixed keys under `"gguf"`
-  for model-specific mapping in the model plugin (M0.2/M0.3), which also supplies the fields GGUF never carries
-  (`hidden_act`, `attention_bias`, …) for its architecture. A key the recipe needs and the file lacks: error. Test
+  for model-specific mapping in the model plugin (M0.2/M0.3). Fields GGUF never carries need no defaults for Qwen3
+  (its recipe reads `attention_bias`/`use_sliding_window` with `c.get` and never reads `hidden_act`); later models
+  supply theirs in their GGUF mapping. A key the recipe needs and the file lacks: error. Test
   (tests only): the GGUF-derived config equals HF's `config.json` on every field the recipe reads.
-- **Tokenizer** (D3): `tokenizer()`, `stop_ids()`, `chat_template()`. Tests with the cached `Qwen/Qwen3-8B` (tests
+- **Tokenizer** (D3): `tokenizer()`, `chat_template()`, and the stop set in `eos_token_ids`. Tests with the cached `Qwen/Qwen3-8B` (tests
   only): every CONTROL/USER_DEFINED string encodes to its own id (their special flag is not compared: the fim/repo
   tokens are CONTROL in GGUF but non-special in HF); `encode` equals HF's and round-trips on the judge prompts and an
   adversarial set (whitespace runs, CRLF, long digit runs, CJK, emoji, NBSP, contractions, special tokens in text,
