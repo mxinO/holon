@@ -7,6 +7,7 @@ for c in check_core_denylist.py check_core_loc.py check_no_env.py check_torch_cu
   python3 "$c" || rc=1
 done
 (cd ../.. && ruff check core std plugins judge tools testing scripts bench) || rc=1
+bash ../../plugins/holon_plugins/kernels/ggml_cuda/vendor.sh --check || rc=1   # vendored llama.cpp = upstream + patch
 bash check_core_diff.sh "${1:-origin/main}" || true
 if command -v lint-imports >/dev/null; then (cd ../.. && lint-imports) || rc=1; else echo "skip import contracts (import-linter not installed)"; fi
 exit $rc

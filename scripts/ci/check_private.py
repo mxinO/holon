@@ -11,6 +11,8 @@ import subprocess
 from _common import ROOT, fail
 
 GENERIC = [r"/home/[\w.-]+", r"/Users/[\w.-]+", r"/scratch[\w.-]*/"]
+# Upstream files pinned by their SHA256SUMS (public URLs can match the patterns); our patches on them are checked.
+VENDORED = ("plugins/holon_plugins/kernels/ggml_cuda/vendor/",)
 
 
 def _patterns() -> re.Pattern[str]:
@@ -23,7 +25,7 @@ def _patterns() -> re.Pattern[str]:
 def _files() -> list[str]:
     out = subprocess.run(["git", "ls-files", "-co", "--exclude-standard", "-z"], cwd=ROOT, capture_output=True,
                          check=True).stdout
-    return [f for f in out.decode().split("\0") if f and (ROOT / f).is_file()]
+    return [f for f in out.decode().split("\0") if f and (ROOT / f).is_file() and not f.startswith(VENDORED)]
 
 
 pat = _patterns()
