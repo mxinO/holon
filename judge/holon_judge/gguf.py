@@ -127,7 +127,9 @@ def _place(model: torch.nn.Module, device: str) -> torch.nn.Module:
     import accelerate
 
     layer = type(model.model.layers[0]).__name__
-    placement = accelerate.infer_auto_device_map(model, no_split_module_classes=[layer])
+    budget = {i: int(0.7 * torch.cuda.get_device_properties(i).total_memory)        # room for activations
+              for i in range(torch.cuda.device_count())}
+    placement = accelerate.infer_auto_device_map(model, max_memory=budget, no_split_module_classes=[layer])
     return accelerate.dispatch_model(model, placement)
 
 
