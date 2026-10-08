@@ -1,6 +1,6 @@
 # M0.2 — Mixture of experts on a 16 GB card: design and implementation plan
 
-Status: **revision 3, for review** (2026-10-08). Revisions 1 and 2 were challenged by three reviewers
+Status: **revision 3.1, for review** (2026-10-08). Revisions 1 and 2 were challenged by three reviewers
 (architecture/API, kernels/performance, numerics/judge); §8 maps every finding to its resolution. Scope: plan §5. Builds on M0.1
 (`docs/m01-gguf.md`: the GGUF source, `kernels.ggml_cuda`, the judge's tiers) and spike S2 (MoE sections).
 
@@ -124,7 +124,7 @@ class MoE(nn.Module):                      # unit.std.moe@1(experts, top_k, inte
 ```
 
 `ExpertLinear` mirrors `Linear`: `adopt` takes a quantized `(E, out, in)` stack, `merge(gate, up)` interleaves the two
-per expert (`view(E, out, rb)` concatenated on dim 1, layer by layer at load) into a unit that carries `glu =
+per expert (`view(E, out, rb)` concatenated on dim 1, in `finalize_weights`, one layer at a time) into a unit that carries `glu =
 "swiglu"`, and `bind_kernels` selects `qlinear_experts` with its facts after merges. A dense stack has no path:
 `bind_kernels` fails at startup naming the unit and layout. The unit's chunk bounds memory; the kernel chunks at its
 own 512 too (any T, as `qlinear`) and picks the path per chunk, as llama.cpp does per ubatch: a 513-token step runs
@@ -148,7 +148,10 @@ one mmq chunk and one mmvq chunk.
   no module state, no switch).
 - Graph safety: no host sync; grids fixed by (T, E, k, out); per-type mmq instances and attributes are set on the
   eager warm-up run each graph key gets before capture. Padding rows get unique in-range ids from `moe_topk`, which
-  both kernels require (an invalid id reads out of bounds on mmvq; a duplicate leaves a compacted row unwritten).
+  both kernels require: an invalid id reads out of bounds on mmvq; a duplicate *inside a row* shifts mmq's
+  `expert_bounds` (`nex_prev` counts slots, the compaction counts each token once per expert), leaving a stale
+  compacted row whose leftover workspace entries can write over another token's output. Rows sharing experts with
+  other rows are ordinary routing.
 - Padding cost: a padding row routes to 8 more experts (≈ 16 MB of expert reads per layer at IQ3). Batch-1 decode
   (tg128) is never padded; serving batches 3, 5–7 pay it. Measured in step 5; the remedy, finer graph buckets for MoE
   models, is a core change and waits for that measurement.
@@ -187,7 +190,10 @@ kernels (with the wait rule of §4.3), finer graph buckets for MoE (core).
   built from `std/holon_std/moe/reference.py`'s functions at the reviewed commit (as `ref_kernels` uses the std
   references) — router F32 with f32 logits, expert outputs, SwiGLU and down input in f32, combine in f32 in slot
   order, bf16 out — so the floor is no looser than the engine and D3 is defined once. HF stays the golden. The pure-HF
-  bf16 floor is recorded for information only.
+  bf16 floor is recorded for information only. The floor and Tier A's candidate now share those reference functions,
+  so a reference bug would inflate both: floors are recorded only at a reference commit where step 1's oracle test
+  and Tier A's sanity ceiling pass, carry `reference.py`'s hash in their meta (a change invalidates them), and are
+  predicted to sit at or below the pure-HF floor's KL p99 (a looser one is suspect).
 - **Tier A — assembly**, on the CPU in fp32: the production `gguf` source and `testing.ref_kernels` (references for
   every op, dequantizing with gguf-py), so adoption, the per-expert merge and kernel binding are covered too. Peak
   ≈ 140 GB (the references' fp32 cache ≈ 122 GB plus the blocks), run apart from the golden.
@@ -206,9 +212,8 @@ kernels (with the wait rule of §4.3), finer graph buckets for MoE (core).
   SwiGLU kernel matches an f64 reference within the fp32 budget (fails for a bf16 SwiGLU cast to f32); expert
   outputs are f32; `qlinear_experts` binds `act_dtype` bf16 with f32 output.
 - **Graphs vs eager**: `holon_judge bounded` with `cuda_graphs` on vs off on MoE decode at batch 3 and 5 (padded,
-  mmvq) and 12 and 20 (padded to 16 and 32: mmq, where a duplicate id would leave a row unwritten). Its KL is scored
-  eagerly, so its sensitivity to replay comes from greedy agreement; a plant giving padding rows the ids of a real
-  row is predicted to fail it.
+  mmvq) and 12 and 20 (padded to 16 and 32: mmq). Its KL is scored eagerly, so its sensitivity to replay comes from
+  greedy agreement.
 - **L0** (sm_86, sm_89, sm_120a): `qlinear_experts` per type, path and `glu` vs the q8_1-emulated reference per
   element (`l0.check(bf16)`); the merged stack vs two separate stacks with `glu = "none"` (bit-exact on mmvq and on mmq
   without fixup), and the fused mmvq SwiGLU vs ours within the fp32 budget;
@@ -229,7 +234,10 @@ kernels (with the wait rule of §4.3), finer graph buckets for MoE (core).
     compacted buffer; fires counted per path), and the rare variant reported.
   - L0 must fail: down reading `x[t, 0]` (R confused); an id offset in the compaction.
   - Precision test must fail: router logits in bf16 (L2 predicted at ≤ 1.2× the floor's KL p99, recorded).
-  - Graphs-vs-eager must fail: padding rows given a real row's ids.
+  - L0 must fail, deterministically: padding rows with all k slots on one expert, the `ggml_cuda.id` workspace
+    pre-filled with a real row's index — real rows change on mmq, stay unchanged on mmvq.
+  - Graphs-vs-eager, the same plant: predicted to fail at batches 12 and 20 (mmq) and pass at 3 and 5 (mmvq); a pass on
+    mmq is recorded with its cause (the stale entries are not controlled there).
 - **Quantization error**, reported: the file's (dequantized golden vs the bf16 checkpoint's fp32 golden, pinned
   revision) and the engine's (engine vs that golden), with top-k flip rates.
 
@@ -310,3 +318,10 @@ the logits (§4.3); 3 our SwiGLU on `ggml_cuda_op_silu_single` (§4.3); 4 combin
 graphs vs eager on mmq too, with a padding plant (§4.6); 2 the prefill floor's path per chunk (§4.6); 3 SwiGLU vs
 f64 (§4.6); 4 bit-exactness on `glu = "none"` (§4.6); 5 the near-threshold layer fixed, the merge plant in Tier A,
 the bf16-router prediction (§4.6); 6 the gate's memory and per-expert slices, Tier A's peak (§4.6).
+
+Revision 3 re-review. Architecture/API: clean (the merge's timing worded as `finalize_weights`, §4.2).
+Kernels/performance and numerics/judge, the same finding: a padding row sharing a real row's ids is harmless; the
+hazard is a duplicate inside a row → reason restated (§4.3), the plant moved to L0, deterministic, and kept in
+graphs-vs-eager with per-path predictions (§4.6). Numerics/judge: the floor and Tier A share the references → floors
+recorded only after step 1's oracle and the ceiling pass, the reference hash in their meta, predicted ≤ the pure-HF
+floor (§4.6).
