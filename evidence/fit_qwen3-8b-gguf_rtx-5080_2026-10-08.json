@@ -1,0 +1,25 @@
+{
+ "question": "Do both Qwen3-8B GGUF files serve with >= 64K KV tokens on a 16 GB RTX 5080 (M0.1 acceptance 6, design §4.7)?",
+ "date": "2026-10-08",
+ "gpu_class": "rtx-5080",
+ "gpu": "NVIDIA GeForce RTX 5080, 15.56 GiB",
+ "commit": "2a50258",
+ "settings": "memory_fraction 0.98, max_step_tokens 2048, page_size 16, bf16 KV (144 KiB/token); max_seqs 64, stepped down to 48 for Q4_K_M on the measured shortfall below",
+ "breakdown_gib_q4_k_m": {
+  "note": "max_model_len 8192; the engine sizes KV as 0.98 x free memory after weights - worst-step peak - CUDA-graph pool",
+  "total": 15.56, "weights": 4.68, "cuda_context_and_libraries": 0.91, "free_after_weights": 9.97,
+  "by_max_seqs": {
+   "64": {"worst_step_peak": 0.47, "graph_pool": 0.50, "kv_tokens": 64112},
+   "48": {"worst_step_peak": 0.35, "graph_pool": 0.38, "kv_tokens": 65840},
+   "32": {"worst_step_peak": 0.31, "graph_pool": 0.26, "kv_tokens": 67056}},
+  "max_step_tokens_1024_or_1536": "no change (64112 KV tokens at max_seqs 64): the peak is the sampling step over every slot, not the prefill"
+ },
+ "runs": [
+  {"file": "Qwen3-8B-UD-IQ3_XXS.gguf", "max_seqs": 64, "max_model_len": 65536, "kv_tokens": 75392, "kv_gib": 10.35,
+   "weights_gib": 3.17, "served": "63488-token prompt + 64 tokens, 21.0 s", "max_allocated_gib": 14.19},
+  {"file": "Qwen3-8B-Q4_K_M.gguf", "max_seqs": 64, "max_model_len": 65536, "result": "OutOfUnits: 8.768 GiB budget, KV needs 4097 pages of 16 tokens, 3990 fit"},
+  {"file": "Qwen3-8B-Q4_K_M.gguf", "max_seqs": 48, "max_model_len": 65536, "kv_tokens": 65552, "kv_gib": 9.0,
+   "weights_gib": 4.68, "served": "63488-token prompt + 64 tokens, 21.4 s", "max_allocated_gib": 14.23}
+ ],
+ "result": "Both files serve 64K-token contexts on the RTX 5080: UD-IQ3_XXS at max_seqs 64 (75K KV tokens), Q4_K_M at max_seqs 48 (65.5K). The design's estimate of the graph pool (0.25 GiB) was low: 0.50 GiB at 64 decode buckets."
+}

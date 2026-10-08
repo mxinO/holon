@@ -387,7 +387,7 @@ class ModelPlugin(Protocol):
     def spec(self, cfg, par: ParallelInfo) -> ModelSpec   # = recipe(cfg) + sharding from ParamSpec/ParallelInfo
     def build(self, cfg, ctx: BuildCtx) -> Module    # uses ctx.mixer(...), ctx.op(...)
     def weights(self, src: WeightSource) -> Iterator[ParamLoad]   # name mapping lives here
-    def bundle(self) -> FrontendBundle               # tokenizer, chat template, reasoning/tool parsers
+    def bundle(self, source) -> FrontendBundle       # tokenizer, chat template, parsers of this checkpoint
 
 @dataclass
 class ModelSpec:
@@ -422,11 +422,14 @@ class ModelSpec:
   `repeat_interleave` when tiled, and `out_proj`'s input activations are permuted rather than its packed weights),
   and norm offset / `A_log` handling follow the source. A second weight source can feed `draft_heads` (e.g. a
   separate MTP GGUF file).
-- **GGUF tokenizer, template, config.** The HF base model's tokenizer is used, with a load-time check that the GGUF
-  token table matches it (hash of tokens + special ids). A chat template embedded in the GGUF takes precedence (GGUF
-  publishers often ship fixed templates); differences from HF are logged. The HF `config.json` is authoritative for
-  fields GGUF metadata lacks (e.g. `mrope_section`, `partial_rotary_factor`) and is cross-checked against GGUF
-  metadata. `mmproj-*.gguf` is ignored when `text_only`; v1 VLM support loads it as the encoder's weight source.
+- **GGUF is self-contained (M0.1 D3), as in llama.cpp.** The file alone gives the configuration (`<arch>.*`
+  keys mapped to the HF keys recipes read), the tokenizer (BPE over `tokenizer.ggml.tokens/merges`; the
+  pre-tokenizer chosen by `tokenizer.ggml.pre` from llama.cpp's table, e.g. `qwen2` with NFC; CONTROL tokens
+  special, USER_DEFINED atomic), the chat template and the stop set (eos/eot plus llama.cpp's end-of-turn texts).
+  No HF base model is needed; tests check tokenization, templates (agent transcripts with tools and reasoning) and
+  the stop set against the HF checkpoint the file was made from. Fields a future architecture's GGUF lacks (e.g.
+  `mrope_section`) come from a per-architecture table in its weight map, not from an HF download.
+  `mmproj-*.gguf` is ignored when `text_only`; v1 VLM support loads it as the encoder's weight source.
 - **Derivation = copy with lineage.** A new model copies an existing recipe and records `derived_from`; there is
   no model-to-model link or inheritance (e.g. Qwen3.5 differs from Qwen3 in ~10 recipe lines: GDN mixer for
   linear layers, `output_gate=True`, `rotary_dim=64`, `rmsnorm offset=1.0`, MTP draft head). `git diff` against
@@ -574,6 +577,16 @@ def to_mmq_tiles(q: QTensor, *, shard: ShardInfo) -> QTensor: ...   # GGUF kerne
 - Post-repack artifacts are cached on disk keyed by `(source hash, layout, converter version, sm)` (v1).
 - KV cache formats are Layouts too, so attention kernels and state kinds negotiate page size/dtype via layouts.
 
+**As built (M0.1).** Weight sources are detected from manifest `[support] detect` patterns (`config.json`,
+`*.gguf`), so no plugin is imported to decide. The model is built on the meta device; `load_weights` swaps each dense
+parameter in place and hands each `QTensor` to the unit owning the parameter (`adopt(ctx, name, qtensor)`), which
+stores it in its own form or refuses (a load error naming unit and layout); the core never looks inside a layout.
+GGUF tensors keep their stored blocks (`Layout(Scheme("ggml.<type>"), "gguf.native")`): llama.cpp's kernels read
+them directly, so v0 has no Dialect and no converter for GGUF. Units bind the kernel of the layout they adopted in
+`bind_kernels`, after merges: same-type q/k/v and gate/up concatenate by rows (ggml rows are independent block
+runs) and run as one quantized matmul; a v of another type stays apart. A tied quantized head reads the
+embedding's blocks.
+
 ### 5.6 Borrowed-kernel adoption rule (D3)
 
 A third-party kernel is wrapped as a kernel plugin only if **all** hold; otherwise we write our own (Triton first):
@@ -609,7 +622,12 @@ Adopted kernels, decided by the M0 spikes (evidence and raw numbers in `spikes/s
   workspaces (≈ 5 developer-days; same code as the baseline, so parity is direct). The SGLang-carried set was
   measured and not adopted: it decodes IQ3_S with an obsolete grid (4.3% of weights wrong) and is far behind
   llama.cpp for multi-row decode (0.2–0.8×) and batched/MoE prefill (0.05–0.45×). Types needed for the unsloth UD
-  builds: Q8_0, Q3_K–Q6_K, IQ4_XS, IQ3_XXS, IQ3_S, IQ2_S, IQ2_XS. A tied `lm_head` is dequantized in chunks.
+  builds: Q8_0, Q3_K–Q6_K, IQ4_XS, IQ3_XXS, IQ3_S, IQ2_S, IQ2_XS.
+  **Built in M0.1** (`kernels.ggml_cuda`): llama.cpp `51ce9c11` vendored with a mechanical `vendor.patch` (bf16
+  activations in, bf16 or f32 out, no environment reads), 18 types, `mmvq` up to llama.cpp's row threshold and `mmq`
+  in 512-row chunks above it, the q8_1 workspace declared to the ledger, no weight padding (`in` % 256 = 0; checked
+  under compute-sanitizer). On the RTX 5080 Qwen3-8B Q4_K_M prefills at 1.06× and decodes at 0.98× llama.cpp
+  (UD-IQ3_XXS: 1.08×, 0.97×).
   Reference dequantization: llama.cpp's gguf-py.
 - **GDN** (spike S3): vendored subset of vLLM's flash-linear-attention copy (commit `6dd813e0`, 14 files,
   ≈ 2.75k code lines, Apache-2.0 over MIT), rebuilt by `vendor.sh` + `vendor.patch`: `vllm.*` imports and env
@@ -873,6 +891,9 @@ def commit(self, h):                                                    # CPU af
     for r in self.rewindables: r.host_commit(h.view)                    # frees, ledger trims
     finish/stop/stream; apply deferred frees; apply control-plane requests
 ```
+
+A step whose rows all stop mid-prompt (chunked prefill) samples nothing: it runs the trunk, which writes their state
+(and prompt logprobs, when asked), and no head.
 
 `inflight_depth` = the maximum number of uncommitted steps when the scheduler runs:
 
