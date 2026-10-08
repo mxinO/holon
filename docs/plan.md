@@ -234,6 +234,11 @@ Carried into M0.1 and later:
   current lock" (needs L2 metrics in the lock); the engine/supervisor starting from the newest lock.
 - Graph replay with logprobs (logprob steps run eagerly at depth 1) and the graph-vs-eager bounded comparison.
 - rtx-5080 lock (M0.1, per §3.4 item 7).
+- Watch: one rtx-4090 lock run failed with a CUDA "unknown error" in FlashInfer `silu_and_mul` during memory
+  profiling (the largest prefill); the same step ran cleanly on another rtx-4090 node and in two earlier runs, so it
+  was taken as a node fault. A recurrence would point at the kernel (an out-of-bounds access) instead.
+- The two agent-trace records at ee12f42 carry `-dirty`: an earlier run in the same worktree had rewritten a tracked
+  evidence file (no code changed); `bench/run.py` now ignores `evidence/` when judging dirtiness.
 - Prefix eviction in O(1): an ordered set of evictable leaves (eviction now scans from the LRU end, which stays
   cheap while unused leaves sit there; long contexts with many pinned blocks would make the scan long).
 

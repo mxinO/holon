@@ -186,9 +186,12 @@ def main() -> None:
     argv = [public(a, args.model) for a in sys.argv[1:]]
     traces = {pathlib.Path(p).stem: hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()[:16]
               for p in args.traces}
-    commit = git("rev-parse", "HEAD") + ("-dirty" if git("status", "--porcelain", "--untracked-files=no") else "")
+    # Records written by earlier runs (evidence/) do not make the code dirty; anything else is listed.
+    dirty = git("status", "--porcelain", "--untracked-files=no", "--", ".", ":!evidence").splitlines()
+    commit = git("rev-parse", "HEAD") + ("-dirty" if dirty else "")
     record = {"workload": args.name, "date": date, "command": " ".join(["python bench/run.py", *argv]),
-              "commit": commit, "gpu_class": gpu, "model": model_id(args.model), "rounds": args.rounds,
+              "commit": commit, **({"dirty": dirty} if dirty else {}), "gpu_class": gpu,
+              "model": model_id(args.model), "rounds": args.rounds,
               "order": args.backends, "method": METHOD, "traces_sha256": traces, "backends": infos,
               "summary": summary, "runs": runs}
     out = pathlib.Path(args.evidence_dir) / f"bench_{args.name}_{gpu}_{date}.json"
