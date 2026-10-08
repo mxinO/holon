@@ -2,7 +2,13 @@
 over a unified KV cache (`-kvu`) of `LLAMA_SERVER_CTX` tokens (Holon's measured KV tokens; default: max running
 sequences × max context); `-b` = the step budget; `LLAMA_SERVER_ARGS` adds flags (e.g. `-cram 0`, `-ub 512`).
 Token-id prompts, greedy, `ignore_eos`, `n_predict`; prompt cache at its default. Every request's server-side
-timings are kept."""
+timings are kept.
+
+Tokens are counted by the server's `tokens_predicted`: a token whose text ends in an incomplete UTF-8 character is
+not streamed (llama.cpp holds its bytes back, `server-context.cpp` `process_token`), and the next chunk carries only
+its own id. A held-back token therefore counts when its bytes reach the client, and its id — never sent in stream
+mode — is stood in for by the id that arrives; only a multi-turn trace's history sees the stand-in (about 2 of 126
+agent requests per round), costing llama.cpp at most the re-prefill of that turn's tail."""
 from __future__ import annotations
 
 import os
@@ -38,5 +44,9 @@ def _body(prompt: list[int], max_tokens: int) -> dict:
             "return_tokens": True, "cache_prompt": True}
 
 
-def _parse(event: dict) -> tuple[list[int], bool]:
-    return event.get("tokens", []), bool(event.get("stop"))
+def _parse(event: dict, state: dict) -> tuple[list[int], bool]:
+    seen, now = state.get("seen", 0), event.get("tokens_predicted", 0)
+    state["seen"] = max(seen, now)
+    toks = event.get("tokens", [])
+    missing = now - seen - len(toks)
+    return ([toks[-1] if toks else 0] * missing + toks) if missing > 0 else toks, bool(event.get("stop"))

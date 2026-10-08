@@ -29,6 +29,6 @@ def _body(prompt: list[int], max_tokens: int) -> dict:
             "return_token_ids": True}
 
 
-def _parse(event: dict) -> tuple[list[int], bool]:
+def _parse(event: dict, state: dict) -> tuple[list[int], bool]:
     (choice,) = event["choices"]
     return choice.get("token_ids", []), choice["finish_reason"] is not None

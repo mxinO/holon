@@ -72,11 +72,12 @@ class Server:
 
 
 class Backend:
-    """Streams requests to `server` at `path`; `body(prompt, max_tokens)` is a request, `parse(event)` the token ids
-    and whether the request finished. Each request's last event is kept (`finals`: e.g. server-side timings)."""
+    """Streams requests to `server` at `path`; `body(prompt, max_tokens)` is a request, `parse(event, state)` the
+    token ids an event brings and whether the request finished (`state`: a dict per request, for parsers that count).
+    Each request's last event is kept (`finals`: e.g. server-side timings)."""
 
     def __init__(self, server: Server, path: str, body: Callable[[list[int], int], dict],
-                 parse: Callable[[dict], tuple[list[int], bool]]) -> None:
+                 parse: Callable[[dict, dict], tuple[list[int], bool]]) -> None:
         self.server, self.path, self.body, self.parse = server, path, body, parse
         self.arrived: queue.Queue[Delta | BaseException] = queue.Queue()
         self.in_flight = 0
@@ -88,8 +89,9 @@ class Backend:
 
     def _run(self, rid: int, prompt: list[int], max_tokens: int) -> None:
         try:
+            state: dict = {}
             for event in self.server.stream(self.path, self.body(prompt, max_tokens)):
-                toks, done = self.parse(event)
+                toks, done = self.parse(event, state)
                 if done:
                     self.finals.append(event)
                 if toks or done:
