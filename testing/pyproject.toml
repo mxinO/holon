@@ -3,7 +3,7 @@ name = "holonlm-testing"
 version = "0.0.1"
 requires-python = ">=3.12"
 description = "Test-only plugins for Holon (installed in the development environment, never with Holon)"
-dependencies = ["holonlm", "holonlm-std"]
+dependencies = ["holonlm", "holonlm-std", "gguf"]
 
 [project.entry-points."holon.plugins"]
 "testing.ref_kernels" = "holon_testing.ref_kernels"

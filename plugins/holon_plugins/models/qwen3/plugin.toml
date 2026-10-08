@@ -6,7 +6,7 @@ slot = "model"
 license = "Apache-2.0"
 
 [resources]
-provides = ["model.qwen3@1", "arch.Qwen3ForCausalLM@1"]
+provides = ["model.qwen3@1", "arch.Qwen3ForCausalLM@1", "arch.gguf.qwen3@1"]
 
 [dependencies]
 python = ["transformers"]

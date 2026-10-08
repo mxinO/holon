@@ -11,5 +11,6 @@ class Plugin:
             paged = impl is PagedAttention
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="testing.ref_kernels", impl=impl, requires=Constraint(devices=frozenset({"cpu"})),
-                supports=(lambda f: f["layout"] == KV_LAYOUT) if paged else None,
+                supports=(lambda f: f["layout"] == KV_LAYOUT) if paged else
+                (lambda f: f["layout"].endswith("/gguf.native")) if op.startswith("q") else None,
                 props=frozenset({"deterministic"} if paged else {"deterministic", "graph_safe"})))

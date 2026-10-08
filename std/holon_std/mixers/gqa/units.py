@@ -91,7 +91,8 @@ class GQA(nn.Module):
         self.q_norm = ctx.unit(qk_norm, dim=head_dim) if qk_norm else None
         self.k_norm = ctx.unit(qk_norm, dim=head_dim) if qk_norm else None
         self.rope = ctx.unit(rope, head_dim=head_dim)
-        self._qkv: torch.Tensor | None = None
+        self._qkv: nn.Module | None = None          # q, k and v in one matmul …
+        self._qk: nn.Module | None = None           # … or q and k (a quantized v of another type stays apart)
         bound = ctx.state("kv", layer)
         self._kv = None if bound is None else (bound[1], bound[0].layers.index(layer), len(bound[0].layers),
                                                 bound[0].shape.tokens_per_unit, ctx.dtype)
@@ -108,15 +109,20 @@ class GQA(nn.Module):
         return pool.view(dtype, shape)[index]
 
     def finalize_weights(self, ctx) -> None:
-        merge = getattr(type(self.q_proj), "merge", None)          # one GEMM for q, k, v where the linears allow
-        self._qkv = merge(self.q_proj, self.k_proj, self.v_proj) if merge else None
+        merge = getattr(type(self.q_proj), "merge", None)          # one matmul for q, k, v where the linears allow
+        if merge is not None:
+            self._qkv = merge(self.q_proj, self.k_proj, self.v_proj)
+            self._qk = None if self._qkv is not None else merge(self.q_proj, self.k_proj)
 
     def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
         dev = ctx.batch.dev
         t = x.shape[0]
         if self._qkv is not None:
-            q, k, v = torch.nn.functional.linear(x, self._qkv).split(
+            q, k, v = self._qkv(x).split(
                 [self.heads * self.head_dim, self.kv_heads * self.head_dim, self.kv_heads * self.head_dim], dim=-1)
+        elif self._qk is not None:
+            q, k = self._qk(x).split([self.heads * self.head_dim, self.kv_heads * self.head_dim], dim=-1)
+            v = self.v_proj(x)
         else:
             q, k, v = self.q_proj(x), self.k_proj(x), self.v_proj(x)
         q = q.reshape(t, self.heads, self.head_dim)

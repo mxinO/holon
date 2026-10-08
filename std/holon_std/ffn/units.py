@@ -18,13 +18,13 @@ class SwiGLU(nn.Module):
         facts = {"inter": inter, "dtype": str(ctx.dtype).removeprefix("torch.")}
         spec = ctx.select_kernel(kernels.SILU_MUL, site=f"std.ffn.swiglu[inter={inter}]", **facts)
         self._act = spec.impl(ctx, **facts)
-        self._gate_up: torch.Tensor | None = None
+        self._gate_up: nn.Module | None = None
 
     def finalize_weights(self, ctx) -> None:
-        merge = getattr(type(self.gate_proj), "merge", None)       # one GEMM for gate and up where possible
+        merge = getattr(type(self.gate_proj), "merge", None)       # one matmul for gate and up where possible
         self._gate_up = merge(self.gate_proj, self.up_proj) if merge else None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self._gate_up is not None:
-            return self.down_proj(self._act(torch.nn.functional.linear(x, self._gate_up)))
+            return self.down_proj(self._act(self._gate_up(x)))
         return self.down_proj(self._act(torch.cat([self.gate_proj(x), self.up_proj(x)], dim=-1)))

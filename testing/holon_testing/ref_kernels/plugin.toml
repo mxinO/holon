@@ -8,9 +8,10 @@ license = "Apache-2.0"
 [resources]
 provides = ["kernel.rmsnorm@1", "kernel.add_rmsnorm@1", "kernel.rope@1", "kernel.silu_mul@1",
             "kernel.attention.paged_prefill@1", "kernel.attention.paged_decode@1", "kernel.attention.paged_verify@1",
-            "kernel.attention.causal@1"]
+            "kernel.attention.causal@1", "kernel.qlinear@1", "kernel.qembedding@1"]
 requires = ["op.rmsnorm@1", "op.add_rmsnorm@1", "op.rope@1", "op.silu_mul@1", "op.attention.paged_prefill@1",
-            "op.attention.paged_decode@1", "op.attention.paged_verify@1", "op.attention.causal@1"]
+            "op.attention.paged_decode@1", "op.attention.paged_verify@1", "op.attention.causal@1", "op.qlinear@1",
+            "op.qembedding@1"]
 
 [properties]
 numerics = "exact"

@@ -1,8 +1,8 @@
 """A minimal GGUF (v2/v3) reader: metadata and tensor views over one copy-on-write memory map, nothing copied.
 
 gguf-py's `GGUFReader` builds Python objects for every element of every array (≈ 5 s for a 152K-token vocabulary);
-this reads numeric arrays with numpy and strings in one pass (≈ 1 s, the token and merge strings). gguf-py still supplies the type tables, and
-stays the dequantization oracle.
+this reads numeric arrays with numpy and strings in one pass (≈ 1 s, the token and merge strings). gguf-py still
+supplies the type tables, and stays the dequantization oracle.
 """
 from __future__ import annotations
 
