@@ -44,12 +44,14 @@ class DraftHeadDecl:
 class WeightRule:
     """Map checkpoint tensor names onto unit parameters, optionally through a registered value transform.
 
-    `pattern` and `target` use `{i}` for the layer index and `{name}` for any other captured span.
+    `pattern` and `target` use `{i}` for the layer index and `{name}` for any other captured span. With `stack`
+    naming a capture (e.g. "e"), its integer indexes dim 0 of the target: one tensor per index fills a stack.
     """
 
     pattern: str
     target: str
     transform: str | None = None
+    stack: str | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

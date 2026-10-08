@@ -91,3 +91,59 @@ def test_gate_and_up_of_different_layouts_fail_at_startup(tiny_moe, tmp_path):
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_up_exps": Q.Q4_0})
     with pytest.raises(ValueError, match="gate and up experts must share a layout"):
         _engine(file)
+
+
+def test_an_hf_moe_checkpoint_serves_what_transformers_computes(tiny_moe):
+    """The bf16/fp32 HF path (design D1, D7): per-expert tensors stacked by the stacking rule, dense experts."""
+    checkpoint, prompts = tiny_moe
+    hf = AutoModelForCausalLM.from_pretrained(checkpoint, dtype=torch.float32).eval()
+    engine = _engine(checkpoint)
+    assert engine.source.kind == "hf_safetensors" and engine.source.arch == "Qwen3MoeForCausalLM"
+    rids = [engine.add(p, SamplingParams(temperature=0.0, max_tokens=1, prompt_logprobs=3)) for p in prompts]
+    got = {}
+    while engine.has_work():
+        got |= {d.rid: d.prompt_logprobs for d in engine.step() if d.prompt_logprobs is not None}
+    for p, r in zip(prompts, rids, strict=True):
+        with torch.no_grad():
+            lp = hf(torch.tensor([p])).logits[0, :-1].log_softmax(-1)
+        torch.testing.assert_close(torch.tensor(got[r].token), lp.gather(-1, torch.tensor(p[1:])[:, None])[:, 0],
+                                   atol=1e-4, rtol=1e-4)
+
+
+def test_every_stacked_expert_is_the_checkpoints_tensor(tiny_moe):
+    """The structural test (design §4.6): each slice of the loaded stacks equals the checkpoint's tensor, bit for
+    bit, whatever the routing would have touched — the merged gate/up included."""
+    from safetensors.torch import load_file
+
+    checkpoint, _ = tiny_moe
+    tensors = load_file(checkpoint / "model.safetensors")
+    engine = _engine(checkpoint)
+    cfg = json.loads((checkpoint / "config.json").read_text())
+    inter = cfg["moe_intermediate_size"]
+    for i, layer in enumerate(engine.executor.model.layers):
+        moe, mlp = layer.ffn, f"model.layers.{i}.mlp"
+        assert torch.equal(moe.router, tensors[f"{mlp}.gate.weight"])
+        for e in range(moe.down.experts):
+            gate_up = moe._gate_up.weight[e]
+            assert torch.equal(gate_up[:inter], tensors[f"{mlp}.experts.{e}.gate_proj.weight"])
+            assert torch.equal(gate_up[inter:], tensors[f"{mlp}.experts.{e}.up_proj.weight"])
+            assert torch.equal(moe.down.weight[e], tensors[f"{mlp}.experts.{e}.down_proj.weight"])
+
+
+def test_the_hf_facts_and_a_missing_expert(tiny_moe, tmp_path):
+    from holon_plugins.models.qwen3_moe.recipe import moe_facts
+    from safetensors.torch import load_file
+
+    checkpoint, _ = tiny_moe
+    cfg = json.loads((checkpoint / "config.json").read_text())
+    assert moe_facts(cfg, "hf_safetensors") == {"experts": 8, "top_k": 2, "inter": 32, "renormalize": True}
+    with pytest.raises(NotImplementedError, match="dense layers"):
+        moe_facts(cfg | {"mlp_only_layers": [1]}, "hf_safetensors")
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "config.json").write_text((checkpoint / "config.json").read_text())
+    tensors = load_file(checkpoint / "model.safetensors")
+    del tensors["model.layers.1.mlp.experts.5.up_proj.weight"]
+    save_file(tensors, broken / "model.safetensors")
+    with pytest.raises(Exception, match=r"layers\.1\.ffn\.up\.weight: stack slices not loaded: \[5\]"):
+        _engine(broken)

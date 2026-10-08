@@ -179,24 +179,45 @@ def build_model(spec: ModelSpec, ctx: BuildContext) -> Model:
 
 
 @functools.lru_cache(maxsize=256)
-def _compile(pattern: str) -> re.Pattern[str]:
+def _compile(pattern: str, stack: str | None = None) -> re.Pattern[str]:
     parts = re.split(r"\{(\w+)\}", pattern)
-    regex = "".join(re.escape(p) if i % 2 == 0 else (r"(?P<i>\d+)" if p == "i" else f"(?P<{p}>.+)")
+    regex = "".join(re.escape(p) if i % 2 == 0 else (f"(?P<{p}>\\d+)" if p in ("i", stack) else f"(?P<{p}>.+)")
                     for i, p in enumerate(parts))
     return re.compile(regex + r"\Z")
 
 
-def map_name(name: str, weights: WeightMap) -> tuple[str, str | None] | None:
-    """Checkpoint tensor name → (parameter path, transform), or None if the tensor is skipped."""
+def map_name(name: str, weights: WeightMap) -> tuple[str, str | None, int | None] | None:
+    """Checkpoint tensor name → (parameter path, transform, stack index), or None if the tensor is skipped."""
     if weights.root and name.startswith(weights.root):
         name = name[len(weights.root):]
     if any(name.startswith(s) for s in weights.skip):
         return None
     for rule in weights.rules:
-        m = _compile(rule.pattern).match(name)
+        m = _compile(rule.pattern, rule.stack).match(name)
         if m:
-            return rule.target.format(**m.groupdict()), rule.transform
+            return rule.target.format(**m.groupdict()), rule.transform, int(m[rule.stack]) if rule.stack else None
     raise PluginError(f"no weight rule maps checkpoint tensor {name!r}")
+
+
+def _fill_slice(param: nn.Parameter, target: str, index: int, name: str, value: torch.Tensor | QTensor,
+                transform: str | None, ctx: BuildContext, got: set[int]) -> None:
+    """Copy one checkpoint tensor into slice `index` of a stacked parameter, materializing the stack on its first
+    slice (in place: no transient copy of the whole stack)."""
+    if isinstance(value, QTensor):
+        raise PluginError(f"{name!r}: a quantized tensor cannot fill a slice of {target!r}")
+    if not 0 <= index < param.shape[0]:
+        raise PluginError(f"{name!r}: index {index} outside the {param.shape[0]} slices of {target!r}")
+    if index in got:
+        raise PluginError(f"{target}[{index}] filled twice (last from {name!r})")
+    if transform:
+        value = ctx.plugins.regs.transforms.get(transform)(value)
+    if tuple(value.shape) != tuple(param.shape[1:]):
+        raise PluginError(f"{name!r}: shape {tuple(value.shape)} != a slice of {target!r} {tuple(param.shape[1:])}")
+    if param.is_meta:
+        torch.utils.swap_tensors(param, nn.Parameter(torch.empty(param.shape, dtype=param.dtype, device=ctx.device),
+                                                     requires_grad=False))
+    param.data[index].copy_(value.to(dtype=param.dtype))
+    got.add(index)
 
 
 @torch.no_grad()
@@ -208,13 +229,17 @@ def load_weights(model: Model, ctx: BuildContext, tensors: Iterable[tuple[str, t
     cannot read that layout (design §5.5; the core never looks inside a layout)."""
     params = dict(model.named_parameters())
     filled: set[str] = set()
+    slices: dict[str, set[int]] = {}                    # stacked parameters: the slices filled so far
     for name, value in tensors:
         mapped = map_name(name, model.spec.weights)
         if mapped is None:
             continue
-        target, transform = mapped
+        target, transform, index = mapped
         if target not in params:
             raise PluginError(f"{name!r} maps to {target!r}, which the model does not have")
+        if index is not None:
+            _fill_slice(params[target], target, index, name, value, transform, ctx, slices.setdefault(target, set()))
+            continue
         if target in filled:
             raise PluginError(f"{target!r} filled twice (last from {name!r})")
         if isinstance(value, QTensor):
@@ -234,6 +259,9 @@ def load_weights(model: Model, ctx: BuildContext, tensors: Iterable[tuple[str, t
             torch.utils.swap_tensors(param, nn.Parameter(value.to(device=ctx.device, dtype=param.dtype),
                                                          requires_grad=False))
         filled.add(target)
+    for target, got in slices.items():
+        if missing := sorted(set(range(params[target].shape[0])) - got):
+            raise PluginError(f"{target}: stack slices not loaded: {missing[:8]}{' …' if len(missing) > 8 else ''}")
     if missing := sorted(n for n, p in model.named_parameters() if p.is_meta):
         raise PluginError(f"parameters not loaded: {missing[:8]}{' …' if len(missing) > 8 else ''}")
     del params                                      # weights merges give up are freed as they go

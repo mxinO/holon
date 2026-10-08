@@ -14,6 +14,7 @@ openai = ["fastapi", "uvicorn"]   # frontends.openai (anyio and pydantic come wi
 "models.qwen3_moe" = "holon_plugins.models.qwen3_moe"
 "kernels.flashinfer" = "holon_plugins.kernels.flashinfer"
 "kernels.triton_attn" = "holon_plugins.kernels.triton_attn"
+"kernels.triton_experts" = "holon_plugins.kernels.triton_experts"
 "kernels.ggml_cuda" = "holon_plugins.kernels.ggml_cuda"
 "frontends.openai" = "holon_plugins.frontends.openai"
 

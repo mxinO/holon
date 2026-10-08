@@ -48,8 +48,8 @@ def test_map_name_rules_root_and_skip():
         WeightRule("embed_tokens.weight", "embed.weight"),
         WeightRule("layers.{i}.mlp.{rest}", "layers.{i}.ffn.{rest}", transform="t"),
     ))
-    assert map_name("model.embed_tokens.weight", wm) == ("embed.weight", None)
-    assert map_name("model.layers.12.mlp.up_proj.weight", wm) == ("layers.12.ffn.up_proj.weight", "t")
+    assert map_name("model.embed_tokens.weight", wm) == ("embed.weight", None, None)
+    assert map_name("model.layers.12.mlp.up_proj.weight", wm) == ("layers.12.ffn.up_proj.weight", "t", None)
     assert map_name("model.visual.patch.weight", wm) is None
     with pytest.raises(PluginError, match="no weight rule"):
         map_name("model.unknown.weight", wm)
