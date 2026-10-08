@@ -1,6 +1,6 @@
 # M0.2 — Mixture of experts on a 16 GB card: design and implementation plan
 
-Status: **revision 4, for review** (user additions: a basic bf16 HF path, §3 D1, D7, D8) (2026-10-08). Revisions 1 and 2 were challenged by three reviewers
+Status: **revision 5, for review** (user additions: a basic bf16 HF path, §3 D1, D7, D8) (2026-10-08). Revisions 1 and 2 were challenged by three reviewers
 (architecture/API, kernels/performance, numerics/judge); §8 maps every finding to its resolution. Scope: plan §5. Builds on M0.1
 (`docs/m01-gguf.md`: the GGUF source, `kernels.ggml_cuda`, the judge's tiers) and spike S2 (MoE sections).
 
@@ -13,7 +13,7 @@ kernels, on a 16 GB RTX 5080 and on 24–32 GB cards. Acceptance:
    ffn `Ref`, the GGUF and HF expert weight rules). Core diff: the stacking weight rule only (D7). Every Qwen3 lock
    (bf16 and GGUF) changes only in `[units]` source pins (the core's; and `kernels.ggml_cuda`'s for GGUF):
    `propagate` shows a byte-identical snapshot trace, L2 passing, `[sites]`, `[engine]` and the recipe hash unchanged;
-   approved once per lock.
+   one approval covering every affected lock (design §4.6).
 2. L0 for the MoE ops on sm_86, sm_89, sm_120a, every supported type on both kernel paths (§4.6), memcheck clean.
 3. L2 for UD-IQ3_XXS and Q4_K_M: Tier A and Tier B (prefill and decode) pass; each planted bug fails at the level
    and margin recorded in §4.6; the gates pass; the quantization error vs bf16 is reported.
@@ -71,7 +71,7 @@ run for that workload on the target hardware (llama.cpp for GGUF on consumer car
   `arch.Qwen3MoeForCausalLM@1`. FP8, NVFP4 and MXFP4 (dense and MoE) are their own milestone: they plug in as
   `linear_experts` (and `qlinear`) providers over their layouts' parts.
 - **D2 — Its own package, three ops.** Everything MoE lives in `std/holon_std/moe` (a sibling of `std.ffn`, so no
-  existing unit's `src` or `sem` changes and no bf16 lock moves):
+  existing unit's `src` or `sem` changes; the locks move only for the core's stacking rule, D7):
   - `unit.std.moe@1(experts, top_k, inter, renormalize)` — the MoE ffn, and the **v1 seam**: an expert cache (a
     residency map, miss handling, a CPU path for missed experts, router telemetry) is a variant of this unit; the
     kernel ops stay stateless. How a deployment selects the variant (a recipe knob, or a second provider chosen by
@@ -109,16 +109,30 @@ run for that workload on the target hardware (llama.cpp for GGUF on consumer car
   with `stack="e"`, the integer the pattern captures as `{e}` indexes dim 0 of the target parameter, so HF's per-expert
   tensors (`model.layers.{i}.mlp.experts.{e}.gate_proj.weight`) fill one `[E, out, in]` stack. The loader materializes
   the stack on its first slice and copies each slice in place (no transient copy); "filled once" holds per slice, and
-  a stack missing slices is "not loaded", naming them. ≈ 25 core lines; generic to every HF MoE. A defaulted field
-  leaves existing recipe terms, and so their hashes, unchanged. Rejected: per-expert parameters stacked in
-  `finalize_weights` (no core change, but `ExpertLinear` would carry two parameter layouts depending on the source).
-- **D8 — The dense provider: a grouped GEMM of our own** (`kernels.triton_experts`, Triton): rows sorted by expert on
-  the device (`argsort` of the ids, `bincount`, `cumsum` — fixed shapes, capture-safe), then one program per (expert,
-  row block, column block) with `tl.dot` over the gathered rows, f32 accumulation and output (`out_dtype` f32, as the
-  ggml provider), `glu = "swiglu"` fused. Each expert's weights are read once per row block, so prefill over the
-  prompt set takes minutes, not hours. Correct and graph-safe; tuning is not a target (vLLM / SGLang's fused-MoE
-  kernels are the performance reference for a later milestone). Routing and combine reuse `kernels.ggml_cuda`'s
-  `moe_topk` and `moe_combine`, which are layout-free.
+  a stack missing slices is "not loaded", naming them. The stack capture matches digits only (as `{i}`), an index
+  ≥ the stack's length is a load error naming the tensor, a transform applies per slice, and a `QTensor` under a
+  stacking rule is a load error in M0.2 (HF's FP8 MoE checkpoints are per-expert too: M0.6 chooses between a per-slice
+  `adopt` and a dialect grouping slices into one 3-D `QTensor`). ≈ 25 core lines; generic to every HF MoE. A
+  defaulted field leaves existing recipe terms, and so their hashes, unchanged. Rejected: per-expert parameters
+  stacked in `finalize_weights` (no core change, but `ExpertLinear` would carry two parameter layouts by source and
+  ≈ 18.9K parameters). Merges of dense stacks copy per layer (≈ 0.8 GB transient on the 96 GB card).
+- **D8 — The dense provider: a grouped GEMM of our own** (`kernels.triton_experts`, Triton), the standard padded
+  layout with a fixed grid: on the device, rows are sorted by expert (`argsort` of the ids), per-expert boundaries
+  taken with `searchsorted` over `arange(E + 1)` (no `bincount`, which syncs to size its output), each expert's rows
+  padded to a multiple of the row block BM, and a table maps each row block to its expert; the grid is fixed at
+  `ceil((T·k + E·(BM − 1)) / BM) × out / BN` programs and those past the used blocks exit — capture-safe, checked by
+  a capture test in torch's default error mode. Each program runs `tl.dot` over its gathered rows with f32
+  accumulation and writes f32 (`out_dtype`, as the ggml provider); `glu = "swiglu"` fused. **Operand precision**: a
+  dense layout's activation operand is rounded to the weight dtype (bf16) before the product — for gate/up the bf16
+  hidden state as is, for down the f32 SwiGLU output rounded to bf16, as HF does and as q8_1 quantizes it on the ggml
+  path — so every `tl.dot` is bf16 × bf16 with f32 accumulation and TF32 never enters. Fixed configurations per
+  (in, out), no autotuning (it would change summation order run to run, and benchmarks cannot run during capture).
+  Each expert's weights are read once per row block: prefill over the prompt set reads ≈ 3.7 TB, seconds on a PRO
+  6000. Correct and graph-safe; tuning is not a target (vLLM / SGLang's fused-MoE kernels are the performance
+  reference later). Routing and combine reuse `kernels.ggml_cuda`'s `moe_topk` and `moe_combine` (layout-free;
+  providers are chosen per op), so a dense deployment needs ggml_cuda prebuilt for its SM — without it, startup
+  fails with "no kernel for moe_topk@1"; a ggml-free set (at a lower priority, so the two never tie) waits for a
+  deployment without ggml_cuda.
 - **D6 — Configuration in the model plugin.** The recipe reads the MoE keys from the file's raw `qwen3moe.*` metadata
   (`c["gguf"]["expert_count"]`, `expert_used_count`, `expert_feed_forward_length`), so `std.weights.gguf` is
   untouched; `renormalize=True` is written with llama.cpp's reason (hard-coded for `qwen3moe`).
@@ -129,7 +143,7 @@ run for that workload on the target hardware (llama.cpp for GGUF on consumer car
 
 | package | change |
 |---|---|
-| `plugins/holon_plugins/models/qwen3_moe` | new: recipe copied from qwen3 (`derived_from`), `arch.gguf.qwen3moe@1`, GGUF weight map, bundle (copied) |
+| `plugins/holon_plugins/models/qwen3_moe` | new: recipe copied from qwen3 (`derived_from`), `arch.gguf.qwen3moe@1` and `arch.Qwen3MoeForCausalLM@1`, GGUF and HF weight maps, bundle (copied) |
 | `core/holon` | the stacking weight rule (D7): `WeightRule.stack`, the loader's slice fill |
 | `plugins/holon_plugins/kernels/triton_experts` | new: the dense `linear_experts` provider (D8) |
 | `std/holon_std/moe` | new: the unit and `ExpertLinear`; `moe_topk@1`, `linear_experts@1`, `moe_combine@1` contracts and `reference.py` |
@@ -153,12 +167,12 @@ class MoE(nn.Module):                      # unit.std.moe@1(experts, top_k, inte
 ```
 
 `ExpertLinear` mirrors `Linear`: `adopt` takes a quantized `(E, out, in)` stack and keeps all its parts (a dense
-stack, from a future HF source, is the parameter itself, with layout `"dense/<dtype>"`), `merge(gate, up)` interleaves the two
+stack, from the HF source, is the parameter itself, filled by the stacking rule, with layout `"dense/<dtype>"`), `merge(gate, up)` interleaves the two
 per expert (every part viewed as `[E, out, …]` and concatenated on dim 1 — a block-scaled layout needs `inter`
 divisible by its row block, else the merge fails at startup — in `finalize_weights`, one layer at a time) into a unit that carries `glu =
-"swiglu"`, and `bind_kernels` selects `linear_experts` with its facts after merges. A dense stack has no provider in M0.2:
-dense stacks go through the same selection, so until a dense provider registers the core's "no kernel for
-`linear_experts@1` … layout=dense/…" is the startup error — one path, one message (D1). The unit's chunk bounds memory; the kernel chunks at its
+"swiglu"`, and `bind_kernels` selects `linear_experts` with its facts after merges. Dense stacks go
+through the same selection (`kernels.triton_experts`, D8); without a provider for a layout the core's "no kernel for
+`linear_experts@1` … layout=…" is the startup error — one path, one message. The unit's chunk bounds memory; the kernel chunks at its
 own 512 too (any T, as `qlinear`) and picks the path per chunk, as llama.cpp does per ubatch: a 513-token step runs
 one mmq chunk and one mmvq chunk.
 
@@ -199,9 +213,12 @@ one mmq chunk and one mmvq chunk.
 `models/qwen3_moe/recipe.py` = qwen3's recipe with `ffn = Ref("std.moe@1", experts=g["expert_count"],
 top_k=g["expert_used_count"], inter=g["expert_feed_forward_length"], renormalize=True)` and `GGUF_WEIGHTS` = qwen3's
 with `ffn_gate_inp → ffn.router`, `ffn_{gate,up,down}_exps → ffn.{gate,up,down}.weight` in place of the dense ffn
-rules; `HF_WEIGHTS` = qwen3's with `mlp.gate → ffn.router` and `mlp.experts.{e}.{gate,up,down}_proj.weight →
-ffn.{gate,up,down}.weight` (`stack="e"`); for the HF source the MoE facts come from `num_experts`,
-`num_experts_per_tok`, `moe_intermediate_size` and `norm_topk_prob`; `derived_from = "models.qwen3@<commit>"`.
+rules; `HF_WEIGHTS` = qwen3's attention and norm rules with explicit MoE rules in place of qwen3's
+`mlp.{rest}` catch-all (which would send `mlp.gate.weight`, the router, to the gate expert stack): `mlp.gate.weight →
+ffn.router` and `mlp.experts.{e}.{gate,up,down}_proj.weight → ffn.{gate,up,down}.weight` (`stack="e"`). The MoE
+facts come from one small helper per source: GGUF's raw keys (above), or HF's `num_experts`, `num_experts_per_tok`,
+`moe_intermediate_size`, `norm_topk_prob`; the HF branch rejects `mlp_only_layers` ≠ [] and `decoder_sparse_step` ≠ 1
+(as qwen3 rejects options it does not support). `derived_from = "models.qwen3@<commit>"`.
 
 ### 4.5 Performance
 
@@ -276,10 +293,27 @@ kernels (with the wait rule of §4.3), finer graph buckets for MoE (core).
     controlled there).
 - **The bf16 HF path** (acceptance 7), on an RTX PRO 6000 node: golden = the bf16 checkpoint in fp32 on the CPU (the
   one the quantization-error report records); floor = HF bf16 with the D3-mirroring MoE block, no q8_1; candidate =
-  the engine in bf16 (stacked loading, `triton_experts`). Budgets as M0's. Plants, predicted to fail: the stack index
-  off by one (expert e loaded into slot e + 1, one layer); gate/up swapped in the HF map. L0 for `triton_experts`
-  (sm_86 and sm_120): vs the reference within `l0.check(bf16)`; the routings and T values of the ggml L0; graph
-  replay; the merged stack vs separate stacks. The chat set of M0.1's chat evidence, read for sense.
+  the engine in bf16 (stacked loading, `triton_experts`). The floor's dense MoE block rounds the down input to bf16
+  as D8 does; the floor-validity rule of the GGUF floors holds here too (recorded after step 1's oracle and the
+  ceiling pass, `reference.py`'s hash in its meta, predicted ≤ the pure-HF bf16 floor's KL p99). Budgets as M0's.
+  - **Structural test**, exact and independent of the golden: after loading, every stacked slice equals the tensor
+    read straight from the safetensors, bit for bit — merged `gate_up[i][e][:I]` vs `experts.e.gate_proj`, `[I:]` vs
+    `up_proj`, `down[i][e]` vs `down_proj`, the router (f32) vs `mlp.gate` — streamed per layer on the CPU. It catches
+    any misplaced expert whatever the routing (a swap of two rarely routed experts can pass L2). Stacking-rule unit
+    tests: the `{e}` capture is a bijection over 0..E−1 ("1" never matches "12"); a missing slice is "not loaded"
+    naming it; an out-of-range index and a `QTensor` under a stack are load errors.
+  - **Facts test**: the HF source's MoE facts (experts, top_k, inter, renormalize) equal the config's.
+  - **Plants**, predicted to fail: the stack index off by one in one layer (L2); gate/up swapped in the HF map (L2);
+    two experts swapped in one layer (the structural test; L2 result recorded for information); `renormalize`
+    ignored for the HF source (L2, gross); `tl.dot` on f32 operands in TF32 for down (the precision test).
+  - **Precision test**, extended to `triton_experts`: gate/up and SwiGLU outputs at the fp32 budget against f64, the
+    down input exactly the bf16 rounding of the SwiGLU output.
+  - **L0** for `triton_experts` (sm_86 and sm_120): `l0.check(float32, K)` against a reference with the same operand
+    precision; T = 0; one expert taking all T rows (several row blocks); per-expert counts of BM and BM + 1; empty
+    experts; ids 0 and E−1 beside poisoned memory; `out` / `in` off the tile multiples (masks) or a support check
+    requiring them; `glu` none and swiglu vs f64; the merged stack vs separate stacks; run-to-run bit equality;
+    graph replay with routing unlike the capture's, in the default capture error mode; memcheck.
+  - The chat set of M0.1's chat evidence, read for sense.
 - **Quantization error**, reported: the file's (dequantized golden vs the bf16 checkpoint's fp32 golden, pinned
   revision) and the engine's (engine vs that golden), with top-k flip rates.
 
@@ -308,12 +342,12 @@ Same three reviewers throughout; each step ends green.
 | 3 | `kernels.ggml_cuda`: C API, two vendored kernels and their patches, f32 SwiGLU, provenance; L0 incl. memcheck | L0 on sm_86 and sm_120a; graph capture; determinism | 4.5 |
 | 4 | Emulator expert paths; Tier B floors and runs on the A5000; Tier B, L0 and precision plants; precision test; graphs vs eager; perf on the A5000 | Tier B passes; plants fail | 2.5 |
 | 5 | Consumer classes: L0 on sm_89; 5080 fit ≥ 16K; bars on 5080 / 4090 / 5090 / A5000; `llama-server` traces on the 5080; Tier B on the 5080; tune + GGUF locks; snapshot ×3 | evidence; locks | 3 |
-| 6 | bf16 HF path: stacking rule (core) and its tests; `kernels.triton_experts` and its L0; the HF map; the judge's HF source; L2, plants and chat on an RTX PRO 6000 node | acceptance 7 | 3.5 |
+| 6 | bf16 HF path: stacking rule (core) and its tests; `kernels.triton_experts` and its L0; the HF map and facts; the structural test; the judge's HF source; L2, plants and chat on an RTX PRO 6000 node (`ggml_cuda` prebuilt for sm_120, for routing and combine) | acceptance 7 | 4 |
 | 6b | Qwen3 locks (bf16 rtx-a5000 / 4090 / 5090; GGUF rtx-5080 / a5000): `propagate`, approved once each | locks | 0.5 |
 | 7 | Docs: design §5.1 / §5.3 / §5.6, plan §5 status | — | 0.5 |
 
-≈ 19.5 days; critical path 1 → 2 and 3 (parallel) → 4 → 5 → 6b → 7, with step 6 in parallel from step 1 on (it
-needs only the unit, the ops and a free PRO 6000 node).
+≈ 20 days; critical path 1 → 2 and 3 (parallel) → 4 → 5 → 6b → 7, with step 6 in parallel from step 3 on (it needs
+the unit, the ops, ggml_cuda's routing and combine kernels, and a free PRO 6000 node).
 
 ## 6. Risks
 
@@ -381,3 +415,13 @@ MoE's → `out_dtype` / `y_dtype` facts, `"float32"` in M0.2 (D2); F3 a dense st
 Revision 4 (user additions): a basic bf16 HF path in M0.2 — acceptance 7, D1, D7 (the stacking weight rule, a core
 change), D8 (a Triton grouped GEMM as the dense provider), §4.6 (its judge), step 6; FP8, NVFP4 and MXFP4 move to
 their own milestone.
+
+Revision 4 review. Architecture/API: A1 the stacking rule's edges — digits-only capture, range, per-slice transforms,
+`QTensor` under a stack an error, M0.6's choice noted (D7); A2 step 6 after step 3, the ggml_cuda dependency stated
+(D8, §5); A3 no `bincount` (D8); A4 explicit HF MoE rules, unsupported options rejected, facts per source in one
+helper (§4.4); A5 stale text (D2, §4.1, §4.2, acceptance 1, plan §5). Kernels/performance: 1 `searchsorted`
+boundaries and a capture test (D8); 2 the fixed padded grid (D8); 3 down's operand precision chosen, bf16 (D8, §4.6);
+4 no autotuning (D8); 5 the merge transient stated (D7); the L0 list (§4.6). Numerics/judge: 1 the exact structural
+test and stacking-rule unit tests, a two-expert-swap plant (§4.6); 2 the down precision, mirrored in the floor, a
+TF32 plant (D8, §4.6); 3 `l0.check(float32, K)` (§4.6); 4 capture safety (D8); 5 the floor-validity rule for the HF
+floor (§4.6); 6 the facts test and a `renormalize` plant (§4.6).
