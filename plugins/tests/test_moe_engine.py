@@ -32,6 +32,8 @@ def tiny_moe(tmp_path_factory):
     with torch.no_grad():                                  # a router sharp enough that routing matters
         for layer in model.model.layers:
             layer.mlp.gate.weight.mul_(8)
+            layer.mlp.experts.gate_up_proj.mul_(20)          # SiLU out of its linear range
+            layer.mlp.experts.down_proj.mul_(5)               # the MoE output matters beside the residual
     model.save_pretrained(path)
     prompts = [torch.randint(0, 512, (n,)).tolist() for n in (3, 17, 8, 25)]
     return path, prompts

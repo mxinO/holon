@@ -16,6 +16,7 @@ import time
 import torch
 import transformers
 
+from . import moe
 from .recording import PromptSet, Recording
 
 DTYPES = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}
@@ -81,10 +82,12 @@ def teacher_force(model: torch.nn.Module, ids: list[int], k: int, rows: int = 25
 
 
 def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, device: str = "cpu",
-           k: int = 20, config: str | None = None, q8_1: str | None = None) -> Recording:
+           k: int = 20, config: str | None = None, q8_1: str | None = None, pure_hf: bool = False) -> Recording:
     """Record top-k teacher-forced logprobs of `model` (hub id, checkpoint directory, or a .gguf file with the HF
     `config` it was made from: the dense model of its dequantized weights, M0.1 §4.6) over `prompts`. `q8_1` ("mmq"
-    or "mmvq", GGUF only): every quantized linear computes as llama.cpp's kernels on that path (Tier B's floor)."""
+    or "mmvq", GGUF only): every quantized linear computes as llama.cpp's kernels on that path (Tier B's floor).
+    A floor (not fp32) of an MoE model runs the D3-mirroring MoE block (`moe.mirror`, M0.2 §4.6) unless `pure_hf`;
+    the fp32 golden is always HF's own model."""
     path = resolve_model(model)
     if path.suffix == ".gguf":
         from . import gguf
@@ -92,16 +95,25 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
         if config is None:
             raise ValueError(f"{path}: a GGUF golden needs the HF config it was made from")
         hf_config = resolve_model(config)
-        hf = gguf.hf_model(path, hf_config, dtype, device)
+        mirrored = dtype != torch.float32 and not pure_hf and _is_moe(hf_config)
+        hf = gguf.hf_model(path, hf_config, dtype, device, router_f32=mirrored)
         if q8_1:
             gguf.emulate_q8_1(hf, path, q8_1)
+        if mirrored:
+            moe.mirror(hf)
         config_sha256 = hashlib.sha256((hf_config / "config.json").read_bytes()).hexdigest()
         source = gguf.file_meta(path) | {"q8_1": q8_1, "config": model_meta(hf_config)["model"],
-                                         "config_sha256": config_sha256}
+                                         "config_sha256": config_sha256} | _moe_meta(mirrored)
     else:
+        mirrored = dtype != torch.float32 and not pure_hf and _is_moe(path)
         hf = transformers.AutoModelForCausalLM.from_pretrained(path, dtype=dtype, device_map=device,
                                                                attn_implementation="sdpa").eval()
-        source = model_meta(path)
+        if mirrored:                       # the router F32 as the engine holds it; dense operands rounded to bf16
+            for block in hf.modules():
+                if type(block).__name__.endswith("SparseMoeBlock"):
+                    block.gate.weight.data = block.gate.weight.data.float()
+            moe.mirror(hf, operand_dtype=dtype)
+        source = model_meta(path) | _moe_meta(mirrored)
     t0 = time.perf_counter()
     rows = [teacher_force(hf, p.ids, k) for p in prompts.prompts]
     wall = time.perf_counter() - t0
@@ -110,3 +122,11 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
         "hardware": hardware(hf.device), "threads": torch.get_num_threads(), "torch": torch.__version__,
         "transformers": transformers.__version__, "wall_s": round(wall, 2)}
     return Recording.from_rows(rows, meta)
+
+
+def _is_moe(config_dir: pathlib.Path) -> bool:
+    return transformers.AutoConfig.from_pretrained(config_dir).model_type.endswith("_moe")
+
+
+def _moe_meta(mirrored: bool) -> dict:
+    return {"moe_block": f"d3-reference@{moe.reference_hash()}"} if mirrored else {}

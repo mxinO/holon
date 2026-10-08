@@ -21,6 +21,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import dataclasses
+import functools
 import itertools
 import sys
 from collections.abc import Callable, Iterator
@@ -83,9 +84,10 @@ def stale_device_token(every: int = 7) -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def _loaded(edit: Callable[..., tuple[str, torch.Tensor]] | None = None, cfg: dict | None = None) -> Iterator[None]:
-    """Every engine built inside loads `edit(name, tensor, config)` for each dense checkpoint tensor, with `cfg` over
-    its weight source's configuration."""
+def _loaded(edit: Callable[..., tuple[str, torch.Tensor]] | None = None, cfg: dict | None = None,
+            rename: Callable[[str], str] | None = None) -> Iterator[None]:
+    """Every engine built inside loads `edit(name, tensor, config)` for each dense checkpoint tensor, `rename(name)`
+    for every tensor (quantized ones included), with `cfg` over its weight source's configuration."""
     from holon.core import engine
 
     load_weights, resolve = engine.load_weights, engine.resolve_model
@@ -99,8 +101,9 @@ def _loaded(edit: Callable[..., tuple[str, torch.Tensor]] | None = None, cfg: di
         return source, plugin
 
     def planted_load(model, ctx, tensors):
+        renamed = ((rename(n) if rename else n, t) for n, t in tensors)
         return load_weights(model, ctx, (edit(n, t, config) if edit and isinstance(t, torch.Tensor) else (n, t)
-                                         for n, t in tensors))
+                                         for n, t in renamed))
     with mock.patch.object(engine, "load_weights", planted_load), \
             mock.patch.object(engine, "resolve_model", planted_resolve):
         yield
@@ -159,6 +162,45 @@ def ggml_stale_q8_1(every: int = 97) -> Iterator[None]:
     print(f"plant ggml-stale-q8_1 fired: {dict(fired)}", file=sys.stderr)
 
 
+@contextlib.contextmanager
+def _moe(layer: int | None = None, init: Callable[[dict], dict] | None = None,
+         topk: Callable | None = None, combine: Callable | None = None, merge_swapped: bool = False) -> Iterator[None]:
+    """MoE bugs in the engine's std.moe unit, in every layer or only `layer`: its constructor arguments changed by
+    `init`, its routing or combine kernel's arguments or results changed, or its gate/up merge given up first."""
+    from holon_std.moe import units
+
+    construct, merge = units.MoE.__init__, units.ExpertLinear.merge
+
+    def planted_init(self, ctx, **kw):
+        here = layer is None or kw.get("layer") == layer
+        construct(self, ctx, **(init(kw) if init and here else kw))
+        if here and topk:
+            self._topk = functools.partial(lambda f, logits: topk(*f(logits), kw["experts"]), self._topk)
+        if here and combine:
+            self._combine = functools.partial(lambda f, y, w, out: f(*combine(y, w), out), self._combine)
+    with mock.patch.object(units.MoE, "__init__", planted_init), \
+            mock.patch.object(units.ExpertLinear, "merge",
+                              staticmethod(lambda gate, up: merge(up, gate) if merge_swapped else merge(gate, up))):
+        yield
+
+
+def _swap_gate_up_experts(name: str) -> str:
+    swap = {".ffn_gate_exps.": ".ffn_up_exps.", ".ffn_up_exps.": ".ffn_gate_exps."}
+    return next((name.replace(a, b) for a, b in swap.items() if a in name), name)
+
+
+def moe_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:
+    """Tier A's MoE plants (docs/m02-moe.md §4.6), the one-layer ones at `layer`."""
+    return {
+        "moe-renormalize-off": lambda: _moe(init=lambda kw: kw | {"renormalize": False}),
+        "moe-renormalize-off-one-layer": lambda: _moe(layer, init=lambda kw: kw | {"renormalize": False}),
+        "moe-ids-shifted-one-layer": lambda: _moe(layer, topk=lambda w, ids, experts: (w, (ids + 1) % experts)),
+        "moe-gate-up-swapped": lambda: _loaded(rename=_swap_gate_up_experts),
+        "moe-top-k-7": lambda: _moe(init=lambda kw: kw | {"top_k": kw["top_k"] - 1}),
+        "moe-combine-slots-reversed": lambda: _moe(combine=lambda y, w: (y, w.flip(-1).contiguous())),
+        "moe-merge-up-first": lambda: _moe(merge_swapped=True)}
+
+
 PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "adoption-off-by-one": adoption_off_by_one, "wrong-block": wrong_block,
     "stale-device-token": stale_device_token, "rare-stale-device-token": lambda: stale_device_token(every=101),
@@ -169,4 +211,6 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "gguf-qk-permuted": lambda: _loaded(_qk_permuted),
     # GGUF Tier B
     "ggml-wrong-type": ggml_wrong_type, "ggml-stale-q8_1": ggml_stale_q8_1,
-    "rare-ggml-stale-q8_1": lambda: ggml_stale_q8_1(every=9973)}      # ~ one linear in 55 forwards
+    "rare-ggml-stale-q8_1": lambda: ggml_stale_q8_1(every=9973),      # ~ one linear in 55 forwards
+    # MoE Tier A (Qwen3-30B-A3B: the one-layer plants at layer 24)
+    **moe_plants(24)}

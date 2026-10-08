@@ -35,7 +35,7 @@ def _golden(a: argparse.Namespace) -> int:
     if a.threads:
         torch.set_num_threads(a.threads)
     rec = golden.record(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k, a.config,
-                        a.q8_1)
+                        a.q8_1, a.pure_hf)
     rec.save(a.out)
     print(json.dumps(rec.meta | {"bytes": pathlib.Path(a.out).stat().st_size}, indent=1))
     return 0
@@ -57,9 +57,11 @@ def _compare(a: argparse.Namespace) -> int:
 def _l2(a: argparse.Namespace) -> int:
     from .engine import score_model
 
+    if a.threads:
+        torch.set_num_threads(a.threads)
     with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
         cand = score_model(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k, a.source,
-                           a.max_step_tokens)
+                           a.max_step_tokens, a.state_memory_gib and int(a.state_memory_gib * 2**30), a.max_seqs)
     if a.save:
         cand.save(a.save)
     return _report(compare(Recording.load(a.golden), cand, Recording.load(a.floor)), a.json)
@@ -134,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")
     g.add_argument("--config", help="for a .gguf: the HF checkpoint (dir or hub id) it was made from")
     g.add_argument("--q8-1", choices=["mmq", "mmvq"], help="for a .gguf: Tier B's floor on that kernel path")
+    g.add_argument("--pure-hf", action="store_true", help="an MoE floor with HF's own MoE block (information only)")
     g.add_argument("--prompts", required=True)
     g.add_argument("--out", required=True)
     g.add_argument("--threads", type=int, default=0, help="CPU threads; pin it to re-record a golden bitwise")
@@ -153,6 +156,9 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")
     e.add_argument("--source", help="weight source (default: detected); gguf_dense for GGUF Tier A")
     e.add_argument("--max-step-tokens", type=int, help="tokens per engine step (default: whole prompts)")
+    e.add_argument("--max-seqs", type=int, default=64)
+    e.add_argument("--state-memory-gib", type=float, help="state pools on the CPU (Tier A), which cannot be measured")
+    e.add_argument("--threads", type=int, default=0, help="CPU threads (Tier A)")
     e.add_argument("--prompts", required=True)
     e.add_argument("--golden", required=True)
     e.add_argument("--floor", required=True)
