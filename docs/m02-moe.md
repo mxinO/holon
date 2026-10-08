@@ -311,8 +311,9 @@ kernels (with the wait rule of §4.3), finer graph buckets for MoE (core).
   - **Plants**, predicted to fail: the stack index off by one in one layer (L2); gate/up swapped in the HF map (L2);
     two experts swapped in one layer (the structural test; L2 result recorded for information); `renormalize`
     ignored for the HF source (L2, gross); `tl.dot` on f32 operands in TF32 for down (the precision test).
-  - **Precision test**, extended to `triton_experts`: gate/up and SwiGLU outputs at the fp32 budget against f64, the
-    down input exactly the bf16 rounding of the SwiGLU output.
+  - **Precision test**, extended to `triton_experts`: gate/up and SwiGLU outputs at the fp32 budget against f64; down's
+    output against f64 of bf16(h) · W at the fp32 budget (≈ 1.6e-5·rms at K = 768) — TF32 (10 mantissa bits, not
+    bf16's 7) or a missing rounding misses it by ≈ 2^-9, so the TF32 plant fails here.
   - **L0** for `triton_experts` (sm_86 and sm_120): `l0.check(float32, K)` against a reference with the same operand
     precision; T = 0; one expert taking all T rows (several row blocks); per-expert counts of BM and BM + 1; empty
     experts; ids 0 and E−1 beside poisoned memory; `out` / `in` off the tile multiples (masks) or a support check
@@ -429,4 +430,4 @@ boundaries and a capture test (D8); 2 the fixed padded grid (D8); 3 down's opera
 4 no autotuning (D8); 5 the merge transient stated (D7); the L0 list (§4.6). Numerics/judge: 1 the exact structural
 test and stacking-rule unit tests, a two-expert-swap plant (§4.6); 2 the down precision, mirrored in the floor, a
 TF32 plant (D8, §4.6); 3 `l0.check(float32, K)` (§4.6); 4 capture safety (D8); 5 the floor-validity rule for the HF
-floor (§4.6); 6 the facts test and a `renormalize` plant (§4.6). Kernels, last: the fused SwiGLU's grid and two accumulators (D8). Architecture, last: B1 the dense operand rounding is the op contract's, implemented once in `reference.py`, which the HF floor and `triton_experts`' L0 both use (D2); 6b's approval wording.
+floor (§4.6); 6 the facts test and a `renormalize` plant (§4.6). Kernels, last: the fused SwiGLU's grid and two accumulators (D8). Architecture, last: B1 the dense operand rounding is the op contract's, implemented once in `reference.py`, which the HF floor and `triton_experts`' L0 both use (D2); 6b's approval wording. Numerics, last: the precision test checks down's output, where the rounding shows (§4.6).
