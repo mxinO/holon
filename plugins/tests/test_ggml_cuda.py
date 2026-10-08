@@ -182,15 +182,30 @@ def test_qlinear_f32_out_and_empty(ctx):
 @pytest.mark.parametrize("name", sorted(TYPES))
 def test_mmq_schedules(ctx, sm, name):
     """mmq at CHUNK rows under each of llama.cpp's schedules, asserted from its own choice (`mmq_schedule`:
-    0 tiling, 1 stream-k with one block per tile, 2 stream-k with the fixup pass)."""
+    0 tiling, 1 stream-k with one block per tile, 2 stream-k with the fixup pass) and from the kernels that launch
+    (so a refresh that moves llama.cpp's choice away from our mirror fails here)."""
     lib, k = extension.load(sm), 4096
     nsm = torch.cuda.get_device_properties().multi_processor_count
     kind, tile_i, _ = lib.mmq_schedule(0, TYPES[name], OUT, CHUNK)
     assert kind == 2, f"{name}: out={OUT} should take the stream-k fixup"
-    for out in (nsm * tile_i, 4096, 12288):
+    for out in (OUT, nsm * tile_i, 4096, 12288):
         kind = lib.mmq_schedule(0, TYPES[name], out, CHUNK)[0]
         assert out != nsm * tile_i or kind in (0, 1), f"{name}: out={out} (tiles a multiple of nsm) takes the fixup"
-        check_qlinear(qlinear(ctx, name, k, out=out), name, random_blocks(name, out, k, seed=out), (CHUNK,))
+        kernel, blocks = qlinear(ctx, name, k, out=out), random_blocks(name, out, k, seed=out)
+        launched = _launches(kernel, activations(CHUNK, k, seed=0), device_blocks(blocks))
+        fixup = any("stream_k_fixup" in n for n in launched)
+        assert fixup == (kind == 2), f"{name}: out={out} schedule {kind}, fixup launched: {fixup}"
+        check_qlinear(kernel, name, blocks, (CHUNK,))
+
+
+def _launches(kernel, x: torch.Tensor, w: torch.Tensor) -> set[str]:
+    """The names of the CUDA kernels one call launches."""
+    from torch.profiler import ProfilerActivity, profile
+
+    with profile(activities=[ProfilerActivity.CUDA]) as prof:
+        kernel(x, w)
+        torch.cuda.synchronize()
+    return {e.name for e in prof.events() if e.device_type == torch.autograd.DeviceType.CUDA}
 
 
 @pytest.mark.parametrize("name", sorted(TYPES))

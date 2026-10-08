@@ -21,6 +21,7 @@ class Constraint:
 
     sm_min: int | None = None              # compute capability as 10*major+minor, e.g. 86, 89, 120
     sm_max: int | None = None
+    sms: frozenset[int] = frozenset()      # exactly these (e.g. the SMs a prebuilt binary carries)
     devices: frozenset[str] = frozenset({"cuda"})
     cpu_isa: frozenset[str] = frozenset()  # e.g. {"avx2"}
     libs: frozenset[str] = frozenset()     # third-party libraries that must import
@@ -28,7 +29,8 @@ class Constraint:
     def allows(self, device: str, sm: int | None, isa: frozenset[str] = frozenset()) -> bool:
         if device not in self.devices:
             return False
-        if sm is not None and ((self.sm_min and sm < self.sm_min) or (self.sm_max and sm > self.sm_max)):
+        if sm is not None and ((self.sm_min and sm < self.sm_min) or (self.sm_max and sm > self.sm_max)
+                               or (self.sms and sm not in self.sms)):
             return False
         return self.cpu_isa <= isa
 
