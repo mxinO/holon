@@ -308,6 +308,10 @@ Acceptance: qwen3 locks unchanged or advanced only by propagate; MoE L0 vs refer
 with ≥ 16K KV tokens, Q4_K_M on 4090/5090/A5000; decode tok/s vs llama.cpp on the same card and quant recorded;
 core diff target zero.
 
+MoE is format-general: bf16 and FP8 HF MoE checkpoints are required too, as a follow-up (stacked loading of HF's
+per-expert tensors, dense and FP8 `linear_experts` providers, the judge on an HF source) — not M0.2's acceptance,
+whose target is GGUF on 16 GB cards. Design: `docs/m02-moe.md` (D1, D2).
+
 ## 6. M0.3 — heterogeneous state (Qwen3.5-4B → 9B, text-only)
 
 Qwen3.5 specifics (from HF config/modeling; record deviations found during implementation):
