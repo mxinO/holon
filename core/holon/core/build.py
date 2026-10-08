@@ -14,7 +14,18 @@ import numpy as np
 import torch
 from torch import nn
 
-from holon.api import Batch, DeviceBatch, KernelSpec, ModelSpec, Ref, SeqTable, StepCtx, WeightMap, parse_versioned
+from holon.api import (
+    Batch,
+    DeviceBatch,
+    KernelSpec,
+    ModelSpec,
+    QTensor,
+    Ref,
+    SeqTable,
+    StepCtx,
+    WeightMap,
+    parse_versioned,
+)
 
 from . import platform
 from .batching import host_plan
@@ -161,10 +172,10 @@ class Model(nn.Module):
 
 
 def build_model(spec: ModelSpec, ctx: BuildContext) -> Model:
-    """Build on the meta device (no memory), then materialize parameters directly on the context's device."""
+    """Build on the meta device: no parameter takes memory until `load_weights` fills it, in its stored form."""
     with torch.device("meta"):
         model = Model(spec, ctx)
-    return model.to_empty(device=ctx.device).eval()
+    return model.eval()
 
 
 @functools.lru_cache(maxsize=256)
@@ -189,11 +200,15 @@ def map_name(name: str, weights: WeightMap) -> tuple[str, str | None] | None:
 
 
 @torch.no_grad()
-def load_weights(model: Model, ctx: BuildContext, tensors: Iterable[tuple[str, torch.Tensor]]) -> None:
-    """Fill every parameter exactly once from the checkpoint, then run each unit's `finalize_weights`."""
+def load_weights(model: Model, ctx: BuildContext, tensors: Iterable[tuple[str, torch.Tensor | QTensor]]) -> None:
+    """Fill every parameter exactly once from the checkpoint, then run each unit's `finalize_weights`.
+
+    A dense tensor is copied to the device in the parameter's dtype. A quantized one (`QTensor`) goes to the module
+    owning the parameter — `adopt(ctx, name, qtensor)` stores it in its own form and returns True, or False if it
+    cannot read that layout (design §5.5; the core never looks inside a layout)."""
     params = dict(model.named_parameters())
     filled: set[str] = set()
-    for name, tensor in tensors:
+    for name, value in tensors:
         mapped = map_name(name, model.spec.weights)
         if mapped is None:
             continue
@@ -202,13 +217,24 @@ def load_weights(model: Model, ctx: BuildContext, tensors: Iterable[tuple[str, t
             raise PluginError(f"{name!r} maps to {target!r}, which the model does not have")
         if target in filled:
             raise PluginError(f"{target!r} filled twice (last from {name!r})")
-        if transform:
-            tensor = ctx.plugins.regs.transforms.get(transform)(tensor)
-        if params[target].shape != tensor.shape:
-            raise PluginError(f"{target}: checkpoint shape {tuple(tensor.shape)} != {tuple(params[target].shape)}")
-        params[target].copy_(tensor)
+        if isinstance(value, QTensor):
+            if transform:
+                raise PluginError(f"{target}: transform {transform!r} cannot apply to a quantized tensor")
+            owner, _, leaf = target.rpartition(".")
+            unit = model.get_submodule(owner)
+            if not getattr(unit, "adopt", None) or not unit.adopt(ctx, leaf, value):
+                raise PluginError(f"{target}: {type(unit).__name__} cannot read layout {value.layout}")
+        else:
+            if transform:
+                value = ctx.plugins.regs.transforms.get(transform)(value)
+            param = params[target]
+            if param.shape != value.shape:
+                raise PluginError(f"{target}: checkpoint shape {tuple(value.shape)} != {tuple(param.shape)}")
+            # The meta parameter becomes the loaded tensor in place (the Parameter object others hold is kept).
+            torch.utils.swap_tensors(param, nn.Parameter(value.to(device=ctx.device, dtype=param.dtype),
+                                                         requires_grad=False))
         filled.add(target)
-    if missing := sorted(set(params) - filled):
+    if missing := sorted(n for n, p in model.named_parameters() if p.is_meta):
         raise PluginError(f"parameters not loaded: {missing[:8]}{' …' if len(missing) > 8 else ''}")
     for module in reversed(list(model.modules())):  # children first: composites may read finalized children
         if module is not model and hasattr(module, "finalize_weights"):

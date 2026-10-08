@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from .memory import Pool
     from .ops import KernelSpec
     from .platform import Fingerprint
+    from .quant import QTensor
     from .state import StateSpec
 
 
@@ -112,15 +113,21 @@ class Unit(Protocol):
 
 
 class WeightSource(Protocol):
-    """Provisional (settled with spike S2 / M0.1): raw checkpoint tensors plus their metadata."""
+    """A checkpoint: its tensors plus the metadata to build and serve it. Its plugin's manifest declares `detect`
+    patterns (`[support]`) so the core can tell which source reads a path without importing anything."""
 
     kind: str
     arch: str                          # resolved to the model plugin providing `arch.<arch>`
-    eos_token_ids: frozenset[int]
+    eos_token_ids: frozenset[int]      # the stop set
 
-    def config(self) -> Mapping[str, Any]: ...
+    def config(self) -> Mapping[str, Any]:
+        """HF-style configuration (the keys recipes read)."""
 
-    def tensors(self) -> Iterator[tuple[str, torch.Tensor]]: ...
+    def tensors(self) -> Iterator[tuple[str, torch.Tensor | QTensor]]:
+        """Checkpoint tensors by checkpoint name; quantized ones as `QTensor`s (adopted by their unit, design §5.5)."""
+
+    def tokenizer(self) -> Any:
+        """The checkpoint's tokenizer with its chat template (a transformers fast tokenizer)."""
 
     def identity(self) -> str:
         """The checkpoint's identity for plans and lock histories (design §4.3): `<name>@<build>`, the build a
@@ -132,5 +139,5 @@ class ModelPlugin(Protocol):
 
     def recipe(self, cfg: Mapping[str, Any], source: str) -> ModelSpec: ...
 
-    def bundle(self, checkpoint: str) -> FrontendBundle:
-        """Tokenizer, chat template and parsers for the checkpoint at `checkpoint`."""
+    def bundle(self, source: WeightSource) -> FrontendBundle:
+        """Tokenizer, chat template and parsers for the checkpoint `source` reads."""

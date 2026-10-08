@@ -36,7 +36,7 @@ class EngineConfig:
     model: str                               # checkpoint directory
     device: str = "cuda"
     dtype: torch.dtype = torch.bfloat16
-    source: str = "hf_safetensors"           # weight source kind
+    source: str | None = None                # weight source kind; None: detected from the checkpoint
     page_size: int = 16
     max_seqs: int = 64
     max_model_len: int = 8192                # prompt + generated tokens per request; pools always hold one
@@ -72,12 +72,13 @@ class Engine:
         platform.configure_allocator(self.device)
         self.plugins = p = plugins or PluginSet(discover())
         source, model_plugin = resolve_model(p, cfg)
+        self.source = source                       # what the engine serves (plans name it; bundles read it)
         self.spec = model_plugin.recipe(source.config(), source.kind)
         self.eos = source.eos_token_ids
 
         self.ledger = Ledger(self.device)
         options = {"page_size": cfg.page_size, "max_seqs": cfg.max_seqs, "max_model_len": cfg.max_model_len,
-                   "kernels": cfg.kernels}
+                   "max_step_tokens": cfg.max_step_tokens, "kernels": cfg.kernels}
         self.ctx = BuildContext(p, self.device, cfg.dtype, options)
         bound, planners = bind_state(self.spec, self.ctx, p, self.ledger, cfg)
         model = build_model(self.spec, self.ctx)

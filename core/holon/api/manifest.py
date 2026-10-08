@@ -97,7 +97,7 @@ _SECTIONS: dict[str, set[str]] = {
     "dependencies": {"python"},
     "reference": {"module"},
     "tunables": None,  # any names; each value is validated as a Tunable
-    "support": {"platforms"},
+    "support": {"platforms", "detect"},
     "provenance": {"source", "commit", "license", "files"},
 }
 
@@ -126,6 +126,7 @@ class Manifest:
     reference: str | None = None       # oracle module of a numeric unit
     tunables: dict[str, Tunable] = dataclasses.field(default_factory=dict)
     platforms: tuple[str, ...] = ()
+    detect: tuple[str, ...] = ()       # weight sources: file-name patterns of their checkpoints (e.g. "*.gguf")
     provenance: Provenance | None = None
 
     @property
@@ -166,6 +167,7 @@ class Manifest:
             reference=data.get("reference", {}).get("module"),
             tunables={k: _tunable(v) for k, v in data.get("tunables", {}).items()},
             platforms=tuple(data.get("support", {}).get("platforms", ())),
+            detect=tuple(data.get("support", {}).get("detect", ())),
             provenance=_provenance(data["provenance"]) if "provenance" in data else None,
         )
         if m.slot not in SLOTS:

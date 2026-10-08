@@ -18,7 +18,6 @@ import torch
 from holon import __version__
 from holon.api import Binding, Lock, Plan, UnitPin, canonical_hash
 from holon.core import platform
-from holon.core.assembly import resolve_model
 from holon.core.engine import Engine
 from holon.core.plans import CORE_DIR, CORE_UNIT, history, loads, numbered, read, src_hash
 from holon.core.plugins import Installed
@@ -32,7 +31,7 @@ def plan_of(engine: Engine) -> Plan:
     units it built, the kernels bound at its sites, and its single plugins — model, weight source, sampler, state
     kinds …; kernel providers loaded only as candidates are left out), every site's kernel binding, and the engine
     settings that shape outputs."""
-    source, _ = resolve_model(engine.plugins, engine.cfg)
+    source = engine.source
     root = _git(CORE_DIR, "rev-parse", "--show-toplevel")
     uv_lock = pathlib.Path(root, "uv.lock") if root else None
     bound = {k["provider"] for k in engine.ctx.kernels.values()}
@@ -44,7 +43,7 @@ def plan_of(engine: Engine) -> Plan:
                           | ({"launch": k["config"]} if k["config"] else {}))
              for key, k in engine.ctx.kernels.items()}
     settings = {f.name: getattr(engine.cfg, f.name) for f in dataclasses.fields(engine.cfg)
-                if f.name not in _NOT_PLANNED}
+                if f.name not in _NOT_PLANNED} | {"source": source.kind}         # resolved, not the setting
     return Plan(model_id=source.identity(), fingerprint_class=platform.fingerprint(engine.device).cls,
                 recipe=canonical_hash(engine.spec), commit=_git(CORE_DIR, "rev-parse", "HEAD") or "unknown",
                 uv_lock=_sha256(uv_lock.read_bytes()) if uv_lock and uv_lock.is_file() else "none",

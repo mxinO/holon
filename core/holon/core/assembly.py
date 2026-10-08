@@ -5,7 +5,9 @@ prefix index over the paged state.
 from __future__ import annotations
 
 import collections
+import fnmatch
 import math
+import pathlib
 from typing import Any
 
 from holon.api import Batch, ModelSpec, Paged, Ref, StateSpec, canonical_hash
@@ -19,9 +21,24 @@ from .state import BoundSpec
 
 def resolve_model(plugins: PluginSet, cfg: Any) -> tuple[Any, Any]:
     """The checkpoint's weight source and the model plugin that provides its architecture (`cfg`: EngineConfig)."""
-    plugins.load(plugins.owner(f"weight_source.{cfg.source}")[0])
-    source = plugins.regs.weight_sources.get(cfg.source)(cfg.model)
+    kind = cfg.source or detect_source(plugins, cfg.model)
+    plugins.load(plugins.owner(f"weight_source.{kind}")[0])
+    source = plugins.regs.weight_sources.get(kind)(cfg.model)
     return source, plugins.load(plugins.owner(f"arch.{source.arch}")[0])
+
+
+def detect_source(plugins: PluginSet, model: str) -> str:
+    """The weight-source kind whose manifest `detect` patterns match `model` — its file name, or a file inside it —
+    read from manifests alone (no plugin is imported to decide). Exactly one must match."""
+    path = pathlib.Path(model)
+    names = [path.name, *(p.name for p in path.iterdir())] if path.is_dir() else [path.name]
+    kinds = {r.name.removeprefix("weight_source.") for inst in plugins.installed.values()
+             for r in inst.manifest.provides if r.name.startswith("weight_source.")
+             if any(fnmatch.fnmatch(n, pattern) for pattern in inst.manifest.detect for n in names)}
+    if len(kinds) != 1:
+        raise PluginError(f"{model}: {'no' if not kinds else 'several'} weight sources recognise it "
+                          f"({sorted(kinds)}); name one with EngineConfig.source")
+    return kinds.pop()
 
 
 class _PagesPlanner:

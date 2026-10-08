@@ -10,3 +10,6 @@ provides = ["weight_source.hf_safetensors@1"]
 
 [dependencies]
 python = ["safetensors"]
+
+[support]
+detect = ["config.json"]

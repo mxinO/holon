@@ -27,8 +27,8 @@ def engine_flags(parser: argparse.ArgumentParser) -> None:
             parser.add_argument(flag, action=argparse.BooleanOptionalAction, default=f.default)
         elif kind is torch.dtype:
             parser.add_argument(flag, type=lambda s: getattr(torch, s), default=f.default)
-        elif kind in (int, float, str) or kind == int | None:
-            parser.add_argument(flag, type=int if kind == int | None else kind, default=f.default)
+        elif kind in (int, float, str, int | None, str | None):
+            parser.add_argument(flag, type={int | None: int, str | None: str}.get(kind, kind), default=f.default)
 
 
 def engine_config(model: str, args: argparse.Namespace) -> EngineConfig:
@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="holon")
     sub = parser.add_subparsers(dest="command", required=True)
     serve = sub.add_parser("serve", help="serve a model over a frontend plugin")
-    serve.add_argument("model", help="checkpoint directory")
+    serve.add_argument("model", help="checkpoint directory or file (e.g. a .gguf)")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--frontend", default=None, help="frontend plugin name (default: the one installed)")
@@ -52,8 +52,8 @@ def main(argv: list[str] | None = None) -> None:
     config = engine_config(args.model, args)
 
     plugins = PluginSet(discover())
-    _, model_plugin = resolve_model(plugins, config)
-    bundle = model_plugin.bundle(config.model)
+    source, model_plugin = resolve_model(plugins, config)
+    bundle = model_plugin.bundle(source)
     names = [m.name for m in plugins.by_slot("frontend")]
     name = args.frontend or (names[0] if len(names) == 1 else None)
     if name is None:

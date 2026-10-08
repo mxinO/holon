@@ -34,6 +34,11 @@ class HFSafetensors:
     def config(self) -> Mapping[str, Any]:
         return self._config
 
+    def tokenizer(self) -> Any:
+        from transformers import AutoTokenizer  # only frontends and tests need it
+
+        return AutoTokenizer.from_pretrained(self.path)
+
     def tensors(self) -> Iterator[tuple[str, torch.Tensor]]:
         for file in sorted(self.path.glob("*.safetensors")):
             with safe_open(file, "pt", device=str(self.device)) as f:

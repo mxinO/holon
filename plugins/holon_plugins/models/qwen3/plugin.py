@@ -7,7 +7,7 @@ class Plugin:
     def register(self, regs) -> None:
         pass
 
-    def bundle(self, checkpoint: str):
-        from .bundle import Bundle  # transformers is imported only by frontends that need it
+    def bundle(self, source):
+        from .bundle import Bundle
 
-        return Bundle(checkpoint)
+        return Bundle(source)

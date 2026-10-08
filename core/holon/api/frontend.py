@@ -65,7 +65,7 @@ class Parser(Protocol):
 
 
 class FrontendBundle(Protocol):
-    """Shipped by the model plugin (`ModelPlugin.bundle(checkpoint)`): tokenizer, chat template, parsers."""
+    """Shipped by the model plugin (`ModelPlugin.bundle(source)`): tokenizer, chat template, parsers."""
 
     model_name: str
     tokenizer: Tokenizer
