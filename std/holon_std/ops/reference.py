@@ -26,3 +26,14 @@ def rope_neox(x: torch.Tensor, positions: torch.Tensor, theta: float, rotary_dim
 def linear(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None = None) -> torch.Tensor:
     return torch.nn.functional.linear(x, weight, bias)
 
+
+
+def qlinear(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    """The `qlinear@1` oracle: `x @ weight.T` in fp32, with `weight` [out, in] the dequantized weight (the format's
+    own reference dequantization produces it, e.g. gguf-py for ggml types)."""
+    return x.float() @ weight.float().T
+
+
+def qembedding(ids: torch.Tensor, table: torch.Tensor) -> torch.Tensor:
+    """The `qembedding@1` oracle: rows `ids` of the dequantized table [vocab, hidden]."""
+    return table[ids]

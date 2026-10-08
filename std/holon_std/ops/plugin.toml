@@ -15,6 +15,8 @@ provides = [
     "op.rmsnorm@1",
     "op.add_rmsnorm@1",
     "op.rope@1",
+    "op.qlinear@1",
+    "op.qembedding@1",
 ]
 
 [properties]
