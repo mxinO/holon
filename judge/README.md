@@ -8,6 +8,7 @@ The judge runs outside the engine and drives it only as a client (design §10.3)
 | `compare` | L2 | candidate vs golden: KL p50/p99, top-1 agreement, ΔPPL, per category; pass/fail against the floor |
 | `engine` | L2 | the candidate side: scores the prompt set through a Holon engine (`prompt_logprobs=20`) |
 | `l0` | L0 | `budget(dtype, reduction_len)` and `check(candidate, reference, dtype, reduction_len)` for op oracles |
+| `q8_1` | L0, L2 | llama.cpp's int8-dot matmuls emulated per path (`mmvq`, `mmq`): q8_1 activations and the stored-sum offsets; the reference of the GGUF kernels' L0 and of Tier B's floor |
 | `snapshot` | snapshot | records a fixed trace's token streams and a sha256 per delta (request, sequence, step); compares runs for byte identity; `trace(prompts)` is the snapshot trace of design §7.10 (long context, a prefix hit, the decode batch shrinking through every graph bucket up to 64, seeded n > 1, logprobs, prompt logprobs) |
 | `recording` | | prompt sets and the recording format (safetensors + JSON provenance) |
 
