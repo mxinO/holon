@@ -1,5 +1,5 @@
 """Third-party code is declared (AGENTS.md, "Third-party code"): the repository is Apache-2.0 (LICENSE, NOTICE); every
-path THIRD_PARTY_NOTICES.md names exists; every code file saying it is adapted or copied from elsewhere is named
+path THIRD_PARTY_NOTICES.md names exists; every code file whose header marks it as taken from elsewhere is named
 there; every plugin's `[provenance]` has an allowed license, its source in the notices, its files present and named
 there, and vendored directories carry their upstream LICENSE."""
 from __future__ import annotations
@@ -51,5 +51,5 @@ for manifest in sorted(p for p in tracked if p.endswith("plugin.toml")):
 for path in tracked:
     if CODE.search(path) and not any(path.startswith(v) for v in vendored) and path not in named \
             and MARKER.search((ROOT / path).read_text(errors="replace")):
-        msgs.append(f"{path}: says it is adapted or copied from elsewhere but is not in THIRD_PARTY_NOTICES.md")
+        msgs.append(f"{path}: marked as third-party code but not in THIRD_PARTY_NOTICES.md")
 fail(msgs, "third-party code declared (license, notices, provenance)")
