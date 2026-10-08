@@ -3,6 +3,7 @@ import dataclasses
 import json
 import os
 import textwrap
+import time
 
 import pytest
 from holon.api import Lock, Manifest
@@ -109,8 +110,10 @@ def test_identity_remembers_weight_digests(tiny_checkpoint, tmp_path, monkeypatc
     assert source.HFSafetensors(copy).identity() != first
     weights = copy / "model.safetensors"
     st = weights.stat()
-    weights.write_bytes(weights.read_bytes())
-    os.utime(weights, ns=(st.st_atime_ns, st.st_mtime_ns))
+    while weights.stat().st_ctime_ns == st.st_ctime_ns:     # some filesystems keep ctime in coarse ticks
+        time.sleep(0.05)
+        weights.write_bytes(weights.read_bytes())
+        os.utime(weights, ns=(st.st_atime_ns, st.st_mtime_ns))
     assert source.HFSafetensors(copy).identity() == first
 
 
