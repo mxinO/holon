@@ -81,9 +81,10 @@ def teacher_force(model: torch.nn.Module, ids: list[int], k: int, rows: int = 25
 
 
 def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, device: str = "cpu",
-           k: int = 20, config: str | None = None) -> Recording:
+           k: int = 20, config: str | None = None, q8_1: str | None = None) -> Recording:
     """Record top-k teacher-forced logprobs of `model` (hub id, checkpoint directory, or a .gguf file with the HF
-    `config` it was made from: the dense model of its dequantized weights, M0.1 §4.6) over `prompts`."""
+    `config` it was made from: the dense model of its dequantized weights, M0.1 §4.6) over `prompts`. `q8_1` ("mmq"
+    or "mmvq", GGUF only): every quantized linear computes as llama.cpp's kernels on that path (Tier B's floor)."""
     path = resolve_model(model)
     if path.suffix == ".gguf":
         from . import gguf
@@ -92,8 +93,11 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
             raise ValueError(f"{path}: a GGUF golden needs the HF config it was made from")
         hf_config = resolve_model(config)
         hf = gguf.hf_model(path, hf_config, dtype, device)
-        source = gguf.file_meta(path) | {"config": model_meta(hf_config)["model"], "config_sha256": hashlib.sha256(
-            (hf_config / "config.json").read_bytes()).hexdigest()}
+        if q8_1:
+            gguf.emulate_q8_1(hf, path, q8_1)
+        config_sha256 = hashlib.sha256((hf_config / "config.json").read_bytes()).hexdigest()
+        source = gguf.file_meta(path) | {"q8_1": q8_1, "config": model_meta(hf_config)["model"],
+                                         "config_sha256": config_sha256}
     else:
         hf = transformers.AutoModelForCausalLM.from_pretrained(path, dtype=dtype, device_map=device,
                                                                attn_implementation="sdpa").eval()

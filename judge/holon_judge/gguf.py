@@ -4,6 +4,7 @@ per-tensor gate that checks what both maps believe (orientation, no Q/K permutat
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import pathlib
@@ -34,6 +35,9 @@ def hf_name(name: str) -> str:
     return f"model.layers.{m[1]}.{_LAYER[m[2]]}.weight"
 
 
+_DENSE = {gguf.GGMLQuantizationType.F32, gguf.GGMLQuantizationType.F16, gguf.GGMLQuantizationType.BF16}
+
+
 def dequantized(path: str | pathlib.Path) -> dict[str, torch.Tensor]:
     """Every tensor of the file, dequantized by gguf-py (fp32), by HF name."""
     out = {}
@@ -41,6 +45,37 @@ def dequantized(path: str | pathlib.Path) -> dict[str, torch.Tensor]:
         x = gguf.quants.dequantize(np.asarray(t.data), t.tensor_type).astype(np.float32, copy=False)
         out[hf_name(t.name)] = torch.from_numpy(x.reshape([int(n) for n in reversed(t.shape)]).copy())
     return out
+
+
+def emulate_q8_1(model: torch.nn.Module, path: str | pathlib.Path, kernel_path: str) -> dict[str, str]:
+    """Tier B's floor (design §4.6): every quantized linear of `model` (the HF model of `path`, lm_head included)
+    computes as llama.cpp's int8 dots do on `kernel_path` (`q8_1.MMQ` or `q8_1.MMVQ`) — its input rounded to q8_1, the
+    stored-sum offsets of its type — in float32 over its weights, writing its own dtype (the head: float32). Returns
+    the ggml type of each linear it changed."""
+    from . import q8_1
+
+    linears = {name: m for name, m in model.named_modules() if isinstance(m, torch.nn.Linear)}
+    types = {}
+    for t in gguf.GGUFReader(path).tensors:
+        owner = hf_name(t.name).removesuffix(".weight")
+        if t.tensor_type in _DENSE or owner not in linears:
+            continue                                   # norms, and the embedding (get_rows reads it exactly)
+        kind, blocks = t.tensor_type.name.lower(), np.asarray(t.data)
+        g = q8_1.blocking(kind, kernel_path).sum_group
+        offs = q8_1.offsets(blocks, kind, g).float().to(linears[owner].weight.device) if g else None
+        linears[owner].forward = functools.partial(_emulated, linears[owner], kind, kernel_path, offs,
+                                                   torch.float32 if owner == "lm_head" else None)
+        types[owner] = kind
+    return types
+
+
+def _emulated(linear: torch.nn.Linear, kind: str, kernel_path: str, offs: torch.Tensor | None,
+              out_dtype: torch.dtype | None, x: torch.Tensor) -> torch.Tensor:
+    from . import q8_1
+
+    rows = x.reshape(-1, x.shape[-1])
+    y = q8_1.matmul(rows, linear.weight, None, kind, kernel_path, offs, torch.float32)
+    return y.to(out_dtype or x.dtype).reshape(*x.shape[:-1], -1)
 
 
 def hf_model(path: str | pathlib.Path, config_dir: str | pathlib.Path, dtype: torch.dtype = torch.float32,

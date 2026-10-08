@@ -3,6 +3,7 @@
 - The bounded check (`bounded --plant`, judge/tests/test_bounded.py): the configurations using the broken path fail.
 - GGUF Tier A (`l2 --plant`, M0.1 design §4.6): bugs in what a GGUF file means (configuration, names, layouts),
   planted in the weights the engine loads; L2 fails.
+- GGUF Tier B (`l2 --plant`): bugs in the quantized kernels' use (`kernels.ggml_cuda`); L2 fails.
 
 They patch engine classes, so they apply to every engine built inside the context, graph captures included. The
 reference re-scoring is untouched by all three: prompt-logprob requests never adopt cached blocks, and it samples one
@@ -10,8 +11,11 @@ token per request, which is never fed back.
 """
 from __future__ import annotations
 
+import collections
 import contextlib
 import dataclasses
+import itertools
+import sys
 from collections.abc import Callable, Iterator
 from unittest import mock
 
@@ -112,6 +116,42 @@ def _qk_permuted(name, t, config):
     return name, t
 
 
+@contextlib.contextmanager
+def ggml_wrong_type() -> Iterator[None]:
+    """The first Q4_K `qlinear` built reads its blocks as Q4_0 (the same 144 bytes per 256 values)."""
+    from holon_plugins.kernels.ggml_cuda import plugin
+
+    init, done = plugin.QLinear.__init__, []
+
+    def planted(self, ext, ctx, **facts):
+        init(self, ext, ctx, **facts)
+        if not done and self.type == plugin.TYPES["q4_k"]:
+            self.type = plugin.TYPES["q4_0"]
+            done.append(facts)
+    with mock.patch.object(plugin.QLinear, "__init__", planted):
+        yield
+    print(f"plant ggml-wrong-type: {done}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def ggml_stale_q8_1(every: int = 97) -> Iterator[None]:
+    """Every `every`-th `qlinear` call reads the activations of the previous call sharing its q8_1 workspace (same
+    `in`) — what a workspace left stale by a skipped quantization holds. Reports how often it fired on each path."""
+    from holon_plugins.kernels.ggml_cuda import plugin
+
+    call, last, calls, fired = plugin.QLinear.__call__, {}, itertools.count(1), collections.Counter()
+
+    def planted(self, x, blocks):
+        prev, last[self.k] = last.get(self.k), x.clone()
+        if next(calls) % every == 0 and prev is not None and len(prev) >= len(x):
+            fired["mmvq" if len(x) <= self.mmvq_rows else "mmq"] += 1
+            x = prev[:len(x)]
+        return call(self, x, blocks)
+    with mock.patch.object(plugin.QLinear, "__call__", planted):
+        yield
+    print(f"plant ggml-stale-q8_1 fired: {dict(fired)}", file=sys.stderr)
+
+
 PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "adoption-off-by-one": adoption_off_by_one, "wrong-block": wrong_block,
     "stale-device-token": stale_device_token, "rare-stale-device-token": lambda: stale_device_token(every=101),
@@ -119,4 +159,6 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "gguf-rope-theta-9e5": lambda: _loaded(cfg={"rope_theta": 9e5}),
     "gguf-transposed-attn-output": lambda: _loaded(_transposed_attn_output),
     "gguf-gate-up-swapped": lambda: _loaded(_gate_up_swapped),
-    "gguf-qk-permuted": lambda: _loaded(_qk_permuted)}
+    "gguf-qk-permuted": lambda: _loaded(_qk_permuted),
+    # GGUF Tier B
+    "ggml-wrong-type": ggml_wrong_type, "ggml-stale-q8_1": ggml_stale_q8_1}

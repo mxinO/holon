@@ -1,11 +1,11 @@
 """Judge command line.
 
-    python -m holon_judge golden   --model <hf dir or id | .gguf> [--config <hf dir or id>] --prompts <jsonl>
-                                   --out <file> [--threads N] [--k 20]
+    python -m holon_judge golden   --model <hf dir or id | .gguf> [--config <hf dir or id> [--q8-1 mmq|mmvq]]
+                                   --prompts <jsonl> --out <file> [--threads N] [--k 20]
                                    [--dtype bfloat16 --device cuda]          # the floor: HF in the activation dtype
     python -m holon_judge compare  --golden <file> --candidate <file> [--floor <file>] [--json <file>]
     python -m holon_judge l2       --model <hf dir or id | .gguf> --prompts <jsonl> --golden <file> --floor <file>
-                                   [--source gguf_dense] [--plant <bug>]
+                                   [--source gguf_dense] [--max-step-tokens N] [--plant <bug>]
                                    [--dtype bfloat16] [--k 20] [--save <file>] [--json <file>]
     python -m holon_judge snapshot-diff <a.json> <b.json>
     python -m holon_judge snapshot --model <hf dir or id> --prompts <jsonl> [--runs 3] [--json <file>]
@@ -34,7 +34,8 @@ from .recording import PromptSet, Recording
 def _golden(a: argparse.Namespace) -> int:
     if a.threads:
         torch.set_num_threads(a.threads)
-    rec = golden.record(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k, a.config)
+    rec = golden.record(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k, a.config,
+                        a.q8_1)
     rec.save(a.out)
     print(json.dumps(rec.meta | {"bytes": pathlib.Path(a.out).stat().st_size}, indent=1))
     return 0
@@ -57,7 +58,8 @@ def _l2(a: argparse.Namespace) -> int:
     from .engine import score_model
 
     with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
-        cand = score_model(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k, a.source)
+        cand = score_model(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k, a.source,
+                           a.max_step_tokens)
     if a.save:
         cand.save(a.save)
     return _report(compare(Recording.load(a.golden), cand, Recording.load(a.floor)), a.json)
@@ -131,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("golden", help="record HF teacher-forced top-k logprobs (golden or floor)")
     g.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")
     g.add_argument("--config", help="for a .gguf: the HF checkpoint (dir or hub id) it was made from")
+    g.add_argument("--q8-1", choices=["mmq", "mmvq"], help="for a .gguf: Tier B's floor on that kernel path")
     g.add_argument("--prompts", required=True)
     g.add_argument("--out", required=True)
     g.add_argument("--threads", type=int, default=0, help="CPU threads; pin it to re-record a golden bitwise")
@@ -149,6 +152,7 @@ def main(argv: list[str] | None = None) -> int:
     e = sub.add_parser("l2", help="score the prompt set through a Holon engine and judge it")
     e.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")
     e.add_argument("--source", help="weight source (default: detected); gguf_dense for GGUF Tier A")
+    e.add_argument("--max-step-tokens", type=int, help="tokens per engine step (default: whole prompts)")
     e.add_argument("--prompts", required=True)
     e.add_argument("--golden", required=True)
     e.add_argument("--floor", required=True)

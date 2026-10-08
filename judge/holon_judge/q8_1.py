@@ -86,16 +86,19 @@ def offsets(blocks: np.ndarray, ggml_type: str, group: int) -> torch.Tensor:
     return torch.from_numpy(w[:, ::group].astype(np.float64))
 
 
-def matmul(x: torch.Tensor, weight: torch.Tensor, blocks: np.ndarray, ggml_type: str, path: str) -> torch.Tensor:
-    """llama.cpp's `x @ weight.T` on `path` (float64, on x's device): `weight` [out, in] dequantized from `blocks`
-    [out, row_bytes] (gguf.native) by gguf-py, `x` [T, in]."""
+def matmul(x: torch.Tensor, weight: torch.Tensor, blocks: np.ndarray | None, ggml_type: str, path: str,
+           offs: torch.Tensor | None = None, dtype: torch.dtype = torch.float64) -> torch.Tensor:
+    """llama.cpp's `x @ weight.T` on `path` (in `dtype`, on x's device): `weight` [out, in] dequantized from `blocks`
+    [out, row_bytes] (gguf.native) by gguf-py, `x` [T, in]. `offs`: `offsets(blocks, ggml_type, group)` computed
+    once for many calls (Tier B's floor runs this in float32 on every quantized linear)."""
     b = blocking(ggml_type, path)
-    xt = quantize(x, b)
-    y = xt @ weight.double().T
+    xt = quantize(x, b).to(dtype)
+    y = xt @ weight.to(dtype).T
     if b.sum_group:
         g = b.sum_group
-        stored = x.float().reshape(len(x), -1, g).sum(-1).half().double()     # fp32 sums stored as fp16
+        stored = x.float().reshape(len(x), -1, g).sum(-1).half().to(dtype)     # fp32 sums stored as fp16
         corr = stored - xt.reshape(len(x), -1, g).sum(-1)
         corr[:, (torch.arange(corr.shape[1], device=x.device) * g) % 128 >= b.sum_span] = 0
-        y += corr @ offsets(blocks, ggml_type, g).to(x.device).T
+        offs = offsets(blocks, ggml_type, g) if offs is None else offs
+        y += corr @ offs.to(x.device, dtype).T
     return y

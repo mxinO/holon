@@ -67,3 +67,20 @@ def test_a_planted_tier_a_bug_moves_the_scores(files, tiny_prompts, gold, clean,
     with PLANTS[plant]():
         r = compare(gold, _tier_a(files[0], tiny_prompts))
     assert r.overall.kl_p99 > 100 * clean.kl_p99, r.table()
+
+
+@pytest.mark.parametrize("kernel_path", ["mmq", "mmvq"])
+def test_tier_b_floor_rounds_every_quantized_linear_input_to_q8_1(files, tiny_checkpoint, tiny_prompts, gold,
+                                                                  kernel_path):
+    from holon_judge import q8_1
+
+    model = judge_gguf.hf_model(files[0], tiny_checkpoint)
+    types = judge_gguf.emulate_q8_1(model, files[0], kernel_path)
+    assert set(types) == {n for n, m in model.named_modules() if isinstance(m, torch.nn.Linear)}
+    proj = model.model.layers[0].mlp.down_proj
+    x = torch.randn(3, proj.in_features)
+    want = q8_1.quantize(x, q8_1.blocking("q8_0", kernel_path)).float() @ proj.weight.T
+    torch.testing.assert_close(proj(x), want, rtol=0, atol=1e-6)
+    floor = golden.record(str(files[0]), tiny_prompts, config=str(tiny_checkpoint), q8_1=kernel_path)
+    r = compare(gold, floor).overall
+    assert floor.meta["q8_1"] == kernel_path and 0 < r.kl_p99 < 1e-3
