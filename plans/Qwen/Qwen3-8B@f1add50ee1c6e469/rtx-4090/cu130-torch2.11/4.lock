@@ -1,0 +1,51 @@
+# Written by the holon tools; never edit by hand (AGENTS.md).
+digest = "sha256:cafab283a52061054618c0cd804b9b7168cc28bb34c4a3dc09fd7c974ebfb7c5"
+plan_id = "sha256:47900384fff04d5aff87ff890a3e3ac441010abad1be0e6662ec973a9d7f0226"
+model_id = "Qwen/Qwen3-8B@f1add50ee1c6e469"
+fingerprint_class = "rtx-4090/cu130-torch2.11"
+sm = 89
+recipe = "sha256:59b2e29d6f245caf2e355beb379319447fb2765a6cbfe2c49220064dc341ae4e"
+
+[deploy]
+commit = "c488f64414da2b7901c86671a30dd697c972b50a"
+uv_lock = "none"
+
+[engine]
+cuda_graphs = true
+dtype = "bfloat16"
+max_draft_tokens = 0
+max_model_len = 8192
+max_seqs = 64
+max_step_tokens = 4096
+overlap = true
+page_size = 16
+prefix_cache = true
+source = "hf_safetensors"
+
+[snapshot]
+trace = "sha256:e415cb9897d70b92c5aad786095bef4dbc9e7d760f4c98ee6029cb612eb15897"
+uncovered = []
+
+[units]
+holon = { src = "sha256:4ec1be29fe41d6795216c2b00c9f41a1a5f850359fc62018780f63624fcb19f3", version = "0.0.1" }
+"kernels.flashinfer" = { src = "sha256:0124daddd0a977d4dcf2a9bab28233967b69da30dcb3a2dbe0e0412d43e2b06d", version = "1.0.0" }
+"kernels.triton_attn" = { src = "sha256:cf01b493c8b9527fdcaeb09c05b51cf77ecfe293563ee93a7f8c25045cbc70d1", version = "1.0.0" }
+"models.qwen3" = { src = "sha256:eb2732850055da1fba4541eb3a21c5a0c7a298fd1bf6c99a1fa1d23670b8a45b", version = "1.0.0" }
+"std.blocks" = { src = "sha256:91c02d82c532b18dfe6d7485f3d8372d5448b321a905736cfd352eda5a793a46", version = "1.0.0" }
+"std.ffn" = { sem = "sha256:3d659257417ee8d6db9940788a3c20c14c4c31282948b5bc8ab32aa375a499fa", src = "sha256:ca0a8fd8ea3112368af9f22104c1fce2c6de5aff6cfeb5823ecf3178726bf46b", version = "1.0.0" }
+"std.mixers.gqa" = { sem = "sha256:7c99653b452b11280e4ab069399a8e5452f02eaa2246458f6d2491797e479cbc", src = "sha256:5cccca308ec230c5d9f7f477cac9db3adb238ac806c806ea181825afd50c6f5a", version = "1.0.0" }
+"std.ops" = { sem = "sha256:ef3810eb577e185a91ebc58be5ed3aa3427761a68b467f3000a22d534f3e65b9", src = "sha256:2b6c99bf6685dce493a6c8275d7df457485f82fb4664280f8f5da1fbb8f31813", version = "1.0.0" }
+"std.sampling" = { sem = "sha256:3f9a80781e878ec96e0bc4ed2ec5fd13a51f1332899a19467dad5fd8328e597b", src = "sha256:383a6dc9383aaa42bc1ae948809de77b228731d8c9fcf9f6ebfbf01163079d09", version = "1.0.0" }
+"std.state.paged" = { src = "sha256:850bebdf9b6b45a55f289248171e5ca619bd4a10656c422f30fbc2d6d7a8008b", version = "1.0.0" }
+"std.weights.hf" = { src = "sha256:952e602a295074539dd306bf73c8eaf9c568efe80a3255ededbd39c3176a9d2c", version = "1.0.0" }
+
+[sites]
+"kv/attention.paged_decode@1" = { config = { facts = { head_dim = 128, heads = 32, kv_dtype = "bfloat16", kv_heads = 8, layout = "kv.hnd", max_seqs = 64, page = 16, q_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"kv/attention.paged_prefill@1" = { config = { facts = { head_dim = 128, heads = 32, kv_dtype = "bfloat16", kv_heads = 8, layout = "kv.hnd", max_seqs = 64, page = 16, q_dtype = "bfloat16" }, props = ["deterministic", "needs_host_lens"] }, impl = "kernels.flashinfer" }
+"kv/attention.paged_verify@1" = { config = { facts = { head_dim = 128, heads = 32, kv_dtype = "bfloat16", kv_heads = 8, layout = "kv.hnd", max_seqs = 64, page = 16, q_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.ffn.swiglu[inter=12288]/silu_mul@1" = { config = { facts = { dtype = "bfloat16", inter = 12288 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.rmsnorm[dim=128]/add_rmsnorm@1" = { config = { facts = { dim = 128, dtype = "bfloat16", eps = 1e-06, offset = 0.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.rmsnorm[dim=128]/rmsnorm@1" = { config = { facts = { dim = 128, dtype = "bfloat16", eps = 1e-06, offset = 0.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.rmsnorm[dim=4096]/add_rmsnorm@1" = { config = { facts = { dim = 4096, dtype = "bfloat16", eps = 1e-06, offset = 0.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.rmsnorm[dim=4096]/rmsnorm@1" = { config = { facts = { dim = 4096, dtype = "bfloat16", eps = 1e-06, offset = 0.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.rope[head_dim=128]/rope@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, max_positions = 8192, rotary_dim = 128, theta = 1000000 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
