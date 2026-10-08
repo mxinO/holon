@@ -266,6 +266,36 @@ supported type vs `dequant_ref`; L2 bounded vs a golden recorded from `dequant_r
 **first 16 GB consumer data point**: Qwen3-8B Q4_K_M and IQ3_XXS on RTX 5080 with ≥ 64K KV tokens; decode
 tok/s vs llama.cpp (`llama-server`) on the same card and quant recorded.
 
+### 4.1 Status (2026-10-08): acceptance met
+
+Design and evidence: `docs/m01-gguf.md` (rev 3.1); records in `evidence/` and `judge/results/`, locks in `plans/`.
+Qwen3-8B, unsloth `Qwen3-8B-GGUF` Q4_K_M and UD-IQ3_XXS. Built differently from the work list above, by decision
+in the design: the GGUF file is self-contained (no HF base model or config), there is no `dialects/ggml` (the
+kernels read the stored blocks, `gguf.native`; gguf-py dequantizes for the judge and L0), and references never
+serve (test-only `holonlm-testing`).
+
+| # | Result |
+|---|---|
+| 1 | `models/qwen3` adds only the GGUF weight map, `arch.gguf.qwen3` and a bundle built from the weight source; the bf16 recipe hash is unchanged (the bf16 locks re-propagated with no `recipe` change). GGUF is self-contained: configuration, tokenizer, chat template and stop set come from the file and match the HF checkpoint (tokenization, agent transcripts with tools and reasoning, stop set) |
+| 2 | L0 for the 18 supported types (q8_1-emulated references per kernel path, mmq schedules asserted by the kernels that launch, mmvq rows 1–9, bit-exact `convert`/`get_rows`, compute-sanitizer clean with no weight padding): sm_86 and sm_89 118 passed (the PDL test needs sm_90+), sm_120a 119 passed |
+| 3 | Per-tensor gate: all 399 tensors of both files ≤ 0.5 NMSE (worst 0.0065 Q4_K_M, 0.104 UD-IQ3_XXS). Tier A (dense dequantized weights, A5000): both pass (KL p99 4.62e-3 / 4.73e-3 vs floors 5.47e-3 / 5.35e-3); rope θ 9e5, transposed `attn_output`, gate/up swap and Q/K permutation all fail. Tier B (production kernels; floors = HF bf16 with q8_1 emulated per path, recorded on the A5000): prefill (mmq) and decode (mmvq: 8 tokens a step on sm_86, 5 on sm_120) pass for both files on the A5000 and the RTX 5080; one tensor read as the wrong type and a stale q8_1 workspace (every 97th call) fail; a rare stale workspace (every 9973rd call) fails the decode run and passes prefill, where it fired once — the mmq floor is 3× looser than mmvq's (llama.cpp's mmq pairs the Q4_K min-term with unquantized sums), so prefill sensitivity comes from Tier A and L0. Quantization error vs the bf16 checkpoint (reported): Q4_K_M KL p50 1.3e-3, top-1 95.7%, ΔPPL +1.6%; UD-IQ3_XXS 1.1e-2, 88.8%, +9.5% |
+| 4 | bf16 Qwen3-8B locks on rtx-a5000, rtx-4090, rtx-5090: snapshot traces byte-identical, L2 passing, changes limited to `[units]` source pins; approved |
+| 5 | GGUF snapshot trace (Q4_K_M) run-identical over 3 fresh engines on rtx-a5000 and rtx-5080 |
+| 6 | RTX 5080: both files serve 64K-token contexts — UD-IQ3_XXS with 75K KV tokens at `max_seqs` 64, Q4_K_M with 65.5K at `max_seqs` 48 (64 leaves 64.1K: the graph pool is 0.50 GiB, not the estimated 0.25). In-process bars vs llama-bench at the same commit: pp512 1.06× / 1.08×, tg128 0.977× / 0.973× (Q4_K_M 8291 / 155.0 t/s, UD-IQ3_XXS 8595 / 206.0); host CPU 0.36 ms per decode step. Serving vs `llama-server` (Holon over its own HTTP frontend; same settings): batch-1 TPOT equal (6.52 ms Q4_K_M), TTFT lower on every trace, decode throughput 1.27× at batch 8 and 2.3× at batch 48–64; agent trace TTFT / TPOT p50 57 / 7.4 ms vs 228 / 9.0 ms (Q4_K_M) |
+| 7 | GGUF locks for rtx-a5000 and rtx-5080 (`unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243`, `…/Qwen3-8B-UD-IQ3_XXS@495e28b50d2373d0`); the 5080 locks plan its deployment settings (`max_step_tokens` 2048, `max_seqs` 48 / 64; `memory_fraction` 0.98 shapes no output, so it is a deployment flag outside the plan); all four tuned to Triton paged decode |
+
+Found on the way:
+- Any prompt longer than `max_step_tokens` failed on the GPU: a step of mid-prompt chunks ran the head on zero rows,
+  which FlashInfer's rmsnorm rejects; the CPU reference kernels accepted it, so no M0 test saw it (fixed: no head
+  without sampled rows, with a regression test).
+- `llama-server` streams no chunk for a token whose text ends in an incomplete UTF-8 character; the bench counts its
+  tokens by `tokens_predicted`.
+
+Carried forward:
+- The design's KV estimate for the 5080 missed the CUDA-graph pool; quantized KV (M0.3b) is the remedy if a larger
+  `max_seqs` is needed at 64K.
+- A Tier B prefill run cannot see rare kernel faults (its floor is loose by construction); L0 and Tier A cover them.
+
 ## 5. M0.2 — model isolation + MoE (Qwen3-30B-A3B GGUF)
 
 Work: `models/qwen3_moe` — `recipe.py` copied from qwen3 with `derived_from` (diff ≤ ~15 lines: MoE ffn via

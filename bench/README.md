@@ -9,14 +9,15 @@ Same GPU, same model, same requests; every engine in its own environment; client
 | `workloads.py` | deterministic workload specs → `traces/*.jsonl` (lengths and turns only; token ids are drawn from a seeded stream at replay time) |
 | `driver.py` | the `Backend` protocol and the trace replayer (arrivals, multi-turn dependencies, per-token client timestamps, per-step wall/CPU time) |
 | `backends/{holon,minisgl,nanovllm}.py` | one adapter per engine: `add`, `step`, `has_work`, `info` |
+| `backends/http.py`, `llamaserver.py`, `holon_http.py` | engines behind a server (llama.cpp's `llama-server`; Holon over its OpenAI frontend), streamed; their "steps" are client polls, so only request timings compare |
+| `llama_bench.py` | Holon's in-process llama-bench (pp512, tg128 at depths), batch 1 |
 | `worker.py` | runs one backend over a list of traces inside that backend's venv; writes raw JSON |
 | `run.py` | orchestrator: ABAB rounds of fresh worker processes, summaries, evidence record |
 | `setup_baselines.sh` | pinned baseline checkouts and venvs under `bench/.envs/` (gitignored) |
 | `decode_kernels.py` | E2's per-kernel decode step micro-benchmark (separate from the harness) |
 
-`workloads.py`, `driver.py` and `worker.py` are stdlib-only so they run unchanged in every engine's environment. An
-HTTP backend (Holon's OpenAI frontend, or any server) fits the same protocol: `add` posts a streaming request,
-`step` returns the chunks that arrived.
+`workloads.py`, `driver.py` and `worker.py` are stdlib-only so they run unchanged in every engine's environment. The
+HTTP backends fit the same protocol: `add` posts a streaming request, `step` returns the tokens that arrived.
 
 ## Baselines
 
@@ -60,6 +61,17 @@ rejects temperature 0, so it samples at 1e-5 (argmax in practice); the others ar
 - Evidence: `evidence/bench_<workload>_<gpu-class>_<date>.json` with the command, commit, GPU class, baseline
   commits and package versions, engine configs and KV capacities, per-request rows and summaries. Raw per-step
   timings and worker logs stay in `bench/.out/` (gitignored).
+
+## GGUF against llama.cpp (M0.1)
+
+```bash
+# in-process bars, compared with llama-bench -p 512 -n 128 -d 0,256 -ngl 99 -fa on -r 5 on the same file and card
+python bench/llama_bench.py --model <file.gguf> -r 5 --blocking-sync --engine-args "--memory-fraction 0.98"
+# serving: both behind HTTP, same settings; -c = Holon's measured KV tokens
+LLAMA_SERVER=<llama-server> LLAMA_SERVER_CTX=65536 HOLON_SERVE_ARGS="--memory-fraction 0.98" \
+python bench/run.py --name serve --gpu 0 --model <file.gguf> --backends holon_http llamaserver \
+    --max-batch 48 --max-step-tokens 2048 --traces bench/traces/decode_b1.jsonl bench/traces/agent.jsonl
+```
 
 ## Reproduce
 
