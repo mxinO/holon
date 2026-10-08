@@ -160,7 +160,7 @@ and L0 call gguf-py directly.
 - **Streams**: llama.cpp's context creates a private stream (`common.cuh:1519-1526`) that would escape capture; the
   shim injects torch's current stream into the context per call (read every call) for `ggml_cuda_mul_mat_q` and
   `ggml_cuda_mul_mat_vec_q` — one mechanism, llama.cpp's own argument setup kept; `get_rows_cuda` takes a stream
-  directly. Debug builds assert every call arrives on the stream seen at build.
+  directly. The stream invariant this relies on is recorded in §8.
 - **Shim**: ggml-base helpers incl. `ggml_type_name`; `ggml_cuda_info` with true `cc`, `nsm`, `smpbo`, `warp_size`;
   a destructor for the context; zeroed `op_params`; the pool is a bump allocator over our workspace, reset per call,
   256-B aligned, aborting on overflow (never `cudaMalloc`); `get_rows` gets int32 ids.
@@ -306,3 +306,8 @@ kernels: never (D1).
 other decode fallbacks of §4.5 (triggered by measurement); CI-built per-SM extension wheels; per-class `src` pins;
 the engine starting from its lock (deployment settings are flags until then). The pre-tokenizer table lives in
 std, so a new entry changes the `src` of every GGUF lock (acceptable for v0).
+
+Not asserted, an invariant of `kernels.ggml_cuda`: every `qlinear` instance with the same `in` shares one q8_1/fixup
+workspace, so no two such calls may be in flight on different streams. The engine runs a model step on one stream
+(eager or graph replay), which satisfies it; a second stream (e.g. overlapping two models or steps on the device)
+needs a workspace per stream. A per-call stream assert would not detect a violation, so there is none.

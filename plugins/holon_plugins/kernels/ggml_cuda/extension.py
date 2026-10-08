@@ -3,12 +3,14 @@ linked into a thin torch module. Built ahead of time by `prebuild` into the user
 changes the binary; the engine only loads it and never compiles (M0.1 design §4.4)."""
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import importlib.util
 import pathlib
 import re
 import shutil
 import subprocess
+import sys
 from types import ModuleType
 
 import torch
@@ -42,11 +44,12 @@ def cuda_major() -> int:
 
 
 def key(sm: int) -> str:
-    """The cache key: vendored + own sources, flags, target SM, CUDA major and torch (the module links libtorch)."""
+    """The cache key: vendored + own sources, flags, target SM, CUDA major, the Python ABI and torch (the module
+    links libtorch)."""
     h = hashlib.sha256(" ".join((*NVCC_FLAGS, gencode(sm))).encode())
     for f in sorted(p for d in (VENDOR, CSRC) for p in d.rglob("*") if p.is_file()):
         h.update(str(f.relative_to(HERE)).encode() + b"\0" + f.read_bytes())
-    return f"sm{sm}-cu{cuda_major()}-torch{torch.__version__}-{h.hexdigest()[:16]}"
+    return f"sm{sm}-cu{cuda_major()}-{sys.implementation.cache_tag}-torch{torch.__version__}-{h.hexdigest()[:16]}"
 
 
 def module_path(sm: int) -> pathlib.Path:
@@ -68,7 +71,8 @@ def load(sm: int) -> ModuleType:
 
 
 def build(sm: int, jobs: int, verbose: bool = False) -> pathlib.Path:
-    """Compile the static library with ninja, then link the torch module; returns the module path."""
+    """Compile the static library with ninja, then link the torch module; returns the module path. Concurrent
+    builds of one key take turns (a lock file in its directory)."""
     from torch.utils import cpp_extension
 
     nvcc = shutil.which("nvcc") or (cpp_extension.CUDA_HOME and str(pathlib.Path(cpp_extension.CUDA_HOME, "bin/nvcc")))
@@ -80,6 +84,15 @@ def build(sm: int, jobs: int, verbose: bool = False) -> pathlib.Path:
         raise RuntimeError(f"kernels.ggml_cuda: nvcc is CUDA {major}, torch is built for CUDA {cuda_major()}")
     out = CACHE / key(sm)
     (out / "obj").mkdir(parents=True, exist_ok=True)
+    with open(out / "build.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        _build(sm, nvcc, out, jobs, verbose)
+    return module_path(sm)
+
+
+def _build(sm: int, nvcc: str, out: pathlib.Path, jobs: int, verbose: bool) -> None:
+    from torch.utils import cpp_extension
+
     flags = " ".join((*NVCC_FLAGS, gencode(sm), *(f"-I{d}" for d in INCLUDES)))
     lines = [f"rule cu\n  command = {nvcc} {flags} -MD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n",
              "rule ar\n  command = rm -f $out && ar rcs $out $in\n"]
@@ -94,4 +107,3 @@ def build(sm: int, jobs: int, verbose: bool = False) -> pathlib.Path:
     cpp_extension.load(name=NAME, sources=[str(CSRC / "torch_ext.cpp")], extra_include_paths=[str(CSRC)],
                        extra_cflags=["-O2"], extra_ldflags=[str(out / "libggml_cuda.a")],
                        build_directory=str(out / "ext"), with_cuda=True, verbose=verbose)
-    return module_path(sm)

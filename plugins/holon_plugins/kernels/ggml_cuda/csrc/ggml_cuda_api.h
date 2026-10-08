@@ -21,6 +21,10 @@ size_t holon_ggml_row_bytes(int type, int64_t in);
 int holon_ggml_use_mmvq(int type, int64_t rows);
 int holon_ggml_use_mmq(int type, int64_t rows);
 
+// How llama.cpp's mmq runs `out` x `rows` here (its J choice and stream-k grid, mirrored for tests): 0 = tiling,
+// 1 = stream-k with one block per tile (no fixup), 2 = stream-k with the fixup pass. Sets the tile size I x J.
+int holon_ggml_mmq_schedule(int type, int64_t out, int64_t rows, int * tile_i, int * tile_j);
+
 // Workspace bytes for calls with `in` values per row and at most `rows` rows (any type), on the current device.
 size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows);
 

@@ -77,6 +77,29 @@ int holon_ggml_use_mmvq(int type, int64_t rows) { return ggml_cuda_should_use_mm
 
 int holon_ggml_use_mmq(int type, int64_t rows) { return ggml_cuda_should_use_mmq((ggml_type) type, device_cc(), rows, 0); }
 
+int holon_ggml_mmq_schedule(int type, int64_t out, int64_t rows, int * tile_i, int * tile_j) {
+    const auto & dev = ggml_cuda_info().devices[ggml_cuda_get_device()];
+    const bool fallback = out % 128 != 0;                              // as ggml_cuda_mul_mat_q
+    int J_best = 0, ntx_best = INT_MAX;                                // as mul_mat_q_switch_J
+    for (int J = 8; J <= 128 && ntx_best > 1; J += 8) {
+        const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config((ggml_type) type, J, fallback, dev.cc);
+        if (c.type != GGML_TYPE_COUNT && mmq_get_nbytes_shared(c, dev.cc) <= dev.smpbo && (rows + J - 1)/J < ntx_best) {
+            J_best = J;
+            ntx_best = (rows + J - 1)/J;
+        }
+    }
+    const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config((ggml_type) type, J_best, fallback, dev.cc);
+    *tile_i = c.I;
+    *tile_j = c.J;
+    if (!c.stream_k) {
+        return 0;
+    }
+    const int64_t ntiles = (out + c.I - 1)/c.I * ntx_best;           // as launch_mul_mat_q
+    const int64_t waves = (ntiles + dev.nsm - 1)/dev.nsm;
+    const int64_t nblocks = 100*ntiles/(dev.nsm*waves) >= 90 ? ntiles : dev.nsm;
+    return ntiles % nblocks == 0 ? 1 : 2;
+}
+
 size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows) {
     const int64_t in_padded = GGML_PAD(in, MATRIX_ROW_PADDING);
     // mmq's q8_1 activations plus its tile padding (J_max <= 512 rows); mmvq's block_q8_1 need less

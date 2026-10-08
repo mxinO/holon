@@ -87,13 +87,19 @@ class QEmbedding:
         return y
 
 
+def _built_here() -> bool:
+    """Whether the current device's SM is one we build (selection passes no SM fact; `requires` is a range)."""
+    major, minor = torch.cuda.get_device_capability()
+    return 10 * major + minor in extension.ARCHS
+
+
 def _supports_qlinear(f: dict) -> bool:
-    return (ggml_type(f["layout"]) is not None and f["in"] % 256 == 0 and f["act_dtype"] in DTYPES
+    return (_built_here() and ggml_type(f["layout"]) is not None and f["in"] % 256 == 0 and f["act_dtype"] in DTYPES
             and f["out_dtype"] in DTYPES)
 
 
 def _supports_qembedding(f: dict) -> bool:
-    return ggml_type(f["layout"]) is not None and f["hidden"] % 256 == 0 and f["dtype"] in DTYPES
+    return _built_here() and ggml_type(f["layout"]) is not None and f["hidden"] % 256 == 0 and f["dtype"] in DTYPES
 
 
 class Plugin:

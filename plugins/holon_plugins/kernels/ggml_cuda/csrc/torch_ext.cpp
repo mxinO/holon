@@ -58,6 +58,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         const c10::cuda::CUDAGuard guard(device);
         return holon_ggml_use_mmq(type, rows) != 0;
     });
+    m.def("mmq_schedule", [](int64_t device, int64_t type, int64_t out, int64_t rows) {
+        const c10::cuda::CUDAGuard guard(device);
+        int tile_i, tile_j;
+        const int kind = holon_ggml_mmq_schedule(type, out, rows, &tile_i, &tile_j);
+        return std::make_tuple(kind, tile_i, tile_j);
+    });
     m.def("workspace_bytes", [](int64_t device, int64_t in, int64_t rows) {
         const c10::cuda::CUDAGuard guard(device);
         return holon_ggml_workspace_bytes(in, rows);
