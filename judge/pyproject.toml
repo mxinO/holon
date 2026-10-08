@@ -1,6 +1,7 @@
 [project]
 name = "holonlm-judge"
 version = "0.0.1"
+license = "Apache-2.0"
 requires-python = ">=3.12"
 description = "Holon judge harness: op oracles, goldens, snapshots, perf (out-of-process client)"
 dependencies = ["holonlm", "gguf"]  # gguf-py: the GGUF oracle (M0.1); torch, transformers, safetensors, huggingface_hub come from the environment

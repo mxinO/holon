@@ -22,11 +22,26 @@ Read `docs/design.md` (architecture) and `docs/plan.md` (milestones) first.
 ## Implementation policy
 
 - References (mini-sglang, nano-vllm, vLLM, SGLang, FreeToken, Strata, kvmem) are **studied, not copied**. Write
-  our own plugin-native code. Only kernels may be borrowed, under design §5.6, with license and provenance recorded.
+  our own plugin-native code. Only kernels may be borrowed, under design §5.6, as "Third-party code" below says.
 - No claim without a measurement. Every performance claim gets an evidence record (command, fingerprint class,
   plan_id or commit, raw numbers) under `evidence/` or the spike's `results/`.
 - Every bug fix comes with a test that fails before and passes after.
 - Never edit `judge/` goldens/snapshots or `plans/` locks by hand; they are written by the tools.
+
+## Third-party code
+
+Holon is Apache-2.0 (`LICENSE`, `NOTICE`). Code from elsewhere — vendored, copied or adapted, even a few lines — is
+allowed only under MIT, BSD or Apache-2.0, and is declared where it lands (`scripts/ci/check_provenance.py`):
+
+- **The file says so**, in one line near its top: `Adapted from <project> <commit> (<upstream path>), <license>`
+  (or "copied from"). Vendored trees keep their upstream `LICENSE` and are fetched by a script at a pinned commit,
+  with our changes in a patch, never edited by hand.
+- **The plugin declares it**: its manifest's `[provenance]` gives `source`, `commit`, `license` and every vendored or
+  adapted file.
+- **`THIRD_PARTY_NOTICES.md` lists it**: project, commit, license and copyright, the repository paths, and the
+  license text for every non-Apache license.
+
+Studying code to write our own needs none of this; a comment naming what we followed is enough.
 
 ## Environment
 

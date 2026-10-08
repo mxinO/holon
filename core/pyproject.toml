@@ -1,6 +1,7 @@
 [project]
 name = "holonlm"
 version = "0.0.1"
+license = "Apache-2.0"
 requires-python = ">=3.12"
 description = "Holon core: plugin ABI (holon.api) and runtime (holon.core)"
 dependencies = []  # torch/triton come from the environment (see README)

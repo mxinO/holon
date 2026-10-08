@@ -1,6 +1,7 @@
 [project]
 name = "holon-workspace"
 version = "0.0.0"
+license = "Apache-2.0"
 requires-python = ">=3.12"
 description = "Holon uv workspace root (not a distributable package)"
 

@@ -1,6 +1,7 @@
 [project]
 name = "holonlm-plugins"
 version = "0.0.1"
+license = "Apache-2.0"
 requires-python = ">=3.12"
 description = "Holon first-party plugins: models, kernels, dialects, frontends"
 dependencies = ["holonlm"]  # std units are reached through Ref, never imported
