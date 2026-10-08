@@ -11,6 +11,13 @@ def rmsnorm(x: torch.Tensor, weight: torch.Tensor, eps: float, offset: float = 0
     return (y * (weight.float() + offset)).to(x.dtype)
 
 
+def add_rmsnorm(x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, eps: float,
+                offset: float = 0.0) -> tuple[torch.Tensor, torch.Tensor]:
+    """The `add_rmsnorm@1` oracle: `(rmsnorm(residual + x), residual + x)`."""
+    residual = residual + x
+    return rmsnorm(residual, weight, eps, offset), residual
+
+
 def rope_neox(x: torch.Tensor, positions: torch.Tensor, theta: float, rotary_dim: int | None = None) -> torch.Tensor:
     """Rotate the first `rotary_dim` dims of `x` [tokens, heads, head_dim] in neox (half-split) layout."""
     rd = rotary_dim or x.shape[-1]

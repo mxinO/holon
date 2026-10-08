@@ -92,7 +92,7 @@ class BuildCtx(Protocol):
 
     def state(self, spec_name: str, layer: int) -> tuple[StateSpec, Pool] | None:
         """The spec and pool holding state `spec_name` for `layer` (e.g. its KV pages); None in a model-only build,
-        where units run their stateless reference path."""
+        where units run without state (attention over each whole sequence)."""
 
     def static(self, name: str, shape: tuple[int, ...], dtype: torch.dtype) -> torch.Tensor:
         """A static device buffer, stable across graph replays (design §7.4)."""

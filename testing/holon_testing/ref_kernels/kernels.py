@@ -19,8 +19,7 @@ class RMSNorm:
 
 class AddRMSNorm(RMSNorm):
     def __call__(self, x, residual, weight):
-        residual = residual + x
-        return ops.rmsnorm(residual, weight, self.eps, self.offset), residual
+        return ops.add_rmsnorm(x, residual, weight, self.eps, self.offset)
 
 
 class Rope:

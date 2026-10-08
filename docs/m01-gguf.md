@@ -50,9 +50,11 @@ Non-goals: MoE (`mul_mat_id`, M0.2); quantized KV (M0.3b); HF quant formats (v1)
 judge only. No reference is registered as a kernel: the `kernel.*` provides of `std.ops`, `std.ffn` and
 `std.mixers.gqa` are removed, and kernel selection fails at startup on a missing production kernel, naming op, facts
 and device (invariant 7). Production units stop calling `reference.py` directly (`Linear`/`LMHead` use `F.linear` in
-`units.py`; gqa's state-free path gets a production path or becomes test-only). Tests — CPU tiny models and the GPU
-oracle/L0 tests that pin the references — get them from a fixture plugin `plugins/tests/fixtures/ref_kernels`
-(cpu + cuda), injected by a shared conftest helper, never installed with Holon.
+`units.py`; a model built without state selects `attention.causal@1`). Tests get the references as CPU-only kernels
+from the test-only distribution `holonlm-testing` (`testing.ref_kernels`): an entry point installed in the
+development environment only, so engines in subprocesses find it too; GPU tests call its adapters directly as
+oracles; an import contract keeps production code from importing it. After D1 no production CPU kernels exist, so
+a CPU lock is a test artifact by construction.
 
 **D2 — Quantized weights are adopted at load time.**
 - `build_model` builds on meta without `to_empty`.
@@ -102,7 +104,7 @@ an ordinary activation (caching allocator / graph pool), never a workspace. Fusi
 | `std/holon_std/ffn`, `mixers/gqa` | composites call merged units (not `F.linear` on a merged weight); SwiGLU uses the selected `silu_mul`; KV index math moves into gqa's `Planner.prepare_device` (once per step, not per layer); gqa's state-free path becomes test-only (`units.py` only) |
 | `plugins/holon_plugins/kernels/ggml_cuda` | new: vendored llama.cpp subset + patch, shim, C API, torch wrapper, prebuild; `kernel.qlinear@1`, `kernel.qembedding@1` |
 | `plugins/holon_plugins/models/qwen3` | `GGUF_WEIGHTS`, `arch.gguf.qwen3`, `bundle(source)` |
-| `plugins/tests/fixtures/ref_kernels` | new (D1) |
+| `testing/holon_testing/ref_kernels` | new, test-only distribution (D1) |
 | `judge` | GGUF golden (own name map, gguf-py direct), q8_1 emulator (shared with L0), Tier A wrapper source, planted bugs |
 | `bench` | in-process llama-bench equivalent; `llama-server` backend |
 | `core` | D1 (no reference selection), D2, D4; `max_step_tokens` in `ctx.options`; CLI flags for `str \| None` fields |
@@ -271,7 +273,7 @@ Same three reviewers throughout; each step ends green.
 
 | # | Step | Deliverable / test | Days |
 |---|---|---|---|
-| 0 | D1: no reference selection; fixture plugin + conftest helper; units stop calling `reference.py` | full suite green via the fixture; missing provider → startup error naming it | 1 |
+| 0 | D1: no reference selection; test-only `holonlm-testing` plugin; units stop calling `reference.py` | full suite green via the fixture; missing provider → startup error naming it | 1 |
 | 1 | Core D2/D4; `weights/gguf` (reader, detect, config, tokenizer + tests vs HF, identity); `std.ops` adopt + `qlinear`/`qembedding` references | CPU: tiny synthetic Q8_0/Q4_0 GGUF (gguf-py writer) vs dense via the fixture; tokenizer tests; bf16 snapshot byte-identical | 2.5 |
 | 2 | Qwen3 `GGUF_WEIGHTS` + bundle(source); CLI `.gguf`; tools/judge resolve; golden + per-tensor gate; Tier A source | Tier A L2 on A5000 for both files; Tier A planted bugs fail | 1.5 |
 | 3 | `kernels.ggml_cuda` (parallel with 1–2): PDL measurement on the 5080; link test sm_86/89/120a, which also checks that `vendor.patch` applies; vendor + patch + shim + C API + wrapper + prebuild; q8_1 emulator | L0 (all of §4.6) on sm_86 and sm_120a; graph capture (incl. PDL) on sm_120a; determinism; FMA decision | 6 |
