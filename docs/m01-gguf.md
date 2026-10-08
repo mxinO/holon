@@ -1,6 +1,6 @@
 # M0.1 — GGUF quantized models: design and implementation plan
 
-Status: **revision 3 for review** (2026-10-08). Revisions 1 and 2 were challenged by three reviewers
+Status: **revision 3.1 for review** (2026-10-08). Revisions 1 and 2 were challenged by three reviewers
 (architecture/API, kernels/performance, numerics/judge); every finding is resolved below or deferred in §8. Scope:
 plan §4. Builds on design §5.1, §5.4–5.6 and spike S2 (`spikes/s2_gguf/README.md`).
 
@@ -12,11 +12,13 @@ kernels, and take the first 16 GB consumer data point. Acceptance:
 1. The `models/qwen3` diff adds only the GGUF weight map, the `arch.gguf.qwen3` resource and the bundle taking its
    weight source. `canonical_hash(recipe(cfg, "hf_safetensors"))` is unchanged.
 2. L0 passes for every supported type (§4.6) on sm_86, sm_89 and sm_120a.
-3. L2 Tier A and Tier B (§4.6) pass for both files on rtx-a5000 and rtx-5080; each planted bug fails at the level
-   recorded in §4.6; the per-tensor gate passes; the quantization error vs bf16 is reported.
+3. L2 (§4.6) passes for both files — Tier A on rtx-a5000 (dense bf16 8B does not fit 16 GB), Tier B on rtx-a5000
+   and rtx-5080; each planted bug fails at the level recorded in §4.6; the per-tensor gate passes; the quantization
+   error vs bf16 is reported.
 4. bf16 Qwen3-8B on rtx-a5000, rtx-4090, rtx-5090: `propagate` shows a snapshot trace byte-identical to the current
    lock and L2 passing; lock changes are limited to `[units]` lines (`src`, and `sem` of `std.ops`, whose
-   `reference.py` gains the quantized ops); `[sites]`, `[engine]` and the recipe hash unchanged; approved once.
+   `reference.py` gains the quantized ops; `std.ffn` and `std.mixers.gqa` `reference.py` stay byte-identical);
+   `[sites]`, `[engine]` and the recipe hash unchanged; approved once.
 5. GGUF snapshot trace run-identical across 3 fresh engines (Q4_K_M; rtx-a5000 and rtx-5080).
 6. RTX 5080: both files with ≥ 64K KV tokens (§4.7). Performance vs llama.cpp on the same card, file and commit
    (§4.8): in-process pp512 and tg128 against the S2 llama-bench bars (≥ 0.8×: Q4_K_M ≥ 6380 t/s pp512, ≥ 127 t/s
@@ -39,7 +41,8 @@ Non-goals: MoE (`mul_mat_id`, M0.2); quantized KV (M0.3b); HF quant formats (v1)
 - **llama.cpp needs nothing but the file**: tokenizer from `tokenizer.ggml.tokens/merges/token_type` with a
   pre-tokenizer regex chosen by `tokenizer.ggml.pre` from a built-in table (`src/llama-vocab.cpp:383`, `qwen2`),
   CONTROL/USER_DEFINED tokens matched atomically; stop set = eos/eot plus CONTROL tokens whose text is a known
-  end-of-turn marker (`llama-vocab.cpp:3008-3037`).
+  end-of-turn marker (`llama-vocab.cpp:3008-3037`), plus the FIM pad/repo/file-sep ids. It does not apply Unicode
+  normalization, which HF's Qwen3 `tokenizer.json` does (NFC).
 
 ## 3. Decisions
 
@@ -64,22 +67,29 @@ oracle/L0 tests that pin the references — get them from a fixture plugin `plug
 **D3 — A GGUF file is self-contained, as in llama.cpp.** The source builds the tokenizer from the file with
 `tokenizers` primitives — byte-level BPE from tokens + merges; CONTROL → special added tokens; USER_DEFINED →
 atomic added tokens; UNUSED unreachable; the pre-tokenizer regex from a small std table keyed by
-`tokenizer.ggml.pre` (unknown → error). transformers' GGUF converter is not used (it drops USER_DEFINED tokens,
-reports the wrong eos, admits the 267 UNUSED entries). Stop set = eos/eot ∪ CONTROL tokens matching llama.cpp's
-end-of-turn list. The chat template is the file's. No base model at runtime.
+`tokenizer.ggml.pre` (unknown → error), including the normalizer the original tokenizer uses — NFC for `qwen2`,
+deliberately unlike llama.cpp, so decomposed input encodes as the model was trained. transformers' GGUF converter is
+not used (it drops USER_DEFINED tokens, reports the wrong eos, admits the 267 UNUSED entries). Stop set = eos/eot ∪
+CONTROL tokens whose text is on llama.cpp's end-of-turn list (not its FIM additions), kept in the existing
+`WeightSource.eos_token_ids`. The chat template is the file's. No base model at runtime.
 
 **D4 — Sources are detected from manifests.** Each weight-source plugin declares `detect` patterns in its manifest
-(`["*.gguf"]`, `["config.json"]`); the core matches them without importing anything (exactly one match, else an
-error). `EngineConfig.source = None` (detect); the plan records the resolved kind only — the bf16 locks keep
+(`["*.gguf"]`, `["config.json"]`), matched against a path's file name or the files inside a directory; the core
+matches them without importing anything (exactly one match, else an error; test fixtures declare none). `EngineConfig.source = None` (detect); the plan records the resolved kind only — the bf16 locks keep
 `source = "hf_safetensors"` and never pin the GGUF source.
 
 **D5 — A quantized linear is dtype-preserving: bf16 in, bf16 out**, exactly like the dense one, so no neighbour,
-residual or KV write changes. The ported kernels take and return f32 (`mmq.cu:132-133`, `mmvq.cu:1437-1438`);
-a small reviewed `vendor.patch` makes the activation quantizers (`quantize_q8_1`, `quantize_mmq_q8_1`) read bf16 and
-`mmvq` write bf16 (its two store sites, `mmvq.cu:840,1001`). Decode therefore launches what llama.cpp launches
-(quantize + mmvq per linear); prefill (`mmq`) writes f32 into the workspace and one cast writes bf16 (negligible
-against its compute). Fusing f32 into the neighbours (revision 2's D5) is the fallback, triggered only by a measured
-miss of the tg128 bar (§8).
+residual or KV write changes; `lm_head` takes `out_dtype = float32` (its logits are f32 anyway). The ported kernels
+take and return f32 (`mmq.cu:132-133`, `mmvq.cu:1437-1438`). `vendor.patch` (≈ 60–80 mechanical lines in
+`quantize.cu/.cuh`, `mmq.cu`, `mmvq.cu`): the activation quantizers read bf16 (`quantize_q8_1` scalar loads;
+`quantize_mmq_q8_1` 8-byte loads of 4 bf16, alignment asserted; launchers take `const void *` + type); `mmvq` writes
+bf16 or f32 by a runtime flag passed as `void *dst` down its chain (no new template instantiations), branching at its
+store; the callers' F32 asserts follow. So mmvq calls (decode at rows ≤ the type's threshold) launch what llama.cpp
+launches. `mmq` calls (prefill, and decode buckets above the threshold) write f32 into a per-call buffer and one cast
+writes bf16: ≈ 5 % of a 2048-token prefill step and ≈ 2–3 % of a b8/b64 decode step — inside the bar, stated rather
+than hidden. Prefill runs `mmq` in 512-row chunks, llama.cpp's own ubatch, so that buffer is ≤ 512 × out × 4 B and
+an ordinary activation (caching allocator / graph pool), never a workspace. Fusing f32 into the neighbours (revision
+2's D5) is a fallback, triggered only by a measured miss (§4.5).
 
 ## 4. Design
 
@@ -87,9 +97,9 @@ miss of the tg128 bar (§8).
 
 | package | change |
 |---|---|
-| `std/holon_std/weights/gguf` | new: memmap reader, manifest `detect`, generic llama.cpp keys, tokenizer (D3), identity |
+| `std/holon_std/weights/gguf` | new: memmap reader, manifest `detect`, generic llama.cpp keys, tokenizer (D3), identity; both sources expose `tokenizer()` (a transformers fast tokenizer — HF via `AutoTokenizer`, imported lazily; GGUF wrapping the built `tokenizers.Tokenizer` with its template) and `chat_template()`, so bundles need no format branch |
 | `std/holon_std/ops` | `adopt` on Linear/Embedding/LMHead; `reference.py` gains `qlinear` / `qembedding` over an already-dequantized weight (the ops' `sem`); same-type merges through the kernel |
-| `std/holon_std/ffn`, `mixers/gqa` | composites call merged units (not `F.linear` on a merged weight); SwiGLU uses the selected `silu_mul`; KV index math moves into gqa's `Planner.prepare_device` (once per step, not per layer) |
+| `std/holon_std/ffn`, `mixers/gqa` | composites call merged units (not `F.linear` on a merged weight); SwiGLU uses the selected `silu_mul`; KV index math moves into gqa's `Planner.prepare_device` (once per step, not per layer); gqa's state-free path becomes test-only (`units.py` only) |
 | `plugins/holon_plugins/kernels/ggml_cuda` | new: vendored llama.cpp subset + patch, shim, C API, torch wrapper, prebuild; `kernel.qlinear@1`, `kernel.qembedding@1` |
 | `plugins/holon_plugins/models/qwen3` | `GGUF_WEIGHTS`, `arch.gguf.qwen3`, `bundle(source)` |
 | `plugins/tests/fixtures/ref_kernels` | new (D1) |
@@ -109,11 +119,14 @@ and L0 call gguf-py directly.
   `embedding_length`, `feed_forward_length`, `attention.head_count{,_kv}`, `attention.key_length`, `rope.freq_base`,
   `attention.layer_norm_rms_epsilon`, `context_length`, vocab from the token table, tie = no `output.weight`), floats
   at their shortest float32 form (`9.999999974752427e-07` → `1e-06`), plus the raw arch-prefixed keys under `"gguf"`
-  for model-specific mapping in the model plugin (M0.2/M0.3). A key the recipe needs and the file lacks: error.
+  for model-specific mapping in the model plugin (M0.2/M0.3), which also supplies the fields GGUF never carries
+  (`hidden_act`, `attention_bias`, …) for its architecture. A key the recipe needs and the file lacks: error. Test
+  (tests only): the GGUF-derived config equals HF's `config.json` on every field the recipe reads.
 - **Tokenizer** (D3): `tokenizer()`, `stop_ids()`, `chat_template()`. Tests with the cached `Qwen/Qwen3-8B` (tests
   only): every CONTROL/USER_DEFINED string encodes to its own id (their special flag is not compared: the fim/repo
   tokens are CONTROL in GGUF but non-special in HF); `encode` equals HF's and round-trips on the judge prompts and an
-  adversarial set (whitespace runs, CRLF, long digit runs, CJK, emoji, NBSP, contractions, special tokens in text);
+  adversarial set (whitespace runs, CRLF, long digit runs, CJK, emoji, NBSP, contractions, special tokens in text,
+  NFD / combining characters and Hangul jamo, the `[PAD151669]` text);
   the stop set equals HF's `generation_config` (151645, 151643); the two chat templates render the judge's agent
   transcripts identically or the differences are listed.
 - **Identity**: `<hub repo>/<file stem>@<16 hex>` for hub-cache files (blob name = sha256), else
@@ -122,8 +135,9 @@ and L0 call gguf-py directly.
 
 ### 4.3 Units and merges
 
-`Linear.adopt` / `Embedding.adopt` / `LMHead.adopt`; a tied quantized head selects `qlinear` on the embedding's
-blocks in `finalize_weights`. `Linear.merge` returns `None` when a layout is set unless all units share scheme and
+`Linear.adopt` / `Embedding.adopt` / `LMHead.adopt` upload the parts and record the layout; kernels are selected in
+`finalize_weights`, after merges, so merged-away units leave no site in the lock; a tied quantized head selects
+`qlinear` on the embedding's blocks there too. `Linear.merge` returns `None` when a layout is set unless all units share scheme and
 `in`, in which case rows are concatenated (ggml rows are independent block runs) and the merged unit runs through
 `qlinear`: q+k and gate+up merge in both files, v stays separate where its type differs. Kernel facts: `layout`,
 `in`, `out`, `act_dtype`.
@@ -148,9 +162,10 @@ blocks in `finalize_weights`. `Linear.merge` returns `None` when a layout is set
   a destructor for the context; zeroed `op_params`; the pool is a bump allocator over our workspace, reset per call,
   256-B aligned, aborting on overflow (never `cudaMalloc`); `get_rows` gets int32 ids.
 - **Dispatch**: llama.cpp's `ggml_cuda_should_use_mmvq/mmq` per call from shapes (fixed per graph bucket).
-- **Workspaces**: fixed-size `ctx.workspace(f"ggml_cuda[in={in}]", bytes)` per distinct `in` (today's `static()`),
-  sized for rows = max(`max_step_tokens`, seqs × (1+k), `PROMPT_LOGPROB_CHUNK`): mmq `rows × pad512(in) × 144/128 +
-  J_max × 144` B + stream-k fixup `nsm × 128 × 128 × 4` B, plus the f32 prefill output `rows × out_max × 4` B.
+- **Workspaces**: fixed-size `ctx.workspace(f"ggml_cuda[in={in}]", bytes)` per distinct `in` (today's `static()`)
+  holding only what depends on `in`, the options and `nsm`: q8_1 activations for one 512-row chunk
+  (`512 × pad512(in) × 144/128 + J_max × 144` B; mmvq needs less) + the stream-k fixup (`nsm × 128 × 128 × 4` B) —
+  ≈ 13 MB at `in` = 12288 on the 5080. The f32 mmq output is a per-call activation (D5).
 - **Build**: ≈ 9–10 CPU-minutes per SM (≈ 2 min wall with ninja on 8 cores), cached by (vendored hash, flags, SM,
   CUDA major). **Prebuild is mandatory** (`python -m holon_plugins.kernels.ggml_cuda.prebuild`); the engine never
   compiles at start. No build, no nvcc, CUDA-major mismatch → provider unavailable → D1's startup error, which prints
@@ -163,12 +178,14 @@ blocks in `finalize_weights`. `Linear.merge` returns `None` when a layout is set
 
 Decode at batch 1 is llama.cpp's own kernels for every quantized linear (D5); the remaining differences are ours:
 non-GEMM kernels per layer (norms, rope, attention, KV write, residual adds) and per-step host work. Planned:
-same-type merges, the selected `silu_mul`, the KV index hoist. llama.cpp launches nearly every decode kernel with
+same-type merges, the selected `silu_mul`, the KV index hoist. Known extra launches vs llama.cpp: D5's cast after
+each `mmq` call, and the copies FlashInfer's norm makes of the strided q/k views after a q+k split (as on the bf16
+path today). llama.cpp launches nearly every decode kernel with
 PDL on sm_90+ (`common.cuh:1696-1712`), which hides launch gaps ours (FlashInfer, Triton, torch) do not; the review
 puts decode at ≈ 0.82–0.90× of llama.cpp with this plan. First task of step 3: measure llama-bench tg128 on the 5080
-with `GGML_CUDA_PDL=0` vs default, to size that gap. If tg128 misses 0.8× after step 4, the fallbacks in order: PDL
-launches for our Triton kernels, fused q/k norm + rope + KV write, revision 2's f32 fusion, llama.cpp's batch-1
-gate+up+swiglu fusion.
+with `GGML_CUDA_PDL=0` vs default, to size that gap. If a bar is missed after step 4, the fallbacks in order: a
+q/k norm reading the strided views, PDL launches for our Triton kernels, fused q/k norm + rope + KV write, revision
+2's f32 fusion (decode and prefill), llama.cpp's batch-1 gate+up+swiglu fusion.
 
 ### 4.6 Numerics and the judge (all thresholds fixed before measuring)
 
@@ -208,7 +225,8 @@ reported, not gated.
 - **Tier B — kernels**: the production engine; floor = HF bf16 with the q8_1 emulator on every quantized linear's
   input (lm_head included) — prefill with mmq semantics on the full prompt set; decode with mmvq semantics on the
   full prompt set at a step size ≤ the smallest mmvq threshold among the file's types on that class (≤ 5 on
-  Blackwell, ≤ 8 on the A5000). Floors are recorded once (CPU) and used on every class. GGUF-only code paths
+  Blackwell, ≤ 8 on the A5000). Floors are recorded once on the A5000 GPU (as M0's) and reused on every class; the
+  fp32 golden is recorded on the CPU. GGUF-only code paths
   (adopt, padding, merges, lm_head on the embedding's blocks, per-type dispatch) are covered by L0 and Tier B only.
 - **Planted bugs, verdicts recorded before measuring**:
   - Tier A must fail: rope θ 1e6 → 9e5 (S5's calibration bug, 3.0× floor KL p99), transposed `attn_output`,
@@ -225,12 +243,13 @@ RTX 5080: 15.47 GiB (15841 MiB). Qwen3-8B KV: 144 KiB/token; 64K tokens = 9.00 G
 | GiB | Q4_K_M | UD-IQ3_XXS |
 |---|---|---|
 | weights | 4.68 | 3.17 |
-| context + FlashInfer/ggml workspaces | ≈ 0.65 | ≈ 0.65 |
+| context + FlashInfer/ggml workspaces (≈ 0.13 + 0.07) | ≈ 0.65 | ≈ 0.65 |
 | KV 64K | 9.00 | 9.00 |
 | left for activations + graph pool | ≈ 1.14 | ≈ 2.65 |
 
 The worst-step peak is the largest of trunk, prompt-logprob head (≈ 0.3) and sampling — ≈ 0.4 GiB at 2048 step
-tokens — plus the 64-row graph pool (≈ 0.25). Start with `memory_fraction 0.98`, `max_step_tokens 2048`,
+tokens, with the mmq output buffer ≤ 48 MiB by the 512-row chunking — plus the 64-row graph pool (≈ 0.25) and
+`memory_fraction 0.98`'s ≈ 0.2 held back. Start with `memory_fraction 0.98`, `max_step_tokens 2048`,
 `max_seqs 64`; step down only on a measured shortfall (breakdown into the evidence; remedy if still short: quantized
 KV, M0.3b). These are deployment settings for the class (recorded with the evidence and in the lock's `[engine]` where
 planned fields apply), not code.
@@ -254,7 +273,7 @@ Same three reviewers throughout; each step ends green.
 | 0 | D1: no reference selection; fixture plugin + conftest helper; units stop calling `reference.py` | full suite green via the fixture; missing provider → startup error naming it | 1 |
 | 1 | Core D2/D4; `weights/gguf` (reader, detect, config, tokenizer + tests vs HF, identity); `std.ops` adopt + `qlinear`/`qembedding` references | CPU: tiny synthetic Q8_0/Q4_0 GGUF (gguf-py writer) vs dense via the fixture; tokenizer tests; bf16 snapshot byte-identical | 2.5 |
 | 2 | Qwen3 `GGUF_WEIGHTS` + bundle(source); CLI `.gguf`; tools/judge resolve; golden + per-tensor gate; Tier A source | Tier A L2 on A5000 for both files; Tier A planted bugs fail | 1.5 |
-| 3 | `kernels.ggml_cuda` (parallel with 1–2): PDL measurement on the 5080; link test sm_86/89/120a; vendor + patch + shim + C API + wrapper + prebuild; q8_1 emulator | L0 (all of §4.6) on sm_86 and sm_120a; graph capture (incl. PDL) on sm_120a; determinism; FMA decision | 6 |
+| 3 | `kernels.ggml_cuda` (parallel with 1–2): PDL measurement on the 5080; link test sm_86/89/120a, which also checks that `vendor.patch` applies; vendor + patch + shim + C API + wrapper + prebuild; q8_1 emulator | L0 (all of §4.6) on sm_86 and sm_120a; graph capture (incl. PDL) on sm_120a; determinism; FMA decision | 6 |
 | 4 | Merges through `qlinear`, selected `silu_mul`, KV index hoist; Tier B | Tier B (prefill + decode) on A5000; Tier B and L0 planted bugs fail; bf16 snapshot byte-identical | 3 |
 | 5 | Consumer classes: L0 on sm_89; 5080 fit at 64K; bars; `llama-server` backend + traces; Tier B on 5080; tune + GGUF locks; GGUF snapshot ×3 | evidence; locks | 3.5 |
 | 6 | bf16 locks re-propagated on a5000/4090/5090 (acceptance 4) | locks | 0.5 |
@@ -267,8 +286,8 @@ Same three reviewers throughout; each step ends green.
 - Port link, sm_120a, PDL under torch capture — first tasks of step 3.
 - Decode parity: ≈ 0.82–0.90× estimated; fallbacks listed in §4.5.
 - 5080 fit for Q4_K_M at 64K: ≈ 1.1 GiB headroom.
-- `vendor.patch` grows llama.cpp refresh cost: keep it to D5 and the environment constants; refresh = vendor.sh +
-  patch + link test + L0.
+- `vendor.patch` (≈ 60–80 lines in upstream's most active files) raises refresh cost: keep it mechanical (no new
+  templates) and limited to D5 and the environment constants; refresh = vendor.sh + patch + link test + L0.
 - Tier B floors: guarded by the planted set; δ fixed.
 
 ## 7. Revision-1 questions, answered
@@ -282,4 +301,5 @@ kernels: never (D1).
 
 "Repo id + file" resolution; pre-tokenizer table entries beyond the archs served; revision 2's f32 fusion and the
 other decode fallbacks of §4.5 (triggered by measurement); CI-built per-SM extension wheels; per-class `src` pins;
-the engine starting from its lock (deployment settings are flags until then).
+the engine starting from its lock (deployment settings are flags until then). The pre-tokenizer table lives in
+std, so a new entry changes the `src` of every GGUF lock (acceptable for v0).
