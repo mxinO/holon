@@ -1,0 +1,22 @@
+[plugin]
+name = "kernels.ggml_cuda"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+
+[resources]
+provides = ["kernel.qlinear@1", "kernel.qembedding@1"]
+requires = ["op.qlinear@1", "op.qembedding@1"]
+
+[properties]
+numerics = "bounded"
+
+[support]
+platforms = ["cuda"]
+
+[provenance]
+source = "https://github.com/ggml-org/llama.cpp"
+commit = "51ce9c11a6f2dfa895696c0048c4333e8953b728"
+license = "MIT"
+files = ["vendor/", "vendor.patch", "SHA256SUMS", "vendor.sh"]
