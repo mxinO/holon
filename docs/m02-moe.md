@@ -1,93 +1,98 @@
 # M0.2 — Mixture of experts on a 16 GB card: design and implementation plan
 
-Status: **revision 1, for review** (2026-10-08). Scope: plan §5. Builds on M0.1 (`docs/m01-gguf.md`: the GGUF source,
-`kernels.ggml_cuda`, the judge's tiers) and spike S2 (`spikes/s2_gguf/README.md`, MoE sections).
+Status: **revision 2, for review** (2026-10-08). Revision 1 was challenged by three reviewers (architecture/API,
+kernels/performance, numerics/judge); §8 maps every finding to its resolution. Scope: plan §5. Builds on M0.1
+(`docs/m01-gguf.md`: the GGUF source, `kernels.ggml_cuda`, the judge's tiers) and spike S2 (MoE sections).
 
 ## 1. Goal and acceptance
 
 Serve Qwen3-30B-A3B (128 experts, 8 per token, ≈ 3B active) from llama.cpp GGUF files with llama.cpp's own MoE CUDA
 kernels, on a 16 GB RTX 5080 and on 24–32 GB cards. Acceptance:
 
-1. `models/qwen3_moe` is `models/qwen3` copied with `derived_from`; its recipe diff to qwen3 is ≤ ~15 lines (the
-   MoE ffn `Ref`, the expert weight map). Qwen3 locks change only through `propagate`. Core diff: zero.
-2. L0 for the MoE ops on sm_86, sm_89, sm_120a: every supported type on both kernel paths, skewed routings included.
-3. L2 for UD-IQ3_XXS and Q4_K_M: Tier A (assembly) and Tier B (kernels, prefill and decode) pass; each planted bug
-   fails at the level recorded in §4.6; the per-tensor gate passes; the quantization error vs bf16 is reported.
-4. Snapshot trace run-identical over 3 fresh engines (UD-IQ3_XXS on rtx-5080, Q4_K_M on rtx-a5000).
+1. `models/qwen3_moe` is `models/qwen3` copied with `derived_from`; its recipe diff to qwen3 is ≤ ~15 lines. Core
+   diff: zero. The bf16 Qwen3 locks do not change. The GGUF Qwen3 locks change only in `kernels.ggml_cuda`'s `src`
+   pin: `propagate` shows a byte-identical snapshot trace, L2 passing, `[sites]`, `[engine]` and the recipe hash
+   unchanged; approved once.
+2. L0 for the MoE ops on sm_86, sm_89, sm_120a, every supported type on both kernel paths (§4.6), memcheck clean.
+3. L2 for UD-IQ3_XXS and Q4_K_M: Tier A and Tier B (prefill and decode) pass; each planted bug fails at the level
+   and margin recorded in §4.6; the gates pass; the quantization error vs bf16 is reported.
+4. Snapshot trace run-identical over 3 fresh engines (UD-IQ3_XXS on rtx-5080, Q4_K_M on rtx-a5000); graphs vs eager
+   bounded on MoE decode.
 5. RTX 5080: UD-IQ3_XXS with ≥ 16K KV tokens. RTX 4090, 5090, A5000: Q4_K_M. In-process pp512 / tg128 against
-   llama-bench at the same commit on every class (bar on the 5080: ≥ 0.8× S2, pp512 ≥ 5800 t/s, tg128 ≥ 199 t/s);
-   decode and agent traces against `llama-server` on the 5080.
+   llama-bench at the same commit on every class, both sides as the median of repetitions 2–5 (bar on the 5080:
+   ≥ 0.8× S2's 7462 / 248.2, i.e. pp512 ≥ 5970, tg128 ≥ 199); decode and agent traces against `llama-server` on the
+   5080. UD-Q3_K_XL (plan §5) is optional: recorded on the 5080 if time allows, not required.
 6. GGUF locks for rtx-5080 (UD-IQ3_XXS) and rtx-a5000, rtx-4090, rtx-5090 (Q4_K_M).
 
-Non-goals: serving the bf16 HF checkpoint (57 GiB fits no single target card; §3 D1); expert offload / expert cache
-(v1; its seam is the `qlinear_experts` op); expert parallelism; Qwen3.5 (M0.3).
+Non-goals: serving the bf16 HF checkpoint (§3 D1); expert offload / expert cache (v1, §3 D2); expert parallelism;
+Qwen3.5 (M0.3).
 
 ## 2. Starting point
 
-- **The model.** 48 layers, all MoE (`decoder_sparse_step` 1, `mlp_only_layers` []); hidden 2048; attention 32 / 4
-  heads × 128 (as Qwen3, with q/k norm); 128 experts, top-8, expert width 768, `norm_topk_prob` true; vocab 151936,
-  untied head. KV: 96 KiB / token.
-- **The files** (unsloth `Qwen3-30B-A3B-GGUF`): UD-IQ3_XXS 12.0 GiB (cached), Q4_K_M 17.28 GiB (fetched for M0.2),
-  UD-Q3_K_XL 12.88 GiB (optional). UD-IQ3_XXS: experts IQ3_XXS / IQ3_S (gate, up), IQ3_XXS / IQ4_XS / IQ3_S (down);
-  attention IQ4_XS / Q5_K / Q6_K; router `ffn_gate_inp` **F32** [128, 2048]; embedding Q4_K, head Q6_K. Gate and up
-  share a type in every layer, as do q / k / v. Experts are stacked `[E, out, in]` with no permutation and HF's expert
-  order (measured: NMSE vs HF 0.035 per expert, 2.0 for gate↔up, 2.3–2.6 for a neighbouring expert). The GGUF lacks
-  `norm_topk_prob` and the gating function: llama.cpp hard-codes softmax + renormalisation for `qwen3moe`.
-- **llama.cpp's MoE path** (`ggml_cuda_mul_mat_id`, `ggml-cuda.cu:1992-2031`) is already in our vendored tree:
-  `mmvq` with ids up to a per-type limit (`get_mmvq_mmid_max_batch`: 8 on sm_89 / sm_120; on sm_86 Q3_K 5, IQ3_S 6,
-  Q2_K / IQ2_S / IQ3_XXS 7, others 8), else `mmq` with ids (a device-side compaction per expert, `mmid.cu`; grid
-  z = E), else a host-syncing fallback no supported type reaches. The bf16 quantizers our `vendor.patch` added
-  already cover the ids paths (gather and scatter). Outputs are f32. No host sync, grids depend only on T, E, k, out:
-  capture-safe. Fused routing (`topk-moe.cu`: softmax, top-k by argmax rounds, renormalisation with the sum clamped
-  at 6.1e-5) and the weighted combine (`moe-weighted-reduction.cu`, f32, expert slots summed in order) are separate
-  files, not yet vendored.
-- **Holon.** The loader hands a `QTensor` to its owner's `adopt` whatever its rank: a 3-D expert stack arrives as
-  `QTensor(layout, (E, out, in), blocks [E·out, row_bytes])` with no core change. The block calls `ffn(x)` without a
-  step context, which MoE does not need: routing is data, not shape. Graphs capture pure-decode steps at fixed
-  buckets after one eager warm-up run per key (`platform.Graphs`).
-- **S2's measurements** rule out the SGLang-carried MoE kernels (0.07–0.45× llama.cpp at 512 tokens; 25.2 vs 2.7 ms
-  per 30B layer on the A5000) and set the bars: llama-bench UD-IQ3_XXS pp512 / tg128 — rtx-5080 7247 / 248,
-  rtx-4090 10133 / 257, rtx-5090 11905 / 341, rtx-a5000 3529 / 151.
+- **The model.** 48 layers, all MoE; hidden 2048; attention 32 / 4 heads × 128 with q/k norm (as Qwen3); 128
+  experts, top-8, expert width 768, softmax routing renormalised over the top-8; vocab 151936, untied head. KV:
+  96 KiB / token.
+- **The files** (unsloth `Qwen3-30B-A3B-GGUF`): UD-IQ3_XXS 12.0 GiB, Q4_K_M 17.28 GiB (both cached), UD-Q3_K_XL
+  12.88 GiB (optional). UD-IQ3_XXS: experts IQ3_XXS / IQ3_S (gate, up), IQ3_XXS / IQ4_XS / IQ3_S (down); attention
+  IQ4_XS / Q5_K / Q6_K; router `ffn_gate_inp` **F32** [128, 2048]; embedding Q4_K, head Q6_K. Gate and up share a type
+  in every layer, as do q / k / v. Expert stacks are `[E, out, in]` in HF's expert order with no permutation
+  (measured: NMSE vs HF 0.035 per expert; 2.0 for gate↔up; 2.3–2.6 for a neighbouring expert). The GGUF lacks the
+  gating function and `norm_topk_prob`: llama.cpp hard-codes softmax + renormalisation for `qwen3moe`.
+- **llama.cpp's MoE path** is in our vendored tree (`ggml_cuda_mul_mat_id`, `ggml-cuda.cu:1992-2031`): mmvq with ids
+  up to `get_mmvq_mmid_max_batch` (8 on sm_89 / sm_120; on sm_86 Q3_K 5, IQ3_S 6, Q2_K / IQ2_S / IQ3_XXS 7, else 8),
+  else mmq with ids (device-side compaction per expert, `mmid.cu`; grid z = E), else a host-syncing fallback no
+  supported type reaches. Our bf16 quantizer patch already covers the gather and scatter paths. Grids depend only on
+  (T, E, k, out): capture-safe. Fused routing (`topk-moe.cu`) and the weighted combine (`moe-weighted-reduction.cu`)
+  are not yet vendored.
+- **Holon.** `adopt` receives a `QTensor` of any rank (a 3-D stack arrives as `QTensor(layout, (E, out, in),
+  blocks [E·out, row_bytes])`), and the block calls `ffn(x)` without a step context, which MoE does not need.
+- **Baselines** (llama-bench at 51ce9c11, median of repetitions 2–5): rtx-a5000 UD-IQ3_XXS 3694 / 159.2, Q4_K_M
+  3458 / 172.6 (measured for M0.2); rtx-5080 UD-IQ3_XXS 7462 / 248.2 (S2). S2 rejected the SGLang-carried MoE kernels
+  (0.07–0.45× llama.cpp at 512 tokens).
 
 ## 3. Decisions
 
-**How references are chosen** (the rule M0.1 followed, now written down). A reference has one of three jobs, and each
-is picked for that job: the *oracle* is the model's own definition — HF transformers with the original checkpoint —
-plus the format owner's decoding (gguf-py); never another serving engine. The *kernel source* is the best-maintained
-implementation of the exact workload, chosen by measurement (S2: llama.cpp's MoE kernels over SGLang's stale fork of
-them). The *bar* is the engine users run for that workload on the target hardware: llama.cpp for GGUF on consumer
-cards (M0.1, M0.2), mini-sglang / nano-vllm for bf16 batching (M0), vLLM / SGLang for HF quant formats (v1).
+**How references are chosen** (M0.1's rule, now written down). A reference has one of three jobs: the *oracle* is the
+model's own definition — HF transformers with the original checkpoint — plus the format owner's decoding (gguf-py),
+never another serving engine; the *kernel source* is the best-maintained implementation of the exact workload,
+chosen by measurement (S2: llama.cpp's MoE kernels over SGLang's stale fork of them); the *bar* is the engine users
+run for that workload on the target hardware (llama.cpp for GGUF on consumer cards).
 
-- **D1 — GGUF only.** The recipe accepts the `gguf` source; for `hf_safetensors` it raises "no weight map". The bf16
-  checkpoint fits no target card, and loading HF's 18,867 per-expert tensors into stacked parameters needs either a
-  stacking weight rule (a core change) or 384 parameters per layer: both wait until a card or a multi-GPU deployment
-  can hold the model. The judge builds the HF model itself (§4.6).
-- **D2 — Ops.** The MoE ffn is one unit (`unit.std.ffn.moe@1`) composing three ops, so the expert matmul — the seam
-  an expert cache will need — is its own op:
-  - `moe_topk@1` (std.ffn): `logits [T, E] f32 → (weights [T, k] f32, ids [T, k] int32)`: softmax over E in f32,
-    the k largest (ties to the lower index), renormalised by their sum (clamped at 6.1e-5, llama.cpp's guard) when
-    `norm`. Facts: experts, top_k, norm. Ids are unique and in range for every row, padding rows included.
-  - `qlinear_experts@1` (std.ops, beside `qlinear`): `(x [T, R, in], blocks, ids [T, k]) → y [T, k, out] f32`, row j
-    of token t = expert `ids[t, j]` applied to `x[t, 0]` (R = 1: gate / up) or `x[t, j]` (R = k: down). Blocks are
-    the stack `[E·out, row_bytes]`. Facts: layout, experts, in, out, top_k, rows_per_token (R), act_dtype.
-  - `moe_combine@1` (std.ffn): `(y [T, k, H] f32, weights [T, k] f32) → [T, H]` in the activation dtype,
-    `Σ_j weights[t, j] · y[t, j]` accumulated in f32 in slot order. Facts: hidden, top_k, dtype.
-  - Between them, the existing `silu_mul@1` at `dtype=float32` on `[T·k, 2·inter]`.
-- **D3 — f32 inside the expert path, as llama.cpp.** The expert matmuls write f32 (llama.cpp's MoE stores are
-  f32-only; no patch), SwiGLU runs in f32 and the down projection's quantizer reads f32. The block's input and the
-  combine's output are bf16. The router runs in f32 over the bf16 hidden state cast to f32, its weight F32 as stored
-  (llama.cpp: f32 × F32; HF: model dtype, then an f32 softmax).
-- **D4 — Gate and up merge per expert.** When gate and up experts share a layout (every layer of both files), the
-  unit concatenates them per expert into one stack `[E, 2·inter, in]` (rows are independent block runs, as for dense
-  merges) and runs one `qlinear_experts` instead of two; the activation is quantized once. llama.cpp runs two
-  `mul_mat_id`s, fusing them with SwiGLU on its mmvq path only; we take the merge on both paths and keep SwiGLU
-  separate (a fused gate on mmvq is a §4.5 fallback).
-- **D5 — The router is the MoE unit's own f32 parameter**, multiplied with `F.linear` in the unit (as dense `Linear`
-  does for bf16 weights): a [2048 → 128] product, not worth an op. std.ops is untouched for it.
-- **D6 — Configuration from the file.** The GGUF source maps llama.cpp's MoE keys every MoE architecture shares —
-  `expert_count`, `expert_used_count`, `expert_feed_forward_length` — to `num_experts`, `num_experts_per_tok`,
-  `moe_intermediate_size`. What a `qwen3moe` GGUF omits (`norm_topk_prob`) the recipe defaults to llama.cpp's
-  hard-coded `true`.
+- **D1 — GGUF only.** The model plugin declares `arch.gguf.qwen3moe@1` alone. The bf16 checkpoint (57 GiB) fits no
+  target card, and loading HF's 18,867 per-expert tensors into stacks needs a stacking weight rule (a core change):
+  both wait for a deployment that can hold the model. The judge builds the HF model itself (§4.6).
+- **D2 — Its own package, three ops.** Everything MoE lives in `std/holon_std/moe` (a sibling of `std.ffn`, so no
+  existing unit's `src` or `sem` changes and no bf16 lock moves):
+  - `unit.std.moe@1(experts, top_k, inter, renormalize)` — the MoE ffn, and the **v1 seam**: an expert cache (a
+    residency map, miss handling, a CPU path for missed experts, router telemetry) replaces this unit by `Ref` with a
+    placement policy; the kernel ops stay stateless.
+  - `moe_topk@1`: `logits [T, E] f32 → (weights [T, k] f32, ids [T, k] int32)`, both contiguous: softmax over E in
+    f32, the k largest (ties to the lower index; NaN as −FLT_MAX), divided by their sum when `renormalize` (the sum is
+    clamped at 6.1e-5 as llama.cpp, a guard softmax never reaches: the top-8 sum is ≥ 8/128). Ids are unique and in
+    range for every row, padding included. Facts: experts, top_k, renormalize.
+  - `qlinear_experts@1`: `(x [T, R, in], blocks, ids [T, k]) → y [T, k, out_y] f32`; row j of token t applies expert
+    `ids[t, j]` to `x[t, 0]` (R = 1) or `x[t, j]` (R = k). With `glu = "swiglu"` the stack is a merged gate/up stack
+    (per expert: `inter` gate rows, then `inter` up rows) and `y = silu(gate) · up` (out_y = inter); with `glu =
+    "none"`, out_y = out. Facts: layout, experts, in, out, top_k, rows_per_token, glu, act_dtype.
+  - `moe_combine@1`: `(y [T, k, H] f32, weights [T, k] f32) → [T, H]` in the activation dtype, `Σ_j w[t, j] · y[t, j]`
+    accumulated in f32 in slot order. Facts: hidden, top_k, dtype.
+  The split follows the kernels (three vendored kernels, three L0 suites), not a cache's needs; plan §5's "one coarse
+  op" becomes one unit over three ops. `ExpertLinear` (a 3-D quantized stack: adopt, merge, bind) is an internal class
+  of the unit, not a `Ref`'d unit.
+- **D3 — f32 inside the expert path, as llama.cpp.** Expert matmuls write f32, SwiGLU runs in f32, the down
+  projection quantizes the f32 hidden; the combine stores the activation dtype. The router multiplies the bf16 hidden
+  state cast to f32 by the F32 weight in IEEE fp32 (no TF32: torch's default, asserted by a test); HF instead
+  rounds router logits to bf16 before an f32 softmax.
+- **D4 — Gate and up merge per expert** when their layouts match (every layer of both files): one stack, one scatter
+  quantization, one compaction and one matmul instead of two — valid on both paths (the scatter mode depends only on
+  R = 1, the compaction never reads `out`) and the layout llama.cpp's own merged path uses (gate rows first). On mmvq
+  the merged stack feeds llama.cpp's fused gate kernel directly (`fusion{gate, SWIGLU}`, gate and up at equal
+  strides), so decode needs no separate SwiGLU; on mmq a small f32 SwiGLU kernel follows. Unmatched layouts fall back
+  to two `glu = "none"` calls and the same SwiGLU kernel.
+- **D5 — The router is the unit's own F32 parameter**, applied with `F.linear` in the unit (as dense `Linear` does).
+- **D6 — Configuration in the model plugin.** The recipe reads the MoE keys from the file's raw `qwen3moe.*` metadata
+  (`c["gguf"]["expert_count"]`, `expert_used_count`, `expert_feed_forward_length`), so `std.weights.gguf` is
+  untouched; `renormalize=True` is written with llama.cpp's reason (hard-coded for `qwen3moe`).
 
 ## 4. Design
 
@@ -96,109 +101,130 @@ cards (M0.1, M0.2), mini-sglang / nano-vllm for bf16 batching (M0), vLLM / SGLan
 | package | change |
 |---|---|
 | `plugins/holon_plugins/models/qwen3_moe` | new: recipe copied from qwen3 (`derived_from`), `arch.gguf.qwen3moe@1`, GGUF weight map, bundle (copied) |
-| `std/holon_std/ffn` | `MoE` unit, `moe_topk@1` and `moe_combine@1` contracts and references |
-| `std/holon_std/ops` | `qlinear_experts@1` contract and reference; `ExpertLinear` unit (adopts a 3-D stack, merges per expert) |
-| `std/holon_std/weights/gguf` | the three shared MoE keys (D6) |
-| `plugins/holon_plugins/kernels/ggml_cuda` | `qlinear_experts`, `moe_topk`, `moe_combine` kernels; `topk-moe.cu` and `moe-weighted-reduction.cu` vendored |
-| `testing` | reference providers for the new ops; tiny MoE GGUF writer; `gguf_dense` dequantizes 3-D stacks |
-| `judge` | MoE name map, golden, per-tensor gate, Tier A / B for experts, planted bugs |
+| `std/holon_std/moe` | new: the unit and `ExpertLinear`; `moe_topk@1`, `qlinear_experts@1`, `moe_combine@1` contracts and `reference.py` |
+| `plugins/holon_plugins/kernels/ggml_cuda` | the three kernels; `topk-moe.cu` and `moe-weighted-reduction.cu` vendored (`vendor.sh`, `SHA256SUMS`, `[provenance]`, `THIRD_PARTY_NOTICES.md`); `vendor.patch`: topk ids at stride k, the reduction's bf16 store; csrc: f32 SwiGLU, the shim's `ggml_get_unary_op` |
+| `testing` | reference providers for the three ops (gguf-py dequantization, cached); tiny MoE GGUF writer |
+| `judge` | MoE name map, streamed golden, gates, the MoE block of the floors (§4.6), emulator expert paths, planted bugs |
 
 ### 4.2 The MoE unit
 
 ```python
-class MoE(nn.Module):                     # unit.std.ffn.moe@1(experts, top_k, inter, norm) at site (layer, hidden)
+class MoE(nn.Module):                      # unit.std.moe@1(experts, top_k, inter, renormalize) at (layer, hidden)
     router: Parameter [E, H] f32
-    gate_exps, up_exps, down_exps: ExpertLinear     # std.ops.experts@1 units; adopt QTensors [E, out, in]
+    gate_up, down: ExpertLinear             # gate_up = merge(gate, up) in finalize_weights, else gate and up apart
     def forward(x [T, H]):
-        w, ids = topk(F.linear(x.float(), router))                  # moe_topk@1
-        h = silu_mul(gate_up(x[:, None], ids).view(T·k, 2I))       # qlinear_experts@1 (merged, D4), silu_mul@1 f32
-        y = down(h.view(T, k, I), ids)                              # qlinear_experts@1, R = k
-        return combine(y, w)                                        # moe_combine@1 → bf16
+        out = empty_like(x)
+        for c in chunks(T, 512):                                       # bounds the f32 expert path (≈ 45 MiB)
+            w, ids = topk(F.linear(x[c].float(), router))               # moe_topk@1
+            h = gate_up(x[c][:, None], ids, glu="swiglu")               # [t, k, I] f32
+            out[c] = combine(down(h, ids), w)                           # [t, k, H] f32 → bf16
+        return out
 ```
 
-`ExpertLinear` mirrors `Linear`: `adopt` accepts a `QTensor` of logical shape `(E, out, in)`, `bind_kernels`
-selects `qlinear_experts` with its facts after merges, and `merge(gate, up)` returns a unit whose stack interleaves
-the two per expert (`blocks.view(E, out, rb)` concatenated on dim 1). A dense expert stack (bf16) has no provider in
-M0.2 and fails at load, naming the unit and layout.
+`ExpertLinear` mirrors `Linear`: `adopt` takes a quantized `(E, out, in)` stack, `merge(gate, up)` interleaves the two
+per expert (`view(E, out, rb)` concatenated on dim 1, layer by layer at load), and `bind_kernels` selects
+`qlinear_experts` with its facts after merges. A dense stack has no path: `bind_kernels` fails at startup naming the
+unit and layout. The chunk (512 tokens, llama.cpp's ubatch) also selects the kernel path per chunk, as llama.cpp does
+per ubatch: a 513-token step runs one mmq chunk and one mmvq chunk.
 
 ### 4.3 Kernels (`kernels.ggml_cuda`)
 
-- `qlinear_experts`: `mmvq` with ids when T ≤ `get_mmvq_mmid_max_batch(type, cc)` (llama.cpp's own MoE limit, not the
-  dense one), else `mmq` with ids in chunks of 512 tokens (4096 rows at k = 8; the compaction's shared memory holds
-  ≈ 25K tokens on sm_86). Output f32 straight from the kernels. The C API gains `mmvq_id`, `mmq_id`, `use_mmvq_id`
-  and `workspace_bytes_id(in, tokens, k, E)` = the q8_1 buffer for T·k rows (gather / scatter), the ids and
-  `expert_bounds` arrays, and the stream-k fixup — declared per `in` to the ledger, as for `qlinear`.
-- `moe_topk`: vendored `topk-moe.cu` (E a power of two ≤ 512: 128 fits). Its ids output has row stride E: the
-  kernel instance owns a `[T_max, E]` int32 buffer and returns the `[T, k]` view the matmuls read with that stride.
-- `moe_combine`: vendored `moe-weighted-reduction.cu` (f32 out) and one cast to the activation dtype.
-- `silu_mul` at f32: FlashInfer's `silu_and_mul` if it accepts f32 (checked first in step 3), else a small Triton
-  kernel in our own plugin. llama.cpp's f32 SwiGLU (`unary.cu`) is not worth vendoring for this.
-- Graph safety: no host sync, grids fixed by (T, E, k, out); per-type mmq instances and `cudaFuncSetAttribute`
-  happen on the eager warm-up run each graph key gets before capture. Padding rows route like any row: `moe_topk`
-  gives them unique in-range ids, which both kernels require (an invalid id reads out of bounds in mmvq; a duplicate
-  leaves a dst row unwritten in the compaction).
-- Determinism: run to run, yes (token-ordered compaction, index-ordered ties, fixed stream-k split). Not batch
-  invariant: the path switches at the per-type limit, and an expert's stream-k split depends on the other tokens
-  routed to it — as for dense mmq.
-- PDL: llama.cpp launches `mul_mat_vec_q_moe`, `quantize_*` and `topk_moe` with PDL on sm_90+; they wait on their
-  inputs, so this is safe beside our kernels and in graphs.
+- `qlinear_experts`: mmvq with ids when the chunk's T ≤ `get_mmvq_mmid_max_batch(type, cc)` (fused SwiGLU when `glu =
+  "swiglu"`), else mmq with ids (f32) followed, for `swiglu`, by our f32 SwiGLU kernel. Workspace
+  `ggml_cuda.id[in=…]` (distinct from dense `qlinear`'s `ggml_cuda[in=…]`), sized as the pool allocates it for a
+  512-token chunk: `ids_src1` and `ids_dst` (T·k int32), `expert_bounds` (E + 1), q8_1 for T·k rows plus `J_max`, the
+  stream-k fixup — each padded to 256 B. M0.1's one-stream invariant (§8 there) extends to it.
+- `moe_topk`: vendored `topk-moe.cu` with ids written at row stride k (`vendor.patch`), so ids are an ordinary
+  contiguous `[T, k]` tensor. E a power of two ≤ 512.
+- `moe_combine`: vendored `moe-weighted-reduction.cu`, its store patched to bf16 (one launch).
+- Graph safety: no host sync; grids fixed by (T, E, k, out); per-type mmq instances and attributes are set on the
+  eager warm-up run each graph key gets before capture. Padding rows get unique in-range ids from `moe_topk`, which
+  both kernels require (an invalid id reads out of bounds on mmvq; a duplicate leaves a compacted row unwritten).
+- Padding cost: a padding row routes to 8 more experts (≈ 16 MB of expert reads per layer at IQ3). Batch-1 decode
+  (tg128) is never padded; serving batches 3, 5–7 pay it. Measured in step 5; the remedy, finer graph buckets for MoE
+  models, is a core change and waits for that measurement.
+- Determinism: run to run, yes; batch-invariant, no (as dense mmq).
+- PDL: llama.cpp's PDL kernels wait on their inputs before reading, so they are safe beside ours. Any kernel of ours
+  launched with PDL later must wait before its first global read *and* first write (llama.cpp's quantizer triggers
+  its successor before it waits, and workspaces are reused).
+- Launches per layer at batch 1: llama.cpp 7 (router, topk, quantize, fused gate/up, quantize, down, reduction);
+  ours 8 (one more: the router's cast). §4.5 has the fallback.
 
 ### 4.4 Model plugin
 
-`models/qwen3_moe/recipe.py` = qwen3's recipe with the ffn `Ref("std.ffn.moe@1", experts=…, top_k=…,
-inter=moe_intermediate_size, norm=c.get("norm_topk_prob", True))` per layer (an `mlp_only_layers` entry keeps the
-dense `swiglu`), and `GGUF_WEIGHTS` = qwen3's GGUF map with `ffn_gate_inp → ffn.router`, `ffn_{gate,up,down}_exps →
-ffn.{gate,up,down}_exps.weight` in place of the dense ffn rules. `derived_from = "models.qwen3@<commit>"`.
+`models/qwen3_moe/recipe.py` = qwen3's recipe with `ffn = Ref("std.moe@1", experts=g["expert_count"],
+top_k=g["expert_used_count"], inter=g["expert_feed_forward_length"], renormalize=True)` and `GGUF_WEIGHTS` = qwen3's
+with `ffn_gate_inp → ffn.router`, `ffn_{gate,up,down}_exps → ffn.{gate,up,down}.weight` in place of the dense ffn
+rules; `derived_from = "models.qwen3@<commit>"`.
 
 ### 4.5 Performance
 
-Per decode step at batch 1 the expert work is three `mmvq`-with-ids launches (merged gate/up, down) plus routing and
-combine; llama.cpp fuses gate + up + SwiGLU into one mmvq launch and the routing into one kernel — we take its fused
-routing, merge gate/up instead of fusing them with SwiGLU, and add one f32 SwiGLU and one combine launch per layer.
-Fallbacks if a bar is missed, in order: the mmvq gate fusion (`fusion{gate, SWIGLU}`, already in the vendored
-kernel), a fused combine + cast, PDL for our Triton kernels (M0.1's list). Known: mmq's grid has z = E, so mid-size
-decode buckets (9–64 tokens) launch many empty blocks — as in llama.cpp.
+Estimated tg128 on the 5080 ≈ 0.93× llama.cpp (kernels reviewer: the router cast is the one extra launch per layer;
+PDL ≈ 2 % as measured in M0.1). Prefill should beat llama.cpp (the merge saves a compaction, a quantization and a
+matmul per layer). Fallbacks, in order: a fused router kernel (bf16 hidden × F32 weight), PDL launches for our
+kernels (with the wait rule of §4.3), finer graph buckets for MoE (core).
 
-### 4.6 Numerics and the judge (thresholds fixed before measuring)
+### 4.6 Numerics and the judge (thresholds and predictions fixed before measuring)
 
-- **Golden**: HF `Qwen3MoeForCausalLM` (fp32, CPU, HF config) filled with gguf-py's dequantized tensors through the
-  judge's own name map (experts stacked; `gate_up_proj` = gate then up per expert, as transformers stores it).
-  Measured on this host: ≈ 35 s per 4096 tokens at 48 threads, ≈ 5–10 min for the prompt set, ≈ 8 min to dequantize,
-  ≈ 122 GB RAM.
-- **Per-tensor gate**: NMSE(dequantized, HF bf16) ≤ 0.5 per tensor, experts per expert; the router compared exactly.
-- **Tier A — assembly** (router, top-k, renormalisation, expert order, gate/up, combine; at M0 sensitivity): the
-  dense bf16 model does not fit one GPU, so Tier A runs the engine **on the CPU in fp32** — `gguf_dense` source
-  (stacks dequantized), `testing.ref_kernels` (references for every op, the MoE ones included). Floor: HF bf16 of the
-  dequantized weights, recorded once on A5000 GPUs with `device_map` across 3–4 cards (57 GiB). The fp32 candidate is
-  closer to the golden than that floor, so a pass is cheap; planted bugs must fail against the floor's budgets.
-- **Tier B — kernels**: the production engine on one A5000 (both files fit 24 GB). Floor: HF bf16 across A5000s with
-  the q8_1 emulator on every quantized linear, now including experts: gate/up quantize each token's input once (the
-  scatter path), down each (token, slot) row, per path (mmq for the prefill run, mmvq for the decode run at a step size
-  ≤ the smallest MoE mmvq limit among the file's types on that class: 6 for UD-IQ3_XXS on sm_86, 8 on sm_89 / sm_120).
-  Floors recorded once on the A5000s and reused on every class.
-- **L0** (sm_86, sm_89, sm_120a): `qlinear_experts` per type and path vs the q8_1-emulated reference per element
-  (`l0.check(bf16)` as M0.1); routings: uniform, every token to one expert, half the experts empty, the same expert
-  for all k slots is impossible (ids unique) — checked as an invariant of `moe_topk`; T ∈ {1, limit, limit+1, 9, 64,
-  512, 513, max_step_tokens}; poisoned bytes past every stack. `moe_topk` vs the reference (ties, NaN logits, k = E).
-  `moe_combine` exact vs an f32 slot-ordered sum. compute-sanitizer memcheck on each class.
-- **Planted bugs, verdicts recorded before measuring**: Tier A must fail: renormalisation off (`norm=False`); expert
-  ids shifted by one (mod E) in one layer; gate and up swapped in the experts; top-k = 7. Tier B must fail: an expert
-  stack read as the wrong type; a stale q8_1 workspace on every 97th expert call (and the rare variant reported).
-  L0 must fail: an id offset in the compaction.
-- **Quantization error** vs the bf16 checkpoint's golden: reported, not gated (bf16 golden recorded on the CPU once).
+- **Golden**: HF `Qwen3MoeForCausalLM` (fp32, CPU, HF config at a pinned revision) filled with gguf-py's
+  dequantized tensors through the judge's own name map, built and loaded **layer by layer** (peak ≈ 130 GB);
+  `experts_implementation` pinned and recorded in the meta. ≈ 5–10 min of forward, ≈ 8 min of dequantization.
+- **Gates**: per tensor, NMSE(dequantized, HF bf16) ≤ 0.5 (experts per expert, the router exact); and the judge's
+  **assembled** state dict (its fused `gate_up_proj`) against the bf16 checkpoint loaded by `from_pretrained`, which
+  does transformers' own per-expert fusion — so a gate/up concatenation mistake shared by the judge and the engine
+  fails here. Both streamed per layer.
+- **The floors' MoE block mirrors D3**: the judge replaces HF's MoE block (and grouped_mm) in the floors with its
+  own — router F32 with f32 logits, expert outputs, SwiGLU and down input in f32, combine in f32 in slot order,
+  bf16 out — so the floor is no looser than the engine. The pure-HF bf16 floor is recorded for information only.
+- **Tier A — assembly**, on the CPU in fp32: the production `gguf` source and `testing.ref_kernels` (references for
+  every op, dequantizing with gguf-py), so adoption, the per-expert merge and kernel binding are covered too.
+  Floor: the D3-mirroring bf16 model on A5000 GPUs with `device_map` (57 GiB over 3–4 cards). Sanity ceiling fixed in
+  advance: Tier A's own KL p99 ≤ 1e-4 (fp32 throughout; any more means a real difference). Floor p99 reported with
+  a sequence-bootstrap interval (`bounded`'s), and per-layer top-k flip rates vs the golden for floor and candidate.
+- **Tier B — kernels**: the production engine on one A5000. Floor: the D3-mirroring bf16 model with the q8_1
+  emulator on every quantized linear and expert stack — gate/up quantize each token's input (scatter), down each
+  (token, slot) row (gather), per path; prefill uses mmq semantics, the decode run mmvq semantics at a step size
+  equal to the smallest limit any tensor of the file uses on that class (dense `ggml_cuda_should_use_mmvq` and MoE
+  `use_mmvq_id`), computed from the plugin, with a counter asserting that no mmq call ran. Decode runs are eager
+  (prompt-logprob steps are never graphed), so graph padding does not enter them.
+- **Precision test** (CUDA unit test, not L2: Tier A is fp32 and Tier B's floor is noisier than these choices): at
+  bf16, the router logits match an f64 reference within the fp32 budget (fails under TF32 or a bf16 router), the
+  SwiGLU and expert outputs are f32, `qlinear_experts` binds `act_dtype` bf16 with f32 output.
+- **Graphs vs eager**: `holon_judge bounded` with `cuda_graphs` on vs off on MoE decode at batch 3 and 5 (padded
+  buckets).
+- **L0** (sm_86, sm_89, sm_120a): `qlinear_experts` per type, path and `glu` vs the q8_1-emulated reference per
+  element (`l0.check(bf16)`); the merged stack vs two separate calls (bit-exact on mmvq and on mmq without fixup);
+  routings — uniform, all tokens on the same 8 experts at T = 512 and 513 (column tiles and stream-k fixup inside
+  one expert), half the experts empty, ids 0 and E−1 beside poisoned bytes; T ∈ {0, 1, limit, limit + 1, 9, 64,
+  512, 513, 1025, 2049}; mmvq and mmq agree at limit and limit + 1; down with distinct per-slot inputs; mixed types in
+  one layer at T = 7 on sm_86 (gate IQ3_S on mmq, down IQ4_XS on mmvq); ids straight from `moe_topk`; graph replay
+  with routing unlike the capture's; every captured bucket. `moe_topk` vs the reference (near-ties compared modulo
+  `__expf`, ±inf and all-NaN rows giving unique in-range ids, T not a multiple of 8). `moe_combine` within 1 ulp (FMA).
+  compute-sanitizer memcheck on each class.
+- **Planted bugs**, verdicts and predicted multiples of the floor's KL p99 recorded before measuring:
+  - Tier A must fail: renormalisation off in every layer (gross); renormalisation off in one layer (near threshold:
+    predicted 1.5–3×); expert ids shifted by one in one layer; gate/up swapped in the experts; top-k 7; weights
+    paired with the wrong slots (reversed) in the combine.
+  - Tier B must fail: the production merge interleaving up before gate; an expert stack read as the wrong type; a
+    stale q8_1 input on every 97th expert call (keyed by in and R; it models a stale per-token input, not a stale
+    compacted buffer; fires counted per path), and the rare variant reported.
+  - L0 must fail: down reading `x[t, 0]` (R confused); an id offset in the compaction.
+  - Precision test must fail, L2 predicted to pass: router logits in bf16.
+- **Quantization error**, reported: the file's (dequantized golden vs the bf16 checkpoint's fp32 golden, pinned
+  revision) and the engine's (engine vs that golden), with top-k flip rates.
 
 ### 4.7 Memory on a 16 GB card
 
-RTX 5080, UD-IQ3_XXS: 15.56 GiB total, 12.0 GiB weights, ≈ 0.9 GiB context and libraries (M0.1's measurement) →
-≈ 2.6 GiB for KV, activations and the graph pool. 16K KV tokens = 1.5 GiB. The worst step's peak grows with the
-expert path (`[T·k, 2·inter]` f32 = 100 MiB at 2048 step tokens) and the graph pool with `max_seqs` (0.38–0.50 GiB at
-48–64 in M0.1). Start at `memory_fraction 0.98`, `max_step_tokens 2048`, `max_seqs 32`; step down on a measured
-shortfall, breakdown into the evidence. The KV ceiling is ≈ 20K tokens; 64K needs quantized KV (M0.3b).
+RTX 5080, UD-IQ3_XXS: 15.56 GiB total, 12.0 GiB weights, ≈ 0.9 GiB context and libraries → ≈ 2.6 GiB. 16K KV tokens
+= 1.5 GiB; the expert path is chunked (≈ 45 MiB at 512 tokens); the worst step ≈ 0.3–0.4 GiB; graph pool ≈ 0.26 GiB
+at `max_seqs` 32 (M0.1) → ≈ 0.4 GiB left. Settings: `memory_fraction 0.98`, `max_step_tokens 2048`, `max_seqs 32`;
+breakdown into the evidence; ceiling ≈ 20K KV tokens (64K needs quantized KV, M0.3b). Merges at load are per layer
+(≈ 170 MB transient).
 
 ### 4.8 Bench
 
-As M0.1 (§4.8 there): in-process `bench/llama_bench.py` vs `llama-bench -p 512 -n 128 -d 0,256 -ngl 99 -fa on`
-(warm-up repetition excluded on both sides), and `llama-server` vs Holon over HTTP on the decode and agent traces.
+As M0.1: `bench/llama_bench.py` vs llama-bench (`-p 512 -n 128 -d 0,256 -ngl 99 -fa on`, medians of repetitions
+2–5 on both sides), and `llama-server` vs Holon over HTTP on the decode and agent traces.
 
 ## 5. Implementation plan
 
@@ -206,28 +232,50 @@ Same three reviewers throughout; each step ends green.
 
 | # | Step | Deliverable / test | Days |
 |---|---|---|---|
-| 0 | Fetch Q4_K_M; llama-bench baselines at 51ce9c11 for both files on the A5000 (and per class in step 5) | baselines recorded | 0.5 |
-| 1 | Ops, references, `MoE` + `ExpertLinear` units, gguf MoE keys, `models/qwen3_moe`; test-only providers; tiny MoE GGUF writer | CPU: tiny Q8_0 / Q4_0 MoE GGUF serves what its dequantized weights serve (bitwise prompt logprobs); load errors for unreadable stacks; recipe diff ≤ 15 lines | 2.5 |
-| 2 | Judge: name map, golden (CPU), gate, Tier A on the CPU with its floor on A5000s, Tier A plants | Tier A L2 for both files; plants fail | 2 |
-| 3 | `kernels.ggml_cuda`: C API, two vendored kernels, f32 SwiGLU; L0 incl. memcheck; emulator expert path | L0 on sm_86 and sm_120a; graph capture; determinism | 3 |
-| 4 | Tier B floors and runs on the A5000; Tier B and L0 plants; perf on the A5000 vs llama-bench | Tier B (prefill + decode) passes; plants fail | 2 |
+| 0 | Q4_K_M fetched; A5000 llama-bench baselines (done); per-class baselines in step 5 | baselines | done |
+| 1 | `std.moe` (unit, `ExpertLinear`, contracts, references); `models/qwen3_moe`; test-only providers; tiny MoE GGUF writer | CPU, against an independent oracle: a tiny random HF `Qwen3MoeForCausalLM` (2 layers, 8 experts, top-2, one mixed-type gate/up layer for the unmerged path) written as GGUF; the engine (reference kernels) vs transformers on the dequantized weights; the Tier A plants fail here too; load errors for unreadable stacks; recipe diff ≤ 15 lines | 2.5 |
+| 2 | Judge: name map, streamed golden, gates, the D3-mirroring MoE block, Tier A on the CPU with its floor on A5000s, Tier A plants | Tier A L2 for both files; plants fail at their predicted margins | 2.5 |
+| 3 | `kernels.ggml_cuda`: C API, two vendored kernels and their patches, f32 SwiGLU, provenance; L0 incl. memcheck | L0 on sm_86 and sm_120a; graph capture; determinism | 4.5 |
+| 4 | Emulator expert paths; Tier B floors and runs on the A5000; Tier B, L0 and precision plants; precision test; graphs vs eager; perf on the A5000 | Tier B passes; plants fail | 2.5 |
 | 5 | Consumer classes: L0 on sm_89; 5080 fit ≥ 16K; bars on 5080 / 4090 / 5090 / A5000; `llama-server` traces on the 5080; Tier B on the 5080; tune + GGUF locks; snapshot ×3 | evidence; locks | 3 |
-| 6 | Qwen3 locks: `propagate` on a5000 / 4090 / 5090 (bf16) and rtx-5080 / a5000 (GGUF) | locks | 0.5 |
+| 6 | Qwen3 GGUF locks (rtx-5080, rtx-a5000): `propagate`, approved once | locks | 0.5 |
 | 7 | Docs: design §5.1 / §5.3 / §5.6, plan §5 status | — | 0.5 |
 
-≈ 13.5 days; critical path 0 → 1 → 2 and 3 (parallel) → 4 → 5 → 6 → 7.
+≈ 16 days; critical path 1 → 2 and 3 (parallel) → 4 → 5 → 6 → 7.
 
 ## 6. Risks
 
-- 16K KV on the 5080: ≈ 1 GiB of headroom over the measured M0.1 overheads; the graph pool estimate was low last time.
-- Tier A on the CPU: the reference MoE (a loop over experts) at fp32 over 32.8K tokens, estimated 15–30 min; if it
-  is much slower, Tier A runs on the categories' first half and the full set only on release.
-- Tier B prefill floors are loose by construction (M0.1: mmq's min-term); decode carries the sensitivity.
-- `topk-moe.cu` needs `ggml_get_unary_op` from `ggml.c` (one function in the shim) and its fusion constraints
-  (power-of-two E): other MoE models may need the torch-free fallback of a Triton top-k.
+- 16K KV on the 5080: ≈ 0.4 GiB of headroom after the measured M0.1 overheads.
+- Tier A on the CPU: the reference experts at fp32 over 32.8K tokens, estimated 15–30 min.
+- Tier B prefill floors are loose by construction (M0.1: mmq's min-term); decode and Tier A carry the sensitivity.
+- Serving batches that pad (3, 5–7) pay extra expert reads until finer buckets land.
 
 ## 7. Deferred, deliberately
 
-Serving HF MoE checkpoints (D1: a stacking weight rule or per-expert parameters); expert offload and the expert cache
-(v1, at the `qlinear_experts` seam); expert parallelism; the fused mmvq gate + SwiGLU (§4.5 fallback); MoE models with
-shared experts or sigmoid routing (DeepSeek-style; their own `moe_topk` facts).
+Serving HF MoE checkpoints (a stacking weight rule); expert offload and the expert cache (v1, at the unit); expert
+parallelism; finer graph buckets for MoE (core, on measurement); a fused router kernel; MoE models with shared experts
+or sigmoid routing (DeepSeek-style; their own `moe_topk` facts).
+
+## 8. Revision-1 findings, resolved
+
+Architecture/API: 1 dense stacks / Tier A → Tier A on the `gguf` source with reference kernels, `ExpertLinear`
+quantized only (§4.2, §4.6); 2 workspace name → `ggml_cuda.id[in=…]` (§4.3); 3 lock churn → `std/holon_std/moe`
+(D2, acceptance 1); 4 the cache seam → the unit (D2); 5 a tautological step-1 test → a tiny random HF MoE as oracle
+(§5 step 1); 6 an aliased ids buffer → ids at stride k, contiguous (§4.3); 7 HF keys in std → the recipe reads raw
+GGUF keys (D6); 8 the f32 SwiGLU provider → our kernel, combine stores bf16 (§4.3); 9 speculative recipe content →
+removed, `renormalize` (§4.4); 10 lock-diff statement, step 3 sizing, UD-Q3_K_XL optional (§1, §5); 11 expert-path
+memory → chunked (§4.2, §4.7).
+
+Kernels/performance: 1 workspace collision (as above); 2 decode run on mmq → step size from the plugin's predicates,
+eager runs, a counter (§4.6); 3 padding cost → measured, remedy deferred (§4.3, §7); 4 no f32 SwiGLU (as above); 5
+fused gate on the merged stack by default (D4); 6 peak memory → chunking (§4.2); 7 combine ±1 ulp, topk near-ties
+(§4.6 L0); 8 combine + cast in one launch, IEEE router (D3, §4.3); 9 ids stride (as above); 10 per-chunk path
+(§4.2); 11 PDL wait rule (§4.3); 12 merge transient (§4.7); 13 L0 cases (§4.6); bars on medians (§1).
+
+Numerics/judge: 1 floor looser than candidate → the D3-mirroring MoE block (§4.6); 2 precision invisible at L2 → the
+precision test and its plant (§4.6); 3 decode step size → from the plugin (§4.6); 4 shared judge/engine mistake →
+the assembled-state-dict gate (§4.6); 5 Tier A sensitivity → predicted margins, a near-threshold plant, a sanity
+ceiling (§4.6); 6 flip tails → bootstrap intervals and flip rates reported (§4.6); 7 missing plants → added, the
+clamp noted as dead for softmax (D2, §4.6); 8 stale plant definition (§4.6); 9 L0 cases (§4.6); 10 graph padding →
+graphs-vs-eager bounded check (acceptance 4, §4.6); 11 quantization-error report (§4.6); 12 golden RAM → streamed
+(§4.6).
