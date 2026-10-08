@@ -89,7 +89,7 @@ run for that workload on the target hardware (llama.cpp for GGUF on consumer car
     in f32 in slot order, into `out` (the activation dtype; so a chunk lands in place). Facts: hidden, top_k, dtype,
     y_dtype (`"float32"` in M0.2).
   The split follows the kernels (three vendored kernels, three L0 suites), not a cache's needs; plan §5's "one coarse
-  op" becomes one unit over three ops. `ExpertLinear` (a 3-D quantized stack: adopt, merge, bind) is an internal class
+  op" becomes one unit over three ops. `ExpertLinear` (a 3-D expert stack: adopt, merge, bind) is an internal class
   of the unit, not a `Ref`'d unit.
 - **D3 — f32 inside the expert path, as llama.cpp.** Expert matmuls write f32, SwiGLU runs in f32, the down
   projection quantizes the f32 hidden; the combine stores the activation dtype. The router multiplies the bf16 hidden
@@ -137,7 +137,7 @@ class MoE(nn.Module):                      # unit.std.moe@1(experts, top_k, inte
 stack, from a future HF source, is the parameter itself, with layout `"dense/<dtype>"`), `merge(gate, up)` interleaves the two
 per expert (every part viewed as `[E, out, …]` and concatenated on dim 1 — a block-scaled layout needs `inter`
 divisible by its row block, else the merge fails at startup — in `finalize_weights`, one layer at a time) into a unit that carries `glu =
-"swiglu"`, and `bind_kernels` selects `linear_experts` with its facts after merges. A dense stack has no path:
+"swiglu"`, and `bind_kernels` selects `linear_experts` with its facts after merges. A dense stack has no provider in M0.2:
 dense stacks go through the same selection, so until a dense provider registers the core's "no kernel for
 `linear_experts@1` … layout=dense/…" is the startup error — one path, one message (D1). The unit's chunk bounds memory; the kernel chunks at its
 own 512 too (any T, as `qlinear`) and picks the path per chunk, as llama.cpp does per ubatch: a 513-token step runs
