@@ -216,6 +216,18 @@ def test_linear_experts_every_type(ctx, lib, name):
         check(y, emulated(down, sd, h, ids), INTER, f"down {name} T={tokens}")
 
 
+@pytest.mark.parametrize("name", sorted(TYPES))
+def test_linear_experts_every_type_at_prefill_chunks(ctx, name):
+    """mmq's prefill kernels on every type: the tile width J follows the chunk's tokens (128 at a 512-token chunk,
+    64 at the sweep's 64), and each J is its own kernel. A small stack (8 experts, 256 rows) keeps it to ~1M
+    outputs; 513 tokens adds the one-token mmvq tail chunk."""
+    n, out = 8, 256
+    kernel, s = experts(ctx, name, H, out, 1, n=n), stack(name, n, out, H, seed=5)
+    for tokens in (CHUNK, CHUNK + 1):
+        ids, x = uniform(tokens, n, seed=tokens), gate_up_input(tokens, seed=tokens)
+        check(kernel(x, s.parts, ids), emulated(kernel, s, x, ids), H, f"{name} T={tokens}", True)
+
+
 @pytest.mark.parametrize("name", ["q4_k", "iq3_xxs", "q6_k", "q4_0", "q2_k"])
 def test_merged_stack_equals_separate_stacks(ctx, lib, name):
     """Gate and up merged per expert give each stack's own output bitwise on mmvq and on mmq without the fixup (with

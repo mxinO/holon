@@ -76,6 +76,8 @@ def emulate_q8_1(model: torch.nn.Module, path: str | pathlib.Path, kernel_path: 
     linears = {name: m for name, m in model.named_modules() if isinstance(m, torch.nn.Linear)}
     types = {}
     for t in gguf.GGUFReader(path).tensors:
+        if t.name.endswith("_exps.weight"):            # expert stacks: the floors' D3 block (`q8_1_experts`)
+            continue
         owner = hf_name(t.name).removesuffix(".weight")
         if t.tensor_type in _DENSE or owner not in linears:
             continue                                   # norms, and the embedding (get_rows reads it exactly)
@@ -86,6 +88,58 @@ def emulate_q8_1(model: torch.nn.Module, path: str | pathlib.Path, kernel_path: 
                                                    torch.float32 if owner == "lm_head" else None)
         types[owner] = kind
     return types
+
+
+def q8_1_experts(path: str | pathlib.Path, kernel_path: str):
+    """Tier B's expert stacks for the floors' D3 block (`moe.mirror(experts=…)`): each applies llama.cpp's MUL_MAT_ID
+    on `kernel_path` (`q8_1.linear_experts`, f32) with the type and stored-sum offsets of the file's stack; a merged
+    gate/up stack takes gate's type (gate and up share one in every file in scope) and both offsets."""
+    from . import q8_1
+
+    stacks: dict[str, dict[str, tuple[str, np.ndarray]]] = {}
+    for t in gguf.GGUFReader(path).tensors:
+        m = re.fullmatch(r"blk\.(\d+)\.(ffn_(?:gate|up|down)_exps)\.weight", t.name)
+        if m:
+            stacks.setdefault(f"model.layers.{m[1]}.mlp", {})[_EXPERTS[m[2]]] = (t.tensor_type.name.lower(),
+                                                                                np.asarray(t.data))
+    cache: dict[str, torch.Tensor | None] = {}
+
+    def offsets(key: str, parts: list[tuple[str, np.ndarray]], e: int, device) -> torch.Tensor | None:
+        """Each stack's offsets [E, out, in/group] (merged: gate's then up's rows), once per stack."""
+        if key not in cache:
+            g = q8_1.blocking(parts[0][0], kernel_path).sum_group
+            if not g:
+                cache[key] = None
+            else:
+                per = [q8_1.offsets(b, kind, g).float() for kind, b in parts]
+                cache[key] = torch.cat([o.view(e, -1, o.shape[-1]) for o in per], dim=1).to(device)
+        return cache[key]
+
+    def experts(name: str, x, weight, ids, glu):
+        block, which = name.rsplit(".", 1)
+        parts = [stacks[block]["gate"], stacks[block]["up"]] if which == "gate_up" else [stacks[block]["down"]]
+        if len({kind for kind, _ in parts}) != 1:
+            raise ValueError(f"{block}: gate and up experts of different types")
+        offs = offsets(name, parts, weight.shape[0], weight.device)
+        return q8_1.linear_experts(x, weight, None, ids, parts[0][0], kernel_path, glu, offs, torch.float32)
+    return experts
+
+
+def mmvq_step(path: str | pathlib.Path) -> int:
+    """The largest step at which every quantized matmul of the file takes mmvq on the current GPU — dense tensors by
+    llama.cpp's dense limit, expert stacks by its MoE one (the plugin's own predicates): Tier B's decode run."""
+    from holon_plugins.kernels.ggml_cuda import extension, plugin
+
+    major, minor = torch.cuda.get_device_capability()
+    lib, device = extension.load(10 * major + minor), torch.cuda.current_device()
+    limits = []
+    for t in gguf.GGUFReader(path).tensors:
+        if t.tensor_type in _DENSE or t.name == "token_embd.weight":     # get_rows reads the embedding
+            continue
+        use = lib.use_mmvq_id if t.name.endswith("_exps.weight") else lib.use_mmvq
+        kind = plugin.TYPES[t.tensor_type.name.lower()]
+        limits.append(max((n for n in range(1, 9) if use(device, kind, n)), default=0))
+    return min(limits)
 
 
 def _emulated(linear: torch.nn.Linear, kind: str, kernel_path: str, offs: torch.Tensor | None,

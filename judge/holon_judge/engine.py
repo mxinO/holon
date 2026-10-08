@@ -70,4 +70,8 @@ def score_model(model: str, prompts: PromptSet, dtype: torch.dtype = torch.bfloa
         "weight_source": source or engine.source.kind, "max_step_tokens": engine.cfg.max_step_tokens,
         "dtype": str(dtype).removeprefix("torch."), "device": torch.device(device).type,
         "hardware": hardware(torch.device(device)), "torch": torch.__version__}
-    return score(engine, prompts, k, meta)
+    rec = score(engine, prompts, k, meta)
+    calls = [m._kernel.calls for m in engine.executor.model.modules() if hasattr(getattr(m, "_kernel", None), "calls")]
+    if calls:                                       # expert matmuls per kernel path (a decode run asserts no mmq)
+        rec.meta["expert_calls"] = {p: sum(c[p] for c in calls) for p in calls[0]}
+    return rec

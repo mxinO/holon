@@ -100,7 +100,7 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
         if q8_1:
             gguf.emulate_q8_1(hf, path, q8_1)
         if mirrored:
-            moe.mirror(hf)
+            moe.mirror(hf, experts=gguf.q8_1_experts(path, q8_1) if q8_1 else None)
         config_sha256 = hashlib.sha256((hf_config / "config.json").read_bytes()).hexdigest()
         source = gguf.file_meta(path) | {"q8_1": q8_1, "config": model_meta(hf_config)["model"],
                                          "config_sha256": config_sha256} | _moe_meta(mirrored)
