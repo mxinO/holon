@@ -20,7 +20,8 @@ faithful consumer proxy — CPU-side and PCIe-bound tunables are only measured o
 
 **Quantization priority (D9):** for consumer and edge GPUs the formats that matter are llama.cpp's GGUF sub-4-bit
 types (k-quants Q2_K–Q6_K, i-quants IQ1–IQ4, e.g. `unsloth/Qwen3.8-27B-GGUF`); they are v0. HF-ecosystem formats
-(GPTQ/AWQ INT4, FP8) follow in v1; NVFP4/MXFP4 are datacenter formats (large-memory GPUs) in v2.
+(GPTQ/AWQ INT4) follow in v1. FP8, NVFP4 and MXFP4 checkpoints (dense and MoE) have their own milestone, M0.6,
+developed on Blackwell (RTX PRO 6000, sm_120: native FP8 and FP4 tensor cores) with FP8 also on sm_89.
 
 Runtime dependencies (v0): `torch`, `triton`, `safetensors`, `tokenizers`, `jinja2`, `flashinfer` (JIT caches
 pre-built), vendored GDN ops from vLLM's `third_party/flash_linear_attention` (subset, Apache-2.0, `vllm.*` imports
@@ -40,11 +41,12 @@ the code is our own plugin-native implementation. Only kernels may be borrowed, 
 |---|---|---|---|
 | M0 | Qwen3-8B bf16 | core end to end: overlap, graphs, prefix cache, device SeqTable, MemOps/quiesce, locks, snapshots, judge L0–L2 | qwen3, gqa, paged_kv, flashinfer attn, std ops, sampler, FCFS, openai frontend |
 | M0.1 | Qwen3-8B GGUF (Q8_0, Q4_K_M, IQ4_XS, IQ3_XXS) | quant pipeline: GGUF weight source, ggml dialect, borrowed ggml kernels chosen per class; first 16 GB consumer data point (RTX 5080) | gguf weight source, ggml dialect, ggml_cuda kernels |
-| M0.2 | Qwen3-30B-A3B GGUF (UD-IQ3_XXS 12.0 GiB, UD-Q3_K_XL, Q4_K_M) | model isolation + coarse MoE op; a 30B MoE on a 16 GB card | qwen3_moe recipe, moe op, GGUF MoE kernels |
+| M0.2 | Qwen3-30B-A3B GGUF (UD-IQ3_XXS 12.0 GiB, Q4_K_M; UD-Q3_K_XL optional) + bf16 HF (correctness, RTX PRO 6000) | model isolation; format-general MoE unit and ops; a 30B MoE on a 16 GB card | qwen3_moe recipe, std.moe, GGUF MoE kernels, stacked loading, a Triton grouped GEMM |
 | M0.3 | Qwen3.5-4B → 9B, bf16, text-only | heterogeneous state, page groups, publish/adopt MemOps, checkpoint prefix reuse; legibility benchmark | qwen3_5 recipe, gdn mixer, ssm_checkpoint kind, checkpoint policy |
 | M0.3b | Qwen3.8-27B GGUF (UD-IQ3_S 11.2 GiB, UD-IQ4_XS 13.3 GiB) | large-model target on 16 GB; quantized KV cache (fp8 via FlashInfer, then q8_0/q4_0 via our own kernel; per-class support set by S1) | qwen3_8 recipe, quantized-KV layouts |
 | M0.4 | Qwen3.5 / Qwen3.8 (built-in MTP) + Qwen3-8B | spec decoding at depth 1 on the device SeqTable; Rewindable incl. GDN rollback | mtp drafter, gpu n-gram drafter, verifiers, draft policies |
 | M0.5 | Qwen3-8B, Qwen3.5-9B | forward/sample split, host_input, Rewindable grammar | xgrammar processor, parsers, anthropic + responses frontends |
+| M0.6 | Qwen3-8B / Qwen3-30B-A3B in FP8 (block-scaled), NVFP4 and MXFP4 | low-precision HF checkpoints, dense and MoE: weight-source dialects over `QTensor` parts, `qlinear` / `linear_experts` providers, judge tiers per format; RTX PRO 6000 (sm_120), FP8 also on sm_89 | fp8 / nvfp4 / mxfp4 dialects and kernels |
 
 Expert caching/offload, KV offload, VMM and the optional self-improvement layer follow in v1 (§10); their core
 seams are built and spiked in M0 (design D8).
@@ -308,9 +310,9 @@ Acceptance: qwen3 locks unchanged or advanced only by propagate; MoE L0 vs refer
 with ≥ 16K KV tokens, Q4_K_M on 4090/5090/A5000; decode tok/s vs llama.cpp on the same card and quant recorded;
 core diff target zero.
 
-MoE is format-general: bf16 and FP8 HF MoE checkpoints are required too, as a follow-up (stacked loading of HF's
-per-expert tensors, dense and FP8 `linear_experts` providers, the judge on an HF source) — not M0.2's acceptance,
-whose target is GGUF on 16 GB cards. Design: `docs/m02-moe.md` (D1, D2).
+MoE is format-general: M0.2 also serves the bf16 HF checkpoint as a correctness path on an RTX PRO 6000 node
+(stacked loading of HF's per-expert tensors, a Triton grouped GEMM, L2; no performance bar). FP8, NVFP4 and MXFP4
+are M0.6. Design: `docs/m02-moe.md` (D1, D7, D8).
 
 ## 6. M0.3 — heterogeneous state (Qwen3.5-4B → 9B, text-only)
 
@@ -427,8 +429,8 @@ without spec bounded; core diff target zero.
 - KV offload to pinned RAM / SSD (connector-chosen BLOCKED vs layer-wise, cancellable futures, demote/pin eviction).
 - VMM ledger + live rebalance KV ↔ experts through `quiesce` (run-identical after shrink/regrow).
 - Mixed prefill/decode scheduling policy + PIECEWISE graphs; depth 2; radix PrefixIndex if profiles warrant.
-- HF-ecosystem quantization: GPTQ/AWQ INT4 (W4A16) and FP8 (W8A16 via uint8 bit-decode on sm_86, native FP8 on
-  sm_89/120); TP=2 on 2× A5000 (zero core diff); `update_weights`; LoRA; Qwen3.5 VLM.
+- HF-ecosystem quantization: GPTQ/AWQ INT4 (W4A16), and FP8 on sm_86 (W8A16 via uint8 bit-decode; native FP8,
+  NVFP4 and MXFP4 are M0.6); TP=2 on 2× A5000 (zero core diff); `update_weights`; LoRA; Qwen3.5 VLM.
 - **Optional self-improvement layer** (design §10): supervisor, improve API (first-version tool set), sandbox
   container, spare-GPU evaluation, L4 + L4-confirm, canary with sampled live re-scoring. Acceptance: (1) a scripted
   or external agent promotes a tunable and a policy variant with evidence whose gain CI excludes 0; (2) a served-agent
@@ -440,8 +442,7 @@ without spec bounded; core diff target zero.
 **v2 — breadth**
 - DeepSeek-class: DSA indexer (page groups), V4 compressed KV (`tokens_per_unit`) — correctness on reduced-layer
   configs locally, performance on datacenter GPUs.
-- PD disaggregation, EP, DP-attention, PP on datacenter GPUs (H100/GB200); NVFP4 and MXFP4 for large-memory datacenter
-  GPUs; draft-model drafter (nested ModelPlugin).
+- PD disaggregation, EP, DP-attention, PP on datacenter GPUs (H100/GB200); draft-model drafter (nested ModelPlugin).
 - Tree verification, KVMem-style retrieval window, batch-invariant deterministic Plan (if needed), L3 quality judge,
   ROCm/CPU platforms, multi-model serving.
 
