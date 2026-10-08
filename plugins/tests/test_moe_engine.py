@@ -147,3 +147,15 @@ def test_the_hf_facts_and_a_missing_expert(tiny_moe, tmp_path):
     save_file(tensors, broken / "model.safetensors")
     with pytest.raises(Exception, match=r"layers\.1\.ffn\.up\.weight: stack slices not loaded: \[5\]"):
         _engine(broken)
+
+
+@pytest.mark.parametrize("plant", ["hf-stack-off-by-one", "hf-gate-up-swapped", "hf-two-experts-swapped"])
+def test_the_structural_test_catches_a_misplaced_expert(tiny_moe, plant):
+    from holon_judge.planted import hf_moe_plants
+    from holon_judge.structure import mismatches
+
+    checkpoint, _ = tiny_moe
+    assert mismatches(_engine(checkpoint), checkpoint) == []
+    with hf_moe_plants(layer=1, experts=8)[plant]():
+        engine = _engine(checkpoint)
+    assert mismatches(engine, checkpoint)

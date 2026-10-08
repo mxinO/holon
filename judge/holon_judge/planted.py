@@ -189,6 +189,31 @@ def _swap_gate_up_experts(name: str) -> str:
     return next((name.replace(a, b) for a, b in swap.items() if a in name), name)
 
 
+def _hf_experts(layer: int, edit: Callable[[int, str], tuple[int, str]]) -> Callable[[str], str]:
+    """A rename of HF per-expert tensor names in `layer`: (expert, projection) -> (expert, projection)."""
+    import re
+
+    pattern = re.compile(rf"model\.layers\.{layer}\.mlp\.experts\.(\d+)\.(\w+)_proj\.weight")
+
+    def rename(name: str) -> str:
+        m = pattern.fullmatch(name)
+        if m is None:
+            return name
+        e, proj = edit(int(m[1]), m[2])
+        return f"model.layers.{layer}.mlp.experts.{e}.{proj}_proj.weight"
+    return rename
+
+
+def hf_moe_plants(layer: int, experts: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:
+    """The bf16 HF path's plants (docs/m02-moe.md §4.6), in `layer` of a model with `experts` experts."""
+    swap = {"gate": "up", "up": "gate"}
+    return {
+        "hf-stack-off-by-one": lambda: _loaded(rename=_hf_experts(layer, lambda e, p: ((e + 1) % experts, p))),
+        "hf-gate-up-swapped": lambda: _loaded(rename=_hf_experts(layer, lambda e, p: (e, swap.get(p, p)))),
+        "hf-two-experts-swapped": lambda: _loaded(rename=_hf_experts(layer, lambda e, p: ({0: 1, 1: 0}.get(e, e), p))),
+        "hf-renormalize-ignored": lambda: _moe(init=lambda kw: kw | {"renormalize": False})}
+
+
 def moe_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:
     """Tier A's MoE plants (docs/m02-moe.md §4.6), the one-layer ones at `layer`."""
     return {
@@ -212,5 +237,5 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     # GGUF Tier B
     "ggml-wrong-type": ggml_wrong_type, "ggml-stale-q8_1": ggml_stale_q8_1,
     "rare-ggml-stale-q8_1": lambda: ggml_stale_q8_1(every=9973),      # ~ one linear in 55 forwards
-    # MoE Tier A (Qwen3-30B-A3B: the one-layer plants at layer 24)
-    **moe_plants(24)}
+    # MoE Tier A and the bf16 HF path (Qwen3-30B-A3B: the one-layer plants at layer 24)
+    **moe_plants(24), **hf_moe_plants(24, 128)}

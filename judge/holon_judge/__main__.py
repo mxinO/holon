@@ -67,6 +67,20 @@ def _l2(a: argparse.Namespace) -> int:
     return _report(compare(Recording.load(a.golden), cand, Recording.load(a.floor)), a.json)
 
 
+def _structure(a: argparse.Namespace) -> int:
+    from holon.core.engine import Engine, EngineConfig
+
+    from .structure import mismatches
+
+    path = golden.resolve_model(a.model)
+    with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
+        engine = Engine(EngineConfig(model=str(path), dtype=golden.DTYPES[a.dtype], max_model_len=1024))
+    bad = mismatches(engine, path)
+    print(json.dumps({"model": golden.model_meta(path)["model"], "plant": a.plant, "mismatches": len(bad),
+                      "first": bad[:8]}))
+    return 1 if bad else 0
+
+
 def _snapshot_diff(a: argparse.Namespace) -> int:
     from .snapshot import Snapshot, diff
 
@@ -169,6 +183,12 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--json", help="write the machine-readable result here")
     e.add_argument("--plant", choices=sorted(PLANTS), help="calibration: run with a planted bug (must fail)")
     e.set_defaults(run=_l2)
+
+    st = sub.add_parser("structure", help="every stacked expert of an HF MoE load equals the checkpoint's tensor")
+    st.add_argument("--model", required=True, help="HF checkpoint directory or hub id")
+    st.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
+    st.add_argument("--plant", choices=sorted(PLANTS), help="calibration: run with a planted bug (must fail)")
+    st.set_defaults(run=_structure)
 
     s = sub.add_parser("snapshot-diff", help="check two snapshots for byte identity")
     s.add_argument("a")
