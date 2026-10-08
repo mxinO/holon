@@ -236,8 +236,10 @@ kernels (with the wait rule of §4.3), finer graph buckets for MoE (core).
   - Precision test must fail: router logits in bf16 (L2 predicted at ≤ 1.2× the floor's KL p99, recorded).
   - L0 must fail, deterministically: padding rows with all k slots on one expert, the `ggml_cuda.id` workspace
     pre-filled with a real row's index — real rows change on mmq, stay unchanged on mmvq.
-  - Graphs-vs-eager, the same plant: predicted to fail at batches 12 and 20 (mmq) and pass at 3 and 5 (mmvq); a pass on
-    mmq is recorded with its cause (the stale entries are not controlled there).
+  - Graphs-vs-eager, the same plant: predicted per (file, class) by the path the plugin's predicate gives at each
+    padded bucket — fail where it is mmq (batches 12 and 20 everywhere; batch 5, bucket 8, for UD-IQ3_XXS on sm_86),
+    pass where it is mmvq (batch 3 everywhere); a pass on mmq is recorded with its cause (the stale entries are not
+    controlled there).
 - **Quantization error**, reported: the file's (dequantized golden vs the bf16 checkpoint's fp32 golden, pinned
   revision) and the engine's (engine vs that golden), with top-k flip rates.
 
@@ -324,4 +326,4 @@ Kernels/performance and numerics/judge, the same finding: a padding row sharing 
 hazard is a duplicate inside a row → reason restated (§4.3), the plant moved to L0, deterministic, and kept in
 graphs-vs-eager with per-path predictions (§4.6). Numerics/judge: the floor and Tier A share the references → floors
 recorded only after step 1's oracle and the ceiling pass, the reference hash in their meta, predicted ≤ the pure-HF
-floor (§4.6).
+floor (§4.6). Kernels/performance, last: predictions by the path at the padded bucket, not the batch (§4.6).
