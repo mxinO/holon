@@ -3,7 +3,7 @@ name = "holonlm-judge"
 version = "0.0.1"
 requires-python = ">=3.12"
 description = "Holon judge harness: op oracles, goldens, snapshots, perf (out-of-process client)"
-dependencies = ["holonlm"]  # torch, transformers, safetensors, huggingface_hub come from the environment
+dependencies = ["holonlm", "gguf"]  # gguf-py: the GGUF oracle (M0.1); torch, transformers, safetensors, huggingface_hub come from the environment
 
 [build-system]
 requires = ["hatchling"]

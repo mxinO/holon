@@ -106,7 +106,9 @@ class Unit(Protocol):
     """A built component (op, norm, block, mixer, ffn …), typically a `torch.nn.Module`.
 
     If a unit defines `finalize_weights(ctx: BuildCtx)`, the core calls it once after loading and before graph
-    capture (design §5.1); derived buffers are created there.
+    capture (design §5.1); derived buffers are created there. If it defines `bind_kernels(ctx: BuildCtx)`, the core
+    calls it after every unit has finalized (merges included): kernels that depend on the loaded weights (e.g. a
+    quantized layout adopted with `adopt(ctx, name, qtensor)`) are selected there.
     """
 
     def forward(self, *args: Any) -> Any: ...

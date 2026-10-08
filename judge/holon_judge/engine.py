@@ -12,6 +12,7 @@ from typing import Protocol
 import torch
 from holon.api import Logprobs, SamplingParams, TokenDelta
 
+from . import gguf
 from .golden import hardware, model_meta, resolve_model
 from .recording import Prompt, PromptSet, Recording, tail_from_topk
 
@@ -52,14 +53,16 @@ def _rows(prompt: Prompt, parts: list[Logprobs], k: int) -> tuple[torch.Tensor, 
 
 
 def score_model(model: str, prompts: PromptSet, dtype: torch.dtype = torch.bfloat16, device: str = "cuda",
-                k: int = 20) -> Recording:
-    """Build a Holon engine for `model` (hub id or checkpoint directory) and score `prompts` through it."""
+                k: int = 20, source: str | None = None) -> Recording:
+    """Build a Holon engine for `model` (hub id, checkpoint directory or .gguf file; `source` names the weight source,
+    else it is detected) and score `prompts` through it."""
     from holon.core.engine import Engine, EngineConfig
 
     path = resolve_model(model)
     max_len = max(len(p.ids) for p in prompts.prompts) + 1     # room for the one sampled token
     engine = Engine(EngineConfig(model=str(path), device=device, dtype=dtype, max_model_len=max_len,
-                                 max_step_tokens=max(max_len, 4096)))
-    meta = model_meta(path) | {"dtype": str(dtype).removeprefix("torch."), "device": torch.device(device).type,
-                               "hardware": hardware(torch.device(device)), "torch": torch.__version__}
+                                 max_step_tokens=max(max_len, 4096), source=source))
+    meta = (gguf.file_meta(path) if path.suffix == ".gguf" else model_meta(path)) | {
+        "weight_source": source or engine.source.kind, "dtype": str(dtype).removeprefix("torch."),
+        "device": torch.device(device).type, "hardware": hardware(torch.device(device)), "torch": torch.__version__}
     return score(engine, prompts, k, meta)

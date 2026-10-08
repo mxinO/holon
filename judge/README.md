@@ -79,6 +79,27 @@ The engine is closer to fp32 than HF bf16 on every budgeted metric, so the S5 δ
 (design §10.3: "δ is re-checked on the first real-engine run"). Agent transcripts carry the largest ΔPPL (8B
 +0.346%; floor +0.228%), as in S5.
 
+## GGUF files (M0.1)
+
+`gguf` builds the dense model a GGUF file stands for: `Qwen3ForCausalLM` from the HF config the file was made from,
+filled with the file's tensors dequantized by gguf-py through the judge's own name map (never the engine's loader or
+weight map). Goldens and floors record it with `--config`; meta = the file's sha256, the gguf-py version and the
+name-map hash.
+
+```
+# per-tensor gate: NMSE(dequantized, HF bf16) <= 0.5 for every tensor
+python -c "from holon_judge import gguf; print(max(gguf.gate('<file>.gguf', '<hf dir>').values()))"
+# golden (CPU fp32) and Tier A floor (HF bf16 of the dequantized weights, A5000)
+python -m holon_judge golden --model <file>.gguf --config Qwen/Qwen3-8B --prompts judge/prompts/v1.jsonl \
+    --out judge/goldens/qwen3-8b-q4_k_m/v1-fp32.safetensors --threads 44
+CUDA_VISIBLE_DEVICES=<gpu> python -m holon_judge golden --model <file>.gguf --config Qwen/Qwen3-8B \
+    --prompts judge/prompts/v1.jsonl --out judge/goldens/qwen3-8b-q4_k_m/v1-bfloat16-floor.safetensors \
+    --dtype bfloat16 --device cuda --threads 2
+# Tier A: the engine on the dequantized weights (the test-only `gguf_dense` source), and its planted bugs
+CUDA_VISIBLE_DEVICES=<gpu> python -m holon_judge l2 --model <file>.gguf --source gguf_dense \
+    --prompts judge/prompts/v1.jsonl --golden <golden> --floor <floor> [--plant gguf-qk-permuted]
+```
+
 ## Engine contract (L2 candidate)
 
 `SamplingParams(max_tokens=1, temperature=0.0, prompt_logprobs=20)` per sequence; the `TokenDelta.prompt_logprobs`

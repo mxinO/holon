@@ -1,5 +1,8 @@
-"""Planted bugs that calibrate the bounded check (`bounded --plant`, judge/tests/test_bounded.py): each breaks one
-path the check guards, and the configurations using that path must fail.
+"""Planted bugs that calibrate the judge: each breaks one path a check guards, and the check must fail.
+
+- The bounded check (`bounded --plant`, judge/tests/test_bounded.py): the configurations using the broken path fail.
+- GGUF Tier A (`l2 --plant`, M0.1 design §4.6): bugs in what a GGUF file means (configuration, names, layouts),
+  planted in the weights the engine loads; L2 fails.
 
 They patch engine classes, so they apply to every engine built inside the context, graph captures included. The
 reference re-scoring is untouched by all three: prompt-logprob requests never adopt cached blocks, and it samples one
@@ -68,6 +71,52 @@ def stale_device_token(every: int = 7) -> Iterator[None]:
         yield
 
 
+@contextlib.contextmanager
+def _loaded(edit: Callable[..., tuple[str, torch.Tensor]] | None = None, cfg: dict | None = None) -> Iterator[None]:
+    """Every engine built inside loads `edit(name, tensor, config)` for each dense checkpoint tensor, with `cfg` over
+    its weight source's configuration."""
+    from holon.core import engine
+
+    load_weights, resolve = engine.load_weights, engine.resolve_model
+    config: dict = {}                                   # of the engine being built: resolved, then loaded
+
+    def planted_resolve(plugins, c):
+        source, plugin = resolve(plugins, c)
+        config.clear()
+        config.update(source.config(), **(cfg or {}))
+        source.config = lambda: config
+        return source, plugin
+
+    def planted_load(model, ctx, tensors):
+        return load_weights(model, ctx, (edit(n, t, config) if edit and isinstance(t, torch.Tensor) else (n, t)
+                                         for n, t in tensors))
+    with mock.patch.object(engine, "load_weights", planted_load), \
+            mock.patch.object(engine, "resolve_model", planted_resolve):
+        yield
+
+
+def _transposed_attn_output(name, t, config):
+    return name, (t.T.contiguous() if name.endswith(".attn_output.weight") else t)
+
+
+def _gate_up_swapped(name, t, config):
+    swap = {".ffn_gate.": ".ffn_up.", ".ffn_up.": ".ffn_gate."}
+    return next((name.replace(a, b) for a, b in swap.items() if a in name), name), t
+
+
+def _qk_permuted(name, t, config):
+    """llama.cpp's HF -> GGUF rope permutation (convert_hf_to_gguf.py `permute`), applied where it must not be: Qwen
+    files keep NEOX order."""
+    if name.endswith((".attn_q.weight", ".attn_k.weight")):
+        t = t.reshape(-1, 2, config["head_dim"] // 2, t.shape[-1]).transpose(1, 2).reshape(t.shape)
+    return name, t
+
+
 PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "adoption-off-by-one": adoption_off_by_one, "wrong-block": wrong_block,
-    "stale-device-token": stale_device_token, "rare-stale-device-token": lambda: stale_device_token(every=101)}
+    "stale-device-token": stale_device_token, "rare-stale-device-token": lambda: stale_device_token(every=101),
+    # GGUF Tier A: S5's calibration bug on the file's rope base, and three misreadings of its tensors.
+    "gguf-rope-theta-9e5": lambda: _loaded(cfg={"rope_theta": 9e5}),
+    "gguf-transposed-attn-output": lambda: _loaded(_transposed_attn_output),
+    "gguf-gate-up-swapped": lambda: _loaded(_gate_up_swapped),
+    "gguf-qk-permuted": lambda: _loaded(_qk_permuted)}

@@ -1,9 +1,11 @@
 """Judge command line.
 
-    python -m holon_judge golden   --model <hf dir or id> --prompts <jsonl> --out <file> [--threads N] [--k 20]
+    python -m holon_judge golden   --model <hf dir or id | .gguf> [--config <hf dir or id>] --prompts <jsonl>
+                                   --out <file> [--threads N] [--k 20]
                                    [--dtype bfloat16 --device cuda]          # the floor: HF in the activation dtype
     python -m holon_judge compare  --golden <file> --candidate <file> [--floor <file>] [--json <file>]
-    python -m holon_judge l2       --model <hf dir or id> --prompts <jsonl> --golden <file> --floor <file>
+    python -m holon_judge l2       --model <hf dir or id | .gguf> --prompts <jsonl> --golden <file> --floor <file>
+                                   [--source gguf_dense] [--plant <bug>]
                                    [--dtype bfloat16] [--k 20] [--save <file>] [--json <file>]
     python -m holon_judge snapshot-diff <a.json> <b.json>
     python -m holon_judge snapshot --model <hf dir or id> --prompts <jsonl> [--runs 3] [--json <file>]
@@ -32,7 +34,7 @@ from .recording import PromptSet, Recording
 def _golden(a: argparse.Namespace) -> int:
     if a.threads:
         torch.set_num_threads(a.threads)
-    rec = golden.record(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k)
+    rec = golden.record(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k, a.config)
     rec.save(a.out)
     print(json.dumps(rec.meta | {"bytes": pathlib.Path(a.out).stat().st_size}, indent=1))
     return 0
@@ -54,7 +56,8 @@ def _compare(a: argparse.Namespace) -> int:
 def _l2(a: argparse.Namespace) -> int:
     from .engine import score_model
 
-    cand = score_model(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k)
+    with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
+        cand = score_model(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k, a.source)
     if a.save:
         cand.save(a.save)
     return _report(compare(Recording.load(a.golden), cand, Recording.load(a.floor)), a.json)
@@ -126,7 +129,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(required=True)
 
     g = sub.add_parser("golden", help="record HF teacher-forced top-k logprobs (golden or floor)")
-    g.add_argument("--model", required=True, help="HF checkpoint directory or hub id")
+    g.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")
+    g.add_argument("--config", help="for a .gguf: the HF checkpoint (dir or hub id) it was made from")
     g.add_argument("--prompts", required=True)
     g.add_argument("--out", required=True)
     g.add_argument("--threads", type=int, default=0, help="CPU threads; pin it to re-record a golden bitwise")
@@ -143,7 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     c.set_defaults(run=_compare)
 
     e = sub.add_parser("l2", help="score the prompt set through a Holon engine and judge it")
-    e.add_argument("--model", required=True, help="HF checkpoint directory or hub id")
+    e.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")
+    e.add_argument("--source", help="weight source (default: detected); gguf_dense for GGUF Tier A")
     e.add_argument("--prompts", required=True)
     e.add_argument("--golden", required=True)
     e.add_argument("--floor", required=True)
@@ -152,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--k", type=int, default=20)
     e.add_argument("--save", help="also save the candidate recording")
     e.add_argument("--json", help="write the machine-readable result here")
+    e.add_argument("--plant", choices=sorted(PLANTS), help="calibration: run with a planted bug (must fail)")
     e.set_defaults(run=_l2)
 
     s = sub.add_parser("snapshot-diff", help="check two snapshots for byte identity")

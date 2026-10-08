@@ -54,8 +54,12 @@ class _Cursor:
             elem, n = self.scalar(np.uint32), self.scalar(np.uint64)
             if elem == _STRING:
                 return [self.string() for _ in range(n)]
+            if elem not in _SCALARS:
+                raise ValueError(f"{self.path}: unsupported GGUF array of type {elem}")
             dtype = np.dtype(_SCALARS[elem])
             return self.take(n * dtype.itemsize).view(dtype).tolist()
+        if kind not in _SCALARS:
+            raise ValueError(f"{self.path}: unsupported GGUF value type {kind}")
         return self.scalar(_SCALARS[kind])
 
 
@@ -81,10 +85,13 @@ def read(path: str | pathlib.Path) -> tuple[dict[str, Any], list[TensorInfo]]:
     infos = []
     for name, kind, dims, offset in table:
         block, size = GGML_QUANT_SIZES[kind]
-        if dims[0] % block:
-            raise ValueError(f"{path}: {name} rows of {dims[0]} are not whole {kind.name} blocks of {block}")
-        info = TensorInfo(name, kind, tuple(reversed(dims)), start + offset, int(np.prod(dims[1:], dtype=np.int64)),
-                          dims[0] // block * size)
+        if not dims or dims[0] % block or offset % align:
+            raise ValueError(f"{path}: {name}: rows of {dims[:1]} not whole {kind.name} blocks of {block}, or offset "
+                             f"{offset} not aligned to {align}")
+        rows = 1
+        for n in dims[1:]:
+            rows *= n                                   # Python ints: corrupt sizes cannot wrap around
+        info = TensorInfo(name, kind, tuple(reversed(dims)), start + offset, rows, dims[0] // block * size)
         if info.offset + info.rows * info.row_bytes > len(buf):
             raise ValueError(f"{path}: {name} runs past the end of the file")
         infos.append(info)
@@ -93,7 +100,8 @@ def read(path: str | pathlib.Path) -> tuple[dict[str, Any], list[TensorInfo]]:
 
 def views(path: str | pathlib.Path, infos: list[TensorInfo]) -> Iterator[tuple[TensorInfo, np.ndarray]]:
     """Each tensor's bytes, uint8 [rows, row_bytes], over one copy-on-write map (torch wraps them without a copy, and
-    the file is never written); the map closes when the last view is dropped."""
+    the file is never written); the map closes when the last view is dropped — after loading on a GPU, and with the
+    engine on the CPU, whose parameters stay views into it."""
     buf = np.memmap(path, dtype=np.uint8, mode="c")
     for t in infos:
         yield t, buf[t.offset:t.offset + t.rows * t.row_bytes].reshape(t.rows, t.row_bytes)

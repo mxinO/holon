@@ -7,6 +7,7 @@ dependencies = ["holonlm", "holonlm-std", "gguf"]
 
 [project.entry-points."holon.plugins"]
 "testing.ref_kernels" = "holon_testing.ref_kernels"
+"testing.gguf_dense" = "holon_testing.gguf_dense"
 
 [build-system]
 requires = ["hatchling"]

@@ -22,10 +22,10 @@ DTYPES = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch
 
 
 def resolve_model(model: str) -> pathlib.Path:
-    """A checkpoint directory, or an HF model id resolved through the hub cache (downloaded if missing, unless the
-    hub is offline)."""
+    """A checkpoint directory or file (a .gguf), or an HF model id resolved through the hub cache (downloaded if
+    missing, unless the hub is offline)."""
     path = pathlib.Path(model)
-    if path.is_dir():
+    if path.exists():
         return path
     from huggingface_hub import snapshot_download
 
@@ -81,15 +81,27 @@ def teacher_force(model: torch.nn.Module, ids: list[int], k: int, rows: int = 25
 
 
 def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, device: str = "cpu",
-           k: int = 20) -> Recording:
-    """Record top-k teacher-forced logprobs of `model` (hub id or checkpoint directory) over `prompts`."""
+           k: int = 20, config: str | None = None) -> Recording:
+    """Record top-k teacher-forced logprobs of `model` (hub id, checkpoint directory, or a .gguf file with the HF
+    `config` it was made from: the dense model of its dequantized weights, M0.1 §4.6) over `prompts`."""
     path = resolve_model(model)
-    hf = transformers.AutoModelForCausalLM.from_pretrained(path, dtype=dtype, device_map=device,
-                                                           attn_implementation="sdpa").eval()
+    if path.suffix == ".gguf":
+        from . import gguf
+
+        if config is None:
+            raise ValueError(f"{path}: a GGUF golden needs the HF config it was made from")
+        hf_config = resolve_model(config)
+        hf = gguf.hf_model(path, hf_config, dtype, device)
+        source = gguf.file_meta(path) | {"config": model_meta(hf_config)["model"], "config_sha256": hashlib.sha256(
+            (hf_config / "config.json").read_bytes()).hexdigest()}
+    else:
+        hf = transformers.AutoModelForCausalLM.from_pretrained(path, dtype=dtype, device_map=device,
+                                                               attn_implementation="sdpa").eval()
+        source = model_meta(path)
     t0 = time.perf_counter()
     rows = [teacher_force(hf, p.ids, k) for p in prompts.prompts]
     wall = time.perf_counter() - t0
-    meta = model_meta(path) | prompts.meta() | {
+    meta = source | prompts.meta() | {
         "source": "hf", "dtype": str(dtype).removeprefix("torch."), "device": hf.device.type, "attn": "sdpa",
         "hardware": hardware(hf.device), "threads": torch.get_num_threads(), "torch": torch.__version__,
         "transformers": transformers.__version__, "wall_s": round(wall, 2)}

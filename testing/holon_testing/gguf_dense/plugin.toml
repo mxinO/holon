@@ -1,0 +1,12 @@
+[plugin]
+name = "testing.gguf_dense"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "weight_source"
+license = "Apache-2.0"
+
+[resources]
+provides = ["weight_source.gguf_dense@1"]
+
+[dependencies]
+python = ["gguf", "numpy"]
