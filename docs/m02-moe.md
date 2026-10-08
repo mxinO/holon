@@ -85,7 +85,10 @@ run for that workload on the target hardware (llama.cpp for GGUF on consumer car
     in M0.2; `{"weight"}` dense, `{"weight", "scale"}` block-scaled FP8 later); row j of token
     t applies expert `ids[t, j]` to `x[t, 0]` (R = 1) or `x[t, j]` (R = k). With `glu = "swiglu"` the stack is a
     merged gate/up stack (per expert: `inter` gate rows, then `inter` up rows) and `y = silu(gate) · up` in f32
-    (out_y = inter); with `glu = "none"`, out_y = out. Facts: layout, experts, in, out, top_k, rows_per_token, glu,
+    (out_y = inter); with `glu = "none"`, out_y = out. For a `dense/<dtype>` layout the activation operand is rounded to
+    the weight dtype before the product, with f32 accumulation — part of the contract, implemented once in
+    `reference.py` by layout (ggml layouts keep the fp32 product there; their q8_1 rounding lives in the emulator).
+    Facts: layout, experts, in, out, top_k, rows_per_token, glu,
     act_dtype, out_dtype (`"float32"` in M0.2, the only value its provider supports; a bf16-intermediate provider for
     HF checkpoints adds `"bfloat16"` without changing any GGUF lock's site facts).
   - `moe_combine@1`: `(y [T, k, H], weights [T, k] f32, out [T, H])`: writes `Σ_j w[t, j] · y[t, j]`, accumulated
@@ -345,7 +348,7 @@ Same three reviewers throughout; each step ends green.
 | 4 | Emulator expert paths; Tier B floors and runs on the A5000; Tier B, L0 and precision plants; precision test; graphs vs eager; perf on the A5000 | Tier B passes; plants fail | 2.5 |
 | 5 | Consumer classes: L0 on sm_89; 5080 fit ≥ 16K; bars on 5080 / 4090 / 5090 / A5000; `llama-server` traces on the 5080; Tier B on the 5080; tune + GGUF locks; snapshot ×3 | evidence; locks | 3 |
 | 6 | bf16 HF path: stacking rule (core) and its tests; `kernels.triton_experts` and its L0; the HF map and facts; the structural test; the judge's HF source; L2, plants and chat on an RTX PRO 6000 node (`ggml_cuda` prebuilt for sm_120, for routing and combine) | acceptance 7 | 4 |
-| 6b | Qwen3 locks (bf16 rtx-a5000 / 4090 / 5090; GGUF rtx-5080 / a5000): `propagate`, approved once each | locks | 0.5 |
+| 6b | Qwen3 locks (bf16 rtx-a5000 / 4090 / 5090; GGUF rtx-5080 / a5000): `propagate`, one approval covering every affected lock | locks | 0.5 |
 | 7 | Docs: design §5.1 / §5.3 / §5.6, plan §5 status | — | 0.5 |
 
 ≈ 20 days; critical path 1 → 2 and 3 (parallel) → 4 → 5 → 6b → 7, with step 6 in parallel from step 3 on (it needs
@@ -426,4 +429,4 @@ boundaries and a capture test (D8); 2 the fixed padded grid (D8); 3 down's opera
 4 no autotuning (D8); 5 the merge transient stated (D7); the L0 list (§4.6). Numerics/judge: 1 the exact structural
 test and stacking-rule unit tests, a two-expert-swap plant (§4.6); 2 the down precision, mirrored in the floor, a
 TF32 plant (D8, §4.6); 3 `l0.check(float32, K)` (§4.6); 4 capture safety (D8); 5 the floor-validity rule for the HF
-floor (§4.6); 6 the facts test and a `renormalize` plant (§4.6). Kernels, last: the fused SwiGLU's grid and two accumulators (D8).
+floor (§4.6); 6 the facts test and a `renormalize` plant (§4.6). Kernels, last: the fused SwiGLU's grid and two accumulators (D8). Architecture, last: B1 the dense operand rounding is the op contract's, implemented once in `reference.py`, which the HF floor and `triton_experts`' L0 both use (D2); 6b's approval wording.
