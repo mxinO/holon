@@ -25,8 +25,8 @@ and take the first 16 GB consumer data point. Acceptance, made testable:
 7. GGUF locks for rtx-5080 (and rtx-a5000) — model ids `unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@…` and
    `…/Qwen3-8B-UD-IQ3_XXS@…` (bf16 Qwen3-8B does not fit 16 GB, so rtx-5080 has GGUF locks only).
 
-Non-goals: MoE (`mul_mat_id`, M0.2); quantized KV cache (M0.3b); HF quant formats (v1); a GGUF-only tokenizer
-(§4.2); converters other than identity.
+Non-goals: MoE (`mul_mat_id`, M0.2); quantized KV cache (M0.3b); HF quant formats (v1); converters other than
+identity.
 
 ## 2. Starting point
 
@@ -39,8 +39,12 @@ Non-goals: MoE (`mul_mat_id`, M0.2); quantized KV cache (M0.3b); HF quant format
   bf16 for an 8B model before a byte is read.
 - **Qwen3 GGUF files** (unsloth): no Q/K permutation (llama.cpp's Qwen2/3 converters keep NEOX order); F32 norms;
   q/k share one type in every layer of both files, so do gate/up; v differs (Q6_K in half the Q4_K_M layers; Q4_K vs
-  IQ2_S in UD-IQ3_XXS); the file has `qwen3.*` hyperparameters and a tokenizer table but **no base-model id**, and
-  its eos list ({151645}) is narrower than the HF checkpoint's ({151645, 151643}).
+  IQ2_S in UD-IQ3_XXS); the file has `qwen3.*` hyperparameters, a full tokenizer table and the chat template, but
+  no base-model id; its eos field ({151645}) is narrower than the HF checkpoint's stop set ({151645, 151643}).
+- **llama.cpp needs nothing but the file**: its tokenizer is built from `tokenizer.ggml.tokens/merges/token_type`
+  with a pre-tokenizer regex chosen by `tokenizer.ggml.pre` from a built-in table (`src/llama-vocab.cpp:383`,
+  `qwen2`), CONTROL/USER_DEFINED tokens matched atomically; its stop set is eos/eot plus CONTROL tokens whose text is
+  a known end-of-turn marker (`<|im_end|>`, `<|endoftext|>`, …, `llama-vocab.cpp:3008-3037`).
 
 ## 3. Decisions
 
@@ -66,10 +70,14 @@ stops in step 0.
   Formats with several checkpoint tensors per parameter (GPTQ/AWQ, v1) are grouped by their source into one
   `QTensor`; M0.2's expert stacks are one 3-D `QTensor`.
 
-**D3 — v0 requires an HF base for GGUF models** (design §5.1 as written). `EngineConfig.base` (a hub id or
-directory) supplies the tokenizer, `generation_config` stop ids and the config fields GGUF lacks. Building a
-tokenizer from the GGUF table alone is deferred: transformers' GGUF loader drops the USER_DEFINED tokens
-(`<think>`, `<tool_call>` …), reports the wrong eos and admits 267 UNUSED `[PAD…]` entries (measured by review).
+**D3 — A GGUF file is self-contained, as in llama.cpp** (design §5.1's "HF base tokenizer" is revised). We build
+the tokenizer from the GGUF table ourselves with `tokenizers` primitives — byte-level BPE from tokens + merges,
+CONTROL → special added tokens, USER_DEFINED → atomic added tokens, UNUSED unreachable, the pre-tokenizer regex from
+a small std table keyed by `tokenizer.ggml.pre` (unknown value → error) — and do **not** use transformers' GGUF
+converter (it drops the USER_DEFINED tokens, reports the wrong eos and admits the 267 UNUSED `[PAD…]` entries,
+measured by review). Stop ids = GGUF eos/eot ∪ CONTROL tokens whose text is a known end-of-turn marker (llama.cpp's
+rule). The chat template is the GGUF's. An HF base is never needed at runtime; it appears only in tests, which prove
+our GGUF tokenizer encodes identically to HF's (§4.2).
 
 **D4 — No format names in core; sources are detected by their plugins.** Each weight-source plugin registers
 `detect(path) -> bool` beside its factory; the core picks the single match (zero or several is an error).
@@ -110,17 +118,19 @@ like the existing ones, with the dtype pair as facts.
   `embedding_length`, `feed_forward_length`, `attention.head_count{,_kv}`, `attention.key_length`,
   `rope.freq_base`, `attention.layer_norm_rms_epsilon`, `context_length`, vocab size from the token table, tie =
   no `output.weight`). Floats are taken at their shortest float32 representation (`9.999999974752427e-07` →
-  `1e-06`), so the recipe term is the same with or without a base. Model-specific keys (M0.2 `expert_*`, M0.3
-  `ssm.*`) are mapped by the model plugin beside its weight map. With the base, every field both define must agree
-  (an error otherwise); the base fills the rest.
-- **Tokenizer check**: the base's token strings equal the GGUF table up to the base vocabulary; the GGUF tail is
-  UNUSED; every CONTROL/USER_DEFINED entry is an added token of the base with the matching special flag, and
-  encodes to its own id; eos agrees. Stop ids = GGUF eos/eot ∪ the base's `generation_config` eos.
-- **Frontend**: the source exposes `frontend_dir()` (the base) and `chat_template()` (the GGUF one, which takes
-  precedence — differences logged). `ModelPlugin.bundle(source)` replaces `bundle(path)`; the CLI passes the source.
+  `1e-06`), so the recipe term equals the HF checkpoint's. Model-specific keys (M0.2 `expert_*`, M0.3 `ssm.*`) are
+  mapped by the model plugin beside its weight map. A key the recipe needs that the file lacks is an error naming it.
+- **Tokenizer** (D3), built by the source from the GGUF table: `tokenizer()` returns a `tokenizers.Tokenizer`,
+  `stop_ids()` the stop set, `chat_template()` the template. Tests (not runtime): with the cached `Qwen/Qwen3-8B`,
+  (1) every CONTROL/USER_DEFINED string encodes to exactly its own id; (2) `encode` equals HF's and
+  `encode(decode(ids)) == ids` on the judge prompts and an adversarial set (whitespace runs, CRLF, long digit runs,
+  CJK, emoji, NBSP, contractions, the special tokens inside text); (3) the stop set equals HF's
+  `generation_config` (151645, 151643); (4) the GGUF and HF chat templates render the judge's agent transcripts
+  identically, or the differences are listed.
+- **Frontend**: `ModelPlugin.bundle(source)` replaces `bundle(path)`; for GGUF the bundle wraps the source's
+  tokenizer and template; the CLI passes the source.
 - **Identity**: `<hub repo>/<file stem>@<16 hex>` for hub-cache files (the blob name is the sha256, free), else
-  `<file stem>@<16 hex>`; the hash covers the file digest and, when the base supplies fields, its `config.json`.
-  A re-upload (even template-only) is a new model id with its own golden and lock history.
+  `<file stem>@<16 hex>`. A re-upload (even template-only) is a new model id with its own golden and lock history.
 - **Tensors**: dense types yield tensors; quantized types yield `QTensor(layout, (out, in), {"blocks": u8 view of
   the memmap})`. llama.cpp pads quantized rows to 512 elements (`ggml-cuda.cu:910-916`); `adopt` allocates the
   padded size and zeroes the tail (a no-op for Qwen3-8B, needed for `in` ∉ 512ℕ).
@@ -207,7 +217,7 @@ dequantize (Q1_0, Q2_0) and MXFP4/TQ (not in GGUF LLM builds we serve).
   types (FMA contraction under `-use_fast_math`), or bit-exact if those translation units build with
   `-fmad=false` — decided in step 1 by measurement, recorded in the test.
 
-**L2 golden**: the judge builds `Qwen3ForCausalLM` (fp32, CPU) from the base config and fills it with tensors
+**L2 golden**: the judge builds `Qwen3ForCausalLM` (fp32, CPU) from the HF config and fills it with tensors
 dequantized by calling `gguf.quants.dequantize` directly (never std's wrapper), through the judge's own name map.
 The recording's meta holds the file sha256, the gguf-py version and the name-map hash. One golden per quant file.
 
@@ -265,9 +275,9 @@ The same three reviewers for the whole milestone; each step ends green (lint, te
 |---|---|---|---|
 | 0 | D1: references stop registering as kernels; test fixture plugin; startup error | full suite green via the fixture; `holon serve` with a missing provider fails naming it | 0.5 |
 | 1 | `quant/ggml` + `qops`; L0 dequant harness; FMA decision | dequant vs gguf-py on real + random blocks, all supported types | 1 |
-| 2 | `weights/gguf`: reader, detect, generic keys, base cross-check, tokenizer checks, identity; core D2/D4 | CPU: tiny synthetic Q8_0/Q4_0 GGUF model (gguf-py writer) vs dense, through the fixture kernels; bf16 path snapshot byte-identical | 2 |
+| 2 | `weights/gguf`: reader, detect, generic keys, GGUF tokenizer + stop set + tests vs HF, identity; core D2/D4 | CPU: tiny synthetic Q8_0/Q4_0 GGUF model (gguf-py writer) vs dense, through the fixture kernels; bf16 path snapshot byte-identical | 2 |
 | 3 | `kernels.ggml_cuda`: vendor + shim + wrapper + build/prebuild (sm_86/89/120a link test first); workspace grow-to-max | L0 (all checks of §4.7) on sm_86; graph capture; run-to-run determinism | 4 (in parallel with 1–2) |
-| 4 | Qwen3 `GGUF_WEIGHTS`, `arch.gguf.qwen3`, bundle(source), CLI `--base`/`.gguf` path, tools/judge resolve | Tier A L2 on A5000 for both files; per-tensor gate; planted Tier A bugs fail | 1.5 |
+| 4 | Qwen3 `GGUF_WEIGHTS`, `arch.gguf.qwen3`, bundle(source), CLI `.gguf` path, tools/judge resolve | Tier A L2 on A5000 for both files; per-tensor gate; planted Tier A bugs fail | 1.5 |
 | 5 | D5 boundary kernels (`triton_ops`), same-type merges, KV index hoist, memory reserve | Tier B L2 (prefill + decode) on A5000; planted Tier B bugs fail; bf16 snapshot byte-identical | 2.5 |
 | 6 | Consumer classes: L0 on 4090/5090 (sm_89/120a); 5080 fit at 64K; in-process bars; `llama-server` backend + traces; Tier B on 5080; `tune` + GGUF locks; GGUF snapshot ×3 | evidence; locks | 2 |
 | 7 | bf16 locks re-propagated on a5000/4090/5090 (acceptance 4) | locks | 0.5 |
@@ -295,6 +305,6 @@ About 14.5 days. Step 3 is the long pole and starts at once; steps 4–5 need it
 
 ## 8. Deferred, deliberately
 
-GGUF-only tokenizer builder; "repo id + file" resolution; llama.cpp's batch-1 gate/up/swiglu fusion; fused q/k
+"repo id + file" resolution; pre-tokenizer table entries beyond the archs we serve; llama.cpp's batch-1 gate/up/swiglu fusion; fused q/k
 norm + rope + KV write; CI-built per-SM extension wheels (v0 prebuilds locally); fine-grained (per-class) `src`
 pins.
