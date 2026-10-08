@@ -77,14 +77,17 @@ run for that workload on the target hardware (llama.cpp for GGUF on consumer car
     f32, the k largest (ties to the lower index; NaN as −FLT_MAX), divided by their sum when `renormalize` (the sum is
     clamped at 6.1e-5 as llama.cpp, a guard softmax never reaches: the top-8 sum is ≥ 8/128). Ids are unique and in
     range for every row, padding included. Facts: experts, top_k, renormalize.
-  - `linear_experts@1`: `(x [T, R, in], weight, ids [T, k]) → y [T, k, out_y] f32` for any T ≥ 0 — `weight` the
-    stack in its layout (ggml blocks `[E·out, row_bytes]` in M0.2; dense or FP8 stacks later); row j of token
+  - `linear_experts@1`: `(x [T, R, in], parts, ids [T, k]) → y [T, k, out_y]` in `out_dtype`, for any T ≥ 0 —
+    `parts` the stack's tensors by role in its layout, as `QTensor.parts` (`{"blocks": [E·out, row_bytes]}` for ggml
+    in M0.2; `{"weight"}` dense, `{"weight", "scale"}` block-scaled FP8 later); row j of token
     t applies expert `ids[t, j]` to `x[t, 0]` (R = 1) or `x[t, j]` (R = k). With `glu = "swiglu"` the stack is a
     merged gate/up stack (per expert: `inter` gate rows, then `inter` up rows) and `y = silu(gate) · up` in f32
     (out_y = inter); with `glu = "none"`, out_y = out. Facts: layout, experts, in, out, top_k, rows_per_token, glu,
-    act_dtype.
-  - `moe_combine@1`: `(y [T, k, H] f32, weights [T, k] f32, out [T, H])`: writes `Σ_j w[t, j] · y[t, j]`, accumulated
-    in f32 in slot order, into `out` (the activation dtype; so a chunk lands in place). Facts: hidden, top_k, dtype.
+    act_dtype, out_dtype (`"float32"` in M0.2, the only value its provider supports; a bf16-intermediate provider for
+    HF checkpoints adds `"bfloat16"` without changing any GGUF lock's site facts).
+  - `moe_combine@1`: `(y [T, k, H], weights [T, k] f32, out [T, H])`: writes `Σ_j w[t, j] · y[t, j]`, accumulated
+    in f32 in slot order, into `out` (the activation dtype; so a chunk lands in place). Facts: hidden, top_k, dtype,
+    y_dtype (`"float32"` in M0.2).
   The split follows the kernels (three vendored kernels, three L0 suites), not a cache's needs; plan §5's "one coarse
   op" becomes one unit over three ops. `ExpertLinear` (a 3-D quantized stack: adopt, merge, bind) is an internal class
   of the unit, not a `Ref`'d unit.
@@ -112,7 +115,7 @@ run for that workload on the target hardware (llama.cpp for GGUF on consumer car
 | `plugins/holon_plugins/models/qwen3_moe` | new: recipe copied from qwen3 (`derived_from`), `arch.gguf.qwen3moe@1`, GGUF weight map, bundle (copied) |
 | `std/holon_std/moe` | new: the unit and `ExpertLinear`; `moe_topk@1`, `linear_experts@1`, `moe_combine@1` contracts and `reference.py` |
 | `plugins/holon_plugins/kernels/ggml_cuda` | the three kernels; `topk-moe.cu` and `moe-weighted-reduction.cu` vendored (`vendor.sh`, `SHA256SUMS`, `[provenance]`, `THIRD_PARTY_NOTICES.md`); `vendor.patch`: topk ids at stride k (the write and its stride assert), the reduction's bf16 store; csrc: f32 SwiGLU on llama.cpp's `ggml_cuda_op_silu_single`, the shim's `ggml_get_unary_op` |
-| `testing` | reference providers for the three ops (gguf-py dequantization, cached); tiny MoE GGUF writer |
+| `testing` | reference providers for the three ops (gguf-py dequantization, cached), selecting layouts by scheme (`ggml.*`), not by op-name prefix; tiny MoE GGUF writer |
 | `judge` | MoE name map, streamed golden, gates, the MoE block of the floors (§4.6), emulator expert paths, planted bugs |
 
 ### 4.2 The MoE unit
@@ -130,11 +133,13 @@ class MoE(nn.Module):                      # unit.std.moe@1(experts, top_k, inte
         return out
 ```
 
-`ExpertLinear` mirrors `Linear`: `adopt` takes a quantized `(E, out, in)` stack (a dense stack, from a future HF
-source, is the parameter itself), `merge(gate, up)` interleaves the two
-per expert (`view(E, out, rb)` concatenated on dim 1, in `finalize_weights`, one layer at a time) into a unit that carries `glu =
+`ExpertLinear` mirrors `Linear`: `adopt` takes a quantized `(E, out, in)` stack and keeps all its parts (a dense
+stack, from a future HF source, is the parameter itself, with layout `"dense/<dtype>"`), `merge(gate, up)` interleaves the two
+per expert (every part viewed as `[E, out, …]` and concatenated on dim 1 — a block-scaled layout needs `inter`
+divisible by its row block, else the merge fails at startup — in `finalize_weights`, one layer at a time) into a unit that carries `glu =
 "swiglu"`, and `bind_kernels` selects `linear_experts` with its facts after merges. A dense stack has no path:
-`bind_kernels` fails at startup naming the unit and layout until a dense provider exists (D1). The unit's chunk bounds memory; the kernel chunks at its
+dense stacks go through the same selection, so until a dense provider registers the core's "no kernel for
+`linear_experts@1` … layout=dense/…" is the startup error — one path, one message (D1). The unit's chunk bounds memory; the kernel chunks at its
 own 512 too (any T, as `qlinear`) and picks the path per chunk, as llama.cpp does per ubatch: a 513-token step runs
 one mmq chunk and one mmvq chunk.
 
@@ -339,4 +344,7 @@ floor (§4.6). Kernels/performance, last: predictions by the path at the padded 
 
 After review (user): MoE is format-general — D1 states the bf16 / FP8 HF follow-up, and the expert op is
 `linear_experts@1` with the layout as a fact (renamed from `qlinear_experts`), so dense and FP8 providers plug in
-without changing the unit or the contract.
+without changing the unit or the contract. Architecture/API on that change: F1 FP8 needs two tensors →
+`linear_experts` takes the layout's parts, merged part by part (D2, §4.2); F2 the f32 output is llama.cpp parity, not
+MoE's → `out_dtype` / `y_dtype` facts, `"float32"` in M0.2 (D2); F3 a dense stack fails through ordinary selection
+(§4.2); F4 the reference provider filters by layout scheme (§4.1).
