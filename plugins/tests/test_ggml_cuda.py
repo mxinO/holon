@@ -2,14 +2,17 @@
 
 - `qlinear`, every supported type, `in` ∈ {768, 2304, 4096, 12288} on random-byte blocks with realistic fp16 scales
   (negative, zero, subnormal, up to 1) and real tensors from the cached Qwen3-8B files; `out` = 300 (not a multiple
-  of the mmq tile); the bytes right after the weights are poisoned (NaN scales). Rows {1, t, t+1, 8, 9, 64, 128,
-  256, 512, 513, 1025, max_step_tokens}, t = llama.cpp's mmvq threshold for the type on this device; activations
-  hold an all-zero row and a row with one large outlier. Per element `l0.check(bf16, in)` against the emulated
-  reference of the path taken (judge `q8_1`), NMSE ≤ 5e-4 against the unquantized oracle, run-to-run identical.
-- `convert` and `get_rows` (`qembedding`) against `gguf.quants.dequantize`: equal for every type. FMA decision,
-  measured on sm_86: with llama.cpp's flags (`-use_fast_math`, FMA contraction on) every value matches gguf-py
-  exactly, affine types (Q4_1, Q5_1, Q2_K, Q4_K, Q5_K, IQ1_S) included, so nothing is built with `-fmad=false`;
-  the only bit difference is the sign of zero in Q4_0's convert ((8 − 8)·d).
+  of the mmq tile); the bytes right after the weights are poisoned (NaN scales). Rows 1..9 (every mmvq column
+  count, and mmq above the type's threshold on this device), 64, 128, 256, 512, 513, 1025, max_step_tokens;
+  activations hold an all-zero row and a row with one large outlier. Per element `l0.check(bf16, in)` against the
+  emulated reference of the path taken (judge `q8_1`, MMA kernels: cc >= 7.5), NMSE <= 5e-4 against the
+  unquantized oracle, run-to-run identical.
+- mmq's schedules at 512 rows, asserted from llama.cpp's own choice (tile I x J, nsm): stream-k with the fixup
+  pass (out = 300), one block per tile (out = nsm * I), and the model's out 4096 and 12288.
+- `convert` and `get_rows` (`qembedding`) against `gguf.quants.dequantize`: bit-identical for every type. FMA
+  decision, measured on sm_86: with llama.cpp's flags (`-use_fast_math`, FMA contraction on) every value matches
+  gguf-py bit for bit, affine types (Q4_1, Q5_1, Q2_K, Q4_K, Q5_K, IQ1_S) included, so nothing is built with
+  `-fmad=false`; the one exception is the sign of zero in Q4_0's convert ((8 - 8) * d is +0 for negative d).
 - CUDA graphs: captured calls replay bitwise like eager ones (PDL launches on sm_120a), also on new inputs.
 
 Skips without a GPU; builds the extension (prebuild) into the user cache if it is missing.
@@ -47,6 +50,7 @@ SCALES = {"q4_1": (0, 2), "q5_1": (0, 2), "q2_k": (80, 82), "q3_k": (108,), "q4_
 def sm() -> int:
     major, minor = torch.cuda.get_device_capability()
     sm = 10 * major + minor
+    assert sm >= 75, "q8_1.MMQ emulates llama.cpp's MMA kernels (turing_mma_available)"
     try:
         extension.load(sm)
     except extension.NotBuilt:
@@ -71,8 +75,8 @@ def real() -> dict[tuple[str, int], np.ndarray]:
     return found
 
 
-def qlinear(ctx, name: str, k: int, out_dtype: str = "bfloat16"):
-    facts = {"layout": f"ggml.{name}/gguf.native", "in": k, "out": OUT, "act_dtype": "bfloat16",
+def qlinear(ctx, name: str, k: int, out_dtype: str = "bfloat16", out: int = OUT):
+    facts = {"layout": f"ggml.{name}/gguf.native", "in": k, "out": out, "act_dtype": "bfloat16",
              "out_dtype": out_dtype}
     spec = ctx.select_kernel("qlinear@1", site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
@@ -91,6 +95,11 @@ def random_blocks(name: str, rows: int, k: int, seed: int) -> np.ndarray:
         d[rng.random(d.shape) < 0.03] = 0
         b[..., off:off + 2] = d.astype(np.float16).view(np.uint8).reshape(*b.shape[:2], 2)
     return b.reshape(rows, -1)
+
+
+def same_bits(a: torch.Tensor, b: torch.Tensor) -> bool:
+    ints = {torch.float32: torch.int32, torch.bfloat16: torch.int16}[a.dtype]
+    return a.shape == b.shape and torch.equal(a.view(ints), b.to(a.dtype).view(ints))
 
 
 def device_blocks(blocks: np.ndarray) -> torch.Tensor:
@@ -148,7 +157,8 @@ def test_link(sm):
 def test_qlinear_random_blocks(ctx, name, k):
     kernel = qlinear(ctx, name, k)
     t = kernel.mmvq_rows
-    rows = sorted({1, t, t + 1, 8, 9, 64, 128, 256, CHUNK, CHUNK + 1, 2 * CHUNK + 1, MAX_STEP_TOKENS})
+    assert 1 <= t <= 8
+    rows = sorted({*range(1, 10), 64, 128, 256, CHUNK, CHUNK + 1, 2 * CHUNK + 1, MAX_STEP_TOKENS})
     check_qlinear(kernel, name, random_blocks(name, OUT, k, seed=k), rows)
 
 
@@ -170,6 +180,20 @@ def test_qlinear_f32_out_and_empty(ctx):
 
 
 @pytest.mark.parametrize("name", sorted(TYPES))
+def test_mmq_schedules(ctx, sm, name):
+    """mmq at CHUNK rows under each of llama.cpp's schedules, asserted from its own choice (`mmq_schedule`:
+    0 tiling, 1 stream-k with one block per tile, 2 stream-k with the fixup pass)."""
+    lib, k = extension.load(sm), 4096
+    nsm = torch.cuda.get_device_properties().multi_processor_count
+    kind, tile_i, _ = lib.mmq_schedule(0, TYPES[name], OUT, CHUNK)
+    assert kind == 2, f"{name}: out={OUT} should take the stream-k fixup"
+    for out in (nsm * tile_i, 4096, 12288):
+        kind = lib.mmq_schedule(0, TYPES[name], out, CHUNK)[0]
+        assert out != nsm * tile_i or kind in (0, 1), f"{name}: out={out} (tiles a multiple of nsm) takes the fixup"
+        check_qlinear(qlinear(ctx, name, k, out=out), name, random_blocks(name, out, k, seed=out), (CHUNK,))
+
+
+@pytest.mark.parametrize("name", sorted(TYPES))
 def test_convert_and_get_rows_match_gguf(ctx, sm, name):
     lib = extension.load(sm)
     for k in (768, 4096):
@@ -177,13 +201,14 @@ def test_convert_and_get_rows_match_gguf(ctx, sm, name):
         ref, w = dequantize(name, blocks), device_blocks(blocks)
         y = torch.empty(OUT, k, device="cuda")
         lib.dequantize(TYPES[name], w, y)
-        assert torch.equal(y, ref), f"{name}: convert differs from gguf-py"
+        zero = 0.0 if name == "q4_0" else -0.0   # x + 0.0 maps -0 to +0: Q4_0's one exception (docstring)
+        assert same_bits(y + zero, ref + zero), f"{name}: convert differs from gguf-py"
         facts = {"layout": f"ggml.{name}/gguf.native", "vocab": OUT, "hidden": k}
         ids = torch.tensor([0, OUT - 1, 5, 5, 123], device="cuda")
         for dtype in ("float32", "bfloat16"):
             spec = ctx.select_kernel("qembedding@1", site="l0", dtype=dtype, **facts)
             got = spec.impl(ctx, dtype=dtype, **facts)(ids, w)
-            assert torch.equal(got, ref[ids].to(got.dtype)), f"{name}: get_rows ({dtype}) differs from gguf-py"
+            assert same_bits(got, ref[ids]), f"{name}: get_rows ({dtype}) differs from gguf-py"
 
 
 def test_qembedding_real_table(ctx):
@@ -198,7 +223,7 @@ def test_qembedding_real_table(ctx):
     ids = torch.tensor([0, 1, 151643, 151645, vocab - 1, 4096])
     rows = np.array(t.data[ids.numpy()])
     got = kernel(ids.cuda(), device_blocks(np.array(t.data)))
-    assert torch.equal(got, dequantize(t.tensor_type.name.lower(), rows).to(torch.bfloat16))
+    assert same_bits(got, dequantize(t.tensor_type.name.lower(), rows))
 
 
 @pytest.mark.parametrize("name", ["q4_k", "q6_k", "q2_k", "iq3_xxs", "iq2_s", "q8_0"])

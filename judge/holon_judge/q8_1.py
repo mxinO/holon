@@ -7,9 +7,11 @@ weights' per-group offset (`w = scale·k + b`, `k` the integer factor) multiplie
 
 - `mmvq` (`block_q8_1`): 32 values per fp16 scale, fp16 sums; the offsets of Q4_0/Q4_1/Q5_0/Q5_1/IQ1_S use the
   sums, those of the k-quants the quantized values (`vecdotq.cuh`, e.g. `vec_dot_q4_K_q8_1_impl_vmmq`).
-- `mmq` (`block_q8_1_mmq`, MMA kernels): D4 (32 values per f32 scale), DS4 (32 per fp16 scale, fp16 sums; the
+- `mmq` (`block_q8_1_mmq`): D4 (32 values per f32 scale), DS4 (32 per fp16 scale, fp16 sums; the
   offsets of Q4_1/Q5_1/Q4_K/Q5_K/IQ1_S use them, `vecdotq.cuh:521-552` and `ggml_cuda_mmq_vec_dot_q8_1_q8_1_mma`),
   D2S6 for Q2_K (64 per fp16 scale, fp16 sums of 16 for the first 96 of every 128 values).
+  These are the MMA kernels', which llama.cpp runs on NVIDIA cc >= 7.5 (`turing_mma_available`), i.e. on every
+  class we build (sm_86, sm_89, sm_120a); the dp4a kernels of older GPUs differ (e.g. Q4_0 there uses its sums).
 
 So `y = W x̃ + Σ_g b_g (S_g − Σ_g x̃)` over the groups `g` whose offset uses a stored sum `S_g`. The offsets `b` are
 read from the blocks by gguf-py with the integer factors zeroed. Everything else (fp16 products, summation order,
