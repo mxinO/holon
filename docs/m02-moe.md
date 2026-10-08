@@ -77,7 +77,7 @@ run for that workload on the target hardware (llama.cpp for GGUF on consumer car
     kernel ops stay stateless. How a deployment selects the variant (a recipe knob, or a second provider chosen by
     pin — today one provider serves each unit resource) is v1's decision.
   - `moe_topk@1`: `logits [T, E] f32 → (weights [T, k] f32, ids [T, k] int32)`, both contiguous: softmax over E in
-    f32, the k largest (ties to the lower index; NaN as −FLT_MAX), divided by their sum when `renormalize` (the sum is
+    f32, the k largest (ties to the lower index; a row with any NaN or +inf logit gets k unique in-range ids and unspecified weights), divided by their sum when `renormalize` (the sum is
     clamped at 6.1e-5 as llama.cpp, a guard softmax never reaches: the top-8 sum is ≥ 8/128). Ids are unique and in
     range for every row, padding included. Facts: experts, top_k, renormalize.
   - `linear_experts@1`: `(x [T, R, in], parts, ids [T, k]) → y [T, k, out_y]` in `out_dtype`, for any T ≥ 0 —
