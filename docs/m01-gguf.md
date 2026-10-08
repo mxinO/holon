@@ -60,7 +60,7 @@ a CPU lock is a test artifact by construction.
 - `build_model` builds on meta without `to_empty`.
 - `load_weights`: a dense value is copied into a device tensor bound in place (`param.data = …`, the Parameter
   object kept); a `QTensor` value goes to `owner.adopt(ctx, leaf_name, qtensor)` on the owning module, which uploads
-  the parts as its own uint8 parameters (rows padded to 512 elements as llama.cpp does, tail zeroed), and records the
+  the parts as its own uint8 parameters (the ggml kernels need no padding: they support `in` % 256 = 0), and records the
   layout (the kernel is selected in `finalize_weights`, §4.3). No `adopt`, or `False`: load error naming path, unit and layout. A parameter still
   on meta afterwards: "not loaded". `WeightRule.transform` on a `QTensor`: error.
 - The core never iterates parts or knows formats; `QTensor` is a loader-time value. Several checkpoint tensors per
