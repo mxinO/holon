@@ -2,7 +2,7 @@
 
 Unknown fields are ignored, since OpenAI clients send many; known ones we cannot honour yet are rejected rather than
 silently changing what a request means. Extensions follow vLLM's names (top_k, min_p, repetition_penalty,
-stop_token_ids, ignore_eos, chat_template_kwargs).
+stop_token_ids, ignore_eos, chat_template_kwargs, return_token_ids).
 """
 from __future__ import annotations
 
@@ -35,6 +35,7 @@ class GenerationRequest(BaseModel):
     stop: str | list[str] | None = None
     stop_token_ids: list[int] = []
     ignore_eos: bool = False
+    return_token_ids: bool = False          # each choice (and stream chunk) also carries its generated token ids
 
     @model_validator(mode="before")
     @classmethod

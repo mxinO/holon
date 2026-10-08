@@ -32,7 +32,9 @@ METHOD = (
     "ms/step = time.process_time() delta around step() on those steps, measured with --blocking-sync (CUDA "
     "primary context in blocking-sync mode and torch events created blocking, so waiting for the GPU sleeps and "
     "is not counted). Greedy, ignore_eos, fixed output lengths; warmup on the same shapes with other prompt "
-    "tokens, excluded.")
+    "tokens, excluded. HTTP backends (llamaserver, holon_http; bench/backends/http.py): streamed requests, a "
+    "token timestamped when its chunk arrives; their 'steps' are client polls, so decode tok/s and CPU ms/step do "
+    "not apply to them.")
 
 
 def git(*args: str, cwd: pathlib.Path = ROOT) -> str:
@@ -47,9 +49,10 @@ def gpu_class(index: int) -> str:
 
 
 def model_id(path: str) -> str:
-    """"Org/Name@snapshot" for a Hugging Face cache snapshot, else the directory name (no absolute paths)."""
-    m = re.search(r"models--([^/]+)--([^/]+)/snapshots/([0-9a-f]+)", path)
-    return f"{m[1]}/{m[2]}@{m[3][:12]}" if m else pathlib.Path(path).name
+    """"Org/Name@snapshot" for a Hugging Face cache snapshot (plus "/<file>" for a file in it, e.g. a .gguf), else
+    the directory or file name (no absolute paths)."""
+    m = re.search(r"models--([^/]+)--([^/]+)/snapshots/([0-9a-f]+)(/[^/]+)?", path)
+    return f"{m[1]}/{m[2]}@{m[3][:12]}{m[4] or ''}" if m else pathlib.Path(path).name
 
 
 def public(arg: str, model: str) -> str:
@@ -110,8 +113,11 @@ def summarize(cases: list[dict], columns: list[str], cpu_time: bool) -> dict:
 def run_worker(backend: str, args: argparse.Namespace, out: pathlib.Path) -> tuple[dict | None, str]:
     # PCI order: --gpu is the nvidia-smi index, which also names the GPU class in the evidence.
     env = dict(os.environ, CUDA_DEVICE_ORDER="PCI_BUS_ID", CUDA_VISIBLE_DEVICES=str(args.gpu), HF_HUB_OFFLINE="1")
-    if backend == "holon":   # measure this checkout, whatever copy of Holon the venv has installed
+    if backend in ("holon", "holon_http"):   # measure this checkout, whatever copy the venv has installed
         env["PYTHONPATH"] = os.pathsep.join(str(ROOT / d) for d in ("core", "std", "plugins"))
+        python = sys.executable
+    elif backend == "llamaserver":           # a server binary (LLAMA_SERVER): the client needs only the stdlib
+        env.pop("PYTHONPATH", None)
         python = sys.executable
     else:
         env.pop("PYTHONPATH", None)
@@ -144,10 +150,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--name", required=True, help="workload name for the evidence file")
     ap.add_argument("--gpu", type=int, required=True, help="CUDA device index to pin")
-    ap.add_argument("--model", required=True, help="checkpoint directory")
+    ap.add_argument("--model", required=True, help="checkpoint directory or file (a .gguf)")
     ap.add_argument("--traces", nargs="+", required=True, help="JSONL specs from workloads.py")
     ap.add_argument("--backends", nargs="+", default=["holon", "minisgl"],
-                    choices=["holon", "minisgl", "nanovllm"])
+                    choices=["holon", "holon_http", "llamaserver", "minisgl", "nanovllm"])
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--max-batch", type=int, default=64, help="max running sequences (same for every backend)")
     ap.add_argument("--max-step-tokens", type=int, default=8192, help="max tokens per prefill step")

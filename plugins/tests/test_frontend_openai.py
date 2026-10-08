@@ -179,6 +179,18 @@ def test_completion_token_prompts_batch_and_length(http, engine):
 
 
 @pytest.mark.parametrize("stream", [False, True])
+def test_return_token_ids_covers_every_generated_token(http, engine, stream):
+    """Clients counting tokens (the bench's HTTP backend) get every token id, in a chunk per engine delta — even
+    a delta whose bytes complete no character yet."""
+    r = http.post("/v1/completions", json={"prompt": "Hi", "max_tokens": 100, "stream": stream,
+                                           "return_token_ids": True})
+    choices = [c for e in _events(r) for c in e["choices"]] if stream else r.json()["choices"]
+    ids = [t for c in choices for t in c["token_ids"]]
+    assert bytes(ids[:-1]).decode() == OUTPUTS[0] and "".join(c["text"] for c in choices) == OUTPUTS[0]
+    assert "token_ids" not in http.post("/v1/completions", json={"prompt": "Hi"}).json()["choices"][0]
+
+
+@pytest.mark.parametrize("stream", [False, True])
 def test_stop_string_across_tokens(http, engine, stream):
     # "wö" spans three byte tokens; the stop is found mid-character and the engine request is aborted.
     r = http.post("/v1/completions", json={"prompt": "Hi", "stop": ["xyz", "wö"], "stream": stream, "max_tokens": 100})

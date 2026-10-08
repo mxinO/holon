@@ -88,7 +88,7 @@ def build_app(client: EngineClient, bundle: FrontendBundle) -> FastAPI:
             if first.finish_reason == "error":
                 raise BadRequest(first.error)
             events = _events(fmt, {**envelope, "object": fmt.chunk_object}, first, gens[0],
-                             n_prompt if req.include_usage else None)
+                             n_prompt if req.include_usage else None, req.return_token_ids)
             return _EventStream(events, media_type="text/event-stream")
 
         results = await _unless_disconnected(request, _collect(gens))
@@ -96,8 +96,9 @@ def build_app(client: EngineClient, bundle: FrontendBundle) -> FastAPI:
             return Response(status_code=499)
         if errors := [p.error for pieces in results for p in pieces if p.finish_reason == "error"]:
             raise BadRequest(errors[0])
-        choices = [fmt.choice(i * params.n + k, responses.merge([p for p in pieces if p.index == k]))
-                   for i, pieces in enumerate(results) for k in range(params.n)]
+        merged = [responses.merge([p for p in pieces if p.index == k]) for pieces in results for k in range(params.n)]
+        choices = [fmt.choice(i, p) | ({"token_ids": p.token_ids} if req.return_token_ids else {})
+                   for i, p in enumerate(merged)]
         n_completion = sum(len(p.token_ids) for pieces in results for p in pieces)
         return JSONResponse({**envelope, "choices": choices, "usage": responses.usage(n_prompt, n_completion)})
 
@@ -123,8 +124,9 @@ async def _collect(gens: list[AsyncIterator[Piece]]) -> list[list[Piece]]:
 
 
 async def _events(fmt: responses.Chat | responses.Completion, envelope: dict[str, Any], first: Piece,
-                  gen: AsyncIterator[Piece], n_prompt: int | None) -> AsyncIterator[str]:
-    """Server-sent events of one request; the final usage chunk only if asked for (`n_prompt` given)."""
+                  gen: AsyncIterator[Piece], n_prompt: int | None, token_ids: bool) -> AsyncIterator[str]:
+    """Server-sent events of one request; the final usage chunk only if asked for (`n_prompt` given); with
+    `token_ids`, a chunk for every piece, carrying its token ids."""
     seen: set[int] = set()
     n_completion = 0
     async with aclosing(gen):
@@ -136,8 +138,9 @@ async def _events(fmt: responses.Chat | responses.Completion, envelope: dict[str
             n_completion += len(p.token_ids)
             new = p.index not in seen
             seen.add(p.index)
-            if new or p.text or p.logprobs is not None or p.finish_reason:
-                yield _event({**envelope, "choices": [fmt.chunk(p.index, p, new)]})
+            if new or p.text or p.logprobs is not None or p.finish_reason or token_ids:
+                chunk = fmt.chunk(p.index, p, new) | ({"token_ids": p.token_ids} if token_ids else {})
+                yield _event({**envelope, "choices": [chunk]})
             p = await anext(gen, None)
     if n_prompt is not None:
         yield _event({**envelope, "choices": [], "usage": responses.usage(n_prompt, n_completion)})
