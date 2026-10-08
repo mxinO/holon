@@ -13,6 +13,7 @@ dependencies = ["holonlm"]
 "std.state.paged" = "holon_std.state.paged"
 "std.sampling" = "holon_std.sampling"
 "std.weights.hf" = "holon_std.weights.hf"
+"std.weights.gguf" = "holon_std.weights.gguf"
 "std.spec.greedy" = "holon_std.spec.greedy"
 
 [build-system]
