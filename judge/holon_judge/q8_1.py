@@ -15,7 +15,8 @@ weights' per-group offset (`w = scale·k + b`, `k` the integer factor) multiplie
 
 So `y = W x̃ + Σ_g b_g (S_g − Σ_g x̃)` over the groups `g` whose offset uses a stored sum `S_g`. The offsets `b` are
 read from the blocks by gguf-py with the integer factors zeroed. Everything else (fp16 products, summation order,
-fast-math) is left to the L0 budget. Types are ggml names in lowercase (`"q4_k"`).
+fast-math) is left to the L0 budget. Types are ggml names in lowercase (`"q4_k"`). Expert stacks (`linear_experts`,
+M0.2 design §4.6) quantize each input row once and apply each slot's expert with the same per-path semantics.
 """
 from __future__ import annotations
 
@@ -92,13 +93,58 @@ def matmul(x: torch.Tensor, weight: torch.Tensor, blocks: np.ndarray | None, ggm
     [out, row_bytes] (gguf.native) by gguf-py, `x` [T, in]. `offs`: `offsets(blocks, ggml_type, group)` computed
     once for many calls (Tier B's floor runs this in float32 on every quantized linear)."""
     b = blocking(ggml_type, path)
+    if b.sum_group and offs is None:
+        offs = offsets(blocks, ggml_type, b.sum_group)
+    return _product(*_activations(x, b, dtype), weight, offs)
+
+
+def linear_experts(x: torch.Tensor, weight: torch.Tensor, blocks: np.ndarray | None, ids: torch.Tensor,
+                   ggml_type: str, path: str, glu: str = "none", offs: torch.Tensor | None = None,
+                   dtype: torch.dtype = torch.float64) -> torch.Tensor:
+    """llama.cpp's MUL_MAT_ID on `path` (`linear_experts@1`, in `dtype`, on x's device): slot j of token t applies
+    expert `ids[t, j]` of `weight` [E, out, in] (dequantized from `blocks` [E·out, row_bytes]) to `x[t, 0]` or
+    `x[t, j]` (`x` [T, R, in], R = 1 or k) → [T, k, out_y]. Each input row is quantized once: for R = 1 (gate/up) a
+    token's input once, scattered to its k slots; for R = k (down) each (token, slot) row, gathered. mmvq and mmq with
+    ids use the dense paths' q8_1 layouts. `glu="swiglu"`: a merged gate/up stack, y = silu(gate)·up. `offs`:
+    `offsets(blocks, ggml_type, group)` viewed [E, out, in/group], computed once for many calls."""
+    t, k = ids.shape
+    e, out = weight.shape[:2]
+    b = blocking(ggml_type, path)
+    if b.sum_group and offs is None:
+        offs = offsets(blocks, ggml_type, b.sum_group).view(e, out, -1)
+    xt, corr = _activations(x.reshape(-1, x.shape[-1]), b, dtype)          # T·R rows
+    source = torch.arange(t * k, device=x.device) // (k // x.shape[1])     # the input row of each (token, slot)
+    flat = ids.reshape(-1).long()
+    y = torch.zeros(t * k, out, dtype=dtype, device=x.device)
+    for expert in flat.unique().tolist():
+        rows = flat == expert
+        src = source[rows]
+        y[rows] = _product(xt[src], None if corr is None else corr[src], weight[expert],
+                           None if offs is None else offs[expert])
+    y = y.view(t, k, out)
+    if glu == "swiglu":
+        gate, up = y.chunk(2, dim=-1)
+        return torch.nn.functional.silu(gate) * up
+    if glu != "none":
+        raise ValueError(f"unknown glu {glu!r}")
+    return y
+
+
+def _activations(x: torch.Tensor, b: Blocking, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """x̃ [T, in] and, where the offsets use stored sums, each group's `S_g − Σ_g x̃` [T, in/group] (else None)."""
     xt = quantize(x, b).to(dtype)
-    y = xt @ weight.to(dtype).T
-    if b.sum_group:
-        g = b.sum_group
-        stored = x.float().reshape(len(x), -1, g).sum(-1).half().to(dtype)     # fp32 sums stored as fp16
-        corr = stored - xt.reshape(len(x), -1, g).sum(-1)
-        corr[:, (torch.arange(corr.shape[1], device=x.device) * g) % 128 >= b.sum_span] = 0
-        offs = offsets(blocks, ggml_type, g) if offs is None else offs
-        y += corr @ offs.to(x.device, dtype).T
+    if not b.sum_group:
+        return xt, None
+    g = b.sum_group
+    stored = x.float().reshape(len(x), -1, g).sum(-1).half().to(dtype)         # fp32 sums stored as fp16
+    corr = stored - xt.reshape(len(x), -1, g).sum(-1)
+    corr[:, (torch.arange(corr.shape[1], device=x.device) * g) % 128 >= b.sum_span] = 0
+    return xt, corr
+
+
+def _product(xt: torch.Tensor, corr: torch.Tensor | None, weight: torch.Tensor,
+             offs: torch.Tensor | None) -> torch.Tensor:
+    y = xt @ weight.to(xt.dtype).T
+    if corr is not None:
+        y += corr @ offs.to(xt.device, xt.dtype).T
     return y

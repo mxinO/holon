@@ -2,8 +2,9 @@
 plugins. Kernel instances are stateless across steps and safe to call inside CUDA graphs; any `T` ≥ 0.
 
 - `moe_topk@1`: instance `(logits [T, E] f32) -> (weights [T, k] f32, ids [T, k] int32)`, both contiguous: softmax
-  over E in f32, the k largest (ties to the lower index; NaN as the lowest value), divided by their sum (clamped at
-  6.1e-5) when `renormalize`. Ids are unique and in range in every row. Facts: experts, top_k, renormalize.
+  over E in f32, the k largest (ties to the lower index), divided by their sum (clamped at 6.1e-5) when
+  `renormalize`. Ids are unique and in range in every row; a row with any NaN or +inf logit gets such ids and
+  unspecified weights. Facts: experts, top_k, renormalize.
 - `linear_experts@1`: instance `(x [T, R, in], parts, ids [T, k]) -> y [T, k, out_y]` of `out_dtype`: row j of token
   t applies expert `ids[t, j]` to `x[t, 0]` (R = 1) or `x[t, j]` (R = k). `parts` holds the stack's tensors by role,
   as `QTensor.parts` (`{"blocks": [E·out, row_bytes]}` for ggml layouts; `{"weight": [E, out, in]}` for

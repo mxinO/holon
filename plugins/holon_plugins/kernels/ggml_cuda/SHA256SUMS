@@ -26,6 +26,10 @@ b857a798c69a6a6ed71e1f99064673dd7a406a301b54d7d92f93787c12c1e3cd  ggml/src/ggml-
 5c365e5111fe5a44ded0c0344568dbc8489c94aa87583746c8e15666fe910601  ggml/src/ggml-cuda/getrows.cuh
 4984ec7d0a7d0a054dc7d1189d0ef01482c3ac2346eb31d945d53357b62b78fc  ggml/src/ggml-cuda/convert.cu
 c22bcfa617140b6dfd7fb5eb11fc5ae4c25244a435aceb8e7c4c26f4bd578fd0  ggml/src/ggml-cuda/convert.cuh
+3eb3845a68e0ba7596b0ec18e9e719ea87006e910bca1a5c7dea95f8eabd83c9  ggml/src/ggml-cuda/topk-moe.cu
+cc1cec0c9b865624be058697b9a21048cfdaac0aca547bc6f6b18d54d820c88b  ggml/src/ggml-cuda/topk-moe.cuh
+c05a68615007e34ffbbd8a5f381a8f915c2cc0d38cd859351c8535ddb513c1d0  ggml/src/ggml-cuda/moe-weighted-reduction.cu
+89b9a6138bbc20ca12a82cc082a3b38da94cd83c2f41367ef6f8a41abd044638  ggml/src/ggml-cuda/moe-weighted-reduction.cuh
 6de9336a6c2f65c0ad83cbe9303dcd03e8cbb6185d15346133a31421000f6408  ggml/src/ggml-cuda/mmq-config-ampere.cuh
 8bec1e65a3a2a58fab1f406225f6ba2f1a4c38a19793dfa255baff69bc044d70  ggml/src/ggml-cuda/mmq-config-blackwell.cuh
 314eeb8453834723d5224012f692f70673f86ecc42d2b6d6f2005a0fad124dbc  ggml/src/ggml-cuda/mmq-config-cdna.cuh

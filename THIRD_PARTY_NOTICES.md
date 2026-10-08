@@ -14,15 +14,17 @@ Source: https://github.com/ggml-org/llama.cpp at `51ce9c11a6f2dfa895696c0048c433
 Copyright (c) 2023-2026 The ggml authors. License text below and in
 `plugins/holon_plugins/kernels/ggml_cuda/vendor/LICENSE`.
 
-- `plugins/holon_plugins/kernels/ggml_cuda/vendor/` — the quantized CUDA kernels (`mmvq`, `mmq`, `get_rows`,
-  `convert` and their headers), unmodified upstream files fetched by
+- `plugins/holon_plugins/kernels/ggml_cuda/vendor/` — the quantized CUDA kernels (`mmvq`, `mmq`, `mmid`,
+  `get_rows`, `convert` and their headers) and the MoE routing and combine kernels (`topk-moe`,
+  `moe-weighted-reduction`), unmodified upstream files fetched by
   `plugins/holon_plugins/kernels/ggml_cuda/vendor.sh`, then modified by
-  `plugins/holon_plugins/kernels/ggml_cuda/vendor.patch` (bf16 activations and output, no environment reads);
-  `plugins/holon_plugins/kernels/ggml_cuda/SHA256SUMS` pins the result.
+  `plugins/holon_plugins/kernels/ggml_cuda/vendor.patch` (bf16 activations and output, no environment reads, top-k
+  ids at row stride k, a bf16 combine); `plugins/holon_plugins/kernels/ggml_cuda/SHA256SUMS` pins the result.
 - `plugins/holon_plugins/kernels/ggml_cuda/csrc/shim.cu` — adapted: ggml's type traits, tensor helpers and device
   table, after `ggml/src/ggml.c` and `ggml/src/ggml-cuda/ggml-cuda.cu`.
-- `plugins/holon_plugins/kernels/ggml_cuda/csrc/api.cu` — adapted: llama.cpp's matmul dispatch, scratch pool and
-  mmq schedule, after `ggml/src/ggml-cuda/ggml-cuda.cu`, `mmq.cuh` and `mmq.cu`.
+- `plugins/holon_plugins/kernels/ggml_cuda/csrc/api.cu` — adapted: llama.cpp's matmul dispatch (dense and
+  `MUL_MAT_ID`), fused SwiGLU gate, scratch pool and mmq schedule, after `ggml/src/ggml-cuda/ggml-cuda.cu`,
+  `mmq.cuh` and `mmq.cu`.
 
 ### Qwen tokenizer — Apache-2.0
 

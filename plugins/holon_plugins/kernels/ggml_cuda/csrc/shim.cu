@@ -114,6 +114,12 @@ bool ggml_is_contiguously_allocated(const ggml_tensor * t) {
 
 bool ggml_is_matrix(const ggml_tensor * t) { return t->ne[2] == 1 && t->ne[3] == 1; }
 
+// topk-moe.cu's fusion check (never called: the C API launches the kernel itself) references it.
+ggml_unary_op ggml_get_unary_op(const ggml_tensor * t) {
+    GGML_ASSERT(t->op == GGML_OP_UNARY);
+    return (ggml_unary_op) ggml_get_op_params_i32(t, 0);
+}
+
 bool ggml_are_same_shape(const ggml_tensor * a, const ggml_tensor * b) {
     return a->ne[0] == b->ne[0] && a->ne[1] == b->ne[1] && a->ne[2] == b->ne[2] && a->ne[3] == b->ne[3];
 }
