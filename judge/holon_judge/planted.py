@@ -3,7 +3,14 @@
 - The bounded check (`bounded --plant`, judge/tests/test_bounded.py): the configurations using the broken path fail.
 - GGUF Tier A (`l2 --plant`, M0.1 design §4.6): bugs in what a GGUF file means (configuration, names, layouts),
   planted in the weights the engine loads; L2 fails.
-- GGUF Tier B (`l2 --plant`): bugs in the quantized kernels' use (`kernels.ggml_cuda`); L2 fails.
+- GGUF Tier B (`l2 --plant`): bugs in the quantized kernels' use (`kernels.ggml_cuda`); L2 fails, except the rare
+  stale workspace, which measures Tier B's sensitivity (predicted before running: fails the decode run, likely passes
+  the looser prefill run).
+
+The GGUF plants patch names, so they rely on how the engine reaches them: `_loaded` replaces `load_weights` and
+`resolve_model` in `holon.core.engine`'s namespace (it imports them by name), and the kernel plants wrap
+`QLinear` in Python, so they act on eagerly run steps — all of L2's (prompt-logprob steps are never graphed); in
+a graphed decode step they would act only while the graph is captured.
 
 They patch engine classes, so they apply to every engine built inside the context, graph captures included. The
 reference re-scoring is untouched by all three: prompt-logprob requests never adopt cached blocks, and it samples one
@@ -161,4 +168,5 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "gguf-gate-up-swapped": lambda: _loaded(_gate_up_swapped),
     "gguf-qk-permuted": lambda: _loaded(_qk_permuted),
     # GGUF Tier B
-    "ggml-wrong-type": ggml_wrong_type, "ggml-stale-q8_1": ggml_stale_q8_1}
+    "ggml-wrong-type": ggml_wrong_type, "ggml-stale-q8_1": ggml_stale_q8_1,
+    "rare-ggml-stale-q8_1": lambda: ggml_stale_q8_1(every=9973)}      # ~ one linear in 55 forwards

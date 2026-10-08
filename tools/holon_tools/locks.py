@@ -37,10 +37,6 @@ def plan_of(engine: Engine) -> Plan:
     bound = {k["provider"] for k in engine.ctx.kernels.values()}
     runs = {name for name in engine.plugins.loaded if name in bound or name in engine.ctx.used.values()
             or engine.plugins.installed[name].manifest.slot not in ("unit", "kernel")}
-    if hidden := sorted(n for n in runs if engine.plugins.installed[n].manifest.slot == "weight_source"
-                        and not engine.plugins.installed[n].manifest.detect):
-        # A lock serves the checkpoints the engine detects; a source never detected (a judge fixture) never serves.
-        raise ValueError(f"{hidden[0]}: a weight source without detect patterns cannot be planned")
     units = {CORE_UNIT: UnitPin(__version__, src_hash(CORE_DIR))}
     units |= {name: unit_pin(engine.plugins.installed[name]) for name in sorted(runs)}
     sites = {key: Binding(k["provider"], {"facts": k["facts"], "props": k["props"]}

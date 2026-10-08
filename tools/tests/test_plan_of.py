@@ -124,13 +124,13 @@ def test_weight_changes_change_the_model_id(tiny_engine, tiny_checkpoint, tmp_pa
     assert a.model_id != b.model_id and dataclasses.replace(b, model_id=a.model_id).plan_id == a.plan_id
 
 
-def test_a_source_never_detected_is_never_planned(tiny_engine, tiny_checkpoint, tmp_path):
-    """The judge's Tier A source (a GGUF read densely) serves no checkpoint the engine would detect."""
+def test_tier_a_source_plans_as_gguf_with_its_test_only_pin(tiny_engine, tiny_checkpoint, tmp_path):
+    """The judge's Tier A source (a GGUF read densely) keeps the GGUF kind, and its plan pins it: CI refuses any
+    tracked lock pinning a `testing.*` plugin (scripts/ci/check_locks.py)."""
     import gguf
     from holon_testing.gguf_files import write
 
     file = tmp_path / "tiny.gguf"
     write(tiny_checkpoint, file, gguf.GGMLQuantizationType.Q8_0)
-    assert locks.plan_of(tiny_engine(model=str(file))).engine["source"] == "gguf"
-    with pytest.raises(ValueError, match="testing.gguf_dense: a weight source without detect patterns"):
-        locks.plan_of(tiny_engine(model=str(file), source="gguf_dense"))
+    plan = locks.plan_of(tiny_engine(model=str(file), source="gguf_dense"))
+    assert plan.engine["source"] == "gguf" and "testing.gguf_dense" in plan.units
