@@ -16,6 +16,7 @@ import gc
 import itertools
 import secrets
 
+import numpy as np
 import torch
 
 from holon.api import BatchPlan, Logprobs, SamplingParams, Seq, Status, TokenDelta, sequence_seed
@@ -23,7 +24,7 @@ from holon.api import BatchPlan, Logprobs, SamplingParams, Seq, Status, TokenDel
 from . import platform
 from .assembly import bind_state, prefix_index, resolve_model
 from .build import BuildContext, build_model, load_weights
-from .executor import Executor, Launched
+from .executor import Executor, Launched, PromptRows
 from .memory import Ledger
 from .plugins import PluginSet, discover
 from .sched import Scheduler
@@ -195,7 +196,7 @@ class Engine:
         return {"waiting": len(self.sched.waiting), "running": len(self.sched.running),
                 "preemptions": self.sched.preemptions, "prefix_tokens_saved": self.state.tokens_saved,
                 "cached_blocks": len(self.state.index.entries) if self.state.index is not None else 0,
-                "graphs": len(self.executor.graphs) if self.executor.graphs is not None else 0}
+                "graphs": len(self.executor.graphs) if self.executor and self.executor.graphs is not None else 0}
 
     def generate(self, prompts: list[list[int]], params: SamplingParams | None = None) -> list[list[int]]:
         """Token ids generated for each prompt (one sequence per prompt)."""
@@ -240,7 +241,15 @@ class Engine:
         """Launch the step on the device, then advance the host mirrors."""
         rows = [(seq, int(n), int(m)) for seq, n, m in zip(seqs, plan.n_query, plan.n_logits, strict=True)]
         sync = any(seq in self._prompt_lp for seq in seqs)
-        out = self.executor.launch(plan, seqs, self._prompt_lp)
+        exact = np.array([seq.inexact == 0 for seq in seqs], dtype=bool)
+        logprobs = any(m and seq.params.logprobs is not None for seq, _, m in rows)
+        prompt = self._prompt_rows(plan, seqs) if sync else None
+        out = self.executor.launch(plan, exact, logprobs, prompt)
+        for r, got in zip(prompt or [], out.prompt_logprobs, strict=True):
+            acc = self._prompt_lp[seqs[r.row]]
+            acc.token += got.token
+            acc.top_ids += got.top_ids
+            acc.top += got.top
         running = Status.RUNNING
         for seq, n, m in rows:
             seq.num_computed += n                   # an upper bound for verify rows until their commit
@@ -251,6 +260,21 @@ class Engine:
                 if seq.status is not running:
                     self.sched.finished_prefill(seq)
         return _Inflight(rows, out, sync)
+
+    def _prompt_rows(self, plan: BatchPlan, seqs: list[Seq]) -> list[PromptRows]:
+        """The prompt logprobs this step's rows owe: the prompt positions they compute that predict a prompt token,
+        except those already recorded (a request preempted mid-prompt recomputes them)."""
+        out = []
+        for i, seq in enumerate(seqs):
+            acc = self._prompt_lp.get(seq)
+            if acc is None:
+                continue
+            start = int(plan.start_upper[i])
+            lo, hi = max(start, len(acc.token)), min(start + int(plan.n_query[i]), seq.prompt_len - 1)
+            if lo < hi:
+                out.append(PromptRows(i, lo - start, hi - start, max(seq.params.prompt_logprobs, 1),
+                                      seq.tokens[lo + 1: hi + 1]))
+        return out
 
     def _commit(self, step: _Inflight) -> list[TokenDelta]:
         """Host bookkeeping once a step's results are on the host: tokens, finishing, publishing, streaming."""

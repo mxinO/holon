@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from holon.api import Batch, BatchPlan, DeviceBatch, Logprobs, SamplingParams, Seq, SeqTable, TokenSrc
+from holon.api import Batch, BatchPlan, DeviceBatch, Logprobs, SamplingParams, SeqTable, TokenSrc
 
 from . import platform
 from .batching import host_plan, padded
@@ -31,6 +31,17 @@ _VARIANTS = (SamplingParams(temperature=0.0, seed=0), SamplingParams(temperature
 
 
 @dataclasses.dataclass
+class PromptRows:
+    """Prompt logprobs a step owes one batch row: its query tokens `first` … `end`-1 predict `targets`; top `k`."""
+
+    row: int
+    first: int
+    end: int
+    k: int
+    targets: list[int]
+
+
+@dataclasses.dataclass
 class Launched:
     """A launched step's results: pinned host copies, valid once `done` has fired."""
 
@@ -38,6 +49,7 @@ class Launched:
     accepts: torch.Tensor | None             # verify rows' accepted draft counts
     logprobs: tuple[torch.Tensor, ...] | None   # sampled tokens' logprob, top ids, top logprobs
     done: platform.Event
+    prompt_logprobs: list[Logprobs] = dataclasses.field(default_factory=list)   # per PromptRows, on the host now
 
 
 @dataclasses.dataclass
@@ -166,30 +178,30 @@ class Executor:
         return True
 
     # -- one step -------------------------------------------------------------------------------------------------
-    def launch(self, plan: BatchPlan, seqs: list[Seq], prompt_lp: dict[Seq, Logprobs]) -> Launched:
-        """Enqueue the step's device work without waiting for the device. Prompt logprobs of the rows in `prompt_lp`
-        are appended to their accumulators (on the host: that part waits for the device)."""
-        record = any(seq in prompt_lp for seq in seqs)
-        logprobs = any(m and seq.params.logprobs is not None for seq, m in zip(seqs, plan.n_logits, strict=True))
-        exact = np.array([seq.inexact == 0 for seq in seqs], dtype=bool)
-        n_sampled = int(plan.n_logits.sum())
-        graphed = (self.graphs is not None and not record and not logprobs           # graphs return tokens only
-                   and bool((plan.n_query == 1).all()) and len(seqs) <= self.buckets[-1])
+    def launch(self, plan: BatchPlan, exact: np.ndarray, logprobs: bool, prompt: list[PromptRows] | None = None
+               ) -> Launched:
+        """Enqueue the step's device work without waiting for the device. `exact`: the rows whose start the host
+        knows; `logprobs`: some sampled row reports logprobs; `prompt` (not None: a prompt-logprob step) — those are
+        computed now, on the host, so that step waits for the device."""
+        rows, n_sampled = len(plan.slots), int(plan.n_logits.sum())
+        graphed = (self.graphs is not None and prompt is None and not logprobs        # graphs return tokens only
+                   and bool((plan.n_query == 1).all()) and rows <= self.buckets[-1])
         if graphed:
-            plan = padded(plan, next(b for b in self.buckets if b >= len(seqs)), self.state.padding_slot)
-            exact = np.concatenate([exact, np.ones(len(plan.slots) - len(seqs), dtype=bool)])   # padding: start 0
+            plan = padded(plan, next(b for b in self.buckets if b >= rows), self.state.padding_slot)
+            exact = np.concatenate([exact, np.ones(len(plan.slots) - rows, dtype=bool)])   # padding: start 0
         ctx = self._context(plan, exact)
         out = sampled = accepts = None
+        recorded: list[Logprobs] = []
         if graphed:
             keys = [meta.graph_key for meta in ctx.metas.values()]
             key = (len(plan.slots), self.sampler.variant(plan.slots), *keys)
             sampled = self.graphs.run(key, lambda: self._decode(ctx))
         else:
             self._prepare(ctx)
-            if record:
+            if prompt is not None:
                 h = self.model.trunk(ctx)
                 logits = self.model.head(h[ctx.batch.dev.logits_index])
-                self._record_prompt_logprobs(h, plan, seqs, prompt_lp)
+                recorded = self._prompt_logprobs(h, plan, prompt)
             else:
                 logits = self.model(ctx)            # always: chunks without sampled rows still write their state
             if (plan.n_logits > 1).any():           # verify rows
@@ -212,7 +224,7 @@ class Executor:
             self._out_turn ^= 1
         done = platform.Event(self.device)
         done.record()
-        return Launched(tokens, accepts, lps, done)
+        return Launched(tokens, accepts, lps, done, recorded)
 
     def _decode(self, ctx: StepContext) -> torch.Tensor:
         """A decode step's device work from inputs to sampled tokens — the part captured in a graph."""
@@ -291,23 +303,21 @@ class Executor:
         for group, planner in self.planners.items():
             planner.prepare_device(ctx.metas[group], ctx)
 
-    def _record_prompt_logprobs(self, h: torch.Tensor, plan: BatchPlan, seqs: list[Seq],
-                                prompt_lp: dict[Seq, Logprobs], chunk: int = PROMPT_LOGPROB_CHUNK) -> None:
-        """Logprobs of the prompt tokens this step's rows predict, in row chunks (no full-vocab logits for long
-        prompts); positions recomputed after a preemption are not recorded twice."""
+    def _prompt_logprobs(self, h: torch.Tensor, plan: BatchPlan, prompt: list[PromptRows],
+                         chunk: int = PROMPT_LOGPROB_CHUNK) -> list[Logprobs]:
+        """The prompt logprobs `prompt` asks for, from the trunk's hidden states in row chunks (no full-vocab logits
+        for long prompts)."""
         qstart = np.concatenate([[0], np.cumsum(plan.n_query)])
-        for i, seq in enumerate(seqs):
-            acc = prompt_lp.get(seq)
-            if acc is None:
-                continue
-            start = int(plan.start_upper[i])
-            lo, hi = max(start, len(acc.token)), min(start + int(plan.n_query[i]), seq.prompt_len - 1)
-            k = max(seq.params.prompt_logprobs, 1)
-            for a in range(lo, hi, chunk):
-                b = min(a + chunk, hi)
-                lp = self.model.head(h[qstart[i] + a - start: qstart[i] + b - start]).float().log_softmax(-1)
-                target = torch.as_tensor(seq.tokens[a + 1: b + 1], device=lp.device)
-                top = lp.topk(k)
+        out = []
+        for r in prompt:
+            acc, base = Logprobs([], [], []), int(qstart[r.row])
+            for a in range(r.first, r.end, chunk):
+                b = min(a + chunk, r.end)
+                lp = self.model.head(h[base + a: base + b]).float().log_softmax(-1)
+                target = torch.as_tensor(r.targets[a - r.first: b - r.first], device=lp.device)
+                top = lp.topk(r.k)
                 acc.token += lp.gather(-1, target[:, None])[:, 0].tolist()
                 acc.top_ids += top.indices.tolist()
                 acc.top += top.values.tolist()
+            out.append(acc)
+        return out

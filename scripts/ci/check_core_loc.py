@@ -17,17 +17,17 @@ SKIP = {tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokeni
 
 
 def code_lines(source: str) -> int:
-    docs: set[int] = set()
+    docs: set[tuple[int, int]] = set()                    # where each docstring's string token starts
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
             first = node.body[0]
             if isinstance(first, ast.Expr) and isinstance(getattr(first.value, "value", None), str):
-                docs.update(range(first.lineno, first.end_lineno + 1))
+                docs.add((first.lineno, first.col_offset))
     lines: set[int] = set()
     for tok in tokenize.generate_tokens(io.StringIO(source).readline):
-        if tok.type not in SKIP:
+        if tok.type not in SKIP and not (tok.type == tokenize.STRING and tok.start in docs):
             lines.update(range(tok.start[0], tok.end[0] + 1))
-    return len(lines - docs)
+    return len(lines)
 
 
 total = sum(code_lines(p.read_text()) for p in py_files(CORE))
