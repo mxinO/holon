@@ -117,13 +117,12 @@ def test_engine_matches_hf_greedy_qwen3_0_6b():
     texts = ["The capital of France is", "def quicksort(xs):", "List three prime numbers:",
              "In 1969, astronauts first"]
     prompts = [tok(t)["input_ids"] for t in texts]
-    hf = AutoModelForCausalLM.from_pretrained(SNAP, dtype=torch.float32).to("cuda").eval()
+    hf = AutoModelForCausalLM.from_pretrained(SNAP, dtype=torch.float32).eval()
     expected = _hf_greedy(hf, prompts, GREEDY.max_tokens)
     del hf
-    # Pool sizes are measured: weights loaded, worst-case step profiled, the rest goes to KV pages.
-    engine = Engine(EngineConfig(model=str(SNAP), dtype=torch.float32, page_size=16, max_step_tokens=24,
-                                 max_model_len=4096))
-    assert engine.ledger.pool("state.kv").capacity * 16 >= 4096
+    # fp32 on the CPU (the test-only reference kernels): exact against HF fp32.
+    engine = Engine(EngineConfig(model=str(SNAP), device="cpu", dtype=torch.float32, page_size=16,
+                                 max_step_tokens=24, max_model_len=256, state_memory=64 << 20))
     assert engine.generate(prompts, GREEDY) == expected
 
 
@@ -141,16 +140,16 @@ def test_fast_kernels_agree_with_reference_and_are_run_identical_bf16():
     cfg = dict(model=str(SNAP), dtype=torch.bfloat16, page_size=16, max_step_tokens=64, max_model_len=2048)
 
     fast = Engine(EngineConfig(**cfg))
+    # Pool sizes are measured: weights loaded, worst-case step profiled, the rest goes to KV pages.
+    assert fast.ledger.pool("state.kv").capacity * 16 >= cfg["max_model_len"]
     assert {k.split("/")[-1]: v["provider"] for k, v in fast.ctx.kernels.items()} == {
         "attention.paged_prefill@1": "kernels.flashinfer", "attention.paged_decode@1": "kernels.triton_attn",
         "attention.paged_verify@1": "kernels.triton_attn", "rmsnorm@1": "kernels.flashinfer",
         "add_rmsnorm@1": "kernels.flashinfer", "rope@1": "kernels.flashinfer", "silu_mul@1": "kernels.flashinfer"}
     first, again = fast.generate(prompts, params), fast.generate(prompts, params)
     del fast
-    oracles = {"attention.paged_prefill": "std.mixers.gqa", "attention.paged_decode": "std.mixers.gqa",
-               "attention.paged_verify": "std.mixers.gqa",
-               "rmsnorm": "std.ops", "add_rmsnorm": "std.ops", "rope": "std.ops", "silu_mul": "std.ffn"}
-    ref = Engine(EngineConfig(**cfg, kernels=oracles)).generate(prompts, params)
+    # The oracles: the same engine on the CPU, where the test-only reference kernels serve every op.
+    ref = Engine(EngineConfig(**cfg | {"device": "cpu", "state_memory": 512 << 20})).generate(prompts, params)
 
     assert first == again                                   # run-identical with the fast kernels
     agree = [next((i for i, (a, b) in enumerate(zip(x, y, strict=True)) if a != b), len(x))

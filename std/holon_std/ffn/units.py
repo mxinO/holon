@@ -5,7 +5,6 @@ from holon.api import Ref
 from torch import nn
 
 from . import kernels
-from . import reference as ref
 
 LINEAR = "std.ops.linear@1"
 
@@ -28,4 +27,4 @@ class SwiGLU(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self._gate_up is not None:
             return self.down_proj(self._act(torch.nn.functional.linear(x, self._gate_up)))
-        return self.down_proj(ref.silu_mul(self.gate_proj(x), self.up_proj(x)))
+        return self.down_proj(self._act(torch.cat([self.gate_proj(x), self.up_proj(x)], dim=-1)))

@@ -10,10 +10,8 @@ provides = [
     "unit.std.mixers.gqa@1",
     "op.attention.paged_prefill@1",
     "op.attention.paged_decode@1",
-    "kernel.attention.paged_prefill@1",
-    "kernel.attention.paged_decode@1",
     "op.attention.paged_verify@1",
-    "kernel.attention.paged_verify@1",
+    "op.attention.causal@1",
 ]
 
 [properties]

@@ -526,8 +526,15 @@ lock. It returns the `KernelSpec`; the caller — a mixer's planner — creates 
 `spec.impl(ctx, **facts)`, because instances hold per-step plans (FlashInfer wrappers) and depth 1 needs two of
 them. Layouts are facts the unit passes in (GQA: `kv.hnd`), so every kernel of one state group agrees by
 construction; rows of length 0 (graph padding) must be harmless. The same mechanism serves the small per-token ops: std.ops owns
-`rmsnorm@1`, `add_rmsnorm@1` (residual add fused into the norm) and `rope@1`, std.ffn owns `silu_mul@1`, each with
-its reference registered as the lowest-priority kernel; units pick their kernel once at build. Projections that
+`rmsnorm@1`, `add_rmsnorm@1` (residual add fused into the norm) and `rope@1`, std.ffn owns `silu_mul@1`; units pick
+their kernel once at build.
+
+**References never serve (M0.1 D1).** A `reference.py` is the op's oracle only: it is never registered as a kernel and
+production code never calls it. Selection sees production kernel plugins only; no match is a startup error naming
+the op, facts and device (invariant 7) — there is no silent slow path. Tests get the references as CPU kernels from
+the test-only `holonlm-testing` distribution (`testing.ref_kernels`, installed in the development environment, never
+with Holon; an import contract keeps production code from importing it), which also serves `attention.causal@1`, the
+whole-sequence attention of a model built without state. Projections that
 read the same input (q/k/v, gate/up) are merged into one GEMM in `finalize_weights` when the linear units allow it
 (`Linear.merge` rebinds each unit's weight as a view of the merged buffer, so recipes and weight maps stay as they
 are).

@@ -1,4 +1,5 @@
-"""Walking skeleton: Qwen3-0.6B built from its recipe on the reference units matches HF transformers."""
+"""Walking skeleton: Qwen3-0.6B built from its recipe (no engine state) matches HF transformers. It runs on the CPU,
+where the test-only reference kernels serve every op."""
 import json
 import pathlib
 
@@ -9,14 +10,14 @@ from holon.core.build import BuildContext, StepContext, build_model, load_weight
 from holon.core.plugins import PluginSet, discover
 
 SNAP = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
-pytestmark = pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
+pytestmark = pytest.mark.skipif(SNAP is None, reason="needs Qwen3-0.6B")
 
 
 def test_qwen3_matches_hf():
     from safetensors import safe_open
     from transformers import AutoModelForCausalLM
 
-    device = torch.device("cuda")
+    device = torch.device("cpu")
     cfg = json.loads((SNAP / "config.json").read_text())
     plugins = PluginSet(discover())
     model_plugin = plugins.load("models.qwen3")
@@ -25,7 +26,7 @@ def test_qwen3_matches_hf():
 
     ctx = BuildContext(plugins, device)
     model = build_model(spec, ctx)
-    with safe_open(SNAP / "model.safetensors", "pt", device="cuda") as f:
+    with safe_open(SNAP / "model.safetensors", "pt", device="cpu") as f:
         load_weights(model, ctx, ((k, f.get_tensor(k)) for k in f.keys()))
 
     from transformers import AutoTokenizer

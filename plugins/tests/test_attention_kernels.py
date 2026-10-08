@@ -6,7 +6,8 @@ import torch
 from holon.api import Batch, DeviceBatch, Pages
 from holon.core.batching import host_plan
 from holon.core.build import BuildContext
-from holon.core.plugins import PluginSet, discover
+from holon.core.plugins import PluginError, PluginSet, discover
+from holon_testing.ref_kernels.kernels import PagedAttention
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 
@@ -64,7 +65,7 @@ def test_kernel_matches_oracle(op, provider, rows, geometry, dtype):
     q, kv, batch, pages = _case(rows, *geometry, dtype=dtype)
     name = str(dtype).removeprefix("torch.")
     ours = _run(_kernel(op, provider, *geometry, dtype=name), q, kv, batch, pages)
-    ref = _run(_kernel(op, "std.mixers.gqa", *geometry, dtype=name), q, kv, batch, pages)
+    ref = _run(PagedAttention(None), q, kv, batch, pages)
     # bf16 output: a rounding step is ~0.4% of the value, and short rows output near-raw V values (|v| ~ 3).
     torch.testing.assert_close(ours.float(), ref.float(), atol=1e-2, rtol=1e-2)
 
@@ -96,14 +97,15 @@ def test_every_selected_kernel_constructs(head_dim, dtype):
         assert ctx.select_kernel(f"{op}@1", site="t", **facts).impl(ctx, **facts) is not None
 
 
-def test_selection_prefers_fast_kernels_and_falls_back_on_cpu():
+def test_selection_prefers_fast_kernels_and_never_falls_back_to_a_reference():
     facts = {"heads": 32, "kv_heads": 8, "head_dim": 128, "page": PAGE, "q_dtype": "bfloat16",
              "kv_dtype": "bfloat16", "layout": "kv.hnd", "max_seqs": MAX_SEQS}
     gpu = BuildContext(PluginSet(discover()), torch.device("cuda"))
     assert gpu.select_kernel("attention.paged_prefill@1", site="t", **facts).provider == "kernels.flashinfer"
     assert gpu.select_kernel("attention.paged_decode@1", site="t", **facts).provider == "kernels.triton_attn"
     fp32 = {**facts, "q_dtype": "float32", "kv_dtype": "float32"}
-    assert gpu.select_kernel("attention.paged_decode@1", site="t", **fp32).provider == "std.mixers.gqa"
-    cpu = BuildContext(PluginSet(discover()), torch.device("cpu"))
-    assert cpu.select_kernel("attention.paged_prefill@1", site="t", **facts).provider == "std.mixers.gqa"
+    with pytest.raises(PluginError, match="no kernel for attention.paged_decode@1 on cuda"):
+        gpu.select_kernel("attention.paged_decode@1", site="t", **fp32)       # no production fp32 kernel: an error
+    cpu = BuildContext(PluginSet(discover()), torch.device("cpu"))         # the test-only references serve the CPU
+    assert cpu.select_kernel("attention.paged_prefill@1", site="t", **facts).provider == "testing.ref_kernels"
     assert "kernels.flashinfer" not in cpu.plugins._loaded      # unavailable plugins are never imported

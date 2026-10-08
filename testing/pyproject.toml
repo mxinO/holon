@@ -1,0 +1,16 @@
+[project]
+name = "holonlm-testing"
+version = "0.0.1"
+requires-python = ">=3.12"
+description = "Test-only plugins for Holon (installed in the development environment, never with Holon)"
+dependencies = ["holonlm", "holonlm-std"]
+
+[project.entry-points."holon.plugins"]
+"testing.ref_kernels" = "holon_testing.ref_kernels"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["holon_testing"]

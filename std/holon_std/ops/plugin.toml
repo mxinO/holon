@@ -15,9 +15,6 @@ provides = [
     "op.rmsnorm@1",
     "op.add_rmsnorm@1",
     "op.rope@1",
-    "kernel.rmsnorm@1",
-    "kernel.add_rmsnorm@1",
-    "kernel.rope@1",
 ]
 
 [properties]

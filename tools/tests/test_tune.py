@@ -27,8 +27,7 @@ def test_the_pinned_provider_stays_within_the_noise_margin():
 
 
 def test_candidates_and_decode_rate_on_cpu(tiny_engine, tiny_checkpoint, cpu_flags):
-    assert tune.candidates(tiny_engine()) == {
-        "attention.paged_decode": ["std.mixers.gqa"], "rmsnorm": ["std.ops"], "add_rmsnorm": ["std.ops"],
-        "rope": ["std.ops"], "silu_mul": ["std.ffn"]}
+    ops = ("attention.paged_decode", "rmsnorm", "add_rmsnorm", "rope", "silu_mul")
+    assert tune.candidates(tiny_engine()) == dict.fromkeys(ops, ["testing.ref_kernels"])
     config = EngineConfig(**{"model": str(tiny_checkpoint)} | cpu_flags)
     assert tune.decode_rate(config, batch=2, prompt_len=8, tokens=8, repeats=1) > 0

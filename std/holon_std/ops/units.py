@@ -1,15 +1,14 @@
-"""std.ops units: small modules that own their weights and call the bound kernel (initially the reference)."""
+"""std.ops units: small modules that own their weights and call the kernel the core selected for them."""
 from __future__ import annotations
 
 import torch
 from torch import nn
 
 from . import kernels
-from . import reference as ref
 
 
 def _kernel(ctx, op: str, site: str, **facts):
-    """This op's kernel for these facts (chosen by the core; the reference unless a faster one is installed)."""
+    """This op's kernel for these facts, chosen by the core among the installed kernel plugins."""
     return ctx.select_kernel(op, site=site, **facts).impl(ctx, **facts)
 
 
@@ -56,7 +55,7 @@ class Linear(nn.Module):
         self.bias = nn.Parameter(torch.empty(out_features, dtype=ctx.dtype), requires_grad=False) if bias else None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return ref.linear(x, self.weight, self.bias)
+        return nn.functional.linear(x, self.weight, self.bias)
 
     @staticmethod
     def merge(*units: Linear) -> torch.Tensor | None:
@@ -103,4 +102,4 @@ class LMHead(nn.Module):
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
         weight = self._embed[0].weight if self._embed else self.weight
-        return ref.linear(h, weight).float()
+        return nn.functional.linear(h, weight).float()

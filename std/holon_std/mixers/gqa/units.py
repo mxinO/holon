@@ -8,7 +8,6 @@ from holon.api import Paged, Ref, StateSpec
 from torch import nn
 
 from . import kernels
-from . import reference as ref
 
 LINEAR = "std.ops.linear@1"
 
@@ -60,7 +59,7 @@ class GQA(nn.Module):
     With engine state bound, keys and values live in a paged pool shared by all layers of this mixer, one pool
     segment per layer — [layers, units, 2 (k/v), kv_heads, page, head_dim] (HND, the layout every selected
     attention kernel must read) — so each layer's slice is contiguous for kernels. In a model-only build (no
-    state) it runs the stateless whole-sequence reference path.
+    state) it attends over each whole sequence with the `attention.causal@1` kernel.
     """
 
     @classmethod
@@ -96,6 +95,12 @@ class GQA(nn.Module):
         bound = ctx.state("kv", layer)
         self._kv = None if bound is None else (bound[1], bound[0].layers.index(layer), len(bound[0].layers),
                                                 bound[0].shape.tokens_per_unit, ctx.dtype)
+        self._causal = None
+        if bound is None:
+            facts = {"heads": heads, "kv_heads": kv_heads, "head_dim": head_dim,
+                     "dtype": str(ctx.dtype).removeprefix("torch.")}
+            self._causal = ctx.select_kernel(kernels.CAUSAL, site=f"std.mixers.gqa[layer={layer}]", **facts).impl(
+                ctx, **facts)
 
     def _kv_layer(self) -> torch.Tensor:
         pool, index, n_layers, page, dtype = self._kv
@@ -121,7 +126,7 @@ class GQA(nn.Module):
             q, k = self.q_norm(q), self.k_norm(k)
         q, k = self.rope(q, k, dev.positions)
         if self._kv is None:
-            o = ref.causal_attention(q, k, v, dev.query_start)
+            o = self._causal(q, k, v, dev.query_start)
         else:
             meta, kv = ctx.meta("kv"), self._kv_layer()
             unit, off = meta.pages.write_index // meta.pages.page, meta.pages.write_index % meta.pages.page

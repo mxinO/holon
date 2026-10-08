@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 description = "Holon uv workspace root (not a distributable package)"
 
 [tool.uv.workspace]
-members = ["core", "judge", "std", "plugins", "tools"]
+members = ["core", "judge", "std", "plugins", "tools", "testing"]
 
 [tool.uv.sources]
 holonlm = { workspace = true }
@@ -13,9 +13,11 @@ holonlm-judge = { workspace = true }
 holonlm-std = { workspace = true }
 holonlm-plugins = { workspace = true }
 holonlm-tools = { workspace = true }
+holonlm-testing = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "import-linter>=2.1", "httpx"]  # httpx: FastAPI's TestClient
+dev = ["pytest>=8", "ruff>=0.6", "import-linter>=2.1", "httpx",  # httpx: FastAPI's TestClient
+       "holonlm-testing"]  # test-only plugins (D1: references never serve)
 
 [tool.ruff]
 line-length = 120
@@ -31,7 +33,7 @@ addopts = "-p no:libtmux"
 
 # Design §1 invariants 2–3: import contracts (plugins added as they appear).
 [tool.importlinter]
-root_packages = ["holon", "holon_judge", "holon_std", "holon_plugins", "holon_tools"]
+root_packages = ["holon", "holon_judge", "holon_std", "holon_plugins", "holon_tools", "holon_testing"]
 
 [[tool.importlinter.contracts]]
 name = "holon.api depends on nothing in the runtime core"
@@ -69,3 +71,9 @@ name = "std units are injected, never imported by each other"
 type = "independence"
 modules = ["holon_std.ops", "holon_std.blocks", "holon_std.ffn", "holon_std.mixers.gqa", "holon_std.state.paged",
            "holon_std.sampling", "holon_std.weights.hf", "holon_std.spec.greedy"]
+
+[[tool.importlinter.contracts]]
+name = "production code never imports the test-only plugins"
+type = "forbidden"
+source_modules = ["holon", "holon_std", "holon_plugins", "holon_judge", "holon_tools"]
+forbidden_modules = ["holon_testing"]

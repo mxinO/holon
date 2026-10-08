@@ -1,4 +1,4 @@
-"""The attention op contract this mixer owns, and its reference kernel.
+"""The attention op contracts this mixer owns. Their oracles are in `reference.py`; kernels come from kernel plugins.
 
 Ops `attention.paged_prefill@1` (ragged chunk rows), `attention.paged_decode@1` (one row per sequence) and
 `attention.paged_verify@1` (the same number of rows, 1 + k, for every sequence: the last input token and k drafts;
@@ -18,25 +18,12 @@ only from `prepare` on; host planning uses the plan's bounds.
 
 Facts: heads, kv_heads, head_dim, page, q_dtype, kv_dtype (torch dtype names), layout ("kv.hnd"), max_seqs.
 Kernel instances hold plans, so each planner creates its own.
+
+`attention.causal@1` (a model built without state, e.g. a whole-sequence comparison in tests): instance
+`(q [T, Hq, D], k, v [T, Hkv, D], query_start [B+1]) -> [T, Hq, D]`. Facts: heads, kv_heads, head_dim, dtype.
 """
 from __future__ import annotations
 
-from . import reference as ref
-
 PREFILL, DECODE, VERIFY = "attention.paged_prefill@1", "attention.paged_decode@1", "attention.paged_verify@1"
+CAUSAL = "attention.causal@1"
 LAYOUT = "kv.hnd"
-
-
-class Reference:
-    """The oracle as a kernel (lowest priority): any device and dtype, so CPU and fp32 runs take the same path."""
-
-    layout = LAYOUT
-
-    def __init__(self, ctx, **facts) -> None:
-        pass
-
-    def plan(self, batch, pages):
-        return pages.table, batch.dev.slots, pages.lens, batch.dev.query_start
-
-    def run(self, q, kv, handle):
-        return ref.paged_attention(q, kv, *handle)
