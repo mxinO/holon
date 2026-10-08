@@ -76,15 +76,18 @@ class PrefixIndex:
         return mask
 
     def _evictable(self, e: Entry) -> bool:
-        return e.children == 0 and all((self.pools[n].refcount(np.asarray(us)) == 1).all() for n, us in e.units.items())
+        return e.children == 0 and all(self.pools[n].held_once(us) for n, us in e.units.items())
 
     def evict(self, pool: str, need: int) -> None:
         """Drop least-recently-used unused leaves — and the ancestors that become unused leaves — until `pool` has
         `need` free units or nothing more is evictable."""
-        for e in list(self.entries.values()):
-            if self.pools[pool].num_free >= need:
+        while self.pools[pool].num_free < need:
+            # The least recently used unused leaf: a scan that stops there, not a copy of the index (this runs per
+            # request when a full pool makes every request in a step evict).
+            e = next((e for e in self.entries.values() if self._evictable(e)), None)
+            if e is None:
                 return
-            while e is not None and e.key in self.entries and self._evictable(e):
+            while e is not None and self._evictable(e):
                 parent = self.entries.get(e.parent) if e.parent is not None else None
                 self._drop(e)
                 e = parent
@@ -94,9 +97,8 @@ class PrefixIndex:
         if e.parent is not None:
             self.entries[e.parent].children -= 1
         for name, us in e.units.items():
-            arr = np.asarray(us, dtype=np.int32)
-            self.cached(name)[arr] = False
-            self.pools[name].decref(arr)
+            self.cached(name)[us if len(us) > 1 else us[0]] = False
+            self.pools[name].decref(us)
 
     def clear(self) -> None:
         for e in reversed(list(self.entries.values())):

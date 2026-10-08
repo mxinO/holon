@@ -75,13 +75,26 @@ class Pool:
     def refcount(self, units: np.ndarray) -> np.ndarray:
         return self._refs[units]
 
+    def held_once(self, units: tuple[int, ...]) -> bool:
+        """Whether each of `units` has exactly one reference."""
+        return self._refs[units[0]] == 1 if len(units) == 1 else bool((self._refs[list(units)] == 1).all())
+
     def incref(self, units: np.ndarray | tuple[int, ...]) -> None:
         if len(units) == 1:                       # a block of one page: skip the slow ufunc.at
             self._refs[units[0]] += 1
         else:
             np.add.at(self._refs, np.asarray(units, dtype=np.int64), 1)
 
-    def decref(self, units: np.ndarray) -> None:
+    def decref(self, units: np.ndarray | tuple[int, ...]) -> None:
+        if len(units) == 1:                       # a block of one page: skip the slow ufunc.at and unique
+            unit = int(units[0])
+            if self._refs[unit] <= 0:
+                raise RuntimeError(f"pool {self.name!r}: unit released twice")
+            self._refs[unit] -= 1
+            if not self._refs[unit]:
+                self._free.append(unit)
+            return
+        units = np.asarray(units, dtype=np.int64)
         np.subtract.at(self._refs, units, 1)
         if (self._refs[units] < 0).any():
             raise RuntimeError(f"pool {self.name!r}: unit released twice")
