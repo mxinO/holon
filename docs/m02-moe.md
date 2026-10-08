@@ -1,6 +1,6 @@
 # M0.2 — Mixture of experts on a 16 GB card: design and implementation plan
 
-Status: **revision 5, for review** (user additions: a basic bf16 HF path, §3 D1, D7, D8) (2026-10-08). Revisions 1 and 2 were challenged by three reviewers
+Status: **revision 5, reviewed clean** (user additions: a basic bf16 HF path, §3 D1, D7, D8) (2026-10-08). Revisions 1 and 2 were challenged by three reviewers
 (architecture/API, kernels/performance, numerics/judge); §8 maps every finding to its resolution. Scope: plan §5. Builds on M0.1
 (`docs/m01-gguf.md`: the GGUF source, `kernels.ggml_cuda`, the judge's tiers) and spike S2 (MoE sections).
 
@@ -314,6 +314,8 @@ kernels (with the wait rule of §4.3), finer graph buckets for MoE (core).
   - **Precision test**, extended to `triton_experts`: gate/up and SwiGLU outputs at the fp32 budget against f64; down's
     output against f64 of bf16(h) · W at the fp32 budget (≈ 1.6e-5·rms at K = 768) — TF32 (10 mantissa bits, not
     bf16's 7) or a missing rounding misses it by ≈ 2^-9, so the TF32 plant fails here.
+    Its f64 references are written out in the test, not built from `reference.py`: that independence is what
+    catches a rounding omitted in both the kernel and the reference.
   - **L0** for `triton_experts` (sm_86 and sm_120): `l0.check(float32, K)` against a reference with the same operand
     precision; T = 0; one expert taking all T rows (several row blocks); per-expert counts of BM and BM + 1; empty
     experts; ids 0 and E−1 beside poisoned memory; `out` / `in` off the tile multiples (masks) or a support check
