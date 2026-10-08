@@ -12,13 +12,16 @@ from . import kernels
 LINEAR = "std.ops.linear@1"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(eq=False)
 class AttnMeta:
-    """One step's attention metadata for every layer of the group: the kernel this step uses and its plan."""
+    """One step's attention metadata for every layer of the group: the kernel this step uses and its plan, and
+    (from `prepare_device` on) where this step's keys and values go: page unit and offset per token."""
 
     kernel: Any
     handle: Any
     pages: Any
+    write_unit: torch.Tensor | None = None
+    write_off: torch.Tensor | None = None
 
     @property
     def graph_key(self) -> Any:
@@ -48,6 +51,8 @@ class Planner:
         return AttnMeta(kernel, kernel.plan(batch, pages), pages)
 
     def prepare_device(self, meta: AttnMeta, ctx) -> None:
+        pages = meta.pages                                       # once per step, not per layer
+        meta.write_unit, meta.write_off = pages.write_index // pages.page, pages.write_index % pages.page
         prepare = getattr(meta.kernel, "prepare", None)          # in-graph part of a kernel's plan (optional)
         if prepare is not None:
             prepare(meta.handle)
@@ -135,7 +140,7 @@ class GQA(nn.Module):
             o = self._causal(q, k, v, dev.query_start)
         else:
             meta, kv = ctx.meta("kv"), self._kv_layer()
-            unit, off = meta.pages.write_index // meta.pages.page, meta.pages.write_index % meta.pages.page
+            unit, off = meta.write_unit, meta.write_off
             kv[unit, 0, :, off], kv[unit, 1, :, off] = k, v       # advanced indices around a slice: [T, Hkv, D]
             o = meta.kernel.run(q, kv, meta.handle)
         return self.o_proj(o.reshape(t, self.heads * self.head_dim))

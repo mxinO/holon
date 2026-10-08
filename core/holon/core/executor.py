@@ -198,12 +198,11 @@ class Executor:
             sampled = self.graphs.run(key, lambda: self._decode(ctx))
         else:
             self._prepare(ctx)
+            h = self.model.trunk(ctx)               # always: chunks without sampled rows still write their state
+            # The head only when a row samples: a step of mid-prompt chunks has no logits rows at all.
+            logits = self.model.head(h[ctx.batch.dev.logits_index]) if n_sampled else None
             if prompt is not None:
-                h = self.model.trunk(ctx)
-                logits = self.model.head(h[ctx.batch.dev.logits_index])
                 recorded = self._prompt_logprobs(h, plan, prompt)
-            else:
-                logits = self.model(ctx)            # always: chunks without sampled rows still write their state
             if (plan.n_logits > 1).any():           # verify rows
                 out, accepts = self.verifier.verify(logits.float(), ctx)
                 sampled = self._store(ctx, out.tokens, accepts)

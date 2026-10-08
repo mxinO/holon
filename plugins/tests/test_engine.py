@@ -157,6 +157,17 @@ def test_fast_kernels_agree_with_reference_and_are_run_identical_bf16():
     assert all(n >= 1 for n in agree) and sum(agree) >= 0.75 * len(agree) * params.max_tokens, agree
 
 
+@pytest.mark.parametrize("prompt_logprobs", [None, 2])
+def test_a_step_without_sampled_rows_runs_no_head(tiny_checkpoint, tiny_case, prompt_logprobs):
+    """Mid-prompt chunks need no logits: the head (whose GPU kernels reject zero rows) is not called for them."""
+    prompts, expected = tiny_case
+    engine = _tiny_engine(tiny_checkpoint, max_step_tokens=4)
+    rows, head = [], engine.executor.model.head
+    engine.executor.model.head = lambda h: rows.append(len(h)) or head(h)
+    out = engine.generate(prompts, dataclasses.replace(GREEDY, prompt_logprobs=prompt_logprobs))
+    assert min(rows) > 0 and (prompt_logprobs or out == expected)
+
+
 def test_prompt_and_sampled_logprobs_match_hf(tiny_checkpoint, tiny_case):
     # Chunked prefill (budget 10) and preemption (12 pages) must not change or duplicate prompt logprobs.
     prompts, _ = tiny_case

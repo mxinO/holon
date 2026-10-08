@@ -236,6 +236,7 @@ def load_weights(model: Model, ctx: BuildContext, tensors: Iterable[tuple[str, t
         filled.add(target)
     if missing := sorted(n for n, p in model.named_parameters() if p.is_meta):
         raise PluginError(f"parameters not loaded: {missing[:8]}{' …' if len(missing) > 8 else ''}")
+    del params                                      # weights merges give up are freed as they go
     for module in reversed(list(model.modules())):  # children first: composites may read finalized children
         if module is not model and hasattr(module, "finalize_weights"):
             module.finalize_weights(ctx)
