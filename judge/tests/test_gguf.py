@@ -42,7 +42,7 @@ def test_a_files_golden_is_the_golden_of_its_dequantized_weights(files, tiny_pro
 def test_the_per_tensor_gate(files, tiny_checkpoint):
     nmse = judge_gguf.gate(files[0], tiny_checkpoint)
     assert len(nmse) == 2 * 11 + 3 and max(nmse.values()) < 1e-3            # Q8_0: far inside the gate
-    assert judge_gguf.gate(files[0], files[1]) == dict.fromkeys(nmse, 0.0)
+    assert max(judge_gguf.gate(files[0], files[1]).values()) < 1e-5      # the reference is loaded in bf16
 
 
 def _tier_a(file, prompts):
