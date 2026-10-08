@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# llama.cpp's quantized CUDA matmul kernels (MIT), vendored at a pinned commit (M0.1 design §4.4).
+# llama.cpp's quantized CUDA matmul kernels and MoE routing / combine kernels (MIT), vendored at a pinned commit
+# (M0.1 design §4.4, M0.2 design §4.3).
 #
 #   ./vendor.sh [llama.cpp checkout]   refresh vendor/: copy the files below from a checkout at $COMMIT (cloned when
 #                                       omitted), record their upstream SHA256SUMS, apply vendor.patch
@@ -17,7 +18,8 @@ ggml/src/ggml-common.h ggml/src/ggml-impl.h
 $CUDA/common.cuh $CUDA/vendors/cuda.h $CUDA/mma.cuh $CUDA/vecdotq.cuh $CUDA/dequantize.cuh $CUDA/unary.cuh
 $CUDA/mmq.cu $CUDA/mmq.cuh $CUDA/mmq-load-tiles.cuh $CUDA/mmq-vec-dot.cuh $CUDA/mmid.cu $CUDA/mmid.cuh
 $CUDA/mmvq.cu $CUDA/mmvq.cuh $CUDA/quantize.cu $CUDA/quantize.cuh $CUDA/getrows.cu $CUDA/getrows.cuh
-$CUDA/convert.cu $CUDA/convert.cuh"
+$CUDA/convert.cu $CUDA/convert.cuh
+$CUDA/topk-moe.cu $CUDA/topk-moe.cuh $CUDA/moe-weighted-reduction.cu $CUDA/moe-weighted-reduction.cuh"
 for c in ampere blackwell cdna gcn pascal-dp4a pascal-older rdna2 rdna3 rdna3-5 rdna4; do
   FILES="$FILES $CUDA/mmq-config-$c.cuh"
 done
