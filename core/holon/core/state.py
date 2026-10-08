@@ -261,7 +261,7 @@ class StateManager:
 
     def pages(self, plan: BatchPlan, up: Uploader) -> dict[str, Pages]:
         """This step's view of every page group. The block tables are synced now; lengths and write indices are
-        static buffers the engine's device prep fills from the device SeqTable (see `Engine._prepare`)."""
+        static buffers the engine's device prep fills from the device SeqTable (see `Executor._prepare`)."""
         rows, tokens = len(plan.slots), int(plan.n_query.sum())
         out = {}
         for group, t in self.tables.items():

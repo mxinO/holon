@@ -973,7 +973,7 @@ it stays `None` until tree verification (v2).
     step are padded to the step's `spec.q` (the max k); the DraftPolicy chooses k from a finite declared set.
 - Rollback = core commit fan-out to all Rewindables.
 - **The SeqTable seam (implemented, M0 acceptance §3.4-5).** Every step's positions, lengths and page write indices
-  are derived on the device from the SeqTable's `num_computed` (`Engine._prepare`, inside the graph for decode); the
+  are derived on the device from the SeqTable's `num_computed` (`Executor._prepare`, inside the graph for decode); the
   host writes the starts it knows exactly (prefill chunks, padding rows, requests without an uncommitted verify
   row) through a per-row mask, so a verify row's outcome never has to reach the host before the next step is
   planned. A draft policy (`draft_policy` slot) picks k per request; the step takes the smallest k any row allows,

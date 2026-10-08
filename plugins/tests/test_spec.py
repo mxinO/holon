@@ -49,7 +49,7 @@ def _run(engine, prompts, params):
         steps += 1
         if not engine.cfg.overlap:
             for seq in engine.sched.running:
-                assert seq.inexact == 0 and int(engine.num_computed[seq.slot]) == seq.num_computed
+                assert seq.inexact == 0 and int(engine.executor.num_computed[seq.slot]) == seq.num_computed
     return [out[r] for r in rids], steps
 
 

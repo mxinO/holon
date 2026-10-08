@@ -41,9 +41,8 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine, Sequence
 from typing import Any
 
-from holon.api import SamplingParams, TokenDelta
+from holon.api import SamplingParams, TokenDelta, sequence_seed
 
-from .engine import sequence_seed
 from .ipc import EngineProcess, engine_main
 
 _CANARY = [1, 2, 3, 4], SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True)

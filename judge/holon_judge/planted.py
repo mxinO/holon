@@ -52,9 +52,9 @@ def wrong_block() -> Iterator[None]:
 def stale_device_token(every: int = 7) -> Iterator[None]:
     """After a sampled token id divisible by `every`, the next step's device-sourced input (depth 1) is the previous
     token."""
-    from holon.core.engine import Engine
+    from holon.core.executor import Executor
 
-    store = Engine._store
+    store = Executor._store
 
     def planted(self, ctx, tokens, accepts=None):
         if accepts is not None:
@@ -64,7 +64,7 @@ def stale_device_token(every: int = 7) -> Iterator[None]:
         out = store(self, ctx, tokens, accepts)
         self.last_token[slots] = torch.where(tokens % every == 0, before, tokens)
         return out
-    with mock.patch.object(Engine, "_store", planted):
+    with mock.patch.object(Executor, "_store", planted):
         yield
 
 

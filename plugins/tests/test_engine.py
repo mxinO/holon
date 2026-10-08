@@ -304,7 +304,7 @@ def test_decode_launch_never_waits_for_the_device():
         scheduled = engine.sched.schedule()
         with platform.no_host_sync(engine.device):           # any implicit device->host sync raises here
             step = engine._launch(*scheduled)
-        assert not step.done._event.query()                  # a long step: the host got ahead of the device
+        assert not step.out.done._event.query()              # a long step: the host got ahead of the device
         engine._commit(prev)
         engine._inflight = step
     while engine.has_work():
@@ -336,7 +336,7 @@ def test_cuda_graphs_are_bounded_and_run_identical_bf16():
         engine = Engine(EngineConfig(model=str(SNAP), dtype=torch.bfloat16, max_model_len=1024, cuda_graphs=graphs))
         outs[graphs] = [engine.generate(prompts, params), engine.generate(prompts, sampled)]
         assert outs[graphs][0] == engine.generate(prompts, params)              # run-identical
-        assert (engine.graphs is not None and len(engine.graphs) > 0) == graphs
+        assert (engine.executor.graphs is not None and len(engine.executor.graphs) > 0) == graphs
         del engine
     for a, b in zip(outs[False], outs[True], strict=True):
         agree = [next((i for i, (x, y) in enumerate(zip(u, v, strict=True)) if x != y), len(u))

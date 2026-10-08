@@ -18,7 +18,8 @@ import torch
 from holon import __version__
 from holon.api import Binding, Lock, Plan, UnitPin, canonical_hash
 from holon.core import platform
-from holon.core.engine import Engine, resolve_model
+from holon.core.assembly import resolve_model
+from holon.core.engine import Engine
 from holon.core.plans import CORE_DIR, CORE_UNIT, history, loads, numbered, read, src_hash
 from holon.core.plugins import Installed
 

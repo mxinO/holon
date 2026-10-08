@@ -22,8 +22,9 @@ import sys
 import torch
 from holon.api import Lock
 from holon.core import plans, platform
+from holon.core.assembly import resolve_model
 from holon.core.cli import engine_config, engine_flags
-from holon.core.engine import Engine, EngineConfig, resolve_model
+from holon.core.engine import Engine, EngineConfig
 from holon.core.plugins import PluginSet, discover
 from holon_judge.golden import resolve_model as checkpoint_dir
 from holon_judge.recording import PromptSet

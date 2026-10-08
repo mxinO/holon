@@ -13,6 +13,7 @@ from .batch import (
     Status,
     StepCtx,
     TokenSrc,
+    sequence_seed,
 )
 from .decoding import (
     Drafter,
@@ -64,13 +65,14 @@ from .terms import Ref, canonical_hash, parse_versioned, to_term
 
 __all__ = [
     "SLOTS", "Abort", "Batch", "BatchPlan", "Binding", "BuildCtx", "Cardinality", "CommitView", "Constraint",
-    "Converter", "DeviceBatch", "Dialect", "DraftHeadDecl", "DraftPolicy", "Drafter", "EngineClient", "EngineRequest",
-    "Event", "Fingerprint", "FrontendBundle", "FrontendPlugin", "HitLen", "KernelRegistry", "KernelSpec", "LayerDecl",
-    "Layout", "Ledger", "Lock", "LogitsProcessor", "Logprobs", "Manifest", "MemOp", "Mixer", "ModelPlugin",
-    "ModelSpec", "Paged", "Pages", "Parser", "Payload", "Plan", "PlanTransform", "Planner", "Platform", "Plugin",
-    "Pool", "PrefixView", "Provenance", "QTensor", "Ref", "Registries", "Registry", "Resource", "Rewindable",
-    "SampleOut", "Sampler", "SamplerPlugin", "SamplingParams", "Scale", "SchedulePolicy", "Scheme", "SchemeImpl",
-    "Seq", "SeqTable", "SeqView", "ShapeKey", "Slot", "StateKind", "StateKindFactory", "StateSpec", "Status",
-    "StepCtx", "TokenDelta", "TokenSrc", "Tokenizer", "Tunable", "Unit", "UnitPin", "Verifier", "WeightMap",
-    "WeightRule", "WeightSource", "canonical_hash", "parse_versioned", "to_term",
+    "Converter", "DeviceBatch", "Dialect", "DraftHeadDecl", "DraftPolicy", "Drafter", "EngineClient",
+    "EngineRequest", "Event", "Fingerprint", "FrontendBundle", "FrontendPlugin", "HitLen", "KernelRegistry",
+    "KernelSpec", "LayerDecl", "Layout", "Ledger", "Lock", "LogitsProcessor", "Logprobs", "Manifest", "MemOp",
+    "Mixer", "ModelPlugin", "ModelSpec", "Paged", "Pages", "Parser", "Payload", "Plan", "PlanTransform", "Planner",
+    "Platform", "Plugin", "Pool", "PrefixView", "Provenance", "QTensor", "Ref", "Registries", "Registry",
+    "Resource", "Rewindable", "SampleOut", "Sampler", "SamplerPlugin", "SamplingParams", "Scale",
+    "SchedulePolicy", "Scheme", "SchemeImpl", "Seq", "SeqTable", "SeqView", "ShapeKey", "Slot", "StateKind",
+    "StateKindFactory", "StateSpec", "Status", "StepCtx", "TokenDelta", "TokenSrc", "Tokenizer", "Tunable", "Unit",
+    "UnitPin", "Verifier", "WeightMap", "WeightRule", "WeightSource", "canonical_hash", "parse_versioned",
+    "sequence_seed", "to_term",
 ]

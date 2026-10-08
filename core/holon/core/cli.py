@@ -9,7 +9,8 @@ import typing
 
 import torch
 
-from .engine import EngineConfig, resolve_model
+from .assembly import resolve_model
+from .engine import EngineConfig
 from .ipc import engine_process
 from .plugins import PluginError, PluginSet, discover
 from .supervisor import supervised

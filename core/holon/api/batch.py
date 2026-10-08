@@ -53,6 +53,22 @@ class SamplingParams:
     ext: dict[str, Any] = dataclasses.field(default_factory=dict)  # namespaced plugin params
 
 
+SEED_MASK = 2**63 - 1
+
+
+def sequence_seed(seed: int, index: int) -> int:
+    """The seed of sequence `index` of a request seeded `seed`: sequence 0 keeps it, the others get it mixed with
+    their index by a fixed 64-bit function (never the interpreter's hash), so a sequence resubmitted alone (the
+    supervisor) draws what it would have drawn beside its siblings."""
+    base = seed & SEED_MASK
+    if index == 0:
+        return base
+    x = (base + index + 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF          # splitmix64
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9 & 0xFFFFFFFFFFFFFFFF
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EB & 0xFFFFFFFFFFFFFFFF
+    return (x ^ (x >> 31)) & SEED_MASK
+
+
 @dataclasses.dataclass(slots=True, eq=False)
 class Seq:
     rid: str

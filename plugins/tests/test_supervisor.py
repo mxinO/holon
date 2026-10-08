@@ -7,8 +7,7 @@ import pathlib
 import time
 
 import pytest
-from holon.api import SamplingParams
-from holon.core.engine import sequence_seed
+from holon.api import SamplingParams, sequence_seed
 from holon.core.supervisor import Policy, _Request, supervised
 
 from .test_engine import GREEDY, tiny_case, tiny_checkpoint  # noqa: F401 — fixtures

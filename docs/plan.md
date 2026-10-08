@@ -224,7 +224,7 @@ Measured on Qwen3-8B bf16 unless noted, with the final M0 core (ee12f42) unless 
 | 5 | SeqTable seam: a fixed-token test drafter runs at depth 1 with correct positions and lengths (`plugins/tests/test_spec.py`) |
 | 6 | Restart (A5000, 5 kills mid-stream, every stream completes; exact continuation is tested in fp32): median 11.5 s, max 11.6 s for Qwen3-8B (6.7 s for 0.6B), at 0f50514. **SLO: restart ≤ 15 s for models up to 8B on a 24 GB card.** A poison request is quarantined without rollback, also alone on a quiet server; `n > 1` and prompt logprobs are served |
 | 7 | Memory fit per §2 (Qwen3-8B on a 24 GB A5000: 42K KV tokens at the default budget, mini-sglang 37K). Tuned default locks at ee12f42 for rtx-a5000, rtx-4090, rtx-5090 (`holon_tools tune`, then propagated: Triton paged decode/verify, FlashInfer prefill and fused per-token ops on all three) |
-| 8 | Core 2057 / 6000 lines; lints, import contracts and the static checks green |
+| 8 | Core 3035 / 6000 code lines (counted with the tokenizer since 2026-10-08: the earlier line-based check skipped code after docstrings that close mid-line, reporting about 2000); lints, import contracts and the static checks green |
 
 Carried into M0.1 and later:
 - CI jobs: `manifest-deps`, `no-arch-branches`, `reference-provenance` and the GPU-runner jobs (`isolation-check`,
