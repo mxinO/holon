@@ -42,6 +42,12 @@ def ggml_type(layout: str) -> int | None:
     return TYPES.get(scheme.removeprefix("ggml.")) if scheme.startswith("ggml.") and name == "gguf.native" else None
 
 
+def _device(ctx) -> int:
+    """The index of the build's CUDA device."""
+    index = torch.device(ctx.device).index
+    return torch.cuda.current_device() if index is None else index
+
+
 class Extension:
     """The prebuilt module, loaded once per SM on first use (never compiled here)."""
 
@@ -58,8 +64,7 @@ class QLinear:
     def __init__(self, ext: Extension, ctx, **facts) -> None:
         self.type, self.k, self.out = ggml_type(facts["layout"]), facts["in"], facts["out"]
         self.out_dtype = getattr(torch, facts["out_dtype"])
-        self.lib, device = ext(ctx.fingerprint.sm), torch.device(ctx.device).index
-        device = torch.cuda.current_device() if device is None else device
+        self.lib, device = ext(ctx.fingerprint.sm), _device(ctx)
         # llama.cpp's choice from the row count (`ne11 <= threshold`; fixed per graph bucket): mmvq, else mmq
         self.mmvq_rows = max((n for n in range(1, 9) if self.lib.use_mmvq(device, self.type, n)), default=0)
         if not self.lib.use_mmq(device, self.type, self.mmvq_rows + 1):
@@ -100,8 +105,7 @@ class LinearExperts:
         self.type, self.k, self.out = ggml_type(facts["layout"]), facts["in"], facts["out"]
         self.experts, self.top_k, self.swiglu = facts["experts"], facts["top_k"], facts["glu"] == "swiglu"
         self.out_y = self.out // 2 if self.swiglu else self.out
-        self.lib, device = ext(ctx.fingerprint.sm), torch.device(ctx.device).index
-        device = torch.cuda.current_device() if device is None else device
+        self.lib, device = ext(ctx.fingerprint.sm), _device(ctx)
         # llama.cpp's choice per chunk from its token count (fixed per graph bucket): mmvq with ids, else mmq
         self.mmvq_tokens = max((n for n in range(1, 9) if self.lib.use_mmvq_id(device, self.type, n)), default=0)
         if not self.lib.use_mmq(device, self.type, self.mmvq_tokens + 1):

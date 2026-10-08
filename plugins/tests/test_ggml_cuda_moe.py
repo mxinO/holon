@@ -11,8 +11,8 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
   `glu="swiglu"` output is checked against our SwiGLU of the checked `glu="none"` output instead: bitwise where mmq
   ran, within the fp32 budget for mmvq's fused gate; our SwiGLU kernel itself is checked against f64.
 - Merge: the merged stack against separate gate and up stacks, bitwise on mmvq and on mmq without the stream-k fixup.
-- Routings, at E = 128, k = 8: uniform; every token on the same 8 experts at 512 and 513 tokens (column tiles and the
-  fixup inside one expert); half the experts empty; ids 0 and E−1 in every row with poisoned bytes before and after
+- Routings, at E = 128, k = 8: uniform; every token on the same 8 experts at 512 and 513 tokens (several column
+  tiles inside one expert); half the experts empty; ids 0 and E−1 in every row with poisoned bytes before and after
   the stack. Token counts 0, 1, t, t + 1, 9, 64, 512, 513, 1025, 2049 (t: the type's mmvq limit); the two paths
   agree across the limit. Mixed types in one std.moe layer at 7 tokens (sm_86: IQ3_S gate/up on mmq, IQ4_XS down on
   mmvq); ids straight from `moe_topk`; CUDA graphs replayed with routing unlike the capture's at every decode
@@ -108,9 +108,10 @@ def stack(name: str, experts: int, out: int, k: int, seed: int, blocks: np.ndarr
     return Stack(name, blocks, w, dequantize(name, blocks).view(experts, out, k))
 
 
-def experts(ctx, name: str, k: int, out: int, rows_per_token: int, glu: str = "none", n: int = E):
+def experts(ctx, name: str, k: int, out: int, rows_per_token: int, glu: str = "none", n: int = E,
+            act_dtype: str = "bfloat16"):
     facts = {"layout": f"ggml.{name}/gguf.native", "experts": n, "in": k, "out": out, "top_k": K,
-             "rows_per_token": rows_per_token, "glu": glu, "act_dtype": "bfloat16", "out_dtype": "float32"}
+             "rows_per_token": rows_per_token, "glu": glu, "act_dtype": act_dtype, "out_dtype": "float32"}
     spec = ctx.select_kernel("linear_experts@1", site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
     return spec.impl(ctx, **facts)
@@ -324,11 +325,11 @@ def moe_layer(ctx, gate_up: str, down: str):
 
 def test_ids_from_moe_topk(ctx, qwen_stacks):
     sg, sd = qwen_stacks["q4_k"]
-    gate_up, down = experts(ctx, "q4_k", H, 2 * INTER, 1, n=EQ), experts(ctx, "q4_k", INTER, H, K, n=EQ)
-    route = topk(ctx, EQ)
-    for tokens, dtype in ((1, torch.bfloat16), (5, torch.float32), (77, torch.float32)):   # act_dtype f32 too
+    route, down = topk(ctx, EQ), experts(ctx, "q4_k", INTER, H, K, n=EQ)
+    for tokens, dtype in ((1, "bfloat16"), (5, "float32"), (77, "float32")):   # act_dtype f32 too
+        gate_up = experts(ctx, "q4_k", H, 2 * INTER, 1, n=EQ, act_dtype=dtype)
         _, ids = route(torch.randn(tokens, EQ, generator=torch.Generator().manual_seed(tokens)).cuda())
-        x, h = gate_up_input(tokens, seed=tokens).to(dtype), down_input(tokens, seed=tokens)
+        x, h = gate_up_input(tokens, seed=tokens).to(getattr(torch, dtype)), down_input(tokens, seed=tokens)
         check(gate_up(x, sg.parts, ids), emulated(gate_up, sg, x, ids), H, f"gate_up topk T={tokens}", True)
         check(down(h, sd.parts, ids), emulated(down, sd, h, ids), INTER, f"down topk T={tokens}")
 
@@ -369,7 +370,9 @@ def test_padding_plant_changes_real_rows_on_mmq_only(ctx, qwen_stacks, path, sta
     `ggml_cuda.id` workspace pre-filled with a real row's index. mmq's compaction counts the duplicates in
     `expert_bounds` but compacts each token once per expert, so the expert's range ends in k − 1 stale entries per
     padding row: they write over the real row (and, on gate/up, scatter the padding input over its compact row).
-    mmvq applies each slot on its own: real rows are unchanged, bitwise."""
+    mmvq applies each slot on its own: real rows are unchanged, bitwise. The stale entries are asserted in the
+    workspace (`ids_src1`, `ids_dst`, `expert_bounds`, each padded to 256 B, as mmq allocates them); which writer of a
+    real row lands last is a race, so the changed output is the secondary check (it held in 100/100 routings)."""
     sg, sd = qwen_stacks["q4_k"]
     s, kern = (sg, experts(ctx, "q4_k", H, 2 * INTER, 1, n=EQ)) if stage == "gate_up" else \
         (sd, experts(ctx, "q4_k", INTER, H, K, n=EQ))
@@ -378,7 +381,7 @@ def test_padding_plant_changes_real_rows_on_mmq_only(ctx, qwen_stacks, path, sta
     ids = uniform(tokens, EQ, seed=14)
     x = gate_up_input(tokens, seed=14) if stage == "gate_up" else down_input(tokens, seed=14)
     clean = kern(x, s.parts, ids)
-    victim = int(ids[0].argmin())              # token 0's slot on its lowest expert: computed before the plant's
+    victim = K + int(ids[1].argmin())          # token 1's slot on its lowest expert: computed before the plant's
     planted = ids.clone()
     planted[real:] = EQ - 2                    # after the victim's expert, and not the last (whose tail is unused)
     kern.workspace.view(torch.int32).fill_(victim)
@@ -386,6 +389,12 @@ def test_padding_plant_changes_real_rows_on_mmq_only(ctx, qwen_stacks, path, sta
     if path == "mmvq":
         assert torch.equal(y[:real], clean[:real])
     else:
+        ws, n = kern.workspace.view(torch.int32), -(-tokens * K * 4 // 256) * 64
+        ids_dst, bounds = ws[n:2 * n], ws[2 * n:2 * n + EQ + 1]
+        lo, hi = int(bounds[EQ - 2]), int(bounds[EQ - 1])
+        assert hi - lo == int((planted == EQ - 2).sum()), "expert_bounds counts every slot of the expert"
+        stale = (K - 1) * (tokens - real)      # one compacted entry per token, k per padding row in the bounds
+        assert (ids_dst[hi - stale:hi] == victim).all() and (ids_dst[lo:hi - stale] != victim).all()
         ref = emulated(kern, s, x, ids)[:real]
         assert l0.check(clean[:real], ref, torch.bfloat16, k_in).passed
         assert not l0.check(y[:real], ref, torch.bfloat16, k_in).passed, "the plant left the real rows alone"
@@ -428,9 +437,10 @@ def test_moe_topk(ctx, n):
 
 @pytest.mark.parametrize("n", [16, 128, 512])
 def test_moe_topk_non_finite_rows(ctx, n):
-    """Rows of ±inf and NaN still give k unique ids in range (NaN as −FLT_MAX, ties to the lower index). llama.cpp
-    replaces NaN after the softmax, so a row with any NaN logit routes to experts 0..k−1 with NaN weights, where the
-    reference (NaN replaced before) routes on the other logits; rows of finite values and −inf match it."""
+    """Rows with NaN or ±inf logits still give k unique ids in range, as the contract requires; their weights are
+    unspecified. llama.cpp replaces NaN by −FLT_MAX after the softmax, so a NaN or +inf logit makes every probability
+    NaN: the row routes to experts 0..k−1, its renormalised weights −inf (−FLT_MAX over the clamped sum). Rows of
+    finite values and −inf match the reference."""
     inf, nan = float("inf"), float("nan")
     rows = torch.randn(7, n)
     rows[0] = nan
@@ -442,7 +452,7 @@ def test_moe_topk_non_finite_rows(ctx, n):
     rows[6, 1], rows[6, 2], rows[6, 3] = inf, -inf, nan
     weights, ids = topk(ctx, n)(rows.cuda())
     assert all(len(set(row)) == K and 0 <= min(row) and max(row) < n for row in ids.tolist())
-    assert ids[4].tolist() == list(range(K))
+    assert ids[4].tolist() == list(range(K)) and (weights[4] == -float("inf")).all()
     torch.testing.assert_close(ids[5], reference.moe_topk(rows[5:6], K, True)[1][0].cuda(), rtol=0, atol=0)
 
 
