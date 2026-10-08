@@ -7,6 +7,7 @@ import gguf
 import pytest
 from holon.core.assembly import detect_source
 from holon.core.plugins import PluginSet, discover
+from holon_std.weights.gguf import reader
 from holon_std.weights.gguf.source import GGUFSource
 
 HUB = pathlib.Path.home() / ".cache/huggingface/hub"
@@ -34,11 +35,12 @@ def source(request):
 
 def test_the_reader_sees_what_gguf_py_sees(source):
     ref = gguf.GGUFReader(source.path)
-    ours = {t.name: t for t in source._tensors}
+    ours = {t.name: (t, data) for t, data in reader.views(source.path, source._tensors)}
     assert set(ours) == {t.name for t in ref.tensors}
     for t in ref.tensors[:24]:                                       # every kind of tensor, bytes and shapes
-        assert ours[t.name].type == t.tensor_type and ours[t.name].data.tobytes() == bytes(t.data)
-        assert ours[t.name].shape == tuple(int(n) for n in reversed(t.shape))
+        info, data = ours[t.name]
+        assert info.type == t.tensor_type and data.tobytes() == bytes(t.data)
+        assert info.shape == tuple(int(n) for n in reversed(t.shape))
     for key in ("general.architecture", "tokenizer.ggml.pre", "qwen3.rope.freq_base", "tokenizer.ggml.merges"):
         assert source._fields[key] == ref.fields[key].contents()
 
@@ -66,12 +68,28 @@ def test_stop_set_equals_hf_generation_config(source):
     assert source.eos_token_ids == frozenset(gen)
 
 
-def test_chat_template_renders_like_hf_or_the_differences_are_known(source, hf_tok):
-    tok = source.tokenizer()
-    chat = [{"role": "system", "content": "Be brief."}, {"role": "user", "content": "What is 2+2?"},
-            {"role": "assistant", "content": "4"}, {"role": "user", "content": "And 3+3?"}]
-    ours = tok.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
-    assert ours == hf_tok.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+TOOLS = [{"type": "function", "function": {"name": "get_weather", "description": "Weather in a city.",
+                                           "parameters": {"type": "object", "properties": {"city": {"type": "string"}},
+                                                          "required": ["city"]}}}]
+AGENT = [{"role": "system", "content": "You are a helpful agent."},
+         {"role": "user", "content": "Weather in Paris and Rome?"},
+         {"role": "assistant", "reasoning_content": "Two cities: two calls.", "content": "",
+          "tool_calls": [{"type": "function", "function": {"name": "get_weather", "arguments": {"city": "Paris"}}},
+                         {"type": "function", "function": {"name": "get_weather", "arguments": {"city": "Rome"}}}]},
+         {"role": "tool", "content": "18C, sunny"}, {"role": "tool", "content": "24C, clear"},
+         {"role": "assistant", "content": "<think>\nBoth known.\n</think>\n\nParis 18C, Rome 24C."},
+         {"role": "user", "content": "Thanks!"}]
+CHATS = {"plain": ([{"role": "system", "content": "Be brief."}, {"role": "user", "content": "What is 2+2?"},
+                    {"role": "assistant", "content": "4"}, {"role": "user", "content": "And 3+3?"}], {}),
+         "agent with tools and reasoning": (AGENT, {"tools": TOOLS}),
+         "thinking off": (AGENT[:2], {"enable_thinking": False})}
+
+
+@pytest.mark.parametrize("chat", CHATS)
+def test_chat_template_renders_like_hf(source, hf_tok, chat):
+    messages, kw = CHATS[chat]
+    ours = source.tokenizer().apply_chat_template(messages, tokenize=False, add_generation_prompt=True, **kw)
+    assert ours == hf_tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, **kw)
 
 
 def test_identity_and_detection(source):

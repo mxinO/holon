@@ -58,10 +58,10 @@ a CPU lock is a test artifact by construction.
 
 **D2 — Quantized weights are adopted at load time.**
 - `build_model` builds on meta without `to_empty`.
-- `load_weights`: a dense value is copied into a device tensor bound in place (`param.data = …`, the Parameter
-  object kept); a `QTensor` value goes to `owner.adopt(ctx, leaf_name, qtensor)` on the owning module, which uploads
+- `load_weights`: a dense value is copied into a device tensor swapped in place (`torch.utils.swap_tensors`, the
+  Parameter object kept); a `QTensor` value goes to `owner.adopt(ctx, leaf_name, qtensor)` on the owning module, which uploads
   the parts as its own uint8 parameters (the ggml kernels need no padding: they support `in` % 256 = 0), and records the
-  layout (the kernel is selected in `finalize_weights`, §4.3). No `adopt`, or `False`: load error naming path, unit and layout. A parameter still
+  layout (the kernel is bound later, §4.3). No `adopt`, or `False`: load error naming path, unit and layout. A parameter still
   on meta afterwards: "not loaded". `WeightRule.transform` on a `QTensor`: error.
 - The core never iterates parts or knows formats; `QTensor` is a loader-time value. Several checkpoint tensors per
   parameter (GPTQ/AWQ, v1) are grouped by their source; M0.2 expert stacks are one 3-D `QTensor`.
@@ -138,9 +138,10 @@ and L0 call gguf-py directly.
 
 ### 4.3 Units and merges
 
-`Linear.adopt` / `Embedding.adopt` / `LMHead.adopt` upload the parts and record the layout; kernels are selected in
-`finalize_weights`, after merges, so merged-away units leave no site in the lock; a tied quantized head selects
-`qlinear` on the embedding's blocks there too. `Linear.merge` returns `None` when a layout is set unless all units share scheme and
+`Linear.adopt` / `Embedding.adopt` / `LMHead.adopt` upload the parts and record the layout; kernels are bound in
+a core pass after every `finalize_weights` (`bind_kernels(ctx)` on each module that has it), so units merged away —
+they give up their weight — leave no site in the lock; a tied quantized head takes the embedding's layout in its
+`finalize_weights` and binds `qlinear` on its blocks. `Linear.merge` returns `None` when a layout is set unless all units share scheme and
 `in`, in which case rows are concatenated (ggml rows are independent block runs) and the merged unit runs through
 `qlinear`: q+k and gate+up merge in both files, v stays separate where its type differs. Kernel facts: `layout`,
 `in`, `out`, `act_dtype`.

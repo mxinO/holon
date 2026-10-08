@@ -19,7 +19,7 @@ class Tokenizer:
 
 class Bundle:
     def __init__(self, source: Any) -> None:
-        self.model_name = source.identity().split("@")[0]
+        self.model_name = source.name
         self.tokenizer = Tokenizer(source)
 
     def render_chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,

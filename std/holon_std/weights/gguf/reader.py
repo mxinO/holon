@@ -1,4 +1,5 @@
-"""A minimal GGUF (v2/v3) reader: metadata and tensor views over one copy-on-write memory map, nothing copied.
+"""A minimal GGUF (v2/v3) reader: the metadata and tensor table read once, and tensor views over a copy-on-write
+memory map opened only while weights load, nothing copied.
 
 gguf-py's `GGUFReader` builds Python objects for every element of every array (≈ 5 s for a 152K-token vocabulary);
 this reads numeric arrays with numpy and strings in one pass (≈ 1 s, the token and merge strings). gguf-py still
@@ -8,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import pathlib
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
@@ -19,27 +21,31 @@ _STRING, _ARRAY = 8, 9
 
 
 @dataclasses.dataclass(frozen=True)
-class Tensor:
+class TensorInfo:
     name: str
     type: GGMLQuantizationType
     shape: tuple[int, ...]           # torch order (slowest dimension first)
-    data: np.ndarray                 # uint8 [rows, row_bytes] for block types, else the element type
+    offset: int                      # from the file's start
+    rows: int
+    row_bytes: int                   # a row is whole blocks (or elements, for dense types)
 
 
 class _Cursor:
-    def __init__(self, buf: np.ndarray) -> None:
-        self.buf, self.at = buf, 0
+    def __init__(self, buf: np.ndarray, path: pathlib.Path) -> None:
+        self.buf, self.path, self.at = buf, path, 0
+
+    def take(self, n: int) -> np.ndarray:
+        if self.at + n > len(self.buf):
+            raise ValueError(f"{self.path}: truncated GGUF header")
+        out = self.buf[self.at:self.at + n]
+        self.at += n
+        return out
 
     def scalar(self, dtype: Any) -> Any:
-        v = self.buf[self.at:self.at + np.dtype(dtype).itemsize].view(dtype)[0]
-        self.at += np.dtype(dtype).itemsize
-        return v.item()
+        return self.take(np.dtype(dtype).itemsize).view(dtype)[0].item()
 
     def string(self) -> str:
-        n = self.scalar(np.uint64)
-        s = self.buf[self.at:self.at + n].tobytes().decode("utf-8", errors="replace")
-        self.at += n
-        return s
+        return self.take(self.scalar(np.uint64)).tobytes().decode("utf-8", errors="replace")
 
     def value(self, kind: int) -> Any:
         if kind == _STRING:
@@ -49,37 +55,45 @@ class _Cursor:
             if elem == _STRING:
                 return [self.string() for _ in range(n)]
             dtype = np.dtype(_SCALARS[elem])
-            out = self.buf[self.at:self.at + n * dtype.itemsize].view(dtype).tolist()
-            self.at += n * dtype.itemsize
-            return out
+            return self.take(n * dtype.itemsize).view(dtype).tolist()
         return self.scalar(_SCALARS[kind])
 
 
-def read(path: str | pathlib.Path) -> tuple[dict[str, Any], list[Tensor]]:
-    """The file's metadata (key -> value) and its tensors (views into the memory map; copy-on-write, so torch can
-    wrap them without a copy and the file is never written)."""
-    buf = np.memmap(path, dtype=np.uint8, mode="c")
-    cur = _Cursor(buf)
-    cur.at = 4
-    if buf[:4].tobytes() != b"GGUF" or cur.scalar(np.uint32) < 2:
-        raise ValueError(f"{path}: not a GGUF v2+ file")
+def read(path: str | pathlib.Path) -> tuple[dict[str, Any], list[TensorInfo]]:
+    """The file's metadata (key -> value) and its tensor table, checked against the file's size."""
+    path = pathlib.Path(path)
+    buf = np.memmap(path, dtype=np.uint8, mode="r")
+    cur = _Cursor(buf, path)
+    if cur.take(4).tobytes() != b"GGUF" or cur.scalar(np.uint32) not in (2, 3):
+        raise ValueError(f"{path}: not a GGUF v2 or v3 file")
     n_tensors, n_fields = cur.scalar(np.uint64), cur.scalar(np.uint64)
     fields = {}
     for _ in range(n_fields):
         key = cur.string()
         fields[key] = cur.value(cur.scalar(np.uint32))
-    infos = []
+    table = []
     for _ in range(n_tensors):
         name = cur.string()
         dims = [cur.scalar(np.uint64) for _ in range(cur.scalar(np.uint32))]
-        infos.append((name, GGMLQuantizationType(cur.scalar(np.uint32)), dims, cur.scalar(np.uint64)))
+        table.append((name, GGMLQuantizationType(cur.scalar(np.uint32)), dims, cur.scalar(np.uint64)))
     align = fields.get("general.alignment", 32)
     start = -(-cur.at // align) * align
-    tensors = []
-    for name, kind, dims, offset in infos:
+    infos = []
+    for name, kind, dims, offset in table:
         block, size = GGML_QUANT_SIZES[kind]
-        row_bytes = dims[0] // block * size
-        rows = int(np.prod(dims[1:], dtype=np.int64))
-        data = buf[start + offset:start + offset + rows * row_bytes].reshape(rows, row_bytes)
-        tensors.append(Tensor(name, kind, tuple(reversed(dims)), data))
-    return fields, tensors
+        if dims[0] % block:
+            raise ValueError(f"{path}: {name} rows of {dims[0]} are not whole {kind.name} blocks of {block}")
+        info = TensorInfo(name, kind, tuple(reversed(dims)), start + offset, int(np.prod(dims[1:], dtype=np.int64)),
+                          dims[0] // block * size)
+        if info.offset + info.rows * info.row_bytes > len(buf):
+            raise ValueError(f"{path}: {name} runs past the end of the file")
+        infos.append(info)
+    return fields, infos
+
+
+def views(path: str | pathlib.Path, infos: list[TensorInfo]) -> Iterator[tuple[TensorInfo, np.ndarray]]:
+    """Each tensor's bytes, uint8 [rows, row_bytes], over one copy-on-write map (torch wraps them without a copy, and
+    the file is never written); the map closes when the last view is dropped."""
+    buf = np.memmap(path, dtype=np.uint8, mode="c")
+    for t in infos:
+        yield t, buf[t.offset:t.offset + t.rows * t.row_bytes].reshape(t.rows, t.row_bytes)

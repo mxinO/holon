@@ -117,6 +117,7 @@ class WeightSource(Protocol):
     patterns (`[support]`) so the core can tell which source reads a path without importing anything."""
 
     kind: str
+    name: str                          # the display name, cheap (no hashing): the `<name>` of `identity()`
     arch: str                          # resolved to the model plugin providing `arch.<arch>`
     eos_token_ids: frozenset[int]      # the stop set
 

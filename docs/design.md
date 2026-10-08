@@ -441,7 +441,10 @@ class ModelSpec:
   `finalize_weights(params, ctx)`, run once after loading and converters, before graph capture. It covers
   transformations spanning several tensors or semantics a converter cannot see: MLA W_UK/W_UV absorption,
   zero-centred RMSNorm (`x·(1+w)` — kept as an offset-gamma kernel parameter, not folded into bf16), GDN
-  `-exp(A_log)` precompute, KV-cache scales. Results live in the module's Pool-backed storage.
+  `-exp(A_log)` precompute, KV-cache scales. Results live in the module's Pool-backed storage. After every
+  module has finalized (merges included), the core calls `bind_kernels(ctx)` on each module that has it: units
+  whose kernel depends on the loaded weights (a quantized layout, M0.1) select it there, so a unit merged away
+  binds none.
 - **Nested models.** `BuildCtx` and the weight pipeline are available to drafters, so a draft-*model* drafter
   instantiates a nested `ModelPlugin` whose StateSpecs and ledger requests are namespaced (`draft.*`).
 

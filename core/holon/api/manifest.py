@@ -126,7 +126,7 @@ class Manifest:
     reference: str | None = None       # oracle module of a numeric unit
     tunables: dict[str, Tunable] = dataclasses.field(default_factory=dict)
     platforms: tuple[str, ...] = ()
-    detect: tuple[str, ...] = ()       # weight sources: file-name patterns of their checkpoints (e.g. "*.gguf")
+    detect: tuple[str, ...] = ()       # weight sources: file-name patterns of their checkpoints (e.g. "config.json")
     provenance: Provenance | None = None
 
     @property

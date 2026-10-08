@@ -25,6 +25,10 @@ class HFSafetensors:
             raise FileNotFoundError(f"{self.path}: no config.json")
         self._config = json.loads((self.path / "config.json").read_text())
         self.arch = self._config["architectures"][0]
+        self._hub = self.path.parent.name == "snapshots" and self.path.parent.parent.name.startswith("models--")
+        # The display name: the hub id for a hub-cache snapshot, else the directory name.
+        self.name = self.path.parent.parent.name.removeprefix("models--").replace("--", "/") if self._hub \
+            else self.path.name
         # generation_config.json may add end-of-turn tokens (e.g. Qwen3 instruct: <|im_end|> and <|endoftext|>).
         gen = self.path / "generation_config.json"
         ids = [self._config.get("eos_token_id"), json.loads(gen.read_text()).get("eos_token_id") if gen.is_file()
@@ -48,11 +52,9 @@ class HFSafetensors:
     def identity(self) -> str:
         """`<name>@<build>`: the hub id for a hub-cache snapshot, else the directory name, and a hash of config.json
         and every weight file — content, not the hub revision, which also moves with README edits."""
-        name, hub = self.path.name, False
-        if self.path.parent.name == "snapshots" and self.path.parent.parent.name.startswith("models--"):
-            name, hub = self.path.parent.parent.name.removeprefix("models--").replace("--", "/"), True
-        files = self._digests([self.path / "config.json", *sorted(self.path.glob("*.safetensors"))], remember=not hub)
-        return f"{name}@{hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()[:16]}"
+        files = self._digests([self.path / "config.json", *sorted(self.path.glob("*.safetensors"))],
+                              remember=not self._hub)
+        return f"{self.name}@{hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()[:16]}"
 
     def _digests(self, files: list[pathlib.Path], remember: bool) -> dict[str, str]:
         """sha256 per file. Large hub-cache files are free: their symlink target is the blob named by it. Others are

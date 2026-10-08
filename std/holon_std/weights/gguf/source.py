@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import pathlib
+import tempfile
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -36,7 +37,13 @@ class GGUFSource:
 
     def __init__(self, path: str | pathlib.Path, device: str = "cpu") -> None:
         self.path = pathlib.Path(path)
+        if not self.path.is_file():
+            raise ValueError(f"{self.path}: a GGUF weight source reads one .gguf file")
         self._fields, self._tensors = reader.read(self.path)
+        hub = [p for p in self.path.parts if p.startswith("models--")]
+        # The display name: `<hub repo>/<file stem>` for a hub-cache file, else the stem.
+        self.name = (f"{hub[-1].removeprefix('models--').replace('--', '/')}/{self.path.stem}" if hub
+                     else self.path.stem)
         self._arch = self._value("general.architecture")
         self.arch = f"gguf.{self._arch}"
         tokens, types = self._value("tokenizer.ggml.tokens"), self._value("tokenizer.ggml.token_type")
@@ -56,33 +63,27 @@ class GGUFSource:
         return cfg
 
     def tensors(self) -> Iterator[tuple[str, torch.Tensor | QTensor]]:
-        for t in self._tensors:
+        for t, data in reader.views(self.path, self._tensors):
             if t.type in _DENSE:
-                yield t.name, torch.from_numpy(t.data).view(_DENSE[t.type]).reshape(t.shape)
+                yield t.name, torch.from_numpy(data).view(_DENSE[t.type]).reshape(t.shape)
             else:
                 layout = Layout(Scheme(f"ggml.{t.type.name.lower()}"), "gguf.native")
-                yield t.name, QTensor(layout, t.shape, {"blocks": torch.from_numpy(t.data)})
+                yield t.name, QTensor(layout, t.shape, {"blocks": torch.from_numpy(data)})
 
     def tokenizer(self) -> Any:
         from .tokenizer import build
 
-        tokens = self._value("tokenizer.ggml.tokens")
+        tokens, eos = self._value("tokenizer.ggml.tokens"), self._value("tokenizer.ggml.eos_token_id")
         return build(tokens, self._value("tokenizer.ggml.merges"), self._value("tokenizer.ggml.token_type"),
                      self._value("tokenizer.ggml.pre"), self._value("tokenizer.chat_template"),
-                     tokens[self._value("tokenizer.ggml.eos_token_id")])
+                     None if eos is None else tokens[eos])
 
     def identity(self) -> str:
         """`<hub repo>/<file stem>@<16 hex of the file's sha256>` for a hub-cache file (the blob is named by its
         sha256), else `<file stem>@…`; a re-upload is a new model id."""
-        name = self.path.stem
-        parts = self.path.parts
-        hub = [p for p in parts if p.startswith("models--")]
-        if hub and self.path.is_symlink():
-            name = f"{hub[-1].removeprefix('models--').replace('--', '/')}/{name}"
-            digest = os.path.basename(os.readlink(self.path))
-        else:
-            digest = _file_digest(self.path)
-        return f"{name}@{digest[:16]}"
+        hub_blob = self.path.is_symlink() and any(p.startswith("models--") for p in self.path.parts)
+        digest = os.path.basename(os.readlink(self.path)) if hub_blob else _file_digest(self.path)
+        return f"{self.name}@{digest[:16]}"
 
 
 def _shortest(v: Any) -> Any:
@@ -103,9 +104,11 @@ def _file_digest(path: pathlib.Path) -> str:
         pass
     with open(path, "rb") as f:
         digest = hashlib.file_digest(f, "sha256").hexdigest()
-    try:
+    try:                                   # atomically: engines may start side by side
         cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps([*key, digest]))
+        with tempfile.NamedTemporaryFile("w", dir=cache.parent, delete=False) as tmp:
+            tmp.write(json.dumps([*key, digest]))
+        os.replace(tmp.name, cache)
     except OSError:
         pass
     return digest

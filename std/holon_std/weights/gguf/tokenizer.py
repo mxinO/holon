@@ -21,7 +21,7 @@ _PRE = {   # tokenizer.ggml.pre -> (normalizer, split regex), as in the original
 
 
 def build(tokens: list[str], merges: list[str], types: list[int], pre: str, chat_template: str | None,
-          eos: str) -> Any:
+          eos: str | None) -> Any:
     """A transformers fast tokenizer (so frontends keep `apply_chat_template`) over the GGUF table."""
     from transformers import PreTrainedTokenizerFast  # only frontends and tests build tokenizers
 

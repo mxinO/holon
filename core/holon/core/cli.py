@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="holon")
     sub = parser.add_subparsers(dest="command", required=True)
     serve = sub.add_parser("serve", help="serve a model over a frontend plugin")
-    serve.add_argument("model", help="checkpoint directory or file (e.g. a .gguf)")
+    serve.add_argument("model", help="checkpoint directory or file")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--frontend", default=None, help="frontend plugin name (default: the one installed)")

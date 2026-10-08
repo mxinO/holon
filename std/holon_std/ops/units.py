@@ -50,18 +50,18 @@ class Rope(nn.Module):
 
 class _Quantized:
     """A unit's quantized weight (adopted at load, design §5.5): its layout and the op that reads it. The kernel is
-    selected on first use — after `finalize_weights` — so a unit merged away never binds one or leaves a site in the
-    lock."""
+    bound by `bind_kernels`, after merges, so a unit merged away binds none and leaves no site in the lock."""
 
     def __init__(self, ctx, layout, op: str, **facts) -> None:
         self.ctx, self.layout, self.op = ctx, layout, op
         self.facts = {"layout": f"{layout.scheme.elem}/{layout.name}", **facts}
         self._kernel = None
 
+    def bind(self) -> None:
+        site = f"std.ops.{self.op.split('@')[0]}[" + ",".join(f"{k}={v}" for k, v in self.facts.items()) + "]"
+        self._kernel = self.ctx.select_kernel(self.op, site=site, **self.facts).impl(self.ctx, **self.facts)
+
     def __call__(self, x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-        if self._kernel is None:
-            site = f"std.ops.{self.op.split('@')[0]}[" + ",".join(f"{k}={v}" for k, v in self.facts.items()) + "]"
-            self._kernel = self.ctx.select_kernel(self.op, site=site, **self.facts).impl(self.ctx, **self.facts)
         return self._kernel(x, weight)
 
 
@@ -94,6 +94,10 @@ class Linear(nn.Module):
         _adopt(self.weight, q.parts["blocks"], ctx.device)
         return True
 
+    def bind_kernels(self, ctx) -> None:
+        if self._q is not None and self.weight is not None:          # not merged away
+            self._q.bind()
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self._q is None:
             return nn.functional.linear(x, self.weight, self.bias)
@@ -103,9 +107,9 @@ class Linear(nn.Module):
     @staticmethod
     def merge(*units: Linear) -> Linear | None:
         """One unit for several projections of the same input — one GEMM, or one quantized matmul, instead of
-        several — whose output rows are the units' outputs in order; the units' weights become views into it. None if
-        they cannot share one: biases, or different dtypes, layouts or input sizes (ggml rows are independent block
-        runs, so quantized weights of one type concatenate by rows).
+        several — whose output rows are the units' outputs in order; it owns the weight and the units give theirs up
+        (they are not called afterwards). None if they cannot share one: biases, or different dtypes, layouts or input
+        sizes (ggml rows are independent block runs, so quantized weights of one type concatenate by rows).
 
         Optional capability of every `unit.std.ops.linear@1` provider, used duck-typed by composites (attention q/k/v,
         gate/up) in `finalize_weights`."""
@@ -119,11 +123,8 @@ class Linear(nn.Module):
         torch.utils.swap_tensors(merged.weight, nn.Parameter(weight, requires_grad=False))
         if first._q is not None:
             merged._q = merged._quantized(first._q.layout)
-        start = 0
         for u in units:
-            n = u.weight.shape[0]
-            u.weight.data = weight[start:start + n]
-            start += n
+            u.weight = None
         return merged
 
 
@@ -141,6 +142,10 @@ class Embedding(nn.Module):
                              dtype=_dtype(self.dtype))
         _adopt(self.weight, q.parts["blocks"], ctx.device)
         return True
+
+    def bind_kernels(self, ctx) -> None:
+        if self._q is not None:
+            self._q.bind()
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         return nn.functional.embedding(ids, self.weight) if self._q is None else self._q(ids, self.weight)
@@ -177,6 +182,10 @@ class LMHead(nn.Module):
     def finalize_weights(self, ctx) -> None:
         if self._embed and self._embed[0]._q is not None:          # tied to a quantized table: read its blocks
             self._q = self._quantized(ctx, self._embed[0]._q.layout)
+
+    def bind_kernels(self, ctx) -> None:
+        if self._q is not None:
+            self._q.bind()
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
         weight = self._embed[0].weight if self._embed else self.weight

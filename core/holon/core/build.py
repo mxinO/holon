@@ -239,3 +239,6 @@ def load_weights(model: Model, ctx: BuildContext, tensors: Iterable[tuple[str, t
     for module in reversed(list(model.modules())):  # children first: composites may read finalized children
         if module is not model and hasattr(module, "finalize_weights"):
             module.finalize_weights(ctx)
+    for module in model.modules():                  # after merges: units bind the kernels of the weights they hold
+        if hasattr(module, "bind_kernels"):
+            module.bind_kernels(ctx)
