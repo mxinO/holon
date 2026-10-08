@@ -1,0 +1,13 @@
+[plugin]
+name = "models.qwen3_moe"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "model"
+license = "Apache-2.0"
+derived_from = "models.qwen3@1f04987"
+
+[resources]
+provides = ["model.qwen3_moe@1", "arch.gguf.qwen3moe@1"]
+
+[dependencies]
+python = ["transformers"]

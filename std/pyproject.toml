@@ -10,6 +10,7 @@ dependencies = ["holonlm"]
 "std.ops" = "holon_std.ops"
 "std.blocks" = "holon_std.blocks"
 "std.ffn" = "holon_std.ffn"
+"std.moe" = "holon_std.moe"
 "std.mixers.gqa" = "holon_std.mixers.gqa"
 "std.state.paged" = "holon_std.state.paged"
 "std.sampling" = "holon_std.sampling"

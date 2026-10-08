@@ -3,6 +3,12 @@ from holon.api import Constraint, KernelSpec
 from .kernels import BY_OP, PagedAttention
 
 KV_LAYOUT = "kv.hnd"           # the only KV layout the paged reference reads
+# Weight layouts the references read, by scheme: ggml blocks as stored (dequantized by gguf-py), and dense stacks.
+WEIGHT_SCHEMES = {"qlinear": {"ggml"}, "qembedding": {"ggml"}, "linear_experts": {"ggml", "dense"}}
+
+
+def _reads(schemes: set[str]):
+    return lambda facts: facts["layout"].split("/")[0].split(".")[0] in schemes
 
 
 class Plugin:
@@ -12,5 +18,5 @@ class Plugin:
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="testing.ref_kernels", impl=impl, requires=Constraint(devices=frozenset({"cpu"})),
                 supports=(lambda f: f["layout"] == KV_LAYOUT) if paged else
-                (lambda f: f["layout"].endswith("/gguf.native")) if op.startswith("q") else None,
+                _reads(WEIGHT_SCHEMES[op]) if op in WEIGHT_SCHEMES else None,
                 props=frozenset({"deterministic"} if paged else {"deterministic", "graph_safe"})))

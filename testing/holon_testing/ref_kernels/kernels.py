@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from holon_std.ffn import reference as ffn
 from holon_std.mixers.gqa import reference as gqa
+from holon_std.moe import reference as moe
 from holon_std.ops import reference as ops
 
 
@@ -88,7 +89,42 @@ class QEmbedding(_Dequantized):
         return ops.qembedding(ids, self.dequantized(blocks)).to(getattr(torch, self.facts["dtype"]))
 
 
+class LinearExperts:
+    """Expert stacks: ggml layouts dequantized by gguf-py once per stack; dense ones as stored, the activation rounded
+    to their dtype (the contract)."""
+
+    def __init__(self, ctx, *, layout: str, experts: int, out: int, glu: str, out_dtype: str, **facts) -> None:
+        self.ggml = None if layout.startswith("dense/") else _Dequantized(ctx, layout=layout)
+        self.experts, self.out, self.glu, self.out_dtype = experts, out, glu, getattr(torch, out_dtype)
+
+    def __call__(self, x, parts, ids):
+        if self.ggml is None:
+            weight = parts["weight"]
+            y = moe.linear_experts(x, weight, ids, self.glu, operand_dtype=weight.dtype)
+        else:
+            weight = self.ggml.dequantized(parts["blocks"]).view(self.experts, self.out, -1)
+            y = moe.linear_experts(x, weight, ids, self.glu)
+        return y.to(self.out_dtype)
+
+
+class MoeTopk:
+    def __init__(self, ctx, *, experts: int, top_k: int, renormalize: bool) -> None:
+        self.top_k, self.renormalize = top_k, renormalize
+
+    def __call__(self, logits):
+        return moe.moe_topk(logits, self.top_k, self.renormalize)
+
+
+class MoeCombine:
+    def __init__(self, ctx, *, dtype: str, **facts) -> None:
+        self.dtype = getattr(torch, dtype)
+
+    def __call__(self, y, weights, out):
+        out.copy_(moe.moe_combine(y, weights, self.dtype))
+
+
 BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul": SiluMul,
          "attention.paged_prefill": PagedAttention, "attention.paged_decode": PagedAttention,
          "attention.paged_verify": PagedAttention, "attention.causal": CausalAttention,
-         "qlinear": QLinear, "qembedding": QEmbedding}
+         "qlinear": QLinear, "qembedding": QEmbedding, "linear_experts": LinearExperts, "moe_topk": MoeTopk,
+         "moe_combine": MoeCombine}
