@@ -1587,6 +1587,7 @@ struct ggml_cuda_mm_fusion_args_device {
     const void * shared_gate = nullptr;
     float * shared_dst = nullptr;
     uint32_t shared_stride_col_dst = 0;
+    bool dst_bf16 = false; // Holon: mul_mat_vec_q stores bf16 instead of f32 (dst is passed as void *)
 };
 
 struct ggml_cuda_kernel_launch_params {
@@ -1698,7 +1699,7 @@ static __inline__ void ggml_cuda_kernel_launch(Kernel kernel, const ggml_cuda_ke
 #if defined(GGML_CUDA_USE_PDL)
 
     static const bool env_pdl_enabled = []() {
-        const char * env = getenv("GGML_CUDA_PDL");
+        const char * env = nullptr; // Holon: no environment configuration, PDL on
         return env == nullptr || std::atoi(env) != 0;
     }();
 

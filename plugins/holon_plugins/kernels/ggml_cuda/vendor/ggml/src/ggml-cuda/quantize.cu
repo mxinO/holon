@@ -1,6 +1,25 @@
 #include "quantize.cuh"
 #include <cstdint>
 
+// Holon: activations are f32 or bf16; bf16 -> f32 is exact (the upper 16 bits).
+static bool is_bf16(const ggml_type type_x) {
+    GGML_ASSERT(type_x == GGML_TYPE_F32 || type_x == GGML_TYPE_BF16);
+    return type_x == GGML_TYPE_BF16;
+}
+
+static __device__ __forceinline__ float load_x(const void * x, const int64_t i, const bool x_bf16) {
+    return x_bf16 ? __uint_as_float(uint32_t(((const uint16_t *) x)[i]) << 16) : ((const float *) x)[i];
+}
+
+static __device__ __forceinline__ float4 load_x4(const void * x, const int64_t i, const bool x_bf16) { // i % 4 == 0
+    if (!x_bf16) {
+        return ((const float4 *) x)[i/4];
+    }
+    const uint2 v = ((const uint2 *) x)[i/4];
+    return make_float4(__uint_as_float(v.x << 16), __uint_as_float(v.x & 0xFFFF0000u),
+                       __uint_as_float(v.y << 16), __uint_as_float(v.y & 0xFFFF0000u));
+}
+
 #if defined(BLACKWELL_MMA_AVAILABLE)
 // this maps to 256-bit loads in PTX on supported devices,
 // and otherwise falls back to 2 128-bit loads
@@ -52,11 +71,11 @@ static __device__ __forceinline__ float nvfp4_native_scale_error(
 
 __launch_bounds__(CUDA_QUANTIZE_BLOCK_SIZE, 1)
 static __global__ void quantize_q8_1(
-        const float * x_ptr, void * vy_ptr,
+        const void * x_ptr, const bool x_bf16, void * vy_ptr,
         const int64_t ne00, const int64_t s01, const int64_t s02, const int64_t s03,
         const int64_t ne0, const uint32_t ne1, const uint3 ne2) {
     ggml_cuda_pdl_lc();
-    const float * GGML_CUDA_RESTRICT x  = x_ptr;
+    const void  * GGML_CUDA_RESTRICT x  = x_ptr;
     void        * GGML_CUDA_RESTRICT vy = vy_ptr;
     const int64_t i0 = (int64_t)blockDim.x*blockIdx.x + threadIdx.x;
 
@@ -81,7 +100,7 @@ static __global__ void quantize_q8_1(
     const int64_t iqs = i_cont % QK8_1; // quant index
 
     ggml_cuda_pdl_sync();
-    const float xi = i0 < ne00 ? x[i03*s03 + i02*s02 + i01*s01 + i00] : 0.0f;
+    const float xi = i0 < ne00 ? load_x(x, i03*s03 + i02*s02 + i01*s01 + i00, x_bf16) : 0.0f;
     float amax = fabsf(xi);
     float sum = xi;
 
@@ -455,7 +474,7 @@ static __global__ void quantize_mmq_mxfp4(const float * __restrict__ x,
 // scatter: grid over tokens, quantize once, write to all the token's compact rows
 template <mmq_q8_1_ds_layout ds_layout, bool scatter>
 static __global__ void quantize_mmq_q8_1(
-        const float * __restrict__ x, const int32_t * __restrict__ ids, void * __restrict__ vy,
+        const void * __restrict__ x, const bool x_bf16, const int32_t * __restrict__ ids, void * __restrict__ vy,
         const int64_t ne00, const int64_t s01, const int64_t s02, const int64_t s03,
         const int64_t ne0, const int ne1, const int ne2, const int n_expert_used) {
 
@@ -481,14 +500,13 @@ static __global__ void quantize_mmq_q8_1(
         base_idx = i3*s03 + i2*s02 + i01*s01;
     }
 
-    const float4 * x4 = (const float4 *) x;
     block_q8_1_mmq * y = (block_q8_1_mmq *) vy;
 
     const int64_t k_block = i0 / QK8_1_MMQ; // column block in the channel
     const int64_t iqs     = i0 % QK8_1_MMQ; // quant index in block
 
     // Load 4 floats per thread and calculate max. abs. value between them:
-    const float4 xi = i0 < ne00 ? x4[(base_idx + i00)/4] : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+    const float4 xi = i0 < ne00 ? load_x4(x, base_idx + i00, x_bf16) : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
     float amax = fabsf(xi.x);
     amax = fmaxf(amax, fabsf(xi.y));
     amax = fmaxf(amax, fabsf(xi.z));
@@ -555,7 +573,7 @@ static __global__ void quantize_mmq_q8_1(
 }
 
 void quantize_row_q8_1_cuda(
-        const float * x, const int32_t * ids, void * vy, const ggml_type type_src0,
+        const void * x, const ggml_type type_x, const int32_t * ids, void * vy, const ggml_type type_src0,
         const int64_t ne00, const int64_t s01, const int64_t s02, const int64_t s03,
         const int64_t ne0, const int64_t ne1, const int64_t ne2, const int64_t ne3, cudaStream_t stream) {
     GGML_ASSERT(!ids);
@@ -567,16 +585,18 @@ void quantize_row_q8_1_cuda(
     const dim3 num_blocks(block_num_x, ne1, ne2*ne3);
     const dim3 block_size(CUDA_QUANTIZE_BLOCK_SIZE, 1, 1);
     const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(num_blocks, block_size, 0, stream);
-    ggml_cuda_kernel_launch(quantize_q8_1, launch_params, x, vy, ne00, s01, s02, s03, ne0, ne1, ne2_fastdiv);
+    ggml_cuda_kernel_launch(quantize_q8_1, launch_params, x, is_bf16(type_x), vy, ne00, s01, s02, s03, ne0, ne1, ne2_fastdiv);
     GGML_UNUSED(type_src0);
 }
 
 void quantize_mmq_q8_1_cuda(
-        const float * x, const int32_t * ids, void * vy, const ggml_type type_src0,
+        const void * x, const ggml_type type_x, const int32_t * ids, void * vy, const ggml_type type_src0,
         const int64_t ne00, const int64_t s01, const int64_t s02, const int64_t s03,
         const int64_t ne0, const int64_t ne1, const int64_t ne2, const int64_t ne3, cudaStream_t stream) {
     GGML_ASSERT(ne00 % 4 == 0);
     GGML_ASSERT(ne0 % QK8_1_MMQ == 0);
+    const bool x_bf16 = is_bf16(type_x);
+    GGML_ASSERT((uintptr_t) x % (x_bf16 ? 8 : 16) == 0 && s01 % 4 == 0 && s02 % 4 == 0 && s03 % 4 == 0);
 
     // ne1 tends to assume the highest values, therefore use it as the "x" dimension of the CUDA grid:
     const int64_t block_num_y = (ne0 + 4*CUDA_QUANTIZE_BLOCK_SIZE_MMQ - 1) / (4*CUDA_QUANTIZE_BLOCK_SIZE_MMQ);
@@ -585,15 +605,15 @@ void quantize_mmq_q8_1_cuda(
     switch (mmq_get_q8_1_ds_layout(type_src0)) {
         case MMQ_Q8_1_DS_LAYOUT_D4:
             quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D4, false>
-                <<<num_blocks, block_size, 0, stream>>>(x, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0);
+                <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0);
             break;
         case MMQ_Q8_1_DS_LAYOUT_DS4:
             quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_DS4, false>
-                <<<num_blocks, block_size, 0, stream>>>(x, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0);
+                <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0);
             break;
         case MMQ_Q8_1_DS_LAYOUT_D2S6:
             quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D2S6, false>
-                <<<num_blocks, block_size, 0, stream>>>(x, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0);
+                <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0);
             break;
         default:
             GGML_ABORT("fatal error");
@@ -603,11 +623,13 @@ void quantize_mmq_q8_1_cuda(
 
 // scatter=true reuses the quant kernel: grid over tokens, ids = inverse map (token slot -> compact row)
 void quantize_scatter_mmq_q8_1_cuda(
-        const float * x, const int32_t * ids_src1_inv, void * vy, const ggml_type type_src0,
+        const void * x, const ggml_type type_x, const int32_t * ids_src1_inv, void * vy, const ggml_type type_src0,
         const int64_t ne00, const int64_t stride_token, const int64_t ne0,
         const int64_t n_tokens, const int64_t nrows_dst, const int n_expert_used, cudaStream_t stream) {
     GGML_ASSERT(ne00 % 4 == 0);
     GGML_ASSERT(ne0 % QK8_1_MMQ == 0);
+    const bool x_bf16 = is_bf16(type_x);
+    GGML_ASSERT((uintptr_t) x % (x_bf16 ? 8 : 16) == 0 && stride_token % 4 == 0);
 
     const int64_t block_num_y = (ne0 + 4*CUDA_QUANTIZE_BLOCK_SIZE_MMQ - 1) / (4*CUDA_QUANTIZE_BLOCK_SIZE_MMQ);
     const dim3 num_blocks(n_tokens, block_num_y, 1);
@@ -615,15 +637,15 @@ void quantize_scatter_mmq_q8_1_cuda(
     switch (mmq_get_q8_1_ds_layout(type_src0)) {
         case MMQ_Q8_1_DS_LAYOUT_D4:
             quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D4, true><<<num_blocks, block_size, 0, stream>>>(
-                x, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used);
+                x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used);
             break;
         case MMQ_Q8_1_DS_LAYOUT_DS4:
             quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_DS4, true><<<num_blocks, block_size, 0, stream>>>(
-                x, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used);
+                x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used);
             break;
         case MMQ_Q8_1_DS_LAYOUT_D2S6:
             quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D2S6, true><<<num_blocks, block_size, 0, stream>>>(
-                x, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used);
+                x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used);
             break;
         default:
             GGML_ABORT("fatal error");
