@@ -120,9 +120,11 @@ run for that workload on the target hardware (llama.cpp for GGUF on consumer car
   layout with a fixed grid: on the device, rows are sorted by expert (`argsort` of the ids), per-expert boundaries
   taken with `searchsorted` over `arange(E + 1)` (no `bincount`, which syncs to size its output), each expert's rows
   padded to a multiple of the row block BM, and a table maps each row block to its expert; the grid is fixed at
-  `ceil((T·k + E·(BM − 1)) / BM) × out / BN` programs and those past the used blocks exit — capture-safe, checked by
-  a capture test in torch's default error mode. Each program runs `tl.dot` over its gathered rows with f32
-  accumulation and writes f32 (`out_dtype`, as the ggml provider); `glu = "swiglu"` fused. **Operand precision**: a
+  `ceil((T·k + E·(BM − 1)) / BM) × out_y / BN` programs and those past the used blocks exit — capture-safe, checked
+  by a capture test in torch's default error mode. Each program runs `tl.dot` over its gathered rows with f32
+  accumulation and writes f32 (`out_dtype`, as the ggml provider); with `glu = "swiglu"` (out_y = I) a program keeps
+  two accumulators — gate rows `[n·BN, (n+1)·BN)` and up rows `I + [n·BN, (n+1)·BN)` — and writes `silu(gate) · up`;
+  its support check requires BN to divide I (768: BN 64 or 128). **Operand precision**: a
   dense layout's activation operand is rounded to the weight dtype (bf16) before the product — for gate/up the bf16
   hidden state as is, for down the f32 SwiGLU output rounded to bf16, as HF does and as q8_1 quantizes it on the ggml
   path — so every `tl.dot` is bf16 × bf16 with f32 accumulation and TF32 never enters. Fixed configurations per
@@ -424,4 +426,4 @@ boundaries and a capture test (D8); 2 the fixed padded grid (D8); 3 down's opera
 4 no autotuning (D8); 5 the merge transient stated (D7); the L0 list (§4.6). Numerics/judge: 1 the exact structural
 test and stacking-rule unit tests, a two-expert-swap plant (§4.6); 2 the down precision, mirrored in the floor, a
 TF32 plant (D8, §4.6); 3 `l0.check(float32, K)` (§4.6); 4 capture safety (D8); 5 the floor-validity rule for the HF
-floor (§4.6); 6 the facts test and a `renormalize` plant (§4.6).
+floor (§4.6); 6 the facts test and a `renormalize` plant (§4.6). Kernels, last: the fused SwiGLU's grid and two accumulators (D8).
