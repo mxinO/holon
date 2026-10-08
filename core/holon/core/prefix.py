@@ -63,7 +63,7 @@ class PrefixIndex:
         """Publish one block (the key must be new and the parent cached)."""
         for name, us in units.items():
             self.pools[name].incref(us)
-            self.cached(name)[us if len(us) > 1 else us[0]] = True
+            self.cached(name)[us[0] if len(us) == 1 else list(us)] = True
         self.entries[key] = Entry(key, parent, tokens, units)
         if parent is not None:
             self.entries[parent].children += 1
@@ -79,25 +79,25 @@ class PrefixIndex:
         return e.children == 0 and all(self.pools[n].held_once(us) for n, us in e.units.items())
 
     def evict(self, pool: str, need: int) -> None:
-        """Drop least-recently-used unused leaves — and the ancestors that become unused leaves — until `pool` has
-        `need` free units or nothing more is evictable."""
+        """Drop least-recently-used unused leaves — and the ancestors that become unused leaves, while still short —
+        until `pool` has `need` free units or nothing more is evictable."""
         while self.pools[pool].num_free < need:
             # The least recently used unused leaf: a scan that stops there, not a copy of the index (this runs per
             # request when a full pool makes every request in a step evict).
             e = next((e for e in self.entries.values() if self._evictable(e)), None)
             if e is None:
                 return
-            while e is not None and self._evictable(e):
+            while e is not None and self._evictable(e):           # up the chain, while still short
                 parent = self.entries.get(e.parent) if e.parent is not None else None
                 self._drop(e)
-                e = parent
+                e = parent if self.pools[pool].num_free < need else None
 
     def _drop(self, e: Entry) -> None:
         del self.entries[e.key]
         if e.parent is not None:
             self.entries[e.parent].children -= 1
         for name, us in e.units.items():
-            self.cached(name)[us if len(us) > 1 else us[0]] = False
+            self.cached(name)[us[0] if len(us) == 1 else list(us)] = False
             self.pools[name].decref(us)
 
     def clear(self) -> None:

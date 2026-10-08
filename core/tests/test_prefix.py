@@ -60,3 +60,28 @@ def test_a_collision_with_another_prefix_is_a_miss():
     other = [9, 9, 9, 9, 4, 5, 6, 7]                                 # Q: same second block, different first
     q_keys = _publish(index, pool, other[:4]) + [p_keys[1]]          # Q's block 0 cached; its block-1 key collides
     assert len(index.match(q_keys, other)) == 1                      # P's block 1 has the right tokens, wrong parent
+
+
+def test_blocks_of_several_pages_publish_and_evict_cleanly():
+    ledger = Ledger(torch.device("cpu"))
+    pool = ledger.request("kv", unit_bytes=8, min_units=8, tokens_per_unit=4)
+    ledger.materialize(None)
+    index = PrefixIndex(7, 8, {"kv": pool})                               # a block spans two pages
+    tokens = list(range(16))
+    keys = index.keys(tokens, 0, 2, None)
+    units = pool.alloc(4)
+    for i, key in enumerate(keys):
+        index.insert(key, keys[i - 1] if i else None, tuple(tokens[i * 8:(i + 1) * 8]),
+                     {"kv": tuple(int(u) for u in units[2 * i:2 * i + 2])})
+    assert index.cached("kv")[units].all() and (pool.refcount(units) == 2).all()
+    pool.decref(units)                                                    # the request finishes
+    assert len(index.match(keys, tokens)) == 2
+    index.evict("kv", pool.capacity)
+    assert not index.entries and not index.cached("kv").any() and pool.num_free == pool.capacity
+
+
+def test_eviction_stops_climbing_a_chain_once_enough_is_free():
+    index, pool = _index(units=6)
+    a = _publish(index, pool, list(range(12)))                             # chain a0 -> a1 -> a2, 3 free units
+    index.evict("kv", pool.num_free + 1)
+    assert set(index.entries) == {a[0], a[1]}                              # only the leaf went
