@@ -1,0 +1,102 @@
+{
+ "golden": {
+  "source": "hf",
+  "model": "Qwen/Qwen3-30B-A3B",
+  "revision": "ad44e777bcd18fa416d9da3bd8f70d33ebb85d39",
+  "dtype": "float32",
+  "device": "cpu",
+  "hardware": "AMD <cpu>",
+  "threads": 44,
+  "prompts": "v1.jsonl",
+  "prompts_sha256": "5157b507f2553584a5d44ca1ef902043e7a1f5ad5a3deecd3038b6eb5fadb9ae",
+  "weight_source": null,
+  "max_step_tokens": null,
+  "q8_1": null,
+  "moe_block": null,
+  "experts": "eager",
+  "expert_calls": null
+ },
+ "candidate": {
+  "source": "hf",
+  "model": "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS",
+  "revision": null,
+  "dtype": "float32",
+  "device": "cpu",
+  "hardware": "AMD <cpu>",
+  "threads": 44,
+  "prompts": "v1.jsonl",
+  "prompts_sha256": "5157b507f2553584a5d44ca1ef902043e7a1f5ad5a3deecd3038b6eb5fadb9ae",
+  "weight_source": null,
+  "max_step_tokens": null,
+  "q8_1": null,
+  "moe_block": null,
+  "experts": null,
+  "expert_calls": null
+ },
+ "overall": {
+  "n": 32783,
+  "top1": 0.9323734862581216,
+  "top1_confident": 0.9426682054961165,
+  "kl_mean": 0.05139913838920371,
+  "kl_p50": 0.0028280059056368053,
+  "kl_p99": 0.7738006277414213,
+  "kl_max": 9.130473772786937,
+  "dppl": 0.029597258157255994,
+  "dppl_se": 0.00424212207105811,
+  "missing": 0.11469359119055608
+ },
+ "categories": {
+  "chat": {
+   "n": 8061,
+   "top1": 0.9356159285448455,
+   "top1_confident": 0.9444795750600734,
+   "kl_mean": 0.04328679639600286,
+   "kl_p50": 0.0025121212631220137,
+   "kl_p99": 0.5595029373746849,
+   "kl_max": 5.2400925125998095,
+   "dppl": 0.04038164007377259,
+   "dppl_se": 0.010899022227606804,
+   "missing": 0.09947277012777571
+  },
+  "code": {
+   "n": 8930,
+   "top1": 0.9339305711086227,
+   "top1_confident": 0.9422967271068536,
+   "kl_mean": 0.057503740914756137,
+   "kl_p50": 0.0013375579111042889,
+   "kl_p99": 0.8999441259831601,
+   "kl_max": 9.130473772786937,
+   "dppl": 0.030437709053782,
+   "dppl_se": 0.00880366977112347,
+   "missing": 0.10693729003359463
+  },
+  "recall": {
+   "n": 8849,
+   "top1": 0.9117414397107018,
+   "top1_confident": 0.9293868424149699,
+   "kl_mean": 0.043653646813377446,
+   "kl_p50": 0.01328577814918436,
+   "kl_p99": 0.528954998031073,
+   "kl_max": 4.303649600211124,
+   "dppl": 0.03022108773442874,
+   "dppl_se": 0.004564780888467678,
+   "missing": 0.11324443439936716
+  },
+  "agent": {
+   "n": 6943,
+   "top1": 0.952902203658361,
+   "top1_confident": 0.957449898344467,
+   "kl_mean": 0.06283790307428158,
+   "kl_p50": 7.598818934235849e-06,
+   "kl_p99": 1.2702068652760286,
+   "kl_max": 8.907232250993081,
+   "dppl": 0.01536533477767377,
+   "dppl_se": 0.004987098511103596,
+   "missing": 0.14418839118536655
+  }
+ },
+ "floor": null,
+ "budgets": null,
+ "failures": [],
+ "passed": null
+}
