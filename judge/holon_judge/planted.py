@@ -370,13 +370,15 @@ def qwen35_qk_unnormalized() -> Iterator[None]:
 
 @contextlib.contextmanager
 def qwen35_conv_state_dropped() -> Iterator[None]:
-    """The causal conv forgets its carried inputs between steps (a chunked prefill restarts its window)."""
+    """The causal conv forgets its carried inputs between prefill chunks (a later chunk restarts its window); decode
+    rows keep theirs, so one-shot prefill and decode stay correct and only chunked prefill differs."""
     from holon_plugins.kernels.gdn_triton import plugin
 
     call = plugin.CausalConv1d.__call__
 
     def planted(self, x, weight, state, slots, query_start, has_init):
-        return call(self, x, weight, state, slots, query_start, torch.zeros_like(has_init))
+        decode = (query_start[1:] - query_start[:-1]) == 1
+        return call(self, x, weight, state, slots, query_start, has_init & decode.to(has_init.dtype))
     with mock.patch.object(plugin.CausalConv1d, "__call__", planted):
         yield
 
