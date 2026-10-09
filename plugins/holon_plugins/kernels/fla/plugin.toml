@@ -1,0 +1,25 @@
+[plugin]
+name = "kernels.fla"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+
+[resources]
+provides = ["kernel.gated_delta_rule@1"]
+requires = ["op.gated_delta_rule@1"]
+
+[properties]
+numerics = "bounded"
+
+[dependencies]
+python = ["triton"]
+
+[support]
+platforms = ["cuda"]
+
+[provenance]
+source = "https://github.com/vllm-project/vllm"
+commit = "6dd813e0b7ca8314fed28c13a73cfb5fc5310163"
+license = "Apache-2.0"        # vLLM's copy (vllm/third_party/flash_linear_attention) of flash-linear-attention (MIT)
+files = ["vendor/", "vendor.patch", "SHA256SUMS", "vendor.sh"]

@@ -26,6 +26,20 @@ Copyright (c) 2023-2026 The ggml authors. License text below and in
   `MUL_MAT_ID`), fused SwiGLU gate, scratch pool and mmq schedule, after `ggml/src/ggml-cuda/ggml-cuda.cu`,
   `mmq.cuh` and `mmq.cu`.
 
+### flash-linear-attention, as copied into vLLM — MIT and Apache-2.0
+
+Source: https://github.com/vllm-project/vllm at `6dd813e0b7ca8314fed28c13a73cfb5fc5310163`
+(`vllm/third_party/flash_linear_attention`; its files are Apache-2.0, Copyright contributors to the vLLM project,
+and contain code copied from https://github.com/fla-org/flash-linear-attention, MIT, Copyright (c) 2023-2025,
+Songlin Yang, Yu Zhang). License text below and in `plugins/holon_plugins/kernels/fla/vendor/LICENSE`.
+
+- `plugins/holon_plugins/kernels/fla/vendor/` — the Gated DeltaNet Triton kernels (`chunk_gated_delta_rule` and its
+  parts, `fused_sigmoid_gating`, l2norm, index and utility helpers) from the directory's `ops/` and its `LICENSE`,
+  unmodified upstream files fetched by `plugins/holon_plugins/kernels/fla/vendor.sh`, then modified by
+  `plugins/holon_plugins/kernels/fla/vendor.patch` (no vLLM imports or environment reads, one pinned config per
+  kernel, the `v_head_tiled` order, the recurrent kernel's skip sentinel at slot < 0, has-initial-state flags);
+  `plugins/holon_plugins/kernels/fla/SHA256SUMS` pins the upstream files.
+
 ### Qwen tokenizer — Apache-2.0
 
 Source: the `tokenizer.json` of Qwen2 / Qwen3 (https://huggingface.co/Qwen), Copyright Alibaba Cloud (Qwen team).
@@ -52,6 +66,32 @@ tracked scripts and patches below contain or modify upstream lines.
 MIT License
 
 Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### MIT (flash-linear-attention)
+
+```
+MIT License
+
+Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

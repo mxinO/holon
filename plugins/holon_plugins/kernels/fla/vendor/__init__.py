@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Songlin Yang, Yu Zhang
+#
+# This file contains code copied from the flash-linear-attention project.
+# The original source code was licensed under the MIT license and included
+# the following copyright notice:
+# Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
+from .chunk import chunk_gated_delta_rule
+from .fused_sigmoid_gating import fused_sigmoid_gating_delta_rule_update
+from .l2norm import l2norm_fwd
+
+__all__ = [
+    "chunk_gated_delta_rule",
+    "fused_sigmoid_gating_delta_rule_update",
+    "l2norm_fwd",
+]
