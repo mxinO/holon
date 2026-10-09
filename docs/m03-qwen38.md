@@ -136,11 +136,11 @@ plan §10); performance of the bf16 HF path.
   D6 stores and reads them; the KV error itself reported against the bf16-KV floor. Plants in §4.7.
 - **D8 — Bars are llama.cpp's.** The GDN kernel source is fla (S3), the oracle is HF, the bar is llama.cpp on the same
   card, file and KV format.
-- **D9 — Open (user): the legibility benchmark.** The old M0.3 acceptance (and plan §9's pivot criterion) has a
-  coding agent add Qwen3.5 to Holon and to a mini-sglang fork from a branch point before `qwen3_5` exists, ≥ 3 runs
-  per side — hours of agent time per run, ≥ 6 runs. Options: (a) as specified, after M0.3; (b) on a model whose
-  parts then exist, so it measures the plugin structure rather than kernel porting; (c) dropped from M0.3, kept in §9
-  for later. Not in §1's acceptance until decided.
+- **D9 — The legibility benchmark runs later, on a model whose parts then exist** (user, 2026-10-09). The old M0.3
+  acceptance (plan §9's pivot criterion) had a coding agent add Qwen3.5 to Holon and to a mini-sglang fork from a
+  branch point before `qwen3_5` existed; that would measure kernel porting (GDN, recurrent state) on both sides, hours
+  per run. It is not an M0.3 gate; plan §9 keeps it, to run on a later model whose units then exist, so it measures
+  the plugin structure.
 
 ## 4. Design
 
