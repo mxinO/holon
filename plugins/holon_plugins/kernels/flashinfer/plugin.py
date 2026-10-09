@@ -3,6 +3,7 @@
 
 Prefill uses the FA2 paged-prefill wrapper (bottom-right causal, so a chunk attends to the context before it);
 decode uses the tensor-core decode wrapper. Both plan on the host every step from the block table's host mirror.
+Both read KV in the model dtype (`kv.hnd`) or in e4m3 (`kv.hnd.fp8`, with a bf16/fp16 q, from sm_89 on).
 Each instance alternates two wrappers: a wrapper stages its plan through one pinned buffer with an asynchronous
 copy, so with overlap the next step's plan() must not overwrite the buffer the previous step's copy still reads
 (spike S1).
@@ -88,6 +89,12 @@ def _supports(f: dict) -> bool:
             and f["head_dim"] in (64, 128, 256))
 
 
+def _supports_fp8(f: dict) -> bool:
+    # e4m3 KV with a half-precision q (scale 1: the cache holds the values themselves, saturated on write)
+    return (f["layout"] == "kv.hnd.fp8" and f["kv_dtype"] == "float8_e4m3fn" and f["q_dtype"] in ("bfloat16", "float16")
+            and f["head_dim"] in (64, 128, 256))
+
+
 def _half(f: dict) -> bool:
     return f["dtype"] in ("bfloat16", "float16")
 
@@ -100,12 +107,15 @@ def _rope(f: dict) -> bool:
 
 class Plugin:
     def register(self, regs) -> None:
-        for op, impl in (("attention.paged_prefill", Prefill), ("attention.paged_decode", Decode)):
-            regs.kernels.add(op, KernelSpec(
-                op=op, provider="kernels.flashinfer", impl=impl, in_layouts={"kv": "kv.hnd"},
-                requires=Constraint(sm_min=80, sm_max=129), supports=_supports,
-                props=frozenset({"deterministic", "needs_host_lens"}),
-                priority=10 if op == "attention.paged_prefill" else 5))
+        # fp8 KV from sm_89 on, where e4m3 converts in hardware (on sm_86 FlashInfer converts in software, 4-5x slower
+        # than bf16; spike S1)
+        for layout, supports, sm_min in (("kv.hnd", _supports, 80), ("kv.hnd.fp8", _supports_fp8, 89)):
+            for op, impl in (("attention.paged_prefill", Prefill), ("attention.paged_decode", Decode)):
+                regs.kernels.add(op, KernelSpec(
+                    op=op, provider="kernels.flashinfer", impl=impl, in_layouts={"kv": layout},
+                    requires=Constraint(sm_min=sm_min, sm_max=129), supports=supports,
+                    props=frozenset({"deterministic", "needs_host_lens"}),
+                    priority=10 if op == "attention.paged_prefill" else 5))
         for op, impl, supports in (("rmsnorm", ops.RMSNorm, _half), ("add_rmsnorm", ops.AddRMSNorm, _half),
                                    ("rope", ops.Rope, _rope), ("silu_mul", ops.SiluMul, _half)):
             regs.kernels.add(op, KernelSpec(
