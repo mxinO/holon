@@ -23,7 +23,8 @@ dev = ["pytest>=8", "ruff>=0.6", "import-linter>=2.1", "httpx",  # httpx: FastAP
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-extend-exclude = ["spikes"]  # throwaway spike code; reviewed per spike README, not linted
+extend-exclude = ["spikes",  # throwaway spike code; reviewed per spike README, not linted
+                  "plugins/holon_plugins/kernels/fla/vendor"]  # vendored upstream code (vendor.sh, vendor.patch)
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -66,13 +67,20 @@ type = "forbidden"
 source_modules = ["holon_plugins"]
 forbidden_modules = ["holon_std"]
 
-# Add every new std unit / model package to the matching independence list below.
+# Add every new std unit / model / kernel package to the matching independence list below.
 [[tool.importlinter.contracts]]
 name = "std units are injected, never imported by each other"
 type = "independence"
 modules = ["holon_std.ops", "holon_std.blocks", "holon_std.ffn", "holon_std.moe", "holon_std.mixers.gqa", "holon_std.mixers.gdn",
            "holon_std.state.paged",
            "holon_std.sampling", "holon_std.weights.hf", "holon_std.weights.gguf", "holon_std.spec.greedy"]
+
+[[tool.importlinter.contracts]]
+name = "kernel plugins are selected by the core, never imported by each other"
+type = "independence"
+modules = ["holon_plugins.kernels.flashinfer", "holon_plugins.kernels.triton_attn",
+           "holon_plugins.kernels.triton_experts", "holon_plugins.kernels.ggml_cuda", "holon_plugins.kernels.fla",
+           "holon_plugins.kernels.gdn_triton"]
 
 [[tool.importlinter.contracts]]
 name = "production code never imports the test-only plugins"
