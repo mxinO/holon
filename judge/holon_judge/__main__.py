@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import dataclasses
 import json
 import pathlib
+import shlex
 import sys
 
 import torch
@@ -93,15 +95,19 @@ def _snapshot(a: argparse.Namespace) -> int:
     import gc
 
     from holon.api import canonical_hash
-    from holon.core.engine import Engine, EngineConfig
+    from holon.core.cli import engine_config, engine_flags
+    from holon.core.engine import Engine
 
     from . import snapshot
 
     path = golden.resolve_model(a.model)
     requests = snapshot.trace(PromptSet.load(a.prompts))
     runs = []
+    flags = argparse.ArgumentParser()
+    engine_flags(flags)
+    config = engine_config(str(path), flags.parse_args(shlex.split(a.engine_args)))
     for _ in range(a.runs):
-        engine = Engine(EngineConfig(model=str(path), dtype=golden.DTYPES[a.dtype]))
+        engine = Engine(dataclasses.replace(config, dtype=golden.DTYPES[a.dtype]))
         runs.append(snapshot.record(engine, requests))
         engine.close()
         gc.collect()
@@ -200,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--prompts", required=True)
     t.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
     t.add_argument("--runs", type=int, default=3)
+    t.add_argument("--engine-args", default="", help="EngineConfig flags, as for `holon serve` (a class's settings)")
     t.add_argument("--json", help="write the machine-readable report here")
     t.set_defaults(run=_snapshot)
 

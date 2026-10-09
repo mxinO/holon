@@ -1,0 +1,124 @@
+{
+ "golden": {
+  "source": "hf",
+  "model": "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS",
+  "revision": null,
+  "dtype": "float32",
+  "device": "cpu",
+  "hardware": "AMD <cpu>",
+  "threads": 44,
+  "prompts": "v1.jsonl",
+  "prompts_sha256": "5157b507f2553584a5d44ca1ef902043e7a1f5ad5a3deecd3038b6eb5fadb9ae",
+  "weight_source": null,
+  "max_step_tokens": null,
+  "q8_1": null,
+  "moe_block": null,
+  "expert_calls": null
+ },
+ "candidate": {
+  "source": "holon",
+  "model": "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS",
+  "revision": null,
+  "dtype": "bfloat16",
+  "device": "cuda",
+  "hardware": "NVIDIA RTX A5000",
+  "threads": null,
+  "prompts": "v1.jsonl",
+  "prompts_sha256": "5157b507f2553584a5d44ca1ef902043e7a1f5ad5a3deecd3038b6eb5fadb9ae",
+  "weight_source": "gguf",
+  "max_step_tokens": 4096,
+  "q8_1": null,
+  "moe_block": null,
+  "expert_calls": {
+   "mmvq": 1806,
+   "mmq": 10962
+  }
+ },
+ "overall": {
+  "n": 32783,
+  "top1": 0.0,
+  "top1_confident": 0.0,
+  "kl_mean": 4.654622965372521,
+  "kl_p50": 4.932443901869259,
+  "kl_p99": 6.383509079568551,
+  "kl_max": 9.992799718352098,
+  "dppl": 20007498.339067385,
+  "dppl_se": 3213530.403624786,
+  "missing": 0.9997041149376201
+ },
+ "categories": {
+  "chat": {
+   "n": 8061,
+   "top1": 0.0,
+   "top1_confident": 0.0,
+   "kl_mean": 4.787578251360497,
+   "kl_p50": 4.947026220080686,
+   "kl_p99": 6.380381891368867,
+   "kl_max": 8.778116061311854,
+   "dppl": 30748915.34089766,
+   "dppl_se": 1460670.0780653376,
+   "missing": 0.9997270810073192
+  },
+  "code": {
+   "n": 8930,
+   "top1": 0.0,
+   "top1_confident": 0.0,
+   "kl_mean": 4.838549980992625,
+   "kl_p50": 4.9832726725519105,
+   "kl_p99": 6.363012732942136,
+   "kl_max": 9.5565993775826,
+   "dppl": 32063872.763688378,
+   "dppl_se": 4059367.7418897203,
+   "missing": 0.9997760358342666
+  },
+  "recall": {
+   "n": 8849,
+   "top1": 0.0,
+   "top1_confident": 0.0,
+   "kl_mean": 4.088209957158267,
+   "kl_p50": 4.314393452668267,
+   "kl_p99": 6.064202072928578,
+   "kl_max": 7.88163747609098,
+   "dppl": 6845807.0116191,
+   "dppl_se": 1171837.5262160595,
+   "missing": 0.9997400836252683
+  },
+  "agent": {
+   "n": 6943,
+   "top1": 0.0,
+   "top1_confident": 0.0,
+   "kl_mean": 4.985599186005009,
+   "kl_p50": 5.086484548942897,
+   "kl_p99": 6.735588069215227,
+   "kl_max": 9.992799718352098,
+   "dppl": 25983205.22320539,
+   "dppl_se": 4937073.046419265,
+   "missing": 0.9995391041336598
+  }
+ },
+ "floor": {
+  "n": 32783,
+  "top1": 0.9833145227709483,
+  "top1_confident": 0.991232996380881,
+  "kl_mean": 0.004502994005748633,
+  "kl_p50": 0.0001864229473886179,
+  "kl_p99": 0.05925342533285989,
+  "kl_max": 3.9840403862009737,
+  "dppl": -0.0003112890169691919,
+  "dppl_se": 0.001045884427945284,
+  "missing": 0.04160082969831925
+ },
+ "budgets": {
+  "top1_min": 0.9808145227709484,
+  "kl_p50_max": 0.0003728458947772358,
+  "kl_p99_max": 0.11850685066571978,
+  "dppl_max": 0.002811289016969192
+ },
+ "failures": [
+  "top-1 0.0000% < 98.0815%",
+  "KL p50 4.932e+00 > 3.728e-04",
+  "KL p99 6.384e+00 > 1.185e-01",
+  "|\u0394PPL| 2000749833.907% > 0.281%"
+ ],
+ "passed": false
+}
