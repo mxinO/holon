@@ -146,6 +146,11 @@ class GQA(nn.Module):
             self._qkv = merge(self.q_proj, self.k_proj, self.v_proj)
             self._qk = None if self._qkv is not None else merge(self.q_proj, self.k_proj)
 
+    def _split_gate(self, q: torch.Tensor, t: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per head: its head_dim queries, then its head_dim gate values."""
+        q, gate = q.reshape(t, self.heads, 2 * self.head_dim).chunk(2, dim=-1)
+        return q.contiguous(), gate                              # the norm and rope kernels take dense rows
+
     def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
         dev = ctx.batch.dev
         t = x.shape[0]
@@ -157,10 +162,7 @@ class GQA(nn.Module):
             v = self.v_proj(x)
         else:
             q, k, v = self.q_proj(x), self.k_proj(x), self.v_proj(x)
-        gate = None
-        if self.gated:
-            q, gate = q.reshape(t, self.heads, 2 * self.head_dim).chunk(2, dim=-1)
-            q = q.contiguous()                                   # the norm and rope kernels take dense rows
+        q, gate = self._split_gate(q, t) if self.gated else (q, None)
         q = q.reshape(t, self.heads, self.head_dim)
         k = k.reshape(t, self.kv_heads, self.head_dim)
         v = v.reshape(t, self.kv_heads, self.head_dim)

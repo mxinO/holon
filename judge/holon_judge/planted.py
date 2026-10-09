@@ -306,6 +306,114 @@ def moe_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextM
         "moe-merge-up-first": lambda: _moe(merge_swapped=True)}
 
 
+@contextlib.contextmanager
+def _qwen35_facts(**changes) -> Iterator[None]:
+    """models.qwen3_5's recipe reading `changes` into its facts (a misread configuration or file)."""
+    from holon_plugins.models.qwen3_5 import recipe
+
+    facts = recipe._facts
+    with mock.patch.object(recipe, "_facts", lambda c, s: facts(c, s) | changes):
+        yield
+
+
+@contextlib.contextmanager
+def _qwen35_transform(name: str, fn: Callable[[torch.Tensor], torch.Tensor]) -> Iterator[None]:
+    """One of models.qwen3_5's weight-map value transforms replaced (a misread GGUF tensor)."""
+    from holon.core.plugins import Registry
+
+    get = Registry.get
+
+    def planted(self, key):
+        return fn if key == name else get(self, key)
+    with mock.patch.object(Registry, "get", planted):
+        yield
+
+
+@contextlib.contextmanager
+def qwen35_gate_one_block() -> Iterator[None]:
+    """The attention output gate split as q's whole block, then the gate's (not per head)."""
+    from holon_std.mixers.gqa import units
+
+    def planted(self, q, t):
+        q, gate = q.split(self.heads * self.head_dim, dim=-1)
+        return q.contiguous(), gate.reshape(t, self.heads, self.head_dim)
+    with mock.patch.object(units.GQA, "_split_gate", planted):
+        yield
+
+
+@contextlib.contextmanager
+def qwen35_stale_state() -> Iterator[None]:
+    """Every row reads its recurrent-state unit, also a row that starts a request (has-initial-state forced)."""
+    from holon_std.mixers.gdn import units
+
+    prepare = units.Planner.prepare_device
+
+    def planted(self, meta, ctx):
+        prepare(self, meta, ctx)
+        meta.has_init = torch.ones_like(meta.has_init)
+    with mock.patch.object(units.Planner, "prepare_device", planted):
+        yield
+
+
+@contextlib.contextmanager
+def qwen35_qk_unnormalized() -> Iterator[None]:
+    """The delta rule without its q/k l2 normalisation."""
+    from holon_plugins.kernels.fla import plugin
+
+    def without(fn):
+        return functools.wraps(fn)(lambda *a, **kw: fn(*a, **(kw | {"use_qk_l2norm_in_kernel": False})))
+    with mock.patch.object(plugin, "chunk_gated_delta_rule", without(plugin.chunk_gated_delta_rule)), \
+            mock.patch.object(plugin, "fused_sigmoid_gating_delta_rule_update",
+                              without(plugin.fused_sigmoid_gating_delta_rule_update)):
+        yield
+
+
+@contextlib.contextmanager
+def qwen35_conv_state_dropped() -> Iterator[None]:
+    """The causal conv forgets its carried inputs between steps (a chunked prefill restarts its window)."""
+    from holon_plugins.kernels.gdn_triton import plugin
+
+    call = plugin.CausalConv1d.__call__
+
+    def planted(self, x, weight, state, slots, query_start, has_init):
+        return call(self, x, weight, state, slots, query_start, torch.zeros_like(has_init))
+    with mock.patch.object(plugin.CausalConv1d, "__call__", planted):
+        yield
+
+
+@contextlib.contextmanager
+def payload_one_block_early() -> Iterator[None]:
+    """A published payload filed at the block before its position (a hit there resumes from a later state)."""
+    from holon.core import state
+
+    register = state.StateManager.register
+
+    def planted(self, seq, spec, at, payload):
+        register(self, seq, spec, at - self.index.block, payload)
+    with mock.patch.object(state.StateManager, "register", planted):
+        yield
+
+
+@contextlib.contextmanager
+def padding_on_a_real_slot() -> Iterator[None]:
+    """Graph padding rows on request slot 0 instead of the padding slot (their writes land in a real request)."""
+    from holon.core import executor
+
+    padded = executor.padded
+    with mock.patch.object(executor, "padded", lambda plan, rows, slot: padded(plan, rows, 0)):
+        yield
+
+
+QWEN35_PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
+    "qwen35-tiled-as-grouped": lambda: _qwen35_facts(order="grouped"),
+    "qwen35-rotary-all-dims": lambda: _qwen35_facts(rotary_dim=256),
+    "qwen35-norm-offset-twice": lambda: _qwen35_transform("qwen3_5.minus_one", lambda t: t.float()),
+    "qwen35-a-log-sign": lambda: _qwen35_transform("qwen3_5.a_log", lambda t: -torch.log(-t.float())),
+    "qwen35-gate-one-block": qwen35_gate_one_block, "qwen35-stale-state": qwen35_stale_state,
+    "qwen35-qk-unnormalized": qwen35_qk_unnormalized, "qwen35-conv-state-dropped": qwen35_conv_state_dropped,
+    "payload-one-block-early": payload_one_block_early, "padding-on-a-real-slot": padding_on_a_real_slot}
+
+
 PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "adoption-off-by-one": adoption_off_by_one, "wrong-block": wrong_block,
     "stale-device-token": stale_device_token, "rare-stale-device-token": lambda: stale_device_token(every=101),
@@ -322,4 +430,4 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     # MoE Tier B
     "ggml-experts-wrong-type": ggml_experts_wrong_type, "ggml-experts-stale-q8_1": ggml_experts_stale_q8_1,
     "rare-ggml-experts-stale-q8_1": lambda: ggml_experts_stale_q8_1(every=9973),
-    "moe-padding-duplicate-ids": moe_padding_duplicate_ids}
+    "moe-padding-duplicate-ids": moe_padding_duplicate_ids, **QWEN35_PLANTS}

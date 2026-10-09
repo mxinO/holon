@@ -256,7 +256,8 @@ measures fp8 prefill before fp8 enters acceptance.
     attention gate split as one block instead of per head; norm offset 0 on zero-centred norms; rotary over all 256
     dims; stale state on slot reuse (has-initial-state forced true).
   - Bounded must fail: the conv state dropped between prefill chunks (chunked vs one-shot); a payload adopted one
-    block early (resume vs recompute); padding rows writing a real slot (graphs vs eager).
+    block early — filed at the block before its position (resume vs recompute); padding rows writing a real slot
+    (graphs vs eager).
   - Core tests must fail (toy kind): a payload registered with a fabricated commit whose accepted tokens do not cover
     it (without speculation every computed token is committed, so the end-to-end plant waits for M0.4); an adopted
     payload unpinned before its copy and evicted by a publish.
