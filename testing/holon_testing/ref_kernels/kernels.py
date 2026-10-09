@@ -8,6 +8,7 @@ import gguf
 import numpy as np
 import torch
 from holon_std.ffn import reference as ffn
+from holon_std.mixers.gdn import reference as gdn
 from holon_std.mixers.gqa import reference as gqa
 from holon_std.moe import reference as moe
 from holon_std.ops import reference as ops
@@ -123,8 +124,37 @@ class MoeCombine:
         out.copy_(moe.moe_combine(y, weights, self.dtype))
 
 
+class CausalConv1d:
+    def __init__(self, ctx, *, channels: int, kernel_size: int, dtype: str) -> None:
+        pass
+
+    def __call__(self, x, weight, state, slots, query_start, has_init):
+        return gdn.causal_conv1d(x, weight, state, slots, query_start, has_init)
+
+
+class GatedDeltaRule:
+    def __init__(self, ctx, *, heads_k: int, heads_v: int, head_k_dim: int, head_v_dim: int, v_head_order: str,
+                 dtype: str) -> None:
+        self.order = v_head_order
+
+    def plan(self, lens: list[int]):
+        return torch.tensor([0, *np.cumsum(lens).tolist()], dtype=torch.int32)
+
+    def __call__(self, handle, q, k, v, a, b, a_log, dt_bias, state, slots, has_init):
+        return gdn.gated_delta_rule(q, k, v, a, b, a_log, dt_bias, state, slots, handle, has_init, self.order)
+
+
+class GatedRMSNorm:
+    def __init__(self, ctx, *, dim: int, eps: float, dtype: str) -> None:
+        self.eps = eps
+
+    def __call__(self, o, z, weight):
+        return gdn.gated_rmsnorm(o, z, weight, self.eps)
+
+
 BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul": SiluMul,
          "attention.paged_prefill": PagedAttention, "attention.paged_decode": PagedAttention,
          "attention.paged_verify": PagedAttention, "attention.causal": CausalAttention,
          "qlinear": QLinear, "qembedding": QEmbedding, "linear_experts": LinearExperts, "moe_topk": MoeTopk,
-         "moe_combine": MoeCombine}
+         "moe_combine": MoeCombine, "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule,
+         "gated_rmsnorm": GatedRMSNorm}
