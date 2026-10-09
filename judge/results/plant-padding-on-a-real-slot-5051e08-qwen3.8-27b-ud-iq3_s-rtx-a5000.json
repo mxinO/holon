@@ -1,0 +1,102 @@
+{
+ "sessions": 5,
+ "turns": 4,
+ "system_len": 512,
+ "max_tokens": 128,
+ "results": {
+  "baseline": {
+   "config": {
+    "cuda_graphs": false,
+    "prefix_cache": false,
+    "overlap": false
+   },
+   "top1": {
+    "value": 0.989453125,
+    "se": 0.00280326173718893,
+    "n": 2560
+   },
+   "confident": {
+    "value": 0.9944532488114105,
+    "se": 0.0020252129079709083,
+    "n": 2524
+   },
+   "regret": {
+    "value": 0.005327116698026657,
+    "se": 0.004285126292958871,
+    "n": 2560
+   },
+   "kl": {
+    "kl": {
+     "value": 0.006393756257204045,
+     "se": 0.004097381091577648,
+     "n": 2560
+    },
+    "p50": 0.00014992983427352877,
+    "p99": 0.03475670898785606,
+    "p50_se": 4.7594502003123985e-05,
+    "p99_se": 0.016672506563038095
+   },
+   "tokens_saved": 0,
+   "margins": {
+    "top1": 0.00991102691903537,
+    "confident": 0.007160208902863783,
+    "kl_p50": 0.00016827197556802846,
+    "kl_p99": 0.05894621225050728
+   },
+   "failures": [],
+   "passed": true
+  },
+  "graphs on": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": false,
+    "overlap": false
+   },
+   "top1": {
+    "value": 0.97421875,
+    "se": 0.01190285076968171,
+    "n": 2560
+   },
+   "confident": {
+    "value": 0.9785969084423306,
+    "se": 0.01165705360012186,
+    "n": 2523
+   },
+   "regret": {
+    "value": 0.0803704627091065,
+    "se": 0.048915616260548536,
+    "n": 2560
+   },
+   "kl": {
+    "kl": {
+     "value": 0.006393756257204045,
+     "se": 0.004097381091577648,
+     "n": 2560
+    },
+    "p50": 0.00014992983427352877,
+    "p99": 0.03475670898785606,
+    "p50_se": 4.7594502003123985e-05,
+    "p99_se": 0.016672506563038095
+   },
+   "tokens_saved": 0,
+   "margins": {
+    "top1": 0.00991102691903537,
+    "confident": 0.007160208902863783,
+    "kl_p50": 0.00016827197556802846,
+    "kl_p99": 0.05894621225050728
+   },
+   "failures": [
+    "top1 0.9742 beyond 0.00991 of the baseline",
+    "confident 0.9786 beyond 0.00716 of the baseline"
+   ],
+   "passed": false
+  }
+ },
+ "passed": false,
+ "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+ "dtype": "bfloat16",
+ "graphs_vs_eager": true,
+ "hardware": "NVIDIA RTX A5000",
+ "torch": "2.11.0+cu130",
+ "plant": "padding-on-a-real-slot"
+}
