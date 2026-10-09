@@ -483,6 +483,11 @@ class Mixer(Protocol):
 The state semantics (rollback, prefix hits) live in the mixer's `StateKind` (§6.2), usually shipped in the same
 package, so the core can reason about state without instantiating layers.
 
+M0.3's `std.mixers.gdn` is the first mixer with `Slot` state: a row's state is its pool's unit at the row's SeqTable
+slot, padding rows use the pool's null unit (the padding slot's) and start from zero state; the planner computes
+has-initial-state on the device from positions (a row at position 0 starts from zero, so a reused slot's stale state
+is never read), builds the chunk kernel's indices from the host plan (else it syncs), and keys decode graphs by rows.
+
 ### 5.3 Ops and composites
 
 ```python
@@ -720,7 +725,8 @@ class Pool:
 - Startup: the model's `state_specs`, weights, kernel workspaces, draft heads and plugin pools declare needs;
   the ledger profiles free memory and grants.
 - Budget split (v0, deterministic): (1) weights + workspaces + graph memory; (2) `Slot` pools sized exactly
-  `max_seqs × (1 + draft_slots)` from the deployment file; (3) plugin pools at their declared `pref_units`, or
+  `(max_seqs + 1) × (1 + draft_slots)` from the deployment file (the extra slot is the padding slot, whose unit is
+  the pool's null unit); (3) plugin pools (`BuildCtx.pool`, M0.3) at their declared `pref_units`, or
   `min_units` if short (e.g. checkpoint pool: a byte budget from the deployment file, with its own eviction);
   (4) all remaining memory to `Paged` pools, divided in proportion to bytes-per-token of each spec; specs in one
   page group (`page_group`) get one shared unit count. Startup fails
@@ -742,7 +748,8 @@ class StateSpec:
     layers: tuple[int, ...]
     layout: str                     # dtype/arrangement, negotiated with kernels (format settled by spike S1)
     alignment: int = 1              # prefix-hit granularity only when intrinsic (e.g. compressed-KV ratio);
-                                    # GDN uses 1 — its kernels accept an initial state at any offset
+                                    # GDN uses 64, the chunk size: its kernels accept an initial state at any
+                                    # offset, but resume is bitwise equal to recomputing only at chunk boundaries
     page_group: str | None = None   # specs sharing page ids, one page table and one unit count, allocated and
                                     # evicted jointly (DSA indexer ↔ MLA KV; drafter KV ↔ target KV)
 # Slot(unit_bytes, draft_slots=0): draft_slots = extra slots for verify intermediates
@@ -755,6 +762,8 @@ class StateKind(Rewindable, Protocol):   # e.g. paged_kv, ssm_checkpoint (plugin
     def publish(self, seq: SeqView, upto: int) -> tuple[Payload, list[MemOp]] | None
     def adopt(self, seq: SeqView, payload: Payload) -> list[MemOp]
     def fork(self, src: SeqView, dsts: list[SeqView]) -> list[MemOp]         # n>1, parallel tool branches
+    # optional (M0.3), for state reused through payloads: cut(seq, start, n) -> n' (a prefill row may end where
+    # the kind publishes), next_publish(seq) -> position | None, payload_pool (the pool the index may evict from)
     # Page tables and slot indices are filled into DeviceBatch by the core (it owns allocation); mixer planners
     # read them. publish/adopt return MemOps (§6.3). Callbacks are per request; the core vectorises them.
 ```
@@ -809,6 +818,15 @@ while True:
   preemption; `could_fit` counts such units as available, which keeps the scheduler's liveness argument. `n > 1`
   siblings wait until the first sequence's prompt is published and then adopt it (each recomputes at most one
   partial block); `fork` with a partial-page copy replaces this when MemOps land.
+- **M0.3**: `Slot` state joins through payloads. A kind that publishes asks the scheduler to `cut` prefill rows at
+  its policy's positions (`std.state.recurrent`: the prompt's last aligned block, or every n tokens); when a row's
+  step ends at `next_publish`, `publish` returns a payload unit of the kind's plugin pool and a copy MemOp run after
+  the sample; the core registers the payload on the block's entry at `host_commit` only if committed tokens cover
+  it. Admission takes the fixed point above; the adopting request pins the payload until its copy MemOp is enqueued
+  (before the forward of its first step). MemOps run eagerly around the step, never inside a graph, unit by unit
+  with no temporary. A full payload pool evicts its own least-recently-used payloads, interior entries included,
+  never paged units; an evicted payload only shortens the hits that would have resumed there (the kind's
+  `hit_length` falls back to an earlier payload). `fork` is not built.
 
 ### 6.4 Async loading
 

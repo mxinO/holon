@@ -107,7 +107,9 @@ def summarize(cases: list[dict], columns: list[str], cpu_time: bool) -> dict:
                        "wall_ms_p50": None if not wall else round(pct(wall, 50) * 1e3, 3),
                        "cpu_ms_p50": None if not cpu else round(pct(cpu, 50) * 1e3, 3),
                        "cpu_ms_mean": None if not cpu else round(sum(cpu) / len(cpu) * 1e3, 3)},
-            "wrong_length": short}
+            "wrong_length": short,
+            "prompt_tokens": sum(r[columns.index("prompt")] for c in cases for r in c["requests"]),
+            "stats": {k: sum(c["stats"][k] for c in cases) for k in cases[0].get("stats", {})}}
 
 
 def run_worker(backend: str, args: argparse.Namespace, out: pathlib.Path) -> tuple[dict | None, str]:

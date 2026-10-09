@@ -43,7 +43,7 @@ class EngineConfig:
     max_step_tokens: int = 4096
     memory_fraction: float = 0.9             # of the memory left after weights, for activations and state
     state_memory: int | None = None          # bytes for state pools; None: measure (GPU only)
-    prefix_cache: bool = True                # reuse cached prompt blocks across requests (paged state only)
+    prefix_cache: bool = True                # reuse cached prompt blocks across requests (and payloads)
     overlap: bool = True                     # schedule step N while step N-1 runs (depth 1); False: depth 0
     cuda_graphs: bool = True                 # replay decode steps from CUDA graphs, per batch-size bucket
     max_draft_tokens: int = 0                # speculative decoding: drafts per verify row at most (0: off)

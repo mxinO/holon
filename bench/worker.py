@@ -75,9 +75,12 @@ def main() -> None:
     for name, sessions in traces.items():
         # Salts name the trace: prompts of one trace never prefix-match another trace's or the warmup's.
         replay(backend, warmup_sessions(sessions), salt=f"{name}/warmup")
+        before = backend.stats() if hasattr(backend, "stats") else None
         done, steps = replay(backend, sessions, salt=f"{name}/run")
         done.sort(key=lambda r: (r.sid, r.turn))
         cases.append({"trace": name, "requests": [r.row() for r in done], "steps": steps})
+        if before is not None:                     # the backend's counters over this trace (warmup excluded)
+            cases[-1]["stats"] = {k: v - before[k] for k, v in backend.stats().items()}
         print(f"{args.backend} {name}: {len(done)} requests, {len(steps)} steps", flush=True)
 
     info = backend.info() | {"load_s": round(load_s, 1), "blocking_sync": args.blocking_sync,
