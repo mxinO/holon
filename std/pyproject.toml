@@ -14,6 +14,7 @@ dependencies = ["holonlm"]
 "std.mixers.gqa" = "holon_std.mixers.gqa"
 "std.mixers.gdn" = "holon_std.mixers.gdn"
 "std.state.paged" = "holon_std.state.paged"
+"std.state.recurrent" = "holon_std.state.recurrent"
 "std.sampling" = "holon_std.sampling"
 "std.weights.hf" = "holon_std.weights.hf"
 "std.weights.gguf" = "holon_std.weights.gguf"
