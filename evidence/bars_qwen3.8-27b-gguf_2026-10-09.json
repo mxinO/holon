@@ -1,0 +1,406 @@
+{
+ "question": "In-process pp512 / tg128 and tg128 at depth 8K against llama-bench on each class, same file, llama.cpp commit and KV format (M0.3 acceptance 5); both sides the median of repetitions 2-5",
+ "date": "2026-10-09",
+ "holon_command": "python bench/llama_bench.py --model <file> -r 5 --depths 0 8192 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs <n> --plugin-options recurrent.checkpoints=<n> [kv.format=q8_0]'",
+ "llama_cpp": "ggml-org/llama.cpp 51ce9c11 (the spike S2 build per class, CUDA 13.0)",
+ "llama_bench_command": "llama-bench -m <file> -p 512 -n 128 -d 0,8192 -ngl 99 -fa on -ctk <kv> -ctv <kv> -r 5 -o json",
+ "bars": ">= 0.8 x llama-bench at the same KV format",
+ "results": {
+  "rtx-5080/UD-IQ3_S/kv-f16": {
+   "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e",
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "commit": "f804d45",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "2",
+    "max_model_len": "8328",
+    "max_step_tokens": "8192",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "plugin_options": "{'recurrent.checkpoints': '2'}"
+   },
+   "pp512": {
+    "holon": {
+     "mean": 2565.74,
+     "sd": 5.81,
+     "runs": [
+      2574.09,
+      2569.07,
+      2564.25,
+      2560.35,
+      2560.95
+     ],
+     "median_reps_2_5": 2562.6
+    },
+    "llama_cpp": {
+     "runs": [
+      2037.79,
+      2161.3,
+      2157.33,
+      2157.03,
+      2156.17
+     ],
+     "median_reps_2_5": 2157.18
+    },
+    "ratio": 1.188
+   },
+   "tg128": {
+    "holon": {
+     "mean": 63.31,
+     "sd": 0.14,
+     "runs": [
+      63.48,
+      63.45,
+      63.25,
+      63.2,
+      63.19
+     ],
+     "cpu_ms_per_step_p50": 0.414,
+     "median_reps_2_5": 63.23
+    },
+    "llama_cpp": {
+     "runs": [
+      61.47,
+      61.64,
+      61.65,
+      61.63,
+      61.51
+     ],
+     "median_reps_2_5": 61.63
+    },
+    "ratio": 1.026
+   },
+   "tg128 @ d8192": {
+    "holon": {
+     "mean": 60.92,
+     "sd": 0.11,
+     "runs": [
+      61.11,
+      60.92,
+      60.87,
+      60.86,
+      60.84
+     ],
+     "cpu_ms_per_step_p50": 0.415,
+     "median_reps_2_5": 60.86
+    },
+    "llama_cpp": {
+     "runs": [
+      58.16,
+      58.35,
+      58.35,
+      58.35,
+      58.33
+     ],
+     "median_reps_2_5": 58.35
+    },
+    "ratio": 1.043
+   }
+  },
+  "rtx-5080/UD-IQ3_S/kv-q8_0": {
+   "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e",
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "commit": "f804d45",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "2",
+    "max_model_len": "8328",
+    "max_step_tokens": "8192",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "plugin_options": "{'recurrent.checkpoints': '2', 'kv.format': 'q8_0'}"
+   },
+   "pp512": {
+    "holon": {
+     "mean": 2553.35,
+     "sd": 6.17,
+     "runs": [
+      2562.08,
+      2557.59,
+      2550.06,
+      2549.01,
+      2548.03
+     ],
+     "median_reps_2_5": 2549.53
+    },
+    "llama_cpp": {
+     "runs": [
+      2004.43,
+      2131.21,
+      2128.87,
+      2089.39,
+      2111.5
+     ],
+     "median_reps_2_5": 2120.18
+    },
+    "ratio": 1.203
+   },
+   "tg128": {
+    "holon": {
+     "mean": 63.66,
+     "sd": 0.01,
+     "runs": [
+      63.68,
+      63.67,
+      63.66,
+      63.65,
+      63.65
+     ],
+     "cpu_ms_per_step_p50": 0.401,
+     "median_reps_2_5": 63.66
+    },
+    "llama_cpp": {
+     "runs": [
+      60.62,
+      60.78,
+      60.74,
+      60.73,
+      60.73
+     ],
+     "median_reps_2_5": 60.74
+    },
+    "ratio": 1.048
+   },
+   "tg128 @ d8192": {
+    "holon": {
+     "mean": 61.52,
+     "sd": 0.01,
+     "runs": [
+      61.53,
+      61.53,
+      61.51,
+      61.51,
+      61.51
+     ],
+     "cpu_ms_per_step_p50": 0.403,
+     "median_reps_2_5": 61.51
+    },
+    "llama_cpp": {
+     "runs": [
+      55.7,
+      57.36,
+      57.37,
+      57.37,
+      57.37
+     ],
+     "median_reps_2_5": 57.37
+    },
+    "ratio": 1.072
+   }
+  },
+  "rtx-4090/UD-Q4_K_M/kv-f16": {
+   "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7",
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "commit": "f804d45",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "4",
+    "max_model_len": "8328",
+    "max_step_tokens": "8192",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "plugin_options": "{'recurrent.checkpoints': '4'}"
+   },
+   "pp512": {
+    "holon": {
+     "mean": 3674.61,
+     "sd": 2.42,
+     "runs": [
+      3677.37,
+      3675.53,
+      3675.37,
+      3673.9,
+      3670.89
+     ],
+     "median_reps_2_5": 3674.64
+    },
+    "llama_cpp": {
+     "runs": [
+      2723.28,
+      3191.72,
+      3191.49,
+      3191.49,
+      3192.01
+     ],
+     "median_reps_2_5": 3191.6
+    },
+    "ratio": 1.151
+   },
+   "tg128": {
+    "holon": {
+     "mean": 46.7,
+     "sd": 0.01,
+     "runs": [
+      46.7,
+      46.7,
+      46.7,
+      46.7,
+      46.69
+     ],
+     "cpu_ms_per_step_p50": 0.515,
+     "median_reps_2_5": 46.7
+    },
+    "llama_cpp": {
+     "runs": [
+      44.96,
+      45.1,
+      45.09,
+      45.09,
+      45.09
+     ],
+     "median_reps_2_5": 45.09
+    },
+    "ratio": 1.036
+   },
+   "tg128 @ d8192": {
+    "holon": {
+     "mean": 45.34,
+     "sd": 0.0,
+     "runs": [
+      45.34,
+      45.34,
+      45.34,
+      45.34,
+      45.33
+     ],
+     "cpu_ms_per_step_p50": 0.51,
+     "median_reps_2_5": 45.34
+    },
+    "llama_cpp": {
+     "runs": [
+      43.68,
+      43.83,
+      43.83,
+      43.81,
+      43.83
+     ],
+     "median_reps_2_5": 43.83
+    },
+    "ratio": 1.034
+   }
+  },
+  "rtx-4090/UD-Q4_K_M/kv-q8_0": {
+   "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7",
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "commit": "f804d45",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "4",
+    "max_model_len": "8328",
+    "max_step_tokens": "8192",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "plugin_options": "{'recurrent.checkpoints': '4', 'kv.format': 'q8_0'}"
+   },
+   "pp512": {
+    "holon": {
+     "mean": 3671.0,
+     "sd": 2.48,
+     "runs": [
+      3671.21,
+      3673.46,
+      3673.12,
+      3669.72,
+      3667.49
+     ],
+     "median_reps_2_5": 3671.42
+    },
+    "llama_cpp": {
+     "runs": [
+      2719.44,
+      3167.03,
+      3166.71,
+      3167.58,
+      3166.61
+     ],
+     "median_reps_2_5": 3166.87
+    },
+    "ratio": 1.159
+   },
+   "tg128": {
+    "holon": {
+     "mean": 46.78,
+     "sd": 0.01,
+     "runs": [
+      46.79,
+      46.78,
+      46.78,
+      46.78,
+      46.78
+     ],
+     "cpu_ms_per_step_p50": 0.516,
+     "median_reps_2_5": 46.78
+    },
+    "llama_cpp": {
+     "runs": [
+      44.64,
+      44.76,
+      44.77,
+      44.76,
+      44.76
+     ],
+     "median_reps_2_5": 44.76
+    },
+    "ratio": 1.045
+   },
+   "tg128 @ d8192": {
+    "holon": {
+     "mean": 45.98,
+     "sd": 0.01,
+     "runs": [
+      45.99,
+      45.97,
+      45.98,
+      45.97,
+      45.97
+     ],
+     "cpu_ms_per_step_p50": 0.507,
+     "median_reps_2_5": 45.97
+    },
+    "llama_cpp": {
+     "runs": [
+      43.51,
+      43.76,
+      43.77,
+      43.78,
+      43.77
+     ],
+     "median_reps_2_5": 43.77
+    },
+    "ratio": 1.05
+   }
+  }
+ }
+}

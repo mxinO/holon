@@ -1,0 +1,321 @@
+{
+ "question": "Fit of Qwen3.8-27B per (max_seqs, checkpoints, KV format) at memory fraction 0.9, max_model_len 32768 (M0.3 \u00a74.8, acceptance 4-5): KV tokens, every pool, and a prompt as long as the KV and max_model_len allow actually served",
+ "date": "2026-10-09",
+ "command": "python local fit script <file> --memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs <n> --plugin-options recurrent.checkpoints=<c> [kv.format=q8_0]",
+ "results": {
+  "rtx-5080/UD-IQ3_S": [
+   {
+    "config": "max_seqs 4 checkpoints 4 kv model dtype",
+    "error": "memory budget 3.028 GiB too small: state.kv (1779 < 2049 units)"
+   },
+   {
+    "flags": "--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 4 --plugin-options recurrent.checkpoints=4 kv.format=q8_0",
+    "load_s": 14.0,
+    "kv_tokens": 58464,
+    "pools": {
+     "state.conv_state": {
+      "units": 5,
+      "unit_mib": 2.812
+     },
+     "plugin.conv_state.checkpoints": {
+      "units": 4,
+      "unit_mib": 2.812
+     },
+     "state.ssm_state": {
+      "units": 5,
+      "unit_mib": 144.0
+     },
+     "plugin.ssm_state.checkpoints": {
+      "units": 4,
+      "unit_mib": 144.0
+     },
+     "state.kv": {
+      "units": 3654,
+      "unit_mib": 0.531,
+      "tokens": 58464
+     }
+    },
+    "weights_gib": 10.87,
+    "total_gib": 15.56,
+    "long_prompt": 32512,
+    "generated": 64,
+    "long_s": 17.2,
+    "max_allocated_gib": 14.4
+   },
+   {
+    "flags": "--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 4 --plugin-options recurrent.checkpoints=0 kv.format=q8_0",
+    "load_s": 10.8,
+    "kv_tokens": 76160,
+    "pools": {
+     "state.conv_state": {
+      "units": 5,
+      "unit_mib": 2.812
+     },
+     "plugin.conv_state.checkpoints": {
+      "units": 0,
+      "unit_mib": 2.812
+     },
+     "state.ssm_state": {
+      "units": 5,
+      "unit_mib": 144.0
+     },
+     "plugin.ssm_state.checkpoints": {
+      "units": 0,
+      "unit_mib": 144.0
+     },
+     "state.kv": {
+      "units": 4760,
+      "unit_mib": 0.531,
+      "tokens": 76160
+     }
+    },
+    "weights_gib": 10.87,
+    "total_gib": 15.56,
+    "long_prompt": 32512,
+    "generated": 64,
+    "long_s": 17.2,
+    "max_allocated_gib": 14.4
+   },
+   {
+    "flags": "--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 2 --plugin-options recurrent.checkpoints=2",
+    "load_s": 10.1,
+    "kv_tokens": 38208,
+    "pools": {
+     "state.conv_state": {
+      "units": 3,
+      "unit_mib": 2.812
+     },
+     "plugin.conv_state.checkpoints": {
+      "units": 2,
+      "unit_mib": 2.812
+     },
+     "state.ssm_state": {
+      "units": 3,
+      "unit_mib": 144.0
+     },
+     "plugin.ssm_state.checkpoints": {
+      "units": 2,
+      "unit_mib": 144.0
+     },
+     "state.kv": {
+      "units": 2388,
+      "unit_mib": 1.0,
+      "tokens": 38208
+     }
+    },
+    "weights_gib": 10.87,
+    "total_gib": 15.56,
+    "long_prompt": 32512,
+    "generated": 64,
+    "long_s": 16.0,
+    "max_allocated_gib": 14.41
+   },
+   {
+    "flags": "--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 2 --plugin-options recurrent.checkpoints=2 kv.format=q8_0",
+    "load_s": 9.3,
+    "kv_tokens": 76816,
+    "pools": {
+     "state.conv_state": {
+      "units": 3,
+      "unit_mib": 2.812
+     },
+     "plugin.conv_state.checkpoints": {
+      "units": 2,
+      "unit_mib": 2.812
+     },
+     "state.ssm_state": {
+      "units": 3,
+      "unit_mib": 144.0
+     },
+     "plugin.ssm_state.checkpoints": {
+      "units": 2,
+      "unit_mib": 144.0
+     },
+     "state.kv": {
+      "units": 4801,
+      "unit_mib": 0.531,
+      "tokens": 76816
+     }
+    },
+    "weights_gib": 10.87,
+    "total_gib": 15.56,
+    "long_prompt": 32512,
+    "generated": 64,
+    "long_s": 17.3,
+    "max_allocated_gib": 14.42
+   }
+  ],
+  "rtx-4090/UD-Q4_K_M": [
+   {
+    "flags": "--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 4 --plugin-options recurrent.checkpoints=4",
+    "load_s": 86.2,
+    "kv_tokens": 61808,
+    "pools": {
+     "state.conv_state": {
+      "units": 5,
+      "unit_mib": 2.812
+     },
+     "plugin.conv_state.checkpoints": {
+      "units": 4,
+      "unit_mib": 2.812
+     },
+     "state.ssm_state": {
+      "units": 5,
+      "unit_mib": 144.0
+     },
+     "plugin.ssm_state.checkpoints": {
+      "units": 4,
+      "unit_mib": 144.0
+     },
+     "state.kv": {
+      "units": 3863,
+      "unit_mib": 1.0,
+      "tokens": 61808
+     }
+    },
+    "weights_gib": 14.99,
+    "total_gib": 22.11,
+    "long_prompt": 32512,
+    "generated": 64,
+    "long_s": 11.9,
+    "max_allocated_gib": 20.61
+   },
+   {
+    "flags": "--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 4 --plugin-options recurrent.checkpoints=4 kv.format=q8_0",
+    "load_s": 15.3,
+    "kv_tokens": 122848,
+    "pools": {
+     "state.conv_state": {
+      "units": 5,
+      "unit_mib": 2.812
+     },
+     "plugin.conv_state.checkpoints": {
+      "units": 4,
+      "unit_mib": 2.812
+     },
+     "state.ssm_state": {
+      "units": 5,
+      "unit_mib": 144.0
+     },
+     "plugin.ssm_state.checkpoints": {
+      "units": 4,
+      "unit_mib": 144.0
+     },
+     "state.kv": {
+      "units": 7678,
+      "unit_mib": 0.531,
+      "tokens": 122848
+     }
+    },
+    "weights_gib": 14.99,
+    "total_gib": 22.11,
+    "long_prompt": 32512,
+    "generated": 64,
+    "long_s": 12.8,
+    "max_allocated_gib": 20.62
+   },
+   {
+    "flags": "--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 4 --plugin-options recurrent.checkpoints=0 kv.format=q8_0",
+    "load_s": 12.4,
+    "kv_tokens": 140544,
+    "pools": {
+     "state.conv_state": {
+      "units": 5,
+      "unit_mib": 2.812
+     },
+     "plugin.conv_state.checkpoints": {
+      "units": 0,
+      "unit_mib": 2.812
+     },
+     "state.ssm_state": {
+      "units": 5,
+      "unit_mib": 144.0
+     },
+     "plugin.ssm_state.checkpoints": {
+      "units": 0,
+      "unit_mib": 144.0
+     },
+     "state.kv": {
+      "units": 8784,
+      "unit_mib": 0.531,
+      "tokens": 140544
+     }
+    },
+    "weights_gib": 14.99,
+    "total_gib": 22.11,
+    "long_prompt": 32512,
+    "generated": 64,
+    "long_s": 12.8,
+    "max_allocated_gib": 20.62
+   },
+   {
+    "flags": "--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 2 --plugin-options recurrent.checkpoints=2",
+    "load_s": 11.9,
+    "kv_tokens": 71552,
+    "pools": {
+     "state.conv_state": {
+      "units": 3,
+      "unit_mib": 2.812
+     },
+     "plugin.conv_state.checkpoints": {
+      "units": 2,
+      "unit_mib": 2.812
+     },
+     "state.ssm_state": {
+      "units": 3,
+      "unit_mib": 144.0
+     },
+     "plugin.ssm_state.checkpoints": {
+      "units": 2,
+      "unit_mib": 144.0
+     },
+     "state.kv": {
+      "units": 4472,
+      "unit_mib": 1.0,
+      "tokens": 71552
+     }
+    },
+    "weights_gib": 14.99,
+    "total_gib": 22.11,
+    "long_prompt": 32512,
+    "generated": 64,
+    "long_s": 11.9,
+    "max_allocated_gib": 20.63
+   },
+   {
+    "flags": "--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 2 --plugin-options recurrent.checkpoints=2 kv.format=q8_0",
+    "load_s": 11.7,
+    "kv_tokens": 141200,
+    "pools": {
+     "state.conv_state": {
+      "units": 3,
+      "unit_mib": 2.812
+     },
+     "plugin.conv_state.checkpoints": {
+      "units": 2,
+      "unit_mib": 2.812
+     },
+     "state.ssm_state": {
+      "units": 3,
+      "unit_mib": 144.0
+     },
+     "plugin.ssm_state.checkpoints": {
+      "units": 2,
+      "unit_mib": 144.0
+     },
+     "state.kv": {
+      "units": 8825,
+      "unit_mib": 0.531,
+      "tokens": 141200
+     }
+    },
+    "weights_gib": 14.99,
+    "total_gib": 22.11,
+    "long_prompt": 32512,
+    "generated": 64,
+    "long_s": 12.8,
+    "max_allocated_gib": 20.64
+   }
+  ]
+ }
+}
