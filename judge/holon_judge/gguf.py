@@ -17,6 +17,8 @@ import numpy as np
 import torch
 import transformers
 
+from .golden import place
+
 GATE = 0.5          # NMSE(dequantized, HF bf16) per tensor: a correct quant explains at least half the energy
 # llama.cpp's tensor names (src/llama-arch.cpp) for the dense-transformer tensors -> HF Qwen3 names.
 _GLOBAL = {"token_embd.weight": "model.embed_tokens.weight", "output_norm.weight": "model.norm.weight",
@@ -240,21 +242,7 @@ def hf_model(path: str | pathlib.Path, config_dir: str | pathlib.Path, dtype: to
     if missing := [n for n, p in model.named_parameters() if p.is_meta]:
         raise ValueError(f"{path}: no tensor for {missing[:4]}")
     model.model.rotary_emb = type(model.model.rotary_emb)(config=config)    # its buffers are not weights: built here
-    return _place(model.eval(), device)
-
-
-def _place(model: torch.nn.Module, device: str) -> torch.nn.Module:
-    """On one device, or across the visible GPUs when it does not fit one (whole decoder layers per GPU)."""
-    size = sum(p.numel() * p.element_size() for p in model.parameters())
-    if device != "cuda" or size < 0.85 * torch.cuda.get_device_properties(0).total_memory:
-        return model.to(device)
-    import accelerate
-
-    layer = type(model.model.layers[0]).__name__
-    budget = {i: int(0.7 * torch.cuda.get_device_properties(i).total_memory)        # room for activations
-              for i in range(torch.cuda.device_count())}
-    placement = accelerate.infer_auto_device_map(model, max_memory=budget, no_split_module_classes=[layer])
-    return accelerate.dispatch_model(model, placement)
+    return place(model.eval(), device)
 
 
 def gate(path: str | pathlib.Path, hf_dir: str | pathlib.Path) -> dict[str, float]:

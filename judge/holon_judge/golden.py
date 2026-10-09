@@ -105,8 +105,7 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
     else:
         is_moe = _is_moe(path)
         mirrored = dtype != torch.float32 and not pure_hf and is_moe
-        hf = transformers.AutoModelForCausalLM.from_pretrained(path, dtype=dtype, device_map=device,
-                                                               attn_implementation="sdpa",
+        hf = transformers.AutoModelForCausalLM.from_pretrained(path, dtype=dtype, attn_implementation="sdpa",
                                                                experts_implementation="eager").eval()
         hf.to(dtype)        # transformers 5.6 ignores `dtype` for a multimodal checkpoint's text model (Qwen3.5/3.8)
         if mirrored:                       # the router F32 as the engine holds it; dense operands rounded to bf16
@@ -114,6 +113,7 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
                 if type(block).__name__.endswith("SparseMoeBlock"):
                     block.gate.weight.data = block.gate.weight.data.float()
             moe.mirror(hf, operand_dtype=dtype)
+        hf = place(hf, device)
         source = model_meta(path) | _moe_meta(mirrored)
     _torch_paths(hf)
     t0 = time.perf_counter()
@@ -127,6 +127,20 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
         "hardware": hardware(hf.device), "threads": torch.get_num_threads(), "torch": torch.__version__,
         "transformers": transformers.__version__, "wall_s": round(wall, 2)}
     return Recording.from_rows(rows, meta)
+
+
+def place(model: torch.nn.Module, device: str) -> torch.nn.Module:
+    """On one device, or across the visible GPUs when it does not fit one (whole decoder layers per GPU)."""
+    size = sum(p.numel() * p.element_size() for p in model.parameters())
+    if device != "cuda" or size < 0.85 * torch.cuda.get_device_properties(0).total_memory:
+        return model.to(device)
+    import accelerate
+
+    layer = type(model.model.layers[0]).__name__
+    budget = {i: int(0.7 * torch.cuda.get_device_properties(i).total_memory)        # room for activations
+              for i in range(torch.cuda.device_count())}
+    placement = accelerate.infer_auto_device_map(model, max_memory=budget, no_split_module_classes=[layer])
+    return accelerate.dispatch_model(model, placement)
 
 
 def _torch_paths(model: torch.nn.Module) -> None:
