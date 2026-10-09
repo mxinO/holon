@@ -5,7 +5,7 @@
 Can a FULL CUDA graph hand work to a persistent native CPU worker and wait for the result without
 `cudaLaunchHostFunc` (design §7.4, §6.5, plan §3.1 S6, D8)? Specifically:
 
-1. Does stream capture (torch 2.11 / CUDA 13.0 / driver 580) accept the stream-memop flag pair
+1. Does stream capture (torch 2.11 / CUDA 13.0) accept the stream-memop flag pair
    (`cuStreamWriteValue32` + `cuStreamWaitValue32`) and the kernel-flag alternative?
 2. What does one handshake cost, and what does a step with N = 24/48/75 handshakes cost, compared with `cudaLaunchHostFunc`?
 3. Can independent GPU work overlap the CPU work, on the same stream or on a branch?
@@ -16,16 +16,16 @@ Can a FULL CUDA graph hand work to a persistent native CPU worker and wait for t
 
 | | |
 |---|---|
-| host | the A5000 server: 2× AMD <cpu> (<cpu>, AVX2, no AVX-512), 251 GiB, shared (load avg ≈ 22 during the run) |
-| GPU | RTX A5000 (sm_86), `CUDA_VISIBLE_DEVICES=7`, driver <version>, PCIe, NUMA node 1 |
-| software | torch 2.11.0+cu130, nvcc 13.0.48, Python 3.12.12, g++ 11.4, Linux <version> |
-| CPU worker | 8 threads pinned to cores 24–31 (GPU-local NUMA node, one per physical core); Python main thread kept off them |
+| host | a shared multi-GPU server, busy during the run |
+| GPU | RTX A5000 (sm_86), PCIe |
+| software | torch 2.11.0+cu130, nvcc 13.0.48, Python 3.12.12, g++ 11.4 |
+| CPU worker | 8 threads pinned to physical cores near the GPU; Python main thread kept off them |
 | memop caps | 64-bit memops 1, wait NOR 1, flush-remote-writes 0, host-native-atomics 0 |
 
 ```bash
 cd spikes/s6_cpu_handshake
-CUDA_VISIBLE_DEVICES=7 ./build.sh                       # optional; bench.py builds on first use (~20 s)
-CUDA_VISIBLE_DEVICES=7 python bench.py --out results/a5000_$(hostname -s).json   # ~9 min
+CUDA_VISIBLE_DEVICES=0 ./build.sh                       # optional; bench.py builds on first use (~20 s)
+CUDA_VISIBLE_DEVICES=0 python bench.py --out results/a5000_$(hostname -s).json   # ~9 min
 #   --threads 8 --cores 24-31 --quick --only capture,latency,...   (see --help)
 ```
 
@@ -133,7 +133,7 @@ step minus the CPU compute time measured inside the worker:
 | copy | memop | 5675 µs | 3660 µs | 8.3 µs | 622 µs |
 
 CPU task standalone (`cpu_task`, 225 MiB sweep): 135 / 75 / 57 / 44 / 37 µs for 1 / 2 / 4 / 8 / 16 threads, which is
-23 → 86 GB/s. In-graph per-layer compute is noisier, 41–64 µs, on this shared host.
+23 → 86 GB/s. In-graph per-layer compute is noisier, 41–64 µs, on this busy host.
 
 ### Q3 — overlap
 
@@ -215,8 +215,8 @@ The CPU worker itself does not need the map: the graph passes the miss list (`id
 
 ## Decision
 
-**The seam is sound for the core ABI.** Stream capture accepts both flag flavours on torch 2.11 / CUDA 13 /
-driver 580. A persistent native worker answers 1.5 M in-graph handshakes with no loss, overlaps GPU work, and can
+**The seam is sound for the core ABI.** Stream capture accepts both flag flavours on torch 2.11 / CUDA 13.
+A persistent native worker answers 1.5 M in-graph handshakes with no loss, overlaps GPU work, and can
 be aborted, drained, and restarted under a live graph. The cost is 2.8–9.7 µs per handshake, against 31–41 µs
 for `cudaLaunchHostFunc`. At 75 layers that is 0.2–0.7 ms per step instead of 2.4–3.0 ms.
 
@@ -238,9 +238,9 @@ The script builds for the visible SM (sm_120) and picks GPU-local physical cores
 
 - **Wake-up of memop vs kernel waits** (`wakeup`, `with_work`): front-end polling on Blackwell/GeForce may differ.
   This decides the default backend.
-- **CPU side:** with 8 cores, the coordinator and 7 pool threads spinning hot leave nothing for the Python step loop
-  and driver threads. Measure `--threads 7` vs 8, and the GEMV bandwidth on dual-channel <memory> (expect ≈ 60–80 GB/s
-  peak; here 86 GB/s with 16 threads, 72 GB/s with 8). A single CCD may also change the pool barrier cost.
+- **CPU side:** with every core taken, the coordinator and 7 pool threads spinning hot leave nothing for the Python step loop
+  and driver threads. Measure `--threads 7` vs 8, and the GEMV bandwidth on the desktops (expect ≈ 60–80 GB/s
+  peak; here 86 GB/s with 16 threads, 72 GB/s with 8). The desktops' cache layout may also change the pool barrier cost.
 - **PCIe 5.0 latency** to mapped memory: zc reads of `y` and the spin-kernel polls.
 - **hostfunc baseline** on the desktop, to confirm the FreeToken-reported 30–50 µs on consumer parts.
 - Whether a parked graph trips anything when the GPU also drives a display (watchdog/TDR). It did not here, but this is a headless A5000.
@@ -250,7 +250,7 @@ Not covered by this spike: multiple tasks per slot (top-k CPU experts per layer 
 graph sharing a worker concurrently (the per-slot words assume one in-flight request per slot, which holds for
 serialized replays on one stream), `cuStreamBatchMemOp` to fuse the write and wait into one node, and the
 coordinator's idle doze latency (≤ 50 µs for the first layer after 100 ms of idle; not measured).
-The numbers above come from a busy shared host, and p99 tails (for example hostfunc 13.6 ms) partly reflect that noise.
+The numbers above come from a busy host, and p99 tails (for example hostfunc 13.6 ms) partly reflect that noise.
 
 ## Consumer cards (RTX 4090 / 5080 / 5090 desktops), 2026-10-06
 
@@ -260,8 +260,6 @@ nvcc 13.0.48, g++ 13; uv venv with torch 2.11.0+cu130, Python 3.12.12). GPUs are
 | | rtx-4090 | rtx-5080 | rtx-5090 |
 |---|---|---|---|
 | GPU | RTX 4090 (sm_89), PCIe 4.0 x16 | RTX 5080 (sm_120), PCIe 5.0 x16 | RTX 5090 (sm_120), PCIe 5.0 x16 |
-| CPU | <cpu> (<cpu>, 8C/16T, 2 CCX, AVX2), 128 GB <memory> | <cpu> (<cpu>, 8C/16T, 1 CCD, 96 MB L3), 128 GB <memory> | same as 5080 |
-| driver (all: Linux <version>) | <version> | <version> | <version> |
 | memop caps | 64-bit 1, wait NOR 1, flush-remote-writes 0, host-native-atomics 0 | same | same |
 | `KERNEL_EXEC_TIMEOUT` | 0 | 0 | 0 |
 
@@ -330,11 +328,11 @@ GEMV bandwidth (`cpu_task`, 225 MiB sweep, per-layer µs / GB/s; 1 / 2 / 4 / 8 t
 
 | host | 1 | 2 | 4 | 8 |
 |---|---|---|---|---|
-| <cpu> + <memory> (4090 desktop) | 160 / 19.7 | 98 / 32.2 | 89 / 35.5 | 93 / 34.0 |
-| <cpu> + <memory> (5080 desktop) | 64 / 49.5 | 46 / 68.0 | 47 / 67.7 | 48 / 66.2 |
-| <cpu> + <memory> (5090 desktop) | 61 / 51.7 | 45 / 69.8 | 43 / 73.4 | 46 / 67.8 |
+| 4090 desktop | 160 / 19.7 | 98 / 32.2 | 89 / 35.5 | 93 / 34.0 |
+| 5080 desktop | 64 / 49.5 | 46 / 68.0 | 47 / 67.7 | 48 / 66.2 |
+| 5090 desktop | 61 / 51.7 | 45 / 69.8 | 43 / 73.4 | 46 / 67.8 |
 
-Dual-channel <memory> saturates at **66–73 GB/s with 2–4 threads**; <memory> at **32–36 GB/s**. More than 4 threads buys
+The 5080 and 5090 desktops saturate at **66–73 GB/s with 2–4 threads**, the 4090 desktop at **32–36 GB/s**. More than 4 threads buys
 nothing for a bandwidth-bound expert GEMV, so a desktop CPU-expert pool needs ≤ 4 compute threads. The 96 MB L3
 of the <cpu> matters: in `overlap` (N = 24, 72 MiB of weights) the per-layer CPU task drops to 12–15 µs
 (L3-resident) vs 43–47 µs from DRAM; the <cpu> (2 × 16 MB L3) stays at ~94 µs.
@@ -354,11 +352,11 @@ p50 µs), then replays the 75-layer graph (≤ 2 in flight). Alone = same worklo
 | | t8 | 8–15 | 180 | 186 | 420 | 405 |
 | | t7 pinned | 7, 15 | 176 | 178 | 181 | 184 |
 
-Yes: whenever the Python thread can land on the SMT sibling of a spinning worker it runs **1.4× (<cpu>) to 2.3×
-(<cpu>) slower** — with 8 workers it has no other choice, and with 7 workers the scheduler still puts it there
+Yes: whenever the Python thread can land on the SMT sibling of a spinning worker it runs **1.4× (4090 desktop) to 2.3×
+(5080 / 5090 desktops) slower** — with 8 workers it has no other choice, and with 7 workers the scheduler still puts it there
 (repeat run: 373 / 341 µs on the 5080, 355 / 340 on the 5090). Pinning it to the free physical core (both SMT
 threads of core 7) removes the effect entirely (≤ 5 % over alone), and also speeds up the worker itself (CPU
-compute 3350 vs 3440–4370 µs per step on <cpu>, because the main thread no longer competes with a worker's SMT
+compute 3350 vs 3440–4370 µs per step on the 5080 / 5090 desktops, because the main thread no longer competes with a worker's SMT
 sibling). Step time p50 with kernel waits: 5080 4309 (t7) / 4266 (t8) / 3858 µs (pinned), 5090 4390 / 4435 /
 3866, 4090 7791 / 7733 / 7537.
 
@@ -413,4 +411,4 @@ kernel waits (5080: 509 µs on a branch vs 498 GPU-only; 4090: 2460 vs 2413).
    interference. Of the 7, ≤ 4 compute threads saturate DRAM for GEMV; the rest are wasted spinning.
 3. Zero-copy payloads (+0.5 µs per mapped read) and the single-word REQ/DONE protocol carry over unchanged.
 4. Budget: on the 5080 desktop a 75-layer CPU-expert step at 3 MiB/layer is DRAM-bound at ≈ 3.35 ms of CPU time
-   (68 GB/s); on <cpu> / <memory> it is 2× that. Handshakes add only 0.15 ms (kernel waits).
+   (68 GB/s); on the 4090 desktop it is 2× that. Handshakes add only 0.15 ms (kernel waits).

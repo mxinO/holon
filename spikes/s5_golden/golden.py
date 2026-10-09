@@ -11,7 +11,7 @@ Metadata (safetensors header, key "meta"): JSON with model, revision, weight blo
 prompt-set hash, k, wall time.
 
     python golden.py --model Qwen/Qwen3-0.6B --device cpu --dtype float32 --threads 48 --out out/0.6b-fp32.st
-    CUDA_VISIBLE_DEVICES=4 python golden.py --model Qwen/Qwen3-8B --device cuda --dtype bfloat16 --out ...
+    CUDA_VISIBLE_DEVICES=0 python golden.py --model Qwen/Qwen3-8B --device cuda --dtype bfloat16 --out ...
 """
 
 import argparse
@@ -83,8 +83,7 @@ def teacher_force(model, ids: list[int], k: int, chunk: int = 0) -> tuple[torch.
 
 
 def cpu_name() -> str:
-    with open("/proc/cpuinfo") as f:
-        return next((line.split(":", 1)[1].strip() for line in f if line.startswith("model name")), "cpu")
+    return "cpu"            # host details stay out of records
 
 
 def model_meta(model_id: str) -> dict:

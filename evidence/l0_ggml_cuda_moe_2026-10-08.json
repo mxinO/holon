@@ -7,7 +7,7 @@
  "shapes": "type sweep E 32, k 8, hidden 2048, expert width 768 (merged gate/up out 1536); routings, sizes, graphs and the plant at E 128 (Qwen3-30B-A3B's)",
  "classes": {
   "rtx-a5000": {
-   "gpu": "RTX A5000, sm_86, driver <version>",
+   "gpu": "RTX A5000, sm_86",
    "prebuild_wall_s": 75,
    "prebuild_cpu_min": 11.2,
    "jobs": 48,
@@ -15,7 +15,7 @@
    "memcheck": "ERROR SUMMARY: 0 errors"
   },
   "rtx-5080": {
-   "gpu": "GeForce RTX 5080, sm_120a, driver <version>",
+   "gpu": "GeForce RTX 5080, sm_120a",
    "prebuild_wall_s": 99,
    "prebuild_cpu_min": 11.8,
    "jobs": 16,

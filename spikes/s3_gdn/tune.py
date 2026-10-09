@@ -1,7 +1,7 @@
 """Search vLLM's original autotune space for every chunk-prefill kernel and record the winners.
 
 The winners become `fla_ops.utils.PINNED` (design §5.6 rule 7: no run-time autotuning in plug-serve).
-Usage: CUDA_VISIBLE_DEVICES=3 python tune.py results/tune_sm86.json
+Usage: CUDA_VISIBLE_DEVICES=0 python tune.py results/tune_sm86.json
 """
 
 import json

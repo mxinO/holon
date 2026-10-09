@@ -5,7 +5,7 @@
 2. Chunked prefill captured with host-precomputed chunk indices (informational: v0 runs prefill eager).
 3. Run-to-run byte identity: 10 runs in-process, and SHA-256 of outputs across fresh processes (pinned configs, and
    once with vLLM's autotuning to show what pinning buys).
-Usage: CUDA_VISIBLE_DEVICES=3 python graph_determinism.py results/graph_det_sm86.json
+Usage: CUDA_VISIBLE_DEVICES=0 python graph_determinism.py results/graph_det_sm86.json
 """
 
 import hashlib

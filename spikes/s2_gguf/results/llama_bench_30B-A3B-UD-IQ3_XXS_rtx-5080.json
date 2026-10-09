@@ -2,7 +2,7 @@
   {
     "build_commit": "51ce9c1",
     "build_number": 1,
-    "cpu_info": "AMD <cpu>",
+    "cpu_info": "cpu",
     "gpu_info": "NVIDIA GeForce RTX 5080",
     "backends": "CUDA",
     "model_filename": "$HF_HOME/hub/models--unsloth--Qwen3-30B-A3B-GGUF/snapshots/d5b1d57bd0b504ac62ae6c725904e96ef228dc74/Qwen3-30B-A3B-UD-IQ3_XXS.gguf",
@@ -48,7 +48,7 @@
   {
     "build_commit": "51ce9c1",
     "build_number": 1,
-    "cpu_info": "AMD <cpu>",
+    "cpu_info": "cpu",
     "gpu_info": "NVIDIA GeForce RTX 5080",
     "backends": "CUDA",
     "model_filename": "$HF_HOME/hub/models--unsloth--Qwen3-30B-A3B-GGUF/snapshots/d5b1d57bd0b504ac62ae6c725904e96ef228dc74/Qwen3-30B-A3B-UD-IQ3_XXS.gguf",

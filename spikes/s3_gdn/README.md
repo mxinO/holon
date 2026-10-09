@@ -14,8 +14,8 @@ value-head order through a `v_head_order` knob instead of repacking weights?
 
 | | |
 |---|---|
-| sm_86 | RTX A5000 24 GB, this host, `CUDA_VISIBLE_DEVICES=3` |
-| sm_120 | RTX PRO 6000 Blackwell Max-Q (the Blackwell workstation), `CUDA_VISIBLE_DEVICES=6`, peak torch allocation < 4 GiB |
+| sm_86 | RTX A5000 24 GB |
+| sm_120 | RTX PRO 6000 Blackwell Max-Q, peak torch allocation < 4 GiB |
 | software | `.venv` python: torch 2.11.0+cu130, Triton 3.6.0, transformers 5.6.0.dev0; `import fla` fails (ModuleNotFoundError), and `gdn.py` asserts HF runs its torch path |
 | weights | layer 0 (a GDN layer) of `Qwen/Qwen3.5-4B` (Hg=16, H=32) and `Qwen/Qwen3.8-27B` (Hg=16, H=48), from the HF cache; random inputs through the layer's real input RMSNorm |
 | perf shapes | `Qwen3.5-9B` (Hg=16, H=32, 24 GDN layers), `Qwen3.8-27B` (Hg=16, H=48, 48 GDN layers), K=V=128, read from the cached configs |
@@ -33,8 +33,8 @@ Files (all scripts take the result path; run from this directory):
 | `tiled_order.py` | task 6 → `results/tiled_order_*.json` |
 | `report.py` | prints the tables below from `results/` |
 
-Commands: `CUDA_VISIBLE_DEVICES=3 ../../.venv/bin/python <script>.py results/<name>_sm86.json`, and the same over
-`ssh <blackwell-host>` with `CUDA_VISIBLE_DEVICES=6` for `_sm120`. Logs in `out/`.
+Commands: `CUDA_VISIBLE_DEVICES=0 ../../.venv/bin/python <script>.py results/<name>_sm86.json`, and the same over
+on the sm_120 GPU for `_sm120`. Logs in `out/`.
 
 ## Vendored subset and provenance
 

@@ -3,7 +3,7 @@ weights with random inputs.
 
 Reference ("golden"): HF `torch_recurrent_gated_delta_rule` in fp32 from the same bf16 q/k/v/g/beta. Noise floor
 ("hf_bf16"): what HF itself computes in a bf16 model (its chunk prefill path; l2norm in bf16, bf16 output).
-Usage: CUDA_VISIBLE_DEVICES=3 python correctness.py results/correctness_sm86.json
+Usage: CUDA_VISIBLE_DEVICES=0 python correctness.py results/correctness_sm86.json
 """
 
 import json

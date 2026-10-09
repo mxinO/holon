@@ -1,7 +1,7 @@
 #!/bin/sh
 # Spike S1 end to end on one GPU.  Usage: run_all.sh <gpu index> <log suffix> [step ...]
 #   A5000 host:  spikes/s1_attention/run_all.sh 0 a5000
-#   shared host: S1_WAIT_FOR_IDLE=s2_gguf spikes/s1_attention/run_all.sh 6 sm120
+#   while another spike uses the GPU: S1_WAIT_FOR_IDLE=s2_gguf spikes/s1_attention/run_all.sh 6 sm120
 # Results: results/*_<class>.json; logs: out/*_<suffix>.log.
 set -u
 cd "$(dirname "$0")"

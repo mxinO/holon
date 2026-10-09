@@ -3,14 +3,10 @@ extension ready in 26s
  "host": "rtx-4090-desktop",
  "gpu": "NVIDIA GeForce RTX 4090",
  "sm": "8.9",
- "driver": "<version>",
  "torch": "2.11.0+cu130",
  "torch_cuda": "13.0",
  "nvcc": "Build cuda_13.0.r13.0/compiler.36260728_0",
  "python": "3.12.12",
- "cpu": "AMD <cpu>",
- "cpu_count": 16,
- "mem": "125 GiB",
  "cores_used": [
   0,
   1,
@@ -29,9 +25,7 @@ extension ready in 26s
   "host_native_atomic_supported": 0,
   "pageable_memory_access": 1
  },
- "kernel": "6.17.0-35-generic",
- "kernel_exec_timeout": 0,
- "display_active": "Disabled, [Requested functionality has been deprecated], 600.00 W, 4, 16"
+ "kernel_exec_timeout": 0
 }
 capture memop {'captured': True, 'node_types': {'batch_mem_op': 4, 'kernel': 29}, 'max_abs_err_50_replays': 2.980232238769531e-07}
 capture kernel {'captured': True, 'node_types': {'kernel': 33}, 'max_abs_err_50_replays': 4.76837158203125e-07}

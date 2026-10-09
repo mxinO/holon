@@ -3,14 +3,10 @@
   "host": "a5000-server",
   "gpu": "NVIDIA RTX A5000",
   "sm": "8.6",
-  "driver": "<version>",
   "torch": "2.11.0+cu130",
   "torch_cuda": "13.0",
   "nvcc": "Build cuda_13.0.r13.0/compiler.36260728_0",
   "python": "3.12.12",
-  "cpu": "AMD <cpu>",
-  "cpu_count": 96,
-  "mem": "251 GiB",
   "cores_used": [
    24,
    25,
@@ -29,8 +25,7 @@
    "can_use_stream_wait_value_nor": 1,
    "host_native_atomic_supported": 0,
    "pageable_memory_access": 0
-  },
-  "kernel": "5.15.0-134-generic"
+  }
  },
  "args": {
   "out": "results/a5000.json",

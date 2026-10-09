@@ -1,9 +1,6 @@
 """Shared helpers for spike S1: geometries, paged KV construction, torch reference, graph timing."""
 
 import json
-import os
-import platform
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,11 +37,8 @@ def fingerprint() -> dict:
     import triton
     return {
         "gpu": p.name, "sm": f"{p.major}{p.minor}", "num_sms": p.multi_processor_count,
-        "host": platform.node(), "torch": torch.__version__, "cuda": torch.version.cuda,
+        "torch": torch.__version__, "cuda": torch.version.cuda,      # host details stay out of records
         "triton": triton.__version__, "flashinfer": flashinfer.__version__,
-        "driver": subprocess.run(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader", "-i",
-                                  os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0]],
-                                 capture_output=True, text=True).stdout.strip(),
     }
 
 

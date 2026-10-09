@@ -170,7 +170,7 @@ they give up their weight — leave no site in the lock; a tied quantized head t
   holding only what depends on `in`, the options and `nsm`: q8_1 activations for one 512-row chunk
   (`512 × pad512(in) × 144/128 + J_max × 144` B; mmvq needs less) + the stream-k fixup (`nsm × 128 × 128 × 4` B) —
   ≈ 13 MB at `in` = 12288 on the 5080. The f32 mmq output is a per-call activation (D5).
-- **Build**: ≈ 9–10 CPU-minutes per SM (≈ 2 min wall with ninja on 8 cores), cached by (vendored hash, flags, SM,
+- **Build**: ≈ 9–10 CPU-minutes per SM (≈ 2 min wall with ninja), cached by (vendored hash, flags, SM,
   CUDA major). **Prebuild is mandatory** (`python -m holon_plugins.kernels.ggml_cuda.prebuild`); the engine never
   compiles at start. No build, no nvcc, CUDA-major mismatch → provider unavailable → D1's startup error, which prints
   the prebuild command.

@@ -7,8 +7,7 @@
   "torch": "2.11.0+cu130",
   "cuda": "13.0",
   "triton": "3.6.0",
-  "flashinfer": "0.6.12",
-  "driver": "<version>"
+  "flashinfer": "0.6.12"
  },
  "replay": [
   {

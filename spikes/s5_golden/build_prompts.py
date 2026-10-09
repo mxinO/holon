@@ -4,7 +4,7 @@ Each sequence = a Qwen3-chat-template-rendered conversation whose final assistan
 Qwen3-8B (HF bf16, GPU) so that the teacher-forced positions mix off-policy context (user turns, documents, tool
 output) with on-policy model text. Token ids are frozen in the JSONL; the generator never runs again.
 
-    CUDA_VISIBLE_DEVICES=4 python build_prompts.py --out prompts/v1.jsonl
+    CUDA_VISIBLE_DEVICES=0 python build_prompts.py --out prompts/v1.jsonl
 """
 
 import argparse

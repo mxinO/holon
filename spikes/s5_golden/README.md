@@ -9,8 +9,8 @@ legitimate bf16 implementations from real bugs?
 
 ## Setup
 
-- Host: 2× AMD <cpu>, shared with other spikes. fp32 recording uses 44 threads, each GPU process 2 threads.
-  GPUs: `CUDA_VISIBLE_DEVICES=4,5` (RTX A5000, sm_86).
+- fp32 recording uses 44 CPU threads, each GPU process 2.
+  GPUs: two RTX A5000 (sm_86).
 - torch 2.11.0+cu130, transformers 5.6.0.dev0, `.venv`.
 - Models: `Qwen/Qwen3-8B@b968826d`, `Qwen/Qwen3-0.6B@c1899de2`. Weight blob sha256s are in each recording's
   metadata.
@@ -31,7 +31,7 @@ legitimate bf16 implementations from real bugs?
 Reproduce:
 
 ```
-CUDA_VISIBLE_DEVICES=4 python build_prompts.py --out prompts/v1.jsonl   # once; already frozen
+CUDA_VISIBLE_DEVICES=0 python build_prompts.py --out prompts/v1.jsonl   # once; already frozen
 ./run_all.sh Qwen/Qwen3-8B qwen3-8b                                      # golden + candidates + noise_floor.py
 ./run_all.sh Qwen/Qwen3-0.6B qwen3-0.6b
 python golden.py --model Qwen/Qwen3-0.6B --threads 44 --override rms_norm_eps=1e-5 \

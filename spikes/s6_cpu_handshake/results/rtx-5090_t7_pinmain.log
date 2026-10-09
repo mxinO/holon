@@ -3,14 +3,10 @@ extension ready in 0s
  "host": "rtx-5090-desktop",
  "gpu": "NVIDIA GeForce RTX 5090",
  "sm": "12.0",
- "driver": "<version>",
  "torch": "2.11.0+cu130",
  "torch_cuda": "13.0",
  "nvcc": "Build cuda_13.0.r13.0/compiler.36260728_0",
  "python": "3.12.12",
- "cpu": "AMD <cpu>",
- "cpu_count": 16,
- "mem": "124 GiB",
  "cores_used": [
   0,
   1,
@@ -29,9 +25,7 @@ extension ready in 0s
   "host_native_atomic_supported": 0,
   "pageable_memory_access": 1
  },
- "kernel": "6.17.0-35-generic",
- "kernel_exec_timeout": 0,
- "display_active": "Disabled, [Requested functionality has been deprecated], 600.00 W, 5, 16"
+ "kernel_exec_timeout": 0
 }
 pyloop none    py_work p50=  177.9us p99=  198.8us step p50=   389.3us (alone p50=175.8us)
 pyloop kernel  py_work p50=  180.9us p99=  206.7us step p50=  3865.6us (alone p50=175.8us)

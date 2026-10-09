@@ -44,6 +44,6 @@
    "tok_s": 776.0
   }
  ],
- "command": "CUDA_VISIBLE_DEVICES=4 python bench/decode_kernels.py --model <Qwen3-8B snapshot> --ctx 1024 --out evidence/e2_decode_kernels_rtx-a5000.json",
+ "command": "CUDA_VISIBLE_DEVICES=0 python bench/decode_kernels.py --model <Qwen3-8B snapshot> --ctx 1024 --out evidence/e2_decode_kernels_rtx-a5000.json",
  "note": "Eager engine (no CUDA graphs): decode steps are CPU/launch-bound (weights alone need ~21 ms), and the host CPU was loaded by a concurrent fp32 golden recording, so these numbers cannot rank the kernels. An earlier run on an idle host gave 45-52 ms for both kernels at batch 1/8/64. Re-measure with graphs (E6)."
 }

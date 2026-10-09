@@ -2,7 +2,7 @@
   {
     "build_commit": "51ce9c1",
     "build_number": 1,
-    "cpu_info": "AMD <cpu>",
+    "cpu_info": "cpu",
     "gpu_info": "NVIDIA GeForce RTX 4090",
     "backends": "CUDA",
     "model_filename": "$HF_HOME/hub/models--unsloth--Qwen3-8B-GGUF/snapshots/a6adef130ffb23ddaf1a62fec9dced968c9bc482/Qwen3-8B-UD-IQ3_XXS.gguf",
@@ -48,7 +48,7 @@
   {
     "build_commit": "51ce9c1",
     "build_number": 1,
-    "cpu_info": "AMD <cpu>",
+    "cpu_info": "cpu",
     "gpu_info": "NVIDIA GeForce RTX 4090",
     "backends": "CUDA",
     "model_filename": "$HF_HOME/hub/models--unsloth--Qwen3-8B-GGUF/snapshots/a6adef130ffb23ddaf1a62fec9dced968c9bc482/Qwen3-8B-UD-IQ3_XXS.gguf",

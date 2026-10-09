@@ -22,8 +22,6 @@ Geometries (HF configs in `~/.cache/huggingface/hub`):
 | | a5000 | rtx-pro-6000 |
 |---|---|---|
 | GPU | RTX A5000 24 GB, sm_86, 64 SMs, 6 MB L2 | RTX PRO 6000 Blackwell Max-Q 96 GB, sm_120, 188 SMs, 128 MB L2 |
-| host / GPU index | the A5000 server, `CUDA_VISIBLE_DEVICES=0` | the Blackwell workstation, `CUDA_VISIBLE_DEVICES=6` (shared with other users; < 20 GB used) |
-| driver | <version> | <version> |
 
 Software (both): torch 2.11.0+cu130, CUDA 13.0 (nvcc V13.0.48), Triton 3.6.0, flashinfer-python 0.6.12 +
 flashinfer-cubin 0.6.12, Python 3.12, the repo `.venv`. (design.md §5.6 mentions FlashInfer 0.7; the env has 0.6.12.)
@@ -354,8 +352,6 @@ Closes open issue 1. Same scripts, same matrix, one desktop per class; the class
 | | rtx-4090 | rtx-5080 | rtx-5090 |
 |---|---|---|---|
 | GPU | RTX 4090 24 GB, sm_89, 128 SMs, 72 MB L2, ~1.0 TB/s | RTX 5080 16 GB, sm_120, 84 SMs, 64 MB L2, ~0.96 TB/s | RTX 5090 32 GB, sm_120, 170 SMs, 96 MB L2, ~1.8 TB/s |
-| host | <cpu> (<cpu>, 8C/16T), 128 GB <memory>, PCIe 4.0 x16 | <cpu> (<cpu>, 8C/16T), 128 GB <memory>, PCIe 5.0 x16 | <cpu>, 128 GB <memory>, PCIe 5.0 x16 |
-| driver | <version> | <version> | <version> |
 
 Software: the desktops have a driver but no CUDA toolkit, so everything ran in one persistent container per
 desktop (public CUDA 13.0.0 devel Ubuntu 24.04 image, nvcc 13.0.48 = the dev-host toolkit) with a fresh
@@ -464,7 +460,7 @@ short context, and on the 5080 FlashInfer's split-KV paged-prefill verify path i
 - `prep_cost.py` (device CSR rewrite): 1.2–2.6 µs per step on all three.
 - Host `plan()` from pinned CSR (ctx 8K), µs — the desktop CPU matters:
 
-| B | 4090 (<cpu>) tc / verify / CUDA-core | 5080 (<cpu>) | 5090 (<cpu>) |
+| B | 4090 tc / verify / CUDA-core | 5080 | 5090 |
 |---|---|---|---|
 | 1 | 81 / 107 / 78 | 39 / 52–68 / 54 | 39 / 52 / 39 |
 | 8 | 105 / 152 / 79 | 57–60 / 76 / 39 | 50–52 / 71–74 / 39 |

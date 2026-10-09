@@ -1,7 +1,7 @@
 """S3 performance: chunked prefill throughput and recurrent decode / verify latency of the vendored GDN kernels at
 Qwen3.5-9B and Qwen3.8-27B layer shapes (kernel level: core GDN incl. in-kernel q/k l2norm; projections excluded).
 
-Usage: CUDA_VISIBLE_DEVICES=3 python bench.py results/perf_sm86.json [autotune]
+Usage: CUDA_VISIBLE_DEVICES=0 python bench.py results/perf_sm86.json [autotune]
 `autotune` searches vLLM's original config space instead of the pinned configs (prefill only).
 """
 

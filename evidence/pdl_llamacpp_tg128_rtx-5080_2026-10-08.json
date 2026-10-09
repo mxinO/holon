@@ -2,7 +2,7 @@
  "question": "How much of llama.cpp's batch-1 decode on the RTX 5080 comes from PDL launches (M0.1 design §4.5, first task of step 3)?",
  "date": "2026-10-08",
  "gpu_class": "rtx-5080",
- "gpu": "NVIDIA GeForce RTX 5080, driver <version>, power limit 360 W",
+ "gpu": "NVIDIA GeForce RTX 5080",
  "llama_cpp": "ggml-org/llama.cpp 51ce9c11a6f2dfa895696c0048c4333e8953b728, the spike S2 build (CUDA 13.0, CMAKE_CUDA_ARCHITECTURES=120 -> 120a)",
  "model": "unsloth/Qwen3-8B-GGUF Qwen3-8B-Q4_K_M.gguf",
  "command": "llama-bench -m Qwen3-8B-Q4_K_M.gguf -p 0 -n 128 -ngl 99 -fa on -r 10 -o json, with and without GGML_CUDA_PDL=0; three interleaved rounds (default, off, default, off, ...)",

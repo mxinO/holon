@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import os
 import pathlib
-import platform
 import re
 import time
 
@@ -54,13 +53,8 @@ def _sha256(f: pathlib.Path) -> str:
 
 
 def hardware(device: torch.device) -> str:
-    if device.type == "cuda":
-        return torch.cuda.get_device_name(device)
-    try:
-        with open("/proc/cpuinfo") as f:
-            return next(line.split(":", 1)[1].strip() for line in f if line.startswith("model name"))
-    except (OSError, StopIteration):
-        return platform.processor() or platform.machine()
+    """The GPU's product name (it defines the card class), or just "cpu": host details stay out of records."""
+    return torch.cuda.get_device_name(device) if device.type == "cuda" else "cpu"
 
 
 @torch.inference_mode()

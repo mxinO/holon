@@ -26,8 +26,8 @@ Triton for these types. The SGLang set is superseded, except as a short-lived st
 
 | | |
 |---|---|
-| sm_86 | this host, RTX A5000 24 GB, `CUDA_VISIBLE_DEVICES=1` (llama.cpp) / `2` (ours), driver <version> |
-| sm_120 | the Blackwell workstation, RTX PRO 6000 Blackwell Max-Q, `CUDA_VISIBLE_DEVICES=6` (shared, ~20 GB held by others, idle during runs), driver <version> |
+| sm_86 | RTX A5000 24 GB (llama.cpp and ours on separate GPUs) |
+| sm_120 | RTX PRO 6000 Blackwell Max-Q |
 | toolchain | CUDA 13.0 (nvcc V13.0.48), torch 2.11.0+cu130, gguf-py 0.19.0, Python 3.12, cmake 3.22, ninja |
 | kernel source | sgl-project/sglang `968726f3cea0f6d6f44bea84797e5e5914658f4e`, `python/sglang/kernels/aot/csrc/quantization/gguf` (Apache-2.0; from vLLM `4492e3a5`/`755ed7b0`, from llama.cpp ggml-cuda b2899, MIT) |
 | llama.cpp | ggml-org/llama.cpp `51ce9c11a6f2dfa895696c0048c4333e8953b728` (2026-10-06, MIT), CUDA build, Release, `CMAKE_CUDA_ARCHITECTURES=86` / `120` |
@@ -50,11 +50,11 @@ Commands (each step writes `results/`):
 scripts/download_models.sh                       # HF cache
 scripts/vendor_kernels.sh                        # SGLang headers -> third_party/sglang_gguf (+ patches)
 scripts/build_llamacpp.sh 86                     # clone/pin/patch llama.cpp, build -> out/llama-sm86
-CUDA_VISIBLE_DEVICES=1 scripts/run_all_sm.sh 86  # build ext, correctness, graph check, our op perf, llama.cpp op perf, llama-bench
+CUDA_VISIBLE_DEVICES=0 scripts/run_all_sm.sh 86  # build ext, correctness, graph check, our op perf, llama.cpp op perf, llama-bench
 python scripts/inventory.py                      # results/inventory.json
 python scripts/report.py 86 > out/report_sm86.md # joins -> results/compare_sm86.json + all tables
 scripts/probe_llamacpp_port.sh 86                # port-feasibility probe (below)
-# sm_120: same on the Blackwell workstation with CUDA_VISIBLE_DEVICES=6 and SM=120
+# sm_120: the same on an sm_120 GPU with SM=120
 ```
 
 ### Extension API (all ops write into caller-allocated tensors, current stream, no allocation)
@@ -336,11 +336,11 @@ Risks:
 
 Closes the "consumer evidence" open issue. Same pinned commits, same scripts, one desktop per class:
 
-| class | GPU | host | driver |
-|---|---|---|---|
-| rtx-4090 | RTX 4090 24 GB, sm_89, 128 SMs, 72 MB L2 | <cpu>, 128 GB <memory>, PCIe 4.0 x16 | <version> |
-| rtx-5080 | RTX 5080 16 GB, sm_120, 84 SMs, 64 MB L2 | <cpu>, 128 GB <memory>, PCIe 5.0 x16 | <version> |
-| rtx-5090 | RTX 5090 32 GB, sm_120, 170 SMs, 96 MB L2 | <cpu>, 128 GB <memory>, PCIe 5.0 x16 | <version> |
+| class | GPU |
+|---|---|
+| rtx-4090 | RTX 4090 24 GB, sm_89, 128 SMs, 72 MB L2 |
+| rtx-5080 | RTX 5080 16 GB, sm_120, 84 SMs, 64 MB L2 |
+| rtx-5090 | RTX 5090 32 GB, sm_120, 170 SMs, 96 MB L2 |
 
 Toolchain: a persistent CUDA 13.0.0 devel container (nvcc 13.0.48, g++ 13, cmake/ninja from pip) per desktop and
 a uv venv with torch 2.11.0+cu130 and gguf-py 0.19.0, i.e. the same versions as above. Both our extension and

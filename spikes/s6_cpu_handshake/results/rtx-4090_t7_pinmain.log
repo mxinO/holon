@@ -3,14 +3,10 @@ extension ready in 0s
  "host": "rtx-4090-desktop",
  "gpu": "NVIDIA GeForce RTX 4090",
  "sm": "8.9",
- "driver": "<version>",
  "torch": "2.11.0+cu130",
  "torch_cuda": "13.0",
  "nvcc": "Build cuda_13.0.r13.0/compiler.36260728_0",
  "python": "3.12.12",
- "cpu": "AMD <cpu>",
- "cpu_count": 16,
- "mem": "125 GiB",
  "cores_used": [
   0,
   1,
@@ -29,9 +25,7 @@ extension ready in 0s
   "host_native_atomic_supported": 0,
   "pageable_memory_access": 1
  },
- "kernel": "6.17.0-35-generic",
- "kernel_exec_timeout": 0,
- "display_active": "Disabled, [Requested functionality has been deprecated], 600.00 W, 4, 16"
+ "kernel_exec_timeout": 0
 }
 pyloop none    py_work p50=  310.5us p99=  423.3us step p50=   396.4us (alone p50=332.4us)
 pyloop kernel  py_work p50=  330.0us p99=  366.2us step p50=  7536.9us (alone p50=332.4us)

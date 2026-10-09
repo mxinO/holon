@@ -5,7 +5,7 @@ The GGUF layout is simulated from real HF weights with the inverse of transforme
 (src/transformers/integrations/gguf/gguf_conversion_mapping.py, `_qwen35`): tiled is `v0k0 v0k1 v1k0 v1k1`,
 grouped (HF) is `v0k0 v1k0 v0k1 v1k1`. Permuted tensors, as listed there: in_proj_qkv (value block rows),
 conv1d (value block rows), in_proj_z (rows), in_proj_a / in_proj_b / A_log / dt_bias (per head), out_proj (input
-columns). Usage: CUDA_VISIBLE_DEVICES=3 python tiled_order.py results/tiled_order_sm86.json
+columns). Usage: CUDA_VISIBLE_DEVICES=0 python tiled_order.py results/tiled_order_sm86.json
 """
 
 import json

@@ -1,6 +1,6 @@
 """S6 -- CPU handshake inside CUDA graphs. Single self-contained benchmark.
 
-    CUDA_VISIBLE_DEVICES=7 python bench.py --out results/<host>.json [--threads 8] [--cores 24-31] [--quick]
+    CUDA_VISIBLE_DEVICES=0 python bench.py --out results/<host>.json [--threads 8] [--cores 24-31] [--quick]
     python bench.py --build-only
 
 Builds the extension (csrc/) on first use with torch.utils.cpp_extension (needs nvcc + ninja + a C++ compiler).
@@ -10,7 +10,6 @@ Every graph is a torch.cuda.CUDAGraph; the extension only adds the handshake ops
 import argparse
 import json
 import os
-import platform
 import statistics
 import subprocess
 import sys
@@ -32,7 +31,7 @@ def load_ext():
     os.environ.setdefault("TORCH_CUDA_ARCH_LIST", f"{major}.{minor}")
     from torch.utils.cpp_extension import load
 
-    # S6_BUILD_DIR: one build per host class (-march=native differs, e.g. <cpu> vs <cpu> desktops)
+    # S6_BUILD_DIR: one build per host class (-march=native differs between hosts)
     build = HERE / os.environ.get("S6_BUILD_DIR", "build")
     build.mkdir(parents=True, exist_ok=True)
     return load(
@@ -88,23 +87,16 @@ def sh(cmd: str) -> str:
 def host_facts(ext, cores) -> dict:
     p = torch.cuda.get_device_properties(0)
     return {
-        "host": platform.node(),
-        "gpu": p.name,
+        "gpu": p.name,                  # host details (name, CPU, RAM, driver, OS) stay out of records
         "sm": f"{p.major}.{p.minor}",
-        "driver": sh("nvidia-smi -i $CUDA_VISIBLE_DEVICES --query-gpu=driver_version --format=csv,noheader"),
         "torch": torch.__version__,
         "torch_cuda": torch.version.cuda,
         "nvcc": sh("nvcc --version | tail -1"),
         "python": sys.version.split()[0],
-        "cpu": sh("lscpu | grep 'Model name' | sed 's/.*: *//'"),
-        "cpu_count": os.cpu_count(),
-        "mem": sh("free -g | awk '/Mem:/{print $2\" GiB\"}'"),
         "cores_used": cores,
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
         "memop_caps": ext.memop_caps(),
-        "kernel": platform.release(),
         "kernel_exec_timeout": kernel_exec_timeout(),
-        "display_active": sh("nvidia-smi -i $CUDA_VISIBLE_DEVICES --query-gpu=display_active,display_mode,power.limit,pcie.link.gen.max,pcie.link.width.max --format=csv,noheader"),
     }
 
 

@@ -13,15 +13,14 @@
    "l0": "118 passed, 1 skipped (PDL test: sm_90+ only)"
   },
   "rtx-4090": {
-   "gpu": "GeForce RTX 4090, sm_89, driver <version>",
+   "gpu": "GeForce RTX 4090, sm_89",
    "prebuild_wall_s": 120,
    "prebuild_cpu_min": 16.7,
    "jobs": 16,
-   "l0": "118 passed, 1 skipped (PDL test: sm_90+ only)",
-   "driver": "<version>"
+   "l0": "118 passed, 1 skipped (PDL test: sm_90+ only)"
   },
   "rtx-5080": {
-   "gpu": "GeForce RTX 5080, sm_120a (rerun on driver <version>)",
+   "gpu": "GeForce RTX 5080, sm_120a (rerun on a newer driver)",
    "prebuild_wall_s": 59,
    "prebuild_cpu_min": 11.5,
    "jobs": 16,

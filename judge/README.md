@@ -44,9 +44,9 @@ Qwen3-8B uses the same commands with `--model Qwen/Qwen3-8B` and `judge/goldens/
 
 | model | file | recorded on | wall | size |
 |---|---|---|---|---|
-| Qwen3-0.6B @ c1899de2 | `goldens/qwen3-0.6b/v1-fp32.safetensors` | CPU fp32, 44 threads (<cpu>) | 53 s | 5.5 MB |
+| Qwen3-0.6B @ c1899de2 | `goldens/qwen3-0.6b/v1-fp32.safetensors` | CPU fp32, 44 threads | 53 s | 5.5 MB |
 | | `goldens/qwen3-0.6b/v1-bfloat16-floor.safetensors` | HF bf16 sdpa, RTX A5000 (sm_86) | 3.4 s | 5.5 MB |
-| Qwen3-8B @ b968826d | `goldens/qwen3-8b/v1-fp32.safetensors` | CPU fp32, 44 threads (<cpu>), 49 GB peak RSS | 282 s | 5.5 MB |
+| Qwen3-8B @ b968826d | `goldens/qwen3-8b/v1-fp32.safetensors` | CPU fp32, 44 threads, 49 GB peak RSS | 282 s | 5.5 MB |
 | | `goldens/qwen3-8b/v1-bfloat16-floor.safetensors` | HF bf16 sdpa, RTX A5000 (sm_86) | 9.8 s | 5.5 MB |
 
 Floors and budgets (`v1-bfloat16-floor.json`; budgets: KL ≤ 2× floor, top-1 ≥ floor − 0.25 points,
