@@ -176,8 +176,8 @@ def _path_failures(floor: dict, cand: dict) -> list[str]:
     path, calls = floor.get("q8_1"), cand.get("expert_calls")
     if not path or not floor.get("moe_block"):
         return []
-    if not calls:
-        return [f"no expert calls counted, the floor emulates {path}"]
+    if not calls or not calls.get(path):
+        return [f"no expert calls counted on {path}, the floor's path"]
     return [f"{n} expert calls on {other}, the floor emulates {path}" for other, n in calls.items()
             if other != path and n]
 

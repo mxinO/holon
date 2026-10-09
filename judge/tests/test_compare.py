@@ -94,6 +94,8 @@ def test_expert_calls_off_the_floors_path_fail(case):
     assert compare(g, on_path, floor).passed
     r = compare(g, off_path, floor)
     assert r.passed is False and r.failures == ("3 expert calls on mmq, the floor emulates mmvq",)
-    assert compare(g, uncounted, floor).failures == ("no expert calls counted, the floor emulates mmvq",)
+    assert compare(g, uncounted, floor).failures == ("no expert calls counted on mmvq, the floor's path",)
+    uncounted.meta["expert_calls"] = {"mmvq": 0, "mmq": 0}                 # counters that never ran
+    assert compare(g, uncounted, floor).failures == ("no expert calls counted on mmvq, the floor's path",)
     del floor.meta["moe_block"]                                            # a dense Tier B floor: nothing to count
     assert compare(g, uncounted, floor).passed
