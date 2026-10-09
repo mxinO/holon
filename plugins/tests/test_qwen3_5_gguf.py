@@ -2,59 +2,20 @@
 weights, Qwen3.8's head ratio 3, an MTP block) converted by llama.cpp's own converter (`convert_hf_to_gguf.py`, f32),
 then served by the engine on the CPU — it must compute what transformers computes on the checkpoint. The converter
 writes norms as w + 1, `ssm_a = −exp(A_log)` and value heads tiled, and appends the MTP block as an extra layer."""
-import json
-import os
-import pathlib
-import subprocess
-import sys
-
 import pytest
 import torch
 from holon.api import SamplingParams
 from holon.core.engine import Engine, EngineConfig
-from safetensors.torch import save_file
+from holon_testing.qwen3_5_files import can_convert, convert, save, tiny_hf
 
-from .test_qwen3_5_cpu import checkpoint, hf, tiny_config
-
-ROOT = pathlib.Path(__file__).resolve().parents[2]
-LLAMA = ROOT / "spikes" / "s2_gguf" / "third_party" / "llama.cpp"
-TOKENIZER = sorted(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3.8-27B/snapshots/*"))
-
-pytestmark = pytest.mark.skipif(not (LLAMA / "convert_hf_to_gguf.py").is_file() or not TOKENIZER,
-                                reason="needs llama.cpp's converter and the Qwen3.8 tokenizer")
+pytestmark = pytest.mark.skipif(not can_convert(), reason="needs llama.cpp's converter and the Qwen3.8 tokenizer")
 
 
 @pytest.fixture(scope="module")
 def tiny_gguf(tmp_path_factory):
-    torch.manual_seed(0)
-    cfg = tiny_config(6)
-    cfg.vocab_size = 248320                       # the converter takes the real tokenizer
-    model = hf.Qwen3_5ForCausalLM(cfg).eval()
-    with torch.no_grad():
-        for name, p in model.named_parameters():
-            if name.endswith(("norm.weight", "A_log", "dt_bias")):
-                p.copy_(torch.randn_like(p) * 0.5)
-    model = model.to(torch.bfloat16)              # bf16 values, so the converter's f32 w + 1 undoes exactly
-    path = tmp_path_factory.mktemp("tiny_qwen3_5_gguf")
-    tensors = dict(checkpoint(model))
-    g = torch.Generator().manual_seed(3)
-    rand = lambda *s: (torch.randn(*s, generator=g) * 0.05).bfloat16()          # noqa: E731
-    h = cfg.hidden_size
-    tensors |= {"mtp.fc.weight": rand(h, 2 * h), "mtp.norm.weight": rand(h),
-                "mtp.pre_fc_norm_embedding.weight": rand(h), "mtp.pre_fc_norm_hidden.weight": rand(h)}
-    tensors |= {"mtp.layers.0." + k.removeprefix("model.layers.1."): rand(*v.shape)       # a full-attention layer
-                for k, v in model.state_dict().items() if k.startswith("model.layers.1.")}
-    save_file({k: v.contiguous() for k, v in tensors.items()}, path / "model.safetensors")
-    (path / "config.json").write_text(json.dumps({
-        "architectures": ["Qwen3_5ForConditionalGeneration"], "model_type": "qwen3_5", "tie_word_embeddings": False,
-        "text_config": cfg.to_dict() | {"mtp_num_hidden_layers": 1}}))
-    for name in ("tokenizer.json", "tokenizer_config.json"):
-        (path / name).write_bytes((TOKENIZER[0] / name).read_bytes())
-    out = path / "tiny.gguf"
-    subprocess.run([sys.executable, str(LLAMA / "convert_hf_to_gguf.py"), str(path), "--outtype", "f32",
-                    "--outfile", str(out)], env=os.environ | {"PYTHONPATH": str(LLAMA / "gguf-py")}, check=True,
-                   capture_output=True)
-    return model.float(), out
+    model = tiny_hf(6, vocab=248320).to(torch.bfloat16)      # bf16 values: the converter's f32 w + 1 undoes exactly
+    path = save(model, tmp_path_factory.mktemp("tiny_qwen3_5_gguf"), mtp=True)
+    return model.float(), convert(path)
 
 
 def _logprobs(engine, prompt):

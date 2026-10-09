@@ -7,34 +7,9 @@ from holon.core.build import BuildContext, StepContext, build_model, load_weight
 from holon.core.plugins import PluginSet, discover
 
 hf = pytest.importorskip("transformers.models.qwen3_5.modeling_qwen3_5")
-from transformers import Qwen3_5TextConfig  # noqa: E402
+from holon_testing.qwen3_5_files import checkpoint, tiny_hf  # noqa: E402
 
 assert hf.chunk_gated_delta_rule is None and hf.FusedRMSNormGated is None, "HF must run its torch GDN path"
-
-
-def tiny_config(heads_v: int) -> Qwen3_5TextConfig:
-    return Qwen3_5TextConfig(
-        vocab_size=320, hidden_size=64, intermediate_size=96, num_hidden_layers=4, layer_types=None,
-        full_attention_interval=2, num_attention_heads=4, num_key_value_heads=2, head_dim=32,
-        linear_num_key_heads=2, linear_num_value_heads=heads_v, linear_key_head_dim=16, linear_value_head_dim=16,
-        linear_conv_kernel_dim=4, tie_word_embeddings=False, attn_implementation="eager",
-        rope_parameters={"rope_type": "default", "rope_theta": 1e7, "partial_rotary_factor": 0.25,
-                         "mrope_section": [2, 1, 1], "mrope_interleaved": True})
-
-
-def tiny_hf(heads_v: int, seed: int = 0):
-    torch.manual_seed(seed)
-    model = hf.Qwen3_5ForCausalLM(tiny_config(heads_v)).eval()
-    with torch.no_grad():                        # zero-initialised norms and A_log ones would hide mistakes
-        for name, p in model.named_parameters():
-            if name.endswith(("norm.weight", "A_log", "dt_bias")):
-                p.copy_(torch.randn_like(p) * 0.5)
-    return model
-
-
-def checkpoint(model):
-    """The state dict as `Qwen3_5ForConditionalGeneration` stores it (language model under `model.language_model.`)."""
-    return [(k.replace("model.", "model.language_model.", 1), v) for k, v in model.state_dict().items()]
 
 
 @pytest.mark.parametrize("heads_v", [4, 6])

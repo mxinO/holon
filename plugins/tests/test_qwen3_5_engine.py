@@ -2,25 +2,17 @@
 Slot pools across chunked prefill and decode, against transformers; and prefix reuse through checkpoints — a request
 that adopts a checkpoint computes exactly what it computes without the cache (the reference recurrence is exact in
 f32, so resuming is bitwise)."""
-import json
-
 import pytest
 import torch
 from holon.api import SamplingParams
 from holon.core.engine import Engine, EngineConfig
-from safetensors.torch import save_file
-
-from .test_qwen3_5_cpu import checkpoint, tiny_hf
+from holon_testing.qwen3_5_files import save, tiny_hf
 
 
 @pytest.fixture(scope="module", params=[4, 6], ids=["ratio2", "ratio3"])
 def tiny(request, tmp_path_factory):
     model = tiny_hf(request.param, seed=1)
-    path = tmp_path_factory.mktemp(f"tiny_qwen3_5_{request.param}")
-    text = model.config.to_dict() | {"eos_token_id": None}
-    (path / "config.json").write_text(json.dumps({"architectures": ["Qwen3_5ForConditionalGeneration"],
-                                                  "model_type": "qwen3_5", "text_config": text}))
-    save_file({k: v.contiguous() for k, v in checkpoint(model)}, path / "model.safetensors")
+    path = save(model, tmp_path_factory.mktemp(f"tiny_qwen3_5_{request.param}"))
     g = torch.Generator().manual_seed(2)
     prompts = [torch.randint(0, 320, (n,), generator=g).tolist() for n in (5, 70, 131, 30)]
     return model, path, prompts

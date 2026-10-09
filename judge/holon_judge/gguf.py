@@ -27,16 +27,68 @@ _LAYER = {"attn_norm": "input_layernorm", "ffn_norm": "post_attention_layernorm"
           "ffn_up": "mlp.up_proj", "ffn_down": "mlp.down_proj", "ffn_gate_inp": "mlp.gate"}
 # Expert stacks [E, out, in] -> transformers' fused parameters: gate_up_proj = per expert gate rows then up rows.
 _EXPERTS = {"ffn_gate_exps": "gate", "ffn_up_exps": "up", "ffn_down_exps": "down"}
-NAME_MAP_HASH = hashlib.sha256(json.dumps([_GLOBAL, _LAYER, _EXPERTS], sort_keys=True).encode()).hexdigest()[:16]
+# Qwen3.5/3.8 (`qwen35`): its own norm name and the Gated DeltaNet tensors (llama.cpp conversion/qwen.py), by full
+# suffix since `ssm_a` and `ssm_dt.bias` are not `.weight`s.
+_QWEN35 = {"post_attention_norm.weight": "post_attention_layernorm.weight",
+           "attn_qkv.weight": "linear_attn.in_proj_qkv.weight", "attn_gate.weight": "linear_attn.in_proj_z.weight",
+           "ssm_beta.weight": "linear_attn.in_proj_b.weight", "ssm_alpha.weight": "linear_attn.in_proj_a.weight",
+           "ssm_out.weight": "linear_attn.out_proj.weight", "ssm_conv1d.weight": "linear_attn.conv1d.weight",
+           "ssm_norm.weight": "linear_attn.norm.weight", "ssm_a": "linear_attn.A_log",
+           "ssm_dt.bias": "linear_attn.dt_bias"}
+NAME_MAP_HASH = hashlib.sha256(json.dumps([_GLOBAL, _LAYER, _EXPERTS, _QWEN35], sort_keys=True).encode()
+                               ).hexdigest()[:16]
 
 
 def hf_name(name: str) -> str:
     if name in _GLOBAL:
         return _GLOBAL[name]
+    m = re.fullmatch(r"blk\.(\d+)\.(.+)", name)
+    if m is not None and m[2] in _QWEN35:
+        return f"model.layers.{m[1]}.{_QWEN35[m[2]]}"
     m = re.fullmatch(r"blk\.(\d+)\.(\w+)\.weight", name)
     if m is None or m[2] not in _LAYER:
         raise KeyError(f"no HF name for GGUF tensor {name!r}")
     return f"model.layers.{m[1]}.{_LAYER[m[2]]}.weight"
+
+
+def _qwen35(fields) -> dict | None:
+    """The `qwen35` facts the judge needs to undo llama.cpp's conversion (None for other architectures)."""
+    if bytes(fields["general.architecture"].parts[-1]).decode() != "qwen35":
+        return None
+    value = lambda k: int(fields[f"qwen35.{k}"].parts[-1][0])                  # noqa: E731
+    blocks = value("block_count") - (value("nextn_predict_layers") if "qwen35.nextn_predict_layers" in fields else 0)
+    hk, hv = value("ssm.group_count"), value("ssm.time_step_rank")
+    return {"layers": blocks, "hk": hk, "hv": hv, "dv": value("ssm.inner_size") // hv, "dk": value("ssm.state_size")}
+
+
+def _untile(x: torch.Tensor, f: dict, dim: int, start: int = 0) -> torch.Tensor:
+    """Value heads from llama.cpp's tiled order (v-head j reads k-head j mod Hk) back to HF's grouped one (j // r),
+    along `dim` from `start` on, each head a block of `x.shape[dim]`'s per-head width."""
+    hk, hv = f["hk"], f["hv"]
+    r = hv // hk
+    tiled = [s * hk + h for h in range(hk) for s in range(r)]                  # grouped position g = h·r + s
+    head = (x.shape[dim] - start) // hv
+    index = torch.tensor([start + t * head + i for t in tiled for i in range(head)])
+    return torch.cat([x.narrow(dim, 0, start), x.index_select(dim, index)], dim=dim)
+
+
+def _qwen35_value(name: str, x: torch.Tensor, f: dict) -> torch.Tensor:
+    """Undo the converter's value changes: zero-centred norms (all but the GDN norm) stored as w + 1, `ssm_a` as
+    −exp(A_log), conv1d squeezed, value heads tiled."""
+    part = name.split(".", 2)[-1] if name.startswith("blk.") else name
+    if part.endswith("norm.weight") and part != "ssm_norm.weight":
+        return x - 1
+    if part == "ssm_a":
+        return _untile(torch.log(-x), f, 0)
+    if part in ("ssm_dt.bias", "ssm_beta.weight", "ssm_alpha.weight", "attn_gate.weight"):
+        return _untile(x, f, 0)
+    if part == "attn_qkv.weight":
+        return _untile(x, f, 0, start=2 * f["hk"] * f["dk"])
+    if part == "ssm_conv1d.weight":
+        return _untile(x, f, 0, start=2 * f["hk"] * f["dk"])[:, None, :]
+    if part == "ssm_out.weight":
+        return _untile(x, f, 1)
+    return x
 
 
 _DENSE = {gguf.GGMLQuantizationType.F32, gguf.GGMLQuantizationType.F16, gguf.GGMLQuantizationType.BF16}
@@ -46,9 +98,15 @@ def hf_state(path: str | pathlib.Path) -> Iterator[tuple[str, torch.Tensor]]:
     """The HF state-dict entries (fp32) the file's tensors make, dequantized by gguf-py one tensor at a time; a
     layer's gate and up expert stacks are fused as transformers stores them (`gate_up_proj` [E, 2I, H])."""
     pending: dict[str, dict[str, torch.Tensor]] = {}
-    for t in gguf.GGUFReader(path).tensors:
+    reader = gguf.GGUFReader(path)
+    q35 = _qwen35(reader.fields)
+    for t in reader.tensors:
+        if q35 is not None and re.match(rf"blk\.{q35['layers']}\.", t.name):
+            continue                                   # the MTP block (M0.4)
         x = gguf.quants.dequantize(np.asarray(t.data), t.tensor_type).astype(np.float32, copy=False)
         x = torch.from_numpy(x.reshape([int(n) for n in reversed(t.shape)]).copy())
+        if q35 is not None:
+            x = _qwen35_value(t.name, x, q35)
         m = re.fullmatch(r"blk\.(\d+)\.(ffn_(?:gate|up|down)_exps)\.weight", t.name)
         if m is None:
             yield hf_name(t.name), x
@@ -157,7 +215,7 @@ def hf_model(path: str | pathlib.Path, config_dir: str | pathlib.Path, dtype: to
     """The HF model of `config_dir`'s config with the file's dequantized weights (the dense model the file means),
     loaded tensor by tensor; `router_f32`: MoE routers stay F32 as stored (the floors' D3 block reads them). On
     "cuda" a model larger than one GPU is spread over the visible ones."""
-    config = transformers.AutoConfig.from_pretrained(config_dir)
+    config = transformers.AutoConfig.from_pretrained(config_dir).get_text_config()   # a multimodal one: its text part
     with torch.device("meta"):
         model = transformers.AutoModelForCausalLM.from_config(config, attn_implementation="sdpa",
                                                               experts_implementation="eager")
