@@ -5,8 +5,8 @@ is the checkpoint's golden."""
 import pytest
 import torch
 import transformers
-from holon_judge import golden
 from holon_judge import gguf as judge_gguf
+from holon_judge import golden
 from holon_judge.compare import compare
 from holon_testing.qwen3_5_files import can_convert, convert, save, tiny_hf
 
