@@ -176,7 +176,17 @@ The planner (design §5.2) builds the chunk indices and offsets the fla prefill 
 
 ### 4.3 Core: completing the state seams
 
-Every item is a seam design §6–7 already specifies; none adds a concept.
+Every item is a seam design §6–7 already specifies; none adds a concept. **Generality rule** (user, 2026-10-09: the
+core holds only general mechanisms; the plugin design depends on it):
+
+1. No model, mixer, state or format names in the core (CI's `check_core_denylist` already bans gdn, deltanet, mamba,
+   …). Each mechanism serves any `Slot` state (Mamba, a sliding-window ring, a draft model's state) and any mix of
+   state kinds.
+2. Each mechanism is proven in the core's own tests by a **toy state kind** (a per-sequence running sum with
+   checkpoints) before GDN uses it.
+3. No policy in the core: what a checkpoint holds, where it is taken (policies), its pool budget (the deployment) and
+   eviction preferences come from plugins; the core calls the hooks and moves the bytes.
+
 
 | Seam | Today | M0.3 |
 |---|---|---|
@@ -258,7 +268,7 @@ So acceptance 5's 32K context needs q8_0 (or fp8) KV once checkpoints are on. Th
 | 0 | Files (27B HF, UD-IQ3_S, UD-Q4_K_M); llama-bench / llama-server baselines on 5080 and 4090; GGUF name map and hparams checked against the checkpoint | baselines | 0.5 |
 | 1 | Std knobs (D2) and their unit tests; `propagate` Qwen3 / Qwen3-MoE | auto-advance, zero approvals | 1 |
 | 2 | `kernels.fla` (vendor S3's subset, patch, provenance), `kernels.gdn_triton` (conv1d, gated norm), op contracts and references | L0 on sm_86 / sm_89 / sm_120a, both head ratios, both orders, graph capture, memcheck | 3 |
-| 3 | Core seams (§4.3) with core tests; `std.state.recurrent` | core tests; Qwen3 snapshots unchanged | 3 |
+| 3 | Core seams (§4.3), proven by a toy state kind in core tests; then `std.state.recurrent` | core tests; denylist; Qwen3 snapshots unchanged | 3 |
 | 4 | GDN mixer, `models/qwen3_5` (HF and GGUF maps), the tiny model fixture; the 27B GGUF end to end on the A5000 | the tiny model vs transformers (CPU); 27B Tier A on the CPU; bounded checks; plants | 3 |
 | 5 | Qwen3.8-27B: gates, Tier B (A5000 floors), plants; bf16 HF on an RTX PRO 6000 (L2, chat) | L2 all paths | 2.5 |
 | 6 | Checkpoints: kind hooks, policies, agent trace | prefix bounded checks, depth-1 test, tokens saved | 2 |
