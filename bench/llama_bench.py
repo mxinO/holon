@@ -47,7 +47,9 @@ def main() -> None:
     ap.add_argument("--model", required=True)
     ap.add_argument("-p", type=int, default=512, help="prompt tokens of the pp test")
     ap.add_argument("-n", type=int, default=128, help="generated tokens of the tg test")
-    ap.add_argument("-d", type=int, nargs="+", default=[0, 256], help="depths of the tg test")
+    ap.add_argument("-d", "--depths", dest="d", type=int, nargs="+", default=[0, 256],
+                    help="depths of the tg test (use --depths where FlashInfer loads NVIDIA's CuTe DSL, whose own "
+                         "argv parser takes -d for its -diagnostic)")
     ap.add_argument("-r", type=int, default=5, help="repetitions")
     ap.add_argument("--engine-args", default="", help="EngineConfig flags, as for `holon serve`")
     ap.add_argument("--blocking-sync", action="store_true")
