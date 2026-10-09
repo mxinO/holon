@@ -259,9 +259,11 @@ There is no separate database. The **Registry** is the git history of lockfiles 
   at the best configuration we know — no agent is involved.
 - **Fingerprint class** = GPU SKU (a slug of the product name, e.g. `rtx-5090`, which fixes SM and VRAM) +
   toolchain majors (CUDA, torch; the torch pin implies Triton), e.g. `rtx-5090/cu130-torch2.11`. GPU UUID, driver
-  build and measured bandwidths are recorded in evidence only. Classes maintained first: `rtx-5080` and
-  `rtx-5090` (sm_120), `rtx-4090` (sm_89), `rtx-a5000`/`rtx-3090` (sm_86); evidence is produced on those cards
-  (consumer desktop machines, plan §1).
+  build and measured bandwidths are recorded in evidence only. **Lock classes during development:** `rtx-5080`
+  (sm_120) and `rtx-4090` (sm_89), re-propagated on every shared change. **Release classes:** `rtx-5090`,
+  `rtx-3090`, `rtx-a5000`, tuned once per release. **Kernel correctness** (L0, memcheck) runs on every kernel change
+  on sm_86 (`rtx-a5000`, the local development host), sm_89 and sm_120a; a card of a covered SM with no lock
+  borrows the nearest one (below). Evidence is produced on these cards (plan §1).
 - **Missing or outdated lock for a class** (an outdated lock pins unit `src`s that the deployed commit does not
   contain) → the nearest class's current lock (same SM preferred) is used, flagged `unverified`, with an alert. The engine **never refuses to serve** for lack of a lock; `holon tune` on the host produces a
   verified lock for its class.
@@ -354,11 +356,11 @@ outcomes:
 
 Toolchain bumps (torch, Triton, FlashInfer, CUDA majors) produce a new fingerprint class and run the same sweep.
 New models get their first lock from `holon propagate --new-model` (L2 vs reference + snapshot, approved).
-Maintained consumer classes (`rtx-5080`, `rtx-5090`, `rtx-4090`) are refreshed by `isolation-check` runners on
+The development lock classes (`rtx-5080`, `rtx-4090`, §4.4) are refreshed by `isolation-check` runners on
 consumer desktop machines — a scheduled (renewable) allocation per class that starts the pinned container image
 and runs the queued checks inside it (D7 working method); the image digest is recorded in evidence as part of the toolchain —
 on shared-change PRs where capacity allows, and nightly at least; a release commit requires
-every maintained class refreshed. Until refreshed, an outdated lock is treated as missing (§4.4).
+every development and release class refreshed. Until refreshed, an outdated lock is treated as missing (§4.4).
 
 **Deferred machinery, each added only when its trigger fires:**
 

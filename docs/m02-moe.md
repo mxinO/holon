@@ -25,7 +25,8 @@ kernels, on a 16 GB RTX 5080 and on 24–32 GB cards. Acceptance:
    llama-bench at the same commit on every class, both sides as the median of repetitions 2–5 (bar on the 5080:
    ≥ 0.8× S2's 7462 / 248.2, i.e. pp512 ≥ 5970, tg128 ≥ 199); decode and agent traces against `llama-server` on the
    5080. UD-Q3_K_XL (plan §5) is optional: recorded on the 5080 if time allows, not required.
-6. GGUF locks for rtx-5080 (UD-IQ3_XXS) and rtx-a5000, rtx-4090 (Q4_K_M).
+6. GGUF locks for rtx-5080 (UD-IQ3_XXS) and rtx-4090 (Q4_K_M) — the lock classes during development (design §4.4;
+   the rtx-a5000 locks written in M0.2 were removed by that decision, the A5000 being an sm_86 L0 host).
 7. **The bf16 HF checkpoint** (`Qwen/Qwen3-30B-A3B`, 57 GiB) on a full RTX PRO 6000 node (96 GB, sm_120): it loads
    through the stacking rule, answers the M0.1 chat set sensibly, and passes L2 against the bf16 checkpoint's fp32
    golden with an HF bf16 floor. A correctness path: no performance bar, no lock.
@@ -355,7 +356,7 @@ Same three reviewers throughout; each step ends green.
 | 4 | Emulator expert paths; Tier B floors and runs on the A5000; Tier B, L0 and precision plants; precision test; graphs vs eager; perf on the A5000 | Tier B passes; plants fail | 2.5 |
 | 5 | Consumer classes: L0 on sm_89; 5080 fit ≥ 16K; bars on 5080 / 4090 / A5000; `llama-server` traces on the 5080; Tier B on the 5080; tune + GGUF locks; snapshot ×3 | evidence; locks | 3 |
 | 6 | bf16 HF path: stacking rule (core) and its tests; `kernels.triton_experts` and its L0; the HF map and facts; the structural test; the judge's HF source; L2, plants and chat on an RTX PRO 6000 node (`ggml_cuda` prebuilt for sm_120, for routing and combine) | acceptance 7 | 4 |
-| 6b | Qwen3 locks (bf16 rtx-a5000 / 4090; GGUF rtx-5080 / a5000; core, `kernels.flashinfer` and, for GGUF, `kernels.ggml_cuda` pins): `propagate`, one approval covering every affected lock; the bf16 rtx-5090 lock stays outdated (a 5090 borrows the nearest lock, unverified): M0.2 is not a release commit, and the 5090 refresh is owed before the next one (design §4.6) | locks | 0.5 |
+| 6b | Qwen3 locks (bf16 rtx-a5000 / 4090; GGUF rtx-5080 / a5000; core, `kernels.flashinfer` and, for GGUF, `kernels.ggml_cuda` pins): `propagate`, one approval covering every affected lock; rtx-5090 is a release class, tuned at release (design §4.4) | locks | 0.5 |
 | 7 | Docs: design §5.1 / §5.3 / §5.6, plan §5 status | — | 0.5 |
 
 ≈ 20 days; critical path 1 → 2 and 3 (parallel) → 4 → 5 → 6b → 7, with step 6 in parallel from step 3 on (it needs
