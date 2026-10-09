@@ -1,6 +1,6 @@
 # M0.3 — Qwen3.8-27B: heterogeneous state, prefix reuse, quantized KV: design and implementation plan
 
-Status: **revision 3** (2026-10-09; revisions 1 and 2 reviewed, every finding resolved, §8). Scope: plan §6,
+Status: **revision 3, reviewed clean** (2026-10-09; revisions 1 and 2 reviewed, every finding resolved, §8). Scope: plan §6,
 which merges the former M0.3 (Qwen3.5, heterogeneous state) and M0.3b (Qwen3.8-27B GGUF, quantized KV) by user
 decision: Qwen3.8-27B is the only target. Builds on design §5.2, §5.6, §6, §7.3, §7.5, M0.1 (GGUF, `kernels.ggml_cuda`,
 the judge's tiers), M0.2 (std.moe, the HF bf16 correctness path) and spikes S1 (quantized KV) and S3 (GDN kernels).
@@ -189,7 +189,7 @@ general mechanisms; the plugin design depends on it):
 | Seam | Today | M0.3 (ABI change in **bold**) |
 |---|---|---|
 | Slot addressing | Slot pools sized `max_seqs·(1+draft)`, no null unit | a Slot pool's unit for a sequence **is its SeqTable slot** (with draft slots, M0.4: `slot·(1+k)+j`; the core owns the mapping); the pool gets the padding slot's unit as its null unit (all pools expose `pool.null`); no new batch field |
-| Prefill cuts | `n = min(remaining, budget)` | before `reserve`, the scheduler asks every kind **`cut(seq, start, n) → 1 ≤ n' ≤ n`** and takes the minimum (a kind asks its policy; default: no cut; cuts are 64-aligned for GDN); **`SeqView.prompt_len`** is added for policies |
+| Prefill cuts | `n = min(remaining, budget)` | before `reserve`, the scheduler asks every kind **`cut(seq, start, n) → 1 ≤ n' ≤ n`** and takes the minimum (a kind asks its policy; default: no cut; cuts follow the kind's alignment); **`SeqView.prompt_len`** is added for policies |
 | Publish | never called | optional: a kind that publishes exposes **`next_publish(seq) → position \| None`**; the core compares it per row (O(1), nothing for kinds that never publish, so Qwen3's decode path is unchanged) and, when a row's step ends there, asks `publish(seq, p)` → (payload, MemOps) or None; ops run in the step's `post_sample` phase; at `host_commit` the payload is registered after that commit's paged blocks are inserted (one payload per entry and spec; a duplicate is freed), only if committed tokens cover p, else dropped — before `n > 1` siblings are released |
 | Adopt | never called | `admit` takes the fixed-point hit over every kind's `hit_length` (design §6.3); the admitting request holds a reference on the adopted payload unit until its `adopt` MemOp has been enqueued (`pre_forward` of its first scheduled step), so best-effort publishes cannot evict it in between |
 | MemOps | `BatchPlan.mem_ops` never executed | run eagerly on the step's stream, before the forward / after the sample (or around a graph replay, never inside a graph: their count varies per step); `Pool.copy` copies unit by unit across pools with no temporary (a 147 MiB gather would break the profiled peak) |
@@ -314,7 +314,8 @@ assumed. The fit records KV tokens per (`max_seqs`, payloads, KV format); the de
 - A payload codec (bf16 or quantized checkpoints), judged bounded.
 - A slot-indexed chunk kernel (no gather/scatter); an in-step snapshot (fla writing the fp32 state at one chunk
   index), which would remove the extra step a cut causes; PIECEWISE graphs; `fork`.
-- MTP (`blk.64`, M0.4); the vision tower (v1).
+- MTP (`blk.64`, M0.4; its verify/commit index rows use −1, not 0, for "don't store" under the patched sentinel); the
+  vision tower (v1).
 
 ## 8. Review findings, resolved
 
