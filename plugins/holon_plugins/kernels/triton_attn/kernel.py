@@ -17,8 +17,8 @@ deterministic.
 
 Stored formats are decoded in registers right after the load (`_load_kv`): q8_0 as values × scale, rounded once to
 fp16 (q joins it there: `_compute_q`; so |K|, |V| must stay below fp16's 65504, which normed keys do), fp8 by moving
-its bits into an fp16 (exact, and on every SM: Triton rejects e4m3 on sm_86; e4m3's NaN, which saturating writes
-never store, would read as ±480).
+its bits into an fp16 (exact, and on every SM: Triton rejects e4m3 on sm_86; a NaN k/v, which the saturating write
+keeps, reads back as ±480).
 """
 from __future__ import annotations
 
