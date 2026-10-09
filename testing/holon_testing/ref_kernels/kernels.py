@@ -57,6 +57,14 @@ class PagedAttention:
         return gqa.paged_attention(q, kv, *handle)
 
 
+class KvWrite:
+    def __init__(self, ctx, **facts) -> None:
+        pass
+
+    def __call__(self, k, v, kv, unit, off) -> None:
+        gqa.kv_write(k, v, kv, unit, off)
+
+
 class CausalAttention:
     def __init__(self, ctx, **facts) -> None:
         pass
@@ -157,4 +165,4 @@ BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul"
          "attention.paged_verify": PagedAttention, "attention.causal": CausalAttention,
          "qlinear": QLinear, "qembedding": QEmbedding, "linear_experts": LinearExperts, "moe_topk": MoeTopk,
          "moe_combine": MoeCombine, "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule,
-         "gated_rmsnorm": GatedRMSNorm}
+         "gated_rmsnorm": GatedRMSNorm, "kv_write": KvWrite}

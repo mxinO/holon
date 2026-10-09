@@ -70,19 +70,27 @@ class GQA(nn.Module):
     state) it attends over each whole sequence with the `attention.causal@1` kernel.
     """
 
+    @staticmethod
+    def kv_layout(ctx) -> str:
+        """The KV layout of the deployment's `kv.format` plugin option (default: the model dtype)."""
+        fmt = ctx.options.get("plugins", {}).get("kv.format")
+        if fmt not in kernels.FORMATS:
+            raise ValueError(f"kv.format {fmt!r}: one of {sorted(f for f in kernels.FORMATS if f)}")
+        return kernels.FORMATS[fmt]
+
     @classmethod
     def state_specs(cls, params: dict, layers: tuple[int, ...], ctx) -> list[StateSpec]:
-        page = ctx.options.get("page_size", 16)
-        per_layer = 2 * page * params["kv_heads"] * params["head_dim"] * ctx.dtype.itemsize
-        return [StateSpec("kv", "paged@1", Paged(per_layer * len(layers), page), layers, kernels.LAYOUT,
+        page, layout = ctx.options.get("page_size", 16), cls.kv_layout(ctx)
+        per_layer = kernels.page_bytes(layout, page, params["kv_heads"], params["head_dim"], ctx.dtype.itemsize)
+        return [StateSpec("kv", "paged@1", Paged(per_layer * len(layers), page), layers, layout,
                           segments=len(layers))]
 
     @classmethod
     def planner(cls, params: dict, specs: list[StateSpec], ctx) -> Planner:
-        dtype = str(ctx.dtype).removeprefix("torch.")
+        dtype, layout = str(ctx.dtype).removeprefix("torch."), specs[0].layout
         facts = {"heads": params["heads"], "kv_heads": params["kv_heads"], "head_dim": params["head_dim"],
-                 "page": specs[0].shape.tokens_per_unit, "q_dtype": dtype, "kv_dtype": dtype,
-                 "layout": kernels.LAYOUT, "max_seqs": ctx.options["max_seqs"]}
+                 "page": specs[0].shape.tokens_per_unit, "q_dtype": dtype, "kv_dtype": kernels.kv_dtype(layout, dtype),
+                 "layout": layout, "max_seqs": ctx.options["max_seqs"]}
         ops = (kernels.PREFILL, kernels.DECODE, kernels.VERIFY)
         chosen = [ctx.select_kernel(op, site=specs[0].group, **facts) for op in ops]
         decode_props = chosen[1].props
@@ -107,18 +115,30 @@ class GQA(nn.Module):
         self._qk: nn.Module | None = None           # … or q and k (a quantized v of another type stays apart)
         bound = ctx.state("kv", layer)
         self._kv = None if bound is None else (bound[1], bound[0].layers.index(layer), len(bound[0].layers),
-                                                bound[0].shape.tokens_per_unit, ctx.dtype)
-        self._causal = None
+                                                bound[0].shape.tokens_per_unit, ctx.dtype, bound[0].layout)
+        self._causal = self._write = None
+        if bound is not None:
+            facts = {"layout": bound[0].layout, "kv_heads": kv_heads, "head_dim": head_dim,
+                     "page": bound[0].shape.tokens_per_unit, "dtype": str(ctx.dtype).removeprefix("torch.")}
+            self._write = ctx.select_kernel(kernels.KV_WRITE, site=f"std.mixers.gqa[layer={layer}]", **facts).impl(
+                ctx, **facts)
         if bound is None:
             facts = {"heads": heads, "kv_heads": kv_heads, "head_dim": head_dim,
                      "dtype": str(ctx.dtype).removeprefix("torch.")}
             self._causal = ctx.select_kernel(kernels.CAUSAL, site=f"std.mixers.gqa[layer={layer}]", **facts).impl(
                 ctx, **facts)
 
-    def _kv_layer(self) -> torch.Tensor:
-        pool, index, n_layers, page, dtype = self._kv
-        shape = (n_layers, pool.capacity, 2, self.kv_heads, page, self.head_dim)
-        return pool.view(dtype, shape)[index]
+    def _kv_layer(self):
+        """This layer's pages as its layout's kernels read them (kernels.py): a tensor, or q8_0's (values, scales)."""
+        pool, index, n_layers, page, dtype, layout = self._kv
+        shape = (pool.capacity, 2, self.kv_heads, page, self.head_dim)
+        if layout == "kv.hnd.q8_0":
+            n = 2 * self.kv_heads * page * self.head_dim
+            units = pool.view(torch.uint8, (n_layers, pool.capacity, pool.unit_bytes // n_layers))[index]
+            return (units[:, :n].view(torch.int8).view(shape),
+                    units[:, n:].view(torch.float16).view(*shape[:-1], self.head_dim // kernels.Q8_BLOCK))
+        dtype = torch.float8_e4m3fn if layout == "kv.hnd.fp8" else dtype
+        return pool.view(dtype, (n_layers, *shape))[index]
 
     def finalize_weights(self, ctx) -> None:
         merge = getattr(type(self.q_proj), "merge", None)          # one matmul for q, k, v where the linears allow
@@ -151,8 +171,7 @@ class GQA(nn.Module):
             o = self._causal(q, k, v, dev.query_start)
         else:
             meta, kv = ctx.meta("kv"), self._kv_layer()
-            unit, off = meta.write_unit, meta.write_off
-            kv[unit, 0, :, off], kv[unit, 1, :, off] = k, v       # advanced indices around a slice: [T, Hkv, D]
+            self._write(k, v, kv, meta.write_unit, meta.write_off)
             o = meta.kernel.run(q, kv, meta.handle)
         o = o.reshape(t, self.heads, self.head_dim)
         if gate is not None:

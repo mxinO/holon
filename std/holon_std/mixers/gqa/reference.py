@@ -27,6 +27,10 @@ def paged_attention(q: torch.Tensor, kv: torch.Tensor, table: torch.Tensor, rows
     `query_start[b]:query_start[b+1]`, the last ones of its sequence (bottom-right causal). Rows with length 0
     (graph padding) produce zeros.
     """
+    if isinstance(kv, tuple):                     # q8_0: (values, scales), read through its dequantization
+        kv = dequantize_q8_0(*kv)
+    elif kv.dtype == FP8:
+        kv = kv.float()
     rep, page = q.shape[1] // kv.shape[2], kv.shape[3]
     out = torch.zeros_like(q)
     bounds = zip(query_start[:-1].tolist(), query_start[1:].tolist(), rows.tolist(), lens.tolist(), strict=True)
@@ -42,3 +46,44 @@ def paged_attention(q: torch.Tensor, kv: torch.Tensor, table: torch.Tensor, rows
         probs = scores.masked_fill(future, float("-inf")).softmax(-1)
         out[s:e] = torch.einsum("hqk,khd->qhd", probs, v).to(q.dtype)
     return out
+
+
+# KV formats (docs/m03-qwen38.md D6): the KV cache as stored, its write and its read.
+Q8_BLOCK = 32
+FP8 = torch.float8_e4m3fn
+FP8_MAX = 448.0
+
+
+def quantize_q8_0(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """GGUF's q8_0 over the last dim: per 32 values d = amax/127 (stored fp16), q = round(x · (1/d)) half away from
+    zero, with d and its inverse in f32 before the fp16 store (ggml's `quantize_row_q8_0_ref`)."""
+    blocks = x.float().reshape(*x.shape[:-1], -1, Q8_BLOCK)
+    d = blocks.abs().amax(-1, keepdim=True) / 127
+    inv = torch.where(d == 0, 0.0, 1.0 / d)
+    v = blocks * inv
+    q = (v.sign() * (v.abs() + 0.5).floor()).clamp(-127, 127).to(torch.int8)
+    return q.reshape(x.shape), d[..., 0].to(torch.float16)
+
+
+def dequantize_q8_0(values: torch.Tensor, scales: torch.Tensor) -> torch.Tensor:
+    blocks = values.float().reshape(*values.shape[:-1], -1, Q8_BLOCK)
+    return (blocks * scales.float()[..., None]).reshape(values.shape)
+
+
+def to_fp8(x: torch.Tensor) -> torch.Tensor:
+    """e4m3 with saturation (no inf in e4m3fn; out-of-range values clamp to ±448, as the kernels' writes do)."""
+    return x.float().clamp(-FP8_MAX, FP8_MAX).to(FP8)
+
+
+def kv_write(k: torch.Tensor, v: torch.Tensor, kv, unit: torch.Tensor, off: torch.Tensor) -> None:
+    """The `kv_write@1` oracle: this step's k/v [T, Hkv, D] into the cache at (unit, off) per token, in its format."""
+    if isinstance(kv, tuple):
+        values, scales = kv
+        for i, x in enumerate((k, v)):
+            q, d = quantize_q8_0(x)
+            values[unit, i, :, off], scales[unit, i, :, off] = q, d
+    elif kv.dtype == FP8:
+        kv[unit, 0, :, off], kv[unit, 1, :, off] = to_fp8(k), to_fp8(v)
+    else:
+        kv[unit, 0, :, off], kv[unit, 1, :, off] = k, v
+

@@ -63,8 +63,22 @@ def _supports(f: dict) -> bool:
             and f["head_dim"] in (64, 128, 256) and f["heads"] % f["kv_heads"] == 0)
 
 
+class KvWrite:
+    """`kv_write@1` for the model-dtype layout (`kv.hnd`): this step's k/v into their pages."""
+
+    def __init__(self, ctx, **facts) -> None:
+        pass
+
+    def __call__(self, k, v, kv, unit, off) -> None:
+        kv[unit, 0, :, off], kv[unit, 1, :, off] = k, v            # advanced indices around a slice: [T, Hkv, D]
+
+
 class Plugin:
     def register(self, regs) -> None:
+        regs.kernels.add("kv_write", KernelSpec(
+            op="kv_write", provider="kernels.triton_attn", impl=KvWrite, requires=Constraint(sm_min=80, sm_max=129),
+            supports=lambda f: f["layout"] == "kv.hnd", props=frozenset({"graph_safe", "deterministic"}),
+            priority=10))
         for op, impl in ((OP, Decode), ("attention.paged_verify", Verify)):
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="kernels.triton_attn", impl=impl, in_layouts={"kv": "kv.hnd"},

@@ -8,3 +8,4 @@ class Plugin:
         for target in (kernels.PREFILL, kernels.DECODE, kernels.VERIFY):
             regs.ops.add(target.split("@")[0], ref.paged_attention)
         regs.ops.add(kernels.CAUSAL.split("@")[0], ref.causal_attention)
+        regs.ops.add(kernels.KV_WRITE.split("@")[0], ref.kv_write)
