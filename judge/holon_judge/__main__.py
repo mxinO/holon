@@ -148,16 +148,20 @@ def _snapshot(a: argparse.Namespace) -> int:
 
 
 def _bounded(a: argparse.Namespace) -> int:
-    from holon.core.engine import Engine, EngineConfig
+    from holon.core.cli import engine_config, engine_flags
+    from holon.core.engine import Engine
 
     from . import bounded, gguf
 
     path = golden.resolve_model(a.model)
     trace = bounded.Trace.from_prompts(PromptSet.load(a.prompts), sessions=a.sessions)
+    flags = argparse.ArgumentParser()
+    engine_flags(flags)
+    base = dataclasses.replace(engine_config(str(path), flags.parse_args(shlex.split(a.engine_args))),
+                               dtype=golden.DTYPES[a.dtype], max_model_len=trace.max_len)
 
     def build(**overrides):
-        return Engine(EngineConfig(model=str(path), dtype=golden.DTYPES[a.dtype], max_model_len=trace.max_len,
-                                   **overrides))
+        return Engine(dataclasses.replace(base, **overrides))
 
     if a.graphs_vs_eager:                                # every decode step a batch of `sessions` rows, padded
         baseline = bounded.BASELINE | {"cuda_graphs": False}
@@ -166,6 +170,8 @@ def _bounded(a: argparse.Namespace) -> int:
         baseline = bounded.BASELINE
         configs = {f"prefix {'on' if p else 'off'}, depth {int(o)}": {"prefix_cache": p, "overlap": o}
                    for p, o in ((True, True), (True, False), (False, True))}   # the baseline is off, 0
+        if a.chunked:                                    # prefill in chunks of `chunked` tokens vs one shot
+            configs[f"chunked {a.chunked}"] = bounded.BASELINE | {"max_step_tokens": a.chunked}
     with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
         report = bounded.compare_configs(build, configs, trace, a.k, baseline)
     meta = gguf.file_meta(path) if path.suffix == ".gguf" else golden.model_meta(path)
@@ -252,6 +258,8 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--prompts", required=True)
     b.add_argument("--sessions", type=int, default=48, help="concurrent sessions: the decode batch")
     b.add_argument("--graphs-vs-eager", action="store_true", help="judge graphed decode against an eager baseline")
+    b.add_argument("--chunked", type=int, help="also judge prefill in chunks of this many tokens")
+    b.add_argument("--engine-args", default="", help="EngineConfig flags, as for `holon serve`")
     b.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
     b.add_argument("--k", type=int, default=20)
     b.add_argument("--json", help="write the machine-readable report here")

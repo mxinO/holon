@@ -17,7 +17,8 @@ from .supervisor import supervised
 
 
 def engine_flags(parser: argparse.ArgumentParser) -> None:
-    """One flag per EngineConfig field (bool fields as --x / --no-x; dtype by name)."""
+    """One flag per EngineConfig field (bool fields as --x / --no-x; dtype by name; dict fields as key=value
+    lists, e.g. `--plugin-options kv.format=q8_0 recurrent.checkpoints=2`)."""
     hints = typing.get_type_hints(EngineConfig)
     for f in dataclasses.fields(EngineConfig):
         if f.name == "model":
@@ -29,12 +30,20 @@ def engine_flags(parser: argparse.ArgumentParser) -> None:
             parser.add_argument(flag, type=lambda s: getattr(torch, s), default=f.default)
         elif kind in (int, float, str, int | None, str | None):
             parser.add_argument(flag, type={int | None: int, str | None: str}.get(kind, kind), default=f.default)
+        elif typing.get_origin(kind) is dict:
+            parser.add_argument(flag, nargs="*", default=[], metavar="KEY=VALUE")
 
 
 def engine_config(model: str, args: argparse.Namespace) -> EngineConfig:
     """The EngineConfig of `model` from the flags `engine_flags` added."""
     fields = {f.name for f in dataclasses.fields(EngineConfig)} - {"model"}
-    return EngineConfig(model=model, **{k: v for k, v in vars(args).items() if k in fields})
+    values = {k: v for k, v in vars(args).items() if k in fields}
+    for k, v in values.items():
+        if isinstance(v, list):                       # a dict field's key=value list
+            if any("=" not in item for item in v):
+                raise SystemExit(f"--{k.replace('_', '-')}: expected KEY=VALUE items, got {v}")
+            values[k] = dict(item.split("=", 1) for item in v)
+    return EngineConfig(model=model, **values)
 
 
 def main(argv: list[str] | None = None) -> None:
