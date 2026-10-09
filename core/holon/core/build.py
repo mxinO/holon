@@ -36,8 +36,9 @@ class BuildContext:
     """Instantiates units by Ref; the only way models and units obtain other units (invariant 2)."""
 
     def __init__(self, plugins: PluginSet, device: torch.device, dtype: torch.dtype = torch.bfloat16,
-                 options: dict[str, Any] | None = None) -> None:
+                 options: dict[str, Any] | None = None, ledger: Any = None) -> None:
         self.plugins = plugins
+        self.ledger = ledger               # the engine's memory ledger (None: a model-only build)
         self.device = device
         self.dtype = dtype                 # parameter dtype for units that do not override it
         self.fingerprint = platform.fingerprint(device)
@@ -100,6 +101,12 @@ class BuildContext:
 
     def workspace(self, name: str, nbytes: int) -> torch.Tensor:
         return self.static(f"workspace.{name}", (nbytes,), torch.uint8)
+
+    def pool(self, name: str, *, unit_bytes: int, segments: int = 1, min_units: int = 0, pref_units: int = 0) -> Any:
+        if self.ledger is None:
+            raise PluginError(f"pool {name!r}: a model-only build has no memory ledger")
+        return self.ledger.plugin_pool(name, unit_bytes=unit_bytes, segments=segments, min_units=min_units,
+                                       pref_units=pref_units)
 
     def bind_state(self, spec: Any, pool: Any) -> None:
         """Make `pool` the state of `spec` for its layers (engine builds; model-only builds bind nothing)."""

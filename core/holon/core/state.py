@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from holon.api import BatchPlan, Paged, Pages, Seq, StateSpec
+from holon.api import BatchPlan, MemOp, Paged, Pages, Payload, Seq, Slot, StateSpec
 
 from .inputs import Uploader
 from .memory import OutOfUnits, Pool
@@ -58,10 +58,10 @@ class BlockTable:
 class _View:
     """The SeqView a StateKind sees: a read-only window on the request (no copies; this runs per request per step)."""
 
-    __slots__ = ("_seq", "_units")
+    __slots__ = ("_seq", "_units", "_slot_units")
 
-    def __init__(self, seq: Seq, units: dict[str, list[int]]) -> None:
-        self._seq, self._units = seq, units
+    def __init__(self, seq: Seq, units: dict[str, list[int]], slot_units: dict[str, int] | None = None) -> None:
+        self._seq, self._units, self._slot_units = seq, units, slot_units or {}
 
     @property
     def slot(self) -> int:
@@ -75,16 +75,48 @@ class _View:
     def tokens(self) -> list[int]:
         return self._seq.tokens
 
+    @property
+    def prompt_len(self) -> int:
+        return self._seq.prompt_len
+
     def units(self, spec: str) -> list[int]:
+        per = self._slot_units.get(spec)
+        if per is not None:                       # Slot state: the request's slot owns its units (api.Slot)
+            return list(range(self._seq.slot * per, (self._seq.slot + 1) * per))
         return self._units.get(spec, [])
+
+
+class _Hits:
+    """The PrefixView a kind's `hit_length` sees: the payloads of one spec on a request's matched chain."""
+
+    def __init__(self, entries: list, spec: str, block: int) -> None:
+        self.entries, self.spec, self.block = entries, spec, block
+
+    def payload(self, block: int) -> Payload | None:
+        return self.entries[block].payloads.get(self.spec) if block < len(self.entries) else None
+
+    def blocks(self, upto: int) -> int:
+        return min(upto // self.block, len(self.entries))
+
+
+@dataclasses.dataclass
+class StepOps:
+    """The state work of one step, decided when it is launched: MemOps to run around it, payloads it publishes (to
+    register at its commit) and payload units pinned until the step is enqueued."""
+
+    mem_ops: list[MemOp]
+    publishes: list[tuple[Seq, str, int, Payload]]
+    pins: list[Payload]
 
 
 class StateManager:
     """Slots, units and block tables of admitted requests, plus the prefix cache (when given an index).
 
-    v0 prefix caching covers paged state only: pages are shared by reference, so a hit adopts whole cached blocks
-    and publishing a completed block hands its pages to the index. Checkpointed state (recurrent mixers) joins
-    through StateKind publish/adopt MemOps in M0.3.
+    Paged state is shared by reference: a hit adopts whole cached blocks and publishing a completed block hands its
+    pages to the index. State that cannot be shared that way (e.g. recurrent state) joins through its kind: the hit
+    is the fixed point over every kind's `hit_length` (design §6.3), a hit copies the kind's payload in (`adopt`
+    MemOps before the request's first forward) and the kind publishes payloads at positions it chooses (`publish`
+    MemOps after the step, registered at the step's commit once committed tokens cover them).
     """
 
     def __init__(self, bound: list[BoundSpec], max_seqs: int, max_tokens: int, device: torch.device,
@@ -97,6 +129,10 @@ class StateManager:
         self.capacity: dict[int, int] = {}                     # slot -> tokens its units hold (fast-path reserve)
         self._sized = all(hasattr(b.kind, "capacity") for b in bound)
         self._free_slots = list(range(max_seqs - 1, -1, -1))
+        self._slot_units = {b.spec.name: 1 + b.spec.shape.draft_slots for b in bound if isinstance(b.spec.shape, Slot)}
+        self._cutting = [b.kind for b in bound if hasattr(b.kind, "cut")]
+        self._publishing = [b for b in bound if hasattr(b.kind, "next_publish")]
+        self._adopting: dict[int, list[tuple[list[MemOp], Payload]]] = {}      # slot -> adopt ops not yet launched
         self.tables: dict[str, BlockTable] = {}
         self._table_of: dict[str, BlockTable] = {}            # paged spec name -> its group's table
         for b in bound:
@@ -119,10 +155,13 @@ class StateManager:
         if self.index is not None and seq.params.prompt_logprobs is None:   # those need every position computed
             keys = self.index.keys(seq.tokens, 0, (len(seq.tokens) - 1) // self.index.block, None)
             entries = self.index.match(keys, seq.tokens)
+            entries = entries[:self._hit_blocks(seq, entries)]
             for e in entries:
                 for name, units in e.units.items():
                     self._take(seq.slot, name, np.asarray(units, dtype=np.int32), shared=True)
             self.chain[seq.slot] = [e.key for e in entries]
+            if entries:
+                self._adopt(seq, entries[-1])
         seq.num_computed = len(entries) * (self.index.block if self.index else 0)
         self._resize(seq)
         try:
@@ -134,12 +173,85 @@ class StateManager:
         self.tokens_saved += seq.num_computed
         return True
 
+    def _hit_blocks(self, seq: Seq, entries: list) -> int:
+        """The cached blocks every kind can resume from: the fixed point of the non-paged kinds' `hit_length` over
+        the matched chain (paged state resumes from any block; a kind without `hit_length` from none)."""
+        n, block = len(entries), self.index.block
+        others = [b for b in self.bound if not isinstance(b.spec.shape, Paged)]
+        while n:
+            hit = min((b.kind.hit_length(_Hits(entries, b.spec.name, block), n * block).length // block
+                       if hasattr(b.kind, "hit_length") else 0 for b in others), default=n)
+            if hit >= n:
+                return n
+            n = hit
+        return 0
+
+    def _adopt(self, seq: Seq, entry) -> None:
+        """Queue the non-paged kinds' adopt MemOps for a hit ending at `entry`; their payloads stay pinned until the
+        ops are launched, so a publish cannot evict and reuse those units in between."""
+        view, todo = _View(seq, self.held[seq.slot], self._slot_units), []
+        for b in self.bound:
+            payload = entry.payloads.get(b.spec.name)
+            if payload is not None and not isinstance(b.spec.shape, Paged):
+                self.index.payload_pools[payload.pool].incref(payload.units)
+                todo.append((b.kind.adopt(view, payload), payload))
+        if todo:
+            self._adopting[seq.slot] = todo
+
+    def cut(self, seq: Seq, n: int) -> int:
+        """The tokens (1 … n) a prefill row of `seq` may take, so the step ends where a kind publishes."""
+        if self._cutting:
+            view = _View(seq, self.held[seq.slot], self._slot_units)
+            for kind in self._cutting:
+                n = min(n, max(1, kind.cut(view, seq.num_computed, n)))
+        return n
+
+    def step_ops(self, plan: BatchPlan, seqs: list[Seq]) -> StepOps:
+        """A step's state work at launch: pending adopts of its requests (before the forward) and the payloads
+        kinds publish where a row's step ends (after the sample). Host lengths are exact for prefill and decode
+        rows here (before the launch advances them)."""
+        ops, publishes, pins = [], [], []
+        if self._adopting:
+            for seq in seqs:
+                for adopt, payload in self._adopting.pop(seq.slot, ()):
+                    ops += adopt
+                    pins.append(payload)
+        if self._publishing and self.index is not None:
+            for seq, n in zip(seqs, plan.n_query.tolist(), strict=True):
+                view = _View(seq, self.held[seq.slot], self._slot_units)
+                for b in self._publishing:
+                    at = b.kind.next_publish(view)
+                    if at is None or at != seq.num_computed + n:
+                        continue
+                    if (pool := getattr(b.kind, "payload_pool", None)) is not None:
+                        self.index.evict_payloads(pool, 1)
+                    if (made := b.kind.publish(view, at)) is not None:
+                        ops += made[1]
+                        publishes.append((seq, b.spec.name, at, made[0]))
+        return StepOps(ops, publishes, pins)
+
+    def unpin(self, pins: list[Payload]) -> None:
+        """Drop the adopt pins once the step that copies them is enqueued (stream order protects the copy)."""
+        for payload in pins:
+            self.index.payload_pools[payload.pool].decref(payload.units)
+
+    def register(self, seq: Seq, spec: str, at: int, payload: Payload) -> None:
+        """At a step's commit: add a payload published at `at` to the block ending there, if committed tokens cover
+        `at` and the block is cached; otherwise free it."""
+        block, held = self.index.block, False
+        if 0 < at <= len(seq.tokens) and at % block == 0:
+            keys = self.index.keys(seq.tokens, 0, at // block, None)
+            found = self.index.match(keys, seq.tokens)
+            held = len(found) == len(keys) and self.index.attach(found[-1], spec, payload)
+        if not held:
+            self.index.payload_pools[payload.pool].decref(payload.units)
+
     def reserve(self, seq: Seq, new_tokens: int) -> bool:
         """The units admitted `seq` needs for `new_tokens` more tokens, evicting unused cached blocks if a pool is
         short; all-or-nothing."""
         if seq.num_computed + new_tokens <= self.capacity.get(seq.slot, -1):
             return True                          # its units already hold these tokens
-        view = _View(seq, self.held[seq.slot])
+        view = _View(seq, self.held[seq.slot], self._slot_units)
         taken: list[tuple[BoundSpec, np.ndarray]] = []
         try:
             for b in self.bound:
@@ -158,7 +270,7 @@ class StateManager:
 
     def _resize(self, seq: Seq, view: _View | None = None) -> None:
         if self._sized:
-            view = view or _View(seq, self.held[seq.slot])
+            view = view or _View(seq, self.held[seq.slot], self._slot_units)
             self.capacity[seq.slot] = min([b.kind.capacity(view) for b in self.bound], default=1 << 62)
 
     def _take(self, slot: int, spec: str, units: np.ndarray, shared: bool) -> None:
@@ -213,7 +325,7 @@ class StateManager:
         request in `releasing` is released and unused cached blocks are evicted."""
         if seq.slot < 0 and not self._free_slots and not any(s.slot >= 0 for s in releasing):
             return False
-        view = _View(seq, self.held.get(seq.slot, {}))
+        view = _View(seq, self.held.get(seq.slot, {}), self._slot_units)
         for b in self.bound:
             need = b.kind.units_needed(view, new_tokens)
             if need <= b.pool.num_free:
@@ -235,6 +347,8 @@ class StateManager:
             return
         for name, units in self.held.pop(seq.slot).items():
             self._pool(name).decref(np.asarray(units, dtype=np.int32))
+        for _, payload in self._adopting.pop(seq.slot, ()):
+            self.index.payload_pools[payload.pool].decref(payload.units)
         del self.chain[seq.slot]
         self.capacity.pop(seq.slot, None)
         self._free_slots.append(seq.slot)

@@ -48,6 +48,7 @@ class EngineConfig:
     cuda_graphs: bool = True                 # replay decode steps from CUDA graphs, per batch-size bucket
     max_draft_tokens: int = 0                # speculative decoding: drafts per verify row at most (0: off)
     kernels: dict[str, str] = dataclasses.field(default_factory=dict)   # op name -> pinned kernel provider
+    plugin_options: dict[str, object] = dataclasses.field(default_factory=dict)   # read by plugins, never the core
 
     def __post_init__(self) -> None:
         for name in ("page_size", "max_seqs", "max_model_len", "max_step_tokens"):
@@ -64,6 +65,7 @@ class _Inflight:
     rows: list[tuple[Seq, int, int]]          # (seq, tokens computed, logits rows: 0 | 1 | 1 + k)
     out: Launched
     sync: bool                               # commit at once (prompt logprobs were extracted on the host)
+    publishes: list = dataclasses.field(default_factory=list)   # payloads to register at the commit
 
 
 class Engine:
@@ -78,8 +80,8 @@ class Engine:
 
         self.ledger = Ledger(self.device)
         options = {"page_size": cfg.page_size, "max_seqs": cfg.max_seqs, "max_model_len": cfg.max_model_len,
-                   "max_step_tokens": cfg.max_step_tokens, "kernels": cfg.kernels}
-        self.ctx = BuildContext(p, self.device, cfg.dtype, options)
+                   "max_step_tokens": cfg.max_step_tokens, "kernels": cfg.kernels, "plugins": cfg.plugin_options}
+        self.ctx = BuildContext(p, self.device, cfg.dtype, options, ledger=self.ledger)
         bound, planners = bind_state(self.spec, self.ctx, p, self.ledger, cfg)
         model = build_model(self.spec, self.ctx)
         load_weights(model, self.ctx, source.tensors())
@@ -88,7 +90,7 @@ class Engine:
         sampler = p.load(p.single("sampler")).sampler(cfg.max_seqs + 1, self.device)
         self.state = StateManager(bound, cfg.max_seqs, cfg.max_model_len, self.device,
                                   on_admit=lambda seq: sampler.admit(seq.slot, seq.params),
-                                  index=prefix_index(self.spec, bound, cfg.prefix_cache))
+                                  index=prefix_index(self.spec, bound, cfg.prefix_cache, self.ledger.pools))
         # Speculative decoding (design §7.6): a draft policy picks k per request, one drafter proposes, the verifier
         # checks; all three are plugins, used only when drafts are enabled and a policy is installed.
         self.policy = drafter = verifier = None
@@ -99,7 +101,7 @@ class Engine:
         self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len,
                                draft_k=self._draft_k if self.policy is not None else None, host_lens_only=host_lens)
         self.executor = Executor(cfg, self.device, model, self.spec.vocab, sampler, self.state, planners,
-                                 verifier, drafter)
+                                 verifier, drafter, pools=self.ledger.pools)
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None
                                 else self.executor.state_memory(self.ledger, cfg.memory_fraction))
         self.state.reset_padding()
@@ -245,7 +247,10 @@ class Engine:
         exact = np.array([seq.inexact == 0 for seq in seqs], dtype=bool)
         logprobs = any(m and seq.params.logprobs is not None for seq, _, m in rows)
         prompt = self._prompt_rows(plan, seqs) if sync else None
+        ops = self.state.step_ops(plan, seqs)
+        plan.mem_ops = ops.mem_ops
         out = self.executor.launch(plan, exact, logprobs, prompt)
+        self.state.unpin(ops.pins)
         for r, got in zip(prompt or [], out.prompt_logprobs, strict=True):
             acc = self._prompt_lp[seqs[r.row]]
             acc.token += got.token
@@ -260,7 +265,7 @@ class Engine:
                     seq.inexact += 1
                 if seq.status is not running:
                     self.sched.finished_prefill(seq)
-        return _Inflight(rows, out, sync)
+        return _Inflight(rows, out, sync, ops.publishes)
 
     def _prompt_rows(self, plan: BatchPlan, seqs: list[Seq]) -> list[PromptRows]:
         """The prompt logprobs this step's rows owe: the prompt positions they compute that predict a prompt token,
@@ -332,6 +337,8 @@ class Engine:
             logprobs = None if k is None else Logprobs([lps[0][at]], [lps[1][at][:k]], [lps[2][at][:k]])
             prompt_lp = self._prompt_lp.pop(seq, None) if self._prompt_lp else None
             deltas.append(TokenDelta(seq.rid, out, seq.index, logprobs, prompt_lp, reason))
+        for seq, spec, at, payload in step.publishes:    # after this commit's blocks are cached
+            self.state.register(seq, spec, at, payload)
         return deltas
 
     def _completes_block(self, seq: Seq) -> bool:

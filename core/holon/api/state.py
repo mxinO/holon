@@ -25,6 +25,9 @@ class Paged:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Slot:
+    """Fixed-size state per request: request slot s owns units s·(1 + draft_slots) … + draft_slots of its pool (the
+    padding slot's units too, so graph padding rows have state to read and write)."""
+
     unit_bytes: int
     draft_slots: int = 0         # extra slots for verify intermediates
 
@@ -80,9 +83,11 @@ class HitLen:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Payload:
-    """What a StateKind publishes into the PrefixIndex for one block: units in its pool, on some tier."""
+    """What a StateKind publishes into the PrefixIndex for one block: units of the pool named `pool` (the index holds
+    the publisher's reference on them), on some tier."""
 
     units: tuple[int, ...]
+    pool: str
     tier: str = "vram"
 
 
@@ -93,11 +98,17 @@ class SeqView(Protocol):
     slot: int
     num_computed: int            # host mirror (upper bound while a step is in flight)
     tokens: tuple[int, ...]
+    prompt_len: int
 
     def units(self, spec: str) -> tuple[int, ...]: ...
 
 
 class PrefixView(Protocol):
+    """A request's matched prefix chain as one kind sees it: `block` tokens per entry; `payload(i)` is the kind's
+    payload at the end of entry i (position (i + 1)·block), `blocks(upto)` the entries within `upto` tokens."""
+
+    block: int
+
     def payload(self, block: int) -> Payload | None: ...
 
     def blocks(self, upto: int) -> int: ...
@@ -130,6 +141,13 @@ class StateKind(Rewindable, Protocol):
 
     # Optional: `capacity(seq) -> int`, the tokens the request's current units hold. When every bound kind offers it,
     # the core skips `units_needed` for steps that fit (most decode steps), which keeps per-request host work O(1).
+    #
+    # Optional, for state reused through payloads (design §6.3; paged state is shared by reference instead):
+    # `cut(seq, start, n) -> int`, the tokens (1 … n) a prefill row starting at `start` may take, so a step can end
+    # where the kind publishes; `next_publish(seq) -> int | None`, the position the kind publishes at next, so the
+    # core calls `publish` only when a row's step ends there; `payload_pool`, the name of the pool its payloads use,
+    # which the prefix index may evict payloads from to make room. `hit_length` answers for state the kind can
+    # restore; a non-paged kind without it allows no prefix hit.
 
     def reclaimable(self, seq: SeqView) -> list[int]: ...
 

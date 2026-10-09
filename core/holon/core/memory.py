@@ -100,16 +100,43 @@ class Pool:
             raise RuntimeError(f"pool {self.name!r}: unit released twice")
         self._free.extend(int(u) for u in np.unique(units) if self._refs[u] == 0)
 
+    def units(self) -> torch.Tensor:
+        """The buffer as `[segments, capacity, bytes per segment]`: unit u is `[:, u]`."""
+        return self.buffer.view(self.segments, self.capacity, self.unit_bytes // self.segments)
+
     def copy(self, src: torch.Tensor, dst: torch.Tensor) -> None:
         """Copy units `src` → `dst` (device index tensors) in every segment, in stream order."""
-        units = self.buffer.view(self.segments, self.capacity, self.unit_bytes // self.segments)
+        units = self.units()
         units[:, dst] = units[:, src]
+
+
+def copy_units(src: Pool, src_units, dst: Pool, dst_units) -> None:
+    """Copy units between pools of the same unit shape, one unit at a time in stream order, with no temporary (a
+    unit of recurrent state can be hundreds of MiB, beyond the profiled peak)."""
+    if (src.unit_bytes, src.segments) != (dst.unit_bytes, dst.segments):
+        raise ValueError(f"copy {src.name!r} → {dst.name!r}: unit shapes differ")
+    s, d = src.units(), dst.units()
+    for a, b in zip(np.asarray(src_units).tolist(), np.asarray(dst_units).tolist(), strict=True):
+        d[:, b].copy_(s[:, a], non_blocking=True)
+
+
+def run_mem_ops(ops, pools: dict[str, Pool], phase: str) -> None:
+    """Run the step's MemOps of `phase` (design §7.3), in order, on the current stream."""
+    for op in ops:
+        if op.phase == phase:
+            copy_units(pools[op.src_pool], op.src_units, pools[op.dst_pool], op.dst_units)
 
 
 @dataclasses.dataclass
 class Ledger:
     device: torch.device
     pools: dict[str, Pool] = dataclasses.field(default_factory=dict)
+
+    def plugin_pool(self, name: str, *, unit_bytes: int, segments: int = 1, min_units: int = 0,
+                    pref_units: int = 0) -> Pool:
+        """A plugin's fixed pool (`BuildCtx.pool`), namespaced so it cannot collide with the core's."""
+        return self.request(f"plugin.{name}", unit_bytes=unit_bytes, segments=segments, min_units=min_units,
+                            pref_units=max(pref_units, min_units))
 
     def request(self, name: str, *, unit_bytes: int, min_units: int, pref_units: int | None = None,
                 tokens_per_unit: int | None = None, segments: int = 1, priority: int = 0, resize: str = "fixed",

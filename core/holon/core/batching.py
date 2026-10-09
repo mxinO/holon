@@ -12,8 +12,10 @@ def padded(plan: BatchPlan, rows: int, slot: int) -> BatchPlan:
     if extra == 0:
         return plan
     pad = lambda a, v: np.concatenate([a, np.full(extra, v, dtype=a.dtype)])   # noqa: E731
-    return host_plan(plan.step, pad(plan.slots, slot), pad(plan.start_upper, 0), pad(plan.n_query, 1),
-                     pad(plan.n_logits, 1), pad(plan.host_tokens, 0), pad(plan.token_src, TokenSrc.HOST))
+    out = host_plan(plan.step, pad(plan.slots, slot), pad(plan.start_upper, 0), pad(plan.n_query, 1),
+                    pad(plan.n_logits, 1), pad(plan.host_tokens, 0), pad(plan.token_src, TokenSrc.HOST))
+    out.mem_ops, out.ext = plan.mem_ops, plan.ext
+    return out
 
 
 def host_plan(step: int, slots: np.ndarray, starts: np.ndarray, n_query: np.ndarray, n_logits: np.ndarray,

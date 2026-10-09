@@ -19,7 +19,7 @@ from . import platform
 from .batching import host_plan, padded
 from .build import StepContext
 from .inputs import Uploader
-from .memory import Ledger
+from .memory import Ledger, run_mem_ops
 from .state import StateManager
 
 PROMPT_LOGPROB_CHUNK = 256     # rows of full-vocabulary logits materialized at once for prompt logprobs
@@ -76,9 +76,11 @@ def _last_tokens(qstart: np.ndarray, n_logits: np.ndarray) -> np.ndarray:
 
 class Executor:
     def __init__(self, cfg: Any, device: torch.device, model: Any, vocab: int, sampler: Any, state: StateManager,
-                 planners: dict[str, Any], verifier: Any = None, drafter: Any = None) -> None:
-        """`cfg`: the EngineConfig (sizes, graphs on or off)."""
+                 planners: dict[str, Any], verifier: Any = None, drafter: Any = None,
+                 pools: dict[str, Any] | None = None) -> None:
+        """`cfg`: the EngineConfig (sizes, graphs on or off); `pools`: every ledger pool, by name (for MemOps)."""
         self.cfg, self.device, self.model, self.vocab, self.state = cfg, device, model, vocab, state
+        self.pools = pools or {}
         self.sampler, self.planners, self.verifier, self.drafter = sampler, planners, verifier, drafter
         seqs = cfg.max_seqs
         tokens = max(cfg.max_step_tokens, seqs * (1 + cfg.max_draft_tokens))     # a verify step: 1 + k per row
@@ -192,6 +194,8 @@ class Executor:
         ctx = self._context(plan, exact)
         out = sampled = accepts = None
         recorded: list[Logprobs] = []
+        # MemOps run eagerly in stream order around the forward, never inside a graph: their count varies per step.
+        run_mem_ops(plan.mem_ops, self.pools, "pre_forward")
         if graphed:
             keys = [meta.graph_key for meta in ctx.metas.values()]
             key = (len(plan.slots), self.sampler.variant(plan.slots), *keys)
@@ -209,6 +213,7 @@ class Executor:
             elif plan.n_logits.any():
                 out = self.sampler.sample(logits.float(), ctx)
                 sampled = self._store(ctx, out.tokens)
+        run_mem_ops(plan.mem_ops, self.pools, "post_sample")
         if sampled is not None and self.drafter is not None:
             self.drafter.propose(ctx)               # drafts for the next step, from the advanced SeqTable
         tokens = lps = None

@@ -86,6 +86,7 @@ class Scheduler:
             if budget == 0 or (seq.slot < 0 and not self._fit(seq, None)):
                 break
             n = min(len(seq.tokens) - seq.num_computed, budget)       # after admission: a prefix hit counts
+            n = self.state.cut(seq, n)                                 # end where a state kind publishes
             if not self._fit(seq, n):
                 break
             rows.append((seq, n, int(seq.num_computed + n == len(seq.tokens))))

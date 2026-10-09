@@ -1,6 +1,6 @@
 """Engine assembly (design §7): the checkpoint's weight source and the model plugin for its architecture, and the
 state the model's mixers declare — bound to ledger pools and state kinds, with one planner per state group and a
-prefix index over the paged state.
+prefix index.
 """
 from __future__ import annotations
 
@@ -75,8 +75,8 @@ def _bind(spec: StateSpec, ctx: BuildContext, plugins: PluginSet, ledger: Ledger
     shape = spec.shape
     if isinstance(shape, Paged):
         sizing = {"min_units": -(-cfg.max_model_len // shape.tokens_per_unit), "tokens_per_unit": shape.tokens_per_unit}
-    else:
-        n = cfg.max_seqs * (1 + shape.draft_slots)
+    else:                                  # every request slot, the padding slot too, owns its units (api.Slot)
+        n = (cfg.max_seqs + 1) * (1 + shape.draft_slots)
         sizing = {"min_units": n, "pref_units": n}
     pool = ledger.request(f"state.{spec.name}", unit_bytes=shape.unit_bytes, segments=spec.segments,
                           null_unit=isinstance(shape, Paged), **sizing)
@@ -86,13 +86,14 @@ def _bind(spec: StateSpec, ctx: BuildContext, plugins: PluginSet, ledger: Ledger
     return BoundSpec(spec, pool, plugins.regs.state_kinds.get(kind.name)(spec, pool, ctx))
 
 
-def prefix_index(spec: ModelSpec, bound: list[BoundSpec], enabled: bool) -> PrefixIndex | None:
-    """A prefix index over blocks every paged spec can share whole pages of; None when disabled or when some state
-    is not paged (checkpointed recurrent state joins in M0.3)."""
-    if not enabled or not bound or not all(isinstance(b.spec.shape, Paged) for b in bound):
+def prefix_index(spec: ModelSpec, bound: list[BoundSpec], enabled: bool, pools: dict[str, Any]) -> PrefixIndex | None:
+    """A prefix index over blocks every paged spec can share whole pages of and every spec's alignment divides;
+    other state joins through its kind's payloads (`pools`: every pool, by name). None when disabled."""
+    if not enabled or not bound:
         return None
-    block = math.lcm(*(b.spec.shape.tokens_per_unit for b in bound), *(b.spec.alignment for b in bound))
+    paged = [b for b in bound if isinstance(b.spec.shape, Paged)]
+    block = math.lcm(*(b.spec.shape.tokens_per_unit for b in paged), *(b.spec.alignment for b in bound))
     # Model + recipe identity. Enough within one process; weight updates (v1) and persistent tiers must add the
     # checkpoint identity and weight version (design §6.3).
     namespace = int(canonical_hash(spec).removeprefix("sha256:")[:16], 16)
-    return PrefixIndex(namespace, block, {b.spec.name: b.pool for b in bound})
+    return PrefixIndex(namespace, block, {b.spec.name: b.pool for b in paged}, pools)

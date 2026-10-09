@@ -103,6 +103,11 @@ class BuildCtx(Protocol):
     def workspace(self, name: str, nbytes: int) -> torch.Tensor:
         """Kernel scratch memory, accounted by the ledger (design §5.6 rule 1)."""
 
+    def pool(self, name: str, *, unit_bytes: int, segments: int = 1, min_units: int = 0,
+             pref_units: int = 0) -> Pool:
+        """A plugin's own pool of units, sized by the ledger with the fixed pools (design §6.1): `pref_units` when
+        the budget allows, else `min_units`."""
+
 
 class Unit(Protocol):
     """A built component (op, norm, block, mixer, ffn …), typically a `torch.nn.Module`.
