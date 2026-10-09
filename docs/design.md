@@ -422,6 +422,11 @@ class ModelSpec:
   `repeat_interleave` when tiled, and `out_proj`'s input activations are permuted rather than its packed weights),
   and norm offset / `A_log` handling follow the source. A second weight source can feed `draft_heads` (e.g. a
   separate MTP GGUF file).
+- **Stacked parameters (M0.2 D7).** `WeightRule(pattern, target, stack="e")`: checkpoint tensors that differ only in
+  the digits captured by `{e}` (HF's per-expert tensors) fill slice `e` of one `[E, …]` parameter, in place on the
+  first slice. Out-of-range or twice-filled slices, a quantized tensor under a stack, a shape mismatch, a parameter
+  filled both whole and by slices and missing slices are load errors. GGUF stores expert stacks whole and needs no
+  rule; the unit sees the same `[E, …]` stack from either source.
 - **GGUF is self-contained (M0.1 D3), as in llama.cpp.** The file alone gives the configuration (`<arch>.*`
   keys mapped to the HF keys recipes read), the tokenizer (BPE over `tokenizer.ggml.tokens/merges`; the
   pre-tokenizer chosen by `tokenizer.ggml.pre` from llama.cpp's table, e.g. `qwen2` with NFC; CONTROL tokens
@@ -492,6 +497,10 @@ def linear_ref(x, w, bias=None): return x @ w.layout.scheme.dequant_ref(w).T + (
   reference is the oracle and defines the unit's `sem` hash.
 - **Fusion in v0 = explicit composites** called by models/mixers. A composite's decomposition is its reference.
   No torch.compile in the core. (Inductor may be used as a kernel provider for a single op.)
+- **MoE (M0.2, `std.moe`):** `unit.std.moe@1` composes three ops, each with a reference: `moe_topk@1` (f32
+  softmax, top-k, renormalised), `linear_experts@1` (a stack of E experts applied per (token, slot), format-general
+  through a `layout` fact; a merged gate/up stack applies SwiGLU) and `moe_combine@1` (the weighted sum in f32, in
+  slot order). The router is f32 and the expert path f32 between the stacks (M0.2 D3).
 
 ### 5.4 Kernels
 
@@ -628,6 +637,11 @@ Adopted kernels, decided by the M0 spikes (evidence and raw numbers in `spikes/s
   in 512-row chunks above it, the q8_1 workspace declared to the ledger, no weight padding (`in` % 256 = 0; checked
   under compute-sanitizer). On the RTX 5080 Qwen3-8B Q4_K_M prefills at 1.04× and decodes at 0.98× llama.cpp
   (UD-IQ3_XXS: 1.06×, 0.97×).
+  **Extended in M0.2** with llama.cpp's MoE kernels: `mul_mat_id` (mmvq with ids, its fused SwiGLU on the merged
+  gate/up stack; mmq with ids, then our f32 SwiGLU), `topk-moe.cu` and `moe-weighted-reduction.cu`, patched to the
+  contracts' layouts (ids at row stride k; the combine stores bf16). Qwen3-30B-A3B prefills at 1.02–1.11× and
+  decodes at 0.97–1.02× llama.cpp (RTX 5080 UD-IQ3_XXS; Q4_K_M on 4090 and A5000). Dense bf16 expert stacks (an HF
+  checkpoint) run on our own `kernels.triton_experts` grouped GEMM.
   Reference dequantization: llama.cpp's gguf-py.
 - **GDN** (spike S3): vendored subset of vLLM's flash-linear-attention copy (commit `6dd813e0`, 14 files,
   ≈ 2.75k code lines, Apache-2.0 over MIT), rebuilt by `vendor.sh` + `vendor.patch`: `vllm.*` imports and env

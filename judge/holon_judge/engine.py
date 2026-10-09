@@ -26,7 +26,11 @@ class EngineLike(Protocol):
 
 
 def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None = None) -> Recording:
-    """Run every prompt with `prompt_logprobs=k` and pack the answers as a recording comparable to the golden."""
+    """Run every prompt with `prompt_logprobs=k` and pack the answers as a recording comparable to the golden; with
+    expert kernels that count their calls per path, the calls made while scoring (`expert_calls`: Tier B's path
+    check; the engine's start-up — memory profiling, graphs — excluded)."""
+    counters = _expert_counters(engine)
+    before = [dict(c) for c in counters]
     params = SamplingParams(max_tokens=1, temperature=0.0, prompt_logprobs=k)
     index = {engine.add(p.ids, params): i for i, p in enumerate(prompts.prompts)}
     parts: list[list[Logprobs]] = [[] for _ in prompts.prompts]
@@ -38,7 +42,16 @@ def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None
                 parts[index[delta.rid]].append(delta.prompt_logprobs)
     rows = [_rows(p, got, k) for p, got in zip(prompts.prompts, parts, strict=True)]
     wall = round(time.perf_counter() - t0, 2)
-    return Recording.from_rows(rows, prompts.meta() | {"source": "holon", "wall_s": wall} | (meta or {}))
+    calls = {"expert_calls": {path: sum(c[path] - b[path] for c, b in zip(counters, before, strict=True))
+                              for path in counters[0]}} if counters else {}
+    return Recording.from_rows(rows, prompts.meta() | {"source": "holon", "wall_s": wall} | (meta or {}) | calls)
+
+
+def _expert_counters(engine: EngineLike) -> list[dict[str, int]]:
+    """The per-path call counters of the engine's expert kernels (none for other engines or kernels)."""
+    model = getattr(getattr(engine, "executor", None), "model", None)
+    return [] if model is None else [m._kernel.calls for m in model.modules()
+                                     if hasattr(getattr(m, "_kernel", None), "calls")]
 
 
 def _rows(prompt: Prompt, parts: list[Logprobs], k: int) -> tuple[torch.Tensor, ...]:
@@ -70,11 +83,4 @@ def score_model(model: str, prompts: PromptSet, dtype: torch.dtype = torch.bfloa
         "weight_source": source or engine.source.kind, "max_step_tokens": engine.cfg.max_step_tokens,
         "dtype": str(dtype).removeprefix("torch."), "device": torch.device(device).type,
         "hardware": hardware(torch.device(device)), "torch": torch.__version__}
-    counters = [m._kernel.calls for m in engine.executor.model.modules()
-                if hasattr(getattr(m, "_kernel", None), "calls")]
-    before = [dict(c) for c in counters]            # the engine's start-up (memory profiling, graphs) excluded
-    rec = score(engine, prompts, k, meta)
-    if counters:                                    # expert matmuls per kernel path while scoring (decode: no mmq)
-        rec.meta["expert_calls"] = {p: sum(c[p] - b[p] for c, b in zip(counters, before, strict=True))
-                                    for p in counters[0]}
-    return rec
+    return score(engine, prompts, k, meta)
