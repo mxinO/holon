@@ -7,6 +7,7 @@ from holon.api import Batch, DeviceBatch, Pages
 from holon.core.batching import host_plan
 from holon.core.build import BuildContext
 from holon.core.plugins import PluginError, PluginSet, discover
+from holon_std.mixers.gqa.kernels import kv_dtype
 from holon_testing.ref_kernels.kernels import PagedAttention
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
@@ -37,10 +38,11 @@ def _case(rows: list[tuple[int, int]], heads: int, kv_heads: int, head_dim: int,
     return q, kv, Batch(plan, dev), pages
 
 
-def _kernel(op: str, provider: str, heads: int, kv_heads: int, head_dim: int, dtype: str = "bfloat16"):
+def _kernel(op: str, provider: str, heads: int, kv_heads: int, head_dim: int, dtype: str = "bfloat16",
+            layout: str = "kv.hnd"):
     ctx = BuildContext(PluginSet(discover()), torch.device("cuda"), options={"kernels": {op: provider}})
     facts = {"heads": heads, "kv_heads": kv_heads, "head_dim": head_dim, "page": PAGE, "q_dtype": dtype,
-             "kv_dtype": dtype, "layout": "kv.hnd", "max_seqs": MAX_SEQS}
+             "kv_dtype": kv_dtype(layout, dtype), "layout": layout, "max_seqs": MAX_SEQS}
     return ctx.select_kernel(f"{op}@1", site="test", **facts).impl(ctx, **facts)
 
 

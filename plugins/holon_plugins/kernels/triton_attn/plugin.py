@@ -1,4 +1,5 @@
-"""Our Triton paged attention as an `attention.paged_decode@1` kernel (op contract: std.mixers.gqa)."""
+"""Our Triton paged attention as `attention.paged_decode@1` and `attention.paged_verify@1` kernels, a paged prefill
+for q8_0 KV, and `kv_write@1` for every KV layout (op contracts: std.mixers.gqa)."""
 from __future__ import annotations
 
 import dataclasses
@@ -6,9 +7,7 @@ import dataclasses
 import torch
 from holon.api import Constraint, KernelSpec
 
-from .kernel import Config, paged_attention, splits_for
-
-OP = "attention.paged_decode"
+from .kernel import Config, paged_attention, paged_prefill, splits_for, write_q8_0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -58,9 +57,31 @@ class Verify(Decode):
         return ("triton_attn.verify", len(h.rows), h.splits)
 
 
-def _supports(f: dict) -> bool:
-    return (f["layout"] == "kv.hnd" and f["q_dtype"] == f["kv_dtype"] and f["q_dtype"] in ("bfloat16", "float16")
-            and f["head_dim"] in (64, 128, 256) and f["heads"] % f["kv_heads"] == 0)
+class Prefill:
+    """Ragged chunk rows, each continuing its sequence (bottom-right causal), for KV formats FlashInfer cannot read.
+    Planned from the host's row counts alone; slots, query starts and lengths are read on the device in `run`."""
+
+    def __init__(self, ctx, **facts) -> None:
+        pass
+
+    def plan(self, batch, pages) -> tuple:
+        return (pages.table, batch.dev.slots, pages.lens, batch.dev.query_start), int(batch.plan.n_query.max(initial=0))
+
+    def run(self, q: torch.Tensor, kv, h: tuple) -> torch.Tensor:
+        (table, rows, lens, query_start), max_rows = h
+        return paged_prefill(q, kv, table, rows, lens, query_start, max_rows=max_rows)
+
+
+# KV layout -> its kv_dtype fact (None: the model dtype, q_dtype)
+KV_DTYPE = {"kv.hnd": None, "kv.hnd.fp8": "float8_e4m3fn", "kv.hnd.q8_0": "q8_0"}
+
+
+def _supports(layout: str):
+    def supports(f: dict) -> bool:
+        return (f["layout"] == layout and f["kv_dtype"] == (KV_DTYPE[layout] or f["q_dtype"])
+                and f["q_dtype"] in ("bfloat16", "float16") and f["head_dim"] in (64, 128, 256)
+                and f["heads"] % f["kv_heads"] == 0)
+    return supports
 
 
 class KvWrite:
@@ -73,14 +94,44 @@ class KvWrite:
         kv[unit, 0, :, off], kv[unit, 1, :, off] = k, v            # advanced indices around a slice: [T, Hkv, D]
 
 
+class KvWriteFp8(KvWrite):
+    """`kv.hnd.fp8`: e4m3 with saturation (out-of-range values clamp to ±448; a plain cast would give NaN)."""
+
+    def __call__(self, k, v, kv, unit, off) -> None:
+        kv[unit, :, :, off] = torch.stack((k, v), 1).clamp_(-448.0, 448.0).to(kv.dtype)   # [T, 2, Hkv, D]
+
+
+class KvWriteQ8(KvWrite):
+    """`kv.hnd.q8_0`: GGUF q8_0 per 32 values, one Triton launch for k and v."""
+
+    def __call__(self, k, v, kv, unit, off) -> None:
+        write_q8_0(k, v, kv, unit, off)
+
+
+def _write_supports(layout: str):
+    def supports(f: dict) -> bool:
+        return f["layout"] == layout and (layout != "kv.hnd.q8_0" or f["head_dim"] in (64, 128, 256))
+    return supports
+
+
 class Plugin:
     def register(self, regs) -> None:
-        regs.kernels.add("kv_write", KernelSpec(
-            op="kv_write", provider="kernels.triton_attn", impl=KvWrite, requires=Constraint(sm_min=80, sm_max=129),
-            supports=lambda f: f["layout"] == "kv.hnd", props=frozenset({"graph_safe", "deterministic"}),
-            priority=10))
-        for op, impl in ((OP, Decode), ("attention.paged_verify", Verify)):
+        anywhere, fp8_sms = Constraint(sm_min=80, sm_max=129), Constraint(sm_min=89, sm_max=129)
+        props = frozenset({"graph_safe", "deterministic"})
+        for layout, impl in (("kv.hnd", KvWrite), ("kv.hnd.fp8", KvWriteFp8), ("kv.hnd.q8_0", KvWriteQ8)):
+            regs.kernels.add("kv_write", KernelSpec(
+                op="kv_write", provider="kernels.triton_attn", impl=impl, requires=anywhere,
+                supports=_write_supports(layout), props=props, priority=10))
+        # Decode and verify read the model dtype and q8_0 everywhere. fp8 is read for verify only, where FlashInfer
+        # serves its prefill and decode (sm_89 on: no fast e4m3 before), since verify rows have device lengths only.
+        for op, impl, layout, requires in (
+                ("attention.paged_decode", Decode, "kv.hnd", anywhere),
+                ("attention.paged_decode", Decode, "kv.hnd.q8_0", anywhere),
+                ("attention.paged_verify", Verify, "kv.hnd", anywhere),
+                ("attention.paged_verify", Verify, "kv.hnd.q8_0", anywhere),
+                ("attention.paged_verify", Verify, "kv.hnd.fp8", fp8_sms),
+                ("attention.paged_prefill", Prefill, "kv.hnd.q8_0", anywhere)):
             regs.kernels.add(op, KernelSpec(
-                op=op, provider="kernels.triton_attn", impl=impl, in_layouts={"kv": "kv.hnd"},
-                requires=Constraint(sm_min=80, sm_max=129), supports=_supports,
-                props=frozenset({"graph_safe", "deterministic"}), priority=10))
+                op=op, provider="kernels.triton_attn", impl=impl, in_layouts={"kv": layout}, requires=requires,
+                supports=_supports(layout), props=props if impl is not Prefill else frozenset({"deterministic"}),
+                priority=10))
