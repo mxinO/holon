@@ -344,9 +344,9 @@ Carried forward:
   absolute headroom floor in the KV budget.
 - The 30B GGUF goldens and floors predate the `experts` meta field; their expert path was pinned to eager anyway
   (`gguf.hf_model`).
-- Lock classes (2026-10-09 decision, design §4.4): rtx-4090 and rtx-5080 during development; rtx-5090, rtx-3090 and
-  rtx-a5000 at release (their cards borrow the nearest lock, unverified, until then; the outdated rtx-5090 Qwen3-8B
-  lock stays as history). The rtx-4090 has no Qwen3-8B GGUF locks yet (M0.1 wrote them for rtx-a5000 and rtx-5080).
+- Lock classes (2026-10-09 decision, design §4.4): rtx-4090 and rtx-5080 during development; rtx-5090 and rtx-3090
+  at release (their cards borrow the nearest lock, unverified, until then; the outdated rtx-5090 Qwen3-8B lock stays
+  as history); rtx-a5000 has no locks (an sm_86 L0 host, uncommon among users). The rtx-4090 has no Qwen3-8B GGUF locks yet (M0.1 wrote them for rtx-a5000 and rtx-5080).
 - UD-Q3_K_XL (optional) not recorded.
 
 ## 6. M0.3 — heterogeneous state (Qwen3.5-4B → 9B, text-only)

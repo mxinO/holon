@@ -261,8 +261,8 @@ There is no separate database. The **Registry** is the git history of lockfiles 
   toolchain majors (CUDA, torch; the torch pin implies Triton), e.g. `rtx-5090/cu130-torch2.11`. GPU UUID, driver
   build and measured bandwidths are recorded in evidence only. **Lock classes during development:** `rtx-5080`
   (sm_120) and `rtx-4090` (sm_89), re-propagated on every shared change. **Release classes:** `rtx-5090`,
-  `rtx-3090`, `rtx-a5000`, tuned once per release. **Kernel correctness** (L0, memcheck) runs on every kernel change
-  on sm_86 (`rtx-a5000`, the local development host), sm_89 and sm_120a; a card of a covered SM with no lock
+  `rtx-3090`, tuned once per release. `rtx-a5000` (the local development host, uncommon among users) has no locks.
+  **Kernel correctness** (L0, memcheck) runs on every kernel change on sm_86 (the A5000), sm_89 and sm_120a; a card of a covered SM with no lock
   borrows the nearest one (below). Evidence is produced on these cards (plan §1).
 - **Missing or outdated lock for a class** (an outdated lock pins unit `src`s that the deployed commit does not
   contain) → the nearest class's current lock (same SM preferred) is used, flagged `unverified`, with an alert. The engine **never refuses to serve** for lack of a lock; `holon tune` on the host produces a
