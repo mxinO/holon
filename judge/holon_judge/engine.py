@@ -28,7 +28,9 @@ class EngineLike(Protocol):
 def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None = None) -> Recording:
     """Run every prompt with `prompt_logprobs=k` and pack the answers as a recording comparable to the golden; with
     expert kernels that count their calls per path, the calls made while scoring (`expert_calls`: Tier B's path
-    check; the engine's start-up — memory profiling, graphs — excluded)."""
+    check; the engine's start-up — memory profiling, graphs — excluded) and its KV cache format (`kv`, unless the
+    model dtype: a floor must emulate the same, `compare`)."""
+    kv = getattr(getattr(engine, "cfg", None), "plugin_options", {}).get("kv.format")
     counters = _expert_counters(engine)
     before = [dict(c) for c in counters]
     params = SamplingParams(max_tokens=1, temperature=0.0, prompt_logprobs=k)
@@ -44,7 +46,8 @@ def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None
     wall = round(time.perf_counter() - t0, 2)
     calls = {"expert_calls": {path: sum(c[path] - b[path] for c, b in zip(counters, before, strict=True))
                               for path in counters[0]}} if counters else {}
-    return Recording.from_rows(rows, prompts.meta() | {"source": "holon", "wall_s": wall} | (meta or {}) | calls)
+    return Recording.from_rows(rows, prompts.meta() | {"source": "holon", "wall_s": wall} | (meta or {}) | calls
+                               | ({"kv": kv} if kv else {}))
 
 
 def _expert_counters(engine: EngineLike) -> list[dict[str, int]]:
@@ -84,5 +87,5 @@ def score_model(model: str, prompts: PromptSet, dtype: torch.dtype = torch.bfloa
     meta = (gguf.file_meta(path) if path.suffix == ".gguf" else model_meta(path)) | {
         "weight_source": source or engine.source.kind, "max_step_tokens": engine.cfg.max_step_tokens,
         "dtype": str(dtype).removeprefix("torch."), "device": torch.device(device).type,
-        "hardware": hardware(torch.device(device)), "torch": torch.__version__, **({"kv": kv} if kv else {})}
+        "hardware": hardware(torch.device(device)), "torch": torch.__version__}
     return score(engine, prompts, k, meta)
