@@ -408,7 +408,7 @@ def padding_on_a_real_slot() -> Iterator[None]:
 
 QWEN35_PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "qwen35-tiled-as-grouped": lambda: _qwen35_facts(order="grouped"),
-    "qwen35-rotary-all-dims": lambda: _qwen35_facts(rotary_dim=256),
+    "qwen35-rotary-all-dims": lambda: _qwen35_facts(rotary_dim=256, sections=[]),     # partial_rotary_factor read as 1
     "qwen35-norm-offset-twice": lambda: _qwen35_transform("qwen3_5.minus_one", lambda t: t.float()),
     "qwen35-a-log-sign": lambda: _qwen35_transform("qwen3_5.a_log", lambda t: -torch.log(-t.float())),
     "qwen35-gate-one-block": qwen35_gate_one_block, "qwen35-stale-state": qwen35_stale_state,
