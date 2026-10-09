@@ -61,6 +61,9 @@ class Planner:
 class GQA(nn.Module):
     """Grouped-query attention with optional per-head q/k norm. Rope and norms are injected units.
 
+    `output_gate="sigmoid"`: `q_proj` also emits a gate, interleaved per head (each head's `head_dim` queries, then its
+    `head_dim` gate values), and the attention output is multiplied by `sigmoid(gate)` before `o_proj`.
+
     With engine state bound, keys and values live in a paged pool shared by all layers of this mixer, one pool
     segment per layer — [layers, units, 2 (k/v), kv_heads, page, head_dim] (HND, the layout every selected
     attention kernel must read) — so each layer's slice is contiguous for kernels. In a model-only build (no
@@ -86,10 +89,14 @@ class GQA(nn.Module):
         return Planner(*(spec.impl(ctx, **facts) for spec in chosen), needs_host_lens="needs_host_lens" in decode_props)
 
     def __init__(self, ctx, *, layer: int, hidden: int, heads: int, kv_heads: int, head_dim: int, rope: Ref,
-                 qk_norm: Ref | None = None) -> None:
+                 qk_norm: Ref | None = None, output_gate: str = "none") -> None:
         super().__init__()
+        if output_gate not in ("none", "sigmoid"):
+            raise ValueError(f"output_gate {output_gate!r}: expected 'none' or 'sigmoid'")
         self.heads, self.kv_heads, self.head_dim = heads, kv_heads, head_dim
-        self.q_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=heads * head_dim))
+        self.gated = output_gate == "sigmoid"
+        self.q_width = heads * head_dim * (2 if self.gated else 1)
+        self.q_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=self.q_width))
         self.k_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=kv_heads * head_dim))
         self.v_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=kv_heads * head_dim))
         self.o_proj = ctx.unit(Ref(LINEAR, in_features=heads * head_dim, out_features=hidden))
@@ -124,12 +131,16 @@ class GQA(nn.Module):
         t = x.shape[0]
         if self._qkv is not None:
             q, k, v = self._qkv(x).split(
-                [self.heads * self.head_dim, self.kv_heads * self.head_dim, self.kv_heads * self.head_dim], dim=-1)
+                [self.q_width, self.kv_heads * self.head_dim, self.kv_heads * self.head_dim], dim=-1)
         elif self._qk is not None:
-            q, k = self._qk(x).split([self.heads * self.head_dim, self.kv_heads * self.head_dim], dim=-1)
+            q, k = self._qk(x).split([self.q_width, self.kv_heads * self.head_dim], dim=-1)
             v = self.v_proj(x)
         else:
             q, k, v = self.q_proj(x), self.k_proj(x), self.v_proj(x)
+        gate = None
+        if self.gated:
+            q, gate = q.reshape(t, self.heads, 2 * self.head_dim).chunk(2, dim=-1)
+            q = q.contiguous()                                   # the norm and rope kernels take dense rows
         q = q.reshape(t, self.heads, self.head_dim)
         k = k.reshape(t, self.kv_heads, self.head_dim)
         v = v.reshape(t, self.kv_heads, self.head_dim)
@@ -143,4 +154,7 @@ class GQA(nn.Module):
             unit, off = meta.write_unit, meta.write_off
             kv[unit, 0, :, off], kv[unit, 1, :, off] = k, v       # advanced indices around a slice: [T, Hkv, D]
             o = meta.kernel.run(q, kv, meta.handle)
+        o = o.reshape(t, self.heads, self.head_dim)
+        if gate is not None:
+            o = o * torch.sigmoid(gate)
         return self.o_proj(o.reshape(t, self.heads * self.head_dim))

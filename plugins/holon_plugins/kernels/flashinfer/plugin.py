@@ -93,7 +93,9 @@ def _half(f: dict) -> bool:
 
 
 def _rope(f: dict) -> bool:
-    return _half(f) and f["rotary_dim"] == f["head_dim"] and f["head_dim"] in (64, 128, 256)
+    # partial rotary (the first `rotary_dim` dims of each head, neox) comes from the cos/sin cache's width
+    return (_half(f) and f["head_dim"] in (64, 128, 256) and 0 < f["rotary_dim"] <= f["head_dim"]
+            and f["rotary_dim"] % 2 == 0)
 
 
 class Plugin:

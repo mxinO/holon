@@ -40,17 +40,20 @@ def test_rmsnorm_and_fused_add(dtype, offset):
     _close(got_y, want_y)
 
 
+@pytest.mark.parametrize(("head_dim", "rotary_dim", "theta"), [(128, 128, 1e6), (256, 64, 1e7)])  # Qwen3, Qwen3.8
 @pytest.mark.parametrize("dtype", DTYPES)
-def test_rope(dtype):
-    facts = {"head_dim": 128, "rotary_dim": 128, "theta": 1e6, "max_positions": 8192,
+def test_rope(dtype, head_dim, rotary_dim, theta):
+    facts = {"head_dim": head_dim, "rotary_dim": rotary_dim, "theta": theta, "max_positions": 8192,
              "dtype": str(dtype).removeprefix("torch.")}
     fast, ref = _pair("rope@1", **facts)
-    q, k = torch.randn(29, 32, 128, device="cuda", dtype=dtype), torch.randn(29, 8, 128, device="cuda", dtype=dtype)
+    q = torch.randn(29, 24, head_dim, device="cuda", dtype=dtype)
+    k = torch.randn(29, 4, head_dim, device="cuda", dtype=dtype)
     pos = torch.tensor([0, 1, 2, 15, 16, 1000, 4095, 8191] + list(range(100, 121)), device="cuda")
     want = ref(q.clone(), k.clone(), pos)
     got = fast(q.clone(), k.clone(), pos)
     _close(got[0], want[0])
     _close(got[1], want[1])
+    assert torch.equal(got[0][..., rotary_dim:], q[..., rotary_dim:])      # the rest passes through untouched
 
 
 @pytest.mark.parametrize("dtype", DTYPES)
