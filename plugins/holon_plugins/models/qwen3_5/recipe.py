@@ -28,7 +28,7 @@ HF_WEIGHTS = WeightMap("hf_safetensors", skip=("model.visual.", "mtp."), rules=(
 _NORMS = (("attn_norm", "input_norm"), ("post_attention_norm", "post_norm"))
 _ATTN = (("q", "q_proj"), ("k", "k_proj"), ("v", "v_proj"), ("output", "o_proj"))
 _GDN = (("attn_qkv", "in_proj_qkv"), ("attn_gate", "in_proj_z"), ("ssm_beta", "in_proj_b"), ("ssm_alpha", "in_proj_a"),
-        ("ssm_out", "out_proj"), ("ssm_conv1d", "conv_weight"), ("ssm_norm", "norm_weight"))
+        ("ssm_out", "out_proj"))
 GGUF_RULES = (
     WeightRule("token_embd.weight", "embed.weight"),
     WeightRule("output_norm.weight", "norm.weight", "qwen3_5.minus_one"),
@@ -38,6 +38,8 @@ GGUF_RULES = (
     *(WeightRule(f"blk.{{i}}.attn_{g}_norm.weight", f"layers.{{i}}.mixer.{g}_norm.weight", "qwen3_5.minus_one")
       for g in ("q", "k")),
     *(WeightRule(f"blk.{{i}}.{g}.weight", f"layers.{{i}}.mixer.{h}.weight") for g, h in _GDN),
+    WeightRule("blk.{i}.ssm_conv1d.weight", "layers.{i}.mixer.conv_weight"),
+    WeightRule("blk.{i}.ssm_norm.weight", "layers.{i}.mixer.norm_weight"),
     WeightRule("blk.{i}.ssm_a", "layers.{i}.mixer.A_log", "qwen3_5.a_log"),
     WeightRule("blk.{i}.ssm_dt.bias", "layers.{i}.mixer.dt_bias"),
     *(WeightRule(f"blk.{{i}}.ffn_{g}.weight", f"layers.{{i}}.ffn.{g}_proj.weight") for g in ("gate", "up", "down")),
@@ -49,9 +51,11 @@ def _facts(c: Mapping[str, Any], source: str) -> dict[str, Any]:
     if source == "gguf":
         g = c["gguf"]
         n = c["num_hidden_layers"] - g.get("nextn_predict_layers", 0)        # block_count includes MTP blocks
-        every = g["full_attention_interval"]
+        recurrent = g.get("attention.recurrent_layers")        # per layer, when the converter wrote it
+        full = ([not r for r in recurrent[:n]] if recurrent is not None else
+                [(i + 1) % g["full_attention_interval"] == 0 for i in range(n)])
         hv = g["ssm.time_step_rank"]
-        return {"layers": n, "full": [(i + 1) % every == 0 for i in range(n)], "heads_k": g["ssm.group_count"],
+        return {"layers": n, "full": full, "heads_k": g["ssm.group_count"],
                 "heads_v": hv, "head_k_dim": g["ssm.state_size"], "head_v_dim": g["ssm.inner_size"] // hv,
                 "conv_kernel": g["ssm.conv_kernel"], "rotary_dim": g["rope.dimension_count"],
                 "sections": list(g.get("rope.dimension_sections", []))[:3], "theta": c["rope_theta"],
