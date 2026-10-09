@@ -1,6 +1,7 @@
 """No kernel of kernels.triton_attn reads or writes past its allocations with quantized KV (M0.3 L0, once per class):
 
-    cd plugins && PYTORCH_NO_CUDA_MEMORY_CACHING=1 compute-sanitizer --tool memcheck python -m tests.memcheck_triton_attn
+    cd plugins
+    PYTORCH_NO_CUDA_MEMORY_CACHING=1 compute-sanitizer --tool memcheck python -m tests.memcheck_triton_attn
 
 Without torch's caching allocator every tensor is its own cudaMalloc of exactly its size, so an access past the last
 unit's q8_0 scales (the end of the cache's byte segments), the block table or q is outside any allocation. Every

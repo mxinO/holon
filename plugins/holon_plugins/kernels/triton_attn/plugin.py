@@ -122,11 +122,12 @@ class Plugin:
             regs.kernels.add("kv_write", KernelSpec(
                 op="kv_write", provider="kernels.triton_attn", impl=impl, requires=anywhere,
                 supports=_write_supports(layout), props=props, priority=10))
-        # Decode and verify read the model dtype and q8_0 everywhere. fp8 is read for verify only, where FlashInfer
-        # serves its prefill and decode (sm_89 on: no fast e4m3 before), since verify rows have device lengths only.
+        # Decode and verify read every layout; fp8 is offered where FlashInfer serves its prefill (sm_89 on: no fast
+        # e4m3 before), and decode stays ours there too, as for the model dtype: graph-safe, where FlashInfer's is not.
         for op, impl, layout, requires in (
                 ("attention.paged_decode", Decode, "kv.hnd", anywhere),
                 ("attention.paged_decode", Decode, "kv.hnd.q8_0", anywhere),
+                ("attention.paged_decode", Decode, "kv.hnd.fp8", fp8_sms),
                 ("attention.paged_verify", Verify, "kv.hnd", anywhere),
                 ("attention.paged_verify", Verify, "kv.hnd.q8_0", anywhere),
                 ("attention.paged_verify", Verify, "kv.hnd.fp8", fp8_sms),

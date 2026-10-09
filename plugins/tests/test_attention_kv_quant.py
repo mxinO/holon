@@ -26,8 +26,8 @@ Q8, FP8 = "kv.hnd.q8_0", "kv.hnd.fp8"
 VERIFY_ROWS = [(0, 3), (13, 3), (14, 3), (99, 3), (998, 3), (4093, 3)]       # 1 + 2 drafts, across page boundaries
 CASES = {Q8: [(PREFILL, TRITON, PREFILL_ROWS + [(2000, 129)]), (DECODE, TRITON, DECODE_ROWS),
               (VERIFY, TRITON, VERIFY_ROWS)],
-         FP8: [(PREFILL, FLASHINFER, PREFILL_ROWS + [(2000, 129)]), (DECODE, FLASHINFER, DECODE_ROWS),
-               (VERIFY, TRITON, VERIFY_ROWS)]}
+         FP8: [(PREFILL, FLASHINFER, PREFILL_ROWS + [(2000, 129)]), (DECODE, TRITON, DECODE_ROWS),
+               (DECODE, FLASHINFER, DECODE_ROWS), (VERIFY, TRITON, VERIFY_ROWS)]}
 ROWS = {op: rows for op, _, rows in CASES[Q8]}
 
 
@@ -136,7 +136,8 @@ def test_kv_write_is_the_reference_bitwise(layout, head_dim, dtype):
     qkv = torch.randn(t, 3 * kv_heads * head_dim, generator=g).to(dtype).cuda()
     k, v = (qkv[:, i * kv_heads * head_dim:(i + 1) * kv_heads * head_dim].view(t, kv_heads, head_dim)
             for i in (1, 2))                     # strided rows, as the fused projection's split gives them
-    k, v = shaped(k), shaped(v)
+    k.copy_(shaped(k)), v.copy_(shaped(v))
+    assert not k.is_contiguous() and not v.is_contiguous()
     k[0, 0], v[1, 1] = 0, 0                                                       # all-zero blocks
     k[2, 0, :32] = (torch.arange(32) - 15.5) / 8                                  # ties: with amax 127/8 the scale
     k[2, 0, 31] = 127 / 8                                                         # is 1/8, so x / d = ±n.5
@@ -170,7 +171,8 @@ def test_kv_write_q8_0_is_ggufs_own():
 # attention -----------------------------------------------------------------------------------------------------------
 
 def _cases(layout):
-    return [pytest.param(layout, *case, marks=[needs_fp8] if layout == FP8 else [], id=f"{layout}-{case[0]}")
+    return [pytest.param(layout, *case, marks=[needs_fp8] if layout == FP8 else [],
+                         id=f"{layout}-{case[0]}-{case[1]}")
             for case in CASES[layout]]
 
 
@@ -273,7 +275,7 @@ def test_a_step_reads_its_own_tokens_through_the_cache(op, layout):
         x[unit, :, :, off] = x[(unit + 1) % len(x), :, :, off]                      # stale contents
     writer(layout, *geometry[1:])(k, v, cache, unit, off)
     want = _run(PagedAttention(None), q, store(raw, layout), batch, pages)          # everything stored, then read
-    provider = {o: p for o, p, _ in CASES[layout]}[op]
+    provider = next(p for o, p, _ in CASES[layout] if o == op)
     assert usage(_run(_kernel(op, provider, *geometry, layout=layout), q, cache, batch, pages), want) <= 1
     mixed = dequantized(cache)
     mixed[unit, 0, :, off], mixed[unit, 1, :, off] = k.float(), v.float()            # the plant: this step raw
@@ -295,7 +297,7 @@ def test_selection_per_layout():
     assert bf16 == {PREFILL: FLASHINFER, DECODE: TRITON}                      # the model-dtype choices are unchanged
     if fp8_device():
         pick = {op: ctx.select_kernel(f"{op}@1", site="t", **_facts(FP8)).provider for op in (PREFILL, DECODE, VERIFY)}
-        assert pick == {PREFILL: FLASHINFER, DECODE: FLASHINFER, VERIFY: TRITON}
+        assert pick == {PREFILL: FLASHINFER, DECODE: TRITON, VERIFY: TRITON}       # decode: graph-safe
     else:
         for op in (PREFILL, DECODE, VERIFY):
             with pytest.raises(PluginError, match="no kernel"):
