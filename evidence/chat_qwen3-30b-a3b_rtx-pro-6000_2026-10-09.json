@@ -1,0 +1,14 @@
+{
+ "question": "Does the bf16 HF checkpoint, loaded through the stacking rule and served by kernels.triton_experts, answer the M0.1 chat set sensibly? (M0.2 acceptance 7)",
+ "date": "2026-10-09",
+ "gpu_class": "rtx-pro-6000",
+ "commit": "c21762a",
+ "model": "Qwen/Qwen3-30B-A3B (bf16)",
+ "command": "4 chat requests (facts, code, Chinese, a tool call) through the engine in process: the checkpoint's chat template without thinking, greedy, max_tokens 200; read for sense",
+ "answers": {
+  "facts": "The capital of Australia is Canberra. It was chosen as a compromise between Sydney and Melbourne to avoid favoring either city.",
+  "code": "```python\ndef fibonacci(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n```",
+  "chinese": "长城是中国古代的军事防御工程，始建于春秋战国时期，后经多个朝代修建和扩展。它全长超过两万公里，是中华民族的象征之一，也是世界文化遗产。",
+  "tool call": "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}\n</tool_call>"
+ }
+}

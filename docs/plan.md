@@ -314,6 +314,37 @@ MoE is format-general: M0.2 also serves the bf16 HF checkpoint as a correctness 
 (stacked loading of HF's per-expert tensors, a Triton grouped GEMM, L2; no performance bar). FP8, NVFP4 and MXFP4
 are M0.6. Design: `docs/m02-moe.md` (D1, D7, D8).
 
+### 5.1 Status (2026-10-09): acceptance met
+
+Design and evidence: `docs/m02-moe.md` (rev 5 and its implementation review); records in `evidence/` and
+`judge/results/`, locks in `plans/`. Qwen3-30B-A3B, unsloth `Qwen3-30B-A3B-GGUF` UD-IQ3_XXS and Q4_K_M; the bf16
+HF checkpoint on an RTX PRO 6000. Built differently from the work list above, by decision in the design: the MoE is
+its own package (`std.moe`: `moe_topk@1`, `linear_experts@1` with a layout fact, `moe_combine@1`), the expert path
+runs in f32 between the stacks with an f32 router (D3), and dense bf16 stacks run on our Triton grouped GEMM.
+
+| # | Result |
+|---|---|
+| 1 | `models/qwen3_moe` copied from qwen3 (`derived_from`): ~25 changed recipe lines (the `std.moe` `Ref` and its facts, five expert weight rules). Core diff: the stacking weight rule only (`WeightRule.stack`, 42 lines in `build.py`/`model.py`). Qwen3-8B locks re-propagated — bf16 on rtx-a5000 and rtx-4090, GGUF on rtx-5080 and rtx-a5000: snapshot traces byte-identical, L2 passing, only the core's, `kernels.flashinfer`'s and (GGUF) `kernels.ggml_cuda`'s source pins changed; approved |
+| 2 | L0 for the MoE ops (`linear_experts` per type, path and `glu`; `moe_topk`; `moe_combine`; our SwiGLU; the padding plant) with the dense kernels' L0: sm_86 221 passed (the PDL test needs sm_90+), sm_89 219 passed, sm_120a 216 passed on the RTX PRO 6000 (its 188 SMs put every tested mmq size through the stream-k fixup, so the bitwise merged-stack comparison runs on the RTX 5080's sm_120a instead); compute-sanitizer clean. The router precision test passes at the fp32 budget, and a bf16 router and TF32 fail it |
+| 3 | Gate: every tensor of both files ≤ 0.5 NMSE per expert (worst 0.092 UD-IQ3_XXS, 0.0094 Q4_K_M), routers exact. Tier A (fp32 CPU, production GGUF source): KL p99 1.8e-5 / 2.2e-5 under the 1e-4 sanity ceiling; its 7 plants fail (renormalisation off in one layer at 3.94× the floor's KL p99 against a predicted 1.5–3×: the layer's expert output shrinks by its top-8 mass; δ unchanged). Tier B on the A5000 (floors: the D3-mirroring bf16 block with q8_1 per path) passes prefill and decode for both files, every expert call on the floor's path; also on the RTX 5080 (UD-IQ3_XXS). Wrong type, stale q8_1 and the up-first merge fail; the rare stale plant passes the decode run (1.07×, as reported). Quantization error vs the bf16 checkpoint: Q4_K_M KL p50 1.0e-3, top-1 95.9%, ΔPPL +1.0%; UD-IQ3_XXS 2.8e-3, 93.2%, +3.0% |
+| 4 | Snapshot trace run-identical over 3 fresh engines (UD-IQ3_XXS on rtx-5080, Q4_K_M on rtx-a5000). Graphs vs eager (`bounded --graphs-vs-eager`) passes at decode batches 3, 5, 12 and 20 for both files; the padding plant fails exactly where the padded bucket's expert path is mmq (batches 12 and 20, and batch 5 for UD-IQ3_XXS on sm_86) and passes on mmvq, as predicted |
+| 5 | RTX 5080, UD-IQ3_XXS: 20.8K KV tokens at `max_seqs` 32 (22.1K at 16) with 16K contexts. In-process vs llama-bench (median of repetitions 2–5): pp512 / tg128 1.11× / 0.97× (8199 / 240.2 t/s; bar 5970 / 199) on the 5080; Q4_K_M 1.02× / 1.01× on the 4090 and 1.10× / 1.02× on the A5000 (UD-IQ3_XXS 1.04× / 1.00×). Serving vs `llama-server` on the 5080: TPOT 4.21 vs 4.26 ms at batch 1 and 10.1 vs 11.6 ms at batch 8, lower TTFT; agent trace TTFT / TPOT p50 62 / 4.9 ms vs 209 / 6.0 ms (`llama-server` has no KV admission control: at Holon's KV size it runs 3 slots, its queue holding the rest) |
+| 6 | GGUF locks: UD-IQ3_XXS on rtx-5080 (`max_seqs` 32, `max_step_tokens` 2048, `max_model_len` 16384), Q4_K_M on rtx-a5000 and rtx-4090; tuned to Triton paged decode, L2 passing |
+| 7 | The bf16 HF checkpoint on an RTX PRO 6000 (sm_120, 96 GB): it loads through the stacking rule, and the structural test finds every expert equal to the checkpoint's (two swapped experts: 6 mismatches). L2 against its fp32 golden passes (KL p99 3.32e-2 vs the D3 bf16 floor's 3.42e-2, itself below the pure-HF floor's 4.37e-2, as predicted); the stack off by one, gate/up swapped and renormalisation ignored fail. The M0.1 chat set reads correct (facts, code, Chinese, a tool call). `kernels.triton_experts` L0 passes on sm_86 and sm_120a |
+
+Found on the way:
+- `kernels.flashinfer`'s fixed 128 MiB workspace overflowed for Qwen3-30B-A3B (4 KV heads) on the 128-SM RTX 4090:
+  FlashInfer splits the KV into up to 2 CTAs per SM per KV head. Sized per device and geometry now, with a test.
+- A Tier B MoE floor emulates one kernel path; the verdict now checks that every expert call took it.
+
+Carried forward:
+- At `memory_fraction` 0.98 the 30B on the 16 GB card keeps ~50 MB beyond the measured worst step, below allocator
+  slack for prompt-logprob steps (L2 ran out of memory; the lock was tuned at the default 0.9, which plans the same
+  kernels). Remedy: an absolute headroom floor in the KV budget.
+- The bf16 rtx-5090 Qwen3-8B lock is outdated (a 5090 borrows the nearest lock, unverified); M0.2 is not a release
+  commit, and the refresh is owed before the next one. No 30B lock for the 5090.
+- UD-Q3_K_XL (optional) not recorded.
+
 ## 6. M0.3 — heterogeneous state (Qwen3.5-4B → 9B, text-only)
 
 Qwen3.5 specifics (from HF config/modeling; record deviations found during implementation):
