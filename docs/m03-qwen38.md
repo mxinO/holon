@@ -1,9 +1,9 @@
 # M0.3 — Qwen3.8-27B: heterogeneous state, prefix reuse, quantized KV: design and implementation plan
 
-Status: **revision 1, draft for review** (2026-10-09). Scope: plan §6, which now merges the former M0.3 (Qwen3.5,
-heterogeneous state) and M0.3b (Qwen3.8-27B GGUF, quantized KV) by user decision: Qwen3.8-27B is the target, Qwen3.5
-shares its architecture. Builds on design §5.2, §5.6, §6, §7.3, §7.5, M0.1 (GGUF, `kernels.ggml_cuda`, the judge's
-tiers), M0.2 (std.moe, the HF bf16 correctness path) and spikes S1 (quantized KV) and S3 (GDN kernels).
+Status: **revision 2** (2026-10-09; revision 1 reviewed: 2 blockers, 13 majors, all resolved here, §8). Scope: plan §6,
+which merges the former M0.3 (Qwen3.5, heterogeneous state) and M0.3b (Qwen3.8-27B GGUF, quantized KV) by user
+decision: Qwen3.8-27B is the only target. Builds on design §5.2, §5.6, §6, §7.3, §7.5, M0.1 (GGUF, `kernels.ggml_cuda`,
+the judge's tiers), M0.2 (std.moe, the HF bf16 correctness path) and spikes S1 (quantized KV) and S3 (GDN kernels).
 
 ## 1. Goal and acceptance
 
@@ -12,32 +12,33 @@ RTX 4090, with prefix reuse for agent traffic and a quantized KV cache, and the 
 path on an RTX PRO 6000. Acceptance:
 
 1. **Model.** `models/qwen3_5` serves `Qwen3_5ForConditionalGeneration` text-only (Qwen3.5 and Qwen3.8 alike; the
-   vision tower and the GGUF's MTP block are skipped, MTP is M0.4), copied from `models/qwen3` with `derived_from`.
-   L2 passes for Qwen3.8-27B: bf16 HF on an RTX PRO 6000 against its fp32 golden; GGUF UD-IQ3_S and UD-Q4_K_M in Tier A
-   and Tier B (prefill and decode) against the files' fp32 goldens; per-tensor gates pass; quantization error vs the
-   bf16 checkpoint reported. A tiny random-weight model of the architecture (both head ratios) matches transformers
-   in CPU tests.
-2. **Bounded checks** (L1.5, on Qwen3.8-27B GGUF): chunked vs one-shot prefill; prefix-hit resume vs
-   recompute; graphs vs eager on decode; snapshot trace run-identical over 3 fresh engines.
-3. **Prefix reuse.** On the multi-turn agent trace, prefill tokens saved vs cache off are measured on the RTX 5080;
-   recurrent-state checkpoints are published only at boundaries covered by committed tokens (an overlap-depth-1
-   test); a checkpoint adopted at a boundary resumes to the same state as recomputing it (bitwise on the same path).
-4. **Quantized KV.** q8_0 KV (our Triton kernels, every class) and fp8 KV (FlashInfer, sm_89 / sm_120) pass L2 with
-   floors that emulate the KV format; their error vs bf16 KV is reported separately; on the 5080 they at least
-   double the KV tokens that fit vs bf16 KV.
-5. **Consumer classes.** RTX 5080: UD-IQ3_S serving a 32K-token context at `max_seqs` 4 with one checkpoint per
-   sequence (q8_0 KV; estimate in §4.8). RTX 4090: UD-Q4_K_M. In-process
-   pp512 / tg128 and long-context decode against llama-bench at the same commit (both medians of repetitions 2–5),
-   bar ≥ 0.8× (plan §9); decode and agent traces against `llama-server` on the 5080; memory fit recorded.
+   vision tower and the MTP block are skipped, MTP is M0.4), copied from `models/qwen3` with `derived_from`. L2 passes
+   for Qwen3.8-27B: bf16 HF on an RTX PRO 6000 against its fp32 golden; GGUF UD-IQ3_S and UD-Q4_K_M in Tier A and
+   Tier B (prefill and decode) against the files' fp32 goldens; per-tensor gates pass; quantization error vs the bf16
+   checkpoint reported. A tiny random-weight model of the architecture matches transformers in CPU tests (§4.7).
+2. **Bounded checks** (L1.5, the 27B GGUF): chunked vs one-shot prefill; prefix-hit resume vs recompute; graphs vs
+   eager on decode; overlap depth 1 vs 0; snapshot trace run-identical over 3 fresh engines.
+3. **Prefix reuse.** On the multi-turn agent trace on the RTX 5080: prefill tokens saved and TTFT vs cache off are
+   measured; a checkpoint adopted at a boundary resumes to the same state as recomputing to it (bitwise, same path);
+   a checkpoint is registered only once committed tokens cover it (§4.7's depth-1 test).
+4. **Quantized KV.** q8_0 KV (our Triton kernels, every class) passes L2 against floors that emulate it, and fp8 KV
+   (FlashInfer, sm_89 / sm_120) does where its prefill path measures usable (§4.5); the KV error vs bf16 KV is reported
+   separately; on the 5080 a quantized KV at least doubles the KV tokens that fit.
+5. **Consumer classes.** RTX 5080: UD-IQ3_S serves one 32K-token context with q8_0 KV at `max_seqs` 2 and two
+   checkpoints (estimate in §4.8; the fit records the other configurations). RTX 4090: UD-Q4_K_M. In-process pp512 /
+   tg128 and decode at depth 8K against llama-bench at the same commit and KV format (`-ctk/-ctv q8_0` when ours is
+   q8_0; both medians of repetitions 2–5), bar ≥ 0.8× (plan §9); decode and agent traces against `llama-server` on
+   the 5080.
 6. **Locks** for rtx-5080 (UD-IQ3_S) and rtx-4090 (UD-Q4_K_M), the development lock classes (design §4.4).
-7. **Reuse.** New std knobs (attention output gate, partial rotary, RMSNorm offset) land with defaults that keep the
-   old behaviour, and `propagate` auto-advances every Qwen3 and Qwen3-MoE lock (byte-identical snapshots, no approval).
+7. **Reuse.** The one new std knob (the attention output gate, D2) and the core's seams leave every Qwen3 and
+   Qwen3-MoE lock's snapshot trace byte-identical and its L2 passing; `propagate` advances them with one approval
+   covering every lock (changed lines the Qwen3 traces cannot reach — the gate branch, the KV write op, the new core
+   seams — keep auto-advance off, design §4.6).
 8. **Kernels.** L0 for every new kernel on sm_86, sm_89 and sm_120a; memcheck clean.
-9. **Core diff:** the designed-but-unbuilt state seams of §4.3 only, no new concepts (the plan's "zero" was written
-   before it was known that these seams were deferred to this milestone; see §4.3).
+9. **Core diff:** the designed-but-unbuilt state seams of §4.3 only, under its generality rule.
 
-Non-goals: MTP and speculative decoding (M0.4); the vision tower; q4_0 KV (§7); Qwen3.8-Flash-Next (its own
-architecture, `qwen4_exp`, 512 experts: after M0.3, see plan §10); performance of the bf16 HF path.
+Non-goals: MTP and speculative decoding (M0.4); the vision tower; q4_0 KV (§7); Qwen3.8-Flash-Next (`qwen4_exp`,
+plan §10); performance of the bf16 HF path.
 
 ## 2. Starting point
 
@@ -50,95 +51,93 @@ architecture, `qwen4_exp`, 512 experts: after M0.3, see plan §10); performance 
     out = `o_proj(attn · sigmoid(gate))`. KV: 64 KiB / token (16 layers, bf16).
   - **GDN:** `in_proj_qkv` → q, k (16 heads × 128) and v (48 heads × 128); a depthwise causal conv1d, kernel 4, no
     bias, SiLU, over all 10240 qkv channels; q/k l2-normalised (eps 1e-6), q scaled by 128^-½; q/k heads repeated
-    16 → 48 (ratio 3; Qwen3.5: 16 → 32, ratio 2); `β = sigmoid(in_proj_b x)`, `g = −exp(A_log) · softplus(in_proj_a x
-    + dt_bias)` in fp32; recurrence `S ← e^g S; S += k ⊗ β(v − Sᵀk); o = Sᵀq` with fp32 `S` [48, 128, 128];
-    output `out_proj(w · rmsnorm(o) · silu(z))` per 128-dim head (a plain-`w` gated norm), `z = in_proj_z x`.
-    Recurrent state per sequence: conv 3 × 10240 and SSM 48 × 128 × 128, fp32 in HF and llama.cpp — ≈ 150 MiB for the
-    48 layers (Qwen3.5-4B / 9B: ≈ 50 MiB).
+    16 → 48 (ratio 3; Qwen3.5: 2); `β = sigmoid(in_proj_b x)`, `g = −exp(A_log) · softplus(in_proj_a x + dt_bias)` in
+    fp32; recurrence `S ← e^g S; S += k ⊗ β(v − Sᵀk); o = Sᵀq` with fp32 `S` [48, 128, 128]; output
+    `out_proj(w · rmsnorm(o) · silu(z))` per 128-dim head (a plain-`w` gated norm), `z = in_proj_z x`. Recurrent
+    state per sequence: SSM 48 × 128 × 128 fp32 (144 MiB for 48 layers) and conv 3 × 10240 in the activation dtype
+    (HF; bf16 inputs make bf16 storage lossless; 2.8 MiB) — ≈ 147 MiB.
   - **`output_gate_type: "swish"`** (Qwen3.8 only) is read by neither transformers' `qwen3_5` nor llama.cpp; in
     transformers' `qwen4_exp` it names the GDN norm gate's activation, i.e. the `silu(z)` above. Qwen3.8 is therefore
     numerically Qwen3.5's architecture; the recipe asserts the key is absent or `swish`/`silu` (§4.4).
-- **The files** (unsloth `Qwen3.8-27B-GGUF`, arch `qwen35`): UD-IQ3_S 11.21 GiB (the 16 GB target), UD-Q4_K_M
-  15.33 GiB (the 24 GB target). llama.cpp's converter adds 1 to every norm weight except the GDN norm's, stores
-  `ssm_a = −exp(A_log)`, squeezes conv1d, and reorders value heads from grouped to **tiled** (v-head j uses q/k head
-  `j mod 16`) in `in_proj_qkv`'s v rows, `in_proj_z/b/a`, `A_log`, `dt_bias`, conv1d's v channels and `out_proj`'s
-  input columns. The MTP block is in the main file as `blk.64.*` (`nextn.*`). Hparams `qwen35.ssm.*`,
-  `qwen35.full_attention_interval`, `qwen35.rope.dimension_count = 64`.
+- **The files** (unsloth `Qwen3.8-27B-GGUF`, arch `qwen35`): UD-IQ3_S 11.21 GiB (the 16 GB target; ≈ 0.3 GiB of it is
+  the MTP block we skip), UD-Q4_K_M 15.33 GiB (the 24 GB target). `qwen35.block_count` is **65**: the MTP block is
+  `blk.64` (`nextn_predict_layers = 1`). llama.cpp's converter writes every zero-centred norm as `w + 1` in f32 (all
+  `*norm.weight` but the GDN norm), stores `ssm_a = −exp(A_log)`, squeezes conv1d, and reorders value heads from
+  grouped to **tiled** (v-head j uses q/k head `j mod 16`) in `in_proj_qkv`'s v rows, `in_proj_z/b/a`, `A_log`,
+  `dt_bias`, conv1d's v channels and `out_proj`'s input columns. Every ggml type in both files is in
+  `kernels.ggml_cuda`'s set.
 - **Kernels.** S3 adopted a vendored subset of vLLM's flash-linear-attention copy (vLLM `6dd813e0`, 14 files):
   `chunk_gated_delta_rule` for prefill, `fused_sigmoid_gating_delta_rule_update` for decode; correct vs HF's fp32
-  recurrence within 1e-2 relative (HF bf16 itself: 6.9e-3); chunk-aligned resume and graph replay bitwise equal to
-  one-shot and eager; a `V_HEAD_TILED` constexpr reads GGUF's order with no repacking; pinned configs (no autotune).
-  Open from S3: outputs and scratch in our buffers, conv1d and the gated norm (HF torch in the spike), slot indexing
-  in the chunk kernel (else gather/scatter), padded rows zeroed, an eager host floor of 0.44–0.65 ms per GDN layer per
-  prefill step. S1 measured q8_0 KV in our Triton paged attention (int8 + an fp16 scale per 32): at the memory
-  roofline on sm_89 (0.49–0.57× bf16 time), ALU-bound on sm_120 (0.60–0.90×; 1.1–1.7× FlashInfer fp8's time); fp8
-  via FlashInfer's tensor-core decode on sm_89 / sm_120 (0.54–0.56×), sm_86 has no fast fp8 path.
-- **Holon.** The state ABI is designed in full (design §6.2–6.3, §7.3): `StateSpec` with `Paged | Slot` shapes,
-  `StateKind` with `hit_length / publish / adopt / fork / commit`, MemOps run by the core around the step, a
-  PrefixIndex whose hit is the fixed point over every kind. Built so far: paged state only. `bind_state` binds Slot
-  specs and the ledger sizes their pools, but the batch exposes no slot units, the pool has no null unit for graph
-  padding rows, no MemOp is ever executed, no kind hook is called, and the prefix index switches itself off when any
-  spec is not paged. Prefill is never graph-captured. These are this milestone's core work (§4.3).
-- **Baselines** (step 0): llama-bench and `llama-server` at 51ce9c11 on the 5080 (UD-IQ3_S) and the 4090
-  (UD-Q4_K_M); llama.cpp has its own `qwen35` CUDA path (GDN and SSM-conv ops).
+  recurrence within 1e-2 relative (HF bf16 itself: 6.9e-3); chunk-aligned (64) resume and graph replay bitwise equal
+  to one-shot and eager; a `V_HEAD_TILED` constexpr reads GGUF's order with no repacking; pinned configs; measured on
+  sm_86 and sm_120 (sm_89 is new in M0.3). Open from S3: outputs and scratch in our buffers, conv1d and the gated
+  norm, the chunk kernel's lack of state indices (gather/scatter), an eager host floor of 0.44–0.65 ms per GDN layer
+  per prefill step. S1 measured q8_0 KV in a spike Triton paged attention (int8 + an fp16 scale per 32): at the
+  memory roofline on sm_89, ALU-bound on sm_120 (0.60–0.90× bf16 time); fp8 via FlashInfer's tensor-core decode on
+  sm_89 / sm_120 (0.54–0.56×), no fast sm_86 fp8 path, fp8 prefill unmeasured.
+- **Holon.** The state ABI is designed in full (design §6.2–6.3, §7.3), built for paged state only: Slot specs are
+  bound and sized but have no null unit, no MemOp is executed, no kind hook is called, the prefix index switches off
+  when any spec is not paged, and prefill is never graph-captured. `RMSNorm(offset)` and `Rope(rotary_dim)` already
+  exist (FlashInfer's rope only rejects partial rotary in its `supports`).
+- **Baselines** (step 0): llama-bench and `llama-server` at 51ce9c11 on the 5080 (UD-IQ3_S) and the 4090 (UD-Q4_K_M),
+  bf16 and q8_0 KV; llama.cpp has its own `qwen35` CUDA path.
 
 ## 3. Decisions
 
 - **D1 — Qwen3.8-27B is the only target.** One recipe (`models/qwen3_5`) serves the architecture, so Qwen3.5
-  checkpoints load too, but nothing in M0.3 depends on them: no Qwen3.5 lock or acceptance item (a quick Qwen3.5-4B run
-  is allowed as an ad-hoc check). The fast inner loop is a **tiny random-weight model** built at test time from a
-  small `Qwen3_5` config (two layers of each type; v/k head ratios 2 and 3; both value-head orders through a GGUF
-  writer, as M0.2's tiny MoE fixture), checked against transformers on the CPU in seconds. End-to-end development
-  runs the 27B GGUF on the A5000 (UD-IQ3_S fits 24 GB); the bf16 HF path at full size runs on an RTX PRO 6000.
-- **D2 — Three std knobs, defaults unchanged (the reuse test).** `std.mixers.gqa` gains `output_gate: none |
-  sigmoid` (q_proj emits per-head-interleaved q and gate, `o_proj(attn · σ(gate))`) and `rotary_dim` (partial NeoX
-  RoPE; default = head_dim); `std.ops` RMSNorm gains `offset` (`x̂·(offset + w)`; default 0). Defaults reproduce
-  Qwen3 exactly, so Qwen3 / Qwen3-MoE locks auto-advance (acceptance 7). The HF map uses `offset=1`; the GGUF map
-  uses `offset=0` because the file stores `w + 1` — the source picks the knob, no weight transform. A per-head
-  interleaved gate is a fact of the unit, not a weight permutation, so the gqa unit and the GGUF map need none.
-- **D3 — GDN is a std mixer with its own ops; kernels come from a kernel plugin.** `std.mixers.gdn@1` composes
-  three ops, each with a pure-torch reference (the fp32 recurrence is the oracle, as HF's torch path):
+  checkpoints load too, but nothing in M0.3 depends on them: no Qwen3.5 lock or acceptance item (a quick Qwen3.5-4B
+  run is allowed as an ad-hoc check). The fast inner loop is a **tiny random-weight model** (§4.7). End-to-end
+  development runs the 27B GGUF on the A5000 (UD-IQ3_S fits 24 GB); full-size bf16 runs on an RTX PRO 6000.
+- **D2 — One new std knob; the existing ones are reused.** `std.mixers.gqa` gains `output_gate: none | sigmoid`
+  (q_proj emits per-head-interleaved q and gate; `o_proj(attn · σ(gate))`); default `none` is today's path. Partial
+  rotary is `Rope(rotary_dim=64)` (existing; FlashInfer's rope `supports` is relaxed to `rotary_dim ≤ head_dim`,
+  its kernel already handles it). Zero-centred norms are `RMSNorm(offset=1)` (existing) for both sources: the GGUF
+  map transforms the stored `w + 1` back by `w − 1` in f32 (exact for |w| ≥ 2⁻¹⁶; the result then rounds to bf16
+  exactly as HF's checkpoint), so one recipe term serves both sources and no gain loses precision to a bf16 `1 + w`.
+- **D3 — GDN is a std mixer with its own ops; kernels come from kernel plugins.** `std.mixers.gdn@1` composes three
+  ops, each with a pure-torch reference (the fp32 recurrence is the oracle, as HF's torch path):
   `causal_conv1d@1` (depthwise, kernel K, SiLU, reading and updating the per-sequence conv state),
   `gated_delta_rule@1` (prefill chunks and decode rows over per-sequence state, `v_head_order: grouped | tiled`),
-  `gated_rmsnorm@1` (`w · rmsnorm(o) · silu(z)`). Facts carry heads, head dims, the head ratio and the order.
+  `gated_rmsnorm@1` (`w · rmsnorm(o) · silu(z)`). Both stateful ops take a per-row **has-initial-state** flag (the
+  row's start > 0, computed by the planner on the device): without it they start from zero state, so a slot reused by
+  a new or preempted sequence never reads its previous occupant's state and nothing is cleared per admission.
   `kernels.fla` provides `gated_delta_rule` (the vendored S3 subset, its `vendor.patch`, provenance as
-  `kernels.ggml_cuda`) and `kernels.gdn_triton` provides our conv1d and gated-norm kernels (fused with the β / g
-  gating where it saves a launch). The tiled order is a fact the GGUF map sets (`v_head_order="tiled"`); the
-  kernels read it, nothing is repacked. GGUF's `ssm_a = −exp(A_log)` becomes `A_log = log(−ssm_a)` by a value
-  transform in the GGUF map (one f32 rounding; the gate checks it against the checkpoint).
-- **D4 — Recurrent state is a Slot spec; checkpoints are a second pool of the same kind.** The GDN mixer declares
-  one `Slot` spec per layer group (`recurrent`: conv + SSM state, fp32, alignment = the chunk size 64), served by a
-  new state kind `std.state.recurrent`. Prefix reuse for it is the design's `ssm_checkpoint`: a checkpoint is a copy
-  of a sequence's whole recurrent state at a page-aligned position, held in a ledger-budgeted checkpoint pool
-  (bytes from the deployment, default: one checkpoint per running sequence), with `hit_length` = the deepest
-  checkpoint ≤ L on the chain, `publish` / `adopt` as device MemOps, and eviction joint with the paged KV's chain
-  (design §6.3). Placement is a policy: `checkpoint_prompt_end` (default; cut at `floor(end/page)·page`) and
-  `checkpoint_every_n`. A checkpoint is 150 MiB for the 27B, so on the 5080 it competes with KV for the same bytes:
-  the fit records both (acceptance 5). No compression codec in M0.3 (§7).
-- **D5 — The core completes the designed state seams, nothing more** (§4.3): slot units per row in the batch and a
-  null slot unit for padding rows; the MemOp runner (adopt before the forward, publish after the sample, both in
-  stream order and graph-safe); the kind hooks called where design §6.3 places them; the prefix index over mixed
-  kinds with the fixed-point hit; and prefill graphs per token bucket if step 8's measurement needs them (§4.6).
-  No new ABI type; `DeviceBatch` gains one field (`slot_units`), the planner one optional key (prefill `graph_key`).
+  `kernels.ggml_cuda`); `kernels.gdn_triton` provides our conv1d and gated-norm kernels. The tiled order is a fact the
+  GGUF map sets; the kernels read it, nothing is repacked. GGUF's `ssm_a` becomes `A_log = log(−ssm_a)` by a value
+  transform (HF stores `A_log` in bf16, so the round trip recovers it exactly after the bf16 cast; the gate compares
+  after that cast).
+- **D4 — Recurrent state is a Slot spec; checkpoints are payloads in a plugin pool.** The GDN mixer declares one
+  `Slot` spec (`recurrent`: per layer conv + SSM state, alignment 64 — the chunk size, the granularity at which S3
+  showed resume to be bitwise), served by a new state kind `std.state.recurrent`. Its prefix reuse is design §6.3's
+  checkpoint: a copy of a sequence's whole recurrent state at a 64-aligned position, held in the kind's own
+  ledger-budgeted pool (budget from the deployment), with `hit_length` = the deepest checkpoint ≤ L, `publish` /
+  `adopt` as MemOps, and per-payload eviction joint with the chain. Where checkpoints are taken is a policy plugin:
+  `checkpoint_prompt_end` (default; at `floor(prompt_end/64)·64`) and `checkpoint_every_n`. A checkpoint is ≈ 147 MiB
+  for the 27B, so on the 5080 it competes with KV: the fit records both (acceptance 5). No compression codec (§7).
+- **D5 — The core completes the designed state seams** (§4.3), each general: Slot pools indexed by the SeqTable slot
+  with a null unit; a scheduler cut hook; MemOps run around the step; the kind hooks called at planning and commit;
+  the prefix index over mixed kinds with payloads in their own pools; plugin pools from the build context. ABI
+  additions are small and generic (§4.3); no new concept.
 - **D6 — Quantized KV is a layout of the KV spec, negotiated with the kernels.** `kv.hnd` gains `kv.hnd.q8_0` (int8
-  values + fp16 scale per 32, as S1) and `kv.hnd.fp8` (e4m3, per-tensor scale 1). q8_0: our Triton kernels — the
-  quantizing KV write, paged decode and prefill (verify is M0.4) — on every class. fp8: FlashInfer decode and
-  prefill on sm_89 / sm_120 (no fast sm_86 path; the layout is simply unsupported there). The deployment chooses the
-  layout (`kv_dtype`); `tune` picks providers per class. q4_0 is deferred (§7).
-- **D7 — The judge mirrors deployment numerics, as in M0.1/M0.2.** fp32 goldens on the CPU (HF's torch GDN path,
-  never fla); bf16 floors on GPUs with HF's torch path; GGUF Tier A (production weight source, reference kernels,
-  CPU fp32) and Tier B (production kernels; floors with q8_1 emulation per path, M0.1); KV formats emulated in the
-  floor's attention (quantize-dequantize K and V as stored) so a q8_0 or fp8 run is judged against a floor that pays
-  the same rounding; the KV error itself is reported against the bf16-KV floor. Plants in §4.7.
-- **D9 — Open (user): the legibility benchmark.** The old M0.3 acceptance (and the plan §9 pivot criterion) has a
+  values + fp16 scale per 32) and `kv.hnd.fp8` (e4m3, saturating cast, scale 1). The attention unit's KV append becomes
+  a `kv_write@1` op so the format lives in kernels. Prefill **writes the chunk's K/V first and attends through the
+  cache**, so every read (prefix and the chunk's own tokens) sees the stored format, independent of chunking — and one
+  floor emulates it exactly (D7). q8_0: our Triton kernels (write, decode, prefill; verify is M0.4) on every class.
+  fp8: FlashInfer decode and prefill on sm_89 / sm_120 (its `supports` gains `q_dtype ≠ kv_dtype`); if fp8 prefill
+  measures unusable in step 7, fp8 is recorded as decode-only and q8_0 is the deployment's format.
+- **D7 — The judge mirrors deployment numerics, as in M0.1/M0.2.** fp32 goldens on the CPU through HF's torch GDN
+  path (the judge asserts transformers' swappable hub kernels are off, as S3's harness did); bf16 floors on GPUs,
+  torch path; GGUF Tier A on the RTX PRO 6000 (bf16 engine on the file's dequantized weights, as M0.1's, with its own
+  bf16 floor — 54 GB fits 96 GB, neither the A5000 nor a CPU run is practical at 27B) and Tier B on the A5000
+  (production kernels; floors with q8_1 emulation per path); KV formats emulated in the floor's attention exactly as
+  D6 stores and reads them; the KV error itself reported against the bf16-KV floor. Plants in §4.7.
+- **D8 — Bars are llama.cpp's.** The GDN kernel source is fla (S3), the oracle is HF, the bar is llama.cpp on the same
+  card, file and KV format.
+- **D9 — Open (user): the legibility benchmark.** The old M0.3 acceptance (and plan §9's pivot criterion) has a
   coding agent add Qwen3.5 to Holon and to a mini-sglang fork from a branch point before `qwen3_5` exists, ≥ 3 runs
-  per side. Before this milestone that means implementing GDN, recurrent state and its kernels on both sides —
-  hours of agent time per run, ≥ 6 runs. Options: (a) run it as specified, after M0.3's code is final, from the
-  pre-M0.3 branch point; (b) run it on a model whose parts then exist (e.g. a GDN model variant after M0.3) so it
-  measures the plugin structure rather than kernel porting; (c) drop it as an M0.3 gate and keep it in §9 for a
-  later milestone. Not in §1's acceptance until decided.
-- **D8 — Bars are llama.cpp's.** The kernel source for GDN is fla (S3), the oracle is HF, the bar is llama.cpp on the
-  same card and file (its own `qwen35` CUDA path).
+  per side — hours of agent time per run, ≥ 6 runs. Options: (a) as specified, after M0.3; (b) on a model whose
+  parts then exist, so it measures the plugin structure rather than kernel porting; (c) dropped from M0.3, kept in §9
+  for later. Not in §1's acceptance until decided.
 
 ## 4. Design
 
@@ -146,154 +145,185 @@ architecture, `qwen4_exp`, 512 experts: after M0.3, see plan §10); performance 
 
 | Package | Contents |
 |---|---|
-| `std/holon_std/mixers/gqa` | `output_gate`, `rotary_dim` (D2) |
-| `std/holon_std/ops` | RMSNorm `offset` (D2) |
+| `std/holon_std/mixers/gqa` | `output_gate` (D2) |
 | `std/holon_std/mixers/gdn` (new) | `unit.std.mixers.gdn@1`, op contracts `causal_conv1d@1`, `gated_delta_rule@1`, `gated_rmsnorm@1`, `reference.py` |
-| `std/holon_std/state/recurrent` (new) | the `recurrent` Slot kind with checkpoints (`hit_length`, `publish`, `adopt`, `fork`) |
+| `std/holon_std/state/recurrent` (new) | the `recurrent` Slot kind with checkpoint payloads (`hit_length`, `cut`, `publish`, `adopt`) |
 | `std/holon_std/policies/checkpoint` (new) | `checkpoint_prompt_end`, `checkpoint_every_n` |
 | `plugins/.../models/qwen3_5` (new) | recipe (`derived_from = "models.qwen3@…"`), HF and GGUF weight maps, bundle |
 | `plugins/.../kernels/fla` (new) | vendored S3 subset + patch: `gated_delta_rule` provider |
-| `plugins/.../kernels/gdn_triton` (new) | our conv1d, gated RMSNorm (+ gating) kernels |
-| `plugins/.../kernels/triton_attn` | q8_0 KV: quantizing write, decode, prefill |
-| `plugins/.../kernels/flashinfer` | fp8 KV decode / prefill |
+| `plugins/.../kernels/gdn_triton` (new) | our conv1d and gated-RMSNorm kernels |
+| `plugins/.../kernels/triton_attn` | `kv_write`; q8_0 KV decode and prefill |
+| `plugins/.../kernels/flashinfer` | partial-rotary rope; fp8 KV decode / prefill |
 | `core/holon` | §4.3 |
-| `judge/holon_judge` | GDN-aware goldens/floors (torch path), KV-format emulation, plants, the checkpoint bounded check |
+| `judge/holon_judge` | GDN-aware goldens/floors (torch path), KV-format emulation, plants, the prefix bounded checks |
 
 ### 4.2 The GDN mixer
 
 `unit.std.mixers.gdn@1(heads_k, heads_v, head_k_dim, head_v_dim, conv_kernel, v_head_order)` at (layer, hidden).
 Forward over a step's rows (prefill chunks and decode rows mixed): `in_proj_qkv`, `in_proj_z`, `in_proj_b`,
-`in_proj_a` (four `qlinear`/`linear` sites, merged where the layouts allow, M0.1's rule) → `causal_conv1d` (reads
-and writes the conv state of each row's slot) → `gated_delta_rule` (reads the SSM state of each row's slot, writes
-the final state back; l2-norm, scale, β/g gating inside) → `gated_rmsnorm` → `out_proj`. State is addressed by the
-batch's `slot_units[recurrent]` (§4.3): one unit per running sequence, unit 0 the null unit padding rows read and
-write. The chunk kernel takes no state indices (S3), so the mixer gathers the step's prefill states into a
-contiguous scratch and scatters them back — a few MiB per prefill row per layer; slot-indexing the chunk kernel is a
-perf item (§7). Facts: `v_head_order` (`grouped` for HF, `tiled` for GGUF), head counts, dims, and `dtype`.
-
-The planner (design §5.2) builds the chunk indices and offsets the fla prefill kernel needs from the host plan
-(else it syncs), and a `graph_key` for decode (and, if adopted, prefill buckets).
+`in_proj_a` (`qlinear`/`linear` sites, merged where the layouts allow, M0.1's rule) → `causal_conv1d` → 
+`gated_delta_rule` (l2-norm, scale, β/g gating inside) → `gated_rmsnorm` → `out_proj`. A row's state is the
+`recurrent` pool's unit at the row's SeqTable slot (§4.3); padding rows use the null unit (their writes land there,
+as paged padding writes land in the null page) with has-initial-state false. The chunk kernel takes no state indices
+(S3), so the mixer gathers the step's prefill rows' states into a contiguous scratch and scatters them back (≈ 12 MiB
+per prefill row per layer, plus launches counted in §4.6); slot-indexing the chunk kernel is a perf item (§7). The
+planner (design §5.2) builds fla's chunk indices and offsets from the host plan (else the kernel syncs), the
+has-initial-state flags, and the decode `graph_key`.
 
 ### 4.3 Core: completing the state seams
 
-Every item is a seam design §6–7 already specifies; none adds a concept. **Generality rule** (user, 2026-10-09: the
-core holds only general mechanisms; the plugin design depends on it):
+Every item is a seam design §6–7 already specifies. **Generality rule** (user, 2026-10-09: the core holds only
+general mechanisms; the plugin design depends on it):
 
 1. No model, mixer, state or format names in the core (CI's `check_core_denylist` already bans gdn, deltanet, mamba,
    …). Each mechanism serves any `Slot` state (Mamba, a sliding-window ring, a draft model's state) and any mix of
-   state kinds.
+   state kinds; the core never says "checkpoint" — it handles **payloads** a kind publishes.
 2. Each mechanism is proven in the core's own tests by a **toy state kind** (a per-sequence running sum with
-   checkpoints) before GDN uses it.
-3. No policy in the core: what a checkpoint holds, where it is taken (policies), its pool budget (the deployment) and
-   eviction preferences come from plugins; the core calls the hooks and moves the bytes.
+   payloads at every n tokens) before GDN uses it.
+3. No policy in the core: what a payload holds and where it is taken (the kind and its policy plugin), its pool's
+   budget (the deployment) and eviction preferences come from plugins; the core calls the hooks and moves the bytes.
 
-
-| Seam | Today | M0.3 |
+| Seam | Today | M0.3 (ABI change in **bold**) |
 |---|---|---|
-| Slot units in the batch | `DeviceBatch` has no per-spec slot index | `slot_units: dict[spec, Tensor[rows]]`, filled like block tables |
-| Null slot unit | Slot pools have none | unit 0 reserved; graph padding rows use it (as paged pools' null unit) |
-| MemOps | `BatchPlan.mem_ops` never executed | the executor runs `pre_forward` ops (adopt) before the forward and `post_sample` ops (publish) after the sample, in stream order, captured with the step's graph when the step is graphed |
-| Kind hooks | never called | `admit` asks every kind's `hit_length` and takes the fixed point (design §6.3); `adopt` MemOps on a hit; `publish` at the policy's boundaries, registered at `host_commit` only once committed tokens cover them (depth 1) |
-| Prefix index | off when any spec is not paged | entries carry each kind's payload (KV pages, a checkpoint unit); joint chain eviction |
-| Prefill graphs | decode only | optional, per token bucket, if §4.6's measurement says so |
+| Slot addressing | Slot pools sized `max_seqs·(1+draft)`, no null unit | a Slot pool's unit for a sequence **is its SeqTable slot**; the pool gets the padding slot's unit as its null unit (all pools expose `pool.null`); no new batch field |
+| Prefill cuts | `n = min(remaining, budget)` | the scheduler asks every kind **`cut(seq, start, n) → n' ≤ n`** and takes the minimum (a kind asks its policy; default: no cut) |
+| Publish | never called | when a planned row ends at position p, the core asks every kind `publish(seq, p)` → (payload, MemOps) or None; ops run in the step's `post_sample` phase; the payload is registered in the index at `host_commit` only if committed tokens cover p, else dropped (depth 1) — before `n > 1` siblings are released |
+| Adopt | never called | `admit` takes the fixed-point hit over every kind's `hit_length` (design §6.3) and runs the kinds' `adopt` MemOps in `pre_forward` |
+| MemOps | `BatchPlan.mem_ops` never executed | run eagerly on the step's stream, before the forward / after the sample (or around a graph replay, never inside a graph: their count varies per step); `Pool.copy` copies unit by unit across pools with no temporary (a 147 MiB gather would break the profiled peak) |
+| Prefix index | off when any spec is not paged; refcounts by spec name | entries hold paged units and payloads; **`Payload.pool`** names the payload's pool for refcounts; **per-payload drop** (design §6.3's tombstone) with per-pool victim choice, so a full payload pool evicts its own payloads (interior ones included) and never the KV; publish is best-effort (no free unit: no payload) |
+| Plugin pools | `BuildContext` has `static` and `workspace` | **`ctx.pool(name, unit_bytes, min_units, pref_units)`**, design §6.1's plugin pool (step 3 of the ledger's split) |
+| Prefill graphs | decode only | optional, per token bucket, if §4.6's measurement says so (the planner's `graph_key` for prefill) |
 
-`StateManager.admit` and `publish`, `PrefixIndex` and the executor change; the paged path is unchanged and its
-snapshots stay byte-identical (Qwen3 / Qwen3-MoE propagate with zero approvals; checked in step 3). Estimated
-≈ 400 core lines; the core stays under its LOC cap (3134 / 6000 now).
+Not built in M0.3: `fork` (siblings of `n > 1` wait and adopt the first's payloads when there is a free unit, as
+today's paged path). The paged path's behaviour is unchanged, so Qwen3 snapshots stay byte-identical (acceptance 7).
+The core grows by an estimated ≈ 500 lines (3134 / 6000 now).
 
 ### 4.4 Model plugin
 
 `models/qwen3_5`: `derived_from = "models.qwen3@<commit>"`; provides `model.qwen3_5@1`,
 `arch.Qwen3_5ForConditionalGeneration@1` (reads `text_config`; skips `model.visual.*` and `mtp.*`) and
-`arch.gguf.qwen35@1` (skips `blk.<n_layer>.*`, the MTP block). Per layer: `layer_types[i]` selects
-`Ref("std.mixers.gqa@1", output_gate="sigmoid", rotary_dim=64, …)` or `Ref("std.mixers.gdn@1", …)`; norms
-`Ref(rmsnorm, offset=1 if source is HF else 0)` except the GDN norm (plain `w`). Facts read per source (HF config or
-`qwen35.*` hparams). The recipe rejects configs it does not implement: `output_gate_type` other than absent / swish /
-silu, `attn_output_gate: false`, an mrope section that is not text-equivalent. Bundle: tokenizer, chat template
-(thinking), stop set — from the file for GGUF (M0.1 D3).
+`arch.gguf.qwen35@1`. Facts per source: HF from the config; GGUF from `qwen35.*` with `n_layer = block_count −
+nextn_predict_layers` and layer types derived from `full_attention_interval` (the GGUF map skips `blk.n_layer..`, the
+MTP block). Per layer: `Ref("std.mixers.gqa@1", output_gate="sigmoid", …)` with `Rope(rotary_dim=64)`, or
+`Ref("std.mixers.gdn@1", v_head_order=…)`; norms `RMSNorm(offset=1)` except the GDN norm (`offset=0`). Value
+transforms in the GGUF map: norms `w − 1` (f32), `A_log = log(−ssm_a)`, conv1d unsqueeze. The recipe rejects what it
+does not implement: `output_gate_type` other than absent / swish / silu, `attn_output_gate: false`, an mrope section
+that is not text-equivalent. Bundle: tokenizer, chat template (thinking), stop set — from the file for GGUF.
 
 ### 4.5 Quantized KV
 
-`std.state.paged` already carries a `layout` per spec. GQA declares `kv.hnd.<format>` from the deployment's
-`kv_dtype` (`bfloat16` default, `q8_0`, `fp8`); unit bytes follow the format. Writes: the attention unit's KV append
-becomes a `kv_write@1` op (bf16: today's copy; q8_0: quantize per 32; fp8: cast) so the format lives in kernels, not
-in the unit. Readers: `triton_attn` (q8_0 decode and prefill — S1's kernel productionised, head_dim 256, GQA 6) and
-`flashinfer` (fp8 decode and prefill on sm_89 / sm_120). L0 against a reference that dequantizes the cache.
+`std.state.paged` carries a `layout` per spec; GQA declares `kv.hnd.<format>` from the deployment's `kv_dtype`
+(`bfloat16` default, `q8_0`, `fp8`), and unit bytes follow the format. `kv_write@1` writes a step's K/V into the cache
+(bf16: today's copy; q8_0: per-32 quantize; fp8: saturating cast) before attention, which then reads everything
+through the cache (D6). Readers: `triton_attn` (q8_0 decode and prefill, head_dim 256, GQA 6 — S1's spike kernel
+productionised, with an L0 reference that dequantizes the cache) and `flashinfer` (fp8 decode and prefill). Step 7
+measures fp8 prefill before fp8 enters acceptance.
 
 ### 4.6 Performance
 
-- Decode: graphed as today; GDN decode is bandwidth-bound (S3: ~1.46 TB/s on sm_120), the attention part is 16
-  layers of GQA-6 with head_dim 256.
-- Prefill: S3's eager host floor (0.44–0.65 ms per GDN layer, ≈ 21–31 ms per step for the 27B) matters for agent
-  turns of a few hundred tokens. Step 8 measures TTFT on the agent trace; if the floor is ≥ 20% of TTFT, prefill is
-  graph-captured per token bucket (D5) — else deferred.
-- Bars: pp512 / tg128 and tg128 at depth 8K vs llama-bench; agent and decode traces vs `llama-server` (5080).
+- Decode: graphed as today; GDN decode is bandwidth-bound (S3: ~1.46 TB/s on sm_120); the attention part is 16
+  layers of GQA-6 at head_dim 256.
+- Prefill: eager launches overlap GPU work, so the host floor matters only where host time exceeds GPU time. Step 8
+  measures the **GPU-idle fraction** of eager prefill steps (wall time minus summed kernel time) at agent-turn sizes,
+  including the extra step a cut causes (§4.3; ≈ 21–31 ms of host floor plus one weight pass ≈ 12 ms on the 5080);
+  if idle ≥ 20% at those sizes, prefill is graph-captured per token bucket, else deferred.
+- Bars: pp512 / tg128 and decode at depth 8K vs llama-bench; agent and decode traces vs `llama-server` (5080).
 
 ### 4.7 Numerics and the judge (thresholds and predictions fixed before measuring)
 
-- **Goldens:** fp32 on the CPU through HF's torch GDN path (the 27B ≈ 108 GB of RAM; dequantized GGUF weights for the
-  GGUF goldens, M0.1). HF bf16 floors on GPUs (`device_map`), torch path. A sanity ceiling for Tier A: KL p99 ≤ 1e-4.
-- **KV formats in the floor:** K and V quantize-dequantized as stored (q8_0 per 32 with fp16 scales; fp8 e4m3 cast)
-  in the floor's attention; the bf16-KV floor stays the reference for reporting the KV error.
+- **Tiny model.** Built at test time from a small `Qwen3_5` text config (2 layers of each type, ≥ 2 key heads so the
+  tiled and grouped orders differ, head ratios 2 and 3) with random weights; its GGUF is produced by llama.cpp's own
+  converter at 51ce9c11 (`conversion/qwen.py`, `--outtype f32`, MTP layer included so `block_count = n_layer + 1` is
+  exercised), and cross-checked against transformers' own GGUF loader where it supports `qwen35`. The engine
+  (reference kernels, CPU) must match transformers on the HF weights and on the GGUF.
+- **Goldens:** fp32 on the CPU through HF's torch GDN path, streamed per layer (M0.2's `hf_state`; ≈ 108 GB of fp32
+  weights each, recorded once per file); dequantized GGUF weights for the GGUF goldens. HF bf16 floors on GPUs
+  (`device_map`), torch path. Tier A runs in bf16 (as M0.1's, not M0.2's fp32 CPU run), so it is judged against its
+  own bf16 floor and has no fp32 sanity ceiling.
+- **L0 for GDN:** against the f64 reference recurrence, relative Frobenius error within 2× that of HF's bf16 torch
+  path on the same inputs (measured in the test, not a constant), plus exactness: chunk-aligned resume and graph
+  replay bitwise equal to one-shot and eager, verify-free decode equal to the recurrence step by step within the same
+  bound.
+- **KV formats in the floor:** K and V quantize-dequantized exactly as `kv_write` stores them (q8_0 per 32 with fp16
+  scales; fp8 e4m3 saturating), every attention read through them; the bf16-KV floor stays the reference for the KV
+  error report.
 - **Plants**, verdicts predicted before running:
-  - L2 must fail: value heads read grouped when tiled (gross); `A_log` sign (gross); the conv state dropped between
-    prefill chunks; q/k not l2-normalised; the attention gate split as one block instead of per head; RMSNorm offset
-    0 on the HF source; rotary over all 256 dims.
-  - Bounded must fail: a checkpoint adopted one page early (resume vs recompute); a checkpoint published before its
-    tokens are committed (the depth-1 test); padding rows writing a real slot (graphs vs eager).
-  - L0 must fail: conv1d without the state carry; the delta rule with bf16 state.
+  - L2 must fail: value heads read grouped when tiled (gross); `A_log` sign (gross); q/k not l2-normalised; the
+    attention gate split as one block instead of per head; norm offset 0 on zero-centred norms; rotary over all 256
+    dims; stale state on slot reuse (has-initial-state forced true).
+  - Bounded must fail: the conv state dropped between prefill chunks (chunked vs one-shot); a payload adopted one
+    block early (resume vs recompute); padding rows writing a real slot (graphs vs eager); a payload registered
+    without its tokens committed — run with `checkpoint_every_n` and stops or aborts placed just past a boundary,
+    where depth 1 leaves uncommitted rows (depth 1 vs 0).
+  - L0 must fail: conv1d without the state carry; has-initial-state ignored.
 - **Bounded checks** (design §7.10, `holon_judge bounded`): chunked vs one-shot prefill (chunk sizes 64·k and not),
-  prefix-hit resume vs recompute, graphs vs eager on decode at padded batches.
+  prefix-hit resume vs recompute, graphs vs eager on decode at padded batches, overlap depth 1 vs 0.
 
 ### 4.8 Memory on the 16 GB card
 
-Estimated from the 30B's measured fit on the same card (2.52 GiB free after 12.0 GiB of weights; worst step
-0.31 GiB, graphs 0.26 GiB): UD-IQ3_S's 11.21 GiB leaves ≈ 3.3 GiB, × 0.9 (the 5080's fraction) ≈ 2.97 GiB, minus
-≈ 0.6 GiB for the worst step (GDN prefill scratch ≈ 84 KB per token per layer call) and graphs ≈ 2.4 GiB for state.
-Per running sequence 150 MiB of recurrent state; per checkpoint 150 MiB; KV 64 KiB / token bf16, 34 KiB q8_0, 32 KiB
-fp8. At `max_seqs` 4:
+From the 30B's measured fit on the same card (2.52 GiB free after 12.0 GiB of weights): UD-IQ3_S's ≈ 10.9 GiB of
+loaded weights (MTP skipped) leaves ≈ 3.6 GiB, × 0.9 (the 5080's fraction) ≈ 3.2 GiB, minus the worst step ≈ 0.8 GiB
+(the prompt-logprob chunk alone is ≈ 0.47 GiB at the 248K vocab; GDN prefill scratch ≈ 84 KB per token per layer
+call) and graphs ≈ 0.3 GiB ≈ 2.1 GiB for state. Recurrent state 147 MiB per Slot unit (`max_seqs` + 1 for the null
+unit), a payload 147 MiB, KV 64 KiB / token bf16, 34 KiB q8_0, 32 KiB fp8:
 
-| checkpoints | KV bytes | bf16 KV tokens | q8_0 KV tokens |
-|---|---|---|---|
-| 0 | ≈ 1.8 GiB | ≈ 29K | ≈ 55K |
-| 4 (one per sequence) | ≈ 1.2 GiB | ≈ 20K | ≈ 37K |
+| `max_seqs` | payloads | KV bytes | bf16 KV tokens | q8_0 KV tokens |
+|---|---|---|---|---|
+| 4 | 4 | ≈ 0.8 GiB | ≈ 13K | ≈ 25K |
+| 4 | 0 | ≈ 1.4 GiB | ≈ 23K | ≈ 43K |
+| 2 | 2 | ≈ 1.4 GiB | ≈ 23K | ≈ 43K |
 
-So acceptance 5's 32K context needs q8_0 (or fp8) KV once checkpoints are on. The fit records KV tokens per
-(`max_seqs`, checkpoints, KV format), and the deployment's choice goes into the lock's engine settings.
+So acceptance 5's single 32K context is planned at `max_seqs` 2 with two payloads and q8_0 KV. A generic option to
+recover the prompt-logprob chunk's 0.47 GiB (sizing that chunk by bytes rather than rows) is noted for the fit, not
+assumed. The fit records KV tokens per (`max_seqs`, payloads, KV format); the deployment's choice goes into the lock.
 
 ## 5. Implementation plan
 
 | Step | Work | Checks | Days |
 |---|---|---|---|
-| 0 | Files (27B HF, UD-IQ3_S, UD-Q4_K_M); llama-bench / llama-server baselines on 5080 and 4090; GGUF name map and hparams checked against the checkpoint | baselines | 0.5 |
-| 1 | Std knobs (D2) and their unit tests; `propagate` Qwen3 / Qwen3-MoE | auto-advance, zero approvals | 1 |
-| 2 | `kernels.fla` (vendor S3's subset, patch, provenance), `kernels.gdn_triton` (conv1d, gated norm), op contracts and references | L0 on sm_86 / sm_89 / sm_120a, both head ratios, both orders, graph capture, memcheck | 3 |
-| 3 | Core seams (§4.3), proven by a toy state kind in core tests; then `std.state.recurrent` | core tests; denylist; Qwen3 snapshots unchanged | 3 |
-| 4 | GDN mixer, `models/qwen3_5` (HF and GGUF maps), the tiny model fixture; the 27B GGUF end to end on the A5000 | the tiny model vs transformers (CPU); 27B Tier A on the CPU; bounded checks; plants | 3 |
-| 5 | Qwen3.8-27B: gates, Tier B (A5000 floors), plants; bf16 HF on an RTX PRO 6000 (L2, chat) | L2 all paths | 2.5 |
-| 6 | Checkpoints: kind hooks, policies, agent trace | prefix bounded checks, depth-1 test, tokens saved | 2 |
+| 0 | Files (done: 27B HF, UD-IQ3_S, UD-Q4_K_M); baselines on 5080 and 4090 (bf16 and q8_0 KV); the GGUF name map and hparams checked against the checkpoint | baselines | 0.5 |
+| 1 | `gqa.output_gate`; FlashInfer partial rotary; their unit tests | the knob's default path byte-identical | 0.5 |
+| 2 | `kernels.fla` (vendor S3's subset, patch, provenance), `kernels.gdn_triton` (conv1d, gated norm), op contracts and references, has-initial-state | L0 on sm_86 / sm_89 / sm_120a, both head ratios and orders, graph capture, memcheck | 3 |
+| 3 | Core seams (§4.3), proven by the toy state kind in core tests; `std.state.recurrent` | core tests; denylist; Qwen3 snapshots unchanged | 4 |
+| 4 | GDN mixer, `models/qwen3_5` (HF and GGUF maps), the tiny model fixture; the 27B GGUF end to end on the A5000 | tiny model vs transformers; gates; bounded checks; plants | 3 |
+| 5 | 27B goldens and floors; Tier B (A5000), Tier A and bf16 HF L2 + chat on an RTX PRO 6000 | L2 all paths | 3 |
+| 6 | Payloads end to end: policies, the agent trace | prefix bounded checks, depth-1 test, tokens saved | 2 |
 | 7 | Quantized KV (D6): `kv_write`, q8_0 Triton decode/prefill, fp8 FlashInfer; floors with KV emulation | L0, L2, KV error report | 3 |
-| 8 | Consumer classes: fit, bars, serving, prefill-graph decision (§4.6), tune + locks (5080, 4090), snapshots | evidence, locks | 3 |
-| 9 | Docs: design §5.2 / §6 / plan §6 status | — | 0.5 |
+| 8 | Consumer classes: fit, bars, serving, prefill-graph decision (§4.6), tune + locks (5080, 4090), snapshots; Qwen3 / Qwen3-MoE propagation (one approval) | evidence, locks | 3 |
+| 9 | Docs: design §5.2, §6.2 (GDN alignment 64, not 1), §6.3; plan §6 status | — | 0.5 |
 
 ## 6. Risks
 
-- **The core seams** are the riskiest part: MemOps inside graphs and the fixed-point hit across kinds have no
-  production code yet. Step 3 lands them with core tests before any model uses them.
-- **Checkpoint memory:** 150 MiB each on a 16 GB card; the default (one per running sequence) may leave too little
-  KV at 4 sequences — the fit decides, and a compressed checkpoint codec is the follow-up (§7).
-- **Prefill host floor** (§4.6) could cost agent TTFT; the decision is measured.
-- **fla numerics:** the chunk kernel keeps per-chunk states in bf16 (S3); L2 and the bounded resume check decide
-  whether that is within the floor; fp32 per-chunk states are the fallback.
-- **CPU goldens for the 27B** (≈ 108 GB RAM, torch recurrence): hours, not minutes; recorded once per file.
+- **The core seams** are the riskiest part: MemOps, cuts and the fixed-point hit across kinds have no production code
+  yet. Step 3 lands them against the toy kind before any model uses them.
+- **Memory on the 5080:** 147 MiB per Slot unit and per payload; the planned 32K context needs `max_seqs` 2 and q8_0
+  KV (§4.8). A payload codec is the follow-up (§7).
+- **Cut cost:** each agent turn's prefill becomes two steps (§4.6); measured against the hit's savings.
+- **fla numerics:** per-chunk states are bf16 inside the chunk kernel (S3); L2 and the resume check decide; fp32
+  per-chunk states are the fallback.
+- **27B goldens and Tier A** need ≈ 108 GB of RAM per golden and a PRO 6000 for Tier A: queue time.
 
 ## 7. Deferred, deliberately
 
-- q4_0 KV (S1: not implemented anywhere), and q8_0 verify (M0.4).
-- A checkpoint codec (bf16 or quantized checkpoints) — judged bounded, after M0.3's measurements.
-- Slot-indexed chunk kernel (removes the gather/scatter), PIECEWISE graphs.
-- MTP (the GGUF's `blk.64`, M0.4); the vision tower (v1).
+- q4_0 KV; q8_0 / fp8 verify (M0.4).
+- A payload codec (bf16 or quantized checkpoints), judged bounded.
+- A slot-indexed chunk kernel (no gather/scatter); an in-step snapshot (fla writing the fp32 state at one chunk
+  index), which would remove the extra step a cut causes; PIECEWISE graphs; `fork`.
+- MTP (`blk.64`, M0.4); the vision tower (v1).
 
 ## 8. Review findings, resolved
 
-(none yet)
+Revision 1 (one reviewer: architecture, kernels, numerics). Blockers: B1 stale state on slot reuse → per-row
+has-initial-state in both stateful ops, a plant (D3, §4.7); B2 no step ends at a boundary → the generic `cut` hook
+(§4.3, §4.6). Majors: M1 `offset` and `rotary_dim` exist → one new knob (D2); M2 GGUF norm precision → `w − 1` in f32,
+`offset=1` for both sources (D2, §4.4); M3 auto-advance impossible → one approval (acceptance 7); M4 payloads in other
+pools, unevictable interior payloads, KV evicted for payloads, no plugin pool API → `Payload.pool`, per-payload drop,
+best-effort publish, `ctx.pool` (§4.3); M5 MemOps in graphs, gather temporaries → eager around replays, unit copies
+(§4.3); M6 fla's null convention and checkpoint words in the core → SeqTable-slot addressing with `pool.null`,
+payloads (§4.3); M7 the prefill rule → GPU-idle fraction (§4.6); M8 the depth-1 plant → `checkpoint_every_n` with
+stops near a boundary (§4.7); M9 unsupported plants → dropped / moved to bounded (§4.7); M10 27B Tier A → on the PRO
+6000, goldens streamed (D7, §4.7); M11 the tiny GGUF → llama.cpp's converter (§4.7); M12 `block_count` 65 (§2, §4.4);
+M13 KV-format path → write first, read through the cache, saturating fp8, fp8 prefill measured (D6, §4.5). Minors:
+alignment 64 vs design §6.2 (step 9); `fork` not built (§4.3); §4.8 redone (null unit, the prompt-logprob chunk, the
+skipped MTP block); bars at the same KV format; sm_89 fla is new evidence; hub kernels asserted off; a GDN L0
+budget defined; D-order. Facts corrected: conv state dtype, `A_log` exactness, `block_count`, plan §2 / §6 / §9.

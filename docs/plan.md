@@ -42,7 +42,7 @@ the code is our own plugin-native implementation. Only kernels may be borrowed, 
 | M0 | Qwen3-8B bf16 | core end to end: overlap, graphs, prefix cache, device SeqTable, MemOps/quiesce, locks, snapshots, judge L0–L2 | qwen3, gqa, paged_kv, flashinfer attn, std ops, sampler, FCFS, openai frontend |
 | M0.1 | Qwen3-8B GGUF (Q8_0, Q4_K_M, IQ4_XS, IQ3_XXS) | quant pipeline: GGUF weight source, ggml dialect, borrowed ggml kernels chosen per class; first 16 GB consumer data point (RTX 5080) | gguf weight source, ggml dialect, ggml_cuda kernels |
 | M0.2 | Qwen3-30B-A3B GGUF (UD-IQ3_XXS 12.0 GiB, Q4_K_M; UD-Q3_K_XL optional) + bf16 HF (correctness, RTX PRO 6000) | model isolation; format-general MoE unit and ops; a 30B MoE on a 16 GB card | qwen3_moe recipe, std.moe, GGUF MoE kernels, stacked loading, a Triton grouped GEMM |
-| M0.3 | Qwen3.8-27B: GGUF (UD-IQ3_S 11.2 GiB on 16 GB, UD-Q4_K_M) + bf16 HF (correctness, RTX PRO 6000); Qwen3.5-4B as test model | heterogeneous state, publish/adopt MemOps, checkpoint prefix reuse, quantized KV cache (q8_0 ours, fp8 FlashInfer) | qwen3_5 recipe, gdn mixer + kernels, recurrent state kind, checkpoint policies, quantized-KV layouts |
+| M0.3 | Qwen3.8-27B: GGUF (UD-IQ3_S 11.2 GiB on 16 GB, UD-Q4_K_M) + bf16 HF (correctness, RTX PRO 6000) | heterogeneous state, publish/adopt MemOps, checkpoint prefix reuse, quantized KV cache (q8_0 ours, fp8 FlashInfer) | qwen3_5 recipe, gdn mixer + kernels, recurrent state kind, checkpoint policies, quantized-KV layouts |
 | M0.4 | Qwen3.5 / Qwen3.8 (built-in MTP) + Qwen3-8B | spec decoding at depth 1 on the device SeqTable; Rewindable incl. GDN rollback | mtp drafter, gpu n-gram drafter, verifiers, draft policies |
 | M0.5 | Qwen3-8B, Qwen3.5-9B | forward/sample split, host_input, Rewindable grammar | xgrammar processor, parsers, anthropic + responses frontends |
 | M0.6 | Qwen3-8B / Qwen3-30B-A3B in FP8 (block-scaled), NVFP4 and MXFP4 | low-precision HF checkpoints, dense and MoE: weight-source dialects over `QTensor` parts, `qlinear` / `linear_experts` providers, judge tiers per format; RTX PRO 6000 (sm_120), FP8 also on sm_89 | fp8 / nvfp4 / mxfp4 dialects and kernels |
@@ -63,7 +63,7 @@ L2 budgets. Every criterion names its mode.
 | Qwen3-30B-A3B GGUF UD-IQ3_XXS | 12.0 GiB | 96 KiB | ✓ (Q4_K_M 17.3 GiB) | ✓ | 16K ≈ 15.0 GiB ✓ (more with q8_0 KV) |
 | Qwen3.5-4B bf16 text + MTP | ≈ 8.5 GiB | full-attn layers only | ✓ | ✓ | ✓ (exact numbers in M0.3) |
 | Qwen3.5-9B bf16 text + MTP | 17.13 GiB | full-attn layers only | ≈ 21–22 GiB ✓ | ✓ | ✗ (GGUF builds ✓) |
-| Qwen3.8-27B GGUF UD-IQ3_S / UD-IQ4_XS | 11.2 / 13.3 GiB | 64 KiB (16 full-attn layers; ≈ 34 KiB q8_0) + GDN state ≈ 147 MiB/Seq | ✓ (UD-Q4_K_M 15.3 GiB) | ✓ | 4 Seqs: IQ3_S ≈ 43K tokens bf16 KV / ≈ 80K q8_0; IQ4_XS ≈ 9K / ≈ 17K |
+| Qwen3.8-27B GGUF UD-IQ3_S / UD-Q4_K_M | 11.2 / 15.3 GiB | 64 KiB (16 full-attn layers; ≈ 34 KiB q8_0) + GDN state ≈ 147 MiB/Seq (+ 147 MiB per prefix checkpoint) | ✓ (UD-Q4_K_M) | ✓ | UD-IQ3_S, 2 Seqs, 2 checkpoints: ≈ 23K tokens bf16 KV / ≈ 43K q8_0 (estimate, `docs/m03-qwen38.md` §4.8) |
 
 Global acceptance for every milestone ≥ M0.1:
 - Every earlier model's lock is byte-unchanged, or advanced by `holon propagate` (auto-advance on a
@@ -156,7 +156,7 @@ vLLM Model Runner V2's device-side state, nano-vllm's minimal loop)
 
 **D. std units** (each numeric unit ships `reference.py`)
 - `std.ops`: linear (bf16), rmsnorm, add_rmsnorm composite, rope (neox), silu_mul, embedding, lm_head.
-  (Knobs `rmsnorm.offset`, `rope.rotary_dim` are added in M0.3 with old defaults.)
+  (Knobs `rmsnorm.offset` and `rope.rotary_dim` exist; M0.3 uses them for Qwen3.5/3.8.)
 - `std.blocks.prenorm` + `hf_weights`; `std.ffn.swiglu`; `std.mixers.gqa` (Planner with `plan_bounds` /
   `prepare_device`; `output_gate` knob added in M0.3); `std.state.paged_kv` (truncate, fork); `std.sampling`
   (greedy/temperature/top-k/top-p/min-p, n>1, logprobs incl. prompt logprobs; seeded per (Seq, position)).
@@ -351,20 +351,21 @@ Carried forward:
 ## 6. M0.3 — Qwen3.8-27B: heterogeneous state, prefix reuse, quantized KV (merged with the former M0.3b)
 
 Merged 2026-10-09 by user decision: Qwen3.8-27B (the current, more used family) is the target; Qwen3.5 shares its
-architecture (`Qwen3_5ForConditionalGeneration`) and Qwen3.5-4B is the fast test model. Design and plan:
+architecture (`Qwen3_5ForConditionalGeneration`); a tiny random-weight model of it is the fast test fixture. Design and plan:
 `docs/m03-qwen38.md`.
 
 Work: `models/qwen3_5` (Qwen3.5 and Qwen3.8, HF and GGUF, text-only); `std.mixers.gdn` with `causal_conv1d`,
 `gated_delta_rule`, `gated_rmsnorm` ops; `kernels.fla` (vendored per S3) and our conv1d / gated-norm kernels;
 `std.state.recurrent` (Slot state with page-aligned checkpoints) and checkpoint policies; the core's designed state
 seams (slot units, MemOps, the fixed-point prefix hit across kinds); quantized KV as KV layouts (q8_0 through our
-Triton kernels, fp8 through FlashInfer); std knobs `gqa.output_gate`, `gqa.rotary_dim`, `rmsnorm.offset`.
+Triton kernels, fp8 through FlashInfer); the std knob `gqa.output_gate` (partial rotary and the norm offset reuse existing knobs).
 
 Acceptance (design §1): L2 for the 27B on every path (bf16 HF on an RTX PRO 6000; GGUF UD-IQ3_S / UD-Q4_K_M Tier A
 and B); bounded checks (chunked vs one-shot prefill, prefix resume vs recompute, graphs vs eager); prefix tokens
 saved on agent traces with depth-1-safe checkpoint publishing; q8_0 / fp8 KV judged against floors that emulate them;
-RTX 5080 UD-IQ3_S serving a 32K context, RTX 4090 UD-Q4_K_M, bars vs llama.cpp ≥ 0.8×; locks for rtx-5080 and
-rtx-4090; the std knobs auto-advance Qwen3 / Qwen3-MoE locks; core diff limited to the designed state seams.
+RTX 5080 UD-IQ3_S serving a 32K context (q8_0 KV), RTX 4090 UD-Q4_K_M, bars vs llama.cpp ≥ 0.8×; locks for rtx-5080 and
+rtx-4090; Qwen3 / Qwen3-MoE snapshots byte-identical, propagated with one approval; core diff limited to the
+designed state seams, all general.
 
 ## 7. M0.4 — speculative decoding
 
@@ -403,7 +404,7 @@ without spec bounded; core diff target zero.
 | S6 spike | CPU handshake inside a FULL graph on a desktop host | seam does not hold → redesign the graph/CPU seam before the core ABI freezes |
 | M0 | decode + mixed-trace TTFT/TPOT vs mini-sglang; CPU/step vs nano-vllm; core LOC | < 0.9× after two weeks of perf work, or core > 6k → move per-token input prep to GPU kernels and cut core scope before continuing |
 | M0.2 | core changes needed for MoE; approvals per week from propagation | > 1 core ABI change, or > 3 approvals/week → abstraction or machinery is wrong; simplify |
-| M0.3 | legibility benchmark: ≥ 3 runs per side, same agent and prompt, both starting from a branch point before `qwen3_5` exists | Holon not ≥ 30% cheaper for the agent than a mini-sglang fork → collapse slots and nouns |
+| M0.3 (open, design D9) | legibility benchmark: ≥ 3 runs per side, same agent and prompt, both starting from a branch point before `qwen3_5` exists | Holon not ≥ 30% cheaper for the agent than a mini-sglang fork → collapse slots and nouns |
 | Any | propagation sweep time; approvals/day | > 30 min or > 1/day → async propagation (design §4.6 trigger) |
 | M0.1 / M0.2 / M0.3 | GGUF decode **and prefill** tok/s vs llama.cpp on the same card and quant (RTX 5080), dense and MoE | < 0.8× on either after a perf pass → fix the GGUF kernel path (ported i-quant `mmq` or own Triton kernels for the slow types) before adding features |
 | v1 offload | MoE larger than VRAM on RTX 5080: decode tok/s vs FreeToken and Strata on the same node | < 0.8× → rework the offload path before adding features |
