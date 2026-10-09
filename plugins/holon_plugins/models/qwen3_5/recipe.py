@@ -66,7 +66,8 @@ def _facts(c: Mapping[str, Any], source: str) -> dict[str, Any]:
     return {"layers": t["num_hidden_layers"], "full": [k == "full_attention" for k in t["layer_types"]],
             "heads_k": t["linear_num_key_heads"], "heads_v": t["linear_num_value_heads"],
             "head_k_dim": t["linear_key_head_dim"], "head_v_dim": t["linear_value_head_dim"],
-            "conv_kernel": t["linear_conv_kernel_dim"], "rotary_dim": int(t["head_dim"] * rope["partial_rotary_factor"]),
+            "conv_kernel": t["linear_conv_kernel_dim"],
+            "rotary_dim": int(t["head_dim"] * rope["partial_rotary_factor"]),
             "sections": rope.get("mrope_section", []), "theta": rope["rope_theta"], "order": "grouped", "skip": ()}
 
 
