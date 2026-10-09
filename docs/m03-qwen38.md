@@ -289,10 +289,10 @@ assumed. The fit records KV tokens per (`max_seqs`, payloads, KV format); the de
 | 0 | Files (done: 27B HF, UD-IQ3_S, UD-Q4_K_M); baselines on 5080 and 4090 (bf16 and q8_0 KV); the GGUF name map and hparams checked against the checkpoint | baselines | 0.5 |
 | 1 | `gqa.output_gate`; FlashInfer partial rotary; their unit tests | the knob's default path byte-identical | 0.5 |
 | 2 | `kernels.fla` (vendor S3's subset, patch, provenance), `kernels.gdn_triton` (conv1d, gated norm), op contracts and references, has-initial-state | L0 on sm_86 / sm_89 / sm_120a, both head ratios and orders, graph capture, memcheck | 3 |
-| 3 | Core seams (§4.3), proven by the toy state kind in core tests; `std.state.recurrent` | core tests; denylist; Qwen3 snapshots unchanged | 4 |
+| 3 | Core seams (§4.3), proven by the toy state kind in core tests; `std.state.recurrent` | core tests (incl. the commit-coverage and pinning plants); denylist; Qwen3 snapshots unchanged | 4 |
 | 4 | GDN mixer, `models/qwen3_5` (HF and GGUF maps), the tiny model fixture; the 27B GGUF end to end on the A5000 | tiny model vs transformers; gates; bounded checks; plants | 3 |
 | 5 | 27B goldens and floors; Tier B (A5000), Tier A and bf16 HF L2 + chat on an RTX PRO 6000 | L2 all paths | 3 |
-| 6 | Payloads end to end: policies, the agent trace | prefix bounded checks, depth-1 test, tokens saved | 2 |
+| 6 | Payloads end to end: policies, the agent trace | prefix bounded checks, tokens saved and TTFT | 2 |
 | 7 | Quantized KV (D6): `kv_write`, q8_0 Triton decode/prefill, fp8 FlashInfer; floors with KV emulation | L0, L2, KV error report | 3 |
 | 8 | Consumer classes: fit, bars, serving, prefill-graph decision (§4.6), tune + locks (5080, 4090), snapshots; Qwen3 / Qwen3-MoE propagation (one approval) | evidence, locks | 3 |
 | 9 | Docs: design §5.2, §6.2 (GDN alignment 64, not 1), §6.3; plan §6 status | — | 0.5 |
