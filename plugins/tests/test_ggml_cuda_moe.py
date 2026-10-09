@@ -231,30 +231,30 @@ def test_linear_experts_every_type_at_prefill_chunks(ctx, name):
 @pytest.mark.parametrize("name", ["q4_k", "iq3_xxs", "q6_k", "q4_0", "q2_k"])
 def test_merged_stack_equals_separate_stacks(ctx, lib, name):
     """Gate and up merged per expert give each stack's own output bitwise on mmvq and on mmq without the fixup (with
-    it, the stream-k split moves with the number of row tiles)."""
-    sep, merged = experts(ctx, name, H, INTER, 1), experts(ctx, name, H, 2 * INTER, 1)
-    fused = experts(ctx, name, H, 2 * INTER, 1, "swiglu")
-    gate, up = random_blocks(name, E * INTER, H, seed=3), random_blocks(name, E * INTER, H, seed=4)
-    both = np.concatenate([gate.reshape(E, INTER, -1), up.reshape(E, INTER, -1)], axis=1).reshape(E * 2 * INTER, -1)
-    sg, su, sm_ = (stack(name, E, n, H, 0, b) for n, b in ((INTER, gate), (INTER, up), (2 * INTER, both)))
+    it, the stream-k split moves with the number of row tiles). E = the SM count: every tile count is a multiple of
+    it, so llama.cpp tiles one block per tile and never runs the fixup (`mmq.cuh`, ≥ 90% efficiency), on any GPU."""
+    n = torch.cuda.get_device_properties(0).multi_processor_count
+    sep, merged = experts(ctx, name, H, INTER, 1, n=n), experts(ctx, name, H, 2 * INTER, 1, n=n)
+    fused = experts(ctx, name, H, 2 * INTER, 1, "swiglu", n=n)
+    gate, up = random_blocks(name, n * INTER, H, seed=3), random_blocks(name, n * INTER, H, seed=4)
+    both = np.concatenate([gate.reshape(n, INTER, -1), up.reshape(n, INTER, -1)], axis=1).reshape(n * 2 * INTER, -1)
+    sg, su, sm_ = ({"blocks": torch.from_numpy(b).cuda()} for b in (gate, up, both))     # compared bitwise only
     t, exact_mmq = merged.mmvq_tokens, 0
     for tokens in (1, t, t + 1, 64, CHUNK):
-        ids, x = uniform(tokens, E, seed=tokens), gate_up_input(tokens, seed=tokens)
-        calls = launched(lambda x=x, ids=ids: [sep(x, sg.parts, ids), sep(x, su.parts, ids), merged(x, sm_.parts, ids)])
-        if any("stream_k_fixup" in n for n in calls):
+        ids, x = uniform(tokens, n, seed=tokens), gate_up_input(tokens, seed=tokens)
+        calls = launched(lambda x=x, ids=ids: [sep(x, sg, ids), sep(x, su, ids), merged(x, sm_, ids)])
+        if any("stream_k_fixup" in c for c in calls):
             continue
         exact_mmq += tokens > t
-        y = merged(x, sm_.parts, ids)
-        assert torch.equal(y[..., :INTER], sep(x, sg.parts, ids)), f"{name} T={tokens}: gate rows differ"
-        assert torch.equal(y[..., INTER:], sep(x, su.parts, ids)), f"{name} T={tokens}: up rows differ"
+        y = merged(x, sm_, ids)
+        assert torch.equal(y[..., :INTER], sep(x, sg, ids)), f"{name} T={tokens}: gate rows differ"
+        assert torch.equal(y[..., INTER:], sep(x, su, ids)), f"{name} T={tokens}: up rows differ"
         if tokens <= t:
             ours = torch.empty(tokens, K, INTER, device="cuda")
             lib.swiglu(y, ours)
-            r = l0.check(fused(x, sm_.parts, ids), ours, torch.float32, 1)
+            r = l0.check(fused(x, sm_, ids), ours, torch.float32, 1)
             assert r.passed, f"{name} T={tokens}: the fused gate vs ours: {r}"
-    if not exact_mmq:       # the fixup runs unless the tiles divide evenly over the SMs: never here at these sizes
-        sms = torch.cuda.get_device_properties(0).multi_processor_count
-        pytest.skip(f"{name}: every mmq size took the stream-k fixup on this GPU ({sms} SMs): mmvq compared, mmq not")
+    assert exact_mmq, f"{name}: every mmq size took the fixup at E = {n} SMs, so none was compared"
 
 
 @pytest.fixture(scope="module")
