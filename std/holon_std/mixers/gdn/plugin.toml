@@ -7,6 +7,7 @@ license = "Apache-2.0"
 
 [resources]
 provides = [
+    "unit.std.mixers.gdn@1",
     "op.causal_conv1d@1",
     "op.gated_delta_rule@1",
     "op.gated_rmsnorm@1",
