@@ -8,7 +8,13 @@
   "hardware": "AMD <cpu>",
   "threads": 44,
   "prompts": "v1.jsonl",
-  "prompts_sha256": "5157b507f2553584a5d44ca1ef902043e7a1f5ad5a3deecd3038b6eb5fadb9ae"
+  "prompts_sha256": "5157b507f2553584a5d44ca1ef902043e7a1f5ad5a3deecd3038b6eb5fadb9ae",
+  "weight_source": null,
+  "max_step_tokens": null,
+  "q8_1": null,
+  "moe_block": null,
+  "experts": null,
+  "expert_calls": null
  },
  "candidate": {
   "source": "holon",
@@ -19,7 +25,16 @@
   "hardware": "NVIDIA RTX A5000",
   "threads": null,
   "prompts": "v1.jsonl",
-  "prompts_sha256": "5157b507f2553584a5d44ca1ef902043e7a1f5ad5a3deecd3038b6eb5fadb9ae"
+  "prompts_sha256": "5157b507f2553584a5d44ca1ef902043e7a1f5ad5a3deecd3038b6eb5fadb9ae",
+  "weight_source": "gguf",
+  "max_step_tokens": 4096,
+  "q8_1": null,
+  "moe_block": null,
+  "experts": null,
+  "expert_calls": {
+   "mmvq": 0,
+   "mmq": 6240
+  }
  },
  "overall": {
   "n": 32783,

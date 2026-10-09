@@ -1,0 +1,49 @@
+{
+ "question": "Per-tensor gate: NMSE of every dequantized tensor (per expert for stacks) against the HF checkpoint as transformers loads it, gate 0.5; routers exact (M0.2 design \u00a74.6)",
+ "date": "2026-10-09",
+ "command": "holon_judge.gguf.gate(<file>, Qwen/Qwen3-30B-A3B)",
+ "results": {
+  "UD-IQ3_XXS": {
+   "tensors": 12723,
+   "max": 0.09154501557350159,
+   "over_gate": 0,
+   "max_by_role": {
+    "lm_head": 0.0003149846743326634,
+    "norm": 0.0,
+    "embed_tokens": 0.0051937890239059925,
+    "k_proj": 0.00821980182081461,
+    "k_norm": 0.0,
+    "input_layernorm": 0.0,
+    "o_proj": 0.006831700913608074,
+    "q_proj": 0.009240750223398209,
+    "q_norm": 0.0,
+    "v_proj": 0.009229072369635105,
+    "down_proj": 0.09154501557350159,
+    "gate": 0.0,
+    "post_attention_layernorm": 0.0,
+    "gate_up_proj": 0.041587308049201965
+   }
+  },
+  "Q4_K_M": {
+   "tensors": 12723,
+   "max": 0.009350703097879887,
+   "over_gate": 0,
+   "max_by_role": {
+    "lm_head": 0.0003149846743326634,
+    "norm": 0.0,
+    "embed_tokens": 0.0051937890239059925,
+    "k_proj": 0.008220703341066837,
+    "k_norm": 0.0,
+    "input_layernorm": 0.0,
+    "o_proj": 0.006380490493029356,
+    "q_proj": 0.009350703097879887,
+    "q_norm": 0.0,
+    "v_proj": 0.0065728966146707535,
+    "down_proj": 0.006298640742897987,
+    "gate": 0.0,
+    "post_attention_layernorm": 0.0,
+    "gate_up_proj": 0.007716962601989508
+   }
+  }
+ }
+}

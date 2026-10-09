@@ -13,6 +13,7 @@
   "max_step_tokens": null,
   "q8_1": null,
   "moe_block": null,
+  "experts": null,
   "expert_calls": null
  },
  "candidate": {
@@ -29,9 +30,10 @@
   "max_step_tokens": 8,
   "q8_1": null,
   "moe_block": null,
+  "experts": null,
   "expert_calls": {
-   "mmvq": 396096,
-   "mmq": 3456
+   "mmvq": 393696,
+   "mmq": 0
   }
  },
  "overall": {

@@ -1,0 +1,366 @@
+{
+ "question": "In-process pp512 / tg128 against llama-bench on each class, same file and llama.cpp commit (M0.2 acceptance 5, design §4.5); both sides the median of repetitions 2-5",
+ "date": "2026-10-09",
+ "holon_command": "python bench/llama_bench.py --model <file> -r 5 --blocking-sync [--engine-args '--memory-fraction 0.98 --max-seqs 32' on the 5080]",
+ "llama_cpp": "ggml-org/llama.cpp 51ce9c11 (the spike S2 build per class, CUDA 13.0)",
+ "llama_bench_command": "llama-bench -m <file> -p 512 -n 128 -d 0,256 -ngl 99 -fa on -r 5 -o json",
+ "bars": "RTX 5080 UD-IQ3_XXS: >= 0.8 x S2's 7462 / 248.2, i.e. pp512 >= 5970, tg128 >= 199",
+ "results": {
+  "rtx-5080/UD-IQ3_XXS": {
+   "model": "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS@dbe47df66091cac6",
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "commit": "4d2cfa2",
+   "engine": {
+    "max_seqs": "32",
+    "memory_fraction": "0.98",
+    "max_step_tokens": "512",
+    "cuda_graphs": "True",
+    "overlap": "True"
+   },
+   "pp512": {
+    "holon": {
+     "mean": 8135.58,
+     "sd": 141.11,
+     "runs": [
+      7959.91,
+      8190.05,
+      8299.98,
+      8208.48,
+      8019.48
+     ],
+     "median_reps_2_5": 8199.26
+    },
+    "llama_cpp": {
+     "runs": [
+      6457.17,
+      7396.2,
+      7465.98,
+      7432.67,
+      7325.91
+     ],
+     "median_reps_2_5": 7414.43
+    },
+    "ratio": 1.106
+   },
+   "tg128": {
+    "holon": {
+     "mean": 240.23,
+     "sd": 0.04,
+     "runs": [
+      240.28,
+      240.19,
+      240.2,
+      240.21,
+      240.26
+     ],
+     "cpu_ms_per_step_p50": 0.338,
+     "median_reps_2_5": 240.2
+    },
+    "llama_cpp": {
+     "runs": [
+      247.08,
+      247.94,
+      248.03,
+      248.04,
+      248.11
+     ],
+     "median_reps_2_5": 248.03
+    },
+    "ratio": 0.968
+   },
+   "tg128 @ d256": {
+    "holon": {
+     "mean": 237.14,
+     "sd": 0.09,
+     "runs": [
+      237.26,
+      237.2,
+      237.14,
+      237.11,
+      237.02
+     ],
+     "cpu_ms_per_step_p50": 0.359,
+     "median_reps_2_5": 237.12
+    },
+    "llama_cpp": {
+     "runs": [
+      243.12,
+      244.39,
+      244.42,
+      244.36,
+      244.4
+     ],
+     "median_reps_2_5": 244.4
+    },
+    "ratio": 0.97
+   }
+  },
+  "rtx-4090/Q4_K_M": {
+   "model": "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09",
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "commit": "63941b4",
+   "engine": {
+    "max_seqs": "1",
+    "memory_fraction": "0.9",
+    "max_step_tokens": "512",
+    "cuda_graphs": "True",
+    "overlap": "True"
+   },
+   "pp512": {
+    "holon": {
+     "mean": 10209.21,
+     "sd": 171.49,
+     "runs": [
+      9955.67,
+      10321.81,
+      10393.62,
+      10240.96,
+      10134.02
+     ],
+     "median_reps_2_5": 10281.38
+    },
+    "llama_cpp": {
+     "runs": [
+      7693.26,
+      10119.7,
+      10245.1,
+      10137.9,
+      10039.1
+     ],
+     "median_reps_2_5": 10128.8
+    },
+    "ratio": 1.015
+   },
+   "tg128": {
+    "holon": {
+     "mean": 252.07,
+     "sd": 0.03,
+     "runs": [
+      252.09,
+      252.08,
+      252.02,
+      252.06,
+      252.1
+     ],
+     "cpu_ms_per_step_p50": 0.389,
+     "median_reps_2_5": 252.07
+    },
+    "llama_cpp": {
+     "runs": [
+      248.39,
+      250.34,
+      250.23,
+      250.29,
+      250.11
+     ],
+     "median_reps_2_5": 250.26
+    },
+    "ratio": 1.007
+   },
+   "tg128 @ d256": {
+    "holon": {
+     "mean": 250.81,
+     "sd": 0.01,
+     "runs": [
+      250.81,
+      250.8,
+      250.79,
+      250.83,
+      250.82
+     ],
+     "cpu_ms_per_step_p50": 0.386,
+     "median_reps_2_5": 250.81
+    },
+    "llama_cpp": {
+     "runs": [
+      245.56,
+      248.62,
+      248.59,
+      248.53,
+      248.53
+     ],
+     "median_reps_2_5": 248.56
+    },
+    "ratio": 1.009
+   }
+  },
+  "rtx-a5000/Q4_K_M": {
+   "model": "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09",
+   "gpu": "NVIDIA RTX A5000",
+   "commit": "dcf8902",
+   "engine": {
+    "max_seqs": "1",
+    "memory_fraction": "0.9",
+    "max_step_tokens": "512",
+    "cuda_graphs": "True",
+    "overlap": "True"
+   },
+   "pp512": {
+    "holon": {
+     "mean": 3748.27,
+     "sd": 89.77,
+     "runs": [
+      3618.11,
+      3782.65,
+      3842.99,
+      3799.48,
+      3698.13
+     ],
+     "median_reps_2_5": 3791.07
+    },
+    "llama_cpp": {
+     "runs": [
+      3233.49,
+      3450.67,
+      3508.35,
+      3464.43,
+      3416.92
+     ],
+     "median_reps_2_5": 3457.55
+    },
+    "ratio": 1.096
+   },
+   "tg128": {
+    "holon": {
+     "mean": 176.25,
+     "sd": 0.55,
+     "runs": [
+      176.71,
+      176.67,
+      176.55,
+      175.6,
+      175.71
+     ],
+     "cpu_ms_per_step_p50": 0.744,
+     "median_reps_2_5": 176.13
+    },
+    "llama_cpp": {
+     "runs": [
+      171.43,
+      172.0,
+      171.94,
+      173.13,
+      173.13
+     ],
+     "median_reps_2_5": 172.57
+    },
+    "ratio": 1.021
+   },
+   "tg128 @ d256": {
+    "holon": {
+     "mean": 174.73,
+     "sd": 0.76,
+     "runs": [
+      175.66,
+      174.25,
+      175.3,
+      174.69,
+      173.77
+     ],
+     "cpu_ms_per_step_p50": 0.765,
+     "median_reps_2_5": 174.47
+    },
+    "llama_cpp": {
+     "runs": [
+      170.74,
+      172.28,
+      172.27,
+      172.17,
+      172.13
+     ],
+     "median_reps_2_5": 172.22
+    },
+    "ratio": 1.013
+   }
+  },
+  "rtx-a5000/UD-IQ3_XXS": {
+   "model": "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS@dbe47df66091cac6",
+   "gpu": "NVIDIA RTX A5000",
+   "commit": "dcf8902",
+   "engine": {
+    "max_seqs": "1",
+    "memory_fraction": "0.9",
+    "max_step_tokens": "512",
+    "cuda_graphs": "True",
+    "overlap": "True"
+   },
+   "pp512": {
+    "holon": {
+     "mean": 3798.75,
+     "sd": 100.2,
+     "runs": [
+      3842.54,
+      3866.44,
+      3841.42,
+      3821.57,
+      3621.79
+     ],
+     "median_reps_2_5": 3831.49
+    },
+    "llama_cpp": {
+     "runs": [
+      3429.38,
+      3677.56,
+      3729.61,
+      3710.04,
+      3659.12
+     ],
+     "median_reps_2_5": 3693.8
+    },
+    "ratio": 1.037
+   },
+   "tg128": {
+    "holon": {
+     "mean": 159.23,
+     "sd": 0.27,
+     "runs": [
+      159.61,
+      159.42,
+      159.1,
+      159.01,
+      159.04
+     ],
+     "cpu_ms_per_step_p50": 0.844,
+     "median_reps_2_5": 159.07
+    },
+    "llama_cpp": {
+     "runs": [
+      158.82,
+      159.34,
+      159.22,
+      159.26,
+      159.19
+     ],
+     "median_reps_2_5": 159.24
+    },
+    "ratio": 0.999
+   },
+   "tg128 @ d256": {
+    "holon": {
+     "mean": 158.11,
+     "sd": 0.42,
+     "runs": [
+      158.04,
+      157.97,
+      157.75,
+      157.97,
+      158.83
+     ],
+     "cpu_ms_per_step_p50": 1.09,
+     "median_reps_2_5": 157.97
+    },
+    "llama_cpp": {
+     "runs": [
+      156.1,
+      157.36,
+      157.24,
+      157.2,
+      157.25
+     ],
+     "median_reps_2_5": 157.25
+    },
+    "ratio": 1.005
+   }
+  }
+ }
+}

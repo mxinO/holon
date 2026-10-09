@@ -1,0 +1,102 @@
+{
+ "sessions": 12,
+ "turns": 4,
+ "system_len": 512,
+ "max_tokens": 128,
+ "results": {
+  "baseline": {
+   "config": {
+    "cuda_graphs": false,
+    "prefix_cache": false,
+    "overlap": false
+   },
+   "top1": {
+    "value": 0.9855143229166666,
+    "se": 0.0022483228261636003,
+    "n": 6144
+   },
+   "confident": {
+    "value": 0.99401695196942,
+    "se": 0.001135653294255094,
+    "n": 6017
+   },
+   "regret": {
+    "value": 0.0023857867636252195,
+    "se": 0.000499060781156121,
+    "n": 6144
+   },
+   "kl": {
+    "kl": {
+     "value": 0.0026918418151573448,
+     "se": 0.0002525703185265422,
+     "n": 6144
+    },
+    "p50": 0.0001224644748014793,
+    "p99": 0.03655905102446028,
+    "p50_se": 8.064479291076763e-05,
+    "p99_se": 0.0031180079288962996
+   },
+   "tokens_saved": 0,
+   "margins": {
+    "top1": 0.007949021583383925,
+    "confident": 0.004015140727223093,
+    "kl_p50": 0.00028512239967294303,
+    "kl_p99": 0.03655905102446028
+   },
+   "failures": [],
+   "passed": true
+  },
+  "graphs on": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": false,
+    "overlap": false
+   },
+   "top1": {
+    "value": 0.9013671875,
+    "se": 0.02190465197256466,
+    "n": 6144
+   },
+   "confident": {
+    "value": 0.9125938281901584,
+    "se": 0.021833126190375515,
+    "n": 5995
+   },
+   "regret": {
+    "value": 0.20509856426118253,
+    "se": 0.09296089825572741,
+    "n": 6144
+   },
+   "kl": {
+    "kl": {
+     "value": 0.0026918418151573448,
+     "se": 0.0002525703185265422,
+     "n": 6144
+    },
+    "p50": 0.0001224644748014793,
+    "p99": 0.03655905102446028,
+    "p50_se": 8.064479291076763e-05,
+    "p99_se": 0.0031180079288962996
+   },
+   "tokens_saved": 0,
+   "margins": {
+    "top1": 0.007949021583383925,
+    "confident": 0.004015140727223093,
+    "kl_p50": 0.00028512239967294303,
+    "kl_p99": 0.03655905102446028
+   },
+   "failures": [
+    "top1 0.9014 beyond 0.00795 of the baseline",
+    "confident 0.9126 beyond 0.00402 of the baseline"
+   ],
+   "passed": false
+  }
+ },
+ "passed": false,
+ "model": "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS",
+ "dtype": "bfloat16",
+ "graphs_vs_eager": true,
+ "hardware": "NVIDIA RTX A5000",
+ "torch": "2.11.0+cu130",
+ "plant": "moe-padding-duplicate-ids"
+}

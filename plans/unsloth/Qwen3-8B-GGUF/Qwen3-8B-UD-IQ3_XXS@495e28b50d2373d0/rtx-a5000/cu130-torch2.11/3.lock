@@ -1,0 +1,62 @@
+# Written by the holon tools; never edit by hand (AGENTS.md).
+digest = "sha256:8766cc2b215e769670ac5d14bc33d2638e28178188118bc52d51634d5c572761"
+plan_id = "sha256:9990489b7667ff4e15221e6601b0283cc77460975caa33e1abe71c60911f6efb"
+model_id = "unsloth/Qwen3-8B-GGUF/Qwen3-8B-UD-IQ3_XXS@495e28b50d2373d0"
+fingerprint_class = "rtx-a5000/cu130-torch2.11"
+sm = 86
+recipe = "sha256:1d2e9a0f418f886e2f04e057614a2a2550f5796bcc6699aee00fad82660a82e5"
+
+[deploy]
+commit = "28f444655832057d3010a3418b4bf2c0a9ab9b31"
+uv_lock = "none"
+
+[engine]
+cuda_graphs = true
+dtype = "bfloat16"
+max_draft_tokens = 0
+max_model_len = 8192
+max_seqs = 64
+max_step_tokens = 4096
+overlap = true
+page_size = 16
+prefix_cache = true
+source = "gguf"
+
+[snapshot]
+trace = "sha256:604530e6cefccb08582a62e1a6e71352d46c129a1c4c9ffd362d351e85bdf3d7"
+uncovered = []
+
+[units]
+holon = { src = "sha256:a7d7bfdf887231863d9df076994f2dbbab2052d6c08c1ff74ebb4ad4c987e705", version = "0.0.1" }
+"kernels.flashinfer" = { src = "sha256:3a41f001e6216a8ee29470c33a7ff9ff909360682c2a6ec53566365d074df83e", version = "1.0.0" }
+"kernels.ggml_cuda" = { src = "sha256:18b7beb6e9f7f10aaa55adbe29541680f8869f0af657526976bd174e24186267", version = "1.0.0" }
+"kernels.triton_attn" = { src = "sha256:cf01b493c8b9527fdcaeb09c05b51cf77ecfe293563ee93a7f8c25045cbc70d1", version = "1.0.0" }
+"models.qwen3" = { src = "sha256:3875c1fe51ad48a369153bb90b3faee7bda9cf460d81c26d488a4c4e3e6cbd62", version = "1.0.0" }
+"std.blocks" = { src = "sha256:91c02d82c532b18dfe6d7485f3d8372d5448b321a905736cfd352eda5a793a46", version = "1.0.0" }
+"std.ffn" = { sem = "sha256:3d659257417ee8d6db9940788a3c20c14c4c31282948b5bc8ab32aa375a499fa", src = "sha256:910c54f302697761f4137376ec9f11d93ffca211be91692efab2c7b756f833b1", version = "1.0.0" }
+"std.mixers.gqa" = { sem = "sha256:7c99653b452b11280e4ab069399a8e5452f02eaa2246458f6d2491797e479cbc", src = "sha256:dc6021e4d861d18f4bb07ecdad9b1c93f3d9edd97fdc17b9e8ed328b70f74672", version = "1.0.0" }
+"std.ops" = { sem = "sha256:d5e6b193767f20bdf4e0da771de82e00180d565866bbe0b675b19295135607ef", src = "sha256:77c713ba2d8326399631199a185b4521df86f7f3ee71083ff14e1189ee43a10d", version = "1.0.0" }
+"std.sampling" = { sem = "sha256:3f9a80781e878ec96e0bc4ed2ec5fd13a51f1332899a19467dad5fd8328e597b", src = "sha256:383a6dc9383aaa42bc1ae948809de77b228731d8c9fcf9f6ebfbf01163079d09", version = "1.0.0" }
+"std.state.paged" = { src = "sha256:850bebdf9b6b45a55f289248171e5ca619bd4a10656c422f30fbc2d6d7a8008b", version = "1.0.0" }
+"std.weights.gguf" = { src = "sha256:6efbcdd396b43c18bb3c60986d68892348cd9ad2877cb4ae651b6ee419911fae", version = "1.0.0" }
+
+[sites]
+"kv/attention.paged_decode@1" = { config = { facts = { head_dim = 128, heads = 32, kv_dtype = "bfloat16", kv_heads = 8, layout = "kv.hnd", max_seqs = 64, page = 16, q_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"kv/attention.paged_prefill@1" = { config = { facts = { head_dim = 128, heads = 32, kv_dtype = "bfloat16", kv_heads = 8, layout = "kv.hnd", max_seqs = 64, page = 16, q_dtype = "bfloat16" }, props = ["deterministic", "needs_host_lens"] }, impl = "kernels.flashinfer" }
+"kv/attention.paged_verify@1" = { config = { facts = { head_dim = 128, heads = 32, kv_dtype = "bfloat16", kv_heads = 8, layout = "kv.hnd", max_seqs = 64, page = 16, q_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.ffn.swiglu[inter=12288]/silu_mul@1" = { config = { facts = { dtype = "bfloat16", inter = 12288 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.qembedding[layout=ggml.q3_k/gguf.native,vocab=151936,hidden=4096,dtype=bfloat16]/qembedding@1" = { config = { facts = { dtype = "bfloat16", hidden = 4096, layout = "ggml.q3_k/gguf.native", vocab = 151936 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.ggml_cuda" }
+"std.ops.qlinear[layout=ggml.iq2_s/gguf.native,in=4096,out=5120,act_dtype=bfloat16,out_dtype=bfloat16]/qlinear@1" = { config = { facts = { act_dtype = "bfloat16", in = 4096, layout = "ggml.iq2_s/gguf.native", out = 5120, out_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.ggml_cuda" }
+"std.ops.qlinear[layout=ggml.iq2_xs/gguf.native,in=4096,out=5120,act_dtype=bfloat16,out_dtype=bfloat16]/qlinear@1" = { config = { facts = { act_dtype = "bfloat16", in = 4096, layout = "ggml.iq2_xs/gguf.native", out = 5120, out_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.ggml_cuda" }
+"std.ops.qlinear[layout=ggml.iq3_s/gguf.native,in=4096,out=4096,act_dtype=bfloat16,out_dtype=bfloat16]/qlinear@1" = { config = { facts = { act_dtype = "bfloat16", in = 4096, layout = "ggml.iq3_s/gguf.native", out = 4096, out_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.ggml_cuda" }
+"std.ops.qlinear[layout=ggml.iq3_xxs/gguf.native,in=12288,out=4096,act_dtype=bfloat16,out_dtype=bfloat16]/qlinear@1" = { config = { facts = { act_dtype = "bfloat16", in = 12288, layout = "ggml.iq3_xxs/gguf.native", out = 4096, out_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.ggml_cuda" }
+"std.ops.qlinear[layout=ggml.iq3_xxs/gguf.native,in=4096,out=24576,act_dtype=bfloat16,out_dtype=bfloat16]/qlinear@1" = { config = { facts = { act_dtype = "bfloat16", in = 4096, layout = "ggml.iq3_xxs/gguf.native", out = 24576, out_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.ggml_cuda" }
+"std.ops.qlinear[layout=ggml.iq3_xxs/gguf.native,in=4096,out=5120,act_dtype=bfloat16,out_dtype=bfloat16]/qlinear@1" = { config = { facts = { act_dtype = "bfloat16", in = 4096, layout = "ggml.iq3_xxs/gguf.native", out = 5120, out_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.ggml_cuda" }
+"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=12288,out=4096,act_dtype=bfloat16,out_dtype=bfloat16]/qlinear@1" = { config = { facts = { act_dtype = "bfloat16", in = 12288, layout = "ggml.iq4_xs/gguf.native", out = 4096, out_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.ggml_cuda" }
+"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=4096,out=1024,act_dtype=bfloat16,out_dtype=bfloat16]/qlinear@1" = { config = { facts = { act_dtype = "bfloat16", in = 4096, layout = "ggml.q4_k/gguf.native", out = 1024, out_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.ggml_cuda" }
+"std.ops.qlinear[layout=ggml.q5_k/gguf.native,in=4096,out=151936,act_dtype=bfloat16,out_dtype=float32]/qlinear@1" = { config = { facts = { act_dtype = "bfloat16", in = 4096, layout = "ggml.q5_k/gguf.native", out = 151936, out_dtype = "float32" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.ggml_cuda" }
+"std.ops.rmsnorm[dim=128]/add_rmsnorm@1" = { config = { facts = { dim = 128, dtype = "bfloat16", eps = 1e-06, offset = 0.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.rmsnorm[dim=128]/rmsnorm@1" = { config = { facts = { dim = 128, dtype = "bfloat16", eps = 1e-06, offset = 0.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.rmsnorm[dim=4096]/add_rmsnorm@1" = { config = { facts = { dim = 4096, dtype = "bfloat16", eps = 1e-06, offset = 0.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.rmsnorm[dim=4096]/rmsnorm@1" = { config = { facts = { dim = 4096, dtype = "bfloat16", eps = 1e-06, offset = 0.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.rope[head_dim=128]/rope@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, max_positions = 8192, rotary_dim = 128, theta = 1000000.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
