@@ -1,0 +1,195 @@
+{
+ "sessions": 8,
+ "turns": 4,
+ "system_len": 512,
+ "max_tokens": 128,
+ "results": {
+  "baseline": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": false,
+    "overlap": false
+   },
+   "top1": {
+    "value": 0.02880859375,
+    "se": 0.02880859375,
+    "n": 4096
+   },
+   "confident": {
+    "value": 0.4541832669322709,
+    "se": 0.4632307423691687,
+    "n": 251
+   },
+   "regret": {
+    "value": NaN,
+    "se": NaN,
+    "n": 4096
+   },
+   "kl": {
+    "kl": {
+     "value": NaN,
+     "se": NaN,
+     "n": 4096
+    },
+    "p50": NaN,
+    "p99": NaN,
+    "p50_se": NaN,
+    "p99_se": NaN
+   },
+   "tokens_saved": 0,
+   "margins": {
+    "top1": 0.10185375998536696,
+    "confident": 1.637767995916589,
+    "kl_p50": NaN,
+    "kl_p99": NaN
+   },
+   "failures": [
+    "kl_p50 nan beyond nan of the baseline",
+    "kl_p99 nan beyond nan of the baseline"
+   ],
+   "passed": false
+  },
+  "prefix on, depth 1": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": true,
+    "overlap": true
+   },
+   "top1": {
+    "value": 0.048095703125,
+    "se": 0.032470703125,
+    "n": 4096
+   },
+   "confident": {
+    "value": 0.4125560538116592,
+    "se": 0.23247130105239774,
+    "n": 446
+   },
+   "regret": {
+    "value": NaN,
+    "se": NaN,
+    "n": 4096
+   },
+   "kl": {
+    "kl": {
+     "value": NaN,
+     "se": NaN,
+     "n": 4096
+    },
+    "p50": NaN,
+    "p99": NaN,
+    "p50_se": NaN,
+    "p99_se": NaN
+   },
+   "tokens_saved": 19456,
+   "margins": {
+    "top1": 0.10185375998536696,
+    "confident": 1.637767995916589,
+    "kl_p50": NaN,
+    "kl_p99": NaN
+   },
+   "failures": [
+    "kl_p50 nan beyond nan of the baseline",
+    "kl_p99 nan beyond nan of the baseline"
+   ],
+   "passed": false
+  },
+  "prefix on, depth 0": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": true,
+    "overlap": false
+   },
+   "top1": {
+    "value": 0.057861328125,
+    "se": 0.04072216696214921,
+    "n": 4096
+   },
+   "confident": {
+    "value": 0.6243093922651933,
+    "se": 0.003693415951894052,
+    "n": 362
+   },
+   "regret": {
+    "value": NaN,
+    "se": NaN,
+    "n": 4096
+   },
+   "kl": {
+    "kl": {
+     "value": NaN,
+     "se": NaN,
+     "n": 4096
+    },
+    "p50": NaN,
+    "p99": NaN,
+    "p50_se": NaN,
+    "p99_se": NaN
+   },
+   "tokens_saved": 19456,
+   "margins": {
+    "top1": 0.10185375998536696,
+    "confident": 1.637767995916589,
+    "kl_p50": NaN,
+    "kl_p99": NaN
+   },
+   "failures": [
+    "kl_p50 nan beyond nan of the baseline",
+    "kl_p99 nan beyond nan of the baseline"
+   ],
+   "passed": false
+  },
+  "prefix off, depth 1": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": false,
+    "overlap": true
+   },
+   "top1": {
+    "value": 0.185546875,
+    "se": 0.07927017138117452,
+    "n": 4096
+   },
+   "confident": {
+    "value": 0.8675115207373272,
+    "se": 0.06443274819350166,
+    "n": 868
+   },
+   "regret": {
+    "value": NaN,
+    "se": NaN,
+    "n": 4096
+   },
+   "kl": {
+    "kl": {
+     "value": NaN,
+     "se": NaN,
+     "n": 4096
+    },
+    "p50": NaN,
+    "p99": NaN,
+    "p50_se": NaN,
+    "p99_se": NaN
+   },
+   "tokens_saved": 0,
+   "margins": {
+    "top1": 0.10185375998536696,
+    "confident": 1.637767995916589,
+    "kl_p50": NaN,
+    "kl_p99": NaN
+   },
+   "failures": [
+    "kl_p50 nan beyond nan of the baseline",
+    "kl_p99 nan beyond nan of the baseline"
+   ],
+   "passed": false
+  }
+ },
+ "passed": false,
+ "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+ "dtype": "bfloat16",
+ "graphs_vs_eager": false,
+ "hardware": "NVIDIA RTX A5000",
+ "torch": "2.11.0+cu130",
+ "plant": "qwen35-stale-state"
+}
