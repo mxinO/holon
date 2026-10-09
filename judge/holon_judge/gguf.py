@@ -72,23 +72,27 @@ def _untile(x: torch.Tensor, f: dict, dim: int, start: int = 0) -> torch.Tensor:
     return torch.cat([x.narrow(dim, 0, start), x.index_select(dim, index)], dim=dim)
 
 
+def _qwen35_order(name: str, x: torch.Tensor, f: dict) -> torch.Tensor:
+    """`x` (a tensor of `name`'s rows × columns, or anything laid out like it, e.g. its q8_1 offsets per group) with
+    value heads back in grouped order: rows of the per-v-head projections, the input columns of `ssm_out`."""
+    part = name.split(".", 2)[-1] if name.startswith("blk.") else name
+    if part in ("ssm_a", "ssm_dt.bias", "ssm_beta.weight", "ssm_alpha.weight", "attn_gate.weight"):
+        return _untile(x, f, 0)
+    if part in ("attn_qkv.weight", "ssm_conv1d.weight"):
+        return _untile(x, f, 0, start=2 * f["hk"] * f["dk"])
+    if part == "ssm_out.weight":
+        return _untile(x, f, 1)
+    return x
+
+
 def _qwen35_value(name: str, x: torch.Tensor, f: dict) -> torch.Tensor:
     """Undo the converter's value changes: zero-centred norms (all but the GDN norm) stored as w + 1, `ssm_a` as
     −exp(A_log), conv1d squeezed, value heads tiled."""
     part = name.split(".", 2)[-1] if name.startswith("blk.") else name
     if part.endswith("norm.weight") and part != "ssm_norm.weight":
         return x - 1
-    if part == "ssm_a":
-        return _untile(torch.log(-x), f, 0)
-    if part in ("ssm_dt.bias", "ssm_beta.weight", "ssm_alpha.weight", "attn_gate.weight"):
-        return _untile(x, f, 0)
-    if part == "attn_qkv.weight":
-        return _untile(x, f, 0, start=2 * f["hk"] * f["dk"])
-    if part == "ssm_conv1d.weight":
-        return _untile(x, f, 0, start=2 * f["hk"] * f["dk"])[:, None, :]
-    if part == "ssm_out.weight":
-        return _untile(x, f, 1)
-    return x
+    x = _qwen35_order(name, torch.log(-x) if part == "ssm_a" else x, f)
+    return x[:, None, :] if part == "ssm_conv1d.weight" else x
 
 
 _DENSE = {gguf.GGMLQuantizationType.F32, gguf.GGMLQuantizationType.F16, gguf.GGMLQuantizationType.BF16}
@@ -133,7 +137,11 @@ def emulate_q8_1(model: torch.nn.Module, path: str | pathlib.Path, kernel_path: 
 
     linears = {name: m for name, m in model.named_modules() if isinstance(m, torch.nn.Linear)}
     types = {}
-    for t in gguf.GGUFReader(path).tensors:
+    reader = gguf.GGUFReader(path)
+    q35 = _qwen35(reader.fields)
+    for t in reader.tensors:
+        if q35 is not None and re.match(rf"blk\.{q35['layers']}\.", t.name):
+            continue
         if t.name.endswith("_exps.weight"):            # expert stacks: the floors' D3 block (`q8_1_experts`)
             continue
         owner = hf_name(t.name).removesuffix(".weight")
@@ -141,7 +149,10 @@ def emulate_q8_1(model: torch.nn.Module, path: str | pathlib.Path, kernel_path: 
             continue                                   # norms, and the embedding (get_rows reads it exactly)
         kind, blocks = t.tensor_type.name.lower(), np.asarray(t.data)
         g = q8_1.blocking(kind, kernel_path).sum_group
-        offs = q8_1.offsets(blocks, kind, g).float().to(linears[owner].weight.device) if g else None
+        offs = q8_1.offsets(blocks, kind, g).float() if g else None
+        if offs is not None and q35 is not None:          # the weight's value heads were untiled: so are its offsets
+            offs = _qwen35_order(t.name, offs, q35)
+        offs = None if offs is None else offs.to(linears[owner].weight.device)
         linears[owner].forward = functools.partial(_emulated, linears[owner], kind, kernel_path, offs,
                                                    torch.float32 if owner == "lm_head" else None)
         types[owner] = kind
