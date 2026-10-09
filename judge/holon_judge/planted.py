@@ -189,6 +189,46 @@ def _swap_gate_up_experts(name: str) -> str:
     return next((name.replace(a, b) for a, b in swap.items() if a in name), name)
 
 
+@contextlib.contextmanager
+def ggml_experts_wrong_type() -> Iterator[None]:
+    """The first expert stack of a type with a same-size twin is read as the twin (IQ3_S as Q3_K, Q4_K as Q4_0: 110
+    and 144 bytes per 256 values)."""
+    from holon_plugins.kernels.ggml_cuda import plugin
+
+    twin = {plugin.TYPES["iq3_s"]: plugin.TYPES["q3_k"], plugin.TYPES["q4_k"]: plugin.TYPES["q4_0"]}
+    init, done = plugin.LinearExperts.__init__, []
+
+    def planted(self, ext, ctx, **facts):
+        init(self, ext, ctx, **facts)
+        if not done and self.type in twin:
+            self.type = twin[self.type]
+            done.append(facts)
+    with mock.patch.object(plugin.LinearExperts, "__init__", planted):
+        yield
+    print(f"plant ggml-experts-wrong-type: {done}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def ggml_experts_stale_q8_1(every: int = 97) -> Iterator[None]:
+    """Every `every`-th expert call reads the activations of the previous call with the same `in` and rows per token
+    (what a stale q8_1 input would hold; it models a stale per-token input, not a stale compacted buffer). Reports
+    how often it fired on each path."""
+    from holon_plugins.kernels.ggml_cuda import plugin
+
+    call, last, calls, fired = plugin.LinearExperts.__call__, {}, itertools.count(1), collections.Counter()
+
+    def planted(self, x, parts, ids):
+        key = (self.k, x.shape[1])
+        prev, last[key] = last.get(key), x.clone()
+        if next(calls) % every == 0 and prev is not None and len(prev) >= len(x):
+            fired["mmvq" if len(x) <= self.mmvq_tokens else "mmq"] += 1
+            x = prev[:len(x)]
+        return call(self, x, parts, ids)
+    with mock.patch.object(plugin.LinearExperts, "__call__", planted):
+        yield
+    print(f"plant ggml-experts-stale-q8_1 fired: {dict(fired)}", file=sys.stderr)
+
+
 def _hf_experts(layer: int, edit: Callable[[int, str], tuple[int, str]]) -> Callable[[str], str]:
     """A rename of HF per-expert tensor names in `layer`: (expert, projection) -> (expert, projection)."""
     import re
@@ -238,4 +278,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "ggml-wrong-type": ggml_wrong_type, "ggml-stale-q8_1": ggml_stale_q8_1,
     "rare-ggml-stale-q8_1": lambda: ggml_stale_q8_1(every=9973),      # ~ one linear in 55 forwards
     # MoE Tier A and the bf16 HF path (Qwen3-30B-A3B: the one-layer plants at layer 24)
-    **moe_plants(24), **hf_moe_plants(24, 128)}
+    **moe_plants(24), **hf_moe_plants(24, 128),
+    # MoE Tier B
+    "ggml-experts-wrong-type": ggml_experts_wrong_type, "ggml-experts-stale-q8_1": ggml_experts_stale_q8_1,
+    "rare-ggml-experts-stale-q8_1": lambda: ggml_experts_stale_q8_1(every=9973)}

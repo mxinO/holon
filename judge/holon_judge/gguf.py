@@ -100,8 +100,9 @@ def q8_1_experts(path: str | pathlib.Path, kernel_path: str):
     for t in gguf.GGUFReader(path).tensors:
         m = re.fullmatch(r"blk\.(\d+)\.(ffn_(?:gate|up|down)_exps)\.weight", t.name)
         if m:
+            blocks = np.asarray(t.data)                                     # [E, out, row_bytes] -> rows
             stacks.setdefault(f"model.layers.{m[1]}.mlp", {})[_EXPERTS[m[2]]] = (t.tensor_type.name.lower(),
-                                                                                np.asarray(t.data))
+                                                                                blocks.reshape(-1, blocks.shape[-1]))
     cache: dict[str, torch.Tensor | None] = {}
 
     def offsets(key: str, parts: list[tuple[str, np.ndarray]], e: int, device) -> torch.Tensor | None:

@@ -162,7 +162,8 @@ def metrics(golden: Recording, cand: Recording) -> tuple[Metrics, dict[str, Metr
     return _summarize(rows, golden.k), by_cat
 
 
-_PROVENANCE = ("source", "model", "revision", "dtype", "device", "hardware", "threads", "prompts", "prompts_sha256")
+_PROVENANCE = ("source", "model", "revision", "dtype", "device", "hardware", "threads", "prompts", "prompts_sha256",
+               "weight_source", "max_step_tokens", "q8_1", "moe_block", "expert_calls")
 
 
 def _provenance(rec: Recording) -> dict:

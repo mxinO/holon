@@ -90,3 +90,13 @@ def test_a_planted_moe_bug_moves_the_scores(moe_files, tiny_prompts, gold, clean
     with moe_plants(layer=1)[plant]():
         r = compare(gold, _tier_a(moe_files[1], tiny_prompts))
     assert r.overall.kl_p99 > 100 * clean.kl_p99, r.table()
+
+
+@pytest.mark.parametrize("kernel_path", ["mmq", "mmvq"])
+def test_the_tier_b_floor_emulates_q8_1_in_the_experts(moe_files, tiny_prompts, gold, kernel_path):
+    checkpoint, file, _ = moe_files
+    plain = golden.record(str(file), tiny_prompts, dtype=torch.bfloat16, config=str(checkpoint))
+    floor = golden.record(str(file), tiny_prompts, dtype=torch.bfloat16, config=str(checkpoint), q8_1=kernel_path)
+    assert floor.meta["q8_1"] == kernel_path and floor.meta["moe_block"].startswith("d3-reference@")
+    assert not floor.same_tensors(plain)                                  # q8_1 rounding reached the experts
+    assert compare(gold, floor).overall.kl_p99 < 1e-2
