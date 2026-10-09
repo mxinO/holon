@@ -14,8 +14,8 @@
    "memcheck": "ERROR SUMMARY: 0 errors"
   },
   "rtx-pro-6000 (sm_120a, 188 SMs)": {
-   "commit": "c21762a",
-   "l0": "216 passed, 6 skipped: the merged-stack mmq comparison skipped for the stream-k fixup (since 39d4a8d the test runs at E = the SM count, where the fixup cannot run), and the sm_86-only case"
+   "commit": "d8c26c2",
+   "l0": "216 passed, 6 skipped: the merged-stack mmq comparison skipped for the stream-k fixup (since 39d4a8d the test runs at E = the SM count, where the fixup cannot run), and the sm_86-only case; not re-run since 39d4a8d"
   },
   "rtx-4090 (sm_89)": {
    "commit": "4d2cfa2",
