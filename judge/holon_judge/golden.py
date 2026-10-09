@@ -15,6 +15,7 @@ import time
 import torch
 import transformers
 
+from . import kv as kv_format
 from . import moe
 from .recording import PromptSet, Recording
 
@@ -76,10 +77,12 @@ def teacher_force(model: torch.nn.Module, ids: list[int], k: int, rows: int = 25
 
 
 def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, device: str = "cpu",
-           k: int = 20, config: str | None = None, q8_1: str | None = None, pure_hf: bool = False) -> Recording:
+           k: int = 20, config: str | None = None, q8_1: str | None = None, pure_hf: bool = False,
+           kv: str | None = None) -> Recording:
     """Record top-k teacher-forced logprobs of `model` (hub id, checkpoint directory, or a .gguf file with the HF
     `config` it was made from: the dense model of its dequantized weights, M0.1 §4.6) over `prompts`. `q8_1` ("mmq"
     or "mmvq", GGUF only): every quantized linear computes as llama.cpp's kernels on that path (Tier B's floor).
+    `kv` ("q8_0" or "fp8"): attention reads K and V as a cache in that format stores them (`kv.emulate`).
     A floor (not fp32) of an MoE model runs the D3-mirroring MoE block (`moe.mirror`, M0.2 §4.6) unless `pure_hf`;
     the fp32 golden is always HF's own model."""
     path = resolve_model(model)
@@ -105,6 +108,7 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
         hf = transformers.AutoModelForCausalLM.from_pretrained(path, dtype=dtype, device_map=device,
                                                                attn_implementation="sdpa",
                                                                experts_implementation="eager").eval()
+        hf.to(dtype)        # transformers 5.6 ignores `dtype` for a multimodal checkpoint's text model (Qwen3.5/3.8)
         if mirrored:                       # the router F32 as the engine holds it; dense operands rounded to bf16
             for block in hf.modules():
                 if type(block).__name__.endswith("SparseMoeBlock"):
@@ -113,11 +117,13 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
         source = model_meta(path) | _moe_meta(mirrored)
     _torch_paths(hf)
     t0 = time.perf_counter()
-    rows = [teacher_force(hf, p.ids, k) for p in prompts.prompts]
+    with kv_format.emulate(kv):
+        rows = [teacher_force(hf, p.ids, k) for p in prompts.prompts]
     wall = time.perf_counter() - t0
     meta = source | prompts.meta() | {
         "source": "hf", "dtype": str(dtype).removeprefix("torch."), "device": hf.device.type, "attn": "sdpa",
         **({"experts": "eager"} if is_moe else {}),      # HF's expert path, pinned (a default may change)
+        **({"kv": kv} if kv else {}),
         "hardware": hardware(hf.device), "threads": torch.get_num_threads(), "torch": torch.__version__,
         "transformers": transformers.__version__, "wall_s": round(wall, 2)}
     return Recording.from_rows(rows, meta)

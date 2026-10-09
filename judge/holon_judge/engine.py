@@ -67,20 +67,22 @@ def _rows(prompt: Prompt, parts: list[Logprobs], k: int) -> tuple[torch.Tensor, 
 
 def score_model(model: str, prompts: PromptSet, dtype: torch.dtype = torch.bfloat16, device: str = "cuda",
                 k: int = 20, source: str | None = None, max_step_tokens: int | None = None,
-                state_memory: int | None = None, max_seqs: int = 64) -> Recording:
+                state_memory: int | None = None, max_seqs: int = 64, kv: str | None = None) -> Recording:
     """Build a Holon engine for `model` (hub id, checkpoint directory or .gguf file; `source` names the weight source,
     else it is detected) and score `prompts` through it, whole prompts per step unless `max_step_tokens` says less
     (GGUF Tier B's decode run: steps small enough that every quantized matmul takes mmvq). On the CPU (Tier A)
-    `state_memory` sizes the state pools, which only a GPU can measure."""
+    `state_memory` sizes the state pools, which only a GPU can measure. `kv` is the KV cache format (the
+    deployment's `kv.format` option; None: the model dtype)."""
     from holon.core.engine import Engine, EngineConfig
 
     path = resolve_model(model)
     max_len = max(len(p.ids) for p in prompts.prompts) + 1     # room for the one sampled token
     engine = Engine(EngineConfig(model=str(path), device=device, dtype=dtype, max_model_len=max_len,
                                  max_step_tokens=max_step_tokens or max(max_len, 4096), source=source,
-                                 state_memory=state_memory, max_seqs=max_seqs))
+                                 state_memory=state_memory, max_seqs=max_seqs,
+                                 plugin_options={"kv.format": kv} if kv else {}))
     meta = (gguf.file_meta(path) if path.suffix == ".gguf" else model_meta(path)) | {
         "weight_source": source or engine.source.kind, "max_step_tokens": engine.cfg.max_step_tokens,
         "dtype": str(dtype).removeprefix("torch."), "device": torch.device(device).type,
-        "hardware": hardware(torch.device(device)), "torch": torch.__version__}
+        "hardware": hardware(torch.device(device)), "torch": torch.__version__, **({"kv": kv} if kv else {})}
     return score(engine, prompts, k, meta)

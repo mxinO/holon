@@ -163,7 +163,7 @@ def metrics(golden: Recording, cand: Recording) -> tuple[Metrics, dict[str, Metr
 
 
 _PROVENANCE = ("source", "model", "revision", "dtype", "device", "hardware", "threads", "prompts", "prompts_sha256",
-               "weight_source", "max_step_tokens", "q8_1", "moe_block", "experts", "expert_calls")
+               "weight_source", "max_step_tokens", "q8_1", "kv", "moe_block", "experts", "expert_calls")
 
 
 def _provenance(rec: Recording) -> dict:
@@ -171,8 +171,13 @@ def _provenance(rec: Recording) -> dict:
 
 
 def _path_failures(floor: dict, cand: dict) -> list[str]:
-    """A Tier B floor emulates one kernel path (`q8_1`) for every expert matmul: the candidate's expert calls while
-    scoring must all have taken it (an MoE floor's candidate must have counted them)."""
+    """A floor emulates the candidate's KV format (none: the model dtype), or it would hide KV bugs (a quantized floor)
+    or fail a correct quantized cache (an exact one). A Tier B floor emulates one kernel path (`q8_1`) for every
+    expert matmul: the candidate's expert calls while scoring must all have taken it (an MoE floor's candidate must
+    have counted them)."""
+    if floor.get("kv") != cand.get("kv"):
+        return [f"the floor's KV format is {floor.get('kv') or 'the model dtype'}, the candidate's "
+                f"{cand.get('kv') or 'the model dtype'}"]
     path, calls = floor.get("q8_1"), cand.get("expert_calls")
     if not path or not floor.get("moe_block"):
         return []
