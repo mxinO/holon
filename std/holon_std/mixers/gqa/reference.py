@@ -58,7 +58,8 @@ def quantize_q8_0(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """GGUF's q8_0 over the last dim: per 32 values d = amax/127 (stored fp16), q = round(x · (1/d)) half away from
     zero, with d and its inverse in f32 before the fp16 store (ggml's `quantize_row_q8_0_ref`)."""
     blocks = x.float().reshape(*x.shape[:-1], -1, Q8_BLOCK)
-    d = blocks.abs().amax(-1, keepdim=True) / 127
+    amax = blocks.abs().amax(-1, keepdim=True)
+    d = amax / torch.full_like(amax, 127)               # a true division (CUDA multiplies by 1/127 for a scalar)
     inv = torch.where(d == 0, 0.0, 1.0 / d)
     v = blocks * inv
     q = (v.sign() * (v.abs() + 0.5).floor()).clamp(-127, 127).to(torch.int8)

@@ -24,6 +24,13 @@ def test_q8_0_is_ggufs():
                                                                        gguf.GGMLQuantizationType.Q8_0)))
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_q8_0_is_the_same_on_cuda():
+    x = torch.randn(4096, 256, generator=torch.Generator().manual_seed(1)) * 3
+    want, got = gqa.quantize_q8_0(x), gqa.quantize_q8_0(x.cuda())
+    assert all(torch.equal(a, b.cpu()) for a, b in zip(want, got, strict=True))
+
+
 def test_fp8_saturates():
     x = torch.tensor([1.0, -1000.0, 600.0, 0.0])
     assert gqa.to_fp8(x).float().tolist() == [1.0, -448.0, 448.0, 0.0]

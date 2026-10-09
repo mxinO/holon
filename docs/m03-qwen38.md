@@ -125,8 +125,9 @@ plan §10); performance of the bf16 HF path.
   values + fp16 scale per 32) and `kv.hnd.fp8` (e4m3, saturating cast, scale 1). The attention unit's KV append becomes
   a `kv_write@1` op so the format lives in kernels. Prefill **writes the chunk's K/V first and attends through the
   cache**, so every read (prefix and the chunk's own tokens) sees the stored format, independent of chunking — and one
-  floor emulates it exactly (D7). q8_0: our Triton kernels (write, decode, prefill; verify is M0.4) on every class.
-  fp8: FlashInfer decode and prefill on sm_89 / sm_120 (its `supports` gains `q_dtype ≠ kv_dtype`); if fp8 prefill
+  floor emulates it exactly (D7). q8_0: our Triton kernels (write, decode, prefill, verify) on every class.
+  fp8: FlashInfer prefill on sm_89 / sm_120 (its `supports` gains `q_dtype ≠ kv_dtype`), our Triton decode and verify
+  (graph-capturable; FlashInfer's fp8 decode stays registered at a lower priority); if fp8 prefill
   measures unusable in step 7, fp8 is recorded as decode-only and q8_0 is the deployment's format.
 - **D7 — The judge mirrors deployment numerics, as in M0.1/M0.2.** fp32 goldens on the CPU through HF's torch GDN
   path (the judge asserts transformers' swappable hub kernels are off, as S3's harness did); bf16 floors on GPUs,
@@ -218,8 +219,9 @@ that is not text-equivalent. Bundle: tokenizer, chat template (thinking), stop s
 `std.state.paged` carries a `layout` per spec; GQA declares `kv.hnd.<format>` from the deployment's `kv_dtype`
 (`bfloat16` default, `q8_0`, `fp8`), and unit bytes follow the format. `kv_write@1` writes a step's K/V into the cache
 (bf16: today's copy; q8_0: per-32 quantize; fp8: saturating cast) before attention, which then reads everything
-through the cache (D6). Readers: `triton_attn` (q8_0 decode and prefill, head_dim 256, GQA 6 — S1's spike kernel
-productionised, with an L0 reference that dequantizes the cache) and `flashinfer` (fp8 decode and prefill). Step 7
+through the cache (D6). Readers: `triton_attn` (q8_0 decode, verify and prefill, fp8 decode and verify, head_dim
+256, GQA 6 — S1's spike kernel productionised, with an L0 reference that dequantizes the cache) and `flashinfer`
+(fp8 prefill; its fp8 decode cannot be captured in a graph, so ours is preferred). Step 7
 measures fp8 prefill before fp8 enters acceptance.
 
 ### 4.6 Performance
@@ -311,7 +313,7 @@ assumed. The fit records KV tokens per (`max_seqs`, payloads, KV format); the de
 
 ## 7. Deferred, deliberately
 
-- q4_0 KV; q8_0 / fp8 verify (M0.4).
+- q4_0 KV.
 - A payload codec (bf16 or quantized checkpoints), judged bounded.
 - A slot-indexed chunk kernel (no gather/scatter); an in-step snapshot (fla writing the fp32 state at one chunk
   index), which would remove the extra step a cut causes; PIECEWISE graphs; `fork`.
