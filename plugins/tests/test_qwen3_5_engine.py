@@ -66,3 +66,16 @@ def test_a_checkpoint_hit_computes_what_recomputing_does(tiny, policy):
     assert engine.stats()["cached_blocks"] >= 2
     hot = _run(engine, turn, params)
     assert engine.stats()["prefix_tokens_saved"] == 128 and hot == cold
+
+
+def test_without_checkpoint_units_nothing_is_reused(tiny):
+    """A checkpoint pool may get no units (its budget did not fit): publishes find no room, so a turn recomputes."""
+    _, path, prompts = tiny
+    first = prompts[2]
+    turn = first + [7, 8, 9] + prompts[3]
+    params = SamplingParams(temperature=0.0, max_tokens=5, logprobs=1)
+    cold = _run(_engine(path, prefix_cache=False), turn, params)
+    engine = _engine(path, plugin_options={"recurrent.checkpoints": "0"})
+    assert engine.ledger.pool("plugin.ssm_state.checkpoints").capacity == 0
+    _run(engine, first, params)
+    assert _run(engine, turn, params) == cold and engine.stats()["prefix_tokens_saved"] == 0

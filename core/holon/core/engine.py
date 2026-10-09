@@ -106,7 +106,8 @@ class Engine:
                                 else self.executor.state_memory(self.ledger, cfg.memory_fraction))
         self.state.reset_padding()
         for pool in self.ledger.pools.values():          # fresh segments, so they show the allocator setting
-            platform.check_expandable(pool.buffer)
+            if pool.buffer is not None:                  # (a plugin pool may get no units)
+                platform.check_expandable(pool.buffer)
         self.executor.capture_graphs()
 
         self._inflight: _Inflight | None = None
