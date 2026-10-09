@@ -70,8 +70,11 @@ def score_model(model: str, prompts: PromptSet, dtype: torch.dtype = torch.bfloa
         "weight_source": source or engine.source.kind, "max_step_tokens": engine.cfg.max_step_tokens,
         "dtype": str(dtype).removeprefix("torch."), "device": torch.device(device).type,
         "hardware": hardware(torch.device(device)), "torch": torch.__version__}
+    counters = [m._kernel.calls for m in engine.executor.model.modules()
+                if hasattr(getattr(m, "_kernel", None), "calls")]
+    before = [dict(c) for c in counters]            # the engine's start-up (memory profiling, graphs) excluded
     rec = score(engine, prompts, k, meta)
-    calls = [m._kernel.calls for m in engine.executor.model.modules() if hasattr(getattr(m, "_kernel", None), "calls")]
-    if calls:                                       # expert matmuls per kernel path (a decode run asserts no mmq)
-        rec.meta["expert_calls"] = {p: sum(c[p] for c in calls) for p in calls[0]}
+    if counters:                                    # expert matmuls per kernel path while scoring (decode: no mmq)
+        rec.meta["expert_calls"] = {p: sum(c[p] - b[p] for c, b in zip(counters, before, strict=True))
+                                    for p in counters[0]}
     return rec
