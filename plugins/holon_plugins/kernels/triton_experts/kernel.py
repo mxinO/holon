@@ -68,6 +68,8 @@ def _grouped(x_ptr, w_ptr, y_ptr, rows_ptr, expert_ptr, k_slots: tl.constexpr, r
 def grouped(x: torch.Tensor, weight: torch.Tensor, ids: torch.Tensor, glu: str) -> torch.Tensor:
     """`y [T, k, out_y]` f32 for `x [T, R, in]` (rounded to the weight dtype here: the dense contract) over the stack
     `weight [E, out, in]`."""
+    if weight.stride(2) != 1:
+        raise ValueError(f"the expert stack's rows must be contiguous (strides {weight.stride()})")
     t, k = ids.shape
     out_y = weight.shape[1] // 2 if glu == "swiglu" else weight.shape[1]
     y = torch.empty(t, k, out_y, dtype=torch.float32, device=x.device)

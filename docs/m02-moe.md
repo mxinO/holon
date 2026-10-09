@@ -11,7 +11,8 @@ kernels, on a 16 GB RTX 5080 and on 24–32 GB cards. Acceptance:
 
 1. `models/qwen3_moe` is `models/qwen3` copied with `derived_from`; its recipe diff to qwen3 is ≤ ~25 lines (the
    ffn `Ref`, the GGUF and HF expert weight rules). Core diff: the stacking weight rule only (D7). Every Qwen3 lock
-   (bf16 and GGUF) changes only in `[units]` source pins (the core's; and `kernels.ggml_cuda`'s for GGUF):
+   (bf16 and GGUF) changes only in `[units]` source pins (the core's and `kernels.flashinfer`'s, whose workspace
+   is sized per device and geometry; and `kernels.ggml_cuda`'s for GGUF):
    `propagate` shows a byte-identical snapshot trace, L2 passing, `[sites]`, `[engine]` and the recipe hash unchanged;
    one approval covering every affected lock (design §4.6).
 2. L0 for the MoE ops on sm_86, sm_89, sm_120a, every supported type on both kernel paths (§4.6), memcheck clean.
@@ -19,11 +20,12 @@ kernels, on a 16 GB RTX 5080 and on 24–32 GB cards. Acceptance:
    and margin recorded in §4.6; the gates pass; the quantization error vs bf16 is reported.
 4. Snapshot trace run-identical over 3 fresh engines (UD-IQ3_XXS on rtx-5080, Q4_K_M on rtx-a5000); graphs vs eager
    bounded on MoE decode, on both kernel paths.
-5. RTX 5080: UD-IQ3_XXS with ≥ 16K KV tokens. RTX 4090, 5090, A5000: Q4_K_M. In-process pp512 / tg128 against
+5. RTX 5080: UD-IQ3_XXS with ≥ 16K KV tokens. RTX 4090, A5000: Q4_K_M (the 5080 covers sm_120; the 5090 adds no
+   correctness coverage and is left to a later lock refresh). In-process pp512 / tg128 against
    llama-bench at the same commit on every class, both sides as the median of repetitions 2–5 (bar on the 5080:
    ≥ 0.8× S2's 7462 / 248.2, i.e. pp512 ≥ 5970, tg128 ≥ 199); decode and agent traces against `llama-server` on the
    5080. UD-Q3_K_XL (plan §5) is optional: recorded on the 5080 if time allows, not required.
-6. GGUF locks for rtx-5080 (UD-IQ3_XXS) and rtx-a5000, rtx-4090, rtx-5090 (Q4_K_M).
+6. GGUF locks for rtx-5080 (UD-IQ3_XXS) and rtx-a5000, rtx-4090 (Q4_K_M).
 7. **The bf16 HF checkpoint** (`Qwen/Qwen3-30B-A3B`, 57 GiB) on a full RTX PRO 6000 node (96 GB, sm_120): it loads
    through the stacking rule, answers the M0.1 chat set sensibly, and passes L2 against the bf16 checkpoint's fp32
    golden with an HF bf16 floor. A correctness path: no performance bar, no lock.
@@ -266,7 +268,8 @@ kernels (with the wait rule of §4.3), finer graph buckets for MoE (core).
 - **Precision test** (CUDA unit test, not L2: Tier A is fp32 and Tier B's floor is noisier than these choices): at
   bf16, the router logits match an f64 reference within the fp32 budget (fails under TF32 or a bf16 router); our f32
   SwiGLU kernel matches an f64 reference within the fp32 budget (fails for a bf16 SwiGLU cast to f32); expert
-  outputs are f32; `linear_experts` binds `act_dtype` bf16 with f32 output.
+  outputs are f32; `linear_experts` binds `act_dtype` bf16 for gate/up and f32 for down (the SwiGLU output), with
+  f32 output.
 - **Graphs vs eager**: `holon_judge bounded` with `cuda_graphs` on vs off on MoE decode at batch 3 and 5 (padded,
   mmvq) and 12 and 20 (padded to 16 and 32: mmq). Its KL is scored eagerly, so its sensitivity to replay comes from
   greedy agreement.
@@ -349,9 +352,9 @@ Same three reviewers throughout; each step ends green.
 | 2 | Judge: name map, streamed golden, gates, the D3-mirroring MoE block, Tier A on the CPU with its floor on A5000s, Tier A plants | Tier A L2 for both files; plants fail at their predicted margins | 2.5 |
 | 3 | `kernels.ggml_cuda`: C API, two vendored kernels and their patches, f32 SwiGLU, provenance; L0 incl. memcheck | L0 on sm_86 and sm_120a; graph capture; determinism | 4.5 |
 | 4 | Emulator expert paths; Tier B floors and runs on the A5000; Tier B, L0 and precision plants; precision test; graphs vs eager; perf on the A5000 | Tier B passes; plants fail | 2.5 |
-| 5 | Consumer classes: L0 on sm_89; 5080 fit ≥ 16K; bars on 5080 / 4090 / 5090 / A5000; `llama-server` traces on the 5080; Tier B on the 5080; tune + GGUF locks; snapshot ×3 | evidence; locks | 3 |
+| 5 | Consumer classes: L0 on sm_89; 5080 fit ≥ 16K; bars on 5080 / 4090 / A5000; `llama-server` traces on the 5080; Tier B on the 5080; tune + GGUF locks; snapshot ×3 | evidence; locks | 3 |
 | 6 | bf16 HF path: stacking rule (core) and its tests; `kernels.triton_experts` and its L0; the HF map and facts; the structural test; the judge's HF source; L2, plants and chat on an RTX PRO 6000 node (`ggml_cuda` prebuilt for sm_120, for routing and combine) | acceptance 7 | 4 |
-| 6b | Qwen3 locks (bf16 rtx-a5000 / 4090 / 5090; GGUF rtx-5080 / a5000): `propagate`, one approval covering every affected lock | locks | 0.5 |
+| 6b | Qwen3 locks (bf16 rtx-a5000 / 4090; GGUF rtx-5080 / a5000; core, `kernels.flashinfer` and, for GGUF, `kernels.ggml_cuda` pins): `propagate`, one approval covering every affected lock; the bf16 rtx-5090 lock stays outdated (a 5090 borrows the nearest lock, unverified): M0.2 is not a release commit, and the 5090 refresh is owed before the next one (design §4.6) | locks | 0.5 |
 | 7 | Docs: design §5.1 / §5.3 / §5.6, plan §5 status | — | 0.5 |
 
 ≈ 20 days; critical path 1 → 2 and 3 (parallel) → 4 → 5 → 6b → 7, with step 6 in parallel from step 3 on (it needs

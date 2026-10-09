@@ -181,6 +181,8 @@ def build_model(spec: ModelSpec, ctx: BuildContext) -> Model:
 @functools.lru_cache(maxsize=256)
 def _compile(pattern: str, stack: str | None = None) -> re.Pattern[str]:
     parts = re.split(r"\{(\w+)\}", pattern)
+    if stack is not None and stack not in parts[1::2]:
+        raise PluginError(f"weight rule {pattern!r}: stack {stack!r} is not one of its captures")
     regex = "".join(re.escape(p) if i % 2 == 0 else (f"(?P<{p}>\\d+)" if p in ("i", stack) else f"(?P<{p}>.+)")
                     for i, p in enumerate(parts))
     return re.compile(regex + r"\Z")
@@ -237,6 +239,8 @@ def load_weights(model: Model, ctx: BuildContext, tensors: Iterable[tuple[str, t
         target, transform, index = mapped
         if target not in params:
             raise PluginError(f"{name!r} maps to {target!r}, which the model does not have")
+        if (index is None and target in slices) or (index is not None and target in filled):
+            raise PluginError(f"{target!r} filled both whole and by stack slices (last from {name!r})")
         if index is not None:
             _fill_slice(params[target], target, index, name, value, transform, ctx, slices.setdefault(target, set()))
             continue

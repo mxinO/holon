@@ -1,8 +1,10 @@
 """The stacking weight rule (docs/m02-moe.md D7): per-expert checkpoint tensors fill one [E, …] parameter."""
+import types
+
 import pytest
 import torch
 from holon.api import Layout, QTensor, Scheme, WeightMap, WeightRule
-from holon.core.build import BuildContext, _fill_slice, map_name
+from holon.core.build import BuildContext, _fill_slice, load_weights, map_name
 from holon.core.plugins import PluginError, PluginSet, discover
 from torch import nn
 
@@ -17,6 +19,12 @@ def test_the_stack_capture_is_an_integer_index():
     assert map_name("m.layers.3.experts.1.w", RULES)[2] == 1               # "1" and "12" are distinct slices
     assert map_name("m.layers.3.experts.x.w", RULES) == ("layers.3.experts.x.w", None, None)   # digits only
     assert map_name("m.layers.3.norm", RULES) == ("layers.3.norm", None, None)
+
+
+def test_a_stack_must_name_a_capture():
+    bad = WeightMap("hf_safetensors", rules=(WeightRule("m.experts.{e}.w", "ffn.w", stack="x"),))
+    with pytest.raises(PluginError, match="stack 'x' is not one of its captures"):
+        map_name("m.experts.0.w", bad)
 
 
 @pytest.fixture
@@ -48,3 +56,20 @@ def test_bad_slices_are_load_errors(ctx):
     q = QTensor(Layout(Scheme("ggml.q8_0"), "gguf.native"), (2, 4), {"blocks": torch.zeros(2, 34, dtype=torch.uint8)})
     with pytest.raises(PluginError, match="quantized tensor cannot fill a slice"):
         _fill_slice(param, "w", 2, "x.2", q, None, ctx, got)
+
+
+class _Model(nn.Module):
+    def __init__(self, weights: WeightMap) -> None:
+        super().__init__()
+        self.spec = types.SimpleNamespace(weights=weights)
+        with torch.device("meta"):
+            self.w = nn.Parameter(torch.empty(2, 3), requires_grad=False)
+
+
+@pytest.mark.parametrize("whole_first", [True, False])
+def test_a_parameter_is_filled_whole_or_by_slices_not_both(ctx, whole_first):
+    rules = WeightMap("hf_safetensors", rules=(WeightRule("e.{e}.w", "w", stack="e"), WeightRule("w", "w")))
+    slices = [("e.0.w", torch.zeros(3)), ("e.1.w", torch.zeros(3))]
+    whole = [("w", torch.ones(2, 3))]
+    with pytest.raises(PluginError, match="filled both whole and by stack slices"):
+        load_weights(_Model(rules), ctx, whole + slices if whole_first else slices + whole)

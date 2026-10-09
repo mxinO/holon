@@ -503,11 +503,38 @@ def test_swiglu_kernel_within_the_fp32_budget(lib):
     assert not l0.check((torch.nn.functional.silu(gb) * ub).float(), want, torch.float32, 1).passed
 
 
-def test_moe_layer_binds_bf16_activations_and_f32_outputs(ctx):
+def test_router_logits_within_the_fp32_budget(ctx, monkeypatch):
+    # D3: the router is an f32 product of the bf16 hidden states (an f64 reference at the fp32 budget); a bf16
+    # router or TF32 (`allow_tf32`, e.g. via `set_float32_matmul_precision("high")`) must miss it.
     unit, _ = moe_layer(ctx, "q4_k", "q4_k")
-    sites = {k: v for k, v in ctx.kernels.items() if k.endswith("/linear_experts@1") and "experts=128" in k}
-    assert sites and all(v["provider"] == "kernels.ggml_cuda" and v["facts"]["act_dtype"] == "bfloat16"
-                         and v["facts"]["out_dtype"] == "float32" for v in sites.values())
+    x = torch.randn(300, H, generator=torch.Generator().manual_seed(17)).bfloat16().cuda()
+    want = x.double() @ unit.router.double().T
+    seen = []
+    route = unit._topk
+    monkeypatch.setattr(unit, "_topk", lambda logits: seen.append(logits.clone()) or route(logits))
+
+    def logits() -> torch.Tensor:
+        seen.clear()
+        unit(x)
+        return seen[0]
+
+    assert torch.backends.cuda.matmul.allow_tf32 is False
+    r = l0.check(logits(), want, torch.float32, H)
+    assert r.passed, r
+    bf16 = torch.nn.functional.linear(x, unit.router.bfloat16()).float()
+    assert not l0.check(bf16, want, torch.float32, H).passed
+    monkeypatch.setattr(torch.backends.cuda.matmul, "allow_tf32", True)
+    assert not l0.check(logits(), want, torch.float32, H).passed
+
+
+def test_moe_layer_binds_its_activation_dtypes_and_f32_outputs(ctx):
+    unit, _ = moe_layer(ctx, "q4_k", "q4_k")
+    sites = {v["facts"]["glu"]: v for k, v in ctx.kernels.items()
+             if k.endswith("/linear_experts@1") and "experts=128" in k}
+    assert set(sites) == {"swiglu", "none"} and all(v["provider"] == "kernels.ggml_cuda"
+                                                    and v["facts"]["out_dtype"] == "float32" for v in sites.values())
+    assert sites["swiglu"]["facts"]["act_dtype"] == "bfloat16"         # gate/up: the layer input
+    assert sites["none"]["facts"]["act_dtype"] == "float32"            # down: the f32 SwiGLU output
     x = layer_input(3, seed=16)
     _, ids = unit._topk(torch.nn.functional.linear(x.float(), unit.router))
     h = unit._gate_up(x[:, None], ids)

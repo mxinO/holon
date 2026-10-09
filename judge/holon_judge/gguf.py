@@ -189,13 +189,16 @@ def _place(model: torch.nn.Module, device: str) -> torch.nn.Module:
 
 
 def gate(path: str | pathlib.Path, hf_dir: str | pathlib.Path) -> dict[str, float]:
-    """NMSE of every dequantized tensor against the HF checkpoint as transformers loads it (bf16; its own fusion of
-    per-expert tensors), per expert for expert stacks: a mistake in the judge's assembly (expert order, gate before
-    up) fails here even if the engine makes the same one."""
-    reference = transformers.AutoModelForCausalLM.from_pretrained(hf_dir, dtype=torch.bfloat16).state_dict()
+    """NMSE of every dequantized tensor against the HF checkpoint as transformers loads it (in its stored dtype, with
+    its own fusion of per-expert tensors), per expert for expert stacks: a mistake in the judge's assembly (expert
+    order, gate before up) fails here even if the engine makes the same one. MoE routers must be exact (F32 in the
+    file, the checkpoint's values upcast): a ValueError otherwise."""
+    reference = transformers.AutoModelForCausalLM.from_pretrained(hf_dir, dtype="auto").state_dict()
     out = {}
     for name, x in hf_state(path):
         ref = reference[name].float()
+        if name.endswith(".mlp.gate.weight") and not torch.equal(x.float(), ref):
+            raise ValueError(f"{path}: router {name} differs from the checkpoint's")
         if ".mlp.experts." in name:
             for e in range(x.shape[0]):
                 out[f"{name}[{e}]"] = _nmse(x[e], ref[e])

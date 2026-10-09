@@ -82,3 +82,15 @@ def test_refuses_different_prompt_sets(case):
     other = _recording(logits, targets, lens[::-1])
     with pytest.raises(ValueError, match="different prompt sets"):
         compare(g, other)
+
+
+def test_expert_calls_off_the_floors_path_fail(case):
+    lens, logits, targets, _ = case
+    g, floor = _recording(logits, targets, lens), _recording(logits, targets, lens)
+    floor.meta["q8_1"] = "mmvq"
+    on_path, off_path = _recording(logits, targets, lens), _recording(logits, targets, lens)
+    on_path.meta["expert_calls"] = {"mmvq": 40, "mmq": 0}
+    off_path.meta["expert_calls"] = {"mmvq": 40, "mmq": 3}
+    assert compare(g, on_path, floor).passed
+    r = compare(g, off_path, floor)
+    assert r.passed is False and r.failures == ("3 expert calls on mmq, the floor emulates mmvq",)

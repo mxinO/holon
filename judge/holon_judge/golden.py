@@ -95,7 +95,8 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
         if config is None:
             raise ValueError(f"{path}: a GGUF golden needs the HF config it was made from")
         hf_config = resolve_model(config)
-        mirrored = dtype != torch.float32 and not pure_hf and _is_moe(hf_config)
+        is_moe = _is_moe(hf_config)
+        mirrored = dtype != torch.float32 and not pure_hf and is_moe
         hf = gguf.hf_model(path, hf_config, dtype, device, router_f32=mirrored)
         if q8_1:
             gguf.emulate_q8_1(hf, path, q8_1)
@@ -105,9 +106,11 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
         source = gguf.file_meta(path) | {"q8_1": q8_1, "config": model_meta(hf_config)["model"],
                                          "config_sha256": config_sha256} | _moe_meta(mirrored)
     else:
-        mirrored = dtype != torch.float32 and not pure_hf and _is_moe(path)
+        is_moe = _is_moe(path)
+        mirrored = dtype != torch.float32 and not pure_hf and is_moe
         hf = transformers.AutoModelForCausalLM.from_pretrained(path, dtype=dtype, device_map=device,
-                                                               attn_implementation="sdpa").eval()
+                                                               attn_implementation="sdpa",
+                                                               experts_implementation="eager").eval()
         if mirrored:                       # the router F32 as the engine holds it; dense operands rounded to bf16
             for block in hf.modules():
                 if type(block).__name__.endswith("SparseMoeBlock"):
@@ -119,6 +122,7 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
     wall = time.perf_counter() - t0
     meta = source | prompts.meta() | {
         "source": "hf", "dtype": str(dtype).removeprefix("torch."), "device": hf.device.type, "attn": "sdpa",
+        **({"experts": "eager"} if is_moe else {}),      # HF's expert path, pinned (a default may change)
         "hardware": hardware(hf.device), "threads": torch.get_num_threads(), "torch": torch.__version__,
         "transformers": transformers.__version__, "wall_s": round(wall, 2)}
     return Recording.from_rows(rows, meta)

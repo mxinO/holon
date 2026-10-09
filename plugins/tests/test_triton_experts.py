@@ -101,5 +101,10 @@ def test_operand_precision_against_f64():
     w = stack(E, 64, 768, seed=6)
     h = torch.randn(32, K, 768, device="cuda")                             # the f32 SwiGLU output, as down sees it
     ids = routing(32, "uniform", seed=3)
-    r = l0.check(grouped(h, w, ids, "none"), exact(h, w, ids, "none"), torch.float32, 768)
+    want = exact(h, w, ids, "none")
+    r = l0.check(grouped(h, w, ids, "none"), want, torch.float32, 768)
     assert r.passed, r
+    tf32 = (h.view(torch.int32) + 0x1000 & ~0x1FFF).view(torch.float32)   # 10 mantissa bits (round half up)
+    for operand in (h, tf32):                                              # the plants, products exact in f64
+        plant = torch.einsum("tki,tkoi->tko", operand.double(), w.double()[ids.long()])
+        assert not l0.check(plant, want, torch.float32, 768).passed

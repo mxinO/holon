@@ -18,13 +18,15 @@ class ExpertLinear(nn.Module):
 
     Dense (an HF checkpoint) it is the parameter itself, layout `dense/<dtype>`; quantized (a GGUF file) `adopt`
     keeps the stored parts — ggml layouts have one, `blocks` [E·out, row_bytes], held in `weight`. `merge(gate, up)`
-    builds one gate/up stack per expert that applies SwiGLU (`glu="swiglu"`); the kernel is bound after merges."""
+    builds one gate/up stack per expert that applies SwiGLU (`glu="swiglu"`); the kernel is bound after merges.
+    `act_dtype`: its input's dtype (the model dtype for gate/up, f32 for down, which takes the SwiGLU output)."""
 
     def __init__(self, ctx, *, experts: int, in_features: int, out_features: int, top_k: int,
-                 rows_per_token: int) -> None:
+                 rows_per_token: int, act_dtype: torch.dtype) -> None:
         super().__init__()
         self.experts, self.in_features, self.out_features = experts, in_features, out_features
         self.top_k, self.rows_per_token, self.glu, self._ctx = top_k, rows_per_token, "none", ctx
+        self.act_dtype = act_dtype
         self.weight = nn.Parameter(torch.empty(experts, out_features, in_features, dtype=ctx.dtype),
                                    requires_grad=False)
         self.layout: str | None = None                       # set by `adopt`; None: dense
@@ -50,8 +52,9 @@ class ExpertLinear(nn.Module):
         """One stack applying SwiGLU: per expert gate's rows, then up's (every stored row is a whole block run, so
         stacks of one layout concatenate per expert). None if the layouts or shapes differ; gate and up give up
         their weights."""
-        if (gate.layout, gate.in_features, gate.out_features, gate.experts) != \
-                (up.layout, up.in_features, up.out_features, up.experts) or gate.weight.dtype != up.weight.dtype:
+        if (gate.layout, gate.in_features, gate.out_features, gate.experts, gate.act_dtype) != \
+                (up.layout, up.in_features, up.out_features, up.experts, up.act_dtype) \
+                or gate.weight.dtype != up.weight.dtype:
             return None
         e = gate.experts
         weight = torch.cat([gate.weight.data.view(e, gate.out_features, -1),
@@ -59,7 +62,7 @@ class ExpertLinear(nn.Module):
         with torch.device("meta"):
             merged = ExpertLinear(gate._ctx, experts=e, in_features=gate.in_features,
                                   out_features=2 * gate.out_features, top_k=gate.top_k,
-                                  rows_per_token=gate.rows_per_token)
+                                  rows_per_token=gate.rows_per_token, act_dtype=gate.act_dtype)
         if gate.layout is not None:
             weight = weight.view(-1, weight.shape[-1])               # back to the stored [E·out, row_bytes]
         torch.utils.swap_tensors(merged.weight, nn.Parameter(weight, requires_grad=False))
@@ -72,7 +75,7 @@ class ExpertLinear(nn.Module):
             return
         facts = {"layout": self.layout_fact(), "experts": self.experts, "in": self.in_features,
                  "out": self.out_features, "top_k": self.top_k, "rows_per_token": self.rows_per_token,
-                 "glu": self.glu, "act_dtype": _dtype(ctx.dtype), "out_dtype": "float32"}
+                 "glu": self.glu, "act_dtype": _dtype(self.act_dtype), "out_dtype": "float32"}
         site = "std.moe.experts[" + ",".join(f"{k}={v}" for k, v in facts.items()) + "]"
         self._kernel = ctx.select_kernel(kernels.LINEAR_EXPERTS, site=site, **facts).impl(ctx, **facts)
 
@@ -90,9 +93,12 @@ class MoE(nn.Module):
         self.layer = layer
         self.router = nn.Parameter(torch.empty(experts, hidden, dtype=torch.float32), requires_grad=False)
         stack = {"experts": experts, "top_k": top_k}
-        self.gate = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1, **stack)
-        self.up = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1, **stack)
-        self.down = ExpertLinear(ctx, in_features=inter, out_features=hidden, rows_per_token=top_k, **stack)
+        self.gate = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1, act_dtype=ctx.dtype,
+                                 **stack)
+        self.up = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1, act_dtype=ctx.dtype,
+                               **stack)
+        self.down = ExpertLinear(ctx, in_features=inter, out_features=hidden, rows_per_token=top_k,
+                                 act_dtype=torch.float32, **stack)          # the f32 SwiGLU output
         self._gate_up: ExpertLinear | None = None
         dtype = _dtype(ctx.dtype)
         topk = {"experts": experts, "top_k": top_k, "renormalize": renormalize}

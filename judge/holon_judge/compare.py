@@ -163,11 +163,21 @@ def metrics(golden: Recording, cand: Recording) -> tuple[Metrics, dict[str, Metr
 
 
 _PROVENANCE = ("source", "model", "revision", "dtype", "device", "hardware", "threads", "prompts", "prompts_sha256",
-               "weight_source", "max_step_tokens", "q8_1", "moe_block", "expert_calls")
+               "weight_source", "max_step_tokens", "q8_1", "moe_block", "experts", "expert_calls")
 
 
 def _provenance(rec: Recording) -> dict:
     return {key: rec.meta.get(key) for key in _PROVENANCE}
+
+
+def _path_failures(floor: dict, cand: dict) -> list[str]:
+    """A Tier B floor emulates one kernel path (`q8_1`) for every expert matmul: the candidate's expert calls while
+    scoring must all have taken it."""
+    path, calls = floor.get("q8_1"), cand.get("expert_calls")
+    if not path or not calls:
+        return []
+    return [f"{n} expert calls on {other}, the floor emulates {path}" for other, n in calls.items()
+            if other != path and n]
 
 
 def compare(golden: Recording, cand: Recording, floor: Recording | None = None) -> Result:
@@ -178,5 +188,5 @@ def compare(golden: Recording, cand: Recording, floor: Recording | None = None) 
     if floor is not None:
         floor_m = metrics(golden, floor)[0]
         budgets = Budgets.from_floor(floor_m)
-        failures = budgets.failures(overall)
+        failures = budgets.failures(overall) + _path_failures(floor.meta, cand.meta)
     return Result(_provenance(golden), _provenance(cand), overall, categories, floor_m, budgets, tuple(failures))

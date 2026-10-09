@@ -307,7 +307,7 @@ incl. i-quants); pinned configs, provenance.
 
 Acceptance: qwen3 locks unchanged or advanced only by propagate; MoE L0 vs reference; L2 bounded vs a golden from
 `dequant_ref` weights (CPU fp32, ≈ 122 GB in RAM); **30B MoE on a 16 GB card**: UD-IQ3_XXS / UD-Q3_K_XL on RTX 5080
-with ≥ 16K KV tokens, Q4_K_M on 4090/5090/A5000; decode tok/s vs llama.cpp on the same card and quant recorded;
+with ≥ 16K KV tokens, Q4_K_M on 4090/A5000 (the 5080 covers sm_120); decode tok/s vs llama.cpp on the same card and quant recorded;
 core diff: the stacking weight rule only (`docs/m02-moe.md` D7).
 
 MoE is format-general: M0.2 also serves the bf16 HF checkpoint as a correctness path on an RTX PRO 6000 node
