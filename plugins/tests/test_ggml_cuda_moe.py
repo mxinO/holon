@@ -239,13 +239,11 @@ def test_merged_stack_equals_separate_stacks(ctx, lib, name):
     gate, up = random_blocks(name, n * INTER, H, seed=3), random_blocks(name, n * INTER, H, seed=4)
     both = np.concatenate([gate.reshape(n, INTER, -1), up.reshape(n, INTER, -1)], axis=1).reshape(n * 2 * INTER, -1)
     sg, su, sm_ = ({"blocks": torch.from_numpy(b).cuda()} for b in (gate, up, both))     # compared bitwise only
-    t, exact_mmq = merged.mmvq_tokens, 0
+    t = merged.mmvq_tokens
     for tokens in (1, t, t + 1, 64, CHUNK):
         ids, x = uniform(tokens, n, seed=tokens), gate_up_input(tokens, seed=tokens)
         calls = launched(lambda x=x, ids=ids: [sep(x, sg, ids), sep(x, su, ids), merged(x, sm_, ids)])
-        if any("stream_k_fixup" in c for c in calls):
-            continue
-        exact_mmq += tokens > t
+        assert not any("stream_k_fixup" in c for c in calls), f"{name} T={tokens}: mmq took the fixup at E = {n}"
         y = merged(x, sm_, ids)
         assert torch.equal(y[..., :INTER], sep(x, sg, ids)), f"{name} T={tokens}: gate rows differ"
         assert torch.equal(y[..., INTER:], sep(x, su, ids)), f"{name} T={tokens}: up rows differ"
@@ -254,7 +252,6 @@ def test_merged_stack_equals_separate_stacks(ctx, lib, name):
             lib.swiglu(y, ours)
             r = l0.check(fused(x, sm_, ids), ours, torch.float32, 1)
             assert r.passed, f"{name} T={tokens}: the fused gate vs ours: {r}"
-    assert exact_mmq, f"{name}: every mmq size took the fixup at E = {n} SMs, so none was compared"
 
 
 @pytest.fixture(scope="module")
