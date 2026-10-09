@@ -87,10 +87,13 @@ def test_refuses_different_prompt_sets(case):
 def test_expert_calls_off_the_floors_path_fail(case):
     lens, logits, targets, _ = case
     g, floor = _recording(logits, targets, lens), _recording(logits, targets, lens)
-    floor.meta["q8_1"] = "mmvq"
-    on_path, off_path = _recording(logits, targets, lens), _recording(logits, targets, lens)
+    floor.meta |= {"q8_1": "mmvq", "moe_block": "d3-reference@x"}
+    on_path, off_path, uncounted = (_recording(logits, targets, lens) for _ in range(3))
     on_path.meta["expert_calls"] = {"mmvq": 40, "mmq": 0}
     off_path.meta["expert_calls"] = {"mmvq": 40, "mmq": 3}
     assert compare(g, on_path, floor).passed
     r = compare(g, off_path, floor)
     assert r.passed is False and r.failures == ("3 expert calls on mmq, the floor emulates mmvq",)
+    assert compare(g, uncounted, floor).failures == ("no expert calls counted, the floor emulates mmvq",)
+    del floor.meta["moe_block"]                                            # a dense Tier B floor: nothing to count
+    assert compare(g, uncounted, floor).passed

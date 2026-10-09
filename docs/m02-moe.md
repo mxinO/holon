@@ -260,10 +260,11 @@ kernels (with the wait rule of §4.3), finer graph buckets for MoE (core).
   a sequence-bootstrap interval (`bounded`'s), and per-layer top-k flip rates vs the golden for floor and candidate.
 - **Tier B — kernels**: the production engine on one A5000. Floor: the D3-mirroring bf16 model with the q8_1
   emulator on every quantized linear and expert stack — gate/up quantize each token's input (scatter), down each
-  (token, slot) row (gather), per path; prefill uses each 512-token chunk's path by the plugin's predicate (a short
-  last chunk is mmvq), the decode run mmvq semantics at a step size
+  (token, slot) row (gather), per path: the prefill run mmq semantics, the decode run mmvq semantics at a step size
   equal to the smallest limit any tensor of the file uses on that class (dense `ggml_cuda_should_use_mmvq` and MoE
-  `use_mmvq_id`), computed from the plugin, with a counter asserting that no mmq call ran. Decode runs are eager
+  `use_mmvq_id`), computed from the plugin. Each floor emulates one path, so the verdict checks the candidate's
+  per-path expert calls while scoring: all on the floor's path, and counted (a prefill step whose last 512-token
+  chunk is within the mmvq limit runs it on mmvq and fails loudly; v1's steps have none). Decode runs are eager
   (prompt-logprob steps are never graphed), so graph padding does not enter them.
 - **Precision test** (CUDA unit test, not L2: Tier A is fp32 and Tier B's floor is noisier than these choices): at
   bf16, the router logits match an f64 reference within the fp32 budget (fails under TF32 or a bf16 router); our f32

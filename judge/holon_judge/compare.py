@@ -172,10 +172,12 @@ def _provenance(rec: Recording) -> dict:
 
 def _path_failures(floor: dict, cand: dict) -> list[str]:
     """A Tier B floor emulates one kernel path (`q8_1`) for every expert matmul: the candidate's expert calls while
-    scoring must all have taken it."""
+    scoring must all have taken it (an MoE floor's candidate must have counted them)."""
     path, calls = floor.get("q8_1"), cand.get("expert_calls")
-    if not path or not calls:
+    if not path or not floor.get("moe_block"):
         return []
+    if not calls:
+        return [f"no expert calls counted, the floor emulates {path}"]
     return [f"{n} expert calls on {other}, the floor emulates {path}" for other, n in calls.items()
             if other != path and n]
 
