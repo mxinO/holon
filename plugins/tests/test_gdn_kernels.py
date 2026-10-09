@@ -46,10 +46,18 @@ DECODE_INIT = [True, False, True, True, False, True]
 DECODE_SLOTS = [0, UNITS - 1, 4, 2, 11, 6]
 RATIO = 2.0                                                    # × HF's bf16 error
 FLOOR = 2e-2                                                   # HF's bf16 error itself stays below this
+# The yardstick's transformers (the judge's): later versions l2-normalise q/k in f32, a smaller HF error against
+# which the same kernels measure ≈ 2.3× on mixed batches, so the ratio holds only for the version it was set on.
+HF_VERSION = "5.6.0.dev0"
 
 
 @pytest.fixture(autouse=True)
 def _seeded():
+    import transformers
+
+    if transformers.__version__ != HF_VERSION:
+        pytest.fail(f"transformers {transformers.__version__}: the 2x bound is set against HF's torch path at "
+                    f"{HF_VERSION} (l2norm in bf16)")
     torch.manual_seed(0)
 
 

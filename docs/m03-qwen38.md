@@ -247,7 +247,8 @@ measures fp8 prefill before fp8 enters acceptance.
   (`device_map`), torch path. Tier A runs in bf16 (as M0.1's, not M0.2's fp32 CPU run), so it is judged against its
   own bf16 floor and has no fp32 sanity ceiling.
 - **L0 for GDN:** against the f64 reference recurrence, relative Frobenius error within 2× that of HF's bf16 torch
-  path on the same inputs (measured in the test, not a constant), plus exactness: chunk-aligned resume and graph
+  path on the same inputs (measured in the test, not a constant; HF's path at the judge's transformers, 5.6.0.dev0,
+  which l2-normalises q/k in bf16 — newer versions do it in f32, and the same kernels then measure ≈ 2.3×), plus exactness: chunk-aligned resume and graph
   replay bitwise equal to one-shot and eager, verify-free decode equal to the recurrence step by step within the same
   bound.
 - **KV formats in the floor:** K and V quantize-dequantized exactly as `kv_write` stores them (q8_0 per 32 with fp16
