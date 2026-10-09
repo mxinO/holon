@@ -1,6 +1,6 @@
 # M0.3 — Qwen3.8-27B: heterogeneous state, prefix reuse, quantized KV: design and implementation plan
 
-Status: **revision 2** (2026-10-09; revision 1 reviewed: 2 blockers, 13 majors, all resolved here, §8). Scope: plan §6,
+Status: **revision 3** (2026-10-09; revisions 1 and 2 reviewed, every finding resolved, §8). Scope: plan §6,
 which merges the former M0.3 (Qwen3.5, heterogeneous state) and M0.3b (Qwen3.8-27B GGUF, quantized KV) by user
 decision: Qwen3.8-27B is the only target. Builds on design §5.2, §5.6, §6, §7.3, §7.5, M0.1 (GGUF, `kernels.ggml_cuda`,
 the judge's tiers), M0.2 (std.moe, the HF bf16 correctness path) and spikes S1 (quantized KV) and S3 (GDN kernels).
@@ -19,11 +19,13 @@ path on an RTX PRO 6000. Acceptance:
 2. **Bounded checks** (L1.5, the 27B GGUF): chunked vs one-shot prefill; prefix-hit resume vs recompute; graphs vs
    eager on decode; overlap depth 1 vs 0; snapshot trace run-identical over 3 fresh engines.
 3. **Prefix reuse.** On the multi-turn agent trace on the RTX 5080: prefill tokens saved and TTFT vs cache off are
-   measured; a checkpoint adopted at a boundary resumes to the same state as recomputing to it (bitwise, same path);
-   a checkpoint is registered only once committed tokens cover it (§4.7's depth-1 test).
+   measured; a checkpoint produced by prefill and adopted at its boundary resumes to the same state as recomputing to
+   it (bitwise, same path; decode-produced ones are bounded); the core registers a payload only once committed tokens
+   cover it (proven in core tests; the end-to-end plant needs speculation, M0.4).
 4. **Quantized KV.** q8_0 KV (our Triton kernels, every class) passes L2 against floors that emulate it, and fp8 KV
    (FlashInfer, sm_89 / sm_120) does where its prefill path measures usable (§4.5); the KV error vs bf16 KV is reported
-   separately; on the 5080 a quantized KV at least doubles the KV tokens that fit.
+   separately; KV tokens per byte grow by the format's ratio (q8_0 ≥ 1.85×, fp8 2×), and the 5080 fits the 32K
+   context that bf16 KV does not (§4.8).
 5. **Consumer classes.** RTX 5080: UD-IQ3_S serves one 32K-token context with q8_0 KV at `max_seqs` 2 and two
    checkpoints (estimate in §4.8; the fit records the other configurations). RTX 4090: UD-Q4_K_M. In-process pp512 /
    tg128 and decode at depth 8K against llama-bench at the same commit and KV format (`-ctk/-ctv q8_0` when ours is
@@ -102,7 +104,8 @@ plan §10); performance of the bf16 HF path.
   row's start > 0, computed by the planner on the device): without it they start from zero state, so a slot reused by
   a new or preempted sequence never reads its previous occupant's state and nothing is cleared per admission.
   `kernels.fla` provides `gated_delta_rule` (the vendored S3 subset, its `vendor.patch`, provenance as
-  `kernels.ggml_cuda`); `kernels.gdn_triton` provides our conv1d and gated-norm kernels. The tiled order is a fact the
+  `kernels.ggml_cuda`; the patch also moves the recurrent kernels' skip sentinel from index ≤ 0 to < 0, because state
+  units are SeqTable slots and slot 0 is a real sequence, §4.3); `kernels.gdn_triton` provides our conv1d and gated-norm kernels. The tiled order is a fact the
   GGUF map sets; the kernels read it, nothing is repacked. GGUF's `ssm_a` becomes `A_log = log(−ssm_a)` by a value
   transform (HF stores `A_log` in bf16, so the round trip recovers it exactly after the bf16 cast; the gate compares
   after that cast).
@@ -185,13 +188,13 @@ general mechanisms; the plugin design depends on it):
 
 | Seam | Today | M0.3 (ABI change in **bold**) |
 |---|---|---|
-| Slot addressing | Slot pools sized `max_seqs·(1+draft)`, no null unit | a Slot pool's unit for a sequence **is its SeqTable slot**; the pool gets the padding slot's unit as its null unit (all pools expose `pool.null`); no new batch field |
-| Prefill cuts | `n = min(remaining, budget)` | the scheduler asks every kind **`cut(seq, start, n) → n' ≤ n`** and takes the minimum (a kind asks its policy; default: no cut) |
-| Publish | never called | when a planned row ends at position p, the core asks every kind `publish(seq, p)` → (payload, MemOps) or None; ops run in the step's `post_sample` phase; the payload is registered in the index at `host_commit` only if committed tokens cover p, else dropped (depth 1) — before `n > 1` siblings are released |
-| Adopt | never called | `admit` takes the fixed-point hit over every kind's `hit_length` (design §6.3) and runs the kinds' `adopt` MemOps in `pre_forward` |
+| Slot addressing | Slot pools sized `max_seqs·(1+draft)`, no null unit | a Slot pool's unit for a sequence **is its SeqTable slot** (with draft slots, M0.4: `slot·(1+k)+j`; the core owns the mapping); the pool gets the padding slot's unit as its null unit (all pools expose `pool.null`); no new batch field |
+| Prefill cuts | `n = min(remaining, budget)` | before `reserve`, the scheduler asks every kind **`cut(seq, start, n) → 1 ≤ n' ≤ n`** and takes the minimum (a kind asks its policy; default: no cut; cuts are 64-aligned for GDN); **`SeqView.prompt_len`** is added for policies |
+| Publish | never called | optional: a kind that publishes exposes **`next_publish(seq) → position \| None`**; the core compares it per row (O(1), nothing for kinds that never publish, so Qwen3's decode path is unchanged) and, when a row's step ends there, asks `publish(seq, p)` → (payload, MemOps) or None; ops run in the step's `post_sample` phase; at `host_commit` the payload is registered after that commit's paged blocks are inserted (one payload per entry and spec; a duplicate is freed), only if committed tokens cover p, else dropped — before `n > 1` siblings are released |
+| Adopt | never called | `admit` takes the fixed-point hit over every kind's `hit_length` (design §6.3); the admitting request holds a reference on the adopted payload unit until its `adopt` MemOp has been enqueued (`pre_forward` of its first scheduled step), so best-effort publishes cannot evict it in between |
 | MemOps | `BatchPlan.mem_ops` never executed | run eagerly on the step's stream, before the forward / after the sample (or around a graph replay, never inside a graph: their count varies per step); `Pool.copy` copies unit by unit across pools with no temporary (a 147 MiB gather would break the profiled peak) |
 | Prefix index | off when any spec is not paged; refcounts by spec name | entries hold paged units and payloads; **`Payload.pool`** names the payload's pool for refcounts; **per-payload drop** (design §6.3's tombstone) with per-pool victim choice, so a full payload pool evicts its own payloads (interior ones included) and never the KV; publish is best-effort (no free unit: no payload) |
-| Plugin pools | `BuildContext` has `static` and `workspace` | **`ctx.pool(name, unit_bytes, min_units, pref_units)`**, design §6.1's plugin pool (step 3 of the ledger's split) |
+| Plugin pools | `BuildContext` has `static` and `workspace` | **`ctx.pool(name, unit_bytes, segments, min_units, pref_units)`**, design §6.1's plugin pool (step 3 of the ledger's split); a cross-pool unit copy copies the unit's segments in order and requires equal unit shapes |
 | Prefill graphs | decode only | optional, per token bucket, if §4.6's measurement says so (the planner's `graph_key` for prefill) |
 
 Not built in M0.3: `fork` (siblings of `n > 1` wait and adopt the first's payloads when there is a free unit, as
@@ -232,9 +235,10 @@ measures fp8 prefill before fp8 enters acceptance.
 ### 4.7 Numerics and the judge (thresholds and predictions fixed before measuring)
 
 - **Tiny model.** Built at test time from a small `Qwen3_5` text config (2 layers of each type, ≥ 2 key heads so the
-  tiled and grouped orders differ, head ratios 2 and 3) with random weights; its GGUF is produced by llama.cpp's own
-  converter at 51ce9c11 (`conversion/qwen.py`, `--outtype f32`, MTP layer included so `block_count = n_layer + 1` is
-  exercised), and cross-checked against transformers' own GGUF loader where it supports `qwen35`. The engine
+  tiled and grouped orders differ, head ratios 2 and 3) with random weights saved in bf16 (so `(w + 1) − 1` is exact);
+  its GGUF is produced by llama.cpp's own converter at 51ce9c11 (`conversion/qwen.py`, `--outtype f32`; `mtp.*`
+  tensors added to the checkpoint by hand, since transformers' `Qwen3_5` has no MTP module, so `block_count =
+  n_layer + 1` is exercised), and cross-checked against transformers' own GGUF loader where it supports `qwen35`. The engine
   (reference kernels, CPU) must match transformers on the HF weights and on the GGUF.
 - **Goldens:** fp32 on the CPU through HF's torch GDN path, streamed per layer (M0.2's `hf_state`; ≈ 108 GB of fp32
   weights each, recorded once per file); dequantized GGUF weights for the GGUF goldens. HF bf16 floors on GPUs
@@ -252,10 +256,11 @@ measures fp8 prefill before fp8 enters acceptance.
     attention gate split as one block instead of per head; norm offset 0 on zero-centred norms; rotary over all 256
     dims; stale state on slot reuse (has-initial-state forced true).
   - Bounded must fail: the conv state dropped between prefill chunks (chunked vs one-shot); a payload adopted one
-    block early (resume vs recompute); padding rows writing a real slot (graphs vs eager); a payload registered
-    without its tokens committed — run with `checkpoint_every_n` and stops or aborts placed just past a boundary,
-    where depth 1 leaves uncommitted rows (depth 1 vs 0).
-  - L0 must fail: conv1d without the state carry; has-initial-state ignored.
+    block early (resume vs recompute); padding rows writing a real slot (graphs vs eager).
+  - Core tests must fail (toy kind): a payload registered with a fabricated commit whose accepted tokens do not cover
+    it (without speculation every computed token is committed, so the end-to-end plant waits for M0.4); an adopted
+    payload unpinned before its copy and evicted by a publish.
+  - L0 must fail: conv1d without the state carry; has-initial-state ignored; a row on slot 0 skipped (the sentinel).
 - **Bounded checks** (design §7.10, `holon_judge bounded`): chunked vs one-shot prefill (chunk sizes 64·k and not),
   prefix-hit resume vs recompute, graphs vs eager on decode at padded batches, overlap depth 1 vs 0.
 
@@ -312,6 +317,13 @@ assumed. The fit records KV tokens per (`max_seqs`, payloads, KV format); the de
 - MTP (`blk.64`, M0.4); the vision tower (v1).
 
 ## 8. Review findings, resolved
+
+Revision 2: M1 slot 0 skipped by fla's ≤ 0 sentinel → patched to < 0, an L0 plant (D3, §4.7); M2 the depth-1
+plant cannot fail without speculation → proven in core tests, end-to-end in M0.4 (acceptance 3, §4.7); M3 an adopted
+payload evicted before its copy → the admitting request pins it (§4.3); M4 q8_0 cannot double KV tokens → byte
+ratios (acceptance 4). Minors: `SeqView.prompt_len`; the `cut` contract (≥ 1, before `reserve`, aligned); an optional
+`next_publish` so decode pays nothing; registration order and duplicates; `ctx.pool` segments; the draft-slot
+mapping; the tiny model's MTP tensors and bf16 weights; acceptance 3's bitwise scope; plan wording.
 
 Revision 1 (one reviewer: architecture, kernels, numerics). Blockers: B1 stale state on slot reuse → per-row
 has-initial-state in both stateful ops, a plant (D3, §4.7); B2 no step ends at a boundary → the generic `cut` hook

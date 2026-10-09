@@ -61,7 +61,7 @@ L2 budgets. Every criterion names its mode.
 | Qwen3-8B bf16 | 15.26 GiB | 144 KiB | 32K tokens ≈ 21.3 GiB ✓ | ✓ (more KV) | ✗ |
 | Qwen3-8B GGUF Q4_K_M | 4.7 GiB | 144 KiB | ✓ | ✓ | 64K ≈ 15.2 GiB ✓ |
 | Qwen3-30B-A3B GGUF UD-IQ3_XXS | 12.0 GiB | 96 KiB | ✓ (Q4_K_M 17.3 GiB) | ✓ | 16K ≈ 15.0 GiB ✓ (more with q8_0 KV) |
-| Qwen3.5-4B bf16 text + MTP | ≈ 8.5 GiB | full-attn layers only | ✓ | ✓ | ✓ (exact numbers in M0.3) |
+| Qwen3.5-4B bf16 text + MTP | ≈ 8.5 GiB | full-attn layers only | ✓ | ✓ | ✓ (not measured: Qwen3.5 is not an M0.3 target) |
 | Qwen3.5-9B bf16 text + MTP | 17.13 GiB | full-attn layers only | ≈ 21–22 GiB ✓ | ✓ | ✗ (GGUF builds ✓) |
 | Qwen3.8-27B GGUF UD-IQ3_S / UD-Q4_K_M | 11.2 / 15.3 GiB | 64 KiB (16 full-attn layers; ≈ 34 KiB q8_0) + GDN state ≈ 147 MiB/Seq (+ 147 MiB per prefix checkpoint) | ✓ (UD-Q4_K_M) | ✓ | UD-IQ3_S, 2 Seqs, 2 checkpoints: ≈ 23K tokens bf16 KV / ≈ 43K q8_0 (estimate, `docs/m03-qwen38.md` §4.8) |
 
@@ -356,12 +356,12 @@ architecture (`Qwen3_5ForConditionalGeneration`); a tiny random-weight model of 
 
 Work: `models/qwen3_5` (Qwen3.5 and Qwen3.8, HF and GGUF, text-only); `std.mixers.gdn` with `causal_conv1d`,
 `gated_delta_rule`, `gated_rmsnorm` ops; `kernels.fla` (vendored per S3) and our conv1d / gated-norm kernels;
-`std.state.recurrent` (Slot state with page-aligned checkpoints) and checkpoint policies; the core's designed state
-seams (slot units, MemOps, the fixed-point prefix hit across kinds); quantized KV as KV layouts (q8_0 through our
+`std.state.recurrent` (Slot state with 64-aligned checkpoint payloads) and checkpoint policies; the core's designed state
+seams (SeqTable-slot addressing, prefill cuts, MemOps, payloads in plugin pools, the fixed-point prefix hit); quantized KV as KV layouts (q8_0 through our
 Triton kernels, fp8 through FlashInfer); the std knob `gqa.output_gate` (partial rotary and the norm offset reuse existing knobs).
 
 Acceptance (design §1): L2 for the 27B on every path (bf16 HF on an RTX PRO 6000; GGUF UD-IQ3_S / UD-Q4_K_M Tier A
-and B); bounded checks (chunked vs one-shot prefill, prefix resume vs recompute, graphs vs eager); prefix tokens
+and B); bounded checks (chunked vs one-shot prefill, prefix resume vs recompute, graphs vs eager, depth 1 vs 0); prefix tokens
 saved on agent traces with depth-1-safe checkpoint publishing; q8_0 / fp8 KV judged against floors that emulate them;
 RTX 5080 UD-IQ3_S serving a 32K context (q8_0 KV), RTX 4090 UD-Q4_K_M, bars vs llama.cpp ≥ 0.8×; locks for rtx-5080 and
 rtx-4090; Qwen3 / Qwen3-MoE snapshots byte-identical, propagated with one approval; core diff limited to the
