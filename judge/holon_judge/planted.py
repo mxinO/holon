@@ -3,6 +3,8 @@
 - The bounded check (`bounded --plant`, judge/tests/test_bounded.py): the configurations using the broken path fail.
 - GGUF Tier A (`l2 --plant`, M0.1 design §4.6): bugs in what a GGUF file means (configuration, names, layouts),
   planted in the weights the engine loads; L2 fails.
+- Graphs vs eager (`bounded --graphs-vs-eager --plant moe-padding-duplicate-ids`): a bug only graph padding rows
+  reach; the graphed configuration fails where the padded bucket's expert path is mmq.
 - GGUF Tier B (`l2 --plant`): bugs in the quantized kernels' use (`kernels.ggml_cuda`); L2 fails, except the rare
   stale workspace, which measures Tier B's sensitivity (predicted before running: fails the decode run, likely passes
   the looser prefill run).
@@ -229,6 +231,44 @@ def ggml_experts_stale_q8_1(every: int = 97) -> Iterator[None]:
     print(f"plant ggml-experts-stale-q8_1 fired: {dict(fired)}", file=sys.stderr)
 
 
+@contextlib.contextmanager
+def moe_padding_duplicate_ids() -> Iterator[None]:
+    """Graph padding rows route all k slots to one expert (E − 2), and every expert workspace starts the layer filled
+    with a real row's compacted index (0): mmq's compaction then leaves k − 1 stale entries per padding row that write
+    over real row 0, while mmvq applies each slot on its own (docs/m02-moe.md §4.6; L0's plant, in the engine). Only
+    padded decode steps — graph replays — have padding rows; the step's device slots mark them."""
+    from holon.core import executor
+    from holon_std.moe import units
+
+    context, forward, step = executor.Executor._context, units.MoE.forward, {}
+
+    def planted_context(self, plan, *args, **kwargs):
+        ctx = context(self, plan, *args, **kwargs)
+        step.update(slots=ctx.batch.dev.slots, padding=self.state.padding_slot)
+        return ctx
+
+    def planted_forward(self, x):
+        slots, route = step.get("slots"), self._topk
+        if slots is None or len(slots) != len(x):            # not one token per row: no padding rows
+            return forward(self, x)
+
+        def padded_route(logits):
+            weights, ids = route(logits)
+            for kernel in (self._gate_up._kernel, self.down._kernel):
+                if hasattr(kernel, "workspace"):
+                    kernel.workspace.view(torch.int32).fill_(0)
+            pad = (slots == step["padding"])[:, None]
+            return weights, torch.where(pad, logits.shape[1] - 2, ids).to(ids.dtype)
+        self._topk = padded_route
+        try:
+            return forward(self, x)
+        finally:
+            self._topk = route
+    with mock.patch.object(executor.Executor, "_context", planted_context), \
+            mock.patch.object(units.MoE, "forward", planted_forward):
+        yield
+
+
 def _hf_experts(layer: int, edit: Callable[[int, str], tuple[int, str]]) -> Callable[[str], str]:
     """A rename of HF per-expert tensor names in `layer`: (expert, projection) -> (expert, projection)."""
     import re
@@ -281,4 +321,5 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     **moe_plants(24), **hf_moe_plants(24, 128),
     # MoE Tier B
     "ggml-experts-wrong-type": ggml_experts_wrong_type, "ggml-experts-stale-q8_1": ggml_experts_stale_q8_1,
-    "rare-ggml-experts-stale-q8_1": lambda: ggml_experts_stale_q8_1(every=9973)}
+    "rare-ggml-experts-stale-q8_1": lambda: ggml_experts_stale_q8_1(every=9973),
+    "moe-padding-duplicate-ids": moe_padding_duplicate_ids}

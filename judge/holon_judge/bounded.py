@@ -202,18 +202,18 @@ def divergence(reference, turns: list[Turn], sessions: int, k: int) -> Divergenc
     return Divergence(Mean.of(kl, session), p50, p99, p50_se, p99_se)
 
 
-def compare_configs(build, configs: dict[str, dict], trace: Trace, k: int = 20) -> dict:
+def compare_configs(build, configs: dict[str, dict], trace: Trace, k: int = 20, baseline: dict = BASELINE) -> dict:
     """Run `trace` under the baseline and every configuration (EngineConfig overrides by name), without and with
     logprobs, re-score each run with the reference engine and judge it against the baseline. `build(**overrides)`
-    returns an engine."""
+    returns an engine. Graphs vs eager: `baseline` with `cuda_graphs=False`, the configuration with it on."""
     runs: dict[str, tuple[list[Turn], list[Turn], dict]] = {}
-    for name, overrides in {"baseline": BASELINE, **configs}.items():
+    for name, overrides in {"baseline": baseline, **configs}.items():
         engine = build(**overrides)
         plain = trace.run(engine)
         stats = engine.stats()
         runs[name] = plain, trace.run(engine, logprobs=k), stats
         _free(engine)
-    reference = build(**BASELINE, cuda_graphs=False, max_step_tokens=max(trace.max_len, 4096))
+    reference = build(**(BASELINE | {"cuda_graphs": False, "max_step_tokens": max(trace.max_len, 4096)}))
     sessions = len(trace.chunks)
     scored = {name: (agreement(reference, plain, sessions, k), divergence(reference, lp, sessions, k), stats)
               for name, (plain, lp, stats) in runs.items()}
@@ -225,7 +225,7 @@ def compare_configs(build, configs: dict[str, dict], trace: Trace, k: int = 20) 
         values = {"top1": agree.top1.value, "confident": agree.confident.value, "kl_p50": div.p50, "kl_p99": div.p99}
         failures = [f"{what} {values[what]:.4g} beyond {margin:.3g} of the baseline"
                     for what, (ok, margin) in checks.items() if not ok]
-        results[name] = {"config": {"cuda_graphs": True} | (BASELINE if name == "baseline" else configs[name]),
+        results[name] = {"config": {"cuda_graphs": True} | (baseline if name == "baseline" else configs[name]),
                          **dataclasses.asdict(agree), "kl": dataclasses.asdict(div),
                          "tokens_saved": stats["prefix_tokens_saved"],
                          "margins": {what: margin for what, (_, margin) in checks.items()},

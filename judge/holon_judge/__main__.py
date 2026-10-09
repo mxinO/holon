@@ -10,8 +10,10 @@
     python -m holon_judge snapshot-diff <a.json> <b.json>
     python -m holon_judge snapshot --model <hf dir or id> --prompts <jsonl> [--runs 3] [--json <file>]
                                    # the snapshot trace on fresh engines: run-identical?
-    python -m holon_judge bounded  --model <hf dir or id> --prompts <jsonl> [--json <file>] [--plant <bug>]
-                                   # prefix cache on/off x overlap depth 1/0 on a multi-turn trace
+    python -m holon_judge bounded  --model <hf dir or id | .gguf> --prompts <jsonl> [--json <file>] [--plant <bug>]
+                                   [--sessions N] [--graphs-vs-eager]
+                                   # prefix cache on/off x overlap depth 1/0 on a multi-turn trace; or decode
+                                   # graphs on vs off at a batch of N sessions
 
 `compare`, `l2`, `snapshot-diff`, `snapshot` and `bounded` exit with status 1 on a failed check.
 """
@@ -126,20 +128,26 @@ def _snapshot(a: argparse.Namespace) -> int:
 def _bounded(a: argparse.Namespace) -> int:
     from holon.core.engine import Engine, EngineConfig
 
-    from . import bounded
+    from . import bounded, gguf
 
     path = golden.resolve_model(a.model)
-    trace = bounded.Trace.from_prompts(PromptSet.load(a.prompts))
+    trace = bounded.Trace.from_prompts(PromptSet.load(a.prompts), sessions=a.sessions)
 
     def build(**overrides):
         return Engine(EngineConfig(model=str(path), dtype=golden.DTYPES[a.dtype], max_model_len=trace.max_len,
                                    **overrides))
 
-    configs = {f"prefix {'on' if p else 'off'}, depth {int(o)}": {"prefix_cache": p, "overlap": o}
-               for p, o in ((True, True), (True, False), (False, True))}       # the baseline is off, 0
+    if a.graphs_vs_eager:                                # every decode step a batch of `sessions` rows, padded
+        baseline = bounded.BASELINE | {"cuda_graphs": False}
+        configs = {"graphs on": bounded.BASELINE | {"cuda_graphs": True}}
+    else:
+        baseline = bounded.BASELINE
+        configs = {f"prefix {'on' if p else 'off'}, depth {int(o)}": {"prefix_cache": p, "overlap": o}
+                   for p, o in ((True, True), (True, False), (False, True))}   # the baseline is off, 0
     with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
-        report = bounded.compare_configs(build, configs, trace, a.k)
-    report |= {"model": golden.model_meta(path)["model"], "dtype": a.dtype,
+        report = bounded.compare_configs(build, configs, trace, a.k, baseline)
+    meta = gguf.file_meta(path) if path.suffix == ".gguf" else golden.model_meta(path)
+    report |= {"model": meta["model"], "dtype": a.dtype, "graphs_vs_eager": a.graphs_vs_eager,
                "hardware": golden.hardware(torch.device("cuda")), "torch": torch.__version__, "plant": a.plant}
     print(bounded.table(report))
     if a.json:
@@ -211,8 +219,10 @@ def main(argv: list[str] | None = None) -> int:
     t.set_defaults(run=_snapshot)
 
     b = sub.add_parser("bounded", help="judge engine configurations against the reference on a multi-turn trace")
-    b.add_argument("--model", required=True, help="HF checkpoint directory or hub id")
+    b.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")
     b.add_argument("--prompts", required=True)
+    b.add_argument("--sessions", type=int, default=48, help="concurrent sessions: the decode batch")
+    b.add_argument("--graphs-vs-eager", action="store_true", help="judge graphed decode against an eager baseline")
     b.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
     b.add_argument("--k", type=int, default=20)
     b.add_argument("--json", help="write the machine-readable report here")
