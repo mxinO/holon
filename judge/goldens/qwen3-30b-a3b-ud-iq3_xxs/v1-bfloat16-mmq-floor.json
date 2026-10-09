@@ -8,7 +8,13 @@
   "hardware": "AMD <cpu>",
   "threads": 44,
   "prompts": "v1.jsonl",
-  "prompts_sha256": "5157b507f2553584a5d44ca1ef902043e7a1f5ad5a3deecd3038b6eb5fadb9ae"
+  "prompts_sha256": "5157b507f2553584a5d44ca1ef902043e7a1f5ad5a3deecd3038b6eb5fadb9ae",
+  "weight_source": null,
+  "max_step_tokens": null,
+  "q8_1": null,
+  "moe_block": null,
+  "experts": null,
+  "expert_calls": null
  },
  "candidate": {
   "source": "hf",
@@ -19,7 +25,13 @@
   "hardware": "NVIDIA RTX A5000",
   "threads": 8,
   "prompts": "v1.jsonl",
-  "prompts_sha256": "5157b507f2553584a5d44ca1ef902043e7a1f5ad5a3deecd3038b6eb5fadb9ae"
+  "prompts_sha256": "5157b507f2553584a5d44ca1ef902043e7a1f5ad5a3deecd3038b6eb5fadb9ae",
+  "weight_source": null,
+  "max_step_tokens": null,
+  "q8_1": "mmq",
+  "moe_block": "d3-reference@ec9841f4b3a2fa32",
+  "experts": null,
+  "expert_calls": null
  },
  "overall": {
   "n": 32783,
@@ -101,6 +113,8 @@
   "kl_p99_max": 0.11850685066571978,
   "dppl_max": 0.002811289016969192
  },
- "failures": [],
- "passed": true
+ "failures": [
+  "no expert calls counted on mmq, the floor's path"
+ ],
+ "passed": false
 }

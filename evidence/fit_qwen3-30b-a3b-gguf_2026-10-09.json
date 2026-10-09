@@ -2,7 +2,7 @@
  "question": "Does Qwen3-30B-A3B serve >= 16K KV tokens on a 16 GB RTX 5080 (UD-IQ3_XXS), and what fits on a 24 GB RTX 4090 (Q4_K_M)? (M0.2 acceptance 5, design §4.7)",
  "date": "2026-10-09",
  "command": "fit: an engine at memory_fraction 0.98, max_model_len 16384, then one 16128-token prompt generating 64 tokens",
- "settings": "memory_fraction 0.98, max_step_tokens 2048, page_size 16, bf16 KV (96 KiB/token)",
+ "settings": "memory_fraction 0.98 (the first runs) and 0.9 (the 5080's deployment setting), max_step_tokens 2048, page_size 16, bf16 KV (96 KiB/token)",
  "rtx-5080/UD-IQ3_XXS": {
   "commit": "4d2cfa2",
   "by_max_seqs": {
@@ -85,5 +85,35 @@
    }
   }
  },
- "note": "free_memory: GiB free after weights; the KV is 0.98 x that - the worst step's peak - the graph pool. Prompt-logprob scoring (L2) at 0.98 on the 5080 ran out of memory (~50 MB of margin is below allocator slack); the lock was tuned at the default 0.9, which plans the same kernels."
+ "note": "free_memory: GiB free after weights; the KV is fraction x that - the worst step's peak - the graph pool. 0.9 is the 5080's deployment setting: at 0.98 (~50 MB beyond the measured worst step) prompt-logprob scoring (L2) ran out of memory. The lock does not record the fraction (it shapes no output).",
+ "rtx-5080/UD-IQ3_XXS at the deployment fraction 0.9": {
+  "commit": "7548399",
+  "by_max_seqs": {
+   "32": {
+    "memory_fraction": 0.9,
+    "max_seqs": 32,
+    "max_model_len": 16384,
+    "load_s": 102.2,
+    "GiB": {
+     "peak_memory": [
+      0.306
+     ],
+     "reserved_growth": [
+      0.26
+     ],
+     "free_memory": [
+      2.518
+     ]
+    },
+    "kv_tokens": 18576,
+    "kv_gib": 1.7,
+    "weights_gib": 12.0,
+    "total_gib": 15.47,
+    "long_prompt": 16128,
+    "generated": 64,
+    "long_s": 3.3,
+    "max_allocated_gib": 14.14
+   }
+  }
+ }
 }

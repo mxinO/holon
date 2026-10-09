@@ -13,6 +13,7 @@
   "max_step_tokens": null,
   "q8_1": null,
   "moe_block": null,
+  "experts": null,
   "expert_calls": null
  },
  "candidate": {
@@ -29,6 +30,7 @@
   "max_step_tokens": null,
   "q8_1": "mmq",
   "moe_block": "d3-reference@ec9841f4b3a2fa32",
+  "experts": null,
   "expert_calls": null
  },
  "overall": {
@@ -111,6 +113,8 @@
   "kl_p99_max": 0.11757136879724298,
   "dppl_max": 0.004115051762549917
  },
- "failures": [],
- "passed": true
+ "failures": [
+  "no expert calls counted on mmq, the floor's path"
+ ],
+ "passed": false
 }

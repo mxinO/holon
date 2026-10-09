@@ -1,0 +1,26 @@
+{
+ "what": "M0.2 L0 at the final code: kernels.ggml_cuda (dense and MoE), kernels.triton_experts, the router precision test (a bf16 router and TF32 must fail it) and the padding plant; memcheck of the MoE kernels",
+ "command": "pytest plugins/tests/test_ggml_cuda_moe.py plugins/tests/test_ggml_cuda.py plugins/tests/test_triton_experts.py; cd plugins && PYTORCH_NO_CUDA_MEMORY_CACHING=1 compute-sanitizer --tool memcheck python -m tests.memcheck_ggml_cuda_moe",
+ "date": "2026-10-09",
+ "classes": {
+  "rtx-a5000 (sm_86)": {
+   "commit": "7548399",
+   "l0": "221 passed, 1 skipped (PDL needs sm_90+)",
+   "memcheck": "ERROR SUMMARY: 0 errors"
+  },
+  "rtx-5080 (sm_120a)": {
+   "commit": "7548399",
+   "l0": "221 passed, 1 skipped (the mixed-types case whose limits split 7 tokens only on sm_86)",
+   "memcheck": "ERROR SUMMARY: 0 errors"
+  },
+  "rtx-pro-6000 (sm_120a, 188 SMs)": {
+   "commit": "c21762a",
+   "l0": "216 passed, 6 skipped: the merged-stack mmq comparison skipped for the stream-k fixup (since 39d4a8d the test runs at E = the SM count, where the fixup cannot run), and the sm_86-only case"
+  },
+  "rtx-4090 (sm_89)": {
+   "commit": "4d2cfa2",
+   "l0": "219 passed, 2 skipped (before the router precision test and the triton_experts operand plants were added)"
+  }
+ },
+ "previous": "evidence/l0_ggml_cuda_moe_2026-10-08.json (step 3, e83d355: budget usage per type and path)"
+}

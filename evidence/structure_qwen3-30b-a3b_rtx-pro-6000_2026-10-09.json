@@ -1,0 +1,27 @@
+{
+ "question": "Does the bf16 HF checkpoint load through the stacking rule with every expert slice equal to the checkpoint's tensor, and does a misplaced expert fail the check? (M0.2 acceptance 7, design \u00a74.6)",
+ "date": "2026-10-09",
+ "gpu_class": "rtx-pro-6000",
+ "commit": "c21762a",
+ "command": "python -m holon_judge structure --model Qwen/Qwen3-30B-A3B [--plant hf-two-experts-swapped]",
+ "clean": {
+  "model": "Qwen/Qwen3-30B-A3B",
+  "plant": null,
+  "mismatches": 0,
+  "first": []
+ },
+ "plant hf-two-experts-swapped (must fail)": {
+  "model": "Qwen/Qwen3-30B-A3B",
+  "plant": "hf-two-experts-swapped",
+  "mismatches": 6,
+  "first": [
+   "model.layers.24.mlp.experts.0.gate_proj.weight",
+   "model.layers.24.mlp.experts.0.up_proj.weight",
+   "model.layers.24.mlp.experts.0.down_proj.weight",
+   "model.layers.24.mlp.experts.1.gate_proj.weight",
+   "model.layers.24.mlp.experts.1.up_proj.weight",
+   "model.layers.24.mlp.experts.1.down_proj.weight"
+  ]
+ },
+ "passed": true
+}
