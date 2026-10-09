@@ -15,8 +15,9 @@ path on an RTX PRO 6000. Acceptance:
    vision tower and the GGUF's MTP block are skipped, MTP is M0.4), copied from `models/qwen3` with `derived_from`.
    L2 passes for Qwen3.8-27B: bf16 HF on an RTX PRO 6000 against its fp32 golden; GGUF UD-IQ3_S and UD-Q4_K_M in Tier A
    and Tier B (prefill and decode) against the files' fp32 goldens; per-tensor gates pass; quantization error vs the
-   bf16 checkpoint reported. Qwen3.5-4B bf16 (the fast test model) passes L2 on the A5000.
-2. **Bounded checks** (L1.5, on Qwen3.5-4B and Qwen3.8-27B GGUF): chunked vs one-shot prefill; prefix-hit resume vs
+   bf16 checkpoint reported. A tiny random-weight model of the architecture (both head ratios) matches transformers
+   in CPU tests.
+2. **Bounded checks** (L1.5, on Qwen3.8-27B GGUF): chunked vs one-shot prefill; prefix-hit resume vs
    recompute; graphs vs eager on decode; snapshot trace run-identical over 3 fresh engines.
 3. **Prefix reuse.** On the multi-turn agent trace, prefill tokens saved vs cache off are measured on the RTX 5080;
    recurrent-state checkpoints are published only at boundaries covered by committed tokens (an overlap-depth-1
@@ -83,10 +84,12 @@ architecture, `qwen4_exp`, 512 experts: after M0.3, see plan §10); performance 
 
 ## 3. Decisions
 
-- **D1 — Qwen3.8-27B is the target; Qwen3.5-4B is the test vehicle.** One recipe (`models/qwen3_5`) serves both: the
-  architecture is identical and the differences are sizes (and the v/k head ratio, 3 vs 2, which every GDN test
-  covers both ways). The 27B carries every acceptance item; the 4B (bf16, 9 GiB, fp32 golden in minutes) carries the
-  fast inner loop: unit tests, L2 and the bounded checks on the A5000. No lock for the 4B.
+- **D1 — Qwen3.8-27B is the only target.** One recipe (`models/qwen3_5`) serves the architecture, so Qwen3.5
+  checkpoints load too, but nothing in M0.3 depends on them: no Qwen3.5 lock or acceptance item (a quick Qwen3.5-4B run
+  is allowed as an ad-hoc check). The fast inner loop is a **tiny random-weight model** built at test time from a
+  small `Qwen3_5` config (two layers of each type; v/k head ratios 2 and 3; both value-head orders through a GGUF
+  writer, as M0.2's tiny MoE fixture), checked against transformers on the CPU in seconds. End-to-end development
+  runs the 27B GGUF on the A5000 (UD-IQ3_S fits 24 GB); the bf16 HF path at full size runs on an RTX PRO 6000.
 - **D2 — Three std knobs, defaults unchanged (the reuse test).** `std.mixers.gqa` gains `output_gate: none |
   sigmoid` (q_proj emits per-head-interleaved q and gate, `o_proj(attn · σ(gate))`) and `rotary_dim` (partial NeoX
   RoPE; default = head_dim); `std.ops` RMSNorm gains `offset` (`x̂·(offset + w)`; default 0). Defaults reproduce
@@ -256,8 +259,8 @@ So acceptance 5's 32K context needs q8_0 (or fp8) KV once checkpoints are on. Th
 | 1 | Std knobs (D2) and their unit tests; `propagate` Qwen3 / Qwen3-MoE | auto-advance, zero approvals | 1 |
 | 2 | `kernels.fla` (vendor S3's subset, patch, provenance), `kernels.gdn_triton` (conv1d, gated norm), op contracts and references | L0 on sm_86 / sm_89 / sm_120a, both head ratios, both orders, graph capture, memcheck | 3 |
 | 3 | Core seams (§4.3) with core tests; `std.state.recurrent` | core tests; Qwen3 snapshots unchanged | 3 |
-| 4 | GDN mixer, `models/qwen3_5` (HF map), Qwen3.5-4B end to end on the A5000 | L2 vs fp32 golden; bounded checks; plants | 2.5 |
-| 5 | Qwen3.8-27B: bf16 HF on an RTX PRO 6000 (L2, chat); GGUF map, gates, Tier A / B (A5000 floors), plants | L2 all paths | 3 |
+| 4 | GDN mixer, `models/qwen3_5` (HF and GGUF maps), the tiny model fixture; the 27B GGUF end to end on the A5000 | the tiny model vs transformers (CPU); 27B Tier A on the CPU; bounded checks; plants | 3 |
+| 5 | Qwen3.8-27B: gates, Tier B (A5000 floors), plants; bf16 HF on an RTX PRO 6000 (L2, chat) | L2 all paths | 2.5 |
 | 6 | Checkpoints: kind hooks, policies, agent trace | prefix bounded checks, depth-1 test, tokens saved | 2 |
 | 7 | Quantized KV (D6): `kv_write`, q8_0 Triton decode/prefill, fp8 FlashInfer; floors with KV emulation | L0, L2, KV error report | 3 |
 | 8 | Consumer classes: fit, bars, serving, prefill-graph decision (§4.6), tune + locks (5080, 4090), snapshots | evidence, locks | 3 |
