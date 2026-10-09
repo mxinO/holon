@@ -1,6 +1,6 @@
 # M0.2 — Mixture of experts on a 16 GB card: design and implementation plan
 
-Status: **revision 5, reviewed clean** (user additions: a basic bf16 HF path, §3 D1, D7, D8) (2026-10-08). Revisions 1 and 2 were challenged by three reviewers
+Status: **revision 5, implemented; acceptance met** (2026-10-09, plan §5.1; user additions: a basic bf16 HF path, §3 D1, D7, D8). Revisions 1 and 2 were challenged by three reviewers
 (architecture/API, kernels/performance, numerics/judge); §8 maps every finding to its resolution. Scope: plan §5. Builds on M0.1
 (`docs/m01-gguf.md`: the GGUF source, `kernels.ggml_cuda`, the judge's tiers) and spike S2 (MoE sections).
 
@@ -437,3 +437,12 @@ boundaries and a capture test (D8); 2 the fixed padded grid (D8); 3 down's opera
 test and stacking-rule unit tests, a two-expert-swap plant (§4.6); 2 the down precision, mirrored in the floor, a
 TF32 plant (D8, §4.6); 3 `l0.check(float32, K)` (§4.6); 4 capture safety (D8); 5 the floor-validity rule for the HF
 floor (§4.6); 6 the facts test and a `renormalize` plant (§4.6). Kernels, last: the fused SwiGLU's grid and two accumulators (D8). Architecture, last: B1 the dense operand rounding is the op contract's, implemented once in `reference.py`, which the HF floor and `triton_experts`' L0 both use (D2); 6b's approval wording. Numerics, last: the precision test checks down's output, where the rounding shows (§4.6).
+
+Implementation review (2026-10-09; the same reviewers). Architecture: 1 down's `act_dtype` is f32 (its input is the
+SwiGLU output), per stack (§4.2); 2 `kernels.flashinfer`'s pin named in the lock diff (§1); 3 its workspace named by
+size; 4 a parameter filled whole and by slices, and a `stack` naming no capture, are load errors (D7); 5
+`experts_implementation` pinned and recorded on the HF path (§4.6); 6 the rtx-5090 refresh owed before the next
+release (§5). Numerics: 1 the router precision test with its bf16 and TF32 plants (§4.6); 2 the Triton operand plants;
+3 every Tier B expert call on the floor's path, counted, or the verdict fails (§4.6); 4 the off-prediction plant
+recorded (plan §5.1); 5 routers exact in the gate; 6 as architecture 5; 7 a stride check in the grouped GEMM; 8 the
+NaN docstring of `reference.py` deferred to its next change. Kernels: the prefill-chunk L0 at 512 / 513 tokens.
