@@ -109,3 +109,14 @@ def test_selection_prefers_fast_kernels_and_never_falls_back_to_a_reference():
     cpu = BuildContext(PluginSet(discover()), torch.device("cpu"))         # the test-only references serve the CPU
     assert cpu.select_kernel("attention.paged_prefill@1", site="t", **facts).provider == "testing.ref_kernels"
     assert "kernels.flashinfer" not in cpu.plugins._loaded      # unavailable plugins are never imported
+
+
+@pytest.mark.parametrize("op", ["attention.paged_prefill", "attention.paged_decode"])
+def test_flashinfer_workspace_holds_the_widest_split(op):
+    # One KV head and long contexts: FlashInfer splits the KV into up to 2 CTAs per SM, whose f32 partials exceed the
+    # 128 MiB floor on a 64-SM card (Qwen3-30B-A3B's 4 KV heads did on a 128-SM RTX 4090).
+    geometry = (32, 1, 128)
+    q, kv, batch, pages = _case([(2000, 3 if op.endswith("prefill") else 1)] * MAX_SEQS, *geometry)
+    ours = _run(_kernel(op, "kernels.flashinfer", *geometry), q, kv, batch, pages)
+    torch.testing.assert_close(ours.float(), _run(PagedAttention(None), q, kv, batch, pages).float(),
+                               atol=1e-2, rtol=1e-2)

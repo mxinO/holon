@@ -19,6 +19,17 @@ from . import ops
 # Float workspace for split-KV partials. It is only touched inside `run`, in stream order, so every instance shares
 # one (allocated by the core, zero-initialized as FlashInfer requires); each wrapper keeps its own plan buffers.
 WORKSPACE_BYTES = 128 << 20
+CTA_TILE_Q = 128            # FlashInfer's largest FA2 query tile (FA2DetermineCtaTileQ)
+
+
+def workspace_bytes(device, heads: int, kv_heads: int, head_dim: int) -> int:
+    """At least WORKSPACE_BYTES, and FlashInfer's split-KV partials at most: a split plan has up to 2 CTAs per SM per
+    KV head (`max_batch_size_if_split`), each with a query tile of f32 outputs and log-sum-exps per head (scheduler.cuh
+    PrefillPlan; the tensor-core decode plans the same way). Many SMs and few KV heads exceed the floor (e.g.
+    Qwen3-30B-A3B's 4 KV heads on a 128-SM RTX 4090)."""
+    ctas = 2 * torch.cuda.get_device_properties(device).multi_processor_count // kv_heads
+    partials = heads * ctas * CTA_TILE_Q * (head_dim + 1) * 4 + 2 * 16          # tmp_v, tmp_s, their alignment
+    return max(WORKSPACE_BYTES, partials)
 
 
 class _Paged:
@@ -26,7 +37,7 @@ class _Paged:
                  layout: str, max_seqs: int) -> None:
         self.geometry = (heads, kv_heads, head_dim, page)
         self.dtypes = {"q_data_type": getattr(torch, q_dtype), "kv_data_type": getattr(torch, kv_dtype)}
-        self.workspace = ctx.workspace("kernels.flashinfer", WORKSPACE_BYTES)
+        self.workspace = ctx.workspace("kernels.flashinfer", workspace_bytes(ctx.device, heads, kv_heads, head_dim))
 
     def _pages(self, batch, pages) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """FlashInfer's CSR page list per batch row (host): indptr, unit ids, tokens in each row's last page."""
