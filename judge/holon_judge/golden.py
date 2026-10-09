@@ -111,6 +111,7 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
                     block.gate.weight.data = block.gate.weight.data.float()
             moe.mirror(hf, operand_dtype=dtype)
         source = model_meta(path) | _moe_meta(mirrored)
+    _torch_paths(hf)
     t0 = time.perf_counter()
     rows = [teacher_force(hf, p.ids, k) for p in prompts.prompts]
     wall = time.perf_counter() - t0
@@ -120,6 +121,16 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
         "hardware": hardware(hf.device), "threads": torch.get_num_threads(), "torch": torch.__version__,
         "transformers": transformers.__version__, "wall_s": round(wall, 2)}
     return Recording.from_rows(rows, meta)
+
+
+def _torch_paths(model: torch.nn.Module) -> None:
+    """The reference runs transformers' own torch code: a swappable hub kernel (e.g. flash-linear-attention's for a
+    Gated DeltaNet layer) would make it another implementation of the same thing."""
+    for name, m in model.named_modules():
+        for attr in ("chunk_gated_delta_rule", "recurrent_gated_delta_rule", "causal_conv1d_fn"):
+            fn = getattr(m, attr, None)
+            if fn is not None and not getattr(fn, "__name__", "").startswith("torch_"):
+                raise RuntimeError(f"{name}.{attr} is {fn!r}, not transformers' torch path")
 
 
 def _is_moe(config_dir: pathlib.Path) -> bool:

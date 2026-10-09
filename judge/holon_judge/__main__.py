@@ -7,6 +7,8 @@
     python -m holon_judge l2       --model <hf dir or id | .gguf> --prompts <jsonl> --golden <file> --floor <file>
                                    [--source gguf_dense] [--max-step-tokens N] [--plant <bug>]
                                    [--dtype bfloat16] [--k 20] [--save <file>] [--json <file>]
+    python -m holon_judge retokenize --prompts <jsonl> --model <hf dir or id> --out <jsonl>
+                                   # the same texts in another model's tokenizer (each must decode back exactly)
     python -m holon_judge snapshot-diff <a.json> <b.json>
     python -m holon_judge snapshot --model <hf dir or id> --prompts <jsonl> [--runs 3] [--json <file>]
                                    # the snapshot trace on fresh engines: run-identical?
@@ -83,6 +85,26 @@ def _structure(a: argparse.Namespace) -> int:
     print(json.dumps({"model": golden.model_meta(path)["model"], "plant": a.plant, "mismatches": len(bad),
                       "first": bad[:8]}))
     return 1 if bad else 0
+
+
+def _retokenize(a: argparse.Namespace) -> int:
+    from tokenizers import Tokenizer
+
+    tok = Tokenizer.from_file(str(golden.resolve_model(a.model) / "tokenizer.json"))
+    rows = [json.loads(line) for line in pathlib.Path(a.prompts).read_text().splitlines() if line]
+    old = Tokenizer.from_file(str(golden.resolve_model(a.source_model) / "tokenizer.json")) if a.source_model else None
+    for row in rows:
+        ids = tok.encode(row["text"], add_special_tokens=False).ids
+        if tok.decode(ids, skip_special_tokens=False) != row["text"]:
+            raise ValueError(f"{row['id']}: the text does not round-trip through the tokenizer")
+        if old is not None:          # where generation started: the same text prefix, in the new tokens
+            prefix = old.decode(row["ids"][:row["gen_start"]], skip_special_tokens=False)
+            row["gen_start"] = len(tok.encode(prefix, add_special_tokens=False).ids)
+        row["ids"], row["n_tokens"] = ids, len(ids)
+    out = pathlib.Path(a.out)
+    out.write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
+    print(f"{len(rows)} prompts, {sum(r['n_tokens'] for r in rows)} tokens -> {out}")
+    return 0
 
 
 def _snapshot_diff(a: argparse.Namespace) -> int:
@@ -203,6 +225,13 @@ def main(argv: list[str] | None = None) -> int:
     st.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
     st.add_argument("--plant", choices=sorted(PLANTS), help="calibration: run with a planted bug (must fail)")
     st.set_defaults(run=_structure)
+
+    rt = sub.add_parser("retokenize", help="a prompt set's texts in another model's tokenizer")
+    rt.add_argument("--prompts", required=True)
+    rt.add_argument("--model", required=True, help="HF checkpoint directory or hub id with tokenizer.json")
+    rt.add_argument("--source-model", help="the tokenizer the set was built with (to carry gen_start over)")
+    rt.add_argument("--out", required=True)
+    rt.set_defaults(run=_retokenize)
 
     s = sub.add_parser("snapshot-diff", help="check two snapshots for byte identity")
     s.add_argument("a")
