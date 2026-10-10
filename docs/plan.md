@@ -367,6 +367,35 @@ RTX 5080 UD-IQ3_S serving a 32K context (q8_0 KV), RTX 4090 UD-Q4_K_M, bars vs l
 rtx-4090; Qwen3 / Qwen3-MoE snapshots byte-identical, propagated with one approval; core diff limited to the
 designed state seams, all general.
 
+### 6.1 Status (2026-10-10): built; two decisions open
+
+Design and evidence: `docs/m03-qwen38.md` (rev 3 and its implementation review, re-reviewed clean); records in
+`evidence/` and `judge/results/`. Qwen3.8-27B, unsloth `Qwen3.8-27B-GGUF` UD-IQ3_S and UD-Q4_K_M; the bf16 HF
+checkpoint on an RTX PRO 6000. Final code c521906 (review fixes); results before it are at the commit in their names.
+
+| # | Result |
+|---|---|
+| 1 | `models/qwen3_5` from qwen3 (`derived_from`), HF and GGUF maps; the tiny model matches transformers (HF and llama.cpp-converted GGUF) on the CPU. Gates: 851 tensors per file, none over 0.5 (worst 0.296 UD-IQ3_S, 0.026 UD-Q4_K_M; norms, `A_log`, conv exact). bf16 HF L2 passes on the RTX PRO 6000 (top-1 98.42% vs floor 98.36%) — its floor re-recorded after the review (the cast had rounded RoPE's frequencies to bf16); the fp32 goldens run in fp32 (transformers 5.6 ignores `dtype` for a multimodal checkpoint's text model: the judge casts). UD-IQ3_S passes Tier A (PRO 6000) and Tier B prefill and decode (A5000). UD-Q4_K_M passes Tier B decode; its Tier B prefill (A5000 and 4090) and Tier A fail only compare's ΔPPL guard, with top-1 and KL at the floor's (**open**, below). Quantization error vs bf16: UD-IQ3_S top-1 88.2%, KL p50 1.25e-2; UD-Q4_K_M 94.6%, 2.3e-3. Plants: all seven L2 plants fail on Tier B, the four HF-path ones on the PRO 6000 |
+| 2 | Bounded on the 27B (A5000, c521906): chunked 100 vs one-shot, prefix resume vs recompute, depth 1 vs 0, graphs vs eager at batch 5 pass; a payload filed one block early, the conv carry dropped between prefill chunks and padding on a real slot fail. Snapshot trace run-identical over 3 fresh engines on rtx-5080 and rtx-4090 at their deployments |
+| 3 | Agent trace on the RTX 5080 at the deployment (max_seqs 2, two checkpoint units, q8_0 KV): 37% of prompt tokens saved; TTFT p50 / p99 8.9 / 16.5 s vs 12.1 / 24.2 s with the cache off (A5000 preview with 16 units: 63.5% saved). A checkpoint hit computes what recomputing does (bitwise on the CPU); registration needs committed tokens (core tests) |
+| 4 | q8_0 KV (our Triton write, decode, verify, prefill) passes Tier B prefill and decode (UD-IQ3_S, A5000) against floors emulating it (gguf-py's Q8_0); the KV error vs bf16 KV floors: KL p50 2.9e-4, top-1 97.8%. fp8 KV: FlashInfer's fp8 prefill runs at bf16's speed on the 4090, so it entered acceptance; its Tier B prefill L2 (4090) fails only the ΔPPL guard. KV units 1.88× smaller with q8_0 |
+| 5 | RTX 5080 UD-IQ3_S at max_seqs 2, two checkpoints, q8_0 KV: 76.8K KV tokens, a 32.5K prompt served (bf16 KV also fits 32K at max_seqs 2 — 38.2K tokens — beating §4.8's estimate; at max_seqs 4 only q8_0 does). Bars vs llama-bench at the same KV format: pp512 1.15–1.20×, tg128 1.03–1.05×, tg at 8K 1.03–1.07× (5080 and 4090, bf16 and q8_0 KV). Serving vs `llama-server` on the 5080: TPOT 15.6 vs 16.6 ms at batch 1; agent TTFT p50 9.3 vs 10.7 s, TPOT 21.9 vs 26.2 ms. Prefill graphs deferred: 5–7% GPU-idle on the 5080 at agent-turn sizes (the 4090 node's slower host: 20–31%) |
+| 6 | Locks (verdicts at c521906; written only on approval): the 27B UD-IQ3_S on rtx-5080 passes (`approve`); the 27B UD-Q4_K_M on rtx-4090 fails only the ΔPPL guard |
+| 7 | Qwen3 / Qwen3-MoE: all five development-class locks (rtx-4090: Qwen3-8B bf16, 30B Q4_K_M; rtx-5080: 30B UD-IQ3_XXS, 8B Q4_K_M, 8B UD-IQ3_XXS) `approve` — snapshot traces byte-identical, L2 passing; changed pins: core, `kernels.flashinfer`, `kernels.triton_attn`, `std.mixers.gqa` (+ `std.weights.gguf`), and `plugin_options` in the plan |
+| 8 | L0 for the GDN and quantized-KV kernels: sm_86, sm_89 (4090) and sm_120a (5080) 193 passed each, fp8 included from sm_89; memcheck 0 errors on all. The GDN bound is pinned to the judge's transformers (a newer one normalises q/k in f32 and moves the yardstick) |
+| 9 | Core diff: the §4.3 seams only (~480 lines; 3288 / 6000), denylist clean, proven by a toy state kind |
+
+Open, for decision:
+- **The ΔPPL guard** (`compare.DPPL_DELTA`: |ΔPPL| ≤ |floor ΔPPL| + 0.25%) has no noise term: its standard errors here are
+  0.3–2% (the same UD-Q4_K_M prefill moved from −1.68% to +1.12% when only the KV format changed). The reviewer's
+  proposal: guard the paired difference, |ΔPPL_cand − ΔPPL_floor| ≤ 0.25% + 2.5 × its clustered SE (as bounded's
+  margins). Not changed after seeing the failures; until decided, the UD-Q4_K_M verdicts and the rtx-4090 27B lock stay failing.
+- **One approval** for the locks: the five propagations and the rtx-5080 27B lock (`--approve` re-runs them).
+
+Found on the way: the fp32-golden dtype and RoPE-buffer issues above; a misplaced conv plant (fixed to drop only the
+prefill-chunk carry); NVIDIA's CuTe DSL parsing `-d` from any process's argv (bench `--depths`); prefill cut with
+nothing to publish (fixed in the review).
+
 ## 7. M0.4 — speculative decoding
 
 Work: `drafters/mtp` (consumes ModelSpec `draft_heads`), `drafters/ngram_gpu`, `drafters/lookup_cpu` (depth
