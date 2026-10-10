@@ -401,6 +401,72 @@
     },
     "ratio": 1.05
    }
+  },
+  "rtx-4090/UD-Q4_K_M/kv-fp8": {
+   "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7",
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "commit": "6292789",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "4",
+    "max_model_len": "8328",
+    "max_step_tokens": "8192",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "plugin_options": "{'recurrent.checkpoints': '4', 'kv.format': 'fp8'}"
+   },
+   "pp512": {
+    "holon": {
+     "mean": 3659.15,
+     "sd": 2.4,
+     "runs": [
+      3662.23,
+      3658.15,
+      3661.18,
+      3657.25,
+      3656.97
+     ],
+     "median_reps_2_5": 3657.7
+    }
+   },
+   "tg128": {
+    "holon": {
+     "mean": 46.62,
+     "sd": 0.01,
+     "runs": [
+      46.63,
+      46.63,
+      46.63,
+      46.63,
+      46.61
+     ],
+     "cpu_ms_per_step_p50": 0.498,
+     "median_reps_2_5": 46.63
+    }
+   },
+   "tg128 @ d8192": {
+    "holon": {
+     "mean": 45.95,
+     "sd": 0.01,
+     "runs": [
+      45.95,
+      45.95,
+      45.95,
+      45.94,
+      45.94
+     ],
+     "cpu_ms_per_step_p50": 0.5,
+     "median_reps_2_5": 45.95
+    }
+   }
   }
  }
 }
