@@ -1,0 +1,178 @@
+{
+ "question": "GPU-idle fraction of an agent turn's eager prefill (M0.3 \u00a74.6): graph-capture prefill per token bucket if idle >= 20% at agent-turn sizes (a resent history hits the cache; ~300-450 new tokens per turn on the agent trace)",
+ "date": "2026-10-09",
+ "command": "python bench/prefill_idle.py --model <file> --engine-args '--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs <n> --plugin-options recurrent.checkpoints=<n> kv.format=q8_0' [--sizes 100 300 450 700 1500]",
+ "results": {
+  "rtx-5080/UD-IQ3_S": {
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "history": 4096,
+   "aligned (multiples of 64: one step)": [
+    {
+     "new_tokens": 64,
+     "steps": 1,
+     "wall_ms": 50.7,
+     "kernel_ms": 48.58,
+     "idle": 0.042
+    },
+    {
+     "new_tokens": 128,
+     "steps": 1,
+     "wall_ms": 69.94,
+     "kernel_ms": 68.35,
+     "idle": 0.023
+    },
+    {
+     "new_tokens": 256,
+     "steps": 1,
+     "wall_ms": 117.78,
+     "kernel_ms": 116.16,
+     "idle": 0.014
+    },
+    {
+     "new_tokens": 512,
+     "steps": 1,
+     "wall_ms": 218.71,
+     "kernel_ms": 217.6,
+     "idle": 0.005
+    },
+    {
+     "new_tokens": 1024,
+     "steps": 1,
+     "wall_ms": 432.79,
+     "kernel_ms": 431.37,
+     "idle": 0.003
+    },
+    {
+     "new_tokens": 2048,
+     "steps": 1,
+     "wall_ms": 880.69,
+     "kernel_ms": 880.9,
+     "idle": -0.0
+    }
+   ],
+   "unaligned (the policy's cut: two steps)": [
+    {
+     "new_tokens": 100,
+     "steps": 2,
+     "wall_ms": 93.89,
+     "kernel_ms": 89.13,
+     "idle": 0.051
+    },
+    {
+     "new_tokens": 300,
+     "steps": 2,
+     "wall_ms": 169.66,
+     "kernel_ms": 159.22,
+     "idle": 0.062
+    },
+    {
+     "new_tokens": 450,
+     "steps": 2,
+     "wall_ms": 240.46,
+     "kernel_ms": 223.27,
+     "idle": 0.071
+    },
+    {
+     "new_tokens": 700,
+     "steps": 2,
+     "wall_ms": 333.43,
+     "kernel_ms": 326.35,
+     "idle": 0.021
+    },
+    {
+     "new_tokens": 1500,
+     "steps": 2,
+     "wall_ms": 687.03,
+     "kernel_ms": 674.78,
+     "idle": 0.018
+    }
+   ]
+  },
+  "rtx-4090/UD-Q4_K_M": {
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "history": 4096,
+   "aligned (multiples of 64: one step)": [
+    {
+     "new_tokens": 64,
+     "steps": 1,
+     "wall_ms": 73.81,
+     "kernel_ms": 45.91,
+     "idle": 0.378
+    },
+    {
+     "new_tokens": 128,
+     "steps": 1,
+     "wall_ms": 90.3,
+     "kernel_ms": 57.63,
+     "idle": 0.362
+    },
+    {
+     "new_tokens": 256,
+     "steps": 1,
+     "wall_ms": 95.3,
+     "kernel_ms": 83.4,
+     "idle": 0.125
+    },
+    {
+     "new_tokens": 512,
+     "steps": 1,
+     "wall_ms": 152.74,
+     "kernel_ms": 147.69,
+     "idle": 0.033
+    },
+    {
+     "new_tokens": 1024,
+     "steps": 1,
+     "wall_ms": 303.49,
+     "kernel_ms": 297.35,
+     "idle": 0.02
+    },
+    {
+     "new_tokens": 2048,
+     "steps": 1,
+     "wall_ms": 618.52,
+     "kernel_ms": 610.33,
+     "idle": 0.013
+    }
+   ],
+   "unaligned (the policy's cut: two steps)": [
+    {
+     "new_tokens": 100,
+     "steps": 2,
+     "wall_ms": 144.89,
+     "kernel_ms": 87.02,
+     "idle": 0.399
+    },
+    {
+     "new_tokens": 300,
+     "steps": 2,
+     "wall_ms": 180.9,
+     "kernel_ms": 125.39,
+     "idle": 0.307
+    },
+    {
+     "new_tokens": 450,
+     "steps": 2,
+     "wall_ms": 206.95,
+     "kernel_ms": 165.12,
+     "idle": 0.202
+    },
+    {
+     "new_tokens": 700,
+     "steps": 2,
+     "wall_ms": 287.59,
+     "kernel_ms": 236.72,
+     "idle": 0.177
+    },
+    {
+     "new_tokens": 1500,
+     "steps": 2,
+     "wall_ms": 531.0,
+     "kernel_ms": 478.9,
+     "idle": 0.098
+    }
+   ]
+  }
+ },
+ "decision": "deferred: on the RTX 5080 (the agent-trace class) idle is 5-7% at agent-turn sizes; the RTX 4090 node's slower host leaves 20-31% idle at 300-450 new tokens, so prefill graphs would help slow hosts (noted for later)"
+}
