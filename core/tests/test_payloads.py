@@ -134,6 +134,8 @@ def test_a_payload_published_at_a_step_end_is_registered_at_its_commit():
 
 def test_a_payload_whose_tokens_are_not_committed_is_freed():
     # The plant of §4.7 at the core: registration with a commit that does not cover the position must not attach.
+    # Two things refuse it — `register`'s bound and the key of a block past the committed tokens, which cannot
+    # match a cached one — so this proves the property, not the bound alone.
     state, _, payloads = _state()
     seq = _seq(range(17))
     assert state.admit(seq) and state.reserve(seq, 16)

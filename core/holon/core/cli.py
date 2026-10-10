@@ -18,7 +18,7 @@ from .supervisor import supervised
 
 def engine_flags(parser: argparse.ArgumentParser) -> None:
     """One flag per EngineConfig field (bool fields as --x / --no-x; dtype by name; dict fields as key=value
-    lists, e.g. `--plugin-options kv.format=q8_0 recurrent.checkpoints=2`)."""
+    lists, e.g. `--plugin-options key=value other.key=value`)."""
     hints = typing.get_type_hints(EngineConfig)
     for f in dataclasses.fields(EngineConfig):
         if f.name == "model":

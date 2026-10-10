@@ -59,7 +59,7 @@ def _facts(c: Mapping[str, Any], source: str) -> dict[str, Any]:
                 "heads_v": hv, "head_k_dim": g["ssm.state_size"], "head_v_dim": g["ssm.inner_size"] // hv,
                 "conv_kernel": g["ssm.conv_kernel"], "rotary_dim": g["rope.dimension_count"],
                 "sections": list(g.get("rope.dimension_sections", []))[:3], "theta": c["rope_theta"],
-                "order": "tiled", "skip": (f"blk.{n}.",)}
+                "order": "tiled", "skip": tuple(f"blk.{i}." for i in range(n, c["num_hidden_layers"]))}
     t = c.get("text_config", c)
     if t.get("output_gate_type", "swish") not in ("swish", "silu") or not t.get("attn_output_gate", True):
         raise NotImplementedError(f"qwen3_5: output gates {t.get('output_gate_type')!r} / "

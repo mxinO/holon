@@ -199,8 +199,9 @@ class StateManager:
             self._adopting[seq.slot] = todo
 
     def cut(self, seq: Seq, n: int) -> int:
-        """The tokens (1 … n) a prefill row of `seq` may take, so the step ends where a kind publishes."""
-        if self._cutting:
+        """The tokens (1 … n) a prefill row of `seq` may take, so the step ends where a kind publishes (without a
+        prefix index nothing is published: no cut)."""
+        if self._cutting and self.index is not None:
             view = _View(seq, self.held[seq.slot], self._slot_units)
             for kind in self._cutting:
                 n = min(n, max(1, kind.cut(view, seq.num_computed, n)))
@@ -240,9 +241,14 @@ class StateManager:
         `at` and the block is cached; otherwise free it."""
         block, held = self.index.block, False
         if 0 < at <= len(seq.tokens) and at % block == 0:
-            keys = self.index.keys(seq.tokens, 0, at // block, None)
-            found = self.index.match(keys, seq.tokens)
-            held = len(found) == len(keys) and self.index.attach(found[-1], spec, payload)
+            chain, i = self.chain.get(seq.slot), at // block
+            if chain is not None and len(chain) >= i:        # the request's own published chain: no re-hash
+                entry = self.index.entries.get(chain[i - 1])
+            else:
+                keys = self.index.keys(seq.tokens, 0, i, None)
+                found = self.index.match(keys, seq.tokens)
+                entry = found[-1] if len(found) == len(keys) else None
+            held = entry is not None and self.index.attach(entry, spec, payload)
         if not held:
             self.index.payload_pools[payload.pool].decref(payload.units)
 

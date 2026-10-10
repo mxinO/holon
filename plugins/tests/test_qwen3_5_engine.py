@@ -79,3 +79,53 @@ def test_without_checkpoint_units_nothing_is_reused(tiny):
     assert engine.ledger.pool("plugin.ssm_state.checkpoints").capacity == 0
     _run(engine, first, params)
     assert _run(engine, turn, params) == cold and engine.stats()["prefix_tokens_saved"] == 0
+
+
+def _prefill_steps(engine, prompt) -> int:
+    rid, steps = engine.add(prompt, SamplingParams(temperature=0.0, max_tokens=1)), 0
+    while engine.has_work():
+        steps += 1
+        if any(d.rid == rid and d.token_ids for d in engine.step()):
+            break
+    while engine.has_work():
+        engine.step()
+    return steps
+
+
+@pytest.mark.parametrize("kw", [{"prefix_cache": False}, {"plugin_options": {"recurrent.checkpoints": "0"}}],
+                         ids=["no-index", "no-units"])
+def test_nothing_to_publish_means_no_cut(tiny, kw):
+    _, path, prompts = tiny
+    assert _prefill_steps(_engine(path, max_step_tokens=256, overlap=False), prompts[2]) == 2   # 131: 128, then 3
+    assert _prefill_steps(_engine(path, max_step_tokens=256, overlap=False, **kw), prompts[2]) == 1
+
+
+def test_more_sessions_than_checkpoint_units(tiny):
+    """Three concurrent conversations share one checkpoint unit: publishes evict each other's payloads (an adopted
+    one stays pinned until copied), some turns still hit, and every turn computes what recomputing does."""
+    _, path, prompts = tiny
+    g = torch.Generator().manual_seed(5)
+    firsts = [torch.randint(0, 320, (n,), generator=g).tolist() for n in (70, 131, 100)]
+    params = SamplingParams(temperature=0.0, max_tokens=4, logprobs=1)
+    cold = _engine(path, prefix_cache=False)
+    want = [[_run(cold, p, params) for p in (f, f + [7, 8] + prompts[3])] for f in firsts]
+    hot = _engine(path, plugin_options={"recurrent.checkpoints": "1"})
+    rids = {hot.add(f, params): (i, 0) for i, f in enumerate(firsts)}
+    got: dict[tuple[int, int], tuple[list, list]] = {}
+    while hot.has_work() or len(got) < 2 * len(firsts):
+        for d in hot.step():
+            key = rids[d.rid]
+            toks, lps = got.setdefault(key, ([], []))
+            toks += d.token_ids
+            lps += d.logprobs.token if d.logprobs is not None else []
+            if d.finish_reason is not None and key[1] == 0:          # the next turn resends the history
+                i = key[0]
+                rids[hot.add(firsts[i] + [7, 8] + prompts[3], params)] = (i, 1)
+    for i in range(len(firsts)):            # batching moves f32 sums by ulps; a wrong state moves them far more
+        for t in (0, 1):
+            (toks, lps), (want_toks, want_lps) = got[(i, t)], want[i][t]
+            assert toks == want_toks and max(abs(a - b) for a, b in zip(lps, want_lps, strict=True)) < 1e-5
+    assert hot.stats()["prefix_tokens_saved"] > 0
+    pool = hot.ledger.pool("plugin.ssm_state.checkpoints")                      # nothing leaked: the index holds
+    held = [p for e in hot.state.index.entries.values() for p in e.payloads.values() if p.pool == pool.name]
+    assert pool.capacity - pool.num_free == len(held)                           # every used unit

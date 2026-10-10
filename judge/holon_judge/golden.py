@@ -107,7 +107,10 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
         mirrored = dtype != torch.float32 and not pure_hf and is_moe
         hf = transformers.AutoModelForCausalLM.from_pretrained(path, dtype=dtype, attn_implementation="sdpa",
                                                                experts_implementation="eager").eval()
-        hf.to(dtype)        # transformers 5.6 ignores `dtype` for a multimodal checkpoint's text model (Qwen3.5/3.8)
+        # transformers 5.6 ignores `dtype` for a multimodal checkpoint's text model (Qwen3.5/3.8): cast the parameters
+        # (only: the rotary frequency buffers stay f32, as `from_pretrained` keeps them).
+        for param in hf.parameters():
+            param.data = param.data.to(dtype)
         if mirrored:                       # the router F32 as the engine holds it; dense operands rounded to bf16
             for block in hf.modules():
                 if type(block).__name__.endswith("SparseMoeBlock"):

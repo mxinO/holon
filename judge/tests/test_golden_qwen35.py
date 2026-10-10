@@ -15,3 +15,16 @@ def test_an_fp32_golden_of_a_bf16_checkpoint_is_fp32(tmp_path, tiny_prompts):
     f32 = score_model(checkpoint, tiny_prompts, torch.float32, "cpu", state_memory=8 << 20, max_seqs=4)
     bf16 = score_model(checkpoint, tiny_prompts, torch.bfloat16, "cpu", state_memory=8 << 20, max_seqs=4)
     assert (gold.target_lp - f32.target_lp).abs().max() < 1e-5 < (gold.target_lp - bf16.target_lp).abs().max()
+
+
+
+def test_a_bf16_floors_rotary_frequencies_stay_f32(tmp_path, tiny_prompts, monkeypatch):
+    """Casting the whole model would round RoPE's frequencies to bf16 (radians of phase at long positions): the floor
+    casts the parameters only."""
+    checkpoint = str(save(tiny_hf(6, seed=1, vocab=VOCAB), tmp_path))
+    models = []
+    teacher_force = golden.teacher_force
+    monkeypatch.setattr(golden, "teacher_force", lambda model, *a: models.append(model) or teacher_force(model, *a))
+    golden.record(checkpoint, tiny_prompts, dtype=torch.bfloat16)
+    assert {p.dtype for p in models[0].parameters()} == {torch.bfloat16}
+    assert {b.dtype for n, b in models[0].named_buffers() if n.endswith("inv_freq")} == {torch.float32}

@@ -189,7 +189,7 @@ general mechanisms; the plugin design depends on it):
 
 | Seam | Today | M0.3 (ABI change in **bold**) |
 |---|---|---|
-| Slot addressing | Slot pools sized `max_seqs·(1+draft)`, no null unit | a Slot pool's unit for a sequence **is its SeqTable slot** (with draft slots, M0.4: `slot·(1+k)+j`; the core owns the mapping); the pool gets the padding slot's unit as its null unit (all pools expose `pool.null`); no new batch field |
+| Slot addressing | Slot pools sized `max_seqs·(1+draft)`, no null unit | a Slot pool's unit for a sequence **is its SeqTable slot** (with draft slots, M0.4: `slot·(1+k)+j`; the core owns the mapping); the pool gets the padding slot's unit as its null unit (as built: the padding slot's unit plays that role; Slot pools have no separate `pool.null`); no new batch field |
 | Prefill cuts | `n = min(remaining, budget)` | before `reserve`, the scheduler asks every kind **`cut(seq, start, n) → 1 ≤ n' ≤ n`** and takes the minimum (a kind asks its policy; default: no cut; cuts follow the kind's alignment); **`SeqView.prompt_len`** is added for policies |
 | Publish | never called | optional: a kind that publishes exposes **`next_publish(seq) → position \| None`**; the core compares it per row (O(1), nothing for kinds that never publish, so Qwen3's decode path is unchanged) and, when a row's step ends there, asks `publish(seq, p)` → (payload, MemOps) or None; ops run in the step's `post_sample` phase; at `host_commit` the payload is registered after that commit's paged blocks are inserted (one payload per entry and spec; a duplicate is freed), only if committed tokens cover p, else dropped — before `n > 1` siblings are released |
 | Adopt | never called | `admit` takes the fixed-point hit over every kind's `hit_length` (design §6.3); the admitting request holds a reference on the adopted payload unit until its `adopt` MemOp has been enqueued (`pre_forward` of its first scheduled step), so best-effort publishes cannot evict it in between |
@@ -319,7 +319,13 @@ assumed. The fit records KV tokens per (`max_seqs`, payloads, KV format); the de
 - A slot-indexed chunk kernel (no gather/scatter); an in-step snapshot (fla writing the fp32 state at one chunk
   index), which would remove the extra step a cut causes; PIECEWISE graphs; `fork`.
 - MTP (`blk.64`, M0.4; its verify/commit index rows use −1, not 0, for "don't store" under the patched sentinel); the
-  vision tower (v1).
+  vision tower (v1). With draft slots (M0.4) the GDN mixer must index state through the core's `slot·(1+k)+j`
+  mapping, not `batch.dev.slots` directly.
+- Prefill graphs per token bucket: the RTX 5080 leaves 5–7% of an agent turn's eager prefill idle (below §4.6's 20%),
+  the RTX 4090 node's slower host 20–31% at 300–450 new tokens (`evidence/prefill_idle_qwen3.8-27b-gguf_*.json`).
+- The conv and SSM halves of the recurrent state are two specs with two payload pools: they evict in step, but a
+  pin or a full pool can strand one half (wasted units, never a wrong hit: the fixed point needs both). One spec,
+  or one shared payload pool, would remove that.
 
 ## 8. Review findings, resolved
 

@@ -5,10 +5,16 @@ later request with the same prefix (docs/m03-qwen38.md D4).
 
 Where checkpoints are taken is a policy, from the deployment's plugin options:
 - `recurrent.policy`: `"prompt_end"` (default: once per prompt, at its last aligned position — what an agent's next
-  turn resends) or `"every:<n>"` (every n tokens, n a multiple of the alignment);
-- `recurrent.checkpoints`: units of the checkpoint pool (default: one per request slot).
+  turn resends) or `"every:<n>"` (every n tokens, n a multiple of the alignment; prefill steps then end every n
+  tokens, so a small n costs steps);
+- `recurrent.checkpoints`: units of the checkpoint pool (default: one per request slot; 0: no checkpoints, no cuts).
+
+Positions are multiples of the spec's alignment and of the page size: the prefix index files payloads per block of
+`lcm(page, alignment)` tokens, and a payload off a block boundary could never be found.
 """
 from __future__ import annotations
+
+import math
 
 import numpy as np
 from holon.api import HitLen, MemOp, Payload
@@ -19,7 +25,7 @@ class Recurrent:
 
     def __init__(self, spec, pool, ctx) -> None:
         self.spec, self.pool = spec, pool
-        self.align = spec.alignment
+        self.align = math.lcm(spec.alignment, ctx.options.get("page_size", 16))
         opts = ctx.options.get("plugins", {})
         policy = opts.get("recurrent.policy", "prompt_end")
         if policy == "prompt_end":
@@ -43,7 +49,10 @@ class Recurrent:
         return []
 
     def next_publish(self, seq) -> int | None:
-        """The next position after the request's computed tokens where the policy checkpoints."""
+        """The next position after the request's computed tokens where the policy checkpoints (none without
+        checkpoint units)."""
+        if self.payloads.capacity == 0:
+            return None
         start = seq.num_computed
         if self.every is not None:
             return (start // self.every + 1) * self.every
