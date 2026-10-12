@@ -115,10 +115,10 @@ def summarize(cases: list[dict], columns: list[str], cpu_time: bool) -> dict:
 def run_worker(backend: str, args: argparse.Namespace, out: pathlib.Path) -> tuple[dict | None, str]:
     # PCI order: --gpu is the nvidia-smi index, which also names the GPU class in the evidence.
     env = dict(os.environ, CUDA_DEVICE_ORDER="PCI_BUS_ID", CUDA_VISIBLE_DEVICES=str(args.gpu), HF_HUB_OFFLINE="1")
-    if backend in ("holon", "holon_http"):   # measure this checkout, whatever copy the venv has installed
+    if backend in ("holon", "holon_http", "holon_http_text"):   # this checkout, whatever copy the venv installed
         env["PYTHONPATH"] = os.pathsep.join(str(ROOT / d) for d in ("core", "std", "plugins"))
         python = sys.executable
-    elif backend == "llamaserver":           # a server binary (LLAMA_SERVER): the client needs only the stdlib
+    elif backend in ("llamaserver", "freetoken_http"):   # a server (its own binary or environment) and our client
         env.pop("PYTHONPATH", None)
         python = sys.executable
     else:
@@ -155,7 +155,8 @@ def main() -> None:
     ap.add_argument("--model", required=True, help="checkpoint directory or file (a .gguf)")
     ap.add_argument("--traces", nargs="+", required=True, help="JSONL specs from workloads.py")
     ap.add_argument("--backends", nargs="+", default=["holon", "minisgl"],
-                    choices=["holon", "holon_http", "llamaserver", "minisgl", "nanovllm"])
+                    choices=["holon", "holon_http", "holon_http_text", "llamaserver", "freetoken_http", "minisgl",
+                             "nanovllm"])
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--max-batch", type=int, default=64, help="max running sequences (same for every backend)")
     ap.add_argument("--max-step-tokens", type=int, default=8192, help="max tokens per prefill step")
