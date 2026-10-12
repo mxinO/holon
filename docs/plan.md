@@ -387,8 +387,10 @@ Results are at the commit in their names; the final verdicts at the paired ΔPPL
 | 9 | Core diff: the §4.3 seams plus the in-step publish seam (`StateSpec.in_step`, `BatchPlan.publishes`, `StepCtx.pool`), all general and proven by the toy state kind |
 
 Decisions taken at the close (2026-10-12): the in-step checkpoints are part of M0.3; L2's ΔPPL guard is paired with
-the floor (|ΔPPL vs floor| ≤ 0.25% + 2.5 SE, sequences as clusters — the unpaired margin had no noise term and failed
-runs whose top-1 and KL matched the floor); the 5080 deploys at max_seqs 4 with four checkpoints.
+the floor (|ΔPPL vs floor| ≤ 0.25% + 2.5 SE, sequences as clusters, the SE capped at √2 × the floor's own so an error
+confined to a few sequences cannot widen its budget — the unpaired margin had no noise term and failed runs whose
+top-1 and KL matched the floor; the guard stays coarse, ≈ 2.5% on v1-qwen3_5); the 5080 deploys at max_seqs 4 with
+four checkpoints.
 
 Found on the way: the fp32-golden dtype and RoPE-buffer issues above; a misplaced conv plant (fixed to drop only the
 prefill-chunk carry); NVIDIA's CuTe DSL parsing `-d` from any process's argv (bench `--depths`); prefill cut with
