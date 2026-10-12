@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     import numpy as np
     import torch
 
-    from .state import MemOp
+    from .state import InStepPublish, MemOp
 
 
 class Status(enum.Enum):
@@ -123,6 +123,7 @@ class BatchPlan:
     host_tokens: np.ndarray              # flat tokens for HOST rows
     shape: ShapeKey
     mem_ops: list[MemOp] = dataclasses.field(default_factory=list)
+    publishes: list[InStepPublish] = dataclasses.field(default_factory=list)   # payloads the forward fills
     ext: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
@@ -153,3 +154,6 @@ class StepCtx(Protocol):
 
     def meta(self, group: str) -> Any:
         """Metadata prepared this step for a state group (a page group or state spec name)."""
+
+    def pool(self, name: str) -> Any:
+        """A memory pool by name (e.g. the pool of a payload this step's forward fills)."""

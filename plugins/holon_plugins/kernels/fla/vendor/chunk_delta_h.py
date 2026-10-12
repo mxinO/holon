@@ -30,6 +30,7 @@ _CHUNK_DELTA_H_NUM_STAGES = [2, 3] if torch.version.hip else [2, 3, 4]
         "STORE_FINAL_STATE": lambda args: args["ht"] is not None,
         "SAVE_NEW_VALUE": lambda args: args["v_new"] is not None,
         "IS_VARLEN": lambda args: args["cu_seqlens"] is not None,
+        "SNAPSHOT": lambda args: args["snap"] is not None,  # Holon: the fp32 state at one chunk per sequence
     }
 )
 @autotune(
@@ -52,6 +53,9 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
     h,
     h0,
     ht,
+    snap,
+    snap_unit,
+    snap_chunk,
     cu_seqlens,
     chunk_offsets,
     T,
@@ -67,6 +71,7 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
     STORE_FINAL_STATE: tl.constexpr,
     SAVE_NEW_VALUE: tl.constexpr,
     IS_VARLEN: tl.constexpr,
+    SNAPSHOT: tl.constexpr,
     USE_EXP2: tl.constexpr,
     V_HEAD_TILED: tl.constexpr,  # Holon: GGUF value-head order, v head j reads q/k head j % Hg
 ):
@@ -110,6 +115,10 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
         h0 = h0 + i_nh * V * K
     if STORE_FINAL_STATE:
         ht = ht + i_nh * V * K
+    if SNAPSHOT:  # Holon: sequence i_n's state at the start of chunk s_chunk (-1: none) into unit s_unit of snap
+        s_chunk = tl.load(snap_chunk + i_n).to(tl.int32)
+        s_unit = tl.maximum(tl.load(snap_unit + i_n).to(tl.int32), 0)
+        snap = snap + ((s_unit * H + i_h) * V * K).to(tl.int64)
 
     # load initial state
     if USE_INITIAL_STATE:
@@ -133,6 +142,19 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
 
     # main recurrence
     for i_t in range(NT):
+        if SNAPSHOT:  # Holon: the fp32 running state before chunk i_t = after the sequence's first 64·i_t tokens
+            if i_t == s_chunk:
+                p_s = tl.make_block_ptr(snap, (V, K), (K, 1), (i_v * BV, 0), (BV, 64), (1, 0))
+                tl.store(p_s, b_h1.to(p_s.dtype.element_ty), boundary_check=(0, 1))
+                if K > 64:
+                    p_s = tl.make_block_ptr(snap, (V, K), (K, 1), (i_v * BV, 64), (BV, 64), (1, 0))
+                    tl.store(p_s, b_h2.to(p_s.dtype.element_ty), boundary_check=(0, 1))
+                if K > 128:
+                    p_s = tl.make_block_ptr(snap, (V, K), (K, 1), (i_v * BV, 128), (BV, 64), (1, 0))
+                    tl.store(p_s, b_h3.to(p_s.dtype.element_ty), boundary_check=(0, 1))
+                if K > 192:
+                    p_s = tl.make_block_ptr(snap, (V, K), (K, 1), (i_v * BV, 192), (BV, 64), (1, 0))
+                    tl.store(p_s, b_h4.to(p_s.dtype.element_ty), boundary_check=(0, 1))
         p_h1 = tl.make_block_ptr(
             h + i_t.to(tl.int64) * stride_h,
             (V, K),
@@ -334,6 +356,7 @@ def chunk_gated_delta_rule_fwd_h(
     chunk_offsets: torch.Tensor | None = None,
     use_exp2: bool = False,
     v_head_tiled: bool = False,
+    snapshot: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,  # Holon: (pool view, unit, chunk)
 ) -> tuple[torch.Tensor, torch.Tensor]:
     # This kernel is slightly different from fla to support Q/K with different head numbers.
     # In fla, Q/K always have the same head number, so Hg is always equal to H.
@@ -372,6 +395,9 @@ def chunk_gated_delta_rule_fwd_h(
         h=h,
         h0=initial_state,
         ht=final_state,
+        snap=None if snapshot is None else snapshot[0],
+        snap_unit=None if snapshot is None else snapshot[1],
+        snap_chunk=None if snapshot is None else snapshot[2],
         cu_seqlens=cu_seqlens,
         chunk_offsets=chunk_offsets,
         T=T,

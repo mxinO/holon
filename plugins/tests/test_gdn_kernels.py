@@ -460,3 +460,47 @@ def test_decode_step_graph_replay_equals_eager(order):
     p_eager, c_eager = p0.clone(), c0.clone()
     eager = step(p_eager, c_eager)
     assert torch.equal(out, eager) and torch.equal(pool, p_eager) and torch.equal(conv_state, c_eager)
+
+
+# --- in-step snapshots (docs/m03-in-step-snapshot.md §3.1) ---------------------------------------------------------
+
+def _call(kernel, x, g, state, lens, init, slots, snapshots=(), view=None):
+    h = kernel.plan(lens, snapshots)
+    return kernel(h, x["q"], x["k"], x["v"], x["a"], x["b"], g["a_log"], g["dt_bias"], state, dev(slots),
+                  dev(init, torch.bool), snapshot=view)
+
+
+@pytest.mark.parametrize("order", ["grouped", "tiled"])
+def test_a_snapshot_is_the_final_state_of_a_split_there(order):
+    """Rows of 200 (snapshot after 64 = chunk 1), 0, 150 (after 128: the last full chunk, a partial tail) and 90 (none,
+    with an initial state): each snapshot is bitwise the final state of a call over the row's first tokens; outputs
+    and final states are bitwise those of the call without snapshots; untouched units stay NaN."""
+    hk, hv, d = SHAPES["qwen3.8-27b"]
+    lens, init, slots = [200, 0, 150, 90], [False, False, True, True], [0, 5, 2, 7]
+    kernel, x, g = gdn("qwen3.8-27b", order), tokens(sum(lens), hk, hv, d), gates(hv)
+    pool, warm = warm_states(x, g, order, UNITS)
+    for unit in (2, 7):
+        pool[unit] = warm
+    payload = torch.full((4, hv, d, d), float("nan"), device="cuda")
+    snapped, plain = pool.clone(), pool.clone()
+    o1 = _call(kernel, x, g, snapped, lens, init, slots, [(0, 64, 1), (2, 128, 3)], payload)
+    o0 = _call(kernel, x, g, plain, lens, init, slots)
+    assert torch.equal(o0, o1) and torch.equal(snapped.nan_to_num(), plain.nan_to_num())
+    assert payload[0].isnan().all() and payload[2].isnan().all()
+    qs = query_start(lens).tolist()
+    for row, offset, unit in [(0, 64, 1), (2, 128, 3)]:
+        split = pool.clone()
+        lo = qs[row]
+        _call(kernel, rows(x, lo, lo + offset), g, split, [offset], [init[row]], [slots[row]])
+        assert torch.equal(payload[unit], split[slots[row]]), (row, offset)
+        late = pool.clone()                                    # plant: one chunk late is another state
+        _call(kernel, rows(x, lo, lo + offset + 64), g, late, [offset + 64], [init[row]], [slots[row]])
+        assert not torch.equal(payload[unit], late[slots[row]])
+        assert not torch.equal(payload[unit], split[slots[row]].bfloat16().float())   # plant: fla's bf16 `h`
+
+
+def test_snapshots_must_fall_inside_their_row_on_a_chunk():
+    kernel = gdn("small", "grouped")
+    for bad in [(0, 0, 0), (0, 32, 0), (0, 192, 0), (1, 64, 0)]:   # chunk 0, off a chunk, past the end, a 0-token row
+        with pytest.raises(ValueError, match="snapshot"):
+            kernel.plan([150, 0], [bad])

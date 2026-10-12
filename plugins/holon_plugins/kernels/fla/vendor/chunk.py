@@ -34,6 +34,7 @@ def chunk_gated_delta_rule_fwd(
     chunk_offsets: torch.Tensor | None = None,
     core_attn_out: torch.Tensor | None = None,
     v_head_tiled: bool = False,
+    snapshot: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,  # Holon: see chunk_delta_h
 ):
     g = chunk_local_cumsum(
         g, chunk_size=FLA_CHUNK_SIZE, cu_seqlens=cu_seqlens, chunk_indices=chunk_indices
@@ -72,6 +73,7 @@ def chunk_gated_delta_rule_fwd(
         chunk_indices=chunk_indices,
         chunk_offsets=chunk_offsets,
         v_head_tiled=v_head_tiled,
+        snapshot=snapshot,
     )
     o = chunk_fwd_o(
         q=q,
@@ -108,6 +110,7 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
         use_qk_l2norm_in_kernel: bool = False,
         core_attn_out: torch.Tensor | None = None,
         v_head_tiled: bool = False,
+        snapshot: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
     ):
         if use_qk_l2norm_in_kernel:
             q = l2norm_fwd(q)
@@ -127,6 +130,7 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
             chunk_offsets=chunk_offsets,
             core_attn_out=core_attn_out,
             v_head_tiled=v_head_tiled,
+            snapshot=snapshot,
         )
         ctx.scale = scale
         ctx.use_qk_l2norm_in_kernel = use_qk_l2norm_in_kernel
@@ -154,6 +158,7 @@ def chunk_gated_delta_rule(
     use_qk_l2norm_in_kernel: bool = False,
     core_attn_out: torch.Tensor | None = None,
     v_head_tiled: bool = False,
+    snapshot: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,  # Holon: (fp32 [U,H,V,K], unit, chunk)
 ):
     r"""
     Args:
@@ -247,5 +252,6 @@ def chunk_gated_delta_rule(
         use_qk_l2norm_in_kernel,
         core_attn_out,
         v_head_tiled,
+        snapshot,
     )
     return o, final_state

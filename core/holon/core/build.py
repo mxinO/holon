@@ -128,9 +128,13 @@ class StepContext:
     seq_table: SeqTable | None = None
     pages: dict[str, Any] = dataclasses.field(default_factory=dict)    # the core's page views (engine steps)
     prep: Any = None                                                    # the engine's device-prep inputs
+    pools: dict[str, Any] = dataclasses.field(default_factory=dict)     # the ledger's pools, by name
 
     def meta(self, group: str) -> Any:
         return self.metas[group]
+
+    def pool(self, name: str) -> Any:
+        return self.pools[name]
 
     @classmethod
     def whole_sequences(cls, ids: list[list[int]], device: torch.device | str) -> StepContext:

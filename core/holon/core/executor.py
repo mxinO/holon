@@ -286,7 +286,7 @@ class Executor:
         pages = self.state.pages(plan, up)
         up.end()
         metas = {g: p.plan_bounds(batch, pages.get(g)) for g, p in self.planners.items()}
-        return StepContext(batch, metas, seq_table=self.seq_table, pages=pages, prep=prep)
+        return StepContext(batch, metas, seq_table=self.seq_table, pages=pages, prep=prep, pools=self.pools)
 
     def _prepare(self, ctx: StepContext) -> None:
         """The device half: the SeqTable's starts for host-exact rows, then positions, lengths, write indices and

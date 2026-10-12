@@ -145,11 +145,17 @@ class GatedDeltaRule:
                  dtype: str) -> None:
         self.order = v_head_order
 
-    def plan(self, lens: list[int]):
-        return torch.tensor([0, *np.cumsum(lens).tolist()], dtype=torch.int32)
+    def plan(self, lens: list[int], snapshots=()):
+        for row, offset, _ in snapshots:
+            if offset % 64 or not 0 < offset < lens[row]:
+                raise ValueError(f"snapshot of row {row} at {offset}: a multiple of 64 inside its {lens[row]} tokens")
+        return (torch.tensor([0, *np.cumsum(lens).tolist()], dtype=torch.int32),
+                {row: (offset, unit) for row, offset, unit in snapshots})
 
-    def __call__(self, handle, q, k, v, a, b, a_log, dt_bias, state, slots, has_init):
-        return gdn.gated_delta_rule(q, k, v, a, b, a_log, dt_bias, state, slots, handle, has_init, self.order)
+    def __call__(self, handle, q, k, v, a, b, a_log, dt_bias, state, slots, has_init, snapshot=None):
+        query_start, snaps = handle
+        return gdn.gated_delta_rule(q, k, v, a, b, a_log, dt_bias, state, slots, query_start, has_init, self.order,
+                                    snapshot, snaps)
 
 
 class GatedRMSNorm:

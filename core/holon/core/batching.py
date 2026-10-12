@@ -14,7 +14,7 @@ def padded(plan: BatchPlan, rows: int, slot: int) -> BatchPlan:
     pad = lambda a, v: np.concatenate([a, np.full(extra, v, dtype=a.dtype)])   # noqa: E731
     out = host_plan(plan.step, pad(plan.slots, slot), pad(plan.start_upper, 0), pad(plan.n_query, 1),
                     pad(plan.n_logits, 1), pad(plan.host_tokens, 0), pad(plan.token_src, TokenSrc.HOST))
-    out.mem_ops, out.ext = plan.mem_ops, plan.ext
+    out.mem_ops, out.publishes, out.ext = plan.mem_ops, plan.publishes, plan.ext
     return out
 
 

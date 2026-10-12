@@ -48,8 +48,11 @@ def head_map(heads_k: int, heads_v: int, v_head_order: str) -> torch.Tensor:
 
 def gated_delta_rule(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, a: torch.Tensor, b: torch.Tensor,
                      a_log: torch.Tensor, dt_bias: torch.Tensor, state: torch.Tensor, slots: torch.Tensor,
-                     query_start: torch.Tensor, has_init: torch.Tensor, v_head_order: str) -> torch.Tensor:
-    """The gated delta rule per row, token by token in f32; state [units, Hv, Dv, Dk] f32 updated in place."""
+                     query_start: torch.Tensor, has_init: torch.Tensor, v_head_order: str,
+                     snapshot: torch.Tensor | None = None, snaps: dict[int, tuple[int, int]] | None = None
+                     ) -> torch.Tensor:
+    """The gated delta rule per row, token by token in f32; state [units, Hv, Dv, Dk] f32 updated in place; `snaps`
+    {row: (offset, unit)}: the row's state after its first `offset` tokens into `snapshot[unit]`."""
     heads_v, dv, dk = state.shape[1:]
     idx = head_map(q.shape[1], heads_v, v_head_order).to(q.device)
     qn = l2norm(q.float())[:, idx] * dk ** -0.5                                 # [T, Hv, Dk]
@@ -67,6 +70,8 @@ def gated_delta_rule(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, a: torch
             delta = beta[t][:, None] * (v[t].float() - (s * kn[t][:, None, :]).sum(-1))     # [Hv, Dv]
             s = s + delta[:, :, None] * kn[t][:, None, :]
             o[t] = (s * qn[t][:, None, :]).sum(-1)
+            if snaps and r in snaps and t + 1 - lo == snaps[r][0]:
+                snapshot[snaps[r][1]] = s
         state[unit] = s
     return o.to(v.dtype)
 

@@ -4,7 +4,8 @@ registered at its commit only when committed tokens cover them, the fixed-point 
 launched, payload eviction that never costs paged units, and unit copies between pools.
 
 The toy kind keeps one Slot unit per request (think: a running sum of the tokens) and publishes a copy of it every
-EVERY tokens into its own plugin pool."""
+EVERY tokens into its own plugin pool — where a step ends (a MemOp copy), or, when its spec declares an `in_step` grid,
+inside a step: then the forward fills it (`BatchPlan.publishes`; the tests play the toy mixer)."""
 import numpy as np
 import pytest
 import torch
@@ -38,16 +39,20 @@ class _ToyKind:
         return 0
 
     def cut(self, seq, start, n):
+        if self.spec.in_step:                     # the forward fills payloads inside the step: no cut
+            return n
         return min(n, (start // self.every + 1) * self.every - start)
 
     def next_publish(self, seq):
         return (seq.num_computed // self.every + 1) * self.every
 
-    def publish(self, seq, at):
+    def publish(self, seq, at, in_step=False):
         if self.payloads.num_free == 0:
             return None
         unit = self.payloads.alloc(1)
         payload = Payload((int(unit[0]),), self.payload_pool)
+        if in_step:
+            return payload, []
         return payload, [MemOp(f"state.{self.spec.name}", np.array(seq.units(self.spec.name)), self.payload_pool,
                                unit, "post_sample")]
 
@@ -62,14 +67,14 @@ class _ToyKind:
                       np.array(seq.units(self.spec.name)), "pre_forward")]
 
 
-def _state(payload_units: int = 4):
+def _state(payload_units: int = 4, in_step: int = 0, payload_bytes: int = 8):
     ledger = Ledger(torch.device("cpu"))
     kv = ledger.request("state.kv", unit_bytes=8, min_units=64, tokens_per_unit=PAGE)
     toy = ledger.request("state.toy", unit_bytes=8, min_units=SLOTS + 1, pref_units=SLOTS + 1)
-    payloads = ledger.plugin_pool("toy", unit_bytes=8, min_units=payload_units, pref_units=payload_units)
+    payloads = ledger.plugin_pool("toy", unit_bytes=payload_bytes, min_units=payload_units, pref_units=payload_units)
     ledger.materialize(None)
     kv_spec = StateSpec("kv", "paged@1", Paged(8, PAGE), (0,), "test")
-    toy_spec = StateSpec("toy", "toy@1", Slot(8), (1,), "test", alignment=EVERY)
+    toy_spec = StateSpec("toy", "toy@1", Slot(8), (1,), "test", alignment=EVERY, in_step=in_step)
     index = PrefixIndex(1, EVERY, {"kv": kv}, ledger.pools)
     toy_kind = _ToyKind(toy_spec, payloads)
     state = StateManager([BoundSpec(kv_spec, kv, _PagedKind(kv_spec)), BoundSpec(toy_spec, toy, toy_kind)],
@@ -81,12 +86,13 @@ def _seq(tokens):
     return Seq(rid="r", tokens=list(tokens), params=SamplingParams())
 
 
-def _step(state, seqs_n, sample=True):
+def _step(state, seqs_n, sample=True, n_logits=None):
     """Plan, launch and commit one step for [(seq, n)] the way the engine does (no device)."""
     seqs = [s for s, _ in seqs_n]
     n = np.array([k for _, k in seqs_n], dtype=np.int32)
     plan = host_plan(1, np.array([s.slot for s in seqs], np.int32), np.array([s.num_computed for s in seqs], np.int32),
-                     n, np.ones_like(n), np.zeros(int(n.sum()), np.int64))
+                     n, np.ones_like(n) if n_logits is None else np.array(n_logits, np.int32),
+                     np.zeros(int(n.sum()), np.int64))
     ops = state.step_ops(plan, seqs)
     state.unpin(ops.pins)
     for s, k in seqs_n:
@@ -210,3 +216,39 @@ def test_unit_copies_between_pools():
     assert torch.equal(b.units()[:, 0], a.units()[:, 2])                       # other phase: not run
     with pytest.raises(ValueError, match="unit shapes differ"):
         copy_units(a, [0], c, [0])
+
+
+def test_an_in_step_payload_is_listed_for_the_forward_and_registered_at_the_commit():
+    state, _, payloads = _state(in_step=EVERY)
+    seq = _seq(range(17))
+    assert state.admit(seq) and state.reserve(seq, 16)
+    assert state.cut(seq, 12) == 12                                            # no cut: 8 lies inside the step
+    ops = _step(state, [(seq, 12)], sample=False)
+    assert not ops.mem_ops and [(p.row, p.spec, p.offset) for p in ops.in_step] == [(0, "toy", EVERY)]
+    unit = ops.in_step[0].payload.units
+    entry = next(e for e in state.index.entries.values() if e.payloads)        # filed on the block ending at 8
+    assert entry.payloads["toy"].units == unit and payloads.refcount(np.array(unit))[0] == 1
+
+
+def test_in_step_publishes_need_the_grid_a_non_verify_row_and_no_mem_ops():
+    state, _, payloads = _state(in_step=EVERY)
+    seq = _seq(range(40))
+    assert state.admit(seq) and state.reserve(seq, 30)
+    seq.num_computed = 3                                                       # 8 − 3 is off the grid: skipped
+    assert not _step(state, [(seq, 9)], sample=False).in_step
+    seq.num_computed = 16                                                      # a verify row (1 + k logits): skipped
+    assert not _step(state, [(seq, 12)], sample=False, n_logits=[3]).in_step
+    kind = next(b.kind for b in state.bound if b.spec.name == "toy")
+    kind.publish = lambda seq, at, in_step=False: (Payload((0,), "plugin.toy"), [MemOp("a", np.array([0]), "b",
+                                                                                        np.array([0]), "post_sample")])
+    seq.num_computed = 24                                                      # 32 inside, on the grid
+    with pytest.raises(RuntimeError, match="MemOps"):
+        _step(state, [(seq, 12)], sample=False)
+
+
+def test_an_in_step_payload_pool_must_have_the_specs_layout():
+    state, _, _ = _state(in_step=EVERY, payload_bytes=16)
+    seq = _seq(range(17))
+    assert state.admit(seq) and state.reserve(seq, 16)
+    with pytest.raises(RuntimeError, match="differ from the spec"):
+        _step(state, [(seq, 12)], sample=False)

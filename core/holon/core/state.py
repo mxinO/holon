@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from holon.api import BatchPlan, MemOp, Paged, Pages, Payload, Seq, Slot, StateSpec
+from holon.api import BatchPlan, InStepPublish, MemOp, Paged, Pages, Payload, Seq, Slot, StateSpec
 
 from .inputs import Uploader
 from .memory import OutOfUnits, Pool
@@ -107,6 +107,7 @@ class StepOps:
     mem_ops: list[MemOp]
     publishes: list[tuple[Seq, str, int, Payload]]
     pins: list[Payload]
+    in_step: list[InStepPublish] = dataclasses.field(default_factory=list)   # payloads the forward fills
 
 
 class StateManager:
@@ -209,27 +210,47 @@ class StateManager:
 
     def step_ops(self, plan: BatchPlan, seqs: list[Seq]) -> StepOps:
         """A step's state work at launch: pending adopts of its requests (before the forward) and the payloads
-        kinds publish where a row's step ends (after the sample). Host lengths are exact for prefill and decode
-        rows here (before the launch advances them)."""
-        ops, publishes, pins = [], [], []
+        kinds publish where a row's step ends (after the sample) or, for a spec with an `in_step` grid, inside a
+        non-verify row's step on that grid (the forward fills them: `BatchPlan.publishes`). Host lengths are exact
+        for prefill and decode rows here (before the launch advances them)."""
+        ops, publishes, pins, in_step = [], [], [], []
         if self._adopting:
             for seq in seqs:
                 for adopt, payload in self._adopting.pop(seq.slot, ()):
                     ops += adopt
                     pins.append(payload)
         if self._publishing and self.index is not None:
-            for seq, n in zip(seqs, plan.n_query.tolist(), strict=True):
+            rows = zip(seqs, plan.n_query.tolist(), plan.n_logits.tolist(), strict=True)
+            for row, (seq, n, n_logits) in enumerate(rows):
                 view = _View(seq, self.held[seq.slot], self._slot_units)
+                start = seq.num_computed
                 for b in self._publishing:
                     at = b.kind.next_publish(view)
-                    if at is None or at != seq.num_computed + n:
+                    inside = (at is not None and start < at < start + n and b.spec.in_step > 0 and n_logits <= 1
+                              and (at - start) % b.spec.in_step == 0)
+                    if at is None or (at != start + n and not inside):
                         continue
                     if (pool := getattr(b.kind, "payload_pool", None)) is not None:
                         self.index.evict_payloads(pool, 1)
-                    if (made := b.kind.publish(view, at)) is not None:
-                        ops += made[1]
-                        publishes.append((seq, b.spec.name, at, made[0]))
-        return StepOps(ops, publishes, pins)
+                    if (made := b.kind.publish(view, at, in_step=True) if inside else b.kind.publish(view, at)) is None:
+                        continue
+                    payload, mem_ops = made
+                    if inside:
+                        self._check_in_step(b, payload, mem_ops)
+                        in_step.append(InStepPublish(row, b.spec.name, at - start, payload))
+                    ops += mem_ops
+                    publishes.append((seq, b.spec.name, at, payload))
+        return StepOps(ops, publishes, pins, in_step)
+
+    def _check_in_step(self, b: BoundSpec, payload: Payload, mem_ops: list[MemOp]) -> None:
+        """An in-step payload is filled by the spec's forward: no MemOps, and units laid out like the spec's own."""
+        if mem_ops:
+            raise RuntimeError(f"{b.spec.name}: an in-step publish returned MemOps (the forward fills it)")
+        pool = self.index.payload_pools[payload.pool]
+        if (pool.unit_bytes, pool.segments) != (b.pool.unit_bytes, b.pool.segments):
+            raise RuntimeError(f"{b.spec.name}: payload pool {payload.pool} units ({pool.unit_bytes} B, "
+                               f"{pool.segments} segments) differ from the spec's ({b.pool.unit_bytes} B, "
+                               f"{b.pool.segments})")
 
     def unpin(self, pins: list[Payload]) -> None:
         """Drop the adopt pins once the step that copies them is enqueued (stream order protects the copy)."""

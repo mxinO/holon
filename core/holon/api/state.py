@@ -42,6 +42,8 @@ class StateSpec:
     segments: int = 1            # a unit is split into this many equal chunks, segment-major (e.g. one per layer)
     alignment: int = 1           # prefix-hit granularity when intrinsic (e.g. compressed-KV ratio)
     page_group: str | None = None  # specs sharing page ids, one page table and one unit count
+    in_step: int = 0             # the grid (tokens) on which the spec's forward fills a payload inside a step
+                                 # (`BatchPlan.publishes`); 0: payloads only where a step ends
 
     @property
     def group(self) -> str:
@@ -89,6 +91,17 @@ class Payload:
     units: tuple[int, ...]
     pool: str
     tier: str = "vram"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class InStepPublish:
+    """A payload this step's forward fills (`StateSpec.in_step`): spec `spec`'s state of batch row `row` after the
+    row's first `offset` tokens of the step, into `payload`'s units (`StepCtx.pool(payload.pool)`)."""
+
+    row: int
+    spec: str
+    offset: int
+    payload: Payload
 
 
 class SeqView(Protocol):
@@ -153,7 +166,9 @@ class StateKind(Rewindable, Protocol):
 
     def hit_length(self, idx: PrefixView, upto: int) -> HitLen: ...
 
-    def publish(self, seq: SeqView, upto: int) -> tuple[Payload, list[MemOp]] | None: ...
+    def publish(self, seq: SeqView, upto: int, in_step: bool = False) -> tuple[Payload, list[MemOp]] | None: ...
+    # `in_step`: `upto` lies inside the step and the spec's forward fills the payload (`StateSpec.in_step`), so no
+    # MemOps; otherwise `upto` is where the step ends and MemOps fill it.
 
     def adopt(self, seq: SeqView, payload: Payload) -> list[MemOp]: ...
 

@@ -60,14 +60,27 @@ class Recurrent:
         return at if at > start else None
 
     def cut(self, seq, start: int, n: int) -> int:
-        at = self.next_publish(seq)
-        return at - start if at is not None and start < at < start + n else n
+        """Where a prefill step must end so every checkpoint is taken: at the position, unless the spec's forward
+        fills it in-step (`spec.in_step`: a grid the position meets from `start`; one per step, so a second position
+        ends the step one grid before it, to be taken in-step by the next). A budget-truncated step is rounded down
+        to the grid, so the next one starts on it."""
+        at, grid, end = self.next_publish(seq), self.spec.in_step, start + n
+        if at is not None and start < at < end:
+            if not grid or (at - start) % grid:
+                return at - start                                    # taken where the step ends (a MemOp copy)
+            if self.every is not None and at + self.every <= end:     # a second position: the next step's
+                return at + self.every - grid - start
+        if grid and end < len(seq.tokens) and end % grid and end // grid * grid > start:
+            return end // grid * grid - start                         # truncated by the step budget
+        return n
 
-    def publish(self, seq, at: int):
+    def publish(self, seq, at: int, in_step: bool = False):
         if self.payloads.num_free == 0:           # best effort: the index already evicted what it could
             return None
         unit = self.payloads.alloc(1)
         payload = Payload((int(unit[0]),), self.payload_pool)
+        if in_step:                               # the mixer's forward writes it (`BatchPlan.publishes`)
+            return payload, []
         return payload, [MemOp(self.pool.name, np.array(seq.units(self.spec.name)), self.payload_pool, unit,
                                "post_sample")]
 

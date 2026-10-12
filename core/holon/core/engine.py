@@ -249,7 +249,7 @@ class Engine:
         logprobs = any(m and seq.params.logprobs is not None for seq, _, m in rows)
         prompt = self._prompt_rows(plan, seqs) if sync else None
         ops = self.state.step_ops(plan, seqs)
-        plan.mem_ops = ops.mem_ops
+        plan.mem_ops, plan.publishes = ops.mem_ops, ops.in_step
         out = self.executor.launch(plan, exact, logprobs, prompt)
         self.state.unpin(ops.pins)
         for r, got in zip(prompt or [], out.prompt_logprobs, strict=True):
