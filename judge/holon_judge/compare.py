@@ -4,8 +4,11 @@ Budgets come from the floor, the same comparison for HF in the model's activatio
 spike S5): pass iff KL p99 ≤ 2× floor (the discriminating metric), KL p50 ≤ 2× floor, top-1 agreement ≥ floor − 0.25
 points and the candidate's ΔPPL against the floor, paired at the same positions, within 0.25% + 2.5 standard errors
 (sequences as clusters: ΔPPL is noisy — S5 found it does not discriminate, and M0.3 measured standard errors of
-0.3–2%, so a margin without noise failed runs whose top-1 and KL matched the floor). The verdict is on all positions;
-per-category numbers are for diagnosis.
+0.3–2%, so a margin without noise failed runs whose top-1 and KL matched the floor). The standard error is capped at
+√2 × the floor's own (floor vs golden: the noise between two correct paths), so an error confined to a few
+sequences cannot widen its own budget. The guard is coarse: on v1-qwen3_5 (24 sequences) two correct bf16 paths
+differ by a paired SE of ≈ 0.9%, so only shifts beyond ≈ 2.5% fail it; top-1 and KL carry the verdict. The verdict is
+on all positions; per-category numbers are for diagnosis.
 
 KL(golden ‖ candidate) is computed over k+1 buckets: the golden's top-k ids plus one tail bucket holding the rest of
 each distribution. Merging outcomes never increases KL (log-sum inequality), so where the candidate's top-k contains
@@ -54,12 +57,14 @@ class Budgets:
     dppl_max: float
 
     @classmethod
-    def from_floor(cls, floor: Metrics, paired_se: float = 0.0) -> Budgets:
-        """`paired_se`: the standard error of the candidate's ΔPPL against the floor (`paired_dppl`)."""
+    def from_floor(cls, floor: Metrics, paired_se: float) -> Budgets:
+        """`paired_se`: the standard error of the candidate's ΔPPL against the floor (`paired_dppl`), capped at √2 ×
+        the floor's own (a candidate cannot inflate it); nan (one sequence) counts as 0."""
+        known = [x for x in (paired_se, math.sqrt(2) * floor.dppl_se) if not math.isnan(x)]
         return cls(floor.top1 - TOP1_DELTA, KL_FACTOR * floor.kl_p50, KL_FACTOR * floor.kl_p99,
-                   DPPL_DELTA + DPPL_Z * (0.0 if math.isnan(paired_se) else paired_se))
+                   DPPL_DELTA + DPPL_Z * min(known, default=0.0))
 
-    def failures(self, m: Metrics, dppl_vs_floor: float = 0.0) -> list[str]:
+    def failures(self, m: Metrics, dppl_vs_floor: float) -> list[str]:
         checks = [(m.top1 >= self.top1_min, f"top-1 {m.top1:.4%} < {self.top1_min:.4%}"),
                   (m.kl_p50 <= self.kl_p50_max, f"KL p50 {m.kl_p50:.3e} > {self.kl_p50_max:.3e}"),
                   (m.kl_p99 <= self.kl_p99_max, f"KL p99 {m.kl_p99:.3e} > {self.kl_p99_max:.3e}"),

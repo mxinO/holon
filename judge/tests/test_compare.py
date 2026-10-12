@@ -67,8 +67,9 @@ def test_budgets_follow_design_rule():
     from holon_judge.compare import Metrics
 
     floor = Metrics(n=1, top1=0.98, top1_confident=0.99, kl_mean=0, kl_p50=1e-4, kl_p99=5e-3, kl_max=1, dppl=-0.001,
-                    dppl_se=0, missing=0)
+                    dppl_se=0.01, missing=0)
     b = Budgets.from_floor(floor, paired_se=0.004)                  # ΔPPL vs floor within 0.25% + 2.5 SE
+    assert Budgets.from_floor(floor, paired_se=0.5).dppl_max == pytest.approx(0.0025 + 2.5 * 2 ** 0.5 * 0.01)
     assert b == Budgets(top1_min=pytest.approx(0.9775), kl_p50_max=2e-4, kl_p99_max=1e-2,
                         dppl_max=pytest.approx(0.0125))
     assert b.failures(floor, dppl_vs_floor=-0.012) == []
@@ -102,18 +103,34 @@ def test_expert_calls_off_the_floors_path_fail(case):
 
 
 def test_the_ppl_guard_is_paired_with_the_floor(case):
-    """A consistent NLL shift of 1% fails though top-1 and KL stay within budget; per-sequence noise of the same size,
-    which averages out, passes (an unpaired margin of 0.25% would fail it)."""
+    """A consistent NLL shift of 1% fails though top-1 and KL stay within budget; per-sequence noise as large as the
+    floor's own (two correct paths), which averages out, passes (an unpaired margin of 0.25% would fail it)."""
     lens, logits, targets, noise = case
     base = noise(0.02)
-    g, floor = _recording(logits, targets, lens), _recording(base, targets, lens)
     seq = torch.repeat_interleave(torch.arange(len(lens)), torch.tensor(lens))
 
-    def nudged(delta: torch.Tensor) -> Recording:    # the floor, the target logit moved: NLL by ~ −δ(1 − p)
+    def nudged(delta: torch.Tensor) -> Recording:    # the base, the target logit moved: NLL by ~ −δ(1 − p)
         out = base.clone()
         out[torch.arange(len(targets)), targets] += delta
         return _recording(out, targets, lens)
-    shifted = compare(g, nudged(torch.full((len(targets),), -0.02)), floor)
+    g = _recording(logits, targets, lens)
+    floor = nudged(torch.where(seq % 4 < 2, 0.03, -0.03))           # a correct path: per-sequence noise
+    shifted = compare(g, nudged(torch.where(seq % 4 < 2, 0.03, -0.03) - 0.04), floor)
     assert any("ΔPPL vs floor" in f for f in shifted.failures) and not any("KL" in f for f in shifted.failures)
-    noisy = compare(g, nudged(torch.where(seq % 2 == 0, -0.03, 0.03)), floor)
+    noisy = compare(g, nudged(torch.where(seq % 2 == 0, -0.03, 0.03)), floor)   # another correct path
     assert noisy.passed and abs(noisy.overall.dppl - noisy.floor.dppl) > 0.0025
+
+
+def test_an_error_in_one_sequence_cannot_widen_its_own_budget(case):
+    """The paired SE (sequences as clusters) grows with an error confined to one sequence; capped at √2 × the floor's
+    own, it cannot make room for that error (review of the paired guard)."""
+    lens, logits, targets, noise = case
+    base = noise(0.02)
+    g, floor = _recording(logits, targets, lens), _recording(base, targets, lens)
+    out = base.clone()
+    one = torch.arange(lens[0])                                  # the first sequence's positions only
+    out[one, targets[one]] -= 2.0
+    r = compare(g, _recording(out, targets, lens), floor)
+    d, se = r.dppl_vs_floor
+    assert d < 0.0025 + 2.5 * se                                 # within the uncapped budget: it would have passed
+    assert any("ΔPPL vs floor" in f for f in r.failures)
