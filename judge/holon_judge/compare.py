@@ -2,7 +2,10 @@
 
 Budgets come from the floor, the same comparison for HF in the model's activation dtype (design §10.3, calibrated in
 spike S5): pass iff KL p99 ≤ 2× floor (the discriminating metric), KL p50 ≤ 2× floor, top-1 agreement ≥ floor − 0.25
-points and |ΔPPL| ≤ |floor| + 0.25%. The verdict is on all positions; per-category numbers are for diagnosis.
+points and the candidate's ΔPPL against the floor, paired at the same positions, within 0.25% + 2.5 standard errors
+(sequences as clusters: ΔPPL is noisy — S5 found it does not discriminate, and M0.3 measured standard errors of
+0.3–2%, so a margin without noise failed runs whose top-1 and KL matched the floor). The verdict is on all positions;
+per-category numbers are for diagnosis.
 
 KL(golden ‖ candidate) is computed over k+1 buckets: the golden's top-k ids plus one tail bucket holding the rest of
 each distribution. Merging outcomes never increases KL (log-sum inequality), so where the candidate's top-k contains
@@ -23,7 +26,8 @@ from .recording import Recording
 
 TOP1_DELTA = 0.0025       # top-1 agreement ≥ floor − 0.25 points (≈ 2.5 sequence-bootstrap SE in S5)
 KL_FACTOR = 2.0           # KL p50/p99 ≤ 2× floor: the floor varies 5× across models, so δ_KL is relative
-DPPL_DELTA = 0.0025       # |ΔPPL| ≤ |floor| + 0.25%: a coarse guard, ΔPPL alone does not discriminate (S5)
+DPPL_DELTA = 0.0025       # |ΔPPL vs floor| ≤ 0.25% + DPPL_Z standard errors: a coarse guard (S5)
+DPPL_Z = 2.5              # as bounded's margins (design §7.10)
 CONFIDENT_GAP = 0.1       # nats between the golden's top-2: positions that are not near-ties
 
 
@@ -50,15 +54,17 @@ class Budgets:
     dppl_max: float
 
     @classmethod
-    def from_floor(cls, floor: Metrics) -> Budgets:
+    def from_floor(cls, floor: Metrics, paired_se: float = 0.0) -> Budgets:
+        """`paired_se`: the standard error of the candidate's ΔPPL against the floor (`paired_dppl`)."""
         return cls(floor.top1 - TOP1_DELTA, KL_FACTOR * floor.kl_p50, KL_FACTOR * floor.kl_p99,
-                   abs(floor.dppl) + DPPL_DELTA)
+                   DPPL_DELTA + DPPL_Z * (0.0 if math.isnan(paired_se) else paired_se))
 
-    def failures(self, m: Metrics) -> list[str]:
+    def failures(self, m: Metrics, dppl_vs_floor: float = 0.0) -> list[str]:
         checks = [(m.top1 >= self.top1_min, f"top-1 {m.top1:.4%} < {self.top1_min:.4%}"),
                   (m.kl_p50 <= self.kl_p50_max, f"KL p50 {m.kl_p50:.3e} > {self.kl_p50_max:.3e}"),
                   (m.kl_p99 <= self.kl_p99_max, f"KL p99 {m.kl_p99:.3e} > {self.kl_p99_max:.3e}"),
-                  (abs(m.dppl) <= self.dppl_max, f"|ΔPPL| {abs(m.dppl):.3%} > {self.dppl_max:.3%}")]
+                  (abs(dppl_vs_floor) <= self.dppl_max,
+                   f"|ΔPPL vs floor| {abs(dppl_vs_floor):.3%} > {self.dppl_max:.3%}")]
         return [msg for ok, msg in checks if not ok]
 
 
@@ -71,6 +77,7 @@ class Result:
     floor: Metrics | None = None
     budgets: Budgets | None = None
     failures: tuple[str, ...] = ()
+    dppl_vs_floor: tuple[float, float] | None = None   # the candidate's ΔPPL against the floor, its SE
 
     @property
     def passed(self) -> bool | None:
@@ -87,6 +94,10 @@ class Result:
         rows = [head, _row("overall", self.overall)]
         if self.floor is not None:
             rows.append(_row("floor", self.floor))
+        if self.dppl_vs_floor is not None:
+            d, se = self.dppl_vs_floor
+            rows.append(f"{'vs floor':10s} {'':6s} {'':8s} {'':10s} {'':9s} {'':9s} {'':9s} "
+                        f"{f'{d:+.3%} ± {se:.3%}':>17s}")
         if self.budgets is not None:
             b = self.budgets
             rows.append(f"{'budget':10s} {'':6s} {'≥' + format(b.top1_min, '.3%'):>8s} {'':10s} "
@@ -187,13 +198,28 @@ def _path_failures(floor: dict, cand: dict) -> list[str]:
             if other != path and n]
 
 
+def paired_dppl(golden: Recording, cand: Recording, floor: Recording) -> tuple[float, float]:
+    """The candidate's perplexity change against the floor's at the same positions, exp(mean(NLL_c − NLL_f)) − 1,
+    and its standard error with sequences as clusters (the ratio estimator `_summarize` uses for ΔPPL)."""
+    d = floor.target_lp.double() - cand.target_lp.double()
+    _, seq = golden.seq_index().unique(return_inverse=True)
+    s, n = int(seq.max()) + 1, len(d)
+    d_s = torch.zeros(s, dtype=torch.float64).index_add_(0, seq, d)
+    n_s = torch.zeros(s, dtype=torch.float64).index_add_(0, seq, torch.ones_like(d))
+    mean = d_s.sum().item() / n
+    se = math.sqrt(s / (s - 1) * ((d_s - mean * n_s) ** 2).sum().item()) / n if s > 1 else math.nan
+    return math.expm1(mean), se * math.exp(mean)
+
+
 def compare(golden: Recording, cand: Recording, floor: Recording | None = None) -> Result:
     """The L2 check. Without a floor only the metrics are reported; with one, budgets and a verdict."""
     overall, categories = metrics(golden, cand)
-    floor_m = budgets = None
+    floor_m = budgets = paired = None
     failures: list[str] = []
     if floor is not None:
         floor_m = metrics(golden, floor)[0]
-        budgets = Budgets.from_floor(floor_m)
-        failures = budgets.failures(overall) + _path_failures(floor.meta, cand.meta)
-    return Result(_provenance(golden), _provenance(cand), overall, categories, floor_m, budgets, tuple(failures))
+        paired = paired_dppl(golden, cand, floor)
+        budgets = Budgets.from_floor(floor_m, paired[1])
+        failures = budgets.failures(overall, paired[0]) + _path_failures(floor.meta, cand.meta)
+    return Result(_provenance(golden), _provenance(cand), overall, categories, floor_m, budgets, tuple(failures),
+                  paired)

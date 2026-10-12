@@ -68,12 +68,12 @@ def test_budgets_follow_design_rule():
 
     floor = Metrics(n=1, top1=0.98, top1_confident=0.99, kl_mean=0, kl_p50=1e-4, kl_p99=5e-3, kl_max=1, dppl=-0.001,
                     dppl_se=0, missing=0)
-    b = Budgets.from_floor(floor)
+    b = Budgets.from_floor(floor, paired_se=0.004)                  # ΔPPL vs floor within 0.25% + 2.5 SE
     assert b == Budgets(top1_min=pytest.approx(0.9775), kl_p50_max=2e-4, kl_p99_max=1e-2,
-                        dppl_max=pytest.approx(0.0035))
-    assert b.failures(floor) == []
+                        dppl_max=pytest.approx(0.0125))
+    assert b.failures(floor, dppl_vs_floor=-0.012) == []
     worse = Metrics(**{**floor.__dict__, "top1": 0.97, "kl_p99": 2e-2})
-    assert len(b.failures(worse)) == 2
+    assert len(b.failures(worse, dppl_vs_floor=0.013)) == 3
 
 
 def test_refuses_different_prompt_sets(case):
@@ -99,3 +99,21 @@ def test_expert_calls_off_the_floors_path_fail(case):
     assert compare(g, uncounted, floor).failures == ("no expert calls counted on mmvq, the floor's path",)
     del floor.meta["moe_block"]                                            # a dense Tier B floor: nothing to count
     assert compare(g, uncounted, floor).passed
+
+
+def test_the_ppl_guard_is_paired_with_the_floor(case):
+    """A consistent NLL shift of 1% fails though top-1 and KL stay within budget; per-sequence noise of the same size,
+    which averages out, passes (an unpaired margin of 0.25% would fail it)."""
+    lens, logits, targets, noise = case
+    base = noise(0.02)
+    g, floor = _recording(logits, targets, lens), _recording(base, targets, lens)
+    seq = torch.repeat_interleave(torch.arange(len(lens)), torch.tensor(lens))
+
+    def nudged(delta: torch.Tensor) -> Recording:    # the floor, the target logit moved: NLL by ~ −δ(1 − p)
+        out = base.clone()
+        out[torch.arange(len(targets)), targets] += delta
+        return _recording(out, targets, lens)
+    shifted = compare(g, nudged(torch.full((len(targets),), -0.02)), floor)
+    assert any("ΔPPL vs floor" in f for f in shifted.failures) and not any("KL" in f for f in shifted.failures)
+    noisy = compare(g, nudged(torch.where(seq % 2 == 0, -0.03, 0.03)), floor)
+    assert noisy.passed and abs(noisy.overall.dppl - noisy.floor.dppl) > 0.0025
