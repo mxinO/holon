@@ -4,7 +4,7 @@ budget, `--memory-ratio` 0.9 (Holon's fraction); `FREETOKEN_ARGS` adds flags. It
 port, so one FreeToken server at a time on a host."""
 from __future__ import annotations
 
-import http.client
+import http.client as client
 import json
 import os
 import shlex
@@ -35,7 +35,7 @@ class Backend(http.Backend):
 def _wait_ok(port: int, timeout_s: float = 900) -> None:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn = client.HTTPConnection("127.0.0.1", port, timeout=5)
         conn.request("GET", "/health")
         if json.loads(conn.getresponse().read()).get("status") == "ok":
             return
