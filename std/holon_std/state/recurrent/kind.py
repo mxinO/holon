@@ -5,8 +5,8 @@ later request with the same prefix (docs/m03-qwen38.md D4).
 
 Where checkpoints are taken is a policy, from the deployment's plugin options:
 - `recurrent.policy`: `"prompt_end"` (default: once per prompt, at its last aligned position — what an agent's next
-  turn resends) or `"every:<n>"` (every n tokens, n a multiple of the alignment; prefill steps then end every n
-  tokens, so a small n costs steps);
+  turn resends) or `"every:<n>"` (every n tokens, n a multiple of the alignment; a prefill step takes one of them
+  in-step and ends one grid before the next, so a small n costs steps);
 - `recurrent.checkpoints`: units of the checkpoint pool (default: one per request slot; 0: no checkpoints, no cuts).
 
 Positions are multiples of the spec's alignment and of the page size: the prefix index files payloads per block of
@@ -70,7 +70,7 @@ class Recurrent:
                 return at - start                                    # taken where the step ends (a MemOp copy)
             if self.every is not None and at + self.every <= end:     # a second position: the next step's
                 return at + self.every - grid - start
-        if grid and end < len(seq.tokens) and end % grid and end // grid * grid > start:
+        if at is not None and grid and end < len(seq.tokens) and end % grid and end // grid * grid > start:
             return end // grid * grid - start                         # truncated by the step budget
         return n
 

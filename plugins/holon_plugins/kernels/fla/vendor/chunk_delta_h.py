@@ -117,8 +117,8 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
         ht = ht + i_nh * V * K
     if SNAPSHOT:  # Holon: sequence i_n's state at the start of chunk s_chunk (-1: none) into unit s_unit of snap
         s_chunk = tl.load(snap_chunk + i_n).to(tl.int32)
-        s_unit = tl.maximum(tl.load(snap_unit + i_n).to(tl.int32), 0)
-        snap = snap + ((s_unit * H + i_h) * V * K).to(tl.int64)
+        s_unit = tl.maximum(tl.load(snap_unit + i_n).to(tl.int64), 0)
+        snap = snap + (s_unit * H + i_h) * V * K
 
     # load initial state
     if USE_INITIAL_STATE:

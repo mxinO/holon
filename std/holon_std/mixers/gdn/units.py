@@ -22,6 +22,7 @@ from . import kernels
 
 LINEAR = "std.ops.linear@1"
 GROUP = "recurrent"
+CONV, SSM = "conv_state", "ssm_state"   # the two Slot specs (their names in BatchPlan.publishes)
 CHUNK = 64                         # the delta rule's chunk: resuming at its multiples is exact (S3)
 
 
@@ -47,13 +48,13 @@ class Planner:
     def plan_bounds(self, batch, pages) -> GDNMeta:
         lens = batch.plan.n_query.tolist()
         decode = all(n == 1 for n in lens)
-        pubs = {spec: [p for p in batch.plan.publishes if p.spec == spec] for spec in ("conv_state", "ssm_state")}
-        ssm = [(p.row, p.offset, p.payload.units[0]) for p in pubs["ssm_state"]]
+        pubs = {spec: [p for p in batch.plan.publishes if p.spec == spec] for spec in (CONV, SSM)}
+        ssm = [(p.row, p.offset, p.payload.units[0]) for p in pubs[SSM]]
         meta = GDNMeta(self.rule, self.rule.plan(lens, ssm), batch.dev.slots, batch.dev.query_start,
                        ("gdn", len(lens)) if decode else None)
         if ssm:
-            meta.ssm_pool = pubs["ssm_state"][0].payload.pool
-        if conv := pubs["conv_state"]:                   # the window before each position, from the step's rows
+            meta.ssm_pool = pubs[SSM][0].payload.pool
+        if conv := pubs[CONV]:                   # the window before each position, from the step's rows
             starts, device = [0, *itertools.accumulate(lens)], batch.dev.slots.device
             rows = [starts[p.row] + p.offset - self.window + j for p in conv for j in range(self.window)]
             meta.conv = (conv[0].payload.pool, _on(rows, device), _on([p.payload.units[0] for p in conv], device))
@@ -65,7 +66,8 @@ class Planner:
 
 
 def _on(values: list[int], device: torch.device) -> torch.Tensor:
-    return torch.tensor(values, dtype=torch.long).to(device, non_blocking=True)
+    """Host ints on the device through pinned memory: an asynchronous copy, no host sync."""
+    return torch.tensor(values, dtype=torch.long, pin_memory=device.type == "cuda").to(device, non_blocking=True)
 
 
 def _facts(params: dict, dtype: str) -> dict:
@@ -81,9 +83,9 @@ class GDN(nn.Module):
         conv = channels * (params.get("conv_kernel", 4) - 1) * ctx.dtype.itemsize
         ssm = params["heads_v"] * params["head_v_dim"] * params["head_k_dim"] * 4
         n = len(layers)
-        return [StateSpec("conv_state", "recurrent@1", Slot(conv * n), layers, "gdn.conv", segments=n,
+        return [StateSpec(CONV, "recurrent@1", Slot(conv * n), layers, "gdn.conv", segments=n,
                           alignment=CHUNK, page_group=GROUP, in_step=CHUNK),
-                StateSpec("ssm_state", "recurrent@1", Slot(ssm * n), layers, "gdn.ssm", segments=n,
+                StateSpec(SSM, "recurrent@1", Slot(ssm * n), layers, "gdn.ssm", segments=n,
                           alignment=CHUNK, page_group=GROUP, in_step=CHUNK)]
 
     @classmethod
@@ -114,7 +116,7 @@ class GDN(nn.Module):
         norm = {"dim": head_v_dim, "eps": norm_eps, "dtype": dtype}
         self._conv = ctx.select_kernel(kernels.CAUSAL_CONV1D, site=site, **conv).impl(ctx, **conv)
         self._norm = ctx.select_kernel(kernels.GATED_RMSNORM, site=site, **norm).impl(ctx, **norm)
-        conv_bound, ssm_bound = ctx.state("conv_state", layer), ctx.state("ssm_state", layer)
+        conv_bound, ssm_bound = ctx.state(CONV, layer), ctx.state(SSM, layer)
         self._state = None if conv_bound is None else (conv_bound, ssm_bound, conv_bound[0].layers.index(layer))
         self._rule = None
         if conv_bound is None:                     # a model-only build: whole sequences from zero state

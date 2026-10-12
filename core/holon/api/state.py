@@ -158,9 +158,10 @@ class StateKind(Rewindable, Protocol):
     # Optional, for state reused through payloads (design §6.3; paged state is shared by reference instead):
     # `cut(seq, start, n) -> int`, the tokens (1 … n) a prefill row starting at `start` may take, so a step can end
     # where the kind publishes; `next_publish(seq) -> int | None`, the position the kind publishes at next, so the
-    # core calls `publish` only when a row's step ends there; `payload_pool`, the name of the pool its payloads use,
-    # which the prefix index may evict payloads from to make room. `hit_length` answers for state the kind can
-    # restore; a non-paged kind without it allows no prefix hit.
+    # core calls `publish` only when a row's step ends there or, for a spec with an `in_step` grid, when it lies
+    # inside the step on that grid (`in_step=True`: the spec's forward fills it); `payload_pool`, the name of the
+    # pool its payloads use, which the prefix index may evict payloads from to make room. `hit_length` answers for
+    # state the kind can restore; a non-paged kind without it allows no prefix hit.
 
     def reclaimable(self, seq: SeqView) -> list[int]: ...
 

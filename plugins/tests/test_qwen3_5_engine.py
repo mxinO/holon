@@ -101,7 +101,7 @@ EVERY = {"recurrent.policy": "every:64"}
 def test_nothing_to_publish_means_no_cut(tiny, kw):
     _, path, prompts = tiny
     cutting = _engine(path, max_step_tokens=256, overlap=False, plugin_options=EVERY)
-    assert _prefill_steps(cutting, prompts[2]) == 2                # 131, every 64: 64 (in-step) | 128 (in-step) + 3
+    assert _prefill_steps(cutting, prompts[2]) == 2                # 131, every 64: 64 (step end) | 128 (in-step) + 3
     assert _prefill_steps(_engine(path, max_step_tokens=256, overlap=False, **kw), prompts[2]) == 1
 
 
@@ -154,7 +154,7 @@ class _Seq:
         self.tokens, self.num_computed, self.prompt_len = [0] * tokens, computed, prompt or tokens
 
 
-def _kind(policy: str):
+def _kind(policy: str, units: int = 2):
     from holon.api import Slot, StateSpec
     from holon_std.state.recurrent.kind import Recurrent
 
@@ -162,7 +162,7 @@ def _kind(policy: str):
         options = {"plugins": {"recurrent.policy": policy}, "max_seqs": 2, "page_size": 4}
 
         def pool(self, name, **kw):
-            return type("P", (), {"capacity": 2, "name": f"plugin.{name}", "num_free": 2})()
+            return type("P", (), {"capacity": units, "name": f"plugin.{name}", "num_free": units})()
     spec = StateSpec("ssm_state", "recurrent@1", Slot(8), (0,), "t", alignment=64, in_step=64)
     return Recurrent(spec, type("P", (), {"name": "state.ssm_state"})(), _Ctx())
 
@@ -175,6 +175,7 @@ def test_the_kinds_cuts_follow_the_in_step_grid():
     assert every.cut(_Seq(300, 64), 64, 236) == 64
     assert prompt_end.cut(_Seq(400, 0), 0, 100) == 64                  # budget-truncated: rounded to the grid
     assert prompt_end.cut(_Seq(400, 0), 0, 30) == 30                   # ... never to nothing
+    assert _kind("prompt_end", units=0).cut(_Seq(400, 0), 0, 100) == 100   # nothing to publish: no rounding
     # every 1024: the next position (2048) lies past the prompt, so its last step is not rounded
     assert _kind("every:1024").cut(_Seq(1500, 1024), 1024, 476) == 476
 

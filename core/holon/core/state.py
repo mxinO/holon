@@ -117,7 +117,8 @@ class StateManager:
     pages to the index. State that cannot be shared that way (e.g. recurrent state) joins through its kind: the hit
     is the fixed point over every kind's `hit_length` (design §6.3), a hit copies the kind's payload in (`adopt`
     MemOps before the request's first forward) and the kind publishes payloads at positions it chooses (`publish`
-    MemOps after the step, registered at the step's commit once committed tokens cover them).
+    MemOps after a step that ends there, or filled by the forward of a step that contains it on the spec's `in_step`
+    grid), registered at the step's commit once committed tokens cover them.
     """
 
     def __init__(self, bound: list[BoundSpec], max_seqs: int, max_tokens: int, device: torch.device,
