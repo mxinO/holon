@@ -14,7 +14,8 @@ PACKAGES = ("torch", "triton", "flashinfer-python")
 class Backend(http.Backend):
     def __init__(self, model: str, max_batch: int, max_model_len: int, max_step_tokens: int) -> None:
         port = http.free_port()
-        self.flags = ["--max-seqs", str(max_batch), "--max-model-len", str(max_model_len), "--max-step-tokens",
+        self.flags = ["--max-seqs", str(max_batch), "--max-model-len", str(text.headroom(max_model_len)),
+                      "--max-step-tokens",
                       str(max_step_tokens), *shlex.split(os.environ.get("HOLON_SERVE_ARGS", ""))]
         server = http.Server([sys.executable, "-m", "holon", "serve", model, "--port", str(port), *self.flags], port)
         prompts = text.Prompts(model)

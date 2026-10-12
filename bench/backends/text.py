@@ -10,6 +10,11 @@ import pathlib
 from tokenizers import Tokenizer
 
 
+def headroom(max_model_len: int) -> int:
+    """A context limit for text prompts: decoded and re-encoded, a trace's token ids can come back longer."""
+    return -(-max_model_len * 3 // 2 // 256) * 256
+
+
 class Prompts:
     def __init__(self, model: str) -> None:
         path = pathlib.Path(model)

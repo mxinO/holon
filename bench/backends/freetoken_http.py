@@ -19,9 +19,10 @@ class Backend(http.Backend):
     def __init__(self, model: str, max_batch: int, max_model_len: int, max_step_tokens: int) -> None:
         port = http.free_port()
         self.flags = ["--max-running-requests", str(max_batch), "--max-prefill-length", str(max_step_tokens),
+                      "--max-seq-len-override", str(text.headroom(max_model_len)),
                       "--memory-ratio", "0.9", "--served-model-name", "m",
                       *shlex.split(os.environ.get("FREETOKEN_ARGS", ""))]
-        server = http.Server([os.environ["FREETOKEN_PYTHON"], "-m", "freetoken", "serve", "--model-path", model,
+        server = http.Server([os.environ["FREETOKEN_PYTHON"], "-m", "freetoken", "--model-path", model,
                               "--host", "127.0.0.1", "--port", str(port), *self.flags], port)
         _wait_ok(port)                               # its /health answers 200 while still loading
         prompts = text.Prompts(model)
