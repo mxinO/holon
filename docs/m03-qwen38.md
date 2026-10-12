@@ -282,7 +282,7 @@ unit), a payload 147 MiB, KV 64 KiB / token bf16, 34 KiB q8_0, 32 KiB fp8:
 | 4 | 0 | ≈ 1.4 GiB | ≈ 23K | ≈ 43K |
 | 2 | 2 | ≈ 1.4 GiB | ≈ 23K | ≈ 43K |
 
-So acceptance 5's single 32K context is planned at `max_seqs` 2 with two payloads and q8_0 KV. A generic option to
+So acceptance 5's single 32K context is planned at `max_seqs` 2 with two payloads and q8_0 KV. (Measured, and decided 2026-10-12: the 5080 deploys at `max_seqs` 4 with four payloads and q8_0 KV — 58K KV tokens, a 32K context still fits, and the agent trace's TTFT p50 falls from 8.4 s to 0.93 s since it was queueing for two slots; `evidence/fit_*`, `evidence/bench_agent-27b-iq3s-s4-*`.) A generic option to
 recover the prompt-logprob chunk's 0.47 GiB (sizing that chunk by bytes rather than rows) is noted for the fit, not
 assumed. The fit records KV tokens per (`max_seqs`, payloads, KV format); the deployment's choice goes into the lock.
 
