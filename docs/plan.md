@@ -367,7 +367,7 @@ RTX 5080 UD-IQ3_S serving a 32K context (q8_0 KV), RTX 4090 UD-Q4_K_M, bars vs l
 rtx-4090; Qwen3 / Qwen3-MoE snapshots byte-identical, propagated with one approval; core diff limited to the
 designed state seams, all general.
 
-### 6.1 Status (2026-10-13): acceptance met
+### 6.1 Status (2026-10-12): acceptance met
 
 Design and evidence: `docs/m03-qwen38.md` (rev 3 and its implementation review, re-reviewed clean) and
 `docs/m03-in-step-snapshot.md` (in-step checkpoints, reviewed); records in `evidence/` and `judge/results/`, locks in
