@@ -1,0 +1,128 @@
+{
+ "golden": {
+  "source": "hf",
+  "model": "Qwen/Qwen3.8-27B",
+  "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+  "dtype": "float32",
+  "device": "cpu",
+  "hardware": "cpu",
+  "threads": 44,
+  "prompts": "v1-qwen3_5.jsonl",
+  "prompts_sha256": "80bf5a54bd350923484251e1a09fedf72e87f7a12a326edcd162055b44c83f55",
+  "weight_source": null,
+  "max_step_tokens": null,
+  "q8_1": null,
+  "kv": null,
+  "moe_block": null,
+  "experts": null,
+  "expert_calls": null
+ },
+ "candidate": {
+  "source": "holon",
+  "model": "Qwen/Qwen3.8-27B",
+  "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+  "dtype": "bfloat16",
+  "device": "cuda",
+  "hardware": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "threads": null,
+  "prompts": "v1-qwen3_5.jsonl",
+  "prompts_sha256": "80bf5a54bd350923484251e1a09fedf72e87f7a12a326edcd162055b44c83f55",
+  "weight_source": "hf_safetensors",
+  "max_step_tokens": 4096,
+  "q8_1": null,
+  "kv": null,
+  "moe_block": null,
+  "experts": null,
+  "expert_calls": null
+ },
+ "overall": {
+  "n": 33372,
+  "top1": 0.009049502577010668,
+  "top1_confident": 0.009016798418972332,
+  "kl_mean": 5.735361045751909,
+  "kl_p50": 5.621631045169286,
+  "kl_p99": 11.235096571929294,
+  "kl_max": 15.129932379623128,
+  "dppl": 82319.1669495377,
+  "dppl_se": 50224.49770818665,
+  "missing": 0.9237998921251348
+ },
+ "categories": {
+  "chat": {
+   "n": 8167,
+   "top1": 0.010162850495898127,
+   "top1_confident": 0.010453400503778338,
+   "kl_mean": 6.068512032801096,
+   "kl_p50": 6.029477608135944,
+   "kl_p99": 9.730460290838575,
+   "kl_max": 10.961394292363982,
+   "dppl": 560121.0034042421,
+   "dppl_se": 686063.2572474787,
+   "missing": 0.9260805681400759
+  },
+  "code": {
+   "n": 9308,
+   "top1": 0.0053717232488182205,
+   "top1_confident": 0.005294506949040371,
+   "kl_mean": 5.874521624423776,
+   "kl_p50": 5.751569406717257,
+   "kl_p99": 9.542511066966805,
+   "kl_max": 11.768493362057702,
+   "dppl": 188156.6928839775,
+   "dppl_se": 156334.614029121,
+   "missing": 0.9311828534593898
+  },
+  "recall": {
+   "n": 8846,
+   "top1": 0.010739317205516618,
+   "top1_confident": 0.010850336124542989,
+   "kl_mean": 4.749426382631976,
+   "kl_p50": 4.904938285087643,
+   "kl_p99": 7.834307424124697,
+   "kl_max": 9.437432684152014,
+   "dppl": 11923.099661771073,
+   "dppl_se": 4367.836624987195,
+   "missing": 0.9229821388198055
+  },
+  "agent": {
+   "n": 7051,
+   "top1": 0.01049496525315558,
+   "top1_confident": 0.01000144948543267,
+   "kl_mean": 6.402702877045414,
+   "kl_p50": 6.05906404766107,
+   "kl_p99": 13.115718572855556,
+   "kl_max": 15.129932379623128,
+   "dppl": 33858.07042719774,
+   "dppl_se": 59397.94837733852,
+   "missing": 0.9124379520635371
+  }
+ },
+ "floor": {
+  "n": 33372,
+  "top1": 0.9836090135442886,
+  "top1_confident": 0.993546195652174,
+  "kl_mean": 0.01309320949610025,
+  "kl_p50": 9.928396168652839e-05,
+  "kl_p99": 0.059900401938741556,
+  "kl_max": 16.08937736530976,
+  "dppl": 0.007371883896160623,
+  "dppl_se": 0.0035026772789002684,
+  "missing": 0.019204722521874624
+ },
+ "budgets": {
+  "top1_min": 0.9811090135442887,
+  "kl_p50_max": 0.00019856792337305678,
+  "kl_p99_max": 0.11980080387748311,
+  "dppl_max": 125059.47466889428
+ },
+ "failures": [
+  "top-1 0.9050% < 98.1109%",
+  "KL p50 5.622e+00 > 1.986e-04",
+  "KL p99 1.124e+01 > 1.198e-01"
+ ],
+ "dppl_vs_floor": [
+  81716.75316097979,
+  50023.78886755771
+ ],
+ "passed": false
+}
