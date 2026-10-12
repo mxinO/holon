@@ -59,7 +59,8 @@ class Budgets:
     @classmethod
     def from_floor(cls, floor: Metrics, paired_se: float) -> Budgets:
         """`paired_se`: the standard error of the candidate's ΔPPL against the floor (`paired_dppl`), capped at √2 ×
-        the floor's own (a candidate cannot inflate it); nan (one sequence) counts as 0."""
+        the floor's own (a candidate cannot inflate it); nan (one sequence) counts as 0. A floor bitwise equal to its
+        golden would cap it at 0 (budget 0.25%); real floors run in the activation dtype against an fp32 golden."""
         known = [x for x in (paired_se, math.sqrt(2) * floor.dppl_se) if not math.isnan(x)]
         return cls(floor.top1 - TOP1_DELTA, KL_FACTOR * floor.kl_p50, KL_FACTOR * floor.kl_p99,
                    DPPL_DELTA + DPPL_Z * min(known, default=0.0))
