@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 
@@ -59,7 +60,7 @@ def public(arg: str, model: str) -> str:
     """A command-line argument fit for a published record: the model as its id, other paths repo-relative."""
     if arg == model:
         return model_id(model)
-    if arg.startswith("--") and "=" in arg:
+    if "=" in arg:                                       # --key=value and plugin options key=value
         key, value = arg.split("=", 1)
         return f"{key}={public(value, model)}"
     path = pathlib.Path(arg)
@@ -191,8 +192,12 @@ def main() -> None:
                 runs.append({"round": r, "backend": b, "error": err})
                 continue
             if b not in infos:
-                infos[b] = res["info"] | ({"commit": git("rev-parse", "HEAD", cwd=ENVS / "src" / SOURCES[b])}
-                                          if b in SOURCES else {})
+                info = res["info"]
+                if "flags" in info.get("config", {}):        # server flags name local files (drafts, …)
+                    flags = " ".join(public(a, args.model) for a in shlex.split(info["config"]["flags"]))
+                    info = info | {"config": info["config"] | {"flags": flags}}
+                infos[b] = info | ({"commit": git("rev-parse", "HEAD", cwd=ENVS / "src" / SOURCES[b])}
+                                   if b in SOURCES else {})
             for case in res["cases"]:
                 runs.append({"round": r, "backend": b, "trace": case["trace"], "columns": res["columns"],
                              "summary": summarize([case], res["columns"], args.blocking_sync), **case})

@@ -1,0 +1,154 @@
+{
+ "workload": "m04b-decode_b1-llama-dflash2",
+ "date": "2026-10-13",
+ "command": "python bench/run.py --name m04b-decode_b1-llama-dflash2 --gpu 0 --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e --rounds 2 --max-batch 4 --max-step-tokens 2048 --corpus judge/prompts/v1-qwen3_5.jsonl --backends llamaserver --traces bench/traces/decode_b1.jsonl",
+ "commit": "f64bb77b6d012709c3c43227979b791a235bdc2b",
+ "gpu_class": "rtx-4090",
+ "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e",
+ "rounds": 2,
+ "order": ["llamaserver"],
+ "method": "In-process engines driven by bench/driver.py, one scheduling step per call; client-side timestamps taken when a step returns a token. TTFT = first token - release (arrival, or previous turn's last token + gap); TPOT = (last - first) / (tokens - 1) per request; throughput = output tokens / (last token - first release). Decode steps = steps at peak batch that return no first token; decode tok/s = their tokens / their wall time. CPU ms/step = time.process_time() delta around step() on those steps, measured with --blocking-sync (CUDA primary context in blocking-sync mode and torch events created blocking, so waiting for the GPU sleeps and is not counted). Greedy, ignore_eos, fixed output lengths; warmup on the same shapes with other prompt tokens, excluded. HTTP backends (llamaserver, holon_http; bench/backends/http.py): streamed requests, a token timestamped when its chunk arrives; their 'steps' are client polls, so decode tok/s and CPU ms/step do not apply to them.",
+ "traces_sha256": {
+  "decode_b1": "cc41d53b03df6007"
+ },
+ "corpus": {
+  "v1-qwen3_5.jsonl": "80bf5a54bd350923"
+ },
+ "backends": {
+  "llamaserver": {
+   "config": {
+    "flags": "-ngl 99 -fa on -kvu --parallel 4 -c 8192 -b 2048 -ctk q8_0 -ctv q8_0 -ub 512 --spec-type draft-dflash -md local/models/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --spec-draft-n-max 7 -ngld 99 -ctkd q8_0 -ctvd q8_0"
+   },
+   "version": "version: 0.6.0-dev (build 1, commit 51ce9c1)\nbuilt with GNU 13.3.0 for Linux x86_64",
+   "server_timings": {
+    "prompt_n": 512,
+    "prompt_ms": 824.717,
+    "predicted_n": 272,
+    "predicted_ms": 3679.0099999999998,
+    "cache_n": 0
+   },
+   "load_s": 5.2,
+   "blocking_sync": false,
+   "packages": {}
+  }
+ },
+ "summary": {
+  "decode_b1": {
+   "llamaserver": {
+    "requests": 2,
+    "ttft_ms": {
+     "p50": 415.36,
+     "p90": 416.7,
+     "p99": 417.0
+    },
+    "tpot_ms": {
+     "p50": 12.75,
+     "p90": 12.76,
+     "p99": 12.76
+    },
+    "throughput_tok_s": 69.8,
+    "throughput_per_round": [69.8, 69.8],
+    "decode": {
+     "batch": 7,
+     "steps": 5,
+     "tok_s": 53224.0,
+     "wall_ms_p50": 0.094,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 512,
+    "stats": {
+     "spec_accepted": 328,
+     "spec_drafted": 1230
+    }
+   }
+  }
+ },
+ "runs": [
+  {
+   "round": 0,
+   "backend": "llamaserver",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 417.03,
+     "p90": 417.03,
+     "p99": 417.03
+    },
+    "tpot_ms": {
+     "p50": 12.74,
+     "p90": 12.74,
+     "p99": 12.74
+    },
+    "throughput_tok_s": 69.8,
+    "throughput_per_round": [69.8],
+    "decode": {
+     "batch": 4,
+     "steps": 3,
+     "tok_s": 47726.8,
+     "wall_ms_p50": 0.084,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "spec_accepted": 164,
+     "spec_drafted": 615
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.417034, 3.665595]
+   ],
+   "stats": {
+    "spec_drafted": 615,
+    "spec_accepted": 164
+   }
+  },
+  {
+   "round": 1,
+   "backend": "llamaserver",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 413.68,
+     "p90": 413.68,
+     "p99": 413.68
+    },
+    "tpot_ms": {
+     "p50": 12.76,
+     "p90": 12.76,
+     "p99": 12.76
+    },
+    "throughput_tok_s": 69.8,
+    "throughput_per_round": [69.8],
+    "decode": {
+     "batch": 7,
+     "steps": 2,
+     "tok_s": 59054.3,
+     "wall_ms_p50": 0.119,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "spec_accepted": 164,
+     "spec_drafted": 615
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.413678, 3.667962]
+   ],
+   "stats": {
+    "spec_drafted": 615,
+    "spec_accepted": 164
+   }
+  }
+ ]
+}

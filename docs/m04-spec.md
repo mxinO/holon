@@ -738,3 +738,36 @@ id + 1).
   configurations each.
 
 Core: 3683 of 6000 code lines (+14 in phase 1, +19 in phase 2).
+
+## 13. Gate B, the RTX 4090 evidence (2026-10-13)
+
+Target Qwen3.8-27B UD-Q4_K_M, DFlash2 drafter Q4_K_M (llama.cpp's converter + `llama-quantize`, 1.08 GiB), q8_0 KV,
+four checkpoints, max_seqs 4, natural text (`--corpus`), k = 7 (block 8), `std.spec.rejection`; llama-server at the
+same KV format with `--spec-type draft-dflash -md <drafter> --spec-draft-n-max 7` (records `bench_m04b-*`,
+`fit_m04-27b-dflash2-*`).
+
+| | Holon plain | Holon DFlash2 | llama-server plain | llama-server DFlash2 |
+|---|---|---|---|---|
+| single stream TPOT (ms) | 21.33 | **10.59 (2.01×)** | 22.68 | 12.75 |
+| single stream acceptance / tokens per verify step | — | 0.276 / 2.93 | — | 0.267 / — |
+| agent TPOT p50 (ms) | 30.14 | **14.06 (2.14×)** | 52.61 | does not fit (below) |
+| agent tokens per verify step | — | 3.87 | — | — |
+| agent TTFT p50 (s) | 0.62 | 0.53 | 5.46 | — |
+
+- **Against the predictions (§5):** single stream 2.0–3.0× → **2.01×** (at the bottom); tokens per verify step
+  3.5–5 → **2.93** single stream (below), 3.87 on the agent trace. Acceptance equals llama.cpp's drafts on the same
+  file (0.276 vs 0.267, within 3%), so the shortfall is the drafter's on this target, not ours. Every verify step
+  replays a graph (174/174, 3868/3868); a closing plain run (21.34 ms) bounds the session's drift at < 0.1%.
+- **Verify-step cost** (eager kernel breakdown, one stream): 32.7 ms of kernels vs 21.6 ms for a decode step (r ≈ 1.5;
+  the A5000 measured ≈ 2.7): the target's 8-column mmvq +3.6 ms, index / elementwise glue (rewind, drafter) ≈ +2.5 ms,
+  GDN recurrent +1.25 ms, the drafter's top-16 head over 7 rows 1.4 ms, the draft layers the rest. M0.7's speculation
+  items (fusion, a small-batch quantized matmul) apply.
+- **Fit:** q8_0 KV 53,968 tokens with DFlash2 (predicted ≈ 54K), a 32.5K prompt served; bf16 KV fails the 32K
+  context at max_seqs 4 (1655 < 2049 KV units, ≈ 26.5K tokens), as §5 predicted — Gate B runs on q8_0 KV.
+- **llama-server with DFlash2 does not fit the agent trace on 24 GB** at max_seqs 4: a 65K or 32K context OOMs when
+  the draft model loads, 24.5K OOMs on its compute buffers (`-ub 512`), and 16K (`-ub 256`) runs but exceeds the
+  context mid-trace (4 sessions × up to 6135 tokens). Its single stream ran at an 8K context with `-ub 512`.
+- **Decisions:** the drafter judge's top-1 margin (§12) — max(0.25 points, 2.5 paired SE) — was set after the first
+  verdicts; it reuses the bounded judge's statistic, is backed by the reviewer's simulation, and keeps the plants
+  failing; recorded for the user. The bench now writes server flags with paths made repo-relative (records named a
+  local draft path).
