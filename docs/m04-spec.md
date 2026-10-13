@@ -692,10 +692,10 @@ id + 1).
 
 | Check (RTX A5000) | Result |
 |---|---|
-| L0-drafter, DFlash2 bf16 on UD-IQ3_S (v1-qwen3_5, 4 cuts per prompt, 672 rows) | top-1 99.107% vs floor 99.405% (6 vs 4 disagreements, all at near-ties: confident top-1 100% for both); KL p50 1.67e-4 (≤ 3.97e-4), p99 3.29e-3 (≤ 5.83e-3): **FAIL by 2 rows** on the overall top-1 budget |
-| L0-drafter, DFlash2 Q4_K_M (floor: q8_1 by row count) | top-1 97.470% vs 97.321%, KL p50 5.82e-4 (≤ 1.05e-3), p99 9.47e-3 (≤ 2.11e-2): PASS |
-| Plant `dflash-tap-offset` | top-1 72.8%, KL p50 0.11: FAIL |
-| L0-drafter, the GGUF MTP head with its chain of 3 (steps 2–3 teacher-forced; 288 rows) | top-1 99.653% vs 100% (one row, confident), KL p50 1.66e-5 (≤ 7.36e-5), p99 3.36e-3 (≤ 3.87e-3): **FAIL by 1 row** |
+| L0-drafter, DFlash2 bf16 on UD-IQ3_S (v1-qwen3_5, 12 cuts per prompt, 2016 rows; the §5 rule as decided below) | top-1 99.504% vs floor 99.256% (bar 0.400 points), at the 1778 confident positions 100% vs 100%; KL p50 1.49e-4 (≤ 3.15e-4), p99 3.16e-3 (≤ 7.24e-3), mean 3.48e-4 (≤ 7.90e-4): PASS (L2's rule too) |
+| L0-drafter, DFlash2 Q4_K_M (floor: q8_1 by row count; 2016 rows) | top-1 98.115% vs 98.065% (bar 0.522), confident 100% vs 100%; KL p50 4.34e-4 (≤ 9.41e-4), p99 1.36e-2 (≤ 3.16e-2), mean 1.29e-3 (≤ 2.98e-3): PASS |
+| Plant `dflash-tap-offset` (2016 rows) | top-1 73.3%, confident 77.6%, KL p50 0.10: FAIL on all five |
+| L0-drafter, the GGUF MTP head with its chain of 3 (steps 2–3 teacher-forced; 28 cuts, 2016 rows) | top-1 99.405% vs 99.306% (bar 0.397), confident 100% vs 99.946% — no confident disagreement at any chain step (the floor has one); KL p50 2.03e-5 (≤ 5.04e-5), p99 4.20e-3 (≤ 8.27e-3), mean 3.09e-4 (≤ 7.76e-4): PASS |
 | Bounded spec vs plain, UD-IQ3_S + DFlash2 Q4_K_M, k = 7, q8_0 KV, 8 sessions | 98.828% / 99.023% vs 98.999%: PASS; plants replay-off-by-one, verify-writes-state: FAIL |
 | Snapshot, the same configuration, 3 engines | run-identical, 79 steps |
 | Memory fit (q8_0 KV, 4 seqs, 32K, 4 checkpoints) | drafter 1.054 GiB (Q4_K_M) / 3.584 GiB (bf16); features buffer 100 MiB; draft KV 10 880 B per token (target 34 816 B); KV 176.6K / 120.9K tokens |
@@ -703,19 +703,31 @@ id + 1).
 | Single stream, natural text (`bench_m04nat-decode_b1-{plain,dflash2}`, Q4_K_M drafter, q8_0 KV) | TPOT 27.34 → 18.11 ms (1.51×); 4.02 tokens per verify step (predicted 3.5–5), draft acceptance 0.431; 130/130 verify steps graphed |
 
 **Decisions and deviations**
-- **The L0-drafter verdicts held for the panel.** Both near-misses are on the overall top-1 budget (floor − 0.25
-  points), which at 672 and 288 rows is under 2 rows and under 1 row; KL p50 and p99 are within budget in both. The
-  spec states the rule at confident positions (§5); the judge applies L2's overall rule, as Gate A's MTP L0-drafter
-  did. Not re-run, nor the rule changed after the result: the panel decides (more cuts per prompt, or the confident
-  rule).
+- **The L0-drafter rule (decision, 2026-10-13; panel and numerics review).** The first runs (672 and 288 rows) failed
+  L2's overall top-1 bar (floor − 0.25 points) by two rows and one — the judge had copied L2's rule. The verdict is
+  now the spec's §5 rule, refined: top-1 agreement overall and at confident positions (the golden's top-1 margin
+  above the floor's 99th-percentile |Δlogit|, measured on the golden's top-k ids the floor holds, its logprob
+  differences centred so the log-normaliser drops out), each at least the floor's less max(0.25 points, 2.5 paired
+  standard errors of the difference, prompts as clusters — `bounded`'s guard); KL p50, p99 and mean at most 2× the
+  floor's; at least 2000 rows (KL p99's stability). The reviewer's simulation: a correct candidate at the floor's
+  disagreement rate fails the fixed 0.25-point bar 36–40% of the time at 288 rows, 25–31% at 672, 8–15% at 2000.
+  L2's verdict is reported alongside, and the confident disagreements by row of a draft (block row; chain step — on
+  step 1 a head discrepancy, on 2–3 more likely the floor's emulated kernel path). The plants fail under it (tiny CPU
+  tests; `dflash-tap-offset` on the 27B). The earlier records stay as history.
+- **The DFlash walk draws through the request's full sampler law** (temperature, top-k, top-p, min-p over the 16
+  candidates; SGLang samples softmax(s / T) only): a deliberate deviation, lossless because the q published is
+  exactly the law each draft was drawn from.
 - **"Recorded target hidden states"** are the engine's own: the judge taps the target at the checkpoint's layers
   (independently of the drafter's taps, so the tap plant shows) and the reference runs on them; an fp32 27B target is
   out of reach of the host's memory. For GGUF weights the golden dequantizes them; the floor rounds each quantized
   matmul to q8_1 on the kernel path its row count selects (the ggml plugin's own predicate).
 - **The snapshot tool pinned its runs' pools** (a judge bug: engines built one after another measured different free
   memory, so later runs had smaller pools and another schedule — the DFlash2 trace first came out not run-identical).
-  The lock snapshots of `holon_tools propagate` compare runs across processes and have the same exposure: to fix with
-  Gate B's locks.
+  `holon_tools propagate` had the same exposure, across processes too: its snapshot engines now share the first
+  one's pool bytes, recorded in the stored snapshot and reused when the next lock is compared to it.
+- **Plans record a drafter's checkpoint by identity** (`Plan.sources["dflash.path"] = <name>@<build>`, from
+  `BuildCtx.weight_source`); the host path stays a deployment input, out of the lock. `Sampler.distribution(...,
+  rows=)` gives some of a step's rows' laws (the walk's one per request and slot).
 - **The startup profile now measures a drafting verify step whole** (rewind, drafter, sub-steps): eager verify steps
   allocated the draft block's activations unmeasured.
 - **Fixed on the way:** the selector's projection took 3-D input, which a quantized linear rejects (the GGUF drafter
@@ -725,4 +737,4 @@ id + 1).
   graph test; the sampled Markov test and the stream test are one; the tap and DFlash CPU matrices run 2 of 4
   configurations each.
 
-Core: 3678 of 6000 code lines (+14 in phase 1, +14 in phase 2).
+Core: 3683 of 6000 code lines (+14 in phase 1, +19 in phase 2).
