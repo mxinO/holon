@@ -1,0 +1,89 @@
+# Written by the holon tools; never edit by hand (AGENTS.md).
+digest = "sha256:655740a923594be97ba8d1d03b6874c67faea5f406b99763bb01914a145c4f5a"
+plan_id = "sha256:19a8823f79b0ba65ba4c0d64b76fc32dd9647d794f92b87b6d1bf803d3fb35d9"
+model_id = "Qwen/Qwen3-8B@f1add50ee1c6e469"
+fingerprint_class = "rtx-5090/cu130-torch2.11"
+sm = 120
+recipe = "sha256:59b2e29d6f245caf2e355beb379319447fb2765a6cbfe2c49220064dc341ae4e"
+
+[deploy]
+commit = "96f8d50aa91cc5725fc899d3b56ea5da2b70700e"
+uv_lock = "none"
+
+[engine]
+cuda_graphs = true
+dtype = "bfloat16"
+max_draft_tokens = 0
+max_model_len = 8192
+max_seqs = 64
+max_step_tokens = 4096
+overlap = true
+page_size = 16
+plugin_options = {}
+prefix_cache = true
+slots = {}
+source = "hf_safetensors"
+
+[snapshot]
+trace = "sha256:f1e1f73bbcfe9083b5320a8635f5ab320e4ddb0377a3891bc7ab38a763de0151"
+uncovered = []
+
+[units]
+holon = { src = "sha256:1c491267353cb0cc2640972e3736cfd087eef7a9046fa7a7ab4fc3f0a43bab11", version = "0.0.1" }
+"kernels.flashinfer" = { src = "sha256:c7f6f9ea1cd1eab9f04bec26a0ccb4564e13df6d5fe97002a9a5768f65fa79e3", version = "1.0.0" }
+"kernels.triton_attn" = { src = "sha256:369dd6e768a5af1895585a08af1a772b33965773ae89d77c1b9cc15a818a6412", version = "1.0.0" }
+"models.qwen3" = { src = "sha256:3875c1fe51ad48a369153bb90b3faee7bda9cf460d81c26d488a4c4e3e6cbd62", version = "1.0.0" }
+"std.blocks" = { src = "sha256:91c02d82c532b18dfe6d7485f3d8372d5448b321a905736cfd352eda5a793a46", version = "1.0.0" }
+"std.ffn" = { sem = "sha256:3d659257417ee8d6db9940788a3c20c14c4c31282948b5bc8ab32aa375a499fa", src = "sha256:910c54f302697761f4137376ec9f11d93ffca211be91692efab2c7b756f833b1", version = "1.0.0" }
+"std.mixers.gqa" = { sem = "sha256:1aa5f7026cb1670ab3273c9a7bd957e2b5a7bf5689a6bc5abde54c7d18fb1f1e", src = "sha256:36488d936f6f4f3f635aa1d5e303609da82a15bd36d2c5f5bde8de5966c33ed3", version = "1.0.0" }
+"std.ops" = { sem = "sha256:d5e6b193767f20bdf4e0da771de82e00180d565866bbe0b675b19295135607ef", src = "sha256:77c713ba2d8326399631199a185b4521df86f7f3ee71083ff14e1189ee43a10d", version = "1.0.0" }
+"std.sampling" = { sem = "sha256:3f9a80781e878ec96e0bc4ed2ec5fd13a51f1332899a19467dad5fd8328e597b", src = "sha256:a80d3209255734e4e5a21e0717495c0c7e33e39104e2a81dc11a10ac2e19a56e", version = "1.0.0" }
+"std.state.paged" = { src = "sha256:af458a28fe97d0ac1cca01cb3f37fdc34b603c2e253adc318abf71a56befddc1", version = "1.0.0" }
+"std.weights.hf" = { src = "sha256:108656f7ac097ea51c41d51c8b97d25a6ad6176c03aa24f9111a55499ca009d6", version = "1.0.0" }
+
+[sites]
+"kv/attention.paged_decode@1" = { config = { facts = { head_dim = 128, heads = 32, kv_dtype = "bfloat16", kv_heads = 8, layout = "kv.hnd", max_seqs = 64, page = 16, q_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"kv/attention.paged_prefill@1" = { config = { facts = { head_dim = 128, heads = 32, kv_dtype = "bfloat16", kv_heads = 8, layout = "kv.hnd", max_seqs = 64, page = 16, q_dtype = "bfloat16" }, props = ["deterministic", "needs_host_lens"] }, impl = "kernels.flashinfer" }
+"kv/attention.paged_verify@1" = { config = { facts = { head_dim = 128, heads = 32, kv_dtype = "bfloat16", kv_heads = 8, layout = "kv.hnd", max_seqs = 64, page = 16, q_dtype = "bfloat16" }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.ffn.swiglu[inter=12288]/silu_mul@1" = { config = { facts = { dtype = "bfloat16", inter = 12288 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.mixers.gqa[layer=0]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=10]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=11]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=12]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=13]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=14]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=15]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=16]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=17]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=18]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=19]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=1]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=20]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=21]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=22]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=23]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=24]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=25]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=26]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=27]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=28]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=29]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=2]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=30]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=31]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=32]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=33]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=34]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=35]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=3]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=4]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=5]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=6]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=7]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=8]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.mixers.gqa[layer=9]/kv_write@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, kv_heads = 8, layout = "kv.hnd", page = 16 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
+"std.ops.rmsnorm[dim=128]/add_rmsnorm@1" = { config = { facts = { dim = 128, dtype = "bfloat16", eps = 1e-06, offset = 0.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.rmsnorm[dim=128]/rmsnorm@1" = { config = { facts = { dim = 128, dtype = "bfloat16", eps = 1e-06, offset = 0.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.rmsnorm[dim=4096]/add_rmsnorm@1" = { config = { facts = { dim = 4096, dtype = "bfloat16", eps = 1e-06, offset = 0.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.rmsnorm[dim=4096]/rmsnorm@1" = { config = { facts = { dim = 4096, dtype = "bfloat16", eps = 1e-06, offset = 0.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
+"std.ops.rope[head_dim=128]/rope@1" = { config = { facts = { dtype = "bfloat16", head_dim = 128, max_positions = 8192, rotary_dim = 128, theta = 1000000 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
