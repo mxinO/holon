@@ -273,7 +273,7 @@ def _q8_1_matmul(named: list):
             continue
         limit = max((n for n in range(1, 9) if lib.use_mmvq(index, plugin.TYPES[kind], n)), default=0)
         blocks = np.asarray(t.data)
-        offs = {route: q8_1.offsets(blocks, kind, q8_1.blocking(kind, route).sum_group).float()
+        offs = {route: q8_1.offsets(blocks, kind, q8_1.blocking(kind, route).sum_group).float().cuda()
                 for route in (q8_1.MMVQ, q8_1.MMQ) if q8_1.blocking(kind, route).sum_group}
         kinds[name] = (kind, limit, offs)
 
@@ -297,12 +297,12 @@ def dflash_reference(draft: str, target: str, prompts: PromptSet, inputs: list[t
 
     cfg = checkpoint(open_source(PluginSet(discover()), draft))
     embed, head = _target_rows(target)
-    ref = Reference(_dflash_state(draft), cfg, embed, head, dtype,
-                    _emulation(draft, target) if q8_1 else None)
+    ref = Reference(_dflash_state(draft), cfg, embed, head, dtype, _emulation(draft, target) if q8_1 else None,
+                    "cuda" if torch.cuda.is_available() else "cpu")
     rows = [_draft_rows(ref.logits(ref.block(features, anchor)), p.ids, k)
             for p, (features, anchor) in zip(prompts.prompts, inputs, strict=True)]
     return Recording.from_rows(rows, prompts.meta() | {"source": "reference", "head": "dflash", "dtype": str(
-        dtype).removeprefix("torch."), "q8_1": "by rows" if q8_1 else None, "hardware": hardware(torch.device("cpu"))})
+        dtype).removeprefix("torch."), "q8_1": "by rows" if q8_1 else None, "hardware": hardware(ref.device)})
 
 
 
@@ -363,7 +363,8 @@ class MTPReference:
         own = lambda name: name.startswith(f"blk.{n}.")                                       # noqa: E731
         local = lambda name: name.removeprefix(f"blk.{n}.").removeprefix("nextn.")           # noqa: E731
         shared = ("token_embd.weight", "output.weight", "output_norm.weight")
-        self.w = {(local(t.name) if own(t.name) else t.name): x.to(dtype)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.w = {(local(t.name) if own(t.name) else t.name): x.to(self.device, dtype)
                   for t, x in _dequantized(reader, lambda name: own(name) or name in shared)}
         self.w.setdefault("output.weight", self.w["token_embd.weight"])
         self.dtype, self.q8_1 = dtype, q8_1
@@ -417,6 +418,10 @@ class MTPReference:
     def chain(self, stream: torch.Tensor, context: list[int], anchor: int, drafts: torch.Tensor) -> torch.Tensor:
         """The chain's logits [k, V]: the prompt's rows (token p, h(p − 1)) in one pass, then step 1 (anchor, h(P −
         1)) and each step j (draft j − 1, step j − 1's output) one row at a time."""
+        with torch.device(self.device):
+            return self._chain(stream.to(self.device), context, anchor, drafts)
+
+    def _chain(self, stream: torch.Tensor, context: list[int], anchor: int, drafts: torch.Tensor) -> torch.Tensor:
         h = self._norm("output_norm.weight", stream.to(self.dtype))                 # the target's final-norm hidden
         cache: list[torch.Tensor] = []
         self.rows(torch.tensor(context), torch.cat([torch.zeros_like(h[:1]), h[:-1]]), cache)
@@ -434,4 +439,4 @@ class MTPReference:
                 for p, (stream, anchor, drafts) in zip(prompts.prompts, inputs, strict=True)]
         return Recording.from_rows(rows, prompts.meta() | {"source": "reference", "head": "mtp", "dtype": str(
             self.dtype).removeprefix("torch."), "q8_1": "by rows" if self.q8_1 else None,
-            "hardware": hardware(torch.device("cpu"))})
+            "hardware": hardware(self.device)})

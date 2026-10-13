@@ -5,7 +5,7 @@ target's residual streams after the tapped layers, concatenated) and the anchor 
 
 Weights are the checkpoint's own (HF names); the target's embedding and head are given. `dtype` is the arithmetic
 (fp32: the golden; the model's dtype: the floor); `matmul(name, x, w)` may be replaced to emulate a kernel path (the
-judge's q8_1 rounding for GGUF weights).
+judge's q8_1 rounding for GGUF weights); `device` is where it runs.
 """
 from __future__ import annotations
 
@@ -17,10 +17,12 @@ import torch
 class Reference:
     def __init__(self, state: dict[str, torch.Tensor], cfg: dict, embed: torch.Tensor, head: torch.Tensor,
                  dtype: torch.dtype = torch.float32,
-                 matmul: Callable[[str, torch.Tensor, torch.Tensor], torch.Tensor] | None = None) -> None:
-        self.w = {k: v.to(dtype) for k, v in state.items()}
+                 matmul: Callable[[str, torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
+                 device: str | torch.device = "cpu") -> None:
+        self.device = torch.device(device)
+        self.w = {k: v.to(self.device, dtype) for k, v in state.items()}
         self.cfg, self.dtype = cfg, dtype
-        self.embed, self.head = embed, head
+        self.embed, self.head = embed, head.to(self.device, dtype)          # the embedding: two rows read
         self.matmul = matmul or (lambda name, x, w: x @ w.T)
 
     def _linear(self, name: str, x: torch.Tensor) -> torch.Tensor:
@@ -62,6 +64,10 @@ class Reference:
 
     def block(self, features: torch.Tensor, anchor: int) -> torch.Tensor:
         """The final-norm hidden states of block rows 1 … B − 1 [B − 1, H]."""
+        with torch.device(self.device):
+            return self._block(features.to(self.device), anchor)
+
+    def _block(self, features: torch.Tensor, anchor: int) -> torch.Tensor:
         c = self.cfg
         n, b, heads, dim = len(features), c["block"], c["heads"], c["head_dim"]
         context = self._norm("hidden_norm.weight", self._linear("fc.weight", features.to(self.dtype)))
@@ -71,8 +77,8 @@ class Reference:
         visible = keys <= queries if c["causal"] else torch.ones(b, n + b, dtype=torch.bool)
         if c["window"]:
             visible = visible & (queries - keys < c["window"])
-        ids = torch.tensor([anchor] + [c["mask"]] * (b - 1))
-        x, residual = self.embed[ids].to(self.dtype), None
+        ids = torch.tensor([anchor] + [c["mask"]] * (b - 1), device="cpu")
+        x, residual = self.embed[ids].to(self.device, self.dtype), None
         for i in range(c["layers"]):
             p = f"layers.{i}."
             residual = x if residual is None else residual + x
@@ -100,12 +106,12 @@ class Reference:
 
     def logits(self, hidden: torch.Tensor) -> torch.Tensor:
         """The target head's logits of draft rows [B − 1, V] (fp32)."""
-        return self.matmul("lm_head", hidden, self.head.to(self.dtype)).float()
+        return self.matmul("lm_head", hidden, self.head).float()
 
     def scores(self, cand: torch.Tensor, unary: torch.Tensor, hidden: torch.Tensor, anchor: int) -> torch.Tensor:
         """The selector's lattice [B − 1, K, K] for one block's candidates (ids and logits [B − 1, K])."""
         projected = self._linear("candidate_selector.hidden_projection.weight", hidden).float()
-        before = torch.cat([torch.full((1, cand.shape[1]), anchor), cand[:-1]])
+        before = torch.cat([torch.full((1, cand.shape[1]), anchor, device=cand.device), cand[:-1]])
         a = self.w["candidate_selector.predecessor_codebook"][before].float()
         s = self.w["candidate_selector.successor_codebook"][cand].float()
         return unary[:, None, :] + torch.einsum("epr,ecr->epc", a * projected[:, None], s)
