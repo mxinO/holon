@@ -204,7 +204,8 @@ def _drafter_dflash(a: argparse.Namespace) -> int:
     with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
         engine = Engine(config)
         cand, inputs = drafter.dflash_candidate(engine, prompts, a.k)
-    cand.meta |= {"model": model, "dtype": str(config.dtype).removeprefix("torch.")}
+    cand.meta |= {"model": golden.model_meta(pathlib.Path(model))["model"], "dtype": str(config.dtype).removeprefix(
+        "torch.")}
     engine.close()
     del engine
     torch.cuda.empty_cache()
