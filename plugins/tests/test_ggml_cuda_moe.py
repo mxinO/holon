@@ -631,7 +631,8 @@ def test_nvfp4_scale2_per_expert_on_both_paths(ctx, lib):
 @pytest.mark.parametrize("name", FP4)
 def test_native_w4a4_experts_against_their_own_codes(ctx, lib, sm, name):
     """sm_120, `quant.act = a4`: mmq with ids at native W4A4 (gate/up: bf16 copied to f32, one row per token,
-    scattered to its slots; down: f32, one row per slot) against the f64 product of its own decoded activations."""
+    scattered to its slots; down: f32, one row per slot) against the f64 product of its own decoded activations;
+    each 512-token chunk on its own path (513 tokens: a one-token mmvq chunk, q8_1, against the emulator)."""
     if sm != 120:
         pytest.skip("native W4A4 is Blackwell's")
     gate_up = experts(ctx, name, H, 2 * INTER, 1, act_quant="a4")
@@ -645,11 +646,14 @@ def test_native_w4a4_experts_against_their_own_codes(ctx, lib, sm, name):
         for kern, s, parts, inp, k in ((gate_up, sg, pg, x, H), (down, sd, pdn, h, INTER)):
             want = []
             for a in range(0, tokens, CHUNK):
-                rows = inp[a:a + CHUNK].float()
-                xhat = native_codes(lib, name, rows.flatten(0, 1))[2].cuda().view(*rows.shape)
-                want.append(decoded_experts(xhat, s.weight, ids[a:a + CHUNK]))
+                rows, ids_c = inp[a:a + CHUNK], ids[a:a + CHUNK]
+                if len(ids_c) <= kern.mmvq_tokens:
+                    want.append(q8_1.linear_experts(rows, s.weight, s.blocks, ids_c, name, q8_1.MMVQ))
+                    continue
+                xhat = native_codes(lib, name, rows.float().flatten(0, 1))[2].cuda().view(*rows.shape)
+                want.append(decoded_experts(xhat, s.weight, ids_c))
             check(kern(inp, parts, ids), torch.cat(want), k, f"{name} in={k} T={tokens}")
-    assert set(gate_up.calls) == {"mmq/fp4"} and set(down.calls) == {"mmq/fp4"}
+    assert set(gate_up.calls) == set(down.calls) == {"mmq/fp4", "mmvq/q8_1"}
 
 
 def decoded_experts(xhat: torch.Tensor, weight: torch.Tensor, ids: torch.Tensor) -> torch.Tensor:

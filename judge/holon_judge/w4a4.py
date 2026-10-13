@@ -142,14 +142,13 @@ def check_codes(elem: str, x: torch.Tensor, codes: torch.Tensor, scales: torch.T
         by_value = torch.where(c == 8, 0, c) == torch.where(codes == 8, 0, codes)
         return by_value.reshape(len(x), -1, group).all(-1) & (s == scales)
 
-    if elem == "mxfp4":
-        exact, nudged = quantize_mxfp4(x), [quantize_mxfp4(x, d) for d in mxfp4_ties(x)]
-    else:
-        r = row_scale.float().cpu()
-        exact, nudged = quantize_nvfp4(x, r), [quantize_nvfp4(x, r, n) for n in nvfp4_ties()]
-    ok = same(*exact)
+    r = None if row_scale is None else row_scale.float().cpu()
+    exact = quantize_mxfp4(x) if elem == "mxfp4" else quantize_nvfp4(x, r)
+    explained = same(*exact)
     differ = (torch.where(exact[0] == 8, 0, exact[0]) != torch.where(codes == 8, 0, codes)).float().mean().item()
-    explained = ok.clone()
-    for c, s in nudged:
-        explained |= same(c, s)
+    if not explained.all():                                  # the nudged emulations, only where something differs
+        nudged = ([quantize_mxfp4(x, d) for d in mxfp4_ties(x)] if elem == "mxfp4" else
+                  [quantize_nvfp4(x, r, n) for n in nvfp4_ties()])
+        for c, s in nudged:
+            explained |= same(c, s)
     return differ, int((~explained).sum())

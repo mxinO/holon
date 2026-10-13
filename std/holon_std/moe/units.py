@@ -108,6 +108,8 @@ class ExpertLinear(nn.Module):
     def bind_kernels(self, ctx) -> None:
         if self.weight is None:                                   # merged away
             return
+        # once: `prepare` replaces the layout the facts are read from (a second bind would select for its output)
+        assert self._kernel is None, "ExpertLinear.bind_kernels runs once"
         facts = {"layout": self.layout_fact(), "experts": self.experts, "in": self.in_features,
                  "out": self.out_features, "top_k": self.top_k, "rows_per_token": self.rows_per_token,
                  "glu": self.glu, "act_dtype": _dtype(self.act_dtype), "out_dtype": "float32",

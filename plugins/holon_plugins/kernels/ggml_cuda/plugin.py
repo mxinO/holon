@@ -36,6 +36,9 @@ Calls are counted per path and mode (`calls["mmq/fp4"]`, …; counted when calle
 
 The native extension is built ahead of time (`python -m holon_plugins.kernels.ggml_cuda.prebuild`); without it an
 instance cannot be created and the error names that command.
+
+`repack` and `tail_bytes` are adapted from llama.cpp cbe28bb3 (conversion/base.py `_nvfp4_pack`,
+`repack_mxfp4_blocks`; ggml-cuda.cu's row padding), MIT License, Copyright (c) 2023-2026 The ggml authors.
 """
 from __future__ import annotations
 

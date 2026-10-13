@@ -1,7 +1,7 @@
 """The W4A4 activation emulator (holon_judge.w4a4) on the CPU: against a scalar transliteration of llama.cpp's FP4
 quantizers (cbe28bb3 quantize.cu, CUDA ≥ 12.8: `quantize_mmq_nvfp4`, `quantize_mmq_mxfp4`, element by element in
-f32), so the NVFP4 emulation is checked off Blackwell too; `unpack` against blocks packed as those kernels store them;
-and MXFP4's tie class still nudges a block at a half-integer log2 when a zero block shares the activations."""
+f32), so the NVFP4 emulation is checked off Blackwell too, with MXFP4's tie class beside a zero block; `unpack`
+against blocks packed as those kernels store them."""
 import math
 
 import numpy as np
@@ -85,11 +85,14 @@ def test_the_emulator_is_llama_cpp_s_quantizer():
         assert by_value(codes) == by_value(nv_codes[i].tolist()) and scales == nv_scales[i].tolist(), i
         codes, scales = mxfp4_row(x[i].numpy())
         assert by_value(codes) == by_value(mx_codes[i].tolist()) and scales == mx_scales[i].tolist(), i
-
-
-def test_mxfp4_ties_survive_a_zero_block():
-    """A block with log2(amax) at a half-integer may take either exponent; an all-zero block beside it must not
-    turn the nudges into NaN (which would leave the tie class empty)."""
+    # a code no nudge explains (the largest of a sub-block flipped in sign) is counted, its scale group unexplained
+    flipped = nv_codes.clone()
+    flipped[0, 0] ^= 8 if flipped[0, 0] & 7 else 1
+    assert w4a4.check_codes("nvfp4", x, nv_codes, nv_scales, r) == (0.0, 0)
+    differ, unexplained = w4a4.check_codes("nvfp4", x, flipped, nv_scales, r)
+    assert math.isclose(differ, 1 / x.numel(), rel_tol=1e-6) and unexplained == 1
+    # MXFP4's tie class: a block with log2(amax) at a half-integer may take either exponent, and an all-zero block
+    # beside it must not turn the nudges into NaN (which would leave the class empty)
     x = torch.zeros(1, 64)
     x[0, 0] = 2 ** 2.5
     nudges = w4a4.mxfp4_ties(x)
