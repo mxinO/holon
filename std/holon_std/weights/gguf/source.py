@@ -40,6 +40,10 @@ class GGUFSource:
         if not self.path.is_file():
             raise ValueError(f"{self.path}: a GGUF weight source reads one .gguf file")
         self._fields, self._tensors = reader.read(self.path)
+        if nvfp4 := [t.name for t in self._tensors if t.type == GGMLQuantizationType.NVFP4]:
+            raise ValueError(f"{self.path}: NVFP4 tensors ({nvfp4[0]}, …) are not served from GGUF: llama.cpp keeps "
+                             "their per-tensor scales in separate `.scale` tensors no recipe maps; serve the HF "
+                             "checkpoint instead (docs/m06-lowp.md D1)")
         hub = [p for p in self.path.parts if p.startswith("models--")]
         # The display name: `<hub repo>/<file stem>` for a hub-cache file, else the stem.
         self.name = (f"{hub[-1].removeprefix('models--').replace('--', '/')}/{self.path.stem}" if hub

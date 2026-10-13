@@ -72,3 +72,19 @@ def test_a_damaged_file_fails_when_opened(tiny_checkpoint, tmp_path):  # noqa: F
     for name, match in [("cut", "past the end"), ("header", "truncated"), ("v9", "v2 or v3")]:
         with pytest.raises(ValueError, match=match):
             reader.read(tmp_path / f"{name}.gguf")
+
+
+def test_a_gguf_holding_nvfp4_tensors_is_refused(tmp_path):
+    """llama.cpp's NVFP4 GGUFs keep each tensor's scale apart, as a `.scale` tensor (docs/m06-lowp.md D1)."""
+    from holon_std.weights.gguf.source import GGUFSource
+
+    file = tmp_path / "nvfp4.gguf"
+    w = gguf.GGUFWriter(file, "qwen3")
+    w.add_tensor("blk.0.ffn_down.weight", np.zeros((4, 36), np.uint8), raw_dtype=Q.NVFP4)     # 4 rows of 64
+    w.add_tensor("blk.0.ffn_down.scale", np.ones(1, np.float32))
+    w.write_header_to_file()
+    w.write_kv_data_to_file()
+    w.write_tensors_to_file()
+    w.close()
+    with pytest.raises(ValueError, match=r"NVFP4 tensors \(blk\.0\.ffn_down\.weight, …\) are not served from GGUF"):
+        GGUFSource(file)
