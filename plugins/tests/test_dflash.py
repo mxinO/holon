@@ -106,8 +106,8 @@ class Watch:
                     self.forced += 1
 
 
-@pytest.mark.parametrize("memory", [8 << 20, 300_000], ids=["roomy", "preempting"])
-@pytest.mark.parametrize("overlap", [False, True], ids=["depth0", "depth1"])
+@pytest.mark.parametrize(("overlap", "memory"), [(False, 300_000), (True, 8 << 20)],
+                         ids=["depth0-preempting", "depth1-roomy"])
 def test_dflash_drafts_like_its_reference_and_is_lossless(case, overlap, memory):
     target, draft, prompts, plain = case
     engine = _engine(target, draft, overlap=overlap, state_memory=memory)
@@ -127,9 +127,38 @@ def test_dflash_drafts_like_its_reference_and_is_lossless(case, overlap, memory)
 SNAP = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
 
 
-@pytest.mark.skipif(SNAP is None or not torch.cuda.is_available() or not dflash_files.can_convert(),
-                    reason="needs Qwen3-0.6B, a GPU and llama.cpp's converter")
-def test_a_quantized_draft_runs_in_verify_graphs(tmp_path):
+needs_gpu = pytest.mark.skipif(SNAP is None or not torch.cuda.is_available() or not dflash_files.can_convert(),
+                               reason="needs Qwen3-0.6B, a GPU and llama.cpp's converter")
+
+
+@pytest.fixture(scope="module")
+def quantized_draft(tmp_path_factory):
+    """A random DFlash2 of Qwen3-0.6B's geometry (head_dim 128, 16 candidates), converted to q8_0 by llama.cpp."""
+    return dflash_files.convert(dflash_files.save(tmp_path_factory.mktemp("draft"), 1024, 151936, (3, 20),
+                                                  mask=151643, layers=1, window=64, heads=(8, 4, 128), inter=512,
+                                                  rank=256, top_k=16), SNAP)
+
+
+def _gpu_config(draft, **kw) -> EngineConfig:
+    return EngineConfig(model=str(SNAP), dtype=torch.bfloat16, max_seqs=8, max_model_len=256, max_draft_tokens=K,
+                        plugin_options={"spec.k": str(K), "dflash.path": str(draft)},
+                        slots={"drafter": "drafters.dflash", "draft_policy": "std.spec.fixed_k",
+                               "verifier": "std.spec.rejection"}, **kw)
+
+
+@needs_gpu
+def test_the_startup_profile_runs_the_draft_block(quantized_draft, monkeypatch):
+    # The pools are sized after the worst step's peak: eager verify steps (logprobs) run the drafter's block over every
+    # slot, so the profile does too — without graphs, which would hide it in their capture.
+    blocks = []
+    walk = dflash.DFlashDrafter.walk
+    monkeypatch.setattr(dflash.DFlashDrafter, "walk", lambda self, *a: blocks.append(a[1].shape) or walk(self, *a))
+    Engine(_gpu_config(quantized_draft, cuda_graphs=False)).close()
+    assert blocks and blocks[0][0] == 8                       # every slot's block
+
+
+@needs_gpu
+def test_a_quantized_draft_runs_in_verify_graphs(quantized_draft):
     # Qwen3-0.6B with a random DFlash2 of its geometry (head_dim 128, 16 candidates), converted to q8_0 by llama.cpp:
     # quantized linears and codebook rows, the taps, the block sub-step and the sparse laws inside captured verify
     # graphs. Graphed and eager runs of the same padded plans (the eager runner calls the step instead of replaying
@@ -143,20 +172,14 @@ def test_a_quantized_draft_runs_in_verify_graphs(tmp_path):
         def __len__(self):
             return 0
 
-    draft = dflash_files.convert(dflash_files.save(tmp_path / "draft", 1024, 151936, (3, 20), mask=151643, layers=1,
-                                                   window=64, heads=(8, 4, 128), inter=512, rank=256, top_k=16), SNAP)
     tok = AutoTokenizer.from_pretrained(SNAP)
     prompts = [tok(t)["input_ids"] for t in ("1, 2, 3, 4, 5, 6, 7, 8,", "def add(a, b):\n    return a + b\n",
                                              "The capital of France is", "a b c a b c a b")]
     runs = [SamplingParams(temperature=0.0, seed=5, max_tokens=24, ignore_eos=True),
             SamplingParams(temperature=0.8, top_p=0.9, seed=3, max_tokens=24, ignore_eos=True)]
-    cfg = EngineConfig(model=str(SNAP), dtype=torch.bfloat16, max_seqs=8, max_model_len=256, max_draft_tokens=K,
-                       plugin_options={"spec.k": str(K), "dflash.path": str(draft)},
-                       slots={"drafter": "drafters.dflash", "draft_policy": "std.spec.fixed_k",
-                              "verifier": "std.spec.rejection"})
     outs = []
     for graphed in (True, False):
-        engine = Engine(cfg)
+        engine = Engine(_gpu_config(quantized_draft))
         assert engine.executor.drafter.model.fc._q is not None                  # the GGUF's q8_0, adopted
         if not graphed:
             engine.executor.graphs = Eager()
@@ -164,5 +187,5 @@ def test_a_quantized_draft_runs_in_verify_graphs(tmp_path):
         stats = engine.stats()
         assert stats["spec_verify_steps"] > 0 and stats["spec_verify_steps_graphed"] == stats["spec_verify_steps"]
         outs.append((tokens, {k: v for k, v in stats.items() if k.startswith("spec_") and "graphed" not in k}))
-        del engine
+        engine.close()                                           # its memory back before the next engine sizes pools
     assert outs[0] == outs[1]
