@@ -68,9 +68,10 @@ class Sampler(Protocol):
     def sample(self, logits: torch.Tensor, ctx: StepCtx) -> SampleOut:
         """`logits` [R, V] fp32 for the plan rows with `n_logits > 0`, in row order."""
 
-    def distribution(self, logits: torch.Tensor, ctx: StepCtx) -> torch.Tensor:
+    def distribution(self, logits: torch.Tensor, ctx: StepCtx, rows: torch.Tensor | None = None) -> torch.Tensor:
         """The probabilities `sample` draws each row of `logits` from, in vocabulary order [R, V] (greedy rows:
-        one-hot at the argmax) — what a verifier accepts drafts against."""
+        one-hot at the argmax) — what a verifier accepts drafts against. `rows`: which of ctx's logits rows `logits`
+        holds (default: all, in order)."""
 
     def uniform(self, ctx: StepCtx, stream: int = 0) -> torch.Tensor:
         """Per logits row, a counter-based uniform at the position of the token the row draws; stream 0 is the one

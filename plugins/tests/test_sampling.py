@@ -77,6 +77,12 @@ def test_draws_depend_only_on_seed_and_position(std):
     b.admit(7, SamplingParams(temperature=1.0, seed=101))
     alone = b.sample(logits[[1, 5]], _ctx([7, 7], [5, 9])).tokens
     assert together[[1, 5]].tolist() == alone.tolist()
+    # The laws of some of a step's rows (`rows`: a drafter's own scores per row) are those rows' laws in the whole step.
+    c = plugin.sampler(4, torch.device("cpu"))
+    for slot, params in enumerate(PARAMS[:4]):
+        c.admit(slot, dataclasses.replace(params, seed=slot))
+    ctx, picked = _ctx([0, 1, 2, 3, 0, 1], [5, 5, 5, 5, 9, 9]), torch.tensor([1, 2, 5])
+    assert torch.equal(c.distribution(logits[picked], ctx, rows=picked), c.distribution(logits, ctx)[picked])
 
 
 def test_greedy_and_logprobs(std):

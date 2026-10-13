@@ -175,10 +175,11 @@ class DFlashDrafter:
         b = slots_ + 1
         u = sub.sampler.uniform(sub, STREAM).view(r, b)              # block row j draws the token at its position + 1
         prev = torch.zeros(r, dtype=torch.long, device=scores.device)
+        first = torch.arange(r, device=scores.device) * b                   # each request's first block row
         drafts, laws = [], []
         for e in range(slots_):
             row = scores[:, e].gather(1, prev[:, None, None].expand(-1, 1, k))[:, 0]      # [R, K]: after prev
-            law = sub.sampler.distribution(row[:, None].expand(-1, b, -1).reshape(-1, k), sub).view(r, b, k)[:, e]
+            law = sub.sampler.distribution(row, sub, rows=first + e)
             c = law.cumsum(-1)
             prev = torch.searchsorted(c, (u[:, e] * c[:, -1])[:, None], right=True)[:, 0].clamp_(max=k - 1)
             drafts.append(cand[:, e].gather(1, prev[:, None])[:, 0])

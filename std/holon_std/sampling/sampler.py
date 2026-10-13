@@ -83,12 +83,12 @@ class Sampler:
             return ("greedy", int(self._logprobs[slots].max()))
         return ("sample", bool(self._filtered[slots].any()), int(self._logprobs[slots].max()))
 
-    def distribution(self, logits: torch.Tensor, ctx) -> torch.Tensor:
+    def distribution(self, logits: torch.Tensor, ctx, rows: torch.Tensor | None = None) -> torch.Tensor:
         """The probabilities `sample` draws each logits row from, in vocabulary order [R, V] (greedy rows: one-hot at
-        the argmax)."""
+        the argmax); `rows`: which of the step's logits rows `logits` holds (default: all, in order)."""
         plan, dev = ctx.batch.plan, ctx.batch.dev
         slots = plan.slots[plan.n_logits > 0]
-        rows = dev.slots[dev.logits_rows]
+        rows = dev.slots[dev.logits_rows if rows is None else dev.logits_rows[rows]]
         greedy = torch.zeros_like(logits).scatter_(-1, logits.argmax(-1, keepdim=True), 1.0)
         if self._greedy[slots].all():
             return greedy
