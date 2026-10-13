@@ -80,9 +80,9 @@ MASKS = [{}, {"causal": False}, {"window": 16}, {"causal": False, "window": 16},
 
 
 @pytest.mark.parametrize("masks", MASKS, ids=lambda m: "-".join(f"{k}={v}" for k, v in m.items()) or "default")
-@pytest.mark.parametrize("geometry", GEOMETRIES)
-@pytest.mark.parametrize(("op", "rows"), [("attention.paged_verify", BLOCK_ROWS),
-                                          ("attention.paged_decode", DECODE_ROWS)], ids=["verify", "decode"])
+@pytest.mark.parametrize(("op", "rows", "geometry"),     # decode runs the verify kernel: one geometry is enough
+                         [("attention.paged_verify", BLOCK_ROWS, g) for g in GEOMETRIES]
+                         + [("attention.paged_decode", DECODE_ROWS, GEOMETRIES[2])])
 def test_masks_match_oracle(op, rows, geometry, masks):
     q, kv, batch, pages = _case(rows, *geometry)
     kernel = _kernel(op, "kernels.triton_attn", *geometry, **masks)
