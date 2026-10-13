@@ -46,6 +46,9 @@ Decode faster with speculation on consumer cards, without changing the output di
      leaves the SSM state and the conv window equal to 1 + n single-token decode calls. Checked on every kernel
      class and on the CPU reference, which computes its gating per token. Rows that are not rewound stay
      bitwise untouched (R ≥ 2 rows of q ≥ 2).
+   - **Fallback, if a kernel class is not bitwise against the decode calls** (two Triton specializations,
+     store-in-loop vs store-after): check bitwise against a call of the same `out_slots` kernel over the 1 + n
+     accepted tokens alone, and hold the decode comparison to the drift and L0 bounds.
    - **Drift:** 200 verify/replay steps from a non-zero S0 stay within the GDN L0 bound of an f64 recurrence.
    - **No checkpoint lands in a verify row.** No checkpoint is registered at the end of a row with `n_logits > 1`,
      or for a request with an uncommitted verify row.
@@ -215,7 +218,8 @@ Non-goals:
      - The drafter writes `SeqTable.n_draft [S]` on the device, bounded by the deployment's **maximum** k, not the
        step's k. At depth 1 the drafts for step N + 1 are written before the host picks that step's k.
      - Short rows pad with token 0, and every verifier caps acceptance at `min(n_draft, k)`.
-     - `run` drafts, and `observe` reports `n_draft`, on k = 0 steps too.
+     - `run` drafts, and `observe` reports `n_draft` (the uncapped would-have-drafted length), on k = 0 steps too.
+       A toy test shows the n-gram policy re-enabling after a hit.
      - Every running row joins a verify step: rows without drafts carry `n_draft = 0`. Prefill and decode never
        share a step (`sched.py:59`).
    - **Sampling.**
@@ -531,3 +535,5 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
 |---|---|
 | B-R1: n-gram fallback switches itself off (`n_draft ≤` step k) | `n_draft` bounded by the deployment's maximum k; verifiers cap at `min(n_draft, k)`; drafting and `observe` continue on k = 0 steps (§3.5) |
 | B-r1: aux tensors unspecified | `target.tensors()`, `ctx.weight_source(path)`, `WeightMap(only=…)`, `TargetView` (§3.1) |
+| C-n1: fallback latches off | covered by B-R1; `observe` gets the uncapped length; re-enable toy (§3.5) |
+| C-n2: bitwise across two kernel specializations | fallback named (§1.3) |
