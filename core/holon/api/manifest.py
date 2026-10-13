@@ -28,8 +28,7 @@ SLOTS: types.MappingProxyType[str, Cardinality] = types.MappingProxyType({
     **dict.fromkeys(["unit", "kernel", "state_kind", "placement_policy", "codec", "weight_source"],
                     Cardinality.PER_SITE),
     **dict.fromkeys(["plan_transform", "logits_processor", "checkpoint_policy"], Cardinality.ORDERED_MULTI),
-    **dict.fromkeys(["frontend", "dialect", "converter", "tier", "mover", "drafter", "encoder", "connector",
-                     "exporter"], Cardinality.MULTI),
+    **dict.fromkeys(["frontend", "tier", "mover", "drafter", "encoder", "connector", "exporter"], Cardinality.MULTI),
 })
 
 Numerics = Literal["policy", "exact", "bounded", "approx"]
