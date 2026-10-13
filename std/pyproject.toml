@@ -19,6 +19,8 @@ dependencies = ["holonlm"]
 "std.weights.hf" = "holon_std.weights.hf"
 "std.weights.gguf" = "holon_std.weights.gguf"
 "std.spec.greedy" = "holon_std.spec.greedy"
+"std.spec.mtp_head" = "holon_std.spec.mtp_head"
+"std.spec.fixed_k" = "holon_std.spec.fixed_k"
 
 [build-system]
 requires = ["hatchling"]

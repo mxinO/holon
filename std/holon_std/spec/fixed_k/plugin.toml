@@ -1,0 +1,12 @@
+[plugin]
+name = "std.spec.fixed_k"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "draft_policy"
+license = "Apache-2.0"
+
+[resources]
+provides = ["draft_policy.fixed_k@1"]
+
+[properties]
+numerics = "exact"

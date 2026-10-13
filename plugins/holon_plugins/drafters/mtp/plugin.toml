@@ -1,0 +1,12 @@
+[plugin]
+name = "drafters.mtp"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "drafter"
+license = "Apache-2.0"
+
+[resources]
+provides = ["drafter.mtp@1"]
+
+[properties]
+max_depth = 1

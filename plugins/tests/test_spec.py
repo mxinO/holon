@@ -13,6 +13,7 @@ from .fixtures.oracle import ORACLE
 from .test_engine import GREEDY, _released, tiny_case, tiny_checkpoint  # noqa: F401 — fixtures
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
+ORACLE_SLOTS = {"drafter": "tests.oracle.drafter", "draft_policy": "tests.oracle.policy"}
 
 
 def _plugins() -> PluginSet:
@@ -25,7 +26,7 @@ def _plugins() -> PluginSet:
 
 def _engine(path, **kw) -> Engine:
     cfg = dict(model=str(path), device="cpu", dtype=torch.float32, page_size=4, max_seqs=3, max_step_tokens=10,
-               max_model_len=40, state_memory=1 << 20, max_draft_tokens=3) | kw
+               max_model_len=40, state_memory=1 << 20, max_draft_tokens=3, slots=ORACLE_SLOTS) | kw
     return Engine(EngineConfig(**cfg), plugins=_plugins())
 
 
@@ -157,7 +158,7 @@ def test_host_length_decode_kernels_wait_for_verify_commits():
     ORACLE.sequences = {tuple(p): p + e for p, e in zip(prompts, expected, strict=True)}
     ORACLE.by_slot.clear()
     ORACLE.mode, ORACLE.k, ORACLE.vocab, ORACLE.steps = "alternate", 3, 151936, 0
-    spec = _generate(EngineConfig(**cfg, max_draft_tokens=3), prompts, params, plugins=_plugins(),
+    spec = _generate(EngineConfig(**cfg, max_draft_tokens=3, slots=ORACLE_SLOTS), prompts, params, plugins=_plugins(),
                      check=lambda e: e.sched.host_lens_only)
     agree = [next((i for i, (a, b) in enumerate(zip(x, y, strict=True)) if a != b), len(x))
              for x, y in zip(plain, spec, strict=True)]

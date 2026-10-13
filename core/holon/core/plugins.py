@@ -177,11 +177,17 @@ class PluginSet:
     def by_slot(self, slot: str) -> Iterator[Manifest]:
         return (i.manifest for i in self.installed.values() if i.manifest.slot == slot)
 
-    def single(self, slot: str) -> str:
-        """The one installed plugin of a `single` slot (e.g. the sampler)."""
+    def single(self, slot: str, chosen: str | None = None) -> str:
+        """The plugin serving a `single` slot (e.g. the sampler): `chosen` (the deployment's pick among several
+        installed), else the only one installed."""
         names = [m.name for m in self.by_slot(slot)]
+        if chosen is not None:
+            if chosen not in names:
+                raise PluginError(f"slot {slot!r}: {chosen!r} is not an installed plugin of it ({names})")
+            return chosen
         if len(names) != 1:
-            raise PluginError(f"slot {slot!r} needs exactly one installed plugin, found {names}")
+            raise PluginError(f"slot {slot!r} needs exactly one installed plugin, found {names}; choose one with "
+                              "EngineConfig.slots")
         return names[0]
 
     def providers(self, resource: str, major: int) -> list[str]:

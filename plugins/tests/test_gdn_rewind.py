@@ -40,7 +40,8 @@ def _engine(path, **kw) -> Engine:
         manifest = Manifest.load(FIXTURES / name / "plugin.toml")
         found[manifest.name] = Installed(manifest, f"tests.fixtures.{name}", FIXTURES / name)
     cfg = dict(model=str(path), device="cpu", dtype=torch.float32, page_size=4, max_seqs=3, max_step_tokens=48,
-               max_model_len=256, state_memory=8 << 20, max_draft_tokens=3) | kw
+               max_model_len=256, state_memory=8 << 20, max_draft_tokens=3,
+               slots={"drafter": "tests.oracle.drafter", "draft_policy": "tests.oracle.policy"}) | kw
     return Engine(EngineConfig(**cfg), plugins=PluginSet(found))
 
 

@@ -1,10 +1,11 @@
 import torch
 
-from .recipe import recipe
+from .recipe import draft_head, recipe
 
 
 class Plugin:
     recipe = staticmethod(recipe)
+    draft_head = staticmethod(draft_head)
 
     def register(self, regs) -> None:
         # Value transforms of the weight maps (applied in f32: exact for these values, see recipe.py).

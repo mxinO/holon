@@ -3,14 +3,16 @@
 Every `full_attention_interval`-th layer is full attention (output-gated, partial rotary), the rest Gated DeltaNet
 (docs/m03-qwen38.md §2, §4.4). The HF checkpoint stores zero-centred norms (`x̂·(1 + w)`); llama.cpp's converter writes
 `w + 1` in f32 and `ssm_a = −exp(A_log)`, both undone here by value transforms, and orders value heads tiled, which
-the GDN kernels read as a fact. The vision tower and the MTP block are skipped (MTP is M0.4).
+the GDN kernels read as a fact. The vision tower is skipped; the MTP block is too, except in the draft head
+`draft_head("mtp")` returns (docs/m04-spec.md D2): the checkpoint's multi-token-prediction layer as a
+`std.spec.mtp_head@1` over the trunk's own attention and MLP Refs, built only when a drafter asks for it.
 """
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
 
-from holon.api import LayerDecl, ModelSpec, Ref, WeightMap, WeightRule
+from holon.api import AuxSpec, LayerDecl, ModelSpec, Ref, WeightMap, WeightRule
 
 _P = "model.language_model."
 HF_WEIGHTS = WeightMap("hf_safetensors", skip=("model.visual.", "mtp."), rules=(
@@ -75,9 +77,8 @@ def _facts(c: Mapping[str, Any], source: str) -> dict[str, Any]:
             "sections": rope.get("mrope_section", []), "theta": rope["rope_theta"], "order": "grouped", "skip": ()}
 
 
-def recipe(c: Mapping[str, Any], source: str) -> ModelSpec:
-    if source not in ("hf_safetensors", "gguf"):
-        raise ValueError(f"qwen3_5: no weight map for source {source!r}")
+def _refs(c: Mapping[str, Any], source: str) -> dict[str, Any]:
+    """The recipe's facts and the Refs the trunk and the draft head share."""
     t = c if source == "gguf" else c.get("text_config", c)
     f = _facts(c, source)
     if f["sections"] and sum(f["sections"]) * 2 != f["rotary_dim"]:
@@ -91,6 +92,14 @@ def recipe(c: Mapping[str, Any], source: str) -> ModelSpec:
               head_v_dim=f["head_v_dim"], conv_kernel=f["conv_kernel"], v_head_order=f["order"],
               norm_eps=t["rms_norm_eps"])
     mlp = Ref("std.ffn.swiglu@1", inter=t["intermediate_size"])
+    return {"t": t, "f": f, "norm": norm, "attn": attn, "gdn": gdn, "mlp": mlp}
+
+
+def recipe(c: Mapping[str, Any], source: str) -> ModelSpec:
+    if source not in ("hf_safetensors", "gguf"):
+        raise ValueError(f"qwen3_5: no weight map for source {source!r}")
+    r = _refs(c, source)
+    t, f = r["t"], r["f"]
     tied = t.get("tie_word_embeddings", c.get("tie_word_embeddings", False))
     if source == "gguf":
         weights = WeightMap("gguf", rules=GGUF_RULES, skip=f["skip"])
@@ -99,8 +108,58 @@ def recipe(c: Mapping[str, Any], source: str) -> ModelSpec:
                             skip=HF_WEIGHTS.skip + (("lm_head.",) if tied else ()))
     return ModelSpec(
         hidden=t["hidden_size"], vocab=t["vocab_size"],
-        layers=tuple(LayerDecl(attn if full else gdn, mlp, "full_attention" if full else "linear_attention")
-                     for full in f["full"]),
-        block=Ref("std.blocks.prenorm@1"), embed=Ref("std.ops.embedding@1"), norm=norm,
+        layers=tuple(LayerDecl(r["attn"] if full else r["gdn"], r["mlp"],
+                               "full_attention" if full else "linear_attention") for full in f["full"]),
+        block=Ref("std.blocks.prenorm@1"), embed=Ref("std.ops.embedding@1"), norm=r["norm"],
         lm_head=Ref("std.ops.lm_head@1", tied=tied), weights=weights,
     )
+
+
+# The MTP block: HF `mtp.*`; GGUF `blk.<n>.*` after the trunk's n blocks (`nextn.*` for the head's own tensors).
+_MTP_HF = (
+    WeightRule("mtp.fc.weight", "fc.weight"),
+    WeightRule("mtp.pre_fc_norm_embedding.weight", "enorm.weight"),
+    WeightRule("mtp.pre_fc_norm_hidden.weight", "hnorm.weight"),
+    WeightRule("mtp.norm.weight", "norm.weight"),
+    WeightRule("mtp.layers.{i}.input_layernorm.weight", "layers.{i}.input_norm.weight"),
+    WeightRule("mtp.layers.{i}.post_attention_layernorm.weight", "layers.{i}.post_norm.weight"),
+    WeightRule("mtp.layers.{i}.self_attn.{rest}", "layers.{i}.mixer.{rest}"),
+    WeightRule("mtp.layers.{i}.mlp.{rest}", "layers.{i}.ffn.{rest}"),
+)
+
+
+def _mtp_gguf(n: int) -> tuple[WeightRule, ...]:
+    """Block n (the first after the trunk) as layer 0 of the head; norms stored as w + 1."""
+    b, minus = f"blk.{n}.", "qwen3_5.minus_one"
+    return (
+        WeightRule(b + "nextn.eh_proj.weight", "fc.weight"),
+        WeightRule(b + "nextn.enorm.weight", "enorm.weight", minus),
+        WeightRule(b + "nextn.hnorm.weight", "hnorm.weight", minus),
+        WeightRule(b + "nextn.shared_head_norm.weight", "norm.weight", minus),
+        *(WeightRule(f"{b}{g}.weight", f"layers.0.{h}.weight", minus) for g, h in _NORMS),
+        *(WeightRule(f"{b}attn_{g}.weight", f"layers.0.mixer.{h}.weight") for g, h in _ATTN),
+        *(WeightRule(f"{b}attn_{g}_norm.weight", f"layers.0.mixer.{g}_norm.weight", minus) for g in ("q", "k")),
+        *(WeightRule(f"{b}ffn_{g}.weight", f"layers.0.ffn.{g}_proj.weight") for g in ("gate", "up", "down")),
+    )
+
+
+def draft_head(c: Mapping[str, Any], source: str, name: str) -> AuxSpec | None:
+    """The checkpoint's MTP layer as a draft head (None if it has none, or for any other name)."""
+    if name != "mtp" or source not in ("hf_safetensors", "gguf"):
+        return None
+    r = _refs(c, source)
+    t, f = r["t"], r["f"]
+    if source == "gguf":
+        nextn = c["gguf"].get("nextn_predict_layers", 0)
+        if nextn != 1:
+            return None
+        n = f["layers"]
+        weights = WeightMap("gguf", rules=_mtp_gguf(n), only=(f"blk.{n}.",),
+                            skip=(f"blk.{n}.nextn.embed_tokens.", f"blk.{n}.nextn.shared_head_head."))
+    else:
+        if t.get("mtp_num_hidden_layers", 0) != 1:
+            return None
+        weights = WeightMap("hf_safetensors", rules=_MTP_HF, only=("mtp.",))
+    head = Ref("std.spec.mtp_head@1", hidden=t["hidden_size"], block=Ref("std.blocks.prenorm@1"), norm=r["norm"],
+               order="embed_first")
+    return AuxSpec(head, (LayerDecl(r["attn"], r["mlp"], "full_attention"),), weights)

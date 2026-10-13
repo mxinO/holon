@@ -127,6 +127,9 @@ class DrafterPlugin(Protocol):
 
 
 class DraftPolicy(Protocol):
+    """The `draft_policy` slot's plugin object, or what its optional `build(ctx: BuildCtx)` returns (for policies
+    configured by the deployment's options)."""
+
     def k(self, seqs: list[Seq]) -> int:
         """Drafts per row for the next step of `seqs` (the running requests), from a finite declared set; 0: a plain
         decode step. Per step, not per request: every row of a verify step has the same width."""

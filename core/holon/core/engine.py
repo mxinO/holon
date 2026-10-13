@@ -49,6 +49,7 @@ class EngineConfig:
     cuda_graphs: bool = True                 # replay decode steps from CUDA graphs, per batch-size bucket
     max_draft_tokens: int = 0                # speculative decoding: drafts per verify row at most (0: off)
     kernels: dict[str, str] = dataclasses.field(default_factory=dict)   # op name -> pinned kernel provider
+    slots: dict[str, str] = dataclasses.field(default_factory=dict)     # slot -> plugin, where several are installed
     plugin_options: dict[str, object] = dataclasses.field(default_factory=dict)   # read by plugins, never the core
 
     def __post_init__(self) -> None:
@@ -109,15 +110,17 @@ class Engine:
         load_weights(model, self.ctx, source.tensors())
 
         # One extra slot (max_seqs) is the padding slot of graph-captured steps.
-        sampler = p.load(p.single("sampler")).sampler(cfg.max_seqs + 1, self.device)
+        sampler = p.load(p.single("sampler", cfg.slots.get("sampler"))).sampler(cfg.max_seqs + 1, self.device)
         # Speculative decoding (design §7.6): a draft policy picks k per step, one drafter proposes, the verifier
         # checks; all three are plugins, used only when drafts are enabled and a policy is installed.
         self.policy = drafter = verifier = aux = None
         substeps, sub_planners = (0, 0), {}
         if cfg.max_draft_tokens and any(True for _ in p.by_slot("draft_policy")):
-            self.policy, verifier = p.load(p.single("draft_policy")), p.load(p.single("verifier"))
+            pick = lambda slot: p.load(p.single(slot, cfg.slots.get(slot)))        # noqa: E731
+            policy, verifier = pick("draft_policy"), pick("verifier")
+            self.policy = policy.build(self.ctx) if hasattr(policy, "build") else policy
             self.ctx.aux = aux = AuxModels(self.ctx, p, self.ledger, cfg)
-            drafter = p.load(p.single("drafter")).build(self.ctx, _Target(self.spec, model, source, model_plugin))
+            drafter = pick("drafter").build(self.ctx, _Target(self.spec, model, source, model_plugin))
             bound += aux.bound                           # the drafter's auxiliary models' state and planners
             planners |= aux.planners
             widths = [getattr(drafter, "substeps", lambda k: [])(k) for k in range(cfg.max_draft_tokens + 1)]
