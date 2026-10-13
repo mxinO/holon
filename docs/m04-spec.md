@@ -139,6 +139,13 @@ Non-goals:
      - `target.draft_head(name)` asks the model plugin (the drafter cannot import it). The model plugin answers
        `ModelPlugin.draft_head(config, source, name) -> AuxSpec | None`, with weight rules over the target's own
        source. The target keeps its skip.
+   - Weights:
+     - `target.tensors()` gives the target's own source.
+     - `ctx.weight_source(path)` opens a drafter's own checkpoint, resolved through `detect_source` (weight sources
+       are plugins).
+     - `WeightMap` gains an `only=` prefix filter, so an aux map over the target's source names only its
+       tensors.
+   - `target` is a `holon.api` Protocol, `TargetView`.
    - `ctx.aux_model(namespace, AuxSpec(unit, layers, weights), tensors)` builds into a **child context**.
      - `unit` is a Ref that builds its own internals. `layers` only drives state binding.
      - The child maps state names, planner groups and `BatchPlan.publishes` to `<namespace>.<name>`. A GQA unit's
@@ -204,9 +211,11 @@ Non-goals:
      - Paged state rewinds by length.
    - **Draft lengths.**
      - Today: one k per step, the minimum over its rows.
-     - Change: the policy sets the step's k (D7), so the width is q = 1 + k. The drafter writes `SeqTable.n_draft
-       [S]` ≤ k on the device.
-     - Short rows pad with token 0, and every verifier caps acceptance at `n_draft`.
+     - Change: the policy sets the step's k (D7), so the width is q = 1 + k.
+     - The drafter writes `SeqTable.n_draft [S]` on the device, bounded by the deployment's **maximum** k, not the
+       step's k. At depth 1 the drafts for step N + 1 are written before the host picks that step's k.
+     - Short rows pad with token 0, and every verifier caps acceptance at `min(n_draft, k)`.
+     - `run` drafts, and `observe` reports `n_draft`, on k = 0 steps too.
      - Every running row joins a verify step: rows without drafts carry `n_draft = 0`. Prefill and decode never
        share a step (`sched.py:59`).
    - **Sampling.**
@@ -515,3 +524,10 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
 | A-m2: greedy verifier with sampled rows | samples them from the first column, `n_accept = 0` (§3.5) |
 | A-m3: conv window not counted | 2.8 MiB per row, ledger-counted (D6, §5) |
 | A-m4: no `every:n` checkpoints while speculating | stated (§3.7) |
+
+**Rev 3.**
+
+| Finding | Resolution |
+|---|---|
+| B-R1: n-gram fallback switches itself off (`n_draft ≤` step k) | `n_draft` bounded by the deployment's maximum k; verifiers cap at `min(n_draft, k)`; drafting and `observe` continue on k = 0 steps (§3.5) |
+| B-r1: aux tensors unspecified | `target.tensors()`, `ctx.weight_source(path)`, `WeightMap(only=…)`, `TargetView` (§3.1) |
