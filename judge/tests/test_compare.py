@@ -136,23 +136,25 @@ def test_an_error_in_one_sequence_cannot_widen_its_own_budget(case):
     assert any("ΔPPL vs floor" in f for f in r.failures)
 
 
-def test_the_drafter_rule_gates_on_confident_positions(case):
-    # Draft heads are judged on few positions (docs/m04-spec.md §5): a candidate that flips near-ties only — where a
-    # correct bf16 path moves the top-2 margin as much — passes, though L2's all-position top-1 rule fails it; one
-    # that flips confident positions fails.
-    lens, logits, targets, noise = case
-    g, floor = _recording(logits, targets, lens), _recording(noise(0.02), targets, lens)
+def test_the_drafter_rule_tolerates_near_tie_noise(case):
+    # Draft heads are judged on few positions (docs/m04-spec.md §5, §12): 288 rows of 24 prompts. A candidate flipping
+    # two near-ties beyond the floor's own — a correct path's noise — passes, though L2's fixed 0.25-point bar fails it
+    # (one row is 0.35 points); one that flips confident positions fails.
+    _, logits, targets, _ = case
+    n, lens = 288, [12] * 24
+    gen = torch.Generator().manual_seed(1)
+    logits, targets = logits[:n], targets[:n]
+    g, floor = _recording(logits, targets, lens), _recording(logits + 0.02 * torch.randn(n, V, generator=gen), targets,
+                                                             lens)
     top2 = logits.topk(2, -1)
     margin = top2.values[:, 0] - top2.values[:, 1]
 
-    def flipped(rows: torch.Tensor) -> torch.Tensor:          # the top-2 swapped at `rows`
-        out = logits.clone()
-        r = rows.nonzero()[:, 0]
-        out[r, top2.indices[r, 0]], out[r, top2.indices[r, 1]] = top2.values[r, 1], top2.values[r, 0]
-        return out
+    def flipped(rows: torch.Tensor) -> Recording:                 # a correct path's noise, the top-2 swapped at `rows`
+        out = logits + 0.02 * torch.randn(n, V, generator=gen)
+        out[rows, top2.indices[rows, 0]], out[rows, top2.indices[rows, 1]] = top2.values[rows, 1], top2.values[rows, 0]
+        return _recording(out, targets, lens)
 
-    near = compare_drafter(g, _recording(flipped(margin < 0.06), targets, lens), floor)
+    near = compare_drafter(g, flipped(margin.argsort()[:2]), floor)
     assert near.passed and near.drafter["l2_failures"]
-    far = compare_drafter(g, _recording(flipped((margin > 1) & (torch.arange(len(margin)) % 50 == 0)), targets, lens),
-                          floor)
-    assert far.passed is False and "confident" in far.failures[0]
+    far = compare_drafter(g, flipped(margin.argsort()[-15:]), floor)
+    assert far.passed is False and any("confident" in f for f in far.failures)

@@ -112,11 +112,13 @@ class Result:
                         f"{'':9s} {'≤' + format(b.dppl_max, '.3%'):>17s}")
         rows += [_row(name, m) for name, m in self.categories.items()]
         if (d := self.drafter) is not None:
-            rows += [f"L0-drafter (§5): {d['n_confident']} positions of margin > {d['margin']:.3e} (the floor's p99 "
-                     f"|Δ margin|): top-1 {d['top1']:.3%} vs floor {d['floor_top1']:.3%} (≥ {d['top1_min']:.3%}); "
-                     f"KL mean {d['kl_mean']:.3e} (≤ {d['kl_mean_max']:.3e}); confident disagreements by row of a "
-                     f"draft (block row, chain step): {d['confident_disagreements_by_row']}",
-                     "L2's rule, reported only: " + ("pass" if not d["l2_failures"] else "; ".join(d["l2_failures"]))]
+            rows += [f"L0-drafter (§5, §12): {d['n_confident']} of {d['n']} positions confident (top-1 margin > "
+                     f"{d['logit_shift_p99']:.3e}, the floor's p99 |Δlogit|)"]
+            rows += [f"  top-1 {w}: {d[w]['top1']:.3%} vs floor {d[w]['floor_top1']:.3%} − {d[w]['margin']:.3%}"
+                     for w in ("overall", "confident")]
+            rows += [f"  {name}: {d[name][0]:.3e} ≤ {d[name][1]:.3e}" for name in ("kl_p50", "kl_p99", "kl_mean")]
+            rows += [f"  confident disagreements by row of a draft: {d['confident_disagreements_by_row']}",
+                     "  L2's rule, reported only: " + ("pass" if not d["l2_failures"] else "; ".join(d["l2_failures"]))]
         where = f"{self.candidate.get('model')} {self.candidate.get('dtype')} vs {self.golden.get('dtype')} golden"
         if self.passed is None:
             verdict = "no floor given: metrics only"
@@ -238,38 +240,48 @@ def compare(golden: Recording, cand: Recording, floor: Recording | None = None) 
                   paired)
 
 
-def _margins(golden: Recording, rec: Recording) -> torch.Tensor:
-    """Per position, `rec`'s margin between the golden's top-2 ids (nan where `rec`'s top-k lacks either)."""
-    out = []
-    for j in (0, 1):
-        match = rec.topk_ids == golden.topk_ids[:, j:j + 1]
-        lp = torch.where(match, rec.topk_lp, torch.nan).nansum(-1).where(match.any(-1), torch.nan)
-        out.append(lp)
-    return out[0] - out[1]
+def _logit_shift(golden: Recording, floor: Recording) -> torch.Tensor:
+    """Per position, the floor's largest |Δlogit| over the golden's top-k ids its own top-k holds: their logprob
+    differences, centred (a logprob is a logit less the row's log-normaliser, which centring removes)."""
+    match = golden.topk_ids[:, :, None] == floor.topk_ids[:, None, :]                  # [N, k golden, k floor]
+    found = match.any(-1)
+    d = (floor.topk_lp[:, None, :] * match).sum(-1) - golden.topk_lp                      # where found
+    centre = (d * found).sum(-1, keepdim=True) / found.sum(-1, keepdim=True).clamp_min(1)
+    return ((d - centre).abs() * found).amax(-1)
 
 
 def compare_drafter(golden: Recording, cand: Recording, floor: Recording) -> Result:
-    """The L0-drafter check (docs/m04-spec.md §5): pass iff the candidate's top-1 agreement at confident positions —
-    those whose golden top-2 margin exceeds the floor's 99th-percentile perturbation of that margin (how far a correct
-    bf16 path moves it) — is at least the floor's − 0.25 points there, and its mean KL at most 2× the floor's. Draft
-    heads are judged on few positions, where L2's all-position top-1 rule turns on a row or two at near-ties; L2's
-    metrics and verdict are reported alongside."""
+    """The L0-drafter check (docs/m04-spec.md §5, as decided in §12): a draft head is judged on its top-1 agreement
+    with the golden, overall and at confident positions — the golden's top-1 margin above the floor's 99th-percentile
+    |Δlogit| (`_logit_shift`) — each at least the floor's less max(0.25 points, 2.5 paired standard errors of the
+    difference, prompts as clusters: `bounded`'s guard), and on KL p50, p99 and mean, each at most 2× the floor's. A
+    fixed 0.25-point bar alone fails a correct head at the floor's rate of near-tie flips too often at the few
+    thousand positions a draft head has. L2's verdict is reported alongside, and the confident disagreements by row
+    of a draft (block row, chain step)."""
+    from .bounded import SE_FACTOR, Mean
+
     result = compare(golden, cand, floor)
     margin = golden.topk_lp[:, 0] - golden.topk_lp[:, 1]
-    shift = (_margins(golden, floor) - margin).abs()
-    threshold = torch.quantile(shift[~shift.isnan()].double(), 0.99).item()
+    threshold = torch.quantile(_logit_shift(golden, floor).double(), 0.99).item()
     confident = margin > threshold
-    agree = lambda rec: (golden.topk_ids[confident, 0] == rec.topk_ids[confident, 0]).double().mean().item()  # noqa
-    within = torch.arange(len(margin)) - golden.offsets[golden.seq_index()]       # a row's place in its sequence
-    missed = confident & (golden.topk_ids[:, 0] != cand.topk_ids[:, 0])
-    numbers = {"margin": threshold, "n_confident": int(confident.sum()), "top1": agree(cand),
-               "confident_disagreements_by_row": torch.bincount(within[missed], minlength=int(within.max()) + 1
-                                                                ).tolist(),
-               "floor_top1": agree(floor), "top1_min": agree(floor) - TOP1_DELTA, "kl_mean": result.overall.kl_mean,
-               "kl_mean_max": KL_FACTOR * result.floor.kl_mean, "l2_failures": list(result.failures)}
-    failures = [msg for ok, msg in (
-        (numbers["top1"] >= numbers["top1_min"], f"top-1 at confident positions {numbers['top1']:.4%} < "
-                                                 f"{numbers['top1_min']:.4%}"),
-        (numbers["kl_mean"] <= numbers["kl_mean_max"], f"KL mean {numbers['kl_mean']:.3e} > "
-                                                       f"{numbers['kl_mean_max']:.3e}")) if not ok]
+    ids = [str(i).split("@")[0] for i in golden.meta.get("seq_ids", range(len(golden.offsets) - 1))]   # cuts → prompt
+    prompt = torch.tensor([list(dict.fromkeys(ids)).index(i) for i in ids])[golden.seq_index()]
+    agree = {name: (golden.topk_ids[:, 0] == rec.topk_ids[:, 0]).double() for name, rec in (("cand", cand),
+                                                                                           ("floor", floor))}
+    numbers, failures = {"logit_shift_p99": threshold, "n": len(margin), "n_confident": int(confident.sum())}, []
+    for where, rows in (("overall", torch.ones_like(confident)), ("confident", confident)):
+        c, f = agree["cand"][rows], agree["floor"][rows]
+        bar = max(TOP1_DELTA, SE_FACTOR * Mean.of(c - f, prompt[rows]).se)
+        numbers[where] = {"top1": c.mean().item(), "floor_top1": f.mean().item(), "margin": bar}
+        if c.mean().item() < f.mean().item() - bar:
+            failures.append(f"top-1 {where} {c.mean().item():.4%} < {f.mean().item() - bar:.4%}")
+    for name in ("kl_p50", "kl_p99", "kl_mean"):
+        ours, theirs = getattr(result.overall, name), getattr(result.floor, name)
+        numbers[name] = (ours, KL_FACTOR * theirs)
+        if ours > KL_FACTOR * theirs:
+            failures.append(f"{name} {ours:.3e} > {KL_FACTOR * theirs:.3e}")
+    within = torch.arange(len(margin)) - golden.offsets[golden.seq_index()]               # a row's place in its draft
+    missed = confident & (agree["cand"] == 0)
+    numbers["confident_disagreements_by_row"] = torch.bincount(within[missed], minlength=int(within.max()) + 1).tolist()
+    numbers["l2_failures"] = list(result.failures)
     return dataclasses.replace(result, failures=tuple(failures), drafter=numbers)
