@@ -1029,8 +1029,10 @@ verification (v2).
   theirs from the request's), and computes prompt logprobs from the trunk's hidden states in row chunks. Sampler, processors and verifiers declare whether they accept
   vocab-sharded logits or need gathered logits (TP seam, §8).
 - **Speculative decoding** (M0.4, `docs/m04-spec.md`) = three roles, all plugins:
-  - `DraftPolicy` (`draft_policy` slot): k **per step**, `k(seqs)` from a finite declared set; `observe(seq, k,
-    n_draft, n_accept)` after each commit (Strata-style cost models later).
+  - `DraftPolicy` (`draft_policy` slot): k **per step**, `k(seqs)` from a finite declared set (`ks()`: the widths
+    captured as verify graphs); `observe(seq, k, n_draft, n_accept)` after each commit (Strata-style cost models
+    later). The slot's plugin object is the policy, or its optional `build(ctx)` returns one configured from the
+    deployment's options (`std.spec.fixed_k`: `spec.k`, `spec.fallback`).
   - `Drafter` (`drafter` slot; MTP, DFlash, GPU n-gram; EAGLE-3 and draft models later): built against a
     `TargetView` (the target's shared `embed`/`norm`/`lm_head`, its checkpoint, its model plugin's `draft_head`);
     `admit(slot, history)` at admission; `run(ctx, h)` after **every** step's sample stage with the trunk's output, in
@@ -1039,8 +1041,11 @@ verification (v2).
     state names, pools, tables and planners live under a namespace; `StepCtx.view(namespace)` at step time) and run
     **sub-steps** (`StepCtx.substep(q, offset)`: its own rows at positions past the step's, planned at launch with
     per-sub-step buffers and device-length planners). `lookahead(k)` positions past each row are reserved for it.
-  - `Verifier` (`verifier` slot; greedy-exact, rejection): replaces the Sampler on verify steps and never accepts
-    past a row's `n_draft`.
+  - `Verifier` (`verifier` slot; exact-match, rejection): replaces the Sampler on verify steps, drawing through it
+    (`ctx.sampler`: `distribution`, counter-based `uniform` streams, `logprobs`), and never accepts past a row's
+    `n_draft`.
+  Several plugins may be installed for each slot: `EngineConfig.slots` (`--slots drafter=… verifier=…`) picks one,
+  and locks record the choice in `[engine]`. `Engine.stats()` counts real drafts and verify rows by drafts accepted.
   Every running row of a speculating step is a verify row of the step's width 1 + k (rows with fewer real drafts pad
   with token 0); block tables carry overflow columns at the null unit for positions past `max_model_len`.
 - **The SeqTable seam (implemented, M0 acceptance §3.4-5).** Every step's positions, lengths and page write indices
