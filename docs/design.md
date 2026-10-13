@@ -437,6 +437,11 @@ class ModelSpec:
   the stop set against the HF checkpoint the file was made from. Fields a future architecture's GGUF lacks (e.g.
   `mrope_section`) come from a per-architecture table in its weight map, not from an HF download.
   `mmproj-*.gguf` is ignored when `text_only`; v1 VLM support loads it as the encoder's weight source.
+- **Attention masks (M0.4 D4).** `std.mixers.gqa` takes `causal=False` (a row's new tokens see each other both ways:
+  a block drafted at once) and `window=W` (sliding-window attention: a query at p sees no key at or before p − W,
+  llama.cpp's convention); both reach every attention kernel it selects as facts, so a provider that cannot mask so
+  is never chosen. `GQA.write_kv(x, ctx)` writes a step's keys and values without attending (a drafter's context
+  from another model's features).
 - **Derivation = copy with lineage.** A new model copies an existing recipe and records `derived_from`; there is
   no model-to-model link or inheritance (e.g. Qwen3.5 differs from Qwen3 in ~10 recipe lines: GDN mixer for
   linear layers, `output_gate=True`, `rotary_dim=64`, `rmsnorm offset=1.0`, MTP draft head). `git diff` against
@@ -1038,7 +1043,10 @@ verification (v2).
     `admit(slot, history)` at admission; `run(ctx, h)` after **every** step's sample stage with the trunk's output, in
     the step's graph: it writes its own state for the step's tokens, then `SeqTable.draft_tokens` and `n_draft` for
     the rows that sampled. It may build **auxiliary models** (`BuildCtx.aux_model`: units in a child context whose
-    state names, pools, tables and planners live under a namespace; `StepCtx.view(namespace)` at step time) and run
+    state names, pools, tables and planners live under a namespace, with options of its own — `planner.device_lens`
+    for a model that only runs as sub-steps; `StepCtx.view(namespace)` at step time), open its own checkpoint
+    (`BuildCtx.weight_source(path)`: the source plugin that recognises it; the plan records its identity under the
+    option naming it, not the host path) and run
     **sub-steps** (`StepCtx.substep(q, offset)`: its own rows at positions past the step's, planned at launch with
     per-sub-step buffers and device-length planners). `lookahead(k)` positions past each row are reserved for it. It
     may **tap** the target (`BuildCtx.tap(layer, consume)`: the trunk hands `consume` the residual stream after that
