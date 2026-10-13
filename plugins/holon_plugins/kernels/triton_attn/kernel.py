@@ -9,9 +9,11 @@ table:  [slots, max_pages] int32         persistent block table, one row per req
 rows:   [B] int32                        the slot (table row) of each batch row
 lens:   [B] int32                        KV length per row including this step's tokens
 
-Row i of sequence b sits at position lens[b] - NQ + i and attends causally. One program handles all NQ * group
-query rows of one (sequence, kv head, split), so K/V are read once per kv head. The split count is a launch
-constant chosen on the host from an upper bound on the lengths, never from the lengths themselves; split
+Row i of sequence b sits at position lens[b] - NQ + i and attends causally — or (`causal` False, verify rows of a
+block drafted at once) to all NQ rows of its sequence and the context before them; with a `window` W > 0 it sees no
+key at or before its position − W, and the KV walk starts at the first key any row sees. One program handles all
+NQ * group query rows of one (sequence, kv head, split), so K/V are read once per kv head. The split count is a
+launch constant chosen on the host from an upper bound on the lengths, never from the lengths themselves; split
 boundaries are computed on the device and partials are merged in a fixed order, so the output is run-to-run
 deterministic.
 
@@ -64,7 +66,8 @@ def _paged_attn(Q, K, V, KS, VS, TABLE, ROWS, LENS, OUT, WS_ML, WS_ACC,
                 stride_qt, stride_qh, stride_ku, stride_kh, stride_kt, stride_su, stride_sh, stride_st, stride_table,
                 qk_scale,
                 NQ: tl.constexpr, G: tl.constexpr, D: tl.constexpr, PAGE: tl.constexpr,
-                BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, SPLITS: tl.constexpr, FMT: tl.constexpr):
+                BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, SPLITS: tl.constexpr, FMT: tl.constexpr,
+                CAUSAL: tl.constexpr, WINDOW: tl.constexpr):
     b = tl.program_id(0)
     h = tl.program_id(1)
     s = tl.program_id(2)
@@ -80,10 +83,13 @@ def _paged_attn(Q, K, V, KS, VS, TABLE, ROWS, LENS, OUT, WS_ML, WS_ACC,
     q = tl.load(Q + (b * NQ + qi)[:, None] * stride_qt + head[:, None] * stride_qh + d[None, :],
                 mask=row_ok[:, None], other=0.0)
     q, qk_scale = _compute_q(q, qk_scale, FMT)
-    last_visible = n - NQ + qi                                    # causal bound per row
+    last_visible = n - NQ + qi                                    # causal bound per row (its position)
 
-    per_split = tl.cdiv(tl.cdiv(n, SPLITS), BLOCK_N) * BLOCK_N
-    lo = s * per_split
+    first = 0
+    if WINDOW > 0:
+        first = tl.maximum(n - NQ - WINDOW + 1, 0)                # the first key row 0 (the earliest) sees
+    per_split = tl.cdiv(tl.cdiv(n - first, SPLITS), BLOCK_N) * BLOCK_N
+    lo = first + s * per_split
     hi = tl.minimum(lo + per_split, n)
 
     m_i = tl.full([BLOCK_M], float("-inf"), tl.float32)
@@ -99,7 +105,12 @@ def _paged_attn(Q, K, V, KS, VS, TABLE, ROWS, LENS, OUT, WS_ML, WS_ACC,
         s_off = unit[:, None] * stride_su + (tok % PAGE)[:, None] * stride_st + tl.arange(0, D // Q8_BLOCK)[None, :]
         k = _load_kv(k_head, ks_head, off, s_off, tok_ok, FMT, BLOCK_N, D, q.dtype)
         qk = tl.dot(q, tl.trans(k)) * qk_scale
-        visible = (tok[None, :] <= last_visible[:, None]) & tok_ok[None, :]
+        if CAUSAL:
+            visible = (tok[None, :] <= last_visible[:, None]) & tok_ok[None, :]
+        else:
+            visible = (qi[:, None] >= 0) & tok_ok[None, :]
+        if WINDOW > 0:
+            visible &= tok[None, :] > last_visible[:, None] - WINDOW
         qk = tl.where(visible, qk, float("-inf"))
         m_new = tl.maximum(m_i, tl.max(qk, 1))
         m_safe = tl.where(m_new == float("-inf"), 0.0, m_new)
@@ -179,8 +190,8 @@ def _operands(kv) -> tuple:
     return kv[:, 0], kv[:, 1], kv[:, 0], kv[:, 1], fmt.value
 
 
-def paged_attention(q: torch.Tensor, kv, table: torch.Tensor, rows: torch.Tensor,
-                    lens: torch.Tensor, *, nq: int, splits: int, cfg: Config) -> torch.Tensor:
+def paged_attention(q: torch.Tensor, kv, table: torch.Tensor, rows: torch.Tensor, lens: torch.Tensor, *, nq: int,
+                    splits: int, cfg: Config, causal: bool = True, window: int = 0) -> torch.Tensor:
     """See the module docstring; returns [B * nq, Hq, D]."""
     t, hq, d = q.shape
     k, v, ks, vs, fmt = _operands(kv)
@@ -195,7 +206,7 @@ def paged_attention(q: torch.Tensor, kv, table: torch.Tensor, rows: torch.Tensor
         q.stride(0), q.stride(1), k.stride(0), k.stride(1), k.stride(2), ks.stride(0), ks.stride(1), ks.stride(2),
         table.stride(0), 1.0 / math.sqrt(d) * math.log2(math.e),
         NQ=nq, G=g, D=d, PAGE=page, BLOCK_M=max(16, triton.next_power_of_2(nq * g)), BLOCK_N=cfg.block_n,
-        SPLITS=splits, FMT=fmt, num_warps=cfg.num_warps, num_stages=cfg.num_stages)
+        SPLITS=splits, FMT=fmt, CAUSAL=causal, WINDOW=window, num_warps=cfg.num_warps, num_stages=cfg.num_stages)
     if splits > 1:
         _merge_splits[(t * hq,)](ws_ml, ws_acc, out, D=d, SPLITS=splits,
                                  SPLITS_P2=triton.next_power_of_2(splits), num_warps=4)

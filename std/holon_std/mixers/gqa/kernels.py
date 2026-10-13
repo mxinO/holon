@@ -17,7 +17,13 @@ they read are stable; the key covers their launch shapes). `pages.lens` and `pag
 only from `prepare` on; host planning uses the plan's bounds.
 
 Facts: heads, kv_heads, head_dim, page, q_dtype, kv_dtype, layout, max_seqs. Kernel instances hold plans, so each
-planner creates its own.
+planner creates its own. `attention.paged_verify@1` has two more, given only when not their default (so the facts of
+every other site, which locks record, stay as they were), and a provider that does not implement them must not
+support them:
+- `causal` (default True): False — each row's 1 + k tokens see each other both ways (a block drafted at once), and
+  all of the context before them;
+- `window` (default 0, none): W > 0 — a query at position p sees no key at or before p − W (llama.cpp's
+  `p − p_k < n_swa`; SGLang's `window_left` = W − 1), keys after p (`causal` False) included.
 
 KV layouts (the deployment's `kv.format` plugin option; docs/m03-qwen38.md D6), each a page of one layer:
 - `kv.hnd`: `kv` [units, 2 (k/v), Hkv, page, D] in the model dtype (kv_dtype = q_dtype);

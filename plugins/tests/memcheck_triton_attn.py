@@ -5,14 +5,15 @@
 
 Without torch's caching allocator every tensor is its own cudaMalloc of exactly its size, so an access past the last
 unit's q8_0 scales (the end of the cache's byte segments), the block table or q is outside any allocation. Every
-head_dim, q8_0 and fp8 (Triton's bit decode), kv_write, prefill, decode with and without splits, and verify.
+head_dim, q8_0 and fp8 (Triton's bit decode), kv_write, prefill, decode with and without splits, and verify — also
+with its `causal` / `window` facts on blocks of 8 rows (M0.4 D4: the walk starts at the window's first key).
 """
 import torch
 from holon.core.build import BuildContext
 from holon.core.plugins import PluginSet, discover
 from holon_plugins.kernels.triton_attn import plugin
 
-from tests.test_attention_kernels import GEOMETRIES, MAX_SEQS, PAGE
+from tests.test_attention_kernels import BLOCK_ROWS, GEOMETRIES, MASKS, MAX_SEQS, PAGE
 from tests.test_attention_kv_quant import FP8, Q8, ROWS, quant_case, step_slots, writer
 
 
@@ -23,13 +24,14 @@ def main() -> None:
                  "layout": Q8, "kv_dtype": "q8_0", "max_seqs": MAX_SEQS}
         for layout, kernels in ((Q8, (plugin.Prefill, plugin.Decode, plugin.Verify)), (FP8, (plugin.Decode,
                                                                                                plugin.Verify))):
-            for cls, op in zip(kernels, ("attention.paged_prefill", "attention.paged_decode",
-                                         "attention.paged_verify")[-len(kernels):], strict=True):
-                rows = ROWS[op]
+            ops = ("attention.paged_prefill", "attention.paged_decode", "attention.paged_verify")[-len(kernels):]
+            runs = [(cls, ROWS[op], {}) for cls, op in zip(kernels, ops, strict=True)]
+            runs += [(plugin.Verify, BLOCK_ROWS, masks) for masks in MASKS if masks]
+            for cls, rows, masks in runs:
                 q, raw, cache, batch, pages = quant_case(rows, heads, kv_heads, head_dim, layout)
                 unit, off = step_slots(rows, pages, batch)
                 writer(layout, kv_heads, head_dim)(raw[unit, 0, :, off], raw[unit, 1, :, off], cache, unit, off)
-                kernel = cls(ctx, **facts)
+                kernel = cls(ctx, **facts, **masks)
                 handle = kernel.plan(batch, pages)
                 if hasattr(kernel, "prepare"):
                     kernel.prepare(handle)

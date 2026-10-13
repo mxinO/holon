@@ -18,14 +18,18 @@ def causal_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, query_st
     return out
 
 
-def paged_attention(q: torch.Tensor, kv: torch.Tensor, table: torch.Tensor, rows: torch.Tensor,
-                    lens: torch.Tensor, query_start: torch.Tensor) -> torch.Tensor:
-    """The `attention.paged_prefill@1` / `attention.paged_decode@1` oracle: new rows attend over paged KV.
+def paged_attention(q: torch.Tensor, kv: torch.Tensor, table: torch.Tensor, rows: torch.Tensor, lens: torch.Tensor,
+                    query_start: torch.Tensor, causal: bool = True, window: int = 0) -> torch.Tensor:
+    """The `attention.paged_prefill@1` / `paged_decode@1` / `paged_verify@1` oracle: new rows attend over paged KV.
 
     q [T, Hq, D]; kv [units, 2, Hkv, page, D] (one layer, HND); `table` [slots, max_pages] unit ids; batch row b
     uses table row `rows[b]`, holds `lens[b]` tokens including this step's, and owns query rows
     `query_start[b]:query_start[b+1]`, the last ones of its sequence (bottom-right causal). Rows with length 0
     (graph padding) produce zeros.
+
+    `causal=False`: a row's new tokens see each other both ways (and all the context before them). `window` W > 0: a
+    query at position p sees no key at or before p − W (llama.cpp's `p − p_k < n_swa`, SGLang's `window_left` W − 1;
+    HF's sliding mask admits one key more), keys after it (not causal) included.
     """
     if isinstance(kv, tuple):                     # q8_0: (values, scales), read through its dequantization
         kv = dequantize_q8_0(*kv)
@@ -41,9 +45,12 @@ def paged_attention(q: torch.Tensor, kv: torch.Tensor, table: torch.Tensor, rows
         k, v = (kv[units, i].transpose(1, 2).reshape(-1, *kv.shape[2:3], kv.shape[4])[:n].float()
                 .repeat_interleave(rep, dim=1) for i in (0, 1))
         scores = torch.einsum("qhd,khd->hqk", q[s:e].float(), k) / q.shape[-1] ** 0.5
-        pos = torch.arange(n - (e - s), n, device=q.device)
-        future = torch.arange(n, device=q.device)[None, :] > pos[:, None]
-        probs = scores.masked_fill(future, float("-inf")).softmax(-1)
+        pos = torch.arange(n - (e - s), n, device=q.device)[:, None]
+        key = torch.arange(n, device=q.device)[None, :]
+        hidden = (key > pos) if causal else torch.zeros(e - s, n, dtype=torch.bool, device=q.device)
+        if window:
+            hidden |= pos - key >= window
+        probs = scores.masked_fill(hidden, float("-inf")).softmax(-1)
         out[s:e] = torch.einsum("hqk,khd->qhd", probs, v).to(q.dtype)
     return out
 

@@ -39,10 +39,11 @@ def _case(rows: list[tuple[int, int]], heads: int, kv_heads: int, head_dim: int,
 
 
 def _kernel(op: str, provider: str, heads: int, kv_heads: int, head_dim: int, dtype: str = "bfloat16",
-            layout: str = "kv.hnd"):
+            layout: str = "kv.hnd", **masks):
+    """The kernel `provider` offers for `op`; `masks`: verify's `causal` / `window` facts, given when not default."""
     ctx = BuildContext(PluginSet(discover()), torch.device("cuda"), options={"kernels": {op: provider}})
     facts = {"heads": heads, "kv_heads": kv_heads, "head_dim": head_dim, "page": PAGE, "q_dtype": dtype,
-             "kv_dtype": kv_dtype(layout, dtype), "layout": layout, "max_seqs": MAX_SEQS}
+             "kv_dtype": kv_dtype(layout, dtype), "layout": layout, "max_seqs": MAX_SEQS} | masks
     return ctx.select_kernel(f"{op}@1", site="test", **facts).impl(ctx, **facts)
 
 
@@ -70,6 +71,22 @@ def test_kernel_matches_oracle(op, provider, rows, geometry, dtype):
     ref = _run(PagedAttention(None), q, kv, batch, pages)
     # bf16 output: a rounding step is ~0.4% of the value, and short rows output near-raw V values (|v| ~ 3).
     torch.testing.assert_close(ours.float(), ref.float(), atol=1e-2, rtol=1e-2)
+
+
+# Blocks of 8 rows (a drafter's block, M0.4 D4) from an empty context to past the widest window, across page bounds.
+BLOCK_ROWS = [(0, 8), (5, 8), (13, 8), (200, 8), (2040, 8), (2041, 8), (3000, 8)]
+MASKS = [{}, {"causal": False}, {"window": 16}, {"causal": False, "window": 16}, {"causal": False, "window": 100},
+         {"causal": False, "window": 2048}]
+
+
+@pytest.mark.parametrize("masks", MASKS, ids=lambda m: "-".join(f"{k}={v}" for k, v in m.items()) or "default")
+@pytest.mark.parametrize("geometry", GEOMETRIES)
+def test_verify_masks_match_oracle(geometry, masks):
+    q, kv, batch, pages = _case(BLOCK_ROWS, *geometry)
+    kernel = _kernel("attention.paged_verify", "kernels.triton_attn", *geometry, **masks)
+    ours, ref = _run(kernel, q, kv, batch, pages), _run(PagedAttention(None, **masks), q, kv, batch, pages)
+    torch.testing.assert_close(ours.float(), ref.float(), atol=1e-2, rtol=1e-2)
+    assert torch.equal(ours, _run(kernel, q, kv, batch, pages))
 
 
 @pytest.mark.parametrize(("op", "provider", "rows"), CASES)

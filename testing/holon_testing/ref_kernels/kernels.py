@@ -45,16 +45,16 @@ class SiluMul:
 
 
 class PagedAttention:
-    """`attention.paged_prefill/decode/verify@1` (any dtype)."""
+    """`attention.paged_prefill/decode/verify@1` (any dtype; verify's `causal` and `window` facts too)."""
 
-    def __init__(self, ctx, **facts) -> None:
-        pass
+    def __init__(self, ctx, *, causal: bool = True, window: int = 0, **facts) -> None:
+        self.causal, self.window = causal, window
 
     def plan(self, batch, pages):
         return pages.table, batch.dev.slots, pages.lens, batch.dev.query_start
 
     def run(self, q, kv, handle):
-        return gqa.paged_attention(q, kv, *handle)
+        return gqa.paged_attention(q, kv, *handle, causal=self.causal, window=self.window)
 
 
 class KvWrite:

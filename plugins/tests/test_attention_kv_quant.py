@@ -16,7 +16,17 @@ from holon_std.mixers.gqa import kernels as gqa_kernels
 from holon_std.mixers.gqa import reference as gqa
 from holon_testing.ref_kernels.kernels import PagedAttention
 
-from .test_attention_kernels import DECODE_ROWS, GEOMETRIES, MAX_SEQS, PAGE, PREFILL_ROWS, _case, _kernel, _run
+from .test_attention_kernels import (
+    BLOCK_ROWS,
+    DECODE_ROWS,
+    GEOMETRIES,
+    MAX_SEQS,
+    PAGE,
+    PREFILL_ROWS,
+    _case,
+    _kernel,
+    _run,
+)
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 
@@ -197,6 +207,19 @@ def test_triton_reads_fp8_on_every_sm(op):
              "kv_dtype": "float8_e4m3fn", "layout": FP8, "max_seqs": MAX_SEQS}
     kernel = (plugin.Decode if op == DECODE else plugin.Verify)(ctx, **facts)
     assert usage(_run(kernel, q, cache, batch, pages), _run(PagedAttention(None), q, cache, batch, pages)) <= 1
+
+
+@pytest.mark.parametrize("masks", [{"causal": False, "window": 16}, {"causal": False, "window": 2048}],
+                         ids=["window16", "window2048"])
+@pytest.mark.parametrize("layout", [Q8, FP8])
+def test_verify_masks_read_the_stored_format(layout, masks):
+    # A drafter's block (8 rows, bidirectional, sliding window) on the KV formats a 24 GB card serves it with.
+    if layout == FP8 and not fp8_device():
+        pytest.skip("fp8 KV kernels are selected from sm_89 on")
+    geometry = GEOMETRIES[0]
+    q, _, cache, batch, pages = quant_case(BLOCK_ROWS, *geometry, layout)
+    kernel = _kernel(VERIFY, TRITON, *geometry, layout=layout, **masks)
+    assert usage(_run(kernel, q, cache, batch, pages), _run(PagedAttention(None, **masks), q, cache, batch, pages)) <= 1
 
 
 @pytest.mark.parametrize(("op", "rows"), [(op, rows) for op, _, rows in CASES[Q8]])
