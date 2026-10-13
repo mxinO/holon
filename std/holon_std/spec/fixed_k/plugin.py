@@ -41,6 +41,10 @@ class FixedK:
                 return 0
         return k
 
+    def ks(self) -> set[int]:
+        """The k values this policy may answer (the engine captures a graph per verify width)."""
+        return {k for _, k in self.table}
+
     def observe(self, seq, k: int, n_draft: int, n_accept: int) -> None:
         if self.fallback:
             self.dry[id(seq)] = 0 if n_draft else self.dry.get(id(seq), 0) + 1

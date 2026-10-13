@@ -134,6 +134,8 @@ class DraftPolicy(Protocol):
         """Drafts per row for the next step of `seqs` (the running requests), from a finite declared set; 0: a plain
         decode step. Per step, not per request: every row of a verify step has the same width."""
 
+    # Optional: `ks() -> set[int]`, the k values `k` may return (the engine captures verify graphs for those).
+
     def observe(self, seq: Seq, k: int, n_draft: int, n_accept: int) -> None:
         """After a commit: the step's k, the drafts written for the request's next step, and the drafts it accepted
         (results reach the host one step late at overlap depth 1)."""

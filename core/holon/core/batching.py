@@ -6,15 +6,17 @@ import numpy as np
 from holon.api import BatchPlan, ShapeKey, TokenSrc
 
 
-def padded(plan: BatchPlan, rows: int, slot: int) -> BatchPlan:
-    """`plan` with decode rows appended up to `rows`, all on `slot` at position 0 (graph padding)."""
+def padded(plan: BatchPlan, rows: int, slot: int, width: int = 1) -> BatchPlan:
+    """`plan` with rows of `width` tokens, all producing logits (decode rows, or verify rows), appended up to `rows`,
+    all on `slot` at position 0 (graph padding)."""
     extra = rows - len(plan.slots)
     if extra == 0:
         return plan
-    pad = lambda a, v: np.concatenate([a, np.full(extra, v, dtype=a.dtype)])   # noqa: E731
-    out = host_plan(plan.step, pad(plan.slots, slot), pad(plan.start_upper, 0), pad(plan.n_query, 1),
-                    pad(plan.n_logits, 1), pad(plan.host_tokens, 0), pad(plan.token_src, TokenSrc.HOST))
-    out.mem_ops, out.publishes, out.ext = plan.mem_ops, plan.publishes, plan.ext
+    pad = lambda a, v, n=extra: np.concatenate([a, np.full(n, v, dtype=a.dtype)])   # noqa: E731
+    out = host_plan(plan.step, pad(plan.slots, slot), pad(plan.start_upper, 0), pad(plan.n_query, width),
+                    pad(plan.n_logits, width), pad(plan.host_tokens, 0, extra * width),
+                    pad(plan.token_src, TokenSrc.HOST))
+    out.mem_ops, out.publishes, out.ext, out.draft_k = plan.mem_ops, plan.publishes, plan.ext, plan.draft_k
     return out
 
 

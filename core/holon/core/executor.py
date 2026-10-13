@@ -101,17 +101,19 @@ class Executor:
                  planners: dict[str, Any], verifier: Any = None, drafter: Any = None,
                  pools: dict[str, Any] | None = None, rewinders: list[Any] = (),
                  sub_planners: dict[str, list[Any]] | None = None, substeps: tuple[int, int] = (0, 0),
-                 namespaces: list[str] = ()) -> None:
+                 namespaces: list[str] = (), verify_widths: tuple[int, ...] = ()) -> None:
         """`cfg`: the EngineConfig (sizes, graphs on or off); `pools`: every ledger pool, by name (for MemOps);
         `rewinders`: what rolls back past rejected drafts after each verify (`rewind(ctx)` callables);
         `sub_planners`: per auxiliary state group, one planner per drafter sub-step; `substeps`: how many sub-steps a
-        step may have and their widest row (the drafter's declarations); `namespaces`: the auxiliary models'."""
+        step may have and their widest row (the drafter's declarations); `namespaces`: the auxiliary models';
+        `verify_widths`: the verify-row widths (1 + k) the draft policy may ask for, captured as graphs."""
         self.cfg, self.device, self.model, self.vocab, self.state = cfg, device, model, vocab, state
         self.pools = pools or {}
         self.sampler, self.planners, self.verifier, self.drafter = sampler, planners, verifier, drafter
         self.rewinders = list(rewinders)
         self.sub_planners, self.substeps = sub_planners or {}, substeps
         self.namespaces = sorted(namespaces, key=len, reverse=True)       # the longest prefix names a group's
+        self.verify_widths = tuple(verify_widths)
         seqs = cfg.max_seqs
         tokens = max(cfg.max_step_tokens, seqs * (1 + cfg.max_draft_tokens))     # a verify step: 1 + k per row
         self.uploader = Uploader(device, state.upload_fields(seqs, tokens) | {
@@ -173,7 +175,7 @@ class Executor:
                 # bucket's variants leave reserved.
                 graphs, self.graphs = self.graphs, platform.Graphs(self.device)
                 peak += platform.reserved_growth(self.device, lambda: [
-                    self._graph_step(self.buckets[-1], params) for params in _VARIANTS])
+                    self._graph_step(self.buckets[-1], params, width) for width, params in self._graph_variants()])
                 self.graphs = graphs
         ledger.free()
         return int(platform.free_memory(self.device) * fraction) - peak
@@ -200,33 +202,49 @@ class Executor:
         if self.cfg.max_draft_tokens:
             torch.zeros(n * (1 + self.cfg.max_draft_tokens), self.vocab, device=self.device).argmax(-1)
 
+    def _graph_variants(self) -> list[tuple[int, SamplingParams]]:
+        """(row width, sampler params) of every graph per bucket: decode rows for each sampler variant; verify rows
+        of each width the policy may ask for, greedy (the verifier is greedy-exact)."""
+        return [(1, params) for params in _VARIANTS] + [(width, _VARIANTS[0]) for width in self.verify_widths]
+
     def capture_graphs(self) -> None:
-        """Capture every decode bucket for each sampler variant (after the pools' final materialize: graphs bake in
-        their addresses), so serving never stops to capture."""
+        """Capture every bucket's decode and verify graphs (after the pools' final materialize: graphs bake in their
+        addresses), so serving never stops to capture."""
         if self.graphs is None:
             return
         for rows in reversed(self.buckets):          # largest first: smaller graphs reuse its pool blocks
-            for params in _VARIANTS:
-                if not self._graph_step(rows, params):
+            for width, params in self._graph_variants():
+                if not self._graph_step(rows, params, width):
                     self.graphs = None              # some planner's kernel cannot be captured: stay eager
                     return
         self.sampler.admit(self.state.padding_slot, _VARIANTS[0])
 
     @torch.no_grad()
-    def _graph_step(self, rows: int, params: SamplingParams) -> bool:
-        """Warm up and capture one decode graph with every row on the padding slot (null unit, `params`)."""
+    def _graph_step(self, rows: int, params: SamplingParams, width: int = 1) -> bool:
+        """Warm up and capture one graph with every row on the padding slot (null unit, `params`): decode rows, or
+        verify rows of `width` tokens with their drafter sub-steps."""
         self.sampler.admit(self.state.padding_slot, params)
         empty = np.zeros(0, dtype=np.int32)
-        plan = padded(host_plan(0, empty, empty, empty, empty, np.zeros(0, dtype=np.int64)), rows,
-                      self.state.padding_slot)
+        plan = host_plan(0, empty, empty, empty, empty, np.zeros(0, dtype=np.int64))
+        plan.draft_k = width - 1
+        plan = padded(plan, rows, self.state.padding_slot, width)
         ctx = self._context(plan)
-        keys = [getattr(meta, "graph_key", None) for meta in ctx.metas.values()]
-        if None in keys:
+        key = self._graph_key(ctx, width)
+        if key is None:
             return False
-        key = (rows, self.sampler.variant(plan.slots), *keys)
         for _ in range(2):                          # warm-up, then capture
             self.graphs.run(key, lambda: self._decode(ctx))
         return True
+
+    def _graph_key(self, ctx: StepContext, width: int) -> tuple | None:
+        """The graph a step replays: its size and width, the sampler's variant, every planner's and sub-step's key
+        (None: some kernel cannot be captured)."""
+        metas = list(ctx.metas.values()) + [m for sub in (ctx.substeps.subs if ctx.substeps else []) for m in
+                                            sub.metas.values()]
+        keys = [getattr(meta, "graph_key", None) for meta in metas]
+        if None in keys:
+            return None
+        return (len(ctx.batch.plan.slots), width, self.sampler.variant(ctx.batch.plan.slots), *keys)
 
     # -- one step -------------------------------------------------------------------------------------------------
     def launch(self, plan: BatchPlan, exact: np.ndarray, logprobs: bool, prompt: list[PromptRows] | None = None
@@ -235,20 +253,21 @@ class Executor:
         knows; `logprobs`: some sampled row reports logprobs; `prompt` (not None: a prompt-logprob step) — those are
         computed now, on the host, so that step waits for the device."""
         rows, n_sampled = len(plan.slots), int(plan.n_logits.sum())
+        width = int(plan.n_query.max(initial=1))
+        uniform = bool((plan.n_query == width).all() and (plan.n_logits == width).all())   # decode or verify rows
         graphed = (self.graphs is not None and prompt is None and not logprobs        # graphs return tokens only
-                   and bool((plan.n_query == 1).all()) and rows <= self.buckets[-1])
+                   and uniform and rows <= self.buckets[-1])
         if graphed:
-            plan = padded(plan, next(b for b in self.buckets if b >= rows), self.state.padding_slot)
+            plan = padded(plan, next(b for b in self.buckets if b >= rows), self.state.padding_slot, width)
             exact = np.concatenate([exact, np.ones(len(plan.slots) - rows, dtype=bool)])   # padding: start 0
         ctx = self._context(plan, exact)
+        key = self._graph_key(ctx, width) if graphed else None
         out = sampled = accepts = drafts = None
         recorded: list[Logprobs] = []
         # MemOps run eagerly in stream order around the forward, never inside a graph: their count varies per step.
         run_mem_ops(plan.mem_ops, self.pools, "pre_forward")
-        if graphed:
-            keys = [meta.graph_key for meta in ctx.metas.values()]
-            key = (len(plan.slots), self.sampler.variant(plan.slots), *keys)
-            sampled = self.graphs.run(key, lambda: self._decode(ctx))           # the drafter's run included
+        if key is not None:
+            sampled, accepts = self.graphs.run(key, lambda: self._decode(ctx))   # verify, rewind, drafter included
         else:
             self._prepare(ctx)
             h = self.model.trunk(ctx)               # always: chunks without sampled rows still write their state
@@ -284,16 +303,23 @@ class Executor:
         done.record()
         return Launched(tokens, accepts, drafts, lps, done, recorded)
 
-    def _decode(self, ctx: StepContext) -> torch.Tensor:
-        """A decode step's device work from inputs to sampled tokens and the drafter's run — the part captured in a
-        graph."""
+    def _decode(self, ctx: StepContext) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """A decode or verify step's device work from inputs to tokens (and accepted drafts), the rewind and the
+        drafter's run — the part captured in a graph."""
         self._prepare(ctx)
         h = self.model.trunk(ctx)
         logits = self.model.head(h[ctx.batch.dev.logits_index]).float()
-        tokens = self._store(ctx, self.sampler.sample(logits, ctx).tokens)
+        accepts = None
+        if (ctx.batch.plan.n_logits > 1).any():
+            out, accepts = self.verifier.verify(logits, ctx)
+            tokens = self._store(ctx, out.tokens, accepts)
+            for rewind in self.rewinders:
+                rewind(ctx)
+        else:
+            tokens = self._store(ctx, self.sampler.sample(logits, ctx).tokens)
         if self.drafter is not None:
             self._run_drafter(ctx, h)
-        return tokens
+        return tokens, accepts
 
     def _run_drafter(self, ctx: StepContext, h: torch.Tensor) -> None:
         if ctx.substeps is not None:

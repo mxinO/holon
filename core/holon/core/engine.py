@@ -147,7 +147,8 @@ class Engine:
         self.executor = Executor(cfg, self.device, model, self.spec.vocab, sampler, self.state, planners,
                                  verifier, drafter, pools=self.ledger.pools, rewinders=rewinders,
                                  sub_planners=sub_planners, substeps=substeps,
-                                 namespaces=[ns for ns, _ in aux.modules] if aux is not None else [])
+                                 namespaces=[ns for ns, _ in aux.modules] if aux is not None else [],
+                                 verify_widths=self._verify_widths())
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None
                                 else self.executor.state_memory(self.ledger, cfg.memory_fraction))
         self.state.reset_padding()
@@ -161,6 +162,13 @@ class Engine:
         self._prompt_lp: dict[Seq, Logprobs] = {}         # sequences still accumulating prompt logprobs
         self._siblings: dict[Seq, list[Seq]] = {}         # n > 1: waiting for the first sequence's prefill
         self._live: dict[str, list[Seq]] = {}              # request id -> its unfinished sequences
+
+    def _verify_widths(self) -> tuple[int, ...]:
+        """The verify-row widths to capture: 1 + each k the policy declares (`ks()`), else every k up to the maximum."""
+        if self.policy is None:
+            return ()
+        ks = self.policy.ks() if hasattr(self.policy, "ks") else range(1, self.cfg.max_draft_tokens + 1)
+        return tuple(sorted({1 + k for k in ks if 0 < k <= self.cfg.max_draft_tokens}))
 
     def _overflow(self, drafter) -> int:
         """Positions past max_model_len a step may touch: a verify row padded from one below the limit, then what
