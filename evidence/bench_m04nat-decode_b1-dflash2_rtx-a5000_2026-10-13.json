@@ -1,0 +1,206 @@
+{
+ "workload": "m04nat-decode_b1-dflash2",
+ "date": "2026-10-13",
+ "command": "python bench/run.py --name m04nat-decode_b1-dflash2 --gpu 0 --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf --rounds 2 --max-batch 4 --max-step-tokens 2048 --corpus judge/prompts/v1-qwen3_5.jsonl --backends holon_http --traces bench/traces/decode_b1.jsonl",
+ "commit": "a222be36f543581eb3ef94f403e8f62c5aa56b9f-dirty",
+ "dirty": ["M docs/m04-spec.md", " M plugins/tests/test_rejection.py", " M plugins/tests/test_spec.py", " M plugins/tests/test_taps.py"],
+ "gpu_class": "rtx-a5000",
+ "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf",
+ "rounds": 2,
+ "order": ["holon_http"],
+ "method": "In-process engines driven by bench/driver.py, one scheduling step per call; client-side timestamps taken when a step returns a token. TTFT = first token - release (arrival, or previous turn's last token + gap); TPOT = (last - first) / (tokens - 1) per request; throughput = output tokens / (last token - first release). Decode steps = steps at peak batch that return no first token; decode tok/s = their tokens / their wall time. CPU ms/step = time.process_time() delta around step() on those steps, measured with --blocking-sync (CUDA primary context in blocking-sync mode and torch events created blocking, so waiting for the GPU sleeps and is not counted). Greedy, ignore_eos, fixed output lengths; warmup on the same shapes with other prompt tokens, excluded. HTTP backends (llamaserver, holon_http; bench/backends/http.py): streamed requests, a token timestamped when its chunk arrives; their 'steps' are client polls, so decode tok/s and CPU ms/step do not apply to them.",
+ "traces_sha256": {
+  "decode_b1": "cc41d53b03df6007"
+ },
+ "corpus": {
+  "v1-qwen3_5.jsonl": "80bf5a54bd350923"
+ },
+ "backends": {
+  "holon_http": {
+   "config": {
+    "flags": "--max-seqs 4 --max-model-len 768 --max-step-tokens 2048 --max-seqs 4 --max-model-len 768 --max-step-tokens 2048 --memory-fraction 0.9 --max-draft-tokens 7 --slots drafter=drafters.dflash draft_policy=std.spec.fixed_k verifier=std.spec.rejection --plugin-options recurrent.checkpoints=4 kv.format=q8_0 spec.k=7 dflash.path=local/models/Qwen3.8-27B-DFlash2-Q4_K_M.gguf"
+   },
+   "load_s": 31.5,
+   "blocking_sync": false,
+   "packages": {
+    "torch": "2.11.0",
+    "triton": "3.6.0",
+    "flashinfer-python": "0.6.12"
+   }
+  }
+ },
+ "summary": {
+  "decode_b1": {
+   "holon_http": {
+    "requests": 2,
+    "ttft_ms": {
+     "p50": 241.27,
+     "p90": 241.38,
+     "p99": 241.41
+    },
+    "tpot_ms": {
+     "p50": 18.11,
+     "p90": 18.11,
+     "p99": 18.11
+    },
+    "throughput_tok_s": 52.7,
+    "throughput_per_round": [52.7, 52.7],
+    "decode": {
+     "batch": 8,
+     "steps": 26,
+     "tok_s": 740.1,
+     "wall_ms_p50": 10.822,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 512,
+    "stats": {
+     "prefix_tokens_saved": 0,
+     "spec_drafted": 910,
+     "spec_rows_k7_accepting_0": 22,
+     "spec_rows_k7_accepting_1": 30,
+     "spec_rows_k7_accepting_2": 16,
+     "spec_rows_k7_accepting_3": 16,
+     "spec_rows_k7_accepting_4": 6,
+     "spec_rows_k7_accepting_5": 10,
+     "spec_rows_k7_accepting_6": 2,
+     "spec_rows_k7_accepting_7": 28,
+     "spec_verify_steps": 130,
+     "spec_verify_steps_graphed": 130,
+     "spec_verify_steps_overlapped": 128
+    }
+   }
+  }
+ },
+ "runs": [
+  {
+   "round": 0,
+   "backend": "holon_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 241.12,
+     "p90": 241.12,
+     "p99": 241.12
+    },
+    "tpot_ms": {
+     "p50": 18.11,
+     "p90": 18.11,
+     "p99": 18.11
+    },
+    "throughput_tok_s": 52.7,
+    "throughput_per_round": [52.7],
+    "decode": {
+     "batch": 8,
+     "steps": 13,
+     "tok_s": 738.9,
+     "wall_ms_p50": 11.013,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "prefix_tokens_saved": 0,
+     "spec_drafted": 455,
+     "spec_rows_k7_accepting_0": 11,
+     "spec_rows_k7_accepting_1": 15,
+     "spec_rows_k7_accepting_2": 8,
+     "spec_rows_k7_accepting_3": 8,
+     "spec_rows_k7_accepting_4": 3,
+     "spec_rows_k7_accepting_5": 5,
+     "spec_rows_k7_accepting_6": 1,
+     "spec_rows_k7_accepting_7": 14,
+     "spec_verify_steps": 65,
+     "spec_verify_steps_graphed": 65,
+     "spec_verify_steps_overlapped": 64
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.241115, 4.859277]
+   ],
+   "stats": {
+    "prefix_tokens_saved": 0,
+    "spec_verify_steps": 65,
+    "spec_verify_steps_graphed": 65,
+    "spec_verify_steps_overlapped": 64,
+    "spec_drafted": 455,
+    "spec_rows_k7_accepting_0": 11,
+    "spec_rows_k7_accepting_1": 15,
+    "spec_rows_k7_accepting_3": 8,
+    "spec_rows_k7_accepting_2": 8,
+    "spec_rows_k7_accepting_5": 5,
+    "spec_rows_k7_accepting_7": 14,
+    "spec_rows_k7_accepting_4": 3,
+    "spec_rows_k7_accepting_6": 1
+   }
+  },
+  {
+   "round": 1,
+   "backend": "holon_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 241.41,
+     "p90": 241.41,
+     "p99": 241.41
+    },
+    "tpot_ms": {
+     "p50": 18.11,
+     "p90": 18.11,
+     "p99": 18.11
+    },
+    "throughput_tok_s": 52.7,
+    "throughput_per_round": [52.7],
+    "decode": {
+     "batch": 8,
+     "steps": 13,
+     "tok_s": 741.3,
+     "wall_ms_p50": 10.811,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "prefix_tokens_saved": 0,
+     "spec_drafted": 455,
+     "spec_rows_k7_accepting_0": 11,
+     "spec_rows_k7_accepting_1": 15,
+     "spec_rows_k7_accepting_2": 8,
+     "spec_rows_k7_accepting_3": 8,
+     "spec_rows_k7_accepting_4": 3,
+     "spec_rows_k7_accepting_5": 5,
+     "spec_rows_k7_accepting_6": 1,
+     "spec_rows_k7_accepting_7": 14,
+     "spec_verify_steps": 65,
+     "spec_verify_steps_graphed": 65,
+     "spec_verify_steps_overlapped": 64
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.241415, 4.859143]
+   ],
+   "stats": {
+    "prefix_tokens_saved": 0,
+    "spec_verify_steps": 65,
+    "spec_verify_steps_graphed": 65,
+    "spec_verify_steps_overlapped": 64,
+    "spec_drafted": 455,
+    "spec_rows_k7_accepting_0": 11,
+    "spec_rows_k7_accepting_1": 15,
+    "spec_rows_k7_accepting_3": 8,
+    "spec_rows_k7_accepting_2": 8,
+    "spec_rows_k7_accepting_5": 5,
+    "spec_rows_k7_accepting_7": 14,
+    "spec_rows_k7_accepting_4": 3,
+    "spec_rows_k7_accepting_6": 1
+   }
+  }
+ ]
+}

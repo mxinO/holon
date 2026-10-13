@@ -1,8 +1,9 @@
 # M0.4 — speculative decoding: MTP, DFlash2, n-gram: design and implementation plan
 
 Status: **revision 3, reviewed clean** (2026-10-13). Revisions 1–3 were reviewed by a panel of three; every finding is
-resolved in §9. **Gate A met** (2026-10-13, §10): MTP and n-gram, merged to `main`. Gate B (DFlash2): its core and
-std seams are built (§11, phase 1), for the panel's review before `drafters/dflash`.
+resolved in §9. **Gate A met** (2026-10-13, §10): MTP and n-gram, merged to `main`. Gate B (DFlash2): the seams
+(§11, phase 1) and `drafters.dflash` with its A5000 evidence (§12, phase 2) are built; the 4090 evidence and the
+panel's review are next.
 
 Scope: plan §7, amended:
 - DFlash/DFlash2 is added. It was previously a v2 draft-model drafter.
@@ -657,14 +658,71 @@ is verified (research note, open items 1–2): every tensor name and shape §2 a
   untouched). Re-propagation comes with Gate B's evidence.
 
 
-**Open for phase 2** (for the panel with the seams)
-- **The DFlash attention unit's planner.** Its block attention is a sub-step of 8 rows through `attention.paged_verify@1`
-  with `causal=False, window=2048`, and its absorb pass only writes context K/V. The GQA planner (which selects verify
-  kernels for sub-steps) lives in `std.mixers.gqa`, which a plugin may not import: either the GQA unit gains `causal` /
-  `window` knobs passed through as the verify facts (sliding-window models need them too), or the DFlash unit carries
-  its own small planner. The first is the more general; it touches std only.
-- **The drafter's temperature.** DFlash2 walks at the request's temperature, which the `Sampler` protocol does not
-  expose per row; its draws can use `ctx.sampler.uniform` on a stream of its own.
-- **Tap 5, 19, 33, 47, 61** are `tap(i)` directly: the residual stream after HF layer i (llama.cpp stores i + 1, the
-  next layer's input: the same tensor).
-- Core: 3664 of 6000 code lines (+14 in phase 1).
+**Settled for phase 2** (panel, 2026-10-13): `causal` / `window` become GQA knobs reaching every attention op (no
+private planner), `aux_model(..., options)` carries `planner.device_lens`, `GQA.write_kv` writes context; the drafter
+samples through `Sampler.distribution` / `uniform` (no new API). Taps 5, 19, 33, 47, 61 are `tap(i)` directly (the
+residual stream after HF layer i; llama.cpp stores i + 1, the next layer's input: the same tensor).
+
+## 12. Gate B, phase 2 (2026-10-13): DFlash2 and the A5000 evidence
+
+**Fold-ins (panel minors):** a draft outside its own law (q(d) = 0) is never accepted — it ends the row's real
+drafts and its column is drawn from p (lossless whatever the law); sub-steps carry the sampler; `Sampler` documents
+its rows, widths and uniform streams (0 sampler, 1–2 verifiers, ≥ 8 drafters; a drafter on stream 1 fails the joint
+L0-dist); the kernel-identity check is `holon_judge.kernel_identity` with its record (48/48 bitwise against
+71e6fd3); `BuildCtx.static` / `tap` buffers are allocated at build, sized for a step's most tokens.
+
+**Seams:** the GQA knobs `causal` / `window` reach every attention op it selects (prefill, decode, verify, the
+model-only causal op): Triton decode and verify, the references implement them; Triton's q8_0 prefill and FlashInfer
+decline, so a sliding-window target with them fails to build instead of attending unwindowed. `aux_model(...,
+options)`; `GQA.write_kv`; `BuildCtx.weight_source(path)` (§3.1, unbuilt until now).
+
+**`drafters.dflash`** (plugin `drafters.dflash`, option `dflash.path`; an HF checkpoint or llama.cpp's GGUF): an aux
+model `dflash` built with `planner.device_lens`. Every step: the tapped streams → `fc` → `hidden_norm` → every draft
+layer's context K/V at the step's positions (`write_kv`, paged `dflash.kv`, prefix-shared); then for the rows that
+sampled one sub-step of 8 rows at num_computed … + 7 (the last token, then the target's embedding of the mask token),
+GQA not causal with a 2048 window, wrapped like the MLP by the grouped dynamic conv; the selector scores the target
+lm_head's top-16 per row, and the walk draws each slot through the sampler at the request's parameters (stream 8;
+greedy: one-hot), publishing its laws (`q_support` 16). `reference.py`: the published forward in plain torch.
+Lookahead 8, sub-step offset 0: the block's K/V at num_computed … + 7 are overwritten by the next step's context.
+
+**GGUF:** llama.cpp's converter (`convert_hf_to_gguf.py --target-model-dir`, BF16) handles the checkpoint as is;
+`llama-quantize Q4_K_M` (built CPU-only) gives 1079.6 MiB (4.71 BPW; fc, conv projections and both codebooks Q4_K,
+the conv bases and norms F32). The drafter reads the GGUF through its own weight map (`target_layers` stored as
+id + 1).
+
+| Check (RTX A5000) | Result |
+|---|---|
+| L0-drafter, DFlash2 bf16 on UD-IQ3_S (v1-qwen3_5, 4 cuts per prompt, 672 rows) | top-1 99.107% vs floor 99.405% (6 vs 4 disagreements, all at near-ties: confident top-1 100% for both); KL p50 1.67e-4 (≤ 3.97e-4), p99 3.29e-3 (≤ 5.83e-3): **FAIL by 2 rows** on the overall top-1 budget |
+| L0-drafter, DFlash2 Q4_K_M (floor: q8_1 by row count) | top-1 97.470% vs 97.321%, KL p50 5.82e-4 (≤ 1.05e-3), p99 9.47e-3 (≤ 2.11e-2): PASS |
+| Plant `dflash-tap-offset` | top-1 72.8%, KL p50 0.11: FAIL |
+| L0-drafter, the GGUF MTP head with its chain of 3 (steps 2–3 teacher-forced; 288 rows) | top-1 99.653% vs 100% (one row, confident), KL p50 1.66e-5 (≤ 7.36e-5), p99 3.36e-3 (≤ 3.87e-3): **FAIL by 1 row** |
+| Bounded spec vs plain, UD-IQ3_S + DFlash2 Q4_K_M, k = 7, q8_0 KV, 8 sessions | 98.828% / 99.023% vs 98.999%: PASS; plants replay-off-by-one, verify-writes-state: FAIL |
+| Snapshot, the same configuration, 3 engines | run-identical, 79 steps |
+| Memory fit (q8_0 KV, 4 seqs, 32K, 4 checkpoints) | drafter 1.054 GiB (Q4_K_M) / 3.584 GiB (bf16); features buffer 100 MiB; draft KV 10 880 B per token (target 34 816 B); KV 176.6K / 120.9K tokens |
+| GPU smoke, 2 chat prompts × 96 greedy tokens | identical to plain; 49/49 verify steps graphed; ≈ 3.9 tokens per verify step (bf16 and Q4_K_M) |
+| Single stream, natural text (`bench_m04nat-decode_b1-{plain,dflash2}`, Q4_K_M drafter, q8_0 KV) | TPOT 27.34 → 18.11 ms (1.51×); 4.02 tokens per verify step (predicted 3.5–5), draft acceptance 0.431; 130/130 verify steps graphed |
+
+**Decisions and deviations**
+- **The L0-drafter verdicts held for the panel.** Both near-misses are on the overall top-1 budget (floor − 0.25
+  points), which at 672 and 288 rows is under 2 rows and under 1 row; KL p50 and p99 are within budget in both. The
+  spec states the rule at confident positions (§5); the judge applies L2's overall rule, as Gate A's MTP L0-drafter
+  did. Not re-run, nor the rule changed after the result: the panel decides (more cuts per prompt, or the confident
+  rule).
+- **"Recorded target hidden states"** are the engine's own: the judge taps the target at the checkpoint's layers
+  (independently of the drafter's taps, so the tap plant shows) and the reference runs on them; an fp32 27B target is
+  out of reach of the host's memory. For GGUF weights the golden dequantizes them; the floor rounds each quantized
+  matmul to q8_1 on the kernel path its row count selects (the ggml plugin's own predicate).
+- **The snapshot tool pinned its runs' pools** (a judge bug: engines built one after another measured different free
+  memory, so later runs had smaller pools and another schedule — the DFlash2 trace first came out not run-identical).
+  The lock snapshots of `holon_tools propagate` compare runs across processes and have the same exposure: to fix with
+  Gate B's locks.
+- **The startup profile now measures a drafting verify step whole** (rewind, drafter, sub-steps): eager verify steps
+  allocated the draft block's activations unmeasured.
+- **Fixed on the way:** the selector's projection took 3-D input, which a quantized linear rejects (the GGUF drafter
+  failed at its first draft).
+- **The mask row is the target's `embed[248070]`** (no `mask_embedding.pt` ships).
+- **Tests merged under the suite-time rule:** the toy GPU graph test of phase 1 is replaced by the quantized DFlash2
+  graph test; the sampled Markov test and the stream test are one; the tap and DFlash CPU matrices run 2 of 4
+  configurations each.
+
+Core: 3678 of 6000 code lines (+14 in phase 1, +14 in phase 2).
