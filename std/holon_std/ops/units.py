@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import torch
+from holon.api import QTensor
 from torch import nn
 
 from . import kernels
@@ -50,66 +51,120 @@ class Rope(nn.Module):
 
 class _Quantized:
     """A unit's quantized weight (adopted at load, design §5.5): its layout and the op that reads it. The kernel is
-    bound by `bind_kernels`, after merges, so a unit merged away binds none and leaves no site in the lock."""
+    bound by `bind`, after merges, so a unit merged away binds none and leaves no site in the lock."""
 
     def __init__(self, ctx, layout, op: str, **facts) -> None:
         self.ctx, self.layout, self.op = ctx, layout, op
         self.facts = {"layout": f"{layout.scheme.elem}/{layout.name}", **facts}
         self._kernel = None
 
-    def bind(self) -> None:
+    def bind(self, parts: dict[str, torch.Tensor], shape: tuple[int, ...],
+             param: nn.Parameter | None) -> dict[str, torch.Tensor]:
+        """Select the kernel; returns the parts it reads: `parts`, or what its `prepare` makes of them
+        (docs/m06-lowp.md D4), the primary part swapped into `param` so the source parts are released (a tied head
+        has no `param`)."""
         site = f"std.ops.{self.op.split('@')[0]}[" + ",".join(f"{k}={v}" for k, v in self.facts.items()) + "]"
         self._kernel = self.ctx.select_kernel(self.op, site=site, **self.facts).impl(self.ctx, **self.facts)
+        if not hasattr(self._kernel, "prepare"):
+            return parts
+        q = QTensor(self.layout, shape, parts)
+        if (prepared := self._kernel.prepare(q)) is q:
+            return parts
+        return dict(prepared.parts) if param is None else _hold(param, prepared.parts, self.ctx.device)
 
-    def __call__(self, x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    def __call__(self, x: torch.Tensor, weight) -> torch.Tensor:
         return self._kernel(x, weight)
 
 
-def _adopt(param: nn.Parameter, blocks: torch.Tensor, device: torch.device) -> None:
-    """The meta parameter becomes the stored blocks on the device (the Parameter object kept)."""
-    torch.utils.swap_tensors(param, nn.Parameter(blocks.to(device), requires_grad=False))
+def _hold(param: nn.Parameter, parts: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
+    """`parts` on the device by role, the first (the primary part) held by `param`: what the parameter held (meta,
+    or a part `prepare` replaced) is swapped out, the Parameter object kept."""
+    (role, primary), *rest = parts.items()
+    torch.utils.swap_tensors(param, nn.Parameter(primary.to(device), requires_grad=False))
+    return {role: param} | {r: t.to(device) for r, t in rest}
+
+
+def _act_quant(ctx) -> str:
+    """The deployment's `quant.act` plugin option for quantized weights (default `a8`, docs/m06-lowp.md D3)."""
+    act = ctx.options.get("plugins", {}).get("quant.act", "a8")
+    if act not in kernels.ACT_QUANT:
+        raise ValueError(f"quant.act {act!r}: one of {list(kernels.ACT_QUANT)} for quantized weights")
+    return act
 
 
 def _dtype(t: torch.dtype) -> str:
     return str(t).removeprefix("torch.")
 
 
+def _by_rows(parts: list[torch.Tensor], outs: list[int]) -> bool:
+    """Every unit's part has `out / g` rows of its unit's `out`, for one `g`."""
+    gs = {out // p.shape[0] if p.dim() and p.shape[0] and out % p.shape[0] == 0 else 0
+          for p, out in zip(parts, outs, strict=True)}
+    return len(gs) == 1 and 0 not in gs
+
+
+def _same_bits(a: torch.Tensor, b: torch.Tensor) -> bool:
+    return a.dtype == b.dtype and a.shape == b.shape and torch.equal(a.reshape(-1).view(torch.uint8),
+                                                                     b.reshape(-1).view(torch.uint8))
+
+
+def _merged_parts(units: tuple[Linear, ...]) -> dict[str, torch.Tensor] | None:
+    """The units' quantized parts as one weight's (docs/m06-lowp.md D5): a part with `out / g` rows in every unit is
+    concatenated by rows; any other (a per-tensor scale) must be bit-equal in every unit, else None."""
+    if len({tuple(u.parts) for u in units}) > 1:
+        return None
+    merged = {}
+    for role, first in units[0].parts.items():
+        parts = [u.parts[role] for u in units]
+        if _by_rows(parts, [u.out_features for u in units]):
+            merged[role] = torch.cat(parts)
+        elif all(_same_bits(p, first) for p in parts):
+            merged[role] = first
+        else:
+            return None
+    return merged
+
+
 class Linear(nn.Module):
+    """`x @ weight.T (+ bias)`. Dense, or a quantized weight adopted at load: its parts by role, the first (the primary
+    part) held by `weight`, read by the `qlinear@2` kernel bound after merges."""
+
     def __init__(self, ctx, *, in_features: int, out_features: int, bias: bool = False) -> None:
         super().__init__()
         self.in_features, self.out_features, self._ctx = in_features, out_features, ctx
         self.weight = nn.Parameter(torch.empty(out_features, in_features, dtype=ctx.dtype), requires_grad=False)
         self.bias = nn.Parameter(torch.empty(out_features, dtype=ctx.dtype), requires_grad=False) if bias else None
         self._q: _Quantized | None = None
+        self.parts: dict[str, torch.Tensor] | None = None            # a quantized weight's, by role
 
     def _quantized(self, layout) -> _Quantized:
         dtype = _dtype(self._ctx.dtype)
         return _Quantized(self._ctx, layout, kernels.QLINEAR, **{"in": self.in_features, "out": self.out_features},
-                          act_dtype=dtype, out_dtype=dtype)
+                          act_dtype=dtype, out_dtype=dtype, act_quant=_act_quant(self._ctx))
 
     def adopt(self, ctx, name: str, q) -> bool:
         if name != "weight" or tuple(q.logical_shape) != (self.out_features, self.in_features):
             return False
-        self._q = self._quantized(q.layout)
-        _adopt(self.weight, q.parts["blocks"], ctx.device)
+        self._q, self.parts = self._quantized(q.layout), _hold(self.weight, q.parts, ctx.device)
         return True
 
     def bind_kernels(self, ctx) -> None:
         if self._q is not None and self.weight is not None:          # not merged away
-            self._q.bind()
+            self.parts = self._q.bind(self.parts, (self.out_features, self.in_features), self.weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self._q is None:
             return nn.functional.linear(x, self.weight, self.bias)
-        y = self._q(x, self.weight)
+        y = self._q(x, self.parts)
         return y if self.bias is None else y + self.bias
 
     @staticmethod
     def merge(*units: Linear) -> Linear | None:
         """One unit for several projections of the same input — one GEMM, or one quantized matmul, instead of
         several — whose output rows are the units' outputs in order; it owns the weight and the units give theirs up
-        (they are not called afterwards). None if they cannot share one: biases, or different dtypes, layouts or input
-        sizes (ggml rows are independent block runs, so quantized weights of one type concatenate by rows).
+        (they are not called afterwards). None if they cannot share one: biases, different dtypes, layouts or input
+        sizes, or quantized parts that merge neither by rows nor as equal values (`_merged_parts`; ggml rows are
+        independent block runs, so weights of one type concatenate by rows).
 
         Optional capability of every `unit.std.ops.linear@1` provider, used duck-typed by composites (attention q/k/v,
         gate/up) in `finalize_weights`."""
@@ -117,35 +172,41 @@ class Linear(nn.Module):
         kinds = {(u.weight.dtype, u._q and u._q.facts["layout"], u.in_features) for u in units}
         if any(u.bias is not None for u in units) or len(kinds) > 1:
             return None
-        weight = torch.cat([u.weight.data for u in units])
+        parts = {"weight": torch.cat([u.weight.data for u in units])} if first._q is None else _merged_parts(units)
+        if parts is None:
+            return None
         with torch.device("meta"):
             merged = Linear(first._ctx, in_features=first.in_features, out_features=sum(u.out_features for u in units))
-        torch.utils.swap_tensors(merged.weight, nn.Parameter(weight, requires_grad=False))
+        held = _hold(merged.weight, parts, first._ctx.device)
         if first._q is not None:
-            merged._q = merged._quantized(first._q.layout)
+            merged._q, merged.parts = merged._quantized(first._q.layout), held
         for u in units:
-            u.weight = None
+            u.weight = u.parts = None
         return merged
 
 
 class Embedding(nn.Module):
+    """The token table: dense, or a quantized one adopted at load (its parts as `Linear`'s), read by `qembedding@1`
+    from `weight`, its primary part; a tied head reads all its parts."""
+
     def __init__(self, ctx, *, vocab: int, hidden: int) -> None:
         super().__init__()
         self.vocab, self.hidden, self.dtype = vocab, hidden, ctx.dtype
         self.weight = nn.Parameter(torch.empty(vocab, hidden, dtype=ctx.dtype), requires_grad=False)
         self._q: _Quantized | None = None
+        self.parts: dict[str, torch.Tensor] | None = None
 
     def adopt(self, ctx, name: str, q) -> bool:
         if name != "weight" or tuple(q.logical_shape) != (self.vocab, self.hidden):
             return False
         self._q = _Quantized(ctx, q.layout, kernels.QEMBEDDING, vocab=self.vocab, hidden=self.hidden,
                              dtype=_dtype(self.dtype))
-        _adopt(self.weight, q.parts["blocks"], ctx.device)
+        self.parts = _hold(self.weight, q.parts, ctx.device)
         return True
 
     def bind_kernels(self, ctx) -> None:
         if self._q is not None:
-            self._q.bind()
+            self.parts = self._q.bind(self.parts, (self.vocab, self.hidden), self.weight)
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         return nn.functional.embedding(ids, self.weight) if self._q is None else self._q(ids, self.weight)
@@ -167,26 +228,28 @@ class LMHead(nn.Module):
             self._embed = []
             self.weight = nn.Parameter(torch.empty(vocab, hidden, dtype=ctx.dtype), requires_grad=False)
         self._q: _Quantized | None = None
+        self.parts: dict[str, torch.Tensor] | None = None
 
     def _quantized(self, ctx, layout) -> _Quantized:
         return _Quantized(ctx, layout, kernels.QLINEAR, **{"in": self.hidden, "out": self.vocab},
-                          act_dtype=_dtype(self.dtype), out_dtype="float32")
+                          act_dtype=_dtype(self.dtype), out_dtype="float32", act_quant=_act_quant(ctx))
 
     def adopt(self, ctx, name: str, q) -> bool:
         if self._embed or name != "weight" or tuple(q.logical_shape) != (self.vocab, self.hidden):
             return False
-        self._q = self._quantized(ctx, q.layout)
-        _adopt(self.weight, q.parts["blocks"], ctx.device)
+        self._q, self.parts = self._quantized(ctx, q.layout), _hold(self.weight, q.parts, ctx.device)
         return True
 
     def finalize_weights(self, ctx) -> None:
-        if self._embed and self._embed[0]._q is not None:          # tied to a quantized table: read its blocks
+        if self._embed and self._embed[0]._q is not None:          # tied to a quantized table: read its parts
             self._q = self._quantized(ctx, self._embed[0]._q.layout)
 
     def bind_kernels(self, ctx) -> None:
-        if self._q is not None:
-            self._q.bind()
+        if self._q is not None:                                    # after the embedding's (model order)
+            parts = self._embed[0].parts if self._embed else self.parts
+            self.parts = self._q.bind(parts, (self.vocab, self.hidden), self.weight)
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
-        weight = self._embed[0].weight if self._embed else self.weight
-        return nn.functional.linear(h, weight).float() if self._q is None else self._q(h, weight)
+        if self._q is not None:
+            return self._q(h, self.parts)
+        return nn.functional.linear(h, self._embed[0].weight if self._embed else self.weight).float()

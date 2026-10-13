@@ -1,12 +1,13 @@
 """llama.cpp's quantized CUDA kernels (vendored at a pinned commit, M0.1 design §4.4, M0.2 design §4.3) as
-`qlinear@1`, `qembedding@1` and `linear_experts@1` kernels for ggml block layouts (`"ggml.<type>/gguf.native"`), and
+`qlinear@2`, `qembedding@1` and `linear_experts@1` kernels for ggml block layouts (`"ggml.<type>/gguf.native"`), and
 its MoE routing and combine as `moe_topk@1` and `moe_combine@1` (op contracts: std.ops.kernels, std.moe.kernels).
 
 `qlinear` dispatches like llama.cpp, from the row count: `mmvq` up to the type's threshold on this device (it writes
 bf16 or f32 directly), else `mmq` in 512-row chunks (llama.cpp's ubatch) into a per-call f32 tensor that one cast
 turns into `out_dtype` (D5). Both quantize the activations to q8_1 in a workspace shared by every instance with the
-same `in`. `qembedding` is llama.cpp's `get_rows`. With `in` a multiple of 256 (all supported shapes) no kernel
-reads past the weight blocks, so they need no padding (L0 poisons the bytes after them).
+same `in`, so they serve `act_quant` `a8` and `a4` alike (`config["act"]`, recorded in the lock, names each path's
+activation format; M0.6 D3). `qembedding` is llama.cpp's `get_rows`. With `in` a multiple of 256 (all supported
+shapes) no kernel reads past the weight blocks, so they need no padding (L0 poisons the bytes after them).
 
 `linear_experts` is llama.cpp's MUL_MAT_ID per 512-token chunk: mmvq with ids up to the type's limit
 (`get_mmvq_mmid_max_batch`), for `glu="swiglu"` through its fused gate on the merged stack, else mmq with ids into
@@ -34,6 +35,8 @@ TYPES = {"q4_0": 2, "q4_1": 3, "q5_0": 6, "q5_1": 7, "q8_0": 8, "q2_k": 10, "q3_
          "q6_k": 14, "iq2_xxs": 16, "iq2_xs": 17, "iq3_xxs": 18, "iq1_s": 19, "iq4_nl": 20, "iq3_s": 21, "iq2_s": 22,
          "iq4_xs": 23}
 DTYPES = ("bfloat16", "float32")
+ACT_QUANT = ("a4", "a8")                    # q8_1 activations (8 bits) serve either
+ACT = {"mmvq": "q8_1", "mmq": "q8_1"}       # each path's activation format
 
 
 def ggml_type(layout: str) -> int | None:
@@ -71,8 +74,8 @@ class QLinear:
             raise RuntimeError(f"kernels.ggml_cuda: llama.cpp uses neither mmvq nor mmq for {facts['layout']} here")
         self.workspace = ctx.workspace(f"ggml_cuda[in={self.k}]", self.lib.workspace_bytes(device, self.k, CHUNK))
 
-    def __call__(self, x: torch.Tensor, blocks: torch.Tensor) -> torch.Tensor:
-        x, rows = x.contiguous(), len(x)
+    def __call__(self, x: torch.Tensor, parts: dict[str, torch.Tensor]) -> torch.Tensor:
+        x, rows, blocks = x.contiguous(), len(x), parts["blocks"]
         y = torch.empty(rows, self.out, dtype=self.out_dtype, device=x.device)
         if rows == 0:
             return y
@@ -117,6 +120,7 @@ class LinearExperts:
 
     def __call__(self, x: torch.Tensor, parts: dict[str, torch.Tensor], ids: torch.Tensor) -> torch.Tensor:
         x, ids, blocks = x.contiguous(), ids.contiguous(), parts["blocks"]
+        blocks = blocks.view(-1, blocks.shape[-1])          # [E, out, row_bytes] as llama.cpp's [E·out, row_bytes]
         tokens = len(ids)
         y = torch.empty(tokens, self.top_k, self.out_y, device=x.device)
         gate_up = None          # mmq's f32 gate/up output before our SwiGLU, a per-call activation
@@ -161,7 +165,7 @@ class MoeCombine:
 
 def _supports_qlinear(f: dict) -> bool:
     return (ggml_type(f["layout"]) is not None and f["in"] % 256 == 0 and f["act_dtype"] in DTYPES
-            and f["out_dtype"] in DTYPES)
+            and f["out_dtype"] in DTYPES and f["act_quant"] in ACT_QUANT)
 
 
 def _supports_qembedding(f: dict) -> bool:
@@ -173,7 +177,7 @@ def _supports_linear_experts(f: dict) -> bool:
     swiglu = f["glu"] == "swiglu"
     return (ggml_type(f["layout"]) is not None and f["in"] % 256 == 0 and f["act_dtype"] in DTYPES
             and f["out_dtype"] == "float32" and f["glu"] in ("none", "swiglu") and f["out"] % (8 if swiglu else 4) == 0
-            and f["rows_per_token"] in (1, f["top_k"]))
+            and f["rows_per_token"] in (1, f["top_k"]) and f["act_quant"] in ACT_QUANT)
 
 
 def _supports_moe_topk(f: dict) -> bool:
@@ -196,4 +200,5 @@ class Plugin:
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="kernels.ggml_cuda", impl=functools.partial(impl, ext),
                 requires=Constraint(sms=frozenset(extension.ARCHS)), supports=supports,
-                props=frozenset({"graph_safe", "deterministic"}), priority=10))
+                props=frozenset({"graph_safe", "deterministic"}), priority=10,
+                config={"act": ACT} if op in (QLINEAR, LINEAR_EXPERTS) else {}))

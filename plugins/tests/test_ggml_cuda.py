@@ -77,8 +77,8 @@ def real() -> dict[tuple[str, int], np.ndarray]:
 
 def qlinear(ctx, name: str, k: int, out_dtype: str = "bfloat16", out: int = OUT):
     facts = {"layout": f"ggml.{name}/gguf.native", "in": k, "out": out, "act_dtype": "bfloat16",
-             "out_dtype": out_dtype}
-    spec = ctx.select_kernel("qlinear@1", site="l0", **facts)
+             "out_dtype": out_dtype, "act_quant": "a8"}
+    spec = ctx.select_kernel("qlinear@2", site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
     return spec.impl(ctx, **facts)
 
@@ -122,7 +122,7 @@ def activations(rows: int, k: int, seed: int) -> torch.Tensor:
 
 
 def check_qlinear(kernel, name: str, blocks: np.ndarray, rows_list) -> None:
-    k, weight, w = kernel.k, dequantize(name, blocks), device_blocks(blocks)
+    k, weight, w = kernel.k, dequantize(name, blocks), {"blocks": device_blocks(blocks)}
     for rows in rows_list:
         path = q8_1.MMVQ if rows <= kernel.mmvq_rows else q8_1.MMQ
         x = activations(rows, k, seed=rows)
@@ -176,7 +176,8 @@ def test_qlinear_f32_out_and_empty(ctx):
     kernel = qlinear(ctx, "q4_k", 4096, out_dtype="float32")
     blocks = random_blocks("q4_k", OUT, 4096, seed=1)
     check_qlinear(kernel, "q4_k", blocks, (1, kernel.mmvq_rows + 1, CHUNK + 1))
-    assert kernel(torch.empty(0, 4096, dtype=torch.bfloat16, device="cuda"), device_blocks(blocks)).shape == (0, OUT)
+    x = torch.empty(0, 4096, dtype=torch.bfloat16, device="cuda")
+    assert kernel(x, {"blocks": device_blocks(blocks)}).shape == (0, OUT)
 
 
 @pytest.mark.parametrize("name", sorted(TYPES))
@@ -192,13 +193,13 @@ def test_mmq_schedules(ctx, sm, name):
         kind = lib.mmq_schedule(0, TYPES[name], out, CHUNK)[0]
         assert out != nsm * tile_i or kind in (0, 1), f"{name}: out={out} (tiles a multiple of nsm) takes the fixup"
         kernel, blocks = qlinear(ctx, name, k, out=out), random_blocks(name, out, k, seed=out)
-        launched = _launches(kernel, activations(CHUNK, k, seed=0), device_blocks(blocks))
+        launched = _launches(kernel, activations(CHUNK, k, seed=0), {"blocks": device_blocks(blocks)})
         fixup = any("stream_k_fixup" in n for n in launched)
         assert fixup == (kind == 2), f"{name}: out={out} schedule {kind}, fixup launched: {fixup}"
         check_qlinear(kernel, name, blocks, (CHUNK,))
 
 
-def _launches(kernel, x: torch.Tensor, w: torch.Tensor) -> set[str]:
+def _launches(kernel, x: torch.Tensor, w: dict[str, torch.Tensor]) -> set[str]:
     """The names of the CUDA kernels one call launches."""
     from torch.profiler import ProfilerActivity, profile
 
@@ -245,7 +246,7 @@ def test_qembedding_real_table(ctx):
 def test_cuda_graph_replays_bitwise(ctx, name):
     k = 4096
     kernel = qlinear(ctx, name, k)
-    w = device_blocks(random_blocks(name, OUT, k, seed=3))
+    w = {"blocks": device_blocks(random_blocks(name, OUT, k, seed=3))}
     for rows in (1, kernel.mmvq_rows + 1, CHUNK + 1):
         x = activations(rows, k, seed=11)
         eager = kernel(x, w)
@@ -272,7 +273,7 @@ def test_pdl_survives_graph_capture(ctx, sm):
     from cuda.bindings import runtime as rt
 
     kernel = qlinear(ctx, "q4_k", 4096)
-    w, x = device_blocks(random_blocks("q4_k", OUT, 4096, seed=3)), activations(1, 4096, seed=1)
+    w, x = {"blocks": device_blocks(random_blocks("q4_k", OUT, 4096, seed=3))}, activations(1, 4096, seed=1)
     kernel(x, w)
     graph = torch.cuda.CUDAGraph(keep_graph=True)
     with torch.cuda.graph(graph):

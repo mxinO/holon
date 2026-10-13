@@ -46,7 +46,7 @@ def test_a_quantized_gguf_serves_what_its_dequantized_weights_serve(tiny_checkpo
     assert _prompt_logprobs(ours, prompts) == _prompt_logprobs(theirs, prompts)      # bit for bit
     # One quantized matmul per merged group (q/k/v, gate/up) plus o, down and the head; the merged-away
     # projections bound no kernel, so they leave no site in a lock.
-    linears = [k for k in ours.ctx.kernels if k.endswith("/qlinear@1")]
+    linears = [k for k in ours.ctx.kernels if k.endswith("/qlinear@2")]
     assert any(k.endswith("/qembedding@1") for k in ours.ctx.kernels)
     outs = sorted(int(re.search(r",out=(\d+)", k)[1]) for k in linears)
     assert outs == [64, 64, 64 + 2 * 32, 2 * 128, 512], outs         # o, down, qkv, gate+up, lm_head

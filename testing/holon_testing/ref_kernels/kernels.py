@@ -89,8 +89,8 @@ class _Dequantized:
 
 
 class QLinear(_Dequantized):
-    def __call__(self, x, blocks):
-        return ops.qlinear(x, self.dequantized(blocks)).to(getattr(torch, self.facts["out_dtype"]))
+    def __call__(self, x, parts):
+        return ops.qlinear(x, self.dequantized(parts["blocks"])).to(getattr(torch, self.facts["out_dtype"]))
 
 
 class QEmbedding(_Dequantized):

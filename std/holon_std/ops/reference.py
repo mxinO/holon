@@ -36,7 +36,7 @@ def linear(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None = No
 
 
 def qlinear(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-    """The `qlinear@1` oracle: `x @ weight.T` in fp32, with `weight` [out, in] the dequantized weight (the format's
+    """The `qlinear@2` oracle: `x @ weight.T` in fp32, with `weight` [out, in] the dequantized weight (the format's
     own reference dequantization produces it, e.g. gguf-py for ggml types)."""
     return x.float() @ weight.float().T
 

@@ -97,7 +97,7 @@ class Stack:
 
     @property
     def parts(self) -> dict[str, torch.Tensor]:
-        return {"blocks": self.w}
+        return {"blocks": self.w.view(len(self.weight), -1, self.w.shape[-1])}       # per expert (the contract)
 
 
 def stack(name: str, experts: int, out: int, k: int, seed: int, blocks: np.ndarray | None = None) -> Stack:
@@ -111,7 +111,8 @@ def stack(name: str, experts: int, out: int, k: int, seed: int, blocks: np.ndarr
 def experts(ctx, name: str, k: int, out: int, rows_per_token: int, glu: str = "none", n: int = E,
             act_dtype: str = "bfloat16"):
     facts = {"layout": f"ggml.{name}/gguf.native", "experts": n, "in": k, "out": out, "top_k": K,
-             "rows_per_token": rows_per_token, "glu": glu, "act_dtype": act_dtype, "out_dtype": "float32"}
+             "rows_per_token": rows_per_token, "glu": glu, "act_dtype": act_dtype, "out_dtype": "float32",
+             "act_quant": "a8"}
     spec = ctx.select_kernel("linear_experts@1", site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
     return spec.impl(ctx, **facts)
@@ -238,7 +239,8 @@ def test_merged_stack_equals_separate_stacks(ctx, lib, name):
     fused = experts(ctx, name, H, 2 * INTER, 1, "swiglu", n=n)
     gate, up = random_blocks(name, n * INTER, H, seed=3), random_blocks(name, n * INTER, H, seed=4)
     both = np.concatenate([gate.reshape(n, INTER, -1), up.reshape(n, INTER, -1)], axis=1).reshape(n * 2 * INTER, -1)
-    sg, su, sm_ = ({"blocks": torch.from_numpy(b).cuda()} for b in (gate, up, both))     # compared bitwise only
+    sg, su, sm_ = ({"blocks": torch.from_numpy(b).cuda().view(n, -1, b.shape[-1])}       # compared bitwise only
+                   for b in (gate, up, both))
     t = merged.mmvq_tokens
     for tokens in (1, t, t + 1, 64, CHUNK):
         ids, x = uniform(tokens, n, seed=tokens), gate_up_input(tokens, seed=tokens)
@@ -303,7 +305,7 @@ def test_mixed_types_in_one_layer(ctx, sm):
     h = unit._gate_up(x[:, None], ids)
     y = unit.down(h, ids)
     assert unit._gate_up._kernel.calls == {"mmvq": 0, "mmq": 1} and unit.down._kernel.calls == {"mmvq": 1, "mmq": 0}
-    merged = stack("iq3_s", EQ, 2 * INTER, H, 0, unit._gate_up.weight.cpu().numpy())
+    merged = stack("iq3_s", EQ, 2 * INTER, H, 0, unit._gate_up.weight.flatten(0, 1).cpu().numpy())
     none = experts(ctx, "iq3_s", H, 2 * INTER, 1, n=EQ)
     check(none(x[:, None], merged.parts, ids), emulated(none, merged, x[:, None], ids), H, "gate_up iq3_s T=7")
     check_swiglu(extension.load(sm), unit._gate_up._kernel, none, merged, x[:, None], ids, "swiglu iq3_s T=7")

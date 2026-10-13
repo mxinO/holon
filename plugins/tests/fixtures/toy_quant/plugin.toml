@@ -1,0 +1,16 @@
+[plugin]
+name = "tests.toy_quant"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+
+[resources]
+provides = ["kernel.qlinear@2", "kernel.qembedding@1", "kernel.linear_experts@1"]
+requires = ["op.qlinear@2", "op.qembedding@1", "op.linear_experts@1"]
+
+[properties]
+numerics = "exact"
+
+[support]
+platforms = ["cpu"]

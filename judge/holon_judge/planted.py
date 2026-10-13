@@ -232,12 +232,12 @@ def ggml_stale_q8_1(every: int = 97) -> Iterator[None]:
 
     call, last, calls, fired = plugin.QLinear.__call__, {}, itertools.count(1), collections.Counter()
 
-    def planted(self, x, blocks):
+    def planted(self, x, parts):
         prev, last[self.k] = last.get(self.k), x.clone()
         if next(calls) % every == 0 and prev is not None and len(prev) >= len(x):
             fired["mmvq" if len(x) <= self.mmvq_rows else "mmq"] += 1
             x = prev[:len(x)]
-        return call(self, x, blocks)
+        return call(self, x, parts)
     with mock.patch.object(plugin.QLinear, "__call__", planted):
         yield
     print(f"plant ggml-stale-q8_1 fired: {dict(fired)}", file=sys.stderr)

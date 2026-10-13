@@ -21,7 +21,7 @@ def main() -> None:
             kernel = qlinear(ctx, name, k)
             w = torch.from_numpy(random_blocks(name, 300, k, seed=k)).cuda()
             for rows in (1, 2, kernel.mmvq_rows, kernel.mmvq_rows + 1, 513):
-                kernel(activations(rows, k, seed=rows), w)
+                kernel(activations(rows, k, seed=rows), {"blocks": w})
             facts = {"layout": f"ggml.{name}/gguf.native", "vocab": 300, "hidden": k, "dtype": "bfloat16"}
             ctx.select_kernel("qembedding@1", site="memcheck", **facts).impl(ctx, **facts)(
                 torch.tensor([0, 299, 7], device="cuda"), w)

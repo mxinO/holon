@@ -32,14 +32,16 @@ def main() -> None:
 
     def experts(name: str, k: int, out: int, rows_per_token: int, glu: str = "none"):
         return select("linear_experts@1", layout=f"ggml.{name}/gguf.native", experts=E, top_k=K, glu=glu,
-                      rows_per_token=rows_per_token, act_dtype="bfloat16", out_dtype="float32", out=out, **{"in": k})
+                      rows_per_token=rows_per_token, act_dtype="bfloat16", out_dtype="float32", act_quant="a8",
+                      out=out, **{"in": k})
 
     for name in sorted(TYPES):
         for hidden in (768, 2304):
             gate_up = [experts(name, hidden, 2 * INTER, 1, glu) for glu in ("none", "swiglu")]
             down = experts(name, INTER, hidden, K)
-            w_gu = torch.from_numpy(random_blocks(name, E * 2 * INTER, hidden, seed=hidden)).cuda()
-            w_dn = torch.from_numpy(random_blocks(name, E * hidden, INTER, seed=hidden + 1)).cuda()
+            gu = random_blocks(name, E * 2 * INTER, hidden, seed=hidden)
+            dn = random_blocks(name, E * hidden, INTER, seed=hidden + 1)
+            w_gu, w_dn = (torch.from_numpy(b).cuda().unflatten(0, (E, -1)) for b in (gu, dn))     # per expert
             t = down.mmvq_tokens
             for tokens in (1, 2, t, t + 1, 513):
                 route = ids(tokens)
