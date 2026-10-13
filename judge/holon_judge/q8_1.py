@@ -101,7 +101,7 @@ def matmul(x: torch.Tensor, weight: torch.Tensor, blocks: np.ndarray | None, ggm
 def linear_experts(x: torch.Tensor, weight: torch.Tensor, blocks: np.ndarray | None, ids: torch.Tensor,
                    ggml_type: str, path: str, glu: str = "none", offs: torch.Tensor | None = None,
                    dtype: torch.dtype = torch.float64) -> torch.Tensor:
-    """llama.cpp's MUL_MAT_ID on `path` (`linear_experts@1`, in `dtype`, on x's device): slot j of token t applies
+    """llama.cpp's MUL_MAT_ID on `path` (`linear_experts@2`, in `dtype`, on x's device): slot j of token t applies
     expert `ids[t, j]` of `weight` [E, out, in] (dequantized from `blocks` [E·out, row_bytes]) to `x[t, 0]` or
     `x[t, j]` (`x` [T, R, in], R = 1 or k) → [T, k, out_y]. Each input row is quantized once: for R = 1 (gate/up) a
     token's input once, scattered to its k slots; for R = k (down) each (token, slot) row, gathered. mmvq and mmq with

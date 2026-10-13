@@ -1,16 +1,17 @@
 """Quantized weights in std units (docs/m06-lowp.md D3–D6), on the CPU with a toy layout (fixtures/toy_quant): a
-unit hands its kernel every part by role (`qlinear@2`, `linear_experts@1`), binds after merges with the `act_quant`
+unit hands its kernel every part by role (`qlinear@2`, `linear_experts@2`), binds after merges with the `act_quant`
 fact, keeps only what the kernel's `prepare` returns, merges parts by shape, and stacks experts slice by slice."""
 import pathlib
+import types
 
 import pytest
 import torch
-from holon.api import Layout, Manifest, QTensor, Ref, Scheme
-from holon.core.build import BuildContext
-from holon.core.plugins import Installed, PluginSet, discover
+from holon.api import Layout, Manifest, QTensor, Ref, Scheme, WeightMap, WeightRule
+from holon.core.build import BuildContext, load_weights
+from holon.core.plugins import Installed, PluginError, PluginSet, discover
 from holon_std.moe import reference as moe
 
-from .fixtures.toy_quant.plugin import FOLDED, PREPARED, ROWS, G
+from .fixtures.toy_quant.plugin import PREPARED, ROWS, G
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "toy_quant"
 E, H, INTER = 4, 8, 4
@@ -23,11 +24,11 @@ def _ctx(**plugin_options) -> BuildContext:
     return BuildContext(PluginSet(found), torch.device("cpu"), torch.float32, options={"plugins": plugin_options})
 
 
-def _toy(out: int, inp: int, seed: int, scale2: float = 0.5, rows_per_scale: int = G) -> QTensor:
+def _toy(out: int, inp: int, seed: int, scale2: float = 0.5, rows_per_scale: int = G, shape2=()) -> QTensor:
     g = torch.Generator().manual_seed(seed)
     return QTensor(ROWS, (out, inp), {"q": torch.randint(-128, 128, (out, inp), dtype=torch.int8, generator=g),
                                       "scale": torch.rand(out // rows_per_scale, generator=g),
-                                      "scale2": torch.tensor(scale2)})
+                                      "scale2": torch.full(shape2, scale2)})
 
 
 def _x(rows: int, seed: int) -> torch.Tensor:
@@ -108,14 +109,46 @@ def test_linears_merge_parts_by_shape(second, merges):
     torch.testing.assert_close(merged(x), torch.cat([x @ _weight(q).T for q in qs], dim=-1))
 
 
-def test_a_quantized_moe_stacks_its_experts_slice_by_slice():
+@pytest.mark.parametrize("scale2", [0.25, 0.5])
+def test_a_one_element_part_is_per_tensor_in_a_merge(scale2):
+    """Two units of equal `out` with a [1] per-tensor scale: equal, kept once; unequal, the units stay apart (never
+    concatenated as if it were one row per unit)."""
+    ctx = _ctx()
+    qs = [_toy(4, H, seed=6, shape2=(1,)), _toy(4, H, seed=7, scale2=scale2, shape2=(1,))]
+    units = [_linear(ctx, q) for q in qs]
+    merged = type(units[0]).merge(*units)
+    if scale2 != 0.5:
+        assert merged is None
+        return
+    assert tuple(merged.parts["scale2"].shape) == (1,)
+    merged.bind_kernels(ctx)
+    x = _x(3, seed=4)
+    torch.testing.assert_close(merged(x), torch.cat([x @ _weight(q).T for q in qs], dim=-1))
+
+
+@pytest.mark.parametrize("ref, site", [("std.ops.linear@1", dict(out_features=4, in_features=H)),
+                                       ("std.ops.embedding@1", dict(vocab=4, hidden=H)),
+                                       ("std.ops.lm_head@1", dict(vocab=4, hidden=H))])
+def test_a_unit_without_stacks_refuses_a_slice(ref, site):
+    ctx = _ctx()
+    model = torch.nn.Module()
+    with torch.device("meta"):
+        model.unit = ctx.unit(Ref(ref, **({"tied": False} if "lm_head" in ref else {})), **site)
+    model.spec = types.SimpleNamespace(weights=WeightMap("hf_safetensors", rules=(
+        WeightRule("u.{e}", "unit.weight", stack="e"),)))
+    with pytest.raises(PluginError, match="cannot read layout"):
+        load_weights(model, ctx, [("u.0", _toy(4, H, seed=0))])
+
+
+@pytest.mark.parametrize("shape2", [(), (1,)])
+def test_a_quantized_moe_stacks_its_experts_slice_by_slice(shape2):
     ctx = _ctx()
     with torch.device("meta"):
         unit = ctx.unit(Ref("std.moe@1", experts=E, top_k=2, inter=INTER, renormalize=True), hidden=H, layer=0)
     router = torch.nn.Parameter(torch.randn(E, H, generator=torch.Generator().manual_seed(5)), requires_grad=False)
     torch.utils.swap_tensors(unit.router, router)
     shapes = {"gate": (INTER, H), "up": (INTER, H), "down": (H, INTER)}
-    slices = {(p, e): _toy(*shapes[p], seed=10 * e + i, scale2=0.25 * (1 + e + i)) for e in range(E)
+    slices = {(p, e): _toy(*shapes[p], seed=10 * e + i, scale2=0.25 * (1 + e + i), shape2=shape2) for e in range(E)
               for i, p in enumerate(shapes)}
     for e in (3, 1, 0, 2):
         for p in shapes:
@@ -124,17 +157,17 @@ def test_a_quantized_moe_stacks_its_experts_slice_by_slice():
     assert not unit.gate.adopt(ctx, "weight", other, index=0)                          # another layout
     assert not unit.gate.adopt(ctx, "weight", _toy(*shapes["gate"], seed=0, rows_per_scale=1), index=0)  # shapes
     assert {r: tuple(t.shape) for r, t in unit.gate.parts.items()} == {"q": (E, INTER, H), "scale": (E, 2),
-                                                                       "scale2": (E,)}
+                                                                       "scale2": (E, *shape2)}
     unit.finalize_weights(ctx)
-    scale2 = [torch.stack([slices[p, e].parts["scale2"] for e in range(E)]) for p in ("gate", "up")]
+    scale2 = [torch.stack([slices[p, e].parts["scale2"].reshape(()) for e in range(E)]) for p in ("gate", "up")]
     assert torch.equal(unit._gate_up.parts["scale2"], torch.stack(scale2))           # [2, E]: gate's row, up's
     PREPARED.clear()
     for m in unit.modules():
         if hasattr(m, "bind_kernels"):
             m.bind_kernels(ctx)
-    assert len(PREPARED) == 2 and unit._gate_up.parts.keys() == {"q", "scale"} and PREPARED[0][0].layout == ROWS
-    assert unit._gate_up._kernel.prepare(QTensor(ROWS, (E, 2 * INTER, H), PREPARED[0][1])).layout == FOLDED
-    facts = [s["facts"] for k, s in ctx.kernels.items() if k.endswith("/linear_experts@1")]
+    assert [tuple(source["scale2"].shape) for _, source in PREPARED] == [(E, *shape2), (2, E)]     # down, gate/up
+    assert unit._gate_up.parts.keys() == {"q", "scale"} and unit.down.parts.keys() == {"q", "scale"}
+    facts = [s["facts"] for k, s in ctx.kernels.items() if k.endswith("/linear_experts@2")]
     assert [f["act_quant"] for f in facts] == ["a8", "a8"] and {f["glu"] for f in facts} == {"swiglu", "none"}
     stack = {p: torch.stack([_weight(slices[p, e]) for e in range(E)]) for p in shapes}
     x = _x(5, seed=3)

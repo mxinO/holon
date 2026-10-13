@@ -1,5 +1,5 @@
 """llama.cpp's quantized CUDA kernels (vendored at a pinned commit, M0.1 design §4.4, M0.2 design §4.3) as
-`qlinear@2`, `qembedding@1` and `linear_experts@1` kernels for ggml block layouts (`"ggml.<type>/gguf.native"`), and
+`qlinear@2`, `qembedding@1` and `linear_experts@2` kernels for ggml block layouts (`"ggml.<type>/gguf.native"`), and
 its MoE routing and combine as `moe_topk@1` and `moe_combine@1` (op contracts: std.ops.kernels, std.moe.kernels).
 
 `qlinear` dispatches like llama.cpp, from the row count: `mmvq` up to the type's threshold on this device (it writes

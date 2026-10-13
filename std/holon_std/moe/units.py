@@ -25,13 +25,13 @@ def _hold(param: nn.Parameter, parts: dict[str, torch.Tensor], device: torch.dev
 def _act_quant(ctx) -> str:
     """The deployment's `quant.act` plugin option for quantized weights (default `a8`, docs/m06-lowp.md D3)."""
     act = ctx.options.get("plugins", {}).get("quant.act", "a8")
-    if act not in ("a4", "a8"):
-        raise ValueError(f"quant.act {act!r}: one of ['a4', 'a8'] for quantized weights")
+    if act not in kernels.ACT_QUANT:
+        raise ValueError(f"quant.act {act!r}: one of {list(kernels.ACT_QUANT)} for quantized weights")
     return act
 
 
 class ExpertLinear(nn.Module):
-    """A stack of E experts' [out, in] weights, applied per (token, slot) by `linear_experts@1`.
+    """A stack of E experts' [out, in] weights, applied per (token, slot) by `linear_experts@2`.
 
     Dense (an HF checkpoint) it is the parameter itself, layout `dense/<dtype>`. Quantized, `adopt` takes the whole
     stack (a GGUF file's, whose parts hold the experts' rows in order) or one expert's slice at a time (the first
@@ -80,8 +80,8 @@ class ExpertLinear(nn.Module):
     @staticmethod
     def merge(gate: ExpertLinear, up: ExpertLinear) -> ExpertLinear | None:
         """One stack applying SwiGLU: per expert gate's rows, then up's. Parts merge by shape (docs/m06-lowp.md D5):
-        one with `out / g` rows per expert is concatenated per expert (a stored row is a whole block run, or its
-        rows' scales), one with a value per expert ([E]) is stacked [2, E], gate's row then up's. None if the
+        one with a value per expert (E elements) is stacked [2, E], gate's row then up's; one with `out / g` rows per
+        expert is concatenated per expert (a stored row is a whole block run, or its rows' scales). None if the
         layouts, shapes or parts differ; gate and up give up their weights."""
         if (gate.layout, gate.in_features, gate.out_features, gate.experts, gate.act_dtype) != \
                 (up.layout, up.in_features, up.out_features, up.experts, up.act_dtype) \
@@ -89,9 +89,9 @@ class ExpertLinear(nn.Module):
             return None
         parts = {}
         for role, g in gate.parts.items():
-            if g.dim() == 1:
-                parts[role] = torch.stack([g, up.parts[role]])
-            elif g.dim() > 1 and g.shape[1] and gate.out_features % g.shape[1] == 0:
+            if g.numel() == gate.experts:                       # one value per expert
+                parts[role] = torch.stack([g.reshape(-1), up.parts[role].reshape(-1)])
+            elif g.dim() > 1 and gate.out_features % g.shape[1] == 0:
                 parts[role] = torch.cat([g, up.parts[role]], dim=1)
             else:
                 return None

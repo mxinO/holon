@@ -1,4 +1,4 @@
-"""Our Triton grouped GEMM as the `linear_experts@1` kernel for dense expert stacks (`dense/<dtype>`; op contract:
+"""Our Triton grouped GEMM as the `linear_experts@2` kernel for dense expert stacks (`dense/<dtype>`; op contract:
 std.moe). Correct and graph-safe; not tuned (vLLM / SGLang's fused-MoE kernels are the performance reference)."""
 from __future__ import annotations
 

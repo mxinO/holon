@@ -80,7 +80,7 @@ def test_the_gate_up_merge_puts_gate_first_and_binds_one_kernel(tiny_moe, tmp_pa
     checkpoint, _ = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
     engine = _engine(file)
-    sites = [k for k in engine.ctx.kernels if k.endswith("/linear_experts@1")]
+    sites = [k for k in engine.ctx.kernels if k.endswith("/linear_experts@2")]
     cfg = json.loads((checkpoint / "config.json").read_text())
     merged = [k for k in sites if "glu=swiglu" in k and f"out={2 * cfg['moe_intermediate_size']}" in k]
     assert len(merged) == 1 and len(sites) == 2, sites                 # the merged gate/up stack and down

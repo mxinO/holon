@@ -6,9 +6,9 @@ slot = "kernel"
 license = "Apache-2.0"
 
 [resources]
-provides = ["kernel.qlinear@2", "kernel.qembedding@1", "kernel.linear_experts@1", "kernel.moe_topk@1",
+provides = ["kernel.qlinear@2", "kernel.qembedding@1", "kernel.linear_experts@2", "kernel.moe_topk@1",
             "kernel.moe_combine@1"]
-requires = ["op.qlinear@2", "op.qembedding@1", "op.linear_experts@1", "op.moe_topk@1", "op.moe_combine@1"]
+requires = ["op.qlinear@2", "op.qembedding@1", "op.linear_experts@2", "op.moe_topk@1", "op.moe_combine@1"]
 
 [properties]
 numerics = "bounded"

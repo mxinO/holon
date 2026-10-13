@@ -6,8 +6,8 @@ slot = "kernel"
 license = "Apache-2.0"
 
 [resources]
-provides = ["kernel.linear_experts@1"]
-requires = ["op.linear_experts@1"]
+provides = ["kernel.linear_experts@2"]
+requires = ["op.linear_experts@2"]
 
 [properties]
 numerics = "bounded"

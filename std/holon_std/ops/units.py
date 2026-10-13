@@ -60,12 +60,12 @@ class _Quantized:
 
     def bind(self, parts: dict[str, torch.Tensor], shape: tuple[int, ...],
              param: nn.Parameter | None) -> dict[str, torch.Tensor]:
-        """Select the kernel; returns the parts it reads: `parts`, or what its `prepare` makes of them
-        (docs/m06-lowp.md D4), the primary part swapped into `param` so the source parts are released (a tied head
-        has no `param`)."""
+        """Select the kernel; returns the parts it reads: `parts`, or what a `qlinear@2` kernel's `prepare` makes of
+        them (docs/m06-lowp.md D4), the primary part swapped into `param` so the source parts are released (a tied
+        head has no `param`). `qembedding@1` has no `prepare`: a table is read as adopted."""
         site = f"std.ops.{self.op.split('@')[0]}[" + ",".join(f"{k}={v}" for k, v in self.facts.items()) + "]"
         self._kernel = self.ctx.select_kernel(self.op, site=site, **self.facts).impl(self.ctx, **self.facts)
-        if not hasattr(self._kernel, "prepare"):
+        if self.op != kernels.QLINEAR or not hasattr(self._kernel, "prepare"):
             return parts
         q = QTensor(self.layout, shape, parts)
         if (prepared := self._kernel.prepare(q)) is q:
@@ -97,7 +97,10 @@ def _dtype(t: torch.dtype) -> str:
 
 
 def _by_rows(parts: list[torch.Tensor], outs: list[int]) -> bool:
-    """Every unit's part has `out / g` rows of its unit's `out`, for one `g`."""
+    """Every unit's part has `out / g` rows of its unit's `out`, for one `g`; one element in every unit is a
+    per-tensor value instead (whatever the units' `out`)."""
+    if all(p.numel() == 1 for p in parts):
+        return False
     gs = {out // p.shape[0] if p.dim() and p.shape[0] and out % p.shape[0] == 0 else 0
           for p, out in zip(parts, outs, strict=True)}
     return len(gs) == 1 and 0 not in gs
@@ -110,7 +113,7 @@ def _same_bits(a: torch.Tensor, b: torch.Tensor) -> bool:
 
 def _merged_parts(units: tuple[Linear, ...]) -> dict[str, torch.Tensor] | None:
     """The units' quantized parts as one weight's (docs/m06-lowp.md D5): a part with `out / g` rows in every unit is
-    concatenated by rows; any other (a per-tensor scale) must be bit-equal in every unit, else None."""
+    concatenated by rows; any other (a per-tensor scale, one element) must be bit-equal in every unit, else None."""
     if len({tuple(u.parts) for u in units}) > 1:
         return None
     merged = {}
@@ -142,8 +145,8 @@ class Linear(nn.Module):
         return _Quantized(self._ctx, layout, kernels.QLINEAR, **{"in": self.in_features, "out": self.out_features},
                           act_dtype=dtype, out_dtype=dtype, act_quant=_act_quant(self._ctx))
 
-    def adopt(self, ctx, name: str, q) -> bool:
-        if name != "weight" or tuple(q.logical_shape) != (self.out_features, self.in_features):
+    def adopt(self, ctx, name: str, q, index: int | None = None) -> bool:
+        if name != "weight" or index is not None or tuple(q.logical_shape) != (self.out_features, self.in_features):
             return False
         self._q, self.parts = self._quantized(q.layout), _hold(self.weight, q.parts, ctx.device)
         return True
@@ -196,8 +199,8 @@ class Embedding(nn.Module):
         self._q: _Quantized | None = None
         self.parts: dict[str, torch.Tensor] | None = None
 
-    def adopt(self, ctx, name: str, q) -> bool:
-        if name != "weight" or tuple(q.logical_shape) != (self.vocab, self.hidden):
+    def adopt(self, ctx, name: str, q, index: int | None = None) -> bool:
+        if name != "weight" or index is not None or tuple(q.logical_shape) != (self.vocab, self.hidden):
             return False
         self._q = _Quantized(ctx, q.layout, kernels.QEMBEDDING, vocab=self.vocab, hidden=self.hidden,
                              dtype=_dtype(self.dtype))
@@ -234,8 +237,8 @@ class LMHead(nn.Module):
         return _Quantized(ctx, layout, kernels.QLINEAR, **{"in": self.hidden, "out": self.vocab},
                           act_dtype=_dtype(self.dtype), out_dtype="float32", act_quant=_act_quant(ctx))
 
-    def adopt(self, ctx, name: str, q) -> bool:
-        if self._embed or name != "weight" or tuple(q.logical_shape) != (self.vocab, self.hidden):
+    def adopt(self, ctx, name: str, q, index: int | None = None) -> bool:
+        if self._embed or name != "weight" or index is not None or tuple(q.logical_shape) != (self.vocab, self.hidden):
             return False
         self._q, self.parts = self._quantized(ctx, q.layout), _hold(self.weight, q.parts, ctx.device)
         return True
@@ -246,6 +249,7 @@ class LMHead(nn.Module):
 
     def bind_kernels(self, ctx) -> None:
         if self._q is not None:                                    # after the embedding's (model order)
+            # tied: the embedding's parts as adopted (qembedding@1 has no `prepare`); this head prepares its own copy
             parts = self._embed[0].parts if self._embed else self.parts
             self.parts = self._q.bind(parts, (self.vocab, self.hidden), self.weight)
 

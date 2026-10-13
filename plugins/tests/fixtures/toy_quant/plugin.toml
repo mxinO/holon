@@ -6,8 +6,8 @@ slot = "kernel"
 license = "Apache-2.0"
 
 [resources]
-provides = ["kernel.qlinear@2", "kernel.qembedding@1", "kernel.linear_experts@1"]
-requires = ["op.qlinear@2", "op.qembedding@1", "op.linear_experts@1"]
+provides = ["kernel.qlinear@2", "kernel.qembedding@1", "kernel.linear_experts@2"]
+requires = ["op.qlinear@2", "op.qembedding@1", "op.linear_experts@2"]
 
 [properties]
 numerics = "exact"

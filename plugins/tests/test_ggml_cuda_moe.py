@@ -113,7 +113,7 @@ def experts(ctx, name: str, k: int, out: int, rows_per_token: int, glu: str = "n
     facts = {"layout": f"ggml.{name}/gguf.native", "experts": n, "in": k, "out": out, "top_k": K,
              "rows_per_token": rows_per_token, "glu": glu, "act_dtype": act_dtype, "out_dtype": "float32",
              "act_quant": "a8"}
-    spec = ctx.select_kernel("linear_experts@1", site="l0", **facts)
+    spec = ctx.select_kernel("linear_experts@2", site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
     return spec.impl(ctx, **facts)
 
@@ -533,7 +533,7 @@ def test_router_logits_within_the_fp32_budget(ctx, monkeypatch):
 def test_moe_layer_binds_its_activation_dtypes_and_f32_outputs(ctx):
     unit, _ = moe_layer(ctx, "q4_k", "q4_k")
     sites = {v["facts"]["glu"]: v for k, v in ctx.kernels.items()
-             if k.endswith("/linear_experts@1") and "experts=128" in k}
+             if k.endswith("/linear_experts@2") and "experts=128" in k}
     assert set(sites) == {"swiglu", "none"} and all(v["provider"] == "kernels.ggml_cuda"
                                                     and v["facts"]["out_dtype"] == "float32" for v in sites.values())
     assert sites["swiglu"]["facts"]["act_dtype"] == "bfloat16"         # gate/up: the layer input

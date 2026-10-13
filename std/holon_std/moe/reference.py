@@ -21,7 +21,7 @@ def moe_topk(logits: torch.Tensor, top_k: int, renormalize: bool) -> tuple[torch
 
 def linear_experts(x: torch.Tensor, weight: torch.Tensor, ids: torch.Tensor, glu: str = "none",
                    operand_dtype: torch.dtype | None = None) -> torch.Tensor:
-    """The `linear_experts@1` oracle over the stack's weights `weight` [E, out, in] (dequantized, or dense):
+    """The `linear_experts@2` oracle over the stack's weights `weight` [E, out, in] (dequantized, or dense):
     `y [T, k, out_y]` f32. `operand_dtype`: a dense layout rounds the activation to the weight dtype first."""
     t, k = ids.shape
     xs = x.expand(t, k, x.shape[-1]) if x.shape[1] == 1 else x

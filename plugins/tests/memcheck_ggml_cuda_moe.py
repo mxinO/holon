@@ -31,7 +31,7 @@ def main() -> None:
         return torch.cat([torch.tensor([[0, E - 1]] * tokens), rest], 1).int().cuda()
 
     def experts(name: str, k: int, out: int, rows_per_token: int, glu: str = "none"):
-        return select("linear_experts@1", layout=f"ggml.{name}/gguf.native", experts=E, top_k=K, glu=glu,
+        return select("linear_experts@2", layout=f"ggml.{name}/gguf.native", experts=E, top_k=K, glu=glu,
                       rows_per_token=rows_per_token, act_dtype="bfloat16", out_dtype="float32", act_quant="a8",
                       out=out, **{"in": k})
 

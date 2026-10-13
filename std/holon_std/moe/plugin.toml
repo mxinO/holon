@@ -9,7 +9,7 @@ license = "Apache-2.0"
 provides = [
     "unit.std.moe@1",
     "op.moe_topk@1",
-    "op.linear_experts@1",
+    "op.linear_experts@2",
     "op.moe_combine@1",
 ]
 
