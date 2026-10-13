@@ -39,7 +39,8 @@ class NGramDrafter:
 
     def run(self, ctx, h: torch.Tensor) -> None:
         dev, table = ctx.batch.dev, ctx.seq_table
-        rows = torch.repeat_interleave(torch.arange(len(dev.slots), device=dev.slots.device), dev.query_start.diff())
+        rows = torch.repeat_interleave(torch.arange(len(dev.slots), device=dev.slots.device), dev.query_start.diff(),
+                                       output_size=dev.input_ids.shape[0])        # a known size: no host sync
         self.history[dev.slots[rows], dev.positions] = dev.input_ids          # the step's inputs at their positions
         sampled = dev.slots[dev.logits_rows]
         if not len(sampled):

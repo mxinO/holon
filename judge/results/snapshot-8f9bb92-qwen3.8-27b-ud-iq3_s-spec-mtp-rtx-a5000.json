@@ -1,0 +1,33 @@
+{
+ "model": "Qwen3.8-27B-UD-IQ3_S.gguf",
+ "dtype": "bfloat16",
+ "runs": 3,
+ "hardware": "NVIDIA RTX A5000",
+ "torch": "2.11.0+cu130",
+ "trace": "sha256:178205fee798392b824ef159f47175942a38cd82041e4e5f724103fb68429f69",
+ "steps": 112,
+ "diffs": [
+  null,
+  null
+ ],
+ "run_identical": true,
+ "step_widths": [
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  10,
+  11,
+  12,
+  13,
+  14,
+  15,
+  16
+ ],
+ "tokens_saved": 2048
+}
