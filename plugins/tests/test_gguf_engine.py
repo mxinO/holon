@@ -74,8 +74,10 @@ def test_a_damaged_file_fails_when_opened(tiny_checkpoint, tmp_path):  # noqa: F
             reader.read(tmp_path / f"{name}.gguf")
 
 
-def test_a_gguf_holding_nvfp4_tensors_is_refused(tmp_path):
-    """llama.cpp's NVFP4 GGUFs keep each tensor's scale apart, as a `.scale` tensor (docs/m06-lowp.md D1)."""
+def test_nvfp4_tensors_and_nan_mxfp4_scales_are_refused(tiny_checkpoint, tmp_path):  # noqa: F811
+    """llama.cpp's NVFP4 GGUFs keep each tensor's scale apart, as a `.scale` tensor (docs/m06-lowp.md D1); an MXFP4
+    e8m0 scale of 0xFF is NaN, refused as std.weights.hf refuses it."""
+    from holon_std.weights.gguf import reader
     from holon_std.weights.gguf.source import GGUFSource
 
     file = tmp_path / "nvfp4.gguf"
@@ -88,3 +90,11 @@ def test_a_gguf_holding_nvfp4_tensors_is_refused(tmp_path):
     w.close()
     with pytest.raises(ValueError, match=r"NVFP4 tensors \(blk\.0\.ffn_down\.weight, …\) are not served from GGUF"):
         GGUFSource(file)
+    file = tmp_path / "mxfp4.gguf"
+    write(tiny_checkpoint, file, Q.Q8_0, types={"ffn_down": Q.MXFP4})
+    down = next(t for t in reader.read(file)[1] if t.name == "blk.1.ffn_down.weight")
+    with open(file, "r+b") as f:                                       # the last row's last block's scale
+        f.seek(down.offset + down.rows * down.row_bytes - 17)
+        f.write(b"\xff")
+    with pytest.raises(ValueError, match=r"blk\.1\.ffn_down\.weight: an MXFP4 scale is NaN"):
+        list(GGUFSource(file).tensors())

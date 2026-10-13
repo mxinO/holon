@@ -9,6 +9,7 @@ from __future__ import annotations
 import pathlib
 
 import torch
+from holon_std.moe import reference as moe
 from holon_std.weights.hf import reference
 
 from . import hf_quant
@@ -38,4 +39,5 @@ def _experts(stack) -> torch.Tensor:
     if stack.layout is None:
         return stack.weight.cpu()
     parts = {role: p.cpu() for role, p in stack.parts.items()}
-    return reference.dequantize_experts(stack.layout.scheme.elem, parts, stack.experts)
+    return torch.stack([torch.cat([reference.dequantize(stack.layout.scheme.elem, u) for u in units])
+                        for units in moe.expert_parts(parts, stack.experts, merged=stack.glu == "swiglu")])

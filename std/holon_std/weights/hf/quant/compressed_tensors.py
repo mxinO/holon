@@ -25,8 +25,14 @@ def dialect(qc: Mapping[str, Any]) -> Dialect:
         raise ValueError(f"compressed-tensors format {sorted(formats)}: one of {sorted(FORMATS)} is supported")
     if qc.get("quantization_status", "compressed") != "compressed":
         raise ValueError(f"compressed-tensors quantization_status {qc['quantization_status']!r}: not compressed")
-    if fmt == "float-quantized" and any((g.get("weights") or {}).get("strategy") != "block" for g in groups):
-        raise ValueError("compressed-tensors float-quantized: only block-scaled FP8 weights are supported")
     elem, parts = FORMATS[fmt]
+    args = {}
+    if fmt == "float-quantized":
+        blocks = {tuple((g.get("weights") or {}).get("block_structure") or ()) for g in groups
+                  if (g.get("weights") or {}).get("strategy") == "block"}
+        if len(blocks) != 1 or len(groups) != 1 or len(block := blocks.pop()) != 2:
+            raise ValueError("compressed-tensors float-quantized: only block-scaled FP8 weights (one group, a 2-D "
+                             "block_structure) are supported")
+        args = {"block": block}
     return Dialect(elem, parts, ignore=tuple(qc.get("ignore") or ()), dropped={"input_global_scale": None},
-                   inverted=frozenset({"scale2"}) if elem == "nvfp4" else frozenset())
+                   inverted=frozenset({"scale2"}) if elem == "nvfp4" else frozenset(), args=args)

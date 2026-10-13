@@ -33,21 +33,6 @@ def dequantize(elem: str, parts: dict[str, torch.Tensor]) -> torch.Tensor:
     raise ValueError(f"no reference dequantization for {elem!r}/hf")
 
 
-def dequantize_experts(elem: str, parts: dict[str, torch.Tensor], experts: int) -> torch.Tensor:
-    """The fp32 [E, out, in] weights of a `linear_experts@2` stack of `<elem>/hf` experts: each part per expert, [E,
-    …]; a per-tensor part is [E] (or [E, 1]) or, in a merged gate/up stack, [2, E], gate's half of every expert's
-    rows taking row 0 and up's row 1 (D5)."""
-    merged = (2, experts)
-    halves = 2 if any(p.shape == merged for p in parts.values()) else 1
-
-    def part(p: torch.Tensor, e: int, h: int) -> torch.Tensor:
-        if p.shape == merged:
-            return p[h, e]
-        return p.reshape(-1)[e] if p.dim() <= 2 and p.numel() == experts else p[e].chunk(halves)[h]
-    return torch.stack([torch.cat([dequantize(elem, {r: part(p, e, h) for r, p in parts.items()})
-                                   for h in range(halves)]) for e in range(experts)])
-
-
 def e8m0(s: torch.Tensor) -> torch.Tensor:
     """2^(s − 127) in f32, exactly: the biased exponent placed in the f32 exponent field (s = 0 is the subnormal
     2^-127; 255, NaN, is refused at load)."""

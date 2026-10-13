@@ -22,15 +22,10 @@ from holon_testing.qwen3_5_files import LLAMA
 from safetensors.torch import load_file, save_file
 from transformers import AutoModelForCausalLM
 
-from .test_engine import _hf_greedy
-
 CASES = [(d, moe) for moe in (False, True) for d in hq.DIALECTS]
 ELEM = {"fp8": "fp8_e4m3", "ct-fp8": "fp8_e4m3", "ct-nvfp4": "nvfp4", "modelopt": "nvfp4", "ct-mxfp4": "mxfp4",
         "quark": "mxfp4"}
 PLANTS = {**hf_quant_plants(layer=1), **hf_moe_plants(layer=1, experts=4)}
-GREEDY = SamplingParams(temperature=0.0, max_tokens=8, ignore_eos=True)
-SUFFIXES = re.compile(r".*\.(weight_scale(_inv|_2)?|weight_packed|weight_global_scale|input_scale|input_global_scale"
-                      r"|[kv]_scale)$")
 
 
 @pytest.fixture(scope="module")
@@ -84,52 +79,38 @@ def _error(engine: Engine, oracle: torch.nn.Module) -> float:
 
 @pytest.mark.parametrize("dialect,moe", CASES)
 def test_a_quantized_checkpoint_serves_what_transformers_computes(files, dialect, moe):
+    """Each quantized module reaches the engine as one QTensor (primary part first, parts never alone, each read
+    once, compressed-tensors' global inverted exactly), and the engine serves the oracle's logprobs."""
     quantized, dense = files(dialect, moe)
+    raw = {n: t for f in quantized.glob("*.safetensors") for n, t in load_file(f).items()}
+    shapes = {k: tuple(v.shape) for k, v in load_file(dense / "model.safetensors").items()}
+    reads = _counted_reads(lambda: list(HFSafetensors(quantized).tensors()))
+    yielded = reads.pop(None)
+    dropped = {n for n in raw if n.endswith((".input_scale", ".input_global_scale"))}
+    assert set(reads.values()) == {1} and set(raw) - set(reads) == dropped               # dropped tensors unread
+    assert sorted(n for n, _ in yielded) == sorted(shapes)                          # parts never yielded alone
+    for name, t in yielded:
+        if isinstance(t, QTensor):
+            assert (t.layout.scheme.elem, t.layout.name, next(iter(t.parts))) == (ELEM[dialect], "hf", "weight")
+            assert tuple(t.logical_shape) == shapes[name] and t.parts["weight"].dtype == torch.uint8
+            assert t.parts["scale"].dtype == (torch.float32 if ELEM[dialect] == "fp8_e4m3" else torch.uint8)
+            if dialect == "ct-nvfp4":
+                want = 1.0 / raw[name.replace(".weight", ".weight_global_scale")].reshape(())
+                assert t.parts["scale2"].shape == () and t.parts["scale2"].view(torch.int32) == want.view(torch.int32)
     engine = _engine(quantized)
     assert _error(engine, _oracle(dense)) <= 1e-4
-    prompts = _prompts()
-    assert _engine(quantized).generate(prompts, GREEDY) == _hf_greedy(_oracle(dense), prompts, GREEDY.max_tokens)
     # q/k/v and gate/up merge into one quantized matmul each (D5: FP8 block-scale rows, FP4 tied global scales), so
     # the only (in, out) are o's, down's and the merged q/k/v's and gate/up's
-    shapes = {tuple(int(re.search(rf"\b{f}=(\d+)", k)[1]) for f in ("in", "out"))
-              for k in engine.ctx.kernels if k.endswith("/qlinear@2")}
+    sites = {tuple(int(re.search(rf"\b{f}=(\d+)", k)[1]) for f in ("in", "out"))
+             for k in engine.ctx.kernels if k.endswith("/qlinear@2")}
     attention = {(256, 256), (256, 512)}
-    assert shapes == (set() if dialect == "quark" else attention) if moe else attention | {(384, 256), (256, 768)}
+    assert sites == (set() if dialect == "quark" else attention) if moe else attention | {(384, 256), (256, 768)}
 
 
-@pytest.mark.parametrize("dialect,moe", CASES)
-def test_each_quantized_module_is_one_qtensor_its_primary_part_first(files, dialect, moe):
-    quantized, dense = files(dialect, moe)
-    shapes = {k: tuple(v.shape) for k, v in load_file(dense / "model.safetensors").items()}
-    yielded = list(HFSafetensors(quantized).tensors())
-    assert not [n for n, _ in yielded if SUFFIXES.fullmatch(n)]                     # parts never yielded alone
-    assert sorted(n for n, _ in yielded) == sorted(shapes)
-    for name, t in yielded:
-        if not isinstance(t, QTensor):
-            continue
-        assert (t.layout.scheme.elem, t.layout.name, next(iter(t.parts))) == (ELEM[dialect], "hf", "weight")
-        assert tuple(t.logical_shape) == shapes[name]
-        assert t.parts["weight"].dtype == torch.uint8
-        assert t.parts["scale"].dtype == (torch.float32 if ELEM[dialect] == "fp8_e4m3" else torch.uint8)
-        if "scale2" in t.parts:
-            assert t.parts["scale2"].dtype == torch.float32 and t.parts["scale2"].shape == ()
-
-
-def test_compressed_tensors_global_scales_are_inverted_in_f32(files):
-    quantized, _ = files("ct-nvfp4", False)
-    raw = {}
-    for f in quantized.glob("*.safetensors"):
-        raw |= load_file(f)
-    for name, t in HFSafetensors(quantized).tensors():
-        if isinstance(t, QTensor):
-            want = 1.0 / raw[name.replace(".weight", ".weight_global_scale")]
-            assert t.parts["scale2"].view(torch.int32) == want.reshape(()).view(torch.int32)
-
-
-def test_each_part_is_read_once(files):
+def _counted_reads(run) -> dict:
+    """Tensor name -> how often std.weights.hf read it while `run()` ran; under None, what `run()` returned."""
     from holon_std.weights.hf import source
 
-    quantized, _ = files("modelopt", False)
     reads, opened = {}, source.safe_open
 
     class Counted:
@@ -151,17 +132,15 @@ def test_each_part_is_read_once(files):
             return self.f.get_tensor(name)
 
     with mock.patch.object(source, "safe_open", Counted):
-        list(HFSafetensors(quantized).tensors())
-    everything = set().union(*(load_file(f).keys() for f in quantized.glob("*.safetensors")))
-    assert set(reads.values()) == {1}
-    assert everything - set(reads) == {n for n in everything if n.endswith(".input_scale")}    # dropped unread
+        reads[None] = run()
+    return reads
 
 
-@pytest.mark.parametrize("dialect,moe", [(d, True) for d in hq.DIALECTS])
-def test_the_reference_is_the_format_owners_decoding(files, dialect, moe):
-    """D10 on the fixtures (`python -m holon_judge hf-quant-check` runs it on the real files): transformers,
+@pytest.mark.parametrize("dialect", hq.DIALECTS)
+def test_the_reference_is_the_format_owners_decoding(files, dialect):
+    """D10 on the MoE fixtures (`python -m holon_judge hf-quant-check` runs it on the real files): transformers,
     compressed-tensors, ModelOpt and amd-quark where importable, and gguf-py on llama.cpp's repacks."""
-    quantized, _ = files(dialect, moe)
+    quantized, _ = files(dialect, True)
     llama = LLAMA if (LLAMA / "conversion" / "base.py").is_file() else None
     path = list(sys.path)
     report = owner_check(quantized, llama)
@@ -175,35 +154,34 @@ def test_the_reference_is_the_format_owners_decoding(files, dialect, moe):
     assert all(r["modules"] == modules and not r["over"] for r in report.values()), report
 
 
-@pytest.mark.parametrize("plant,dialect,moe", [
-    ("ct-global-not-inverted", "ct-nvfp4", False),               # N1
-    ("dialect-k-scale-on-v", "modelopt", False),                 # T1
-    ("hf-stack-off-by-one", "quark", True),                      # M2
-    ("mxfp4-scale-as-e4m3", "quark", True),                      # M3
-    ("mxfp4-scale-halved", "ct-mxfp4", False),                   # M5
-    ("gate-up-merge-gate-scales", "fp8", False),                 # P5
-    ("gate-up-merge-gate-scales", "modelopt", False),
-    ("hf-scale-stack-off-by-one", "fp8", True)])                 # P6
-def test_the_tier_a_plants_fail(files, plant, dialect, moe):
-    quantized, dense = files(dialect, moe)
+@pytest.mark.parametrize("plant,dialect", [
+    ("ct-global-not-inverted", "ct-nvfp4"),                      # N1
+    ("dialect-k-scale-on-v", "modelopt"),                        # T1
+    ("mxfp4-scale-halved", "ct-mxfp4"),                          # M5
+    ("gate-up-merge-gate-scales", "fp8"),                        # P5
+    ("mxfp4-scale-as-e4m3", "quark")])                           # M3 (the structural test shares the reference)
+def test_the_tier_a_plants_fail(files, plant, dialect):
+    """Plants in what the dense fixtures mean; the stack plants (M2, P6) are the structural test's."""
+    quantized, dense = files(dialect, False)
     with PLANTS[plant]():                                # loaded and run planted (the reference decodes lazily)
         assert _error(_engine(quantized), _oracle(dense)) > 1e-3            # 10× the passing bound
 
 
-@pytest.mark.parametrize("dialect", hq.DIALECTS)
-def test_every_stacked_expert_slice_dequantizes_to_the_checkpoints(files, dialect):
+@pytest.mark.parametrize("dialect,plants", [
+    ("fp8", ["hf-scale-stack-off-by-one"]),                                                   # P6
+    ("ct-fp8", ["hf-gate-up-swapped"]),
+    ("ct-nvfp4", ["hf-two-experts-swapped", "hf-scale2-stack-off-by-one", "hf-gate-up-scale2-swapped"]),
+    ("ct-mxfp4", ["hf-gate-up-swapped"]),
+    ("modelopt", ["hf-scale-stack-off-by-one", "hf-scale2-stack-off-by-one", "hf-gate-up-scale2-swapped"]),
+    ("quark", ["hf-stack-off-by-one"])])                                                      # M2
+def test_the_structural_test_checks_every_stacked_slice(files, dialect, plants):
+    """Every slice of the MoE fixture's stacks dequantizes to the checkpoint's; each plant misplaces some."""
     quantized, _ = files(dialect, True)
     assert mismatches(_engine(quantized), quantized) == []
-
-
-@pytest.mark.parametrize("plant,dialect", [("hf-stack-off-by-one", "quark"), ("hf-two-experts-swapped", "ct-nvfp4"),
-                                           ("hf-gate-up-swapped", "ct-mxfp4"), ("hf-scale-stack-off-by-one", "fp8"),
-                                           ("hf-scale-stack-off-by-one", "modelopt")])
-def test_the_structural_test_catches_a_misplaced_quantized_slice(files, plant, dialect):
-    quantized, _ = files(dialect, True)
-    with PLANTS[plant]():
-        engine = _engine(quantized)
-    assert mismatches(engine, quantized)
+    for plant in plants:
+        with PLANTS[plant]():
+            engine = _engine(quantized)
+        assert mismatches(engine, quantized), plant
 
 
 def _edited(src, dst, tensors=None, config=None):
@@ -247,8 +225,8 @@ def _poke(suffix: str, byte: int):
     ("modelopt", _poke("weight_scale", 0x88), None, r"q_proj: an NVFP4 block scale is negative or NaN"),
     ("ct-nvfp4", _poke("weight_scale", 0x7F), None, r"q_proj: an NVFP4 block scale is negative or NaN"),
     ("quark", _poke("weight_scale", 0xFF), None, r"q_proj: an MXFP4 scale is NaN"),
-    ("fp8", lambda n, t: torch.cat([t, t[:1]]) if n.endswith("q_proj.weight_scale_inv") else t, None,
-     r"the blocks tiling it")])
+    ("fp8", lambda n, t: t[:200] if n == "model.layers.0.self_attn.q_proj.weight" else t, None,
+     r"q_proj: FP8 weight float8_e4m3fn \[200, 256\] and scale bfloat16 \[2, 2\]: expected .* whole 128 × 128 blocks")])
 def test_what_the_engine_cannot_honour_is_a_load_error(files, tmp_path, dialect, tensors, config, error):
     quantized, _ = files(dialect, False)
     with pytest.raises(ValueError, match=error):

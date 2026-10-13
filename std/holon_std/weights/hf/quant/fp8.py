@@ -11,8 +11,9 @@ from .base import Dialect
 
 
 def dialect(qc: Mapping[str, Any]) -> Dialect:
-    if qc.get("fmt", "e4m3") != "e4m3" or not qc.get("weight_block_size"):
-        raise ValueError(f"fp8 quantization config {dict(qc)}: only e4m3 weights with block scales "
+    block = qc.get("weight_block_size")
+    if qc.get("fmt", "e4m3") != "e4m3" or not block or len(block) != 2:
+        raise ValueError(f"fp8 quantization config {dict(qc)}: only e4m3 weights with 2-D block scales "
                          "(weight_block_size) are supported")
     return Dialect("fp8_e4m3", {"weight": "weight", "weight_scale_inv": "scale"},
-                   ignore=tuple(qc.get("modules_to_not_convert") or ()))
+                   ignore=tuple(qc.get("modules_to_not_convert") or ()), args={"block": tuple(block)})

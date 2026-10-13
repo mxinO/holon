@@ -405,15 +405,15 @@ def _part_from(modules: dict, name: str, other: str, role: str = "scale") -> dic
     return {name: dataclasses.replace(m, parts=m.parts | {role: modules[other].parts[role]})}
 
 
-def _expert_scales_shifted(layer: int) -> Callable[[dict], dict]:
-    """Each expert of `layer` takes the next expert's scale (the scale stack off by one)."""
+def _expert_scales_shifted(layer: int, role: str = "scale") -> Callable[[dict], dict]:
+    """Each expert of `layer` takes the next expert's `role` part (that stack off by one)."""
     def edit(modules: dict) -> dict:
         prefix, changed = f"model.layers.{layer}.mlp.experts.", {}
         experts = len({n.split(".")[5] for n in modules if n.startswith(prefix)})
         for name in modules:
             if name.startswith(prefix):
                 e, proj = name.removeprefix(prefix).split(".")
-                changed |= _part_from(modules, name, f"{prefix}{(int(e) + 1) % experts}.{proj}")
+                changed |= _part_from(modules, name, f"{prefix}{(int(e) + 1) % experts}.{proj}", role)
         return changed
     return edit
 
@@ -435,6 +435,22 @@ def _gate_up_merge_gate_scales() -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def _gate_up_scale2_swapped() -> Iterator[None]:
+    """An expert gate/up merge whose per-tensor `scale2` rows are swapped (up's for gate's half, and back)."""
+    from holon_std.moe import units
+
+    merge = units.ExpertLinear.merge
+
+    def planted(gate, up):
+        merged = merge(gate, up)
+        if merged is not None and "scale2" in merged.parts:
+            merged.parts["scale2"] = merged.parts["scale2"].flip(0)
+        return merged
+    with mock.patch.object(units.ExpertLinear, "merge", staticmethod(planted)):
+        yield
+
+
+@contextlib.contextmanager
 def _mxfp4_scales_edited(edit: Callable[[torch.Tensor], torch.Tensor]) -> Iterator[None]:
     """The dialects' MXFP4 normalization yielding `edit(scale)`."""
     from holon_std.weights.hf.quant import base
@@ -446,7 +462,8 @@ def _mxfp4_scales_edited(edit: Callable[[torch.Tensor], torch.Tensor]) -> Iterat
 
 def hf_quant_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:
     """Quantized HF checkpoints' Tier A and structural plants (docs/m06-lowp.md §4.8: N1, T1, M3, M5, P5, P6; M2 is
-    `hf-stack-off-by-one`), the one-layer ones in `layer`."""
+    `hf-stack-off-by-one`; and the per-tensor `scale2` stack off by one or its gate/up rows swapped in the merge), the
+    one-layer ones in `layer`."""
     attn = f"model.layers.{layer}.self_attn"
     return {
         "ct-global-not-inverted": lambda: _hf_dialect(inverted=frozenset()),                          # N1
@@ -456,7 +473,9 @@ def hf_quant_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractCon
             "holon_std.weights.hf.reference.e8m0", lambda s: s.view(torch.float8_e4m3fn).float()),
         "mxfp4-scale-halved": lambda: _mxfp4_scales_edited(lambda s: s - 1),                           # M5
         "gate-up-merge-gate-scales": _gate_up_merge_gate_scales,                                       # P5
-        "hf-scale-stack-off-by-one": lambda: _hf_grouped(_expert_scales_shifted(layer))}               # P6
+        "hf-scale-stack-off-by-one": lambda: _hf_grouped(_expert_scales_shifted(layer)),               # P6
+        "hf-scale2-stack-off-by-one": lambda: _hf_grouped(_expert_scales_shifted(layer, "scale2")),
+        "hf-gate-up-scale2-swapped": _gate_up_scale2_swapped}
 
 
 def moe_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:

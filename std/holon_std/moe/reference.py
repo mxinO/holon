@@ -19,6 +19,20 @@ def moe_topk(logits: torch.Tensor, top_k: int, renormalize: bool) -> tuple[torch
     return weights.contiguous(), ids.int().contiguous()
 
 
+def expert_parts(parts: dict[str, torch.Tensor], experts: int, merged: bool) -> list[list[dict[str, torch.Tensor]]]:
+    """A `linear_experts@2` stack's parts per expert, then per unit it was merged from (gate's, then up's when
+    `merged`; else one): a part of rank ≥ 3 is per row, [E, rows, …], each unit taking its share of the expert's rows;
+    one of rank ≤ 2 is per tensor, [E] or [E, 1], or merged [2, E] (gate's row, then up's). For a dequantizer that
+    reads one unit's parts at a time."""
+    units = 2 if merged else 1
+
+    def part(p: torch.Tensor, e: int, u: int) -> torch.Tensor:
+        if p.dim() >= 3:
+            return p[e].chunk(units)[u]
+        return p[u, e] if merged else p.reshape(experts)[e]
+    return [[{r: part(p, e, u) for r, p in parts.items()} for u in range(units)] for e in range(experts)]
+
+
 def linear_experts(x: torch.Tensor, weight: torch.Tensor, ids: torch.Tensor, glu: str = "none",
                    operand_dtype: torch.dtype | None = None) -> torch.Tensor:
     """The `linear_experts@2` oracle over the stack's weights `weight` [E, out, in] (dequantized, or dense):

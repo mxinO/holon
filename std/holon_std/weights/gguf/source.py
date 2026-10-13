@@ -73,6 +73,8 @@ class GGUFSource:
             if t.type in _DENSE:
                 yield t.name, torch.from_numpy(data).view(_DENSE[t.type]).reshape(t.shape)
             else:
+                if t.type == GGMLQuantizationType.MXFP4 and (data.reshape(t.rows, -1, 17)[..., 0] == 0xFF).any():
+                    raise ValueError(f"{t.name}: an MXFP4 scale is NaN (e8m0 0xFF)")     # as std.weights.hf's
                 layout = Layout(Scheme(f"ggml.{t.type.name.lower()}"), "gguf.native")
                 yield t.name, QTensor(layout, t.shape, {"blocks": torch.from_numpy(data)})
 

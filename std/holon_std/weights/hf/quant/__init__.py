@@ -83,11 +83,10 @@ def load(d: Dialect, module: Module, get: Callable[[str], torch.Tensor]) -> QTen
     raw = {role: get(name) for role, name in module.parts.items()}
     raw |= {role: 1.0 / raw[role].float() for role in d.inverted}
     try:
-        parts = NORMALIZE[d.elem](**raw)
+        parts, shape = NORMALIZE[d.elem](**raw, **d.args)
     except ValueError as e:
         raise ValueError(f"{module.name}: {e}") from None
-    out, cols = parts["weight"].shape
-    return QTensor(Layout(Scheme(d.elem), "hf"), (out, cols if d.elem == "fp8_e4m3" else 2 * cols), parts)
+    return QTensor(Layout(Scheme(d.elem), "hf"), shape, parts)
 
 
 def ignored(module: str, patterns: tuple[str, ...]) -> bool:

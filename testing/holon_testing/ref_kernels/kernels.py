@@ -123,8 +123,9 @@ class LinearExperts:
         elif self.quantized.ggml is not None:
             y = moe.linear_experts(x, self.quantized.dequantized(parts).view(self.experts, self.out, -1), ids, self.glu)
         else:
-            stack = self.quantized.dequantized(parts, lambda p: hf.dequantize_experts(self.quantized.elem, p,
-                                                                                      self.experts))
+            stack = self.quantized.dequantized(parts, lambda p: torch.stack([
+                torch.cat([hf.dequantize(self.quantized.elem, u) for u in units])
+                for units in moe.expert_parts(p, self.experts, merged=self.glu == "swiglu")]))
             y = moe.linear_experts(x, stack, ids, self.glu)
         return y.to(self.out_dtype)
 
