@@ -1,8 +1,10 @@
 """flash-linear-attention's Gated DeltaNet kernels (vLLM's copy, vendored at a pinned commit with `vendor.patch`; the
 subset spike S3 measured) as the `gated_delta_rule@1` kernel (op contract: std.mixers.gdn; M0.3 design D3).
 
-A step whose rows all have one token runs the fused recurrent kernel: it computes g and β itself and reads and writes
-each row's state unit in place by slot (patched: slot 0 is a real sequence, and a row without has_init reads nothing).
+A step whose rows all have one token, or planned `per_token` (verify rows and their replays, M0.4 D6), runs the fused
+recurrent kernel: it computes g and β itself, token by token, and reads each row's state unit by slot (patched: slot 0
+is a real sequence, and a row without has_init reads nothing); one-token rows write it back in place, `per_token` rows
+once after their last token, to `out_slots` (patched).
 Other steps run the chunked kernel over the rows that have tokens: it takes no state indices, so their states are
 gathered into a scratch (zeros without has_init) and the final states scattered back; a row's in-step checkpoint
 (`snapshots`) is the chunk kernel's own f32 state at the chunk where it falls (patched: stored into the payload
@@ -26,7 +28,7 @@ OP = "gated_delta_rule"
 
 @dataclasses.dataclass(frozen=True)
 class _Handle:
-    decode: bool                          # every row has one token: the fused recurrent kernel
+    decode: bool                          # one-token or per-token rows: the fused recurrent kernel
     tokens: int
     cu_seqlens: torch.Tensor | None       # [n + 1] int32: token offsets of the rows with tokens
     chunk_indices: torch.Tensor | None    # chunked: (row, chunk) per 64-token chunk
@@ -42,21 +44,25 @@ def _to_device(values: list, device: torch.device) -> torch.Tensor:
 
 class GatedDeltaRule:
     def __init__(self, ctx, *, heads_k: int, heads_v: int, head_k_dim: int, head_v_dim: int, v_head_order: str,
-                 dtype: str) -> None:
+                 dtype: str, out_slots: bool = False) -> None:
         self.device, self.tiled = ctx.device, v_head_order == "tiled"
-        self._offsets: dict[int, torch.Tensor] = {}       # decode cu_seqlens per row count, kept for graph replay
+        self._offsets: dict[tuple[int, ...], torch.Tensor] = {}   # recurrent cu_seqlens per row lengths (graphs)
 
-    def plan(self, lens: list[int], snapshots=()) -> _Handle:
+    def plan(self, lens: list[int], snapshots=(), per_token: bool = False) -> _Handle:
         if torch.cuda.is_current_stream_capturing():
             raise RuntimeError("plan() runs on the host before a step, never inside a graph capture")
         n = len(lens)
         for row, offset, _ in snapshots:
             if offset % FLA_CHUNK_SIZE or not 0 < offset // FLA_CHUNK_SIZE < -(-lens[row] // FLA_CHUNK_SIZE):
                 raise ValueError(f"snapshot of row {row} at {offset}: a chunk boundary inside its {lens[row]} tokens")
-        if n and all(t == 1 for t in lens):
-            if n not in self._offsets:
-                self._offsets[n] = torch.arange(n + 1, dtype=torch.int32, device=self.device)
-            return _Handle(True, n, self._offsets[n], None, None, None)
+        if per_token and snapshots:
+            raise ValueError("per-token rows take no snapshots")
+        if n and (per_token or all(t == 1 for t in lens)):
+            key = tuple(lens)
+            if key not in self._offsets:
+                self._offsets[key] = torch.tensor([0, *itertools.accumulate(lens)], dtype=torch.int32,
+                                                  device=self.device)
+            return _Handle(True, sum(lens), self._offsets[key], None, None, None)
         rows = [r for r, t in enumerate(lens) if t > 0]
         if not rows:
             return _Handle(False, 0, None, None, None, None)
@@ -73,8 +79,8 @@ class GatedDeltaRule:
                        None if len(rows) == n else _to_device(rows, self.device), snap)
 
     @torch.no_grad()
-    def __call__(self, h: _Handle, q, k, v, a, b, a_log, dt_bias, state, slots, has_init, snapshot=None
-                 ) -> torch.Tensor:
+    def __call__(self, h: _Handle, q, k, v, a, b, a_log, dt_bias, state, slots, has_init, snapshot=None,
+                 out_slots=None) -> torch.Tensor:
         if q.shape[0] != h.tokens:
             raise ValueError(f"{q.shape[0]} tokens for a plan of {h.tokens}")
         if state.stride()[1:] != (state.shape[2] * state.shape[3], state.shape[3], 1):
@@ -82,10 +88,13 @@ class GatedDeltaRule:
         if h.tokens == 0:
             return torch.empty(v.shape, dtype=v.dtype, device=v.device)
         if h.decode:
+            # One-token rows store in place in the loop (unchanged); multi-token rows, or another destination, store
+            # once after the last token.
+            once = None if out_slots is None and h.tokens == len(slots) else (slots if out_slots is None else out_slots)
             o, _ = fused_sigmoid_gating_delta_rule_update(
                 a_log, a, b, dt_bias, q[None], k[None], v[None], initial_state=state, inplace_final_state=True,
                 cu_seqlens=h.cu_seqlens, ssm_state_indices=slots, use_qk_l2norm_in_kernel=True,
-                has_initial_state=has_init, v_head_tiled=self.tiled)
+                has_initial_state=has_init, v_head_tiled=self.tiled, out_indices=once)
             return o[0]
         if h.live is not None:
             slots, has_init = slots.index_select(0, h.live), has_init.index_select(0, h.live)
@@ -108,7 +117,7 @@ class GatedDeltaRule:
 
 
 def _supports(f: dict) -> bool:
-    return (f["dtype"] == "bfloat16" and f["heads_v"] % f["heads_k"] == 0
+    return (f["dtype"] == "bfloat16" and f["heads_v"] % f["heads_k"] == 0         # any `out_slots` fact: supported
             and f["head_k_dim"] in (64, 128) and f["head_v_dim"] in (64, 128)
             and f["v_head_order"] in ("grouped", "tiled"))
 

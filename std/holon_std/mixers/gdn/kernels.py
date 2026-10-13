@@ -10,12 +10,15 @@ from zero state and never reads its unit, so a unit reused by a new sequence nee
   has_init [R]) -> y [T, C]`: per row, a depthwise causal convolution of the row's tokens continuing the K-1 inputs in
   `state[slots[r]]` (zeros without `has_init`), `y = silu(conv)` in f32, cast to x's dtype; then `state[slots[r]]`
   holds the last K-1 inputs of (previous ‖ row). Facts: channels, kernel_size, dtype.
-- `gated_delta_rule@1`: instance with `plan(lens: list[int], snapshots=()) -> handle` (host, once per step: per-row
-  token counts; `snapshots` (row, offset, unit): every provider writes row's state after its first `offset` tokens,
-  a multiple of 64 with 0 < offset < the row's length, to `snapshot[unit]` — an in-step checkpoint) and
-  `(handle, q [T, Hk, Dk], k [T, Hk, Dk], v [T, Hv, Dv], a [T, Hv], b [T, Hv], a_log [Hv] f32, dt_bias [Hv] f32,
-  state [units, Hv, Dv, Dk] f32, slots [R], has_init [R], snapshot=None [units', Hv, Dv, Dk] f32) -> o [T, Hv, Dv]`
-  of v's dtype: q and k l2-normalised
+- `gated_delta_rule@1`: instance with `plan(lens: list[int], snapshots=(), per_token=False) -> handle` (host, once
+  per step: per-row token counts; `snapshots` (row, offset, unit): every provider writes row's state after its first
+  `offset` tokens, a multiple of 64 with 0 < offset < the row's length, to `snapshot[unit]` — an in-step checkpoint;
+  `per_token`: each row is computed token by token exactly as that many one-token rows would be, no snapshots —
+  verify rows and their replays, M0.4 D6) and `(handle, q [T, Hk, Dk], k [T, Hk, Dk], v [T, Hv, Dv], a [T, Hv],
+  b [T, Hv], a_log [Hv] f32, dt_bias [Hv] f32, state [units, Hv, Dv, Dk] f32, slots [R], has_init [R],
+  snapshot=None [units', Hv, Dv, Dk] f32, out_slots=None [R]) -> o [T, Hv, Dv]` of v's dtype (`out_slots`: the units
+  each row's final state is written to instead of its `slots` unit; a deployment that passes it selects with the fact
+  `out_slots=True`): q and k l2-normalised
   (`x · rsqrt(Σx² + 1e-6)`) in f32, q scaled by Dk^-½, `g = −exp(a_log) · softplus(a + dt_bias)`, `β = sigmoid(b)`;
   per row from `S = state[slots[r]]` (zeros without `has_init`), for each token `S ← e^g S; S += k (β(v − Sk))ᵀ;
   o = S q` (S is [Dv, Dk] per v-head), and the final S written back. V-head j reads q/k head `j // (Hv/Hk)`

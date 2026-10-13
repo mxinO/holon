@@ -16,7 +16,8 @@ def _rows(query_start: torch.Tensor) -> list[tuple[int, int]]:
 
 def causal_conv1d(x: torch.Tensor, weight: torch.Tensor, state: torch.Tensor, slots: torch.Tensor,
                   query_start: torch.Tensor, has_init: torch.Tensor) -> torch.Tensor:
-    """Per row: silu(depthwise causal conv over (state ‖ row)) → y; state ← the last K-1 inputs."""
+    """Per row: silu(depthwise causal conv over (state ‖ row)) → y; state ← the last K-1 inputs. Each output is computed
+    for its token alone, so a row of n tokens is bitwise n one-token calls (CPU math varies with tensor length)."""
     kernel = weight.shape[1]
     y = torch.empty_like(x)
     w = weight.float()
@@ -26,8 +27,8 @@ def causal_conv1d(x: torch.Tensor, weight: torch.Tensor, state: torch.Tensor, sl
         unit = int(slots[r])
         prev = state[unit].float() if bool(has_init[r]) else x.new_zeros(x.shape[1], kernel - 1, dtype=torch.float32)
         seq = torch.cat([prev, x[lo:hi].float().T], dim=1)                     # [C, K-1 + n]
-        windows = seq.unfold(1, kernel, 1)                                     # [C, n, K]
-        y[lo:hi] = F.silu((windows * w[:, None, :]).sum(-1)).T.to(x.dtype)
+        for t in range(hi - lo):
+            y[lo + t] = F.silu((seq[:, t: t + kernel] * w).sum(-1)).to(x.dtype)
         state[unit] = seq[:, -(kernel - 1):].to(state.dtype)
     return y
 
@@ -49,16 +50,14 @@ def head_map(heads_k: int, heads_v: int, v_head_order: str) -> torch.Tensor:
 def gated_delta_rule(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, a: torch.Tensor, b: torch.Tensor,
                      a_log: torch.Tensor, dt_bias: torch.Tensor, state: torch.Tensor, slots: torch.Tensor,
                      query_start: torch.Tensor, has_init: torch.Tensor, v_head_order: str,
-                     snapshot: torch.Tensor | None = None, snaps: dict[int, tuple[int, int]] | None = None
-                     ) -> torch.Tensor:
-    """The gated delta rule per row, token by token in f32; state [units, Hv, Dv, Dk] f32 updated in place; `snaps`
-    {row: (offset, unit)}: the row's state after its first `offset` tokens into `snapshot[unit]`."""
+                     snapshot: torch.Tensor | None = None, snaps: dict[int, tuple[int, int]] | None = None,
+                     out_slots: torch.Tensor | None = None) -> torch.Tensor:
+    """The gated delta rule per row, token by token in f32; state [units, Hv, Dv, Dk] f32 updated in place (into
+    `out_slots[r]` instead of `slots[r]` when given); `snaps` {row: (offset, unit)}: the row's state after its first
+    `offset` tokens into `snapshot[unit]`. Every per-token quantity is computed for its token alone, so a row of n
+    tokens is bitwise n one-token calls (CPU math varies with tensor length)."""
     heads_v, dv, dk = state.shape[1:]
     idx = head_map(q.shape[1], heads_v, v_head_order).to(q.device)
-    qn = l2norm(q.float())[:, idx] * dk ** -0.5                                 # [T, Hv, Dk]
-    kn = l2norm(k.float())[:, idx]
-    g = -a_log.float().exp() * F.softplus(a.float() + dt_bias.float())          # [T, Hv]
-    beta = torch.sigmoid(b.float())
     o = torch.empty(v.shape, dtype=torch.float32, device=v.device)
     for r, (lo, hi) in enumerate(_rows(query_start)):
         if hi == lo:
@@ -66,13 +65,17 @@ def gated_delta_rule(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, a: torch
         unit = int(slots[r])
         s = state[unit].clone() if bool(has_init[r]) else state.new_zeros(heads_v, dv, dk)
         for t in range(lo, hi):
-            s = s * g[t].exp()[:, None, None]
-            delta = beta[t][:, None] * (v[t].float() - (s * kn[t][:, None, :]).sum(-1))     # [Hv, Dv]
-            s = s + delta[:, :, None] * kn[t][:, None, :]
-            o[t] = (s * qn[t][:, None, :]).sum(-1)
+            qn = l2norm(q[t: t + 1].float())[0, idx] * dk ** -0.5                  # [Hv, Dk]
+            kn = l2norm(k[t: t + 1].float())[0, idx]
+            g = -a_log.float().exp() * F.softplus(a[t].float() + dt_bias.float())  # [Hv]
+            beta = torch.sigmoid(b[t].float())
+            s = s * g.exp()[:, None, None]
+            delta = beta[:, None] * (v[t].float() - (s * kn[:, None, :]).sum(-1))      # [Hv, Dv]
+            s = s + delta[:, :, None] * kn[:, None, :]
+            o[t] = (s * qn[:, None, :]).sum(-1)
             if snaps and r in snaps and t + 1 - lo == snaps[r][0]:
                 snapshot[snaps[r][1]] = s
-        state[unit] = s
+        state[unit if out_slots is None else int(out_slots[r])] = s
     return o.to(v.dtype)
 
 

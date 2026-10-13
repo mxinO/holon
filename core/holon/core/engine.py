@@ -101,7 +101,8 @@ class Engine:
 
         self.ledger = Ledger(self.device)
         options = {"page_size": cfg.page_size, "max_seqs": cfg.max_seqs, "max_model_len": cfg.max_model_len,
-                   "max_step_tokens": cfg.max_step_tokens, "kernels": cfg.kernels, "plugins": cfg.plugin_options}
+                   "max_step_tokens": cfg.max_step_tokens, "max_draft_tokens": cfg.max_draft_tokens,
+                   "kernels": cfg.kernels, "plugins": cfg.plugin_options}
         self.ctx = BuildContext(p, self.device, cfg.dtype, options, ledger=self.ledger)
         bound, planners = bind_state(self.spec, self.ctx, p, self.ledger, cfg)
         model = build_model(self.spec, self.ctx)

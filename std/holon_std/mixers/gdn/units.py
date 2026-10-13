@@ -7,6 +7,14 @@ per layer, f32). A request's state is the unit at its request slot; checkpoints 
 except that this forward fills those the core lists inside a prefill step (`BatchPlan.publishes`, on the 64-token
 chunk grid both specs declare as `in_step`): the delta-rule kernel stores its f32 state at that chunk, and the conv
 payload gets the K − 1 conv inputs before the position, all from the step's own rows.
+
+Speculative verify rows (M0.4 D6) leave both states at their pre-verify values S0: the conv window and the row's conv
+inputs and gates are saved, and the delta rule writes its final state to the padding slot's unit (a sink nothing
+reads). Once the verifier has accepted n drafts, `rewind` restores the conv window, recomputes the convolution, and
+reruns the delta rule from S0 over the row with a = b = −1e4 past its first 1 + n tokens — g = −exp(A)·softplus(−1e4)
+= 0 and β = sigmoid(−1e4) = 0 leave S unchanged there — writing the state after the accepted tokens, then sets the
+conv window at the accepted end. Both delta-rule calls are planned `per_token`, so the result is bitwise what 1 + n
+one-token decode steps would leave.
 """
 from __future__ import annotations
 
@@ -24,6 +32,7 @@ LINEAR = "std.ops.linear@1"
 GROUP = "recurrent"
 CONV, SSM = "conv_state", "ssm_state"   # the two Slot specs (their names in BatchPlan.publishes)
 CHUNK = 64                         # the delta rule's chunk: resuming at its multiples is exact (S3)
+MASKED = -1e4                      # a and b past a verify row's accepted tokens: the delta rule's identity step
 
 
 @dataclasses.dataclass(eq=False)
@@ -35,6 +44,7 @@ class GDNMeta:
     slots: torch.Tensor
     query_start: torch.Tensor
     graph_key: Any
+    verify: bool = False                             # every row a verify row (planned per token; `rewind` follows)
     has_init: torch.Tensor | None = None
     ssm_pool: str | None = None                      # in-step checkpoints: the delta-rule payloads' pool (the
     conv: tuple[str, torch.Tensor, torch.Tensor] | None = None   # kernel has their rows); the conv payloads' pool,
@@ -46,12 +56,15 @@ class Planner:
         self.rule, self.window = rule, conv_kernel - 1
 
     def plan_bounds(self, batch, pages) -> GDNMeta:
-        lens = batch.plan.n_query.tolist()
+        plan = batch.plan
+        lens = plan.n_query.tolist()
         decode = all(n == 1 for n in lens)
-        pubs = {spec: [p for p in batch.plan.publishes if p.spec == spec] for spec in (CONV, SSM)}
+        verify = bool(len(lens)) and not decode and bool((plan.n_logits == plan.n_query).all())
+        pubs = {spec: [p for p in plan.publishes if p.spec == spec] for spec in (CONV, SSM)}
         ssm = [(p.row, p.offset, p.payload.units[0]) for p in pubs[SSM]]
-        meta = GDNMeta(self.rule, self.rule.plan(lens, ssm), batch.dev.slots, batch.dev.query_start,
-                       ("gdn", len(lens)) if decode else None)
+        meta = GDNMeta(self.rule, self.rule.plan(lens, ssm, per_token=verify), batch.dev.slots, batch.dev.query_start,
+                       ("gdn", len(lens)) if decode else ("gdn.verify", len(lens), lens[0]) if verify else None,
+                       verify)
         if ssm:
             meta.ssm_pool = pubs[SSM][0].payload.pool
         if conv := pubs[CONV]:                   # the window before each position, from the step's rows
@@ -91,6 +104,8 @@ class GDN(nn.Module):
     @classmethod
     def planner(cls, params: dict, specs: list[StateSpec], ctx) -> Planner:
         facts = _facts(params, str(ctx.dtype).removeprefix("torch."))
+        if ctx.options.get("max_draft_tokens"):     # verify rows write their final state elsewhere (D6)
+            facts["out_slots"] = True
         rule = ctx.select_kernel(kernels.GATED_DELTA_RULE, site=GROUP, **facts).impl(ctx, **facts)
         return Planner(rule, params.get("conv_kernel", 4))
 
@@ -118,7 +133,15 @@ class GDN(nn.Module):
         self._norm = ctx.select_kernel(kernels.GATED_RMSNORM, site=site, **norm).impl(ctx, **norm)
         conv_bound, ssm_bound = ctx.state(CONV, layer), ctx.state(SSM, layer)
         self._state = None if conv_bound is None else (conv_bound, ssm_bound, conv_bound[0].layers.index(layer))
-        self._rule = None
+        self._rule = self._replay = None
+        if conv_bound is not None and ctx.options.get("max_draft_tokens"):     # verify rows: what `rewind` reruns
+            rows = ctx.options["max_seqs"]
+            tokens, name = rows * (1 + ctx.options["max_draft_tokens"]), f"gdn.replay.{layer}"
+            self._replay = (ctx.static(name + ".x", (tokens, self.channels), ctx.dtype),
+                            ctx.static(name + ".a", (tokens, heads_v), ctx.dtype),
+                            ctx.static(name + ".b", (tokens, heads_v), ctx.dtype),
+                            ctx.static(name + ".window", (rows, self.channels, conv_kernel - 1), ctx.dtype))
+            self._sink = rows                       # the padding slot's unit: never read (graph padding rows only)
         if conv_bound is None:                     # a model-only build: whole sequences from zero state
             facts = {"heads_k": heads_k, "heads_v": heads_v, "head_k_dim": head_k_dim, "head_v_dim": head_v_dim,
                      "v_head_order": v_head_order, "dtype": dtype}
@@ -147,7 +170,15 @@ class GDN(nn.Module):
             meta = ctx.meta(GROUP)
             conv_state, ssm_state = self._states()
             qs, slots, has_init, rule, handle = meta.query_start, meta.slots, meta.has_init, meta.rule, meta.handle
-        qkv = self.in_proj_qkv(x)
+        qkv, a, b = self.in_proj_qkv(x), self.in_proj_a(x), self.in_proj_b(x)
+        out_slots = None
+        if self._state is not None and meta.verify:      # keep S0: save what `rewind` reruns, write the state aside
+            saved_x, saved_a, saved_b, window = self._replay
+            saved_x[:t].copy_(qkv)
+            saved_a[:t].copy_(a)
+            saved_b[:t].copy_(b)
+            window[: len(slots)].copy_(conv_state.index_select(0, slots.long()))
+            out_slots = torch.full_like(slots, self._sink)
         mixed = self._conv(qkv, self.conv_weight, conv_state, slots, qs, has_init)
         snapshot = None
         if self._state is not None:
@@ -157,9 +188,34 @@ class GDN(nn.Module):
                 self._states(conv_pool=ctx.pool(pool))[0].index_copy_(0, units, window.to(conv_state.dtype))
             if meta.ssm_pool is not None:
                 snapshot = self._states(ssm_pool=ctx.pool(meta.ssm_pool))[1]
-        q, k, v = mixed.split([self.hk * self.dk, self.hk * self.dk, self.hv * self.dv], dim=-1)
-        o = rule(handle, q.reshape(t, self.hk, self.dk), k.reshape(t, self.hk, self.dk),
-                 v.reshape(t, self.hv, self.dv), self.in_proj_a(x), self.in_proj_b(x), self.A_log, self.dt_bias,
-                 ssm_state, slots, has_init, snapshot=snapshot)
+        o = self._rule_call(rule, handle, mixed, a, b, ssm_state, slots, has_init, snapshot, out_slots)
         o = self._norm(o, self.in_proj_z(x).reshape(t, self.hv, self.dv), self.norm_weight)
         return self.out_proj(o.reshape(t, self.hv * self.dv))
+
+    def _rule_call(self, rule, handle, mixed, a, b, ssm_state, slots, has_init, snapshot=None, out_slots=None):
+        t = mixed.shape[0]
+        q, k, v = mixed.split([self.hk * self.dk, self.hk * self.dk, self.hv * self.dv], dim=-1)
+        return rule(handle, q.reshape(t, self.hk, self.dk), k.reshape(t, self.hk, self.dk),
+                    v.reshape(t, self.hv, self.dv), a, b, self.A_log, self.dt_bias, ssm_state, slots, has_init,
+                    snapshot=snapshot, out_slots=out_slots)
+
+    def rewind(self, ctx) -> None:
+        """After a verify step: the conv window and the delta-rule state after each row's accepted tokens (D6)."""
+        if self._state is None or not (meta := ctx.meta(GROUP)).verify:
+            return
+        conv_state, ssm_state = self._states()
+        saved_x, saved_a, saved_b, window = self._replay
+        slots, qs, rows = meta.slots, meta.query_start, len(meta.slots)
+        t = int(ctx.batch.plan.n_query.sum())
+        width, kept = t // rows, self.kernel - 1
+        units = slots.long()
+        keep = 1 + ctx.seq_table.n_accept[units]                                   # tokens accepted per row
+        conv_state.index_copy_(0, units, window[:rows])
+        mixed = self._conv(saved_x[:t], self.conv_weight, conv_state, slots, qs, meta.has_init)
+        past = (torch.arange(width, device=keep.device) >= keep[:, None]).reshape(t, 1)
+        a = saved_a[:t].masked_fill(past, MASKED)
+        b = saved_b[:t].masked_fill(past, MASKED)
+        self._rule_call(meta.rule, meta.handle, mixed, a, b, ssm_state, slots, meta.has_init, out_slots=slots)
+        inputs = torch.cat([window[:rows], saved_x[:t].view(rows, width, -1).transpose(1, 2)], dim=2)
+        at = (keep[:, None] + torch.arange(kept, device=keep.device)).unsqueeze(1).expand(rows, self.channels, kept)
+        conv_state.index_copy_(0, units, inputs.gather(2, at))

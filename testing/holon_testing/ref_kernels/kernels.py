@@ -142,20 +142,22 @@ class CausalConv1d:
 
 class GatedDeltaRule:
     def __init__(self, ctx, *, heads_k: int, heads_v: int, head_k_dim: int, head_v_dim: int, v_head_order: str,
-                 dtype: str) -> None:
+                 dtype: str, out_slots: bool = False) -> None:
         self.order = v_head_order
 
-    def plan(self, lens: list[int], snapshots=()):
+    def plan(self, lens: list[int], snapshots=(), per_token: bool = False):
+        if per_token and snapshots:
+            raise ValueError("per-token rows take no snapshots")
         for row, offset, _ in snapshots:
             if offset % 64 or not 0 < offset < lens[row]:
                 raise ValueError(f"snapshot of row {row} at {offset}: a multiple of 64 inside its {lens[row]} tokens")
         return (torch.tensor([0, *np.cumsum(lens).tolist()], dtype=torch.int32),
                 {row: (offset, unit) for row, offset, unit in snapshots})
 
-    def __call__(self, handle, q, k, v, a, b, a_log, dt_bias, state, slots, has_init, snapshot=None):
+    def __call__(self, handle, q, k, v, a, b, a_log, dt_bias, state, slots, has_init, snapshot=None, out_slots=None):
         query_start, snaps = handle
         return gdn.gated_delta_rule(q, k, v, a, b, a_log, dt_bias, state, slots, query_start, has_init, self.order,
-                                    snapshot, snaps)
+                                    snapshot, snaps, out_slots)
 
 
 class GatedRMSNorm:

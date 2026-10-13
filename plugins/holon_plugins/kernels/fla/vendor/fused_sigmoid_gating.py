@@ -20,6 +20,7 @@ import triton.language as tl
         "IS_CONTINUOUS_BATCHING": lambda args: args["ssm_state_indices"] is not None,
         "IS_SPEC_DECODING": lambda args: args["num_accepted_tokens"] is not None,
         "USE_HAS_INIT": lambda args: args["has_init"] is not None,
+        "STORE_FINAL_ONCE": lambda args: args["out_indices"] is not None,
     }
 )
 @triton.jit(do_not_specialize=["N", "T"])
@@ -40,6 +41,7 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
     ssm_state_indices,
     num_accepted_tokens,
     has_init,  # Holon: [N] per-sequence has-initial-state flags (or None: every sequence has one)
+    out_indices,  # Holon: [N] the unit each sequence's final state goes to, once, after its last token (or None)
     scale,
     N: tl.int64,  # num of sequences
     T: tl.int64,  # num of tokens
@@ -61,6 +63,7 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
     IS_CONTINUOUS_BATCHING: tl.constexpr,
     IS_SPEC_DECODING: tl.constexpr,
     USE_HAS_INIT: tl.constexpr,
+    STORE_FINAL_ONCE: tl.constexpr,  # Holon: store only the final state, to out_indices[i_n] (multi-token rows)
     IS_KDA: tl.constexpr,
     V_HEAD_TILED: tl.constexpr,  # Holon: GGUF value-head order, v head j reads q/k head j % H
 ):
@@ -162,7 +165,9 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
         tl.store(p_o, b_o.to(p_o.dtype.element_ty), mask=mask_v)
 
         # keep the states for multi-query tokens
-        if INPLACE_FINAL_STATE:
+        if STORE_FINAL_ONCE:
+            pass
+        elif INPLACE_FINAL_STATE:
             # Load state index and check for invalid entries
             final_state_idx = tl.load(
                 ssm_state_indices + i_n * stride_indices_seq + i_t
@@ -185,6 +190,12 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
         p_b += HV
         p_a += HV
 
+    if STORE_FINAL_ONCE:  # Holon: one store per sequence, after its last token, where out_indices says (< 0: none)
+        out_idx = tl.load(out_indices + i_n).to(tl.int64)
+        if out_idx >= 0:
+            p_ht = ht + out_idx * stride_final_state_token + i_hv * V * K + o_v[:, None] * K + o_k[None, :]
+            tl.store(p_ht, b_h.to(p_ht.dtype.element_ty), mask=mask_h)
+
 
 def fused_sigmoid_gating_delta_rule_update(
     A_log: torch.Tensor,
@@ -206,6 +217,7 @@ def fused_sigmoid_gating_delta_rule_update(
     is_kda: bool = False,
     has_initial_state: torch.Tensor | None = None,
     v_head_tiled: bool = False,
+    out_indices: torch.Tensor | None = None,
 ):
     """
     Fused triton implementation of sigmoid gating delta rule update.
@@ -266,6 +278,7 @@ def fused_sigmoid_gating_delta_rule_update(
         ssm_state_indices=ssm_state_indices,
         num_accepted_tokens=num_accepted_tokens,
         has_init=has_initial_state,
+        out_indices=out_indices,
         scale=scale,
         N=N,
         T=T,
