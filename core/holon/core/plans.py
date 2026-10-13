@@ -73,7 +73,8 @@ def loads(text: str) -> Lock:
     plan = Plan(model_id=d["model_id"], fingerprint_class=d["fingerprint_class"], recipe=d["recipe"],
                 commit=d["deploy"]["commit"], uv_lock=d["deploy"]["uv_lock"],
                 units={k: UnitPin(**v) for k, v in d["units"].items()},
-                sites={k: Binding(**v) for k, v in d["sites"].items()}, engine=d["engine"])
+                sites={k: Binding(**v) for k, v in d["sites"].items()}, engine=d["engine"],
+                sources=d.get("sources", {}))
     if plan.plan_id != d["plan_id"]:
         raise ValueError(f"plan_id {d['plan_id']} does not match the plan ({plan.plan_id})")
     return Lock(plan, d["snapshot"].get("trace"), tuple(d["snapshot"]["uncovered"]), d["sm"])

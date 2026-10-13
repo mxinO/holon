@@ -44,11 +44,15 @@ def plan_of(engine: Engine) -> Plan:
              for key, k in engine.ctx.kernels.items()}
     settings = {f.name: getattr(engine.cfg, f.name) for f in dataclasses.fields(engine.cfg)
                 if f.name not in _NOT_PLANNED} | {"source": source.kind}         # resolved, not the setting
+    # An option naming another checkpoint (a drafter's) is planned as that checkpoint's identity, not its host path.
+    opened = engine.ctx.sources
+    sources = {k: opened[str(v)] for k, v in settings["plugin_options"].items() if str(v) in opened}
+    settings["plugin_options"] = {k: v for k, v in settings["plugin_options"].items() if k not in sources}
     return Plan(model_id=source.identity(), fingerprint_class=platform.fingerprint(engine.device).cls,
                 recipe=canonical_hash(engine.spec), commit=_git(CORE_DIR, "rev-parse", "HEAD") or "unknown",
                 uv_lock=_sha256(uv_lock.read_bytes()) if uv_lock and uv_lock.is_file() else "none",
                 units=units, sites=sites, engine={k: str(v).removeprefix("torch.") if isinstance(v, torch.dtype)
-                                                  else v for k, v in settings.items()})
+                                                  else v for k, v in settings.items()}, sources=sources)
 
 
 def unit_pin(inst: Installed) -> UnitPin:
@@ -63,12 +67,13 @@ def uncovered(plan: Plan) -> tuple[str, ...]:
 
 
 def diff(a: Plan, b: Plan) -> dict[str, tuple[Any, Any]]:
-    """What changed from `a` to `b`: "<field>", "unit:<name>", "site:<key>" or "engine:<setting>" -> (old, new),
-    None where absent."""
+    """What changed from `a` to `b`: "<field>", "unit:<name>", "site:<key>", "engine:<setting>" or "source:<option>" ->
+    (old, new), None where absent."""
     out: dict[str, tuple[Any, Any]] = {f: (getattr(a, f), getattr(b, f))
                                        for f in ("model_id", "fingerprint_class", "recipe", "commit", "uv_lock")
                                        if getattr(a, f) != getattr(b, f)}
-    for kind, x, y in (("unit", a.units, b.units), ("site", a.sites, b.sites), ("engine", a.engine, b.engine)):
+    for kind, x, y in (("unit", a.units, b.units), ("site", a.sites, b.sites), ("engine", a.engine, b.engine),
+                       ("source", a.sources, b.sources)):
         for key in sorted(x.keys() | y.keys()):
             if key not in x or key not in y or canonical_hash(x[key]) != canonical_hash(y[key]):
                 out[f"{kind}:{key}"] = (x.get(key), y.get(key))
@@ -83,6 +88,8 @@ def dumps(lock: Lock) -> str:
                            "snapshot": {"trace": lock.snapshot, "uncovered": list(lock.uncovered)}}
     if lock.snapshot is None:
         del doc["snapshot"]["trace"]
+    if p.sources:
+        doc["sources"] = dict(sorted(p.sources.items()))
     doc["units"] = {k: {f: v for f, v in dataclasses.asdict(u).items() if v is not None}
                     for k, u in sorted(p.units.items())}
     doc["sites"] = {k: {f: v for f, v in dataclasses.asdict(b).items() if v} | {"impl": b.impl}

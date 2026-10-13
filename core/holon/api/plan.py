@@ -39,6 +39,9 @@ class Plan:
     sites: dict[str, Binding]
     # Core settings that shape outputs (step budget, page size, graphs, overlap, dtype …); budgets are per host.
     engine: dict[str, Any] = dataclasses.field(default_factory=dict)
+    # Other checkpoints the engine opened (a drafter's), by the deployment option naming them: their identity, never
+    # the host path (a deployment input).
+    sources: dict[str, str] = dataclasses.field(default_factory=dict)
 
     @property
     def plan_id(self) -> str:

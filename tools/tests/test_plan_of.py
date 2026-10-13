@@ -137,3 +137,24 @@ def test_tier_a_source_plans_as_gguf_with_its_test_only_pin(tiny_engine, tiny_ch
     write(tiny_checkpoint, file, gguf.GGMLQuantizationType.Q8_0)
     plan = locks.plan_of(tiny_engine(model=str(file), source="gguf_dense"))
     assert plan.engine["source"] == "gguf" and "testing.gguf_dense" in plan.units
+
+
+def test_a_drafters_checkpoint_is_planned_by_identity(tiny_checkpoint, cpu_flags, tmp_path):
+    # The DFlash2 checkpoint the drafter opens (BuildCtx.weight_source) is part of the plan as its identity, under the
+    # option naming it: another draft is another plan; the host path stays a deployment input, out of the lock.
+    from holon.core.assembly import open_source
+    from holon.core.engine import Engine, EngineConfig
+    from holon_testing import dflash_files
+
+    drafts = [dflash_files.save(tmp_path / f"draft{i}", 64, 512, (0, 1), mask=7, seed=i) for i in range(2)]
+    engine = Engine(EngineConfig(model=str(tiny_checkpoint), **cpu_flags, max_draft_tokens=7,
+                                 plugin_options={"spec.k": "7", "dflash.path": str(drafts[0])},
+                                 slots={"drafter": "drafters.dflash", "draft_policy": "std.spec.fixed_k",
+                                        "verifier": "std.spec.rejection"}))
+    plan = locks.plan_of(engine)
+    identity = open_source(engine.plugins, str(drafts[0])).identity()
+    assert plan.sources == {"dflash.path": identity} and plan.engine["plugin_options"] == {"spec.k": "7"}
+    text = locks.dumps(Lock(plan))
+    assert str(tmp_path) not in text and plans.loads(text).plan.plan_id == plan.plan_id
+    other = dataclasses.replace(plan, sources={"dflash.path": open_source(engine.plugins, str(drafts[1])).identity()})
+    assert other.plan_id != plan.plan_id and "source:dflash.path" in locks.diff(plan, other)

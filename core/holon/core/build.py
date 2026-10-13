@@ -50,6 +50,7 @@ class BuildContext:
         self._buffers: dict[str, torch.Tensor] = {}
         self.aux: Any = None               # the engine's AuxModels, which `aux_model` builds into (engine builds)
         self.taps: dict[int, list[Any]] = {}   # layer -> consumers of the residual stream after it (`Model.trunk`)
+        self.sources: dict[str, str] = {}      # path -> identity of every checkpoint `weight_source` opened (plans)
 
     def unit_factory(self, ref: Ref) -> Any:
         """The registered factory (usually the unit class) serving `ref`, loading its plugin if needed."""
@@ -129,7 +130,9 @@ class BuildContext:
     def weight_source(self, path: str) -> Any:
         from .assembly import open_source
 
-        return open_source(self.plugins, path)
+        source = open_source(self.plugins, path)
+        self.sources[str(path)] = source.identity()
+        return source
 
     def tap(self, layer: int, consume: Any) -> None:
         self.taps.setdefault(layer, []).append(consume)
