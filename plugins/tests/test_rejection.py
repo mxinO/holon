@@ -13,7 +13,7 @@ cells of expected count < 5 pooled:
 Sampled drafts (Gate B, D5: a drafter publishing the sparse laws it drew from, `SeqTable.draft_q_ids` / `draft_q`):
 - the first token for laws of Kq = 4 inside, straddling and outside the filtered support, and equal to p;
 - the joint law of three tokens on the Markov target with a drafter sampling each draft from a Kq = 4 law given the
-  previous one;
+  previous one, on a uniform stream of its own (on the verifier's, the law fails);
 - n_draft < k with stale rows past it (tokens the target likes, laws that would accept them): never read — the
   `unmasked-padding` plant (judge/holon_judge/planted.py) must fail it;
 - plant: the residual keeping q's mass (drawn from p instead of max(p − q, 0)) moves the first token's law. (The
@@ -258,40 +258,30 @@ def test_first_token_has_the_target_law_with_sampled_drafts(target, case):
     assert (n_accept <= K).all() and (case != "equal" or (n_accept == K).all())
 
 
-def _markov_drafter(target, seed=5, stream=None):
-    """Samples each draft from a Kq = 4 law given the previous token: the target's four likeliest successors, flatter
-    than the target (its logits at temperature 2), so drafts are often accepted and the residual still has mass. With
-    `stream`, each draft is drawn with the request's counter-based uniform on that stream at the draft's position, as
-    a drafter drawing through `Sampler.uniform` would."""
+def _markov_drafter(target, stream: int):
+    """Samples each draft from a Kq = 4 law given the previous token — the target's four likeliest successors, flatter
+    than the target (its logits at temperature 2), so drafts are often accepted and the residual still has mass — with
+    the request's counter-based uniform on `stream` at the draft's position, as a drafter drawing through
+    `Sampler.uniform` does."""
     _, trans = target
     top = trans.topk(4, -1)
     ids_of, q_of = top.indices, torch.softmax(top.values / 2, -1)            # [V, 4] per previous token
-    g = torch.Generator().manual_seed(seed)
     seeds = 1000 + torch.arange(N)                                         # `_sampler`'s
 
     def draft(prev, start):
         drafts, ids, qs = [], [], []
         for j in range(K):
             ids.append(ids_of[prev]), qs.append(q_of[prev])
-            if stream is None:
-                prev = _sample(ids[-1], qs[-1], g)
-            else:
-                prev = ids[-1].gather(1, rejection.draw(qs[-1], uniform(seeds, start + 1 + j, stream))[:, None])[:, 0]
+            prev = ids[-1].gather(1, rejection.draw(qs[-1], uniform(seeds, start + 1 + j, stream))[:, None])[:, 0]
             drafts.append(prev)
         return torch.stack(drafts, 1), (torch.stack(ids, 1), torch.stack(qs, 1))
     return draft
 
 
-def test_three_tokens_have_the_markov_law_with_sampled_drafts(target):
-    seqs = _markov_sequences(target, rejection.verify, _markov_drafter(target))
-    counts = np.bincount((seqs[:, 0] * V + seqs[:, 1]) * V + seqs[:, 2], minlength=V ** 3)
-    assert _chi2(counts, _markov_law(target)) > 1e-3
-
-
 @pytest.mark.parametrize("stream", [8, 1])
-def test_a_drafter_draws_on_streams_of_its_own(target, stream):
-    # Streams 8 and up are a drafter's (api.decoding.Sampler); a draft drawn on the verifier's coins (stream 1) is
-    # correlated with its own acceptance, and the joint law moves.
+def test_three_tokens_have_the_markov_law_with_sampled_drafts(target, stream):
+    # A drafter sampling each draft from its law on a uniform stream of its own (8 and up, api.decoding.Sampler): the
+    # joint law holds. On the verifier's coins (stream 1) a draft is correlated with its own acceptance: it moves.
     seqs = _markov_sequences(target, rejection.verify, _markov_drafter(target, stream=stream))
     counts = np.bincount((seqs[:, 0] * V + seqs[:, 1]) * V + seqs[:, 2], minlength=V ** 3)
     p = _chi2(counts, _markov_law(target))

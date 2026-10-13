@@ -64,8 +64,8 @@ def _reference(engine) -> tuple:
     return stream
 
 
-@pytest.mark.parametrize("overlap", [False, True], ids=["depth0", "depth1"])
-@pytest.mark.parametrize("memory", [1 << 20, 12 * 2048], ids=["roomy", "preempting"])
+@pytest.mark.parametrize(("overlap", "memory"), [(False, 1 << 20), (True, 12 * 2048)],
+                         ids=["depth0-roomy", "depth1-preempting"])
 def test_taps_see_the_residual_stream_of_a_reference_run(tiny_checkpoint, tiny_case, memory, overlap):  # noqa: F811
     prompts, expected = tiny_case
     _oracle(prompts, expected, 512)

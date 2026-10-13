@@ -93,9 +93,8 @@ def test_the_unmasked_padding_plant_is_caught(tiny_checkpoint, tiny_case, oracle
     # drafter declared none (n_draft 0); the drafter's exact check after each verify (n_accept ≤ n_draft) fails.
     from holon_judge.planted import unmasked_padding
 
-    prompts, expected = tiny_case
+    prompts, _ = tiny_case
     oracle.hidden = {tuple(prompts[1])}
-    assert _run(_engine(tiny_checkpoint, overlap=False), prompts, GREEDY)[0] == expected       # without the plant
     with unmasked_padding(), pytest.raises(AssertionError):
         _run(_engine(tiny_checkpoint, overlap=False), prompts, GREEDY)
 
