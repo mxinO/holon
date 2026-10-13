@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 class Status(enum.Enum):
     WAITING = "waiting"
     RUNNING = "running"
-    BLOCKED = "blocked"      # waiting on an async future (state load, transfer)
+    BLOCKED = "blocked"      # waiting on an async future (state load, transfer, its logits processor's `ready`)
     PREEMPTED = "preempted"
     FINISHED = "finished"
 
@@ -82,6 +82,8 @@ class Seq:
     pending: int = 0                     # tokens sampled on the device, not yet committed (an upper bound)
     inexact: int = 0                     # uncommitted verify rows: num_computed is then only an upper bound
     n_draft: int = 0                     # real drafts its last commit wrote for its next step (host copy)
+    drafts: list[int] = dataclasses.field(default_factory=list)   # and the drafts, when the logits processor masks it
+    constrained: bool = False            # a logits processor masks its rows (launched only with every token committed)
     status: Status = Status.WAITING
     finish_reason: str | None = None
     ext: dict[str, Any] = dataclasses.field(default_factory=dict)  # namespaced plugin state; core never reads

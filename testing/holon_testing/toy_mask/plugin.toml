@@ -1,0 +1,15 @@
+[plugin]
+name = "testing.toy_mask"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "logits_processor"
+license = "Apache-2.0"
+
+[resources]
+provides = ["toy.even_after@1"]
+
+[properties]
+numerics = "exact"
+
+[dependencies]
+python = ["numpy", "torch"]

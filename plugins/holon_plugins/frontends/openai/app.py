@@ -20,11 +20,24 @@ from .stream import Piece, generate
 
 
 class BadRequest(Exception):
-    pass
+    def __init__(self, message: str, status: int = 400) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+def _rejected(p: Piece) -> BadRequest:
+    """A failed request's status by the error's kind (TokenDelta.kind): the request is wrong (400), the server is
+    busy (503), or the engine failed (500)."""
+    return BadRequest(p.error or "request failed", {"client": 400, "busy": 503}.get(p.kind, 500))
+
+
+def _error_body(status: int, message: str) -> dict[str, Any]:
+    kind = "invalid_request_error" if status == 400 else "server_error"
+    return {"error": {"message": message, "type": kind, "code": status}}
 
 
 def _error(status: int, message: str) -> JSONResponse:
-    return JSONResponse({"error": {"message": message, "type": "invalid_request_error", "code": status}}, status)
+    return JSONResponse(_error_body(status, message), status)
 
 
 def build_app(client: EngineClient, bundle: FrontendBundle) -> FastAPI:
@@ -38,7 +51,7 @@ def build_app(client: EngineClient, bundle: FrontendBundle) -> FastAPI:
 
     @app.exception_handler(BadRequest)
     async def _bad(_: Request, e: BadRequest) -> JSONResponse:
-        return _error(400, str(e))
+        return _error(e.status, str(e))
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
@@ -80,13 +93,13 @@ def build_app(client: EngineClient, bundle: FrontendBundle) -> FastAPI:
         n_prompt = sum(map(len, prompts))
 
         if req.stream:
-            # Wait for the first piece before answering, so that a rejected request gets a 400 status.
+            # Wait for the first piece before answering, so that a rejected request gets its error status.
             first = await _unless_disconnected(request, anext(gens[0]))
             if first is None:
                 await gens[0].aclose()
                 return Response(status_code=499)
             if first.finish_reason == "error":
-                raise BadRequest(first.error)
+                raise _rejected(first)
             events = _events(fmt, {**envelope, "object": fmt.chunk_object}, first, gens[0],
                              n_prompt if req.include_usage else None, req.return_token_ids)
             return _EventStream(events, media_type="text/event-stream")
@@ -94,8 +107,8 @@ def build_app(client: EngineClient, bundle: FrontendBundle) -> FastAPI:
         results = await _unless_disconnected(request, _collect(gens))
         if results is None:
             return Response(status_code=499)
-        if errors := [p.error for pieces in results for p in pieces if p.finish_reason == "error"]:
-            raise BadRequest(errors[0])
+        if errors := [p for pieces in results for p in pieces if p.finish_reason == "error"]:
+            raise _rejected(errors[0])
         merged = [responses.merge([p for p in pieces if p.index == k]) for pieces in results for k in range(params.n)]
         choices = [fmt.choice(i, p) | ({"token_ids": p.token_ids} if req.return_token_ids else {})
                    for i, p in enumerate(merged)]
@@ -133,7 +146,8 @@ async def _events(fmt: responses.Chat | responses.Completion, envelope: dict[str
         p: Piece | None = first
         while p is not None:
             if p.finish_reason == "error":
-                yield _event({"error": {"message": p.error, "type": "invalid_request_error", "code": 400}})
+                e = _rejected(p)
+                yield _event(_error_body(e.status, str(e)))
                 break
             n_completion += len(p.token_ids)
             new = p.index not in seen

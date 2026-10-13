@@ -22,6 +22,7 @@ class Piece:
     prompt_logprobs: Logprobs | None = None
     finish_reason: str | None = None   # "stop" | "length" | "abort" | "error"
     error: str | None = None
+    kind: str | None = None            # the error's kind (TokenDelta.kind)
 
 
 class Choice:
@@ -61,7 +62,7 @@ async def generate(client: EngineClient, tokenizer: Tokenizer, prompt_ids: list[
         async for d in deltas:
             if d.finish_reason == "error":
                 running.clear()
-                yield Piece(d.index, "", [], finish_reason="error", error=d.error or "request rejected")
+                yield Piece(d.index, "", [], finish_reason="error", error=d.error or "request rejected", kind=d.kind)
                 return
             if d.finish_reason:
                 running.discard(d.index)

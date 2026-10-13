@@ -37,6 +37,7 @@ class ByteTokenizer:
 class Bundle:
     model_name = "toy"
     tokenizer = ByteTokenizer()
+    tool_format = reasoning_format = None
 
     def __init__(self):
         self.rendered = []
@@ -48,7 +49,7 @@ class Bundle:
     def reasoning_parser(self):
         return None
 
-    def tool_parser(self):
+    def tool_parser(self, tools):
         return None
 
 
@@ -61,10 +62,15 @@ class FakeEngine:
         self.max_prompt, self.endless = max_prompt, endless
         self.requests, self.aborted = [], []
 
-    async def generate(self, token_ids, params: SamplingParams, rid=None):
+    async def generate(self, token_ids, params: SamplingParams, rid=None, resume_output=0):
         self.requests.append((token_ids, params, rid))
         if len(token_ids) > self.max_prompt:
-            yield TokenDelta(rid, [], finish_reason="error", error=f"prompt of {len(token_ids)} tokens is too long")
+            yield TokenDelta(rid, [], finish_reason="error", error=f"prompt of {len(token_ids)} tokens is too long",
+                             kind="client")
+            return
+        if token_ids in (list(b"busy"), list(b"fail")):        # the server is busy; the engine failed
+            kind = "busy" if token_ids == list(b"busy") else None
+            yield TokenDelta(rid, [], finish_reason="error", error="no", kind=kind)
             return
         if self.endless:
             while True:
@@ -95,7 +101,7 @@ class FakeEngine:
     def _lp(ids, k):
         if k is None:
             return None
-        return Logprobs([-0.5] * len(ids), [[t, 0][:k] for t in ids], [[-0.5, -2.0][:k] for _ in ids])
+        return Logprobs([-0.5] * len(ids), [[t, 0][:k] for t in ids], [[-0.5, float("-inf")][:k] for _ in ids])
 
     async def abort(self, rid):
         await asyncio.sleep(0.01)          # a real client awaits IPC: the abort must survive cancellation
@@ -287,18 +293,21 @@ def test_chat_logprobs(http, engine):
     assert [c["token"] for c in content] == list(OUTPUTS[0][:4])
     assert all(c["logprob"] == -0.5 and len(c["top_logprobs"]) == 2 for c in content)
     assert content[0]["bytes"] == [ord("H")] and content[0]["top_logprobs"][0]["token"] == "H"
+    assert content[0]["top_logprobs"][1]["logprob"] == -9999           # a masked token: JSON has no -inf
     assert engine.requests[0][1].max_tokens == 4 and engine.requests[0][1].logprobs == 2
 
 
 # -- errors -----------------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_rejected_request_is_400(http, stream):
+def test_rejected_request_status_follows_the_error_kind(http, stream):
     r = http.post("/v1/completions", json={"prompt": "x" * 100, "stream": stream})
     assert r.status_code == 400 and "too long" in r.json()["error"]["message"]
     r = http.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": "x" * 100}],
                                                 "stream": stream})
     assert r.status_code == 400 and "too long" in r.json()["error"]["message"]
+    assert http.post("/v1/completions", json={"prompt": "busy", "stream": stream}).status_code == 503
+    assert http.post("/v1/completions", json={"prompt": "fail", "stream": stream}).status_code == 500
 
 
 @pytest.mark.parametrize("body", [

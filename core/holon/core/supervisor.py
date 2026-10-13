@@ -3,9 +3,9 @@
 Frontends talk to the `Supervisor` as their `EngineClient`. It owns the engine process and watches it: the client
 notices a dead process, and a periodic `stats` ping with a timeout catches a hung one. After a crash it restarts the
 engine and resubmits every in-flight request from its committed tokens — each unfinished sequence continues as its
-prompt plus the tokens already streamed, with its own seed and the remaining token budget. Sampling is a pure
-function of (seed, position), so the stream goes on exactly where it stopped: the frontend sees no duplicate or
-missing tokens, only a pause.
+prompt plus the tokens already streamed (marked as output: `resume_output`), with its own seed and token budget.
+Sampling is a pure function of (seed, position), and a logits processor replays the output, so the stream goes on
+exactly where it stopped: the frontend sees no duplicate or missing tokens, only a pause.
 
 Attribution. Each crash strikes the requests in flight. Most crashes are transient, so requests are resubmitted
 together. A request with `poison_crashes` strikes is a repeat suspect and goes on probation: suspects rerun one at a
@@ -77,20 +77,19 @@ class _Request:
     def finished(self) -> bool:
         return len(self.done) == self.params.n
 
-    def submissions(self) -> list[tuple[str, list[int], SamplingParams, int | None]]:
-        """Engine requests (rid, tokens, params, sequence index) that continue it: the whole request while nothing
-        has streamed, else one per unfinished sequence — its prompt plus the tokens streamed, its own seed, the
-        remaining budget, and prompt logprobs only if they were not delivered yet."""
+    def submissions(self) -> list[tuple[str, list[int], SamplingParams, int | None, int]]:
+        """Engine requests (rid, tokens, params, sequence index, output tokens resumed) that continue it: the whole
+        request while nothing has streamed, else one per unfinished sequence — its prompt plus the tokens streamed,
+        its own seed, and prompt logprobs only if they were not delivered yet."""
         self.attempt += 1
         if not self.out and not self.done:
-            return [(f"{self.rid}#{self.attempt}", self.prompt, self.params, None)]
+            return [(f"{self.rid}#{self.attempt}", self.prompt, self.params, None, 0)]
         p, subs = self.params, []
         for i in sorted(set(range(p.n)) - self.done):
             out = self.out.get(i, [])
             params = dataclasses.replace(p, n=1, seed=sequence_seed(p.seed, i),
-                                         max_tokens=None if p.max_tokens is None else p.max_tokens - len(out),
                                          prompt_logprobs=p.prompt_logprobs if i == 0 and not out else None)
-            subs.append((f"{self.rid}#{self.attempt}.{i}", self.prompt + out, params, i))
+            subs.append((f"{self.rid}#{self.attempt}.{i}", self.prompt + out, params, i, len(out)))
         return subs
 
 
@@ -143,10 +142,12 @@ class Supervisor:
         return self._failure
 
     # -- EngineClient ---------------------------------------------------------------------------------------------
-    async def generate(self, token_ids: list[int], params: SamplingParams, rid: str | None = None
-                       ) -> AsyncIterator[TokenDelta]:
+    async def generate(self, token_ids: list[int], params: SamplingParams, rid: str | None = None,
+                       resume_output: int = 0) -> AsyncIterator[TokenDelta]:
         if self._failure is not None:
             raise RuntimeError(self._failure)
+        if resume_output:
+            raise ValueError("the supervisor resumes requests itself (resume_output)")
         rid = rid or uuid.uuid4().hex
         if rid in self._requests:
             raise ValueError(f"request id {rid!r} is already in flight")
@@ -205,8 +206,8 @@ class Supervisor:
             req.engine = self._engine
             if req.attempt:
                 self.counters["resubmitted"] += 1
-            for rid, tokens, params, index in req.submissions():
-                req.pumps[rid] = self._spawn(self._pump(req, self._engine, rid, tokens, params, index))
+            for rid, *submission in req.submissions():
+                req.pumps[rid] = self._spawn(self._pump(req, self._engine, rid, *submission))
         self._waiting.clear()
 
     async def _send_canary(self, rid: str) -> None:
@@ -219,15 +220,19 @@ class Supervisor:
             self._canary = None
 
     async def _pump(self, req: _Request, engine: EngineProcess, rid: str, tokens: list[int], params: SamplingParams,
-                    index: int | None) -> None:
+                    index: int | None, resume_output: int) -> None:
         """Forward one engine request's deltas to `req` until it finishes or the engine fails."""
         try:
-            async for d in engine.client.generate(tokens, params, rid):
+            async for d in engine.client.generate(tokens, params, rid, resume_output):
                 if d.finish_reason == "error" and d.error == engine.client.failure:
                     break                                         # the engine failed, not this request
                 d.rid, d.index = req.rid, d.index if index is None else index
                 req.out.setdefault(d.index, []).extend(d.token_ids)
                 req.queue.put_nowait(d)
+                if d.finish_reason == "error":                    # the request failed: its other sequences end too
+                    for other, task in req.pumps.items():
+                        if other != rid:
+                            task.cancel()                         # (which aborts their engine requests)
                 if d.finish_reason is not None:
                     req.done.update(range(req.params.n) if d.finish_reason == "error" else (d.index,))
                     if req.finished:

@@ -10,6 +10,7 @@ from .stream import Piece
 
 # A token's logprob row: its text, its logprob (None for the unscored first prompt token) and the ranked top-k.
 Row = tuple[str, float | None, list[tuple[str, float]] | None]
+MASKED = -9999.0       # the logprob reported for a token a constrained request may not take (−inf: not JSON)
 
 
 def merge(pieces: list[Piece]) -> Piece:
@@ -29,7 +30,7 @@ def usage(prompt_tokens: int, completion_tokens: int) -> dict[str, int]:
 def _rows(tok: Tokenizer, ids: list[int], lp: Logprobs) -> list[Row]:
     def text(i: int) -> str:
         return tok.decode([i])
-    return [(text(t), v, [(text(i), x) for i, x in zip(ti, tv, strict=True)])
+    return [(text(t), max(v, MASKED), [(text(i), max(x, MASKED)) for i, x in zip(ti, tv, strict=True)])
             for t, v, ti, tv in zip(ids, lp.token, lp.top_ids, lp.top, strict=True)]
 
 

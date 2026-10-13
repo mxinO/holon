@@ -29,7 +29,7 @@ import msgspec
 import zmq
 import zmq.asyncio
 
-from holon.api import Abort, EngineRequest, SamplingParams, TokenDelta
+from holon.api import Abort, EngineRequest, RequestError, SamplingParams, TokenDelta
 
 _encode = msgspec.msgpack.encode
 _DECODE = {b"submit": msgspec.msgpack.Decoder(EngineRequest), b"abort": msgspec.msgpack.Decoder(Abort),
@@ -66,15 +66,17 @@ def serve(engine_factory: Callable[[], Any], endpoints: Endpoints) -> None:
     parent = os.getppid()
     while os.getppid() == parent:                 # the launcher died without shutting us down: free the GPU
         deltas: list[TokenDelta] = []
-        timeout = 0 if engine.has_work() else _POLL_MS
+        idle = engine.idle_for()                  # 0 while work can run; a short poll while it waits on a plugin
+        timeout = _POLL_MS if idle is None else round(idle * 1000)
         while inbox.poll(timeout):
             kind, payload = inbox.recv_multipart()
             msg = _DECODE[kind].decode(payload)
             if kind == b"submit":
                 try:
-                    engine.add(msg.token_ids, msg.params, rid=msg.rid)
+                    engine.add(msg.token_ids, msg.params, rid=msg.rid, resume_output=msg.resume_output)
                 except (ValueError, NotImplementedError) as e:      # a rejected request, not an engine failure
-                    deltas.append(TokenDelta(msg.rid, [], finish_reason="error", error=str(e)))
+                    deltas.append(TokenDelta(msg.rid, [], finish_reason="error", error=str(e),
+                                             kind=e.kind if isinstance(e, RequestError) else "client"))
             elif kind == b"abort":
                 deltas += engine.abort(msg.rid)
             elif msg == "stats":
@@ -128,8 +130,8 @@ class Client:
             raise RuntimeError(f"engine failed to start: {_DECODE[kind].decode(payload)}")
         self._reader = asyncio.get_running_loop().create_task(self._read())
 
-    async def generate(self, token_ids: list[int], params: SamplingParams, rid: str | None = None
-                       ) -> AsyncIterator[TokenDelta]:
+    async def generate(self, token_ids: list[int], params: SamplingParams, rid: str | None = None,
+                       resume_output: int = 0) -> AsyncIterator[TokenDelta]:
         if self._dead is not None:
             raise RuntimeError(self._dead)
         rid = rid or uuid.uuid4().hex
@@ -139,7 +141,8 @@ class Client:
         self._queues[rid] = queue
         finished = 0
         try:
-            await self._requests.send_multipart([b"submit", _encode(EngineRequest(rid, list(token_ids), params))])
+            request = EngineRequest(rid, list(token_ids), params, resume_output)
+            await self._requests.send_multipart([b"submit", _encode(request)])
             while finished < params.n:
                 delta = await queue.get()
                 if delta.finish_reason is not None:

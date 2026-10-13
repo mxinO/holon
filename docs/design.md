@@ -180,8 +180,7 @@ requires = ["store.tiered@1", "telemetry.router_hist@1"]   # matching major = co
 
 [properties]
 numerics    = "policy"     # policy | exact | bounded | approx   (§10.3)
-graph_policy = "host"      # full | piecewise | eager | host   (§7.4)
-max_depth = 1             # overlap depth tolerated (§7.3); also after/before, shape_axes
+graph_policy = "host"      # full | piecewise | eager | host   (§7.4); also after/before, shape_axes
 
 [dependencies]             # third-party imports allowed for this plugin (invariant 2)
 python = []
@@ -913,21 +912,24 @@ class Batch:                         # plan + static device mirror built by the 
 Fixed timing; plugins attach to named hooks inside the regions.
 
 ```python
-def step(self):
-    while len(self.inflight) > self.depth:                              # depth = max uncommitted steps at schedule time
-        self.commit(self.inflight.popleft())
-    plan = self.scheduler.schedule(self.seqs, self.ledger, self.inflight)   # CPU; skips Seqs over their own depth
-    for t in self.transforms: plan = t.transform(plan, self.sctx)       # ordered, pure
-    h = self.exec.launch_forward(plan)                                  # GPU (graph): prepare → model → logits
-    if self.depth >= 1 and len(self.inflight) >= self.depth:           # overlap: commit oldest step while GPU runs
-        self.commit(self.inflight.popleft())
-    host_in = {p.name: p.host_input(plan) for p in self.host_input_stages}       # e.g. grammar bitmasks
-    self.exec.launch_sample(h, host_in)    # GPU (graph): logits procs → Sampler|Verifier → rewind (device) → drafter
-    self.inflight.append(h)
+def step(self):                                                         # Engine.step, depth 1 (as implemented)
+    prev = self.inflight                                                # launched, not committed
+    unblock()                                       # requests whose logits processor became ready may be scheduled
+    if prev has a constrained row: commit(prev)     # its next mask needs that row's tokens (A′, M0.5 D2)
+    plan = self.scheduler.schedule()                # CPU; skips constrained Seqs with a row in flight, and BLOCKED
+    launch(plan)    # GPU (one graph for decode/verify): prepare → model → logits → mask (logits processor, rows
+                    # filled on the host at launch) → Sampler|Verifier → store → rewind (device) → drafter
+    commit(prev)                                    # CPU, while the step runs
+    self.inflight = plan
 
-def commit(self, h):                                                    # CPU after D2H event of step h
-    finish/stop/stream; observe drafts; apply deferred frees; apply control-plane requests
+def commit(step):                                                       # CPU after D2H event of the step
+    processor.commit (may fail the request); finish/stop/stream; observe drafts; deferred frees; control requests
 ```
+
+The design's forward/sample split (`launch_forward` → commit N−1 → host input → `launch_sample`, two graphs per
+step) is not built: a constrained Seq (one whose logits a processor masks from its committed tokens) runs at depth 0
+inside depth-1 steps instead, and the split is built only if M0.5 D2's measurement asks for it (its seam is
+sketched there).
 
 A step whose rows all stop mid-prompt (chunked prefill) samples nothing: it runs the trunk, which writes their state
 (and prompt logprobs, when asked), and no head.
@@ -937,7 +939,7 @@ A step whose rows all stop mid-prompt (chunked prefill) samples nothing: it runs
 | depth | Behaviour | Use |
 |---|---|---|
 | 0 | commit before schedule (fully synchronous) | debugging, judge invariant tests, CPU drafters/plugins needing the last token on host |
-| 1 | schedule step N while step N−1's sample is still on the GPU; N−1 is committed during step N's forward | default; grammar `host_input` works (it runs after N−1's commit) |
+| 1 | schedule step N while step N−1's sample is still on the GPU; N−1 is committed during step N's forward | default; constrained Seqs are gated to depth 0 (below) |
 | 2 | two uncommitted steps (deeper pipelining; PP uses N) | v1 perf option |
 
 **MemOps and quiesce.** The plan carries an ordered list of device memory operations (copy, swap, load, checkpoint
@@ -966,10 +968,14 @@ request that stopped at the previous commit is discarded. Sampled-token logprobs
 host copies read at commit), so those steps run at depth 1, eagerly; steps that report prompt logprobs, which are
 extracted on the host, commit at once.
 
-Plugins declare the maximum depth they tolerate (`max_depth` in the manifest). Per-Seq depth: the scheduler
-skips any Seq that has more uncommitted steps in flight than the minimum depth tolerated by the plugins attached
-to it, so a CPU prompt-lookup Seq runs every other step while others keep overlapping. Device-side
-`Rewindable.commit` runs **inside** the `launch_sample` graph, right after the Sampler/Verifier, so the next step's
+**Host-token gate (M0.5 D2).** A logits processor builds a row's mask on the host from the Seq's committed tokens
+(and, for a verify row, the drafts copied back with the step's results), so a constrained Seq is never scheduled
+while it has a row in flight or while it is `BLOCKED` (its processor not ready). Two variants behind one engine
+switch (`Engine.commit_for_constrained`), chosen by D2's measurement: A′ (default) commits the in-flight step first
+whenever it holds a constrained row, so constrained Seqs decode every step and that step's other rows lose their
+overlap; A leaves the constrained Seq out of the step instead (it decodes every other step beside overlapping free
+rows). A manifest-declared per-plugin depth (`max_depth`) was removed unread: the gate comes from the processor's
+`open`. Device-side `rewind` runs inside the step's graph, right after the Sampler/Verifier, so the next step's
 device inputs (`DEVICE_LAST`/`DEVICE_DRAFT`) are already consistent.
 
 ### 7.4 CUDA graphs
@@ -981,16 +987,17 @@ device inputs (`DEVICE_LAST`/`DEVICE_DRAFT`) are already consistent.
   per ShapeKey class. `host` means the plugin never runs inside a graph — it runs on the CPU between replays
   (placement-policy `adapt()`, schedulers). v0 implements FULL (decode/verify) and EAGER (prefill); PIECEWISE is v1.
 - **v0 (implemented in E6)**: decode-only steps without logprobs are padded to a batch-size bucket (1, 2, 4, 8, 16,
-  24, 32, 48, 64, … up to `max_seqs`) and replayed from a graph keyed by (bucket, the sampler's `variant` — its
-  host-side branches —, each planner's `graph_key`). A planner whose kernel offers no `graph_key` keeps the step
-  eager. The graph covers forward, sampling and the SeqTable write; inputs are staged into the static buffers and
-  results copied out around the replay. Padding rows use a dedicated slot whose block-table row points at each
-  paged pool's reserved, zeroed null unit, so they read and write nothing real. Every bucket × sampler variant
-  (greedy, sampled, filtered) is captured at startup, largest bucket first so smaller graphs reuse its blocks of
-  the one shared pool; kernels keep their graph keys independent of per-step lengths (Triton's split count follows
-  the batch and the table width), so serving never stops to capture. The memory profile subtracts the pool the
-  largest bucket's graphs leave reserved, and the CUDA allocator uses expandable segments so a long mix of large
-  prefill activations and the graph pool does not fragment the budget.
+  24, 32, 48, 64, … up to `max_seqs`) and replayed from a graph keyed by (bucket, row width, whether the step has
+  constrained rows, the sampler's `variant` — its host-side branches —, each planner's `graph_key`). A planner whose
+  kernel offers no `graph_key` keeps the step eager. The graph covers forward, sampling and the SeqTable write; inputs
+  are staged into the static buffers and results copied out around the replay. Padding rows use a dedicated slot whose
+  block-table row points at each paged pool's reserved, zeroed null unit, so they read and write nothing real. Every
+  bucket × width × sampler variant (greedy, sampled, filtered) — × with and without constrained rows when a logits
+  processor is selected — is captured at startup, largest bucket first so smaller graphs reuse its blocks of the one
+  shared pool; kernels keep their graph keys independent of per-step lengths (Triton's split count follows the batch
+  and the table width), so serving never stops to capture. The memory profile subtracts the pool the largest bucket's
+  graphs leave reserved, and the CUDA allocator uses expandable segments so a long mix of large prefill activations
+  and the graph pool does not fragment the budget.
 - **CPU work inside a FULL graph** (CPU expert compute, Strata/FreeToken style) uses a one-word handshake per
   layer with a persistent native CPU worker (spike S6): the graph signals REQ, the worker computes on pinned
   memory and answers DONE, the graph waits. `Platform` exposes this as a signal/wait pair with two
@@ -1025,8 +1032,20 @@ verification (v2).
 
 ### 7.6 Sampling and decoding
 
-- `LogitsProcessor` chain (ordered multi): `argmax_invariant`, per-slot device params, optional `host_input()`.
-  The default sampler is a builtin plugin (`std.sampling`, implemented in E3): per-slot parameter tensors set on
+- **Logits processor** (M0.5, `docs/m05-grammar.md` §3): at most one, opt-in (`--slots logits_processor=…`, recorded
+  in the lock's `[engine]`), built with `build(ctx, vocab: VocabView)` (padded vocabulary size, stop set, the weight
+  source's tokenizer). It follows the requests it constrains on the host — `open(rid, params, prompt) -> bool` at
+  `Engine.add` (a request whose `SamplingParams.ext` names a resource no active plugin provides is rejected),
+  `ready(rid)` polled while the request is `BLOCKED` (compiling off the engine thread), `commit(seq, out)` with the
+  tokens each step appends (before finishing or streaming; once after `ready` for a resumed request), `close(rid)` —
+  writes the masks of a step's constrained rows at launch (`fill(rows: list[MaskRow], buf)`, never raising; a verify
+  row's `MaskRow.drafts` are the drafts it checks, copied to the host with the step's results), and applies them on
+  the device between the head and the Sampler/Verifier on every path (`apply(logits, mask, rows)`, in the graph).
+  The core stages only the constrained rows (a compact `[rows, mask_width]` int32 block and their logits rows, padded
+  with an out-of-range index to the graph's row count) through the Uploader and never reads mask bits; the format and
+  kernel are the plugin's. Logprobs are of the masked distribution (frontends clamp −∞ to −9999). Its `open`,
+  `ready` or `commit` raising `RequestError(kind, message)` ends the request (§7.7).
+- The default sampler is a builtin plugin (`std.sampling`, implemented in E3): per-slot parameter tensors set on
   admission; temperature → top-k → top-p over the renormalized remainder → min-p; one counter-based uniform per row,
   a hash of (seed, position), picks the token by inverse CDF, so samples depend on neither batching nor preemption
   and the step needs no generator state (resolution ≈ 1e-7 absolute probability: 24-bit uniform, fp32 CDF). The
@@ -1076,8 +1095,11 @@ verification (v2).
   `flush_prefix` (v0). `update_weights(name → tensor)` (in-place through converters into existing QTensor storage;
   bumps `weight_version`) is specified now because it fixes the namespace design, but implemented in v1 (RL weight
   sync, LoRA merges).
-- Per-request error isolation: a plugin exception tied to one Seq (grammar, parser) → `FINISHED(error)` for that
-  Seq.
+- Per-request error isolation (M0.5): `RequestError(kind, message)` from the logits processor (`open`, `ready`,
+  `commit`) ends every sequence of its request (`finish_reason` "error", `TokenDelta.kind`: "client" — the request
+  is wrong, "busy" — the server cannot take it now, "engine" — it failed while generating); a plain `ValueError`
+  from `Engine.add` is kind "client". Frontends map "client" to 400, "busy" to 503, anything else to a 5xx (or
+  `finish_reason` "error" once streaming). Other exceptions in a step still end the engine.
 - Step-level exception or device fault → engine exits non-zero; the supervisor restarts it **on the same lock**.
   **Crash attribution first:** in-flight requests are resubmitted from committed tokens, rate-limited; a request
   implicated in two crashes is quarantined (`FINISHED(error)`). Only repeated crashes without a poison request lead
@@ -1088,28 +1110,29 @@ verification (v2).
 
 **Implemented (M0).** The v0 supervisor is `holon.core.supervisor` (the core owns the engine lifecycle; the
 `supervisor/` package keeps the optional layer of §10). It is the frontends' `EngineClient` (`holon serve
---supervised`, the default). Health: the IPC client notices a dead process (the engine also sends `failed` when a
-step raises), and a periodic `stats` ping with a timeout catches a hung one. After a crash the engine restarts on the
-same config and every in-flight request is resubmitted from its committed tokens — each unfinished sequence as
-prompt + tokens streamed, its own seed (`sequence_seed`), the remaining `max_tokens`; since sampling is a pure
-function of (seed, position), the stream continues without duplicate or missing tokens. Attribution: each crash
-strikes the requests in flight; a request with `poison_crashes` (2) strikes that is the only such request in a crash,
-with other requests completed since its first strike, is quarantined, and the crashes it was in no longer count
-against the config. Several repeat suspects go on probation (rerun one at a time beside other requests) so a later
-crash isolates the culprit. Resubmission is bounded per request rather than by restarts per minute (a restart takes
-seconds, so such a rate would rarely trigger): a request that has lived through `max_crashes` (5) crashes, in flight
-or waiting, fails with an error. Every crash no quarantine explains is charged to the config: `rollback_crashes` (4)
-charges, or as many failed starts in a row, roll back to the previous entry of the config history. On the oldest
-entry the engine keeps restarting; the supervisor gives up (and `serve` exits) only when the engine cannot start.
-Strikes and charges are forgotten after `stable_s` (60 s) of engine uptime without a crash — uptime, not wall time, so
-slow restarts or hang timeouts do not make repeated crashes look unrelated. The history is a plain list of
-`EngineConfig`s, oldest first — the seam where the lock registry (§4.4) plugs in. Limits of v0 attribution: a poison
-request alone on an idle server cannot be told from a broken config (it fails by `max_crashes`, and its crashes count
-toward rollback); two poison requests submitted together can be probed before any survivor exists and charge enough
-crashes to roll back (rollback is permanent until restart); a crash caused by a fresh request while a suspect is on
-probation is blamed on the suspect; one long probe holds the other suspects back until it finishes, and several
-poison requests probed first can push innocent suspects past `max_crashes`; a config that crashes only after
-`stable_s` of uptime is treated as flaky and never rolls back.
+--supervised`, the default). Health: the IPC client notices a dead process (the engine also sends `failed` when a step
+raises), and a periodic `stats` ping with a timeout catches a hung one. After a crash the engine restarts on the same
+config and every in-flight request is resubmitted from its committed tokens — each unfinished sequence as prompt +
+tokens streamed, marked as output (`EngineRequest.resume_output`: they count towards `max_tokens`, and a logits
+processor replays them), its own seed (`sequence_seed`); since sampling is a pure function of (seed, position), the
+stream continues without duplicate or missing tokens. An "error" delta on one of a request's engine requests aborts
+the others. Attribution: each crash strikes the requests in flight; a request with `poison_crashes` (2) strikes that
+is the only such request in a crash, with other requests completed since its first strike, is quarantined, and the
+crashes it was in no longer count against the config. Several repeat suspects go on probation (rerun one at a time
+beside other requests) so a later crash isolates the culprit. Resubmission is bounded per request rather than by
+restarts per minute (a restart takes seconds, so such a rate would rarely trigger): a request that has lived through
+`max_crashes` (5) crashes, in flight or waiting, fails with an error. Every crash no quarantine explains is charged to
+the config: `rollback_crashes` (4) charges, or as many failed starts in a row, roll back to the previous entry of the
+config history. On the oldest entry the engine keeps restarting; the supervisor gives up (and `serve` exits) only when
+the engine cannot start. Strikes and charges are forgotten after `stable_s` (60 s) of engine uptime without a crash —
+uptime, not wall time, so slow restarts or hang timeouts do not make repeated crashes look unrelated. The history is a
+plain list of `EngineConfig`s, oldest first — the seam where the lock registry (§4.4) plugs in. Limits of v0
+attribution: a poison request alone on an idle server cannot be told from a broken config (it fails by `max_crashes`,
+and its crashes count toward rollback); two poison requests submitted together can be probed before any survivor
+exists and charge enough crashes to roll back (rollback is permanent until restart); a crash caused by a fresh request
+while a suspect is on probation is blamed on the suspect; one long probe holds the other suspects back until it
+finishes, and several poison requests probed first can push innocent suspects past `max_crashes`; a config that
+crashes only after `stable_s` of uptime is treated as flaky and never rolls back.
 Measured (`bench/restart.py`, Qwen3-0.6B, rtx-a5000, overlap + CUDA graphs, 5 kills): restart (process launch →
 ready) 6.6–7.1 s (median 6.75 s), of which ~1.3 s imports and ~5.5 s engine init (weights, pool sizing, 27 graph captures); the
 stall a client sees is 7.6–8.1 s (≤ 1 s detection, teardown, restart); the continued greedy stream equals the
@@ -1119,10 +1142,14 @@ the same way before an SLO is set for them.
 
 ### 7.8 Frontend
 
-Separate process. API plugins (`openai.chat`, `openai.responses`, `anthropic.messages`) implement
-`to_engine(http_req) -> EngineRequest(token_ids, params, ext)` and `from_engine(stream) -> events`, using the model
-plugin's `FrontendBundle` (tokenizer, template, reasoning/tool parsers with a token-level `channel()` state
-machine). Stop strings are matched in the frontend and trigger `abort`; stop tokens are an engine Rewindable.
+Separate process. One frontend package serves the API dialects (M0.5 D7: OpenAI chat/completions, OpenAI Responses,
+Anthropic Messages as routers of one app over one pipeline: normalize → render → generate → reasoning/tool parse →
+typed events), using the model plugin's `FrontendBundle`: tokenizer, chat template, and the formats its template
+writes reasoning and tool calls in (`reasoning_format`, `tool_format`, versioned names such as "hermes@1"); the
+frontend implements each named format once — its streaming parser (`Parser.feed` yields typed events: `Text`,
+`Reasoning`, `ToolCallStart`, `ToolArgsDelta`, `ToolCallEnd`) and its constraint builder (a plain-dict resource in
+`SamplingParams.ext` that the logits processor's plugin declares and translates). Stop strings are matched in the
+frontend and trigger `abort`; stop tokens are checked at the engine's commit.
 
 The frontend↔engine protocol is a **language-neutral schema** (token ids, sampling params, deltas, logprobs;
 msgspec structs from which a protobuf/IDL file is generated and checked in CI), so the frontend can later be replaced by a native (e.g. Rust)
@@ -1136,7 +1163,7 @@ frontend stays Python.
 (Prometheus/OTel plugins):
 
 ```
-{plan_id, step, ts, phase_us{schedule,transform,forward,host_input,sample,commit},
+{plan_id, step, ts, phase_us{schedule,transform,forward,fill,sample,commit},
  batch{n_seqs,n_tokens,shape_key}, ledger{pool: used/cap}, prefix{hits,misses,tokens_saved},
  spec{proposed,accepted}, plugin_counters{ns: {...}}}
 ```
@@ -1206,8 +1233,8 @@ The dev machine has 8× RTX A5000; v1 includes a **TP=2 milestone** to prove the
 | Quant formats | dialect, scheme, layout, converter, kernels | kernel registry, layout negotiation |
 | Linear attention (GDN, KDA, Mamba2) | mixer + `Slot` state (`draft_slots`), page-boundary checkpoints, checkpoint policy + codec | fixed-point prefix hits, device Rewindable |
 | DeepSeek sparse attention / V4 compressed KV | `dsa_mla` mixer: MLA `Paged` + indexer `Paged(page_group)` + compressed `Paged(tokens_per_unit)` | `page_group`, `tokens_per_unit`, `alignment` |
-| Speculative decoding | drafter, draft policy, verifier, plan transform | taps, shared modules, Rewindable, ShapeKey axis, forward/sample split |
-| Structured output / tool calls | xgrammar logits processor (Rewindable matcher), parser `channel()` | `host_input` region |
+| Speculative decoding | drafter, draft policy, verifier, plan transform | taps, shared modules, Rewindable, verify graphs, sub-steps, aux models |
+| Structured output / tool calls | xgrammar logits processor (host matcher rolled back after each draft probe), frontend parsers and constraint builders by the bundle's formats | logits-processor lifecycle, host-token gate, drafts on the host, `RequestError`, `resume_output`, masks staged through the Uploader on every sampling path |
 | LoRA (v1) | adapter op context, ShapeKey axis | namespace, ops read `Batch.dev`/`ext` |
 | VLM (v1) | encoder plugin, content-hash encoder cache | `position_fn`, `ext` annotations |
 

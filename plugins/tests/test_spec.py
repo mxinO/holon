@@ -37,6 +37,7 @@ def oracle(tiny_case):  # noqa: F811
     ORACLE.by_slot.clear()
     ORACLE.steps, ORACLE.k, ORACLE.vocab, ORACLE.mode = 0, 3, 512, "right"
     ORACLE.observed.clear()
+    ORACLE.written.clear()
     ORACLE.hidden.clear()
     ORACLE.hidden_slots.clear()
     ORACLE.real, ORACLE.rewinds, ORACLE.max_position = None, 0, -1

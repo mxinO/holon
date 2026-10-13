@@ -18,6 +18,8 @@ class Tokenizer:
 
 
 class Bundle:
+    tool_format = reasoning_format = None          # named (and their parsers built) in M0.5 step 3
+
     def __init__(self, source: Any) -> None:
         self.model_name = source.name
         self.tokenizer = Tokenizer(source)
@@ -31,5 +33,5 @@ class Bundle:
     def reasoning_parser(self) -> None:
         return None
 
-    def tool_parser(self) -> None:
+    def tool_parser(self, tools: list[dict[str, Any]]) -> None:
         return None

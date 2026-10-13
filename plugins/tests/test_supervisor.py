@@ -5,10 +5,11 @@ import dataclasses
 import multiprocessing
 import pathlib
 import time
+import types
 
 import pytest
-from holon.api import SamplingParams, sequence_seed
-from holon.core.supervisor import Policy, _Request, supervised
+from holon.api import SamplingParams, TokenDelta, sequence_seed
+from holon.core.supervisor import Policy, Supervisor, _Request, supervised
 
 from .test_engine import GREEDY, tiny_case, tiny_checkpoint  # noqa: F401 — fixtures
 from .test_ipc import _config
@@ -87,25 +88,61 @@ def _broken_engine(config, endpoints):
 def test_resubmission_continues_each_unfinished_sequence():
     params = SamplingParams(n=3, max_tokens=10, seed=5, prompt_logprobs=2)
     req = _Request("r", [1, 2], params)
-    assert req.submissions() == [("r#1", [1, 2], params, None)]          # nothing streamed: the request as it was
+    assert req.submissions() == [("r#1", [1, 2], params, None, 0)]       # nothing streamed: the request as it was
     req.out, req.done = {1: [9], 2: [7, 8]}, {1}
     subs = req.submissions()
-    assert [(rid, tokens, i) for rid, tokens, _, i in subs] == [("r#2.0", [1, 2], 0), ("r#2.2", [1, 2, 7, 8], 2)]
-    (_, _, p0, _), (_, _, p2, _) = subs
+    assert [(rid, tokens, i, resumed) for rid, tokens, _, i, resumed in subs] == [
+        ("r#2.0", [1, 2], 0, 0), ("r#2.2", [1, 2, 7, 8], 2, 2)]           # its output, marked as such
+    (_, _, p0, _, _), (_, _, p2, _, _) = subs
     assert (p0.n, p0.seed, p0.max_tokens, p0.prompt_logprobs) == (1, sequence_seed(5, 0), 10, 2)   # not sent yet
-    assert (p2.n, p2.seed, p2.max_tokens, p2.prompt_logprobs) == (1, sequence_seed(5, 2), 8, None)
+    assert (p2.n, p2.seed, p2.max_tokens, p2.prompt_logprobs) == (1, sequence_seed(5, 2), 10, None)
+
+
+def test_a_failed_sequence_ends_its_siblings_engine_requests():
+    # After a restart a request runs as one engine request per sequence: an error on one (a request error from the
+    # logits processor) aborts the others at once, whether or not anyone reads the request's stream.
+    aborted = []
+
+    class Client:
+        failure = None
+
+        async def generate(self, tokens, params, rid, resume_output):
+            try:
+                if rid.endswith(".1"):
+                    yield TokenDelta(rid, [], finish_reason="error", error="refused", kind="engine")
+                    return
+                await asyncio.sleep(60)
+            finally:
+                aborted.append(rid)
+
+    async def run():
+        sup = Supervisor([None])
+        req = _Request("r", [1], SamplingParams(n=2, seed=1, max_tokens=10))
+        req.out = {0: [5], 1: [6]}
+        engine = types.SimpleNamespace(client=Client())
+        for rid, *sub in req.submissions():
+            req.pumps[rid] = sup._spawn(sup._pump(req, engine, rid, *sub))
+        await asyncio.sleep(0.1)
+        return req, sorted(aborted)                   # before the loop's end cancels what is left
+
+    req, aborted_by_then = asyncio.run(run())
+    assert aborted_by_then == ["r#1.0", "r#1.1"] and req.finished and req.queue.qsize() == 1
 
 
 def test_a_killed_engine_restarts_and_streams_continue_exactly(tiny_checkpoint, tiny_case):  # noqa: F811
+    # The request the kill interrupts is constrained by the toy logits processor from its first token on: after the
+    # restart the processor must resume from the output (M0.5 §3.5), or its continuation differs.
     prompts, expected = tiny_case
     sampled = SamplingParams(temperature=1.0, top_p=0.9, max_tokens=12, ignore_eos=True, seed=7)
     requests = [(p, GREEDY) for p in prompts] + [(prompts[1], sampled),
                                                  (prompts[2], dataclasses.replace(sampled, n=2, seed=11))]
+    config = dataclasses.replace(_config(tiny_checkpoint), slots={"logits_processor": "testing.toy_mask"})
+    constrained = dataclasses.replace(GREEDY, max_tokens=30, ext={"toy.even_after@1": {"marker": expected[0][0]}})
 
     async def run(kill):
-        async with supervised([_config(tiny_checkpoint)], FAST, target=_slow_engine) as sup:
+        async with supervised([config], FAST, target=_slow_engine) as sup:
             async def killer():
-                stream = sup.generate(prompts[0], dataclasses.replace(GREEDY, max_tokens=30))
+                stream = sup.generate(prompts[0], constrained)
                 first = await anext(stream)
                 if kill:
                     for proc in multiprocessing.active_children():
@@ -120,7 +157,7 @@ def test_a_killed_engine_restarts_and_streams_continue_exactly(tiny_checkpoint, 
     (*results, long, rejected), stats = asyncio.run(asyncio.wait_for(run(kill=True), timeout=120))
     assert [r[0][0] for r in results[:4]] == expected
     assert [r[0] for r in results] == [r[0] for r in reference]        # greedy and seeded sampling, n = 2
-    assert len(long) == 30 and long == long_reference
+    assert len(long) == 30 and long == long_reference and all(t % 2 == 0 for t in long[1:])
     assert rejected[1].finish_reason == "error" and "max_model_len" in rejected[1].error
     assert stats["crashes"] == 1 and stats["resubmitted"] >= 1 and stats["restarts"] == 1
     assert 0 < stats["restart_s"] < 60 and stats["start_s"] > 0 and stats["quarantined"] == stats["rollbacks"] == 0

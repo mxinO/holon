@@ -7,7 +7,7 @@ from _common import CORE, fail, py_files
 
 DENY = re.compile(
     r"\b\w*(mamba|gdn|deltanet|mla|dsa|kda|nvfp4|mxfp4|gguf|ggml|gptq|awq|marlin|eagle|mtp|"
-    r"qwen|deepseek|llama|mistral|gemma|lora|moe|expert)\w*\b",
+    r"qwen|deepseek|llama|mistral|gemma|lora|moe|expert|grammar|xgrammar|tool_call|structural)\w*\b",
     re.IGNORECASE,
 )
 

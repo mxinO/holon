@@ -10,7 +10,7 @@ class Event:
     plan_id: str
     step: int
     ts_ns: int
-    phase_us: dict[str, float]            # schedule, transform, forward, host_input, sample, commit
+    phase_us: dict[str, float]            # schedule, transform, forward, fill (masks), sample, commit
     n_seqs: int
     n_tokens: int
     shape: str

@@ -103,7 +103,6 @@ requires = ["store.tiered@1", "telemetry.router_hist@1"]
 [properties]
 numerics    = "policy"
 graph_policy = "host"
-max_depth = 1
 
 [dependencies]
 python = []
@@ -129,7 +128,7 @@ def test_manifest_loads_design_example(tmp_path: pathlib.Path):
     ("[surprise]\nk=1\n", "unknown section"),
     ("[resources]\nprovide=['a@1']\n", "unknown keys"),
     ("[properties]\nnumerics='fast'\n", "invalid numerics"),
-    ("[properties]\nmax_depth='1'\n", "max_depth"),
+    ("[properties]\nmax_depth=1\n", "unknown keys"),          # removed: the depth gate comes from the processor
     ("[plugin_extra]\n", "unknown section"),
 ])
 def test_manifest_rejects_mistakes_with_path(tmp_path: pathlib.Path, extra, match):

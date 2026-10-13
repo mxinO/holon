@@ -50,12 +50,17 @@ class Uploader:
 
     def put(self, name: str, values: np.ndarray) -> torch.Tensor:
         """Stage `values`; returns the device view that holds them once `end()` has run."""
-        n = len(values)
-        self._host[self._turn][name][:n] = values
+        host, dev = self.stage(name, len(values))
+        host[:] = values
+        return dev
+
+    def stage(self, name: str, n: int) -> tuple[np.ndarray, torch.Tensor]:
+        """The host view of `name`'s first `n` values, for the caller to write in full before `end()`, and the
+        device view that holds them afterwards."""
         offset, _, dtype = self._layout[name]
         if n:
             self._written.append((offset, offset + n * dtype.itemsize))
-        return self.dev[name][:n]
+        return self._host[self._turn][name][:n], self.dev[name][:n]
 
     def after(self, fn: Callable[[], None]) -> None:
         """Run `fn` (device work reading staged inputs) right after this step's copy is enqueued."""

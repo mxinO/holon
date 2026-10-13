@@ -1,5 +1,7 @@
 """The GPU prompt-lookup drafter (`drafters.ngram`): the lookup itself on synthetic histories, and lossless
 speculation with it (and `std.spec.fixed_k`'s fallback) on a tiny Qwen3, on CPU."""
+import contextlib
+import dataclasses
 import pathlib
 import types
 
@@ -95,7 +97,10 @@ def test_ngram_speculation_captures_graphs():
 def test_verify_graphs_equal_eager_on_the_same_padded_plans():
     # M0.4 §1.4: a graphed engine and one that runs the very same padded plans eagerly (its graph runner calls the
     # step instead of replaying it) emit the same tokens and accept the same drafts, greedy and sampled — five
-    # requests padded to the 8-row bucket, verify steps with the drafter and rewind inside.
+    # requests padded to the 8-row bucket, verify steps with the drafter and rewind inside. M0.5 §3.6: three of them
+    # are constrained by the toy logits processor (even tokens only), two of those finish early so that free
+    # requests take rows constrained ones held, and the plant `mask-rows-not-reset` must make the graphs differ.
+    from holon_judge.planted import PLANTS
     from transformers import AutoTokenizer
 
     class Eager:
@@ -114,15 +119,29 @@ def test_verify_graphs_equal_eager_on_the_same_padded_plans():
     cfg = EngineConfig(model=str(SNAP), dtype=torch.bfloat16, max_seqs=8, max_model_len=256, max_draft_tokens=3,
                        plugin_options={"spec.k": "3", "spec.fallback": 2},
                        slots={"drafter": "drafters.ngram", "draft_policy": "std.spec.fixed_k",
-                              "verifier": "std.spec.greedy"})
+                              "verifier": "std.spec.greedy", "logits_processor": "testing.toy_mask"})
+
+    def generate(engine, params):
+        rids = [engine.add(p, dataclasses.replace(params, max_tokens=12 if i in (1, 2) else params.max_tokens,
+                                                  ext={"toy.even_after@1": {"marker": p[-1]}} if i < 3 else {}))
+                for i, p in enumerate(prompts)]
+        out = {r: [] for r in rids}
+        while engine.has_work():
+            for d in engine.step():
+                out[d.rid] += d.token_ids
+                assert d.finish_reason != "error", d
+        return [out[r] for r in rids]
+
     outs = []
-    for graphed in (True, False):
-        engine = Engine(cfg)
-        if not graphed:
-            engine.executor.graphs = Eager()
-        outs.append(([engine.generate(prompts, params) for params in runs],
-                     {k: v for k, v in engine.stats().items() if k.startswith("spec_") and "graphed" not in k}))
+    for graphed, plant in ((True, None), (False, None), (True, "mask-rows-not-reset")):
+        with PLANTS[plant]() if plant else contextlib.nullcontext():
+            engine = Engine(cfg)
+            if not graphed:
+                engine.executor.graphs = Eager()
+            outs.append(([generate(engine, params) for params in runs],
+                         {k: v for k, v in engine.stats().items() if k.startswith("spec_") and "graphed" not in k}))
         stats = engine.stats()                   # the eager runner takes the graphed path too, without replays
         assert stats["spec_verify_steps"] > 0 and stats["spec_verify_steps_graphed"] == stats["spec_verify_steps"]
-        del engine
-    assert outs[0] == outs[1]
+        assert all(t % 2 == 0 for run in outs[-1][0] for out in run[:3] for t in out)
+        engine.close()                           # its memory is free before the next engine sizes its pools
+    assert outs[0] == outs[1] != outs[2]

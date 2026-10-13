@@ -1,7 +1,7 @@
 """Plugin manifests, slots and resources (design §4.1, §4.2).
 
 A manifest is read without importing the plugin, so everything the resolver needs — resources, numerics class,
-graph policy, overlap depth, ordering, shape axes — lives here and nowhere else.
+graph policy, ordering, shape axes — lives here and nowhere else.
 """
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ _SECTIONS: dict[str, set[str]] = {
     "plugin": {"name", "version", "entry", "slot", "license", "core_abi", "slot_abi", "variant_of", "implements",
                "derived_from"},
     "resources": {"provides", "requires"},
-    "properties": {"numerics", "graph_policy", "max_depth", "after", "before", "shape_axes"},
+    "properties": {"numerics", "graph_policy", "after", "before", "shape_axes"},
     "dependencies": {"python"},
     "reference": {"module"},
     "tunables": None,  # any names; each value is validated as a Tunable
@@ -118,7 +118,6 @@ class Manifest:
     requires: tuple[Resource, ...] = ()
     numerics: Numerics = "exact"
     graph_policy: GraphPolicy = "full"
-    max_depth: int = 1                 # largest overlap depth tolerated (design §7.3)
     after: tuple[str, ...] = ()        # ordering for ordered_multi slots
     before: tuple[str, ...] = ()
     shape_axes: dict[str, tuple[Any, ...]] = dataclasses.field(default_factory=dict)  # finite graph-capture axes
@@ -159,7 +158,6 @@ class Manifest:
             requires=tuple(map(Resource.parse, res.get("requires", ()))),
             numerics=props.get("numerics", "exact"),
             graph_policy=props.get("graph_policy", "full"),
-            max_depth=props.get("max_depth", 1),
             after=tuple(props.get("after", ())),
             before=tuple(props.get("before", ())),
             shape_axes={k: tuple(v) for k, v in props.get("shape_axes", {}).items()},
@@ -174,8 +172,6 @@ class Manifest:
             raise ValueError(f"unknown slot {m.slot!r}")
         if m.numerics not in _NUMERICS or m.graph_policy not in _GRAPH:
             raise ValueError(f"invalid numerics/graph_policy: {m.numerics!r}/{m.graph_policy!r}")
-        if type(m.max_depth) is not int or m.max_depth < 0:
-            raise ValueError(f"max_depth must be a non-negative int, got {m.max_depth!r}")
         return m
 
 

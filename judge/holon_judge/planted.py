@@ -7,6 +7,8 @@
   reach; the graphed configuration fails where the padded bucket's expert path is mmq.
 - Speculative decoding on a recurrent mixer (`bounded --spec-vs-plain --plant replay-off-by-one`, …): the GDN
   rollback broken; the speculating configurations fail.
+- Logits processors' masks inside graphs (`mask-rows-not-reset`): the toy processor's graphs-vs-eager proof
+  (plugins/tests/test_ngram.py) fails.
 - GGUF Tier B (`l2 --plant`): bugs in the quantized kernels' use (`kernels.ggml_cuda`); L2 fails, except the rare
   stale workspace, which measures Tier B's sensitivity (predicted before running: fails the decode run, likely passes
   the looser prefill run).
@@ -479,6 +481,25 @@ def padding_on_a_real_slot() -> Iterator[None]:
         yield
 
 
+@contextlib.contextmanager
+def mask_rows_not_reset() -> Iterator[None]:
+    """A step with constrained rows stages their logits rows without the padding (an index past the step's rows) up
+    to its count of logits rows. An eager step reads only the staged ones, but a graph replay reads as many as it was
+    captured with, so it masks the rows past them by indices earlier steps left: a free request on a row a
+    constrained one held is masked as that one (docs/m05-grammar.md §3.6). Signal: the graphed run's tokens differ from
+    the eager run's on the same padded plans (plugins/tests/test_ngram.py)."""
+    from holon.core.inputs import Uploader
+
+    put = Uploader.put
+
+    def planted(self, name, values):
+        if name == "mask_rows" and (real := values[values < len(values)]).size:
+            values = real
+        return put(self, name, values)
+    with mock.patch.object(Uploader, "put", planted):
+        yield
+
+
 QWEN35_PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "qwen35-tiled-as-grouped": lambda: _qwen35_facts(order="grouped"),
     "qwen35-rotary-all-dims": lambda: _qwen35_facts(rotary_dim=256, sections=[]),     # partial_rotary_factor read as 1
@@ -511,4 +532,6 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)
     "unmasked-padding": unmasked_padding,
     # Draft heads (L0-drafter, `holon_judge drafter`)
-    "dflash-tap-offset": dflash_tap_offset}
+    "dflash-tap-offset": dflash_tap_offset,
+    # Logits processors (docs/m05-grammar.md §5): the graphs-vs-eager toy proof (plugins/tests/test_ngram.py)
+    "mask-rows-not-reset": mask_rows_not_reset}

@@ -2,13 +2,17 @@
 
 Speculative decoding is three roles: a DraftPolicy picks k per step, a Drafter proposes (writing the SeqTable's draft
 tokens and counts, and its own state, possibly through auxiliary models and sub-steps), and a Verifier replaces the
-Sampler for the step's verify rows. Rollback is the core's `rewind` fan-out to Rewindables (api.state). Ordering,
-overlap depth and shape axes of transforms and drafters are declared in their manifests.
+Sampler for the step's verify rows. Rollback is the core's `rewind` fan-out to Rewindables (api.state). Ordering and
+shape axes of transforms and drafters are declared in their manifests.
+
+A LogitsProcessor constrains requests (design §7.6): it follows each one on the host (`open`, `ready`, `commit`,
+`close`), writes its masks at launch (`fill`) and applies them on the device before the sampler or verifier (`apply`).
 """
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Hashable, Iterable
@@ -45,13 +49,76 @@ class PlanTransform(Protocol):
         """Host-side: rewrite the step's plan; `seqs` are the scheduled requests, row-aligned with the plan."""
 
 
+class RequestError(ValueError):
+    """A request fails, the engine goes on: raised by a logits processor (`open`, `ready`, `commit`), it ends every
+    sequence of the request with finish reason "error" and this `kind` — "client" (the request itself is wrong: a
+    400 before its first token), "busy" (the server cannot take it now: a 503) or "engine" (it failed while
+    generating)."""
+
+    def __init__(self, kind: str, message: str) -> None:
+        super().__init__(message)
+        self.kind = kind
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class VocabView:
+    """The vocabulary a logits processor masks."""
+
+    size: int                          # logits per row (the model's padded vocabulary)
+    stop_tokens: frozenset[int]        # the engine's stop set (a request may add its `stop_token_ids`)
+    tokenizer: Callable[[], Any]       # returns the weight source's tokenizer (`WeightSource.tokenizer`; loads it)
+
+
+@dataclasses.dataclass(slots=True, eq=False)
+class MaskRow:
+    """A constrained sequence's logits rows in a step: rows `start` … `start + n - 1` of the step's mask block —
+    one, or a verify row's 1 + k: column j masks the token after `drafts[:j]`."""
+
+    seq: Seq
+    start: int
+    n: int
+    drafts: list[int]                  # the real drafts the row checks (at most n - 1)
+
+
 class LogitsProcessor(Protocol):
-    argmax_invariant: ClassVar[bool]   # greedy rows may skip this processor
+    """Masks the logits of the requests it constrains (at most one processor per deployment, `EngineConfig.slots`).
+    Its sequences run at overlap depth 0: a row is launched only once every token before it is committed, so `fill`
+    sees them on the host. Host hooks run on the engine thread; `apply` runs on the device, in the step's graph."""
 
-    def host_input(self, plan: BatchPlan) -> Any | None:
-        """Optional CPU-built input (e.g. a grammar bitmask), produced between forward and sample."""
+    mask_width: int                    # int32 words per mask row (the core stages the mask block, never reads it)
 
-    def apply(self, logits: torch.Tensor, host_input: Any, ctx: StepCtx) -> torch.Tensor: ...
+    def open(self, rid: str, params: SamplingParams, prompt: list[int]) -> bool:
+        """At `Engine.add`, before anything is registered: whether it constrains request `rid`. Raising
+        `RequestError` rejects the request; slow work (compiling) happens elsewhere, `ready` reports it."""
+
+    def ready(self, rid: str) -> bool:
+        """Polled each step while a constrained request waits to start (`Status.BLOCKED`): whether it may run.
+        Raising `RequestError` ends the request."""
+
+    def commit(self, seq: Seq, out: list[int]) -> None:
+        """The tokens a step appends to `seq` (truncated at a stop), before the engine finishes or streams anything;
+        once after `ready` for a resumed request (`EngineRequest.resume_output`). Raising `RequestError` ends the
+        request and drops these tokens."""
+
+    def close(self, rid: str) -> None:
+        """Request `rid` ended (finished or aborted; every sequence)."""
+
+    def fill(self, rows: list[MaskRow], buf: np.ndarray) -> None:
+        """At launch: write each row's masks into `buf[row.start: row.start + row.n]` ([rows, mask_width] int32,
+        stale until written). Never raises: a mask it cannot build allows every token, and the failure surfaces at
+        the row's `commit`."""
+
+    def apply(self, logits: torch.Tensor, mask: torch.Tensor, rows: torch.Tensor) -> None:
+        """Device, in place, graph-capturable: mask logits row `rows[i]` with `mask[i]`; rows past the end of
+        `logits` are padding (skip them)."""
+
+    # Optional: `shutdown()`, called by `Engine.close`, stops the processor's helpers.
+
+
+class LogitsProcessorPlugin(Protocol):
+    """The `logits_processor` slot's plugin object."""
+
+    def build(self, ctx: BuildCtx, vocab: VocabView) -> LogitsProcessor: ...
 
 
 class Sampler(Protocol):

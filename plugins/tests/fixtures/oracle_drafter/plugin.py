@@ -72,3 +72,5 @@ class Drafter:
             drafts = torch.where(torch.arange(k, device=slots.device) < n_draft[:, None], drafts, ORACLE.vocab + 7)
         table.draft_tokens[slots] = drafts
         table.n_draft[slots] = n_draft
+        for slot, row, n in zip(slots.tolist(), drafts.tolist(), n_draft.tolist(), strict=True):
+            ORACLE.written[slot] = row[:n]

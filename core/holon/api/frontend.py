@@ -19,13 +19,15 @@ class EngineRequest:
     rid: str
     token_ids: list[int]
     params: SamplingParams
+    resume_output: int = 0             # trailing tokens of `token_ids` that are output already (a resubmission)
 
 
 @dataclasses.dataclass(slots=True)
 class Logprobs:
     """Per position: the chosen token's logprob and the ranked top-k (ids and logprobs as parallel lists), from the
-    raw logits (before temperature and filters). Prompt logprobs cover prompt positions 1 … n-1 (the first token
-    has no context)."""
+    raw logits (before temperature and filters) — masked for a constrained request, so a token it may not take has
+    logprob −inf (frontends clamp it to −9999: JSON has no −inf). Prompt logprobs cover prompt positions 1 … n-1
+    (the first token has no context)."""
 
     token: list[float]
     top_ids: list[list[int]]
@@ -41,6 +43,7 @@ class TokenDelta:
     prompt_logprobs: Logprobs | None = None
     finish_reason: str | None = None   # "stop" | "length" | "abort" | "error"
     error: str | None = None           # why the request was rejected (finish_reason "error")
+    kind: str | None = None            # and the error's kind: "client" | "busy" | "engine" (`RequestError`)
 
 
 @dataclasses.dataclass(slots=True)
@@ -56,19 +59,54 @@ class Tokenizer(Protocol):
     def decode(self, ids: list[int]) -> str: ...
 
 
-class Parser(Protocol):
-    """Token-level reasoning/tool-call parser with a `channel()` state machine (design §7.8)."""
+@dataclasses.dataclass(slots=True)
+class Text:
+    text: str
 
-    def feed(self, text: str) -> Iterator[dict[str, Any]]: ...
+
+@dataclasses.dataclass(slots=True)
+class Reasoning:
+    text: str
+
+
+@dataclasses.dataclass(slots=True)
+class ToolCallStart:
+    index: int                         # the call's place in the response
+    name: str
+
+
+@dataclasses.dataclass(slots=True)
+class ToolArgsDelta:
+    index: int
+    text: str                          # the next piece of the call's arguments as JSON (values typed by the schema)
+
+
+@dataclasses.dataclass(slots=True)
+class ToolCallEnd:
+    index: int
+
+
+ParseEvent = Text | Reasoning | ToolCallStart | ToolArgsDelta | ToolCallEnd
+
+
+class Parser(Protocol):
+    """Streaming reasoning/tool-call parser with a `channel()` state machine (design §7.8): the same events whether
+    the text arrives at once or in pieces."""
+
+    def feed(self, text: str) -> Iterator[ParseEvent]: ...
 
     def channel(self) -> str: ...
 
 
 class FrontendBundle(Protocol):
-    """Shipped by the model plugin (`ModelPlugin.bundle(source)`): tokenizer, chat template, parsers."""
+    """Shipped by the model plugin (`ModelPlugin.bundle(source)`): tokenizer, chat template, parsers. The formats its
+    template writes reasoning and tool calls in are named with versions (e.g. "hermes@1", "think@1"); the frontend
+    implements each named format once — its parser and its constraint builder."""
 
     model_name: str
     tokenizer: Tokenizer
+    tool_format: str | None            # None: the template has no tool calls
+    reasoning_format: str | None
 
     def render_chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                     add_generation_prompt: bool = True, **template_kwargs: Any) -> list[int]:
@@ -76,16 +114,21 @@ class FrontendBundle(Protocol):
 
     def reasoning_parser(self) -> Parser | None: ...
 
-    def tool_parser(self) -> Parser | None: ...
+    def tool_parser(self, tools: list[dict[str, Any]]) -> Parser | None:
+        """A parser of tool calls to `tools` (the request's, whose schemas type the argument values)."""
+
+    # Optional: `constraint(tools, tool_choice, response_format) -> dict | None`, the constraint resource (a plain
+    # dict for `SamplingParams.ext`, M0.5 design D6) for a template whose format the frontend does not build.
 
 
 class EngineClient(Protocol):
     """What a frontend gets from the core: the engine behind a process boundary, in token ids."""
 
-    def generate(self, token_ids: list[int], params: SamplingParams, rid: str | None = None
+    def generate(self, token_ids: list[int], params: SamplingParams, rid: str | None = None, resume_output: int = 0
                  ) -> AsyncIterator[TokenDelta]:
-        """Submit a request and yield its deltas until each of its `params.n` sequences has finished; leaving the
-        iteration early aborts the request."""
+        """Submit a request and yield its deltas until each of its `params.n` sequences has finished (an "error"
+        delta finishes them all); leaving the iteration early aborts the request. `resume_output`: the trailing
+        tokens of `token_ids` that are output already (`EngineRequest`)."""
 
     async def abort(self, rid: str) -> None: ...
 

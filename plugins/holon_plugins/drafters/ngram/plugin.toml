@@ -7,6 +7,3 @@ license = "Apache-2.0"
 
 [resources]
 provides = ["drafter.ngram@1"]
-
-[properties]
-max_depth = 1

@@ -1,7 +1,8 @@
 # M0.5 — structured output and tool calls: design and implementation plan
 
 Status: **revision 5, reviewed clean** (2026-10-13). Revs 1–5 were reviewed by a panel of three; every finding is
-resolved in §9.
+resolved in §9. **Step 1 built** (2026-10-13): the core seams of §3 with the toy processor; its record, deviations
+and §6's measurements are in §11.
 
 Scope: plan §8, amended (D1; plan §2 / §8 updated with this revision):
 - the core gets general logits-processor seams (§3); "core diff target zero" becomes "only the seams of §3, each
@@ -504,3 +505,49 @@ unread `max_depth` is removed (the gate comes from `open`).
 - Exact regular translations of the date / date-time / ipv4 / hostname formats (v1; rejected under strict now).
 - More than one logits processor (ordering, chained masks).
 - Constraining `tool_choice: "auto"` by default (D8).
+
+## 11. Step 1 record (2026-10-13)
+
+Built: §3.1–3.8 (core +184 code lines, 3650 → 3834; budget ≈ +275), the denylist terms, the plant
+`mask-rows-not-reset`, design §4.1 / §7.3 / §7.4 / §7.6 / §7.7 / §7.8 / §9 corrected. The toy processor
+`testing.toy_mask` (an entry-point test plugin, so engine processes can select it) masks odd tokens after a marker.
+
+Proofs:
+- `plugins/tests/test_logits_processor.py`, tiny Qwen3 on the CPU: one matrix (depth 0, depth 1 with A′ and A; no
+  drafter and the oracle drafter right / wrong / mixed; roomy and preempting pools; two passes for prefix hits;
+  chunked prefill; greedy constrained, free, and an n = 2 sampled constrained request): greedy outputs equal HF's
+  logits masked by the rule, sampled ones the depth-0 run, the processor's `commit` saw exactly the emitted tokens and
+  its `fill` exactly the drafts the drafter wrote, every constrained row launched with its tokens committed, free rows
+  overlapped under A; one engine for the lifecycle: blocked on an idle engine until `ready`, a `busy` timeout, a
+  `client` rejection at `open`, an unserved `ext` key (also with no processor selected), an n = 2 request failing
+  mid-generation beside unchanged requests, a resumed request.
+- `plugins/tests/test_ngram.py` (GPU, Qwen3-0.6B): graphs equal eager on the same padded plans with three constrained
+  requests, two finishing early; under `mask-rows-not-reset` the graphed run differs.
+- `test_supervisor.py`: a kill in the middle of a constrained stream (marker = its first token) resumes it exactly; a
+  failed sequence aborts its siblings' engine requests. `test_ipc.py`: a request blocked on an idle engine process
+  completes, the loop polling every 5 ms rather than spinning; rejections carry kind `client`.
+- `test_frontend_openai.py`: kinds map to 400 / 503 / 500; masked logprobs clamp to −9999.
+
+Deviations (simplest option consistent with the decisions):
+- The toy proofs live in `plugins/tests`, the toy plugin in `testing/` (acceptance 7 and §3 say `core/tests`): every
+  proof needs a built model (the tiny Qwen3, the oracle drafter), which `core/tests` never builds; M0.4 placed its
+  toy drafters the same way.
+- `FrontendBundle.constraint(…)` is an optional hook documented in the protocol, not a required method: D6 / D7 build
+  constraints in the frontend from `tool_format`; a bundle implements it only for a format the frontend lacks.
+  `tool_parser(tools)` takes the request's tools.
+- `VocabView.tokenizer` is a callable (`WeightSource.tokenizer`, loaded when called): test checkpoints carry no
+  tokenizer, and the toy needs none.
+- A `RequestError` ends the request with the kind its raiser chose (`commit` failures are `engine` by contract).
+- `Seq` gains `constrained` and `drafts` (the host copy of a constrained sequence's drafts).
+- The masks' row indices are padded on every masked step, eager ones too (one code path; the graph reads them all).
+- The existing OpenAI frontend maps kinds now (`client` 400, `busy` 503, otherwise 500 — an engine failure without a
+  kind was a 400 before; streamed errors carry the same code). **Deferred to step 3** (`frontends/http`): a failure
+  after the first token as `finish_reason: "error"` on the choice (today an SSE error event, or a 5xx when not
+  streamed).
+- `logits_processor` keeps its `ordered_multi` cardinality (§10 defers several processors); the engine selects at
+  most one, by `EngineConfig.slots`.
+- `Engine.add` also rejects a `resume_output` at or past `max_tokens` (a finished sequence is never resubmitted).
+- A resumed request's `prompt_len` excludes its output, so a recurrent state's prompt-end checkpoint
+  (`std.state.recurrent`) is published at the original prompt's end, not after the resumed output.
+- `Supervisor.generate` refuses `resume_output` (it resumes requests itself).
+

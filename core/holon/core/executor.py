@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from holon.api import Batch, BatchPlan, DeviceBatch, Logprobs, Pages, SamplingParams, SeqTable, TokenSrc
+from holon.api import Batch, BatchPlan, DeviceBatch, Logprobs, MaskRow, Pages, SamplingParams, SeqTable, TokenSrc
 
 from . import platform
 from .batching import host_plan, padded
@@ -52,6 +52,7 @@ class Launched:
     done: platform.Event
     prompt_logprobs: list[Logprobs] = dataclasses.field(default_factory=list)   # per PromptRows, on the host now
     graphed: bool = False                    # replayed a captured graph
+    draft_tokens: torch.Tensor | None = None   # per plan row: the drafts themselves (with a logits processor)
 
 
 @dataclasses.dataclass
@@ -67,6 +68,8 @@ class _Prep:
     lens: torch.Tensor             # [B] out: tokens held after the step (shared with every page group's Pages)
     draft_index: torch.Tensor | None = None   # [R*k] verify rows: input positions of the drafts
     draft_from: torch.Tensor | None = None    # [R*k] where each draft is in the SeqTable (flat)
+    mask: torch.Tensor | None = None          # [M, mask_width] the logits processor's masks of the constrained rows
+    mask_rows: torch.Tensor | None = None     # [M] their logits rows; past the step's logits rows: padding
 
 
 class _Substeps:
@@ -102,22 +105,28 @@ class Executor:
                  planners: dict[str, Any], verifier: Any = None, drafter: Any = None,
                  pools: dict[str, Any] | None = None, rewinders: list[Any] = (),
                  sub_planners: dict[str, list[Any]] | None = None, substeps: tuple[int, int] = (0, 0),
-                 namespaces: list[str] = (), verify_widths: tuple[int, ...] = ()) -> None:
+                 namespaces: list[str] = (), verify_widths: tuple[int, ...] = (), processor: Any = None) -> None:
         """`cfg`: the EngineConfig (sizes, graphs on or off); `pools`: every ledger pool, by name (for MemOps);
         `rewinders`: what rolls back past rejected drafts after each verify (`rewind(ctx)` callables);
         `sub_planners`: per auxiliary state group, one planner per drafter sub-step; `substeps`: how many sub-steps a
         step may have and their widest row (the drafter's declarations); `namespaces`: the auxiliary models';
-        `verify_widths`: the verify-row widths (1 + k) the draft policy may ask for, captured as graphs."""
+        `verify_widths`: the verify-row widths (1 + k) the draft policy may ask for, captured as graphs; `processor`:
+        the logits processor, if one is selected."""
         self.cfg, self.device, self.model, self.vocab, self.state = cfg, device, model, vocab, state
         self.pools = pools or {}
         self.sampler, self.planners, self.verifier, self.drafter = sampler, planners, verifier, drafter
+        self.processor = processor
         self.rewinders = list(rewinders)
         self.sub_planners, self.substeps = sub_planners or {}, substeps
         self.namespaces = sorted(namespaces, key=len, reverse=True)       # the longest prefix names a group's
         self.verify_widths = tuple(verify_widths)
         seqs = cfg.max_seqs
         tokens = max(cfg.max_step_tokens, seqs * (1 + cfg.max_draft_tokens))     # a verify step: 1 + k per row
-        self.uploader = Uploader(device, state.upload_fields(seqs, tokens) | {
+        # A step's logits rows are at most a verify row's 1 + k per sequence; masks are staged for constrained ones.
+        logits_rows = seqs * (1 + cfg.max_draft_tokens)
+        masks = {"mask": (logits_rows * processor.mask_width, torch.int32),
+                 "mask_rows": (logits_rows, torch.int64)} if processor is not None else {}
+        self.uploader = Uploader(device, masks | state.upload_fields(seqs, tokens) | {
             "input_ids": (tokens, torch.int64), "positions": (tokens, torch.int64),
             "query_start": (seqs + 1, torch.int64), "slots": (seqs, torch.int64),
             "logits_index": (tokens, torch.int64), "logits_rows": (tokens, torch.int64),   # verify rows: 1 + k each
@@ -141,6 +150,9 @@ class Executor:
         self._out_tokens = [platform.pinned_empty(seqs * width, torch.int64, device) for _ in range(2)]
         self._out_accepts = [platform.pinned_empty(seqs, torch.int64, device) for _ in range(2)]
         self._out_drafts = [platform.pinned_empty(seqs, torch.int64, device) for _ in range(2)]
+        k = self.seq_table.draft_tokens.shape[1]
+        self._out_draft_tokens = [platform.pinned_empty(seqs * k, torch.int64, device).view(seqs, k)
+                                  for _ in range(2)] if processor is not None and drafter is not None else None
         self._out_turn = 0
 
     def _sub_fields(self, cfg: Any) -> dict[str, tuple[int, torch.dtype]]:
@@ -178,15 +190,16 @@ class Executor:
                 # bucket's variants leave reserved.
                 graphs, self.graphs = self.graphs, platform.Graphs(self.device)
                 peak += platform.reserved_growth(self.device, lambda: [
-                    self._graph_step(self.buckets[-1], params, width) for width, params in self._graph_variants()])
+                    self._graph_step(self.buckets[-1], *variant) for variant in self._graph_variants()])
                 self.graphs = graphs
         ledger.free()
         return int(platform.free_memory(self.device) * fraction) - peak
 
     def _worst_step(self, plan: BatchPlan) -> None:
-        """The largest prefill, a prompt-logprob chunk, a filtered sampling step over every slot with logprobs, and
+        """The largest prefill, a prompt-logprob chunk, a filtered sampling step over every slot with logprobs,
         (when drafting) a verify step over every slot's 1 + k rows, then its rewind and the drafter's run with its
-        sub-steps (eager: logprob steps are never graphed)."""
+        sub-steps (eager: logprob steps are never graphed), and the logits processor's masks on every one of those
+        rows."""
         ctx = self._context(plan)
         self._prepare(ctx)
         h = self.model.trunk(ctx)
@@ -215,11 +228,17 @@ class Executor:
                 rewind(ctx)
             self._run_drafter(ctx, torch.zeros(int(width.sum()), self.model.spec.hidden, dtype=self.cfg.dtype,
                                                device=self.device))
+        if self.processor is not None:
+            r = n * (1 + self.cfg.max_draft_tokens)
+            self.processor.apply(torch.zeros(r, self.vocab, device=self.device), self.uploader.dev["mask"].view(r, -1),
+                                 torch.arange(r, device=self.device))
 
-    def _graph_variants(self) -> list[tuple[int, SamplingParams]]:
-        """(row width, sampler params) of every graph per bucket: decode rows and verify rows of each width the
-        policy may ask for, for each sampler variant."""
-        return [(width, params) for width in (1, *self.verify_widths) for params in _VARIANTS]
+    def _graph_variants(self) -> list[tuple[SamplingParams, int, bool]]:
+        """(sampler params, row width, masked) of every graph per bucket: decode rows and verify rows of each width
+        the policy may ask for, for each sampler variant — with and without constrained rows when a logits processor
+        is selected."""
+        return [(params, width, masked) for width in (1, *self.verify_widths) for params in _VARIANTS
+                for masked in ((False, True) if self.processor is not None else (False,))]
 
     def capture_graphs(self) -> None:
         """Capture every bucket's decode and verify graphs (after the pools' final materialize: graphs bake in their
@@ -227,22 +246,23 @@ class Executor:
         if self.graphs is None:
             return
         for rows in reversed(self.buckets):          # largest first: smaller graphs reuse its pool blocks
-            for width, params in self._graph_variants():
-                if not self._graph_step(rows, params, width):
+            for variant in self._graph_variants():
+                if not self._graph_step(rows, *variant):
                     self.graphs = None              # some planner's kernel cannot be captured: stay eager
                     return
         self.sampler.admit(self.state.padding_slot, _VARIANTS[0])
 
     @torch.no_grad()
-    def _graph_step(self, rows: int, params: SamplingParams, width: int = 1) -> bool:
+    def _graph_step(self, rows: int, params: SamplingParams, width: int = 1, masked: bool = False) -> bool:
         """Warm up and capture one graph with every row on the padding slot (null unit, `params`): decode rows, or
-        verify rows of `width` tokens with their drafter sub-steps."""
+        verify rows of `width` tokens with their drafter sub-steps; `masked`: with the logits processor's `apply`
+        (over padding rows only)."""
         self.sampler.admit(self.state.padding_slot, params)
         empty = np.zeros(0, dtype=np.int32)
         plan = host_plan(0, empty, empty, empty, empty, np.zeros(0, dtype=np.int64))
         plan.draft_k = width - 1
         plan = padded(plan, rows, self.state.padding_slot, width)
-        ctx = self._context(plan)
+        ctx = self._context(plan, masks=([], np.zeros(0, dtype=np.int64)) if masked else None)
         key = self._graph_key(ctx, width)
         if key is None:
             return False
@@ -251,21 +271,23 @@ class Executor:
         return True
 
     def _graph_key(self, ctx: StepContext, width: int) -> tuple | None:
-        """The graph a step replays: its size and width, the sampler's variant, every planner's and sub-step's key
-        (None: some kernel cannot be captured)."""
+        """The graph a step replays: its size and width, whether it has constrained rows, the sampler's variant,
+        every planner's and sub-step's key (None: some kernel cannot be captured)."""
         metas = list(ctx.metas.values()) + [m for sub in (ctx.substeps.subs if ctx.substeps else []) for m in
                                             sub.metas.values()]
         keys = [getattr(meta, "graph_key", None) for meta in metas]
         if None in keys:
             return None
-        return (len(ctx.batch.plan.slots), width, self.sampler.variant(ctx.batch.plan.slots), *keys)
+        return (len(ctx.batch.plan.slots), width, ctx.prep.mask is not None, self.sampler.variant(ctx.batch.plan.slots),
+                *keys)
 
     # -- one step -------------------------------------------------------------------------------------------------
-    def launch(self, plan: BatchPlan, exact: np.ndarray, logprobs: bool, prompt: list[PromptRows] | None = None
-               ) -> Launched:
+    def launch(self, plan: BatchPlan, exact: np.ndarray, logprobs: bool, prompt: list[PromptRows] | None = None,
+               masks: tuple[list[MaskRow], np.ndarray] | None = None) -> Launched:
         """Enqueue the step's device work without waiting for the device. `exact`: the rows whose start the host
         knows; `logprobs`: some sampled row reports logprobs; `prompt` (not None: a prompt-logprob step) — those are
-        computed now, on the host, so that step waits for the device."""
+        computed now, on the host, so that step waits for the device; `masks`: the constrained rows (the logits
+        processor fills their masks) and their logits rows."""
         rows, n_sampled = len(plan.slots), int(plan.n_logits.sum())
         width = int(plan.n_query.max(initial=1))
         uniform = bool((plan.n_query == width).all() and (plan.n_logits == width).all())   # decode or verify rows
@@ -274,7 +296,7 @@ class Executor:
         if graphed:
             plan = padded(plan, next(b for b in self.buckets if b >= rows), self.state.padding_slot, width)
             exact = np.concatenate([exact, np.ones(len(plan.slots) - rows, dtype=bool)])   # padding: start 0
-        ctx = self._context(plan, exact)
+        ctx = self._context(plan, exact, masks)
         key = self._graph_key(ctx, width) if graphed else None
         out = sampled = accepts = drafts = None
         recorded: list[Logprobs] = []
@@ -286,23 +308,27 @@ class Executor:
             self._prepare(ctx)
             h = self.model.trunk(ctx)               # always: chunks without sampled rows still write their state
             # The head only when a row samples: a step of mid-prompt chunks has no logits rows at all.
-            logits = self.model.head(h[ctx.batch.dev.logits_index]) if n_sampled else None
+            logits = self._logits(ctx, h) if n_sampled else None
             if prompt is not None:
                 recorded = self._prompt_logprobs(h, plan, prompt)
             if (plan.n_logits > 1).any():           # verify rows
-                out, accepts = self.verifier.verify(logits.float(), ctx)
+                out, accepts = self.verifier.verify(logits, ctx)
                 sampled = self._store(ctx, out.tokens, accepts)
                 for rewind in self.rewinders:       # past the rejected drafts, before anything drafts from it
                     rewind(ctx)
             elif plan.n_logits.any():
-                out = self.sampler.sample(logits.float(), ctx)
+                out = self.sampler.sample(logits, ctx)
                 sampled = self._store(ctx, out.tokens)
             if self.drafter is not None:
                 self._run_drafter(ctx, h)           # its state for this step's tokens, then the next step's drafts
         run_mem_ops(plan.mem_ops, self.pools, "post_sample")
+        draft_tokens = None
         if sampled is not None and self.drafter is not None:
-            drafts = self._out_drafts[self._out_turn][:rows].copy_(self.seq_table.n_draft[ctx.batch.dev.slots[:rows]],
-                                                                   non_blocking=True)
+            slots = ctx.batch.dev.slots[:rows]
+            drafts = self._out_drafts[self._out_turn][:rows].copy_(self.seq_table.n_draft[slots], non_blocking=True)
+            if self._out_draft_tokens is not None:   # the masks of a constrained row's next verify need the drafts
+                draft_tokens = self._out_draft_tokens[self._out_turn][:rows]
+                draft_tokens.copy_(self.seq_table.draft_tokens[slots], non_blocking=True)
         tokens = lps = None
         if out is not None and out.logprobs is not None:   # pinned copies, read at commit: no host sync at launch
             lps = tuple(platform.pinned_empty(t.numel(), t.dtype, self.device).view(t.shape).copy_(t, non_blocking=True)
@@ -315,14 +341,14 @@ class Executor:
             self._out_turn ^= 1
         done = platform.Event(self.device)
         done.record()
-        return Launched(tokens, accepts, drafts, lps, done, recorded, key is not None)
+        return Launched(tokens, accepts, drafts, lps, done, recorded, key is not None, draft_tokens)
 
     def _decode(self, ctx: StepContext) -> tuple[torch.Tensor, torch.Tensor | None]:
         """A decode or verify step's device work from inputs to tokens (and accepted drafts), the rewind and the
         drafter's run — the part captured in a graph."""
         self._prepare(ctx)
         h = self.model.trunk(ctx)
-        logits = self.model.head(h[ctx.batch.dev.logits_index]).float()
+        logits = self._logits(ctx, h)
         accepts = None
         if (ctx.batch.plan.n_logits > 1).any():
             out, accepts = self.verifier.verify(logits, ctx)
@@ -334,6 +360,14 @@ class Executor:
         if self.drafter is not None:
             self._run_drafter(ctx, h)
         return tokens, accepts
+
+    def _logits(self, ctx: StepContext, h: torch.Tensor) -> torch.Tensor:
+        """The step's logits rows (fp32), masked where the logits processor constrains them: every path that samples
+        or verifies runs this (prefill, decode and verify; graphed and eager)."""
+        logits = self.model.head(h[ctx.batch.dev.logits_index]).float()
+        if ctx.prep.mask is not None:
+            self.processor.apply(logits, ctx.prep.mask, ctx.prep.mask_rows)
+        return logits
 
     def _run_drafter(self, ctx: StepContext, h: torch.Tensor) -> None:
         if ctx.substeps is not None:
@@ -359,10 +393,11 @@ class Executor:
         self.seq_table.n_accept[slots] = accepts
         return tokens
 
-    def _context(self, plan: BatchPlan, exact: np.ndarray | None = None) -> StepContext:
-        """The host half of a step's inputs: index arrays and the starts the host knows exactly (`exact` rows; all by
-        default), staged into static device buffers with asynchronous copies, plus host-side planning. Positions,
-        lengths and write indices are derived on the device by `_prepare`."""
+    def _context(self, plan: BatchPlan, exact: np.ndarray | None = None,
+                 masks: tuple[list[MaskRow], np.ndarray] | None = None) -> StepContext:
+        """The host half of a step's inputs: index arrays, the starts the host knows exactly (`exact` rows; all by
+        default) and the constrained rows' masks, staged into static device buffers with asynchronous copies, plus
+        host-side planning. Positions, lengths and write indices are derived on the device by `_prepare`."""
         n = plan.n_query
         rows, tokens = len(n), int(n.sum())
         qstart = np.concatenate([[0], np.cumsum(n)])
@@ -390,6 +425,15 @@ class Executor:
             prep.draft_index = up.put("draft_index", np.repeat(qstart[verify] + 1, k) + j)
             cols = self.seq_table.draft_tokens.shape[1]
             prep.draft_from = up.put("draft_from", np.repeat(plan.slots[verify].astype(np.int64) * cols, k) + j)
+        if masks is not None:
+            # Only the constrained rows' masks are staged. Their logits rows are padded with an index past the step's
+            # last row up to the step's count of logits rows, which a captured graph reads in full: no index of an
+            # earlier step may survive in the graph's view.
+            constrained, index = masks
+            width, total = self.processor.mask_width, int(plan.n_logits.sum())
+            self.processor.fill(constrained, up.stage("mask", len(index) * width)[0].reshape(-1, width))
+            prep.mask_rows = up.put("mask_rows", np.concatenate([index, np.full(total - len(index), total)]))
+            prep.mask = up.dev["mask"][: len(prep.mask_rows) * width].view(-1, width)
         pages = self.state.pages(plan, up)
         drafting = plan.draft_k and plan.n_logits.any() and hasattr(self.drafter, "substeps")
         widths = self.drafter.substeps(plan.draft_k) if drafting else []

@@ -22,6 +22,10 @@ after it too; reservations stop at `max_model_len` (positions past it compute no
 uncommitted verify row knows its length only on the device; steps whose decode kernel plans from host lengths
 (`host_lens_only`) leave it out until that row commits.
 
+Constrained requests (a logits processor masks their rows from their committed tokens) run at depth 0: one is left
+out while it has a row in flight (the engine may commit that row first), and while BLOCKED (its processor is not
+ready), without holding up the requests queued behind it.
+
 Liveness: the pools always hold one request of the engine's maximum length, and every unit is held by some request
 or only by the prefix cache, which evicts such units before anyone is preempted. So the top-ranked request fits once
 everything below it is preempted, and every step makes progress.
@@ -89,8 +93,8 @@ class Scheduler:
         rows, budget, ahead = [], self.max_step_tokens, None
         self._k = 0
         for seq in list(self.waiting):
-            if seq.pending:                       # preempted while its decode was in flight: wait for the commit
-                continue
+            if seq.pending or seq.status is Status.BLOCKED:      # preempted while its decode was in flight: wait for
+                continue                                         # the commit; or its logits processor is not ready
             if budget == 0 or (seq.slot < 0 and not self._fit(seq, None)):
                 break
             n = min(len(seq.tokens) - seq.num_computed, budget)       # after admission: a prefix hit counts
@@ -108,7 +112,8 @@ class Scheduler:
         return rows
 
     def _decode(self) -> list[tuple[Seq, int, int]]:
-        ready = [s for s in self.running if not self._at_limit(s) and not (self.host_lens_only and s.inexact)]
+        ready = [s for s in self.running if not self._at_limit(s) and not (self.host_lens_only and s.inexact)
+                 and not (s.constrained and s.pending)]
         self._k = k = self.draft_k(ready) if self.draft_k is not None and ready else 0
         need = 1 + k + (self.lookahead(k) if k else 0)
         rows, capacity, limit = [], self.state.capacity, self.max_model_len

@@ -24,6 +24,7 @@ class Oracle:
     absorbed: object = None                        # the part of it that came from steps' inputs
     observed: list[tuple[tuple[int, ...], int, int, int]] = dataclasses.field(default_factory=list)
     # (prompt, k, n_draft, n_accept) per committed sampled row
+    written: dict[int, list[int]] = dataclasses.field(default_factory=dict)   # slot -> its last real drafts
 
 
 ORACLE = Oracle({})

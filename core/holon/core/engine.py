@@ -17,11 +17,24 @@ import functools
 import gc
 import itertools
 import secrets
+import time
 
 import numpy as np
 import torch
 
-from holon.api import BatchPlan, Logprobs, SamplingParams, Seq, Status, TokenDelta, rewind_modules, sequence_seed
+from holon.api import (
+    BatchPlan,
+    Logprobs,
+    MaskRow,
+    RequestError,
+    SamplingParams,
+    Seq,
+    Status,
+    TokenDelta,
+    VocabView,
+    rewind_modules,
+    sequence_seed,
+)
 
 from . import platform
 from .assembly import AuxModels, bind_state, prefix_index, resolve_model
@@ -31,6 +44,8 @@ from .memory import Ledger
 from .plugins import PluginError, PluginSet, discover
 from .sched import Scheduler
 from .state import StateManager
+
+BLOCKED_POLL_S = 0.005       # how often a server whose only requests wait for their logits processor steps
 
 
 @dataclasses.dataclass
@@ -92,6 +107,11 @@ class _Target:
 
 
 class Engine:
+    # A constrained sequence (its logits processor needs every token before its next row on the host) whose last row
+    # is in flight: True (A′) — the step commits the row before scheduling, so it decodes every step and the step's
+    # other rows lose their overlap; False (A) — it sits the step out, others overlap (M0.5 design D2).
+    commit_for_constrained = True
+
     def __init__(self, cfg: EngineConfig, plugins: PluginSet | None = None) -> None:
         self.cfg, self.device = cfg, torch.device(cfg.device)
         platform.configure_allocator(self.device)
@@ -133,6 +153,11 @@ class Engine:
             substeps = (max(map(len, widths)), max((q for w in widths for q in w), default=0))
             sub_planners = aux.sub_planners(substeps[0])
         admit_draft = getattr(drafter, "admit", None)
+        # At most one logits processor, selected by the deployment (opt-in, like the drafter).
+        self.processor = None
+        if "logits_processor" in cfg.slots:
+            self.processor = p.load(p.single("logits_processor", cfg.slots["logits_processor"])).build(
+                self.ctx, VocabView(self.spec.vocab, self.eos, source.tokenizer))
 
         def admit(seq: Seq) -> None:
             sampler.admit(seq.slot, seq.params)
@@ -154,7 +179,7 @@ class Engine:
                                  verifier, drafter, pools=self.ledger.pools, rewinders=rewinders,
                                  sub_planners=sub_planners, substeps=substeps,
                                  namespaces=[ns for ns, _ in aux.modules] if aux is not None else [],
-                                 verify_widths=self._verify_widths())
+                                 verify_widths=self._verify_widths(), processor=self.processor)
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None
                                 else self.executor.state_memory(self.ledger, cfg.memory_fraction))
         self.state.reset_padding()
@@ -168,6 +193,9 @@ class Engine:
         self._prompt_lp: dict[Seq, Logprobs] = {}         # sequences still accumulating prompt logprobs
         self._siblings: dict[Seq, list[Seq]] = {}         # n > 1: waiting for the first sequence's prefill
         self._live: dict[str, list[Seq]] = {}              # request id -> its unfinished sequences
+        self._blocked: dict[str, None] = {}                # constrained requests until their processor is ready
+        # What a request's `SamplingParams.ext` may name: the resources of the plugins this engine runs.
+        self._served = {str(r) for name in p.loaded for r in p.installed[name].manifest.provides}
 
     def _verify_widths(self) -> tuple[int, ...]:
         """The verify-row widths to capture: 1 + each k the policy declares (`ks()`), else every k up to the maximum."""
@@ -190,9 +218,12 @@ class Engine:
         return max(0, min(self.policy.k(seqs), self.cfg.max_draft_tokens))
 
     # -- requests -------------------------------------------------------------------------------------------------
-    def add(self, token_ids: list[int], params: SamplingParams | None = None, rid: str | None = None) -> str:
+    def add(self, token_ids: list[int], params: SamplingParams | None = None, rid: str | None = None,
+            resume_output: int = 0) -> str:
         """Queue a request; its `params.n` sequences stream as TokenDeltas with `index` 0 … n-1. `rid` defaults to a
-        fresh id; callers that route results themselves (frontends) choose it."""
+        fresh id; callers that route results themselves (frontends) choose it. `resume_output`: the last tokens of
+        `token_ids` are output already (a resubmission): they count towards `max_tokens`, and a logits processor
+        replays them. Raises ValueError (`RequestError` from the processor) for a request it rejects."""
         p = params or SamplingParams()
         if not token_ids:
             raise ValueError("empty prompt")
@@ -203,42 +234,67 @@ class Engine:
             raise ValueError(f"n must be >= 1, got {p.n}")
         if p.presence_penalty or p.frequency_penalty or p.repetition_penalty != 1:
             raise NotImplementedError("sampling penalties are not supported yet")
+        if not 0 <= resume_output < len(token_ids) or (p.max_tokens is not None and resume_output >= p.max_tokens):
+            raise ValueError(f"resume_output {resume_output}: not within the {len(token_ids)} tokens and max_tokens")
+        if unserved := set(p.ext) - self._served:     # never ignore what a request asks for
+            raise ValueError(f"no plugin of this deployment serves {sorted(unserved)} (SamplingParams.ext)")
         rid = rid if rid is not None else str(next(self._ids))
         if rid in self._live:
             raise ValueError(f"request id {rid!r} is already in flight")
+        prompt_len = len(token_ids) - resume_output
+        constrained = self.processor is not None and self.processor.open(rid, p, list(token_ids[:prompt_len]))
         base = p.seed if p.seed is not None else secrets.randbits(63)
         for i in range(p.n):
             # A concrete seed per sequence keeps sampling reproducible across batching and preemption.
             child = dataclasses.replace(p, seed=sequence_seed(base, i),
                                         prompt_logprobs=p.prompt_logprobs if i == 0 else None)
-            seq = Seq(rid=rid, tokens=list(token_ids), params=child, index=i)
+            seq = Seq(rid=rid, tokens=list(token_ids), params=child, prompt_len=prompt_len, index=i,
+                      constrained=constrained)
             self._live.setdefault(rid, []).append(seq)       # siblings too: abort must account for them
             if child.prompt_logprobs is not None:
                 self._prompt_lp[seq] = Logprobs([], [], [])
             if i == 0 or self.state.index is None:
                 self.sched.add(seq)
+                if constrained:                               # until its processor is ready (`_unblock`)
+                    seq.status = Status.BLOCKED
                 first = seq
             else:   # siblings wait until the first sequence's prompt is cached, then adopt it
                 self._siblings.setdefault(first, []).append(seq)
+        if constrained:
+            self._blocked[rid] = None
         return rid
 
     def has_work(self) -> bool:
         return bool(self.sched.waiting or self.sched.running or self._inflight)
 
+    def idle_for(self) -> float | None:
+        """How long a serving loop may wait for new requests before its next `step`: 0 while some request can run,
+        BLOCKED_POLL_S while the only ones left wait for their logits processor (each step polls `ready`), None
+        (indefinitely) when there is no work."""
+        if not self.has_work():
+            return None
+        if self.sched.running or self._inflight is not None:
+            return 0.0
+        return BLOCKED_POLL_S if all(seq.status is Status.BLOCKED for seq in self.sched.waiting) else 0.0
+
     # -- control (design §7.7) -------------------------------------------------------------------------------------
-    def abort(self, rid: str, reason: str = "abort", error: str | None = None) -> list[TokenDelta]:
+    def abort(self, rid: str, reason: str = "abort", error: str | None = None, kind: str | None = None
+              ) -> list[TokenDelta]:
         """Finish every sequence of request `rid` now — one delta each, siblings that never started included; a row
-        already in flight is discarded at its commit."""
-        deltas = []
-        for seq in self._live.pop(rid, []):
+        already in flight is discarded at its commit. `error` and `kind` (a `RequestError`'s) say why it failed."""
+        deltas, seqs = [], self._live.pop(rid, [])
+        for seq in seqs:
             for sibling in self._siblings.pop(seq, []):             # never started: nothing to release
                 sibling.status = Status.FINISHED
-                deltas.append(TokenDelta(rid, [], index=sibling.index, finish_reason=reason, error=error))
+                deltas.append(TokenDelta(rid, [], sibling.index, finish_reason=reason, error=error, kind=kind))
             if seq.status is Status.FINISHED:
                 continue
             self.sched.finish(seq, reason)
             self._prompt_lp.pop(seq, None)
-            deltas.append(TokenDelta(rid, [], index=seq.index, finish_reason=reason, error=error))
+            deltas.append(TokenDelta(rid, [], seq.index, finish_reason=reason, error=error, kind=kind))
+        if seqs and seqs[0].constrained:
+            self._blocked.pop(rid, None)
+            self.processor.close(rid)
         return deltas
 
     def drain(self) -> list[TokenDelta]:
@@ -257,6 +313,7 @@ class Engine:
         """Release the device memory now (graphs, state pools, weights) instead of whenever the garbage collector
         breaks the engine's reference cycles; the engine is unusable afterwards."""
         self.drain()
+        getattr(self.processor, "shutdown", lambda: None)()
         self.executor = self._inflight = None
         self.ledger.free()
         gc.collect()
@@ -280,6 +337,8 @@ class Engine:
         out: dict[str, list[int]] = {r: [] for r in rids}
         pending = set(rids)
         while pending:
+            if wait := self.idle_for():              # only requests waiting for their logits processor
+                time.sleep(wait)
             for d in self.step():
                 if d.rid in out:                     # other requests may be in flight too
                     out[d.rid].extend(d.token_ids)
@@ -290,16 +349,20 @@ class Engine:
     # -- one step -------------------------------------------------------------------------------------------------
     @torch.no_grad()
     def step(self) -> list[TokenDelta]:
-        """Schedule and launch one step; commit the previous one while this one runs (overlap), or this one at
-        once (depth 0, and steps that report prompt logprobs, whose extraction needs the host)."""
+        """Schedule and launch one step; commit the previous one while this one runs (overlap) — before scheduling
+        if it holds a constrained row (`commit_for_constrained`) — or this one at once (depth 0, and steps that report
+        prompt logprobs, whose extraction needs the host)."""
         prev, self._inflight = self._inflight, None
-        deltas: list[TokenDelta] = []
+        deltas = self._unblock() if self._blocked else []
+        if prev is not None and self.processor is not None and self.commit_for_constrained and any(
+                m and seq.constrained for seq, _, m in prev.rows):
+            deltas, prev = deltas + self._commit(prev), None
         scheduled = self.sched.schedule()
         if scheduled is None and prev is not None:      # what is left waits on the in-flight step's tokens
-            deltas, prev = self._commit(prev), None
+            deltas, prev = deltas + self._commit(prev), None
             scheduled = self.sched.schedule()
         if scheduled is None:
-            if self.has_work():
+            if self.idle_for() == 0:                    # not only requests waiting for their logits processor
                 raise RuntimeError("the scheduler made no progress with requests pending")
             return deltas
         step = self._launch(*scheduled)
@@ -314,6 +377,26 @@ class Engine:
             deltas += self._commit(step)
         return deltas
 
+    def _unblock(self) -> list[TokenDelta]:
+        """Let the constrained requests whose processor is ready run — a resumed one after replaying its output into
+        the processor (`commit`); end those the processor fails."""
+        deltas = []
+        for rid in list(self._blocked):
+            try:
+                if not self.processor.ready(rid):
+                    continue
+                for seq in self._live[rid]:
+                    if len(seq.tokens) > seq.prompt_len:
+                        self.processor.commit(seq, seq.tokens[seq.prompt_len:])
+            except RequestError as e:
+                deltas += self.abort(rid, "error", str(e), e.kind)
+                continue
+            del self._blocked[rid]
+            for seq in self._live[rid]:
+                if seq.status is Status.BLOCKED:
+                    seq.status = Status.WAITING
+        return deltas
+
     def _launch(self, plan: BatchPlan, seqs: list[Seq]) -> _Inflight:
         """Launch the step on the device, then advance the host mirrors."""
         rows = [(seq, int(n), int(m)) for seq, n, m in zip(seqs, plan.n_query, plan.n_logits, strict=True)]
@@ -323,7 +406,8 @@ class Engine:
         prompt = self._prompt_rows(plan, seqs) if sync else None
         ops = self.state.step_ops(plan, seqs)
         plan.mem_ops, plan.publishes = ops.mem_ops, ops.in_step
-        out = self.executor.launch(plan, exact, logprobs, prompt)
+        masks = self._masks(rows) if self.processor is not None else None
+        out = self.executor.launch(plan, exact, logprobs, prompt, masks)
         self.state.unpin(ops.pins)
         for r, got in zip(prompt or [], out.prompt_logprobs, strict=True):
             acc = self._prompt_lp[seqs[r.row]]
@@ -340,6 +424,18 @@ class Engine:
                 if seq.status is not running:
                     self.sched.finished_prefill(seq)
         return _Inflight(rows, plan.draft_k, out, sync, ops.publishes)
+
+    @staticmethod
+    def _masks(rows: list[tuple[Seq, int, int]]) -> tuple[list[MaskRow], np.ndarray] | None:
+        """The step's constrained rows — a verify row with the drafts it checks — and their logits rows (None: it
+        has none)."""
+        masks, index, at = [], [], 0
+        for seq, _, m in rows:
+            if m and seq.constrained:
+                masks.append(MaskRow(seq, len(index), m, seq.drafts[: m - 1]))
+                index += range(at, at + m)
+            at += m
+        return (masks, np.array(index, dtype=np.int64)) if masks else None
 
     def _prompt_rows(self, plan: BatchPlan, seqs: list[Seq]) -> list[PromptRows]:
         """The prompt logprobs this step's rows owe: the prompt positions they compute that predict a prompt token,
@@ -363,6 +459,7 @@ class Engine:
         tokens = out.tokens.tolist() if out.tokens is not None else []
         accepts = iter(out.accepts.tolist() if out.accepts is not None else [])
         drafts = out.drafts.tolist() if out.drafts is not None else None
+        draft_tokens = out.draft_tokens                # read only for constrained rows
         lps = None if out.logprobs is None else [t.tolist() for t in out.logprobs]
         deltas, row = [], 0
         index, chains, finished = self.state.index, self.state.chain, Status.FINISHED
@@ -389,6 +486,8 @@ class Engine:
                     self.spec_counts["drafted"] += min(seq.n_draft, m - 1)
                     self.spec_counts[m - 1, accepted] += 1
                 seq.n_draft = drafts[i]
+                if seq.constrained:                  # for the masks of its next verify row
+                    seq.drafts = draft_tokens[i, : drafts[i]].tolist()
             if m == 1:                               # the common case, without the per-token loop
                 out = [tokens[at]]
                 seq.tokens.append(out[0])
@@ -400,6 +499,13 @@ class Engine:
                     out.append(token)
                     if reason := self._finish_reason(seq, token):
                         break
+            if seq.constrained:
+                try:
+                    self.processor.commit(seq, out)
+                except RequestError as e:            # the request fails: these tokens are not its own
+                    del seq.tokens[len(seq.tokens) - len(out):]
+                    deltas += self.abort(seq.rid, "error", str(e), e.kind)
+                    continue
             # _completes_block, inline: this runs per row per step
             if block and (chain := chains.get(seq.slot)) is not None and \
                     min(seq.num_computed, len(seq.tokens)) // block > len(chain):
@@ -414,6 +520,8 @@ class Engine:
                     live.remove(seq)
                 if not live:
                     self._live.pop(seq.rid, None)
+                    if seq.constrained:
+                        self.processor.close(seq.rid)
             k = seq.params.logprobs                  # one entry per emitted token (a verify row emits several)
             logprobs = None if k is None else Logprobs(
                 lps[0][at: at + len(out)], [t[:k] for t in lps[1][at: at + len(out)]],
