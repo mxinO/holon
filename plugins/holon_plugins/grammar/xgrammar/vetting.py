@@ -8,9 +8,9 @@ One long-lived watchdog thread starts, watches (every `poll` seconds) and respaw
 which follows the thread that created a child — kills them with it. Workers are fresh interpreters (spawned, never
 forked from the engine's CUDA process) with a lean environment and no GPU; they read the engine's `TokenizerInfo`
 from a file they inherit open, already unlinked (nothing to clean up, nothing for a tmp cleaner to remove). At most
-`queue` constraints wait for a worker; more are rejected `busy`. If workers keep dying before they are ready
-(`STARTS` in a row), the checker is down: waiting constraints and new ones are `busy` until a worker starts again
-(respawns back off, up to 30 s apart).
+`queue` constraints wait for a worker; more are rejected `busy`. If no worker is ready and workers keep dying
+before they are ready (`STARTS` in a row), the checker is down: waiting constraints and new ones are `busy` until a
+worker starts again (respawns back off, up to 30 s apart).
 """
 from __future__ import annotations
 
@@ -41,6 +41,7 @@ class Outcome:
     seconds: float = 0.0        # the compile's wall time
     size: int = 0               # the compiled grammar's bytes
     growth: int = 0             # how far the compile grew the worker's resident set, at its peak (bytes)
+    final: bool = True          # False: about the checker, not the constraint (do not remember it)
 
 
 @dataclasses.dataclass(slots=True, eq=False)
@@ -75,7 +76,8 @@ class Vetting:
         self._waiting: collections.deque[tuple[str, str]] = collections.deque()   # (key, constraint JSON)
         self._running: set[str] = set()
         self._done: list[tuple[str, Outcome]] = []
-        self._failed_starts = 0
+        self._failed_starts = 0                  # workers that died before they were ready, in a row
+        self._ready = 0                          # workers ready now
         self.starts: list[tuple[float, int]] = []    # per worker start: seconds until ready, resident bytes then
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._watch, args=(workers,), name="grammar-vetting", daemon=True)
@@ -83,7 +85,7 @@ class Vetting:
 
     @property
     def alive(self) -> bool:
-        return self._thread.is_alive() and self._failed_starts < STARTS
+        return self._thread.is_alive() and (self._ready > 0 or self._failed_starts < STARTS)
 
     def submit(self, key: str, constraint: str) -> None:
         """Vet `constraint` (JSON text) under `key`, unless it is already waiting, running or reported."""
@@ -134,6 +136,7 @@ class Vetting:
                     if failed is not None:
                         self._kill(sel, w)
                         workers[i] = None
+                        self._ready -= w.ready
                         if w.key is not None:
                             self._finish(w, failed)
                         if not w.ready:
@@ -143,7 +146,7 @@ class Vetting:
                 for event, _ in sel.select(timeout=self.poll):
                     try:
                         self._read(sel, event.data)
-                    except (ValueError, KeyError, TypeError):    # not an outcome: `_check` retires the worker
+                    except (ValueError, KeyError, TypeError, AttributeError):   # not an outcome: retire it
                         event.data.broken = True
         finally:
             for w in workers:
@@ -180,12 +183,12 @@ class Vetting:
         return None
 
     def _failed_start(self) -> float:
-        """A worker died before it was ready: after STARTS in a row, fail the waiting constraints `busy`. Returns the
-        seconds to wait before the next try."""
+        """A worker died before it was ready: after STARTS in a row with none ready, fail the waiting constraints
+        `busy`. Returns the seconds to wait before the next try."""
         self._failed_starts += 1
-        if self._failed_starts >= STARTS:
+        if not self.alive:
             with self._lock:
-                self._done += [(k, Outcome(False, "busy", "the constraint checker cannot start"))
+                self._done += [(k, Outcome(False, "busy", "the constraint checker cannot start", final=False))
                                for k, _ in self._waiting]
                 self._waiting.clear()
         return min(30.0, self._failed_starts - 1.0)
@@ -210,7 +213,7 @@ class Vetting:
             return
         out = json.loads(line)
         if out.get("ready"):
-            w.ready, self._failed_starts = True, 0
+            w.ready, self._failed_starts, self._ready = True, 0, self._ready + 1
             self.starts.append((time.monotonic() - w.spawned, _resident(w.proc.pid)))
         elif w.key is None:
             raise ValueError("an outcome without a job")

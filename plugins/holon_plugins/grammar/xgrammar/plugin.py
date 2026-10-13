@@ -134,7 +134,8 @@ class XGrammar:
             if outcome.ok:
                 _remember(self.vetted, key, outcome)
                 self._refused.pop(key, None)
-            elif key not in self._cache and key not in self.vetted:   # an older run of a constraint known to work
+            elif outcome.final and key not in self._cache and key not in self.vetted:
+                # (not remembered: an older run of a constraint known to work, or the checker's own failure)
                 until = float("inf") if outcome.kind == "client" else time.monotonic() + BUSY_TTL
                 _remember(self._refused, key, (outcome.kind, outcome.message, until))
         key = req.key
@@ -144,8 +145,8 @@ class XGrammar:
                 self._known_refusal(key)
                 if key in self.vetted:
                     self._compile(key, req.text)
-                elif not self.vetting.alive:
-                    raise RequestError("busy", "the constraint checker is down")
+                else:                               # (again, if the checker dropped it while down: busy then)
+                    self.vetting.submit(key, req.text)
                 return False
             if not future.done():
                 return False

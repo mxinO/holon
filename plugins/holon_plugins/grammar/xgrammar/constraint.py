@@ -168,13 +168,13 @@ def strict_violation(schema: Any) -> str | None:
     todo, seen = [(schema, "")], set()
     while todo:                                 # a work list, not recursion: schemas may nest deeply
         node, at = todo.pop()
-        if not isinstance(node, dict):
+        if not isinstance(node, dict) or id(node) in seen:     # each node once, however many refs reach it
             continue
-        if why := _local_violation(node, schema, at, draft):
+        seen.add(id(node))
+        if why := _local_violation(node, schema, draft):
             return f"{at or '/'}: {why}"
-        if isinstance(ref := node.get("$ref"), str) and ref not in seen:   # resolved by `_local_violation`
-            seen.add(ref)
-            todo.append((_resolve(ref, schema), ref))
+        if "$ref" in node:                      # resolved by `_local_violation`
+            todo.append((_resolve(node["$ref"], schema), node["$ref"]))
         for k in _SCHEMA_DICTS:
             todo += [(sub, f"{at}/{k}/{_escape(name)}") for name, sub in node.get(k, {}).items()]
         for k in _SCHEMA_LISTS:
@@ -183,11 +183,11 @@ def strict_violation(schema: Any) -> str | None:
     return None
 
 
-def _local_violation(node: dict, root: Any, at: str, draft: int) -> str | None:
+def _local_violation(node: dict, root: Any, draft: int) -> str | None:
     keys = set(node)
     if unsupported := sorted(keys & _UNSUPPORTED):
         return f"{unsupported[0]} is not supported"
-    if at and ("$schema" in node or "$id" in node or isinstance(node.get("id"), str)):
+    if node is not root and ("$schema" in node or "$id" in node or isinstance(node.get("id"), str)):
         return "an embedded schema resource ($schema, $id or id below the root)"
     if len(node.get("allOf") or []) >= 2:
         return "allOf with two or more branches is not supported"
@@ -214,8 +214,8 @@ def _local_violation(node: dict, root: Any, at: str, draft: int) -> str | None:
         return f"required {sorted(missing)} not in properties"
     if "propertyNames" in node and "properties" in node:
         return "propertyNames beside properties is not supported (xgrammar checks only the other names)"
-    if names := set(node.get("properties", {})) & _matched(node.get("patternProperties", {}), node):
-        return f"properties {sorted(names)} also match patternProperties (xgrammar applies only properties)"
+    if "patternProperties" in node and "properties" in node:   # no client regex runs here
+        return "patternProperties beside properties is not supported (a name both match: xgrammar applies properties)"
     patterns = [node["pattern"]] if "pattern" in node else []
     patterns += list(node.get("patternProperties", {}))
     if loose := next((p for p in patterns if _LOOSE_PATTERN.search(p)), None):
@@ -225,15 +225,6 @@ def _local_violation(node: dict, root: Any, at: str, draft: int) -> str | None:
     if "format" in node and node["format"] not in FORMATS:
         return f"format {node['format']!r} is not supported (supported: {sorted(FORMATS)})"
     return None
-
-
-def _matched(patterns: dict, node: dict) -> set[str]:
-    """The `properties` names some `patternProperties` pattern matches (a pattern Python cannot read: all)."""
-    names = set(node.get("properties", {}))
-    try:
-        return {n for n in names if any(re.search(p, n) for p in patterns)}
-    except re.error:
-        return names
 
 
 def _allowed_beside(node: dict, head: str) -> set[str]:
@@ -254,9 +245,10 @@ def _is(value: Any, kind: str) -> bool:
 
 
 def _ref_violation(ref: Any, root: Any) -> str | None:
-    """Only local JSON-pointer refs that resolve ('#' or '#/…'); remote and anchor refs are refused."""
-    if not isinstance(ref, str) or not (ref == "#" or ref.startswith("#/")):
-        return f"$ref {ref!r}: only local refs ('#/…') are supported"
+    """Only local JSON-pointer refs that resolve ('#' or '#/…'), without escapes ('%', '~': xgrammar reads them
+    literally, JSON Schema decodes them); remote and anchor refs are refused."""
+    if not isinstance(ref, str) or not (ref == "#" or ref.startswith("#/")) or "%" in ref or "~" in ref:
+        return f"$ref {ref!r}: only local refs ('#/…') without escapes are supported"
     return None if _resolve(ref, root) is not _MISSING else f"$ref {ref!r} does not resolve"
 
 
@@ -266,10 +258,9 @@ _MISSING = object()
 def _resolve(ref: str, root: Any) -> Any:
     node = root
     for part in ref[2:].split("/") if ref != "#" else ():
-        part = re.sub(r"%([0-9A-Fa-f]{2})", lambda m: chr(int(m[1], 16)), part).replace("~1", "/").replace("~0", "~")
         if isinstance(node, dict) and part in node:
             node = node[part]
-        elif isinstance(node, list) and part.isdigit() and int(part) < len(node):
+        elif isinstance(node, list) and part.isdigit() and part == str(int(part)) and int(part) < len(node):
             node = node[int(part)]
         else:
             return _MISSING
