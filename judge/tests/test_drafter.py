@@ -2,14 +2,14 @@
 references to fp32 rounding, so they pass against the fp32 golden with the bf16 reference as the floor; planted bugs
 fail. The MTP block: against transformers' modules; its concat halves swapped (`mtp_concat_order`) fails. A tiny
 random DFlash2: against `reference.py` on the target streams the judge records itself; taps a layer late
-(`dflash-tap-offset`) fails."""
+(`dflash-tap-offset`) fails. The MTP block from a GGUF, chained: against the judge's own forward of the file's head."""
 import pytest
 import torch
 from holon.core.engine import Engine, EngineConfig
 from holon_judge import drafter
 from holon_judge.compare import compare
 from holon_judge.recording import Prompt, PromptSet
-from holon_testing.qwen3_5_files import save, tiny_hf
+from holon_testing.qwen3_5_files import can_convert, convert, save, tiny_hf
 
 
 @pytest.fixture(scope="module")
@@ -51,7 +51,7 @@ def test_dflash_passes_and_its_tap_offset_fails(case, tmp_path):
 
     path, prompts, _, _ = case
     draft = dflash_files.save(tmp_path / "draft", 64, 320, (0, 2), mask=7)
-    cuts = drafter.dflash_prompts(prompts)
+    cuts = drafter.cut_prompts(prompts)
 
     def judged():
         engine = Engine(EngineConfig(
@@ -68,3 +68,35 @@ def test_dflash_passes_and_its_tap_offset_fails(case, tmp_path):
     assert result.passed and result.overall.top1 > 0.99 and result.overall.n == 7 * len(cuts.prompts)
     with dflash_tap_offset():
         assert judged().passed is False
+
+
+@pytest.mark.skipif(not can_convert(), reason="needs llama.cpp's converter and the Qwen3.8 tokenizer")
+def test_a_gguf_mtp_chain_passes_and_its_swapped_concat_fails(tmp_path, monkeypatch):
+    # The head stored in a GGUF (llama.cpp's converter, f32), judged per cut with its chain of 3 drafts: steps 2 and
+    # 3 teacher-forced with the candidate's drafts. The concat halves swapped fail.
+    import gguf
+    from holon_std.spec.mtp_head import units
+
+    path = convert(save(tiny_hf(4, seed=1, vocab=248320), tmp_path, mtp=True))
+    g = torch.Generator().manual_seed(9)
+    cuts = drafter.cut_prompts(PromptSet("tiny", "0", [Prompt(str(i), "x", torch.randint(0, 320, (n,), generator=g)
+                                                              .tolist()) for i, n in enumerate((40, 70))]), 3, 4)
+
+    reader = gguf.GGUFReader(path)
+    references = [drafter.MTPReference(str(path), dtype, reader=reader) for dtype in (torch.float32, torch.bfloat16)]
+
+    def judged():
+        engine = Engine(EngineConfig(model=str(path), device="cpu", dtype=torch.float32, page_size=4, max_seqs=2,
+                                     max_step_tokens=128, max_model_len=128, state_memory=64 << 20,
+                                     prefix_cache=False, max_draft_tokens=3, plugin_options={"spec.k": "3"},
+                                     slots={"drafter": "drafters.mtp", "draft_policy": "std.spec.fixed_k",
+                                            "verifier": "std.spec.greedy"}))
+        cand, inputs = drafter.mtp_candidate(engine, cuts, 3)
+        return compare(*(r.record(cuts, inputs) for r in references[:1]), cand, references[1].record(cuts, inputs))
+
+    result = judged()
+    assert result.passed and result.overall.top1 > 0.99 and result.overall.n == 3 * len(cuts.prompts)
+    init = units.MTPHead.__init__
+    monkeypatch.setattr(units.MTPHead, "__init__", lambda self, ctx, **kw: init(self, ctx, **{**kw, "order":
+                                                                                               "hidden_first"}))
+    assert judged().passed is False
