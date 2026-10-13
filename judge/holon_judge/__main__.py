@@ -166,9 +166,17 @@ def _bounded(a: argparse.Namespace) -> int:
     def build(**overrides):
         return Engine(dataclasses.replace(base, **overrides))
 
+    reference = None
     if a.graphs_vs_eager:                                # every decode step a batch of `sessions` rows, padded
         baseline = bounded.BASELINE | {"cuda_graphs": False}
         configs = {"graphs on": bounded.BASELINE | {"cuda_graphs": True}}
+    elif a.spec_vs_plain:                                # the engine args speculate; the baseline does not
+        if not base.max_draft_tokens:
+            raise SystemExit("--spec-vs-plain: the engine args must speculate (--max-draft-tokens, --slots)")
+        reference = {"max_draft_tokens": 0}
+        baseline = bounded.BASELINE | reference
+        configs = {"spec, prefix on, depth 1": {"prefix_cache": True, "overlap": True},
+                   "spec, depth 0": dict(bounded.BASELINE)}
     else:
         baseline = bounded.BASELINE
         configs = {f"prefix {'on' if p else 'off'}, depth {int(o)}": {"prefix_cache": p, "overlap": o}
@@ -176,9 +184,10 @@ def _bounded(a: argparse.Namespace) -> int:
         if a.chunked:                                    # prefill in chunks of `chunked` tokens vs one shot
             configs[f"chunked {a.chunked}"] = bounded.BASELINE | {"max_step_tokens": a.chunked}
     with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
-        report = bounded.compare_configs(build, configs, trace, a.k, baseline)
+        report = bounded.compare_configs(build, configs, trace, a.k, baseline, reference)
     meta = gguf.file_meta(path) if path.suffix == ".gguf" else golden.model_meta(path)
     report |= {"model": meta["model"], "dtype": a.dtype, "graphs_vs_eager": a.graphs_vs_eager,
+               "spec_vs_plain": a.spec_vs_plain, "engine_args": a.engine_args,
                "hardware": golden.hardware(torch.device("cuda")), "torch": torch.__version__, "plant": a.plant}
     print(bounded.table(report))
     if a.json:
@@ -264,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--sessions", type=int, default=48, help="concurrent sessions: the decode batch")
     b.add_argument("--graphs-vs-eager", action="store_true", help="judge graphed decode against an eager baseline")
     b.add_argument("--chunked", type=int, help="also judge prefill in chunks of this many tokens")
+    b.add_argument("--spec-vs-plain", action="store_true",
+                   help="judge speculative decoding (the engine args' drafter, policy, verifier) against plain")
     b.add_argument("--engine-args", default="", help="EngineConfig flags, as for `holon serve`")
     b.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
     b.add_argument("--k", type=int, default=20)

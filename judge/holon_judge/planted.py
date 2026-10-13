@@ -5,6 +5,8 @@
   planted in the weights the engine loads; L2 fails.
 - Graphs vs eager (`bounded --graphs-vs-eager --plant moe-padding-duplicate-ids`): a bug only graph padding rows
   reach; the graphed configuration fails where the padded bucket's expert path is mmq.
+- Speculative decoding on a recurrent mixer (`bounded --spec-vs-plain --plant replay-off-by-one`, …): the GDN
+  rollback broken; the speculating configurations fail.
 - GGUF Tier B (`l2 --plant`): bugs in the quantized kernels' use (`kernels.ggml_cuda`); L2 fails, except the rare
   stale workspace, which measures Tier B's sensitivity (predicted before running: fails the decode run, likely passes
   the looser prefill run).
@@ -45,6 +47,40 @@ def adoption_off_by_one() -> Iterator[None]:
             seq.num_computed += 1
         return ok
     with mock.patch.object(StateManager, "admit", planted):
+        yield
+
+
+@contextlib.contextmanager
+def replay_off_by_one() -> Iterator[None]:
+    """Speculation on a recurrent mixer: the GDN rewind keeps the state after n accepted tokens, not 1 + n (the
+    verify row's own input token is lost whenever a draft was accepted)."""
+    from holon_std.mixers.gdn.units import GDN
+
+    rewind = GDN.rewind
+
+    def off_by_one(self, ctx):
+        n_accept = ctx.seq_table.n_accept
+        before = n_accept.clone()
+        n_accept.sub_(1).clamp_(min=0)
+        rewind(self, ctx)
+        n_accept.copy_(before)
+
+    with mock.patch.object(GDN, "rewind", off_by_one):
+        yield
+
+
+@contextlib.contextmanager
+def verify_writes_state() -> Iterator[None]:
+    """Speculation on a recurrent mixer: a verify row's delta rule writes its final state over the live one (no
+    sink), so the replay starts from the state after every draft, rejected ones included."""
+    from holon_std.mixers.gdn.units import GDN
+
+    call = GDN._rule_call
+
+    def live(self, rule, handle, mixed, a, b, ssm_state, slots, has_init, snapshot=None, out_slots=None):
+        return call(self, rule, handle, mixed, a, b, ssm_state, slots, has_init, snapshot, None)
+
+    with mock.patch.object(GDN, "_rule_call", live):
         yield
 
 
@@ -432,4 +468,6 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     # MoE Tier B
     "ggml-experts-wrong-type": ggml_experts_wrong_type, "ggml-experts-stale-q8_1": ggml_experts_stale_q8_1,
     "rare-ggml-experts-stale-q8_1": lambda: ggml_experts_stale_q8_1(every=9973),
-    "moe-padding-duplicate-ids": moe_padding_duplicate_ids, **QWEN35_PLANTS}
+    "moe-padding-duplicate-ids": moe_padding_duplicate_ids, **QWEN35_PLANTS,
+    # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
+    "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state}

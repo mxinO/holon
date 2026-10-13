@@ -202,10 +202,13 @@ def divergence(reference, turns: list[Turn], sessions: int, k: int) -> Divergenc
     return Divergence(Mean.of(kl, session), p50, p99, p50_se, p99_se)
 
 
-def compare_configs(build, configs: dict[str, dict], trace: Trace, k: int = 20, baseline: dict = BASELINE) -> dict:
+def compare_configs(build, configs: dict[str, dict], trace: Trace, k: int = 20, baseline: dict = BASELINE,
+                    reference: dict | None = None) -> dict:
     """Run `trace` under the baseline and every configuration (EngineConfig overrides by name), without and with
     logprobs, re-score each run with the reference engine and judge it against the baseline. `build(**overrides)`
-    returns an engine. Graphs vs eager: `baseline` with `cuda_graphs=False`, the configuration with it on."""
+    returns an engine. Graphs vs eager: `baseline` with `cuda_graphs=False`, the configuration with it on.
+    Speculation vs plain decoding: `baseline` and `reference` (more overrides of the reference engine) without
+    drafts."""
     runs: dict[str, tuple[list[Turn], list[Turn], dict]] = {}
     for name, overrides in {"baseline": baseline, **configs}.items():
         engine = build(**overrides)
@@ -213,7 +216,8 @@ def compare_configs(build, configs: dict[str, dict], trace: Trace, k: int = 20, 
         stats = engine.stats()
         runs[name] = plain, trace.run(engine, logprobs=k), stats
         _free(engine)
-    reference = build(**(BASELINE | {"cuda_graphs": False, "max_step_tokens": max(trace.max_len, 4096)}))
+    reference = build(**(BASELINE | {"cuda_graphs": False, "max_step_tokens": max(trace.max_len, 4096)}
+                         | (reference or {})))
     sessions = len(trace.chunks)
     scored = {name: (agreement(reference, plain, sessions, k), divergence(reference, lp, sessions, k), stats)
               for name, (plain, lp, stats) in runs.items()}
