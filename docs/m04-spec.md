@@ -754,7 +754,9 @@ same KV format with `--spec-type draft-dflash -md <drafter> --spec-draft-n-max 7
 | agent TTFT p50 (s) | 0.62 | 0.53 | 5.46 | — |
 
 - **Against the predictions (§5):** single stream 2.0–3.0× → **2.01×** (at the bottom); tokens per verify step
-  3.5–5 → **2.93** single stream (below), 3.87 on the agent trace. Acceptance equals llama.cpp's drafts on the same
+  3.5–5 (an agent-trace prediction) → **3.87** on the agent trace (7041 verify rows: inside); the single-stream 2.93
+  comes from one prompt (174 rows; the A5000's single prompt gave 4.02) and is prompt variance, kept as the speed
+  figure only. Acceptance equals llama.cpp's drafts on the same
   file (0.276 vs 0.267, within 3%), so the shortfall is the drafter's on this target, not ours. Every verify step
   replays a graph (174/174, 3868/3868); a closing plain run (21.34 ms) bounds the session's drift at < 0.1%.
 - **Verify-step cost** (eager kernel breakdown, one stream): 32.7 ms of kernels vs 21.6 ms for a decode step (r ≈ 1.5;
@@ -766,7 +768,9 @@ same KV format with `--spec-type draft-dflash -md <drafter> --spec-draft-n-max 7
 - **llama-server with DFlash2 does not fit the agent trace on 24 GB** at max_seqs 4: a 65K or 32K context OOMs when
   the draft model loads, 24.5K OOMs on its compute buffers (`-ub 512`), and 16K (`-ub 256`) runs but exceeds the
   context mid-trace (4 sessions × up to 6135 tokens). Its single stream ran at an 8K context with `-ub 512`.
-- **Decisions:** the drafter judge's top-1 margin (§12) — max(0.25 points, 2.5 paired SE) — was set after the first
-  verdicts; it reuses the bounded judge's statistic, is backed by the reviewer's simulation, and keeps the plants
+- **Decisions:** the drafter judge's top-1 margin (§12) — max(0.25 points, 2.5 paired SE, the SE capped at √2 × the
+  floor's own so a candidate's disagreements cannot widen its own bar, as L2's ΔPPL guard) — was set after the first
+  verdicts (the cap after the final review; every recorded verdict's candidate is at or above its floor, so none
+  changes); it reuses the bounded judge's statistic, is backed by the reviewer's simulation, and keeps the plants
   failing; recorded for the user. The bench now writes server flags with paths made repo-relative (records named a
   local draft path).

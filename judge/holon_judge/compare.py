@@ -254,10 +254,10 @@ def compare_drafter(golden: Recording, cand: Recording, floor: Recording) -> Res
     """The L0-drafter check (docs/m04-spec.md §5, as decided in §12): a draft head is judged on its top-1 agreement
     with the golden, overall and at confident positions — the golden's top-1 margin above the floor's 99th-percentile
     |Δlogit| (`_logit_shift`) — each at least the floor's less max(0.25 points, 2.5 paired standard errors of the
-    difference, prompts as clusters: `bounded`'s guard), and on KL p50, p99 and mean, each at most 2× the floor's. A
-    fixed 0.25-point bar alone fails a correct head at the floor's rate of near-tie flips too often at the few
-    thousand positions a draft head has. L2's verdict is reported alongside, and the confident disagreements by row
-    of a draft (block row, chain step)."""
+    difference, prompts as clusters, capped at √2 × the floor's own: `bounded`'s guard), and on KL p50, p99 and
+    mean, each at most 2× the floor's. A fixed 0.25-point bar alone fails a correct head at the floor's rate of
+    near-tie flips too often at the few thousand positions a draft head has. L2's verdict is reported alongside, and
+    the confident disagreements by row of a draft (block row, chain step)."""
     from .bounded import SE_FACTOR, Mean
 
     result = compare(golden, cand, floor)
@@ -271,7 +271,9 @@ def compare_drafter(golden: Recording, cand: Recording, floor: Recording) -> Res
     numbers, failures = {"logit_shift_p99": threshold, "n": len(margin), "n_confident": int(confident.sum())}, []
     for where, rows in (("overall", torch.ones_like(confident)), ("confident", confident)):
         c, f = agree["cand"][rows], agree["floor"][rows]
-        bar = max(TOP1_DELTA, SE_FACTOR * Mean.of(c - f, prompt[rows]).se)
+        # The paired error capped at √2 × the floor's own, so a candidate's own disagreements cannot widen its bar
+        se = min(Mean.of(c - f, prompt[rows]).se, math.sqrt(2) * Mean.of(f, prompt[rows]).se)
+        bar = max(TOP1_DELTA, SE_FACTOR * se)
         numbers[where] = {"top1": c.mean().item(), "floor_top1": f.mean().item(), "margin": bar}
         if c.mean().item() < f.mean().item() - bar:
             failures.append(f"top-1 {where} {c.mean().item():.4%} < {f.mean().item() - bar:.4%}")
