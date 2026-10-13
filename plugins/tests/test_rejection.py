@@ -373,3 +373,17 @@ def test_an_empty_residual_accepts_a_sampled_draft_at_a_coin_of_one():
     laws = (torch.tensor([0, 1]).expand(1, K, 2), torch.full((1, K, 2), 0.5 + 2**-20))
     tokens, n_accept = _step(sampler, logits, torch.tensor([[1, 0, 1]]), torch.tensor([6]), laws=laws)
     assert n_accept.item() == K and tokens[0, :K].tolist() == [1, 0, 1]
+
+
+def test_a_draft_outside_its_own_law_is_never_accepted(target):
+    # A drafter publishing a law that cannot have drawn its draft (q(d) = 0) breaks the contract; the verifier rejects
+    # the draft and draws that column from p as past the last real draft, so the emitted token keeps p's law.
+    logits = target[0]
+    d = int(logits.argmax())                                     # the target's likeliest token, outside the law
+    others = torch.tensor([t for t in range(V) if t != d][:2])
+    laws = (others.expand(N, K, 2), torch.full((N, K, 2), 0.5))
+    sampler = _sampler(SamplingParams(temperature=1.0))
+    tokens, n_accept = _step(sampler, logits.expand(N, K + 1, V), torch.full((N, K), d), torch.full((N,), 10),
+                             laws=laws)
+    assert (n_accept == 0).all()
+    assert _chi2(np.bincount(tokens[:, 0].numpy(), minlength=V), torch.softmax(logits, -1).numpy()) > 1e-3

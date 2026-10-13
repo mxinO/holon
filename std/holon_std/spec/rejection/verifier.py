@@ -9,8 +9,10 @@ q(t) min(1, p(t)/q(t)) + (1 − Σ min(p, q)) · max(p(t) − q(t), 0) / Σ max(
 
 Deterministic drafts (no `SeqTable.draft_q`): q is one-hot at d, so d is accepted with probability p(d) and the
 residual is p with d removed. Sampled drafts (`draft_q_ids` / `draft_q`, Kq entries per draft): q is zero off its
-support, so the residual is p there and max(p − q, 0) on it. Greedy rows reduce to greedy-exact (p is one-hot). An
-empty residual (p ≤ q everywhere, so p = q up to rounding) accepts the draft, whatever the coin."""
+support, so the residual is p there and max(p − q, 0) on it. A draft its own law could not have drawn (q(d) = 0: a
+broken drafter) ends the row's real drafts there: rejected, its column drawn from p — lossless whatever the law.
+Greedy rows reduce to greedy-exact (p is one-hot). An empty residual (p ≤ q everywhere, so p = q up to rounding)
+accepts the draft, whatever the coin."""
 from __future__ import annotations
 
 import torch
@@ -55,6 +57,7 @@ def verify(logits: torch.Tensor, ctx):
         qd = None
     else:
         pd, qd, residual = _sampled(p, table, slots, drafts, real)
+        real = real & (qd > 0).long().cumprod(-1).bool()              # drafts after one outside its law: not real
     sure = (residual.sum(-1) == 0).view(-1, width)[:, :k]             # p ≤ q up to fp32: nothing to draw instead
     coins = sampler.uniform(ctx, stream=1).view(-1, width)[:, :k]
     below = coins < pd if qd is None else coins * qd < pd
@@ -62,7 +65,7 @@ def verify(logits: torch.Tensor, ctx):
     plain = sampler.sample(logits, ctx).tokens                        # the token after the row's last real draft
     rejected = draw(residual, sampler.uniform(ctx, stream=2))
     j = torch.arange(width, device=logits.device)
-    n_real = table.n_draft[slots].clamp(max=k)
+    n_real = real.sum(-1)
     final = torch.where((j[None, :] < n_real[:, None]), rejected.view(-1, width), plain.view(-1, width))
     accepted = torch.cat([drafts, drafts.new_zeros(len(drafts), 1)], 1)
     tokens = torch.where(j[None, :] < n_accept[:, None], accepted, final).reshape(-1)
