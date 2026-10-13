@@ -222,18 +222,21 @@ unread `max_depth` is removed (the gate comes from `open`).
   - **Vetting** (an xgrammar compile cannot be cancelled in a thread, and compiled grammars can be huge: up to
     ≈ 2 GB in memory for two Github_hard schemas, 300 MB for the largest Kubernetes ones, with deserialization slower
     than compiling — reviewers' measurements): two worker processes, started with `spawn` (the engine process has
-    CUDA and threads), exiting when their parent dies, each with its own `TokenizerInfo` built from the same
-    tokenizer, padded size and stop set as the parent's (asserted) and `GrammarCompiler(max_threads=2)`. A worker
-    compiles the constraint and returns only `ok` / the error, the compile time and `memory_size_bytes` — no grammar
-    crosses the pipe, but the compile's peak RSS is reported too. Each worker's memory is capped at **1 GB**
-    (`RLIMIT_DATA` set in the spawn initializer; recalibrated at step 2 from the measured peak-to-final ratio on a
-    mid-size fixture) and its `oom_score_adj` is 1000, so the kernel kills a worker, never the engine (a compile's
-    peak is at least its final size, ≈ 2 GB for the worst measured schemas). Past the **10 s timeout** the worker is killed and respawned
-    (≈ 0.3–1 s; the queue is bounded for that) and the request is rejected `busy`; a compiled size over **64 MB**, or
-    a worker that fails under its own limit (a `MemoryError` / allocation failure reported over the pipe, or an
-    abort under the rlimit), is rejected `client` ("schema too complex"); a worker SIGKILLed by the kernel's OOM
-    killer is load, treated like a timeout (`busy`). A negative cache rejects repeats of compile errors and
-    over-size or over-limit constraints for the process's life, and of timeouts and OOM kills for 10 minutes. Tested with a lowered memory limit on a mid-size fixture.
+    CUDA and threads), kept lean (`OMP_NUM_THREADS=1`, `TOKENIZERS_PARALLELISM=false`, `MALLOC_ARENA_MAX=2`; the
+    `TokenizerInfo` sent from the parent as JSON, asserted equal in padded size and stop set) and set to die with the
+    parent (`PR_SET_PDEATHSIG`), each with `GrammarCompiler(max_threads=2)`. A worker compiles the constraint and
+    returns only `ok` / the error, the compile time, `memory_size_bytes` and its peak RSS — no grammar crosses the
+    pipe.
+  - **Memory:** a worker's baseline is ≈ 1.1 GB resident (≈ 6.7 GB virtual after importing xgrammar and torch, so
+    `RLIMIT_DATA` cannot cap it — reviewer measurement). The parent's watchdog reads each busy worker's resident
+    set (`/proc/<pid>/statm`) every 50 ms and kills it when the compile grows it past **baseline + 1 GB** (portable:
+    no cgroup needed); workers also get `oom_score_adj` 1000 so the kernel prefers them to the engine.
+  - **Outcomes:** past the **10 s timeout** the worker is killed and respawned (≈ 0.3–1 s; the queue is bounded for
+    that) and the request is rejected `busy`; a compiled size over **64 MB** or a watchdog kill is rejected `client`
+    ("schema too complex"); any other worker death or exit without a report (a kernel OOM kill, a crash) is `busy`.
+    A negative cache rejects repeats of compile errors and `client` rejections for the process's life, and of `busy`
+    outcomes for 10 minutes. Tested with a lowered watchdog budget on a mid-size fixture, with a small schema as the
+    positive control that still compiles under it.
   - **Compiling for use:** a vetted constraint is compiled again in the engine process by two helper threads with
     `max_threads=2` each (xgrammar releases the GIL while compiling, R §8), never on the engine thread; each compile's
     time is bounded by the worker's measured time; the helper backlog is bounded by the sum of its vetted compile
@@ -473,6 +476,13 @@ unread `max_depth` is removed (the gate comes from `open`).
 | C-R5-1: an OOM-killed worker rejects a valid schema forever | failures under the worker's own limit are `client` and permanent; kernel OOM kills are `busy`, expiring like timeouts (D5) |
 | C nit: the worker cap far above the size cap | 1 GB, recalibrated at step 2 from the measured peak-to-final ratio (D5) |
 | B note: confirm the engine-side peak | workers report each compile's peak RSS, recorded in the D9 runs (D5) |
+
+**Rev 5, round 2.**
+
+| Finding | Resolution |
+|---|---|
+| A (rev 5 major): `RLIMIT_DATA` caps virtual memory, ≈ 6.7 GB after the imports; a tight limit hangs or crashes the worker | a parent watchdog on resident memory (baseline + 1 GB) kills the worker → `client`; lean worker environment, `TokenizerInfo` as JSON, `PR_SET_PDEATHSIG`; any unreported death `busy` with the TTL; a positive control in the test (D5) |
+| A-m1: `oom_score_adj` makes workers the host's first victim | kept, but an OOM kill is `busy` and expires, never a permanent rejection (D5) |
 
 ## 10. Deferred, deliberately
 
