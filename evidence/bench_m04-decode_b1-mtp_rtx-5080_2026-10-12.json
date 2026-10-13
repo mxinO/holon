@@ -1,0 +1,130 @@
+{
+ "workload": "m04-decode_b1-mtp",
+ "date": "2026-10-12",
+ "command": "python bench/run.py --name m04-decode_b1-mtp --gpu 0 --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e --rounds 2 --max-batch 4 --max-step-tokens 2048 --backends holon_http --traces bench/traces/decode_b1.jsonl",
+ "commit": "8f9bb92d26557a71859b391d2560c5980bc9aab8",
+ "gpu_class": "rtx-5080",
+ "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e",
+ "rounds": 2,
+ "order": ["holon_http"],
+ "method": "In-process engines driven by bench/driver.py, one scheduling step per call; client-side timestamps taken when a step returns a token. TTFT = first token - release (arrival, or previous turn's last token + gap); TPOT = (last - first) / (tokens - 1) per request; throughput = output tokens / (last token - first release). Decode steps = steps at peak batch that return no first token; decode tok/s = their tokens / their wall time. CPU ms/step = time.process_time() delta around step() on those steps, measured with --blocking-sync (CUDA primary context in blocking-sync mode and torch events created blocking, so waiting for the GPU sleeps and is not counted). Greedy, ignore_eos, fixed output lengths; warmup on the same shapes with other prompt tokens, excluded. HTTP backends (llamaserver, holon_http; bench/backends/http.py): streamed requests, a token timestamped when its chunk arrives; their 'steps' are client polls, so decode tok/s and CPU ms/step do not apply to them.",
+ "traces_sha256": {
+  "decode_b1": "cc41d53b03df6007"
+ },
+ "backends": {
+  "holon_http": {
+   "config": {
+    "flags": "--max-seqs 4 --max-model-len 768 --max-step-tokens 2048 --memory-fraction 0.9 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options recurrent.checkpoints=4 kv.format=q8_0 spec.k=1:3,3:2"
+   },
+   "load_s": 32.0,
+   "blocking_sync": false,
+   "packages": {
+    "torch": "2.11.0+cu130",
+    "triton": "3.6.0",
+    "flashinfer-python": "0.6.12"
+   }
+  }
+ },
+ "summary": {
+  "decode_b1": {
+   "holon_http": {
+    "requests": 2,
+    "ttft_ms": {
+     "p50": 116.64,
+     "p90": 116.67,
+     "p99": 116.67
+    },
+    "tpot_ms": {
+     "p50": 7.15,
+     "p90": 7.15,
+     "p99": 7.15
+    },
+    "throughput_tok_s": 132.0,
+    "throughput_per_round": [132.0, 132.0],
+    "decode": {
+     "batch": 4,
+     "steps": 120,
+     "tok_s": 561.5,
+     "wall_ms_p50": 7.12,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 512,
+    "stats": {}
+   }
+  }
+ },
+ "runs": [
+  {
+   "round": 0,
+   "backend": "holon_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 116.61,
+     "p90": 116.61,
+     "p99": 116.61
+    },
+    "tpot_ms": {
+     "p50": 7.15,
+     "p90": 7.15,
+     "p99": 7.15
+    },
+    "throughput_tok_s": 132.0,
+    "throughput_per_round": [132.0],
+    "decode": {
+     "batch": 4,
+     "steps": 60,
+     "tok_s": 561.5,
+     "wall_ms_p50": 7.121,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.116608, 1.938975]
+   ]
+  },
+  {
+   "round": 1,
+   "backend": "holon_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 116.67,
+     "p90": 116.67,
+     "p99": 116.67
+    },
+    "tpot_ms": {
+     "p50": 7.15,
+     "p90": 7.15,
+     "p99": 7.15
+    },
+    "throughput_tok_s": 132.0,
+    "throughput_per_round": [132.0],
+    "decode": {
+     "batch": 4,
+     "steps": 60,
+     "tok_s": 561.6,
+     "wall_ms_p50": 7.118,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.116675, 1.938686]
+   ]
+  }
+ ]
+}
