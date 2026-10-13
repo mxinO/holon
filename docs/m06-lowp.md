@@ -1,435 +1,469 @@
 # M0.6 — FP8 (block), NVFP4 and MXFP4 checkpoints of Qwen3-8B and Qwen3-30B-A3B: design and implementation plan
 
-Status: **revision 1, draft for the challenge panel** (2026-10-13). Scope: plan §2 row M0.6. Builds on design §5.5
-(Scheme / Layout / QTensor), §5.6 (borrowed kernels), M0.1 (`kernels.ggml_cuda`, the judge's tiers and the q8_1
-emulator), M0.2 (`std.moe`, `linear_experts@1`, the stacking rule D7, `kernels.triton_experts` D8). Research behind
-it: the M0.6 research note (checkpoints, numerics, kernels per GPU class; local, not tracked), re-checked against
-source where cited below.
+Status: **revision 2, under review** (2026-10-13; revision 1 challenged by the three-reviewer panel, every finding
+mapped in §8; user decisions D-a…D-h applied). Scope: plan §2 row M0.6. Builds on design §5.5 (Scheme / Layout /
+QTensor), §5.6 (borrowed kernels), M0.1 (`kernels.ggml_cuda`, the judge's tiers, the q8_1 emulator), M0.2 (`std.moe`,
+`linear_experts@1`, the stacking rule D7, `kernels.triton_experts` D8), M0.4 (draft heads load through `Linear.adopt`).
+Research behind it: the M0.6 research note (local, not tracked), re-checked against source where cited.
 
 ## 1. Goal and acceptance
 
-Serve the low-precision HF checkpoints of Qwen3-8B (dense) and Qwen3-30B-A3B (MoE) — FP8 with 128×128 block scales,
-NVFP4 and MXFP4 — on consumer cards first (RTX 5080 / 5090 sm_120, RTX 4090 sm_89, RTX 3090 / A5000 sm_86), with the
-RTX PRO 6000 (sm_120) for what fits nowhere else. Acceptance:
+Serve low-precision checkpoints of Qwen3-8B (dense) and Qwen3-30B-A3B (MoE) — FP8 with 128×128 block scales, NVFP4,
+MXFP4 — on consumer cards first (RTX 5080 / 5090 sm_120, RTX 4090 sm_89; RTX 3090 / A5000 sm_86 for FP4), with W8 /
+W4 weights and **8-bit activations by default on every class** (D3). Two gates, each closed by the panel.
 
-1. **Targets load and serve** (D1): `Qwen/Qwen3-8B-FP8`, `nvidia/Qwen3-8B-NVFP4`, `RedHatAI/Qwen3-8B-NVFP4`,
-   `Yi30/Qwen3-8B-MXFP4`, `Qwen/Qwen3-30B-A3B-FP8`, `nvidia/Qwen3-30B-A3B-NVFP4`, `amd-quark/Qwen3-30B-A3B-MXFP4`,
-   through the existing `models/qwen3` and `models/qwen3_moe` with **no change to either model package**
-   (`git diff plugins/holon_plugins/models` empty). Each answers the M0.1 chat set sensibly.
-2. **Core diff:** the per-slice `adopt` of quantized stack slices only (§4.2, ≤ 20 lines), proven by a toy layout in
-   `core/tests/test_stacking.py`; denylist clean; core ≤ 6000 code lines (3324 today, `scripts/ci/check_core_loc.py`).
-3. **Lossless repack** (D6): for every quantized tensor of the five FP4 targets, gguf-py's dequantization of our
-   ggml blocks × the global scale equals `std.weights.hf`'s reference dequantization **bitwise** in fp32; for the two
-   8B NVFP4 files our blocks are **byte-equal** to llama.cpp's converter output at the vendored pin.
-4. **L0** for every new kernel path on sm_86, sm_89 and sm_120a against its emulated reference (§4.8), memcheck clean;
-   the reference dequantization equals the format owners' decoders (§4.8, D8).
-5. **L2** for each target: Tier A (CPU fp32, production source + reference kernels) under the 1e-4 sanity ceiling;
-   Tier B against the floor of the activation mode and path the kernel ran (D9), on the classes of §4.8's table;
-   every plant of §4.8 fails or passes as predicted there; quantization error vs the bf16 checkpoint reported per
-   format and per activation mode.
-6. **Memory:** on the RTX 5080 each 8B format serves a 32K-token context with bf16 KV at `max_seqs` 32 (§4.9); the
-   30B FP4 targets serve 32K on the RTX 4090; the 30B FP8 fit on the RTX 5090 is measured and recorded (≈ 10K tokens
-   predicted, no bar).
-7. **Speed** (D10), medians of repetitions 2–5 on both sides: FP4 pp512 and tg128 ≥ 0.8× llama-bench on the same
-   bytes (8B on rtx-5080, rtx-4090, rtx-a5000; 30B on rtx-4090 and rtx-5090); FP8 tg128 ≥ 0.8× llama-bench Q8_0 of
-   the same checkpoint (8B on rtx-5080 and rtx-4090), FP8 pp512 recorded against its prediction; serving vs
-   `llama-server` on the 5080 for the 8B NVFP4.
-8. **Locks** (rtx-5080: the three 8B targets of `Qwen`, `nvidia`, `Yi30`; rtx-4090: the same plus the 30B NVFP4 and
-   MXFP4), each snapshot run-identical over 3 fresh engines; graphs vs eager bounded on the 30B NVFP4 decode.
-9. **Reuse:** every existing lock (Qwen3-8B bf16 and GGUF, Qwen3-30B-A3B GGUF, Qwen3.8-27B GGUF) advances by
-   `holon propagate` with one approval covering all of them (qlinear@2, the `act_quant` fact, the ggml pin, D3/D6);
-   L2 passing; bf16 snapshots byte-identical.
+**Gate A — the ggml pin, the pure refactor, FP4 and FP8 loading.**
 
-Non-goals: checkpoint-faithful W4A4 with static input scales (CUTLASS / FlashInfer, §7); ModelOpt per-tensor FP8 and
-`MIXED_PRECISION`; weight-only (A16) FP4 kernels; gpt-oss; FP8 KV from checkpoint scales; Qwen3.5/3.8 low-precision
-builds.
+1. **Pin bump alone, first** (D7): `kernels.ggml_cuda` moves from llama.cpp `51ce9c11` to `cbe28bb3`; `vendor.sh
+   --check` passes; L0 for the 18 existing types on sm_86 / sm_89 / sm_120a, memcheck clean; every GGUF lock advances
+   by its own `propagate` (one approval), L2 passing; spot check Qwen3-8B Q4_K_M pp512 / tg128 on the RTX 5080 within
+   ±3% of M0.1's.
+2. **Pure refactor** (D2, D4, D5, D11): the core's unused `Dialect` / `Converter` / `SchemeImpl` deleted; the per-slice
+   `adopt` seam (≈ 8 lines) with its toy proof in `core/tests/test_stacking.py`; `qlinear@2`, `prepare`, `act_quant` in
+   std. `propagate` leaves **every existing snapshot byte-identical** (bf16, GGUF, M0.4's draft heads), L2 passing;
+   `git diff plugins/holon_plugins/models` empty; denylist clean; core ≤ 6000 code lines (3324 today).
+3. **Targets load and answer the M0.1 chat set** through `models/qwen3` / `models/qwen3_moe` unchanged (D1 roles):
+   `nvidia/Qwen3-8B-NVFP4`, `nvidia/Qwen3-30B-A3B-NVFP4`, `amd-quark/Qwen3-30B-A3B-MXFP4`, the GGUF
+   `Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE`; the fixtures `RedHatAI/Qwen3-8B-NVFP4` and `Yi30/Qwen3-8B-MXFP4`;
+   `Qwen/Qwen3-8B-FP8` and `Qwen/Qwen3-30B-A3B-FP8` load through the dialect and the reference provider (CPU). A GGUF
+   holding NVFP4 tensors is refused at load with a message naming the reason (D1).
+4. **Lossless repack:** for every quantized tensor of the five HF FP4 files, gguf-py's dequantization of our ggml
+   blocks × `scale2` equals `reference.py`'s by value in fp32; the two 8B NVFP4 files' blocks are byte-equal to the
+   pin's converter output.
+5. **L0** (`kernels.ggml_cuda`, sm_86 / sm_89 / sm_120a, memcheck clean): every spec × path × input dtype (bf16, f32)
+   against its declared mode's emulator (§4.8); reference dequantization equals the format owners' decoders (D10).
+6. **L2.** Tier A (CPU fp32) for every target and fixture, under the 1e-4 sanity ceiling; the 30B FP8 structural test.
+   Tier B at the default `a8` (W4A8, both paths) against the W4A8 floor: 8B NVFP4 (A5000, 5080), 30B NVFP4 and
+   `amd-quark` 30B MXFP4 (A5000, RTX PRO 6000), the GGUF MXFP4_MOE (A5000, 4090). Plants as predicted in §4.8.
+   Quantization error vs the bf16 checkpoint reported per format and mode.
+7. **W4A4 report** (opt-in `quant.act = a4`, sm_120): 8B NVFP4 and 8B MXFP4 scored against the W4A4-dynamic floor;
+   the near-threshold plant N9 passes as predicted (the documented blind spot); graphs vs eager bounded on the 5080.
+   **Pre-registered:** `a4` may become a default only if, on the real 8B files, the W4A4 floor's KL p99 ≤ 1.5× the
+   W4A8 floor's and its top-1 within 0.5 points — then escalated to the user. Predicted: not met (≈ 45×, §4.8).
+8. **Memory** (§4.9), bf16 KV, `max_seqs` 32, `memory_fraction` 0.9: RTX 5080 8B NVFP4 ≥ 32K KV tokens; RTX 4090
+   30B NVFP4 and the GGUF MXFP4_MOE ≥ 32K. Fallbacks named per row (0.98, or q8_0 KV); `amd-quark` (no lock) recorded.
+9. **Speed** (D9), medians of repetitions 2–5: pp512 and tg128 ≥ 0.8× llama-bench on the same bytes and the same
+   activation mode (llama.cpp forced to Q8 activations), for 8B NVFP4 (5080, 4090) and the 30B NVFP4 and GGUF
+   MXFP4_MOE (4090); 5090 recorded; llama.cpp's default (W4A4 on sm_120) reported beside; serving vs `llama-server`
+   on the 5080 for the 8B NVFP4.
+10. **Locks:** rtx-5080 8B NVFP4 (`nvidia`); rtx-4090 8B NVFP4, 30B NVFP4, 30B MXFP4_MOE (GGUF). Snapshots
+    run-identical ×3; graphs vs eager bounded on the 30B NVFP4 decode (4090).
+
+**Gate B — FP8 kernels.**
+
+11. **Bandwidth gate first:** per-shape microbenchmark (the 8B's 5 projection shapes, M = 1…16) of the W8A16 split-K
+    decode kernel on the 5080 and 4090: ≥ 75% of measured copy bandwidth on the summed bytes, or the kernel is
+    redesigned before step B2.
+12. **L0** for `kernels.triton_gemm` FP8 on sm_89 and sm_120a (dense and grouped, both modes), memcheck.
+13. **L2 Tier B**, 8B FP8 on rtx-5080 and rtx-4090: prefill W8A8 vs the W8A8 floor, decode W8A16 vs the A16 floor;
+    FP8 plants as predicted. The 30B FP8 loads with kernels on the RTX 5090 and its fit is recorded.
+14. **Speed:** 8B FP8 tg128 ≥ 0.8× llama-bench Q8_0 of the same checkpoint on the 5080 and 4090; pp512 recorded
+    against its prediction. **Memory:** 8B FP8 on the 5080 ≥ 32K KV tokens at 0.9 (34.3K predicted; fallback 0.98).
+15. **Locks:** 8B FP8 on rtx-5080 and rtx-4090, snapshots ×3.
+
+Non-goals: FP8 on sm_86 (plan §10, v1; if the W8A16 kernel happens to run there it is noted, nothing more);
+checkpoint-faithful static-scale W4A4 providers; GGUF NVFP4; ModelOpt per-tensor FP8 and `MIXED_PRECISION`; A16 FP4
+kernels; gpt-oss; FP8 KV from checkpoint scales; Qwen3.5/3.8 low-precision builds.
 
 ## 2. Starting point
 
-- **Checkpoints** (research note §1, headers read): every quantized Linear is `[out, in]` with all dimensions
-  multiples of 128; experts are per-expert 2-D tensors (`mlp.experts.{e}.{gate,up,down}_proj.*`); embeddings,
-  `lm_head` and routers are dense (bf16, or F32 in `Qwen/Qwen3-30B-A3B-FP8`). Parts per module:
-  - FP8 (`quant_method: fp8`): `weight` F8_E4M3 `[out, in]`, `weight_scale_inv` BF16 or F32 `[out/128, in/128]` —
-    a dequant *multiplier* despite its name; activations declared dynamic.
+- **Checkpoints** (research note §1, headers read): every quantized Linear is `[out, in]`, all dimensions multiples of
+  128; experts are per-expert 2-D tensors (`mlp.experts.{e}.{gate,up,down}_proj.*`); embeddings, `lm_head` and
+  routers are dense (bf16, or F32 in `Qwen/Qwen3-30B-A3B-FP8`). Parts per module:
+  - FP8 (`quant_method: fp8`): `weight` F8_E4M3 `[out, in]`, `weight_scale_inv` BF16 or F32 `[out/128, in/128]` (a
+    dequant multiplier despite its name); activations declared dynamic.
   - NVFP4: ModelOpt `weight` U8 `[out, in/2]`, `weight_scale` F8_E4M3 `[out, in/16]`, `weight_scale_2` F32 `[]`,
-    `input_scale` F32 `[]` (plus `k_scale`/`v_scale` = 1.0 on attention); compressed-tensors `weight_packed`,
-    `weight_scale`, and the **reciprocals** `weight_global_scale`, `input_global_scale` `[1]`.
-  - MXFP4: compressed-tensors `weight_packed` U8 `[out, in/2]`, `weight_scale` U8 (e8m0) `[out, in/32]`; Quark
-    `weight`, `weight_scale` with the same shapes (`amd-quark` 30B: experts only, attention bf16).
-  - Global scales are tied where layers fuse: ModelOpt 8B shares `weight_scale_2` and `input_scale` across q/k/v and
-    gate/up; the 30B's gate/up share `weight_scale_2` per expert (values differ across experts); the 30B's down
-    `input_scale` differs per expert (research note §1.2).
+    `input_scale` F32 `[]` (plus `k_scale`/`v_scale` = 1.0); compressed-tensors `weight_packed`, `weight_scale` and the
+    **reciprocals** `weight_global_scale`, `input_global_scale` `[1]`.
+  - MXFP4: compressed-tensors `weight_packed`, `weight_scale` U8 (e8m0) `[out, in/32]`; Quark `weight`,
+    `weight_scale`, same shapes (`amd-quark` 30B: experts only).
+  - ModelOpt 8B ties `weight_scale_2` across q/k/v and across gate/up; the 30B's experts carry one `weight_scale_2`
+    per expert and projection (gate/up equal per expert in the files read, not guaranteed).
 - **Holon today:**
-  - `qlinear@1` takes one `blocks` tensor (`std/holon_std/ops/kernels.py:8`); `Linear.adopt` stores
-    `q.parts["blocks"]` only (`std/holon_std/ops/units.py:90-95`); `ExpertLinear.adopt` refuses any parts other than
-    `{"blocks"}` (`std/holon_std/moe/units.py:109-115`). `linear_experts@1` already takes `parts` by role
+  - `qlinear@1` takes one `blocks` tensor (`std/holon_std/ops/kernels.py:8`); `Linear.adopt` keeps
+    `q.parts["blocks"]` (`std/holon_std/ops/units.py:90-95`); `ExpertLinear.adopt` refuses parts other than
+    `{"blocks"}` (`std/holon_std/moe/units.py:42-48`); `linear_experts@1` takes `parts` by role
     (`std/holon_std/moe/kernels.py:8-14`).
-  - A quantized tensor under a stacking rule is a load error (`core/holon/core/build.py:219-220`), the choice M0.2
-    D7 left to M0.6.
-  - `std.weights.hf` yields tensors one by one in file order (`std/holon_std/weights/hf/source.py:46-50`); it has no
-    notion of quantization. The core's `Dialect`, `Converter` and `SchemeImpl` (`core/holon/api/quant.py:55-79`) are
-    registered nowhere.
-  - `kernels.ggml_cuda` serves 18 types (`plugins/holon_plugins/kernels/ggml_cuda/plugin.py:33-35`; its paths below
-    are relative to that directory). The vendored
-    tree already has `GGML_TYPE_MXFP4 = 39` and `GGML_TYPE_NVFP4 = 40` (`vendor/ggml/include/ggml.h:429-430`), their
-    blocks (`vendor/ggml/src/ggml-common.h:214-226`), mmq / mmvq instances and the sm_120a build
-    (`extension.py:25`).
-- **The vendored ggml on sm_120, as patched today:**
-  - mmq takes its activation precision from `op_params[3]` (`vendor/ggml/src/ggml-cuda/mmq.cu:118-133`; the env
-    override is nulled at `:96`). Our shim zeroes `op_params` (`csrc/api.cu:58-71`), i.e. `GGML_PREC_UNDEFINED`,
-    which for NVFP4/MXFP4 on Blackwell means **native W4A4** (`mmq.cu:128-132`).
-  - Native W4A4 quantizes activations from **f32 only** (`quantize.cuh:29`), and our own patch asserts it
-    (`vendor.patch:46` → `mmq.cu:184`). Holon passes bf16 activations to gate/up and every dense `qlinear`, so a
-    W4A4 call there would **abort the process**; MoE down (f32 SwiGLU input) would silently run W4A4.
-  - W4A4 also allocates a per-row activation scale for NVFP4 (`mmq.cu:192-195`), which
-    `holon_ggml_workspace_bytes` does not size (`csrc/api.cu:138-145`).
-  - mmvq is always q8_1 (`mmvq.cu:49-50`): decode is W4A8 on every class.
-  - The vendored mmvq applies NVFP4 per-tensor / per-expert scales in its fused path (`x_scale`, `gate_scale`, one
-    f32 per expert; `mmvq.cu:669-675, 702-709, 1506-1516`).
-  - Upstream fixed MMQ out-of-bounds reads (`fc9ce6b9d`, 2026-10-08) and host configs ignoring the src1 precision
-    (`8a1a9b512`, 2026-10-09) after our pin `51ce9c11` (2026-10-06); the second is exactly the FP4-at-Q8 path on
-    Blackwell.
-- **Triton:** `fp8e4nv` is rejected below sm_89 (design §5.6); `kernels.triton_experts` is our bf16 grouped GEMM with
-  the D8 grid (`plugins/holon_plugins/kernels/triton_experts/kernel.py:34-83`).
+  - A quantized tensor under a stacking rule is a load error (`core/holon/core/build.py:219-220`): M0.2 D7's open
+    question.
+  - `std.weights.hf` yields tensors one by one (`std/holon_std/weights/hf/source.py:46-50`). The core's `Dialect`,
+    `Converter`, `SchemeImpl` (`core/holon/api/quant.py:55-79`) and their registries (`core/holon/api/ops.py:76-78`,
+    `core/holon/core/plugins.py:66-79`) are used by nothing.
+  - `kernels.ggml_cuda` (paths below relative to `plugins/holon_plugins/kernels/ggml_cuda/`) serves 18 types
+    (`plugin.py:33-35`); the vendored tree has `GGML_TYPE_MXFP4 = 39`, `GGML_TYPE_NVFP4 = 40`
+    (`vendor/ggml/include/ggml.h:429-430`), their blocks (`vendor/ggml/src/ggml-common.h:214-226`) and mmq / mmvq
+    instances, built for sm_120a (`extension.py:25`).
+- **The vendored ggml for FP4** (`vendor/ggml/src/ggml-cuda/`):
+  - mmq's activation precision comes from `op_params[3]` (`mmq.cu:118-133`; env override nulled at `:96`); our shim
+    zeroes `op_params` (`csrc/api.cu:58-71`) = `GGML_PREC_UNDEFINED` = **native W4A4 on Blackwell** for FP4
+    (`mmq.cu:128-132`).
+  - Native W4A4 quantizes from f32 only (`quantize.cuh:29`) and our patch asserts it (`vendor.patch:46` →
+    `mmq.cu:184`); it allocates a per-row activation scale for NVFP4 (`mmq.cu:192-195`) that our workspace formula
+    does not size (`csrc/api.cu:138-145`); its K loop steps 512 with no tail, so `in = 768` (30B down) reads past the
+    last row — llama.cpp pads every tensor allocation by one row's tail to 512 elements and zeroes it
+    (`ggml-cuda.cu:765, 914-916` at `cbe28bb3`). The plugin docstring's "no kernel reads past the blocks"
+    (`plugin.py:8-9`) is wrong for FP4.
+  - mmvq is always q8_1 (`mmvq.cu:49-50`) and applies NVFP4 per-tensor / per-expert scales in its fused path
+    (`x_scale`, `gate_scale`; `mmvq.cu:669-675, 702-709, 1506-1516`).
+  - Upstream fixed MMQ out-of-bounds reads (`fc9ce6b9d`) and host configs ignoring the src1 precision (`8a1a9b512`,
+    the FP4-at-Q8 path on Blackwell) after our pin.
+- **Triton:** `fp8e4nv` is rejected below sm_89 (design §5.6); `kernels.triton_experts` is our bf16 grouped GEMM
+  (`plugins/holon_plugins/kernels/triton_experts/kernel.py:34-83`).
 
 ## 3. Decisions
 
-**How references are chosen** (M0.2's rule): oracle = the format owner's decoding; kernel source = the best
-maintained implementation of the exact workload; bar = the engine users run for it on the card.
+**How references are chosen** (M0.2's rule): oracle = the format owner's decoding; kernel source = the best maintained
+implementation of the workload; bar = the engine users run for it on the card.
 
-- **D1 — Acceptance targets.** Official files where they exist; each dialect the targets need is exercised once:
+- **D1 — Targets and roles** (D-g).
 
-  | | Qwen3-8B | Qwen3-30B-A3B |
+  | file | format, dialect | role |
   |---|---|---|
-  | FP8 block | `Qwen/Qwen3-8B-FP8` (8.79 GiB) | `Qwen/Qwen3-30B-A3B-FP8` (30.22 GiB on disk, ≈ 29.1 loaded: F32 embed/head cast to bf16) |
-  | NVFP4 | `nvidia/Qwen3-8B-NVFP4` (ModelOpt, 5.96) and `RedHatAI/Qwen3-8B-NVFP4` (compressed-tensors) | `nvidia/Qwen3-30B-A3B-NVFP4` (ModelOpt, 16.85) |
-  | MXFP4 | `Yi30/Qwen3-8B-MXFP4` (compressed-tensors, W4A4, 5.76) | `amd-quark/Qwen3-30B-A3B-MXFP4` (Quark, experts only, 17.22) |
+  | `nvidia/Qwen3-8B-NVFP4` (5.96 GiB) | NVFP4, ModelOpt | Tier A + B, W4A4 report, bars, locks 5080 + 4090 |
+  | `nvidia/Qwen3-30B-A3B-NVFP4` (16.85) | NVFP4, ModelOpt | Tier A + B, bars, lock 4090 |
+  | `Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE` GGUF (experts MXFP4, rest Q8_0; e.g. `Face314/…-MXFP4_MOE`, fixed in step A0) | ggml | Tier A + B, bars (same file), lock 4090 |
+  | `amd-quark/Qwen3-30B-A3B-MXFP4` (17.22) | MXFP4, Quark | Tier A + B, no lock |
+  | `RedHatAI/Qwen3-8B-NVFP4` | NVFP4, compressed-tensors | fixture: Tier A only |
+  | `Yi30/Qwen3-8B-MXFP4` (5.76; community test upload) | MXFP4, compressed-tensors | fixture: Tier A + W4A4 report only |
+  | `Qwen/Qwen3-8B-FP8` (8.79) | FP8, `fp8` | Gate A: Tier A; Gate B: Tier B, bars, locks 5080 + 4090 |
+  | `Qwen/Qwen3-30B-A3B-FP8` (30.22 on disk, ≈ 29.1 loaded) | FP8, `fp8` | structural + Tier A; fit on the 5090 (Gate B) |
 
-  No MXFP4 Qwen3 comes from Qwen, NVIDIA or OpenAI: `Yi30` is a community test upload (a format fixture, not a
-  quality reference) and `amd-quark` is AMD's. Compressed-tensors FP8-block (`RedHatAI/Qwen3-8B-FP8-block`) is covered
-  by the tiny-model fixtures only. **For the user:** keep these, or move the MXFP4 targets to AMD's official
-  Qwen3.5/3.8 builds after their low-precision recipes exist (§7).
-- **D2 — Dialects live in the weight source; one source layout per format.** `std.weights.hf` reads
-  `quantization_config` (`config.json`, else `hf_quant_config.json`, which then joins the identity hash) and picks one
-  of four internal dialects by `quant_method` / `format`: `fp8` (DeepSeek/Qwen), compressed-tensors
-  (`float-quantized` block, `nvfp4-pack-quantized`, `mxfp4-pack-quantized`), `modelopt` (`quant_algo: NVFP4`), `quark`
-  (fp4 group 32, e8m0). Anything else is a load error naming it. It yields **one `QTensor` per quantized module under
-  `<module>.weight`**, so the model plugins' existing weight rules map it unchanged, with parts normalized:
+  No MXFP4 Qwen3 comes from Qwen, NVIDIA or OpenAI; AMD's official MXFP4 line targets Qwen3.5/3.8 (§7). GGUF NVFP4
+  files (per-tensor scales as separate `<name>.scale` tensors) are refused by `std.weights.gguf` with that reason.
+- **D2 — Dialects inside the weight source, one module each** (`std/holon_std/weights/hf/quant/{fp8,compressed_tensors,
+  modelopt,quark}.py`). `std.weights.hf` reads `quantization_config` (`config.json`, else `hf_quant_config.json`, which
+  then joins the identity hash), picks the dialect by `quant_method` / `format` (anything else: a load error naming
+  it), reads every shard header first and yields **one `QTensor` per quantized module under `<module>.weight`**, so
+  the recipes' rules map it unchanged. Normalized parts:
 
-  | scheme (`elem`) | parts (per 2-D weight) | normalization |
+  | scheme `elem` | parts | normalization |
   |---|---|---|
-  | `fp8_e4m3` (scale `fp32`, 128×128) | `weight` u8 (e4m3 bits) `[out, in]`, `scale` f32 `[out/128, in/128]` | BF16 scales upcast (exact) |
-  | `nvfp4` (e4m3 per 16; f32 per tensor, level 2) | `weight` u8 `[out, in/2]`, `scale` u8 (e4m3 bits) `[out, in/16]`, `scale2` f32 `[]`, `input_scale` f32 `[]` if present | compressed-tensors' globals inverted at load, `1/x` in fp32, as llama.cpp's converter does (`conversion/base.py:1186-1209` at `cbe28bb3`); ≤ 0.5 ulp from CT's own division |
-  | `mxfp4` (e8m0 per 32) | `weight` u8 `[out, in/2]`, `scale` u8 `[out, in/32]` | none |
+  | `fp8_e4m3` | `weight` u8 (e4m3 bits) `[out, in]`, `scale` f32 `[out/128, in/128]` | BF16 scales upcast (exact) |
+  | `nvfp4` | `weight` u8 `[out, in/2]`, `scale` u8 (e4m3 bits) `[out, in/16]`, `scale2` f32 `[]` | compressed-tensors' global inverted, `1/x` in fp32 as llama.cpp's converter (`conversion/base.py:1186-1209` at `cbe28bb3`): ≤ 1 ulp from CT's division |
+  | `mxfp4` | `weight` u8 `[out, in/2]`, `scale` u8 `[out, in/32]` | none |
 
-  Layout name `hf`; the layout's `act` param records the declared activation scheme (D3). ModelOpt's
-  `k_scale`/`v_scale` must be 1.0 and are dropped (any other value: a load error; the KV format is the deployment's,
-  M0.3 D6). The source reads every shard's header first and yields a module's parts together (they may sit in
-  different shards). Why not registered dialect plugins: a weight source is built from a path alone
-  (`core/holon/core/assembly.py:26`), so reaching a registry would be a core seam with no second consumer. The core's
-  unused `Dialect` / `Converter` / `SchemeImpl` stay untouched (§7).
-- **D3 — Contracts.** `std.ops` replaces `qlinear@1` by **`qlinear@2`**: instance `(x [T, in], parts) → y [T, out]`,
-  `parts` the unit's stored parts by role as in `linear_experts@1` (breaker pays: `kernels.ggml_cuda` and
-  `testing.ref_kernels` move to @2 in the same change). Both ops gain, additively:
-  - an optional instance method **`prepare(parts) → parts`**, called once by the unit after binding; later calls
-    receive its result. It is the design §5.5 converter, owned by the plugin that owns the destination layout, and must
-    be lossless (L0, acceptance 3);
-  - a fact **`act_quant` ∈ {`a4`, `a8`, `a16`}**: the lowest activation precision the kernel may use. The unit sets it
-    to the layout's declared value — W4A4 checkpoints `a4`, W8A8 `a8`, ggml layouts `a8`, dense `a16`; weight-only FP4
-    files `a8`, as llama.cpp's precision policy runs them (`src/llama-model.cpp:1270` at `cbe28bb3`) — raised, never
-    lowered, by the deployment's plugin option `quant.act` (`a8` | `a16`), as `kv.format` is read
-    (`std/holon_std/mixers/gqa/units.py:73-79`). `qembedding@1` is unchanged.
-
-  A provider registers **one `KernelSpec` per activation mode**; `config["act"]` names the mode (`bf16`, `fp8_g128`,
-  `q8_1`, `fp4`) and is recorded in the lock's site entry (`core/holon/core/build.py:67-68`), so the judge reads which
-  floor applies. Rejected: one spec choosing its mode from the SM inside the instance — the lock would not show the
-  numerics.
-- **D4 — Merges by shape.** `Linear.merge` and `ExpertLinear.merge` concatenate every part whose leading (per expert:
-  second) dimension is `out / g` for one `g` dividing every unit's `out` (weights, block scales); per-tensor and
-  per-expert scalars (`scale2`, `input_scale`) must be bit-equal across the merged units, else the merge is refused —
-  dense units stay separate (`std/holon_std/ffn/units.py:23-30`, `gqa/units.py:146-147`), MoE gate/up is a startup
-  error naming the layer (M0.2 D4). Every target satisfies the ties (checked from headers and values in step 0).
-- **D5 — Per-expert stacking: per-slice `adopt`** (closes M0.2 D7's question). A quantized slice under a stacking rule
-  goes to the owning unit's `adopt(ctx, name, q, index=e)`; the core keeps the bookkeeping it has. Rejected: the
-  source grouping slices into a 3-D `QTensor` — it would have to guess the stack from names (`experts.{e}`) that the
-  recipe already declares with `stack="e"`, and it would hold a whole stack in host memory.
-- **D6 — FP4 runs on `kernels.ggml_cuda` through a lossless repack** (zero new kernel family; the same code as the
-  llama.cpp bar):
-  - `TYPES` gains `"mxfp4": 39, "nvfp4": 40`; the provider's `prepare` repacks `nvfp4/hf` and `mxfp4/hf` into ggml
-    blocks (`blocks` `[out, row_bytes]`, stacks `[E·out, row_bytes]`) and keeps `scale2` (§4.5).
-  - The NVFP4 global scale is applied **in f32 before SwiGLU** on every path: mmvq through the vendored fused
-    `x_scale` / `gate_scale`; mmq by our post-multiply (dense: folded into the existing f32 → bf16 copy; experts: our
-    f32 SwiGLU kernel takes per-row gate/up scales gathered by expert id, and down multiplies its f32 output by
-    `scale2[ids]`).
-  - Activation modes are explicit: the shim sets `op_params[3]` from the spec (`GGML_PREC_Q8` = 30 or `GGML_PREC_Q4`
-    = 40) and never relies on the zero default; the `fp4` spec (sm_120 only, FP4 layouts with `act_quant = a4`)
-    casts bf16 activations to f32 before mmq (exact; the vendored quantizer reads f32 only) and its workspace adds the
-    per-row scale. mmvq stays q8_1 in both specs.
-  - The vendored pin moves from `51ce9c11` to `cbe28bb3` (2026-10-13), which contains `fc9ce6b9d` and `8a1a9b512`;
-    `vendor.patch` regenerated, `vendor.sh --check`. The same commit is the llama-bench baseline of D10. Rejected:
-    cherry-picking ≈ 450 lines of upstream into our patch file.
-  - Rejected for M0.6: a W4A16 (Marlin-style) provider. On GeForce, int8 MMA runs ≈ 4× bf16 (design §5.6), so W4A8
-    prefill should beat W4A16 at equal bytes; decode is bandwidth-bound either way; W4A8's activation noise is judged
-    exactly as for GGUF.
-- **D7 — FP8 runs on our own Triton**, in `kernels.triton_experts` renamed **`kernels.triton_gemm`** (no lock names it;
-  one module holds the bf16 grouped GEMM, an FP8 grouped path on the same D8 grid and an FP8 dense GEMM, sharing one
-  FP8 K-loop and one activation-quantization kernel). Two specs per op:
-  - `fp8_g128` (sm ≥ 89): per-token, per-128-column e4m3 activations (`a_s = max(amax, 1e-10)/448`), `tl.dot` of e4m3
-    tiles with f32 accumulation, `a_s · s_w` applied per 128-K step — the DeepSeek-V3 recipe, as SGLang's / vLLM's
-    `_w8a8_triton_block_scaled_mm` and FreeToken's `fp8_block_linear.py` (studied, not copied);
-  - `bf16` (sm ≥ 80): weights read as u8 and decoded to bf16 exactly by bit operations (e4m3 ⊂ bf16, subnormals
-    included), bf16 × bf16 `tl.dot`, the block scale applied per 128-K step in f32.
-  On sm_86 only `bf16` exists; on sm_89/120 `fp8_g128` wins by priority unless `quant.act = a16`. **Scope change
-  against plan §10** (FP8 W8A16 on sm_86 was v1): it is the same kernel with a different operand path, and the A5000
-  is the L2 host — for the user's approval. Not vendored: the borrowable kernels are ≈ 130 lines inside files that
-  import half of vLLM, and none has a W8A16 path. CUTLASS sm120 blockwise (87b / 87c) is the later performance step.
-- **D8 — Reference dequantization** (`std/holon_std/weights/hf/reference.py`, `[reference]` in the manifest so its
-  hash pins the oracle): FP8 `q · s`; NVFP4 `e2m1(code) · e4m3(scale) · scale2`, low nibble = even element (ModelOpt
-  `8101d128` `modelopt/torch/quantization/qtensor/nvfp4_tensor.py:322-326, 356-357`); MXFP4 `e2m1(code) · 2^(e − 127)`
-  (OCP MX v1.0). Cross-checked in step 1, fp32, per tensor of every target: transformers' `Fp8Dequantize`
-  (`integrations/finegrained_fp8.py`, the judge's 5.6.0.dev0) bitwise; compressed-tensors' `NVFP4PackedCompressor` /
-  `MXFP4PackedCompressor` (0.17.0) within 1 ulp; **ModelOpt NVFP4 has no transformers oracle**, so its files are
-  checked against ModelOpt's own `NVFP4QTensor.dequantize` (test-only, within 1 ulp: it forms `scale·scale2` first)
-  and, independently, against gguf-py's NVFP4 dequantization of llama.cpp's converter output × `weight_scale_2`
-  (bitwise); Quark MXFP4 against gguf-py on llama.cpp's `repack_mxfp4_blocks` (bitwise).
-- **D9 — One floor per activation mode** (research note §4 item 4), all HF bf16 on the dequantized weights with the
-  M0.2 MoE mirror, the mode emulated on every quantized linear and expert stack: **A16** (none); **W8A8** (e4m3 per
-  token per 128); **W4A8** (the existing q8_1 emulator, per path); **W4A4-dynamic** (ggml's Blackwell quantizer:
-  NVFP4 per-row `amax/(6·448)` and a UE4M3 per 16 chosen among 5 codes by squared error, `quantize.cu:199, 250-290`;
-  MXFP4 e8m0 per 32 with round-to-nearest `log2`, `:122-140`); **W4A4-static** (ModelOpt's `input_scale`, NVFP4 only;
-  information: no provider). A run is judged against the floor of the mode and path every quantized call took,
-  counted per instance as M0.2's paths; a mismatch fails the verdict before scoring.
-- **D10 — Bars are llama.cpp's, on the same bytes where a format exists.** FP4: GGUFs from the same HF files — NVFP4
-  by the pin's `convert_hf_to_gguf.py`; MXFP4 (which the pin's converter does not take for Qwen3) written from our
-  repack by a bench tool, its blocks byte-equal to the pin's `repack_mxfp4_blocks` — run by llama-bench at the pin.
-  llama.cpp defaults to W4A4 mmq on Blackwell for these types, as our `a4` targets do. FP8: llama.cpp has no FP8
-  type; the comparator is its Q8_0 of the same checkpoint (`--outtype q8_0`), the nearest bytes (8.5 vs ≈ 8.0 bits);
-  the 30B FP8 has none (Q8_0 does not fit 32 GB with any KV).
+  Layout name `hf`; param `declared_act` (the checkpoint's activation scheme, for reports only). Dropped at load:
+  input scales (no provider reads them; the judge reads them from the checkpoint) and ModelOpt `k_scale`/`v_scale`
+  (must be 1.0, else a load error). Load-time asserts: no NVFP4 scale byte has its sign bit set or is 0x7F / 0xFF; no
+  FP8 weight byte is 0x7F / 0xFF. **Extraction trigger** (recorded): the dialects move to their own plugins, with a
+  core seam to reach them, when a second weight source needs them or when dialect churn pushes `std.weights.hf`
+  approvals toward plan §9's > 3 / week.
+- **D3 — Activation precision: `a8` by default everywhere; `a4` opt-in** (D-b). A fact `act_quant` ∈ {`a4`, `a8`,
+  `a16`} on `qlinear@2` and `linear_experts@1` sites: the lowest activation precision the kernel may use. Default `a8`
+  for every quantized layout (GGUF included), `a16` for dense; the plugin option `quant.act` (`a4` | `a8` | `a16`,
+  read as `kv.format` is, `std/holon_std/mixers/gqa/units.py:73-79`) sets it explicitly, lowering included. A provider
+  registers **one `KernelSpec` per mode**, and `config["act"]` maps each of its paths to the mode it computes (e.g.
+  ggml default `{"mmvq": "q8_1", "mmq": "q8_1"}`, opt-in `{"mmvq": "q8_1", "mmq": "fp4"}`), recorded in the lock's
+  site entry (`core/holon/core/build.py:67-68`); the judge picks floors from it. sm_120 kernels are scored at `a8`
+  against the W4A8 floor; W4A4 is a report (acceptance 7).
+- **D4 — Contracts.** `qlinear@1` → **`qlinear@2`**: instance `(x [T, in], parts) → y [T, out]`, `parts` by role as
+  `linear_experts@1` (breaker pays: `kernels.ggml_cuda`, `testing.ref_kernels` move in the same change). Both ops gain
+  an optional instance method **`prepare(q: QTensor) → QTensor`** (D-d): called once by the unit after binding; returns
+  the destination layout (e.g. `Layout(Scheme("ggml.nvfp4"), "gguf.native")` with parts `{blocks, scale2}`); must not
+  mutate its input (a tied head reads the embedding's parts); lossless (acceptance 4). The unit swaps `weight` to the
+  prepared primary part and drops the source parts, so one tensor or stack is transient. M0.4's draft-head linears
+  load through the same `Linear.adopt` and are covered.
+- **D5 — Merges by shape.** `Linear.merge` / `ExpertLinear.merge` concatenate every part whose leading (per expert:
+  second) dimension is `out / g` for one `g` dividing every unit's `out`. Dense: `scale2` must be bit-equal, else the
+  units stay separate (`std/holon_std/ffn/units.py:23-30`, `std/holon_std/mixers/gqa/units.py:146-147`). MoE gate/up:
+  `scale2` is carried per expert and half as `[E, 2]` (mmvq's `gate_scale` / `x_scale`, our SwiGLU's two scales).
+- **D6 — Per-expert stacking: per-slice `adopt`** (D-e, closes M0.2 D7). In `_fill_slice`, after the range and
+  duplicate checks, a `QTensor` with a transform is an error, else `adopt(ctx, leaf, q, index=index)`; units keep dim
+  0 = stack length while loading (the repack to `[E·out, row_bytes]` is `prepare`'s). Rejected: the source grouping
+  slices — it would guess the stack from names the recipe already declares (`stack="e"`) and hold it in host memory.
+- **D7 — The ggml pin moves to `cbe28bb3` as its own first step** (D-a): contains `fc9ce6b9d` and `8a1a9b512`; the
+  same commit is the llama-bench baseline. Rejected: cherry-picking ≈ 450 upstream lines into `vendor.patch`.
+- **D8 — FP4 on `kernels.ggml_cuda` through a lossless repack.** `TYPES` gains `mxfp4` / `nvfp4` for the layouts
+  `prepare` produces and for GGUF MXFP4; `prepare` repacks `nvfp4/hf` / `mxfp4/hf` (llama.cpp's `_nvfp4_pack`,
+  `repack_mxfp4_blocks`, our code) and, for every FP4 tensor or stack, appends a zeroed tail of one row padded to 512
+  elements (llama.cpp's allocation rule; ≤ 1 row, negligible). `scale2` is applied in f32 before SwiGLU on every path
+  (§4.5). The shim sets `op_params[3]` from the spec and reads back the precision mmq actually used (a mismatch
+  raises). The opt-in `fp4` spec reads bf16 activations through a `vendor.patch` extension of the FP4 quantizers (as
+  M0.1 did for q8_1) rather than an f32 copy. Rejected for M0.6: a W4A16 provider (W4A8 prefill uses int8 MMA, ≈ 4×
+  bf16 on GeForce, design §5.6).
+- **D9 — Bars on the same bytes and mode.** FP4: GGUFs from the same HF files (NVFP4 by the pin's converter; MXFP4 —
+  which the pin's converter does not take for Qwen3 — by `bench/hf_to_gguf.py` from our repack, byte-equal to
+  `repack_mxfp4_blocks`), and the MXFP4_MOE GGUF itself; llama-bench at the pin with `GGML_CUDA_MMQ_PREC=q8`
+  (`mmq.cu:96` upstream) so both sides run W4A8; its default (W4A4 on sm_120) reported beside. FP8: llama.cpp has no
+  FP8 type; the comparator is its Q8_0 of the same checkpoint (`--outtype q8_0`).
+- **D10 — Reference dequantization** (`std/holon_std/weights/hf/reference.py`, `[reference]` in the manifest): FP8
+  `q · s`; NVFP4 `(e2m1(code) · e4m3(scale)) · scale2`, low nibble = even element (ModelOpt `8101d128`
+  `nvfp4_tensor.py:322-326`, packing `:338`); MXFP4 `e2m1(code) · 2^(e − 127)` (OCP MX v1.0). Step A2 cross-checks
+  every target tensor, fp32 outputs, compared by value (signed zeros equal): transformers' `Fp8Dequantize`
+  (`integrations/finegrained_fp8.py`, the judge's 5.6.0.dev0) exact; compressed-tensors' `NVFP4PackedCompressor` ≤ 2
+  ulp, `MXFP4PackedCompressor` exact; ModelOpt NVFP4 (no transformers oracle) against ModelOpt's
+  `NVFP4QTensor.dequantize` ≤ 1 ulp (test-only) and against gguf-py on the pin converter's bytes × `weight_scale_2`
+  exact; Quark MXFP4 (its own packer reorders, no installable oracle) against gguf-py on `repack_mxfp4_blocks` exact,
+  plus plant M3.
+- **D11 — Delete the unused core quant registries now** (D-c): `SchemeImpl`, `Converter`, `Dialect`
+  (`api/quant.py:55-79`), their registry fields and imports (`api/ops.py:14, 76-78`), `_DECLARED` entries and fields
+  (`core/plugins.py:66-79`), exports (`api/__init__.py:47, 69-75`). `Scale`, `Scheme`, `Layout`, `QTensor` stay.
+- **D12 — FP8 on our own Triton, Gate B** (D-a, D-f). `kernels.triton_experts` is renamed `kernels.triton_gemm` in
+  Gate B (no lock names it). One spec on sm ≥ 89, modes per path: **decode (M ≤ 16): W8A16 split-K** — u8 weights
+  decoded to bf16 exactly by bit operations, bf16 activations, the block scale per 128-K step in f32; **prefill
+  (M > 16): W8A8** — per-token, per-128-column e4m3 activations (`a_s = max(amax, 1e-10)/448`, `x / a_s` by IEEE
+  division `tl.math.div_rn`, clamped to ±448), e4m3 `tl.dot` with f32 accumulation, `a_s · s_w` per K step; grouped
+  experts on D8's grid. The DeepSeek-V3 recipe as SGLang / vLLM `_w8a8_triton_block_scaled_mm` and FreeToken
+  `fp8_block_linear.py` implement it (studied, not copied: the borrowable code sits in files importing half of
+  vLLM). `quant.act = a16` selects W8A16 on both paths. CUTLASS sm120 blockwise is the later prefill step.
 
 ## 4. Design
 
 ### 4.1 Packages
 
-| package | change |
-|---|---|
-| `core/holon` | per-slice `adopt` of quantized stack slices (§4.2) |
-| `std/holon_std/weights/hf` | `quant.py`: the four dialects (D2); `reference.py`: reference dequantization (D8); grouped yield, identity incl. `hf_quant_config.json` |
-| `std/holon_std/ops` | `qlinear@2`; `Linear` keeps parts, merges by shape (D4), `act_quant`, calls `prepare` |
-| `std/holon_std/moe` | `ExpertLinear`: parts, per-slice adopt (D5), merges by shape, `act_quant`, `prepare`; contract text |
-| `plugins/holon_plugins/kernels/ggml_cuda` | FP4 types, `prepare` repack, `scale2` on every path, two activation specs, workspace, pin `cbe28bb3` (`vendor.sh`, `vendor.patch`, `SHA256SUMS`, `[provenance]`, `THIRD_PARTY_NOTICES.md`) |
-| `plugins/holon_plugins/kernels/triton_gemm` | renamed from `triton_experts`; FP8 dense + grouped, act quant, pinned configs per class (D7) |
-| `testing` | reference providers for `fp8_e4m3/hf`, `nvfp4/hf`, `mxfp4/hf` (via `reference.py`); tiny Qwen3 / Qwen3-MoE fixtures written in each dialect |
-| `judge` | HF-quant name map and golden, gates, activation emulators (D9), floors, mode check, plants |
-| `bench` | `hf_to_gguf.py` (MXFP4 GGUF from our repack, D10) |
+| gate | package | change |
+|---|---|---|
+| A0 | `plugins/holon_plugins/kernels/ggml_cuda` | pin `cbe28bb3`: `vendor.sh`, regenerated `vendor.patch`, `SHA256SUMS`, `[provenance]`, `THIRD_PARTY_NOTICES.md` |
+| A1 | `core/holon` | D11 deletions; per-slice `adopt` (§4.2) |
+| A1 | `std/holon_std/ops`, `std/holon_std/moe` | `qlinear@2`, `prepare`, `act_quant`, parts, merges by shape (D4, D5); `testing.ref_kernels` @2 |
+| A2 | `std/holon_std/weights/hf` | `quant/` dialects, `reference.py`, grouped yield; `std/holon_std/weights/gguf`: NVFP4 refusal |
+| A3 | `plugins/holon_plugins/kernels/ggml_cuda` | FP4 types, `prepare`, `scale2` paths, two specs, read-back, bf16 FP4 quantizer patch, workspace, docstring |
+| A | `testing`, `judge`, `bench` | reference providers for the `hf` layouts; tiny fixtures per dialect; HF-quant map, goldens, emulators, floors, mode check, plants; `hf_to_gguf.py` |
+| B | `plugins/holon_plugins/kernels/triton_gemm` | rename; FP8 act quant, W8A16 split-K decode, W8A8 prefill, grouped; pinned configs |
 
-### 4.2 Core seam
+### 4.2 Core
 
 | Seam | Today | M0.6 |
 |---|---|---|
-| Quantized stack slices | `_fill_slice` raises for a `QTensor` (`build.py:219-220`) | a `QTensor` under a stacking rule goes to the owning unit's **`adopt(ctx, leaf, q, index=e)`** (False → the existing "cannot read layout" error). The core reads the stack length from the meta parameter at the first slice (the unit may then store a different shape, e.g. ggml's `[E·out, row_bytes]`), and keeps "each index once", "in range", "not both whole and sliced" and "all slices present" (`build.py:245-281`). A unit storing slices must leave its parameter non-meta (the existing "parameters not loaded" check) |
+| Quantized stack slices | `_fill_slice` raises for a `QTensor` (`build.py:219-220`) | after the range and "filled twice" checks: transform → error; else `adopt(ctx, leaf, q, index=index)`, False → the existing "cannot read layout" error. The rest of the bookkeeping is unchanged (`build.py:245-281`) |
+| Quant registries | `Dialect` / `Converter` / `SchemeImpl`, unused | deleted (D11) |
 
-Generality: the core passes an index and a `QTensor` it never opens; no format, model or MoE word. Proof in
-`core/tests/test_stacking.py`: a toy two-part layout (int8 rows + f32 row scales) adopted slice by slice into a toy
-stacked unit and read back; out of range, twice, missing, whole-then-sliced and a refusing unit are load errors.
-Existing units' `adopt` is called without `index` as today. M0.4 also changes the core: M0.6's change rebases onto it
-(parallel-tracks rule).
+≈ +8 / −35 lines. The core passes an index and a `QTensor` it never opens. Toy proof in `core/tests/test_stacking.py`:
+a two-part layout (int8 rows + f32 row scales) adopted slice by slice by a toy stacked unit and read back; out of
+range, twice, missing, whole-then-sliced, a transform and a refusing unit are load errors. Sequencing (D-h): M0.4
+(`<user>/m04-spec`, which changes `build.py`, `load_weights` and `api/__init__.py`) merges to `main` first; Gate A's
+core change rebases onto it, and its propagate runs after.
 
-### 4.3 The HF weight source
+### 4.3 Units
 
-`HFSafetensors.tensors()` (`source.py:46-50`) becomes: read all shard headers; if `quantization_config` is present,
-the dialect (D2) groups each quantized module's tensors (FP8: `weight` F8_E4M3 + `weight_scale_inv` | `weight_scale`;
-NVFP4: `weight`|`weight_packed` + `weight_scale` + `weight_scale_2`|`weight_global_scale` [+ input scale]; MXFP4:
-`weight`|`weight_packed` + U8 `weight_scale`) and cross-checks the config (every module it declares quantized has its
-parts; ignored ones are dense); yield order: dense tensors and modules in shard order. Each part is read once
-(`safe_open` handles kept per shard). ≈ 200 lines with the dialects.
-
-### 4.4 Units
-
-- `_Quantized` (`std/holon_std/ops/units.py:51-65`) gains `act_quant` (qlinear only) and, after binding, `parts =
-  kernel.prepare(parts)` when the instance defines it; calls pass `parts`. `Linear` keeps `self.parts` with `weight`
-  holding the primary part (so the meta check and the GGUF path are unchanged: ggml layouts have `blocks` only).
-  `Embedding` / `LMHead` (dense in every target) pass `{"blocks": …}` for GGUF.
+- `_Quantized` (`std/holon_std/ops/units.py:51-65`): facts gain `act_quant` (qlinear only); after binding, `q =
+  kernel.prepare(q)` when defined; calls pass the parts. `Linear` keeps the parts, `weight` holding the primary one
+  (GGUF: `blocks`, unchanged). `Embedding` / `LMHead` pass `{"blocks": …}` for GGUF.
 - `ExpertLinear`: `adopt(…, index)` materializes each part as `[E, *slice_part]` on the first slice and copies slice
-  `e` in place; a 2-D whole-stack adopt (GGUF) is unchanged. `merge` views parts as `[E, rows, …]` (D4); `bind_kernels`
-  adds `act_quant` and calls `prepare`.
-- The judge's structural test (M0.2) extends to parts: every stacked slice's dequantization equals the checkpoint
-  slice's, bitwise, after loading (so after `prepare`).
+  `e` in place; whole-stack GGUF adopt unchanged; `merge` per D5; `bind_kernels` adds `act_quant`, calls `prepare`.
+- The judge's structural test (M0.2) compares every stacked slice's dequantization after loading with the checkpoint
+  slice's, by value.
+
+### 4.4 HF weight source
+
+Read all headers; the dialect groups each module's tensors (FP8 `weight` + `weight_scale_inv` | `weight_scale`; NVFP4
+`weight` | `weight_packed` + `weight_scale` + `weight_scale_2` | `weight_global_scale`; MXFP4 `weight` |
+`weight_packed` + U8 `weight_scale`) and checks the config (declared-quantized modules have their parts, ignored ones
+are dense); yields dense tensors and modules in shard order, each part read once (`safe_open` handles per shard).
 
 ### 4.5 `kernels.ggml_cuda` for FP4
 
-- **Repack** (`prepare`, on the device, one tensor or one merged stack at a time — ≤ 230 MB transient for a 30B
-  gate/up stack): NVFP4: per 64 elements `{4 × e4m3 scale bytes (sign bit cleared), 32 bytes: element j in the low and
-  j + 8 in the high nibble of each 16-element sub-block}` — llama.cpp's `_nvfp4_pack` (`conversion/base.py:996-1018`
-  at `cbe28bb3`); ggml decodes the scale ×0.5 against a doubled value table, so the value is unchanged. MXFP4: per 32
-  `{e8m0 byte, 16 bytes: element j low, j + 16 high}` — `repack_mxfp4_blocks` (`:917-951`). Our code, following
-  both; `in % 256 = 0` holds for every target shape (`plugin.py:162-176` support checks unchanged).
-- **Specs:** `q8_1` (every class, priority 10; every supported type with `act_quant` ∈ {`a4`, `a8`}) and `fp4`
-  (`sms = {120}`, priority 11; NVFP4 / MXFP4 with `act_quant = a4`). `config["act"]` as D3.
-- **C API** (`csrc/api.cu`, ours): `mmq` / `mmq_id` take the precision and set `dst.op_params[3]`;
-  `mmvq` / `mmvq_id` take optional `x_scale` / `gate_scale` (f32, 1 or E values) into the vendored fusion args;
-  `mmq_schedule` takes the precision (the host config differs for FP4 at Q4 vs Q8); the workspace adds `rows` f32 for
-  the NVFP4 activation scale for every instance (one size per workspace name, `build.py:93-100`); our f32 SwiGLU
-  takes optional per-row gate/up scales.
-- **NVFP4 down** on mmq: `y *= scale2[ids][..., None]` (device gather, graph-safe); gate/up: inside our SwiGLU.
-- Each instance counts its calls per (path, mode) for the judge (M0.2's counters).
+- **Repack** (`prepare`, on the device; ≤ 230 MB transient for a 30B gate/up stack): NVFP4 per 64 elements `{4
+  e4m3 scale bytes, 32 bytes with element j low and j + 8 high per 16-element sub-block}` (`conversion/base.py:996-1018`
+  at `cbe28bb3`; ggml decodes the scale ×0.5 against a doubled table, same value); MXFP4 per 32 `{e8m0, 16 bytes,
+  j low, j + 16 high}` (`:917-951`); then the zeroed 512-element tail (D8). GGUF MXFP4 tensors get the tail only.
+- **Specs:** `q8_1` (every class, priority 10, every type, `act_quant` ∈ {`a4`, `a8`}); `fp4` (sm_120, priority 11,
+  FP4 types, `act_quant = a4`; mmq W4A4-dynamic, mmvq q8_1).
+- **`scale2`:** mmvq via the vendored fused `x_scale` / `gate_scale` (dense: 1 value; experts: `[E]` per half); mmq
+  dense folded into the f32 → bf16 copy; mmq experts: our f32 SwiGLU takes per-row gate and up scales gathered by
+  expert id, down does `y *= scale2[ids][..., None]` (device gather, graph-safe).
+- **C API** (`csrc/api.cu`, ours): mmq / mmq_id take the precision, set `dst.op_params[3]` and return the precision
+  `ggml_cuda_mmq_get_prec_src1` chose; mmvq / mmvq_id take the optional scales; `mmq_schedule` takes the precision; the
+  workspace adds the NVFP4 per-row scale for `rows` (dense) or `tokens·k` (with ids) floats + 256 B, for every instance
+  (one size per workspace name, `build.py:93-100`); a test-only entry returns the quantized activation blocks.
+- Calls are counted per (path, mode) (M0.2's counters).
 
-### 4.6 `kernels.triton_gemm` for FP8
+### 4.6 `kernels.triton_gemm` for FP8 (Gate B)
 
-- `act_quant_fp8(x [R, in]) → (x_q e4m3 [R, in], a_s f32 [R, in/128])`, one program per (row, group): the W8A8
-  operand; for experts it runs once per input row (R = T for gate/up, T·k for down — the f32 SwiGLU output quantized
-  directly; the floor does the same).
-- Dense GEMM: tiles `BM × BN × 128` (BK = the scale block), scales loaded once per K step, output `out_dtype`;
-  grouped: D8's routing and grid unchanged, the same K-loop over gathered rows, f32 out.
-- `bf16` mode: `u8 → bf16` decode in-register (sign, exponent + 120, mantissa << 4; exponent 0 → `m · 2⁻⁹`), the
-  dense contract's operand rounding (M0.2 D2) for the activation, scale per K step.
-- Configurations pinned per (out, in) and class in the plugin (no autotune, design §5.6 rule 7); determinism and
-  capture as D8; support checks: `in % 128 = 0`, `out % 128 = 0` (every target).
+- `act_quant_fp8(x [R, in]) → (e4m3 [R, in], a_s f32 [R, in/128])`, one program per (row, group); experts quantize
+  each input row once (R = T for gate/up, T·k for down from the f32 SwiGLU output; the floor does the same).
+- Decode W8A16 split-K: one program per (N-tile, K-split) streaming weights once, f32 partials reduced in a fixed
+  order (deterministic, no atomics); prefill W8A8 tiles `BM × BN × 128`. Configs pinned per (out, in) and class (no
+  autotune); support `in % 128 = out % 128 = 0`.
 
-### 4.7 Activation mode per class (defaults; `quant.act` raises them)
+### 4.7 Activation mode per class
 
-| format (targets) | sm_86 (3090, A5000) | sm_89 (4090) | sm_120 (5080, 5090, PRO 6000) |
+| | sm_86 | sm_89 | sm_120 |
 |---|---|---|---|
-| FP8 block (`a8`) | W8A16, Triton bit-decode | W8A8 Triton | W8A8 Triton |
-| NVFP4 (`a4`) | W4A8: mmq int8 MMA, mmvq dp4a | W4A8 | prefill (mmq) W4A4-dynamic, native `mxf4nvf4` MMA; decode (mmvq) W4A8 |
-| MXFP4 (`a4`) | W4A8 | W4A8 | prefill W4A4-dynamic (`mxf4`); decode W4A8 |
-| any, `quant.act = a8` | as above | as above | FP4: W4A8 on both paths |
-| any, `quant.act = a16` | FP8: W8A16; FP4: no provider (startup error) | same | same |
+| FP4, default `a8` | W4A8 (mmq int8 MMA, mmvq dp4a) | W4A8 | W4A8 (mmq Ampere config) |
+| FP4, `quant.act = a4` | W4A8 | W4A8 | prefill W4A4-dynamic, decode W4A8 |
+| FP8, default (Gate B) | — (v1) | prefill W8A8, decode W8A16 | same |
+| FP8, `quant.act = a16` | — | W8A16 | W8A16 |
 
 ### 4.8 Numerics and the judge (thresholds and predictions fixed before measuring)
 
-- **Golden:** HF fp32 on the CPU, weights from `reference.py` through the judge's own HF-quant name map (never the
-  engine's dialect: it reads the safetensors itself and inverts compressed-tensors' globals itself), streamed per
-  layer for the 30B (M0.2: ≈ 122 GB); meta carries `reference.py`'s hash. Prompt set `v1.jsonl`.
-- **Gates:** per tensor (per expert), NMSE(reference dequantization, HF bf16 original) ≤ 0.5 (M0.1); predicted
-  FP8 ≈ 1e-3, NVFP4 ≈ 1e-2, MXFP4 ≈ 2–3e-2 (reported). Routers, embeddings and heads exact (bf16) or the F32 → bf16
-  cast of the 30B FP8.
-- **Budgets:** unchanged (`judge/holon_judge/compare.py:30-33`): KL p50/p99 ≤ 2× floor, top-1 ≥ floor − 0.25 points,
-  paired ΔPPL guard. Tier A sanity ceiling KL p99 ≤ 1e-4. Floors recorded only after step 1's oracle checks pass,
-  carrying `reference.py`'s and `moe/reference.py`'s hashes (M0.2 floor-validity rule); predicted order: A16 ≤ W8A8,
-  W4A8 ≤ W4A4-dynamic; W4A4-dynamic vs W4A4-static is the measurement the research note left open.
-- **Tier A** (CPU fp32, production `hf` source + dialects + reference providers reading the source layouts, as
-  M0.2): every target. It covers dialects, normalization, merges and stacking; the repack is L0's (acceptance 3).
-- **Tier B** (production kernels; floor of the mode and path, D9):
+- **Golden:** HF fp32 on the CPU, weights from `reference.py` through the judge's own HF-quant name map (it reads
+  the safetensors and inverts compressed-tensors' globals itself), streamed per layer for the 30B; the MXFP4_MOE GGUF
+  through M0.2's GGUF path (gguf-py has MXFP4). Prompt set `v1.jsonl`; meta carries the reference hashes.
+- **Gates:** per tensor (per expert) NMSE vs the HF bf16 original ≤ 0.5; predicted FP8 ≈ 1e-2, NVFP4 ≈ 0.1, MXFP4 ≈
+  0.3 (reported; MXFP4 is within 2× of the gate).
+- **Floors** (HF bf16 on the dequantized weights with M0.2's MoE mirror, the mode emulated on every quantized linear
+  and expert stack), with orders of magnitude from the panel's CPU simulation on Qwen3-1.7B (KL p99 vs golden):
 
-  | target | rtx-a5000 | rtx-5080 | RTX PRO 6000 |
+  | floor | emulation | sim KL p99 |
+  |---|---|---|
+  | A16 | none | ≈ 8e-3 |
+  | W4A8 | the q8_1 emulator per path (FP4 types: no offset sums) | ≈ 2e-2 |
+  | W8A8 | e4m3 per token per 128, IEEE division, ±448 | ≈ 6e-2 (≈ 3× W4A8) |
+  | W4A4-dynamic | ggml's quantizer: NVFP4 row `amax/(6·448)` + UE4M3 per 16 chosen among 5 codes (`quantize.cu:199, 250-290`); MXFP4 e8m0 per 32, `log2` rounded to nearest (`:122-140`) | ≈ 0.9 (NVFP4), ≈ 3.4 (MXFP4) |
+  | W4A4-static (report) | NVFP4 per-16 e4m3 scale over the checkpoint's static input scale: per projection; per expert for experts (each (token, slot) row uses its expert's); compressed-tensors `1/input_global_scale` | ≈ 1.2 |
+
+  Predicted order on the real files: A16 < W4A8 < W8A8 ≪ W4A4. Budgets unchanged (`judge/holon_judge/compare.py:30-33`);
+  Tier A sanity ceiling KL p99 ≤ 1e-4. Floors are recorded only after step A2's oracle checks pass (M0.2's
+  floor-validity rule). A run is scored against the floor of the mode each path took (per-instance counters); a
+  mismatch fails before scoring.
+- **Tier A** (CPU fp32, production source + dialects + reference providers): every target and fixture; it covers
+  dialects, normalization, merges and stacking; the repack is L0's.
+- **Tier B** per acceptance 6 and 13; decode runs use M0.1's step size from the plugin's mmvq limits.
+- **L0:** ggml FP4 per spec × path × input dtype against the declared mode's emulator, `l0.check` budgets; the GEMM
+  checks consume the activation codes from the test entry, so they stay tight; the codes themselves are checked
+  against the emulator with mismatches allowed only where the input lies within 4 ulp of a rounding boundary, at a
+  rate ≤ 1e-3 (`-use_fast_math` reciprocals); the read-back precision equals the spec's; `scale2` on every path vs f64;
+  poisoned bytes after the tail. FP8 (Gate B): act quant bitwise vs torch `float8_e4m3fn` (IEEE division on both
+  sides); e4m3 → bf16 decode over the 254 finite codes; distinct random block scales; T ∈ {0, 1, 7, 8, 9, 16, 17, 64,
+  512, 513, 2049} (the M = 16 / 17 mode switch); graph replay; run-to-run bit equality.
+- **Plants** (`judge/holon_judge/planted.py`; multiples of the floor's KL p99; outside a prediction: recorded with its
+  cause, δ unchanged):
+
+  | # | plant | where | predicted |
   |---|---|---|---|
-  | 8B FP8 | W8A16 | W8A8 | — |
-  | 8B NVFP4 (both files), 8B MXFP4 | W4A8 prefill + decode | W4A4-dyn prefill, W4A8 decode | — |
-  | 30B NVFP4, 30B MXFP4 | W4A8 prefill + decode | — | W4A4-dyn prefill, W4A8 decode |
-  | 30B FP8 | — (does not fit) | — | W8A8, and W8A16 (`quant.act = a16`) |
-
-  Decode runs use M0.1's step size from the plugin's mmvq limits (NVFP4 8, MXFP4 7 with ids on sm_86,
-  `mmvq.cu:182-183`; 8 on sm_89/120, `:288-289`).
-- **L0** (sm_86, sm_89, sm_120a; memcheck each): lossless repack bitwise (acceptance 3); qlinear@2 and
-  linear_experts per type, mode and path vs the emulated reference with `l0.check`'s budgets; mmvq `x_scale` /
-  `gate_scale` dense and with ids, mmq post-scale and the scaled SwiGLU vs f64; W4A4 activation codes vs the
-  emulator bitwise (a test-only quantize entry in the C API); FP8 act quant bitwise vs torch `float8_e4m3fn`; the
-  e4m3 → bf16 decode over all 256 codes; distinct random block scales (so a transposed or shifted scale index fails);
-  T ∈ {0, 1, 7, 8, 9, 64, 512, 513, 2049}; M0.2's routings for experts; graph replay; run-to-run bit equality;
-  poisoned bytes after weights and workspaces.
-- **Quantization error**, reported per format and mode: the file's golden vs the bf16 checkpoint's fp32 golden (M0 /
-  M0.2), and the engine vs that golden, with top-k flip rates; the W4A4-dynamic vs W4A4-static floor gap for NVFP4.
-- **Plants** (`judge/holon_judge/planted.py`; predictions are multiples of the floor's KL p99; outside a prediction:
-  recorded with its cause, δ unchanged — M0.1's rule):
-
-  | # | plant | where it bites | predicted |
-  |---|---|---|---|
-  | P1 | FP8 scale read transposed (`s[k/128, n/128]`) | L0; Tier B | L0 fail; L2 fail, > 10× |
-  | P2 | FP8 scale shifted by one K block | L0; Tier B | L0 fail; L2 fail, > 10× |
-  | P3 | W8A8 activation scale per token, not per 128 group | L0 (codes); Tier B 5080 | L0 fail; **L2 pass** (≤ 1.5×: with either scale every value above 3.5e-5 of the token's max stays an e4m3 normal, relative error 2⁻⁴) |
-  | P4 | e4m3 subnormals decoded as normals (W8A16) | L0 (256 codes); Tier B A5000 | L0 fail; **L2 pass** (≤ 1.2×: it moves only weights below 3.5e-5 of their block's max, by at most that much) |
-  | P5 | dense gate/up merge keeps gate's scale rows for up | Tier A; Tier B | fail, > 10× |
-  | P6 | 30B FP8 expert scale stack off by one expert | structural; Tier B | structural fail; L2 fail |
-  | N1 | compressed-tensors global not inverted | Tier A; Tier B (RedHat 8B) | fail, gross |
-  | N2 | NVFP4 repack with the nibbles swapped | L0 (lossless); Tier B | L0 fail; L2 fail, gross |
-  | N3 | NVFP4 sub-scales permuted within a 64-block | L0; Tier B | L0 fail; L2 fail, gross |
-  | N4 | per-expert `scale2` gathered by slot, not expert id, in mmq down | Tier B 30B NVFP4 | prefill fail (3–20×); decode pass (the vendored fusion indexes by id) |
+  | N1 | compressed-tensors global not inverted | Tier A (RedHat) | fail, gross |
+  | N2 | NVFP4 repack nibbles swapped | L0; Tier B | L0 fail; L2 fail, gross |
+  | N3 | NVFP4 sub-scales permuted in a 64-block | L0; Tier B | L0 fail; L2 fail, gross |
+  | N4 | per-expert `scale2` gathered by slot in mmq down | Tier B 30B NVFP4 | prefill fail (3–20×); decode pass |
   | N5 | `scale2` applied after SwiGLU on mmq | Tier B 30B NVFP4 | prefill fail, gross; decode pass |
-  | N6 | `op_params[3]` left zero on the `q8_1` spec (today's shim) | Tier B 8B NVFP4 | sm_120: aborts at the first gate/up mmq call (`mmq.cu:184`); sm_86/89: pass |
-  | N7 | the `fp4` spec run against the W4A8 floor | verdict | fails the mode check before scoring |
-  | N8 | one layer's (layer 18) `o_proj` `scale2` × 1.25 | Tier B 8B NVFP4, A5000 | near threshold: 1.5–4×, fail if > 2× |
+  | N6 | `op_params[3]` left zero on the `q8_1` spec, 8B NVFP4, sm_120 | Tier B 5080 | the read-back raises at the first q/k/v mmq call; sm_86 / 89 pass |
+  | N6b | the same on the 30B NVFP4, `a8`, sm_120a | L0 | fail (read-back and the W4A8 emulator) |
+  | N7 | the `fp4` spec scored against the W4A8 floor | verdict | mode check fails before scoring |
+  | N8 | layer 18 `o_proj` `scale2` × 1.25, W4A8 | Tier B A5000 | fail, 4–8× (sim 5.8×) |
+  | N8b | the same × 1.1, W4A8 | Tier B A5000 | near threshold: 1.3–2.5×, fail if > 2× |
+  | N9 | the × 1.25 plant under `a4`, vs the W4A4 floor | W4A4 report, 5080 | **pass** (sim 1.01×): the W4A4 floor cannot see it |
   | M1 | MXFP4 e8m0 byte off by one in the repack | L0; Tier B | L0 fail; L2 fail, gross |
-  | M2 | Quark 30B expert index off by one in per-slice adopt | structural; Tier B | structural fail; L2 fail |
+  | M2 | Quark 30B expert index off by one in per-slice adopt | structural; Tier A | fail |
+  | M3 | Quark `weight_scale` decoded as e4m3, not e8m0 | gate; Tier A | gate fail (NMSE ≫ 0.5) |
+  | M4 | no zeroed tail on FP4 tensors | L0 sm_120a, `fp4` spec, `in = 768` | memcheck fail; `q8_1` spec pass |
+  | T1 | dialect pairs k's `scale` with v's weight | Tier A 8B NVFP4 | fail (≥ 3×) |
+  | P1 | FP8 scale read transposed | L0; Tier B | L0 fail; L2 fail, > 10× |
+  | P2 | FP8 scale shifted by one K block | L0; Tier B | L0 fail; L2 fail, > 10× |
+  | P3 | W8A8 activation scale per token, not per 128 | L0; Tier B 5080 | L0 fail; **L2 pass** (sim 1.3×) |
+  | P4 | e4m3 subnormals decoded as normals (W8A16) | L0; Tier B | L0 fail; **L2 pass** (≤ 1.2×: moves only weights below 3.5e-5 of their block max) |
+  | P5 | dense gate/up merge keeps gate's scale rows for up | Tier A | fail, > 10× |
+  | P6 | 30B FP8 expert scale stack off by one | structural; Tier A | fail |
+  | P7 | layer 18 `o_proj` FP8 block scales × 1.25, W8A8 | Tier B 5080 | near threshold: 1.5–4×, fail if > 2× |
 
-  Tier A must also fail P5, N1 and a dialect plant (q's `scale` paired with k's weight).
-- **Bounded:** graphs vs eager at decode batches 3, 5, 12, 20 on the 30B NVFP4 (rtx-4090): pass (M0.2's padding
-  rule holds: unique ids per row); chunked vs one-shot prefill on the 8B FP8 and NVFP4 (rtx-5080): pass.
+  The GGUF MXFP4_MOE also takes M0.1's wrong-type and stale-q8_1 plants (fail).
+- **Bounded:** graphs vs eager at decode batches 3, 5, 12, 20: 30B NVFP4 on the 4090 (`a8`) and 8B NVFP4 on the 5080
+  (`a4`): pass. Chunked vs one-shot prefill: 8B NVFP4 (Gate A) and 8B FP8 (Gate B) on the 5080: pass.
+- **Quantization error**, reported per format and mode: the file's golden vs the bf16 checkpoint's fp32 golden, the
+  engine vs that golden, top-k flip rates; W4A4-dynamic vs W4A4-static for NVFP4.
 
 ### 4.9 Memory fit
 
-Plan §2's formula: weights + KV + ≈ 1.5 GiB. Usable totals: 15.56 GiB on the 5080 (measured in M0.2), ≈ 23.6 and
-≈ 31.5 GiB estimated for the 4090 and 5090. KV per token: 8B 144 KiB bf16, 76.5 KiB q8_0; 30B 96 and 51 KiB. Free
-memory for state, and the KV tokens it holds:
+Rule from the measured records: KV = `memory_fraction` × (usable − context − weights) − peak step − graph pool.
+RTX 5080 (`fit_qwen3-8b-gguf_rtx-5080`): usable 15.56, context 0.91, peak 0.31, graphs 0.26 GiB at `max_seqs` 32. RTX
+4090 node (`fit_qwen3-30b-a3b-gguf`): usable − context = 21.04 GiB, peak + graphs taken as the 5080's 0.57. KV per
+token: 8B 144 KiB (bf16), 30B 96 KiB. Tokens at fraction 0.98 / 0.9:
 
-| weights loaded | RTX 5080 16 GB | RTX 4090 24 GB | RTX 5090 32 GB |
-|---|---|---|---|
-| 8B FP8, 8.79 GiB | 5.3 GiB: ≈ 38K tokens bf16 KV (72K q8_0) | ≈ 97K | ≈ 154K |
-| 8B NVFP4, 5.96 GiB | 8.1 GiB: ≈ 59K (111K) | ≈ 118K | ≈ 175K |
-| 8B MXFP4, 5.76 GiB | 8.3 GiB: ≈ 60K (114K) | ≈ 119K | ≈ 177K |
-| 30B NVFP4, 16.85 GiB | does not fit | 5.3 GiB: ≈ 57K (108K) | ≈ 144K |
-| 30B MXFP4 (Quark), 17.22 GiB | does not fit | 4.9 GiB: ≈ 53K (100K) | ≈ 140K |
-| 30B FP8, ≈ 29.1 GiB | no | no | 0.9 GiB: ≈ 10K (19K) |
+| | card | weights | KV tokens 0.98 / 0.9 | acceptance (0.9, `max_seqs` 32) | fallback |
+|---|---|---|---|---|---|
+| 8B NVFP4 | 5080 | 5.96 GiB | 57.9K / 52.8K | ≥ 32K | — |
+| 8B FP8 | 5080 | 8.79 | 37.7K / 34.3K | ≥ 32K (Gate B) | 0.98, or q8_0 KV |
+| 30B NVFP4 | 4090 | 16.85 | 38.6K / 35.0K | ≥ 32K | 0.98 |
+| 30B MXFP4_MOE GGUF | 4090 | ≈ 15.9–17.1 (file chosen in A0) | 48.7K–35.9K / 44.2K–32.5K | ≥ 32K | 0.98, or q8_0 KV |
+| 30B MXFP4 `amd-quark` | 4090 | 17.22 | 34.7K / 31.3K | recorded (no lock) | 0.98 |
+| 30B FP4 | 5080 | ≥ 15.9 | does not fit | — | GGUF UD-IQ3_XXS (M0.2) |
+| 30B FP8 | 5090 | ≈ 29.1 | unmeasured; ≈ 9–10K if usable ≈ 31.5 | recorded | q8_0 KV |
 
-The repack keeps the byte count (4.5 / 4.25 bits per weight on both sides); `input_scale` scalars are the only dropped
-bytes. The 16 GB MoE answer stays GGUF UD-IQ3_XXS (M0.2). `prepare` transients: ≤ 230 MB (§4.5). Measured fits go to
-`evidence/fit_*`; the 5080's deployment `memory_fraction` 0.9 (M0.2) applies.
+The repack keeps the byte count; the FP4 tail adds ≤ one row per tensor. 5090 numbers are unmeasured.
 
 ### 4.10 Speed measurement
 
 As M0.1 / M0.2: `bench/llama_bench.py` in-process vs llama-bench at the pin (`-p 512 -n 128 -d 0,256 -ngl 99 -fa
 on`), medians of repetitions 2–5, from the fixed bench worktree; `llama-server` vs Holon over HTTP on the decode and
-agent traces (8B NVFP4, 5080). Predictions: FP4 0.95–1.1× on both bars (same kernels; the W4A4 f32 cast costs ≤ 3% of
-a 512-token prefill on sm_120); FP8 tg128 0.85–1.0× Q8_0 (bytes per token ≈ equal: FP8 linears + bf16 head vs Q8_0
-linears + Q8_0 head); FP8 pp512 0.4–0.9× Q8_0 (sm_89: fp8 MMA peak is half int8's; Triton vs tuned mmq) — below 0.5×
-on sm_120, the CUTLASS sm120 blockwise follow-up is escalated. Evidence: `evidence/<name>_<gpu-class>_<date>.json`.
+agent traces. Predictions: FP4 at W4A8 0.95–1.1× (same kernels; the post-scale folds into an existing copy); FP8
+tg128 0.85–1.0× Q8_0 (gate B1 measures it first), pp512 0.4–0.9× (sm_89's fp8 MMA peak is half its int8 peak).
+Evidence: `evidence/<name>_<gpu-class>_<date>.json`.
 
 ## 5. Implementation plan
 
-Same panel throughout; each step ends green.
+Hosts: **A5000 (sm_86)** — Tier A and goldens (CPU), structural tests, fixtures, sm_86 L0, Tier B W4A8 for the 8B
+NVFP4, 30B NVFP4, `amd-quark` and MXFP4_MOE. **Cluster only** — sm_89 / sm_120a L0, Tier B on the 5080 / 4090 / PRO
+6000, the W4A4 report, every bar, fit, lock, snapshot and lock-class propagate, all of Gate B's kernel work.
 
 | Step | Work | Checks | Days |
 |---|---|---|---|
-| 0 | Files (7 targets, llama.cpp GGUFs: NVFP4 by the pin's converter, Q8_0 of the 8B FP8); headers: ties of D4, `k/v_scale` = 1.0, shapes | ties hold for every target; baselines llama-bench at `cbe28bb3` on 5080 / 4090 / A5000 | 0.5 |
-| 1 | `std.weights.hf` dialects + `reference.py`; owner cross-checks (D8); `qlinear@2`, units (parts, D4 merges, `act_quant`, `prepare`); core per-slice adopt + toy test; reference providers; tiny Qwen3 / Qwen3-MoE fixtures in each dialect (FP8, CT NVFP4 / MXFP4 by compressed-tensors' own compressors; ModelOpt and Quark written from their specs) | engine (reference kernels) vs transformers on the fixtures' dequantized weights; Tier A plants fail on the fixtures; denylist, core LOC | 3.5 |
-| 2 | ggml pin bump to `cbe28bb3` (patch regenerated, existing L0 re-run); FP4 types, repack, `scale2` paths, two specs, C API, workspace | acceptance 3; L0 sm_86 / sm_120a (A5000, 5080), memcheck; existing GGUF L0 unchanged | 3.5 |
-| 3 | `kernels.triton_gemm`: rename, FP8 act quant, dense and grouped FP8 in both modes, pinned configs | L0 sm_86 / sm_89 / sm_120a, capture, determinism, memcheck | 3.5 |
-| 4 | Judge: HF-quant map, goldens (8B ×4, 30B ×3), gates, emulators (D9), floors, mode check, Tier A on the CPU | gates; Tier A for every target; floors' order | 3 |
-| 5 | Tier B per §4.8's table; plants; quantization-error reports; structural test; bounded checks | acceptance 5; plants as predicted | 2.5 |
-| 6 | Existing locks: `propagate` (qlinear@2, `act_quant`, pin), one approval | acceptance 9 | 0.5 |
-| 7 | Consumer classes: fits, bars, serving, tune + locks, snapshots ×3; sm_89 L0 | acceptance 6–8 | 3 |
-| 8 | Docs: design §5.5 (as built: dialects in the source, `prepare` as converter, references), §5.6; plan §2 / §10 status | — | 0.5 |
+| A0 | Pin bump (D7): re-vendor, regenerate the patch, L0 18 types ×3 classes; GGUF locks propagate; spot-check bar. Files: targets, MXFP4_MOE GGUF chosen, the pin's GGUF conversions; header checks (ties, `k/v_scale`, scale bytes) | acceptance 1 | 2 |
+| A1 | Core (D11, per-slice adopt + toy); `qlinear@2`, `prepare`, `act_quant`, parts, merges; ref_kernels @2. After M0.4 merges: propagate | acceptance 2 (byte-identical snapshots) | 2 |
+| A2 | Dialects, `reference.py`, owner cross-checks (D10), NVFP4 GGUF refusal; tiny fixtures per dialect (CT by compressed-tensors' compressors; FP8, ModelOpt, Quark written from their specs); engine (reference kernels) vs transformers on them | fixtures; Tier A plants on fixtures | 3 |
+| A3 | ggml FP4: types, repack + tail, `scale2`, specs, read-back, C API, bf16 FP4 quantizer patch, docstring | acceptance 4, 5 (A5000 first, then 4090 / 5080) | 3.5 |
+| A4 | Judge: HF-quant map, gates, emulators, floors, mode check. Machine time: goldens 4 × 8B (≈ 0.5 h each) + 4 × 30B (≈ 2 h each, streamed) ≈ 10 h CPU, overnight; floors ≈ 12 × 0.5 h on A5000s; Tier A ≈ 8 runs | gates; Tier A all; floors' order | 3 + 1.5 machine days |
+| A5 | Tier B (A5000, then 5080 / 4090 / PRO 6000), plants, W4A4 report, structural, bounded | acceptance 6, 7 | 2.5 |
+| A6 | Consumer: fits, bars (same mode and default), serving, tune + locks, snapshots ×3; Gate A panel review | acceptance 8–10 | 3 |
+| B1 | `triton_gemm` rename; W8A16 split-K decode kernel; bandwidth microbenchmark on 5080 / 4090 | acceptance 11 | 2 |
+| B2 | W8A8 act quant + prefill GEMM, grouped FP8; L0 sm_89 / sm_120a | acceptance 12 | 3 |
+| B3 | W8A8 floors, Tier B, FP8 plants, bars, fits (5080, 5090), locks, snapshots; Gate B panel review | acceptance 13–15 | 2.5 |
+| C | Docs: design §4.2 (no dialect / converter slots), §5.5 as built, §5.6; plan §2 / §10 status | — | 0.5 |
 
-≈ 20.5 days; critical path 0 → 1 → 2 → 4 → 5 → 7 → 8, step 3 parallel to 2.
+≈ 27 developer days plus machine time; Gate A ≈ 19, Gate B ≈ 7.5.
 
 ## 6. Risks
 
-- **W4A4-dynamic quality** on sm_120 may cost more than the checkpoints' calibrated static scales; it is judged
-  against its own floor, so it passes while degrading quality. The report (W4A4-dyn vs W4A4-static vs W4A8 floors, and
-  the engine vs bf16) decides whether `a8` becomes the sm_120 default — escalated if so (a default change).
-- **Pin bump** (`51ce9c11` → `cbe28bb3`): a week of upstream MMQ changes; the existing GGUF locks may not stay
-  snapshot-identical (one approval, L2 decides) and the GGUF bars get a spot check (Qwen3-8B Q4_K_M on the 5080 within
-  ±3% of M0.1's).
-- **FP8 decode at M = 1:** a tile GEMM wastes 15/16 of its rows; if tg128 < 0.8× Q8_0, a split-K GEMV variant
-  (FreeToken's decode GEMV is prior art) is added in step 7.
-- **30B FP8 on the 5090:** ≈ 0.9 GiB for state; may not reach a useful context.
-- **Community MXFP4 files** (`Yi30`) may hold quality surprises unrelated to Holon; the gate and the quantization-error
-  report make that visible, not a failure.
-- **Parallel core change:** M0.4 changes the core; M0.6 rebases its one seam after M0.4 merges.
+- **Pin bump:** a week of upstream MMQ changes; GGUF snapshots may move (step A0's own approval, L2 decides) before
+  the refactor, so acceptance 2's byte-identity is measured against the bumped locks.
+- **FP8 decode bar:** gated by B1's bandwidth measurement; below 75%, the split-K kernel is reworked before B2.
+- **MXFP4 gate margin:** NMSE ≈ 0.3 against a 0.5 gate; a file over it is reported per tensor and escalated, not
+  waved through.
+- **8B FP8 and 30B FP4 fits** have 2–3K tokens of margin at 0.9; fallbacks named in §4.9.
+- **Sequencing:** Gate A's core change and propagate wait for M0.4's merge (D-h).
+- **Community fixtures** (`Yi30`): quality surprises show in the gate and the reports, not in acceptance.
 
 ## 7. Deferred, deliberately
 
-- Checkpoint-faithful W4A4 (static input scales) on sm_120: vLLM's CUTLASS sm120 NVFP4 GEMM / grouped MoE, or
-  FlashInfer `mm_fp4` / `cutlass_fused_moe`, judged against the W4A4-static floor recorded here.
-- CUTLASS sm120 blockwise FP8 (examples 87b / 87c) as the faster FP8 prefill.
-- A W4A16 FP4 provider (true A16 for weight-only checkpoints); ModelOpt `MIXED_PRECISION` (needed by NVIDIA's newer
-  Qwen3.6/3.8 builds) and per-tensor FP8; Quark NVFP4.
-- gpt-oss (canonical MXFP4; a new model plugin with interleaved gate/up, biases and its clamped SwiGLU).
-- AMD's official MXFP4 Qwen3.5/3.8 builds; vLLM as a secondary FP8 / FP4 bar.
-- Removing the core's unused `Dialect`, `Converter` and `SchemeImpl` registries (M0.6 does not need them: dialects
-  live in the source, conversion is a kernel's `prepare`, references are std `reference.py` modules) — a separate
-  cleanup with its own design §4.2 / §5.5 edit.
-- A bf16-input W4A4 quantizer in `vendor.patch` (removes the f32 cast) if the cast measures above 3%.
+- Static-scale W4A4 providers on sm_120 (vLLM's CUTLASS sm120 NVFP4 GEMM and grouped MoE, FlashInfer `mm_fp4` /
+  `cutlass_fused_moe`), judged against the W4A4-static floor recorded here; `a4` as a default (acceptance 7's rule).
+- CUTLASS sm120 blockwise FP8 (examples 87b / 87c) for prefill; FP8 on sm_86 (plan §10, v1).
+- A16 FP4 kernels; ModelOpt `MIXED_PRECISION` and per-tensor FP8; Quark NVFP4; GGUF NVFP4.
+- gpt-oss (interleaved gate/up, biases, clamped SwiGLU: a new model plugin); AMD's official MXFP4 Qwen3.5/3.8 builds;
+  vLLM as a secondary bar.
+- Dialects as their own plugins (D2's trigger).
 
 ## 8. Review findings, resolved
 
-(none yet)
+**Rev 1.** User decisions: D-a two gates → acceptance split, D7, D12, §5; D-b `a8` default, `a4` opt-in, the
+pre-registered rule → D3, acceptance 7, N9; D-c → D11; D-d → D4; D-e → D6, §4.2; D-f → non-goals, D12, §4.7; D-g → D1,
+acceptance 3 / 10 / 15; D-h → §4.2, risks.
+
+| # | finding | resolution |
+|---|---|---|
+| A-M1 | W4A4 mmq K loop steps 512 with no tail: `in = 768` reads past the end | zeroed one-row tail to 512 elements on every FP4 tensor / stack, GGUF MXFP4 included (D8, §4.5), as llama.cpp's allocation; docstring fixed; plant M4 |
+| A-M2 | source parts kept after the repack | `prepare` returns a new `QTensor`, the unit drops the source parts (D4) |
+| A-M3 | W4A4 codes cannot be bitwise (`-use_fast_math`) | boundary-bounded code check with a capped rate; GEMM L0 consumes the kernel's codes; floors budget-based (§4.8) |
+| A-M4 | memory table not from the 0.9 rule and records | recomputed from the fit records (§4.9), fraction and `max_seqs` in acceptance 8 / 14, fallbacks named |
+| A-m | owner cross-checks: fp32 outputs, CT NVFP4 ≤ 2 ulp, D2's "≤ 0.5 ulp" | D10 tolerances; D2 says ≤ 1 ulp |
+| A-m | signed zeros; bad scale bytes | compare by value; load-time asserts on sign bit and 0x7F / 0xFF (D2, D10) |
+| A-m | FP8 act quant division and clamp; 256-code check | `tl.math.div_rn`, ±448 (D12); 254 finite codes (§4.8) |
+| A-m | N6 mispredicted | first W4A4 call is q/k/v; read-back of the chosen precision (D8, §4.5), N6 / N6b reworded |
+| A-m | Tier A dialect plant with unequal shapes | k's scale with v's weight (T1) |
+| A-m | merges: `input_scale` need not be equal; gate/up `scale2` may differ | input scales not loaded (D2); gate/up `scale2` carried as `[E, 2]` (D5) |
+| A-m | `TYPES` admits GGUF NVFP4 | refused at the GGUF source (D1) |
+| A-m | Quark has no owner oracle | gguf-py cross-check + plant M3 (D10) |
+| A-m | citations | `ExpertLinear.adopt` `moe/units.py:42-48`; ModelOpt packing `nvfp4_tensor.py:338` |
+| B-1 | one milestone too large | Gate A / Gate B (§1, §5) |
+| B-2 | pin bump bundled with the refactor | its own first step and propagate (D7, A0) |
+| B-3 | dead core registries | deleted in Gate A (D11) |
+| B-4 | `prepare` signature / layout | `prepare(QTensor) → QTensor` with the destination layout, no input mutation (D4) |
+| B-5 | per-slice seam size | minimal form, units keep dim 0 = E during load (D6) |
+| B-6 | `a8` vs GGUF FP4 defaults | `a8` for every quantized layout, GGUF included (D3); MXFP4_MOE target (D1) |
+| B-7 | sm_86 FP8 scope | stays v1 (non-goals, D12) |
+| B-8 | dialects in `std.weights.hf` | one module per dialect under `weights/hf/quant/`; extraction trigger recorded (D2) |
+| B-9 | rename timing | `triton_gemm` rename in Gate B (D12, B1) |
+| B-10 | M0.4 sequencing, draft heads | §4.2, D4 |
+| C-B1 | W4A4 default unsafe | D3 / D-b |
+| C-M1 | FP8 decode bar at M = 1 | W8A16 split-K decode mode at M ≤ 16, bandwidth gate B1 (D12, acceptance 11) |
+| C-M2 | fit numbers | §4.9 from the records; 5090 marked unmeasured |
+| C-M3 | code checks, Triton division | §4.8 L0, D12 |
+| C-M4 | sm_120a L0 coverage; zeroed `op_params` plant | spec × path × input dtype vs the declared mode's emulator; N6b |
+| C-M5 | floor ordering; W8A8 near-threshold plant | §4.8 table (W8A8 ≈ 3× W4A8); P7 |
+| C-m | N8 band | sim 5.8× → N8 fail 4–8×; near threshold moved to N8b (× 1.1) |
+| C-m | W4A4 workspace and f32 cast | `tokens·k` + 256 B per-row scale; bf16 FP4 quantizer patch instead of a cast (D8, §4.5) |
+| C-m | graphs vs eager for W4A4 on sm_120 | 8B NVFP4 `a4` on the 5080 (§4.8, acceptance 7) |
+| C-m | gate NMSE predictions | ≈ 1e-2 / 0.1 / 0.3; MXFP4 margin as a risk |
+| C-m | W4A4-static definition | per projection / per expert, CT reciprocal (§4.8 floors) |
+| C-m | reference multiply order | `(e2m1 · e4m3) · scale2` (D10) |
+| C-m | 8B FP8 Tier B on sm_89 | rtx-4090 in acceptance 13 |
+| C-m | A5000 vs cluster; step-4 schedule | §5 host split; A4 machine time |
