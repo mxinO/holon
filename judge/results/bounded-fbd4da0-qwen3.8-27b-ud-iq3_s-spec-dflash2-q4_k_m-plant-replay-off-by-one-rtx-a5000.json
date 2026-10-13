@@ -1,0 +1,154 @@
+{
+ "sessions": 8,
+ "turns": 4,
+ "system_len": 512,
+ "max_tokens": 128,
+ "results": {
+  "baseline": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": false,
+    "overlap": false,
+    "max_draft_tokens": 0
+   },
+   "top1": {
+    "value": 0.989990234375,
+    "se": 0.0015413211351830603,
+    "n": 4096
+   },
+   "confident": {
+    "value": 0.9967645594823296,
+    "se": 0.0009925545987102844,
+    "n": 4018
+   },
+   "regret": {
+    "value": 0.0014108833856880665,
+    "se": 0.0006573126364180919,
+    "n": 4096
+   },
+   "kl": {
+    "kl": {
+     "value": 0.0028253121022455575,
+     "se": 0.0008709327714360239,
+     "n": 4096
+    },
+    "p50": 0.00011719538905187046,
+    "p99": 0.025882620129278732,
+    "p50_se": 3.683454245248554e-05,
+    "p99_se": 0.012258683513147881
+   },
+   "tokens_saved": 0,
+   "margins": {
+    "top1": 0.005449393133370446,
+    "confident": 0.0035092104372296726,
+    "kl_p50": 0.00013022977375028145,
+    "kl_p99": 0.04334099120283298
+   },
+   "failures": [],
+   "passed": true
+  },
+  "spec, prefix on, depth 1": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": true,
+    "overlap": true
+   },
+   "top1": {
+    "value": 0.82080078125,
+    "se": 0.02397981553298428,
+    "n": 4096
+   },
+   "confident": {
+    "value": 0.8337506259389084,
+    "se": 0.02247405874280974,
+    "n": 3994
+   },
+   "regret": {
+    "value": 0.5629326065536588,
+    "se": 0.0699503139348317,
+    "n": 4096
+   },
+   "kl": {
+    "kl": {
+     "value": 0.5481860930041533,
+     "se": 0.06218509652802424,
+     "n": 4096
+    },
+    "p50": 0.1352759652616936,
+    "p99": 6.7893696949720646,
+    "p50_se": 0.012936738884764064,
+    "p99_se": 1.4275471133195203
+   },
+   "tokens_saved": 12672,
+   "margins": {
+    "top1": 0.005449393133370446,
+    "confident": 0.0035092104372296726,
+    "kl_p50": 0.00013022977375028145,
+    "kl_p99": 0.04334099120283298
+   },
+   "failures": [
+    "top1 0.8208 beyond 0.00545 of the baseline",
+    "confident 0.8338 beyond 0.00351 of the baseline",
+    "kl_p50 0.1353 beyond 0.00013 of the baseline",
+    "kl_p99 6.789 beyond 0.0433 of the baseline"
+   ],
+   "passed": false
+  },
+  "spec, depth 0": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": false,
+    "overlap": false
+   },
+   "top1": {
+    "value": 0.805908203125,
+    "se": 0.020732248391668692,
+    "n": 4096
+   },
+   "confident": {
+    "value": 0.8165,
+    "se": 0.020095007644046457,
+    "n": 4000
+   },
+   "regret": {
+    "value": 0.6619065277918708,
+    "se": 0.063133006494087,
+    "n": 4096
+   },
+   "kl": {
+    "kl": {
+     "value": 0.6345368497117942,
+     "se": 0.056017765856843246,
+     "n": 4096
+    },
+    "p50": 0.13528278588973253,
+    "p99": 9.504416327027315,
+    "p50_se": 0.027047422934921773,
+    "p99_se": 3.3793675426095597
+   },
+   "tokens_saved": 0,
+   "margins": {
+    "top1": 0.005449393133370446,
+    "confident": 0.0035092104372296726,
+    "kl_p50": 0.00013022977375028145,
+    "kl_p99": 0.04334099120283298
+   },
+   "failures": [
+    "top1 0.8059 beyond 0.00545 of the baseline",
+    "confident 0.8165 beyond 0.00351 of the baseline",
+    "kl_p50 0.1353 beyond 0.00013 of the baseline",
+    "kl_p99 9.504 beyond 0.0433 of the baseline"
+   ],
+   "passed": false
+  }
+ },
+ "passed": false,
+ "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+ "dtype": "bfloat16",
+ "graphs_vs_eager": false,
+ "spec_vs_plain": true,
+ "engine_args": "--max-draft-tokens 7 --slots drafter=drafters.dflash draft_policy=std.spec.fixed_k verifier=std.spec.rejection --plugin-options kv.format=q8_0 spec.k=7 dflash.path=local/models/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --max-seqs 8 --memory-fraction 0.9",
+ "hardware": "NVIDIA RTX A5000",
+ "torch": "2.11.0+cu130",
+ "plant": "replay-off-by-one"
+}
