@@ -231,8 +231,9 @@ unread `max_depth` is removed (the gate comes from `open`).
     pipe.
   - **Memory:** a worker's baseline is ≈ 1.1 GB resident (≈ 6.7 GB virtual after importing xgrammar and torch, so
     `RLIMIT_DATA` cannot cap it — reviewer measurement). The parent's watchdog reads each busy worker's resident
-    set (`/proc/<pid>/statm`) every 50 ms and kills it when the compile grows it past **baseline + 1 GB** (portable:
-    no cgroup needed); workers also get `oom_score_adj` 1000 so the kernel prefers them to the engine.
+    set (`/proc/<pid>/statm`) every 50 ms and kills it when the compile grows it **1 GB past its size at the job's
+    start** (a per-compile delta; portable, no cgroup needed); workers also get `oom_score_adj` 1000 so the kernel
+    prefers them to the engine.
   - **Outcomes:** past the **10 s timeout** the worker is killed and respawned and the request is rejected `busy` (a
     respawn re-imports torch: likely 2–5 s, measured at step 2 and the queue bound sized to it); a compiled size over
     **64 MB** or a watchdog kill is rejected `client` ("schema too complex"); any other worker death or exit without a
