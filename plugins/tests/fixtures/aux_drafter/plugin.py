@@ -60,6 +60,7 @@ class Drafter:
         table = ctx.seq_table
         for i in range(ctx.batch.plan.draft_k):
             sub = aux.substep(1, i)
+            assert sub.sampler is ctx.sampler                  # a drafter samples on its sub-steps' rows
             slots = sub.batch.dev.slots
             sub.batch.dev.input_ids.copy_(table.last_token[slots] if i == 0 else table.draft_tokens[slots, i - 1])
             self.aux.layers[0](self.embed(sub.batch.dev.input_ids), sub)

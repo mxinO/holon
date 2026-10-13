@@ -421,7 +421,8 @@ class Executor:
         sub_pages = {g: Pages(pages[g].page, pages[g].table, pages[g].host_table, up.dev[f + "lens"][:rows],
                               up.dev[f"{f}{g}.write"][:tokens]) for g in self.sub_planners}
         offset = up.put(f + "offset", np.tile(np.arange(q), rows))
-        return StepContext(batch, {}, seq_table=self.seq_table, pages=sub_pages, prep=offset, pools=self.pools)
+        return StepContext(batch, {}, seq_table=self.seq_table, pages=sub_pages, prep=offset, pools=self.pools,
+                           sampler=self.sampler)
 
     def _prepare_substep(self, sub: StepContext, i: int, offset: int) -> None:
         """The device half of a sub-step (inside the step's graph): positions from the advanced SeqTable."""
