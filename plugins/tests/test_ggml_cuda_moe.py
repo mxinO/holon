@@ -11,6 +11,7 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
   `glu="swiglu"` output is checked against our SwiGLU of the checked `glu="none"` output instead: bitwise where mmq
   ran, within the fp32 budget for mmvq's fused gate; our SwiGLU kernel itself is checked against f64.
 - Merge: the merged stack against separate gate and up stacks, bitwise on mmvq and on mmq without the stream-k fixup.
+- Workspace: every call within `workspace_bytes_id` for its tokens (`test_ggml_cuda.Sized`, the high-water mark).
 - Routings, at E = 128, k = 8: uniform; every token on the same 8 experts at 512 and 513 tokens (several column
   tiles inside one expert); half the experts empty; ids 0 and E−1 in every row with poisoned bytes before and after
   the stack. Token counts 0, 1, t, t + 1, 9, 64, 512, 513, 1025, 2049 (t: the type's mmvq limit); the two paths
@@ -43,7 +44,7 @@ from holon_plugins.kernels.ggml_cuda import extension
 from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, TYPES
 from holon_std.moe import reference
 
-from .test_ggml_cuda import activations, dequantize, random_blocks
+from .test_ggml_cuda import Sized, activations, dequantize, random_blocks
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 
@@ -115,7 +116,8 @@ def experts(ctx, name: str, k: int, out: int, rows_per_token: int, glu: str = "n
              "act_quant": "a8"}
     spec = ctx.select_kernel("linear_experts@2", site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
-    return spec.impl(ctx, **facts)
+    kernel, device = spec.impl(ctx, **facts), torch.cuda.current_device()
+    return Sized(kernel, lambda x, parts, ids: kernel.lib.workspace_bytes_id(device, k, min(len(ids), CHUNK), K, n))
 
 
 def uniform(tokens: int, n: int, seed: int) -> torch.Tensor:

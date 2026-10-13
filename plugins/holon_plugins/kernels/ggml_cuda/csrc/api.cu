@@ -19,6 +19,8 @@ namespace {
 
 constexpr size_t POOL_ALIGN = 256;
 
+size_t high_water = 0;   // the most bytes one call took from its workspace since the last read (tests)
+
 // llama.cpp's scratch allocator, as a bump allocator over the caller's workspace: no cudaMalloc, so a call is safe
 // inside CUDA graph capture. It lives for one call (llama.cpp frees everything before returning).
 struct workspace_pool : ggml_cuda_pool {
@@ -29,6 +31,8 @@ struct workspace_pool : ggml_cuda_pool {
     workspace_pool(void * base, size_t size) : base((char *) base), size(size) {
         GGML_ASSERT((uintptr_t) base % POOL_ALIGN == 0);
     }
+
+    ~workspace_pool() override { high_water = std::max(high_water, used); }
 
     void * alloc(size_t nbytes, size_t * actual_size) override {
         const size_t n = GGML_PAD(nbytes, POOL_ALIGN);
@@ -113,6 +117,8 @@ int holon_ggml_use_mmvq(int type, int64_t rows) { return ggml_cuda_should_use_mm
 int holon_ggml_use_mmq(int type, int64_t rows) { return ggml_cuda_should_use_mmq((ggml_type) type, device_cc(), rows, 0); }
 
 int holon_ggml_mmq_schedule(int type, int64_t out, int64_t rows, int * tile_i, int * tile_j) {
+    // FP4 types choose their activation precision per call: the schedule must take it (M0.6 step A3)
+    GGML_ASSERT(type != GGML_TYPE_MXFP4 && type != GGML_TYPE_NVFP4 && "mmq_schedule: an FP4 type needs its precision");
     const auto & dev = ggml_cuda_info().devices[ggml_cuda_get_device()];
     const bool fallback = ggml_cuda_mmq_needs_fallback(out);          // as ggml_cuda_mul_mat_q
     const ggml_prec prec = GGML_PREC_Q8;                               // ggml_cuda_mmq_get_prec_src1, non-FP4 types
@@ -134,6 +140,12 @@ int holon_ggml_mmq_schedule(int type, int64_t out, int64_t rows, int * tile_i, i
     const int64_t waves = (ntiles + dev.nsm - 1)/dev.nsm;
     const int64_t nblocks = 100*ntiles/(dev.nsm*waves) >= 90 ? ntiles : dev.nsm;
     return ntiles % nblocks == 0 ? 1 : 2;
+}
+
+size_t holon_ggml_workspace_high_water(void) {
+    const size_t used = high_water;
+    high_water = 0;
+    return used;
 }
 
 size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows) {

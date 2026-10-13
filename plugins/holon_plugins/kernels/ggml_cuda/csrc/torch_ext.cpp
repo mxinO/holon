@@ -101,6 +101,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         const c10::cuda::CUDAGuard guard(device);
         return holon_ggml_workspace_bytes(in, rows);
     });
+    m.def("workspace_high_water", [] { return holon_ggml_workspace_high_water(); });
     m.def("mmvq", [](int64_t type, const at::Tensor & w, const at::Tensor & x, at::Tensor & y, at::Tensor & ws) {
         matmul(true, type, w, x, y, ws);
     });

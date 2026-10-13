@@ -14,11 +14,15 @@
   gguf-py bit for bit, affine types (Q4_1, Q5_1, Q2_K, Q4_K, Q5_K, IQ1_S) included, so nothing is built with
   `-fmad=false`; the one exception is the sign of zero in Q4_0's convert ((8 - 8) * d is +0 for negative d).
 - CUDA graphs: captured calls replay bitwise like eager ones (PDL launches on sm_120a), also on new inputs.
+- Workspace: every call takes at most what `workspace_bytes` sizes for its rows (the pool's high-water mark,
+  `Sized`), so an undersized formula fails at any row count; `mmq_schedule` refuses FP4 types.
 
 Skips without a GPU; builds the extension (prebuild) into the user cache if it is missing.
 """
 import os
 import pathlib
+import subprocess
+import sys
 
 import gguf
 import numpy as np
@@ -80,7 +84,27 @@ def qlinear(ctx, name: str, k: int, out_dtype: str = "bfloat16", out: int = OUT)
              "out_dtype": out_dtype, "act_quant": "a8"}
     spec = ctx.select_kernel("qlinear@2", site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
-    return spec.impl(ctx, **facts)
+    kernel, device = spec.impl(ctx, **facts), torch.cuda.current_device()
+    return Sized(kernel, lambda x, parts: kernel.lib.workspace_bytes(device, k, min(len(x), CHUNK)))
+
+
+class Sized:
+    """A kernel instance whose every call is held to its workspace formula: the most bytes the call took from its
+    workspace (the pool's high-water mark) are at most what `sized(*args)` gives for its rows, so an undersized
+    formula fails at any row count and pin, not only when a whole chunk overflows its buffer."""
+
+    def __init__(self, kernel, sized) -> None:
+        self.kernel, self.sized = kernel, sized
+
+    def __getattr__(self, name: str):
+        return getattr(self.kernel, name)
+
+    def __call__(self, *args):
+        self.kernel.lib.workspace_high_water()                  # reset
+        y = self.kernel(*args)
+        used, sized = self.kernel.lib.workspace_high_water(), self.sized(*args)
+        assert used <= sized, f"a call took {used} workspace bytes, sized for {sized}"
+        return y
 
 
 def random_blocks(name: str, rows: int, k: int, seed: int) -> np.ndarray:
@@ -282,3 +306,22 @@ def test_pdl_survives_graph_capture(ctx, sm):
     n = rt.cudaGraphGetEdges(raw)[-1]
     data = rt.cudaGraphGetEdges(raw, n)[3][:n]
     assert data and all(d.type == rt.cudaGraphDependencyType.cudaGraphDependencyTypeProgrammatic for d in data)
+
+
+def test_the_workspace_high_water_mark(ctx, sm):
+    """The test entry reads (and resets) the most bytes one call took: at 512 rows, at least the q8_1 activations
+    (144 bytes per 128 values)."""
+    kernel, k = qlinear(ctx, "q4_k", 4096), 4096
+    kernel.kernel(activations(CHUNK, k, seed=0), {"blocks": device_blocks(random_blocks("q4_k", OUT, k, seed=0))})
+    used = kernel.lib.workspace_high_water()
+    assert CHUNK * k // 128 * 144 <= used <= kernel.lib.workspace_bytes(torch.cuda.current_device(), k, CHUNK)
+    assert kernel.lib.workspace_high_water() == 0
+
+
+@pytest.mark.parametrize("fp4", [39, 40])                  # GGML_TYPE_MXFP4, GGML_TYPE_NVFP4
+def test_mmq_schedule_refuses_fp4_types(sm, fp4):
+    """Their activation precision is chosen per call (M0.6 A3 passes it): the schedule aborts rather than guess."""
+    code = ("from holon_plugins.kernels.ggml_cuda import extension; "
+            f"extension.load({sm}).mmq_schedule(0, {fp4}, 300, 512)")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600)
+    assert r.returncode != 0 and "an FP4 type needs its precision" in r.stderr, r.stderr[-2000:]
