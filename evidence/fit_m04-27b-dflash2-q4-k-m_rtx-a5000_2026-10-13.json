@@ -1,0 +1,46 @@
+{
+ "gpu": "NVIDIA RTX A5000",
+ "command": "local fit script: Engine(flags) on unsloth/Qwen3.8-27B-GGUF UD-IQ3_S, pools, then a 32512-token prompt + 64 tokens",
+ "commit": "07d656a",
+ "flags": "--memory-fraction 0.9 --max-seqs 4 --max-step-tokens 2048 --max-model-len 32768 --max-draft-tokens 7 --slots drafter=drafters.dflash draft_policy=std.spec.fixed_k verifier=std.spec.rejection --plugin-options recurrent.checkpoints=4 kv.format=q8_0 spec.k=7 dflash.path=Qwen3.8-27B-DFlash2-Q4_K_M.gguf (llama.cpp convert_hf_to_gguf --outtype bf16, llama-quantize Q4_K_M)",
+ "load_s": 21.2,
+ "kv_tokens": 176640,
+ "pools": {
+  "state.conv_state": {
+   "units": 5,
+   "unit_mib": 2.812
+  },
+  "plugin.conv_state.checkpoints": {
+   "units": 4,
+   "unit_mib": 2.812
+  },
+  "state.ssm_state": {
+   "units": 5,
+   "unit_mib": 144.0
+  },
+  "plugin.ssm_state.checkpoints": {
+   "units": 4,
+   "unit_mib": 144.0
+  },
+  "state.kv": {
+   "units": 11040,
+   "unit_mib": 0.531,
+   "tokens": 176640
+  },
+  "state.dflash.kv": {
+   "units": 11040,
+   "unit_mib": 0.166,
+   "tokens": 176640
+  }
+ },
+ "weights_gib": 10.872,
+ "drafter_weights_gib": 1.054,
+ "drafter_features_mib": 100.0,
+ "drafter_kv_bytes_per_token": 10880,
+ "target_kv_bytes_per_token": 34816,
+ "total_gib": 23.55,
+ "long_prompt": 32512,
+ "generated": 64,
+ "long_s": 35.6,
+ "max_allocated_gib": 21.41
+}
