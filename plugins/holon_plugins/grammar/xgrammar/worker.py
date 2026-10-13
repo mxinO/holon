@@ -1,5 +1,5 @@
 """A vetting worker (docs/m05-grammar.md D5), run by `vetting.Vetting` as `python -m <this module> <parent pid>
-<tokenizer file> <vocab size> <stop ids>`: it compiles each constraint it is sent and reports only the outcome — the
+<tokenizer fd> <vocab size> <stop ids>`: it compiles each constraint it is sent and reports only the outcome — the
 compile time, the compiled size and how far the compile grew its resident set at its peak — never the grammar
 (shipping and loading one costs more than compiling it). One JSON line per job on stdin, one per outcome on stdout.
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import re
 import resource
 import signal
 import sys
@@ -36,7 +37,7 @@ def _status(field: str) -> int:
         return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss << 10
 
 
-def main(parent: int, tokenizer_file: str, vocab_size: int, stops: list[int]) -> None:
+def main(parent: int, tokenizer: int, vocab_size: int, stops: list[int]) -> None:
     ctypes.CDLL(None, use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
     if os.getppid() != parent:          # the parent died before prctl: nobody will signal us
         sys.exit(1)
@@ -51,8 +52,8 @@ def main(parent: int, tokenizer_file: str, vocab_size: int, stops: list[int]) ->
 
     from .constraint import grammar
 
-    with open(tokenizer_file) as f:
-        info = xgr.TokenizerInfo.deserialize_json(f.read())
+    data = os.pread(tokenizer, os.fstat(tokenizer).st_size, 0)       # its own offset: siblings read it too
+    info = xgr.TokenizerInfo.deserialize_json(data.decode())
     if info.vocab_size != vocab_size or sorted(info.stop_token_ids) != stops:
         raise SystemExit(f"tokenizer mismatch: {info.vocab_size} / {info.stop_token_ids} vs {vocab_size} / {stops}")
     compiler = xgr.GrammarCompiler(info, max_threads=2, cache_enabled=False)
@@ -65,9 +66,10 @@ def main(parent: int, tokenizer_file: str, vocab_size: int, stops: list[int]) ->
             out = {"ok": True, "seconds": time.perf_counter() - start, "size": size,
                    "growth": _status("VmHWM") - base}
         except Exception as e:          # a compile error: the constraint's own fault
-            out = {"ok": False, "error": str(e).strip().splitlines()[-1] if str(e).strip() else type(e).__name__}
+            lines = str(e).strip().splitlines() or [type(e).__name__]
+            out = {"ok": False, "error": re.sub(r"^\[[\d:]+\] \S+:\d+: ", "", lines[-1])}   # no log stamp
         print(json.dumps(out), file=reply, flush=True)
 
 
 if __name__ == "__main__":
-    main(int(sys.argv[1]), sys.argv[2], int(sys.argv[3]), json.loads(sys.argv[4]))
+    main(int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), json.loads(sys.argv[4]))

@@ -6,8 +6,11 @@ bytes past its size at the job's start (`client`: the schema is too complex). A 
 
 One long-lived watchdog thread starts, watches (every `poll` seconds) and respawns the workers, so PR_SET_PDEATHSIG —
 which follows the thread that created a child — kills them with it. Workers are fresh interpreters (spawned, never
-forked from the engine's CUDA process) with a lean environment and no GPU, and get the engine's `TokenizerInfo` as a
-file. At most `queue` constraints wait for a worker; more are rejected `busy`.
+forked from the engine's CUDA process) with a lean environment and no GPU; they read the engine's `TokenizerInfo`
+from a file they inherit open, already unlinked (nothing to clean up, nothing for a tmp cleaner to remove). At most
+`queue` constraints wait for a worker; more are rejected `busy`. If workers keep dying before they are ready
+(`STARTS` in a row), the checker is down: waiting constraints and new ones are `busy` until a worker starts again
+(respawns back off, up to 30 s apart).
 """
 from __future__ import annotations
 
@@ -26,6 +29,8 @@ from holon.api import RequestError
 
 _LEAN = {"OMP_NUM_THREADS": "1", "TOKENIZERS_PARALLELISM": "false", "MALLOC_ARENA_MAX": "2", "CUDA_VISIBLE_DEVICES": ""}
 _PAGE = os.sysconf("SC_PAGE_SIZE")
+STARTS = 3                      # workers dying before they are ready, in a row, before the checker is down
+START_TIMEOUT = 60.0            # seconds a worker may take to become ready
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -43,6 +48,7 @@ class _Worker:
     proc: subprocess.Popen
     spawned: float
     ready: bool = False
+    broken: bool = False        # it wrote something that is not an outcome
     key: str | None = None      # the job it runs
     started: float = 0.0
     base: int = 0               # resident bytes at the job's start
@@ -58,16 +64,18 @@ def _resident(pid: int) -> int:
 
 class Vetting:
     def __init__(self, tokenizer_json: str, vocab_size: int, stops: list[int], workers: int = 2,
-                 timeout: float = 10.0, budget: int = 1 << 30, max_size: int = 64 << 20, queue: int = 8,
+                 timeout: float = 10.0, budget: int = 256 << 20, max_size: int = 64 << 20, queue: int = 8,
                  poll: float = 0.05) -> None:
         self.timeout, self.budget, self.max_size, self.queue, self.poll = timeout, budget, max_size, queue, poll
-        with tempfile.NamedTemporaryFile("w", prefix="holon-grammar-", suffix=".json", delete=False) as f:
-            f.write(tokenizer_json)
-        self._args = [f.name, str(vocab_size), json.dumps(sorted(stops))]
+        self._tokenizer = tempfile.TemporaryFile()
+        self._tokenizer.write(tokenizer_json.encode())
+        self._tokenizer.flush()
+        self._args = [str(self._tokenizer.fileno()), str(vocab_size), json.dumps(sorted(stops))]
         self._lock = threading.Lock()
         self._waiting: collections.deque[tuple[str, str]] = collections.deque()   # (key, constraint JSON)
         self._running: set[str] = set()
         self._done: list[tuple[str, Outcome]] = []
+        self._failed_starts = 0
         self.starts: list[tuple[float, int]] = []    # per worker start: seconds until ready, resident bytes then
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._watch, args=(workers,), name="grammar-vetting", daemon=True)
@@ -75,14 +83,14 @@ class Vetting:
 
     @property
     def alive(self) -> bool:
-        return self._thread.is_alive()
+        return self._thread.is_alive() and self._failed_starts < STARTS
 
     def submit(self, key: str, constraint: str) -> None:
-        """Vet `constraint` (JSON text) under `key`, unless it is already waiting or running."""
+        """Vet `constraint` (JSON text) under `key`, unless it is already waiting, running or reported."""
         if not self.alive:
             raise RequestError("busy", "the constraint checker is down")
         with self._lock:
-            if key in self._running or any(k == key for k, _ in self._waiting):
+            if key in self._running or any(k == key for k, _ in (*self._waiting, *self._done)):
                 return
             if len(self._waiting) >= self.queue:
                 raise RequestError("busy", f"{len(self._waiting)} constraints are waiting to be checked")
@@ -103,31 +111,40 @@ class Vetting:
         self._stop.set()
         if self._thread.is_alive() and self._thread is not threading.current_thread():
             self._thread.join(timeout=5)
-        try:
-            os.unlink(self._args[0])
-        except OSError:
-            pass
+        self._tokenizer.close()
 
     # -- the watchdog thread ----------------------------------------------------------------------------------------
     def _watch(self, n: int) -> None:
         workers: list[_Worker | None] = [None] * n
+        spawn_at = [0.0] * n                     # when an empty slot may spawn again (backoff after failed starts)
         sel = selectors.DefaultSelector()
         try:
             while not self._stop.is_set():
                 now = time.monotonic()
                 for i, w in enumerate(workers):
                     if w is None:
-                        workers[i] = w = self._spawn(sel, now)
+                        if now < spawn_at[i]:
+                            continue
+                        try:
+                            workers[i] = w = self._spawn(sel, now)
+                        except OSError:          # e.g. no memory to fork: a start that failed
+                            spawn_at[i] = now + self._failed_start()
+                            continue
                     failed = self._check(w, now)
                     if failed is not None:
                         self._kill(sel, w)
                         workers[i] = None
                         if w.key is not None:
                             self._finish(w, failed)
+                        if not w.ready:
+                            spawn_at[i] = now + self._failed_start()
                     elif w.ready and w.key is None:
                         self._assign(w, now)
                 for event, _ in sel.select(timeout=self.poll):
-                    self._read(sel, event.data)
+                    try:
+                        self._read(sel, event.data)
+                    except (ValueError, KeyError, TypeError):    # not an outcome: `_check` retires the worker
+                        event.data.broken = True
         finally:
             for w in workers:
                 if w is not None:
@@ -138,15 +155,22 @@ class Vetting:
         module = f"{__package__}.worker"
         # -P: the working directory is not on the path (a directory named like a module there would shadow it).
         proc = subprocess.Popen([sys.executable, "-P", "-m", module, str(os.getpid()), *self._args],
-                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=os.environ | _LEAN)
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=os.environ | _LEAN,
+                                pass_fds=(self._tokenizer.fileno(),))
         w = _Worker(proc, now)
         sel.register(proc.stdout, selectors.EVENT_READ, w)
         return w
 
     def _check(self, w: _Worker, now: float) -> Outcome | None:
-        """Why `w` must go: it died, its job ran past the timeout, or the job grew it past the budget."""
+        """Why `w` must go: it died, broke the protocol or did not start, its job ran past the timeout, or the job
+        grew it past the budget."""
         if w.proc.poll() is not None:
             return Outcome(False, "busy", f"the constraint checker exited ({w.proc.returncode})")
+        if w.broken:
+            return Outcome(False, "busy", "the constraint checker failed")
+        if not w.ready:
+            return Outcome(False, "busy", "the constraint checker did not start") \
+                if now - w.spawned > START_TIMEOUT else None
         if w.key is None:
             return None
         if now - w.started > self.timeout:
@@ -154,6 +178,17 @@ class Vetting:
         if _resident(w.proc.pid) - w.base > self.budget:
             return Outcome(False, "client", f"schema too complex: compiling it needs over {self.budget >> 20} MB")
         return None
+
+    def _failed_start(self) -> float:
+        """A worker died before it was ready: after STARTS in a row, fail the waiting constraints `busy`. Returns the
+        seconds to wait before the next try."""
+        self._failed_starts += 1
+        if self._failed_starts >= STARTS:
+            with self._lock:
+                self._done += [(k, Outcome(False, "busy", "the constraint checker cannot start"))
+                               for k, _ in self._waiting]
+                self._waiting.clear()
+        return min(30.0, self._failed_starts - 1.0)
 
     def _assign(self, w: _Worker, now: float) -> None:
         with self._lock:
@@ -175,8 +210,10 @@ class Vetting:
             return
         out = json.loads(line)
         if out.get("ready"):
-            w.ready = True
+            w.ready, self._failed_starts = True, 0
             self.starts.append((time.monotonic() - w.spawned, _resident(w.proc.pid)))
+        elif w.key is None:
+            raise ValueError("an outcome without a job")
         elif not out["ok"]:
             self._finish(w, Outcome(False, "client", f"invalid constraint: {out['error']}"))
         elif out["size"] > self.max_size:

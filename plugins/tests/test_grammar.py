@@ -50,11 +50,12 @@ def compiler():
 
 
 def _compiled(compiler, c):
-    """The compiled grammar of constraint `c`, or None where the plugin refuses it (a 400)."""
+    """The compiled grammar of constraint `c`, or None where the plugin refuses it (a 400: `check`, a compile
+    error)."""
     try:
         check(c)
         return compiler.compile_grammar(grammar(c))
-    except Exception:
+    except (ValueError, RuntimeError):
         return None
 
 
@@ -94,8 +95,7 @@ PROBES = [
     ({"type": "string", "enum": ["é", "日本", "🙂"]}, "日本", "日"),
     ({"type": "string", "minLength": 3}, "abc", "ab"), ({"type": "string", "maxLength": 3}, "abc", "abcd"),
     ({"type": "string", "pattern": "^[a-z]+\\d$"}, "ab1", "ab"),
-    ({"type": "string", "format": "email"}, "a@b.co", "nope"), ({"type": "string", "format": "uuid"},
-                                                                "123e4567-e89b-12d3-a456-426614174000", "nope"),
+    ({"type": "string", "format": "uuid"}, "123e4567-e89b-12d3-a456-426614174000", "nope"),
     ({"type": "string", "format": "uri"}, "http://a.b/c", "nope"), ({"type": "string", "format": "duration"}, "P1D",
                                                                      "nope"),
     ({"type": "integer", "minimum": 5}, 5, 4), ({"type": "integer", "exclusiveMaximum": 5}, 4, 5),
@@ -124,21 +124,44 @@ PROBES = [
 ]
 
 
-@pytest.mark.parametrize("draft", [*DRAFTS, "probes"])
+D4, D7 = DRAFTS["draft4"], DRAFTS["draft7"]
+# Schemas xgrammar reads differently from JSON Schema, each with an instance it would admit (found by review):
+# (schema, invalid instance). The reject list must refuse them.
+HOLES = [
+    ({**_obj({"a": {"$ref": "#/foo"}}), "foo": {"type": "string", "format": "date"}}, {"a": "2024-02-30"}),
+    ({**_obj({"a": {"$ref": "#/foo"}}), "foo": {"oneOf": [{"type": "integer"}, {"type": "integer", "minimum": 0}]}},
+     {"a": 5}),
+    ({"type": "object", "properties": {"a": {"$ref": "#/properties/b/default"}, "b": {
+        "type": "integer", "default": {"not": {"type": "integer"}}}}, "required": ["a"]}, {"a": 1}),
+    ({"type": "object", "properties": {"a": {"type": "string"}},
+      "patternProperties": {"^a": {"type": "string", "maxLength": 1}}}, {"a": "long"}),
+    ({"type": "object", "properties": {"ab1": {"type": "integer"}},
+      "propertyNames": {"type": "string", "maxLength": 2}}, {"ab1": 1}),
+    ({"$schema": D7, "type": "array", "prefixItems": [{}], "items": {"type": "integer"}}, ["a"]),
+    ({"$schema": D4, "type": "number", "minimum": 5, "exclusiveMinimum": 1}, 5),
+    ({"$schema": D4, "definitions": {"s": {"type": "string"}}, **_obj({"a": {
+        "id": "http://example.com/inner", "definitions": {"s": {"type": "integer"}}, **_obj({"b": {
+            "$ref": "#/definitions/s"}})}})}, {"a": {"b": "x"}}),
+]
+
+
+@pytest.mark.parametrize("draft", [*DRAFTS, "probes", "holes"])
 def test_accepted_strict_schemas_admit_only_valid_instances(compiler, draft):
-    groups = [(s, [{"data": ok, "valid": True}, {"data": bad, "valid": False}]) for s, ok, bad in PROBES] \
-        if draft == "probes" else _groups(draft)
+    groups = {"probes": [(s, [{"data": ok, "valid": True}, {"data": bad, "valid": False}]) for s, ok, bad in PROBES],
+              "holes": [(s, [{"data": bad, "valid": False}]) for s, bad in HOLES]}.get(draft) or _groups(draft)
     accepted, admitted = 0, []
     for schema, tests in groups:
         compiled = _compiled(compiler, {"type": "json_schema", "schema": schema, "strict": True})
         if compiled is None:
             continue
         accepted += 1
-        admitted += [(schema, t["data"]) for t in tests if not t["valid"] and _admits(compiled, _dump(t["data"]))]
+        admitted += [(schema, t["data"]) for t in tests if not t["valid"] and any(
+            _admits(compiled, text) for text in {_dump(t["data"]), json.dumps(t["data"])})]     # also \u escapes
         if draft == "probes":
             assert _admits(compiled, _dump(tests[0]["data"])), schema
     assert admitted == []
-    assert (accepted == len(PROBES)) if draft == "probes" else ((accepted == 0) == (draft == "draft3"))
+    assert accepted == {"probes": len(PROBES), "holes": 0, "draft3": 0}.get(draft, accepted) and (
+        accepted or draft in ("holes", "draft3"))
 
 
 def _depth(value) -> int:
@@ -187,7 +210,11 @@ REFUSED = [
     {"type": "triggered_tags", "triggers": ["<"], "tags": [{"type": "regex", "pattern": "x"}]},
     {**TAG, "content": {"type": "json_schema", "schema": {"oneOf": [{}]}, "strict": True}},    # strict, nested
     {"type": "regex", "pattern": "("},                                                          # a compile error
+    *({"type": "json_schema", "schema": s, "strict": True} for s in (                          # malformed schemas
+        {"anyOf": 5}, {"type": "string", "format": ["x"]}, {"type": "object", "properties": 5, "required": ["a"]})),
+    {"type": ["regex"]},
 ]
+
 
 
 def test_constraint_forms(compiler):
@@ -393,6 +420,27 @@ def test_masked_tokens_have_the_masked_law(toy, target, case):  # noqa: F811
     assert _law_holds(toy, target, case)
 
 
+def test_a_checker_that_cannot_start_fails_busy(monkeypatch):
+    # Workers that die before they are ready (here: an interpreter that exits at once) do not leave constraints
+    # waiting forever: after STARTS of them in a row the waiting ones fail `busy`, and new ones are refused.
+    from holon_plugins.grammar.xgrammar import vetting
+
+    monkeypatch.setattr(vetting, "sys", type("Sys", (), {"executable": "/bin/false"}))
+    checker = vetting.Vetting(xgr.TokenizerInfo(TOY_VOCAB, vocab_size=16, stop_token_ids=[STOP]).serialize_json(), 16,
+                              [STOP], workers=1)
+    try:
+        checker.submit("k", json.dumps(TOY))
+        deadline, done = time.monotonic() + 10, []
+        while not done and time.monotonic() < deadline:
+            time.sleep(0.05)
+            done = checker.drain()
+        assert [(k, o.kind) for k, o in done] == [("k", "busy")] and not checker.alive
+        with pytest.raises(ValueError, match="down"):
+            checker.submit("k2", json.dumps(TOY))
+    finally:
+        checker.shutdown()
+
+
 # -- end to end on the CPU ----------------------------------------------------------------------------------------
 
 QWEN3 = "Qwen/Qwen3-0.6B"
@@ -552,7 +600,8 @@ def test_a_failing_constraint_ends_only_its_request(e2e, qwen_checkpoint):
     # D5's outcomes on the plain engine beside requests that finish unchanged: a compile error (client), a compile
     # past a lowered timeout (busy, then refused at once from the negative cache), a compile the memory watchdog
     # kills under a lowered budget (client) — the respawned worker then vets a small schema under the same budget
-    # (the positive control). ignore_eos with a constraint, and a constraint no processor serves, are 400s.
+    # (the positive control). ignore_eos with a constraint, malformed constraints, stop tokens past the vocabulary,
+    # and a constraint no processor serves, are 400s.
     requests, refs, engines = e2e
     engine, vetting = engines["plain"], engines["plain"].processor.vetting
     slow = {"type": "string", "maxLength": 2000}                                # ≈ 3 s to compile
@@ -560,17 +609,17 @@ def test_a_failing_constraint_ends_only_its_request(e2e, qwen_checkpoint):
                                               for i in range(30)}}             # ≈ 2 s, 53 MB compiled
     failing = [{"type": "regex", "pattern": "("}, {"type": "json_schema", "schema": slow},
                {"type": "json_schema", "schema": large}]
-    reasons = []
+    reasons, defaults = [], (vetting.timeout, vetting.budget)
     try:
-        for c, timeout, budget in zip(failing, (10.0, 0.3, 10.0), (1 << 30, 1 << 30, 16 << 20), strict=True):
-            vetting.timeout, vetting.budget = timeout, budget
+        for c, lowered in zip(failing, ({}, {"timeout": 0.3}, {"budget": 16 << 20}), strict=True):
+            vetting.timeout, vetting.budget = lowered.get("timeout", defaults[0]), lowered.get("budget", defaults[1])
             got = _outcomes(engine, [(requests[0][0], dataclasses.replace(GREEDY, ext={KEY: c})), *requests[3:]])
             assert got[1:] == _expected(requests[3:], refs[3:])
             reasons.append(got[0][0][1])
         small = {"type": "json_schema", "schema": {"type": "string", "maxLength": 20}}       # 2 MB compiled
         [[(_, reason)]] = _outcomes(engine, [(requests[1][0], dataclasses.replace(GREEDY, ext={KEY: small}))])
     finally:
-        vetting.timeout, vetting.budget = 10.0, 1 << 30
+        vetting.timeout, vetting.budget = defaults
     assert reasons == ["error:client", "error:busy", "error:client"] and reason in ("stop", "length")
     assert len(vetting.starts) == 3                         # the first worker and two respawns
     with pytest.raises(ValueError, match="took over") as busy:                # the negative cache
@@ -578,5 +627,13 @@ def test_a_failing_constraint_ends_only_its_request(e2e, qwen_checkpoint):
     assert busy.value.kind == "busy"
     with pytest.raises(ValueError, match="ignore_eos"):
         engine.add(requests[0][0], dataclasses.replace(GREEDY, ignore_eos=True, ext=requests[0][1].ext))
+    deep = {"type": "json_object"}
+    for _ in range(5000):
+        deep = {"type": "sequence", "elements": [deep]}
+    for c, stops in [({"type": ["regex"]}, ()), ({"type": "json_schema", "schema": {"anyOf": 5}, "strict": True}, ()),
+                     (deep, ()), (requests[0][1].ext[KEY], (1 << 40,))]:
+        with pytest.raises(ValueError) as malformed:   # a 400, never an exception that ends the engine
+            engine.add(requests[0][0], dataclasses.replace(GREEDY, stop_token_ids=stops, ext={KEY: c}))
+        assert malformed.value.kind == "client"
     with pytest.raises(ValueError, match="serves"):
         _qwen_engine(qwen_checkpoint, slots={}).add(*requests[0])

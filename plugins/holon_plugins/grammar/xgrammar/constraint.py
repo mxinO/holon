@@ -40,10 +40,21 @@ _FIELDS: dict[str, tuple[set[str], set[str]]] = {
     "sequence": ({"elements"}, set()), "or": ({"elements"}, set())}
 
 
-def check(c: Any, path: str = "") -> None:
+def check(c: Any) -> None:
     """Raise ValueError naming what is wrong with constraint `c` (its form, or a strict schema's unsupported
-    feature)."""
-    if not isinstance(c, dict) or c.get("type") not in _FIELDS:
+    feature) — whatever the request holds: a malformed or too deeply nested one is a ValueError too."""
+    try:
+        _check(c, "")
+    except ValueError:
+        raise
+    except RecursionError:
+        raise ValueError(f"{KEY}: nested too deeply") from None
+    except Exception as e:                      # e.g. a schema keyword of the wrong JSON type
+        raise ValueError(f"{KEY}: malformed ({type(e).__name__}: {e})") from None
+
+
+def _check(c: Any, path: str) -> None:
+    if not isinstance(c, dict) or not isinstance(c.get("type"), str) or c["type"] not in _FIELDS:
         raise ValueError(f"{KEY}{path}: a dict whose type is one of {sorted(_FIELDS)}")
     required, optional = _FIELDS[c["type"]]
     if missing := required - set(c):
@@ -67,9 +78,9 @@ def check(c: Any, path: str = "") -> None:
     for i, sub in enumerate(c.get("elements", c.get("tags", []))):
         if c["type"] == "triggered_tags" and not (isinstance(sub, dict) and sub.get("type") == "tag"):
             raise ValueError(f"{KEY}{path}/tags/{i}: a tag")
-        check(sub, f"{path}/{'tags' if c['type'] == 'triggered_tags' else 'elements'}/{i}")
+        _check(sub, f"{path}/{'tags' if c['type'] == 'triggered_tags' else 'elements'}/{i}")
     if c["type"] == "tag":
-        check(c["content"], f"{path}/content")
+        _check(c["content"], f"{path}/content")
 
 
 def grammar(c: dict) -> xgr.Grammar:
@@ -109,16 +120,17 @@ _RUN = re.compile(r"\[(?: |\\[nrt])+\]\*")         # a whitespace run, e.g. [ \n
 
 
 def _capped(g: xgr.Grammar) -> xgr.Grammar:
-    """`g` with every unbounded whitespace run capped at WHITESPACE_CAP characters (a pattern's own such class,
-    inside a string, is capped too: stricter, never looser)."""
+    """`g` with every unbounded whitespace run between JSON tokens capped at WHITESPACE_CAP characters (a schema's
+    `pattern` prints as a quoted Regex(...) argument, which stays as it is)."""
     cap = f"{{0,{WHITESPACE_CAP}}}"
     return xgr.Grammar.from_ebnf(_TOKEN.sub(lambda m: m[0][:-1] + cap if _RUN.fullmatch(m[0]) else m[0], str(g)))
 
 
 # -- the strict reject list (D9) -------------------------------------------------------------------------------------
 
-_DRAFTS = {"json-schema.org/draft-04/schema", "json-schema.org/draft-06/schema", "json-schema.org/draft-07/schema",
-           "json-schema.org/draft/2019-09/schema", "json-schema.org/draft/2020-12/schema"}
+_DRAFTS = {"json-schema.org/draft-04/schema": 4, "json-schema.org/draft-06/schema": 6,
+           "json-schema.org/draft-07/schema": 7, "json-schema.org/draft/2019-09/schema": 2019,
+           "json-schema.org/draft/2020-12/schema": 2020}
 # Ignored or mishandled by xgrammar wherever they appear (R §6.2 and the oracle).
 _UNSUPPORTED = {"oneOf", "not", "if", "then", "else", "multipleOf", "dependencies", "dependentRequired",
                 "dependentSchemas", "contains", "minContains", "maxContains", "additionalItems", "$dynamicRef",
@@ -133,8 +145,9 @@ _TYPED = {"string": {"minLength", "maxLength", "pattern", "format"},
 _ASSERTIONS = {"type", "properties", "items", "enum", "const", "anyOf", "allOf", "$ref", "uniqueItems",
                *_UNSUPPORTED, *(k for ks in _TYPED.values() for k in ks)}
 # Formats the oracle checks xgrammar enforces exactly (its date, date-time, time, ipv4 and hostname are syntax only:
-# 2024-02-30, a leap second at 22:59; its ipv6 takes a leading zero in an embedded IPv4 octet).
-FORMATS = {"email", "uri", "uuid", "duration"}
+# 2024-02-30, a leap second at 22:59; its ipv6 takes a leading zero in an embedded IPv4 octet; its email takes a
+# \u00a9 escape in a quoted local part).
+FORMATS = {"uri", "uuid", "duration"}
 # Patterns xgrammar reads more loosely than ECMA 262: its \S and [^\s] exclude ASCII whitespace only.
 _LOOSE_PATTERN = re.compile(r"(?<!\\)(?:\\\\)*\\S|\[\^(?:[^\]\\]|\\.)*\\s")
 _PYTHON = {"string": str, "number": (int, float), "boolean": bool, "null": type(None), "array": list, "object": dict}
@@ -144,47 +157,49 @@ _SCHEMAS = ("additionalProperties", "items", "propertyNames", "unevaluatedProper
 
 
 def strict_violation(schema: Any) -> str | None:
-    """Why a strict request cannot have `schema` (the first reason found, with its JSON pointer), or None."""
-    if isinstance(schema, dict) and "$schema" in schema and _draft(schema["$schema"]) not in _DRAFTS:
-        return f"$schema {schema['$schema']!r} is not a supported draft (04, 06, 07, 2019-09, 2020-12)"
-    return _violation(schema, schema, "")
+    """Why a strict request cannot have `schema` (the first reason found, with its JSON pointer), or None. Every
+    subschema xgrammar reads is checked: those under the keywords it applies and those `$ref`s reach."""
+    draft = 2020
+    if isinstance(schema, dict) and "$schema" in schema:
+        draft = _DRAFTS.get(re.sub(r"^https?://|#$", "", schema["$schema"]) if isinstance(schema["$schema"], str)
+                            else "", 0)
+        if not draft:
+            return f"$schema {schema['$schema']!r} is not a supported draft (04, 06, 07, 2019-09, 2020-12)"
+    todo, seen = [(schema, "")], set()
+    while todo:                                 # a work list, not recursion: schemas may nest deeply
+        node, at = todo.pop()
+        if not isinstance(node, dict):
+            continue
+        if why := _local_violation(node, schema, at, draft):
+            return f"{at or '/'}: {why}"
+        if isinstance(ref := node.get("$ref"), str) and ref not in seen:   # resolved by `_local_violation`
+            seen.add(ref)
+            todo.append((_resolve(ref, schema), ref))
+        for k in _SCHEMA_DICTS:
+            todo += [(sub, f"{at}/{k}/{_escape(name)}") for name, sub in node.get(k, {}).items()]
+        for k in _SCHEMA_LISTS:
+            todo += [(sub, f"{at}/{k}/{i}") for i, sub in enumerate(node.get(k, []))]
+        todo += [(node[k], f"{at}/{k}") for k in _SCHEMAS if k in node]
+    return None
 
 
-def _draft(uri: Any) -> str:
-    return re.sub(r"^https?://|#$", "", uri) if isinstance(uri, str) else ""
-
-
-def _violation(node: Any, root: Any, at: str) -> str | None:
-    if not isinstance(node, dict):
-        return None
+def _local_violation(node: dict, root: Any, at: str, draft: int) -> str | None:
     keys = set(node)
-    why = next((f"{k} is not supported" for k in sorted(keys & _UNSUPPORTED)), None)
-    if why is None and at and ("$schema" in node or "$id" in node):
-        why = "an embedded schema resource ($schema or $id below the root)"
-    if why is None:
-        why = _local_violation(node, root, keys)
-    if why is not None:
-        return f"{at or '/'}: {why}"
-    for k in _SCHEMA_DICTS:
-        for name, sub in (node.get(k) or {}).items() if isinstance(node.get(k), dict) else ():
-            if why := _violation(sub, root, f"{at}/{k}/{_escape(name)}"):
-                return why
-    for k in _SCHEMA_LISTS:
-        for i, sub in enumerate(node.get(k) or []):
-            if why := _violation(sub, root, f"{at}/{k}/{i}"):
-                return why
-    return next((why for k in _SCHEMAS if k in node and (why := _violation(node[k], root, f"{at}/{k}"))), None)
-
-
-def _local_violation(node: dict, root: Any, keys: set[str]) -> str | None:
+    if unsupported := sorted(keys & _UNSUPPORTED):
+        return f"{unsupported[0]} is not supported"
+    if at and ("$schema" in node or "$id" in node or isinstance(node.get("id"), str)):
+        return "an embedded schema resource ($schema, $id or id below the root)"
     if len(node.get("allOf") or []) >= 2:
         return "allOf with two or more branches is not supported"
     if node.get("uniqueItems") is True:
         return "uniqueItems is not supported"
     if isinstance(node.get("items"), list):
         return "items as an array (a tuple) is not supported; use prefixItems"
-    if any(isinstance(node.get(k), bool) for k in ("exclusiveMinimum", "exclusiveMaximum")):
-        return "boolean exclusiveMinimum / exclusiveMaximum (draft 4) are not supported"
+    if draft < 2020 and "prefixItems" in keys:
+        return "prefixItems before draft 2020-12 (it is not a keyword there) is not supported"
+    if (draft == 4 or any(isinstance(node.get(k), bool) for k in ("exclusiveMinimum", "exclusiveMaximum"))) \
+            and keys & {"exclusiveMinimum", "exclusiveMaximum"}:
+        return "draft 4's exclusiveMinimum / exclusiveMaximum (flags on minimum / maximum) are not supported"
     if "$ref" in node and (why := _ref_violation(node["$ref"], root)):
         return why
     for head in ("$ref", "enum", "const", "anyOf", "allOf"):
@@ -195,10 +210,14 @@ def _local_violation(node: dict, root: Any, keys: set[str]) -> str | None:
     for kind, words in _TYPED.items():
         if (untyped := keys & words) and not types & ({kind, "integer"} if kind == "number" else {kind}):
             return f"{sorted(untyped)} without type {kind!r} are not supported"
-    if isinstance(node.get("required"), list) and (missing := set(node["required"]) - set(node.get("properties", {}))):
+    if "required" in node and (missing := set(node["required"]) - set(node.get("properties", {}))):
         return f"required {sorted(missing)} not in properties"
-    patterns = [node["pattern"]] if isinstance(node.get("pattern"), str) else []
-    patterns += node["patternProperties"] if isinstance(node.get("patternProperties"), dict) else []
+    if "propertyNames" in node and "properties" in node:
+        return "propertyNames beside properties is not supported (xgrammar checks only the other names)"
+    if names := set(node.get("properties", {})) & _matched(node.get("patternProperties", {}), node):
+        return f"properties {sorted(names)} also match patternProperties (xgrammar applies only properties)"
+    patterns = [node["pattern"]] if "pattern" in node else []
+    patterns += list(node.get("patternProperties", {}))
     if loose := next((p for p in patterns if _LOOSE_PATTERN.search(p)), None):
         return f"pattern {loose!r}: \\S and [^\\s] are not supported (ECMA 262 whitespace is Unicode's)"
     if "pattern" in node and keys & {"format", "minLength", "maxLength"}:
@@ -206,6 +225,15 @@ def _local_violation(node: dict, root: Any, keys: set[str]) -> str | None:
     if "format" in node and node["format"] not in FORMATS:
         return f"format {node['format']!r} is not supported (supported: {sorted(FORMATS)})"
     return None
+
+
+def _matched(patterns: dict, node: dict) -> set[str]:
+    """The `properties` names some `patternProperties` pattern matches (a pattern Python cannot read: all)."""
+    names = set(node.get("properties", {}))
+    try:
+        return {n for n in names if any(re.search(p, n) for p in patterns)}
+    except re.error:
+        return names
 
 
 def _allowed_beside(node: dict, head: str) -> set[str]:
@@ -229,6 +257,13 @@ def _ref_violation(ref: Any, root: Any) -> str | None:
     """Only local JSON-pointer refs that resolve ('#' or '#/…'); remote and anchor refs are refused."""
     if not isinstance(ref, str) or not (ref == "#" or ref.startswith("#/")):
         return f"$ref {ref!r}: only local refs ('#/…') are supported"
+    return None if _resolve(ref, root) is not _MISSING else f"$ref {ref!r} does not resolve"
+
+
+_MISSING = object()
+
+
+def _resolve(ref: str, root: Any) -> Any:
     node = root
     for part in ref[2:].split("/") if ref != "#" else ():
         part = re.sub(r"%([0-9A-Fa-f]{2})", lambda m: chr(int(m[1], 16)), part).replace("~1", "/").replace("~0", "~")
@@ -237,8 +272,8 @@ def _ref_violation(ref: Any, root: Any) -> str | None:
         elif isinstance(node, list) and part.isdigit() and int(part) < len(node):
             node = node[int(part)]
         else:
-            return f"$ref {ref!r} does not resolve"
-    return None
+            return _MISSING
+    return node
 
 
 def _escape(name: str) -> str:

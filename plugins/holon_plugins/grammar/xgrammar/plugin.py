@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import hashlib
 import json
 import time
 import weakref
@@ -32,6 +33,7 @@ from .constraint import KEY, check, grammar
 from .vetting import Outcome, Vetting
 
 BUSY_TTL = 600.0                                 # seconds a `busy` refusal is remembered
+REMEMBERED = 4096                                # vetted and refused constraints remembered (the latest)
 
 
 class Plugin:
@@ -44,12 +46,13 @@ class Plugin:
         info = xgr.TokenizerInfo.from_huggingface(vocab.tokenizer(), vocab_size=vocab.size, stop_token_ids=stops)
         return XGrammar(info, stops, workers=int(opts.get("grammar.workers", 2)),
                         timeout=float(opts.get("grammar.timeout", 10.0)),
-                        budget=int(float(opts.get("grammar.budget", 1024)) * (1 << 20)))
+                        budget=int(float(opts.get("grammar.budget", 256)) * (1 << 20)))
 
 
 @dataclasses.dataclass(slots=True, eq=False)
 class _Request:
-    key: str                                     # its constraint, as JSON text
+    key: str                                     # its constraint's digest
+    text: str                                    # its constraint, as JSON text
     stops: list[int]
     stop_row: torch.Tensor                       # the mask allowing only its stop tokens
     grammar: xgr.CompiledGrammar | None = None
@@ -82,20 +85,21 @@ def probe(matcher: xgr.GrammarMatcher, drafts: list[int], out: torch.Tensor, sto
 
 class XGrammar:
     def __init__(self, info: xgr.TokenizerInfo, stops: list[int], *, workers: int = 2, timeout: float = 10.0,
-                 budget: int = 1 << 30, cache_bytes: int = 512 << 20, backlog: float = 10.0) -> None:
+                 budget: int = 256 << 20, cache_bytes: int = 512 << 20, backlog: float = 10.0) -> None:
         self.info, self.stops, self.cache_bytes, self.backlog = info, frozenset(stops), cache_bytes, backlog
         self.mask_width = xgr.get_bitmask_shape(1, info.vocab_size)[1]
-        self.vetting = Vetting(info.serialize_json(), info.vocab_size, sorted(info.stop_token_ids), workers,
-                               timeout, budget)
         self._compiler = xgr.GrammarCompiler(info, max_threads=2, cache_enabled=False)
-        self._helpers = ThreadPoolExecutor(2, thread_name_prefix="grammar-compile")
-        weakref.finalize(self, _stop, self.vetting, self._helpers)       # engines are often dropped, not closed
         self._requests: dict[str, _Request] = {}
         self._cache: collections.OrderedDict[str, xgr.CompiledGrammar] = collections.OrderedDict()
         self._compiling: dict[str, Future] = {}
-        self.vetted: dict[str, Outcome] = {}          # constraints the workers compiled
-        self._refused: dict[str, tuple[str, str, float]] = {}     # constraint -> kind, message, until
+        # Constraints the workers compiled, and refused ones (kind, message, until): by digest, the latest REMEMBERED.
+        self.vetted: collections.OrderedDict[str, Outcome] = collections.OrderedDict()
+        self._refused: collections.OrderedDict[str, tuple[str, str, float]] = collections.OrderedDict()
         self.drafts_refused = 0
+        self._helpers = ThreadPoolExecutor(2, thread_name_prefix="grammar-compile")
+        self.vetting = Vetting(info.serialize_json(), info.vocab_size, sorted(info.stop_token_ids), workers,
+                               timeout, budget)
+        self.shutdown = weakref.finalize(self, _stop, self.vetting, self._helpers)   # engines are often just dropped
 
     # -- the request lifecycle (engine thread) ---------------------------------------------------------------------
     def open(self, rid: str, params: Any, prompt: list[int]) -> bool:
@@ -106,18 +110,20 @@ class XGrammar:
             raise RequestError("client", "ignore_eos cannot be combined with a constraint (it ends at a stop token)")
         try:
             check(c)
-        except ValueError as e:
+            text = json.dumps(c, separators=(",", ":"))
+        except (ValueError, TypeError, RecursionError) as e:
             raise RequestError("client", str(e)) from None
         stops = sorted(self.stops | set(params.stop_token_ids))
-        if not stops:
-            raise RequestError("client", "a constraint needs a stop token; the model declares none")
-        key = json.dumps(c, separators=(",", ":"))
-        self._known_refusal(key)
+        if not stops or not all(isinstance(t, int) and 0 <= t < self.info.vocab_size for t in stops):
+            raise RequestError("client", f"a constraint needs stop tokens within the vocabulary, not {stops}")
+        key = hashlib.sha256(text.encode()).hexdigest()
         if key not in self._cache:
-            self._prepare(key)
+            self._known_refusal(key)
+            if key not in self._compiling:
+                self._compile(key, text) if key in self.vetted else self.vetting.submit(key, text)
         row = np.zeros(self.mask_width, dtype=np.uint32)
         np.bitwise_or.at(row, np.array(stops) >> 5, np.uint32(1) << (np.array(stops, dtype=np.uint32) & 31))
-        self._requests[rid] = _Request(key, stops, torch.from_numpy(row.view(np.int32)))
+        self._requests[rid] = _Request(key, text, stops, torch.from_numpy(row.view(np.int32)))
         return True
 
     def ready(self, rid: str) -> bool:
@@ -126,17 +132,18 @@ class XGrammar:
             return True
         for key, outcome in self.vetting.drain():
             if outcome.ok:
-                self.vetted[key] = outcome
-            else:
-                self._refused[key] = outcome.kind, outcome.message, (
-                    float("inf") if outcome.kind == "client" else time.monotonic() + BUSY_TTL)
+                _remember(self.vetted, key, outcome)
+                self._refused.pop(key, None)
+            elif key not in self._cache and key not in self.vetted:   # an older run of a constraint known to work
+                until = float("inf") if outcome.kind == "client" else time.monotonic() + BUSY_TTL
+                _remember(self._refused, key, (outcome.kind, outcome.message, until))
         key = req.key
         if (compiled := self._cache.get(key)) is None:
-            self._known_refusal(key)
             future = self._compiling.get(key)
             if future is None:
+                self._known_refusal(key)
                 if key in self.vetted:
-                    self._compile(key)
+                    self._compile(key, req.text)
                 elif not self.vetting.alive:
                     raise RequestError("busy", "the constraint checker is down")
                 return False
@@ -146,7 +153,7 @@ class XGrammar:
             try:
                 compiled = future.result()
             except Exception as e:                  # it compiled in the worker: ours to retry later
-                self._refused[key] = "busy", f"compiling the constraint failed: {e}", time.monotonic() + BUSY_TTL
+                _remember(self._refused, key, ("busy", f"compiling failed: {e}", time.monotonic() + BUSY_TTL))
                 raise RequestError("busy", f"compiling the constraint failed: {e}") from None
             self._cache[key] = compiled
             while sum(g.memory_size_bytes for g in self._cache.values()) > self.cache_bytes and len(self._cache) > 1:
@@ -168,45 +175,35 @@ class XGrammar:
         req = self._requests.pop(rid, None)
         if req is None or req.grammar is not None or any(r.key == req.key for r in self._requests.values()):
             return
-        future = self._compiling.get(req.key)
-        if future is not None and future.cancel():
-            del self._compiling[req.key]
+        if (future := self._compiling.pop(req.key, None)) is not None:
+            future.cancel()                         # a running compile ends unreferenced
         self.vetting.cancel(req.key)
-
-    def shutdown(self) -> None:
-        _stop(self.vetting, self._helpers)
 
     # -- masks ---------------------------------------------------------------------------------------------------
     def fill(self, rows: list[Any], buf: np.ndarray) -> None:
         masks = torch.from_numpy(buf)
         for row in rows:
-            req, out = self._requests[row.seq.rid], masks[row.start: row.start + row.n]
+            out, req = masks[row.start: row.start + row.n], self._requests.get(row.seq.rid)
             try:
                 self.drafts_refused += probe(self._matcher(req, row.seq.index), row.drafts, out, req.stop_row)
             except Exception as e:                  # never raise here: the row's commit reports it
                 out[:] = -1
-                req.failed[row.seq.index] = f"the constraint's mask failed: {e}"
+                if req is not None:
+                    req.failed[row.seq.index] = f"the constraint's mask failed: {e}"
 
     def apply(self, logits: torch.Tensor, mask: torch.Tensor, rows: torch.Tensor) -> None:
         kernel.apply(logits, mask, rows)
 
     # -- compiling -----------------------------------------------------------------------------------------------
-    def _prepare(self, key: str) -> None:
-        if key in self._compiling:
-            return
-        if key in self.vetted:
-            self._compile(key)
-        else:
-            self.vetting.submit(key, key)
-
-    def _compile(self, key: str) -> None:
-        queued = sum(self.vetted[k].seconds for k, f in self._compiling.items() if not (f.running() or f.done()))
+    def _compile(self, key: str, text: str) -> None:
+        queued = sum(self.vetted[k].seconds for k, f in self._compiling.items()
+                     if k in self.vetted and not (f.running() or f.done()))
         if queued + self.vetted[key].seconds > self.backlog:
             raise RequestError("busy", f"{queued:.1f} s of constraint compiles are queued")
-        self._compiling[key] = self._helpers.submit(self._build, key)
+        self._compiling[key] = self._helpers.submit(self._build, text)
 
-    def _build(self, key: str) -> xgr.CompiledGrammar:
-        return self._compiler.compile_grammar(grammar(json.loads(key)))
+    def _build(self, text: str) -> xgr.CompiledGrammar:
+        return self._compiler.compile_grammar(grammar(json.loads(text)))
 
     def _known_refusal(self, key: str) -> None:
         if (refused := self._refused.get(key)) is not None:
@@ -215,10 +212,18 @@ class XGrammar:
                 raise RequestError(kind, message)
             del self._refused[key]
 
-    def _matcher(self, req: _Request, index: int) -> xgr.GrammarMatcher:
+    @staticmethod
+    def _matcher(req: _Request, index: int) -> xgr.GrammarMatcher:
         if (matcher := req.matchers.get(index)) is None:
             matcher = req.matchers[index] = xgr.GrammarMatcher(req.grammar, override_stop_tokens=req.stops)
         return matcher
+
+
+def _remember(memory: collections.OrderedDict, key: str, value: Any) -> None:
+    memory[key] = value
+    memory.move_to_end(key)
+    if len(memory) > REMEMBERED:
+        memory.popitem(last=False)
 
 
 def _stop(vetting: Vetting, helpers: ThreadPoolExecutor) -> None:
