@@ -27,7 +27,8 @@ class Paged:
 @dataclasses.dataclass(frozen=True, slots=True)
 class Slot:
     """Fixed-size state per request: request slot s owns units s·(1 + draft_slots) … + draft_slots of its pool (the
-    padding slot's units too, so graph padding rows have state to read and write)."""
+    padding slot's units too, so graph padding rows have state to read and write; the padding slot is `max_seqs`,
+    and its units are read only by padding rows, which start no request: a sink units may write to)."""
 
     unit_bytes: int
     draft_slots: int = 0         # extra slots for verify intermediates
@@ -126,6 +127,14 @@ class PrefixView(Protocol):
     def payload(self, block: int) -> Payload | None: ...
 
     def blocks(self, upto: int) -> int: ...
+
+
+def rewind_modules(module: torch.nn.Module, ctx: StepCtx) -> None:
+    """Roll back every submodule of `module` that defines `rewind` (the core does this for the target; a drafter for
+    the auxiliary models it runs, with `ctx.view(namespace)`)."""
+    for m in module.modules():
+        if callable(getattr(m, "rewind", None)):
+            m.rewind(ctx)
 
 
 class Rewindable(Protocol):

@@ -91,6 +91,9 @@ class AuxModels:
         """`n` planners per auxiliary state group, one per drafter sub-step: kernel instances hold per-step buffers,
         and a sub-step's lengths exist only on the device (`planner.device_lens`)."""
         out: dict[str, list[Any]] = {}
+        if n and (recurrent := [b.spec.name for b in self.bound if not isinstance(b.spec.shape, Paged)]):
+            raise PluginError(f"{recurrent}: drafter sub-steps over per-request (recurrent) aux state are not "
+                              "supported — a sub-step would advance it past the committed tokens")
         for namespace, layers in self._layers:
             child = self.ctx.child(namespace, {"planner.device_lens": True})
             for _ in range(n):

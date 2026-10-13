@@ -12,6 +12,7 @@ minimum pools → capture the decode graphs.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import gc
 import itertools
 import secrets
@@ -19,7 +20,7 @@ import secrets
 import numpy as np
 import torch
 
-from holon.api import BatchPlan, Logprobs, SamplingParams, Seq, Status, TokenDelta, sequence_seed
+from holon.api import BatchPlan, Logprobs, SamplingParams, Seq, Status, TokenDelta, rewind_modules, sequence_seed
 
 from . import platform
 from .assembly import AuxModels, bind_state, prefix_index, resolve_model
@@ -138,8 +139,8 @@ class Engine:
                                lookahead=getattr(drafter, "lookahead", None), host_lens_only=host_lens)
         # What rolls back after a verify (api.Rewindable): the target's modules and the slot objects. An auxiliary
         # model runs inside `Drafter.run`, after this: rolling it back is the drafter's call.
-        found = [*model.modules(), *(o for o in (sampler, verifier, drafter, self.policy) if o is not None)]
-        rewinders = [o for o in found if callable(getattr(o, "rewind", None))]
+        slot_objects = [o for o in (sampler, verifier, drafter, self.policy) if callable(getattr(o, "rewind", None))]
+        rewinders = [functools.partial(rewind_modules, model), *(o.rewind for o in slot_objects)]
         self.executor = Executor(cfg, self.device, model, self.spec.vocab, sampler, self.state, planners,
                                  verifier, drafter, pools=self.ledger.pools, rewinders=rewinders,
                                  sub_planners=sub_planners, substeps=substeps,

@@ -61,6 +61,7 @@ from .state import (
     StateKind,
     StateKindFactory,
     StateSpec,
+    rewind_modules,
 )
 from .telemetry import Event
 from .terms import Ref, canonical_hash, parse_versioned, to_term
@@ -76,5 +77,5 @@ __all__ = [
     "Scale", "SchedulePolicy", "Scheme", "SchemeImpl", "Seq", "SeqTable", "SeqView", "ShapeKey", "Slot", "StateKind",
     "StateKindFactory", "StateSpec", "Status", "StepCtx", "TargetView", "TokenDelta", "TokenSrc", "Tokenizer",
     "Tunable", "Unit", "UnitPin", "Verifier", "WeightMap", "WeightRule", "WeightSource", "canonical_hash",
-    "parse_versioned", "sequence_seed", "to_term",
+    "parse_versioned", "rewind_modules", "sequence_seed", "to_term",
 ]

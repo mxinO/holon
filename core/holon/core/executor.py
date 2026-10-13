@@ -103,7 +103,7 @@ class Executor:
                  sub_planners: dict[str, list[Any]] | None = None, substeps: tuple[int, int] = (0, 0),
                  namespaces: list[str] = ()) -> None:
         """`cfg`: the EngineConfig (sizes, graphs on or off); `pools`: every ledger pool, by name (for MemOps);
-        `rewinders`: what rolls back past rejected drafts after each verify (api.Rewindable);
+        `rewinders`: what rolls back past rejected drafts after each verify (`rewind(ctx)` callables);
         `sub_planners`: per auxiliary state group, one planner per drafter sub-step; `substeps`: how many sub-steps a
         step may have and their widest row (the drafter's declarations); `namespaces`: the auxiliary models'."""
         self.cfg, self.device, self.model, self.vocab, self.state = cfg, device, model, vocab, state
@@ -259,8 +259,8 @@ class Executor:
             if (plan.n_logits > 1).any():           # verify rows
                 out, accepts = self.verifier.verify(logits.float(), ctx)
                 sampled = self._store(ctx, out.tokens, accepts)
-                for r in self.rewinders:            # past the rejected drafts, before anything drafts from it
-                    r.rewind(ctx)
+                for rewind in self.rewinders:       # past the rejected drafts, before anything drafts from it
+                    rewind(ctx)
             elif plan.n_logits.any():
                 out = self.sampler.sample(logits.float(), ctx)
                 sampled = self._store(ctx, out.tokens)

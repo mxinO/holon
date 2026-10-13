@@ -17,8 +17,8 @@ from zero state and never reads its unit, so a unit reused by a new sequence nee
   verify rows and their replays, M0.4 D6) and `(handle, q [T, Hk, Dk], k [T, Hk, Dk], v [T, Hv, Dv], a [T, Hv],
   b [T, Hv], a_log [Hv] f32, dt_bias [Hv] f32, state [units, Hv, Dv, Dk] f32, slots [R], has_init [R],
   snapshot=None [units', Hv, Dv, Dk] f32, out_slots=None [R]) -> o [T, Hv, Dv]` of v's dtype (`out_slots`: the units
-  each row's final state is written to instead of its `slots` unit; a deployment that passes it selects with the fact
-  `out_slots=True`): q and k l2-normalised
+  each row's final state is written to instead of its `slots` unit; a deployment that passes it or plans `per_token`
+  selects with the fact `out_slots=True`): q and k l2-normalised
   (`x · rsqrt(Σx² + 1e-6)`) in f32, q scaled by Dk^-½, `g = −exp(a_log) · softplus(a + dt_bias)`, `β = sigmoid(b)`;
   per row from `S = state[slots[r]]` (zeros without `has_init`), for each token `S ← e^g S; S += k (β(v − Sk))ᵀ;
   o = S q` (S is [Dv, Dk] per v-head), and the final S written back. V-head j reads q/k head `j // (Hv/Hk)`

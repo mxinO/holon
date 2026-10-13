@@ -96,6 +96,8 @@ class GatedDeltaRule:
                 cu_seqlens=h.cu_seqlens, ssm_state_indices=slots, use_qk_l2norm_in_kernel=True,
                 has_initial_state=has_init, v_head_tiled=self.tiled, out_indices=once)
             return o[0]
+        if out_slots is not None:
+            raise ValueError("out_slots needs a per-token plan (the chunked path writes the rows' own units)")
         if h.live is not None:
             slots, has_init = slots.index_select(0, h.live), has_init.index_select(0, h.live)
         units = slots.long()

@@ -1,4 +1,4 @@
-from holon.api import AuxSpec, Ref, WeightMap
+from holon.api import AuxSpec, Ref, WeightMap, rewind_modules
 from torch import nn
 
 from ..oracle import ORACLE
@@ -51,9 +51,7 @@ class Drafter:
         aux = ctx.view("aux")
         self.aux.layers[0](self.embed(ctx.batch.dev.input_ids), aux)
         if (ctx.batch.plan.n_logits > 1).any():          # a verify step: roll the aux model back as the core did
-            for module in self.aux.modules():           # the target (its recurrent layers keep only accepted tokens)
-                if hasattr(module, "rewind"):
-                    module.rewind(aux)
+            rewind_modules(self.aux, aux)                # the target (its recurrent layers keep only accepted tokens)
         if not ORACLE.ahead:
             self.oracle.rewound = None
             ctx.seq_table.n_draft.zero_()

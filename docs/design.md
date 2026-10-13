@@ -798,11 +798,10 @@ while True:
   (nano-vllm style). **Eviction is joint per chain**: evicting a recurrent checkpoint also releases the KV pages that
   only it made reachable, so KV and checkpoint LRUs cannot strand each other.
 - **Publish and adopt are device MemOps** (§7.3), not host reads of live state: `publish` emits "copy slot →
-  checkpoint" ordered after the device commit (in the sample graph) of the step that ends at the boundary — so with
-  `replay` verify the copied state is the post-accept state — and the checkpoint is
-  registered in the index by `host_commit` only if `n_accept` covers that boundary; `adopt` emits "copy checkpoint →
-  active slot" before the forward that uses it; source checkpoints stay pinned until the copy completes. The spec
-  transform caps verify windows at checkpoint boundaries.
+  checkpoint" ordered after the sample of the step that ends at the boundary, and the checkpoint is registered in
+  the index at that step's commit only if committed tokens cover it; `adopt` emits "copy checkpoint → active slot"
+  before the forward that uses it; source checkpoints stay pinned until the copy completes. Verify rows, and requests
+  with an uncommitted one, publish nothing: their end is known only on the device (M0.4 §3.7).
 - Because the index is page-granular, recurrent checkpoints are taken at page boundaries. For agent traffic the
   default policy checkpoints at the **end of each prompt** (chat templates may re-render earlier turns, e.g. strip
   reasoning, so anchors on sampled tool-call tokens are unreliable); the chunk is cut at `floor(end / page) · page`.
@@ -821,8 +820,8 @@ while True:
 - **M0.3**: `Slot` state joins through payloads. A kind that publishes asks the scheduler to `cut` prefill rows at
   its policy's positions (`std.state.recurrent`: the prompt's last aligned block, or every n tokens); when a row's
   step ends at `next_publish`, `publish` returns a payload unit of the kind's plugin pool and a copy MemOp run after
-  the sample; the core registers the payload on the block's entry at `host_commit` only if committed tokens cover
-  it. Admission takes the fixed point above; the adopting request pins the payload until its copy MemOp is enqueued
+  the sample; the core registers the payload on the block's entry at the step's commit only if committed tokens
+  cover it. Admission takes the fixed point above; the adopting request pins the payload until its copy MemOp is enqueued
   (before the forward of its first step). MemOps run eagerly around the step, never inside a graph, unit by unit
   with no temporary. A full payload pool evicts its own least-recently-used payloads, interior entries included,
   never paged units; an evicted payload only shortens the hits that would have resumed there (the kind's
@@ -918,12 +917,11 @@ def step(self):
     if self.depth >= 1 and len(self.inflight) >= self.depth:           # overlap: commit oldest step while GPU runs
         self.commit(self.inflight.popleft())
     host_in = {p.name: p.host_input(plan) for p in self.host_input_stages}       # e.g. grammar bitmasks
-    self.exec.launch_sample(h, host_in)    # GPU (graph): logits procs → Sampler|Verifier → Rewindable.commit (device) → drafters
+    self.exec.launch_sample(h, host_in)    # GPU (graph): logits procs → Sampler|Verifier → rewind (device) → drafter
     self.inflight.append(h)
 
 def commit(self, h):                                                    # CPU after D2H event of step h
-    for r in self.rewindables: r.host_commit(h.view)                    # frees, ledger trims
-    finish/stop/stream; apply deferred frees; apply control-plane requests
+    finish/stop/stream; observe drafts; apply deferred frees; apply control-plane requests
 ```
 
 A step whose rows all stop mid-prompt (chunked prefill) samples nothing: it runs the trunk, which writes their state
@@ -1008,17 +1006,17 @@ device inputs (`DEVICE_LAST`/`DEVICE_DRAFT`) are already consistent.
 
 ```python
 class Rewindable(Protocol):
-    def commit(self, slots: Tensor, n_accept: Tensor, path: Tensor | None = None) -> None  # device, graph-capturable
-    def host_commit(self, view: CommitView) -> None                                       # optional, CPU
-    verify_mode: Literal["trivial", "checkpoint_slots", "replay", "snapshot"]
+    def rewind(self, ctx: StepCtx, path: Tensor | None = None) -> None   # device, graph-capturable
 ```
 
-Implemented by every per-sequence state: paged KV (truncate), GDN/Mamba (select `draft_slots[n_accept]` or replay
-Strata-style), grammar matcher, stop-token detector, penalties, drafter KV. Memory matters for recurrent state:
-Qwen3.5-9B GDN state is fp32, ≈ 48 MiB per sequence per copy, so `checkpoint_slots` with k drafts costs
-(k+1)× that per running Seq. Consumer-GPU deployments default to `replay`; `checkpoint_slots` is opt-in with a
-capped `draft_slots`. `path` is in the signature from day 1;
-it stays `None` until tree verification (v2).
+After the verifier has written `SeqTable.n_accept` for a step's verify rows, the core calls `rewind(ctx)` on every
+module of the target and every loaded slot object (sampler, verifier, drafter, policy) that defines it, before the
+drafter runs. Paged state needs none — it rewinds by length. Recurrent state rolls back by **masked replay** (M0.4
+D6): a verify row keeps the state it started from (its final state goes to a sink unit, its inputs to a replay
+buffer), and `rewind` reruns the recurrence from it with the update masked to identity past the accepted tokens. Per-
+token state copies (`checkpoint_slots`) were dropped: (k + 1) × 147 MiB per sequence for Qwen3.8-27B. An auxiliary
+model a drafter runs (§7.6) is rolled back by that drafter, after its own pass. `path` stays `None` until tree
+verification (v2).
 
 ### 7.6 Sampling and decoding
 
@@ -1030,25 +1028,30 @@ it stays `None` until tree verification (v2).
   engine gives every sequence a concrete seed (`n > 1` siblings derive
   theirs from the request's), and computes prompt logprobs from the trunk's hidden states in row chunks. Sampler, processors and verifiers declare whether they accept
   vocab-sharded logits or need gathered logits (TP seam, §8).
-- Speculative decoding = four roles:
-  - `Drafter` (EAGLE-3, MTP, draft model, GPU n-gram, CPU prompt lookup); declares required taps/shared modules.
-  - `DraftPolicy` (single): per-Seq `(source, k)` from a finite set; `observe()` for adaptive cost models (Strata).
-  - `Verifier` (single): replaces the Sampler during verify (greedy-exact, rejection, typical; tree in v2).
-  - `PlanTransform`: appends `DEVICE_DRAFT` rows and sets the `spec.q` ShapeKey axis. Seqs with different k in one
-    step are padded to the step's `spec.q` (the max k); the DraftPolicy chooses k from a finite declared set.
-- Rollback = core commit fan-out to all Rewindables.
+- **Speculative decoding** (M0.4, `docs/m04-spec.md`) = three roles, all plugins:
+  - `DraftPolicy` (`draft_policy` slot): k **per step**, `k(seqs)` from a finite declared set; `observe(seq, k,
+    n_draft, n_accept)` after each commit (Strata-style cost models later).
+  - `Drafter` (`drafter` slot; MTP, DFlash, GPU n-gram; EAGLE-3 and draft models later): built against a
+    `TargetView` (the target's shared `embed`/`norm`/`lm_head`, its checkpoint, its model plugin's `draft_head`);
+    `admit(slot, history)` at admission; `run(ctx, h)` after **every** step's sample stage with the trunk's output, in
+    the step's graph: it writes its own state for the step's tokens, then `SeqTable.draft_tokens` and `n_draft` for
+    the rows that sampled. It may build **auxiliary models** (`BuildCtx.aux_model`: units in a child context whose
+    state names, pools, tables and planners live under a namespace; `StepCtx.view(namespace)` at step time) and run
+    **sub-steps** (`StepCtx.substep(q, offset)`: its own rows at positions past the step's, planned at launch with
+    per-sub-step buffers and device-length planners). `lookahead(k)` positions past each row are reserved for it.
+  - `Verifier` (`verifier` slot; greedy-exact, rejection): replaces the Sampler on verify steps and never accepts
+    past a row's `n_draft`.
+  Every running row of a speculating step is a verify row of the step's width 1 + k (rows with fewer real drafts pad
+  with token 0); block tables carry overflow columns at the null unit for positions past `max_model_len`.
 - **The SeqTable seam (implemented, M0 acceptance §3.4-5).** Every step's positions, lengths and page write indices
   are derived on the device from the SeqTable's `num_computed` (`Executor._prepare`, inside the graph for decode); the
   host writes the starts it knows exactly (prefill chunks, padding rows, requests without an uncommitted verify
   row) through a per-row mask, so a verify row's outcome never has to reach the host before the next step is
-  planned. A draft policy (`draft_policy` slot) picks k per request; the step takes the smallest k any row allows,
-  clamped so drafts stay below `max_model_len`; verify rows (1 + k tokens, all producing logits) read their drafts
-  from `SeqTable.draft_tokens`; the verifier (`verifier` slot; `std.spec.greedy`, greedy-exact) returns the tokens
-  and `n_accept`; the sample stage writes `last_token`, `num_computed = start + 1 + n_accept` and `n_accept`, and the
-  drafter (`drafter` slot) proposes the next drafts from there. Commit appends the accepted tokens (stopping at a
-  stop token or length) and makes the host length exact again. Requests with an uncommitted verify row skip steps
-  whose decode kernel plans from host lengths (`Planner.needs_host_lens`). Spec steps run eagerly in v0; real
-  drafters, sampled verification and spec graphs are M0.4.
+  planned. Verify rows read their drafts from `SeqTable.draft_tokens`; the verifier returns the tokens and
+  `n_accept`; the sample stage writes `last_token`, `num_computed = start + 1 + n_accept` and `n_accept`; rewind and
+  the drafter follow. Commit appends the accepted tokens (stopping at a stop token or length) and makes the host
+  length exact again. Requests with an uncommitted verify row skip steps whose decode kernel plans from host lengths
+  (`Planner.needs_host_lens`).
 
 ### 7.7 Control plane and errors
 
