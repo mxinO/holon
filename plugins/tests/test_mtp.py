@@ -31,7 +31,8 @@ def tiny(tmp_path_factory):
 def _engine(path, **kw) -> Engine:
     cfg = dict(model=str(path), device="cpu", dtype=torch.float32, page_size=4, max_seqs=3, max_step_tokens=256,
                max_model_len=256, state_memory=8 << 20, max_draft_tokens=3, plugin_options={"spec.k": "3"},
-               slots={"drafter": "drafters.mtp", "draft_policy": "std.spec.fixed_k"}) | kw
+               slots={"drafter": "drafters.mtp", "draft_policy": "std.spec.fixed_k",
+                      "verifier": "std.spec.greedy"}) | kw
     return Engine(EngineConfig(**cfg))
 
 

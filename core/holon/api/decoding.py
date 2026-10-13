@@ -63,6 +63,17 @@ class Sampler(Protocol):
     def sample(self, logits: torch.Tensor, ctx: StepCtx) -> SampleOut:
         """`logits` [R, V] fp32 for the plan rows with `n_logits > 0`, in row order."""
 
+    def distribution(self, logits: torch.Tensor, ctx: StepCtx) -> torch.Tensor:
+        """The probabilities `sample` draws each row of `logits` from, in vocabulary order [R, V] (greedy rows:
+        one-hot at the argmax) — what a verifier accepts drafts against."""
+
+    def uniform(self, ctx: StepCtx, stream: int = 0) -> torch.Tensor:
+        """Per logits row, a counter-based uniform at the position of the token the row draws; stream 0 is the one
+        `sample` uses, others are independent (a verifier's coins)."""
+
+    def logprobs(self, logits: torch.Tensor, tokens: torch.Tensor, ctx: StepCtx) -> SampleOut:
+        """`tokens` (one per logits row) with the logprobs the step's requests asked for."""
+
     def variant(self, slots: np.ndarray) -> Hashable:
         """The host-side choices `sample` makes for these slots — a step with the same variant runs the same device
         work, so it may replay a captured graph."""
@@ -77,8 +88,10 @@ class SamplerPlugin(Protocol):
 class Verifier(Protocol):
     def verify(self, logits: torch.Tensor, ctx: StepCtx) -> tuple[SampleOut, torch.Tensor]:
         """`logits` [R * (1+k), V]: the 1+k rows of each verify row in order (its last input token, then its k drafts,
-        which the SeqTable's draft_tokens hold). Returns tokens [R * (1+k)] — position j is the token to emit after
-        accepting j drafts — and `n_accept` [R] (device), never more than the row's `SeqTable.n_draft`."""
+        which the SeqTable's draft_tokens hold). Returns `n_accept` [R] (device; never more than the row's
+        `SeqTable.n_draft`) and tokens [R * (1+k)] whose first n_accept + 1 of each row are what it emits: the accepted
+        drafts, then the token after them — with their logprobs when the step's requests ask for them. The step's
+        sampler is `ctx.sampler`."""
 
 
 class Drafter(Protocol):

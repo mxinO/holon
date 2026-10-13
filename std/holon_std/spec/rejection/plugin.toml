@@ -1,0 +1,12 @@
+[plugin]
+name = "std.spec.rejection"
+version = "1.0.0"
+entry = "verifier:Plugin"
+slot = "verifier"
+license = "Apache-2.0"
+
+[resources]
+provides = ["verifier.rejection@1"]
+
+[properties]
+numerics = "exact"

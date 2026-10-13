@@ -203,9 +203,9 @@ class Executor:
             torch.zeros(n * (1 + self.cfg.max_draft_tokens), self.vocab, device=self.device).argmax(-1)
 
     def _graph_variants(self) -> list[tuple[int, SamplingParams]]:
-        """(row width, sampler params) of every graph per bucket: decode rows for each sampler variant; verify rows
-        of each width the policy may ask for, greedy (the verifier is greedy-exact)."""
-        return [(1, params) for params in _VARIANTS] + [(width, _VARIANTS[0]) for width in self.verify_widths]
+        """(row width, sampler params) of every graph per bucket: decode rows and verify rows of each width the
+        policy may ask for, for each sampler variant."""
+        return [(width, params) for width in (1, *self.verify_widths) for params in _VARIANTS]
 
     def capture_graphs(self) -> None:
         """Capture every bucket's decode and verify graphs (after the pools' final materialize: graphs bake in their
@@ -388,7 +388,7 @@ class Executor:
             sub.metas = {g: p[i].plan_bounds(sub.batch, sub.pages[g]) for g, p in self.sub_planners.items()}
         ahead = self.drafter.lookahead(plan.draft_k) if subs and hasattr(self.drafter, "lookahead") else 0
         return StepContext(batch, metas, seq_table=self.seq_table, pages=pages, prep=prep, pools=self.pools,
-                           substeps=_Substeps(self, subs, ahead) if subs else None)
+                           substeps=_Substeps(self, subs, ahead) if subs else None, sampler=self.sampler)
 
     def _namespace(self, group: str) -> str | None:
         return next((ns for ns in self.namespaces if group.startswith(ns + ".")), None)

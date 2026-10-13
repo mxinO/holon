@@ -13,7 +13,7 @@ from .fixtures.oracle import ORACLE
 from .test_engine import GREEDY, _released, tiny_case, tiny_checkpoint  # noqa: F401 — fixtures
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
-ORACLE_SLOTS = {"drafter": "tests.oracle.drafter", "draft_policy": "tests.oracle.policy"}
+ORACLE_SLOTS = {"drafter": "tests.oracle.drafter", "draft_policy": "tests.oracle.policy", "verifier": "std.spec.greedy"}
 
 
 def _plugins() -> PluginSet:
@@ -176,3 +176,37 @@ def _generate(cfg, prompts, params, plugins=None, check=lambda engine: True):
     gc.collect()
     torch.cuda.empty_cache()
     return out
+
+
+@pytest.mark.parametrize("overlap", [False, True], ids=["depth0", "depth1"])
+@pytest.mark.parametrize("mode", ["right", "mixed"])
+def test_sampled_and_logprob_requests_speculate_exactly(tiny_checkpoint, tiny_case, oracle, mode, overlap):  # noqa: F811
+    # Exact-match verification accepts a draft only where it equals the sampler's own draw at that position, so
+    # sampled requests (fixed seeds) emit what plain sampling does, and logprob requests get their logprobs per
+    # emitted token (M0.4 §3.5).
+    prompts, _ = tiny_case
+    params = SamplingParams(temperature=0.8, top_p=0.9, seed=7, max_tokens=12, ignore_eos=True, logprobs=2)
+    plain_engine = _engine(tiny_checkpoint, max_draft_tokens=0, overlap=overlap)
+    plain = [plain_engine.generate([p], params)[0] for p in prompts]
+    oracle.sequences = {tuple(p): p + e for p, e in zip(prompts, plain, strict=True)}
+    oracle.mode = mode
+    engine = _engine(tiny_checkpoint, overlap=overlap)
+    rids = [engine.add(p, params) for p in prompts]
+    out, lps = {r: [] for r in rids}, {r: [] for r in rids}
+    while engine.has_work():
+        for d in engine.step():
+            out[d.rid] += d.token_ids
+            if d.logprobs is not None:
+                assert len(d.logprobs.token) == len(d.token_ids)
+                lps[d.rid] += d.logprobs.token
+    assert [out[r] for r in rids] == plain and oracle.rewinds > 0
+    assert all(len(lps[r]) == len(out[r]) and all(v <= 0 for v in lps[r]) for r in rids)
+
+
+def test_rejection_verifier_speculates_sampled_requests(tiny_checkpoint, tiny_case, oracle):  # noqa: F811
+    prompts, expected = tiny_case
+    params = SamplingParams(temperature=1.0, seed=3, max_tokens=12, ignore_eos=True)
+    engine = _engine(tiny_checkpoint, slots={**ORACLE_SLOTS, "verifier": "std.spec.rejection"})
+    outs = engine.generate(prompts, params)
+    assert [len(o) for o in outs] == [12] * len(prompts) and all(0 <= t < 512 for o in outs for t in o)
+    assert oracle.rewinds > 0 and _released(engine)

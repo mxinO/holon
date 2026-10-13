@@ -176,6 +176,7 @@ class StepContext:
     prep: Any = None                                                    # the engine's device-prep inputs
     pools: dict[str, Any] = dataclasses.field(default_factory=dict)     # the ledger's pools, by name
     substeps: Any = None                       # the drafter sub-steps planned with this step (Executor)
+    sampler: Any = None                        # the engine's sampler (verifiers draw through it)
     namespace: str = ""                        # set by `view`: whose names `meta` and `substep` use
 
     def meta(self, group: str) -> Any:

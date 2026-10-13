@@ -47,7 +47,8 @@ def test_ngram_speculation_is_plain_greedy(tiny_checkpoint, tiny_case):  # noqa:
     plain = Engine(EngineConfig(**cfg)).generate(prompts, GREEDY)
     for overlap in (False, True):
         engine = Engine(EngineConfig(**cfg, overlap=overlap, max_draft_tokens=3,
-                                     slots={"drafter": "drafters.ngram", "draft_policy": "std.spec.fixed_k"},
+                                     slots={"drafter": "drafters.ngram", "draft_policy": "std.spec.fixed_k",
+                      "verifier": "std.spec.greedy"},
                                      plugin_options={"spec.k": "3", "spec.fallback": 2}))
         seen, observe = [], engine.policy.observe
 

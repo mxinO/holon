@@ -179,10 +179,8 @@ class Engine:
         return 1 + 2 * k + (drafter.lookahead(k) if hasattr(drafter, "lookahead") else 0)
 
     def _draft_k(self, seqs: list[Seq]) -> int:
-        """Drafts per row the policy wants for the next step of `seqs`. Only steps of greedy requests without logprobs
-        speculate: the verifier is greedy-exact and reports no logprobs."""
-        if any(s.params.temperature != 0 or s.params.logprobs is not None for s in seqs):
-            return 0
+        """Drafts per row the policy wants for the next step of `seqs` (the verifier serves every request: greedy,
+        sampled, with logprobs)."""
         return max(0, min(self.policy.k(seqs), self.cfg.max_draft_tokens))
 
     # -- requests -------------------------------------------------------------------------------------------------
@@ -399,8 +397,10 @@ class Engine:
                     live.remove(seq)
                 if not live:
                     self._live.pop(seq.rid, None)
-            k = seq.params.logprobs                  # logprob requests are never drafted (_draft_k): one token per row
-            logprobs = None if k is None else Logprobs([lps[0][at]], [lps[1][at][:k]], [lps[2][at][:k]])
+            k = seq.params.logprobs                  # one entry per emitted token (a verify row emits several)
+            logprobs = None if k is None else Logprobs(
+                lps[0][at: at + len(out)], [t[:k] for t in lps[1][at: at + len(out)]],
+                [t[:k] for t in lps[2][at: at + len(out)]])
             prompt_lp = self._prompt_lp.pop(seq, None) if self._prompt_lp else None
             deltas.append(TokenDelta(seq.rid, out, seq.index, logprobs, prompt_lp, reason))
         for seq, spec, at, payload in step.publishes:    # after this commit's blocks are cached

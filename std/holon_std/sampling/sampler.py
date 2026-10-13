@@ -25,9 +25,13 @@ def _mix32(x: torch.Tensor) -> torch.Tensor:
     return x ^ (x >> 16)
 
 
-def uniform(seeds: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
-    """One uniform in (0, 1) per row, a pure function of (seed, position)."""
-    h = _mix32(_mix32(seeds & _M32) ^ (seeds >> 32 & _M32) ^ _mix32(positions & _M32))
+def uniform(seeds: torch.Tensor, positions: torch.Tensor, stream: int = 0) -> torch.Tensor:
+    """One uniform in (0, 1) per row, a pure function of (seed, position, stream); stream 0 is the sampler's own
+    draw, other streams are independent ones (e.g. a speculative verifier's acceptance coins)."""
+    h = _mix32(seeds & _M32) ^ (seeds >> 32 & _M32) ^ _mix32(positions & _M32)
+    if stream:
+        h = h ^ _mix32(torch.full_like(positions, (0x9E3779B9 * stream) & _M32))
+    h = _mix32(h)
     return ((h >> 8).float() + 0.5) * 2.0**-24
 
 
@@ -78,6 +82,39 @@ class Sampler:
         if self._greedy[slots].all():
             return ("greedy", int(self._logprobs[slots].max()))
         return ("sample", bool(self._filtered[slots].any()), int(self._logprobs[slots].max()))
+
+    def distribution(self, logits: torch.Tensor, ctx) -> torch.Tensor:
+        """The probabilities `sample` draws each logits row from, in vocabulary order [R, V] (greedy rows: one-hot at
+        the argmax)."""
+        plan, dev = ctx.batch.plan, ctx.batch.dev
+        slots = plan.slots[plan.n_logits > 0]
+        rows = dev.slots[dev.logits_rows]
+        greedy = torch.zeros_like(logits).scatter_(-1, logits.argmax(-1, keepdim=True), 1.0)
+        if self._greedy[slots].all():
+            return greedy
+        t = self.temperature[rows]
+        x = logits / torch.where(t == 0, 1.0, t)[:, None]
+        filters = (self.top_k[rows], self.top_p[rows], self.min_p[rows]) if self._filtered[slots].any() else (
+            None, None, None)
+        q, order = _distribution(x, *filters)
+        if order is not None:                           # filters drop mass: renormalize what is left
+            q = torch.zeros_like(q).scatter_(-1, order, q / q.sum(-1, keepdim=True))
+        return torch.where((t == 0)[:, None], greedy, q)
+
+    def uniform(self, ctx, stream: int = 0) -> torch.Tensor:
+        """Per logits row, the uniform of stream `stream` at the position of the token it draws."""
+        dev = ctx.batch.dev
+        return uniform(self.seed[dev.slots[dev.logits_rows]], dev.positions[dev.logits_index].long() + 1, stream)
+
+    def logprobs(self, logits: torch.Tensor, tokens: torch.Tensor, ctx) -> SampleOut:
+        """`tokens` with the logprobs the step's requests asked for (none asked: tokens alone)."""
+        plan = ctx.batch.plan
+        k = int(self._logprobs[plan.slots[plan.n_logits > 0]].max())
+        if k < 0:
+            return SampleOut(tokens)
+        logprobs = logits.log_softmax(-1)
+        top = logprobs.topk(max(k, 1))
+        return SampleOut(tokens, logprobs.gather(-1, tokens[:, None])[:, 0], top.indices, top.values)
 
     def sample(self, logits: torch.Tensor, ctx) -> SampleOut:
         plan, dev = ctx.batch.plan, ctx.batch.dev
