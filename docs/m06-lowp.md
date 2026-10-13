@@ -21,7 +21,7 @@ W4 weights and **8-bit activations by default on every class** (D3). Two gates, 
 2. **Pure refactor** (D2, D4, D5, D11): the core's unused `Dialect` / `Converter` / `SchemeImpl` deleted; the per-slice
    `adopt` seam (≈ 8 lines) with its toy proof in `core/tests/test_stacking.py`; `qlinear@2`, `prepare`, `act_quant` in
    std. `propagate` leaves **every existing snapshot byte-identical** (bf16, GGUF, M0.4's draft heads), L2 passing;
-   `git diff plugins/holon_plugins/models` empty; denylist clean; core ≤ 6000 code lines (3324 today).
+   `git diff plugins/holon_plugins/models` empty; denylist clean; core ≤ 6000 code lines (3643 after the M0.4 rebase, 3623 after A1).
 3. **Targets load and answer the M0.1 chat set** through `models/qwen3` / `models/qwen3_moe` unchanged (D1 roles):
    `nvidia/Qwen3-8B-NVFP4`, `nvidia/Qwen3-30B-A3B-NVFP4`, `amd-quark/Qwen3-30B-A3B-MXFP4`, the GGUF
    `Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE`; the fixtures `RedHatAI/Qwen3-8B-NVFP4` and `Yi30/Qwen3-8B-MXFP4`;
@@ -151,7 +151,7 @@ implementation of the workload; bar = the engine users run for it on the card.
   (recorded): the dialects move to their own plugins, with a core seam to reach them, when a second weight source
   needs them or when dialect churn pushes `std.weights.hf` approvals toward plan §9's > 3 / week.
 - **D3 — Activation precision: `a8` by default everywhere; `a4` opt-in** (D-b). A fact `act_quant` ∈ {`a4`, `a8`,
-  `a16`} on `qlinear@2` and `linear_experts@1` sites: the lowest activation precision the kernel may use. Default `a8`
+  `a16`} on `qlinear@2` and `linear_experts@2` sites: the lowest activation precision the kernel may use. Default `a8`
   for every quantized layout (GGUF included), `a16` for dense; the plugin option `quant.act` (`a4` | `a8`, read as
   `kv.format` is, `std/holon_std/mixers/gqa/units.py:73-79`) sets it explicitly, lowering included; `a16` for a
   quantized layout is not offered in M0.6 (a startup error naming the option). A provider
@@ -160,8 +160,11 @@ implementation of the workload; bar = the engine users run for it on the card.
   site entry (`core/holon/core/build.py:67-68`); the judge picks floors from it. sm_120 kernels are scored at `a8`
   against the W4A8 floor; W4A4 is a report (acceptance 7).
 - **D4 — Contracts.** `qlinear@1` → **`qlinear@2`**: instance `(x [T, in], parts) → y [T, out]`, `parts` by role as
-  `linear_experts@1` (breaker pays: `kernels.ggml_cuda`, `testing.ref_kernels` move in the same change). Both ops gain
-  an optional instance method **`prepare(q: QTensor) → QTensor`** (D-d): called once by the unit after binding; returns
+  `linear_experts`' (breaker pays: `kernels.ggml_cuda`, `testing.ref_kernels` move in the same change). As built,
+  `linear_experts@1` → **`@2`**: a stack's parts are per expert, `[E, …]` (ggml: `[E, out, row_bytes]`, a view of the
+  stored bytes; D6). The first part is the primary one, held by the unit's `weight` (GGUF: `blocks`; A2's dialects
+  yield `weight` first, and A2's tests check it). Both ops gain an optional instance method **`prepare(q: QTensor) →
+  QTensor`** (D-d; `qembedding@1` has none): called once by the unit after binding; returns
   the destination layout (e.g. `Layout(Scheme("ggml.nvfp4"), "gguf.native")` with parts `{blocks, scale2}`); must not
   mutate its input (a tied head reads the embedding's parts); lossless (acceptance 4). The unit swaps `weight` to the
   prepared primary part and drops the source parts, so one tensor or stack is transient. M0.4's draft-head linears
@@ -170,10 +173,14 @@ implementation of the workload; bar = the engine users run for it on the card.
   second) dimension is `out / g` for one `g` dividing every unit's `out`. Dense: `scale2` must be bit-equal, else the
   units stay separate (`std/holon_std/ffn/units.py:23-30`, `std/holon_std/mixers/gqa/units.py:146-147`). MoE gate/up:
   `scale2` is carried as `[2, E]` (gate row, up row), so each half is contiguous as mmvq's `gate_scale` / `x_scale`
-  indexing requires (`mmvq.cu:705-708, 1506-1516`); our SwiGLU takes both rows.
+  indexing requires (`mmvq.cu:705-708, 1506-1516`); our SwiGLU takes both rows. A part of one element in every unit
+  (per expert: one value per expert, any shape) is per tensor: bit-equal for dense merges, stacked `[2, E]` for
+  experts, never concatenated as rows.
 - **D6 — Per-expert stacking: per-slice `adopt`** (D-e, closes M0.2 D7). In `_fill_slice`, after the range and
-  duplicate checks, a `QTensor` with a transform is an error, else `adopt(ctx, leaf, q, index=index)`; units keep dim
-  0 = stack length while loading (the repack to `[E·out, row_bytes]` is `prepare`'s). Rejected: the source grouping
+  duplicate checks, a `QTensor` with a transform is an error, else `adopt(ctx, leaf, q, index=index)`; units hold every
+  stacked part per expert, `[E, …]`, whole GGUF stacks included (a view of their rows), as `linear_experts@2` takes
+  them (`kernels.ggml_cuda` reads `[E, out, row_bytes]` as llama.cpp's `[E·out, row_bytes]`); units without stacks
+  refuse a slice (the "cannot read layout" error). Rejected: the source grouping
   slices — it would guess the stack from names the recipe already declares (`stack="e"`) and hold it in host memory.
 - **D7 — The ggml pin moves to `cbe28bb3` as its own first step** (D-a): contains `fc9ce6b9d` and `8a1a9b512`; the
   same commit is the llama-bench baseline. Our C API follows it: `ggml_cuda_mmq_get_config` gains a fifth argument
@@ -183,7 +190,8 @@ implementation of the workload; bar = the engine users run for it on the card.
   `prepare` produces and for GGUF MXFP4; `prepare` repacks `nvfp4/hf` / `mxfp4/hf` (llama.cpp's `_nvfp4_pack`,
   `repack_mxfp4_blocks`, our code); the `q8_1` spec's `prepare` is the identity for GGUF layouts. Only the opt-in `fp4`
   spec's `prepare` appends a zeroed tail of one row padded to 512 elements to each FP4 tensor or stack (llama.cpp's
-  allocation rule; ≤ 1 row), so MXFP4_MOE stacks are never copied under `a8`. `scale2` is applied in f32 before SwiGLU
+  allocation rule; ≤ 1 row; a stack stays `[E, out, row_bytes]`, a view of a buffer one tail longer), so MXFP4_MOE
+  stacks are never copied under `a8`. `scale2` is applied in f32 before SwiGLU
   on every path (§4.5). The shim sets `op_params[3]` from the spec and, **before every launch and before graph
   capture**, asks mmq which precision it will use: `vendor.patch` exports `ggml_cuda_mmq_get_prec_src1` (static at
   `mmq.cu:118`); a mismatch with the spec is a Python error. The `fp4` spec copies bf16 activations to f32 before mmq
@@ -245,13 +253,16 @@ core change rebases onto it, and its propagate runs after.
 
 ### 4.3 Units
 
-- `_Quantized` (`std/holon_std/ops/units.py:51-65`): facts gain `act_quant` (qlinear only); after binding, `q =
-  kernel.prepare(q)` when defined; calls pass the parts. `Linear` keeps the parts, `weight` holding the primary one
-  (GGUF: `blocks`, unchanged). `Embedding` / `LMHead` pass `{"blocks": …}` for GGUF.
+- `_Quantized` (`std/holon_std/ops/units.py`): facts gain `act_quant` (qlinear only); after binding, `q =
+  kernel.prepare(q)` when defined (qlinear only: `qembedding@1` has no `prepare`); calls pass the parts. `Linear`
+  keeps the parts, `weight` holding the primary one (GGUF: `blocks`, unchanged). `Embedding` keeps its parts and
+  `qembedding@1` reads `weight` as before; a tied `LMHead` reads the embedding's parts (`{"blocks": …}` for GGUF) as
+  adopted and prepares its own copy.
 - `ExpertLinear`: `adopt(…, index)` materializes each part as `[E, *slice_part]` on the first slice and copies slice
-  `e` in place; whole-stack GGUF adopt unchanged; `merge` per D5; `bind_kernels` adds `act_quant`, calls `prepare`.
+  `e` in place (a slice of another layout or shape is refused); a whole GGUF stack is held as the per-expert view
+  `[E, out, row_bytes]` of its bytes; `merge` per D5; `bind_kernels` adds `act_quant`, calls `prepare`.
 - The judge's structural test (M0.2) compares every stacked slice's dequantization after loading with the checkpoint
-  slice's, by value.
+  slice's, by value: step A2 (it needs `reference.py` and the dialects).
 
 ### 4.4 HF weight source
 
@@ -404,7 +415,7 @@ NVFP4, 30B NVFP4, `amd-quark` and MXFP4_MOE. **Cluster only** — sm_89 / sm_120
 |---|---|---|---|
 | A0 | Pin bump (D7): re-vendor, regenerate the patch, `csrc/api.cu` for the 5-argument `ggml_cuda_mmq_get_config`, L0 18 types ×3 classes; GGUF locks propagate; spot-check bar. Files: targets, MXFP4_MOE GGUF chosen, the pin's GGUF conversions; header checks (ties, `k/v_scale`, scale bytes) | acceptance 1 | 2 |
 | A1 | Core (D11, per-slice adopt + toy); `qlinear@2`, `prepare`, `act_quant`, parts, merges; ref_kernels @2. After M0.4 merges: propagate | acceptance 2 (byte-identical snapshots) | 2 |
-| A2 | Dialects, `reference.py`, owner cross-checks (D10), NVFP4 GGUF refusal; tiny fixtures per dialect (CT by compressed-tensors' compressors; FP8, ModelOpt, Quark written from their specs); engine (reference kernels) vs transformers on them | fixtures; Tier A plants on fixtures | 3 |
+| A2 | Dialects (each yields `weight` first: the primary part, checked), `reference.py`, owner cross-checks (D10), NVFP4 GGUF refusal; the structural test's quantized slices (§4.3); tiny fixtures per dialect (CT by compressed-tensors' compressors; FP8, ModelOpt, Quark written from their specs); engine (reference kernels) vs transformers on them | fixtures; Tier A plants on fixtures | 3 |
 | A3 | ggml FP4: types, repack, `fp4` tail, `scale2`, specs, pre-launch precision check, C API, docstring | acceptance 4, 5 (A5000 first, then 4090 / 5080) | 3.5 |
 | A4 | Judge: HF-quant map, gates, emulators, floors, mode check. Machine time: goldens 4 × 8B (≈ 0.5 h each) + 4 × 30B (≈ 2 h each, streamed) ≈ 10 h CPU, overnight; floors ≈ 12 × 0.5 h on A5000s; Tier A ≈ 8 runs | gates; Tier A all; floors' order | 3 + 1.5 machine days |
 | A5 | Tier B (A5000, then 5080 / 4090 / PRO 6000), plants, W4A4 report, structural, bounded | acceptance 6, 7 | 2.5 |
@@ -508,3 +519,18 @@ grouped FP8 is dropped; `quant.act = a16` is not offered.
 **Rev 3.** All three reviewers: clean. Applied nits: the FP8 kernel is a new `kernels.triton_fp8` (no rename: dense only,
 nothing shared with `triton_experts`); no whole-row tie class (the row scale is f32); the `fp4` spec's f32 activation
 copy is a named plan-time workspace.
+
+**As built (A0, A1).** Recorded deviations from rev 3; the panel reviewed A0 + A1 and its fixes are in.
+
+| item | rev 3 | as built |
+|---|---|---|
+| A0 C API | 5-argument `ggml_cuda_mmq_get_config` | also `ggml_cuda_mmq_needs_fallback`; the workspace follows mmq's new allocations (q8_1 tile padding J ≤ 128 rows rounded to a load chunk; `ids_dst` J − 1 entries of read padding); the MoE padding plant reads the new layout |
+| expert stacks | dim 0 = E while loading; GGUF whole stacks `[E·out, row_bytes]` unchanged; the repack to `[E·out, …]` is `prepare`'s | every part per expert, `[E, …]`, GGUF whole stacks as a view; so `linear_experts@1` → `@2` (D4, D6, D8, §4.3); `kernels.ggml_cuda` reads it as `[E·out, row_bytes]`; one merge rule for dense, GGUF and HF stacks (D5) |
+| per-tensor parts | `scale2` `[]` | a part of one element in every unit (one value per expert) is per tensor whatever its shape: bit-equal (dense), `[2, E]` (experts) (D5) |
+| `qembedding@1` | "`Embedding` / `LMHead` pass `{"blocks": …}`" | unchanged contract and no `prepare`; `Embedding` keeps its parts for a tied head (§4.3) |
+| primary part | unspecified | the first part of `QTensor.parts`, held by `weight`; A2's dialects yield `weight` first and A2's tests check it (D4) |
+| slices to plain units | — | `Linear` / `Embedding` / `LMHead.adopt` take `index` and refuse a slice: the core's load error (D6) |
+| `quant.act`, `config["act"]` | with the providers (A3) | in A1: the option (`a16` a startup error) and `kernels.ggml_cuda`'s `{"mmvq": "q8_1", "mmq": "q8_1"}`, so GGUF locks propagate once (D3) |
+| structural test | A1 (§4.3) | A2: it needs `reference.py` and the dialects |
+| core | registries deleted (D11) | also the dead `dialect` / `converter` slot kinds (`api/manifest.py`) |
+| ggml workspace | — | the pool records its high-water mark (a test entry); L0 holds every call to `workspace_bytes(_id)` for its rows; `mmq_schedule` aborts on FP4 types until A3 passes the precision |
