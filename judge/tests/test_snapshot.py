@@ -1,6 +1,5 @@
 """Snapshots: a trace through the real engine (CPU) is run-identical; any change is located."""
 import dataclasses
-import gc
 import pathlib
 
 import pytest
@@ -9,7 +8,7 @@ from holon.api import SamplingParams
 from holon.core.engine import Engine, EngineConfig
 from holon_judge.__main__ import main
 from holon_judge.recording import PromptSet
-from holon_judge.snapshot import Request, Snapshot, diff, record, trace
+from holon_judge.snapshot import Request, Snapshot, diff, record, repeat, trace
 
 GREEDY = SamplingParams(temperature=0.0, max_tokens=6, ignore_eos=True)
 # Seeded sampling with n > 1 and logprobs, as the snapshot trace of design §7.10 requires.
@@ -71,13 +70,20 @@ def test_snapshot_trace_is_run_identical_on_qwen3():
     """The acceptance check of design §7.10 on the production engine (graphs, overlap, prefix cache)."""
     prompts = PromptSet.load(pathlib.Path(__file__).resolve().parents[1] / "prompts" / "v1.jsonl")
     requests = trace(prompts)
-    runs = []
-    for _ in range(3):
-        gc.collect()                 # free the previous engine before the next one measures the memory left
-        runs.append(record(Engine(EngineConfig(model=str(QWEN))), requests))
+    runs, pools = repeat(lambda memory: Engine(EngineConfig(model=str(QWEN), state_memory=memory)), requests, 3)
+    assert pools[0] == pools[1] == pools[2]
     assert diff(runs[0], runs[1]) is None and diff(runs[0], runs[2]) is None
     assert runs[0].meta["tokens_saved"] > 0 and len(requests[0].ids) == 2048
     assert _covers_buckets(runs[0].meta["step_widths"], (1, 2, 4, 8, 16, 24, 32, 48, 64))
+
+
+def test_repeated_runs_get_the_first_runs_pools(tiny_checkpoint, requests):
+    # Pool sizes set admission and preemption, so the schedule: engines built one after another measure different free
+    # memory (a predecessor's cached blocks; the process's own growth) — here each would size its own differently —
+    # so later runs get the bytes of the first run's pools.
+    measured = iter([3 << 19, 1 << 20, 1 << 20])
+    runs, pools = repeat(lambda memory: _engine(tiny_checkpoint, state_memory=memory or next(measured)), requests, 3)
+    assert pools[0] == pools[1] == pools[2] and diff(runs[0], runs[2]) is None
 
 
 def test_changes_are_located(snap):

@@ -119,7 +119,6 @@ def _snapshot_diff(a: argparse.Namespace) -> int:
 
 
 def _snapshot(a: argparse.Namespace) -> int:
-    import gc
 
     from holon.api import canonical_hash
     from holon.core.cli import engine_config, engine_flags
@@ -129,20 +128,19 @@ def _snapshot(a: argparse.Namespace) -> int:
 
     path = golden.resolve_model(a.model)
     requests = snapshot.trace(PromptSet.load(a.prompts))
-    runs = []
     flags = argparse.ArgumentParser()
     engine_flags(flags)
-    config = engine_config(str(path), flags.parse_args(shlex.split(a.engine_args)))
-    for _ in range(a.runs):
-        engine = Engine(dataclasses.replace(config, dtype=golden.DTYPES[a.dtype]))
-        runs.append(snapshot.record(engine, requests))
-        engine.close()
-        gc.collect()
-    diffs = [snapshot.diff(runs[0], run) for run in runs[1:]]
+    config = dataclasses.replace(engine_config(str(path), flags.parse_args(shlex.split(a.engine_args))),
+                                 dtype=golden.DTYPES[a.dtype])
+    runs, pools = snapshot.repeat(lambda memory: Engine(dataclasses.replace(
+        config, state_memory=config.state_memory or memory)), requests, a.runs)
+    diffs = [f"pools differ: {p} vs {pools[0]}" if p != pools[0] else snapshot.diff(runs[0], run)
+             for run, p in zip(runs[1:], pools[1:], strict=True)]
     report = {"model": golden.model_meta(path)["model"], "dtype": a.dtype, "runs": a.runs,
               "hardware": golden.hardware(torch.device("cuda")), "torch": torch.__version__,
               "trace": canonical_hash([[r.ids, r.params, r.after] for r in requests]),
-              "steps": len(runs[0].steps), "diffs": diffs, "run_identical": not any(diffs), **runs[0].meta}
+              "steps": len(runs[0].steps), "pools": pools[0], "diffs": diffs, "run_identical": not any(diffs),
+              **runs[0].meta}
     print(json.dumps(report, indent=1, default=str))
     if a.json:
         pathlib.Path(a.json).parent.mkdir(parents=True, exist_ok=True)

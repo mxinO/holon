@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import gc
 import hashlib
 import json
 import pathlib
+from collections.abc import Callable
 
 from holon.api import Logprobs, SamplingParams, TokenDelta
 
@@ -95,6 +97,33 @@ def record(engine: EngineLike, trace: list[Request], meta: dict | None = None) -
     if "prefix_tokens_saved" in stats:
         measured["tokens_saved"] = stats["prefix_tokens_saved"]
     return Snapshot(streams, steps, measured | (meta or {}))
+
+
+def repeat(build: Callable[[int | None], EngineLike], requests: list[Request], runs: int
+           ) -> tuple[list[Snapshot], list[dict[str, int]]]:
+    """`runs` snapshots of the trace, each on a fresh engine `build(state_memory)`: the first sizes its pools from the
+    memory it measures (None), the others get the bytes those pools took, so every run has the same pools — they set
+    admission and preemption, so the schedule, and engines built one after another in a process measure different
+    free memory. Each engine is freed before the next; returns the snapshots and each run's pool sizes."""
+    import torch
+
+    snaps, pools, budget = [], [], None
+    for _ in range(runs):
+        engine = build(budget)
+        ledger = getattr(engine, "ledger", None)
+        if ledger is not None:
+            pools.append({name: p.capacity for name, p in ledger.pools.items()})
+            budget = sum(p.capacity * p.unit_bytes for p in ledger.pools.values())
+        else:
+            pools.append({})
+        snaps.append(record(engine, requests))
+        if hasattr(engine, "close"):
+            engine.close()
+        del engine
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    return snaps, pools
 
 
 def trace(prompts: PromptSet, width: int = 64, short_len: int = 32, long_len: int = 2048) -> list[Request]:
