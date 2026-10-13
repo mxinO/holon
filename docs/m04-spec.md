@@ -1,7 +1,7 @@
 # M0.4 — speculative decoding: MTP, DFlash2, n-gram: design and implementation plan
 
-Status: **revision 2, under review** (2026-10-13). Rev 1 was reviewed by a panel of three; every finding is resolved
-in §9.
+Status: **revision 3, under review** (2026-10-13). Revs 1 and 2 were reviewed by a panel of three; every finding is
+resolved in §9.
 
 Scope: plan §7, amended:
 - DFlash/DFlash2 is added. It was previously a v2 draft-model drafter.
@@ -42,15 +42,18 @@ Decode faster with speculation on consumer cards, without changing the output di
    - Both hold across the `test_spec.py` matrix (right / wrong / mixed / alternate drafts × depth 0 / 1 × roomy /
      preempting), extended to a tiny qwen3_5 with the oracle drafter and a tiny MTP.
 3. **Recurrent rollback** (GDN replay, D6).
-   - **Bitwise:** the masked replay of a verify row equals a call over its 1 + n accepted tokens alone. Checked on
-     every kernel class and on the CPU reference.
+   - **Bitwise, at the GDN unit's level:** for every n_accept < k as well as n_accept = k, the unit's `rewind`
+     leaves the SSM state and the conv window equal to 1 + n single-token decode calls. Checked on every kernel
+     class and on the CPU reference, which computes its gating per token. Rows that are not rewound stay
+     bitwise untouched (R ≥ 2 rows of q ≥ 2).
    - **Drift:** 200 verify/replay steps from a non-zero S0 stay within the GDN L0 bound of an f64 recurrence.
    - **No checkpoint lands in a verify row.** No checkpoint is registered at the end of a row with `n_logits > 1`,
      or for a request with an uncommitted verify row.
 4. **Graphs and overlap.**
    - Verify steps replay captured graphs for the deployment's q (one per drafter policy, D7), drafter work and
      replay included.
-   - Graph and eager runs are bitwise equal per step.
+   - Graph and eager runs are bitwise equal per step when eager runs the graph's exact padded plan, sub-steps
+     included. Padded vs unpadded runs stay a bounded check.
    - Speculation runs at overlap depth 1.
    - Measured: the share of spec steps that are graphed and that run at depth 1.
 5. **Speed** (evidence records; predictions in §5):
@@ -86,14 +89,17 @@ Non-goals:
 
 **Declared but unbuilt:**
 - `ModelSpec.taps`, `ModelSpec.draft_heads` / `DraftHeadDecl` (`api/model.py:33-40, 73-74`).
-- `Rewindable.commit` and `verify_mode`. The core never calls `commit` or reads `verify_mode`.
+- `Rewindable.commit`, `host_commit` / `CommitView` and `verify_mode`. The core never calls any of them.
 - **So a GDN model under speculation is wrong today:** a verify row advances the state over rejected drafts.
 
 **The GDN kernels** (`kernels/fla`):
 - Any row longer than one token takes the chunked path. It gathers the row's state, runs ≈ 8 kernels and scatters
   the state back (≈ 0.9 GiB moved per row per call across 48 layers), and rounds S to bf16 in one product.
 - The vendored `fused_sigmoid_gating.py` is a recurrent kernel built for spec decode: multi-token rows, fp32 S
-  throughout, per-token state indices. It is unused.
+  throughout. It serves decode today (one token per row).
+- **That kernel has a bug on rows longer than one token** (`:166-176`). Inside its token loop it stores S at every
+  token, to `indices + i_n·stride_seq + i_t`; `stride_indices_tok` is computed but unused. With our 1-D `slots`,
+  token t of row n writes `slots[n + t]`: a neighbour's live state. D6 patches it.
 
 **MTP:**
 - **Where it is stored:**
@@ -124,93 +130,116 @@ Non-goals:
 
 ## 3. Core seams (today → change), each general
 
-1. **Auxiliary models, namespaced, built only on demand.**
-   - Today: `DraftHeadDecl` is declared and nothing is built.
-   - Change: `BuildCtx.aux_model(namespace, spec, tensors)` builds a ModelSpec-shaped set of units into a **child
-     context**.
-     - The child maps state names and planner groups to `<namespace>.<name>`. A GQA unit's `ctx.state("kv", i)` and
-       `ctx.meta("kv")` therefore resolve to `mtp.kv`, with the units unchanged.
-     - It binds the state into its own groups and planners, and loads the weights under the spec's map.
-   - Where specs come from:
-     - **MTP:** the model plugin answers `draft_head(config, source, name) -> ModelSpec | None`, with weight rules
-       over the target's own source. The target keeps its skip.
-     - **DFlash:** the drafter plugin brings its own checkpoint.
-   - The core calls `aux_model` only for a drafter that is bound. With speculation off nothing is built, and the
-     recipe hash, the pools and the locks are unchanged.
-   - Paged aux state is a separate spec in the prefix index (`assembly.py:93-100` already indexes every paged
-     spec), so drafter KV is prefix-shared and truncated by length.
+1. **Drafter construction and auxiliary models, namespaced, built only on demand.**
+   - Today: `DraftHeadDecl` is declared and nothing is built. Drafters are only `p.load`ed (`engine.py:98`).
+   - Change: a drafter plugin builds through `DrafterPlugin.build(ctx: BuildCtx, target) -> Drafter`. The core
+     calls it only when a drafter is bound.
+     - `target.shared(name)` returns the target's built modules (`embed`, `norm`, `lm_head`). They are shared, not
+       loaded twice.
+     - `target.draft_head(name)` asks the model plugin (the drafter cannot import it). The model plugin answers
+       `ModelPlugin.draft_head(config, source, name) -> AuxSpec | None`, with weight rules over the target's own
+       source. The target keeps its skip.
+   - `ctx.aux_model(namespace, AuxSpec(unit, layers, weights), tensors)` builds into a **child context**.
+     - `unit` is a Ref that builds its own internals. `layers` only drives state binding.
+     - The child maps state names, planner groups and `BatchPlan.publishes` to `<namespace>.<name>`. A GQA unit's
+       `ctx.state("kv", i)` and `ctx.meta("kv")` therefore resolve to `mtp.kv`, with the units unchanged.
+     - It loads the weights under `weights`.
+   - With speculation off nothing is built, and the recipe hash, the pools and the locks are unchanged.
+     `canonical_hash` skips default-valued fields (`terms.py:63-79`), so deleting the fields below does not move
+     any hash.
+   - Paged aux state is its own spec in the prefix index (`assembly.py:93-100`), so drafter KV is prefix-shared and
+     truncated by length. The ledger fills paged pools to equal token counts (`memory.py:173-178`).
    - `DraftHeadDecl`, `ModelSpec.draft_heads` and `ModelSpec.taps` are deleted.
-   - Toy proof: a toy drafter with its own paged spec, prefix-hit, rolled back, and absent when unbound.
+   - Toy proof:
+     - a toy drafter with its own paged spec and an `in_step` recurrent spec;
+     - it is prefix-hit and rolled back, never sees the target's publishes, and is absent when unbound.
 2. **Sub-steps: a drafter's own forward rows.**
    - Today: every planner is planned once per step, for the step's batch.
    - Change: `StepCtx.substep(q, offset)` returns a child step whose rows are the step's sampled rows. Each gets q
-     tokens at device positions `num_computed[slot] + offset + j`.
-     - Its `input_ids` are a static buffer the drafter fills.
-     - Its page write indices are derived on the device.
-     - Its metas come from every planner (target and aux groups) through the verify-class kernels, which read
-       device lengths and are planned on the host from upper bounds.
-   - Sub-steps are planned at launch with the step and captured inside its graph. A drafter declares its sub-step
-     shapes up front (`Drafter.substeps(k) -> list[int]`), so the capture set stays finite.
-   - **Reservation:** `Drafter.lookahead(k)` is the number of positions past 1 + k it writes (MTP: k; DFlash: block).
-     The scheduler reserves `1 + k + lookahead` per row, clamped at `max_model_len`. Drafters clamp their positions
-     to the same limit.
-   - Toy proof: a toy drafter writing a paged spec k positions ahead at depth 1, with graphs. Its pages must be
-     reserved, never another request's.
+     tokens at device positions `num_computed[slot] + offset + j`, read after `_store` has advanced
+     `num_computed`.
+     - Each sub-step owns its static buffers: positions, lengths, write indices, input ids. The input ids are
+       filled by the drafter.
+     - It is planned only for the child namespace's groups, through the verify-class kernels (device lengths,
+       host upper bounds), with no publishes. Its metas are prepared immediately before its forward. Nothing it
+       touches is shared with the parent step or another sub-step: one kernel instance per sub-step.
+   - Sub-steps are planned at launch and captured inside the step's graph. A drafter declares its sub-step shapes
+     (`Drafter.substeps(k) -> list[int]`), so the capture set stays finite.
+   - **Reservation:** `Drafter.lookahead(k)` is the number of positions past the row it writes (MTP: k; DFlash:
+     block). The scheduler reserves:
+     - `1 + k + lookahead` for a verify row;
+     - `n + lookahead` for a prefill chunk that ends its prompt.
+   - **The length limit:**
+     - Positions at or past `max_model_len`, whether padded verify columns or drafter positions, write to the null
+       unit (`_prepare` clamps the page index and selects the null unit). Nothing then indexes past the table.
+     - The drafter caps `n_draft` at `max_model_len − 1 − start`.
+   - Toy proofs:
+     - a toy drafter writes a paged spec k positions ahead at depth 1, with graphs. Its pages must be reserved and
+       never another request's, from the first draft after prefill on.
+     - verify rows one token below the limit.
 3. **Drafter lifecycle.**
    - Today: `propose(ctx)` after sampled steps.
    - Change:
-     - `Drafter.admit(slot, tokens)` (host; staged through the Uploader like `Sampler.admit`) receives the
-       request's full token history, prefix-hit tokens included. It also resets per-slot carries.
+     - `Drafter.admit(slot, tokens)` (host) receives the request's full token history, prefix-hit tokens included,
+       and resets per-slot carries. The drafter copies the history itself with a pinned asynchronous copy, as the
+       GDN unit does (`gdn/units.py:68-70`). The step uploader is sized per step and cannot hold a 32K history.
      - `Drafter.run(ctx, h)` runs after **every** step's sample stage, prefill chunks included. It gets the
-       trunk's output `h`, the device `n_accept`, and `ctx.substep`.
-     - It writes the drafter's state for the step's tokens, then drafts for the rows that sampled.
+       trunk's output `h`, the device `n_accept`, and `ctx.substep`. It writes the drafter's state for the step's
+       tokens, then drafts for the rows that sampled.
    - Toy proof: a toy drafter whose per-slot hash of everything admitted and absorbed equals the committed
      history, across chunked prefill, rejection, preemption and prefix hits.
 4. **Taps.**
    - Today: none.
    - Change: `Model.trunk` calls consumers a drafter registered at build (`ctx.tap(i, fn)`) with the residual
-     stream after layer i. What a consumer keeps is its own choice: a copy, or an fp32 accumulation.
+     stream after layer i. What it keeps is the consumer's choice: a copy, or an fp32 accumulation.
    - Toy proof: a toy consumer sees the tensors of a model-only reference run.
 5. **Verification: rewind, draft lengths, sampling, logprobs.**
    - **Rewind.**
      - Today: nothing is rolled back.
      - Change: after the verifier, inside the sample stage and before `Drafter.run`, the core calls `rewind(ctx)`
-       on every built module and every loaded slot object that defines it, found by duck typing like
-       `finalize_weights`.
-     - `Rewindable` becomes `rewind(ctx, path=None)`. `verify_mode` and the kinds' device `commit` are deleted;
-       paged state rewinds by length. `host_commit` stays.
+       on every built module (aux models' included) and every loaded slot object that defines it. They are found
+       by duck typing, like `finalize_weights`.
+     - `Rewindable` becomes `rewind(ctx, path=None)`.
+     - Deleted: `verify_mode`, the kinds' `commit` and `host_commit`, and `CommitView`. None of them has a caller.
+     - Paged state rewinds by length.
    - **Draft lengths.**
      - Today: one k per step, the minimum over its rows.
-     - Change: the drafter writes `SeqTable.n_draft [S]` on the device. The host's k is an upper bound that sets
-       the step's width q = 1 + k from the policy (D7).
-     - Rows with fewer drafts pad with token 0, and every verifier caps acceptance at `n_draft`.
-     - Every running row joins a verify step: rows without drafts carry `n_draft = 0`.
+     - Change: the policy sets the step's k (D7), so the width is q = 1 + k. The drafter writes `SeqTable.n_draft
+       [S]` ≤ k on the device.
+     - Short rows pad with token 0, and every verifier caps acceptance at `n_draft`.
+     - Every running row joins a verify step: rows without drafts carry `n_draft = 0`. Prefill and decode never
+       share a step (`sched.py:59`).
    - **Sampling.**
      - `Sampler` gains:
        - `distribution(logits, ctx, rows)`: the filtered probabilities `sample` draws from;
        - `uniform(ctx, positions, stream)`: counter-based, where stream 0 is bit-identical to today's draw;
        - `logprobs(logits, tokens, ctx)`.
      - Verifiers reach the sampler through `ctx.sampler`.
-     - The SeqTable gains sparse draft probabilities `draft_q_ids` / `draft_q` [S, k_max, Kq], where Kq is the
-       drafter's declared candidate count (1 = deterministic). **Contract:** a drafter samples exactly from the q it
-       publishes.
-     - Verifiers return logprobs for emitted tokens, so logprob and sampled requests speculate too. The temperature
-       and logprob gate in `_draft_k` is deleted.
+     - Verifiers return logprobs for emitted tokens, so logprob and sampled requests speculate too. The
+       temperature and logprob gate in `_draft_k` is deleted.
+     - `std.spec.greedy` samples rows with temperature > 0 through `ctx.sampler` from their first column, with
+       `n_accept = 0`. It is never wrong for mixed traffic, only slower than `std.spec.rejection`.
+     - **Gate B adds** the sparse draft probabilities `draft_q_ids` / `draft_q` [S, k_max, Kq]: no Gate A drafter
+       needs them (Kq = 1). **Contract:** a drafter samples exactly from the q it publishes. Rows past `n_draft`
+       are never read.
    - **Determinism.**
      - Greedy speculative output is deterministic.
      - Sampled speculative output is lossless in distribution, but not batch-invariant: drafts depend on batch
        shape and prefix history.
-   - Toy proof: the oracle drafter with known q, and the L0-dist tests of §5.
+   - Toy proof: the oracle drafter, and the L0-dist tests of §5.
 6. **Verify graphs.**
    - Today: decode only (`executor.py:150`).
    - Change: verify steps are captured per (bucket, q, sampler variant, planner keys), with q-wide padding rows.
+     The capture set maps each bucket to the policy's q for it (D7), about 9 graphs, not every bucket × q.
    - The startup memory profile measures:
-     - the largest verify graph with its drafter sub-steps and the replay;
+     - the largest verify graph with its sub-steps and the replay;
      - graph instantiation memory, by `cudaMemGetInfo` across captures.
 7. **Publishing rule.**
    - Today: a step's row end is published whenever a kind asks.
    - Change: never at the end of a row with `n_logits > 1`, or for a request with an uncommitted verify row
      (`seq.inexact`). Its host start is then only an upper bound.
+   - Consequence: at depth 1, a speculating request always has an uncommitted verify row, so `every:n` takes no
+     checkpoints while generating. `prompt_end` (the default) is unaffected.
    - Toy proof: a checkpoint request after a partially accepted verify is never registered at the wrong position.
 
 No model, mixer or drafter names enter the core; the CI denylist enforces this.
@@ -220,15 +249,17 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
 - **D1. One milestone, two gates.**
   - **Gate A:** all of §3 except taps; GDN replay; MTP; n-gram; both verifiers; verify graphs; `fixed_k`; the 5080
     and 4090 MTP evidence.
-  - **Gate B:** taps, the `causal` / `window` attention facts, `drafters/dflash`, and the 4090 evidence.
+  - **Gate B:** taps, the `causal` / `window` attention facts, sparse `draft_q`, `drafters/dflash`, and the 4090
+    evidence.
 - **D2. MTP from the target checkpoint, through a std head.**
   - `std.spec.mtp_head@1`, with knobs `order` ("embed_first") and `norm` (a Ref), plus a `reference.py` oracle.
     This is the shared shape of the Qwen3.5, DeepSeek-V3, GLM-4.5 and MiMo heads.
-  - The qwen3_5 plugin's `draft_head("mtp")` returns:
-    - the head;
-    - one `LayerDecl(attn, mlp)` with the trunk's own Refs;
-    - weight rules for `mtp.*` and `blk.{n}.*`, which are then removed from the target's skip only inside this aux
-      map.
+  - The qwen3_5 plugin's `draft_head("mtp")` returns an `AuxSpec`:
+    - `unit`: the head;
+    - `layers`: one `LayerDecl(attn, mlp)` with the trunk's own Refs;
+    - `weights`: rules for `mtp.*` and `blk.{n}.*`. The target's own map keeps skipping them.
+  - The head uses the target's `embed` and `lm_head` through `target.shared`. The memory sum in §5 counts only the
+    335 MiB MTP block; the 834 MiB head is the target's.
   - The MTP KV is the aux spec `mtp.kv` (one segment), 1/16 more KV per token.
   - The generic `drafters/mtp` runs any head declared this way.
   - The "separate MTP GGUF" in the plan is superseded.
@@ -238,9 +269,14 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
   - `run` covers every input row of the step. It needs h(start − 1): it is carried per slot, tagged with its
     position, and replaced by zero unless the tag equals start − 1 (after a prefix hit, a preemption or a slot
     reuse).
-  - **On verify steps, the token at row n_accept + 1 is replaced by the bonus token** before the MTP forward. That
-    row's output is then the first draft, so no extra forward is needed for it.
-  - Then k − 1 one-row sub-steps follow. Cost: one (1 + k)-row MTP layer and k heads.
+  - `run` then drafts with **k one-row sub-steps** at offsets 0 … k − 1 (`substeps(k) = [1] × k`).
+    - The first takes `last_token` (the bonus, or the token sampled after prefill) and h from row `n_accept`.
+    - Each later one takes the previous draft and its own output hidden.
+    - This holds on every kind of step: full acceptance, partial acceptance, and a prefill's last chunk alike.
+    - Rev 2's "substitute the bonus in the absorb pass" is dropped. It has no row when every draft is accepted,
+      nor after a prefill.
+  - The first sub-step rewrites the entry the next step's absorb pass would write, with the same pair.
+  - Cost per step: one MTP layer pass over the step's rows (no head), plus k one-row MTP forwards with the head.
 - **D4. DFlash2: a plugin with its own checkpoint and its own attention unit.**
   - `drafters/dflash` declares taps 5, 19, 33, 47, 61 (from `target_layer_ids`). Its attention unit composes std
     `linear`, `rmsnorm`, `rope` and `kv_write@1` for context K/V.
@@ -259,26 +295,40 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
   - **Why:** `checkpoint_slots` would cost (1 + k) × 147 MiB per sequence.
   - **Kernel routing:** verify rows and replays route to the recurrent kernel (`fused_sigmoid_gating.py`); the
     chunked kernel stays for prefill.
-  - **Contract amendment:** `gated_delta_rule@1` gains optional `out_slots` [R], the units final states go to,
-    declared as the kernel fact `out_slots=True`, so a provider without it can never be selected. It comes with a
-    vendor.patch that splits the recurrent kernel's read and write indices.
+  - **Contract amendment:** `gated_delta_rule@1` gains optional `out_slots` [R], the units final states go to. It is
+    declared as the kernel fact `out_slots=True`, so a provider without it can never be selected.
+  - **The vendor.patch on the recurrent kernel:**
+    - adds a constexpr path that stores S **once, after the token loop**, to `out_slots[n]`;
+    - leaves the T = 1 decode specialization's arithmetic unchanged, so spec-off traces stay identical;
+    - this fixes the per-token store into neighbours' units (§2).
+    - L0 runs R ≥ 2 rows of q ≥ 2 and asserts every other unit is bitwise untouched.
   - **During verify:**
     - The verify forward writes final states to the padding slot's unit. That unit is a discard sink: only graph
       padding rows use it, always with `has_init` False.
-    - The unit saves the conv window [C, K−1] and the row's conv input x and gates a, b into a static replay buffer
-      (0.95 MiB per token for the 27B; `max_seqs × (1 + k_max)` tokens, ledger-counted).
+    - The unit saves into a static replay buffer, ledger-counted:
+      - the conv window [C, K−1]: 2.8 MiB per row for the 27B;
+      - the row's conv input x and gates a, b: 0.95 MiB per token, for `max_seqs × (1 + k_max)` tokens.
   - **`rewind`:**
     - restores the conv window;
     - re-runs the conv over x, then the recurrent kernel from S0 over the 1 + k rows, with a = b = −1e4 at
       positions ≥ 1 + n_accept;
-    - in fp32, g = −exp(A)·softplus(−1e4) = −0 and β = 0, so those tokens leave S bit-identical;
+    - in fp32, g = −exp(A)·softplus(−1e4) = −0 and β = 0, so those tokens leave S bit-identical (checked against
+      the kernel's thresholded softplus and `tl.sigmoid`);
     - writes the conv window at the accepted end.
   - No new kernel and no host length; captured in the graph.
-  - **Cost:** one recurrent launch per GDN layer, ≈ 0.29 GiB moved per row, ≈ 0.5 ms (≈ 3% of a step).
-- **D7. `draft_policy/fixed_k`, per drafter and per batch-size bucket.**
-  - `DraftPolicy.choose(seq, rows)` gains the step's row count.
-  - Defaults: MTP k = 3 at 1–2 rows and k = 2 at 3 or more; DFlash2 k = 7; n-gram k = 4 (`n_draft` is 0 on a miss).
-  - **The graph q set is the deployment's** (e.g. {3, 4} for MTP), not a union over drafters.
+  - **Cost:** one recurrent launch per GDN layer with a single final store, ≈ 0.29 GiB moved per row, ≈ 0.5 ms
+    (≈ 3% of a step), paid twice (verify, replay).
+  - **The CPU reference and provider** compute g and β per token inside the loop. Computed vectorised over T, CPU
+    transcendentals differ with tensor length, and 79 of 150 cases were then not bitwise.
+- **D7. Policy per step: `DraftPolicy.k(seqs) -> int`, plus `observe(seq, k, n_draft, n_accept)`.**
+  - k is chosen per step, because q is per step. `seqs` are the running requests before reservation.
+  - `observe` gets the lagged host results, one step late at depth 1.
+  - **`draft_policy/fixed_k`:** a k per running-request bucket.
+    - MTP: k = 3 at 1–2 requests, k = 2 at 3 or more.
+    - DFlash2: k = 7.
+    - n-gram: k = 4, but **k = 0 (a plain decode step) when no running request hit in its last 4 steps**. A miss
+      at full width costs ≈ 3.3 ms single stream and may be a net loss at 4 requests (§5).
+  - **The capture set** maps each bucket to its q. For MTP that is {4 at buckets 1–2, 3 above}.
   - The Strata-style cost model is §7.
 - **D8. Turning it on.**
   - Speculation is a slot binding (drafter, policy, verifier); k is the policy's tunable (design §5.7, level 1).
@@ -294,8 +344,10 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
 - For GGUF heads the reference uses dequantized weights and emulates q8_1 activations per path (`q8_1.py`), as Tier
   B does.
 - The floor is the bf16 reference vs the fp32 reference.
-- The verdict follows L2: top-1 agreement at confident positions (margin > the floor's 99th-percentile |Δlogit|),
-  plus a KL bound.
+- The verdict follows L2:
+  - top-1 agreement ≥ the floor's − 0.25 points, at confident positions (margin > the floor's 99th-percentile
+    |Δlogit|);
+  - mean KL ≤ 2 × the floor's.
 - MTP steps 2 and later are teacher-forced.
 
 **L0-dist** (`std.spec.rejection`)
@@ -319,8 +371,8 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
 | `verify_writes_state` | §1.3; L1.5 |
 | `rejection_keeps_draft` | L0-dist (marginal) |
 | `rejection_reused_uniform` (one coin across the chain) | L0-dist (joint) |
-| `unmasked_padding` (pad drafts accepted past `n_draft`) | the exact assert `n_accept ≤ n_draft`; L1.5 |
-| `verify_row_publish` (a checkpoint at a verify row's end) | §1.3 toy; prefix-hit bounded |
+| `unmasked_padding` (pad drafts accepted past `n_draft`) | the exact assert `n_accept ≤ n_draft` on a toy target with p(0) large; Gate B: L0-dist with sparse q and `n_draft < k` (stale q rows). Lossless for Kq = 1, so no L1.5. |
+| `verify_row_publish` (a checkpoint at a verify row's end) | the §3.7 toy proof |
 
 **Acceptance-length predictions** (agent trace, greedy). Compared with llama.cpp at the same settings; a gap over
 15% is investigated before any speed claim.
@@ -333,7 +385,9 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
   - Each draft reads the MTP layer (335 MiB) plus the Q5_K head (834 MiB): ≈ 1.6 ms. The head is 71% of draft
     bytes.
   - The optimum k is flat between 2 and 4.
-- **5080 + MTP at `max_seqs` 4:** 1.15–1.3× TPOT. Verify rows of 16 tokens go to mmq.
+- **5080 + MTP at `max_seqs` 4:** 1.15–1.3× TPOT. With k = 2, 12-token verify steps go to mmq.
+- **n-gram (Qwen3-8B and the 27B):** speed is recorded against the break-even acceptance per bucket. The predicted
+  break-even single stream on the 5080 is ≈ 1.2 tokens per step, at a step of 15.6 + 4 × 0.7 + 0.5 ms.
 - **4090 + DFlash2, single stream:** 2.0–3.0× vs 21.4 ms.
 - **Pivot:** below 1.2× single stream for MTP on the 5080, after a perf pass → profile the step breakdown (verify
   GEMMs, GDN verify and replay, drafts) and fix the largest item. The candidates are a vocabulary-restricted head
@@ -343,7 +397,7 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
 - Start from 1940 MiB of KV.
 - Subtract:
   - 0.9 × 335 MiB of MTP weights;
-  - the replay buffer, 16 rows × 0.95 MiB;
+  - the replay buffer: 16 rows × 0.95 MiB, plus 4 × 2.8 MiB of conv windows;
   - the verify-graph pool, ≈ 100 MiB, measured at startup.
 - That leaves ≈ 1520 MiB, at 0.564 MiB per unit (17/16 of today's): **≈ 42K tokens** (58K today).
 - The 32K agent context still fits.
@@ -357,12 +411,12 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
 
 | # | Work | Checks | Days |
 |---|---|---|---|
-| 1 | Core: §3.1–3.3 and §3.5–3.7 with toy proofs (aux namespacing, sub-steps and lookahead, admit/run, rewind, `n_draft`, publishing rule) | core tests; full suite | 4 |
-| 2 | GDN: `out_slots` in the recurrent kernel (vendor.patch), the CPU provider and the reference; routing; the replay buffer; `rewind` | L0 bitwise + drift on sm_86/89/120; the extended `test_spec` matrix on tiny qwen3_5 | 2 |
+| 1 | Core: §3.1–3.3 and §3.5–3.7 with toy proofs. Line budgets: construction and namespacing 90, sub-steps and device prep 110, verify graphs and profile 60, admit/run/rewind 50, `n_draft`, padding and limit 50, sampler and verifier plumbing 40, policy, lookahead and publishing 40; deletions −40 | core tests; full suite; core ≤ 5100 lines | 4.5 |
+| 2 | GDN: the recurrent kernel's single final store to `out_slots` (vendor.patch), the CPU provider and the reference (gating per token); routing; the replay buffer; `rewind` | unit-level `rewind` bitwise vs 1 + n decode calls (n < k and n = k; neighbours untouched) on sm_86/89/120; drift; the extended `test_spec` matrix on tiny qwen3_5 | 2 |
 | 3 | `std.spec.mtp_head@1`, qwen3_5 `draft_head`, `drafters/mtp` | L0-drafter; CPU identity; Qwen3.5-9B bf16 bounded (A5000) | 3 |
 | 4 | `drafters/ngram` (device history from `admit` + `run`), `fixed_k` | Qwen3-8B bounded; acceptance recorded | 1 |
 | 5 | §3.5 sampler seam, `std.spec.rejection`, verifier logprobs | L0-dist; plants | 2.5 |
-| 6 | §3.6 verify graphs; the 27B GGUF end to end | graph vs eager bitwise per step; depth-1 share; memory fit | 2 |
+| 6 | §3.6 verify graphs; the 27B GGUF end to end | graph vs eager on the same padded plan, bitwise per step; depth-1 share; memory fit | 2 |
 | 7 | **Gate A:** 5080 / 4090 MTP evidence vs llama-server; panel code review; merge | records; review clean | 2 |
 | 8 | Taps, attention `causal` / `window` facts, `drafters/dflash` (context KV, block attention, conv, selector); header dump of the checkpoint first | L0-drafter; bounded 27B (4090) | 4 |
 | 9 | **Gate B:** DFlash2 vs llama-server on the 4090 (q8_0 KV); panel code review; plan §7.1 status; merge | records; review clean | 2 |
@@ -378,9 +432,9 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
 
 ## 8. Risks
 
-- **Sub-step planning cost.** Each verify step plans the target groups, plus the aux groups, plus k − 1 MTP
-  sub-steps on the host. If host time per step grows by more than 1 ms, cache plans per (bucket, q): the shapes are
-  fixed per graph.
+- **Sub-step planning cost.** Each verify step plans the target groups, the aux groups for the absorb pass, and
+  the aux groups for k sub-steps on the host. If host time per step grows by more than 1 ms, cache plans per
+  (bucket, q): the shapes are fixed per graph.
 - **Weight names and `mask_embedding.pt`** are unverified until the DFlash2 checkpoint's headers are dumped
   (step 8).
 - **Sliding-window off-by-one.** HF admits ≤ 2048; SGLang and llama.cpp admit ≤ 2047. We follow llama.cpp, whose
@@ -433,3 +487,31 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
 | C-m4: more plants | `replay_conv_row_end`, `verify_row_publish`, `rejection_reused_uniform`, `unmasked_padding` |
 | C-m6 / C-m7: rollback and graph checks | bitwise masked replay + drift; graph vs eager bitwise per step |
 | C-m9: fold MTP's first draft into the absorb pass | bonus substitution (D3) |
+
+**Rev 2.**
+
+| Finding | Resolution |
+|---|---|
+| A-M1 / C-N1: the recurrent kernel stores S per token into neighbours' units | vendor.patch: one store after the loop to `out_slots[n]`; T = 1 path unchanged; neighbour-untouched L0 (D6, §2) |
+| A-M2 / B-N2 / C-m4: bonus substitution has no row at full acceptance or after prefill | dropped; k one-row sub-steps from offset 0 on every step (D3) |
+| A-M3: verify rows near `max_model_len` index past the table | positions at or past the limit go to the null unit; `n_draft` capped; toy at limit − 1 (§3.2) |
+| A-M4: prefill's last chunk reserves no lookahead | `n + lookahead` for a prompt-ending chunk (§3.2) |
+| A-M5 / B-n1: sub-steps share buffers and kernel instances; plan every group; inherit publishes | per-sub-step static buffers and instances; child groups only; no publishes; prepared right before the forward (§3.2) |
+| B-N1: drafter construction and sharing undefined | `DrafterPlugin.build(ctx, target)`; `target.shared` / `target.draft_head`; `AuxSpec(unit, layers, weights)` (§3.1, D2) |
+| B-n2: policy per request vs per step | `DraftPolicy.k(seqs)` per step; `observe` lagged (D7) |
+| B-n3: sparse q over-built for Gate A | moved to Gate B (§3.5, D1) |
+| B-n4: admit staging | the drafter's own pinned asynchronous copy (§3.3) |
+| B-n5: publishes leak through namespacing | the child maps or filters publishes; aux `in_step` toy (§3.1) |
+| B-n6: `host_commit` / `CommitView` have no caller | deleted (§3.5) |
+| B-n7: line budget | per-seam budgets in step 1; core ≤ 5100 |
+| C-N2: `unmasked_padding` cannot fail L1.5 | must-fail checks corrected (§5) |
+| C-N3: n-gram misses pay full width | `fixed_k` falls back to k = 0 without recent hits; break-even recorded (D7, §5) |
+| C-m1: graph vs eager bitwise | on the same padded plan; padded vs unpadded stays bounded (§1.4) |
+| C-m2: §1.3 must be unit-level | unit `rewind` with the conv window, n < k cases, neighbours (§1.3, step 2) |
+| C-m3: `verify_row_publish` prediction | the toy proof only (§5) |
+| C-m5: 16 vs 12 tokens; capture set | corrected (§5, §3.6, D7) |
+| C-m6: L0-drafter number | floor − 0.25 points top-1; KL ≤ 2 × floor (§5) |
+| A-m1: CPU reference not bitwise | gating per token in the reference and the CPU provider (D6) |
+| A-m2: greedy verifier with sampled rows | samples them from the first column, `n_accept = 0` (§3.5) |
+| A-m3: conv window not counted | 2.8 MiB per row, ledger-counted (D6, §5) |
+| A-m4: no `every:n` checkpoints while speculating | stated (§3.7) |
