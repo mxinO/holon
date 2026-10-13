@@ -37,7 +37,7 @@ def _oracle(prompts, continuations, mode="mixed", ahead=False, vocab=512):
     ORACLE.hidden.clear()
     ORACLE.hidden_slots.clear()
     ORACLE.steps, ORACLE.k, ORACLE.mode, ORACLE.ahead, ORACLE.vocab = 0, 3, mode, ahead, vocab
-    ORACLE.real, ORACLE.rewinds, ORACLE.max_position = None, 0, -1
+    ORACLE.real, ORACLE.rewinds, ORACLE.max_position, ORACLE.max_computed = None, 0, -1, -1
 
 
 def _kv(engine, pool: str, segment: int, units: list[int], n: int) -> torch.Tensor:
@@ -118,10 +118,17 @@ def test_sub_steps_at_the_length_limit(tiny_checkpoint, tiny_case):  # noqa: F81
     two = [prompts[3], prompts[0]]
     params = SamplingParams(temperature=0.0, ignore_eos=True)
     plain = _engine(tiny_checkpoint, drafting=False).generate(two, params)
-    _oracle(two, plain, mode="right", ahead=True)
-    out = _engine(tiny_checkpoint).generate(two, params)
+    # The oracle knows each continuation 8 tokens past the limit: drafts there are right, so only the cap at the limit
+    # keeps them from being accepted.
+    longer = _engine(tiny_checkpoint, drafting=False, max_model_len=48).generate(two, params)
+    _oracle(two, longer, mode="right", ahead=True)
+    engine = _engine(tiny_checkpoint)
+    for b in engine.state.bound:                       # every slot's overflow columns point at the null unit
+        if (table := engine.state._table_of.get(b.spec.name)) is not None:
+            assert (table.host[:, table.real_pages:] == b.pool.null).all() and table.real_pages < table.max_pages
+    out = engine.generate(two, params)
     assert out == plain and all(len(p) + len(o) == 40 for p, o in zip(two, out, strict=True))
-    assert ORACLE.max_position == 39
+    assert ORACLE.max_position == 39 and ORACLE.max_computed == 39      # nothing computed or accepted past it
 
 
 def test_no_aux_model_without_a_drafter(tiny_checkpoint):  # noqa: F811

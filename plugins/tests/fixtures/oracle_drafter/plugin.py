@@ -46,6 +46,7 @@ class Drafter:
         if not verify:                                                 # sampled rows of a plain step accepted nothing
             assert (table.n_accept[dev.slots[dev.logits_rows]] == 0).all()
         ORACLE.max_position = max(ORACLE.max_position, int(dev.positions.max()))
+        ORACLE.max_computed = max(ORACLE.max_computed, int(table.num_computed[dev.slots].max()))
         rows = torch.repeat_interleave(torch.arange(len(dev.slots)), dev.query_start.diff().cpu())
         slots, positions = dev.slots.cpu()[rows], dev.positions.cpu()
         self.history[slots, positions] = self.absorbed[slots, positions] = dev.input_ids.cpu()

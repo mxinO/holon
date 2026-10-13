@@ -19,6 +19,7 @@ class Oracle:
     real: int | None = None                        # drafts per row that are real (n_draft); the rest invalid ids
     rewinds: int = 0                               # verify steps the drafter saw rewound before it ran
     max_position: int = -1                         # the largest position any step computed at
+    max_computed: int = -1                         # the largest length a step left in the SeqTable
     history: object = None                         # the drafter's per-slot token history (a [slots, positions] tensor)
     absorbed: object = None                        # the part of it that came from steps' inputs
     observed: list[tuple[tuple[int, ...], int, int, int]] = dataclasses.field(default_factory=list)

@@ -60,6 +60,8 @@ class Planner:
         lens = plan.n_query.tolist()
         decode = all(n == 1 for n in lens)
         verify = bool(len(lens)) and not decode and bool((plan.n_logits == plan.n_query).all())
+        if not verify and bool((plan.n_logits > 1).any()):      # rewind needs every row of a step to be a verify row
+            raise RuntimeError("gdn: a step mixing verify rows with other rows")
         pubs = {spec: [p for p in plan.publishes if p.spec == spec] for spec in (CONV, SSM)}
         ssm = [(p.row, p.offset, p.payload.units[0]) for p in pubs[SSM]]
         meta = GDNMeta(self.rule, self.rule.plan(lens, ssm, per_token=verify), batch.dev.slots, batch.dev.query_start,
