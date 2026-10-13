@@ -504,3 +504,97 @@ def test_snapshots_must_fall_inside_their_row_on_a_chunk():
     for bad in [(0, 0, 0), (0, 32, 0), (0, 192, 0), (1, 64, 0)]:   # chunk 0, off a chunk, past the end, a 0-token row
         with pytest.raises(ValueError, match="snapshot"):
             kernel.plan([150, 0], [bad])
+
+
+# --- speculative verify rows (docs/m04-spec.md D6): per-token rows, out_slots, masked replay ---------------------
+# Bitwise: the masked replay equals one call over the accepted tokens alone (the same kernel specialization). Against
+# one-token decode calls (a specialization storing inside its loop) the states agree within STATE_ULPS·eps(f32) of
+# their scale — the design's fallback (§1.3) — and a long run of verify/replay steps stays there without drifting.
+STATE_ULPS = 8
+
+
+def _verify_replay(rule, x, g, s0, slots, accepted, q, sink=None):
+    """A verify step over rows of q tokens (written to `sink`, else to the rows' units) and its masked replay."""
+    n = len(slots)
+    init = dev([True] * n, torch.bool)
+    out = None
+    if sink is not None:
+        out = rule(rule.plan([q] * n, per_token=True), *rows(x, 0, n * q).values(), g["a_log"], g["dt_bias"], s0,
+                   dev(slots), init, out_slots=dev([sink] * n))
+    keep = torch.arange(q, device="cuda")[None, :] < 1 + torch.tensor(accepted, device="cuda")[:, None]
+    masked = dict(rows(x, 0, n * q))
+    for name in ("a", "b"):
+        masked[name] = masked[name].masked_fill(~keep.reshape(-1, 1), -1e4)
+    rule(rule.plan([q] * n, per_token=True), *masked.values(), g["a_log"], g["dt_bias"], s0, dev(slots), init,
+         out_slots=dev(slots))
+    return out
+
+
+def _decode_steps(rule, x, g, state, slots, accepted, q) -> dict:
+    """1 + n one-token calls per row; their outputs by (row, token)."""
+    outs = {}
+    for j in range(1 + max(accepted)):
+        live = [r for r, n in enumerate(accepted) if j <= n]
+        at = torch.tensor([r * q + j for r in live], device="cuda")
+        o = rule(rule.plan([1] * len(live)), *{n: t[at] for n, t in rows(x, 0, len(slots) * q).items()}.values(),
+                 g["a_log"], g["dt_bias"], state, dev([slots[r] for r in live]), dev([True] * len(live), torch.bool))
+        outs |= {(r, j): o[i] for i, r in enumerate(live)}
+    return outs
+
+
+def _close(a: torch.Tensor, b: torch.Tensor, ulps: int = STATE_ULPS) -> bool:
+    return bool((a - b).abs().max() <= ulps * torch.finfo(torch.float32).eps * b.abs().max())
+
+
+@pytest.mark.parametrize("order", ["grouped", "tiled"])
+@pytest.mark.parametrize("shape", ["qwen3.8-27b", "qwen3.5"])
+def test_verify_rows_replay_bitwise_to_the_accepted_tokens(shape, order):
+    hk, hv, d = SHAPES[shape]
+    rule = gdn(shape, order)
+    q, slots, accepted, sink = 4, [3, 0, UNITS - 1], [0, 2, 3], 9
+    x, g = tokens(len(slots) * q, hk, hv, d), gates(hv)
+    s0 = torch.randn(UNITS, hv, d, d, device="cuda") * 0.1
+
+    state = s0.clone()
+    keep_s0 = state.clone()
+    out = rule(rule.plan([q] * len(slots), per_token=True), *rows(x, 0, len(slots) * q).values(), g["a_log"],
+               g["dt_bias"], state, dev(slots), dev([True] * len(slots), torch.bool),
+               out_slots=dev([sink] * len(slots)))
+    others = [u for u in range(UNITS) if u != sink]
+    assert torch.equal(state[others], keep_s0[others])               # the verify step moved nothing but the sink
+
+    replay = s0.clone()
+    _verify_replay(rule, x, g, replay, slots, accepted, q)
+    alone = s0.clone()
+    take = torch.cat([torch.arange(r * q, r * q + 1 + n, device="cuda") for r, n in enumerate(accepted)])
+    rule(rule.plan([1 + n for n in accepted], per_token=True),
+         *{n: t[take] for n, t in rows(x, 0, len(slots) * q).items()}.values(), g["a_log"], g["dt_bias"], alone,
+         dev(slots), dev([True] * len(slots), torch.bool), out_slots=dev(slots))
+    assert torch.equal(alone, replay)                                # bitwise: every unit
+
+    decode = s0.clone()
+    outs = _decode_steps(rule, x, g, decode, slots, accepted, q)
+    untouched = [u for u in range(UNITS) if u not in slots]
+    assert torch.equal(replay[untouched], s0[untouched]) and torch.equal(decode[untouched], s0[untouched])
+    assert _close(replay[slots], decode[slots])
+    for (r, j), o in outs.items():                                   # verify outputs: decode's within a bf16 step
+        assert torch.allclose(out[r * q + j].float(), o.float(), rtol=2 ** -7, atol=1e-3)
+
+
+@pytest.mark.parametrize("shape", ["qwen3.8-27b"])
+def test_verify_replay_does_not_drift_from_decoding(shape):
+    # 60 verify/replay rounds (up to 240 tokens per row, random acceptance) against the same tokens decoded one at a
+    # time: the states stay within STATE_ULPS of each other — the specializations' rounding does not accumulate.
+    hk, hv, d = SHAPES[shape]
+    rule = gdn(shape, "tiled")
+    q, slots = 4, [2, 5]
+    g = gates(hv)
+    spec = torch.randn(UNITS, hv, d, d, device="cuda") * 0.1
+    plain = spec.clone()
+    gen = torch.Generator().manual_seed(7)
+    for _ in range(60):
+        accepted = torch.randint(0, q, (len(slots),), generator=gen).tolist()
+        x = tokens(len(slots) * q, hk, hv, d)
+        _verify_replay(rule, x, g, spec, slots, accepted, q)
+        _decode_steps(rule, x, g, plain, slots, accepted, q)
+    assert _close(spec[slots], plain[slots])

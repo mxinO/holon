@@ -49,6 +49,9 @@ Decode faster with speculation on consumer cards, without changing the output di
    - **Fallback, if a kernel class is not bitwise against the decode calls** (two Triton specializations,
      store-in-loop vs store-after): check bitwise against a call of the same `out_slots` kernel over the 1 + n
      accepted tokens alone, and hold the decode comparison to the drift and L0 bounds.
+     **Taken** (sm_86, step 2): the specializations differ by ≤ 6e-8 in f32 states. The GPU L0 is now:
+     bitwise to the accepted-tokens call; within 8 f32 ulps of the states' scale against decode calls, with no
+     drift over 60 rounds. The CPU reference stays bitwise against decode calls at the unit level.
    - **Drift:** 200 verify/replay steps from a non-zero S0 stay within the GDN L0 bound of an f64 recurrence.
    - **No checkpoint lands in a verify row.** No checkpoint is registered at the end of a row with `n_logits > 1`,
      or for a request with an uncommitted verify row.
