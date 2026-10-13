@@ -29,26 +29,25 @@ class Piece:
 
 class Choice:
     """One of a request's `n` sequences as text. Stop strings are matched here, across token boundaries; text that
-    could still turn out to start a stop string is held back until it cannot."""
+    could still turn out to start a stop string is held back until it cannot. Only that unsent text is kept (a
+    whole answer grown piece by piece is copied on every piece)."""
 
     def __init__(self, tokenizer: Tokenizer, prompt_ids: list[int], stop: list[str]) -> None:
         self.detok = Detokenizer(tokenizer, prompt_ids)
         self.stop = stop
         self.hold = max(map(len, stop), default=1) - 1
-        self.text = ""
-        self.sent = 0                      # text[:sent] has been handed out
+        self.unsent = ""                   # text not handed out yet: no stop string starts before it
         self.finish_reason: str | None = None
 
     def feed(self, d: TokenDelta) -> Piece:
         ids = d.token_ids[:-1] if d.finish_reason == "stop" else d.token_ids   # the engine stopped on EOS/stop id
-        searched = max(0, len(self.text) - self.hold)                          # a new match cannot start earlier
-        self.text += self.detok.push(ids, final=d.finish_reason is not None)
+        self.unsent += self.detok.push(ids, final=d.finish_reason is not None)
         self.finish_reason = d.finish_reason
-        hits = [i for i in (self.text.find(s, searched) for s in self.stop) if i >= 0]
+        hits = [i for i in (self.unsent.find(s) for s in self.stop) if i >= 0]
         if hits:
-            self.text, self.finish_reason = self.text[:min(hits)], "stop"
-        end = len(self.text) if self.finish_reason else max(self.sent, len(self.text) - self.hold)
-        text, self.sent = self.text[self.sent:end], end
+            self.unsent, self.finish_reason = self.unsent[:min(hits)], "stop"
+        end = len(self.unsent) if self.finish_reason else max(0, len(self.unsent) - self.hold)
+        text, self.unsent = self.unsent[:end], self.unsent[end:]
         return Piece(d.index, text, d.token_ids, d.logprobs, d.prompt_logprobs, self.finish_reason)
 
 

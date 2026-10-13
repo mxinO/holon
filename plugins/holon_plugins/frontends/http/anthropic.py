@@ -78,7 +78,7 @@ def router(client: EngineClient, bundle: FrontendBundle, drop_billing_header: bo
                 return Response(status_code=499)
             if first.finish_reason == "error":
                 raise rejected(first)
-            return EventStream(_events(message, len(chat.ids), first, gen))
+            return EventStream(_events(message, len(chat.ids), first, gen), _sse("ping", {"type": "ping"}))
         results = await unless_disconnected(request, collect([gen]))
         if results is None:
             return Response(status_code=499)
@@ -196,7 +196,7 @@ async def _events(message: dict[str, Any], n_prompt: int, first: Piece, gen: Asy
             for step, i, text in blocks.push(p.events) + (blocks.close() if reason else []):
                 b = blocks.blocks[i]
                 if step == "start":                     # empty: `b` may hold this piece's deltas already
-                    start = _block(Block(b.kind, "{}", b.name, b.id) if b.kind == "tool" else Block(b.kind))
+                    start = _block(Block(b.kind, b.name, b.id, ["{}"] if b.kind == "tool" else []))
                     yield _sse("content_block_start", {"type": "content_block_start", "index": i,
                                                        "content_block": start})
                 elif step == "delta":

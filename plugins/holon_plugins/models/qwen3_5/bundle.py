@@ -1,6 +1,7 @@
-"""Qwen3's frontend bundle: the checkpoint's tokenizer and chat template, from whichever source holds the weights
-(HF directory or GGUF file), and the formats the template writes reasoning and tool calls in (docs/m05-grammar.md
-§3.8; the frontend parses and constrains each format)."""
+"""Qwen3.5's (and 3.8's) frontend bundle: the checkpoint's tokenizer and chat template, from whichever source holds
+the weights (HF directory or GGUF file), and the formats the template writes reasoning and tool calls in
+(docs/m05-grammar.md §3.8; the frontend parses and constrains each format). Qwen3.5's and 3.8's templates write tool
+calls in XML but argument values differently, so the tool format is read off the template."""
 from __future__ import annotations
 
 import json
@@ -40,12 +41,12 @@ class Bundle:
         return None                                 # the frontend's think@1
 
     def tool_parser(self, tools: list[dict[str, Any]]) -> None:
-        return None                                 # the frontend's parser of `tool_format`
+        return None                                 # the frontend's qwen_xml@1 / @2
 
 
 def _parsed(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Tool-call arguments sent as JSON text (OpenAI's wire form) as objects: the XML templates iterate them (the
-    Qwen3.8 GGUF one raises on text, R §4.1); the hermes one writes an object as it would its text."""
+    Qwen3.8 GGUF one raises on text, R §4.1)."""
     def parsed(call: dict[str, Any]) -> dict[str, Any]:
         fn = call.get("function")
         if not isinstance(fn, dict) or not isinstance(fn.get("arguments"), str):
@@ -59,15 +60,14 @@ def _parsed(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _tool_format(render: Any) -> str | None:
-    """The tool-call format the template writes, read off a rendered call with a boolean argument: hermes JSON in
-    <tool_call>, or Qwen's XML with values written by Jinja's `| string` (Python's True: qwen_xml@1, Qwen3.5) or as
-    JSON (qwen_xml@2, Qwen3.6+)."""
+    """The tool-call format the template writes, read off a rendered call with a boolean argument: Qwen's XML with
+    values written by Jinja's `| string` (Python's True: qwen_xml@1, Qwen3.5) or as JSON (qwen_xml@2, Qwen3.6+)."""
     call = {"type": "function", "function": {"name": "f", "arguments": {"b": True}}}
     try:
         text = render([{"role": "user", "content": "x"}, {"role": "assistant", "content": "", "tool_calls": [call]}],
                       [{"type": "function", "function": {"name": "f", "parameters": {}}}], False)
     except Exception:  # noqa: BLE001 — a template without tool calls
         return None
-    if "<function=f>" in text:
-        return "qwen_xml@1" if "\nTrue\n" in text else "qwen_xml@2"
-    return "hermes@1" if '"name": "f"' in text else None
+    if "<function=f>" not in text:
+        return None
+    return "qwen_xml@1" if "\nTrue\n" in text else "qwen_xml@2"

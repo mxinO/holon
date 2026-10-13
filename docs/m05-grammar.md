@@ -723,18 +723,21 @@ router per dialect: `openai.py` (chat and text completions), `anthropic.py` (`/v
 `responses.py` (`/v1/responses`); `pipeline.py` (a router's `Conversation` → `Chat`: render, constraint, a parser
 per choice; `Blocks`, the block shape Anthropic and Responses share); `formats.py` (think@1, hermes@1, qwen_xml@1 /
 @2: each format's streaming parser and the constraint of its output, plain `grammar.constraint@1` dicts); `web.py`
-(errors by kind, event streams). The bundles name their formats: `reasoning_format` think@1; `tool_format` read off
-the template by rendering a call with a boolean argument — hermes@1 (Qwen3, Qwen3 MoE), qwen_xml@1 (Qwen3.5,
-`| string`: Python's `True`), qwen_xml@2 (Qwen3.6+ / 3.8, `tojson`); `render_chat` parses tool-call arguments sent as
-JSON text into objects (the XML templates iterate them; Qwen3.8's raises on text). No core change.
+(errors by kind, event streams with a keepalive). The bundles name their formats: `reasoning_format` think@1;
+`tool_format` hermes@1 for Qwen3 and Qwen3 MoE (declared; their template writes arguments sent as JSON text as they
+are), and for Qwen3.5 / 3.8 read off the template by rendering a call with a boolean argument — qwen_xml@1 (Qwen3.5,
+`| string`: Python's `True`) or qwen_xml@2 (Qwen3.6+ / 3.8, `tojson`); the Qwen3.5 bundle's `render_chat` parses
+tool-call arguments sent as JSON text into objects (the XML templates iterate them; Qwen3.8's raises on text). Each
+tool format exposes its call opener (`opener`, beside `call`). No core change.
 
-Proofs (`plugins/tests/test_frontend_http.py`, 73 tests of which 45 new, ≈ 47 s with the GPU one; the package is
+Proofs (`plugins/tests/test_frontend_http.py`, 78 tests of which 50 new, ≈ 27 s with the GPU one; the package is
 ≈ 1.2k lines, plan §2 budgets frontends ≈ 1.5k):
-- Parsers, R §4.2's fixtures (10): hermes with reasoning the model opens, text and two calls, a body that is no call,
-  a call cut by the end of the text; XML with `<tool_call>` ending reasoning without `</think>`, closed reasoning
-  then text then a call, typed values under @1 and @2 (`True` / `None` are a boolean / null under @1 and strings
-  under @2; `007` for a string parameter stays a string; multi-line strings), a call cut inside a parameter, markers
-  that start nothing. For each, the parse of every split of the text (character by character, and random cuts)
+- Parsers, R §4.2's fixtures (12): hermes with reasoning the model opens, text and two calls, both markers inside an
+  argument string, arguments written as a JSON string, a body that is no call, a call cut by the end of the text;
+  XML with `<tool_call>` ending reasoning without `</think>`, closed reasoning then text then a call, typed values
+  under @1 and @2 (`True` / `None` are a boolean / null under @1 and strings under @2; `007` for a string parameter
+  and `5` for an `anyOf` [string, null] one stay strings; multi-line strings), a call cut inside a parameter,
+  markers that start nothing. For each, the parse of every split of the text (character by character, and random cuts)
   equals the whole text's.
 - Constraints (7 forms + 5 choices): every builder's output passes `constraint.check` and compiles; samples admitted
   and refused (a second call under `parallel_tool_calls: false` or a named choice, text before a required call, a
@@ -748,7 +751,8 @@ Proofs (`plugins/tests/test_frontend_http.py`, 73 tests of which 45 new, ≈ 47 
   reassemble to the non-streamed content; Responses' input items (a call joins the assistant turn, its output a tool
   message, reasoning the next assistant's) and its streamed items equal the non-streamed output, sequence numbers in
   order; a failure after the first token is `finish_reason: "error"` (chat, streamed and not), `event: error` /
-  `response.failed` streamed, a 500 otherwise — never a 400 (D7; deferred from step 1).
+  `response.failed` streamed, a 500 otherwise — never a 400 (D7; deferred from step 1); a stream quiet for 15 s
+  sends a keepalive (Anthropic's `ping` event, an SSE comment otherwise) and ends normally.
 - Bundles with the real templates (Qwen3-0.6B, Qwen3.5-9B, Qwen3.8-27B): the format named, a call sent with JSON-text
   arguments renders, and the frontend's parser reads the rendered call back.
 - Round trips: a tiny random Qwen3 over Qwen3's tokenizer and template (CPU, grammar.xgrammar; whitespace-only tokens
@@ -760,11 +764,13 @@ Deviations (simplest option consistent with the decisions):
 - **The parsers take `final`** (`feed(text, final=False)`): a streaming parser holds back what may still be a marker
   and needs the end of the text to release it; §3.8's `Parser.feed(text)` has no end. The frontend uses its own
   parsers, chosen by format name; `FrontendBundle.reasoning_parser()` / `tool_parser()` (every bundle returns None)
-  are not consulted. Adding `final` to `holon.api.Parser` is a one-line core change, left for the step-7 review.
-- **Format versions:** qwen_xml@1 is Qwen3.5's template (`| string`), @2 Qwen3.6+ / 3.8's (`tojson`). A bundle reads its
-  format off its template (one plugin serves both), rather than declaring it.
+  are not consulted; step 7 deletes them and the `Parser` protocol (panel, below).
+- **Format versions:** qwen_xml@1 is Qwen3.5's template (`| string`), @2 Qwen3.6+ / 3.8's (`tojson`). The Qwen3.5
+  bundle reads its format off its template (the plugin serves both), rather than declaring it.
 - **hermes emits a call when it closes** (its arguments as one delta, checked JSON; a body that is not a call stays
-  text); qwen_xml streams a parameter at a time (`{`, each `"key": value`, `}`), a cut parameter dropped at the end.
+  text): its body is read as one JSON value (`raw_decode`) followed by whitespace and `</tool_call>` — a
+  `</tool_call>` inside one of its strings does not close it; qwen_xml streams a parameter at a time (`{`, each
+  `"key": value`, `}`), a cut parameter dropped at the end.
 - **Text and reasoning runs are stripped** at both ends (the formats put newlines around markers).
 - **The reasoning state is read off the prompt's last 16 tokens:** opened (`<think>`: Qwen3.5 / 3.8 thinking on),
   closed (`</think>`: thinking off), or left to the model (Qwen3: a leading `<think>` opens it). The constraint
@@ -800,3 +806,28 @@ constrained tool choices and response formats):
 
   The served model id is `/v1/models`'s; capture the session's requests (headers redacted) to check R §5.4's
   unverified items, and count the dropped billing headers in `/metrics`.
+
+**Step 3, panel review** (clean for step 4; fixed before step 5):
+- *Major:* the hermes parser closed a call at the first `</tool_call>`, so a grammar-admitted call whose argument
+  string held that text parsed into text. Fixed as above; fixture "markers inside an argument string" (fails before).
+- *F3-1:* fixtures for hermes arguments written as a JSON string (the re-parse) and an `anyOf`-typed XML parameter.
+- *F3-2:* parsing a long call cost quadratic time (each piece re-searched and re-copied the held text: a 400K-character
+  qwen_xml call took 18.4 s, hermes 6.4 s, a stop-string choice 9.1 s for 1.6M characters). Held text is now kept as
+  pieces and searched only where a marker may newly start (`formats._Until`), a block's text as pieces joined once,
+  and a choice keeps only its unsent text: 0.13 s / 0.13 s / 1.3 s (`/tmp` bench, CPU). Event streams send a keepalive
+  after 15 s of silence (`web.KEEPALIVE`).
+- *F3-3:* the shared `plugins/tests/conftest.py` collects garbage only after tests that left GPU memory reserved
+  (≈ 0.24 s per test before); the GPU suites still release their pools (`test_frontend_http.py` then `test_ngram.py`
+  in one run: 83 passed).
+- *m2 / m3:* Qwen3 and Qwen3 MoE declare hermes@1 and pass arguments through; the template probe and the argument
+  parsing stay in the Qwen3.5 bundle; the pipeline reads each format's call opener instead of naming `<tool_call>`.
+
+For step 7 (deferred, both core):
+- delete `FrontendBundle.reasoning_parser()` / `tool_parser()` and the `Parser` protocol from `holon.api` — dead API:
+  the frontend owns the formats;
+- pass `EngineConfig.plugin_options` to `FrontendPlugin.serve`, so frontends read namespaced options (e.g.
+  `http.drop_billing_header`; today a `build_app` argument only).
+
+For step 5 (measure and record): the largest gap between events per stream; frontend CPU per token at the agent
+concurrency; TTFT split per dialect into render + constraint build, cold vetting + compile, and warm; and echo the
+effective `strict: false` in the Responses API's `tools`.

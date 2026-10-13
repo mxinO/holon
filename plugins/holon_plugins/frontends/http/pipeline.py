@@ -66,7 +66,7 @@ class Chat:
         self.reasoning = formats.REASONING.get(bundle.reasoning_format or "")
         self.tool_format = bundle.tool_format if tools and bundle.tool_format in formats.TOOLS else None
         self.tools = tools if self.tool_format else []
-        self.ends = (formats.CALL,) if self.tool_format else ()      # every tool format's calls open with it
+        self.ends = (formats.TOOLS[self.tool_format].opener,) if self.tool_format else ()   # it ends reasoning
 
         calls = None
         strict = any(t["function"].get("strict") for t in tools)
@@ -74,9 +74,9 @@ class Chat:
             if self.tool_format is None:
                 raise BadRequest(f"tool_choice / parallel_tool_calls / strict need a known tool format; this model's "
                                  f"is {bundle.tool_format!r}")
-            call = formats.CALLS[self.tool_format]
+            call = formats.TOOLS[self.tool_format].call
             calls = call(tools[names.index(named)]) if named else {
-                "type": "triggered_tags", "triggers": [formats.CALL], "tags": [call(t) for t in tools],
+                "type": "triggered_tags", "triggers": list(self.ends), "tags": [call(t) for t in tools],
                 "at_least_one": conv.tool_choice == "required", "stop_after_first": not conv.parallel_tool_calls}
         if calls and conv.response_format:
             raise BadRequest("response_format cannot be combined with a constrained tool choice")
@@ -140,9 +140,14 @@ async def pieces(client: EngineClient, bundle: FrontendBundle, chat: Chat, param
 @dataclasses.dataclass
 class Block:
     kind: str                           # "reasoning" | "text" | "tool"
-    text: str = ""                      # the reasoning, the text, or a tool call's arguments (JSON)
     name: str = ""                      # a tool call's function
     id: str = ""                        # a tool call's id
+    parts: list[str] = dataclasses.field(default_factory=list)   # its text in pieces (not one string grown: quadratic)
+
+    @property
+    def text(self) -> str:
+        """The reasoning, the text, or a tool call's arguments (JSON)."""
+        return "".join(self.parts)
 
 
 class Blocks:
@@ -186,5 +191,5 @@ class Blocks:
         return [("start", len(self.blocks) - 1, "")]
 
     def _delta(self, text: str) -> list[tuple[str, int, str]]:
-        self.blocks[-1].text += text
+        self.blocks[-1].parts.append(text)
         return [("delta", len(self.blocks) - 1, text)]

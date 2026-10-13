@@ -1,6 +1,7 @@
 """HTTP plumbing the routers share: errors by kind, waiting on the engine while watching the client, event streams."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable
 from typing import Any
 
@@ -68,16 +69,45 @@ async def unless_disconnected[T](request: Request, aw: Awaitable[T]) -> T | None
     return result
 
 
-class EventStream(StreamingResponse):
-    """Server-sent events that close their body however the response ends. Starlette cancels a stream whose client
-    went away, but leaves the body generator suspended if that happens while a chunk is being sent; closing it
-    aborts the engine request."""
+KEEPALIVE = 15.0      # seconds without an event after which a stream sends a keepalive (clients and proxies drop
+                      # quiet connections: a call's arguments are held back until it closes)
 
-    def __init__(self, events: AsyncIterator[str]) -> None:
-        super().__init__(events, media_type="text/event-stream")
+
+class EventStream(StreamingResponse):
+    """Server-sent events, with `keepalive` (a comment by default) after every KEEPALIVE seconds of silence, that close
+    their body however the response ends. Starlette cancels a stream whose client went away, but leaves the body
+    generator suspended if that happens while a chunk is being sent; closing it aborts the engine request."""
+
+    def __init__(self, events: AsyncIterator[str], keepalive: str = ": keepalive\n\n") -> None:
+        super().__init__(_paced(events, keepalive), media_type="text/event-stream")
 
     async def stream_response(self, send: Any) -> None:
         try:
             await super().stream_response(send)
         finally:
             await self.body_iterator.aclose()  # type: ignore[union-attr]
+
+
+async def _paced(events: AsyncIterator[str], keepalive: str) -> AsyncIterator[str]:
+    """`events`, and `keepalive` after every KEEPALIVE seconds without one. The next event is awaited in a task of its
+    own, so that a timeout never cancels `events`."""
+    pending: asyncio.Future[str] | None = None
+    try:
+        while True:
+            pending = pending or asyncio.ensure_future(anext(events))
+            done, _ = await asyncio.wait({pending}, timeout=KEEPALIVE)
+            if not done:
+                yield keepalive
+                continue
+            finished, pending = pending, None
+            try:
+                event = finished.result()
+            except StopAsyncIteration:
+                return
+            yield event
+    finally:
+        with anyio.CancelScope(shield=True):                 # the request must still be aborted when cancelled
+            if pending is not None:
+                pending.cancel()
+                await asyncio.wait({pending})
+            await events.aclose()  # type: ignore[attr-defined]  # an async generator in practice

@@ -68,10 +68,12 @@ class FakeEngine:
     """Streams `outputs` (OUTPUTS) one token per delta, round-robin over the `n` sequences, like the engine:
     max_tokens and stop ids finish a sequence, the EOS/stop token is part of the last delta, prompt logprobs come
     with sequence 0's first delta. Prompts longer than `max_prompt` are rejected; `endless` never finishes; with
-    `fail_after`, the request fails (kind "engine") after that many steps."""
+    `fail_after`, the request fails (kind "engine") after that many steps; with `pause`, it is quiet that many seconds
+    after its first step."""
 
-    def __init__(self, max_prompt=64, endless=False, outputs=OUTPUTS, fail_after=None):
+    def __init__(self, max_prompt=64, endless=False, outputs=OUTPUTS, fail_after=None, pause=0.0):
         self.max_prompt, self.endless, self.outputs, self.fail_after = max_prompt, endless, outputs, fail_after
+        self.pause = pause
         self.requests, self.aborted = [], []
 
     async def generate(self, token_ids, params: SamplingParams, rid=None, resume_output=0):
@@ -93,6 +95,8 @@ class FakeEngine:
             if step == self.fail_after:
                 yield TokenDelta(rid, [], finish_reason="error", error="matcher refused", kind="engine")
                 return
+            if step == 1:
+                await asyncio.sleep(self.pause)
             for i, seq in enumerate(seqs):
                 if step < len(seq):
                     token, reason = seq[step]
@@ -406,14 +410,16 @@ WEATHER = {"type": "function", "function": {"name": "get_weather", "parameters":
     "type": "object", "properties": {"city": {"type": "string"}, "days": {"type": "integer"}}, "required": ["city"]}}}
 TYPED = {"type": "function", "function": {"name": "f", "parameters": {"type": "object", "properties": {
     "s": {"type": "string"}, "n": {"type": "integer"}, "b": {"type": "boolean"}, "t": {"type": "boolean"},
-    "u": {}, "z": {"type": ["string", "null"]}, "l": {"type": "array"}, "m": {"type": "string"}}}}}
+    "u": {}, "z": {"type": ["string", "null"]}, "l": {"type": "array"}, "m": {"type": "string"},
+    "o": {"anyOf": [{"type": "string"}, {"type": "null"}]}}}}}
 HERMES_CALL = '<tool_call>\n{"name": "get_weather", "arguments": {"city": "Paris"}}\n</tool_call>'
 XML_CALL = "<tool_call>\n<function=get_weather>\n<parameter=city>\nParis\n</parameter>\n<parameter=days>\n3\n" \
            "</parameter>\n</function>\n</tool_call>"
 XML_TYPED = "<tool_call>\n<function=f>\n" + "".join(f"<parameter={k}>\n{v}\n</parameter>\n" for k, v in [
     ("s", "007"), ("n", "3"), ("b", "True"), ("t", "true"), ("u", "True"), ("z", "None"), ("l", "[1, 2]"),
-    ("m", "line 1\nline 2")]) + "</function>\n</tool_call>"
-TYPED_ARGS = {"s": "007", "n": 3, "t": True, "l": [1, 2], "m": "line 1\nline 2"}
+    ("m", "line 1\nline 2"), ("o", "5")]) + "</function>\n</tool_call>"
+TYPED_ARGS = {"s": "007", "n": 3, "t": True, "l": [1, 2], "m": "line 1\nline 2", "o": "5"}   # o: Optional[str]
+MARKED = {"city": "Paris", "note": "a </tool_call> and a <tool_call> in a string"}
 START, OPEN, CLOSED = "<|im_start|>assistant\n", "<|im_start|>assistant\n<think>\n", "<think>\n\n</think>\n\n"
 
 PARSES = {   # format, prompt tail, tools, output -> the answer: (kind, text) and ("call", name, arguments)
@@ -423,6 +429,12 @@ PARSES = {   # format, prompt tail, tools, output -> the answer: (kind, text) an
     "hermes, text and two calls": (
         "hermes@1", START, [WEATHER], f"Sure.\n{HERMES_CALL}\n{HERMES_CALL.replace('Paris', 'Rome')}",
         [("text", "Sure."), ("call", "get_weather", {"city": "Paris"}), ("call", "get_weather", {"city": "Rome"})]),
+    "hermes, markers inside an argument string": (
+        "hermes@1", CLOSED, [WEATHER], f'<tool_call>\n{{"name": "get_weather", "arguments": {json.dumps(MARKED)}}}'
+                                       f"\n</tool_call>", [("call", "get_weather", MARKED)]),
+    "hermes, arguments written as a JSON string": (
+        "hermes@1", CLOSED, [WEATHER], '<tool_call>\n{"name": "get_weather", "arguments": "{\\"city\\": \\"Paris\\"}"}'
+                                       "\n</tool_call>", [("call", "get_weather", {"city": "Paris"})]),
     "hermes, a body that is no call stays text": (
         "hermes@1", CLOSED, [WEATHER], "<tool_call>\n{oops}\n</tool_call> done",
         [("text", "<tool_call>\n{oops}\n</tool_call> done")]),
@@ -567,9 +579,9 @@ def test_unconstrained_and_refused_choices(fields, error):
 REASONED_CALL = f"Checking.\n{XML_CALL}"                 # an answer of a model whose prompt opened its reasoning
 
 
-def _app(outputs, fail_after=None, tool_format="qwen_xml@2", tail="<think>\n"):
-    engine, bundle = FakeEngine(max_prompt=4096, outputs=outputs, fail_after=fail_after), Bundle(
-        tool_format, "think@1", tail)
+def _app(outputs, fail_after=None, tool_format="qwen_xml@2", tail="<think>\n", pause=0.0):
+    engine = FakeEngine(max_prompt=4096, outputs=outputs, fail_after=fail_after, pause=pause)
+    bundle = Bundle(tool_format, "think@1", tail)
     return TestClient(build_app(engine, bundle)), engine, bundle
 
 
@@ -654,6 +666,21 @@ def test_failure_after_the_first_token_is_no_client_error(dialect, stream):
         assert r.status_code == 200 and _events(r)[-1]["choices"][0]["finish_reason"] == "error"
     else:
         assert r.status_code == 200 and _sse(r)[-1][0] == ("error" if dialect == "messages" else "response.failed")
+
+
+@pytest.mark.parametrize("dialect", DIALECTS)
+def test_quiet_streams_send_keepalives(monkeypatch, dialect):
+    """A stream quiet for KEEPALIVE seconds (a long call is held back until it closes) sends a keepalive — Anthropic's
+    `ping` event, an SSE comment otherwise — and goes on to its normal end."""
+    from holon_plugins.frontends.http import web
+
+    monkeypatch.setattr(web, "KEEPALIVE", 0.02)
+    http, _, _ = _app([REASONED_CALL], pause=0.2)
+    route, body = DIALECTS[dialect]
+    text = http.post(route, json=body | {"stream": True}).text
+    keepalive, end = {"chat": (": keepalive", "data: [DONE]"), "messages": ("event: ping", "event: message_stop"),
+                      "responses": (": keepalive", "event: response.completed")}[dialect]
+    assert text.index(keepalive) < text.index(end)
 
 
 ANTHROPIC = {

@@ -10,7 +10,6 @@ Constraints are `grammar.constraint@1` plain dicts (D6), the grammar plugin's re
 from __future__ import annotations
 
 import json
-from functools import partial
 from typing import Any
 
 from holon.api import ParseEvent, Reasoning, Text, ToolArgsDelta, ToolCallEnd, ToolCallStart
@@ -107,38 +106,79 @@ def _arguments(tool: dict[str, Any], style: str) -> dict[str, Any]:
         {"style": style} if style != "json" else {})
 
 
+class _Until:
+    """Text held until one of `markers` appears, kept as pieces and searched only where a marker may newly start: a
+    string grown piece by piece is copied on every piece, which made a long call cost quadratic time."""
+
+    def __init__(self, markers: tuple[str, ...]) -> None:
+        self.markers, self.reach = markers, max(map(len, markers)) - 1
+        self.parts: list[str] = []
+        self.tail = ""                                       # the last `reach` characters held
+
+    def push(self, text: str) -> tuple[str, str, str] | None:
+        """(the held text before the first marker, the marker, the text after it) once one has appeared."""
+        window = self.tail + text
+        hits = [(i, m) for m in self.markers if (i := window.find(m)) >= 0]
+        if not hits:
+            self.hold(text)
+            return None
+        i, marker = min(hits)
+        held = "".join(self.parts) + text
+        i += len(held) - len(window)
+        self.parts, self.tail = [], ""
+        return held[:i], marker, held[i + len(marker):]
+
+    def hold(self, text: str) -> None:
+        """Hold `text` without searching it (it was)."""
+        self.parts.append(text)
+        self.tail = (self.tail + text)[-self.reach:] if self.reach else ""
+
+    def text(self) -> str:
+        return "".join(self.parts)
+
+
+_JSON = json.JSONDecoder()
+
+
 class Hermes:
-    """hermes@1 (Qwen3): `<tool_call>\\n{"name": …, "arguments": {…}}\\n</tool_call>`. A call is parsed when it
-    closes (or the text ends): its arguments are then known to be a JSON object; a body that is not such a call
-    stays text."""
+    """hermes@1 (Qwen3): `<tool_call>\\n{"name": …, "arguments": {…}}\\n</tool_call>`. A call is parsed when it closes
+    (or the text ends): its body is read as one JSON value — a </tool_call> inside one of its strings does not close
+    it — followed by whitespace; a body that is not such a call stays text. Its arguments are then known JSON."""
+
+    opener = CALL
 
     def __init__(self, tools: list[dict[str, Any]]) -> None:
-        self.buf, self.inside, self.calls = "", False, 0
+        self.buf, self.calls = "", 0
+        self.body: _Until | None = None                     # inside a call: its body, until </tool_call>
 
     def channel(self) -> str:
-        return "tool" if self.inside else "text"
+        return "text" if self.body is None else "tool"
 
     def feed(self, text: str, final: bool = False) -> list[ParseEvent]:
-        self.buf += text
         out: list[ParseEvent] = []
         while True:
-            if not self.inside:
-                before, marker, self.buf = _split(self.buf, (CALL,), final)
+            if self.body is None:
+                before, marker, rest = _split(self.buf + text, (CALL,), final)
                 if before:
                     out.append(Text(before))
                 if marker is None:
+                    self.buf = rest
                     return out
-                self.inside = True
-            end = self.buf.find(END_CALL)
-            if end < 0 and not final:
+                self.buf, self.body, text = "", _Until((END_CALL,)), rest
+            hit = self.body.push(text)
+            if hit is None and not final:
                 return out
-            body, self.buf = (self.buf[:end], self.buf[end + len(END_CALL):]) if end >= 0 else (self.buf, "")
-            self.inside = False
-            if call := _hermes(body):
+            body, end, text = hit or (self.body.text(), "", "")
+            call, cut = _hermes(body)
+            if cut and end:                                  # the </tool_call> was inside a string: read on
+                self.body.hold(body + end)
+                continue
+            self.body = None
+            if call:
                 out += [ToolCallStart(self.calls, call[0]), ToolArgsDelta(self.calls, call[1]), ToolCallEnd(self.calls)]
                 self.calls += 1
             else:
-                out.append(Text(CALL + body + (END_CALL if end >= 0 else "")))
+                out.append(Text(CALL + body + end))
 
     @staticmethod
     def call(tool: dict[str, Any]) -> dict[str, Any]:
@@ -147,90 +187,98 @@ class Hermes:
         return _tag(f'{CALL}\n{{"name": {name}, "arguments": ', _arguments(tool, "json"), f"}}\n{END_CALL}")
 
 
-def _hermes(body: str) -> tuple[str, str] | None:
-    """(name, arguments as JSON) of a hermes call's body, or None."""
+def _hermes(body: str) -> tuple[tuple[str, str] | None, bool]:
+    """A hermes call's body as (name, arguments as JSON) or None, and whether it ends inside a JSON string."""
     try:
-        call = json.loads(body)
+        call, end = _JSON.raw_decode(body, len(body) - len(body.lstrip()))
         args = call.get("arguments", {})
         args = json.loads(args) if isinstance(args, str) else args
+    except json.JSONDecodeError as e:
+        return None, e.msg.startswith("Unterminated string")
     except (ValueError, AttributeError):
-        return None
-    if not isinstance(call.get("name"), str) or not isinstance(args, dict):
-        return None
-    return call["name"], json.dumps(args, ensure_ascii=False)
-
-
-_PYTHON = {"True": True, "False": False, "None": None}
+        return None, False
+    if body[end:].strip() or not isinstance(call.get("name"), str) or not isinstance(args, dict):
+        return None, False
+    return (call["name"], json.dumps(args, ensure_ascii=False)), False
 
 
 class QwenXML:
-    """qwen_xml@1 (Qwen3.5) and @2 (Qwen3.6+, 3.8): `<tool_call>\\n<function=NAME>\\n<parameter=KEY>\\nVALUE\\n
-    </parameter>\\n…</function>\\n</tool_call>`. The arguments stream as JSON a parameter at a time (`{` at the
-    function, each `"key": value` when its parameter closes, `}` at the end), each value typed by the tool's schema.
-    The template writes strings raw and other values as @1 Jinja's `| string` (Python's True / False / None; mappings
-    and sequences as JSON, `Q35T:120-124`) or @2 JSON (`tojson`); a value that does not read as one of its schema's
-    types stays a string."""
+    """qwen_xml@2 (Qwen3.6+, 3.8): `<tool_call>\\n<function=NAME>\\n<parameter=KEY>\\nVALUE\\n</parameter>\\n…
+    </function>\\n</tool_call>`. The arguments stream as JSON a parameter at a time (`{` at the function, each
+    `"key": value` when its parameter closes, `}` at the end), each value typed by the tool's schema. The template
+    writes strings raw and other values as JSON (`tojson`); a value that does not read as one of its schema's types
+    stays a string."""
 
-    def __init__(self, tools: list[dict[str, Any]], version: int) -> None:
+    opener = CALL
+    python = False                                           # values may be Python's True / False / None
+
+    def __init__(self, tools: list[dict[str, Any]]) -> None:
         self.properties = {t["function"]["name"]: _parameters(t).get("properties") for t in tools}
-        self.python = version == 1
         self.state, self.buf, self.calls = "text", "", 0
-        self.function, self.n_args = "", 0
+        self.function, self.key, self.n_args = "", "", 0
+        self.held = _Until((PARAMETER,))                     # the text of a call's parameters, until a marker
 
     def channel(self) -> str:
         return "text" if self.state == "text" else "tool"
 
     def feed(self, text: str, final: bool = False) -> list[ParseEvent]:
-        self.buf += text
         out: list[ParseEvent] = []
         while True:
             if self.state == "text":
-                before, marker, self.buf = _split(self.buf, (CALL,), final)
+                before, marker, rest = _split(self.buf + text, (CALL,), final)
                 if before:
                     out.append(Text(before))
                 if marker is None:
+                    self.buf = rest
                     return out
-                self.state = "call"
+                self.state, self.buf, text = "call", "", rest
             elif self.state == "call":                       # after <tool_call>: <function=NAME>
+                self.buf, text = self.buf + text, ""
                 head = self.buf.lstrip()
                 if head.startswith(FUNCTION) and (gt := head.find(">")) >= 0:
-                    self.function, self.n_args, self.buf = head[len(FUNCTION):gt], 0, head[gt + 1:]
+                    self.function, self.n_args, self.buf, text = head[len(FUNCTION):gt], 0, "", head[gt + 1:]
                     out += [ToolCallStart(self.calls, self.function), ToolArgsDelta(self.calls, "{")]
-                    self.state = "args"
+                    self._expect("args")
                 elif (FUNCTION.startswith(head) or head.startswith(FUNCTION)) and not final:
                     return out
                 else:                                        # not a call after all
                     out.append(Text(CALL))
                     self.state = "text"
-            elif self.state == "args":                       # parameters until </function> (or </tool_call>)
-                hits = [(i, m) for m in (PARAMETER, END_FUNCTION, END_CALL) if (i := self.buf.find(m)) >= 0]
-                i, marker = min(hits) if hits else (-1, None)
-                if marker == PARAMETER:
-                    rest = self.buf[i + len(PARAMETER):]
-                    gt = rest.find(">")
-                    end = rest.find(END_PARAMETER, gt) if gt >= 0 else -1
-                    if end >= 0:
-                        key, sep = rest[:gt], ", " if self.n_args else ""
-                        pair = [json.dumps(v, ensure_ascii=False) for v in (key, self._value(key, rest[gt + 1:end]))]
-                        out.append(ToolArgsDelta(self.calls, f"{sep}{pair[0]}: {pair[1]}"))
-                        self.n_args, self.buf = self.n_args + 1, rest[end + len(END_PARAMETER):]
-                        continue
-                if marker is None or marker == PARAMETER:
-                    if not final:
-                        return out
-                    self.buf = ""                            # the text ended inside the call: a cut parameter is lost
-                else:
-                    self.buf = self.buf[i + len(marker):]
-                out += [ToolArgsDelta(self.calls, "}"), ToolCallEnd(self.calls)]
-                self.calls += 1
-                self.state = "close" if marker == END_FUNCTION else "text"
-            else:                                            # after </function>: </tool_call>
+            elif self.state == "close":                      # after </function>: </tool_call>
+                self.buf, text = self.buf + text, ""
                 head = self.buf.lstrip()
                 if head.startswith(END_CALL):
                     self.buf = head[len(END_CALL):]
                 elif END_CALL.startswith(head) and not final:
                     return out
                 self.state = "text"
+            else:                                            # args, a parameter's key or its value
+                hit = self.held.push(text)
+                if hit is None:
+                    if not final:
+                        return out
+                    hit, self.state = ("", END_CALL, ""), "args"   # the text ended in the call: a cut parameter is lost
+                before, marker, text = hit
+                if self.state == "key":
+                    self.key = before
+                    self._expect("value")
+                elif self.state == "value":
+                    sep, pair = ", " if self.n_args else "", [json.dumps(v, ensure_ascii=False) for v in (
+                        self.key, self._value(self.key, before))]
+                    out.append(ToolArgsDelta(self.calls, f"{sep}{pair[0]}: {pair[1]}"))
+                    self.n_args += 1
+                    self._expect("args")
+                elif marker == PARAMETER:
+                    self._expect("key")
+                else:                                        # </function>, or </tool_call> without it
+                    out += [ToolArgsDelta(self.calls, "}"), ToolCallEnd(self.calls)]
+                    self.calls += 1
+                    self.state = "close" if marker == END_FUNCTION else "text"
+
+    def _expect(self, state: str) -> None:
+        self.state = state
+        self.held = _Until({"args": (PARAMETER, END_FUNCTION, END_CALL), "key": (">",),
+                            "value": (END_PARAMETER,)}[state])
 
     def _value(self, key: str, text: str) -> Any:
         text = text.removeprefix("\n").removesuffix("\n")   # the template's newlines around a value
@@ -250,6 +298,16 @@ class QwenXML:
         style writes values as JSON (strings raw), which both versions read."""
         begin = f"{CALL}\n{FUNCTION}{tool['function']['name']}>\n"
         return _tag(begin, _arguments(tool, "qwen_xml"), f"\n{END_FUNCTION}\n{END_CALL}")
+
+
+_PYTHON = {"True": True, "False": False, "None": None}
+
+
+class QwenXMLString(QwenXML):
+    """qwen_xml@1 (Qwen3.5): values as its template writes them, Jinja's `| string` — Python's True / False / None;
+    mappings and sequences as JSON (`Q35T:120-124`)."""
+
+    python = True
 
 
 def _types(schema: Any) -> set[str]:
@@ -276,5 +334,4 @@ def _kinds(value: Any) -> set[str]:
 
 
 REASONING = {"think@1": Think}
-TOOLS = {"hermes@1": Hermes, "qwen_xml@1": partial(QwenXML, version=1), "qwen_xml@2": partial(QwenXML, version=2)}
-CALLS = {"hermes@1": Hermes.call, "qwen_xml@1": QwenXML.call, "qwen_xml@2": QwenXML.call}
+TOOLS = {"hermes@1": Hermes, "qwen_xml@1": QwenXMLString, "qwen_xml@2": QwenXML}
