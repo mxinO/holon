@@ -553,3 +553,14 @@ copy is a named plan-time workspace.
 | GGUF MXFP4 | — | an e8m0 scale of 0xFF (NaN) is a load error, as for HF |
 | expert stacks in the references | — | `std.moe.reference.expert_parts(parts, experts, merged)` splits a `linear_experts@2` stack per expert and unit (rank ≥ 3 per row, ≤ 2 per tensor, the merge state given, not guessed from a [2, E] shape); std.weights.hf's reference stays per tensor |
 | structural test after `prepare` (A3) | — | A3: once `kernels.ggml_cuda` prepares HF FP4 stacks, the structural test reads their ggml blocks with gguf-py × the `scale2` row and drops the 512-element tail of the `fp4` spec |
+
+**Decisions during Gate A (2026-10-13).**
+- **Locks are approved once, at Gate A's close.** A0 + A1 were propagated on every development class (rebased on
+  `main` at the M0.4 Gate A merge) without `--approve`: all seven snapshot traces byte-identical, L2 at the M0.4
+  values. A2 onward changes `std.weights.*` hashes again, so approving per step would repeat approvals for
+  byte-identical results; the delegated approval (passing verdicts only) is taken at the close.
+- **A0's bar:** Qwen3-8B Q4_K_M on the RTX 5080 pp512 8356 / tg128 155.05 vs M0.1's 8291 / 155.0 (+0.8%, +0.0%);
+  llama-bench at `cbe28bb3`, the new baseline, 7906 / 158.3 (`evidence/bars_qwen3-8b-gguf-cbe28bb3_*`). L0 at A0 + A1:
+  sm_120a 242 passed, sm_89 241 passed, memcheck 0 errors.
+- **Quark's oracle:** the real `amd-quark/Qwen3-30B-A3B-MXFP4` agrees exactly with `quark.Pack_fp4` and with gguf-py on
+  llama.cpp's repack over all 18432 modules (`evidence/owner_qwen3-30b-a3b-mxfp4-amd-quark_cpu_*`).
