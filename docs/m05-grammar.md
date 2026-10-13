@@ -1,6 +1,6 @@
 # M0.5 — structured output and tool calls: design and implementation plan
 
-Status: **revision 4, for review** (2026-10-13). Revs 1–3 were reviewed by a panel of three; every finding is
+Status: **revision 5, for review** (2026-10-13). Revs 1–4 were reviewed by a panel of three; every finding is
 resolved in §9.
 
 Scope: plan §8, amended (D1; plan §2 / §8 updated with this revision):
@@ -92,8 +92,11 @@ conformance; multimodal content blocks; more than one active logits processor (�
        (D5);
      - `ready(rid) -> bool`: false while the request's constraint is not built — the request is held as
        `Status.BLOCKED` and skipped by the scheduler (never blocking others: `_prefill` continues past it); `step()`
-       returns no deltas when only blocked work remains, and `has_work()` excludes blocked-only work, so the serve
-       loop waits with its normal poll interval instead of spinning or raising "no progress". `ready` may raise `RequestError` (a compile error: kind `client`; a timeout: kind
+       returns no deltas when only blocked work remains (instead of raising "no progress"); `has_work()` stays true
+       while anything is blocked, and the serve loop's poll timeout comes from `engine.idle_for()`: 0 when work is
+       schedulable, 5 ms when only blocked work remains (each iteration promotes requests whose `ready` flipped, and
+       surfaces a `ready` that raises), its normal interval when idle. Toy test: one constrained request on an idle
+       engine, for a compile that succeeds and for one that times out. `ready` may raise `RequestError` (a compile error: kind `client`; a timeout: kind
        `busy`), which aborts the request;
      - `commit(seq, out: list[int])` after each step's results, **before** the engine acts on stop or length and
        before any delta is built, with the tokens the step appends (truncated at a stop, skipped for finished rows);
@@ -212,29 +215,41 @@ unread `max_depth` is removed (the gate comes from `open`).
   Uploader staging; the processor owns `apply`. `grammar/xgrammar` applies with a Triton kernel of its own (one
   program per row block, no `[R, V, 32]` intermediate), checked against xgrammar's CPU `apply_token_bitmask_inplace`
   as the reference (L0-mask). Steps without mask rows keep today's graphs.
-- **D5. `grammar/xgrammar`, a plugin; constraints vetted in killable workers, compiled in a helper thread.**
-  - It accepts `ext["grammar.constraint"]` (`grammar.constraint@1`, D6).
+- **D5. `grammar/xgrammar`, a plugin; constraints vetted in killable, memory-capped workers, compiled in helper
+  threads.**
+  - It accepts `ext["grammar.constraint@1"]` (the key carries the resource's major version and matches the
+    manifest's `provides`).
   - **Vetting** (an xgrammar compile cannot be cancelled in a thread, and compiled grammars can be huge: up to
     ≈ 2 GB in memory for two Github_hard schemas, 300 MB for the largest Kubernetes ones, with deserialization slower
     than compiling — reviewers' measurements): two worker processes, started with `spawn` (the engine process has
     CUDA and threads), exiting when their parent dies, each with its own `TokenizerInfo` built from the same
     tokenizer, padded size and stop set as the parent's (asserted) and `GrammarCompiler(max_threads=2)`. A worker
     compiles the constraint and returns only `ok` / the error, the compile time and `memory_size_bytes` — no grammar
-    crosses the pipe. Past the **10 s timeout** the worker is killed and respawned (≈ 0.3–1 s; the queue is bounded
-    for that) and the request is rejected `busy`; a compiled size over **64 MB** is rejected `client` ("schema too
-    complex"); a negative cache rejects repeats of either at once.
-  - **Compiling for use:** a vetted constraint is compiled again in the engine process by one helper thread with
-    `max_threads=2` (xgrammar releases the GIL while compiling, R §8), never on the engine thread; its time is
-    bounded by the worker's measured time; `ready(rid)` flips when it is done. Compiled grammars are cached by
+    crosses the pipe. Each worker's memory is capped at **2 GB** (`RLIMIT_DATA` set in the spawn initializer) and
+    its `oom_score_adj` is 1000, so the kernel kills a worker, never the engine (a compile's peak is at least its
+    final size, ≈ 2 GB for the worst measured schemas). Past the **10 s timeout** the worker is killed and respawned
+    (≈ 0.3–1 s; the queue is bounded for that) and the request is rejected `busy`; a compiled size over **64 MB**, or
+    a worker that dies of `MemoryError` or a signal, is rejected `client` ("schema too complex"). A negative cache
+    rejects repeats of compile errors and over-size or over-memory constraints for the process's life, and of
+    timeouts for 10 minutes (a timeout can be load). Tested with a lowered memory limit on a mid-size fixture.
+  - **Compiling for use:** a vetted constraint is compiled again in the engine process by two helper threads with
+    `max_threads=2` each (xgrammar releases the GIL while compiling, R §8), never on the engine thread; each compile's
+    time is bounded by the worker's measured time; the helper backlog is bounded by the sum of its vetted compile
+    times (10 s), beyond which a request is rejected `busy`; `close` drops queued compiles; `ready(rid)` flips when
+    it is done. Vetting then compiling doubles a cold constraint's compile time (+13–62 ms for tool schemas and
+    tags, R §1.2): cold-constraint TTFT is recorded beside the free streams' p99. Compiled grammars are cached by
     constraint (`cache_limit_bytes` = 512 MB), so repeats cost microseconds. Both compile times and the compiled size
     are recorded per schema in the D9 runs.
   - One `GrammarMatcher` per sequence; stop tokens = the engine's stop set plus the request's `stop_token_ids`;
     `ignore_eos` with a constraint is rejected at `open`.
   - JSON: `any_whitespace = True` with a whitespace run cap of 64 (the cap counts the newline and the indentation;
     64 admits nesting depth 8 at 4-space indentation, so pretty-printed JSON and MTP's drafts of it stay allowed).
-    xgrammar applies the cap only to typed schema rules: `json_object` is compiled from our own capped JSON EBNF, and
-    untyped subschemas (`{}`, `{"type": "object"}` without properties) stay uncapped — stated, and covered by
-    `max_tokens` and the truncation gate.
+    xgrammar applies the cap only to typed schema rules: `json_object` is compiled from xgrammar's builtin JSON EBNF
+    with only its whitespace rule replaced by the capped one (fixtures: every JSON-Schema-Test-Suite instance dumped
+    compact and at indents 2 and 4 to depth 8 is accepted, malformed JSON — escapes, `\uXXXX` surrogates, numbers,
+    non-ASCII — refused, and it agrees with the builtin except for whitespace past the cap); untyped subschemas
+    (`{}`, `{"type": "object"}` without properties) stay uncapped — stated, and covered by `max_tokens` and the
+    truncation gate.
   - `strict_mode` per D9. xgrammar is a pinned pip dependency (Apache-2.0); the pin is chosen at step 2 (0.2.3 now;
     vLLM 0.2.8, SGLang 0.2.7) and the reject-list oracle and the tag fixtures are re-run at it.
 - **D6. `grammar.constraint@1`, a plain-dict resource.** The frontend package builds constraints as plain dicts
@@ -317,7 +332,8 @@ unread `max_depth` is removed (the gate comes from `open`).
   108–109 of 109 random schema walks, so every plant fires within the first tokens.
 - **Predictions:**
   - Conformance 100% of accepted; declared coverage of the filtered split under D9's predicate **64–67%**
-    (reviewer measurement of the predicate, minus compile errors and timeouts).
+    (reviewer measurement of the predicate), minus size-cap, memory-cap and timeout rejections — counted by step 2's
+    precompile, run under the worker memory cap with two workers.
   - D2: as in D2.
   - Refused drafts inside JSON (27B + MTP, `any_whitespace` on): ≤ 15% of drafts; measured directly by
     `spec_drafts_refused / spec_drafted`, not by comparing acceptance across different texts.
@@ -435,6 +451,18 @@ unread `max_depth` is removed (the gate comes from `open`).
 | B-m4: existing admission errors need a kind | plain `ValueError` from `add` is kind `client` (§3.4) |
 | A (rev 3 minor): the whitespace cap misses `json_object` and untyped subschemas | `json_object` from our capped EBNF; untyped subschemas stated, covered by `max_tokens` and the truncation gate (D5) |
 | B nit: §10 before §9 | moved |
+
+**Rev 4.**
+
+| Finding | Resolution |
+|---|---|
+| A / B (rev 4 major): a blocked request on an idle engine is never stepped | `has_work()` stays true while blocked; the loop polls every 5 ms via `engine.idle_for()`, promoting ready requests; toy tests for success and timeout on an idle engine (§3.1) |
+| C-R4-1: a worker can exhaust host memory before the size check | 2 GB `RLIMIT_DATA` per worker, `oom_score_adj` 1000, a dead worker = "schema too complex" (D5) |
+| A-m1: a timeout cached forever | timeouts expire from the negative cache after 10 minutes (D5) |
+| A-m2 / B-m1 / C-R4-3: one helper thread queues every compile; unbounded backlog; cold TTFT | two helper threads, a backlog bounded by vetted time, `close` drops queued compiles; cold-constraint TTFT recorded (D5) |
+| B nit: the `ext` key carries no version | `ext["grammar.constraint@1"]` (D5) |
+| A nit / C-R4-4: the `json_object` EBNF untested | derived from the builtin with only the whitespace rule replaced; oracle fixtures (D5) |
+| C-R4-2: coverage ignores the size cap | restated net of size, memory and timeout rejections (§5) |
 
 ## 10. Deferred, deliberately
 
