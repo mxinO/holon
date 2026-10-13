@@ -29,8 +29,9 @@ from holon.api.batch import Seq
 from holon.core.engine import Engine, EngineConfig
 from holon_judge.planted import PLANTS
 from holon_plugins.grammar.xgrammar import kernel
-from holon_plugins.grammar.xgrammar.constraint import KEY, WHITESPACE_CAP, check, grammar
+from holon_plugins.grammar.xgrammar.constraint import KEY, check, grammar
 from holon_plugins.grammar.xgrammar.plugin import XGrammar
+from holon_plugins.grammar.xgrammar.worker import failure
 from scipy import stats
 
 from .fixtures.oracle import ORACLE
@@ -144,6 +145,7 @@ HOLES = [
        {"a": "x"}) for ref, key in (("%61", "a"), ("a~1b", "a/b"), ("a~0b", "a~b"))),   # xgrammar: no unescaping
     *(({"type": "string", "pattern": p}, w) for p, w in (("^[a^]x[^\\s]$", "ax\u3000"), ("^[\\[]x[^\\s]$", "[x\u3000"),
                                                          ("^[\\^]x[^\\s]$", "^x\u3000"))),   # ECMA: U+3000 is \s
+    *(({"type": "string", "pattern": "^a.b$"}, f"a{end}b") for end in "\u2028\u2029"),  # ECMA: . ends a line there
     ({"$schema": D4, "definitions": {"s": {"type": "string"}}, **_obj({"a": {
         "id": "http://example.com/inner", "definitions": {"s": {"type": "integer"}}, **_obj({"b": {
             "$ref": "#/definitions/s"}})}})}, {"a": {"b": "x"}}),
@@ -179,19 +181,18 @@ MALFORMED = ['{"a":1,}', "{'a':1}", "{a:1}", '{"a" 1}', '{"a":01}', '{"a":1.}', 
              '{"a":"x\ny"}', '{"a":tru}', "[1,]", '{"a":1}}', 'é{"a":1}', '{"a":1}é', '{"é" :1 é}']
 
 
-def test_json_object_is_xgrammars_json_with_capped_whitespace(compiler):
-    # D5: every JSON-Schema-Test-Suite object or array to depth 8 — compact, at indent 2 and 4 — and non-ASCII text
-    # (escaped surrogate pairs too) is admitted, malformed JSON refused, both as by xgrammar's builtin JSON grammar;
-    # they differ only on a whitespace run past the cap.
-    capped, builtin = _compiled(compiler, {"type": "json_object"}), compiler.compile_builtin_json_grammar()
+def test_json_object_is_any_json_object(compiler):
+    # D5: every JSON-Schema-Test-Suite object to depth 8 — compact, at indents 2 and 4, with a long whitespace run (no
+    # cap) — and non-ASCII text (escaped surrogate pairs too) is admitted, malformed JSON refused, both as by
+    # xgrammar's builtin JSON grammar; unlike it, json_object refuses anything but an object at the top.
+    obj, builtin = _compiled(compiler, {"type": "json_object"}), compiler.compile_builtin_json_grammar()
     values = [t["data"] for _, tests in _groups("draft2020-12") for t in tests
-              if isinstance(t["data"], dict | list) and _depth(t["data"]) <= 8]
-    texts = [_dump(v, indent) for v in values for indent in (None, 2, 4)] + ['{"é":"日本🙂"}', '["\\ud83d\\ude42"]']
-    assert len(values) > 500 and all(_admits(capped, t) and _admits(builtin, t) for t in texts)
-    assert not any(_admits(capped, t) or _admits(builtin, t) for t in MALFORMED)
-    run = lambda n: "{\n" + " " * (n - 1) + '"a": 1}'       # noqa: E731 — a newline and n − 1 spaces
-    assert _admits(capped, run(WHITESPACE_CAP)) and not _admits(capped, run(WHITESPACE_CAP + 1))
-    assert _admits(builtin, run(WHITESPACE_CAP + 1))
+              if isinstance(t["data"], dict) and _depth(t["data"]) <= 8]
+    texts = [_dump(v, indent) for v in values for indent in (None, 2, 4)]
+    texts += ['{"é":"日本🙂"}', '{"a":["\\ud83d\\ude42"]}', "{\n" + " " * 300 + '"a": 1}']
+    assert len(values) > 300 and all(_admits(obj, t) and _admits(builtin, t) for t in texts)
+    assert not any(_admits(obj, t) or _admits(builtin, t) for t in MALFORMED)
+    assert not any(_admits(obj, t) for t in ("[1]", "[]", '"x"', "1")) and _admits(builtin, "[1]")
 
 
 TAG = {"type": "tag", "begin": "<a>", "content": {"type": "json_object"}, "end": "</a>"}
@@ -202,11 +203,12 @@ FORMS = [   # (constraint, admitted, refused)
      ["<parameter=n>\n3\n</parameter>\n<parameter=s>\nhi\n</parameter>\n"], ["<parameter=n>\nx\n</parameter>\n"]),
     (TAG, ['<a>{"k": [1]}</a>'], ["<a>{}</b>", "{}"]),
     ({"type": "triggered_tags", "triggers": ["<t"], "tags": [{**TAG, "begin": "<t1>", "end": "</t1>"}],
-      "at_least_one": True, "stop_after_first": True}, ["<t1>[]</t1>"], ["hi", "<t1>x</t1>", "<t1>[]</t1> bye"]),
+      "at_least_one": True, "stop_after_first": True}, ["<t1>{}</t1>"], ["hi", "<t1>x</t1>", "<t1>{}</t1> bye"]),
     ({"type": "triggered_tags", "triggers": ["<t"], "tags": [{**TAG, "begin": "<t1>", "end": "</t1>"}]},
-     ["hi", "hi <t1>[]</t1> bye <t1>{}</t1>"], ["hi <t1>x</t1>"]),
+     ["hi", "hi <t1>{}</t1> bye <t1>{}</t1>"], ["hi <t1>x</t1>"]),
     ({"type": "any_text", "excludes": ["STOP"]}, ["anything"], ["a STOP b"]),
-    ({"type": "sequence", "elements": [{"type": "regex", "pattern": "a+"}, TAG]}, ["aa<a>[]</a>"], ["<a>[]</a>"]),
+    ({"type": "sequence", "elements": [{"type": "regex", "pattern": "a+"}, TAG]}, ["aa<a>{}</a>"],
+     ["<a>{}</a>", "aa<a>[]</a>"]),
     ({"type": "or", "elements": [{"type": "regex", "pattern": "x"}, {"type": "json_object"}]}, ["x", "{}"], ["y"]),
 ]
 REFUSED = [
@@ -227,6 +229,10 @@ def test_constraint_forms(compiler):
         compiled = _compiled(compiler, c)
         assert all(_admits(compiled, t) for t in admitted) and not any(_admits(compiled, t) for t in refused), c
     assert [c for c in REFUSED if _compiled(compiler, c) is not None] == []
+    # A compile error is the constraint's fault (a 400), running out of memory the server's (a 503).
+    assert [failure(e)["busy"] for e in (RuntimeError("[1:2:3] x.cc:5: Regex parsing error"), MemoryError(),
+                                         RuntimeError("std::bad_alloc"))] == [False, True, True]
+    assert failure(RuntimeError("[1:2:3] x.cc:5: Regex parsing error"))["error"] == "Regex parsing error"
 
 
 # -- L0-mask ------------------------------------------------------------------------------------------------------

@@ -12,11 +12,10 @@ and translated to an xgrammar grammar here — the frontends build these dicts a
     {"type": "any_text", "excludes": ["..."]}
     {"type": "sequence" | "or", "elements": [<constraint>, ...]}
 
-JSON (schemas in the `json` style and `json_object`) is xgrammar's any-whitespace JSON grammar with every whitespace
-run capped at WHITESPACE_CAP characters (D5: pretty-printed JSON and its drafts stay allowed, a model cannot pad
-forever). The cap is a rewrite of the grammar's text rather than xgrammar's `max_whitespace_cnt`, which caps typed
-rules only: the rewrite caps untyped subschemas too, at the same cost (≈ 13.5 MB and 30 ms more per compiled grammar
-at a 152k vocabulary, docs/m05-grammar.md §11).
+JSON (schemas in the `json` style and `json_object`, an object of any JSON) is xgrammar's any-whitespace JSON grammar,
+uncapped (D5: a whitespace cap inflates every compiled grammar by 13–26 MB; `max_tokens` bounds a run).
+
+Schema `pattern`s are ECMA 262 regular expressions (JSON Schema's dialect).
 
 `strict` schemas are checked against the reject list (D9): features xgrammar ignores or gets wrong are refused, so an
 accepted strict schema admits only valid instances (the JSON-Schema-Test-Suite oracle, plugins/tests/test_grammar.py).
@@ -30,7 +29,6 @@ from typing import Any
 import xgrammar as xgr
 
 KEY = "grammar.constraint@1"
-WHITESPACE_CAP = 64
 
 # type -> (required fields, optional fields)
 _FIELDS: dict[str, tuple[set[str], set[str]]] = {
@@ -87,9 +85,9 @@ def grammar(c: dict) -> xgr.Grammar:
     """The xgrammar grammar of a checked constraint."""
     kind = c["type"]
     if kind == "json_schema" and c.get("style", "json") == "json":
-        return _capped(xgr.Grammar.from_json_schema(json.dumps(c["schema"]), any_whitespace=True, strict_mode=True))
-    if kind == "json_object":
-        return _capped(xgr.Grammar.builtin_json_grammar())
+        return xgr.Grammar.from_json_schema(json.dumps(c["schema"]), any_whitespace=True, strict_mode=True)
+    if kind == "json_object":                   # an object (OpenAI's promise), unlike xgrammar's builtin JSON
+        return xgr.Grammar.from_json_schema('{"type": "object"}', any_whitespace=True, strict_mode=False)
     if kind == "regex":
         return xgr.Grammar.from_regex(c["pattern"])
     if kind == "ebnf":
@@ -112,18 +110,6 @@ def _format(c: dict) -> dict:
     if kind == "any_text":
         return {"type": kind, "excludes": c.get("excludes", [])}
     return {"type": kind, "elements": [_format(e) for e in c["elements"]]}
-
-
-# A string literal or a character class (with its `*`) of xgrammar's printed EBNF, so a quoted "[ \n\t]*" is skipped.
-_TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"|\[(?:[^\]\\]|\\.)*\]\*?')
-_RUN = re.compile(r"\[(?: |\\[nrt])+\]\*")         # a whitespace run, e.g. [ \n\r\t]*
-
-
-def _capped(g: xgr.Grammar) -> xgr.Grammar:
-    """`g` with every unbounded whitespace run between JSON tokens capped at WHITESPACE_CAP characters (a schema's
-    `pattern` prints as a quoted Regex(...) argument, which stays as it is)."""
-    cap = f"{{0,{WHITESPACE_CAP}}}"
-    return xgr.Grammar.from_ebnf(_TOKEN.sub(lambda m: m[0][:-1] + cap if _RUN.fullmatch(m[0]) else m[0], str(g)))
 
 
 # -- the strict reject list (D9) -------------------------------------------------------------------------------------
@@ -217,7 +203,7 @@ def _local_violation(node: dict, root: Any, draft: int) -> str | None:
     patterns = [node["pattern"]] if "pattern" in node else []
     patterns += list(node.get("patternProperties", {}))
     if loose := next((p for p in patterns if _loose(p)), None):
-        return f"pattern {loose!r}: \\S and [^\\s] are not supported (ECMA 262 whitespace is Unicode's)"
+        return f"pattern {loose!r}: \\S, [^\\s] and . are not supported (xgrammar's are ASCII-only)"
     if "pattern" in node and keys & {"format", "minLength", "maxLength"}:
         return f"pattern beside {sorted(keys & {'format', 'minLength', 'maxLength'})} is not supported"
     if "format" in node and node["format"] not in FORMATS:
@@ -226,8 +212,9 @@ def _local_violation(node: dict, root: Any, draft: int) -> str | None:
 
 
 def _loose(pattern: str) -> bool:
-    """Whether `pattern` has \\S, or \\s inside a negated class — which xgrammar reads more loosely than ECMA 262
-    (its whitespace is ASCII's, ECMA's Unicode's). One linear scan: no regex over the client's text."""
+    """Whether `pattern` has \\S, \\s inside a negated class, or `.` outside a class — which xgrammar reads more
+    loosely than ECMA 262 (its whitespace is ASCII's; its `.` takes U+2028 / U+2029, ECMA's ends a line there). One
+    linear scan: no regex over the client's text."""
     escaped, negated, first = False, None, 0    # negated: None outside a class; first: where its body starts
     for i, ch in enumerate(pattern):
         if escaped:
@@ -236,6 +223,8 @@ def _loose(pattern: str) -> bool:
                 return True
         elif ch == "\\":
             escaped = True
+        elif negated is None and ch == ".":
+            return True
         elif negated is None and ch == "[":
             negated = pattern.startswith("^", i + 1)
             first = i + 1 + negated

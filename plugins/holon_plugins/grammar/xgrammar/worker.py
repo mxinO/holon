@@ -65,10 +65,17 @@ def main(parent: int, tokenizer: int, vocab_size: int, stops: list[int]) -> None
             size = compiler.compile_grammar(grammar(json.loads(line))).memory_size_bytes
             out = {"ok": True, "seconds": time.perf_counter() - start, "size": size,
                    "growth": _status("VmHWM") - base}
-        except Exception as e:          # a compile error: the constraint's own fault
-            lines = str(e).strip().splitlines() or [type(e).__name__]
-            out = {"ok": False, "error": re.sub(r"^\[[\d:]+\] \S+:\d+: ", "", lines[-1])}   # no log stamp
+        except Exception as e:
+            out = failure(e)
         print(json.dumps(out), file=reply, flush=True)
+
+
+def failure(e: Exception) -> dict:
+    """A failed compile's report: a compile error is the constraint's own fault (`client`), running out of memory is
+    ours for now (`busy`)."""
+    lines = str(e).strip().splitlines() or [type(e).__name__]
+    busy = isinstance(e, MemoryError) or "bad_alloc" in str(e)
+    return {"ok": False, "busy": busy, "error": re.sub(r"^\[[\d:]+\] \S+:\d+: ", "", lines[-1])}   # no log stamp
 
 
 if __name__ == "__main__":

@@ -2,7 +2,8 @@
 cancelled, and a compiled grammar can take gigabytes, so each new constraint is first compiled in a worker process
 (`worker.py`) that can be killed: past the timeout (`busy`, retry later), or when its resident set grows `budget`
 bytes past its size at the job's start (`client`: the schema is too complex). A compiled size over `max_size` is
-`client` too; a worker that dies without reporting (a kernel OOM kill, a crash) is `busy`.
+`client` too; a compile that runs out of memory, or a worker that dies without reporting (a kernel OOM kill, a
+crash), is `busy`.
 
 One long-lived watchdog thread starts, watches (every `poll` seconds) and respawns the workers, so PR_SET_PDEATHSIG —
 which follows the thread that created a child — kills them with it. Workers are fresh interpreters (spawned, never
@@ -218,7 +219,8 @@ class Vetting:
         elif w.key is None:
             raise ValueError("an outcome without a job")
         elif not out["ok"]:
-            self._finish(w, Outcome(False, "client", f"invalid constraint: {out['error']}"))
+            self._finish(w, Outcome(False, "busy", f"out of memory compiling the constraint: {out['error']}")
+                         if out["busy"] else Outcome(False, "client", f"invalid constraint: {out['error']}"))
         elif out["size"] > self.max_size:
             self._finish(w, Outcome(False, "client", f"schema too complex: it compiles to {out['size'] >> 20} MB "
                                     f"(at most {self.max_size >> 20} MB)", out["seconds"], out["size"], out["growth"]))

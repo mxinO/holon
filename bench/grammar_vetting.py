@@ -1,9 +1,11 @@
-"""What grammar.xgrammar's vetting and compiling cost (docs/m05-grammar.md D5, §6; evidence record): a vetting worker's
-start — spawn to ready, which is also the respawn time after a kill — and its resident set; per constraint, the
-worker's compile time, compiled size and peak resident growth, beside the engine process's own compile on a thread;
-and the share of each subset a strict request would have accepted (D9's reject list). Constraints: a tool schema,
-json_object, a 10-tool structural tag, a regex, and mid-size JSONSchemaBench schemas (never Github_hard, Snowplow or
-Kubernetes: their compiles take seconds to minutes and gigabytes). CPU only, one worker at a time, per tokenizer.
+"""What grammar.xgrammar's vetting, compiling and masks cost (docs/m05-grammar.md D5, §6; evidence record): a vetting
+worker's start — spawn to ready, which is also the respawn time after a kill — and its resident set; per constraint,
+the worker's compile time, compiled size and peak resident growth, beside the engine process's own compile on a
+thread, and the time to fill one mask row (at every token of a sample output for the fixed constraints, at the start
+for the subsets'); and the share of each subset a strict request would have accepted (D9's reject list).
+Constraints: a tool schema, json_object, a 10-tool structural tag, a regex, and mid-size JSONSchemaBench schemas
+(never Github_hard, Snowplow or Kubernetes: their compiles take seconds to minutes and gigabytes). CPU only, one worker
+at a time, per tokenizer.
 
 Usage (from the repository root):
   python bench/grammar_vetting.py --model <checkpoint dir> [--model …] --jsb <JSONSchemaBench data dir>
@@ -27,6 +29,13 @@ TOOL = {"type": "object", "properties": {
     "env": {"type": "array", "items": {"type": "object", "required": ["k", "v"], "additionalProperties": False,
                                        "properties": {"k": {"type": "string"}, "v": {"type": "string"}}}}},
     "required": ["command"], "additionalProperties": False}
+SAMPLES = {   # an output of each fixed constraint, pretty-printed where JSON (the fills walk its tokens)
+    "tool_schema": json.dumps({"command": "ls -la /tmp && echo done", "timeout": 30, "description": "list the files",
+                               "run_in_background": False, "mode": "a", "env": [{"k": "A", "v": "1"}]}, indent=2),
+    "json_object": json.dumps({"name": "Ada", "tags": ["x", "y"], "nested": {"n": 1.5, "ok": None}}, indent=4),
+    "tag_10_tools": '<tool_call>\n{"name": "tool_3", "arguments": {"command": "pwd"}}\n</tool_call>',
+    "regex": "2024-01-02",
+}
 FIXED = {
     "tool_schema": {"type": "json_schema", "schema": TOOL, "strict": True},
     "json_object": {"type": "json_object"},
@@ -67,17 +76,33 @@ def measure(model: str, jsb: pathlib.Path, per_subset: int) -> dict:
             time.sleep(0.01)
         return done[0][1]
 
-    def row(c: dict) -> dict:
+    mask = xgr.allocate_token_bitmask(1, vocab)
+
+    def fills(compiled, ids: list[int]) -> list[float]:
+        """µs per mask fill at the start and after each of `ids`."""
+        matcher, out = xgr.GrammarMatcher(compiled, override_stop_tokens=stops), []
+        for t in [*ids, None]:
+            start = time.perf_counter()
+            matcher.fill_next_token_bitmask(mask)
+            out.append((time.perf_counter() - start) * 1e6)
+            if t is not None and not matcher.accept_token(t):
+                raise ValueError(f"the sample's token {t} is refused")
+        return out
+
+    def row(c: dict, sample: str | None = None) -> dict:
         outcome = vet(c)
         out = {"ok": outcome.ok, "why": outcome.message[:60] if not outcome.ok else None}
         if outcome.ok:
             start = time.perf_counter()
-            compiler.compile_grammar(grammar(c))
-            out |= {"worker_ms": outcome.seconds * 1e3, "engine_ms": (time.perf_counter() - start) * 1e3,
-                    "size_mb": outcome.size / 2**20, "growth_mb": outcome.growth / 2**20}
+            compiled = compiler.compile_grammar(grammar(c))
+            engine_ms = (time.perf_counter() - start) * 1e3
+            us = fills(compiled, tok.encode(sample) if sample is not None else [])
+            out |= {"worker_ms": outcome.seconds * 1e3, "engine_ms": engine_ms,
+                    "size_mb": outcome.size / 2**20, "growth_mb": outcome.growth / 2**20,
+                    "fill_us": statistics.median(us), "fill_us_max": max(us)}
         return out
 
-    fixed = {name: {k: round(v, 2) if isinstance(v, float) else v for k, v in row(c).items()}
+    fixed = {name: {k: round(v, 2) if isinstance(v, float) else v for k, v in row(c, SAMPLES[name]).items()}
              for name, c in FIXED.items()}
     vetting.timeout = 0.05                                    # three kills: the respawn time
     for _ in range(3):
@@ -93,7 +118,7 @@ def measure(model: str, jsb: pathlib.Path, per_subset: int) -> dict:
             "n": len(rows), "vetted": len(ok), "refused": sorted({r["why"] for r in rows if not r["ok"]}),
             "strict_accepts": sum(strict_violation(s) is None for s in schemas),
             **{key: _dist([r[key] for r in ok], 2 if key.endswith("mb") else 1)
-               for key in ("worker_ms", "engine_ms", "size_mb", "growth_mb")}}
+               for key in ("worker_ms", "engine_ms", "size_mb", "growth_mb", "fill_us")}}
     while len(vetting.starts) < 4:
         time.sleep(0.05)
     vetting.shutdown()
