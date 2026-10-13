@@ -228,7 +228,7 @@ def _local_violation(node: dict, root: Any, draft: int) -> str | None:
 def _loose(pattern: str) -> bool:
     """Whether `pattern` has \\S, or \\s inside a negated class — which xgrammar reads more loosely than ECMA 262
     (its whitespace is ASCII's, ECMA's Unicode's). One linear scan: no regex over the client's text."""
-    escaped, negated = False, None              # negated: None outside a class, else whether it is [^…]
+    escaped, negated, first = False, None, 0    # negated: None outside a class; first: where its body starts
     for i, ch in enumerate(pattern):
         if escaped:
             escaped = False
@@ -238,7 +238,8 @@ def _loose(pattern: str) -> bool:
             escaped = True
         elif negated is None and ch == "[":
             negated = pattern.startswith("^", i + 1)
-        elif negated is not None and ch == "]" and pattern[i - 1] not in "[^":
+            first = i + 1 + negated
+        elif negated is not None and ch == "]" and i != first:   # a ']' first in the body is literal
             negated = None
     return False
 

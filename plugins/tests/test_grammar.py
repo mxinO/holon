@@ -142,6 +142,8 @@ HOLES = [
     ({"$schema": D4, "type": "number", "minimum": 5, "exclusiveMinimum": 1}, 5),
     *(({**_obj({"a": {"$ref": f"#/foo/{ref}"}}), "foo": {key: {"type": "integer"}, ref: {"type": "string"}}},
        {"a": "x"}) for ref, key in (("%61", "a"), ("a~1b", "a/b"), ("a~0b", "a~b"))),   # xgrammar: no unescaping
+    *(({"type": "string", "pattern": p}, w) for p, w in (("^[a^]x[^\\s]$", "ax\u3000"), ("^[\\[]x[^\\s]$", "[x\u3000"),
+                                                         ("^[\\^]x[^\\s]$", "^x\u3000"))),   # ECMA: U+3000 is \s
     ({"$schema": D4, "definitions": {"s": {"type": "string"}}, **_obj({"a": {
         "id": "http://example.com/inner", "definitions": {"s": {"type": "integer"}}, **_obj({"b": {
             "$ref": "#/definitions/s"}})}})}, {"a": {"b": "x"}}),

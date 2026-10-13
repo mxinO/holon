@@ -1,8 +1,9 @@
 # M0.5 — structured output and tool calls: design and implementation plan
 
 Status: **revision 5, reviewed clean** (2026-10-13). Revs 1–5 were reviewed by a panel of three; every finding is
-resolved in §9. **Step 1 built** (2026-10-13): the core seams of §3 with the toy processor; its record, deviations
-and §6's measurements are in §11.
+resolved in §9. **Step 1 built** (2026-10-13): the core seams of §3 with the toy processor. **Step 2 built**
+(2026-10-13): the `grammar.xgrammar` plugin, pinned at xgrammar 0.2.8. Their records, deviations and §6's
+measurements are in §11.
 
 Scope: plan §8, amended (D1; plan §2 / §8 updated with this revision):
 - the core gets general logits-processor seams (§3); "core diff target zero" becomes "only the seams of §3, each
@@ -368,6 +369,10 @@ unread `max_depth` is removed (the gate comes from `open`).
 - Host RAM when the grammar processor is selected: two vetting workers at ≈ 1.1 GB resident each (≈ 2.2 GB, up to
   ≈ 4.4 GB at the watchdog bound) plus the 512 MB compiled-grammar cache — measured at step 2; if it matters on
   consumer hosts, one worker (more queueing) or a worker that never imports torch.
+- **Measured (step 2,** `evidence/grammar_vetting_rtx-a5000_2026-10-13.json`, xgrammar 0.2.8, CPU, Qwen3's 152k
+  and Qwen3.5's 248k vocabularies): a vetting worker is ready 3.1–3.5 s after its spawn (the respawn time) at
+  762 / 804 MB resident — two take ≈ 1.6 GB, plus ≤ 256 MB each while compiling (the budget, §11); a compiled JSON
+  grammar takes 13.4 / 26.3 MB, almost all of it the whitespace cap's (§11), so the 512 MB cache holds ≈ 38 / 19.
 
 ## 7. Steps
 
@@ -513,7 +518,9 @@ unread `max_depth` is removed (the gate comes from `open`).
 - More than one logits processor (ordering, chained masks).
 - Constraining `tool_choice: "auto"` by default (D8).
 
-## 11. Step 1 record (2026-10-13)
+## 11. Build record
+
+### Step 1 (2026-10-13)
 
 Built: §3.1–3.8 (core +184 code lines, 3650 → 3834; budget ≈ +275), the denylist terms, the plant
 `mask-rows-not-reset`, design §4.1 / §7.3 / §7.4 / §7.6 / §7.7 / §7.8 / §9 corrected. The toy processor
@@ -561,3 +568,119 @@ Deviations (simplest option consistent with the decisions):
   (`std.state.recurrent`) is published at the original prompt's end, not after the resumed output.
 - `Supervisor.generate` refuses `resume_output` (it resumes requests itself).
 
+
+### Step 2 (2026-10-13)
+
+Built: `plugins/holon_plugins/grammar/xgrammar` — `constraint.py` (the `grammar.constraint@1` forms, their
+translation, the whitespace cap, the strict reject list), `vetting.py` and `worker.py` (D5's workers and watchdog),
+`plugin.py` (the processor: negative cache, helper threads, compiled-grammar cache, matchers, the probe, the stop set),
+`kernel.py` (the Triton `apply`); the plants `mask-column-shift`, `no-rollback-after-probe`, `mask-bit-order`,
+`stop-tokens-masked`, `closing-tokens-masked` (`judge/holon_judge/planted.py`); the JSON-Schema-Test-Suite vendored
+unmodified at a pinned commit (`plugins/tests/fixtures/jsts.sh`, checked by `scripts/ci/run_all.sh`);
+`bench/grammar_vetting.py`. No core change.
+
+`grammar.constraint@1` (D6 named the forms, not the fields): `{"type": "json_schema", "schema", "strict", "style":
+"json" | "qwen_xml"}`, `{"type": "json_object"}`, `{"type": "regex", "pattern"}`, `{"type": "ebnf", "grammar"}`
+(rule `root`), `{"type": "tag", "begin", "content", "end"}`, `{"type": "triggered_tags", "triggers", "tags",
+"at_least_one", "stop_after_first"}` (xgrammar's meaning: `at_least_one` also forbids text before the first tag),
+`{"type": "any_text", "excludes"}`, `{"type": "sequence" | "or", "elements"}` — documented in `constraint.py`.
+
+Proofs (`plugins/tests/test_grammar.py`, 29 tests, ≈ 45 s of test time; with `test_logits_processor.py` 54 tests
+in 63–72 s):
+- The oracle (CPU, model-free, in CI): every draft of the suite — 454 groups accepted under strict (drafts 4 to
+  2020-12; every draft-3 schema refused), their 978 invalid instances all refused, compact and with `\u` escapes —
+  plus a 31-row typed probe table (R §6.2's enforced features, a non-ASCII enum and a draft-07 recursive tree among
+  them), each accepted with its valid instance admitted, and 14 schemas the review found xgrammar would read
+  differently (refused).
+- `json_object`: every 2020-12 instance that is an object or array to depth 8, compact and at indents 2 and 4, plus
+  non-ASCII text and escaped surrogate pairs, is admitted, 22 malformed texts refused, both as by xgrammar's builtin
+  JSON grammar; they differ only on a whitespace run of 65 (refused) where the builtin admits it.
+- Every constraint form compiles and admits / refuses samples; malformed dicts and schemas, a nested strict violation
+  and a regex compile error are refused.
+- L0-mask (sm_86, rtx-a5000): `apply` equals xgrammar's CPU `apply_token_bitmask_inplace` bit for bit on 152k, 248k
+  and 1000-token vocabularies, with all-allowed, all-refused and padding rows, eager and replayed in a CUDA graph with
+  new contents; memcheck 0 errors (`plugins/tests/memcheck_grammar_apply.py`); `mask-bit-order` fails it. sm_89 and
+  sm_120a: pending (to run on the consumer cluster: the `-k apply` tests and the memcheck script).
+- Masked L0-dist (10⁵ sequences, χ² at p = 1e-3, the real `fill` probe over a prefix-dependent toy grammar of 16
+  tokens with a multi-character token and stops after two or three tokens): greedy exact; T = 1 p = 0.48; top-p 0.9
+  p = 0.57; stop-token drafts (the drafter proposes the stop token first) p = 0.09; no refusals in any replay. The
+  plants, run once (not kept: the end-to-end checks below keep them failing): `mask-column-shift` — 553 refused
+  sequences and p = 0 at T = 1, p = 0 with stop drafts; `no-rollback-after-probe` — 678 refused, p = 0 at T = 1, 207
+  refused with stop drafts.
+- End to end (CPU, a tiny Qwen3 over Qwen3's 152k vocabulary and tokenizer): a regex with n = 2, a strict schema (the
+  random model fills it with capped whitespace runs and is cut at `max_tokens`), a structural tag around a schema and
+  `json_object` beside a free request give exactly HF's greedy tokens masked by a fresh matcher, with the same finish
+  reasons — plain, and with the oracle drafter's right, wrong and mixed drafts (refused drafts counted). The plants:
+  `mask-column-shift`, `no-rollback-after-probe` (speculating), `mask-bit-order` and `stop-tokens-masked` end the
+  constrained requests with `error` (a commit the matcher refuses) instead of `stop`; `closing-tokens-masked` cuts
+  `json_object` at `length` instead of `stop` (§5's truncation signal).
+- Token-level masks with the real tokenizer: a non-ASCII enum (byte-fragment tokens) is admitted token by token,
+  ids past the tokenizer (151669 … 151935) are never allowed, a stop token only once the constraint is complete.
+- Isolation on one engine, beside requests that finish unchanged: a regex compile error ends its request `client`,
+  a compile past a lowered timeout (0.3 s) `busy` — the same constraint again is refused at once from the negative
+  cache — and a 53 MB compile under a lowered watchdog budget (16 MB) `client`; the respawned worker then vets a small
+  schema (2 MB) under that budget (positive control); `ignore_eos` with a constraint, malformed and too deeply nested
+  constraints, stop tokens past the vocabulary, a constraint over 1 MiB and a constraint on a deployment without the
+  processor are 400s (kind `client`), never exceptions that end the engine. A checker whose workers cannot start fails
+  its waiting constraint `busy` and refuses new ones instead of leaving them blocked forever.
+- Step-1 review items: `test_logits_processor.py` records the running constrained sequences each decode step leaves
+  out — none under A′, some under A (a mutation making A′ behave as A now fails all 8 depth1-commit cases); the
+  preempting cases assert preemptions > 0. Design §4.2 notes one logits processor.
+
+Measured (D5, `evidence/grammar_vetting_rtx-a5000_2026-10-13.json` at 69357e5 — vetting and compiling unchanged since; mid-size subsets only, 40 schemas
+each of Glaiveai2K, Github_easy, Github_medium and 29 of WashingtonPost; 152k / 248k vocabularies):
+- worker start and respawn 3.2–3.9 s (one start at 6.1 s); resident 767 / 814 MB when ready;
+- compile (worker ≈ engine thread): tool schema 43 / 83 ms, `json_object` 54 / 114 ms, a 10-tool structural tag 69 /
+  100 ms, schemas p50 41–45 / 80–86 ms, p90 up to 3.0 s / 1.1 s, max 8.8 s / 9.9 s (one Github_easy and one
+  Github_medium schema time out at 10 s with the larger vocabulary); compiled 13.4 / 26.3 MB at p50, ≤ 46 MB;
+- peak resident growth while compiling ≤ 38 MB (≤ 1.4× the compiled size);
+- the strict reject list accepts 96 of the 149 sampled schemas (64%; §5's predicted coverage 64–67%).
+
+Review: one reviewer, four rounds (4504ed3 → 92db331 → 69357e5 → d2a14a5 → the last step-2 commit; clean), each fix with a test that failed before
+where a test could show it. Found and fixed: malformed constraints and out-of-vocabulary stop ids escaping `open` as
+exceptions that end the engine process; `$ref` targets in unwalked locations, `properties` names also matched by
+`patternProperties`, `propertyNames` beside `properties`, older drafts' `prefixItems` / `exclusiveMinimum` / `id`,
+and escaped `$ref`s bypassing the reject list; workers dying before they are ready leaving requests blocked forever;
+watchdog-thread exceptions disabling vetting; abandoned compiles held outside the cache; unbounded negative and
+positive caches; super-linear checks on the engine thread (ref re-walks, Python regex over client patterns, enum ×
+type lists; a class-end misread reopening `[^\s]`).
+
+Deviations (simplest option consistent with the decisions):
+- **xgrammar 0.2.8, not 0.2.3.** 0.2.3 expands bounded repetition: with the 64-character whitespace cap a 3-property
+  schema compiles to 330 MB in 0.6 s and `json_object` to 763 MB in 1.1 s (every JSON constraint over the 64 MB cap);
+  0.2.8 gives 13.4 MB and ≈ 30 ms more than uncapped. 0.2.8 needs apache-tvm-ffi ≥ 0.1.11 (the shared stack had
+  0.1.9; FlashInfer 0.6.12 accepts it and its kernel tests pass at 0.1.14). The oracle, fixtures and tag forms were
+  run at 0.2.8.
+- **The whitespace cap is a rewrite of xgrammar's printed any-whitespace JSON grammar** (`[ \n\r\t]*` →
+  `{0,64}`), for schemas as for `json_object`, so untyped subschemas are capped too (D5 left them uncapped).
+  xgrammar's `max_whitespace_cnt` costs the same; the cost is ≈ 13.4 MB (152k vocabulary) or 26.3 MB (248k) per
+  compiled grammar however many schemas it holds — the 512 MB cache holds ≈ 38 / 19 grammars. A cap of 16 would take
+  3.5 MB but refuses pretty-printed JSON past depth 3 (C-R2-3).
+- **Workers are fresh interpreters started with `subprocess`** (`python -P -m …worker`) rather than
+  `multiprocessing`'s `spawn`: the same isolation with an explicit environment (also `CUDA_VISIBLE_DEVICES=""`). The
+  `TokenizerInfo` JSON (5–8 MB) goes through an inherited, already unlinked file read with `pread`: written to a pipe
+  it would block the watchdog thread until the child read it, and a named temporary file could be removed under a
+  long-running server.
+- **Watchdog budget 256 MB** (D5: 1 GB, recalibrated at step 2 from the peak-to-final ratio): a compile measured
+  ≤ 1.4× its compiled size at its peak, so one that ends under the 64 MB size cap peaks under ≈ 90 MB.
+- **The vetting queue holds 8 waiting constraints** (more are `busy`): with two workers, a 10 s timeout and a 3.5 s
+  respawn, the last waits at most ≈ 54 s. Constraints waiting, running or reported are not queued twice. With no
+  worker ready and three starts failed in a row, the checker is down: waiting and new constraints are `busy` (not
+  remembered) until a worker starts.
+- **A constraint's JSON is at most 1 MiB** (a 400 beyond), bounding the checks `open` runs on the engine thread.
+- **The reject list grew where the oracle and the review found holes:** `time`, `ipv6` and `email` leave the format
+  allowlist (leap seconds at a wrong hour; a leading zero in an embedded IPv4 octet; a `\u00a9` escape in a quoted
+  local part), leaving `uri`, `uuid`, `duration`; `contentMediaType` / `contentEncoding` / `contentSchema` (draft 7
+  asserts them); patterns with `\S` or `\s` in a negated class (ECMA 262's whitespace is Unicode's);
+  `patternProperties` or `propertyNames` beside `properties`; `$id`, `$schema` or a string `id` below the root;
+  `$schema` other than drafts 4, 6, 7, 2019-09, 2020-12; `prefixItems` before 2020-12, draft 4's
+  `exclusiveMinimum` / `exclusiveMaximum`, `items` as an array and `additionalItems`; `$dynamicRef` /
+  `$recursiveRef` and their anchors; `$ref`s with `%` or `~` escapes; every `$ref` target is checked like the rest.
+  `type` beside `enum` / `const` is allowed when every value has that type. A `propertyNames` schema needs
+  `type: string` for its typed keywords (like any other schema).
+- **`spec_drafts_refused` is not in `Engine.stats()` yet:** the processor counts refused drafts
+  (`XGrammar.drafts_refused`), but surfacing them in the engine's stats needs a general core hook (an optional
+  `stats()` of the processor merged into `Engine.stats`), deferred to step 5, where the share is measured.
+- xgrammar's `strict_mode` (no undeclared properties) is on for every schema, strict or not (D9's "stricter" rows).
+- The masked L0-dist's plant checks ran once and are recorded above rather than kept as tests (≈ 8 s); the
+  end-to-end plant checks (< 1 s each) stay.

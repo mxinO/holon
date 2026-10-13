@@ -1,0 +1,351 @@
+{
+ "workload": "grammar_vetting",
+ "date": "2026-10-13",
+ "gpu_class": "rtx-a5000",
+ "command": "python bench/grammar_vetting.py --model Qwen/Qwen3-0.6B@c1899de289a0 --model Qwen/Qwen3.5-4B@851bf6e806ef --jsb <JSONSchemaBench> --per-subset 40",
+ "commit": "69357e5710236460455a2129908df8cc0dc619e4",
+ "xgrammar": "0.2.8",
+ "results": [
+  {
+   "model": "Qwen/Qwen3-0.6B@c1899de289a0",
+   "vocab": 151936,
+   "worker_starts": [
+    {
+     "ready_s": 3.26,
+     "rss_mb": 768
+    },
+    {
+     "ready_s": 3.27,
+     "rss_mb": 767
+    },
+    {
+     "ready_s": 3.24,
+     "rss_mb": 767
+    },
+    {
+     "ready_s": 3.23,
+     "rss_mb": 767
+    }
+   ],
+   "constraints": {
+    "tool_schema": {
+     "ok": true,
+     "why": null,
+     "worker_ms": 42.84,
+     "engine_ms": 46.17,
+     "size_mb": 13.44,
+     "growth_mb": 11.96
+    },
+    "json_object": {
+     "ok": true,
+     "why": null,
+     "worker_ms": 53.94,
+     "engine_ms": 54.19,
+     "size_mb": 13.52,
+     "growth_mb": 2.06
+    },
+    "tag_10_tools": {
+     "ok": true,
+     "why": null,
+     "worker_ms": 68.71,
+     "engine_ms": 57.31,
+     "size_mb": 13.46,
+     "growth_mb": 15.86
+    },
+    "regex": {
+     "ok": true,
+     "why": null,
+     "worker_ms": 0.36,
+     "engine_ms": 0.4,
+     "size_mb": 0.0,
+     "growth_mb": 0.0
+    }
+   },
+   "subsets": {
+    "Glaiveai2K": {
+     "n": 40,
+     "vetted": 40,
+     "refused": [],
+     "strict_accepts": 35,
+     "worker_ms": {
+      "p50": 41.2,
+      "p90": 46.5,
+      "max": 54.2
+     },
+     "engine_ms": {
+      "p50": 40.2,
+      "p90": 42.0,
+      "max": 47.2
+     },
+     "size_mb": {
+      "p50": 13.42,
+      "p90": 13.43,
+      "max": 13.47
+     },
+     "growth_mb": {
+      "p50": 3.74,
+      "p90": 11.22,
+      "max": 18.34
+     }
+    },
+    "Github_easy": {
+     "n": 40,
+     "vetted": 40,
+     "refused": [],
+     "strict_accepts": 25,
+     "worker_ms": {
+      "p50": 43.4,
+      "p90": 3010.8,
+      "max": 8842.9
+     },
+     "engine_ms": {
+      "p50": 41.4,
+      "p90": 2966.1,
+      "max": 8841.5
+     },
+     "size_mb": {
+      "p50": 13.43,
+      "p90": 21.03,
+      "max": 35.69
+     },
+     "growth_mb": {
+      "p50": 2.37,
+      "p90": 11.02,
+      "max": 21.46
+     }
+    },
+    "Github_medium": {
+     "n": 40,
+     "vetted": 38,
+     "refused": [
+      "invalid constraint: Schema 'false' cannot accept any value",
+      "invalid constraint: minItems is greater than the number of p"
+     ],
+     "strict_accepts": 18,
+     "worker_ms": {
+      "p50": 44.9,
+      "p90": 711.8,
+      "max": 7669.9
+     },
+     "engine_ms": {
+      "p50": 46.3,
+      "p90": 617.9,
+      "max": 7683.3
+     },
+     "size_mb": {
+      "p50": 13.49,
+      "p90": 16.19,
+      "max": 37.1
+     },
+     "growth_mb": {
+      "p50": 0.0,
+      "p90": 6.14,
+      "max": 8.75
+     }
+    },
+    "WashingtonPost": {
+     "n": 29,
+     "vetted": 29,
+     "refused": [],
+     "strict_accepts": 18,
+     "worker_ms": {
+      "p50": 41.1,
+      "p90": 45.7,
+      "max": 929.2
+     },
+     "engine_ms": {
+      "p50": 40.5,
+      "p90": 44.8,
+      "max": 890.3
+     },
+     "size_mb": {
+      "p50": 13.43,
+      "p90": 13.52,
+      "max": 15.35
+     },
+     "growth_mb": {
+      "p50": 0.0,
+      "p90": 0.0,
+      "max": 1.24
+     }
+    }
+   }
+  },
+  {
+   "model": "Qwen/Qwen3.5-4B@851bf6e806ef",
+   "vocab": 248320,
+   "worker_starts": [
+    {
+     "ready_s": 3.37,
+     "rss_mb": 814
+    },
+    {
+     "ready_s": 3.63,
+     "rss_mb": 815
+    },
+    {
+     "ready_s": 3.91,
+     "rss_mb": 814
+    },
+    {
+     "ready_s": 3.75,
+     "rss_mb": 814
+    },
+    {
+     "ready_s": 3.66,
+     "rss_mb": 815
+    },
+    {
+     "ready_s": 6.12,
+     "rss_mb": 814
+    }
+   ],
+   "constraints": {
+    "tool_schema": {
+     "ok": true,
+     "why": null,
+     "worker_ms": 83.04,
+     "engine_ms": 85.63,
+     "size_mb": 26.3,
+     "growth_mb": 25.96
+    },
+    "json_object": {
+     "ok": true,
+     "why": null,
+     "worker_ms": 113.86,
+     "engine_ms": 109.23,
+     "size_mb": 26.38,
+     "growth_mb": 11.38
+    },
+    "tag_10_tools": {
+     "ok": true,
+     "why": null,
+     "worker_ms": 99.94,
+     "engine_ms": 104.28,
+     "size_mb": 26.31,
+     "growth_mb": 9.34
+    },
+    "regex": {
+     "ok": true,
+     "why": null,
+     "worker_ms": 0.56,
+     "engine_ms": 0.48,
+     "size_mb": 0.0,
+     "growth_mb": 0.0
+    }
+   },
+   "subsets": {
+    "Glaiveai2K": {
+     "n": 40,
+     "vetted": 40,
+     "refused": [],
+     "strict_accepts": 35,
+     "worker_ms": {
+      "p50": 82.6,
+      "p90": 87.7,
+      "max": 90.7
+     },
+     "engine_ms": {
+      "p50": 80.1,
+      "p90": 86.4,
+      "max": 111.3
+     },
+     "size_mb": {
+      "p50": 26.28,
+      "p90": 26.28,
+      "max": 26.35
+     },
+     "growth_mb": {
+      "p50": 21.74,
+      "p90": 24.99,
+      "max": 35.67
+     }
+    },
+    "Github_easy": {
+     "n": 40,
+     "vetted": 39,
+     "refused": [
+      "compiling the constraint took over 10 s"
+     ],
+     "strict_accepts": 25,
+     "worker_ms": {
+      "p50": 80.2,
+      "p90": 1140.1,
+      "max": 9697.8
+     },
+     "engine_ms": {
+      "p50": 83.4,
+      "p90": 1157.9,
+      "max": 9776.1
+     },
+     "size_mb": {
+      "p50": 26.29,
+      "p90": 28.13,
+      "max": 45.42
+     },
+     "growth_mb": {
+      "p50": 9.29,
+      "p90": 24.98,
+      "max": 37.77
+     }
+    },
+    "Github_medium": {
+     "n": 40,
+     "vetted": 37,
+     "refused": [
+      "compiling the constraint took over 10 s",
+      "invalid constraint: Schema 'false' cannot accept any value",
+      "invalid constraint: minItems is greater than the number of p"
+     ],
+     "strict_accepts": 18,
+     "worker_ms": {
+      "p50": 85.7,
+      "p90": 798.7,
+      "max": 9868.7
+     },
+     "engine_ms": {
+      "p50": 82.2,
+      "p90": 786.8,
+      "max": 9834.3
+     },
+     "size_mb": {
+      "p50": 26.34,
+      "p90": 28.19,
+      "max": 45.74
+     },
+     "growth_mb": {
+      "p50": 9.34,
+      "p90": 21.8,
+      "max": 33.03
+     }
+    },
+    "WashingtonPost": {
+     "n": 29,
+     "vetted": 29,
+     "refused": [],
+     "strict_accepts": 18,
+     "worker_ms": {
+      "p50": 81.3,
+      "p90": 95.6,
+      "max": 1505.8
+     },
+     "engine_ms": {
+      "p50": 77.4,
+      "p90": 82.6,
+      "max": 1512.8
+     },
+     "size_mb": {
+      "p50": 26.29,
+      "p90": 26.38,
+      "max": 28.86
+     },
+     "growth_mb": {
+      "p50": 11.53,
+      "p90": 23.02,
+      "max": 33.49
+     }
+    }
+   }
+  }
+ ]
+}
