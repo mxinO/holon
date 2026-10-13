@@ -224,7 +224,9 @@ unread `max_depth` is removed (the gate comes from `open`).
     than compiling — reviewers' measurements): two worker processes, started with `spawn` (the engine process has
     CUDA and threads), kept lean (`OMP_NUM_THREADS=1`, `TOKENIZERS_PARALLELISM=false`, `MALLOC_ARENA_MAX=2`; the
     `TokenizerInfo` sent from the parent as JSON, asserted equal in padded size and stop set) and set to die with the
-    parent (`PR_SET_PDEATHSIG`), each with `GrammarCompiler(max_threads=2)`. A worker compiles the constraint and
+    parent (`PR_SET_PDEATHSIG`, which follows the creating thread: workers are started and respawned only by the
+    watchdog's long-lived thread, and the child exits if `os.getppid()` is no longer that parent right after
+    `prctl`), each with `GrammarCompiler(max_threads=2)`. A worker compiles the constraint and
     returns only `ok` / the error, the compile time, `memory_size_bytes` and its peak RSS — no grammar crosses the
     pipe.
   - **Memory:** a worker's baseline is ≈ 1.1 GB resident (≈ 6.7 GB virtual after importing xgrammar and torch, so
@@ -232,7 +234,8 @@ unread `max_depth` is removed (the gate comes from `open`).
     set (`/proc/<pid>/statm`) every 50 ms and kills it when the compile grows it past **baseline + 1 GB** (portable:
     no cgroup needed); workers also get `oom_score_adj` 1000 so the kernel prefers them to the engine.
   - **Outcomes:** past the **10 s timeout** the worker is killed and respawned (≈ 0.3–1 s; the queue is bounded for
-    that) and the request is rejected `busy`; a compiled size over **64 MB** or a watchdog kill is rejected `client`
+    that) and the request is rejected `busy` (a respawn re-imports torch: likely 2–5 s, measured at step 2 and the
+    queue bound sized to it); a compiled size over **64 MB** or a watchdog kill is rejected `client`
     ("schema too complex"); any other worker death or exit without a report (a kernel OOM kill, a crash) is `busy`.
     A negative cache rejects repeats of compile errors and `client` rejections for the process's life, and of `busy`
     outcomes for 10 minutes. Tested with a lowered watchdog budget on a mid-size fixture, with a small schema as the
@@ -353,6 +356,9 @@ unread `max_depth` is removed (the gate comes from `open`).
 - Graphs double when a processor is selected (the 27B config: 27 → 54: buckets {1, 2, 4} × widths {1, 3, 4} × 3
   sampler variants × mask on/off). The graph-pool and capture-time deltas and the KV tokens lost are measured at step
   1 and recorded; the profile includes `apply`. With no processor selected, nothing changes (acceptance 6).
+- Host RAM when the grammar processor is selected: two vetting workers at ≈ 1.1 GB resident each (≈ 2.2 GB, up to
+  ≈ 4.4 GB at the watchdog bound) plus the 512 MB compiled-grammar cache — measured at step 2; if it matters on
+  consumer hosts, one worker (more queueing) or a worker that never imports torch.
 
 ## 7. Steps
 
@@ -483,6 +489,14 @@ unread `max_depth` is removed (the gate comes from `open`).
 |---|---|
 | A (rev 5 major): `RLIMIT_DATA` caps virtual memory, ≈ 6.7 GB after the imports; a tight limit hangs or crashes the worker | a parent watchdog on resident memory (baseline + 1 GB) kills the worker → `client`; lean worker environment, `TokenizerInfo` as JSON, `PR_SET_PDEATHSIG`; any unreported death `busy` with the TTL; a positive control in the test (D5) |
 | A-m1: `oom_score_adj` makes workers the host's first victim | kept, but an OOM kill is `busy` and expires, never a permanent rejection (D5) |
+
+**Rev 5, round 3.**
+
+| Finding | Resolution |
+|---|---|
+| B-m1: `PR_SET_PDEATHSIG` follows the creating thread | workers started and respawned only by the watchdog thread; the child checks `getppid()` after `prctl` (D5) |
+| B-m2: the workers' host RAM unrecorded | §6, measured at step 2 |
+| C nit: respawn time | likely 2–5 s, measured; the queue bound sized to it (D5) |
 
 ## 10. Deferred, deliberately
 
