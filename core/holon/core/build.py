@@ -48,6 +48,11 @@ class BuildContext:
         self._selected: dict[tuple, KernelSpec] = {}
         self.states: dict[tuple[str, int], tuple[Any, Any]] = {}  # (local spec name, layer) -> (spec, pool)
         self._buffers: dict[str, torch.Tensor] = {}
+        # Auxiliary models (engine builds): set by the engine, filled by `aux_model`.
+        self.aux_builder: Any = None
+        self.aux_bound: list[Any] = []
+        self.aux_planners: dict[str, Any] = {}
+        self.aux_modules: list[nn.Module] = []
 
     def unit_factory(self, ref: Ref) -> Any:
         """The registered factory (usually the unit class) serving `ref`, loading its plugin if needed."""
@@ -118,6 +123,42 @@ class BuildContext:
     def state(self, spec_name: str, layer: int) -> tuple[Any, Any] | None:
         return self.states.get((spec_name, layer))
 
+    def aux_model(self, namespace: str, spec: Any, tensors: Iterable[tuple[str, torch.Tensor | QTensor]]) -> nn.Module:
+        if self.aux_builder is None:
+            raise PluginError(f"aux model {namespace!r}: a model-only build has no engine state")
+        module = self.aux_builder(namespace, spec, tensors)
+        self.aux_modules.append(module)
+        return module
+
+    def child(self, namespace: str) -> ChildContext:
+        return ChildContext(self, namespace)
+
+
+class ChildContext:
+    """The BuildCtx an auxiliary model's units see: the parent's, with state names, static buffers and lock sites
+    under `<namespace>.`, so the same units build beside the target without colliding with it."""
+
+    def __init__(self, parent: BuildContext, namespace: str) -> None:
+        self.parent, self.namespace = parent, namespace
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.parent, name)
+
+    def unit(self, ref: Ref, **site: Any) -> nn.Module:
+        return self.parent.unit_factory(ref)(self, **dict(ref.params), **site)       # nested units see the child too
+
+    def select_kernel(self, op: str, *, site: str, **facts: Any) -> KernelSpec:
+        return self.parent.select_kernel(op, site=f"{self.namespace}.{site}", **facts)
+
+    def state(self, spec_name: str, layer: int) -> tuple[Any, Any] | None:
+        return self.parent.state(f"{self.namespace}.{spec_name}", layer)
+
+    def static(self, name: str, shape: tuple[int, ...], dtype: torch.dtype) -> torch.Tensor:
+        return self.parent.static(f"{self.namespace}.{name}", shape, dtype)
+
+    def workspace(self, name: str, nbytes: int) -> torch.Tensor:
+        return self.parent.workspace(f"{self.namespace}.{name}", nbytes)
+
 
 @dataclasses.dataclass
 class StepContext:
@@ -132,6 +173,17 @@ class StepContext:
 
     def meta(self, group: str) -> Any:
         return self.metas[group]
+
+    def view(self, namespace: str) -> StepContext:
+        """This step as an auxiliary model's units see it: its groups' metadata, pages and in-step publishes under
+        their local names (`<namespace>.kv` → `kv`)."""
+        pre = namespace + "."
+        local = lambda d: {k[len(pre):]: v for k, v in d.items() if k.startswith(pre)}    # noqa: E731
+        publishes = [dataclasses.replace(p, spec=p.spec[len(pre):]) for p in self.batch.plan.publishes
+                     if p.spec.startswith(pre)]
+        plan = dataclasses.replace(self.batch.plan, publishes=publishes)
+        return dataclasses.replace(self, batch=Batch(plan, self.batch.dev), metas=local(self.metas),
+                                   pages=local(self.pages))
 
     def pool(self, name: str) -> Any:
         return self.pools[name]
@@ -203,7 +255,7 @@ def map_name(name: str, weights: WeightMap) -> tuple[str, str | None, int | None
     """Checkpoint tensor name → (parameter path, transform, stack index), or None if the tensor is skipped."""
     if weights.root and name.startswith(weights.root):
         name = name[len(weights.root):]
-    if any(name.startswith(s) for s in weights.skip):
+    if any(name.startswith(s) for s in weights.skip) or (weights.only and not name.startswith(weights.only)):
         return None
     for rule in weights.rules:
         m = _compile(rule.pattern, rule.stack).match(name)
@@ -234,17 +286,20 @@ def _fill_slice(param: nn.Parameter, target: str, index: int, name: str, value: 
 
 
 @torch.no_grad()
-def load_weights(model: Model, ctx: BuildContext, tensors: Iterable[tuple[str, torch.Tensor | QTensor]]) -> None:
-    """Fill every parameter exactly once from the checkpoint, then run each unit's `finalize_weights`.
+def load_weights(model: nn.Module, ctx: BuildContext, tensors: Iterable[tuple[str, torch.Tensor | QTensor]],
+                 weights: WeightMap | None = None) -> None:
+    """Fill every parameter exactly once from the checkpoint by `weights` (default: the model spec's), then run each
+    unit's `finalize_weights`.
 
     A dense tensor is copied to the device in the parameter's dtype. A quantized one (`QTensor`) goes to the module
     owning the parameter — `adopt(ctx, name, qtensor)` stores it in its own form and returns True, or False if it
     cannot read that layout (design §5.5; the core never looks inside a layout)."""
+    weights = weights or model.spec.weights
     params = dict(model.named_parameters())
     filled: set[str] = set()
     slices: dict[str, set[int]] = {}                    # stacked parameters: the slices filled so far
     for name, value in tensors:
-        mapped = map_name(name, model.spec.weights)
+        mapped = map_name(name, weights)
         if mapped is None:
             continue
         target, transform, index = mapped

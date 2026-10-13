@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     import torch
 
     from .batch import BatchPlan, SamplingParams, Seq, StepCtx
-    from .model import BuildCtx, ModelSpec
+    from .model import AuxSpec, BuildCtx, ModelSpec
     from .quant import QTensor
 
 
@@ -111,6 +111,9 @@ class TargetView(Protocol):
 
     def tensors(self) -> Iterable[tuple[str, torch.Tensor | QTensor]]:
         """The target checkpoint's tensors (e.g. a draft head stored with it)."""
+
+    def draft_head(self, name: str) -> AuxSpec | None:
+        """The draft head `name` the target's model plugin declares for this checkpoint, if any."""
 
 
 class DrafterPlugin(Protocol):

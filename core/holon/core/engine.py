@@ -12,6 +12,7 @@ minimum pools → capture the decode graphs.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import gc
 import itertools
 import secrets
@@ -22,7 +23,7 @@ import torch
 from holon.api import BatchPlan, Logprobs, SamplingParams, Seq, Status, TokenDelta, sequence_seed
 
 from . import platform
-from .assembly import bind_state, prefix_index, resolve_model
+from .assembly import bind_state, build_aux, prefix_index, resolve_model
 from .build import BuildContext, build_model, load_weights
 from .executor import Executor, Launched, PromptRows
 from .memory import Ledger
@@ -72,8 +73,8 @@ class _Inflight:
 class _Target:
     """The TargetView a drafter builds against: the target's spec, its built shared modules, its checkpoint."""
 
-    def __init__(self, spec, model, source) -> None:
-        self.spec, self._model, self._source = spec, model, source
+    def __init__(self, spec, model, source, plugin) -> None:
+        self.spec, self._model, self._source, self._plugin = spec, model, source, plugin
 
     def shared(self, name: str):
         if name not in ("embed", "norm", "lm_head"):
@@ -82,6 +83,10 @@ class _Target:
 
     def tensors(self):
         return self._source.tensors()
+
+    def draft_head(self, name: str):
+        declare = getattr(self._plugin, "draft_head", None)
+        return declare(self._source.config(), self._source.kind, name) if declare else None
 
 
 class Engine:
@@ -109,7 +114,10 @@ class Engine:
         self.policy = drafter = verifier = None
         if cfg.max_draft_tokens and any(True for _ in p.by_slot("draft_policy")):
             self.policy, verifier = p.load(p.single("draft_policy")), p.load(p.single("verifier"))
-            drafter = p.load(p.single("drafter")).build(self.ctx, _Target(self.spec, model, source))
+            self.ctx.aux_builder = functools.partial(build_aux, ctx=self.ctx, plugins=p, ledger=self.ledger, cfg=cfg)
+            drafter = p.load(p.single("drafter")).build(self.ctx, _Target(self.spec, model, source, model_plugin))
+            bound += self.ctx.aux_bound                  # the drafter's auxiliary models' state and planners
+            planners |= self.ctx.aux_planners
         admit_draft = getattr(drafter, "admit", None)
 
         def admit(seq: Seq) -> None:
@@ -124,7 +132,8 @@ class Engine:
         self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len,
                                draft_k=self._draft_k if self.policy is not None else None,
                                lookahead=getattr(drafter, "lookahead", None), host_lens_only=host_lens)
-        rewinders = [m for m in model.modules() if callable(getattr(m, "rewind", None))]
+        modules = [m for root in (model, *self.ctx.aux_modules) for m in root.modules()]
+        rewinders = [m for m in modules if callable(getattr(m, "rewind", None))]
         rewinders += [o for o in (sampler, verifier, drafter, self.policy) if callable(getattr(o, "rewind", None))]
         self.executor = Executor(cfg, self.device, model, self.spec.vocab, sampler, self.state, planners,
                                  verifier, drafter, pools=self.ledger.pools, rewinders=rewinders)

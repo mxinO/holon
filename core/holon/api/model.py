@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from .terms import Ref
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterable, Iterator, Mapping
 
     import torch
 
@@ -50,6 +50,7 @@ class WeightMap:
     rules: tuple[WeightRule, ...]
     root: str = ""                     # prefix stripped from checkpoint names
     skip: tuple[str, ...] = ()         # prefixes ignored (e.g. a tied output head, a vision tower)
+    only: tuple[str, ...] = ()         # when set, the only prefixes read (a model sharing a checkpoint with another)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -63,6 +64,16 @@ class ModelSpec:
     lm_head: Ref
     weights: WeightMap
     position_fn: str | None = None      # e.g. a multi-section rope; default: arange
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class AuxSpec:
+    """A model built beside the target for a plugin (e.g. a draft head): `unit` builds it, given `layers` (numbered
+    from 0 within it; their mixers' state is bound under the aux model's namespace); `weights` loads it."""
+
+    unit: Ref
+    layers: tuple[LayerDecl, ...]
+    weights: WeightMap
 
 
 class BuildCtx(Protocol):
@@ -95,6 +106,12 @@ class BuildCtx(Protocol):
              pref_units: int = 0) -> Pool:
         """A plugin's own pool of units, sized by the ledger with the fixed pools (design §6.1): `pref_units` when
         the budget allows, else `min_units`."""
+
+    def aux_model(self, namespace: str, spec: AuxSpec, tensors: Iterable[tuple[str, torch.Tensor | QTensor]]
+                  ) -> torch.nn.Module:
+        """Build, state-bind and load an auxiliary model (engine builds only). Its units see a child context in which
+        state names and planner groups are `<namespace>.<name>`; at step time `StepCtx.view(namespace)` gives them the
+        same mapping."""
 
 
 class Unit(Protocol):
@@ -139,3 +156,6 @@ class ModelPlugin(Protocol):
 
     def bundle(self, source: WeightSource) -> FrontendBundle:
         """Tokenizer, chat template and parsers for the checkpoint `source` reads."""
+
+    # Optional: `draft_head(cfg, source, name) -> AuxSpec | None`, a draft head stored with the checkpoint (e.g. a
+    # multi-token-prediction layer), built only when a drafter asks for it (`TargetView.draft_head`).

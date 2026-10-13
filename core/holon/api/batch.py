@@ -159,3 +159,7 @@ class StepCtx(Protocol):
 
     def pool(self, name: str) -> Any:
         """A memory pool by name (e.g. the pool of a payload this step's forward fills)."""
+
+    def view(self, namespace: str) -> StepCtx:
+        """This step as the units of auxiliary model `namespace` (`BuildCtx.aux_model`) see it: state groups and
+        in-step publishes under their local names."""

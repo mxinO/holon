@@ -5,14 +5,18 @@ prefix index.
 from __future__ import annotations
 
 import collections
+import dataclasses
 import fnmatch
 import math
 import pathlib
 from typing import Any
 
-from holon.api import Batch, ModelSpec, Paged, Ref, StateSpec, canonical_hash
+import torch
+from torch import nn
 
-from .build import BuildContext
+from holon.api import AuxSpec, Batch, ModelSpec, Paged, Ref, StateSpec, canonical_hash
+
+from .build import BuildContext, load_weights
 from .memory import Ledger
 from .plugins import PluginError, PluginSet
 from .prefix import PrefixIndex
@@ -54,13 +58,36 @@ class _PagesPlanner:
 def bind_state(spec: ModelSpec, ctx: BuildContext, plugins: PluginSet, ledger: Ledger, cfg: Any
                ) -> tuple[list[BoundSpec], dict[str, Any]]:
     """Each mixer group's state specs → pools and bound state kinds; one planner per state group."""
+    return _bind_layers(spec.layers, ctx, plugins, ledger, cfg)
+
+
+def build_aux(namespace: str, spec: AuxSpec, tensors: Any, ctx: BuildContext, plugins: PluginSet, ledger: Ledger,
+              cfg: Any) -> nn.Module:
+    """An auxiliary model (`BuildCtx.aux_model`): its layers' state bound under `namespace`, its units built in a
+    child context that maps their state names there, its weights loaded by its own map. The bound specs and planners
+    join the engine's through `ctx.aux_bound` / `ctx.aux_planners`."""
+    child = ctx.child(namespace)
+    bound, planners = _bind_layers(spec.layers, child, plugins, ledger, cfg, namespace)
+    ctx.aux_bound += bound
+    ctx.aux_planners.update(planners)
+    with torch.device("meta"):
+        module = child.unit(spec.unit, layers=spec.layers)
+    load_weights(module.eval(), child, tensors, spec.weights)
+    return module
+
+
+def _bind_layers(layers: tuple, ctx: Any, plugins: PluginSet, ledger: Ledger, cfg: Any, namespace: str = ""
+                 ) -> tuple[list[BoundSpec], dict[str, Any]]:
     by_mixer: dict[Ref, list[int]] = collections.defaultdict(list)
-    for i, layer in enumerate(spec.layers):
+    for i, layer in enumerate(layers):
         by_mixer[layer.mixer].append(i)
     bound, planners = [], {}
-    for ref, layers in by_mixer.items():
+    for ref, at in by_mixer.items():
         cls = ctx.unit_factory(ref)
-        specs = cls.state_specs(dict(ref.params), tuple(layers), ctx) if hasattr(cls, "state_specs") else []
+        specs = cls.state_specs(dict(ref.params), tuple(at), ctx) if hasattr(cls, "state_specs") else []
+        if namespace:                      # e.g. "kv" → "mtp.kv": its own pools, tables and planners
+            specs = [dataclasses.replace(s, name=f"{namespace}.{s.name}",
+                                         page_group=s.page_group and f"{namespace}.{s.page_group}") for s in specs]
         bound += [_bind(s, ctx, plugins, ledger, cfg) for s in specs]
         for group in dict.fromkeys(s.group for s in specs):
             if group in planners:
