@@ -94,13 +94,20 @@ class Seq:
 @dataclasses.dataclass(slots=True, eq=False)
 class SeqTable:
     """Device-authoritative per-slot state, written by the step's sample stage (inside the graph when captured):
-    while steps are in flight it, not the host mirror, holds the true lengths."""
+    while steps are in flight it, not the host mirror, holds the true lengths.
+
+    Draft probabilities (with a drafter that samples its drafts, `Drafter.q_support` = Kq): draft j of a slot was drawn
+    from q_j(t) = the sum of `draft_q[slot, j, c]` over the entries c with `draft_q_ids[slot, j, c]` = t, zero off
+    them — exactly the law the drafter sampled it from, given the drafts before it. Rows past `n_draft` are never
+    read. None: drafts are deterministic (q one-hot at the draft)."""
 
     num_computed: torch.Tensor           # [S] int64: tokens whose state is computed; the next input's position
     last_token: torch.Tensor             # [S] int64: the next input token
     n_accept: torch.Tensor               # [S] int64: drafts accepted by the slot's last sampled row (0 unless a verify)
     draft_tokens: torch.Tensor           # [S, k_max] int64: drafts for positions num_computed + 1 + j
     n_draft: torch.Tensor                # [S] int64: how many of draft_tokens are real (verifiers accept no more)
+    draft_q_ids: torch.Tensor | None = None    # [S, k_max, Kq] int64: the support of each draft's law …
+    draft_q: torch.Tensor | None = None        # [S, k_max, Kq] fp32: … and its probabilities
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

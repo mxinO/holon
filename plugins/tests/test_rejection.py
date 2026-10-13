@@ -9,6 +9,17 @@ cells of expected count < 5 pooled:
 - plants that must fail: the residual keeping the draft (marginal), one coin for every column (joint);
 - the token after the last real draft (all accepted, n_draft = 1 and K) is the plain draw from its column's law;
 - a coin is below 1: a sure draft is accepted at the one-in-2²⁴ draw that rounds to 1.0 unclamped.
+
+Sampled drafts (Gate B, D5: a drafter publishing the sparse laws it drew from, `SeqTable.draft_q_ids` / `draft_q`):
+- the first token for laws of Kq = 4 inside, straddling and outside the filtered support, and equal to p;
+- the joint law of three tokens on the Markov target with a drafter sampling each draft from a Kq = 4 law given the
+  previous one;
+- n_draft < k with stale rows past it (tokens the target likes, laws that would accept them): never read — the
+  `unmasked-padding` plant (judge/holon_judge/planted.py) must fail it;
+- plant: the residual keeping q's mass (drawn from p instead of max(p − q, 0)) moves the first token's law. (The
+  deterministic rule applied to sampled drafts is no plant: it is lossless for any proposal independent of the coins,
+  only slower — accepting d with p(d) ≤ min(1, p(d)/q(d)).)
+- one-hot laws (Kq = 1) verify bitwise as deterministic drafts do; ids past n_draft are never read (any value).
 """
 import dataclasses
 
@@ -36,8 +47,9 @@ def _chi2(counts: np.ndarray, probs: np.ndarray) -> float:
     return stats.chisquare(obs[keep], exp[keep] * obs[keep].sum() / exp[keep].sum()).pvalue
 
 
-def _step(sampler, logits, drafts, positions, verify=rejection.verify, n_draft=K):
-    """One verify step of N rows of width K + 1: (tokens [N, K + 1], n_accept [N])."""
+def _step(sampler, logits, drafts, positions, verify=rejection.verify, n_draft=K, laws=None):
+    """One verify step of N rows of width K + 1: (tokens [N, K + 1], n_accept [N]); `laws`: the drafts' sparse laws
+    (ids, probabilities [N, K, Kq])."""
     n, width = drafts.shape[0], drafts.shape[1] + 1
     slots = torch.arange(n)
     plan = host_plan(0, slots.numpy().astype(np.int32), positions.numpy().astype(np.int32),
@@ -48,7 +60,8 @@ def _step(sampler, logits, drafts, positions, verify=rejection.verify, n_draft=K
                       logits_rows=torch.arange(n).repeat_interleave(width))
     table = SeqTable(torch.zeros(n, dtype=torch.long), torch.zeros(n, dtype=torch.long),
                      n_accept=torch.zeros(n, dtype=torch.long), draft_tokens=drafts.clone(),
-                     n_draft=torch.full((n,), n_draft, dtype=torch.long))
+                     n_draft=torch.as_tensor(n_draft, dtype=torch.long).expand(n).clone(),
+                     **({} if laws is None else {"draft_q_ids": laws[0].clone(), "draft_q": laws[1].clone()}))
     ctx = StepContext(Batch(plan, dev), {}, seq_table=table, sampler=sampler)
     out, n_accept = verify(logits.reshape(n * width, -1), ctx)
     return out.tokens.view(n, width), n_accept
@@ -93,17 +106,19 @@ def test_first_token_has_the_target_law(target, case):
     assert (n_accept <= K).all()
 
 
-def _markov_sequences(target, verify) -> np.ndarray:
-    """The first three tokens of N sequences, speculating k = 3 with drafts (prev + 1) mod V."""
+def _markov_sequences(target, verify, drafter=None) -> np.ndarray:
+    """The first three tokens of N sequences, speculating k = 3 with drafts (prev + 1) mod V, or what `drafter(prev)`
+    samples (drafts, laws)."""
     _, trans = target
     sampler = _sampler(SamplingParams(temperature=1.0))
     prev = torch.zeros(N, dtype=torch.long)                  # context token 0
     out = torch.full((N, 3), -1)
     filled = torch.zeros(N, dtype=torch.long)
     while (filled < 3).any():
-        drafts = (prev[:, None] + 1 + torch.arange(K)) % V   # d1 = prev + 1, d2 = d1 + 1, …
+        # d1 = prev + 1, d2 = d1 + 1, … unless a drafter samples them
+        drafts, laws = drafter(prev) if drafter else ((prev[:, None] + 1 + torch.arange(K)) % V, None)
         cols = torch.cat([prev[:, None], drafts], 1)         # column j's logits condition on its predecessor
-        tokens, n_accept = _step(sampler, trans[cols], drafts, 10 + filled, verify)
+        tokens, n_accept = _step(sampler, trans[cols], drafts, 10 + filled, verify, laws=laws)
         for j in range(K + 1):
             take = (j <= n_accept) & (filled < 3)
             out[take, filled[take]] = tokens[take, j]
@@ -195,3 +210,166 @@ def test_a_sure_draft_is_accepted_at_a_coin_of_one():
     logits[..., 5] = 0.0                                  # p(5) = 1: the rest underflows to 0 in fp32
     tokens, n_accept = _step(sampler, logits, torch.full((1, K), 5), torch.tensor([6]))
     assert n_accept.item() == K and (tokens == 5).all()
+
+
+# Sampled drafts: sparse laws ------------------------------------------------------------------------------------------
+
+def _sample(ids: torch.Tensor, q: torch.Tensor, g: torch.Generator) -> torch.Tensor:
+    """One draw per row of the laws (ids, q) [N, Kq], as a sampling drafter makes it."""
+    return ids.gather(-1, torch.multinomial(q, 1, generator=g))[:, 0]
+
+
+def _filtered(logits: torch.Tensor, top_p: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """(the law after top-p, its support, the tokens outside it, likeliest first)."""
+    p = torch.softmax(logits, -1)
+    order = p.argsort(descending=True)
+    keep = (p[order].cumsum(0) - p[order]) <= top_p
+    probs = torch.zeros(V)
+    probs[order[keep]] = p[order[keep]] / p[order[keep]].sum()
+    return probs, order[keep], order[~keep]
+
+
+@pytest.mark.parametrize("case", ["inside", "straddling", "outside", "padded", "equal"])
+def test_first_token_has_the_target_law_with_sampled_drafts(target, case):
+    # Every draft is drawn from its own Kq = 4 law, which may cover tokens outside the filtered support (never emitted),
+    # pad its support by repeating an id at zero mass, or equal p exactly (an empty residual: every draft accepted).
+    logits, _ = target
+    top_p = 0.9
+    probs, support, outside = _filtered(logits, top_p)
+    g = torch.Generator().manual_seed(5)
+    if case == "equal":
+        logits = torch.full((V,), -1e4)
+        logits[support[:4]] = target[0][support[:4]]
+        probs, top_p = torch.softmax(logits, -1), 1.0
+        ids = support[:4]
+        q = probs[ids].clone()
+    else:
+        ids = {"inside": support[:4], "straddling": torch.cat([support[-2:], outside[:2]]),
+               "outside": outside[:4], "padded": support[:4]}[case]
+        q = torch.rand(4, generator=g) + 0.2
+        q /= q.sum()
+        if case == "padded":                                 # two real entries, then the first id again at mass 0
+            ids, q = support[[0, 1, 0, 0]], torch.cat([q[:2] / q[:2].sum(), torch.zeros(2)])
+    ids, q = ids.expand(N, K, 4), q.expand(N, K, 4)
+    drafts = torch.stack([_sample(ids[:, j], q[:, j], g) for j in range(K)], 1)
+    sampler = _sampler(SamplingParams(temperature=1.0, top_p=top_p))
+    tokens, n_accept = _step(sampler, logits.expand(N, K + 1, V), drafts, torch.full((N,), 10), laws=(ids, q))
+    assert _chi2(np.bincount(tokens[:, 0].numpy(), minlength=V), probs.numpy()) > 1e-3
+    assert (n_accept <= K).all() and (case != "equal" or (n_accept == K).all())
+
+
+def _markov_drafter(target, seed=5):
+    """Samples each draft from a Kq = 4 law given the previous token: the target's four likeliest successors, flatter
+    than the target (its logits at temperature 2), so drafts are often accepted and the residual still has mass."""
+    _, trans = target
+    top = trans.topk(4, -1)
+    ids_of, q_of = top.indices, torch.softmax(top.values / 2, -1)            # [V, 4] per previous token
+    g = torch.Generator().manual_seed(seed)
+
+    def draft(prev):
+        drafts, ids, qs = [], [], []
+        for _ in range(K):
+            ids.append(ids_of[prev]), qs.append(q_of[prev])
+            prev = _sample(ids[-1], qs[-1], g)
+            drafts.append(prev)
+        return torch.stack(drafts, 1), (torch.stack(ids, 1), torch.stack(qs, 1))
+    return draft
+
+
+def test_three_tokens_have_the_markov_law_with_sampled_drafts(target):
+    seqs = _markov_sequences(target, rejection.verify, _markov_drafter(target))
+    counts = np.bincount((seqs[:, 0] * V + seqs[:, 1]) * V + seqs[:, 2], minlength=V ** 3)
+    assert _chi2(counts, _markov_law(target)) > 1e-3
+
+
+def _stale(target, n_draft: int, verify):
+    """N rows of width K + 1 on one law p, whose first `n_draft` drafts are sampled from Kq = 4 laws; past them, stale
+    rows: the token p likes best, under a law that would accept it at any coin (q(t) = 0.05 ≤ p(t)). Returns the
+    first emitted token, the emitted token after the real drafts (rows that accepted them all), n_accept, and p."""
+    logits = target[0]
+    p = torch.softmax(logits, -1)
+    top = logits.topk(4)
+    g = torch.Generator().manual_seed(9)
+    ids, q = top.indices.repeat(N, K, 1), torch.softmax(top.values / 2, -1).repeat(N, K, 1)
+    drafts = torch.stack([_sample(ids[:, j], q[:, j], g) for j in range(K)], 1)
+    t = int(p.argmax())
+    drafts[:, n_draft:] = t
+    ids[:, n_draft:] = (t + torch.arange(4)) % V
+    q[:, n_draft:] = torch.tensor([0.05, 0.05, 0.05, 0.85])
+    sampler = _sampler(SamplingParams(temperature=1.0))
+    tokens, n_accept = _step(sampler, logits.expand(N, K + 1, V), drafts, torch.full((N,), 10), verify, n_draft,
+                             (ids, q))
+    rows = n_accept >= n_draft
+    return tokens[:, 0], tokens[rows, n_draft], n_accept, p
+
+
+@pytest.mark.parametrize("n_draft", [1, 2])
+def test_rows_past_n_draft_are_never_read(target, n_draft):
+    first, after, n_accept, p = _stale(target, n_draft, rejection.verify)
+    assert (n_accept <= n_draft).all() and len(after) > 0
+    assert _chi2(np.bincount(first.numpy(), minlength=V), p.numpy()) > 1e-3
+    assert _chi2(np.bincount(after.numpy(), minlength=V), p.numpy()) > 1e-3
+
+
+def test_sampled_draft_plants_fail(target, monkeypatch):
+    from holon_judge.planted import unmasked_padding
+
+    # Stale rows read as real drafts: accepted past n_draft, and the token after the real drafts loses its law.
+    with unmasked_padding():
+        _, after, n_accept, p = _stale(target, 1, rejection.verify)
+    assert (n_accept > 1).any()
+    assert _chi2(np.bincount(after.numpy(), minlength=V), p.numpy()) < 1e-3
+
+    # The residual keeping q's mass (drawn from p, not max(p − q, 0)): the first token's law moves.
+    sampled = rejection._sampled
+    monkeypatch.setattr(rejection, "_sampled", lambda p, *a: (*sampled(p, *a)[:2], p.clone()))
+    first, _, _, p = _stale(target, K, rejection.verify)
+    assert _chi2(np.bincount(first.numpy(), minlength=V), p.numpy()) < 1e-3
+
+
+def test_one_hot_laws_verify_as_deterministic_drafts(target):
+    # Kq = 1 at the draft with probability 1 is the deterministic proposal: the same tokens and acceptances, bitwise,
+    # on filtered rows of different laws per column with every n_draft — drafts drawn from their columns' laws, so
+    # many coins fall near the acceptance bound.
+    _, trans = target
+    g = torch.Generator().manual_seed(3)
+    rows = trans[torch.randint(0, V, (N, K + 1), generator=g)]
+    drafts = torch.multinomial(torch.softmax(rows[:, :K], -1).view(-1, V), 1, generator=g).view(N, K)
+    n_draft = torch.randint(0, K + 1, (N,), generator=g)
+    sampler = _sampler(SamplingParams(temperature=1.0, top_p=0.9))
+    positions = torch.randint(0, 100, (N,), generator=g)
+    plain = _step(sampler, rows, drafts, positions, n_draft=n_draft)
+    one_hot = _step(sampler, rows, drafts, positions, n_draft=n_draft,
+                    laws=(drafts[..., None], torch.ones(N, K, 1)))
+    assert all(torch.equal(a, b) for a, b in zip(plain, one_hot, strict=True)) and plain[1].sum() > 0
+
+
+@pytest.mark.parametrize("sampled", [False, True])
+def test_ids_past_n_draft_may_be_anything(sampled):
+    # A drafter leaves whatever it likes past its real drafts (the test oracle writes ids no vocabulary has): the
+    # verifier never reads them, so they cannot index out of range.
+    sampler = Sampler(1, torch.device("cpu"))
+    sampler.admit(0, SamplingParams(temperature=1.0, seed=0))
+    logits = torch.zeros(1, K + 1, V)
+    logits[..., 5] = 30.0
+    drafts = torch.tensor([[5, V + 7, V + 7]])
+    laws = (torch.tensor([[[5], [V + 7], [V + 7]]]), torch.tensor([[[1.0], [float("nan")], [2.0]]]))
+    tokens, n_accept = _step(sampler, logits, drafts, torch.tensor([6]), n_draft=1, laws=laws if sampled else None)
+    assert n_accept.item() == 1 and tokens[0, :2].tolist() == [5, 5]
+
+
+def test_an_empty_residual_accepts_a_sampled_draft_at_a_coin_of_one():
+    # q ≥ p everywhere (q a hair above p, as rounding may leave it): the residual is empty, so a rejection would have
+    # nothing to draw; the draft is accepted whatever the coin.
+    class CoinOfOne(Sampler):
+        def uniform(self, ctx, stream=0):
+            u = super().uniform(ctx, stream)
+            return torch.ones_like(u) if stream == 1 else u
+
+    sampler = CoinOfOne(1, torch.device("cpu"))
+    sampler.admit(0, SamplingParams(temperature=1.0, seed=0))
+    logits = torch.full((1, K + 1, V), -1e4)
+    logits[..., :2] = 0.0                                 # p = (½, ½, 0, …)
+    laws = (torch.tensor([0, 1]).expand(1, K, 2), torch.full((1, K, 2), 0.5 + 2**-20))
+    tokens, n_accept = _step(sampler, logits, torch.tensor([[1, 0, 1]]), torch.tensor([6]), laws=laws)
+    assert n_accept.item() == K and tokens[0, :K].tolist() == [1, 0, 1]

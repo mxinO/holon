@@ -95,7 +95,11 @@ class Verifier(Protocol):
 
 
 class Drafter(Protocol):
-    """Built by the `drafter` slot's plugin (`DrafterPlugin.build`); `admit`, `substeps`, `lookahead` are optional."""
+    """Built by the `drafter` slot's plugin (`DrafterPlugin.build`); `admit`, `substeps`, `lookahead` and `q_support`
+    are optional."""
+
+    # Optional: `q_support: int`, Kq > 0 for a drafter that samples its drafts and publishes the laws it drew them
+    # from, Kq entries per draft (`SeqTable.draft_q_ids` / `draft_q`); absent or 0: its drafts are deterministic.
 
     def admit(self, slot: int, tokens: list[int]) -> None:
         """Host: a request now owns `slot`; `tokens` is its whole history so far, prefix-hit tokens included (copy it
@@ -105,8 +109,9 @@ class Drafter(Protocol):
         """After every step's sample stage (prefill chunks too), inside the step's graph when captured. `h` [T, H] is
         the target trunk's output for every token of the step; for verify rows the SeqTable already holds `n_accept`
         and the advanced `num_computed`. Writes the drafter's own state for the step's tokens, then, for the rows that
-        sampled, `seq_table.draft_tokens[slot, :n]` (positions `num_computed[slot] + 1 + j`) and `n_draft[slot] = n`,
-        n at most the step's `plan.draft_k` if the drafter writes state per draft, else at most the engine's maximum.
+        sampled, `seq_table.draft_tokens[slot, :n]` (positions `num_computed[slot] + 1 + j`; with `q_support`, their
+        laws `draft_q_ids` / `draft_q[slot, :n]` too) and `n_draft[slot] = n`, n at most the step's `plan.draft_k` if
+        the drafter writes state per draft, else at most the engine's maximum.
         An auxiliary model run here over a verify step's rows sees them after the verifier: the core's `rewind`
         fan-out (target modules, slot objects) has already run, so rolling the aux model back is the drafter's call
         (its modules' `rewind(ctx.view(namespace))` after their forward)."""

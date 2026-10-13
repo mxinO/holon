@@ -85,6 +85,32 @@ def verify_writes_state() -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def unmasked_padding() -> Iterator[None]:
+    """Speculative verification ignores `n_draft`: every column of a verify row counts as a real draft, so padding
+    and a drafter's stale rows past its real drafts (tokens and laws) can be accepted (docs/m04-spec.md §5)."""
+    from holon_std.spec.greedy import verifier as greedy
+    from holon_std.spec.rejection import verifier as rejection
+
+    def unmasked(verify):
+        def planted(logits, ctx):
+            n_draft = ctx.seq_table.n_draft
+            before = n_draft.clone()
+            n_draft.fill_(ctx.seq_table.draft_tokens.shape[1])
+            try:
+                return verify(logits, ctx)
+            finally:
+                n_draft.copy_(before)
+        return planted
+
+    with contextlib.ExitStack() as stack:
+        for module in (greedy, rejection):
+            planted = unmasked(module.verify)
+            stack.enter_context(mock.patch.object(module, "verify", planted))
+            stack.enter_context(mock.patch.object(module.Plugin, "verify", staticmethod(planted)))
+        yield
+
+
+@contextlib.contextmanager
 def wrong_block() -> Iterator[None]:
     """A prefix hit of two or more blocks adopts its first block's state in place of its last block's. (Swapping two
     adopted blocks would be no bug: keys are cached after RoPE, and attention over a prefix ignores its order.)"""
@@ -470,4 +496,6 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "rare-ggml-experts-stale-q8_1": lambda: ggml_experts_stale_q8_1(every=9973),
     "moe-padding-duplicate-ids": moe_padding_duplicate_ids, **QWEN35_PLANTS,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
-    "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state}
+    "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
+    # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)
+    "unmasked-padding": unmasked_padding}

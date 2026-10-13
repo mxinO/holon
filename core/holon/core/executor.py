@@ -125,14 +125,16 @@ class Executor:
             "exact": (seqs, torch.bool), "start": (seqs, torch.int64), "from_device": (seqs, torch.bool),
             "draft_index": (tokens, torch.int64), "draft_from": (tokens, torch.int64)} | self._sub_fields(cfg))
         # The device SeqTable (one row per slot, plus the padding slot): authoritative while steps are in flight.
-        rows = seqs + 1
+        rows, cols = seqs + 1, max(cfg.max_draft_tokens, 1)
         self.last_token = torch.zeros(rows, dtype=torch.int64, device=device)
         self.num_computed = torch.zeros(rows, dtype=torch.int64, device=device)
+        kq = getattr(drafter, "q_support", 0)               # a sampling drafter's laws: Kq entries per draft
+        laws = {"draft_q_ids": torch.zeros(rows, cols, kq, dtype=torch.int64, device=device),
+                "draft_q": torch.zeros(rows, cols, kq, dtype=torch.float32, device=device)} if kq else {}
         self.seq_table = SeqTable(self.num_computed, self.last_token,
                                   n_accept=torch.zeros(rows, dtype=torch.int64, device=device),
-                                  draft_tokens=torch.zeros(rows, max(cfg.max_draft_tokens, 1), dtype=torch.int64,
-                                                           device=device),
-                                  n_draft=torch.zeros(rows, dtype=torch.int64, device=device))
+                                  draft_tokens=torch.zeros(rows, cols, dtype=torch.int64, device=device),
+                                  n_draft=torch.zeros(rows, dtype=torch.int64, device=device), **laws)
         self.graphs = platform.Graphs(device) if cfg.cuda_graphs and device.type == "cuda" else None
         self.buckets = sorted({min(b, seqs) for b in BUCKETS} | {seqs})
         width = 1 + cfg.max_draft_tokens
