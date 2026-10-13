@@ -19,7 +19,10 @@ namespace {
 
 constexpr size_t POOL_ALIGN = 256;
 
-size_t high_water = 0;   // the most bytes one call took from its workspace since the last read (tests)
+// Test-only (L0 holds every call to the workspace formulas): the most bytes one call took from its workspace since
+// the last holon_ggml_workspace_high_water(). One counter for the process, not per device, not thread-safe; serving
+// never reads it, and the update is one max per call.
+size_t high_water = 0;
 
 // llama.cpp's scratch allocator, as a bump allocator over the caller's workspace: no cudaMalloc, so a call is safe
 // inside CUDA graph capture. It lives for one call (llama.cpp frees everything before returning).

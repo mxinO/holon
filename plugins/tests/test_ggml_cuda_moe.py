@@ -44,7 +44,7 @@ from holon_plugins.kernels.ggml_cuda import extension
 from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, TYPES
 from holon_std.moe import reference
 
-from .test_ggml_cuda import Sized, activations, dequantize, random_blocks
+from .test_ggml_cuda import SLACK, Sized, activations, dequantize, random_blocks
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 
@@ -544,3 +544,16 @@ def test_moe_layer_binds_its_activation_dtypes_and_f32_outputs(ctx):
     _, ids = unit._topk(torch.nn.functional.linear(x.float(), unit.router))
     h = unit._gate_up(x[:, None], ids)
     assert h.dtype == unit.down(h, ids).dtype == torch.float32 and unit(x).dtype == torch.bfloat16
+
+
+def test_the_workspace_formula_with_ids_is_tight(ctx, lib):
+    """Negative control with ids on a J = 128 shape with the stream-k fixup: 8 experts of 384 rows at 512 tokens are
+    3 · 8 · 4 = 96 tiles (dense mmq_schedule over out · E rows mirrors that grid when out is a multiple of I). The
+    formula exceeds what the call takes by at most its spare."""
+    n, out, device = 8, 384, torch.cuda.current_device()
+    if lib.mmq_schedule(device, TYPES["q4_k"], out * n, CHUNK) != (2, 128, 128):
+        pytest.skip("96 tiles need no stream-k fixup on this GPU's SM count")
+    kernel, s = experts(ctx, "q4_k", H, out, 1, n=n), stack("q4_k", n, out, H, seed=5)
+    kernel.kernel(gate_up_input(CHUNK, seed=1), s.parts, uniform(CHUNK, n, seed=2))
+    used = lib.workspace_high_water()
+    assert used > 0 and 0 <= lib.workspace_bytes_id(device, H, CHUNK, K, n) - used <= SLACK

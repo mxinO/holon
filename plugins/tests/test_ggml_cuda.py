@@ -318,6 +318,19 @@ def test_the_workspace_high_water_mark(ctx, sm):
     assert kernel.lib.workspace_high_water() == 0
 
 
+SLACK = 512 * 4 + 3 * 256     # the formulas' spare: the 512-int load-chunk allowance, then three 256-byte pool pads
+
+
+def test_the_workspace_formula_is_tight(ctx, sm):
+    """Negative control on a J = 128 shape with the stream-k fixup (out 300 at 512 rows): the formula exceeds what
+    the call takes by at most its spare, so a too-generous formula (one that would hide an allocation) fails too."""
+    kernel, k = qlinear(ctx, "q4_k", 4096), 4096
+    assert kernel.lib.mmq_schedule(torch.cuda.current_device(), TYPES["q4_k"], OUT, CHUNK) == (2, 128, 128)
+    kernel.kernel(activations(CHUNK, k, seed=0), {"blocks": device_blocks(random_blocks("q4_k", OUT, k, seed=0))})
+    used = kernel.lib.workspace_high_water()
+    assert 0 <= kernel.lib.workspace_bytes(torch.cuda.current_device(), k, CHUNK) - used <= SLACK
+
+
 @pytest.mark.parametrize("fp4", [39, 40])                  # GGML_TYPE_MXFP4, GGML_TYPE_NVFP4
 def test_mmq_schedule_refuses_fp4_types(sm, fp4):
     """Their activation precision is chosen per call (M0.6 A3 passes it): the schedule aborts rather than guess."""

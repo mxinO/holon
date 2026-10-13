@@ -29,8 +29,8 @@ int holon_ggml_mmq_schedule(int type, int64_t out, int64_t rows, int * tile_i, i
 // Workspace bytes for calls with `in` values per row and at most `rows` rows (any type), on the current device.
 size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows);
 
-// Tests: the most bytes one call took from its workspace since the last read (then 0), to hold the sizes above to
-// what llama.cpp allocates on every call.
+// Tests only: the most bytes one call took from its workspace since the last read (then 0), to hold the sizes above
+// to what llama.cpp allocates on every call. One process-wide counter: not per device, not thread-safe.
 size_t holon_ggml_workspace_high_water(void);
 
 // y = x @ W.T. mmvq: rows <= 8, y bf16 or f32. mmq: y f32.
