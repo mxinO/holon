@@ -86,13 +86,18 @@ class Decode(_Paged):
 
 def _supports(f: dict) -> bool:
     return (f["layout"] == "kv.hnd" and f["q_dtype"] == f["kv_dtype"] and f["q_dtype"] in ("bfloat16", "float16")
-            and f["head_dim"] in (64, 128, 256))
+            and f["head_dim"] in (64, 128, 256) and _causal(f))
 
 
 def _supports_fp8(f: dict) -> bool:
     # e4m3 KV with a half-precision q (scale 1: the cache holds the values themselves, saturated on write)
     return (f["layout"] == "kv.hnd.fp8" and f["kv_dtype"] == "float8_e4m3fn" and f["q_dtype"] in ("bfloat16", "float16")
-            and f["head_dim"] in (64, 128, 256))
+            and f["head_dim"] in (64, 128, 256) and _causal(f))
+
+
+def _causal(f: dict) -> bool:
+    """Plain causal attention only: the `causal` / `window` facts (std.mixers.gqa) are not wired to the wrappers."""
+    return not {"causal", "window"} & f.keys()
 
 
 def _half(f: dict) -> bool:

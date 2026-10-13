@@ -17,9 +17,9 @@ they read are stable; the key covers their launch shapes). `pages.lens` and `pag
 only from `prepare` on; host planning uses the plan's bounds.
 
 Facts: heads, kv_heads, head_dim, page, q_dtype, kv_dtype, layout, max_seqs. Kernel instances hold plans, so each
-planner creates its own. `attention.paged_verify@1` has two more, given only when not their default (so the facts of
-every other site, which locks record, stay as they were), and a provider that does not implement them must not
-support them:
+planner creates its own. Every attention op (`attention.causal@1` too) has two more, given only when not their
+default (so the facts of every other site, which locks record, stay as they were), and a provider that does not
+implement them must not support them:
 - `causal` (default True): False — each row's 1 + k tokens see each other both ways (a block drafted at once), and
   all of the context before them;
 - `window` (default 0, none): W > 0 — a query at position p sees no key at or before p − W (llama.cpp's

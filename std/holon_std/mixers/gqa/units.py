@@ -68,6 +68,10 @@ class GQA(nn.Module):
     segment per layer — [layers, units, 2 (k/v), kv_heads, page, head_dim] (HND, the layout every selected
     attention kernel must read) — so each layer's slice is contiguous for kernels. In a model-only build (no
     state) it attends over each whole sequence with the `attention.causal@1` kernel.
+
+    `causal=False` (a row's new tokens see each other both ways) and `window` W > 0 (sliding-window attention) reach
+    every attention kernel it selects as facts (kernels.py). `write_kv` writes a step's keys and values without
+    attending (a drafter's context).
     """
 
     @staticmethod
@@ -85,12 +89,19 @@ class GQA(nn.Module):
         return [StateSpec("kv", "paged@1", Paged(per_layer * len(layers), page), layers, layout,
                           segments=len(layers))]
 
+    @staticmethod
+    def masks(params: dict) -> dict:
+        """The `causal` / `window` knobs as attention facts, given only when not default (kernels.py): every attention
+        op this mixer selects gets them, so a provider that cannot mask so is never chosen — the build fails instead of
+        attending unwindowed."""
+        return {k: params[k] for k, default in (("causal", True), ("window", 0)) if params.get(k, default) != default}
+
     @classmethod
     def planner(cls, params: dict, specs: list[StateSpec], ctx) -> Planner:
         dtype, layout = str(ctx.dtype).removeprefix("torch."), specs[0].layout
         facts = {"heads": params["heads"], "kv_heads": params["kv_heads"], "head_dim": params["head_dim"],
                  "page": specs[0].shape.tokens_per_unit, "q_dtype": dtype, "kv_dtype": kernels.kv_dtype(layout, dtype),
-                 "layout": layout, "max_seqs": ctx.options["max_seqs"]}
+                 "layout": layout, "max_seqs": ctx.options["max_seqs"]} | cls.masks(params)
         if ctx.options.get("planner.device_lens"):   # lengths only on the device (drafter sub-steps): verify kernel
             verify = ctx.select_kernel(kernels.VERIFY, site=specs[0].group, **facts).impl(ctx, **facts)
             return Planner(verify, verify, verify, needs_host_lens=False)
@@ -100,7 +111,7 @@ class GQA(nn.Module):
         return Planner(*(spec.impl(ctx, **facts) for spec in chosen), needs_host_lens="needs_host_lens" in decode_props)
 
     def __init__(self, ctx, *, layer: int, hidden: int, heads: int, kv_heads: int, head_dim: int, rope: Ref,
-                 qk_norm: Ref | None = None, output_gate: str = "none") -> None:
+                 qk_norm: Ref | None = None, output_gate: str = "none", causal: bool = True, window: int = 0) -> None:
         super().__init__()
         if output_gate not in ("none", "sigmoid"):
             raise ValueError(f"output_gate {output_gate!r}: expected 'none' or 'sigmoid'")
@@ -127,7 +138,7 @@ class GQA(nn.Module):
                 ctx, **facts)
         if bound is None:
             facts = {"heads": heads, "kv_heads": kv_heads, "head_dim": head_dim,
-                     "dtype": str(ctx.dtype).removeprefix("torch.")}
+                     "dtype": str(ctx.dtype).removeprefix("torch.")} | self.masks({"causal": causal, "window": window})
             self._causal = ctx.select_kernel(kernels.CAUSAL, site=f"std.mixers.gqa[layer={layer}]", **facts).impl(
                 ctx, **facts)
 
@@ -154,8 +165,8 @@ class GQA(nn.Module):
         q, gate = q.reshape(t, self.heads, 2 * self.head_dim).chunk(2, dim=-1)
         return q.contiguous(), gate                              # the norm and rope kernels take dense rows
 
-    def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
-        dev = ctx.batch.dev
+    def _project(self, x: torch.Tensor, ctx) -> tuple[torch.Tensor, ...]:
+        """q, the output gate (or None), k and v of `x`, normed and rotated at the step's positions."""
         t = x.shape[0]
         if self._qkv is not None:
             q, k, v = self._qkv(x).split(
@@ -171,9 +182,21 @@ class GQA(nn.Module):
         v = v.reshape(t, self.kv_heads, self.head_dim)
         if self.q_norm is not None:
             q, k = self.q_norm(q), self.k_norm(k)
-        q, k = self.rope(q, k, dev.positions)
+        q, k = self.rope(q, k, ctx.batch.dev.positions)
+        return q, gate, k, v
+
+    def write_kv(self, x: torch.Tensor, ctx) -> None:
+        """Write the keys and values of `x` at the step's positions without attending: a drafter's context from
+        another model's features (engine builds)."""
+        _, _, k, v = self._project(x, ctx)
+        meta = ctx.meta("kv")
+        self._write(k, v, self._kv_layer(), meta.write_unit, meta.write_off)
+
+    def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
+        t = x.shape[0]
+        q, gate, k, v = self._project(x, ctx)
         if self._kv is None:
-            o = self._causal(q, k, v, dev.query_start)
+            o = self._causal(q, k, v, ctx.batch.dev.query_start)
         else:
             meta, kv = ctx.meta("kv"), self._kv_layer()
             self._write(k, v, kv, meta.write_unit, meta.write_off)

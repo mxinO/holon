@@ -29,7 +29,7 @@ class Decode:
                  layout: str, max_seqs: int, causal: bool = True, window: int = 0) -> None:
         fp = ctx.fingerprint
         self.kv_heads, self.num_sms = kv_heads, fp.num_sms
-        self.causal, self.window = causal, window          # verify's facts (decode is never given them)
+        self.causal, self.window = causal, window          # the mask facts (one decode row sees all n either way)
         self.cfg = Config.pinned(fp.gpu, fp.sm, head_dim)
         self.rows = torch.zeros(max_seqs, dtype=torch.int32, device=ctx.device)
         self.lens = torch.zeros(max_seqs, dtype=torch.int32, device=ctx.device)
@@ -82,11 +82,12 @@ class Prefill:
 KV_DTYPE = {"kv.hnd": None, "kv.hnd.fp8": "float8_e4m3fn", "kv.hnd.q8_0": "q8_0"}
 
 
-def _supports(layout: str):
+def _supports(layout: str, masks: bool = True):
+    """`masks`: the kernel implements the `causal` / `window` facts (decode and verify; the prefill does not)."""
     def supports(f: dict) -> bool:
         return (f["layout"] == layout and f["kv_dtype"] == (KV_DTYPE[layout] or f["q_dtype"])
                 and f["q_dtype"] in ("bfloat16", "float16") and f["head_dim"] in (64, 128, 256)
-                and f["heads"] % f["kv_heads"] == 0)
+                and f["heads"] % f["kv_heads"] == 0 and (masks or not {"causal", "window"} & f.keys()))
     return supports
 
 
@@ -140,5 +141,6 @@ class Plugin:
                 ("attention.paged_prefill", Prefill, "kv.hnd.q8_0", anywhere)):
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="kernels.triton_attn", impl=impl, in_layouts={"kv": layout}, requires=requires,
-                supports=_supports(layout), props=props if impl is not Prefill else frozenset({"deterministic"}),
+                supports=_supports(layout, impl is not Prefill),
+                props=props if impl is not Prefill else frozenset({"deterministic"}),
                 priority=10))

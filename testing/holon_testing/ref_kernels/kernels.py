@@ -45,7 +45,7 @@ class SiluMul:
 
 
 class PagedAttention:
-    """`attention.paged_prefill/decode/verify@1` (any dtype; verify's `causal` and `window` facts too)."""
+    """`attention.paged_prefill/decode/verify@1` (any dtype; the `causal` and `window` facts too)."""
 
     def __init__(self, ctx, *, causal: bool = True, window: int = 0, **facts) -> None:
         self.causal, self.window = causal, window
@@ -66,11 +66,11 @@ class KvWrite:
 
 
 class CausalAttention:
-    def __init__(self, ctx, **facts) -> None:
-        pass
+    def __init__(self, ctx, *, causal: bool = True, window: int = 0, **facts) -> None:
+        self.causal, self.window = causal, window
 
     def __call__(self, q, k, v, query_start):
-        return gqa.causal_attention(q, k, v, query_start)
+        return gqa.causal_attention(q, k, v, query_start, self.causal, self.window)
 
 
 class _Dequantized:

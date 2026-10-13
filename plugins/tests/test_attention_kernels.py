@@ -81,9 +81,11 @@ MASKS = [{}, {"causal": False}, {"window": 16}, {"causal": False, "window": 16},
 
 @pytest.mark.parametrize("masks", MASKS, ids=lambda m: "-".join(f"{k}={v}" for k, v in m.items()) or "default")
 @pytest.mark.parametrize("geometry", GEOMETRIES)
-def test_verify_masks_match_oracle(geometry, masks):
-    q, kv, batch, pages = _case(BLOCK_ROWS, *geometry)
-    kernel = _kernel("attention.paged_verify", "kernels.triton_attn", *geometry, **masks)
+@pytest.mark.parametrize(("op", "rows"), [("attention.paged_verify", BLOCK_ROWS),
+                                          ("attention.paged_decode", DECODE_ROWS)], ids=["verify", "decode"])
+def test_masks_match_oracle(op, rows, geometry, masks):
+    q, kv, batch, pages = _case(rows, *geometry)
+    kernel = _kernel(op, "kernels.triton_attn", *geometry, **masks)
     ours, ref = _run(kernel, q, kv, batch, pages), _run(PagedAttention(None, **masks), q, kv, batch, pages)
     torch.testing.assert_close(ours.float(), ref.float(), atol=1e-2, rtol=1e-2)
     assert torch.equal(ours, _run(kernel, q, kv, batch, pages))
@@ -128,6 +130,20 @@ def test_selection_prefers_fast_kernels_and_never_falls_back_to_a_reference():
     cpu = BuildContext(PluginSet(discover()), torch.device("cpu"))         # the test-only references serve the CPU
     assert cpu.select_kernel("attention.paged_prefill@1", site="t", **facts).provider == "testing.ref_kernels"
     assert "kernels.flashinfer" not in cpu.plugins._loaded      # unavailable plugins are never imported
+
+
+@pytest.mark.parametrize("layout", ["kv.hnd", "kv.hnd.q8_0"])
+def test_masks_select_only_kernels_that_implement_them(layout):
+    # A sliding-window or non-causal site never runs on a kernel that would ignore its facts: no prefill implements
+    # them on the GPU yet (the build fails), Triton's decode and verify do.
+    facts = {"heads": 32, "kv_heads": 8, "head_dim": 128, "page": PAGE, "q_dtype": "bfloat16",
+             "kv_dtype": kv_dtype(layout, "bfloat16"), "layout": layout, "max_seqs": MAX_SEQS}
+    ctx = BuildContext(PluginSet(discover()), torch.device("cuda"))
+    for masks in ({"window": 16}, {"causal": False}):
+        with pytest.raises(PluginError, match="no kernel for attention.paged_prefill@1"):
+            ctx.select_kernel("attention.paged_prefill@1", site="t", **facts, **masks)
+        for op in ("attention.paged_decode@1", "attention.paged_verify@1"):
+            assert ctx.select_kernel(op, site="t", **facts, **masks).provider == "kernels.triton_attn"
 
 
 @pytest.mark.parametrize("op", ["attention.paged_prefill", "attention.paged_decode"])
