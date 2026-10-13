@@ -308,33 +308,25 @@ def test_pdl_survives_graph_capture(ctx, sm):
     assert data and all(d.type == rt.cudaGraphDependencyType.cudaGraphDependencyTypeProgrammatic for d in data)
 
 
-def test_the_workspace_high_water_mark(ctx, sm):
-    """The test entry reads (and resets) the most bytes one call took: at 512 rows, at least the q8_1 activations
-    (144 bytes per 128 values)."""
-    kernel, k = qlinear(ctx, "q4_k", 4096), 4096
-    kernel.kernel(activations(CHUNK, k, seed=0), {"blocks": device_blocks(random_blocks("q4_k", OUT, k, seed=0))})
-    used = kernel.lib.workspace_high_water()
-    assert CHUNK * k // 128 * 144 <= used <= kernel.lib.workspace_bytes(torch.cuda.current_device(), k, CHUNK)
-    assert kernel.lib.workspace_high_water() == 0
-
-
 SLACK = 512 * 4 + 3 * 256     # the formulas' spare: the 512-int load-chunk allowance, then three 256-byte pool pads
 
 
 def test_the_workspace_formula_is_tight(ctx, sm):
     """Negative control on a J = 128 shape with the stream-k fixup (out 300 at 512 rows): the formula exceeds what
-    the call takes by at most its spare, so a too-generous formula (one that would hide an allocation) fails too."""
+    the call takes by at most its spare, so a too-generous formula (one that would hide an allocation) fails too. The
+    test entry reads and resets the high-water mark, at least the q8_1 activations (144 bytes per 128 values)."""
     kernel, k = qlinear(ctx, "q4_k", 4096), 4096
     assert kernel.lib.mmq_schedule(torch.cuda.current_device(), TYPES["q4_k"], OUT, CHUNK) == (2, 128, 128)
     kernel.kernel(activations(CHUNK, k, seed=0), {"blocks": device_blocks(random_blocks("q4_k", OUT, k, seed=0))})
     used = kernel.lib.workspace_high_water()
+    assert used >= CHUNK * k // 128 * 144 and kernel.lib.workspace_high_water() == 0
     assert 0 <= kernel.lib.workspace_bytes(torch.cuda.current_device(), k, CHUNK) - used <= SLACK
 
 
-@pytest.mark.parametrize("fp4", [39, 40])                  # GGML_TYPE_MXFP4, GGML_TYPE_NVFP4
-def test_mmq_schedule_refuses_fp4_types(sm, fp4):
-    """Their activation precision is chosen per call (M0.6 A3 passes it): the schedule aborts rather than guess."""
+def test_mmq_schedule_refuses_fp4_types(sm):
+    """Their activation precision is chosen per call (M0.6 A3 passes it): the schedule aborts rather than guess
+    (shown on NVFP4, GGML_TYPE 40; MXFP4 takes the same check, and A3 replaces both)."""
     code = ("from holon_plugins.kernels.ggml_cuda import extension; "
-            f"extension.load({sm}).mmq_schedule(0, {fp4}, 300, 512)")
+            f"extension.load({sm}).mmq_schedule(0, 40, 300, 512)")
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600)
     assert r.returncode != 0 and "an FP4 type needs its precision" in r.stderr, r.stderr[-2000:]

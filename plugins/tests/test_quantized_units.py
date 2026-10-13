@@ -89,40 +89,30 @@ def test_a_tied_head_prepares_its_own_copy_of_the_embedding_parts():
     torch.testing.assert_close(head(h), h @ _weight(q).T)
 
 
-@pytest.mark.parametrize("second, merges", [
-    (dict(scale2=0.5), True),                       # rows concatenate (scale: one per G rows), scale2 equal
-    (dict(scale2=0.25), False),                     # scale2 differs: the units stay apart
-    (dict(rows_per_scale=1), False),                # its scale rows are not out / G: neither rows nor equal
-])
-def test_linears_merge_parts_by_shape(second, merges):
+@pytest.mark.parametrize("second, shape2, merges", [
+    (dict(scale2=0.5), (), True),                   # rows concatenate (scale: one per G rows), scale2 equal
+    (dict(scale2=0.25), (), False),                 # scale2 differs: the units stay apart
+    (dict(rows_per_scale=1), (), False),            # its scale rows are not out / G: neither rows nor equal
+    # equal outs, where a [1] scale2 would also read as one row per unit: it is per tensor, kept once
+    (dict(scale2=0.5, out=4), (1,), True),
+    (dict(scale2=0.25, out=4), (1,), False)])
+def test_linears_merge_parts_by_shape(second, shape2, merges):
     ctx = _ctx()
-    qs = [_toy(4, H, seed=2), _toy(2, H, seed=3, **second), _toy(2, H, seed=4)]
+    second = dict(second)
+    out = second.pop("out", 2)
+    qs = [_toy(4, H, seed=2, shape2=shape2), _toy(out, H, seed=3, shape2=shape2, **second),
+          _toy(out, H, seed=4, shape2=shape2)]
     units = [_linear(ctx, q) for q in qs]
     merged = type(units[0]).merge(*units)
     if not merges:
         assert merged is None and all(u.weight is not None for u in units)
         return
-    assert {r: tuple(t.shape) for r, t in merged.parts.items()} == {"q": (8, H), "scale": (4,), "scale2": ()}
+    rows = 4 + 2 * out
+    assert {r: tuple(t.shape) for r, t in merged.parts.items()} == {"q": (rows, H), "scale": (rows // G,),
+                                                                    "scale2": shape2}
     assert all(u.weight is None and u.parts is None for u in units)
     merged.bind_kernels(ctx)
     x = _x(3, seed=2)
-    torch.testing.assert_close(merged(x), torch.cat([x @ _weight(q).T for q in qs], dim=-1))
-
-
-@pytest.mark.parametrize("scale2", [0.25, 0.5])
-def test_a_one_element_part_is_per_tensor_in_a_merge(scale2):
-    """Two units of equal `out` with a [1] per-tensor scale: equal, kept once; unequal, the units stay apart (never
-    concatenated as if it were one row per unit)."""
-    ctx = _ctx()
-    qs = [_toy(4, H, seed=6, shape2=(1,)), _toy(4, H, seed=7, scale2=scale2, shape2=(1,))]
-    units = [_linear(ctx, q) for q in qs]
-    merged = type(units[0]).merge(*units)
-    if scale2 != 0.5:
-        assert merged is None
-        return
-    assert tuple(merged.parts["scale2"].shape) == (1,)
-    merged.bind_kernels(ctx)
-    x = _x(3, seed=4)
     torch.testing.assert_close(merged(x), torch.cat([x @ _weight(q).T for q in qs], dim=-1))
 
 
@@ -205,12 +195,10 @@ def _stacks(ctx, slice_of):
 
 
 def test_expert_block_scales_of_one_block_merge_per_expert():
-    """[E, 1, 1] is one block row per expert: gate/up concatenate it per expert, [E, 2, 1], not [2, E]."""
+    """[E, 1, 1] is one block row per expert: gate/up concatenate it per expert, [E, 2, 1], not [2, E]; a part with
+    an empty dimension does not merge."""
     unit = _stacks(_ctx(), lambda seed: _block_scaled(128, 128, seed))
     merged = type(unit.gate).merge(unit.gate, unit.up)
     assert tuple(merged.parts["scale"].shape) == (E, 2, 1) and tuple(merged.parts["q"].shape) == (E, 256, 128)
-
-
-def test_an_expert_part_with_an_empty_dimension_does_not_merge():
     unit = _stacks(_ctx(), lambda seed: _block_scaled(128, 128, seed, empty=torch.zeros(0)))
     assert type(unit.gate).merge(unit.gate, unit.up) is None
