@@ -76,6 +76,29 @@ def test_an_aux_model_writes_its_own_state_like_the_layer_it_copies(tiny_checkpo
     assert engine.state.tokens_saved > 0 and (memory == 1 << 20 or engine.sched.preemptions > 0)
 
 
+@pytest.mark.parametrize("options", [{"aux.write_kv": True}, {"aux.device_lens": True}],
+                         ids=["write_kv", "device_lens"])
+def test_aux_model_options_and_context_writes(tiny_checkpoint, tiny_case, options):  # noqa: F811
+    # `write_kv`: the attention writes the step's keys and values without attending — what a drafter does with another
+    # model's features — and they are the target layer's. `BuildCtx.aux_model(..., options)`: an aux model built with
+    # `planner.device_lens` plans every step through its verify-class kernel (M0.4 D4: DFlash's).
+    prompts, expected = tiny_case
+    _oracle(prompts, expected, ahead=True)
+    engine = _engine(tiny_checkpoint, plugin_options=options)
+    planner = engine.executor.planners["aux.kv"]
+    assert (planner.prefill is planner.verify) == ("aux.device_lens" in options)
+    rids = [engine.add(p, GREEDY) for p in prompts]
+    out = {r: [] for r in rids}
+    while engine.has_work():
+        for d in engine.step():
+            out[d.rid] += d.token_ids
+        for seq in engine.sched.running:
+            held = engine.state.held[seq.slot]
+            assert torch.equal(_kv(engine, "state.aux.kv", 0, held["aux.kv"], seq.num_computed),
+                               _kv(engine, "state.kv", 0, held["kv"], seq.num_computed))
+    assert [out[r] for r in rids] == expected
+
+
 @pytest.fixture(scope="module")
 def tiny_gdn(tmp_path_factory):
     path = save(tiny_hf(4, seed=1), tmp_path_factory.mktemp("tiny_qwen3_5_aux"))

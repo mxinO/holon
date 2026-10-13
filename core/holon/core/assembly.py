@@ -25,10 +25,15 @@ from .state import BoundSpec
 
 def resolve_model(plugins: PluginSet, cfg: Any) -> tuple[Any, Any]:
     """The checkpoint's weight source and the model plugin that provides its architecture (`cfg`: EngineConfig)."""
-    kind = cfg.source or detect_source(plugins, cfg.model)
-    plugins.load(plugins.owner(f"weight_source.{kind}")[0])
-    source = plugins.regs.weight_sources.get(kind)(cfg.model)
+    source = open_source(plugins, cfg.model, cfg.source)
     return source, plugins.load(plugins.owner(f"arch.{source.arch}")[0])
+
+
+def open_source(plugins: PluginSet, path: str, kind: str | None = None) -> Any:
+    """The weight source of `kind` (default: the one whose manifest recognises `path`) reading `path`."""
+    kind = kind or detect_source(plugins, path)
+    plugins.load(plugins.owner(f"weight_source.{kind}")[0])
+    return plugins.regs.weight_sources.get(kind)(path)
 
 
 def detect_source(plugins: PluginSet, model: str) -> str:
@@ -73,10 +78,10 @@ class AuxModels:
         self.modules: list[tuple[str, nn.Module]] = []      # (namespace, module)
         self._layers: list[tuple[str, tuple]] = []
 
-    def build(self, namespace: str, spec: AuxSpec, tensors: Any) -> nn.Module:
+    def build(self, namespace: str, spec: AuxSpec, tensors: Any, options: dict[str, Any] | None = None) -> nn.Module:
         if any(namespace == ns for ns, _ in self.modules):
             raise PluginError(f"aux model {namespace!r} built twice")
-        child = self.ctx.child(namespace)
+        child = self.ctx.child(namespace, options)
         bound, planners = _bind_layers(spec.layers, child, self.plugins, self.ledger, self.cfg, namespace)
         self.bound += bound
         self.planners |= planners
@@ -84,7 +89,7 @@ class AuxModels:
             module = child.unit(spec.unit, layers=spec.layers)
         load_weights(module.eval(), child, tensors, spec.weights)
         self.modules.append((namespace, module))
-        self._layers.append((namespace, spec.layers))
+        self._layers.append((namespace, spec.layers, options or {}))
         return module
 
     def sub_planners(self, n: int) -> dict[str, list[Any]]:
@@ -94,8 +99,8 @@ class AuxModels:
         if n and (recurrent := [b.spec.name for b in self.bound if not isinstance(b.spec.shape, Paged)]):
             raise PluginError(f"{recurrent}: drafter sub-steps over per-request (recurrent) aux state are not "
                               "supported — a sub-step would advance it past the committed tokens")
-        for namespace, layers in self._layers:
-            child = self.ctx.child(namespace, {"planner.device_lens": True})
+        for namespace, layers, options in self._layers:
+            child = self.ctx.child(namespace, options | {"planner.device_lens": True})
             for _ in range(n):
                 for group, planner in _bind_layers(layers, child, self.plugins, self.ledger, self.cfg, namespace,
                                                    plan_only=True)[1].items():

@@ -110,11 +110,15 @@ class BuildCtx(Protocol):
         """A plugin's own pool of units, sized by the ledger with the fixed pools (design §6.1): `pref_units` when
         the budget allows, else `min_units`."""
 
-    def aux_model(self, namespace: str, spec: AuxSpec, tensors: Iterable[tuple[str, torch.Tensor | QTensor]]
-                  ) -> torch.nn.Module:
+    def aux_model(self, namespace: str, spec: AuxSpec, tensors: Iterable[tuple[str, torch.Tensor | QTensor]],
+                  options: Mapping[str, Any] | None = None) -> torch.nn.Module:
         """Build, state-bind and load an auxiliary model (engine builds only). Its units see a child context in which
-        state names and planner groups are `<namespace>.<name>`; at step time `StepCtx.view(namespace)` gives them the
-        same mapping."""
+        state names and planner groups are `<namespace>.<name>` and `options` add to the deployment's (e.g.
+        `planner.device_lens` for a model that only ever runs as sub-steps); at step time `StepCtx.view(namespace)`
+        gives them the same mapping."""
+
+    def weight_source(self, path: str) -> WeightSource:
+        """The checkpoint at `path` (a drafter's own), read by the weight-source plugin whose manifest recognises it."""
 
     def tap(self, layer: int, consume: Callable[[torch.Tensor, StepCtx], None]) -> None:
         """Have the target's trunk call `consume(h, ctx)` every step with its residual stream after layer `layer` (h

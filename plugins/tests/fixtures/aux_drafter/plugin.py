@@ -26,7 +26,8 @@ class Drafter:
     """Runs the target's layer 0, loaded a second time as the aux model "aux", over every step's tokens: its KV (state
     `aux.kv`, its own pages) must equal the target's layer-0 KV at every computed position. With ORACLE.ahead it also
     drafts the oracle's tokens and writes their aux KV ahead, one sub-step per draft (positions num_computed + i),
-    the way a chained draft head does."""
+    the way a chained draft head does. Plugin options: `aux.write_kv` — the step's tokens only write their KV (the
+    attention's `write_kv`, no attention); `aux.device_lens` — the aux model is built with `planner.device_lens`."""
 
     def __init__(self, ctx, target) -> None:
         w = target.spec.weights
@@ -34,7 +35,10 @@ class Drafter:
         spec = AuxSpec(Ref("tests.aux_head@1", hidden=target.spec.hidden, block=target.spec.block,
                            norm=target.spec.norm),
                        target.spec.layers[:1], WeightMap(w.source, w.rules, w.root, only=(layer0,)))
-        self.aux = ctx.aux_model("aux", spec, target.tensors())
+        options = ctx.options.get("plugins", {})
+        self.write_only = bool(options.get("aux.write_kv"))
+        self.aux = ctx.aux_model("aux", spec, target.tensors(),
+                                 {"planner.device_lens": True} if options.get("aux.device_lens") else None)
         self.embed = target.shared("embed")
         self.oracle = OracleDrafter(ctx.options["max_seqs"] + 1, ctx.options["max_model_len"])
 
@@ -48,8 +52,12 @@ class Drafter:
         self.oracle.rewind(ctx)
 
     def run(self, ctx, h) -> None:
-        aux = ctx.view("aux")
-        self.aux.layers[0](self.embed(ctx.batch.dev.input_ids), aux)
+        aux, layer = ctx.view("aux"), self.aux.layers[0]
+        x = self.embed(ctx.batch.dev.input_ids)
+        if self.write_only:
+            layer.mixer.write_kv(layer.input_norm(x), aux)
+        else:
+            layer(x, aux)
         if (ctx.batch.plan.n_logits > 1).any():          # a verify step: roll the aux model back as the core did
             rewind_modules(self.aux, aux)                # the target (its recurrent layers keep only accepted tokens)
         if not ORACLE.ahead:

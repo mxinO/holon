@@ -120,10 +120,16 @@ class BuildContext:
     def state(self, spec_name: str, layer: int) -> tuple[Any, Any] | None:
         return self.states.get((spec_name, layer))
 
-    def aux_model(self, namespace: str, spec: Any, tensors: Iterable[tuple[str, torch.Tensor | QTensor]]) -> nn.Module:
+    def aux_model(self, namespace: str, spec: Any, tensors: Iterable[tuple[str, torch.Tensor | QTensor]],
+                  options: dict[str, Any] | None = None) -> nn.Module:
         if self.aux is None:
             raise PluginError(f"aux model {namespace!r}: a model-only build has no engine state")
-        return self.aux.build(namespace, spec, tensors)
+        return self.aux.build(namespace, spec, tensors, options)
+
+    def weight_source(self, path: str) -> Any:
+        from .assembly import open_source
+
+        return open_source(self.plugins, path)
 
     def tap(self, layer: int, consume: Any) -> None:
         self.taps.setdefault(layer, []).append(consume)
