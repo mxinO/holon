@@ -55,7 +55,12 @@ class LogitsProcessor(Protocol):
 
 
 class Sampler(Protocol):
-    """One per engine, holding per-slot parameters (device rows once sampling is graph-captured)."""
+    """One per engine, holding per-slot parameters (device rows once sampling is graph-captured).
+
+    `distribution` and `uniform` serve any StepCtx — a step, an aux view, a drafter's sub-step — one row per entry of
+    its `batch.dev.logits_rows`, and `distribution` any last-dim width (a drafter's candidate scores as well as the
+    vocabulary). Uniform streams: 0 is the sampler's own draw, 1–2 the verifiers' coins, 8 and up a drafter's (a draft
+    drawn on a verifier's coins is no longer independent of them, and verification stops being lossless)."""
 
     def admit(self, slot: int, params: SamplingParams) -> None:
         """A request now owns `slot`."""
