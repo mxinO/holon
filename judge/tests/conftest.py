@@ -29,3 +29,15 @@ def tiny_prompts(tmp_path_factory) -> PromptSet:
     path = tmp_path_factory.mktemp("prompts") / "tiny.jsonl"
     path.write_text("".join(json.dumps(r) + "\n" for r in rows))
     return PromptSet.load(path)
+
+
+@pytest.fixture(scope="session")
+def tiny_qwen3_5_gguf(tmp_path_factory) -> tuple[pathlib.Path, pathlib.Path]:
+    """A tiny Qwen3.5 checkpoint with an MTP block (bf16 values: the converter's f32 w + 1 undoes exactly) and its GGUF
+    by llama.cpp's own converter (f32): (checkpoint directory, .gguf). Converted once per session."""
+    from holon_testing.qwen3_5_files import can_convert, convert, save, tiny_hf
+
+    if not can_convert():
+        pytest.skip("needs llama.cpp's converter and the Qwen3.8 tokenizer")
+    path = save(tiny_hf(6, vocab=248320).to(torch.bfloat16), tmp_path_factory.mktemp("tiny_qwen3_5"), mtp=True)
+    return path, convert(path)

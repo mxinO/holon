@@ -9,7 +9,7 @@ from holon.core.engine import Engine, EngineConfig
 from holon_judge import drafter
 from holon_judge.compare import compare_drafter
 from holon_judge.recording import Prompt, PromptSet
-from holon_testing.qwen3_5_files import can_convert, convert, save, tiny_hf
+from holon_testing.qwen3_5_files import save, tiny_hf
 
 
 @pytest.fixture(scope="module")
@@ -70,14 +70,13 @@ def test_dflash_passes_and_its_tap_offset_fails(case, tmp_path):
         assert judged().passed is False
 
 
-@pytest.mark.skipif(not can_convert(), reason="needs llama.cpp's converter and the Qwen3.8 tokenizer")
-def test_a_gguf_mtp_chain_passes_and_its_swapped_concat_fails(tmp_path, monkeypatch):
+def test_a_gguf_mtp_chain_passes_and_its_swapped_concat_fails(tiny_qwen3_5_gguf, monkeypatch):
     # The head stored in a GGUF (llama.cpp's converter, f32), judged per cut with its chain of 3 drafts: steps 2 and
     # 3 teacher-forced with the candidate's drafts. The concat halves swapped fail.
     import gguf
     from holon_std.spec.mtp_head import units
 
-    path = convert(save(tiny_hf(4, seed=1, vocab=248320), tmp_path, mtp=True))
+    _, path = tiny_qwen3_5_gguf
     g = torch.Generator().manual_seed(9)
     cuts = drafter.cut_prompts(PromptSet("tiny", "0", [Prompt(str(i), "x", torch.randint(0, 320, (n,), generator=g)
                                                               .tolist()) for i, n in enumerate((40, 70))]), 3, 4)

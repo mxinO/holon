@@ -8,16 +8,14 @@ import transformers
 from holon_judge import gguf as judge_gguf
 from holon_judge import golden
 from holon_judge.compare import compare
-from holon_testing.qwen3_5_files import can_convert, convert, save, tiny_hf
+from holon_testing.qwen3_5_files import can_convert
 
 pytestmark = pytest.mark.skipif(not can_convert(), reason="needs llama.cpp's converter and the Qwen3.8 tokenizer")
 
 
 @pytest.fixture(scope="module")
-def converted(tmp_path_factory):
-    model = tiny_hf(6, vocab=248320).to(torch.bfloat16)
-    path = save(model, tmp_path_factory.mktemp("tiny_qwen3_5"), mtp=True)
-    return path, convert(path)
+def converted(tiny_qwen3_5_gguf):
+    return tiny_qwen3_5_gguf
 
 
 def test_the_judge_undoes_the_conversion_exactly(converted):

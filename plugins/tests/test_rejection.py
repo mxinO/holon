@@ -34,6 +34,7 @@ from holon_std.spec.rejection import verifier as rejection
 from scipy import stats
 
 N, V, K = 100_000, 16, 3
+PLANT_N = 10_000          # plants move the law far beyond the noise: 10⁴ draws show them
 
 
 def _chi2(counts: np.ndarray, probs: np.ndarray) -> float:
@@ -67,11 +68,18 @@ def _step(sampler, logits, drafts, positions, verify=rejection.verify, n_draft=K
     return out.tokens.view(n, width), n_accept
 
 
-def _sampler(params: SamplingParams) -> Sampler:
-    sampler = Sampler(N, torch.device("cpu"))
-    for slot in range(N):
-        sampler.admit(slot, dataclasses.replace(params, seed=1000 + slot))
-    return sampler
+SAMPLERS: dict[tuple, Sampler] = {}
+
+
+def _sampler(params: SamplingParams, n: int = N) -> Sampler:
+    """`n` slots of `params`, seeded 1000 + slot: one per (sampler class, params, n) in the module — a sampler holds no
+    state between steps, and admitting 10⁵ slots takes seconds."""
+    key = (Sampler, repr(params), n)
+    if key not in SAMPLERS:
+        SAMPLERS[key] = Sampler(n, torch.device("cpu"))
+        for slot in range(n):
+            SAMPLERS[key].admit(slot, dataclasses.replace(params, seed=1000 + slot))
+    return SAMPLERS[key]
 
 
 @pytest.fixture(scope="module")
@@ -106,14 +114,14 @@ def test_first_token_has_the_target_law(target, case):
     assert (n_accept <= K).all()
 
 
-def _markov_sequences(target, verify, drafter=None) -> np.ndarray:
-    """The first three tokens of N sequences, speculating k = 3 with drafts (prev + 1) mod V, or what
+def _markov_sequences(target, verify, drafter=None, n: int = N) -> np.ndarray:
+    """The first three tokens of n sequences, speculating k = 3 with drafts (prev + 1) mod V, or what
     `drafter(prev, positions)` samples (drafts, laws)."""
     _, trans = target
-    sampler = _sampler(SamplingParams(temperature=1.0))
-    prev = torch.zeros(N, dtype=torch.long)                  # context token 0
-    out = torch.full((N, 3), -1)
-    filled = torch.zeros(N, dtype=torch.long)
+    sampler = _sampler(SamplingParams(temperature=1.0), n)
+    prev = torch.zeros(n, dtype=torch.long)                  # context token 0
+    out = torch.full((n, 3), -1)
+    filled = torch.zeros(n, dtype=torch.long)
     while (filled < 3).any():
         # d1 = prev + 1, d2 = d1 + 1, … unless a drafter samples them
         drafts, laws = drafter(prev, 10 + filled) if drafter else ((prev[:, None] + 1 + torch.arange(K)) % V, None)
@@ -143,7 +151,7 @@ def test_three_tokens_have_the_markov_law(target):
 def test_plants_fail(target, monkeypatch):
     # The residual keeping the draft: the first token's law moves.
     logits, _ = target
-    sampler = _sampler(SamplingParams(temperature=1.0))
+    sampler = _sampler(SamplingParams(temperature=1.0), PLANT_N)
     original_scatter = torch.Tensor.scatter_
 
     def no_removal(self, dim, index, value):
@@ -151,7 +159,8 @@ def test_plants_fail(target, monkeypatch):
 
     monkeypatch.setattr(torch.Tensor, "scatter_", no_removal)
     d = int(torch.softmax(logits, -1).argmax())
-    tokens, _ = _step(sampler, logits.expand(N, K + 1, V), torch.full((N, K), d), torch.full((N,), 10))
+    tokens, _ = _step(sampler, logits.expand(PLANT_N, K + 1, V), torch.full((PLANT_N, K), d),
+                      torch.full((PLANT_N,), 10))
     monkeypatch.undo()
     assert _chi2(np.bincount(tokens[:, 0].numpy(), minlength=V), torch.softmax(logits, -1).numpy()) < 1e-3
 
@@ -163,7 +172,7 @@ def test_plants_fail(target, monkeypatch):
             return u.view(-1, K + 1)[:, :1].expand(-1, K + 1).reshape(-1) if stream == 1 else u
 
     monkeypatch.setattr("tests.test_rejection.Sampler", OneCoin)
-    seqs = _markov_sequences(target, rejection.verify)
+    seqs = _markov_sequences(target, rejection.verify, n=PLANT_N)
     counts = np.bincount((seqs[:, 0] * V + seqs[:, 1]) * V + seqs[:, 2], minlength=V ** 3)
     assert _chi2(counts, _markov_law(target)) < 1e-3
 
@@ -258,7 +267,7 @@ def test_first_token_has_the_target_law_with_sampled_drafts(target, case):
     assert (n_accept <= K).all() and (case != "equal" or (n_accept == K).all())
 
 
-def _markov_drafter(target, stream: int):
+def _markov_drafter(target, stream: int, n: int = N):
     """Samples each draft from a Kq = 4 law given the previous token — the target's four likeliest successors, flatter
     than the target (its logits at temperature 2), so drafts are often accepted and the residual still has mass — with
     the request's counter-based uniform on `stream` at the draft's position, as a drafter drawing through
@@ -266,7 +275,7 @@ def _markov_drafter(target, stream: int):
     _, trans = target
     top = trans.topk(4, -1)
     ids_of, q_of = top.indices, torch.softmax(top.values / 2, -1)            # [V, 4] per previous token
-    seeds = 1000 + torch.arange(N)                                         # `_sampler`'s
+    seeds = 1000 + torch.arange(n)                                         # `_sampler`'s
 
     def draft(prev, start):
         drafts, ids, qs = [], [], []
@@ -282,28 +291,29 @@ def _markov_drafter(target, stream: int):
 def test_three_tokens_have_the_markov_law_with_sampled_drafts(target, stream):
     # A drafter sampling each draft from its law on a uniform stream of its own (8 and up, api.decoding.Sampler): the
     # joint law holds. On the verifier's coins (stream 1) a draft is correlated with its own acceptance: it moves.
-    seqs = _markov_sequences(target, rejection.verify, _markov_drafter(target, stream=stream))
+    n = N if stream == 8 else PLANT_N
+    seqs = _markov_sequences(target, rejection.verify, _markov_drafter(target, stream, n), n)
     counts = np.bincount((seqs[:, 0] * V + seqs[:, 1]) * V + seqs[:, 2], minlength=V ** 3)
     p = _chi2(counts, _markov_law(target))
     assert p > 1e-3 if stream == 8 else p < 1e-3
 
 
-def _stale(target, n_draft: int, verify):
-    """N rows of width K + 1 on one law p, whose first `n_draft` drafts are sampled from Kq = 4 laws; past them, stale
+def _stale(target, n_draft: int, verify, n: int = N):
+    """n rows of width K + 1 on one law p, whose first `n_draft` drafts are sampled from Kq = 4 laws; past them, stale
     rows: the token p likes best, under a law that would accept it at any coin (q(t) = 0.05 ≤ p(t)). Returns the
     first emitted token, the emitted token after the real drafts (rows that accepted them all), n_accept, and p."""
     logits = target[0]
     p = torch.softmax(logits, -1)
     top = logits.topk(4)
     g = torch.Generator().manual_seed(9)
-    ids, q = top.indices.repeat(N, K, 1), torch.softmax(top.values / 2, -1).repeat(N, K, 1)
+    ids, q = top.indices.repeat(n, K, 1), torch.softmax(top.values / 2, -1).repeat(n, K, 1)
     drafts = torch.stack([_sample(ids[:, j], q[:, j], g) for j in range(K)], 1)
     t = int(p.argmax())
     drafts[:, n_draft:] = t
     ids[:, n_draft:] = (t + torch.arange(4)) % V
     q[:, n_draft:] = torch.tensor([0.05, 0.05, 0.05, 0.85])
-    sampler = _sampler(SamplingParams(temperature=1.0))
-    tokens, n_accept = _step(sampler, logits.expand(N, K + 1, V), drafts, torch.full((N,), 10), verify, n_draft,
+    sampler = _sampler(SamplingParams(temperature=1.0), n)
+    tokens, n_accept = _step(sampler, logits.expand(n, K + 1, V), drafts, torch.full((n,), 10), verify, n_draft,
                              (ids, q))
     rows = n_accept >= n_draft
     return tokens[:, 0], tokens[rows, n_draft], n_accept, p
@@ -322,14 +332,14 @@ def test_sampled_draft_plants_fail(target, monkeypatch):
 
     # Stale rows read as real drafts: accepted past n_draft, and the token after the real drafts loses its law.
     with unmasked_padding():
-        _, after, n_accept, p = _stale(target, 1, rejection.verify)
+        _, after, n_accept, p = _stale(target, 1, rejection.verify, PLANT_N)
     assert (n_accept > 1).any()
     assert _chi2(np.bincount(after.numpy(), minlength=V), p.numpy()) < 1e-3
 
     # The residual keeping q's mass (drawn from p, not max(p − q, 0)): the first token's law moves.
     sampled = rejection._sampled
     monkeypatch.setattr(rejection, "_sampled", lambda p, *a: (*sampled(p, *a)[:2], p.clone()))
-    first, _, _, p = _stale(target, K, rejection.verify)
+    first, _, _, p = _stale(target, K, rejection.verify, PLANT_N)
     assert _chi2(np.bincount(first.numpy(), minlength=V), p.numpy()) < 1e-3
 
 
