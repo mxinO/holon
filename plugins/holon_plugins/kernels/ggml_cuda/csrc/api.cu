@@ -1,7 +1,7 @@
 // The C API (ggml_cuda_api.h): llama.cpp's own entry points, called with ggml tensors built on the stack over the
 // caller's pointers, a context that borrows the caller's stream and a pool over the caller's workspace.
 //
-// The dispatch rules (dense and MUL_MAT_ID), the fused gate and the mmq schedule mirror llama.cpp 51ce9c11
+// The dispatch rules (dense and MUL_MAT_ID), the fused gate and the mmq schedule mirror llama.cpp cbe28bb3
 // (ggml/src/ggml-cuda/ggml-cuda.cu, mmq.cuh, mmq.cu), MIT License, Copyright (c) 2023-2026 The ggml authors; the
 // license is in ../vendor/LICENSE.
 #include "ggml_cuda_api.h"
@@ -114,16 +114,17 @@ int holon_ggml_use_mmq(int type, int64_t rows) { return ggml_cuda_should_use_mmq
 
 int holon_ggml_mmq_schedule(int type, int64_t out, int64_t rows, int * tile_i, int * tile_j) {
     const auto & dev = ggml_cuda_info().devices[ggml_cuda_get_device()];
-    const bool fallback = out % 128 != 0;                              // as ggml_cuda_mul_mat_q
-    int J_best = 0, ntx_best = INT_MAX;                                // as mul_mat_q_switch_J
+    const bool fallback = ggml_cuda_mmq_needs_fallback(out);          // as ggml_cuda_mul_mat_q
+    const ggml_prec prec = GGML_PREC_Q8;                               // ggml_cuda_mmq_get_prec_src1, non-FP4 types
+    int J_best = 0, ntx_best = INT_MAX;
     for (int J = 8; J <= 128 && ntx_best > 1; J += 8) {
-        const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config((ggml_type) type, J, fallback, dev.cc);
+        const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config((ggml_type) type, J, fallback, dev.cc, prec);
         if (c.type != GGML_TYPE_COUNT && mmq_get_nbytes_shared(c, dev.cc) <= dev.smpbo && (rows + J - 1)/J < ntx_best) {
             J_best = J;
             ntx_best = (rows + J - 1)/J;
         }
     }
-    const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config((ggml_type) type, J_best, fallback, dev.cc);
+    const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config((ggml_type) type, J_best, fallback, dev.cc, prec);
     *tile_i = c.I;
     *tile_j = c.J;
     if (!c.stream_k) {
@@ -137,8 +138,9 @@ int holon_ggml_mmq_schedule(int type, int64_t out, int64_t rows, int * tile_i, i
 
 size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows) {
     const int64_t in_padded = GGML_PAD(in, MATRIX_ROW_PADDING);
-    // mmq's q8_1 activations plus its tile padding (J_max <= 512 rows); mmvq's block_q8_1 need less
-    const size_t q8_1 = (rows*in_padded/QK8_1_MMQ + 512) * sizeof(block_q8_1_mmq);
+    // mmq's q8_1 activations plus its tile padding (J <= 128 rows, rounded up to a load chunk of <= 512 ints);
+    // mmvq's block_q8_1 need less
+    const size_t q8_1 = (rows*in_padded/QK8_1_MMQ + 128) * sizeof(block_q8_1_mmq) + 512*sizeof(int);
     // stream-k fixup: one partial I x J f32 tile per SM (I, J <= 128 on every config we build)
     const size_t fixup = size_t(ggml_cuda_info().devices[ggml_cuda_get_device()].nsm) * 128*128 * sizeof(float);
     return GGML_PAD(q8_1, POOL_ALIGN) + GGML_PAD(fixup, POOL_ALIGN);
@@ -188,10 +190,13 @@ int holon_ggml_use_mmvq_id(int type, int64_t tokens) {
 }
 
 size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int64_t experts) {
-    // as ggml_cuda_mul_mat_q allocates with ids: ids_src1 and ids_dst, expert_bounds, then q8_1 and the fixup as a
-    // dense call over the tokens·k (token, slot) rows; mmvq with ids needs less
-    const size_t ids = GGML_PAD(tokens*k*sizeof(int32_t), POOL_ALIGN);
-    return 2*ids + GGML_PAD((experts + 1)*sizeof(int32_t), POOL_ALIGN) + holon_ggml_workspace_bytes(in, tokens*k);
+    // as ggml_cuda_mul_mat_q allocates with ids: ids_src1, ids_dst (padded by J - 1 <= 127 for its unconditional
+    // reads), expert_bounds, then q8_1 and the fixup as a dense call over the tokens·k (token, slot) rows; mmvq with
+    // ids needs less
+    const size_t ids_src1 = GGML_PAD(tokens*k*sizeof(int32_t), POOL_ALIGN);
+    const size_t ids_dst = GGML_PAD((tokens*k + 127)*sizeof(int32_t), POOL_ALIGN);
+    return ids_src1 + ids_dst + GGML_PAD((experts + 1)*sizeof(int32_t), POOL_ALIGN) +
+           holon_ggml_workspace_bytes(in, tokens*k);
 }
 
 void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, int64_t in, const void * x, int x_bf16,

@@ -9,7 +9,7 @@
 # A refresh to a new commit: change COMMIT (and [provenance] in plugin.toml), run ./vendor.sh, fix vendor.patch until
 # it applies, then the link test and L0 (plugins/tests/test_ggml_cuda.py) on every SM.
 set -euo pipefail
-COMMIT=51ce9c11a6f2dfa895696c0048c4333e8953b728
+COMMIT=cbe28bb3cb0758f0c566a9a3561766821aeb0748
 HERE=$(cd "$(dirname "$0")" && pwd)
 CUDA=ggml/src/ggml-cuda
 FILES="LICENSE

@@ -10,7 +10,7 @@ tokenizers, gguf-py, safetensors, xgrammar, …) are not in this repository; the
 
 ### llama.cpp / ggml — MIT
 
-Source: https://github.com/ggml-org/llama.cpp at `51ce9c11a6f2dfa895696c0048c4333e8953b728`.
+Source: https://github.com/ggml-org/llama.cpp at `cbe28bb3cb0758f0c566a9a3561766821aeb0748`.
 Copyright (c) 2023-2026 The ggml authors. License text below and in
 `plugins/holon_plugins/kernels/ggml_cuda/vendor/LICENSE`.
 

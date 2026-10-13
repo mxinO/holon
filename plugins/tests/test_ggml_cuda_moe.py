@@ -376,14 +376,15 @@ def test_graph_replay_follows_the_routing(ctx, qwen_stacks, name):
 
 @pytest.mark.parametrize("path", ["mmvq", "mmq"])
 @pytest.mark.parametrize("stage", ["gate_up", "down"])
-def test_padding_plant_changes_real_rows_on_mmq_only(ctx, qwen_stacks, path, stage):
+def test_padding_plant_changes_real_rows_on_mmq_only(ctx, lib, qwen_stacks, path, stage):
     """The plant of design §4.6: padding rows with all k slots on one expert (a duplicate inside a row), the
     `ggml_cuda.id` workspace pre-filled with a real row's index. mmq's compaction counts the duplicates in
     `expert_bounds` but compacts each token once per expert, so the expert's range ends in k − 1 stale entries per
     padding row: they write over the real row (and, on gate/up, scatter the padding input over its compact row).
     mmvq applies each slot on its own: real rows are unchanged, bitwise. The stale entries are asserted in the
-    workspace (`ids_src1`, `ids_dst`, `expert_bounds`, each padded to 256 B, as mmq allocates them); which writer of a
-    real row lands last is a race, so the changed output is the secondary check (it held in 100/100 routings)."""
+    workspace (`ids_src1`, `ids_dst` with its J − 1 entries of read padding, `expert_bounds`, each padded to 256 B, as
+    mmq allocates them); which writer of a real row lands last is a race, so the changed output is the secondary check
+    (it held in 100/100 routings)."""
     sg, sd = qwen_stacks["q4_k"]
     s, kern = (sg, experts(ctx, "q4_k", H, 2 * INTER, 1, n=EQ)) if stage == "gate_up" else \
         (sd, experts(ctx, "q4_k", INTER, H, K, n=EQ))
@@ -400,8 +401,9 @@ def test_padding_plant_changes_real_rows_on_mmq_only(ctx, qwen_stacks, path, sta
     if path == "mmvq":
         assert torch.equal(y[:real], clean[:real])
     else:
-        ws, n = kern.workspace.view(torch.int32), -(-tokens * K * 4 // 256) * 64
-        ids_dst, bounds = ws[n:2 * n], ws[2 * n:2 * n + EQ + 1]
+        j = lib.mmq_schedule(0, TYPES["q4_k"], s.weight.shape[1], tokens)[2]    # the tile width over the tokens
+        ws, n, n_dst = kern.workspace.view(torch.int32), -(-tokens * K // 64) * 64, -(-(tokens * K + j - 1) // 64) * 64
+        ids_dst, bounds = ws[n:n + n_dst], ws[n + n_dst:n + n_dst + EQ + 1]
         lo, hi = int(bounds[EQ - 2]), int(bounds[EQ - 1])
         assert hi - lo == int((planted == EQ - 2).sum()), "expert_bounds counts every slot of the expert"
         stale = (K - 1) * (tokens - real)      # one compacted entry per token, k per padding row in the bounds
