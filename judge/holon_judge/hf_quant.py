@@ -39,6 +39,11 @@ AUX = frozenset({"weight_packed", "weight_scale", "weight_scale_inv", "weight_sc
                  "input_scale", "input_global_scale", "k_scale", "v_scale"})
 GATES = {"fp8_e4m3": 1e-2, "nvfp4": 0.1, "mxfp4": 0.1, None: 1e-2}    # NMSE vs bf16 per tensor; dense: the tightest
 _EXPERT = re.compile(r"(.+\.mlp)\.experts\.(\d+)\.(gate|up|down)_proj")
+# The gate's view of a decoder layer: the linears reading a norm's output (q/k/v its input norm's; gate/up, experts'
+# and the router its post-attention norm's), and those norms.
+_NORMED = re.compile(r"(model\.layers\.\d+)\.(self_attn|mlp)\."
+                     r"(?:[qkv]_proj|(?:experts\.\d+\.)?(?:gate|up)_proj|gate)\.weight")
+_FOLDED = re.compile(r"\.(input|post_attention)_layernorm\.weight$")
 
 
 @contextlib.contextmanager
@@ -105,17 +110,23 @@ def input_scale(get: Get, names: set[str], module: str) -> torch.Tensor:
 def gate(path: str | pathlib.Path, original: str | pathlib.Path) -> dict[str, tuple[str | None, float]]:
     """§4.8's gates: every tensor the engine's weight source yields — a quantized module dequantized by the reference,
     so a dialect's misreading shows — against the bf16 original's tensor of that name: name -> (elem, or None if
-    dense; NMSE). Per expert, as the source yields them (before stacking)."""
+    dense; NMSE). Per expert, as the source yields them (before stacking). A linear that reads an RMSNorm's output
+    is compared as it applies to the normalized input, W · diag(γ), each side with its own norm, and the norm is not
+    compared alone: SmoothQuant (RedHatAI's recipe) moves scale from the norm into its consumers' columns."""
     from holon.api import QTensor
     from holon_std.weights.hf.source import HFSafetensors
 
     out = {}
-    with opened(original) as (get, _):
+    with opened(original) as (ref, _), opened(path) as (own, _):
         for name, t in HFSafetensors(path).tensors():
+            if _FOLDED.search(name):
+                continue
             q = isinstance(t, QTensor)
-            w = reference.dequantize(t.layout.scheme.elem, t.parts) if q else t.float()
-            ref = get(name).float()
-            out[name] = (t.layout.scheme.elem if q else None, ((w - ref).pow(2).sum() / ref.pow(2).sum()).item())
+            w, r = reference.dequantize(t.layout.scheme.elem, t.parts) if q else t.float(), ref(name).float()
+            if m := _NORMED.fullmatch(name):
+                norm = f"{m[1]}.{'input' if m[2] == 'self_attn' else 'post_attention'}_layernorm.weight"
+                w, r = w * own(norm).float(), r * ref(norm).float()
+            out[name] = (t.layout.scheme.elem if q else None, ((w - r).pow(2).sum() / r.pow(2).sum()).item())
     return out
 
 

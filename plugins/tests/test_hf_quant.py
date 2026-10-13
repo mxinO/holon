@@ -185,16 +185,30 @@ def test_the_tier_a_plants_fail(files, plant, dialect):
 
 
 @pytest.mark.parametrize("dialect,plant", [(d, None) for d in hq.DIALECTS] + [
+    ("modelopt", "smoothed"),                                    # the original smoothed: a SmoothQuant file, inverted
     ("ct-mxfp4", "mxfp4-scale-halved"),                          # M5
     ("quark", "mxfp4-scale-as-e4m3")])                           # M3
-def test_the_gate_holds_what_the_source_yields_to_the_original(files, dialect, plant):
-    """§4.8's gates: every tensor the engine's source yields (per expert) within its format's NMSE of the original;
-    a dialect's or the reference's misreading of MXFP4 scales fails them."""
+def test_the_gate_holds_what_the_source_yields_to_the_original(files, tmp_path, dialect, plant):
+    """§4.8's gates: every tensor the engine's source yields (per expert; a norm's consumers with the norm folded in)
+    within its format's NMSE of the original; a dialect's or the reference's misreading of MXFP4 scales fails them."""
     quantized, _ = files(dialect, True)
-    with PLANTS[plant]() if plant else contextlib.nullcontext():
-        nmse = gate(quantized, quantized.parent / "tiny-True")
+    original = quantized.parent / "tiny-True"
+    if plant == "smoothed":                  # scale moved from each norm into its consumers' columns, as SmoothQuant
+        shutil.copytree(original, tmp_path / "smoothed")
+        original, tensors = tmp_path / "smoothed", load_file(original / "model.safetensors")
+        for name, t in list(tensors.items()):
+            if m := re.fullmatch(r"(.+)\.(input|post_attention)_layernorm\.weight", name):
+                s = torch.rand(t.shape, generator=torch.Generator().manual_seed(len(name))) + 0.5
+                tensors[name] = t * s
+                for c, w in tensors.items():
+                    if re.fullmatch(rf"{re.escape(m[1])}\.{'self_attn' if m[2] == 'input' else 'mlp'}\."
+                                    r"(.+\.)?(q_proj|k_proj|v_proj|gate_proj|up_proj|gate)\.weight", c):
+                        tensors[c] = w / s
+        save_file(tensors, original / "model.safetensors")
+    with PLANTS[plant]() if plant in PLANTS else contextlib.nullcontext():
+        nmse = gate(quantized, original)
     over = [n for n, (elem, v) in nmse.items() if not v <= GATES[elem]]
-    assert len(nmse) == 2 * (4 * 3 + 9) + 3 and bool(over) == bool(plant), over
+    assert len(nmse) == 2 * (4 * 3 + 7) + 3 and bool(over) == (plant in PLANTS), over
     assert {elem for elem, _ in nmse.values()} == {ELEM[dialect], None}
 
 
