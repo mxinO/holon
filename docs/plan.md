@@ -44,7 +44,7 @@ the code is our own plugin-native implementation. Only kernels may be borrowed, 
 | M0.2 | Qwen3-30B-A3B GGUF (UD-IQ3_XXS 12.0 GiB, Q4_K_M; UD-Q3_K_XL optional) + bf16 HF (correctness, RTX PRO 6000) | model isolation; format-general MoE unit and ops; a 30B MoE on a 16 GB card | qwen3_moe recipe, std.moe, GGUF MoE kernels, stacked loading, a Triton grouped GEMM |
 | M0.3 | Qwen3.8-27B: GGUF (UD-IQ3_S 11.2 GiB on 16 GB, UD-Q4_K_M) + bf16 HF (correctness, RTX PRO 6000) | heterogeneous state, publish/adopt MemOps, checkpoint prefix reuse, quantized KV cache (q8_0 ours, fp8 FlashInfer) | qwen3_5 recipe, gdn mixer + kernels, recurrent state kind, checkpoint policies, quantized-KV layouts |
 | M0.4 | Qwen3.5 / Qwen3.8 (built-in MTP, DFlash2 draft) + Qwen3-8B | spec decoding at depth 1 on the device SeqTable; taps, auxiliary layers, Rewindable incl. GDN replay; verify graphs | mtp, dflash and gpu n-gram drafters, greedy + rejection verifiers, fixed-k policy (`docs/m04-spec.md`) |
-| M0.5 | Qwen3-8B, Qwen3.5-9B | forward/sample split, host_input, Rewindable grammar | xgrammar processor, parsers, anthropic + responses frontends |
+| M0.5 | Qwen3-8B, Qwen3.8-27B | logits-processor lifecycle, host-token depth gate, drafts to the host, per-request errors, resume (`docs/m05-grammar.md` §3; the forward/sample split only if measured necessary) | xgrammar processor, parsers, one HTTP frontend with OpenAI, Anthropic and Responses routers |
 | M0.6 | Qwen3-8B / Qwen3-30B-A3B in FP8 (block-scaled), NVFP4 and MXFP4 | low-precision HF checkpoints, dense and MoE: weight-source dialects over `QTensor` parts, `qlinear` / `linear_experts` providers, judge tiers per format; RTX PRO 6000 (sm_120), FP8 also on sm_89 | fp8 / nvfp4 / mxfp4 dialects and kernels |
 | M0.7 | Qwen3-8B, Qwen3.8-27B GGUF | fused prefill glue (KV-store kernel, add+norm, q/k norm) and a model-specific megakernel experiment (design §5.7) | fused kernels in std and in the model package |
 | Release | every v0 model | packaging, quickstart, rtx-5090 / rtx-3090 locks, an agent demo; the benchmark suite (decode, prefill, agent trace vs llama.cpp, FreeToken and SGLang where each runs) on the release classes | — |
@@ -463,6 +463,12 @@ count_tokens), `frontends/openai_responses`.
 Acceptance: 100% schema conformance on the JSON-schema suite (truncated responses reported separately); tool-call
 round trips via OpenAI and Anthropic APIs (Claude-Code-style client on `/v1/messages`); grammar + spec vs grammar
 without spec bounded; core diff target zero.
+
+Amended (2026-10-13, `docs/m05-grammar.md` D1, D7–D9): "core diff target zero" became "only the general seams of
+the design's §3, each with a toy proof" — grammar needs a request lifecycle, a depth rule, drafts on the host and
+per-request errors; the three API dialects are routers of one frontend package (`holon serve` runs one frontend);
+conformance is defined for strict requests against a published reject list (xgrammar silently ignores some JSON
+Schema keywords); `tool_choice: "auto"` stays unconstrained unless a tool is strict.
 
 ## 9. Kill / pivot criteria
 
