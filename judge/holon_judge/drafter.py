@@ -17,7 +17,7 @@ import transformers
 from safetensors import safe_open
 
 from .golden import hardware, model_meta, resolve_model, topk_rows
-from .recording import PromptSet, Recording
+from .recording import Prompt, PromptSet, Recording
 
 
 def _mtp_weights(path: pathlib.Path) -> dict[str, torch.Tensor]:
@@ -112,3 +112,182 @@ def candidate(engine, prompts: PromptSet, k: int = 20) -> Recording:
         drafter.head.forward = forward
     return Recording.from_rows(rows, prompts.meta() | {"source": "holon", "head": "mtp",
                                                        "hardware": hardware(engine.device)})
+
+
+# DFlash2 -------------------------------------------------------------------------------------------------------------
+# The draft's rows 1 … B − 1 for an anchor at P predict positions P + 1 … P + B − 1, given the target's residual
+# streams at positions < P. Each prompt is cut at a few lengths P; the engine prefills the cut and drafts once (its
+# first draft, anchored at the token it sampled), and the judge records, besides the draft logits, the target's
+# streams after the checkpoint's own `target_layer_ids` — its own taps, so a drafter tapping elsewhere shows. The
+# reference (the plugin's `reference.py`) runs on those streams with the checkpoint's weights: fp32 for the golden,
+# the model's dtype for the floor — for GGUF weights (the draft's and the target's head) dequantized by gguf-py, and
+# in the floor every quantized matmul rounded as llama.cpp's kernel path for its row count does (q8_1).
+
+# llama.cpp's DFlash tensor names (conversion/qwen.py `DFlashModel`, gguf-py tensor_mapping) -> the checkpoint's.
+_DFLASH_GLOBAL = {"fc.weight": "fc.weight", "enc.output_norm.weight": "hidden_norm.weight",
+                  "output_norm.weight": "norm.weight",
+                  "selector_predecessor.weight": "candidate_selector.predecessor_codebook",
+                  "selector_successor.weight": "candidate_selector.successor_codebook",
+                  "selector_hidden.weight": "candidate_selector.hidden_projection.weight"}
+_DFLASH_LAYER = {"attn_norm.weight": "input_layernorm.weight", "ffn_norm.weight": "post_attention_layernorm.weight",
+                 "attn_q.weight": "self_attn.q_proj.weight", "attn_k.weight": "self_attn.k_proj.weight",
+                 "attn_v.weight": "self_attn.v_proj.weight", "attn_output.weight": "self_attn.o_proj.weight",
+                 "attn_q_norm.weight": "self_attn.q_norm.weight", "attn_k_norm.weight": "self_attn.k_norm.weight",
+                 "ffn_gate.weight": "mlp.gate_proj.weight", "ffn_up.weight": "mlp.up_proj.weight",
+                 "ffn_down.weight": "mlp.down_proj.weight", "attn_conv_base": "attention_conv.base_kernel",
+                 "attn_conv_proj.weight": "attention_conv.kernel_projection.weight",
+                 "ffn_conv_base": "mlp_conv.base_kernel", "ffn_conv_proj.weight": "mlp_conv.kernel_projection.weight"}
+
+
+def dflash_prompts(prompts: PromptSet, cuts: int = 4, block: int = 8, shortest: int = 16) -> PromptSet:
+    """Each prompt cut at `cuts` lengths P, evenly from `shortest` to its length − `block`: a sequence of the context
+    ids[:P] and the block's targets ids[P + 1 : P + block] (its first P + block ids)."""
+    out = []
+    for p in prompts.prompts:
+        last = len(p.ids) - block
+        for c in sorted({shortest + (last - shortest) * i // max(cuts - 1, 1) for i in range(cuts)} if last >= shortest
+                        else set()):
+            out.append(Prompt(f"{p.id}@{c}", p.category, p.ids[:c + block]))
+    return PromptSet(f"{prompts.name}:dflash{cuts}", prompts.sha256, out)
+
+
+def _draft_rows(logits: torch.Tensor, ids: list[int], k: int) -> tuple[torch.Tensor, ...]:
+    """The draft's rows for one cut: logits of rows 1 … B − 1 against the cut's block targets."""
+    block = len(logits) + 1
+    return topk_rows(logits.float().cpu(), torch.tensor(ids[-block + 1:]), k)
+
+
+@torch.no_grad()
+def dflash_candidate(engine, prompts: PromptSet, k: int = 20) -> tuple[Recording, list[tuple[torch.Tensor, int]]]:
+    """The engine drafter's logits for each cut (one prefill, one draft), and what the reference needs: the target's
+    streams [P, taps · H] at the checkpoint's layers and the anchor, per cut."""
+    from holon.api import SamplingParams
+
+    drafter, model = engine.executor.drafter, engine.executor.model
+    taps: dict[int, torch.Tensor] = {}
+    layers = drafter.cfg["taps"]
+    for n, layer in enumerate(layers):
+        model.taps.setdefault(layer, []).append(lambda h, ctx, n=n: taps.__setitem__(n, h.to("cpu", copy=True)))
+    seen: list[torch.Tensor] = []
+    head = drafter.lm_head
+    drafter.lm_head = lambda h: seen.append(out := head(h)) or out
+    rows, inputs = [], []
+    try:
+        for p in prompts.prompts:
+            seen.clear()
+            context = p.ids[:len(p.ids) - drafter.block_size]
+            anchor = engine.generate([context], SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True))[0][0]
+            rows.append(_draft_rows(seen[-1], p.ids, k))
+            inputs.append((torch.cat([taps[n][:len(context)] for n in range(len(layers))], -1), anchor))
+    finally:
+        drafter.lm_head = head
+        for layer in layers:
+            model.taps[layer].pop()
+    return Recording.from_rows(rows, prompts.meta() | {"source": "holon", "head": "dflash",
+                                                       "hardware": hardware(engine.device)}), inputs
+
+
+def _dflash_state(path: str) -> dict[str, torch.Tensor]:
+    """The draft checkpoint's tensors by its own (HF) names: safetensors as stored, a GGUF dequantized by gguf-py."""
+    p = pathlib.Path(path)
+    if p.suffix != ".gguf":
+        out = {}
+        for f in sorted(p.glob("*.safetensors")):
+            with safe_open(str(f), "pt") as st:
+                out |= {n: st.get_tensor(n) for n in st.keys()}
+        return out
+    return {_dflash_name(t.name): x for t, x in _dequantized(p)}
+
+
+def _dflash_name(name: str) -> str:
+    if name in _DFLASH_GLOBAL:
+        return _DFLASH_GLOBAL[name]
+    layer, _, part = name.removeprefix("blk.").partition(".")
+    return f"layers.{layer}.{_DFLASH_LAYER[part]}"
+
+
+def _dequantized(path: pathlib.Path):
+    import gguf
+    import numpy as np
+
+    for t in gguf.GGUFReader(path).tensors:
+        x = gguf.quants.dequantize(np.asarray(t.data), t.tensor_type).astype(np.float32, copy=False)
+        yield t, torch.from_numpy(x.reshape([int(n) for n in reversed(t.shape)]).copy())
+
+
+def _target_rows(path: str) -> tuple[torch.Tensor, torch.Tensor]:
+    """The target's embedding and output head (fp32), from its checkpoint (a GGUF dequantized by gguf-py)."""
+    p = pathlib.Path(path)
+    if p.suffix == ".gguf":
+        import gguf
+        import numpy as np
+
+        found = {}
+        for t in gguf.GGUFReader(p).tensors:
+            if t.name in ("token_embd.weight", "output.weight"):
+                x = gguf.quants.dequantize(np.asarray(t.data), t.tensor_type).astype(np.float32, copy=False)
+                found[t.name] = torch.from_numpy(x.reshape([int(n) for n in reversed(t.shape)]).copy())
+        embed = found["token_embd.weight"]
+        return embed, found.get("output.weight", embed)
+    found = {}
+    for f in sorted(p.glob("*.safetensors")):
+        with safe_open(str(f), "pt") as st:
+            for n in st.keys():
+                if n.endswith(("embed_tokens.weight", "lm_head.weight")) and "mtp" not in n:
+                    found["head" if n.endswith("lm_head.weight") else "embed"] = st.get_tensor(n).float()
+    return found["embed"], found.get("head", found["embed"])
+
+
+def _emulation(draft: str, target: str):
+    """The floor's matmul for GGUF weights: llama.cpp's q8_1 rounding on the kernel path its row count selects."""
+    import gguf
+    import numpy as np
+    from holon_plugins.kernels.ggml_cuda import extension, plugin
+
+    from . import q8_1
+
+    major, minor = torch.cuda.get_device_capability()
+    lib, index = extension.load(10 * major + minor), torch.cuda.current_device()
+    named = []                                   # (reference name, GGUF tensor) of every quantized matmul weight
+    if draft.endswith(".gguf"):
+        codebooks = ("selector_predecessor.weight", "selector_successor.weight")          # read by get_rows: exact
+        named += [(_dflash_name(t.name), t) for t in gguf.GGUFReader(draft).tensors if t.name not in codebooks]
+    if target.endswith(".gguf"):
+        named += [("lm_head", t) for t in gguf.GGUFReader(target).tensors if t.name == "output.weight"]
+    kinds = {}
+    for name, t in named:
+        kind = t.tensor_type.name.lower()
+        if kind in ("f32", "f16", "bf16"):
+            continue
+        limit = max((n for n in range(1, 9) if lib.use_mmvq(index, plugin.TYPES[kind], n)), default=0)
+        blocks = np.asarray(t.data)
+        offs = {route: q8_1.offsets(blocks, kind, q8_1.blocking(kind, route).sum_group).float()
+                for route in (q8_1.MMVQ, q8_1.MMQ) if q8_1.blocking(kind, route).sum_group}
+        kinds[name] = (kind, limit, offs)
+
+    def matmul(name: str, x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+        if name not in kinds:
+            return x @ w.T
+        kind, limit, offs = kinds[name]
+        route = q8_1.MMVQ if len(x) <= limit else q8_1.MMQ
+        return q8_1.matmul(x.float(), w.float(), None, kind, route, offs.get(route), torch.float32)
+    return matmul
+
+
+def dflash_reference(draft: str, target: str, prompts: PromptSet, inputs: list[tuple[torch.Tensor, int]],
+                     dtype: torch.dtype = torch.float32, k: int = 20, q8_1: bool = False) -> Recording:
+    """The published forward's draft logits for each cut, on the recorded streams (CPU, `dtype`); `q8_1`: GGUF
+    matmuls rounded as llama.cpp's kernels do (the floor; needs the GPU to ask which path a row count takes)."""
+    from holon.core.assembly import open_source
+    from holon.core.plugins import PluginSet, discover
+    from holon_plugins.drafters.dflash.plugin import checkpoint
+    from holon_plugins.drafters.dflash.reference import Reference
+
+    cfg = checkpoint(open_source(PluginSet(discover()), draft))
+    embed, head = _target_rows(target)
+    ref = Reference(_dflash_state(draft), cfg, embed, head, dtype,
+                    _emulation(draft, target) if q8_1 else None)
+    rows = [_draft_rows(ref.logits(ref.block(features, anchor)), p.ids, k)
+            for p, (features, anchor) in zip(prompts.prompts, inputs, strict=True)]
+    return Recording.from_rows(rows, prompts.meta() | {"source": "reference", "head": "dflash", "dtype": str(
+        dtype).removeprefix("torch."), "q8_1": "by rows" if q8_1 else None, "hardware": hardware(torch.device("cpu"))})

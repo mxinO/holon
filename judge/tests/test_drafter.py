@@ -1,6 +1,8 @@
-"""L0-drafter (`holon_judge drafter`) on a tiny Qwen3.5 with an MTP block, on CPU: the engine's head in fp32 agrees
-with the transformers reference to fp32 rounding, so it passes against the fp32 golden with the bf16 reference as
-the floor; the head with its concat halves swapped (the `mtp_concat_order` plant) fails."""
+"""L0-drafter (`holon_judge drafter`) on a tiny Qwen3.5, on CPU: the engine's draft heads in fp32 agree with their
+references to fp32 rounding, so they pass against the fp32 golden with the bf16 reference as the floor; planted bugs
+fail. The MTP block: against transformers' modules; its concat halves swapped (`mtp_concat_order`) fails. A tiny
+random DFlash2: against `reference.py` on the target streams the judge records itself; taps a layer late
+(`dflash-tap-offset`) fails."""
 import pytest
 import torch
 from holon.core.engine import Engine, EngineConfig
@@ -41,3 +43,28 @@ def test_a_swapped_concat_fails(case, monkeypatch):
     monkeypatch.setattr(units.MTPHead, "__init__", lambda self, ctx, **kw: init(self, ctx, **{**kw, "order":
                                                                                                "hidden_first"}))
     assert compare(golden, drafter.candidate(_engine(path), prompts), floor).passed is False
+
+
+def test_dflash_passes_and_its_tap_offset_fails(case, tmp_path):
+    from holon_judge.planted import dflash_tap_offset
+    from holon_testing import dflash_files
+
+    path, prompts, _, _ = case
+    draft = dflash_files.save(tmp_path / "draft", 64, 320, (0, 2), mask=7)
+    cuts = drafter.dflash_prompts(prompts)
+
+    def judged():
+        engine = Engine(EngineConfig(
+            model=str(path), device="cpu", dtype=torch.float32, page_size=4, max_seqs=2, max_step_tokens=128,
+            max_model_len=128, state_memory=8 << 20, prefix_cache=False, max_draft_tokens=7,
+            plugin_options={"spec.k": "7", "dflash.path": str(draft)},
+            slots={"drafter": "drafters.dflash", "draft_policy": "std.spec.fixed_k", "verifier": "std.spec.rejection"}))
+        cand, inputs = drafter.dflash_candidate(engine, cuts)
+        golden, floor = (drafter.dflash_reference(str(draft), str(path), cuts, inputs, dtype)
+                         for dtype in (torch.float32, torch.bfloat16))
+        return compare(golden, cand, floor)
+
+    result = judged()
+    assert result.passed and result.overall.top1 > 0.99 and result.overall.n == 7 * len(cuts.prompts)
+    with dflash_tap_offset():
+        assert judged().passed is False

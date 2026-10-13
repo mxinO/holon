@@ -111,6 +111,17 @@ def unmasked_padding() -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def dflash_tap_offset() -> Iterator[None]:
+    """DFlash reads the target one layer late: the residual stream after layer id + 1 for each `target_layer_ids`
+    entry (llama.cpp's stored numbering, the next layer's input, taken as HF's)."""
+    from holon_plugins.drafters.dflash import plugin
+
+    taps = plugin.tap_layers
+    with mock.patch.object(plugin, "tap_layers", lambda cfg: tuple(i + 1 for i in taps(cfg))):
+        yield
+
+
+@contextlib.contextmanager
 def wrong_block() -> Iterator[None]:
     """A prefix hit of two or more blocks adopts its first block's state in place of its last block's. (Swapping two
     adopted blocks would be no bug: keys are cached after RoPE, and attention over a prefix ignores its order.)"""
@@ -498,4 +509,6 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)
-    "unmasked-padding": unmasked_padding}
+    "unmasked-padding": unmasked_padding,
+    # Draft heads (L0-drafter, `holon_judge drafter`)
+    "dflash-tap-offset": dflash_tap_offset}

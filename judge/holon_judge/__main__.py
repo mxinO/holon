@@ -157,6 +157,8 @@ def _drafter(a: argparse.Namespace) -> int:
 
     from . import drafter
 
+    if a.head == "dflash":
+        return _drafter_dflash(a)
     prompts = PromptSet.load(a.prompts)
     recordings = {}
     for name, dtype in (("golden", torch.float32), ("floor", golden.DTYPES[a.dtype])):
@@ -180,6 +182,37 @@ def _drafter(a: argparse.Namespace) -> int:
                   "dtype": str(config.dtype).removeprefix("torch.")}
     engine.close()
     return _report(compare(recordings["golden"], cand, recordings["floor"]), a.json)
+
+
+def _drafter_dflash(a: argparse.Namespace) -> int:
+    """DFlash2: the engine's first draft after prefilling each cut of each prompt, against the reference on the
+    target's streams the judge records itself; GGUF weights (draft or target head) dequantized, the floor rounding
+    their matmuls to q8_1 as the kernel path of their row count does."""
+    from holon.core.cli import engine_config, engine_flags
+    from holon.core.engine import Engine
+
+    from . import drafter
+
+    prompts = drafter.dflash_prompts(PromptSet.load(a.prompts), a.cuts)
+    flags = argparse.ArgumentParser()
+    engine_flags(flags)
+    model = str(golden.resolve_model(a.engine_model or a.model))
+    config = engine_config(model, flags.parse_args(shlex.split(a.engine_args)))
+    longest = max(len(p.ids) for p in prompts.prompts)
+    config = dataclasses.replace(config, prefix_cache=False, max_model_len=max(config.max_model_len, longest + 16),
+                                 max_step_tokens=max(config.max_step_tokens, longest))
+    with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
+        engine = Engine(config)
+        cand, inputs = drafter.dflash_candidate(engine, prompts, a.k)
+    cand.meta |= {"model": model, "dtype": str(config.dtype).removeprefix("torch.")}
+    engine.close()
+    del engine
+    torch.cuda.empty_cache()
+    draft = str(config.plugin_options["dflash.path"])
+    quantized = draft.endswith(".gguf") or model.endswith(".gguf")
+    golden_rec = drafter.dflash_reference(draft, model, prompts, inputs, torch.float32, a.k)
+    floor = drafter.dflash_reference(draft, model, prompts, inputs, golden.DTYPES[a.dtype], a.k, q8_1=quantized)
+    return _report(compare(golden_rec, cand, floor), a.json)
 
 
 def _bounded(a: argparse.Namespace) -> int:
@@ -299,7 +332,10 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--json", help="write the machine-readable report here")
     t.set_defaults(run=_snapshot)
 
-    d = sub.add_parser("drafter", help="L0-drafter: a draft head (MTP) against its fp32 reference")
+    d = sub.add_parser("drafter", help="L0-drafter: a draft head (MTP, DFlash2) against its fp32 reference")
+    d.add_argument("--head", default="mtp", choices=("mtp", "dflash"), help="dflash: the engine args' dflash.path")
+    d.add_argument("--cuts", type=int, default=4, help="dflash: drafts per prompt, at cuts of it")
+    d.add_argument("--plant", choices=sorted(PLANTS), help="calibration: run with a planted bug (must fail)")
     d.add_argument("--model", required=True, help="HF checkpoint with the head (the reference reads it)")
     d.add_argument("--engine-model", help="what the engine serves, if not --model (e.g. a .gguf of it)")
     d.add_argument("--prompts", required=True)
