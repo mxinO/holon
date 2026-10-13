@@ -207,7 +207,7 @@ against the Protocol (`runtime_checkable` + signature check).
 |---|---|---|
 | `single` | exactly one per Plan | model, platform, launcher, schedule_policy, sampler, verifier, draft_policy, eviction_policy (prefix index) |
 | `per_site` | bound per site (layer, op instance, state spec, store) | unit (mixers, ffn/MoE, norms, blocks, ops — anything a recipe names by `Ref`), kernel, state_kind, placement_policy, codec, weight_source |
-| `ordered_multi` | ordered list, `after`/`before` in the manifest | plan_transform, logits_processor, checkpoint_policy |
+| `ordered_multi` | ordered list, `after`/`before` in the manifest | plan_transform, logits_processor (v0: at most one, selected via `EngineConfig.slots`), checkpoint_policy |
 | `multi` | any number, keyed by name | frontend, dialect, converter, tier, mover, drafter, encoder, connector, exporter |
 
 A `Ref("a.b.c@1")` is served by the installed plugin whose name is the longest prefix of the unit name (e.g.

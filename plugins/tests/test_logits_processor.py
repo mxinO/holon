@@ -6,7 +6,7 @@ import dataclasses
 
 import pytest
 import torch
-from holon.api import SamplingParams, TokenSrc
+from holon.api import SamplingParams, Status, TokenSrc
 from holon.core.engine import BLOCKED_POLL_S, Engine, EngineConfig
 from transformers import AutoModelForCausalLM
 
@@ -80,25 +80,28 @@ def test_constrained_outputs_are_the_masked_reference(tiny_checkpoint, masked, o
     # depth 0 and both depth-1 gates (D2: commit the constrained row first, or skip it), n = 2, verify rows with right,
     # wrong and mixed drafts, greedy and sampled: every output equals its reference (so every sampled row was masked
     # with its request's current state), the processor saw exactly the tokens committed and the drafts the drafter
-    # wrote, and free rows kept overlapping at depth 1.
+    # wrote, free rows kept overlapping at depth 1, and the gates differ: under A′ every decode step holds every
+    # running constrained sequence, under A some decode step leaves one out.
     requests, refs = masked
     oracle.mode = mode
     oracle.sequences = {tuple(p): p + (ref[0] if params.n > 1 else ref)
                         for (p, params), ref in zip(requests, refs, strict=True)}
     engine = _engine(tiny_checkpoint, spec=mode != "plain", overlap=depth != "depth0", state_memory=memory)
     engine.commit_for_constrained = depth != "depth1-skip"
-    toy, overlapped, launch, fill = engine.processor, [], engine.executor.launch, engine.processor.fill
+    toy, overlapped, left_out, launch, fill = engine.processor, [], [], engine._launch, engine.processor.fill
 
-    def launch_(plan, *args):
+    def launch_(plan, seqs):
         overlapped.append(bool((plan.token_src == TokenSrc.DEVICE_LAST).any()))
-        return launch(plan, *args)
+        if all(seq.status is Status.RUNNING for seq in seqs):          # a decode step
+            left_out.append(any(seq.constrained and seq not in seqs for seq in engine.sched.running))
+        return launch(plan, seqs)
 
     def fill_(rows, buf):
         for row in rows:                         # §3.3: the drafts the drafter wrote for this row
             assert row.drafts == ORACLE.written.get(row.seq.slot, [])[: row.n - 1]
         fill(rows, buf)
 
-    engine.executor.launch, toy.fill = launch_, fill_
+    engine._launch, toy.fill = launch_, fill_
     for _ in range(2):
         assert _run(engine, requests) == refs
     constrained = [ref if params.n > 1 else [ref] for (_, params), ref in zip(requests, refs, strict=True)
@@ -108,6 +111,9 @@ def test_constrained_outputs_are_the_masked_reference(tiny_checkpoint, masked, o
     assert sorted(toy.opened) == sorted(toy.closed) and _released(engine)
     if depth != "depth1-commit":                 # A′ commits a constrained row before the step: its rows wait too
         assert any(overlapped) == (depth == "depth1-skip")
+    if depth != "depth0":
+        assert any(left_out) == (depth == "depth1-skip")
+    assert (engine.stats()["preemptions"] > 0) == (memory < 1 << 20)
     if mode != "plain":
         assert any(drafts for *_, drafts in toy.rows)
     if mode == "right":
