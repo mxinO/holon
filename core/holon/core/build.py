@@ -301,16 +301,28 @@ def map_name(name: str, weights: WeightMap) -> tuple[str, str | None, int | None
     raise PluginError(f"no weight rule maps checkpoint tensor {name!r}")
 
 
-def _fill_slice(param: nn.Parameter, target: str, index: int, name: str, value: torch.Tensor | QTensor,
-                transform: str | None, ctx: BuildContext, got: set[int]) -> None:
+def _adopt(model: nn.Module, target: str, q: QTensor, transform: str | None, ctx: BuildContext, **index: int) -> None:
+    """Hand a quantized tensor to the unit owning `target`: `adopt(ctx, leaf, q)`, or `adopt(…, index=i)` for slice
+    `i` of a stack (the unit keeps its stack's first dimension while loading)."""
+    if transform:
+        raise PluginError(f"{target}: transform {transform!r} cannot apply to a quantized tensor")
+    owner, _, leaf = target.rpartition(".")
+    unit = model.get_submodule(owner)
+    if not getattr(unit, "adopt", None) or not unit.adopt(ctx, leaf, q, **index):
+        raise PluginError(f"{target}: {type(unit).__name__} cannot read layout {q.layout}")
+
+
+def _fill_slice(model: nn.Module, param: nn.Parameter, target: str, index: int, name: str,
+                value: torch.Tensor | QTensor, transform: str | None, ctx: BuildContext, got: set[int]) -> None:
     """Copy one checkpoint tensor into slice `index` of a stacked parameter, materializing the stack on its first
-    slice (in place: no transient copy of the whole stack)."""
-    if isinstance(value, QTensor):
-        raise PluginError(f"{name!r}: a quantized tensor cannot fill a slice of {target!r}")
+    slice (in place: no transient copy of the whole stack); a quantized one goes to its unit."""
     if not 0 <= index < param.shape[0]:
         raise PluginError(f"{name!r}: index {index} outside the {param.shape[0]} slices of {target!r}")
     if index in got:
         raise PluginError(f"{target}[{index}] filled twice (last from {name!r})")
+    got.add(index)
+    if isinstance(value, QTensor):
+        return _adopt(model, target, value, transform, ctx, index=index)
     if transform:
         value = ctx.plugins.regs.transforms.get(transform)(value)
     if tuple(value.shape) != tuple(param.shape[1:]):
@@ -319,7 +331,6 @@ def _fill_slice(param: nn.Parameter, target: str, index: int, name: str, value: 
         torch.utils.swap_tensors(param, nn.Parameter(torch.empty(param.shape, dtype=param.dtype, device=ctx.device),
                                                      requires_grad=False))
     param.data[index].copy_(value.to(dtype=param.dtype))
-    got.add(index)
 
 
 @torch.no_grad()
@@ -329,8 +340,9 @@ def load_weights(model: nn.Module, ctx: BuildContext, tensors: Iterable[tuple[st
     unit's `finalize_weights`.
 
     A dense tensor is copied to the device in the parameter's dtype. A quantized one (`QTensor`) goes to the module
-    owning the parameter — `adopt(ctx, name, qtensor)` stores it in its own form and returns True, or False if it
-    cannot read that layout (design §5.5; the core never looks inside a layout)."""
+    owning the parameter — `adopt(ctx, name, qtensor)`, with `index=i` for slice `i` of a stack, stores it in its own
+    form and returns True, or False if it cannot read that layout (design §5.5; the core never looks inside a
+    layout)."""
     weights = weights or model.spec.weights
     params = dict(model.named_parameters())
     filled: set[str] = set()
@@ -345,17 +357,13 @@ def load_weights(model: nn.Module, ctx: BuildContext, tensors: Iterable[tuple[st
         if (index is None and target in slices) or (index is not None and target in filled):
             raise PluginError(f"{target!r} filled both whole and by stack slices (last from {name!r})")
         if index is not None:
-            _fill_slice(params[target], target, index, name, value, transform, ctx, slices.setdefault(target, set()))
+            _fill_slice(model, params[target], target, index, name, value, transform, ctx,
+                        slices.setdefault(target, set()))
             continue
         if target in filled:
             raise PluginError(f"{target!r} filled twice (last from {name!r})")
         if isinstance(value, QTensor):
-            if transform:
-                raise PluginError(f"{target}: transform {transform!r} cannot apply to a quantized tensor")
-            owner, _, leaf = target.rpartition(".")
-            unit = model.get_submodule(owner)
-            if not getattr(unit, "adopt", None) or not unit.adopt(ctx, leaf, value):
-                raise PluginError(f"{target}: {type(unit).__name__} cannot read layout {value.layout}")
+            _adopt(model, target, value, transform, ctx)
         else:
             if transform:
                 value = ctx.plugins.regs.transforms.get(transform)(value)
