@@ -2,7 +2,7 @@
 over a unified KV cache (`-kvu`) of `LLAMA_SERVER_CTX` tokens (Holon's measured KV tokens; default: max running
 sequences × max context); `-b` = the step budget; `LLAMA_SERVER_ARGS` adds flags (e.g. `-cram 0`, `-ub 512`).
 Token-id prompts, greedy, `ignore_eos`, `n_predict`; prompt cache at its default. Every request's server-side
-timings are kept.
+timings are kept (drafts and accepted drafts are the backend's stats).
 
 Tokens are counted by the server's `tokens_predicted`: a token whose text ends in an incomplete UTF-8 character is
 not streamed (llama.cpp holds its bytes back, `server-context.cpp` `process_token`), and the next chunk carries only
@@ -31,6 +31,12 @@ class Backend(http.Backend):
         server = http.Server([binary, "-m", model, "--host", "127.0.0.1", "--port", str(port), "--no-webui",
                               *self.flags], port)
         super().__init__(server, "/completion", _body, _parse)
+
+    def stats(self) -> dict[str, int]:
+        """Drafts and accepted drafts so far (the finished requests' timings; 0 without speculation)."""
+        timings = [e.get("timings", {}) for e in self.finals]
+        return {"spec_drafted": sum(t.get("draft_n", 0) for t in timings),
+                "spec_accepted": sum(t.get("draft_n_accepted", 0) for t in timings)}
 
     def info(self) -> dict:
         timings = [e.get("timings", {}) for e in self.finals]

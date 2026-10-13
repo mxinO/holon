@@ -6,7 +6,10 @@ i-1's prompt + the tokens turn i-1 generated + `append` new tokens (a tool resul
 generates exactly `output` tokens (ignore_eos). A plain request is a one-turn session without a system prompt.
 
 Specs hold lengths only; token ids are drawn at replay time from a seeded stream (`tokens`), so every backend sees
-the same prompts. This module is stdlib-only: it runs in every backend's environment.
+the same prompts: uniform ids by default, or spans of a natural-text corpus (`corpus`: a judge prompt set's token
+ids for the model's tokenizer) where the text matters, e.g. speculative decoding, whose acceptance on uniform ids
+(greedy continuations of token soup repeat) is far above natural text's.
+This module is stdlib-only: it runs in every backend's environment.
 
 Usage: python bench/workloads.py [--out-dir bench/traces] [--seed 0]
 """
@@ -21,10 +24,19 @@ import random
 VOCAB = (1000, 30000)   # plain-text token ids, clear of special tokens in Qwen-family vocabularies
 
 
-def tokens(salt: str, key: str, n: int) -> list[int]:
-    """`n` token ids determined by (salt, key); str seeds hash with SHA-512, so they are stable across processes."""
+def tokens(salt: str, key: str, n: int, corpus: list[int] | None = None) -> list[int]:
+    """`n` token ids determined by (salt, key): uniform, or the corpus from a seeded offset (wrapping); str seeds hash
+    with SHA-512, so they are stable across processes."""
     rng = random.Random(f"{salt}:{key}")
+    if corpus:
+        at = rng.randrange(len(corpus))
+        return [corpus[(at + i) % len(corpus)] for i in range(n)]
     return [rng.randrange(*VOCAB) for _ in range(n)]
+
+
+def corpus(path: str | pathlib.Path) -> list[int]:
+    """A JSONL prompt set's token ids (`ids` per line), concatenated."""
+    return [t for line in pathlib.Path(path).read_text().splitlines() if line for t in json.loads(line)["ids"]]
 
 
 def turn(append: int, output: int, gap: float = 0.0) -> dict:

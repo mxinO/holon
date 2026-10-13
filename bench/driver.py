@@ -47,10 +47,11 @@ ROW = ["sid", "turn", "prompt", "output", "generated", "release", "first", "last
 _rids = itertools.count()               # unique across the replays of one process (warmup included)
 
 
-def replay(backend: Backend, sessions: list[dict], salt: str) -> tuple[list[Request], list[tuple]]:
+def replay(backend: Backend, sessions: list[dict], salt: str,
+           corpus: list[int] | None = None) -> tuple[list[Request], list[tuple]]:
     """Run every session to completion. Returns the finished requests and one (wall s, CPU s, tokens, first
     tokens) record per step; CPU time is the whole process's, measured around `step()` only."""
-    system = tokens(salt, "system", max(s["system"] for s in sessions))
+    system = tokens(salt, "system", max(s["system"] for s in sessions), corpus)
     by_id = {s["id"]: s for s in sessions}
     ready = [(s["arrival"], s["id"], 0, []) for s in sessions]   # (release, sid, turn, history)
     heapq.heapify(ready)
@@ -63,7 +64,7 @@ def replay(backend: Backend, sessions: list[dict], salt: str) -> tuple[list[Requ
         while ready and ready[0][0] <= now:
             release, sid, i, history = heapq.heappop(ready)
             s, t = by_id[sid], by_id[sid]["turns"][i]
-            prompt = (history or system[:s["system"]]) + tokens(salt, f"{sid}.{i}", t["append"])
+            prompt = (history or system[:s["system"]]) + tokens(salt, f"{sid}.{i}", t["append"], corpus)
             rid = next(_rids)
             live[rid] = Request(sid, i, prompt, t["output"], release)
             backend.add(rid, prompt, t["output"])

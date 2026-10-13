@@ -114,6 +114,7 @@ class Engine:
         # Speculative decoding (design §7.6): a draft policy picks k per step, one drafter proposes, the verifier
         # checks; all three are plugins, used only when drafts are enabled and a policy is installed.
         self.policy = drafter = verifier = aux = None
+        self.drafted, self.accepted = 0, [0] * (cfg.max_draft_tokens + 1)    # real drafts; rows by drafts accepted
         substeps, sub_planners = (0, 0), {}
         if cfg.max_draft_tokens and any(True for _ in p.by_slot("draft_policy")):
             pick = lambda slot: p.load(p.single(slot, cfg.slots.get(slot)))        # noqa: E731
@@ -257,10 +258,14 @@ class Engine:
         platform.release_cache(self.device)
 
     def stats(self) -> dict[str, int]:
-        return {"waiting": len(self.sched.waiting), "running": len(self.sched.running),
-                "preemptions": self.sched.preemptions, "prefix_tokens_saved": self.state.tokens_saved,
-                "cached_blocks": len(self.state.index.entries) if self.state.index is not None else 0,
-                "graphs": len(self.executor.graphs) if self.executor and self.executor.graphs is not None else 0}
+        out = {"waiting": len(self.sched.waiting), "running": len(self.sched.running),
+               "preemptions": self.sched.preemptions, "prefix_tokens_saved": self.state.tokens_saved,
+               "cached_blocks": len(self.state.index.entries) if self.state.index is not None else 0,
+               "graphs": len(self.executor.graphs) if self.executor and self.executor.graphs is not None else 0}
+        if self.policy is not None:                  # speculation: real drafts, and verify rows by drafts accepted
+            out["spec_drafted"] = self.drafted
+            out |= {f"spec_rows_accepting_{j}": n for j, n in enumerate(self.accepted)}
+        return out
 
     def generate(self, prompts: list[list[int]], params: SamplingParams | None = None) -> list[list[int]]:
         """Token ids generated for each prompt (one sequence per prompt)."""
@@ -372,6 +377,9 @@ class Engine:
                 continue
             if drafts is not None:
                 self.policy.observe(seq, step.k, drafts[i], accepted)
+                if m > 1:
+                    self.drafted += drafts[i]
+                    self.accepted[accepted] += 1
             if m == 1:                               # the common case, without the per-token loop
                 out = [tokens[at]]
                 seq.tokens.append(out[0])

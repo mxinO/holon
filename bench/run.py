@@ -128,6 +128,8 @@ def run_worker(backend: str, args: argparse.Namespace, out: pathlib.Path) -> tup
            "--max-batch", str(args.max_batch), "--max-step-tokens", str(args.max_step_tokens), "--out", str(out)]
     if args.blocking_sync:
         cmd.append("--blocking-sync")
+    if args.corpus:
+        cmd += ["--corpus", args.corpus]
     log = out.with_suffix(".log")
     with log.open("w") as f:
         rc = subprocess.run(cmd, env=env, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT).returncode
@@ -136,15 +138,24 @@ def run_worker(backend: str, args: argparse.Namespace, out: pathlib.Path) -> tup
     return json.loads(out.read_text()), ""
 
 
+def acceptance(stats: dict) -> float | None:
+    """Accepted drafts over real drafts (speculating backends' stats: Holon's verify rows by drafts accepted, or a
+    server's accepted count)."""
+    accepted = stats.get("spec_accepted", sum(int(k.rsplit("_", 1)[1]) * n for k, n in stats.items()
+                                             if k.startswith("spec_rows_accepting_")))
+    return round(accepted / stats["spec_drafted"], 3) if stats.get("spec_drafted") else None
+
+
 def table(summary: dict) -> str:
     lines = ["| trace | backend | TTFT p50 / p99 ms | TPOT p50 / p99 ms | out tok/s | decode tok/s (batch) | "
-             "decode step: wall / CPU ms (p50) |", "|---|---|---|---|---|---|---|"]
+             "decode step: wall / CPU ms (p50) | draft acceptance |", "|---|---|---|---|---|---|---|---|"]
     for trace, by_backend in summary.items():
         for b, s in by_backend.items():
-            d = s["decode"]
+            d, a = s["decode"], acceptance(s["stats"])
             lines.append(f"| {trace} | {b} | {s['ttft_ms']['p50']} / {s['ttft_ms']['p99']} | {s['tpot_ms']['p50']} / "
                          f"{s['tpot_ms']['p99']} | {s['throughput_tok_s']} | {d['tok_s']} ({d['batch']}) | "
-                         f"{d['wall_ms_p50']} / {"-" if d['cpu_ms_p50'] is None else d['cpu_ms_p50']} |")
+                         f"{d['wall_ms_p50']} / {"-" if d['cpu_ms_p50'] is None else d['cpu_ms_p50']} | "
+                         f"{"-" if a is None else a} |")
     return "\n".join(lines)
 
 
@@ -161,6 +172,7 @@ def main() -> None:
     ap.add_argument("--max-batch", type=int, default=64, help="max running sequences (same for every backend)")
     ap.add_argument("--max-step-tokens", type=int, default=8192, help="max tokens per prefill step")
     ap.add_argument("--blocking-sync", action="store_true", help="CUDA waits sleep (for CPU time per step)")
+    ap.add_argument("--corpus", help="JSONL prompt set whose token ids prompts are cut from (default: uniform ids)")
     ap.add_argument("--evidence-dir", default=str(ROOT / "evidence"))
     args = ap.parse_args()
 
@@ -201,7 +213,9 @@ def main() -> None:
     record = {"workload": args.name, "date": date, "command": " ".join(["python bench/run.py", *argv]),
               "commit": commit, **({"dirty": dirty} if dirty else {}), "gpu_class": gpu,
               "model": model_id(args.model), "rounds": args.rounds,
-              "order": args.backends, "method": METHOD, "traces_sha256": traces, "backends": infos,
+              "order": args.backends, "method": METHOD, "traces_sha256": traces,
+              **({"corpus": {pathlib.Path(args.corpus).name: hashlib.sha256(pathlib.Path(args.corpus).read_bytes())
+                             .hexdigest()[:16]}} if args.corpus else {}), "backends": infos,
               "summary": summary, "runs": runs}
     out = pathlib.Path(args.evidence_dir) / f"bench_{args.name}_{gpu}_{date}.json"
     text = json.dumps(record, indent=1, default=str)

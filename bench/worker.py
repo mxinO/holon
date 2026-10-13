@@ -59,12 +59,14 @@ def main() -> None:
     ap.add_argument("--max-batch", type=int, required=True)
     ap.add_argument("--max-step-tokens", type=int, required=True)
     ap.add_argument("--blocking-sync", action="store_true")
+    ap.add_argument("--corpus", help="a JSONL prompt set: natural-text prompts (workloads.corpus)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     if args.blocking_sync:
         blocking_sync()
 
     traces = {pathlib.Path(p).stem: workloads.load(p) for p in args.traces}
+    corpus = workloads.corpus(args.corpus) if args.corpus else None
     longest = max(workloads.context_len(s) for sessions in traces.values() for s in sessions)
     mod = importlib.import_module(f"backends.{args.backend}")
     t = time.perf_counter()
@@ -74,9 +76,9 @@ def main() -> None:
     cases = []
     for name, sessions in traces.items():
         # Salts name the trace: prompts of one trace never prefix-match another trace's or the warmup's.
-        replay(backend, warmup_sessions(sessions), salt=f"{name}/warmup")
+        replay(backend, warmup_sessions(sessions), salt=f"{name}/warmup", corpus=corpus)
         before = backend.stats() if hasattr(backend, "stats") else None
-        done, steps = replay(backend, sessions, salt=f"{name}/run")
+        done, steps = replay(backend, sessions, salt=f"{name}/run", corpus=corpus)
         done.sort(key=lambda r: (r.sid, r.turn))
         cases.append({"trace": name, "requests": [r.row() for r in done], "steps": steps})
         if before is not None:                     # the backend's counters over this trace (warmup excluded)

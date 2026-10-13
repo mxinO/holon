@@ -23,6 +23,11 @@ class Backend(http.Backend):
     def info(self) -> dict:
         return {"config": {"flags": " ".join(self.flags)}}
 
+    def stats(self) -> dict[str, int]:
+        """The engine's counters (/metrics): prefix hits, and real drafts and verify rows by drafts accepted."""
+        return {k: v for k, v in self.server.get("/metrics").items()
+                if k == "prefix_tokens_saved" or k.startswith("spec_")}
+
 
 def _body(prompt: list[int], max_tokens: int) -> dict:
     return {"prompt": prompt, "max_tokens": max_tokens, "temperature": 0.0, "ignore_eos": True, "stream": True,

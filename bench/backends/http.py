@@ -58,6 +58,11 @@ class Server:
             except subprocess.TimeoutExpired:
                 os.killpg(self.proc.pid, 9)
 
+    def get(self, path: str) -> dict:
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=60)
+        conn.request("GET", path)
+        return json.loads(conn.getresponse().read())
+
     def stream(self, path: str, body: dict) -> Iterator[dict]:
         """The JSON objects of a server-sent event stream."""
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=3600)
