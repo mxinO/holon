@@ -89,3 +89,40 @@ def test_ngram_speculation_captures_graphs():
     assert sum(agree) >= 0.75 * len(agree) * params.max_tokens, agree
     stats = engine.stats()                       # every verify step replayed a graph
     assert stats["spec_verify_steps"] > 0 and stats["spec_verify_steps_graphed"] == stats["spec_verify_steps"]
+
+
+@pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
+def test_verify_graphs_equal_eager_on_the_same_padded_plans():
+    # M0.4 §1.4: a graphed engine and one that runs the very same padded plans eagerly (its graph runner calls the
+    # step instead of replaying it) emit the same tokens and accept the same drafts, greedy and sampled — five
+    # requests padded to the 8-row bucket, verify steps with the drafter and rewind inside.
+    from transformers import AutoTokenizer
+
+    class Eager:
+        def run(self, key, fn):
+            return fn()
+
+        def __len__(self):
+            return 0
+
+    tok = AutoTokenizer.from_pretrained(SNAP)
+    texts = ["1, 2, 3, 4, 5, 6, 7, 8,", "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n", "a b c a b c a b",
+             "The capital of France is Paris. The capital of France is", "for i in range(10):\n    print(i)\n"]
+    prompts = [tok(t)["input_ids"] for t in texts]
+    runs = [SamplingParams(temperature=0.0, max_tokens=40, ignore_eos=True),
+            SamplingParams(temperature=0.8, top_p=0.9, seed=3, max_tokens=40, ignore_eos=True)]
+    cfg = EngineConfig(model=str(SNAP), dtype=torch.bfloat16, max_seqs=8, max_model_len=256, max_draft_tokens=3,
+                       plugin_options={"spec.k": "3", "spec.fallback": 2},
+                       slots={"drafter": "drafters.ngram", "draft_policy": "std.spec.fixed_k",
+                              "verifier": "std.spec.greedy"})
+    outs = []
+    for graphed in (True, False):
+        engine = Engine(cfg)
+        if not graphed:
+            engine.executor.graphs = Eager()
+        outs.append(([engine.generate(prompts, params) for params in runs],
+                     {k: v for k, v in engine.stats().items() if k.startswith("spec_") and "graphed" not in k}))
+        stats = engine.stats()                   # the eager runner takes the graphed path too, without replays
+        assert stats["spec_verify_steps"] > 0 and stats["spec_verify_steps_graphed"] == stats["spec_verify_steps"]
+        del engine
+    assert outs[0] == outs[1]

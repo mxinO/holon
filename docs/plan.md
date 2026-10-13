@@ -426,6 +426,28 @@ Acceptance:
 - Acceptance length and speedup recorded on agent traces (A5000 + consumer desktops); graphs captured for the `spec.q` set.
 - Core diff target zero.
 
+### 7.1 Status (2026-10-13): Gate A met (MTP, n-gram); Gate B (DFlash2) in progress
+
+Design and evidence: `docs/m04-spec.md` (rev 3, reviewed clean; §10 is Gate A's status with every result, decision
+and deviation); records `evidence/bench_m04nat-*` (natural text), `fit_m04-*`, `judge/results/` (bounded, L0-drafter,
+snapshot); locks in `plans/`. The scope moved from this section's first draft: MTP from the target checkpoint itself
+(no separate MTP GGUF), DFlash2 added, `checkpoint_slots` dropped for GDN replay, the CPU lookup drafter and the
+cost-model policy deferred.
+
+| # | Result |
+|---|---|
+| 1 | Drafters `drafters.mtp` (Qwen3.5 / Qwen3.8 HF and GGUF heads) and `drafters.ngram` (device prompt lookup); verifiers `std.spec.greedy` (exact-match against the sampler's own draw, greedy or sampled) and `std.spec.rejection` (L0-dist); policy `std.spec.fixed_k`; core seams with toy proofs (core 3643 / 6000 lines) |
+| 2 | Lossless: bounded spec vs plain passes for Qwen3-8B + n-gram, Qwen3.5-9B + MTP, the 27B GGUF + MTP; GDN rollback by masked replay, bitwise at the unit; L0-drafter passes on Qwen3.5-9B |
+| 3 | 27B + MTP, natural text, single stream: 1.49× on the RTX 5080 (10.63 ms, llama.cpp MTP 10.53), 1.85× on the RTX 4090 (11.52 ms, llama.cpp 12.63); agent trace TPOT p50 1.71× / 1.75× (19.1 / 16.7 ms vs llama.cpp MTP 28.1 / 34.6); acceptance equal to llama.cpp's drafts; 2.6–2.8 tokens per verify step |
+| 4 | Verify steps 100% graphed, 99.6–100% at depth 1; n-gram on Qwen3-8B: agent 1.10×, single stream 0.97× (below break-even) |
+| 5 | All eight locks propagated, snapshots byte-identical (speculation off changes nothing) |
+
+Decisions: speculation is benchmarked on natural text (`--corpus`; uniform-id prompts inflate acceptance); MTP's
+k table stays `1:3,3:2`; lock approvals delegated for passing verdicts. Found on the way: the sampler's uniform
+could round to 1.0 (fixed); a stale MTP carry at position 0 (fixed by the L0-drafter judge); `repeat_interleave`
+without an output size broke capture. Next: Gate B (DFlash2 on the 4090), and M0.7's speculation items (a verify
+step costs ≈ 1.8 decode steps: multi-column mmvq, the MTP head, rewind's index ops).
+
 ## 8. M0.5 — structured output and tool calls
 
 Work: `grammar/xgrammar` LogitsProcessor (`host_input` bitmask; Rewindable matcher advancing through drafts and

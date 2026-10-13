@@ -1,0 +1,185 @@
+{
+ "workload": "m04nat-8b-decode_b1-ngram",
+ "date": "2026-10-12",
+ "command": "python bench/run.py --name m04nat-8b-decode_b1-ngram --gpu 0 --model unsloth/Qwen3-8B-GGUF@a6adef130ffb --rounds 2 --max-batch 4 --max-step-tokens 2048 --corpus judge/prompts/v1.jsonl --backends holon_http --traces bench/traces/decode_b1.jsonl",
+ "commit": "96f8d50aa91cc5725fc899d3b56ea5da2b70700e",
+ "gpu_class": "rtx-5080",
+ "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb",
+ "rounds": 2,
+ "order": ["holon_http"],
+ "method": "In-process engines driven by bench/driver.py, one scheduling step per call; client-side timestamps taken when a step returns a token. TTFT = first token - release (arrival, or previous turn's last token + gap); TPOT = (last - first) / (tokens - 1) per request; throughput = output tokens / (last token - first release). Decode steps = steps at peak batch that return no first token; decode tok/s = their tokens / their wall time. CPU ms/step = time.process_time() delta around step() on those steps, measured with --blocking-sync (CUDA primary context in blocking-sync mode and torch events created blocking, so waiting for the GPU sleeps and is not counted). Greedy, ignore_eos, fixed output lengths; warmup on the same shapes with other prompt tokens, excluded. HTTP backends (llamaserver, holon_http; bench/backends/http.py): streamed requests, a token timestamped when its chunk arrives; their 'steps' are client polls, so decode tok/s and CPU ms/step do not apply to them.",
+ "traces_sha256": {
+  "decode_b1": "cc41d53b03df6007"
+ },
+ "corpus": {
+  "v1.jsonl": "5157b507f2553584"
+ },
+ "backends": {
+  "holon_http": {
+   "config": {
+    "flags": "--max-seqs 4 --max-model-len 768 --max-step-tokens 2048 --memory-fraction 0.9 --max-draft-tokens 4 --slots drafter=drafters.ngram draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options spec.k=4 spec.fallback=4"
+   },
+   "load_s": 17.5,
+   "blocking_sync": false,
+   "packages": {
+    "torch": "2.11.0+cu130",
+    "triton": "3.6.0",
+    "flashinfer-python": "0.6.12"
+   }
+  }
+ },
+ "summary": {
+  "decode_b1": {
+   "holon_http": {
+    "requests": 2,
+    "ttft_ms": {
+     "p50": 34.94,
+     "p90": 35.05,
+     "p99": 35.07
+    },
+    "tpot_ms": {
+     "p50": 6.69,
+     "p90": 6.69,
+     "p99": 6.69
+    },
+    "throughput_tok_s": 147.1,
+    "throughput_per_round": [147.1, 147.1],
+    "decode": {
+     "batch": 5,
+     "steps": 4,
+     "tok_s": 676.5,
+     "wall_ms_p50": 7.39,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 512,
+    "stats": {
+     "prefix_tokens_saved": 0,
+     "spec_drafted": 264,
+     "spec_rows_k4_accepting_0": 264,
+     "spec_rows_k4_accepting_1": 4,
+     "spec_rows_k4_accepting_2": 4,
+     "spec_rows_k4_accepting_4": 4,
+     "spec_verify_steps": 276,
+     "spec_verify_steps_graphed": 276,
+     "spec_verify_steps_overlapped": 274
+    }
+   }
+  }
+ },
+ "runs": [
+  {
+   "round": 0,
+   "backend": "holon_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 34.8,
+     "p90": 34.8,
+     "p99": 34.8
+    },
+    "tpot_ms": {
+     "p50": 6.69,
+     "p90": 6.69,
+     "p99": 6.69
+    },
+    "throughput_tok_s": 147.1,
+    "throughput_per_round": [147.1],
+    "decode": {
+     "batch": 5,
+     "steps": 2,
+     "tok_s": 675.3,
+     "wall_ms_p50": 7.404,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "prefix_tokens_saved": 0,
+     "spec_drafted": 132,
+     "spec_rows_k4_accepting_0": 132,
+     "spec_rows_k4_accepting_1": 2,
+     "spec_rows_k4_accepting_2": 2,
+     "spec_rows_k4_accepting_4": 2,
+     "spec_verify_steps": 138,
+     "spec_verify_steps_graphed": 138,
+     "spec_verify_steps_overlapped": 137
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.034804, 1.740247]
+   ],
+   "stats": {
+    "prefix_tokens_saved": 0,
+    "spec_verify_steps": 138,
+    "spec_verify_steps_graphed": 138,
+    "spec_verify_steps_overlapped": 137,
+    "spec_drafted": 132,
+    "spec_rows_k4_accepting_0": 132,
+    "spec_rows_k4_accepting_2": 2,
+    "spec_rows_k4_accepting_4": 2,
+    "spec_rows_k4_accepting_1": 2
+   }
+  },
+  {
+   "round": 1,
+   "backend": "holon_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 35.07,
+     "p90": 35.07,
+     "p99": 35.07
+    },
+    "tpot_ms": {
+     "p50": 6.69,
+     "p90": 6.69,
+     "p99": 6.69
+    },
+    "throughput_tok_s": 147.1,
+    "throughput_per_round": [147.1],
+    "decode": {
+     "batch": 5,
+     "steps": 2,
+     "tok_s": 677.7,
+     "wall_ms_p50": 7.378,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "prefix_tokens_saved": 0,
+     "spec_drafted": 132,
+     "spec_rows_k4_accepting_0": 132,
+     "spec_rows_k4_accepting_1": 2,
+     "spec_rows_k4_accepting_2": 2,
+     "spec_rows_k4_accepting_4": 2,
+     "spec_verify_steps": 138,
+     "spec_verify_steps_graphed": 138,
+     "spec_verify_steps_overlapped": 137
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.035073, 1.740157]
+   ],
+   "stats": {
+    "prefix_tokens_saved": 0,
+    "spec_verify_steps": 138,
+    "spec_verify_steps_graphed": 138,
+    "spec_verify_steps_overlapped": 137,
+    "spec_drafted": 132,
+    "spec_rows_k4_accepting_0": 132,
+    "spec_rows_k4_accepting_2": 2,
+    "spec_rows_k4_accepting_4": 2,
+    "spec_rows_k4_accepting_1": 2
+   }
+  }
+ ]
+}

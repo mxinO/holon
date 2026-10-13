@@ -1,7 +1,7 @@
 # M0.4 — speculative decoding: MTP, DFlash2, n-gram: design and implementation plan
 
 Status: **revision 3, reviewed clean** (2026-10-13). Revisions 1–3 were reviewed by a panel of three; every finding is
-resolved in §9.
+resolved in §9. **Gate A met** (2026-10-13, §10): MTP and n-gram, merged to `main`; Gate B (DFlash2) next.
 
 Scope: plan §7, amended:
 - DFlash/DFlash2 is added. It was previously a v2 draft-model drafter.
@@ -562,3 +562,66 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
 | A-m1: reservation clamp dropped | restored, with the fast-path check (§3.2) |
 | A-m2: capture set misses shapes | every bucket × the declared q set (§3.6, D7) |
 | A-M1 (rev 3 recheck): drafting at the maximum k overruns MTP's reservation | only stateless drafters draft at the maximum k; MTP and DFlash draft at the step's k (§3.5) |
+
+## 10. Gate A status (2026-10-13): acceptance met for MTP and n-gram; Gate B (DFlash2) next
+
+Records in `evidence/` (`bench_m04nat-*`, natural text; `bench_m04-*`, uniform token ids) and `judge/results/`;
+locks in `plans/`. Gate A's code review: the panel of three, clean after two rounds (§9 style findings fixed in
+37f8368, d002fd7 and 96f8d50).
+
+| # | Result |
+|---|---|
+| 1 | `drafters/mtp` (Qwen3.5 / Qwen3.8, HF and GGUF heads), `drafters/ngram` (device prompt lookup). L0-drafter: the MTP head on Qwen3.5-9B bf16 against transformers' MTP block, fp32 golden and bf16 floor — top-1 98.68% vs 98.63%, KL p50 1.38e-4 vs 1.40e-4, PASS (A5000) |
+| 2 | Lossless. Bounded spec vs plain passes: Qwen3-8B bf16 + n-gram (A5000), Qwen3.5-9B bf16 + MTP (RTX PRO 6000), Qwen3.8-27B UD-IQ3_S + MTP (A5000); the replay-off-by-one and verify-writes-state plants fail it. L0-dist for `std.spec.rejection`: marginal (inside, edge, outside the top-p support, p(d) ≈ 1), the joint law of three tokens, the token after the last real draft (n_draft 1 and k), the largest coin; the keeps-draft and one-coin plants fail. The `test_spec` matrix on tiny Qwen3 and tiny qwen3_5 (oracle drafter, tiny MTP) is exact |
+| 3 | GDN replay: unit-level bitwise vs the accepted-tokens call (the §1.3 fallback), within 8 f32 ulps of decode calls, no drift over 60 rounds; L0 56/56 + memcheck on sm_86, sm_89, sm_120a. No checkpoint at a verify row (core test) |
+| 4 | Verify graphs captured per bucket × declared width × sampler variant. Measured on the 27B with MTP (`bench_m04nat-*-mtp-shares`): every verify step replays a graph (100/100 single stream, 2204/2204 and 2358/2358 on the agent trace) and 99.6–100% launch at depth 1 (the rest follow a forced commit); n-gram on Qwen3-8B: 100% graphed, 98.1% at depth 1 |
+| 5 | Speed, natural text (prompts cut from the judge prompt set): below |
+| 6 | Speculation off: all eight locks propagated (approved, delegated) with their snapshot traces byte-identical and L2 at the M0.3 values — rtx-5080: 30B UD-IQ3_XXS, 8B Q4_K_M, 8B UD-IQ3_XXS, 27B UD-IQ3_S; rtx-4090: 8B bf16, 30B Q4_K_M, 27B UD-Q4_K_M; rtx-5090: 8B bf16. Speculation on: the 27B snapshot run-identical (3 engines, A5000) |
+| 7 | Core: 3643 of 6000 code lines; the seams of §3, each with a toy proof |
+
+**Speed** (Qwen3.8-27B; RTX 5080 UD-IQ3_S, RTX 4090 UD-Q4_K_M; q8_0 KV, four checkpoints, max_seqs 4; MTP
+`spec.k=1:3,3:2`; llama-server at the same KV format with `--spec-type draft-mtp --spec-draft-n-max 3`):
+
+| | 5080 Holon | 5080 llama.cpp | 4090 Holon | 4090 llama.cpp |
+|---|---|---|---|---|
+| single stream TPOT, plain → MTP (ms) | 15.79 → 10.63 (1.49×) | 16.76 → 10.53 | 21.33 → 11.52 (1.85×) | 22.69 → 12.63 |
+| single stream, MTP acceptance (drafts) | 0.52 | 0.54 | 0.55 | 0.52 |
+| tokens per verify step, single stream | 2.56 | — | 2.66 | — |
+| agent TPOT p50, plain → MTP (ms) | 32.5 → 19.1 (1.71×) | 50.4 → 28.1 | 29.2 → 16.7 (1.75×) | 52.2 → 34.6 |
+| agent tokens per verify step (k 3 and 2) | 2.78 | — | 2.82 | — |
+| agent TTFT p50, MTP (s) | 0.91 | 1.63 | 0.61 | 2.69 |
+
+**n-gram** (Qwen3-8B Q4_K_M on the RTX 5080, `spec.k=4 spec.fallback=4`, natural text): single stream 1.10 tokens
+per verify step, TPOT 6.48 → 6.69 ms (0.97×: below the predicted break-even of ≈ 1.2); agent trace 1.56 tokens per
+step (predicted 1.3–1.8), TPOT p50 7.36 → 6.68 ms (1.10×).
+
+**Memory fit** (27B + MTP, max_seqs 4, four checkpoints, `fit_m04-27b-mtp_*`): 39.6K KV tokens on the RTX 5080
+(q8_0 KV; predicted ≈ 42K; 58K without MTP), 48.5K on the RTX 4090 (bf16 KV). The 32K agent context fits.
+
+Against the predictions (§5): acceptance length 2.3–2.8 → 2.56–2.82, and the same acceptance as llama.cpp's drafts
+(within 0.03); 5080 single stream predicted 1.5–1.8× → **1.49×** (below the range, above the 1.2× pivot: no pivot);
+5080 at max_seqs 4 predicted 1.15–1.3× → 1.71×. k = 2 single stream: 10.73 ms (5080) and 12.78 ms (4090), so the
+table stays `1:3,3:2`. Uniform-id prompts (`bench_m04-*`) inflate acceptance (greedy continuations of token soup
+repeat): 132 tok/s single stream on the 5080 there; those runs are kept as upper bounds only.
+
+**Decisions and deviations (recorded at the close)**
+- **Evidence regime.** Speculation is measured on natural text (`bench/run.py --corpus`); acceptance is recorded
+  per position and per k (`Engine.stats()`, `/metrics`), and llama-server's `draft_n` / `draft_n_accepted`. The
+  reviewer's catch: the first Gate A records used uniform ids.
+- **L0-drafter as built** (vs §1.1 and §5): the reference is transformers' own MTP block run on its own fp32 target's
+  hidden states (not recorded ones), chain step 1 only. GGUF heads (dequantized reference with q8_1 emulation) and
+  teacher-forced steps 2+ move to Gate B with DFlash2's L0-drafter; for Gate A the GGUF head rests on the natural-text
+  acceptance matching llama.cpp's on the same file.
+- **Qwen3.5-9B bf16 bounded on the RTX PRO 6000**, not the A5000: 19 GB of weights leave no room for the startup
+  profile on 24 GB.
+- **The sampler's uniform is clamped below 1** (a bug: the top 24-bit value rounded to 1.0 in fp32, 1 in 2²⁴ draws,
+  which emitted a filtered or last token). It changes plain sampled draws only at that value; every snapshot stays
+  identical.
+- **`spec.fallback`** is for drafters that draft on plain steps (n-gram), documented, not enforced. On single-stream
+  chat it does not switch n-gram off (some drafts keep arriving, 1.10 tokens per step): a policy that turns off below
+  the break-even is the cost-model policy's job (§7).
+- **Lock approvals delegated** (user, 2026-10-13: "you can push the locks if verified"): written with `--approve` only
+  for passing verdicts; all eight passed with byte-identical snapshots.
+- **Below-prediction single stream on the 5080:** a verify step costs ≈ 1.8 decode steps (A5000 profile: multi-column
+  mmvq +6 ms, the MTP head's lm_head 3 × 1.6 ms, rewind index ops ≈ 2 ms). Those three are M0.7's speculation items
+  (fusion and a small-batch quantized matmul), not Gate A blockers.
