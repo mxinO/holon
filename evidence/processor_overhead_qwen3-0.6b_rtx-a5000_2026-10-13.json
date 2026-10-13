@@ -1,0 +1,148 @@
+{
+ "workload": "processor_overhead",
+ "date": "2026-10-13",
+ "gpu_class": "rtx-a5000",
+ "model": "Qwen/Qwen3-0.6B@c1899de289a0",
+ "command": "python bench/processor_overhead.py --gpu 2 --model Qwen/Qwen3-0.6B@c1899de289a0 --rounds 3",
+ "commit": "1ecc044270b454ae1d9ce4e70003efd6f14b46f8",
+ "results": {
+  "plain/none": [
+   {
+    "graphs": 27,
+    "capture_s": 1.17,
+    "graph_pool_mib": 526.0,
+    "init_s": 5.43,
+    "kv_tokens": 172800
+   },
+   {
+    "graphs": 27,
+    "capture_s": 1.07,
+    "graph_pool_mib": 526.0,
+    "init_s": 2.07,
+    "kv_tokens": 166624
+   },
+   {
+    "graphs": 27,
+    "capture_s": 1.07,
+    "graph_pool_mib": 526.0,
+    "init_s": 2.07,
+    "kv_tokens": 166800
+   }
+  ],
+  "plain/toy": [
+   {
+    "graphs": 54,
+    "capture_s": 2.16,
+    "graph_pool_mib": 526.0,
+    "init_s": 3.32,
+    "kv_tokens": 172016
+   },
+   {
+    "graphs": 54,
+    "capture_s": 2.19,
+    "graph_pool_mib": 526.0,
+    "init_s": 3.36,
+    "kv_tokens": 167952
+   },
+   {
+    "graphs": 54,
+    "capture_s": 2.2,
+    "graph_pool_mib": 526.0,
+    "init_s": 3.33,
+    "kv_tokens": 167952
+   }
+  ],
+  "plain/null": [
+   {
+    "graphs": 54,
+    "capture_s": 2.15,
+    "graph_pool_mib": 526.0,
+    "init_s": 3.28,
+    "kv_tokens": 170832
+   },
+   {
+    "graphs": 54,
+    "capture_s": 2.11,
+    "graph_pool_mib": 526.0,
+    "init_s": 3.24,
+    "kv_tokens": 167952
+   },
+   {
+    "graphs": 54,
+    "capture_s": 2.12,
+    "graph_pool_mib": 526.0,
+    "init_s": 3.25,
+    "kv_tokens": 167952
+   }
+  ],
+  "ngram-k3/none": [
+   {
+    "graphs": 54,
+    "capture_s": 2.59,
+    "graph_pool_mib": 1568.0,
+    "init_s": 3.92,
+    "kv_tokens": 152144
+   },
+   {
+    "graphs": 54,
+    "capture_s": 2.53,
+    "graph_pool_mib": 1568.0,
+    "init_s": 3.77,
+    "kv_tokens": 149280
+   },
+   {
+    "graphs": 54,
+    "capture_s": 2.53,
+    "graph_pool_mib": 1568.0,
+    "init_s": 3.81,
+    "kv_tokens": 149280
+   }
+  ],
+  "ngram-k3/toy": [
+   {
+    "graphs": 108,
+    "capture_s": 5.17,
+    "graph_pool_mib": 1568.0,
+    "init_s": 6.78,
+    "kv_tokens": 150656
+   },
+   {
+    "graphs": 108,
+    "capture_s": 5.16,
+    "graph_pool_mib": 1568.0,
+    "init_s": 6.78,
+    "kv_tokens": 148128
+   },
+   {
+    "graphs": 108,
+    "capture_s": 4.91,
+    "graph_pool_mib": 1568.0,
+    "init_s": 6.54,
+    "kv_tokens": 147952
+   }
+  ],
+  "ngram-k3/null": [
+   {
+    "graphs": 108,
+    "capture_s": 4.99,
+    "graph_pool_mib": 1568.0,
+    "init_s": 6.59,
+    "kv_tokens": 147952
+   },
+   {
+    "graphs": 108,
+    "capture_s": 5.02,
+    "graph_pool_mib": 1568.0,
+    "init_s": 6.6,
+    "kv_tokens": 148128
+   },
+   {
+    "graphs": 108,
+    "capture_s": 4.87,
+    "graph_pool_mib": 1568.0,
+    "init_s": 6.42,
+    "kv_tokens": 147952
+   }
+  ]
+ }
+}

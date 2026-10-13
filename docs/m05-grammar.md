@@ -358,6 +358,13 @@ unread `max_depth` is removed (the gate comes from `open`).
 - Graphs double when a processor is selected (the 27B config: 27 → 54: buckets {1, 2, 4} × widths {1, 3, 4} × 3
   sampler variants × mask on/off). The graph-pool and capture-time deltas and the KV tokens lost are measured at step
   1 and recorded; the profile includes `apply`. With no processor selected, nothing changes (acceptance 6).
+- **Measured (step 1,** `evidence/processor_overhead_qwen3-0.6b_rtx-a5000_2026-10-13.json`, Qwen3-0.6B bf16,
+  rtx-a5000, default settings: max_seqs 64, three interleaved rounds; the toy processor, and the toy with a no-op
+  `apply` for the core's own cost): graphs double (27 → 54 plain; 54 → 108 with n-gram k = 3); capture time doubles
+  (1.07–1.17 → 2.11–2.20 s plain; 2.53–2.59 → 4.87–5.17 s with k = 3); the graph pool does not grow (526 and
+  1568 MiB with and without: the masked graphs reuse the blocks the unmasked ones reserved); KV tokens lost are
+  within the run-to-run noise of the pool sizing (plain 166.6k–172.8k without, 167.9k–172.0k with; k = 3 149.3k
+  vs 148.0k in the last two rounds, ≤ 1%). The toy's dense `apply` costs nothing measurable over the no-op.
 - Host RAM when the grammar processor is selected: two vetting workers at ≈ 1.1 GB resident each (≈ 2.2 GB, up to
   ≈ 4.4 GB at the watchdog bound) plus the 512 MB compiled-grammar cache — measured at step 2; if it matters on
   consumer hosts, one worker (more queueing) or a worker that never imports torch.
@@ -527,6 +534,9 @@ Proofs:
   failed sequence aborts its siblings' engine requests. `test_ipc.py`: a request blocked on an idle engine process
   completes, the loop polling every 5 ms rather than spinning; rejections carry kind `client`.
 - `test_frontend_openai.py`: kinds map to 400 / 503 / 500; masked logprobs clamp to −9999.
+
+Measured (§6): graphs and capture time double with a processor selected; graph pool unchanged; KV tokens lost
+≤ 1%, within the pool sizing's run-to-run noise.
 
 Deviations (simplest option consistent with the decisions):
 - The toy proofs live in `plugins/tests`, the toy plugin in `testing/` (acceptance 7 and §3 say `core/tests`): every
