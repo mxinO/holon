@@ -7,7 +7,7 @@ import pytest
 import torch
 from holon.core.engine import Engine, EngineConfig
 from holon_judge import drafter
-from holon_judge.compare import compare
+from holon_judge.compare import compare_drafter
 from holon_judge.recording import Prompt, PromptSet
 from holon_testing.qwen3_5_files import can_convert, convert, save, tiny_hf
 
@@ -31,7 +31,7 @@ def _engine(path):
 
 def test_the_engine_head_passes(case):
     path, prompts, golden, floor = case
-    result = compare(golden, drafter.candidate(_engine(path), prompts), floor)
+    result = compare_drafter(golden, drafter.candidate(_engine(path), prompts), floor)
     assert result.passed and result.overall.top1 > 0.99
 
 
@@ -42,7 +42,7 @@ def test_a_swapped_concat_fails(case, monkeypatch):
     init = units.MTPHead.__init__
     monkeypatch.setattr(units.MTPHead, "__init__", lambda self, ctx, **kw: init(self, ctx, **{**kw, "order":
                                                                                                "hidden_first"}))
-    assert compare(golden, drafter.candidate(_engine(path), prompts), floor).passed is False
+    assert compare_drafter(golden, drafter.candidate(_engine(path), prompts), floor).passed is False
 
 
 def test_dflash_passes_and_its_tap_offset_fails(case, tmp_path):
@@ -62,7 +62,7 @@ def test_dflash_passes_and_its_tap_offset_fails(case, tmp_path):
         cand, inputs = drafter.dflash_candidate(engine, cuts)
         golden, floor = (drafter.dflash_reference(str(draft), str(path), cuts, inputs, dtype)
                          for dtype in (torch.float32, torch.bfloat16))
-        return compare(golden, cand, floor)
+        return compare_drafter(golden, cand, floor)
 
     result = judged()
     assert result.passed and result.overall.top1 > 0.99 and result.overall.n == 7 * len(cuts.prompts)
@@ -92,7 +92,8 @@ def test_a_gguf_mtp_chain_passes_and_its_swapped_concat_fails(tmp_path, monkeypa
                                      slots={"drafter": "drafters.mtp", "draft_policy": "std.spec.fixed_k",
                                             "verifier": "std.spec.greedy"}))
         cand, inputs = drafter.mtp_candidate(engine, cuts, 3)
-        return compare(*(r.record(cuts, inputs) for r in references[:1]), cand, references[1].record(cuts, inputs))
+        golden, floor = (r.record(cuts, inputs) for r in references)
+        return compare_drafter(golden, cand, floor)
 
     result = judged()
     assert result.passed and result.overall.top1 > 0.99 and result.overall.n == 3 * len(cuts.prompts)

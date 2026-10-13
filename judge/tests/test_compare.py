@@ -1,7 +1,7 @@
 """L2 comparator math on synthetic recordings."""
 import pytest
 import torch
-from holon_judge.compare import Budgets, compare, kl_topk
+from holon_judge.compare import Budgets, compare, compare_drafter, kl_topk
 from holon_judge.recording import Recording
 
 V, K = 64, 20
@@ -134,3 +134,25 @@ def test_an_error_in_one_sequence_cannot_widen_its_own_budget(case):
     d, se = r.dppl_vs_floor
     assert d < 0.0025 + 2.5 * se                                 # within the uncapped budget: it would have passed
     assert any("ΔPPL vs floor" in f for f in r.failures)
+
+
+def test_the_drafter_rule_gates_on_confident_positions(case):
+    # Draft heads are judged on few positions (docs/m04-spec.md §5): a candidate that flips near-ties only — where a
+    # correct bf16 path moves the top-2 margin as much — passes, though L2's all-position top-1 rule fails it; one
+    # that flips confident positions fails.
+    lens, logits, targets, noise = case
+    g, floor = _recording(logits, targets, lens), _recording(noise(0.02), targets, lens)
+    top2 = logits.topk(2, -1)
+    margin = top2.values[:, 0] - top2.values[:, 1]
+
+    def flipped(rows: torch.Tensor) -> torch.Tensor:          # the top-2 swapped at `rows`
+        out = logits.clone()
+        r = rows.nonzero()[:, 0]
+        out[r, top2.indices[r, 0]], out[r, top2.indices[r, 1]] = top2.values[r, 1], top2.values[r, 0]
+        return out
+
+    near = compare_drafter(g, _recording(flipped(margin < 0.06), targets, lens), floor)
+    assert near.passed and near.drafter["l2_failures"]
+    far = compare_drafter(g, _recording(flipped((margin > 1) & (torch.arange(len(margin)) % 50 == 0)), targets, lens),
+                          floor)
+    assert far.passed is False and "confident" in far.failures[0]

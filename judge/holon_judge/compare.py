@@ -84,6 +84,7 @@ class Result:
     budgets: Budgets | None = None
     failures: tuple[str, ...] = ()
     dppl_vs_floor: tuple[float, float] | None = None   # the candidate's ΔPPL against the floor, its SE
+    drafter: dict | None = None    # the L0-drafter rule's numbers (`compare_drafter`): its verdict replaces L2's
 
     @property
     def passed(self) -> bool | None:
@@ -110,6 +111,12 @@ class Result:
                         f"{'≤' + format(b.kl_p50_max, '.2e'):>9s} {'≤' + format(b.kl_p99_max, '.2e'):>9s} "
                         f"{'':9s} {'≤' + format(b.dppl_max, '.3%'):>17s}")
         rows += [_row(name, m) for name, m in self.categories.items()]
+        if (d := self.drafter) is not None:
+            rows += [f"L0-drafter (§5): {d['n_confident']} positions of margin > {d['margin']:.3e} (the floor's p99 "
+                     f"|Δ margin|): top-1 {d['top1']:.3%} vs floor {d['floor_top1']:.3%} (≥ {d['top1_min']:.3%}); "
+                     f"KL mean {d['kl_mean']:.3e} (≤ {d['kl_mean_max']:.3e}); confident disagreements by row of a "
+                     f"draft (block row, chain step): {d['confident_disagreements_by_row']}",
+                     "L2's rule, reported only: " + ("pass" if not d["l2_failures"] else "; ".join(d["l2_failures"]))]
         where = f"{self.candidate.get('model')} {self.candidate.get('dtype')} vs {self.golden.get('dtype')} golden"
         if self.passed is None:
             verdict = "no floor given: metrics only"
@@ -229,3 +236,40 @@ def compare(golden: Recording, cand: Recording, floor: Recording | None = None) 
         failures = budgets.failures(overall, paired[0]) + _path_failures(floor.meta, cand.meta)
     return Result(_provenance(golden), _provenance(cand), overall, categories, floor_m, budgets, tuple(failures),
                   paired)
+
+
+def _margins(golden: Recording, rec: Recording) -> torch.Tensor:
+    """Per position, `rec`'s margin between the golden's top-2 ids (nan where `rec`'s top-k lacks either)."""
+    out = []
+    for j in (0, 1):
+        match = rec.topk_ids == golden.topk_ids[:, j:j + 1]
+        lp = torch.where(match, rec.topk_lp, torch.nan).nansum(-1).where(match.any(-1), torch.nan)
+        out.append(lp)
+    return out[0] - out[1]
+
+
+def compare_drafter(golden: Recording, cand: Recording, floor: Recording) -> Result:
+    """The L0-drafter check (docs/m04-spec.md §5): pass iff the candidate's top-1 agreement at confident positions —
+    those whose golden top-2 margin exceeds the floor's 99th-percentile perturbation of that margin (how far a correct
+    bf16 path moves it) — is at least the floor's − 0.25 points there, and its mean KL at most 2× the floor's. Draft
+    heads are judged on few positions, where L2's all-position top-1 rule turns on a row or two at near-ties; L2's
+    metrics and verdict are reported alongside."""
+    result = compare(golden, cand, floor)
+    margin = golden.topk_lp[:, 0] - golden.topk_lp[:, 1]
+    shift = (_margins(golden, floor) - margin).abs()
+    threshold = torch.quantile(shift[~shift.isnan()].double(), 0.99).item()
+    confident = margin > threshold
+    agree = lambda rec: (golden.topk_ids[confident, 0] == rec.topk_ids[confident, 0]).double().mean().item()  # noqa
+    within = torch.arange(len(margin)) - golden.offsets[golden.seq_index()]       # a row's place in its sequence
+    missed = confident & (golden.topk_ids[:, 0] != cand.topk_ids[:, 0])
+    numbers = {"margin": threshold, "n_confident": int(confident.sum()), "top1": agree(cand),
+               "confident_disagreements_by_row": torch.bincount(within[missed], minlength=int(within.max()) + 1
+                                                                ).tolist(),
+               "floor_top1": agree(floor), "top1_min": agree(floor) - TOP1_DELTA, "kl_mean": result.overall.kl_mean,
+               "kl_mean_max": KL_FACTOR * result.floor.kl_mean, "l2_failures": list(result.failures)}
+    failures = [msg for ok, msg in (
+        (numbers["top1"] >= numbers["top1_min"], f"top-1 at confident positions {numbers['top1']:.4%} < "
+                                                 f"{numbers['top1_min']:.4%}"),
+        (numbers["kl_mean"] <= numbers["kl_mean_max"], f"KL mean {numbers['kl_mean']:.3e} > "
+                                                       f"{numbers['kl_mean_max']:.3e}")) if not ok]
+    return dataclasses.replace(result, failures=tuple(failures), drafter=numbers)

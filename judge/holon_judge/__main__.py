@@ -34,7 +34,7 @@ import torch
 
 from . import golden
 from . import kv as kv_format
-from .compare import Result, compare
+from .compare import Result, compare, compare_drafter
 from .planted import PLANTS
 from .recording import PromptSet, Recording
 
@@ -179,7 +179,7 @@ def _drafter(a: argparse.Namespace) -> int:
     cand.meta |= {"model": golden.model_meta(golden.resolve_model(a.model))["model"],
                   "dtype": str(config.dtype).removeprefix("torch.")}
     engine.close()
-    return _report(compare(recordings["golden"], cand, recordings["floor"]), a.json)
+    return _report(compare_drafter(recordings["golden"], cand, recordings["floor"]), a.json)
 
 
 def _drafter_cuts(a: argparse.Namespace) -> int:
@@ -222,7 +222,7 @@ def _drafter_cuts(a: argparse.Namespace) -> int:
         reference = lambda dtype, q8_1: drafter.MTPReference(model, dtype, q8_1, reader).record(  # noqa: E731
             prompts, inputs, a.k)
     golden_rec = reference(torch.float32, False)
-    return _report(compare(golden_rec, cand, reference(golden.DTYPES[a.dtype], True)), a.json)
+    return _report(compare_drafter(golden_rec, cand, reference(golden.DTYPES[a.dtype], True)), a.json)
 
 
 def _bounded(a: argparse.Namespace) -> int:
