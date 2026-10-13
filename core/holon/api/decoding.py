@@ -10,12 +10,14 @@ import dataclasses
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Hashable
+    from collections.abc import Hashable, Iterable
 
     import numpy as np
     import torch
 
     from .batch import BatchPlan, SamplingParams, Seq, StepCtx
+    from .model import BuildCtx, ModelSpec
+    from .quant import QTensor
 
 
 @dataclasses.dataclass(slots=True, eq=False)
@@ -79,9 +81,42 @@ class Verifier(Protocol):
 
 
 class Drafter(Protocol):
-    def propose(self, ctx: StepCtx) -> None:
-        """After each sample stage: write `seq_table.draft_tokens[slot, :k_max]` for the sampled rows' slots, the
-        drafts for positions `num_computed[slot] + 1 + j` (num_computed is already advanced)."""
+    """Built by the `drafter` slot's plugin (`DrafterPlugin.build`); `admit`, `substeps`, `lookahead` are optional."""
+
+    def admit(self, slot: int, tokens: list[int]) -> None:
+        """Host: a request now owns `slot`; `tokens` is its whole history so far, prefix-hit tokens included (copy it
+        with a pinned asynchronous copy: this is not per step). Resets the slot's carried state."""
+
+    def run(self, ctx: StepCtx, h: torch.Tensor) -> None:
+        """After every step's sample stage (prefill chunks too), inside the step's graph when captured. `h` [T, H] is
+        the target trunk's output for every token of the step; for verify rows the SeqTable already holds `n_accept`
+        and the advanced `num_computed`. Writes the drafter's own state for the step's tokens, then, for the rows that
+        sampled, `seq_table.draft_tokens[slot, :n]` (positions `num_computed[slot] + 1 + j`) and `n_draft[slot] = n`,
+        n at most the step's `plan.draft_k` if the drafter writes state per draft, else at most the engine's maximum."""
+
+    def substeps(self, k: int) -> list[int]:
+        """The query widths of the sub-steps `run` asks for at k drafts (fixed, so graphs can be captured)."""
+
+    def lookahead(self, k: int) -> int:
+        """Positions past a row's own tokens `run` writes state at, at k drafts (the scheduler reserves them)."""
+
+
+class TargetView(Protocol):
+    """What a drafter may use of the target it drafts for."""
+
+    spec: ModelSpec
+
+    def shared(self, name: str) -> torch.nn.Module:
+        """A built target module (`embed`, `norm`, `lm_head`), shared rather than loaded twice."""
+
+    def tensors(self) -> Iterable[tuple[str, torch.Tensor | QTensor]]:
+        """The target checkpoint's tensors (e.g. a draft head stored with it)."""
+
+
+class DrafterPlugin(Protocol):
+    """The `drafter` slot's plugin object."""
+
+    def build(self, ctx: BuildCtx, target: TargetView) -> Drafter: ...
 
 
 class DraftPolicy(Protocol):

@@ -17,6 +17,7 @@ from .batch import (
 )
 from .decoding import (
     Drafter,
+    DrafterPlugin,
     DraftPolicy,
     LogitsProcessor,
     PlanTransform,
@@ -24,6 +25,7 @@ from .decoding import (
     Sampler,
     SamplerPlugin,
     SchedulePolicy,
+    TargetView,
     Verifier,
 )
 from .frontend import (
@@ -65,14 +67,14 @@ from .terms import Ref, canonical_hash, parse_versioned, to_term
 
 __all__ = [
     "SLOTS", "Abort", "Batch", "BatchPlan", "Binding", "BuildCtx", "Cardinality", "Constraint",
-    "Converter", "DeviceBatch", "Dialect", "DraftPolicy", "Drafter", "EngineClient",
+    "Converter", "DeviceBatch", "Dialect", "DraftPolicy", "Drafter", "DrafterPlugin", "EngineClient",
     "EngineRequest", "Event", "Fingerprint", "FrontendBundle", "FrontendPlugin", "HitLen", "InStepPublish",
     "KernelRegistry", "KernelSpec", "LayerDecl", "Layout", "Ledger", "Lock", "LogitsProcessor", "Logprobs",
     "Manifest", "MemOp", "Mixer", "ModelPlugin", "ModelSpec", "Paged", "Pages", "Parser", "Payload", "Plan",
     "PlanTransform", "Planner", "Platform", "Plugin", "Pool", "PrefixView", "Provenance", "QTensor", "Ref",
     "Registries", "Registry", "Resource", "Rewindable", "SampleOut", "Sampler", "SamplerPlugin", "SamplingParams",
     "Scale", "SchedulePolicy", "Scheme", "SchemeImpl", "Seq", "SeqTable", "SeqView", "ShapeKey", "Slot", "StateKind",
-    "StateKindFactory", "StateSpec", "Status", "StepCtx", "TokenDelta", "TokenSrc", "Tokenizer", "Tunable", "Unit",
-    "UnitPin", "Verifier", "WeightMap", "WeightRule", "WeightSource", "canonical_hash", "parse_versioned",
-    "sequence_seed", "to_term",
+    "StateKindFactory", "StateSpec", "Status", "StepCtx", "TargetView", "TokenDelta", "TokenSrc", "Tokenizer",
+    "Tunable", "Unit", "UnitPin", "Verifier", "WeightMap", "WeightRule", "WeightSource", "canonical_hash",
+    "parse_versioned", "sequence_seed", "to_term",
 ]

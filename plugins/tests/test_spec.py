@@ -84,6 +84,31 @@ def test_drafts_past_n_draft_are_never_accepted(tiny_checkpoint, tiny_case, orac
     assert any(n_accept > 0 for *_, n_accept in others) and all(k == 3 for _, k, _, _ in oracle.observed)
 
 
+@pytest.mark.parametrize("memory", [1 << 20, 12 * 2048], ids=["roomy", "preempting"])
+@pytest.mark.parametrize("mode", ["right", "mixed"])
+def test_the_drafter_sees_every_committed_token(tiny_checkpoint, tiny_case, oracle, mode, memory):  # noqa: F811
+    # What a drafter admits (the whole history, prefix hits included) and absorbs (every step's inputs) must equal
+    # the committed tokens after every step — through chunked prefill, rejected drafts, preemption and a second
+    # pass over the same prompts that hits the prefix cache (M0.4 §3.3).
+    prompts, expected = tiny_case
+    oracle.mode = mode
+    engine = _engine(tiny_checkpoint, state_memory=memory, max_step_tokens=6, overlap=False)   # exact host lengths
+    for _ in range(2):
+        rids = [engine.add(p, GREEDY) for p in prompts]
+        out = {r: [] for r in rids}
+        while engine.has_work():
+            for d in engine.step():
+                out[d.rid] += d.token_ids
+            for seq in engine.sched.running:
+                n = seq.num_computed
+                assert oracle.history[seq.slot, :n].tolist() == seq.tokens[:n]
+                absorbed = oracle.absorbed[seq.slot, :n].tolist()            # from the first computed position on:
+                first = next(i for i, t in enumerate(absorbed) if t >= 0)    # no gaps (every chunk was absorbed)
+                assert absorbed[first:] == seq.tokens[first:n]
+        assert [out[r] for r in rids] == expected
+    assert engine.state.tokens_saved > 0
+
+
 def test_a_stop_inside_accepted_drafts(tiny_checkpoint, tiny_case, oracle):  # noqa: F811
     prompts, expected = tiny_case
     stop = expected[1][4]

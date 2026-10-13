@@ -204,7 +204,7 @@ class Executor:
         if graphed:
             keys = [meta.graph_key for meta in ctx.metas.values()]
             key = (len(plan.slots), self.sampler.variant(plan.slots), *keys)
-            sampled = self.graphs.run(key, lambda: self._decode(ctx))
+            sampled = self.graphs.run(key, lambda: self._decode(ctx))           # the drafter's run included
         else:
             self._prepare(ctx)
             h = self.model.trunk(ctx)               # always: chunks without sampled rows still write their state
@@ -220,9 +220,10 @@ class Executor:
             elif plan.n_logits.any():
                 out = self.sampler.sample(logits.float(), ctx)
                 sampled = self._store(ctx, out.tokens)
+            if self.drafter is not None:
+                self.drafter.run(ctx, h)            # its state for this step's tokens, then the next step's drafts
         run_mem_ops(plan.mem_ops, self.pools, "post_sample")
         if sampled is not None and self.drafter is not None:
-            self.drafter.propose(ctx)               # drafts for the next step, from the advanced SeqTable
             drafts = self._out_drafts[self._out_turn][:rows].copy_(self.seq_table.n_draft[ctx.batch.dev.slots[:rows]],
                                                                    non_blocking=True)
         tokens = lps = None
@@ -240,9 +241,15 @@ class Executor:
         return Launched(tokens, accepts, drafts, lps, done, recorded)
 
     def _decode(self, ctx: StepContext) -> torch.Tensor:
-        """A decode step's device work from inputs to sampled tokens — the part captured in a graph."""
+        """A decode step's device work from inputs to sampled tokens and the drafter's run — the part captured in a
+        graph."""
         self._prepare(ctx)
-        return self._store(ctx, self.sampler.sample(self.model(ctx).float(), ctx).tokens)
+        h = self.model.trunk(ctx)
+        logits = self.model.head(h[ctx.batch.dev.logits_index]).float()
+        tokens = self._store(ctx, self.sampler.sample(logits, ctx).tokens)
+        if self.drafter is not None:
+            self.drafter.run(ctx, h)
+        return tokens
 
     def _store(self, ctx: StepContext, tokens: torch.Tensor, accepts: torch.Tensor | None = None) -> torch.Tensor:
         """Advance the device SeqTable for the sampled rows: the next input token and the computed length — for a

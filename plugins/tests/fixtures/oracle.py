@@ -15,6 +15,8 @@ class Oracle:
     steps: int = 0
     hidden: set[tuple[int, ...]] = dataclasses.field(default_factory=set)   # prompts drafted right, but n_draft 0
     hidden_slots: set[int] = dataclasses.field(default_factory=set)
+    history: object = None                         # the drafter's per-slot token history (a [slots, positions] tensor)
+    absorbed: object = None                        # the part of it that came from steps' inputs
     observed: list[tuple[tuple[int, ...], int, int, int]] = dataclasses.field(default_factory=list)
     # (prompt, k, n_draft, n_accept) per committed sampled row
 

@@ -69,6 +69,21 @@ class _Inflight:
     publishes: list = dataclasses.field(default_factory=list)   # payloads to register at the commit
 
 
+class _Target:
+    """The TargetView a drafter builds against: the target's spec, its built shared modules, its checkpoint."""
+
+    def __init__(self, spec, model, source) -> None:
+        self.spec, self._model, self._source = spec, model, source
+
+    def shared(self, name: str):
+        if name not in ("embed", "norm", "lm_head"):
+            raise KeyError(f"the target shares embed, norm and lm_head, not {name!r}")
+        return getattr(self._model, name)
+
+    def tensors(self):
+        return self._source.tensors()
+
+
 class Engine:
     def __init__(self, cfg: EngineConfig, plugins: PluginSet | None = None) -> None:
         self.cfg, self.device = cfg, torch.device(cfg.device)
@@ -93,10 +108,16 @@ class Engine:
         # checks; all three are plugins, used only when drafts are enabled and a policy is installed.
         self.policy = drafter = verifier = None
         if cfg.max_draft_tokens and any(True for _ in p.by_slot("draft_policy")):
-            self.policy, drafter = p.load(p.single("draft_policy")), p.load(p.single("drafter"))
-            verifier = p.load(p.single("verifier"))
-        self.state = StateManager(bound, cfg.max_seqs, cfg.max_model_len, self.device,
-                                  on_admit=lambda seq: sampler.admit(seq.slot, seq.params),
+            self.policy, verifier = p.load(p.single("draft_policy")), p.load(p.single("verifier"))
+            drafter = p.load(p.single("drafter")).build(self.ctx, _Target(self.spec, model, source))
+        admit_draft = getattr(drafter, "admit", None)
+
+        def admit(seq: Seq) -> None:
+            sampler.admit(seq.slot, seq.params)
+            if admit_draft is not None:
+                admit_draft(seq.slot, seq.tokens)
+
+        self.state = StateManager(bound, cfg.max_seqs, cfg.max_model_len, self.device, on_admit=admit,
                                   index=prefix_index(self.spec, bound, cfg.prefix_cache, self.ledger.pools),
                                   overflow=self._overflow(drafter))
         host_lens = any(getattr(planner, "needs_host_lens", False) for planner in planners.values())
