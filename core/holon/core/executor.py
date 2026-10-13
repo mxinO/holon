@@ -17,7 +17,7 @@ from holon.api import Batch, BatchPlan, DeviceBatch, Logprobs, Pages, SamplingPa
 
 from . import platform
 from .batching import host_plan, padded
-from .build import StepContext
+from .build import StepContext, local_batch
 from .inputs import Uploader
 from .memory import Ledger, run_mem_ops
 from .state import StateManager
@@ -72,8 +72,8 @@ class _Substeps:
     """A step's planned drafter sub-steps, handed out in order (`StepCtx.substep`); `reset` before each run of the
     drafter (a graph's warm-up and capture run it twice)."""
 
-    def __init__(self, executor: Executor, subs: list[StepContext]) -> None:
-        self.executor, self.subs, self.cursor = executor, subs, 0
+    def __init__(self, executor: Executor, subs: list[StepContext], ahead: int) -> None:
+        self.executor, self.subs, self.ahead, self.cursor = executor, subs, ahead, 0
 
     def reset(self) -> None:
         self.cursor = 0
@@ -81,6 +81,8 @@ class _Substeps:
     def next(self, q: int, offset: int) -> StepContext:
         if self.cursor >= len(self.subs) or int(self.subs[self.cursor].batch.plan.n_query.max(initial=q)) != q:
             raise RuntimeError(f"sub-step {self.cursor} of width {q} was not declared (Drafter.substeps)")
+        if offset + q > self.ahead:            # what the scheduler reserved past each row (Drafter.lookahead)
+            raise RuntimeError(f"sub-step at offset {offset} of width {q} writes past the lookahead {self.ahead}")
         sub, i = self.subs[self.cursor], self.cursor
         self.cursor += 1
         self.executor._prepare_substep(sub, i, offset)
@@ -98,15 +100,18 @@ class Executor:
     def __init__(self, cfg: Any, device: torch.device, model: Any, vocab: int, sampler: Any, state: StateManager,
                  planners: dict[str, Any], verifier: Any = None, drafter: Any = None,
                  pools: dict[str, Any] | None = None, rewinders: list[Any] = (),
-                 sub_planners: dict[str, list[Any]] | None = None) -> None:
+                 sub_planners: dict[str, list[Any]] | None = None, substeps: tuple[int, int] = (0, 0),
+                 namespaces: list[str] = ()) -> None:
         """`cfg`: the EngineConfig (sizes, graphs on or off); `pools`: every ledger pool, by name (for MemOps);
-        `rewinders`: what rolls back past rejected drafts after each verify (api.Rewindable); `sub_planners`: per
-        auxiliary state group, one planner per drafter sub-step."""
+        `rewinders`: what rolls back past rejected drafts after each verify (api.Rewindable);
+        `sub_planners`: per auxiliary state group, one planner per drafter sub-step; `substeps`: how many sub-steps a
+        step may have and their widest row (the drafter's declarations); `namespaces`: the auxiliary models'."""
         self.cfg, self.device, self.model, self.vocab, self.state = cfg, device, model, vocab, state
         self.pools = pools or {}
         self.sampler, self.planners, self.verifier, self.drafter = sampler, planners, verifier, drafter
         self.rewinders = list(rewinders)
-        self.sub_planners = sub_planners or {}
+        self.sub_planners, self.substeps = sub_planners or {}, substeps
+        self.namespaces = sorted(namespaces, key=len, reverse=True)       # the longest prefix names a group's
         seqs = cfg.max_seqs
         tokens = max(cfg.max_step_tokens, seqs * (1 + cfg.max_draft_tokens))     # a verify step: 1 + k per row
         self.uploader = Uploader(device, state.upload_fields(seqs, tokens) | {
@@ -134,12 +139,13 @@ class Executor:
         self._out_turn = 0
 
     def _sub_fields(self, cfg: Any) -> dict[str, tuple[int, torch.dtype]]:
-        """Static buffers of each drafter sub-step: up to `max_seqs` rows of up to 1 + max_draft_tokens tokens."""
-        if not self.sub_planners:
+        """Static buffers of each drafter sub-step: up to `max_seqs` rows of the widest declared width."""
+        count, width = self.substeps
+        if not self.sub_planners or not count:
             return {}
-        rows, tokens = cfg.max_seqs, cfg.max_seqs * (1 + cfg.max_draft_tokens)
+        rows, tokens = cfg.max_seqs, cfg.max_seqs * width
         out = {}
-        for i in range(cfg.max_draft_tokens):
+        for i in range(count):
             out |= {f"sub{i}.query_start": (rows + 1, torch.int64), f"sub{i}.slots": (rows, torch.int64),
                     f"sub{i}.rows": (tokens, torch.int64), f"sub{i}.offset": (tokens, torch.int64),
                     f"sub{i}.logits": (tokens, torch.int64), f"sub{i}.input_ids": (tokens, torch.int64),
@@ -179,6 +185,8 @@ class Executor:
         self._prepare(ctx)
         h = self.model.trunk(ctx)
         self.model.head(h[:PROMPT_LOGPROB_CHUNK]).float().log_softmax(-1)
+        if self.drafter is not None:                 # its pass over the step's tokens
+            self._run_drafter(ctx, h)
         del h
         n = self.cfg.max_seqs
         for slot in range(n):
@@ -300,7 +308,8 @@ class Executor:
             slots = dev.slots[dev.logits_rows]
             self.last_token[slots] = tokens
             self.num_computed[slots] = ctx.prep.lens[dev.logits_rows].long()
-            self.seq_table.n_accept[slots] = 0
+            if self.drafter is not None:             # the drafter reads it after every step
+                self.seq_table.n_accept[slots] = 0
             return tokens
         width = int(ctx.batch.plan.n_logits.max())
         rows = dev.logits_rows.view(-1, width)[:, 0]
@@ -342,20 +351,27 @@ class Executor:
             cols = self.seq_table.draft_tokens.shape[1]
             prep.draft_from = up.put("draft_from", np.repeat(plan.slots[verify].astype(np.int64) * cols, k) + j)
         pages = self.state.pages(plan, up)
-        widths = self.drafter.substeps(plan.draft_k) if plan.draft_k and hasattr(self.drafter, "substeps") else []
+        drafting = plan.draft_k and plan.n_logits.any() and hasattr(self.drafter, "substeps")
+        widths = self.drafter.substeps(plan.draft_k) if drafting else []
         subs = [self._substep(plan, pages, i, q) for i, q in enumerate(widths)]
         up.end()
-        metas = {g: p.plan_bounds(batch, pages.get(g)) for g, p in self.planners.items()}
+        # An auxiliary model's planners see the step's in-step publishes of its own specs only, under local names.
+        local = {ns: local_batch(batch, ns) for ns in self.namespaces}
+        metas = {g: p.plan_bounds(local.get(self._namespace(g), batch), pages.get(g)) for g, p in self.planners.items()}
         for i, sub in enumerate(subs):
             sub.metas = {g: p[i].plan_bounds(sub.batch, sub.pages[g]) for g, p in self.sub_planners.items()}
+        ahead = self.drafter.lookahead(plan.draft_k) if subs and hasattr(self.drafter, "lookahead") else 0
         return StepContext(batch, metas, seq_table=self.seq_table, pages=pages, prep=prep, pools=self.pools,
-                           substeps=_Substeps(self, subs) if subs else None)
+                           substeps=_Substeps(self, subs, ahead) if subs else None)
+
+    def _namespace(self, group: str) -> str | None:
+        return next((ns for ns in self.namespaces if group.startswith(ns + ".")), None)
 
     def _substep(self, plan: BatchPlan, pages: dict[str, Any], i: int, q: int) -> StepContext:
         """The host half of drafter sub-step `i`: q tokens for each sampled row of `plan`, over the auxiliary state
         groups; positions, lengths and write indices are derived on the device when the drafter asks for it."""
-        if i >= self.cfg.max_draft_tokens or q > 1 + self.cfg.max_draft_tokens:
-            raise RuntimeError(f"sub-step {i} of width {q}: at most max_draft_tokens sub-steps of 1 + max_draft_tokens")
+        if i >= self.substeps[0] or q > self.substeps[1]:
+            raise RuntimeError(f"sub-step {i} of width {q}: beyond what the drafter declared ({self.substeps})")
         up, f = self.uploader, f"sub{i}."
         slots = plan.slots[plan.n_logits > 0]
         rows, tokens = len(slots), len(slots) * q
@@ -398,7 +414,7 @@ class Executor:
         # are never accepted.
         limit = self.cfg.max_model_len
         positions = start[prep.row_of_token] + prep.offset
-        dev.positions.copy_(positions.clamp(max=limit - 1))
+        dev.positions.copy_(positions.clamp(max=limit - 1) if self.drafter is not None else positions)
         prep.lens.copy_(start + prep.n_query)
         first = dev.query_start[:-1]
         dev.input_ids[first] = torch.where(prep.from_device, self.last_token[dev.slots], dev.input_ids[first])

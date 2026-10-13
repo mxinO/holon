@@ -97,11 +97,13 @@ class Scheduler:
             n = self.state.cut(seq, n)                                 # end where a state kind publishes
             last = seq.num_computed + n == len(seq.tokens)
             if last and ahead is None:            # the step's k, asked once: the drafter drafts after this chunk
-                self._k = self.draft_k(self.running + list(self.waiting)) if self.draft_k is not None else 0
-                ahead = self.lookahead(self._k) if self._k else 0
+                k = self.draft_k(self.running + [s for s, _, _ in rows] + [seq]) if self.draft_k is not None else 0
+                ahead = self.lookahead(k) if k else 0
             if not self._fit(seq, min(n + ahead, self.max_model_len - seq.num_computed) if last else n):
                 break
             rows.append((seq, n, int(last)))
+            if last:                              # a row the drafter drafts after: the step speculates at k
+                self._k = k
             budget -= n
         return rows
 

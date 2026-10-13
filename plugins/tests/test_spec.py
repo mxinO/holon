@@ -38,6 +38,7 @@ def oracle(tiny_case):  # noqa: F811
     ORACLE.observed.clear()
     ORACLE.hidden.clear()
     ORACLE.hidden_slots.clear()
+    ORACLE.real, ORACLE.rewinds, ORACLE.max_position = None, 0, -1
     return ORACLE
 
 
@@ -64,7 +65,7 @@ def test_greedy_verification_reproduces_greedy(tiny_checkpoint, tiny_case, oracl
     oracle.mode = mode
     engine = _engine(tiny_checkpoint, overlap=overlap, state_memory=memory)
     outs, steps = _run(engine, prompts, GREEDY)
-    assert outs == expected and _released(engine)
+    assert outs == expected and _released(engine) and oracle.rewinds > 0      # the drafter is a Rewindable too
     if mode == "right" and memory == 1 << 20:
         _, plain_steps = _run(_engine(tiny_checkpoint, overlap=overlap, max_draft_tokens=0), prompts, GREEDY)
         assert steps < plain_steps                       # accepted drafts save steps
@@ -73,26 +74,30 @@ def test_greedy_verification_reproduces_greedy(tiny_checkpoint, tiny_case, oracl
 @pytest.mark.parametrize("overlap", [False, True], ids=["depth0", "depth1"])
 def test_drafts_past_n_draft_are_never_accepted(tiny_checkpoint, tiny_case, oracle, overlap):  # noqa: F811
     # Every row of a verify step has the step's width; a row whose drafter wrote no real drafts (n_draft 0) still
-    # verifies, and its drafts — here the right tokens — must not be accepted: it decodes one token per step.
+    # verifies, and its drafts — here the right tokens — must not be accepted: it decodes one token per step. Past
+    # every other row's one real draft are ids no embedding has: the step feeds token 0 there instead.
     prompts, expected = tiny_case
-    oracle.hidden = {tuple(prompts[1])}
+    oracle.hidden, oracle.real = {tuple(prompts[1])}, 1
     outs, _ = _run(_engine(tiny_checkpoint, overlap=overlap), prompts, GREEDY)
     assert outs == expected
     hidden = [o for o in oracle.observed if o[0] == tuple(prompts[1])]
     others = [o for o in oracle.observed if o[0] != tuple(prompts[1])]
     assert hidden and all(n_draft == 0 and n_accept == 0 for _, _, n_draft, n_accept in hidden)
-    assert any(n_accept > 0 for *_, n_accept in others) and all(k == 3 for _, k, _, _ in oracle.observed)
+    assert any(n_accept > 0 for *_, n_accept in others) and all(n_accept <= 1 for *_, n_accept in others)
+    assert all(k == 3 for _, k, _, _ in oracle.observed)
 
 
+@pytest.mark.parametrize("overlap", [False, True], ids=["depth0", "depth1"])
 @pytest.mark.parametrize("memory", [1 << 20, 12 * 2048], ids=["roomy", "preempting"])
 @pytest.mark.parametrize("mode", ["right", "mixed"])
-def test_the_drafter_sees_every_committed_token(tiny_checkpoint, tiny_case, oracle, mode, memory):  # noqa: F811
+def test_the_drafter_sees_every_committed_token(tiny_checkpoint, tiny_case, oracle, mode, memory, overlap):  # noqa: F811
     # What a drafter admits (the whole history, prefix hits included) and absorbs (every step's inputs) must equal
     # the committed tokens after every step — through chunked prefill, rejected drafts, preemption and a second
-    # pass over the same prompts that hits the prefix cache (M0.4 §3.3).
+    # pass over the same prompts that hits the prefix cache (M0.4 §3.3). At depth 1 the host's computed length is an
+    # upper bound, so the check covers the committed tokens before the last (the next step's input).
     prompts, expected = tiny_case
     oracle.mode = mode
-    engine = _engine(tiny_checkpoint, state_memory=memory, max_step_tokens=6, overlap=False)   # exact host lengths
+    engine = _engine(tiny_checkpoint, state_memory=memory, max_step_tokens=6, overlap=overlap)
     for _ in range(2):
         rids = [engine.add(p, GREEDY) for p in prompts]
         out = {r: [] for r in rids}
@@ -100,10 +105,10 @@ def test_the_drafter_sees_every_committed_token(tiny_checkpoint, tiny_case, orac
             for d in engine.step():
                 out[d.rid] += d.token_ids
             for seq in engine.sched.running:
-                n = seq.num_computed
+                n = len(seq.tokens) - 1 if overlap else seq.num_computed
                 assert oracle.history[seq.slot, :n].tolist() == seq.tokens[:n]
                 absorbed = oracle.absorbed[seq.slot, :n].tolist()            # from the first computed position on:
-                first = next(i for i, t in enumerate(absorbed) if t >= 0)    # no gaps (every chunk was absorbed)
+                first = next((i for i, t in enumerate(absorbed) if t >= 0), n)   # no gaps (every chunk absorbed)
                 assert absorbed[first:] == seq.tokens[first:n]
         assert [out[r] for r in rids] == expected
     assert engine.state.tokens_saved > 0

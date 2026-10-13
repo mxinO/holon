@@ -61,26 +61,45 @@ def bind_state(spec: ModelSpec, ctx: BuildContext, plugins: PluginSet, ledger: L
     return _bind_layers(spec.layers, ctx, plugins, ledger, cfg)
 
 
-def build_aux(namespace: str, spec: AuxSpec, tensors: Any, ctx: BuildContext, plugins: PluginSet, ledger: Ledger,
-              cfg: Any) -> nn.Module:
-    """An auxiliary model (`BuildCtx.aux_model`): its layers' state bound under `namespace`, its units built in a
-    child context that maps their state names there, its weights loaded by its own map. The bound specs and planners
-    join the engine's through `ctx.aux_bound` / `ctx.aux_planners`."""
-    child = ctx.child(namespace)
-    bound, planners = _bind_layers(spec.layers, child, plugins, ledger, cfg, namespace)
-    ctx.aux_bound += bound
-    ctx.aux_planners.update(planners)
-    # Each drafter sub-step gets planners of its own: kernel instances hold per-step buffers (design §3.2).
-    for _ in range(cfg.max_draft_tokens):
-        _, more = _bind_layers(spec.layers, child, plugins, ledger, cfg, namespace, plan_only=True)
-        for group, planner in more.items():
-            if getattr(planner, "needs_host_lens", False):
-                raise PluginError(f"{group}: drafter sub-steps need kernels that read lengths on the device")
-            ctx.aux_sub_planners.setdefault(group, []).append(planner)
-    with torch.device("meta"):
-        module = child.unit(spec.unit, layers=spec.layers)
-    load_weights(module.eval(), child, tensors, spec.weights)
-    return module
+class AuxModels:
+    """The auxiliary models drafters build (`BuildCtx.aux_model`): each one's layers' state bound under its namespace,
+    its units built in a child context that maps their state names there, its weights loaded by its own map. Their
+    bound specs and planners join the engine's; drafter sub-steps get planners of their own (`sub_planners`)."""
+
+    def __init__(self, ctx: BuildContext, plugins: PluginSet, ledger: Ledger, cfg: Any) -> None:
+        self.ctx, self.plugins, self.ledger, self.cfg = ctx, plugins, ledger, cfg
+        self.bound: list[BoundSpec] = []
+        self.planners: dict[str, Any] = {}
+        self.modules: list[tuple[str, nn.Module]] = []      # (namespace, module)
+        self._layers: list[tuple[str, tuple]] = []
+
+    def build(self, namespace: str, spec: AuxSpec, tensors: Any) -> nn.Module:
+        if any(namespace == ns for ns, _ in self.modules):
+            raise PluginError(f"aux model {namespace!r} built twice")
+        child = self.ctx.child(namespace)
+        bound, planners = _bind_layers(spec.layers, child, self.plugins, self.ledger, self.cfg, namespace)
+        self.bound += bound
+        self.planners |= planners
+        with torch.device("meta"):
+            module = child.unit(spec.unit, layers=spec.layers)
+        load_weights(module.eval(), child, tensors, spec.weights)
+        self.modules.append((namespace, module))
+        self._layers.append((namespace, spec.layers))
+        return module
+
+    def sub_planners(self, n: int) -> dict[str, list[Any]]:
+        """`n` planners per auxiliary state group, one per drafter sub-step: kernel instances hold per-step buffers,
+        and a sub-step's lengths exist only on the device (`planner.device_lens`)."""
+        out: dict[str, list[Any]] = {}
+        for namespace, layers in self._layers:
+            child = self.ctx.child(namespace, {"planner.device_lens": True})
+            for _ in range(n):
+                for group, planner in _bind_layers(layers, child, self.plugins, self.ledger, self.cfg, namespace,
+                                                   plan_only=True)[1].items():
+                    if getattr(planner, "needs_host_lens", False):
+                        raise PluginError(f"{group}: drafter sub-steps need planners that read lengths on the device")
+                    out.setdefault(group, []).append(planner)
+        return out
 
 
 def _bind_layers(layers: tuple, ctx: Any, plugins: PluginSet, ledger: Ledger, cfg: Any, namespace: str = "",
@@ -97,8 +116,8 @@ def _bind_layers(layers: tuple, ctx: Any, plugins: PluginSet, ledger: Ledger, cf
         if namespace:                      # e.g. "kv" → "mtp.kv": its own pools, tables and planners
             specs = [dataclasses.replace(s, name=f"{namespace}.{s.name}",
                                          page_group=s.page_group and f"{namespace}.{s.page_group}") for s in specs]
-        if not plan_only:
-            bound += [_bind(s, ctx, plugins, ledger, cfg) for s in specs]
+        if not plan_only:             # kinds see the engine's context: the specs carry their full names
+            bound += [_bind(s, getattr(ctx, "parent", ctx), plugins, ledger, cfg) for s in specs]
         for group in dict.fromkeys(s.group for s in specs):
             if group in planners:
                 raise PluginError(f"state group {group!r} declared by two mixers")

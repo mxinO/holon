@@ -91,6 +91,9 @@ class GQA(nn.Module):
         facts = {"heads": params["heads"], "kv_heads": params["kv_heads"], "head_dim": params["head_dim"],
                  "page": specs[0].shape.tokens_per_unit, "q_dtype": dtype, "kv_dtype": kernels.kv_dtype(layout, dtype),
                  "layout": layout, "max_seqs": ctx.options["max_seqs"]}
+        if ctx.options.get("planner.device_lens"):   # lengths only on the device (drafter sub-steps): verify kernel
+            verify = ctx.select_kernel(kernels.VERIFY, site=specs[0].group, **facts).impl(ctx, **facts)
+            return Planner(verify, verify, verify, needs_host_lens=False)
         ops = (kernels.PREFILL, kernels.DECODE, kernels.VERIFY)
         chosen = [ctx.select_kernel(op, site=specs[0].group, **facts) for op in ops]
         decode_props = chosen[1].props

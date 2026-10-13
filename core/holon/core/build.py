@@ -48,12 +48,7 @@ class BuildContext:
         self._selected: dict[tuple, KernelSpec] = {}
         self.states: dict[tuple[str, int], tuple[Any, Any]] = {}  # (local spec name, layer) -> (spec, pool)
         self._buffers: dict[str, torch.Tensor] = {}
-        # Auxiliary models (engine builds): set by the engine, filled by `aux_model`.
-        self.aux_builder: Any = None
-        self.aux_bound: list[Any] = []
-        self.aux_planners: dict[str, Any] = {}
-        self.aux_sub_planners: dict[str, list[Any]] = {}   # group -> one planner per drafter sub-step
-        self.aux_modules: list[nn.Module] = []
+        self.aux: Any = None               # the engine's AuxModels, which `aux_model` builds into (engine builds)
 
     def unit_factory(self, ref: Ref) -> Any:
         """The registered factory (usually the unit class) serving `ref`, loading its plugin if needed."""
@@ -125,25 +120,28 @@ class BuildContext:
         return self.states.get((spec_name, layer))
 
     def aux_model(self, namespace: str, spec: Any, tensors: Iterable[tuple[str, torch.Tensor | QTensor]]) -> nn.Module:
-        if self.aux_builder is None:
+        if self.aux is None:
             raise PluginError(f"aux model {namespace!r}: a model-only build has no engine state")
-        module = self.aux_builder(namespace, spec, tensors)
-        self.aux_modules.append(module)
-        return module
+        return self.aux.build(namespace, spec, tensors)
 
-    def child(self, namespace: str) -> ChildContext:
-        return ChildContext(self, namespace)
+    def child(self, namespace: str, options: dict[str, Any] | None = None) -> ChildContext:
+        return ChildContext(self, namespace, options)
 
 
 class ChildContext:
-    """The BuildCtx an auxiliary model's units see: the parent's, with state names, static buffers and lock sites
-    under `<namespace>.`, so the same units build beside the target without colliding with it."""
+    """The BuildCtx an auxiliary model's units see: the parent's, with state names, static buffers, plugin pools and
+    lock sites under `<namespace>.`, so the same units build beside the target without colliding with it; `options`
+    adds deployment options (e.g. `planner.device_lens` for drafter sub-steps). Kernel workspaces are shared: target
+    and aux kernels run in stream order."""
 
-    def __init__(self, parent: BuildContext, namespace: str) -> None:
+    def __init__(self, parent: BuildContext, namespace: str, options: dict[str, Any] | None = None) -> None:
         self.parent, self.namespace = parent, namespace
+        self.plugins, self.device, self.dtype = parent.plugins, parent.device, parent.dtype
+        self.fingerprint = parent.fingerprint
+        self.options = parent.options | (options or {})
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.parent, name)
+    def unit_factory(self, ref: Ref) -> Any:
+        return self.parent.unit_factory(ref)
 
     def unit(self, ref: Ref, **site: Any) -> nn.Module:
         return self.parent.unit_factory(ref)(self, **dict(ref.params), **site)       # nested units see the child too
@@ -154,11 +152,17 @@ class ChildContext:
     def state(self, spec_name: str, layer: int) -> tuple[Any, Any] | None:
         return self.parent.state(f"{self.namespace}.{spec_name}", layer)
 
+    def bind_state(self, spec: Any, pool: Any) -> None:
+        self.parent.bind_state(spec, pool)            # specs arrive already under the namespace
+
     def static(self, name: str, shape: tuple[int, ...], dtype: torch.dtype) -> torch.Tensor:
         return self.parent.static(f"{self.namespace}.{name}", shape, dtype)
 
     def workspace(self, name: str, nbytes: int) -> torch.Tensor:
-        return self.parent.workspace(f"{self.namespace}.{name}", nbytes)
+        return self.parent.workspace(name, nbytes)
+
+    def pool(self, name: str, **sizes: Any) -> Any:
+        return self.parent.pool(f"{self.namespace}.{name}", **sizes)
 
 
 @dataclasses.dataclass
@@ -182,10 +186,7 @@ class StepContext:
         their local names (`<namespace>.kv` → `kv`)."""
         pre = namespace + "."
         local = lambda d: {k[len(pre):]: v for k, v in d.items() if k.startswith(pre)}    # noqa: E731
-        publishes = [dataclasses.replace(p, spec=p.spec[len(pre):]) for p in self.batch.plan.publishes
-                     if p.spec.startswith(pre)]
-        plan = dataclasses.replace(self.batch.plan, publishes=publishes)
-        return dataclasses.replace(self, batch=Batch(plan, self.batch.dev), metas=local(self.metas),
+        return dataclasses.replace(self, batch=local_batch(self.batch, namespace), metas=local(self.metas),
                                    pages=local(self.pages), namespace=namespace)
 
     def substep(self, q: int, offset: int) -> StepContext:
@@ -214,6 +215,13 @@ class StepContext:
                           logits_index=torch.arange(int(lens.sum()), device=device),
                           logits_rows=torch.repeat_interleave(torch.arange(len(ids)), torch.as_tensor(lens)).to(device))
         return cls(Batch(plan, dev))
+
+
+def local_batch(batch: Batch, namespace: str) -> Batch:
+    """`batch` with only the in-step publishes of `namespace`'s specs, under their local names."""
+    pre = namespace + "."
+    publishes = [dataclasses.replace(p, spec=p.spec[len(pre):]) for p in batch.plan.publishes if p.spec.startswith(pre)]
+    return Batch(dataclasses.replace(batch.plan, publishes=publishes), batch.dev)
 
 
 class Model(nn.Module):

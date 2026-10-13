@@ -129,8 +129,9 @@ class PrefixView(Protocol):
 
 
 class Rewindable(Protocol):
-    """Anything that speculative decoding must roll back past rejected drafts (design §7.5): a built module or a loaded
-    slot object defining `rewind`. Paged state needs none — it rewinds by length."""
+    """Anything that speculative decoding must roll back past rejected drafts (design §7.5): a module of the target or a
+    loaded slot object defining `rewind` (an auxiliary model's modules are rolled back by the drafter that runs them,
+    `Drafter.run`). Paged state needs none — it rewinds by length."""
 
     def rewind(self, ctx: StepCtx, path: torch.Tensor | None = None) -> None:
         """Device-side, graph-capturable: after the verifier wrote `ctx.seq_table.n_accept` for the step's verify rows,

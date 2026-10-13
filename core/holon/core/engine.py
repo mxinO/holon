@@ -12,7 +12,6 @@ minimum pools → capture the decode graphs.
 from __future__ import annotations
 
 import dataclasses
-import functools
 import gc
 import itertools
 import secrets
@@ -23,7 +22,7 @@ import torch
 from holon.api import BatchPlan, Logprobs, SamplingParams, Seq, Status, TokenDelta, sequence_seed
 
 from . import platform
-from .assembly import bind_state, build_aux, prefix_index, resolve_model
+from .assembly import AuxModels, bind_state, prefix_index, resolve_model
 from .build import BuildContext, build_model, load_weights
 from .executor import Executor, Launched, PromptRows
 from .memory import Ledger
@@ -112,13 +111,17 @@ class Engine:
         sampler = p.load(p.single("sampler")).sampler(cfg.max_seqs + 1, self.device)
         # Speculative decoding (design §7.6): a draft policy picks k per step, one drafter proposes, the verifier
         # checks; all three are plugins, used only when drafts are enabled and a policy is installed.
-        self.policy = drafter = verifier = None
+        self.policy = drafter = verifier = aux = None
+        substeps, sub_planners = (0, 0), {}
         if cfg.max_draft_tokens and any(True for _ in p.by_slot("draft_policy")):
             self.policy, verifier = p.load(p.single("draft_policy")), p.load(p.single("verifier"))
-            self.ctx.aux_builder = functools.partial(build_aux, ctx=self.ctx, plugins=p, ledger=self.ledger, cfg=cfg)
+            self.ctx.aux = aux = AuxModels(self.ctx, p, self.ledger, cfg)
             drafter = p.load(p.single("drafter")).build(self.ctx, _Target(self.spec, model, source, model_plugin))
-            bound += self.ctx.aux_bound                  # the drafter's auxiliary models' state and planners
-            planners |= self.ctx.aux_planners
+            bound += aux.bound                           # the drafter's auxiliary models' state and planners
+            planners |= aux.planners
+            widths = [getattr(drafter, "substeps", lambda k: [])(k) for k in range(cfg.max_draft_tokens + 1)]
+            substeps = (max(map(len, widths)), max((q for w in widths for q in w), default=0))
+            sub_planners = aux.sub_planners(substeps[0])
         admit_draft = getattr(drafter, "admit", None)
 
         def admit(seq: Seq) -> None:
@@ -133,12 +136,14 @@ class Engine:
         self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len,
                                draft_k=self._draft_k if self.policy is not None else None,
                                lookahead=getattr(drafter, "lookahead", None), host_lens_only=host_lens)
-        modules = [m for root in (model, *self.ctx.aux_modules) for m in root.modules()]
-        rewinders = [m for m in modules if callable(getattr(m, "rewind", None))]
-        rewinders += [o for o in (sampler, verifier, drafter, self.policy) if callable(getattr(o, "rewind", None))]
+        # What rolls back after a verify (api.Rewindable): the target's modules and the slot objects. An auxiliary
+        # model runs inside `Drafter.run`, after this: rolling it back is the drafter's call.
+        found = [*model.modules(), *(o for o in (sampler, verifier, drafter, self.policy) if o is not None)]
+        rewinders = [o for o in found if callable(getattr(o, "rewind", None))]
         self.executor = Executor(cfg, self.device, model, self.spec.vocab, sampler, self.state, planners,
                                  verifier, drafter, pools=self.ledger.pools, rewinders=rewinders,
-                                 sub_planners=self.ctx.aux_sub_planners)
+                                 sub_planners=sub_planners, substeps=substeps,
+                                 namespaces=[ns for ns, _ in aux.modules] if aux is not None else [])
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None
                                 else self.executor.state_memory(self.ledger, cfg.memory_fraction))
         self.state.reset_padding()

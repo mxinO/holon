@@ -24,13 +24,28 @@ class Drafter:
         self.history = ORACLE.history = torch.full((64, 256), -1, dtype=torch.int64)
         self.absorbed = ORACLE.absorbed = torch.full((64, 256), -1, dtype=torch.int64)
 
+        self.rewound = None
+
     def admit(self, slot, tokens) -> None:
         self.history[slot] = self.absorbed[slot] = -1
         self.history[slot, : len(tokens)] = torch.tensor(tokens)
 
+    def rewind(self, ctx) -> None:
+        """Called after the verifier wrote n_accept, never past n_draft, and before `run`."""
+        table, slots = ctx.seq_table, ctx.batch.dev.slots
+        assert (ctx.batch.plan.n_logits > 1).all() and (table.n_accept[slots] <= table.n_draft[slots]).all()
+        self.rewound = ctx.batch
+        ORACLE.rewinds += 1
+
     def run(self, ctx, h) -> None:
         dev, table = ctx.batch.dev, ctx.seq_table
         assert h.shape[0] == dev.input_ids.shape[0]                    # the trunk's output for every step token
+        verify = bool((ctx.batch.plan.n_logits > 1).any())
+        assert (self.rewound is ctx.batch) == verify                   # rewound first, exactly on verify steps
+        self.rewound = None
+        if not verify:                                                 # sampled rows of a plain step accepted nothing
+            assert (table.n_accept[dev.slots[dev.logits_rows]] == 0).all()
+        ORACLE.max_position = max(ORACLE.max_position, int(dev.positions.max()))
         rows = torch.repeat_interleave(torch.arange(len(dev.slots)), dev.query_start.diff().cpu())
         slots, positions = dev.slots.cpu()[rows], dev.positions.cpu()
         self.history[slots, positions] = self.absorbed[slots, positions] = dev.input_ids.cpu()
@@ -50,5 +65,9 @@ class Drafter:
             drafts = wrong
         elif ORACLE.mode == "mixed":
             drafts = torch.where((slots[:, None] + pos) % 3 == 0, wrong, drafts)
+        n_draft = known.to(slots.device)[slots]
+        if ORACLE.real is not None:                                    # past the real drafts: ids no model accepts
+            n_draft = n_draft.clamp(max=ORACLE.real)
+            drafts = torch.where(torch.arange(k, device=slots.device) < n_draft[:, None], drafts, ORACLE.vocab + 7)
         table.draft_tokens[slots] = drafts
-        table.n_draft[slots] = known.to(slots.device)[slots]
+        table.n_draft[slots] = n_draft

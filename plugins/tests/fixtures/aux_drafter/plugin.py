@@ -30,9 +30,10 @@ class Drafter:
 
     def __init__(self, ctx, target) -> None:
         w = target.spec.weights
+        layer0 = next(r.pattern for r in w.rules if "layers.{i}." in r.pattern).split("layers.{i}.")[0] + "layers.0."
         spec = AuxSpec(Ref("tests.aux_head@1", hidden=target.spec.hidden, block=target.spec.block,
                            norm=target.spec.norm),
-                       target.spec.layers[:1], WeightMap(w.source, w.rules, w.root, only=("model.layers.0.",)))
+                       target.spec.layers[:1], WeightMap(w.source, w.rules, w.root, only=(layer0,)))
         self.aux = ctx.aux_model("aux", spec, target.tensors())
         self.embed = target.shared("embed")
         self.oracle = OracleDrafter()
@@ -43,10 +44,18 @@ class Drafter:
     def lookahead(self, k: int) -> int:
         return k if ORACLE.ahead else 0
 
+    def rewind(self, ctx) -> None:
+        self.oracle.rewind(ctx)
+
     def run(self, ctx, h) -> None:
         aux = ctx.view("aux")
         self.aux.layers[0](self.embed(ctx.batch.dev.input_ids), aux)
+        if (ctx.batch.plan.n_logits > 1).any():          # a verify step: roll the aux model back as the core did
+            for module in self.aux.modules():           # the target (its recurrent layers keep only accepted tokens)
+                if hasattr(module, "rewind"):
+                    module.rewind(aux)
         if not ORACLE.ahead:
+            self.oracle.rewound = None
             ctx.seq_table.n_draft.zero_()
             return
         self.oracle.run(ctx, h)
@@ -56,3 +65,5 @@ class Drafter:
             slots = sub.batch.dev.slots
             sub.batch.dev.input_ids.copy_(table.last_token[slots] if i == 0 else table.draft_tokens[slots, i - 1])
             self.aux.layers[0](self.embed(sub.batch.dev.input_ids), sub)
+            if len(slots):
+                ORACLE.max_position = max(ORACLE.max_position, int(sub.batch.dev.positions.max()))

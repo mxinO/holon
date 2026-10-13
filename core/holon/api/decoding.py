@@ -1,8 +1,9 @@
 """Scheduling, sampling and speculative decoding roles (design §7.3, §7.6).
 
-Speculative decoding is four roles: a Drafter proposes, a DraftPolicy picks the source and k, a PlanTransform adds the
-draft rows, and a Verifier replaces the Sampler for those rows. Rollback is the core's `rewind` fan-out to Rewindables
-(api.state). Ordering, overlap depth and shape axes of transforms and drafters are declared in their manifests.
+Speculative decoding is three roles: a DraftPolicy picks k per step, a Drafter proposes (writing the SeqTable's draft
+tokens and counts, and its own state, possibly through auxiliary models and sub-steps), and a Verifier replaces the
+Sampler for the step's verify rows. Rollback is the core's `rewind` fan-out to Rewindables (api.state). Ordering,
+overlap depth and shape axes of transforms and drafters are declared in their manifests.
 """
 from __future__ import annotations
 
@@ -92,7 +93,10 @@ class Drafter(Protocol):
         the target trunk's output for every token of the step; for verify rows the SeqTable already holds `n_accept`
         and the advanced `num_computed`. Writes the drafter's own state for the step's tokens, then, for the rows that
         sampled, `seq_table.draft_tokens[slot, :n]` (positions `num_computed[slot] + 1 + j`) and `n_draft[slot] = n`,
-        n at most the step's `plan.draft_k` if the drafter writes state per draft, else at most the engine's maximum."""
+        n at most the step's `plan.draft_k` if the drafter writes state per draft, else at most the engine's maximum.
+        An auxiliary model run here over a verify step's rows sees them after the verifier: the core's `rewind`
+        fan-out (target modules, slot objects) has already run, so rolling the aux model back is the drafter's call
+        (its modules' `rewind(ctx.view(namespace))` after their forward)."""
 
     def substeps(self, k: int) -> list[int]:
         """The query widths of the sub-steps `run` asks for at k drafts (fixed, so graphs can be captured)."""
