@@ -228,7 +228,7 @@ implementation of the workload; bar = the engine users run for it on the card.
 | A2 | `std/holon_std/weights/hf` | `quant/` dialects, `reference.py`, grouped yield; `std/holon_std/weights/gguf`: NVFP4 refusal |
 | A3 | `plugins/holon_plugins/kernels/ggml_cuda` | FP4 types, `prepare`, `scale2` paths, two specs, pre-launch precision check (`vendor.patch` export), f32 activation copy for `fp4` as a named workspace sized at plan time (fixed for graph capture), workspace, docstring |
 | A | `testing`, `judge`, `bench` | reference providers for the `hf` layouts; tiny fixtures per dialect; HF-quant map, goldens, emulators, floors, mode check, plants; `hf_to_gguf.py` |
-| B | `plugins/holon_plugins/kernels/triton_fp8` | rename; FP8 act quant, W8A16 split-K decode, W8A8 prefill (dense); pinned configs |
+| B | `plugins/holon_plugins/kernels/triton_fp8` | new plugin: FP8 act quant, W8A16 split-K decode, W8A8 prefill (dense); pinned configs |
 
 ### 4.2 Core
 
@@ -466,7 +466,7 @@ acceptance 3 / 10 / 15; D-h → §4.2, risks.
 | B-6 | `a8` vs GGUF FP4 defaults | `a8` for every quantized layout, GGUF included (D3); MXFP4_MOE target (D1) |
 | B-7 | sm_86 FP8 scope | stays v1 (non-goals, D12) |
 | B-8 | dialects in `std.weights.hf` | one module per dialect under `weights/hf/quant/`; extraction trigger recorded (D2) |
-| B-9 | rename timing | `triton_fp8` rename in Gate B (D12, B1) |
+| B-9 | rename timing | no rename: a new `kernels.triton_fp8` in Gate B (D12, B1) |
 | B-10 | M0.4 sequencing, draft heads | §4.2, D4 |
 | C-B1 | W4A4 default unsafe | D3 / D-b |
 | C-M1 | FP8 decode bar at M = 1 | W8A16 split-K decode mode at M ≤ 16, bandwidth gate B1 (D12, acceptance 11) |
