@@ -9,6 +9,7 @@ done
 (cd ../.. && ruff check core std plugins judge tools testing scripts bench) || rc=1
 bash ../../plugins/holon_plugins/kernels/ggml_cuda/vendor.sh --check || rc=1   # vendored llama.cpp = upstream + patch
 bash ../../plugins/holon_plugins/kernels/fla/vendor.sh --check || rc=1         # vendored vLLM fla = upstream + patch
+bash ../../plugins/tests/fixtures/jsts.sh --check || rc=1                       # JSON-Schema-Test-Suite = upstream
 bash check_core_diff.sh "${1:-origin/main}" || true
 if command -v lint-imports >/dev/null; then (cd ../.. && lint-imports) || rc=1; else echo "skip import contracts (import-linter not installed)"; fi
 exit $rc

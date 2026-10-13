@@ -1,0 +1,15 @@
+[plugin]
+name = "grammar.xgrammar"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "logits_processor"
+license = "Apache-2.0"
+
+[resources]
+provides = ["grammar.constraint@1"]
+
+[properties]
+numerics = "exact"
+
+[dependencies]
+python = ["xgrammar", "numpy", "torch", "triton"]   # xgrammar pinned in plugins/pyproject.toml (extra "grammar")

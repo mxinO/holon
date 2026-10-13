@@ -3,7 +3,7 @@
 Holon is licensed under the Apache License 2.0 (`LICENSE`, `NOTICE`). This file lists every piece of third-party
 code in this repository — copied, vendored or adapted — with its source, version, license and where it lives.
 Libraries Holon only depends on (installed from their own packages: PyTorch, Triton, FlashInfer, transformers,
-tokenizers, gguf-py, safetensors, …) are not in this repository; their own licenses apply. Rules for adding an entry:
+tokenizers, gguf-py, safetensors, xgrammar, …) are not in this repository; their own licenses apply. Rules for adding an entry:
 `AGENTS.md`, "Third-party code"; `scripts/ci/check_provenance.py` checks them.
 
 ## In the engine
@@ -45,6 +45,17 @@ Songlin Yang, Yu Zhang). License text below and in `plugins/holon_plugins/kernel
 Source: the `tokenizer.json` of Qwen2 / Qwen3 (https://huggingface.co/Qwen), Copyright Alibaba Cloud (Qwen team).
 
 - `std/holon_std/weights/gguf/tokenizer.py` — copied: the `qwen2` pre-tokenizer split regex.
+
+## In tests
+
+### JSON-Schema-Test-Suite — MIT
+
+Source: https://github.com/json-schema-org/JSON-Schema-Test-Suite at `8568bcc477cc3aaeed5bc397c9c8648e631317fc`.
+Copyright (c) 2012 Julian Berman. License text below and in `plugins/tests/fixtures/jsts/LICENSE`.
+
+- `plugins/tests/fixtures/jsts/` — the test files of drafts 3, 4, 6, 7, 2019-09 and 2020-12 (the grammar plugin's
+  model-free oracle, `plugins/tests/test_grammar.py`), unmodified upstream files fetched by
+  `plugins/tests/fixtures/jsts.sh`; `plugins/tests/fixtures/jsts.SHA256SUMS` pins them.
 
 ## In spikes (research code, not part of the engine)
 
@@ -110,4 +121,28 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
+### MIT (JSON-Schema-Test-Suite)
+
+```
+Copyright (c) 2012 Julian Berman
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 ```

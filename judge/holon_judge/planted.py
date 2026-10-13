@@ -9,6 +9,10 @@
   rollback broken; the speculating configurations fail.
 - Logits processors' masks inside graphs (`mask-rows-not-reset`): the toy processor's graphs-vs-eager proof
   (plugins/tests/test_ngram.py) fails.
+- grammar.xgrammar (docs/m05-grammar.md §5; plugins/tests/test_grammar.py): a verify row's probe shifted by one
+  column or never rolled back (the masked L0-dist and the CPU spec identity fail), the apply kernel's bit order
+  reversed (L0-mask fails), a completed constraint's stop tokens or every closing bracket masked (the finish reasons
+  of constrained generation change).
 - GGUF Tier B (`l2 --plant`): bugs in the quantized kernels' use (`kernels.ggml_cuda`); L2 fails, except the rare
   stale workspace, which measures Tier B's sensitivity (predicted before running: fails the decode run, likely passes
   the looser prefill run).
@@ -500,6 +504,87 @@ def mask_rows_not_reset() -> Iterator[None]:
         yield
 
 
+@contextlib.contextmanager
+def mask_column_shift() -> Iterator[None]:
+    """grammar.xgrammar masks verify column j with the matcher's state after j + 1 drafts instead of j."""
+    from holon_plugins.grammar.xgrammar import plugin
+
+    probe = plugin.probe
+
+    def planted(matcher, drafts, out, stop_row):
+        if not drafts or not matcher.accept_token(drafts[0]):
+            return probe(matcher, drafts, out, stop_row)
+        refused = probe(matcher, drafts[1:], out, stop_row)
+        matcher.rollback(1)
+        return refused
+    with mock.patch.object(plugin, "probe", planted):
+        yield
+
+
+@contextlib.contextmanager
+def no_rollback_after_probe() -> Iterator[None]:
+    """grammar.xgrammar's probe leaves the matcher at the drafts it accepted (xgrammar's rollback does nothing)."""
+    import xgrammar
+
+    with mock.patch.object(xgrammar.GrammarMatcher, "rollback", lambda self, n: None):
+        yield
+
+
+def _int32(words: torch.Tensor) -> torch.Tensor:
+    """int64 values in [0, 2³²) as the int32 words with the same bits."""
+    return torch.where(words >= 1 << 31, words - (1 << 32), words).to(torch.int32)
+
+
+@contextlib.contextmanager
+def mask_bit_order() -> Iterator[None]:
+    """grammar.xgrammar's apply reads bit 31 − t of a mask word for token 32·w + t."""
+    from holon_plugins.grammar.xgrammar import kernel
+
+    apply = kernel.apply
+
+    def planted(logits, mask, rows):
+        bits = torch.arange(32, device=mask.device)
+        flipped = (((mask.long()[..., None] >> bits) & 1) << (31 - bits)).sum(-1)
+        apply(logits, _int32(flipped), rows)
+    with mock.patch.object(kernel, "apply", planted):
+        yield
+
+
+@contextlib.contextmanager
+def stop_tokens_masked() -> Iterator[None]:
+    """A completed constraint's mask omits the stop tokens (xgrammar's fill, planted)."""
+    import xgrammar
+
+    fill = xgrammar.GrammarMatcher.fill_next_token_bitmask
+
+    def planted(self, bitmask, index=0, **kwargs):
+        out = fill(self, bitmask, index, **kwargs)
+        if self.is_completed():
+            for t in self.stop_token_ids:
+                bitmask[index, t >> 5] &= int(_int32(torch.tensor(~(1 << (t & 31)) & 0xFFFFFFFF)))
+        return out
+    with mock.patch.object(xgrammar.GrammarMatcher, "fill_next_token_bitmask", planted):
+        yield
+
+
+@contextlib.contextmanager
+def closing_tokens_masked() -> Iterator[None]:
+    """grammar.xgrammar never allows a token holding `}` or `]` (no JSON can close)."""
+    from holon_plugins.grammar.xgrammar import plugin
+
+    fill, closing = plugin.XGrammar.fill, {}
+
+    def planted(self, rows, buf):
+        fill(self, rows, buf)
+        if id(self) not in closing:
+            ids = torch.tensor([i for i, t in enumerate(self.info.decoded_vocab) if b"}" in t or b"]" in t])
+            words = torch.zeros(buf.shape[1], dtype=torch.int64).index_add_(0, ids >> 5, 1 << (ids & 31))
+            closing[id(self)] = _int32(~words & 0xFFFFFFFF).numpy()
+        buf &= closing[id(self)]
+    with mock.patch.object(plugin.XGrammar, "fill", planted):
+        yield
+
+
 QWEN35_PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "qwen35-tiled-as-grouped": lambda: _qwen35_facts(order="grouped"),
     "qwen35-rotary-all-dims": lambda: _qwen35_facts(rotary_dim=256, sections=[]),     # partial_rotary_factor read as 1
@@ -533,5 +618,8 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "unmasked-padding": unmasked_padding,
     # Draft heads (L0-drafter, `holon_judge drafter`)
     "dflash-tap-offset": dflash_tap_offset,
-    # Logits processors (docs/m05-grammar.md §5): the graphs-vs-eager toy proof (plugins/tests/test_ngram.py)
-    "mask-rows-not-reset": mask_rows_not_reset}
+    # Logits processors (docs/m05-grammar.md §5): the graphs-vs-eager toy proof (plugins/tests/test_ngram.py), and
+    # grammar.xgrammar's (plugins/tests/test_grammar.py)
+    "mask-rows-not-reset": mask_rows_not_reset, "mask-column-shift": mask_column_shift,
+    "no-rollback-after-probe": no_rollback_after_probe, "mask-bit-order": mask_bit_order,
+    "stop-tokens-masked": stop_tokens_masked, "closing-tokens-masked": closing_tokens_masked}

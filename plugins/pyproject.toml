@@ -8,6 +8,7 @@ dependencies = ["holonlm"]  # std units are reached through Ref, never imported
 
 [project.optional-dependencies]
 openai = ["fastapi", "uvicorn"]   # frontends.openai (anyio and pydantic come with fastapi)
+grammar = ["xgrammar==0.2.8"]     # grammar.xgrammar (Apache-2.0; needs apache-tvm-ffi >= 0.1.11)
 
 [project.entry-points."holon.plugins"]
 "models.qwen3" = "holon_plugins.models.qwen3"
@@ -23,6 +24,7 @@ openai = ["fastapi", "uvicorn"]   # frontends.openai (anyio and pydantic come wi
 "drafters.dflash" = "holon_plugins.drafters.dflash"
 "drafters.ngram" = "holon_plugins.drafters.ngram"
 "frontends.openai" = "holon_plugins.frontends.openai"
+"grammar.xgrammar" = "holon_plugins.grammar.xgrammar"
 
 [build-system]
 requires = ["hatchling"]
