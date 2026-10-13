@@ -633,8 +633,9 @@ def test_a_failing_constraint_ends_only_its_request(e2e, qwen_checkpoint):
     deep = {"type": "json_object"}
     for _ in range(5000):
         deep = {"type": "sequence", "elements": [deep]}
+    huge = {"type": "json_schema", "schema": {"enum": ["x" * 1000] * 2000}}
     for c, stops in [({"type": ["regex"]}, ()), ({"type": "json_schema", "schema": {"anyOf": 5}, "strict": True}, ()),
-                     (deep, ()), (requests[0][1].ext[KEY], (1 << 40,))]:
+                     (deep, ()), (huge, ()), (requests[0][1].ext[KEY], (1 << 40,))]:
         with pytest.raises(ValueError) as malformed:   # a 400, never an exception that ends the engine
             engine.add(requests[0][0], dataclasses.replace(GREEDY, stop_token_ids=stops, ext={KEY: c}))
         assert malformed.value.kind == "client"

@@ -34,6 +34,7 @@ from .vetting import Outcome, Vetting
 
 BUSY_TTL = 600.0                                 # seconds a `busy` refusal is remembered
 REMEMBERED = 4096                                # vetted and refused constraints remembered (the latest)
+MAX_TEXT = 1 << 20                               # bytes of a constraint's JSON
 
 
 class Plugin:
@@ -109,8 +110,10 @@ class XGrammar:
         if params.ignore_eos:
             raise RequestError("client", "ignore_eos cannot be combined with a constraint (it ends at a stop token)")
         try:
-            check(c)
             text = json.dumps(c, separators=(",", ":"))
+            if len(text) > MAX_TEXT:            # bounds every check that runs here, on the engine thread
+                raise ValueError(f"{KEY}: {len(text)} bytes (at most {MAX_TEXT})")
+            check(c)
         except (ValueError, TypeError, RecursionError) as e:
             raise RequestError("client", str(e)) from None
         stops = sorted(self.stops | set(params.stop_token_ids))

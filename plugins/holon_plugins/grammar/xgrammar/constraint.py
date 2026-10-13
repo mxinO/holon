@@ -148,9 +148,7 @@ _ASSERTIONS = {"type", "properties", "items", "enum", "const", "anyOf", "allOf",
 # 2024-02-30, a leap second at 22:59; its ipv6 takes a leading zero in an embedded IPv4 octet; its email takes a
 # \u00a9 escape in a quoted local part).
 FORMATS = {"uri", "uuid", "duration"}
-# Patterns xgrammar reads more loosely than ECMA 262: its \S and [^\s] exclude ASCII whitespace only.
-_LOOSE_PATTERN = re.compile(r"(?<!\\)(?:\\\\)*\\S|\[\^(?:[^\]\\]|\\.)*\\s")
-_PYTHON = {"string": str, "number": (int, float), "boolean": bool, "null": type(None), "array": list, "object": dict}
+_PYTHON = {"string": str, "number": float, "null": type(None), "array": list, "object": dict}
 _SCHEMA_DICTS = ("properties", "patternProperties", "$defs", "definitions")
 _SCHEMA_LISTS = ("anyOf", "allOf", "prefixItems")
 _SCHEMAS = ("additionalProperties", "items", "propertyNames", "unevaluatedProperties", "unevaluatedItems")
@@ -218,7 +216,7 @@ def _local_violation(node: dict, root: Any, draft: int) -> str | None:
         return "patternProperties beside properties is not supported (a name both match: xgrammar applies properties)"
     patterns = [node["pattern"]] if "pattern" in node else []
     patterns += list(node.get("patternProperties", {}))
-    if loose := next((p for p in patterns if _LOOSE_PATTERN.search(p)), None):
+    if loose := next((p for p in patterns if _loose(p)), None):
         return f"pattern {loose!r}: \\S and [^\\s] are not supported (ECMA 262 whitespace is Unicode's)"
     if "pattern" in node and keys & {"format", "minLength", "maxLength"}:
         return f"pattern beside {sorted(keys & {'format', 'minLength', 'maxLength'})} is not supported"
@@ -227,21 +225,40 @@ def _local_violation(node: dict, root: Any, draft: int) -> str | None:
     return None
 
 
+def _loose(pattern: str) -> bool:
+    """Whether `pattern` has \\S, or \\s inside a negated class — which xgrammar reads more loosely than ECMA 262
+    (its whitespace is ASCII's, ECMA's Unicode's). One linear scan: no regex over the client's text."""
+    escaped, negated = False, None              # negated: None outside a class, else whether it is [^…]
+    for i, ch in enumerate(pattern):
+        if escaped:
+            escaped = False
+            if ch == "S" or (ch == "s" and negated):
+                return True
+        elif ch == "\\":
+            escaped = True
+        elif negated is None and ch == "[":
+            negated = pattern.startswith("^", i + 1)
+        elif negated is not None and ch == "]" and pattern[i - 1] not in "[^":
+            negated = None
+    return False
+
+
 def _allowed_beside(node: dict, head: str) -> set[str]:
     """`type` beside enum / const when every value has that type (xgrammar keeps the values, drops the type)."""
     if head not in ("enum", "const") or "type" not in node:
         return set()
     values = node["enum"] if head == "enum" and isinstance(node["enum"], list) else [node.get(head)]
-    types = [node["type"]] if isinstance(node["type"], str) else node["type"]
-    return {"type"} if isinstance(types, list) and all(any(_is(v, t) for t in types) for v in values) else set()
+    types = {node["type"]} if isinstance(node["type"], str) else set(node["type"])
+    return {"type"} if all(_kinds(v) & types for v in values) else set()
 
 
-def _is(value: Any, kind: str) -> bool:
-    if isinstance(value, bool) and kind in ("number", "integer"):
-        return False
-    if kind == "integer":
-        return isinstance(value, int) or (isinstance(value, float) and value.is_integer())
-    return isinstance(value, _PYTHON.get(kind, ()))
+def _kinds(value: Any) -> set[str]:
+    """The JSON Schema types `value` has."""
+    if isinstance(value, bool):
+        return {"boolean"}
+    if isinstance(value, int) or (isinstance(value, float) and value.is_integer()):
+        return {"integer", "number"}
+    return {next((k for k, t in _PYTHON.items() if isinstance(value, t)), "")}
 
 
 def _ref_violation(ref: Any, root: Any) -> str | None:
