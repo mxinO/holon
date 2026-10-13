@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     import numpy as np
     import torch
 
+    from .batch import StepCtx
     from .memory import Pool
     from .model import BuildCtx
 
@@ -127,27 +128,16 @@ class PrefixView(Protocol):
     def blocks(self, upto: int) -> int: ...
 
 
-class CommitView(Protocol):
-    """Host-side results of one step, after its device→host copy."""
-
-    slots: np.ndarray            # [B]
-    n_accept: np.ndarray         # [B] accepted draft tokens (0 without speculation)
-    seqs: list[SeqView]
-
-
 class Rewindable(Protocol):
-    """Per-request state that speculative decoding may roll back (design §7.5)."""
+    """Anything that speculative decoding must roll back past rejected drafts (design §7.5): a built module or a loaded
+    slot object defining `rewind`. Paged state needs none — it rewinds by length."""
 
-    verify_mode: Literal["trivial", "checkpoint_slots", "replay", "snapshot"]
-
-    def commit(self, slots: torch.Tensor, n_accept: torch.Tensor, path: torch.Tensor | None = None) -> None:
-        """Device-side, graph-capturable; runs inside the sample graph."""
-
-    def host_commit(self, view: CommitView) -> None:
-        """CPU-side bookkeeping (frees, trims) after the step's results reach the host."""
+    def rewind(self, ctx: StepCtx, path: torch.Tensor | None = None) -> None:
+        """Device-side, graph-capturable: after the verifier wrote `ctx.seq_table.n_accept` for the step's verify rows,
+        keep only what their accepted tokens produced. `path` stays None until tree verification."""
 
 
-class StateKind(Rewindable, Protocol):
+class StateKind(Protocol):
     """The meaning of one bound state spec. Callbacks are per request; the core vectorises over SoA batches."""
 
     def units_needed(self, seq: SeqView, new_tokens: int) -> int: ...

@@ -31,16 +31,6 @@ class LayerDecl:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class DraftHeadDecl:
-    """A model-provided drafter (e.g. a multi-token-prediction head): its layers, consumed taps, shared modules."""
-
-    name: str
-    layers: tuple[LayerDecl, ...]
-    taps: tuple[str, ...] = ("pre_norm_last",)
-    shares: tuple[str, ...] = ("embed", "lm_head")
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
 class WeightRule:
     """Map checkpoint tensor names onto unit parameters, optionally through a registered value transform.
 
@@ -72,8 +62,6 @@ class ModelSpec:
     norm: Ref
     lm_head: Ref
     weights: WeightMap
-    taps: tuple[str, ...] = ()          # extra named export points
-    draft_heads: tuple[DraftHeadDecl, ...] = ()
     position_fn: str | None = None      # e.g. a multi-section rope; default: arange
 
 

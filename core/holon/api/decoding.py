@@ -1,8 +1,8 @@
 """Scheduling, sampling and speculative decoding roles (design §7.3, §7.6).
 
 Speculative decoding is four roles: a Drafter proposes, a DraftPolicy picks the source and k, a PlanTransform adds the
-draft rows, and a Verifier replaces the Sampler for those rows. Rollback is the core's commit fan-out to Rewindables.
-Ordering, overlap depth and shape axes of transforms and drafters are declared in their manifests.
+draft rows, and a Verifier replaces the Sampler for those rows. Rollback is the core's `rewind` fan-out to Rewindables
+(api.state). Ordering, overlap depth and shape axes of transforms and drafters are declared in their manifests.
 """
 from __future__ import annotations
 

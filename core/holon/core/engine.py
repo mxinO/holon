@@ -100,8 +100,10 @@ class Engine:
         host_lens = any(getattr(planner, "needs_host_lens", False) for planner in planners.values())
         self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len,
                                draft_k=self._draft_k if self.policy is not None else None, host_lens_only=host_lens)
+        rewinders = [m for m in model.modules() if callable(getattr(m, "rewind", None))]
+        rewinders += [o for o in (sampler, verifier, drafter, self.policy) if callable(getattr(o, "rewind", None))]
         self.executor = Executor(cfg, self.device, model, self.spec.vocab, sampler, self.state, planners,
-                                 verifier, drafter, pools=self.ledger.pools)
+                                 verifier, drafter, pools=self.ledger.pools, rewinders=rewinders)
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None
                                 else self.executor.state_memory(self.ledger, cfg.memory_fraction))
         self.state.reset_padding()

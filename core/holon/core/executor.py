@@ -77,11 +77,13 @@ def _last_tokens(qstart: np.ndarray, n_logits: np.ndarray) -> np.ndarray:
 class Executor:
     def __init__(self, cfg: Any, device: torch.device, model: Any, vocab: int, sampler: Any, state: StateManager,
                  planners: dict[str, Any], verifier: Any = None, drafter: Any = None,
-                 pools: dict[str, Any] | None = None) -> None:
-        """`cfg`: the EngineConfig (sizes, graphs on or off); `pools`: every ledger pool, by name (for MemOps)."""
+                 pools: dict[str, Any] | None = None, rewinders: list[Any] = ()) -> None:
+        """`cfg`: the EngineConfig (sizes, graphs on or off); `pools`: every ledger pool, by name (for MemOps);
+        `rewinders`: what rolls back past rejected drafts after each verify (api.Rewindable)."""
         self.cfg, self.device, self.model, self.vocab, self.state = cfg, device, model, vocab, state
         self.pools = pools or {}
         self.sampler, self.planners, self.verifier, self.drafter = sampler, planners, verifier, drafter
+        self.rewinders = list(rewinders)
         seqs = cfg.max_seqs
         tokens = max(cfg.max_step_tokens, seqs * (1 + cfg.max_draft_tokens))     # a verify step: 1 + k per row
         self.uploader = Uploader(device, state.upload_fields(seqs, tokens) | {
@@ -210,6 +212,8 @@ class Executor:
             if (plan.n_logits > 1).any():           # verify rows
                 out, accepts = self.verifier.verify(logits.float(), ctx)
                 sampled = self._store(ctx, out.tokens, accepts)
+                for r in self.rewinders:            # past the rejected drafts, before anything drafts from it
+                    r.rewind(ctx)
             elif plan.n_logits.any():
                 out = self.sampler.sample(logits.float(), ctx)
                 sampled = self._store(ctx, out.tokens)

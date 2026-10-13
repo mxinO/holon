@@ -8,8 +8,6 @@ import math
 
 
 class Paged:
-    verify_mode = "trivial"  # rollback = truncating the token count; no device work
-
     def __init__(self, spec, pool, ctx) -> None:
         self.spec, self.pool = spec, pool
         self.page = spec.shape.tokens_per_unit
@@ -22,9 +20,3 @@ class Paged:
 
     def reclaimable(self, seq) -> list[int]:
         return []
-
-    def commit(self, slots, n_accept, path=None) -> None:
-        pass
-
-    def host_commit(self, view) -> None:
-        pass

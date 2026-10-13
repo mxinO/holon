@@ -56,7 +56,7 @@ def test_hash_is_pinned():
 
 
 def test_defaulted_fields_do_not_change_identity():
-    assert canonical_hash(_spec()) == canonical_hash(_spec(taps=(), position_fn=None))
+    assert canonical_hash(_spec()) == canonical_hash(_spec(position_fn=None))
     assert canonical_hash(_spec()) != canonical_hash(_spec(heads=16))
     assert canonical_hash(_spec()) != canonical_hash(_spec(position_fn="mrope"))
 

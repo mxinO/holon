@@ -40,13 +40,12 @@ from .frontend import (
 from .manifest import SLOTS, Cardinality, Manifest, Provenance, Resource, Tunable
 from .memory import Ledger, Pool
 from .mixer import Mixer, Planner
-from .model import BuildCtx, DraftHeadDecl, LayerDecl, ModelPlugin, ModelSpec, Unit, WeightMap, WeightRule, WeightSource
+from .model import BuildCtx, LayerDecl, ModelPlugin, ModelSpec, Unit, WeightMap, WeightRule, WeightSource
 from .ops import Constraint, KernelRegistry, KernelSpec, Plugin, Registries, Registry
 from .plan import Binding, Lock, Plan, UnitPin
 from .platform import Fingerprint, Platform
 from .quant import Converter, Dialect, Layout, QTensor, Scale, Scheme, SchemeImpl
 from .state import (
-    CommitView,
     HitLen,
     InStepPublish,
     MemOp,
@@ -65,8 +64,8 @@ from .telemetry import Event
 from .terms import Ref, canonical_hash, parse_versioned, to_term
 
 __all__ = [
-    "SLOTS", "Abort", "Batch", "BatchPlan", "Binding", "BuildCtx", "Cardinality", "CommitView", "Constraint",
-    "Converter", "DeviceBatch", "Dialect", "DraftHeadDecl", "DraftPolicy", "Drafter", "EngineClient",
+    "SLOTS", "Abort", "Batch", "BatchPlan", "Binding", "BuildCtx", "Cardinality", "Constraint",
+    "Converter", "DeviceBatch", "Dialect", "DraftPolicy", "Drafter", "EngineClient",
     "EngineRequest", "Event", "Fingerprint", "FrontendBundle", "FrontendPlugin", "HitLen", "InStepPublish",
     "KernelRegistry", "KernelSpec", "LayerDecl", "Layout", "Ledger", "Lock", "LogitsProcessor", "Logprobs",
     "Manifest", "MemOp", "Mixer", "ModelPlugin", "ModelSpec", "Paged", "Pages", "Parser", "Payload", "Plan",

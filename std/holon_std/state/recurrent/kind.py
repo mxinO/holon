@@ -21,8 +21,6 @@ from holon.api import HitLen, MemOp, Payload
 
 
 class Recurrent:
-    verify_mode = "trivial"  # speculative rollback (replay or checkpoint slots) arrives with M0.4
-
     def __init__(self, spec, pool, ctx) -> None:
         self.spec, self.pool = spec, pool
         self.align = math.lcm(spec.alignment, ctx.options.get("page_size", 16))
@@ -96,9 +94,3 @@ class Recurrent:
 
     def fork(self, src, dsts) -> list[MemOp]:
         return []                                  # not built in M0.3: n > 1 siblings adopt the first's checkpoints
-
-    def commit(self, slots, n_accept, path=None) -> None:
-        pass
-
-    def host_commit(self, view) -> None:
-        pass
