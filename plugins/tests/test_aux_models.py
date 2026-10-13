@@ -38,12 +38,15 @@ def _kv(engine, pool: str, segment: int, units: list[int], n: int) -> torch.Tens
     return kv.permute(1, 2, 0, 3, 4).reshape(2, heads, -1, dim)[:, :, :n]
 
 
+@pytest.mark.parametrize("ahead", [False, True], ids=["absorb", "ahead"])
 @pytest.mark.parametrize("memory", [1 << 20, 18 * 2048], ids=["roomy", "preempting"])
-def test_an_aux_model_writes_its_own_state_like_the_layer_it_copies(tiny_checkpoint, tiny_case, memory):  # noqa: F811
+def test_an_aux_model_writes_its_own_state_like_the_layer_it_copies(tiny_checkpoint, tiny_case, memory, ahead):  # noqa: F811
+    # "ahead": sub-steps write KV past each row (reserved by the drafter's lookahead) — never into another request's
+    # pages, and equal to what the absorb pass writes there once those positions are committed (M0.4 §3.2).
     prompts, expected = tiny_case
     ORACLE.sequences = {tuple(p): p + e for p, e in zip(prompts, expected, strict=True)}
     ORACLE.by_slot.clear()
-    ORACLE.steps, ORACLE.k, ORACLE.mode = 0, 3, "right"
+    ORACLE.steps, ORACLE.k, ORACLE.mode, ORACLE.ahead = 0, 3, "mixed", ahead
     engine = _engine(tiny_checkpoint, state_memory=memory)
     assert "aux.kv" in engine.executor.planners and engine.ledger.pool("state.aux.kv").segments == 1
     for _ in range(2):                                             # the second pass hits the prefix cache
@@ -63,3 +66,15 @@ def test_an_aux_model_writes_its_own_state_like_the_layer_it_copies(tiny_checkpo
 def test_no_aux_model_without_a_drafter(tiny_checkpoint):  # noqa: F811
     engine = _engine(tiny_checkpoint, drafting=False)
     assert "aux.kv" not in engine.executor.planners and "state.aux.kv" not in engine.ledger.pools
+
+
+def test_sub_steps_at_the_length_limit(tiny_checkpoint, tiny_case):  # noqa: F811
+    # A request decoding up to max_model_len: verify padding and the drafter's writes ahead go past the limit, into
+    # the block tables' null overflow columns, and change nothing (M0.4 §3.2).
+    prompts, expected = tiny_case
+    ORACLE.sequences = {tuple(p): p + e for p, e in zip(prompts, expected, strict=True)}
+    ORACLE.by_slot.clear()
+    ORACLE.steps, ORACLE.k, ORACLE.mode, ORACLE.ahead = 0, 3, "right", True
+    engine = _engine(tiny_checkpoint)
+    out = engine.generate([prompts[3]], SamplingParams(temperature=0.0, ignore_eos=True))[0]
+    assert len(prompts[3]) + len(out) == 40 and out[:12] == expected[3]

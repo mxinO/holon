@@ -163,3 +163,8 @@ class StepCtx(Protocol):
     def view(self, namespace: str) -> StepCtx:
         """This step as the units of auxiliary model `namespace` (`BuildCtx.aux_model`) see it: state groups and
         in-step publishes under their local names."""
+
+    def substep(self, q: int, offset: int) -> StepCtx:
+        """A drafter's next sub-step (in the order `Drafter.substeps` declared): q query tokens for each sampled row of
+        this step at positions `num_computed[slot] + offset + j` (num_computed already advanced), with buffers and
+        planned metadata of its own; the drafter fills its `batch.dev.input_ids`."""

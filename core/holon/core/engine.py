@@ -136,7 +136,8 @@ class Engine:
         rewinders = [m for m in modules if callable(getattr(m, "rewind", None))]
         rewinders += [o for o in (sampler, verifier, drafter, self.policy) if callable(getattr(o, "rewind", None))]
         self.executor = Executor(cfg, self.device, model, self.spec.vocab, sampler, self.state, planners,
-                                 verifier, drafter, pools=self.ledger.pools, rewinders=rewinders)
+                                 verifier, drafter, pools=self.ledger.pools, rewinders=rewinders,
+                                 sub_planners=self.ctx.aux_sub_planners)
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None
                                 else self.executor.state_memory(self.ledger, cfg.memory_fraction))
         self.state.reset_padding()

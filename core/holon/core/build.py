@@ -52,6 +52,7 @@ class BuildContext:
         self.aux_builder: Any = None
         self.aux_bound: list[Any] = []
         self.aux_planners: dict[str, Any] = {}
+        self.aux_sub_planners: dict[str, list[Any]] = {}   # group -> one planner per drafter sub-step
         self.aux_modules: list[nn.Module] = []
 
     def unit_factory(self, ref: Ref) -> Any:
@@ -170,6 +171,8 @@ class StepContext:
     pages: dict[str, Any] = dataclasses.field(default_factory=dict)    # the core's page views (engine steps)
     prep: Any = None                                                    # the engine's device-prep inputs
     pools: dict[str, Any] = dataclasses.field(default_factory=dict)     # the ledger's pools, by name
+    substeps: Any = None                       # the drafter sub-steps planned with this step (Executor)
+    namespace: str = ""                        # set by `view`: whose names `meta` and `substep` use
 
     def meta(self, group: str) -> Any:
         return self.metas[group]
@@ -183,7 +186,15 @@ class StepContext:
                      if p.spec.startswith(pre)]
         plan = dataclasses.replace(self.batch.plan, publishes=publishes)
         return dataclasses.replace(self, batch=Batch(plan, self.batch.dev), metas=local(self.metas),
-                                   pages=local(self.pages))
+                                   pages=local(self.pages), namespace=namespace)
+
+    def substep(self, q: int, offset: int) -> StepContext:
+        """The next of the drafter's sub-steps (`Drafter.substeps`): q tokens per sampled row at positions
+        `num_computed + offset + j`, with its own buffers, ready to run (in this context's namespace)."""
+        if self.substeps is None:
+            raise RuntimeError("this step planned no sub-steps (Drafter.substeps)")
+        sub = self.substeps.next(q, offset)
+        return sub.view(self.namespace) if self.namespace else sub
 
     def pool(self, name: str) -> Any:
         return self.pools[name]

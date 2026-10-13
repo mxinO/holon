@@ -13,6 +13,7 @@ class Oracle:
     vocab: int = 512
     by_slot: dict[int, list[int]] = dataclasses.field(default_factory=dict)
     steps: int = 0
+    ahead: bool = False                            # the aux drafter writes KV ahead through sub-steps
     hidden: set[tuple[int, ...]] = dataclasses.field(default_factory=set)   # prompts drafted right, but n_draft 0
     hidden_slots: set[int] = dataclasses.field(default_factory=set)
     history: object = None                         # the drafter's per-slot token history (a [slots, positions] tensor)

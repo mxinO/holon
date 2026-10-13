@@ -70,14 +70,23 @@ def build_aux(namespace: str, spec: AuxSpec, tensors: Any, ctx: BuildContext, pl
     bound, planners = _bind_layers(spec.layers, child, plugins, ledger, cfg, namespace)
     ctx.aux_bound += bound
     ctx.aux_planners.update(planners)
+    # Each drafter sub-step gets planners of its own: kernel instances hold per-step buffers (design §3.2).
+    for _ in range(cfg.max_draft_tokens):
+        _, more = _bind_layers(spec.layers, child, plugins, ledger, cfg, namespace, plan_only=True)
+        for group, planner in more.items():
+            if getattr(planner, "needs_host_lens", False):
+                raise PluginError(f"{group}: drafter sub-steps need kernels that read lengths on the device")
+            ctx.aux_sub_planners.setdefault(group, []).append(planner)
     with torch.device("meta"):
         module = child.unit(spec.unit, layers=spec.layers)
     load_weights(module.eval(), child, tensors, spec.weights)
     return module
 
 
-def _bind_layers(layers: tuple, ctx: Any, plugins: PluginSet, ledger: Ledger, cfg: Any, namespace: str = ""
-                 ) -> tuple[list[BoundSpec], dict[str, Any]]:
+def _bind_layers(layers: tuple, ctx: Any, plugins: PluginSet, ledger: Ledger, cfg: Any, namespace: str = "",
+                 plan_only: bool = False) -> tuple[list[BoundSpec], dict[str, Any]]:
+    """Bind the state the layers' mixers declare (`namespace`: under `<namespace>.`); `plan_only`: no binding, new
+    planners only."""
     by_mixer: dict[Ref, list[int]] = collections.defaultdict(list)
     for i, layer in enumerate(layers):
         by_mixer[layer.mixer].append(i)
@@ -88,7 +97,8 @@ def _bind_layers(layers: tuple, ctx: Any, plugins: PluginSet, ledger: Ledger, cf
         if namespace:                      # e.g. "kv" → "mtp.kv": its own pools, tables and planners
             specs = [dataclasses.replace(s, name=f"{namespace}.{s.name}",
                                          page_group=s.page_group and f"{namespace}.{s.page_group}") for s in specs]
-        bound += [_bind(s, ctx, plugins, ledger, cfg) for s in specs]
+        if not plan_only:
+            bound += [_bind(s, ctx, plugins, ledger, cfg) for s in specs]
         for group in dict.fromkeys(s.group for s in specs):
             if group in planners:
                 raise PluginError(f"state group {group!r} declared by two mixers")

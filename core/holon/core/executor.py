@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from holon.api import Batch, BatchPlan, DeviceBatch, Logprobs, SamplingParams, SeqTable, TokenSrc
+from holon.api import Batch, BatchPlan, DeviceBatch, Logprobs, Pages, SamplingParams, SeqTable, TokenSrc
 
 from . import platform
 from .batching import host_plan, padded
@@ -68,6 +68,25 @@ class _Prep:
     draft_from: torch.Tensor | None = None    # [R*k] where each draft is in the SeqTable (flat)
 
 
+class _Substeps:
+    """A step's planned drafter sub-steps, handed out in order (`StepCtx.substep`); `reset` before each run of the
+    drafter (a graph's warm-up and capture run it twice)."""
+
+    def __init__(self, executor: Executor, subs: list[StepContext]) -> None:
+        self.executor, self.subs, self.cursor = executor, subs, 0
+
+    def reset(self) -> None:
+        self.cursor = 0
+
+    def next(self, q: int, offset: int) -> StepContext:
+        if self.cursor >= len(self.subs) or int(self.subs[self.cursor].batch.plan.n_query.max(initial=q)) != q:
+            raise RuntimeError(f"sub-step {self.cursor} of width {q} was not declared (Drafter.substeps)")
+        sub, i = self.subs[self.cursor], self.cursor
+        self.cursor += 1
+        self.executor._prepare_substep(sub, i, offset)
+        return sub
+
+
 def _last_tokens(qstart: np.ndarray, n_logits: np.ndarray) -> np.ndarray:
     """Flat indices of each row's last `n_logits` tokens (the tokens whose logits a step computes)."""
     ends = np.repeat(qstart[1:], n_logits)
@@ -78,13 +97,16 @@ def _last_tokens(qstart: np.ndarray, n_logits: np.ndarray) -> np.ndarray:
 class Executor:
     def __init__(self, cfg: Any, device: torch.device, model: Any, vocab: int, sampler: Any, state: StateManager,
                  planners: dict[str, Any], verifier: Any = None, drafter: Any = None,
-                 pools: dict[str, Any] | None = None, rewinders: list[Any] = ()) -> None:
+                 pools: dict[str, Any] | None = None, rewinders: list[Any] = (),
+                 sub_planners: dict[str, list[Any]] | None = None) -> None:
         """`cfg`: the EngineConfig (sizes, graphs on or off); `pools`: every ledger pool, by name (for MemOps);
-        `rewinders`: what rolls back past rejected drafts after each verify (api.Rewindable)."""
+        `rewinders`: what rolls back past rejected drafts after each verify (api.Rewindable); `sub_planners`: per
+        auxiliary state group, one planner per drafter sub-step."""
         self.cfg, self.device, self.model, self.vocab, self.state = cfg, device, model, vocab, state
         self.pools = pools or {}
         self.sampler, self.planners, self.verifier, self.drafter = sampler, planners, verifier, drafter
         self.rewinders = list(rewinders)
+        self.sub_planners = sub_planners or {}
         seqs = cfg.max_seqs
         tokens = max(cfg.max_step_tokens, seqs * (1 + cfg.max_draft_tokens))     # a verify step: 1 + k per row
         self.uploader = Uploader(device, state.upload_fields(seqs, tokens) | {
@@ -93,7 +115,7 @@ class Executor:
             "logits_index": (tokens, torch.int64), "logits_rows": (tokens, torch.int64),   # verify rows: 1 + k each
             "row_of_token": (tokens, torch.int64), "offset": (tokens, torch.int64), "n_query": (seqs, torch.int64),
             "exact": (seqs, torch.bool), "start": (seqs, torch.int64), "from_device": (seqs, torch.bool),
-            "draft_index": (tokens, torch.int64), "draft_from": (tokens, torch.int64)})
+            "draft_index": (tokens, torch.int64), "draft_from": (tokens, torch.int64)} | self._sub_fields(cfg))
         # The device SeqTable (one row per slot, plus the padding slot): authoritative while steps are in flight.
         rows = seqs + 1
         self.last_token = torch.zeros(rows, dtype=torch.int64, device=device)
@@ -110,6 +132,20 @@ class Executor:
         self._out_accepts = [platform.pinned_empty(seqs, torch.int64, device) for _ in range(2)]
         self._out_drafts = [platform.pinned_empty(seqs, torch.int64, device) for _ in range(2)]
         self._out_turn = 0
+
+    def _sub_fields(self, cfg: Any) -> dict[str, tuple[int, torch.dtype]]:
+        """Static buffers of each drafter sub-step: up to `max_seqs` rows of up to 1 + max_draft_tokens tokens."""
+        if not self.sub_planners:
+            return {}
+        rows, tokens = cfg.max_seqs, cfg.max_seqs * (1 + cfg.max_draft_tokens)
+        out = {}
+        for i in range(cfg.max_draft_tokens):
+            out |= {f"sub{i}.query_start": (rows + 1, torch.int64), f"sub{i}.slots": (rows, torch.int64),
+                    f"sub{i}.rows": (tokens, torch.int64), f"sub{i}.offset": (tokens, torch.int64),
+                    f"sub{i}.logits": (tokens, torch.int64), f"sub{i}.input_ids": (tokens, torch.int64),
+                    f"sub{i}.positions": (tokens, torch.int64), f"sub{i}.lens": (rows, torch.int32)}
+            out |= {f"sub{i}.{g}.write": (tokens, torch.int64) for g in self.sub_planners}
+        return out
 
     # -- startup --------------------------------------------------------------------------------------------------
     def state_memory(self, ledger: Ledger, fraction: float) -> int:
@@ -221,7 +257,7 @@ class Executor:
                 out = self.sampler.sample(logits.float(), ctx)
                 sampled = self._store(ctx, out.tokens)
             if self.drafter is not None:
-                self.drafter.run(ctx, h)            # its state for this step's tokens, then the next step's drafts
+                self._run_drafter(ctx, h)           # its state for this step's tokens, then the next step's drafts
         run_mem_ops(plan.mem_ops, self.pools, "post_sample")
         if sampled is not None and self.drafter is not None:
             drafts = self._out_drafts[self._out_turn][:rows].copy_(self.seq_table.n_draft[ctx.batch.dev.slots[:rows]],
@@ -248,8 +284,13 @@ class Executor:
         logits = self.model.head(h[ctx.batch.dev.logits_index]).float()
         tokens = self._store(ctx, self.sampler.sample(logits, ctx).tokens)
         if self.drafter is not None:
-            self.drafter.run(ctx, h)
+            self._run_drafter(ctx, h)
         return tokens
+
+    def _run_drafter(self, ctx: StepContext, h: torch.Tensor) -> None:
+        if ctx.substeps is not None:
+            ctx.substeps.reset()
+        self.drafter.run(ctx, h)
 
     def _store(self, ctx: StepContext, tokens: torch.Tensor, accepts: torch.Tensor | None = None) -> torch.Tensor:
         """Advance the device SeqTable for the sampled rows: the next input token and the computed length — for a
@@ -301,9 +342,50 @@ class Executor:
             cols = self.seq_table.draft_tokens.shape[1]
             prep.draft_from = up.put("draft_from", np.repeat(plan.slots[verify].astype(np.int64) * cols, k) + j)
         pages = self.state.pages(plan, up)
+        widths = self.drafter.substeps(plan.draft_k) if plan.draft_k and hasattr(self.drafter, "substeps") else []
+        subs = [self._substep(plan, pages, i, q) for i, q in enumerate(widths)]
         up.end()
         metas = {g: p.plan_bounds(batch, pages.get(g)) for g, p in self.planners.items()}
-        return StepContext(batch, metas, seq_table=self.seq_table, pages=pages, prep=prep, pools=self.pools)
+        for i, sub in enumerate(subs):
+            sub.metas = {g: p[i].plan_bounds(sub.batch, sub.pages[g]) for g, p in self.sub_planners.items()}
+        return StepContext(batch, metas, seq_table=self.seq_table, pages=pages, prep=prep, pools=self.pools,
+                           substeps=_Substeps(self, subs) if subs else None)
+
+    def _substep(self, plan: BatchPlan, pages: dict[str, Any], i: int, q: int) -> StepContext:
+        """The host half of drafter sub-step `i`: q tokens for each sampled row of `plan`, over the auxiliary state
+        groups; positions, lengths and write indices are derived on the device when the drafter asks for it."""
+        if i >= self.cfg.max_draft_tokens or q > 1 + self.cfg.max_draft_tokens:
+            raise RuntimeError(f"sub-step {i} of width {q}: at most max_draft_tokens sub-steps of 1 + max_draft_tokens")
+        up, f = self.uploader, f"sub{i}."
+        slots = plan.slots[plan.n_logits > 0]
+        rows, tokens = len(slots), len(slots) * q
+        sub_plan = host_plan(plan.step, slots, plan.start_upper[plan.n_logits > 0] + int(plan.n_query.max()) + q
+                             + (self.drafter.lookahead(plan.draft_k) if hasattr(self.drafter, "lookahead") else 0),
+                             np.full(rows, q, dtype=np.int32), np.full(rows, q, dtype=np.int32),
+                             np.zeros(tokens, dtype=np.int64))
+        batch = Batch(sub_plan, DeviceBatch(
+            input_ids=up.dev[f + "input_ids"][:tokens], positions=up.dev[f + "positions"][:tokens],
+            query_start=up.put(f + "query_start", np.arange(rows + 1) * q),
+            slots=up.put(f + "slots", slots.astype(np.int64)),
+            logits_index=up.put(f + "logits", np.arange(tokens)),
+            logits_rows=up.put(f + "rows", np.repeat(np.arange(rows), q))))
+        sub_pages = {g: Pages(pages[g].page, pages[g].table, pages[g].host_table, up.dev[f + "lens"][:rows],
+                              up.dev[f"{f}{g}.write"][:tokens]) for g in self.sub_planners}
+        offset = up.put(f + "offset", np.tile(np.arange(q), rows))
+        return StepContext(batch, {}, seq_table=self.seq_table, pages=sub_pages, prep=offset, pools=self.pools)
+
+    def _prepare_substep(self, sub: StepContext, i: int, offset: int) -> None:
+        """The device half of a sub-step (inside the step's graph): positions from the advanced SeqTable."""
+        dev, q = sub.batch.dev, int(sub.batch.plan.n_query[0]) if len(sub.batch.plan.n_query) else 0
+        start = self.num_computed[dev.slots] + offset
+        positions = start[dev.logits_rows] + sub.prep
+        dev.positions.copy_(positions.clamp(max=self.cfg.max_model_len - 1))
+        slot_of_token = dev.slots[dev.logits_rows]
+        for g, pages in sub.pages.items():
+            pages.lens.copy_(start + q)
+            unit = pages.table[slot_of_token, positions // pages.page].long()
+            pages.write_index.copy_(unit * pages.page + positions % pages.page)
+            self.sub_planners[g][i].prepare_device(sub.metas[g], sub)
 
     def _prepare(self, ctx: StepContext) -> None:
         """The device half: the SeqTable's starts for host-exact rows, then positions, lengths, write indices and
