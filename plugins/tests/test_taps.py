@@ -5,15 +5,14 @@ residual stream after its first and last layers and drafts from sparse laws it p
   reference run over the committed tokens at every computed position: across chunked prefill, verify rows (rejected
   drafts' positions recomputed), preemption, at overlap depth 0 and 1.
 - Its drafts verify losslessly through `std.spec.rejection` (greedy: plain greedy's tokens).
-- On a GPU, the taps and the sparse-law verifier run inside captured verify graphs, equal to eager runs of the same
-  padded plans.
+Taps and sparse laws inside captured verify graphs: test_dflash (a quantized DFlash2 on Qwen3-0.6B).
 """
 import dataclasses
 import pathlib
 
 import pytest
 import torch
-from holon.api import Manifest, SamplingParams
+from holon.api import Manifest
 from holon.core.build import BuildContext, StepContext, build_model, load_weights
 from holon.core.engine import Engine, EngineConfig
 from holon.core.plugins import Installed, PluginError, PluginSet, discover
@@ -96,52 +95,3 @@ def test_taps_are_checked_against_the_target(tiny_checkpoint, tiny_case):  # noq
     _oracle(*tiny_case, 512)
     with pytest.raises(PluginError, match=r"taps layers \[2\]; the target has 2"):
         _engine(tiny_checkpoint, plugin_options={"tap.layers": "0,2"})
-
-
-SNAP = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
-
-
-@pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
-def test_taps_and_sampled_drafts_run_in_verify_graphs():
-    # Graphed and eager runs of the very same padded plans (the eager runner calls the step instead of replaying it):
-    # the same tokens, acceptances and tapped streams, greedy and sampled; every verify step replays a graph.
-    from transformers import AutoTokenizer
-
-    class Eager:
-        def run(self, key, fn):
-            return fn()
-
-        def __len__(self):
-            return 0
-
-    tok = AutoTokenizer.from_pretrained(SNAP)
-    texts = ["1, 2, 3, 4, 5, 6, 7, 8,", "def add(a, b):\n    return a + b\n", "The capital of France is",
-             "for i in range(10):\n    print(i)\n", "a b c a b c a b"]
-    prompts = [tok(t)["input_ids"] for t in texts]
-    runs = [SamplingParams(temperature=0.0, seed=5, max_tokens=24, ignore_eos=True),     # seeds: the drafter's coins
-            SamplingParams(temperature=0.8, top_p=0.9, seed=3, max_tokens=24, ignore_eos=True)]
-    cfg = dict(model=str(SNAP), dtype=torch.bfloat16, max_seqs=8, max_model_len=256)
-    plain = Engine(EngineConfig(**cfg))
-    oracles = [plain.generate(prompts, params) for params in runs]
-    del plain
-    outs = []
-    for graphed in (True, False):
-        engine = Engine(EngineConfig(**cfg, max_draft_tokens=3, prefix_cache=False, slots=SLOTS), plugins=_plugins())
-        if not graphed:
-            engine.executor.graphs = Eager()
-        tokens, taps = [], []
-        for params, oracle in zip(runs, oracles, strict=True):
-            _oracle(prompts, oracle, 151936)
-            tokens.append(engine.generate(prompts, params))
-            drafter = engine.executor.drafter
-            taps.append((drafter.copy[:-1].clone(), drafter.accum[:-1].clone()))    # the padding slot's are junk
-        stats = engine.stats()
-        assert stats["spec_verify_steps"] > 0 and stats["spec_verify_steps_graphed"] == stats["spec_verify_steps"]
-        outs.append((tokens, taps, {k: v for k, v in stats.items() if k.startswith("spec_") and "graphed" not in k}))
-        del engine
-    (tokens, taps, stats), (eager_tokens, eager_taps, eager_stats) = outs
-    assert tokens == eager_tokens and stats == eager_stats
-    assert all(torch.equal(a, b) for pair, eager in zip(taps, eager_taps, strict=True)
-               for a, b in zip(pair, eager, strict=True))
-    accepted = sum(n for key, n in stats.items() if key.startswith("spec_rows_k3_accepting_") and key[-1] != "0")
-    assert accepted > 0

@@ -1,22 +1,32 @@
-"""Tiny DFlash2 draft checkpoints for CPU tests: random weights under the names and `config.json` layout of
-z-lab's DFlash2 checkpoints (z-lab/Qwen3.8-27B-DFlash2), for a given target's hidden size and vocabulary."""
+"""Tiny DFlash2 draft checkpoints for tests: random weights under the names and `config.json` layout of z-lab's DFlash2
+checkpoints (z-lab/Qwen3.8-27B-DFlash2), for a given target's hidden size and vocabulary; and their GGUF as llama.cpp's
+own converter writes it."""
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import subprocess
+import sys
 
 import torch
 from safetensors.torch import save_file
 
+from .qwen3_5_files import LLAMA, can_convert  # noqa: F401 — re-exported
 
-def config(hidden: int, vocab: int, taps: tuple[int, ...], mask: int, layers: int = 2, window: int = 6) -> dict:
+
+def config(hidden: int, vocab: int, taps: tuple[int, ...], mask: int, layers: int = 2, window: int = 6,
+           heads: tuple[int, int, int] = (4, 2, 16), inter: int = 96, rank: int = 8, top_k: int = 4) -> dict:
+    """`heads`: query heads, kv heads, head dim."""
     return {"architectures": ["DFlash2DraftModel"], "model_type": "qwen3", "hidden_size": hidden,
-            "intermediate_size": 96, "num_hidden_layers": layers, "num_attention_heads": 4, "num_key_value_heads": 2,
-            "head_dim": 16, "rms_norm_eps": 1e-6, "vocab_size": vocab, "is_causal": False,
-            "use_sliding_window": True, "sliding_window": window, "layer_types": ["sliding_attention"] * layers,
+            "intermediate_size": inter, "num_hidden_layers": layers, "num_attention_heads": heads[0],
+            "num_key_value_heads": heads[1], "head_dim": heads[2], "rms_norm_eps": 1e-6, "vocab_size": vocab,
+            "is_causal": False, "use_sliding_window": True, "sliding_window": window,
+            "layer_types": ["sliding_attention"] * layers, "max_window_layers": layers,
             "rope_parameters": {"rope_theta": 1e7, "rope_type": "default"}, "tie_word_embeddings": False,
             "dflash_config": {"block_size": 8, "target_layer_ids": list(taps), "mask_token_id": mask,
-                              "conv_kernel_size": 2, "conv_group_size": 16, "selector_rank": 8, "selector_top_k": 4}}
+                              "conv_kernel_size": 2, "conv_group_size": 16, "selector_rank": rank,
+                              "selector_top_k": top_k}}
 
 
 def save(path: pathlib.Path, hidden: int, vocab: int, taps: tuple[int, ...], mask: int, seed: int = 0,
@@ -55,3 +65,13 @@ def save(path: pathlib.Path, hidden: int, vocab: int, taps: tuple[int, ...], mas
     save_file({k: v.contiguous() for k, v in t.items()}, path / "model.safetensors")
     (path / "config.json").write_text(json.dumps(c))
     return path
+
+
+def convert(path: pathlib.Path, target: pathlib.Path, outtype: str = "q8_0") -> pathlib.Path:
+    """`path` converted by llama.cpp's own converter (its DFlash support) to a GGUF of `outtype`, with the tokenizer
+    of `target` (an HF checkpoint directory with the draft's vocabulary)."""
+    out = path / f"draft-{outtype}.gguf"
+    subprocess.run([sys.executable, str(LLAMA / "convert_hf_to_gguf.py"), str(path), "--target-model-dir",
+                    str(target), "--outtype", outtype, "--outfile", str(out)],
+                   env=os.environ | {"PYTHONPATH": str(LLAMA / "gguf-py")}, check=True, capture_output=True)
+    return out

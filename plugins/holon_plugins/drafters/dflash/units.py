@@ -88,7 +88,7 @@ class Selector(nn.Module):
                 ) -> torch.Tensor:
         """ids, unary [R, E, K] (candidates per slot, their logits), hidden [R, E, H], anchor [R] → [R, E, K, K]."""
         k = ids.shape[-1]
-        projected = self.hidden_projection(hidden).float()                              # [R, E, r]
+        projected = self.hidden_projection(hidden.reshape(-1, hidden.shape[-1])).float().view(*ids.shape[:2], -1)
         before = torch.cat([anchor[:, None, None].expand(-1, 1, k), ids[:, :-1]], 1)     # each slot's predecessors
         edges = torch.einsum("bepr,becr->bepc", self._rows(self.predecessor, before) * projected[:, :, None],
                              self._rows(self.successor, ids))

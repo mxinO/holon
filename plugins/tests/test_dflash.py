@@ -9,7 +9,10 @@ requests and a sampled one in the same batches:
   drafts move the next block's anchor and the context it attends to;
 - the sampled request's published laws are the contract's: real rows sum to 1 and hold their draft with q > 0;
   greedy rows' are one-hot at their draft.
+
+On a GPU (Qwen3-0.6B with a random draft of its geometry, quantized by llama.cpp's converter): verify graphs.
 """
+import pathlib
 
 import pytest
 import torch
@@ -119,3 +122,47 @@ def test_dflash_drafts_like_its_reference_and_is_lossless(case, overlap, memory)
     accepted = sum(n for key, n in stats.items() if key.startswith("spec_rows_k7_accepting_") and key[-1] != "0")
     assert watch.blocks > 10 and watch.forced and accepted and watch.laws > watch.blocks
     assert memory == 8 << 20 or engine.sched.preemptions > 0
+
+
+SNAP = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
+
+
+@pytest.mark.skipif(SNAP is None or not torch.cuda.is_available() or not dflash_files.can_convert(),
+                    reason="needs Qwen3-0.6B, a GPU and llama.cpp's converter")
+def test_a_quantized_draft_runs_in_verify_graphs(tmp_path):
+    # Qwen3-0.6B with a random DFlash2 of its geometry (head_dim 128, 16 candidates), converted to q8_0 by llama.cpp:
+    # quantized linears and codebook rows, the taps, the block sub-step and the sparse laws inside captured verify
+    # graphs. Graphed and eager runs of the same padded plans (the eager runner calls the step instead of replaying
+    # it) give the same tokens and acceptances, greedy and sampled; every verify step replays a graph.
+    from transformers import AutoTokenizer
+
+    class Eager:
+        def run(self, key, fn):
+            return fn()
+
+        def __len__(self):
+            return 0
+
+    draft = dflash_files.convert(dflash_files.save(tmp_path / "draft", 1024, 151936, (3, 20), mask=151643, layers=1,
+                                                   window=64, heads=(8, 4, 128), inter=512, rank=256, top_k=16), SNAP)
+    tok = AutoTokenizer.from_pretrained(SNAP)
+    prompts = [tok(t)["input_ids"] for t in ("1, 2, 3, 4, 5, 6, 7, 8,", "def add(a, b):\n    return a + b\n",
+                                             "The capital of France is", "a b c a b c a b")]
+    runs = [SamplingParams(temperature=0.0, seed=5, max_tokens=24, ignore_eos=True),
+            SamplingParams(temperature=0.8, top_p=0.9, seed=3, max_tokens=24, ignore_eos=True)]
+    cfg = EngineConfig(model=str(SNAP), dtype=torch.bfloat16, max_seqs=8, max_model_len=256, max_draft_tokens=K,
+                       plugin_options={"spec.k": str(K), "dflash.path": str(draft)},
+                       slots={"drafter": "drafters.dflash", "draft_policy": "std.spec.fixed_k",
+                              "verifier": "std.spec.rejection"})
+    outs = []
+    for graphed in (True, False):
+        engine = Engine(cfg)
+        assert engine.executor.drafter.model.fc._q is not None                  # the GGUF's q8_0, adopted
+        if not graphed:
+            engine.executor.graphs = Eager()
+        tokens = [engine.generate(prompts, params) for params in runs]
+        stats = engine.stats()
+        assert stats["spec_verify_steps"] > 0 and stats["spec_verify_steps_graphed"] == stats["spec_verify_steps"]
+        outs.append((tokens, {k: v for k, v in stats.items() if k.startswith("spec_") and "graphed" not in k}))
+        del engine
+    assert outs[0] == outs[1]
