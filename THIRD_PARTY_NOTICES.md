@@ -18,13 +18,17 @@ Copyright (c) 2023-2026 The ggml authors. License text below and in
   `get_rows`, `convert` and their headers) and the MoE routing and combine kernels (`topk-moe`,
   `moe-weighted-reduction`), unmodified upstream files fetched by
   `plugins/holon_plugins/kernels/ggml_cuda/vendor.sh`, then modified by
-  `plugins/holon_plugins/kernels/ggml_cuda/vendor.patch` (bf16 activations and output, no environment reads, top-k
-  ids at row stride k, a bf16 combine); `plugins/holon_plugins/kernels/ggml_cuda/SHA256SUMS` pins the result.
+  `plugins/holon_plugins/kernels/ggml_cuda/vendor.patch` (bf16 activations and output, also with mmvq's fused
+  scale, no environment reads, top-k ids at row stride k, a bf16 combine, mmq's src1 precision exported);
+  `plugins/holon_plugins/kernels/ggml_cuda/SHA256SUMS` pins the result.
 - `plugins/holon_plugins/kernels/ggml_cuda/csrc/shim.cu` — adapted: ggml's type traits, tensor helpers and device
   table, after `ggml/src/ggml.c` and `ggml/src/ggml-cuda/ggml-cuda.cu`.
 - `plugins/holon_plugins/kernels/ggml_cuda/csrc/api.cu` — adapted: llama.cpp's matmul dispatch (dense and
-  `MUL_MAT_ID`), fused SwiGLU gate, scratch pool and mmq schedule, after `ggml/src/ggml-cuda/ggml-cuda.cu`,
-  `mmq.cuh` and `mmq.cu`.
+  `MUL_MAT_ID`), fused SwiGLU gate and NVFP4 scales, scratch pool and mmq schedule, after
+  `ggml/src/ggml-cuda/ggml-cuda.cu`, `mmq.cuh` and `mmq.cu`.
+- `plugins/holon_plugins/kernels/ggml_cuda/plugin.py` (`repack`, `tail_bytes`) — adapted: the byte layouts of
+  llama.cpp's HF converter (`conversion/base.py` `_nvfp4_pack`, `repack_mxfp4_blocks`) and its CUDA buffers' row
+  padding (`ggml-cuda.cu`).
 
 ### flash-linear-attention, as copied into vLLM — MIT and Apache-2.0
 

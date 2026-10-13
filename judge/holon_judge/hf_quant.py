@@ -9,6 +9,9 @@ NVFP4 / MXFP4 — its own unpacking, scale decoding and `dequantize`, in f32 (�
 `NVFP4QTensor.dequantize` (≤ 1 ulp; test-only, when importable); Quark MXFP4 — amd-quark's `Pack_fp4.unpack` ×
 2^(e − 127) (exact; when importable); and, given a llama.cpp checkout, gguf-py on its converter's repack of every FP4
 tensor (`_nvfp4_pack` × scale2, `repack_mxfp4_blocks`; exact).
+
+`repack_check` is acceptance 4's lossless repack (docs/m06-lowp.md §1): kernels.ggml_cuda's own ggml blocks of every
+FP4 tensor, dequantized by gguf-py × scale2, against the reference, and byte for byte against the converter's.
 """
 from __future__ import annotations
 
@@ -192,11 +195,9 @@ def _quark() -> Callable | None:
     return decode
 
 
-def _llama_cpp(root: str | pathlib.Path) -> Callable:
-    """gguf-py's dequantization of llama.cpp's own repack (its converter at `root`), × scale2 for NVFP4."""
-    import gguf
-    import numpy as np
-
+def converter(root: str | pathlib.Path) -> Callable[[str, torch.Tensor, torch.Tensor], torch.Tensor]:
+    """llama.cpp's converter repack (its checkout at `root`): (elem, packed codes, block scales) -> ggml blocks u8,
+    `_nvfp4_pack` or `repack_mxfp4_blocks`."""
     path = list(sys.path)                    # restored: the converter adds its gguf-py, whose `tests` shadows ours
     sys.path.insert(0, str(root))
     try:
@@ -204,13 +205,55 @@ def _llama_cpp(root: str | pathlib.Path) -> Callable:
     finally:
         sys.path[:] = path
 
+    def repack(elem: str, w: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
+        blocks = ModelBase.repack_mxfp4_blocks(w, s) if elem == "mxfp4" else ModelBase._nvfp4_pack(w, s)[0]
+        return torch.from_numpy(blocks)
+    return repack
+
+
+def dequantize_blocks(elem: str, blocks: torch.Tensor, scale2: torch.Tensor | None = None) -> torch.Tensor:
+    """gguf-py's f32 dequantization of ggml FP4 blocks [rows, row_bytes], × scale2 (NVFP4's) when given."""
+    import gguf
+
+    values = torch.from_numpy(gguf.quants.dequantize(blocks.cpu().numpy(), gguf.GGMLQuantizationType[elem.upper()]))
+    return values.float() if scale2 is None else values.float() * scale2.float().cpu().reshape(())
+
+
+def _llama_cpp(root: str | pathlib.Path) -> Callable:
+    """gguf-py's dequantization of llama.cpp's own repack (its converter at `root`), × scale2 for NVFP4."""
+    repack = converter(root)
+
     def decode(raw: dict[str, torch.Tensor]) -> torch.Tensor:
         w, s = raw.get("weight_packed", raw.get("weight")), raw["weight_scale"]
         if s.dtype == torch.uint8:
-            blocks = ModelBase.repack_mxfp4_blocks(w, s)
-            return torch.from_numpy(gguf.quants.dequantize(blocks, gguf.GGMLQuantizationType.MXFP4).astype(np.float32))
-        blocks, _ = ModelBase._nvfp4_pack(w, s)
+            return dequantize_blocks("mxfp4", repack("mxfp4", w, s))
         scale2 = raw["weight_scale_2"].float() if "weight_scale_2" in raw else 1.0 / raw["weight_global_scale"].float()
-        values = torch.from_numpy(gguf.quants.dequantize(blocks, gguf.GGMLQuantizationType.NVFP4).astype(np.float32))
-        return values * scale2.reshape(())
+        return dequantize_blocks("nvfp4", repack("nvfp4", w, s), scale2)
     return decode
+
+
+def repack_check(path: str | pathlib.Path, llama_cpp: str | pathlib.Path | None = None, device: str = "cuda",
+                 limit: int | None = None) -> dict:
+    """Acceptance 4: every FP4 module the engine's weight source yields, repacked by kernels.ggml_cuda (its `repack`,
+    what its `prepare` holds, on `device`): gguf-py's dequantization of those blocks × scale2 against the reference
+    (the largest difference in ulps, and the modules off it: none expected), and, given a llama.cpp checkout, the
+    blocks against its converter's bytes (the modules that differ: none expected)."""
+    from holon.api import QTensor
+    from holon_plugins.kernels.ggml_cuda.plugin import FP4, repack
+    from holon_std.weights.hf.source import HFSafetensors
+
+    theirs = converter(llama_cpp) if llama_cpp is not None else None
+    report = {"modules": 0, "max_ulps": 0, "over": [], "bytes_differ": [] if theirs else None}
+    quantized = ((n, t) for n, t in HFSafetensors(path).tensors()
+                 if isinstance(t, QTensor) and t.layout.scheme.elem in FP4)
+    for name, q in itertools.islice(quantized, limit):
+        elem, module = q.layout.scheme.elem, name.removesuffix(".weight")
+        blocks = repack(elem, {r: p.to(device) for r, p in q.parts.items()}).cpu()
+        d = int(ulps(dequantize_blocks(elem, blocks, q.parts.get("scale2")), reference.dequantize(elem, q.parts)).max())
+        report["modules"] += 1
+        report["max_ulps"] = max(report["max_ulps"], d)
+        if d:
+            report["over"].append(module)
+        if theirs and not torch.equal(blocks, theirs(elem, q.parts["weight"], q.parts["scale"])):
+            report["bytes_differ"].append(module)
+    return report

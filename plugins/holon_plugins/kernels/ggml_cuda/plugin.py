@@ -1,29 +1,49 @@
 """llama.cpp's quantized CUDA kernels (vendored at a pinned commit, M0.1 design §4.4, M0.2 design §4.3) as
-`qlinear@2`, `qembedding@1` and `linear_experts@2` kernels for ggml block layouts (`"ggml.<type>/gguf.native"`), and
-its MoE routing and combine as `moe_topk@1` and `moe_combine@1` (op contracts: std.ops.kernels, std.moe.kernels).
+`qlinear@2`, `qembedding@1` and `linear_experts@2` kernels for ggml block layouts (`"ggml.<type>/gguf.native"`) and
+the HF FP4 layouts (`"nvfp4/hf"`, `"mxfp4/hf"`, repacked by `prepare`), and its MoE routing and combine as
+`moe_topk@1` and `moe_combine@1` (op contracts: std.ops.kernels, std.moe.kernels).
 
 `qlinear` dispatches like llama.cpp, from the row count: `mmvq` up to the type's threshold on this device (it writes
 bf16 or f32 directly), else `mmq` in 512-row chunks (llama.cpp's ubatch) into a per-call f32 tensor that one cast
-turns into `out_dtype` (D5). Both quantize the activations to q8_1 in a workspace shared by every instance with the
-same `in`, so they serve `act_quant` `a8` and `a4` alike (`config["act"]`, recorded in the lock, names each path's
-activation format; M0.6 D3). `qembedding` is llama.cpp's `get_rows`. With `in` a multiple of 256 (all supported
-shapes) no kernel reads past the weight blocks, so they need no padding (L0 poisons the bytes after them).
+turns into `out_dtype` (D5). Both quantize the activations in a workspace shared by every instance with the same
+`in`. `qembedding` is llama.cpp's `get_rows`.
 
 `linear_experts` is llama.cpp's MUL_MAT_ID per 512-token chunk: mmvq with ids up to the type's limit
 (`get_mmvq_mmid_max_batch`), for `glu="swiglu"` through its fused gate on the merged stack, else mmq with ids into
-f32, followed for swiglu by our f32 SwiGLU. Its workspace (`ggml_cuda.id[…]`) holds mmq's id maps besides q8_1.
-`moe_topk` is `topk-moe.cu` (softmax, top k, renormalised) and `moe_combine` `moe-weighted-reduction.cu`, both
-patched to the contracts' layouts (ids at row stride k; the combine stores bf16 into the caller's `out`).
+f32, followed for swiglu by our f32 SwiGLU. Its workspace (`ggml_cuda.id[…]`) holds mmq's id maps besides the
+activations. `moe_topk` is `topk-moe.cu` (softmax, top k, renormalised) and `moe_combine`
+`moe-weighted-reduction.cu`, both patched to the contracts' layouts (ids at row stride k; the combine stores bf16
+into the caller's `out`).
+
+Activation modes (docs/m06-lowp.md D3, D8, §4.5, §4.7): one spec per mode, `config["act"]` naming each path's
+activation format. `q8_1` (every class, every type, `act_quant` a4 or a8): q8_1 activations on both paths, so
+W4A8 for the FP4 types. `fp4` (sm_120, FP4 types, `act_quant` a4): mmq at llama.cpp's native W4A4 (its own
+dynamic FP4 quantizer, which reads f32 only: bf16 activations are first copied, exactly, into the named workspace
+`ggml_cuda.f32[…]`), mmvq at q8_1. Every mmq call passes its mode's precision in dst's `op_params[3]` (zero is
+llama.cpp's default, native W4A4 on Blackwell), and each instance asks llama.cpp, before any launch or capture,
+which precision it will use (`mmq_prec`): a mismatch is an error.
+
+FP4 (D8): `prepare` repacks the HF layouts losslessly into ggml blocks (`repack`, llama.cpp's converter layouts);
+NVFP4's per-tensor or per-expert `scale2` ([1]; [E]; [2, E] for a merged gate/up stack) is applied in f32 before
+SwiGLU on every path: mmvq in llama.cpp's fused epilogue (one row dense; any tokens with ids), dense mmq and dense
+mmvq above one row in the f32 → `out_dtype` step, mmq with ids by our SwiGLU (gate/up) or `y *= scale2[ids]`
+(down). With `in` a multiple of 256 (all supported shapes) no q8_1 kernel reads past the weight blocks, so they need
+no padding (L0 poisons the bytes after them); native W4A4 steps K by 512 with no tail, so the `fp4` spec's
+`prepare` appends llama.cpp's allocation padding, the blocks of one row's values up to a multiple of 512 zeroed
+(`tail_bytes`), after each FP4 tensor or stack, and its calls check it is there.
+
+Calls are counted per path and mode (`calls["mmq/fp4"]`, …; counted when called, not on graph replay).
 
 The native extension is built ahead of time (`python -m holon_plugins.kernels.ggml_cuda.prebuild`); without it an
 instance cannot be created and the error names that command.
 """
 from __future__ import annotations
 
+import collections
 import functools
 
 import torch
-from holon.api import Constraint, KernelSpec
+from holon.api import Constraint, KernelSpec, Layout, QTensor, Scheme
 
 from . import extension
 
@@ -33,16 +53,77 @@ CHUNK = 512                     # mmq rows per call: llama.cpp's ubatch; sizes t
 # Supported ggml types (design §4.6) and their ggml type ids.
 TYPES = {"q4_0": 2, "q4_1": 3, "q5_0": 6, "q5_1": 7, "q8_0": 8, "q2_k": 10, "q3_k": 11, "q4_k": 12, "q5_k": 13,
          "q6_k": 14, "iq2_xxs": 16, "iq2_xs": 17, "iq3_xxs": 18, "iq1_s": 19, "iq4_nl": 20, "iq3_s": 21, "iq2_s": 22,
-         "iq4_xs": 23}
+         "iq4_xs": 23, "mxfp4": 39, "nvfp4": 40}
+FP4 = ("mxfp4", "nvfp4")
+# ggml type -> (values per block, block bytes)
+BLOCKS = {"mxfp4": (32, 17), "nvfp4": (64, 36)}
 DTYPES = ("bfloat16", "float32")
 ACT_QUANT = ("a4", "a8")                    # q8_1 activations (8 bits) serve either
-ACT = {"mmvq": "q8_1", "mmq": "q8_1"}       # each path's activation format
+# Each spec's activation format per path, and the ggml_prec each format asks mmq for (GGML_PREC_Q8, GGML_PREC_Q4).
+Q8_1 = {"mmvq": "q8_1", "mmq": "q8_1"}
+NATIVE_FP4 = {"mmvq": "q8_1", "mmq": "fp4"}
+PREC = {"q8_1": 30, "fp4": 40}
+ROW_PADDING = 512               # llama.cpp's MATRIX_ROW_PADDING: native W4A4's K step
 
 
 def ggml_type(layout: str) -> int | None:
     """The ggml type id of a `"ggml.<type>/gguf.native"` layout, None for any other layout."""
     scheme, _, name = layout.partition("/")
     return TYPES.get(scheme.removeprefix("ggml.")) if scheme.startswith("ggml.") and name == "gguf.native" else None
+
+
+def weight_type(layout: str) -> str | None:
+    """The ggml type a matmul reads for `layout`: the GGUF one's, or what `prepare` repacks an HF FP4 layout into."""
+    elem, _, name = layout.partition("/")
+    if name == "hf":
+        return elem if elem in FP4 else None
+    return elem.removeprefix("ggml.") if ggml_type(layout) is not None else None
+
+
+def repack(elem: str, parts: dict[str, torch.Tensor], tail: int = 0, rows: int = 4096) -> torch.Tensor:
+    """An HF FP4 weight's codes and block scales (docs/m06-lowp.md D2: `weight` [..., out, in/2] u8, element 2i in
+    the low nibble; `scale` [..., out, in/g] u8) as ggml blocks [..., out, row_bytes], bit for bit what llama.cpp's
+    converter writes (cbe28bb3 conversion/base.py): NVFP4 per 64 values the four e4m3 scales of its sub-blocks (sign
+    bit cleared, as `_nvfp4_pack`), then per sub-block 8 bytes, element j low and j + 8 high; MXFP4 per 32 values the
+    e8m0 scale, then 16 bytes, element j low and j + 16 high (`repack_mxfp4_blocks`). Same device; `rows` at a time,
+    so the transient beyond the output stays small for any stack; `tail` zeroed bytes after it in the same buffer
+    (`with_tail`'s)."""
+    group, block = BLOCKS[elem]
+    lead, half = parts["weight"].shape[:-1], parts["weight"].shape[-1]
+    w = parts["weight"].reshape(-1, half)
+    s = parts["scale"].reshape(len(w), -1)
+    out = with_tail(torch.empty(len(w), half * 2 // group * block, dtype=torch.uint8, device=w.device), tail, False)
+    for a in range(0, len(w), rows):
+        out[a:a + rows] = _blocks(elem, w[a:a + rows], s[a:a + rows])
+    return out.view(*lead, -1)
+
+
+def _blocks(elem: str, w: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
+    n = len(w)
+    sub = 16 if elem == "nvfp4" else 32                                   # values per scale
+    codes = torch.stack((w & 0x0F, w >> 4), dim=-1).reshape(n, -1, sub)   # [rows, scales, sub]
+    qs = codes[..., :sub // 2] | (codes[..., sub // 2:] << 4)
+    if elem == "mxfp4":
+        return torch.cat((s[..., None], qs), dim=-1).reshape(n, -1)
+    return torch.cat(((s & 0x7F).reshape(n, -1, 4), qs.reshape(n, -1, 32)), dim=-1).reshape(n, -1)
+
+
+def tail_bytes(name: str, k: int) -> int:
+    """llama.cpp's padding of a quantized tensor (ggml-cuda.cu, `ggml_backend_cuda_buffer_type_get_alloc_size`): the
+    blocks of one row's values up to a multiple of 512, zeroed, which native W4A4's last K step reads."""
+    group, block = BLOCKS[name]
+    return (-k % ROW_PADDING) // group * block
+
+
+def with_tail(blocks: torch.Tensor, nbytes: int, copy: bool = True) -> torch.Tensor:
+    """A view of `blocks`' shape over a buffer `nbytes` longer whose end is zeroed, holding a copy of `blocks` (or,
+    not `copy`, uninitialized); `blocks` itself when `nbytes` is 0."""
+    if not nbytes:
+        return blocks
+    buf = torch.empty(blocks.numel() + nbytes, dtype=torch.uint8, device=blocks.device)
+    buf[blocks.numel():] = 0
+    out = buf[:blocks.numel()].view(blocks.shape)
+    return out.copy_(blocks) if copy else out
 
 
 def _device(ctx) -> int:
@@ -63,31 +144,99 @@ class Extension:
         return self.modules[sm]
 
 
-class QLinear:
-    def __init__(self, ext: Extension, ctx, **facts) -> None:
-        self.type, self.k, self.out = ggml_type(facts["layout"]), facts["in"], facts["out"]
+class _Matmul:
+    """What `qlinear` and `linear_experts` instances share: the type they read, their spec's activation mode per
+    path, the precision check, the f32 activation copy of native FP4 and `prepare`."""
+
+    def __init__(self, ext: Extension, act: dict[str, str], ctx, facts: dict) -> None:
+        self.name, self.k, self.out, self.act = weight_type(facts["layout"]), facts["in"], facts["out"], act
+        self.type, self.hf, self.prec = TYPES[self.name], facts["layout"].endswith("/hf"), PREC[act["mmq"]]
+        self.lib, self.device = ext(ctx.fingerprint.sm), _device(ctx)
+        self.tail = tail_bytes(self.name, self.k) if act["mmq"] == "fp4" else 0
+        self.calls: collections.Counter[str] = collections.Counter()
+
+    def _uses_mmq(self, after: int, layout: str) -> None:
+        """llama.cpp runs mmq above `after` rows here; and asks it, before any launch or capture, for the activation
+        precision it will use: a spec whose mode it would not run is an error, not a silent other mode."""
+        if not self.lib.use_mmq(self.device, self.type, after + 1):
+            raise RuntimeError(f"kernels.ggml_cuda: llama.cpp uses neither mmvq nor mmq for {layout} here")
+        got = self.lib.mmq_prec(self.device, self.type, self.prec)
+        if got != PREC[self.act["mmq"]]:
+            raise RuntimeError(f"kernels.ggml_cuda: mmq would quantize {layout} activations at ggml_prec {got}, its "
+                               f"spec's mode {self.act['mmq']!r} is {PREC[self.act['mmq']]}")
+
+    def _count(self, path: str) -> None:
+        self.calls[f"{path}/{self.act[path]}"] += 1
+
+    def _mmq_input(self, x: torch.Tensor, f32: torch.Tensor | None) -> torch.Tensor:
+        """mmq's activations: as given, or copied (exactly) into the f32 workspace for native FP4's quantizer."""
+        if f32 is None or x.dtype == torch.float32:
+            return x
+        out = f32.view(torch.float32)[:x.numel()].view(x.shape)
+        out.copy_(x)
+        return out
+
+    def _f32_workspace(self, ctx, rows: int, act_dtype: str):
+        """Native FP4's f32 copy of `rows` activation rows (named by its size: shared, fixed for graph capture)."""
+        if self.act["mmq"] != "fp4" or act_dtype == "float32":
+            return None
+        return ctx.workspace(f"ggml_cuda.f32[in={self.k},rows={rows}]", rows * self.k * 4)
+
+    def _mmq_blocks(self, parts: dict[str, torch.Tensor]) -> torch.Tensor:
+        blocks = parts["blocks"]
+        if self.tail and blocks.untyped_storage().nbytes() < (blocks.storage_offset() + blocks.numel() + self.tail):
+            raise RuntimeError("kernels.ggml_cuda: native W4A4 reads a zeroed tail after the blocks (prepare's)")
+        return blocks
+
+    def prepare(self, q: QTensor) -> QTensor:
+        """The weight as this instance reads it (docs/m06-lowp.md D4, D8): an HF FP4 layout repacked into ggml blocks
+        (`{"blocks", "scale2"}` for NVFP4, its scale2 [1] dense, [E] or [2, E] per expert), under the `fp4` spec
+        followed by the zeroed tail; a GGUF layout as adopted (`q` itself), under `fp4` copied with the tail."""
+        if not (self.hf or self.tail):
+            return q
+        blocks = repack(self.name, q.parts, self.tail) if self.hf else with_tail(q.parts["blocks"], self.tail)
+        parts = {"blocks": blocks}
+        if "scale2" in q.parts:                         # one value per tensor, or per expert ([E] or [E, 1]; [2, E])
+            s = q.parts["scale2"].float()
+            parts["scale2"] = s.reshape(1) if blocks.dim() == 2 else s.reshape(-1, len(blocks)).squeeze(0)
+        return QTensor(Layout(Scheme(f"ggml.{self.name}"), "gguf.native"), q.logical_shape, parts)
+
+
+class QLinear(_Matmul):
+    def __init__(self, ext: Extension, act: dict[str, str], ctx, **facts) -> None:
+        super().__init__(ext, act, ctx, facts)
         self.out_dtype = getattr(torch, facts["out_dtype"])
-        self.lib, device = ext(ctx.fingerprint.sm), _device(ctx)
         # llama.cpp's choice from the row count (`ne11 <= threshold`; fixed per graph bucket): mmvq, else mmq
-        self.mmvq_rows = max((n for n in range(1, 9) if self.lib.use_mmvq(device, self.type, n)), default=0)
-        if not self.lib.use_mmq(device, self.type, self.mmvq_rows + 1):
-            raise RuntimeError(f"kernels.ggml_cuda: llama.cpp uses neither mmvq nor mmq for {facts['layout']} here")
-        self.workspace = ctx.workspace(f"ggml_cuda[in={self.k}]", self.lib.workspace_bytes(device, self.k, CHUNK))
+        self.mmvq_rows = max((n for n in range(1, 9) if self.lib.use_mmvq(self.device, self.type, n)), default=0)
+        self._uses_mmq(self.mmvq_rows, facts["layout"])
+        self.workspace = ctx.workspace(f"ggml_cuda[in={self.k}]", self.lib.workspace_bytes(self.device, self.k, CHUNK))
+        self.f32 = self._f32_workspace(ctx, CHUNK, facts["act_dtype"])
 
     def __call__(self, x: torch.Tensor, parts: dict[str, torch.Tensor]) -> torch.Tensor:
-        x, rows, blocks = x.contiguous(), len(x), parts["blocks"]
+        x, rows, blocks, scale2 = x.contiguous(), len(x), parts["blocks"], parts.get("scale2")
         y = torch.empty(rows, self.out, dtype=self.out_dtype, device=x.device)
         if rows == 0:
             return y
         if rows <= self.mmvq_rows:
-            self.lib.mmvq(self.type, blocks, x, y, self.workspace)
+            self._count("mmvq")
+            if scale2 is None or rows == 1:              # llama.cpp fuses scale2 into mmvq at one row only
+                self.lib.mmvq(self.type, blocks, x, y, scale2, self.workspace)
+            else:                                        # else it is its own f32 multiply, as ours
+                f32 = y if y.dtype == torch.float32 else torch.empty(rows, self.out, device=x.device)
+                self.lib.mmvq(self.type, blocks, x, f32, None, self.workspace)
+                torch.mul(f32, scale2, out=y)
             return y
+        self._count("mmq")
+        blocks = self._mmq_blocks(parts)
         f32 = None if y.dtype == torch.float32 else torch.empty(min(rows, CHUNK), self.out, device=x.device)
         for start in range(0, rows, CHUNK):
             xs, ys = x[start:start + CHUNK], y[start:start + CHUNK]
-            self.lib.mmq(self.type, blocks, xs, ys if f32 is None else f32[:len(xs)], self.workspace)
-            if f32 is not None:
-                ys.copy_(f32[:len(xs)])
+            out = ys if f32 is None else f32[:len(xs)]
+            self.lib.mmq(self.type, self.prec, blocks, self._mmq_input(xs, self.f32), out, self.workspace)
+            if scale2 is not None:
+                torch.mul(out, scale2, out=ys)           # in f32, rounded once to out_dtype
+            elif f32 is not None:
+                ys.copy_(out)
         return y
 
 
@@ -103,42 +252,59 @@ class QEmbedding:
         return y
 
 
-class LinearExperts:
-    def __init__(self, ext: Extension, ctx, **facts) -> None:
-        self.type, self.k, self.out = ggml_type(facts["layout"]), facts["in"], facts["out"]
+class LinearExperts(_Matmul):
+    def __init__(self, ext: Extension, act: dict[str, str], ctx, **facts) -> None:
+        super().__init__(ext, act, ctx, facts)
         self.experts, self.top_k, self.swiglu = facts["experts"], facts["top_k"], facts["glu"] == "swiglu"
         self.out_y = self.out // 2 if self.swiglu else self.out
-        self.lib, device = ext(ctx.fingerprint.sm), _device(ctx)
         # llama.cpp's choice per chunk from its token count (fixed per graph bucket): mmvq with ids, else mmq
-        self.mmvq_tokens = max((n for n in range(1, 9) if self.lib.use_mmvq_id(device, self.type, n)), default=0)
-        if not self.lib.use_mmq(device, self.type, self.mmvq_tokens + 1):
-            raise RuntimeError(f"kernels.ggml_cuda: llama.cpp uses neither mmvq nor mmq for {facts['layout']} here")
-        # its size depends on in, k (the id maps, q8_1 per slot) and E (expert_bounds): all three name it
-        self.workspace = ctx.workspace(f"ggml_cuda.id[in={self.k},top_k={self.top_k},experts={self.experts}]",
-                                       self.lib.workspace_bytes_id(device, self.k, CHUNK, self.top_k, self.experts))
-        self.calls = {"mmvq": 0, "mmq": 0}           # per path, for tests (counted when called, not on graph replay)
+        self.mmvq_tokens = max((n for n in range(1, 9) if self.lib.use_mmvq_id(self.device, self.type, n)), default=0)
+        self._uses_mmq(self.mmvq_tokens, facts["layout"])
+        # its size depends on in, k (the id maps, the activations per slot) and E (expert_bounds): all three name it
+        self.workspace = ctx.workspace(
+            f"ggml_cuda.id[in={self.k},top_k={self.top_k},experts={self.experts}]",
+            self.lib.workspace_bytes_id(self.device, self.k, CHUNK, self.top_k, self.experts))
+        self.f32 = self._f32_workspace(ctx, CHUNK * facts["rows_per_token"], facts["act_dtype"])
 
     def __call__(self, x: torch.Tensor, parts: dict[str, torch.Tensor], ids: torch.Tensor) -> torch.Tensor:
         x, ids, blocks = x.contiguous(), ids.contiguous(), parts["blocks"]
-        blocks = blocks.view(-1, blocks.shape[-1])          # [E, out, row_bytes] as llama.cpp's [E·out, row_bytes]
+        # NVFP4's scale2 per expert: [E], or [2, E] (gate's row, up's) for a merged gate/up stack
+        scale2 = parts.get("scale2")
+        if scale2 is not None and scale2.shape != ((2, self.experts) if self.swiglu else (self.experts,)):
+            raise ValueError(f"kernels.ggml_cuda: scale2 {tuple(scale2.shape)} for {self.experts} experts, glu "
+                             f"{'swiglu' if self.swiglu else 'none'}")
+        gate_scale, up_scale = (scale2[0], scale2[1]) if scale2 is not None and self.swiglu else (None, scale2)
         tokens = len(ids)
         y = torch.empty(tokens, self.top_k, self.out_y, device=x.device)
         gate_up = None          # mmq's f32 gate/up output before our SwiGLU, a per-call activation
         for start in range(0, tokens, CHUNK):
             xs, ids_c, ys = x[start:start + CHUNK], ids[start:start + CHUNK], y[start:start + CHUNK]
             if len(ids_c) <= self.mmvq_tokens:
-                self.calls["mmvq"] += 1
-                self.lib.mmvq_id(self.type, blocks, xs, ids_c, ys, self.swiglu, self.workspace)
+                self._count("mmvq")
+                self.lib.mmvq_id(self.type, blocks.view(-1, blocks.shape[-1]), xs, ids_c, ys, self.swiglu,
+                                 gate_scale, up_scale, self.workspace)
                 continue
-            self.calls["mmq"] += 1
+            self._count("mmq")
+            w, xs = self._mmq_blocks(parts).view(-1, blocks.shape[-1]), self._mmq_input(xs, self.f32)
             if not self.swiglu:
-                self.lib.mmq_id(self.type, blocks, xs, ids_c, ys, self.workspace)
+                self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, ys, self.workspace)
+                if up_scale is not None:
+                    self._scale_slots(ys, up_scale, ids_c)
                 continue
             if gate_up is None:
                 gate_up = torch.empty(min(tokens, CHUNK), self.top_k, self.out, device=x.device)
-            self.lib.mmq_id(self.type, blocks, xs, ids_c, gate_up[:len(ids_c)], self.workspace)
-            self.lib.swiglu(gate_up[:len(ids_c)], ys)
+            self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, gate_up[:len(ids_c)], self.workspace)
+            self._swiglu(gate_up[:len(ids_c)], ys, gate_scale, up_scale, ids_c)
         return y
+
+    @staticmethod
+    def _scale_slots(y: torch.Tensor, scale: torch.Tensor, ids: torch.Tensor) -> None:
+        """y [T, k, out] *= the scale of each slot's expert (a device gather: graph-safe)."""
+        y.mul_(scale[ids][..., None])
+
+    def _swiglu(self, gate_up: torch.Tensor, y: torch.Tensor, gate_scale, up_scale, ids: torch.Tensor) -> None:
+        """Our f32 SwiGLU of mmq's gate/up rows, each half first scaled by its row's expert scale (if any)."""
+        self.lib.swiglu(gate_up, y, gate_scale, up_scale, None if up_scale is None else ids.view(-1))
 
 
 class MoeTopk:
@@ -163,21 +329,25 @@ class MoeCombine:
             self.lib.moe_combine(y.contiguous(), weights.contiguous(), out)
 
 
-def _supports_qlinear(f: dict) -> bool:
-    return (ggml_type(f["layout"]) is not None and f["in"] % 256 == 0 and f["act_dtype"] in DTYPES
-            and f["out_dtype"] in DTYPES and f["act_quant"] in ACT_QUANT)
+def _supports_matmul(f: dict, act_quant: tuple[str, ...], types) -> bool:
+    return (weight_type(f["layout"]) in types and f["in"] % 256 == 0 and f["act_dtype"] in DTYPES
+            and f["act_quant"] in act_quant)
+
+
+def _supports_qlinear(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
+    return _supports_matmul(f, act_quant, types) and f["out_dtype"] in DTYPES
 
 
 def _supports_qembedding(f: dict) -> bool:
-    return ggml_type(f["layout"]) is not None and f["hidden"] % 256 == 0 and f["dtype"] in DTYPES
+    # get_rows has no NVFP4
+    return ggml_type(f["layout"]) not in (None, TYPES["nvfp4"]) and f["hidden"] % 256 == 0 and f["dtype"] in DTYPES
 
 
-def _supports_linear_experts(f: dict) -> bool:
+def _supports_linear_experts(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
     # out_y a multiple of 4: mmvq with ids at one token bounds a block's rows (up to 4) by the slot stride, not out_y
     swiglu = f["glu"] == "swiglu"
-    return (ggml_type(f["layout"]) is not None and f["in"] % 256 == 0 and f["act_dtype"] in DTYPES
-            and f["out_dtype"] == "float32" and f["glu"] in ("none", "swiglu") and f["out"] % (8 if swiglu else 4) == 0
-            and f["rows_per_token"] in (1, f["top_k"]) and f["act_quant"] in ACT_QUANT)
+    return (_supports_matmul(f, act_quant, types) and f["out_dtype"] == "float32" and f["glu"] in ("none", "swiglu")
+            and f["out"] % (8 if swiglu else 4) == 0 and f["rows_per_token"] in (1, f["top_k"]))
 
 
 def _supports_moe_topk(f: dict) -> bool:
@@ -192,13 +362,20 @@ def _supports_moe_combine(f: dict) -> bool:
 class Plugin:
     def register(self, regs) -> None:
         ext = Extension()
-        for op, impl, supports in ((QLINEAR, QLinear, _supports_qlinear),
-                                   (QEMBEDDING, QEmbedding, _supports_qembedding),
-                                   (LINEAR_EXPERTS, LinearExperts, _supports_linear_experts),
-                                   (MOE_TOPK, MoeTopk, _supports_moe_topk),
-                                   (MOE_COMBINE, MoeCombine, _supports_moe_combine)):
+
+        def add(op: str, impl, supports, sms=frozenset(extension.ARCHS), priority: int = 10, act=None) -> None:
             regs.kernels.add(op, KernelSpec(
-                op=op, provider="kernels.ggml_cuda", impl=functools.partial(impl, ext),
-                requires=Constraint(sms=frozenset(extension.ARCHS)), supports=supports,
-                props=frozenset({"graph_safe", "deterministic"}), priority=10,
-                config={"act": ACT} if op in (QLINEAR, LINEAR_EXPERTS) else {}))
+                op=op, provider="kernels.ggml_cuda", impl=impl, requires=Constraint(sms=sms), supports=supports,
+                props=frozenset({"graph_safe", "deterministic"}), priority=priority,
+                config={"act": act} if act else {}))
+
+        # q8_1 everywhere; native W4A4 on Blackwell for the FP4 types, opt-in (`quant.act = a4`) and then preferred
+        for act, sms, priority, act_quant, types in ((Q8_1, frozenset(extension.ARCHS), 10, ACT_QUANT, TYPES),
+                                                     (NATIVE_FP4, frozenset({120}), 11, ("a4",), FP4)):
+            for op, impl, supports in ((QLINEAR, QLinear, _supports_qlinear),
+                                       (LINEAR_EXPERTS, LinearExperts, _supports_linear_experts)):
+                add(op, functools.partial(impl, ext, act),
+                    functools.partial(supports, act_quant=act_quant, types=types), sms, priority, act)
+        add(QEMBEDDING, functools.partial(QEmbedding, ext), _supports_qembedding)
+        add(MOE_TOPK, functools.partial(MoeTopk, ext), _supports_moe_topk)
+        add(MOE_COMBINE, functools.partial(MoeCombine, ext), _supports_moe_combine)

@@ -3,8 +3,10 @@
 // `type` is a ggml type id (enum ggml_type). Pointers are device pointers on the current device; rows are
 // contiguous. Weights `w` are `out` rows of ggml blocks covering `in` values each (gguf.native). Activations `x` are
 // [rows, in] bf16 (x_bf16) or f32; outputs `y` are [rows, out] (or [n, hidden]) bf16 (y_bf16) or f32. `stream` is a
-// cudaStream_t. The workspace holds llama.cpp's scratch (q8_1 activations, stream-k fixup); a call that would
-// overflow it aborts.
+// cudaStream_t. The workspace holds llama.cpp's scratch (quantized activations, stream-k fixup); a call that would
+// overflow it aborts. `prec` is mmq's activation precision, a ggml_prec: GGML_PREC_Q8 (30, q8_1) or GGML_PREC_Q4 (40,
+// native W4A4: FP4 types on Blackwell, f32 activations only). `scale`s are NVFP4's f32 per-tensor or per-expert
+// factors (scale2), fused into mmvq's epilogue; NULL: none.
 #pragma once
 
 #include <stddef.h>
@@ -21,23 +23,34 @@ size_t holon_ggml_row_bytes(int type, int64_t in);
 int holon_ggml_use_mmvq(int type, int64_t rows);
 int holon_ggml_use_mmq(int type, int64_t rows);
 
-// How llama.cpp's mmq runs `out` x `rows` here (its J choice and stream-k grid, mirrored for tests): 0 = tiling,
-// 1 = stream-k with one block per tile (no fixup), 2 = stream-k with the fixup pass. Sets the tile size I x J. Not
-// for FP4 types (aborts): their precision is chosen per call.
-int holon_ggml_mmq_schedule(int type, int64_t out, int64_t rows, int * tile_i, int * tile_j);
+// The activation precision ggml_cuda_mul_mat_q will use for `type` asked for `prec` here (its exported
+// ggml_cuda_mmq_get_prec_src1 on the dst our mmq calls build): the caller's check before launch and graph capture.
+int holon_ggml_mmq_prec(int type, int prec);
 
-// Workspace bytes for calls with `in` values per row and at most `rows` rows (any type), on the current device.
+// How llama.cpp's mmq runs `out` x `rows` at `prec` here (its J choice and stream-k grid, mirrored for tests): 0 =
+// tiling, 1 = stream-k with one block per tile (no fixup), 2 = stream-k with the fixup pass. Sets the tile size I x J.
+int holon_ggml_mmq_schedule(int type, int prec, int64_t out, int64_t rows, int * tile_i, int * tile_j);
+
+// Workspace bytes for calls with `in` values per row and at most `rows` rows (any type, any precision), on the
+// current device.
 size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows);
 
 // Tests only: the most bytes one call took from its workspace since the last read (then 0), to hold the sizes above
 // to what llama.cpp allocates on every call. One process-wide counter: not per device, not thread-safe.
 size_t holon_ggml_workspace_high_water(void);
 
-// y = x @ W.T. mmvq: rows <= 8, y bf16 or f32. mmq: y f32.
+// y = x @ W.T. mmvq: rows <= 8, y bf16 or f32, times `scale[0]` (NVFP4 only, rows = 1 only: llama.cpp fuses no
+// scale for more columns). mmq: y f32.
 void holon_ggml_mmvq(int type, const void * w, int64_t out, int64_t in, const void * x, int x_bf16, int64_t rows,
-                     void * y, int y_bf16, void * workspace, size_t workspace_bytes, void * stream);
-void holon_ggml_mmq(int type, const void * w, int64_t out, int64_t in, const void * x, int x_bf16, int64_t rows,
-                    float * y, void * workspace, size_t workspace_bytes, void * stream);
+                     void * y, int y_bf16, const float * scale, void * workspace, size_t workspace_bytes,
+                     void * stream);
+void holon_ggml_mmq(int type, int prec, const void * w, int64_t out, int64_t in, const void * x, int x_bf16,
+                    int64_t rows, float * y, void * workspace, size_t workspace_bytes, void * stream);
+
+// Tests only: native mmq's FP4 activations of x [rows, in] f32 (`type` MXFP4, or NVFP4 on Blackwell), as it
+// quantizes them: block_fp4_mmq [in padded to 512 / 256][rows] into `blocks`, NVFP4's per-row scale into `scale`.
+void holon_ggml_quantize_fp4(int type, const float * x, int64_t rows, int64_t in, void * blocks, float * scale,
+                             void * stream);
 
 // y[i] = dequantized row ids[i] of the table (rows of `hidden` values).
 void holon_ggml_get_rows(int type, const void * table, int64_t hidden, const int32_t * ids, int64_t n, void * y,
@@ -58,17 +71,21 @@ int holon_ggml_use_mmvq_id(int type, int64_t tokens);
 size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int64_t experts);
 
 // mmvq: tokens <= the mmvq limit. swiglu: `w` is a merged stack (per expert out/2 gate rows, then out/2 up rows) and
-// y = silu(gate) * up with out_y = out/2 (llama.cpp's fused gate); else out_y = out.
+// y = silu(gate · gate_scale[e]) * up · up_scale[e] with out_y = out/2 (llama.cpp's fused gate); else out_y = out and
+// y = x @ W_e.T · up_scale[e]. Scales: `experts` f32 values each, or NULL (NVFP4 only).
 void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, int64_t in, const void * x, int x_bf16,
                         int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y, int swiglu,
-                        void * workspace, size_t workspace_bytes, void * stream);
+                        const float * gate_scale, const float * up_scale, void * workspace, size_t workspace_bytes,
+                        void * stream);
 // mmq: any tokens (one call is sized by the workspace), out_y = out.
-void holon_ggml_mmq_id(int type, const void * w, int64_t experts, int64_t out, int64_t in, const void * x, int x_bf16,
-                       int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y,
+void holon_ggml_mmq_id(int type, int prec, const void * w, int64_t experts, int64_t out, int64_t in, const void * x,
+                       int x_bf16, int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y,
                        void * workspace, size_t workspace_bytes, void * stream);
 
-// y[r, i] = silu(x[r, i]) * x[r, n + i] for `rows` rows of 2n f32 values (gate, then up), y f32.
-void holon_ggml_swiglu(const float * x, int64_t rows, int64_t n, float * y, void * stream);
+// y[r, i] = silu(x[r, i]) * x[r, n + i] for `rows` rows of 2n f32 values (gate, then up), y f32; with `ids` (one
+// expert per row), gate and up first times gate_scale[ids[r]] and up_scale[ids[r]].
+void holon_ggml_swiglu(const float * x, int64_t rows, int64_t n, const float * gate_scale, const float * up_scale,
+                       const int32_t * ids, float * y, void * stream);
 
 // Softmax routing: `logits` [tokens, experts] f32 -> the k largest probabilities `weights` [tokens, k] f32 (divided by
 // their sum, clamped as llama.cpp, when `renormalize`) and their `ids` [tokens, k] int32. experts: a power of 2 <= 512.

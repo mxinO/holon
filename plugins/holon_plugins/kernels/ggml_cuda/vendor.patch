@@ -30,6 +30,15 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
      if (env_c == nullptr) {
          return GGML_PREC_UNDEFINED;
      }
+@@ -115,7 +115,7 @@
+ 
+ // src1 is quantized to Q8_1 unless the FP4 types can use 4-bit activations, in which case they
+ // default to the native W4A4 instructions on Blackwell.
+-static ggml_prec ggml_cuda_mmq_get_prec_src1(const ggml_tensor * src0, const ggml_tensor * dst, const int cc) {
++ggml_prec ggml_cuda_mmq_get_prec_src1(const ggml_tensor * src0, const ggml_tensor * dst, const int cc) { // Holon: exported
+     static const ggml_prec prec_env = ggml_cuda_mmq_get_prec_env();
+ 
+     ggml_prec prec = prec_env;
 @@ -134,7 +134,7 @@
  
  void ggml_cuda_mul_mat_q(
@@ -69,6 +78,16 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
                                     ne10_padded, ne11_flat, ne12_flat, ne13_flat, stream);
          }
          CUDA_CHECK(cudaGetLastError());
+diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
+--- a/ggml/src/ggml-cuda/mmq.cuh
++++ b/ggml/src/ggml-cuda/mmq.cuh
+@@ -1585,3 +1585,6 @@
+         ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst);
+ 
+ bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t n_experts);
++
++// Holon: the src1 precision ggml_cuda_mul_mat_q will use for these tensors (the C API checks it before launching)
++ggml_prec ggml_cuda_mmq_get_prec_src1(const ggml_tensor * src0, const ggml_tensor * dst, int cc);
 diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
 --- a/ggml/src/ggml-cuda/mmvq.cu
 +++ b/ggml/src/ggml-cuda/mmvq.cu
@@ -155,7 +174,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
 -    GGML_ASSERT(        src1->type == GGML_TYPE_F32);
 -    GGML_ASSERT(        dst->type  == GGML_TYPE_F32);
 +    GGML_ASSERT(        src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_BF16); // Holon: bf16 in,
-+    GGML_ASSERT(        dst->type  == GGML_TYPE_F32 || (dst->type == GGML_TYPE_BF16 && !ids && !fusion)); // bf16 out
++    GGML_ASSERT(        dst->type  == GGML_TYPE_F32 || (dst->type == GGML_TYPE_BF16 && !ids)); // bf16 out
      GGML_ASSERT(!ids || ids->type  == GGML_TYPE_I32); // Optional, used for batched GGML_MUL_MAT_ID.
  
      GGML_TENSOR_BINARY_OP_LOCALS;

@@ -24,8 +24,15 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
   weights; ±inf and all-NaN rows give unique in-range ids; token counts off the kernel's 8-row blocks.
 - `moe_combine`: within 1 bf16 ulp of the reference, plus the f32 accumulation's rounding (the kernel's FMA) for
   sums that cancel.
-- Precision (f64 references written out here): our f32 SwiGLU within the fp32 budget, which a bf16 SwiGLU misses;
-  a std.moe layer binds `linear_experts` with act_dtype bf16 and out_dtype f32, and its expert outputs are f32.
+- Precision (f64 references written out here): our f32 SwiGLU within the fp32 budget, which a bf16 SwiGLU misses,
+  with per-expert gate and up scales too; a std.moe layer binds `linear_experts` with act_dtype bf16 and out_dtype
+  f32, and its expert outputs are f32.
+- NVFP4 `scale2` per expert (docs/m06-lowp.md §4.5): HF stacks through `prepare`, the merged gate/up stack's [2, E]
+  rows (distinct per expert and half) and down's [E], on both paths: down against the emulator in f64 on the
+  reference weight, and bitwise the unscaled stack's output times each slot's expert scale; gate/up's SwiGLU against
+  ours on the unscaled stack's output with the scales (bitwise on mmq); plants N4 (scale by slot) and N5 (scale after
+  SwiGLU) fail them. sm_120, `quant.act = a4`: native W4A4 mmq with ids against the f64 product of its own decoded
+  activation codes, gate/up (bf16, one row per token) and down (f32, one per slot).
 
 Skips without a GPU; builds the extension (prebuild) into the user cache if it is missing.
 """
@@ -40,11 +47,23 @@ from holon.core.build import BuildContext
 from holon.core.executor import BUCKETS
 from holon.core.plugins import PluginSet, discover
 from holon_judge import l0, q8_1
+from holon_judge.planted import PLANTS
 from holon_plugins.kernels.ggml_cuda import extension
-from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, TYPES
+from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, FP4, NATIVE_FP4, PREC, TYPES
 from holon_std.moe import reference
 
-from .test_ggml_cuda import SLACK, Sized, activations, dequantize, random_blocks
+from .test_ggml_cuda import (
+    SLACK,
+    Sized,
+    activations,
+    dequantize,
+    hf_fp4,
+    hf_weight,
+    native_codes,
+    prepared,
+    random_blocks,
+    reserve,
+)
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 
@@ -110,10 +129,11 @@ def stack(name: str, experts: int, out: int, k: int, seed: int, blocks: np.ndarr
 
 
 def experts(ctx, name: str, k: int, out: int, rows_per_token: int, glu: str = "none", n: int = E,
-            act_dtype: str = "bfloat16"):
-    facts = {"layout": f"ggml.{name}/gguf.native", "experts": n, "in": k, "out": out, "top_k": K,
-             "rows_per_token": rows_per_token, "glu": glu, "act_dtype": act_dtype, "out_dtype": "float32",
-             "act_quant": "a8"}
+            act_dtype: str = "bfloat16", act_quant: str = "a8"):
+    """A `linear_experts` of ggml type `name` (or of an HF layout, `"nvfp4/hf"`), held to its workspace formula."""
+    facts = {"layout": name if "/" in name else f"ggml.{name}/gguf.native", "experts": n, "in": k, "out": out,
+             "top_k": K, "rows_per_token": rows_per_token, "glu": glu, "act_dtype": act_dtype, "out_dtype": "float32",
+             "act_quant": act_quant}
     spec = ctx.select_kernel("linear_experts@2", site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
     kernel, device = spec.impl(ctx, **facts), torch.cuda.current_device()
@@ -175,13 +195,17 @@ def check(y: torch.Tensor, ref: torch.Tensor, k: int, what: str, special: bool =
         assert not y[1].any(), f"{what}: zero token"
 
 
-def check_swiglu(lib, fused, none, s: Stack, x: torch.Tensor, ids: torch.Tensor, what: str) -> None:
+def check_swiglu(lib, fused, none, s: Stack, x: torch.Tensor, ids: torch.Tensor, what: str,
+                 fused_parts: dict | None = None) -> None:
     """`glu="swiglu"` against our SwiGLU of the `glu="none"` output: bitwise where mmq ran, within the fp32 budget
-    where mmvq's fused gate did."""
-    y, gate_up = fused(x, s.parts, ids), none(x, s.parts, ids)
+    where mmvq's fused gate did. `fused_parts`: the fused kernel's (the stack's with its [2, E] scale2), the scales
+    then applied by ours."""
+    fused_parts = s.parts if fused_parts is None else fused_parts
+    y, gate_up = fused(x, fused_parts, ids), none(x, s.parts, ids)
     ours = torch.empty_like(y)
+    scale2 = fused_parts.get("scale2")
     if len(y):
-        lib.swiglu(gate_up, ours)
+        lib.swiglu(gate_up, ours, *((None,) * 3 if scale2 is None else (scale2[0], scale2[1], ids.view(-1))))
     for a in range(0, len(ids), CHUNK):
         c = slice(a, a + CHUNK)
         if len(ids[c]) > fused.mmvq_tokens:
@@ -306,7 +330,7 @@ def test_mixed_types_in_one_layer(ctx, sm):
     weights, ids = unit._topk(torch.nn.functional.linear(x.float(), unit.router))
     h = unit._gate_up(x[:, None], ids)
     y = unit.down(h, ids)
-    assert unit._gate_up._kernel.calls == {"mmvq": 0, "mmq": 1} and unit.down._kernel.calls == {"mmvq": 1, "mmq": 0}
+    assert unit._gate_up._kernel.calls == {"mmq/q8_1": 1} and unit.down._kernel.calls == {"mmvq/q8_1": 1}
     merged = stack("iq3_s", EQ, 2 * INTER, H, 0, unit._gate_up.weight.flatten(0, 1).cpu().numpy())
     none = experts(ctx, "iq3_s", H, 2 * INTER, 1, n=EQ)
     check(none(x[:, None], merged.parts, ids), emulated(none, merged, x[:, None], ids), H, "gate_up iq3_s T=7")
@@ -349,17 +373,21 @@ def test_ids_from_moe_topk(ctx, qwen_stacks):
         check(down(h, sd.parts, ids), emulated(down, sd, h, ids), INTER, f"down topk T={tokens}")
 
 
-@pytest.mark.parametrize("name", ["q4_k", "iq3_xxs"])
+@pytest.mark.parametrize("name", ["q4_k", "iq3_xxs", "nvfp4/hf"])
 def test_graph_replay_follows_the_routing(ctx, qwen_stacks, name):
     """Captured at every decode bucket (mmvq up to the limit, mmq above), replayed with other ids and inputs: the
-    result is the eager one on the new routing, bitwise."""
-    sg, sd = qwen_stacks[name]
-    gate_up, down = experts(ctx, name, H, 2 * INTER, 1, "swiglu", n=EQ), experts(ctx, name, INTER, H, K, n=EQ)
+    result is the eager one on the new routing, bitwise (NVFP4: its per-expert scale2 gathered on the device)."""
+    if name == "nvfp4/hf":
+        gate_up, down, pg, pd, _ = nvfp4_stacks(ctx, EQ)
+    else:
+        sg, sd = qwen_stacks[name]
+        pg, pd = sg.parts, sd.parts
+        gate_up, down = experts(ctx, name, H, 2 * INTER, 1, "swiglu", n=EQ), experts(ctx, name, INTER, H, K, n=EQ)
     for tokens in BUCKETS:
         x, ids = layer_input(tokens, seed=tokens)[:, None], uniform(tokens, EQ, seed=tokens)
 
         def layer(x=x, ids=ids):
-            return down(gate_up(x, sg.parts, ids), sd.parts, ids)
+            return down(gate_up(x, pg, ids), pd, ids)
 
         eager = layer()
         stream = torch.cuda.Stream()
@@ -405,7 +433,7 @@ def test_padding_plant_changes_real_rows_on_mmq_only(ctx, lib, qwen_stacks, path
     if path == "mmvq":
         assert torch.equal(y[:real], clean[:real])
     else:
-        j = lib.mmq_schedule(0, TYPES["q4_k"], s.weight.shape[1], tokens)[2]    # the tile width over the tokens
+        j = lib.mmq_schedule(0, TYPES["q4_k"], PREC["q8_1"], s.weight.shape[1], tokens)[2]    # the tokens' tile
         ws, n, n_dst = kern.workspace.view(torch.int32), -(-tokens * K // 64) * 64, -(-(tokens * K + j - 1) // 64) * 64
         ids_dst, bounds = ws[n:n + n_dst], ws[n + n_dst:n + n_dst + EQ + 1]
         lo, hi = int(bounds[EQ - 2]), int(bounds[EQ - 1])
@@ -493,18 +521,23 @@ def test_moe_combine_within_one_ulp(ctx):
 
 
 def test_swiglu_kernel_within_the_fp32_budget(lib):
-    """Our f32 SwiGLU against f64, written out here (not `reference.py`): within the fp32 budget; a bf16 SwiGLU cast
-    to f32 misses it."""
+    """Our f32 SwiGLU against f64, written out here (not `reference.py`): within the fp32 budget, also with each
+    row's expert scales on gate and up (NVFP4's scale2, before the product); a bf16 SwiGLU cast to f32 misses it."""
     gen = torch.Generator().manual_seed(15)
     scale = 10 ** torch.empty(4099, 1).uniform_(-2, 1.5, generator=gen)          # gates from ±0.01 to ±100
     x = (torch.randn(4099, 2 * INTER, generator=gen) * scale).cuda()
     y = torch.empty(4099, INTER, device="cuda")
-    lib.swiglu(x, y)
     g, u = x[:, :INTER].double(), x[:, INTER:].double()
-    want = g / (1 + torch.exp(-g)) * u
-    r = l0.check(y, want, torch.float32, 1)
-    assert r.passed, r
+    ids = torch.randint(0, E, (4099,), generator=gen, dtype=torch.int32).cuda()
+    s = (2.0 ** torch.empty(2, E).uniform_(-4, 4, generator=gen)).cuda()        # [2, E]: gate's row, up's
+    for scales in (None, (s[0], s[1], ids)):
+        lib.swiglu(x, y, *(scales or (None,) * 3))
+        sg, su = (s[0][ids.long()].double()[:, None], s[1][ids.long()].double()[:, None]) if scales else (1, 1)
+        want = g * sg / (1 + torch.exp(-g * sg)) * u * su
+        r = l0.check(y, want, torch.float32, 1)
+        assert r.passed, r
     gb, ub = x[:, :INTER].bfloat16(), x[:, INTER:].bfloat16()
+    want = g / (1 + torch.exp(-g)) * u
     assert not l0.check((torch.nn.functional.silu(gb) * ub).float(), want, torch.float32, 1).passed
 
 
@@ -551,9 +584,80 @@ def test_the_workspace_formula_with_ids_is_tight(ctx, lib):
     3 · 8 · 4 = 96 tiles (dense mmq_schedule over out · E rows mirrors that grid when out is a multiple of I). The
     formula exceeds what the call takes by at most its spare."""
     n, out, device = 8, 384, torch.cuda.current_device()
-    if lib.mmq_schedule(device, TYPES["q4_k"], out * n, CHUNK) != (2, 128, 128):
+    if lib.mmq_schedule(device, TYPES["q4_k"], PREC["q8_1"], out * n, CHUNK) != (2, 128, 128):
         pytest.skip("96 tiles need no stream-k fixup on this GPU's SM count")
     kernel, s = experts(ctx, "q4_k", H, out, 1, n=n), stack("q4_k", n, out, H, seed=5)
     kernel.kernel(gate_up_input(CHUNK, seed=1), s.parts, uniform(CHUNK, n, seed=2))
     used = lib.workspace_high_water()
-    assert used > 0 and 0 <= lib.workspace_bytes_id(device, H, CHUNK, K, n) - used <= SLACK
+    assert used > 0 and 0 <= lib.workspace_bytes_id(device, H, CHUNK, K, n) - used <= SLACK + reserve(CHUNK * K)
+
+
+def nvfp4_stacks(ctx, n: int = E):
+    """NVFP4 HF stacks through their kernels' `prepare`: the merged gate/up (fused SwiGLU) with scale2 [2, E] and
+    down with [E] (distinct per expert and half); also down's HF parts."""
+    fused = experts(ctx, "nvfp4/hf", H, 2 * INTER, 1, "swiglu", n)
+    down = experts(ctx, "nvfp4/hf", INTER, H, K, n=n, act_dtype="float32")
+    gate, up, dn = (hf_fp4("nvfp4", out, k, seed, experts=n) for out, k, seed in ((INTER, H, 1), (INTER, H, 2),
+                                                                                   (H, INTER, 3)))
+    merged = {role: torch.cat([gate[role], up[role]], 1) for role in ("weight", "scale")}
+    gu = prepared(fused, "nvfp4", merged | {"scale2": torch.stack([gate["scale2"], up["scale2"]])})
+    dw = prepared(down, "nvfp4", dn)
+    assert gu["scale2"].shape == (2, n) and dw["scale2"].shape == (n,)
+    return fused, down, gu, dw, dn
+
+
+def test_nvfp4_scale2_per_expert_on_both_paths(ctx, lib):
+    fused, down, gu, dw, dn = nvfp4_stacks(ctx)
+    sg, sd = (stack("nvfp4", E, out, k, 0, p["blocks"].flatten(0, 1).cpu().numpy())        # unscaled, same blocks
+              for p, out, k in ((gu, 2 * INTER, H), (dw, H, INTER)))
+    none, down_none = experts(ctx, "nvfp4", H, 2 * INTER, 1), experts(ctx, "nvfp4", INTER, H, K, act_dtype="float32")
+    t = fused.mmvq_tokens
+    weighted = Stack("nvfp4", sd.blocks, sd.w, hf_weight("nvfp4", dn).cuda())   # the reference weight, scale2 in it
+    for tokens in (1, t, t + 1, 64, CHUNK + 1):
+        ids, x, h = uniform(tokens, E, seed=tokens), gate_up_input(tokens, seed=tokens), down_input(tokens, tokens)
+        check_swiglu(lib, fused, none, sg, x, ids, f"swiglu T={tokens}", gu)
+        y = down(h, dw, ids)
+        check(y, emulated(down, weighted, h, ids), INTER, f"down T={tokens}")
+        assert torch.equal(y, down_none(h, sd.parts, ids) * dw["scale2"][ids.long()][..., None]), f"down T={tokens}"
+    ids, x, h = uniform(64, E, seed=5), gate_up_input(64, seed=5), down_input(64, 5)
+    with pytest.raises(ValueError, match=r"scale2 \(32,\) for 32 experts, glu swiglu"):    # one row for two halves
+        fused(x, gu | {"scale2": dw["scale2"]}, ids)
+    with PLANTS["nvfp4-scale2-by-slot"]():                                                                  # N4
+        assert not torch.equal(down(h, dw, ids), down_none(h, sd.parts, ids) * dw["scale2"][ids.long()][..., None])
+    with PLANTS["nvfp4-scale2-after-swiglu"](), pytest.raises(AssertionError, match="mmq's SwiGLU differs"):  # N5
+        check_swiglu(lib, fused, none, sg, x, ids, "N5", gu)
+
+
+@pytest.mark.parametrize("name", FP4)
+def test_native_w4a4_experts_against_their_own_codes(ctx, lib, sm, name):
+    """sm_120, `quant.act = a4`: mmq with ids at native W4A4 (gate/up: bf16 copied to f32, one row per token,
+    scattered to its slots; down: f32, one row per slot) against the f64 product of its own decoded activations."""
+    if sm != 120:
+        pytest.skip("native W4A4 is Blackwell's")
+    gate_up = experts(ctx, name, H, 2 * INTER, 1, act_quant="a4")
+    down = experts(ctx, name, INTER, H, K, act_dtype="float32", act_quant="a4")
+    assert gate_up.act == down.act == NATIVE_FP4
+    sg, sd = stack(name, E, 2 * INTER, H, seed=1), stack(name, E, H, INTER, seed=2)
+    pg, pdn = (k.prepare(QTensor(Layout(Scheme(f"ggml.{name}"), "gguf.native"), tuple(s.weight.shape), s.parts)).parts
+               for k, s in ((gate_up, sg), (down, sd)))
+    for tokens in (gate_up.mmvq_tokens + 1, 64, CHUNK + 1):
+        ids, x, h = uniform(tokens, E, seed=tokens), gate_up_input(tokens, seed=tokens), down_input(tokens, tokens)
+        for kern, s, parts, inp, k in ((gate_up, sg, pg, x, H), (down, sd, pdn, h, INTER)):
+            want = []
+            for a in range(0, tokens, CHUNK):
+                rows = inp[a:a + CHUNK].float()
+                xhat = native_codes(lib, name, rows.flatten(0, 1))[2].cuda().view(*rows.shape)
+                want.append(decoded_experts(xhat, s.weight, ids[a:a + CHUNK]))
+            check(kern(inp, parts, ids), torch.cat(want), k, f"{name} in={k} T={tokens}")
+    assert set(gate_up.calls) == {"mmq/fp4"} and set(down.calls) == {"mmq/fp4"}
+
+
+def decoded_experts(xhat: torch.Tensor, weight: torch.Tensor, ids: torch.Tensor) -> torch.Tensor:
+    """Slot j of token t: expert ids[t, j] of `weight` [E, out, in] on xhat[t, 0] or xhat[t, j], in f64."""
+    t, k = ids.shape
+    src = xhat.expand(t, k, -1) if xhat.shape[1] == 1 else xhat
+    y = torch.zeros(t, k, weight.shape[1], dtype=torch.float64, device=xhat.device)
+    for e in ids.unique().tolist():
+        rows = ids == e
+        y[rows] = src[rows].double() @ weight[e].double().T
+    return y

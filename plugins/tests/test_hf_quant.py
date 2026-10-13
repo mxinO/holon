@@ -1,7 +1,9 @@
 """Quantized HF checkpoints on the CPU (docs/m06-lowp.md step A2): tiny checkpoints in every dialect
 (`holon_testing.hf_quant_files`) load through std.weights.hf's dialects and serve, on the test-only reference kernels,
 what transformers computes on the weights as each file means them; the reference dequantization is each format
-owner's; the dialects refuse what the engine cannot honour; the Tier A and structural plants fail."""
+owner's; the dialects refuse what the engine cannot honour; the Tier A and structural plants fail. On a GPU the FP4
+MoE fixtures load through kernels.ggml_cuda, whose `prepare` repacks their stacks: the structural test reads those
+ggml blocks (gguf-py × the scale2 rows) and still sees every misplaced slice."""
 import functools
 import json
 import re
@@ -14,8 +16,9 @@ import torch
 from holon.api import QTensor, SamplingParams
 from holon.core.engine import Engine, EngineConfig
 from holon_judge.hf_quant import owner_check
-from holon_judge.planted import hf_moe_plants, hf_quant_plants
+from holon_judge.planted import fp4_plants, hf_moe_plants, hf_quant_plants
 from holon_judge.structure import mismatches
+from holon_std.moe.units import ExpertLinear
 from holon_std.weights.hf.source import HFSafetensors
 from holon_testing import hf_quant_files as hq
 from holon_testing.qwen3_5_files import LLAMA
@@ -25,7 +28,7 @@ from transformers import AutoModelForCausalLM
 CASES = [(d, moe) for moe in (False, True) for d in hq.DIALECTS]
 ELEM = {"fp8": "fp8_e4m3", "ct-fp8": "fp8_e4m3", "ct-nvfp4": "nvfp4", "modelopt": "nvfp4", "ct-mxfp4": "mxfp4",
         "quark": "mxfp4"}
-PLANTS = {**hf_quant_plants(layer=1), **hf_moe_plants(layer=1, experts=4)}
+PLANTS = {**hf_quant_plants(layer=1), **hf_moe_plants(layer=1, experts=4), **fp4_plants(layer=1)}
 
 
 @pytest.fixture(scope="module")
@@ -56,9 +59,11 @@ def _prompts() -> list[list[int]]:
     return [torch.randint(0, 512, (n,), generator=g).tolist() for n in (3, 17, 8, 25)]
 
 
-def _engine(model, **kw) -> Engine:
-    cfg = dict(model=str(model), device="cpu", dtype=torch.float32, page_size=4, max_seqs=3, max_step_tokens=10,
+def _engine(model, device: str = "cpu", **kw) -> Engine:
+    cfg = dict(model=str(model), device=device, dtype=torch.float32, page_size=4, max_seqs=3, max_step_tokens=10,
                max_model_len=40, state_memory=1 << 20)
+    if device == "cuda":                     # kernels.ggml_cuda: bf16 activations, no graphs for a load check
+        cfg |= dict(dtype=torch.bfloat16, cuda_graphs=False)
     return Engine(EngineConfig(**cfg | kw))
 
 
@@ -167,21 +172,34 @@ def test_the_tier_a_plants_fail(files, plant, dialect):
         assert _error(_engine(quantized), _oracle(dense)) > 1e-3            # 10× the passing bound
 
 
-@pytest.mark.parametrize("dialect,plants", [
-    ("fp8", ["hf-scale-stack-off-by-one"]),                                                   # P6
-    ("ct-fp8", ["hf-gate-up-swapped"]),
-    ("ct-nvfp4", ["hf-two-experts-swapped", "hf-scale2-stack-off-by-one", "hf-gate-up-scale2-swapped"]),
-    ("ct-mxfp4", ["hf-gate-up-swapped"]),
-    ("modelopt", ["hf-scale-stack-off-by-one", "hf-scale2-stack-off-by-one", "hf-gate-up-scale2-swapped"]),
-    ("quark", ["hf-stack-off-by-one"])])                                                      # M2
-def test_the_structural_test_checks_every_stacked_slice(files, dialect, plants):
+GPU = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+
+
+@pytest.mark.parametrize("dialect,plants,device", [
+    ("fp8", ["hf-scale-stack-off-by-one"], "cpu"),                                            # P6
+    ("ct-fp8", ["hf-gate-up-swapped"], "cpu"),
+    ("ct-nvfp4", ["hf-two-experts-swapped", "hf-scale2-stack-off-by-one", "hf-gate-up-scale2-swapped"], "cpu"),
+    ("ct-mxfp4", ["hf-gate-up-swapped"], "cpu"),
+    ("modelopt", ["hf-scale-stack-off-by-one", "hf-scale2-stack-off-by-one", "hf-gate-up-scale2-swapped"], "cpu"),
+    ("quark", ["hf-stack-off-by-one"], "cpu"),                                                # M2
+    # prepared by kernels.ggml_cuda (docs/m06-lowp.md D8)
+    pytest.param("modelopt", ["hf-scale2-stack-off-by-one", "hf-gate-up-scale2-swapped"], "cuda", marks=GPU),
+    pytest.param("ct-mxfp4", ["mxfp4-repack-scale-off-by-one"], "cuda", marks=GPU),            # M1
+    pytest.param("quark", ["hf-stack-off-by-one"], "cuda", marks=GPU)])
+def test_the_structural_test_checks_every_stacked_slice(files, dialect, plants, device):
     """Every slice of the MoE fixture's stacks dequantizes to the checkpoint's; each plant misplaces some."""
     quantized, _ = files(dialect, True)
-    assert mismatches(_engine(quantized), quantized) == []
+    engine = _engine(quantized, device)
+    if device == "cuda":
+        stacks = [m for m in engine.executor.model.modules() if isinstance(m, ExpertLinear) and m.weight is not None]
+        assert {m.layout.name for m in stacks} == {"gguf.native"} and len(stacks) == 4        # 2 layers × 2
+    assert mismatches(engine, quantized) == []
+    del engine
     for plant in plants:
         with PLANTS[plant]():
-            engine = _engine(quantized)
+            engine = _engine(quantized, device)
         assert mismatches(engine, quantized), plant
+        del engine
 
 
 def _edited(src, dst, tensors=None, config=None):

@@ -70,6 +70,7 @@ class _Quantized:
         q = QTensor(self.layout, shape, parts)
         if (prepared := self._kernel.prepare(q)) is q:
             return parts
+        self.layout = prepared.layout                    # what the parts now are (the site's facts keep the adopted)
         return dict(prepared.parts) if param is None else _hold(param, prepared.parts, self.ctx.device)
 
     def __call__(self, x: torch.Tensor, weight) -> torch.Tensor:

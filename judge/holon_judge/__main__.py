@@ -95,14 +95,21 @@ def _structure(a: argparse.Namespace) -> int:
 
 
 def _hf_quant_check(a: argparse.Namespace) -> int:
-    from .hf_quant import owner_check
+    from .hf_quant import owner_check, repack_check
 
     path = golden.resolve_model(a.model)
     report = owner_check(path, a.llama_cpp, a.limit)
-    print(json.dumps({"model": golden.model_meta(path)["model"], "llama_cpp": bool(a.llama_cpp),
-                      "owners": {k: v | {"over": len(v["over"]), "first_over": v["over"][:8]}
-                                 for k, v in report.items()}}))
-    return 0 if report and not any(v["over"] for v in report.values()) else 1
+    out = {"model": golden.model_meta(path)["model"], "llama_cpp": bool(a.llama_cpp),
+           "owners": {k: v | {"over": len(v["over"]), "first_over": v["over"][:8]} for k, v in report.items()}}
+    failed = not report or any(v["over"] for v in report.values())
+    if a.repack:
+        r = repack_check(path, a.llama_cpp, a.repack, a.limit)
+        out["repack"] = r | {"over": len(r["over"]), "first_over": r["over"][:8]} | (
+            {"bytes_differ": len(r["bytes_differ"]), "first_bytes_differ": r["bytes_differ"][:8]}
+            if r["bytes_differ"] is not None else {})
+        failed |= not r["modules"] or bool(r["over"]) or bool(r["bytes_differ"])
+    print(json.dumps(out))
+    return 1 if failed else 0
 
 
 def _retokenize(a: argparse.Namespace) -> int:
@@ -382,6 +389,8 @@ def main(argv: list[str] | None = None) -> int:
     hq.add_argument("--model", required=True, help="HF checkpoint directory or hub id")
     hq.add_argument("--llama-cpp", help="a llama.cpp checkout at the ggml pin: also gguf-py on its FP4 repacks")
     hq.add_argument("--limit", type=int, help="the first N quantized tensors only")
+    hq.add_argument("--repack", metavar="DEVICE", help="also acceptance 4 on DEVICE (e.g. cuda): kernels.ggml_cuda's "
+                    "FP4 blocks by gguf-py × scale2 against the reference, and against the converter's bytes")
     hq.set_defaults(run=_hf_quant_check)
 
     rt = sub.add_parser("retokenize", help="a prompt set's texts in another model's tokenizer")

@@ -16,6 +16,9 @@
 - GGUF Tier B (`l2 --plant`): bugs in the quantized kernels' use (`kernels.ggml_cuda`); L2 fails, except the rare
   stale workspace, which measures Tier B's sensitivity (predicted before running: fails the decode run, likely passes
   the looser prefill run).
+- FP4 in `kernels.ggml_cuda` (docs/m06-lowp.md §4.8: N2–N6, N8, N8b, M1, M4): its repack, `scale2` paths, mmq
+  precision and zeroed tail broken, and a checkpoint's `scale2` misread; each also fails L0 where L0 reaches it
+  (plugins/tests/test_ggml_cuda*.py), N6 as the pre-launch precision check's error on sm_120.
 
 The GGUF plants patch names, so they rely on how the engine reaches them: `_loaded` replaces `load_weights` and
 `resolve_model` in `holon.core.engine`'s namespace (it imports them by name), and the kernel plants wrap
@@ -346,6 +349,119 @@ def moe_padding_duplicate_ids() -> Iterator[None]:
     with mock.patch.object(executor.Executor, "_context", planted_context), \
             mock.patch.object(units.MoE, "forward", planted_forward):
         yield
+
+
+@contextlib.contextmanager
+def _fp4_blocks_edited(elem: str, edit: Callable[[torch.Tensor], torch.Tensor]) -> Iterator[None]:
+    """kernels.ggml_cuda's repack of `elem` (what `prepare` holds) with its ggml blocks edited: `edit(blocks [rows,
+    blocks per row, block bytes])`."""
+    from holon_plugins.kernels.ggml_cuda import plugin
+
+    blocks = plugin._blocks
+
+    def planted(e, w, s):
+        out = blocks(e, w, s)
+        return out if e != elem else edit(out.view(len(out), -1, plugin.BLOCKS[e][1]).clone()).view(len(out), -1)
+    with mock.patch.object(plugin, "_blocks", planted):
+        yield
+
+
+def _nibbles_swapped(b: torch.Tensor) -> torch.Tensor:
+    b[..., 4:] = (b[..., 4:] >> 4) | (b[..., 4:] << 4)
+    return b
+
+
+def _sub_scales_permuted(b: torch.Tensor) -> torch.Tensor:
+    b[..., :4] = b[..., :4].flip(-1)
+    return b
+
+
+def _e8m0_off_by_one(b: torch.Tensor) -> torch.Tensor:
+    b[..., 0] += 1
+    return b
+
+
+@contextlib.contextmanager
+def scale2_by_slot() -> Iterator[None]:
+    """N4: mmq with ids (down) scales each slot by `scale2[slot]`, not by its expert's."""
+    from holon_plugins.kernels.ggml_cuda import plugin
+
+    def planted(y, scale, ids):
+        y.mul_(scale[torch.arange(ids.shape[1], device=ids.device).expand_as(ids)][..., None])
+    with mock.patch.object(plugin.LinearExperts, "_scale_slots", staticmethod(planted)):
+        yield
+
+
+@contextlib.contextmanager
+def scale2_after_swiglu() -> Iterator[None]:
+    """N5: mmq's gate/up SwiGLU takes `scale2` after the product (silu(g)·u·s_g·s_u), not on each half before it."""
+    from holon_plugins.kernels.ggml_cuda import plugin
+
+    def planted(self, gate_up, y, gate_scale, up_scale, ids):
+        self.lib.swiglu(gate_up, y, None, None, None)
+        if up_scale is not None:
+            y.mul_((gate_scale * up_scale)[ids][..., None])
+    with mock.patch.object(plugin.LinearExperts, "_swiglu", planted):
+        yield
+
+
+@contextlib.contextmanager
+def ggml_prec_default() -> Iterator[None]:
+    """N6, N6b: every mmq call leaves dst's `op_params[3]` zero (llama.cpp's default precision: native W4A4 for FP4
+    types on Blackwell), whatever its spec's mode."""
+    from holon_plugins.kernels.ggml_cuda import plugin
+
+    init = plugin._Matmul.__init__
+
+    def planted(self, *args, **kwargs):
+        init(self, *args, **kwargs)
+        self.prec = 0
+    with mock.patch.object(plugin._Matmul, "__init__", planted):
+        yield
+
+
+@contextlib.contextmanager
+def fp4_tail_not_zeroed() -> Iterator[None]:
+    """M4: the `fp4` spec's tail after each FP4 tensor left as found (here 0xFF: NaN scales), not zeroed."""
+    from holon_plugins.kernels.ggml_cuda import plugin
+
+    def planted(blocks, nbytes, copy=True):
+        buf = torch.full((blocks.numel() + nbytes,), 0xFF, dtype=torch.uint8, device=blocks.device)
+        out = buf[:blocks.numel()].view(blocks.shape)
+        return out.copy_(blocks) if copy else out
+    with mock.patch.object(plugin, "with_tail", planted):
+        yield
+
+
+@contextlib.contextmanager
+def _scale2_scaled(module: str, factor: float) -> Iterator[None]:
+    """N8, N8b: `module`'s NVFP4 `scale2` read × `factor` by std.weights.hf (the judge reads the checkpoint itself)."""
+    from holon_std.weights.hf import quant
+
+    load = quant.load
+
+    def planted(d, m, get):
+        q = load(d, m, get)
+        if m.name == module and "scale2" in q.parts:
+            q.parts["scale2"] = q.parts["scale2"] * factor
+        return q
+    with mock.patch.object(quant, "load", planted):
+        yield
+
+
+def fp4_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:
+    """kernels.ggml_cuda's FP4 plants (docs/m06-lowp.md §4.8), the scale2 ones at `layer`'s o_proj."""
+    o_proj = f"model.layers.{layer}.self_attn.o_proj"
+    return {
+        "nvfp4-repack-nibbles-swapped": lambda: _fp4_blocks_edited("nvfp4", _nibbles_swapped),            # N2
+        "nvfp4-repack-scales-permuted": lambda: _fp4_blocks_edited("nvfp4", _sub_scales_permuted),        # N3
+        "nvfp4-scale2-by-slot": scale2_by_slot,                                                            # N4
+        "nvfp4-scale2-after-swiglu": scale2_after_swiglu,                                                  # N5
+        "ggml-prec-default": ggml_prec_default,                                                            # N6, N6b
+        "nvfp4-o-proj-scale2-1.25": lambda: _scale2_scaled(o_proj, 1.25),                                  # N8
+        "nvfp4-o-proj-scale2-1.1": lambda: _scale2_scaled(o_proj, 1.1),                                    # N8b
+        "mxfp4-repack-scale-off-by-one": lambda: _fp4_blocks_edited("mxfp4", _e8m0_off_by_one),           # M1
+        "fp4-tail-not-zeroed": fp4_tail_not_zeroed}                                                         # M4
 
 
 def _hf_experts(layer: int, edit: Callable[[int, str], tuple[int, str]]) -> Callable[[str], str]:
@@ -714,7 +830,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     # MoE Tier A and the bf16 HF path (Qwen3-30B-A3B: the one-layer plants at layer 24)
     **moe_plants(24), **hf_moe_plants(24, 128),
     # Quantized HF checkpoints (docs/m06-lowp.md §4.8)
-    **hf_quant_plants(18),
+    **hf_quant_plants(18), **fp4_plants(18),
     # MoE Tier B
     "ggml-experts-wrong-type": ggml_experts_wrong_type, "ggml-experts-stale-q8_1": ggml_experts_stale_q8_1,
     "rare-ggml-experts-stale-q8_1": lambda: ggml_experts_stale_q8_1(every=9973),

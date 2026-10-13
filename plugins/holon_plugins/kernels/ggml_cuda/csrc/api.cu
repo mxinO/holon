@@ -12,6 +12,7 @@
 #include "mmq.cuh"
 #include "mmvq.cuh"
 #include "moe-weighted-reduction.cuh"
+#include "quantize.cuh"
 #include "topk-moe.cuh"
 #include "unary.cuh"
 
@@ -96,14 +97,34 @@ ggml_tensor experts_view(const ggml_type type, const void * w, const int64_t exp
 
 ggml_type act(const int bf16) { return bf16 ? GGML_TYPE_BF16 : GGML_TYPE_F32; }
 
-// SwiGLU after mmq, computed as llama.cpp's fused mmvq gate computes it: up * silu(gate), ggml_cuda_op_silu_single.
-__global__ void swiglu_f32(const float * __restrict__ x, float * __restrict__ y, const int64_t n, const int64_t size) {
+// mmq's output with the activation precision asked of it: llama.cpp's graph sets it in dst's op_params[3]
+// (GGML_PREC_Q8 or GGML_PREC_Q4, read by ggml_cuda_mmq_get_prec_src1). Left zero it is the default, native W4A4 for
+// the FP4 types on Blackwell, so every mmq call and its pre-launch check (holon_ggml_mmq_prec) pass the spec's.
+ggml_tensor with_prec(ggml_tensor dst, const int prec) {
+    ggml_set_op_params_i32(&dst, 3, prec);
+    return dst;
+}
+
+// A per-tensor (dense) or per-expert scale for mmvq's fused epilogue: `n` f32 values, or none.
+ggml_tensor scale_vector(const float * scale, const int64_t n) { return matrix(GGML_TYPE_F32, scale, n, 1); }
+
+// SwiGLU after mmq, computed as llama.cpp's fused mmvq gate computes it: up * silu(gate), ggml_cuda_op_silu_single;
+// with `ids`, each half first scaled by its row's expert scale (NVFP4's scale2, as mmvq's x_scale and gate_scale).
+__global__ void swiglu_f32(const float * __restrict__ x, const float * __restrict__ gate_scale,
+                           const float * __restrict__ up_scale, const int32_t * __restrict__ ids,
+                           float * __restrict__ y, const int64_t n, const int64_t size) {
     const int64_t i = (int64_t) blockIdx.x*blockDim.x + threadIdx.x;
     if (i >= size) {
         return;
     }
     const float * row = x + 2*(i/n)*n;
-    y[i] = row[n + i%n] * ggml_cuda_op_silu_single(row[i%n]);
+    float gate = row[i%n], up = row[n + i%n];
+    if (ids) {
+        const int32_t e = ids[i/n];
+        up *= up_scale[e];
+        gate *= gate_scale[e];
+    }
+    y[i] = up * ggml_cuda_op_silu_single(gate);
 }
 
 int device_cc() { return ggml_cuda_info().devices[ggml_cuda_get_device()].cc; }
@@ -119,21 +140,26 @@ int holon_ggml_use_mmvq(int type, int64_t rows) { return ggml_cuda_should_use_mm
 
 int holon_ggml_use_mmq(int type, int64_t rows) { return ggml_cuda_should_use_mmq((ggml_type) type, device_cc(), rows, 0); }
 
-int holon_ggml_mmq_schedule(int type, int64_t out, int64_t rows, int * tile_i, int * tile_j) {
-    // FP4 types choose their activation precision per call: the schedule must take it (M0.6 step A3)
-    GGML_ASSERT(type != GGML_TYPE_MXFP4 && type != GGML_TYPE_NVFP4 && "mmq_schedule: an FP4 type needs its precision");
+int holon_ggml_mmq_prec(int type, int prec) {
+    ggml_tensor src0 = {};
+    src0.type = (ggml_type) type;
+    const ggml_tensor dst = with_prec(matrix(GGML_TYPE_F32, nullptr, 1, 1), prec);
+    return ggml_cuda_mmq_get_prec_src1(&src0, &dst, device_cc());
+}
+
+int holon_ggml_mmq_schedule(int type, int prec, int64_t out, int64_t rows, int * tile_i, int * tile_j) {
     const auto & dev = ggml_cuda_info().devices[ggml_cuda_get_device()];
     const bool fallback = ggml_cuda_mmq_needs_fallback(out);          // as ggml_cuda_mul_mat_q
-    const ggml_prec prec = GGML_PREC_Q8;                               // ggml_cuda_mmq_get_prec_src1, non-FP4 types
+    const ggml_prec prec_src1 = (ggml_prec) holon_ggml_mmq_prec(type, prec);
     int J_best = 0, ntx_best = INT_MAX;
     for (int J = 8; J <= 128 && ntx_best > 1; J += 8) {
-        const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config((ggml_type) type, J, fallback, dev.cc, prec);
+        const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config((ggml_type) type, J, fallback, dev.cc, prec_src1);
         if (c.type != GGML_TYPE_COUNT && mmq_get_nbytes_shared(c, dev.cc) <= dev.smpbo && (rows + J - 1)/J < ntx_best) {
             J_best = J;
             ntx_best = (rows + J - 1)/J;
         }
     }
-    const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config((ggml_type) type, J_best, fallback, dev.cc, prec);
+    const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config((ggml_type) type, J_best, fallback, dev.cc, prec_src1);
     *tile_i = c.I;
     *tile_j = c.J;
     if (!c.stream_k) {
@@ -154,29 +180,44 @@ size_t holon_ggml_workspace_high_water(void) {
 size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows) {
     const int64_t in_padded = GGML_PAD(in, MATRIX_ROW_PADDING);
     // mmq's q8_1 activations plus its tile padding (J <= 128 rows, rounded up to a load chunk of <= 512 ints);
-    // mmvq's block_q8_1 need less
+    // mmvq's block_q8_1 and native FP4's block_fp4_mmq (half the bytes) need less
     const size_t q8_1 = (rows*in_padded/QK8_1_MMQ + 128) * sizeof(block_q8_1_mmq) + 512*sizeof(int);
+    // native NVFP4's per-row activation scale, reserved on every workspace (one size per workspace name)
+    const size_t row_scale = rows * sizeof(float);
     // stream-k fixup: one partial I x J f32 tile per SM (I, J <= 128 on every config we build)
     const size_t fixup = size_t(ggml_cuda_info().devices[ggml_cuda_get_device()].nsm) * 128*128 * sizeof(float);
-    return GGML_PAD(q8_1, POOL_ALIGN) + GGML_PAD(fixup, POOL_ALIGN);
+    return GGML_PAD(q8_1, POOL_ALIGN) + GGML_PAD(row_scale, POOL_ALIGN) + GGML_PAD(fixup, POOL_ALIGN);
 }
 
 void holon_ggml_mmvq(int type, const void * w, int64_t out, int64_t in, const void * x, int x_bf16, int64_t rows,
-                     void * y, int y_bf16, void * workspace, size_t workspace_bytes, void * stream) {
+                     void * y, int y_bf16, const float * scale, void * workspace, size_t workspace_bytes,
+                     void * stream) {
     call_context c(stream, workspace, workspace_bytes);
     const ggml_tensor src0 = matrix((ggml_type) type, w, in, out);
     const ggml_tensor src1 = matrix(act(x_bf16), x, in, rows);
     ggml_tensor dst = matrix(act(y_bf16), y, out, rows);
-    ggml_cuda_mul_mat_vec_q(c.ctx, &src0, &src1, nullptr, &dst);
+    const ggml_tensor x_scale = scale_vector(scale, 1);
+    ggml_cuda_mm_fusion_args_host fusion{};
+    fusion.x_scale = &x_scale;
+    ggml_cuda_mul_mat_vec_q(c.ctx, &src0, &src1, nullptr, &dst, scale ? &fusion : nullptr);
 }
 
-void holon_ggml_mmq(int type, const void * w, int64_t out, int64_t in, const void * x, int x_bf16, int64_t rows,
-                    float * y, void * workspace, size_t workspace_bytes, void * stream) {
+void holon_ggml_mmq(int type, int prec, const void * w, int64_t out, int64_t in, const void * x, int x_bf16,
+                    int64_t rows, float * y, void * workspace, size_t workspace_bytes, void * stream) {
     call_context c(stream, workspace, workspace_bytes);
     const ggml_tensor src0 = matrix((ggml_type) type, w, in, out);
     const ggml_tensor src1 = matrix(act(x_bf16), x, in, rows);
-    ggml_tensor dst = matrix(GGML_TYPE_F32, y, out, rows);
+    ggml_tensor dst = with_prec(matrix(GGML_TYPE_F32, y, out, rows), prec);
     ggml_cuda_mul_mat_q(c.ctx, &src0, &src1, nullptr, &dst);
+}
+
+void holon_ggml_quantize_fp4(int type, const float * x, int64_t rows, int64_t in, void * blocks, float * scale,
+                             void * stream) {
+    const ggml_tensor src1 = matrix(GGML_TYPE_F32, x, in, rows);
+    // as ggml_cuda_mul_mat_q quantizes a dense src1 for native FP4 (its float8 loads when aligned)
+    quantize_mmq_fp4_cuda(x, nullptr, blocks, scale, (ggml_type) type, ggml_cuda_is_aligned(&src1, 32), in, in,
+                          rows*in, rows*in, GGML_PAD(in, MATRIX_ROW_PADDING), rows, 1, 1, (cudaStream_t) stream);
+    CUDA_CHECK(cudaGetLastError());
 }
 
 void holon_ggml_get_rows(int type, const void * table, int64_t hidden, const int32_t * ids, int64_t n, void * y,
@@ -216,7 +257,8 @@ size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int6
 
 void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, int64_t in, const void * x, int x_bf16,
                         int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y, int swiglu,
-                        void * workspace, size_t workspace_bytes, void * stream) {
+                        const float * gate_scale, const float * up_scale, void * workspace, size_t workspace_bytes,
+                        void * stream) {
     call_context c(stream, workspace, workspace_bytes);
     const ggml_type t = (ggml_type) type;
     const int64_t out_y = swiglu ? out/2 : out;
@@ -226,27 +268,34 @@ void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, 
     const ggml_tensor src1 = tensor3(act(x_bf16), x, in, rows_per_token, tokens);
     const ggml_tensor ids_t = matrix(GGML_TYPE_I32, ids, k, tokens);
     ggml_tensor dst = tensor3(GGML_TYPE_F32, y, out_y, k, tokens);
+    // NVFP4's per-expert scales in the fused epilogue: up's (or the stack's) as x_scale, gate's as gate_scale
+    const ggml_tensor x_scale = scale_vector(up_scale, experts), g_scale = scale_vector(gate_scale, experts);
     ggml_cuda_mm_fusion_args_host fusion{};
-    fusion.gate = &gate;
-    fusion.glu_op = GGML_GLU_OP_SWIGLU;
-    ggml_cuda_mul_mat_vec_q(c.ctx, &src0, &src1, &ids_t, &dst, swiglu ? &fusion : nullptr);
+    if (swiglu) {
+        fusion.gate = &gate;
+        fusion.glu_op = GGML_GLU_OP_SWIGLU;
+        fusion.gate_scale = gate_scale ? &g_scale : nullptr;
+    }
+    fusion.x_scale = up_scale ? &x_scale : nullptr;
+    ggml_cuda_mul_mat_vec_q(c.ctx, &src0, &src1, &ids_t, &dst, swiglu || up_scale ? &fusion : nullptr);
 }
 
-void holon_ggml_mmq_id(int type, const void * w, int64_t experts, int64_t out, int64_t in, const void * x, int x_bf16,
-                       int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y,
+void holon_ggml_mmq_id(int type, int prec, const void * w, int64_t experts, int64_t out, int64_t in, const void * x,
+                       int x_bf16, int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y,
                        void * workspace, size_t workspace_bytes, void * stream) {
     call_context c(stream, workspace, workspace_bytes);
     const ggml_tensor src0 = experts_view((ggml_type) type, w, experts, out, in, 0, out);
     const ggml_tensor src1 = tensor3(act(x_bf16), x, in, rows_per_token, tokens);
     const ggml_tensor ids_t = matrix(GGML_TYPE_I32, ids, k, tokens);
-    ggml_tensor dst = tensor3(GGML_TYPE_F32, y, out, k, tokens);
+    ggml_tensor dst = with_prec(tensor3(GGML_TYPE_F32, y, out, k, tokens), prec);
     ggml_cuda_mul_mat_q(c.ctx, &src0, &src1, &ids_t, &dst);
 }
 
-void holon_ggml_swiglu(const float * x, int64_t rows, int64_t n, float * y, void * stream) {
+void holon_ggml_swiglu(const float * x, int64_t rows, int64_t n, const float * gate_scale, const float * up_scale,
+                       const int32_t * ids, float * y, void * stream) {
     const int64_t size = rows*n;
     swiglu_f32<<<(size + CUDA_GLU_BLOCK_SIZE - 1)/CUDA_GLU_BLOCK_SIZE, CUDA_GLU_BLOCK_SIZE, 0, (cudaStream_t) stream>>>(
-        x, y, n, size);
+        x, gate_scale, up_scale, ids, y, n, size);
     CUDA_CHECK(cudaGetLastError());
 }
 

@@ -37,8 +37,9 @@ class ExpertLinear(nn.Module):
     stack (a GGUF file's, whose parts hold the experts' rows in order) or one expert's slice at a time (the first
     materializes each part as [E, …] on the device, docs/m06-lowp.md D6); either way every part is held per expert,
     [E, …], the first (the primary part) by `weight`. `merge(gate, up)` builds one gate/up stack per expert that
-    applies SwiGLU (`glu="swiglu"`); the kernel is bound after merges, and its `prepare`, if any, replaces the parts.
-    `act_dtype`: its input's dtype (the model dtype for gate/up, f32 for down, which takes the SwiGLU output)."""
+    applies SwiGLU (`glu="swiglu"`); the kernel is bound after merges, and its `prepare`, if any, replaces the parts
+    and their layout. `act_dtype`: its input's dtype (the model dtype for gate/up, f32 for down, which takes the
+    SwiGLU output)."""
 
     def __init__(self, ctx, *, experts: int, in_features: int, out_features: int, top_k: int,
                  rows_per_token: int, act_dtype: torch.dtype) -> None:
@@ -49,7 +50,7 @@ class ExpertLinear(nn.Module):
         self.weight = nn.Parameter(torch.empty(experts, out_features, in_features, dtype=ctx.dtype),
                                    requires_grad=False)
         self.parts: dict[str, torch.Tensor] | None = {"weight": self.weight}     # by role; dense: the parameter
-        self.layout = None                                   # the adopted Layout; None: dense
+        self.layout = None                         # the parts' Layout (adopted, then prepared); None: dense
         self._kernel = None
 
     def layout_fact(self) -> str:
@@ -116,7 +117,7 @@ class ExpertLinear(nn.Module):
         if self.layout is not None and hasattr(self._kernel, "prepare"):          # docs/m06-lowp.md D4
             q = QTensor(self.layout, (self.experts, self.out_features, self.in_features), self.parts)
             if (prepared := self._kernel.prepare(q)) is not q:
-                self.parts = _hold(self.weight, prepared.parts, ctx.device)
+                self.layout, self.parts = prepared.layout, _hold(self.weight, prepared.parts, ctx.device)
 
     def forward(self, x: torch.Tensor, ids: torch.Tensor) -> torch.Tensor:
         return self._kernel(x, self.parts, ids)

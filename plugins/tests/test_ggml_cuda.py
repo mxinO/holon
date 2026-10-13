@@ -15,25 +15,38 @@
   `-fmad=false`; the one exception is the sign of zero in Q4_0's convert ((8 - 8) * d is +0 for negative d).
 - CUDA graphs: captured calls replay bitwise like eager ones (PDL launches on sm_120a), also on new inputs.
 - Workspace: every call takes at most what `workspace_bytes` sizes for its rows (the pool's high-water mark,
-  `Sized`), so an undersized formula fails at any row count; `mmq_schedule` refuses FP4 types.
+  `Sized`), so an undersized formula fails at any row count.
+- FP4 (docs/m06-lowp.md D8, §4.8; MXFP4 and NVFP4 are in the type sweeps above as ggml blocks): the HF layouts'
+  `prepare` is lossless — gguf-py on its blocks × scale2 equals `reference.py` by value, the blocks are llama.cpp's
+  converter's byte for byte, the source parts untouched — and the repack plants (N2, N3, M1) break it; `scale2` on
+  every path and output dtype against the q8_1 emulator in f64 on the reference weight, also in CUDA graphs. The
+  precision check: mmq's precision is the spec's, and the default one (the N6 plant) is an error on sm_120 only;
+  `quant.act = a4` selects native W4A4 on sm_120 and q8_1 elsewhere. Native FP4 activations: llama.cpp's quantizer
+  against the emulator (`holon_judge.w4a4`: MXFP4 runs on any class, NVFP4 on sm_120), codes differing at a rate
+  ≤ 1e-3 and only in fast-math's tie classes. sm_120: native W4A4 mmq against its own decoded activation codes (bf16
+  and f32 inputs), the zeroed tail of `prepare` at `in` 768 (without it, plant M4: NaN output).
 
 Skips without a GPU; builds the extension (prebuild) into the user cache if it is missing.
 """
 import os
 import pathlib
 import subprocess
-import sys
 
 import gguf
 import numpy as np
 import pytest
 import torch
+from holon.api import Layout, QTensor, Scheme
 from holon.core.build import BuildContext
 from holon.core.plugins import PluginSet, discover
-from holon_judge import l0, q8_1
+from holon_judge import l0, q8_1, w4a4
+from holon_judge.hf_quant import converter, dequantize_blocks, ulps
+from holon_judge.planted import PLANTS
 from holon_plugins.kernels.ggml_cuda import extension
-from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, TYPES
+from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, FP4, NATIVE_FP4, PREC, Q8_1, TYPES
 from holon_std.ops import reference
+from holon_std.weights.hf import reference as hf
+from holon_testing.qwen3_5_files import LLAMA
 from huggingface_hub.constants import HF_HUB_CACHE
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
@@ -79,9 +92,11 @@ def real() -> dict[tuple[str, int], np.ndarray]:
     return found
 
 
-def qlinear(ctx, name: str, k: int, out_dtype: str = "bfloat16", out: int = OUT):
-    facts = {"layout": f"ggml.{name}/gguf.native", "in": k, "out": out, "act_dtype": "bfloat16",
-             "out_dtype": out_dtype, "act_quant": "a8"}
+def qlinear(ctx, name: str, k: int, out_dtype: str = "bfloat16", out: int = OUT, act_dtype: str = "bfloat16",
+            act_quant: str = "a8"):
+    """A `qlinear` of ggml type `name` (or of an HF layout, `"nvfp4/hf"`), held to its workspace formula."""
+    facts = {"layout": name if "/" in name else f"ggml.{name}/gguf.native", "in": k, "out": out,
+             "act_dtype": act_dtype, "out_dtype": out_dtype, "act_quant": act_quant}
     spec = ctx.select_kernel("qlinear@2", site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
     kernel, device = spec.impl(ctx, **facts), torch.cuda.current_device()
@@ -109,16 +124,59 @@ class Sized:
 
 def random_blocks(name: str, rows: int, k: int, seed: int) -> np.ndarray:
     """Random bytes, with every fp16 scale realistic: |d| log-uniform in [1e-6, 1] (fp16 subnormals below 6e-5),
-    random sign, 3 % exact zeros."""
+    random sign, 3 % exact zeros; FP4 scales as `fp4_scales`."""
     rng = np.random.default_rng(seed)
     qtype = gguf.GGMLQuantizationType[name.upper()]
     block, size = gguf.GGML_QUANT_SIZES[qtype]
     b = rng.integers(0, 256, size=(rows, k // block, size), dtype=np.uint8)
+    if name in FP4:
+        n = 4 if name == "nvfp4" else 1
+        b[..., :n] = fp4_scales(name, (rows, k // block, n), rng)
+        return b.reshape(rows, -1)
     for off in SCALES.get(name, (0,)):
         d = rng.choice([-1.0, 1.0], size=b.shape[:2]) * 10 ** rng.uniform(-6, 0, size=b.shape[:2])
         d[rng.random(d.shape) < 0.03] = 0
         b[..., off:off + 2] = d.astype(np.float16).view(np.uint8).reshape(*b.shape[:2], 2)
     return b.reshape(rows, -1)
+
+
+def fp4_scales(name: str, shape: tuple[int, ...], rng: np.random.Generator) -> np.ndarray:
+    """Realistic FP4 block scales: MXFP4 e8m0 2^-10..2^0; NVFP4 UE4M3 up to 1.0 (0x38), subnormals (0x01..0x07)
+    included, 3 % zeros (never a sign bit or NaN: the HF sources refuse them)."""
+    if name == "mxfp4":
+        return rng.integers(117, 128, size=shape, dtype=np.uint8)
+    return np.where(rng.random(shape) < 0.03, 0, rng.integers(1, 0x39, size=shape)).astype(np.uint8)
+
+
+def hf_fp4(elem: str, out: int, k: int, seed: int, experts: int = 0) -> dict[str, torch.Tensor]:
+    """An HF FP4 weight's normalized parts (docs/m06-lowp.md D2), random codes and realistic scales; NVFP4's scale2
+    near a real checkpoint's (amax / (6 · 448)), one per expert when `experts`."""
+    rng = np.random.default_rng(seed)
+    lead = (experts,) if experts else ()
+    group = 16 if elem == "nvfp4" else 32
+    parts = {"weight": torch.from_numpy(rng.integers(0, 256, size=(*lead, out, k // 2), dtype=np.uint8)),
+             "scale": torch.from_numpy(fp4_scales(elem, (*lead, out, k // group), rng))}
+    if elem == "nvfp4":
+        parts["scale2"] = torch.from_numpy(np.asarray(rng.uniform(1, 2, size=lead) / 2688)).float()
+    return parts
+
+
+def hf_weight(elem: str, parts: dict[str, torch.Tensor]) -> torch.Tensor:
+    """The reference's fp32 weight of `hf_fp4` parts ([E, out, in] for a stack: per expert)."""
+    if parts["weight"].dim() == 2:
+        return hf.dequantize(elem, parts)
+    return torch.stack([hf.dequantize(elem, {r: p[e] for r, p in parts.items()}) for e in range(len(parts["weight"]))])
+
+
+def prepared(kernel, elem: str, parts: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """What the kernel's `prepare` makes of HF parts (on the GPU), checked not to modify them."""
+    cuda = {r: p.cuda() for r, p in parts.items()}
+    before = {r: p.clone() for r, p in cuda.items()}
+    q = kernel.prepare(QTensor(Layout(Scheme(elem), "hf"), (*parts["weight"].shape[:-1], 2 * parts["weight"].shape[-1]),
+                               cuda))
+    assert all(torch.equal(cuda[r], before[r]) for r in cuda), "prepare modified its input"
+    assert q.layout == Layout(Scheme(f"ggml.{elem}"), "gguf.native") and next(iter(q.parts)) == "blocks"
+    return dict(q.parts)
 
 
 def same_bits(a: torch.Tensor, b: torch.Tensor) -> bool:
@@ -145,14 +203,19 @@ def activations(rows: int, k: int, seed: int) -> torch.Tensor:
     return x
 
 
-def check_qlinear(kernel, name: str, blocks: np.ndarray, rows_list) -> None:
-    k, weight, w = kernel.k, dequantize(name, blocks), {"blocks": device_blocks(blocks)}
+def check_qlinear(kernel, name: str, blocks: np.ndarray | None, rows_list, parts=None, weight=None,
+                  act_dtype: torch.dtype = torch.bfloat16) -> None:
+    """The kernel against the q8_1 emulator of each row count's path (the weight: gguf-py's of `blocks`, or the
+    given one with its `parts`), its zero and outlier rows on their own, NMSE against the exact product."""
+    k = kernel.k
+    weight = dequantize(name, blocks) if weight is None else weight.cuda()
+    w = {"blocks": device_blocks(blocks)} if parts is None else parts
     for rows in rows_list:
         path = q8_1.MMVQ if rows <= kernel.mmvq_rows else q8_1.MMQ
-        x = activations(rows, k, seed=rows)
+        x = activations(rows, k, seed=rows).to(act_dtype)
         y = kernel(x, w)
         assert torch.equal(y, kernel(x, w)), f"{name} rows={rows}: not run-to-run identical"
-        ref = q8_1.matmul(x, weight, blocks, name, path)
+        ref = q8_1.matmul(x, weight, blocks, name.split("/")[0], path)
         normal = [i for i in range(rows) if i not in (1, 2)]
         for sel in (normal, [i for i in (1, 2) if i < rows]):
             if sel:
@@ -168,8 +231,6 @@ def check_qlinear(kernel, name: str, blocks: np.ndarray, rows_list) -> None:
 def test_link(sm):
     """The module resolves every ggml symbol in the vendored code itself (the shim), and its build applied the
     patch (the static library is built from the committed, patched sources)."""
-    import subprocess
-
     undefined = subprocess.run(["nm", "-D", "--undefined-only", str(extension.module_path(sm))],
                                capture_output=True, text=True, check=True).stdout
     assert not [s for s in undefined.split() if "ggml" in s or "gguf" in s]
@@ -211,10 +272,10 @@ def test_mmq_schedules(ctx, sm, name):
     (so a refresh that moves llama.cpp's choice away from our mirror fails here)."""
     lib, k = extension.load(sm), 4096
     nsm = torch.cuda.get_device_properties().multi_processor_count
-    kind, tile_i, _ = lib.mmq_schedule(0, TYPES[name], OUT, CHUNK)
+    kind, tile_i, _ = lib.mmq_schedule(0, TYPES[name], PREC["q8_1"], OUT, CHUNK)
     assert kind == 2, f"{name}: out={OUT} should take the stream-k fixup"
     for out in (OUT, nsm * tile_i, 4096, 12288):
-        kind = lib.mmq_schedule(0, TYPES[name], out, CHUNK)[0]
+        kind = lib.mmq_schedule(0, TYPES[name], PREC["q8_1"], out, CHUNK)[0]
         assert out != nsm * tile_i or kind in (0, 1), f"{name}: out={out} (tiles a multiple of nsm) takes the fixup"
         kernel, blocks = qlinear(ctx, name, k, out=out), random_blocks(name, out, k, seed=out)
         launched = _launches(kernel, activations(CHUNK, k, seed=0), {"blocks": device_blocks(blocks)})
@@ -243,6 +304,8 @@ def test_convert_and_get_rows_match_gguf(ctx, sm, name):
         lib.dequantize(TYPES[name], w, y)
         zero = 0.0 if name == "q4_0" else -0.0   # x + 0.0 maps -0 to +0: Q4_0's one exception (docstring)
         assert same_bits(y + zero, ref + zero), f"{name}: convert differs from gguf-py"
+        if name == "nvfp4":                       # get_rows has no NVFP4
+            continue
         facts = {"layout": f"ggml.{name}/gguf.native", "vocab": OUT, "hidden": k}
         ids = torch.tensor([0, OUT - 1, 5, 5, 123], device="cuda")
         for dtype in ("float32", "bfloat16"):
@@ -266,12 +329,13 @@ def test_qembedding_real_table(ctx):
     assert same_bits(got, dequantize(t.tensor_type.name.lower(), rows))
 
 
-@pytest.mark.parametrize("name", ["q4_k", "q6_k", "q2_k", "iq3_xxs", "iq2_s", "q8_0"])
+@pytest.mark.parametrize("name", ["q4_k", "q6_k", "q2_k", "iq3_xxs", "iq2_s", "q8_0", "nvfp4/hf"])
 def test_cuda_graph_replays_bitwise(ctx, name):
     k = 4096
     kernel = qlinear(ctx, name, k)
-    w = {"blocks": device_blocks(random_blocks(name, OUT, k, seed=3))}
-    for rows in (1, kernel.mmvq_rows + 1, CHUNK + 1):
+    w = prepared(kernel, "nvfp4", hf_fp4("nvfp4", OUT, k, seed=3)) if name == "nvfp4/hf" else \
+        {"blocks": device_blocks(random_blocks(name, OUT, k, seed=3))}
+    for rows in (1, 2, kernel.mmvq_rows + 1, CHUNK + 1):
         x = activations(rows, k, seed=11)
         eager = kernel(x, w)
         stream = torch.cuda.Stream()
@@ -311,22 +375,137 @@ def test_pdl_survives_graph_capture(ctx, sm):
 SLACK = 512 * 4 + 3 * 256     # the formulas' spare: the 512-int load-chunk allowance, then three 256-byte pool pads
 
 
+def reserve(rows: int) -> int:
+    """The workspace's native NVFP4 per-row scale (256-byte padded), which q8_1 calls leave unused."""
+    return -(-rows * 4 // 256) * 256
+
+
 def test_the_workspace_formula_is_tight(ctx, sm):
     """Negative control on a J = 128 shape with the stream-k fixup (out 300 at 512 rows): the formula exceeds what
     the call takes by at most its spare, so a too-generous formula (one that would hide an allocation) fails too. The
     test entry reads and resets the high-water mark, at least the q8_1 activations (144 bytes per 128 values)."""
     kernel, k = qlinear(ctx, "q4_k", 4096), 4096
-    assert kernel.lib.mmq_schedule(torch.cuda.current_device(), TYPES["q4_k"], OUT, CHUNK) == (2, 128, 128)
+    assert kernel.lib.mmq_schedule(torch.cuda.current_device(), TYPES["q4_k"], PREC["q8_1"], OUT, CHUNK) == \
+        (2, 128, 128)
     kernel.kernel(activations(CHUNK, k, seed=0), {"blocks": device_blocks(random_blocks("q4_k", OUT, k, seed=0))})
     used = kernel.lib.workspace_high_water()
     assert used >= CHUNK * k // 128 * 144 and kernel.lib.workspace_high_water() == 0
-    assert 0 <= kernel.lib.workspace_bytes(torch.cuda.current_device(), k, CHUNK) - used <= SLACK
+    assert 0 <= kernel.lib.workspace_bytes(torch.cuda.current_device(), k, CHUNK) - used <= SLACK + reserve(CHUNK)
 
 
-def test_mmq_schedule_refuses_fp4_types(sm):
-    """Their activation precision is chosen per call (M0.6 A3 passes it): the schedule aborts rather than guess
-    (shown on NVFP4, GGML_TYPE 40; MXFP4 takes the same check, and A3 replaces both)."""
-    code = ("from holon_plugins.kernels.ggml_cuda import extension; "
-            f"extension.load({sm}).mmq_schedule(0, 40, 300, 512)")
-    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600)
-    assert r.returncode != 0 and "an FP4 type needs its precision" in r.stderr, r.stderr[-2000:]
+@pytest.mark.parametrize("elem", FP4)
+def test_hf_fp4_prepare_is_lossless_and_scale2_holds_on_every_path(ctx, elem):
+    """Acceptance 4 on random weights: `prepare`'s ggml blocks, dequantized by gguf-py × scale2, equal the reference
+    by value, and are llama.cpp's converter's byte for byte (with the pin's checkout, git-ignored under spikes/); the
+    repack plants change them. Then `scale2` (one value
+    per tensor: the fused mmvq epilogue at one row, f32 then the multiply above it, the f32 → out_dtype step of mmq)
+    against the q8_1 emulator on the reference weight, both output dtypes and both input dtypes."""
+    plants = {"nvfp4": ("nvfp4-repack-nibbles-swapped", "nvfp4-repack-scales-permuted"),
+              "mxfp4": ("mxfp4-repack-scale-off-by-one",)}[elem]
+    theirs = converter(LLAMA) if (LLAMA / "conversion" / "base.py").is_file() else None
+    for k, out_dtype, act_dtype in ((768, "bfloat16", torch.bfloat16), (4096, "float32", torch.float32)):
+        kernel, parts = qlinear(ctx, f"{elem}/hf", k, out_dtype, act_dtype=str(act_dtype)[6:]), hf_fp4(elem, OUT, k, k)
+        weight, got = hf_weight(elem, parts), prepared(kernel, elem, parts)
+        assert set(got) == ({"blocks", "scale2"} if elem == "nvfp4" else {"blocks"})
+        assert torch.equal(dequantize_blocks(elem, got["blocks"], got.get("scale2")), weight)     # by value
+        if theirs is not None:
+            assert torch.equal(got["blocks"].cpu(), theirs(elem, parts["weight"], parts["scale"]))
+        for plant in plants:
+            with PLANTS[plant]():
+                bad = prepared(kernel, elem, parts)["blocks"]
+            assert not torch.equal(dequantize_blocks(elem, bad, got.get("scale2")), weight), plant
+        t = kernel.mmvq_rows
+        check_qlinear(kernel, f"{elem}/hf", None, (1, 2, t, t + 1, 64, CHUNK + 1), got, weight, act_dtype)
+        assert set(kernel.calls) == {"mmvq/q8_1", "mmq/q8_1"}
+
+
+def test_the_mmq_precision_is_the_spec_s(ctx, sm):
+    """llama.cpp's precision for each type: q8_1 when asked for it; at the default (dst's op_params[3] zero, plant
+    N6) native W4A4 for the FP4 types on sm_120, which the pre-launch check refuses for the q8_1 spec, and q8_1 below
+    it, which passes. `quant.act = a4` selects the native spec on sm_120 only (§4.7); `a8` never does."""
+    lib, device = extension.load(sm), torch.cuda.current_device()
+    for name, t in TYPES.items():
+        assert lib.mmq_prec(device, t, PREC["q8_1"]) == PREC["q8_1"]
+        assert lib.mmq_prec(device, t, 0) == PREC["fp4" if sm == 120 and name in FP4 else "q8_1"], name
+    with PLANTS["ggml-prec-default"]():
+        if sm == 120:
+            with pytest.raises(RuntimeError, match="spec's mode 'q8_1'"):
+                qlinear(ctx, "nvfp4/hf", 4096)
+        else:
+            qlinear(ctx, "nvfp4/hf", 4096)
+    for name, act_quant in (("nvfp4/hf", "a4"), ("mxfp4", "a4"), ("nvfp4/hf", "a8"), ("q4_k", "a4")):
+        kernel = qlinear(ctx, name, 4096, act_quant=act_quant)
+        native = sm == 120 and act_quant == "a4" and name.split("/")[0] in FP4
+        assert kernel.act == (NATIVE_FP4 if native else Q8_1), (name, act_quant)
+
+
+def fp4_activations(rows: int, k: int, seed: int) -> torch.Tensor:
+    """f32 rows with row scales from 1e-3 to 1e3, row 1 all zero and row 2 with one large outlier."""
+    gen = torch.Generator().manual_seed(seed)
+    x = torch.randn(rows, k, generator=gen) * 10 ** torch.empty(rows, 1).uniform_(-3, 3, generator=gen)
+    x[1:2] = 0
+    x[2:3, k // 3] = OUTLIER * 100
+    return x.cuda()
+
+
+def native_codes(lib, elem: str, x: torch.Tensor):
+    """llama.cpp's native FP4 activations of f32 `x` (the test entry): (codes, scales, values f64, row scales)."""
+    blocks = torch.empty(-(-x.shape[1] // 512) * 2, len(x), 144, dtype=torch.uint8, device=x.device)
+    row_scale = torch.zeros(len(x), device=x.device)
+    lib.quantize_fp4(TYPES[elem], x, blocks, row_scale)
+    return (*w4a4.unpack(elem, blocks, row_scale, x.shape[1]), row_scale)
+
+
+@pytest.mark.parametrize("elem", FP4)
+def test_native_fp4_activations_are_the_emulator_s(sm, elem):
+    """The codes llama.cpp's FP4 quantizer gives against `holon_judge.w4a4`: at most 1e-3 differ, every differing
+    scale group inside a fast-math tie class (MXFP4's quantizer runs on every class; NVFP4's on sm_120 only), and
+    NVFP4's row scale is amax / (6 · 448) within the tie class's 4 ulp."""
+    if elem == "nvfp4" and sm != 120:
+        pytest.skip("llama.cpp's NVFP4 activation quantizer is Blackwell's")
+    lib = extension.load(sm)
+    for rows, k in ((64, 768), (300, 4096), (7, 12288)):
+        x = fp4_activations(rows, k, seed=rows)
+        codes, scales, values, row_scale = native_codes(lib, elem, x)
+        differ, unexplained = w4a4.check_codes(elem, x, codes, scales, row_scale)
+        assert unexplained == 0 and differ <= 1e-3, (rows, k, differ, unexplained)
+        assert not values[1].any() and values.isfinite().all()
+        if elem == "nvfp4":
+            want = (x.abs().amax(1).double() / (6 * 448)).float()
+            assert (ulps(row_scale, want) <= w4a4.NUDGE).all(), (row_scale, want)
+
+
+@pytest.mark.parametrize("elem", FP4)
+@pytest.mark.parametrize("act_dtype", [torch.bfloat16, torch.float32])
+def test_native_w4a4_against_its_own_codes(ctx, sm, elem, act_dtype):
+    """sm_120, `quant.act = a4`: mmq at native W4A4 against the f64 product of its own decoded activation codes
+    (exact operands: the budget is the reduction's), mmvq at q8_1 against the emulator; `prepare` appends the zeroed
+    tail at `in` 768, without which (plant M4) MXFP4's NaN scales reach the output."""
+    if sm != 120:
+        pytest.skip("native W4A4 is Blackwell's")
+    lib = extension.load(sm)
+    for k in (768, 4096):
+        kernel = qlinear(ctx, f"{elem}/hf", k, act_dtype=str(act_dtype)[6:], act_quant="a4")
+        assert kernel.act == NATIVE_FP4
+        parts = hf_fp4(elem, OUT, k, seed=k)
+        weight, got = hf_weight(elem, parts).cuda().double(), prepared(kernel, elem, parts)
+        blocks, tail = got["blocks"], kernel.tail
+        assert (tail > 0) == (k % 512 != 0)
+        storage = torch.empty(0, dtype=torch.uint8, device="cuda").set_(blocks.untyped_storage())
+        assert len(storage) == blocks.numel() + tail and not storage[blocks.numel():].any()
+        t = kernel.mmvq_rows
+        for rows in (1, t, t + 1, 64, CHUNK + 1, MAX_STEP_TOKENS):
+            x = activations(rows, k, seed=rows).to(act_dtype)
+            y = kernel(x, got)
+            if rows <= t:
+                ref = q8_1.matmul(x, weight, None, elem, q8_1.MMVQ)
+            else:
+                ref = torch.cat([native_codes(lib, elem, x[a:a + CHUNK].float())[2].cuda() @ weight.T
+                                 for a in range(0, rows, CHUNK)])
+            r = l0.check(y, ref, torch.bfloat16, k)
+            assert r.passed, f"{elem} in={k} rows={rows}: {r}"
+        assert set(kernel.calls) == {"mmvq/q8_1", "mmq/fp4"}
+        if elem == "mxfp4" and tail:
+            with PLANTS["fp4-tail-not-zeroed"]():
+                planted = prepared(kernel, elem, parts)
+            assert kernel(activations(CHUNK, k, seed=1).to(act_dtype), planted).isnan().any()

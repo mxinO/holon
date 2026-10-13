@@ -27,12 +27,12 @@ class EngineLike(Protocol):
 
 def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None = None) -> Recording:
     """Run every prompt with `prompt_logprobs=k` and pack the answers as a recording comparable to the golden; with
-    expert kernels that count their calls per path, the calls made while scoring (`expert_calls`: Tier B's path
-    check; the engine's start-up — memory profiling, graphs — excluded) and its KV cache format (`kv`, unless the
-    model dtype: a floor must emulate the same, `compare`)."""
+    expert kernels that count their calls per path (and activation mode, `path/mode`, summed here), the calls made
+    while scoring (`expert_calls`: Tier B's path check; the engine's start-up — memory profiling, graphs — excluded)
+    and its KV cache format (`kv`, unless the model dtype: a floor must emulate the same, `compare`)."""
     kv = getattr(getattr(engine, "cfg", None), "plugin_options", {}).get("kv.format")
     counters = _expert_counters(engine)
-    before = [dict(c) for c in counters]
+    before = _by_path(counters)
     params = SamplingParams(max_tokens=1, temperature=0.0, prompt_logprobs=k)
     index = {engine.add(p.ids, params): i for i, p in enumerate(prompts.prompts)}
     parts: list[list[Logprobs]] = [[] for _ in prompts.prompts]
@@ -44,10 +44,19 @@ def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None
                 parts[index[delta.rid]].append(delta.prompt_logprobs)
     rows = [_rows(p, got, k) for p, got in zip(prompts.prompts, parts, strict=True)]
     wall = round(time.perf_counter() - t0, 2)
-    calls = {"expert_calls": {path: sum(c[path] - b[path] for c, b in zip(counters, before, strict=True))
-                              for path in counters[0]}} if counters else {}
+    after = _by_path(counters)
+    calls = {"expert_calls": {path: n - before.get(path, 0) for path, n in after.items()}} if counters else {}
     return Recording.from_rows(rows, prompts.meta() | {"source": "holon", "wall_s": wall} | (meta or {}) | calls
                                | ({"kv": kv} if kv else {}))
+
+
+def _by_path(counters: list[dict[str, int]]) -> dict[str, int]:
+    """The calls counted so far per path, over every counter and activation mode (keys `path/mode`)."""
+    total: dict[str, int] = {}
+    for c in counters:
+        for key, n in c.items():
+            total[key.split("/")[0]] = total.get(key.split("/")[0], 0) + n
+    return total
 
 
 def _expert_counters(engine: EngineLike) -> list[dict[str, int]]:
