@@ -32,7 +32,7 @@ def uniform(seeds: torch.Tensor, positions: torch.Tensor, stream: int = 0) -> to
     if stream:
         h = h ^ _mix32(torch.full_like(positions, (0x9E3779B9 * stream) & _M32))
     h = _mix32(h)
-    return ((h >> 8).float() + 0.5) * 2.0**-24
+    return (((h >> 8).float() + 0.5) * 2.0**-24).clamp_(max=1 - 2.0**-24)    # the top value rounds to 1.0 in fp32
 
 
 def _distribution(x: torch.Tensor, top_k: torch.Tensor | None, top_p: torch.Tensor | None,

@@ -116,7 +116,7 @@ def _bind_layers(layers: tuple, ctx: Any, plugins: PluginSet, ledger: Ledger, cf
     for ref, at in by_mixer.items():
         cls = ctx.unit_factory(ref)
         specs = cls.state_specs(dict(ref.params), tuple(at), ctx) if hasattr(cls, "state_specs") else []
-        if namespace:                      # e.g. "kv" → "mtp.kv": its own pools, tables and planners
+        if namespace:                      # e.g. "kv" → "draft.kv": its own pools, tables and planners
             specs = [dataclasses.replace(s, name=f"{namespace}.{s.name}",
                                          page_group=s.page_group and f"{namespace}.{s.page_group}") for s in specs]
         if not plan_only:             # kinds see the engine's context: the specs carry their full names

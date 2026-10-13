@@ -1,7 +1,9 @@
 """Exact-match verification: accept the longest prefix of drafts that equals the token the sampler draws at each
 column, then emit the sampler's token after it. Every emitted token is the sampler's own draw (its counter-based
-uniform at that position), so speculative decoding emits exactly what plain decoding would — greedy or sampled. Greedy
-rows accept whatever matches the argmax; sampled rows accept less often than `std.spec.rejection` does."""
+uniform at that position), so speculative decoding emits exactly what plain decoding would given the same logits —
+greedy or sampled (verify rows' logits may differ from decode rows' in the last bits on GPU: the law is exact, the
+tokens agree up to rounding). Greedy rows accept whatever matches the argmax; sampled rows accept less often than
+`std.spec.rejection` does."""
 from __future__ import annotations
 
 import torch

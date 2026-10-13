@@ -5,7 +5,8 @@ options:
   `"1:3,3:2"`: k = 3 for one or two requests, 2 from three on);
 - `spec.fallback`: `n` > 0 makes a step plain decoding (k = 0) when no running request has had a real draft in its last
   n steps (a drafter that often finds nothing, such as prompt lookup); the drafter keeps drafting on those steps, so
-  the first hit turns speculation back on.
+  the first hit turns speculation back on. Only for such drafters: one that drafts on verify steps alone (a draft
+  head, MTP) would never turn it back on.
 """
 from __future__ import annotations
 

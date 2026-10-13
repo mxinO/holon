@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     import numpy as np
     import torch
 
+    from .decoding import Sampler
     from .state import InStepPublish, MemOp
 
 
@@ -153,6 +154,7 @@ class StepCtx(Protocol):
 
     batch: Batch
     seq_table: SeqTable
+    sampler: Sampler             # the step's sampler (verifiers draw through it)
 
     def meta(self, group: str) -> Any:
         """Metadata prepared this step for a state group (a page group or state spec name)."""

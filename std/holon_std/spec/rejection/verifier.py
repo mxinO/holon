@@ -25,12 +25,13 @@ def verify(logits: torch.Tensor, ctx):
     drafts = table.draft_tokens[slots, :k]
     real = torch.arange(k, device=logits.device) < table.n_draft[slots, None]
     pd = p.view(-1, width, p.shape[-1])[:, :k].gather(-1, drafts[..., None])[..., 0]          # p_j(d_j)
-    coins = sampler.uniform(ctx, stream=1).view(-1, width)[:, :k]
-    n_accept = ((coins < pd) & real).long().cumprod(-1).sum(-1)
-    plain = sampler.sample(logits, ctx).tokens                        # the token after the row's last real draft
     residual = p.clone()
     padded = torch.cat([drafts, drafts.new_zeros(len(drafts), 1)], 1).reshape(-1)          # column j's draft
     residual.scatter_(-1, padded[:, None], 0.0)
+    sure = (residual.sum(-1) == 0).view(-1, width)[:, :k]             # p(d) = 1 up to fp32: nothing to draw instead
+    coins = sampler.uniform(ctx, stream=1).view(-1, width)[:, :k]
+    n_accept = (((coins < pd) | sure) & real).long().cumprod(-1).sum(-1)
+    plain = sampler.sample(logits, ctx).tokens                        # the token after the row's last real draft
     rejected = draw(residual, sampler.uniform(ctx, stream=2))
     j = torch.arange(width, device=logits.device)
     n_real = table.n_draft[slots].clamp(max=k)

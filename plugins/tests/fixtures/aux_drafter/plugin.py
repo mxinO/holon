@@ -36,7 +36,7 @@ class Drafter:
                        target.spec.layers[:1], WeightMap(w.source, w.rules, w.root, only=(layer0,)))
         self.aux = ctx.aux_model("aux", spec, target.tensors())
         self.embed = target.shared("embed")
-        self.oracle = OracleDrafter()
+        self.oracle = OracleDrafter(ctx.options["max_seqs"] + 1, ctx.options["max_model_len"])
 
     def substeps(self, k: int) -> list[int]:
         return [1] * k if ORACLE.ahead else []

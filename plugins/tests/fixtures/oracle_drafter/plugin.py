@@ -8,7 +8,7 @@ class Plugin:
         pass
 
     def build(self, ctx, target):
-        return Drafter()
+        return Drafter(ctx.options["max_seqs"] + 1, ctx.options["max_model_len"])
 
 
 class Drafter:
@@ -20,9 +20,9 @@ class Drafter:
     slot's history from `admit` (ORACLE.history) and every step's input tokens at their positions (ORACLE.absorbed,
     and history too)."""
 
-    def __init__(self) -> None:
-        self.history = ORACLE.history = torch.full((64, 256), -1, dtype=torch.int64)
-        self.absorbed = ORACLE.absorbed = torch.full((64, 256), -1, dtype=torch.int64)
+    def __init__(self, slots: int, length: int) -> None:
+        self.history = ORACLE.history = torch.full((slots, length), -1, dtype=torch.int64)
+        self.absorbed = ORACLE.absorbed = torch.full((slots, length), -1, dtype=torch.int64)
 
         self.rewound = None
 

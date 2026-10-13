@@ -6,7 +6,9 @@ cells of expected count < 5 pooled:
   outside the support, and p(d) ≈ 1 (the residual's guard);
 - the joint law of the first three tokens of a toy Markov target (vocabulary 16, k = 3), the drafter proposing
   (prev + 1) mod 16 — accepted drafts condition the next column, rejections end the step and the next step resumes;
-- plants that must fail: the residual keeping the draft (marginal), one coin for every column (joint).
+- plants that must fail: the residual keeping the draft (marginal), one coin for every column (joint);
+- the token after the last real draft (all accepted, n_draft = 1 and K) is the plain draw from its column's law;
+- a coin is below 1: a sure draft is accepted at the one-in-2²⁴ draw that rounds to 1.0 unclamped.
 """
 import dataclasses
 
@@ -16,7 +18,7 @@ import torch
 from holon.api import Batch, DeviceBatch, SamplingParams, SeqTable
 from holon.core.batching import host_plan
 from holon.core.build import StepContext
-from holon_std.sampling.sampler import Sampler
+from holon_std.sampling.sampler import Sampler, uniform
 from holon_std.spec.rejection import verifier as rejection
 from scipy import stats
 
@@ -34,7 +36,7 @@ def _chi2(counts: np.ndarray, probs: np.ndarray) -> float:
     return stats.chisquare(obs[keep], exp[keep] * obs[keep].sum() / exp[keep].sum()).pvalue
 
 
-def _step(sampler, logits, drafts, positions, verify=rejection.verify):
+def _step(sampler, logits, drafts, positions, verify=rejection.verify, n_draft=K):
     """One verify step of N rows of width K + 1: (tokens [N, K + 1], n_accept [N])."""
     n, width = drafts.shape[0], drafts.shape[1] + 1
     slots = torch.arange(n)
@@ -46,7 +48,7 @@ def _step(sampler, logits, drafts, positions, verify=rejection.verify):
                       logits_rows=torch.arange(n).repeat_interleave(width))
     table = SeqTable(torch.zeros(n, dtype=torch.long), torch.zeros(n, dtype=torch.long),
                      n_accept=torch.zeros(n, dtype=torch.long), draft_tokens=drafts.clone(),
-                     n_draft=torch.full((n,), drafts.shape[1], dtype=torch.long))
+                     n_draft=torch.full((n,), n_draft, dtype=torch.long))
     ctx = StepContext(Batch(plan, dev), {}, seq_table=table, sampler=sampler)
     out, n_accept = verify(logits.reshape(n * width, -1), ctx)
     return out.tokens.view(n, width), n_accept
@@ -138,7 +140,8 @@ def test_plants_fail(target, monkeypatch):
     monkeypatch.undo()
     assert _chi2(np.bincount(tokens[:, 0].numpy(), minlength=V), torch.softmax(logits, -1).numpy()) < 1e-3
 
-    # One coin for every column: the joint law moves (the first token's alone does not).
+    # One coin for every column: the joint law moves (the first token's alone does not). The plant intercepts
+    # stream 1, so it names where the coins are drawn; which stream that is does not matter for the law.
     class OneCoin(Sampler):
         def uniform(self, ctx, stream=0):
             u = super().uniform(ctx, stream)
@@ -148,3 +151,32 @@ def test_plants_fail(target, monkeypatch):
     seqs = _markov_sequences(target, rejection.verify)
     counts = np.bincount((seqs[:, 0] * V + seqs[:, 1]) * V + seqs[:, 2], minlength=V ** 3)
     assert _chi2(counts, _markov_law(target)) < 1e-3
+
+
+@pytest.mark.parametrize("n_draft", [1, K])
+def test_the_token_after_the_last_real_draft_has_its_columns_law(target, n_draft):
+    # Drafts sure to be accepted up to column n_draft, whose law the next token must have — token 0 (the padding
+    # draft past the real ones) the likeliest, so drawing it from a residual would show.
+    logits = target[0].clone()
+    logits[0] = logits.max() + 1
+    rows = torch.full((K + 1, V), -30.0)
+    rows[:, 3] = 30.0
+    rows[n_draft] = logits
+    sampler = _sampler(SamplingParams(temperature=1.0))
+    tokens, n_accept = _step(sampler, rows.expand(N, K + 1, V), torch.full((N, K), 3), torch.full((N,), 10),
+                             n_draft=n_draft)
+    assert (n_accept == n_draft).all()
+    last = tokens[:, n_draft].numpy()
+    assert _chi2(np.bincount(last, minlength=V), torch.softmax(logits, -1).numpy()) > 1e-3
+
+
+def test_a_sure_draft_is_accepted_at_the_largest_coin():
+    # (2²⁴ − 0.5) / 2²⁴ rounds to 1.0 in fp32: seed 9111193 draws it at position 7 on stream 1, which would reject
+    # the greedy row's argmax draft and emit the last vocabulary id from an empty residual.
+    assert uniform(torch.tensor([9111193]), torch.tensor([7]), 1).item() < 1
+    sampler = Sampler(1, torch.device("cpu"))
+    sampler.admit(0, SamplingParams(temperature=0.0, seed=9111193))
+    logits = torch.zeros(1, K + 1, V)
+    logits[..., 5] = 10.0
+    tokens, n_accept = _step(sampler, logits, torch.full((1, K), 5), torch.tensor([6]))     # column 0 at position 7
+    assert n_accept.item() == K and (tokens == 5).all()

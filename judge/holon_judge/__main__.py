@@ -176,6 +176,8 @@ def _drafter(a: argparse.Namespace) -> int:
                                                                                           longest)}
     engine = Engine(dataclasses.replace(config, prefix_cache=False, **sizes))
     cand = drafter.candidate(engine, prompts, a.k)
+    cand.meta |= {"model": golden.model_meta(golden.resolve_model(a.model))["model"],
+                  "dtype": str(config.dtype).removeprefix("torch.")}
     engine.close()
     return _report(compare(recordings["golden"], cand, recordings["floor"]), a.json)
 

@@ -182,7 +182,7 @@ class Executor:
 
     def _worst_step(self, plan: BatchPlan) -> None:
         """The largest prefill, a prompt-logprob chunk, a filtered sampling step over every slot with logprobs, and
-        (when drafting) a verify step's logits over every slot's 1 + k rows."""
+        (when drafting) a verify step over every slot's 1 + k rows (eager: logprob steps are never graphed)."""
         ctx = self._context(plan)
         self._prepare(ctx)
         h = self.model.trunk(ctx)
@@ -199,8 +199,12 @@ class Executor:
         ctx = self._context(decode)
         self._prepare(ctx)
         self.sampler.sample(torch.zeros(n, self.vocab, device=self.device), ctx)
-        if self.cfg.max_draft_tokens:
-            torch.zeros(n * (1 + self.cfg.max_draft_tokens), self.vocab, device=self.device).argmax(-1)
+        if self.drafter is not None:                 # the verifier's own buffers (filtered, with logprobs)
+            width = np.full(n, 1 + self.cfg.max_draft_tokens, dtype=np.int32)
+            ctx = self._context(host_plan(0, np.arange(n, dtype=np.int32), np.zeros(n, dtype=np.int32), width, width,
+                                          np.zeros(int(width.sum()), dtype=np.int64)))
+            self._prepare(ctx)
+            self.verifier.verify(torch.zeros(int(width.sum()), self.vocab, device=self.device), ctx)
 
     def _graph_variants(self) -> list[tuple[int, SamplingParams]]:
         """(row width, sampler params) of every graph per bucket: decode rows and verify rows of each width the

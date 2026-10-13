@@ -103,8 +103,11 @@ def candidate(engine, prompts: PromptSet, k: int = 20) -> Recording:
         for p in prompts.prompts:
             seen.clear()
             engine.generate([p.ids], SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True))
-            out = next(o for o in seen if o.shape[0] == len(p.ids))          # the pass over the prompt itself
-            rows.append(topk_rows(drafter.lm_head(out[:-1]).float(), torch.tensor(p.ids[1:], device=out.device), k))
+            out = next(o for o in seen if o.shape[0] == len(p.ids))[:-1]     # the pass over the prompt itself
+            target = torch.tensor(p.ids[1:], device=out.device)
+            blocks = [topk_rows(drafter.lm_head(out[a:a + 256]).float(), target[a:a + 256], k)   # bounds [n, vocab]
+                      for a in range(0, len(target), 256)]
+            rows.append(tuple(torch.cat(t) for t in zip(*blocks, strict=True)))
     finally:
         drafter.head.forward = forward
     return Recording.from_rows(rows, prompts.meta() | {"source": "holon", "head": "mtp",
