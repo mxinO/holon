@@ -92,13 +92,13 @@ class Seq:
 @dataclasses.dataclass(slots=True, eq=False)
 class SeqTable:
     """Device-authoritative per-slot state, written by the step's sample stage (inside the graph when captured):
-    while steps are in flight it, not the host mirror, holds the true lengths. Draft probabilities are added with
-    sampled verification (M0.4)."""
+    while steps are in flight it, not the host mirror, holds the true lengths."""
 
     num_computed: torch.Tensor           # [S] int64: tokens whose state is computed; the next input's position
     last_token: torch.Tensor             # [S] int64: the next input token
-    n_accept: torch.Tensor               # [S] int64: drafts accepted by the last verify row
+    n_accept: torch.Tensor               # [S] int64: drafts accepted by the slot's last sampled row (0 unless a verify)
     draft_tokens: torch.Tensor           # [S, k_max] int64: drafts for positions num_computed + 1 + j
+    n_draft: torch.Tensor                # [S] int64: how many of draft_tokens are real (verifiers accept no more)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -124,6 +124,8 @@ class BatchPlan:
     shape: ShapeKey
     mem_ops: list[MemOp] = dataclasses.field(default_factory=list)
     publishes: list[InStepPublish] = dataclasses.field(default_factory=list)   # payloads the forward fills
+    draft_k: int = 0                     # drafts this step's rows verify (verify width − 1), or a prefill step's drafts
+                                         # for its prompt-ending rows; 0: no speculation
     ext: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 

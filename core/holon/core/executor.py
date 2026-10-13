@@ -47,6 +47,7 @@ class Launched:
 
     tokens: torch.Tensor | None
     accepts: torch.Tensor | None             # verify rows' accepted draft counts
+    drafts: torch.Tensor | None              # per plan row: the drafts written for its next step (with a drafter)
     logprobs: tuple[torch.Tensor, ...] | None   # sampled tokens' logprob, top ids, top logprobs
     done: platform.Event
     prompt_logprobs: list[Logprobs] = dataclasses.field(default_factory=list)   # per PromptRows, on the host now
@@ -100,12 +101,14 @@ class Executor:
         self.seq_table = SeqTable(self.num_computed, self.last_token,
                                   n_accept=torch.zeros(rows, dtype=torch.int64, device=device),
                                   draft_tokens=torch.zeros(rows, max(cfg.max_draft_tokens, 1), dtype=torch.int64,
-                                                           device=device))
+                                                           device=device),
+                                  n_draft=torch.zeros(rows, dtype=torch.int64, device=device))
         self.graphs = platform.Graphs(device) if cfg.cuda_graphs and device.type == "cuda" else None
         self.buckets = sorted({min(b, seqs) for b in BUCKETS} | {seqs})
         width = 1 + cfg.max_draft_tokens
         self._out_tokens = [platform.pinned_empty(seqs * width, torch.int64, device) for _ in range(2)]
         self._out_accepts = [platform.pinned_empty(seqs, torch.int64, device) for _ in range(2)]
+        self._out_drafts = [platform.pinned_empty(seqs, torch.int64, device) for _ in range(2)]
         self._out_turn = 0
 
     # -- startup --------------------------------------------------------------------------------------------------
@@ -194,7 +197,7 @@ class Executor:
             plan = padded(plan, next(b for b in self.buckets if b >= rows), self.state.padding_slot)
             exact = np.concatenate([exact, np.ones(len(plan.slots) - rows, dtype=bool)])   # padding: start 0
         ctx = self._context(plan, exact)
-        out = sampled = accepts = None
+        out = sampled = accepts = drafts = None
         recorded: list[Logprobs] = []
         # MemOps run eagerly in stream order around the forward, never inside a graph: their count varies per step.
         run_mem_ops(plan.mem_ops, self.pools, "pre_forward")
@@ -220,6 +223,8 @@ class Executor:
         run_mem_ops(plan.mem_ops, self.pools, "post_sample")
         if sampled is not None and self.drafter is not None:
             self.drafter.propose(ctx)               # drafts for the next step, from the advanced SeqTable
+            drafts = self._out_drafts[self._out_turn][:rows].copy_(self.seq_table.n_draft[ctx.batch.dev.slots[:rows]],
+                                                                   non_blocking=True)
         tokens = lps = None
         if out is not None and out.logprobs is not None:   # pinned copies, read at commit: no host sync at launch
             lps = tuple(platform.pinned_empty(t.numel(), t.dtype, self.device).view(t.shape).copy_(t, non_blocking=True)
@@ -232,7 +237,7 @@ class Executor:
             self._out_turn ^= 1
         done = platform.Event(self.device)
         done.record()
-        return Launched(tokens, accepts, lps, done, recorded)
+        return Launched(tokens, accepts, drafts, lps, done, recorded)
 
     def _decode(self, ctx: StepContext) -> torch.Tensor:
         """A decode step's device work from inputs to sampled tokens — the part captured in a graph."""
@@ -247,6 +252,7 @@ class Executor:
             slots = dev.slots[dev.logits_rows]
             self.last_token[slots] = tokens
             self.num_computed[slots] = ctx.prep.lens[dev.logits_rows].long()
+            self.seq_table.n_accept[slots] = 0
             return tokens
         width = int(ctx.batch.plan.n_logits.max())
         rows = dev.logits_rows.view(-1, width)[:, 0]
@@ -298,16 +304,27 @@ class Executor:
         dev, prep = ctx.batch.dev, ctx.prep
         self.num_computed[dev.slots] = torch.where(prep.exact, prep.start, self.num_computed[dev.slots])
         start = self.num_computed[dev.slots]
-        dev.positions.copy_(start[prep.row_of_token] + prep.offset)
+        # Columns past the length limit (a verify row's padding near it) read and write the block tables' overflow
+        # columns, which point at the null unit, and take the last position for position-indexed caches (rope); they
+        # are never accepted.
+        limit = self.cfg.max_model_len
+        positions = start[prep.row_of_token] + prep.offset
+        dev.positions.copy_(positions.clamp(max=limit - 1))
         prep.lens.copy_(start + prep.n_query)
         first = dev.query_start[:-1]
         dev.input_ids[first] = torch.where(prep.from_device, self.last_token[dev.slots], dev.input_ids[first])
         if prep.draft_index is not None:
-            dev.input_ids[prep.draft_index] = self.seq_table.draft_tokens.view(-1)[prep.draft_from]
+            # A verify row's drafts past its `n_draft` (capped so its tokens stay within the limit) are token 0.
+            table, cols = self.seq_table, self.seq_table.draft_tokens.shape[1]
+            slot, j = prep.draft_from // cols, prep.draft_from % cols
+            n_draft = torch.minimum(table.n_draft[slot], (limit - 2 - self.num_computed[slot]).clamp(min=0))
+            table.n_draft[slot] = n_draft
+            drafts = table.draft_tokens.view(-1)[prep.draft_from]
+            dev.input_ids[prep.draft_index] = torch.where(j < n_draft, drafts, torch.zeros_like(drafts))
         slot_of_token = dev.slots[prep.row_of_token]
         for pages in ctx.pages.values():
-            unit = pages.table[slot_of_token, dev.positions // pages.page].long()
-            pages.write_index.copy_(unit * pages.page + dev.positions % pages.page)
+            unit = pages.table[slot_of_token, positions // pages.page].long()
+            pages.write_index.copy_(unit * pages.page + positions % pages.page)
         for group, planner in self.planners.items():
             planner.prepare_device(ctx.metas[group], ctx)
 

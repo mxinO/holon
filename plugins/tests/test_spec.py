@@ -35,6 +35,9 @@ def oracle(tiny_case):  # noqa: F811
     ORACLE.sequences = {tuple(p): p + e for p, e in zip(prompts, expected, strict=True)}
     ORACLE.by_slot.clear()
     ORACLE.steps, ORACLE.k, ORACLE.vocab, ORACLE.mode = 0, 3, 512, "right"
+    ORACLE.observed.clear()
+    ORACLE.hidden.clear()
+    ORACLE.hidden_slots.clear()
     return ORACLE
 
 
@@ -65,6 +68,20 @@ def test_greedy_verification_reproduces_greedy(tiny_checkpoint, tiny_case, oracl
     if mode == "right" and memory == 1 << 20:
         _, plain_steps = _run(_engine(tiny_checkpoint, overlap=overlap, max_draft_tokens=0), prompts, GREEDY)
         assert steps < plain_steps                       # accepted drafts save steps
+
+
+@pytest.mark.parametrize("overlap", [False, True], ids=["depth0", "depth1"])
+def test_drafts_past_n_draft_are_never_accepted(tiny_checkpoint, tiny_case, oracle, overlap):  # noqa: F811
+    # Every row of a verify step has the step's width; a row whose drafter wrote no real drafts (n_draft 0) still
+    # verifies, and its drafts — here the right tokens — must not be accepted: it decodes one token per step.
+    prompts, expected = tiny_case
+    oracle.hidden = {tuple(prompts[1])}
+    outs, _ = _run(_engine(tiny_checkpoint, overlap=overlap), prompts, GREEDY)
+    assert outs == expected
+    hidden = [o for o in oracle.observed if o[0] == tuple(prompts[1])]
+    others = [o for o in oracle.observed if o[0] != tuple(prompts[1])]
+    assert hidden and all(n_draft == 0 and n_accept == 0 for _, _, n_draft, n_accept in hidden)
+    assert any(n_accept > 0 for *_, n_accept in others) and all(k == 3 for _, k, _, _ in oracle.observed)
 
 
 def test_a_stop_inside_accepted_drafts(tiny_checkpoint, tiny_case, oracle):  # noqa: F811

@@ -75,7 +75,7 @@ class Verifier(Protocol):
     def verify(self, logits: torch.Tensor, ctx: StepCtx) -> tuple[SampleOut, torch.Tensor]:
         """`logits` [R * (1+k), V]: the 1+k rows of each verify row in order (its last input token, then its k drafts,
         which the SeqTable's draft_tokens hold). Returns tokens [R * (1+k)] — position j is the token to emit after
-        accepting j drafts — and `n_accept` [R] (device)."""
+        accepting j drafts — and `n_accept` [R] (device), never more than the row's `SeqTable.n_draft`."""
 
 
 class Drafter(Protocol):
@@ -85,7 +85,10 @@ class Drafter(Protocol):
 
 
 class DraftPolicy(Protocol):
-    def choose(self, seq: Seq) -> tuple[str, int]:
-        """(drafter name, k) from a finite declared set; ("", 0) disables drafting for this Seq."""
+    def k(self, seqs: list[Seq]) -> int:
+        """Drafts per row for the next step of `seqs` (the running requests), from a finite declared set; 0: a plain
+        decode step. Per step, not per request: every row of a verify step has the same width."""
 
-    def observe(self, seq: Seq, k: int, n_accept: int, step_ms: float) -> None: ...
+    def observe(self, seq: Seq, k: int, n_draft: int, n_accept: int) -> None:
+        """After a commit: the step's k, the drafts written for the request's next step, and the drafts it accepted
+        (results reach the host one step late at overlap depth 1)."""

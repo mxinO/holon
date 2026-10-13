@@ -13,6 +13,10 @@ class Oracle:
     vocab: int = 512
     by_slot: dict[int, list[int]] = dataclasses.field(default_factory=dict)
     steps: int = 0
+    hidden: set[tuple[int, ...]] = dataclasses.field(default_factory=set)   # prompts drafted right, but n_draft 0
+    hidden_slots: set[int] = dataclasses.field(default_factory=set)
+    observed: list[tuple[tuple[int, ...], int, int, int]] = dataclasses.field(default_factory=list)
+    # (prompt, k, n_draft, n_accept) per committed sampled row
 
 
 ORACLE = Oracle({})

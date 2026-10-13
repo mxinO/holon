@@ -12,7 +12,8 @@ def verify(logits: torch.Tensor, ctx) -> tuple[SampleOut, torch.Tensor]:
     target = logits.argmax(-1).view(-1, width)
     slots = dev.slots[dev.logits_rows].view(-1, width)[:, 0]
     drafts = table.draft_tokens[slots, : width - 1]
-    n_accept = (drafts == target[:, :-1]).long().cumprod(-1).sum(-1)
+    real = torch.arange(width - 1, device=logits.device) < table.n_draft[slots, None]     # padding is never accepted
+    n_accept = ((drafts == target[:, :-1]) & real).long().cumprod(-1).sum(-1)
     return SampleOut(target.reshape(-1)), n_accept
 
 

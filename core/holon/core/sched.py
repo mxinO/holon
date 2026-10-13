@@ -14,8 +14,11 @@ its committed ones plus `pending` sampled ones not yet committed. A decode row t
 device (TokenSrc.DEVICE_LAST); a waiting request with a pending token (preempted in flight) waits for its commit; a
 request that reaches its length limit with its pending tokens is not scheduled again — its commit finishes it.
 
-Speculative decoding: a decode step may carry k drafts per request (`draft_k`, the same k for the whole step —
-the smallest any row allows), as verify rows of 1 + k tokens that all produce logits. A request with an
+Speculative decoding: the draft policy picks k per step (`draft_k`, from the running requests); every row of a
+decode step is then a verify row of 1 + k tokens that all produce logits, and how many of its drafts are real is
+on the device (`SeqTable.n_draft`). A row reserves state for its verify tokens plus what the drafter writes ahead
+of them (`lookahead(k)`), and a prompt-ending prefill chunk for its tokens plus that lookahead — the drafter drafts
+after it too; reservations stop at `max_model_len` (positions past it compute nowhere real). A request with an
 uncommitted verify row knows its length only on the device; steps whose decode kernel plans from host lengths
 (`host_lens_only`) leave it out until that row commits.
 
@@ -45,9 +48,12 @@ def _host_tokens(seq: Seq, start: int, n: int, on_device: bool) -> list[int]:
 
 class Scheduler:
     def __init__(self, state: StateManager, max_step_tokens: int, max_model_len: int,
-                 draft_k: Callable[[Seq], int] | None = None, host_lens_only: bool = False) -> None:
+                 draft_k: Callable[[list[Seq]], int] | None = None, lookahead: Callable[[int], int] | None = None,
+                 host_lens_only: bool = False) -> None:
         self.state, self.max_step_tokens, self.max_model_len = state, max_step_tokens, max_model_len
         self.draft_k, self.host_lens_only = draft_k, host_lens_only
+        self.lookahead = lookahead or (lambda k: 0)
+        self._k = 0                               # the step being scheduled: its plan's draft_k
         self.waiting: collections.deque[Seq] = collections.deque()
         self.running: list[Seq] = []
         self.preemptions = 0
@@ -74,12 +80,14 @@ class Scheduler:
                       for t in _host_tokens(s, st, n, dev)]
         src = np.where(device, TokenSrc.DEVICE_LAST, TokenSrc.HOST).astype(np.int8)
         self._step += 1
-        return host_plan(self._step, np.array([s.slot for s in seqs], dtype=np.int32), np.array(starts, np.int32),
-                         np.array(n_query, np.int32), np.array(n_logits, np.int32), np.array(tokens, np.int64),
-                         src), seqs
+        plan = host_plan(self._step, np.array([s.slot for s in seqs], dtype=np.int32), np.array(starts, np.int32),
+                         np.array(n_query, np.int32), np.array(n_logits, np.int32), np.array(tokens, np.int64), src)
+        plan.draft_k = self._k
+        return plan, seqs
 
     def _prefill(self) -> list[tuple[Seq, int, int]]:
-        rows, budget = [], self.max_step_tokens
+        rows, budget, ahead = [], self.max_step_tokens, None
+        self._k = 0
         for seq in list(self.waiting):
             if seq.pending:                       # preempted while its decode was in flight: wait for the commit
                 continue
@@ -87,29 +95,31 @@ class Scheduler:
                 break
             n = min(len(seq.tokens) - seq.num_computed, budget)       # after admission: a prefix hit counts
             n = self.state.cut(seq, n)                                 # end where a state kind publishes
-            if not self._fit(seq, n):
+            last = seq.num_computed + n == len(seq.tokens)
+            if last and ahead is None:            # the step's k, asked once: the drafter drafts after this chunk
+                self._k = self.draft_k(self.running + list(self.waiting)) if self.draft_k is not None else 0
+                ahead = self.lookahead(self._k) if self._k else 0
+            if not self._fit(seq, min(n + ahead, self.max_model_len - seq.num_computed) if last else n):
                 break
-            rows.append((seq, n, int(seq.num_computed + n == len(seq.tokens))))
+            rows.append((seq, n, int(last)))
             budget -= n
         return rows
 
     def _decode(self) -> list[tuple[Seq, int, int]]:
-        ready = {s for s in self.running if not self._at_limit(s) and not (self.host_lens_only and s.inexact)}
-        k = min((self._drafts(s) for s in ready), default=0) if self.draft_k is not None else 0
-        rows, capacity = [], self.state.capacity
-        for seq in list(self.running):
-            if seq.status is not Status.RUNNING or seq not in ready:     # preempted, finishing, or waiting on a commit
+        ready = [s for s in self.running if not self._at_limit(s) and not (self.host_lens_only and s.inexact)]
+        self._k = k = self.draft_k(ready) if self.draft_k is not None and ready else 0
+        need = 1 + k + (self.lookahead(k) if k else 0)
+        rows, capacity, limit = [], self.state.capacity, self.max_model_len
+        for seq in ready:
+            if seq.status is not Status.RUNNING:                       # preempted by a row above it
                 continue
+            n = min(need, limit - seq.num_computed)
             # StateManager.reserve's own fast path, inline: no call for the many rows whose units already fit.
-            if seq.num_computed + 1 + k <= capacity.get(seq.slot, -1) or self._fit(seq, 1 + k):
+            if seq.num_computed + n <= capacity.get(seq.slot, -1) or self._fit(seq, n):
                 rows.append((seq, 1 + k, 1 + k if k else 1))
             else:
                 self._preempt(seq)
         return rows
-
-    def _drafts(self, seq: Seq) -> int:
-        """Drafts for `seq` this step, kept within max_model_len: a verify row writes positions up to length + k."""
-        return max(0, min(self.draft_k(seq), self.max_model_len - (len(seq.tokens) + seq.pending) - 1))
 
     def _at_limit(self, seq: Seq) -> bool:
         length = len(seq.tokens) + seq.pending

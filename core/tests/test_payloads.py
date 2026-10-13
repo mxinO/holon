@@ -252,3 +252,18 @@ def test_an_in_step_payload_pool_must_have_the_specs_layout():
     assert state.admit(seq) and state.reserve(seq, 16)
     with pytest.raises(RuntimeError, match="differ from the spec"):
         _step(state, [(seq, 12)], sample=False)
+
+
+def test_no_payload_where_a_verify_row_or_an_inexact_start_ends():
+    # A verify row's end, and the start of a row after an uncommitted verify, are known only on the device: the host
+    # value is an upper bound (drafts may be rejected), so a payload published there could land at the wrong
+    # position and a later request adopting it would skip tokens (M0.4 §3.7).
+    state, _, _ = _state()
+    seq = _seq(range(40))
+    assert state.admit(seq) and state.reserve(seq, 30)
+    seq.num_computed = 4                                                       # 4 + 4 = 8, where the toy publishes
+    assert not _step(state, [(seq, 4)], sample=False, n_logits=[4]).publishes
+    seq.num_computed, seq.inexact = 7, 1                                       # 7 + 1 = 8, after a verify in flight
+    assert not _step(state, [(seq, 1)], sample=False).publishes
+    seq.num_computed, seq.inexact = 7, 0
+    assert _step(state, [(seq, 1)], sample=False).publishes

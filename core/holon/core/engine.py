@@ -63,6 +63,7 @@ class _Inflight:
     """A launched step: per-row snapshots (seq, tokens computed, sampled) taken at launch, and its results."""
 
     rows: list[tuple[Seq, int, int]]          # (seq, tokens computed, logits rows: 0 | 1 | 1 + k)
+    k: int                                   # the plan's draft_k
     out: Launched
     sync: bool                               # commit at once (prompt logprobs were extracted on the host)
     publishes: list = dataclasses.field(default_factory=list)   # payloads to register at the commit
@@ -88,18 +89,20 @@ class Engine:
 
         # One extra slot (max_seqs) is the padding slot of graph-captured steps.
         sampler = p.load(p.single("sampler")).sampler(cfg.max_seqs + 1, self.device)
-        self.state = StateManager(bound, cfg.max_seqs, cfg.max_model_len, self.device,
-                                  on_admit=lambda seq: sampler.admit(seq.slot, seq.params),
-                                  index=prefix_index(self.spec, bound, cfg.prefix_cache, self.ledger.pools))
-        # Speculative decoding (design §7.6): a draft policy picks k per request, one drafter proposes, the verifier
+        # Speculative decoding (design §7.6): a draft policy picks k per step, one drafter proposes, the verifier
         # checks; all three are plugins, used only when drafts are enabled and a policy is installed.
         self.policy = drafter = verifier = None
         if cfg.max_draft_tokens and any(True for _ in p.by_slot("draft_policy")):
             self.policy, drafter = p.load(p.single("draft_policy")), p.load(p.single("drafter"))
             verifier = p.load(p.single("verifier"))
+        self.state = StateManager(bound, cfg.max_seqs, cfg.max_model_len, self.device,
+                                  on_admit=lambda seq: sampler.admit(seq.slot, seq.params),
+                                  index=prefix_index(self.spec, bound, cfg.prefix_cache, self.ledger.pools),
+                                  overflow=self._overflow(drafter))
         host_lens = any(getattr(planner, "needs_host_lens", False) for planner in planners.values())
         self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len,
-                               draft_k=self._draft_k if self.policy is not None else None, host_lens_only=host_lens)
+                               draft_k=self._draft_k if self.policy is not None else None,
+                               lookahead=getattr(drafter, "lookahead", None), host_lens_only=host_lens)
         rewinders = [m for m in model.modules() if callable(getattr(m, "rewind", None))]
         rewinders += [o for o in (sampler, verifier, drafter, self.policy) if callable(getattr(o, "rewind", None))]
         self.executor = Executor(cfg, self.device, model, self.spec.vocab, sampler, self.state, planners,
@@ -118,12 +121,20 @@ class Engine:
         self._siblings: dict[Seq, list[Seq]] = {}         # n > 1: waiting for the first sequence's prefill
         self._live: dict[str, list[Seq]] = {}              # request id -> its unfinished sequences
 
-    def _draft_k(self, seq: Seq) -> int:
-        """Drafts the policy wants for `seq` this step. Only greedy requests without logprobs are drafted: the
-        verifier is greedy-exact and reports no logprobs."""
-        if self.policy is None or seq.params.temperature != 0 or seq.params.logprobs is not None:
+    def _overflow(self, drafter) -> int:
+        """Positions past max_model_len a step may touch: a verify row padded from one below the limit, then what
+        the drafter writes ahead of it."""
+        k = self.cfg.max_draft_tokens if drafter is not None else 0
+        if not k:
             return 0
-        return min(self.policy.choose(seq)[1], self.cfg.max_draft_tokens)
+        return 1 + 2 * k + (drafter.lookahead(k) if hasattr(drafter, "lookahead") else 0)
+
+    def _draft_k(self, seqs: list[Seq]) -> int:
+        """Drafts per row the policy wants for the next step of `seqs`. Only steps of greedy requests without logprobs
+        speculate: the verifier is greedy-exact and reports no logprobs."""
+        if any(s.params.temperature != 0 or s.params.logprobs is not None for s in seqs):
+            return 0
+        return max(0, min(self.policy.k(seqs), self.cfg.max_draft_tokens))
 
     # -- requests -------------------------------------------------------------------------------------------------
     def add(self, token_ids: list[int], params: SamplingParams | None = None, rid: str | None = None) -> str:
@@ -268,7 +279,7 @@ class Engine:
                     seq.inexact += 1
                 if seq.status is not running:
                     self.sched.finished_prefill(seq)
-        return _Inflight(rows, out, sync, ops.publishes)
+        return _Inflight(rows, plan.draft_k, out, sync, ops.publishes)
 
     def _prompt_rows(self, plan: BatchPlan, seqs: list[Seq]) -> list[PromptRows]:
         """The prompt logprobs this step's rows owe: the prompt positions they compute that predict a prompt token,
@@ -291,16 +302,17 @@ class Engine:
         out.done.synchronize()
         tokens = out.tokens.tolist() if out.tokens is not None else []
         accepts = iter(out.accepts.tolist() if out.accepts is not None else [])
+        drafts = out.drafts.tolist() if out.drafts is not None else None
         lps = None if out.logprobs is None else [t.tolist() for t in out.logprobs]
         deltas, row = [], 0
         index, chains, finished = self.state.index, self.state.chain, Status.FINISHED
         block = index.block if index is not None else 0
-        for seq, _, m in step.rows:
+        for i, (seq, _, m) in enumerate(step.rows):
             if not m:
                 if seq.status is not finished and self._completes_block(seq):
                     self.state.publish(seq)
                 continue
-            at = row
+            at, accepted = row, 0
             if m > 1:                                # a verify row: the accepted drafts, then the target's token
                 accepted = next(accepts)
                 emitted = tokens[row: row + accepted + 1]
@@ -311,6 +323,8 @@ class Engine:
             seq.pending -= m
             if seq.status is finished:             # finished at an earlier commit; this row was extra
                 continue
+            if drafts is not None:
+                self.policy.observe(seq, step.k, drafts[i], accepted)
             if m == 1:                               # the common case, without the per-token loop
                 out = [tokens[at]]
                 seq.tokens.append(out[0])
@@ -336,7 +350,7 @@ class Engine:
                     live.remove(seq)
                 if not live:
                     self._live.pop(seq.rid, None)
-            k = seq.params.logprobs                  # logprob requests are never drafted: one token per row
+            k = seq.params.logprobs                  # logprob requests are never drafted (_draft_k): one token per row
             logprobs = None if k is None else Logprobs([lps[0][at]], [lps[1][at][:k]], [lps[2][at][:k]])
             prompt_lp = self._prompt_lp.pop(seq, None) if self._prompt_lp else None
             deltas.append(TokenDelta(seq.rid, out, seq.index, logprobs, prompt_lp, reason))

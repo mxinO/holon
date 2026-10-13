@@ -29,10 +29,13 @@ class BoundSpec:
 
 
 class BlockTable:
-    """Unit ids per slot for one page group: `[max_seqs, max_pages]` on the host, mirrored to the device."""
+    """Unit ids per slot for one page group: `[max_seqs, max_pages]` on the host, mirrored to the device. Columns from
+    `real_pages` on only ever hold the null unit (positions past the length limit)."""
 
-    def __init__(self, page: int, max_seqs: int, max_pages: int, device: torch.device) -> None:
+    def __init__(self, page: int, max_seqs: int, max_pages: int, device: torch.device,
+                 real_pages: int | None = None) -> None:
         self.page, self.max_seqs, self.max_pages = page, max_seqs, max_pages
+        self.real_pages = max_pages if real_pages is None else real_pages
         self.host = np.zeros((max_seqs, max_pages), dtype=np.int32)
         self.dev = torch.zeros((max_seqs, max_pages), dtype=torch.int32, device=device)
         self._dirty: set[int] = set()
@@ -122,7 +125,10 @@ class StateManager:
     """
 
     def __init__(self, bound: list[BoundSpec], max_seqs: int, max_tokens: int, device: torch.device,
-                 on_admit: Callable[[Seq], None] = lambda seq: None, index: PrefixIndex | None = None) -> None:
+                 on_admit: Callable[[Seq], None] = lambda seq: None, index: PrefixIndex | None = None,
+                 overflow: int = 0) -> None:
+        """`overflow`: positions past `max_tokens` a step may touch (a verify row's padding, a drafter's lookahead
+        near the limit); every block table gets columns for them that always point at the null unit."""
         self.bound, self.device, self.on_admit, self.index = bound, device, on_admit, index
         self.padding_slot = max_seqs                           # graph padding rows use this table row
         self.held: dict[int, dict[str, list[int]]] = {}       # slot -> spec name -> unit ids
@@ -143,7 +149,8 @@ class StateManager:
             if b.spec.group in self.tables:
                 raise NotImplementedError(f"page group {b.spec.group!r} shared by several specs")
             page = b.spec.shape.tokens_per_unit
-            table = BlockTable(page, max_seqs + 1, -(-max_tokens // page), device)
+            table = BlockTable(page, max_seqs + 1, -(-(max_tokens + overflow) // page), device,
+                               real_pages=-(-max_tokens // page))
             self.tables[b.spec.group] = self._table_of[b.spec.name] = table
 
     def admit(self, seq: Seq) -> bool:
@@ -213,7 +220,8 @@ class StateManager:
         """A step's state work at launch: pending adopts of its requests (before the forward) and the payloads
         kinds publish where a row's step ends (after the sample) or, for a spec with an `in_step` grid, inside a
         non-verify row's step on that grid (the forward fills them: `BatchPlan.publishes`). Host lengths are exact
-        for prefill and decode rows here (before the launch advances them)."""
+        for prefill and decode rows here (before the launch advances them); a verify row, or a request with an
+        uncommitted one, knows where it ends only on the device, so it publishes nothing."""
         ops, publishes, pins, in_step = [], [], [], []
         if self._adopting:
             for seq in seqs:
@@ -223,6 +231,8 @@ class StateManager:
         if self._publishing and self.index is not None:
             rows = zip(seqs, plan.n_query.tolist(), plan.n_logits.tolist(), strict=True)
             for row, (seq, n, n_logits) in enumerate(rows):
+                if n_logits > 1 or seq.inexact:     # a verify row, or one whose host start is only an upper bound
+                    continue
                 view = _View(seq, self.held[seq.slot], self._slot_units)
                 start = seq.num_computed
                 for b in self._publishing:
@@ -389,10 +399,13 @@ class StateManager:
         return self._table_of[spec].page
 
     def reset_padding(self) -> None:
-        """Point the padding slot at every pool's null unit (after the pools are allocated)."""
+        """Point the padding slot, and every slot's overflow columns, at every pool's null unit (after the pools are
+        allocated)."""
         for b in self.bound:
             if table := self._table_of.get(b.spec.name):
-                table.write(self.padding_slot, 0, np.full(table.max_pages, b.pool.null, dtype=np.int32))
+                for slot in range(table.max_seqs):
+                    start = 0 if slot == self.padding_slot else table.real_pages
+                    table.write(slot, start, np.full(table.max_pages - start, b.pool.null, dtype=np.int32))
 
     def upload_fields(self, max_seqs: int, max_tokens: int) -> dict[str, tuple[int, torch.dtype]]:
         """The per-step device inputs `pages` stages through the engine's uploader."""
