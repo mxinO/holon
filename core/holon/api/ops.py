@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Protocol
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from .quant import Converter, Dialect, SchemeImpl
     from .state import StateKindFactory
 
 
@@ -73,9 +72,6 @@ class Registries(Protocol):
     kernels: KernelRegistry
     units: Registry[Callable[..., Any]]         # unit name -> factory(ctx, **params)
     state_kinds: Registry[StateKindFactory]
-    schemes: Registry[SchemeImpl]
-    converters: Registry[Converter]
-    dialects: Registry[Dialect]
     transforms: Registry[Callable[[Any], Any]]  # weight value transforms, e.g. "neg_exp"
     weight_sources: Registry[Callable[..., Any]]  # source kind -> factory(path) -> WeightSource
 

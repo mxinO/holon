@@ -55,7 +55,7 @@ from .model import AuxSpec, BuildCtx, LayerDecl, ModelPlugin, ModelSpec, Unit, W
 from .ops import Constraint, KernelRegistry, KernelSpec, Plugin, Registries, Registry
 from .plan import Binding, Lock, Plan, UnitPin
 from .platform import Fingerprint, Platform
-from .quant import Converter, Dialect, Layout, QTensor, Scale, Scheme, SchemeImpl
+from .quant import Layout, QTensor, Scale, Scheme
 from .state import (
     HitLen,
     InStepPublish,
@@ -77,14 +77,14 @@ from .terms import Ref, canonical_hash, parse_versioned, to_term
 
 __all__ = [
     "SLOTS", "Abort", "AuxSpec", "Batch", "BatchPlan", "Binding", "BuildCtx", "Cardinality", "Constraint",
-    "Converter", "DeviceBatch", "Dialect", "DraftPolicy", "Drafter", "DrafterPlugin", "EngineClient",
+    "DeviceBatch", "DraftPolicy", "Drafter", "DrafterPlugin", "EngineClient",
     "EngineRequest", "Event", "Fingerprint", "FrontendBundle", "FrontendPlugin", "HitLen", "InStepPublish",
     "KernelRegistry", "KernelSpec", "LayerDecl", "Layout", "Ledger", "Lock", "LogitsProcessor",
     "LogitsProcessorPlugin", "Logprobs", "Manifest", "MaskRow", "MemOp", "Mixer", "ModelPlugin", "ModelSpec", "Paged",
     "Pages", "ParseEvent", "Payload", "Plan", "PlanTransform", "Planner", "Platform", "Plugin", "Pool",
     "PrefixView", "Provenance", "QTensor", "Reasoning", "Ref", "Registries", "Registry", "RequestError", "Resource",
     "Rewindable", "SampleOut", "Sampler", "SamplerPlugin", "SamplingParams", "Scale", "SchedulePolicy", "Scheme",
-    "SchemeImpl", "Seq", "SeqTable", "SeqView", "ShapeKey", "Slot", "StateKind", "StateKindFactory", "StateSpec",
+    "Seq", "SeqTable", "SeqView", "ShapeKey", "Slot", "StateKind", "StateKindFactory", "StateSpec",
     "Status", "StepCtx", "TargetView", "Text", "TokenDelta", "TokenSrc", "Tokenizer", "ToolArgsDelta", "ToolCallEnd",
     "ToolCallStart", "Tunable", "Unit", "UnitPin", "Verifier", "VocabView", "WeightMap", "WeightRule", "WeightSource",
     "canonical_hash", "parse_versioned", "rewind_modules", "sequence_seed", "to_term",

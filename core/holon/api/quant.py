@@ -1,16 +1,14 @@
 """Number semantics, byte layouts and typed weights (design §5.5).
 
 `Scheme` says what the stored numbers mean; `Layout` says how the bytes are arranged; `QTensor` binds a layout to
-concrete tensors. Repacking between layouts is done by registered converters.
+concrete tensors. The plugins that read a layout interpret it; the core only carries it.
 """
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
-
     import torch
 
 
@@ -23,7 +21,7 @@ class Scale:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Scheme:
-    """What the stored numbers mean; `elem` names the element format, interpreted by its registered SchemeImpl."""
+    """What the stored numbers mean; `elem` names the element format, interpreted by the plugins that read it."""
 
     elem: str
     scales: tuple[Scale, ...] = ()
@@ -50,30 +48,3 @@ class QTensor:
     layout: Layout
     logical_shape: tuple[int, ...]
     parts: dict[str, torch.Tensor]
-
-
-class SchemeImpl(Protocol):
-    """Registered per `Scheme.elem`: the reference dequantization the judge's oracles rely on."""
-
-    def dequant_ref(self, q: QTensor) -> torch.Tensor: ...
-
-
-@dataclasses.dataclass(frozen=True, eq=False)
-class Converter:
-    """Repack a QTensor from one layout to another (registered by the plugin owning `dst`)."""
-
-    src: str
-    dst: str
-    fn: Callable[..., QTensor]
-    lossless: bool = True
-    cost: float = 1.0
-
-
-class Dialect(Protocol):
-    """Provisional (settled with spike S2 / M0.1): a checkpoint's quantization conventions → source layouts."""
-
-    name: str
-
-    def detect(self, meta: Mapping[str, Any]) -> bool: ...
-
-    def source_layout(self, tensor_name: str, meta: Mapping[str, Any]) -> Layout: ...

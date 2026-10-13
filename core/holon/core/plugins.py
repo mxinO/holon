@@ -2,7 +2,7 @@
 
 Plugins are found through the `holon.plugins` entry-point group: each entry names a package whose directory holds
 `plugin.toml`. Manifests are read without executing plugin code. Named objects a plugin registers (units, state
-kinds, schemes, …) must be declared in its manifest as resources — `provides = ["unit.std.ops.rmsnorm@1"]` — and
+kinds, transforms, …) must be declared in its manifest as resources — `provides = ["unit.std.ops.rmsnorm@1"]` — and
 `Ref`s resolve through those declarations. Every failure is an error, never a warning (invariant 7).
 """
 from __future__ import annotations
@@ -63,8 +63,7 @@ class KernelRegistry:
 
 
 # Registry field -> resource namespace a plugin must declare to add to it.
-_DECLARED = {"ops": "op", "units": "unit", "state_kinds": "state_kind", "schemes": "scheme",
-             "converters": "converter", "dialects": "dialect", "transforms": "transform",
+_DECLARED = {"ops": "op", "units": "unit", "state_kinds": "state_kind", "transforms": "transform",
              "weight_sources": "weight_source"}
 
 
@@ -74,9 +73,6 @@ class Registries:
     kernels: KernelRegistry = dataclasses.field(default_factory=KernelRegistry)
     units: Registry = dataclasses.field(default_factory=lambda: Registry("unit"))
     state_kinds: Registry = dataclasses.field(default_factory=lambda: Registry("state kind"))
-    schemes: Registry = dataclasses.field(default_factory=lambda: Registry("scheme"))
-    converters: Registry = dataclasses.field(default_factory=lambda: Registry("converter"))
-    dialects: Registry = dataclasses.field(default_factory=lambda: Registry("dialect"))
     transforms: Registry = dataclasses.field(default_factory=lambda: Registry("weight transform"))
     weight_sources: Registry = dataclasses.field(default_factory=lambda: Registry("weight source"))
 
