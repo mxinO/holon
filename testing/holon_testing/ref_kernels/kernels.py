@@ -12,6 +12,7 @@ from holon_std.mixers.gdn import reference as gdn
 from holon_std.mixers.gqa import reference as gqa
 from holon_std.moe import reference as moe
 from holon_std.ops import reference as ops
+from holon_std.weights.hf import reference as hf
 
 
 class RMSNorm:
@@ -74,45 +75,57 @@ class CausalAttention:
 
 
 class _Dequantized:
-    """Quantized-op references for ggml layouts (`ggml.<type>/gguf.native`), dequantizing with gguf-py — the oracle
-    the judge uses — once per weight."""
+    """Quantized-op references: ggml layouts (`ggml.<type>/gguf.native`) dequantized by gguf-py, the oracle the judge
+    uses; HF layouts (`<elem>/hf`, docs/m06-lowp.md D2) by std.weights.hf's reference."""
 
     def __init__(self, ctx, *, layout: str, **facts) -> None:
-        self.type = gguf.GGMLQuantizationType[layout.split("/")[0].removeprefix("ggml.").upper()]
+        self.elem, name = layout.split("/")
+        self.ggml = gguf.GGMLQuantizationType[self.elem.removeprefix("ggml.").upper()] if name == "gguf.native" \
+            else None
         self.facts, self._cache = facts, {}
 
-    def dequantized(self, blocks: torch.Tensor) -> torch.Tensor:
-        key = (blocks.data_ptr(), blocks.shape)
+    def dequantized(self, parts: dict[str, torch.Tensor], make=None) -> torch.Tensor:
+        """`make(parts)` (default: the whole weight dequantized), once per weight, keyed by its primary part."""
+        first = next(iter(parts.values()))
+        key = (first.data_ptr(), first.shape)
         if key not in self._cache:
-            self._cache[key] = torch.from_numpy(gguf.quants.dequantize(np.asarray(blocks.cpu()), self.type))
+            self._cache[key] = (make or self._dequantize)(parts)
         return self._cache[key]
+
+    def _dequantize(self, parts: dict[str, torch.Tensor]) -> torch.Tensor:
+        if self.ggml is not None:
+            return torch.from_numpy(gguf.quants.dequantize(np.asarray(parts["blocks"].cpu()), self.ggml))
+        return hf.dequantize(self.elem, parts)
 
 
 class QLinear(_Dequantized):
     def __call__(self, x, parts):
-        return ops.qlinear(x, self.dequantized(parts["blocks"])).to(getattr(torch, self.facts["out_dtype"]))
+        return ops.qlinear(x, self.dequantized(parts)).to(getattr(torch, self.facts["out_dtype"]))
 
 
 class QEmbedding(_Dequantized):
     def __call__(self, ids, blocks):
-        return ops.qembedding(ids, self.dequantized(blocks)).to(getattr(torch, self.facts["dtype"]))
+        return ops.qembedding(ids, self.dequantized({"blocks": blocks})).to(getattr(torch, self.facts["dtype"]))
 
 
 class LinearExperts:
-    """Expert stacks: ggml layouts dequantized by gguf-py once per stack; dense ones as stored, the activation rounded
-    to their dtype (the contract)."""
+    """Expert stacks: ggml layouts dequantized by gguf-py, HF layouts per expert by std.weights.hf's reference, once
+    per stack; dense ones as stored, the activation rounded to their dtype (the contract)."""
 
     def __init__(self, ctx, *, layout: str, experts: int, out: int, glu: str, out_dtype: str, **facts) -> None:
-        self.ggml = None if layout.startswith("dense/") else _Dequantized(ctx, layout=layout)
+        self.quantized = None if layout.startswith("dense/") else _Dequantized(ctx, layout=layout)
         self.experts, self.out, self.glu, self.out_dtype = experts, out, glu, getattr(torch, out_dtype)
 
     def __call__(self, x, parts, ids):
-        if self.ggml is None:
+        if self.quantized is None:
             weight = parts["weight"]
             y = moe.linear_experts(x, weight, ids, self.glu, operand_dtype=weight.dtype)
+        elif self.quantized.ggml is not None:
+            y = moe.linear_experts(x, self.quantized.dequantized(parts).view(self.experts, self.out, -1), ids, self.glu)
         else:
-            weight = self.ggml.dequantized(parts["blocks"]).view(self.experts, self.out, -1)
-            y = moe.linear_experts(x, weight, ids, self.glu)
+            stack = self.quantized.dequantized(parts, lambda p: hf.dequantize_experts(self.quantized.elem, p,
+                                                                                      self.experts))
+            y = moe.linear_experts(x, stack, ids, self.glu)
         return y.to(self.out_dtype)
 
 

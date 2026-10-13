@@ -1,38 +1,41 @@
-"""The structural test of an HF MoE load (docs/m02-moe.md §4.6): every stacked expert slice the engine holds equals the
-checkpoint's tensor bit for bit — the merged gate/up stack's halves, the down stack, the router — streamed per layer.
-Exact and independent of any golden: a misplaced expert fails here whatever the routing touches."""
+"""The structural test of an HF MoE load (docs/m02-moe.md §4.6; quantized stacks docs/m06-lowp.md §4.3): every
+stacked expert slice the engine holds — the merged gate/up stack's halves, the down stack — equals the checkpoint's
+tensor, and the router equals it bit for bit, streamed per layer. Dense slices are compared as stored; quantized ones
+by value, the engine's parts dequantized by std.weights.hf's reference against the checkpoint's own tensors as the
+judge reads them (`hf_quant`, its own name map). Exact and independent of any golden: a misplaced expert, or a part
+of one, fails here whatever the routing touches."""
 from __future__ import annotations
 
-import json
 import pathlib
 
 import torch
-from safetensors import safe_open
+from holon_std.weights.hf import reference
+
+from . import hf_quant
 
 
 def mismatches(engine, checkpoint: str | pathlib.Path) -> list[str]:
     """The (layer, tensor) pairs whose loaded slice differs from the checkpoint's tensor; empty when the load is
     exact."""
-    path = pathlib.Path(checkpoint)
-    index = json.loads((path / "model.safetensors.index.json").read_text())["weight_map"] \
-        if (path / "model.safetensors.index.json").is_file() else None
-    handles: dict[str, object] = {}
-
-    def tensor(name: str) -> torch.Tensor:
-        file = path / (index[name] if index else "model.safetensors")
-        if file not in handles:
-            handles[file] = safe_open(file, "pt")
-        return handles[file].get_tensor(name)
-
     bad = []
-    for i, layer in enumerate(engine.executor.model.layers):
-        moe, mlp = layer.ffn, f"model.layers.{i}.mlp"
-        inter = moe.down.in_features
-        if not torch.equal(moe.router.cpu(), tensor(f"{mlp}.gate.weight").float()):
-            bad.append(f"{mlp}.gate.weight")
-        for e in range(moe.down.experts):
-            gate_up, down = moe._gate_up.weight[e].cpu(), moe.down.weight[e].cpu()
-            for got, name in ((gate_up[:inter], "gate_proj"), (gate_up[inter:], "up_proj"), (down, "down_proj")):
-                if not torch.equal(got, tensor(f"{mlp}.experts.{e}.{name}.weight").to(got.dtype)):
-                    bad.append(f"{mlp}.experts.{e}.{name}.weight")
+    with hf_quant.opened(checkpoint) as (get, names):
+        for i, layer in enumerate(engine.executor.model.layers):
+            moe, mlp = layer.ffn, f"model.layers.{i}.mlp"
+            inter = moe.down.in_features
+            if not torch.equal(moe.router.cpu(), get(f"{mlp}.gate.weight").float()):
+                bad.append(f"{mlp}.gate.weight")
+            gate_up, down = _experts(moe._gate_up), _experts(moe.down)
+            for e in range(moe.down.experts):
+                for got, proj in ((gate_up[e, :inter], "gate"), (gate_up[e, inter:], "up"), (down[e], "down")):
+                    module = f"{mlp}.experts.{e}.{proj}_proj"
+                    if not torch.equal(got, hf_quant.weight(get, names, module).to(got.dtype)):
+                        bad.append(f"{module}.weight")
     return bad
+
+
+def _experts(stack) -> torch.Tensor:
+    """A stack's [E, out, in] weights: a dense one as held, a quantized one dequantized by the reference."""
+    if stack.layout is None:
+        return stack.weight.cpu()
+    parts = {role: p.cpu() for role, p in stack.parts.items()}
+    return reference.dequantize_experts(stack.layout.scheme.elem, parts, stack.experts)

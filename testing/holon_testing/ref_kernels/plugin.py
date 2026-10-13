@@ -3,8 +3,10 @@ from holon.api import Constraint, KernelSpec
 from .kernels import BY_OP, PagedAttention
 
 KV_LAYOUTS = ("kv.hnd", "kv.hnd.fp8", "kv.hnd.q8_0")    # every KV layout the paged reference reads
-# Weight layouts the references read, by scheme: ggml blocks as stored (dequantized by gguf-py), and dense stacks.
-WEIGHT_SCHEMES = {"qlinear": {"ggml"}, "qembedding": {"ggml"}, "linear_experts": {"ggml", "dense"}}
+# Weight layouts the references read, by scheme: ggml blocks as stored (dequantized by gguf-py), HF quantized weights
+# (std.weights.hf's reference), and dense stacks.
+HF = {"fp8_e4m3", "nvfp4", "mxfp4"}
+WEIGHT_SCHEMES = {"qlinear": {"ggml", *HF}, "qembedding": {"ggml"}, "linear_experts": {"ggml", "dense", *HF}}
 
 
 def _reads(schemes: set[str]):

@@ -86,11 +86,23 @@ def _structure(a: argparse.Namespace) -> int:
 
     path = golden.resolve_model(a.model)
     with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
-        engine = Engine(EngineConfig(model=str(path), dtype=golden.DTYPES[a.dtype], max_model_len=1024))
+        engine = Engine(EngineConfig(model=str(path), dtype=golden.DTYPES[a.dtype], device=a.device,
+                                     max_model_len=1024, state_memory=1 << 28 if a.device == "cpu" else None))
     bad = mismatches(engine, path)
     print(json.dumps({"model": golden.model_meta(path)["model"], "plant": a.plant, "mismatches": len(bad),
                       "first": bad[:8]}))
     return 1 if bad else 0
+
+
+def _hf_quant_check(a: argparse.Namespace) -> int:
+    from .hf_quant import owner_check
+
+    path = golden.resolve_model(a.model)
+    report = owner_check(path, a.llama_cpp, a.limit)
+    print(json.dumps({"model": golden.model_meta(path)["model"], "llama_cpp": bool(a.llama_cpp),
+                      "owners": {k: v | {"over": len(v["over"]), "first_over": v["over"][:8]}
+                                 for k, v in report.items()}}))
+    return 0 if report and not any(v["over"] for v in report.values()) else 1
 
 
 def _retokenize(a: argparse.Namespace) -> int:
@@ -361,8 +373,16 @@ def main(argv: list[str] | None = None) -> int:
     st = sub.add_parser("structure", help="every stacked expert of an HF MoE load equals the checkpoint's tensor")
     st.add_argument("--model", required=True, help="HF checkpoint directory or hub id")
     st.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
+    st.add_argument("--device", default="cuda", help="cpu: the reference kernels (e.g. a stack no GPU kernel reads)")
     st.add_argument("--plant", choices=sorted(PLANTS), help="calibration: run with a planted bug (must fail)")
     st.set_defaults(run=_structure)
+
+    hq = sub.add_parser("hf-quant-check", help="the reference dequantization of every quantized tensor of an HF "
+                        "checkpoint against the format owners' decoders (docs/m06-lowp.md D10)")
+    hq.add_argument("--model", required=True, help="HF checkpoint directory or hub id")
+    hq.add_argument("--llama-cpp", help="a llama.cpp checkout at the ggml pin: also gguf-py on its FP4 repacks")
+    hq.add_argument("--limit", type=int, help="the first N quantized tensors only")
+    hq.set_defaults(run=_hf_quant_check)
 
     rt = sub.add_parser("retokenize", help="a prompt set's texts in another model's tokenizer")
     rt.add_argument("--prompts", required=True)

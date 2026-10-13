@@ -13,3 +13,6 @@ python = ["safetensors"]
 
 [support]
 detect = ["config.json"]
+
+[reference]
+module = "reference"

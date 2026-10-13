@@ -373,6 +373,92 @@ def hf_moe_plants(layer: int, experts: int) -> dict[str, Callable[[], contextlib
         "hf-renormalize-ignored": lambda: _moe(init=lambda kw: kw | {"renormalize": False})}
 
 
+@contextlib.contextmanager
+def _hf_dialect(**changes) -> Iterator[None]:
+    """Every dialect std.weights.hf picks, with `changes` (a misread producer convention)."""
+    from holon_std.weights.hf import quant
+
+    pick = quant.dialect
+    with mock.patch.object(quant, "dialect", lambda qc: dataclasses.replace(pick(qc), **changes)):
+        yield
+
+
+@contextlib.contextmanager
+def _hf_grouped(edit: Callable[[dict], dict]) -> Iterator[None]:
+    """std.weights.hf's grouping with modules re-pointed: `edit(quantized modules by name)` returns the ones it
+    changes (a dialect pairing a part with the wrong module)."""
+    from holon_std.weights.hf import quant
+
+    group = quant.group
+
+    def planted(d, header):
+        plan, checks = group(d, header)
+        changed = edit({m.name: m for m in plan if isinstance(m, quant.Module)})
+        return [changed.get(m.name, m) if isinstance(m, quant.Module) else m for m in plan], checks
+    with mock.patch.object(quant, "group", planted):
+        yield
+
+
+def _part_from(modules: dict, name: str, other: str, role: str = "scale") -> dict:
+    """Module `name` with `other`'s `role` part."""
+    m = modules[name]
+    return {name: dataclasses.replace(m, parts=m.parts | {role: modules[other].parts[role]})}
+
+
+def _expert_scales_shifted(layer: int) -> Callable[[dict], dict]:
+    """Each expert of `layer` takes the next expert's scale (the scale stack off by one)."""
+    def edit(modules: dict) -> dict:
+        prefix, changed = f"model.layers.{layer}.mlp.experts.", {}
+        experts = len({n.split(".")[5] for n in modules if n.startswith(prefix)})
+        for name in modules:
+            if name.startswith(prefix):
+                e, proj = name.removeprefix(prefix).split(".")
+                changed |= _part_from(modules, name, f"{prefix}{(int(e) + 1) % experts}.{proj}")
+        return changed
+    return edit
+
+
+@contextlib.contextmanager
+def _gate_up_merge_gate_scales() -> Iterator[None]:
+    """A dense gate/up merge that keeps gate's scale rows for up's half too."""
+    from holon_std.ops import units
+
+    merged_parts = units._merged_parts
+
+    def planted(us):
+        parts = merged_parts(us)
+        if parts is not None and len(us) == 2 and "scale" in parts:
+            parts["scale"] = torch.cat([us[0].parts["scale"]] * 2)
+        return parts
+    with mock.patch.object(units, "_merged_parts", planted):
+        yield
+
+
+@contextlib.contextmanager
+def _mxfp4_scales_edited(edit: Callable[[torch.Tensor], torch.Tensor]) -> Iterator[None]:
+    """The dialects' MXFP4 normalization yielding `edit(scale)`."""
+    from holon_std.weights.hf.quant import base
+
+    normalize = base.NORMALIZE["mxfp4"]
+    with mock.patch.dict(base.NORMALIZE, {"mxfp4": lambda weight, scale: normalize(weight, edit(scale))}):
+        yield
+
+
+def hf_quant_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:
+    """Quantized HF checkpoints' Tier A and structural plants (docs/m06-lowp.md §4.8: N1, T1, M3, M5, P5, P6; M2 is
+    `hf-stack-off-by-one`), the one-layer ones in `layer`."""
+    attn = f"model.layers.{layer}.self_attn"
+    return {
+        "ct-global-not-inverted": lambda: _hf_dialect(inverted=frozenset()),                          # N1
+        "dialect-k-scale-on-v": lambda: _hf_grouped(                                                   # T1
+            lambda m: _part_from(m, f"{attn}.v_proj", f"{attn}.k_proj")),
+        "mxfp4-scale-as-e4m3": lambda: mock.patch(                                                     # M3
+            "holon_std.weights.hf.reference.e8m0", lambda s: s.view(torch.float8_e4m3fn).float()),
+        "mxfp4-scale-halved": lambda: _mxfp4_scales_edited(lambda s: s - 1),                           # M5
+        "gate-up-merge-gate-scales": _gate_up_merge_gate_scales,                                       # P5
+        "hf-scale-stack-off-by-one": lambda: _hf_grouped(_expert_scales_shifted(layer))}               # P6
+
+
 def moe_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:
     """Tier A's MoE plants (docs/m02-moe.md §4.6), the one-layer ones at `layer`."""
     return {
@@ -608,6 +694,8 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "rare-ggml-stale-q8_1": lambda: ggml_stale_q8_1(every=9973),      # ~ one linear in 55 forwards
     # MoE Tier A and the bf16 HF path (Qwen3-30B-A3B: the one-layer plants at layer 24)
     **moe_plants(24), **hf_moe_plants(24, 128),
+    # Quantized HF checkpoints (docs/m06-lowp.md §4.8)
+    **hf_quant_plants(18),
     # MoE Tier B
     "ggml-experts-wrong-type": ggml_experts_wrong_type, "ggml-experts-stale-q8_1": ggml_experts_stale_q8_1,
     "rare-ggml-experts-stale-q8_1": lambda: ggml_experts_stale_q8_1(every=9973),

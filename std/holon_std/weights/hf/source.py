@@ -1,6 +1,8 @@
-"""Hugging Face checkpoint directory: config.json + one or more .safetensors files."""
+"""Hugging Face checkpoint directory: config.json + one or more .safetensors files, dense or quantized (a dialect
+of `quant/` reads its `quantization_config`, docs/m06-lowp.md D2)."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -11,7 +13,10 @@ from collections.abc import Iterator, Mapping
 from typing import Any
 
 import torch
+from holon.api import QTensor
 from safetensors import safe_open
+
+from . import quant
 
 _CACHE = pathlib.Path.home() / ".cache" / "holon" / "weights"     # weight-file digests remembered across restarts
 
@@ -34,6 +39,14 @@ class HFSafetensors:
         ids = [self._config.get("eos_token_id"), json.loads(gen.read_text()).get("eos_token_id") if gen.is_file()
                else None]
         self.eos_token_ids = frozenset(i for v in ids if v is not None for i in (v if isinstance(v, list) else [v]))
+        # The quantization config: config.json's, else ModelOpt's hf_quant_config.json, then hashed into the identity.
+        qc, hq = self._config.get("quantization_config"), self.path / "hf_quant_config.json"
+        self._hashed = ["config.json"]
+        if qc is None and hq.is_file():
+            raw = json.loads(hq.read_text())
+            qc = {"quant_method": raw.get("producer", {}).get("name"), **raw["quantization"]}
+            self._hashed.append(hq.name)
+        self._dialect = quant.dialect(qc) if qc else None
 
     def config(self) -> Mapping[str, Any]:
         return self._config
@@ -43,16 +56,37 @@ class HFSafetensors:
 
         return AutoTokenizer.from_pretrained(self.path)
 
-    def tensors(self) -> Iterator[tuple[str, torch.Tensor]]:
-        for file in sorted(self.path.glob("*.safetensors")):
-            with safe_open(file, "pt", device=str(self.device)) as f:
-                for name in f.keys():
-                    yield name, f.get_tensor(name)
+    def tensors(self) -> Iterator[tuple[str, torch.Tensor | QTensor]]:
+        """Every tensor in shard order. Quantized: every shard's header read first, each module's parts grouped by
+        the dialect into one `QTensor` under `<module>.weight` at its primary part's place, each part read once."""
+        if self._dialect is None:
+            for file in sorted(self.path.glob("*.safetensors")):
+                with safe_open(file, "pt", device=str(self.device)) as f:
+                    for name in f.keys():
+                        yield name, f.get_tensor(name)
+            return
+        with contextlib.ExitStack() as stack:
+            where = {}
+            for file in sorted(self.path.glob("*.safetensors")):
+                f = stack.enter_context(safe_open(file, "pt", device=str(self.device)))
+                if twice := set(where) & set(f.keys()):
+                    raise ValueError(f"{file}: tensors also in an earlier shard: {sorted(twice)[:4]}")
+                where |= dict.fromkeys(f.keys(), f)
+            get = lambda name: where[name].get_tensor(name)                   # noqa: E731
+            plan, checks = quant.group(self._dialect, [(n, f.get_slice(n).get_dtype()) for n, f in where.items()])
+            for name, want in checks.items():
+                if not bool((value := get(name)).eq(want).all()):
+                    raise ValueError(f"{name} = {value.tolist()}: must be {want} (the engine does not apply it)")
+            for item in plan:
+                if isinstance(item, str):
+                    yield item, get(item)
+                else:
+                    yield f"{item.name}.weight", quant.load(self._dialect, item, get)
 
     def identity(self) -> str:
         """`<name>@<build>`: the hub id for a hub-cache snapshot, else the directory name, and a hash of config.json
         and every weight file — content, not the hub revision, which also moves with README edits."""
-        files = self._digests([self.path / "config.json", *sorted(self.path.glob("*.safetensors"))],
+        files = self._digests([*(self.path / m for m in self._hashed), *sorted(self.path.glob("*.safetensors"))],
                               remember=not self._hub)
         return f"{self.name}@{hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()[:16]}"
 
