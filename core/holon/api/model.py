@@ -98,7 +98,9 @@ class BuildCtx(Protocol):
         where units run without state (attention over each whole sequence)."""
 
     def static(self, name: str, shape: tuple[int, ...], dtype: torch.dtype) -> torch.Tensor:
-        """A static device buffer, stable across graph replays (design §7.4)."""
+        """A static device buffer, stable across graph replays (design §7.4). Allocate it while building, never while
+        running (a step may be a graph capture); a per-token buffer holds a step's most tokens, max(max_step_tokens,
+        max_seqs · (1 + max_draft_tokens))."""
 
     def workspace(self, name: str, nbytes: int) -> torch.Tensor:
         """Kernel scratch memory, accounted by the ledger (design §5.6 rule 1)."""
@@ -119,7 +121,7 @@ class BuildCtx(Protocol):
         [T, H], every token of the step: the next layer's input, before its norm), inside the step's graph when it is
         captured (engine builds: a drafter registers its taps while it is built). `h` is valid during the call only
         (the next layer may reuse it): the consumer keeps what it needs in its own static buffers — a copy, or an fp32
-        accumulation."""
+        accumulation — allocated with `static` at build time, sized for a step's most tokens."""
 
 
 class Unit(Protocol):
