@@ -1,7 +1,7 @@
 # M0.5 — structured output and tool calls: design and implementation plan
 
-Status: **revision 2, for review** (2026-10-13). Rev 1 was reviewed by a panel of three; every finding is resolved
-in §9.
+Status: **revision 3, for review** (2026-10-13). Revs 1–2 were reviewed by a panel of three; every finding is
+resolved in §9.
 
 Scope: plan §8, amended (D1; plan §2 / §8 updated with this revision):
 - the core gets general logits-processor seams (§3); "core diff target zero" becomes "only the seams of §3, each
@@ -23,7 +23,8 @@ the OpenAI chat, OpenAI Responses and Anthropic Messages APIs, on every model an
 
 1. **Conformance** (D9). On the JSONSchemaBench runs of D9, for strict requests:
    - every accepted, non-truncated output validates (Draft per schema, formats checked): **valid / (accepted −
-     truncated) = 100%**, where an `error` finish counts as invalid;
+     truncated) = 100%**, where a request-time `error` finish (a matcher refusal, a failed fill) counts as invalid;
+     compile errors and timeouts are rejections (declared coverage), reported with each schema's compile time;
    - truncated outputs are reported, and their share is within 2 points of the same requests unconstrained;
    - declared coverage is reported with rejections by reason;
    - the model-free oracle (JSON-Schema-Test-Suite, every draft) finds no accepted schema that admits an invalid
@@ -45,13 +46,16 @@ the OpenAI chat, OpenAI Responses and Anthropic Messages APIs, on every model an
 4. **Graphs and overlap.** Every path that samples applies the mask (prefill, decode, verify; graphed and eager).
    A constrained request never samples from a mask built without its last token. Measured: the share of graphed
    constrained steps, the host time per constrained step, and D2's penalties.
-5. **Isolation.** A failing constraint (compile error or timeout, an unsupported strict schema, a token the matcher
-   refuses, a matcher in a bad state) ends only its request — a 400 at admission, otherwise `finish_reason =
-   "error"` for every sequence of the request — never the engine; a request restarted by the supervisor resumes its
-   matcher.
+5. **Isolation.** A failing constraint ends only its request, never the engine and never other requests: an
+   unsupported strict schema, an invalid constraint or a compile error is a 400 (an error of kind `client`); a
+   compile timeout is a 503 (kind `busy`); a matcher refusal or failed fill during generation is `finish_reason =
+   "error"` for every sequence of the request (kind `engine`). Free streams' p99 TPOT during a cold compile is
+   measured. A constraint sent to a deployment with no processor selected is a 400. A request restarted by the
+   supervisor resumes its matcher.
 6. **Invariants.** Processors are opt-in (`--slots logits_processor=…`), and locks record the choice. With none
    selected, nothing changes: the same graphs, every lock's snapshot trace byte-identical. With one selected and no
-   constrained request, outputs are byte-identical; with constrained requests, snapshot traces are run-identical.
+   constrained request, outputs are byte-identical at a pinned `state_memory` (the extra graphs shrink the KV pool
+   otherwise); with constrained requests, snapshot traces are run-identical.
 7. **Core:** only the seams of §3, each proven by a toy plugin in `core/tests`; core ≤ 6000 code lines (3650 now,
    ≈ +260 budgeted); the core denylist gains `grammar`, `xgrammar`, `tool_call`, `structural`.
 
@@ -79,22 +83,30 @@ conformance; multimodal content blocks; more than one active logits processor (�
    - Today: an unused protocol.
    - Change (`api/decoding.py`): the deployment selects at most one `logits_processor` plugin
      (`EngineConfig.slots`; locks record it in `[engine]`, like the drafter). Its plugin builds the processor with
-     `build(ctx, vocab: VocabView)`; `VocabView` (§3.7) gives the token strings, the padded vocabulary size and the
-     engine's stop set. The processor:
-     - `mask_width: int` — int32 words per mask row (the core allocates the buffer, §3.6);
+     `build(ctx, vocab: VocabView)` (§3.7). The processor:
+     - `mask_width: int` — int32 words per mask row (the core allocates the buffer, §3.6), and `resource`: the
+       `ext` namespace it serves (e.g. `grammar.constraint`); `Engine.add` rejects a request carrying an `ext` key
+       of a resource no selected processor serves (a 400, kind `client`), so a constraint is never silently
+       ignored;
      - `open(rid, params, prompt) -> bool` at `Engine.add`, before anything is registered: whether it constrains
-       this request (it reads its own `SamplingParams.ext` keys). Raising `RequestError` (a `ValueError`) rejects
-       the request — a 400. Work that may be slow (compiling) happens off the engine thread (D5): until `ready(rid)`
-       is true the request is not scheduled;
-     - `commit(seq, out: list[int])` after each commit with the tokens actually appended (truncated at a stop,
-       skipped for finished rows); raising `RequestError` aborts the request (§3.4);
-     - `close(rid)` at finish or abort of the request (every sequence, never-started siblings included);
-     - `fill(rows: list[MaskRow], buf)` at launch: writes the int32 mask rows for the step's constrained logits rows
-       into the core's staging buffer (`MaskRow`: the sequence, the row range, and for verify rows the drafts it will
-       check). It never raises: a row it cannot build gets all tokens allowed and the processor reports the failure
-       at the next `commit`;
-     - `apply(logits, mask)` — device, in place, graph-capturable: applies the mask rows to the logits (the kernel is
-       the plugin's, D4).
+       this request. Raising `RequestError` rejects the request. Slow work (compiling) happens off the engine thread
+       (D5);
+     - `ready(rid) -> bool`: false while the request's constraint is not built — the request is held as
+       `Status.BLOCKED` and skipped by the scheduler (never blocking others: `_prefill` continues past it); `step()`
+       returns no deltas when only blocked work remains, and the serve loop polls with a short timeout instead of
+       raising "no progress". `ready` may raise `RequestError` (a compile error: kind `client`; a timeout: kind
+       `busy`), which aborts the request;
+     - `commit(seq, out: list[int])` after each step's results, **before** the engine acts on stop or length and
+       before any delta is built, with the tokens the step appends (truncated at a stop, skipped for finished rows);
+       raising `RequestError` aborts the request with kind `engine` and drops that step's tokens (§3.4);
+     - `close(rid)` at finish or abort of the request (every sequence, never-started siblings included; drops a
+       pending compile);
+     - `fill(rows: list[MaskRow], buf)` at launch: writes the mask rows of the step's constrained logits rows into
+       the core's staging buffer (`MaskRow`: the sequence, its row range in the compact block, and for verify rows the
+       drafts it will check). It never raises: a row it cannot build gets all tokens allowed and the failure surfaces
+       at the next `commit` (which runs before that row's tokens are acted on);
+     - `apply(logits, mask, rows)` — device, in place, graph-capturable: applies the compact mask block to the
+       logits rows `rows` (the kernel and the mask format are the plugin's, D4).
    - Siblings of an `n > 1` request share one `open`; `fill` and `commit` are per sequence (`seq.index`).
    - Toy proof (`core/tests`): a toy processor — after a marker token, only even tokens; its `apply` is a dense
      `masked_fill_` — on the tiny Qwen3 on the CPU, across chunked prefill, prefix hits, preemption, depth 0 / 1,
@@ -103,7 +115,7 @@ conformance; multimodal content blocks; more than one active logits processor (�
 2. **Host-token gate (D2).**
    - Today: depth 1 for every decode row; `host_lens_only` gates rows for host-length kernels (`sched.py:111`).
    - Change: a constrained sequence is not scheduled while it has `pending` rows (pending covers inexact verify
-     rows) or before `ready`. When a gated sequence is ready but pending, `step()` commits the in-flight step before
+     rows) or while `BLOCKED`. When a gated sequence is ready but pending, `step()` commits the in-flight step before
      scheduling (A′, D2) — or, under the alternative A, schedules without it. One option, chosen by D2's
      measurement.
    - Toy proof: constrained and free requests mixed at depth 1; `fill` asserts that every constrained row's host
@@ -116,36 +128,45 @@ conformance; multimodal content blocks; more than one active logits processor (�
      draft.
    - Toy proof: the toy's probe sees exactly the oracle drafter's drafts.
 4. **Per-request errors from the processor.**
-   - Change: `RequestError` (in `holon.api`, a `ValueError`) from `commit` aborts the whole request
-     (`Engine.abort(rid, "error", message)`: one delta per sequence, rows in flight discarded). Other exceptions
-     still end the engine (bugs).
+   - Change: `RequestError(kind, message)` (in `holon.api`, a `ValueError`; kinds `client`, `busy`, `engine`) from
+     `open`, `ready` or `commit` aborts the whole request (`Engine.abort(rid, "error", message)`: one delta per
+     sequence, rows in flight discarded); `TokenDelta` carries the kind, and the frontend maps `client` before the
+     first token to 400, `busy` to 503, anything else to `finish_reason: "error"`. After a supervisor restart (one
+     engine request per sequence) the supervisor aborts the request's other engine rids on an `error` delta. Other
+     exceptions still end the engine (bugs).
    - Toy proof: a toy processor raises for one request of an `n = 2` pair mid-generation; both its sequences end
      with `error`, the others finish unchanged.
 5. **Resume after a restart.**
-   - Change: `EngineRequest` gains `resume_output: int`, the number of trailing prompt tokens that are output; the
-     engine sets `Seq.prompt_len = len(tokens) − resume_output`; the supervisor sends the full `max_tokens` (it no
-     longer subtracts). Processors replay `seq.tokens[prompt_len:]` themselves in `open`'s first `commit`-equivalent
-     (the core calls `commit(seq, replayed)` once before the first step).
+   - Change: `EngineRequest` and `EngineClient.generate` gain `resume_output: int`, the number of trailing prompt
+     tokens that are output; the engine sets `Seq.prompt_len = len(tokens) − resume_output`; the supervisor sends the
+     full `max_tokens` (it no longer subtracts). The core calls `commit(seq, tokens[prompt_len:])` once, after
+     `ready` and before the sequence is first scheduled; processors do nothing else for resume.
    - Toy proof: a restart in the middle of a toy-constrained greedy generation ends with the same tokens and finish
      reason as an uninterrupted run.
 6. **Masks on every sampling path.**
-   - Change: the mask rows ride the `Uploader` (`inputs.py`: double-buffered host staging guarded by events) as one
-     more field; every step with a constrained row writes the whole `[R·w, mask_width]` block (free and padding rows
-     all-allowed). One helper between the head and the sampler or verifier applies it on every path (prefill and
-     decode, graphed and eager). The graph key gains one core boolean, "this step has mask rows"; the startup
-     capture set crosses it with every (bucket, width, sampler variant) when a processor is selected (capture forces
-     the boolean on); the memory profile includes `apply`.
-   - **Logprobs are the masked distribution's** (as vLLM's processed mode), clamped by the frontends at −9999 (JSON
-     has no −∞); `api/frontend.py:26-28` is updated. No raw-logits copy.
+   - Change: the step's constrained logits rows ride the `Uploader` (`inputs.py`: double-buffered host staging
+     guarded by events) as two more fields — a compact mask block `[n_constrained_rows, mask_width]` and its logits
+     row indices (padded to the graph's row count with an out-of-range index the kernel skips). Free and padding
+     rows cost nothing and the core never interprets mask bits. One helper between the head and the sampler or
+     verifier calls `apply` on every path (prefill and decode, graphed and eager). The graph key gains one core
+     boolean, "this step has constrained rows"; the startup capture set crosses it with every (bucket, width,
+     sampler variant) when a processor is selected (capture stages a valid index list of out-of-range rows); the
+     memory profile includes `apply`.
+   - **Logprobs are of the masked distribution** (vLLM's default raw mode also applies the grammar mask before the
+     sampler), clamped by the frontends at −9999 (JSON has no −∞); `api/frontend.py:26-28` is updated. No
+     raw-logits copy.
    - Toy proof: graphed vs eager on the same padded plans with constrained rows (the M0.4 eager-runner test extended,
      GPU, Qwen3-0.6B); a plant `mask_rows_not_reset` (a free request takes a finished constrained request's row)
      fails it.
 7. **`VocabView` for processors.**
-   - Change: `BuildCtx.vocab()` returns the target's token strings (from the weight source's tokenizer), its padded
-     vocabulary size and its stop-token set. Toy proof: the toy processor reads the tiny model's vocabulary.
+   - Change: the engine passes `build(ctx, vocab)` a `VocabView`: the weight source's tokenizer object
+     (`source.tokenizer()`, a fast tokenizer for HF and GGUF alike — decoded token strings lose byte-fragment tokens,
+     which breaks multi-byte enums), the padded vocabulary size and the engine's stop-token set. Toy proof: the toy
+     processor reads the tiny model's vocabulary; a non-ASCII enum fixture in step 2's oracle.
 
-Line budget: lifecycle and selection 80, gate and A′ 20, drafts 15, errors 30, resume 10, Uploader field, helper,
-key and capture 60, `VocabView` 25, API types (§3.8) 20; ≈ +260.
+Line budget: lifecycle, selection and the resource check 90, gate, `BLOCKED` and A′ 25, drafts 15, errors and kinds
+35, resume 10, Uploader fields, helper, key and capture 60, `VocabView` 20, API types (§3.8) 20; ≈ +275. The manifest's
+unread `max_depth` is removed (the gate comes from `open`).
 
 8. **API for frontends** (`holon.api.frontend`, no core runtime code): `FrontendBundle` gains `tool_format` and
    `reasoning_format` (names with versions, e.g. `"hermes@1"`, `"qwen_xml@1"`, `"think@1"`) and `constraint(…)`
@@ -169,9 +190,10 @@ key and capture 60, `VocabView` 25, API types (§3.8) 20; ≈ +260.
     without (R §8.1's isolation of the stall from acceptance changes), host time per step split by phase
     (`phase_us`). Configurations: Qwen3-8B Q4_K_M plain and the 27B UD-IQ3_S + MTP on the RTX 5080; single stream,
     and 1 constrained + 3 free under A and A′.
-  - **Rule (fixed now):** choose A or A′ by the mixed-batch results (the lower combined TPOT of constrained and free
-    rows); then if the single-stream penalty exceeds **1.10×** on either model, build the split in M0.5 (step 6),
-    else defer it to M0.7 with the numbers recorded.
+  - **Rule (fixed now):** A′ by default (constrained rows — agents' tool calls — decode every step), unless under A′
+    the free rows of the mixed batch slow by more than 1.15×, then A. Then, adding the measured mean `fill` and
+    `apply` time per constrained step (the toy processor has neither): if the single-stream penalty exceeds
+    **1.10×** on either model, build the split in M0.5 (step 6), else defer it to M0.7 with the numbers recorded.
   - **Predictions:** host time per constrained step 1–2 ms (commit, schedule, fill, launch); single stream 8B (6.5 ms
     step) **1.15–1.30×** — likely to trigger the split; 27B + MTP (a verify step ≈ 27 ms for 2.56 tokens) 1.04–1.07×.
     Mixed: A gives constrained rows ≈ 0.5× of free; A′ costs free rows the same 1.04–1.30× as single stream.
@@ -190,13 +212,17 @@ key and capture 60, `VocabView` 25, API types (§3.8) 20; ≈ +260.
   Uploader staging; the processor owns `apply`. `grammar/xgrammar` applies with a Triton kernel of its own (one
   program per row block, no `[R, V, 32]` intermediate), checked against xgrammar's CPU `apply_token_bitmask_inplace`
   as the reference (L0-mask). Steps without mask rows keep today's graphs.
-- **D5. `grammar/xgrammar`, a plugin; compile off the engine thread.** It accepts `ext["grammar.constraint"]`
-  (`grammar.constraint@1`, D6), compiles in a thread pool (xgrammar releases the GIL, R §8) with a per-constraint
-  cache (`cache_limit_bytes` set) and a **compile timeout of 10 s** that rejects the request (an `error` finish
-  before any token); `ready(rid)` gates scheduling. One `GrammarMatcher` per sequence; stop tokens = the engine's
+- **D5. `grammar/xgrammar`, a plugin; compile in a killable subprocess.** It accepts `ext["grammar.constraint"]`
+  (`grammar.constraint@1`, D6). Compiles run in a pool of two worker processes (each holding the `TokenizerInfo`),
+  which return the serialized `CompiledGrammar` (0.28 MB, 3.5 ms to deserialize, R §8) — an xgrammar compile cannot
+  be cancelled in a thread, so a worker that passes the **10 s timeout** is killed and respawned and the request is
+  rejected (`busy`); a negative cache rejects repeats of a timed-out or failed constraint at once; when both workers
+  are busy, cold compiles queue (bounded, then `busy`); `close` drops a queued compile. A per-constraint cache of
+  compiled grammars (`cache_limit_bytes` set) serves repeats in microseconds. `ready(rid)` gates scheduling. One `GrammarMatcher` per sequence; stop tokens = the engine's
   stop set plus the request's `stop_token_ids`; `ignore_eos` with a constraint is rejected at `open`. JSON defaults:
-  `any_whitespace = True` with a whitespace run cap of 16 (pretty-printed JSON stays allowed, so MTP's drafts of it
-  are not refused; runaway whitespace is bounded); `strict_mode` per D9. xgrammar is a pinned pip dependency
+  `any_whitespace = True` with a whitespace run cap of 64 (the cap counts the newline and the indentation: 64 admits
+  depth 8 at 4-space indentation, so pretty-printed JSON and MTP's drafts of it stay allowed; runaway whitespace is
+  bounded); `strict_mode` per D9. xgrammar is a pinned pip dependency
   (Apache-2.0); the pin is chosen at step 2 (0.2.3 now; vLLM 0.2.8, SGLang 0.2.7) and the reject-list oracle and the
   tag fixtures are re-run at it.
 - **D6. `grammar.constraint@1`, a plain-dict resource.** The frontend package builds constraints as plain dicts
@@ -230,14 +256,15 @@ key and capture 60, `VocabView` 25, API types (§3.8) 20; ≈ +260.
     `minLength` / `maxLength` / `minimum` / `maximum` / … (per keyword: untyped `properties` / `items` are enforced),
     required keys not in `properties`, remote and `$anchor` refs, `pattern` beside `format` or a length bound, and
     every `format` outside an allowlist the oracle verifies (xgrammar's date / date-time / ipv4 / hostname checks
-    are syntax-only: `2024-02-30` passes).
+    are syntax-only: `2024-02-30` passes; exact regular translations of these four are deferred, §10).
   - The oracle (CI, model-free): over all JSON-Schema-Test-Suite drafts, every schema the server accepts admits no
     invalid instance through the matcher; plus the typed probe table of R §6.2.
   - The runs: JSONSchemaBench test splits minus GitHub-trivial / -ultra and the 13 unsatisfiable Glaive schemas,
     `strict = true`, thinking off, no stop strings, greedy, `max_tokens` 2048; the **full** filtered split on Qwen3-8B
     Q4_K_M (5080) plus one sampled pass (T = 1, two seeds), and a 500-schema sample on the 27B + MTP (4090);
     validation with `validator_for(schema)` (the schema's own draft) and the format extras installed, the harness
-    self-testing that each enforced format rejects an invalid string.
+    self-testing that each enforced format rejects an invalid string; the split is precompiled once before the
+    timed run and every schema's compile time recorded.
 - **D10. Stop strings.** A frontend stop string inside constrained output ends the request as `stop` (the user
   asked); conformance runs send none.
 
@@ -249,11 +276,15 @@ key and capture 60, `VocabView` 25, API types (§3.8) 20; ≈ +260.
   over a 16-token vocabulary (`TokenizerInfo(encoded_vocab=…)`) whose masks differ per column, the toy Markov target
   and a drafter proposing (prev + 1) mod 16, masks produced by the real `fill` probe. The exact law of the first three
   tokens is enumerated: P(x₁…x₃) = ∏ₜ F(softmax((z(xₜ₋₁) + log 1[M(x<t)]) / T)), with filters F applied after the
-  mask (the sampler sees masked logits). Cases: greedy, T = 1, top-p 0.9; a stop-token draft.
+  mask (the sampler sees masked logits). Cases: greedy, T = 1, top-p 0.9; a stop-token draft. The harness replays
+  every emitted sequence through a fresh matcher and fails on any refusal (part of the plants' signal).
 - **Spec identity:** CPU exact (oracle drafter); GPU — the constrained bounded check: 64 JSON-schema prompts on the
   27B + MTP (A5000), no `ignore_eos`; finish reasons and lengths compared; `error` count 0; agreement scored against
   a teacher-forced reference whose logits are masked by a fresh matcher replay (masked argmax); a first divergence
-  must be a near-tie of the masked logits (the M0.4 bound's calibration).
+  must be a near-tie of the masked logits — top-2 gap below `CONFIDENT_GAP` (`compare.py:34`), calibrated on the
+  first divergences of M0.4's unconstrained 27B spec-vs-plain runs; lengths and finish reasons compared up to the
+  first divergence; the judge's KL made −∞-safe (masked top-k logprobs hold −∞: `p · (log p − log q)` with p = 0
+  is 0).
 - **Conformance** (D9): accepted-but-invalid 0 with errors counted invalid; truncated share within 2 points of
   unconstrained.
 - **Parsers:** streaming = non-streaming on every recorded output; fixtures from R §4.2 (hermes, XML with typed
@@ -273,8 +304,8 @@ key and capture 60, `VocabView` 25, API types (§3.8) 20; ≈ +260.
   Power (reviewer simulation, R §6 schemas): a one-step-stale or one-ahead mask excludes the true next token in
   108–109 of 109 random schema walks, so every plant fires within the first tokens.
 - **Predictions:**
-  - Conformance 100% of accepted; static coverage of the filtered split under D9's predicate **≈ 68%** (reviewer
-    measurement), minus ≈ 1% compile errors and timeouts.
+  - Conformance 100% of accepted; declared coverage of the filtered split under D9's predicate **64–67%**
+    (reviewer measurement of the predicate, minus compile errors and timeouts).
   - D2: as in D2.
   - Refused drafts inside JSON (27B + MTP, `any_whitespace` on): ≤ 15% of drafts; measured directly by
     `spec_drafts_refused / spec_drafted`, not by comparing acceptance across different texts.
@@ -283,8 +314,9 @@ key and capture 60, `VocabView` 25, API types (§3.8) 20; ≈ +260.
 
 ## 6. Memory and capture
 
-- Mask buffer `[max_seqs·(1 + k_max), ⌈V/32⌉]` int32: 0.5 MiB for the 27B at max_seqs 4, k 3; 9.7 MiB for the 8B
-  at max_seqs 64, k 4. The Triton `apply` has no intermediate.
+- Mask block `[max_seqs·(1 + k_max), ⌈V/32⌉]` int32 at most: 0.5 MiB for the 27B at max_seqs 4, k 3; 5.8 MiB for
+  the 8B at max_seqs 64, k 4 — but only constrained rows are staged and copied. The Triton `apply` has no
+  intermediate.
 - Graphs double when a processor is selected (the 27B config: 27 → 54: buckets {1, 2, 4} × widths {1, 3, 4} × 3
   sampler variants × mask on/off). The graph-pool and capture-time deltas and the KV tokens lost are measured at step
   1 and recorded; the profile includes `apply`. With no processor selected, nothing changes (acceptance 6).
@@ -311,6 +343,12 @@ key and capture 60, `VocabView` 25, API types (§3.8) 20; ≈ +260.
   timeout bound their effect to the request itself.
 - **Claude Code's request shape** is only partly confirmed by code (R §5.4): capture a real session's requests
   (headers redacted) before freezing the Anthropic subset.
+
+## 10. Deferred, deliberately
+
+- Exact regular translations of the date / date-time / ipv4 / hostname formats (v1; rejected under strict now).
+- More than one logits processor (ordering, chained masks).
+- Constraining `tool_choice: "auto"` by default (D8).
 
 ## 9. Review findings, resolved
 
@@ -354,3 +392,27 @@ key and capture 60, `VocabView` 25, API types (§3.8) 20; ≈ +260.
 | C-M9: `any_whitespace` undecided | on, with a run cap of 16; refused drafts measured directly (D5, §5) |
 | C-m13: coverage predicate, sample size | 68% from the real predicate; full 8B split + a sampled pass; 500 on the 27B (D9) |
 | C-m14: L0 reference | xgrammar's CPU apply (§5) |
+
+**Rev 2.**
+
+| Finding | Resolution |
+|---|---|
+| B-M1: a constraint silently ignored with no processor selected | processors declare their `resource`; `Engine.add` rejects unserved `ext` keys (§3.1) |
+| B-M2 / A-m3 / C-R2-1: async compile errors: wrong status, no channel; timeouts counted invalid | `ready` may raise; `RequestError` kinds `client` / `busy` / `engine` on `TokenDelta` → 400 / 503 / `error`; compile errors and timeouts are rejections in conformance (§3.1, §3.4, acceptance 1, 5) |
+| A-M1: an idle engine with only a compiling request raises "no progress" | not-ready requests `BLOCKED`, skipped; `step()` returns empty; the loop polls (§3.1) |
+| A-M2: decoded token strings break multi-byte constraints | `VocabView` carries the tokenizer object; non-ASCII enum fixture (§3.7) |
+| B-M3 / C-R2-2 / A-m4: a timed-out compile holds its thread | killable worker processes, negative cache, bounded queue (D5); free-stream p99 during a cold compile measured |
+| B-m1 / C-R2-6 (block cost): the core writes all-allowed rows | compact constrained rows + row indices; `apply(logits, mask, rows)`; the format stays the plugin's (§3.6) |
+| A-m5: capture reads an all-zero mask | capture stages an out-of-range index list (§3.6) |
+| B-m2: `VocabView` path contradictory | `build(ctx, vocab)` argument form (§3.1, §3.7) |
+| B-m3 / A-m2: resume replay contradictory | the core calls `commit(seq, replayed)` once after `ready`; `EngineClient.generate` gains `resume_output` (§3.5) |
+| B-m4 / A-m1: streaming vs `commit` order; commit after finish | `commit` before stop / length handling and before deltas; a `RequestError` drops the step's tokens (§3.1) |
+| B-m5: request-wide error after a restart | the supervisor aborts sibling rids on an `error` delta (§3.4) |
+| B-m6: manifest `max_depth` dead | removed in step 1 |
+| A-m6: acceptance 6 promised too much | byte-identical at a pinned `state_memory` |
+| A nit: "processed mode" | wording fixed (§3.6) |
+| C-R2-3: whitespace cap 16 refuses pretty JSON | 64 (D5) |
+| C-R2-4: constrained bounded check undefined | `CONFIDENT_GAP` calibrated on M0.4 runs, lengths to the first divergence, −∞-safe KL (§5) |
+| C-R2-5: coverage prediction high; date-time 400s | 64–67%; exact format regexes deferred (§10) |
+| C-R2-6: D2 toy misses fill / apply; "combined" undefined | measured fill and apply added; A′ unless free rows slow > 1.15× (D2) |
+| C-R2-7: L0-dist harness must fail on refusals | replay through a fresh matcher (§5) |
