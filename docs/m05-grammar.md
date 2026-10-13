@@ -1,6 +1,6 @@
 # M0.5 — structured output and tool calls: design and implementation plan
 
-Status: **revision 5, for review** (2026-10-13). Revs 1–4 were reviewed by a panel of three; every finding is
+Status: **revision 5, reviewed clean** (2026-10-13). Revs 1–5 were reviewed by a panel of three; every finding is
 resolved in §9.
 
 Scope: plan §8, amended (D1; plan §2 / §8 updated with this revision):
