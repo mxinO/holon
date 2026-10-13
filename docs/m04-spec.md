@@ -178,10 +178,14 @@ Non-goals:
    - **Reservation:** `Drafter.lookahead(k)` is the number of positions past the row it writes (MTP: k; DFlash:
      block). The scheduler reserves:
      - `1 + k + lookahead` for a verify row;
-     - `n + lookahead` for a prefill chunk that ends its prompt.
+     - `n + lookahead` for a prefill chunk that ends its prompt;
+     - always clamped to `max_model_len − num_computed`, and included in the scheduler's fast-path check
+       (`sched.py:91`).
    - **The length limit:**
-     - Positions at or past `max_model_len`, whether padded verify columns or drafter positions, write to the null
-       unit (`_prepare` clamps the page index and selects the null unit). Nothing then indexes past the table.
+     - Columns at or past `max_model_len`, whether padded verify columns or drafter positions, get their
+       **position** clamped to `max_model_len − 1` and their write sent to the null unit. Nothing then indexes past
+       the block table or the rope cache: FlashInfer's cos/sin cache has `max_model_len` rows and no bounds check.
+       Their outputs are never accepted.
      - The drafter caps `n_draft` at `max_model_len − 1 − start`.
    - Toy proofs:
      - a toy drafter writes a paged spec k positions ahead at depth 1, with graphs. Its pages must be reserved and
@@ -218,7 +222,8 @@ Non-goals:
      - The drafter writes `SeqTable.n_draft [S]` on the device, bounded by the deployment's **maximum** k, not the
        step's k. At depth 1 the drafts for step N + 1 are written before the host picks that step's k.
      - Short rows pad with token 0, and every verifier caps acceptance at `min(n_draft, k)`.
-     - `run` drafts, and `observe` reports `n_draft` (the uncapped would-have-drafted length), on k = 0 steps too.
+     - `run` drafts at the maximum k, and `observe` reports `n_draft` (the uncapped would-have-drafted length), on
+       k = 0 steps too. `Launched` brings `n_draft` back to the host with the tokens.
        A toy test shows the n-gram policy re-enabling after a hit.
      - Every running row joins a verify step: rows without drafts carry `n_draft = 0`. Prefill and decode never
        share a step (`sched.py:59`).
@@ -243,7 +248,9 @@ Non-goals:
 6. **Verify graphs.**
    - Today: decode only (`executor.py:150`).
    - Change: verify steps are captured per (bucket, q, sampler variant, planner keys), with q-wide padding rows.
-     The capture set maps each bucket to the policy's q for it (D7), about 9 graphs, not every bucket × q.
+     The capture set is every bucket × the policy's declared q set (MTP {3, 4}; n-gram {5} plus plain decode),
+     because the policy picks k from running requests but the bucket comes from the scheduled rows. That is
+     ≈ 18 graphs for MTP; their memory is measured.
    - The startup memory profile measures:
      - the largest verify graph with its sub-steps and the replay;
      - graph instantiation memory, by `cudaMemGetInfo` across captures.
@@ -283,7 +290,10 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
     position, and replaced by zero unless the tag equals start − 1 (after a prefix hit, a preemption or a slot
     reuse).
   - `run` then drafts with **k one-row sub-steps** at offsets 0 … k − 1 (`substeps(k) = [1] × k`).
-    - The first takes `last_token` (the bonus, or the token sampled after prefill) and h from row `n_accept`.
+    - The first takes `last_token` (the bonus, or the token sampled after prefill) and h from the row of the
+      emitted token, `query_start[r] + n_query[r] − n_logits[r] + n_accept[slot]`.
+    - `_store` writes `n_accept = 0` for every sampled non-verify row, so a prefill's last chunk never reads a
+      previous owner's value. Toy proof: a 1-token last chunk on a slot whose previous owner accepted 3.
     - Each later one takes the previous draft and its own output hidden.
     - This holds on every kind of step: full acceptance, partial acceptance, and a prefill's last chunk alike.
     - Rev 2's "substitute the bonus in the absorb pass" is dropped. It has no row when every draft is accepted,
@@ -341,7 +351,7 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
     - DFlash2: k = 7.
     - n-gram: k = 4, but **k = 0 (a plain decode step) when no running request hit in its last 4 steps**. A miss
       at full width costs ≈ 3.3 ms single stream and may be a net loss at 4 requests (§5).
-  - **The capture set** maps each bucket to its q. For MTP that is {4 at buckets 1–2, 3 above}.
+  - **The capture set** is every bucket × the declared q set (§3.6).
   - The Strata-style cost model is §7.
 - **D8. Turning it on.**
   - Speculation is a slot binding (drafter, policy, verifier); k is the policy's tunable (design §5.7, level 1).
@@ -537,3 +547,8 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
 | B-r1: aux tensors unspecified | `target.tensors()`, `ctx.weight_source(path)`, `WeightMap(only=…)`, `TargetView` (§3.1) |
 | C-n1: fallback latches off | covered by B-R1; `observe` gets the uncapped length; re-enable toy (§3.5) |
 | C-n2: bitwise across two kernel specializations | fallback named (§1.3) |
+| A-M1: h from row `n_accept` is stale after prefill (another request's hidden, or out of bounds) | h from the emitted token's row; `_store` zeroes `n_accept` for non-verify rows; toy proof (D3) |
+| A-M2: positions past the limit overrun the rope cache | positions clamped as well as pages (§3.2) |
+| A-M3: n-gram fallback never resumes | drafting at the maximum k on every step; `n_draft` back to the host (§3.5) |
+| A-m1: reservation clamp dropped | restored, with the fast-path check (§3.2) |
+| A-m2: capture set misses shapes | every bucket × the declared q set (§3.6, D7) |
