@@ -1040,10 +1040,14 @@ verification (v2).
     the rows that sampled. It may build **auxiliary models** (`BuildCtx.aux_model`: units in a child context whose
     state names, pools, tables and planners live under a namespace; `StepCtx.view(namespace)` at step time) and run
     **sub-steps** (`StepCtx.substep(q, offset)`: its own rows at positions past the step's, planned at launch with
-    per-sub-step buffers and device-length planners). `lookahead(k)` positions past each row are reserved for it.
+    per-sub-step buffers and device-length planners). `lookahead(k)` positions past each row are reserved for it. It
+    may **tap** the target (`BuildCtx.tap(layer, consume)`: the trunk hands `consume` the residual stream after that
+    layer, every step, inside its graph), and a drafter that samples its drafts publishes the laws it drew them from
+    (`q_support` = Kq: `SeqTable.draft_q_ids` / `draft_q` [S, k_max, Kq]).
   - `Verifier` (`verifier` slot; exact-match, rejection): replaces the Sampler on verify steps, drawing through it
     (`ctx.sampler`: `distribution`, counter-based `uniform` streams, `logprobs`), and never accepts past a row's
-    `n_draft`.
+    `n_draft`; `std.spec.rejection` accepts d with min(1, p(d)/q(d)) against the drafter's law q (one-hot at d for
+    deterministic drafts) and redraws from max(p − q, 0).
   Several plugins may be installed for each slot: `EngineConfig.slots` (`--slots drafter=… verifier=…`) picks one,
   and locks record the choice in `[engine]`. `Engine.stats()` counts real drafts and verify rows by drafts accepted.
   Every running row of a speculating step is a verify row of the step's width 1 + k (rows with fewer real drafts pad

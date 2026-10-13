@@ -1,7 +1,8 @@
 # M0.4 — speculative decoding: MTP, DFlash2, n-gram: design and implementation plan
 
 Status: **revision 3, reviewed clean** (2026-10-13). Revisions 1–3 were reviewed by a panel of three; every finding is
-resolved in §9. **Gate A met** (2026-10-13, §10): MTP and n-gram, merged to `main`; Gate B (DFlash2) next.
+resolved in §9. **Gate A met** (2026-10-13, §10): MTP and n-gram, merged to `main`. Gate B (DFlash2): its core and
+std seams are built (§11, phase 1), for the panel's review before `drafters/dflash`.
 
 Scope: plan §7, amended:
 - DFlash/DFlash2 is added. It was previously a v2 draft-model drafter.
@@ -625,3 +626,45 @@ repeat): 132 tok/s single stream on the 5080 there; those runs are kept as upper
 - **Below-prediction single stream on the 5080:** a verify step costs ≈ 1.8 decode steps (A5000 profile: multi-column
   mmvq +6 ms, the MTP head's lm_head 3 × 1.6 ms, rewind index ops ≈ 2 ms). Those three are M0.7's speculation items
   (fusion and a small-batch quantized matmul), not Gate A blockers.
+
+## 11. Gate B, phase 1 (2026-10-13): the seams
+
+Phase 1 builds what DFlash2 needs from the core and std, each seam general and proven by a toy; phase 2 is
+`drafters/dflash`, its GGUF (llama.cpp's converter, Q4_K_M), L0-drafter and the bounded 27B. The checkpoint's header
+is verified (research note, open items 1–2): every tensor name and shape §2 and the note assumed, all BF16, and no
+`mask_embedding.pt` — the target's `embed[248070]` is the mask row (D4).
+
+| Seam | As built | Proof |
+|---|---|---|
+| Taps (§3.4) | `BuildCtx.tap(layer, consume)`: `Model.trunk` calls `consume(h, ctx)` with the residual stream after the layer (every token of the step), inside the step's graph; `h` is valid during the call only, the consumer keeps a copy or an fp32 accumulation. The engine rejects taps on layers the target lacks | `test_taps` (toy `tests.tap.drafter`): a copy and an fp32 accumulation of two layers equal a model-only reference run at every computed position — chunked prefill, verify rows, preemption, depth 0 and 1 (tiny Qwen3, CPU); on Qwen3-0.6B the taps and sampled drafts run inside verify graphs, equal to eager runs of the same padded plans |
+| `causal` / `window` (D4) | Facts of `attention.paged_verify@1`, given only when not default, so every existing site's facts (and locks) stay as they were. `causal=False`: a row's new tokens see each other both ways, and the context before them. `window` W: a query at p sees no key at or before p − W | Oracle (`reference.py`) pinned by which keys can change a query's output (`test_attention_masks`, CPU). Triton verify (the walk starts at the window's first key) against the oracle on sm_86: bf16, 4 geometries × 6 masks, and q8_0; memcheck clean; its default path bitwise equal to the previous kernel (48 cases). The CPU provider passes the facts to the oracle |
+| Sampled drafts (§3.5, D5) | `SeqTable.draft_q_ids` / `draft_q` [S, k_max, Kq], allocated when the drafter declares `q_support` = Kq. `std.spec.rejection`: d accepted iff u · q(d) < p(d); the rejection residual max(p − q, 0), which is p off q's support; ids repeated in a law add up; rows past `n_draft` are never read. Deterministic drafts (no laws) take the Gate A path, unchanged | L0-dist (`test_rejection`): the first token for Kq = 4 laws inside, straddling and outside the top-p support, padded, and equal to p; the joint law of three tokens on the toy Markov target with a sampling drafter; n_draft < k with stale rows; one-hot laws bitwise equal to deterministic drafts; an empty residual at a coin of one. Plants: `unmasked-padding` and a residual keeping q's mass fail. Every Gate A test unchanged |
+
+**Decisions and deviations**
+- **The window convention** (§8's risk): W admits the last W positions, the query's own included — distance ≤ W − 1,
+  llama.cpp's `p − p_k < n_swa` and SGLang's `window_left = W − 1`; HF's mask admits one key more. DFlash2's 2048 is
+  passed as `window=2048`. Non-causal block keys after the query are always admitted.
+- **`Drafter.q_support`** names Kq (an optional attribute); the spec named only the tables.
+- **A fix in `std.spec.rejection`:** it gathered p at whatever ids a drafter left past `n_draft` (the test oracle leaves
+  out-of-vocabulary ids there: an index error). Drafts and laws past `n_draft` are now read as token 0 at zero mass;
+  outputs are unchanged otherwise (tested).
+- **Plants:** `unmasked-padding` (judge/holon_judge/planted.py) fails Gate A's exact check (`n_accept ≤ n_draft`, in the
+  toy drafter's rewind) and Gate B's stale-row L0-dist. Applying the deterministic rule to sampled drafts is no plant:
+  target-only verification is lossless for any proposal independent of the coins, only slower (p(d) ≤ min(1, p/q)).
+- **FlashInfer** offers no `attention.paged_verify@1`, so it is never selected for the new facts.
+- **Locks:** core, `std.mixers.gqa`, `std.spec.rejection` and `kernels.triton_attn` changed, so the locks' source pins
+  move; behaviour with speculation off is unchanged (the kernel's default path bitwise, the deterministic verifier path
+  untouched). Re-propagation comes with Gate B's evidence.
+
+
+**Open for phase 2** (for the panel with the seams)
+- **The DFlash attention unit's planner.** Its block attention is a sub-step of 8 rows through `attention.paged_verify@1`
+  with `causal=False, window=2048`, and its absorb pass only writes context K/V. The GQA planner (which selects verify
+  kernels for sub-steps) lives in `std.mixers.gqa`, which a plugin may not import: either the GQA unit gains `causal` /
+  `window` knobs passed through as the verify facts (sliding-window models need them too), or the DFlash unit carries
+  its own small planner. The first is the more general; it touches std only.
+- **The drafter's temperature.** DFlash2 walks at the request's temperature, which the `Sampler` protocol does not
+  expose per row; its draws can use `ctx.sampler.uniform` on a stream of its own.
+- **Tap 5, 19, 33, 47, 61** are `tap(i)` directly: the residual stream after HF layer i (llama.cpp stores i + 1, the
+  next layer's input: the same tensor).
+- Core: 3664 of 6000 code lines (+14 in phase 1).
