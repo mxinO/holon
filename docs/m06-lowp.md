@@ -535,3 +535,18 @@ copy is a named plan-time workspace.
 | structural test | A1 (§4.3) | A2: it needs `reference.py` and the dialects |
 | core | registries deleted (D11) | also the dead `dialect` / `converter` slot kinds (`api/manifest.py`) |
 | ggml workspace | — | the pool records its high-water mark (a test-only process-wide counter); L0 holds every call to `workspace_bytes(_id)` for its rows, and on a J = 128 fixup shape (dense, with ids) the formula's spare to ≤ 2048 + 3 · 256 bytes (the load-chunk allowance stays: `nthreads` may be any multiple of 32, so 128 · 144 bytes can round up past itself); `mmq_schedule` aborts on FP4 types until A3 passes the precision |
+
+**As built (A2).** Recorded deviations from rev 3 in step A2.
+
+| item | rev 3 | as built |
+|---|---|---|
+| declared-quantized modules | the dialect checks the config: declared-quantized modules have their parts, ignored ones are dense (§4.4) | configs name their targets by class (`Linear`), which a weight source cannot see: a module is quantized when it holds a dialect part other than a float `weight`; it must hold every part and not be ignored (`ignore`, `exclude(_modules)`, `modules_to_not_convert`: names, dotted prefixes or suffixes, `*`, `re:`), so an ignored module is dense; one the config would quantize but stores dense loads dense |
+| grouped yield | dense tensors and modules in shard order, each part read once | a module at its primary part's place; dropped tensors (input scales) are never read, except `k_scale` / `v_scale`, checked to be 1.0 before the first yield; a tensor in two shards is a load error |
+| group and block sizes | 16, 32, 128 × 128 | read from the parts' shapes by `reference.py` (a weight merged by rows dequantizes as its units); FP8 blocks must tile the weight; `weight_block_size` is not compared |
+| compressed-tensors FP8 | `weight_scale` named in §4.4 | `float-quantized` with block weights; a fixture, no target |
+| `hf_quant_config.json` | read when config.json has no `quantization_config` | its `producer.name` is the quant method (ModelOpt's file) |
+| owner cross-checks (D10) | transformers exact, compressed-tensors ≤ 2 / 0 ulp, ModelOpt ≤ 1 ulp, Quark exact, gguf-py exact | `python -m holon_judge hf-quant-check` (`holon_judge/hf_quant.py`), every quantized tensor of a checkpoint. transformers' `Fp8Dequantize` is exact given the dialects' f32 scales (with BF16 scales it rounds its product to bf16); compressed-tensors' own unpacking, scale decoding and `dequantize` in f32 (its compressor's `decompress` returns bf16); gguf-py on llama.cpp's repack for every FP4 tensor, compressed-tensors' included. amd-quark 0.13 is not in the development environment (it requires huggingface-hub 2 and datasets 5, which break transformers 5.6): its check runs where it imports |
+| fixture oracle | engine vs transformers on the fixtures | transformers in fp32 on each fixture's weights as the file means them (compressed-tensors' decoding; the spec writers' own for FP8, ModelOpt and Quark): transformers has no ModelOpt loader, needs amd-quark for Quark, and rounds FP8 with BF16 scales and compressed-tensors' FP4 to bf16 |
+| judge HF-quant map | A4 (goldens) | in A2, for the structural test: from names and dtypes, independent of the dialects; `structure --device cpu` for stacks no GPU kernel reads yet (the reference kernels) |
+| plants | §4.8 | N1, T1, M3, M5, P5, P6 in `hf_quant_plants` (layer 18 in the CLI's set); M2 is `hf-stack-off-by-one`; on the fixtures each fails at ≥ 10× the passing bound |
+| GGUF NVFP4 | refused at load | when the source opens the file, naming the first NVFP4 tensor |
