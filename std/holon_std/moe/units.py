@@ -80,18 +80,18 @@ class ExpertLinear(nn.Module):
     @staticmethod
     def merge(gate: ExpertLinear, up: ExpertLinear) -> ExpertLinear | None:
         """One stack applying SwiGLU: per expert gate's rows, then up's. Parts merge by shape (docs/m06-lowp.md D5):
-        one with a value per expert (E elements) is stacked [2, E], gate's row then up's; one with `out / g` rows per
-        expert is concatenated per expert (a stored row is a whole block run, or its rows' scales). None if the
-        layouts, shapes or parts differ; gate and up give up their weights."""
+        one with a value per expert ([E] or [E, 1]) is stacked [2, E], gate's row then up's; one with `out / g` rows
+        per expert ([E, out / g, …]) is concatenated per expert (a stored row is a whole block run, or its rows'
+        scales). None if the layouts, shapes or parts differ; gate and up give up their weights."""
         if (gate.layout, gate.in_features, gate.out_features, gate.experts, gate.act_dtype) != \
                 (up.layout, up.in_features, up.out_features, up.experts, up.act_dtype) \
                 or gate.weight.dtype != up.weight.dtype or gate.parts.keys() != up.parts.keys():
             return None
         parts = {}
         for role, g in gate.parts.items():
-            if g.numel() == gate.experts:                       # one value per expert
+            if g.dim() <= 2 and g.numel() == gate.experts:      # one value per expert, [E] or [E, 1]
                 parts[role] = torch.stack([g.reshape(-1), up.parts[role].reshape(-1)])
-            elif g.dim() > 1 and gate.out_features % g.shape[1] == 0:
+            elif g.dim() > 1 and g.shape[1] and gate.out_features % g.shape[1] == 0:
                 parts[role] = torch.cat([g, up.parts[role]], dim=1)
             else:
                 return None

@@ -97,9 +97,9 @@ def _dtype(t: torch.dtype) -> str:
 
 
 def _by_rows(parts: list[torch.Tensor], outs: list[int]) -> bool:
-    """Every unit's part has `out / g` rows of its unit's `out`, for one `g`; one element in every unit is a
-    per-tensor value instead (whatever the units' `out`)."""
-    if all(p.numel() == 1 for p in parts):
+    """Every unit's part has `out / g` rows of its unit's `out`, for one `g`; a part of rank ≤ 1 and one element ([]
+    or [1]) in every unit is a per-tensor value instead (a per-row part is 2-D: an FP8 block scale [1, 1] is a row)."""
+    if all(p.dim() <= 1 and p.numel() == 1 for p in parts):
         return False
     gs = {out // p.shape[0] if p.dim() and p.shape[0] and out % p.shape[0] == 0 else 0
           for p, out in zip(parts, outs, strict=True)}
@@ -113,7 +113,7 @@ def _same_bits(a: torch.Tensor, b: torch.Tensor) -> bool:
 
 def _merged_parts(units: tuple[Linear, ...]) -> dict[str, torch.Tensor] | None:
     """The units' quantized parts as one weight's (docs/m06-lowp.md D5): a part with `out / g` rows in every unit is
-    concatenated by rows; any other (a per-tensor scale, one element) must be bit-equal in every unit, else None."""
+    concatenated by rows; any other (a per-tensor scale, [] or [1]) must be bit-equal in every unit, else None."""
     if len({tuple(u.parts) for u in units}) > 1:
         return None
     merged = {}

@@ -175,3 +175,42 @@ def test_a_quantized_moe_stacks_its_experts_slice_by_slice(shape2):
     h = moe.linear_experts(x[:, None], torch.cat([stack["gate"], stack["up"]], dim=1), ids, "swiglu")
     want = moe.moe_combine(moe.linear_experts(h, stack["down"], ids), weights, x.dtype)
     torch.testing.assert_close(unit(x), want, rtol=1e-5, atol=1e-2)       # |y| up to ~1e5 (SwiGLU of int8 rows)
+
+
+def _block_scaled(out: int, inp: int, seed: int, **extra: torch.Tensor) -> QTensor:
+    """FP8-shaped: int8 rows and a scale per 128 × 128 block, [out/128, in/128] (a 128 × 128 unit's is [1, 1])."""
+    g = torch.Generator().manual_seed(seed)
+    return QTensor(ROWS, (out, inp), {"q": torch.randint(-128, 128, (out, inp), dtype=torch.int8, generator=g),
+                                      "scale": torch.rand(out // 128, inp // 128, generator=g), **extra})
+
+
+def test_a_block_scale_of_one_block_merges_as_rows():
+    """[1, 1] is one row of blocks, not a per-tensor value: two 128-row units merge to a [2, 1] scale (a kept [1, 1]
+    would leave the second block row's scale out of range)."""
+    ctx = _ctx()
+    q = _block_scaled(128, 128, seed=1)
+    units = [_linear(ctx, QTensor(ROWS, (128, 128), dict(q.parts))) for _ in range(2)]        # equal scales too
+    merged = type(units[0]).merge(*units)
+    assert tuple(merged.parts["scale"].shape) == (2, 1) and tuple(merged.parts["q"].shape) == (256, 128)
+
+
+def _stacks(ctx, slice_of):
+    """A std.moe unit (E experts, inter = hidden = 128) whose gate and up stacks adopt `slice_of(seed)` per expert."""
+    with torch.device("meta"):
+        unit = ctx.unit(Ref("std.moe@1", experts=E, top_k=2, inter=128, renormalize=True), hidden=128, layer=0)
+    for e in range(E):
+        for i, p in enumerate(("gate", "up")):
+            assert getattr(unit, p).adopt(ctx, "weight", slice_of(10 * e + i), index=e)
+    return unit
+
+
+def test_expert_block_scales_of_one_block_merge_per_expert():
+    """[E, 1, 1] is one block row per expert: gate/up concatenate it per expert, [E, 2, 1], not [2, E]."""
+    unit = _stacks(_ctx(), lambda seed: _block_scaled(128, 128, seed))
+    merged = type(unit.gate).merge(unit.gate, unit.up)
+    assert tuple(merged.parts["scale"].shape) == (E, 2, 1) and tuple(merged.parts["q"].shape) == (E, 256, 128)
+
+
+def test_an_expert_part_with_an_empty_dimension_does_not_merge():
+    unit = _stacks(_ctx(), lambda seed: _block_scaled(128, 128, seed, empty=torch.zeros(0)))
+    assert type(unit.gate).merge(unit.gate, unit.up) is None
