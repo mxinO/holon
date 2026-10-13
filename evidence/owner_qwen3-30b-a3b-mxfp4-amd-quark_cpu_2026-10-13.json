@@ -1,0 +1,26 @@
+{
+ "workload": "m06-a2-owner-check",
+ "date": "2026-10-13",
+ "commit": "42a793b",
+ "hardware": "cpu",
+ "command": "python -m holon_judge hf-quant-check --model amd-quark/Qwen3-30B-A3B-MXFP4 --llama-cpp <llama.cpp at cbe28bb3>",
+ "environment": "a separate venv where amd-quark 0.13 and gguf 0.19.0 import (amd-quark is not a dev dependency)",
+ "result": {
+  "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+  "llama_cpp": true,
+  "owners": {
+   "quark.Pack_fp4": {
+    "modules": 18432,
+    "max_ulps": 0,
+    "over": 0,
+    "first_over": []
+   },
+   "gguf-py on llama.cpp's repack": {
+    "modules": 18432,
+    "max_ulps": 0,
+    "over": 0,
+    "first_over": []
+   }
+  }
+ }
+}

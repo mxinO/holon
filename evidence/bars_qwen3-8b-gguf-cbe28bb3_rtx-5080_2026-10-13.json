@@ -1,0 +1,83 @@
+{
+ "workload": "m06-a0-bar",
+ "date": "2026-10-13",
+ "gpu_class": "rtx-5080",
+ "model": "unsloth/Qwen3-8B-GGUF Q4_K_M",
+ "holon_commit": "a503daa (<user>/m06-lowp A0+A1 rebased on main)",
+ "ggml_pin": "cbe28bb3",
+ "m01_reference": {
+  "pp512": 8291,
+  "tg128": 155.0
+ },
+ "holon": {
+  "pp512": {
+   "mean": 8355.92,
+   "sd": 17.6,
+   "runs": [
+    8326.66,
+    8368.85,
+    8354.51,
+    8359.46,
+    8370.1
+   ]
+  },
+  "tg128": {
+   "mean": 155.05,
+   "sd": 0.01,
+   "runs": [
+    155.06,
+    155.05,
+    155.06,
+    155.05,
+    155.03
+   ],
+   "cpu_ms_per_step_p50": 0.385
+  },
+  "tg128 @ d256": {
+   "mean": 153.76,
+   "sd": 0.03,
+   "runs": [
+    153.81,
+    153.76,
+    153.78,
+    153.73,
+    153.73
+   ],
+   "cpu_ms_per_step_p50": 0.388
+  }
+ },
+ "llama_bench_cbe28bb3": [
+  {
+   "n_prompt": 512,
+   "n_gen": 0,
+   "n_depth": 0,
+   "avg_ts": 7905.626862,
+   "stddev_ts": 322.813663
+  },
+  {
+   "n_prompt": 0,
+   "n_gen": 128,
+   "n_depth": 0,
+   "avg_ts": 158.276465,
+   "stddev_ts": 0.124761
+  },
+  {
+   "n_prompt": 512,
+   "n_gen": 0,
+   "n_depth": 256,
+   "avg_ts": 7867.776851,
+   "stddev_ts": 140.313573
+  },
+  {
+   "n_prompt": 0,
+   "n_gen": 128,
+   "n_depth": 256,
+   "avg_ts": 156.824846,
+   "stddev_ts": 0.182389
+  }
+ ],
+ "command": {
+  "holon": "python bench/llama_bench.py --model <Qwen3-8B-Q4_K_M.gguf> -r 5 --blocking-sync --engine-args '--memory-fraction 0.98 --max-seqs 48'",
+  "llama": "llama-bench -m <file> -p 512 -n 128 -d 0,256 -ngl 99 -fa on -r 5 -o json"
+ }
+}
