@@ -1,0 +1,145 @@
+{
+ "workload": "m04nat-decode_b1-plain",
+ "date": "2026-10-12",
+ "command": "python bench/run.py --name m04nat-decode_b1-plain --gpu 0 --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e --rounds 2 --max-batch 4 --max-step-tokens 2048 --corpus judge/prompts/v1-qwen3_5.jsonl --backends holon_http --traces bench/traces/decode_b1.jsonl",
+ "commit": "d002fd75930302522fa8adb776aa60131f74e325",
+ "gpu_class": "rtx-4090",
+ "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e",
+ "rounds": 2,
+ "order": ["holon_http"],
+ "method": "In-process engines driven by bench/driver.py, one scheduling step per call; client-side timestamps taken when a step returns a token. TTFT = first token - release (arrival, or previous turn's last token + gap); TPOT = (last - first) / (tokens - 1) per request; throughput = output tokens / (last token - first release). Decode steps = steps at peak batch that return no first token; decode tok/s = their tokens / their wall time. CPU ms/step = time.process_time() delta around step() on those steps, measured with --blocking-sync (CUDA primary context in blocking-sync mode and torch events created blocking, so waiting for the GPU sleeps and is not counted). Greedy, ignore_eos, fixed output lengths; warmup on the same shapes with other prompt tokens, excluded. HTTP backends (llamaserver, holon_http; bench/backends/http.py): streamed requests, a token timestamped when its chunk arrives; their 'steps' are client polls, so decode tok/s and CPU ms/step do not apply to them.",
+ "traces_sha256": {
+  "decode_b1": "cc41d53b03df6007"
+ },
+ "corpus": {
+  "v1-qwen3_5.jsonl": "80bf5a54bd350923"
+ },
+ "backends": {
+  "holon_http": {
+   "config": {
+    "flags": "--max-seqs 4 --max-model-len 768 --max-step-tokens 2048 --memory-fraction 0.9 --plugin-options recurrent.checkpoints=4 kv.format=q8_0"
+   },
+   "load_s": 146.1,
+   "blocking_sync": false,
+   "packages": {
+    "torch": "2.11.0+cu130",
+    "triton": "3.6.0",
+    "flashinfer-python": "0.6.12"
+   }
+  }
+ },
+ "summary": {
+  "decode_b1": {
+   "holon_http": {
+    "requests": 2,
+    "ttft_ms": {
+     "p50": 83.79,
+     "p90": 84.27,
+     "p99": 84.38
+    },
+    "tpot_ms": {
+     "p50": 21.33,
+     "p90": 21.34,
+     "p99": 21.34
+    },
+    "throughput_tok_s": 46.3,
+    "throughput_per_round": [46.3, 46.3],
+    "decode": {
+     "batch": 1,
+     "steps": 510,
+     "tok_s": 789.9,
+     "wall_ms_p50": 1.266,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 512,
+    "stats": {
+     "prefix_tokens_saved": 0
+    }
+   }
+  }
+ },
+ "runs": [
+  {
+   "round": 0,
+   "backend": "holon_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 84.39,
+     "p90": 84.39,
+     "p99": 84.39
+    },
+    "tpot_ms": {
+     "p50": 21.33,
+     "p90": 21.33,
+     "p99": 21.33
+    },
+    "throughput_tok_s": 46.3,
+    "throughput_per_round": [46.3],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 789.1,
+     "wall_ms_p50": 1.266,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.084395, 5.524698]
+   ],
+   "stats": {
+    "prefix_tokens_saved": 0
+   }
+  },
+  {
+   "round": 1,
+   "backend": "holon_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 83.19,
+     "p90": 83.19,
+     "p99": 83.19
+    },
+    "tpot_ms": {
+     "p50": 21.34,
+     "p90": 21.34,
+     "p99": 21.34
+    },
+    "throughput_tok_s": 46.3,
+    "throughput_per_round": [46.3],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 790.7,
+     "wall_ms_p50": 1.265,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.083194, 5.523663]
+   ],
+   "stats": {
+    "prefix_tokens_saved": 0
+   }
+  }
+ ]
+}

@@ -82,7 +82,7 @@ def main() -> None:
         done.sort(key=lambda r: (r.sid, r.turn))
         cases.append({"trace": name, "requests": [r.row() for r in done], "steps": steps})
         if before is not None:                     # the backend's counters over this trace (warmup excluded)
-            cases[-1]["stats"] = {k: v - before[k] for k, v in backend.stats().items()}
+            cases[-1]["stats"] = {k: v - before.get(k, 0) for k, v in backend.stats().items()}
         print(f"{args.backend} {name}: {len(done)} requests, {len(steps)} steps", flush=True)
 
     info = backend.info() | {"load_s": round(load_s, 1), "blocking_sync": args.blocking_sync,

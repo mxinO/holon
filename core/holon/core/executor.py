@@ -51,6 +51,7 @@ class Launched:
     logprobs: tuple[torch.Tensor, ...] | None   # sampled tokens' logprob, top ids, top logprobs
     done: platform.Event
     prompt_logprobs: list[Logprobs] = dataclasses.field(default_factory=list)   # per PromptRows, on the host now
+    graphed: bool = False                    # replayed a captured graph
 
 
 @dataclasses.dataclass
@@ -305,7 +306,7 @@ class Executor:
             self._out_turn ^= 1
         done = platform.Event(self.device)
         done.record()
-        return Launched(tokens, accepts, drafts, lps, done, recorded)
+        return Launched(tokens, accepts, drafts, lps, done, recorded, key is not None)
 
     def _decode(self, ctx: StepContext) -> tuple[torch.Tensor, torch.Tensor | None]:
         """A decode or verify step's device work from inputs to tokens (and accepted drafts), the rewind and the

@@ -87,3 +87,5 @@ def test_ngram_speculation_captures_graphs():
     agree = [next((i for i, (x, y) in enumerate(zip(a, b, strict=True)) if x != y), len(a))
              for a, b in zip(plain, spec, strict=True)]
     assert sum(agree) >= 0.75 * len(agree) * params.max_tokens, agree
+    stats = engine.stats()                       # every verify step replayed a graph
+    assert stats["spec_verify_steps"] > 0 and stats["spec_verify_steps_graphed"] == stats["spec_verify_steps"]

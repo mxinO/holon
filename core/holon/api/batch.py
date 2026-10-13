@@ -81,6 +81,7 @@ class Seq:
     num_computed: int = 0                # host mirror; exact after commit
     pending: int = 0                     # tokens sampled on the device, not yet committed (an upper bound)
     inexact: int = 0                     # uncommitted verify rows: num_computed is then only an upper bound
+    n_draft: int = 0                     # real drafts its last commit wrote for its next step (host copy)
     status: Status = Status.WAITING
     finish_reason: str | None = None
     ext: dict[str, Any] = dataclasses.field(default_factory=dict)  # namespaced plugin state; core never reads

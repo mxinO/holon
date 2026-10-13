@@ -109,7 +109,8 @@ def summarize(cases: list[dict], columns: list[str], cpu_time: bool) -> dict:
                        "cpu_ms_mean": None if not cpu else round(sum(cpu) / len(cpu) * 1e3, 3)},
             "wrong_length": short,
             "prompt_tokens": sum(r[columns.index("prompt")] for c in cases for r in c["requests"]),
-            "stats": {k: sum(c["stats"][k] for c in cases) for k in cases[0].get("stats", {})}}
+            "stats": {k: sum(c["stats"].get(k, 0) for c in cases)
+                      for k in sorted({k for c in cases for k in c.get("stats", {})})}}
 
 
 def run_worker(backend: str, args: argparse.Namespace, out: pathlib.Path) -> tuple[dict | None, str]:
@@ -139,10 +140,10 @@ def run_worker(backend: str, args: argparse.Namespace, out: pathlib.Path) -> tup
 
 
 def acceptance(stats: dict) -> float | None:
-    """Accepted drafts over real drafts (speculating backends' stats: Holon's verify rows by drafts accepted, or a
-    server's accepted count)."""
+    """Accepted drafts over real drafts verified (speculating backends' stats: Holon's verify rows by k and drafts
+    accepted, `spec_rows_k<k>_accepting_<n>`, or a server's accepted count)."""
     accepted = stats.get("spec_accepted", sum(int(k.rsplit("_", 1)[1]) * n for k, n in stats.items()
-                                             if k.startswith("spec_rows_accepting_")))
+                                             if k.startswith("spec_rows_k")))
     return round(accepted / stats["spec_drafted"], 3) if stats.get("spec_drafted") else None
 
 

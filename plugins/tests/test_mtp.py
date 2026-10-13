@@ -43,9 +43,11 @@ def test_mtp_speculation_is_plain_greedy(tiny, overlap):
     assert "mtp.kv" in engine.executor.planners
     assert engine.generate(prompts, GREEDY) == plain
     assert engine.generate(prompts, GREEDY) == plain and engine.state.tokens_saved > 0
-    stats = engine.stats()                       # every verify row counted once, by the drafts it accepted
-    rows = sum(n for key, n in stats.items() if key.startswith("spec_rows_accepting_"))
-    assert 0 < rows and stats["spec_drafted"] == 3 * rows
+    stats = engine.stats()                       # every verify row counted once, by k and the drafts it accepted
+    rows = sum(n for key, n in stats.items() if key.startswith("spec_rows_k3_accepting_"))
+    assert 0 < rows and stats["spec_drafted"] == 3 * rows      # MTP drafts every row at the maximum k
+    steps, overlapped = stats["spec_verify_steps"], stats["spec_verify_steps_overlapped"]
+    assert 0 < overlapped <= steps if overlap else overlapped == 0      # a step after a forced commit is at depth 0
 
 
 def _reference(model, weights, tokens: list[int], hidden: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

@@ -11,6 +11,7 @@ minimum pools → capture the decode graphs.
 """
 from __future__ import annotations
 
+import collections
 import dataclasses
 import functools
 import gc
@@ -114,7 +115,9 @@ class Engine:
         # Speculative decoding (design §7.6): a draft policy picks k per step, one drafter proposes, the verifier
         # checks; all three are plugins, used only when drafts are enabled and a policy is installed.
         self.policy = drafter = verifier = aux = None
-        self.drafted, self.accepted = 0, [0] * (cfg.max_draft_tokens + 1)    # real drafts; rows by drafts accepted
+        # Speculation counters (stats()): verify steps (graphed, launched at depth 1), real drafts verified, and
+        # verify rows by (k, drafts accepted).
+        self.spec_counts = collections.Counter()
         substeps, sub_planners = (0, 0), {}
         if cfg.max_draft_tokens and any(True for _ in p.by_slot("draft_policy")):
             pick = lambda slot: p.load(p.single(slot, cfg.slots.get(slot)))        # noqa: E731
@@ -262,9 +265,9 @@ class Engine:
                "preemptions": self.sched.preemptions, "prefix_tokens_saved": self.state.tokens_saved,
                "cached_blocks": len(self.state.index.entries) if self.state.index is not None else 0,
                "graphs": len(self.executor.graphs) if self.executor and self.executor.graphs is not None else 0}
-        if self.policy is not None:                  # speculation: real drafts, and verify rows by drafts accepted
-            out["spec_drafted"] = self.drafted
-            out |= {f"spec_rows_accepting_{j}": n for j, n in enumerate(self.accepted)}
+        if self.policy is not None:                  # the speculation counters (__init__)
+            out |= {f"spec_{key}" if isinstance(key, str) else f"spec_rows_k{key[0]}_accepting_{key[1]}": n
+                    for key, n in self.spec_counts.items()}
         return out
 
     def generate(self, prompts: list[list[int]], params: SamplingParams | None = None) -> list[list[int]]:
@@ -298,6 +301,9 @@ class Engine:
                 raise RuntimeError("the scheduler made no progress with requests pending")
             return deltas
         step = self._launch(*scheduled)
+        if self.policy is not None and any(m > 1 for _, _, m in step.rows):
+            self.spec_counts.update(verify_steps=1, verify_steps_graphed=step.out.graphed,
+                             verify_steps_overlapped=prev is not None)
         if prev is not None:
             deltas += self._commit(prev)
         if self.cfg.overlap and not step.sync:
@@ -377,9 +383,10 @@ class Engine:
                 continue
             if drafts is not None:
                 self.policy.observe(seq, step.k, drafts[i], accepted)
-                if m > 1:
-                    self.drafted += drafts[i]
-                    self.accepted[accepted] += 1
+                if m > 1:                            # this row verified what the last commit's drafts were
+                    self.spec_counts["drafted"] += min(seq.n_draft, m - 1)
+                    self.spec_counts[m - 1, accepted] += 1
+                seq.n_draft = drafts[i]
             if m == 1:                               # the common case, without the per-token loop
                 out = [tokens[at]]
                 seq.tokens.append(out[0])

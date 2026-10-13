@@ -180,3 +180,18 @@ def test_a_sure_draft_is_accepted_at_the_largest_coin():
     logits[..., 5] = 10.0
     tokens, n_accept = _step(sampler, logits, torch.full((1, K), 5), torch.tensor([6]))     # column 0 at position 7
     assert n_accept.item() == K and (tokens == 5).all()
+
+
+def test_a_sure_draft_is_accepted_at_a_coin_of_one():
+    # The guard itself, whatever the uniform's range: a draft whose residual is empty (p(d) = 1 in fp32) is accepted.
+    class CoinOfOne(Sampler):
+        def uniform(self, ctx, stream=0):
+            u = super().uniform(ctx, stream)
+            return torch.ones_like(u) if stream == 1 else u
+
+    sampler = CoinOfOne(1, torch.device("cpu"))
+    sampler.admit(0, SamplingParams(temperature=1.0, seed=0))
+    logits = torch.full((1, K + 1, V), -200.0)
+    logits[..., 5] = 0.0                                  # p(5) = 1: the rest underflows to 0 in fp32
+    tokens, n_accept = _step(sampler, logits, torch.full((1, K), 5), torch.tensor([6]))
+    assert n_accept.item() == K and (tokens == 5).all()
