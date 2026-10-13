@@ -54,7 +54,8 @@ class MTPDrafter:
         first = dev.query_start[:-1]
         slots = dev.slots
         prev = hn.roll(1, 0)                                             # each token's predecessor in its row …
-        carried = self.carry[slots] * (self.carry_at[slots] == dev.positions[first] - 1)[:, None]
+        start = dev.positions[first]                                     # a request's first token carries nothing
+        carried = self.carry[slots] * ((self.carry_at[slots] == start - 1) & (start > 0))[:, None]
         prev[first] = carried.to(prev.dtype)                             # … or the slot's carried hidden
         self.head(self.embed(dev.input_ids), prev, view)                 # the head's KV for the step's tokens
         verify = bool((plan.n_logits > 1).any())

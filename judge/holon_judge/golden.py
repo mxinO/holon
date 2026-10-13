@@ -62,7 +62,12 @@ def hardware(device: torch.device) -> str:
 def teacher_force(model: torch.nn.Module, ids: list[int], k: int, rows: int = 256) -> tuple[torch.Tensor, ...]:
     """One sequence → (topk_ids [n-1, k], topk_lp, target_lp [n-1], tail_lp [n-1]) on the CPU, fp32."""
     x = torch.tensor([ids], device=model.device)
-    logits, target = model(x).logits[0, :-1], x[0, 1:]
+    return topk_rows(model(x).logits[0, :-1], x[0, 1:], k, rows)
+
+
+def topk_rows(logits: torch.Tensor, target: torch.Tensor, k: int, rows: int = 256) -> tuple[torch.Tensor, ...]:
+    """Next-token logits [n, V] and their targets [n] → a recording's rows (top-k ids and logprobs, the target's
+    logprob, the tail's), on the CPU, fp32."""
     out = []
     for a in range(0, len(target), rows):  # row blocks bound the fp64 copies of [rows, vocab]
         # Normalize in fp64: an fp32 log-softmax over a 150k vocabulary is off by up to 1e-4 nats on CPU, the size

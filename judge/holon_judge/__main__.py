@@ -150,6 +150,36 @@ def _snapshot(a: argparse.Namespace) -> int:
     return 0 if report["run_identical"] else 1
 
 
+def _drafter(a: argparse.Namespace) -> int:
+    """L0-drafter: the engine's draft head against its fp32 reference, budgets from the bf16 reference (the floor)."""
+    from holon.core.cli import engine_config, engine_flags
+    from holon.core.engine import Engine
+
+    from . import drafter
+
+    prompts = PromptSet.load(a.prompts)
+    recordings = {}
+    for name, dtype in (("golden", torch.float32), ("floor", golden.DTYPES[a.dtype])):
+        cached = pathlib.Path(a.cache) / f"mtp-{name}.safetensors" if a.cache else None
+        if cached is not None and cached.exists():
+            recordings[name] = Recording.load(cached)
+            continue
+        recordings[name] = drafter.reference(a.model, prompts, dtype, a.k)
+        if cached is not None:
+            recordings[name].save(cached)
+    flags = argparse.ArgumentParser()
+    engine_flags(flags)
+    config = engine_config(str(golden.resolve_model(a.engine_model or a.model)), flags.parse_args(shlex.split(
+        a.engine_args)))
+    longest = max(len(p.ids) for p in prompts.prompts)
+    sizes = {"max_model_len": max(config.max_model_len, longest + 8), "max_step_tokens": max(config.max_step_tokens,
+                                                                                          longest)}
+    engine = Engine(dataclasses.replace(config, prefix_cache=False, **sizes))
+    cand = drafter.candidate(engine, prompts, a.k)
+    engine.close()
+    return _report(compare(recordings["golden"], cand, recordings["floor"]), a.json)
+
+
 def _bounded(a: argparse.Namespace) -> int:
     from holon.core.cli import engine_config, engine_flags
     from holon.core.engine import Engine
@@ -266,6 +296,17 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--engine-args", default="", help="EngineConfig flags, as for `holon serve` (a class's settings)")
     t.add_argument("--json", help="write the machine-readable report here")
     t.set_defaults(run=_snapshot)
+
+    d = sub.add_parser("drafter", help="L0-drafter: a draft head (MTP) against its fp32 reference")
+    d.add_argument("--model", required=True, help="HF checkpoint with the head (the reference reads it)")
+    d.add_argument("--engine-model", help="what the engine serves, if not --model (e.g. a .gguf of it)")
+    d.add_argument("--prompts", required=True)
+    d.add_argument("--engine-args", default="", help="EngineConfig flags that speculate with the head")
+    d.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES, help="the floor's dtype")
+    d.add_argument("--k", type=int, default=20)
+    d.add_argument("--cache", help="directory keeping the references' recordings")
+    d.add_argument("--json", help="write the machine-readable result here")
+    d.set_defaults(run=_drafter)
 
     b = sub.add_parser("bounded", help="judge engine configurations against the reference on a multi-turn trace")
     b.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")
