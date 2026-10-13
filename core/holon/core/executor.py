@@ -309,7 +309,7 @@ class Executor:
             self.last_token[slots] = tokens
             self.num_computed[slots] = ctx.prep.lens[dev.logits_rows].long()
             if self.drafter is not None:             # the drafter reads it after every step
-                self.seq_table.n_accept[slots] = 0
+                self.seq_table.n_accept.index_fill_(0, slots, 0)     # device-only: capturable
             return tokens
         width = int(ctx.batch.plan.n_logits.max())
         rows = dev.logits_rows.view(-1, width)[:, 0]

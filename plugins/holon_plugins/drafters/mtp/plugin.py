@@ -64,7 +64,7 @@ class MTPDrafter:
         sampled = dev.slots[dev.logits_rows] if not verify else slots
         k = plan.draft_k
         if not k or not len(dev.logits_rows):
-            table.n_draft[sampled] = 0
+            table.n_draft.index_fill_(0, sampled, 0)
             return
         x, token = self.carry[sampled], table.last_token[sampled]
         for i in range(k):
@@ -72,4 +72,4 @@ class MTPDrafter:
             x = self.head(self.embed(token), x, sub)
             token = self.lm_head(x).argmax(-1)
             table.draft_tokens[sampled, i] = token
-        table.n_draft[sampled] = k
+        table.n_draft.index_fill_(0, sampled, k)
