@@ -43,9 +43,14 @@ the code is our own plugin-native implementation. Only kernels may be borrowed, 
 | M0.1 | Qwen3-8B GGUF (Q8_0, Q4_K_M, IQ4_XS, IQ3_XXS) | quant pipeline: GGUF weight source, ggml dialect, borrowed ggml kernels chosen per class; first 16 GB consumer data point (RTX 5080) | gguf weight source, ggml dialect, ggml_cuda kernels |
 | M0.2 | Qwen3-30B-A3B GGUF (UD-IQ3_XXS 12.0 GiB, Q4_K_M; UD-Q3_K_XL optional) + bf16 HF (correctness, RTX PRO 6000) | model isolation; format-general MoE unit and ops; a 30B MoE on a 16 GB card | qwen3_moe recipe, std.moe, GGUF MoE kernels, stacked loading, a Triton grouped GEMM |
 | M0.3 | Qwen3.8-27B: GGUF (UD-IQ3_S 11.2 GiB on 16 GB, UD-Q4_K_M) + bf16 HF (correctness, RTX PRO 6000) | heterogeneous state, publish/adopt MemOps, checkpoint prefix reuse, quantized KV cache (q8_0 ours, fp8 FlashInfer) | qwen3_5 recipe, gdn mixer + kernels, recurrent state kind, checkpoint policies, quantized-KV layouts |
-| M0.4 | Qwen3.5 / Qwen3.8 (built-in MTP) + Qwen3-8B | spec decoding at depth 1 on the device SeqTable; Rewindable incl. GDN rollback | mtp drafter, gpu n-gram drafter, verifiers, draft policies |
+| M0.4 | Qwen3.5 / Qwen3.8 (built-in MTP, DFlash2 draft) + Qwen3-8B | spec decoding at depth 1 on the device SeqTable; taps, auxiliary layers, Rewindable incl. GDN replay; verify graphs | mtp, dflash and gpu n-gram drafters, greedy + rejection verifiers, fixed-k policy (`docs/m04-spec.md`) |
 | M0.5 | Qwen3-8B, Qwen3.5-9B | forward/sample split, host_input, Rewindable grammar | xgrammar processor, parsers, anthropic + responses frontends |
 | M0.6 | Qwen3-8B / Qwen3-30B-A3B in FP8 (block-scaled), NVFP4 and MXFP4 | low-precision HF checkpoints, dense and MoE: weight-source dialects over `QTensor` parts, `qlinear` / `linear_experts` providers, judge tiers per format; RTX PRO 6000 (sm_120), FP8 also on sm_89 | fp8 / nvfp4 / mxfp4 dialects and kernels |
+| M0.7 | Qwen3-8B, Qwen3.8-27B GGUF | fused prefill glue (KV-store kernel, add+norm, q/k norm) and a model-specific megakernel experiment (design §5.7) | fused kernels in std and in the model package |
+| Release | every v0 model | packaging, quickstart, rtx-5090 / rtx-3090 locks, an agent demo; the benchmark suite (decode, prefill, agent trace vs llama.cpp, FreeToken and SGLang where each runs) on the release classes | — |
+
+Order (user, 2026-10-13): M0.4 → M0.5 (whole: its grammar seam builds on verify); M0.6 runs in parallel, in its own
+worktree; then M0.7 and the release, which needs the benchmark suite first.
 
 Expert caching/offload, KV offload, VMM and the optional self-improvement layer follow in v1 (§10); their core
 seams are built and spiked in M0 (design D8).
