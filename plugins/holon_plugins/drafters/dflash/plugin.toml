@@ -1,0 +1,15 @@
+[plugin]
+name = "drafters.dflash"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "drafter"
+license = "Apache-2.0"
+
+[resources]
+provides = ["drafter.dflash@1", "unit.drafters.dflash.draft@1"]
+
+[properties]
+max_depth = 1
+
+[reference]
+module = "reference"

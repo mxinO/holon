@@ -60,6 +60,8 @@ class GGUFSource:
         names = {t.name for t in self._tensors}
         cfg |= {"vocab_size": len(self._value("tokenizer.ggml.tokens")),
                 "tie_word_embeddings": "output.weight" not in names, "gguf": raw}
+        if (mask := self._value("tokenizer.ggml.mask_token_id")) is not None:      # e.g. a block drafter's mask row
+            cfg["mask_token_id"] = mask
         return cfg
 
     def tensors(self) -> Iterator[tuple[str, torch.Tensor | QTensor]]:

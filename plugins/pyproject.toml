@@ -20,6 +20,7 @@ openai = ["fastapi", "uvicorn"]   # frontends.openai (anyio and pydantic come wi
 "kernels.fla" = "holon_plugins.kernels.fla"
 "kernels.gdn_triton" = "holon_plugins.kernels.gdn_triton"
 "drafters.mtp" = "holon_plugins.drafters.mtp"
+"drafters.dflash" = "holon_plugins.drafters.dflash"
 "drafters.ngram" = "holon_plugins.drafters.ngram"
 "frontends.openai" = "holon_plugins.frontends.openai"
 
