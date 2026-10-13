@@ -96,8 +96,8 @@ conformance; multimodal content blocks; more than one active logits processor (�
        while anything is blocked, and the serve loop's poll timeout comes from `engine.idle_for()`: 0 when work is
        schedulable, 5 ms when only blocked work remains (each iteration promotes requests whose `ready` flipped, and
        surfaces a `ready` that raises), its normal interval when idle. Toy test: one constrained request on an idle
-       engine, for a compile that succeeds and for one that times out. `ready` may raise `RequestError` (a compile error: kind `client`; a timeout: kind
-       `busy`), which aborts the request;
+       engine, for a compile that succeeds and for one that times out. `ready` may raise `RequestError` (a compile
+       error: kind `client`; a timeout: kind `busy`), which aborts the request;
      - `commit(seq, out: list[int])` after each step's results, **before** the engine acts on stop or length and
        before any delta is built, with the tokens the step appends (truncated at a stop, skipped for finished rows);
        raising `RequestError` aborts the request with kind `engine` and drops that step's tokens (§3.4);
@@ -233,10 +233,10 @@ unread `max_depth` is removed (the gate comes from `open`).
     `RLIMIT_DATA` cannot cap it — reviewer measurement). The parent's watchdog reads each busy worker's resident
     set (`/proc/<pid>/statm`) every 50 ms and kills it when the compile grows it past **baseline + 1 GB** (portable:
     no cgroup needed); workers also get `oom_score_adj` 1000 so the kernel prefers them to the engine.
-  - **Outcomes:** past the **10 s timeout** the worker is killed and respawned (≈ 0.3–1 s; the queue is bounded for
-    that) and the request is rejected `busy` (a respawn re-imports torch: likely 2–5 s, measured at step 2 and the
-    queue bound sized to it); a compiled size over **64 MB** or a watchdog kill is rejected `client`
-    ("schema too complex"); any other worker death or exit without a report (a kernel OOM kill, a crash) is `busy`.
+  - **Outcomes:** past the **10 s timeout** the worker is killed and respawned and the request is rejected `busy` (a
+    respawn re-imports torch: likely 2–5 s, measured at step 2 and the queue bound sized to it); a compiled size over
+    **64 MB** or a watchdog kill is rejected `client` ("schema too complex"); any other worker death or exit without a
+    report (a kernel OOM kill, a crash) is `busy`.
     A negative cache rejects repeats of compile errors and `client` rejections for the process's life, and of `busy`
     outcomes for 10 minutes. Tested with a lowered watchdog budget on a mid-size fixture, with a small schema as the
     positive control that still compiles under it.
