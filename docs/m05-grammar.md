@@ -225,13 +225,15 @@ unread `max_depth` is removed (the gate comes from `open`).
     CUDA and threads), exiting when their parent dies, each with its own `TokenizerInfo` built from the same
     tokenizer, padded size and stop set as the parent's (asserted) and `GrammarCompiler(max_threads=2)`. A worker
     compiles the constraint and returns only `ok` / the error, the compile time and `memory_size_bytes` — no grammar
-    crosses the pipe. Each worker's memory is capped at **2 GB** (`RLIMIT_DATA` set in the spawn initializer) and
-    its `oom_score_adj` is 1000, so the kernel kills a worker, never the engine (a compile's peak is at least its
-    final size, ≈ 2 GB for the worst measured schemas). Past the **10 s timeout** the worker is killed and respawned
+    crosses the pipe, but the compile's peak RSS is reported too. Each worker's memory is capped at **1 GB**
+    (`RLIMIT_DATA` set in the spawn initializer; recalibrated at step 2 from the measured peak-to-final ratio on a
+    mid-size fixture) and its `oom_score_adj` is 1000, so the kernel kills a worker, never the engine (a compile's
+    peak is at least its final size, ≈ 2 GB for the worst measured schemas). Past the **10 s timeout** the worker is killed and respawned
     (≈ 0.3–1 s; the queue is bounded for that) and the request is rejected `busy`; a compiled size over **64 MB**, or
-    a worker that dies of `MemoryError` or a signal, is rejected `client` ("schema too complex"). A negative cache
-    rejects repeats of compile errors and over-size or over-memory constraints for the process's life, and of
-    timeouts for 10 minutes (a timeout can be load). Tested with a lowered memory limit on a mid-size fixture.
+    a worker that fails under its own limit (a `MemoryError` / allocation failure reported over the pipe, or an
+    abort under the rlimit), is rejected `client` ("schema too complex"); a worker SIGKILLed by the kernel's OOM
+    killer is load, treated like a timeout (`busy`). A negative cache rejects repeats of compile errors and
+    over-size or over-limit constraints for the process's life, and of timeouts and OOM kills for 10 minutes. Tested with a lowered memory limit on a mid-size fixture.
   - **Compiling for use:** a vetted constraint is compiled again in the engine process by two helper threads with
     `max_threads=2` each (xgrammar releases the GIL while compiling, R §8), never on the engine thread; each compile's
     time is bounded by the worker's measured time; the helper backlog is bounded by the sum of its vetted compile
@@ -463,6 +465,14 @@ unread `max_depth` is removed (the gate comes from `open`).
 | B nit: the `ext` key carries no version | `ext["grammar.constraint@1"]` (D5) |
 | A nit / C-R4-4: the `json_object` EBNF untested | derived from the builtin with only the whitespace rule replaced; oracle fixtures (D5) |
 | C-R4-2: coverage ignores the size cap | restated net of size, memory and timeout rejections (§5) |
+
+**Rev 5.**
+
+| Finding | Resolution |
+|---|---|
+| C-R5-1: an OOM-killed worker rejects a valid schema forever | failures under the worker's own limit are `client` and permanent; kernel OOM kills are `busy`, expiring like timeouts (D5) |
+| C nit: the worker cap far above the size cap | 1 GB, recalibrated at step 2 from the measured peak-to-final ratio (D5) |
+| B note: confirm the engine-side peak | workers report each compile's peak RSS, recorded in the D9 runs (D5) |
 
 ## 10. Deferred, deliberately
 
