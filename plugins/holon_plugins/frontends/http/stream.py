@@ -5,7 +5,7 @@ import dataclasses
 from collections.abc import AsyncIterator
 
 import anyio
-from holon.api import EngineClient, Logprobs, SamplingParams, TokenDelta, Tokenizer
+from holon.api import EngineClient, Logprobs, ParseEvent, SamplingParams, TokenDelta, Tokenizer
 
 from .detok import Detokenizer
 
@@ -13,7 +13,8 @@ from .detok import Detokenizer
 @dataclasses.dataclass(slots=True)
 class Piece:
     """What one engine delta adds to one choice. `token_ids` and `logprobs` cover every generated token (the
-    terminating EOS/stop token included); `text` excludes that token and anything from a stop string on."""
+    terminating EOS/stop token included); `text` excludes that token and anything from a stop string on; `events`
+    are its text parsed (chat, `pipeline.pieces`)."""
 
     index: int
     text: str
@@ -23,6 +24,7 @@ class Piece:
     finish_reason: str | None = None   # "stop" | "length" | "abort" | "error"
     error: str | None = None
     kind: str | None = None            # the error's kind (TokenDelta.kind)
+    events: list[ParseEvent] = dataclasses.field(default_factory=list)
 
 
 class Choice:

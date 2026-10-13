@@ -2,7 +2,8 @@
 
 Status: **revision 5, reviewed clean** (2026-10-13). Revs 1–5 were reviewed by a panel of three; every finding is
 resolved in §9. **Step 1 built** (2026-10-13): the core seams of §3 with the toy processor. **Step 2 built**
-(2026-10-13): the `grammar.xgrammar` plugin, pinned at xgrammar 0.2.8. Their records, deviations and §6's
+(2026-10-13): the `grammar.xgrammar` plugin, pinned at xgrammar 0.2.8. **Step 3 built** (2026-10-13):
+`frontends/http`, the format parsers and constraint builders, the three dialects. Their records, deviations and §6's
 measurements are in §11.
 
 Scope: plan §8, amended (D1; plan §2 / §8 updated with this revision):
@@ -713,3 +714,89 @@ Step-5 obligations (panel S2-2, S2-3):
 - cold-constraint vs warm (cached) TTFT;
 - the precompile pass of D9 on an idle host (the compile times above came from a shared one);
 - the truncations that end in a whitespace run (S2-1's condition for a cap).
+
+### Step 3 (2026-10-13)
+
+Built: `plugins/holon_plugins/frontends/http` (was `frontends/openai`; entry point `frontends.http`, extra `http`;
+provides `frontend.openai@1`, `frontend.anthropic@1`, `frontend.openai_responses@1`) — one app (`app.py`) with a
+router per dialect: `openai.py` (chat and text completions), `anthropic.py` (`/v1/messages`, `count_tokens`),
+`responses.py` (`/v1/responses`); `pipeline.py` (a router's `Conversation` → `Chat`: render, constraint, a parser
+per choice; `Blocks`, the block shape Anthropic and Responses share); `formats.py` (think@1, hermes@1, qwen_xml@1 /
+@2: each format's streaming parser and the constraint of its output, plain `grammar.constraint@1` dicts); `web.py`
+(errors by kind, event streams). The bundles name their formats: `reasoning_format` think@1; `tool_format` read off
+the template by rendering a call with a boolean argument — hermes@1 (Qwen3, Qwen3 MoE), qwen_xml@1 (Qwen3.5,
+`| string`: Python's `True`), qwen_xml@2 (Qwen3.6+ / 3.8, `tojson`); `render_chat` parses tool-call arguments sent as
+JSON text into objects (the XML templates iterate them; Qwen3.8's raises on text). No core change.
+
+Proofs (`plugins/tests/test_frontend_http.py`, 73 tests of which 45 new, ≈ 47 s with the GPU one; the package is
+≈ 1.2k lines, plan §2 budgets frontends ≈ 1.5k):
+- Parsers, R §4.2's fixtures (10): hermes with reasoning the model opens, text and two calls, a body that is no call,
+  a call cut by the end of the text; XML with `<tool_call>` ending reasoning without `</think>`, closed reasoning
+  then text then a call, typed values under @1 and @2 (`True` / `None` are a boolean / null under @1 and strings
+  under @2; `007` for a string parameter stays a string; multi-line strings), a call cut inside a parameter, markers
+  that start nothing. For each, the parse of every split of the text (character by character, and random cuts)
+  equals the whole text's.
+- Constraints (7 forms + 5 choices): every builder's output passes `constraint.check` and compiles; samples admitted
+  and refused (a second call under `parallel_tool_calls: false` or a named choice, text before a required call, a
+  wrong argument type under a strict tool, JSON before open reasoning closes); every admitted sample parses into the
+  expected number of calls. `auto` without a strict tool is free (D8); `none` neither renders nor parses tools; a
+  response format with a constrained tool choice, `required` without tools and a named tool not among them are 400s.
+- Dialects (fake engine): OpenAI tool calls streamed as `tool_calls` deltas reassemble to the non-streamed message;
+  each tool choice's constraint reaches the engine; Anthropic's request becomes the expected conversation (billing
+  header dropped and counted, tool results ahead of the text, thinking as reasoning, `any` + no parallel → exactly
+  one call, thinking disabled → `enable_thinking: false`), `count_tokens`, its error shape, and its streamed blocks
+  reassemble to the non-streamed content; Responses' input items (a call joins the assistant turn, its output a tool
+  message, reasoning the next assistant's) and its streamed items equal the non-streamed output, sequence numbers in
+  order; a failure after the first token is `finish_reason: "error"` (chat, streamed and not), `event: error` /
+  `response.failed` streamed, a 500 otherwise — never a 400 (D7; deferred from step 1).
+- Bundles with the real templates (Qwen3-0.6B, Qwen3.5-9B, Qwen3.8-27B): the format named, a call sent with JSON-text
+  arguments renders, and the frontend's parser reads the rendered call back.
+- Round trips: a tiny random Qwen3 over Qwen3's tokenizer and template (CPU, grammar.xgrammar; whitespace-only tokens
+  given zero logits so its greedy JSON ends) — a forced call and the conversation with its result, through each
+  dialect; Qwen3-0.6B (GPU): a required call (`{"city": "Paris"}`), the streamed answer from its result, reasoning the
+  model opens (Anthropic, a thinking block then the text) and a strict JSON schema (Responses).
+
+Deviations (simplest option consistent with the decisions):
+- **The parsers take `final`** (`feed(text, final=False)`): a streaming parser holds back what may still be a marker
+  and needs the end of the text to release it; §3.8's `Parser.feed(text)` has no end. The frontend uses its own
+  parsers, chosen by format name; `FrontendBundle.reasoning_parser()` / `tool_parser()` (every bundle returns None)
+  are not consulted. Adding `final` to `holon.api.Parser` is a one-line core change, left for the step-7 review.
+- **Format versions:** qwen_xml@1 is Qwen3.5's template (`| string`), @2 Qwen3.6+ / 3.8's (`tojson`). A bundle reads its
+  format off its template (one plugin serves both), rather than declaring it.
+- **hermes emits a call when it closes** (its arguments as one delta, checked JSON; a body that is not a call stays
+  text); qwen_xml streams a parameter at a time (`{`, each `"key": value`, `}`), a cut parameter dropped at the end.
+- **Text and reasoning runs are stripped** at both ends (the formats put newlines around markers).
+- **The reasoning state is read off the prompt's last 16 tokens:** opened (`<think>`: Qwen3.5 / 3.8 thinking on),
+  closed (`</think>`: thinking off), or left to the model (Qwen3: a leading `<think>` opens it). The constraint
+  follows it: reasoning is free text holding neither `</think>` nor `<tool_call>`, ended by `</think>` and
+  whitespace or — before calls — by the first call; optional when left to the model, absent when closed.
+- **Constrained envelopes:** a non-strict tool's arguments follow its schema best-effort (`strict: false`, as vLLM);
+  `required` admits text after the calls (xgrammar's triggered tags), named and `parallel_tool_calls: false` end at
+  the call; a response format with a constrained tool choice is a 400; `tool_choice: "none"` neither renders nor
+  parses the tools; `finish_reason` is `tool_calls` whenever a call was parsed (named too; vLLM says `stop` there).
+- **Failures after the first token:** OpenAI `finish_reason: "error"` on every running choice (a 200, or a stream
+  chunk); Anthropic `event: error` / 500 (`api_error`); Responses `response.failed` / 500. Before the first token,
+  the kind's status (400 / 503 / 500), in each dialect's error shape.
+- **Anthropic:** text blocks joined with newlines (as vLLM joins text parts); `redacted_thinking` dropped; image
+  blocks and server tools (a `type` other than `custom`) are 400s; `thinking: disabled` → `enable_thinking: false`;
+  `stop_sequence` is never reported (`end_turn`, as llama.cpp and SGLang); thinking signatures are empty.
+- **The billing-header drop** is `build_app(drop_billing_header=True)`; `holon serve` has no flag for it (the core
+  passes frontends no options); dropped blocks are counted in `/metrics` (`billing_headers_dropped`).
+- **Responses:** an absent `strict` is false (OpenAI's Responses default is true, which under D8 would constrain
+  every request with tools); `store`, `previous_response_id` and `background` are 400s; `reasoning.effort` ignored.
+
+Step-5 commands (the real round trips and the Claude Code session; `--slots logits_processor=grammar.xgrammar` serves
+constrained tool choices and response formats):
+
+    holon serve <Qwen3-8B Q4_K_M .gguf> --slots logits_processor=grammar.xgrammar --port 8000
+    holon serve <Qwen3.8-27B UD-IQ3_S .gguf> --port 8000 --max-seqs 4 --max-model-len 32768 \
+      --max-step-tokens 2048 --memory-fraction 0.9 --max-draft-tokens 3 --slots logits_processor=grammar.xgrammar \
+      drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy \
+      --plugin-options recurrent.checkpoints=4 kv.format=q8_0 spec.k=1:3,3:2   # M0.4's MTP flags, a longer context
+    # OpenAI chat / Anthropic / Responses round trips: a tool call (auto, required, named), its result, the answer
+    ANTHROPIC_BASE_URL=http://127.0.0.1:8000 ANTHROPIC_AUTH_TOKEN=holon ANTHROPIC_MODEL=<served model id> \
+    ANTHROPIC_DEFAULT_HAIKU_MODEL=<served model id> CLAUDE_CODE_SUBAGENT_MODEL=<served model id> \
+    claude -p "<the scripted multi-tool task>" --allowedTools "Read,Write,Edit,Bash,Glob,Grep" --output-format json
+
+  The served model id is `/v1/models`'s; capture the session's requests (headers redacted) to check R §5.4's
+  unverified items, and count the dropped billing headers in `/metrics`.

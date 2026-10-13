@@ -1,4 +1,4 @@
-"""The `frontend.openai` plugin: the app served by uvicorn in the frontend process."""
+"""The `frontends.http` plugin: the app served by uvicorn in the frontend process."""
 from __future__ import annotations
 
 import uvicorn

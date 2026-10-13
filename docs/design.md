@@ -1362,7 +1362,7 @@ holon/           (repository root)
   plugins/         models/<m>/{recipe.py, fast/, bundle/}  for qwen3, qwen3_moe, qwen3_5, qwen3_8
                    mixers/{gdn}/  state/{ssm_checkpoint}/
                    kernels/{flashinfer,fla_gdn,ggml_cuda}/  weight_sources/{safetensors,gguf}/  dialects/{ggml}/
-                   frontends/{openai,anthropic}/  policies/  drafters/  verifiers/  grammar/
+                   frontends/{http}/  policies/  drafters/  verifiers/  grammar/
   plans/           <model_id>/<class>/<n>.lock     # lock history per (model, fingerprint class) (§4.4)
   judge/           holon_judge/  goldens/  snapshots/  traces/dev/   # holdout stored outside the repo (judge only)
   tools/           holon_tools/                    # impact, propagate, tune (lock history tooling)

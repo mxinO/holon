@@ -7,7 +7,7 @@ description = "Holon first-party plugins: models, kernels, dialects, frontends"
 dependencies = ["holonlm"]  # std units are reached through Ref, never imported
 
 [project.optional-dependencies]
-openai = ["fastapi", "uvicorn"]   # frontends.openai (anyio and pydantic come with fastapi)
+http = ["fastapi", "uvicorn"]     # frontends.http (anyio and pydantic come with fastapi)
 grammar = ["xgrammar==0.2.8"]     # grammar.xgrammar (Apache-2.0; needs apache-tvm-ffi >= 0.1.11)
 
 [project.entry-points."holon.plugins"]
@@ -23,7 +23,7 @@ grammar = ["xgrammar==0.2.8"]     # grammar.xgrammar (Apache-2.0; needs apache-t
 "drafters.mtp" = "holon_plugins.drafters.mtp"
 "drafters.dflash" = "holon_plugins.drafters.dflash"
 "drafters.ngram" = "holon_plugins.drafters.ngram"
-"frontends.openai" = "holon_plugins.frontends.openai"
+"frontends.http" = "holon_plugins.frontends.http"
 "grammar.xgrammar" = "holon_plugins.grammar.xgrammar"
 
 [build-system]

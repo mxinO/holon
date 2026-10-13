@@ -1,12 +1,12 @@
 [plugin]
-name = "frontends.openai"
+name = "frontends.http"
 version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "frontend"
 license = "Apache-2.0"
 
 [resources]
-provides = ["frontend.openai@1"]
+provides = ["frontend.openai@1", "frontend.anthropic@1", "frontend.openai_responses@1"]
 
 [dependencies]
 python = ["fastapi", "uvicorn", "pydantic", "anyio"]

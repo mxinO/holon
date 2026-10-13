@@ -1,4 +1,4 @@
-"""OpenAI request bodies and their mapping to SamplingParams.
+"""OpenAI request bodies and their mapping to SamplingParams and, for chat, to the pipeline's `Conversation`.
 
 Unknown fields are ignored, since OpenAI clients send many; known ones we cannot honour yet are rejected rather than
 silently changing what a request means. Extensions follow vLLM's names (top_k, min_p, repetition_penalty,
@@ -10,6 +10,8 @@ from typing import Any, get_args
 
 from holon.api import SamplingParams
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from .pipeline import Conversation
 
 _UNSUPPORTED = {"logit_bias": None, "suffix": None, "best_of": 1, "response_format": {"type": "text"},
                 "tool_choice": "auto"}   # field → the one value that means "feature not used"
@@ -43,7 +45,7 @@ class GenerationRequest(BaseModel):
         if not isinstance(data, dict):
             return data
         for key, unused in _UNSUPPORTED.items():
-            if data.get(key) not in (None, unused, {}):
+            if key not in cls.model_fields and data.get(key) not in (None, unused, {}):
                 raise ValueError(f"{key!r} is not supported")
         # Clients send null for "unset": a field that cannot be null takes its default instead.
         fields = cls.model_fields
@@ -59,14 +61,14 @@ class GenerationRequest(BaseModel):
     def include_usage(self) -> bool:
         return self.stream_options is not None and self.stream_options.include_usage
 
-    def _params(self, max_tokens: int | None, logprobs: int | None, prompt_logprobs: int | None = None
-                ) -> SamplingParams:
+    def _params(self, max_tokens: int | None, logprobs: int | None, prompt_logprobs: int | None = None,
+                ext: dict[str, Any] | None = None) -> SamplingParams:
         return SamplingParams(
             temperature=self.temperature, top_p=self.top_p, top_k=max(self.top_k, 0), min_p=self.min_p,
             presence_penalty=self.presence_penalty, frequency_penalty=self.frequency_penalty,
             repetition_penalty=self.repetition_penalty, n=self.n, max_tokens=max_tokens, ignore_eos=self.ignore_eos,
             stop_token_ids=tuple(self.stop_token_ids), seed=self.seed, logprobs=logprobs,
-            prompt_logprobs=prompt_logprobs)
+            prompt_logprobs=prompt_logprobs, ext=ext or {})
 
 
 class CompletionRequest(GenerationRequest):
@@ -91,6 +93,9 @@ class CompletionRequest(GenerationRequest):
 class ChatRequest(GenerationRequest):
     messages: list[dict[str, Any]] = Field(min_length=1)
     tools: list[dict[str, Any]] | None = None
+    tool_choice: str | dict[str, Any] | None = None     # default: "auto" with tools, else "none"
+    parallel_tool_calls: bool = True
+    response_format: dict[str, Any] | None = None       # read as a constraint
     max_tokens: int | None = Field(None, ge=1)
     max_completion_tokens: int | None = Field(None, ge=1)
     logprobs: bool = False
@@ -104,9 +109,60 @@ class ChatRequest(GenerationRequest):
         return [{**m, "content": _text(m["content"])} if isinstance(m.get("content"), list) else m
                 for m in messages]
 
-    def params(self) -> SamplingParams:
+    @field_validator("tools")
+    @classmethod
+    def _functions(cls, tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+        for t in tools or []:
+            fn = t.get("function")
+            if t.get("type") != "function" or not isinstance(fn, dict) or not isinstance(fn.get("name"), str) \
+                    or not isinstance(fn.get("parameters", {}), dict | None):
+                raise ValueError("tools are function tools: {type: function, function: {name, parameters, …}}")
+        return tools or None
+
+    @field_validator("tool_choice")
+    @classmethod
+    def _choice(cls, choice: Any) -> str | dict[str, str] | None:
+        return tool_choice(choice)
+
+    @field_validator("response_format")
+    @classmethod
+    def _format(cls, fmt: Any) -> dict[str, Any] | None:
+        return response_format(fmt)
+
+    def conversation(self) -> Conversation:
+        choice = self.tool_choice or ("auto" if self.tools else "none")
+        return Conversation(self.messages, self.tools or [], choice, self.parallel_tool_calls, self.response_format,
+                            self.chat_template_kwargs)
+
+    def params(self, ext: dict[str, Any]) -> SamplingParams:
         logprobs = (self.top_logprobs or 0) if self.logprobs else None
-        return self._params(self.max_completion_tokens or self.max_tokens, logprobs)
+        return self._params(self.max_completion_tokens or self.max_tokens, logprobs, ext=ext)
+
+
+def tool_choice(choice: Any) -> str | dict[str, str] | None:
+    """OpenAI's `tool_choice` (chat: `{type: function, function: {name}}`; Responses: `{type: function, name}`) as
+    the pipeline's."""
+    if choice is None or choice in ("auto", "none", "required"):
+        return choice
+    if isinstance(choice, dict) and choice.get("type") == "function":
+        name = (choice.get("function") or choice).get("name")
+        if isinstance(name, str):
+            return {"name": name}
+    raise ValueError(f"tool_choice {choice!r}: auto, none, required or a function")
+
+
+def response_format(fmt: Any) -> dict[str, Any] | None:
+    """OpenAI's `response_format` (chat: `{type, json_schema: {name, schema, strict}}`; Responses' `text.format`:
+    `{type, name, schema, strict}`) as a constraint (D6), or None for text."""
+    kind = fmt.get("type") if isinstance(fmt, dict) else None
+    if fmt is None or kind == "text":
+        return None
+    if kind == "json_object":
+        return {"type": "json_object"}
+    spec = fmt.get("json_schema", fmt) if kind == "json_schema" else None
+    if not isinstance(spec, dict) or not isinstance(spec.get("schema", {}), dict | bool):
+        raise ValueError(f"response_format {fmt!r}: text, json_object or json_schema {{name, schema, strict}}")
+    return {"type": "json_schema", "schema": spec.get("schema", {}), "strict": bool(spec.get("strict"))}
 
 
 def _text(parts: list[Any]) -> str:
