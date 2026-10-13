@@ -49,6 +49,7 @@ class BuildContext:
         self.states: dict[tuple[str, int], tuple[Any, Any]] = {}  # (local spec name, layer) -> (spec, pool)
         self._buffers: dict[str, torch.Tensor] = {}
         self.aux: Any = None               # the engine's AuxModels, which `aux_model` builds into (engine builds)
+        self.taps: dict[int, list[Any]] = {}   # layer -> consumers of the residual stream after it (`Model.trunk`)
 
     def unit_factory(self, ref: Ref) -> Any:
         """The registered factory (usually the unit class) serving `ref`, loading its plugin if needed."""
@@ -123,6 +124,9 @@ class BuildContext:
         if self.aux is None:
             raise PluginError(f"aux model {namespace!r}: a model-only build has no engine state")
         return self.aux.build(namespace, spec, tensors)
+
+    def tap(self, layer: int, consume: Any) -> None:
+        self.taps.setdefault(layer, []).append(consume)
 
     def child(self, namespace: str, options: dict[str, Any] | None = None) -> ChildContext:
         return ChildContext(self, namespace, options)
@@ -238,16 +242,20 @@ class Model(nn.Module):
         )
         self.norm = ctx.unit(spec.norm, dim=spec.hidden)
         self.lm_head = ctx.unit(spec.lm_head, vocab=spec.vocab, hidden=spec.hidden, embed=self.embed)
+        self.taps = ctx.taps               # filled after the build, by a drafter (`BuildCtx.tap`)
 
     def forward(self, ctx: StepCtx) -> torch.Tensor:
         """Logits of the step's `logits_index` rows."""
         return self.head(self.trunk(ctx)[ctx.batch.dev.logits_index])
 
     def trunk(self, ctx: StepCtx) -> torch.Tensor:
-        """Final hidden states of every token of the step, before the norm."""
+        """Final hidden states of every token of the step, before the norm; the residual stream after each tapped
+        layer goes to its consumers on the way."""
         h = self.embed(ctx.batch.dev.input_ids)
-        for layer in self.layers:
+        for i, layer in enumerate(self.layers):
             h = layer(h, ctx)
+            for consume in self.taps.get(i, ()):
+                consume(h, ctx)
         return h
 
     def head(self, h: torch.Tensor) -> torch.Tensor:

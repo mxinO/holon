@@ -28,7 +28,7 @@ from .assembly import AuxModels, bind_state, prefix_index, resolve_model
 from .build import BuildContext, build_model, load_weights
 from .executor import Executor, Launched, PromptRows
 from .memory import Ledger
-from .plugins import PluginSet, discover
+from .plugins import PluginError, PluginSet, discover
 from .sched import Scheduler
 from .state import StateManager
 
@@ -125,6 +125,8 @@ class Engine:
             self.policy = policy.build(self.ctx) if hasattr(policy, "build") else policy
             self.ctx.aux = aux = AuxModels(self.ctx, p, self.ledger, cfg)
             drafter = pick("drafter").build(self.ctx, _Target(self.spec, model, source, model_plugin))
+            if bad := sorted(set(self.ctx.taps) - set(range(len(self.spec.layers)))):
+                raise PluginError(f"the drafter taps layers {bad}; the target has {len(self.spec.layers)}")
             bound += aux.bound                           # the drafter's auxiliary models' state and planners
             planners |= aux.planners
             widths = [getattr(drafter, "substeps", lambda k: [])(k) for k in range(cfg.max_draft_tokens + 1)]

@@ -11,10 +11,11 @@ from typing import TYPE_CHECKING, Any, Protocol
 from .terms import Ref
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Mapping
+    from collections.abc import Callable, Iterable, Iterator, Mapping
 
     import torch
 
+    from .batch import StepCtx
     from .frontend import FrontendBundle
     from .memory import Pool
     from .ops import KernelSpec
@@ -112,6 +113,13 @@ class BuildCtx(Protocol):
         """Build, state-bind and load an auxiliary model (engine builds only). Its units see a child context in which
         state names and planner groups are `<namespace>.<name>`; at step time `StepCtx.view(namespace)` gives them the
         same mapping."""
+
+    def tap(self, layer: int, consume: Callable[[torch.Tensor, StepCtx], None]) -> None:
+        """Have the target's trunk call `consume(h, ctx)` every step with its residual stream after layer `layer` (h
+        [T, H], every token of the step: the next layer's input, before its norm), inside the step's graph when it is
+        captured (engine builds: a drafter registers its taps while it is built). `h` is valid during the call only
+        (the next layer may reuse it): the consumer keeps what it needs in its own static buffers — a copy, or an fp32
+        accumulation."""
 
 
 class Unit(Protocol):
