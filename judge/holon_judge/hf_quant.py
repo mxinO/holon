@@ -12,6 +12,9 @@ tensor (`_nvfp4_pack` × scale2, `repack_mxfp4_blocks`; exact).
 
 `repack_check` is acceptance 4's lossless repack (docs/m06-lowp.md §1): kernels.ggml_cuda's own ggml blocks of every
 FP4 tensor, dequantized by gguf-py × scale2, against the reference, and byte for byte against the converter's.
+
+`state` is a checkpoint's model as the goldens and floors build it (§4.8), one layer at a time; `gate` holds what the
+engine's weight source yields against the bf16 original, per tensor and per expert (§4.8's gates).
 """
 from __future__ import annotations
 
@@ -19,6 +22,7 @@ import contextlib
 import itertools
 import json
 import pathlib
+import re
 import sys
 import types
 from collections.abc import Callable, Iterator
@@ -30,15 +34,89 @@ from safetensors import safe_open
 Get = Callable[[str], torch.Tensor]
 
 
+# Parts of a quantized module other than its weight: read through `parts`, or not at all (input and KV scales).
+AUX = frozenset({"weight_packed", "weight_scale", "weight_scale_inv", "weight_scale_2", "weight_global_scale",
+                 "input_scale", "input_global_scale", "k_scale", "v_scale"})
+GATES = {"fp8_e4m3": 1e-2, "nvfp4": 0.1, "mxfp4": 0.1, None: 1e-2}    # NMSE vs bf16 per tensor; dense: the tightest
+_EXPERT = re.compile(r"(.+\.mlp)\.experts\.(\d+)\.(gate|up|down)_proj")
+
+
 @contextlib.contextmanager
 def opened(path: str | pathlib.Path) -> Iterator[tuple[Get, set[str]]]:
-    """Every shard of a checkpoint directory open: (tensor by name, the names)."""
+    """Every shard of a checkpoint directory open: (tensor by name, the names), named as the text model's state dict
+    names them (a multimodal checkpoint's `model.language_model.` is `model.`, as transformers loads it)."""
     with contextlib.ExitStack() as stack:
         where = {}
         for file in sorted(pathlib.Path(path).glob("*.safetensors")):
             f = stack.enter_context(safe_open(file, "pt"))
-            where |= dict.fromkeys(f.keys(), f)
-        yield (lambda name: where[name].get_tensor(name)), set(where)
+            where |= {re.sub(r"^model\.language_model\.", "model.", n): (f, n) for n in f.keys()}
+        yield (lambda name: where[name][0].get_tensor(where[name][1])), set(where)
+
+
+def quantized(path: str | pathlib.Path) -> bool:
+    path = pathlib.Path(path)
+    return (path / "hf_quant_config.json").is_file() or \
+        "quantization_config" in json.loads((path / "config.json").read_text())
+
+
+def state(get: Get, names: set[str], select: Callable[[str], bool]) -> tuple[dict[str, torch.Tensor], dict[str, str]]:
+    """The fp32 state-dict entries of the checkpoint tensors `select` keeps (by name) — dense ones as stored, each
+    quantized module's weight by the reference — with every layer's per-expert projections fused as transformers
+    holds them (`mlp.experts.gate_up_proj` [E, 2I, H], gate's rows first; `down_proj` [E, H, I]); and the elem of each
+    quantized linear and expert stack, by module (a stack as the floors' MoE block names it: `<mlp>.gate_up`,
+    `<mlp>.down`)."""
+    out, kinds, experts, stacked = {}, {}, {}, {}
+    for name in sorted(filter(select, names)):
+        module, _, suffix = name.rpartition(".")
+        if suffix == "weight" and f"{module}.weight_packed" in names or suffix in AUX - {"weight_packed"}:
+            continue
+        if suffix not in ("weight", "weight_packed"):
+            out[name] = get(name).float()
+            continue
+        q = parts(get, names, module)
+        w = get(name).float() if q is None else reference.dequantize(*q)
+        if (m := _EXPERT.fullmatch(module)) is None:
+            out[f"{module}.weight"] = w
+            if q is not None:
+                kinds[module] = q[0]
+            continue
+        experts.setdefault(m[1], {})[m[3], int(m[2])] = w
+        stacked.setdefault(f"{m[1]}.{'down' if m[3] == 'down' else 'gate_up'}", set()).add(q and q[0])
+    for mlp, w in experts.items():
+        n = len(w) // 3
+        out[f"{mlp}.experts.gate_up_proj"] = torch.stack([torch.cat([w["gate", e], w["up", e]]) for e in range(n)])
+        out[f"{mlp}.experts.down_proj"] = torch.stack([w["down", e] for e in range(n)])
+    for stack, elems in stacked.items():
+        if len(elems) != 1:
+            raise ValueError(f"{stack}: experts of different layouts {sorted(map(str, elems))}")
+        if (elem := elems.pop()) is not None:
+            kinds[stack] = elem
+    return out, kinds
+
+
+def input_scale(get: Get, names: set[str], module: str) -> torch.Tensor:
+    """A module's static activation scale as the checkpoint stores it: ModelOpt's `input_scale`, compressed-tensors'
+    reciprocal `input_global_scale` (the W4A4-static floor's, §4.8)."""
+    if f"{module}.input_scale" in names:
+        return get(f"{module}.input_scale").float().reshape(())
+    return 1.0 / get(f"{module}.input_global_scale").float().reshape(())
+
+
+def gate(path: str | pathlib.Path, original: str | pathlib.Path) -> dict[str, tuple[str | None, float]]:
+    """§4.8's gates: every tensor the engine's weight source yields — a quantized module dequantized by the reference,
+    so a dialect's misreading shows — against the bf16 original's tensor of that name: name -> (elem, or None if
+    dense; NMSE). Per expert, as the source yields them (before stacking)."""
+    from holon.api import QTensor
+    from holon_std.weights.hf.source import HFSafetensors
+
+    out = {}
+    with opened(original) as (get, _):
+        for name, t in HFSafetensors(path).tensors():
+            q = isinstance(t, QTensor)
+            w = reference.dequantize(t.layout.scheme.elem, t.parts) if q else t.float()
+            ref = get(name).float()
+            out[name] = (t.layout.scheme.elem if q else None, ((w - ref).pow(2).sum() / ref.pow(2).sum()).item())
+    return out
 
 
 def parts(get: Get, names: set[str], module: str) -> tuple[str, dict[str, torch.Tensor]] | None:

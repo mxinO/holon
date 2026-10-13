@@ -1,5 +1,8 @@
 """L2 candidate side: scoring through the engine interface (a fake backed by HF, and the real engine once it serves
 prompt logprobs)."""
+import collections
+import types
+
 import pytest
 import torch
 from holon.api import Logprobs, SamplingParams, TokenDelta
@@ -12,12 +15,19 @@ from transformers import AutoModelForCausalLM
 
 class FakeEngine:
     """`add`/`step`/`has_work` like `holon.core.Engine`, answering prompt logprobs from an HF model; a prompt's
-    logprobs arrive split over two steps, as with chunked prefill."""
+    logprobs arrive split over two steps, as with chunked prefill. Its model counts calls as kernels.ggml_cuda's
+    instances do, where std's units keep them: a linear's quantized weight's kernel (`_q._kernel`) and an expert
+    stack's (`_kernel`), each step one call per path and mode."""
 
     def __init__(self, path, drop_last: bool = False) -> None:
         self.hf = AutoModelForCausalLM.from_pretrained(path, dtype=torch.float32).eval()
         self.queue: list[tuple[str, list[int], SamplingParams]] = []
         self.drop_last = drop_last
+        kernel = lambda: types.SimpleNamespace(calls=collections.Counter())          # noqa: E731
+        linear, experts = torch.nn.Module(), torch.nn.Module()
+        linear._q, experts._kernel = types.SimpleNamespace(_kernel=kernel()), kernel()
+        self.executor = types.SimpleNamespace(model=torch.nn.ModuleList([linear, experts]))
+        self.counters = {"mmq/fp4": linear._q._kernel.calls, "mmvq/q8_1": experts._kernel.calls}
 
     def add(self, token_ids: list[int], params: SamplingParams) -> str:
         rid = f"r{len(self.queue)}"
@@ -29,6 +39,8 @@ class FakeEngine:
 
     @torch.no_grad()
     def step(self) -> list[TokenDelta]:
+        for mode, counter in self.counters.items():
+            counter[mode] += 1
         rid, ids, params = self.queue.pop(0)
         lp = self.hf(torch.tensor([ids])).logits[0, :-1].float().log_softmax(-1)
         top, top_ids = lp.topk(params.prompt_logprobs, -1)
@@ -49,8 +61,11 @@ def gold(tiny_checkpoint, tiny_prompts):
 
 
 def test_fake_engine_scores_like_the_golden(tiny_checkpoint, tiny_prompts, gold):
-    cand = score(FakeEngine(tiny_checkpoint), tiny_prompts, meta={"dtype": "float32"})
+    engine = FakeEngine(tiny_checkpoint)
+    engine.counters["mmq/fp4"]["mmq/fp4"] = 5                              # start-up calls: not the scoring's
+    cand = score(engine, tiny_prompts, meta={"dtype": "float32"})
     assert torch.equal(cand.offsets, gold.offsets) and cand.meta["source"] == "holon"
+    assert cand.meta["calls"] == {"mmq/fp4": 4, "mmvq/q8_1": 4}            # dense and expert kernels, by mode
     r = compare(gold, cand)
     assert r.overall.top1 == 1 and r.overall.kl_p99 < 1e-6 and r.overall.missing == 0
     assert abs(r.overall.dppl) < 1e-6

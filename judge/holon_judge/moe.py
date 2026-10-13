@@ -18,14 +18,15 @@ def reference_hash() -> str:
 
 
 def mirror(model: torch.nn.Module, operand_dtype: torch.dtype | None = None,
-           experts: Callable | None = None) -> int:
+           experts: Callable | None = None, prefix: str = "") -> int:
     """Replace every sparse-MoE block's forward in `model` (its routers kept F32: `gguf.hf_model(router_f32=True)`).
     `operand_dtype`: a dense layout's operand rounding (bf16 HF checkpoints); `experts(name, x, weight, ids, glu)`
-    stands in for `reference.linear_experts` (Tier B's q8_1 emulation). Returns the number of blocks replaced."""
+    stands in for `reference.linear_experts` (Tier B's emulation), `name` the block's (`prefix` + its name in
+    `model`, e.g. one streamed layer's) + `.gate_up` or `.down`. Returns the number of blocks replaced."""
     n = 0
     for name, module in model.named_modules():
         if type(module).__name__.endswith("SparseMoeBlock"):
-            module.forward = functools.partial(_forward, module, name, operand_dtype, experts)
+            module.forward = functools.partial(_forward, module, prefix + name, operand_dtype, experts)
             n += 1
     return n
 

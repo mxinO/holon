@@ -4,6 +4,7 @@ what transformers computes on the weights as each file means them; the reference
 owner's; the dialects refuse what the engine cannot honour; the Tier A and structural plants fail. On a GPU the FP4
 MoE fixtures load through kernels.ggml_cuda, whose `prepare` repacks their stacks: the structural test reads those
 ggml blocks (gguf-py × the scale2 rows) and still sees every misplaced slice."""
+import contextlib
 import functools
 import json
 import re
@@ -15,8 +16,11 @@ import pytest
 import torch
 from holon.api import QTensor, SamplingParams
 from holon.core.engine import Engine, EngineConfig
-from holon_judge.hf_quant import owner_check
+from holon_judge import golden
+from holon_judge.compare import compare
+from holon_judge.hf_quant import GATES, gate, owner_check
 from holon_judge.planted import fp4_plants, hf_moe_plants, hf_quant_plants
+from holon_judge.recording import Prompt, PromptSet
 from holon_judge.structure import mismatches
 from holon_std.moe.units import ExpertLinear
 from holon_std.weights.hf.source import HFSafetensors
@@ -57,6 +61,10 @@ def _oracle(dense) -> torch.nn.Module:
 def _prompts() -> list[list[int]]:
     g = torch.Generator().manual_seed(1)
     return [torch.randint(0, 512, (n,), generator=g).tolist() for n in (3, 17, 8, 25)]
+
+
+def _prompt_set() -> PromptSet:
+    return PromptSet("tiny", "-", [Prompt(str(i), "chat", p) for i, p in enumerate(_prompts())])
 
 
 def _engine(model, device: str = "cpu", **kw) -> Engine:
@@ -104,6 +112,10 @@ def test_a_quantized_checkpoint_serves_what_transformers_computes(files, dialect
                 assert t.parts["scale2"].shape == () and t.parts["scale2"].view(torch.int32) == want.view(torch.int32)
     engine = _engine(quantized)
     assert _error(engine, _oracle(dense)) <= 1e-4
+    # The judge's golden: the file through its own map and the reference, one layer at a time (docs/m06-lowp.md §4.8);
+    # compressed-tensors' NVFP4 decoding is within 2 ulp of the reference's (D10)
+    r = compare(golden.record(str(dense), _prompt_set()), golden.record(str(quantized), _prompt_set())).overall
+    assert r.top1 == 1 and r.kl_max < 1e-6
     # q/k/v and gate/up merge into one quantized matmul each (D5: FP8 block-scale rows, FP4 tied global scales), so
     # the only (in, out) are o's, down's and the merged q/k/v's and gate/up's
     sites = {tuple(int(re.search(rf"\b{f}=(\d+)", k)[1]) for f in ("in", "out"))
@@ -170,6 +182,37 @@ def test_the_tier_a_plants_fail(files, plant, dialect):
     quantized, dense = files(dialect, False)
     with PLANTS[plant]():                                # loaded and run planted (the reference decodes lazily)
         assert _error(_engine(quantized), _oracle(dense)) > 1e-3            # 10× the passing bound
+
+
+@pytest.mark.parametrize("dialect,plant", [(d, None) for d in hq.DIALECTS] + [
+    ("ct-mxfp4", "mxfp4-scale-halved"),                          # M5
+    ("quark", "mxfp4-scale-as-e4m3")])                           # M3
+def test_the_gate_holds_what_the_source_yields_to_the_original(files, dialect, plant):
+    """§4.8's gates: every tensor the engine's source yields (per expert) within its format's NMSE of the original;
+    a dialect's or the reference's misreading of MXFP4 scales fails them."""
+    quantized, _ = files(dialect, True)
+    with PLANTS[plant]() if plant else contextlib.nullcontext():
+        nmse = gate(quantized, quantized.parent / "tiny-True")
+    over = [n for n, (elem, v) in nmse.items() if not v <= GATES[elem]]
+    assert len(nmse) == 2 * (4 * 3 + 9) + 3 and bool(over) == bool(plant), over
+    assert {elem for elem, _ in nmse.values()} == {ELEM[dialect], None}
+
+
+@pytest.mark.parametrize("dialect,moe,modes", [("ct-mxfp4", True, ["q8_1", "fp4"]),
+                                               ("modelopt", False, ["q8_1", "fp4", "fp4-static"])])
+def test_the_floors_emulate_each_activation_mode(files, dialect, moe, modes):
+    """A floor's mode reaches its quantized matmuls (dense, and experts through the MoE block): each moves the
+    floor from the plain bf16 one, coarser activations further from the golden (W4A8 < W4A4)."""
+    quantized, _ = files(dialect, moe)
+    prompts = _prompt_set()
+    gold = golden.record(str(quantized), prompts)
+    plain = golden.record(str(quantized), prompts, torch.bfloat16)
+    kl = {"a16": compare(gold, plain).overall.kl_mean}
+    for act in modes:
+        floor = golden.record(str(quantized), prompts, torch.bfloat16, q8_1="mmq", act=act)
+        assert floor.meta["act"] == act and floor.meta["hf_reference"] and ("w4a4" in floor.meta) == (act != "q8_1")
+        kl[act] = compare(gold, floor).overall.kl_mean
+    assert kl["a16"] < kl["q8_1"] < min(kl[a] for a in modes if a != "q8_1"), kl
 
 
 GPU = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

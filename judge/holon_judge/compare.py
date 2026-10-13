@@ -191,7 +191,7 @@ def metrics(golden: Recording, cand: Recording) -> tuple[Metrics, dict[str, Metr
 
 
 _PROVENANCE = ("source", "model", "revision", "dtype", "device", "hardware", "threads", "prompts", "prompts_sha256",
-               "weight_source", "max_step_tokens", "q8_1", "kv", "moe_block", "experts", "expert_calls")
+               "weight_source", "max_step_tokens", "q8_1", "act", "kv", "moe_block", "experts", "calls")
 
 
 def _provenance(rec: Recording) -> dict:
@@ -200,19 +200,18 @@ def _provenance(rec: Recording) -> dict:
 
 def _path_failures(floor: dict, cand: dict) -> list[str]:
     """A floor emulates the candidate's KV format (none: the model dtype), or it would hide KV bugs (a quantized floor)
-    or fail a correct quantized cache (an exact one). A Tier B floor emulates one kernel path (`q8_1`) for every
-    expert matmul: the candidate's expert calls while scoring must all have taken it (an MoE floor's candidate must
-    have counted them)."""
+    or fail a correct quantized cache (an exact one). A Tier B floor emulates one kernel path (`q8_1`) in one
+    activation mode (`act`, default q8_1) for every quantized matmul: the candidate's calls while scoring must all
+    have taken that `path/mode` (docs/m06-lowp.md D3: a run is scored against the floor of the mode it ran), and be
+    counted."""
     if floor.get("kv") != cand.get("kv"):
         return [f"the floor's KV format is {floor.get('kv') or 'the model dtype'}, the candidate's "
                 f"{cand.get('kv') or 'the model dtype'}"]
-    path, calls = floor.get("q8_1"), cand.get("expert_calls")
-    if not path or not floor.get("moe_block"):
+    if not floor.get("q8_1"):
         return []
-    if not calls or not calls.get(path):
-        return [f"no expert calls counted on {path}, the floor's path"]
-    return [f"{n} expert calls on {other}, the floor emulates {path}" for other, n in calls.items()
-            if other != path and n]
+    want, calls = f"{floor['q8_1']}/{floor.get('act') or 'q8_1'}", cand.get("calls") or {}
+    return ([] if calls.get(want) else [f"no calls counted on {want}, the floor's path and mode"]) + [
+        f"{n} calls on {other}, the floor emulates {want}" for other, n in calls.items() if other != want and n]
 
 
 def paired_dppl(golden: Recording, cand: Recording, floor: Recording) -> tuple[float, float]:
@@ -228,8 +227,11 @@ def paired_dppl(golden: Recording, cand: Recording, floor: Recording) -> tuple[f
     return math.expm1(mean), se * math.exp(mean)
 
 
-def compare(golden: Recording, cand: Recording, floor: Recording | None = None) -> Result:
-    """The L2 check. Without a floor only the metrics are reported; with one, budgets and a verdict."""
+def compare(golden: Recording, cand: Recording, floor: Recording | None = None,
+            ceiling: float | None = None) -> Result:
+    """The L2 check. Without a floor only the metrics are reported; with one, budgets and a verdict: the path and mode
+    check first (a run scored against another mode's floor fails whatever its numbers), then the budgets. `ceiling`:
+    Tier A's sanity ceiling on KL p99 (fp32 throughout, M0.2 §4.6), also checked."""
     overall, categories = metrics(golden, cand)
     floor_m = budgets = paired = None
     failures: list[str] = []
@@ -237,7 +239,9 @@ def compare(golden: Recording, cand: Recording, floor: Recording | None = None) 
         floor_m = metrics(golden, floor)[0]
         paired = paired_dppl(golden, cand, floor)
         budgets = Budgets.from_floor(floor_m, paired[1])
-        failures = budgets.failures(overall, paired[0]) + _path_failures(floor.meta, cand.meta)
+        failures = _path_failures(floor.meta, cand.meta) + budgets.failures(overall, paired[0])
+    if ceiling is not None and overall.kl_p99 > ceiling:
+        failures.append(f"KL p99 {overall.kl_p99:.3e} > the sanity ceiling {ceiling:.0e}")
     return Result(_provenance(golden), _provenance(cand), overall, categories, floor_m, budgets, tuple(failures),
                   paired)
 

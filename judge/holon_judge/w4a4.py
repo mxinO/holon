@@ -12,7 +12,9 @@
   rounding of `x · (1/r · inv)`. Fast-math's reciprocal and divisions (1/r, max|v| / 6, 0.5 / s) are within a few
   ulp of correctly rounded ones.
 
-A block's values are `e2m1(code) · 2^(e − 127)` (MXFP4) or `e2m1(code) · e4m3(c) · r` (NVFP4). `blocks` are the
+A block's values are `e2m1(code) · 2^(e − 127)` (MXFP4) or `e2m1(code) · e4m3(c) · r` (NVFP4): `values`, what the
+W4A4-dynamic floor computes with (§4.8). `static_nvfp4` is the W4A4-static floor's NVFP4 (a report, §4.8): `r` the
+checkpoint's static input scale, a UE4M3 scale per 16 rounded from amax / (6 · r), no search. `blocks` are the
 kernel's `block_fp4_mmq` [in/256, rows, 144] (`kernels.ggml_cuda`'s test entry): per 256 values 16 scale bytes (MXFP4
 two e8m0 per 64-value quad in the low half of each uint32; NVFP4 one UE4M3 per 16), then per scale group its codes,
 byte j holding element j low and j + half the group high.
@@ -110,6 +112,30 @@ def nvfp4_ties() -> list[tuple[int, int, int]]:
     """The nudges standing for fast-math's results: 1/r and 0.5 / s together, max|v| / 6 alone."""
     span = range(-NUDGE, NUDGE + 1)
     return [(a, 0, c) for a, c in itertools.product(span, span)] + [(0, b, 0) for b in span if b]
+
+
+def values(elem: str, x: torch.Tensor) -> torch.Tensor:
+    """The W4A4-dynamic activations of `x` [rows, in] as llama.cpp's quantizer gives them (the emulation, f32; NVFP4's
+    row scale amax / (6 · 448) correctly rounded)."""
+    x = x.float()
+    if elem == "mxfp4":
+        codes, e = quantize_mxfp4(x)
+        unit = torch.exp2(e.double() - 127)
+    else:
+        r = (x.abs().amax(-1).double() / (6 * 448)).float()
+        codes, c = quantize_nvfp4(x, r)
+        unit = e4m3_value(c).double() * r.double()[:, None]
+    return (E2M1.to(x.device)[codes.long()].double() * unit.repeat_interleave(GROUP[elem], 1)).float()
+
+
+def static_nvfp4(x: torch.Tensor, r: torch.Tensor) -> torch.Tensor:
+    """The W4A4-static activations of `x` [rows, in] (f32) over the static input scale `r` (ModelOpt's `input_scale`):
+    per 16 values the UE4M3 scale `c = e4m3(amax / (6 · r))` (saturating at 448), codes the e2m1 rounding of
+    `x / (c · r)` (saturating at 6)."""
+    g = x.float().reshape(len(x), -1, 16)
+    unit = e4m3_value(e4m3(g.abs().amax(-1) / (6 * r.float()))).double() * r.double()
+    codes = e2m1(torch.where(unit[..., None] > 0, g / unit.float()[..., None], 0.0))
+    return (E2M1.to(x.device)[codes.long()].double() * unit[..., None]).float().reshape(x.shape)
 
 
 def unpack(elem: str, blocks: torch.Tensor, row_scale: torch.Tensor | None, k: int

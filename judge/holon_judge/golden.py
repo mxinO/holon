@@ -14,9 +14,10 @@ import time
 
 import torch
 import transformers
+from holon_std.weights.hf import reference as hf_reference
 
+from . import hf_quant, modes, moe, w4a4
 from . import kv as kv_format
-from . import moe
 from .recording import PromptSet, Recording
 
 DTYPES = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}
@@ -83,31 +84,71 @@ def topk_rows(logits: torch.Tensor, target: torch.Tensor, k: int, rows: int = 25
 
 def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, device: str = "cpu",
            k: int = 20, config: str | None = None, q8_1: str | None = None, pure_hf: bool = False,
-           kv: str | None = None) -> Recording:
+           kv: str | None = None, act: str | None = None, stream: bool = False) -> Recording:
     """Record top-k teacher-forced logprobs of `model` (hub id, checkpoint directory, or a .gguf file with the HF
     `config` it was made from: the dense model of its dequantized weights, M0.1 §4.6) over `prompts`. `q8_1` ("mmq"
-    or "mmvq", GGUF only): every quantized linear computes as llama.cpp's kernels on that path (Tier B's floor).
-    `kv` ("q8_0" or "fp8"): attention reads K and V as a cache in that format stores them (`kv.emulate`).
-    A floor (not fp32) of an MoE model runs the D3-mirroring MoE block (`moe.mirror`, M0.2 §4.6) unless `pure_hf`;
-    the fp32 golden is always HF's own model."""
+    or "mmvq"): every quantized linear computes as llama.cpp's kernels on that path (Tier B's floor), its activations
+    in mode `act` (`modes.MODES`; default q8_1, the only one for a GGUF). `kv` ("q8_0" or "fp8"): attention reads K
+    and V as a cache in that format stores them (`kv.emulate`).
+    A GGUF, a quantized HF checkpoint (its weights as `hf_quant` reads them, docs/m06-lowp.md §4.8) or, with
+    `stream`, a dense one runs one decoder layer at a time (`_streamed`), so its weights are never all held; a dense
+    HF checkpoint otherwise loads through transformers. A floor (not fp32) of an MoE model runs the D3-mirroring MoE
+    block (`moe.mirror`, M0.2 §4.6) unless `pure_hf`; the fp32 golden is always HF's own model."""
     path = resolve_model(model)
+    if act is not None and not q8_1:
+        raise ValueError(f"activation mode {act!r} without a kernel path to emulate it on")
     if path.suffix == ".gguf":
         from . import gguf
 
         if config is None:
             raise ValueError(f"{path}: a GGUF golden needs the HF config it was made from")
+        if act not in (None, "q8_1"):
+            raise ValueError(f"{path}: a GGUF floor emulates q8_1 activations, not {act}")
         hf_config = resolve_model(config)
         is_moe = _is_moe(hf_config)
         mirrored = dtype != torch.float32 and not pure_hf and is_moe
-        hf = gguf.hf_model(path, hf_config, dtype, device, router_f32=mirrored)
-        if q8_1:
-            gguf.emulate_q8_1(hf, path, q8_1)
-        if mirrored:
-            moe.mirror(hf, experts=gguf.q8_1_experts(path, q8_1) if q8_1 else None)
+        experts = gguf.q8_1_experts(path, q8_1) if q8_1 and mirrored else None
+
+        def prepare(module: torch.nn.Module, prefix: str) -> None:
+            if q8_1:
+                gguf.emulate_q8_1(module, path, q8_1, prefix)
+            if mirrored:
+                moe.mirror(module, experts=experts, prefix=prefix)
+
         config_sha256 = hashlib.sha256((hf_config / "config.json").read_bytes()).hexdigest()
         source = gguf.file_meta(path) | {"q8_1": q8_1, "config": model_meta(hf_config)["model"],
                                          "config_sha256": config_sha256} | _moe_meta(mirrored)
+        with kv_format.emulate(kv):
+            rows, wall = _streamed(_skeleton(hf_config), lambda select: dict(gguf.hf_state(path, select)), "blk.",
+                                   prompts, k, dtype, device, mirrored, prepare)
+    elif stream or hf_quant.quantized(path):
+        is_moe = _is_moe(path)
+        mirrored = dtype != torch.float32 and not pure_hf and is_moe
+        quantized = hf_quant.quantized(path)
+        with hf_quant.opened(path) as (get, names), kv_format.emulate(kv):
+            kinds: dict[str, str] = {}
+
+            def state(select):
+                tensors, found = hf_quant.state(get, names, select)
+                kinds.update(found)
+                return tensors
+
+            def prepare(module: torch.nn.Module, prefix: str) -> None:
+                if q8_1:
+                    modes.emulate(module, kinds, q8_1, act or "q8_1", prefix,
+                                  lambda name: hf_quant.input_scale(get, names, name))
+                if mirrored:
+                    moe.mirror(module, None if quantized else dtype,
+                               modes.experts(kinds, q8_1, act or "q8_1") if q8_1 else None, prefix)
+
+            rows, wall = _streamed(_skeleton(path), state, "model.layers.", prompts, k, dtype, device, mirrored,
+                                   prepare)
+        source = model_meta(path) | _moe_meta(mirrored) | ({"q8_1": q8_1, "act": act or "q8_1"} if q8_1 else {}) | (
+            {"hf_reference": _hash(hf_reference)} if quantized else {}) | (
+            {"w4a4": _hash(w4a4)} if act in ("fp4", "fp4-static") else {})
     else:
+        if q8_1:
+            raise ValueError(f"{path}: a dense checkpoint has no quantized linears to emulate")
         is_moe = _is_moe(path)
         mirrored = dtype != torch.float32 and not pure_hf and is_moe
         hf = transformers.AutoModelForCausalLM.from_pretrained(path, dtype=dtype, attn_implementation="sdpa",
@@ -123,18 +164,84 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
             moe.mirror(hf, operand_dtype=dtype)
         hf = place(hf, device)
         source = model_meta(path) | _moe_meta(mirrored)
-    _torch_paths(hf)
-    t0 = time.perf_counter()
-    with kv_format.emulate(kv):
-        rows = [teacher_force(hf, p.ids, k) for p in prompts.prompts]
-    wall = time.perf_counter() - t0
+        _torch_paths(hf)
+        t0 = time.perf_counter()
+        with kv_format.emulate(kv):
+            rows = [teacher_force(hf, p.ids, k) for p in prompts.prompts]
+        wall = time.perf_counter() - t0
     meta = source | prompts.meta() | {
-        "source": "hf", "dtype": str(dtype).removeprefix("torch."), "device": hf.device.type, "attn": "sdpa",
-        **({"experts": "eager"} if is_moe else {}),      # HF's expert path, pinned (a default may change)
+        "source": "hf", "dtype": str(dtype).removeprefix("torch."), "device": torch.device(device).type,
+        "attn": "sdpa", **({"experts": "eager"} if is_moe else {}),   # HF's expert path, pinned (a default may change)
         **({"kv": kv} if kv else {}),
-        "hardware": hardware(hf.device), "threads": torch.get_num_threads(), "torch": torch.__version__,
+        "hardware": hardware(torch.device(device)), "threads": torch.get_num_threads(), "torch": torch.__version__,
         "transformers": transformers.__version__, "wall_s": round(wall, 2)}
     return Recording.from_rows(rows, meta)
+
+
+def _skeleton(config_dir: pathlib.Path) -> torch.nn.Module:
+    """The HF model of `config_dir`'s config (a multimodal one: its text part; a quantized one: its dense model) on
+    the meta device: weights come layer by layer (`_streamed`)."""
+    config = transformers.AutoConfig.from_pretrained(config_dir).get_text_config()
+    if hasattr(config, "quantization_config"):
+        del config.quantization_config
+    with torch.device("meta"):
+        return transformers.AutoModelForCausalLM.from_config(config, attn_implementation="sdpa",
+                                                             experts_implementation="eager").eval()
+
+
+class _Inputs(torch.nn.Module):
+    """A decoder layer's stand-in: keeps what the model passes the layer (per call) and returns its input."""
+
+    def __init__(self, layer: torch.nn.Module, kept: list) -> None:
+        super().__init__()
+        self.kept = kept
+        if hasattr(layer, "attention_type"):
+            self.attention_type = layer.attention_type
+
+    def forward(self, hidden: torch.Tensor, **kwargs) -> torch.Tensor:
+        self.kept.append((hidden, kwargs))
+        return hidden
+
+
+@torch.inference_mode()
+def _streamed(model: torch.nn.Module, state, layers: str, prompts: PromptSet, k: int, dtype: torch.dtype,
+              device: str, router_f32: bool, prepare) -> tuple[list[tuple[torch.Tensor, ...]], float]:
+    """Teacher forcing one decoder layer at a time: the model's own forward runs once per prompt with every layer
+    replaced by `_Inputs` (so masks and position embeddings are its own), then each layer is loaded (`state(select)`:
+    the fp32 state entries of the source names `select` keeps, those starting `layers` + its index), `prepare(module,
+    name prefix)`d (a floor's emulation), applied to every prompt's hidden states and freed; the head (also
+    `prepare`d) closes. The same operations as the whole model's forward, so the same bits (judge/tests). Weights are
+    cast to `dtype` on `device`, MoE routers kept F32 if `router_f32`."""
+    def load(module: torch.nn.Module, tensors: dict[str, torch.Tensor], strip: str = "") -> None:
+        keep = lambda name: router_f32 and name.endswith(".mlp.gate.weight")          # noqa: E731
+        module.load_state_dict({n.removeprefix(strip): (t if keep(n) else t.to(dtype)).to(device)
+                                for n, t in tensors.items()}, strict=bool(strip), assign=True)
+
+    config, blocks = model.config, model.model.layers
+    load(model, state(lambda name: not name.startswith(layers)))
+    if config.tie_word_embeddings:
+        model.tie_weights()
+    if missing := [n for n, p in model.named_parameters() if p.is_meta and not n.startswith("model.layers.")]:
+        raise ValueError(f"no tensor for {missing[:4]}")
+    model.model.rotary_emb = type(model.model.rotary_emb)(config=config).to(device)    # buffers, not weights
+    prepare(model.lm_head, "lm_head")
+    _torch_paths(model)
+    t0 = time.perf_counter()
+    kept: list[list] = [[] for _ in blocks]
+    model.model.layers = torch.nn.ModuleList(_Inputs(b, kept[i]) for i, b in enumerate(blocks))
+    for p in prompts.prompts:
+        model.model(torch.tensor([p.ids], device=device), use_cache=False)
+    model.model.layers = blocks
+    hidden = [h for h, _ in kept[0]]
+    for i, block in enumerate(blocks):
+        prefix = f"model.layers.{i}."
+        load(block, state(lambda name, start=f"{layers}{i}.": name.startswith(start)), prefix)
+        prepare(block, prefix)
+        hidden = [block(h, **kwargs) for h, (_, kwargs) in zip(hidden, kept[i], strict=True)]
+        block.to("meta")
+    rows = [topk_rows(model.lm_head(model.model.norm(h))[0, :-1], torch.tensor(p.ids[1:], device=device), k)
+            for h, p in zip(hidden, prompts.prompts, strict=True)]
+    return rows, time.perf_counter() - t0
 
 
 def place(model: torch.nn.Module, device: str) -> torch.nn.Module:
@@ -167,3 +274,9 @@ def _is_moe(config_dir: pathlib.Path) -> bool:
 
 def _moe_meta(mirrored: bool) -> dict:
     return {"moe_block": f"d3-reference@{moe.reference_hash()}"} if mirrored else {}
+
+
+def _hash(module) -> str:
+    """A module's source hash: a floor is recorded at its emulator's and reference's (docs/m06-lowp.md §4.8)."""
+    with open(module.__file__, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()[:16]

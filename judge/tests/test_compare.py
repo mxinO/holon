@@ -92,20 +92,29 @@ def test_refuses_different_prompt_sets(case):
         compare(g, other)
 
 
-def test_expert_calls_off_the_floors_path_fail(case):
+def test_calls_off_the_floors_path_or_mode_fail(case):
+    """Every quantized call while scoring must have run the floor's path and activation mode (docs/m06-lowp.md D3);
+    plant N7: the `fp4` spec's prefill scored against the W4A8 floor fails on the mode alone."""
     lens, logits, targets, _ = case
     g, floor = _recording(logits, targets, lens), _recording(logits, targets, lens)
-    floor.meta |= {"q8_1": "mmvq", "moe_block": "d3-reference@x"}
+    floor.meta |= {"q8_1": "mmvq"}                                         # a floor without `act`: q8_1
     on_path, off_path, uncounted = (_recording(logits, targets, lens) for _ in range(3))
-    on_path.meta["expert_calls"] = {"mmvq": 40, "mmq": 0}
-    off_path.meta["expert_calls"] = {"mmvq": 40, "mmq": 3}
+    on_path.meta["calls"] = {"mmvq/q8_1": 40, "mmq/q8_1": 0}
+    off_path.meta["calls"] = {"mmvq/q8_1": 40, "mmq/q8_1": 3}
     assert compare(g, on_path, floor).passed
     r = compare(g, off_path, floor)
-    assert r.passed is False and r.failures == ("3 expert calls on mmq, the floor emulates mmvq",)
-    assert compare(g, uncounted, floor).failures == ("no expert calls counted on mmvq, the floor's path",)
-    uncounted.meta["expert_calls"] = {"mmvq": 0, "mmq": 0}                 # counters that never ran
-    assert compare(g, uncounted, floor).failures == ("no expert calls counted on mmvq, the floor's path",)
-    del floor.meta["moe_block"]                                            # a dense Tier B floor: nothing to count
+    assert r.passed is False and r.failures == ("3 calls on mmq/q8_1, the floor emulates mmvq/q8_1",)
+    assert compare(g, uncounted, floor).failures == ("no calls counted on mmvq/q8_1, the floor's path and mode",)
+    uncounted.meta["calls"] = {"mmvq/q8_1": 0, "mmq/q8_1": 0}             # counters that never ran
+    assert compare(g, uncounted, floor).failures == ("no calls counted on mmvq/q8_1, the floor's path and mode",)
+    floor.meta |= {"q8_1": "mmq", "act": "q8_1"}                           # N7: the W4A8 floor ...
+    w4a4 = _recording(logits, targets, lens)
+    w4a4.meta["calls"] = {"mmq/fp4": 12, "mmvq/q8_1": 0}                   # ... of a native W4A4 prefill
+    assert compare(g, w4a4, floor).failures == ("no calls counted on mmq/q8_1, the floor's path and mode",
+                                                "12 calls on mmq/fp4, the floor emulates mmq/q8_1")
+    floor.meta["act"] = "fp4"
+    assert compare(g, w4a4, floor).passed
+    del floor.meta["q8_1"]                                                 # not a Tier B floor: nothing to count
     assert compare(g, uncounted, floor).passed
 
 

@@ -1,5 +1,5 @@
 """The judge on a tiny Qwen3-MoE written as a Q8_0 GGUF (docs/m02-moe.md §4.6): the file's golden is HF's model of
-its dequantized weights, the gate checks the judge's expert assembly against transformers' own loading, an MoE floor
+its dequantized weights, the gate checks the judge's expert assembly against the checkpoint's tensors, an MoE floor
 runs the D3-mirroring block, and Tier A — the engine on the production source with reference kernels — sits on the
 golden while each planted MoE bug moves it."""
 import gguf
@@ -52,11 +52,15 @@ def gold(moe_files, tiny_prompts):
 
 
 def test_the_golden_is_hfs_model_of_the_dequantized_weights(moe_files, tiny_prompts, gold):
-    r = compare(gold, golden.record(str(moe_files[2]), tiny_prompts)).overall
-    assert r.top1 == 1 and r.kl_p99 < 1e-8 and "moe_block" not in gold.meta    # fp32: HF's own block
+    """Bit for bit: the file's golden runs one layer at a time on the judge's expert assembly, transformers' runs
+    the whole model it loaded (its own fusion of the per-expert tensors); so does the dense checkpoint streamed by the
+    judge's HF reader (`hf_quant.state`), which the gates read the originals with."""
+    dense = golden.record(str(moe_files[2]), tiny_prompts)
+    assert gold.same_tensors(dense) and "moe_block" not in gold.meta    # fp32: HF's own block
+    assert golden.record(str(moe_files[2]), tiny_prompts, stream=True).same_tensors(dense)
 
 
-def test_the_gate_checks_every_expert_against_transformers_own_loading(moe_files):
+def test_the_gate_checks_every_expert_against_the_checkpoint(moe_files):
     checkpoint, file, _ = moe_files
     nmse = judge_gguf.gate(file, checkpoint)
     assert sum(".mlp.experts.gate_up_proj[" in n for n in nmse) == 2 * 8 and max(nmse.values()) < 1e-3

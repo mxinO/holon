@@ -27,12 +27,13 @@ class EngineLike(Protocol):
 
 def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None = None) -> Recording:
     """Run every prompt with `prompt_logprobs=k` and pack the answers as a recording comparable to the golden; with
-    expert kernels that count their calls per path (and activation mode, `path/mode`, summed here), the calls made
-    while scoring (`expert_calls`: Tier B's path check; the engine's start-up — memory profiling, graphs — excluded)
-    and its KV cache format (`kv`, unless the model dtype: a floor must emulate the same, `compare`)."""
+    quantized kernels that count their calls per path and activation mode (keys `path/mode`: `kernels.ggml_cuda`'s
+    dense and expert instances), the calls made while scoring (`calls`: Tier B's path and mode check; the engine's
+    start-up — memory profiling, graphs — excluded) and its KV cache format (`kv`, unless the model dtype: a floor
+    must emulate the same, `compare`)."""
     kv = getattr(getattr(engine, "cfg", None), "plugin_options", {}).get("kv.format")
-    counters = _expert_counters(engine)
-    before = _by_path(counters)
+    counters = _counters(engine)
+    before = _total(counters)
     params = SamplingParams(max_tokens=1, temperature=0.0, prompt_logprobs=k)
     index = {engine.add(p.ids, params): i for i, p in enumerate(prompts.prompts)}
     parts: list[list[Logprobs]] = [[] for _ in prompts.prompts]
@@ -44,26 +45,30 @@ def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None
                 parts[index[delta.rid]].append(delta.prompt_logprobs)
     rows = [_rows(p, got, k) for p, got in zip(prompts.prompts, parts, strict=True)]
     wall = round(time.perf_counter() - t0, 2)
-    after = _by_path(counters)
-    calls = {"expert_calls": {path: n - before.get(path, 0) for path, n in after.items()}} if counters else {}
+    after = _total(counters)
+    calls = {"calls": {key: n - before.get(key, 0) for key, n in sorted(after.items())}} if counters else {}
     return Recording.from_rows(rows, prompts.meta() | {"source": "holon", "wall_s": wall} | (meta or {}) | calls
                                | ({"kv": kv} if kv else {}))
 
 
-def _by_path(counters: list[dict[str, int]]) -> dict[str, int]:
-    """The calls counted so far per path, over every counter and activation mode (keys `path/mode`)."""
+def _total(counters: list[dict[str, int]]) -> dict[str, int]:
+    """The calls counted so far per `path/mode`, over every counter."""
     total: dict[str, int] = {}
     for c in counters:
         for key, n in c.items():
-            total[key.split("/")[0]] = total.get(key.split("/")[0], 0) + n
+            total[key] = total.get(key, 0) + n
     return total
 
 
-def _expert_counters(engine: EngineLike) -> list[dict[str, int]]:
-    """The per-path call counters of the engine's expert kernels (none for other engines or kernels)."""
+def _counters(engine: EngineLike) -> list[dict[str, int]]:
+    """The call counters of the engine's quantized kernels (none for other engines or kernels): an expert stack's
+    kernel is its unit's `_kernel`, a linear's its quantized weight's (`_q._kernel`)."""
     model = getattr(getattr(engine, "executor", None), "model", None)
-    return [] if model is None else [m._kernel.calls for m in model.modules()
-                                     if hasattr(getattr(m, "_kernel", None), "calls")]
+    if model is None:
+        return []
+    kernels = [k for m in model.modules() for k in (getattr(m, "_kernel", None),
+                                                     getattr(getattr(m, "_q", None), "_kernel", None))]
+    return [k.calls for k in kernels if hasattr(k, "calls")]
 
 
 def _rows(prompt: Prompt, parts: list[Logprobs], k: int) -> tuple[torch.Tensor, ...]:

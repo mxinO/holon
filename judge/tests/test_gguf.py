@@ -13,6 +13,7 @@ from holon_judge.engine import score
 from holon_judge.planted import PLANTS
 from holon_testing.gguf_files import write
 from safetensors.torch import save_file
+from transformers import AutoModelForCausalLM
 
 
 @pytest.fixture(scope="module")
@@ -74,7 +75,7 @@ def test_tier_b_floor_rounds_every_quantized_linear_input_to_q8_1(files, tiny_ch
                                                                   kernel_path):
     from holon_judge import q8_1
 
-    model = judge_gguf.hf_model(files[0], tiny_checkpoint)
+    model = AutoModelForCausalLM.from_pretrained(files[1], dtype=torch.float32)        # the file's weights
     types = judge_gguf.emulate_q8_1(model, files[0], kernel_path)
     assert set(types) == {n for n, m in model.named_modules() if isinstance(m, torch.nn.Linear)}
     proj = model.model.layers[0].mlp.down_proj

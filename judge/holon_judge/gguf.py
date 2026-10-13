@@ -10,14 +10,11 @@ import hashlib
 import json
 import pathlib
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import gguf
 import numpy as np
 import torch
-import transformers
-
-from .golden import place
 
 GATE = 0.5          # NMSE(dequantized, HF bf16) per tensor: a correct quant explains at least half the energy
 # llama.cpp's tensor names (src/llama-arch.cpp) for the dense-transformer tensors -> HF Qwen3 names.
@@ -100,15 +97,19 @@ def _qwen35_value(name: str, x: torch.Tensor, f: dict) -> torch.Tensor:
 _DENSE = {gguf.GGMLQuantizationType.F32, gguf.GGMLQuantizationType.F16, gguf.GGMLQuantizationType.BF16}
 
 
-def hf_state(path: str | pathlib.Path) -> Iterator[tuple[str, torch.Tensor]]:
-    """The HF state-dict entries (fp32) the file's tensors make, dequantized by gguf-py one tensor at a time; a
-    layer's gate and up expert stacks are fused as transformers stores them (`gate_up_proj` [E, 2I, H])."""
+def hf_state(path: str | pathlib.Path, select: Callable[[str], bool] = lambda name: True
+             ) -> Iterator[tuple[str, torch.Tensor]]:
+    """The HF state-dict entries (fp32) the file's tensors make (those whose GGUF name `select` keeps, e.g. one
+    layer's `blk.<i>.`), dequantized by gguf-py one tensor at a time; a layer's gate and up expert stacks are fused as
+    transformers stores them (`gate_up_proj` [E, 2I, H])."""
     pending: dict[str, dict[str, torch.Tensor]] = {}
     reader = gguf.GGUFReader(path)
     q35 = _qwen35(reader.fields)
     for t in reader.tensors:
         if q35 is not None and re.match(rf"blk\.{q35['layers']}\.", t.name):
             continue                                   # the MTP block (M0.4)
+        if not select(t.name):
+            continue
         x = gguf.quants.dequantize(np.asarray(t.data), t.tensor_type).astype(np.float32, copy=False)
         x = torch.from_numpy(x.reshape([int(n) for n in reversed(t.shape)]).copy())
         if q35 is not None:
@@ -125,19 +126,37 @@ def hf_state(path: str | pathlib.Path) -> Iterator[tuple[str, torch.Tensor]]:
                 yield f"model.layers.{m[1]}.mlp.experts.gate_up_proj", torch.cat([p["gate"], p["up"]], dim=1)
 
 
+def hf_types(path: str | pathlib.Path) -> dict[str, str]:
+    """The ggml type (lowercase) of each HF state entry `hf_state` makes (a fused gate/up stack: gate's)."""
+    out = {}
+    for t in gguf.GGUFReader(path).tensors:
+        if m := re.fullmatch(r"blk\.(\d+)\.ffn_(gate|up|down)_exps\.weight", t.name):
+            name = f"model.layers.{m[1]}.mlp.experts.{'down' if m[2] == 'down' else 'gate_up'}_proj"
+            if m[2] == "up":
+                continue
+        else:
+            try:
+                name = hf_name(t.name)
+            except KeyError:
+                continue                                       # the MTP block, which hf_state skips
+        out[name] = t.tensor_type.name.lower()
+    return out
+
+
 def dequantized(path: str | pathlib.Path) -> dict[str, torch.Tensor]:
     """Every tensor of the file, dequantized by gguf-py (fp32), by HF name."""
     return dict(hf_state(path))
 
 
-def emulate_q8_1(model: torch.nn.Module, path: str | pathlib.Path, kernel_path: str) -> dict[str, str]:
-    """Tier B's floor (design §4.6): every quantized linear of `model` (the HF model of `path`, lm_head included)
-    computes as llama.cpp's int8 dots do on `kernel_path` (`q8_1.MMQ` or `q8_1.MMVQ`) — its input rounded to q8_1, the
-    stored-sum offsets of its type — in float32 over its weights, writing its own dtype (the head: float32). Returns
-    the ggml type of each linear it changed."""
+def emulate_q8_1(model: torch.nn.Module, path: str | pathlib.Path, kernel_path: str,
+                 prefix: str = "") -> dict[str, str]:
+    """Tier B's floor (design §4.6): every quantized linear of `model` (the HF model of `path`, lm_head included, or a
+    part of it named `prefix`, e.g. one streamed layer) computes as llama.cpp's int8 dots do on `kernel_path`
+    (`q8_1.MMQ` or `q8_1.MMVQ`) — its input rounded to q8_1, the stored-sum offsets of its type — in float32 over
+    its weights, writing its own dtype (the head: float32). Returns the ggml type of each linear it changed."""
     from . import q8_1
 
-    linears = {name: m for name, m in model.named_modules() if isinstance(m, torch.nn.Linear)}
+    linears = {prefix + name: m for name, m in model.named_modules() if isinstance(m, torch.nn.Linear)}
     types = {}
     reader = gguf.GGUFReader(path)
     q35 = _qwen35(reader.fields)
@@ -223,44 +242,31 @@ def _emulated(linear: torch.nn.Linear, kind: str, kernel_path: str, offs: torch.
     return y.to(out_dtype or x.dtype).reshape(*x.shape[:-1], -1)
 
 
-def hf_model(path: str | pathlib.Path, config_dir: str | pathlib.Path, dtype: torch.dtype = torch.float32,
-             device: str = "cpu", router_f32: bool = False) -> torch.nn.Module:
-    """The HF model of `config_dir`'s config with the file's dequantized weights (the dense model the file means),
-    loaded tensor by tensor; `router_f32`: MoE routers stay F32 as stored (the floors' D3 block reads them). On
-    "cuda" a model larger than one GPU is spread over the visible ones."""
-    config = transformers.AutoConfig.from_pretrained(config_dir).get_text_config()   # a multimodal one: its text part
-    with torch.device("meta"):
-        model = transformers.AutoModelForCausalLM.from_config(config, attn_implementation="sdpa",
-                                                              experts_implementation="eager")
-    for name, x in hf_state(path):
-        if config.tie_word_embeddings and name == "lm_head.weight":
-            continue
-        keep = router_f32 and name.endswith(".mlp.gate.weight")
-        model.load_state_dict({name: x if keep else x.to(dtype)}, strict=False, assign=True)
-    if config.tie_word_embeddings:
-        model.tie_weights()
-    if missing := [n for n, p in model.named_parameters() if p.is_meta]:
-        raise ValueError(f"{path}: no tensor for {missing[:4]}")
-    model.model.rotary_emb = type(model.model.rotary_emb)(config=config)    # its buffers are not weights: built here
-    return place(model.eval(), device)
-
-
 def gate(path: str | pathlib.Path, hf_dir: str | pathlib.Path) -> dict[str, float]:
-    """NMSE of every dequantized tensor against the HF checkpoint as transformers loads it (in its stored dtype, with
-    its own fusion of per-expert tensors), per expert for expert stacks: a mistake in the judge's assembly (expert
-    order, gate before up) fails here even if the engine makes the same one. MoE routers must be exact (F32 in the
-    file, the checkpoint's values upcast): a ValueError otherwise."""
-    reference = transformers.AutoModelForCausalLM.from_pretrained(hf_dir, dtype="auto").state_dict()
-    out = {}
-    for name, x in hf_state(path):
-        ref = reference[name].float()
-        if name.endswith(".mlp.gate.weight") and not torch.equal(x.float(), ref):
-            raise ValueError(f"{path}: router {name} differs from the checkpoint's")
-        if ".mlp.experts." in name:
-            for e in range(x.shape[0]):
-                out[f"{name}[{e}]"] = _nmse(x[e], ref[e])
-        else:
-            out[name] = _nmse(x, ref)
+    """NMSE of every dequantized tensor against the HF checkpoint, per expert for expert stacks, one layer of the
+    checkpoint at a time: its tensors as the judge reads them (`hf_quant.state`, whose fusion of per-expert tensors is
+    transformers' own, bit for bit: judge/tests/test_golden.py), so a mistake in this file's assembly (expert order,
+    gate before up) fails here even if the engine makes the same one. MoE routers must be exact (F32 in the file, the
+    checkpoint's values upcast): a ValueError otherwise."""
+    from . import hf_quant
+
+    out, layer, reference = {}, None, {}
+    with hf_quant.opened(hf_dir) as (get, names):
+        for name, x in hf_state(path):
+            if (m := re.match(r"model\.layers\.\d+\.", name)) is None:
+                ref = get(name).float()
+            else:
+                if m[0] != layer:
+                    layer, reference = m[0], {}           # the previous layer's tensors freed first
+                    reference = hf_quant.state(get, names, lambda n, start=layer: n.startswith(start))[0]
+                ref = reference[name]
+            if name.endswith(".mlp.gate.weight") and not torch.equal(x.float(), ref):
+                raise ValueError(f"{path}: router {name} differs from the checkpoint's")
+            if ".mlp.experts." in name:
+                for e in range(x.shape[0]):
+                    out[f"{name}[{e}]"] = _nmse(x[e], ref[e])
+            else:
+                out[name] = _nmse(x, ref)
     return out
 
 

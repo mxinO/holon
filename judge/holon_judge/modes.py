@@ -1,0 +1,71 @@
+"""The activation modes a floor emulates on a quantized HF checkpoint (docs/m06-lowp.md §4.8, D3): every quantized
+linear and expert stack takes its input as the kernel path's mode quantizes it, then multiplies in f32 by its
+(dequantized) weight. Modes are named as `kernels.ggml_cuda` counts its calls (`<path>/<mode>`):
+
+- `q8_1` (W4A8, either path): `q8_1.py`'s blocking of the path (FP4 types use no stored sums);
+- `fp4` (W4A4-dynamic, mmq only): llama.cpp's native FP4 quantizer, emulated by `w4a4.values`;
+- `fp4-static` (W4A4-static, mmq only, NVFP4 dense linears: a report): `w4a4.static_nvfp4` over each projection's
+  static input scale from the checkpoint.
+
+Each input row is quantized once, as the kernels do: a token's input to a merged gate/up stack once for its k slots,
+each (token, slot) row of down on its own.
+"""
+from __future__ import annotations
+
+import functools
+from collections.abc import Callable
+
+import torch
+from holon_std.moe import reference
+
+from . import q8_1, w4a4
+
+MODES = ("q8_1", "fp4", "fp4-static")
+
+
+def quantizer(elem: str, path: str, mode: str, scale: torch.Tensor | None = None) -> Callable[[torch.Tensor],
+                                                                                              torch.Tensor]:
+    """f32 rows [R, in] -> the values the kernel multiplies (f32), for a weight of `elem` on `path` in `mode`."""
+    if mode == "q8_1":
+        b = q8_1.blocking(elem, path)
+        if b.sum_group:
+            raise ValueError(f"{elem}: an offset type (the GGUF floors' q8_1.matmul emulates those)")
+        return lambda x: q8_1.quantize(x, b).float()
+    if path != q8_1.MMQ or elem not in w4a4.GROUP:
+        raise ValueError(f"{mode} is mmq's on FP4 weights, not {path}'s on {elem}")
+    if mode == "fp4":
+        return functools.partial(w4a4.values, elem)
+    if mode == "fp4-static" and elem == "nvfp4" and scale is not None:
+        return lambda x: w4a4.static_nvfp4(x, scale.to(x.device))
+    raise ValueError(f"no {mode} emulation for {elem}")
+
+
+def emulate(module: torch.nn.Module, kinds: dict[str, str], path: str, mode: str, prefix: str = "",
+            scales: Callable[[str], torch.Tensor] | None = None) -> int:
+    """Every quantized linear of `module` (named `prefix` + its name in `kinds`, their elems) computes in `mode` on
+    `path`; `scales(name)`: a projection's static input scale (`fp4-static`). Returns the number changed."""
+    n = 0
+    for name, m in module.named_modules():
+        if isinstance(m, torch.nn.Linear) and (elem := kinds.get(prefix + name)) is not None:
+            quant = quantizer(elem, path, mode, scales(prefix + name) if mode == "fp4-static" else None)
+            m.forward = functools.partial(_linear, m, quant)
+            n += 1
+    return n
+
+
+def _linear(linear: torch.nn.Linear, quant: Callable, x: torch.Tensor) -> torch.Tensor:
+    y = quant(x.reshape(-1, x.shape[-1]).float()) @ linear.weight.float().T
+    return y.to(x.dtype).reshape(*x.shape[:-1], -1)
+
+
+def experts(kinds: dict[str, str], path: str, mode: str) -> Callable:
+    """The floors' MoE block's expert stacks (`moe.mirror(experts=…)`): a quantized stack (`<mlp>.gate_up`, `<mlp>.down`
+    in `kinds`) takes its rows quantized in `mode` on `path`, then the f32 product (`reference.linear_experts`); a dense
+    one is the reference's."""
+    def apply(name: str, x: torch.Tensor, weight: torch.Tensor, ids: torch.Tensor, glu: str) -> torch.Tensor:
+        if (elem := kinds.get(name)) is not None:
+            if mode == "fp4-static":
+                raise ValueError(f"{name}: the W4A4-static floor is for dense linears (a report on the 8B)")
+            x = quantizer(elem, path, mode)(x.reshape(-1, x.shape[-1]).float()).view(x.shape)
+        return reference.linear_experts(x, weight, ids, glu)
+    return apply

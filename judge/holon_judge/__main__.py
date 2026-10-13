@@ -1,13 +1,16 @@
 """Judge command line.
 
-    python -m holon_judge golden   --model <hf dir or id | .gguf> [--config <hf dir or id> [--q8-1 mmq|mmvq]]
-                                   --prompts <jsonl> --out <file> [--threads N] [--k 20]
+    python -m holon_judge golden   --model <hf dir or id | .gguf> [--config <hf dir or id>] [--q8-1 mmq|mmvq
+                                   [--act q8_1|fp4|fp4-static]] --prompts <jsonl> --out <file> [--threads N] [--k 20]
                                    [--dtype bfloat16 --device cuda]          # the floor: HF in the activation dtype
                                    [--kv q8_0|fp8]                           # ... reading K/V in that cache format
+                                   [--stream]                                # a dense checkpoint one layer at a time
+    python -m holon_judge gate     --model <hf dir or id | .gguf> --original <hf dir or id> [--json <file>]
+                                   # per-tensor NMSE against the bf16 original (docs/m06-lowp.md §4.8)
     python -m holon_judge compare  --golden <file> --candidate <file> [--floor <file>] [--json <file>]
     python -m holon_judge l2       --model <hf dir or id | .gguf> --prompts <jsonl> --golden <file> --floor <file>
                                    [--source gguf_dense] [--max-step-tokens N] [--kv q8_0|fp8] [--plant <bug>]
-                                   [--dtype bfloat16] [--k 20] [--save <file>] [--json <file>]
+                                   [--dtype bfloat16] [--k 20] [--save <file>] [--json <file>] [--ceiling 1e-4]
     python -m holon_judge retokenize --prompts <jsonl> --model <hf dir or id> --out <jsonl>
                                    # the same texts in another model's tokenizer (each must decode back exactly)
     python -m holon_judge snapshot-diff <a.json> <b.json>
@@ -21,7 +24,8 @@
                                    [--calibration <jsonl>] [--plant <bug>] [--json <file>]
                                    # grammar + speculation vs grammar (M0.5 §5)
 
-`compare`, `l2`, `snapshot-diff`, `snapshot`, `bounded` and `constrained` exit with status 1 on a failed check.
+`compare`, `l2`, `gate`, `snapshot-diff`, `snapshot`, `bounded` and `constrained` exit with status 1 on a failed
+check.
 """
 from __future__ import annotations
 
@@ -30,12 +34,13 @@ import contextlib
 import dataclasses
 import json
 import pathlib
+import re
 import shlex
 import sys
 
 import torch
 
-from . import golden
+from . import golden, modes
 from . import kv as kv_format
 from .compare import Result, compare, compare_drafter
 from .planted import PLANTS
@@ -46,7 +51,7 @@ def _golden(a: argparse.Namespace) -> int:
     if a.threads:
         torch.set_num_threads(a.threads)
     rec = golden.record(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k, a.config,
-                        a.q8_1, a.pure_hf, a.kv)
+                        a.q8_1, a.pure_hf, a.kv, a.act, a.stream)
     rec.save(a.out)
     print(json.dumps(rec.meta | {"bytes": pathlib.Path(a.out).stat().st_size}, indent=1))
     return 0
@@ -76,7 +81,37 @@ def _l2(a: argparse.Namespace) -> int:
                            a.kv)
     if a.save:
         cand.save(a.save)
-    return _report(compare(Recording.load(a.golden), cand, Recording.load(a.floor)), a.json)
+    return _report(compare(Recording.load(a.golden), cand, Recording.load(a.floor), a.ceiling), a.json)
+
+
+def _gate(a: argparse.Namespace) -> int:
+    """§4.8's gates: NMSE per tensor (per expert) against the bf16 original, by the tensor's format; a summary per
+    role (the last part of the name, experts' projections apart), and the tensors over their gate."""
+    from . import gguf, hf_quant
+
+    path, original = golden.resolve_model(a.model), golden.resolve_model(a.original)
+    with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
+        if path.suffix == ".gguf":
+            types = gguf.hf_types(path)
+            nmse = {n: (types[re.sub(r"\[\d+\]$", "", n)], v) for n, v in gguf.gate(path, original).items()}
+            bound = {n: hf_quant.GATES.get(t, gguf.GATE) for n, (t, _) in nmse.items()}
+        else:
+            nmse = hf_quant.gate(path, original)
+            bound = {n: hf_quant.GATES[elem] for n, (elem, _) in nmse.items()}
+    by_role: dict[str, float] = {}
+    for n, (_, v) in nmse.items():
+        role = re.sub(r"\[\d+\]$", "", n).removesuffix(".weight").rsplit(".", 1)[-1]
+        by_role[role] = max(by_role.get(role, 0.0), v)
+    over = sorted(n for n, (_, v) in nmse.items() if not v <= bound[n])
+    meta = gguf.file_meta(path) if path.suffix == ".gguf" else golden.model_meta(path)
+    report = {"model": meta["model"], "original": golden.model_meta(original)["model"], "plant": a.plant,
+              "tensors": len(nmse), "max": max(v for _, v in nmse.values()), "max_by_role": by_role,
+              "gates": sorted(set(bound.values())), "over": len(over), "first_over": over[:8]}
+    print(json.dumps(report, indent=1))
+    if a.json:
+        pathlib.Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+        pathlib.Path(a.json).write_text(json.dumps(report, indent=1) + "\n")
+    return 1 if over else 0
 
 
 def _structure(a: argparse.Namespace) -> int:
@@ -343,6 +378,10 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--q8-1", choices=["mmq", "mmvq"], help="for a .gguf: Tier B's floor on that kernel path")
     g.add_argument("--pure-hf", action="store_true", help="an MoE floor with HF's own MoE block (information only)")
     g.add_argument("--kv", choices=kv_format.FORMATS, help="a floor whose attention reads K/V in this cache format")
+    g.add_argument("--act", choices=modes.MODES, help="with --q8-1, a quantized HF checkpoint's activation mode on "
+                   "that path (default q8_1: W4A8; fp4: W4A4-dynamic; fp4-static: W4A4-static, docs/m06-lowp.md §4.8)")
+    g.add_argument("--stream", action="store_true", help="a dense HF checkpoint one decoder layer at a time (GGUF "
+                   "files and quantized checkpoints always are)")
     g.add_argument("--prompts", required=True)
     g.add_argument("--out", required=True)
     g.add_argument("--threads", type=int, default=0, help="CPU threads; pin it to re-record a golden bitwise")
@@ -375,7 +414,15 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--save", help="also save the candidate recording")
     e.add_argument("--json", help="write the machine-readable result here")
     e.add_argument("--plant", choices=sorted(PLANTS), help="calibration: run with a planted bug (must fail)")
+    e.add_argument("--ceiling", type=float, help="Tier A's sanity ceiling on KL p99 (fp32 throughout: 1e-4)")
     e.set_defaults(run=_l2)
+
+    ga = sub.add_parser("gate", help="per-tensor NMSE against the bf16 original (docs/m06-lowp.md §4.8)")
+    ga.add_argument("--model", required=True, help="a quantized HF checkpoint (dir or hub id) or a .gguf file")
+    ga.add_argument("--original", required=True, help="the bf16 HF checkpoint it was made from")
+    ga.add_argument("--json", help="write the report here")
+    ga.add_argument("--plant", choices=sorted(PLANTS), help="calibration: run with a planted bug (must fail)")
+    ga.set_defaults(run=_gate)
 
     st = sub.add_parser("structure", help="every stacked expert of an HF MoE load equals the checkpoint's tensor")
     st.add_argument("--model", required=True, help="HF checkpoint directory or hub id")

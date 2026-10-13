@@ -84,12 +84,12 @@ class _Dequantized:
             else None
         self.facts, self._cache = facts, {}
 
-    def dequantized(self, parts: dict[str, torch.Tensor], make=None) -> torch.Tensor:
-        """`make(parts)` (default: the whole weight dequantized), once per weight, keyed by its primary part."""
+    def dequantized(self, parts: dict[str, torch.Tensor]) -> torch.Tensor:
+        """The whole weight dequantized, once per weight, keyed by its primary part."""
         first = next(iter(parts.values()))
         key = (first.data_ptr(), first.shape)
         if key not in self._cache:
-            self._cache[key] = (make or self._dequantize)(parts)
+            self._cache[key] = self._dequantize(parts)
         return self._cache[key]
 
     def _dequantize(self, parts: dict[str, torch.Tensor]) -> torch.Tensor:
@@ -109,8 +109,9 @@ class QEmbedding(_Dequantized):
 
 
 class LinearExperts:
-    """Expert stacks: ggml layouts dequantized by gguf-py, HF layouts per expert by std.weights.hf's reference, once
-    per stack; dense ones as stored, the activation rounded to their dtype (the contract)."""
+    """Expert stacks: ggml layouts dequantized by gguf-py, HF layouts per expert by std.weights.hf's reference, on
+    every call (a 30B's stacks in f32 take ≈ 122 GB: Tier A must fit a 64 GB budget); dense ones as stored, the
+    activation rounded to their dtype (the contract)."""
 
     def __init__(self, ctx, *, layout: str, experts: int, out: int, glu: str, out_dtype: str, **facts) -> None:
         self.quantized = None if layout.startswith("dense/") else _Dequantized(ctx, layout=layout)
@@ -121,11 +122,11 @@ class LinearExperts:
             weight = parts["weight"]
             y = moe.linear_experts(x, weight, ids, self.glu, operand_dtype=weight.dtype)
         elif self.quantized.ggml is not None:
-            y = moe.linear_experts(x, self.quantized.dequantized(parts).view(self.experts, self.out, -1), ids, self.glu)
+            stack = self.quantized._dequantize(parts).view(self.experts, self.out, -1)
+            y = moe.linear_experts(x, stack, ids, self.glu)
         else:
-            stack = self.quantized.dequantized(parts, lambda p: torch.stack([
-                torch.cat([hf.dequantize(self.quantized.elem, u) for u in units])
-                for units in moe.expert_parts(p, self.experts, merged=self.glu == "swiglu")]))
+            stack = torch.stack([torch.cat([hf.dequantize(self.quantized.elem, u) for u in units])
+                                 for units in moe.expert_parts(parts, self.experts, merged=self.glu == "swiglu")])
             y = moe.linear_experts(x, stack, ids, self.glu)
         return y.to(self.out_dtype)
 
