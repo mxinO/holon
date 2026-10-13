@@ -3,7 +3,7 @@
  "date": "2026-10-13",
  "gpu_class": "rtx-a5000",
  "command": "python bench/grammar_vetting.py --model Qwen/Qwen3-0.6B@c1899de289a0 --model Qwen/Qwen3.5-4B@851bf6e806ef --jsb <JSONSchemaBench> --per-subset 40",
- "commit": "69357e5710236460455a2129908df8cc0dc619e4",
+ "commit": "b32817329786aac6c16d02aa4f8c8e678c0993a1",
  "xgrammar": "0.2.8",
  "results": [
   {
@@ -11,54 +11,62 @@
    "vocab": 151936,
    "worker_starts": [
     {
-     "ready_s": 3.26,
+     "ready_s": 3.35,
      "rss_mb": 768
     },
     {
-     "ready_s": 3.27,
+     "ready_s": 3.33,
      "rss_mb": 767
     },
     {
-     "ready_s": 3.24,
+     "ready_s": 3.18,
      "rss_mb": 767
     },
     {
-     "ready_s": 3.23,
-     "rss_mb": 767
+     "ready_s": 3.17,
+     "rss_mb": 768
     }
    ],
    "constraints": {
     "tool_schema": {
      "ok": true,
      "why": null,
-     "worker_ms": 42.84,
-     "engine_ms": 46.17,
-     "size_mb": 13.44,
-     "growth_mb": 11.96
+     "worker_ms": 14.59,
+     "engine_ms": 15.28,
+     "size_mb": 0.19,
+     "growth_mb": 0.96,
+     "fill_us": 3.79,
+     "fill_us_max": 98.26
     },
     "json_object": {
      "ok": true,
      "why": null,
-     "worker_ms": 53.94,
-     "engine_ms": 54.19,
-     "size_mb": 13.52,
-     "growth_mb": 2.06
+     "worker_ms": 13.66,
+     "engine_ms": 16.27,
+     "size_mb": 0.14,
+     "growth_mb": 0.03,
+     "fill_us": 20.07,
+     "fill_us_max": 79.23
     },
     "tag_10_tools": {
      "ok": true,
      "why": null,
-     "worker_ms": 68.71,
-     "engine_ms": 57.31,
-     "size_mb": 13.46,
-     "growth_mb": 15.86
+     "worker_ms": 17.79,
+     "engine_ms": 20.76,
+     "size_mb": 0.21,
+     "growth_mb": 0.63,
+     "fill_us": 1.83,
+     "fill_us_max": 66.98
     },
     "regex": {
      "ok": true,
      "why": null,
-     "worker_ms": 0.36,
-     "engine_ms": 0.4,
+     "worker_ms": 0.26,
+     "engine_ms": 0.27,
      "size_mb": 0.0,
-     "growth_mb": 0.0
+     "growth_mb": 0.0,
+     "fill_us": 1.32,
+     "fill_us_max": 11.46
     }
    },
    "subsets": {
@@ -68,24 +76,29 @@
      "refused": [],
      "strict_accepts": 35,
      "worker_ms": {
-      "p50": 41.2,
-      "p90": 46.5,
-      "max": 54.2
+      "p50": 14.8,
+      "p90": 16.2,
+      "max": 18.1
      },
      "engine_ms": {
-      "p50": 40.2,
-      "p90": 42.0,
-      "max": 47.2
+      "p50": 14.8,
+      "p90": 16.0,
+      "max": 16.6
      },
      "size_mb": {
-      "p50": 13.42,
-      "p90": 13.43,
-      "max": 13.47
+      "p50": 0.16,
+      "p90": 0.18,
+      "max": 0.2
      },
      "growth_mb": {
-      "p50": 3.74,
-      "p90": 11.22,
-      "max": 18.34
+      "p50": 0.0,
+      "p90": 0.0,
+      "max": 0.86
+     },
+     "fill_us": {
+      "p50": 13.6,
+      "p90": 25.9,
+      "max": 32.2
      }
     },
     "Github_easy": {
@@ -94,24 +107,29 @@
      "refused": [],
      "strict_accepts": 25,
      "worker_ms": {
-      "p50": 43.4,
-      "p90": 3010.8,
-      "max": 8842.9
+      "p50": 15.2,
+      "p90": 2915.1,
+      "max": 8736.8
      },
      "engine_ms": {
-      "p50": 41.4,
-      "p90": 2966.1,
-      "max": 8841.5
+      "p50": 15.2,
+      "p90": 2943.5,
+      "max": 9005.9
      },
      "size_mb": {
-      "p50": 13.43,
-      "p90": 21.03,
-      "max": 35.69
+      "p50": 0.17,
+      "p90": 7.76,
+      "max": 22.42
      },
      "growth_mb": {
-      "p50": 2.37,
-      "p90": 11.02,
-      "max": 21.46
+      "p50": 0.0,
+      "p90": 1.37,
+      "max": 13.7
+     },
+     "fill_us": {
+      "p50": 17.8,
+      "p90": 70.2,
+      "max": 103.9
      }
     },
     "Github_medium": {
@@ -123,24 +141,29 @@
      ],
      "strict_accepts": 18,
      "worker_ms": {
-      "p50": 44.9,
-      "p90": 711.8,
-      "max": 7669.9
+      "p50": 16.6,
+      "p90": 554.1,
+      "max": 7345.5
      },
      "engine_ms": {
-      "p50": 46.3,
-      "p90": 617.9,
-      "max": 7683.3
+      "p50": 15.8,
+      "p90": 551.9,
+      "max": 7443.4
      },
      "size_mb": {
-      "p50": 13.49,
-      "p90": 16.19,
-      "max": 37.1
+      "p50": 0.32,
+      "p90": 3.16,
+      "max": 23.86
      },
      "growth_mb": {
       "p50": 0.0,
-      "p90": 6.14,
-      "max": 8.75
+      "p90": 0.0,
+      "max": 2.33
+     },
+     "fill_us": {
+      "p50": 19.7,
+      "p90": 40.5,
+      "max": 73.9
      }
     },
     "WashingtonPost": {
@@ -149,24 +172,29 @@
      "refused": [],
      "strict_accepts": 18,
      "worker_ms": {
-      "p50": 41.1,
-      "p90": 45.7,
-      "max": 929.2
+      "p50": 14.5,
+      "p90": 17.0,
+      "max": 887.3
      },
      "engine_ms": {
-      "p50": 40.5,
-      "p90": 44.8,
-      "max": 890.3
+      "p50": 14.7,
+      "p90": 16.3,
+      "max": 890.5
      },
      "size_mb": {
-      "p50": 13.43,
-      "p90": 13.52,
-      "max": 15.35
+      "p50": 0.16,
+      "p90": 0.37,
+      "max": 2.18
      },
      "growth_mb": {
       "p50": 0.0,
       "p90": 0.0,
-      "max": 1.24
+      "max": 0.0
+     },
+     "fill_us": {
+      "p50": 21.2,
+      "p90": 24.1,
+      "max": 33.8
      }
     }
    }
@@ -176,27 +204,31 @@
    "vocab": 248320,
    "worker_starts": [
     {
-     "ready_s": 3.37,
-     "rss_mb": 814
-    },
-    {
-     "ready_s": 3.63,
+     "ready_s": 3.49,
      "rss_mb": 815
     },
     {
-     "ready_s": 3.91,
+     "ready_s": 3.42,
      "rss_mb": 814
     },
     {
-     "ready_s": 3.75,
+     "ready_s": 3.24,
      "rss_mb": 814
     },
     {
-     "ready_s": 3.66,
+     "ready_s": 3.29,
+     "rss_mb": 814
+    },
+    {
+     "ready_s": 3.4,
      "rss_mb": 815
     },
     {
-     "ready_s": 6.12,
+     "ready_s": 3.71,
+     "rss_mb": 814
+    },
+    {
+     "ready_s": 3.53,
      "rss_mb": 814
     }
    ],
@@ -204,34 +236,42 @@
     "tool_schema": {
      "ok": true,
      "why": null,
-     "worker_ms": 83.04,
-     "engine_ms": 85.63,
-     "size_mb": 26.3,
-     "growth_mb": 25.96
+     "worker_ms": 27.9,
+     "engine_ms": 35.56,
+     "size_mb": 0.27,
+     "growth_mb": 1.95,
+     "fill_us": 4.1,
+     "fill_us_max": 56.59
     },
     "json_object": {
      "ok": true,
      "why": null,
-     "worker_ms": 113.86,
-     "engine_ms": 109.23,
-     "size_mb": 26.38,
-     "growth_mb": 11.38
+     "worker_ms": 30.46,
+     "engine_ms": 29.39,
+     "size_mb": 0.21,
+     "growth_mb": 0.03,
+     "fill_us": 15.47,
+     "fill_us_max": 84.2
     },
     "tag_10_tools": {
      "ok": true,
      "why": null,
-     "worker_ms": 99.94,
-     "engine_ms": 104.28,
-     "size_mb": 26.31,
-     "growth_mb": 9.34
+     "worker_ms": 42.09,
+     "engine_ms": 36.44,
+     "size_mb": 0.28,
+     "growth_mb": 0.16,
+     "fill_us": 2.53,
+     "fill_us_max": 56.62
     },
     "regex": {
      "ok": true,
      "why": null,
-     "worker_ms": 0.56,
-     "engine_ms": 0.48,
+     "worker_ms": 0.52,
+     "engine_ms": 0.42,
      "size_mb": 0.0,
-     "growth_mb": 0.0
+     "growth_mb": 0.0,
+     "fill_us": 2.24,
+     "fill_us_max": 8.22
     }
    },
    "subsets": {
@@ -241,24 +281,29 @@
      "refused": [],
      "strict_accepts": 35,
      "worker_ms": {
-      "p50": 82.6,
-      "p90": 87.7,
-      "max": 90.7
+      "p50": 27.7,
+      "p90": 30.8,
+      "max": 36.8
      },
      "engine_ms": {
-      "p50": 80.1,
-      "p90": 86.4,
-      "max": 111.3
+      "p50": 28.4,
+      "p90": 31.5,
+      "max": 36.9
      },
      "size_mb": {
-      "p50": 26.28,
-      "p90": 26.28,
-      "max": 26.35
+      "p50": 0.23,
+      "p90": 0.25,
+      "max": 0.29
      },
      "growth_mb": {
-      "p50": 21.74,
-      "p90": 24.99,
-      "max": 35.67
+      "p50": 0.0,
+      "p90": 0.0,
+      "max": 1.32
+     },
+     "fill_us": {
+      "p50": 23.1,
+      "p90": 26.1,
+      "max": 273.3
      }
     },
     "Github_easy": {
@@ -269,29 +314,34 @@
      ],
      "strict_accepts": 25,
      "worker_ms": {
-      "p50": 80.2,
-      "p90": 1140.1,
-      "max": 9697.8
+      "p50": 28.5,
+      "p90": 1083.6,
+      "max": 9709.6
      },
      "engine_ms": {
-      "p50": 83.4,
-      "p90": 1157.9,
-      "max": 9776.1
+      "p50": 28.9,
+      "p90": 1087.1,
+      "max": 11295.9
      },
      "size_mb": {
-      "p50": 26.29,
-      "p90": 28.13,
-      "max": 45.42
+      "p50": 0.25,
+      "p90": 2.13,
+      "max": 19.34
      },
      "growth_mb": {
-      "p50": 9.29,
-      "p90": 24.98,
-      "max": 37.77
+      "p50": 0.0,
+      "p90": 0.0,
+      "max": 7.59
+     },
+     "fill_us": {
+      "p50": 26.0,
+      "p90": 76.2,
+      "max": 222.7
      }
     },
     "Github_medium": {
      "n": 40,
-     "vetted": 37,
+     "vetted": 36,
      "refused": [
       "compiling the constraint took over 10 s",
       "invalid constraint: Schema 'false' cannot accept any value",
@@ -299,24 +349,29 @@
      ],
      "strict_accepts": 18,
      "worker_ms": {
-      "p50": 85.7,
-      "p90": 798.7,
-      "max": 9868.7
+      "p50": 31.2,
+      "p90": 108.6,
+      "max": 2156.6
      },
      "engine_ms": {
-      "p50": 82.2,
-      "p90": 786.8,
-      "max": 9834.3
+      "p50": 31.3,
+      "p90": 112.4,
+      "max": 2288.3
      },
      "size_mb": {
-      "p50": 26.34,
-      "p90": 28.19,
-      "max": 45.74
+      "p50": 0.38,
+      "p90": 2.22,
+      "max": 11.97
      },
      "growth_mb": {
-      "p50": 9.34,
-      "p90": 21.8,
-      "max": 33.03
+      "p50": 0.0,
+      "p90": 0.01,
+      "max": 9.23
+     },
+     "fill_us": {
+      "p50": 21.0,
+      "p90": 33.0,
+      "max": 61.3
      }
     },
     "WashingtonPost": {
@@ -325,24 +380,29 @@
      "refused": [],
      "strict_accepts": 18,
      "worker_ms": {
-      "p50": 81.3,
-      "p90": 95.6,
-      "max": 1505.8
+      "p50": 32.9,
+      "p90": 37.8,
+      "max": 1509.9
      },
      "engine_ms": {
-      "p50": 77.4,
-      "p90": 82.6,
-      "max": 1512.8
+      "p50": 29.5,
+      "p90": 35.9,
+      "max": 1591.4
      },
      "size_mb": {
-      "p50": 26.29,
-      "p90": 26.38,
-      "max": 28.86
+      "p50": 0.24,
+      "p90": 0.45,
+      "max": 2.91
      },
      "growth_mb": {
-      "p50": 11.53,
-      "p90": 23.02,
-      "max": 33.49
+      "p50": 0.0,
+      "p90": 0.0,
+      "max": 0.01
+     },
+     "fill_us": {
+      "p50": 20.8,
+      "p90": 25.2,
+      "max": 76.9
      }
     }
    }

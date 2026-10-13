@@ -253,16 +253,19 @@ unread `max_depth` is removed (the gate comes from `open`).
     are recorded per schema in the D9 runs.
   - One `GrammarMatcher` per sequence; stop tokens = the engine's stop set plus the request's `stop_token_ids`;
     `ignore_eos` with a constraint is rejected at `open`.
-  - JSON: `any_whitespace = True` with a whitespace run cap of 64 (the cap counts the newline and the indentation;
-    64 admits nesting depth 8 at 4-space indentation, so pretty-printed JSON and MTP's drafts of it stay allowed).
-    xgrammar applies the cap only to typed schema rules: `json_object` is compiled from xgrammar's builtin JSON EBNF
-    with only its whitespace rule replaced by the capped one (fixtures: every JSON-Schema-Test-Suite instance dumped
-    compact and at indents 2 and 4 to depth 8 is accepted, malformed JSON — escapes, `\uXXXX` surrogates, numbers,
-    non-ASCII — refused, and it agrees with the builtin except for whitespace past the cap); untyped subschemas
-    (`{}`, `{"type": "object"}` without properties) stay uncapped — stated, and covered by `max_tokens` and the
-    truncation gate.
-  - `strict_mode` per D9. xgrammar is a pinned pip dependency (Apache-2.0); the pin is chosen at step 2 (0.2.3 now;
-    vLLM 0.2.8, SGLang 0.2.7) and the reject-list oracle and the tag fixtures are re-run at it.
+  - JSON: `any_whitespace = True` and **no whitespace cap** (decision S2-1, after step 2; it replaces the cap of 64
+    of revs 2–5). A cap of 64 made every compiled JSON grammar ≈ 13.4 MB (152k vocabulary) / 26.3 MB (248k) instead
+    of 0.2–0.3 MB, its compile 44 instead of 15 ms, its median mask fill 33 instead of 4.2 µs, held the 512 MB cache
+    to ≈ 19 grammars at 248k and made the 64 MB size cap depend on the vocabulary (measured at step 2, §11). A
+    whitespace runaway is bounded by `max_tokens` and caught by the truncation gate; step 5 counts truncations that
+    end in a whitespace run, and a cap (16–32) returns only if they appear. `json_object` is an object of any JSON
+    (xgrammar's `{"type": "object"}`, not strict: OpenAI's promise; xgrammar's builtin JSON also admits a top-level
+    array) — fixtures: every JSON-Schema-Test-Suite object dumped compact and at indents 2 and 4 to depth 8 is
+    accepted, malformed JSON (escapes, `\uXXXX`, numbers, non-ASCII) refused, as by the builtin; a top-level array or
+    scalar refused.
+  - `strict_mode` per D9. Schema `pattern`s are ECMA 262 regular expressions (JSON Schema's dialect): a strict
+    pattern that xgrammar reads more loosely (`.`, `\S`, `\s` in a negated class) is refused. xgrammar is a pinned
+    pip dependency (Apache-2.0): **0.2.8** (§11), the reject-list oracle and the tag fixtures run at it.
 - **D6. `grammar.constraint@1`, a plain-dict resource.** The frontend package builds constraints as plain dicts
   (`json_schema` with `strict`, `json_object`, `regex`, `ebnf`, and the tag forms `tag(begin, content, end)`,
   `triggered_tags(triggers, tags, at_least_one, stop_after_first)`, `any_text(excludes)`, `sequence`, `or`, and the
@@ -271,7 +274,19 @@ unread `max_depth` is removed (the gate comes from `open`).
   frontend from the bundle's `tool_format` (hermes JSON for Qwen3, `<tool_call><function=…><parameter=…>` for
   Qwen3.5 / 3.8, R §4.1), not by xgrammar's builtin `qwen_3` / `qwen_3_5` tags, which refuse a `<tool_call>` that
   ends reasoning without `</think>` and do not limit `parallel_tool_calls: false` to one call (reviewer finding,
-  measured). Reasoning is free text until `</think>` or a `<tool_call>` that ends it.
+  measured). Reasoning is free text until `</think>` or a `<tool_call>` that ends it. The fields (fixed at step 2,
+  `plugins/holon_plugins/grammar/xgrammar/constraint.py`; both sides cite this table):
+
+  | `type` | fields (optional ones with their default) |
+  |---|---|
+  | `json_schema` | `schema` (object or boolean), `strict` = false, `style` = `"json"` \| `"qwen_xml"` |
+  | `json_object` | — (an object of any JSON) |
+  | `regex` | `pattern` (xgrammar's regex) |
+  | `ebnf` | `grammar` (its rule `root` starts it) |
+  | `tag` | `begin`, `content` (a constraint), `end` (a string or a list of them) |
+  | `triggered_tags` | `triggers` (strings), `tags` (`tag`s), `at_least_one` = false (true also forbids text before the first tag), `stop_after_first` = false |
+  | `any_text` | `excludes` = [] |
+  | `sequence`, `or` | `elements` (constraints) |
 - **D7. One frontend package, three dialects.** `frontends/openai` becomes `frontends/http`: one FastAPI app with
   routers for OpenAI chat/completions, `/v1/messages` (+ `count_tokens`) and `/v1/responses`, over one pipeline
   (normalize → render → generate → reasoning/tool parse → typed events). The format parsers and constraint builders
@@ -370,9 +385,10 @@ unread `max_depth` is removed (the gate comes from `open`).
   ≈ 4.4 GB at the watchdog bound) plus the 512 MB compiled-grammar cache — measured at step 2; if it matters on
   consumer hosts, one worker (more queueing) or a worker that never imports torch.
 - **Measured (step 2,** `evidence/grammar_vetting_rtx-a5000_2026-10-13.json`, xgrammar 0.2.8, CPU, Qwen3's 152k
-  and Qwen3.5's 248k vocabularies): a vetting worker is ready 3.1–3.5 s after its spawn (the respawn time) at
-  762 / 804 MB resident — two take ≈ 1.6 GB, plus ≤ 256 MB each while compiling (the budget, §11); a compiled JSON
-  grammar takes 13.4 / 26.3 MB, almost all of it the whitespace cap's (§11), so the 512 MB cache holds ≈ 38 / 19.
+  and Qwen3.5's 248k vocabularies, no whitespace cap): a vetting worker is ready 3.2–3.7 s after its spawn (the
+  respawn time) at 768 / 815 MB resident — two take ≈ 1.6 GB, plus ≤ 256 MB each while compiling (the budget, §11);
+  a compiled JSON grammar takes 0.2–0.4 MB at the median (≤ 24 MB on the mid-size sample), so the 512 MB cache holds
+  hundreds.
 
 ## 7. Steps
 
@@ -571,32 +587,26 @@ Deviations (simplest option consistent with the decisions):
 
 ### Step 2 (2026-10-13)
 
-Built: `plugins/holon_plugins/grammar/xgrammar` — `constraint.py` (the `grammar.constraint@1` forms, their
-translation, the whitespace cap, the strict reject list), `vetting.py` and `worker.py` (D5's workers and watchdog),
-`plugin.py` (the processor: negative cache, helper threads, compiled-grammar cache, matchers, the probe, the stop set),
-`kernel.py` (the Triton `apply`); the plants `mask-column-shift`, `no-rollback-after-probe`, `mask-bit-order`,
-`stop-tokens-masked`, `closing-tokens-masked` (`judge/holon_judge/planted.py`); the JSON-Schema-Test-Suite vendored
-unmodified at a pinned commit (`plugins/tests/fixtures/jsts.sh`, checked by `scripts/ci/run_all.sh`);
-`bench/grammar_vetting.py`. No core change.
+Built: `plugins/holon_plugins/grammar/xgrammar` — `constraint.py` (the `grammar.constraint@1` forms and their
+translation, the strict reject list), `vetting.py` and `worker.py` (D5's workers and watchdog), `plugin.py` (the
+processor: negative cache, helper threads, compiled-grammar cache, matchers, the probe, the stop set), `kernel.py` (the
+Triton `apply`); the plants `mask-column-shift`, `no-rollback-after-probe`, `mask-bit-order`, `stop-tokens-masked`,
+`closing-tokens-masked` (`judge/holon_judge/planted.py`); the JSON-Schema-Test-Suite vendored unmodified at a pinned
+commit (`plugins/tests/fixtures/jsts.sh`, checked by `scripts/ci/run_all.sh`); `bench/grammar_vetting.py`. No core
+change. The `grammar.constraint@1` fields are D6's table.
 
-`grammar.constraint@1` (D6 named the forms, not the fields): `{"type": "json_schema", "schema", "strict", "style":
-"json" | "qwen_xml"}`, `{"type": "json_object"}`, `{"type": "regex", "pattern"}`, `{"type": "ebnf", "grammar"}`
-(rule `root`), `{"type": "tag", "begin", "content", "end"}`, `{"type": "triggered_tags", "triggers", "tags",
-"at_least_one", "stop_after_first"}` (xgrammar's meaning: `at_least_one` also forbids text before the first tag),
-`{"type": "any_text", "excludes"}`, `{"type": "sequence" | "or", "elements"}` — documented in `constraint.py`.
-
-Proofs (`plugins/tests/test_grammar.py`, 29 tests, ≈ 45 s of test time; with `test_logits_processor.py` 54 tests
-in 63–72 s):
+Proofs (`plugins/tests/test_grammar.py`, 29 tests, ≈ 45 s of test time; with `test_logits_processor.py` 54 tests in
+65–92 s on a shared host):
 - The oracle (CPU, model-free, in CI): every draft of the suite — 454 groups accepted under strict (drafts 4 to
   2020-12; every draft-3 schema refused), their 978 invalid instances all refused, compact and with `\u` escapes —
-  plus a 31-row typed probe table (R §6.2's enforced features, a non-ASCII enum and a draft-07 recursive tree among
-  them), each accepted with its valid instance admitted, and 14 schemas the review found xgrammar would read
-  differently (refused).
-- `json_object`: every 2020-12 instance that is an object or array to depth 8, compact and at indents 2 and 4, plus
-  non-ASCII text and escaped surrogate pairs, is admitted, 22 malformed texts refused, both as by xgrammar's builtin
-  JSON grammar; they differ only on a whitespace run of 65 (refused) where the builtin admits it.
+  plus a 30-row typed probe table (R §6.2's enforced features, a non-ASCII enum and a draft-07 recursive tree among
+  them), each accepted with its valid instance admitted, and 16 schemas xgrammar would read differently from JSON
+  Schema (found by the review and the panel; refused).
+- `json_object`: every 2020-12 object instance to depth 8 (537), compact and at indents 2 and 4, a 300-space run,
+  non-ASCII text and escaped surrogate pairs are admitted and 22 malformed texts refused, as by xgrammar's builtin JSON
+  grammar; unlike it, a top-level array or scalar is refused.
 - Every constraint form compiles and admits / refuses samples; malformed dicts and schemas, a nested strict violation
-  and a regex compile error are refused.
+  and a regex compile error are refused; a compile error reports `client`, running out of memory `busy`.
 - L0-mask (sm_86, rtx-a5000): `apply` equals xgrammar's CPU `apply_token_bitmask_inplace` bit for bit on 152k, 248k
   and 1000-token vocabularies, with all-allowed, all-refused and padding rows, eager and replayed in a CUDA graph with
   new contents; memcheck 0 errors (`plugins/tests/memcheck_grammar_apply.py`); `mask-bit-order` fails it. sm_89 and
@@ -608,7 +618,7 @@ in 63–72 s):
   sequences and p = 0 at T = 1, p = 0 with stop drafts; `no-rollback-after-probe` — 678 refused, p = 0 at T = 1, 207
   refused with stop drafts.
 - End to end (CPU, a tiny Qwen3 over Qwen3's 152k vocabulary and tokenizer): a regex with n = 2, a strict schema (the
-  random model fills it with capped whitespace runs and is cut at `max_tokens`), a structural tag around a schema and
+  random model fills it with whitespace runs and is cut at `max_tokens`), a structural tag around a schema and
   `json_object` beside a free request give exactly HF's greedy tokens masked by a fresh matcher, with the same finish
   reasons — plain, and with the oracle drafter's right, wrong and mixed drafts (refused drafts counted). The plants:
   `mask-column-shift`, `no-rollback-after-probe` (speculating), `mask-bit-order` and `stop-tokens-masked` end the
@@ -627,35 +637,47 @@ in 63–72 s):
   out — none under A′, some under A (a mutation making A′ behave as A now fails all 8 depth1-commit cases); the
   preempting cases assert preemptions > 0. Design §4.2 notes one logits processor.
 
-Measured (D5, `evidence/grammar_vetting_rtx-a5000_2026-10-13.json` at 69357e5 — vetting and compiling unchanged since; mid-size subsets only, 40 schemas
-each of Glaiveai2K, Github_easy, Github_medium and 29 of WashingtonPost; 152k / 248k vocabularies):
-- worker start and respawn 3.2–3.9 s (one start at 6.1 s); resident 767 / 814 MB when ready;
-- compile (worker ≈ engine thread): tool schema 43 / 83 ms, `json_object` 54 / 114 ms, a 10-tool structural tag 69 /
-  100 ms, schemas p50 41–45 / 80–86 ms, p90 up to 3.0 s / 1.1 s, max 8.8 s / 9.9 s (one Github_easy and one
-  Github_medium schema time out at 10 s with the larger vocabulary); compiled 13.4 / 26.3 MB at p50, ≤ 46 MB;
-- peak resident growth while compiling ≤ 38 MB (≤ 1.4× the compiled size);
+**Decision S2-1 (panel, after step 2): no whitespace cap.** Measured (this evidence, before and after; 152k / 248k):
+
+| | cap 64 (at 69357e5) | no cap (at b328173) |
+|---|---|---|
+| tool schema: compiled, compile | 13.4 / 26.3 MB, 43 / 83 ms | 0.19 / 0.27 MB, 15 / 28 ms |
+| `json_object`: compiled, compile | 13.5 / 26.4 MB, 54 / 114 ms | 0.14 / 0.21 MB, 14 / 30 ms |
+| sample schemas: compiled p50, compile p50 | 13.4 / 26.3 MB, 41–45 / 80–86 ms | 0.16–0.32 / 0.23–0.38 MB, 15–17 / 28–33 ms |
+| mask fill, median over a tool-call walk | ≈ 33 µs (the panel's measurement) | 3.8 / 4.1 µs (`json_object`'s pretty walk 20 / 15 µs) |
+| the 512 MB cache holds | ≈ 38 / 19 grammars | hundreds |
+
+The cap is dropped; a whitespace runaway ends at `max_tokens` (step 5 counts truncations ending in a whitespace run;
+a cap of 16–32 returns only if they appear).
+
+Measured (D5, `evidence/grammar_vetting_rtx-a5000_2026-10-13.json` at b328173: no whitespace cap; mid-size subsets
+only, 40 schemas each of Glaiveai2K, Github_easy, Github_medium and 29 of WashingtonPost; 152k / 248k vocabularies):
+- worker start and respawn 3.2–3.7 s; resident 768 / 815 MB when ready;
+- compile (worker ≈ engine thread): tool schema 15 / 28 ms, `json_object` 14 / 30 ms, a 10-tool structural tag 18 /
+  42 ms, schemas p50 15–17 / 28–33 ms, p90 up to 2.9 s / 1.1 s, max 8.7 s / 9.7 s (one Github_easy and two
+  Github_medium schemas time out at 10 s with the larger vocabulary); compiled p50 0.16–0.38 MB, ≤ 24 MB;
+- peak resident growth while compiling ≤ 14 MB;
+- mask fill: median 1.3–4.1 µs over the tool-call, tag and regex walks, 15–20 µs over the pretty-printed
+  `json_object` walk, ≤ 98 µs; at a schema's start p50 14–26 µs, ≤ 273 µs;
 - the strict reject list accepts 96 of the 149 sampled schemas (64%; §5's predicted coverage 64–67%).
 
-Review: one reviewer, four rounds (4504ed3 → 92db331 → 69357e5 → d2a14a5 → the last step-2 commit; clean), each fix with a test that failed before
-where a test could show it. Found and fixed: malformed constraints and out-of-vocabulary stop ids escaping `open` as
-exceptions that end the engine process; `$ref` targets in unwalked locations, `properties` names also matched by
-`patternProperties`, `propertyNames` beside `properties`, older drafts' `prefixItems` / `exclusiveMinimum` / `id`,
-and escaped `$ref`s bypassing the reject list; workers dying before they are ready leaving requests blocked forever;
-watchdog-thread exceptions disabling vetting; abandoned compiles held outside the cache; unbounded negative and
-positive caches; super-linear checks on the engine thread (ref re-walks, Python regex over client patterns, enum ×
-type lists; a class-end misread reopening `[^\s]`).
+Review: one reviewer, four rounds (4504ed3 → 92db331 → 69357e5 → d2a14a5 → 0ec738a; clean), each fix with a test that
+failed before where a test could show it; then the panel's step-2 items (b328173). Found and fixed: malformed
+constraints and out-of-vocabulary stop ids escaping `open` as exceptions that end the engine process; `$ref` targets
+in unwalked locations, `properties` names also matched by `patternProperties`, `propertyNames` beside `properties`,
+older drafts' `prefixItems` / `exclusiveMinimum` / `id`, and escaped `$ref`s bypassing the reject list; workers dying
+before they are ready leaving requests blocked forever; watchdog-thread exceptions disabling vetting; abandoned
+compiles held outside the cache; unbounded negative and positive caches; super-linear checks on the engine thread (ref
+re-walks, Python regex over client patterns, enum × type lists); a class-end misread reopening `[^\s]`; the panel's
+`.` (U+2028 / U+2029), a top-level array in `json_object`, and out-of-memory compiles refused permanently.
 
 Deviations (simplest option consistent with the decisions):
-- **xgrammar 0.2.8, not 0.2.3.** 0.2.3 expands bounded repetition: with the 64-character whitespace cap a 3-property
-  schema compiles to 330 MB in 0.6 s and `json_object` to 763 MB in 1.1 s (every JSON constraint over the 64 MB cap);
-  0.2.8 gives 13.4 MB and ≈ 30 ms more than uncapped. 0.2.8 needs apache-tvm-ffi ≥ 0.1.11 (the shared stack had
-  0.1.9; FlashInfer 0.6.12 accepts it and its kernel tests pass at 0.1.14). The oracle, fixtures and tag forms were
-  run at 0.2.8.
-- **The whitespace cap is a rewrite of xgrammar's printed any-whitespace JSON grammar** (`[ \n\r\t]*` →
-  `{0,64}`), for schemas as for `json_object`, so untyped subschemas are capped too (D5 left them uncapped).
-  xgrammar's `max_whitespace_cnt` costs the same; the cost is ≈ 13.4 MB (152k vocabulary) or 26.3 MB (248k) per
-  compiled grammar however many schemas it holds — the 512 MB cache holds ≈ 38 / 19 grammars. A cap of 16 would take
-  3.5 MB but refuses pretty-printed JSON past depth 3 (C-R2-3).
+- **xgrammar 0.2.8, not 0.2.3.** 0.2.3 expands bounded repetition (a 64-character whitespace cap compiled a
+  3-property schema to 330 MB and `json_object` to 763 MB) and 0.2.8 is vLLM's pin. 0.2.8 needs apache-tvm-ffi
+  ≥ 0.1.11 (the shared stack had 0.1.9; FlashInfer 0.6.12 accepts it and its kernel tests pass at 0.1.14). The oracle,
+  fixtures and tag forms run at 0.2.8.
+- **No whitespace cap** (decision S2-1, above; D5 updated).
+- **`json_object` is an object**, not xgrammar's builtin JSON (which admits a top-level array).
 - **Workers are fresh interpreters started with `subprocess`** (`python -P -m …worker`) rather than
   `multiprocessing`'s `spawn`: the same isolation with an explicit environment (also `CUDA_VISIBLE_DEVICES=""`). The
   `TokenizerInfo` JSON (5–8 MB) goes through an inherited, already unlinked file read with `pread`: written to a pipe
@@ -666,21 +688,28 @@ Deviations (simplest option consistent with the decisions):
 - **The vetting queue holds 8 waiting constraints** (more are `busy`): with two workers, a 10 s timeout and a 3.5 s
   respawn, the last waits at most ≈ 54 s. Constraints waiting, running or reported are not queued twice. With no
   worker ready and three starts failed in a row, the checker is down: waiting and new constraints are `busy` (not
-  remembered) until a worker starts.
+  remembered) until a worker starts. A compile that runs out of memory is `busy` (remembered 10 minutes).
 - **A constraint's JSON is at most 1 MiB** (a 400 beyond), bounding the checks `open` runs on the engine thread.
-- **The reject list grew where the oracle and the review found holes:** `time`, `ipv6` and `email` leave the format
-  allowlist (leap seconds at a wrong hour; a leading zero in an embedded IPv4 octet; a `\u00a9` escape in a quoted
-  local part), leaving `uri`, `uuid`, `duration`; `contentMediaType` / `contentEncoding` / `contentSchema` (draft 7
-  asserts them); patterns with `\S` or `\s` in a negated class (ECMA 262's whitespace is Unicode's);
-  `patternProperties` or `propertyNames` beside `properties`; `$id`, `$schema` or a string `id` below the root;
-  `$schema` other than drafts 4, 6, 7, 2019-09, 2020-12; `prefixItems` before 2020-12, draft 4's
-  `exclusiveMinimum` / `exclusiveMaximum`, `items` as an array and `additionalItems`; `$dynamicRef` /
-  `$recursiveRef` and their anchors; `$ref`s with `%` or `~` escapes; every `$ref` target is checked like the rest.
-  `type` beside `enum` / `const` is allowed when every value has that type. A `propertyNames` schema needs
-  `type: string` for its typed keywords (like any other schema).
+- **The reject list grew where the oracle, the review and the panel found holes:** `time`, `ipv6` and `email` leave
+  the format allowlist (leap seconds at a wrong hour; a leading zero in an embedded IPv4 octet; a `\u00a9` escape in a
+  quoted local part), leaving `uri`, `uuid`, `duration`; `contentMediaType` / `contentEncoding` / `contentSchema`
+  (draft 7 asserts them); patterns (ECMA 262, JSON Schema's dialect) with an unescaped `.` outside a class (xgrammar's
+  admits U+2028 / U+2029), `\S` or `\s` in a negated class (ECMA's whitespace is Unicode's); `patternProperties` or
+  `propertyNames` beside `properties`; `$id`, `$schema` or a string `id` below the root; `$schema` other than drafts
+  4, 6, 7, 2019-09, 2020-12; `prefixItems` before 2020-12, draft 4's `exclusiveMinimum` / `exclusiveMaximum`, `items`
+  as an array and `additionalItems`; `$dynamicRef` / `$recursiveRef` and their anchors; `$ref`s with `%` or `~`
+  escapes; every `$ref` target is checked like the rest. `type` beside `enum` / `const` is allowed when every value
+  has that type. A `propertyNames` schema needs `type: string` for its typed keywords (like any other schema).
 - **`spec_drafts_refused` is not in `Engine.stats()` yet:** the processor counts refused drafts
   (`XGrammar.drafts_refused`), but surfacing them in the engine's stats needs a general core hook (an optional
   `stats()` of the processor merged into `Engine.stats`), deferred to step 5, where the share is measured.
 - xgrammar's `strict_mode` (no undeclared properties) is on for every schema, strict or not (D9's "stricter" rows).
 - The masked L0-dist's plant checks ran once and are recorded above rather than kept as tests (≈ 8 s); the
   end-to-end plant checks (< 1 s each) stay.
+
+Step-5 obligations (panel S2-2, S2-3):
+- declared coverage over the **full** filtered split, per tokenizer (152k and 248k), with compile timeouts counted per
+  tokenizer (the 10 s timeout refuses more at 248k: 1 of 40 Github_easy and 2 of 40 Github_medium schemas here);
+- cold-constraint vs warm (cached) TTFT;
+- the precompile pass of D9 on an idle host (the compile times above came from a shared one);
+- the truncations that end in a whitespace run (S2-1's condition for a cap).
