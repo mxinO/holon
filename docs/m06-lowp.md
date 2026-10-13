@@ -1,6 +1,6 @@
 # M0.6 — FP8 (block), NVFP4 and MXFP4 checkpoints of Qwen3-8B and Qwen3-30B-A3B: design and implementation plan
 
-Status: **revision 3, under review** (2026-10-13; revisions 1 and 2 reviewed by the three-reviewer panel, every finding
+Status: **revision 3, reviewed clean** (2026-10-13; revisions 1–3 reviewed by the three-reviewer panel, every finding
 mapped in §8; user decisions D-a…D-h and the rev 2 rulings applied). Scope: plan §2 row M0.6. Builds on design §5.5
 (Scheme / Layout / QTensor), §5.6 (borrowed kernels), M0.1 (`kernels.ggml_cuda`, the judge's tiers, the q8_1 emulator),
 M0.2 (`std.moe`, `linear_experts@1`, the stacking rule D7, `kernels.triton_experts` D8), M0.4 (draft heads load through
@@ -56,7 +56,7 @@ W4 weights and **8-bit activations by default on every class** (D3). Two gates, 
     decode kernel on the 5080 and 4090, turned into an end-to-end prediction: Σ (shape time × 36 layers) + the
     measured bf16 head time + the non-GEMM decode time from the existing GGUF decode profile on that card. It must
     predict ≥ 0.85× the llama-bench Q8_0 tg128 measured in the same step, or the kernel is reworked before B2.
-12. **L0** for `kernels.triton_gemm` FP8 on sm_89 and sm_120a (dense, both path modes), memcheck.
+12. **L0** for `kernels.triton_fp8` FP8 on sm_89 and sm_120a (dense, both path modes), memcheck.
 13. **L2 Tier B**, 8B FP8 on rtx-5080 and rtx-4090: prefill W8A8 vs the W8A8 floor, decode W8A16 vs the A16 floor;
     FP8 plants as predicted. Decode runs use steps of ≤ 16 tokens (the M ≤ 16 switch), so every call is W8A16.
 14. **Speed:** 8B FP8 tg128 ≥ 0.8× llama-bench Q8_0 of the same checkpoint on the 5080 and 4090; pp512 recorded
@@ -207,8 +207,8 @@ implementation of the workload; bar = the engine users run for it on the card.
 - **D11 — Delete the unused core quant registries now** (D-c): `SchemeImpl`, `Converter`, `Dialect`
   (`api/quant.py:55-79`), their registry fields and imports (`api/ops.py:14, 76-78`), `_DECLARED` entries and fields
   (`core/plugins.py:66-79`), exports (`api/__init__.py:47, 69-75`). `Scale`, `Scheme`, `Layout`, `QTensor` stay.
-- **D12 — FP8 on our own Triton, Gate B** (D-a, D-f). `kernels.triton_experts` is renamed `kernels.triton_gemm` in Gate
-  B (no lock names it). One spec on sm ≥ 89, modes per path: **decode (M ≤ 16): W8A16 split-K** — u8 weights decoded to
+- **D12 — FP8 on our own Triton, Gate B** (D-a, D-f). A new plugin `kernels.triton_fp8` (dense only, so nothing is shared
+  with `kernels.triton_experts`, which stays as it is). One spec on sm ≥ 89, modes per path: **decode (M ≤ 16): W8A16 split-K** — u8 weights decoded to
   bf16 exactly by bit operations, bf16 activations, the block scale per 128-K step in f32; **prefill (M > 16): W8A8** —
   per-token, per-128-column e4m3 activations (`a_s = max(amax, 1e-10)/448`, `x / a_s` by IEEE division `tl.math.div_rn`,
   clamped to ±448), e4m3 `tl.dot` with f32 accumulation, `a_s · s_w` per K step. No grouped FP8 kernel: nothing in M0.6
@@ -226,9 +226,9 @@ implementation of the workload; bar = the engine users run for it on the card.
 | A1 | `core/holon` | D11 deletions; per-slice `adopt` (§4.2) |
 | A1 | `std/holon_std/ops`, `std/holon_std/moe` | `qlinear@2`, `prepare`, `act_quant`, parts, merges by shape (D4, D5); `testing.ref_kernels` @2 |
 | A2 | `std/holon_std/weights/hf` | `quant/` dialects, `reference.py`, grouped yield; `std/holon_std/weights/gguf`: NVFP4 refusal |
-| A3 | `plugins/holon_plugins/kernels/ggml_cuda` | FP4 types, `prepare`, `scale2` paths, two specs, pre-launch precision check (`vendor.patch` export), f32 copy for `fp4`, workspace, docstring |
+| A3 | `plugins/holon_plugins/kernels/ggml_cuda` | FP4 types, `prepare`, `scale2` paths, two specs, pre-launch precision check (`vendor.patch` export), f32 activation copy for `fp4` as a named workspace sized at plan time (fixed for graph capture), workspace, docstring |
 | A | `testing`, `judge`, `bench` | reference providers for the `hf` layouts; tiny fixtures per dialect; HF-quant map, goldens, emulators, floors, mode check, plants; `hf_to_gguf.py` |
-| B | `plugins/holon_plugins/kernels/triton_gemm` | rename; FP8 act quant, W8A16 split-K decode, W8A8 prefill (dense); pinned configs |
+| B | `plugins/holon_plugins/kernels/triton_fp8` | rename; FP8 act quant, W8A16 split-K decode, W8A8 prefill (dense); pinned configs |
 
 ### 4.2 Core
 
@@ -279,7 +279,7 @@ are dense); yields dense tensors and modules in shard order, each part read once
   (one size per workspace name, `build.py:93-100`); a test-only entry returns the quantized activation blocks.
 - Calls are counted per (path, mode) (M0.2's counters).
 
-### 4.6 `kernels.triton_gemm` for FP8 (Gate B)
+### 4.6 `kernels.triton_fp8` for FP8 (Gate B)
 
 - `act_quant_fp8(x [R, in]) → (e4m3 [R, in], a_s f32 [R, in/128])`, one program per (row, group).
 - Decode W8A16 split-K: one program per (N-tile, K-split) streaming weights once, f32 partials reduced in a fixed
@@ -319,14 +319,14 @@ are dense); yields dense tensors and modules in shard order, each part read once
   mismatch fails before scoring.
 - **Tier A** (CPU fp32, production source + dialects + reference providers): every target and fixture; it covers
   dialects, normalization, merges and stacking; the repack is L0's.
-- **Tier B** per acceptance 6 and 13. Decode step size: ggml from the plugin's mmvq limits (M0.1); `triton_gemm`
+- **Tier B** per acceptance 6 and 13. Decode step size: ggml from the plugin's mmvq limits (M0.1); `triton_fp8`
   from its M ≤ 16 switch.
 - **L0:** ggml FP4 per spec × path × input dtype against the declared mode's emulator, `l0.check` budgets; the GEMM
   checks consume the activation codes from the test entry, so they stay tight; the codes themselves are checked
   against the emulator at a mismatch rate ≤ 1e-3, mismatches allowed only in the tie classes `-use_fast_math` can
   flip, each within 4 ulp: an element near an e2m1 rounding boundary; the whole 16-value sub-block when two of NVFP4's
   five candidate codes have near-equal squared errors; the whole 32-value block when MXFP4's `log2(amax)` is near a
-  half-integer; the whole row when NVFP4's row scale is near an e4m3 boundary. The pre-launch precision equals the
+  half-integer (the f32 row scale's fast-math reciprocal only nudges values by an ulp: no whole-row class). The pre-launch precision equals the
   spec's; `scale2` on every path vs f64;
   poisoned bytes after the tail. FP8 (Gate B): act quant bitwise vs torch `float8_e4m3fn` (IEEE division on both
   sides); e4m3 → bf16 decode over the 254 finite codes; distinct random block scales; T ∈ {0, 1, 7, 8, 9, 16, 17, 64,
@@ -409,7 +409,7 @@ NVFP4, 30B NVFP4, `amd-quark` and MXFP4_MOE. **Cluster only** — sm_89 / sm_120
 | A4 | Judge: HF-quant map, gates, emulators, floors, mode check. Machine time: goldens 4 × 8B (≈ 0.5 h each) + 4 × 30B (≈ 2 h each, streamed) ≈ 10 h CPU, overnight; floors ≈ 12 × 0.5 h on A5000s; Tier A ≈ 8 runs | gates; Tier A all; floors' order | 3 + 1.5 machine days |
 | A5 | Tier B (A5000, then 5080 / 4090 / PRO 6000), plants, W4A4 report, structural, bounded | acceptance 6, 7 | 2.5 |
 | A6 | Consumer: fits, bars (same mode and default), serving, tune + locks, snapshots ×3; Gate A panel review | acceptance 8–10 | 3 |
-| B1 | `triton_gemm` rename; W8A16 split-K decode kernel; per-shape microbenchmark, head and non-GEMM timings, llama-bench Q8_0 tg128 on 5080 / 4090 | acceptance 11 | 2 |
+| B1 | `kernels.triton_fp8`; W8A16 split-K decode kernel; per-shape microbenchmark, head and non-GEMM timings, llama-bench Q8_0 tg128 on 5080 / 4090 | acceptance 11 | 2 |
 | B2 | W8A8 act quant + dense prefill GEMM; L0 sm_89 / sm_120a | acceptance 12 | 2.5 |
 | B3 | W8A8 floors, Tier B, FP8 plants, bars, 5080 fit, locks, snapshots; Gate B panel review | acceptance 13–15 | 2.5 |
 | C | Docs: design §4.2 (no dialect / converter slots), §5.5 as built, §5.6; plan §2 / §10 status | — | 0.5 |
@@ -466,7 +466,7 @@ acceptance 3 / 10 / 15; D-h → §4.2, risks.
 | B-6 | `a8` vs GGUF FP4 defaults | `a8` for every quantized layout, GGUF included (D3); MXFP4_MOE target (D1) |
 | B-7 | sm_86 FP8 scope | stays v1 (non-goals, D12) |
 | B-8 | dialects in `std.weights.hf` | one module per dialect under `weights/hf/quant/`; extraction trigger recorded (D2) |
-| B-9 | rename timing | `triton_gemm` rename in Gate B (D12, B1) |
+| B-9 | rename timing | `triton_fp8` rename in Gate B (D12, B1) |
 | B-10 | M0.4 sequencing, draft heads | §4.2, D4 |
 | C-B1 | W4A4 default unsafe | D3 / D-b |
 | C-M1 | FP8 decode bar at M = 1 | W8A16 split-K decode mode at M ≤ 16, bandwidth gate B1 (D12, acceptance 11) |
@@ -498,9 +498,13 @@ grouped FP8 is dropped; `quant.act = a16` is not offered.
 | R2-M1 | FP8 decode gate on bandwidth alone | end-to-end prediction from microbenchmarks + head + non-GEMM time, ≥ 0.85× the measured Q8_0 tg128 (acceptance 11, B1) |
 | R2-m2 | code-check tie classes | element, sub-block candidate near-ties, MXFP4 `log2` half-integers, NVFP4 row scale (§4.8 L0) |
 | R2-m3 | N6 with a pre-launch check | predicted Python error at the first q/k/v call; N6b the same (§4.8) |
-| R2-m4 | Gate B decode step size | from `triton_gemm`'s M ≤ 16 switch (§4.8, acceptance 13) |
+| R2-m4 | Gate B decode step size | from `triton_fp8`'s M ≤ 16 switch (§4.8, acceptance 13) |
 | Arch-1 | bf16 FP4 quantizer patch | dropped; `fp4` copies activations to f32 (D8) |
 | Arch-2 | grouped FP8 without an L2 consumer | dropped; 30B FP8 on the reference provider, fit computed (D1, D12, §4.9) |
 | Arch-3 | `a16` | not offered in M0.6, a startup error (D3, §4.7) |
 | Arch-4 | tail copies under `a8` | tail only in the `fp4` spec's `prepare`; `q8_1` `prepare` is the identity for GGUF layouts (D8, §4.5) |
 | nit | unused `declared_act` | removed (D2) |
+
+**Rev 3.** All three reviewers: clean. Applied nits: the FP8 kernel is a new `kernels.triton_fp8` (no rename: dense only,
+nothing shared with `triton_experts`); no whole-row tie class (the row scale is f32); the `fp4` spec's f32 activation
+copy is a named plan-time workspace.
