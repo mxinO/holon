@@ -173,9 +173,10 @@ implementation of the workload; bar = the engine users run for it on the card.
   second) dimension is `out / g` for one `g` dividing every unit's `out`. Dense: `scale2` must be bit-equal, else the
   units stay separate (`std/holon_std/ffn/units.py:23-30`, `std/holon_std/mixers/gqa/units.py:146-147`). MoE gate/up:
   `scale2` is carried as `[2, E]` (gate row, up row), so each half is contiguous as mmvq's `gate_scale` / `x_scale`
-  indexing requires (`mmvq.cu:705-708, 1506-1516`); our SwiGLU takes both rows. A part of one element in every unit
-  (per expert: one value per expert, any shape) is per tensor: bit-equal for dense merges, stacked `[2, E]` for
-  experts, never concatenated as rows.
+  indexing requires (`mmvq.cu:705-708, 1506-1516`); our SwiGLU takes both rows. A part of rank ≤ 1 with one element
+  in every unit (`[]` or `[1]`; per expert `[E]` or `[E, 1]`) is per tensor: bit-equal for dense merges, stacked
+  `[2, E]` for experts, never concatenated as rows. Per-row parts are 2-D (per expert 3-D): an FP8 128 × 128 unit's
+  `[1, 1]` block scale is a row.
 - **D6 — Per-expert stacking: per-slice `adopt`** (D-e, closes M0.2 D7). In `_fill_slice`, after the range and
   duplicate checks, a `QTensor` with a transform is an error, else `adopt(ctx, leaf, q, index=index)`; units hold every
   stacked part per expert, `[E, …]`, whole GGUF stacks included (a view of their rows), as `linear_experts@2` takes
@@ -526,11 +527,11 @@ copy is a named plan-time workspace.
 |---|---|---|
 | A0 C API | 5-argument `ggml_cuda_mmq_get_config` | also `ggml_cuda_mmq_needs_fallback`; the workspace follows mmq's new allocations (q8_1 tile padding J ≤ 128 rows rounded to a load chunk; `ids_dst` J − 1 entries of read padding); the MoE padding plant reads the new layout |
 | expert stacks | dim 0 = E while loading; GGUF whole stacks `[E·out, row_bytes]` unchanged; the repack to `[E·out, …]` is `prepare`'s | every part per expert, `[E, …]`, GGUF whole stacks as a view; so `linear_experts@1` → `@2` (D4, D6, D8, §4.3); `kernels.ggml_cuda` reads it as `[E·out, row_bytes]`; one merge rule for dense, GGUF and HF stacks (D5) |
-| per-tensor parts | `scale2` `[]` | a part of one element in every unit (one value per expert) is per tensor whatever its shape: bit-equal (dense), `[2, E]` (experts) (D5) |
+| per-tensor parts | `scale2` `[]` | by rank: `[]` or `[1]` in every unit (per expert `[E]` or `[E, 1]`) is per tensor, bit-equal (dense) or `[2, E]` (experts); a per-row part is 2-D, so a `[1, 1]` block scale merges as a row (D5) |
 | `qembedding@1` | "`Embedding` / `LMHead` pass `{"blocks": …}`" | unchanged contract and no `prepare`; `Embedding` keeps its parts for a tied head (§4.3) |
 | primary part | unspecified | the first part of `QTensor.parts`, held by `weight`; A2's dialects yield `weight` first and A2's tests check it (D4) |
 | slices to plain units | — | `Linear` / `Embedding` / `LMHead.adopt` take `index` and refuse a slice: the core's load error (D6) |
 | `quant.act`, `config["act"]` | with the providers (A3) | in A1: the option (`a16` a startup error) and `kernels.ggml_cuda`'s `{"mmvq": "q8_1", "mmq": "q8_1"}`, so GGUF locks propagate once (D3) |
 | structural test | A1 (§4.3) | A2: it needs `reference.py` and the dialects |
 | core | registries deleted (D11) | also the dead `dialect` / `converter` slot kinds (`api/manifest.py`) |
-| ggml workspace | — | the pool records its high-water mark (a test entry); L0 holds every call to `workspace_bytes(_id)` for its rows; `mmq_schedule` aborts on FP4 types until A3 passes the precision |
+| ggml workspace | — | the pool records its high-water mark (a test-only process-wide counter); L0 holds every call to `workspace_bytes(_id)` for its rows, and on a J = 128 fixup shape (dense, with ids) the formula's spare to ≤ 2048 + 3 · 256 bytes (the load-chunk allowance stays: `nthreads` may be any multiple of 32, so 128 · 144 bytes can round up past itself); `mmq_schedule` aborts on FP4 types until A3 passes the precision |
