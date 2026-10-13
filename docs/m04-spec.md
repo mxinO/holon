@@ -1,6 +1,6 @@
 # M0.4 — speculative decoding: MTP, DFlash2, n-gram: design and implementation plan
 
-Status: **revision 3, under review** (2026-10-13). Revs 1 and 2 were reviewed by a panel of three; every finding is
+Status: **revision 3, reviewed clean** (2026-10-13). Revisions 1–3 were reviewed by a panel of three; every finding is
 resolved in §9.
 
 Scope: plan §7, amended:
@@ -228,6 +228,8 @@ Non-goals:
      - Drafters that write KV (MTP, DFlash) draft at the step's k, which their reservation covers
        (`lookahead(k)`). They never use the k = 0 fallback, and the next step's verifier caps acceptance at
        `min(n_draft, k)` either way.
+     - A prefill step has no width of its own. Its k is `policy.k(seqs)` evaluated when it is scheduled, and that
+       one value sets both the drafting of its prompt-ending chunks and their `n + lookahead(k)` reservation.
        A toy test shows the n-gram policy re-enabling after a hit.
      - Every running row joins a verify step: rows without drafts carry `n_draft = 0`. Prefill and decode never
        share a step (`sched.py:59`).
