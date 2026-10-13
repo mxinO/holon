@@ -1,10 +1,12 @@
 """`propagate`: the outcomes of design §4.6 with scripted checks, and the command line end to end on a CPU model."""
 import dataclasses
+import types
 
 import pytest
 import torch
 from holon.api import Binding, Lock, Plan, UnitPin
 from holon.core import plans
+from holon.core.engine import EngineConfig
 from holon_judge import golden
 from holon_judge.snapshot import Snapshot
 from holon_tools import locks, propagate
@@ -131,6 +133,28 @@ def test_write_stores_lock_and_snapshot(tmp_path, current):
     assert propagate.trace_hash(stored) == out.lock.snapshot
     with pytest.raises(ValueError, match="nothing to write"):
         propagate.write(tmp_path, propagate.Outcome("unchanged", {}, []))
+
+
+def test_snapshot_engines_share_one_pool_size(monkeypatch):
+    # Pool sizes set the schedule a trace records: every snapshot engine gets the first one's pools (a later build would
+    # measure less free memory), or those of the lock's stored snapshot (recorded in another process).
+    built = []
+
+    class Measuring:                                             # each build would measure 10 bytes less
+        def __init__(self, config):
+            capacity = config.state_memory or 1000 - 10 * len(built)
+            self.ledger = types.SimpleNamespace(pools={"kv": types.SimpleNamespace(capacity=capacity, unit_bytes=1)})
+            built.append(config.state_memory)
+
+        def has_work(self):
+            return False
+
+    monkeypatch.setattr(propagate, "Engine", Measuring)
+    checks = propagate.EngineChecks(EngineConfig(model="m"), [], None)
+    first, again = checks.snapshot(), checks.snapshot()
+    assert built == [None, 1000] and first.meta["pool_bytes"] == again.meta["pool_bytes"] == 1000
+    propagate.EngineChecks(EngineConfig(model="m"), [], None, pool_bytes=990).snapshot()
+    assert built[-1] == 990
 
 
 def test_cli_on_cpu(tiny_checkpoint, tiny_prompts, tiny_prompts_file, cpu_flags, tmp_path, capsys):

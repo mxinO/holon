@@ -25,6 +25,7 @@ import gc
 import pathlib
 from typing import Any, Protocol
 
+import torch
 from holon.api import Binding, Lock, Plan, UnitPin, canonical_hash
 from holon.core.engine import Engine, EngineConfig
 from holon_judge import snapshot
@@ -129,19 +130,33 @@ class L2Inputs:
 
 
 class EngineChecks:
-    """The real checks, on engines built in this process from `config` (model, device, dtype, kernel pins)."""
+    """The real checks, on engines built in this process from `config` (model, device, dtype, kernel pins).
 
-    def __init__(self, config: EngineConfig, trace: list[Request], l2: L2Inputs | None) -> None:
-        self.config, self.trace, self.inputs = config, trace, l2
+    Every snapshot engine gets the same state pools — they set admission and preemption, so the schedule the trace
+    records: `pool_bytes` (the lock's stored snapshot records the bytes its pools took) or else the bytes the first
+    engine's measured pools took. Engines built one after another measure different free memory (a predecessor's
+    cached blocks, the process's own growth, another session's load); an explicit `config.state_memory` wins."""
+
+    def __init__(self, config: EngineConfig, trace: list[Request], l2: L2Inputs | None,
+                 pool_bytes: int | None = None) -> None:
+        self.config, self.trace, self.inputs, self.pool_bytes = config, trace, l2, pool_bytes
         self._built: Engine | None = None
 
     def plan(self) -> Plan:
-        self._built = self._fresh(self.config)
+        self._built = self._pinned()
         return locks.plan_of(self._built)
 
     def snapshot(self) -> Snapshot:
         engine, self._built = self._built, None       # the plan's engine runs the first trace: one build fewer
-        return snapshot.record(engine or self._fresh(self.config), self.trace, {"trace": canonical_hash(self.trace)})
+        return snapshot.record(engine or self._pinned(), self.trace,
+                               {"trace": canonical_hash(self.trace), "pool_bytes": self.pool_bytes})
+
+    def _pinned(self) -> Engine:
+        engine = self._fresh(dataclasses.replace(self.config, state_memory=self.config.state_memory or
+                                                 self.pool_bytes))
+        if self.pool_bytes is None:
+            self.pool_bytes = sum(p.capacity * p.unit_bytes for p in engine.ledger.pools.values())
+        return engine
 
     def l2(self) -> tuple[bool, str]:
         if self.inputs is None:
@@ -155,7 +170,9 @@ class EngineChecks:
 
     def _fresh(self, config: EngineConfig) -> Engine:
         self._built = None
-        gc.collect()         # free the previous engine before the next one measures the memory left for it
+        gc.collect()         # free the previous engine (cached blocks too) before the next one takes memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         return Engine(config)
 
 

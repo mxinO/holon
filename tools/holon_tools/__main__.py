@@ -83,9 +83,10 @@ def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig) -> int
     """Check `config` against `start` and write the new lock if the outcome allows."""
     prompts = PromptSet.load(a.prompts)
     l2 = propagate.L2Inputs(prompts, a.golden, a.floor) if a.golden and a.floor else None
-    checks = propagate.EngineChecks(config, trace(prompts), l2)
     stored = start and start.snapshot and propagate.snapshot_path(a.plans, start.plan, start.snapshot)
     previous = Snapshot.load(stored) if stored and stored.is_file() else None
+    # The stored trace's pools, so the new one is recorded on the same (from another process, another day).
+    checks = propagate.EngineChecks(config, trace(prompts), l2, previous and previous.meta.get("pool_bytes"))
     sm = platform.fingerprint(torch.device(config.device)).sm
     outcome = propagate.decide(start, checks, sm, previous, a.allow_uncovered_advance)
     print(propagate.report(outcome))
