@@ -222,8 +222,12 @@ Non-goals:
      - The drafter writes `SeqTable.n_draft [S]` on the device, bounded by the deployment's **maximum** k, not the
        step's k. At depth 1 the drafts for step N + 1 are written before the host picks that step's k.
      - Short rows pad with token 0, and every verifier caps acceptance at `min(n_draft, k)`.
-     - `run` drafts at the maximum k, and `observe` reports `n_draft` (the uncapped would-have-drafted length), on
-       k = 0 steps too. `Launched` brings `n_draft` back to the host with the tokens.
+     - Drafters that write no state (n-gram) draft at the maximum k on every step, k = 0 steps included. `observe`
+       then reports the uncapped would-have-drafted `n_draft`, which `Launched` brings back to the host with the
+       tokens.
+     - Drafters that write KV (MTP, DFlash) draft at the step's k, which their reservation covers
+       (`lookahead(k)`). They never use the k = 0 fallback, and the next step's verifier caps acceptance at
+       `min(n_draft, k)` either way.
        A toy test shows the n-gram policy re-enabling after a hit.
      - Every running row joins a verify step: rows without drafts carry `n_draft = 0`. Prefill and decode never
        share a step (`sched.py:59`).
@@ -552,3 +556,4 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
 | A-M3: n-gram fallback never resumes | drafting at the maximum k on every step; `n_draft` back to the host (§3.5) |
 | A-m1: reservation clamp dropped | restored, with the fast-path check (§3.2) |
 | A-m2: capture set misses shapes | every bucket × the declared q set (§3.6, D7) |
+| A-M1 (rev 3 recheck): drafting at the maximum k overruns MTP's reservation | only stateless drafters draft at the maximum k; MTP and DFlash draft at the step's k (§3.5) |
