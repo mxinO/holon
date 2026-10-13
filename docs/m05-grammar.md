@@ -1,6 +1,6 @@
 # M0.5 — structured output and tool calls: design and implementation plan
 
-Status: **revision 3, for review** (2026-10-13). Revs 1–2 were reviewed by a panel of three; every finding is
+Status: **revision 4, for review** (2026-10-13). Revs 1–3 were reviewed by a panel of three; every finding is
 resolved in §9.
 
 Scope: plan §8, amended (D1; plan §2 / §8 updated with this revision):
@@ -84,23 +84,22 @@ conformance; multimodal content blocks; more than one active logits processor (�
    - Change (`api/decoding.py`): the deployment selects at most one `logits_processor` plugin
      (`EngineConfig.slots`; locks record it in `[engine]`, like the drafter). Its plugin builds the processor with
      `build(ctx, vocab: VocabView)` (§3.7). The processor:
-     - `mask_width: int` — int32 words per mask row (the core allocates the buffer, §3.6), and `resource`: the
-       `ext` namespace it serves (e.g. `grammar.constraint`); `Engine.add` rejects a request carrying an `ext` key
-       of a resource no selected processor serves (a 400, kind `client`), so a constraint is never silently
-       ignored;
+     - `mask_width: int` — int32 words per mask row (the core allocates the buffer, §3.6). `Engine.add` rejects a
+       request carrying any `ext` key that no active plugin's manifest `provides` (a 400, kind `client`), so a
+       constraint is never silently ignored (nothing reads `ext` today; no runtime attribute repeats the manifest);
      - `open(rid, params, prompt) -> bool` at `Engine.add`, before anything is registered: whether it constrains
        this request. Raising `RequestError` rejects the request. Slow work (compiling) happens off the engine thread
        (D5);
      - `ready(rid) -> bool`: false while the request's constraint is not built — the request is held as
        `Status.BLOCKED` and skipped by the scheduler (never blocking others: `_prefill` continues past it); `step()`
-       returns no deltas when only blocked work remains, and the serve loop polls with a short timeout instead of
-       raising "no progress". `ready` may raise `RequestError` (a compile error: kind `client`; a timeout: kind
+       returns no deltas when only blocked work remains, and `has_work()` excludes blocked-only work, so the serve
+       loop waits with its normal poll interval instead of spinning or raising "no progress". `ready` may raise `RequestError` (a compile error: kind `client`; a timeout: kind
        `busy`), which aborts the request;
      - `commit(seq, out: list[int])` after each step's results, **before** the engine acts on stop or length and
        before any delta is built, with the tokens the step appends (truncated at a stop, skipped for finished rows);
        raising `RequestError` aborts the request with kind `engine` and drops that step's tokens (§3.4);
      - `close(rid)` at finish or abort of the request (every sequence, never-started siblings included; drops a
-       pending compile);
+       pending compile); `shutdown()` (optional), called by `Engine.close`, stops the processor's helpers;
      - `fill(rows: list[MaskRow], buf)` at launch: writes the mask rows of the step's constrained logits rows into
        the core's staging buffer (`MaskRow`: the sequence, its row range in the compact block, and for verify rows the
        drafts it will check). It never raises: a row it cannot build gets all tokens allowed and the failure surfaces
@@ -132,7 +131,8 @@ conformance; multimodal content blocks; more than one active logits processor (�
      `open`, `ready` or `commit` aborts the whole request (`Engine.abort(rid, "error", message)`: one delta per
      sequence, rows in flight discarded); `TokenDelta` carries the kind, and the frontend maps `client` before the
      first token to 400, `busy` to 503, anything else to `finish_reason: "error"`. After a supervisor restart (one
-     engine request per sequence) the supervisor aborts the request's other engine rids on an `error` delta. Other
+     engine request per sequence) the supervisor aborts the request's other engine rids on an `error` delta. A plain
+     `ValueError` from `add` (prompt too long, `n < 1`, …) keeps today's meaning: kind `client`, a 400. Other
      exceptions still end the engine (bugs).
    - Toy proof: a toy processor raises for one request of an `n = 2` pair mid-generation; both its sequences end
      with `error`, the others finish unchanged.
@@ -212,19 +212,31 @@ unread `max_depth` is removed (the gate comes from `open`).
   Uploader staging; the processor owns `apply`. `grammar/xgrammar` applies with a Triton kernel of its own (one
   program per row block, no `[R, V, 32]` intermediate), checked against xgrammar's CPU `apply_token_bitmask_inplace`
   as the reference (L0-mask). Steps without mask rows keep today's graphs.
-- **D5. `grammar/xgrammar`, a plugin; compile in a killable subprocess.** It accepts `ext["grammar.constraint"]`
-  (`grammar.constraint@1`, D6). Compiles run in a pool of two worker processes (each holding the `TokenizerInfo`),
-  which return the serialized `CompiledGrammar` (0.28 MB, 3.5 ms to deserialize, R §8) — an xgrammar compile cannot
-  be cancelled in a thread, so a worker that passes the **10 s timeout** is killed and respawned and the request is
-  rejected (`busy`); a negative cache rejects repeats of a timed-out or failed constraint at once; when both workers
-  are busy, cold compiles queue (bounded, then `busy`); `close` drops a queued compile. A per-constraint cache of
-  compiled grammars (`cache_limit_bytes` set) serves repeats in microseconds. `ready(rid)` gates scheduling. One `GrammarMatcher` per sequence; stop tokens = the engine's
-  stop set plus the request's `stop_token_ids`; `ignore_eos` with a constraint is rejected at `open`. JSON defaults:
-  `any_whitespace = True` with a whitespace run cap of 64 (the cap counts the newline and the indentation: 64 admits
-  depth 8 at 4-space indentation, so pretty-printed JSON and MTP's drafts of it stay allowed; runaway whitespace is
-  bounded); `strict_mode` per D9. xgrammar is a pinned pip dependency
-  (Apache-2.0); the pin is chosen at step 2 (0.2.3 now; vLLM 0.2.8, SGLang 0.2.7) and the reject-list oracle and the
-  tag fixtures are re-run at it.
+- **D5. `grammar/xgrammar`, a plugin; constraints vetted in killable workers, compiled in a helper thread.**
+  - It accepts `ext["grammar.constraint"]` (`grammar.constraint@1`, D6).
+  - **Vetting** (an xgrammar compile cannot be cancelled in a thread, and compiled grammars can be huge: up to
+    ≈ 2 GB in memory for two Github_hard schemas, 300 MB for the largest Kubernetes ones, with deserialization slower
+    than compiling — reviewers' measurements): two worker processes, started with `spawn` (the engine process has
+    CUDA and threads), exiting when their parent dies, each with its own `TokenizerInfo` built from the same
+    tokenizer, padded size and stop set as the parent's (asserted) and `GrammarCompiler(max_threads=2)`. A worker
+    compiles the constraint and returns only `ok` / the error, the compile time and `memory_size_bytes` — no grammar
+    crosses the pipe. Past the **10 s timeout** the worker is killed and respawned (≈ 0.3–1 s; the queue is bounded
+    for that) and the request is rejected `busy`; a compiled size over **64 MB** is rejected `client` ("schema too
+    complex"); a negative cache rejects repeats of either at once.
+  - **Compiling for use:** a vetted constraint is compiled again in the engine process by one helper thread with
+    `max_threads=2` (xgrammar releases the GIL while compiling, R §8), never on the engine thread; its time is
+    bounded by the worker's measured time; `ready(rid)` flips when it is done. Compiled grammars are cached by
+    constraint (`cache_limit_bytes` = 512 MB), so repeats cost microseconds. Both compile times and the compiled size
+    are recorded per schema in the D9 runs.
+  - One `GrammarMatcher` per sequence; stop tokens = the engine's stop set plus the request's `stop_token_ids`;
+    `ignore_eos` with a constraint is rejected at `open`.
+  - JSON: `any_whitespace = True` with a whitespace run cap of 64 (the cap counts the newline and the indentation;
+    64 admits nesting depth 8 at 4-space indentation, so pretty-printed JSON and MTP's drafts of it stay allowed).
+    xgrammar applies the cap only to typed schema rules: `json_object` is compiled from our own capped JSON EBNF, and
+    untyped subschemas (`{}`, `{"type": "object"}` without properties) stay uncapped — stated, and covered by
+    `max_tokens` and the truncation gate.
+  - `strict_mode` per D9. xgrammar is a pinned pip dependency (Apache-2.0); the pin is chosen at step 2 (0.2.3 now;
+    vLLM 0.2.8, SGLang 0.2.7) and the reject-list oracle and the tag fixtures are re-run at it.
 - **D6. `grammar.constraint@1`, a plain-dict resource.** The frontend package builds constraints as plain dicts
   (`json_schema` with `strict`, `json_object`, `regex`, `ebnf`, and the tag forms `tag(begin, content, end)`,
   `triggered_tags(triggers, tags, at_least_one, stop_after_first)`, `any_text(excludes)`, `sequence`, `or`, and the
@@ -344,12 +356,6 @@ unread `max_depth` is removed (the gate comes from `open`).
 - **Claude Code's request shape** is only partly confirmed by code (R §5.4): capture a real session's requests
   (headers redacted) before freezing the Anthropic subset.
 
-## 10. Deferred, deliberately
-
-- Exact regular translations of the date / date-time / ipv4 / hostname formats (v1; rejected under strict now).
-- More than one logits processor (ordering, chained masks).
-- Constraining `tool_choice: "auto"` by default (D8).
-
 ## 9. Review findings, resolved
 
 **Rev 1** (A: correctness, B: architecture, C: numerics / performance / tests).
@@ -416,3 +422,22 @@ unread `max_depth` is removed (the gate comes from `open`).
 | C-R2-5: coverage prediction high; date-time 400s | 64–67%; exact format regexes deferred (§10) |
 | C-R2-6: D2 toy misses fill / apply; "combined" undefined | measured fill and apply added; A′ unless free rows slow > 1.15× (D2) |
 | C-R2-7: L0-dist harness must fail on refusals | replay through a fresh matcher (§5) |
+
+**Rev 3.**
+
+| Finding | Resolution |
+|---|---|
+| C-R3-1 / A (rev 3 major): compiled grammars cost more to ship and deserialize than to compile (up to ≈ 2 GB, 46 s) | workers vet only (timeout, kill, a 64 MB size cap) and return no grammar; a helper thread compiles for use; sizes and times recorded (D5) |
+| C-R3-2: worker start method, threads, respawn, tokenizer match | `spawn`, `max_threads=2`, bounded queue across respawns, `TokenizerInfo` equality asserted (D5) |
+| B-m1 / A nit: the unserved-`ext` rule ambiguous, duplicating the manifest | any `ext` key no active plugin's manifest provides is rejected; no runtime attribute (§3.1) |
+| B-m2: worker lifecycle | `spawn`, exit on parent death, `shutdown()` from `Engine.close` (§3.1, D5) |
+| B-m3: blocked-only work spins the loop | `has_work()` excludes it (§3.1) |
+| B-m4: existing admission errors need a kind | plain `ValueError` from `add` is kind `client` (§3.4) |
+| A (rev 3 minor): the whitespace cap misses `json_object` and untyped subschemas | `json_object` from our capped EBNF; untyped subschemas stated, covered by `max_tokens` and the truncation gate (D5) |
+| B nit: §10 before §9 | moved |
+
+## 10. Deferred, deliberately
+
+- Exact regular translations of the date / date-time / ipv4 / hostname formats (v1; rejected under strict now).
+- More than one logits processor (ordering, chained masks).
+- Constraining `tool_choice: "auto"` by default (D8).
