@@ -426,7 +426,7 @@ Acceptance:
 - Acceptance length and speedup recorded on agent traces (A5000 + consumer desktops); graphs captured for the `spec.q` set.
 - Core diff target zero.
 
-### 7.1 Status (2026-10-13): Gate A met (MTP, n-gram); Gate B (DFlash2) in progress
+### 7.1 Status (2026-10-13): acceptance met (Gate A: MTP, n-gram; Gate B: DFlash2)
 
 Design and evidence: `docs/m04-spec.md` (rev 3, reviewed clean; §10 is Gate A's status with every result, decision
 and deviation); records `evidence/bench_m04nat-*` (natural text), `fit_m04-*`, `judge/results/` (bounded, L0-drafter,
@@ -440,13 +440,19 @@ cost-model policy deferred.
 | 2 | Lossless: bounded spec vs plain passes for Qwen3-8B + n-gram, Qwen3.5-9B + MTP, the 27B GGUF + MTP; GDN rollback by masked replay, bitwise at the unit; L0-drafter passes on Qwen3.5-9B |
 | 3 | 27B + MTP, natural text, single stream: 1.49× on the RTX 5080 (10.63 ms, llama.cpp MTP 10.53), 1.85× on the RTX 4090 (11.52 ms, llama.cpp 12.63); agent trace TPOT p50 1.71× / 1.75× (19.1 / 16.7 ms vs llama.cpp MTP 28.1 / 34.6); acceptance equal to llama.cpp's drafts; 2.6–2.8 tokens per verify step |
 | 4 | Verify steps 100% graphed, 99.6–100% at depth 1; n-gram on Qwen3-8B: agent 1.10×, single stream 0.97× (below break-even) |
-| 5 | All eight locks propagated, snapshots byte-identical (speculation off changes nothing) |
+| 5 | All eight locks propagated, snapshots byte-identical (speculation off changes nothing) — at Gate A and again at Gate B |
+| 6 | Gate B (`docs/m04-spec.md` §11–§13): taps, attention `causal` / `window` facts, sparse draft laws (`std.spec.rejection` exact for sampled drafts), `drafters.dflash` (HF and GGUF checkpoints); L0-drafter passes for DFlash2 (bf16 and Q4_K_M) and the GGUF MTP head with teacher-forced chain steps; bounded spec vs plain on the 27B passes, snapshot run-identical |
+| 7 | 27B + DFlash2 on the RTX 4090 (q8_0 KV): single stream 2.01× (10.59 ms; llama-server with DFlash 12.75), agent TPOT p50 2.14× (14.06 ms); acceptance equal to llama.cpp's on the same drafter file; 2.93 tokens per verify step single stream (predicted 3.5–5: the drafter's on this target); 54K KV tokens; llama-server with DFlash does not fit the agent trace on 24 GB |
 
 Decisions: speculation is benchmarked on natural text (`--corpus`; uniform-id prompts inflate acceptance); MTP's
 k table stays `1:3,3:2`; lock approvals delegated for passing verdicts. Found on the way: the sampler's uniform
 could round to 1.0 (fixed); a stale MTP carry at position 0 (fixed by the L0-drafter judge); `repeat_interleave`
-without an output size broke capture. Next: Gate B (DFlash2 on the 4090), and M0.7's speculation items (a verify
-step costs ≈ 1.8 decode steps: multi-column mmvq, the MTP head, rewind's index ops).
+without an output size broke capture; the startup profile missed the drafter's work on verify steps; the snapshot
+judge and `propagate` gave later engines smaller pools; a draft checkpoint was named by host path in plans (now by
+identity). The drafter judge's top-1 margin became max(0.25 points, 2.5 paired SE) after the first verdicts (a fixed
+0.25-point bar fails a correct drafter 8–40% of the time at 300–2000 rows; reviewer simulation). Next: M0.7's
+speculation items (a verify step costs ≈ 1.5–1.8 decode steps: multi-column mmvq, the draft heads, rewind's index
+ops).
 
 ## 8. M0.5 — structured output and tool calls
 

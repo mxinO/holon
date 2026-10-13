@@ -1,9 +1,8 @@
 # M0.4 — speculative decoding: MTP, DFlash2, n-gram: design and implementation plan
 
 Status: **revision 3, reviewed clean** (2026-10-13). Revisions 1–3 were reviewed by a panel of three; every finding is
-resolved in §9. **Gate A met** (2026-10-13, §10): MTP and n-gram, merged to `main`. Gate B (DFlash2): the seams
-(§11, phase 1) and `drafters.dflash` with its A5000 evidence (§12, phase 2) are built; the 4090 evidence and the
-panel's review are next.
+resolved in §9. **Acceptance met** (2026-10-13): Gate A (§10, MTP and n-gram) and Gate B (§11–§13, DFlash2), each
+reviewed clean by the panel; merged to `main`.
 
 Scope: plan §7, amended:
 - DFlash/DFlash2 is added. It was previously a v2 draft-model drafter.
