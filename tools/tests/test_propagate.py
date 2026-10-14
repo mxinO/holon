@@ -157,8 +157,10 @@ def test_snapshot_engines_share_one_pool_size(monkeypatch):
     assert built[-1] == 990
 
 
-def test_cli_on_cpu(tiny_checkpoint, tiny_prompts, tiny_prompts_file, cpu_flags, tmp_path, capsys):
+def test_cli_on_cpu(tiny_checkpoint, tiny_prompts, tiny_prompts_file, cpu_flags, tmp_path, capsys, monkeypatch):
     gold, floor = tmp_path / "gold.safetensors", tmp_path / "floor.safetensors"
+    pools, checks = [], propagate.EngineChecks          # the stored pools each run's checks start from
+    monkeypatch.setattr(propagate, "EngineChecks", lambda *a: pools.append(a[3]) or checks(*a))
     golden.record(str(tiny_checkpoint), tiny_prompts).save(gold)
     golden.record(str(tiny_checkpoint), tiny_prompts, dtype=torch.bfloat16).save(floor)
 
@@ -181,6 +183,7 @@ def test_cli_on_cpu(tiny_checkpoint, tiny_prompts, tiny_prompts_file, cpu_flags,
     assert "verdict: unchanged" in capsys.readouterr().out
     assert run(home, max_step_tokens=8) == 2                    # a settings change is a checked change
     assert "engine:max_step_tokens: 16 -> 8" in capsys.readouterr().out
+    assert pools[-1] == 4 << 20                                 # on the lock's own class: its stored pools
     assert len(list(home.rglob("*.lock"))) == 1
 
     # Another class's lock, verified here: the trace is byte-identical, which needs an approval, or the opt-in.
@@ -195,6 +198,7 @@ def test_cli_on_cpu(tiny_checkpoint, tiny_prompts, tiny_prompts_file, cpu_flags,
     out = capsys.readouterr().out
     assert "starting from cpu/other-toolchain's" in out and "snapshot trace byte-identical" in out
     assert "prefix tokens saved 0" not in out
+    assert pools[-1] is None                                    # another class's pools may not fit here: measured
     assert run(away, "--allow-uncovered-advance") == 0
     assert "verdict: advance" in capsys.readouterr().out
     assert plans.newest(away, lock.plan.model_id, lock.plan.fingerprint_class).snapshot == lock.snapshot

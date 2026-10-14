@@ -85,9 +85,13 @@ def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig) -> int
     l2 = propagate.L2Inputs(prompts, a.golden, a.floor) if a.golden and a.floor else None
     stored = start and start.snapshot and propagate.snapshot_path(a.plans, start.plan, start.snapshot)
     previous = Snapshot.load(stored) if stored and stored.is_file() else None
-    # The stored trace's pools, so the new one is recorded on the same (from another process, another day).
-    checks = propagate.EngineChecks(config, trace(prompts), l2, previous and previous.meta.get("pool_bytes"))
-    sm = platform.fingerprint(torch.device(config.device)).sm
+    fp = platform.fingerprint(torch.device(config.device))
+    # The stored trace's pools, so the new one is recorded on the same (from another process, another day) — on its
+    # own class only: another class's card may not hold them (an RTX 4090's pools on an RTX 5080), so it measures.
+    same = start is not None and start.plan.fingerprint_class == fp.cls
+    pools = previous.meta.get("pool_bytes") if previous is not None and same else None
+    checks = propagate.EngineChecks(config, trace(prompts), l2, pools)
+    sm = fp.sm
     outcome = propagate.decide(start, checks, sm, previous, a.allow_uncovered_advance)
     print(propagate.report(outcome))
     if outcome.verdict == "advance" or (outcome.verdict == "approve" and a.approve):
