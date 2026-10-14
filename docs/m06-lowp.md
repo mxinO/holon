@@ -575,6 +575,79 @@ copy is a named plan-time workspace.
 | note for A4 | — | the D3 mode check and plant N7 need the dense counters too: `Linear` keeps its kernel at `m._q._kernel` (not `m._kernel`, which `judge/holon_judge/engine.py` reads), and `_by_path` folds the modes into paths |
 | plants | §4.8 | in `planted.py` (`fp4_plants`, layer 18): `nvfp4-repack-nibbles-swapped` (N2), `nvfp4-repack-scales-permuted` (N3), `nvfp4-scale2-by-slot` (N4), `nvfp4-scale2-after-swiglu` (N5), `ggml-prec-default` (N6, N6b), `nvfp4-o-proj-scale2-1.25` / `-1.1` (N8, N8b: std.weights.hf's `scale2` read × the factor), `mxfp4-repack-scale-off-by-one` (M1), `fp4-tail-not-zeroed` (M4). L0 bites: N2, N3, M1 (the lossless check; M1 also the GPU structural test), N4, N5 (the MoE `scale2` checks), N6 (sm_120: the build's error; sm_86 passes), M4 (sm_120). N8 / N8b are Tier B's (A5) |
 
+**As built (A4).** Recorded deviations from rev 3 in step A4 (the judge); results in "A4 results" below.
+
+| item | rev 3 | as built |
+|---|---|---|
+| MXFP4_MOE file | fixed in A0 | fixed in A4 (A0 had not): `Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE` at `68d644f`, 17.08 GB (experts MXFP4; attention, embedding, head Q8_0; norms, routers F32); its original `Qwen/Qwen3-30B-A3B-Instruct-2507` at `0d7cf23` |
+| streamed goldens | the 30B's, per layer | every GGUF and quantized HF golden and floor (a dense checkpoint with `golden --stream`) runs one decoder layer at a time (`golden._streamed`): the model's own forward once per prompt with stand-in layers that keep each layer's inputs (masks, position embeddings), then each layer is loaded, `prepare`d (a floor's emulation), applied to every prompt and freed. Bit-equal to transformers' whole model (the dense and MoE GGUF goldens, a dense checkpoint streamed: judge tests). A 30B fp32 golden holds one layer (≈ 2.4 GB of experts) at a time; its bf16 floors run on one A5000 (no `device_map` over cards). `gguf.hf_model` is gone |
+| HF-quant map | the judge's own | `hf_quant.state`: the judge's name/dtype map, `reference.py`, and transformers' fusion of per-expert tensors (pinned bit for bit by the streamed-golden test); a multimodal checkpoint's `model.language_model.` read as `model.` |
+| gates | per tensor vs the bf16 original | `python -m holon_judge gate`. HF files: what the engine's weight source yields (its dialects) through `reference.py`, so a dialect's misreading shows (M5); a linear reading an RMSNorm's output (q/k/v; gate/up, experts', the router) compared as W · diag(γ), each side with its own norm, and the norm not alone: RedHatAI's file is SmoothQuant-ed (strength 0.8 into q/k/v and gate/up), so per tensor its norms and those linears failed (NMSE up to 354) though the model is the original's. Dense tensors of a quantized file: 1e-2 (unspecified in rev 3). GGUF: streamed per layer against `hf_quant.state` of the original instead of `from_pretrained` (61 GB for the 30B), routers exact |
+| floors | the mode emulated on every quantized linear and stack | `holon_judge/modes.py`, `golden --q8-1 PATH --act q8_1\|fp4\|fp4-static`: each quantized linear's and expert stack's rows quantized in the mode (W4A8 `q8_1.quantize` per path; W4A4-dynamic `w4a4.values`; W4A4-static `w4a4.static_nvfp4` over the checkpoint's `input_scale`, dense linears only: the 8B report), then the f32 product with the dequantized weight (bf16-cast, as the GGUF floors). Meta: `act`, `hf_reference` (reference.py's hash), `w4a4` (w4a4.py's). MoE floors of quantized files leave the experts' input unrounded, as the GGUF floors |
+| floors recorded | W4A8, W4A4 (report) | also an A16 floor for every target and fixture (Tier A's budgets and plant multiples); W4A8 mmq for Yi30 (the a4 rule) |
+| mode check | per-instance counters | `score()` records `calls` per `path/mode` from every quantized kernel, dense (`_q._kernel`) and expert (`_kernel`), replacing `expert_calls`; every floor with a path (dense ones too, unchecked before) needs all calls on its `path/mode`, checked before the budgets (N7: `mmq/fp4` calls against the W4A8 floor fail on the mode alone) |
+| Tier A | 1e-4 sanity ceiling | `l2 --ceiling 1e-4` beside the A16 floor's budgets. The reference kernels dequantize expert stacks on every call (a 30B's in f32, ≈ 122 GB, no longer cached), so a 30B Tier A fits 64 GB |
+| owners (D10) | every target tensor | the five FP4 files in A3's record (with the repack), amd-quark's `Pack_fp4` in A2's; A4 ran the two FP8 files |
+
+**A4 results** (A5000 host; records `evidence/*_m06-lowp_*_2026-10-14.json`, `evidence/owners_m06-hf-files_cpu_2026-10-14.json`).
+
+- **Owners per real file** (D10, 0 modules over bound): nvidia 8B / 30B NVFP4 — ModelOpt `NVFP4QTensor` (≤ 1 ulp) and
+  gguf-py on llama.cpp's repack (exact); RedHatAI 8B NVFP4 — compressed-tensors (≤ 2 ulp), gguf-py; Yi30 8B MXFP4 —
+  compressed-tensors (exact), gguf-py; amd-quark 30B MXFP4 — `quark.Pack_fp4` (A2, its own venv), gguf-py; Qwen 8B /
+  30B FP8 — transformers' `Fp8Dequantize` (exact; 252 / 18624 modules).
+- **Gates** (predicted FP8 ≈ 1e-3, NVFP4 ≈ 1e-2, MXFP4 ≈ 2e-2): worst tensor FP8 7.1e-4 (8B and 30B), NVFP4 9.1e-3
+  (nvidia 8B; 1.1e-2 30B), RedHatAI 1.2e-2 (norms folded), MXFP4 1.6e-2 (Yi30), 2.0e-2 (amd-quark), the GGUF's MXFP4 experts 1.8e-2 and its
+  Q8_0 tensors ≤ 5.3e-5, routers exact; every dense tensor exact. None over its gate. Plants: M5 (scale − 1 in the
+  dialect, Yi30) 0.26 on every MXFP4 tensor (sim 0.271), M3 (Quark scales read as e4m3) 1.6e9: both fail.
+- **Goldens** (fp32, CPU, 32 threads, `judge/goldens/<file>/v1-fp32.safetensors`): `qwen3-8b-nvfp4`,
+  `qwen3-8b-nvfp4-redhatai`, `qwen3-8b-mxfp4-yi30`, `qwen3-8b-fp8` (≈ 4.5 min each), `qwen3-30b-a3b-nvfp4`,
+  `qwen3-30b-a3b-mxfp4-amd-quark`, `qwen3-30b-a3b-fp8` (≈ 6 min), `qwen3-30b-a3b-instruct-2507-mxfp4_moe` (15 min,
+  gguf-py's MXFP4 dequantization), and the GGUF's original `qwen3-30b-a3b-instruct-2507` (streamed); the existing bf16
+  goldens of Qwen3-8B and Qwen3-30B-A3B are reused for the quantization error. HF goldens at `reference.py` b9705bf4.
+- **Floors** (bf16, one A5000; KL p99 vs the file's golden; top-1):
+
+  | file | A16 | W4A8 mmq | W4A8 mmvq | W4A4-dynamic (mmq) | W4A4-static |
+  |---|---|---|---|---|---|
+  | nvidia 8B NVFP4 | 6.10e-3 / 98.96% | 1.24e-2 / 98.69% | 1.42e-2 / 98.78% | 0.526 / 94.07% | 0.626 / 93.31% |
+  | Yi30 8B MXFP4 | 5.89e-3 / 98.97% | 1.29e-2 / 98.79% | — | 1.87 / 88.75% | — |
+  | RedHatAI 8B NVFP4 | 5.96e-3 / 98.93% | — | — | — | — |
+  | Qwen 8B FP8 | 5.60e-3 / 98.96% | — (W8A8: Gate B) | — | — | — |
+  | nvidia 30B NVFP4 | 3.98e-2 / 98.45% | 4.92e-2 / 98.36% | 5.23e-2 / 98.31% | — | — |
+  | amd-quark 30B MXFP4 | 3.13e-2 / 98.58% | 3.61e-2 / 98.51% | 3.61e-2 / 98.50% | — | — |
+  | GGUF MXFP4_MOE | 2.34e-2 / 98.40% | 2.81e-2 / 98.47% | 2.80e-2 / 98.44% | — | — |
+  | Qwen 30B FP8 | 3.16e-2 / 98.54% | — | — | — | — |
+
+  The predicted order A16 < W4A8 < W4A4 holds on every file (sim: A16 ≈ 8e-3, W4A8 ≈ 2e-2, W4A4 0.9 / 3.4 on
+  Qwen3-1.7B). The pre-registered a4 rule (acceptance 7) is not met, as predicted: W4A4-dynamic's KL p99 is 42× the
+  W4A8 floor's on the 8B NVFP4 (predicted ≈ 45×) and 145× on the 8B MXFP4, top-1 4.6 and 10.0 points lower.
+  W4A4-static is looser than dynamic (0.626 vs 0.526), as simulated.
+- **Tier A** (CPU fp32, the production source and dialects on the reference kernels, vs the file's golden; ceiling
+  KL p99 ≤ 1e-4): all eight pass, top-1 ≥ 99.99%.
+
+  | file | KL p99 | A16 floor's | wall |
+  |---|---|---|---|
+  | nvidia / RedHatAI 8B NVFP4 | 6.2e-7 / 6.1e-7 | 6.10e-3 / 5.96e-3 | 8 min each |
+  | Yi30 8B MXFP4, Qwen 8B FP8 | 6.3e-7 / 6.0e-7 | 5.89e-3 / 5.60e-3 | 8 min each |
+  | nvidia 30B NVFP4, amd-quark 30B MXFP4 | 1.1e-6 / 8.3e-7 | 3.98e-2 / 3.13e-2 | 62 / 54 min |
+  | Qwen 30B FP8 | 6.5e-6 | 3.16e-2 | 49 min |
+  | GGUF MXFP4_MOE | 6.1e-6 | 2.34e-2 | 4 h 52 min (gguf-py's one-core MXFP4 decode on every call; vectorized after, b851135) |
+
+  The 30B runs' few flipped positions are routing near-ties (KL max 4e-3 – 0.25 at one or two positions).
+- **Plants** (multiples of the A16 floor's KL p99): Tier A N1 (RedHatAI, compressed-tensors' global not inverted)
+  1.19e1, ≈ 2000× (predicted gross); T1 (nvidia 8B, k's scale on v, layer 18) 0.114, 18.6× (predicted ≥ 3×); P5
+  (Qwen 8B FP8, gate's scale rows for up) 3.36, 600× (predicted > 10×): all fail. Gate M5, M3 fail (above).
+  Structural P6 (30B FP8 scale stack off by one, layer 18) and M2 (amd-quark expert index off by one, layer 24): 384
+  mismatched slices each (every expert's three), fail. N7: the mode check's unit test (judge/tests/test_compare.py);
+  N2–N6, N8, N8b, M1, M4 are A3's L0 and A5's Tier B.
+- **Structural test on the real files** (reference kernels, CPU): 0 mismatched slices in `Qwen/Qwen3-30B-A3B-FP8` (the 30B FP8 structural test) and `amd-quark/Qwen3-30B-A3B-MXFP4`, routers bit-equal.
+- **Quantization error** (file golden vs the bf16 checkpoint's fp32 golden; top-1, KL p50, ΔPPL):
+  8B NVFP4 nvidia 93.2%, 3.9e-3, +3.9%; RedHatAI 94.2%, 2.6e-3, +3.7%; Yi30 MXFP4 90.9%, 7.3e-3, +7.5%; FP8 98.0%,
+  2.3e-4, +0.3%. 30B NVFP4 94.2%, 2.0e-3, +1.3%; amd-quark MXFP4 95.4%, 1.3e-3, +0.8%; FP8 97.9%, 2.5e-4, +0.04%;
+  the GGUF MXFP4_MOE vs Qwen3-30B-A3B-Instruct-2507 94.4%, 3.0e-3, −0.1%. Per file in
+  `judge/goldens/<file>/v1-quantization-error.json`.
+- **For A5:** Tier B's decode step for an HF FP4 file needs `mmvq_step` from its HF layouts (it reads GGUF types
+  today); the floors here serve Tier B on every class (A5000, 5080, 4090, PRO 6000) and the W4A4 report (5080).
+
 **Decisions during Gate A (2026-10-13).**
 - **Locks are approved once, at Gate A's close.** A0 + A1 were propagated on every development class (rebased on
   `main` at the M0.4 Gate A merge) without `--approve`: all seven snapshot traces byte-identical, L2 at the M0.4
