@@ -172,11 +172,14 @@ def regions(events: list[dict], steps: int, classify: Classifier) -> dict:
 
 
 class GemmCounter:
-    """Counts the ggml qlinear calls (type, in, out, mode, rows) and the weight bytes they read, while active."""
+    """Counts the ggml qlinear calls (type, in, out, mode, rows), the weight bytes they read and, on decode and verify
+    steps, the distinct inputs they quantize (the same tensor, unchanged, quantized by several calls: D6's shared
+    quantization; the inputs are held for the step so no address is reused), while active."""
 
     def __init__(self) -> None:
         self.calls: collections.Counter = collections.Counter()
         self.bytes = 0
+        self.inputs: dict[tuple, torch.Tensor] = {}
         self.active = False
         original = ggml.QLinear.__call__
 
@@ -184,19 +187,23 @@ class GemmCounter:
             if self.active:
                 self.calls[(kernel.name, kernel.k, kernel.out, kernel.act["mmq"], len(x))] += 1
                 self.bytes += parts["blocks"].numel() * parts["blocks"].element_size()
+                if len(x) <= 64:
+                    self.inputs[(id(x), x._version)] = x
             return original(kernel, x, parts)
 
         ggml.QLinear.__call__ = counted
 
     def __call__(self, fn) -> dict:
         self.calls.clear()
+        self.inputs.clear()
         self.bytes, self.active = 0, True
         try:
             fn()
             torch.cuda.synchronize()
         finally:
             self.active = False
-        return {"weight_bytes": self.bytes,
+        inputs, self.inputs = len(self.inputs), {}
+        return {"weight_bytes": self.bytes, "inputs": inputs or None,
                 "calls": [{"type": t, "in": k, "out": n, "mode": m, "rows": r, "count": c}
                           for (t, k, n, m, r), c in sorted(self.calls.items())]}
 
