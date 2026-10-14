@@ -60,6 +60,9 @@ def main() -> None:
     ap.add_argument("--max-step-tokens", type=int, required=True)
     ap.add_argument("--blocking-sync", action="store_true")
     ap.add_argument("--corpus", help="a JSONL prompt set: natural-text prompts (workloads.corpus)")
+    ap.add_argument("--temperature", type=float, help="sample at this temperature (default: greedy)")
+    ap.add_argument("--kv-tokens", type=int, help="a baseline's KV cache size (Holon's measured KV tokens)")
+    ap.add_argument("--kv-format", help="a baseline's KV format, as Holon's kv.format (default: the model dtype)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     if args.blocking_sync:
@@ -70,7 +73,9 @@ def main() -> None:
     longest = max(workloads.context_len(s) for sessions in traces.values() for s in sessions)
     mod = importlib.import_module(f"backends.{args.backend}")
     t = time.perf_counter()
-    backend = mod.Backend(args.model, args.max_batch, -(-(longest + 1) // 256) * 256, args.max_step_tokens)
+    # Only the options given reach the backend: one that cannot honour an option refuses it (TypeError).
+    opts = {k: v for k in ("temperature", "kv_tokens", "kv_format") if (v := getattr(args, k)) is not None}
+    backend = mod.Backend(args.model, args.max_batch, -(-(longest + 1) // 256) * 256, args.max_step_tokens, **opts)
     load_s = time.perf_counter() - t
 
     cases = []

@@ -4,6 +4,10 @@ Interleaved ABAB: every round runs each backend once, in order, each in a fresh 
 (`worker.py`), so slow drift of the machine (clocks, temperature, neighbours) hits every backend alike. Each
 process loads the model once and replays every trace after a warmup (`driver.warmup_sessions`).
 
+With `--lock`, Holon runs the lock's engine settings and the baselines are matched to it (release design §5.2): the
+lock's `max_seqs` and step budget for every backend, its KV format for the baselines, and Holon's measured KV tokens
+(the first in-process `holon` run's, or `--kv-tokens`) as the baselines' KV cache size.
+
 Usage (from the repository root, inside Holon's .venv):
   python bench/run.py --name decode --gpu 5 --model <checkpoint dir> --backends holon minisgl \\
       --traces bench/traces/decode_b1.jsonl bench/traces/decode_b8.jsonl bench/traces/decode_b64.jsonl
@@ -25,6 +29,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 BENCH = ROOT / "bench"
 ENVS = BENCH / ".envs"                                   # baseline venvs and sources (setup_baselines.sh)
 SOURCES = {"minisgl": "mini-sglang", "nanovllm": "nano-vllm"}
+SERVERS = ("llamaserver", "freetoken_http", "sglang_http")   # a server binary or venv of its own, and our client
+SET_BY_WORKER = ("max_seqs", "max_step_tokens", "max_model_len")   # from --max-batch, --max-step-tokens, the traces
 METHOD = (
     "In-process engines driven by bench/driver.py, one scheduling step per call; client-side timestamps taken when "
     "a step returns a token. TTFT = first token - release (arrival, or previous turn's last token + gap); TPOT = "
@@ -67,6 +73,32 @@ def public(arg: str, model: str) -> str:
     if not path.is_absolute():
         return arg
     return str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else path.name
+
+
+def lock_flags(engine: dict, skip: tuple[str, ...] = ()) -> list[str]:
+    """`holon serve` flags that rebuild a lock's [engine] table (kernel pins are not flags: the default selection
+    runs; release design D2 makes them soft preferences)."""
+    flags = []
+    for key, value in sorted(engine.items()):
+        if key in skip:
+            continue
+        flag = "--" + key.replace("_", "-")
+        if isinstance(value, bool):
+            flags.append(flag if value else "--no-" + flag[2:])
+        elif isinstance(value, dict):
+            flags += [flag, *(f"{k}={v}" for k, v in value.items())] if value else []
+        else:
+            flags += [flag, str(value)]
+    return flags
+
+
+def read_lock(path: str) -> dict:
+    """What a record says about the lock a run matched: where it is, its plan and class, and its [engine]."""
+    from holon.core import plans
+
+    plan = plans.read(path).plan
+    return {"path": public(path, ""), "plan_id": plan.plan_id, "fingerprint_class": plan.fingerprint_class,
+            "engine": plan.engine}
 
 
 def pct(xs: list[float], q: float) -> float | None:
@@ -114,24 +146,31 @@ def summarize(cases: list[dict], columns: list[str], cpu_time: bool) -> dict:
                       for k in sorted({k for c in cases for k in c.get("stats", {})})}}
 
 
-def run_worker(backend: str, args: argparse.Namespace, out: pathlib.Path) -> tuple[dict | None, str]:
+def run_worker(backend: str, args: argparse.Namespace, out: pathlib.Path,
+               kv_tokens: int | None = None) -> tuple[dict | None, str]:
     # PCI order: --gpu is the nvidia-smi index, which also names the GPU class in the evidence.
     env = dict(os.environ, CUDA_DEVICE_ORDER="PCI_BUS_ID", CUDA_VISIBLE_DEVICES=str(args.gpu), HF_HUB_OFFLINE="1")
+    match: list[str] = []
     if backend.startswith("holon"):                  # this checkout, whatever copy the venv installed
         env["PYTHONPATH"] = os.pathsep.join(str(ROOT / d) for d in ("core", "std", "plugins"))
         python = sys.executable
-    elif backend in ("llamaserver", "freetoken_http"):   # a server (its own binary or environment) and our client
+        if args.lock:                                # the lock's settings first: flags given by hand override them
+            for var in ("HOLON_ENGINE_ARGS", "HOLON_SERVE_ARGS"):
+                env[var] = shlex.join(lock_flags(args.lock["engine"], SET_BY_WORKER)) + " " + env.get(var, "")
+    else:                                            # a server's client runs here; in-process baselines in their venv
         env.pop("PYTHONPATH", None)
-        python = sys.executable
-    else:
-        env.pop("PYTHONPATH", None)
-        python = str(ENVS / backend / "bin" / "python")
+        python = sys.executable if backend in SERVERS else str(ENVS / backend / "bin" / "python")
+        match = [*(["--kv-tokens", str(kv_tokens)] if kv_tokens else []),
+                 *(["--kv-format", args.kv_format] if args.kv_format else [])]
     cmd = [python, str(BENCH / "worker.py"), "--backend", backend, "--model", args.model, "--traces", *args.traces,
            "--max-batch", str(args.max_batch), "--max-step-tokens", str(args.max_step_tokens), "--out", str(out)]
     if args.blocking_sync:
         cmd.append("--blocking-sync")
     if args.corpus:
         cmd += ["--corpus", args.corpus]
+    if args.temperature:
+        cmd += ["--temperature", str(args.temperature)]
+    cmd += match
     log = out.with_suffix(".log")
     with log.open("w") as f:
         rc = subprocess.run(cmd, env=env, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT).returncode
@@ -169,28 +208,42 @@ def main() -> None:
     ap.add_argument("--traces", nargs="+", required=True, help="JSONL specs from workloads.py")
     ap.add_argument("--backends", nargs="+", default=["holon", "minisgl"],
                     choices=["holon", "holon_http", "holon_http_text", "holon_http_chat", "llamaserver",
-                             "freetoken_http", "minisgl", "nanovllm"])
+                             "freetoken_http", "sglang_http", "minisgl", "nanovllm"])
     ap.add_argument("--rounds", type=int, default=2)
-    ap.add_argument("--max-batch", type=int, default=64, help="max running sequences (same for every backend)")
-    ap.add_argument("--max-step-tokens", type=int, default=8192, help="max tokens per prefill step")
+    ap.add_argument("--lock", help="a lock file: Holon runs its engine settings, the baselines are matched to it")
+    ap.add_argument("--max-batch", type=int, help="max running sequences, every backend (default: the lock's, or 64)")
+    ap.add_argument("--max-step-tokens", type=int, help="max tokens per prefill step (default: the lock's, or 8192)")
+    ap.add_argument("--kv-tokens", type=int, help="the baselines' KV cache size (default: Holon's measured)")
+    ap.add_argument("--kv-format", help="the baselines' KV format as Holon's kv.format (default: the lock's)")
+    ap.add_argument("--temperature", type=float, default=0.0, help="sample at this temperature (default: greedy)")
     ap.add_argument("--blocking-sync", action="store_true", help="CUDA waits sleep (for CPU time per step)")
     ap.add_argument("--corpus", help="JSONL prompt set whose token ids prompts are cut from (default: uniform ids)")
     ap.add_argument("--evidence-dir", default=str(ROOT / "evidence"))
     args = ap.parse_args()
+    if args.lock:
+        args.lock = read_lock(args.lock)
+        engine = args.lock["engine"]
+        args.max_batch = args.max_batch or engine["max_seqs"]
+        args.max_step_tokens = args.max_step_tokens or engine["max_step_tokens"]
+        args.kv_format = args.kv_format or engine["plugin_options"].get("kv.format")
+    args.max_batch, args.max_step_tokens = args.max_batch or 64, args.max_step_tokens or 8192
 
     date = datetime.date.today().isoformat()
     gpu = gpu_class(args.gpu)
     raw = BENCH / ".out" / f"{args.name}_{datetime.datetime.now():%Y%m%d-%H%M%S}"
     raw.mkdir(parents=True)
     runs, infos = [], {}
+    kv_tokens = args.kv_tokens
     for r in range(args.rounds):
         for b in args.backends:
             print(f"round {r} {b} ...", flush=True)
-            res, err = run_worker(b, args, raw / f"r{r}-{b}.json")
+            res, err = run_worker(b, args, raw / f"r{r}-{b}.json", kv_tokens)
             if res is None:
                 print(f"  failed:\n{err}", flush=True)
                 runs.append({"round": r, "backend": b, "error": err})
                 continue
+            if args.lock and not kv_tokens:                 # Holon's, for the baselines after it
+                kv_tokens = res["info"].get("kv_tokens")
             if b not in infos:
                 info = res["info"]
                 if "flags" in info.get("config", {}):        # server flags name local files (drafts, …)
@@ -220,6 +273,9 @@ def main() -> None:
               "commit": commit, **({"dirty": dirty} if dirty else {}), "gpu_class": gpu,
               "model": model_id(args.model), "rounds": args.rounds,
               "order": args.backends, "method": METHOD, "traces_sha256": traces,
+              "matched": {"lock": args.lock and {k: v for k, v in args.lock.items() if k != "engine"},
+                          "max_seqs": args.max_batch, "max_step_tokens": args.max_step_tokens,
+                          "kv_tokens": kv_tokens, "kv_format": args.kv_format, "temperature": args.temperature},
               **({"corpus": {pathlib.Path(args.corpus).name: hashlib.sha256(pathlib.Path(args.corpus).read_bytes())
                              .hexdigest()[:16]}} if args.corpus else {}), "backends": infos,
               "summary": summary, "runs": runs}

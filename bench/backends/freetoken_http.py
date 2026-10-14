@@ -1,4 +1,5 @@
-"""FreeToken behind its OpenAI server (`ft serve`, in its own environment: `FREETOKEN_PYTHON`), text prompts
+"""FreeToken behind its OpenAI server (`ft serve`, in its venv from `setup_baselines.sh`; `FREETOKEN_PYTHON` names
+another), text prompts
 (`backends.text`: it takes no token ids); `--max-running-requests` = the max batch, `--max-prefill-length` = the step
 budget, `--memory-ratio` 0.9 (Holon's fraction); `FREETOKEN_ARGS` adds flags. Its distributed rendezvous binds a fixed
 port, so one FreeToken server at a time on a host."""
@@ -7,29 +8,37 @@ from __future__ import annotations
 import http.client as client
 import json
 import os
+import pathlib
 import shlex
+import subprocess
 import time
 
 from backends import http, text
 
 PACKAGES = ()
+PYTHON = pathlib.Path(__file__).resolve().parents[1] / ".envs" / "freetoken" / "bin" / "python"
 
 
 class Backend(http.Backend):
-    def __init__(self, model: str, max_batch: int, max_model_len: int, max_step_tokens: int) -> None:
+    def __init__(self, model: str, max_batch: int, max_model_len: int, max_step_tokens: int, *,
+                 temperature: float = 0.0) -> None:
         port = http.free_port()
         self.flags = ["--max-running-requests", str(max_batch), "--max-prefill-length", str(max_step_tokens),
                       "--max-seq-len-override", str(text.headroom(max_model_len)),
                       "--memory-ratio", "0.9", "--served-model-name", "m",
                       *shlex.split(os.environ.get("FREETOKEN_ARGS", ""))]
-        server = http.Server([os.environ["FREETOKEN_PYTHON"], "-m", "freetoken", "--model-path", model,
+        server = http.Server([os.environ.get("FREETOKEN_PYTHON", str(PYTHON)), "-m", "freetoken", "--model-path", model,
                               "--host", "127.0.0.1", "--port", str(port), *self.flags], port)
         _wait_ok(port)                               # its /health answers 200 while still loading
-        prompts = text.Prompts(model)
+        prompts = text.Prompts(model, temperature)
         super().__init__(server, "/v1/completions", prompts.body, prompts.parse)
+        package = subprocess.run([server.cmd[0], "-c", "import freetoken; print(freetoken.__file__)"],
+                                 capture_output=True, text=True).stdout.strip()
+        self.commit = subprocess.run(["git", "-C", os.path.dirname(package), "rev-parse", "HEAD"],
+                                     capture_output=True, text=True).stdout.strip()
 
     def info(self) -> dict:
-        return {"config": {"flags": " ".join(self.flags)}}
+        return {"config": {"flags": " ".join(self.flags)}, "commit": self.commit}
 
 
 def _wait_ok(port: int, timeout_s: float = 900) -> None:

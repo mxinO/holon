@@ -17,16 +17,18 @@ PACKAGES = ("torch", "triton", "flashinfer-python")
 
 
 class Backend:
-    def __init__(self, model: str, max_batch: int, max_model_len: int, max_step_tokens: int) -> None:
+    def __init__(self, model: str, max_batch: int, max_model_len: int, max_step_tokens: int, *,
+                 temperature: float = 0.0) -> None:
         flags = argparse.ArgumentParser()
         engine_flags(flags)
         cfg = engine_config(model, flags.parse_args(shlex.split(os.environ.get("HOLON_ENGINE_ARGS", ""))))
         self.engine = Engine(dataclasses.replace(cfg, max_seqs=max_batch, max_model_len=max_model_len,
                                                  max_step_tokens=max_step_tokens))
         self._rids: dict[str, int] = {}
+        self.temperature = temperature
 
     def add(self, rid: int, prompt: list[int], max_tokens: int) -> None:
-        params = SamplingParams(temperature=0.0, max_tokens=max_tokens, ignore_eos=True)
+        params = SamplingParams(temperature=self.temperature, max_tokens=max_tokens, ignore_eos=True)
         self._rids[self.engine.add(prompt, params)] = rid
 
     def step(self) -> list[Delta]:

@@ -34,9 +34,11 @@ venv() {  # name requirements...
 
 llamacpp() {  # name commit: llama-bench and llama-server in .envs/llama.cpp-<name>/bin
   checkout "llama.cpp-$1" https://github.com/ggml-org/llama.cpp.git "$2"
-  cmake -S ".envs/src/llama.cpp-$1" -B ".envs/llama.cpp-$1" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=ON \
+  local envs; envs=$(realpath .envs)   # the server's UI step resolves relative paths: none through a symlinked .envs
+  cmake -S "$envs/src/llama.cpp-$1" -B "$envs/llama.cpp-$1" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=ON \
     -DCMAKE_CUDA_ARCHITECTURES="$LLAMA_ARCHS" -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF > /dev/null
-  cmake --build ".envs/llama.cpp-$1" -j "${JOBS:-16}" --target llama-bench llama-server > /dev/null
+  cmake --build "$envs/llama.cpp-$1" -j "${JOBS:-16}" --target llama-bench llama-server > "$envs/llama.cpp-$1.log" 2>&1 ||
+    { grep -A20 FAILED "$envs/llama.cpp-$1.log" >&2; exit 1; }
   echo "llama.cpp-$1: $(".envs/llama.cpp-$1/bin/llama-server" --version 2>&1 | grep version)"
 }
 
@@ -54,8 +56,8 @@ for b in "${targets[@]}"; do
       llamacpp gate "$LLAMA_GATE"
       llamacpp upstream "$LLAMA_UPSTREAM"
       continue ;;
-    sglang)    # HF checkpoints only (release design §5.1); token ids in, so no tokenizer process is needed
-      EXCLUDE_NEWER=$RELEASE_RESOLVED_BEFORE venv sglang "sglang==$SGLANG_VERSION" ;;
+    sglang)    # HF checkpoints only (release design §5.1); it pins release-candidate kernels (cuda-tile, flash-attn-4)
+      EXCLUDE_NEWER=$RELEASE_RESOLVED_BEFORE venv sglang --prerelease=allow "sglang==$SGLANG_VERSION" ;;
     freetoken)  # its C++ extension builds against the torch in its venv: torch first, then no build isolation
       checkout FreeToken https://github.com/FlashML-org/FreeToken.git "$FREETOKEN_COMMIT"
       EXCLUDE_NEWER=$RELEASE_RESOLVED_BEFORE venv freetoken torch==2.14.1 setuptools wheel

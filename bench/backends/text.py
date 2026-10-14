@@ -16,14 +16,16 @@ def headroom(max_model_len: int) -> int:
 
 
 class Prompts:
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str, temperature: float = 0.0) -> None:
         path = pathlib.Path(model)
+        self.temperature = temperature
         self.tok = Tokenizer.from_file(str((path if path.is_dir() else path.parent) / "tokenizer.json"))
         self.stand_in = self.tok.encode(" a", add_special_tokens=False).ids[-1]
 
     def body(self, prompt: list[int], max_tokens: int) -> dict:
-        return {"model": "m", "prompt": self.tok.decode(prompt), "max_tokens": max_tokens, "temperature": 0.0,
-                "ignore_eos": True, "stream": True, "stream_options": {"include_usage": True}}
+        return {"model": "m", "prompt": self.tok.decode(prompt), "max_tokens": max_tokens,
+                "temperature": self.temperature, "ignore_eos": True, "stream": True,
+                "stream_options": {"include_usage": True}}
 
     def parse(self, event: dict, state: dict) -> tuple[list[int], bool]:
         choices, usage, n = event.get("choices") or [], event.get("usage"), 0

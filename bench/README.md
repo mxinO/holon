@@ -9,11 +9,13 @@ Same GPU, same model, same requests; every engine in its own environment; client
 | `workloads.py` | deterministic workload specs → `traces/*.jsonl` (lengths and turns only; token ids are drawn from a seeded stream at replay time) |
 | `driver.py` | the `Backend` protocol and the trace replayer (arrivals, multi-turn dependencies, per-token client timestamps, per-step wall/CPU time) |
 | `backends/{holon,minisgl,nanovllm}.py` | one adapter per engine: `add`, `step`, `has_work`, `info` |
-| `backends/http.py`, `llamaserver.py`, `holon_http.py` | engines behind a server (llama.cpp's `llama-server`; Holon over its OpenAI frontend), streamed; their "steps" are client polls, so only request timings compare |
+| `backends/http.py`, `llamaserver.py`, `holon_http.py`, `sglang_http.py`, `freetoken_http.py` | engines behind a server (llama.cpp's `llama-server`; Holon over its OpenAI frontend; SGLang's `/generate`; FreeToken), streamed; their "steps" are client polls, so only request timings compare |
 | `llama_bench.py` | Holon's in-process llama-bench (pp512, tg128 at depths), batch 1 |
+| `bars.py` | the release gate's bars: `llama_bench.py` against `llama-bench` at the gate pin and upstream, ABAB rounds, at a lock's settings |
+| `report.py` | Markdown tables (README, release record) rendered from `bars.py` and `run.py` records |
 | `worker.py` | runs one backend over a list of traces inside that backend's venv; writes raw JSON |
 | `run.py` | orchestrator: ABAB rounds of fresh worker processes, summaries, evidence record |
-| `setup_baselines.sh` | pinned baseline checkouts and venvs under `bench/.envs/` (gitignored) |
+| `setup_baselines.sh` | pinned baseline checkouts, builds and venvs under `bench/.envs/` (gitignored) |
 | `decode_kernels.py` | E2's per-kernel decode step micro-benchmark (separate from the harness) |
 
 `workloads.py`, `driver.py` and `worker.py` are stdlib-only so they run unchanged in every engine's environment. The
@@ -25,6 +27,10 @@ HTTP backends fit the same protocol: `add` posts a streaming request, `step` ret
 |---|---|---|
 | [mini-sglang](https://github.com/sgl-project/mini-sglang) | `9a91cfafe754` (2026-05-17) | own venv: torch 2.9.1+cu128 (it pins torch < 2.10, so the shared 2.11 stack cannot be reused), flashinfer 0.7.0.post1, sgl-kernel 0.3.21; attention auto-selects FlashInfer on sm_86 |
 | [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) | `bb823b3e0698` (2026-04-26) | own venv: torch 2.9.1+cu128, flash-attn 2.8.3 (prebuilt cu12/torch2.9 wheel) |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp), gate | `cbe28bb3cb07` | `llama-bench` and `llama-server` built for sm_86 / 89 / 120a with the CUDA 13 toolkit; the commit `kernels.ggml_cuda` vendors once M0.6 Gate A merges (release design D5) |
+| llama.cpp, upstream | `df18bee11e96` (2026-10-14) | the same build; the newest upstream, an ungated second column (re-pinned when the suite runs) |
+| [SGLang](https://github.com/sgl-project/sglang) | release 0.5.21 (2026-10-01) | own venv: torch 2.13.0+cu130 and its pinned kernels; HF checkpoints only |
+| [FreeToken](https://github.com/FlashML-org/FreeToken) | `74a387777708` (2026-10-10) | own venv: torch 2.14.1+cu130, `[accel]` (FlashInfer, sglang-kernel); its extension built against that torch |
 
 Both use their defaults otherwise (mini-sglang: overlap scheduling, CUDA graphs, radix cache; nano-vllm: CUDA
 graphs, prefix cache, 256-token KV blocks). Every backend gets the same `--max-batch` (max running sequences) and
@@ -71,6 +77,25 @@ python bench/llama_bench.py --model <file.gguf> -r 5 --blocking-sync --engine-ar
 LLAMA_SERVER=<llama-server> LLAMA_SERVER_CTX=65536 HOLON_SERVE_ARGS="--memory-fraction 0.98" \
 python bench/run.py --name serve --gpu 0 --model <file.gguf> --backends holon_http llamaserver \
     --max-batch 48 --max-step-tokens 2048 --traces bench/traces/decode_b1.jsonl bench/traces/agent.jsonl
+```
+
+## Release benchmarks (release design §5)
+
+Every comparison is matched to a Holon lock (`--lock`): Holon runs the lock's engine settings, every backend the lock's
+`max_seqs` and step budget, the baselines its KV format and Holon's measured KV tokens (from the first in-process
+`holon` run, so list it first). Flags per baseline: `llama-server -ngl 99 -fa on -kvu -np <max_seqs> -c <KV tokens> -b
+<step budget> -ub 512 -ctk/-ctv <format>`; SGLang `--max-running-requests`, `--chunked-prefill-size`,
+`--max-total-tokens`, `--kv-cache-dtype`, `--mem-fraction-static 0.9`; FreeToken as in `freetoken_http.py`. A baseline
+without the lock's KV format (llama.cpp has no FP8 KV, SGLang no q8_0) refuses to run. `--temperature` samples instead
+of greedy decoding (D3's Claude-Code-shaped trace).
+
+```bash
+bash bench/setup_baselines.sh llamacpp sglang freetoken      # once, where nvcc (CUDA 13) is on PATH
+L=plans/<model id>/<class>/cu130-torch2.11/<n>.lock
+python bench/bars.py --name qwen3-8b-q4_k_m --gpu 0 --model <file.gguf> --lock $L --rounds 3
+python bench/run.py --name release-qwen3-8b-q4_k_m --gpu 0 --model <file.gguf> --lock $L \
+    --backends holon llamaserver --corpus judge/prompts/v1.jsonl --traces bench/traces/decode_b1.jsonl
+python bench/report.py evidence/bars_release-*_rtx-5090_*.json      # Markdown tables linking their records
 ```
 
 ## Reproduce
