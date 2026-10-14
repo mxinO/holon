@@ -1,0 +1,19 @@
+[plugin]
+name = "kernels.triton_fp8"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+
+[resources]
+provides = ["kernel.qlinear@2"]
+requires = ["op.qlinear@2"]
+
+[properties]
+numerics = "bounded"
+
+[dependencies]
+python = ["triton"]
+
+[support]
+platforms = ["cuda"]

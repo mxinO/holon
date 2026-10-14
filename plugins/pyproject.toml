@@ -20,6 +20,7 @@ dependencies = [                  # std units are reached through Ref, never imp
 "kernels.flashinfer" = "holon_plugins.kernels.flashinfer"
 "kernels.triton_attn" = "holon_plugins.kernels.triton_attn"
 "kernels.triton_experts" = "holon_plugins.kernels.triton_experts"
+"kernels.triton_fp8" = "holon_plugins.kernels.triton_fp8"
 "kernels.ggml_cuda" = "holon_plugins.kernels.ggml_cuda"
 "kernels.fla" = "holon_plugins.kernels.fla"
 "kernels.gdn_triton" = "holon_plugins.kernels.gdn_triton"

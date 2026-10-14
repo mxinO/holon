@@ -6,6 +6,11 @@ e4m3 bits `[out, in]` uint8 and one f32 multiplier per 128 × 128 block, `scale 
   scaled by its block's multiplier. One program per (column block, K split) streams its weights once: one row as a
   vector product (products in f32, summed per K step), 2–16 rows as one 16-row `tl.dot` tile. With more than one split
   the f32 partials are summed by a second kernel in split order (deterministic, no atomics).
+- `act_quant` (W8A8's activations): per row and 128 columns, `a_s = max(amax, 1e-10) / 448` and `x / a_s` by IEEE
+  division, clamped to ±448, rounded to e4m3 (round to nearest even): bitwise torch's `float8_e4m3fn` of the same.
+- `prefill` (W8A8, M > 16; e4m3 `tl.dot`, so sm ≥ 89): the activations quantized by `act_quant`, then tiles of
+  `BM × BN` over K steps of 128, each step's f32 product scaled by `a_s` (per row) · the weight block's multiplier
+  (the DeepSeek-V3 recipe, as SGLang / vLLM's `_w8a8_triton_block_scaled_mm` implement it: studied, not copied).
 
 Configurations are pinned per GPU class and shape (no autotuning): the summation order is fixed for a shape, a class
 and a row kind (one row, or 2–16).
@@ -31,13 +36,48 @@ class Decode:
     num_stages: int = 4
 
 
-# Pinned per (GPU class, out, in, rows: 1 or 16) from `bench/fp8_decode_gate.py sweep` (the fastest at M = 1 and at
+@dataclasses.dataclass(frozen=True)
+class Prefill:
+    """A prefill launch: row and column tile, warps, pipeline stages, row-block groups (L2 reuse of a weight tile)."""
+    block_m: int = 64
+    block_n: int = 128
+    num_warps: int = 4
+    num_stages: int = 3
+    group_m: int = 8
+
+
+# Pinned per (GPU class, out, in, rows: 1 or 16) from `bench/fp8_kernels.py sweep` (the fastest at M = 1 and at
 # M = 16); other shapes and classes take `Decode()` with four splits where K has them.
-DECODE_CONFIGS: dict[tuple[str, int, int, int], Decode] = {}
+DECODE_CONFIGS: dict[tuple[str, int, int, int], Decode] = {
+    ("rtx-5080", 6144, 4096, 1): Decode(32, 2, 4, 2),
+    ("rtx-5080", 6144, 4096, 16): Decode(32, 2, 4, 2),
+    ("rtx-5080", 4096, 4096, 1): Decode(32, 4, 4, 2),
+    ("rtx-5080", 4096, 4096, 16): Decode(16, 4, 2, 3),
+    ("rtx-5080", 24576, 4096, 1): Decode(16, 1, 4, 3),
+    ("rtx-5080", 24576, 4096, 16): Decode(32, 1, 4, 3),
+    ("rtx-5080", 4096, 12288, 1): Decode(64, 8, 4, 2),
+    ("rtx-5080", 4096, 12288, 16): Decode(32, 16, 4, 3),
+    ("rtx-4090", 6144, 4096, 1): Decode(16, 1, 8, 3),
+    ("rtx-4090", 6144, 4096, 16): Decode(16, 1, 2, 3),
+    ("rtx-4090", 4096, 4096, 1): Decode(16, 1, 8, 3),
+    ("rtx-4090", 4096, 4096, 16): Decode(32, 1, 4, 4),
+    ("rtx-4090", 24576, 4096, 1): Decode(16, 8, 8, 3),
+    ("rtx-4090", 24576, 4096, 16): Decode(32, 1, 4, 4),
+    ("rtx-4090", 4096, 12288, 1): Decode(16, 1, 8, 3),
+    ("rtx-4090", 4096, 12288, 16): Decode(16, 16, 2, 3),
+}
 
 
 def decode_config(gpu: str, n: int, k: int, rows: int) -> Decode:
     return DECODE_CONFIGS.get((gpu, n, k, rows)) or Decode(splits=4 if k // BLOCK % 4 == 0 else 1)
+
+
+# Pinned per (GPU class, out, in) from `bench/fp8_kernels.py sweep` (M = 512); others take `Prefill()`.
+PREFILL_CONFIGS: dict[tuple[str, int, int], Prefill] = {}
+
+
+def prefill_config(gpu: str, n: int, k: int) -> Prefill:
+    return PREFILL_CONFIGS.get((gpu, n, k)) or Prefill()
 
 
 @triton.jit
@@ -104,4 +144,67 @@ def decode(x: torch.Tensor, weight: torch.Tensor, scale: torch.Tensor, out_dtype
                                             num_warps=cfg.num_warps)
     if cfg.splits > 1:
         _sum_splits[(triton.cdiv(m * n, 1024),)](partial, y, m * n, cfg.splits, 1024)
+    return y
+
+
+@triton.jit
+def _act_quant(x_ptr, q_ptr, s_ptr, k, stride_x, GROUP: tl.constexpr):
+    row, g = tl.program_id(0), tl.program_id(1)
+    cols = g * GROUP + tl.arange(0, GROUP)
+    x = tl.load(x_ptr + row.to(tl.int64) * stride_x + cols).to(tl.float32)
+    a_s = tl.maximum(tl.max(tl.abs(x)), 1e-10) / 448.0
+    q = tl.clamp(tl.math.div_rn(x, a_s), -448.0, 448.0)
+    tl.store(q_ptr + row.to(tl.int64) * k + cols, q.to(tl.float8e4nv))
+    tl.store(s_ptr + row * (k // GROUP) + g, a_s)
+
+
+def act_quant(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """`(e4m3 [R, in], a_s f32 [R, in / 128])` for `x [R, in]` (unit stride along `in`)."""
+    r, k = x.shape
+    q = torch.empty(r, k, dtype=torch.float8_e4m3fn, device=x.device)
+    s = torch.empty(r, k // BLOCK, dtype=torch.float32, device=x.device)
+    if r:
+        _act_quant[(r, k // BLOCK)](x, q, s, k, x.stride(0), BLOCK)
+    return q, s
+
+
+@triton.jit
+def _prefill(a_ptr, as_ptr, w_ptr, s_ptr, y_ptr, m, n, k, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+             K_STEP: tl.constexpr, GROUP_M: tl.constexpr, NUM_STAGES: tl.constexpr):
+    pid = tl.program_id(0)
+    blocks_m, blocks_n = tl.cdiv(m, BLOCK_M), n // BLOCK_N
+    group = GROUP_M * blocks_n                         # GROUP_M row blocks sweep the columns together
+    first_m = pid // group * GROUP_M
+    size_m = tl.minimum(blocks_m - first_m, GROUP_M)
+    pid_m, pid_n = first_m + pid % group % size_m, pid % group // size_m
+    rows = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    cols = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    ks = tl.arange(0, K_STEP)
+    row_ok = rows < m
+    kb_n = k // K_STEP
+    a_row = a_ptr + rows[:, None].to(tl.int64) * k
+    w_col = w_ptr + cols[None, :].to(tl.int64) * k
+    s_row = s_ptr + (cols // K_STEP) * kb_n
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+    for kb in tl.range(0, kb_n, num_stages=NUM_STAGES):
+        a = tl.load(a_row + (kb * K_STEP + ks)[None, :], mask=row_ok[:, None], other=0.0)
+        w = tl.load(w_col + (kb * K_STEP + ks)[:, None]).to(tl.float8e4nv, bitcast=True)
+        a_s = tl.load(as_ptr + rows * kb_n + kb, mask=row_ok, other=0.0)
+        acc += tl.dot(a, w) * a_s[:, None] * tl.load(s_row + kb)[None, :]
+    tl.store(y_ptr + rows[:, None].to(tl.int64) * n + cols[None, :], acc.to(y_ptr.dtype.element_ty),
+             mask=row_ok[:, None])
+
+
+def prefill(x: torch.Tensor, weight: torch.Tensor, scale: torch.Tensor, out_dtype: torch.dtype,
+            cfg: Prefill) -> torch.Tensor:
+    """`y [M, out]` of `out_dtype` for `x [M, in]` (unit stride along `in`), activations quantized by `act_quant`."""
+    m, k = x.shape
+    n = weight.shape[0]
+    y = torch.empty(m, n, dtype=out_dtype, device=x.device)
+    if m == 0:
+        return y
+    a, a_s = act_quant(x)
+    grid = (triton.cdiv(m, cfg.block_m) * (n // cfg.block_n),)
+    _prefill[grid](a, a_s, weight, scale, y, m, n, k, cfg.block_m, cfg.block_n, BLOCK, cfg.group_m, cfg.num_stages,
+                   num_warps=cfg.num_warps)
     return y

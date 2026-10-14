@@ -1,6 +1,6 @@
-"""M0.6 acceptance 11, the FP8 decode gate (docs/m06-lowp.md §1, B1): `kernels.triton_fp8`'s W8A16 split-K decode
-kernel timed per projection shape of a dense FP8 checkpoint (as the engine binds them: q/k/v and gate/up merged),
-M = 1 … 16, turned into an end-to-end tg prediction at batch 1:
+"""`kernels.triton_fp8`'s launch configurations and M0.6 acceptance 11, the FP8 decode gate (docs/m06-lowp.md §1,
+B1). `gate`: the W8A16 split-K decode kernel timed per projection shape of a dense FP8 checkpoint (as the engine
+binds them: q/k/v and gate/up merged), M = 1 … 16, turned into an end-to-end tg prediction at batch 1:
 
     step = layers · Σ_shapes t(shape, M = 1) + t(bf16 LM head, M = 1) + non-GEMM time
 
@@ -10,12 +10,13 @@ activation quantizer, the Q8_0 head included). The prediction is compared with l
 (its JSON, measured in the same job): ≥ 0.85× passes.
 
 Every timing replays a CUDA graph over enough weight copies to stream from DRAM, not L2 (as each layer's weights do
-in a decode step). `sweep` times every launch configuration per shape at M = 1 and M = 16 (the two row kinds of the
-kernel; the fastest are pinned into the plugin's table).
+in a decode step). `sweep` times every launch configuration per shape: decode at M = 1 and M = 16 (the kernel's two
+row kinds), prefill (W8A8, activation quantization included) at M = 512; the fastest are pinned into the plugin's
+tables.
 
-    python bench/fp8_decode_gate.py sweep --model <FP8 checkpoint> [--json out.json]
-    python bench/fp8_decode_gate.py gate --model <FP8 checkpoint> --gguf <Q8_0 conversion> --llama-bench <json>
-                                         [--json out.json]
+    python bench/fp8_kernels.py sweep --model <FP8 checkpoint> [--json out.json]
+    python bench/fp8_kernels.py gate --model <FP8 checkpoint> --gguf <Q8_0 conversion> --llama-bench <json>
+                                     [--json out.json]
 """
 from __future__ import annotations
 
@@ -30,10 +31,12 @@ import subprocess
 import sys
 
 import torch
+import triton
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 GEMM_KERNELS = ("mul_mat_vec_q", "quantize_q8_1")      # ggml's mmvq and its activation quantizer
 STREAM_BYTES = 512 << 20                              # weight copies per timing: well past any consumer card's L2
+PREFILL_ROWS = 512                                    # the prefill sweep's M (pp512, llama.cpp's ubatch)
 
 
 def shapes(model: str) -> tuple[int, list[tuple[str, int, int]], tuple[int, int]]:
@@ -82,6 +85,18 @@ def time_decode(n: int, k: int, m: int, cfg, weights=None) -> float:
     return graph_us(lambda w, s: kernel.decode(x, w, s, torch.bfloat16, cfg), weights or fp8_weights(n, k))
 
 
+def time_prefill(x: torch.Tensor, cfg, weights) -> float:
+    from holon_plugins.kernels.triton_fp8 import kernel
+
+    return graph_us(lambda w, s: kernel.prefill(x, w, s, torch.bfloat16, cfg), weights)
+
+
+def _best(results: list[tuple[float, object]], unit: str, per_us: float) -> list[dict]:
+    """The five fastest (µs, config), each with its rate in `unit` (`per_us` / µs)."""
+    best = sorted(results, key=lambda r: r[0])[:5]
+    return [{"us": round(t, 2), unit: round(per_us / t, 1), "config": cfg.__dict__} for t, cfg in best]
+
+
 def sweep(a) -> dict:
     from holon_plugins.kernels.triton_fp8 import kernel
 
@@ -89,16 +104,23 @@ def sweep(a) -> dict:
     out = {}
     for name, n, k in layer:
         weights, kb = fp8_weights(n, k), k // kernel.BLOCK
-        for m in (1, kernel.DECODE_ROWS):
-            results = []
-            for bn, sp, nw, ns in itertools.product((16, 32, 64, 128), [s for s in (1, 2, 4, 8, 16) if kb % s == 0],
-                                                    (2, 4, 8), (2, 3, 4)):
-                cfg = kernel.Decode(bn, sp, nw, ns)
-                results.append((time_decode(n, k, m, cfg, weights), cfg))
-            results.sort(key=lambda r: r[0])
-            out[f"{n}x{k} M={m}"] = [{"us": round(t, 2), "GB/s": round(n * k / t / 1e3), "config": cfg.__dict__}
-                                     for t, cfg in results[:5]]
-            print(name, m, out[f"{n}x{k} M={m}"][0], flush=True)
+        runs = {}
+        if "decode" in a.paths:
+            configs = [kernel.Decode(*c) for c in itertools.product(
+                (16, 32, 64, 128), [s for s in (1, 2, 4, 8, 16) if kb % s == 0], (2, 4, 8), (2, 3, 4))]
+            for m in (1, kernel.DECODE_ROWS):
+                runs[m] = _best([(time_decode(n, k, m, c, weights), c) for c in configs], "GB/s", n * k / 1e3)
+        if "prefill" in a.paths:
+            x, results = torch.randn(PREFILL_ROWS, k, device="cuda").bfloat16(), []
+            for c in itertools.product((32, 64, 128), (64, 128, 256), (4, 8), (2, 3, 4)):
+                try:                                              # compute-bound: two weight copies are enough
+                    results.append((time_prefill(x, kernel.Prefill(*c), weights[:2]), kernel.Prefill(*c)))
+                except triton.runtime.errors.OutOfResources:
+                    continue
+            runs[PREFILL_ROWS] = _best(results, "TFLOPS", 2 * PREFILL_ROWS * n * k / 1e6)
+        for m, best in runs.items():
+            out[f"{n}x{k} M={m}"] = best
+            print(name, m, best[0], flush=True)
         del weights
     return out
 
@@ -191,6 +213,8 @@ def main() -> None:
     ap.add_argument("--model", required=True, help="the FP8 checkpoint (its config.json gives the shapes)")
     ap.add_argument("--gguf", help="its llama.cpp Q8_0 conversion (gate)")
     ap.add_argument("--llama-bench", help="llama-bench's JSON for that file (gate)")
+    ap.add_argument("--paths", nargs="+", choices=("decode", "prefill"), default=["decode", "prefill"],
+                    help="what `sweep` times")
     ap.add_argument("--json")
     a = ap.parse_args()
     from holon.core import platform
@@ -198,7 +222,7 @@ def main() -> None:
     result = sweep(a) if a.what == "sweep" else gate(a)
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     record = {"gpu_class": platform.fingerprint(torch.device("cuda")).cls, "gpu": torch.cuda.get_device_name(),
-              "commit": commit, "command": "python bench/fp8_decode_gate.py " + shlex.join(
+              "commit": commit, "command": "python bench/fp8_kernels.py " + shlex.join(
                   pathlib.Path(x).name if x.startswith("/") else x for x in sys.argv[1:]), "results": result}
     print(json.dumps(result, indent=1))
     if a.json:
