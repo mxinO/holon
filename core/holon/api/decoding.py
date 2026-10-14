@@ -2,14 +2,14 @@
 
 Speculative decoding is three roles: a DraftPolicy picks k per step, a Drafter proposes (writing the SeqTable's draft
 tokens and counts, and its own state, possibly through auxiliary models and sub-steps), and a Verifier replaces the
-Sampler for the step's verify rows. Rollback is the core's `rewind` fan-out to Rewindables (api.state). Ordering and
+Sampler for the step's verify rows. Rollback is the core's `rewind` fan-out to Rewindables (api.hooks). Ordering and
 shape axes of transforms and drafters are declared in their manifests.
 
 A LogitsProcessor constrains requests (design §7.6): it follows each one on the host (`open`, `ready`, `commit`,
 `close`), writes its masks at launch (`fill`) and applies them on the device before the sampler or verifier (`apply`).
 
 Any of these slot objects (sampler, verifier, drafter, draft policy, logits processor) may count what it does:
-an optional `stats() -> dict[str, int]`, reported in the engine's stats as `<plugin name>.<key>`.
+`stats() -> dict[str, int]` (`holon.api.hooks.Reports`), reported in the engine's stats as `<plugin name>.<key>`.
 """
 from __future__ import annotations
 
@@ -115,7 +115,7 @@ class LogitsProcessor(Protocol):
         """Device, in place, graph-capturable: mask logits row `rows[i]` with `mask[i]`; rows past the end of
         `logits` are padding (skip them)."""
 
-    # Optional: `shutdown()`, called by `Engine.close`, stops the processor's helpers.
+    # Optional hooks (`holon.api.hooks`): ShutsDown, Reports.
 
 
 class LogitsProcessorPlugin(Protocol):
@@ -171,15 +171,8 @@ class Verifier(Protocol):
 
 
 class Drafter(Protocol):
-    """Built by the `drafter` slot's plugin (`DrafterPlugin.build`); `admit`, `substeps`, `lookahead` and `q_support`
-    are optional."""
-
-    # Optional: `q_support: int`, Kq > 0 for a drafter that samples its drafts and publishes the laws it drew them
-    # from, Kq entries per draft (`SeqTable.draft_q_ids` / `draft_q`); absent or 0: its drafts are deterministic.
-
-    def admit(self, slot: int, tokens: list[int]) -> None:
-        """Host: a request now owns `slot`; `tokens` is its whole history so far, prefix-hit tokens included (copy it
-        with a pinned asynchronous copy: this is not per step). Resets the slot's carried state."""
+    """Built by the `drafter` slot's plugin (`DrafterPlugin.build`). Optional hooks (`holon.api.hooks`):
+    AdmitsDrafts, DraftsInSubsteps, WritesAhead, SamplesDrafts."""
 
     def run(self, ctx: StepCtx, h: torch.Tensor) -> None:
         """After every step's sample stage (prefill chunks too), inside the step's graph when captured. `h` [T, H] is
@@ -191,12 +184,6 @@ class Drafter(Protocol):
         An auxiliary model run here over a verify step's rows sees them after the verifier: the core's `rewind`
         fan-out (target modules, slot objects) has already run, so rolling the aux model back is the drafter's call
         (its modules' `rewind(ctx.view(namespace))` after their forward)."""
-
-    def substeps(self, k: int) -> list[int]:
-        """The query widths of the sub-steps `run` asks for at k drafts (fixed, so graphs can be captured)."""
-
-    def lookahead(self, k: int) -> int:
-        """Positions past a row's own tokens `run` writes state at, at k drafts (the scheduler reserves them)."""
 
 
 class TargetView(Protocol):
@@ -222,13 +209,11 @@ class DrafterPlugin(Protocol):
 
 class DraftPolicy(Protocol):
     """The `draft_policy` slot's plugin object, or what its optional `build(ctx: BuildCtx)` returns (for policies
-    configured by the deployment's options)."""
+    configured by the deployment's options; `holon.api.hooks.BuildsPolicy`). Optional: DeclaresKs."""
 
     def k(self, seqs: list[Seq]) -> int:
         """Drafts per row for the next step of `seqs` (the running requests), from a finite declared set; 0: a plain
         decode step. Per step, not per request: every row of a verify step has the same width."""
-
-    # Optional: `ks() -> set[int]`, the k values `k` may return (the engine captures verify graphs for those).
 
     def observe(self, seq: Seq, k: int, n_draft: int, n_accept: int) -> None:
         """After a commit: the step's k, the drafts written for the request's next step, and the drafts it accepted

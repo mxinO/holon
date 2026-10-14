@@ -46,40 +46,42 @@ def _impact(a: argparse.Namespace) -> int:
     return 0
 
 
-def _start(a: argparse.Namespace, config: EngineConfig) -> tuple[Lock | None, dict[str, str]]:
+def _start(a: argparse.Namespace, config: EngineConfig) -> tuple[Lock | None, dict[str, str], str]:
     """The lock to start from — the newest of `--class`, else of this machine's class, else of the nearest class
-    (`--new-model` asserts there is none) — and the kernel pins it implies here."""
+    (`--new-model` asserts there is none) —, the kernel pins it implies here, and the model id to write under: the
+    history of the checkpoint's build if there is one (whatever name the file has here), else its identity."""
     plugins = PluginSet(discover())
-    model_id = resolve_model(plugins, config)[0].identity()
+    identity = resolve_model(plugins, config)[0].identity()
+    found = plans.model_ids(a.plans, identity.rpartition("@")[2])
+    if len(found) > 1:
+        raise SystemExit(f"{identity}: its build has histories under several model ids: {found}")
+    model_id = found[0] if found else identity
     fp = platform.fingerprint(torch.device(config.device))
     if a.cls:
         start = plans.newest(a.plans, model_id, a.cls)
     else:
-        start = (plans.nearest_class(a.plans, model_id, fp) or (None, False))[0]
+        start = (plans.nearest_class(a.plans, model_id, fp) or (None,))[0]
     if start is not None and a.new_model:
         raise SystemExit(f"{model_id}: has a lock already; drop --new-model")
     if start is None:
         if not a.new_model:
             raise SystemExit(f"{model_id}: no lock {f'for class {a.cls}' if a.cls else 'yet'}; use --new-model "
                              "for a first one")
-        return None, {}
+        return None, {}, model_id
     pins = _pins(start)
     if start.plan.fingerprint_class != fp.cls:
         # Another class's choices are only preferences here: keep the pins this machine can run.
         print(f"no lock for {fp.cls}: starting from {start.plan.fingerprint_class}'s")
         device = torch.device(config.device).type
         pins = {op: p for op, p in pins.items() if p in plugins.installed and plugins.available(p, device)}
-    return start, pins
+    return start, pins, model_id
 
 
 def _pins(lock: Lock) -> dict[str, str]:
-    try:
-        return plans.lock_overrides(lock)["kernels"]
-    except ValueError as e:
-        raise SystemExit(f"{lock.plan.model_id}: {e}") from None
+    return plans.lock_overrides(lock)["kernel_preferences"]       # the tools rebuild them as hard pins
 
 
-def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig) -> int:
+def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig, model_id: str) -> int:
     """Check `config` against `start` and write the new lock if the outcome allows."""
     prompts = PromptSet.load(a.prompts)
     l2 = propagate.L2Inputs(prompts, a.golden, a.floor) if a.golden and a.floor else None
@@ -90,7 +92,7 @@ def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig) -> int
     # own class only: another class's card may not hold them (an RTX 4090's pools on an RTX 5080), so it measures.
     same = start is not None and start.plan.fingerprint_class == fp.cls
     pools = previous.meta.get("pool_bytes") if previous is not None and same else None
-    checks = propagate.EngineChecks(config, trace(prompts), l2, pools)
+    checks = propagate.EngineChecks(config, trace(prompts), l2, pools, model_id)
     sm = fp.sm
     outcome = propagate.decide(start, checks, sm, previous, a.allow_uncovered_advance)
     print(propagate.report(outcome))
@@ -102,13 +104,13 @@ def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig) -> int
 
 def _propagate(a: argparse.Namespace) -> int:
     config = engine_config(str(checkpoint_dir(a.model)), a)
-    start, pins = _start(a, config)
-    return _run(a, start, dataclasses.replace(config, kernels=pins))
+    start, pins, model_id = _start(a, config)
+    return _run(a, start, dataclasses.replace(config, kernels=pins), model_id)
 
 
 def _tune(a: argparse.Namespace) -> int:
     config = engine_config(str(checkpoint_dir(a.model)), a)
-    start, pins = _start(a, config)
+    start, pins, model_id = _start(a, config)
     base = dataclasses.replace(config, kernels=pins)
     engine = Engine(base)
     resolved = _pins(Lock(locks.plan_of(engine)))  # every tuned op starts pinned to what the base resolves to
@@ -121,7 +123,7 @@ def _tune(a: argparse.Namespace) -> int:
     pins, rates = tune.tune(resolved, ops, rate)
     for op, by in rates.items():
         print(f"{op}: " + ", ".join(f"{p} {r:.1f} tok/s" for p, r in sorted(by.items(), key=lambda x: -x[1])))
-    return _run(a, start, dataclasses.replace(base, kernels=pins))
+    return _run(a, start, dataclasses.replace(base, kernels=pins), model_id)
 
 
 def main(argv: list[str] | None = None) -> int:

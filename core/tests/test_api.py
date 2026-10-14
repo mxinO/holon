@@ -94,7 +94,6 @@ entry     = "lfu_decay:Plugin"
 slot      = "placement_policy"
 license   = "Apache-2.0"
 core_abi  = ">=0.1,<0.2"
-slot_abi  = "1"
 
 [resources]
 provides = ["placement.expert@1"]
@@ -124,16 +123,19 @@ def test_manifest_loads_design_example(tmp_path: pathlib.Path):
     hash(m.tunables["swap_cap"])
 
 
-@pytest.mark.parametrize("extra, match", [
-    ("[surprise]\nk=1\n", "unknown section"),
-    ("[resources]\nprovide=['a@1']\n", "unknown keys"),
-    ("[properties]\nnumerics='fast'\n", "invalid numerics"),
-    ("[properties]\nmax_depth=1\n", "unknown keys"),          # removed: the depth gate comes from the processor
-    ("[plugin_extra]\n", "unknown section"),
+@pytest.mark.parametrize("abi, extra, match", [
+    (">=0.1,<0.2", "[surprise]\nk=1\n", "unknown section"),
+    (">=0.1,<0.2", "[resources]\nprovide=['a@1']\n", "unknown keys"),
+    (">=0.1,<0.2", "[properties]\nnumerics='fast'\n", "invalid numerics"),
+    (">=0.1,<0.2", "[properties]\nmax_depth=1\n", "unknown keys"),  # removed: the depth gate comes from the processor
+    (">=0.1,<0.2", "[plugin_extra]\n", "unknown section"),
+    (None, "", "core_abi missing"),                                  # required (release design §7)
+    (">=1.0,<2", "[surprise]\n", "does not admit this core's plugin ABI 0.1"),   # checked before the keys
+    ("~=0.1", "", "expected clauses"),
 ])
-def test_manifest_rejects_mistakes_with_path(tmp_path: pathlib.Path, extra, match):
+def test_manifest_rejects_mistakes_with_path(tmp_path: pathlib.Path, abi, extra, match):
     base = '[plugin]\nname="x"\nversion="0"\nentry="x:P"\nlicense="MIT"\nslot="unit"\n'
-    (tmp_path / "plugin.toml").write_text(base + extra)
+    (tmp_path / "plugin.toml").write_text(base + (f"core_abi={abi!r}\n" if abi else "") + extra)
     with pytest.raises(ValueError, match=match) as e:
         Manifest.load(tmp_path / "plugin.toml")
     assert "plugin.toml" in str(e.value)

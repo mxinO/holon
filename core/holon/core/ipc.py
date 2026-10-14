@@ -5,10 +5,11 @@ requests, aborts and control messages go in over one ZeroMQ socket, and each eng
 message over another. Messages are two frames — a kind and a msgspec/msgpack payload of the API's plain records — so
 a native frontend could speak the same protocol.
 
-Failure model: if the engine fails inside a step it sends a `failed` message before exiting; if it dies outright the
-client notices (the process is gone). Either way the client ends every open request with an error, refuses new ones
-and names the reason in `failure` — so no frontend waits forever, and the supervisor can tell an engine failure from
-a rejected request. Restarting the engine is the supervisor's job (design §7.7, `supervisor.py`).
+Failure model: if the engine fails to start or inside a step it sends a `failed` message — what failed and its kind
+(`FAILED_KINDS`) — before exiting; if it dies outright the client notices (the process is gone). Either way the client
+ends every open request with an error, refuses new ones and names the reason in `failure` — so no frontend waits
+forever, and the supervisor can tell an engine failure from a rejected request. Restarting the engine is the
+supervisor's job (design §7.7, `supervisor.py`).
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ import multiprocessing
 import os
 import pathlib
 import shutil
+import sys
 import tempfile
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -31,12 +33,29 @@ import zmq.asyncio
 
 from holon.api import Abort, EngineRequest, RequestError, SamplingParams, TokenDelta
 
+from .memory import OutOfUnits
+from .plugins import PluginError
+
 _encode = msgspec.msgpack.encode
 _DECODE = {b"submit": msgspec.msgpack.Decoder(EngineRequest), b"abort": msgspec.msgpack.Decoder(Abort),
            b"control": msgspec.msgpack.Decoder(str), b"deltas": msgspec.msgpack.Decoder(list[TokenDelta]),
-           b"stats": msgspec.msgpack.Decoder(dict[str, Any]), b"ready": msgspec.msgpack.Decoder(str),
-           b"failed": msgspec.msgpack.Decoder(str)}
+           b"stats": msgspec.msgpack.Decoder(dict[str, Any]), b"ready": msgspec.msgpack.Decoder(dict[str, Any]),
+           b"failed": msgspec.msgpack.Decoder(tuple[str, str])}
 _POLL_MS = 1000
+# Kinds of `failed` messages: "plugin" and "memory" fail every start of that configuration alike (a missing provider,
+# another plugin ABI, state that does not fit), "error" is anything else.
+FAILED_KINDS = {PluginError: "plugin", OutOfUnits: "memory"}
+
+
+def _failed(e: BaseException, prefix: str = "") -> list[bytes]:
+    kind = next((k for t, k in FAILED_KINDS.items() if isinstance(e, t)), "error")
+    return [b"failed", _encode((kind, f"{prefix}{type(e).__name__}: {e}"))]
+
+
+class StartFailed(RuntimeError):
+    def __init__(self, kind: str, error: str) -> None:
+        super().__init__(f"engine failed to start: {error}")
+        self.kind = kind
 
 
 @dataclasses.dataclass(frozen=True)
@@ -51,18 +70,21 @@ class Endpoints:
         return cls(f"ipc://{base / 'requests'}", f"ipc://{base / 'results'}", str(base))
 
 
-def serve(engine_factory: Callable[[], Any], endpoints: Endpoints) -> None:
-    """The engine process: build the engine, then step while there is work and serve messages in between."""
+def serve(engine_factory: Callable[[], Any], endpoints: Endpoints,
+          report: Callable[[Any], dict[str, Any]] = lambda engine: {}) -> None:
+    """The engine process: build the engine, report it ready (`report(engine)`), then step while there is work and
+    serve messages in between."""
     ctx = zmq.Context()
     inbox, outbox = ctx.socket(zmq.PULL), ctx.socket(zmq.PUSH)
     inbox.bind(endpoints.requests)
     outbox.bind(endpoints.results)
     try:
         engine = engine_factory()
+        ready = report(engine)
     except Exception as e:  # noqa: BLE001 — reported to the launcher, which raises it
-        outbox.send_multipart([b"failed", _encode(f"{type(e).__name__}: {e}")])
+        outbox.send_multipart(_failed(e))
         raise
-    outbox.send_multipart([b"ready", _encode("ready")])
+    outbox.send_multipart([b"ready", _encode(ready)])
     parent = os.getppid()
     while os.getppid() == parent:                 # the launcher died without shutting us down: free the GPU
         deltas: list[TokenDelta] = []
@@ -95,7 +117,7 @@ def serve(engine_factory: Callable[[], Any], endpoints: Endpoints) -> None:
         except Exception as e:  # noqa: BLE001 — the client ends every open request with this reason
             if deltas:
                 outbox.send_multipart([b"deltas", _encode(deltas)])
-            outbox.send_multipart([b"failed", _encode(f"engine failed: {type(e).__name__}: {e}")])
+            outbox.send_multipart(_failed(e, "engine failed: "))
             raise
         if deltas:
             outbox.send_multipart([b"deltas", _encode(deltas)])
@@ -115,6 +137,7 @@ class Client:
         self._stats: collections.deque[asyncio.Future[dict[str, Any]]] = collections.deque()
         self._reader: asyncio.Task[None] | None = None
         self._dead: str | None = None             # why the engine is gone, once it is
+        self.ready: dict[str, Any] = {}           # what the engine reported when it started (its plan)
 
     @property
     def failure(self) -> str | None:
@@ -127,7 +150,8 @@ class Client:
                 raise RuntimeError("engine process exited during startup")
         kind, payload = await self._results.recv_multipart()
         if kind == b"failed":
-            raise RuntimeError(f"engine failed to start: {_DECODE[kind].decode(payload)}")
+            raise StartFailed(*_DECODE[kind].decode(payload))
+        self.ready = _DECODE[kind].decode(payload)
         self._reader = asyncio.get_running_loop().create_task(self._read())
 
     async def generate(self, token_ids: list[int], params: SamplingParams, rid: str | None = None,
@@ -162,7 +186,7 @@ class Client:
         future = asyncio.get_running_loop().create_future()
         self._stats.append(future)                # replies arrive in request order (one socket each way)
         await self._requests.send_multipart([b"control", _encode("stats")])
-        return await future
+        return await future | self.ready
 
     async def control(self, op: str) -> None:
         """`flush_prefix` or `shutdown`."""
@@ -178,7 +202,7 @@ class Client:
                     continue
                 kind, payload = await self._results.recv_multipart()
                 if kind == b"failed":
-                    self._fail(_DECODE[kind].decode(payload))
+                    self._fail(_DECODE[kind].decode(payload)[1])
                     return
                 if kind == b"stats":
                     if self._stats and not (future := self._stats.popleft()).done():    # its caller may have left
@@ -210,18 +234,20 @@ class Client:
         self._ctx.destroy(linger=0)
 
 
-def engine_main(config: Any, endpoints: Endpoints) -> None:
-    """The engine process's default target."""
+def engine_main(config: Any, endpoints: Endpoints, lock: str | None = None) -> None:
+    """The engine process's default target: reports its plan, and against `lock` (the lock it was configured from)."""
     from .engine import Engine  # imported in the child: CUDA initializes only there
+    from .plans import served
 
-    serve(lambda: Engine(config), endpoints)
+    serve(lambda: Engine(config), endpoints, lambda engine: served(engine, lock))
 
 
-def launch(config: Any, target: Callable[..., None] = engine_main
+def launch(config: Any, target: Callable[..., None] = engine_main, lock: str | None = None
            ) -> tuple[multiprocessing.process.BaseProcess, Endpoints]:
-    """Start an engine process for `config` (an EngineConfig); connect a `Client` to the returned endpoints."""
+    """Start an engine process for `config` (an EngineConfig, from `lock` if one); connect a `Client` to the returned
+    endpoints."""
     endpoints = Endpoints.local()
-    proc = multiprocessing.get_context("spawn").Process(target=target, args=(config, endpoints), daemon=True)
+    proc = multiprocessing.get_context("spawn").Process(target=target, args=(config, endpoints, lock), daemon=True)
     proc.start()
     return proc, endpoints
 
@@ -235,16 +261,22 @@ class EngineProcess:
     client: Client
 
     @classmethod
-    async def start(cls, config: Any, target: Callable[..., None] = engine_main) -> EngineProcess:
-        """Launch an engine for `config` and wait until it is ready; raises RuntimeError if it fails to start.
-        `target` runs in the child (tests substitute engines that fail on purpose)."""
-        proc, endpoints = launch(config, target)
+    async def start(cls, config: Any, target: Callable[..., None] = engine_main, lock: str | None = None
+                    ) -> EngineProcess:
+        """Launch an engine for `config` (configured from `lock`, if one) and wait until it is ready; raises
+        RuntimeError (StartFailed when the engine reports why) if it fails to start. `target` runs in the child (tests
+        substitute engines that fail on purpose)."""
+        proc, endpoints = launch(config, target, lock)
         engine = cls(proc, endpoints, Client(endpoints, alive=proc.is_alive))
         try:
             await engine.client.wait_ready()
         except BaseException:
             await engine.stop(graceful=False)
             raise
+        ready = engine.client.ready
+        if "plan_id" in ready:
+            print(f"holon: engine ready, plan {ready['plan_id']}" + (f", from {ready['lock']}" if ready["lock"] else "")
+                  + "".join(f"\n  differs from the lock: {d}" for d in ready["diff"]), file=sys.stderr, flush=True)
         return engine
 
     async def stop(self, graceful: bool = True) -> None:
@@ -263,9 +295,10 @@ class EngineProcess:
 
 
 @contextlib.asynccontextmanager
-async def engine_process(config: Any, target: Callable[..., None] = engine_main) -> AsyncIterator[Client]:
+async def engine_process(config: Any, target: Callable[..., None] = engine_main, lock: str | None = None
+                         ) -> AsyncIterator[Client]:
     """An engine process and a ready client for it; shuts the engine down on exit."""
-    engine = await EngineProcess.start(config, target)
+    engine = await EngineProcess.start(config, target, lock)
     try:
         yield engine.client
     finally:

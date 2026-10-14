@@ -100,6 +100,13 @@ def _last_tokens(qstart: np.ndarray, n_logits: np.ndarray) -> np.ndarray:
     return ends - n_logits.repeat(n_logits) + (np.arange(len(ends)) - first)
 
 
+def profile_rows(cfg: Any) -> list[int]:
+    """The rows of the worst-case step `state_memory` profiles: `max_step_tokens` prompt tokens in rows of at most
+    `max_model_len`, at most `max_seqs` of them."""
+    rows = [cfg.max_model_len] * (cfg.max_step_tokens // cfg.max_model_len)
+    return [r for r in (rows + [cfg.max_step_tokens % cfg.max_model_len])[:cfg.max_seqs] if r]
+
+
 class Executor:
     def __init__(self, cfg: Any, device: torch.device, model: Any, vocab: int, sampler: Any, state: StateManager,
                  planners: dict[str, Any], verifier: Any = None, drafter: Any = None,
@@ -175,10 +182,7 @@ class Executor:
         """Bytes for the state pools: `fraction` of the free memory, minus the activation peak of a worst-case step
         (`max_step_tokens` prompt tokens in rows of at most `max_model_len`, each sampled) run on minimum-size pools,
         and minus the graphs' private pool."""
-        cfg = self.cfg
-        rows = [cfg.max_model_len] * (cfg.max_step_tokens // cfg.max_model_len)
-        rows = (rows + [cfg.max_step_tokens % cfg.max_model_len])[:cfg.max_seqs]
-        n = np.array([r for r in rows if r], dtype=np.int32)
+        n = np.array(profile_rows(self.cfg), dtype=np.int32)
         plan = host_plan(0, np.arange(len(n), dtype=np.int32), np.zeros_like(n), n, np.ones_like(n),
                          np.zeros(int(n.sum()), dtype=np.int64))
         ledger.materialize(None)

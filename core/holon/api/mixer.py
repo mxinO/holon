@@ -11,13 +11,10 @@ from typing import TYPE_CHECKING, Any, Protocol
 from .model import Unit
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     import torch
 
     from .batch import Batch, StepCtx
-    from .model import BuildCtx
-    from .state import Pages, StateSpec
+    from .state import Pages
 
 
 class Planner(Protocol):
@@ -32,14 +29,7 @@ class Planner(Protocol):
 
 
 class Mixer(Unit, Protocol):
-    @classmethod
-    def state_specs(cls, params: Mapping[str, Any], layers: tuple[int, ...], ctx: BuildCtx) -> list[StateSpec]: ...
-
-    @classmethod
-    def planner(cls, params: Mapping[str, Any], specs: list[StateSpec], ctx: BuildCtx) -> Planner:
-        """The group's planner. With the deployment option `planner.device_lens` (a drafter's sub-steps) every batch
-        it plans has its lengths on the device only: it must choose kernels that read them there, or declare
-        `needs_host_lens` (the build then fails)."""
+    """Optional hooks (`holon.api.hooks`): DeclaresState, PlansState."""
 
     def forward(self, x: torch.Tensor, ctx: StepCtx) -> torch.Tensor:
         """Prefill, decode and verify rows of one step."""

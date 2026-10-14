@@ -137,41 +137,15 @@ def rewind_modules(module: torch.nn.Module, ctx: StepCtx) -> None:
             m.rewind(ctx)
 
 
-class Rewindable(Protocol):
-    """Anything that speculative decoding must roll back past rejected drafts (design §7.5): a module of the target or a
-    loaded slot object defining `rewind` (an auxiliary model's modules are rolled back by the drafter that runs them,
-    `Drafter.run`). Paged state needs none — it rewinds by length."""
-
-    def rewind(self, ctx: StepCtx, path: torch.Tensor | None = None) -> None:
-        """Device-side, graph-capturable: after the verifier wrote `ctx.seq_table.n_accept` for the step's verify rows,
-        keep only what their accepted tokens produced. `path` stays None until tree verification."""
-
-
 class StateKind(Protocol):
     """The meaning of one bound state spec. Callbacks are per request; the core vectorises over SoA batches."""
 
     def units_needed(self, seq: SeqView, new_tokens: int) -> int: ...
 
-    # Optional: `capacity(seq) -> int`, the tokens the request's current units hold. When every bound kind offers it,
-    # the core skips `units_needed` for steps that fit (most decode steps), which keeps per-request host work O(1).
-    #
-    # Optional, for state reused through payloads (design §6.3; paged state is shared by reference instead):
-    # `cut(seq, start, n) -> int`, the tokens (1 … n) a prefill row starting at `start` may take, so a step can end
-    # where the kind publishes; `next_publish(seq) -> int | None`, the position the kind publishes at next, so the
-    # core calls `publish` only when a row's step ends there or, for a spec with an `in_step` grid, when it lies
-    # inside the step on that grid (`in_step=True`: the spec's forward fills it); `payload_pool`, the name of the
-    # pool its payloads use, which the prefix index may evict payloads from to make room. `hit_length` answers for
-    # state the kind can restore; a non-paged kind without it allows no prefix hit.
+    # Optional hooks (`holon.api.hooks`): KnowsCapacity, CutsPrefill, PublishesPayloads, PayloadPool,
+    # RestoresPayloads.
 
     def reclaimable(self, seq: SeqView) -> list[int]: ...
-
-    def hit_length(self, idx: PrefixView, upto: int) -> HitLen: ...
-
-    def publish(self, seq: SeqView, upto: int, in_step: bool = False) -> tuple[Payload, list[MemOp]] | None: ...
-    # `in_step`: `upto` lies inside the step and the spec's forward fills the payload (`StateSpec.in_step`), so no
-    # MemOps; otherwise `upto` is where the step ends and MemOps fill it.
-
-    def adopt(self, seq: SeqView, payload: Payload) -> list[MemOp]: ...
 
     def fork(self, src: SeqView, dsts: list[SeqView]) -> list[MemOp]: ...
 

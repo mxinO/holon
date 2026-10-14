@@ -17,6 +17,7 @@ import functools
 import gc
 import itertools
 import secrets
+import sys
 import time
 
 import numpy as np
@@ -57,6 +58,7 @@ class EngineConfig:
     page_size: int = 16
     max_seqs: int = 64
     max_model_len: int = 8192                # prompt + generated tokens per request; pools always hold one
+    clamp_context: bool = False              # pools may hold less: serve at most what they hold (`holon serve`)
     max_step_tokens: int = 4096
     memory_fraction: float = 0.9             # of the memory left after weights, for activations and state
     state_memory: int | None = None          # bytes for state pools; None: measure (GPU only)
@@ -65,6 +67,8 @@ class EngineConfig:
     cuda_graphs: bool = True                 # replay decode steps from CUDA graphs, per batch-size bucket
     max_draft_tokens: int = 0                # speculative decoding: drafts per verify row at most (0: off)
     kernels: dict[str, str] = dataclasses.field(default_factory=dict)   # op name -> pinned kernel provider
+    # op name -> preferred provider (a lock's pins): used where it supports the site, else default priority
+    kernel_preferences: dict[str, str] = dataclasses.field(default_factory=dict)
     slots: dict[str, str] = dataclasses.field(default_factory=dict)     # slot -> plugin, where several are installed
     plugin_options: dict[str, object] = dataclasses.field(default_factory=dict)   # read by plugins, never the core
 
@@ -108,6 +112,7 @@ class _Target:
 
 class Engine:
     def __init__(self, cfg: EngineConfig, plugins: PluginSet | None = None) -> None:
+        cfg = dataclasses.replace(cfg)             # its own copy: the clamp may lower max_model_len
         self.cfg, self.device = cfg, torch.device(cfg.device)
         platform.configure_allocator(self.device)
         self.plugins = p = plugins or PluginSet(discover())
@@ -119,7 +124,7 @@ class Engine:
         self.ledger = Ledger(self.device)
         options = {"page_size": cfg.page_size, "max_seqs": cfg.max_seqs, "max_model_len": cfg.max_model_len,
                    "max_step_tokens": cfg.max_step_tokens, "max_draft_tokens": cfg.max_draft_tokens,
-                   "kernels": cfg.kernels, "plugins": cfg.plugin_options}
+                   "kernels": cfg.kernels, "kernel_preferences": cfg.kernel_preferences, "plugins": cfg.plugin_options}
         self.ctx = BuildContext(p, self.device, cfg.dtype, options, ledger=self.ledger)
         bound, planners = bind_state(self.spec, self.ctx, p, self.ledger, cfg)
         model = build_model(self.spec, self.ctx)
@@ -181,6 +186,8 @@ class Engine:
                                  verify_widths=self._verify_widths(), processor=self.processor)
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None
                                 else self.executor.state_memory(self.ledger, cfg.memory_fraction))
+        if cfg.clamp_context:
+            self._clamp()
         self.state.reset_padding()
         for pool in self.ledger.pools.values():          # fresh segments, so they show the allocator setting
             if pool.buffer is not None:                  # (a plugin pool may get no units)
@@ -195,6 +202,18 @@ class Engine:
         self._blocked: dict[str, None] = {}                # constrained requests until their processor is ready
         # What a request's `SamplingParams.ext` may name: the resources of the plugins this engine runs.
         self._served = {str(r) for name in p.loaded for r in p.installed[name].manifest.provides}
+
+    def _clamp(self) -> None:
+        """Serve at most what the paged pools hold for one request (`clamp_context`; release design D2): after they
+        are sized, before graphs are captured (they bake in the length limit). What was built for the requested
+        length (static buffers, block tables, the profile) keeps it."""
+        fits = min(((p.capacity - p.has_null) * p.tokens_per_unit for p in self.ledger.pools.values()
+                    if p.tokens_per_unit), default=self.cfg.max_model_len)
+        if fits < self.cfg.max_model_len:
+            print(f"holon: max_model_len {self.cfg.max_model_len} clamped to {fits}, what the state pools hold",
+                  file=sys.stderr, flush=True)
+            self.cfg.max_model_len = self.sched.max_model_len = fits
+            self.state.limit(fits)
 
     def _verify_widths(self) -> tuple[int, ...]:
         """The verify-row widths to capture: 1 + each k the policy declares (`ks()`), else every k up to the maximum."""

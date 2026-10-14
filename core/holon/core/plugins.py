@@ -130,7 +130,10 @@ def discover(group: str = ENTRY_GROUP) -> dict[str, Installed]:
     found: dict[str, Installed] = {}
     for ep in importlib.metadata.entry_points(group=group):
         path = _package_dir(ep.value)
-        manifest = Manifest.load(path / "plugin.toml")
+        try:
+            manifest = Manifest.load(path / "plugin.toml")
+        except ValueError as e:       # e.g. another plugin ABI: the deployment cannot start (no retry helps)
+            raise PluginError(str(e)) from None
         if manifest.name != ep.name:
             raise PluginError(f"entry point {ep.name!r} points at manifest named {manifest.name!r}")
         if manifest.name in found:

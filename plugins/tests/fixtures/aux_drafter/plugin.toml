@@ -4,6 +4,7 @@ version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "drafter"
 license = "Apache-2.0"
+core_abi = ">=0.1,<0.2"
 
 [resources]
 provides = [

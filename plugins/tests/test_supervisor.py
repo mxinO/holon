@@ -49,7 +49,7 @@ def _slow_step(engine, step):
     return step()
 
 
-def _slow_engine(config, endpoints):
+def _slow_engine(config, endpoints, lock=None):
     _patched(config, endpoints, _slow_step)
 
 
@@ -59,7 +59,7 @@ def _poisoned_step(engine, step):
     return step()
 
 
-def _poisoned_engine(config, endpoints):
+def _poisoned_engine(config, endpoints, lock=None):
     _patched(config, endpoints, _poisoned_step)
 
 
@@ -71,7 +71,7 @@ def _hanging_step(engine, step):
     return step()
 
 
-def _hanging_engine(config, endpoints):
+def _hanging_engine(config, endpoints, lock=None):
     _patched(config, endpoints, _hanging_step)
 
 
@@ -81,8 +81,13 @@ def _broken_step(engine, step):
     return step()
 
 
-def _broken_engine(config, endpoints):
+def _broken_engine(config, endpoints, lock=None):
     _patched(config, endpoints, _broken_step)
+
+
+def _twice(config):
+    """A history of two equal entries (one to roll back to)."""
+    return [(config, None), (dataclasses.replace(config), None)]
 
 
 def test_resubmission_continues_each_unfinished_sequence():
@@ -140,7 +145,7 @@ def test_a_killed_engine_restarts_and_streams_continue_exactly(tiny_checkpoint, 
     constrained = dataclasses.replace(GREEDY, max_tokens=30, ext={"toy.even_after@1": {"marker": expected[0][0]}})
 
     async def run(kill):
-        async with supervised([config], FAST, target=_slow_engine) as sup:
+        async with supervised([(config, None)], FAST, target=_slow_engine) as sup:
             async def killer():
                 stream = sup.generate(prompts[0], constrained)
                 first = await anext(stream)
@@ -168,7 +173,7 @@ def test_a_hung_engine_is_killed_and_its_requests_resubmitted(tiny_checkpoint, t
 
     async def run():
         policy = dataclasses.replace(FAST, ping_timeout=1)
-        async with supervised([_config(tiny_checkpoint)], policy, target=_hanging_engine) as sup:
+        async with supervised([(_config(tiny_checkpoint), None)], policy, target=_hanging_engine) as sup:
             results = await asyncio.gather(*(_collect(sup, p, GREEDY) for p in prompts[:2]))
             return results, await sup.stats()
 
@@ -188,7 +193,7 @@ def test_a_poison_request_is_quarantined_without_rollback(tiny_checkpoint, tiny_
     config = _config(tiny_checkpoint)
 
     async def run():
-        async with supervised([config, dataclasses.replace(config)], FAST, target=_poisoned_engine) as sup:
+        async with supervised(_twice(config), FAST, target=_poisoned_engine) as sup:
             results = await asyncio.gather(_collect(sup, [MARKER] + prompts[0], GREEDY),
                                            *(_collect(sup, p, GREEDY) for p in prompts[1:]))
             after = await _collect(sup, prompts[0], GREEDY)                     # the engine still serves
@@ -203,7 +208,7 @@ def test_a_poison_request_is_quarantined_without_rollback(tiny_checkpoint, tiny_
 def test_unexplained_crashes_roll_back_to_the_previous_config(tiny_checkpoint, tiny_case):  # noqa: F811
     prompts, expected = tiny_case
     good = _config(tiny_checkpoint)
-    history = [good, dataclasses.replace(good, max_seqs=2)]                  # oldest first; the newest crashes
+    history = [(good, None), (dataclasses.replace(good, max_seqs=2), None)]   # oldest first; the newest crashes
     policy = dataclasses.replace(FAST, rollback_crashes=2)
 
     async def run():
@@ -216,34 +221,43 @@ def test_unexplained_crashes_roll_back_to_the_previous_config(tiny_checkpoint, t
     assert stats["rollbacks"] == 1 and stats["config"] == 0 and stats["quarantined"] == 0
 
 
-def _unstartable_engine(config, endpoints):
-    """The newest config in the rollback tests fails to start."""
+def _unstartable_engine(config, endpoints, lock=None):
+    """The newest config in the rollback tests fails to start: transiently (max_seqs 2), or as every start of it would
+    (max_seqs 1: a missing plugin). Each start is logged to the file the plugin option `test.starts` names."""
     from holon.core.engine import Engine
     from holon.core.ipc import serve
+    from holon.core.plugins import PluginError
 
     def factory():
+        with open(config.plugin_options["test.starts"], "a") as f:
+            f.write(f"{config.max_seqs}\n")
         if config.max_seqs == 2:
             raise RuntimeError("unstartable config")
+        if config.max_seqs == 1:
+            raise PluginError("a plugin is missing")
         return Engine(config)
     serve(factory, endpoints)
 
 
-def test_failed_starts_roll_back_and_an_exhausted_history_gives_up(tiny_checkpoint, tiny_case):  # noqa: F811
+def test_failed_starts_roll_back_and_an_exhausted_history_gives_up(tiny_checkpoint, tiny_case, tmp_path):  # noqa: F811
     prompts, expected = tiny_case
-    good = _config(tiny_checkpoint)
-    bad = dataclasses.replace(good, max_seqs=2)
+    starts = tmp_path / "starts"
+    good = dataclasses.replace(_config(tiny_checkpoint), plugin_options={"test.starts": str(starts)})
+    bad, broken = dataclasses.replace(good, max_seqs=2), dataclasses.replace(good, max_seqs=1)
 
     async def run():
-        async with supervised([good, bad], FAST, target=_unstartable_engine) as sup:
+        async with supervised([(good, None), (bad, None)], FAST, target=_unstartable_engine) as sup:
             result = await _collect(sup, prompts[0], GREEDY)
             stats = await sup.stats()
-        with pytest.raises(RuntimeError, match="every configuration.*unstartable"):
-            async with supervised([bad], FAST, target=_unstartable_engine):
+        with pytest.raises(RuntimeError, match="every configuration.*a plugin is missing"):
+            async with supervised([(broken, None)], FAST, target=_unstartable_engine):
                 pass
         return result, stats
 
     result, stats = asyncio.run(asyncio.wait_for(run(), timeout=240))
     assert result[0][0] == expected[0] and stats["rollbacks"] == 1 and stats["config"] == 0
+    # transient failures roll back after `rollback_crashes` starts; a plugin error at once (the `failed` kind)
+    assert starts.read_text().split() == ["2"] * FAST.rollback_crashes + ["3", "1"]
 
 
 def test_a_lone_poison_request_on_a_quiet_server_is_quarantined(tiny_checkpoint, tiny_case):  # noqa: F811
@@ -251,7 +265,7 @@ def test_a_lone_poison_request_on_a_quiet_server_is_quarantined(tiny_checkpoint,
     config = _config(tiny_checkpoint)
 
     async def run():
-        async with supervised([config, dataclasses.replace(config)], FAST, target=_poisoned_engine) as sup:
+        async with supervised(_twice(config), FAST, target=_poisoned_engine) as sup:
             poison = await _collect(sup, [MARKER] + prompts[0], GREEDY)       # nothing else ever completed
             after = await _collect(sup, prompts[0], GREEDY)
             return poison, after, await sup.stats()

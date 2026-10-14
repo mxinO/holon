@@ -1,4 +1,4 @@
-"""Plans of built engines and writing the lock history (design §4.3, §4.4, §4.6); reading is `holon.core.plans`.
+"""Writing the lock history (design §4.3, §4.4, §4.6); plans, reading and diffs are `holon.core.plans`.
 
 Lock files are TOML written canonically by `dumps`: a `digest` of the rest, top-level keys, then `[deploy]`,
 `[engine]`, `[snapshot]`, and `[units]` and `[sites]` with one sorted line per entry, so a changed unit or binding is
@@ -7,77 +7,26 @@ one changed line in review.
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import json
 import pathlib
 import re
 import subprocess
 from typing import Any
 
-import torch
-from holon import __version__
-from holon.api import Binding, Lock, Plan, UnitPin, canonical_hash
-from holon.core import platform
+from holon.api import Lock, Plan, canonical_hash
+from holon.core import plans
 from holon.core.engine import Engine
-from holon.core.plans import CORE_DIR, CORE_UNIT, history, loads, numbered, read, src_hash
-from holon.core.plugins import Installed
-
-# EngineConfig fields a plan does not record: identified elsewhere (model_id, class, sites) or per-host budgets.
-_NOT_PLANNED = {"model", "device", "kernels", "memory_fraction", "state_memory"}
+from holon.core.plans import CORE_DIR, history, loads, numbered, read
 
 
-def plan_of(engine: Engine) -> Plan:
-    """The deployment `engine` runs: checkpoint, class, recipe, the code that runs (the core, the plugins of the
-    units it built, the kernels bound at its sites, and its single plugins — model, weight source, sampler, state
-    kinds …; kernel providers loaded only as candidates are left out), every site's kernel binding, and the engine
-    settings that shape outputs."""
-    source = engine.source
-    root = _git(CORE_DIR, "rev-parse", "--show-toplevel")
-    uv_lock = pathlib.Path(root, "uv.lock") if root else None
-    bound = {k["provider"] for k in engine.ctx.kernels.values()}
-    runs = {name for name in engine.plugins.loaded if name in bound or name in engine.ctx.used.values()
-            or engine.plugins.installed[name].manifest.slot not in ("unit", "kernel")}
-    units = {CORE_UNIT: UnitPin(__version__, src_hash(CORE_DIR))}
-    units |= {name: unit_pin(engine.plugins.installed[name]) for name in sorted(runs)}
-    sites = {key: Binding(k["provider"], {"facts": k["facts"], "props": k["props"]}
-                          | ({"launch": k["config"]} if k["config"] else {}))
-             for key, k in engine.ctx.kernels.items()}
-    settings = {f.name: getattr(engine.cfg, f.name) for f in dataclasses.fields(engine.cfg)
-                if f.name not in _NOT_PLANNED} | {"source": source.kind}         # resolved, not the setting
-    # An option naming another checkpoint (a drafter's) is planned as that checkpoint's identity, not its host path.
-    opened = engine.ctx.sources
-    sources = {k: opened[str(v)] for k, v in settings["plugin_options"].items() if str(v) in opened}
-    settings["plugin_options"] = {k: v for k, v in settings["plugin_options"].items() if k not in sources}
-    return Plan(model_id=source.identity(), fingerprint_class=platform.fingerprint(engine.device).cls,
-                recipe=canonical_hash(engine.spec), commit=_git(CORE_DIR, "rev-parse", "HEAD") or "unknown",
-                uv_lock=_sha256(uv_lock.read_bytes()) if uv_lock and uv_lock.is_file() else "none",
-                units=units, sites=sites, engine={k: str(v).removeprefix("torch.") if isinstance(v, torch.dtype)
-                                                  else v for k, v in settings.items()}, sources=sources)
-
-
-def unit_pin(inst: Installed) -> UnitPin:
-    ref = inst.manifest.reference
-    sem = _sha256((inst.path / f"{ref.replace('.', '/')}.py").read_bytes()) if ref else None
-    return UnitPin(inst.manifest.version, src_hash(inst.path), sem)
+def plan_of(engine: Engine, model_id: str | None = None) -> Plan:
+    """`plans.plan_of` at the checked-out commit, under `model_id` (an existing history's id for the build)."""
+    return plans.plan_of(engine, model_id, _git(CORE_DIR, "rev-parse", "HEAD") or "unknown")
 
 
 def uncovered(plan: Plan) -> tuple[str, ...]:
     """Sites whose kernel is not run-to-run deterministic: a change touching them never auto-advances (§7.10)."""
     return tuple(sorted(s for s, b in plan.sites.items() if "deterministic" not in b.config.get("props", ())))
-
-
-def diff(a: Plan, b: Plan) -> dict[str, tuple[Any, Any]]:
-    """What changed from `a` to `b`: "<field>", "unit:<name>", "site:<key>", "engine:<setting>" or "source:<option>" ->
-    (old, new), None where absent."""
-    out: dict[str, tuple[Any, Any]] = {f: (getattr(a, f), getattr(b, f))
-                                       for f in ("model_id", "fingerprint_class", "recipe", "commit", "uv_lock")
-                                       if getattr(a, f) != getattr(b, f)}
-    for kind, x, y in (("unit", a.units, b.units), ("site", a.sites, b.sites), ("engine", a.engine, b.engine),
-                       ("source", a.sources, b.sources)):
-        for key in sorted(x.keys() | y.keys()):
-            if key not in x or key not in y or canonical_hash(x[key]) != canonical_hash(y[key]):
-                out[f"{kind}:{key}"] = (x.get(key), y.get(key))
-    return out
 
 
 def dumps(lock: Lock) -> str:
@@ -146,6 +95,3 @@ def _git(cwd: pathlib.Path, *args: str) -> str | None:
     except (OSError, subprocess.CalledProcessError):
         return None
 
-
-def _sha256(data: bytes) -> str:
-    return "sha256:" + hashlib.sha256(data).hexdigest()

@@ -129,13 +129,8 @@ class BuildCtx(Protocol):
 
 
 class Unit(Protocol):
-    """A built component (op, norm, block, mixer, ffn …), typically a `torch.nn.Module`.
-
-    If a unit defines `finalize_weights(ctx: BuildCtx)`, the core calls it once after loading and before graph
-    capture (design §5.1); derived buffers are created there. If it defines `bind_kernels(ctx: BuildCtx)`, the core
-    calls it after every unit has finalized (merges included): kernels that depend on the loaded weights (e.g. a
-    quantized layout adopted with `adopt(ctx, name, qtensor)`) are selected there.
-    """
+    """A built component (op, norm, block, mixer, ffn …), typically a `torch.nn.Module`. Optional hooks
+    (`holon.api.hooks`): FinalizesWeights, BindsKernels, AdoptsWeights."""
 
     def forward(self, *args: Any) -> Any: ...
 
@@ -171,5 +166,4 @@ class ModelPlugin(Protocol):
     def bundle(self, source: WeightSource) -> FrontendBundle:
         """Tokenizer, chat template and parsers for the checkpoint `source` reads."""
 
-    # Optional: `draft_head(cfg, source, name) -> AuxSpec | None`, a draft head stored with the checkpoint (e.g. a
-    # multi-token-prediction layer), built only when a drafter asks for it (`TargetView.draft_head`).
+    # Optional hooks (`holon.api.hooks`): DeclaresDraftHead, TrainedContext.

@@ -106,6 +106,9 @@ def _build(sm: int, nvcc: str, out: pathlib.Path, jobs: int, verbose: bool) -> N
     (out / "build.ninja").write_text("".join(lines))
     subprocess.run(["ninja", "-C", str(out), "-j", str(jobs)] + ([] if verbose else ["--quiet"]), check=True)
     (out / "ext").mkdir(exist_ok=True)
+    # The torch module is C++ only, but torch asks for an arch list, which it takes from the GPUs when unset: name the
+    # target so a host without a GPU (an image build) can build too.
+    os.environ["TORCH_CUDA_ARCH_LIST"] = f"{sm // 10}.{sm % 10}"
     cpp_extension.load(name=NAME, sources=[str(CSRC / "torch_ext.cpp")], extra_include_paths=[str(CSRC)],
                        extra_cflags=["-O2"], extra_ldflags=[str(out / "libggml_cuda.a")],
                        build_directory=str(out / "ext"), with_cuda=True, verbose=verbose)

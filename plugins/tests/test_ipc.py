@@ -54,7 +54,7 @@ def test_engine_process_serves_concurrent_streams(tiny_checkpoint, tiny_case):  
     assert blocked[0][0] == expected[0] and elapsed > 19 * BLOCKED_POLL_S / 2
 
 
-def _failing_engine(config, endpoints):
+def _failing_engine(config, endpoints, lock=None):
     """Engine-process target whose third step raises (runs in the spawned child)."""
     from holon.core.engine import Engine
     from holon.core.ipc import serve

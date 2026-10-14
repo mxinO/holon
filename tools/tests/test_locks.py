@@ -81,12 +81,13 @@ def test_nearest_class_prefers_own_then_same_gpu_then_same_sm(tmp_path):
     locks.append(tmp_path, Lock(_plan(cls="rtx-5090/cu130-torch2.11"), sm=120))
     assert plans.nearest_class(tmp_path, MODEL, fp)[0].plan.fingerprint_class == "rtx-5090/cu130-torch2.11"
     locks.append(tmp_path, Lock(_plan(cls="rtx-a5000/cu128-torch2.10"), sm=86))
-    lock, unverified = plans.nearest_class(tmp_path, MODEL, fp)
+    lock, unverified, path = plans.nearest_class(tmp_path, MODEL, fp)
+    assert path.parent.name == "cu128-torch2.10" and path.name == "1.lock"
     assert lock.plan.fingerprint_class == "rtx-a5000/cu128-torch2.10" and unverified       # same SM beats toolchain
     locks.append(tmp_path, Lock(_plan(cls="rtx-3090/cu128-torch2.10"), sm=86))
     assert plans.nearest_class(tmp_path, MODEL, fp)[0].plan.fingerprint_class == "rtx-3090/cu128-torch2.10"
     locks.append(tmp_path, Lock(_plan(cls=fp.cls), sm=86))
-    lock, unverified = plans.nearest_class(tmp_path, MODEL, fp)
+    lock, unverified, _ = plans.nearest_class(tmp_path, MODEL, fp)
     assert lock.plan.fingerprint_class == fp.cls and not unverified
 
 
@@ -95,29 +96,28 @@ def test_outdated_locks_are_treated_as_missing(tmp_path):
     locks.append(tmp_path, Lock(_plan(src="old"), sm=86))
     locks.append(tmp_path, Lock(_plan(cls="rtx-3090/cu130-torch2.11", src="new"), sm=86))
     current = {"holon": "core", "std.ops": "new", "kernels.fast": "ffff"}
-    lock, unverified = plans.nearest_class(tmp_path, MODEL, fp, current)
+    lock, unverified, _ = plans.nearest_class(tmp_path, MODEL, fp, current)
     assert lock.plan.fingerprint_class == "rtx-3090/cu130-torch2.11" and unverified
     assert plans.nearest_class(tmp_path, MODEL, fp, current | {"std.ops": "newer"}) is None
 
 
 def test_diff_lists_changed_units_and_sites():
     a, b = _plan(), _plan(decode="std.mixers.gqa", src="bbbb", commit="c2", step=512)
-    d = locks.diff(a, b)
+    d = plans.diff(a, b)
     assert sorted(d) == ["commit", "engine:max_step_tokens", "site:kv/attention.paged_decode@1", "unit:std.ops"]
     assert d["unit:std.ops"][1].src == "bbbb" and d["engine:max_step_tokens"] == (4096, 512)
     smaller = dataclasses.replace(a, units={k: v for k, v in a.units.items() if k != "kernels.fast"})
-    assert locks.diff(a, smaller) == {"unit:kernels.fast": (a.units["kernels.fast"], None)}
-    assert locks.diff(a, a) == {}
+    assert plans.diff(a, smaller) == {"unit:kernels.fast": (a.units["kernels.fast"], None)}
+    assert plans.diff(a, a) == {}
 
 
-def test_lock_overrides_rebuild_settings_and_pin_each_op():
+def test_lock_overrides_rebuild_settings_and_prefer_each_op():
     assert plans.lock_overrides(Lock(_plan())) == {
         "dtype": torch.bfloat16, "max_step_tokens": 4096, "cuda_graphs": True,
-        "kernels": {"attention.paged_decode": "kernels.fast", "rmsnorm": "std.ops"}}
-    plan = _plan()
+        "kernel_preferences": {"attention.paged_decode": "kernels.fast", "rmsnorm": "std.ops"}}
+    plan = _plan()       # an op bound to two providers (preferences are per op) is left to default priority
     split = dataclasses.replace(plan, sites=plan.sites | {"other/rmsnorm@1": Binding("kernels.fast")})
-    with pytest.raises(ValueError, match="pins are per op"):
-        plans.lock_overrides(Lock(split))
+    assert plans.lock_overrides(Lock(split))["kernel_preferences"] == {"attention.paged_decode": "kernels.fast"}
 
 
 def test_uncovered_sites_lack_determinism():

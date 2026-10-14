@@ -33,7 +33,7 @@ async def measure(model: str, kills: int, every: int) -> dict:
     prompt = list(range(1000, 1064))
     # Deliberate kills: the stream must survive them all, and a lone stream killed again and again is not poison.
     policy = Policy(max_crashes=kills + 1, poison_crashes=kills + 1)
-    async with supervised([EngineConfig(model=model)], policy) as sup:
+    async with supervised([(EngineConfig(model=model), None)], policy) as sup:
         tokens, stalls, restarts, killed_at = [], [], [], None
         async for d in sup.generate(prompt, params):
             now = time.perf_counter()

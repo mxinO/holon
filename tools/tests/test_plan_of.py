@@ -27,6 +27,7 @@ def with_fake_kernel(tmp_path, monkeypatch) -> PluginSet:
         entry = "plugin:Plugin"
         slot = "kernel"
         license = "Apache-2.0"
+        core_abi = ">=0.1,<0.2"
 
         [resources]
         provides = ["kernel.rmsnorm@1"]
@@ -68,7 +69,7 @@ def test_plan_is_stable_across_builds(tiny_engine, tiny_checkpoint):
 
 
 def test_plan_moves_with_engine_settings(tiny_engine):
-    changed = locks.diff(locks.plan_of(tiny_engine()), locks.plan_of(tiny_engine(max_step_tokens=8)))
+    changed = plans.diff(locks.plan_of(tiny_engine()), locks.plan_of(tiny_engine(max_step_tokens=8)))
     assert changed == {"engine:max_step_tokens": (16, 8)}
 
 
@@ -76,7 +77,7 @@ def test_plan_moves_with_a_kernel_pin(tiny_engine, with_fake_kernel):
     default = locks.plan_of(tiny_engine(with_fake_kernel))
     pinned = locks.plan_of(tiny_engine(with_fake_kernel, kernels={"rmsnorm": FAKE}))
     assert FAKE not in default.units                # loaded only as a candidate: not code that runs
-    changed = locks.diff(default, pinned)
+    changed = plans.diff(default, pinned)
     assert pinned.plan_id != default.plan_id and changed.pop(f"unit:{FAKE}") == (None, pinned.units[FAKE])
     assert changed and all(key.startswith("site:") and key.endswith("/rmsnorm@1") for key in changed)
     assert {new.impl for _, new in changed.values()} == {FAKE}
@@ -157,4 +158,4 @@ def test_a_drafters_checkpoint_is_planned_by_identity(tiny_checkpoint, cpu_flags
     text = locks.dumps(Lock(plan))
     assert str(tmp_path) not in text and plans.loads(text).plan.plan_id == plan.plan_id
     other = dataclasses.replace(plan, sources={"dflash.path": open_source(engine.plugins, str(drafts[1])).identity()})
-    assert other.plan_id != plan.plan_id and "source:dflash.path" in locks.diff(plan, other)
+    assert other.plan_id != plan.plan_id and "source:dflash.path" in plans.diff(plan, other)

@@ -34,6 +34,10 @@ class Logprobs:
     top: list[list[float]]
 
 
+FINISH_REASONS = ("stop", "length", "abort", "error")      # `TokenDelta.finish_reason`
+ERROR_KINDS = ("client", "busy", "engine")                 # the core's `RequestError` kinds (plugins may add theirs)
+
+
 @dataclasses.dataclass(slots=True)
 class TokenDelta:
     rid: str
@@ -41,9 +45,9 @@ class TokenDelta:
     index: int = 0                     # which of the request's `n` sequences
     logprobs: Logprobs | None = None
     prompt_logprobs: Logprobs | None = None
-    finish_reason: str | None = None   # "stop" | "length" | "abort" | "error"
+    finish_reason: str | None = None   # of FINISH_REASONS
     error: str | None = None           # why the request was rejected (finish_reason "error")
-    kind: str | None = None            # and the error's kind: "client" | "busy" | "engine" (`RequestError`)
+    kind: str | None = None            # and the error's kind (ERROR_KINDS; `RequestError`)
 
 
 @dataclasses.dataclass(slots=True)

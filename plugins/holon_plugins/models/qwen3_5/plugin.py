@@ -7,6 +7,11 @@ class Plugin:
     recipe = staticmethod(recipe)
     draft_head = staticmethod(draft_head)
 
+    @staticmethod
+    def trained_context(cfg, source) -> int | None:
+        text = cfg if source == "gguf" else cfg.get("text_config", cfg)    # HF configs nest it (GGUF: mapped)
+        return text.get("max_position_embeddings")
+
     def register(self, regs) -> None:
         # Value transforms of the weight maps (applied in f32: exact for these values, see recipe.py).
         regs.transforms.add("qwen3_5.squeeze", lambda t: t.squeeze(1))                  # conv1d [C, 1, K] -> [C, K]

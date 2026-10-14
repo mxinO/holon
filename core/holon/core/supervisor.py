@@ -18,16 +18,17 @@ through `max_crashes` crashes (in flight or waiting) fails rather than wait for 
 any request can stall.
 
 Rollback. Every crash no quarantine explains is charged to the configuration. `rollback_crashes` charges, or as many
-failed starts in a row, restart the engine on the previous entry of its config history (rollback = restart on the
-previous lock, §4.4). With no previous entry the engine keeps restarting on the oldest one — requests stay bounded by
-`max_crashes` — unless it cannot even start: then the supervisor gives up, every request fails and `failed()`
-returns, so the server exits and its process manager decides what next.
+failed starts in a row — or one start failing in a way every retry would (a missing plugin, another plugin ABI,
+state that does not fit: `ipc.FAILED_KINDS`) — restart the engine on the previous entry of its config history. With
+no previous entry the engine keeps restarting on the oldest one — requests stay bounded by `max_crashes` — unless it
+cannot even start: then the supervisor gives up, every request fails and `failed()` returns, so the server exits and
+its process manager decides what next.
 
 Strikes and charges are forgotten once an engine has served `stable_s` without crashing — measured in engine uptime,
 not wall time, so slow restarts and hang timeouts cannot make repeated crashes look unrelated.
 
-Seam: the history is a plain list of engine configs, oldest first. The lock registry (`plans/<model>/<class>/*.lock`)
-will supply it — the newest lock last — once lock tooling lands; nothing else here depends on where it comes from.
+The history is a list of (engine config, the lock it was configured from or None), oldest first: `holon serve` gives
+[defaults + flags, lock + flags] (release design D2); the engine reports its plan against that lock.
 """
 from __future__ import annotations
 
@@ -43,7 +44,7 @@ from typing import Any
 
 from holon.api import SamplingParams, TokenDelta, sequence_seed
 
-from .ipc import EngineProcess, engine_main
+from .ipc import EngineProcess, StartFailed, engine_main
 
 _CANARY = [1, 2, 3, 4], SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True)
 
@@ -333,12 +334,13 @@ class Supervisor:
         failed = 0                                      # consecutive failed starts
         while self._failure is None:
             begin = time.monotonic()
+            config, lock = self.history[self.version]
             try:
-                engine = await asyncio.wait_for(EngineProcess.start(self.history[self.version], self._target),
+                engine = await asyncio.wait_for(EngineProcess.start(config, self._target, lock),
                                                 self.policy.start_timeout)
             except (RuntimeError, TimeoutError) as e:
                 failed += 1
-                if failed == self.policy.rollback_crashes:
+                if failed == self.policy.rollback_crashes or isinstance(e, StartFailed) and e.kind != "error":
                     failed = 0
                     if not self._roll_back():
                         self._give_up(f"the engine fails to start on every configuration in its history "

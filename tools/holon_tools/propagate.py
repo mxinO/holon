@@ -27,6 +27,7 @@ from typing import Any, Protocol
 
 import torch
 from holon.api import Binding, Lock, Plan, UnitPin, canonical_hash
+from holon.core import plans
 from holon.core.engine import Engine, EngineConfig
 from holon_judge import snapshot
 from holon_judge.compare import compare
@@ -41,7 +42,7 @@ from . import locks
 @dataclasses.dataclass(frozen=True)
 class Outcome:
     verdict: str                       # unchanged | advance | approve | fail
-    changes: dict[str, tuple[Any, Any]]  # locks.diff(current lock's plan, new plan)
+    changes: dict[str, tuple[Any, Any]]  # plans.diff(current lock's plan, new plan)
     evidence: list[str]
     lock: Lock | None = None           # what to append (advance; approve once approved)
     snapshot: Snapshot | None = None   # the new lock's snapshot trace (None: not run-identical)
@@ -67,7 +68,7 @@ def decide(current: Lock | None, checks: Checks, sm: int, previous: Snapshot | N
     """The outcome for a model whose newest lock is `current` (None: a new model; its first lock always needs an
     approval). `previous` is `current`'s stored snapshot, used only to locate a divergence."""
     plan = checks.plan()
-    changes = locks.diff(current.plan, plan) if current else {}
+    changes = plans.diff(current.plan, plan) if current else {}
     if current is not None and changes.keys() <= {"commit"}:
         return Outcome("unchanged", changes, [f"closure unchanged since commit {current.plan.commit}"])
     first, again = checks.snapshot(), checks.snapshot()
@@ -138,13 +139,14 @@ class EngineChecks:
     cached blocks, the process's own growth, another session's load); an explicit `config.state_memory` wins."""
 
     def __init__(self, config: EngineConfig, trace: list[Request], l2: L2Inputs | None,
-                 pool_bytes: int | None = None) -> None:
+                 pool_bytes: int | None = None, model_id: str | None = None) -> None:
         self.config, self.trace, self.inputs, self.pool_bytes = config, trace, l2, pool_bytes
+        self.model_id = model_id           # the build's existing history, if it has one (else the checkpoint identity)
         self._built: Engine | None = None
 
     def plan(self) -> Plan:
         self._built = self._pinned()
-        return locks.plan_of(self._built)
+        return locks.plan_of(self._built, self.model_id)
 
     def snapshot(self) -> Snapshot:
         engine, self._built = self._built, None       # the plan's engine runs the first trace: one build fewer

@@ -34,6 +34,9 @@ class Constraint:
         return self.cpu_isa <= isa
 
 
+KERNEL_PROPS = frozenset({"graph_safe", "deterministic", "batch_invariant", "needs_host_lens"})   # `KernelSpec.props`
+
+
 @dataclasses.dataclass(frozen=True, eq=False)
 class KernelSpec:
     op: str
@@ -43,9 +46,13 @@ class KernelSpec:
     out_layouts: dict[str, str] = dataclasses.field(default_factory=dict)
     requires: Constraint = Constraint()
     supports: Callable[[Any], bool] | None = None  # shape predicate, evaluated at plan time
-    props: frozenset[str] = frozenset()            # graph_safe, deterministic, batch_invariant, needs_host_lens
+    props: frozenset[str] = frozenset()            # of KERNEL_PROPS
     config: dict[str, Any] = dataclasses.field(default_factory=dict)       # pinned launch config (no autotune)
     priority: int = 0                               # agent variants register < 0 until promoted
+
+    def __post_init__(self) -> None:
+        if not self.props <= KERNEL_PROPS:
+            raise ValueError(f"{self.provider} {self.op}: unknown kernel props {sorted(self.props - KERNEL_PROPS)}")
 
 
 class Registry[T](Protocol):

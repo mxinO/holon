@@ -159,7 +159,8 @@ request, never per token, so a native implementation pays the Python callback co
 
 ### 4.1 Manifest
 
-`plugin.toml` at the package root; registered via entry point group `holon.plugins` (value = path to manifest).
+`plugin.toml` at the package root; registered via entry point group `holon.plugins` (name = the plugin's name, value =
+the plugin's package, whose directory holds `plugin.toml`).
 
 ```toml
 [plugin]
@@ -171,8 +172,7 @@ derived_from = ""                         # optional; copied recipes / explicit 
 entry     = "lfu_decay:Plugin"            # imported only if selected
 slot      = "placement_policy"
 license   = "Apache-2.0"                  # SPDX; provenance hash for borrowed code in [provenance]
-core_abi  = ">=0.1,<0.2"
-slot_abi  = "1"
+core_abi  = ">=0.1,<0.2"                  # required; checked before anything else in the manifest
 
 [resources]
 provides = ["placement.expert@1"]
@@ -195,6 +195,9 @@ swap_cap  = { type = "int",   range = [0, 512],     default = 96, log = true, ap
 
 [support]
 platforms = ["cuda"]                  # device names only; SM limits live in KernelSpec.requires
+
+# [build]                  # plugins with native code (kernels): `python -m <package>.<module> --sm N` builds it
+# module = "prebuild"      # ahead of time for SM N (`holon prebuild`; the CLI is part of the ABI)
 ```
 
 Resource names are **typed**: each `ns.name@major` is registered in `holon.api.resources` and bound to a
@@ -215,7 +218,7 @@ A `Ref("a.b.c@1")` is served by the installed plugin whose name is the longest p
 (resources, numerics, graph policy, depth, ordering, shape axes) lives in the manifest; runtime classes never repeat
 it.
 
-Every slot has an ABI version and a judge-owned contract suite (§10.3).
+Every slot has a judge-owned contract suite (§10.3); per-slot ABI versions return when a slot needs one (§4.5).
 
 ### 4.3 Resolution → Plan
 
@@ -296,8 +299,8 @@ supervisor's job, with `unverified` pins as soft preferences), L2-regression-vs-
 
 ### 4.5 Versioning
 
-- `core_abi` and each `slot_abi` are independent semver. Changing the attention metadata ABI does not touch the
-  placement-policy ABI.
+- `core_abi` is semver over `holon.api.ABI`, listed in `core/abi.txt` and checked in CI (`scripts/ci/check_abi.py`);
+  per-slot versions (`slot_abi`) return, additively, when a slot first needs one (release design §7).
 - Units follow the one-version rule with additive-only interface minors, never-changing defaults and
   "breaker pays" majors; changes reach each model only through propagation (§4.6) — models do not individually
   adopt std versions.

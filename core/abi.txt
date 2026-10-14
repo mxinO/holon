@@ -1,0 +1,639 @@
+abi 0.1
+
+# holon.api
+const ABI = '0.1'
+dataclass Abort
+  rid: str
+dataclass AuxSpec frozen
+  unit: Ref
+  layers: tuple[LayerDecl, ...]
+  weights: WeightMap
+dataclass Batch
+  plan: BatchPlan
+  dev: DeviceBatch
+dataclass BatchPlan
+  step: int
+  slots: np.ndarray
+  n_query: np.ndarray
+  n_logits: np.ndarray
+  start_upper: np.ndarray
+  token_src: np.ndarray
+  host_tokens: np.ndarray
+  shape: ShapeKey
+  mem_ops: list[MemOp] = list()
+  publishes: list[InStepPublish] = list()
+  draft_k: int = 0
+  ext: dict[str, Any] = dict()
+dataclass Binding frozen
+  impl: str
+  config: dict[str, Any] = dict()
+  tunables: dict[str, Any] = dict()
+protocol BuildCtx() required, implemented by core
+  unit(self, ref: 'Ref', **site: 'Any') -> 'Unit'
+  select_kernel(self, op: 'str', *, site: 'str', **facts: 'Any') -> 'KernelSpec'
+  state(self, spec_name: 'str', layer: 'int') -> 'tuple[StateSpec, Pool] | None'
+  static(self, name: 'str', shape: 'tuple[int, ...]', dtype: 'torch.dtype') -> 'torch.Tensor'
+  workspace(self, name: 'str', nbytes: 'int') -> 'torch.Tensor'
+  pool(self, name: 'str', *, unit_bytes: 'int', segments: 'int' = 1, min_units: 'int' = 0, pref_units: 'int' = 0) -> 'Pool'
+  aux_model(self, namespace: 'str', spec: 'AuxSpec', tensors: 'Iterable[tuple[str, torch.Tensor | QTensor]]', options: 'Mapping[str, Any] | None' = None) -> 'torch.nn.Module'
+  weight_source(self, path: 'str') -> 'WeightSource'
+  tap(self, layer: 'int', consume: 'Callable[[torch.Tensor, StepCtx], None]') -> 'None'
+  device: torch.device
+  dtype: torch.dtype
+  fingerprint: Fingerprint
+  options: Mapping[str, Any]
+enum Cardinality
+  SINGLE = 'single'
+  PER_SITE = 'per_site'
+  ORDERED_MULTI = 'ordered_multi'
+  MULTI = 'multi'
+dataclass Constraint frozen
+  sm_min: int | None = None
+  sm_max: int | None = None
+  sms: frozenset[int] = frozenset()
+  devices: frozenset[str] = frozenset({'cuda'})
+  cpu_isa: frozenset[str] = frozenset()
+  libs: frozenset[str] = frozenset()
+  allows(self, device: 'str', sm: 'int | None', isa: 'frozenset[str]' = frozenset()) -> 'bool'
+dataclass Converter frozen
+  src: str
+  dst: str
+  fn: Callable[..., QTensor]
+  lossless: bool = True
+  cost: float = 1.0
+dataclass DeviceBatch
+  input_ids: torch.Tensor
+  positions: torch.Tensor
+  query_start: torch.Tensor
+  slots: torch.Tensor
+  logits_index: torch.Tensor
+  logits_rows: torch.Tensor
+  meta: dict[str, Any] = dict()
+protocol Dialect() required, implemented by plugins
+  detect(self, meta: 'Mapping[str, Any]') -> 'bool'
+  source_layout(self, tensor_name: 'str', meta: 'Mapping[str, Any]') -> 'Layout'
+  name: str
+protocol DraftPolicy() required, implemented by plugins
+  k(self, seqs: 'list[Seq]') -> 'int'
+  observe(self, seq: 'Seq', k: 'int', n_draft: 'int', n_accept: 'int') -> 'None'
+protocol Drafter() required, implemented by plugins
+  run(self, ctx: 'StepCtx', h: 'torch.Tensor') -> 'None'
+protocol DrafterPlugin() required, implemented by plugins
+  build(self, ctx: 'BuildCtx', target: 'TargetView') -> 'Drafter'
+const ERROR_KINDS = ('client', 'busy', 'engine')
+protocol EngineClient() required, implemented by core
+  generate(self, token_ids: 'list[int]', params: 'SamplingParams', rid: 'str | None' = None, resume_output: 'int' = 0) -> 'AsyncIterator[TokenDelta]'
+  abort(self, rid: 'str') -> 'None'
+  stats(self) -> 'dict[str, Any]'
+dataclass EngineRequest
+  rid: str
+  token_ids: list[int]
+  params: SamplingParams
+  resume_output: int = 0
+dataclass Event
+  plan_id: str
+  step: int
+  ts_ns: int
+  phase_us: dict[str, float]
+  n_seqs: int
+  n_tokens: int
+  shape: str
+  pools: dict[str, tuple[int, int]] = dict()
+  prefix: dict[str, int] = dict()
+  spec: dict[str, int] = dict()
+  counters: dict[str, dict[str, Any]] = dict()
+const FINISH_REASONS = ('stop', 'length', 'abort', 'error')
+dataclass Fingerprint frozen
+  gpu: str
+  sm: int
+  vram_gib: int
+  toolchain: str
+  num_sms: int = 0
+protocol FrontendBundle() required, implemented by plugins
+  render_chat(self, messages: 'list[dict[str, Any]]', tools: 'list[dict[str, Any]] | None' = None, add_generation_prompt: 'bool' = True, **template_kwargs: 'Any') -> 'list[int]'
+  model_name: str
+  tokenizer: Tokenizer
+  tool_format: str | None
+  reasoning_format: str | None
+protocol FrontendPlugin() required, implemented by plugins
+  serve(self, client: 'EngineClient', bundle: 'FrontendBundle', host: 'str', port: 'int', options: 'dict[str, object]') -> 'None'
+dataclass HitLen frozen
+  length: int
+  cost: float = 0.0
+dataclass InStepPublish frozen
+  row: int
+  spec: str
+  offset: int
+  payload: Payload
+const KERNEL_PROPS = ['batch_invariant', 'deterministic', 'graph_safe', 'needs_host_lens']
+protocol KernelRegistry() required, implemented by core
+  add(self, op: 'str', spec: 'KernelSpec') -> 'None'
+  get(self, op: 'str') -> 'list[KernelSpec]'
+dataclass KernelSpec frozen
+  op: str
+  provider: str
+  impl: Callable[..., Any]
+  in_layouts: dict[str, str] = dict()
+  out_layouts: dict[str, str] = dict()
+  requires: Constraint = Constraint(sm_min=None, sm_max=None, sms=frozenset(), devices=frozenset({'cuda'}), cpu_isa=frozenset(), libs=frozenset())
+  supports: Callable[[Any], bool] | None = None
+  props: frozenset[str] = frozenset()
+  config: dict[str, Any] = dict()
+  priority: int = 0
+dataclass LayerDecl frozen
+  mixer: Ref
+  ffn: Ref
+  kind: str = ''
+dataclass Layout frozen
+  scheme: Scheme
+  name: str
+  params: tuple[tuple[str, Any], ...] = ()
+  readable_by: frozenset[str] = frozenset({'cuda'})
+protocol Ledger() required, implemented by core
+  request(self, name: 'str', *, unit_bytes: 'int', min_units: 'int', pref_units: 'int | None' = None, tokens_per_unit: 'int | None' = None, segments: 'int' = 1, priority: 'int' = 0, resize: 'ResizeMode' = 'fixed', device: 'torch.device | None' = None) -> 'Pool'
+  pool(self, name: 'str') -> 'Pool'
+  materialize(self, budget_bytes: 'int | None') -> 'None'
+dataclass Lock frozen
+  plan: Plan
+  snapshot: str | None = None
+  uncovered: tuple[str, ...] = ()
+  sm: int = 0
+protocol LogitsProcessor() required, implemented by plugins
+  open(self, rid: 'str', params: 'SamplingParams', prompt: 'list[int]') -> 'bool'
+  ready(self, rid: 'str') -> 'bool'
+  commit(self, seq: 'Seq', out: 'list[int]') -> 'None'
+  close(self, rid: 'str') -> 'None'
+  fill(self, rows: 'list[MaskRow]', buf: 'np.ndarray') -> 'None'
+  apply(self, logits: 'torch.Tensor', mask: 'torch.Tensor', rows: 'torch.Tensor') -> 'None'
+  mask_width: int
+protocol LogitsProcessorPlugin() required, implemented by plugins
+  build(self, ctx: 'BuildCtx', vocab: 'VocabView') -> 'LogitsProcessor'
+dataclass Logprobs
+  token: list[float]
+  top_ids: list[list[int]]
+  top: list[list[float]]
+dataclass Manifest frozen
+  name: str
+  version: str
+  entry: str
+  slot: str
+  license: str
+  core_abi: str
+  variant_of: str | None = None
+  implements: str | None = None
+  derived_from: str | None = None
+  provides: tuple[Resource, ...] = ()
+  requires: tuple[Resource, ...] = ()
+  numerics: Numerics = 'exact'
+  graph_policy: GraphPolicy = 'full'
+  after: tuple[str, ...] = ()
+  before: tuple[str, ...] = ()
+  shape_axes: dict[str, tuple[Any, ...]] = dict()
+  dependencies: tuple[str, ...] = ()
+  reference: str | None = None
+  tunables: dict[str, Tunable] = dict()
+  platforms: tuple[str, ...] = ()
+  detect: tuple[str, ...] = ()
+  provenance: Provenance | None = None
+  build: str | None = None
+  classmethod load(cls, path: 'pathlib.Path') -> 'Manifest'
+dataclass MaskRow
+  seq: Seq
+  start: int
+  n: int
+  drafts: list[int]
+dataclass MemOp frozen
+  src_pool: str
+  src_units: np.ndarray
+  dst_pool: str
+  dst_units: np.ndarray
+  phase: Literal['pre_forward', 'post_sample'] = 'pre_forward'
+protocol Mixer(Unit) required, implemented by plugins
+  forward(self, x: 'torch.Tensor', ctx: 'StepCtx') -> 'torch.Tensor'
+protocol ModelPlugin() required, implemented by plugins
+  recipe(self, cfg: 'Mapping[str, Any]', source: 'str') -> 'ModelSpec'
+  bundle(self, source: 'WeightSource') -> 'FrontendBundle'
+dataclass ModelSpec frozen
+  hidden: int
+  vocab: int
+  layers: tuple[LayerDecl, ...]
+  block: Ref
+  embed: Ref
+  norm: Ref
+  lm_head: Ref
+  weights: WeightMap
+  position_fn: str | None = None
+dataclass Paged frozen
+  unit_bytes: int
+  tokens_per_unit: int
+dataclass Pages
+  page: int
+  table: torch.Tensor
+  host_table: np.ndarray
+  lens: torch.Tensor
+  write_index: torch.Tensor
+const ParseEvent = holon.api.frontend.Text | holon.api.frontend.Reasoning | holon.api.frontend.ToolCallStart | holon.api.frontend.ToolArgsDelta | holon.api.frontend.ToolCallEnd
+dataclass Payload frozen
+  units: tuple[int, ...]
+  pool: str
+  tier: str = 'vram'
+dataclass Plan frozen
+  model_id: str
+  fingerprint_class: str
+  recipe: str
+  commit: str
+  uv_lock: str
+  units: dict[str, UnitPin]
+  sites: dict[str, Binding]
+  engine: dict[str, Any] = dict()
+  sources: dict[str, str] = dict()
+protocol PlanTransform() required, implemented by plugins
+  transform(self, plan: 'BatchPlan', seqs: 'list[Seq]') -> 'BatchPlan'
+protocol Planner() required, implemented by plugins
+  plan_bounds(self, batch: 'Batch', pages: 'Pages | None') -> 'Any'
+  prepare_device(self, meta: 'Any', ctx: 'StepCtx') -> 'None'
+protocol Platform() required, implemented by plugins
+  fingerprint(self) -> 'Fingerprint'
+  device(self, index: 'int' = 0) -> 'torch.device'
+  stream(self) -> 'Any'
+  event(self) -> 'Any'
+  mem_info(self) -> 'tuple[int, int]'
+  pinned_empty(self, shape: 'tuple[int, ...]', dtype: 'torch.dtype') -> 'torch.Tensor'
+  capture(self, fn: 'Callable[[], None]', pool: 'Any' = None) -> 'Callable[[], None]'
+  write_value(self, flag: 'torch.Tensor', value: 'int') -> 'None'
+  wait_value(self, flag: 'torch.Tensor', value: 'int') -> 'None'
+protocol Plugin() required, implemented by plugins
+  register(self, regs: 'Registries') -> 'None'
+protocol Pool() required, implemented by core
+  view(self, dtype: 'torch.dtype', shape: 'tuple[int, ...]') -> 'torch.Tensor'
+  alloc(self, n: 'int') -> 'np.ndarray'
+  incref(self, units: 'np.ndarray') -> 'None'
+  decref(self, units: 'np.ndarray') -> 'None'
+  copy(self, src: 'torch.Tensor', dst: 'torch.Tensor') -> 'None'
+  name: str
+  device: torch.device
+  unit_bytes: int
+  segments: int
+  capacity: int
+  base: int
+  capacity_dev: torch.Tensor
+protocol PrefixView() required, implemented by core
+  payload(self, block: 'int') -> 'Payload | None'
+  blocks(self, upto: 'int') -> 'int'
+  block: int
+dataclass Provenance frozen
+  source: str
+  commit: str
+  license: str
+  files: tuple[str, ...] = ()
+dataclass QTensor
+  layout: Layout
+  logical_shape: tuple[int, ...]
+  parts: dict[str, torch.Tensor]
+dataclass Reasoning
+  text: str
+dataclass Ref frozen
+  name: str
+  major: int
+  params: tuple[tuple[str, Any], ...]
+  _key: str
+  param(self, key: 'str', default: 'Any' = None) -> 'Any'
+  with_(self, **params: 'Any') -> 'Ref'
+protocol Registries() required, implemented by core
+  ops: Registry[Callable[..., Any]]
+  kernels: KernelRegistry
+  units: Registry[Callable[..., Any]]
+  state_kinds: Registry[StateKindFactory]
+  schemes: Registry[SchemeImpl]
+  converters: Registry[Converter]
+  dialects: Registry[Dialect]
+  transforms: Registry[Callable[[Any], Any]]
+  weight_sources: Registry[Callable[..., Any]]
+protocol Registry() required, implemented by core
+  add(self, key: 'str', value: 'T') -> 'None'
+  get(self, key: 'str') -> 'T'
+  items(self) -> 'Iterable[tuple[str, T]]'
+class RequestError(ValueError)
+dataclass Resource frozen
+  name: str
+  major: int
+  classmethod parse(cls, text: 'str') -> 'Resource'
+const SLOTS = {'model': <Cardinality.SINGLE: 'single'>, 'platform': <Cardinality.SINGLE: 'single'>, 'launcher': <Cardinality.SINGLE: 'single'>, 'schedule_policy': <Cardinality.SINGLE: 'single'>, 'sampler': <Cardinality.SINGLE: 'single'>, 'verifier': <Cardinality.SINGLE: 'single'>, 'draft_policy': <Cardinality.SINGLE: 'single'>, 'eviction_policy': <Cardinality.SINGLE: 'single'>, 'unit': <Cardinality.PER_SITE: 'per_site'>, 'kernel': <Cardinality.PER_SITE: 'per_site'>, 'state_kind': <Cardinality.PER_SITE: 'per_site'>, 'placement_policy': <Cardinality.PER_SITE: 'per_site'>, 'codec': <Cardinality.PER_SITE: 'per_site'>, 'weight_source': <Cardinality.PER_SITE: 'per_site'>, 'plan_transform': <Cardinality.ORDERED_MULTI: 'ordered_multi'>, 'logits_processor': <Cardinality.ORDERED_MULTI: 'ordered_multi'>, 'checkpoint_policy': <Cardinality.ORDERED_MULTI: 'ordered_multi'>, 'frontend': <Cardinality.MULTI: 'multi'>, 'dialect': <Cardinality.MULTI: 'multi'>, 'converter': <Cardinality.MULTI: 'multi'>, 'tier': <Cardinality.MULTI: 'multi'>, 'mover': <Cardinality.MULTI: 'multi'>, 'drafter': <Cardinality.MULTI: 'multi'>, 'encoder': <Cardinality.MULTI: 'multi'>, 'connector': <Cardinality.MULTI: 'multi'>, 'exporter': <Cardinality.MULTI: 'multi'>}
+dataclass SampleOut
+  tokens: torch.Tensor
+  logprobs: torch.Tensor | None = None
+  top_ids: torch.Tensor | None = None
+  top_logprobs: torch.Tensor | None = None
+protocol Sampler() required, implemented by plugins
+  admit(self, slot: 'int', params: 'SamplingParams') -> 'None'
+  sample(self, logits: 'torch.Tensor', ctx: 'StepCtx') -> 'SampleOut'
+  distribution(self, logits: 'torch.Tensor', ctx: 'StepCtx', rows: 'torch.Tensor | None' = None) -> 'torch.Tensor'
+  uniform(self, ctx: 'StepCtx', stream: 'int' = 0) -> 'torch.Tensor'
+  logprobs(self, logits: 'torch.Tensor', tokens: 'torch.Tensor', ctx: 'StepCtx') -> 'SampleOut'
+  variant(self, slots: 'np.ndarray') -> 'Hashable'
+protocol SamplerPlugin() required, implemented by plugins
+  sampler(self, max_seqs: 'int', device: 'torch.device') -> 'Sampler'
+dataclass SamplingParams
+  temperature: float = 1.0
+  top_p: float = 1.0
+  top_k: int = 0
+  min_p: float = 0.0
+  presence_penalty: float = 0.0
+  frequency_penalty: float = 0.0
+  repetition_penalty: float = 1.0
+  n: int = 1
+  max_tokens: int | None = None
+  ignore_eos: bool = False
+  stop_token_ids: tuple[int, ...] = ()
+  seed: int | None = None
+  logprobs: int | None = None
+  prompt_logprobs: int | None = None
+  ext: dict[str, Any] = dict()
+dataclass Scale frozen
+  dtype: str
+  group: tuple[int, int]
+  level: int = 1
+protocol SchedulePolicy() required, implemented by plugins
+  order(self, waiting: 'list[Seq]') -> 'list[Seq]'
+  victim(self, running: 'list[Seq]') -> 'Seq | None'
+  mix_phases(self) -> 'bool'
+dataclass Scheme frozen
+  elem: str
+  scales: tuple[Scale, ...] = ()
+  zero_point: bool = False
+protocol SchemeImpl() required, implemented by plugins
+  dequant_ref(self, q: 'QTensor') -> 'torch.Tensor'
+dataclass Seq
+  rid: str
+  tokens: list[int]
+  params: SamplingParams
+  prompt_len: int = 0
+  index: int = 0
+  slot: int = -1
+  num_computed: int = 0
+  pending: int = 0
+  inexact: int = 0
+  n_draft: int = 0
+  drafts: list[int] = list()
+  constrained: bool = False
+  status: Status = <Status.WAITING: 'waiting'>
+  finish_reason: str | None = None
+  ext: dict[str, Any] = dict()
+dataclass SeqTable
+  num_computed: torch.Tensor
+  last_token: torch.Tensor
+  n_accept: torch.Tensor
+  draft_tokens: torch.Tensor
+  n_draft: torch.Tensor
+  draft_q_ids: torch.Tensor | None = None
+  draft_q: torch.Tensor | None = None
+protocol SeqView() required, implemented by core
+  units(self, spec: 'str') -> 'tuple[int, ...]'
+  slot: int
+  num_computed: int
+  tokens: tuple[int, ...]
+  prompt_len: int
+dataclass ShapeKey frozen
+  n_tokens: int
+  n_seqs: int
+  axes: tuple[tuple[str, Hashable], ...] = ()
+dataclass Slot frozen
+  unit_bytes: int
+  draft_slots: int = 0
+protocol StateKind() required, implemented by plugins
+  units_needed(self, seq: 'SeqView', new_tokens: 'int') -> 'int'
+  reclaimable(self, seq: 'SeqView') -> 'list[int]'
+  fork(self, src: 'SeqView', dsts: 'list[SeqView]') -> 'list[MemOp]'
+protocol StateKindFactory() required, implemented by plugins
+  __call__(self, spec: 'StateSpec', pool: 'Pool', ctx: 'BuildCtx') -> 'StateKind'
+dataclass StateSpec frozen
+  name: str
+  kind: str
+  shape: Paged | Slot
+  layers: tuple[int, ...]
+  layout: str
+  segments: int = 1
+  alignment: int = 1
+  page_group: str | None = None
+  in_step: int = 0
+enum Status
+  WAITING = 'waiting'
+  RUNNING = 'running'
+  BLOCKED = 'blocked'
+  PREEMPTED = 'preempted'
+  FINISHED = 'finished'
+protocol StepCtx() required, implemented by core
+  meta(self, group: 'str') -> 'Any'
+  pool(self, name: 'str') -> 'Any'
+  view(self, namespace: 'str') -> 'StepCtx'
+  substep(self, q: 'int', offset: 'int') -> 'StepCtx'
+  batch: Batch
+  seq_table: SeqTable
+  sampler: Sampler
+protocol TargetView() required, implemented by core
+  shared(self, name: 'str') -> 'torch.nn.Module'
+  tensors(self) -> 'Iterable[tuple[str, torch.Tensor | QTensor]]'
+  draft_head(self, name: 'str') -> 'AuxSpec | None'
+  spec: ModelSpec
+dataclass Text
+  text: str
+dataclass TokenDelta
+  rid: str
+  token_ids: list[int]
+  index: int = 0
+  logprobs: Logprobs | None = None
+  prompt_logprobs: Logprobs | None = None
+  finish_reason: str | None = None
+  error: str | None = None
+  kind: str | None = None
+enum TokenSrc
+  HOST = 0
+  DEVICE_LAST = 1
+  DEVICE_DRAFT = 2
+protocol Tokenizer() required, implemented by plugins
+  encode(self, text: 'str') -> 'list[int]'
+  decode(self, ids: 'list[int]') -> 'str'
+  eos_token_ids: frozenset[int]
+dataclass ToolArgsDelta
+  index: int
+  text: str
+dataclass ToolCallEnd
+  index: int
+dataclass ToolCallStart
+  index: int
+  name: str
+dataclass Tunable frozen
+  type: TunableType
+  default: Any
+  range: tuple[Any, Any] | None = None
+  choices: tuple[Any, ...] | None = None
+  log: bool = False
+  apply: TunableApply = 'restart'
+protocol Unit() required, implemented by plugins
+  forward(self, *args: 'Any') -> 'Any'
+dataclass UnitPin frozen
+  version: str
+  src: str
+  sem: str | None = None
+protocol Verifier() required, implemented by plugins
+  verify(self, logits: 'torch.Tensor', ctx: 'StepCtx') -> 'tuple[SampleOut, torch.Tensor]'
+dataclass VocabView frozen
+  size: int
+  stop_tokens: frozenset[int]
+  tokenizer: Callable[[], Any]
+dataclass WeightMap frozen
+  source: str
+  rules: tuple[WeightRule, ...]
+  root: str = ''
+  skip: tuple[str, ...] = ()
+  only: tuple[str, ...] = ()
+dataclass WeightRule frozen
+  pattern: str
+  target: str
+  transform: str | None = None
+  stack: str | None = None
+protocol WeightSource() required, implemented by plugins
+  config(self) -> 'Mapping[str, Any]'
+  tensors(self) -> 'Iterator[tuple[str, torch.Tensor | QTensor]]'
+  tokenizer(self) -> 'Any'
+  identity(self) -> 'str'
+  kind: str
+  name: str
+  arch: str
+  eos_token_ids: frozenset[int]
+def canonical_hash(obj: 'Any') -> 'str'
+def parse_versioned(text: 'str') -> 'tuple[str, int]'
+def rewind_modules(module: 'torch.nn.Module', ctx: 'StepCtx') -> 'None'
+def sequence_seed(seed: 'int', index: 'int') -> 'int'
+def to_term(obj: 'Any') -> 'Any'
+
+# holon.api.hooks (optional)
+protocol AdmitsDrafts() optional, implemented by plugins
+  admit(self, slot: 'int', tokens: 'list[int]') -> 'None'
+protocol AdoptsWeights() optional, implemented by plugins
+  adopt(self, ctx: 'BuildCtx', name: 'str', value: 'QTensor') -> 'bool'
+protocol BindsKernels() optional, implemented by plugins
+  bind_kernels(self, ctx: 'BuildCtx') -> 'None'
+protocol BuildsPolicy() optional, implemented by plugins
+  build(self, ctx: 'BuildCtx') -> 'DraftPolicy'
+protocol CutsPrefill() optional, implemented by plugins
+  cut(self, seq: 'SeqView', start: 'int', n: 'int') -> 'int'
+protocol DeclaresDraftHead() optional, implemented by plugins
+  draft_head(self, cfg: 'Mapping[str, Any]', source: 'str', name: 'str') -> 'AuxSpec | None'
+protocol DeclaresKs() optional, implemented by plugins
+  ks(self) -> 'set[int]'
+protocol DeclaresState() optional, implemented by plugins
+  classmethod state_specs(cls, params: 'Mapping[str, Any]', layers: 'tuple[int, ...]', ctx: 'BuildCtx') -> 'list[StateSpec]'
+protocol DraftsInSubsteps() optional, implemented by plugins
+  substeps(self, k: 'int') -> 'list[int]'
+protocol FinalizesWeights() optional, implemented by plugins
+  finalize_weights(self, ctx: 'BuildCtx') -> 'None'
+protocol GraphKeyed() optional, implemented by plugins
+  graph_key: Any
+protocol KnowsCapacity() optional, implemented by plugins
+  capacity(self, seq: 'SeqView') -> 'int'
+protocol NeedsHostLens() optional, implemented by plugins
+  needs_host_lens: bool
+protocol PayloadPool() optional, implemented by plugins
+  payload_pool: str
+protocol PlansState() optional, implemented by plugins
+  classmethod planner(cls, params: 'Mapping[str, Any]', specs: 'list[StateSpec]', ctx: 'BuildCtx') -> 'Planner'
+protocol PublishesPayloads() optional, implemented by plugins
+  next_publish(self, seq: 'SeqView') -> 'int | None'
+  publish(self, seq: 'SeqView', upto: 'int', in_step: 'bool' = False) -> 'tuple[Payload, list[MemOp]] | None'
+protocol Reports() optional, implemented by plugins
+  stats(self) -> 'dict[str, int]'
+protocol RestoresPayloads() optional, implemented by plugins
+  hit_length(self, idx: 'PrefixView', upto: 'int') -> 'HitLen'
+  adopt(self, seq: 'SeqView', payload: 'Payload') -> 'list[MemOp]'
+protocol Rewindable() optional, implemented by plugins
+  rewind(self, ctx: 'StepCtx', path: 'torch.Tensor | None' = None) -> 'None'
+protocol SamplesDrafts() optional, implemented by plugins
+  q_support: int
+protocol ShutsDown() optional, implemented by plugins
+  shutdown(self) -> 'None'
+protocol TrainedContext() optional, implemented by plugins
+  trained_context(self, cfg: 'Mapping[str, Any]', source: 'str') -> 'int | None'
+protocol WritesAhead() optional, implemented by plugins
+  lookahead(self, k: 'int') -> 'int'
+
+# EngineConfig
+dataclass EngineConfig
+  model: str
+  device: str = 'cuda'
+  dtype: torch.dtype = torch.bfloat16
+  source: str | None = None
+  page_size: int = 16
+  max_seqs: int = 64
+  max_model_len: int = 8192
+  clamp_context: bool = False
+  max_step_tokens: int = 4096
+  memory_fraction: float = 0.9
+  state_memory: int | None = None
+  prefix_cache: bool = True
+  overlap: bool = True
+  cuda_graphs: bool = True
+  max_draft_tokens: int = 0
+  kernels: dict[str, str] = dict()
+  kernel_preferences: dict[str, str] = dict()
+  slots: dict[str, str] = dict()
+  plugin_options: dict[str, object] = dict()
+
+# BuildCtx.options keys the core provides
+kernel_preferences
+kernels
+max_draft_tokens
+max_model_len
+max_seqs
+max_step_tokens
+page_size
+planner.device_lens
+plugins
+
+# manifest sections and keys
+[plugin] ['core_abi', 'derived_from', 'entry', 'implements', 'license', 'name', 'slot', 'variant_of', 'version']
+[resources] ['provides', 'requires']
+[properties] ['after', 'before', 'graph_policy', 'numerics', 'shape_axes']
+[dependencies] ['python']
+[reference] ['module']
+[tunables] <any>
+[support] ['detect', 'platforms']
+[provenance] ['commit', 'files', 'license', 'source']
+[build] ['module']
+
+# string vocabularies
+Numerics = ['approx', 'bounded', 'exact', 'policy']
+GraphPolicy = ['eager', 'full', 'host', 'piecewise']
+ipc frames = ['abort', 'control', 'deltas', 'failed', 'ready', 'stats', 'submit']
+ipc failed kinds = ['error', 'memory', 'plugin']
+
+# op and unit contracts provided by first-party plugins
+op.add_rmsnorm@1  (std.ops)
+op.attention.causal@1  (std.mixers.gqa)
+op.attention.paged_decode@1  (std.mixers.gqa)
+op.attention.paged_prefill@1  (std.mixers.gqa)
+op.attention.paged_verify@1  (std.mixers.gqa)
+op.causal_conv1d@1  (std.mixers.gdn)
+op.gated_delta_rule@1  (std.mixers.gdn)
+op.gated_rmsnorm@1  (std.mixers.gdn)
+op.kv_write@1  (std.mixers.gqa)
+op.linear_experts@1  (std.moe)
+op.moe_combine@1  (std.moe)
+op.moe_topk@1  (std.moe)
+op.qembedding@1  (std.ops)
+op.qlinear@1  (std.ops)
+op.rmsnorm@1  (std.ops)
+op.rope@1  (std.ops)
+op.silu_mul@1  (std.ffn)
+unit.drafters.dflash.draft@1  (drafters.dflash)
+unit.std.blocks.prenorm@1  (std.blocks)
+unit.std.ffn.swiglu@1  (std.ffn)
+unit.std.mixers.gdn@1  (std.mixers.gdn)
+unit.std.mixers.gqa@1  (std.mixers.gqa)
+unit.std.moe@1  (std.moe)
+unit.std.ops.embedding@1  (std.ops)
+unit.std.ops.linear@1  (std.ops)
+unit.std.ops.lm_head@1  (std.ops)
+unit.std.ops.rmsnorm@1  (std.ops)
+unit.std.ops.rope@1  (std.ops)
+unit.std.spec.mtp_head@1  (std.spec.mtp_head)

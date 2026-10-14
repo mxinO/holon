@@ -153,6 +153,11 @@ class StateManager:
                                real_pages=-(-max_tokens // page))
             self.tables[b.spec.group] = self._table_of[b.spec.name] = table
 
+    def limit(self, tokens: int) -> None:
+        """Hold at most `tokens` per request from now on (the engine's clamp): later columns hold only the null unit."""
+        for table in self.tables.values():
+            table.real_pages = -(-tokens // table.page)
+
     def admit(self, seq: Seq) -> bool:
         """Give `seq` a slot and adopt its longest cached prefix (always leaving one token to compute); sets
         `seq.num_computed` to the hit length. False if no slot is free."""

@@ -7,6 +7,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import re
+import sys
 from collections.abc import Iterable
 from typing import Any
 
@@ -82,8 +83,15 @@ class BuildContext:
                 if s.requires.allows(self.device.type, sm) and (s.supports is None or s.supports(facts))]
 
     def _choose(self, op: str, facts: dict[str, Any]) -> KernelSpec:
-        pinned = self.options.get("kernels", {}).get(parse_versioned(op)[0])
+        name = parse_versioned(op)[0]
+        pinned = self.options.get("kernels", {}).get(name)
         found = [s for s in self.candidates(op, facts) if pinned in (None, s.provider)]
+        if pinned is None and (preferred := self.options.get("kernel_preferences", {}).get(name)) is not None:
+            if chosen := [s for s in found if s.provider == preferred]:
+                found = chosen
+            else:                                   # soft: a lock's pin from another class or another kernel set
+                print(f"holon: {op}: preferred {preferred!r} does not serve {facts} on {self.device.type} sm "
+                      f"{self.fingerprint.sm}; default priority", file=sys.stderr, flush=True)
         if not found:
             raise PluginError(f"no kernel for {op} on {self.device.type} sm {self.fingerprint.sm} with {facts}"
                               + (f" from pinned provider {pinned!r}" if pinned else ""))

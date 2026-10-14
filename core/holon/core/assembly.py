@@ -17,6 +17,7 @@ from torch import nn
 from holon.api import AuxSpec, Batch, ModelSpec, Paged, Ref, StateSpec, canonical_hash
 
 from .build import BuildContext, load_weights
+from .executor import profile_rows
 from .memory import Ledger
 from .plugins import PluginError, PluginSet
 from .prefix import PrefixIndex
@@ -137,8 +138,10 @@ def _bind_layers(layers: tuple, ctx: Any, plugins: PluginSet, ledger: Ledger, cf
 
 def _bind(spec: StateSpec, ctx: BuildContext, plugins: PluginSet, ledger: Ledger, cfg: Any) -> BoundSpec:
     shape = spec.shape
-    if isinstance(shape, Paged):
-        sizing = {"min_units": -(-cfg.max_model_len // shape.tokens_per_unit), "tokens_per_unit": shape.tokens_per_unit}
+    if isinstance(shape, Paged):         # one full-length request, or (clamp_context) the profiled step's rows
+        rows = profile_rows(cfg) if cfg.clamp_context else [cfg.max_model_len]
+        page = shape.tokens_per_unit
+        sizing = {"min_units": sum(-(-r // page) for r in rows), "tokens_per_unit": page}
     else:                                  # every request slot, the padding slot too, owns its units (api.Slot)
         n = (cfg.max_seqs + 1) * (1 + shape.draft_slots)
         sizing = {"min_units": n, "pref_units": n}

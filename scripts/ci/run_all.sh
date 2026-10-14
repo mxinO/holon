@@ -4,7 +4,7 @@ set -uo pipefail
 cd "$(dirname "$0")"
 rc=0
 for c in check_core_denylist.py check_core_loc.py check_no_env.py check_torch_cuda.py check_private.py check_locks.py check_provenance.py \
-         check_manifest_deps.py; do
+         check_manifest_deps.py check_abi.py; do
   python3 "$c" || rc=1
 done
 (cd ../.. && ruff check core std plugins judge tools testing scripts bench) || rc=1

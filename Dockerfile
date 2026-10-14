@@ -14,12 +14,13 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.1@sha256:fc93e9ecd7218e9ec8fba117af89348ee
      /uv /usr/local/bin/uv
 
 # Every cache at a fixed path, whoever runs the container: Python and the packages (uv), the prebuilt GGUF kernels
-# (XDG), FlashInfer's modules, Triton's kernels and the Hugging Face hub.
+# (XDG), FlashInfer's modules, the kernels Triton and CuTe DSL (FlashInfer's norms) compile at first use, the hub.
 ENV UV_PYTHON_INSTALL_DIR=/opt/holon/python \
     UV_CACHE_DIR=/opt/holon/uv-cache \
     XDG_CACHE_HOME=/opt/holon/cache \
     FLASHINFER_WORKSPACE_BASE=/opt/holon/cache \
     TRITON_CACHE_DIR=/opt/holon/cache/triton \
+    CUTE_DSL_CACHE_DIR=/opt/holon/cache/cute \
     HF_HOME=/opt/holon/hf \
     PATH=/opt/holon/src/.venv/bin:$PATH
 
@@ -27,6 +28,8 @@ WORKDIR /opt/holon/src
 COPY . .
 RUN uv sync --frozen && rm -rf "$UV_CACHE_DIR"
 # Native code for every supported SM (no GPU needed to build): the GGUF kernels and FlashInfer's modules.
+# `--build-arg MAX_JOBS=N` caps the parallel compiles (default: every CPU).
+ARG MAX_JOBS
 RUN holon prebuild --sm 86 89 120
 
 EXPOSE 8000
