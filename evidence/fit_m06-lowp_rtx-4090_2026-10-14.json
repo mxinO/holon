@@ -1,0 +1,67 @@
+{
+ "workload": "m06-a6-fit",
+ "date": "2026-10-14",
+ "commit": "e6c9f53",
+ "hardware": "NVIDIA GeForce RTX 4090",
+ "command": "local fit script: Engine(<file> --memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384); KV tokens of its pools, the weights it holds, then one prompt of max_model_len - 256 tokens served with 64 generated",
+ "claim": "acceptance 8 (bf16 KV, max_seqs 32, memory_fraction 0.9): RTX 5080 8B NVFP4 >= 32K KV tokens (predicted 52.8K); RTX 4090 30B NVFP4 >= 32K (35.0K), the GGUF MXFP4_MOE >= 32K (44.2K-32.5K); amd-quark 30B MXFP4 recorded (31.3K predicted)",
+ "results": {
+  "qwen3-30b-a3b-instruct-2507-mxfp4_moe": {
+   "flags": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "load_s": 101.6,
+   "kv_tokens": 42096,
+   "pools": {
+    "state.kv": {
+     "units": 2631,
+     "unit_mib": 1.5,
+     "tokens": 42096
+    }
+   },
+   "weights_gib": 15.9,
+   "total_gib": 22.11,
+   "long_prompt": 16128,
+   "generated": 64,
+   "long_s": 2.4,
+   "max_allocated_gib": 20.21
+  },
+  "qwen3-30b-a3b-mxfp4-amd-quark": {
+   "flags": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "load_s": 93.5,
+   "kv_tokens": 24608,
+   "pools": {
+    "state.kv": {
+     "units": 1538,
+     "unit_mib": 1.5,
+     "tokens": 24608
+    }
+   },
+   "weights_gib": 17.24,
+   "total_gib": 22.11,
+   "long_prompt": 16128,
+   "generated": 64,
+   "long_s": 2.5,
+   "max_allocated_gib": 19.92
+  },
+  "qwen3-30b-a3b-nvfp4": {
+   "flags": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "load_s": 150.7,
+   "kv_tokens": 35280,
+   "pools": {
+    "state.kv": {
+     "units": 2205,
+     "unit_mib": 1.5,
+     "tokens": 35280
+    }
+   },
+   "weights_gib": 16.87,
+   "total_gib": 22.11,
+   "long_prompt": 16128,
+   "generated": 64,
+   "long_s": 2.7,
+   "max_allocated_gib": 20.55
+  }
+ }
+}

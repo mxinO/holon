@@ -1,0 +1,591 @@
+{
+ "workload": "m06-a6-bars",
+ "date": "2026-10-14",
+ "commit": "e6c9f53",
+ "clock_screen": {
+  "load": "60 s of bf16 8192^2 matmuls, nvidia-smi every 250 ms",
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "samples": 232,
+  "sm_clock_mhz": {
+   "median": 2670.0,
+   "min": 2670.0,
+   "p5": 2670.0,
+   "max_sm": 3105.0
+  },
+  "thermal_slowdown_share": {
+   "sw": 0.0,
+   "hw": 0.0
+  },
+  "hw_slowdown_share": 0.0,
+  "power_cap_share": 0.0
+ },
+ "command": {
+  "holon": "python bench/llama_bench.py --model <file> -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384 [--plugin-options quant.act=a4]'",
+  "llama": "GGML_CUDA_MMQ_PREC=<q8|auto> llama-bench (llama.cpp cbe28bb3) -m <same bytes .gguf> -p 512 -n 128 -d 0,256 -ngl 99 -fa on -r 5 -o json"
+ },
+ "files": {
+  "qwen3-8b-nvfp4": "nvidia/Qwen3-8B-NVFP4; llama.cpp: its GGUF by the pin's converter (NVFP4, other tensors bf16)",
+  "qwen3-30b-a3b-nvfp4": "nvidia/Qwen3-30B-A3B-NVFP4; likewise",
+  "qwen3-30b-a3b-instruct-2507-mxfp4_moe": "the GGUF itself, both sides"
+ },
+ "claim": "acceptance 9: pp512 and tg128 >= 0.8x llama-bench on the same bytes at the same activation mode (llama.cpp at GGML_CUDA_MMQ_PREC=q8: W4A8), medians of repetitions 2-5; llama.cpp's default (W4A4 prefill on sm_120) and Holon at quant.act = a4 beside; RTX 5090 recorded",
+ "results": {
+  "qwen3-30b-a3b-instruct-2507-mxfp4_moe": {
+   "holon": {
+    "pp512": 10903.81,
+    "tg128": 224.44,
+    "tg128 @ d256": 223.47
+   },
+   "llama-q8": {
+    "pp512": 10761.55,
+    "tg128": 222.56,
+    "tg128 @ d256": 221.04
+   },
+   "ratio (holon / llama q8)": {
+    "pp512": 1.013,
+    "tg128": 1.008,
+    "tg128 @ d256": 1.011
+   }
+  },
+  "qwen3-30b-a3b-nvfp4": {
+   "holon": {
+    "pp512": 9247.97,
+    "tg128": 214.01,
+    "tg128 @ d256": 213.23
+   },
+   "llama-q8": {
+    "pp512": 8774.97,
+    "tg128": 213.78,
+    "tg128 @ d256": 212.53
+   },
+   "ratio (holon / llama q8)": {
+    "pp512": 1.054,
+    "tg128": 1.001,
+    "tg128 @ d256": 1.003
+   }
+  },
+  "qwen3-8b-nvfp4": {
+   "holon": {
+    "pp512": 10475.44,
+    "tg128": 138.53,
+    "tg128 @ d256": 137.8
+   },
+   "llama-q8": {
+    "pp512": 10426.55,
+    "tg128": 136.32,
+    "tg128 @ d256": 135.53
+   },
+   "ratio (holon / llama q8)": {
+    "pp512": 1.005,
+    "tg128": 1.016,
+    "tg128 @ d256": 1.017
+   }
+  }
+ },
+ "raw": {
+  "rtx-4090-bars-holon-qwen3-30b-a3b-instruct-2507-mxfp4_moe": {
+   "model": "Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@84e3f62a338c23dd",
+   "gpu_class": "rtx-4090/cu130-torch2.11",
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "commit": "74bfabbca396f3b195705c1d06de2742cffb763d",
+   "command": "python bench/llama_bench.py --model Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE.gguf -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384' --json rtx-4090-bars-holon-qwen3-30b-a3b-instruct-2507-mxfp4_moe.json",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "32",
+    "max_model_len": "16384",
+    "max_step_tokens": "2048",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "slots": "{}",
+    "plugin_options": "{}"
+   },
+   "results": {
+    "pp512": {
+     "mean": 10829.68,
+     "sd": 181.5,
+     "runs": [
+      10602.51,
+      11016.51,
+      11010.15,
+      10797.47,
+      10721.73
+     ]
+    },
+    "tg128": {
+     "mean": 224.42,
+     "sd": 0.03,
+     "runs": [
+      224.41,
+      224.44,
+      224.45,
+      224.44,
+      224.36
+     ],
+     "cpu_ms_per_step_p50": 0.507
+    },
+    "tg128 @ d256": {
+     "mean": 223.46,
+     "sd": 0.03,
+     "runs": [
+      223.46,
+      223.46,
+      223.49,
+      223.42,
+      223.48
+     ],
+     "cpu_ms_per_step_p50": 0.502
+    }
+   }
+  },
+  "rtx-4090-bars-holon-qwen3-30b-a3b-nvfp4": {
+   "model": "nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99",
+   "gpu_class": "rtx-4090/cu130-torch2.11",
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "commit": "74bfabbca396f3b195705c1d06de2742cffb763d",
+   "command": "python bench/llama_bench.py --model 2538ded2a4edb247b4d2b4a8ba24e44bd4c017c3 -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384' --json rtx-4090-bars-holon-qwen3-30b-a3b-nvfp4.json",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "32",
+    "max_model_len": "16384",
+    "max_step_tokens": "2048",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "slots": "{}",
+    "plugin_options": "{}"
+   },
+   "results": {
+    "pp512": {
+     "mean": 9175.63,
+     "sd": 136.63,
+     "runs": [
+      9011.32,
+      9286.69,
+      9315.86,
+      9209.25,
+      9055.05
+     ]
+    },
+    "tg128": {
+     "mean": 214.02,
+     "sd": 0.02,
+     "runs": [
+      214.05,
+      214.01,
+      214.01,
+      214.04,
+      214.0
+     ],
+     "cpu_ms_per_step_p50": 0.504
+    },
+    "tg128 @ d256": {
+     "mean": 213.23,
+     "sd": 0.01,
+     "runs": [
+      213.24,
+      213.22,
+      213.24,
+      213.23,
+      213.23
+     ],
+     "cpu_ms_per_step_p50": 0.503
+    }
+   }
+  },
+  "rtx-4090-bars-holon-qwen3-8b-nvfp4": {
+   "model": "nvidia/Qwen3-8B-NVFP4@70613544a162fdd3",
+   "gpu_class": "rtx-4090/cu130-torch2.11",
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "commit": "74bfabbca396f3b195705c1d06de2742cffb763d",
+   "command": "python bench/llama_bench.py --model ccd10a893cbca613259517c3efe08e151ddf2b8e -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384' --json rtx-4090-bars-holon-qwen3-8b-nvfp4.json",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "32",
+    "max_model_len": "16384",
+    "max_step_tokens": "2048",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "slots": "{}",
+    "plugin_options": "{}"
+   },
+   "results": {
+    "pp512": {
+     "mean": 10477.73,
+     "sd": 22.77,
+     "runs": [
+      10485.37,
+      10459.47,
+      10491.42,
+      10503.48,
+      10448.91
+     ]
+    },
+    "tg128": {
+     "mean": 138.53,
+     "sd": 0.01,
+     "runs": [
+      138.52,
+      138.55,
+      138.53,
+      138.52,
+      138.52
+     ],
+     "cpu_ms_per_step_p50": 0.525
+    },
+    "tg128 @ d256": {
+     "mean": 137.8,
+     "sd": 0.01,
+     "runs": [
+      137.8,
+      137.81,
+      137.8,
+      137.8,
+      137.8
+     ],
+     "cpu_ms_per_step_p50": 0.517
+    }
+   }
+  },
+  "rtx-4090-bars-llama-q8-qwen3-30b-a3b-instruct-2507-mxfp4_moe": [
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 4090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B MXFP4 MoE",
+    "model_size": 17076477952,
+    "model_n_params": 30532122624,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "avg_ts": 10348.323823,
+    "stddev_ts": 964.620046,
+    "samples_ts": [
+     8628.51,
+     10768,
+     10903.5,
+     10755.1,
+     10686.5
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 4090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B MXFP4 MoE",
+    "model_size": 17076477952,
+    "model_n_params": 30532122624,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "avg_ts": 222.2239,
+    "stddev_ts": 0.740715,
+    "samples_ts": [
+     220.9,
+     222.592,
+     222.514,
+     222.572,
+     222.541
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 4090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B MXFP4 MoE",
+    "model_size": 17076477952,
+    "model_n_params": 30532122624,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 256,
+    "avg_ts": 10472.91012,
+    "stddev_ts": 668.420076,
+    "samples_ts": [
+     10367.7,
+     9346.27,
+     10867.1,
+     10875.9,
+     10907.6
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 4090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B MXFP4 MoE",
+    "model_size": 17076477952,
+    "model_n_params": 30532122624,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 256,
+    "avg_ts": 220.567575,
+    "stddev_ts": 1.074769,
+    "samples_ts": [
+     218.646,
+     221.032,
+     221.017,
+     221.105,
+     221.038
+    ]
+   }
+  ],
+  "rtx-4090-bars-llama-q8-qwen3-30b-a3b-nvfp4": [
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 4090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B NVFP4",
+    "model_size": 18113046016,
+    "model_n_params": 30532159872,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "avg_ts": 8387.945957,
+    "stddev_ts": 881.308691,
+    "samples_ts": [
+     6814.3,
+     8744.87,
+     8856.3,
+     8805.07,
+     8719.2
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 4090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B NVFP4",
+    "model_size": 18113046016,
+    "model_n_params": 30532159872,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "avg_ts": 213.481954,
+    "stddev_ts": 0.65165,
+    "samples_ts": [
+     212.318,
+     213.819,
+     213.718,
+     213.753,
+     213.802
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 4090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B NVFP4",
+    "model_size": 18113046016,
+    "model_n_params": 30532159872,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 256,
+    "avg_ts": 8544.587348,
+    "stddev_ts": 636.661478,
+    "samples_ts": [
+     8410.11,
+     7484.07,
+     8904.78,
+     8975.61,
+     8948.37
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 4090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B NVFP4",
+    "model_size": 18113046016,
+    "model_n_params": 30532159872,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 256,
+    "avg_ts": 212.006454,
+    "stddev_ts": 1.156875,
+    "samples_ts": [
+     209.939,
+     212.53,
+     212.586,
+     212.456,
+     212.522
+    ]
+   }
+  ],
+  "rtx-4090-bars-llama-q8-qwen3-8b-nvfp4": [
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 4090",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "avg_ts": 10037.080475,
+    "stddev_ts": 838.803531,
+    "samples_ts": [
+     8537.51,
+     10423.7,
+     10433.4,
+     10429.4,
+     10361.4
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 4090",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "avg_ts": 136.073395,
+    "stddev_ts": 0.551016,
+    "samples_ts": [
+     135.088,
+     136.316,
+     136.324,
+     136.322,
+     136.317
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 4090",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 256,
+    "avg_ts": 10032.521232,
+    "stddev_ts": 488.047064,
+    "samples_ts": [
+     9989.86,
+     9198.94,
+     10314.9,
+     10329.7,
+     10329.2
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 4090",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 256,
+    "avg_ts": 135.410238,
+    "stddev_ts": 0.267088,
+    "samples_ts": [
+     134.933,
+     135.524,
+     135.526,
+     135.537,
+     135.532
+    ]
+   }
+  ]
+ }
+}

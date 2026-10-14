@@ -1,0 +1,1058 @@
+{
+ "workload": "m06-a6-bars",
+ "date": "2026-10-14",
+ "commit": "e6c9f53",
+ "clock_screen": {
+  "load": "60 s of bf16 8192^2 matmuls, nvidia-smi every 250 ms",
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "samples": 233,
+  "sm_clock_mhz": {
+   "median": 2602.0,
+   "min": 2400.0,
+   "p5": 2400.0,
+   "max_sm": 3090.0
+  },
+  "thermal_slowdown_share": {
+   "sw": 0.0,
+   "hw": 0.0
+  },
+  "hw_slowdown_share": 0.0,
+  "power_cap_share": 0.9098712446351931
+ },
+ "command": {
+  "holon": "python bench/llama_bench.py --model <file> -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384 [--plugin-options quant.act=a4]'",
+  "llama": "GGML_CUDA_MMQ_PREC=<q8|auto> llama-bench (llama.cpp cbe28bb3) -m <same bytes .gguf> -p 512 -n 128 -d 0,256 -ngl 99 -fa on -r 5 -o json"
+ },
+ "files": {
+  "qwen3-8b-nvfp4": "nvidia/Qwen3-8B-NVFP4; llama.cpp: its GGUF by the pin's converter (NVFP4, other tensors bf16)",
+  "qwen3-30b-a3b-nvfp4": "nvidia/Qwen3-30B-A3B-NVFP4; likewise",
+  "qwen3-30b-a3b-instruct-2507-mxfp4_moe": "the GGUF itself, both sides"
+ },
+ "claim": "acceptance 9: pp512 and tg128 >= 0.8x llama-bench on the same bytes at the same activation mode (llama.cpp at GGML_CUDA_MMQ_PREC=q8: W4A8), medians of repetitions 2-5; llama.cpp's default (W4A4 prefill on sm_120) and Holon at quant.act = a4 beside; RTX 5090 recorded",
+ "results": {
+  "qwen3-30b-a3b-nvfp4": {
+   "holon-a4": {
+    "pp512": 19487.49,
+    "tg128": 307.01,
+    "tg128 @ d256": 305.88
+   },
+   "llama-q8": {
+    "pp512": 10213.35,
+    "tg128": 320.59,
+    "tg128 @ d256": 317.5
+   },
+   "llama-auto": {
+    "pp512": 17108.25,
+    "tg128": 320.16,
+    "tg128 @ d256": 317.06
+   },
+   "holon": {
+    "pp512": 11581.04,
+    "tg128": 307.08,
+    "tg128 @ d256": 306.06
+   },
+   "ratio (holon / llama q8)": {
+    "pp512": 1.134,
+    "tg128": 0.958,
+    "tg128 @ d256": 0.964
+   }
+  },
+  "qwen3-8b-nvfp4": {
+   "holon-a4": {
+    "pp512": 24821.17,
+    "tg128": 232.74,
+    "tg128 @ d256": 231.67
+   },
+   "llama-q8": {
+    "pp512": 11764.45,
+    "tg128": 240.24,
+    "tg128 @ d256": 238.47
+   },
+   "llama-auto": {
+    "pp512": 21036.9,
+    "tg128": 239.74,
+    "tg128 @ d256": 238.07
+   },
+   "holon": {
+    "pp512": 12717.8,
+    "tg128": 231.82,
+    "tg128 @ d256": 230.79
+   },
+   "ratio (holon / llama q8)": {
+    "pp512": 1.081,
+    "tg128": 0.965,
+    "tg128 @ d256": 0.968
+   }
+  },
+  "qwen3-30b-a3b-instruct-2507-mxfp4_moe": {
+   "holon": {
+    "pp512": 14483.33,
+    "tg128": 328.96,
+    "tg128 @ d256": 326.87
+   },
+   "llama-q8": {
+    "pp512": 12878.2,
+    "tg128": 343.78,
+    "tg128 @ d256": 340.13
+   },
+   "llama-auto": {
+    "pp512": 16257.45,
+    "tg128": 343.74,
+    "tg128 @ d256": 339.49
+   },
+   "ratio (holon / llama q8)": {
+    "pp512": 1.125,
+    "tg128": 0.957,
+    "tg128 @ d256": 0.961
+   }
+  }
+ },
+ "raw": {
+  "rtx-5090-bars-holon-a4-qwen3-30b-a3b-nvfp4": {
+   "model": "nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99",
+   "gpu_class": "rtx-5090/cu130-torch2.11",
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "commit": "74bfabbca396f3b195705c1d06de2742cffb763d",
+   "command": "python bench/llama_bench.py --model 2538ded2a4edb247b4d2b4a8ba24e44bd4c017c3 -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384 --plugin-options quant.act=a4' --json rtx-5090-bars-holon-a4-qwen3-30b-a3b-nvfp4.json",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "32",
+    "max_model_len": "16384",
+    "max_step_tokens": "2048",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "slots": "{}",
+    "plugin_options": "{'quant.act': 'a4'}"
+   },
+   "results": {
+    "pp512": {
+     "mean": 19381.46,
+     "sd": 199.85,
+     "runs": [
+      19101.52,
+      19511.88,
+      19581.85,
+      19463.09,
+      19248.97
+     ]
+    },
+    "tg128": {
+     "mean": 307.02,
+     "sd": 0.05,
+     "runs": [
+      306.99,
+      307.12,
+      307.01,
+      307.01,
+      306.99
+     ],
+     "cpu_ms_per_step_p50": 0.313
+    },
+    "tg128 @ d256": {
+     "mean": 305.88,
+     "sd": 0.08,
+     "runs": [
+      305.88,
+      305.77,
+      305.86,
+      305.89,
+      305.99
+     ],
+     "cpu_ms_per_step_p50": 0.314
+    }
+   }
+  },
+  "rtx-5090-bars-holon-a4-qwen3-8b-nvfp4": {
+   "model": "nvidia/Qwen3-8B-NVFP4@70613544a162fdd3",
+   "gpu_class": "rtx-5090/cu130-torch2.11",
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "commit": "74bfabbca396f3b195705c1d06de2742cffb763d",
+   "command": "python bench/llama_bench.py --model ccd10a893cbca613259517c3efe08e151ddf2b8e -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384 --plugin-options quant.act=a4' --json rtx-5090-bars-holon-a4-qwen3-8b-nvfp4.json",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "32",
+    "max_model_len": "16384",
+    "max_step_tokens": "2048",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "slots": "{}",
+    "plugin_options": "{'quant.act': 'a4'}"
+   },
+   "results": {
+    "pp512": {
+     "mean": 24801.93,
+     "sd": 59.6,
+     "runs": [
+      24823.44,
+      24846.79,
+      24697.1,
+      24822.82,
+      24819.51
+     ]
+    },
+    "tg128": {
+     "mean": 232.72,
+     "sd": 0.05,
+     "runs": [
+      232.75,
+      232.74,
+      232.74,
+      232.74,
+      232.64
+     ],
+     "cpu_ms_per_step_p50": 0.402
+    },
+    "tg128 @ d256": {
+     "mean": 231.69,
+     "sd": 0.03,
+     "runs": [
+      231.72,
+      231.7,
+      231.68,
+      231.66,
+      231.66
+     ],
+     "cpu_ms_per_step_p50": 0.405
+    }
+   }
+  },
+  "rtx-5090-bars-holon-qwen3-30b-a3b-instruct-2507-mxfp4_moe": {
+   "model": "Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@84e3f62a338c23dd",
+   "gpu_class": "rtx-5090/cu130-torch2.11",
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "commit": "74bfabbca396f3b195705c1d06de2742cffb763d",
+   "command": "python bench/llama_bench.py --model Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE.gguf -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384' --json rtx-5090-bars-holon-qwen3-30b-a3b-instruct-2507-mxfp4_moe.json",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "32",
+    "max_model_len": "16384",
+    "max_step_tokens": "2048",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "slots": "{}",
+    "plugin_options": "{}"
+   },
+   "results": {
+    "pp512": {
+     "mean": 14386.42,
+     "sd": 220.5,
+     "runs": [
+      14082.65,
+      14585.85,
+      14609.27,
+      14380.8,
+      14273.53
+     ]
+    },
+    "tg128": {
+     "mean": 328.98,
+     "sd": 0.26,
+     "runs": [
+      329.19,
+      329.21,
+      328.91,
+      328.57,
+      329.01
+     ],
+     "cpu_ms_per_step_p50": 0.336
+    },
+    "tg128 @ d256": {
+     "mean": 326.81,
+     "sd": 0.26,
+     "runs": [
+      326.89,
+      327.05,
+      326.95,
+      326.37,
+      326.78
+     ],
+     "cpu_ms_per_step_p50": 0.327
+    }
+   }
+  },
+  "rtx-5090-bars-holon-qwen3-30b-a3b-nvfp4": {
+   "model": "nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99",
+   "gpu_class": "rtx-5090/cu130-torch2.11",
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "commit": "74bfabbca396f3b195705c1d06de2742cffb763d",
+   "command": "python bench/llama_bench.py --model 2538ded2a4edb247b4d2b4a8ba24e44bd4c017c3 -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384' --json rtx-5090-bars-holon-qwen3-30b-a3b-nvfp4.json",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "32",
+    "max_model_len": "16384",
+    "max_step_tokens": "2048",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "slots": "{}",
+    "plugin_options": "{}"
+   },
+   "results": {
+    "pp512": {
+     "mean": 11499.85,
+     "sd": 187.78,
+     "runs": [
+      11241.44,
+      11614.82,
+      11712.49,
+      11547.26,
+      11383.26
+     ]
+    },
+    "tg128": {
+     "mean": 307.11,
+     "sd": 0.08,
+     "runs": [
+      307.1,
+      307.1,
+      307.04,
+      307.24,
+      307.06
+     ],
+     "cpu_ms_per_step_p50": 0.334
+    },
+    "tg128 @ d256": {
+     "mean": 306.06,
+     "sd": 0.04,
+     "runs": [
+      306.05,
+      306.11,
+      306.03,
+      306.03,
+      306.09
+     ],
+     "cpu_ms_per_step_p50": 0.339
+    }
+   }
+  },
+  "rtx-5090-bars-holon-qwen3-8b-nvfp4": {
+   "model": "nvidia/Qwen3-8B-NVFP4@70613544a162fdd3",
+   "gpu_class": "rtx-5090/cu130-torch2.11",
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "commit": "74bfabbca396f3b195705c1d06de2742cffb763d",
+   "command": "python bench/llama_bench.py --model ccd10a893cbca613259517c3efe08e151ddf2b8e -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384' --json rtx-5090-bars-holon-qwen3-8b-nvfp4.json",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "32",
+    "max_model_len": "16384",
+    "max_step_tokens": "2048",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "slots": "{}",
+    "plugin_options": "{}"
+   },
+   "results": {
+    "pp512": {
+     "mean": 12728.83,
+     "sd": 18.45,
+     "runs": [
+      12737.87,
+      12717.37,
+      12757.16,
+      12718.22,
+      12713.54
+     ]
+    },
+    "tg128": {
+     "mean": 231.84,
+     "sd": 0.02,
+     "runs": [
+      231.87,
+      231.85,
+      231.83,
+      231.82,
+      231.81
+     ],
+     "cpu_ms_per_step_p50": 0.409
+    },
+    "tg128 @ d256": {
+     "mean": 230.78,
+     "sd": 0.03,
+     "runs": [
+      230.75,
+      230.77,
+      230.8,
+      230.78,
+      230.82
+     ],
+     "cpu_ms_per_step_p50": 0.404
+    }
+   }
+  },
+  "rtx-5090-bars-llama-auto-qwen3-30b-a3b-instruct-2507-mxfp4_moe": [
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B MXFP4 MoE",
+    "model_size": 17076477952,
+    "model_n_params": 30532122624,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "avg_ts": 15561.567231,
+    "stddev_ts": 1649.591482,
+    "samples_ts": [
+     12614.3,
+     16257.9,
+     16439.9,
+     16238.7,
+     16257
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B MXFP4 MoE",
+    "model_size": 17076477952,
+    "model_n_params": 30532122624,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "avg_ts": 343.342586,
+    "stddev_ts": 0.891311,
+    "samples_ts": [
+     341.749,
+     343.74,
+     343.697,
+     343.796,
+     343.731
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B MXFP4 MoE",
+    "model_size": 17076477952,
+    "model_n_params": 30532122624,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 256,
+    "avg_ts": 15788.782436,
+    "stddev_ts": 913.794503,
+    "samples_ts": [
+     15745.1,
+     14217.9,
+     16306,
+     16318.2,
+     16356.8
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B MXFP4 MoE",
+    "model_size": 17076477952,
+    "model_n_params": 30532122624,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 256,
+    "avg_ts": 338.987819,
+    "stddev_ts": 1.152941,
+    "samples_ts": [
+     336.926,
+     339.476,
+     339.554,
+     339.497,
+     339.487
+    ]
+   }
+  ],
+  "rtx-5090-bars-llama-auto-qwen3-30b-a3b-nvfp4": [
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B NVFP4",
+    "model_size": 18113046016,
+    "model_n_params": 30532159872,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "avg_ts": 16155.860625,
+    "stddev_ts": 2207.220625,
+    "samples_ts": [
+     12211.4,
+     17059,
+     17297,
+     17157.5,
+     17054.4
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B NVFP4",
+    "model_size": 18113046016,
+    "model_n_params": 30532159872,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "avg_ts": 319.783451,
+    "stddev_ts": 0.860068,
+    "samples_ts": [
+     318.26,
+     320.126,
+     320.194,
+     320.004,
+     320.333
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B NVFP4",
+    "model_size": 18113046016,
+    "model_n_params": 30532159872,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 256,
+    "avg_ts": 16363.447327,
+    "stddev_ts": 1271.82257,
+    "samples_ts": [
+     16135.6,
+     14229.2,
+     17108.7,
+     17188.5,
+     17155.3
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B NVFP4",
+    "model_size": 18113046016,
+    "model_n_params": 30532159872,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 256,
+    "avg_ts": 316.469391,
+    "stddev_ts": 1.319415,
+    "samples_ts": [
+     314.11,
+     317.087,
+     317.111,
+     317.038,
+     317
+    ]
+   }
+  ],
+  "rtx-5090-bars-llama-auto-qwen3-8b-nvfp4": [
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "avg_ts": 20055.468751,
+    "stddev_ts": 2173.824519,
+    "samples_ts": [
+     16167.4,
+     20967.9,
+     21030,
+     21068.2,
+     21043.8
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "avg_ts": 239.59395,
+    "stddev_ts": 0.319784,
+    "samples_ts": [
+     239.029,
+     239.795,
+     239.727,
+     239.758,
+     239.662
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 256,
+    "avg_ts": 19971.645216,
+    "stddev_ts": 1277.564442,
+    "samples_ts": [
+     20037.6,
+     17743.3,
+     20690.5,
+     20704.3,
+     20682.5
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 256,
+    "avg_ts": 237.871482,
+    "stddev_ts": 0.43542,
+    "samples_ts": [
+     237.097,
+     238.126,
+     238.078,
+     237.991,
+     238.065
+    ]
+   }
+  ],
+  "rtx-5090-bars-llama-q8-qwen3-30b-a3b-instruct-2507-mxfp4_moe": [
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B MXFP4 MoE",
+    "model_size": 17076477952,
+    "model_n_params": 30532122624,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "avg_ts": 12420.160531,
+    "stddev_ts": 1074.250997,
+    "samples_ts": [
+     10507.3,
+     12947.9,
+     13043.2,
+     12808.5,
+     12793.8
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B MXFP4 MoE",
+    "model_size": 17076477952,
+    "model_n_params": 30532122624,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "avg_ts": 343.562626,
+    "stddev_ts": 0.55384,
+    "samples_ts": [
+     342.588,
+     343.958,
+     343.83,
+     343.739,
+     343.698
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B MXFP4 MoE",
+    "model_size": 17076477952,
+    "model_n_params": 30532122624,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 256,
+    "avg_ts": 12670.821808,
+    "stddev_ts": 568.355009,
+    "samples_ts": [
+     12689.8,
+     11682.9,
+     12954.4,
+     12996.3,
+     13030.6
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B MXFP4 MoE",
+    "model_size": 17076477952,
+    "model_n_params": 30532122624,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 256,
+    "avg_ts": 339.576687,
+    "stddev_ts": 1.203129,
+    "samples_ts": [
+     337.43,
+     340.186,
+     340.003,
+     340.2,
+     340.065
+    ]
+   }
+  ],
+  "rtx-5090-bars-llama-q8-qwen3-30b-a3b-nvfp4": [
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B NVFP4",
+    "model_size": 18113046016,
+    "model_n_params": 30532159872,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "avg_ts": 9818.103008,
+    "stddev_ts": 892.140874,
+    "samples_ts": [
+     8227.07,
+     10230,
+     10315.4,
+     10196.7,
+     10121.3
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B NVFP4",
+    "model_size": 18113046016,
+    "model_n_params": 30532159872,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "avg_ts": 320.11181,
+    "stddev_ts": 1.054997,
+    "samples_ts": [
+     318.225,
+     320.546,
+     320.603,
+     320.599,
+     320.586
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B NVFP4",
+    "model_size": 18113046016,
+    "model_n_params": 30532159872,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 256,
+    "avg_ts": 10118.866944,
+    "stddev_ts": 498.395967,
+    "samples_ts": [
+     10104.7,
+     9260.18,
+     10386.4,
+     10446.6,
+     10396.5
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3moe 30B.A3B NVFP4",
+    "model_size": 18113046016,
+    "model_n_params": 30532159872,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 256,
+    "avg_ts": 316.872058,
+    "stddev_ts": 1.314192,
+    "samples_ts": [
+     314.525,
+     317.502,
+     317.488,
+     317.329,
+     317.515
+    ]
+   }
+  ],
+  "rtx-5090-bars-llama-q8-qwen3-8b-nvfp4": [
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "avg_ts": 11404.832971,
+    "stddev_ts": 819.671379,
+    "samples_ts": [
+     9939.3,
+     11813,
+     11770.2,
+     11758.7,
+     11742.9
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "avg_ts": 240.150213,
+    "stddev_ts": 0.245444,
+    "samples_ts": [
+     239.734,
+     240.372,
+     240.233,
+     240.255,
+     240.156
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 256,
+    "avg_ts": 11399.909327,
+    "stddev_ts": 443.397864,
+    "samples_ts": [
+     11514.7,
+     10611.5,
+     11633.4,
+     11608.8,
+     11631.1
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5090",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 256,
+    "avg_ts": 238.249489,
+    "stddev_ts": 0.391612,
+    "samples_ts": [
+     237.573,
+     238.46,
+     238.475,
+     238.495,
+     238.244
+    ]
+   }
+  ]
+ }
+}

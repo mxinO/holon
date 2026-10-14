@@ -1,0 +1,29 @@
+{
+ "workload": "m06-a6-fit",
+ "date": "2026-10-14",
+ "commit": "e6c9f53",
+ "hardware": "NVIDIA GeForce RTX 5080",
+ "command": "local fit script: Engine(<file> --memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384); KV tokens of its pools, the weights it holds, then one prompt of max_model_len - 256 tokens served with 64 generated",
+ "claim": "acceptance 8 (bf16 KV, max_seqs 32, memory_fraction 0.9): RTX 5080 8B NVFP4 >= 32K KV tokens (predicted 52.8K); RTX 4090 30B NVFP4 >= 32K (35.0K), the GGUF MXFP4_MOE >= 32K (44.2K-32.5K); amd-quark 30B MXFP4 recorded (31.3K predicted)",
+ "results": {
+  "qwen3-8b-nvfp4": {
+   "flags": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "load_s": 82.0,
+   "kv_tokens": 51472,
+   "pools": {
+    "state.kv": {
+     "units": 3217,
+     "unit_mib": 2.25,
+     "tokens": 51472
+    }
+   },
+   "weights_gib": 5.96,
+   "total_gib": 15.56,
+   "long_prompt": 16128,
+   "generated": 64,
+   "long_s": 3.7,
+   "max_allocated_gib": 13.45
+  }
+ }
+}

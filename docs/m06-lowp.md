@@ -783,6 +783,76 @@ bf16, are the same at either, and the GGUF prefill verdicts are f5a37b1's.
      as failed: 9 of the 10 offending calls were unscored sampled rows, and 1 was a scored slice of ≤ 8 rows.
      Checking the head instead would need the floor to emulate the engine's logprob slicing.
 
+**As built (A6).** Recorded deviations from rev 3 in step A6 (fits, bars, serving, locks).
+
+| item | rev 3 | as built |
+|---|---|---|
+| bar files (D9) | GGUFs from the same HF files, NVFP4 by the pin's converter | `convert_hf_to_gguf.py` at `cbe28bb3` with `--outtype bf16` on the two nvidia files: 252 / 336 NVFP4 tensors, embedding and head BF16, norms and scales F32; 5.96 / 16.87 GiB of tensors, the HF files' bytes plus the per-tensor scale tensors. The MXFP4_MOE GGUF is benched as is. amd-quark has no bar (not in acceptance 9), so `bench/hf_to_gguf.py` was not needed |
+| bars | llama-bench at `GGML_CUDA_MMQ_PREC=q8`, the default beside | as specified, with llama.cpp built at the pin per class (`build-rtx-5080` also serves the RTX 5090: sm_120, same container image). Holon in process at the new locks' flags (`--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384`). Holon at `quant.act = a4` is reported beside on sm_120. On sm_89 `q8` is llama.cpp's default, so no second run there |
+| serving | Holon vs `llama-server` on the 5080, 8B NVFP4 | `bench/run.py` takes one model for every backend, but Holon serves the HF file and llama-server the converted GGUF. So there is one run per backend (two rounds each, not interleaved): llama-server at `q8` and at its default, `LLAMA_SERVER_CTX` = Holon's measured KV tokens (51472), `--max-batch 32 --max-step-tokens 2048`, the decode_b1 / decode_b8 / agent traces |
+| new locks' flags | — | one deployment for the four: acceptance 8's (`--memory-fraction 0.9 --max-seqs 32`, bf16 KV) with `--max-step-tokens 2048 --max-model-len 16384` |
+| lock order | — | the 8B NVFP4 was locked on the RTX 4090 first (`--new-model`). The RTX 5080's lock then starts from it, so its snapshot differs from the 4090 lock's (another class), as for any second class |
+| **bug found** — a lock's stored pools across classes | — | `holon_tools` seeded the checks' state pools with the start lock's stored snapshot `pool_bytes` even when that lock is another class's (`nearest_class`). The RTX 4090 lock's 12.78 GiB pools ran the RTX 5080 tune out of memory. Fixed in e6c9f53: they seed only on the lock's own class, and from another class the pools are measured. `test_propagate.py::test_cli_on_cpu` is extended and failed before the fix. It never showed before because every second class so far had more memory than the first (Qwen3-8B bf16: 4090, then 5090), where the carried pools merely went unmeasured |
+| commits | — | measured at 74bfabb (the code of A5 + the decisions); the RTX 5080 8B NVFP4 lock at e6c9f53 (the tools fix, outside every lock's units) |
+
+**A6 results** (records `evidence/{fit,bars}_m06-lowp_<class>_2026-10-14.json`, `evidence/bench_m06-8b-nvfp4-*_rtx-5080_2026-10-14.json`, `evidence/locks_m06-lowp_2026-10-14.json`).
+
+- **Clock screen** (60 s of bf16 matmuls before each desktop's runs): SM median / min 2722 / 2610 MHz (RTX 5080),
+  2670 / 2670 (RTX 4090), 2602 / 2400 (RTX 5090). Thermal slowdown was 0% of samples on all three. The power cap was
+  active 54% (5080), 0% (4090) and 91% (5090, at its 575 W limit) of the time.
+- **Fits** (acceptance 8; bf16 KV, `max_seqs` 32, `memory_fraction` 0.9; a prompt of 16128 tokens served on each):
+
+  | file | card | weights | KV tokens | predicted (§4.9) | acceptance |
+  |---|---|---|---|---|---|
+  | nvidia 8B NVFP4 | RTX 5080 | 5.96 GiB | 51472 | 52.8K | ≥ 32K ✓ |
+  | nvidia 30B NVFP4 | RTX 4090 | 16.87 | 35280 | 35.0K | ≥ 32K ✓ |
+  | GGUF MXFP4_MOE | RTX 4090 | 15.90 | 42096 | 44.2K–32.5K | ≥ 32K ✓ |
+  | amd-quark 30B MXFP4 | RTX 4090 | 17.24 | **24608** | 31.3K | recorded |
+
+  amd-quark is 6.7K tokens short of its prediction. At the free-memory read (A5000, same flags) its allocator holds
+  0.98 GiB reserved but not allocated that `empty_cache` cannot return, against 0.31 GiB for the nvidia 30B. Both
+  run the same expert path, and the one difference is amd-quark's bf16 attention, so segments are probably left
+  fragmented by loading and merging those dense weights. Allocated memory beyond weights and pools is 0.19 GiB for
+  both. A run with `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` gave identical numbers, and I did not confirm the option took effect. Not fixed in A6 (amd-quark has no lock).
+- **Bars** (acceptance 9; medians of repetitions 2–5, tokens/s, Holon / llama-bench at `q8` on the same bytes):
+
+  | file | card | pp512 | tg128 | tg128 @ d256 | ratio pp / tg |
+  |---|---|---|---|---|---|
+  | 8B NVFP4 | RTX 5080 | 6771 / 6445 | 144.8 / 146.3 | 144.1 / 145.2 | 1.05 / 0.99 ✓ |
+  | 8B NVFP4 | RTX 4090 | 10475 / 10427 | 138.5 / 136.3 | 137.8 / 135.5 | 1.00 / 1.02 ✓ |
+  | 30B NVFP4 | RTX 4090 | 9248 / 8775 | 214.0 / 213.8 | 213.2 / 212.5 | 1.05 / 1.00 ✓ |
+  | GGUF MXFP4_MOE | RTX 4090 | 10904 / 10762 | 224.4 / 222.6 | 223.5 / 221.0 | 1.01 / 1.01 ✓ |
+  | 8B NVFP4 | RTX 5090 (recorded) | 12718 / 11764 | 231.8 / 240.2 | 230.8 / 238.5 | 1.08 / 0.97 |
+  | 30B NVFP4 | RTX 5090 | 11581 / 10213 | 307.1 / 320.6 | 306.1 / 317.5 | 1.13 / 0.96 |
+  | GGUF MXFP4_MOE | RTX 5090 | 14483 / 12878 | 329.0 / 343.8 | 326.9 / 340.1 | 1.12 / 0.96 |
+
+  Every acceptance row passes, inside the predicted 0.95–1.1× (§4.10) except the RTX 5090's prefill at 1.12–1.13×.
+  Beside them on sm_120, pp512 for llama.cpp's default (native W4A4 prefill) vs Holon at `a4`: 8B 13363 vs 14394
+  (5080), 21037 vs 24821 (5090); 30B NVFP4 17108 vs 19487 (5090). The MXFP4_MOE file at llama.cpp's default runs
+  16257 (5090). tg128 is the same in both modes (decode is mmvq q8_1).
+- **Serving** (RTX 5080, 8B NVFP4; out tok/s, TTFT p50 ms; Holon vs llama-server at `q8` / at its default):
+  decode_b1 141.3, 41.9 vs 137.2, 60.3 / 138.5, 41.8; decode_b8 780.7, 298 vs 644.1, 497 / 680.9, 336; agent 77.1,
+  68 vs 75.2, 208 / 75.3, 171. Holon is at or above llama-server on every trace in both of its modes.
+- **Locks** (acceptance 10; L2 against the W4A8 mmq floor; tune picked `kernels.triton_attn` for decode attention
+  on both classes):
+
+  | lock | KL p99 (floor) | top-1 | verdict |
+  |---|---|---|---|
+  | rtx-5080 nvidia 8B NVFP4 (from the 4090's) | 1.28e-2 (1.24e-2) | 98.85% | approve, PASS |
+  | rtx-4090 nvidia 8B NVFP4 (new model) | 1.26e-2 (1.24e-2) | 98.78% | approve, PASS |
+  | rtx-4090 nvidia 30B NVFP4 (new model) | 4.75e-2 (4.92e-2) | 98.29% | approve, PASS |
+  | rtx-4090 MXFP4_MOE GGUF (new model) | 2.64e-2 (2.81e-2) | 98.44% | approve, PASS |
+
+  Snapshot ×3 run-identical for all four (130 steps each; the 8B NVFP4 on both classes). Graphs vs eager on the 30B
+  NVFP4 at its lock's flags (RTX 4090), decode batches 3, 5, 12, 20: pass.
+- **Every development-class lock propagated** to this tree (rebased on `main`): rtx-5080 30B UD-IQ3_XXS, 8B
+  Q4_K_M, 8B UD-IQ3_XXS, 27B UD-IQ3_S; rtx-4090 Qwen3-8B bf16, 30B Q4_K_M, 27B UD-Q4_K_M. All seven have a
+  snapshot trace byte-identical to their lock's, and L2 passes.
+- **Approvals:** every verdict passes and no existing snapshot moved, so the eleven locks are approved under the
+  delegation at Gate A's close: the four new ones and the seven propagated, each new `N.lock` with its snapshot.
+- **Suite and CI** at e6c9f53: full GPU suite (`pytest core std plugins judge testing tools`, two A5000s) 1134
+  passed, 49 skipped, 21 min 53 s (as at A4: no test added; three extended, two in A5 and one in A6); `scripts/ci/run_all.sh` green.
+
 **Decisions during Gate A (2026-10-13).**
 - **Locks are approved once, at Gate A's close.** A0 + A1 were propagated on every development class (rebased on
   `main` at the M0.4 Gate A merge) without `--approve`: all seven snapshot traces byte-identical, L2 at the M0.4

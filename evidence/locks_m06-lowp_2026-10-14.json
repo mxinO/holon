@@ -1,0 +1,297 @@
+{
+ "workload": "m06-a6-locks",
+ "date": "2026-10-14",
+ "commit": "e6c9f53",
+ "hardware": [
+  "NVIDIA GeForce RTX 5080",
+  "NVIDIA GeForce RTX 4090"
+ ],
+ "command": {
+  "new": "python -m holon_tools tune <file> [--new-model] --approve --golden <v1-fp32> --floor <v1-bfloat16-mmq-floor> --memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+  "existing": "python -m holon_tools propagate <file> --approve --golden <v1-fp32> --floor <floor> <the lock's flags, as A0 + A1>",
+  "snapshot": "python -m holon_judge snapshot --model <file> --runs 3 --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384'",
+  "graphs": "python -m holon_judge bounded --model <30B NVFP4> --graphs-vs-eager --sessions N --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384'"
+ },
+ "claim": "acceptance 10: locks rtx-5080 8B NVFP4; rtx-4090 8B NVFP4, 30B NVFP4, 30B MXFP4_MOE (GGUF), L2 passing against the W4A8 mmq floor; snapshots run-identical x3; graphs vs eager bounded on the 30B NVFP4 (4090) at the lock's flags; every development-class lock propagated to this tree with its snapshot trace byte-identical and L2 passing (approved at Gate A's close, delegated)",
+ "verdicts": {
+  "rtx-4090-tune-qwen3-30b-a3b-instruct-2507-mxfp4_moe": {
+   "rc": 0,
+   "lines": [
+    "attention.paged_decode: kernels.triton_attn 801.0 tok/s, kernels.flashinfer 316.2 tok/s",
+    "verdict: approve",
+    "  new model: first lock",
+    "  trace covered step widths 1-32, prefix tokens saved 2064",
+    "overall     32783  98.444%    99.354%  1.60e-04  2.64e-02  2.12e+00  +0.059% \u00b1 0.082%   3.17%",
+    "floor       32783  98.469%    99.345%  1.68e-04  2.81e-02  3.41e+00  +0.081% \u00b1 0.083%   3.22%",
+    "vs floor                                                             -0.022% \u00b1 0.096%",
+    "budget            \u226598.219%            \u22643.36e-04 \u22645.63e-02                     \u22640.490%",
+    "PASS",
+    "wrote plans/Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@84e3f62a338c23dd/rtx-4090/cu130-torch2.11/1.lock"
+   ]
+  },
+  "rtx-4090-tune-qwen3-30b-a3b-nvfp4": {
+   "rc": 0,
+   "lines": [
+    "attention.paged_decode: kernels.triton_attn 764.4 tok/s, kernels.flashinfer 298.0 tok/s",
+    "verdict: approve",
+    "  new model: first lock",
+    "  trace covered step widths 1-32, prefix tokens saved 2064",
+    "overall     32783  98.289%    99.105%  1.40e-04  4.75e-02  3.26e+00  +0.038% \u00b1 0.126%   3.51%",
+    "floor       32783  98.359%    99.192%  1.51e-04  4.92e-02  3.70e+00  -0.022% \u00b1 0.072%   3.59%",
+    "vs floor                                                             +0.061% \u00b1 0.139%",
+    "budget            \u226598.109%            \u22643.01e-04 \u22649.84e-02                     \u22640.503%",
+    "PASS",
+    "wrote plans/nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99/rtx-4090/cu130-torch2.11/1.lock"
+   ]
+  },
+  "rtx-4090-tune-qwen3-8b-nvfp4": {
+   "rc": 0,
+   "lines": [
+    "attention.paged_decode: kernels.triton_attn 964.4 tok/s, kernels.flashinfer 463.0 tok/s",
+    "verdict: approve",
+    "  new model: first lock",
+    "  trace covered step widths 1-32, prefix tokens saved 2064",
+    "overall     32783  98.783%    99.562%  8.85e-05  1.26e-02  7.89e-01  +0.117% \u00b1 0.035%   1.95%",
+    "floor       32783  98.691%    99.580%  9.28e-05  1.24e-02  5.79e-01  +0.163% \u00b1 0.031%   2.03%",
+    "vs floor                                                             -0.045% \u00b1 0.042%",
+    "budget            \u226598.441%            \u22641.86e-04 \u22642.49e-02                     \u22640.355%",
+    "PASS",
+    "wrote plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/1.lock"
+   ]
+  },
+  "rtx-5080-tune-qwen3-8b-nvfp4": {
+   "rc": 1,
+   "lines": []
+  },
+  "rtx-5080-tune2-qwen3-8b-nvfp4": {
+   "rc": 0,
+   "lines": [
+    "no lock for rtx-5080/cu130-torch2.11: starting from rtx-4090/cu130-torch2.11's",
+    "attention.paged_decode: kernels.triton_attn 894.4 tok/s, kernels.flashinfer 820.3 tok/s",
+    "verdict: approve",
+    "  snapshot trace differs from the lock's: step 1: deltas differ for (request, sequence) [(3, 0), (4, 0)]",
+    "  trace covered step widths 1-32, prefix tokens saved 2064",
+    "overall     32783  98.847%    99.612%  8.81e-05  1.28e-02  5.69e+00  +0.132% \u00b1 0.047%   1.96%",
+    "floor       32783  98.691%    99.580%  9.28e-05  1.24e-02  5.79e-01  +0.163% \u00b1 0.031%   2.03%",
+    "vs floor                                                             -0.031% \u00b1 0.055%",
+    "budget            \u226598.441%            \u22641.86e-04 \u22642.49e-02                     \u22640.359%",
+    "PASS",
+    "wrote plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-5080/cu130-torch2.11/1.lock"
+   ]
+  },
+  "rtx-4090-propagate-bf16-8b": {
+   "rc": 0,
+   "lines": [
+    "verdict: approve",
+    "  snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+    "  trace covered step widths 1-49, 51-57, 59, 61-64, prefix tokens saved 2064",
+    "overall     32783  98.984%    99.831%  3.86e-05  4.55e-03  1.77e-01  +0.003% \u00b1 0.026%   1.29%",
+    "floor       32783  98.929%    99.794%  4.48e-05  5.76e-03  1.09e+00  +0.090% \u00b1 0.030%   1.40%",
+    "vs floor                                                             -0.087% \u00b1 0.047%",
+    "budget            \u226598.679%            \u22648.95e-05 \u22641.15e-02                     \u22640.355%",
+    "PASS",
+    "wrote plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-4090/cu130-torch2.11/10.lock"
+   ]
+  },
+  "rtx-4090-propagate-q4_k_m-30b": {
+   "rc": 0,
+   "lines": [
+    "verdict: approve",
+    "  snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+    "  trace covered step widths 1-49, 51-57, 59, 61-64, prefix tokens saved 2064",
+    "overall     32783  98.325%    99.075%  1.86e-04  5.90e-02  3.58e+00  -0.011% \u00b1 0.125%   4.04%",
+    "floor       32783  98.219%    99.056%  1.81e-04  5.88e-02  4.76e+00  +0.162% \u00b1 0.096%   4.05%",
+    "vs floor                                                             -0.172% \u00b1 0.121%",
+    "budget            \u226597.969%            \u22643.63e-04 \u22641.18e-01                     \u22640.552%",
+    "PASS",
+    "wrote plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-4090/cu130-torch2.11/5.lock"
+   ]
+  },
+  "rtx-4090-propagate-ud-q4_k_m-27b": {
+   "rc": 0,
+   "lines": [
+    "verdict: approve",
+    "  snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+    "  trace covered step widths 1-4, prefix tokens saved 2048",
+    "overall     33372  97.042%    98.033%  4.26e-04  7.40e-01  2.93e+01  -1.432% \u00b1 1.360%   4.48%",
+    "floor       33372  96.947%    97.923%  4.16e-04  6.48e-01  2.21e+01  +0.018% \u00b1 0.894%   4.43%",
+    "vs floor                                                             -1.450% \u00b1 1.079%",
+    "budget            \u226596.697%            \u22648.33e-04 \u22641.30e+00                     \u22642.946%",
+    "PASS",
+    "wrote plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/4.lock"
+   ]
+  },
+  "rtx-5080-propagate-q4_k_m-8b": {
+   "rc": 0,
+   "lines": [
+    "verdict: approve",
+    "  snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+    "  trace covered step widths 1-39, 41-48, prefix tokens saved 2064",
+    "overall     32783  98.429%    99.312%  1.63e-04  3.69e-02  3.20e+00  +0.154% \u00b1 0.090%   2.95%",
+    "floor       32783  98.356%    99.262%  1.63e-04  3.58e-02  6.02e+00  +0.357% \u00b1 0.115%   3.02%",
+    "vs floor                                                             -0.203% \u00b1 0.086%",
+    "budget            \u226598.106%            \u22643.27e-04 \u22647.17e-02                     \u22640.466%",
+    "PASS",
+    "wrote plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/7.lock"
+   ]
+  },
+  "rtx-5080-propagate-ud-iq3_s-27b": {
+   "rc": 0,
+   "lines": [
+    "verdict: approve",
+    "  snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+    "  trace covered step widths 1-4, prefix tokens saved 2048",
+    "overall     33372  97.528%    98.363%  2.36e-04  6.65e-01  3.05e+01  +0.223% \u00b1 0.382%   3.59%",
+    "floor       33372  97.540%    98.382%  2.58e-04  7.12e-01  1.84e+01  +0.656% \u00b1 0.495%   3.69%",
+    "vs floor                                                             -0.430% \u00b1 0.415%",
+    "budget            \u226597.290%            \u22645.17e-04 \u22641.42e+00                     \u22641.287%",
+    "PASS",
+    "wrote plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/4.lock"
+   ]
+  },
+  "rtx-5080-propagate-ud-iq3_xxs-30b": {
+   "rc": 0,
+   "lines": [
+    "verdict: approve",
+    "  snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+    "  trace covered step widths 1-32, prefix tokens saved 2064",
+    "overall     32783  98.408%    99.201%  1.79e-04  5.73e-02  4.23e+00  -0.062% \u00b1 0.070%   4.09%",
+    "floor       32783  98.331%    99.123%  1.86e-04  5.93e-02  3.98e+00  -0.031% \u00b1 0.105%   4.16%",
+    "vs floor                                                             -0.031% \u00b1 0.103%",
+    "budget            \u226598.081%            \u22643.73e-04 \u22641.19e-01                     \u22640.508%",
+    "PASS",
+    "wrote plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS@dbe47df66091cac6/rtx-5080/cu130-torch2.11/5.lock"
+   ]
+  },
+  "rtx-5080-propagate-ud-iq3_xxs-8b": {
+   "rc": 0,
+   "lines": [
+    "verdict: approve",
+    "  snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+    "  trace covered step widths 1-49, 51-57, 59, 61-64, prefix tokens saved 2064",
+    "overall     32783  98.932%    99.699%  1.08e-04  1.43e-02  2.05e+00  +0.101% \u00b1 0.050%   2.15%",
+    "floor       32783  98.871%    99.680%  1.18e-04  1.53e-02  1.27e+00  -0.007% \u00b1 0.081%   2.23%",
+    "vs floor                                                             +0.108% \u00b1 0.071%",
+    "budget            \u226598.621%            \u22642.35e-04 \u22643.06e-02                     \u22640.427%",
+    "PASS",
+    "wrote plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-UD-IQ3_XXS@495e28b50d2373d0/rtx-5080/cu130-torch2.11/7.lock"
+   ]
+  }
+ },
+ "snapshots_x3": {
+  "rtx-4090-snapshot3-qwen3-30b-a3b-instruct-2507-mxfp4_moe": {
+   "model": "Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE.gguf",
+   "runs": 3,
+   "steps": 130,
+   "run_identical": true,
+   "diffs": [
+    null,
+    null
+   ],
+   "hardware": "NVIDIA GeForce RTX 4090"
+  },
+  "rtx-4090-snapshot3-qwen3-30b-a3b-nvfp4": {
+   "model": "nvidia/Qwen3-30B-A3B-NVFP4",
+   "runs": 3,
+   "steps": 130,
+   "run_identical": true,
+   "diffs": [
+    null,
+    null
+   ],
+   "hardware": "NVIDIA GeForce RTX 4090"
+  },
+  "rtx-4090-snapshot3-qwen3-8b-nvfp4": {
+   "model": "nvidia/Qwen3-8B-NVFP4",
+   "runs": 3,
+   "steps": 130,
+   "run_identical": true,
+   "diffs": [
+    null,
+    null
+   ],
+   "hardware": "NVIDIA GeForce RTX 4090"
+  },
+  "rtx-5080-snapshot3-qwen3-8b-nvfp4": {
+   "model": "nvidia/Qwen3-8B-NVFP4",
+   "runs": 3,
+   "steps": 130,
+   "run_identical": true,
+   "diffs": [
+    null,
+    null
+   ],
+   "hardware": "NVIDIA GeForce RTX 5080"
+  }
+ },
+ "graphs_vs_eager": {
+  "rtx-4090-graphs-qwen3-30b-a3b-nvfp4-12": {
+   "passed": true,
+   "sessions": 12,
+   "engine_args": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+   "configs": {
+    "baseline": {
+     "top1": 0.9827473958333334,
+     "kl_p99": 0.030905274968697518,
+     "passed": true
+    },
+    "graphs on": {
+     "top1": 0.9825846354166666,
+     "kl_p99": 0.030905274968697518,
+     "passed": true
+    }
+   }
+  },
+  "rtx-4090-graphs-qwen3-30b-a3b-nvfp4-20": {
+   "passed": true,
+   "sessions": 20,
+   "engine_args": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+   "configs": {
+    "baseline": {
+     "top1": 0.98330078125,
+     "kl_p99": 0.029272528616096062,
+     "passed": true
+    },
+    "graphs on": {
+     "top1": 0.98154296875,
+     "kl_p99": 0.029272528616096062,
+     "passed": true
+    }
+   }
+  },
+  "rtx-4090-graphs-qwen3-30b-a3b-nvfp4-3": {
+   "passed": true,
+   "sessions": 3,
+   "engine_args": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+   "configs": {
+    "baseline": {
+     "top1": 0.9778645833333334,
+     "kl_p99": 0.03474743190862827,
+     "passed": true
+    },
+    "graphs on": {
+     "top1": 0.98046875,
+     "kl_p99": 0.03474743190862827,
+     "passed": true
+    }
+   }
+  },
+  "rtx-4090-graphs-qwen3-30b-a3b-nvfp4-5": {
+   "passed": true,
+   "sessions": 5,
+   "engine_args": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+   "configs": {
+    "baseline": {
+     "top1": 0.982421875,
+     "kl_p99": 0.03237455441479653,
+     "passed": true
+    },
+    "graphs on": {
+     "top1": 0.983984375,
+     "kl_p99": 0.03237455441479653,
+     "passed": true
+    }
+   }
+  }
+ }
+}

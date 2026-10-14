@@ -1,0 +1,399 @@
+{
+ "workload": "m06-a6-bars",
+ "date": "2026-10-14",
+ "commit": "e6c9f53",
+ "clock_screen": {
+  "load": "60 s of bf16 8192^2 matmuls, nvidia-smi every 250 ms",
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "samples": 233,
+  "sm_clock_mhz": {
+   "median": 2722.0,
+   "min": 2610.0,
+   "p5": 2610.0,
+   "max_sm": 3090.0
+  },
+  "thermal_slowdown_share": {
+   "sw": 0.0,
+   "hw": 0.0
+  },
+  "hw_slowdown_share": 0.0,
+  "power_cap_share": 0.5364806866952789
+ },
+ "command": {
+  "holon": "python bench/llama_bench.py --model <file> -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384 [--plugin-options quant.act=a4]'",
+  "llama": "GGML_CUDA_MMQ_PREC=<q8|auto> llama-bench (llama.cpp cbe28bb3) -m <same bytes .gguf> -p 512 -n 128 -d 0,256 -ngl 99 -fa on -r 5 -o json"
+ },
+ "files": {
+  "qwen3-8b-nvfp4": "nvidia/Qwen3-8B-NVFP4; llama.cpp: its GGUF by the pin's converter (NVFP4, other tensors bf16)",
+  "qwen3-30b-a3b-nvfp4": "nvidia/Qwen3-30B-A3B-NVFP4; likewise",
+  "qwen3-30b-a3b-instruct-2507-mxfp4_moe": "the GGUF itself, both sides"
+ },
+ "claim": "acceptance 9: pp512 and tg128 >= 0.8x llama-bench on the same bytes at the same activation mode (llama.cpp at GGML_CUDA_MMQ_PREC=q8: W4A8), medians of repetitions 2-5; llama.cpp's default (W4A4 prefill on sm_120) and Holon at quant.act = a4 beside; RTX 5090 recorded",
+ "results": {
+  "qwen3-8b-nvfp4": {
+   "holon-a4": {
+    "pp512": 14393.81,
+    "tg128": 144.82,
+    "tg128 @ d256": 144.24
+   },
+   "llama-q8": {
+    "pp512": 6445.26,
+    "tg128": 146.3,
+    "tg128 @ d256": 145.23
+   },
+   "llama-auto": {
+    "pp512": 13363.2,
+    "tg128": 146.27,
+    "tg128 @ d256": 145.25
+   },
+   "holon": {
+    "pp512": 6770.52,
+    "tg128": 144.78,
+    "tg128 @ d256": 144.12
+   },
+   "ratio (holon / llama q8)": {
+    "pp512": 1.05,
+    "tg128": 0.99,
+    "tg128 @ d256": 0.992
+   }
+  }
+ },
+ "raw": {
+  "rtx-5080-bars-holon-a4-qwen3-8b-nvfp4": {
+   "model": "nvidia/Qwen3-8B-NVFP4@70613544a162fdd3",
+   "gpu_class": "rtx-5080/cu130-torch2.11",
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "commit": "74bfabbca396f3b195705c1d06de2742cffb763d",
+   "command": "python bench/llama_bench.py --model ccd10a893cbca613259517c3efe08e151ddf2b8e -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384 --plugin-options quant.act=a4' --json rtx-5080-bars-holon-a4-qwen3-8b-nvfp4.json",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "32",
+    "max_model_len": "16384",
+    "max_step_tokens": "2048",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "slots": "{}",
+    "plugin_options": "{'quant.act': 'a4'}"
+   },
+   "results": {
+    "pp512": {
+     "mean": 14396.21,
+     "sd": 31.77,
+     "runs": [
+      14377.74,
+      14369.39,
+      14408.86,
+      14446.33,
+      14378.75
+     ]
+    },
+    "tg128": {
+     "mean": 144.83,
+     "sd": 0.01,
+     "runs": [
+      144.83,
+      144.83,
+      144.84,
+      144.82,
+      144.82
+     ],
+     "cpu_ms_per_step_p50": 0.413
+    },
+    "tg128 @ d256": {
+     "mean": 144.23,
+     "sd": 0.01,
+     "runs": [
+      144.23,
+      144.23,
+      144.23,
+      144.24,
+      144.25
+     ],
+     "cpu_ms_per_step_p50": 0.416
+    }
+   }
+  },
+  "rtx-5080-bars-holon-qwen3-8b-nvfp4": {
+   "model": "nvidia/Qwen3-8B-NVFP4@70613544a162fdd3",
+   "gpu_class": "rtx-5080/cu130-torch2.11",
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "commit": "74bfabbca396f3b195705c1d06de2742cffb763d",
+   "command": "python bench/llama_bench.py --model ccd10a893cbca613259517c3efe08e151ddf2b8e -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384' --json rtx-5080-bars-holon-qwen3-8b-nvfp4.json",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "32",
+    "max_model_len": "16384",
+    "max_step_tokens": "2048",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "slots": "{}",
+    "plugin_options": "{}"
+   },
+   "results": {
+    "pp512": {
+     "mean": 6772.47,
+     "sd": 5.84,
+     "runs": [
+      6778.03,
+      6766.99,
+      6765.65,
+      6777.6,
+      6774.06
+     ]
+    },
+    "tg128": {
+     "mean": 144.79,
+     "sd": 0.01,
+     "runs": [
+      144.81,
+      144.79,
+      144.77,
+      144.79,
+      144.78
+     ],
+     "cpu_ms_per_step_p50": 0.414
+    },
+    "tg128 @ d256": {
+     "mean": 144.13,
+     "sd": 0.01,
+     "runs": [
+      144.13,
+      144.14,
+      144.11,
+      144.13,
+      144.12
+     ],
+     "cpu_ms_per_step_p50": 0.411
+    }
+   }
+  },
+  "rtx-5080-bars-llama-auto-qwen3-8b-nvfp4": [
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5080",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "avg_ts": 12912.756844,
+    "stddev_ts": 994.238931,
+    "samples_ts": [
+     11134.6,
+     13323,
+     13366.8,
+     13359.6,
+     13379.9
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5080",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "avg_ts": 146.20976,
+    "stddev_ts": 0.142538,
+    "samples_ts": [
+     145.955,
+     146.274,
+     146.276,
+     146.27,
+     146.274
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5080",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 256,
+    "avg_ts": 12743.970424,
+    "stddev_ts": 487.377364,
+    "samples_ts": [
+     12745,
+     11899.7,
+     13039.3,
+     13013.1,
+     13022.8
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5080",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 256,
+    "avg_ts": 145.176379,
+    "stddev_ts": 0.163664,
+    "samples_ts": [
+     144.884,
+     145.242,
+     145.254,
+     145.256,
+     145.247
+    ]
+   }
+  ],
+  "rtx-5080-bars-llama-q8-qwen3-8b-nvfp4": [
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5080",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "avg_ts": 6319.419783,
+    "stddev_ts": 276.097238,
+    "samples_ts": [
+     5825.75,
+     6444.03,
+     6451.74,
+     6446.5,
+     6429.08
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5080",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "avg_ts": 146.236139,
+    "stddev_ts": 0.125435,
+    "samples_ts": [
+     146.013,
+     146.273,
+     146.302,
+     146.301,
+     146.292
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5080",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 256,
+    "avg_ts": 6313.756803,
+    "stddev_ts": 109.736221,
+    "samples_ts": [
+     6321.72,
+     6121.91,
+     6379.44,
+     6372.01,
+     6373.69
+    ]
+   },
+   {
+    "build_commit": "cbe28bb3c",
+    "gpu_info": "NVIDIA GeForce RTX 5080",
+    "backends": "CUDA",
+    "model_type": "qwen3 8B NVFP4",
+    "model_size": 6397548512,
+    "model_n_params": 8190735864,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "type_k": "f16",
+    "type_v": "f16",
+    "n_gpu_layers": 99,
+    "flash_attn": 1,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 256,
+    "avg_ts": 145.158436,
+    "stddev_ts": 0.168263,
+    "samples_ts": [
+     144.858,
+     145.242,
+     145.229,
+     145.226,
+     145.238
+    ]
+   }
+  ]
+ }
+}
