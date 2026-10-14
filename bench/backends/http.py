@@ -58,6 +58,11 @@ class Server:
             except subprocess.TimeoutExpired:
                 os.killpg(self.proc.pid, 9)
 
+    def cpu_ms(self) -> float:
+        """The server process's own CPU time (not its children's: Holon's engine runs in one)."""
+        fields = open(f"/proc/{self.proc.pid}/stat").read().rsplit(")", 1)[1].split()
+        return (int(fields[11]) + int(fields[12])) * 1e3 / os.sysconf("SC_CLK_TCK")
+
     def get(self, path: str) -> dict:
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=60)
         conn.request("GET", path)
@@ -87,6 +92,7 @@ class Backend:
         self.arrived: queue.Queue[Delta | BaseException] = queue.Queue()
         self.in_flight = 0
         self.finals: list[dict] = []                 # every request's last event
+        self.gaps: list[float] = []                  # every request's largest gap between its events (s)
 
     def add(self, rid: int, prompt: list[int], max_tokens: int) -> None:
         self.in_flight += 1
@@ -95,10 +101,14 @@ class Backend:
     def _run(self, rid: int, prompt: list[int], max_tokens: int) -> None:
         try:
             state: dict = {}
+            gap, last = 0.0, None
             for event in self.server.stream(self.path, self.body(prompt, max_tokens)):
+                now = time.perf_counter()
+                gap, last = (max(gap, now - last) if last is not None else 0.0), now
                 toks, done = self.parse(event, state)
                 if done:
                     self.finals.append(event)
+                    self.gaps.append(gap)
                 if toks or done:
                     self.arrived.put((rid, toks, done))
         except BaseException as e:  # noqa: BLE001 — surfaced by step() on the driver's thread
