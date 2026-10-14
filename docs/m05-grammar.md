@@ -5,7 +5,9 @@ resolved in §9. **Step 1 built** (2026-10-13): the core seams of §3 with the t
 (2026-10-13): the `grammar.xgrammar` plugin, pinned at xgrammar 0.2.8. **Step 3 built** (2026-10-13):
 `frontends/http`, the format parsers and constraint builders, the three dialects. **Step 4 measured** (2026-10-14):
 D2's decision is A′, and the forward/sample split is deferred to M0.7. **Step 5 evidence** (2026-10-14): §11. Their
-records, deviations and §6's measurements are in §11.
+records, deviations and §6's measurements are in §11. **Acceptance met** (2026-10-14; plan §8.1), with one recorded
+shortfall decided by the owner: the 27B + MTP's truncated share is +2.33 points over unconstrained against the 2-point
+gate (§11, panel round item 7).
 
 Scope: plan §8, amended (D1; plan §2 / §8 updated with this revision):
 - the core gets general logits-processor seams (§3); "core diff target zero" becomes "only the seams of §3, each
@@ -543,6 +545,9 @@ unread `max_depth` is removed (the gate comes from `open`).
 - Exact regular translations of the date / date-time / ipv4 / hostname formats (v1; rejected under strict now).
 - More than one logits processor (ordering, chained masks).
 - Constraining `tool_choice: "auto"` by default (D8).
+- Runaway guards for grammar-admitted loops (the truncation shortfall, §11 panel round item 7): a bound on a
+  number's digits in the plugin's grammar, a repetition stop outside the grammar, and a whitespace cap if a form
+  without the measured compile-size and fill costs exists.
 
 ## 11. Build record
 
@@ -1159,7 +1164,8 @@ three more:
    ×17–30, fill ×3–10); (b) a bound on a number's digits (no JSON Schema keyword gives one; a grammar-level bound in
    the plugin); (c) a repetition guard (outside the grammar: the sampler's or frontend's); (d) accept the shortfall
    for the 27B with the 8B within the gate (−1.72 points over the full split). No guard is added; the decision is the
-   owner's.
+   owner's. **Decided (owner, 2026-10-14): (d), accept and record.** The gate stays as written (not re-defined after
+   the result); the 27B's +2.33 points stand as a shortfall; runaway guards are deferred (§10).
 
 The correctness reviewer's items:
 - (a) above, in 3.

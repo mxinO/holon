@@ -47,7 +47,7 @@ the code is our own plugin-native implementation. Only kernels may be borrowed, 
 | M0.5 | Qwen3-8B, Qwen3.8-27B | logits-processor lifecycle, host-token depth gate, drafts to the host, per-request errors, resume (`docs/m05-grammar.md` §3; the forward/sample split only if measured necessary) | xgrammar processor, parsers, one HTTP frontend with OpenAI, Anthropic and Responses routers |
 | M0.6 | Qwen3-8B / Qwen3-30B-A3B in FP8 (block-scaled), NVFP4 and MXFP4 | low-precision HF checkpoints, dense and MoE: weight-source dialects over `QTensor` parts, `qlinear` / `linear_experts` providers, judge tiers per format; RTX PRO 6000 (sm_120), FP8 also on sm_89 | fp8 / nvfp4 / mxfp4 dialects and kernels |
 | M0.7 | Qwen3-8B, Qwen3.8-27B GGUF | fused prefill glue (KV-store kernel, add+norm, q/k norm) and a model-specific megakernel experiment (design §5.7) | fused kernels in std and in the model package |
-| Release | every v0 model | packaging, quickstart, rtx-5090 / rtx-3090 locks, an agent demo; the benchmark suite (decode, prefill, agent trace vs llama.cpp, FreeToken and SGLang where each runs) on the release classes | — |
+| Release | every v0 model | packaging, quickstart, rtx-5090 / rtx-3090 locks, an agent demo; the legibility benchmark (§9) before the ABI freezes; the benchmark suite (decode, prefill, agent trace vs llama.cpp, FreeToken and SGLang where each runs) on the release classes | — |
 
 Order (user, 2026-10-13): M0.4 → M0.5 (whole: its grammar seam builds on verify); M0.6 runs in parallel, in its own
 worktree; then M0.7 and the release, which needs the benchmark suite first.
@@ -470,6 +470,28 @@ per-request errors; the three API dialects are routers of one frontend package (
 conformance is defined for strict requests against a published reject list (xgrammar silently ignores some JSON
 Schema keywords); `tool_choice: "auto"` stays unconstrained unless a tool is strict.
 
+### 8.1 Status (2026-10-14): acceptance met, one recorded shortfall
+
+Design and evidence: `docs/m05-grammar.md` (rev 5, reviewed clean; §11 is the build record with every result,
+deviation and the panel round after step 5); records `evidence/conformance_*`, `gate_cost_*`, `gate_sizing_*`,
+`round_trips_*`, `constrained_bounded_*`, `claude_code_session_*`.
+
+| # | Result |
+|---|---|
+| 1 | Conformance on JSONSchemaBench (strict, against the published reject list): Qwen3-8B, the full filtered split (1625 accepted): greedy 1582 of 1582 valid, sampled 1587 / 1584 of 1587 / 1584, 0 request-time errors; Qwen3.8-27B + MTP, 500 sampled (301 accepted): 293 of 293 valid. Declared coverage 60.6% / 59.1% of the split (152k / 248k vocabularies). The model-free oracle finds no accepted schema that admits an invalid instance (its hole list grew with the reject list: lookarounds, backreferences, mid-pattern anchors) |
+| 2 | **Shortfall, accepted by the owner:** the 27B's truncated share is +2.33 points over unconstrained (2.66% vs 0.33%, n = 301, SE ≈ 1.0) against the 2-point gate; 6 of its 8 truncations are grammar-admitted runaways (whitespace, digits, a repeated string). The 8B is within the gate (−1.73 points). Runaway guards deferred |
+| 3 | Tool calls: OpenAI chat, Anthropic Messages and OpenAI Responses round trips on both models (9 of 9 calls schema-valid, streamed = whole); a Claude Code session against the 27B on an RTX 5080 completed a multi-tool task |
+| 4 | Grammar with speculation: exact on CPU tiny models with an oracle drafter; the constrained bounded check on the 27B + MTP passes (first divergences ≤ 0.124 nats under the calibrated 0.229); refused drafts 1.1–1.7% |
+| 5 | A′ (no constrained row scheduled with one in flight); one graph set with a processor selected (27B + MTP: KV −0.12%); nothing changes with none selected; the forward/sample split deferred (1.061× / 1.026×, under its 1.10× rule) |
+| 6 | Core: the logits-processor seams of the design's §3, a request lifecycle with per-request errors, and slot objects' `stats()`, each with a toy proof (core 3868 / 6000 lines) |
+
+Decisions: conformance is defined for strict requests against a reject list; no whitespace cap (S2-1: a cap of 16
+costs 17–30× the compiled size and 3–10× the mask fill); the truncation gate kept as written and its 27B shortfall
+accepted (owner, 2026-10-14). Found on the way: GGUF kernels are not batch-invariant (the judge's reference scores one
+sequence at a time); xgrammar silently ignores lookarounds and mid-pattern anchors (refused under strict); Claude Code
+sends `system` messages inside `messages`. Next: M0.7 (mixed prefill/decode steps answer the 34–36 s stream stalls
+measured here).
+
 ## 9. Kill / pivot criteria
 
 | When | Measure | Pivot if |
@@ -477,7 +499,7 @@ Schema keywords); `tool_choice: "auto"` stays unconstrained unless a tool is str
 | S6 spike | CPU handshake inside a FULL graph on a desktop host | seam does not hold → redesign the graph/CPU seam before the core ABI freezes |
 | M0 | decode + mixed-trace TTFT/TPOT vs mini-sglang; CPU/step vs nano-vllm; core LOC | < 0.9× after two weeks of perf work, or core > 6k → move per-token input prep to GPU kernels and cut core scope before continuing |
 | M0.2 | core changes needed for MoE; approvals per week from propagation | > 1 core ABI change, or > 3 approvals/week → abstraction or machinery is wrong; simplify |
-| After M0.3 (design D9) | legibility benchmark: ≥ 3 runs per side, same agent and prompt, adding a model whose units already exist, from a branch point before its model package | Holon not ≥ 30% cheaper for the agent than a mini-sglang fork → collapse slots and nouns |
+| Before the release freezes the ABI (design D9; moved from "after M0.3" by the owner, 2026-10-14) | legibility benchmark: ≥ 3 runs per side, same agent and prompt, adding a model whose units already exist, from a branch point before its model package | Holon not ≥ 30% cheaper for the agent than a mini-sglang fork → collapse slots and nouns |
 | Any | propagation sweep time; approvals/day | > 30 min or > 1/day → async propagation (design §4.6 trigger) |
 | M0.1 / M0.2 / M0.3 | GGUF decode **and prefill** tok/s vs llama.cpp on the same card and quant (RTX 5080), dense and MoE | < 0.8× on either after a perf pass → fix the GGUF kernel path (ported i-quant `mmq` or own Triton kernels for the slow types) before adding features |
 | v1 offload | MoE larger than VRAM on RTX 5080: decode tok/s vs FreeToken and Strata on the same node | < 0.8× → rework the offload path before adding features |
