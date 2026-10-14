@@ -57,5 +57,24 @@
    },
    "max_step_tokens": 16
   }
+ },
+ "after_gate_b_panel": {
+  "commit": "f43ed18",
+  "note": "act_quant's a_s by tl.math.div_rn and the W8A8 emulation's a_s by IEEE division (torch had divided by the scalar 448 as a multiply by its reciprocal); the W8A8 floor re-recorded (KL p99 4.18e-2, was 4.14e-2) and the prefill run (and on the RTX 5080 the near-threshold plants P3, P7) scored again; decode, P1, P2, P4 unaffected (no W8A8 activations, or gross)",
+  "prefill": {
+   "kl_p99": 0.040825047077440245,
+   "floor_kl_p99": 0.04184689072086072,
+   "x_floor_p99": 0.976,
+   "x_floor_p50": 0.935,
+   "top1": 0.9827959613214166,
+   "floor_top1": 0.9817283348076747,
+   "dppl": 0.0018363486050534492,
+   "passed": true,
+   "failures": [],
+   "calls": {
+    "decode/bf16": 0,
+    "prefill/fp8": 1296
+   }
+  }
  }
 }

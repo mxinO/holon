@@ -50,14 +50,14 @@ W4 weights and **8-bit activations by default on every class** (D3). Two gates, 
 10. **Locks:** rtx-5080 8B NVFP4 (`nvidia`); rtx-4090 8B NVFP4, 30B NVFP4, 30B MXFP4_MOE (GGUF). Snapshots
     run-identical ×3; graphs vs eager bounded on the 30B NVFP4 decode (4090).
 
-**Gate B — FP8 kernels.**
+**Gate B — FP8 kernels.** Status (2026-10-14, Gate B panel): **met except 15** (the locks wait for the release and M0.7's propagation); 11, 12, 14 met; 13 met with a deviation (P3, §8).
 
 11. **Decode gate first:** per-shape microbenchmark (the 8B's 5 projection shapes, M = 1…16) of the W8A16 split-K
     decode kernel on the 5080 and 4090, turned into an end-to-end prediction: Σ (shape time × 36 layers) + the
     measured bf16 head time + the non-GEMM decode time from the existing GGUF decode profile on that card. It must
     predict ≥ 0.85× the llama-bench Q8_0 tg128 measured in the same step, or the kernel is reworked before B2.
 12. **L0** for `kernels.triton_fp8` FP8 on sm_89 and sm_120a (dense, both path modes), memcheck.
-13. **L2 Tier B**, 8B FP8 on rtx-5080 and rtx-4090: prefill W8A8 vs the W8A8 floor, decode W8A16 vs the A16 floor;
+13. **L2 Tier B** (met with a deviation: P3 fails L2, predicted to pass; §8), 8B FP8 on rtx-5080 and rtx-4090: prefill W8A8 vs the W8A8 floor, decode W8A16 vs the A16 floor;
     FP8 plants as predicted. Decode runs use steps of ≤ 16 tokens (the M ≤ 16 switch), so every call is W8A16.
 14. **Speed:** 8B FP8 tg128 ≥ 0.8× llama-bench Q8_0 of the same checkpoint on the 5080 and 4090; pp512 recorded
     against its prediction. **Memory:** 8B FP8 on the 5080 ≥ 32K KV tokens at 0.9 (34.3K predicted; fallback 0.98).
@@ -1092,3 +1092,37 @@ before). Flags: the FP4 locks' (0.9, `max_seqs` 32, bf16 KV); a 16128-token prom
 - **Suite and CI** at 2eb40e4: full GPU suite (two A5000s, `.venv` from `uv sync --group dev` with `sentencepiece`)
   1168 passed, 50 skipped, 0 errors, 20 min 26 s (+4: the two `test_dflash.py` tests now run, and the two
   merge-order cases); `scripts/ci/run_all.sh` green.
+
+**Gate B panel (2026-10-14): clean, with minors; fixed.**
+- **Decode mode check:** against a floor that emulates nothing (A16), every counted call (and LM-head call) must be
+  `bf16` (`compare._path_failures`). A decode recording with `prefill/fp8` calls against the A16 floor fails
+  (`judge/tests/test_compare.py`, extended; failing before).
+- **Kernel:** `_act_quant` computes `a_s` with `tl.math.div_rn`. **Found on the way:** the bitwise act quant check then
+  failed on sm_89 and sm_120a (6 of 9, at 0bccbfa). torch divides by a Python scalar as a multiply by its
+  reciprocal, which is not the correctly rounded quotient: 572483 of 2^20 random f32 values differ. Triton had
+  lowered the kernel's `/ 448.0` the same way, so the earlier L0 agreed. The W8A8 emulation (`modes.fp8_act`) now
+  divides by a tensor (IEEE). The FP8 L0 at e6fcce5: 9 passed on the RTX 5080 (sm_120a) and the RTX 4090 (sm_89),
+  memcheck 0 errors on both; clock screens 2670 MHz, no thermal slowdown (`evidence/l0_m06-lowp_gate-b_2026-10-14.json`).
+- **The W8A8 floor re-recorded** (f43ed18): KL p99 4.18e-2 (was 4.14e-2), top-1 98.17%. Scored against it, also in
+  `evidence/tier-b-fp8_m06-lowp_<class>_2026-10-14.json`:
+  - prefill Tier B passes: RTX 5080 1.02×, top-1 98.21%; RTX 4090 0.98×, 98.28%;
+  - P3 still fails (1.46×, top-1 97.78% < 97.92%);
+  - P7 fails (2.15×; fail if > 2×), as predicted.
+
+  Decode (A16 floor) and P1, P2 (gross) and P4 (decode) are unaffected.
+- **`MERGED` / `adjacent`** say that they follow the composites' `finalize_weights` merge lists.
+- **The RTX 4090 bars record** notes the voided first node.
+
+**For M0.7** (recorded, not implemented):
+- **Propagation:** expect the merge-order change (`std.weights.hf` `adjacent`) to move every HF lock's KV sizes. Traces
+  that depend on KV pressure may need approval, including the 30B NVFP4's 35280 → 34128 tokens on the rtx-4090.
+- **FP4 repack holes:** `kernels.ggml_cuda`'s `prepare` leaves holes in FP4 stacks (≈ 0.63 GiB reserved but
+  unallocated on the 30B NVFP4). Either allocate the repacked stacks before freeing the sources, or repack into a
+  preallocated destination.
+- **Allocator setting:** check whether a platform-level allocator setting removes such holes in general. To reconcile
+  with B3's note: expandable segments are already on from startup (`platform.configure_allocator` sets them in
+  process, `check_expandable` verifies every pool; every segment of the B3 fits was expandable), and B3's holes were
+  measured with them on. After `empty_cache` the allocator still kept 71 free blocks of 2–28 MiB mapped inside one
+  expandable segment. So the setting alone does not remove them. Still open: whether torch releases whole free pages
+  inside an expandable segment, or only at its end. If only at its end, a platform-level fix needs another setting or
+  the load order.

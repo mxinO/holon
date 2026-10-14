@@ -62,5 +62,39 @@
     "fp8-subnormals-as-normals": "2 failed, 7 passed in 5.00s"
    }
   }
+ },
+ "after_gate_b_panel": {
+  "rtx-5080": {
+   "clock_sm_mhz_median": 2670.0,
+   "thermal_slowdown_share": {
+    "sw": 0.0,
+    "hw": 0.0
+   },
+   "0bccbfa (div_rn a_s; emulation still torch's scalar division)": [
+    "6 failed, 3 passed in 22.18s"
+   ],
+   "e6fcce5 (the emulation's a_s an IEEE division)": [
+    "9 passed in 4.41s"
+   ],
+   "memcheck (e6fcce5)": [
+    "========= ERROR SUMMARY: 0 errors"
+   ]
+  },
+  "rtx-4090": {
+   "clock_sm_mhz_median": 2670.0,
+   "thermal_slowdown_share": {
+    "sw": 0.0,
+    "hw": 0.0
+   },
+   "0bccbfa (div_rn a_s; emulation still torch's scalar division)": [
+    "6 failed, 3 passed in 9.33s"
+   ],
+   "e6fcce5 (the emulation's a_s an IEEE division)": [
+    "9 passed in 5.99s"
+   ],
+   "memcheck (e6fcce5)": [
+    "========= ERROR SUMMARY: 0 errors"
+   ]
+  }
  }
 }
