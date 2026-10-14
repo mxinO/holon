@@ -1,5 +1,5 @@
 {
- "command": "python bench/step_profile.py --name 8b-nvfp4 --model nvidia/Qwen3-8B-NVFP4@ccd10a893cbc --lock ../plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/1.lock --prefill --batches 1",
+ "command": "python bench/step_profile.py --name 8b-nvfp4 --model nvidia/Qwen3-8B-NVFP4@ccd10a893cbc --lock plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/1.lock --prefill --batches 1",
  "commit": "ed25148",
  "gpu_class": "rtx-a5000",
  "date": "2026-10-14",
@@ -7,7 +7,7 @@
  "name": "8b-nvfp4",
  "gpu": "NVIDIA RTX A5000",
  "model": "nvidia/Qwen3-8B-NVFP4@ccd10a893cbc",
- "lock": "../plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/1.lock",
+ "lock": "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/1.lock",
  "engine_args": "",
  "engine": {
   "device": "cuda",

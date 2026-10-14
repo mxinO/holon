@@ -88,7 +88,8 @@ def replay(backend: Backend, sessions: list[dict], salt: str,
                 r.first, firsts = w1 - t0, firsts + 1
             elif toks:
                 r.max_gap = max(r.max_gap, w1 - t0 - r.last)
-            r.last = w1 - t0
+            if toks or r.last is None:
+                r.last = w1 - t0
             r.generated += toks
             if finished:
                 done.append(live.pop(rid))

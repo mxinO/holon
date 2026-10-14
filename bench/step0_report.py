@@ -30,6 +30,15 @@ GROUPS = {                     # report column -> step_profile categories
     "GDN core + conv": ["gdn core", "gdn conv"],
 }
 DROP = 0.01                    # a candidate under 1% of its step is dropped (D1)
+# Decode steps a row ran before the middle of its graphed timing window (step_profile.py: eager warm-up 2, counter 1,
+# timed 32, traced 32, graphed warm-up 3, half of the timed 32): the context of its graphed wall, for records made
+# before `graphed_ctx` was recorded.
+GRAPHED_AT = 86
+MMVQ_MAX = 8                   # mmvq's most rows (llama.cpp's MMVQ_MAX_BATCH_SIZE)
+
+
+def graphed_ctx(row: dict) -> float:
+    return row.get("graphed_ctx", row["ctx"] + GRAPHED_AT)
 
 
 def load(directory: str, cls: str, what: str) -> dict[str, dict]:
@@ -82,8 +91,9 @@ def candidates(profiles: dict[str, dict], shared: dict[str, float]) -> list[dict
     """Per (model, row): each fusion candidate's estimated saving (ms, share of the step). Estimates:
     - kv_write: the KV store's time beyond one launch per attention layer (bf16 KV: two index_puts become one);
     - qk_rope_kv (D3, on top of kv_write): q/k norm + rope;
-    - mmq bf16 out (D4): the f32 -> bf16 casts (NVFP4: the f32 x scale2 -> bf16 multiplies, the "gates" of a
-      model without GDN; above one row mmvq writes f32 for them too);
+    - mmq bf16 out (D4): the f32 -> bf16 casts, and NVFP4's f32 x scale2 -> bf16 multiplies (the "gates" of a model
+      without GDN) where its matmuls run mmq; where they run mmvq above one row the multiplies are a new candidate;
+      on GDN prefill rows the casts include some outside mmq (an upper bound);
     - fp4 activations read as bf16 (not in §5): native W4A4's bf16 -> f32 activation copies;
     - gate/up + SwiGLU (D6, one column): silu·mul on decode B1;
     - shared q8_1 (D6): act quant x the share of the step's quantizations whose input was already quantized
@@ -105,8 +115,13 @@ def candidates(profiles: dict[str, dict], shared: dict[str, float]) -> list[dict
                 c["kv_write (bf16)"] = kv * (1 - attn_layers / kv_n)
             c["qk_rope_kv (D3)"] = cat.get("q/k norm", 0.0) + cat.get("rope", 0.0)
             c["mmq bf16 out (D4)"] = cat.get("f32 -> bf16 cast", 0.0)
-            if not cat.get("gdn core"):                    # no GDN: the gates are NVFP4's f32 x scale2 -> bf16 write
-                c["mmq bf16 out (D4)"] += cat.get("gates (sigmoid, mul, softplus, exp)", 0.0)
+            scale2 = 0.0 if cat.get("gdn core") else cat.get("gates (sigmoid, mul, softplus, exp)", 0.0)
+            if scale2:                                     # no GDN: the gates are NVFP4's f32 x scale2 -> bf16 writes
+                nvfp4_rows = [x["rows"] for x in row.get("gemm", {}).get("calls", []) if x["type"] == "nvfp4"]
+                if row["kind"] == "prefill" or max(nvfp4_rows, default=0) > MMVQ_MAX:
+                    c["mmq bf16 out (D4)"] += scale2       # mmq's write-back
+                else:                                      # mmvq above one row: D4 does not reach it
+                    c["NVFP4 scale2 in mmvq above one row (new)"] = scale2
             if cat.get("bf16 -> f32 copy"):
                 c["fp4 activations read as bf16 (new)"] = cat["bf16 -> f32 copy"]
             if row["kind"] != "prefill":
@@ -148,14 +163,14 @@ def ratios(profiles: dict[str, dict]) -> list[dict]:
 
 
 def d8(profile: dict, sweep: dict | None) -> dict:
-    """D8's f on decode B1: bytes = the matmuls' weight bytes + the KV read; B = weight bytes / unprofiled GEMV time
-    (the profiled time over the profiled-over-wall ratio); f = 1 - bytes / (B x step)."""
+    """D8's f on decode B1: bytes = the matmuls' weight bytes + the KV read (at the graphed window's context); B =
+    weight bytes / unprofiled GEMV time (the profiled time over the profiled-over-wall ratio); f = 1 - bytes / (B x
+    step). The step's idle time is outside f (r2 cancels): f = 1 - GEMV share of kernel time x (1 + KV / weights)."""
     row = profile["rows"]["decode_b1"]
     r2 = row["ratio_graphed_profiled_over_wall"]
     gemv_ms = row["graphed"]["cat"]["gemm"][1] / r2
     weights = row["gemm"]["weight_bytes"]
-    ctx = (row["ctx"] + row.get("ctx_end", row["ctx"])) / 2
-    kv = profile["kv_bytes_per_token"] * ctx
+    kv = profile["kv_bytes_per_token"] * graphed_ctx(row)
     bw = weights / (gemv_ms / 1e3)
     f = 1 - (weights + kv) / (bw * row["graphed_wall_ms"] / 1e3)
     return {"step_ms": row["graphed_wall_ms"], "weights_gb": round(weights / 1e9, 4), "kv_gb": round(kv / 1e9, 5),
@@ -168,7 +183,8 @@ def d8(profile: dict, sweep: dict | None) -> dict:
 def crossover(sweep: dict, profiles: dict[str, dict]) -> dict:
     """Per (type, mode): llama.cpp's mmvq row limit here, and the limit a per-class table would take — mmvq for every
     n up to it — from the shapes' per-call times summed with their per-step counts (today's cast; and without it,
-    D4), rows 1-8. Then each profiled decode / verify step's saving under that table (rows at most 9)."""
+    D4), rows 1-8. Then each profiled decode / verify step's saving under that table, today (with the cast) and
+    after D4 (both sides without it); `partial` rows had calls beyond the sweep's rows (more than 9), not counted."""
     weight = collections.Counter()
     for rec in profiles.values():
         for row in rec["rows"].values():
@@ -205,7 +221,8 @@ def crossover(sweep: dict, profiles: dict[str, dict]) -> dict:
         for rk, row in rec["rows"].items():
             if row["kind"] == "prefill":
                 continue
-            today = d2 = d2d4 = 0.0
+            today = d2 = d4 = d2d4 = 0.0
+            skipped = 0
             by_type: collections.Counter = collections.Counter()
             for c in row.get("gemm", {}).get("calls", []):
                 key, e = (c["type"], c["in"], c["out"], c["mode"]), table.get(f"{c['type']}/{c['mode']}")
@@ -213,17 +230,21 @@ def crossover(sweep: dict, profiles: dict[str, dict]) -> dict:
                     continue
                 a = call_us(key, c["rows"], e["llama"], "mmq_cast")
                 b = call_us(key, c["rows"], e["best_with_cast"], "mmq_cast")
+                f = call_us(key, c["rows"], e["llama"], "mmq_f32")
                 d = call_us(key, c["rows"], e["best_no_cast"], "mmq_f32")
-                if None in (a, b, d):
+                if None in (a, b, f, d):
+                    skipped += c["count"]
                     continue
-                today, d2, d2d4 = today + c["count"] * a, d2 + c["count"] * b, d2d4 + c["count"] * d
+                today, d2 = today + c["count"] * a, d2 + c["count"] * b
+                d4, d2d4 = d4 + c["count"] * f, d2d4 + c["count"] * d
                 by_type[f"{c['type']}/{c['mode']}"] += c["count"] * (a - b)
             if today:
                 step = row["graphed_wall_ms"]
                 steps.append({"model": name, "row": rk, "step_ms": step,
                               "gemm_today_ms": round(today / 1e3, 3), "d2_saving_ms": round((today - d2) / 1e3, 3),
                               "d2_share": round((today - d2) / 1e3 / step, 4),
-                              "d2_after_d4_share": round((today - d2d4) / 1e3 / step, 4),
+                              "d2_after_d4_share": round((d4 - d2d4) / 1e3 / step, 4),
+                              "partial": skipped > 0,                   # some calls beyond the sweep's rows
                               "d2_share_by_type": {t: round(v / 1e3 / step, 4) for t, v in by_type.items() if v}})
     return {"table": table, "steps": steps}
 

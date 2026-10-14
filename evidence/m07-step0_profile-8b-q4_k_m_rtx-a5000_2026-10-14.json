@@ -1,5 +1,5 @@
 {
- "command": "python bench/step_profile.py --name 8b-q4_k_m --model unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf --lock ../plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/7.lock --prefill --batches 1",
+ "command": "python bench/step_profile.py --name 8b-q4_k_m --model unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf --lock plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/7.lock --prefill --batches 1",
  "commit": "ed25148",
  "gpu_class": "rtx-a5000",
  "date": "2026-10-14",
@@ -7,7 +7,7 @@
  "name": "8b-q4_k_m",
  "gpu": "NVIDIA RTX A5000",
  "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf",
- "lock": "../plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/7.lock",
+ "lock": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/7.lock",
  "engine_args": "",
  "engine": {
   "device": "cuda",

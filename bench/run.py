@@ -1,8 +1,9 @@
 """Compare engines on the same GPU and model; writes an evidence record.
 
-Interleaved ABAB: every round runs each backend once, in order, each in a fresh process with its own venv
-(`worker.py`), so slow drift of the machine (clocks, temperature, neighbours) hits every backend alike. Each
-process loads the model once and replays every trace after a warmup (`driver.warmup_sessions`).
+Interleaved ABBA: every round runs each backend once (in order, reversed on odd rounds), each in a fresh process
+with its own venv (`worker.py`), so slow drift of the machine (clocks, temperature, neighbours) hits every backend
+alike and none always runs first. Each process loads the model once and replays every trace after a warmup
+(`driver.warmup_sessions`).
 
 With `--lock`, Holon runs the lock's engine settings and the baselines are matched to it (release design §5.2): the
 lock's `max_seqs` and step budget for every backend, its KV format for the baselines, and Holon's measured KV tokens
@@ -89,16 +90,22 @@ def public(arg: str, model: str) -> str:
         key, value = arg.split("=", 1)
         return f"{key}={public(value, model)}"
     path = pathlib.Path(arg)
-    if not path.is_absolute():
-        return arg
+    if not path.is_absolute():                            # relative: published as is, unless it leaves the repo
+        full = (pathlib.Path.cwd() / path).resolve()
+        return str(full.relative_to(ROOT)) if full.exists() and full.is_relative_to(ROOT) else arg
     return str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else path.name
 
 
-def lock_flags(engine: dict, skip: tuple[str, ...] = (), extra: str = "") -> list[str]:
+def public_flags(flags: str, model: str) -> str:
+    """A flag string fit for a published record (each argument through `public`)."""
+    return shlex.join(public(a, model) for a in shlex.split(flags))
+
+
+def lock_flags(engine: dict, skip: tuple[str, ...] = (), extra: str = "", locked_kv: bool = True) -> list[str]:
     """`holon serve` flags that rebuild a lock's [engine] table (kernel pins are not flags: the default selection
     runs; release design D2 makes them soft preferences), then the `extra` flags given by hand: those override, a
-    dict flag's items merged per key into the lock's (as D2's `holon serve` will). The KV format stays the lock's:
-    the baselines are matched to it."""
+    dict flag's items merged per key into the lock's (as D2's `holon serve` will). Under a lock (`locked_kv`) the KV
+    format stays the lock's: the baselines are matched to it."""
     engine, rest, key = {k: dict(v) if isinstance(v, dict) else v for k, v in engine.items()}, [], None
     for arg in shlex.split(extra):
         if arg.startswith("--"):
@@ -116,7 +123,7 @@ def lock_flags(engine: dict, skip: tuple[str, ...] = (), extra: str = "") -> lis
         k, eq, v = item.partition("=")
         if not eq:
             raise SystemExit(f"--{key.replace('_', '-')}: expected KEY=VALUE items, got {item!r}")
-        if (key, k) == ("plugin_options", "kv.format"):
+        if locked_kv and (key, k) == ("plugin_options", "kv.format"):
             raise SystemExit("under --lock the KV format is the lock's (the baselines are matched to it)")
         engine.setdefault(key, {})[k] = v
     flags = []
@@ -206,20 +213,21 @@ def summarize(cases: list[dict], columns: list[str], cpu_time: bool) -> dict:
 
 
 def paired_ttft(runs: list[dict], ref: list[dict]) -> dict:
-    """TTFT / the reference's per (session, turn) of the same round: the median ratio over every pair, and per round."""
+    """TTFT / the reference's per (session, turn) of the same round: the median ratio over every pair, and per round
+    (by round)."""
 
     def ttfts(run: dict) -> dict[tuple[int, int], float]:
         c = run["columns"]
         return {(r[c.index("sid")], r[c.index("turn")]): r[c.index("first")] - r[c.index("release")]
                 for r in run["requests"]}
     base = {run["round"]: ttfts(run) for run in ref}
-    per_round, pooled = [], []
+    per_round, pooled = {}, []
     for run in runs:
         if run["round"] in base:
             mine, theirs = ttfts(run), base[run["round"]]
             ratios = [mine[k] / theirs[k] for k in mine.keys() & theirs.keys() if theirs[k] > 0]
             pooled += ratios
-            per_round.append(round(statistics.median(ratios), 4) if ratios else None)
+            per_round[run["round"]] = round(statistics.median(ratios), 4) if ratios else None
     return {"median": round(statistics.median(pooled), 4) if pooled else None, "per_round": per_round,
             "pairs": len(pooled)}
 
@@ -233,12 +241,11 @@ def run_worker(backend: str, args: argparse.Namespace, out: pathlib.Path,
     if backend.startswith("holon"):                  # this checkout, whatever copy the venv installed
         env["PYTHONPATH"] = os.pathsep.join(str(ROOT / d) for d in ("core", "std", "plugins"))
         python = sys.executable
-        for var in ("HOLON_ENGINE_ARGS", "HOLON_SERVE_ARGS"):
-            given = " ".join(filter(None, (env.get(var, ""), args.arms.get(label, ""))))   # an arm's flags last
-            if args.lock:                            # the lock's settings, then the flags given by hand
-                env[var] = shlex.join(lock_flags(args.lock["engine"], SET_BY_WORKER, given))
-            elif given:
-                env[var] = given
+        for var in ("HOLON_ENGINE_ARGS", "HOLON_SERVE_ARGS"):   # the lock's settings, the given flags, the arm's
+            given = " ".join(filter(None, (env.get(var, ""), args.arms.get(label, ""))))
+            if args.lock or given:                   # dict flags merge per key, as over a lock
+                engine = args.lock["engine"] if args.lock else {}
+                env[var] = shlex.join(lock_flags(engine, SET_BY_WORKER, given, locked_kv=bool(args.lock)))
     else:                                            # a server's client runs here; in-process baselines in their venv
         env.pop("PYTHONPATH", None)
         python = sys.executable if backend in SERVERS else str(ENVS / backend / "bin" / "python")
@@ -308,6 +315,9 @@ def main() -> None:
     ap.add_argument("--evidence-dir", default=str(ROOT / "evidence"))
     args = ap.parse_args()
     args.arms = dict(arm.split("=", 1) if "=" in arm else (arm, "") for arm in args.arm)
+    for label, flags in args.arms.items():
+        if set(SET_BY_WORKER) & {a[2:].split("=")[0].replace("-", "_") for a in shlex.split(flags) if a[:2] == "--"}:
+            ap.error(f"--arm {label}: {', '.join(SET_BY_WORKER)} are set for every backend (--max-batch, ...)")
     if unknown := set(args.arms) - {b.partition("@")[2] for b in args.backends}:
         ap.error(f"--arm {', '.join(sorted(unknown))}: no backend of that label")
     if len(set(args.backends)) < len(args.backends):
@@ -334,7 +344,7 @@ def main() -> None:
     runs, infos = [], {}
     kv_tokens = args.kv_tokens
     for r in range(args.rounds):
-        for b in args.backends:
+        for b in args.backends if r % 2 == 0 else reversed(args.backends):     # ABBA: no backend always first
             print(f"round {r} {b} ...", flush=True)
             if args.lock and not kv_tokens and not b.startswith("holon"):
                 res, err = None, "not matched: Holon's KV tokens are unknown"
@@ -371,7 +381,14 @@ def main() -> None:
                 summary[trace][b]["paired_ttft"] = {"vs": args.backends[0], **paired_ttft(rs, ref)}
     for run in ok:
         del run["steps"]                                    # raw step timings stay in bench/.out
-    argv = [public(a, args.model) for a in sys.argv[1:]]
+    argv, prev = [], ""
+    for a in sys.argv[1:]:
+        arm = a.removeprefix("--arm=") if a.startswith("--arm=") else a if prev == "--arm" else None
+        if arm is not None and "=" in arm:                  # an arm's flags: each argument made public
+            label, flags = arm.split("=", 1)
+            a = ("--arm=" if a.startswith("--arm=") else "") + f"{label}={public_flags(flags, args.model)}"
+        argv.append(a if arm is not None else public(a, args.model))
+        prev = a
     traces = {pathlib.Path(p).stem: hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()[:16]
               for p in args.traces}
     # Records written by earlier runs (evidence/) do not make the code dirty; anything else is listed.
@@ -380,7 +397,8 @@ def main() -> None:
     record = {"workload": args.name, "date": date, "command": " ".join(["python bench/run.py", *argv]),
               "commit": commit, **({"dirty": dirty} if dirty else {}), "gpu_class": gpu,
               "model": model_id(args.model), "rounds": args.rounds,
-              "order": args.backends, **({"arms": args.arms} if args.arms else {}), "method": METHOD,
+              "order": args.backends, **({"arms": {k: public_flags(v, args.model) for k, v in args.arms.items()}}
+                                     if args.arms else {}), "method": METHOD,
               "traces_sha256": traces,
               "matched": {"lock": args.lock and {k: v for k, v in args.lock.items() if k != "engine"},
                           "max_seqs": args.max_batch, "max_step_tokens": args.max_step_tokens,

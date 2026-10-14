@@ -318,7 +318,9 @@ def main() -> None:
             row["regions"] = regions(events, STEPS, classify)
         ex.graphs = graphs
         timed(engine.step, 3)
+        ctx0 = statistics.mean(s.num_computed for s in engine.sched.running)
         row["graphed_wall_ms"] = round(timed(engine.step, STEPS), 4)
+        row["graphed_ctx"] = round((ctx0 + statistics.mean(s.num_computed for s in engine.sched.running)) / 2)
         row["graphed"] = breakdown(trace(lambda: [engine.step() for _ in range(STEPS)]), STEPS, classify)
         row["ratio_graphed_wall_over_eager_kernels"] = round(row["graphed_wall_ms"] / row["eager"]["kernel_ms"], 4)
         row["ratio_graphed_profiled_over_wall"] = round(row["graphed"]["kernel_ms"] / row["graphed_wall_ms"], 4)

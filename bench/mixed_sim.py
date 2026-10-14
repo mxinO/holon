@@ -17,7 +17,8 @@ a finished turn's blocks stay until the pool of `kv_tokens` needs them, least re
 system prompt's end once a first turn appending < 64 tokens published it. Matching refreshes every checkpoint on
 the chain; a publish into a full pool drops the least recently matched one. Checkpoints are
 taken inside the step (on the 64-token grid); a budget-truncated step ends on the grid. Not modelled: overlap's
-one-step lag.
+one-step lag, and admission as the prefill loop reaches a request (here every waiting request with a free slot is
+admitted, and takes its hit, at the top of the step).
 
     python bench/mixed_sim.py --decode <step_profile json> [<step_profile json at another ctx>]
         --prefill-idle <prefill_idle json> [<prefill_idle json at another history>] --trace bench/traces/agent.jsonl
@@ -35,6 +36,7 @@ import statistics
 import numpy as np
 
 ALIGN = 64                      # the recurrent checkpoint's alignment (lcm of the GDN chunk and the page size)
+GRAPHED_AT = 86                 # step_profile.py's decode steps before the middle of its graphed window (old records)
 
 
 class Costs:
@@ -43,16 +45,13 @@ class Costs:
         for rec in decode_records:
             for row in rec["rows"].values():
                 if row["kind"] == "decode":
-                    pts[row["batch"]].append(((row["ctx"] + row.get("ctx_end", row["ctx"])) / 2,
-                                              row["graphed_wall_ms"]))
+                    pts[row["batch"]].append((row.get("graphed_ctx", row["ctx"] + GRAPHED_AT), row["graphed_wall_ms"]))
         self.batches = sorted(pts)
-        self.dec = {}                                         # batch -> (wall at ctx 0, ms per context token)
-        for b in self.batches:
-            xs = sorted(pts[b])
-            slope = (xs[-1][1] - xs[0][1]) / (xs[-1][0] - xs[0][0]) if len(xs) > 1 else 0.0
-            self.dec[b] = (xs[0][1] - slope * xs[0][0], slope)
-        with_slope = [b for b in self.batches if len(pts[b]) > 1]
-        self.per_row_ctx = statistics.mean(self.dec[b][1] / b for b in with_slope) if with_slope else 0.0
+        slopes = {b: (max(pts[b])[1] - min(pts[b])[1]) / (max(pts[b])[0] - min(pts[b])[0])
+                  for b in pts if len(pts[b]) > 1}
+        self.per_row_ctx = statistics.mean(v / b for b, v in slopes.items()) if slopes else 0.0
+        # batch -> its wall at no context, through the shortest context it was measured at, at the per-row slope
+        self.dec = {b: min(pts[b])[1] - self.per_row_ctx * b * min(pts[b])[0] for b in self.batches}
         by_hist = {}
         for rec in idle_records:
             rows = next(v for k, v in rec.items() if k.startswith("aligned")) if "rows" not in rec else rec["rows"]
@@ -69,8 +68,7 @@ class Costs:
     def decode(self, batch: int, ctx_sum: int) -> float:
         lo = max([b for b in self.batches if b <= batch], default=self.batches[0])
         hi = min([b for b in self.batches if b >= batch], default=self.batches[-1])
-        base = lambda b: self.dec[b][0]                        # noqa: E731
-        at = base(lo) if hi == lo else base(lo) + (base(hi) - base(lo)) * (batch - lo) / (hi - lo)
+        at = self.dec[lo] if hi == lo else self.dec[lo] + (self.dec[hi] - self.dec[lo]) * (batch - lo) / (hi - lo)
         return at + self.per_row_ctx * ctx_sum
 
     def prefill(self, tokens: int, history: float = 4096) -> float:
@@ -123,8 +121,8 @@ def simulate(trace: list[dict], costs: Costs, policy: str, max_seqs: int, budget
             if not r.slot and sum(x.slot for x in running + waiting) < max_seqs:
                 r.slot = True
                 own = r.turn > 0 and (kv_tokens is None or r.sid in cached)
-                on_chain = [k for k in lru if k[0] == "system" or (own and k[0] == r.sid)]
-                for k in on_chain:                             # matching refreshes every entry on the chain
+                on_chain = sorted((k for k in lru if k[0] == "system" or (own and k[0] == r.sid)), key=lambda k: k[1])
+                for k in on_chain:                             # matching refreshes the chain's entries, in order
                     lru.move_to_end(k)
                 r.computed = r.hit = max((k[1] for k in on_chain), default=0)
                 cached.pop(r.sid, None)                        # its blocks are the request's now
@@ -150,8 +148,8 @@ def simulate(trace: list[dict], costs: Costs, policy: str, max_seqs: int, budget
             at = r.prompt // ALIGN * ALIGN                      # the prompt-end checkpoint (Recurrent.cut)
             if r.computed < at < r.computed + n and (at - r.computed) % ALIGN:
                 n = at - r.computed                             # off the grid: the step ends there
-            elif r.computed + n < r.prompt and (r.computed + n) % ALIGN and (r.computed + n) // ALIGN * ALIGN > \
-                    r.computed:
+            elif checkpoints and r.computed + n < r.prompt and (r.computed + n) % ALIGN and \
+                    (r.computed + n) // ALIGN * ALIGN > r.computed:
                 n = (r.computed + n) // ALIGN * ALIGN - r.computed   # budget-truncated: down to the grid
             rows.append((r, n))
             left -= n
@@ -216,7 +214,8 @@ def measured(record: dict, trace: str) -> dict | None:
     s = record["summary"].get(trace, {}).get(record["order"][0])
     if not s:
         return None
-    rounds = len({run["round"] for run in record["runs"] if run.get("trace") == trace})
+    rounds = len({run["round"] for run in record["runs"] if run.get("trace") == trace
+                  and run["backend"] == record["order"][0]})
     return {"ttft_ms": s["ttft_ms"], "tpot_ms": s["tpot_ms"], "max_gap_ms": s.get("max_gap_ms"),
             "throughput_tok_s": s["throughput_tok_s"],
             "prefix_tokens_saved": s["stats"].get("prefix_tokens_saved", 0) // max(1, rounds)}
@@ -240,7 +239,7 @@ def main() -> None:
     record = json.loads(pathlib.Path(args.measured).read_text()) if args.measured else None
     if args.kv_tokens is None and record is not None:
         args.kv_tokens = next(iter(record["backends"].values())).get("kv_tokens")
-    out = {"costs": {"decode": {b: [round(a, 3), round(s, 6)] for b, (a, s) in costs.dec.items()},
+    out = {"costs": {"decode": {b: round(a, 3) for b, a in costs.dec.items()},
                      "per_row_ctx_ms": round(costs.per_row_ctx, 7), "prefill_history": costs.hist,
                      "prefill": costs.pre, "alpha": costs.alpha},
            "settings": {"max_seqs": args.max_seqs, "max_step_tokens": args.max_step_tokens,

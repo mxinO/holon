@@ -1,5 +1,5 @@
 {
- "command": "python bench/step_profile.py --name 27b-q4km --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf --lock ../plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/4.lock --prefill --batches 1",
+ "command": "python bench/step_profile.py --name 27b-q4km --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf --lock plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/4.lock --prefill --batches 1",
  "commit": "ed25148",
  "gpu_class": "rtx-a5000",
  "date": "2026-10-14",
@@ -7,7 +7,7 @@
  "name": "27b-q4km",
  "gpu": "NVIDIA RTX A5000",
  "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf",
- "lock": "../plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/4.lock",
+ "lock": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/4.lock",
  "engine_args": "",
  "engine": {
   "device": "cuda",
