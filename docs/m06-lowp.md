@@ -769,7 +769,7 @@ bf16, are the same at either, and the GGUF prefill verdicts are f5a37b1's.
   same batches: pass. M0.2's padding plant there fails at batch 12 (expert path mmq: top-1 95.15% beyond 0.79
   points of the baseline) and passes at 5 (mmvq), as predicted. Chunked (100) vs one-shot prefill, the 8B NVFP4 at
   `a8` on the RTX 5080: pass, as do prefix on/off × depth 1/0 in the same run.
-- **For the lead:**
+- **For the lead** (decided: "Decisions during Gate A", A5's three items):
   1. The W4A4 report's top-1 at the L2 slack (floor − 0.25 points). The report's two clean runs fail it, by 0.04 and
      0.29 points past the slack, and N9 fails by one position (predicted pass). A second realization of the floor
      itself moves top-1 by up to 0.36 points. Options: (a) record the report as it stands (KL within budget, top-1
@@ -793,3 +793,14 @@ bf16, are the same at either, and the GGUF prefill verdicts are f5a37b1's.
   sm_120a 242 passed, sm_89 241 passed, memcheck 0 errors.
 - **Quark's oracle:** the real `amd-quark/Qwen3-30B-A3B-MXFP4` agrees exactly with `quark.Pack_fp4` and with gguf-py on
   llama.cpp's repack over all 18432 modules (`evidence/owner_qwen3-30b-a3b-mxfp4-amd-quark_cpu_*`).
+- **A5's three items (lead, 2026-10-14):**
+  1. **The W4A4 report is recorded as is; no rule change.** Acceptance 7 asks that the files be scored, not that
+     they pass. The KL budgets hold (1.04×, 1.08×). Top-1 is below the 0.25-point slack, at −0.29 (NVFP4) and −0.54
+     (MXFP4), by amounts inside the measured floor-to-floor noise: the floors re-recorded on another GPU differ by
+     −0.06 / −0.36. N9's predicted pass missed by one position of 32783, consistent with the documented blind spot
+     (N9 sits closer to the floor than the clean run). `a4` stays opt-in and report-only; the pre-registered default
+     rule is not met.
+  2. **N8b passes at 1.70×**, inside its band and under §4.8's 2× fail line: as designed.
+  3. **A judge rule changed after a result** (for the Gate A panel and the owner): the `head_calls` mode-check change
+     is accepted. It narrows the scope of a check M0.6 itself added in A4 (the Q8_0 head never sees the step's row
+     count, and sampled rows are never scored); no metric bar was loosened.
