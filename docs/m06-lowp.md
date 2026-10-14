@@ -596,9 +596,10 @@ copy is a named plan-time workspace.
   compressed-tensors (exact), gguf-py; amd-quark 30B MXFP4 — `quark.Pack_fp4` (A2, its own venv), gguf-py; Qwen 8B /
   30B FP8 — transformers' `Fp8Dequantize` (exact; 252 / 18624 modules).
 - **Gates** (predicted FP8 ≈ 1e-3, NVFP4 ≈ 1e-2, MXFP4 ≈ 2e-2): worst tensor FP8 7.1e-4 (8B and 30B), NVFP4 9.1e-3
-  (nvidia 8B; 1.1e-2 30B), RedHatAI 1.2e-2 (norms folded), MXFP4 1.6e-2 (Yi30), 2.0e-2 (amd-quark), the GGUF's MXFP4 experts 1.8e-2 and its
-  Q8_0 tensors ≤ 5.3e-5, routers exact; every dense tensor exact. None over its gate. Plants: M5 (scale − 1 in the
-  dialect, Yi30) 0.26 on every MXFP4 tensor (sim 0.271), M3 (Quark scales read as e4m3) 1.6e9: both fail.
+  (nvidia 8B and 30B), RedHatAI 1.2e-2 (its 72 norms differ from the original's: SmoothQuant, folded), MXFP4 1.6e-2
+  (Yi30), 1.8e-2 (amd-quark), the GGUF's MXFP4 experts 1.8e-2 and its Q8_0 tensors ≤ 5.3e-5 (gate 1e-3), routers
+  exact; every dense HF tensor bit-equal (every norm too, but RedHatAI's). None over its gate. Plants: M5 (scale − 1
+  in the dialect, Yi30) 0.26 on every MXFP4 tensor (sim 0.271), M3 (Quark scales read as e4m3) 1.6e9: both fail.
 - **Goldens** (fp32, CPU, 32 threads, `judge/goldens/<file>/v1-fp32.safetensors`): `qwen3-8b-nvfp4`,
   `qwen3-8b-nvfp4-redhatai`, `qwen3-8b-mxfp4-yi30`, `qwen3-8b-fp8` (≈ 4.5 min each), `qwen3-30b-a3b-nvfp4`,
   `qwen3-30b-a3b-mxfp4-amd-quark`, `qwen3-30b-a3b-fp8` (≈ 6 min), `qwen3-30b-a3b-instruct-2507-mxfp4_moe` (15 min,
@@ -620,7 +621,8 @@ copy is a named plan-time workspace.
   The predicted order A16 < W4A8 < W4A4 holds on every file (sim: A16 ≈ 8e-3, W4A8 ≈ 2e-2, W4A4 0.9 / 3.4 on
   Qwen3-1.7B). The pre-registered a4 rule (acceptance 7) is not met, as predicted: W4A4-dynamic's KL p99 is 42× the
   W4A8 floor's on the 8B NVFP4 (predicted ≈ 45×) and 145× on the 8B MXFP4, top-1 4.6 and 10.0 points lower.
-  W4A4-static is looser than dynamic (0.626 vs 0.526), as simulated.
+  W4A4-static is looser than dynamic (0.626 vs 0.526), as simulated. The twelve emulated floors were re-recorded
+  after the panel's minors and the rebase onto M0.5, at `emulation` 54d13262: bit-identical tensors.
 - **Tier A** (CPU fp32, the production source and dialects on the reference kernels, vs the file's golden; ceiling
   KL p99 ≤ 1e-4): all eight pass, top-1 ≥ 99.99%.
 
@@ -645,6 +647,35 @@ copy is a named plan-time workspace.
   2.3e-4, +0.3%. 30B NVFP4 94.2%, 2.0e-3, +1.3%; amd-quark MXFP4 95.4%, 1.3e-3, +0.8%; FP8 97.9%, 2.5e-4, +0.04%;
   the GGUF MXFP4_MOE vs Qwen3-30B-A3B-Instruct-2507 94.4%, 3.0e-3, −0.1%. Per file in
   `judge/goldens/<file>/v1-quantization-error.json`.
+- **Suite** after the rebase onto M0.5 (`pytest core std plugins judge testing tools`, two A5000s): 1134 passed, 49 skipped, 22 min 13 s (965 / 47 / 21 min 10 s before the rebase). No A4 test is among the 25 slowest (`test_gguf_qwen35`'s golden, now streamed, takes 48 s as before); `--durations=25`:
+
+  ```
+   54.11s call  plugins/tests/test_supervisor.py::test_failed_starts_roll_back_and_an_exhausted_history_gives_up
+   48.55s call  judge/tests/test_gguf_qwen35.py::test_the_gguf_golden_is_the_checkpoints
+   47.86s call  plugins/tests/test_dflash.py::test_the_startup_profile_runs_the_draft_block
+   30.53s call  tools/tests/test_propagate.py::test_cli_on_cpu
+   30.16s setup plugins/tests/test_ggml_cuda.py::test_qlinear_real_tensors
+   26.88s call  plugins/tests/test_supervisor.py::test_a_killed_engine_restarts_and_streams_continue_exactly
+   26.12s call  plugins/tests/test_supervisor.py::test_a_poison_request_is_quarantined_without_rollback
+   25.79s call  plugins/tests/test_supervisor.py::test_a_lone_poison_request_on_a_quiet_server_is_quarantined
+   20.24s call  judge/tests/test_gguf_qwen35.py::test_the_judge_undoes_the_conversion_exactly
+   19.88s call  plugins/tests/test_supervisor.py::test_unexplained_crashes_roll_back_to_the_previous_config
+   17.20s call  plugins/tests/test_mtp.py::test_mtp_from_gguf_drafts_as_from_hf
+   16.11s call  judge/tests/test_drafter.py::test_a_gguf_mtp_chain_passes_and_its_swapped_concat_fails
+   15.94s call  plugins/tests/test_attention_kernels.py::test_kernel_matches_oracle[attention.paged_prefill-kernels.flashinfer-rows0-geometry0-dtype0]
+   15.08s call  plugins/tests/test_attention_kernels.py::test_kernel_matches_oracle[attention.paged_prefill-kernels.flashinfer-rows0-geometry1-dtype1]
+   14.91s call  plugins/tests/test_attention_kernels.py::test_kernel_matches_oracle[attention.paged_prefill-kernels.flashinfer-rows0-geometry3-dtype0]
+   14.78s call  plugins/tests/test_attention_kernels.py::test_kernel_matches_oracle[attention.paged_prefill-kernels.flashinfer-rows0-geometry3-dtype1]
+   14.68s call  plugins/tests/test_ggml_cuda_moe.py::test_mixed_types_in_one_layer
+   14.65s call  plugins/tests/test_supervisor.py::test_a_hung_engine_is_killed_and_its_requests_resubmitted
+   14.02s setup plugins/tests/test_ggml_cuda_moe.py::test_routings_and_sizes[q4_k]
+   13.44s call  plugins/tests/test_attention_kernels.py::test_kernel_matches_oracle[attention.paged_prefill-kernels.flashinfer-rows0-geometry0-dtype1]
+   13.23s call  plugins/tests/test_attention_kernels.py::test_kernel_matches_oracle[attention.paged_prefill-kernels.flashinfer-rows0-geometry1-dtype0]
+   13.00s call  tools/tests/test_gpu_lock.py::test_first_lock_for_qwen3_0_6b
+   11.65s setup plugins/tests/test_dflash.py::test_the_startup_profile_runs_the_draft_block
+   11.39s call  plugins/tests/test_engine.py::test_engine_matches_hf_greedy_qwen3_0_6b
+   11.20s call  judge/tests/test_q8_1_qwen35.py::test_the_floors_offsets_follow_the_untiled_weights[blk.0.ssm_out.weight]
+  ```
 - **For A5:** Tier B's decode step for an HF FP4 file needs `mmvq_step` from its HF layouts (it reads GGUF types
   today); the floors here serve Tier B on every class (A5000, 5080, 4090, PRO 6000) and the W4A4 report (5080).
 

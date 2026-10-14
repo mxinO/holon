@@ -1,7 +1,7 @@
 {
  "workload": "m06-a4-floors",
  "date": "2026-10-14",
- "commit": "b851135",
+ "commit": "aa153e3",
  "hardware": "rtx-a5000",
  "command": "python -m holon_judge golden --model <file> --prompts judge/prompts/v1.jsonl --dtype bfloat16 --device cuda [--q8-1 mmq|mmvq [--act q8_1|fp4|fp4-static]]",
  "claim": "\u00a74.8 floors, one decoder layer at a time on one A5000, vs each file's fp32 golden; predicted order A16 < W4A8 < W4A4 (W8A8 is Gate B's); the pre-registered a4 rule (acceptance 7: W4A4 KL p99 <= 1.5x W4A8's and top-1 within 0.5 points) predicted not met (~45x)",
@@ -20,8 +20,8 @@
     "missing": 0.015085562639172743,
     "q8_1": null,
     "act": null,
+    "emulation": null,
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": null,
     "hardware": "NVIDIA RTX A5000",
     "wall_s": 31.51
@@ -39,11 +39,11 @@
     "missing": 0.02025592532715127,
     "q8_1": "mmq",
     "act": "q8_1",
+    "emulation": "54d132628e52e654",
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": null,
     "hardware": "NVIDIA RTX A5000",
-    "wall_s": 73.88
+    "wall_s": 73.97
    },
    "v1-bfloat16-mmq-fp4-floor": {
     "n": 32783,
@@ -58,11 +58,11 @@
     "missing": 0.10020132385687704,
     "q8_1": "mmq",
     "act": "fp4",
+    "emulation": "54d132628e52e654",
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": "7499f2546f76374b",
     "moe_block": null,
     "hardware": "NVIDIA RTX A5000",
-    "wall_s": 267.88
+    "wall_s": 270.34
    },
    "v1-bfloat16-mmq-fp4-static-floor": {
     "n": 32783,
@@ -77,11 +77,11 @@
     "missing": 0.10703565872555898,
     "q8_1": "mmq",
     "act": "fp4-static",
+    "emulation": "54d132628e52e654",
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": "7499f2546f76374b",
     "moe_block": null,
     "hardware": "NVIDIA RTX A5000",
-    "wall_s": 92.62
+    "wall_s": 95.36
    },
    "v1-bfloat16-mmvq-floor": {
     "n": 32783,
@@ -96,11 +96,11 @@
     "missing": 0.020850745813378885,
     "q8_1": "mmvq",
     "act": "q8_1",
+    "emulation": "54d132628e52e654",
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": null,
     "hardware": "NVIDIA RTX A5000",
-    "wall_s": 71.72
+    "wall_s": 72.21
    }
   },
   "qwen3-8b-nvfp4-redhatai": {
@@ -117,8 +117,8 @@
     "missing": 0.013952353353872434,
     "q8_1": null,
     "act": null,
+    "emulation": null,
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": null,
     "hardware": "NVIDIA RTX A5000",
     "wall_s": 33.95
@@ -138,8 +138,8 @@
     "missing": 0.015504987340999908,
     "q8_1": null,
     "act": null,
+    "emulation": null,
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": null,
     "hardware": "NVIDIA RTX A5000",
     "wall_s": 28.33
@@ -157,11 +157,11 @@
     "missing": 0.02120001220144587,
     "q8_1": "mmq",
     "act": "q8_1",
+    "emulation": "54d132628e52e654",
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": null,
     "hardware": "NVIDIA RTX A5000",
-    "wall_s": 74.13
+    "wall_s": 72.46
    },
    "v1-bfloat16-mmq-fp4-floor": {
     "n": 32783,
@@ -176,11 +176,11 @@
     "missing": 0.18328859469847178,
     "q8_1": "mmq",
     "act": "fp4",
+    "emulation": "54d132628e52e654",
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": "7499f2546f76374b",
     "moe_block": null,
     "hardware": "NVIDIA RTX A5000",
-    "wall_s": 89.79
+    "wall_s": 90.32
    }
   },
   "qwen3-8b-fp8": {
@@ -197,8 +197,8 @@
     "missing": 0.014399231308910106,
     "q8_1": null,
     "act": null,
+    "emulation": null,
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": null,
     "hardware": "NVIDIA RTX A5000",
     "wall_s": 19.87
@@ -218,8 +218,8 @@
     "missing": 0.032108104810420035,
     "q8_1": null,
     "act": null,
+    "emulation": null,
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": "d3-reference@0bcc6b6cb83648ff",
     "hardware": "NVIDIA RTX A5000",
     "wall_s": 119.72
@@ -237,11 +237,11 @@
     "missing": 0.03594088399475338,
     "q8_1": "mmq",
     "act": "q8_1",
+    "emulation": "54d132628e52e654",
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": "d3-reference@0bcc6b6cb83648ff",
     "hardware": "NVIDIA RTX A5000",
-    "wall_s": 145.88
+    "wall_s": 148.34
    },
    "v1-bfloat16-mmvq-floor": {
     "n": 32783,
@@ -256,11 +256,11 @@
     "missing": 0.035515358569990545,
     "q8_1": "mmvq",
     "act": "q8_1",
+    "emulation": "54d132628e52e654",
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": "d3-reference@0bcc6b6cb83648ff",
     "hardware": "NVIDIA RTX A5000",
-    "wall_s": 123.8
+    "wall_s": 130.8
    }
   },
   "qwen3-30b-a3b-mxfp4-amd-quark": {
@@ -277,8 +277,8 @@
     "missing": 0.03131043528658146,
     "q8_1": null,
     "act": null,
+    "emulation": null,
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": "d3-reference@0bcc6b6cb83648ff",
     "hardware": "NVIDIA RTX A5000",
     "wall_s": 143.28
@@ -296,11 +296,11 @@
     "missing": 0.03275935698380258,
     "q8_1": "mmq",
     "act": "q8_1",
+    "emulation": "54d132628e52e654",
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": "d3-reference@0bcc6b6cb83648ff",
     "hardware": "NVIDIA RTX A5000",
-    "wall_s": 118.26
+    "wall_s": 120.65
    },
    "v1-bfloat16-mmvq-floor": {
     "n": 32783,
@@ -315,11 +315,11 @@
     "missing": 0.03288137144251594,
     "q8_1": "mmvq",
     "act": "q8_1",
+    "emulation": "54d132628e52e654",
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": "d3-reference@0bcc6b6cb83648ff",
     "hardware": "NVIDIA RTX A5000",
-    "wall_s": 117.39
+    "wall_s": 111.72
    }
   },
   "qwen3-30b-a3b-fp8": {
@@ -336,8 +336,8 @@
     "missing": 0.031653600951712775,
     "q8_1": null,
     "act": null,
+    "emulation": null,
     "hf_reference": "b9705bf494e4e892",
-    "w4a4": null,
     "moe_block": "d3-reference@0bcc6b6cb83648ff",
     "hardware": "NVIDIA RTX A5000",
     "wall_s": 97.77
@@ -357,8 +357,8 @@
     "missing": 0.029532074550834272,
     "q8_1": null,
     "act": null,
+    "emulation": null,
     "hf_reference": null,
-    "w4a4": null,
     "moe_block": "d3-reference@0bcc6b6cb83648ff",
     "hardware": "NVIDIA RTX A5000",
     "wall_s": 793.18
@@ -375,12 +375,12 @@
     "dppl_se": 0.0008280645518325679,
     "missing": 0.032210291919592474,
     "q8_1": "mmq",
-    "act": null,
+    "act": "q8_1",
+    "emulation": "54d132628e52e654",
     "hf_reference": null,
-    "w4a4": null,
     "moe_block": "d3-reference@0bcc6b6cb83648ff",
     "hardware": "NVIDIA RTX A5000",
-    "wall_s": 1086.68
+    "wall_s": 1522.31
    },
    "v1-bfloat16-mmvq-floor": {
     "n": 32783,
@@ -394,12 +394,12 @@
     "dppl_se": 0.0009447715039790155,
     "missing": 0.032493975536101026,
     "q8_1": "mmvq",
-    "act": null,
+    "act": "q8_1",
+    "emulation": "54d132628e52e654",
     "hf_reference": null,
-    "w4a4": null,
     "moe_block": "d3-reference@0bcc6b6cb83648ff",
     "hardware": "NVIDIA RTX A5000",
-    "wall_s": 876.12
+    "wall_s": 1243.03
    }
   }
  },

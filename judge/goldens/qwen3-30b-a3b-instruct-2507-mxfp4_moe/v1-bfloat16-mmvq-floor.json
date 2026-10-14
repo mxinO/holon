@@ -31,7 +31,7 @@
   "weight_source": null,
   "max_step_tokens": null,
   "q8_1": "mmvq",
-  "act": null,
+  "act": "q8_1",
   "kv": null,
   "moe_block": "d3-reference@0bcc6b6cb83648ff",
   "experts": "eager",
@@ -103,5 +103,6 @@
  "budgets": null,
  "failures": [],
  "dppl_vs_floor": null,
+ "drafter": null,
  "passed": null
 }

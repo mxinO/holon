@@ -103,5 +103,6 @@
  "budgets": null,
  "failures": [],
  "dppl_vs_floor": null,
+ "drafter": null,
  "passed": null
 }
