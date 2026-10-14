@@ -1,0 +1,489 @@
+{
+ "workload": "release-smoke-qwen3-8b-bf16",
+ "date": "2026-10-14",
+ "command": "python bench/run.py --gpu 0 --rounds 1 --traces bench/traces/decode_b1.jsonl bench/traces/decode_b8.jsonl --name release-smoke-qwen3-8b-bf16 --model Qwen/Qwen3-8B@b968826d9c46 --lock plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-4090/cu130-torch2.11/9.lock --corpus judge/prompts/v1.jsonl --backends holon sglang_http freetoken_http",
+ "commit": "8bf7bcae9762f04f6fab05d3934e8f7da60af8f5",
+ "gpu_class": "rtx-3090",
+ "model": "Qwen/Qwen3-8B@b968826d9c46",
+ "rounds": 1,
+ "order": ["holon", "sglang_http", "freetoken_http"],
+ "method": "In-process engines driven by bench/driver.py, one scheduling step per call; client-side timestamps taken when a step returns a token. TTFT = first token - release (arrival, or previous turn's last token + gap); TPOT = (last - first) / (tokens - 1) per request; throughput = output tokens / (last token - first release). Decode steps = steps at peak batch that return no first token; decode tok/s = their tokens / their wall time. CPU ms/step = time.process_time() delta around step() on those steps, measured with --blocking-sync (CUDA primary context in blocking-sync mode and torch events created blocking, so waiting for the GPU sleeps and is not counted). Greedy, ignore_eos, fixed output lengths; warmup on the same shapes with other prompt tokens, excluded. HTTP backends (llamaserver, holon_http; bench/backends/http.py): streamed requests, a token timestamped when its chunk arrives; their 'steps' are client polls, so decode tok/s and CPU ms/step do not apply to them.",
+ "traces_sha256": {
+  "decode_b1": "cc41d53b03df6007",
+  "decode_b8": "b611e5615472d7c1"
+ },
+ "matched": {
+  "lock": {
+   "path": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-4090/cu130-torch2.11/9.lock",
+   "plan_id": "sha256:d7d1371a83e95fb20e63e4eddb4dae4bb328ebaaa1ba83313147b05f9b49e9d7",
+   "fingerprint_class": "rtx-4090/cu130-torch2.11"
+  },
+  "max_seqs": 64,
+  "max_step_tokens": 4096,
+  "kv_tokens": 37440,
+  "kv_format": null,
+  "temperature": 0.0,
+  "samplers": "top_k / top_p / min_p off on every engine"
+ },
+ "corpus": {
+  "v1.jsonl": "5157b507f2553584"
+ },
+ "backends": {
+  "holon": {
+   "config": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "hf_safetensors",
+    "page_size": 16,
+    "max_seqs": 64,
+    "max_model_len": 768,
+    "max_step_tokens": 4096,
+    "memory_fraction": 0.9,
+    "state_memory": null,
+    "prefix_cache": true,
+    "overlap": true,
+    "cuda_graphs": true,
+    "max_draft_tokens": 0,
+    "kernels": {},
+    "slots": {},
+    "plugin_options": {}
+   },
+   "fingerprint": "rtx-3090/cu130-torch2.11",
+   "kv_tokens": 37440,
+   "load_s": 47.5,
+   "blocking_sync": false,
+   "packages": {
+    "torch": "2.11.0+cu130",
+    "triton": "3.6.0",
+    "flashinfer-python": "0.6.12"
+   }
+  },
+  "sglang_http": {
+   "config": {
+    "flags": "--max-running-requests 64 --chunked-prefill-size 4096 --max-total-tokens 37440 --kv-cache-dtype auto --mem-fraction-static 0.9 --context-length 768 --skip-tokenizer-init"
+   },
+   "version": "0.5.21",
+   "load_s": 227.5,
+   "blocking_sync": false,
+   "packages": {}
+  },
+  "freetoken_http": {
+   "config": {
+    "flags": "--max-running-requests 64 --max-prefill-length 4096 --num-tokens 37440 --max-seq-len-override 1280 --memory-ratio 0.9 --served-model-name m"
+   },
+   "load_s": 147.1,
+   "blocking_sync": false,
+   "packages": {},
+   "commit": "74a387777708b9650a027494bcb37d2ab9cf2443"
+  }
+ },
+ "summary": {
+  "decode_b1": {
+   "holon": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 68.14,
+     "p90": 68.14,
+     "p99": 68.14
+    },
+    "tpot_ms": {
+     "p50": 20.08,
+     "p90": 20.08,
+     "p99": 20.08
+    },
+    "throughput_tok_s": 49.3,
+    "throughput_per_round": [49.3],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 49.8,
+     "wall_ms_p50": 20.077,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "prefix_tokens_saved": 0
+    }
+   },
+   "sglang_http": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 87.35,
+     "p90": 87.35,
+     "p99": 87.35
+    },
+    "tpot_ms": {
+     "p50": 19.78,
+     "p90": 19.78,
+     "p99": 19.78
+    },
+    "throughput_tok_s": 49.9,
+    "throughput_per_round": [49.9],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 50.6,
+     "wall_ms_p50": 19.777,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {}
+   },
+   "freetoken_http": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 69.9,
+     "p90": 69.9,
+     "p99": 69.9
+    },
+    "tpot_ms": {
+     "p50": 19.91,
+     "p90": 19.91,
+     "p99": 19.91
+    },
+    "throughput_tok_s": 49.7,
+    "throughput_per_round": [49.7],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 51.5,
+     "wall_ms_p50": 19.903,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {}
+   }
+  },
+  "decode_b8": {
+   "holon": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 416.61,
+     "p90": 416.61,
+     "p99": 416.61
+    },
+    "tpot_ms": {
+     "p50": 20.82,
+     "p90": 20.82,
+     "p99": 20.82
+    },
+    "throughput_tok_s": 357.7,
+    "throughput_per_round": [357.7],
+    "decode": {
+     "batch": 8,
+     "steps": 255,
+     "tok_s": 384.4,
+     "wall_ms_p50": 20.751,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 2048,
+    "stats": {
+     "prefix_tokens_saved": 0
+    }
+   },
+   "sglang_http": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 431.79,
+     "p90": 431.93,
+     "p99": 431.96
+    },
+    "tpot_ms": {
+     "p50": 20.41,
+     "p90": 20.41,
+     "p99": 20.41
+    },
+    "throughput_tok_s": 363.3,
+    "throughput_per_round": [363.3],
+    "decode": {
+     "batch": 6,
+     "steps": 9,
+     "tok_s": 2347.2,
+     "wall_ms_p50": 0.382,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 2048,
+    "stats": {}
+   },
+   "freetoken_http": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 438.86,
+     "p90": 438.91,
+     "p99": 438.95
+    },
+    "tpot_ms": {
+     "p50": 20.45,
+     "p90": 20.88,
+     "p99": 21.78
+    },
+    "throughput_tok_s": 362.3,
+    "throughput_per_round": [362.3],
+    "decode": {
+     "batch": 7,
+     "steps": 1,
+     "tok_s": 20889.9,
+     "wall_ms_p50": 0.335,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 2048,
+    "stats": {}
+   }
+  }
+ },
+ "runs": [
+  {
+   "round": 0,
+   "backend": "holon",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 68.14,
+     "p90": 68.14,
+     "p99": 68.14
+    },
+    "tpot_ms": {
+     "p50": 20.08,
+     "p90": 20.08,
+     "p99": 20.08
+    },
+    "throughput_tok_s": 49.3,
+    "throughput_per_round": [49.3],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 49.8,
+     "wall_ms_p50": 20.077,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.068135, 5.188345]
+   ],
+   "stats": {
+    "prefix_tokens_saved": 0
+   }
+  },
+  {
+   "round": 0,
+   "backend": "holon",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 416.61,
+     "p90": 416.61,
+     "p99": 416.61
+    },
+    "tpot_ms": {
+     "p50": 20.82,
+     "p90": 20.82,
+     "p99": 20.82
+    },
+    "throughput_tok_s": 357.7,
+    "throughput_per_round": [357.7],
+    "decode": {
+     "batch": 8,
+     "steps": 255,
+     "tok_s": 384.4,
+     "wall_ms_p50": 20.751,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 2048,
+    "stats": {
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.416607, 5.72509],
+    [1, 0, 256, 256, 256, 0.0, 0.416607, 5.72509],
+    [2, 0, 256, 256, 256, 0.0, 0.416607, 5.72509],
+    [3, 0, 256, 256, 256, 0.0, 0.416607, 5.72509],
+    [4, 0, 256, 256, 256, 0.0, 0.416607, 5.72509],
+    [5, 0, 256, 256, 256, 0.0, 0.416607, 5.72509],
+    [6, 0, 256, 256, 256, 0.0, 0.416607, 5.72509],
+    [7, 0, 256, 256, 256, 0.0, 0.416607, 5.72509]
+   ],
+   "stats": {
+    "prefix_tokens_saved": 0
+   }
+  },
+  {
+   "round": 0,
+   "backend": "sglang_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 87.35,
+     "p90": 87.35,
+     "p99": 87.35
+    },
+    "tpot_ms": {
+     "p50": 19.78,
+     "p90": 19.78,
+     "p99": 19.78
+    },
+    "throughput_tok_s": 49.9,
+    "throughput_per_round": [49.9],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 50.6,
+     "wall_ms_p50": 19.777,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.087348, 5.131556]
+   ]
+  },
+  {
+   "round": 0,
+   "backend": "sglang_http",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 431.79,
+     "p90": 431.93,
+     "p99": 431.96
+    },
+    "tpot_ms": {
+     "p50": 20.41,
+     "p90": 20.41,
+     "p99": 20.41
+    },
+    "throughput_tok_s": 363.3,
+    "throughput_per_round": [363.3],
+    "decode": {
+     "batch": 6,
+     "steps": 9,
+     "tok_s": 2347.2,
+     "wall_ms_p50": 0.382,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 2048,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.431599, 5.635413],
+    [1, 0, 256, 256, 256, 0.0, 0.431911, 5.635973],
+    [2, 0, 256, 256, 256, 0.0, 0.431795, 5.635644],
+    [3, 0, 256, 256, 256, 0.0, 0.431795, 5.635767],
+    [4, 0, 256, 256, 256, 0.0, 0.431795, 5.636243],
+    [5, 0, 256, 256, 256, 0.0, 0.431795, 5.636243],
+    [6, 0, 256, 256, 256, 0.0, 0.431967, 5.636559],
+    [7, 0, 256, 256, 256, 0.0, 0.431911, 5.636559]
+   ]
+  },
+  {
+   "round": 0,
+   "backend": "freetoken_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 69.9,
+     "p90": 69.9,
+     "p99": 69.9
+    },
+    "tpot_ms": {
+     "p50": 19.91,
+     "p90": 19.91,
+     "p99": 19.91
+    },
+    "throughput_tok_s": 49.7,
+    "throughput_per_round": [49.7],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 51.5,
+     "wall_ms_p50": 19.903,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.069898, 5.147282]
+   ]
+  },
+  {
+   "round": 0,
+   "backend": "freetoken_http",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 438.86,
+     "p90": 438.91,
+     "p99": 438.95
+    },
+    "tpot_ms": {
+     "p50": 20.45,
+     "p90": 20.88,
+     "p99": 21.78
+    },
+    "throughput_tok_s": 362.3,
+    "throughput_per_round": [362.3],
+    "decode": {
+     "batch": 7,
+     "steps": 1,
+     "tok_s": 20889.9,
+     "wall_ms_p50": 0.335,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 2048,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.071612, 5.652307],
+    [1, 0, 256, 256, 256, 0.0, 0.438618, 5.6524],
+    [2, 0, 256, 256, 256, 0.0, 0.438856, 5.652518],
+    [3, 0, 256, 256, 256, 0.0, 0.43868, 5.652518],
+    [4, 0, 256, 256, 256, 0.0, 0.438856, 5.652626],
+    [5, 0, 256, 256, 256, 0.0, 0.438856, 5.652626],
+    [6, 0, 256, 256, 256, 0.0, 0.438899, 5.652435],
+    [7, 0, 256, 256, 256, 0.0, 0.438952, 5.652673]
+   ]
+  }
+ ]
+}

@@ -1,0 +1,185 @@
+{
+ "workload": "release-smoke-qwen3-8b-nvfp4",
+ "date": "2026-10-14",
+ "command": "python bench/run.py --gpu 0 --rounds 1 --traces bench/traces/decode_b1.jsonl bench/traces/decode_b8.jsonl --max-batch 32 --max-step-tokens 2048 --corpus judge/prompts/v1.jsonl --name release-smoke-qwen3-8b-nvfp4 --model nvidia/Qwen3-8B-NVFP4@ccd10a893cbc --backends holon sglang_http freetoken_http",
+ "commit": "c9a6f0c51a546c0dde0b90a7ee892e996e5946b2",
+ "gpu_class": "rtx-5090",
+ "model": "nvidia/Qwen3-8B-NVFP4@ccd10a893cbc",
+ "rounds": 1,
+ "order": ["holon", "sglang_http", "freetoken_http"],
+ "method": "In-process engines driven by bench/driver.py, one scheduling step per call; client-side timestamps taken when a step returns a token. TTFT = first token - release (arrival, or previous turn's last token + gap); TPOT = (last - first) / (tokens - 1) per request; throughput = output tokens / (last token - first release). Decode steps = steps at peak batch that return no first token; decode tok/s = their tokens / their wall time. CPU ms/step = time.process_time() delta around step() on those steps, measured with --blocking-sync (CUDA primary context in blocking-sync mode and torch events created blocking, so waiting for the GPU sleeps and is not counted). Greedy, ignore_eos, fixed output lengths; warmup on the same shapes with other prompt tokens, excluded. HTTP backends (llamaserver, holon_http; bench/backends/http.py): streamed requests, a token timestamped when its chunk arrives; their 'steps' are client polls, so decode tok/s and CPU ms/step do not apply to them.",
+ "traces_sha256": {
+  "decode_b1": "cc41d53b03df6007",
+  "decode_b8": "b611e5615472d7c1"
+ },
+ "matched": {
+  "lock": null,
+  "max_seqs": 32,
+  "max_step_tokens": 2048,
+  "kv_tokens": null,
+  "kv_format": null,
+  "temperature": 0.0,
+  "samplers": "top_k / top_p / min_p off on every engine"
+ },
+ "corpus": {
+  "v1.jsonl": "5157b507f2553584"
+ },
+ "backends": {
+  "sglang_http": {
+   "config": {
+    "flags": "--max-running-requests 32 --chunked-prefill-size 2048 --kv-cache-dtype auto --mem-fraction-static 0.9 --context-length 768 --skip-tokenizer-init"
+   },
+   "version": "0.5.21",
+   "load_s": 122.3,
+   "blocking_sync": false,
+   "packages": {}
+  }
+ },
+ "summary": {
+  "decode_b1": {
+   "sglang_http": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 12.93,
+     "p90": 12.93,
+     "p99": 12.93
+    },
+    "tpot_ms": {
+     "p50": 4.26,
+     "p90": 4.26,
+     "p99": 4.26
+    },
+    "throughput_tok_s": 233.0,
+    "throughput_per_round": [233.0],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 235.0,
+     "wall_ms_p50": 4.254,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {}
+   }
+  },
+  "decode_b8": {
+   "sglang_http": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 34.46,
+     "p90": 40.52,
+     "p99": 40.52
+    },
+    "tpot_ms": {
+     "p50": 4.61,
+     "p90": 4.61,
+     "p99": 4.61
+    },
+    "throughput_tok_s": 1692.2,
+    "throughput_per_round": [1692.2],
+    "decode": {
+     "batch": 7,
+     "steps": 4,
+     "tok_s": 5187.2,
+     "wall_ms_p50": 0.29,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 2048,
+    "stats": {}
+   }
+  }
+ },
+ "runs": [
+  {
+   "round": 0,
+   "backend": "holon",
+   "error": "exit code 1: holon.core.plugins.PluginError: 'model.layers.0.mlp.down_proj.input_scale' maps to 'layers.0.ffn.down_proj.input_scale', which the model does not have"
+  },
+  {
+   "round": 0,
+   "backend": "sglang_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 12.93,
+     "p90": 12.93,
+     "p99": 12.93
+    },
+    "tpot_ms": {
+     "p50": 4.26,
+     "p90": 4.26,
+     "p99": 4.26
+    },
+    "throughput_tok_s": 233.0,
+    "throughput_per_round": [233.0],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 235.0,
+     "wall_ms_p50": 4.254,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.012934, 1.098503]
+   ]
+  },
+  {
+   "round": 0,
+   "backend": "sglang_http",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 34.46,
+     "p90": 40.52,
+     "p99": 40.52
+    },
+    "tpot_ms": {
+     "p50": 4.61,
+     "p90": 4.61,
+     "p99": 4.61
+    },
+    "throughput_tok_s": 1692.2,
+    "throughput_per_round": [1692.2],
+    "decode": {
+     "batch": 7,
+     "steps": 4,
+     "tok_s": 5187.2,
+     "wall_ms_p50": 0.29,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 2048,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.034284, 1.209324],
+    [1, 0, 256, 256, 256, 0.0, 0.034417, 1.209465],
+    [2, 0, 256, 256, 256, 0.0, 0.034504, 1.209634],
+    [3, 0, 256, 256, 256, 0.0, 0.034417, 1.20979],
+    [4, 0, 256, 256, 256, 0.0, 0.034417, 1.20979],
+    [5, 0, 256, 256, 256, 0.0, 0.040521, 1.210231],
+    [6, 0, 256, 256, 256, 0.0, 0.040521, 1.21011],
+    [7, 0, 256, 256, 256, 0.0, 0.034504, 1.209953]
+   ]
+  },
+  {
+   "round": 0,
+   "backend": "freetoken_http",
+   "error": "exit code 1: RuntimeError: chunk expects at least a 1-dimensional tensor"
+  }
+ ]
+}

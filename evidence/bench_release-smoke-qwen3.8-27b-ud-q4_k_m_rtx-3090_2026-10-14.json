@@ -1,0 +1,380 @@
+{
+ "workload": "release-smoke-qwen3.8-27b-ud-q4_k_m",
+ "date": "2026-10-14",
+ "command": "python bench/run.py --gpu 0 --rounds 1 --traces bench/traces/decode_b1.jsonl bench/traces/decode_b8.jsonl --name release-smoke-qwen3.8-27b-ud-q4_k_m --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf --lock plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/3.lock --corpus judge/prompts/v1-qwen3_5.jsonl --backends holon llamaserver",
+ "commit": "8bf7bcae9762f04f6fab05d3934e8f7da60af8f5",
+ "gpu_class": "rtx-3090",
+ "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf",
+ "rounds": 1,
+ "order": ["holon", "llamaserver"],
+ "method": "In-process engines driven by bench/driver.py, one scheduling step per call; client-side timestamps taken when a step returns a token. TTFT = first token - release (arrival, or previous turn's last token + gap); TPOT = (last - first) / (tokens - 1) per request; throughput = output tokens / (last token - first release). Decode steps = steps at peak batch that return no first token; decode tok/s = their tokens / their wall time. CPU ms/step = time.process_time() delta around step() on those steps, measured with --blocking-sync (CUDA primary context in blocking-sync mode and torch events created blocking, so waiting for the GPU sleeps and is not counted). Greedy, ignore_eos, fixed output lengths; warmup on the same shapes with other prompt tokens, excluded. HTTP backends (llamaserver, holon_http; bench/backends/http.py): streamed requests, a token timestamped when its chunk arrives; their 'steps' are client polls, so decode tok/s and CPU ms/step do not apply to them.",
+ "traces_sha256": {
+  "decode_b1": "cc41d53b03df6007",
+  "decode_b8": "b611e5615472d7c1"
+ },
+ "matched": {
+  "lock": {
+   "path": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/3.lock",
+   "plan_id": "sha256:17c4add805527960998d5249f5eb0cd10858296c4f58a283d8258d87db32682b",
+   "fingerprint_class": "rtx-4090/cu130-torch2.11"
+  },
+  "max_seqs": 4,
+  "max_step_tokens": 2048,
+  "kv_tokens": 87616,
+  "kv_format": null,
+  "temperature": 0.0,
+  "samplers": "top_k / top_p / min_p off on every engine"
+ },
+ "corpus": {
+  "v1-qwen3_5.jsonl": "80bf5a54bd350923"
+ },
+ "backends": {
+  "holon": {
+   "config": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "gguf",
+    "page_size": 16,
+    "max_seqs": 4,
+    "max_model_len": 768,
+    "max_step_tokens": 2048,
+    "memory_fraction": 0.9,
+    "state_memory": null,
+    "prefix_cache": true,
+    "overlap": true,
+    "cuda_graphs": true,
+    "max_draft_tokens": 0,
+    "kernels": {},
+    "slots": {},
+    "plugin_options": {
+     "recurrent.checkpoints": "4"
+    }
+   },
+   "fingerprint": "rtx-3090/cu130-torch2.11",
+   "kv_tokens": 87616,
+   "load_s": 15.5,
+   "blocking_sync": false,
+   "packages": {
+    "torch": "2.11.0+cu130",
+    "triton": "3.6.0",
+    "flashinfer-python": "0.6.12"
+   }
+  },
+  "llamaserver": {
+   "config": {
+    "flags": "-ngl 99 -fa on -kvu -np 4 -c 87616 -b 2048 -ub 512 -ctk f16 -ctv f16"
+   },
+   "version": "version: 0.6.0-dev (build 11577, commit cbe28bb3c)",
+   "server_timings": {
+    "prompt_n": 4608,
+    "prompt_ms": 18059.275,
+    "predicted_n": 2448,
+    "predicted_ms": 100409.978,
+    "cache_n": 0
+   },
+   "load_s": 4.2,
+   "blocking_sync": false,
+   "packages": {}
+  }
+ },
+ "summary": {
+  "decode_b1": {
+   "holon": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 160.35,
+     "p90": 160.35,
+     "p99": 160.35
+    },
+    "tpot_ms": {
+     "p50": 21.71,
+     "p90": 21.71,
+     "p99": 21.71
+    },
+    "throughput_tok_s": 44.9,
+    "throughput_per_round": [44.9],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 46.1,
+     "wall_ms_p50": 21.712,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "prefix_tokens_saved": 0
+    }
+   },
+   "llamaserver": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 406.85,
+     "p90": 406.85,
+     "p99": 406.85
+    },
+    "tpot_ms": {
+     "p50": 23.16,
+     "p90": 23.16,
+     "p99": 23.16
+    },
+    "throughput_tok_s": 40.6,
+    "throughput_per_round": [40.6],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 323.4,
+     "wall_ms_p50": 2.852,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "spec_accepted": 0,
+     "spec_drafted": 0
+    }
+   }
+  },
+  "decode_b8": {
+   "holon": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 4859.08,
+     "p90": 9111.87,
+     "p99": 9111.87
+    },
+    "tpot_ms": {
+     "p50": 35.12,
+     "p90": 37.51,
+     "p99": 37.51
+    },
+    "throughput_tok_s": 109.6,
+    "throughput_per_round": [109.6],
+    "decode": {
+     "batch": 4,
+     "steps": 510,
+     "tok_s": 113.9,
+     "wall_ms_p50": 33.86,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 2048,
+    "stats": {
+     "prefix_tokens_saved": 0
+    }
+   },
+   "llamaserver": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 7786.95,
+     "p90": 13932.6,
+     "p99": 13932.99
+    },
+    "tpot_ms": {
+     "p50": 43.96,
+     "p90": 46.99,
+     "p99": 46.99
+    },
+    "throughput_tok_s": 79.0,
+    "throughput_per_round": [79.0],
+    "decode": {
+     "batch": 1,
+     "steps": 2040,
+     "tok_s": 288.9,
+     "wall_ms_p50": 0.499,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 2048,
+    "stats": {
+     "spec_accepted": 0,
+     "spec_drafted": 0
+    }
+   }
+  }
+ },
+ "runs": [
+  {
+   "round": 0,
+   "backend": "holon",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 160.35,
+     "p90": 160.35,
+     "p99": 160.35
+    },
+    "tpot_ms": {
+     "p50": 21.71,
+     "p90": 21.71,
+     "p99": 21.71
+    },
+    "throughput_tok_s": 44.9,
+    "throughput_per_round": [44.9],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 46.1,
+     "wall_ms_p50": 21.712,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.160349, 5.695817]
+   ],
+   "stats": {
+    "prefix_tokens_saved": 0
+   }
+  },
+  {
+   "round": 0,
+   "backend": "holon",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 4859.08,
+     "p90": 9111.87,
+     "p99": 9111.87
+    },
+    "tpot_ms": {
+     "p50": 35.12,
+     "p90": 37.51,
+     "p99": 37.51
+    },
+    "throughput_tok_s": 109.6,
+    "throughput_per_round": [109.6],
+    "decode": {
+     "batch": 4,
+     "steps": 510,
+     "tok_s": 113.9,
+     "wall_ms_p50": 33.86,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 2048,
+    "stats": {
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.60628, 8.951356],
+    [1, 0, 256, 256, 256, 0.0, 0.60628, 8.951356],
+    [2, 0, 256, 256, 256, 0.0, 0.60628, 8.951356],
+    [3, 0, 256, 256, 256, 0.0, 0.60628, 8.951356],
+    [4, 0, 256, 256, 256, 0.0, 9.111873, 18.678106],
+    [5, 0, 256, 256, 256, 0.0, 9.111873, 18.678106],
+    [6, 0, 256, 256, 256, 0.0, 9.111873, 18.678106],
+    [7, 0, 256, 256, 256, 0.0, 9.111873, 18.678106]
+   ],
+   "stats": {
+    "prefix_tokens_saved": 0
+   }
+  },
+  {
+   "round": 0,
+   "backend": "llamaserver",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 406.85,
+     "p90": 406.85,
+     "p99": 406.85
+    },
+    "tpot_ms": {
+     "p50": 23.16,
+     "p90": 23.16,
+     "p99": 23.16
+    },
+    "throughput_tok_s": 40.6,
+    "throughput_per_round": [40.6],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 323.4,
+     "wall_ms_p50": 2.852,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 256,
+    "stats": {
+     "spec_accepted": 0,
+     "spec_drafted": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.40685, 6.313017]
+   ],
+   "stats": {
+    "spec_drafted": 0,
+    "spec_accepted": 0
+   }
+  },
+  {
+   "round": 0,
+   "backend": "llamaserver",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 7786.95,
+     "p90": 13932.6,
+     "p99": 13932.99
+    },
+    "tpot_ms": {
+     "p50": 43.96,
+     "p90": 46.99,
+     "p99": 46.99
+    },
+    "throughput_tok_s": 79.0,
+    "throughput_per_round": [79.0],
+    "decode": {
+     "batch": 1,
+     "steps": 2040,
+     "tok_s": 288.9,
+     "wall_ms_p50": 0.499,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "prompt_tokens": 2048,
+    "stats": {
+     "spec_accepted": 0,
+     "spec_drafted": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 1.642064, 12.077882],
+    [1, 0, 256, 256, 256, 0.0, 1.640858, 12.076746],
+    [2, 0, 256, 256, 256, 0.0, 1.64142, 12.077296],
+    [3, 0, 256, 256, 256, 0.0, 1.642739, 12.078436],
+    [4, 0, 256, 256, 256, 0.0, 13.933029, 25.91483],
+    [5, 0, 256, 256, 256, 0.0, 13.931746, 25.913865],
+    [6, 0, 256, 256, 256, 0.0, 13.93241, 25.914322],
+    [7, 0, 256, 256, 256, 0.0, 13.931164, 25.913231]
+   ],
+   "stats": {
+    "spec_drafted": 0,
+    "spec_accepted": 0
+   }
+  }
+ ]
+}

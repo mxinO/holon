@@ -911,3 +911,187 @@ main commit refers to it yet.
 - **The GitHub Actions job that comes with publishing fetches the base ref** (e.g. `fetch-depth: 0`, or a fetch of
   `main`). Otherwise `check_abi.py --base` finds no base and skips the bump check.
 
+
+### 13.5 Step 3 — baselines, smoke and tier-1 bars on main's engine code (2026-10-14)
+
+**Built** (`bench/`, no core, std or plugin change; the engine code is local main's, 2ef170d):
+- `setup_baselines.sh` pins and builds every baseline under `bench/.envs/`:
+
+  | baseline | pin | build |
+  |---|---|---|
+  | llama.cpp, gate | `cbe28bb3` (M0.6 Gate A's vendored pin) | `llama-bench` and `llama-server`, one build for sm_86 / 89 / 120a, CUDA 13.0 |
+  | llama.cpp, upstream | `df18bee1` (HEAD on 2026-10-14; re-pinned at step 8) | the same |
+  | SGLang | release 0.5.21 | own venv: torch 2.13.0 + cu130; it pins pre-release kernels, so `--prerelease=allow` |
+  | FreeToken | `74a38777` | own venv: torch 2.14.1 + cu130, `[accel]`, extension built against that torch |
+
+- `backends/sglang_http.py`: SGLang's `/generate` with `input_ids` (`--skip-tokenizer-init`), streamed.
+- A sampling temperature (`run.py --temperature`) reaches every backend that samples. The other samplers (top-k, top-p, min-p) are sent as "off" in each engine's own spelling, because their defaults differ: llama.cpp uses 40 / 0.95 / 0.05, and FreeToken and SGLang take theirs from `generation_config.json`.
+- **Baselines matched to a lock** (`run.py --lock`):
+  - Holon runs the lock's `[engine]` settings. Hand-given flags override them, and dict flags merge per key as D2's `holon serve` will. Kernel pins are not applied, so the default selection runs (D2 makes pins soft in step 2).
+  - Every backend gets the lock's `max_seqs` and step budget.
+  - The baselines get the lock's KV format and Holon's measured KV tokens, which come from the first in-process `holon` run. A baseline is skipped, with a recorded reason, until those tokens are known.
+  - A baseline without the lock's KV format refuses to run: llama.cpp has no FP8 KV, SGLang has no q8_0, and FreeToken matches only the model dtype.
+  - Flags:
+    - `llama-server -ngl 99 -fa on -kvu -np <max_seqs> -c <KV tokens> -b <budget> -ub 512 -ctk/-ctv <format>`;
+    - SGLang `--max-running-requests --chunked-prefill-size --max-total-tokens --kv-cache-dtype --mem-fraction-static 0.9`;
+    - FreeToken adds `--num-tokens`.
+  - The record's `matched` block lists what was matched. A failed backend's record carries its reason: the log's first exception, with paths cut to file names.
+- `bars.py` produces the gate's bars (§5.3):
+  - Holon's in-process `llama_bench.py` runs against `llama-bench` at the gate pin and at upstream, ABAB in fresh processes, at the lock's settings: `-ctk/-ctv`, `-b` = the lock's budget, `-ub 512`.
+  - A round's value is the median of repetitions 2–5. The statistic is the median over rounds.
+  - Each record names the ggml commit Holon ran (`kernels.ggml_cuda`'s vendored tree) and each llama.cpp build's commit.
+  - It refuses locks with speculation, since llama-bench drafts nothing.
+- `report.py` renders the tables below from the records, each table linking its record.
+- Code review: one reviewer, six rounds, clean at 632eeaa. Its findings were:
+  - FreeToken was never matched.
+  - KV-token matching depended on backend order.
+  - Hand-given dict flags replaced the lock's.
+  - Sampler defaults differed between engines.
+  - Error strings leaked command lines; failure reasons are now scrubbed of paths, host names and driver versions.
+  - The gate column could pass silently.
+
+**Settings.**
+- Neither the RTX 5090 nor the RTX 3090 has a GGUF lock yet; they are the **R** cells of step 7. So every cell runs the nearest class's lock, marked "borrowed" in the records:
+  - 8B Q4_K_M: rtx-5080 lock 6;
+  - 30B-A3B Q4_K_M and 27B UD-Q4_K_M: rtx-4090 locks 4 and 3;
+  - 8B bf16: the rtx-5090 lock 6 (outdated, B9) on the 5090 and the rtx-4090 lock 9 on the 3090.
+- None of these locks selects grammar yet (D3 lands at M0.7's propagation).
+- Bars: 3 rounds per cell. Smoke: one round of `decode_b1` and `decode_b8` on prompts cut from judge prompt set v1 (`v1-qwen3_5` for the 27B).
+- MTP smoke: Holon runs `drafters.mtp` with k ≤ 3; llama.cpp runs `--spec-type draft-mtp --spec-draft-n-max 3`.
+- Holon at commit 8bf7bca (bench code only beyond main). The M0.6-file smoke and the 3090 27B re-measure ran at c9a6f0c, whose only change is that failure reasons are recorded.
+
+**Tier-1 bars** (Holon / llama.cpp; gate ≥ 0.8× the pin; "≈": within 2 sd of the per-round ratios):
+
+NVIDIA GeForce RTX 3090; Holon's ggml at 51ce9c11
+
+| file (record) | lock | metric | Holon t/s | llama.cpp gate (cbe28bb3c) t/s | Holon / gate | llama.cpp upstream (df18bee11) t/s | Holon / upstream |
+|---|---|---|---|---|---|---|---|
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | pp512 | 5083.3 | 4637.5 | 1.10 | 4650.4 | 1.09 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | pp512 @ d8192 | 3258.9 | 3288.7 | 0.99 | 3303.1 | 0.99 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | tg128 | 209.2 | 212.2 | 0.99 | 212.4 | 0.98 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | tg128 @ d8192 | 175.5 | 176.3 | 1.00 | 176.5 | 0.99 |
+| [qwen3.8-27b-ud-q4_k_m-r2](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m-r2_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | pp512 | 886.5 | 1567.4 | **≈ 0.57 (< 0.8)** | 1576.9 | ≈ 0.56 |
+| [qwen3.8-27b-ud-q4_k_m-r2](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m-r2_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | pp512 @ d8192 | 1513.1 | 1432.5 | 1.06 | 1434.8 | 1.05 |
+| [qwen3.8-27b-ud-q4_k_m-r2](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m-r2_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | tg128 | 41.9 | 23.4 | 1.79 | 29.5 | 1.42 |
+| [qwen3.8-27b-ud-q4_k_m-r2](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m-r2_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | tg128 @ d8192 | 39.2 | 26.8 | 1.47 | 27.3 | 1.44 |
+| [qwen3.8-27b-ud-q4_k_m-r3](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m-r3_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | pp512 | 1447.9 | 1387.9 | 1.04 | 1369.1 | 1.06 |
+| [qwen3.8-27b-ud-q4_k_m-r3](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m-r3_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | pp512 @ d8192 | 1276.9 | 1251.8 | ≈ 1.02 | 1251.0 | ≈ 1.02 |
+| [qwen3.8-27b-ud-q4_k_m-r3](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m-r3_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | tg128 | 44.2 | 42.5 | 1.04 | 42.4 | 1.04 |
+| [qwen3.8-27b-ud-q4_k_m-r3](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m-r3_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | tg128 @ d8192 | 43.0 | 41.5 | 1.04 | 41.5 | 1.04 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | pp512 | 685.6 | 1565.0 | **0.44 (< 0.8)** | 1572.5 | 0.44 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | pp512 @ d8192 | 1510.2 | 1434.3 | 1.05 | 1435.1 | 1.05 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | tg128 | 38.5 | 21.9 | 1.75 | 28.3 | 1.36 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-14.json) | rtx-4090 (borrowed) | tg128 @ d8192 | 36.2 | 24.1 | 1.50 | 24.7 | 1.47 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-14.json) | rtx-5080 (borrowed) | pp512 | 5421.6 | 5236.0 | 1.03 | 5236.8 | 1.03 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-14.json) | rtx-5080 (borrowed) | pp512 @ d8192 | 3653.4 | 3823.7 | 0.95 | 3826.9 | 0.95 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-14.json) | rtx-5080 (borrowed) | tg128 | 143.7 | 141.1 | ≈ 1.02 | 140.2 | ≈ 1.02 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-14.json) | rtx-5080 (borrowed) | tg128 @ d8192 | 120.7 | 118.1 | ≈ 1.02 | 117.2 | 1.03 |
+
+NVIDIA GeForce RTX 5090; Holon's ggml at 51ce9c11
+
+| file (record) | lock | metric | Holon t/s | llama.cpp gate (cbe28bb3c) t/s | Holon / gate | llama.cpp upstream (df18bee11) t/s | Holon / upstream |
+|---|---|---|---|---|---|---|---|
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-5090_2026-10-14.json) | rtx-4090 (borrowed) | pp512 | 12544.5 | 11553.3 | 1.09 | 11541.1 | 1.09 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-5090_2026-10-14.json) | rtx-4090 (borrowed) | pp512 @ d8192 | 8428.7 | 8972.9 | 0.94 | 8961.6 | 0.94 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-5090_2026-10-14.json) | rtx-4090 (borrowed) | tg128 | 338.0 | 361.7 | 0.93 | 361.8 | 0.93 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-5090_2026-10-14.json) | rtx-4090 (borrowed) | tg128 @ d8192 | 289.9 | 294.7 | 0.98 | 295.0 | 0.98 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-14.json) | rtx-4090 (borrowed) | pp512 | 4625.6 | 4138.1 | 1.12 | 4146.7 | 1.12 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-14.json) | rtx-4090 (borrowed) | pp512 @ d8192 | 3783.3 | 3937.8 | ≈ 0.96 | 3928.9 | ≈ 0.96 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-14.json) | rtx-4090 (borrowed) | tg128 | 84.8 | 82.3 | 1.03 | 82.3 | 1.03 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-14.json) | rtx-4090 (borrowed) | tg128 @ d8192 | 82.5 | 78.6 | 1.05 | 78.6 | 1.05 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-14.json) | rtx-5080 (borrowed) | pp512 | 14717.0 | 14185.3 | 1.04 | 14140.0 | 1.04 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-14.json) | rtx-5080 (borrowed) | pp512 @ d8192 | 9964.5 | 10951.2 | 0.91 | 10924.4 | 0.91 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-14.json) | rtx-5080 (borrowed) | tg128 | 244.3 | 253.2 | 0.96 | 253.2 | 0.96 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-14.json) | rtx-5080 (borrowed) | tg128 @ d8192 | 206.0 | 207.8 | 0.99 | 207.8 | 0.99 |
+
+**Cells under 0.8× (flagged, not fixed):**
+
+- **Qwen3.8-27B UD-Q4_K_M, pp512 at depth 0, RTX 3090: 0.44× the pin, and 0.57× on a re-measure on the same desktop (B).** This is a measurement artifact, not a kernel gap.
+  - **Desktop B.** During the re-measure, the clock log (nvidia-smi, every 500 ms, kept local) shows its GPU under software thermal slowdown in 43% of loaded samples, with SM clocks swinging between ≈ 300 and 1.9 GHz.
+  - **Both engines were hit.** Within each process, Holon's pp512 fell from ≈ 1,690 to ≈ 550 t/s. llama-bench's tg128 fell from 44 to ≈ 22 t/s, and that fall is what turned the tg ratios into 1.5–1.8×.
+  - **Desktop C.** The same cell on another RTX 3090 desktop (C) measured pp512 1.04×, pp512 at 8K 1.02×, tg128 1.04× and tg128 at 8K 1.04×, with every per-round ratio within 0.01 of the median. That GPU also throttled thermally (70% of samples) but held steady clocks (p10 / p50 1.40 / 1.49 GHz).
+  - **A5000 cross-check.** On an RTX A5000 (sm_86, development host), Holon's own pp512 is flat across repetitions (1,211 → 1,183 t/s).
+  - All three 27B records on the 3090 are kept above (`-r2` is the re-measure on B, `-r3` the run on C). The 8B and 30B cells on B are steady, with per-round ratios within 0.01. The one exception is the 8B's third llama-bench round of tg128 (1.06× at depth 0, 1.32× at 8K), which shows the same swings; the median discards it.
+- No other cell is under 0.8×. Below the predicted bands (§5.3) but above 0.8×:
+  - pp512 at 8K: 0.91–0.96× on the 5090 and on the 3090's 8B;
+  - tg128 on the 5090: 8B 0.96×, 30B-A3B 0.93×.
+  - These are M0.7's step-0 rows to re-measure at the `cbe28bb3` pin. Note that Holon still ran ggml `51ce9c11` here.
+
+**Smoke matrix** (feasibility: one round, so the numbers are not claims; "—" with the recorded reason):
+
+| record | model | GPU | backend | decode_b1: TTFT / TPOT p50 ms | decode_b8: TTFT / TPOT p50 ms |
+|---|---|---|---|---|---|
+| [release-smoke-qwen3-30b-a3b-mxfp4_moe](../evidence/bench_release-smoke-qwen3-30b-a3b-mxfp4_moe_rtx-3090_2026-10-14.json) | Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@68d644f2fca0/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE.gguf | rtx-3090 | holon | — (exit code 1: holon.core.plugins.PluginError: no kernel for linear_experts@1 on cuda sm 86 with {'layout': 'ggml.mxfp4/gguf.native', 'experts': 128, 'in': 768, 'out': 2048, 'top_k': 8, 'rows_per_token': 8, 'glu': 'none', 'act_dtype': 'float32', 'out_dtype': 'float32'}) |  |
+| [release-smoke-qwen3-30b-a3b-mxfp4_moe](../evidence/bench_release-smoke-qwen3-30b-a3b-mxfp4_moe_rtx-3090_2026-10-14.json) | Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@68d644f2fca0/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE.gguf | rtx-3090 | llamaserver | 90.83 / 5.54 | 641.16 / 20.25 |
+| [release-smoke-qwen3-30b-a3b-mxfp4_moe](../evidence/bench_release-smoke-qwen3-30b-a3b-mxfp4_moe_rtx-5090_2026-10-14.json) | Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@68d644f2fca0/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE.gguf | rtx-5090 | holon | — (exit code 1: holon.core.plugins.PluginError: no kernel for linear_experts@1 on cuda sm 120 with {'layout': 'ggml.mxfp4/gguf.native', 'experts': 128, 'in': 768, 'out': 2048, 'top_k': 8, 'rows_per_token': 8, 'glu': 'none', 'act_dtype': 'float32', 'out_dtype': 'float32'}) |  |
+| [release-smoke-qwen3-30b-a3b-mxfp4_moe](../evidence/bench_release-smoke-qwen3-30b-a3b-mxfp4_moe_rtx-5090_2026-10-14.json) | Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@68d644f2fca0/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE.gguf | rtx-5090 | llamaserver | 37.91 / 3.33 | 288.87 / 10.11 |
+| [release-smoke-qwen3-30b-a3b-nvfp4](../evidence/bench_release-smoke-qwen3-30b-a3b-nvfp4_rtx-3090_2026-10-14.json) | nvidia/Qwen3-30B-A3B-NVFP4@2538ded2a4ed | rtx-3090 | holon | — (exit code 1: holon.core.plugins.PluginError: no weight rule maps checkpoint tensor 'model.layers.0.mlp.experts.0.down_proj.input_scale') |  |
+| [release-smoke-qwen3-30b-a3b-nvfp4](../evidence/bench_release-smoke-qwen3-30b-a3b-nvfp4_rtx-3090_2026-10-14.json) | nvidia/Qwen3-30B-A3B-NVFP4@2538ded2a4ed | rtx-3090 | sglang_http | 53.82 / 5.29 | 235.79 / 12.41 |
+| [release-smoke-qwen3-30b-a3b-nvfp4](../evidence/bench_release-smoke-qwen3-30b-a3b-nvfp4_rtx-3090_2026-10-14.json) | nvidia/Qwen3-30B-A3B-NVFP4@2538ded2a4ed | rtx-3090 | freetoken_http | — (exit code 1: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |
+| [release-smoke-qwen3-30b-a3b-nvfp4](../evidence/bench_release-smoke-qwen3-30b-a3b-nvfp4_rtx-5090_2026-10-14.json) | nvidia/Qwen3-30B-A3B-NVFP4@2538ded2a4ed | rtx-5090 | holon | — (exit code 1: holon.core.plugins.PluginError: no weight rule maps checkpoint tensor 'model.layers.0.mlp.experts.0.down_proj.input_scale') |  |
+| [release-smoke-qwen3-30b-a3b-nvfp4](../evidence/bench_release-smoke-qwen3-30b-a3b-nvfp4_rtx-5090_2026-10-14.json) | nvidia/Qwen3-30B-A3B-NVFP4@2538ded2a4ed | rtx-5090 | sglang_http | — (exit code 1: AttributeError: 'FusedMoE' object has no attribute 'g1_scale_c') |  |
+| [release-smoke-qwen3-30b-a3b-nvfp4](../evidence/bench_release-smoke-qwen3-30b-a3b-nvfp4_rtx-5090_2026-10-14.json) | nvidia/Qwen3-30B-A3B-NVFP4@2538ded2a4ed | rtx-5090 | freetoken_http | — (exit code 1: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |
+| [release-smoke-qwen3-30b-a3b-q4_k_m](../evidence/bench_release-smoke-qwen3-30b-a3b-q4_k_m_rtx-3090_2026-10-14.json) | unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf | rtx-3090 | holon | 76.09 / 4.71 | 426.84 / 15.88 |
+| [release-smoke-qwen3-30b-a3b-q4_k_m](../evidence/bench_release-smoke-qwen3-30b-a3b-q4_k_m_rtx-3090_2026-10-14.json) | unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf | rtx-3090 | llamaserver | 97.16 / 5.01 | 684.93 / 19.61 |
+| [release-smoke-qwen3-30b-a3b-q4_k_m](../evidence/bench_release-smoke-qwen3-30b-a3b-q4_k_m_rtx-5090_2026-10-14.json) | unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf | rtx-5090 | holon | 32.29 / 3.01 | 162.39 / 8.54 |
+| [release-smoke-qwen3-30b-a3b-q4_k_m](../evidence/bench_release-smoke-qwen3-30b-a3b-q4_k_m_rtx-5090_2026-10-14.json) | unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf | rtx-5090 | llamaserver | 50.84 / 3.11 | 361.51 / 11.09 |
+| [release-smoke-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-smoke-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-14.json) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | rtx-3090 | holon | 169.49 / 13.61 | 2771.39 / 19.14 |
+| [release-smoke-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-smoke-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-14.json) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | rtx-3090 | llamaserver | 484.06 / 14.58 | 4527.17 / 22.63 |
+| [release-smoke-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-smoke-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-14.json) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | rtx-5090 | holon | 67.59 / 6.92 | 1317.73 / 9.52 |
+| [release-smoke-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-smoke-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-14.json) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | rtx-5090 | llamaserver | 296.8 / 7.41 | 2406.54 / 12.31 |
+| [release-smoke-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-smoke-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-14.json) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | rtx-3090 | holon | 160.35 / 21.71 | 4859.08 / 35.12 |
+| [release-smoke-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-smoke-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-14.json) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | rtx-3090 | llamaserver | 406.85 / 23.16 | 7786.95 / 43.96 |
+| [release-smoke-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-smoke-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-14.json) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | rtx-5090 | holon | 63.0 / 11.74 | 2059.1 / 13.99 |
+| [release-smoke-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-smoke-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-14.json) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | rtx-5090 | llamaserver | 239.66 / 12.6 | 3654.62 / 16.68 |
+| [release-smoke-qwen3-8b-bf16](../evidence/bench_release-smoke-qwen3-8b-bf16_rtx-3090_2026-10-14.json) | Qwen/Qwen3-8B@b968826d9c46 | rtx-3090 | holon | 68.14 / 20.08 | 416.61 / 20.82 |
+| [release-smoke-qwen3-8b-bf16](../evidence/bench_release-smoke-qwen3-8b-bf16_rtx-3090_2026-10-14.json) | Qwen/Qwen3-8B@b968826d9c46 | rtx-3090 | sglang_http | 87.35 / 19.78 | 431.79 / 20.41 |
+| [release-smoke-qwen3-8b-bf16](../evidence/bench_release-smoke-qwen3-8b-bf16_rtx-3090_2026-10-14.json) | Qwen/Qwen3-8B@b968826d9c46 | rtx-3090 | freetoken_http | 69.9 / 19.91 | 438.86 / 20.45 |
+| [release-smoke-qwen3-8b-bf16](../evidence/bench_release-smoke-qwen3-8b-bf16_rtx-5090_2026-10-14.json) | Qwen/Qwen3-8B@b968826d9c46 | rtx-5090 | holon | 17.9 / 10.05 | 104.42 / 11.21 |
+| [release-smoke-qwen3-8b-bf16](../evidence/bench_release-smoke-qwen3-8b-bf16_rtx-5090_2026-10-14.json) | Qwen/Qwen3-8B@b968826d9c46 | rtx-5090 | sglang_http | 27.24 / 9.93 | 113.24 / 10.92 |
+| [release-smoke-qwen3-8b-bf16](../evidence/bench_release-smoke-qwen3-8b-bf16_rtx-5090_2026-10-14.json) | Qwen/Qwen3-8B@b968826d9c46 | rtx-5090 | freetoken_http | 19.94 / 10.03 | 100.97 / 10.97 |
+| [release-smoke-qwen3-8b-fp8](../evidence/bench_release-smoke-qwen3-8b-fp8_rtx-3090_2026-10-14.json) | Qwen/Qwen3-8B-FP8@220b46e3b218 | rtx-3090 | holon | — (exit code 1: holon.core.plugins.PluginError: 'model.layers.0.mlp.down_proj.weight_scale_inv' maps to 'layers.0.ffn.down_proj.weight_scale_inv', which the model does not have) |  |
+| [release-smoke-qwen3-8b-fp8](../evidence/bench_release-smoke-qwen3-8b-fp8_rtx-3090_2026-10-14.json) | Qwen/Qwen3-8B-FP8@220b46e3b218 | rtx-3090 | sglang_http | 69.93 / 11.18 | 452.0 / 11.96 |
+| [release-smoke-qwen3-8b-fp8](../evidence/bench_release-smoke-qwen3-8b-fp8_rtx-3090_2026-10-14.json) | Qwen/Qwen3-8B-FP8@220b46e3b218 | rtx-3090 | freetoken_http | 91.32 / 12.63 | 656.76 / 21.59 |
+| [release-smoke-qwen3-8b-fp8](../evidence/bench_release-smoke-qwen3-8b-fp8_rtx-5090_2026-10-14.json) | Qwen/Qwen3-8B-FP8@220b46e3b218 | rtx-5090 | holon | — (exit code 1: holon.core.plugins.PluginError: 'model.layers.0.mlp.down_proj.weight_scale_inv' maps to 'layers.0.ffn.down_proj.weight_scale_inv', which the model does not have) |  |
+| [release-smoke-qwen3-8b-fp8](../evidence/bench_release-smoke-qwen3-8b-fp8_rtx-5090_2026-10-14.json) | Qwen/Qwen3-8B-FP8@220b46e3b218 | rtx-5090 | sglang_http | 17.98 / 6.44 | 59.23 / 6.64 |
+| [release-smoke-qwen3-8b-fp8](../evidence/bench_release-smoke-qwen3-8b-fp8_rtx-5090_2026-10-14.json) | Qwen/Qwen3-8B-FP8@220b46e3b218 | rtx-5090 | freetoken_http | 15.17 / 6.06 | 73.92 / 6.97 |
+| [release-smoke-qwen3-8b-nvfp4](../evidence/bench_release-smoke-qwen3-8b-nvfp4_rtx-3090_2026-10-14.json) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | rtx-3090 | holon | — (exit code 1: holon.core.plugins.PluginError: 'model.layers.0.mlp.down_proj.input_scale' maps to 'layers.0.ffn.down_proj.input_scale', which the model does not have) |  |
+| [release-smoke-qwen3-8b-nvfp4](../evidence/bench_release-smoke-qwen3-8b-nvfp4_rtx-3090_2026-10-14.json) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | rtx-3090 | sglang_http | 65.34 / 7.63 | 428.39 / 8.28 |
+| [release-smoke-qwen3-8b-nvfp4](../evidence/bench_release-smoke-qwen3-8b-nvfp4_rtx-3090_2026-10-14.json) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | rtx-3090 | freetoken_http | — (exit code 1: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |
+| [release-smoke-qwen3-8b-nvfp4](../evidence/bench_release-smoke-qwen3-8b-nvfp4_rtx-5090_2026-10-14.json) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | rtx-5090 | holon | — (exit code 1: holon.core.plugins.PluginError: 'model.layers.0.mlp.down_proj.input_scale' maps to 'layers.0.ffn.down_proj.input_scale', which the model does not have) |  |
+| [release-smoke-qwen3-8b-nvfp4](../evidence/bench_release-smoke-qwen3-8b-nvfp4_rtx-5090_2026-10-14.json) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | rtx-5090 | sglang_http | 12.93 / 4.26 | 34.46 / 4.61 |
+| [release-smoke-qwen3-8b-nvfp4](../evidence/bench_release-smoke-qwen3-8b-nvfp4_rtx-5090_2026-10-14.json) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | rtx-5090 | freetoken_http | — (exit code 1: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |
+| [release-smoke-qwen3-8b-q4_k_m](../evidence/bench_release-smoke-qwen3-8b-q4_k_m_rtx-3090_2026-10-14.json) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | rtx-3090 | holon | 50.36 / 6.96 | 364.9 / 15.08 |
+| [release-smoke-qwen3-8b-q4_k_m](../evidence/bench_release-smoke-qwen3-8b-q4_k_m_rtx-3090_2026-10-14.json) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | rtx-3090 | llamaserver | 79.06 / 7.41 | 649.81 / 18.1 |
+| [release-smoke-qwen3-8b-q4_k_m](../evidence/bench_release-smoke-qwen3-8b-q4_k_m_rtx-5090_2026-10-14.json) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | rtx-5090 | holon | 19.83 / 4.03 | 125.21 / 5.53 |
+| [release-smoke-qwen3-8b-q4_k_m](../evidence/bench_release-smoke-qwen3-8b-q4_k_m_rtx-5090_2026-10-14.json) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | rtx-5090 | llamaserver | 43.14 / 4.26 | 346.5 / 8.15 |
+
+**M0.6's files** (borrowed on the 5090 and 3090):
+- They are not available on main: M0.6 is unmerged, and main's ggml is still at 51ce9c11. Holon on main refuses each one at load, and the records name the reason:
+  - FP8 and NVFP4: no weight rule for the scale tensors;
+  - the MXFP4_MOE GGUF: no `linear_experts` kernel for `ggml.mxfp4`.
+- So the gap is recorded rather than measured. These files' Holon smoke waits for M0.6 Gate A on main.
+- The baselines did run them: 
+  - **llama.cpp** serves the MXFP4_MOE GGUF on both cards.
+  - **SGLang** serves the 8B FP8 and 8B NVFP4 on both cards. It serves the 30B NVFP4 on the 3090, but fails it on the 5090 (`'FusedMoE' object has no attribute 'g1_scale_c'`).
+  - **FreeToken** serves the 8B FP8 on both cards. It fails both NVFP4 checkpoints at weight load on both cards (`chunk expects at least a 1-dimensional tensor`).
+  - The design's "M0.6's files smoke-tested on the 3090" (§11) is therefore met for the baselines only.
+
+**Deviations and decisions:**
+- **Locks.** The 3090 and 5090 cells run other classes' locks (above). Step 8 reruns at the step-7 locks.
+- **Smoke engine.** Holon is smoked as the in-process engine, because it reports the KV tokens the baselines are matched to. The served path (`holon_http`) is unchanged since M0.5's records.
+- **Lost GPU.** The first RTX 3090 desktop (A) lost its GPU mid-run (it fell off the bus) during the first bar cell, and its partial record was discarded. Every 3090 record comes from desktop B, except the 27B `-r3` run on C.
+- **Concurrent writers.** Two allocations of one class shared a Triton cache directory, which gave "Stale file handle". Each allocation now gets its own tag, and the affected 5090 runs were redone.
+- **Venvs.** The cluster venv's and the development venv's editable installs predate M0.5's plugin renames (`frontends.openai`). The runs used the M0.5 cluster venv, whose entry points match main.
+- **Commits.** The records come from two fixed CI worktrees, at 8bf7bca and c9a6f0c (above).
+
+**For the lead:**
+1. **The 3090 27B flag** (above) is an artifact of desktop B's thermal clock swings. On desktop C the cell is 1.02–1.04×. Proposal: before step 8, the 3090 class's release evidence (locks and suite) runs on desktops that hold steady clocks under the 27B. A short clock check (sustained 27B decode with nvidia-smi logging) would screen a desktop, and that check's result would be recorded beside each 3090 record. Your call whether to make it a rule.
+2. **No 5090 / 3090 GGUF locks exist yet.** Every cell here ran a borrowed lock's settings (marked in the tables). Step 8 re-runs the bars at the step-7 locks, after M0.6 Gate A moves ggml to `cbe28bb3`; until then the gate compares Holon's `51ce9c11` kernels with llama.cpp at `cbe28bb3`.
+3. **FreeToken and SGLang on NVFP4** fail at load as listed. These will publish as "—" with those reasons unless a later pin fixes them. Nothing was patched (§10: "no patches beyond a documented one-liner").
+4. **Upstream llama.cpp** (`df18bee1`) is within 1.5% of the pin on every steady cell, so no upstream regression or gain is in sight.
+
+**Lead decisions on step 3 (2026-10-14):**
+1. **Every desktop that produces release evidence (locks, the suite, the demo) is screened first** with a short GPU clock check under the 27B: SM clocks steady and a thermal-slowdown share recorded. The check's result is written beside each record (GPU clock and slowdown share only, no host details). The RTX 3090 desktop whose clocks swung (pp512 0.44× / 0.57×) is excluded.
+2. **Step 8 re-runs the bars at the step-7 locks after M0.6's Gate A merge**, so Holon's ggml is at the gate pin `cbe28bb3`. The cells below their predicted bands but above 0.8× (pp512 at 8K 0.91–0.96, the 5090's tg128 0.93–0.96) are re-measured in M0.7's step 0.
+3. **Baselines that fail on a file are published as "—" with their recorded reason;** they are not patched (SGLang's NVFP4 30B on the 5090, FreeToken's NVFP4 files).
