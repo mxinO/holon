@@ -147,7 +147,9 @@ def kl_topk(golden: Recording, cand: Recording) -> tuple[torch.Tensor, torch.Ten
     q_tail = c_rest - (q * ~found).sum(-1) + (c_p * ~match.any(1)).sum(-1)
     p, p_tail = g_lp.exp(), g_tail.exp()
     log_q, log_q_tail = q.clamp_min(1e-30).log(), q_tail.clamp_min(1e-30).log()
-    kl = (p * (g_lp - log_q)).sum(-1) + torch.where(p_tail > 0, p_tail * (g_tail - log_q_tail), 0.0)
+    # (A masked distribution's refused tokens hold -inf logprobs: p = 0 there contributes nothing.)
+    kl = torch.where(p > 0, p * (g_lp - log_q), 0.0).sum(-1) + torch.where(p_tail > 0, p_tail * (g_tail - log_q_tail),
+                                                                           0.0)
     return kl.clamp_min(0), n_missing
 
 

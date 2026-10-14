@@ -61,6 +61,13 @@ def test_bucketed_kl_is_a_tight_lower_bound(case):
     assert torch.allclose(full, exact, atol=1e-6)    # no tail: the bucketed KL is the KL (up to fp32 storage)
     approx, missing = kl_topk(_recording(logits, targets, lens), _recording(cand_logits, targets, lens))
     assert (approx <= exact + 1e-6).all() and approx.sum() > 0.9 * exact.sum() and missing.sum() > 0
+    # Masked distributions (a grammar's): a refused token's logprob is -inf in both and carries no mass.
+    refused = torch.arange(V) % 3 == 0
+    g_lp, c_lp = (x.masked_fill(refused, float("-inf")).double().log_softmax(-1) for x in (logits, cand_logits))
+    exact = torch.where(g_lp > float("-inf"), g_lp.exp() * (g_lp - c_lp), 0.0).sum(-1)
+    full, _ = kl_topk(*(_recording(x, targets, lens, k=V) for x in (logits.masked_fill(refused, float("-inf")),
+                                                                     cand_logits.masked_fill(refused, float("-inf")))))
+    assert torch.allclose(full, exact, atol=1e-6)
 
 
 def test_budgets_follow_design_rule():

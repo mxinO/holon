@@ -17,8 +17,10 @@
                                    [--sessions N] [--graphs-vs-eager]
                                    # prefix cache on/off x overlap depth 1/0 on a multi-turn trace; or decode
                                    # graphs on vs off at a batch of N sessions
+    python -m holon_judge constrained --model <.gguf> --jsb <JSONSchemaBench dir> --engine-args "<speculating>"
+                                   [--plant <bug>] [--json <file>]  # grammar + speculation vs grammar (M0.5 §5)
 
-`compare`, `l2`, `snapshot-diff`, `snapshot` and `bounded` exit with status 1 on a failed check.
+`compare`, `l2`, `snapshot-diff`, `snapshot`, `bounded` and `constrained` exit with status 1 on a failed check.
 """
 from __future__ import annotations
 
@@ -271,6 +273,43 @@ def _bounded(a: argparse.Namespace) -> int:
     return 0 if report["passed"] else 1
 
 
+def _constrained(a: argparse.Namespace) -> int:
+    from holon.core.assembly import resolve_model
+    from holon.core.cli import engine_config, engine_flags
+    from holon.core.engine import Engine
+    from holon.core.plugins import PluginSet, discover
+
+    from . import constrained, gguf
+
+    path = golden.resolve_model(a.model)
+    flags = argparse.ArgumentParser()
+    engine_flags(flags)
+    base = engine_config(str(path), flags.parse_args(shlex.split(a.engine_args)))
+    if not base.max_draft_tokens:
+        raise SystemExit("constrained: the engine args must speculate (--max-draft-tokens, --slots)")
+    source, plugin = resolve_model(PluginSet(discover()), base)
+    bundle = plugin.bundle(source)
+    grammar = base.slots | {"logits_processor": "grammar.xgrammar"}
+    configs = {"plain": {"slots": grammar, "max_draft_tokens": 0}, "spec": {"slots": grammar},
+               "reference": {"max_draft_tokens": 0, "prefix_cache": False, "overlap": False, "cuda_graphs": False,
+                             "max_step_tokens": max(base.max_step_tokens, a.max_len)}}
+
+    def build(name: str):
+        return Engine(dataclasses.replace(base, max_model_len=a.max_len, **configs[name]))
+
+    with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
+        report = constrained.judge(build, source.tokenizer(), lambda m: bundle.render_chat(m, enable_thinking=False),
+                                   pathlib.Path(a.jsb), a.prompts, a.max_tokens, a.k)
+    meta = gguf.file_meta(path) if path.suffix == ".gguf" else golden.model_meta(path)
+    report |= {"model": meta["model"], "engine_args": a.engine_args, "plant": a.plant,
+               "hardware": golden.hardware(torch.device("cuda")), "torch": torch.__version__}
+    print(constrained.table(report))
+    if a.json:
+        pathlib.Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+        pathlib.Path(a.json).write_text(json.dumps(report, indent=1) + "\n")
+    return 0 if report["passed"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m holon_judge")
     sub = ap.add_subparsers(required=True)
@@ -370,6 +409,18 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--json", help="write the machine-readable report here")
     b.add_argument("--plant", choices=sorted(PLANTS), help="calibration: run with a planted bug (must fail)")
     b.set_defaults(run=_bounded)
+
+    cs = sub.add_parser("constrained", help="grammar with speculation vs without on JSON-schema prompts (M0.5 §5)")
+    cs.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")
+    cs.add_argument("--jsb", required=True, help="JSONSchemaBench data directory (test parquets)")
+    cs.add_argument("--engine-args", default="", help="EngineConfig flags that speculate")
+    cs.add_argument("--prompts", type=int, default=64)
+    cs.add_argument("--max-tokens", type=int, default=512)
+    cs.add_argument("--max-len", type=int, default=4096, help="max_model_len: prompt and output")
+    cs.add_argument("--k", type=int, default=20)
+    cs.add_argument("--json", help="write the machine-readable report here")
+    cs.add_argument("--plant", choices=sorted(PLANTS), help="calibration: run with a planted bug (must fail)")
+    cs.set_defaults(run=_constrained)
 
     a = ap.parse_args(argv)
     return a.run(a)
