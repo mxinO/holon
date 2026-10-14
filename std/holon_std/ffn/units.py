@@ -23,8 +23,12 @@ class SwiGLU(nn.Module):
     def finalize_weights(self, ctx) -> None:
         merge = getattr(type(self.gate_proj), "merge", None)       # one matmul for gate and up where possible
         self._gate_up = merge(self.gate_proj, self.up_proj) if merge else None
+        if self._gate_up is not None and hasattr(self._gate_up, "use_glu"):   # and the activation fused into it
+            self._gate_up.use_glu("swiglu")                                    # where its kernel can (D6)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self._gate_up is not None:
-            return self.down_proj(self._act(self._gate_up(x)))
-        return self.down_proj(self._act(torch.cat([self.gate_proj(x), self.up_proj(x)], dim=-1)))
+            fused = self._gate_up.glu(x) if hasattr(self._gate_up, "glu") else None
+            return self.down_proj(self._act(self._gate_up(x)) if fused is None else fused)
+        h = getattr(self.gate_proj, "prepare_input", lambda x: x)(x)    # one input, two projections (D6)
+        return self.down_proj(self._act(torch.cat([self.gate_proj(h), self.up_proj(h)], dim=-1)))

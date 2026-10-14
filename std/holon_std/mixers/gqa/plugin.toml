@@ -14,6 +14,7 @@ provides = [
     "op.attention.paged_verify@1",
     "op.attention.causal@1",
     "op.kv_write@1",
+    "op.attention.qk_rope_kv@1",
 ]
 
 [properties]

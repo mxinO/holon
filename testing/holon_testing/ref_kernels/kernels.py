@@ -114,6 +114,13 @@ class QLinear(_Dequantized):
         return ops.qlinear(x, self.dequantized(parts)).to(getattr(torch, self.facts["out_dtype"]))
 
 
+class QLinearGlu(_Dequantized):
+    """`qlinear_glu@1` at every row count: silu(gate) · up of the merged weight's f32 product."""
+
+    def __call__(self, x, parts):
+        return ops.qlinear_glu(x, self.dequantized(parts)).to(getattr(torch, self.facts["out_dtype"]))
+
+
 class QEmbedding(_Dequantized):
     def __call__(self, ids, blocks):
         return ops.qembedding(ids, self.dequantized({"blocks": blocks})).to(getattr(torch, self.facts["dtype"]))
@@ -215,6 +222,7 @@ class GatedRMSNorm:
 BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul": SiluMul,
          "attention.paged_prefill": PagedAttention, "attention.paged_decode": PagedAttention,
          "attention.paged_verify": PagedAttention, "attention.causal": CausalAttention,
-         "qlinear": QLinear, "qembedding": QEmbedding, "linear_experts": LinearExperts, "moe_topk": MoeTopk,
+         "qlinear": QLinear, "qlinear_glu": QLinearGlu, "qembedding": QEmbedding, "linear_experts": LinearExperts,
+         "moe_topk": MoeTopk,
          "moe_combine": MoeCombine, "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule,
          "gated_rmsnorm": GatedRMSNorm, "kv_write": KvWrite}

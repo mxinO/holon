@@ -1,6 +1,7 @@
 """Quantized weights in std units (docs/m06-lowp.md D3–D6), on the CPU with a toy layout (fixtures/toy_quant): a
 unit hands its kernel every part by role (`qlinear@2`, `linear_experts@2`), binds after merges with the `act_quant`
-fact, keeps only what the kernel's `prepare` returns, merges parts by shape, and stacks experts slice by slice."""
+fact, keeps only what the kernel's `prepare` returns, merges parts by shape, and stacks experts slice by slice; a
+merged gate/up binds the fused activation, and one input prepares once for several linears (docs/m07-perf.md D6)."""
 import pathlib
 import types
 
@@ -11,7 +12,7 @@ from holon.core.build import BuildContext, load_weights
 from holon.core.plugins import Installed, PluginError, PluginSet, discover
 from holon_std.moe import reference as moe
 
-from .fixtures.toy_quant.plugin import PREPARED, ROWS, G
+from .fixtures.toy_quant.plugin import CALLS, PREPARED, ROWS, G, Handle
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "toy_quant"
 E, H, INTER = 4, 8, 4
@@ -132,6 +133,43 @@ def test_linears_merge_parts_by_shape(second, shape2, merges):
     merged.bind_kernels(ctx)
     x = _x(3, seed=2)
     torch.testing.assert_close(merged(x), torch.cat([x @ _weight(q).T for q in qs], dim=-1))
+
+
+def test_a_merged_gate_up_fuses_its_activation_and_linears_share_a_prepared_input():
+    """D6: SwiGLU's merged gate/up binds `qlinear_glu@1` (a lock site) because its `qlinear@2` spec lists it in
+    `config["fused"]`; at one row the output is the fused kernel's, at two the composition (the toy fuses one row, as
+    ggml).
+    Unmerged (another scale2 apiece), gate and up share one `prepare_input`, which a dense linear takes too."""
+    for scale2, merged in ((0.5, True), (0.25, False)):
+        ctx = _ctx()
+        with torch.device("meta"):
+            ffn = ctx.unit(Ref("std.ffn.swiglu@1", inter=INTER), hidden=H)
+        qs = {"gate": _toy(INTER, H, seed=6), "up": _toy(INTER, H, seed=7, scale2=scale2),
+              "down": _toy(H, INTER, seed=8)}
+        weights = {n: _weight(q) for n, q in qs.items()}
+        for n, q in qs.items():
+            assert getattr(ffn, f"{n}_proj").adopt_weights(ctx, "weight", q)
+        ffn.finalize_weights(ctx)
+        for m in ffn.modules():
+            if hasattr(m, "bind_kernels"):
+                m.bind_kernels(ctx)
+        assert (ffn._gate_up is not None) == merged
+        assert any(k.endswith("/qlinear_glu@1") for k in ctx.kernels) == merged
+        for rows in (1, 2):
+            CALLS.clear()
+            x = _x(rows, seed=rows)
+            g, u = x @ weights["gate"].T, x @ weights["up"].T
+            want = (torch.nn.functional.silu(g) * u) @ weights["down"].T
+            torch.testing.assert_close(ffn(x), want, rtol=1e-5, atol=1e-3)
+            fused = ["qlinear_glu", "qlinear"] if merged and rows == 1 else []
+            shared = [] if merged else ["prepare_input", "qlinear(handle)", "qlinear(handle)", "qlinear"]
+            assert CALLS == (fused or (["qlinear", "qlinear"] if merged else shared)), (merged, rows, CALLS)
+    dense = torch.nn.Linear(H, 2, bias=False)
+    with torch.device("meta"):
+        linear = ctx.unit(Ref("std.ops.linear@1", in_features=H, out_features=2))
+    torch.utils.swap_tensors(linear.weight, torch.nn.Parameter(dense.weight.detach().clone(), requires_grad=False))
+    x = _x(3, seed=9)
+    assert linear.prepare_input(x) is x and torch.equal(linear(Handle(x)), dense(x))   # a dense linear: x itself
 
 
 @pytest.mark.parametrize("ref, site", [("std.ops.linear@1", dict(out_features=4, in_features=H)),

@@ -197,17 +197,24 @@ size_t workspace_bytes(int64_t in, int64_t rows, int fixup_tiles) {
 
 size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows) { return workspace_bytes(in, rows, 2); }
 
-void holon_ggml_mmvq(int type, const void * w, int64_t out, int64_t in, const void * x, int x_bf16, int64_t rows,
-                     void * y, int y_bf16, const float * scale, void * workspace, size_t workspace_bytes,
-                     void * stream) {
+void holon_ggml_mmvq(int type, const void * w, int64_t out, int64_t in, const void * x, int x_bf16,
+                     const void * x_q8_1, int64_t rows, void * y, int y_bf16, const float * scale, const void * gate,
+                     void * workspace, size_t workspace_bytes, void * stream) {
     call_context c(stream, workspace, workspace_bytes);
     const ggml_tensor src0 = matrix((ggml_type) type, w, in, out);
-    const ggml_tensor src1 = matrix(act(x_bf16), x, in, rows);
+    const ggml_tensor src1 = x_q8_1 ? matrix(GGML_TYPE_Q8_1, x_q8_1, in, rows) : matrix(act(x_bf16), x, in, rows);
     ggml_tensor dst = matrix(act(y_bf16), y, out, rows);
-    const ggml_tensor x_scale = scale_vector(scale, 1);
+    // the fused gate as llama.cpp builds it for a dense GLU: src0 the up rows, `gate` the gate rows; NVFP4's
+    // per-tensor scale2 on both (a merged gate/up holds one)
+    const ggml_tensor x_scale = scale_vector(scale, 1), gate_t = matrix((ggml_type) type, gate, in, out);
     ggml_cuda_mm_fusion_args_host fusion{};
-    fusion.x_scale = &x_scale;
-    ggml_cuda_mul_mat_vec_q(c.ctx, &src0, &src1, nullptr, &dst, scale ? &fusion : nullptr);
+    fusion.x_scale = scale ? &x_scale : nullptr;
+    if (gate) {
+        fusion.gate = &gate_t;
+        fusion.glu_op = GGML_GLU_OP_SWIGLU;
+        fusion.gate_scale = fusion.x_scale;
+    }
+    ggml_cuda_mul_mat_vec_q(c.ctx, &src0, &src1, nullptr, &dst, scale || gate ? &fusion : nullptr);
 }
 
 void holon_ggml_mmq(int type, int prec, const void * w, int64_t out, int64_t in, const void * x, int x_bf16,

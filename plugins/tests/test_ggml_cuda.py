@@ -22,7 +22,8 @@
 - FP4 (docs/m06-lowp.md D8, §4.8; MXFP4 and NVFP4 are in the type sweeps above as ggml blocks): the HF layouts'
   `prepare` is lossless — gguf-py on its blocks × scale2 equals `reference.py` by value, the blocks are llama.cpp's
   converter's byte for byte, the source parts untouched — and the repack plants (N2, N3, M1) break it; `scale2` on
-  every path and output dtype against the q8_1 emulator in f64 on the reference weight, also in CUDA graphs; in mmvq's epilogue at rows 2–8 by value
+  every path and output dtype against the q8_1 emulator in f64 on the reference weight, also in CUDA graphs; in
+  mmvq's epilogue at rows 2–8 by value
 equal to the f32 multiply it replaced (docs/m07-perf.md D11). The
   precision check: mmq's precision is the spec's, and the default one (the N6 plant) is an error on sm_120 only;
   `quant.act = a4` selects native W4A4 on sm_120 and q8_1 elsewhere. Native FP4 activations: llama.cpp's quantizer
@@ -98,14 +99,21 @@ def real() -> dict[tuple[str, int], np.ndarray]:
 
 
 def qlinear(ctx, name: str, k: int, out_dtype: str = "bfloat16", out: int = OUT, act_dtype: str = "bfloat16",
-            act_quant: str = "a8"):
-    """A `qlinear` of ggml type `name` (or of an HF layout, `"nvfp4/hf"`), held to its workspace formula."""
+            act_quant: str = "a8", op: str = "qlinear@2"):
+    """A `qlinear` of ggml type `name` (or of an HF layout, `"nvfp4/hf"`), held to its workspace formula; with `op`
+    "qlinear_glu@1", its fused SwiGLU on a merged gate/up of `out` rows."""
     facts = {"layout": name if "/" in name else f"ggml.{name}/gguf.native", "in": k, "out": out,
              "act_dtype": act_dtype, "out_dtype": out_dtype, "act_quant": act_quant}
-    spec = ctx.select_kernel("qlinear@2", site="l0", **facts)
+    facts |= {"glu": "swiglu"} if op == "qlinear_glu@1" else {}
+    spec = ctx.select_kernel(op, site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
     kernel, device = spec.impl(ctx, **facts), torch.cuda.current_device()
-    return Sized(kernel, lambda x, parts: kernel.lib.workspace_bytes(device, k, min(len(x), CHUNK)))
+    return Sized(kernel, lambda x, parts: kernel.lib.workspace_bytes(device, k, min(len(_rows(x)), CHUNK)))
+
+
+def _rows(x) -> torch.Tensor:
+    """A call's activations: `x`, or a `prepare_input` handle's."""
+    return x if isinstance(x, torch.Tensor) else x.x
 
 
 class Sized:
@@ -209,9 +217,12 @@ def activations(rows: int, k: int, seed: int) -> torch.Tensor:
 
 
 def check_qlinear(kernel, name: str, blocks: np.ndarray | None, rows_list, parts=None, weight=None,
-                  act_dtype: torch.dtype = torch.bfloat16) -> None:
+                  act_dtype: torch.dtype = torch.bfloat16, glu=None, other=None) -> None:
     """The kernel against the q8_1 emulator of each row count's path (the weight: gguf-py's of `blocks`, or the
-    given one with its `parts`), its zero and outlier rows on their own, NMSE against the exact product."""
+    given one with its `parts`), its zero and outlier rows on their own, NMSE against the exact product. D6: `glu`,
+    the fused SwiGLU on the same weight read as a merged gate/up, at one row against silu(gate) · up of the emulated
+    sums; `other`, a (kernel, parts) pair of another type and the same `in`: on the mmvq path one `prepare_input`
+    serves both, bitwise as their own calls, and a handle a later `prepare_input` overwrote is not read."""
     k = kernel.k
     weight = dequantize(name, blocks) if weight is None else weight.cuda()
     w = {"blocks": device_blocks(blocks)} if parts is None else parts
@@ -221,6 +232,19 @@ def check_qlinear(kernel, name: str, blocks: np.ndarray | None, rows_list, parts
         y = kernel(x, w)
         assert torch.equal(y, kernel(x, w)), f"{name} rows={rows}: not run-to-run identical"
         ref = q8_1.matmul(x, weight, blocks, name.split("/")[0], path)
+        if glu is not None:
+            fused = glu(x, w)
+            assert (fused is None) == (rows != 1), f"{name} rows={rows}: glu fuses one row only"
+            if fused is not None:
+                gate, up = ref.chunk(2, dim=-1)
+                r = l0.check(fused, torch.nn.functional.silu(gate) * up, torch.bfloat16, k)
+                assert r.passed, f"{name} in={k} glu: {r}"
+        if other is not None and path == q8_1.MMVQ:
+            (second, second_parts), h = other, kernel.prepare_input(x)
+            alone = second(x, second_parts)
+            assert torch.equal(kernel(h, w), y) and torch.equal(second(h, second_parts), alone), f"{name} rows={rows}"
+            second.prepare_input(activations(rows, k, seed=rows + 100).to(act_dtype))     # overwrites h's buffer
+            assert torch.equal(kernel(h, w), y), f"{name} rows={rows}: a stale prepared input was read"
         normal = [i for i in range(rows) if i not in (1, 2)]
         for sel in (normal, [i for i in (1, 2) if i < rows]):
             if sel:
@@ -253,7 +277,10 @@ def test_qlinear_random_blocks(ctx, name, k):
     t = kernel.mmvq_rows
     assert 1 <= t <= 8
     rows = sorted({*range(1, 10), 64, 128, 256, CHUNK, CHUNK + 1, 2 * CHUNK + 1, MAX_STEP_TOKENS})
-    check_qlinear(kernel, name, random_blocks(name, OUT, k, seed=k), rows)
+    second = "q6_k" if name == "q4_k" else "q4_k"                           # a consumer of another type (D6)
+    other = (qlinear(ctx, second, k, out=64), {"blocks": device_blocks(random_blocks(second, 64, k, seed=1))})
+    glu = qlinear(ctx, name, k, op="qlinear_glu@1")
+    check_qlinear(kernel, name, random_blocks(name, OUT, k, seed=k), rows, glu=glu, other=other)
 
 
 def test_qlinear_real_tensors(ctx, real):
@@ -462,7 +489,8 @@ def test_hf_fp4_prepare_is_lossless_and_scale2_holds_on_every_path(ctx, elem):
                 bad = prepared(kernel, elem, parts)["blocks"]
             assert not torch.equal(dequantize_blocks(elem, bad, got.get("scale2")), weight), plant
         t = kernel.mmvq_rows
-        check_qlinear(kernel, f"{elem}/hf", None, (*range(1, t + 2), 64, CHUNK + 1), got, weight, act_dtype)
+        glu = qlinear(ctx, f"{elem}/hf", k, out_dtype, act_dtype=str(act_dtype)[6:], op="qlinear_glu@1")
+        check_qlinear(kernel, f"{elem}/hf", None, (*range(1, t + 2), 64, CHUNK + 1), got, weight, act_dtype, glu)
         assert set(kernel.calls) == {"mmvq/q8_1", "mmq/q8_1"}
 
 

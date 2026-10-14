@@ -40,8 +40,12 @@ const float * scale(const std::optional<at::Tensor> & s, const at::Tensor & like
     return s->data_ptr<float>();
 }
 
+// The block_q8_1 bytes of `rows` activation rows of `in` values padded to 512 (as mmvq quantizes them).
+int64_t q8_1_bytes(int64_t rows, int64_t in) { return rows * ((in + 511) / 512 * 512) / 32 * 36; }
+
 void matmul(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const at::Tensor & x, at::Tensor & y,
-            const std::optional<at::Tensor> & s, at::Tensor & ws) {
+            const std::optional<at::Tensor> & s, at::Tensor & ws, const std::optional<at::Tensor> & gate = std::nullopt,
+            const std::optional<at::Tensor> & xq = std::nullopt) {
     const c10::cuda::CUDAGuard guard(x.device());
     const int64_t rows = x.size(0), in = x.size(1), out = y.size(1);
     check(x, x, {rows, in}, "x");
@@ -50,8 +54,17 @@ void matmul(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const at
     TORCH_CHECK(ws.scalar_type() == at::kByte && ws.device() == x.device() && ws.is_contiguous(), "workspace: uint8");
     TORCH_CHECK(rows > 0, "no rows");
     if (vec) {
-        holon_ggml_mmvq(type, w.data_ptr(), out, in, x.data_ptr(), bf16(x, "x"), rows, y.data_ptr(), bf16(y, "y"),
-                        scale(s, x, 1, "scale"), ws.data_ptr(), ws.numel(), stream());
+        if (gate) {
+            TORCH_CHECK(rows == 1, "mmvq: a fused gate only at one row");
+            check_blocks(type, *gate, x, out, in);
+        }
+        if (xq) {                                   // x quantized already: at least its rows' bytes, uint8
+            TORCH_CHECK(xq->scalar_type() == at::kByte && xq->device() == x.device() && xq->is_contiguous() &&
+                        xq->numel() >= q8_1_bytes(rows, in), "xq: ", q8_1_bytes(rows, in), " contiguous uint8");
+        }
+        holon_ggml_mmvq(type, w.data_ptr(), out, in, x.data_ptr(), bf16(x, "x"), xq ? xq->data_ptr() : nullptr, rows,
+                        y.data_ptr(), bf16(y, "y"), scale(s, x, 1, "scale"), gate ? gate->data_ptr() : nullptr,
+                        ws.data_ptr(), ws.numel(), stream());
     } else {
         holon_ggml_mmq(type, prec, w.data_ptr(), out, in, x.data_ptr(), bf16(x, "x"), rows, y.data_ptr(), bf16(y, "y"),
                        scale(s, x, 1, "scale"), ws.data_ptr(), ws.numel(), stream());
@@ -119,7 +132,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     });
     m.def("workspace_high_water", [] { return holon_ggml_workspace_high_water(); });
     m.def("mmvq", [](int64_t type, const at::Tensor & w, const at::Tensor & x, at::Tensor & y,
-                     const std::optional<at::Tensor> & s, at::Tensor & ws) { matmul(true, type, 0, w, x, y, s, ws); });
+                     const std::optional<at::Tensor> & s, at::Tensor & ws, const std::optional<at::Tensor> & gate,
+                     const std::optional<at::Tensor> & xq) { matmul(true, type, 0, w, x, y, s, ws, gate, xq); },
+          py::arg("type"), py::arg("w"), py::arg("x"), py::arg("y"), py::arg("scale"), py::arg("ws"),
+          py::arg("gate") = py::none(), py::arg("xq") = py::none());
     m.def("mmq", [](int64_t type, int64_t prec, const at::Tensor & w, const at::Tensor & x, at::Tensor & y,
                     const std::optional<at::Tensor> & s, at::Tensor & ws) { matmul(false, type, prec, w, x, y, s, ws); });
     m.def("quantize_fp4", [](int64_t type, const at::Tensor & x, at::Tensor & blocks, at::Tensor & scale) {
@@ -138,9 +154,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("quantize_q8_1", [](int64_t type, const at::Tensor & x, at::Tensor & y) {
         const c10::cuda::CUDAGuard guard(x.device());
         TORCH_CHECK(x.dim() == 2 && x.size(0) > 0, "x: [rows, in]");
-        const int64_t rows = x.size(0), in = x.size(1), padded = (in + 511) / 512 * 512;
+        const int64_t rows = x.size(0), in = x.size(1);
         check(x, x, {rows, in}, "x");
-        check(y, x, {rows * padded / 32 * 36}, "y");               // block_q8_1: 32 int8 values and a half2
+        check(y, x, {q8_1_bytes(rows, in)}, "y");                  // block_q8_1: 32 int8 values and a half2
         TORCH_CHECK(y.scalar_type() == at::kByte, "y: uint8");
         holon_ggml_quantize_q8_1(type, x.data_ptr(), bf16(x, "x"), rows, in, y.data_ptr(), stream());
     });

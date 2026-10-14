@@ -32,7 +32,19 @@ KV layouts (the deployment's `kv.format` plugin option; docs/m03-qwen38.md D6), 
   (GGUF's q8_0 per 32 values; kv_dtype "q8_0").
 A step writes its K/V before attending (`kv_write@1`), so every read — the prefix and the step's own tokens — sees the
 stored format. `kv_write@1`: instance `(k, v [T, Hkv, D], kv, unit [T], off [T]) -> None`, token t into page
-`unit[t]` at `off[t]`. Facts: layout, kv_heads, head_dim, page, dtype.
+`unit[t]` at `off[t]`. Facts: layout, kv_heads, head_dim, page, dtype. A spec whose `config["fused"]` lists
+`attention.qk_rope_kv@1` has that kernel from its provider for its facts and any the units below may answer.
+
+`attention.qk_rope_kv@1` (docs/m07-perf.md D3): q/k norm, rotary embedding and the KV write in one kernel, used when the
+mixer's injected q/k norm and rope units answer `fusion_facts()`. Instance `(q [T, Hq, Dq], k, v [T, Hkv, D],
+positions [T], q_weight [D], k_weight [D], kv, unit [T], off [T]) -> q' [T, Hq, D]`: each head of q (its first D
+values of Dq: D, or 2D with `gated`, the output gate interleaved after each head's queries) and of k is normed
+(`norm` "rmsnorm@1": x / rms(x) · (weight + offset), eps) and rounded to `dtype`, then its first `rotary_dim`
+dims rotated (`rope` "rope@1", neox) at `positions` with the static table `cos_sin` (rope@1's instance contract) and
+rounded again; k and v (unnormed) are written as `kv_write@1` writes them, q' returned (contiguous). Any T ≥ 0, any
+row strides. Facts: kv_write's, heads, gated, norm, eps, offset, rope, theta, rotary_dim, max_positions, cos_sin.
+No oracle of its own: the reference composes the units' (`rmsnorm@1`, `rope@1`, `kv_write@1`) — the judge builds it
+(holon_judge.fused). Bounded: a provider's norm reduction order is its own.
 
 `attention.causal@1` (a model built without state, e.g. a whole-sequence comparison in tests): instance
 `(q [T, Hq, D], k, v [T, Hkv, D], query_start [B+1]) -> [T, Hq, D]`. Facts: heads, kv_heads, head_dim, dtype.
@@ -41,7 +53,7 @@ from __future__ import annotations
 
 PREFILL, DECODE, VERIFY = "attention.paged_prefill@1", "attention.paged_decode@1", "attention.paged_verify@1"
 CAUSAL = "attention.causal@1"
-KV_WRITE = "kv_write@1"
+KV_WRITE, QK_ROPE_KV = "kv_write@1", "attention.qk_rope_kv@1"
 LAYOUT = "kv.hnd"
 FORMATS = {None: LAYOUT, "fp8": "kv.hnd.fp8", "q8_0": "kv.hnd.q8_0"}      # `kv.format` -> layout
 Q8_BLOCK = 32

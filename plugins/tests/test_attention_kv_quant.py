@@ -1,5 +1,7 @@
 """L0 for quantized KV (docs/m03-qwen38.md D6): `kv_write@1` bitwise against the reference write (the model-dtype
-layout's Triton copy too, docs/m07-perf.md D3), and every kernel
+layout's Triton copy too, docs/m07-perf.md D3), `attention.qk_rope_kv@1` against the judge's composition of the units'
+references (D3: partial rotary, the gated q layout, 1-token rows; its q8_0 write bitwise the reference's write of
+its own model-dtype k), and every kernel
 that reads q8_0 or fp8 against `reference.paged_attention` reading the same stored cache — the reference dequantizes
 it, so the comparison isolates the kernel's error from the format's — within the attention budget of
 test_attention_kernels. Plants that must fail: q8_0 scales read from another head, and a step attending to its own
@@ -13,6 +15,7 @@ import pytest
 import torch
 from holon.core.build import BuildContext
 from holon.core.plugins import PluginError, PluginSet, discover
+from holon_judge import fused, l0
 from holon_std.mixers.gqa import kernels as gqa_kernels
 from holon_std.mixers.gqa import reference as gqa
 from holon_testing.ref_kernels.kernels import PagedAttention
@@ -165,6 +168,65 @@ def test_kv_write_is_the_reference_bitwise(layout, head_dim, dtype):
     writer(layout, kv_heads, head_dim, str(dtype).removeprefix("torch."))(k, v, ours, unit, off)
     gqa.kv_write(k.cpu(), v.cpu(), want, unit.cpu(), off.cpu())
     assert torch.equal(raw_bytes(ours), raw_bytes(want))
+
+
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
+@pytest.mark.parametrize(("heads", "kv_heads", "head_dim", "rotary_dim", "gated"),
+                         [(32, 8, 128, 128, False), (24, 4, 256, 64, True), (16, 8, 64, 64, False)])
+def test_qk_rope_kv_is_the_composition(heads, kv_heads, head_dim, rotary_dim, gated, dtype):
+    """D3: the fused kernel, selected for the facts the units answer (the table: FlashInfer's rope instance's),
+    against the judge's composition on the same inputs — q' and the model-dtype cache within the L0 budget of a
+    norm over head_dim, v copied exactly, no other byte touched; its q8_0 write is the reference write of its own
+    model-dtype k, bitwise. T = 1 (a decode row), 300 rows across pages in any order, and 0."""
+    ctx = BuildContext(PluginSet(discover()), torch.device("cuda"), dtype, options={"max_model_len": 4096})
+    name = str(dtype).removeprefix("torch.")
+    rope = ctx.select_kernel("rope@1", site="t", head_dim=head_dim, rotary_dim=rotary_dim, theta=1e6,
+                             max_positions=4096, dtype=name).impl(ctx, head_dim=head_dim, rotary_dim=rotary_dim,
+                                                                  theta=1e6, max_positions=4096, dtype=name)
+    norm = {"norm": "rmsnorm@1", "eps": 1e-6, "offset": 1.0 if gated else 0.0}
+    units = 40
+    for t in (1, 300, 0):
+        g = torch.Generator().manual_seed(t + head_dim)
+        qw = 2 * (heads * head_dim * (2 if gated else 1))
+        x = torch.randn(t, qw + 2 * kv_heads * head_dim, generator=g).to(dtype).cuda()
+        q = x[:, :qw // 2].view(t, heads, qw // 2 // heads)          # strided rows, as the fused projection's split
+        k, v = (x[:, qw // 2 + i * kv_heads * head_dim:][:, :kv_heads * head_dim].view(t, kv_heads, head_dim)
+                for i in (0, 1))
+        weights = [(torch.randn(head_dim, generator=g) * 0.1 + (0 if gated else 1)).to(dtype).cuda() for _ in "qk"]
+        positions = torch.randint(0, 4096, (t,), generator=g).cuda()
+        unit = torch.randperm(units, generator=g)[:t // PAGE + 1].repeat_interleave(PAGE)[:t]
+        perm = torch.randperm(t, generator=g)
+        unit, off = unit[perm].cuda(), (torch.arange(t) % PAGE)[perm].cuda()
+        caches = {}
+        for layout in (MODEL, Q8):
+            facts = {"layout": layout, "kv_heads": kv_heads, "head_dim": head_dim, "page": PAGE, "dtype": name,
+                     "heads": heads, "gated": gated, **norm, "rope": "rope@1", "rotary_dim": rotary_dim, "theta": 1e6,
+                     "max_positions": 4096, "cos_sin": rope.cos_sin}
+            spec = ctx.select_kernel(gqa_kernels.QK_ROPE_KV, site="t", **facts)
+            assert spec.provider == TRITON
+            caches[layout] = ours = empty_cache(units, kv_heads, head_dim, layout, dtype)
+            for c in ours if isinstance(ours, tuple) else (ours,):
+                c.view(torch.uint8).fill_(0x5A)                           # garbage: unwritten bytes stay
+            q_out = spec.impl(ctx, **facts)(q, k, v, positions, *weights, ours, unit, off)
+            if layout == MODEL:
+                want = empty_cache(units, kv_heads, head_dim, layout, dtype).view(torch.uint8).fill_(0x5A).view(dtype)
+                ref = fused.qk_rope_kv(q, k, v, positions, *weights, want, unit, off, eps=1e-6,
+                                       offset=norm["offset"], theta=1e6, rotary_dim=rotary_dim)
+                assert q_out.shape == (t, heads, head_dim) and q_out.is_contiguous()
+                if t:
+                    for got, exp in ((q_out, ref), (ours[unit, 0, :, off], want[unit, 0, :, off])):
+                        r = l0.check(got, exp, dtype, head_dim)
+                        assert r.passed, (t, r)
+                assert torch.equal(ours[unit, 1, :, off], v)                                       # v: a copy
+                ours[unit, 0, :, off] = want[unit, 0, :, off]
+                assert torch.equal(raw_bytes(ours), raw_bytes(want))                               # nothing else
+            else:
+                want = on_cpu(empty_cache(units, kv_heads, head_dim, Q8, dtype))
+                for c in want:
+                    c.view(torch.uint8).fill_(0x5A)
+                if t:
+                    gqa.kv_write(caches[MODEL][unit, 0, :, off].cpu(), v.cpu(), want, unit.cpu(), off.cpu())
+                assert torch.equal(raw_bytes(ours), raw_bytes(want)), t
 
 
 def test_kv_write_q8_0_is_ggufs_own():

@@ -43,11 +43,13 @@ size_t holon_ggml_workspace_high_water(void);
 
 // y = x @ W.T, times `scale[0]` (NVFP4 only; NULL: none) in f32 before one rounding to y's type, bf16 or f32. mmvq:
 // rows <= 8 (the scale in llama.cpp's fused epilogue at one row; above it in the unfused kernel's epilogue, after the
-// full reduction: docs/m07-perf.md D11). mmq: any rows (a call is sized by the workspace), the stream-k fixup's
-// partials kept in f32 until the rounding (D4).
-void holon_ggml_mmvq(int type, const void * w, int64_t out, int64_t in, const void * x, int x_bf16, int64_t rows,
-                     void * y, int y_bf16, const float * scale, void * workspace, size_t workspace_bytes,
-                     void * stream);
+// full reduction: docs/m07-perf.md D11); `x_q8_1`, if not NULL, is x already quantized as mmvq quantizes it
+// (holon_ggml_quantize_q8_1), read instead of quantizing x (D6); `gate`, if not NULL, a second weight of W's shape:
+// y = silu(x @ gate.T · scale) · (x @ W.T · scale) from the f32 sums, at one row (llama.cpp's fused gate, D6).
+// mmq: any rows (a call is sized by the workspace), the stream-k fixup's partials kept in f32 until the rounding (D4).
+void holon_ggml_mmvq(int type, const void * w, int64_t out, int64_t in, const void * x, int x_bf16,
+                     const void * x_q8_1, int64_t rows, void * y, int y_bf16, const float * scale, const void * gate,
+                     void * workspace, size_t workspace_bytes, void * stream);
 void holon_ggml_mmq(int type, int prec, const void * w, int64_t out, int64_t in, const void * x, int x_bf16,
                     int64_t rows, void * y, int y_bf16, const float * scale, void * workspace, size_t workspace_bytes,
                     void * stream);
@@ -57,8 +59,9 @@ void holon_ggml_mmq(int type, int prec, const void * w, int64_t out, int64_t in,
 void holon_ggml_quantize_fp4(int type, const float * x, int64_t rows, int64_t in, void * blocks, float * scale,
                              void * stream);
 
-// Benchmarks only: mmvq's q8_1 activations of x [rows, in] (f32 or bf16) for a matmul of `type`, as it quantizes
-// them (block_q8_1 per 32 values, rows of `in` padded to 512) into `y`: the quantize's own time (docs/m07-perf.md D8).
+// mmvq's q8_1 activations of x [rows, in] (f32 or bf16) for a matmul of `type`, as it quantizes them (block_q8_1 per
+// 32 values, rows of `in` padded to 512) into `y`: the input several mmvq calls share (`x_q8_1`, docs/m07-perf.md
+// D6), and the quantize's own time in benchmarks (D8).
 void holon_ggml_quantize_q8_1(int type, const void * x, int x_bf16, int64_t rows, int64_t in, void * y, void * stream);
 
 // y[i] = dequantized row ids[i] of the table (rows of `hidden` values).

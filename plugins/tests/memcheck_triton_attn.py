@@ -6,7 +6,8 @@
 Without torch's caching allocator every tensor is its own cudaMalloc of exactly its size, so an access past the last
 unit's q8_0 scales (the end of the cache's byte segments), the block table or q is outside any allocation. Every
 head_dim, q8_0 and fp8 (Triton's bit decode), kv_write, prefill, decode with and without splits, and verify — also
-with its `causal` / `window` facts on blocks of 8 rows (M0.4 D4: the walk starts at the window's first key).
+with its `causal` / `window` facts on blocks of 8 rows (M0.4 D4: the walk starts at the window's first key); and
+the model-dtype kv_write and the fused q/k norm + rope + KV write (docs/m07-perf.md D3) through their L0 cases.
 """
 import torch
 from holon.core.build import BuildContext
@@ -14,7 +15,16 @@ from holon.core.plugins import PluginSet, discover
 from holon_plugins.kernels.triton_attn import plugin
 
 from tests.test_attention_kernels import BLOCK_ROWS, GEOMETRIES, MASKS, MAX_SEQS, PAGE
-from tests.test_attention_kv_quant import FP8, Q8, ROWS, quant_case, step_slots, writer
+from tests.test_attention_kv_quant import (
+    FP8,
+    Q8,
+    ROWS,
+    quant_case,
+    step_slots,
+    test_kv_write_is_the_reference_bitwise,
+    test_qk_rope_kv_is_the_composition,
+    writer,
+)
 
 
 def main() -> None:
@@ -36,8 +46,12 @@ def main() -> None:
                 if hasattr(kernel, "prepare"):
                     kernel.prepare(handle)
                 kernel.run(q, cache, handle)
+    for head_dim in (64, 128, 256):
+        test_kv_write_is_the_reference_bitwise("kv.hnd", head_dim, torch.bfloat16)
+    for geometry in ((32, 8, 128, 128, False), (24, 4, 256, 64, True), (16, 8, 64, 64, False)):
+        test_qk_rope_kv_is_the_composition(*geometry, torch.bfloat16)
     torch.cuda.synchronize()
-    print(f"memcheck run: q8_0 and fp8 KV, head_dim 64/128/256, on sm {ctx.fingerprint.sm}")
+    print(f"memcheck run: q8_0 and fp8 KV, head_dim 64/128/256, the D3 kernels, on sm {ctx.fingerprint.sm}")
 
 
 if __name__ == "__main__":

@@ -21,6 +21,9 @@
   (plugins/tests/test_ggml_cuda*.py), N6 as the pre-launch precision check's error on sm_120.
 - FP8 in `kernels.triton_fp8` (§4.8: P1–P4, P7): its block scales, activation scales and weight decode misread, and a
   checkpoint's block scales misread; P1–P4 also fail its L0 (plugins/tests/test_triton_fp8.py).
+- The fused q/k norm + rope + KV write (docs/m07-perf.md D3, §6): a token that opens a page written one slot late
+  (L2 fails; so would its L0), and decode rows rotated one position late (`bounded`: the configurations' decode
+  rows against the reference's teacher-forced prefill rows).
 
 The GGUF plants patch names, so they rely on how the engine reaches them: `_loaded` replaces `load_weights` and
 `resolve_model` in `holon.core.engine`'s namespace (it imports them by name), and the kernel plants wrap
@@ -232,20 +235,61 @@ def ggml_wrong_type() -> Iterator[None]:
 @contextlib.contextmanager
 def ggml_stale_q8_1(every: int = 97) -> Iterator[None]:
     """Every `every`-th `qlinear` call reads the activations of the previous call sharing its q8_1 workspace (same
-    `in`) — what a workspace left stale by a skipped quantization holds. Reports how often it fired on each path."""
+    `in`) — what a workspace left stale by a skipped quantization holds; a call given a prepared input (D6, shared
+    quantization) is handed the stale rows instead of it. Reports how often it fired on each path."""
     from holon_plugins.kernels.ggml_cuda import plugin
 
     call, last, calls, fired = plugin.QLinear.__call__, {}, itertools.count(1), collections.Counter()
 
     def planted(self, x, parts):
-        prev, last[self.k] = last.get(self.k), x.clone()
-        if next(calls) % every == 0 and prev is not None and len(prev) >= len(x):
-            fired["mmvq" if len(x) <= self.mmvq_rows else "mmq"] += 1
-            x = prev[:len(x)]
+        rows = x.x if isinstance(x, plugin.Prepared) else x
+        prev, last[self.k] = last.get(self.k), rows.clone()
+        if next(calls) % every == 0 and prev is not None and len(prev) >= len(rows):
+            fired[("mmvq" if len(rows) <= self.mmvq_rows else "mmq") + ("" if x is rows else ", prepared")] += 1
+            x = prev[:len(rows)]
         return call(self, x, parts)
     with mock.patch.object(plugin.QLinear, "__call__", planted):
         yield
     print(f"plant ggml-stale-q8_1 fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def qk_rope_kv_page_slot() -> Iterator[None]:
+    """D3: `attention.qk_rope_kv@1` writes each token that opens a page (offset 0) into the page's second slot, only
+    at page boundaries; the first slot keeps what it held. Reports how many calls it changed."""
+    from holon_plugins.kernels.triton_attn import plugin
+
+    call, fired = plugin.QkRopeKv.__call__, collections.Counter()
+
+    def planted(self, q, k, v, positions, q_weight, k_weight, kv, unit, off):
+        fired["calls"] += 1
+        return call(self, q, k, v, positions, q_weight, k_weight, kv, unit, torch.where(off == 0, 1, off))
+    with mock.patch.object(plugin.QkRopeKv, "__call__", planted):
+        yield
+    print(f"plant qk-rope-kv-page-slot fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def qk_rope_kv_decode_position() -> Iterator[None]:
+    """D3: in decode steps (every row one token) the fused kernel rotates q and k at position + 1; prefill and verify
+    rows are right. Reports how many decode calls it changed (graph captures included: the + 1 is captured)."""
+    from holon_std.mixers.gqa import units
+
+    project, fired = units.GQA._project_and_write, collections.Counter()
+
+    def planted(self, x, ctx, kv):
+        fused = self._fused
+        if fused is None or not (ctx.batch.plan.n_query == 1).all():
+            return project(self, x, ctx, kv)
+        fired["decode"] += 1
+        self._fused = lambda q, k, v, positions, *rest: fused(q, k, v, positions + 1, *rest)
+        try:
+            return project(self, x, ctx, kv)
+        finally:
+            self._fused = fused
+    with mock.patch.object(units.GQA, "_project_and_write", planted):
+        yield
+    print(f"plant qk-rope-kv-decode-position fired: {dict(fired)}", file=sys.stderr)
 
 
 @contextlib.contextmanager
@@ -887,6 +931,8 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "ggml-experts-wrong-type": ggml_experts_wrong_type, "ggml-experts-stale-q8_1": ggml_experts_stale_q8_1,
     "rare-ggml-experts-stale-q8_1": lambda: ggml_experts_stale_q8_1(every=9973),
     "moe-padding-duplicate-ids": moe_padding_duplicate_ids, **QWEN35_PLANTS,
+    # The fused q/k norm + rope + KV write (docs/m07-perf.md D3)
+    "qk-rope-kv-page-slot": qk_rope_kv_page_slot, "qk-rope-kv-decode-position": qk_rope_kv_decode_position,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)

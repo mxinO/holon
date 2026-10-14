@@ -1,5 +1,6 @@
 """Our Triton paged attention as `attention.paged_decode@1` and `attention.paged_verify@1` kernels, a paged prefill
-for q8_0 KV, and `kv_write@1` for every KV layout (op contracts: std.mixers.gqa)."""
+for q8_0 KV, `kv_write@1` for every KV layout, and `attention.qk_rope_kv@1` (q/k norm, rotation and the KV write in
+one launch, docs/m07-perf.md D3) for the model-dtype and q8_0 layouts (op contracts: std.mixers.gqa)."""
 from __future__ import annotations
 
 import dataclasses
@@ -18,6 +19,7 @@ from .kernel import (
     fitted,
     paged_attention,
     paged_prefill,
+    qk_rope_kv,
     splits_for,
     write_model,
     write_q8_0,
@@ -158,9 +160,33 @@ class KvWriteQ8(KvWrite):
         write_q8_0(k, v, kv, unit, off)
 
 
+class QkRopeKv:
+    """`attention.qk_rope_kv@1`: the rope kernel's cos|sin table (its static buffer, by name) and the norm's eps and
+    offset; one launch per call."""
+
+    def __init__(self, ctx, *, rotary_dim: int, max_positions: int, cos_sin: str, eps: float, offset: float,
+                 **facts) -> None:
+        self.table = ctx.static(cos_sin, (max_positions, rotary_dim), torch.float32)
+        self.args = {"eps": eps, "offset": offset, "rotary_dim": rotary_dim}
+
+    def __call__(self, q, k, v, positions, q_weight, k_weight, kv, unit, off) -> torch.Tensor:
+        return qk_rope_kv(q, k, v, positions, q_weight, k_weight, self.table, kv, unit, off, **self.args)
+
+
 def _write_supports(layout: str):
     def supports(f: dict) -> bool:
         return f["layout"] == layout and (layout != "kv.hnd.q8_0" or f["head_dim"] in (64, 128, 256))
+    return supports
+
+
+def _fused_supports(layout: str):
+    """Every fact set its KV writer's spec promises (`config["fused"]`): the writer's, the reference ops the units
+    name, an even rotary_dim within head_dim, a half or f32 model dtype."""
+    writes = _write_supports(layout)
+
+    def supports(f: dict) -> bool:
+        return (writes(f) and f["norm"] == "rmsnorm@1" and f["rope"] == "rope@1" and f["rotary_dim"] % 2 == 0
+                and 0 < f["rotary_dim"] <= f["head_dim"] and f["dtype"] in ("bfloat16", "float16", "float32"))
     return supports
 
 
@@ -169,9 +195,15 @@ class Plugin:
         anywhere, fp8_sms = Constraint(sm_min=80, sm_max=129), Constraint(sm_min=89, sm_max=129)
         props = frozenset({"graph_safe", "deterministic"})
         for layout, impl in (("kv.hnd", KvWrite), ("kv.hnd.fp8", KvWriteFp8), ("kv.hnd.q8_0", KvWriteQ8)):
+            fused = layout != "kv.hnd.fp8"                     # D3 covers the model dtype and q8_0
             regs.kernels.add("kv_write", KernelSpec(
                 op="kv_write", provider="kernels.triton_attn", impl=impl, requires=anywhere,
-                supports=_write_supports(layout), props=props, priority=10))
+                supports=_write_supports(layout), props=props, priority=10,
+                config={"fused": ["attention.qk_rope_kv@1"]} if fused else {}))
+            if fused:
+                regs.kernels.add("attention.qk_rope_kv", KernelSpec(
+                    op="attention.qk_rope_kv", provider="kernels.triton_attn", impl=QkRopeKv, requires=anywhere,
+                    supports=_fused_supports(layout), props=props, priority=10))
         # Decode and verify read every layout; fp8 is offered where FlashInfer serves its prefill (sm_89 on: no fast
         # e4m3 before), and decode stays ours there too, as for the model dtype: graph-safe, where FlashInfer's is not.
         for op, impl, layout, requires in (

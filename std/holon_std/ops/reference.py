@@ -41,6 +41,13 @@ def qlinear(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
     return x.float() @ weight.float().T
 
 
+def qlinear_glu(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    """The `qlinear_glu@1` oracle (glu "swiglu"): `silu(x @ Wg.T) · (x @ Wu.T)` in fp32 from the merged `weight`
+    [2·inter, in] (gate's rows, then up's)."""
+    gate, up = qlinear(x, weight).chunk(2, dim=-1)
+    return torch.nn.functional.silu(gate) * up
+
+
 def qembedding(ids: torch.Tensor, table: torch.Tensor) -> torch.Tensor:
     """The `qembedding@1` oracle: rows `ids` of the dequantized table [vocab, hidden]."""
     return table[ids]

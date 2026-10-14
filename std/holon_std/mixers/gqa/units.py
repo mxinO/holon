@@ -72,6 +72,10 @@ class GQA(nn.Module):
     `causal=False` (a row's new tokens see each other both ways) and `window` W > 0 (sliding-window attention) reach
     every attention kernel it selects as facts (kernels.py). `write_kv` writes a step's keys and values without
     attending (a drafter's context).
+
+    With engine state, the q/k norms, the rotation and the KV write run as one `attention.qk_rope_kv@1` kernel on every
+    step (docs/m07-perf.md D3) when the norm and rope units answer `fusion_facts()` and the KV writer's spec offers it
+    (`config["fused"]`); otherwise, and in a model-only build, as the units' composition.
     """
 
     @staticmethod
@@ -130,17 +134,29 @@ class GQA(nn.Module):
         bound = ctx.state("kv", layer)
         self._kv = None if bound is None else (bound[1], bound[0].layers.index(layer), len(bound[0].layers),
                                                 bound[0].shape.tokens_per_unit, ctx.dtype, bound[0].layout)
-        self._causal = self._write = None
+        self._causal = self._write = self._fused = None
         if bound is not None:
             facts = {"layout": bound[0].layout, "kv_heads": kv_heads, "head_dim": head_dim,
                      "page": bound[0].shape.tokens_per_unit, "dtype": str(ctx.dtype).removeprefix("torch.")}
-            self._write = ctx.select_kernel(kernels.KV_WRITE, site=f"std.mixers.gqa[layer={layer}]", **facts).impl(
-                ctx, **facts)
+            spec = ctx.select_kernel(kernels.KV_WRITE, site=f"std.mixers.gqa[layer={layer}]", **facts)
+            self._write = spec.impl(ctx, **facts)
+            self._fused = self._fusion(ctx, spec, facts, layer)
         if bound is None:
             facts = {"heads": heads, "kv_heads": kv_heads, "head_dim": head_dim,
                      "dtype": str(ctx.dtype).removeprefix("torch.")} | self.masks({"causal": causal, "window": window})
             self._causal = ctx.select_kernel(kernels.CAUSAL, site=f"std.mixers.gqa[layer={layer}]", **facts).impl(
                 ctx, **facts)
+
+    def _fusion(self, ctx, write, facts: dict, layer: int):
+        """The `attention.qk_rope_kv@1` instance (D3), or None: the norm units must answer `fusion_facts()` alike, the
+        rope unit too, and the KV writer's spec `write` must offer the fused kernel."""
+        if self.q_norm is None or kernels.QK_ROPE_KV not in write.config.get("fused", ()):
+            return None
+        norm, k_norm, rope = (getattr(u, "fusion_facts", lambda: None)() for u in (self.q_norm, self.k_norm, self.rope))
+        if norm is None or norm != k_norm or rope is None:
+            return None
+        facts = facts | {"heads": self.heads, "gated": self.gated} | norm | rope
+        return ctx.select_kernel(kernels.QK_ROPE_KV, site=f"std.mixers.gqa[layer={layer}]", **facts).impl(ctx, **facts)
 
     def _kv_layer(self):
         """This layer's pages as its layout's kernels read them (kernels.py): a tensor, or q8_0's (values, scales)."""
@@ -160,46 +176,62 @@ class GQA(nn.Module):
             self._qkv = merge(self.q_proj, self.k_proj, self.v_proj)
             self._qk = None if self._qkv is not None else merge(self.q_proj, self.k_proj)
 
-    def _split_gate(self, q: torch.Tensor, t: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """Per head: its head_dim queries, then its head_dim gate values."""
-        q, gate = q.reshape(t, self.heads, 2 * self.head_dim).chunk(2, dim=-1)
-        return q.contiguous(), gate                              # the norm and rope kernels take dense rows
-
-    def _project(self, x: torch.Tensor, ctx) -> tuple[torch.Tensor, ...]:
-        """q, the output gate (or None), k and v of `x`, normed and rotated at the step's positions."""
+    def _projections(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        """q [T, heads, D] (gated: [T, heads, 2D], each head's queries, then its gate values), k and v [T, kv_heads, D]
+        of `x`, before the norms and the rotation: views of the projections' output."""
         t = x.shape[0]
         if self._qkv is not None:
             q, k, v = self._qkv(x).split(
                 [self.q_width, self.kv_heads * self.head_dim, self.kv_heads * self.head_dim], dim=-1)
         elif self._qk is not None:
-            q, k = self._qk(x).split([self.q_width, self.kv_heads * self.head_dim], dim=-1)
-            v = self.v_proj(x)
+            h = getattr(self._qk, "prepare_input", lambda x: x)(x)      # one input, two projections (D6)
+            q, k = self._qk(h).split([self.q_width, self.kv_heads * self.head_dim], dim=-1)
+            v = self.v_proj(h)
         else:
-            q, k, v = self.q_proj(x), self.k_proj(x), self.v_proj(x)
-        q, gate = self._split_gate(q, t) if self.gated else (q, None)
-        q = q.reshape(t, self.heads, self.head_dim)
-        k = k.reshape(t, self.kv_heads, self.head_dim)
-        v = v.reshape(t, self.kv_heads, self.head_dim)
+            h = getattr(self.q_proj, "prepare_input", lambda x: x)(x)
+            q, k, v = self.q_proj(h), self.k_proj(h), self.v_proj(h)
+        return (q.reshape(t, self.heads, -1), k.reshape(t, self.kv_heads, self.head_dim),
+                v.reshape(t, self.kv_heads, self.head_dim))
+
+    def _gate(self, q: torch.Tensor) -> torch.Tensor | None:
+        return q[..., self.head_dim:] if self.gated else None
+
+    def _project(self, x: torch.Tensor, ctx) -> tuple[torch.Tensor, ...]:
+        """q, the output gate (or None), k and v of `x`, normed and rotated at the step's positions."""
+        q, k, v = self._projections(x)
+        q, gate = q[..., :self.head_dim], self._gate(q)
+        if self.gated:
+            q = q.contiguous()                                   # the norm and rope kernels take dense rows
         if self.q_norm is not None:
             q, k = self.q_norm(q), self.k_norm(k)
         q, k = self.rope(q, k, ctx.batch.dev.positions)
         return q, gate, k, v
 
+    def _project_and_write(self, x: torch.Tensor, ctx, kv) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """q normed and rotated and the output gate (or None) of `x`; its keys and values written at the step's
+        positions — by the fused kernel (D3), else by the composition and `kv_write@1`."""
+        meta = ctx.meta("kv")
+        if self._fused is None:
+            q, gate, k, v = self._project(x, ctx)
+            self._write(k, v, kv, meta.write_unit, meta.write_off)
+            return q, gate
+        q, k, v = self._projections(x)
+        return self._fused(q, k, v, ctx.batch.dev.positions, self.q_norm.weight, self.k_norm.weight, kv,
+                           meta.write_unit, meta.write_off), self._gate(q)
+
     def write_kv(self, x: torch.Tensor, ctx) -> None:
         """Write the keys and values of `x` at the step's positions without attending: a drafter's context from
         another model's features (engine builds)."""
-        _, _, k, v = self._project(x, ctx)
-        meta = ctx.meta("kv")
-        self._write(k, v, self._kv_layer(), meta.write_unit, meta.write_off)
+        self._project_and_write(x, ctx, self._kv_layer())
 
     def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
         t = x.shape[0]
-        q, gate, k, v = self._project(x, ctx)
         if self._kv is None:
+            q, gate, k, v = self._project(x, ctx)
             o = self._causal(q, k, v, ctx.batch.dev.query_start)
         else:
             meta, kv = ctx.meta("kv"), self._kv_layer()
-            self._write(k, v, kv, meta.write_unit, meta.write_off)
+            q, gate = self._project_and_write(x, ctx, kv)
             o = meta.kernel.run(q, kv, meta.handle)
         o = o.reshape(t, self.heads, self.head_dim)
         if gate is not None:

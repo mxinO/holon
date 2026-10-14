@@ -3,7 +3,8 @@
 Op contracts are documented next to their references (std.ops.kernels, std.ffn.kernels). FlashInfer's norms take
 2-D input, so leading dimensions are flattened. RoPE uses a cos/sin cache computed with the reference's formula, so
 the angles match the oracle; it is a named static buffer, so every layer with the same rope shares one copy and it
-is allocated (and accounted) at build time.
+is allocated (and accounted) at build time. The rope instance names it (`cos_sin`, std.ops' rope@1 contract), so a
+fused kernel rotates with the same table (docs/m07-perf.md D3).
 """
 from __future__ import annotations
 
@@ -32,9 +33,8 @@ class AddRMSNorm:
 
 class Rope:
     def __init__(self, ctx, *, head_dim: int, rotary_dim: int, theta: float, max_positions: int, dtype: str) -> None:
-        self.head_dim = head_dim
-        self.cache = ctx.static(f"rope.cos_sin[{theta},{rotary_dim},{max_positions}]", (max_positions, rotary_dim),
-                                torch.float32)
+        self.head_dim, self.cos_sin = head_dim, f"rope.cos_sin[{theta},{rotary_dim},{max_positions}]"
+        self.cache = ctx.static(self.cos_sin, (max_positions, rotary_dim), torch.float32)
         dims = torch.arange(0, rotary_dim, 2, device=ctx.device, dtype=torch.float32)
         inv_freq = 1.0 / (theta ** (dims / rotary_dim))
         angles = torch.arange(max_positions, device=ctx.device, dtype=torch.float32)[:, None] * inv_freq[None, :]

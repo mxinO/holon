@@ -17,7 +17,7 @@ class RMSNorm(nn.Module):
     def __init__(self, ctx, *, dim: int, eps: float, offset: float = 0.0) -> None:
         super().__init__()
         self.weight = nn.Parameter(torch.empty(dim, dtype=ctx.dtype), requires_grad=False)
-        facts = {"dim": dim, "eps": eps, "offset": offset, "dtype": str(ctx.dtype).removeprefix("torch.")}
+        facts = self._facts = {"dim": dim, "eps": eps, "offset": offset, "dtype": str(ctx.dtype).removeprefix("torch.")}
         site = f"std.ops.rmsnorm[dim={dim}]"
         self._norm = _kernel(ctx, kernels.RMSNORM, site, **facts)
         self._add_norm = _kernel(ctx, kernels.ADD_RMSNORM, site, **facts)
@@ -28,6 +28,11 @@ class RMSNorm(nn.Module):
     def add(self, x: torch.Tensor, residual: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """(norm(residual + x), residual + x), fused where the kernel allows; `x` and `residual` may be reused."""
         return self._add_norm(x, residual, self.weight)
+
+    def fusion_facts(self) -> dict:
+        """What a fused kernel computing this norm reads besides `weight` (docs/m07-perf.md D3): the op whose oracle
+        defines it, eps and offset. Optional capability of `unit.std.ops.rmsnorm@1` providers."""
+        return {"norm": kernels.RMSNORM, "eps": self._facts["eps"], "offset": self._facts["offset"]}
 
 
 class Rope(nn.Module):
@@ -40,13 +45,21 @@ class Rope(nn.Module):
             raise ValueError(f"unsupported rope style {style!r}")
         if head_dim is None:
             raise ValueError("rope needs the head_dim of the site that uses it")
+        self._facts = {"rotary_dim": rotary_dim or head_dim, "theta": theta,
+                       "max_positions": ctx.options.get("max_model_len", 8192)}
         self._rope = _kernel(ctx, kernels.ROPE, f"std.ops.rope[head_dim={head_dim}]", head_dim=head_dim,
-                             rotary_dim=rotary_dim or head_dim, theta=theta,
-                             max_positions=ctx.options.get("max_model_len", 8192),
-                             dtype=str(ctx.dtype).removeprefix("torch."))
+                             **self._facts, dtype=str(ctx.dtype).removeprefix("torch."))
 
     def forward(self, q: torch.Tensor, k: torch.Tensor, positions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         return self._rope(q, k, positions)
+
+    def fusion_facts(self) -> dict | None:
+        """What a fused kernel rotating as this unit does reads (docs/m07-perf.md D3): the op whose oracle defines it,
+        its facts and the kernel's cos/sin table (`cos_sin`, rope@1's instance contract); None when the kernel names
+        no table. Optional capability of `unit.std.ops.rope@1` providers (a variant that cannot answer leaves the
+        composition)."""
+        table = getattr(self._rope, "cos_sin", None)
+        return None if table is None else {"rope": kernels.ROPE, **self._facts, "cos_sin": table}
 
 
 class _Quantized:
@@ -56,17 +69,17 @@ class _Quantized:
     def __init__(self, ctx, layout, op: str, **facts) -> None:
         self.ctx, self.layout, self.op = ctx, layout, op
         self.facts = {"layout": f"{layout.scheme.elem}/{layout.name}", **facts}
-        self._kernel = None
+        self._kernel = self._glu = None
 
-    def bind(self, parts: dict[str, torch.Tensor], shape: tuple[int, ...],
-             param: nn.Parameter | None) -> dict[str, torch.Tensor]:
-        """Select the kernel; returns the parts it reads: `parts`, or what a `qlinear@2` kernel's `prepare` makes of
-        them (docs/m06-lowp.md D4), the primary part swapped into `param` so the source parts are released (a tied
-        head has no `param`). `qembedding@1` has no `prepare`: a table is read as adopted."""
-        site = f"std.ops.{self.op.split('@')[0]}[" + ",".join(f"{k}={v}" for k, v in self.facts.items()) + "]"
-        spec = self.ctx.select_kernel(self.op, site=site, **self.facts)
-        _one_act_mode(self.ctx, spec, site)
-        self._kernel = spec.impl(self.ctx, **self.facts)
+    def bind(self, parts: dict[str, torch.Tensor], shape: tuple[int, ...], param: nn.Parameter | None,
+             glu: str | None = None) -> dict[str, torch.Tensor]:
+        """Select the kernel — and, for a merged gate/up (`glu`), a `qlinear_glu@1` kernel where the kernel's spec
+        offers one (its `config["fused"]`) — and return the parts it reads: `parts`, or what a `qlinear@2` kernel's
+        `prepare` makes of them (docs/m06-lowp.md D4), the primary part swapped into `param` so the source parts are
+        released (a tied head has no `param`). `qembedding@1` has no `prepare`: a table is read as adopted."""
+        self._kernel, spec = self._select(self.op, self.facts)
+        if glu is not None and kernels.QLINEAR_GLU in spec.config.get("fused", ()):
+            self._glu = self._select(kernels.QLINEAR_GLU, self.facts | {"glu": glu})[0]
         if self.op != kernels.QLINEAR or not hasattr(self._kernel, "prepare"):
             return parts
         q = QTensor(self.layout, shape, parts)
@@ -75,8 +88,28 @@ class _Quantized:
         self.layout = prepared.layout                    # what the parts now are (the site's facts keep the adopted)
         return dict(prepared.parts) if param is None else _hold(param, prepared.parts, self.ctx.device)
 
-    def __call__(self, x: torch.Tensor, weight) -> torch.Tensor:
-        return self._kernel(x, weight)
+    def _select(self, op: str, facts: dict):
+        """The instance of `op`'s kernel for `facts` (a lock site named by them), and its spec."""
+        site = f"std.ops.{op.split('@')[0]}[" + ",".join(f"{k}={v}" for k, v in facts.items()) + "]"
+        spec = self.ctx.select_kernel(op, site=site, **facts)
+        _one_act_mode(self.ctx, spec, site)
+        return spec.impl(self.ctx, **facts), spec
+
+    def __call__(self, x, weight) -> torch.Tensor:
+        """`x`, or a `prepare_input` handle (passed on to a kernel that prepares inputs, else its `x`)."""
+        return self._kernel(x if hasattr(self._kernel, "prepare_input") else _tensor(x), weight)
+
+    def prepare_input(self, x: torch.Tensor):
+        prepare = getattr(self._kernel, "prepare_input", None)
+        return x if prepare is None else prepare(x)
+
+    def glu(self, x: torch.Tensor, parts) -> torch.Tensor | None:
+        return None if self._glu is None else self._glu(x, parts)
+
+
+def _tensor(x) -> torch.Tensor:
+    """A linear's input: `x`, or the `x` a `prepare_input` handle carries (std.ops.kernels, `qlinear@2`)."""
+    return x if isinstance(x, torch.Tensor) else x.x
 
 
 def _hold(param: nn.Parameter, parts: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
@@ -153,6 +186,7 @@ class Linear(nn.Module):
         self.bias = nn.Parameter(torch.empty(out_features, dtype=ctx.dtype), requires_grad=False) if bias else None
         self._q: _Quantized | None = None
         self.parts: dict[str, torch.Tensor] | None = None            # a quantized weight's, by role
+        self._glu: str | None = None                                  # a merged gate/up's activation (use_glu)
 
     def _quantized(self, layout) -> _Quantized:
         dtype = _dtype(self._ctx.dtype)
@@ -167,13 +201,34 @@ class Linear(nn.Module):
 
     def bind_kernels(self, ctx) -> None:
         if self._q is not None and self.weight is not None:          # not merged away
-            self.parts = self._q.bind(self.parts, (self.out_features, self.in_features), self.weight)
+            self.parts = self._q.bind(self.parts, (self.out_features, self.in_features), self.weight, self._glu)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x) -> torch.Tensor:
+        """`x`, or a `prepare_input` handle of it (from this or any other linear)."""
         if self._q is None:
-            return nn.functional.linear(x, self.weight, self.bias)
+            return nn.functional.linear(_tensor(x), self.weight, self.bias)
         y = self._q(x, self.parts)
         return y if self.bias is None else y + self.bias
+
+    def prepare_input(self, x: torch.Tensor):
+        """`x` made ready for several linears of it — e.g. its activations quantized once (docs/m07-perf.md D6): the
+        bound kernel's `prepare_input` handle, else `x`. Every linear takes either; the caller drops the handle after
+        them, and a linear whose kernel prepared differently (another path, layout or shape), or whose handle a later
+        `prepare_input` overwrote, starts from `x`. Optional capability of `unit.std.ops.linear@1` providers, used
+        duck-typed by composites with several projections of one input."""
+        return x if self._q is None else self._q.prepare_input(x)
+
+    def use_glu(self, glu: str) -> None:
+        """This unit is a merged gate/up (gate's rows, then up's) whose halves combine as `glu` ("swiglu"): bind a
+        `qlinear_glu@1` kernel beside the `qlinear@2` one where its spec offers one (docs/m07-perf.md D6). Called
+        by the composite in `finalize_weights`, so the kernel is selected in `bind_kernels` (a lock site). Optional
+        capability, with `glu`."""
+        self._glu = glu
+
+    def glu(self, x: torch.Tensor) -> torch.Tensor | None:
+        """`silu(gate) · up` of this merged gate/up from one fused kernel (`use_glu`), or None where none is bound or
+        it does not fuse this call: the caller composes the matmul and the activation."""
+        return None if self._q is None else self._q.glu(x, self.parts)
 
     @staticmethod
     def merge(*units: Linear) -> Linear | None:

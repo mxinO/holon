@@ -11,6 +11,13 @@ shape where a repeated sweep found mmq faster (docs/m07-perf.md D2, `CROSSOVER`)
 Both quantize the activations in a workspace shared by every instance with the same `in`. `qembedding` is
 llama.cpp's `get_rows`.
 
+Shared quantization (D6): `prepare_input(x)` quantizes `x` once, on the mmvq path, as mmvq would (block_q8_1, the
+same for every type), into the buffer every instance with the same `in` shares (`ggml_cuda.q8_1[in=…]`, its own:
+not the workspace above); the handle (`Prepared`) names it with the host-side generation of that write, and an
+mmvq call of the same `in` and rows reads it while the buffer's last write is still that generation (`Extension`
+counts them), else quantizes `x` itself. `qlinear_glu` (D6): mmvq's fused gate at one row on a merged gate/up
+(`silu(gate) · up` from the f32 sums, NVFP4's scale2 on both halves), None at more rows (std's SwiGLU composes).
+
 `linear_experts` is llama.cpp's MUL_MAT_ID per 512-token chunk: mmvq with ids up to the type's limit
 (`get_mmvq_mmid_max_batch`), for `glu="swiglu"` through its fused gate on the merged stack, else mmq with ids into
 f32, followed for swiglu by our f32 SwiGLU. Its workspace (`ggml_cuda.id[…]`) holds mmq's id maps besides the
@@ -30,8 +37,9 @@ FP4 (D8): `prepare` repacks the HF layouts losslessly into ggml blocks (`repack`
 NVFP4's per-tensor or per-expert `scale2` ([1]; [E]; [2, E] for a merged gate/up stack) is applied in f32 before
 SwiGLU on every path: mmvq in llama.cpp's fused epilogue (one row dense; any tokens with ids), dense mmvq above
 one row in the unfused kernel's epilogue (docs/m07-perf.md D11), dense mmq in its store (D4) — each before the one
-rounding to `out_dtype` — and mmq with ids by our SwiGLU (gate/up) or `y *= scale2[ids]` (down). With `in` a multiple of 256 (all supported shapes) no q8_1 kernel reads past the weight blocks, so they need
-no padding (L0 poisons the bytes after them); native W4A4 steps K by 512 with no tail, so the `fp4` spec's
+rounding to `out_dtype` — and mmq with ids by our SwiGLU (gate/up) or `y *= scale2[ids]` (down). With `in` a
+multiple of 256 (all supported shapes) no q8_1 kernel reads past the weight blocks, so they need no padding (L0
+poisons the bytes after them); native W4A4 steps K by 512 with no tail, so the `fp4` spec's
 `prepare` appends llama.cpp's allocation padding, the blocks of one row's values up to a multiple of 512 zeroed
 (`tail_bytes`), after each FP4 tensor or stack, and its calls check it is there.
 
@@ -46,14 +54,16 @@ instance cannot be created and the error names that command.
 from __future__ import annotations
 
 import collections
+import dataclasses
 import functools
+import itertools
 
 import torch
 from holon.api import Constraint, KernelSpec, Layout, QTensor, Scheme
 
 from . import extension
 
-QLINEAR, QEMBEDDING = "qlinear", "qembedding"
+QLINEAR, QLINEAR_GLU, QEMBEDDING = "qlinear", "qlinear_glu", "qembedding"
 LINEAR_EXPERTS, MOE_TOPK, MOE_COMBINE = "linear_experts", "moe_topk", "moe_combine"
 CHUNK = 512                     # mmq rows per call: llama.cpp's ubatch; sizes the workspace and the f32 buffer
 # Supported ggml types (design §4.6) and their ggml type ids.
@@ -210,15 +220,28 @@ def _device(ctx) -> int:
 
 
 class Extension:
-    """The prebuilt module, loaded once per SM on first use (never compiled here)."""
+    """The prebuilt module, loaded once per SM on first use (never compiled here); and the generation of each prepared
+    input buffer's last write (`QLinear.prepare_input`), by its address, from one count."""
 
     def __init__(self) -> None:
         self.modules: dict[int, object] = {}
+        self.generations, self.written = itertools.count(1), {}
 
     def __call__(self, sm: int):
         if sm not in self.modules:
             self.modules[sm] = extension.load(sm)
         return self.modules[sm]
+
+
+@dataclasses.dataclass(frozen=True)
+class Prepared:
+    """`QLinear.prepare_input`'s handle (std.ops.kernels, `qlinear@2`): `x`, and, when its rows take mmvq, the buffer
+    holding its q8_1 activations as written at `generation` for `key` (path, activation mode, rows, `in`)."""
+
+    x: torch.Tensor
+    key: tuple | None = None
+    buffer: torch.Tensor | None = None
+    generation: int = 0
 
 
 class _Matmul:
@@ -282,21 +305,42 @@ class _Matmul:
 class QLinear(_Matmul):
     def __init__(self, ext: Extension, act: dict[str, str], ctx, **facts) -> None:
         super().__init__(ext, act, ctx, facts)
-        self.out_dtype = getattr(torch, facts["out_dtype"])
+        self.ext, self.out_dtype = ext, getattr(torch, facts["out_dtype"])
         # mmvq up to `mmvq_rows` (the class's, for this shape and mode; fixed per graph bucket), else mmq
         self.mmvq_rows = mmvq_rows(ctx.fingerprint, self.name, act["mmq"], self.k, self.out, self.lib)
         self._uses_mmq(self.mmvq_rows, facts["layout"])
         self.workspace = ctx.workspace(f"ggml_cuda[in={self.k}]", self.lib.workspace_bytes(self.device, self.k, CHUNK))
         self.f32 = self._f32_workspace(ctx, CHUNK, facts["act_dtype"])
+        self.q8_1 = ctx.workspace(f"ggml_cuda.q8_1[in={self.k}]", q8_1_bytes(MMVQ_MAX, self.k))   # prepared inputs
 
-    def __call__(self, x: torch.Tensor, parts: dict[str, torch.Tensor]) -> torch.Tensor:
+    def prepare_input(self, x: torch.Tensor) -> Prepared:
+        """`x` with its q8_1 activations, when its rows take mmvq here (D6; std.ops.kernels, `qlinear@2`)."""
+        rows = len(x)
+        if not 0 < rows <= self.mmvq_rows:
+            return Prepared(x)
+        buffer = self.q8_1[:q8_1_bytes(rows, self.k)]
+        self.lib.quantize_q8_1(self.type, x.contiguous(), buffer)
+        generation = self.ext.written[self.q8_1.data_ptr()] = next(self.ext.generations)
+        return Prepared(x, ("mmvq", "q8_1", rows, self.k), buffer, generation)
+
+    def _prepared(self, x: Prepared) -> torch.Tensor | None:
+        """The q8_1 activations `x` carries, if this call's mmvq would compute exactly them and no later
+        `prepare_input` has overwritten them; else None."""
+        if x.key != ("mmvq", "q8_1", len(x.x), self.k) or len(x.x) > self.mmvq_rows:
+            return None
+        return x.buffer if self.ext.written.get(x.buffer.data_ptr()) == x.generation else None
+
+    def __call__(self, x, parts: dict[str, torch.Tensor]) -> torch.Tensor:
+        xq = None
+        if isinstance(x, Prepared):
+            xq, x = self._prepared(x), x.x
         x, rows, blocks, scale2 = x.contiguous(), len(x), parts["blocks"], parts.get("scale2")
         y = torch.empty(rows, self.out, dtype=self.out_dtype, device=x.device)
         if rows == 0:
             return y
         if rows <= self.mmvq_rows:                       # scale2 in its epilogue at any rows (D11)
             self._count("mmvq")
-            self.lib.mmvq(self.type, blocks, x, y, scale2, self.workspace)
+            self.lib.mmvq(self.type, blocks, x, y, scale2, self.workspace, xq=xq)
             return y
         self._count("mmq")
         blocks = self._mmq_blocks(parts)
@@ -304,6 +348,26 @@ class QLinear(_Matmul):
             self.lib.mmq(self.type, self.prec, blocks, self._mmq_input(x[start:start + CHUNK], self.f32),
                          y[start:start + CHUNK], scale2, self.workspace)
         return y
+
+
+class QLinearGlu(QLinear):
+    """`qlinear_glu@1` (glu "swiglu") on a merged gate/up of `out` rows: mmvq's fused gate at one row (D6), None
+    above."""
+
+    def __call__(self, x: torch.Tensor, parts: dict[str, torch.Tensor]) -> torch.Tensor | None:
+        if len(x) != 1 or self.mmvq_rows < 1:
+            return None
+        self._count("mmvq")
+        blocks, half = parts["blocks"], self.out // 2
+        y = torch.empty(1, half, dtype=self.out_dtype, device=x.device)
+        self.lib.mmvq(self.type, blocks[half:], x.contiguous(), y, parts.get("scale2"), self.workspace,
+                      gate=blocks[:half])
+        return y
+
+
+def q8_1_bytes(rows: int, k: int) -> int:
+    """Bytes of mmvq's q8_1 activations of `rows` rows of `k` values (block_q8_1 per 32, rows padded to 512)."""
+    return rows * -(-k // ROW_PADDING) * ROW_PADDING // 32 * 36
 
 
 class QEmbedding:
@@ -404,6 +468,10 @@ def _supports_qlinear(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
     return _supports_matmul(f, act_quant, types) and f["out_dtype"] in DTYPES
 
 
+def _supports_qlinear_glu(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
+    return _supports_qlinear(f, act_quant, types) and f["glu"] == "swiglu" and f["out"] % 2 == 0
+
+
 def _supports_qembedding(f: dict) -> bool:
     # get_rows has no NVFP4
     return ggml_type(f["layout"]) not in (None, TYPES["nvfp4"]) and f["hidden"] % 256 == 0 and f["dtype"] in DTYPES
@@ -433,12 +501,13 @@ class Plugin:
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="kernels.ggml_cuda", impl=impl, requires=Constraint(sms=sms), supports=supports,
                 props=frozenset({"graph_safe", "deterministic"}), priority=priority,
-                config={"act": act} if act else {}))
+                config=({"act": act} if act else {}) | ({"fused": ["qlinear_glu@1"]} if op == QLINEAR else {})))
 
         # q8_1 everywhere; native W4A4 on Blackwell for the FP4 types, opt-in (`quant.act = a4`) and then preferred
         for act, sms, priority, act_quant, types in ((Q8_1, frozenset(extension.ARCHS), 10, ACT_QUANT, TYPES),
                                                      (NATIVE_FP4, frozenset({120}), 11, ("a4",), FP4)):
             for op, impl, supports in ((QLINEAR, QLinear, _supports_qlinear),
+                                       (QLINEAR_GLU, QLinearGlu, _supports_qlinear_glu),
                                        (LINEAR_EXPERTS, LinearExperts, _supports_linear_experts)):
                 add(op, functools.partial(impl, ext, act),
                     functools.partial(supports, act_quant=act_quant, types=types), sms, priority, act)

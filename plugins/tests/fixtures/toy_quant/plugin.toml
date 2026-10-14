@@ -7,8 +7,8 @@ license = "Apache-2.0"
 core_abi = ">=0.2,<0.3"
 
 [resources]
-provides = ["kernel.qlinear@2", "kernel.qembedding@1", "kernel.linear_experts@2"]
-requires = ["op.qlinear@2", "op.qembedding@1", "op.linear_experts@2"]
+provides = ["kernel.qlinear@2", "kernel.qlinear_glu@1", "kernel.qembedding@1", "kernel.linear_experts@2"]
+requires = ["op.qlinear@2", "op.qlinear_glu@1", "op.qembedding@1", "op.linear_experts@2"]
 
 [properties]
 numerics = "exact"

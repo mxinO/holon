@@ -372,10 +372,16 @@ def paged_prefill(q: torch.Tensor, kv, table: torch.Tensor, rows: torch.Tensor, 
 
 @triton.jit
 def _quantize_q8_0(X, VALUES, SCALES, NB: tl.constexpr):
-    """One row of NB · 32 values as GGUF q8_0, bitwise as std.mixers.gqa.reference.quantize_q8_0: d = amax / 127 and
-    its inverse in fp32, q = floor(|x · (1/d)| + 1/2) with x's sign, d stored fp16 — every step rounded on its own."""
+    """One row of NB · 32 values at X as GGUF q8_0 (`_store_q8_0`)."""
     i = tl.arange(0, NB)[:, None] * Q8_BLOCK + tl.arange(0, Q8_BLOCK)[None, :]
-    x = tl.load(X + i).to(tl.float32)
+    _store_q8_0(tl.load(X + i).to(tl.float32), VALUES, SCALES, NB)
+
+
+@triton.jit
+def _store_q8_0(x, VALUES, SCALES, NB: tl.constexpr):
+    """x [NB, 32] (f32) as GGUF q8_0, bitwise as std.mixers.gqa.reference.quantize_q8_0: d = amax / 127 and its
+    inverse in fp32, q = floor(|x · (1/d)| + 1/2) with x's sign, d stored fp16 — every step rounded on its own."""
+    i = tl.arange(0, NB)[:, None] * Q8_BLOCK + tl.arange(0, Q8_BLOCK)[None, :]
     amax = tl.max(tl.abs(x), 1)
     d = tl.math.div_rn(amax, tl.full(amax.shape, 127.0, tl.float32))
     inv = tl.where(d == 0.0, 0.0, tl.math.div_rn(tl.full(d.shape, 1.0, tl.float32), d))
@@ -434,3 +440,77 @@ def write_model(k: torch.Tensor, v: torch.Tensor, kv: torch.Tensor, unit: torch.
         return
     _write_model[(t, hkv)](k, v, kv, unit, off, k.stride(0), k.stride(1), v.stride(0), v.stride(1), *kv.stride()[:4],
                            D=d, BLOCK_D=triton.next_power_of_2(d), num_warps=1)
+
+
+@triton.jit
+def _norm_rope(X, W, TABLE, pos, eps, offset, D: tl.constexpr, ROT: tl.constexpr, BLOCK_D: tl.constexpr,
+               OUT: tl.constexpr):
+    """One head's D values at X normed (x / rms(x) · (w + offset)) and rounded to OUT, then the first ROT rotated
+    (neox: value i < ROT/2 pairs with i + ROT/2) at row `pos` of the cos|sin table and rounded again, as the
+    references compose (std.ops.reference rmsnorm, rope_neox). Each element reads its rotation partner itself."""
+    half: tl.constexpr = ROT // 2
+    i = tl.arange(0, BLOCK_D)
+    valid, rot, first = i < D, i < ROT, i < half
+    partner = tl.where(first, i + half, i - half)
+    x = tl.load(X + i, mask=valid, other=0.0).to(tl.float32)
+    xp = tl.load(X + partner, mask=rot, other=0.0).to(tl.float32)
+    r = tl.math.rsqrt(tl.sum(x * x, 0) / D + eps)
+    y = (x * r * (tl.load(W + i, mask=valid, other=0.0).to(tl.float32) + offset)).to(OUT).to(tl.float32)
+    yp = (xp * r * (tl.load(W + partner, mask=rot, other=0.0).to(tl.float32) + offset)).to(OUT).to(tl.float32)
+    j = tl.where(first, i, i - half)
+    c = tl.load(TABLE + pos * ROT + j, mask=rot, other=1.0)
+    s = tl.load(TABLE + pos * ROT + half + j, mask=rot, other=0.0)
+    return tl.where(rot, tl.where(first, y * c - yp * s, y * c + yp * s), y).to(OUT)
+
+
+@triton.jit
+def _qk_rope_kv(Q, K, V, POS, QW, KW, TABLE, QOUT, KV, KS, UNIT, OFF,
+                stride_qt, stride_qh, stride_kt, stride_kh, stride_vt, stride_vh,
+                stride_u, stride_i, stride_h, stride_t, stride_su, stride_si, stride_sh, stride_st, eps, offset,
+                HQ: tl.constexpr, D: tl.constexpr, ROT: tl.constexpr, BLOCK_D: tl.constexpr, FMT: tl.constexpr):
+    t = tl.program_id(0)
+    h = tl.program_id(1)
+    pos = tl.load(POS + t).to(tl.int64)
+    i = tl.arange(0, BLOCK_D)
+    if h < HQ:
+        q = _norm_rope(Q + t * stride_qt + h * stride_qh, QW, TABLE, pos, eps, offset, D, ROT, BLOCK_D,
+                       QOUT.dtype.element_ty)
+        tl.store(QOUT + (t * HQ + h) * D + i, q, mask=i < D)
+    else:
+        h -= HQ
+        k = _norm_rope(K + t * stride_kt + h * stride_kh, KW, TABLE, pos, eps, offset, D, ROT, BLOCK_D,
+                       QOUT.dtype.element_ty)
+        v = tl.load(V + t * stride_vt + h * stride_vh + i, mask=i < D)
+        unit = tl.load(UNIT + t).to(tl.int64)
+        off = tl.load(OFF + t)
+        dst = KV + unit * stride_u + h * stride_h + off * stride_t
+        if FMT == Q8_0:
+            nb: tl.constexpr = D // Q8_BLOCK
+            scales = KS + unit * stride_su + h * stride_sh + off * stride_st
+            _store_q8_0(tl.reshape(k.to(tl.float32), [nb, Q8_BLOCK]), dst, scales, nb)
+            _store_q8_0(tl.reshape(v.to(tl.float32), [nb, Q8_BLOCK]), dst + stride_i, scales + stride_si, nb)
+        else:
+            tl.store(dst + i, k, mask=i < D)
+            tl.store(dst + stride_i + i, v, mask=i < D)
+
+
+def qk_rope_kv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, positions: torch.Tensor, q_weight: torch.Tensor,
+               k_weight: torch.Tensor, table: torch.Tensor, kv, unit: torch.Tensor, off: torch.Tensor, *, eps: float,
+               offset: float, rotary_dim: int) -> torch.Tensor:
+    """`attention.qk_rope_kv@1` (std.mixers.gqa): q's and k's heads normed and rotated (q [T, Hq, ≥ D], its first D
+    per head), k and v [T, Hkv, D] written into the model-dtype pages or q8_0's (values, scales) at (unit[t], off[t]);
+    returns q' [T, Hq, D]. One launch, one program per token and head (q's heads, then kv heads)."""
+    (t, hq, _), (_, hkv, d) = q.shape, k.shape
+    out = torch.empty(t, hq, d, dtype=k.dtype, device=k.device)
+    if t == 0:
+        return out
+    values, scales = kv if isinstance(kv, tuple) else (kv, kv)
+    assert all(x.stride(-1) == 1 for x in (q, k, v, values, scales)) and k.dtype == v.dtype == q.dtype
+    fmt = Q8_0 if isinstance(kv, tuple) else MODEL
+    assert fmt == MODEL or d % Q8_BLOCK.value == 0 and d == triton.next_power_of_2(d)
+    block = triton.next_power_of_2(d)
+    _qk_rope_kv[(t, hq + hkv)](q, k, v, positions, q_weight, k_weight, table, out, values, scales, unit, off,
+                               q.stride(0), q.stride(1), k.stride(0), k.stride(1), v.stride(0), v.stride(1),
+                               *values.stride()[:4], *scales.stride()[:4], eps, offset,
+                               HQ=hq, D=d, ROT=rotary_dim, BLOCK_D=block, FMT=fmt, num_warps=1 if block <= 128 else 2)
+    return out
