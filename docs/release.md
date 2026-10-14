@@ -1,6 +1,6 @@
 # Release (v0) — packaging, locks, legibility benchmark, benchmark suite, ABI freeze: design and plan
 
-Status: **revision 3, for review** (2026-10-14). Revs 1 (97c39ff) and 2 (9534861) were reviewed by a panel of three
+Status: **revision 3.1, for review** (2026-10-14). Revs 1 (97c39ff), 2 (9534861) and 3 (41431b5) were reviewed by a panel of three
 (A: serving, packaging, ABI; B: methodology; C: architecture, scope); every finding is resolved in §12. Scope: plan
 §2's Release row ("every v0 model: packaging, quickstart, rtx-5090 / rtx-3090 locks, an agent demo; the legibility
 benchmark (§9) before the ABI freezes; the benchmark suite (decode, prefill, agent trace vs llama.cpp, FreeToken and
@@ -86,9 +86,9 @@ new families or formats; v1's offload, VMM, sandbox and self-improvement; GPUs o
   - **One lookup by build hash**, in `holon.core.plans`, shared by the core and the tools: the weight source's
     identity → histories whose `model_id` ends in `@<build>` → `nearest_class` with the installed units' `src`. The
     tools write under the existing history's `model_id`.
-  - **Plan check:** `plan_of` and `_NOT_PLANNED` move into `holon.core.plans`, without git. The supervisor's history
-    entries become (config, lock path); `EngineProcess.start` passes the path to the engine process, which reads the
-    lock, computes its plan with the lock's `model_id` and `commit`, and returns `plan_id` and the diff against the lock
+  - **Plan check:** `plan_of`, `_NOT_PLANNED` and the lock-diff function move into `holon.core.plans`, without git.
+    The supervisor's history entries become (config, lock path), and the `--no-supervised` path gets the lock path too;
+    `EngineProcess.start` passes it to the engine process, which reads the lock, computes its plan with the lock's `model_id` and `commit`, and returns `plan_id` and the diff against the lock
     in its `ready` message (an internal IPC frame); the log and `/metrics` show them. `uv_lock` hashes only the runtime
     closure: the sorted (name, version, source) of the packages reachable from the three runtime dists, parsed from
     `uv.lock` with `tomllib`, so dev-only pins never move a plan.
@@ -98,15 +98,23 @@ new families or formats; v1's offload, VMM, sandbox and self-improvement; GPUs o
     `kernels`); `--kernels` pins stay hard. `lock_overrides` raises when one op has two providers; step 2 checks the MTP
     locks, and such an op is left unpinned. `plugin_options` apply wholesale.
   - **Memory:** `max_seqs` and `max_step_tokens` stay exactly the lock's; a lock that does not fit fails to start and
-    falls back (below). Only `max_model_len` adapts: `EngineConfig.clamp_context` (default false, so tools, judge and
-    bench are unchanged; not planned) lets the engine, after sizing its pools, cap `max_model_len` at min(what the KV
-    budget holds, the model's trained context) and report it as a plan diff. The trained context comes from a new
-    optional `WeightSource.max_context` (both sources read `max_position_embeddings`; GGUF maps it from
-    `context_length`), an ABI addition before the freeze. `holon serve` sets `clamp_context` and defaults
-    `--max-model-len auto` (the lock's value, else `max_context`).
+    falls back (below). Only `max_model_len` adapts, through `EngineConfig.clamp_context` (default false, so tools,
+    judge and bench are unchanged; not planned), which `holon serve` sets:
+    - the **requested** `max_model_len` is the lock's value; with no lock, `--max-model-len auto` (the serve default)
+      requests min(the model's trained context, 32768), so every build-time reader stays bounded (the n-gram
+      drafter's buffer, rope's `max_positions` fact);
+    - today a paged pool requests units for one full-length sequence (`assembly.py` `_bind`), so a request that does
+      not fit raises `OutOfUnits` before anything could clamp. With `clamp_context`, paged pools request a floor of
+      ceil(`max_step_tokens` / page) units instead; `max_model_len` = min(requested, the smallest paged pool's capacity
+      in tokens), set before the state manager and scheduler are built (`engine.py` L162–166);
+    - build-time readers keep the requested value, so the plan's only diff is `engine.max_model_len`, reported;
+    - the trained context is a new optional **model-plugin** hook (Qwen3.5 / 3.8 HF configs nest it under
+      `text_config`, so the weight source cannot read it generically), an ABI addition before the freeze; None means
+      budget only, under the 32K cap.
   - **Unverified** (borrowed from another class): the same, pins soft. **No lock for the file:** defaults, logged.
-  - **Fallback:** the supervisor's history is `[defaults + flags, lock + flags]`. A start failing with a `PluginError`
-    (deterministic: a missing provider, an ABI mismatch) rolls back at once; other start failures roll back after
+  - **Fallback:** the supervisor's history is `[defaults + flags, lock + flags]`. The `failed` IPC frame gains a kind
+    field (today it carries only text; no message matching); a start failing with `PluginError` or `OutOfUnits`
+    (deterministic: a missing provider, an ABI mismatch, a lock that does not fit) rolls back at once; other start failures roll back after
     `rollback_crashes` (4) tries — a start that hangs costs up to 4 × `start_timeout` (40 min) before the fallback, so
     the README names `--no-lock`. In an install, older locks pin other code; design §4.4's "rollback = restart on the
     previous lock" is corrected for installs in step 6.
@@ -123,9 +131,10 @@ new families or formats; v1's offload, VMM, sandbox and self-improvement; GPUs o
     M0.7's propagation.
   - **MTP** (Qwen3.8-27B, per class), on a Claude-Code-shaped trace (M0.7's runner: the agent workload with a ≈ 16K
     shared prefix, several sessions, sampled at the temperature Claude Code sends, read with `bench/capture_proxy.py`),
-    ABAB rounds, MTP vs plain. **On** if median TPOT improves by ≥ 5% or ≥ 2 SE, **and** for p99 per-request max
-    inter-token gap and p99 TTFT (each pooled over all rounds per arm) the one-sided 90% upper bound of the paired
-    per-round ratio MTP / plain is ≤ 1.10. Undecided: rounds added up to 8; still undecided → plain. Stated beside it:
+    ABAB rounds of ≥ 200 requests each, MTP vs plain. **On** if median TPOT improves by ≥ 5% **and** ≥ 2 SE, **and**
+    for p95 per-request max inter-token gap and p95 TTFT the one-sided 90% upper bound of the paired per-round ratio
+    MTP / plain is ≤ 1.10 (the pooled p99s are reported as point estimates). A power estimate after 4 rounds sets how
+    many more to run, up to 8; still undecided → plain, the expected outcome on a noisy trace. Stated beside it:
     KV on the RTX 5080 falls from 58K to 39.6K tokens (`docs/m04-spec.md` §10); the lock keeps M0.7's
     `chunk_with_decode`, which alternates with a drafter. The README says how to turn speculation off
     (`--max-draft-tokens 0`). DFlash2 stays a documented opt-in.
@@ -141,10 +150,12 @@ new families or formats; v1's offload, VMM, sandbox and self-improvement; GPUs o
   reported beside it. Claude Code's auto-compaction assumes a far larger window than the 32K served; the README says so.
 - **D8 — Documentation: README, AGENTS.md and a contributor guide**, written in step 4 and frozen at a recorded commit
   before the reference Mixtral ports and the pilot (they are part of what §4 measures).
-  - **`docs/adding-a-model.md`** (lean, generic): one worked example from existing packages — the qwen3 → qwen3_moe
-    `derived_from` diff; the manifest, the entry point and the reinstall; `Ref` / `ModelSpec`, `WeightMap` and `stack`,
+  - **`docs/adding-a-model.md`** (lean, generic, by a task-independent rule: it covers what every existing model
+    package has): one table walking through all three packages (qwen3, qwen3_moe, qwen3_5); one worked example, the
+    most recent addition — qwen3_5 from qwen3 via `derived_from`; the manifest, the entry point and the reinstall; `Ref` / `ModelSpec`, `WeightMap` and `stack`,
     the bundle; the static checks and how a model is judged; links into design.md. Nothing the tree does not already
-    say; no Mixtral, no benchmark. A lean CI check (`run_all.sh`) asserts that every path and command it names exists.
+    say; no Mixtral, no benchmark. Reviewer C reviews the frozen text for task tailoring before the freeze. A lean CI
+    check (`run_all.sh`) asserts that every path and command it names exists.
   - **AGENTS.md:** short rules plus routing by task — adding a model → the guide; core or ABI work → design.md.
     plan.md is never required reading. The Environment section describes D1's environment and `uv sync --group dev`.
   - **README:** what Holon is; supported GPUs and the recommended file per card (§6), M0.6's files on the 5090 / 3090
@@ -181,8 +192,10 @@ per-expert `w1` / `w3` / `w2`, a `gate` router.
   `WeightRule.stack`.
 - **mini-sglang** at `9a91cfa` registers Llama, Qwen2, Qwen3, Qwen3-MoE, Mistral and Mistral3, not Mixtral; its layers
   (`RopeAttn` without qk-norm, `MoEMLP` with renormalisation) cover it; its loader hard-codes `gate_proj` / `up_proj`.
-- **Bias against Holon:** Mixtral is probably memorized on the baseline's side — mini-sglang shares SGLang's and
-  vLLM's vocabulary (`RopeAttn`, `qkv_proj`, `MoELayer`), whose Mixtral files are widely published.
+- **Biases, both stated:** against Holon, Mixtral is probably memorized on the baseline's side — mini-sglang shares
+  SGLang's and vLLM's vocabulary (`RopeAttn`, `qkv_proj`, `MoELayer`), whose Mixtral files are widely published; for
+  Holon, a guide written for adding models (D8) where mini-sglang ships none — its equivalent is its upstream history,
+  which it keeps (§4.2). The guide-free runs (§4.5) size the second.
 
 Rejected: Llama / Mistral / Qwen2 (mini-sglang has them); Phi-3 / Phi-4 (fused `qkv_proj`: a `WeightRule` maps one
 tensor to one target, so a core change); Gemma, OLMo 2, Granite, GLM-4 (missing units on both sides); Qwen3.5-MoE,
@@ -198,7 +211,8 @@ Qwen3-Next (no GDN in mini-sglang: kernel porting on one side); SmolLM3 (NoPE: a
   main. Any later documentation edit voids the branch point. M0.7 changes no model-facing surface; if that surface
   (recipe terms, `ModelSpec` / `WeightMap`, the manifest schema, the model plugin protocol, std knobs) changes before
   the freeze, the protocol re-runs.
-- **mini-sglang:** a depth-1 clone at `9a91cfa` (its history holds a ready Mistral diff, 7b670a2).
+- **mini-sglang:** a clone at `9a91cfa` with its full upstream history (its shipped equivalent of a guide, including
+  the Mistral addition 7b670a2). Holon's squash stays: its history holds the benchmark's own design.
 - Both clones sit under a root with no CLAUDE.md or AGENTS.md in any parent; the memory files Claude Code loads are
   recorded per run.
 - **Per run:** a fresh clone, its own venv installed offline from the clone with the dev group (Holon) or its pinned
@@ -245,13 +259,18 @@ Qwen3-Next (no GDN in mini-sglang: kernel porting on one side); SmolLM3 (NoPE: a
 - Reported: turns, wall time, diff size, and tokens and turns per concept through a file-path → concept map fixed
   before the pilot (manifest, entry points, `Ref` / `ModelSpec`, `WeightMap`, bundle, CI rules, and documentation —
   the guide, AGENTS.md, design.md — counted separately, so a fail is attributed to its cause).
+- **Documentation cost** (pre-registered, from per-call usage): each documentation token's first cache write plus one
+  cache read on every later call of the run, priced as in each costing.
 - A run failing for infrastructure (API outage, host fault) is re-run; a run failing its checks or a cap counts as +∞.
 
 ### 4.5 Protocol, rule and prediction (fixed before the pilot)
 
-- **Pilot:** 2 + 2 runs. It validates the harness and estimates σ of log cost for the record. Its runs count if the
-  protocol is unchanged after them; a failed pilot run triggers a harness review, not data.
-- **Counted:** **n = 10 per side**, fixed; launched in pairs (one per side, concurrently, on two GPUs).
+- **Counted:** **n = 10 per side**, fixed; launched in pairs (one per side, concurrently, on two GPUs). Runs 1–2 per
+  side are the **pilot**: they validate the harness and estimate σ of log cost for the record, and count if the
+  protocol is unchanged after them. A failed pilot run triggers a harness review; if no harness fault is found, it
+  counts as +∞.
+- **Guide-free runs** (report only): 3 Holon runs on the branch point without `docs/adding-a-model.md` and with
+  AGENTS.md's routing line to it removed, to separate documentation from structure.
 - **Rule:** r = median cost (Holon) / median cost (mini-sglang), failures +∞, under each costing. **Both r ≤ 0.70 →
   pass; else fail.** Reported on their own lines: the 80% bootstrap interval of r and each side's success rate.
   **Inconclusive:** if most runs on both sides fail although the reference ports passed, the harness (not the
@@ -262,14 +281,18 @@ Qwen3-Next (no GDN in mini-sglang: kernel porting on one side); SmolLM3 (NoPE: a
     for `w1` / `w3` → mean context ≈ S + 25K = 40K → ≈ 1.8M token-turns.
   - Holon: ≈ 4K of guide and AGENTS.md, ≈ 12K of recipes, units and manifests, ≈ 40 turns (five files, a reinstall,
     `$STATIC`) → mean context ≈ S + 20K = 35K → ≈ 1.4M token-turns.
-  - **r ≈ 0.78 (0.55–1.05):** a fail is somewhat more likely than a pass. If the agent also reads design.md (≈ 27K
-    tokens), r rises by ≈ 0.25.
+  - The token-turn ratio is ≈ 0.78. Priced (cache reads ≈ 0.1×, writes ≈ 1.25×, output ≈ 5× the input rate),
+    Holon's extra output (five new files) and the cache rewrites after its reinstall and `$STATIC` waits raise it:
+    **r ≈ 0.85 (0.6–1.1)**, a fail more likely than a pass. If the agent also reads design.md (≈ 27K tokens), r rises
+    by ≈ 0.25–0.6.
 - **Fail branches**, pre-registered:
-  - **documentation-attributed** (the documentation share alone accounts for the gap to 0.70): a documentation fix and
-    a full re-run (≈ 3–4 days, ≈ $100–500); the owner decides whether to run it.
-  - **concept-attributed:** plan §9's pivot (collapse slots and nouns), §4.7.
-- **Budget:** the pilot's 4 + 20 counted runs, ≈ 1–2 h each; estimated $5–25 per run → ≈ $120–600 (owner question 2);
-  the pilot's actual cost re-estimates it. fp32 scoring needs ≈ 24 GB of host memory per check (two at a time,
+  - **documentation-attributed** if Holon's median with its documentation cost (§4.4) removed gives r ≤ 0.70 under
+    both costings: a documentation fix that may only remove or re-route reading (no new content), its diff reviewed and
+    grepped like the branch point, then a full re-run (≈ 3–4 days, ≈ $100–500) if the owner decides; the re-run is
+    labelled "after a transcript-informed documentation fix" and published beside the first result.
+  - **concept-attributed** otherwise: plan §9's pivot (collapse slots and nouns), §4.7.
+- **Budget:** 20 counted runs plus 3 guide-free, ≈ 1–2 h each; estimated $5–25 per run → ≈ $100–500 for the
+  counted runs and ≈ $50–150 for the guide-free ones (owner question 2); the pilot's actual cost re-estimates it. fp32 scoring needs ≈ 24 GB of host memory per check (two at a time,
   capped).
 
 ### 4.6 After the runs
@@ -370,10 +393,10 @@ One lock per model's recommended file per card (✓ on main, **R** new, — borr
 - `holon.api`: every public name and signature, each Protocol member marked **required** or **optional**. The core's
   plugin hooks called by `hasattr` / `getattr` string today — `admit`, `adopt`, `bind_kernels`, `build`, `capacity`,
   `cut`, `draft_head`, `finalize_weights`, `graph_key`, `hit_length`, `ks`, `lookahead`, `needs_host_lens`,
-  `next_publish`, `parent`, `payload_pool`, `planner`, `q_support`, `rewind`, `shutdown`, `state_specs`, `stats`,
-  `substeps` — become small separate optional Protocols (the core keeps its `hasattr` checks, now against declared
-  names). Also `EngineConfig`'s fields, the `BuildCtx.options` keys the core provides, `WeightSource.max_context`
-  (D2), and the IPC records (`EngineRequest`, `TokenDelta`, `Abort`).
+  `next_publish`, `payload_pool`, `planner`, `q_support`, `rewind`, `shutdown`, `state_specs`, `stats`, `substeps`
+  — become small separate optional Protocols (the core keeps its `hasattr` checks, now against declared names); so
+  does the model plugin's trained-context hook (D2). Also `EngineConfig`'s fields, the `BuildCtx.options` keys the
+  core provides, and the IPC records (`EngineRequest`, `TokenDelta`, `Abort`).
 - The manifest schema (sections, keys, `[build] module` and its `--sm N` CLI), `SLOTS`, the entry-point group
   `holon.plugins` (value: the plugin's package; design §4.1's "path to manifest" is corrected in step 6).
 - String vocabularies: `KernelSpec` props, finish reasons, event and message kinds.
@@ -390,7 +413,7 @@ One lock per model's recommended file per card (✓ on main, **R** new, — borr
   defaults, Protocol members with their required / optional mark and whether plugins or the core implement the
   Protocol, `SLOTS`, manifest keys, `EngineConfig`, the options keys, the string vocabularies — and compares it with
   `core/abi.txt`. It also collects every `hasattr` / `getattr` string literal in `holon.core` and fails on one
-  `holon.api` does not declare. A difference fails unless the listing is regenerated with the version bumped: a new
+  `holon.api` does not declare, except an allow-list for the core's own attributes (`parent`, a core object's field). A difference fails unless the listing is regenerated with the version bumped: a new
   optional Protocol or member, a new name, field or key → minor; a required member added to a plugin-implemented
   Protocol, or anything removed or changed → major (a reviewed core ABI change, invariant 9, with a codemod for
   first-party plugins).
@@ -412,8 +435,10 @@ recipe terms, the model plugin protocol, manifest keys, how plugins register.
 ## 8. Publishing (prepared, not done)
 
 - **History:** the history as it stands is not published (B10). Right after the freeze (end of step 6) a **squashed
-  public root** of the release tree is created locally — not published — and steps 7–10 commit on top of it, so the
-  release locks and records name public SHAs; development continues on that line. Owner question 1 chooses this
+  public root** of the release tree is created locally and steps 7–10 commit on top of it, so the release locks and
+  records name public SHAs. The public line is pushed nowhere before the go, the private remote included. At step 6
+  local main moves to the public line and in-flight branches (e.g. M0.6 Gate B) are cherry-picked onto it; development
+  continues there. Owner question 1 (needed by step 6; default: squash) chooses this
   (recommended: pushed later to a fresh public repository) or `git filter-repo` over every leaking blob and message
   with a force-push of the private remote — which already holds the early history, and GitHub keeps force-pushed-over
   commits reachable by SHA until it purges them, so that path also needs GitHub's purge.
@@ -429,11 +454,11 @@ recipe terms, the model plugin protocol, manifest keys, how plugins register.
 | # | Work | Checks | Days |
 |---|---|---|---|
 | 1 | Packaging (D1): root project, declared deps, `manifest-deps`, pins, `uv.lock`, `.python-version`, `holon prebuild` with `[build]`, Dockerfile | fresh venv without system site-packages: `holonlm-testing` absent, CPU tests pass; cold start compiles only Triton; first start vs `start_timeout` | 2.5 |
-| 2 | D2 (serve from the lock, `max_context`) and the ABI mechanism at 0.1 (§7), `core_abi` required | `test_plans.py`, `test_plugins.py` cases; `check_locks`; `check_abi` | 3 |
+| 2 | D2 (serve from the lock, the trained-context hook, the `failed` frame's kind) and the ABI mechanism at 0.1 (§7), `core_abi` required | `test_plans.py`, `test_plugins.py` cases; `check_locks`; `check_abi` | 3 |
 | 3 | Baselines (§5.1): pins, SGLang backend, temperature option, `report.py`; smoke and tier-1 bars on the 3090 / 5090 — on current main | smoke matrix and bars recorded | 2 |
 | — | M0.6 Gate A merges (Gate B is off the critical path); M0.7 starts | — | — |
 | 4 | Documentation (D8), frozen at a recorded commit; then the legibility harness: fixtures, `$CHECK`, calibration, reference ports, plants, `$STATIC`, concept map, the squashed branch point | guide check; δ and port margins recorded; plants fail | 3 |
-| 5 | Legibility: pilot 2 + 2, counted 10 + 10, verdict; on fail §4.5 / §4.7 | verdict record; owner informed | 3–4 |
+| 5 | Legibility: 10 + 10 runs (the first 2 + 2 the pilot), 3 guide-free, verdict; on fail §4.5 / §4.7 | verdict record; owner informed | 3–4 |
 | — | M0.7 closes: one propagation covering D1's environment, D2, the mechanism and grammar on the development classes | its gates; served plan = lock on rtx-5080 / 4090 (acceptance 3's form) | — |
 | 6 | ABI 1.0, versions 0.1.0; design §4.1 / §4.4 / §4.5 and plan §1 corrections; demo task committed (D7); panel review of steps 1–6; the squashed public root created locally | review clean | 2 |
 | 7 | Locks (§6) in the release environment on the public root: propagate all, tune the R cells, MTP decision (D3) | L2, snapshots ×3; approvals and sweep time recorded | 2 + 3 machine |
@@ -450,7 +475,7 @@ adds the pivot (≈ 2–4 weeks) and a full re-run. Core diff: D2 (≈ 100 lines
 
 ## 10. Risks
 
-- **Legibility fails** (predicted r ≈ 0.78, a fail somewhat more likely): pre-registered branches (§4.5, §4.7).
+- **Legibility fails** (predicted r ≈ 0.85, a fail more likely than a pass): pre-registered branches (§4.5, §4.7).
 - **Context:** Claude Code assumes a far larger window than 32K; long sessions hit the limit (README, D7).
 - **Baselines on sm_120 / sm_86** may not run: "—", no patches beyond a documented one-liner; step 3 finds out early.
 - **Late fixes** after step 7 re-propagate every class; the tag waits.
@@ -460,11 +485,13 @@ adds the pivot (≈ 2–4 weeks) and a full re-run. Core diff: D2 (≈ 100 lines
 
 ## 11. Open questions for the owner
 
-1. **Publishing:** the squashed public root created locally after the freeze, with steps 7–10 on top and later pushed
-   to a fresh public repository (recommended) — or `filter-repo`, a force-push of the private remote and GitHub's
-   purge? Reserve the PyPI names `holonlm*` now?
+1. **Publishing** (needed by step 6; default: squash): the squashed public root created locally after the freeze,
+   local main moved onto it, steps 7–10 on top, pushed nowhere before your go and then to a fresh public repository
+   (recommended) — or `filter-repo`, a force-push of the private remote and GitHub's purge? Reserve the PyPI names
+   `holonlm*` now?
 2. **Legibility agent and spend:** proposed default — Claude Code with the current Claude Opus model at its dated id,
-   default thinking / effort, on your account; 24 runs, ≈ $120–600, plus ≈ $100–500 for a documentation-fail re-run.
+   default thinking / effort, on your account; 20 counted runs ≈ $100–500 and 3 guide-free ≈ $50–150, plus
+   ≈ $100–500 for a documentation-fail re-run.
    Agreed, or another model / cap?
 3. **FP8 without locks:** if M0.6 Gate B is late, does FP8 ship served with defaults (a scope change), or wait?
 
@@ -474,6 +501,25 @@ only on the 16 GB card; Qwen3.5 without locks; M0.6's files borrow on the 5090 /
 step 3 and marked "borrowed, unverified" in the README (§6); Dockerfile shipped, image not published (§8).
 
 ## 12. Review findings, resolved
+
+**Rev 3** (A: serving; B: methodology; C: scope).
+
+| Finding | Resolution |
+|---|---|
+| A-MAJOR: the clamp can never run — paged pools request one full-length sequence (`assembly.py` `_bind`), so `OutOfUnits` fires first | requested `max_model_len` = the lock's, else min(trained context, 32768); with `clamp_context` paged pools request ceil(`max_step_tokens` / page) units and `max_model_len` = min(requested, the smallest paged pool's tokens) before the state manager and scheduler; build-time readers keep the requested value, so the only plan diff is `engine.max_model_len` (D2) |
+| A-m1: start failures told apart by text | the `failed` frame gains a kind; `PluginError` and `OutOfUnits` roll back at once (D2) |
+| A-m2: `WeightSource` cannot read Qwen3.5 / 3.8's nested context | an optional model-plugin hook; None → budget only under the 32K cap (D2, §7) |
+| A-m3: `parent` is the core's own attribute | allow-listed in `check_abi`, not declared (§7) |
+| A-m4: the diff function and `--no-supervised` | the lock-diff function moves into the core with `plan_of`; `--no-supervised` gets the lock path (D2) |
+| A-m5 | covered by A-MAJOR |
+| B-MAJOR 1: the guide could be tailored to the task; mini-sglang's history removed | task-independent rule: all three packages in one table, qwen3_5 from qwen3 as the worked example; reviewer C reviews the frozen text; listed as a bias in Holon's favour; mini-sglang keeps its full history; 3 report-only guide-free runs (D8, §4.1, §4.2, §4.5) |
+| B-MAJOR 2: the documentation-fail branch is undefined | pre-registered documentation cost (first write + later reads per call) and its 0.70 test under both costings; the fix only removes or re-routes reading, reviewed and grepped; the re-run labelled and published beside the first (§4.4, §4.5) |
+| B-m1: prediction unpriced | r ≈ 0.85 (0.6–1.1) priced with writes, reads and output; design.md adds 0.25–0.6 (§4.5) |
+| B-m2: MTP rule on p99s of a short trace | paired per-round ratios of p95 gap and p95 TTFT with ≥ 200 requests per round; pooled p99 reported; power estimate after 4 rounds; "undecided → plain" expected (D3) |
+| B-m3: pilot runs outside n | runs 1–2 of the 10; a failed pilot run without a harness fault counts as +∞ (§4.5) |
+| B-m4: TPOT "or" | ≥ 5% **and** ≥ 2 SE (D3) |
+| C-m1: ordering of the public line | owner question 1 needed by step 6, default squash; pushed nowhere before the go, private remote included; local main moves at step 6, in-flight branches cherry-picked (§8, §11) |
+| C-m2: a documentation fail could hide | covered by B-MAJOR 2: both results published, numeric definition |
 
 **Rev 2** (A: serving, packaging, ABI; B: methodology; C: architecture, scope).
 
