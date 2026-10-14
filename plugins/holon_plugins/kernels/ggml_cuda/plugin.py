@@ -84,43 +84,45 @@ MMVQ_MAX = 8                    # llama.cpp's MMVQ_MAX_BATCH_SIZE: mmvq's most a
 # The crossover per shape (docs/m07-perf.md D2): (GPU class, ggml type, in, out, mmq's activation mode) -> mmvq up to
 # this many rows, mmq above, where repeated graph-timed sweeps (bench/qmm_sweep.py) found mmq faster per call by at
 # least 3% and by more than 3 sd at every graphed row the entry moves (4, 7, 8), and the entries save at least 1% of
-# some lock's decode or verify step (evidence/m07-step1_d2_<class>_2026-10-14.json: ten sweeps; the 27B's shapes).
-# Pinned by this plugin's `src`; every other shape keeps llama.cpp's rule.
+# some lock's decode or verify step (ten sweeps of the 27B's shapes). mmq writes bf16 itself (D4), so the table is
+# the sweeps' no-cast column (evidence/m07-step1_d2-no-cast_<class>_2026-10-14.json). Pinned by this plugin's `src`;
+# every other shape keeps llama.cpp's rule.
 CROSSOVER: dict[tuple[str, str, int, int, str], int] = {
     ("rtx-5080", "iq1_s", 5120, 17408, "q8_1"): 7,
-    ("rtx-5080", "iq2_s", 5120, 6144, "q8_1"): 7,
+    ("rtx-5080", "iq2_s", 17408, 5120, "q8_1"): 7,
     ("rtx-5080", "iq2_s", 5120, 17408, "q8_1"): 6,
     ("rtx-5080", "iq2_s", 5120, 34816, "q8_1"): 6,
-    ("rtx-5080", "iq2_s", 17408, 5120, "q8_1"): 7,
-    ("rtx-5080", "iq2_xs", 5120, 6144, "q8_1"): 7,
-    ("rtx-5080", "iq2_xs", 5120, 17408, "q8_1"): 7,
+    ("rtx-5080", "iq2_s", 5120, 6144, "q8_1"): 7,
+    ("rtx-5080", "iq2_xs", 5120, 17408, "q8_1"): 6,
     ("rtx-5080", "iq2_xs", 5120, 34816, "q8_1"): 7,
+    ("rtx-5080", "iq2_xs", 5120, 6144, "q8_1"): 7,
+    ("rtx-5080", "iq2_xxs", 17408, 5120, "q8_1"): 7,
     ("rtx-5080", "iq2_xxs", 5120, 12288, "q8_1"): 6,
     ("rtx-5080", "iq2_xxs", 5120, 17408, "q8_1"): 6,
     ("rtx-5080", "iq2_xxs", 5120, 34816, "q8_1"): 6,
-    ("rtx-5080", "iq2_xxs", 17408, 5120, "q8_1"): 7,
-    ("rtx-5080", "iq3_s", 5120, 6144, "q8_1"): 7,
+    ("rtx-5080", "iq3_s", 17408, 5120, "q8_1"): 7,
     ("rtx-5080", "iq3_s", 5120, 10240, "q8_1"): 7,
     ("rtx-5080", "iq3_s", 5120, 12288, "q8_1"): 7,
     ("rtx-5080", "iq3_s", 5120, 17408, "q8_1"): 7,
     ("rtx-5080", "iq3_s", 5120, 34816, "q8_1"): 7,
-    ("rtx-5080", "iq3_s", 17408, 5120, "q8_1"): 7,
-    ("rtx-5080", "iq4_xs", 5120, 6144, "q8_1"): 7,
+    ("rtx-5080", "iq3_s", 5120, 6144, "q8_1"): 7,
+    ("rtx-5080", "iq4_xs", 17408, 5120, "q8_1"): 7,
     ("rtx-5080", "iq4_xs", 5120, 10240, "q8_1"): 6,
-    ("rtx-5080", "iq4_xs", 5120, 12288, "q8_1"): 7,
+    ("rtx-5080", "iq4_xs", 5120, 12288, "q8_1"): 6,
     ("rtx-5080", "iq4_xs", 5120, 17408, "q8_1"): 7,
     ("rtx-5080", "iq4_xs", 5120, 34816, "q8_1"): 7,
+    ("rtx-5080", "iq4_xs", 5120, 6144, "q8_1"): 7,
     ("rtx-5080", "iq4_xs", 6144, 5120, "q8_1"): 7,
-    ("rtx-5080", "iq4_xs", 17408, 5120, "q8_1"): 7,
-    ("rtx-5090", "iq3_s", 5120, 17408, "q8_1"): 7,
     ("rtx-5090", "iq3_s", 17408, 5120, "q8_1"): 6,
-    ("rtx-5090", "iq4_nl", 5120, 34816, "q8_1"): 7,
+    ("rtx-5090", "iq3_s", 5120, 17408, "q8_1"): 6,
     ("rtx-5090", "iq4_nl", 17408, 5120, "q8_1"): 6,
+    ("rtx-5090", "iq4_nl", 5120, 17408, "q8_1"): 7,
+    ("rtx-5090", "iq4_nl", 5120, 34816, "q8_1"): 7,
+    ("rtx-5090", "iq4_xs", 17408, 5120, "q8_1"): 6,
     ("rtx-5090", "iq4_xs", 5120, 10240, "q8_1"): 7,
     ("rtx-5090", "iq4_xs", 5120, 12288, "q8_1"): 7,
-    ("rtx-5090", "iq4_xs", 5120, 17408, "q8_1"): 7,
+    ("rtx-5090", "iq4_xs", 5120, 17408, "q8_1"): 6,
     ("rtx-5090", "iq4_xs", 5120, 34816, "q8_1"): 7,
-    ("rtx-5090", "iq4_xs", 17408, 5120, "q8_1"): 6,
     ("rtx-5090", "q6_k", 5120, 248320, "q8_1"): 6,
 }
 
