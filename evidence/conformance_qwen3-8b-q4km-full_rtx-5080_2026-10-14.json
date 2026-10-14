@@ -3,8 +3,8 @@
  "date": "2026-10-14",
  "gpu_class": "rtx-5080",
  "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf",
- "serve": "holon serve <model> --port 8000 --max-seqs 16 --max-model-len 32768 --slots logits_processor=grammar.xgrammar (commit fbced8f; core and plugins as 8c59010)",
- "commit": "b77d45cb80354f7fcf71593e37d9aff0e5bd0275",
+ "serve": "holon serve <model> --port 8000 --max-seqs 16 --max-model-len 32768 --slots logits_processor=grammar.xgrammar (commit fbced8f, core and plugins as 8c59010; the passes' 503 retries at concurrency 1 at 29fc8f5)",
+ "commit": "29fc8f50a5b3a33cba14b382d4e6cb1fde4cb03f",
  "method": "JSONSchemaBench conformance of strict JSON-schema requests (docs/m05-grammar.md D9, \u00a71 acceptance 1; evidence).\n\nThe schemas: the test splits of JSONSchemaBench minus Github_trivial / Github_ultra and the 13 unsatisfiable Glaive\nschemas (upstream issue 16), optionally a seeded sample. Three steps, each writing JSON lines into a work directory:\n\n- `precompile` (no server, CPU): per schema, the server's own checks for a strict request \u2014 the constraint check with\n  D9's reject list, then grammar.xgrammar's vetting worker (compile time, compiled size, peak growth; the 10 s\n  timeout, the size and memory caps) \u2014 for one tokenizer. Run on an idle host.\n- `run` (against `holon serve` with grammar.xgrammar): one pass of chat requests (the schema as the prompt, thinking\n  off, no stop strings, `--max-tokens`), constrained by `response_format` (strict) or not (`--free`), greedy or\n  sampled (`--temperature`, `--seed`); per request its status (a 400 / 503 is a rejection, with its reason), finish\n  reason, tokens, TTFT, the largest gap between its stream's events, and whether its output validates\n  (`validator_for(schema)`, format checks on; a request-time `error` finish counts invalid). The server's /metrics\n  before and after, and its frontend process's CPU time, beside it. A 503 is retried twice after 2 s.\n- `report`: the evidence record \u2014 declared coverage and rejections by reason per tokenizer, compile times, and per\n  pass: valid / (accepted \u2212 truncated), truncated share (beside the unconstrained pass's), truncations ending in a\n  whitespace run, TTFT cold (the server's first sight of a schema) vs warm, event gaps, frontend CPU per token.",
  "prompt": {
   "system": "You need to generate a JSON object that matches the schema below.",
@@ -302,25 +302,25 @@
     "uuid": true
    },
    "requests": 2668,
-   "accepted": 1616,
+   "accepted": 1625,
    "rejected": {
     "400": 1040,
-    "503": 12
+    "503": 3
    },
    "finish": {
     "length": 33,
-    "stop": 1583
+    "stop": 1592
    },
    "truncated": 33,
-   "truncated_share": 0.0204,
+   "truncated_share": 0.0203,
    "truncated_whitespace_runs": [
     "o78734",
     "o82694"
    ],
-   "valid": 1582,
+   "valid": 1591,
    "invalid": 1,
    "validator_could_not_judge": 0,
-   "conformance": 0.999368,
+   "conformance": 0.999372,
    "invalid_examples": [
     {
      "id": "vars",
@@ -329,24 +329,24 @@
     }
    ],
    "unjudged_examples": [],
-   "tokens": 266191,
+   "tokens": 266712,
    "ttft_ms": {
-    "n": 1616,
-    "p50": 151.5,
-    "p90": 3909.5,
-    "p99": 14815.8,
+    "n": 1625,
+    "p50": 152.9,
+    "p90": 4127.9,
+    "p99": 16359.5,
     "max": 29364.3
    },
    "max_gap_ms": {
-    "n": 1616,
+    "n": 1625,
     "p50": 90.0,
     "p90": 525.6,
     "p99": 3684.5,
     "max": 35794.5
    },
    "wall_s": 473.1,
-   "attempts_over_1": 28,
-   "frontend_cpu_us_per_token": 100.8,
+   "attempts_over_1": 19,
+   "frontend_cpu_us_per_token": 100.6,
    "engine_counters": {
     "grammar.xgrammar.drafts_refused": 0
    },
@@ -373,7 +373,6 @@
     "400: additionalItems is not supported": 11,
     "400: format 'path' is not supported": 11,
     "400: format 'topic' is not supported": 11,
-    "503: N.N s of constraint compiles are queued": 9,
     "400: format 'time' is not supported": 6,
     "400: not is not supported": 6,
     "400: multipleOf is not supported": 5,
@@ -406,10 +405,10 @@
     "400: contentMediaType is not supported": 1
    },
    "truncated_vs_free": {
-    "schemas": 1615,
-    "share": 0.0198,
-    "free_share": 0.0372,
-    "points": -1.73
+    "schemas": 1624,
+    "share": 0.0197,
+    "free_share": 0.0369,
+    "points": -1.72
    }
   },
   "sampled-s0": {
@@ -428,44 +427,44 @@
     "uuid": true
    },
    "requests": 2668,
-   "accepted": 1616,
+   "accepted": 1625,
    "rejected": {
     "400": 1040,
-    "503": 12
+    "503": 3
    },
    "finish": {
     "length": 29,
-    "stop": 1587
+    "stop": 1596
    },
    "truncated": 29,
-   "truncated_share": 0.0179,
+   "truncated_share": 0.0178,
    "truncated_whitespace_runs": [
     "o78734"
    ],
-   "valid": 1587,
+   "valid": 1596,
    "invalid": 0,
    "validator_could_not_judge": 0,
    "conformance": 1.0,
    "invalid_examples": [],
    "unjudged_examples": [],
-   "tokens": 262630,
+   "tokens": 263603,
    "ttft_ms": {
-    "n": 1616,
+    "n": 1625,
     "p50": 143.1,
-    "p90": 4558.8,
-    "p99": 8822.2,
+    "p90": 4571.9,
+    "p99": 8888.4,
     "max": 10956.6
    },
    "max_gap_ms": {
-    "n": 1616,
-    "p50": 87.5,
-    "p90": 495.5,
+    "n": 1625,
+    "p50": 87.3,
+    "p90": 487.4,
     "p99": 3180.6,
     "max": 24779.1
    },
    "wall_s": 468.3,
-   "attempts_over_1": 26,
-   "frontend_cpu_us_per_token": 101.4,
+   "attempts_over_1": 17,
+   "frontend_cpu_us_per_token": 101.1,
    "engine_counters": {
     "grammar.xgrammar.drafts_refused": 0
    },
@@ -492,7 +491,6 @@
     "400: additionalItems is not supported": 11,
     "400: format 'path' is not supported": 11,
     "400: format 'topic' is not supported": 11,
-    "503: N.N s of constraint compiles are queued": 9,
     "400: format 'time' is not supported": 6,
     "400: not is not supported": 6,
     "400: multipleOf is not supported": 5,
@@ -525,10 +523,10 @@
     "400: contentMediaType is not supported": 1
    },
    "truncated_vs_free": {
-    "schemas": 1615,
-    "share": 0.0173,
-    "free_share": 0.0372,
-    "points": -1.98
+    "schemas": 1624,
+    "share": 0.0172,
+    "free_share": 0.0369,
+    "points": -1.97
    }
   },
   "sampled-s1": {
@@ -547,46 +545,46 @@
     "uuid": true
    },
    "requests": 2668,
-   "accepted": 1615,
+   "accepted": 1625,
    "rejected": {
     "400": 1040,
-    "503": 13
+    "503": 3
    },
    "finish": {
     "length": 31,
-    "stop": 1584
+    "stop": 1594
    },
    "truncated": 31,
-   "truncated_share": 0.0192,
+   "truncated_share": 0.0191,
    "truncated_whitespace_runs": [
     "o78734",
     "o61120",
     "kb_1019_Normalized"
    ],
-   "valid": 1584,
+   "valid": 1594,
    "invalid": 0,
    "validator_could_not_judge": 0,
    "conformance": 1.0,
    "invalid_examples": [],
    "unjudged_examples": [],
-   "tokens": 271174,
+   "tokens": 272027,
    "ttft_ms": {
-    "n": 1615,
+    "n": 1625,
     "p50": 137.9,
-    "p90": 4129.5,
+    "p90": 4209.4,
     "p99": 14328.3,
     "max": 21893.2
    },
    "max_gap_ms": {
-    "n": 1615,
-    "p50": 86.9,
-    "p90": 534.2,
+    "n": 1625,
+    "p50": 86.3,
+    "p90": 524.2,
     "p99": 3758.6,
     "max": 73325.7
    },
    "wall_s": 477.5,
-   "attempts_over_1": 28,
-   "frontend_cpu_us_per_token": 97.8,
+   "attempts_over_1": 18,
+   "frontend_cpu_us_per_token": 97.5,
    "engine_counters": {
     "grammar.xgrammar.drafts_refused": 0
    },
@@ -613,7 +611,6 @@
     "400: additionalItems is not supported": 11,
     "400: format 'path' is not supported": 11,
     "400: format 'topic' is not supported": 11,
-    "503: N.N s of constraint compiles are queued": 10,
     "400: format 'time' is not supported": 6,
     "400: not is not supported": 6,
     "400: multipleOf is not supported": 5,
@@ -646,10 +643,10 @@
     "400: contentMediaType is not supported": 1
    },
    "truncated_vs_free": {
-    "schemas": 1614,
-    "share": 0.0186,
-    "free_share": 0.0372,
-    "points": -1.86
+    "schemas": 1624,
+    "share": 0.0185,
+    "free_share": 0.0369,
+    "points": -1.85
    }
   },
   "warm": {

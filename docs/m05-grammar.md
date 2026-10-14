@@ -123,7 +123,7 @@ conformance; multimodal content blocks; more than one active logits processor (�
    - Change: a constrained sequence is not scheduled while it has `pending` rows (pending covers inexact verify
      rows) or while `BLOCKED`. When a gated sequence is ready but pending, `step()` commits the in-flight step before
      scheduling (A′, D2) — or, under the alternative A, schedules without it. One option, chosen by D2's
-     measurement.
+     measurement. *(Panel round after step 5: A′ is unconditional; A and its switch are removed.)*
    - Toy proof: constrained and free requests mixed at depth 1; `fill` asserts that every constrained row's host
      tokens are complete; the free rows overlap.
 3. **Draft tokens to the host.**
@@ -158,7 +158,9 @@ conformance; multimodal content blocks; more than one active logits processor (�
      verifier calls `apply` on every path (prefill and decode, graphed and eager). The graph key gains one core
      boolean, "this step has constrained rows"; the startup capture set crosses it with every (bucket, width,
      sampler variant) when a processor is selected (capture stages a valid index list of out-of-range rows); the
-     memory profile includes `apply`.
+     memory profile includes `apply`. *(Panel round after step 5 — C5-3, arch m1: with a processor selected every
+     step applies, over an all-padding index list when it has no constrained rows (the kernel's programs exit at
+     once), so the boolean and the doubled capture set are gone; §11.)*
    - **Logprobs are of the masked distribution** (vLLM's default raw mode also applies the grammar mask before the
      sampler), clamped by the frontends at −9999 (JSON has no −∞); `api/frontend.py:26-28` is updated. No
      raw-logits copy.
@@ -204,7 +206,9 @@ unread `max_depth` is removed (the gate comes from `open`).
   - **Predictions:** host time per constrained step 1–2 ms (commit, schedule, fill, launch); single stream 8B (6.5 ms
     step) **1.15–1.30×** — likely to trigger the split; 27B + MTP (a verify step ≈ 27 ms for 2.56 tokens) 1.04–1.07×.
     Mixed: A gives constrained rows ≈ 0.5× of free; A′ costs free rows the same 1.04–1.30× as single stream.
-  - **Decision (step 4, measured on the RTX 5080, §11): A′, the split deferred to M0.7.** Free rows under A′ slow by
+  - **Decision (step 4, measured on the RTX 5080, §11): A′, the split deferred to M0.7.** A′ is unconditional: the
+    variant A and `Engine.commit_for_constrained` are removed (panel round after step 5, arch m2), and the scheduler's
+    gate — a constrained sequence is never scheduled with a row in flight — is the invariant. Free rows under A′ slow by
     1.050× (8B) and 1.016× (27B + MTP), under 1.15×; the single-stream penalty with grammar.xgrammar's fill and apply
     added is 1.061× (8B) and 1.026× (27B + MTP), under 1.10× on both. Host time per constrained step was 0.4–0.8 ms,
     not 1–2 ms, so both penalties came in under the predictions (8B 1.15–1.30×, 27B 1.04–1.07×).
@@ -1099,3 +1103,77 @@ For the panel (and the owner):
    27B + MTP's second engine): judges and benches that build several engines per process inherit it (they pin or
    tolerate it today); `gate_cost` now sizes in fresh processes. Worth tracing in core (what `Engine.close` leaves
    behind), outside this step's scope.
+
+### Panel round after step 5 (2026-10-14)
+
+The panel (architecture clean; numerics: evidence sound) asked for seven items, and the correctness reviewer for
+three more:
+
+1. **One graph set with a processor selected (C5-3, arch m1).** Every step applies the processor's masks, over an
+   all-padding index list when it has no constrained rows (the kernel's programs exit at once: 1.4–3 µs per call,
+   step 2's measurement); the graph key loses its boolean and the capture set its doubling (`Engine._masks` always
+   returns rows, `Executor._graph_variants` / `_graph_step` / `_graph_key`; design §7.4). The profile's temporary
+   graphs are dropped before the free memory is read (they were already: the only reference goes when `self.graphs`
+   is restored; now commented). Re-measured on an RTX 5080 (`evidence/gate_sizing_qwen3.8-27b-iq3s-mtp-r2_…`,
+   `…qwen3-8b-q4km-r2_…`, fresh processes, three rounds): **27B + MTP: graphs 27 and 27, capture 3.0 s and 3.0 s,
+   KV tokens 39,632 without and 39,584 with the processor (−0.12%; was −5.8%)**; the sizing's free memory differs by
+   2 MiB (3811.9 vs 3809.9 MiB: the mask staging) and capture's extra device memory is equal (376 MiB both). 8B:
+   graphs 15 and 15, KV 61,712 both. **Acceptance 6** (`evidence/gate_cost_*-r2_rtx-5080_2026-10-14.json`, a third
+   configuration `selected`: the processor selected, nothing constrained): tokens and verify rows byte-identical to
+   no processor in every round, on both models; its TPOT 1.0007× (27B) and 1.0002× (8B) of none with the toy's
+   no-op apply (the real kernel over padding adds ≤ 3 µs a step: ≤ 0.05%). D2's numbers hold: single-stream penalty
+   with fill and apply 1.027× / 1.059×, free rows under A′ 1.016× / 1.045×.
+2. **A′ unconditional (arch m2):** `Engine.commit_for_constrained` and the A variant are deleted; the scheduler's
+   gate (no constrained row scheduled with one in flight) is the invariant; D2, §3.2 and design §7.3 updated;
+   `test_logits_processor.py`'s matrix runs depth 0 and depth 1 (every decode step holds every running
+   constrained sequence) instead of three gates; `gate_cost` runs none / selected / A′.
+3. **The constrained check's calibration ends at the stop token (C5-2):** re-run on the A5000
+   (`evidence/constrained_bounded_qwen3.8-27b-iq3s-mtp_rtx-a5000_2026-10-14.json`, replacing the record above):
+   **threshold 0.229 nats** (free pair ≤ 0.106; calibration's 4 divergences in 24 natural-text prompts 0.018–0.229),
+   **constrained first divergences ≤ 0.124 (0.006, 0.042, 0.093, 0.100, 0.111, 0.124), PASS**; errors 0; masked
+   agreement plain 99.712%, spec 99.692%, both 99.938% at confident positions; KL p99 2.8e-3 vs 2.6e-3. (a) The
+   recorded first PASS used 7.931 (the post-stop artefact); recomputed from its recorded gaps without the two
+   post-`<|im_end|>` divergences, the threshold is 0.229 and the verdict PASS — both recorded here, the re-run agrees.
+4. **The 7.93-nat gap, localized (C5-2 numerics; `evidence/post_eot_decode_vs_prefill_rtx-a5000_2026-10-14.json`):
+   benign, not a bug in a shared path.** Before the first `<|im_end|>` every path agrees (decode vs teacher-forced
+   KL ≤ 0.05, alone vs batched KL ≤ 0.006, argmax equal everywhere). Past it, under `ignore_eos`, the model loops on
+   special tokens (`<|im_end|>`, `\n`, `<|im_start|>` …) and the same small path differences grow: decode vs
+   teacher-forced KL up to 0.47 (one chunk) and 1.5 (1-token chunks); prompt 17 decoded alone vs in a batch of four
+   (eager or graphed alike) KL up to 0.71 with q8_0 KV, 0.21 with bf16 KV — enough to flip a near-certain token: in
+   the batch it takes `<|im_end|>` at position 95 where alone it takes `<|im_start|>`, which is the 7.93-nat gap the
+   one-sequence teacher-forced reference reported. It does not start at the end-of-turn token (the differences rise
+   over the loop, first flipping 89 tokens later), and no one path carries it: chunking, the KV format and batch
+   composition (the attention split count and the matmul path follow the batch) each move it; rows do not leak into
+   each other (they agree before the end of turn). Recorded as a property of the quantized model in text past its
+   end of turn; `ignore_eos` judges should end at the stop token (the constrained check now does).
+5. **Docs (arch m3):** design §7.9 has a sentence on slot objects' `stats()`; `FrontendBundle`'s stale "Optional:
+   `constraint(…)`" comment is deleted.
+6. **Core follow-up, recorded (not now):** a second engine in one process sizes its pools from ≈ 2 GB less free
+   memory (27B + MTP; step 4 above): `Engine.close` should break its reference cycles explicitly, so a closed
+   engine's weights go at once.
+7. **Truncation gate (not changed; with the owner).** The reviewer's analysis of the 27B + MTP's +2.33 points: at n
+   = 301 the difference's standard error is ≈ 1.0 point: +2.33 ± 1.0 is 2.3 SE above no difference but only 0.3 SE
+   past the 2-point gate — an excess over unconstrained generation, not one established past the gate. Of its 8 truncations, 6 are grammar-admitted runaways — 2 whitespace (after `{`), 3
+   numbers (`0.000…`), 1 repetition inside a string — and 2 are long legitimate objects (also long unconstrained).
+   Options: (a) a whitespace cap of 16 or 32 (S2-1's condition is met; its cost measured above: compiled grammars
+   ×17–30, fill ×3–10); (b) a bound on a number's digits (no JSON Schema keyword gives one; a grammar-level bound in
+   the plugin); (c) a repetition guard (outside the grammar: the sampler's or frontend's); (d) accept the shortfall
+   for the 27B with the 8B within the gate (−1.72 points over the full split). No guard is added; the decision is the
+   owner's.
+
+The correctness reviewer's items:
+- (a) above, in 3.
+- (b) **Mid-pattern anchors, a reject-list hole, fixed:** xgrammar drops `^` / `$` except at a branch's ends (`a^b`
+  and `^a$b` admit "ab", `(a)^` admits "a", `x?^a` admits "xa", `^(?:a$|b)c$` admits "ac"). Strict patterns now
+  refuse `^` other than at the start or right after a top-level `|`, and `$` other than at the end or right before
+  a top-level `|` (`_loose`); the five are in the oracle's hole list (they fail before). Patterns follow JSON
+  Schema's dialect, ECMA 262 with the `u` flag: `\u{41}` is a code point escape and `[\1]` a syntax error, so both
+  are refused too (`\u{…}`; a backreference digit anywhere). Of the filtered split, no schema is newly refused by
+  the anchor rule (the lookaround rule refused `vars` only).
+- (c) **Every cold-accepted 8B schema is now judged:** the 9–10 per pass that the server turned away with 503
+  "compiles are queued" at concurrency 16 were sent again at concurrency 1 (`conformance.py run --retry <pass>`;
+  the report merges them): greedy 9 of 9 valid, seed 0 9 of 9, seed 1 10 of 10. Over the 1625 cold-accepted
+  schemas (3 more are compile timeouts, rejections): **greedy 1591 valid, 1 invalid (`vars`, refused since
+  b77d45c), 33 truncated, 0 unjudged → 100% under the fixed reject list; sampled 1596 and 1594 valid of 1596 and
+  1594 judged, 0 unjudged**; truncated share −1.72 / −1.97 / −1.85 points vs unconstrained
+  (`evidence/conformance_qwen3-8b-q4km-full_rtx-5080_2026-10-14.json`, regenerated).

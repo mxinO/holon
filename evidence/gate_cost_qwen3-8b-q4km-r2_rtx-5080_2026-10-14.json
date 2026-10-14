@@ -1,0 +1,1027 @@
+{
+ "workload": "gate_cost_qwen3-8b-q4km",
+ "date": "2026-10-13",
+ "gpu_class": "rtx-5080",
+ "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf",
+ "command": "python bench/gate_cost.py --gpu 0 --model unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf --corpus judge/prompts/v1.jsonl --name qwen3-8b-q4km --rounds 3 --sizing-rounds 1 --engine-args '--max-seqs 4 --max-model-len 768 --max-step-tokens 2048'",
+ "commit": "29fc8f50a5b3a33cba14b382d4e6cb1fde4cb03f",
+ "state_memory": 9105504450,
+ "processor_selected": {
+  "none": [
+   {
+    "state_memory": 9291331072,
+    "capture_s": 0.36,
+    "graphs": 9,
+    "kv_tokens": 63008
+   }
+  ],
+  "A\u2032": [
+   {
+    "state_memory": 9291331072,
+    "capture_s": 0.31,
+    "graphs": 9,
+    "kv_tokens": 63008
+   }
+  ]
+ },
+ "summary": {
+  "identical_tokens": true,
+  "identical_spec_rows": true,
+  "spec_rows": {},
+  "none": {
+   "single_tpot_ms": {
+    "median": 6.493,
+    "spread": 0.002
+   },
+   "mixed_free_tpot_ms": {
+    "median": 7.33,
+    "spread": 0.031
+   },
+   "mixed_constrained_tpot_ms": {
+    "median": 7.33,
+    "spread": 0.031
+   },
+   "mixed_constrained_tpot_ms_while_free": {
+    "median": 7.33,
+    "spread": 0.031
+   },
+   "single_steps_per_request": 257.0,
+   "single_phase_us_mean": {
+    "schedule": 29.2,
+    "fill": 0.0,
+    "launch": 264.0,
+    "commit": 24.8,
+    "step": 346.3,
+    "wall_us": 6489.4
+   }
+  },
+  "selected": {
+   "single_tpot_ms": {
+    "median": 6.494,
+    "spread": 0.003
+   },
+   "mixed_free_tpot_ms": {
+    "median": 7.339,
+    "spread": 0.008
+   },
+   "mixed_constrained_tpot_ms": {
+    "median": 7.339,
+    "spread": 0.008
+   },
+   "mixed_constrained_tpot_ms_while_free": {
+    "median": 7.339,
+    "spread": 0.008
+   },
+   "single_steps_per_request": 257.0,
+   "single_phase_us_mean": {
+    "schedule": 30.7,
+    "fill": 1.3,
+    "launch": 294.9,
+    "commit": 29.1,
+    "step": 387.3,
+    "wall_us": 6490.0
+   }
+  },
+  "A\u2032": {
+   "single_tpot_ms": {
+    "median": 6.848,
+    "spread": 0.007
+   },
+   "mixed_free_tpot_ms": {
+    "median": 7.659,
+    "spread": 0.016
+   },
+   "mixed_constrained_tpot_ms": {
+    "median": 7.659,
+    "spread": 0.016
+   },
+   "mixed_constrained_tpot_ms_while_free": {
+    "median": 7.659,
+    "spread": 0.016
+   },
+   "single_steps_per_request": 257.0,
+   "single_phase_us_mean": {
+    "schedule": 32.1,
+    "fill": 4.1,
+    "launch": 304.6,
+    "commit": 27.9,
+    "step": 401.4,
+    "wall_us": 6843.7
+   }
+  },
+  "d2": {
+   "single_penalty_toy": 1.0547,
+   "single_penalty_with_fill_apply": 1.0592,
+   "free_slowdown": {
+    "selected": 1.0012,
+    "A\u2032": 1.0449
+   },
+   "selected_single_penalty": 1.0002,
+   "constrained_vs_free_under": {
+    "A\u2032": 1.0
+   }
+  }
+ },
+ "grammar": {
+  "fill_us_per_step": {
+   "mean": 31.5,
+   "p50": 22.8,
+   "max": 86.8
+  },
+  "columns_per_step_mean": 1.0,
+  "fills": 359,
+  "drafts_refused": 0,
+  "spec_drafted": null,
+  "apply_us_per_call": {
+   "1": 1.56
+  },
+  "outputs": [
+   {
+    "tokens": 84,
+    "steps": 84,
+    "text": "{\n  \"name\": \"Ana Silva\",\n  \"age\": 28,\n  \"email\": \"ana.silva@example.com\",\n  \"hobbies\": [\"coding\", \"photography\", \"reading\", \"exploring Lisbon\"],\n  \"address\": {\n    \"street\": \"Rua das Flores\",\n    \"cit"
+   },
+   {
+    "tokens": 89,
+    "steps": 89,
+    "text": "{\n  \"name\": \"Captain Elias Morgan\",\n  \"age\": 68,\n  \"email\": \"captain.elias.morgan@example.com\",\n  \"hobbies\": [\"collecting antique maps\", \"reading maritime history\", \"fishing\", \"playing chess\"],\n  \"add"
+   },
+   {
+    "tokens": 91,
+    "steps": 91,
+    "text": "{\n  \"name\": \"Aiko Tanaka\",\n  \"age\": 17,\n  \"email\": \"aiko.tanaka@example.com\",\n  \"hobbies\": [\"playing violin\", \"calligraphy\", \"reading classical literature\"],\n  \"address\": {\n    \"street\": \"Shijo-dori 5"
+   },
+   {
+    "tokens": 95,
+    "steps": 95,
+    "text": "{\n  \"name\": \"Evelyn Carter\",\n  \"age\": 42,\n  \"email\": \"evelyn.carter@beesontario.com\",\n  \"hobbies\": [\"beekeeping\", \"wildflower gardening\", \"reading historical novels\", \"hiking\"],\n  \"address\": {\n    \"st"
+   }
+  ]
+ },
+ "rounds": [
+  {
+   "none": {
+    "single": [
+     {
+      "tokens": "caf160ed6e483cff",
+      "tpot_ms": 6.4980713372100505,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 33.18103137255857,
+       "fill": 0.0,
+       "launch": 279.33608627449337,
+       "commit": 27.67725882353605,
+       "step": 371.8741568627391,
+       "wall_us": 6493.583183984419
+      }
+     },
+     {
+      "tokens": "83128c00987e13a3",
+      "tpot_ms": 6.4984480706020715,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 34.85541960786423,
+       "fill": 0.0,
+       "launch": 282.4138627451059,
+       "commit": 29.486501960783315,
+       "step": 379.7169058823871,
+       "wall_us": 6493.838309817125
+      }
+     },
+     {
+      "tokens": "110a2b449eaf000f",
+      "tpot_ms": 6.498401019580699,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 33.82131764707912,
+       "fill": 0.0,
+       "launch": 281.005756862747,
+       "commit": 27.922082352947168,
+       "step": 374.5210509803872,
+       "wall_us": 6493.837019147844
+      }
+     },
+     {
+      "tokens": "d5d81831ede55fcf",
+      "tpot_ms": 6.497914886259584,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 25.80874117646371,
+       "fill": 0.0,
+       "launch": 240.53401568626762,
+       "commit": 28.43715294120883,
+       "step": 318.63689411765444,
+       "wall_us": 6494.398929884054
+      }
+     }
+    ],
+    "mixed": [
+     {
+      "tokens": [
+       "35a16cf43dd008d4",
+       "3d9a1e7283f6f1cc",
+       "bd23abffa650fc61",
+       "fba5ee00f46edad4"
+      ],
+      "tpot_ms": [
+       7.301612490190047,
+       7.301612490190047,
+       7.301612490190047,
+       7.301612490190047
+      ],
+      "constrained_tpot_ms_while_free": 7.301612490190047,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     },
+     {
+      "tokens": [
+       "b56b0cdd5c1a75b0",
+       "cc35680c1849a90a",
+       "8d28e45752bb1323",
+       "4688250e43f26518"
+      ],
+      "tpot_ms": [
+       7.328323752895527,
+       7.328323752895527,
+       7.328323752895527,
+       7.328323752895527
+      ],
+      "constrained_tpot_ms_while_free": 7.328323752895527,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     }
+    ],
+    "stats": {},
+    "kv_tokens": 61744
+   },
+   "selected": {
+    "single": [
+     {
+      "tokens": "caf160ed6e483cff",
+      "tpot_ms": 6.492330070571317,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 33.26696862746907,
+       "fill": 1.2683529412039523,
+       "launch": 306.44776078431255,
+       "commit": 28.599235294140556,
+       "step": 403.1945176470398,
+       "wall_us": 6487.94140365413
+      }
+     },
+     {
+      "tokens": "83128c00987e13a3",
+      "tpot_ms": 6.492324807799841,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 33.75932941172391,
+       "fill": 1.2902352940887665,
+       "launch": 309.51936862747226,
+       "commit": 28.632537254907778,
+       "step": 407.24483529409105,
+       "wall_us": 6487.8099837669115
+      }
+     },
+     {
+      "tokens": "110a2b449eaf000f",
+      "tpot_ms": 6.492953972523465,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 34.14341568626862,
+       "fill": 1.2878039215649728,
+       "launch": 310.96163921569826,
+       "commit": 28.744819607836003,
+       "step": 409.6738745098405,
+       "wall_us": 6488.520992114026
+      }
+     },
+     {
+      "tokens": "d5d81831ede55fcf",
+      "tpot_ms": 6.494113019617348,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 33.889443137244996,
+       "fill": 1.2890196078425433,
+       "launch": 310.71091764706756,
+       "commit": 28.80662352945395,
+       "step": 408.81586666665766,
+       "wall_us": 6489.690745936469
+      }
+     }
+    ],
+    "mixed": [
+     {
+      "tokens": [
+       "35a16cf43dd008d4",
+       "3d9a1e7283f6f1cc",
+       "bd23abffa650fc61",
+       "fba5ee00f46edad4"
+      ],
+      "tpot_ms": [
+       7.304261745108913,
+       7.304261745108913,
+       7.304261745108913,
+       7.304261745108913
+      ],
+      "constrained_tpot_ms_while_free": 7.304261745108913,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     },
+     {
+      "tokens": [
+       "b56b0cdd5c1a75b0",
+       "cc35680c1849a90a",
+       "8d28e45752bb1323",
+       "4688250e43f26518"
+      ],
+      "tpot_ms": [
+       7.314296674517476,
+       7.314296674517476,
+       7.314296674517476,
+       7.314296674517476
+      ],
+      "constrained_tpot_ms_while_free": 7.314296674517476,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     }
+    ],
+    "stats": {
+     "testing.toy_mask.rows_filled": 0
+    },
+    "kv_tokens": 61744
+   },
+   "A\u2032": {
+    "single": [
+     {
+      "tokens": "caf160ed6e483cff",
+      "tpot_ms": 6.820096270587551,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 28.31838431377748,
+       "fill": 3.7480431371687146,
+       "launch": 281.2471333334325,
+       "commit": 25.08605098038667,
+       "step": 367.084231372521,
+       "wall_us": 6816.239690341914
+      }
+     },
+     {
+      "tokens": "83128c00987e13a3",
+      "tpot_ms": 6.873555109817899,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 37.15082352944198,
+       "fill": 4.206941176472115,
+       "launch": 313.65029019604253,
+       "commit": 31.14994509805671,
+       "step": 421.15277647059287,
+       "wall_us": 6869.142168365857
+      }
+     },
+     {
+      "tokens": "110a2b449eaf000f",
+      "tpot_ms": 6.873302705878136,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 36.56343137258767,
+       "fill": 4.183537254896649,
+       "launch": 313.71633333337013,
+       "commit": 31.250909803877867,
+       "step": 420.0383686274525,
+       "wall_us": 6868.894596632077
+      }
+     },
+     {
+      "tokens": "d5d81831ede55fcf",
+      "tpot_ms": 6.85485408232803,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 34.49392941171528,
+       "fill": 4.067023529358392,
+       "launch": 306.65988235295384,
+       "commit": 28.846972549032177,
+       "step": 406.8112313726049,
+       "wall_us": 6850.524360882392
+      }
+     }
+    ],
+    "mixed": [
+     {
+      "tokens": [
+       "35a16cf43dd008d4",
+       "3d9a1e7283f6f1cc",
+       "bd23abffa650fc61",
+       "fba5ee00f46edad4"
+      ],
+      "tpot_ms": [
+       7.70158554899835,
+       7.70158554899835,
+       7.70158554899835,
+       7.70158554899835
+      ],
+      "constrained_tpot_ms_while_free": 7.70158554899835,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     },
+     {
+      "tokens": [
+       "b56b0cdd5c1a75b0",
+       "cc35680c1849a90a",
+       "8d28e45752bb1323",
+       "4688250e43f26518"
+      ],
+      "tpot_ms": [
+       7.694605196079732,
+       7.694605196079732,
+       7.694605196079732,
+       7.694605196079732
+      ],
+      "constrained_tpot_ms_while_free": 7.694605196079732,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     }
+    ],
+    "stats": {
+     "testing.toy_mask.rows_filled": 1536
+    },
+    "kv_tokens": 61744
+   }
+  },
+  {
+   "none": {
+    "single": [
+     {
+      "tokens": "caf160ed6e483cff",
+      "tpot_ms": 6.49185235687422,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 26.532196078340085,
+       "fill": 0.0,
+       "launch": 249.79364705886107,
+       "commit": 22.417607843197192,
+       "step": 324.51038039211704,
+       "wall_us": 6488.101141225985
+      }
+     },
+     {
+      "tokens": "83128c00987e13a3",
+      "tpot_ms": 6.4924462588262,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 25.836592156903247,
+       "fill": 0.0,
+       "launch": 251.77776470587455,
+       "commit": 22.706015686331543,
+       "step": 325.8713921569309,
+       "wall_us": 6488.707631554765
+      }
+     },
+     {
+      "tokens": "110a2b449eaf000f",
+      "tpot_ms": 6.492370643137096,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 27.78488627452238,
+       "fill": 0.0,
+       "launch": 268.1395568627251,
+       "commit": 23.312152941152938,
+       "step": 347.6243450979898,
+       "wall_us": 6488.384760450572
+      }
+     },
+     {
+      "tokens": "d5d81831ede55fcf",
+      "tpot_ms": 6.49258247451108,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 26.1714078430997,
+       "fill": 0.0,
+       "launch": 253.02308235289394,
+       "commit": 22.2555843137266,
+       "step": 326.82977254904057,
+       "wall_us": 6488.888906303556
+      }
+     }
+    ],
+    "mixed": [
+     {
+      "tokens": [
+       "35a16cf43dd008d4",
+       "3d9a1e7283f6f1cc",
+       "bd23abffa650fc61",
+       "fba5ee00f46edad4"
+      ],
+      "tpot_ms": [
+       7.312858270597644,
+       7.312858270597644,
+       7.312858270597644,
+       7.312858270597644
+      ],
+      "constrained_tpot_ms_while_free": 7.312858270597644,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     },
+     {
+      "tokens": [
+       "b56b0cdd5c1a75b0",
+       "cc35680c1849a90a",
+       "8d28e45752bb1323",
+       "4688250e43f26518"
+      ],
+      "tpot_ms": [
+       7.3152717882561875,
+       7.3152717882561875,
+       7.3152717882561875,
+       7.3152717882561875
+      ],
+      "constrained_tpot_ms_while_free": 7.3152717882561875,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     }
+    ],
+    "stats": {},
+    "kv_tokens": 61744
+   },
+   "selected": {
+    "single": [
+     {
+      "tokens": "caf160ed6e483cff",
+      "tpot_ms": 6.492671023542974,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 29.412807843141085,
+       "fill": 1.3177254903031526,
+       "launch": 292.22063529394154,
+       "commit": 27.908490196022136,
+       "step": 380.19076470594285,
+       "wall_us": 6488.620278404971
+      }
+     },
+     {
+      "tokens": "83128c00987e13a3",
+      "tpot_ms": 6.492801054892149,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 30.135623529445482,
+       "fill": 1.2607843137745887,
+       "launch": 291.76093725486453,
+       "commit": 29.30459607850283,
+       "step": 383.3957176469733,
+       "wall_us": 6488.678510147877
+      }
+     },
+     {
+      "tokens": "110a2b449eaf000f",
+      "tpot_ms": 6.492894784348798,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 29.184654901923505,
+       "fill": 1.2254901961051812,
+       "launch": 285.9358823529005,
+       "commit": 28.79071372558484,
+       "step": 374.6068313726337,
+       "wall_us": 6488.901725399545
+      }
+     },
+     {
+      "tokens": "d5d81831ede55fcf",
+      "tpot_ms": 6.49262214120587,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 26.495631372574067,
+       "fill": 1.1378039215640336,
+       "launch": 271.0005372549271,
+       "commit": 31.35694509804038,
+       "step": 356.1710784313676,
+       "wall_us": 6488.971517754572
+      }
+     }
+    ],
+    "mixed": [
+     {
+      "tokens": [
+       "35a16cf43dd008d4",
+       "3d9a1e7283f6f1cc",
+       "bd23abffa650fc61",
+       "fba5ee00f46edad4"
+      ],
+      "tpot_ms": [
+       7.34048260783311,
+       7.34048260783311,
+       7.34048260783311,
+       7.34048260783311
+      ],
+      "constrained_tpot_ms_while_free": 7.34048260783311,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     },
+     {
+      "tokens": [
+       "b56b0cdd5c1a75b0",
+       "cc35680c1849a90a",
+       "8d28e45752bb1323",
+       "4688250e43f26518"
+      ],
+      "tpot_ms": [
+       7.345712023522413,
+       7.345712023522413,
+       7.345712023522413,
+       7.345712023522413
+      ],
+      "constrained_tpot_ms_while_free": 7.345712023522413,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     }
+    ],
+    "stats": {
+     "testing.toy_mask.rows_filled": 0
+    },
+    "kv_tokens": 61744
+   },
+   "A\u2032": {
+    "single": [
+     {
+      "tokens": "caf160ed6e483cff",
+      "tpot_ms": 6.836116952906071,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 30.329603921734808,
+       "fill": 3.946513725427327,
+       "launch": 295.8715490195778,
+       "commit": 26.69545098048248,
+       "step": 387.4717294117844,
+       "wall_us": 6831.936326160954
+      }
+     },
+     {
+      "tokens": "83128c00987e13a3",
+      "tpot_ms": 6.851895482395776,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 32.0629960784755,
+       "fill": 4.123298039262654,
+       "launch": 309.41882745084365,
+       "commit": 28.649105882336432,
+       "step": 407.0258509803516,
+       "wall_us": 6847.567297860652
+      }
+     },
+     {
+      "tokens": "110a2b449eaf000f",
+      "tpot_ms": 6.86242606276281,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 33.3350745098285,
+       "fill": 4.190592157016226,
+       "launch": 313.56972548995185,
+       "commit": 29.34836078432122,
+       "step": 414.7850823528921,
+       "wall_us": 6857.987828027713
+      }
+     },
+     {
+      "tokens": "d5d81831ede55fcf",
+      "tpot_ms": 6.827240278453602,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 29.26456078454873,
+       "fill": 3.9125568629516443,
+       "launch": 292.8616823528701,
+       "commit": 24.742662745060393,
+       "step": 380.5826156862809,
+       "wall_us": 6823.259219641377
+      }
+     }
+    ],
+    "mixed": [
+     {
+      "tokens": [
+       "35a16cf43dd008d4",
+       "3d9a1e7283f6f1cc",
+       "bd23abffa650fc61",
+       "fba5ee00f46edad4"
+      ],
+      "tpot_ms": [
+       7.68557932158229,
+       7.68557932158229,
+       7.68557932158229,
+       7.68557932158229
+      ],
+      "constrained_tpot_ms_while_free": 7.68557932158229,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     },
+     {
+      "tokens": [
+       "b56b0cdd5c1a75b0",
+       "cc35680c1849a90a",
+       "8d28e45752bb1323",
+       "4688250e43f26518"
+      ],
+      "tpot_ms": [
+       7.648780196049142,
+       7.648780196049142,
+       7.648780196049142,
+       7.648780196049142
+      ],
+      "constrained_tpot_ms_while_free": 7.648780196049142,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     }
+    ],
+    "stats": {
+     "testing.toy_mask.rows_filled": 1536
+    },
+    "kv_tokens": 61744
+   }
+  },
+  {
+   "none": {
+    "single": [
+     {
+      "tokens": "caf160ed6e483cff",
+      "tpot_ms": 6.494720796107169,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 29.242356862828743,
+       "fill": 0.0,
+       "launch": 260.99807843149625,
+       "commit": 24.435050980273157,
+       "step": 342.89265490196044,
+       "wall_us": 6490.6234311410135
+      }
+     },
+     {
+      "tokens": "83128c00987e13a3",
+      "tpot_ms": 6.49484627841351,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 33.86284705872727,
+       "fill": 0.0,
+       "launch": 283.2402784312398,
+       "commit": 28.504258823635293,
+       "step": 377.6901019609996,
+       "wall_us": 6490.3830309905225
+      }
+     },
+     {
+      "tokens": "110a2b449eaf000f",
+      "tpot_ms": 6.494566470592319,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 34.09341176475276,
+       "fill": 0.0,
+       "launch": 284.69439215687856,
+       "commit": 29.223133333303227,
+       "step": 380.6512078431904,
+       "wall_us": 6490.034834988524
+      }
+     },
+     {
+      "tokens": "d5d81831ede55fcf",
+      "tpot_ms": 6.4943362666549636,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 29.913831372503665,
+       "fill": 0.0,
+       "launch": 260.32178039217763,
+       "commit": 25.56518823521189,
+       "step": 344.3614039216042,
+       "wall_us": 6490.129764607249
+      }
+     }
+    ],
+    "mixed": [
+     {
+      "tokens": [
+       "35a16cf43dd008d4",
+       "3d9a1e7283f6f1cc",
+       "bd23abffa650fc61",
+       "fba5ee00f46edad4"
+      ],
+      "tpot_ms": [
+       7.325262815677835,
+       7.325262815677835,
+       7.325262815677835,
+       7.325262815677835
+      ],
+      "constrained_tpot_ms_while_free": 7.325262815677835,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     },
+     {
+      "tokens": [
+       "b56b0cdd5c1a75b0",
+       "cc35680c1849a90a",
+       "8d28e45752bb1323",
+       "4688250e43f26518"
+      ],
+      "tpot_ms": [
+       7.3650687411381845,
+       7.3650687411381845,
+       7.3650687411381845,
+       7.3650687411381845
+      ],
+      "constrained_tpot_ms_while_free": 7.3650687411381845,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     }
+    ],
+    "stats": {},
+    "kv_tokens": 61744
+   },
+   "selected": {
+    "single": [
+     {
+      "tokens": "caf160ed6e483cff",
+      "tpot_ms": 6.495462894079038,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 34.07360784320348,
+       "fill": 1.3135686274648941,
+       "launch": 310.2093647059801,
+       "commit": 29.38203529412494,
+       "step": 410.41590588225387,
+       "wall_us": 6490.9082705579585
+      }
+     },
+     {
+      "tokens": "83128c00987e13a3",
+      "tpot_ms": 6.495677999976347,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 32.56567450989399,
+       "fill": 1.28757254898636,
+       "launch": 300.1792431373288,
+       "commit": 29.332658823575212,
+       "step": 396.90574901980295,
+       "wall_us": 6491.288906260047
+      }
+     },
+     {
+      "tokens": "110a2b449eaf000f",
+      "tpot_ms": 6.495453631356998,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 32.04827450980028,
+       "fill": 1.304945097980497,
+       "launch": 301.67811764711166,
+       "commit": 27.785458823665984,
+       "step": 395.398705882353,
+       "wall_us": 6491.1363020941035
+      }
+     },
+     {
+      "tokens": "d5d81831ede55fcf",
+      "tpot_ms": 6.495708756904373,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 31.727717647100917,
+       "fill": 1.351999999961467,
+       "launch": 306.04927058839024,
+       "commit": 28.889423529356165,
+       "step": 401.0907490194937,
+       "wall_us": 6491.285188045974
+      }
+     }
+    ],
+    "mixed": [
+     {
+      "tokens": [
+       "35a16cf43dd008d4",
+       "3d9a1e7283f6f1cc",
+       "bd23abffa650fc61",
+       "fba5ee00f46edad4"
+      ],
+      "tpot_ms": [
+       7.315396019611416,
+       7.315396019611416,
+       7.315396019611416,
+       7.315396019611416
+      ],
+      "constrained_tpot_ms_while_free": 7.315396019611416,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     },
+     {
+      "tokens": [
+       "b56b0cdd5c1a75b0",
+       "cc35680c1849a90a",
+       "8d28e45752bb1323",
+       "4688250e43f26518"
+      ],
+      "tpot_ms": [
+       7.355369043116476,
+       7.355369043116476,
+       7.355369043116476,
+       7.355369043116476
+      ],
+      "constrained_tpot_ms_while_free": 7.355369043116476,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     }
+    ],
+    "stats": {
+     "testing.toy_mask.rows_filled": 0
+    },
+    "kv_tokens": 61744
+   },
+   "A\u2032": {
+    "single": [
+     {
+      "tokens": "caf160ed6e483cff",
+      "tpot_ms": 6.858597352915882,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 34.262027451129974,
+       "fill": 4.256670588325042,
+       "launch": 311.18947450978544,
+       "commit": 29.46165098053627,
+       "step": 413.1983411765147,
+       "wall_us": 6854.209748973303
+      }
+     },
+     {
+      "tokens": "83128c00987e13a3",
+      "tpot_ms": 6.859503078443345,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 34.22350196071385,
+       "fill": 4.133023529441423,
+       "launch": 310.0007450980541,
+       "commit": 29.6390666668196,
+       "step": 412.0115960784362,
+       "wall_us": 6855.15460779653
+      }
+     },
+     {
+      "tokens": "110a2b449eaf000f",
+      "tpot_ms": 6.854705192153251,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 33.259678431289004,
+       "fill": 4.183266666785255,
+       "launch": 311.63437254890573,
+       "commit": 28.38751764710479,
+       "step": 412.1789843137036,
+       "wall_us": 6850.382765554184
+      }
+     },
+     {
+      "tokens": "d5d81831ede55fcf",
+      "tpot_ms": 6.832864921592523,
+      "steps": 257,
+      "phase_us_mean": {
+       "schedule": 30.022745097977353,
+       "fill": 3.897215686242705,
+       "launch": 292.1076509803207,
+       "commit": 26.619400000011602,
+       "step": 383.63219607843496,
+       "wall_us": 6828.850615534511
+      }
+     }
+    ],
+    "mixed": [
+     {
+      "tokens": [
+       "35a16cf43dd008d4",
+       "3d9a1e7283f6f1cc",
+       "bd23abffa650fc61",
+       "fba5ee00f46edad4"
+      ],
+      "tpot_ms": [
+       7.656578094111847,
+       7.656578094111847,
+       7.656578094111847,
+       7.656578094111847
+      ],
+      "constrained_tpot_ms_while_free": 7.656578094111847,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     },
+     {
+      "tokens": [
+       "b56b0cdd5c1a75b0",
+       "cc35680c1849a90a",
+       "8d28e45752bb1323",
+       "4688250e43f26518"
+      ],
+      "tpot_ms": [
+       7.645002258804572,
+       7.645002258804572,
+       7.645002258804572,
+       7.645002258804572
+      ],
+      "constrained_tpot_ms_while_free": 7.645002258804572,
+      "constrained_tokens_while_free": 256,
+      "steps": 257
+     }
+    ],
+    "stats": {
+     "testing.toy_mask.rows_filled": 1536
+    },
+    "kv_tokens": 61744
+   }
+  }
+ ]
+}

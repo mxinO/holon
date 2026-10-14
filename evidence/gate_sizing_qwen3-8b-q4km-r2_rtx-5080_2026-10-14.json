@@ -1,0 +1,51 @@
+{
+ "workload": "gate_cost_qwen3-8b-q4km",
+ "date": "2026-10-13",
+ "gpu_class": "rtx-5080",
+ "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf",
+ "command": "python bench/gate_cost.py --gpu 0 --model unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf --corpus judge/prompts/v1.jsonl --name qwen3-8b-q4km --rounds 0 --sizing-rounds 3 --engine-args '--max-seqs 16 --max-model-len 32768'",
+ "commit": "29fc8f50a5b3a33cba14b382d4e6cb1fde4cb03f",
+ "state_memory": 8917985398,
+ "processor_selected": {
+  "none": [
+   {
+    "state_memory": 9099985100,
+    "capture_s": 0.78,
+    "graphs": 15,
+    "kv_tokens": 61712
+   },
+   {
+    "state_memory": 9099985100,
+    "capture_s": 0.73,
+    "graphs": 15,
+    "kv_tokens": 61712
+   },
+   {
+    "state_memory": 9099985100,
+    "capture_s": 0.73,
+    "graphs": 15,
+    "kv_tokens": 61712
+   }
+  ],
+  "A\u2032": [
+   {
+    "state_memory": 9099985100,
+    "capture_s": 0.67,
+    "graphs": 15,
+    "kv_tokens": 61712
+   },
+   {
+    "state_memory": 9099985100,
+    "capture_s": 0.84,
+    "graphs": 15,
+    "kv_tokens": 61712
+   },
+   {
+    "state_memory": 9099985100,
+    "capture_s": 0.63,
+    "graphs": 15,
+    "kv_tokens": 61712
+   }
+  ]
+ }
+}
