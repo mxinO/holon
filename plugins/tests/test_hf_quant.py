@@ -223,7 +223,7 @@ def test_the_gate_holds_what_the_source_yields_to_the_original(files, tmp_path, 
                                                ("modelopt", False, ["q8_1", "fp4", "fp4-static"])])
 def test_the_floors_emulate_each_activation_mode(files, dialect, moe, modes):
     """A floor's mode reaches its quantized matmuls (dense, and experts through the MoE block): each moves the
-    floor from the plain bf16 one, coarser activations further from the golden (W4A8 < W4A4)."""
+    floor from the plain bf16 one, coarser activations further from the golden (W4A8 < W4A4); FP8's W8A8 too."""
     quantized, _ = files(dialect, moe)
     prompts = _prompt_set()
     gold = golden.record(str(quantized), prompts)
@@ -234,8 +234,14 @@ def test_the_floors_emulate_each_activation_mode(files, dialect, moe, modes):
         assert floor.meta["act"] == act and floor.meta["hf_reference"] and floor.meta["emulation"]
         kl[act] = compare(gold, floor).overall.kl_mean
     assert kl["a16"] < kl["q8_1"] < min(kl[a] for a in modes if a != "q8_1"), kl
-    with pytest.raises(ValueError, match="Gate B"):           # FP8's floors are W8A8 / W8A16
-        golden.record(str(files("fp8", False)[0]), prompts, torch.bfloat16, q8_1="mmq")
+    fp8 = str(files("fp8", False)[0])                          # FP8: W8A8 on prefill only (W8A16 is scored on A16)
+    with pytest.raises(ValueError, match="W8A8 on prefill"):
+        golden.record(fp8, prompts, torch.bfloat16, q8_1="mmq")
+    with pytest.raises(ValueError, match="no fp8 emulation"):
+        golden.record(str(quantized), prompts, torch.bfloat16, q8_1="prefill", act="fp8")
+    plain, floor = (golden.record(fp8, prompts, torch.bfloat16, **kw) for kw in ({}, {"q8_1": "prefill", "act": "fp8"}))
+    gold = golden.record(fp8, prompts)
+    assert floor.meta["act"] == "fp8" and compare(gold, plain).overall.kl_mean < compare(gold, floor).overall.kl_mean
 
 
 GPU = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

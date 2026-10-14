@@ -1,7 +1,8 @@
 """Judge command line.
 
-    python -m holon_judge golden   --model <hf dir or id | .gguf> [--config <hf dir or id>] [--q8-1 mmq|mmvq
-                                   [--act q8_1|fp4|fp4-static]] --prompts <jsonl> --out <file> [--threads N] [--k 20]
+    python -m holon_judge golden   --model <hf dir or id | .gguf> [--config <hf dir or id>] [--q8-1 mmq|mmvq|prefill
+                                   [--act q8_1|fp4|fp4-static|fp8]] --prompts <jsonl> --out <file> [--threads N]
+                                   [--k 20]
                                    [--dtype bfloat16 --device cuda]          # the floor: HF in the activation dtype
                                    [--kv q8_0|fp8]                           # ... reading K/V in that cache format
                                    [--stream]                                # a dense checkpoint one layer at a time
@@ -380,11 +381,13 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("golden", help="record HF teacher-forced top-k logprobs (golden or floor)")
     g.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")
     g.add_argument("--config", help="for a .gguf: the HF checkpoint (dir or hub id) it was made from")
-    g.add_argument("--q8-1", choices=["mmq", "mmvq"], help="for a .gguf: Tier B's floor on that kernel path")
+    g.add_argument("--q8-1", choices=modes.PATHS, help="Tier B's floor on that kernel path (kernels.ggml_cuda's mmq / "
+                   "mmvq; kernels.triton_fp8's prefill, with --act fp8)")
     g.add_argument("--pure-hf", action="store_true", help="an MoE floor with HF's own MoE block (information only)")
     g.add_argument("--kv", choices=kv_format.FORMATS, help="a floor whose attention reads K/V in this cache format")
     g.add_argument("--act", choices=modes.MODES, help="with --q8-1, a quantized HF checkpoint's activation mode on "
-                   "that path (default q8_1: W4A8; fp4: W4A4-dynamic; fp4-static: W4A4-static, docs/m06-lowp.md §4.8)")
+                   "that path (default q8_1: W4A8; fp4: W4A4-dynamic; fp4-static: W4A4-static; fp8: W8A8 on prefill, "
+                   "docs/m06-lowp.md §4.8)")
     g.add_argument("--stream", action="store_true", help="a dense HF checkpoint one decoder layer at a time (GGUF "
                    "files and quantized checkpoints always are)")
     g.add_argument("--prompts", required=True)

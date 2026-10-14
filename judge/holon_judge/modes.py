@@ -6,6 +6,8 @@ linear and expert stack takes its input as the kernel path's mode quantizes it, 
 - `fp4` (W4A4-dynamic, mmq only): llama.cpp's native FP4 quantizer, emulated by `w4a4.values`;
 - `fp4-static` (W4A4-static, mmq only, NVFP4 dense linears: a report): `w4a4.static_nvfp4` over each projection's
   static input scale from the checkpoint.
+- `fp8` (W8A8, `kernels.triton_fp8`'s `prefill` path, FP8 weights): `fp8_act`, per row and 128 columns. FP8's decode
+  path (W8A16: the activations as given) is scored against the plain bf16 floor (A16), which emulates nothing.
 
 Each input row is quantized once, as the kernels do: a token's input to a merged gate/up stack once for its k slots,
 each (token, slot) row of down on its own.
@@ -20,15 +22,36 @@ from holon_std.moe import reference
 
 from . import q8_1, w4a4
 
-MODES = ("q8_1", "fp4", "fp4-static")
+MODES = ("q8_1", "fp4", "fp4-static", "fp8")
+PATHS = ("mmq", "mmvq", "prefill")         # kernels.ggml_cuda's two; kernels.triton_fp8's W8A8 one
+
+
+def fp8_act(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """W8A8's activations (docs/m06-lowp.md D12): per row and 128 columns of f32 `x [R, in]`, a_s = max(amax, 1e-10)
+    / 448 and e4m3 of `x / a_s` (IEEE division, clamped to ±448, rounded to nearest even): `(e4m3 [R, in], a_s
+    [R, in / 128])`, bitwise `kernels.triton_fp8`'s (its L0)."""
+    g = x.float().unflatten(-1, (-1, 128))
+    a_s = g.abs().amax(-1).clamp_min(1e-10) / 448
+    return (g / a_s[..., None]).clamp(-448, 448).to(torch.float8_e4m3fn).flatten(-2), a_s
+
+
+def fp8_values(x: torch.Tensor) -> torch.Tensor:
+    """The f32 values W8A8 multiplies: `fp8_act`'s codes times their scales."""
+    q, a_s = fp8_act(x)
+    return (q.float().unflatten(-1, (-1, 128)) * a_s[..., None]).flatten(-2)
 
 
 def quantizer(elem: str, path: str, mode: str, scale: torch.Tensor | None = None) -> Callable[[torch.Tensor],
                                                                                               torch.Tensor]:
     """f32 rows [R, in] -> the values the kernel multiplies (f32), for an FP4 weight of `elem` on `path` in `mode`.
-    FP8's floors (W8A8, W8A16) are Gate B's; ggml types are the GGUF floors' (`gguf.emulate_q8_1`)."""
-    if elem not in w4a4.GROUP:
-        raise ValueError(f"{elem}: the HF floors emulate FP4 weights (FP8's W8A8 / W8A16 floors are Gate B's)")
+    Or, for an FP8 weight, W8A8 on `prefill`; ggml types are the GGUF floors' (`gguf.emulate_q8_1`)."""
+    if elem == "fp8_e4m3":
+        if (path, mode) != ("prefill", "fp8"):
+            raise ValueError(f"{elem}: an FP8 floor emulates W8A8 on prefill (`--q8-1 prefill --act fp8`), not {mode} "
+                             f"on {path}; its decode path (W8A16) is scored against the A16 floor")
+        return fp8_values
+    if elem not in w4a4.GROUP or mode == "fp8":
+        raise ValueError(f"{elem}: no {mode} emulation (fp8 is FP8 weights' W8A8)")
     if mode == "q8_1":
         b = q8_1.blocking(elem, path)                    # FP4 types use no stored sums
         return lambda x: q8_1.quantize(x, b).float()

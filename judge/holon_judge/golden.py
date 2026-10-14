@@ -88,9 +88,9 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
            kv: str | None = None, act: str | None = None, stream: bool = False) -> Recording:
     """Record top-k teacher-forced logprobs of `model` (hub id, checkpoint directory, or a .gguf file with the HF
     `config` it was made from: the dense model of its dequantized weights, M0.1 §4.6) over `prompts`. `q8_1` ("mmq"
-    or "mmvq"): every quantized linear computes as llama.cpp's kernels on that path (Tier B's floor), its activations
-    in mode `act` (`modes.MODES`; default q8_1, the only one for a GGUF). `kv` ("q8_0" or "fp8"): attention reads K
-    and V as a cache in that format stores them (`kv.emulate`).
+    or "mmvq"; "prefill" for FP8): every quantized linear computes as the kernels on that path (Tier B's floor), its
+    activations in mode `act` (`modes.MODES`; default q8_1, the only one for a GGUF; fp8, W8A8, for FP8 weights).
+    `kv` ("q8_0" or "fp8"): attention reads K and V as a cache in that format stores them (`kv.emulate`).
     A GGUF, a quantized HF checkpoint (its weights as `hf_quant` reads them, docs/m06-lowp.md §4.8) or, with
     `stream`, a dense one runs one decoder layer at a time (`_streamed`), so its weights are never all held; a dense
     HF checkpoint otherwise loads through transformers. A floor (not fp32) of an MoE model runs the D3-mirroring MoE
@@ -103,8 +103,8 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
 
         if config is None:
             raise ValueError(f"{path}: a GGUF golden needs the HF config it was made from")
-        if act not in (None, "q8_1"):
-            raise ValueError(f"{path}: a GGUF floor emulates q8_1 activations, not {act}")
+        if act not in (None, "q8_1") or q8_1 not in (None, "mmq", "mmvq"):
+            raise ValueError(f"{path}: a GGUF floor emulates q8_1 activations on mmq or mmvq, not {act} on {q8_1}")
         hf_config = resolve_model(config)
         is_moe = _is_moe(hf_config)
         mirrored = dtype != torch.float32 and not pure_hf and is_moe

@@ -3,12 +3,13 @@ emulations, on random e4m3 bytes (every finite code, subnormals and ±448 includ
 
 - The bit decode: all 254 finite e4m3 codes read back through the decode kernel (one row and two) equal torch's
   `float8_e4m3fn` values (any class).
-- `act_quant` (sm ≥ 89): bitwise torch's e4m3 of `x / a_s` (IEEE division, ±448) and its scales, rows of zeros,
-  outliers, values that round to e4m3 subnormals and every midpoint between e4m3 values (ties to even) included.
+- `act_quant` (sm ≥ 89): bitwise the W8A8 floor's emulation (`holon_judge.modes.fp8_act`: torch's e4m3 of
+  `x / a_s`, IEEE division, ±448) and its scales; rows of zeros, outliers, values that round to e4m3 subnormals and
+  every midpoint between e4m3 values (ties to even) included.
 - `qlinear` through the plugin's instance, rows T ∈ {0, 1, 7, 8, 9, 16, 17, 64, 512, 513, 2049} (the 16 / 17 mode
   switch) on a small shape and the 8B's projections (their pinned configurations): `l0.check` against W8A16 (the
-  bf16 activations, T ≤ 16) or W8A8 (activations quantized as `act_quant`, T > 16) in f64, and the call counted on
-  that path and mode. Below sm_89 only the decode path runs (FP8 there is v1).
+  bf16 activations, T ≤ 16) or W8A8 (activations as `fp8_act`, T > 16) in f64, and the call counted on that path
+  and mode. Below sm_89 only the decode path runs (FP8 there is v1).
 - CUDA graphs replay bitwise like eager calls on both paths, and calls are run-to-run identical.
 """
 import pytest
@@ -16,7 +17,7 @@ import torch
 from holon.api import Layout, QTensor, Scheme
 from holon.core.build import BuildContext
 from holon.core.plugins import PluginSet, discover
-from holon_judge import l0
+from holon_judge import l0, modes
 from holon_plugins.kernels.triton_fp8 import kernel
 from holon_plugins.kernels.triton_fp8.plugin import QLinear
 from holon_std.weights.hf import reference as hf
@@ -54,19 +55,12 @@ def activations(t: int, k: int, seed: int) -> torch.Tensor:
     return x.bfloat16().cuda()
 
 
-def act_quant_reference(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """W8A8's activations in torch: per row and 128 columns, a_s = max(amax, 1e-10) / 448, e4m3 of x / a_s."""
-    g = x.float().unflatten(-1, (-1, kernel.BLOCK))
-    a_s = g.abs().amax(-1).clamp_min(1e-10) / 448
-    return (g / a_s[..., None]).clamp(-448, 448).to(torch.float8_e4m3fn).flatten(-2), a_s
-
-
 def emulated(x: torch.Tensor, parts: dict[str, torch.Tensor]) -> torch.Tensor:
     """f64 `x @ W.T` in the mode of the path T rows take: W8A16 up to 16 rows, else W8A8."""
     w = hf.dequantize("fp8_e4m3", parts).double()
     if len(x) <= kernel.DECODE_ROWS:
         return x.double() @ w.T
-    q, a_s = act_quant_reference(x)
+    q, a_s = modes.fp8_act(x)
     return (q.double().unflatten(-1, (-1, kernel.BLOCK)) * a_s.double()[..., None]).flatten(-2) @ w.T
 
 
@@ -90,7 +84,7 @@ def test_act_quant_is_torchs():
     x[6, :len(ties)], x[6, len(ties):] = ties.cuda(), 448.0
     x[7] = -x[6]
     q, a_s = kernel.act_quant(x)
-    q_ref, a_s_ref = act_quant_reference(x)
+    q_ref, a_s_ref = modes.fp8_act(x)
     assert torch.equal(a_s, a_s_ref)
     assert torch.equal(q.view(torch.uint8), q_ref.view(torch.uint8))
 
