@@ -1,0 +1,141 @@
+{
+ "command": "python -m holon_judge l2 --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf --prompts judge/prompts/v1-qwen3_5.jsonl --golden judge/goldens/qwen3.8-27b-ud-iq3_s/v1-fp32.safetensors --floor judge/goldens/qwen3.8-27b-ud-iq3_s/v1-bfloat16-rows8-rtx-5080-kv-q8_0-floor.safetensors --max-step-tokens 8 --max-seqs 4 --kv q8_0",
+ "commit": "c6b7759",
+ "gpu_class": "rtx-5080",
+ "date": "2026-10-14",
+ "golden": {
+  "source": "hf",
+  "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+  "revision": null,
+  "dtype": "float32",
+  "device": "cpu",
+  "hardware": "cpu",
+  "threads": 44,
+  "prompts": "v1-qwen3_5.jsonl",
+  "prompts_sha256": "80bf5a54bd350923484251e1a09fedf72e87f7a12a326edcd162055b44c83f55",
+  "weight_source": null,
+  "max_step_tokens": null,
+  "q8_1": null,
+  "act": null,
+  "kv": null,
+  "moe_block": null,
+  "experts": null,
+  "calls": null,
+  "head_calls": null,
+  "gpu_class": null
+ },
+ "candidate": {
+  "source": "holon",
+  "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+  "revision": null,
+  "dtype": "bfloat16",
+  "device": "cuda",
+  "hardware": "NVIDIA GeForce RTX 5080",
+  "threads": null,
+  "prompts": "v1-qwen3_5.jsonl",
+  "prompts_sha256": "80bf5a54bd350923484251e1a09fedf72e87f7a12a326edcd162055b44c83f55",
+  "weight_source": "gguf",
+  "max_step_tokens": 8,
+  "q8_1": null,
+  "act": null,
+  "kv": "q8_0",
+  "moe_block": null,
+  "experts": null,
+  "calls": {
+   "mmq/q8_1": 1156198,
+   "mmvq/q8_1": 773114
+  },
+  "head_calls": {
+   "mmq/q8_1": 4138,
+   "mmvq/q8_1": 103
+  },
+  "gpu_class": "rtx-5080"
+ },
+ "overall": {
+  "n": 33372,
+  "top1": 0.9750089895720964,
+  "top1_confident": 0.9837237977805179,
+  "kl_mean": 0.05014209386838837,
+  "kl_p50": 0.0002590990382380855,
+  "kl_p99": 0.6933798152433901,
+  "kl_max": 20.314347509175985,
+  "dppl": -0.002836300079477585,
+  "dppl_se": 0.008826218363011494,
+  "missing": 0.03647668704303009
+ },
+ "categories": {
+  "chat": {
+   "n": 8167,
+   "top1": 0.9920411411779111,
+   "top1_confident": 0.9976169572306535,
+   "kl_mean": 0.00092220243717433,
+   "kl_p50": 0.00015508641493064133,
+   "kl_p99": 0.0090041170663563,
+   "kl_max": 0.33654813953529766,
+   "dppl": -0.0016557733089565577,
+   "dppl_se": 0.0025824109097943304,
+   "missing": 0.01986041386065875
+  },
+  "code": {
+   "n": 9308,
+   "top1": 0.9879673399226472,
+   "top1_confident": 0.9947119092211083,
+   "kl_mean": 0.01339530478476628,
+   "kl_p50": 0.0001412621393123961,
+   "kl_p99": 0.09043960542354275,
+   "kl_max": 12.042921204267637,
+   "dppl": 0.0005784623450859888,
+   "dppl_se": 0.0032073671897617506,
+   "missing": 0.026821014181349377
+  },
+  "recall": {
+   "n": 8846,
+   "top1": 0.9682342301605246,
+   "top1_confident": 0.9821533403780673,
+   "kl_mean": 0.04553299332141914,
+   "kl_p50": 0.0006764404095910906,
+   "kl_p99": 0.3687905095684898,
+   "kl_max": 16.009019541056606,
+   "dppl": 0.01266341374146735,
+   "dppl_se": 0.006799177331926225,
+   "missing": 0.033608410581053585
+  },
+  "agent": {
+   "n": 7051,
+   "top1": 0.9466742306055879,
+   "top1_confident": 0.9550414666084679,
+   "kl_mean": 0.16144404671870313,
+   "kl_p50": 0.00026548851282137535,
+   "kl_p99": 5.548801565216153,
+   "kl_max": 20.314347509175985,
+   "dppl": -0.027684109850163927,
+   "dppl_se": 0.037657383308982,
+   "missing": 0.07206779180258119
+  }
+ },
+ "floor": {
+  "n": 33372,
+  "top1": 0.9755183986575572,
+  "top1_confident": 0.9838779284833539,
+  "kl_mean": 0.05051412780324726,
+  "kl_p50": 0.0002566360810869117,
+  "kl_p99": 0.7036437467131417,
+  "kl_max": 19.955001808573684,
+  "dppl": 0.0028885510027952584,
+  "dppl_se": 0.006175420742769461,
+  "missing": 0.03693665348196092
+ },
+ "budgets": {
+  "top1_min": 0.9730183986575572,
+  "kl_p50_max": 0.0005132721621738234,
+  "kl_p99_max": 1.4072874934262833,
+  "dppl_max": 0.012523452599793738
+ },
+ "failures": [],
+ "dppl_vs_floor": [
+  -0.0057083621869534005,
+  0.004009381039917495
+ ],
+ "drafter": null,
+ "passed": true
+}

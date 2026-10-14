@@ -1,0 +1,141 @@
+{
+ "command": "python -m holon_judge l2 --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf --prompts judge/prompts/v1-qwen3_5.jsonl --golden judge/goldens/qwen3.8-27b-ud-q4_k_m/v1-fp32.safetensors --floor judge/goldens/qwen3.8-27b-ud-q4_k_m/v1-bfloat16-rows8-rtx-5090-floor.safetensors --max-step-tokens 8 --max-seqs 4",
+ "commit": "c6b7759",
+ "gpu_class": "rtx-5090",
+ "date": "2026-10-14",
+ "golden": {
+  "source": "hf",
+  "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M",
+  "revision": null,
+  "dtype": "float32",
+  "device": "cpu",
+  "hardware": "cpu",
+  "threads": 44,
+  "prompts": "v1-qwen3_5.jsonl",
+  "prompts_sha256": "80bf5a54bd350923484251e1a09fedf72e87f7a12a326edcd162055b44c83f55",
+  "weight_source": null,
+  "max_step_tokens": null,
+  "q8_1": null,
+  "act": null,
+  "kv": null,
+  "moe_block": null,
+  "experts": null,
+  "calls": null,
+  "head_calls": null,
+  "gpu_class": null
+ },
+ "candidate": {
+  "source": "holon",
+  "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M",
+  "revision": null,
+  "dtype": "bfloat16",
+  "device": "cuda",
+  "hardware": "NVIDIA GeForce RTX 5090",
+  "threads": null,
+  "prompts": "v1-qwen3_5.jsonl",
+  "prompts_sha256": "80bf5a54bd350923484251e1a09fedf72e87f7a12a326edcd162055b44c83f55",
+  "weight_source": "gguf",
+  "max_step_tokens": 8,
+  "q8_1": null,
+  "act": null,
+  "kv": null,
+  "moe_block": null,
+  "experts": null,
+  "calls": {
+   "mmq/q8_1": 1402464,
+   "mmvq/q8_1": 518496
+  },
+  "head_calls": {
+   "mmq/q8_1": 4138,
+   "mmvq/q8_1": 103
+  },
+  "gpu_class": "rtx-5090"
+ },
+ "overall": {
+  "n": 33372,
+  "top1": 0.9707239602061608,
+  "top1_confident": 0.980180624479857,
+  "kl_mean": 0.05032098085551557,
+  "kl_p50": 0.0004192455152612116,
+  "kl_p99": 0.8661753342785105,
+  "kl_max": 30.44378139420117,
+  "dppl": -0.01164973684621493,
+  "dppl_se": 0.008150367914747703,
+  "missing": 0.0453808582044828
+ },
+ "categories": {
+  "chat": {
+   "n": 8167,
+   "top1": 0.9893473735765888,
+   "top1_confident": 0.9973631341034656,
+   "kl_mean": 0.0015063683802794504,
+   "kl_p50": 0.00024669900607286396,
+   "kl_p99": 0.015666079993827766,
+   "kl_max": 0.47142245390111404,
+   "dppl": 0.0025737488526307263,
+   "dppl_se": 0.001606267213241617,
+   "missing": 0.027672339904493692
+  },
+  "code": {
+   "n": 9308,
+   "top1": 0.9835625268586162,
+   "top1_confident": 0.9908670774647887,
+   "kl_mean": 0.013567696583062698,
+   "kl_p50": 0.0001511155132647183,
+   "kl_p99": 0.149660851730671,
+   "kl_max": 15.115435087559783,
+   "dppl": -0.0009324617411566158,
+   "dppl_se": 0.006483423468884376,
+   "missing": 0.03223571121615814
+  },
+  "recall": {
+   "n": 8846,
+   "top1": 0.9568166402893964,
+   "top1_confident": 0.9709939865581889,
+   "kl_mean": 0.048543553106426746,
+   "kl_p50": 0.0015493849249551051,
+   "kl_p99": 0.9882816781532028,
+   "kl_max": 13.294936400288707,
+   "dppl": -0.009238236545981255,
+   "dppl_se": 0.018300574518469424,
+   "missing": 0.04274248247795614
+  },
+  "agent": {
+   "n": 7051,
+   "top1": 0.9496525315558076,
+   "top1_confident": 0.9575976845151953,
+   "kl_mean": 0.1576095407706602,
+   "kl_p50": 0.00039099604865123886,
+   "kl_p99": 4.728564188769551,
+   "kl_max": 30.44378139420117,
+   "dppl": -0.04454069476111941,
+   "dppl_se": 0.023729620935656705,
+   "missing": 0.08655509856757906
+  }
+ },
+ "floor": {
+  "n": 33372,
+  "top1": 0.9700946901594151,
+  "top1_confident": 0.9797182751286873,
+  "kl_mean": 0.049579314127196725,
+  "kl_p50": 0.0004092413232234459,
+  "kl_p99": 0.758003636592022,
+  "kl_max": 27.093880670084534,
+  "dppl": -0.0067401250329070335,
+  "dppl_se": 0.006474881830777293,
+  "missing": 0.045262495505213954
+ },
+ "budgets": {
+  "top1_min": 0.9675946901594151,
+  "kl_p50_max": 0.0008184826464468918,
+  "kl_p99_max": 1.516007273184044,
+  "dppl_max": 0.023599296045429912
+ },
+ "failures": [],
+ "dppl_vs_floor": [
+  -0.004942927764469045,
+  0.008439718418171965
+ ],
+ "drafter": null,
+ "passed": true
+}

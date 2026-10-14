@@ -1,6 +1,6 @@
 # M0.7 — performance: fused glue, mixed steps, a gated megakernel experiment
 
-Status: **rev 3.3, step 0 reviewed and re-checked** (2026-10-14). Revision 3.1 was reviewed clean by a panel of three (correctness,
+Status: **rev 3.3, step 1 built** (2026-10-14; §12). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
 architecture, numerics / performance / tests) over four rounds. Step 0 ran (§11), and the panel's review of it and the
 lead's decisions are in §10's "Step 0 panel round"; §1, §3.1, §4, §5, §6, §7 and §11 carry them. The panel re-checks
 rev 3.2 before step 1; rev 3.3 fixes its findings (§10, "rev 3.2 re-check") and awaits the panel's final
@@ -106,10 +106,10 @@ run before the release freezes the ABI, not in M0.7).
      > 0 (a chunk's activations alive through sampling).
    - The dead `SchedulePolicy.mix_phases()` protocol (`core/holon/api/decoding.py:39`) is deleted.
    - **ABI:** one commit at step 1 moves the ABI to 0.2 and carries every break and addition of M0.7 (`mix_phases`
-     removed; `BatchPlan.n_decode`, `EngineConfig.chunk_with_decode` and its `BuildCtx.options` key added; the std.ops
-     minors of D3 and D6), so the
-     release's step 6 sets 1.0 from it. The release's frozen guide names `core_abi >=0.1,<0.2`; it is updated after
-     the legibility runs (the legibility snapshot is already cut).
+     removed; `BatchPlan.n_decode`, `EngineConfig.chunk_with_decode` and its `BuildCtx.options` key, the kernel prop
+     `mixes_row_kinds` and its planner hook added), so the release's step 6 sets 1.0 from it. As built (§12.1): the
+     std.ops minors of D3 and D6 land with their code at step 2 — std contracts, which no core listing renders and
+     which are free to add. The guide's `core_abi` example names `>=0.2,<0.3` (the legibility gate is retired).
    - Toy proof: the toy state kinds across mixed steps with chunked prefill, constrained rows and preemption, outputs
      equal to today's schedule on CPU tiny models; startup failure for a non-mixing planner; a bounded check "mixed
      schedule vs today's" on GPU.
@@ -774,3 +774,153 @@ decided at step 5 (§11.6), the cap decided at step 4 with
   p50, RTX 4090 2670 / 2670, no slowdown). The first RTX 4090 desktop of this run lost its GPU at its screen — the
   same desktop that failed in step 0 — and was released; a third desktop ran the propagation.
 
+
+## 12. As built (step 1, 2026-10-14)
+
+Commits 85942db (`mmvq_rows`), 68bf31a (ABI 0.2), 1e51ba2 (`triton_attn`), d5c7e6d (std's refusal), fac1225 (D2's
+table and the judge's per-shape floors) and the review fixes after them. Desktops screened first (`bench/clock_check.py`,
+60 s of 27B decode at batch 4): RTX 5080 SM clock p10 / p50 2685 / 2715 MHz, RTX 5090 2565 / 2655 MHz, no thermal or
+hardware slowdown, both steady. The 4090 has no D2 candidate (§11.5) and was not used.
+
+### 12.1 ABI 0.2
+
+One commit (68bf31a). Breaks: `SchedulePolicy.mix_phases` removed (nothing called or implemented it); `EngineConfig`'s
+fields after `max_step_tokens` and `BatchPlan.ext` move by one index. Additions: `BatchPlan.n_decode` (0 unmixed),
+`EngineConfig.chunk_with_decode` (default 0, checked >= 0) and its `BuildCtx.options` key, the kernel prop
+`mixes_row_kinds` and the optional planner hook `MixesRowKinds`. `core/abi.txt` regenerated; `check_abi --base main`
+accepts it as a bump (0.1 → 0.2). Every manifest's `core_abi`, the test fixtures' included (38), is `>=0.2,<0.3`; the
+guide's example and design §4.1's follow. Behaviour is today's: nothing reads the new fields but std's refusal (§12.5),
+so `--chunk-with-decode` is a flag and a lock field that does nothing until step 4.
+
+- **Deviation: the std.ops minors of D3 and D6** (`qk_rope_kv@1`, `qlinear_glu@1`, `fusion_facts`, `glu`,
+  `prepare_input`) are not in the ABI commit: they land with their code at step 2. They are std contracts and unit
+  members, which no core listing renders and which are free to add (`check_abi`'s contract rule rejects only
+  removals), so step 2 needs no second core bump; adding them before their keep-or-revert would make a revert a
+  contract removal.
+- Core: 4129 code lines (4123 at the base; +6).
+
+### 12.2 `mmvq_rows` (D2)
+
+`kernels.ggml_cuda.mmvq_rows(fingerprint, type, mode, in, out)`: the class's `CROSSOVER` entry for the shape and
+mmq's activation mode, else llama.cpp's threshold at the class's compute capability. The C API's `use_mmvq` takes the
+capability explicitly (`ggml_cuda_should_use_mmvq` is host code), so any SM's module answers for any class, no device
+needed (`rule_module`). An entry must lie in 1 … llama.cpp's limit (an error otherwise), so mmvq runs every row count
+up to it. Users: `QLinear` (its `mmvq_rows`), the judge's DFlash floor (`drafter._q8_1_matmul`), `gguf.mmvq_step`
+(dense matmuls by shape, plus every class entry of their type and `in`: a merged matmul's shape is not the tensor's)
+and the per-shape floors (§12.6). `test_qlinear_dispatch_is_mmvq_rows` runs `QLinear` for every lock class (the
+build's fingerprint names the class) on every shape with an entry and a k-quant without, rows 1–9, and asserts the
+counted path is `mmvq_rows`'s; it fails when `QLinear` ignores the entries. It also checks llama.cpp's rule at another
+class's capability (Q4_K: 8 rows on Ada, 5 on Blackwell).
+
+### 12.3 D2's table, the guard and D9
+
+`bench/qmm_sweep.py --shapes` re-swept step 0's candidates (§11.5: 26 on the 5080, 11 on the 5090) at rows 1, 4, 7,
+8, graph-timed, mmvq and both mmq variants: ten sweeps per class, five, then five more about 15 minutes later; and the
+27B lock whole at rows 1 and 4 (D9). `bench/d2_table.py` takes a row as passing when mmq's mean is >= 3% under mmvq's
+and the mean per-sweep difference exceeds 3 sd of the differences; an entry is the smallest limit in {3, 6, 7} whose
+moved graphed rows all pass. No entry moves row 4. Records: `evidence/m07-step1_qmm-sweep-repeats_<class>`,
+`m07-step1_d2_<class>` (with the cast), `m07-step1_d2-no-cast_<class>` (D4's re-derivation).
+
+| class | entries shipped (of candidates) | limits | moved rows' margin, min–max | row saving (with the cast) |
+|---|---|---|---|---|
+| RTX 5080 (27B UD-IQ3_S) | 25 of 26 (iq3_xxs 5120x34816 drops: 1.8% at row 8) | 6: 6 shapes, 7: 19 | row 8: 3.0–20.5% (7–128 sd); row 7 (limit 6): 4.6–12.2% (12–89 sd) | decode B8 −4.9%, DFlash verify −4.1% |
+| RTX 5090 (27B UD-Q4_K_M, borrowed) | 10 of 11 (iq4_nl 5120x17408 drops: 3.9%, 3 sd at row 8) | 6: 4 (q6_k head included), 7: 6 | row 8: 4.0–17.5% (> 3–17 sd); row 7 (limit 6): 4.9–28.1% (4–10 sd) | decode B8 −3.5%, DFlash verify −3.9% |
+
+- The five-sweep table differed on the 5090 only (it kept iq4_nl 5120x17408 at 7 and gave iq4_xs 5120x34816 6): the
+  ten-sweep table ships. Step 0's re-stated savings were −5.7% / −4.8% (5080) and −4.1% / −4.6% (5090).
+- **Without the cast** (D4 kept): 25 entries on the 5080 (iq2_xs 5120x17408 and iq4_xs 5120x12288 move from 7 to 6;
+  B8 −5.5%, DFlash −4.7%), 11 on the 5090 (iq3_s / iq4_xs 5120x17408 from 7 to 6, iq4_nl 5120x17408 gains 7). The
+  table is re-derived from that column before the close's propagation if D4 is kept.
+- **Guard** (rows 4 and 8, ABBA, two runs per arm, the entries against `--llama-crossover`): `holon_tg` tg128 at batch 4
+  and 8 on the lock's flags; `step_profile`'s graphed verify step of MTP (4 rows) and DFlash2 (8 rows). No regression:
+
+  | class | tg128 b4 (tok/s) | tg128 b8 (tok/s) | MTP verify B1 (ms) | DFlash2 verify B1 (ms) |
+  |---|---|---|---|---|
+  | RTX 5080 | 196.4 vs 195.8 (+0.3%; sd 0.6) | 289.7 vs 277.1 (**+4.5%**) | 26.93 vs 26.95 (0.0%) | 32.65 vs 34.18 (**−4.5%**) |
+  | RTX 5090 | 291.2 vs 290.7 (+0.2%; sd 0.7) | 497.7 vs 482.7 (**+3.1%**) | 18.84 vs 18.86 (−0.1%) | 20.88 vs 21.64 (**−3.5%**) |
+
+  The delivered saving is at least half the re-stated one on every row (§1.2). Records `m07-step1_guard_<class>`.
+- **D9 at the shipped set:** 1.2423 on the 5080 (15 sweeps: step 0's four and this step's eleven; was 1.2477; upside
+  3.4 ms), 1.1116 on the 5090 (12 sweeps), 1.014 on the 4090 (no entry): not fired.
+- **D8 prep:** `qmm_sweep.py` now times mmvq's q8_1 quantize alone per `in`, graph-timed (a new benchmark-only C entry
+  point, `quantize_q8_1`), so step 5's GEMV time is a sweep's call less its own quantize, with no profile. In these
+  sweeps: 0.66–0.98 µs per call at one row (in 5120–17408).
+
+### 12.4 `triton_attn`'s shared memory
+
+- BLOCK_M is capped at 64 (query row, head) pairs; wider steps tile the rows over the grid (program 0 is (row,
+  tile)), every tile walking the same KV range.
+- `fitted` lowers the class's pinned config at build until the kernel, compiled for the device's SM by Triton's
+  compiler alone (`shared_bytes`: the JIT's own specializer, Triton internals pinned by uv.lock), fits the SM's shared
+  memory (`SHARED`, the lock classes' 101,376 B; another SM's device) at one split and several: stages down to 1,
+  then block_n halved to 16. It is fitted per BLOCK_M at the widest declared width (decode 1; verify 1 + k for k up
+  to `max_draft_tokens`), a pure function of (class, facts, widths); an undeclared width (a drafter's block) is
+  fitted by the same function when it first runs. Offline, it reproduces §11.4's 106,752 B. Only head_dim 256 / bf16
+  KV / BLOCK_M 64 on sm_120 changes: the 5090's and 5080's (64, 4|8, 3) run 1 stage (73,728 B).
+- **L0** (`test_triton_attn_configs_fit_every_class`): every lock class's config × KV format (bf16, fp8, q8_0) ×
+  head_dim (128 with 8 heads per KV head, 256 with 6) × width (1, 4, 8, 16), compiled for the class's SM, at one
+  split and several, within its shared memory; it fails with the pinned configs (5080 and 5090, head_dim 256, bf16).
+  First run ≈ 3 min of compiles, then Triton's cache.
+- **Bitwise:** 3 stages = 1 stage, one split and several. `holon_judge.kernel_identity` against 68bf31a: 48 / 48
+  bitwise on sm_86, sm_120 (5080 and 5090) — every shape a lock runs today (≤ 64 pairs). **Deviation:** tiling is
+  bitwise against the single tile at head_dim 256 (the 27B's 16-row blocks) but not at head_dim 128: Triton lays a
+  chained dot's warps along the rows when rows ≥ head_dim, so a 128-pair tile and a 64-pair tile reduce the row sums
+  in another order — one bf16 ulp in 1 of 262,144 values at 16 rows × 8 heads. No lock runs more than 64 pairs
+  (every triton_attn lock has `max_draft_tokens` 0); a future lock that does (Qwen3-30B-A3B verify at k ≥ 8) is
+  tuned on the tiled kernel. The test asserts bitwise at 256, one ulp at 128.
+- **5090, DFlash2 with bf16 KV** (the borrowed 4090 lock, k 7): captures and runs, verify B1 21.56 ms graphed
+  (`m07-step1_profile-27b-dflash2_rtx-5090`); step 0 needed q8_0 KV (21.52 ms).
+
+### 12.5 std's activation-mode refusal
+
+`Linear` (through `_Quantized.bind`) and `ExpertLinear` refuse at bind a kernel whose spec's `config["act"]` names
+more than one mode when `chunk_with_decode` > 0 and the deployment has no drafter (with one, steps alternate and never
+mix — rev 3's B-m5; a review finding). Generic: no format is named; it catches `kernels.ggml_cuda`'s native FP4
+(mmvq q8_1, mmq fp4) and `kernels.triton_fp8` (decode bf16, prefill fp8). Toy proof: `tests.toy_quant` registers a
+one-mode spec and, preferred under `quant.act = a4`, a two-mode one; the linear and a merged expert stack refuse the
+latter at 256 without a drafter and bind it at 0 or with one (the test fails without the check).
+
+### 12.6 The small-step L2 and the per-shape floors
+
+`holon_judge golden --q8-1 rows --rows N --crossover <class>:<sm>` records D2's floor: each dense GGUF linear on the
+path its matmul takes at N rows on the class (`gguf.row_paths`), its shape the engine's after std's merges
+(`engine_shapes`: GQA's q/k/v, else q/k; SwiGLU's gate/up; same type and `in`). The floor records the path per shape
+(`routes`); the candidate records each ggml kernel's `mmvq_rows` per shape and its GPU class; compare requires the
+class, the step size and every shape's path at it to agree, and every call in the floor's mode. A tiny GGUF with mixed
+types checks `engine_shapes` against the engine's sites. At 4 rows no entry moves, so the existing mmvq floors apply.
+
+| class | `--max-step-tokens` | floor | top-1 | KL p99 (floor) | ΔPPL vs floor | verdict |
+|---|---|---|---|---|---|---|
+| RTX 5080 | 4 | mmvq, q8_0 KV | 98.07% (≥ 97.78%) | 3.18e-1 (3.06e-1; ≤ 6.11e-1) | −0.12% ± 0.41% | PASS |
+| RTX 5090 | 4 | mmvq | 98.26% (≥ 97.94%) | 2.28e-1 (2.34e-1; ≤ 4.69e-1) | −0.36% ± 0.42% | PASS |
+| RTX 5080 | 8 | per shape (38 mmq, 12 mmvq), q8_0 KV | 97.50% (≥ 97.30%) | 6.93e-1 (7.04e-1; ≤ 1.41) | −0.57% ± 0.40% | PASS |
+| RTX 5090 | 8 | per shape | 97.07% (≥ 96.76%) | 8.66e-1 (7.58e-1; ≤ 1.52) | −0.49% ± 0.84% | PASS |
+
+At 8 rows the candidate and its floor both sit well above the 4-row ones (KL p99 ≈ 0.7–0.9 against 0.2–0.3): the
+mmq path's rounding, which the floor emulates; the verdict is against the floor of the same paths. `--max-seqs 4` (the
+locks' value). The 8-row floors took ≈ 27 min each on an RTX A5000.
+
+Records `m07-step1_l2-<n>_<class>`; the floors are `judge/goldens/qwen3.8-27b-ud-iq3_s/v1-bfloat16-rows8-rtx-5080-kv-q8_0-floor`
+and `judge/goldens/qwen3.8-27b-ud-q4_k_m/v1-bfloat16-rows8-rtx-5090-floor`.
+
+### 12.7 Review
+
+One reviewer (correctness, architecture, numerics / tests) on the aggregate change. Round 1: no blocker; one major
+(the guard and the small-step L2 had not run yet: run above); round 2: none, four nits (fixed or recorded: the D9 label on the no-cast table, the floor flags' error, step 4's drafter predicate in §12.8; the per-shape floor test still skips without a GPU), six minors and nine nits. Fixed: per-shape floors tied
+to the candidate's per-shape paths (they checked only the set of paths); `d2_table --variant` re-derives the whole
+no-cast table (it kept only the with-cast set's keys); `mmvq_rows` and the floors need no GPU; the refusal exempts
+deployments with a drafter; `triton_attn` fits to the class SM's table, not the test device's; the head's calls on a
+per-shape floor are checked by mode only; docs (§3.1, this section, the guide's `core_abi`). Recorded, not changed:
+the DFlash floor's `_q8_1_matmul` keys limits by unmerged tensor shapes (latent: its draft tensors have no entry);
+a step shorter than the floor's rows (a prompt's last) may take the other path; `--crossover`'s SM is not checked
+against the class.
+
+### 12.8 For the lead
+
+- The std.ops minors' deferral to step 2 (§12.1), and `chunk_with_decode` living as an inert flag until step 4.
+- The refusal's drafter exemption (§12.5) reads rev 3's B-m5 over §1.3's literal text.
+- `triton_attn`'s tiling is bitwise only where Triton keeps its warp layout (§12.4); no lock changes.
+- For step 4: the refusal stands down whenever `max_draft_tokens` > 0, but the engine builds a drafter only if a
+  draft policy is also installed (`engine.py:145`); step 4 mixes only when `max_draft_tokens` is 0, or both use the
+  engine's own predicate.
+- `main` gained 899b661 (the legibility gate retired) after this branch's base; the branch is not rebased.

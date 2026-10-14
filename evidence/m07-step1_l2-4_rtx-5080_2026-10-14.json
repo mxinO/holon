@@ -1,0 +1,143 @@
+{
+ "command": "python -m holon_judge l2 --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf --prompts judge/prompts/v1-qwen3_5.jsonl --golden judge/goldens/qwen3.8-27b-ud-iq3_s/v1-fp32.safetensors --floor judge/goldens/qwen3.8-27b-ud-iq3_s/v1-bfloat16-mmvq-kv-q8_0-floor.safetensors --max-step-tokens 4 --max-seqs 4 --kv q8_0",
+ "commit": "fac1225",
+ "gpu_class": "rtx-5080",
+ "date": "2026-10-14",
+ "golden": {
+  "source": "hf",
+  "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+  "revision": null,
+  "dtype": "float32",
+  "device": "cpu",
+  "hardware": "cpu",
+  "threads": 44,
+  "prompts": "v1-qwen3_5.jsonl",
+  "prompts_sha256": "80bf5a54bd350923484251e1a09fedf72e87f7a12a326edcd162055b44c83f55",
+  "weight_source": null,
+  "max_step_tokens": null,
+  "q8_1": null,
+  "act": null,
+  "kv": null,
+  "moe_block": null,
+  "experts": null,
+  "calls": null,
+  "head_calls": null,
+  "step_rows": null,
+  "crossover": null,
+  "gpu_class": null
+ },
+ "candidate": {
+  "source": "holon",
+  "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+  "revision": null,
+  "dtype": "bfloat16",
+  "device": "cuda",
+  "hardware": "NVIDIA GeForce RTX 5080",
+  "threads": null,
+  "prompts": "v1-qwen3_5.jsonl",
+  "prompts_sha256": "80bf5a54bd350923484251e1a09fedf72e87f7a12a326edcd162055b44c83f55",
+  "weight_source": "gguf",
+  "max_step_tokens": 4,
+  "q8_1": null,
+  "act": null,
+  "kv": "q8_0",
+  "moe_block": null,
+  "experts": null,
+  "calls": {
+   "mmvq/q8_1": 3857700
+  },
+  "head_calls": {
+   "mmvq/q8_1": 8409
+  },
+  "step_rows": null,
+  "crossover": null,
+  "gpu_class": "rtx-5080"
+ },
+ "overall": {
+  "n": 33372,
+  "top1": 0.9807323504734508,
+  "top1_confident": 0.9877928483353884,
+  "kl_mean": 0.03257289781204559,
+  "kl_p50": 0.00014876576527951036,
+  "kl_p99": 0.317713477007628,
+  "kl_max": 19.90733214311602,
+  "dppl": -0.004927993459723198,
+  "dppl_se": 0.006049010315635408,
+  "missing": 0.02888649166966319
+ },
+ "categories": {
+  "chat": {
+   "n": 8167,
+   "top1": 0.994122688869842,
+   "top1_confident": 0.9991220368744512,
+   "kl_mean": 0.0004621961285973558,
+   "kl_p50": 8.61429502706321e-05,
+   "kl_p99": 0.004884938637391231,
+   "kl_max": 0.11138050288400494,
+   "dppl": 0.0037290470733232855,
+   "dppl_se": 0.001587732561039749,
+   "missing": 0.0151218317619689
+  },
+  "code": {
+   "n": 9308,
+   "top1": 0.9906532015470563,
+   "top1_confident": 0.9962542690316184,
+   "kl_mean": 0.007271745427210851,
+   "kl_p50": 6.251496046178818e-05,
+   "kl_p99": 0.03965242953944299,
+   "kl_max": 6.944883227858531,
+   "dppl": -0.002357264372298576,
+   "dppl_se": 0.001623167760372288,
+   "missing": 0.02056832831972497
+  },
+  "recall": {
+   "n": 8846,
+   "top1": 0.9788605019217725,
+   "top1_confident": 0.9900199600798403,
+   "kl_mean": 0.023021469040496102,
+   "kl_p50": 0.00043542036654339086,
+   "kl_p99": 0.09728795073033779,
+   "kl_max": 13.513347034072458,
+   "dppl": 0.0002692665665888875,
+   "dppl_se": 0.006566699492486968,
+   "missing": 0.026232195342527697
+  },
+  "agent": {
+   "n": 7051,
+   "top1": 0.9544745426180684,
+   "top1_confident": 0.9607158446093409,
+   "kl_mean": 0.11514886802334755,
+   "kl_p50": 0.00016726538729155692,
+   "kl_p99": 3.902836450540982,
+   "kl_max": 19.90733214311602,
+   "dppl": -0.024607275437638965,
+   "dppl_se": 0.025041085906325432,
+   "missing": 0.05914054744007942
+  }
+ },
+ "floor": {
+  "n": 33372,
+  "top1": 0.9802529066283111,
+  "top1_confident": 0.9874537607891491,
+  "kl_mean": 0.0349171974770288,
+  "kl_p50": 0.0001686185559885969,
+  "kl_p99": 0.3056817254946595,
+  "kl_max": 26.18507553260617,
+  "dppl": -0.0036899559200267162,
+  "dppl_se": 0.004687384825630853,
+  "missing": 0.029722521874625433
+ },
+ "budgets": {
+  "top1_min": 0.9777529066283112,
+  "kl_p50_max": 0.0003372371119771938,
+  "kl_p99_max": 0.611363450989319,
+  "dppl_max": 0.012805407076666978
+ },
+ "failures": [],
+ "dppl_vs_floor": [
+  -0.0012426227629168671,
+  0.004122162830666791
+ ],
+ "drafter": null,
+ "passed": true
+}
