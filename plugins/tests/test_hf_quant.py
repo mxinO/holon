@@ -16,7 +16,7 @@ import pytest
 import torch
 from holon.api import QTensor, SamplingParams
 from holon.core.engine import Engine, EngineConfig
-from holon_judge import golden
+from holon_judge import gguf, golden
 from holon_judge.compare import compare
 from holon_judge.hf_quant import GATES, gate, owner_check
 from holon_judge.planted import fp4_plants, hf_moe_plants, hf_quant_plants
@@ -259,6 +259,9 @@ def test_the_structural_test_checks_every_stacked_slice(files, dialect, plants, 
     if device == "cuda":
         stacks = [m for m in engine.executor.model.modules() if isinstance(m, ExpertLinear) and m.weight is not None]
         assert {m.layout.name for m in stacks} == {"gguf.native"} and len(stacks) == 4        # 2 layers × 2
+        # Tier B's decode step from the file's headers: the smallest mmvq limit of the instances the engine bound
+        dense = [q._kernel for m in engine.executor.model.modules() if (q := getattr(m, "_q", None)) and q._kernel]
+        assert gguf.mmvq_step(quantized) == min([k.mmvq_rows for k in dense] + [m._kernel.mmvq_tokens for m in stacks])
     assert mismatches(engine, quantized) == []
     del engine
     for plant in plants:

@@ -47,18 +47,41 @@ _EXPERT = re.compile(r"(.+\.mlp)\.experts\.(\d+)\.(gate|up|down)_proj")
 _NORMED = re.compile(r"(model\.layers\.\d+)\.(self_attn|mlp)\."
                      r"(?:[qkv]_proj|(?:experts\.\d+\.)?(?:gate|up)_proj|gate)\.weight")
 _NORM = "{layer}.{which}_layernorm.weight"
+_HEADER_DTYPES = {"U8": torch.uint8, "F8_E4M3": torch.float8_e4m3fn, "BF16": torch.bfloat16, "F16": torch.float16,
+                  "F32": torch.float32}
 
 
 @contextlib.contextmanager
-def opened(path: str | pathlib.Path) -> Iterator[tuple[Get, set[str]]]:
+def opened(path: str | pathlib.Path, meta: bool = False) -> Iterator[tuple[Get, set[str]]]:
     """Every shard of a checkpoint directory open: (tensor by name, the names), named as the text model's state dict
-    names them (a multimodal checkpoint's `model.language_model.` is `model.`, as transformers loads it)."""
+    names them (a multimodal checkpoint's `model.language_model.` is `model.`, as transformers loads it). `meta`:
+    tensors on the meta device, from the headers alone (shapes and dtypes; a dtype `parts` does not tell apart read
+    as F32)."""
     with contextlib.ExitStack() as stack:
         where = {}
         for file in sorted(pathlib.Path(path).glob("*.safetensors")):
             f = stack.enter_context(safe_open(file, "pt"))
             where |= {re.sub(r"^model\.language_model\.", "model.", n): (f, n) for n in f.keys()}
-        yield (lambda name: where[name][0].get_tensor(where[name][1])), set(where)
+
+        def get(name: str) -> torch.Tensor:
+            f, n = where[name]
+            if not meta:
+                return f.get_tensor(n)
+            s = f.get_slice(n)
+            return torch.empty(s.get_shape(), dtype=_HEADER_DTYPES.get(s.get_dtype(), torch.float32), device="meta")
+        yield get, set(where)
+
+
+def elems(path: str | pathlib.Path) -> dict[str, str]:
+    """Each quantized module's elem by `parts`' rules, read from the shard headers alone."""
+    with opened(path, meta=True) as (get, names):
+        modules = sorted({n.rpartition(".")[0] for n in names if n.endswith((".weight", ".weight_packed"))})
+        return {m: q[0] for m in modules if (q := parts(get, names, m)) is not None}
+
+
+def expert(module: str) -> bool:
+    """A per-expert projection (stacked by the engine), by its HF name."""
+    return _EXPERT.fullmatch(module) is not None
 
 
 def quantized(path: str | pathlib.Path) -> bool:

@@ -218,19 +218,28 @@ def q8_1_experts(path: str | pathlib.Path, kernel_path: str):
 
 
 def mmvq_step(path: str | pathlib.Path) -> int:
-    """The largest step at which every quantized matmul of the file takes mmvq on the current GPU — dense tensors by
-    llama.cpp's dense limit, expert stacks by its MoE one (the plugin's own predicates): Tier B's decode run."""
+    """The largest step at which every quantized matmul of the file takes mmvq on the current GPU — dense ones by
+    llama.cpp's dense limit, expert stacks by its MoE one (the plugin's own predicates): Tier B's decode run. A GGUF's
+    tensors by their stored types; an HF checkpoint's quantized modules (`hf_quant.elems`) by the type kernels.ggml_cuda
+    repacks them into (docs/m06-lowp.md D8; one it has none for, e.g. FP8, is an error)."""
     from holon_plugins.kernels.ggml_cuda import extension, plugin
 
+    from . import hf_quant
+
+    path = pathlib.Path(path)
+    if path.suffix == ".gguf":
+        matmuls = {(t.tensor_type.name.lower(), t.name.endswith("_exps.weight")) for t in gguf.GGUFReader(path).tensors
+                   if t.tensor_type not in _DENSE and t.name != "token_embd.weight"}  # get_rows reads the embedding
+    else:
+        matmuls = {(plugin.weight_type(f"{elem}/hf"), hf_quant.expert(m)) for m, elem in hf_quant.elems(path).items()}
+    if not matmuls or any(name is None for name, _ in matmuls):
+        raise ValueError(f"{path.name}: a decode step needs quantized matmuls of kernels.ggml_cuda types only")
     major, minor = torch.cuda.get_device_capability()
     lib, device = extension.load(10 * major + minor), torch.cuda.current_device()
     limits = []
-    for t in gguf.GGUFReader(path).tensors:
-        if t.tensor_type in _DENSE or t.name == "token_embd.weight":     # get_rows reads the embedding
-            continue
-        use = lib.use_mmvq_id if t.name.endswith("_exps.weight") else lib.use_mmvq
-        kind = plugin.TYPES[t.tensor_type.name.lower()]
-        limits.append(max((n for n in range(1, 9) if use(device, kind, n)), default=0))
+    for name, stacked in matmuls:
+        use = lib.use_mmvq_id if stacked else lib.use_mmvq
+        limits.append(max((n for n in range(1, 9) if use(device, plugin.TYPES[name], n)), default=0))
     return min(limits)
 
 

@@ -11,6 +11,7 @@
     python -m holon_judge l2       --model <hf dir or id | .gguf> --prompts <jsonl> --golden <file> --floor <file>
                                    [--source gguf_dense] [--max-step-tokens N] [--kv q8_0|fp8] [--plant <bug>]
                                    [--dtype bfloat16] [--k 20] [--save <file>] [--json <file>] [--ceiling 1e-4]
+                                   [--act a4|a8]                             # quantized weights' quant.act
     python -m holon_judge retokenize --prompts <jsonl> --model <hf dir or id> --out <jsonl>
                                    # the same texts in another model's tokenizer (each must decode back exactly)
     python -m holon_judge snapshot-diff <a.json> <b.json>
@@ -46,6 +47,8 @@ from .compare import Result, compare, compare_drafter
 from .planted import PLANTS
 from .recording import PromptSet, Recording
 
+ACT = ("a4", "a8")                 # the quant.act option (docs/m06-lowp.md D3)
+
 
 def _golden(a: argparse.Namespace) -> int:
     if a.threads:
@@ -78,7 +81,7 @@ def _l2(a: argparse.Namespace) -> int:
     with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
         cand = score_model(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k, a.source,
                            a.max_step_tokens, a.state_memory_gib and int(a.state_memory_gib * 2**30), a.max_seqs,
-                           a.kv)
+                           a.kv, a.act)
     if a.save:
         cand.save(a.save)
     return _report(compare(Recording.load(a.golden), cand, Recording.load(a.floor), a.ceiling), a.json)
@@ -123,7 +126,8 @@ def _structure(a: argparse.Namespace) -> int:
     path = golden.resolve_model(a.model)
     with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
         engine = Engine(EngineConfig(model=str(path), dtype=golden.DTYPES[a.dtype], device=a.device,
-                                     max_model_len=1024, state_memory=1 << 28 if a.device == "cpu" else None))
+                                     max_model_len=1024, state_memory=1 << 28 if a.device == "cpu" else None,
+                                     plugin_options={"quant.act": a.act} if a.act else {}))
     bad = mismatches(engine, path)
     print(json.dumps({"model": golden.model_meta(path)["model"], "plant": a.plant, "mismatches": len(bad),
                       "first": bad[:8]}))
@@ -404,6 +408,8 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--max-step-tokens", type=int, help="tokens per engine step (default: whole prompts)")
     e.add_argument("--max-seqs", type=int, default=64)
     e.add_argument("--kv", choices=kv_format.FORMATS, help="the engine's KV cache format (default: the model dtype)")
+    e.add_argument("--act", choices=ACT, help="quantized weights' activation precision, the quant.act option "
+                   "(default a8; docs/m06-lowp.md D3)")
     e.add_argument("--state-memory-gib", type=float, help="state pools on the CPU (Tier A), which cannot be measured")
     e.add_argument("--threads", type=int, default=0, help="CPU threads (Tier A)")
     e.add_argument("--prompts", required=True)
@@ -429,6 +435,7 @@ def main(argv: list[str] | None = None) -> int:
     st.add_argument("--model", required=True, help="HF checkpoint directory or hub id")
     st.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
     st.add_argument("--device", default="cuda", help="cpu: the reference kernels (e.g. a stack no GPU kernel reads)")
+    st.add_argument("--act", choices=ACT, help="quant.act (a4: on sm_120, the stacks the `fp4` spec prepares)")
     st.add_argument("--plant", choices=sorted(PLANTS), help="calibration: run with a planted bug (must fail)")
     st.set_defaults(run=_structure)
 
