@@ -4,11 +4,11 @@ acceptance 2, step 5; evidence record).
 For each dialect (OpenAI chat, Anthropic Messages, OpenAI Responses) and tool choice (auto, required / any, named):
 the user asks for the weather, the model calls `get_weather` (strict: its arguments follow the schema), the call's
 result goes back, and the model answers. Every request is sent twice, streamed and not, greedy: the streamed events
-reassembled must equal the non-streamed answer (ids aside) — the streaming parse equals the whole-text parse; where
-they differ, all three are kept (a repeat that hits the prefix cache may generate other text: the parse is only
-judged on the same text). Per
-request: what was parsed (calls, text), the finish / stop reason, TTFT; the first request with a constraint is the
-server's first sight of it (cold: vetting and compiling), its repeats are warm. With `--model`, the render and
+reassembled must equal the non-streamed answer (ids aside) — the streaming parse equals the whole-text parse. Each
+request is sent three times: first streamed (cold: the server's first sight of the conversation and its constraint),
+then streamed and whole, both on the prefix the first one cached — the same generation, so that a difference is the
+parser's (the cold one may differ: the GGUF kernels are not batch- or chunk-invariant). Per request: what was parsed
+(calls, text), the finish / stop reason, TTFT cold and warm. With `--model`, the render and
 constraint build of each request (`pipeline.Chat`) is timed in this process with the model's bundle.
 
 Usage (from the repository root, against `holon serve <model> --slots logits_processor=grammar.xgrammar`):
@@ -212,16 +212,19 @@ def main() -> None:
                 row = {"dialect": name, "choice": choice}
                 for turn in ("call", "answer"):
                     answers = {}
-                    for stream in (True, False, True):          # the second streamed request is warm
+                    # The first request is the server's first sight of this conversation (cold: no cached prefix,
+                    # and a new constraint is vetted and compiled); the streamed and whole answers compared after it
+                    # both reuse its prefix, so they are the same generation unless a parser disagrees.
+                    for key, stream in (("cold", True), ("stream", True), ("whole", False)):
                         answer, ttft, total = post(client, dialect, body, stream)
-                        key = "stream" if stream and "stream" not in answers else "warm" if stream else "whole"
                         answers[key] = (dialect.summary(answer), ttft, total, answer)
-                    same = answers["stream"][0] == answers["whole"][0] == answers["warm"][0]
+                    same = answers["stream"][0] == answers["whole"][0]
                     summary = answers["whole"][0]
                     row[turn] = {"summary": summary, "stream_equals_whole": same,
+                                 "cold_generated_the_same": answers["cold"][0] == summary,
                                  **({} if same else {"variants": {k: v[0] for k, v in answers.items()}}),
-                                 "ttft_ms_cold": round(answers["stream"][1] * 1e3, 1),
-                                 "ttft_ms_warm": round(answers["warm"][1] * 1e3, 1),
+                                 "ttft_ms_cold": round(answers["cold"][1] * 1e3, 1),
+                                 "ttft_ms_warm": round(answers["stream"][1] * 1e3, 1),
                                  "total_ms": round(answers["whole"][2] * 1e3, 1)}
                     ok &= same
                     if turn == "call":

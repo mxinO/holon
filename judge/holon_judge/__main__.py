@@ -292,8 +292,10 @@ def _constrained(a: argparse.Namespace) -> int:
     bundle = plugin.bundle(source)
     grammar = base.slots | {"logits_processor": "grammar.xgrammar"}
     configs = {"plain": {"slots": grammar, "max_draft_tokens": 0}, "spec": {"slots": grammar},
+               # One sequence at a time: the GGUF kernels are not batch-invariant, so the reference's rows would
+               # otherwise depend on which other sequences a run asked it to score.
                "reference": {"max_draft_tokens": 0, "prefix_cache": False, "overlap": False, "cuda_graphs": False,
-                             "max_step_tokens": max(base.max_step_tokens, a.max_len)}}
+                             "max_step_tokens": max(base.max_step_tokens, a.max_len), "max_seqs": 1}}
 
     def build(name: str):
         return Engine(dataclasses.replace(base, max_model_len=a.max_len, **configs[name]))
