@@ -78,18 +78,26 @@ def public(arg: str, model: str) -> str:
 def lock_flags(engine: dict, skip: tuple[str, ...] = (), extra: str = "") -> list[str]:
     """`holon serve` flags that rebuild a lock's [engine] table (kernel pins are not flags: the default selection
     runs; release design D2 makes them soft preferences), then the `extra` flags given by hand: those override, a
-    dict flag's items merged per key into the lock's (as D2's `holon serve` will)."""
+    dict flag's items merged per key into the lock's (as D2's `holon serve` will). The KV format stays the lock's:
+    the baselines are matched to it."""
     engine, rest, key = {k: dict(v) if isinstance(v, dict) else v for k, v in engine.items()}, [], None
     for arg in shlex.split(extra):
         if arg.startswith("--"):
-            name = arg[2:].replace("-", "_")
-            key = name if name in ("plugin_options", "slots", "kernels") else None
-        if key and arg.startswith("--"):
-            engine.setdefault(key, {})
-        elif key:
-            engine[key].update([arg.split("=", 1)])
-        else:
+            name, _, item = arg[2:].partition("=")              # --flag=item is --flag item
+            key = name.replace("-", "_") if name in ("plugin-options", "slots", "kernels") else None
+            if key is None:
+                rest.append(arg)
+            if key is None or not item:
+                continue
+        elif key is None:
             rest.append(arg)
+            continue
+        else:
+            item = arg
+        k, _, v = item.partition("=")
+        if (key, k) == ("plugin_options", "kv.format"):
+            raise SystemExit("under --lock the KV format is the lock's (the baselines are matched to it)")
+        engine.setdefault(key, {})[k] = v
     flags = []
     for key, value in sorted(engine.items()):
         if key in skip:
@@ -238,7 +246,7 @@ def main() -> None:
         args.max_batch = args.max_batch or engine["max_seqs"]
         args.max_step_tokens = args.max_step_tokens or engine["max_step_tokens"]
         args.kv_format = args.kv_format or engine.get("plugin_options", {}).get("kv.format")
-        if not args.kv_tokens and args.backends[0] != "holon":
+        if not args.kv_tokens and args.backends[0] != "holon" and not all(b.startswith("holon") for b in args.backends):
             ap.error("--lock matches the baselines to Holon's KV tokens: list holon first, or give --kv-tokens")
     args.max_batch, args.max_step_tokens = args.max_batch or 64, args.max_step_tokens or 8192
 
@@ -252,7 +260,7 @@ def main() -> None:
         for b in args.backends:
             print(f"round {r} {b} ...", flush=True)
             if args.lock and not kv_tokens and not b.startswith("holon"):
-                res, err = None, "not matched: Holon's KV tokens unknown (its run failed)"
+                res, err = None, "not matched: Holon's KV tokens are unknown"
             else:
                 res, err = run_worker(b, args, raw / f"r{r}-{b}.json", kv_tokens)
             if res is None:
