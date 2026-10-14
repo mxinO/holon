@@ -1,15 +1,16 @@
 """What the host-token gate costs a constrained request (docs/m05-grammar.md D2; evidence record).
 
 Identical tokens: every engine serves the same greedy requests (natural-text prompts cut from `--corpus`, 256 tokens
-out, `ignore_eos`); configuration `none` selects no logits processor, `A` and `A′` select the test-only toy
-(`testing.toy_mask`) with its `apply` a no-op, and open the constrained requests with a marker token that never
-occurs, so their masks allow everything and only the gate changes their steps: under A′ the engine commits a
-constrained row before scheduling the next step (`Engine.commit_for_constrained`), under A the sequence sits a step
-out. Workloads: `single` (one request at a time, constrained unless `none`), `mixed` (four at once: one constrained,
-three free). The state pools are pinned to the bytes the first engine with the processor measured, so every engine has
-the same pool; `--rounds` interleaved rounds of fresh engines (none, A, A′), one at a time, CUDA waits sleeping (as
-`bench/run.py --blocking-sync`), with the engine thread's CPU time per phase of each step (`schedule`, `fill`,
-`launch` without the fill, `commit`, and the whole `step`).
+out, `ignore_eos`); configuration `none` selects no logits processor, `A′` selects the test-only toy
+(`testing.toy_mask`) with its `apply` a no-op, and opens the constrained requests with a marker token that never occurs,
+so their masks allow everything and only the gate changes their steps: the engine commits a constrained row before
+scheduling the next step (D2's A′; the variant A, which let the sequence sit a step out, was measured at 8c59010 and
+removed); `selected` selects the toy and constrains nothing (acceptance 6: byte-identical to `none`). Workloads:
+`single` (one request at a time, constrained under A′), `mixed` (four at once: one constrained, three free). The state
+pools are pinned to the bytes the first engine with the processor measured, so every engine has the same pool;
+`--rounds` interleaved rounds of fresh engines (none, selected, A′), one at a time, CUDA waits sleeping (as
+`bench/run.py --blocking-sync`), with the engine thread's CPU time per phase of each step (`schedule`, `fill`, `launch`
+without the fill, `commit`, and the whole `step`).
 
 Before the rounds, `--sizing-rounds` interleaved pairs of engines sized as deployed (`memory_fraction`), without and
 with the processor selected, give what selecting it costs: KV tokens, graphs, capture time (`--rounds 0`: only
@@ -39,7 +40,7 @@ from unittest import mock
 from run import ROOT, git, gpu_class, model_id, public
 
 PROMPT, OUTPUT, SINGLE, MIXED = 256, 256, 4, 2        # tokens in and out; single-stream requests, mixed batches
-CONFIGS = ("none", "A", "A′")
+CONFIGS = ("none", "selected", "A′")       # selected: the processor, no constrained request (acceptance 6)
 PHASES = ("schedule", "fill", "launch", "commit", "step")
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["name", "age", "email", "hobbies", "address"],
           "properties": {"name": {"type": "string"}, "age": {"type": "integer"}, "email": {"type": "string"},
@@ -61,7 +62,6 @@ def _engine(args, cfg_name: str, state_memory: int | None, processor: str | None
         processor = "testing.toy_mask"
     slots = cfg.slots | ({"logits_processor": processor} if processor else {})
     engine = Engine(dataclasses.replace(cfg, slots=slots, state_memory=state_memory))
-    engine.commit_for_constrained = cfg_name != "A"
     return engine
 
 
@@ -127,7 +127,7 @@ def gate_round(args, cfg_name: str, state_memory: int, corpus: list[int]) -> dic
     _timed(engine)
     marker = engine.spec.vocab - 1                   # a padding id: never in a prompt, never sampled
     free = SamplingParams(temperature=0.0, max_tokens=OUTPUT, ignore_eos=True)
-    constrained = dataclasses.replace(free, ext={KEY: {"marker": marker}}) if cfg_name != "none" else free
+    constrained = dataclasses.replace(free, ext={KEY: {"marker": marker}}) if cfg_name == "A′" else free
 
     def prompt(i: int) -> list[int]:
         at = (i * 7919) % (len(corpus) - PROMPT)
@@ -321,9 +321,10 @@ def summarize(rounds: list[dict], costs: dict) -> dict:
         "single_penalty_with_fill_apply": round((out["A′"]["single_tpot_ms"]["median"] + added / tokens_per_step)
                                                 / none, 4),
         "free_slowdown": {c: round(out[c]["mixed_free_tpot_ms"]["median"] / out["none"]["mixed_free_tpot_ms"]["median"],
-                                   4) for c in ("A", "A′")},
+                                   4) for c in ("selected", "A′")},
+        "selected_single_penalty": round(out["selected"]["single_tpot_ms"]["median"] / none, 4),
         "constrained_vs_free_under": {c: round(out[c]["mixed_constrained_tpot_ms_while_free"]["median"]
-                                               / out[c]["mixed_free_tpot_ms"]["median"], 4) for c in ("A", "A′")}}
+                                               / out[c]["mixed_free_tpot_ms"]["median"], 4) for c in ("A′",)}}
     return out
 
 

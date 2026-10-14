@@ -20,6 +20,7 @@ Usage (from the repository root):
   python bench/conformance.py precompile --tokenizer <HF checkpoint> --jsb <data dir> --work <dir>
   python bench/conformance.py run --url http://127.0.0.1:8000 --jsb <data dir> --work <dir> --pass greedy \\
       [--sample 500] [--free] [--temperature 1 --seed 0] [--max-tokens 2048] [--concurrency 16] [--server-pid N]
+      [--retry <pass>]       # only that pass's 503s, again (as pass '<pass>-retry'; the report merges it)
   python bench/conformance.py report --work <dir> --name <name> --gpu-class <class> --model <model id> \
       --serve "<flags>"
 """
@@ -49,11 +50,12 @@ FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
 WHITESPACE_RUN = 32                    # a truncated output ending in at least this much whitespace ran away in it
 
 
-def schemas(jsb: pathlib.Path, sample: int | None, seed: int) -> list[dict]:
+def schemas(jsb: pathlib.Path, sample: int | None, seed: int, only: set[str] | None = None) -> list[dict]:
     import pandas as pd
     rows = [{"id": r.unique_id, "subset": s, "schema": r.json_schema} for s in SUBSETS
             for r in pd.read_parquet(jsb / s / "test.parquet").itertuples() if r.unique_id not in UNSATISFIABLE]
-    return random.Random(seed).sample(rows, sample) if sample else rows
+    rows = random.Random(seed).sample(rows, sample) if sample else rows
+    return [r for r in rows if r["id"] in only] if only is not None else rows
 
 
 def _write(path: pathlib.Path, rows: list[dict]) -> None:
@@ -185,7 +187,10 @@ async def _one(client, args, row: dict, schema: dict, index: int) -> dict:
 
 async def run_pass(args) -> None:
     import httpx
-    rows = schemas(args.jsb, args.sample, args.sample_seed)
+    only = None
+    if args.retry:                       # the pass's requests the server turned away busy (503), again
+        only = {r["id"] for r in _read(args.work / f"run_{args.retry}.jsonl") if r.get("status") == 503}
+    rows = schemas(args.jsb, args.sample, args.sample_seed, only)
     tests = format_self_test()
     limits = asyncio.Semaphore(args.concurrency)
     async with httpx.AsyncClient(base_url=args.url, timeout=None) as client:
@@ -295,15 +300,22 @@ def summarize_precompile(rows: list[dict]) -> dict:
 def report(args) -> None:
     from run import ROOT, git
     work = args.work
-    passes = {}
+    passes, merged = {}, {}
     for meta_path in sorted(work.glob("run_*.meta.json")):
         meta = json.loads(meta_path.read_text())
+        if meta["pass"].endswith("-retry"):
+            continue
         rows = _read(meta_path.with_name(meta_path.name.replace(".meta.json", ".jsonl")))
+        retry = work / f"run_{meta['pass']}-retry.jsonl"
+        if retry.exists():               # a 503's retry replaces it (the pass's counters are its first run's)
+            again = {r["id"]: r for r in _read(retry)}
+            rows = [again.get(r["id"], r) if r.get("status") == 503 else r for r in rows]
+        merged[meta["pass"]] = rows
         passes[meta["pass"]] = {"settings": {k: meta[k] for k in ("free", "temperature", "seed", "max_tokens",
                                                                    "concurrency", "sample", "sample_seed")},
                                 "format_self_test": meta["format_self_test"], **summarize_pass(rows, meta),
                                 "rejection_reasons": _reasons(rows)}
-    runs = {p: {r["id"]: r for r in _read(work / f"run_{p}.jsonl")} for p in passes}
+    runs = {p: {r["id"]: r for r in rows} for p, rows in merged.items()}
     if "free" in runs:                      # the truncated shares over the schemas both passes accepted
         for p in [p for p in passes if passes[p]["settings"]["max_tokens"] == passes["free"]["settings"]["max_tokens"]]:
             both = [i for i, r in runs[p].items() if r.get("status") == 200 and runs["free"][i].get("status") == 200]
@@ -352,6 +364,7 @@ def main() -> None:
     run.add_argument("--max-tokens", type=int, default=2048)
     run.add_argument("--concurrency", type=int, default=16)
     run.add_argument("--server-pid", type=int, help="the frontend process, for its CPU time")
+    run.add_argument("--retry", help="a pass whose 503s to send again (this pass's name: '<pass>-retry')")
     rep = sub.choices["report"]
     for flag in ("--name", "--model", "--serve"):
         rep.add_argument(flag, required=True)

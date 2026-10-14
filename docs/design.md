@@ -970,11 +970,10 @@ extracted on the host, commit at once.
 
 **Host-token gate (M0.5 D2).** A logits processor builds a row's mask on the host from the Seq's committed tokens
 (and, for a verify row, the drafts copied back with the step's results), so a constrained Seq is never scheduled
-while it has a row in flight or while it is `BLOCKED` (its processor not ready). Two variants behind one engine
-switch (`Engine.commit_for_constrained`), chosen by D2's measurement: A′ (default) commits the in-flight step first
-whenever it holds a constrained row, so constrained Seqs decode every step and that step's other rows lose their
-overlap; A leaves the constrained Seq out of the step instead (it decodes every other step beside overlapping free
-rows). A manifest-declared per-plugin depth (`max_depth`) was removed unread: the gate comes from the processor's
+while it has a row in flight or while it is `BLOCKED` (its processor not ready). The engine commits the in-flight
+step first whenever it holds a constrained row, so constrained Seqs decode every step and that step's other rows lose
+their overlap (D2's A′, chosen by measurement; the variant that left the Seq out of the step was removed). A
+manifest-declared per-plugin depth (`max_depth`) was removed unread: the gate comes from the processor's
 `open`. Device-side `rewind` runs inside the step's graph, right after the Sampler/Verifier, so the next step's
 device inputs (`DEVICE_LAST`/`DEVICE_DRAFT`) are already consistent.
 
@@ -987,13 +986,13 @@ device inputs (`DEVICE_LAST`/`DEVICE_DRAFT`) are already consistent.
   per ShapeKey class. `host` means the plugin never runs inside a graph — it runs on the CPU between replays
   (placement-policy `adapt()`, schedulers). v0 implements FULL (decode/verify) and EAGER (prefill); PIECEWISE is v1.
 - **v0 (implemented in E6)**: decode-only steps without logprobs are padded to a batch-size bucket (1, 2, 4, 8, 16,
-  24, 32, 48, 64, … up to `max_seqs`) and replayed from a graph keyed by (bucket, row width, whether the step has
-  constrained rows, the sampler's `variant` — its host-side branches —, each planner's `graph_key`). A planner whose
+  24, 32, 48, 64, … up to `max_seqs`) and replayed from a graph keyed by (bucket, row width, the sampler's `variant` — its host-side branches —, each planner's `graph_key`). A planner whose
   kernel offers no `graph_key` keeps the step eager. The graph covers forward, sampling and the SeqTable write; inputs
   are staged into the static buffers and results copied out around the replay. Padding rows use a dedicated slot whose
   block-table row points at each paged pool's reserved, zeroed null unit, so they read and write nothing real. Every
-  bucket × width × sampler variant (greedy, sampled, filtered) — × with and without constrained rows when a logits
-  processor is selected — is captured at startup, largest bucket first so smaller graphs reuse its blocks of the one
+  bucket × width × sampler variant (greedy, sampled, filtered) is captured at startup (with a logits processor
+  selected, every step applies its masks — over padding rows only when it has no constrained rows — so one graph
+  serves both), largest bucket first so smaller graphs reuse its blocks of the one
   shared pool; kernels keep their graph keys independent of per-step lengths (Triton's split count follows the batch
   and the table width), so serving never stops to capture. The memory profile subtracts the pool the largest bucket's
   graphs leave reserved, and the CUDA allocator uses expandable segments so a long mix of large prefill activations
@@ -1168,6 +1167,9 @@ frontend stays Python.
  batch{n_seqs,n_tokens,shape_key}, ledger{pool: used/cap}, prefix{hits,misses,tokens_saved},
  spec{proposed,accepted}, plugin_counters{ns: {...}}}
 ```
+
+Slot objects (sampler, verifier, drafter, draft policy, logits processor) may count what they do: an optional
+`stats()` whose counters `Engine.stats()` reports as `<plugin name>.<key>` beside the core's (M0.5).
 
 Phase timings are measured by the core with CUDA events for **diagnosis and agent guidance**. Verdicts and canaries
 never rely on them, because candidate code may share the engine process: the judge measures performance

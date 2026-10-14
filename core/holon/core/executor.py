@@ -191,7 +191,7 @@ class Executor:
                 graphs, self.graphs = self.graphs, platform.Graphs(self.device)
                 peak += platform.reserved_growth(self.device, lambda: [
                     self._graph_step(self.buckets[-1], *variant) for variant in self._graph_variants()])
-                self.graphs = graphs
+                self.graphs = graphs                     # the profile's graphs go before the free memory is read
         ledger.free()
         return int(platform.free_memory(self.device) * fraction) - peak
 
@@ -233,12 +233,10 @@ class Executor:
             self.processor.apply(torch.zeros(r, self.vocab, device=self.device), self.uploader.dev["mask"].view(r, -1),
                                  torch.arange(r, device=self.device))
 
-    def _graph_variants(self) -> list[tuple[SamplingParams, int, bool]]:
-        """(sampler params, row width, masked) of every graph per bucket: decode rows and verify rows of each width
-        the policy may ask for, for each sampler variant — with and without constrained rows when a logits processor
-        is selected."""
-        return [(params, width, masked) for width in (1, *self.verify_widths) for params in _VARIANTS
-                for masked in ((False, True) if self.processor is not None else (False,))]
+    def _graph_variants(self) -> list[tuple[SamplingParams, int]]:
+        """(sampler params, row width) of every graph per bucket: decode rows and verify rows of each width the policy
+        may ask for, for each sampler variant."""
+        return [(params, width) for width in (1, *self.verify_widths) for params in _VARIANTS]
 
     def capture_graphs(self) -> None:
         """Capture every bucket's decode and verify graphs (after the pools' final materialize: graphs bake in their
@@ -253,16 +251,16 @@ class Executor:
         self.sampler.admit(self.state.padding_slot, _VARIANTS[0])
 
     @torch.no_grad()
-    def _graph_step(self, rows: int, params: SamplingParams, width: int = 1, masked: bool = False) -> bool:
+    def _graph_step(self, rows: int, params: SamplingParams, width: int = 1) -> bool:
         """Warm up and capture one graph with every row on the padding slot (null unit, `params`): decode rows, or
-        verify rows of `width` tokens with their drafter sub-steps; `masked`: with the logits processor's `apply`
-        (over padding rows only)."""
+        verify rows of `width` tokens with their drafter sub-steps; with a logits processor, its `apply` (over padding
+        rows only: every step applies, constrained rows or not)."""
         self.sampler.admit(self.state.padding_slot, params)
         empty = np.zeros(0, dtype=np.int32)
         plan = host_plan(0, empty, empty, empty, empty, np.zeros(0, dtype=np.int64))
         plan.draft_k = width - 1
         plan = padded(plan, rows, self.state.padding_slot, width)
-        ctx = self._context(plan, masks=([], np.zeros(0, dtype=np.int64)) if masked else None)
+        ctx = self._context(plan, masks=([], np.zeros(0, dtype=np.int64)) if self.processor is not None else None)
         key = self._graph_key(ctx, width)
         if key is None:
             return False
@@ -271,15 +269,14 @@ class Executor:
         return True
 
     def _graph_key(self, ctx: StepContext, width: int) -> tuple | None:
-        """The graph a step replays: its size and width, whether it has constrained rows, the sampler's variant,
-        every planner's and sub-step's key (None: some kernel cannot be captured)."""
+        """The graph a step replays: its size and width, the sampler's variant, every planner's and sub-step's key
+        (None: some kernel cannot be captured)."""
         metas = list(ctx.metas.values()) + [m for sub in (ctx.substeps.subs if ctx.substeps else []) for m in
                                             sub.metas.values()]
         keys = [getattr(meta, "graph_key", None) for meta in metas]
         if None in keys:
             return None
-        return (len(ctx.batch.plan.slots), width, ctx.prep.mask is not None, self.sampler.variant(ctx.batch.plan.slots),
-                *keys)
+        return (len(ctx.batch.plan.slots), width, self.sampler.variant(ctx.batch.plan.slots), *keys)
 
     # -- one step -------------------------------------------------------------------------------------------------
     def launch(self, plan: BatchPlan, exact: np.ndarray, logprobs: bool, prompt: list[PromptRows] | None = None,

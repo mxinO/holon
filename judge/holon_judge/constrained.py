@@ -11,8 +11,9 @@ path (no logprobs) and again with logprobs (eager), so there are two pairs of ru
   cache, teacher-forced on the common prefix — is near a tie: its top-2 gap there, among the tokens a fresh matcher
   replaying the prefix allows (unmasked for free runs), is below the threshold. The threshold is `CONFIDENT_GAP`
   raised to the largest first-divergence gap of the free pair and of the calibration runs (natural-text prompts
-  continued unconstrained, as M0.4's spec-vs-plain runs), which speculation without a grammar (lossless since M0.4)
-  shows to be kernel noise: calibrated by the unconstrained runs, then applied to the constrained ones. Each
+  continued unconstrained up to their stop token, as M0.4's spec-vs-plain runs), which speculation without a grammar
+  (lossless since M0.4) shows to be kernel noise: calibrated by the unconstrained runs, then applied to the
+  constrained ones. Each
   divergence of the logprob runs also records both engines' own (masked) logprobs of the two tokens.
 - **No errors.** No constrained request ends with `error` (a token its matcher refuses).
 - **Agreement.** How often the generated token is the reference's masked argmax — overall and where its masked
@@ -72,7 +73,7 @@ def schemas(jsb: pathlib.Path, n: int) -> list[tuple[str, dict]]:
 
 
 def generate(engine, prompts: list[list[int]], constraints: list[dict | None], max_tokens: int,
-             k: int | None, ignore_eos: bool = False) -> Run:
+             k: int | None) -> Run:
     """Every prompt, greedy; a constraint the processor's vetting queue cannot take yet waits for the engine."""
     rids = {}
     tokens, finish = [[] for _ in prompts], [""] * len(prompts)
@@ -91,8 +92,7 @@ def generate(engine, prompts: list[list[int]], constraints: list[dict | None], m
                 finish[i] = d.finish_reason
 
     for i, (p, c) in enumerate(zip(prompts, constraints, strict=True)):
-        params = SamplingParams(temperature=0.0, max_tokens=max_tokens, logprobs=k, ext={KEY: c} if c else {},
-                                ignore_eos=ignore_eos)
+        params = SamplingParams(temperature=0.0, max_tokens=max_tokens, logprobs=k, ext={KEY: c} if c else {})
         while True:
             try:
                 rids[engine.add(p, params)] = i
@@ -152,9 +152,9 @@ def judge(build, tokenizer, render, jsb: pathlib.Path, n: int = 64, max_tokens: 
           calibration: list[list[int]] = ()) -> dict:
     """`build(name)` returns the "plain" or "spec" engine (the grammar processor selected) or the "reference" (none);
     `render(messages)` the chat prompt's ids (thinking off); `tokenizer` the model's, for the fresh matchers;
-    `calibration`: natural-text prompts the engines also continue unconstrained (CALIBRATION tokens, `ignore_eos`),
-    whose first divergences calibrate the near-tie threshold with the free pair's (§5: M0.4's unconstrained
-    spec-vs-plain runs)."""
+    `calibration`: natural-text prompts the engines also continue unconstrained (up to CALIBRATION tokens, ending at
+    the stop token: past it, decode and prefill disagree by far more than near-ties), whose first divergences
+    calibrate the near-tie threshold with the free pair's (§5: M0.4's unconstrained spec-vs-plain runs)."""
     items = schemas(jsb, n)
     prompts = [render([{"role": "system", "content": SYSTEM}, {"role": "user", "content": json.dumps(s)}])
                for _, s in items]
@@ -172,7 +172,7 @@ def judge(build, tokenizer, render, jsb: pathlib.Path, n: int = 64, max_tokens: 
                           if key.startswith("spec_") or key.endswith("drafts_refused")}
         if calibration:
             runs[f"{name}/calibration"] = generate(engine, inputs["calibration"], [None] * len(calibration),
-                                                   CALIBRATION, None, ignore_eos=True)
+                                                   CALIBRATION, None)
         engine.close()
         gc.collect()
 

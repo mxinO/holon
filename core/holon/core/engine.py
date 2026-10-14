@@ -107,11 +107,6 @@ class _Target:
 
 
 class Engine:
-    # A constrained sequence (its logits processor needs every token before its next row on the host) whose last row
-    # is in flight: True (A′) — the step commits the row before scheduling, so it decodes every step and the step's
-    # other rows lose their overlap; False (A) — it sits the step out, others overlap (M0.5 design D2).
-    commit_for_constrained = True
-
     def __init__(self, cfg: EngineConfig, plugins: PluginSet | None = None) -> None:
         self.cfg, self.device = cfg, torch.device(cfg.device)
         platform.configure_allocator(self.device)
@@ -356,12 +351,12 @@ class Engine:
     @torch.no_grad()
     def step(self) -> list[TokenDelta]:
         """Schedule and launch one step; commit the previous one while this one runs (overlap) — before scheduling
-        if it holds a constrained row (`commit_for_constrained`) — or this one at once (depth 0, and steps that report
-        prompt logprobs, whose extraction needs the host)."""
+        if it holds a constrained row, whose processor needs that row's tokens before the sequence's next row (so a
+        constrained sequence decodes every step and the step's other rows lose their overlap: M0.5 design D2) — or
+        this one at once (depth 0, and steps that report prompt logprobs, whose extraction needs the host)."""
         prev, self._inflight = self._inflight, None
         deltas = self._unblock() if self._blocked else []
-        if prev is not None and self.processor is not None and self.commit_for_constrained and any(
-                m and seq.constrained for seq, _, m in prev.rows):
+        if prev is not None and self.processor is not None and any(m and seq.constrained for seq, _, m in prev.rows):
             deltas, prev = deltas + self._commit(prev), None
         scheduled = self.sched.schedule()
         if scheduled is None and prev is not None:      # what is left waits on the in-flight step's tokens
@@ -432,16 +427,16 @@ class Engine:
         return _Inflight(rows, plan.draft_k, out, sync, ops.publishes)
 
     @staticmethod
-    def _masks(rows: list[tuple[Seq, int, int]]) -> tuple[list[MaskRow], np.ndarray] | None:
-        """The step's constrained rows — a verify row with the drafts it checks — and their logits rows (None: it
-        has none)."""
+    def _masks(rows: list[tuple[Seq, int, int]]) -> tuple[list[MaskRow], np.ndarray]:
+        """The step's constrained rows — a verify row with the drafts it checks — and their logits rows (none: the
+        step still applies, over padding only, so one graph serves steps with and without them)."""
         masks, index, at = [], [], 0
         for seq, _, m in rows:
             if m and seq.constrained:
                 masks.append(MaskRow(seq, len(index), m, seq.drafts[: m - 1]))
                 index += range(at, at + m)
             at += m
-        return (masks, np.array(index, dtype=np.int64)) if masks else None
+        return masks, np.array(index, dtype=np.int64)
 
     def _prompt_rows(self, plan: BatchPlan, seqs: list[Seq]) -> list[PromptRows]:
         """The prompt logprobs this step's rows owe: the prompt positions they compute that predict a prompt token,

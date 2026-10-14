@@ -6,7 +6,7 @@ import dataclasses
 
 import pytest
 import torch
-from holon.api import SamplingParams, Status, TokenSrc
+from holon.api import SamplingParams, Status
 from holon.core.engine import BLOCKED_POLL_S, Engine, EngineConfig
 from transformers import AutoModelForCausalLM
 
@@ -73,25 +73,22 @@ def _run(engine, requests):
 
 
 @pytest.mark.parametrize("memory", [1 << 20, 12 * 2048], ids=["roomy", "preempting"])
-@pytest.mark.parametrize("depth", ["depth0", "depth1-commit", "depth1-skip"])
+@pytest.mark.parametrize("depth", ["depth0", "depth1"])
 @pytest.mark.parametrize("mode", ["plain", "right", "wrong", "mixed"])
 def test_constrained_outputs_are_the_masked_reference(tiny_checkpoint, masked, oracle, mode, depth, memory):  # noqa: F811
     # Constrained and free requests together through chunked prefill, preemption, prefix hits (a second pass),
-    # depth 0 and both depth-1 gates (D2: commit the constrained row first, or skip it), n = 2, verify rows with right,
+    # depth 0 and 1 (D2's gate: a constrained row is committed before the next step), n = 2, verify rows with right,
     # wrong and mixed drafts, greedy and sampled: every output equals its reference (so every sampled row was masked
     # with its request's current state), the processor saw exactly the tokens committed and the drafts the drafter
-    # wrote, free rows kept overlapping at depth 1, and the gates differ: under A′ every decode step holds every
-    # running constrained sequence, under A some decode step leaves one out.
+    # wrote, and at depth 1 every decode step holds every running constrained sequence (none sits a step out).
     requests, refs = masked
     oracle.mode = mode
     oracle.sequences = {tuple(p): p + (ref[0] if params.n > 1 else ref)
                         for (p, params), ref in zip(requests, refs, strict=True)}
     engine = _engine(tiny_checkpoint, spec=mode != "plain", overlap=depth != "depth0", state_memory=memory)
-    engine.commit_for_constrained = depth != "depth1-skip"
-    toy, overlapped, left_out, launch, fill = engine.processor, [], [], engine._launch, engine.processor.fill
+    toy, left_out, launch, fill = engine.processor, [], engine._launch, engine.processor.fill
 
     def launch_(plan, seqs):
-        overlapped.append(bool((plan.token_src == TokenSrc.DEVICE_LAST).any()))
         if all(seq.status is Status.RUNNING for seq in seqs):          # a decode step
             left_out.append(any(seq.constrained and seq not in seqs for seq in engine.sched.running))
         return launch(plan, seqs)
@@ -109,10 +106,7 @@ def test_constrained_outputs_are_the_masked_reference(tiny_checkpoint, masked, o
     assert [[toy.out[rid, i] for i in range(len(outs))] for rid, outs in zip(toy.opened, constrained * 2,
                                                                               strict=True)] == constrained * 2
     assert sorted(toy.opened) == sorted(toy.closed) and _released(engine)
-    if depth != "depth1-commit":                 # A′ commits a constrained row before the step: its rows wait too
-        assert any(overlapped) == (depth == "depth1-skip")
-    if depth != "depth0":
-        assert any(left_out) == (depth == "depth1-skip")
+    assert not any(left_out)
     stats = engine.stats()
     assert (stats["preemptions"] > 0) == (memory < 1 << 20)
     assert stats["testing.toy_mask.rows_filled"] == len(toy.rows) > 0     # a slot object's own counters

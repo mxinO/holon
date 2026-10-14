@@ -103,9 +103,6 @@ class FrontendBundle(Protocol):
                     add_generation_prompt: bool = True, **template_kwargs: Any) -> list[int]:
         """Token ids of a chat, rendered with the model's chat template."""
 
-    # Optional: `constraint(tools, tool_choice, response_format) -> dict | None`, the constraint resource (a plain
-    # dict for `SamplingParams.ext`, M0.5 design D6) for a template whose format the frontend does not build.
-
 
 class EngineClient(Protocol):
     """What a frontend gets from the core: the engine behind a process boundary, in token ids."""

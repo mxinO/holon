@@ -151,6 +151,10 @@ HOLES = [
       "patternProperties": {"^(?!(hosts|vars)$)[a-z_]+$": {}}}, {"hosts": 1}),
     ({"type": "string", "pattern": "^(?=x)[a-z]$"}, "a"),
     ({"type": "string", "pattern": "^([a-z])\\1$"}, "ab"),
+    # Anchors away from the pattern's ends (or a top-level `|`): xgrammar drops them (correctness reviewer, step 5).
+    *(({"type": "string", "pattern": p}, w) for p, w in (("a^b", "ab"), ("^a$b", "ab"), ("(a)^", "a"), ("x?^a", "xa"),
+                                                         ("^(?:a$|b)c$", "ac"))),
+    ({"type": "string", "pattern": "^\\u{41}$"}, "u" * 41),    # the `u`-flag code point escape: "A"
     ({"$schema": D4, "definitions": {"s": {"type": "string"}}, **_obj({"a": {
         "id": "http://example.com/inner", "definitions": {"s": {"type": "integer"}}, **_obj({"b": {
             "$ref": "#/definitions/s"}})}})}, {"a": {"b": "x"}}),
