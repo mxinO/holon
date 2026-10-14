@@ -442,6 +442,8 @@ NVFP4, 30B NVFP4, `amd-quark` and MXFP4_MOE. **Cluster only** — sm_89 / sm_120
 
 - Static-scale W4A4 providers on sm_120 (vLLM's CUTLASS sm120 NVFP4 GEMM and grouped MoE, FlashInfer `mm_fp4` /
   `cutlass_fused_moe`), judged against the W4A4-static floor recorded here; `a4` as a default (acceptance 7's rule).
+  **Pre-registered (Gate A close):** any future `a4` provider gets a recalibrated top-1 rule before any pass/fail
+  verdict, since L2's 0.25-point slack is below W4A4's own floor-to-floor noise (0.36 points, A5).
 - CUTLASS sm120 blockwise FP8 (examples 87b / 87c) for prefill; grouped FP8 kernels (the 30B FP8 on GPUs); FP8 on
   sm_86 (plan §10, v1); `quant.act = a16`.
 - A16 FP4 kernels; ModelOpt `MIXED_PRECISION` and per-tensor FP8; Quark NVFP4; GGUF NVFP4.
@@ -685,7 +687,7 @@ copy is a named plan-time workspace.
 |---|---|---|
 | Tier B's decode step for HF files | `mmvq_step` from the file's types (GGUF only) | `gguf.mmvq_step` also takes an HF checkpoint: its quantized modules from the shard headers alone (`hf_quant.elems`, `parts`' rules on meta tensors), each as the ggml type `prepare` repacks it into (one with none, FP8, is an error), stacked by the Qwen expert pattern; the GPU structural test asserts it equals the smallest mmvq limit of the instances the engine binds. Steps: 8 for the NVFP4 files (sm_86, sm_120), amd-quark 7 on sm_86 and 8 on sm_120 (its MXFP4 experts), the MXFP4_MOE GGUF 7 on sm_86 and 8 on sm_89 |
 | `quant.act` in the judge | — | `l2 --act a4\|a8` and `structure --act` set the plugin option (the W4A4 report, M4, the `fp4` spec's stacks) |
-| mode check (A4) | every quantized call on the floor's `path/mode` | a quantized LM head's calls are counted apart (`head_calls`, reported only): **bug found in A5**, below. The trunk's calls are checked as before |
+| mode check (A4) | every quantized call on the floor's `path/mode` | a quantized LM head's calls are counted apart (`head_calls`): **bug found in A5**, below. The trunk's calls are checked as before; the head's mode is checked and its path is not (Gate A close) |
 | N6 | a Python error at the first q/k/v mmq call (warm-up, before capture) | as built in A3: at load, when `bind_kernels` builds the first quantized linear's instance (before warm-up and capture) |
 | M4 | L0 (sm_120a, `fp4`, `in` = 768) | also on Tier B (RTX PRO 6000, amd-quark 30B, its down `in` = 768): `a8` bit-identical to the clean run (the `q8_1` spec has no tail), `a4` NaN. There is no W4A4 floor for a 30B, so both `a4` runs (clean beside) are scored against the W4A8 floor, which the mode check refuses too |
 | M0.1's wrong-type plants on the MXFP4_MOE file | fail | not applicable: they read a type as its same-size twin (Q4_K / Q4_0, IQ3_S / Q3_K), and neither MXFP4 (17 B per 32) nor Q8_0 (34 B per 32) has one, so they bind nothing; not run. The stale-q8_1 plants (dense and experts) ran |
@@ -826,13 +828,16 @@ bf16, are the same at either, and the GGUF prefill verdicts are f5a37b1's.
   | 30B NVFP4 | RTX 5090 | 11581 / 10213 | 307.1 / 320.6 | 306.1 / 317.5 | 1.13 / 0.96 |
   | GGUF MXFP4_MOE | RTX 5090 | 14483 / 12878 | 329.0 / 343.8 | 326.9 / 340.1 | 1.12 / 0.96 |
 
-  Every acceptance row passes, inside the predicted 0.95–1.1× (§4.10) except the RTX 5090's prefill at 1.12–1.13×.
+  Every acceptance row passes, inside the predicted 0.95–1.1× (§4.10). The RTX 5090's prefill (recorded, not
+  gated) sits above that band at 1.12–1.13×. Its clock screen showed the power cap active 91% of the time, and the
+  rows ran one after another rather than interleaved.
   Beside them on sm_120, pp512 for llama.cpp's default (native W4A4 prefill) vs Holon at `a4`: 8B 13363 vs 14394
   (5080), 21037 vs 24821 (5090); 30B NVFP4 17108 vs 19487 (5090). The MXFP4_MOE file at llama.cpp's default runs
   16257 (5090). tg128 is the same in both modes (decode is mmvq q8_1).
 - **Serving** (RTX 5080, 8B NVFP4; out tok/s, TTFT p50 ms; Holon vs llama-server at `q8` / at its default):
   decode_b1 141.3, 41.9 vs 137.2, 60.3 / 138.5, 41.8; decode_b8 780.7, 298 vs 644.1, 497 / 680.9, 336; agent 77.1,
-  68 vs 75.2, 208 / 75.3, 171. Holon is at or above llama-server on every trace in both of its modes.
+  68 vs 75.2, 208 / 75.3, 171. Holon is ahead at batch 8 (+15–21%) and on TTFT, and level within noise at
+  batch 1 and on the agent trace. The runs were sequential, one per backend.
 - **Locks** (acceptance 10; L2 against the W4A8 mmq floor; tune picked `kernels.triton_attn` for decode attention
   on both classes):
 
@@ -843,7 +848,9 @@ bf16, are the same at either, and the GGUF prefill verdicts are f5a37b1's.
   | rtx-4090 nvidia 30B NVFP4 (new model) | 4.75e-2 (4.92e-2) | 98.29% | approve, PASS |
   | rtx-4090 MXFP4_MOE GGUF (new model) | 2.64e-2 (2.81e-2) | 98.44% | approve, PASS |
 
-  Snapshot ×3 run-identical for all four (130 steps each; the 8B NVFP4 on both classes). Graphs vs eager on the 30B
+  The rtx-5080 8B NVFP4 lock's `deploy.commit` is e6c9f53, the others' 74bfabb. The only change between them is
+  `tools/`, which is not a unit, so it is the same deployment. Snapshot ×3 run-identical for all four (130 steps
+  each; the 8B NVFP4 on both classes). Graphs vs eager on the 30B
   NVFP4 at its lock's flags (RTX 4090), decode batches 3, 5, 12, 20: pass.
 - **Every development-class lock propagated** to this tree (rebased on `main`): rtx-5080 30B UD-IQ3_XXS, 8B
   Q4_K_M, 8B UD-IQ3_XXS, 27B UD-IQ3_S; rtx-4090 Qwen3-8B bf16, 30B Q4_K_M, 27B UD-Q4_K_M. All seven have a
@@ -872,5 +879,35 @@ bf16, are the same at either, and the GGUF prefill verdicts are f5a37b1's.
      rule is not met.
   2. **N8b passes at 1.70×**, inside its band and under §4.8's 2× fail line: as designed.
   3. **A judge rule changed after a result** (for the Gate A panel and the owner): the `head_calls` mode-check change
-     is accepted. It narrows the scope of a check M0.6 itself added in A4 (the Q8_0 head never sees the step's row
+     is accepted (Gate A close: the head's mode stays checked, only its path is not). It narrows the scope of a
+     check M0.6 itself added in A4 (the Q8_0 head never sees the step's row
      count, and sampled rows are never scored); no metric bar was loosened.
+
+**Gate A close (panel, 2026-10-14).** No code blockers. The two missing records and the minors are done:
+- **Acceptance 3, recorded** (`evidence/chat_m06-lowp_rtx-a5000_2026-10-14.json`): the M0.1 chat set's six
+  requests ran in process on the six serving targets (nvidia 8B / 30B NVFP4, RedHatAI 8B NVFP4, Yi30 8B MXFP4,
+  amd-quark 30B MXFP4, the MXFP4_MOE GGUF). Settings: greedy, the files' chat templates, max_tokens 400, `a8`. Every
+  file loads through `models/qwen3` / `models/qwen3_moe` unchanged, and every answer is correct and well formed.
+  The three 30B files reach the 215-minute trip; the 8B files' thinking is still on correct steps at the 400-token
+  cap, as in M0.1's record. The math and multi-turn prompts were rebuilt from M0.1's record, since its script was
+  not kept. The GGUF NVFP4 refusal and the FP8 files' CPU loading were A2's / A4's tests and Tier A.
+- **Acceptance 5 at the head after A3's fix** (`evidence/l0_m06-lowp_gate-a_2026-10-14.json`, commit 2695df7; the
+  later commits change only the judge's mode check and docs). A3's L0 script ran: ggml dense / MoE, the quantized
+  units, the W4A4 emulator, and memcheck. sm_120a (RTX 5080): 230 passed, 1 skipped (an sm_86-only split). sm_89
+  (RTX 4090): 222 passed, 9 skipped (PDL and native W4A4 are sm_90+ / Blackwell). Memcheck was 0 errors on both,
+  dense (20 types, HF FP4 at `a8` and `a4`) and MoE (24 layouts and modes). Clock screens: SM median 2760 / 2715 MHz,
+  no thermal slowdown.
+- **Acceptance 7: met with a deviation.** N9 failed literally by 1 position of 32783 and is met in substance
+  (§8, A5's decisions). Any future `a4` provider gets a recalibrated top-1 rule before any pass/fail verdict
+  (pre-registered in §7).
+- **`head_calls`:** the head's mode is checked again and only its path is not (`compare._path_failures`). The test in
+  `judge/tests/test_compare.py` fails before the change: a head in another mode.
+- **`docs/design.md`**, with this merge: §4.2 has no `dialect` / `converter` slots, and §4.3, §5.3 and §5.4 have no
+  converter registry or `@register_converter`. §5.5's pipeline is the weight source's dialects and the kernels'
+  `prepare` (no `Dialect` / `Converter` classes). `linear_experts@2`.
+- **Gate B, recorded now.**
+  - Before B3's FP8 fit, call `torch.cuda.empty_cache()` after load, merges and `prepare`, or confirm
+    `expandable_segments` takes effect. amd-quark's 0.98 GiB that the allocator held but could not return (A6) would
+    cost the 8B FP8 more than its margin.
+  - Fits record reserved minus allocated at the free-memory read.
+  - The 8B FP8's predicted margin on the RTX 5080 is only 2.3K tokens (34.3K at 0.9 against 32K).

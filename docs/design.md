@@ -208,7 +208,7 @@ against the Protocol (`runtime_checkable` + signature check).
 | `single` | exactly one per Plan | model, platform, launcher, schedule_policy, sampler, verifier, draft_policy, eviction_policy (prefix index) |
 | `per_site` | bound per site (layer, op instance, state spec, store) | unit (mixers, ffn/MoE, norms, blocks, ops — anything a recipe names by `Ref`), kernel, state_kind, placement_policy, codec, weight_source |
 | `ordered_multi` | ordered list, `after`/`before` in the manifest | plan_transform, logits_processor (v0: at most one, selected via `EngineConfig.slots`), checkpoint_policy |
-| `multi` | any number, keyed by name | frontend, dialect, converter, tier, mover, drafter, encoder, connector, exporter |
+| `multi` | any number, keyed by name | frontend, tier, mover, drafter, encoder, connector, exporter |
 
 A `Ref("a.b.c@1")` is served by the installed plugin whose name is the longest prefix of the unit name (e.g.
 `std.ops` serves `std.ops.rmsnorm`), and whose version major equals the Ref's major. Everything the resolver needs
@@ -230,7 +230,7 @@ Every slot has an ABI version and a judge-owned contract suite (§10.3).
    **Lock** file stores the Plan plus its verification results (`snapshot`, `uncovered` sites), which may be
    re-recorded without changing `plan_id` (§4.6). Whether a lock was borrowed from the nearest class (`unverified`)
    is decided when the engine starts, not stored.
-7. Import only the selected entries; each plugin registers its kernels/converters/kinds into explicit registries
+7. Import only the selected entries; each plugin registers its kernels/kinds into explicit registries
    passed to `Plugin.register(regs)` (no module-level registries, invariant 4); construct; bind callables. The hot
    path never does a registry lookup.
 
@@ -452,8 +452,8 @@ class ModelSpec:
 - **Taps** are named export points the core can attach consumers to (EAGLE-3 hidden states, KVMem-style Q/K
   capture, MTP inputs). A feature needing a new tap requires a model plugin change — never a core change.
 - **Weight finalization.** Every built module (model glue, mixer, composite) may implement
-  `finalize_weights(params, ctx)`, run once after loading and converters, before graph capture. It covers
-  transformations spanning several tensors or semantics a converter cannot see: MLA W_UK/W_UV absorption,
+  `finalize_weights(params, ctx)`, run once after loading and kernels' `prepare`, before graph capture. It covers
+  transformations spanning several tensors or semantics a per-tensor `prepare` cannot see: MLA W_UK/W_UV absorption,
   zero-centred RMSNorm (`x·(1+w)` — kept as an offset-gamma kernel parameter, not folded into bf16), GDN
   `-exp(A_log)` precompute, KV-cache scales. Results live in the module's Pool-backed storage. After every
   module has finalized (merges included), the core calls `bind_kernels(ctx)` on each module that has it: units
@@ -501,7 +501,7 @@ def linear_ref(x, w, bias=None): return x @ w.layout.scheme.dequant_ref(w).T + (
 @composite("add_rmsnorm_quant", decomposition=lambda x, r, g, eps, out_layout: quant(rmsnorm(x + r, g, eps), out_layout))
 ```
 
-- `@op`, `@composite` and `@register_converter` are **metadata-only markers** (they attach attributes to the
+- `@op` and `@composite` are **metadata-only markers** (they attach attributes to the
   function); nothing is registered at import. `Plugin.register(regs)` collects marked objects from its own modules
   into the engine's registries (invariant 4).
 - Every Op has a reference implementation (pure torch, fp32 accumulate) in its unit's `reference.py`. The
@@ -509,8 +509,9 @@ def linear_ref(x, w, bias=None): return x @ w.layout.scheme.dequant_ref(w).T + (
 - **Fusion in v0 = explicit composites** called by models/mixers. A composite's decomposition is its reference.
   No torch.compile in the core. (Inductor may be used as a kernel provider for a single op.)
 - **MoE (M0.2, `std.moe`):** `unit.std.moe@1` composes three ops, each with a reference: `moe_topk@1` (f32
-  softmax, top-k, renormalised), `linear_experts@1` (a stack of E experts applied per (token, slot), format-general
-  through a `layout` fact; a merged gate/up stack applies SwiGLU) and `moe_combine@1` (the weighted sum in f32, in
+  softmax, top-k, renormalised), `linear_experts@2` (a stack of E experts applied per (token, slot), format-general
+  through a `layout` fact, its parts by role and per expert `[E, …]` since M0.6; a merged gate/up stack applies
+  SwiGLU) and `moe_combine@1` (the weighted sum in f32, in
   slot order). The router is f32 and the expert path f32 between the stacks (M0.2 D3).
 
 ### 5.4 Kernels
@@ -530,7 +531,7 @@ class KernelSpec:
     config: dict | None = None                      # pinned launch config (tiles, warps, splits) — no autotune
 
 class Plugin(Protocol):
-    def register(self, regs: Registries) -> None    # regs.kernels.add(spec), regs.converters.add(...), ...
+    def register(self, regs: Registries) -> None    # regs.kernels.add(spec), regs.ops.add(...), ...
 ```
 
 Registries are explicit objects owned by the engine instance (open registry, no per-format tables, no module-
@@ -567,7 +568,8 @@ are).
 
 ### 5.5 Quantization and weight loading
 
-Pipeline: `WeightSource → Dialect → Layout(source) → Converter → Layout(kernel) → QTensor → Pool`.
+Pipeline: `WeightSource (its format dialects) → QTensor(Layout(source)) → unit adopt → kernel prepare →
+QTensor(Layout(kernel)) → Pool`.
 
 ```python
 @dataclass(frozen=True)
@@ -580,21 +582,17 @@ class Layout:  scheme: Scheme; name: str; params: frozenset; readable_by: frozen
 
 @dataclass
 class QTensor: layout: Layout; logical_shape: tuple[int, ...]; parts: dict[str, Tensor]
-
-class Dialect(Protocol):         # gptq, awq, modelopt, compressed-tensors, gguf, fp8-block
-    def detect(self, ckpt_meta) -> bool
-    def group(self, names) -> dict[str, dict[str, str]]       # param -> {role: ckpt tensor name}
-    def source_layout(self, param: ParamSpec, roles) -> Layout
-
-@register_converter(src="gguf.q4_k.native", dst="gguf.q4_k.mmq_tiled", lossless=True, cost=1.0)
-def to_mmq_tiles(q: QTensor, *, shard: ShardInfo) -> QTensor: ...   # GGUF kernels usually read gguf.native directly
 ```
 
-- Repacking is owned by **converters**, registered by the plugin that defines the destination layout.
-- v0: single-hop, `lossless=True` converters only. Multi-hop path search is v1.
+- A checkpoint's quantization format is read by its **weight source**: `std.weights.hf` holds one dialect module per
+  format (`weights/hf/quant/{fp8,compressed_tensors,modelopt,quark}.py`, M0.6 D2) and yields one normalized `QTensor`
+  per quantized module; GGUF blocks are their own layout. The core has no dialect or converter registry (removed in
+  M0.6, D11); dialects move to their own plugins, with a core seam, only when a second weight source needs them.
+- Repacking is owned by the **kernel**: a quantized op's optional `prepare(q) → QTensor` (M0.6 D4) returns the layout
+  it reads, losslessly and without mutating its input; the unit swaps to it and drops the source parts.
 - When two consumers need one weight in two layouts (GPU kernel + CPU expert compute), the resolver asks the
   ledger whether to store both; otherwise picks a layout readable by both.
-- Post-repack artifacts are cached on disk keyed by `(source hash, layout, converter version, sm)` (v1).
+- Post-repack artifacts may be cached on disk keyed by `(source hash, layout, kernel version, sm)` (v1).
 - KV cache formats are Layouts too, so attention kernels and state kinds negotiate page size/dtype via layouts.
 
 **As built (M0.1).** Weight sources are detected from manifest `[support] detect` patterns (`config.json`,
@@ -602,7 +600,7 @@ def to_mmq_tiles(q: QTensor, *, shard: ShardInfo) -> QTensor: ...   # GGUF kerne
 parameter in place and hands each `QTensor` to the unit owning the parameter (`adopt(ctx, name, qtensor)`), which
 stores it in its own form or refuses (a load error naming unit and layout); the core never looks inside a layout.
 GGUF tensors keep their stored blocks (`Layout(Scheme("ggml.<type>"), "gguf.native")`): llama.cpp's kernels read
-them directly, so v0 has no Dialect and no converter for GGUF. Units bind the kernel of the layout they adopted in
+them directly, so GGUF needs no repack. Units bind the kernel of the layout they adopted in
 `bind_kernels`, after merges: same-type q/k/v and gate/up concatenate by rows (ggml rows are independent block
 runs) and run as one quantized matmul; a v of another type stays apart. A tied quantized head reads the
 embedding's blocks.
@@ -1091,7 +1089,7 @@ verification (v2).
 ### 7.7 Control plane and errors
 
 - `abort(rid)` (frontend → loop; frees at next commit — safe under overlap), `pause/drain`, `resume`,
-  `flush_prefix` (v0). `update_weights(name → tensor)` (in-place through converters into existing QTensor storage;
+  `flush_prefix` (v0). `update_weights(name → tensor)` (in-place through the kernels' `prepare` into existing QTensor storage;
   bumps `weight_version`) is specified now because it fixes the namespace design, but implemented in v1 (RL weight
   sync, LoRA merges).
 - Per-request error isolation (M0.5): `RequestError(kind, message)` from the logits processor (`open`, `ready`,
@@ -1233,7 +1231,7 @@ The dev machine has 8× RTX A5000; v1 includes a **TP=2 milestone** to prove the
 | KV offload (RAM/SSD, remote) | tiers, mover, placement policy, connector | PrefixIndex tier payloads, BLOCKED, per-layer events |
 | KVMem-style bounded window | `windowed_retrieval` StateKind, HostPlannedResolver, re-RoPE prepare kernel | StateKind emits positions; namespace |
 | Expert cache / offload | expert TieredStore, DeviceResolver, placement policies, MoE op with CPU miss compute | stable Pools, stream-memop CPU handshake, `quiesce`, VMM resize (v1) |
-| Quant formats | dialect, scheme, layout, converter, kernels | kernel registry, layout negotiation |
+| Quant formats | weight-source dialect, scheme, layout, kernels (`prepare`) | kernel registry, per-slice `adopt` |
 | Linear attention (GDN, KDA, Mamba2) | mixer + `Slot` state (`draft_slots`), page-boundary checkpoints, checkpoint policy + codec | fixed-point prefix hits, device Rewindable |
 | DeepSeek sparse attention / V4 compressed KV | `dsa_mla` mixer: MLA `Paged` + indexer `Paged(page_group)` + compressed `Paged(tokens_per_unit)` | `page_group`, `tokens_per_unit`, `alignment` |
 | Speculative decoding | drafter, draft policy, verifier, plan transform | taps, shared modules, Rewindable, verify graphs, sub-steps, aux models |
@@ -1364,7 +1362,7 @@ holon/           (repository root)
   std/             ops/ blocks/ ffn/(swiglu, moe_topk) mixers_gqa/ state_paged_kv/ tiered/ sampling/
   plugins/         models/<m>/{recipe.py, fast/, bundle/}  for qwen3, qwen3_moe, qwen3_5, qwen3_8
                    mixers/{gdn}/  state/{ssm_checkpoint}/
-                   kernels/{flashinfer,fla_gdn,ggml_cuda}/  weight_sources/{safetensors,gguf}/  dialects/{ggml}/
+                   kernels/{flashinfer,fla_gdn,ggml_cuda}/  weight_sources/{safetensors,gguf}/
                    frontends/{http}/  policies/  drafters/  verifiers/  grammar/
   plans/           <model_id>/<class>/<n>.lock     # lock history per (model, fingerprint class) (§4.4)
   judge/           holon_judge/  goldens/  snapshots/  traces/dev/   # holdout stored outside the repo (judge only)

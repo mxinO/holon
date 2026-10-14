@@ -32,9 +32,9 @@ def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None
     dense and expert instances, found by `_counters`), the calls made while scoring (`calls`: Tier B's path and mode
     check; the engine's start-up — memory profiling, graphs — excluded) and its KV cache format (`kv`, unless the
     model dtype: a floor must emulate the same, `compare`). A quantized LM head's calls are counted apart
-    (`head_calls`, reported only): its row counts are not the step's but the prompt-logprob slices' and the sampled
-    rows' (one per prompt finishing in the step, never scored), so a prefill run's head takes mmvq on a few rows
-    whatever the trunk takes."""
+    (`head_calls`: their mode is checked, not their path): its row counts are not the step's but the prompt-logprob
+    slices' and the sampled rows' (one per prompt finishing in the step, never scored), so a prefill run's head takes
+    mmvq on a few rows whatever the trunk takes."""
     kv = getattr(getattr(engine, "cfg", None), "plugin_options", {}).get("kv.format")
     counters, head = _counters(engine), _counters(engine, head=True)
     before, head_before = _total(counters), _total(head)

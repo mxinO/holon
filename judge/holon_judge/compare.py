@@ -203,7 +203,9 @@ def _path_failures(floor: dict, cand: dict) -> list[str]:
     or fail a correct quantized cache (an exact one). A Tier B floor emulates one kernel path (`q8_1`) in one
     activation mode (`act`, default q8_1) for every quantized matmul: the candidate's calls while scoring must all
     have taken that `path/mode` (docs/m06-lowp.md D3: a run is scored against the floor of the mode it ran), and be
-    counted. A recording made before M0.6 counted expert calls by path (`expert_calls`), all q8_1."""
+    counted. A quantized LM head's calls (`head_calls`) may take either path — its rows are the prompt-logprob slices
+    and the sampled rows, not the step's — but must take the floor's mode. A recording made before M0.6 counted
+    expert calls by path (`expert_calls`), all q8_1."""
     if floor.get("kv") != cand.get("kv"):
         return [f"the floor's KV format is {floor.get('kv') or 'the model dtype'}, the candidate's "
                 f"{cand.get('kv') or 'the model dtype'}"]
@@ -212,7 +214,9 @@ def _path_failures(floor: dict, cand: dict) -> list[str]:
     want = f"{floor['q8_1']}/{floor.get('act') or 'q8_1'}"
     calls = cand.get("calls") or {f"{path}/q8_1": n for path, n in (cand.get("expert_calls") or {}).items()}
     return ([] if calls.get(want) else [f"no calls counted on {want}, the floor's path and mode"]) + [
-        f"{n} calls on {other}, the floor emulates {want}" for other, n in calls.items() if other != want and n]
+        f"{n} calls on {other}, the floor emulates {want}" for other, n in calls.items() if other != want and n] + [
+        f"{n} LM-head calls on {k}, the floor's mode is {want.split('/')[1]}"   # the head: any path, the floor's mode
+        for k, n in (cand.get("head_calls") or {}).items() if n and k.split("/")[1] != want.split("/")[1]]
 
 
 def paired_dppl(golden: Recording, cand: Recording, floor: Recording) -> tuple[float, float]:

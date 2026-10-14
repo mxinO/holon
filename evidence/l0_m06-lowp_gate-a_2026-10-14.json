@@ -1,0 +1,84 @@
+{
+ "workload": "m06-gate-a-l0",
+ "date": "2026-10-14",
+ "hardware": [
+  "NVIDIA GeForce RTX 5080",
+  "NVIDIA GeForce RTX 4090"
+ ],
+ "command": "python -m pytest plugins/tests/test_ggml_cuda.py plugins/tests/test_ggml_cuda_moe.py plugins/tests/test_quantized_units.py judge/tests/test_w4a4.py; compute-sanitizer --tool memcheck python -m tests.memcheck_ggml_cuda[_moe]",
+ "claim": "acceptance 5 at the head after A3's fix (0fa3e98): kernels.ggml_cuda's FP4 L0 (every spec x path x input dtype against its mode's emulator) and memcheck clean on sm_89 and sm_120a",
+ "results": {
+  "rtx-5080": {
+   "arch": "sm_120a",
+   "commit": "2695df7",
+   "l0": "230 passed, 1 skipped",
+   "skipped": [
+    "plugins/tests/test_ggml_cuda_moe.py:327: the IQ3_S / IQ4_XS limits that split 7 tokens across the paths are sm_86's"
+   ],
+   "memcheck": [
+    [
+     "20 types x in 768, 2304, HF FP4 at a8 and a4 on sm 120",
+     "0"
+    ],
+    [
+     "24 layouts and modes x in 768, 2304, E 16, k 8, topk, combine on sm 120",
+     "0"
+    ]
+   ],
+   "clock_screen": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "samples": 232,
+    "sm_clock_mhz": {
+     "median": 2760.0,
+     "min": 2760.0,
+     "p5": 2760.0,
+     "max_sm": 3090.0
+    },
+    "thermal_slowdown_share": {
+     "sw": 0.0,
+     "hw": 0.0
+    },
+    "hw_slowdown_share": 0.0,
+    "power_cap_share": 0.5689655172413793
+   }
+  },
+  "rtx-4090": {
+   "arch": "sm_89",
+   "commit": "2695df7",
+   "l0": "222 passed, 9 skipped",
+   "skipped": [
+    "plugins/tests/test_ggml_cuda.py:360: PDL needs sm_90+",
+    "plugins/tests/test_ggml_cuda.py:465: llama.cpp's NVFP4 activation quantizer is Blackwell's",
+    "plugins/tests/test_ggml_cuda.py:485: native W4A4 is Blackwell's",
+    "plugins/tests/test_ggml_cuda_moe.py:327: the IQ3_S / IQ4_XS limits that split 7 tokens across the paths are sm_86's",
+    "plugins/tests/test_ggml_cuda_moe.py:637: native W4A4 is Blackwell's"
+   ],
+   "memcheck": [
+    [
+     "20 types x in 768, 2304, HF FP4 at a8 and a4 on sm 89",
+     "0"
+    ],
+    [
+     "24 layouts and modes x in 768, 2304, E 16, k 8, topk, combine on sm 89",
+     "0"
+    ]
+   ],
+   "clock_screen": {
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "samples": 231,
+    "sm_clock_mhz": {
+     "median": 2715.0,
+     "min": 2700.0,
+     "p5": 2700.0,
+     "max_sm": 3105.0
+    },
+    "thermal_slowdown_share": {
+     "sw": 0.0,
+     "hw": 0.0
+    },
+    "hw_slowdown_share": 0.0,
+    "power_cap_share": 0.0
+   }
+  }
+ }
+}

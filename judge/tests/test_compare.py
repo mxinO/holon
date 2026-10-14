@@ -102,6 +102,10 @@ def test_calls_off_the_floors_path_or_mode_fail(case):
     on_path.meta["calls"] = {"mmvq/q8_1": 40, "mmq/q8_1": 0}
     off_path.meta["calls"] = {"mmvq/q8_1": 40, "mmq/q8_1": 3}
     assert compare(g, on_path, floor).passed
+    on_path.meta["head_calls"] = {"mmq/q8_1": 9, "mmvq/q8_1": 1}          # an LM head: either path, the floor's mode
+    assert compare(g, on_path, floor).passed
+    on_path.meta["head_calls"] = {"mmq/fp4": 9, "mmvq/q8_1": 1}           # ... not another mode
+    assert compare(g, on_path, floor).failures == ("9 LM-head calls on mmq/fp4, the floor's mode is q8_1",)
     legacy = _recording(logits, targets, lens)
     legacy.meta["expert_calls"] = {"mmvq": 40, "mmq": 3}                   # a pre-M0.6 recording: by path, q8_1
     assert compare(g, legacy, floor).failures == ("3 calls on mmq/q8_1, the floor emulates mmvq/q8_1",)
