@@ -163,6 +163,8 @@ def _merge_splits(WS_ML, WS_ACC, OUT, D: tl.constexpr, SPLITS: tl.constexpr, SPL
 DEFAULT = (64, 4, 1)
 MAX_BLOCK_M = 64                # (query row, head) pairs per program; wider steps tile over the grid
 MIN_BLOCK_N = 16
+# Shared memory per block (opt-in) of the lock classes' SMs, which `fitted` fits to (another SM: its device's)
+SHARED = {86: 101376, 89: 101376, 120: 101376}
 CONFIGS = {
     (8, 128): (64, 4, 1), (8, 256): (32, 4, 3),
     (12, 128): (64, 4, 1), (12, 256): (64, 4, 2),
@@ -213,7 +215,9 @@ def shared_bytes(cfg: Config, sm: int, *, nq: int, g: int, d: int, page: int, fm
                  dtype: str, splits: int, block: int | None = None) -> int:
     """The shared memory `_paged_attn` takes compiled for `sm` with `cfg` at these facts (BLOCK_M `block`, default
     `block_m`), specialized as a launch on real tensors is (pointers 16-byte aligned, the strides of contiguous q and
-    pages); Triton's compiler only, for any target."""
+    pages); Triton's compiler only, for any target. It binds the arguments with the JIT's own specializer
+    (`create_function_from_signature`, `_pack_args`: Triton internals, pinned with Triton in uv.lock — a Triton
+    upgrade must re-check them, or every build of this kernel fails)."""
     target = GPUTarget("cuda", sm, 32)
     backend = make_backend(target)
     fn = _paged_attn

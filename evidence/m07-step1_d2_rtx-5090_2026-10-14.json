@@ -1,8 +1,9 @@
 {
- "command": "python bench/d2_table.py --class rtx-5090 --repeats <the ten candidate sweeps of evidence/m07-step1_qmm-sweep-repeats_rtx-5090_2026-10-14.json> --full <its full sweep> (step 0's records from evidence/)",
+ "command": "python bench/d2_table.py --class rtx-5090 --variant mmq_cast --repeats <the ten candidate sweeps of evidence/m07-step1_qmm-sweep-repeats_rtx-5090_2026-10-14.json> --full <its full sweep> (step 0's records from evidence/)",
  "date": "2026-10-14",
  "class": "rtx-5090",
  "gpu": "NVIDIA GeForce RTX 5090",
+ "variant": "mmq_cast",
  "sweeps": 10,
  "entries": {
   "iq3_s/5120x17408/q8_1": {
@@ -61,7 +62,8 @@
      "sd_us": 0.544,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq3_s/17408x5120/q8_1": {
    "llama": 8,
@@ -119,7 +121,8 @@
      "sd_us": 0.543,
      "passes": true
     }
-   }
+   },
+   "limit": 6
   },
   "iq4_nl/5120x17408/q8_1": {
    "llama": 8,
@@ -177,7 +180,8 @@
      "sd_us": 0.509,
      "passes": true
     }
-   }
+   },
+   "limit": null
   },
   "iq4_nl/5120x34816/q8_1": {
    "llama": 8,
@@ -235,7 +239,8 @@
      "sd_us": 2.843,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq4_nl/17408x5120/q8_1": {
    "llama": 8,
@@ -293,7 +298,8 @@
      "sd_us": 0.401,
      "passes": true
     }
-   }
+   },
+   "limit": 6
   },
   "iq4_xs/5120x10240/q8_1": {
    "llama": 8,
@@ -351,7 +357,8 @@
      "sd_us": 0.305,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq4_xs/5120x12288/q8_1": {
    "llama": 8,
@@ -409,7 +416,8 @@
      "sd_us": 0.37,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq4_xs/5120x17408/q8_1": {
    "llama": 8,
@@ -467,7 +475,8 @@
      "sd_us": 0.474,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq4_xs/5120x34816/q8_1": {
    "llama": 8,
@@ -525,7 +534,8 @@
      "sd_us": 2.634,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq4_xs/17408x5120/q8_1": {
    "llama": 8,
@@ -583,7 +593,8 @@
      "sd_us": 0.467,
      "passes": true
     }
-   }
+   },
+   "limit": 6
   },
   "q6_k/5120x248320/q8_1": {
    "llama": 7,
@@ -625,7 +636,8 @@
      "sd_us": 29.065,
      "passes": true
     }
-   }
+   },
+   "limit": 6
   }
  },
  "steps": [
@@ -820,18 +832,6 @@
   "iq4_xs/5120x10240/q8_1": 7,
   "iq4_xs/5120x12288/q8_1": 7,
   "iq4_xs/5120x17408/q8_1": 7,
-  "iq4_xs/5120x34816/q8_1": 7,
-  "q6_k/5120x248320/q8_1": 6
- },
- "shipped_no_cast": {
-  "iq3_s/17408x5120/q8_1": 6,
-  "iq3_s/5120x17408/q8_1": 6,
-  "iq4_nl/17408x5120/q8_1": 6,
-  "iq4_nl/5120x34816/q8_1": 7,
-  "iq4_xs/17408x5120/q8_1": 6,
-  "iq4_xs/5120x10240/q8_1": 7,
-  "iq4_xs/5120x12288/q8_1": 7,
-  "iq4_xs/5120x17408/q8_1": 6,
   "iq4_xs/5120x34816/q8_1": 7,
   "q6_k/5120x248320/q8_1": 6
  },

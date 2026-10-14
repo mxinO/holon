@@ -37,6 +37,9 @@ def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None
     mmvq on a few rows whatever the trunk takes."""
     kv = getattr(getattr(engine, "cfg", None), "plugin_options", {}).get("kv.format")
     counters, head = _counters(engine), _counters(engine, head=True)
+    # each ggml qlinear's mmvq limit, by shape (D2's per-shape floors, `compare`)
+    limits = {f"{k.name}/{k.k}x{k.out}": k.mmvq_rows for k in [*_kernels(engine), *_kernels(engine, head=True)]
+              if isinstance(getattr(k, "mmvq_rows", None), int)}
     before, head_before = _total(counters), _total(head)
     params = SamplingParams(max_tokens=1, temperature=0.0, prompt_logprobs=k)
     index = {engine.add(p.ids, params): i for i, p in enumerate(prompts.prompts)}
@@ -52,7 +55,7 @@ def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None
     calls = {name: {key: n - start.get(key, 0) for key, n in sorted(_total(c).items())}
              for name, c, start in (("calls", counters, before), ("head_calls", head, head_before)) if c}
     return Recording.from_rows(rows, prompts.meta() | {"source": "holon", "wall_s": wall} | (meta or {}) | calls
-                               | ({"kv": kv} if kv else {}))
+                               | ({"kv": kv} if kv else {}) | ({"mmvq_rows": limits} if limits else {}))
 
 
 def _total(counters: list[dict[str, int]]) -> dict[str, int]:
@@ -65,17 +68,21 @@ def _total(counters: list[dict[str, int]]) -> dict[str, int]:
 
 
 def _counters(engine: EngineLike, head: bool = False) -> list[dict[str, int]]:
-    """The call counters of the engine's quantized kernels (none for other engines or kernels): every `calls` Counter
-    held by an attribute of a module, or of a plain object a module holds (a linear's quantized weight holds its
-    kernel), each once; those of the model's `lm_head` if `head`, else the others'."""
+    return [k.calls for k in _kernels(engine, head)]
+
+
+def _kernels(engine: EngineLike, head: bool = False) -> list:
+    """The engine's quantized kernels that count their calls (none for other engines or kernels): every object with a
+    `calls` Counter held by an attribute of a module, or of a plain object a module holds (a linear's quantized weight
+    holds its kernel), each once; those of the model's `lm_head` if `head`, else the others'."""
     model = getattr(getattr(engine, "executor", None), "model", None)
     lm_head = getattr(model, "lm_head", None)
     in_head = {id(m) for m in lm_head.modules()} if isinstance(lm_head, torch.nn.Module) else set()
-    found: dict[int, collections.Counter] = {}
+    found: dict[int, object] = {}
 
     def visit(obj, depth: int) -> None:
-        if isinstance(calls := getattr(obj, "calls", None), collections.Counter):
-            found[id(calls)] = calls
+        if isinstance(getattr(obj, "calls", None), collections.Counter):
+            found[id(obj.calls)] = obj
         elif depth and hasattr(obj, "__dict__") and not isinstance(obj, (torch.nn.Module, torch.Tensor)):
             for value in vars(obj).values():
                 visit(value, depth - 1)

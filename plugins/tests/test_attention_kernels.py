@@ -162,9 +162,8 @@ def test_flashinfer_workspace_holds_the_widest_split(op):
                                atol=1e-2, rtol=1e-2)
 
 
-# The lock classes' SMs, and each SM's shared memory per block (opt-in): the kernel is compiled for each offline.
+# The lock classes' SMs (each SM's shared memory per block: `triton_attn.SHARED`): compiled for each offline.
 CLASSES = {"rtx-3090": 86, "rtx-4090": 89, "rtx-5080": 120, "rtx-5090": 120}
-SHARED = {86: 101376, 89: 101376, 120: 101376}
 WIDTHS = (1, 4, 8, 16)             # decode, MTP's verify (k 3), DFlash's verify and block, a 16-row block
 GROUP = {128: 8, 256: 6}           # query heads per KV head: Qwen3-30B-A3B; Qwen3.5 / 3.8 (the widest of each)
 
@@ -188,7 +187,7 @@ def test_triton_attn_configs_fit_every_class(cls, head_dim, layout):
         for splits in (1, 2):
             used = triton_attn.shared_bytes(kernel.cfg(width), sm, nq=width, g=g, d=head_dim, page=PAGE,
                                             fmt=FORMAT[layout], causal=True, window=0, dtype="bfloat16", splits=splits)
-            assert used <= SHARED[sm], (width, splits, kernel.cfg(width), used)
+            assert used <= triton_attn.SHARED[sm], (width, splits, kernel.cfg(width), used)
 
 
 @pytest.mark.parametrize("masks", [{}, {"causal": False, "window": 16}], ids=["causal", "block-window"])
@@ -198,7 +197,7 @@ def test_triton_attn_tiles_and_stages_are_bitwise(geometry, masks):
     over the grid (16 rows x 8 or 6 heads: two tiles of 64 pairs) give today's single tile's bits where Triton keeps
     its warp layout — at head_dim 256 (the 27B's 16-row blocks). At head_dim 128 a 128-pair tile puts its warps along
     the rows and a 64-pair one along the columns (Triton's chained-dot rule: rows >= head_dim), so the row sums run in
-    another order: one bf16 ulp in a few values (docs/m07-perf.md, as built); no lock runs over 64 pairs."""
+    another order: one bf16 ulp in a few values (docs/m07-perf.md §12.4); no lock runs over 64 pairs."""
     q, kv, batch, pages = _case([(s, 16) for s in (0, 5, 200, 2041)], *geometry)
     for splits in (1, 3):
         def run(cfg, block=None, splits=splits):

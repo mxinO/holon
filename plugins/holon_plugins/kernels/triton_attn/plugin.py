@@ -8,7 +8,19 @@ import functools
 import torch
 from holon.api import Constraint, KernelSpec
 
-from .kernel import FP8, MODEL, Q8_0, Config, block_m, fitted, paged_attention, paged_prefill, splits_for, write_q8_0
+from .kernel import (
+    FP8,
+    MODEL,
+    Q8_0,
+    SHARED,
+    Config,
+    block_m,
+    fitted,
+    paged_attention,
+    paged_prefill,
+    splits_for,
+    write_q8_0,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -38,7 +50,8 @@ class Decode:
         self.causal, self.window = causal, window          # the mask facts (one decode row sees all n either way)
         self._fit = functools.partial(
             fitted, Config.pinned(fp.gpu, fp.sm, head_dim), fp.sm,
-            torch.cuda.get_device_properties(ctx.device).shared_memory_per_block_optin, g=heads // kv_heads,
+            SHARED.get(fp.sm) or torch.cuda.get_device_properties(ctx.device).shared_memory_per_block_optin,
+            g=heads // kv_heads,
             d=head_dim, page=page, fmt=FORMAT[layout], causal=causal, window=window, dtype=q_dtype)
         self.g, self.cfgs = heads // kv_heads, {}
         for width in sorted(self.widths(ctx), reverse=True):     # each BLOCK_M fitted at its widest declared width

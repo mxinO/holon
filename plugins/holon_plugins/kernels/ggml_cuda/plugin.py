@@ -179,10 +179,8 @@ def mmvq_rows(fingerprint, name: str, mode: str, k: int, out: int, lib=None) -> 
     activations in `mode` (`"q8_1"`, `"fp4"`), runs on mmvq on `fingerprint`'s class: its `CROSSOVER` entry, else
     llama.cpp's threshold at the class's compute capability (an entry may only lower it, so mmvq runs every row count
     up to it). `lib`: a loaded extension module (llama.cpp's rule is host code: any SM's module answers for any
-    class); default the current device's."""
-    if lib is None:
-        major, minor = torch.cuda.get_device_capability()
-        lib = extension.load(10 * major + minor)
+    class, no device needed); default the class's SM's module, else any prebuilt one."""
+    lib = lib or rule_module(fingerprint.sm)
     cc = 10 * fingerprint.sm                         # llama.cpp's compute capability: 100 * major + 10 * minor
     llama = max((n for n in range(1, MMVQ_MAX + 1) if lib.use_mmvq(cc, TYPES[name], n)), default=0)
     entry = CROSSOVER.get((fingerprint.gpu, name, k, out, mode))
@@ -192,6 +190,16 @@ def mmvq_rows(fingerprint, name: str, mode: str, k: int, out: int, lib=None) -> 
         raise RuntimeError(f"kernels.ggml_cuda: the {fingerprint.gpu} entry for {name} {k}x{out} ({mode}) is "
                            f"{entry} rows, not within 1..{llama} (llama.cpp's)")
     return entry
+
+
+def rule_module(sm: int):
+    """A module that answers `mmvq_rows` for SM `sm`: its own if prebuilt, else any built here (NotBuilt if none is)."""
+    for arch in (sm, *extension.ARCHS):
+        try:
+            return extension.load(arch)
+        except extension.NotBuilt:
+            continue
+    raise extension.NotBuilt(f"kernels.ggml_cuda: no prebuilt extension; build one with: {extension.PREBUILD} --sm N")
 
 
 def _device(ctx) -> int:

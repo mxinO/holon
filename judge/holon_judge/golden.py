@@ -6,7 +6,6 @@ activation dtype is the same recorder run in that dtype (bf16 on the GPU class t
 """
 from __future__ import annotations
 
-import collections
 import hashlib
 import os
 import pathlib
@@ -103,8 +102,8 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
     path = resolve_model(model)
     if act is not None and not q8_1:
         raise ValueError(f"activation mode {act!r} without a kernel path to emulate it on")
-    if q8_1 == "rows" and path.suffix != ".gguf":
-        raise ValueError(f"{path}: per-shape floors (--q8-1 rows) are for GGUF files")
+    if q8_1 == "rows" and path.suffix != ".gguf" or (rows or crossover) and q8_1 != "rows":
+        raise ValueError(f"{path}: per-shape floors (--q8-1 rows, with --rows and --crossover) are for GGUF files")
     if path.suffix == ".gguf":
         from . import gguf
 
@@ -121,7 +120,8 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
                 raise ValueError(f"{path}: a per-shape floor needs a dense GGUF, its step rows and the crossover class")
             gpu, sm = crossover.split(":")
             routes = gguf.row_paths(path, rows, Fingerprint(gpu=gpu, sm=int(sm), vram_gib=0, toolchain=""))
-            per_shape = {"step_rows": rows, "crossover": gpu, "paths": dict(collections.Counter(routes.values()))}
+            per_shape = {"step_rows": rows, "crossover": gpu, "routes": {
+                f"{t}/{k}x{o}": routes[name] for name, (t, k, o) in gguf.engine_shapes(path).items()}}
         experts = gguf.q8_1_experts(path, q8_1) if q8_1 and mirrored else None
 
         def prepare(module: torch.nn.Module, prefix: str) -> None:

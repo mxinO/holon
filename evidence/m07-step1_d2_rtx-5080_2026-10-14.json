@@ -1,8 +1,9 @@
 {
- "command": "python bench/d2_table.py --class rtx-5080 --repeats <the ten candidate sweeps of evidence/m07-step1_qmm-sweep-repeats_rtx-5080_2026-10-14.json> --full <its full sweep> (step 0's records from evidence/)",
+ "command": "python bench/d2_table.py --class rtx-5080 --variant mmq_cast --repeats <the ten candidate sweeps of evidence/m07-step1_qmm-sweep-repeats_rtx-5080_2026-10-14.json> --full <its full sweep> (step 0's records from evidence/)",
  "date": "2026-10-14",
  "class": "rtx-5080",
  "gpu": "NVIDIA GeForce RTX 5080",
+ "variant": "mmq_cast",
  "sweeps": 10,
  "entries": {
   "iq1_s/5120x17408/q8_1": {
@@ -61,7 +62,8 @@
      "sd_us": 0.214,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq2_s/5120x6144/q8_1": {
    "llama": 8,
@@ -119,7 +121,8 @@
      "sd_us": 0.079,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq2_s/5120x17408/q8_1": {
    "llama": 8,
@@ -177,7 +180,8 @@
      "sd_us": 0.445,
      "passes": true
     }
-   }
+   },
+   "limit": 6
   },
   "iq2_s/5120x34816/q8_1": {
    "llama": 8,
@@ -235,7 +239,8 @@
      "sd_us": 0.337,
      "passes": true
     }
-   }
+   },
+   "limit": 6
   },
   "iq2_s/17408x5120/q8_1": {
    "llama": 8,
@@ -293,7 +298,8 @@
      "sd_us": 0.479,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq2_xs/5120x6144/q8_1": {
    "llama": 8,
@@ -351,7 +357,8 @@
      "sd_us": 0.132,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq2_xs/5120x17408/q8_1": {
    "llama": 8,
@@ -409,7 +416,8 @@
      "sd_us": 0.218,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq2_xs/5120x34816/q8_1": {
    "llama": 8,
@@ -467,7 +475,8 @@
      "sd_us": 0.323,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq2_xxs/5120x12288/q8_1": {
    "llama": 8,
@@ -525,7 +534,8 @@
      "sd_us": 0.211,
      "passes": true
     }
-   }
+   },
+   "limit": 6
   },
   "iq2_xxs/5120x17408/q8_1": {
    "llama": 8,
@@ -583,7 +593,8 @@
      "sd_us": 0.152,
      "passes": true
     }
-   }
+   },
+   "limit": 6
   },
   "iq2_xxs/5120x34816/q8_1": {
    "llama": 8,
@@ -641,7 +652,8 @@
      "sd_us": 0.303,
      "passes": true
     }
-   }
+   },
+   "limit": 6
   },
   "iq2_xxs/17408x5120/q8_1": {
    "llama": 8,
@@ -699,7 +711,8 @@
      "sd_us": 0.474,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq3_s/5120x6144/q8_1": {
    "llama": 8,
@@ -757,7 +770,8 @@
      "sd_us": 0.136,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq3_s/5120x10240/q8_1": {
    "llama": 8,
@@ -815,7 +829,8 @@
      "sd_us": 0.167,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq3_s/5120x12288/q8_1": {
    "llama": 8,
@@ -873,7 +888,8 @@
      "sd_us": 0.275,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq3_s/5120x17408/q8_1": {
    "llama": 8,
@@ -931,7 +947,8 @@
      "sd_us": 0.232,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq3_s/5120x34816/q8_1": {
    "llama": 8,
@@ -989,7 +1006,8 @@
      "sd_us": 0.668,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq3_s/17408x5120/q8_1": {
    "llama": 8,
@@ -1047,7 +1065,8 @@
      "sd_us": 0.56,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq3_xxs/5120x34816/q8_1": {
    "llama": 8,
@@ -1105,7 +1124,8 @@
      "sd_us": 0.529,
      "passes": false
     }
-   }
+   },
+   "limit": null
   },
   "iq4_xs/5120x6144/q8_1": {
    "llama": 8,
@@ -1163,7 +1183,8 @@
      "sd_us": 0.156,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq4_xs/5120x10240/q8_1": {
    "llama": 8,
@@ -1221,7 +1242,8 @@
      "sd_us": 0.211,
      "passes": true
     }
-   }
+   },
+   "limit": 6
   },
   "iq4_xs/5120x12288/q8_1": {
    "llama": 8,
@@ -1279,7 +1301,8 @@
      "sd_us": 0.362,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq4_xs/5120x17408/q8_1": {
    "llama": 8,
@@ -1337,7 +1360,8 @@
      "sd_us": 0.448,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq4_xs/5120x34816/q8_1": {
    "llama": 8,
@@ -1395,7 +1419,8 @@
      "sd_us": 0.909,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq4_xs/6144x5120/q8_1": {
    "llama": 8,
@@ -1453,7 +1478,8 @@
      "sd_us": 0.118,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   },
   "iq4_xs/17408x5120/q8_1": {
    "llama": 8,
@@ -1511,7 +1537,8 @@
      "sd_us": 0.397,
      "passes": true
     }
-   }
+   },
+   "limit": 7
   }
  },
  "steps": [
@@ -1726,33 +1753,6 @@
   "iq4_xs/17408x5120/q8_1": 7,
   "iq4_xs/5120x10240/q8_1": 6,
   "iq4_xs/5120x12288/q8_1": 7,
-  "iq4_xs/5120x17408/q8_1": 7,
-  "iq4_xs/5120x34816/q8_1": 7,
-  "iq4_xs/5120x6144/q8_1": 7,
-  "iq4_xs/6144x5120/q8_1": 7
- },
- "shipped_no_cast": {
-  "iq1_s/5120x17408/q8_1": 7,
-  "iq2_s/17408x5120/q8_1": 7,
-  "iq2_s/5120x17408/q8_1": 6,
-  "iq2_s/5120x34816/q8_1": 6,
-  "iq2_s/5120x6144/q8_1": 7,
-  "iq2_xs/5120x17408/q8_1": 6,
-  "iq2_xs/5120x34816/q8_1": 7,
-  "iq2_xs/5120x6144/q8_1": 7,
-  "iq2_xxs/17408x5120/q8_1": 7,
-  "iq2_xxs/5120x12288/q8_1": 6,
-  "iq2_xxs/5120x17408/q8_1": 6,
-  "iq2_xxs/5120x34816/q8_1": 6,
-  "iq3_s/17408x5120/q8_1": 7,
-  "iq3_s/5120x10240/q8_1": 7,
-  "iq3_s/5120x12288/q8_1": 7,
-  "iq3_s/5120x17408/q8_1": 7,
-  "iq3_s/5120x34816/q8_1": 7,
-  "iq3_s/5120x6144/q8_1": 7,
-  "iq4_xs/17408x5120/q8_1": 7,
-  "iq4_xs/5120x10240/q8_1": 6,
-  "iq4_xs/5120x12288/q8_1": 6,
   "iq4_xs/5120x17408/q8_1": 7,
   "iq4_xs/5120x34816/q8_1": 7,
   "iq4_xs/5120x6144/q8_1": 7,

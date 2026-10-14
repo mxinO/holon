@@ -78,13 +78,14 @@ def test_quant_act_sets_the_fact_and_a16_is_refused():
 def test_mixed_steps_refuse_kernels_with_two_activation_modes(act):
     """docs/m07-perf.md §3.1: with `chunk_with_decode` > 0 a quantized linear and an expert stack refuse, at bind, a
     kernel whose paths compute in different activation modes (the toy's a4 spec: chunks at 4 bits) — generically,
-    from its spec's `config["act"]`; one mode on both paths (a8) binds, and every kernel binds without mixed steps."""
-    for chunk in (0, 256):
+    from its spec's `config["act"]`; one mode on both paths (a8) binds, and every kernel binds without mixed steps:
+    the setting at 0, or a drafter (steps alternate)."""
+    for chunk, drafts in ((0, 0), (256, 3), (256, 0)):
         ctx = _ctx(**{"quant.act": act})
-        ctx.options["chunk_with_decode"] = chunk
+        ctx.options |= {"chunk_with_decode": chunk, "max_draft_tokens": drafts}
         stacks = _stacks(ctx, lambda seed: _toy(128, 128, seed))
         for unit in (_linear(ctx, _toy(4, H, seed=0)), type(stacks.gate).merge(stacks.gate, stacks.up)):
-            if chunk and act == "a4":
+            if chunk and not drafts and act == "a4":
                 with pytest.raises(ValueError, match=r"needs one activation mode on every path; tests.toy_quant"):
                     unit.bind_kernels(ctx)
             else:

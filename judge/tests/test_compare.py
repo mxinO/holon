@@ -129,17 +129,22 @@ def test_calls_off_the_floors_path_or_mode_fail(case):
     decode.meta["calls"]["prefill/fp8"] = 2
     assert compare(g, decode, floor).failures == ("2 calls on prefill/fp8, the floor quantizes no activations "
                                                   "(bf16 only)",)
-    # D2's per-shape floor (docs/m07-perf.md §6): its paths, in its mode, on its class at its step rows
+    # D2's per-shape floor (docs/m07-perf.md §6): each shape on the floor's path at its rows, in its mode, on its
+    # class at its step size
     floor.meta |= {"q8_1": "rows", "act": "q8_1", "step_rows": 8, "crossover": "rtx-5080",
-                   "paths": {"mmvq": 300, "mmq": 120}}
+                   "routes": {"iq3_s/5120x17408": "mmq", "q4_k/5120x1024": "mmvq"}}
     mixed = _recording(logits, targets, lens)
-    mixed.meta |= {"calls": {"mmvq/q8_1": 40, "mmq/q8_1": 9}, "gpu_class": "rtx-5080", "max_step_tokens": 8}
+    mixed.meta |= {"calls": {"mmvq/q8_1": 40, "mmq/q8_1": 9}, "gpu_class": "rtx-5080", "max_step_tokens": 8,
+                   "mmvq_rows": {"iq3_s/5120x17408": 7, "q4_k/5120x1024": 8}}
     assert compare(g, mixed, floor).passed
-    mixed.meta |= {"calls": {"mmvq/q8_1": 40, "mmq/fp4": 9}, "gpu_class": "rtx-5090", "max_step_tokens": 4}
+    mixed.meta |= {"calls": {"mmvq/q8_1": 40, "mmq/fp4": 9}, "gpu_class": "rtx-5090", "max_step_tokens": 4,
+                   "mmvq_rows": {"iq3_s/5120x17408": 8}}
     assert compare(g, mixed, floor).failures == (
         "the candidate ran 'rtx-5090' for gpu_class, the floor's 'rtx-5080'",
         "the candidate ran 4 for max_step_tokens, the floor's 8",
-        "9 calls on mmq/fp4, the floor emulates ['mmq', 'mmvq'] in q8_1")
+        "iq3_s/5120x17408: the candidate runs mmvq at 8 rows, the floor emulates mmq",
+        "q4_k/5120x1024: the candidate runs no kernel at 8 rows, the floor emulates mmvq",
+        "9 calls on mmq/fp4, the floor's mode is q8_1")
 
 
 def test_the_ppl_guard_is_paired_with_the_floor(case):

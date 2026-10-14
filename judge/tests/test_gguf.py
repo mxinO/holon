@@ -89,5 +89,5 @@ def test_tier_b_floor_rounds_every_quantized_linear_input_to_q8_1(files, tiny_ch
         rows = 8 if kernel_path == "mmvq" else 9    # mmvq up to 8 rows on Blackwell, so it is this path's floor
         per_shape = golden.record(str(files[0]), tiny_prompts, config=str(tiny_checkpoint), q8_1="rows", rows=rows,
                                   crossover="rtx-5090:120")
-        assert per_shape.meta["paths"] == {kernel_path: len(types)} and per_shape.meta["step_rows"] == rows
+        assert set(per_shape.meta["routes"].values()) == {kernel_path} and per_shape.meta["step_rows"] == rows
         assert torch.equal(per_shape.target_lp, floor.target_lp) and torch.equal(per_shape.topk_lp, floor.topk_lp)

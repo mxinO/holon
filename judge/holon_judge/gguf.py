@@ -212,12 +212,11 @@ def row_paths(path: str | pathlib.Path, rows: int, fingerprint) -> dict[str, str
     `q8_1.MMQ`) in steps of `rows` activation rows on `fingerprint`'s class: mmvq up to the ggml plugin's `mmvq_rows`
     for the matmul the engine runs it in (`engine_shapes`), else mmq. Expert stacks are not covered (their crossover
     is llama.cpp's, per stack)."""
-    from holon_plugins.kernels.ggml_cuda import extension, plugin
+    from holon_plugins.kernels.ggml_cuda import plugin
 
     from . import q8_1
 
-    major, minor = torch.cuda.get_device_capability()
-    lib = extension.load(10 * major + minor)
+    lib = plugin.rule_module(fingerprint.sm)
     return {name: q8_1.MMVQ if rows <= plugin.mmvq_rows(fingerprint, kind, "q8_1", k, out, lib) else q8_1.MMQ
             for name, (kind, k, out) in engine_shapes(path).items()}
 
