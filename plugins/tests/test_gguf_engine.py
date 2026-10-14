@@ -31,15 +31,19 @@ def _prompt_logprobs(engine: Engine, prompts) -> list:
     return [out[r] for r in rids]
 
 
-@pytest.mark.parametrize("qtype", [Q.Q8_0, Q.Q4_0])
-def test_a_quantized_gguf_serves_what_its_dequantized_weights_serve(tiny_checkpoint, tiny_case, tmp_path, qtype):  # noqa: F811
+@pytest.mark.parametrize(("qtype", "types"), [(Q.Q8_0, None), (Q.Q4_0, None),
+                                              (Q.Q8_0, {"attn_v": Q.Q4_0, "ffn_up": Q.Q4_0})])
+def test_a_quantized_gguf_serves_what_its_dequantized_weights_serve(tiny_checkpoint, tiny_case, tmp_path, qtype,  # noqa: F811
+                                                                    types):
+    from holon_judge.gguf import engine_shapes
+
     prompts, _ = tiny_case
     file = tmp_path / f"tiny-{qtype.name}.gguf"
     dense = tmp_path / "dense"
     dense.mkdir()
     (dense / "config.json").write_text((tiny_checkpoint / "config.json").read_text())
-    save_file({k: torch.from_numpy(np.ascontiguousarray(v)) for k, v in write(tiny_checkpoint, file, qtype).items()},
-              dense / "model.safetensors")
+    save_file({k: torch.from_numpy(np.ascontiguousarray(v))
+               for k, v in write(tiny_checkpoint, file, qtype, types=types).items()}, dense / "model.safetensors")
     ours, theirs = _engine(file), _engine(dense)
     assert ours.source.kind == "gguf" and ours.source.arch == "gguf.qwen3"
     assert ours.generate(prompts, GREEDY) == theirs.generate(prompts, GREEDY)
@@ -49,7 +53,13 @@ def test_a_quantized_gguf_serves_what_its_dequantized_weights_serve(tiny_checkpo
     linears = [k for k in ours.ctx.kernels if k.endswith("/qlinear@2")]
     assert any(k.endswith("/qembedding@1") for k in ours.ctx.kernels)
     outs = sorted(int(re.search(r",out=(\d+)", k)[1]) for k in linears)
-    assert outs == [64, 64, 64 + 2 * 32, 2 * 128, 512], outs         # o, down, qkv, gate+up, lm_head
+    if types is None:
+        assert outs == [64, 64, 64 + 2 * 32, 2 * 128, 512], outs     # o, down, qkv, gate+up, lm_head
+    # Projections of other types stay apart (q/k merge, v alone; gate, up): the judge's per-shape floors read the
+    # same matmul shapes (docs/m07-perf.md D2).
+    sites = {(f["layout"], f["in"], f["out"]) for f in (s["facts"] for k, s in ours.ctx.kernels.items()
+                                                        if k.endswith("/qlinear@2"))}
+    assert sites == {(f"ggml.{t}/gguf.native", k, o) for t, k, o in engine_shapes(file).values()}
 
 
 def test_a_unit_that_cannot_read_a_layout_fails_at_load(tiny_checkpoint, tmp_path):  # noqa: F811

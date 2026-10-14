@@ -256,8 +256,13 @@ def main() -> None:
     ap.add_argument("--batches", type=int, nargs="*", default=[1, 4, 8], help="decode (or verify) batch sizes")
     ap.add_argument("--ctx", type=int, default=512, help="prompt tokens of each decoding request")
     ap.add_argument("--name", default="")
+    ap.add_argument("--llama-crossover", action="store_true", help="kernels.ggml_cuda without its per-shape entries "
+                    "(llama.cpp's rule: D2's baseline, docs/m07-perf.md)")
     ap.add_argument("--json")
     args = ap.parse_args()
+    if args.llama_crossover:
+        from holon_plugins.kernels.ggml_cuda import plugin as ggml
+        ggml.CROSSOVER.clear()
     flags = argparse.ArgumentParser()
     engine_flags(flags)
     given = (lock_flags(read_lock(args.lock)["engine"], (), args.engine_args) if args.lock
@@ -280,7 +285,7 @@ def main() -> None:
               "engine": {k: {o: public(str(x), args.model) for o, x in v.items()} if isinstance(v, dict) else v
                          for k, v in dataclasses.asdict(cfg).items() if k != "model"},
               "kv_bytes_per_token": sum(p.unit_bytes / p.tokens_per_unit for p in pools),
-              "drafts": cfg.max_draft_tokens > 0, "rows": {}}
+              "drafts": cfg.max_draft_tokens > 0, "llama_crossover": args.llama_crossover, "rows": {}}
     sampler = Sampler()
 
     def one(params: SamplingParams, n: int) -> None:

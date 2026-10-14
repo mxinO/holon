@@ -149,12 +149,13 @@ def dequantized(path: str | pathlib.Path) -> dict[str, torch.Tensor]:
     return dict(hf_state(path))
 
 
-def emulate_q8_1(model: torch.nn.Module, path: str | pathlib.Path, kernel_path: str,
+def emulate_q8_1(model: torch.nn.Module, path: str | pathlib.Path, kernel_path: str | dict[str, str],
                  prefix: str = "") -> dict[str, str]:
     """Tier B's floor (design §4.6): every quantized linear of `model` (the HF model of `path`, lm_head included, or a
     part of it named `prefix`, e.g. one streamed layer) computes as llama.cpp's int8 dots do on `kernel_path`
-    (`q8_1.MMQ` or `q8_1.MMVQ`) — its input rounded to q8_1, the stored-sum offsets of its type — in float32 over
-    its weights, writing its own dtype (the head: float32). Returns the ggml type of each linear it changed."""
+    (`q8_1.MMQ` or `q8_1.MMVQ`; or each linear's, by HF module name: `row_paths`) — its input rounded to q8_1, the
+    stored-sum offsets of its type — in float32 over its weights, writing its own dtype (the head: float32). Returns
+    the ggml type of each linear it changed."""
     from . import q8_1
 
     linears = {prefix + name: m for name, m in model.named_modules() if isinstance(m, torch.nn.Linear)}
@@ -170,15 +171,55 @@ def emulate_q8_1(model: torch.nn.Module, path: str | pathlib.Path, kernel_path: 
         if t.tensor_type in _DENSE or owner not in linears:
             continue                                   # norms, and the embedding (get_rows reads it exactly)
         kind, blocks = t.tensor_type.name.lower(), np.asarray(t.data)
-        g = q8_1.blocking(kind, kernel_path).sum_group
+        route = kernel_path[owner] if isinstance(kernel_path, dict) else kernel_path
+        g = q8_1.blocking(kind, route).sum_group
         offs = q8_1.offsets(blocks, kind, g).float() if g else None
         if offs is not None and q35 is not None:          # the weight's value heads were untiled: so are its offsets
             offs = _qwen35_order(t.name, offs, q35)
         offs = None if offs is None else offs.to(linears[owner].weight.device)
-        linears[owner].forward = functools.partial(_emulated, linears[owner], kind, kernel_path, offs,
+        linears[owner].forward = functools.partial(_emulated, linears[owner], kind, route, offs,
                                                    torch.float32 if owner == "lm_head" else None)
         types[owner] = kind
     return types
+
+
+# std's composites merge projections of one input that share a type into one matmul (`Linear.merge`): GQA's q/k/v,
+# else q/k; SwiGLU's gate/up. The engine's matmul shapes are the merged ones.
+MERGES = (("self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj"), ("self_attn.q_proj", "self_attn.k_proj"),
+          ("mlp.gate_proj", "mlp.up_proj"))
+
+
+def engine_shapes(path: str | pathlib.Path) -> dict[str, tuple[str, int, int]]:
+    """Each quantized dense linear of the file (HF module name) -> (ggml type, in, out) of the matmul the engine runs it
+    in: its own shape, or its merged group's (`MERGES`: same type and input; `Linear.merge`)."""
+    reader = gguf.GGUFReader(path)
+    q35 = _qwen35(reader.fields)
+    linears = {hf_name(t.name).removesuffix(".weight"): (t.tensor_type.name.lower(), int(t.shape[0]), int(t.shape[1]))
+               for t in reader.tensors if t.tensor_type not in _DENSE and t.name != "token_embd.weight"
+               and not t.name.endswith("_exps.weight")
+               and not (q35 is not None and re.match(rf"blk\.{q35['layers']}\.", t.name))}
+    out = dict(linears)
+    for owner in sorted({name.rsplit(".", 2)[0] for name in linears}):
+        for group in MERGES:
+            names = [f"{owner}.{g}" for g in group]
+            if all(n in linears and out[n] == linears[n] for n in names) and len({linears[n][:2] for n in names}) == 1:
+                out |= dict.fromkeys(names, (*linears[names[0]][:2], sum(linears[n][2] for n in names)))
+    return out
+
+
+def row_paths(path: str | pathlib.Path, rows: int, fingerprint) -> dict[str, str]:
+    """D2's floors (docs/m07-perf.md §6): each quantized dense linear's kernel path (HF module name -> `q8_1.MMVQ` or
+    `q8_1.MMQ`) in steps of `rows` activation rows on `fingerprint`'s class: mmvq up to the ggml plugin's `mmvq_rows`
+    for the matmul the engine runs it in (`engine_shapes`), else mmq. Expert stacks are not covered (their crossover
+    is llama.cpp's, per stack)."""
+    from holon_plugins.kernels.ggml_cuda import extension, plugin
+
+    from . import q8_1
+
+    major, minor = torch.cuda.get_device_capability()
+    lib = extension.load(10 * major + minor)
+    return {name: q8_1.MMVQ if rows <= plugin.mmvq_rows(fingerprint, kind, "q8_1", k, out, lib) else q8_1.MMQ
+            for name, (kind, k, out) in engine_shapes(path).items()}
 
 
 def q8_1_experts(path: str | pathlib.Path, kernel_path: str):

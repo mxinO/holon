@@ -191,7 +191,8 @@ def metrics(golden: Recording, cand: Recording) -> tuple[Metrics, dict[str, Metr
 
 
 _PROVENANCE = ("source", "model", "revision", "dtype", "device", "hardware", "threads", "prompts", "prompts_sha256",
-               "weight_source", "max_step_tokens", "q8_1", "act", "kv", "moe_block", "experts", "calls", "head_calls")
+               "weight_source", "max_step_tokens", "q8_1", "act", "kv", "moe_block", "experts", "calls", "head_calls",
+               "step_rows", "crossover", "gpu_class")
 
 
 def _provenance(rec: Recording) -> dict:
@@ -203,10 +204,12 @@ def _path_failures(floor: dict, cand: dict) -> list[str]:
     or fail a correct quantized cache (an exact one). A Tier B floor emulates one kernel path (`q8_1`) in one
     activation mode (`act`, default q8_1) for every quantized matmul: the candidate's calls while scoring must all
     have taken that `path/mode` (docs/m06-lowp.md D3: a run is scored against the floor of the mode it ran), and be
-    counted. Against a floor that emulates nothing (A16: FP8's W8A16 decode) every counted call must be `bf16`.
-    A quantized LM head's calls (`head_calls`) may take either path — its rows are the prompt-logprob slices
-    and the sampled rows, not the step's — but must take the floor's mode. A recording made before M0.6 counted
-    expert calls by path (`expert_calls`), all q8_1."""
+    counted. A per-shape floor (`q8_1` "rows", docs/m07-perf.md §6) emulates each matmul on the path its shape takes
+    at `step_rows` rows on the class `crossover`: the candidate must have run on that class at that step size, its
+    calls on the floor's paths in its mode. Against a floor that emulates nothing (A16: FP8's W8A16 decode) every
+    counted call must be `bf16`. A quantized LM head's calls (`head_calls`) may take either path — its rows are the
+    prompt-logprob slices and the sampled rows, not the step's — but must take the floor's mode. A recording made
+    before M0.6 counted expert calls by path (`expert_calls`), all q8_1."""
     if floor.get("kv") != cand.get("kv"):
         return [f"the floor's KV format is {floor.get('kv') or 'the model dtype'}, the candidate's "
                 f"{cand.get('kv') or 'the model dtype'}"]
@@ -214,6 +217,14 @@ def _path_failures(floor: dict, cand: dict) -> list[str]:
         counted = [*(cand.get("calls") or {}).items(), *(cand.get("head_calls") or {}).items()]
         return [f"{n} calls on {k}, the floor quantizes no activations (bf16 only)" for k, n in counted
                 if n and k.split("/")[1] != "bf16"]
+    if floor["q8_1"] == "rows":
+        mode, paths = floor.get("act") or "q8_1", sorted(p for p, n in floor["paths"].items() if n)
+        setting = [f"the candidate ran {cand.get(k)!r} for {k}, the floor's {floor[f]!r}" for k, f in
+                   (("gpu_class", "crossover"), ("max_step_tokens", "step_rows")) if cand.get(k) != floor[f]]
+        counted = [*(cand.get("calls") or {}).items(), *(cand.get("head_calls") or {}).items()]
+        return setting + ([] if any(n for _, n in counted) else ["no calls counted"]) + [
+            f"{n} calls on {k}, the floor emulates {paths} in {mode}" for k, n in counted
+            if n and (k.split("/")[0] not in paths or k.split("/")[1] != mode)]
     want = f"{floor['q8_1']}/{floor.get('act') or 'q8_1'}"
     calls = cand.get("calls") or {f"{path}/q8_1": n for path, n in (cand.get("expert_calls") or {}).items()}
     return ([] if calls.get(want) else [f"no calls counted on {want}, the floor's path and mode"]) + [

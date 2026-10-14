@@ -2,6 +2,7 @@
 
     python -m holon_judge golden   --model <hf dir or id | .gguf> [--config <hf dir or id>] [--q8-1 mmq|mmvq|prefill
                                    [--act q8_1|fp4|fp4-static|fp8]] --prompts <jsonl> --out <file> [--threads N]
+                                   [--q8-1 rows --rows N --crossover <class>:<sm>]   # per shape, D2's floors
                                    [--k 20]
                                    [--dtype bfloat16 --device cuda]          # the floor: HF in the activation dtype
                                    [--kv q8_0|fp8]                           # ... reading K/V in that cache format
@@ -55,7 +56,7 @@ def _golden(a: argparse.Namespace) -> int:
     if a.threads:
         torch.set_num_threads(a.threads)
     rec = golden.record(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k, a.config,
-                        a.q8_1, a.pure_hf, a.kv, a.act, a.stream)
+                        a.q8_1, a.pure_hf, a.kv, a.act, a.stream, a.rows, a.crossover)
     rec.save(a.out)
     print(json.dumps(rec.meta | {"bytes": pathlib.Path(a.out).stat().st_size}, indent=1))
     return 0
@@ -383,6 +384,9 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--config", help="for a .gguf: the HF checkpoint (dir or hub id) it was made from")
     g.add_argument("--q8-1", choices=modes.PATHS, help="Tier B's floor on that kernel path (kernels.ggml_cuda's mmq / "
                    "mmvq; kernels.triton_fp8's prefill, with --act fp8)")
+    g.add_argument("--rows", type=int, help="with --q8-1 rows: the candidate's step rows (its --max-step-tokens)")
+    g.add_argument("--crossover", help="with --q8-1 rows: the class whose mmvq_rows pick each path, <gpu class>:<sm> "
+                   "(e.g. rtx-5080:120; docs/m07-perf.md D2)")
     g.add_argument("--pure-hf", action="store_true", help="an MoE floor with HF's own MoE block (information only)")
     g.add_argument("--kv", choices=kv_format.FORMATS, help="a floor whose attention reads K/V in this cache format")
     g.add_argument("--act", choices=modes.MODES, help="with --q8-1, a quantized HF checkpoint's activation mode on "

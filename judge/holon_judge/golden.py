@@ -6,6 +6,7 @@ activation dtype is the same recorder run in that dtype (bf16 on the GPU class t
 """
 from __future__ import annotations
 
+import collections
 import hashlib
 import os
 import pathlib
@@ -14,6 +15,7 @@ import time
 
 import torch
 import transformers
+from holon.api import Fingerprint
 from holon_std.weights.hf import reference as hf_reference
 
 from . import hf_quant, modes, moe, w4a4
@@ -85,11 +87,14 @@ def topk_rows(logits: torch.Tensor, target: torch.Tensor, k: int, rows: int = 25
 
 def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, device: str = "cpu",
            k: int = 20, config: str | None = None, q8_1: str | None = None, pure_hf: bool = False,
-           kv: str | None = None, act: str | None = None, stream: bool = False) -> Recording:
+           kv: str | None = None, act: str | None = None, stream: bool = False, rows: int | None = None,
+           crossover: str | None = None) -> Recording:
     """Record top-k teacher-forced logprobs of `model` (hub id, checkpoint directory, or a .gguf file with the HF
     `config` it was made from: the dense model of its dequantized weights, M0.1 §4.6) over `prompts`. `q8_1` ("mmq"
     or "mmvq"; "prefill" for FP8): every quantized linear computes as the kernels on that path (Tier B's floor), its
     activations in mode `act` (`modes.MODES`; default q8_1, the only one for a GGUF; fp8, W8A8, for FP8 weights).
+    `q8_1` "rows" (a dense GGUF): each linear on the path its matmul takes in steps of `rows` rows on the class
+    `crossover` ("<gpu class>:<sm>", e.g. "rtx-5080:120"; `gguf.row_paths`): D2's small-step floors.
     `kv` ("q8_0" or "fp8"): attention reads K and V as a cache in that format stores them (`kv.emulate`).
     A GGUF, a quantized HF checkpoint (its weights as `hf_quant` reads them, docs/m06-lowp.md §4.8) or, with
     `stream`, a dense one runs one decoder layer at a time (`_streamed`), so its weights are never all held; a dense
@@ -98,27 +103,37 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
     path = resolve_model(model)
     if act is not None and not q8_1:
         raise ValueError(f"activation mode {act!r} without a kernel path to emulate it on")
+    if q8_1 == "rows" and path.suffix != ".gguf":
+        raise ValueError(f"{path}: per-shape floors (--q8-1 rows) are for GGUF files")
     if path.suffix == ".gguf":
         from . import gguf
 
         if config is None:
             raise ValueError(f"{path}: a GGUF golden needs the HF config it was made from")
-        if act not in (None, "q8_1") or q8_1 not in (None, "mmq", "mmvq"):
+        if act not in (None, "q8_1") or q8_1 not in (None, "mmq", "mmvq", "rows"):
             raise ValueError(f"{path}: a GGUF floor emulates q8_1 activations on mmq or mmvq, not {act} on {q8_1}")
         hf_config = resolve_model(config)
         is_moe = _is_moe(hf_config)
         mirrored = dtype != torch.float32 and not pure_hf and is_moe
+        routes, per_shape = q8_1, {}
+        if q8_1 == "rows":
+            if not rows or not crossover or is_moe:
+                raise ValueError(f"{path}: a per-shape floor needs a dense GGUF, its step rows and the crossover class")
+            gpu, sm = crossover.split(":")
+            routes = gguf.row_paths(path, rows, Fingerprint(gpu=gpu, sm=int(sm), vram_gib=0, toolchain=""))
+            per_shape = {"step_rows": rows, "crossover": gpu, "paths": dict(collections.Counter(routes.values()))}
         experts = gguf.q8_1_experts(path, q8_1) if q8_1 and mirrored else None
 
         def prepare(module: torch.nn.Module, prefix: str) -> None:
             if q8_1:
-                gguf.emulate_q8_1(module, path, q8_1, prefix)
+                gguf.emulate_q8_1(module, path, routes, prefix)
             if mirrored:
                 moe.mirror(module, experts=experts, prefix=prefix)
 
         config_sha256 = hashlib.sha256((hf_config / "config.json").read_bytes()).hexdigest()
         source = gguf.file_meta(path) | {"q8_1": q8_1, "config": model_meta(hf_config)["model"],
-                                         "config_sha256": config_sha256} | _moe_meta(mirrored) | _emulation_meta(q8_1)
+                                         "config_sha256": config_sha256} | _moe_meta(mirrored) | _emulation_meta(q8_1) \
+            | per_shape
         with kv_format.emulate(kv):
             rows, wall = _streamed(_skeleton(hf_config), lambda select: dict(gguf.hf_state(path, select)), "blk.",
                                    prompts, k, dtype, device, mirrored, prepare)

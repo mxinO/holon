@@ -23,7 +23,7 @@ from holon_std.moe import reference
 from . import q8_1, w4a4
 
 MODES = ("q8_1", "fp4", "fp4-static", "fp8")
-PATHS = ("mmq", "mmvq", "prefill")         # kernels.ggml_cuda's two; kernels.triton_fp8's W8A8 one
+PATHS = ("mmq", "mmvq", "prefill", "rows")  # kernels.ggml_cuda's two; kernels.triton_fp8's W8A8 one; GGUF: per shape
 
 
 def fp8_act(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

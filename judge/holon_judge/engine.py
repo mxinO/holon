@@ -120,6 +120,7 @@ def score_model(model: str, prompts: PromptSet, dtype: torch.dtype = torch.bfloa
                                  plugin_options=options))
     meta = (gguf.file_meta(path) if path.suffix == ".gguf" else model_meta(path)) | {
         "weight_source": source or engine.source.kind, "max_step_tokens": engine.cfg.max_step_tokens,
+        "gpu_class": engine.ctx.fingerprint.gpu,
         "dtype": str(dtype).removeprefix("torch."), "device": torch.device(device).type,
         "hardware": hardware(torch.device(device)), "torch": torch.__version__}
     return score(engine, prompts, k, meta)

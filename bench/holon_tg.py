@@ -4,7 +4,9 @@ of 1, in tokens per second over the batch; random prompts, the prefix cache off.
 warm-up.
 
     python bench/holon_tg.py --model <checkpoint | file.gguf> [-n 128] [--depths 0 8192] [--batch 1 8]
-                             [--engine-args "<holon serve flags>"] [-r 5] [--json out]
+                             [--engine-args "<holon serve flags>"] [-r 5] [--llama-crossover] [--json out]
+
+`--llama-crossover`: kernels.ggml_cuda without its per-shape entries (llama.cpp's rule; D2's baseline).
 """
 from __future__ import annotations
 
@@ -30,8 +32,12 @@ def main() -> None:
     ap.add_argument("--batch", type=int, nargs="+", default=[1])
     ap.add_argument("--engine-args", default="")
     ap.add_argument("-r", type=int, default=5)
+    ap.add_argument("--llama-crossover", action="store_true")
     ap.add_argument("--json")
     a = ap.parse_args()
+    if a.llama_crossover:
+        from holon_plugins.kernels.ggml_cuda import plugin as ggml
+        ggml.CROSSOVER.clear()
     flags = argparse.ArgumentParser()
     engine_flags(flags)
     cfg = engine_config(a.model, flags.parse_args(shlex.split(a.engine_args)))
@@ -58,7 +64,8 @@ def main() -> None:
     if a.json:
         with open(a.json, "w") as f:
             json.dump({"engine": "holon", "model": a.model.rstrip("/").rsplit("/", 1)[-1],
-                       "gpu": torch.cuda.get_device_name(), "results": results}, f, indent=1)
+                       "gpu": torch.cuda.get_device_name(), "llama_crossover": a.llama_crossover, "results": results},
+                      f, indent=1)
 
 
 if __name__ == "__main__":
