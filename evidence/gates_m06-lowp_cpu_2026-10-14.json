@@ -1,0 +1,304 @@
+{
+ "workload": "m06-a4-gates",
+ "date": "2026-10-14",
+ "commit": "b851135",
+ "hardware": "cpu",
+ "command": "python -m holon_judge gate --model <file> --original <bf16 original> [--plant <bug>]",
+ "claim": "docs/m06-lowp.md \u00a74.8: per tensor (per expert) NMSE vs the bf16 original, FP8 <= 1e-2, FP4 <= 0.1 (HF and the GGUF's MXFP4 experts), other ggml types 0.5, dense HF tensors 1e-2; HF files through the engine's weight source (dialects) and reference.py, a norm folded into the linears reading it; the GGUF through gguf-py and the judge's map, routers exact. Predicted FP8 ~1e-3, NVFP4 ~1e-2, MXFP4 ~2e-2; plants M5 (sim 0.271) and M3 fail",
+ "results": {
+  "qwen3-8b-nvfp4": {
+   "model": "nvidia/Qwen3-8B-NVFP4",
+   "original": "Qwen/Qwen3-8B",
+   "plant": null,
+   "tensors": 327,
+   "max": 0.009449557401239872,
+   "max_by_role": {
+    "embed_tokens": 0.0,
+    "down_proj": 0.00903963390737772,
+    "gate_proj": 0.009107053279876709,
+    "up_proj": 0.009338988922536373,
+    "k_norm": 0.0,
+    "k_proj": 0.009449557401239872,
+    "o_proj": 0.0090632988139987,
+    "q_norm": 0.0,
+    "q_proj": 0.009013078175485134,
+    "v_proj": 0.009206327609717846,
+    "lm_head": 0.0,
+    "norm": 0.0
+   },
+   "gates": [
+    0.01,
+    0.1
+   ],
+   "over": 0,
+   "first_over": []
+  },
+  "qwen3-8b-nvfp4-redhatai": {
+   "model": "RedHatAI/Qwen3-8B-NVFP4",
+   "original": "Qwen/Qwen3-8B",
+   "plant": null,
+   "tensors": 327,
+   "max": 0.011827103793621063,
+   "max_by_role": {
+    "embed_tokens": 0.0,
+    "down_proj": 0.007842558436095715,
+    "gate_proj": 0.009036638773977757,
+    "up_proj": 0.008355693891644478,
+    "k_norm": 0.0,
+    "k_proj": 0.011827103793621063,
+    "o_proj": 0.007862561382353306,
+    "q_norm": 0.0,
+    "q_proj": 0.009973135776817799,
+    "v_proj": 0.011099900119006634,
+    "lm_head": 0.0,
+    "norm": 0.0
+   },
+   "gates": [
+    0.01,
+    0.1
+   ],
+   "over": 0,
+   "first_over": []
+  },
+  "qwen3-8b-mxfp4-yi30": {
+   "model": "Yi30/Qwen3-8B-MXFP4",
+   "original": "Qwen/Qwen3-8B",
+   "plant": null,
+   "tensors": 327,
+   "max": 0.016165170818567276,
+   "max_by_role": {
+    "embed_tokens": 0.0,
+    "down_proj": 0.016165170818567276,
+    "gate_proj": 0.01462367083877325,
+    "up_proj": 0.013648484833538532,
+    "k_norm": 0.0,
+    "k_proj": 0.01375646609812975,
+    "o_proj": 0.01286059059202671,
+    "q_norm": 0.0,
+    "q_proj": 0.013971874490380287,
+    "v_proj": 0.014412887394428253,
+    "norm": 0.0,
+    "lm_head": 0.0
+   },
+   "gates": [
+    0.01,
+    0.1
+   ],
+   "over": 0,
+   "first_over": []
+  },
+  "qwen3-8b-fp8": {
+   "model": "Qwen/Qwen3-8B-FP8",
+   "original": "Qwen/Qwen3-8B",
+   "plant": null,
+   "tensors": 327,
+   "max": 0.0007119488436728716,
+   "max_by_role": {
+    "embed_tokens": 0.0,
+    "down_proj": 0.0007084351382218301,
+    "gate_proj": 0.0007097576162777841,
+    "up_proj": 0.0007095395121723413,
+    "k_norm": 0.0,
+    "k_proj": 0.0007087227422744036,
+    "o_proj": 0.0007089482969604433,
+    "q_norm": 0.0,
+    "q_proj": 0.0007074244786053896,
+    "v_proj": 0.0007119488436728716,
+    "lm_head": 0.0,
+    "norm": 0.0
+   },
+   "gates": [
+    0.01
+   ],
+   "over": 0,
+   "first_over": []
+  },
+  "qwen3-30b-a3b-nvfp4": {
+   "model": "nvidia/Qwen3-30B-A3B-NVFP4",
+   "original": "Qwen/Qwen3-30B-A3B",
+   "plant": null,
+   "tensors": 18771,
+   "max": 0.011007023975253105,
+   "max_by_role": {
+    "embed_tokens": 0.0,
+    "down_proj": 0.009084365330636501,
+    "gate_proj": 0.011007023975253105,
+    "up_proj": 0.009782426990568638,
+    "gate": 0.0,
+    "k_norm": 0.0,
+    "k_proj": 0.009653299115598202,
+    "o_proj": 0.009057212620973587,
+    "q_norm": 0.0,
+    "q_proj": 0.00906401127576828,
+    "v_proj": 0.009578563272953033,
+    "lm_head": 0.0,
+    "norm": 0.0
+   },
+   "gates": [
+    0.01,
+    0.1
+   ],
+   "over": 0,
+   "first_over": []
+  },
+  "qwen3-30b-a3b-mxfp4-amd-quark": {
+   "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+   "original": "Qwen/Qwen3-30B-A3B",
+   "plant": null,
+   "tensors": 18771,
+   "max": 0.019847208634018898,
+   "max_by_role": {
+    "lm_head": 0.0,
+    "embed_tokens": 0.0,
+    "down_proj": 0.016565166413784027,
+    "gate_proj": 0.019847208634018898,
+    "up_proj": 0.017090192064642906,
+    "gate": 0.0,
+    "k_norm": 0.0,
+    "k_proj": 0.0,
+    "o_proj": 0.0,
+    "q_norm": 0.0,
+    "q_proj": 0.0,
+    "v_proj": 0.0,
+    "norm": 0.0
+   },
+   "gates": [
+    0.01,
+    0.1
+   ],
+   "over": 0,
+   "first_over": []
+  },
+  "qwen3-30b-a3b-fp8": {
+   "model": "Qwen/Qwen3-30B-A3B-FP8",
+   "original": "Qwen/Qwen3-30B-A3B",
+   "plant": null,
+   "tensors": 18771,
+   "max": 0.0007513353484682739,
+   "max_by_role": {
+    "embed_tokens": 0.0,
+    "down_proj": 0.0007121824310161173,
+    "gate_proj": 0.0007513353484682739,
+    "up_proj": 0.0007146800053305924,
+    "gate": 0.0,
+    "k_norm": 0.0,
+    "k_proj": 0.000710137072019279,
+    "o_proj": 0.0007102959789335728,
+    "q_norm": 0.0,
+    "q_proj": 0.000706965452991426,
+    "v_proj": 0.0007124005351215601,
+    "lm_head": 0.0,
+    "norm": 0.0
+   },
+   "gates": [
+    0.01
+   ],
+   "over": 0,
+   "first_over": []
+  },
+  "qwen3-30b-a3b-instruct-2507-mxfp4_moe": {
+   "model": "Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE",
+   "original": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+   "plant": null,
+   "tensors": 12723,
+   "max": 0.01764567568898201,
+   "max_by_role": {
+    "lm_head": 2.8738397304550745e-05,
+    "norm": 0.0,
+    "embed_tokens": 2.9623741284012794e-05,
+    "k_proj": 4.233596700942144e-05,
+    "k_norm": 0.0,
+    "input_layernorm": 0.0,
+    "o_proj": 3.3023752621375024e-05,
+    "q_proj": 5.272087219054811e-05,
+    "q_norm": 0.0,
+    "v_proj": 4.636117228073999e-05,
+    "down_proj": 0.017147524282336235,
+    "gate": 0.0,
+    "post_attention_layernorm": 0.0,
+    "gate_up_proj": 0.01764567568898201
+   },
+   "gates": [
+    0.1,
+    0.5
+   ],
+   "over": 0,
+   "first_over": []
+  }
+ },
+ "plants": {
+  "M5": {
+   "model": "Yi30/Qwen3-8B-MXFP4",
+   "original": "Qwen/Qwen3-8B",
+   "plant": "mxfp4-scale-halved",
+   "tensors": 327,
+   "max": 0.25995466113090515,
+   "max_by_role": {
+    "embed_tokens": 0.0,
+    "down_proj": 0.25995466113090515,
+    "gate_proj": 0.2596518397331238,
+    "up_proj": 0.2587707042694092,
+    "k_norm": 0.0,
+    "k_proj": 0.2588611841201782,
+    "o_proj": 0.2586086094379425,
+    "q_norm": 0.0,
+    "q_proj": 0.2587762475013733,
+    "v_proj": 0.25927287340164185,
+    "norm": 0.0,
+    "lm_head": 0.0
+   },
+   "gates": [
+    0.01,
+    0.1
+   ],
+   "over": 252,
+   "first_over": [
+    "model.layers.0.mlp.down_proj.weight",
+    "model.layers.0.mlp.gate_proj.weight",
+    "model.layers.0.mlp.up_proj.weight",
+    "model.layers.0.self_attn.k_proj.weight",
+    "model.layers.0.self_attn.o_proj.weight",
+    "model.layers.0.self_attn.q_proj.weight",
+    "model.layers.0.self_attn.v_proj.weight",
+    "model.layers.1.mlp.down_proj.weight"
+   ]
+  },
+  "M3": {
+   "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+   "original": "Qwen/Qwen3-30B-A3B",
+   "plant": "mxfp4-scale-as-e4m3",
+   "tensors": 18771,
+   "max": 1642712064.0,
+   "max_by_role": {
+    "lm_head": 0.0,
+    "embed_tokens": 0.0,
+    "down_proj": 1444505216.0,
+    "gate_proj": 1642712064.0,
+    "up_proj": 1631038592.0,
+    "gate": 0.0,
+    "k_norm": 0.0,
+    "k_proj": 0.0,
+    "o_proj": 0.0,
+    "q_norm": 0.0,
+    "q_proj": 0.0,
+    "v_proj": 0.0,
+    "norm": 0.0
+   },
+   "gates": [
+    0.01,
+    0.1
+   ],
+   "over": 18432,
+   "first_over": [
+    "model.layers.0.mlp.experts.0.down_proj.weight",
+    "model.layers.0.mlp.experts.0.gate_proj.weight",
+    "model.layers.0.mlp.experts.0.up_proj.weight",
+    "model.layers.0.mlp.experts.1.down_proj.weight",
+    "model.layers.0.mlp.experts.1.gate_proj.weight",
+    "model.layers.0.mlp.experts.1.up_proj.weight",
+    "model.layers.0.mlp.experts.10.down_proj.weight",
+    "model.layers.0.mlp.experts.10.gate_proj.weight"
+   ]
+  }
+ }
+}

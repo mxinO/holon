@@ -1,0 +1,85 @@
+{
+ "workload": "m06-a4-owner-checks",
+ "date": "2026-10-14",
+ "commit": "b851135",
+ "hardware": "cpu",
+ "command": "python -m holon_judge hf-quant-check --model <file> --llama-cpp <llama.cpp at cbe28bb3>",
+ "claim": "D10: reference.py against every format owner that imports, over every quantized module of each real HF file; which owners ran per file",
+ "owners_per_file": {
+  "nvidia/Qwen3-8B-NVFP4": [
+   "modelopt.NVFP4QTensor (<= 1 ulp)",
+   "gguf-py on llama.cpp's repack (exact)"
+  ],
+  "RedHatAI/Qwen3-8B-NVFP4": [
+   "compressed-tensors (<= 2 ulp)",
+   "gguf-py on llama.cpp's repack (exact)"
+  ],
+  "Yi30/Qwen3-8B-MXFP4": [
+   "compressed-tensors (exact)",
+   "gguf-py on llama.cpp's repack (exact)"
+  ],
+  "Qwen/Qwen3-8B-FP8": [
+   "transformers.Fp8Dequantize (exact)"
+  ],
+  "nvidia/Qwen3-30B-A3B-NVFP4": [
+   "modelopt.NVFP4QTensor (<= 1 ulp)",
+   "gguf-py on llama.cpp's repack (exact)"
+  ],
+  "amd-quark/Qwen3-30B-A3B-MXFP4": [
+   "quark.Pack_fp4 (exact; amd-quark's own venv)",
+   "gguf-py on llama.cpp's repack (exact)"
+  ],
+  "Qwen/Qwen3-30B-A3B-FP8": [
+   "transformers.Fp8Dequantize (exact)"
+  ]
+ },
+ "sources": {
+  "FP4 files (five)": "evidence/repack_hf-fp4_rtx-a5000_2026-10-13.json (A3, with --repack)",
+  "amd-quark quark.Pack_fp4": "evidence/owner_qwen3-30b-a3b-mxfp4-amd-quark_cpu_2026-10-13.json",
+  "this run": "the two FP8 files (and nvidia/Qwen3-8B-NVFP4 again)"
+ },
+ "results": {
+  "qwen3-8b-nvfp4": {
+   "model": "nvidia/Qwen3-8B-NVFP4",
+   "llama_cpp": true,
+   "owners": {
+    "modelopt.NVFP4QTensor": {
+     "modules": 252,
+     "max_ulps": 1,
+     "over": 0,
+     "first_over": []
+    },
+    "gguf-py on llama.cpp's repack": {
+     "modules": 252,
+     "max_ulps": 0,
+     "over": 0,
+     "first_over": []
+    }
+   }
+  },
+  "qwen3-8b-fp8": {
+   "model": "Qwen/Qwen3-8B-FP8",
+   "llama_cpp": true,
+   "owners": {
+    "transformers.Fp8Dequantize": {
+     "modules": 252,
+     "max_ulps": 0,
+     "over": 0,
+     "first_over": []
+    }
+   }
+  },
+  "qwen3-30b-a3b-fp8": {
+   "model": "Qwen/Qwen3-30B-A3B-FP8",
+   "llama_cpp": true,
+   "owners": {
+    "transformers.Fp8Dequantize": {
+     "modules": 18624,
+     "max_ulps": 0,
+     "over": 0,
+     "first_over": []
+    }
+   }
+  }
+ }
+}

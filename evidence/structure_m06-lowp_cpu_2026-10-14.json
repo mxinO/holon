@@ -1,0 +1,56 @@
+{
+ "workload": "m06-a4-structure",
+ "date": "2026-10-14",
+ "commit": "b851135",
+ "hardware": "cpu",
+ "command": "python -m holon_judge structure --model <file> --device cpu [--plant <bug>]",
+ "claim": "every stacked expert slice of the real 30B FP8 / Quark MXFP4 loads equals the checkpoint's by value (reference kernels), the routers bit for bit; P6 (FP8 scale stack off by one) and M2 (Quark expert index off by one) fail",
+ "results": {
+  "qwen3-30b-a3b-fp8": {
+   "model": "Qwen/Qwen3-30B-A3B-FP8",
+   "plant": null,
+   "mismatches": 0,
+   "first": [],
+   "rc": "0"
+  },
+  "P6-qwen3-30b-a3b-fp8": {
+   "model": "Qwen/Qwen3-30B-A3B-FP8",
+   "plant": "hf-scale-stack-off-by-one",
+   "mismatches": 384,
+   "first": [
+    "model.layers.18.mlp.experts.0.gate_proj.weight",
+    "model.layers.18.mlp.experts.0.up_proj.weight",
+    "model.layers.18.mlp.experts.0.down_proj.weight",
+    "model.layers.18.mlp.experts.1.gate_proj.weight",
+    "model.layers.18.mlp.experts.1.up_proj.weight",
+    "model.layers.18.mlp.experts.1.down_proj.weight",
+    "model.layers.18.mlp.experts.2.gate_proj.weight",
+    "model.layers.18.mlp.experts.2.up_proj.weight"
+   ],
+   "rc": "1"
+  },
+  "qwen3-30b-a3b-mxfp4-amd-quark": {
+   "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+   "plant": null,
+   "mismatches": 0,
+   "first": [],
+   "rc": "0"
+  },
+  "M2-qwen3-30b-a3b-mxfp4-amd-quark": {
+   "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+   "plant": "hf-stack-off-by-one",
+   "mismatches": 384,
+   "first": [
+    "model.layers.24.mlp.experts.0.gate_proj.weight",
+    "model.layers.24.mlp.experts.0.up_proj.weight",
+    "model.layers.24.mlp.experts.0.down_proj.weight",
+    "model.layers.24.mlp.experts.1.gate_proj.weight",
+    "model.layers.24.mlp.experts.1.up_proj.weight",
+    "model.layers.24.mlp.experts.1.down_proj.weight",
+    "model.layers.24.mlp.experts.2.gate_proj.weight",
+    "model.layers.24.mlp.experts.2.up_proj.weight"
+   ],
+   "rc": "1"
+  }
+ }
+}
