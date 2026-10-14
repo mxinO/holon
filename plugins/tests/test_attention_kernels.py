@@ -1,5 +1,8 @@
 """L0: every attention kernel against the std.mixers.gqa oracle on paged KV (ragged lengths, page boundaries,
-prefill chunks that continue earlier context, padding rows), plus run-to-run identity."""
+prefill chunks that continue earlier context, padding rows), plus run-to-run identity; `kernels.triton_attn`'s launch
+configs within every class's shared memory, its row tiles and pipeline stages bitwise."""
+import dataclasses
+
 import numpy as np
 import pytest
 import torch
@@ -7,6 +10,8 @@ from holon.api import Batch, DeviceBatch, Pages
 from holon.core.batching import host_plan
 from holon.core.build import BuildContext
 from holon.core.plugins import PluginError, PluginSet, discover
+from holon_plugins.kernels.triton_attn import kernel as triton_attn
+from holon_plugins.kernels.triton_attn.plugin import FORMAT, Verify
 from holon_std.mixers.gqa.kernels import kv_dtype
 from holon_testing.ref_kernels.kernels import PagedAttention
 
@@ -155,3 +160,54 @@ def test_flashinfer_workspace_holds_the_widest_split(op):
     ours = _run(_kernel(op, "kernels.flashinfer", *geometry), q, kv, batch, pages)
     torch.testing.assert_close(ours.float(), _run(PagedAttention(None), q, kv, batch, pages).float(),
                                atol=1e-2, rtol=1e-2)
+
+
+# The lock classes' SMs, and each SM's shared memory per block (opt-in): the kernel is compiled for each offline.
+CLASSES = {"rtx-3090": 86, "rtx-4090": 89, "rtx-5080": 120, "rtx-5090": 120}
+SHARED = {86: 101376, 89: 101376, 120: 101376}
+WIDTHS = (1, 4, 8, 16)             # decode, MTP's verify (k 3), DFlash's verify and block, a 16-row block
+GROUP = {128: 8, 256: 6}           # query heads per KV head: Qwen3-30B-A3B; Qwen3.5 / 3.8 (the widest of each)
+
+
+@pytest.mark.parametrize("layout", ["kv.hnd", "kv.hnd.fp8", "kv.hnd.q8_0"])
+@pytest.mark.parametrize("head_dim", [128, 256])
+@pytest.mark.parametrize("cls", sorted(CLASSES))
+def test_triton_attn_configs_fit_every_class(cls, head_dim, layout):
+    """docs/m07-perf.md §4: the launch config a class's verify kernel runs at each width a deployment declares, compiled
+    for the class's SM, takes at most its shared memory — the config `fitted` at build (on the class's own device;
+    here with its fingerprint), checked per width at one split and several. Before the fix the RTX 5090's pinned
+    (64, 4, 3) took 106,752 B at head_dim 256, 6 heads per KV head, 8 rows, bf16 KV (DFlash2 failed graph capture)."""
+    sm, g = CLASSES[cls], GROUP[head_dim]
+    if layout == "kv.hnd.fp8" and sm < 89:
+        pytest.skip("fp8 KV from sm_89")
+    ctx = BuildContext(PluginSet(discover()), torch.device("cuda"), options={"max_draft_tokens": max(WIDTHS) - 1})
+    ctx.fingerprint = dataclasses.replace(ctx.fingerprint, gpu=cls, sm=sm)
+    kernel = Verify(ctx, heads=4 * g, kv_heads=4, head_dim=head_dim, page=PAGE, q_dtype="bfloat16",
+                    kv_dtype=kv_dtype(layout, "bfloat16"), layout=layout, max_seqs=MAX_SEQS)
+    for width in WIDTHS:
+        for splits in (1, 2):
+            used = triton_attn.shared_bytes(kernel.cfg(width), sm, nq=width, g=g, d=head_dim, page=PAGE,
+                                            fmt=FORMAT[layout], causal=True, window=0, dtype="bfloat16", splits=splits)
+            assert used <= SHARED[sm], (width, splits, kernel.cfg(width), used)
+
+
+@pytest.mark.parametrize("masks", [{}, {"causal": False, "window": 16}], ids=["causal", "block-window"])
+@pytest.mark.parametrize("geometry", [(32, 4, 128), (24, 4, 256)])
+def test_triton_attn_tiles_and_stages_are_bitwise(geometry, masks):
+    """One pipeline stage gives three stages' bits (`fitted` steps stages down first), one split or several. Rows tiled
+    over the grid (16 rows x 8 or 6 heads: two tiles of 64 pairs) give today's single tile's bits where Triton keeps
+    its warp layout — at head_dim 256 (the 27B's 16-row blocks). At head_dim 128 a 128-pair tile puts its warps along
+    the rows and a 64-pair one along the columns (Triton's chained-dot rule: rows >= head_dim), so the row sums run in
+    another order: one bf16 ulp in a few values (docs/m07-perf.md, as built); no lock runs over 64 pairs."""
+    q, kv, batch, pages = _case([(s, 16) for s in (0, 5, 200, 2041)], *geometry)
+    for splits in (1, 3):
+        def run(cfg, block=None, splits=splits):
+            return triton_attn.paged_attention(q, kv, pages.table, batch.dev.slots, pages.lens, nq=16, splits=splits,
+                                               cfg=cfg, block=block, **masks)
+        tiled = run(triton_attn.Config(32, 4, 1))
+        assert torch.equal(tiled, run(triton_attn.Config(32, 4, 3)))
+        whole = run(triton_attn.Config(32, 4, 1), block=128)
+        if geometry[2] == 256:
+            assert torch.equal(tiled, whole)
+        else:
+            torch.testing.assert_close(tiled, whole, rtol=2**-7, atol=0)

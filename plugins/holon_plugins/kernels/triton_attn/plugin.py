@@ -3,11 +3,12 @@ for q8_0 KV, and `kv_write@1` for every KV layout (op contracts: std.mixers.gqa)
 from __future__ import annotations
 
 import dataclasses
+import functools
 
 import torch
 from holon.api import Constraint, KernelSpec
 
-from .kernel import Config, paged_attention, paged_prefill, splits_for, write_q8_0
+from .kernel import FP8, MODEL, Q8_0, Config, block_m, fitted, paged_attention, paged_prefill, splits_for, write_q8_0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -23,14 +24,25 @@ class Decode:
     """One query row per sequence. The block table and lengths are read on the device from buffers this instance
     owns (stable addresses for graph capture); the only host decision is the split count, taken from the batch size
     and the table's capacity, so one graph per batch bucket serves every length (splits past a sequence's end are
-    empty)."""
+    empty).
+
+    The launch config is the class's pinned one for the head_dim, `fitted` at build to the device's shared memory
+    for each row width the deployment declares (one; verify: 1 + k for every k up to `max_draft_tokens`) — a pure
+    function of the class, the facts and the widths, so the lock pins it through this plugin's `src` and its
+    `[engine]`. A width not declared (a drafter's block) is fitted by the same function when it first runs."""
 
     def __init__(self, ctx, *, heads: int, kv_heads: int, head_dim: int, page: int, q_dtype: str, kv_dtype: str,
                  layout: str, max_seqs: int, causal: bool = True, window: int = 0) -> None:
         fp = ctx.fingerprint
         self.kv_heads, self.num_sms = kv_heads, fp.num_sms
         self.causal, self.window = causal, window          # the mask facts (one decode row sees all n either way)
-        self.cfg = Config.pinned(fp.gpu, fp.sm, head_dim)
+        self._fit = functools.partial(
+            fitted, Config.pinned(fp.gpu, fp.sm, head_dim), fp.sm,
+            torch.cuda.get_device_properties(ctx.device).shared_memory_per_block_optin, g=heads // kv_heads,
+            d=head_dim, page=page, fmt=FORMAT[layout], causal=causal, window=window, dtype=q_dtype)
+        self.g, self.cfgs = heads // kv_heads, {}
+        for width in sorted(self.widths(ctx), reverse=True):     # each BLOCK_M fitted at its widest declared width
+            self.cfg(width)
         self.rows = torch.zeros(max_seqs, dtype=torch.int32, device=ctx.device)
         self.lens = torch.zeros(max_seqs, dtype=torch.int32, device=ctx.device)
 
@@ -51,8 +63,19 @@ class Decode:
         return ("triton_attn.decode", len(h.rows), h.splits)
 
     def run(self, q: torch.Tensor, kv: torch.Tensor, h: _Handle) -> torch.Tensor:
-        return paged_attention(q, kv, h.table, h.rows, h.lens, nq=len(q) // len(h.rows), splits=h.splits, cfg=self.cfg,
+        nq = len(q) // len(h.rows)
+        return paged_attention(q, kv, h.table, h.rows, h.lens, nq=nq, splits=h.splits, cfg=self.cfg(nq),
                                causal=self.causal, window=self.window)
+
+    @staticmethod
+    def widths(ctx) -> tuple[int, ...]:
+        return (1,)
+
+    def cfg(self, nq: int) -> Config:
+        bm = block_m(nq, self.g)
+        if bm not in self.cfgs:
+            self.cfgs[bm] = self._fit(nq=nq)
+        return self.cfgs[bm]
 
 
 class Verify(Decode):
@@ -61,6 +84,10 @@ class Verify(Decode):
 
     def graph_key(self, h: _Handle) -> tuple:
         return ("triton_attn.verify", len(h.rows), h.splits)
+
+    @staticmethod
+    def widths(ctx) -> tuple[int, ...]:
+        return tuple(range(1, 2 + ctx.options.get("max_draft_tokens", 0)))
 
 
 class Prefill:
@@ -78,8 +105,9 @@ class Prefill:
         return paged_prefill(q, kv, table, rows, lens, query_start, max_rows=max_rows)
 
 
-# KV layout -> its kv_dtype fact (None: the model dtype, q_dtype)
+# KV layout -> its kv_dtype fact (None: the model dtype, q_dtype), and the stored format the kernel reads
 KV_DTYPE = {"kv.hnd": None, "kv.hnd.fp8": "float8_e4m3fn", "kv.hnd.q8_0": "q8_0"}
+FORMAT = {"kv.hnd": MODEL.value, "kv.hnd.fp8": FP8.value, "kv.hnd.q8_0": Q8_0.value}
 
 
 def _supports(layout: str, masks: bool = True):

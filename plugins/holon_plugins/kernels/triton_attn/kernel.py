@@ -11,11 +11,16 @@ lens:   [B] int32                        KV length per row including this step's
 
 Row i of sequence b sits at position lens[b] - NQ + i and attends causally — or (`causal` False, verify rows of a
 block drafted at once) to all NQ rows of its sequence and the context before them; with a `window` W > 0 it sees no
-key at or before its position − W, and the KV walk starts at the first key any row sees. One program handles all
-NQ * group query rows of one (sequence, kv head, split), so K/V are read once per kv head. The split count is a
-launch constant chosen on the host from an upper bound on the lengths, never from the lengths themselves; split
+key at or before its position − W, and the KV walk starts at the first key any row sees. One program handles up to
+64 of the NQ * group query rows of one (sequence, kv head, split) — all of them up to 64, so K/V are read once per kv
+head; wider steps tile their rows over the grid, each row computed as in one tile (the same KV walk). The split count
+is a launch constant chosen on the host from an upper bound on the lengths, never from the lengths themselves; split
 boundaries are computed on the device and partials are merged in a fixed order, so the output is run-to-run
 deterministic.
+
+The launch config (block_n, warps, stages) is pinned per class and head_dim; `fitted` lowers it, at build, until the
+kernel compiled for the device's SM fits its shared memory: stages down to 1 (pipelining only: the arithmetic is the
+same), then block_n halved (bounded).
 
 Stored formats are decoded in registers right after the load (`_load_kv`): q8_0 as values × scale, rounded once to
 fp16 (q joins it there: `_compute_q`; so |K|, |V| must stay below fp16's 65504, which normed keys do), fp8 by moving
@@ -25,12 +30,17 @@ keeps, reads back as ±480).
 from __future__ import annotations
 
 import dataclasses
+import functools
 import math
 
 import torch
 import triton
 import triton.language as tl
+from triton.backends.compiler import GPUTarget
+from triton.compiler import ASTSource, make_backend
+from triton.compiler import compile as triton_compile
 from triton.language.extra.cuda import libdevice
+from triton.runtime.jit import create_function_from_signature
 
 MODEL, FP8, Q8_0 = tl.constexpr(0), tl.constexpr(1), tl.constexpr(2)     # stored KV formats
 Q8_BLOCK = tl.constexpr(32)                                                 # values per q8_0 scale
@@ -66,16 +76,16 @@ def _paged_attn(Q, K, V, KS, VS, TABLE, ROWS, LENS, OUT, WS_ML, WS_ACC,
                 stride_qt, stride_qh, stride_ku, stride_kh, stride_kt, stride_su, stride_sh, stride_st, stride_table,
                 qk_scale,
                 NQ: tl.constexpr, G: tl.constexpr, D: tl.constexpr, PAGE: tl.constexpr,
-                BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, SPLITS: tl.constexpr, FMT: tl.constexpr,
-                CAUSAL: tl.constexpr, WINDOW: tl.constexpr):
-    b = tl.program_id(0)
+                BLOCK_M: tl.constexpr, TILES: tl.constexpr, BLOCK_N: tl.constexpr, SPLITS: tl.constexpr,
+                FMT: tl.constexpr, CAUSAL: tl.constexpr, WINDOW: tl.constexpr):
+    b = tl.program_id(0) // TILES
     h = tl.program_id(1)
     s = tl.program_id(2)
     hq = tl.num_programs(1) * G
 
     n = tl.load(LENS + b)
     slot = tl.load(ROWS + b)
-    m = tl.arange(0, BLOCK_M)
+    m = tl.program_id(0) % TILES * BLOCK_M + tl.arange(0, BLOCK_M)     # this tile's (query row, head) pairs
     qi = m // G
     head = h * G + m % G
     row_ok = m < NQ * G
@@ -151,6 +161,8 @@ def _merge_splits(WS_ML, WS_ACC, OUT, D: tl.constexpr, SPLITS: tl.constexpr, SPL
 # fingerprint class where the consumer-card sweeps found a better one; anything unswept gets DEFAULT, which is
 # correct everywhere and merely untuned. No autotuning at run time.
 DEFAULT = (64, 4, 1)
+MAX_BLOCK_M = 64                # (query row, head) pairs per program; wider steps tile over the grid
+MIN_BLOCK_N = 16
 CONFIGS = {
     (8, 128): (64, 4, 1), (8, 256): (32, 4, 3),
     (12, 128): (64, 4, 1), (12, 256): (64, 4, 2),
@@ -173,6 +185,56 @@ class Config:
         return cls(*CLASS_CONFIGS.get((gpu_class, head_dim)) or CONFIGS.get((sm // 10, head_dim), DEFAULT))
 
 
+def block_m(nq: int, g: int) -> int:
+    """BLOCK_M for `nq` query rows of `g` heads each: their pairs padded to a power of two (at least 16, tl.dot's
+    minimum), at most MAX_BLOCK_M."""
+    return min(MAX_BLOCK_M, max(16, triton.next_power_of_2(nq * g)))
+
+
+@functools.cache
+def fitted(cfg: Config, sm: int, limit: int, *, nq: int, g: int, d: int, page: int, fmt: int, causal: bool,
+           window: int, dtype: str) -> Config:
+    """`cfg` lowered until `_paged_attn` compiled for `sm` at these facts (one split or several: the epilogues
+    differ) needs at most `limit` bytes of shared memory: num_stages down to 1, then block_n halved down to
+    MIN_BLOCK_N; an error below that. A pure function of its arguments (compiled, never launched: no device needed)."""
+    while max(shared_bytes(cfg, sm, nq=nq, g=g, d=d, page=page, fmt=fmt, causal=causal, window=window, dtype=dtype,
+                           splits=splits) for splits in (1, 2)) > limit:
+        if cfg.num_stages > 1:
+            cfg = dataclasses.replace(cfg, num_stages=cfg.num_stages - 1)
+        elif cfg.block_n > MIN_BLOCK_N:
+            cfg = dataclasses.replace(cfg, block_n=cfg.block_n // 2)
+        else:
+            raise RuntimeError(f"kernels.triton_attn: no launch config fits {limit} B of shared memory on sm {sm} "
+                               f"(nq={nq}, group={g}, head_dim={d}, format {fmt})")
+    return cfg
+
+
+def shared_bytes(cfg: Config, sm: int, *, nq: int, g: int, d: int, page: int, fmt: int, causal: bool, window: int,
+                 dtype: str, splits: int, block: int | None = None) -> int:
+    """The shared memory `_paged_attn` takes compiled for `sm` with `cfg` at these facts (BLOCK_M `block`, default
+    `block_m`), specialized as a launch on real tensors is (pointers 16-byte aligned, the strides of contiguous q and
+    pages); Triton's compiler only, for any target."""
+    target = GPUTarget("cuda", sm, 32)
+    backend = make_backend(target)
+    fn = _paged_attn
+    q = torch.empty(16, dtype=getattr(torch, dtype))                     # stand-ins: only dtype and alignment count
+    kv = {MODEL.value: q, FP8.value: torch.empty(16, dtype=torch.uint8),
+          Q8_0.value: torch.empty(16, dtype=torch.int8)}[fmt]
+    sc = torch.empty(16, dtype=torch.float16) if fmt == Q8_0.value else kv
+    i32, f32 = torch.empty(16, dtype=torch.int32), torch.empty(16, dtype=torch.float32)
+    hkv, per = 4, d // Q8_BLOCK.value if fmt == Q8_0.value else d     # any kv heads: strides stay multiples of 16
+    bm = block or block_m(nq, g)
+    kwargs = {"NQ": nq, "G": g, "D": d, "PAGE": page, "BLOCK_M": bm, "TILES": -(-nq * g // bm),
+              "BLOCK_N": cfg.block_n, "SPLITS": splits, "FMT": fmt, "CAUSAL": causal, "WINDOW": window,
+              "num_warps": cfg.num_warps, "num_stages": cfg.num_stages}
+    args = (q, kv, kv, sc, sc, i32, i32, i32, q, f32, f32, g * hkv * d, d, 2 * hkv * page * d, page * d, d,
+            2 * hkv * page * per, page * per, per, 17, 1.0)
+    bound, specialization, options = create_function_from_signature(fn.signature, fn.params, backend)(*args, **kwargs)
+    options, signature, constexprs, attrs = fn._pack_args(backend, kwargs, bound, specialization, options)
+    compiled = triton_compile(ASTSource(fn, signature, constexprs, attrs), target=target, options=options.__dict__)
+    return compiled.metadata.shared
+
+
 def splits_for(batch: int, kv_heads: int, len_bound: int, num_sms: int, min_tokens: int = 64) -> int:
     """KV splits from the batch size and an upper bound on lengths only: about two programs per SM."""
     want = -(-2 * num_sms // (batch * kv_heads))
@@ -191,8 +253,10 @@ def _operands(kv) -> tuple:
 
 
 def paged_attention(q: torch.Tensor, kv, table: torch.Tensor, rows: torch.Tensor, lens: torch.Tensor, *, nq: int,
-                    splits: int, cfg: Config, causal: bool = True, window: int = 0) -> torch.Tensor:
-    """See the module docstring; returns [B * nq, Hq, D]."""
+                    splits: int, cfg: Config, causal: bool = True, window: int = 0,
+                    block: int | None = None) -> torch.Tensor:
+    """See the module docstring; returns [B * nq, Hq, D]. `block`: BLOCK_M other than `block_m`'s (tests: a wider
+    tile than the cap, today's single tile)."""
     t, hq, d = q.shape
     k, v, ks, vs, fmt = _operands(kv)
     hkv, page = k.shape[1], k.shape[2]
@@ -201,12 +265,14 @@ def paged_attention(q: torch.Tensor, kv, table: torch.Tensor, rows: torch.Tensor
     out = torch.empty(q.shape, dtype=q.dtype, device=q.device)     # the kernel writes it densely
     ws_ml = torch.empty(t * hq * splits * 2 if splits > 1 else 1, dtype=torch.float32, device=q.device)
     ws_acc = torch.empty(t * hq * splits * d if splits > 1 else 1, dtype=torch.float32, device=q.device)
-    _paged_attn[(b, hkv, splits)](
+    bm = block or block_m(nq, g)
+    tiles = -(-nq * g // bm)
+    _paged_attn[(b * tiles, hkv, splits)](
         q, k, v, ks, vs, table, rows, lens, out, ws_ml, ws_acc,
         q.stride(0), q.stride(1), k.stride(0), k.stride(1), k.stride(2), ks.stride(0), ks.stride(1), ks.stride(2),
         table.stride(0), 1.0 / math.sqrt(d) * math.log2(math.e),
-        NQ=nq, G=g, D=d, PAGE=page, BLOCK_M=max(16, triton.next_power_of_2(nq * g)), BLOCK_N=cfg.block_n,
-        SPLITS=splits, FMT=fmt, CAUSAL=causal, WINDOW=window, num_warps=cfg.num_warps, num_stages=cfg.num_stages)
+        NQ=nq, G=g, D=d, PAGE=page, BLOCK_M=bm, TILES=tiles, BLOCK_N=cfg.block_n, SPLITS=splits, FMT=fmt,
+        CAUSAL=causal, WINDOW=window, num_warps=cfg.num_warps, num_stages=cfg.num_stages)
     if splits > 1:
         _merge_splits[(t * hq,)](ws_ml, ws_acc, out, D=d, SPLITS=splits,
                                  SPLITS_P2=triton.next_power_of_2(splits), num_warps=4)
