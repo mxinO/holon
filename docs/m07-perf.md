@@ -1,6 +1,6 @@
 # M0.7 — performance: fused glue, mixed steps, a gated megakernel experiment
 
-Status: **revision 3, for review** (2026-10-14). Rev 1 and rev 2 were reviewed by a panel of three; every finding is
+Status: **revision 3.1, for review** (2026-10-14). Revs 1–3 were reviewed by a panel of three; every finding is
 resolved in §10.
 
 Scope: plan §2 (M0.7: "fused prefill glue (KV-store kernel, add+norm, q/k norm) and a model-specific megakernel
@@ -28,11 +28,11 @@ paths it touches. Acceptance:
 2. **Crossover entries shipped only where the sweep shows a gain** (D2): per (class, type, activation mode), only where
    step 0's sweep shows ≥ 1% of a decode or verify step; each shipped entry delivers ≥ half its re-stated saving and no
    guarded row (`holon_tg` batch 2 / 4 / 8, verify steps) regresses beyond its noise.
-3. **Mixed steps** (D7), on plain (non-speculative) locks of the RTX 5080 (27B) and 4090, ≥ 4 rounds per arm plus an
-   A/A pair of rounds: the per-request maximum inter-token gap improves ≥ 2× at p99 and max (p50 recorded); TTFT,
-   paired per (session, turn), regresses by at most max(15%, 2× the A/A spread) at p50 and the long-prompt scenario's
-   TTFT p99 by at most 25%; throughput by at most max(5%, 2× the A/A spread); TPOT p99 recorded, not gated; the
-   mixed-steps counter > 0. Speculative locks record the alternation's gap and long-prompt TTFT only.
+3. **Mixed steps** (D7), on plain (non-speculative) locks of the RTX 5080 (27B) and 4090, ≥ 4 rounds per arm: the
+   per-request maximum inter-token gap improves ≥ 2× at p99 and max (p50 recorded); the paired TTFT ratio (the median
+   over (session, turn) of TTFT_mixed / TTFT_base) is at most 1 + max(15%, 2 sd of the baseline rounds), and the
+   long-prompt scenario's TTFT p99 regresses by at most 25%; throughput by at most max(5%, 2 sd of the baseline
+   rounds); TPOT p99 recorded, not gated; the mixed-steps counter > 0. Speculative locks record the alternation's gap and long-prompt TTFT only.
 4. **Megakernel experiment** (D8): measured against a fixed speed-of-light gate on the RTX 5090 and 5080 after D3–D6;
    a one-layer prototype only on "go"; recorded either way. No core seam for it unless it goes.
 5. **Locks:** propagated once, at the close (bitwise changes keep snapshots byte-identical; D2 / D3 / D6's bounded
@@ -74,22 +74,25 @@ run before the release freezes the ABI, not in M0.7).
      chunks up to `chunk_with_decode` tokens, at least `min(64, chunk_with_decode)` per step so decoders cannot starve
      prefill; build validates `max_step_tokens ≥ max_seqs + chunk_with_decode`. Prompt-ending rows get k = 0 (no
      drafter). Constrained rows with a token in flight sit out, as today. With a drafter and the setting > 0, steps
-     alternate a capped prefill step with a graphed decode/verify step; no row ever mixes with a verify row.
+     alternate a capped prefill step with a graphed decode/verify step when both kinds are schedulable, else take the
+     schedulable kind; no row ever mixes with a verify row.
+   - The scheduler states the split: `BatchPlan.n_decode` (a holon.api minor; 0 for unmixed steps), the count of
+     leading decode rows — a 1-token prefill row looks like a decode row otherwise.
    - Planners: each attention / mixer planner exposes `mixes_row_kinds` (a kernel prop surfaced by the planner and read
-     at build, like `needs_host_lens`, `engine.py:145`); `chunk_with_decode > 0` with a planner that cannot mix fails
-     at startup. Only steps the scheduler mixed take the per-row-kind path: decode rows first, so a mixed step is two
-     contiguous token slices; GQA's prefill kernel takes both when its prop says it accepts 1-token rows, GDN runs
+     at build, like `needs_host_lens`, `engine.py:145`); `chunk_with_decode > 0` without a drafter and with a planner
+     that cannot mix fails at startup. Only steps with `n_decode > 0` take the per-row-kind path: decode rows first,
+     so a mixed step is two contiguous token slices; GQA's prefill kernel takes both when its prop says it accepts 1-token rows, GDN runs
      chunked over the prefill slice and recurrent over the decode slice, re-basing published `row` indices for the
      chunked subset. Unmixed steps (all steps at the default) keep today's paths, so snapshots at 0 are unchanged.
    - Mixed steps run eagerly (graphs stay uniform). The worst-step memory profile runs a mixed step when the setting is
      > 0 (a chunk's activations alive through sampling).
-   - The dead `SchedulePolicy.mix_phases()` protocol (`core/holon/api/decoding.py:39`) is deleted.
+   - The dead `SchedulePolicy.mix_phases()` protocol (`core/holon/api/decoding.py:39`) is deleted (a holon.api minor).
    - Toy proof: the toy state kinds across mixed steps with chunked prefill, constrained rows and preemption, outputs
      equal to today's schedule on CPU tiny models; startup failure for a non-mixing planner; a bounded check "mixed
      schedule vs today's" on GPU.
 2. **No other core change** unless the megakernel goes (D8).
 
-Line budget ≈ +80 (scheduler, executor planning per row kind, validation, profile).
+Line budget ≈ +90 (scheduler, `n_decode`, executor planning per row kind, validation, profile).
 
 ## 4. Decisions
 
@@ -105,8 +108,9 @@ Line budget ≈ +80 (scheduler, executor planning per row kind, validation, prof
   per-request max inter-token gap added to `bench/driver.py`'s rows; a long-prompt scenario; TTFT paired per turn).
 - **D2. The crossover is a per-class table inside `kernels.ggml_cuda`**, keyed by (class, type, activation mode), with
   llama.cpp's rule as the fallback, behind one exported function `mmvq_rows(fingerprint, type, mode)` used by
-  `QLinear` and by both judge sites (`drafter.py`, `gguf.py`); the existing ggml plugin test asserts they agree on
-  every lock class. The table is pinned by the plugin's `src` hash (as `triton_attn`'s class configs are), no
+  `QLinear` and by both judge sites (`drafter.py`, `gguf.py`); llama.cpp's fallback takes an explicit compute
+  capability (today's C API reads the current device's, `csrc/api.cu:111`), and the existing ggml plugin test asserts
+  that `QLinear`'s actual dispatch per row count matches `mmvq_rows` for every lock class. The table is pinned by the plugin's `src` hash (as `triton_attn`'s class configs are), no
   lock-to-kernel core path. Entries only where D1's sweep shows ≥ 1% of a step; a range check (≤ 8, mmvq for every n
   up to it). Under M0.6's `fp4` mode a lower crossover moves 5–8-row steps from W4A8 to W4A4: a precision change,
   judged by the small-step L2 of §6. The kernel is chosen by the row count the step actually runs (eager real rows,
@@ -114,8 +118,8 @@ Line budget ≈ +80 (scheduler, executor planning per row kind, validation, prof
 - **D3. Fused q/k-norm + RoPE + KV store** is a std op `attention.qk_rope_kv@1` under `std.mixers.gqa`, used only when
   the injected `qk_norm` and `rope` units answer a new optional `fusion_facts()` (std.ops minor: eps, offset, theta,
   `rotary_dim`, `max_positions`, the gate interleave, the reference identity, and the cos/sin table's static name and
-  layout — the contract the fused kernel reads, instead of another plugin's buffer name) and a provider supports those
-  facts — never by unit names; a future RoPE variant answers None and keeps the composition. Its reference is built by
+  layout, which become part of the `rope@1` instance contract in `std/holon_std/ops/kernels.py` — a rope provider
+  without such a table makes the unit answer None) and a provider supports those facts — never by unit names; a future RoPE variant answers None and keeps the composition. Its reference is built by
   the judge from the composed units' references (unit isolation); the Triton provider covers bf16 and q8_0 KV, rounds
   to bf16 after the norm and after RoPE (before q8_0), handles T = 0; the model-only `_causal` build keeps the
   composition. Bounded (not bitwise vs FlashInfer's rmsnorm reduction). The bf16 Triton `kv_write@1` provider (one
@@ -125,30 +129,37 @@ Line budget ≈ +80 (scheduler, executor planning per row kind, validation, prof
   the fixup). Under M0.6, NVFP4's `scale2` multiplies after the fixup reduction (in the fixup kernel for fixup tiles,
   in the write-back otherwise), before the rounding; `test_mmq_schedules` gains an NVFP4 fixup case.
 - **D5. The GDN rewind's glue is fused per step** (masking, window restore, gather / index_copy: ≈ 1.9 of 3.7 ms),
-  with the provider calls (`gated_delta_rule`, `causal_conv1d`) kept as locked. At the first GDN layer's rewind (a
-  host-side per-step counter in `GDNMeta`, graph-safe) one launch writes every layer's accepted-end conv window into the
-  pool straight from `window ‖ saved_x` and restores the state rows; each layer's replay then calls `causal_conv1d`
-  with the saved window buffer as its state (slots `arange(rows)`), so the provider never re-dirties the pool. The
-  replay buffers gain a layer axis. L1.5 stays unconditionally bitwise against 1 + n decode calls.
+  with the provider calls (`gated_delta_rule`, `causal_conv1d`) kept as locked. At the first GDN layer's rewind (the
+  layer's index in its group is 0 — `rewind_modules` visits layers in order; no counter, so graph warm-up and capture
+  behave alike) one launch masks every layer's saved gates and writes every layer's accepted-end conv window into the
+  pool straight from `window ‖ saved_x`; each layer's replay then calls `causal_conv1d` with the saved window buffer as
+  its state (slots `arange(rows)`), so the provider never re-dirties the pool. The replay buffers gain a layer axis.
+  L1.5 stays unconditionally bitwise against 1 + n decode calls, eager and graphed.
 - **D6. Fusions in the ggml and fla plugins**, each classified:
   - **gate/up + SwiGLU** (bounded): a std op `qlinear_glu@1` (owned by std.ops; reference `silu(x @ Wg.T) · (x @
-    Wu.T)`, computed from f32 accumulators) and an optional `Linear.glu(x)` (std.ops minor) that std.ffn calls,
-    falling back to `act(self(x))`; the ggml provider uses the vendored mmvq `fusion.gate` / `glu_op` at one column
-    and the composition otherwise. Judged by L0 and the `--max-step-tokens 1` L2 against the mmvq floor.
+    Wu.T)`, computed from f32 accumulators) and an optional `Linear.glu(x)` (std.ops minor) that returns None when
+    unsupported, SwiGLU then composing as today; SwiGLU's `finalize_weights` marks its merged gate/up `Linear`, so
+    `qlinear_glu@1` is selected in `bind_kernels` and recorded as a lock site, never lazily. The ggml provider uses the
+    vendored mmvq `fusion.gate` / `glu_op` at one column and the composition otherwise. Judged by L0 (the ggml case on
+    q8_1-emulated accumulators, as the qlinear L0 is) and the `--max-step-tokens 1` L2 against the mmvq floor.
   - **shared q8_1 quantization** (bitwise; built only if step 0 shows ≥ 1%): explicit, never a memo — an optional
-    `Linear.prepare_input(x)` (std.ops minor) returning a provider-opaque handle for one (path, ds layout, activation
-    mode, shape), accepted by the provider's next calls of the same layout; a caller with several consumers of one
-    input (GDN's in-projections) prepares once and drops the handle after them; other providers return x unchanged.
-    The handle lives in the provider's own buffer, never the workspace shared per `in`; no identity or `_version` key,
-    so in-place writes and graph capture cannot make it stale.
+    `Linear.prepare_input(x)` (std.ops minor; an optional `prepare_input` and handle-accepting calls in the `qlinear@2`
+    instance contract, documented in `std/holon_std/ops/kernels.py`; reference kernels return x) returning a
+    provider-opaque handle that carries x, its key (path, ds layout, activation mode, shape) and a host-side
+    generation; a caller with several consumers of one input (GDN's in-projections) prepares once and drops the handle
+    after them. The handle lives in the provider's own buffer (one per layout), never the workspace shared per `in`; a
+    later `prepare_input` of the same layout bumps the generation, and a consumer whose key or generation does not
+    match quantizes from the carried x (decided on the host, so graph capture records the right path). No identity or
+    `_version` key, so in-place writes cannot make it stale.
   - **GDN gating** in `kernels.fla` (bounded unless it matches torch's `exp` / `softplus` / `sigmoid` and the bf16 β
     cast; prefill only): L0 against the torch composition and the standard L2.
 - **D7. Mixed steps** (§3.1): default 0; plain locks opt in through `[engine]` with a cap chosen per class by step 4's
   measurement on the recalibrated simulator and real runs (candidates 256 / 512).
 - **D8. Megakernel experiment, gated on speed of light.** After D3–D6, per class (5090, 5080), on 8B Q4_K_M B1 decode:
   f = 1 − (bytes read per step) / (B × step time), with bytes = the weights read (the embedding table excluded) + KV,
-  and B = the bandwidth the step's GEMVs achieve (so f excludes their own gap to peak, which a megakernel does not
-  recover; a read-only stream over ≥ 1 GB is recorded beside it). Projected gain 1 / (1 − f·c) with c = 0.4–0.55 (the
+  and B = the bandwidth the step's GEMVs achieve, from unprofiled GEMV time (profiled times make B ≈ 2% low; D1's
+  second ratio corrects them) — so f excludes the GEMVs' own gap to peak, which a megakernel does not recover; a
+  read-only stream over ≥ 1 GB is recorded beside it. Projected gain 1 / (1 − f·c) with c = 0.4–0.55 (the
   share of the gap to speed of light the published megakernels closed: Cohere 0.38, Hazy 0.56), reported at both
   ends. Stop if the projection at c = 0.55 is under 1.15× (f < 24%); otherwise build a one-layer prototype in
   `models/qwen3/fast/` and go only if its L0 against the judge-built recipe reference passes and it projects ≥ 1.15×
@@ -171,8 +182,9 @@ Line budget ≈ +80 (scheduler, executor planning per row kind, validation, prof
 | D6 | 8B Q4_K_M B1 −2% (gate/up + SwiGLU); 27B decode ≈ −1% (shared quantization, decode only); prefill −0.6% (gating) |
 | Fusions combined | 8B Q4_K_M B1 decode −6–7%; bf16 −2%; GGUF prefill −3–5% |
 | Mixed steps (D7), plain locks | worst gap: 4090 511 → 97–154 ms, 5080 710–974 → 120–220 ms (gap p50 −13 to −35%, within seed noise — recorded only); TPOT p99 within noise; TTFT p50 +4–49% at cap 256 (cap 512 smaller) |
+| Long prompt, plain locks | 30K-token prompt behind decoders: 4090 9.3 s → ≈ 11.7 s at cap 256 (+26%), ≈ 9.1 s at cap 512; 5080 ≈ +8% at cap 256 — §1.3's +25% bar selects cap 512 on the 4090 |
 | Alternation, speculative locks | 2048-token prompt TTFT on the 4090: 618 ms → ≈ 1008 ms at cap 256 (+63%), ≈ 736 ms at cap 512 (+19%) |
-| Megakernel (D8) | A5000: f ≈ 17–20% with stream bandwidth, ≈ 14–16% with the GEMVs' → 1.07–1.10× at c = 0.4–0.55: stop; consumer classes decided by their f |
+| Megakernel (D8) | A5000: weights 4.67 GB + KV 0.075 GB, GEMVs at 655–666 GB/s, step 8.64 ms → f ≈ 16–17.5% → 1.07–1.11× at c = 0.4–0.55: stop; consumer classes decided by their f |
 
 ## 6. Judge
 
@@ -219,6 +231,23 @@ profile). Lean tests: bitwise checks live in existing L0 loops; two new plants, 
 - **The recalibrated simulator** still models, not measures: step 4's real runs decide.
 
 ## 10. Review findings, resolved
+
+**Rev 3** (no blocker or major; minors):
+
+| Finding | Resolution |
+|---|---|
+| A-m1: a per-step counter breaks under warm-up + capture | trigger on the layer's index in its group; L1.5 graphed too (D5) |
+| A-m2 / B-m2: planners cannot tell decode rows from 1-token prefill rows | `BatchPlan.n_decode` (holon.api minor), in the seam list and budget (§3.1) |
+| A-m3: alternation with nothing schedulable | alternate when both kinds are schedulable, else the schedulable kind (§3.1) |
+| A-m4 / B-m4: one buffer per layout invalidates earlier handles; contract | key + host generation; mismatch re-quantizes from the carried x; `qlinear@2` instance-contract minor (D6) |
+| B-m1: the cos/sin table belongs to the kernel, not the unit | part of the `rope@1` instance contract (D3) |
+| B-m3: `glu` fallback direction and selection time | `glu` returns None, SwiGLU composes; marked in `finalize_weights`, selected in `bind_kernels` (D6) |
+| B-m5: startup check refuses alternation | only without a drafter (§3.1) |
+| B-m6: tautological agreement test; one device's rule | dispatch-vs-`mmvq_rows` test; explicit compute capability (D2) |
+| C-m1 / A-nit: A5000 f range | 16–17.5%, 1.07–1.11×; B from unprofiled time (D8, §5) |
+| C-m2: A/A from one difference; paired ratio | 2 sd of the ≥ 4 baseline rounds; the ratio defined (§1.3) |
+| C-m3: no plain long-prompt prediction | added; the bar selects cap 512 on the 4090 (§5) |
+| A-nit: "restores the state rows" | reworded: the launch masks gates and writes windows (D5) |
 
 **Rev 2** (A: correctness, B: architecture, C: numerics / performance / tests).
 
