@@ -1,4 +1,5 @@
-"""L0 for quantized KV (docs/m03-qwen38.md D6): `kv_write@1` bitwise against the reference write, and every kernel
+"""L0 for quantized KV (docs/m03-qwen38.md D6): `kv_write@1` bitwise against the reference write (the model-dtype
+layout's Triton copy too, docs/m07-perf.md D3), and every kernel
 that reads q8_0 or fp8 against `reference.paged_attention` reading the same stored cache — the reference dequantizes
 it, so the comparison isolates the kernel's error from the format's — within the attention budget of
 test_attention_kernels. Plants that must fail: q8_0 scales read from another head, and a step attending to its own
@@ -32,7 +33,7 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a G
 
 PREFILL, DECODE, VERIFY = "attention.paged_prefill", "attention.paged_decode", "attention.paged_verify"
 TRITON, FLASHINFER = "kernels.triton_attn", "kernels.flashinfer"
-Q8, FP8 = "kv.hnd.q8_0", "kv.hnd.fp8"
+MODEL, Q8, FP8 = "kv.hnd", "kv.hnd.q8_0", "kv.hnd.fp8"
 VERIFY_ROWS = [(0, 3), (13, 3), (14, 3), (99, 3), (998, 3), (4093, 3)]       # 1 + 2 drafts, across page boundaries
 CASES = {Q8: [(PREFILL, TRITON, PREFILL_ROWS + [(2000, 129)]), (DECODE, TRITON, DECODE_ROWS),
               (VERIFY, TRITON, VERIFY_ROWS)],
@@ -54,11 +55,11 @@ def usage(ours: torch.Tensor, ref: torch.Tensor) -> float:
     return ((ours.float() - ref.float()).abs() / (1e-2 + 1e-2 * ref.float().abs())).max().item()
 
 
-def empty_cache(units: int, kv_heads: int, head_dim: int, layout: str):
-    """One layer's pages in `layout`, as std.mixers.gqa's `_kv_layer` views them."""
+def empty_cache(units: int, kv_heads: int, head_dim: int, layout: str, dtype: torch.dtype = torch.bfloat16):
+    """One layer's pages in `layout` (`dtype`: the model dtype's), as std.mixers.gqa's `_kv_layer` views them."""
     shape = (units, 2, kv_heads, PAGE, head_dim)
-    if layout == FP8:
-        return torch.zeros(shape, dtype=gqa.FP8, device="cuda")
+    if layout in (MODEL, FP8):
+        return torch.zeros(shape, dtype=gqa.FP8 if layout == FP8 else dtype, device="cuda")
     n = 2 * kv_heads * PAGE * head_dim
     seg = torch.zeros(units, gqa_kernels.page_bytes(layout, PAGE, kv_heads, head_dim, 1), dtype=torch.uint8,
                       device="cuda")
@@ -137,7 +138,7 @@ def on_cpu(cache):
 
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
 @pytest.mark.parametrize("head_dim", [64, 128, 256])
-@pytest.mark.parametrize("layout", [Q8, FP8])
+@pytest.mark.parametrize("layout", [MODEL, Q8, FP8])
 def test_kv_write_is_the_reference_bitwise(layout, head_dim, dtype):
     # The reference runs on the CPU: there it is ggml's arithmetic (test_kv_formats: equal to gguf-py). On CUDA torch
     # divides by the scalar 127 as a multiplication by its reciprocal, which moves d by an ulp now and then.
@@ -157,7 +158,7 @@ def test_kv_write_is_the_reference_bitwise(layout, head_dim, dtype):
     off = torch.arange(t) % PAGE
     perm = torch.randperm(t, generator=g)                                         # tokens in any order
     unit, off = unit[perm].cuda(), off[perm].cuda()
-    ours = empty_cache(units, kv_heads, head_dim, layout)
+    ours = empty_cache(units, kv_heads, head_dim, layout, dtype)
     for x in ours if isinstance(ours, tuple) else (ours,):
         x.view(torch.uint8).fill_(0x5A)                                           # garbage: unwritten bytes stay
     want = on_cpu(ours)

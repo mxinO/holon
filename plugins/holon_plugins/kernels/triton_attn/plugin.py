@@ -19,6 +19,7 @@ from .kernel import (
     paged_attention,
     paged_prefill,
     splits_for,
+    write_model,
     write_q8_0,
 )
 
@@ -133,13 +134,14 @@ def _supports(layout: str, masks: bool = True):
 
 
 class KvWrite:
-    """`kv_write@1` for the model-dtype layout (`kv.hnd`): this step's k/v into their pages."""
+    """`kv_write@1` for the model-dtype layout (`kv.hnd`): this step's k/v copied into their pages, one Triton launch
+    for both (docs/m07-perf.md D3; it was two index_put kernels)."""
 
     def __init__(self, ctx, **facts) -> None:
         pass
 
     def __call__(self, k, v, kv, unit, off) -> None:
-        kv[unit, 0, :, off], kv[unit, 1, :, off] = k, v            # advanced indices around a slice: [T, Hkv, D]
+        write_model(k, v, kv, unit, off)
 
 
 class KvWriteFp8(KvWrite):

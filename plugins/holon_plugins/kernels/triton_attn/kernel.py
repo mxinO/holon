@@ -1,5 +1,5 @@
 """Paged attention for decode (and, from M0.4, verify) rows, reading the block table and lengths on the device; a
-paged prefill for KV formats FlashInfer cannot read; and the KV write of the quantized formats.
+paged prefill for KV formats FlashInfer cannot read; and the KV write of the model dtype (a copy) and q8_0.
 
 q:      [B * NQ, Hq, D]                  NQ query rows per sequence (1 = decode), uniform per launch
 kv:     [units, 2, Hkv, page, D]         one layer of HND paged KV; this step's tokens are already written. In the
@@ -409,3 +409,28 @@ def write_q8_0(k: torch.Tensor, v: torch.Tensor, kv: tuple[torch.Tensor, torch.T
         return
     _write_q8_0[(t, hkv)](k, v, values, scales, unit, off, k.stride(0), k.stride(1), v.stride(0), v.stride(1),
                           *values.stride()[:4], *scales.stride()[:4], NB=d // Q8_BLOCK.value, num_warps=1)
+
+
+@triton.jit
+def _write_model(K, V, KV, UNIT, OFF, stride_kt, stride_kh, stride_vt, stride_vh, stride_u, stride_i, stride_h,
+                 stride_t, D: tl.constexpr, BLOCK_D: tl.constexpr):
+    t = tl.program_id(0)
+    h = tl.program_id(1)
+    unit = tl.load(UNIT + t).to(tl.int64)
+    off = tl.load(OFF + t)
+    d = tl.arange(0, BLOCK_D)
+    ok = d < D
+    dst = KV + unit * stride_u + h * stride_h + off * stride_t + d
+    tl.store(dst, tl.load(K + t * stride_kt + h * stride_kh + d, mask=ok), mask=ok)
+    tl.store(dst + stride_i, tl.load(V + t * stride_vt + h * stride_vh + d, mask=ok), mask=ok)
+
+
+def write_model(k: torch.Tensor, v: torch.Tensor, kv: torch.Tensor, unit: torch.Tensor, off: torch.Tensor) -> None:
+    """k, v [T, Hkv, D] copied into model-dtype pages [units, 2, Hkv, page, D] at (unit[t], off[t]): one launch for
+    both, one program per token and kv head (bitwise: a copy)."""
+    t, hkv, d = k.shape
+    assert k.dtype == v.dtype == kv.dtype and k.stride(-1) == 1 and v.stride(-1) == 1 and kv.stride(-1) == 1
+    if t == 0:
+        return
+    _write_model[(t, hkv)](k, v, kv, unit, off, k.stride(0), k.stride(1), v.stride(0), v.stride(1), *kv.stride()[:4],
+                           D=d, BLOCK_D=triton.next_power_of_2(d), num_warps=1)
