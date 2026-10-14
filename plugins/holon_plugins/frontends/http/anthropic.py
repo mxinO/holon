@@ -99,13 +99,24 @@ def conversation(req: CountRequest, drop_billing_header: bool) -> tuple[Conversa
     """The request as the pipeline's conversation, and whether a billing-header block was dropped."""
     system = [req.system] if isinstance(req.system, str) else [_text(b) for b in req.system or []]
     kept = [s for s in system if not (drop_billing_header and s.startswith(BILLING))]
-    messages: list[dict[str, Any]] = [{"role": "system", "content": "\n".join(kept)}] if kept else []
+    dropped, turns = len(kept) < len(system), []
     for m in req.messages:
         blocks = m.get("content")
         blocks = [{"type": "text", "text": blocks}] if isinstance(blocks, str) else blocks
-        if not isinstance(blocks, list) or m.get("role") not in ("user", "assistant"):
-            raise BadRequest("messages are {role: user | assistant, content: text or blocks}")
-        messages += _user(blocks) if m["role"] == "user" else [_assistant(blocks)]
+        if not isinstance(blocks, list) or m.get("role") not in ("user", "assistant", "system"):
+            raise BadRequest("messages are {role: user | assistant | system, content: text or blocks}")
+        if m["role"] == "system":
+            # Claude Code's mid-conversation system messages: before the first turn they join the system prompt;
+            # later ones are user turns — the Qwen templates take a system message only first, and folding them
+            # into it would change the prompt's prefix every turn (no prefix cache hits).
+            text = "\n".join(_text(b) for b in blocks)
+            if turns:
+                turns.append({"role": "user", "content": text})
+            else:
+                kept.append(text)
+            continue
+        turns += _user(blocks) if m["role"] == "user" else [_assistant(blocks)]
+    messages = ([{"role": "system", "content": "\n".join(kept)}] if kept else []) + turns
     choice = req.tool_choice or {"type": "auto"}
     if choice.get("type") == "tool" and isinstance(choice.get("name"), str):
         tool_choice: str | dict[str, str] = {"name": choice["name"]}
@@ -116,7 +127,7 @@ def conversation(req: CountRequest, drop_billing_header: bool) -> tuple[Conversa
     kwargs = {"enable_thinking": False} if (req.thinking or {}).get("type") == "disabled" else {}
     conv = Conversation(messages, [_tool(t) for t in req.tools or []], tool_choice,
                         not choice.get("disable_parallel_tool_use", False), None, kwargs)
-    return conv, len(kept) < len(system)
+    return conv, dropped
 
 
 def _text(block: Any) -> str:

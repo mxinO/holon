@@ -240,6 +240,7 @@ def judge(build, tokenizer, render, jsb: pathlib.Path, n: int = 64, max_tokens: 
         for i in range(n):
             d = _first_diff(a.tokens[i], b.tokens[i])
             m = len(a.tokens[i]) if d is None else d + 1          # the divergent position's distribution too
+            m = min(m, len(a.logprobs[i][0]), len(b.logprobs[i][0]))     # (a failed request's last row has none)
             ids_a += a.logprobs[i][0][:m]
             lp_a += a.logprobs[i][1][:m]
             ids_b += b.logprobs[i][0][:m]

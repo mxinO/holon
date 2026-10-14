@@ -26,8 +26,9 @@ class Backend(http.Backend):
     def stats(self) -> dict[str, int]:
         """The engine's counters (/metrics): prefix hits, and real drafts and verify rows by drafts accepted; the
         frontend process's CPU time."""
-        return {k: v for k, v in self.server.get("/metrics").items()
-                if k == "prefix_tokens_saved" or k.startswith("spec_")} | {"frontend_cpu_ms": round(self.server.cpu_ms())}
+        metrics = self.server.get("/metrics")
+        return {k: v for k, v in metrics.items() if k == "prefix_tokens_saved" or k.startswith("spec_")} | {
+            "frontend_cpu_ms": round(self.server.cpu_ms())}
 
 
 def _body(prompt: list[int], max_tokens: int) -> dict:

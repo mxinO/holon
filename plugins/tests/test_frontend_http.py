@@ -688,13 +688,15 @@ ANTHROPIC = {
     "system": [{"type": "text", "text": "x-anthropic-billing-header: cc_version=1; cch=00000"},
                {"type": "text", "text": "You are terse.", "cache_control": {"type": "ephemeral"}}],
     "messages": [
+        {"role": "system", "content": [{"type": "text", "text": "Use tools."}]},     # Claude Code's inline system
         {"role": "user", "content": "Weather in Paris?"},
         {"role": "assistant", "content": [
             {"type": "thinking", "thinking": "Look it up.", "signature": "s"},
             {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Paris"}}]},
         {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "Sunny"},
                                      {"type": "text", "text": "<system-reminder>be brief</system-reminder>"},
-                                     {"type": "text", "text": "And Rome?"}]}],
+                                     {"type": "text", "text": "And Rome?"}]},
+        {"role": "system", "content": [{"type": "text", "text": "Be brief.", "cache_control": {"type": "ephemeral"}}]}],
     "tools": [{"name": "get_weather", "description": "Weather", "input_schema": WEATHER["function"]["parameters"]}],
     "tool_choice": {"type": "any", "disable_parallel_tool_use": True},
     "thinking": {"type": "disabled"},
@@ -706,13 +708,14 @@ def test_anthropic_request_as_a_conversation():
     assert http.post("/v1/messages", json=ANTHROPIC).status_code == 200
     messages, tools, kwargs = bundle.rendered[0]
     assert messages == [
-        {"role": "system", "content": "You are terse."},                   # the billing header dropped
+        {"role": "system", "content": "You are terse.\nUse tools."},      # the billing header dropped
         {"role": "user", "content": "Weather in Paris?"},
         {"role": "assistant", "content": "", "reasoning_content": "Look it up.", "tool_calls": [
             {"id": "toolu_1", "type": "function",
              "function": {"name": "get_weather", "arguments": '{"city": "Paris"}'}}]},
         {"role": "tool", "tool_call_id": "toolu_1", "content": "Sunny"},
-        {"role": "user", "content": "<system-reminder>be brief</system-reminder>\nAnd Rome?"}]
+        {"role": "user", "content": "<system-reminder>be brief</system-reminder>\nAnd Rome?"},
+        {"role": "user", "content": "Be brief."}]                          # a later system message: a user turn
     assert tools == [{"type": "function", "function": {"name": "get_weather", "description": "Weather",
                                                        "parameters": WEATHER["function"]["parameters"]}}]
     assert kwargs == {"enable_thinking": False}
