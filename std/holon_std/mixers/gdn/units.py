@@ -172,7 +172,8 @@ class GDN(nn.Module):
             meta = ctx.meta(GROUP)
             conv_state, ssm_state = self._states()
             qs, slots, has_init, rule, handle = meta.query_start, meta.slots, meta.has_init, meta.rule, meta.handle
-        qkv, a, b = self.in_proj_qkv(x), self.in_proj_a(x), self.in_proj_b(x)
+        h = getattr(self.in_proj_qkv, "prepare_input", lambda x: x)(x)    # one input, four projections (m07 D6)
+        qkv, a, b = self.in_proj_qkv(h), self.in_proj_a(h), self.in_proj_b(h)
         out_slots = None
         if self._state is not None and meta.verify:      # keep S0: save what `rewind` reruns, write the state aside
             saved_x, saved_a, saved_b, window = self._replay
@@ -191,7 +192,7 @@ class GDN(nn.Module):
             if meta.ssm_pool is not None:
                 snapshot = self._states(ssm_pool=ctx.pool(meta.ssm_pool))[1]
         o = self._rule_call(rule, handle, mixed, a, b, ssm_state, slots, has_init, snapshot, out_slots)
-        o = self._norm(o, self.in_proj_z(x).reshape(t, self.hv, self.dv), self.norm_weight)
+        o = self._norm(o, self.in_proj_z(h).reshape(t, self.hv, self.dv), self.norm_weight)
         return self.out_proj(o.reshape(t, self.hv * self.dv))
 
     def _rule_call(self, rule, handle, mixed, a, b, ssm_state, slots, has_init, snapshot=None, out_slots=None):
