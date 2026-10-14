@@ -1,0 +1,138 @@
+{
+ "what": "M0.6's std.weights.hf merge-order change propagated to the development-class HF locks (M0.7, step 0 panel decision 11 / Part 3)",
+ "date": "2026-10-14",
+ "commit": "10dceff",
+ "classes": {
+  "rtx-5080": {
+   "clock": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "sm_mhz": {
+     "p10": 2625.0,
+     "p50": 2662.0,
+     "p90": 2685.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 1.0,
+    "steady": true
+   },
+   "locks": {
+    "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-5080/cu130-torch2.11/2.lock": {
+     "command": "python -m holon_tools propagate nvidia/Qwen3-8B-NVFP4 --golden judge/goldens/qwen3-8b-nvfp4/v1-fp32.safetensors --floor judge/goldens/qwen3-8b-nvfp4/v1-bfloat16-mmq-floor.safetensors --approve --memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+     "propagate": [
+      "  unit:std.weights.hf: 1.0.0 sha256:b98b27966 -> 1.0.0 sha256:f69648d61",
+      "  snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "  trace covered step widths 1-32, prefix tokens saved 2064",
+      "overall     32783  98.847%    99.612%  8.81e-05  1.28e-02  5.69e+00  +0.132% \u00b1 0.047%   1.96%",
+      "floor       32783  98.691%    99.580%  9.28e-05  1.24e-02  5.79e-01  +0.163% \u00b1 0.031%   2.03%",
+      "vs floor                                                             -0.031% \u00b1 0.055%",
+      "budget            \u226598.441%            \u22641.86e-04 \u22642.49e-02                     \u22640.359%",
+      "PASS",
+      "wrote plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-5080/cu130-torch2.11/2.lock"
+     ],
+     "snapshot_x3": {
+      "command": "python -m holon_judge snapshot --model nvidia/Qwen3-8B-NVFP4 --prompts judge/prompts/v1.jsonl --runs 3 --engine-args '<the new lock's [engine] and kernel pins, --memory-fraction 0.9>'",
+      "run_identical": true,
+      "runs": 3,
+      "steps": 130,
+      "trace": "sha256:e108b133d8e088eb32ed569da088103e3682d7f7481a696de0ca5ad80887897e",
+      "pools": {
+       "state.kv": 3354
+      }
+     },
+     "lock_snapshot_trace": "sha256:2e0232c33e2dc00876c9fa876469fe3e258941e530df7afa32801d569c71ff08"
+    }
+   }
+  },
+  "rtx-4090": {
+   "clock": {
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "sm_mhz": {
+     "p10": 2670.0,
+     "p50": 2670.0,
+     "p90": 2685.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 0.0,
+    "steady": true
+   },
+   "locks": {
+    "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-4090/cu130-torch2.11/11.lock": {
+     "command": "python -m holon_tools propagate Qwen/Qwen3-8B --golden judge/goldens/qwen3-8b/v1-fp32.safetensors --floor judge/goldens/qwen3-8b/v1-bfloat16-floor.safetensors --approve",
+     "propagate": [
+      "  unit:std.weights.hf: 1.0.0 sha256:b98b27966 -> 1.0.0 sha256:f69648d61",
+      "  snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "  trace covered step widths 1-49, 51-57, 59, 61-64, prefix tokens saved 2064",
+      "overall     32783  98.984%    99.831%  3.86e-05  4.55e-03  1.77e-01  +0.003% \u00b1 0.026%   1.29%",
+      "floor       32783  98.929%    99.794%  4.48e-05  5.76e-03  1.09e+00  +0.090% \u00b1 0.030%   1.40%",
+      "vs floor                                                             -0.087% \u00b1 0.047%",
+      "budget            \u226598.679%            \u22648.95e-05 \u22641.15e-02                     \u22640.355%",
+      "PASS",
+      "wrote plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-4090/cu130-torch2.11/11.lock"
+     ],
+     "snapshot_x3": {
+      "command": "python -m holon_judge snapshot --model Qwen/Qwen3-8B --prompts judge/prompts/v1.jsonl --runs 3 --engine-args '<the new lock's [engine] and kernel pins, --memory-fraction 0.9>'",
+      "run_identical": true,
+      "runs": 3,
+      "steps": 68,
+      "trace": "sha256:e108b133d8e088eb32ed569da088103e3682d7f7481a696de0ca5ad80887897e",
+      "pools": {
+       "state.kv": 2047
+      }
+     },
+     "lock_snapshot_trace": "sha256:e415cb9897d70b92c5aad786095bef4dbc9e7d760f4c98ee6029cb612eb15897"
+    },
+    "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/2.lock": {
+     "command": "python -m holon_tools propagate nvidia/Qwen3-8B-NVFP4 --golden judge/goldens/qwen3-8b-nvfp4/v1-fp32.safetensors --floor judge/goldens/qwen3-8b-nvfp4/v1-bfloat16-mmq-floor.safetensors --approve --memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+     "propagate": [
+      "  unit:std.weights.hf: 1.0.0 sha256:b98b27966 -> 1.0.0 sha256:f69648d61",
+      "  snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "  trace covered step widths 1-32, prefix tokens saved 2064",
+      "overall     32783  98.783%    99.562%  8.85e-05  1.26e-02  7.89e-01  +0.117% \u00b1 0.035%   1.95%",
+      "floor       32783  98.691%    99.580%  9.28e-05  1.24e-02  5.79e-01  +0.163% \u00b1 0.031%   2.03%",
+      "vs floor                                                             -0.045% \u00b1 0.042%",
+      "budget            \u226598.441%            \u22641.86e-04 \u22642.49e-02                     \u22640.355%",
+      "PASS",
+      "wrote plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/2.lock"
+     ],
+     "snapshot_x3": {
+      "command": "python -m holon_judge snapshot --model nvidia/Qwen3-8B-NVFP4 --prompts judge/prompts/v1.jsonl --runs 3 --engine-args '<the new lock's [engine] and kernel pins, --memory-fraction 0.9>'",
+      "run_identical": true,
+      "runs": 3,
+      "steps": 130,
+      "trace": "sha256:e108b133d8e088eb32ed569da088103e3682d7f7481a696de0ca5ad80887897e",
+      "pools": {
+       "state.kv": 5983
+      }
+     },
+     "lock_snapshot_trace": "sha256:fb17ab3e9ecaf16d72a986b9357e94fdebf5ee09e862dd80eb24803d8344fdbb"
+    },
+    "plans/nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99/rtx-4090/cu130-torch2.11/2.lock": {
+     "command": "python -m holon_tools propagate nvidia/Qwen3-30B-A3B-NVFP4 --golden judge/goldens/qwen3-30b-a3b-nvfp4/v1-fp32.safetensors --floor judge/goldens/qwen3-30b-a3b-nvfp4/v1-bfloat16-mmq-floor.safetensors --approve --memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+     "propagate": [
+      "  unit:std.weights.hf: 1.0.0 sha256:b98b27966 -> 1.0.0 sha256:f69648d61",
+      "  snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "  trace covered step widths 1-32, prefix tokens saved 2064",
+      "overall     32783  98.289%    99.105%  1.40e-04  4.75e-02  3.26e+00  +0.038% \u00b1 0.126%   3.51%",
+      "floor       32783  98.359%    99.192%  1.51e-04  4.92e-02  3.70e+00  -0.022% \u00b1 0.072%   3.59%",
+      "vs floor                                                             +0.061% \u00b1 0.139%",
+      "budget            \u226598.109%            \u22643.01e-04 \u22649.84e-02                     \u22640.503%",
+      "PASS",
+      "wrote plans/nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99/rtx-4090/cu130-torch2.11/2.lock"
+     ],
+     "snapshot_x3": {
+      "command": "python -m holon_judge snapshot --model nvidia/Qwen3-30B-A3B-NVFP4 --prompts judge/prompts/v1.jsonl --runs 3 --engine-args '<the new lock's [engine] and kernel pins, --memory-fraction 0.9>'",
+      "run_identical": true,
+      "runs": 3,
+      "steps": 130,
+      "trace": "sha256:e108b133d8e088eb32ed569da088103e3682d7f7481a696de0ca5ad80887897e",
+      "pools": {
+       "state.kv": 2133
+      }
+     },
+     "lock_snapshot_trace": "sha256:ac07044f95f90e7feaa9a8f65c71b3283be9926a678c37b2daea3d80b019ec4e"
+    }
+   }
+  }
+ },
+ "note": "propagate's two trace runs are byte-identical to each previous lock's trace (it seeds the state pools from the lock); the separate snapshot x3 measures its pools at 0.9, so its KV differs and so does its trace hash; it is run-identical x3. The first RTX 4090 desktop of this run lost its GPU at its clock screen (the same desktop as step 0's lost one); a second desktop ran it."
+}
