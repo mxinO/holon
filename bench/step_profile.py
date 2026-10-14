@@ -67,7 +67,7 @@ CATEGORIES = [
     ("copy / cat / fill", r"copy_kernel|fillfunctor|cat_|catarray"),
     ("index / scalar ops", r"<long|<int|long,|index_kernel|index_copy|where|compare|bool|masked|scatter|gather|"
                            r"index_select|arange|clamp|reduce_kernel"),
-    ("gates (sigmoid, mul, softplus, exp)", r"sigmoid|softplus|exp_kernel|binaryfunctor|mulfunctor"),
+    ("gates (sigmoid, mul, softplus, exp)", r"sigmoid|softplus|exp_kernel|neg_kernel|binaryfunctor|mulfunctor"),
     ("other elementwise", r"elementwise"),
 ]
 CAST, TO_F32 = "f32 -> bf16 cast", "bf16 -> f32 copy"

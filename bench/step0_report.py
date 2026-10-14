@@ -33,11 +33,26 @@ DROP = 0.01                    # a candidate under 1% of its step is dropped (D1
 
 
 def load(directory: str, cls: str, what: str) -> dict[str, dict]:
+    """`{name: record}` of `m07-step0_<what>[-<name>]_<cls>_<date>.json`."""
     out = {}
     for path in sorted(glob.glob(os.path.join(directory, f"m07-step0_{what}*_{cls}_*.json"))):
-        name = os.path.basename(path).split("_")[1].removeprefix(what).lstrip("-") or what
+        stem = os.path.basename(path).removeprefix("m07-step0_").rsplit("_", 2)[0]
         with open(path) as f:
-            out[name] = json.load(f)
+            out[stem.removeprefix(what).lstrip("-") or what] = json.load(f)
+    return out
+
+
+def redundancy(directory: str) -> dict[str, float]:
+    """Model id -> the share of a decode step's quantizations whose input was already quantized (D6's shared
+    quantization), from any class's profile that counted inputs (the count is the model's, not the class's)."""
+    out = {}
+    for path in glob.glob(os.path.join(directory, "m07-step0_profile-*.json")):
+        with open(path) as f:
+            rec = json.load(f)
+        g = rec["rows"].get("decode_b1", {}).get("gemm", {})
+        calls = sum(c["count"] for c in g.get("calls", []))
+        if calls and g.get("inputs"):
+            out[rec["model"]] = 1 - g["inputs"] / calls
     return out
 
 
@@ -63,14 +78,17 @@ def glue(profiles: dict[str, dict]) -> list[dict]:
     return rows
 
 
-def candidates(profiles: dict[str, dict]) -> list[dict]:
+def candidates(profiles: dict[str, dict], shared: dict[str, float]) -> list[dict]:
     """Per (model, row): each fusion candidate's estimated saving (ms, share of the step). Estimates:
-    kv_write = the KV store's time beyond one launch per attention layer (its two index_puts become one);
-    qk_rope_kv (D3, on top) = q/k norm + rope; mmq bf16 (D4) = the f32 -> bf16 casts; gate/up + SwiGLU (D6, one
-    column) = silu·mul at one row; shared q8_1 (D6) = act quant x the share of quantizations of an input already
-    quantized (decode / verify steps); GDN gating (D6, prefill) = the gates' time on prefill rows of a GDN model;
-    rewind glue (D5) = the rewind region's time other than the delta rule and conv kernels (eager verify trace,
-    scaled by the graphed / eager kernel time)."""
+    - kv_write: the KV store's time beyond one launch per attention layer (bf16 KV: two index_puts become one);
+    - qk_rope_kv (D3, on top of kv_write): q/k norm + rope;
+    - mmq bf16 out (D4): the f32 -> bf16 casts;
+    - gate/up + SwiGLU (D6, one column): silu·mul on decode B1;
+    - shared q8_1 (D6): act quant x the share of the step's quantizations whose input was already quantized
+      (decode / verify; the model's share, from whichever class's profile counted it);
+    - GDN gating (D6, prefill): the gates' time on a GDN model's prefill rows;
+    - rewind glue (D5): the rewind region's time other than the delta rule and conv (eager verify trace, scaled
+      to the graphed step)."""
     out = []
     for name, rec in profiles.items():
         for key, row in rec["rows"].items():
@@ -88,10 +106,8 @@ def candidates(profiles: dict[str, dict]) -> list[dict]:
             if row["kind"] != "prefill":
                 if row.get("batch") == 1 and row["kind"] == "decode":
                     c["gate/up + SwiGLU (D6)"] = cat.get("silu*mul", 0.0)
-                g = row.get("gemm", {})
-                calls = sum(x["count"] for x in g.get("calls", []))
-                if calls and g.get("inputs"):
-                    c["shared q8_1 (D6)"] = cat.get("act quant (q8_1 / fp4)", 0.0) * (1 - g["inputs"] / calls)
+                if rec["model"] in shared:
+                    c["shared q8_1 (D6)"] = cat.get("act quant (q8_1 / fp4)", 0.0) * shared[rec["model"]]
             elif cat.get("gdn core"):
                 c["GDN gating (D6)"] = cat.get("gates (sigmoid, mul, softplus, exp)", 0.0)
             if "rewind" in row.get("regions", {}):
@@ -214,7 +230,7 @@ def d9(sweep: dict, profile: dict, table: dict) -> dict:
         limit = table[f"{c['type']}/{c['mode']}"]["best_with_cast"]
         one += c["count"] * s["us"]["1"]["mmvq"]
         four += c["count"] * (s["us"]["4"]["mmvq"] if 4 <= limit else s["us"]["4"]["mmq_cast"])
-    return {"ratio_4_over_1": round(four / one, 3), "trigger": four / one > 1.25}
+    return {"ratio_4_over_1": round(four / one, 4), "trigger": four / one > 1.25}
 
 
 def main() -> None:
@@ -225,7 +241,8 @@ def main() -> None:
     args = ap.parse_args()
     profiles = load(args.dir, args.cls, "profile")
     sweep = next(iter(load(args.dir, args.cls, "qmm-sweep").values()), None)
-    out = {"class": args.cls, "glue": glue(profiles), "candidates": candidates(profiles), "ratios": ratios(profiles)}
+    out = {"class": args.cls, "glue": glue(profiles), "candidates": candidates(profiles, redundancy(args.dir)),
+           "ratios": ratios(profiles)}
     if "8b-q4_k_m" in profiles:
         out["d8"] = d8(profiles["8b-q4_k_m"], sweep)
     if sweep:

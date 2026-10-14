@@ -9,11 +9,15 @@ Costs (ms):
   `alpha` x N x (history - 4096) when a second history is given (fitted on the sizes both measured);
 - mixed step (D7): the prefill cost of chunk + decode rows (it runs eagerly) plus the decode rows' attention.
 Scheduling, as `core/holon/core/sched.py`: `max_seqs` slots; while a waiting request can be admitted the step is
-a prefill (FCFS, budget `max_step_tokens`), else every running request decodes; a prompt's prefill ends a step at
-its last aligned position (the recurrent checkpoint), so an unaligned turn takes two steps. Prefix reuse is limited
-by the recurrent checkpoints: a turn resumes from its session's previous prompt-end checkpoint if that is still among
-the `checkpoints` most recently used (LRU), else it recomputes from 0. `mixed:<cap>`: decode rows first, then prefill
-chunks up to `cap` tokens (at least min(64, cap)) while anything decodes. Overlap's one-step lag is not modelled.
+a prefill (FCFS, budget `max_step_tokens`), else every running request decodes. `mixed:<cap>`: decode rows first,
+then prefill chunks up to `cap` tokens (at least min(64, cap)) while anything decodes. Prefix reuse is limited by
+the recurrent checkpoints (`checkpoints` units, one per prompt at its last aligned position): a turn resumes from
+the furthest checkpoint on its chain — its session's earlier prompt ends (while the session's KV blocks are cached:
+a finished turn's blocks stay until the pool of `kv_tokens` needs them, least recently used first), or the shared
+system prompt's end once a first turn appending < 64 tokens published it. Matching refreshes every checkpoint on
+the chain; a publish into a full pool drops the least recently matched one. Checkpoints are
+taken inside the step (on the 64-token grid); a budget-truncated step ends on the grid. Not modelled: overlap's
+one-step lag.
 
     python bench/mixed_sim.py --decode <step_profile json> [<step_profile json at another ctx>]
         --prefill-idle <prefill_idle json> [<prefill_idle json at another history>] --trace bench/traces/agent.jsonl
@@ -90,13 +94,18 @@ class Req:
         return self.prompt + len(self.times)
 
 
-def simulate(trace: list[dict], costs: Costs, policy: str, max_seqs: int, budget: int, checkpoints: int) -> list[Req]:
+def simulate(trace: list[dict], costs: Costs, policy: str, max_seqs: int, budget: int, checkpoints: int,
+             kv_tokens: int | None = None) -> list[Req]:
     """Replay the trace; returns the finished requests with their token times (ms)."""
     cap = int(policy.split(":")[1]) if policy.startswith("mixed:") else None
     by_id = {s["id"]: s for s in trace}
     ready = [(s["arrival"] * 1e3, s["id"], 0, 0) for s in trace]           # (release, sid, turn, previous prompt + out)
     heapq.heapify(ready)
-    lru: collections.OrderedDict[int, int] = collections.OrderedDict()      # sid -> checkpoint position
+    # Checkpoints, least recently matched first: (owner, position); the owner is the session, or "system" for one at
+    # or before the shared system prompt's end (a first turn appending < 64 tokens publishes it, for every session).
+    lru: collections.OrderedDict[tuple, None] = collections.OrderedDict()
+    cached: collections.OrderedDict[int, int] = collections.OrderedDict()   # sid -> its cached KV tokens (unshared)
+    system = max(s["system"] for s in trace)
     waiting: list[Req] = []
     running: list[Req] = []
     done: list[Req] = []
@@ -113,9 +122,18 @@ def simulate(trace: list[dict], costs: Costs, policy: str, max_seqs: int, budget
         for r in waiting:                                       # admission: a slot, and the checkpoint hit
             if not r.slot and sum(x.slot for x in running + waiting) < max_seqs:
                 r.slot = True
-                if r.sid in lru and r.turn > 0:
-                    r.computed = r.hit = lru[r.sid]
-                    lru.move_to_end(r.sid)
+                own = r.turn > 0 and (kv_tokens is None or r.sid in cached)
+                on_chain = [k for k in lru if k[0] == "system" or (own and k[0] == r.sid)]
+                for k in on_chain:                             # matching refreshes every entry on the chain
+                    lru.move_to_end(k)
+                r.computed = r.hit = max((k[1] for k in on_chain), default=0)
+                cached.pop(r.sid, None)                        # its blocks are the request's now
+        if kv_tokens is not None:                              # unused cached blocks go, least recently used first
+            used = system + sum(r.ctx - system * (r.turn == 0 or r.hit > 0) for r in running + waiting if r.slot)
+            while cached and used + sum(cached.values()) > kv_tokens:
+                sid, _ = cached.popitem(last=False)
+                for k in [k for k in lru if k[0] == sid]:
+                    del lru[k]
         admitted = [r for r in waiting if r.slot]
         decode = list(running)
         if admitted and (cap is None or not decode):            # a prefill step (today; or nothing decodes)
@@ -129,9 +147,12 @@ def simulate(trace: list[dict], costs: Costs, policy: str, max_seqs: int, budget
             if left <= 0:
                 break
             n = min(r.prompt - r.computed, left)
-            at = r.prompt // ALIGN * ALIGN                      # the prompt-end checkpoint: a step ends there
-            if r.computed < at < r.computed + n:
-                n = at - r.computed
+            at = r.prompt // ALIGN * ALIGN                      # the prompt-end checkpoint (Recurrent.cut)
+            if r.computed < at < r.computed + n and (at - r.computed) % ALIGN:
+                n = at - r.computed                             # off the grid: the step ends there
+            elif r.computed + n < r.prompt and (r.computed + n) % ALIGN and (r.computed + n) // ALIGN * ALIGN > \
+                    r.computed:
+                n = (r.computed + n) // ALIGN * ALIGN - r.computed   # budget-truncated: down to the grid
             rows.append((r, n))
             left -= n
         chunk = sum(n for _, n in rows)
@@ -148,9 +169,10 @@ def simulate(trace: list[dict], costs: Costs, policy: str, max_seqs: int, budget
         for r, n in rows:
             at = r.prompt // ALIGN * ALIGN
             r.computed += n
-            if r.computed == at and checkpoints:               # published; the LRU evicts the oldest
-                lru[r.sid] = at
-                lru.move_to_end(r.sid)
+            if r.computed - n < at <= r.computed and checkpoints:   # published; the LRU evicts the oldest
+                key = ("system" if r.turn == 0 and at <= system else r.sid, at)
+                lru[key] = None
+                lru.move_to_end(key)
                 while len(lru) > checkpoints:
                     lru.popitem(last=False)
             if r.computed == r.prompt:
@@ -160,6 +182,7 @@ def simulate(trace: list[dict], costs: Costs, policy: str, max_seqs: int, budget
         for r in [r for r in running if len(r.times) >= r.out]:
             running.remove(r)
             done.append(r)
+            cached[r.sid] = r.prompt + r.out - system
             s = by_id[r.sid]
             if r.turn + 1 < len(s["turns"]):
                 heapq.heappush(ready, (t + s["turns"][r.turn + 1]["gap"] * 1e3, r.sid, r.turn + 1, r.prompt + r.out))
@@ -208,22 +231,25 @@ def main() -> None:
     ap.add_argument("--max-seqs", type=int, default=4)
     ap.add_argument("--max-step-tokens", type=int, default=2048)
     ap.add_argument("--checkpoints", type=int, default=4, help="recurrent checkpoint units (recurrent.checkpoints)")
+    ap.add_argument("--kv-tokens", type=int, help="the KV pool's tokens (default: the measured run's; else no limit)")
     ap.add_argument("--policies", nargs="+", default=["today", "mixed:256", "mixed:512"])
     ap.add_argument("--json")
     args = ap.parse_args()
     costs = Costs([json.loads(pathlib.Path(p).read_text()) for p in args.decode],
                   [json.loads(pathlib.Path(p).read_text()) for p in args.prefill_idle])
     record = json.loads(pathlib.Path(args.measured).read_text()) if args.measured else None
+    if args.kv_tokens is None and record is not None:
+        args.kv_tokens = next(iter(record["backends"].values())).get("kv_tokens")
     out = {"costs": {"decode": {b: [round(a, 3), round(s, 6)] for b, (a, s) in costs.dec.items()},
                      "per_row_ctx_ms": round(costs.per_row_ctx, 7), "prefill_history": costs.hist,
                      "prefill": costs.pre, "alpha": costs.alpha},
            "settings": {"max_seqs": args.max_seqs, "max_step_tokens": args.max_step_tokens,
-                        "checkpoints": args.checkpoints}, "traces": {}}
+                        "checkpoints": args.checkpoints, "kv_tokens": args.kv_tokens}, "traces": {}}
     for path in args.trace:
         name = pathlib.Path(path).stem
         sessions = [json.loads(line) for line in pathlib.Path(path).read_text().splitlines() if line.strip()]
-        runs = {p: simulate(sessions, costs, p, args.max_seqs, args.max_step_tokens, args.checkpoints)
-                for p in args.policies}
+        runs = {p: simulate(sessions, costs, p, args.max_seqs, args.max_step_tokens, args.checkpoints,
+                            args.kv_tokens) for p in args.policies}
         res = {p: metrics(done) for p, done in runs.items()}
         for p in args.policies[1:]:
             res[p]["paired_ttft"] = paired_ttft(runs[p], runs[args.policies[0]])
