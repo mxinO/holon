@@ -94,7 +94,9 @@ def lock_flags(engine: dict, skip: tuple[str, ...] = (), extra: str = "") -> lis
             continue
         else:
             item = arg
-        k, _, v = item.partition("=")
+        k, eq, v = item.partition("=")
+        if not eq:
+            raise SystemExit(f"--{key.replace('_', '-')}: expected KEY=VALUE items, got {item!r}")
         if (key, k) == ("plugin_options", "kv.format"):
             raise SystemExit("under --lock the KV format is the lock's (the baselines are matched to it)")
         engine.setdefault(key, {})[k] = v
@@ -245,7 +247,11 @@ def main() -> None:
         engine = args.lock["engine"]
         args.max_batch = args.max_batch or engine["max_seqs"]
         args.max_step_tokens = args.max_step_tokens or engine["max_step_tokens"]
-        args.kv_format = args.kv_format or engine.get("plugin_options", {}).get("kv.format")
+        if args.kv_format and args.kv_format != engine.get("plugin_options", {}).get("kv.format"):
+            ap.error("under --lock the baselines' KV format is the lock's")
+        args.kv_format = engine.get("plugin_options", {}).get("kv.format")
+        for var in ("HOLON_ENGINE_ARGS", "HOLON_SERVE_ARGS"):   # refuse bad hand-given flags before any run
+            lock_flags(engine, SET_BY_WORKER, os.environ.get(var, ""))
         if not args.kv_tokens and args.backends[0] != "holon" and not all(b.startswith("holon") for b in args.backends):
             ap.error("--lock matches the baselines to Holon's KV tokens: list holon first, or give --kv-tokens")
     args.max_batch, args.max_step_tokens = args.max_batch or 64, args.max_step_tokens or 8192
