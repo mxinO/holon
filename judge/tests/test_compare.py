@@ -121,8 +121,14 @@ def test_calls_off_the_floors_path_or_mode_fail(case):
                                                 "12 calls on mmq/fp4, the floor emulates mmq/q8_1")
     floor.meta["act"] = "fp4"
     assert compare(g, w4a4, floor).passed
-    del floor.meta["q8_1"]                                                 # not a Tier B floor: nothing to count
+    del floor.meta["q8_1"]                                                 # A16: no activation quantization ...
     assert compare(g, uncounted, floor).passed
+    decode = _recording(logits, targets, lens)
+    decode.meta["calls"] = {"decode/bf16": 30, "prefill/fp8": 0}           # ... so only bf16 calls (FP8's W8A16)
+    assert compare(g, decode, floor).passed
+    decode.meta["calls"]["prefill/fp8"] = 2
+    assert compare(g, decode, floor).failures == ("2 calls on prefill/fp8, the floor quantizes no activations "
+                                                  "(bf16 only)",)
 
 
 def test_the_ppl_guard_is_paired_with_the_floor(case):

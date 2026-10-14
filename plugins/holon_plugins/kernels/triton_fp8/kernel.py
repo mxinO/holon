@@ -184,7 +184,7 @@ def _act_quant(x_ptr, q_ptr, s_ptr, k, stride_x, GROUP: tl.constexpr):
     row, g = tl.program_id(0), tl.program_id(1)
     cols = g * GROUP + tl.arange(0, GROUP)
     x = tl.load(x_ptr + row.to(tl.int64) * stride_x + cols).to(tl.float32)
-    a_s = tl.maximum(tl.max(tl.abs(x)), 1e-10) / 448.0
+    a_s = tl.math.div_rn(tl.maximum(tl.max(tl.abs(x)), 1e-10), 448.0)       # IEEE division, whatever the lowering
     q = tl.clamp(tl.math.div_rn(x, a_s), -448.0, 448.0)
     tl.store(q_ptr + row.to(tl.int64) * k + cols, f32_to_e4m3(q))
     tl.store(s_ptr + row * (k // GROUP) + g, a_s)

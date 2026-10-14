@@ -148,5 +148,6 @@
     "median_reps_2_5": 91.14
    }
   }
- }
+ },
+ "note": "the first RTX 4090 node was voided after its clock screen read SM 525 MHz median with software thermal slowdown in every sample; these runs are from a second node"
 }
