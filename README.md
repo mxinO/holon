@@ -205,10 +205,6 @@ start. A file outside the HF cache is hashed once to find its lock; the hash is 
 TBD (release step 8): the benchmark tables, rendered from the evidence records by `bench/report.py`, each linking its
 record; losses included.
 
-## Legibility benchmark
-
-TBD (release step 5): the result, pass or fail.
-
 ## Contributing
 
 Rules and routing by task are in [AGENTS.md](AGENTS.md); adding a model is in

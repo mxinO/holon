@@ -1098,4 +1098,9 @@ NVIDIA GeForce RTX 5090; Holon's ggml at 51ce9c11
 
 ### 13.6 Step 4, documentation (drafted 2026-10-14; frozen after M0.6's Gate A merge)
 
-`README.md`, `docs/adding-a-model.md` (≈ 3.3K tokens) and the task-routed `AGENTS.md`, together with `scripts/ci/check_docs.py` in `run_all.sh`, landed in bdabd9e. The writer was told not to read §4 or `bench/legibility/`. **Deviation, recorded for the experiment:** two of the writer's repository searches matched four single lines of §4: a planned guide size (≈ 4K), a mention of a reinstall, and the pinned agent settings. It read nothing else of §4 and never saw the target model. The guide's length and reinstall section follow the writer's brief, which predates those lines. The tailoring review (reviewer C) and the freeze happen before any reference port or pilot.
+`README.md`, `docs/adding-a-model.md` (≈ 3.3K tokens) and the task-routed `AGENTS.md`, together with `scripts/ci/check_docs.py` in `run_all.sh`, landed in bdabd9e. The writer was told not to read §4 or `bench/legibility/`. **Deviation, recorded for the experiment:** two of the writer's repository searches matched four single lines of §4: a planned guide size (≈ 4K), a mention of a reinstall, and the pinned agent settings. The lines it saw are those of §4 near lines 222, 227, 286 and 289 of this file at 7a65d28. It read nothing else of §4 and never saw the target model. The guide's length and reinstall section follow the writer's brief, which predates those lines. The tailoring review (reviewer C) and the freeze happen before any reference port or pilot.
+
+**Tailoring review (reviewer C, 2026-10-14): the guide and AGENTS.md's routing pass all four tests** (derivable from the
+tree, no emphasis driven by the task, proportion, no mention). The deviation compromises nothing, because the control is
+the review of the text. The README's benchmark placeholder failed test 4, so it was removed; the result section is
+added after the verdict. A drift check of the frozen text follows M0.6's Gate A merge.
