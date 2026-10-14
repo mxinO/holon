@@ -1,6 +1,6 @@
 # Release (v0) — packaging, locks, legibility benchmark, benchmark suite, ABI freeze: design and plan
 
-Status: **revision 3.1, for review** (2026-10-14). Revs 1 (97c39ff), 2 (9534861) and 3 (41431b5) were reviewed by a panel of three
+Status: **revision 3.2, for review** (2026-10-14). Revs 1 (97c39ff), 2 (9534861) and 3 (41431b5) were reviewed by a panel of three
 (A: serving, packaging, ABI; B: methodology; C: architecture, scope); every finding is resolved in §12. Scope: plan
 §2's Release row ("every v0 model: packaging, quickstart, rtx-5090 / rtx-3090 locks, an agent demo; the legibility
 benchmark (§9) before the ABI freezes; the benchmark suite (decode, prefill, agent trace vs llama.cpp, FreeToken and
@@ -105,8 +105,12 @@ new families or formats; v1's offload, VMM, sandbox and self-improvement; GPUs o
       drafter's buffer, rope's `max_positions` fact);
     - today a paged pool requests units for one full-length sequence (`assembly.py` `_bind`), so a request that does
       not fit raises `OutOfUnits` before anything could clamp. With `clamp_context`, paged pools request a floor of
-      ceil(`max_step_tokens` / page) units instead; `max_model_len` = min(requested, the smallest paged pool's capacity
-      in tokens), set before the state manager and scheduler are built (`engine.py` L162–166);
+      Σ ceil(r / page) units over the worst-step profile's rows r (= ceil(`max_step_tokens` / page) when the requested
+      `max_model_len` ≥ `max_step_tokens`) instead; `max_model_len` = min(requested, the smallest paged pool's capacity
+      in tokens), computed after the pools are materialized (`engine.py` L183, which needs the executor's profile) and
+      before graph capture (L187: captured graphs bake in the position clamp, `executor.py:480`), and pushed into the
+      engine's config copy (shared with the executor and admission), `Scheduler.max_model_len` and the state
+      manager's token limit; block tables keep the requested width (already bounded);
     - build-time readers keep the requested value, so the plan's only diff is `engine.max_model_len`, reported;
     - the trained context is a new optional **model-plugin** hook (Qwen3.5 / 3.8 HF configs nest it under
       `text_config`, so the weight source cannot read it generically), an ABI addition before the freeze; None means
@@ -501,6 +505,10 @@ only on the 16 GB card; Qwen3.5 without locks; M0.6's files borrow on the 5090 /
 step 3 and marked "borrowed, unverified" in the README (§6); Dockerfile shipped, image not published (§8).
 
 ## 12. Review findings, resolved
+
+**Rev 3.1** (A, the clamp's insertion point): the pool capacity exists only after `ledger.materialize` (the profile needs
+the executor), so the clamp is applied after it and before graph capture, pushed into the engine config, scheduler and
+state manager; the floor is Σ ceil(r / page) over the profile's rows (D2).
 
 **Rev 3** (A: serving; B: methodology; C: scope).
 
