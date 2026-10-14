@@ -17,17 +17,20 @@ class FakeEngine:
     """`add`/`step`/`has_work` like `holon.core.Engine`, answering prompt logprobs from an HF model; a prompt's
     logprobs arrive split over two steps, as with chunked prefill. Its model counts calls as kernels.ggml_cuda's
     instances do, held as std's units hold them: by a plain object a module holds (a linear's quantized weight) and by
-    a module itself (an expert stack), each step one call per path and mode."""
+    a module itself (an expert stack), each step one call per path and mode; and a quantized LM head, counted apart."""
 
     def __init__(self, path, drop_last: bool = False) -> None:
         self.hf = AutoModelForCausalLM.from_pretrained(path, dtype=torch.float32).eval()
         self.queue: list[tuple[str, list[int], SamplingParams]] = []
         self.drop_last = drop_last
         kernel = lambda: types.SimpleNamespace(calls=collections.Counter())          # noqa: E731
-        linear, experts = torch.nn.Module(), torch.nn.Module()
+        model, linear, experts = torch.nn.Module(), torch.nn.Module(), torch.nn.Module()
         linear.weight_q, experts.op = types.SimpleNamespace(op=kernel()), kernel()
-        self.executor = types.SimpleNamespace(model=torch.nn.ModuleList([linear, experts]))
-        self.counters = {"mmq/fp4": linear.weight_q.op.calls, "mmvq/q8_1": experts.op.calls}
+        model.layers, model.lm_head = torch.nn.ModuleList([linear, experts]), torch.nn.Module()
+        model.lm_head.weight_q = types.SimpleNamespace(op=kernel())
+        self.executor = types.SimpleNamespace(model=model)
+        self.counters = {"mmq/fp4": linear.weight_q.op.calls, "mmvq/q8_1": experts.op.calls,
+                         "mmvq/q8_1 head": model.lm_head.weight_q.op.calls}
 
     def add(self, token_ids: list[int], params: SamplingParams) -> str:
         rid = f"r{len(self.queue)}"
@@ -40,7 +43,7 @@ class FakeEngine:
     @torch.no_grad()
     def step(self) -> list[TokenDelta]:
         for mode, counter in self.counters.items():
-            counter[mode] += 1
+            counter[mode.split()[0]] += 1
         rid, ids, params = self.queue.pop(0)
         lp = self.hf(torch.tensor([ids])).logits[0, :-1].float().log_softmax(-1)
         top, top_ids = lp.topk(params.prompt_logprobs, -1)
@@ -66,6 +69,7 @@ def test_fake_engine_scores_like_the_golden(tiny_checkpoint, tiny_prompts, gold)
     cand = score(engine, tiny_prompts, meta={"dtype": "float32"})
     assert torch.equal(cand.offsets, gold.offsets) and cand.meta["source"] == "holon"
     assert cand.meta["calls"] == {"mmq/fp4": 4, "mmvq/q8_1": 4}            # dense and expert kernels, by mode
+    assert cand.meta["head_calls"] == {"mmvq/q8_1": 4}                     # the LM head apart
     r = compare(gold, cand)
     assert r.overall.top1 == 1 and r.overall.kl_p99 < 1e-6 and r.overall.missing == 0
     assert abs(r.overall.dppl) < 1e-6

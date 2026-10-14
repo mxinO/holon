@@ -191,7 +191,7 @@ def metrics(golden: Recording, cand: Recording) -> tuple[Metrics, dict[str, Metr
 
 
 _PROVENANCE = ("source", "model", "revision", "dtype", "device", "hardware", "threads", "prompts", "prompts_sha256",
-               "weight_source", "max_step_tokens", "q8_1", "act", "kv", "moe_block", "experts", "calls")
+               "weight_source", "max_step_tokens", "q8_1", "act", "kv", "moe_block", "experts", "calls", "head_calls")
 
 
 def _provenance(rec: Recording) -> dict:

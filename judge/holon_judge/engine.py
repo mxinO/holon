@@ -31,10 +31,13 @@ def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None
     quantized kernels that count their calls per path and activation mode (keys `path/mode`: `kernels.ggml_cuda`'s
     dense and expert instances, found by `_counters`), the calls made while scoring (`calls`: Tier B's path and mode
     check; the engine's start-up — memory profiling, graphs — excluded) and its KV cache format (`kv`, unless the
-    model dtype: a floor must emulate the same, `compare`)."""
+    model dtype: a floor must emulate the same, `compare`). A quantized LM head's calls are counted apart
+    (`head_calls`, reported only): its row counts are not the step's but the prompt-logprob slices' and the sampled
+    rows' (one per prompt finishing in the step, never scored), so a prefill run's head takes mmvq on a few rows
+    whatever the trunk takes."""
     kv = getattr(getattr(engine, "cfg", None), "plugin_options", {}).get("kv.format")
-    counters = _counters(engine)
-    before = _total(counters)
+    counters, head = _counters(engine), _counters(engine, head=True)
+    before, head_before = _total(counters), _total(head)
     params = SamplingParams(max_tokens=1, temperature=0.0, prompt_logprobs=k)
     index = {engine.add(p.ids, params): i for i, p in enumerate(prompts.prompts)}
     parts: list[list[Logprobs]] = [[] for _ in prompts.prompts]
@@ -46,8 +49,8 @@ def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None
                 parts[index[delta.rid]].append(delta.prompt_logprobs)
     rows = [_rows(p, got, k) for p, got in zip(prompts.prompts, parts, strict=True)]
     wall = round(time.perf_counter() - t0, 2)
-    after = _total(counters)
-    calls = {"calls": {key: n - before.get(key, 0) for key, n in sorted(after.items())}} if counters else {}
+    calls = {name: {key: n - start.get(key, 0) for key, n in sorted(_total(c).items())}
+             for name, c, start in (("calls", counters, before), ("head_calls", head, head_before)) if c}
     return Recording.from_rows(rows, prompts.meta() | {"source": "holon", "wall_s": wall} | (meta or {}) | calls
                                | ({"kv": kv} if kv else {}))
 
@@ -61,11 +64,13 @@ def _total(counters: list[dict[str, int]]) -> dict[str, int]:
     return total
 
 
-def _counters(engine: EngineLike) -> list[dict[str, int]]:
+def _counters(engine: EngineLike, head: bool = False) -> list[dict[str, int]]:
     """The call counters of the engine's quantized kernels (none for other engines or kernels): every `calls` Counter
     held by an attribute of a module, or of a plain object a module holds (a linear's quantized weight holds its
-    kernel), each once."""
+    kernel), each once; those of the model's `lm_head` if `head`, else the others'."""
     model = getattr(getattr(engine, "executor", None), "model", None)
+    lm_head = getattr(model, "lm_head", None)
+    in_head = {id(m) for m in lm_head.modules()} if isinstance(lm_head, torch.nn.Module) else set()
     found: dict[int, collections.Counter] = {}
 
     def visit(obj, depth: int) -> None:
@@ -76,6 +81,8 @@ def _counters(engine: EngineLike) -> list[dict[str, int]]:
                 visit(value, depth - 1)
 
     for m in [] if model is None else model.modules():
+        if (id(m) in in_head) != head:
+            continue
         for value in vars(m).values():
             visit(value, 1)
     return list(found.values())
