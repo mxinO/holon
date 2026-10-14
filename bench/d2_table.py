@@ -121,7 +121,7 @@ def main() -> None:
     step0 = [*load(args.dir, args.cls, "qmm-sweep", exact=True).values(),
              *next(iter(load(args.dir, args.cls, "qmm-sweep-d9-repeat", exact=True).values()), {}).get("repeats", [])]
     target = profiles.get("27b-plain")
-    if target:
+    if target and args.variant == "mmq_cast":               # D9 is defined with today's cast
         out["d9"] = d9([*step0, *full, *repeats], target, {k: {"with_cast": v} for k, v in out["shipped"].items()})
     out["crossover"] = [f'("{args.cls}", "{n}", {k}, {o}, "{m}"): {v},' for n, k, o, m, v in
                         (_key(key) + [lim] for key, lim in out["shipped"].items())]

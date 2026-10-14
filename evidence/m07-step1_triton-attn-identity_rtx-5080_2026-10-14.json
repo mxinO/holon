@@ -1,0 +1,541 @@
+{
+ "gpu_class": "rtx-5080",
+ "date": "2026-10-14",
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "command": "python -m holon_judge.kernel_identity --rev 68bf31a",
+ "kernel": "plugins/holon_plugins/kernels/triton_attn/kernel.py",
+ "against": "68bf31a",
+ "commit": "d5c7e6d",
+ "cases": 48,
+ "bitwise_equal": 48,
+ "results": [
+  {
+   "geometry": [
+    32,
+    8,
+    128
+   ],
+   "rows": "decode",
+   "kv": "bf16",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    32,
+    8,
+    128
+   ],
+   "rows": "decode",
+   "kv": "bf16",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    32,
+    8,
+    128
+   ],
+   "rows": "decode",
+   "kv": "q8_0",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    32,
+    8,
+    128
+   ],
+   "rows": "decode",
+   "kv": "q8_0",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    32,
+    8,
+    128
+   ],
+   "rows": "verify",
+   "kv": "bf16",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    32,
+    8,
+    128
+   ],
+   "rows": "verify",
+   "kv": "bf16",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    32,
+    8,
+    128
+   ],
+   "rows": "verify",
+   "kv": "q8_0",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    32,
+    8,
+    128
+   ],
+   "rows": "verify",
+   "kv": "q8_0",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    32,
+    8,
+    128
+   ],
+   "rows": "block",
+   "kv": "bf16",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    32,
+    8,
+    128
+   ],
+   "rows": "block",
+   "kv": "bf16",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    32,
+    8,
+    128
+   ],
+   "rows": "block",
+   "kv": "q8_0",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    32,
+    8,
+    128
+   ],
+   "rows": "block",
+   "kv": "q8_0",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    4,
+    256
+   ],
+   "rows": "decode",
+   "kv": "bf16",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    4,
+    256
+   ],
+   "rows": "decode",
+   "kv": "bf16",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    4,
+    256
+   ],
+   "rows": "decode",
+   "kv": "q8_0",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    4,
+    256
+   ],
+   "rows": "decode",
+   "kv": "q8_0",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    4,
+    256
+   ],
+   "rows": "verify",
+   "kv": "bf16",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    4,
+    256
+   ],
+   "rows": "verify",
+   "kv": "bf16",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    4,
+    256
+   ],
+   "rows": "verify",
+   "kv": "q8_0",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    4,
+    256
+   ],
+   "rows": "verify",
+   "kv": "q8_0",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    4,
+    256
+   ],
+   "rows": "block",
+   "kv": "bf16",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    4,
+    256
+   ],
+   "rows": "block",
+   "kv": "bf16",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    4,
+    256
+   ],
+   "rows": "block",
+   "kv": "q8_0",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    4,
+    256
+   ],
+   "rows": "block",
+   "kv": "q8_0",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    24,
+    4,
+    256
+   ],
+   "rows": "decode",
+   "kv": "bf16",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    24,
+    4,
+    256
+   ],
+   "rows": "decode",
+   "kv": "bf16",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    24,
+    4,
+    256
+   ],
+   "rows": "decode",
+   "kv": "q8_0",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    24,
+    4,
+    256
+   ],
+   "rows": "decode",
+   "kv": "q8_0",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    24,
+    4,
+    256
+   ],
+   "rows": "verify",
+   "kv": "bf16",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    24,
+    4,
+    256
+   ],
+   "rows": "verify",
+   "kv": "bf16",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    24,
+    4,
+    256
+   ],
+   "rows": "verify",
+   "kv": "q8_0",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    24,
+    4,
+    256
+   ],
+   "rows": "verify",
+   "kv": "q8_0",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    24,
+    4,
+    256
+   ],
+   "rows": "block",
+   "kv": "bf16",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    24,
+    4,
+    256
+   ],
+   "rows": "block",
+   "kv": "bf16",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    24,
+    4,
+    256
+   ],
+   "rows": "block",
+   "kv": "q8_0",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    24,
+    4,
+    256
+   ],
+   "rows": "block",
+   "kv": "q8_0",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    8,
+    64
+   ],
+   "rows": "decode",
+   "kv": "bf16",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    8,
+    64
+   ],
+   "rows": "decode",
+   "kv": "bf16",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    8,
+    64
+   ],
+   "rows": "decode",
+   "kv": "q8_0",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    8,
+    64
+   ],
+   "rows": "decode",
+   "kv": "q8_0",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    8,
+    64
+   ],
+   "rows": "verify",
+   "kv": "bf16",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    8,
+    64
+   ],
+   "rows": "verify",
+   "kv": "bf16",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    8,
+    64
+   ],
+   "rows": "verify",
+   "kv": "q8_0",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    8,
+    64
+   ],
+   "rows": "verify",
+   "kv": "q8_0",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    8,
+    64
+   ],
+   "rows": "block",
+   "kv": "bf16",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    8,
+    64
+   ],
+   "rows": "block",
+   "kv": "bf16",
+   "splits": 3,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    8,
+    64
+   ],
+   "rows": "block",
+   "kv": "q8_0",
+   "splits": 1,
+   "bitwise_equal": true
+  },
+  {
+   "geometry": [
+    16,
+    8,
+    64
+   ],
+   "rows": "block",
+   "kv": "q8_0",
+   "splits": 3,
+   "bitwise_equal": true
+  }
+ ]
+}

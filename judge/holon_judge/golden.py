@@ -102,8 +102,10 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
     path = resolve_model(model)
     if act is not None and not q8_1:
         raise ValueError(f"activation mode {act!r} without a kernel path to emulate it on")
-    if q8_1 == "rows" and path.suffix != ".gguf" or (rows or crossover) and q8_1 != "rows":
-        raise ValueError(f"{path}: per-shape floors (--q8-1 rows, with --rows and --crossover) are for GGUF files")
+    if (rows or crossover) and q8_1 != "rows":
+        raise ValueError("--rows and --crossover go with --q8-1 rows (a per-shape floor)")
+    if q8_1 == "rows" and path.suffix != ".gguf":
+        raise ValueError(f"{path}: per-shape floors (--q8-1 rows) are for GGUF files")
     if path.suffix == ".gguf":
         from . import gguf
 
