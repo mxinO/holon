@@ -14,7 +14,8 @@ tensor (`_nvfp4_pack` × scale2, `repack_mxfp4_blocks`; exact).
 FP4 tensor, dequantized by gguf-py × scale2, against the reference, and byte for byte against the converter's.
 
 `state` is a checkpoint's model as the goldens and floors build it (§4.8), one layer at a time; `gate` holds what the
-engine's weight source yields against the bf16 original, per tensor and per expert (§4.8's gates).
+engine's weight source yields against the bf16 original, per tensor and per expert (§4.8's gates). The expert and
+norm patterns are the Qwen family's HF names (the judge's targets).
 """
 from __future__ import annotations
 
@@ -37,13 +38,15 @@ Get = Callable[[str], torch.Tensor]
 # Parts of a quantized module other than its weight: read through `parts`, or not at all (input and KV scales).
 AUX = frozenset({"weight_packed", "weight_scale", "weight_scale_inv", "weight_scale_2", "weight_global_scale",
                  "input_scale", "input_global_scale", "k_scale", "v_scale"})
-GATES = {"fp8_e4m3": 1e-2, "nvfp4": 0.1, "mxfp4": 0.1, None: 1e-2}    # NMSE vs bf16 per tensor; dense: the tightest
+# NMSE vs bf16 per tensor: dense exact; a dense one folded with a norm (`gate`) within the products' f32 rounding
+GATES = {"fp8_e4m3": 1e-2, "nvfp4": 0.1, "mxfp4": 0.1, None: 0.0, "folded": 1e-10}
+# Qwen-family HF names (Qwen3, Qwen3-MoE; Qwen3.5's `model.language_model.` in `opened`): per-expert projections; the
+# gate's linears reading a norm's output (q/k/v its input norm's; gate/up, experts' and the router its
+# post-attention norm's), and those norms.
 _EXPERT = re.compile(r"(.+\.mlp)\.experts\.(\d+)\.(gate|up|down)_proj")
-# The gate's view of a decoder layer: the linears reading a norm's output (q/k/v its input norm's; gate/up, experts'
-# and the router its post-attention norm's), and those norms.
 _NORMED = re.compile(r"(model\.layers\.\d+)\.(self_attn|mlp)\."
                      r"(?:[qkv]_proj|(?:experts\.\d+\.)?(?:gate|up)_proj|gate)\.weight")
-_FOLDED = re.compile(r"\.(input|post_attention)_layernorm\.weight$")
+_NORM = "{layer}.{which}_layernorm.weight"
 
 
 @contextlib.contextmanager
@@ -107,34 +110,45 @@ def input_scale(get: Get, names: set[str], module: str) -> torch.Tensor:
     return 1.0 / get(f"{module}.input_global_scale").float().reshape(())
 
 
-def gate(path: str | pathlib.Path, original: str | pathlib.Path) -> dict[str, tuple[str | None, float]]:
+def gate(path: str | pathlib.Path, original: str | pathlib.Path) -> tuple[dict[str, tuple[str | None, float]],
+                                                                         list[str]]:
     """§4.8's gates: every tensor the engine's weight source yields — a quantized module dequantized by the reference,
-    so a dialect's misreading shows — against the bf16 original's tensor of that name: name -> (elem, or None if
-    dense; NMSE). Per expert, as the source yields them (before stacking). A linear that reads an RMSNorm's output
-    is compared as it applies to the normalized input, W · diag(γ), each side with its own norm, and the norm is not
-    compared alone: SmoothQuant (RedHatAI's recipe) moves scale from the norm into its consumers' columns."""
+    so a dialect's misreading shows; a dense one cast to the original's dtype, so exact means bit-equal — against the
+    bf16 original's tensor of that name: (name -> (elem, None if dense, "folded" if dense and folded; NMSE), the norms
+    folded). Per expert, as
+    the source yields them (before stacking). Where a norm differs from the original's — SmoothQuant (RedHatAI's
+    recipe) moves scale from it into its consumers' columns — the linears reading it are compared as they apply to
+    the normalized input, W · diag(γ), each side with its own norm, and the norm is not compared alone."""
     from holon.api import QTensor
     from holon_std.weights.hf.source import HFSafetensors
 
-    out = {}
+    out, folded = {}, {}
     with opened(original) as (ref, _), opened(path) as (own, _):
+        def smoothed(norm: str) -> bool:
+            if norm not in folded:
+                r = ref(norm)
+                folded[norm] = not torch.equal(own(norm).to(r.dtype), r)
+            return folded[norm]
+
         for name, t in HFSafetensors(path).tensors():
-            if _FOLDED.search(name):
+            if name.endswith("_layernorm.weight") and smoothed(name):
                 continue
-            q = isinstance(t, QTensor)
-            w, r = reference.dequantize(t.layout.scheme.elem, t.parts) if q else t.float(), ref(name).float()
-            if m := _NORMED.fullmatch(name):
-                norm = f"{m[1]}.{'input' if m[2] == 'self_attn' else 'post_attention'}_layernorm.weight"
-                w, r = w * own(norm).float(), r * ref(norm).float()
-            out[name] = (t.layout.scheme.elem if q else None, ((w - r).pow(2).sum() / r.pow(2).sum()).item())
-    return out
+            q, r = isinstance(t, QTensor), ref(name)
+            w = reference.dequantize(t.layout.scheme.elem, t.parts) if q else t.to(r.dtype).float()
+            r = r.float()
+            elem = t.layout.scheme.elem if q else None
+            if (m := _NORMED.fullmatch(name)) and smoothed(
+                    norm := _NORM.format(layer=m[1], which="input" if m[2] == "self_attn" else "post_attention")):
+                w, r, elem = w * own(norm).float(), r * ref(norm).float(), elem or "folded"
+            out[name] = (elem, ((w - r).pow(2).sum() / r.pow(2).sum()).item())
+    return out, sorted(n for n, f in folded.items() if f)
 
 
 def parts(get: Get, names: set[str], module: str) -> tuple[str, dict[str, torch.Tensor]] | None:
     """A module's (elem, normalized parts) by its tensors' names and dtypes alone, or None if it is dense: an e4m3
     weight with a block scale (`weight_scale_inv` | `weight_scale`) is FP8; a packed U8 weight (`weight` |
     `weight_packed`) with an e4m3 scale is NVFP4 (`weight_scale_2`, or the reciprocal of `weight_global_scale`), with
-    a U8 scale MXFP4."""
+    a U8 scale MXFP4, with any other scale an error."""
     def has(suffix: str) -> bool:
         return f"{module}.{suffix}" in names
 
@@ -147,6 +161,8 @@ def parts(get: Get, names: set[str], module: str) -> tuple[str, dict[str, torch.
     s = get(f"{module}.weight_scale")
     if s.dtype == torch.uint8:
         return "mxfp4", {"weight": w, "scale": s}
+    if s.dtype != torch.float8_e4m3fn:
+        raise ValueError(f"{module}: a packed U8 weight with a {s.dtype} scale is neither NVFP4 nor MXFP4")
     scale2 = get(f"{module}.weight_scale_2").float() if has("weight_scale_2") else \
         1.0 / get(f"{module}.weight_global_scale").float()
     return "nvfp4", {"weight": w, "scale": s.view(torch.uint8), "scale2": scale2.reshape(())}

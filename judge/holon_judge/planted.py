@@ -587,7 +587,8 @@ def hf_quant_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractCon
             lambda m: _part_from(m, f"{attn}.v_proj", f"{attn}.k_proj")),
         "mxfp4-scale-as-e4m3": lambda: mock.patch(                                                     # M3
             "holon_std.weights.hf.reference.e8m0", lambda s: s.view(torch.float8_e4m3fn).float()),
-        "mxfp4-scale-halved": lambda: _mxfp4_scales_edited(lambda s: s - 1),                           # M5
+        # M5; a 0 byte would wrap to 0xFF (NaN, refused at load): none in the real files or the fixtures
+        "mxfp4-scale-halved": lambda: _mxfp4_scales_edited(lambda s: s - 1),
         "gate-up-merge-gate-scales": _gate_up_merge_gate_scales,                                       # P5
         "hf-scale-stack-off-by-one": lambda: _hf_grouped(_expert_scales_shifted(layer)),               # P6
         "hf-scale2-stack-off-by-one": lambda: _hf_grouped(_expert_scales_shifted(layer, "scale2")),

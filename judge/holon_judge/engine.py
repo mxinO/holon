@@ -6,6 +6,7 @@ top-k (`tail_from_topk`).
 """
 from __future__ import annotations
 
+import collections
 import time
 from typing import Protocol
 
@@ -28,9 +29,9 @@ class EngineLike(Protocol):
 def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None = None) -> Recording:
     """Run every prompt with `prompt_logprobs=k` and pack the answers as a recording comparable to the golden; with
     quantized kernels that count their calls per path and activation mode (keys `path/mode`: `kernels.ggml_cuda`'s
-    dense and expert instances), the calls made while scoring (`calls`: Tier B's path and mode check; the engine's
-    start-up — memory profiling, graphs — excluded) and its KV cache format (`kv`, unless the model dtype: a floor
-    must emulate the same, `compare`)."""
+    dense and expert instances, found by `_counters`), the calls made while scoring (`calls`: Tier B's path and mode
+    check; the engine's start-up — memory profiling, graphs — excluded) and its KV cache format (`kv`, unless the
+    model dtype: a floor must emulate the same, `compare`)."""
     kv = getattr(getattr(engine, "cfg", None), "plugin_options", {}).get("kv.format")
     counters = _counters(engine)
     before = _total(counters)
@@ -61,14 +62,23 @@ def _total(counters: list[dict[str, int]]) -> dict[str, int]:
 
 
 def _counters(engine: EngineLike) -> list[dict[str, int]]:
-    """The call counters of the engine's quantized kernels (none for other engines or kernels): an expert stack's
-    kernel is its unit's `_kernel`, a linear's its quantized weight's (`_q._kernel`)."""
+    """The call counters of the engine's quantized kernels (none for other engines or kernels): every `calls` Counter
+    held by an attribute of a module, or of a plain object a module holds (a linear's quantized weight holds its
+    kernel), each once."""
     model = getattr(getattr(engine, "executor", None), "model", None)
-    if model is None:
-        return []
-    kernels = [k for m in model.modules() for k in (getattr(m, "_kernel", None),
-                                                     getattr(getattr(m, "_q", None), "_kernel", None))]
-    return [k.calls for k in kernels if hasattr(k, "calls")]
+    found: dict[int, collections.Counter] = {}
+
+    def visit(obj, depth: int) -> None:
+        if isinstance(calls := getattr(obj, "calls", None), collections.Counter):
+            found[id(calls)] = calls
+        elif depth and hasattr(obj, "__dict__") and not isinstance(obj, (torch.nn.Module, torch.Tensor)):
+            for value in vars(obj).values():
+                visit(value, depth - 1)
+
+    for m in [] if model is None else model.modules():
+        for value in vars(m).values():
+            visit(value, 1)
+    return list(found.values())
 
 
 def _rows(prompt: Prompt, parts: list[Logprobs], k: int) -> tuple[torch.Tensor, ...]:

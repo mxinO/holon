@@ -17,6 +17,7 @@ import numpy as np
 import torch
 
 GATE = 0.5          # NMSE(dequantized, HF bf16) per tensor: a correct quant explains at least half the energy
+GATES = {"mxfp4": 0.1, "q8_0": 1e-3}     # docs/m06-lowp.md §4.8: FP4 experts; Q8_0 from its prediction (≈ 5e-5)
 # llama.cpp's tensor names (src/llama-arch.cpp) for the dense-transformer tensors -> HF Qwen3 names.
 _GLOBAL = {"token_embd.weight": "model.embed_tokens.weight", "output_norm.weight": "model.norm.weight",
            "output.weight": "lm_head.weight"}
@@ -245,7 +246,8 @@ def _emulated(linear: torch.nn.Linear, kind: str, kernel_path: str, offs: torch.
 def gate(path: str | pathlib.Path, hf_dir: str | pathlib.Path) -> dict[str, float]:
     """NMSE of every dequantized tensor against the HF checkpoint, per expert for expert stacks, one layer of the
     checkpoint at a time: its tensors as the judge reads them (`hf_quant.state`, whose fusion of per-expert tensors is
-    transformers' own, bit for bit: judge/tests/test_golden.py), so a mistake in this file's assembly (expert order,
+    transformers' own, bit for bit: judge/tests/test_gguf_moe.py::
+    test_the_golden_is_hfs_model_of_the_dequantized_weights), so a mistake in this file's assembly (expert order,
     gate before up) fails here even if the engine makes the same one. MoE routers must be exact (F32 in the file, the
     checkpoint's values upcast): a ValueError otherwise."""
     from . import hf_quant

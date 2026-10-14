@@ -2,6 +2,8 @@
 its dequantized weights, the gate checks the judge's expert assembly against the checkpoint's tensors, an MoE floor
 runs the D3-mirroring block, and Tier A — the engine on the production source with reference kernels — sits on the
 golden while each planted MoE bug moves it."""
+from unittest import mock
+
 import gguf
 import numpy as np
 import pytest
@@ -13,6 +15,7 @@ from holon_judge.compare import compare
 from holon_judge.engine import score
 from holon_judge.planted import moe_plants
 from holon_testing.gguf_files import write
+from holon_testing.ref_kernels import kernels as ref_kernels
 from safetensors.torch import save_file
 from transformers import Qwen3MoeConfig, Qwen3MoeForCausalLM
 
@@ -81,12 +84,19 @@ def _tier_a(file, prompts):
 
 
 @pytest.fixture(scope="module")
-def clean(moe_files, tiny_prompts, gold):
-    return compare(gold, _tier_a(moe_files[1], tiny_prompts)).overall
+def tier_a(moe_files, tiny_prompts):
+    return _tier_a(moe_files[1], tiny_prompts)
 
 
-def test_tier_a_scores_the_dequantized_model(clean):
+@pytest.fixture(scope="module")
+def clean(gold, tier_a):
+    return compare(gold, tier_a).overall
+
+
+def test_tier_a_scores_the_dequantized_model(moe_files, tiny_prompts, tier_a, clean):
     assert clean.top1 == 1 and clean.kl_p99 < 1e-8
+    with mock.patch.object(ref_kernels, "CACHE_BYTES", 0):     # a 30B's stacks: only the routed experts, per call
+        assert _tier_a(moe_files[1], tiny_prompts).same_tensors(tier_a)
 
 
 @pytest.mark.parametrize("plant", sorted(moe_plants(layer=1)))

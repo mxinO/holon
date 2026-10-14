@@ -16,8 +16,8 @@ from transformers import AutoModelForCausalLM
 class FakeEngine:
     """`add`/`step`/`has_work` like `holon.core.Engine`, answering prompt logprobs from an HF model; a prompt's
     logprobs arrive split over two steps, as with chunked prefill. Its model counts calls as kernels.ggml_cuda's
-    instances do, where std's units keep them: a linear's quantized weight's kernel (`_q._kernel`) and an expert
-    stack's (`_kernel`), each step one call per path and mode."""
+    instances do, held as std's units hold them: by a plain object a module holds (a linear's quantized weight) and by
+    a module itself (an expert stack), each step one call per path and mode."""
 
     def __init__(self, path, drop_last: bool = False) -> None:
         self.hf = AutoModelForCausalLM.from_pretrained(path, dtype=torch.float32).eval()
@@ -25,9 +25,9 @@ class FakeEngine:
         self.drop_last = drop_last
         kernel = lambda: types.SimpleNamespace(calls=collections.Counter())          # noqa: E731
         linear, experts = torch.nn.Module(), torch.nn.Module()
-        linear._q, experts._kernel = types.SimpleNamespace(_kernel=kernel()), kernel()
+        linear.weight_q, experts.op = types.SimpleNamespace(op=kernel()), kernel()
         self.executor = types.SimpleNamespace(model=torch.nn.ModuleList([linear, experts]))
-        self.counters = {"mmq/fp4": linear._q._kernel.calls, "mmvq/q8_1": experts._kernel.calls}
+        self.counters = {"mmq/fp4": linear.weight_q.op.calls, "mmvq/q8_1": experts.op.calls}
 
     def add(self, token_ids: list[int], params: SamplingParams) -> str:
         rid = f"r{len(self.queue)}"

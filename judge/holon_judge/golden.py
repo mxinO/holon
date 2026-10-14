@@ -18,6 +18,7 @@ from holon_std.weights.hf import reference as hf_reference
 
 from . import hf_quant, modes, moe, w4a4
 from . import kv as kv_format
+from . import q8_1 as q8_1_emulator
 from .recording import PromptSet, Recording
 
 DTYPES = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}
@@ -117,7 +118,7 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
 
         config_sha256 = hashlib.sha256((hf_config / "config.json").read_bytes()).hexdigest()
         source = gguf.file_meta(path) | {"q8_1": q8_1, "config": model_meta(hf_config)["model"],
-                                         "config_sha256": config_sha256} | _moe_meta(mirrored)
+                                         "config_sha256": config_sha256} | _moe_meta(mirrored) | _emulation_meta(q8_1)
         with kv_format.emulate(kv):
             rows, wall = _streamed(_skeleton(hf_config), lambda select: dict(gguf.hf_state(path, select)), "blk.",
                                    prompts, k, dtype, device, mirrored, prepare)
@@ -143,9 +144,8 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
 
             rows, wall = _streamed(_skeleton(path), state, "model.layers.", prompts, k, dtype, device, mirrored,
                                    prepare)
-        source = model_meta(path) | _moe_meta(mirrored) | ({"q8_1": q8_1, "act": act or "q8_1"} if q8_1 else {}) | (
-            {"hf_reference": _hash(hf_reference)} if quantized else {}) | (
-            {"w4a4": _hash(w4a4)} if act in ("fp4", "fp4-static") else {})
+        source = model_meta(path) | _moe_meta(mirrored) | _emulation_meta(q8_1, act) | (
+            {"hf_reference": _hash(hf_reference)} if quantized else {})
     else:
         if q8_1:
             raise ValueError(f"{path}: a dense checkpoint has no quantized linears to emulate")
@@ -276,7 +276,18 @@ def _moe_meta(mirrored: bool) -> dict:
     return {"moe_block": f"d3-reference@{moe.reference_hash()}"} if mirrored else {}
 
 
-def _hash(module) -> str:
-    """A module's source hash: a floor is recorded at its emulator's and reference's (docs/m06-lowp.md §4.8)."""
-    with open(module.__file__, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()[:16]
+def _emulation_meta(path: str | None, act: str | None = None) -> dict:
+    """A floor's emulated path and mode, and one hash over the modules emulating them (docs/m06-lowp.md §4.8): a change
+    to any invalidates the floor."""
+    if not path:
+        return {}
+    return {"q8_1": path, "act": act or "q8_1", "emulation": _hash(q8_1_emulator, modes, w4a4, hf_reference)}
+
+
+def _hash(*modules) -> str:
+    """The modules' sources' hash."""
+    h = hashlib.sha256()
+    for module in modules:
+        with open(module.__file__, "rb") as f:
+            h.update(f.read())
+    return h.hexdigest()[:16]

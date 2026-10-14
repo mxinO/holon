@@ -84,12 +84,12 @@ class _Dequantized:
             else None
         self.facts, self._cache = facts, {}
 
-    def dequantized(self, parts: dict[str, torch.Tensor]) -> torch.Tensor:
-        """The whole weight dequantized, once per weight, keyed by its primary part."""
+    def dequantized(self, parts: dict[str, torch.Tensor], make=None) -> torch.Tensor:
+        """`make(parts)` (default: the whole weight dequantized), once per weight, keyed by its primary part."""
         first = next(iter(parts.values()))
         key = (first.data_ptr(), first.shape)
         if key not in self._cache:
-            self._cache[key] = self._dequantize(parts)
+            self._cache[key] = (make or self._dequantize)(parts)
         return self._cache[key]
 
     def _dequantize(self, parts: dict[str, torch.Tensor]) -> torch.Tensor:
@@ -101,8 +101,8 @@ class _Dequantized:
 
 
 def ggml_mxfp4(blocks: torch.Tensor) -> torch.Tensor:
-    """gguf-py's MXFP4 dequantization, vectorized in torch (gguf-py's runs on one core: a 30B's expert stacks, decoded
-    on every call, took ≈ 18 s a layer): per 32 values an e8m0 byte, then 16 bytes holding element j low and j + 16
+    """gguf-py's MXFP4 dequantization, vectorized in torch (gguf-py's runs on one core: ≈ 18 s for a 30B layer's expert
+    stacks, ≈ 1 s here): per 32 values an e8m0 byte, then 16 bytes holding element j low and j + 16
     high; `e2m1 · 2^(e − 127)` equals gguf-py's doubled table times half the scale by value."""
     b = blocks.reshape(-1, 17)
     codes = torch.cat((b[:, 1:] & 0x0F, b[:, 1:] >> 4), dim=-1)
@@ -119,9 +119,16 @@ class QEmbedding(_Dequantized):
         return ops.qembedding(ids, self.dequantized({"blocks": blocks})).to(getattr(torch, self.facts["dtype"]))
 
 
+# A stack's f32 decode is cached up to this size (every test model's, and a small model's: ≤ 12 GiB over 96 stacks);
+# a larger one (a 30B's 0.8–1.6 GB, ≈ 122 GB in all) is decoded on every call, only the experts the call routes to:
+# Tier A fits a 64 GB budget, at the cost of a decode per layer and step (MXFP4 in torch: ≈ 1 s a layer; gguf-py's
+# k-quants and i-quants, on one core: ≈ 10–20 s a layer, so a 30B GGUF Tier A of those types takes hours).
+CACHE_BYTES = 128 << 20
+
+
 class LinearExperts:
-    """Expert stacks: ggml layouts dequantized by gguf-py, HF layouts per expert by std.weights.hf's reference, on
-    every call (a 30B's stacks in f32 take ≈ 122 GB: Tier A must fit a 64 GB budget); dense ones as stored, the
+    """Expert stacks: ggml layouts dequantized per expert (gguf-py, MXFP4 in torch), HF layouts per expert and unit by
+    std.weights.hf's reference — cached when small (`CACHE_BYTES`), else per call; dense ones as stored, the
     activation rounded to their dtype (the contract)."""
 
     def __init__(self, ctx, *, layout: str, experts: int, out: int, glu: str, out_dtype: str, **facts) -> None:
@@ -132,14 +139,25 @@ class LinearExperts:
         if self.quantized is None:
             weight = parts["weight"]
             y = moe.linear_experts(x, weight, ids, self.glu, operand_dtype=weight.dtype)
-        elif self.quantized.ggml is not None:
-            stack = self.quantized._dequantize(parts).view(self.experts, self.out, -1)
-            y = moe.linear_experts(x, stack, ids, self.glu)
         else:
-            stack = torch.stack([torch.cat([hf.dequantize(self.quantized.elem, u) for u in units])
-                                 for units in moe.expert_parts(parts, self.experts, merged=self.glu == "swiglu")])
+            if self.experts * self.out * x.shape[-1] * 4 <= CACHE_BYTES:
+                stack = self.quantized.dequantized(parts, lambda p: self._decode(p, range(self.experts)))
+            else:
+                stack = self._decode(parts, ids.unique().tolist())
             y = moe.linear_experts(x, stack, ids, self.glu)
         return y.to(self.out_dtype)
+
+    def _decode(self, parts, experts) -> torch.Tensor:
+        """The f32 stack [E, out, in] with `experts` decoded (the others zero)."""
+        q = self.quantized
+        if q.ggml is not None:
+            rows = [q._dequantize({"blocks": parts["blocks"][e]}) for e in experts]
+        else:
+            units = moe.expert_parts(parts, self.experts, merged=self.glu == "swiglu")
+            rows = [torch.cat([hf.dequantize(q.elem, u) for u in units[e]]) for e in experts]
+        stack = rows[0].new_zeros(self.experts, *rows[0].shape)
+        stack[list(experts)] = torch.stack(rows)
+        return stack
 
 
 class MoeTopk:

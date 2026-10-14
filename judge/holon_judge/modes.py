@@ -25,14 +25,15 @@ MODES = ("q8_1", "fp4", "fp4-static")
 
 def quantizer(elem: str, path: str, mode: str, scale: torch.Tensor | None = None) -> Callable[[torch.Tensor],
                                                                                               torch.Tensor]:
-    """f32 rows [R, in] -> the values the kernel multiplies (f32), for a weight of `elem` on `path` in `mode`."""
+    """f32 rows [R, in] -> the values the kernel multiplies (f32), for an FP4 weight of `elem` on `path` in `mode`.
+    FP8's floors (W8A8, W8A16) are Gate B's; ggml types are the GGUF floors' (`gguf.emulate_q8_1`)."""
+    if elem not in w4a4.GROUP:
+        raise ValueError(f"{elem}: the HF floors emulate FP4 weights (FP8's W8A8 / W8A16 floors are Gate B's)")
     if mode == "q8_1":
-        b = q8_1.blocking(elem, path)
-        if b.sum_group:
-            raise ValueError(f"{elem}: an offset type (the GGUF floors' q8_1.matmul emulates those)")
+        b = q8_1.blocking(elem, path)                    # FP4 types use no stored sums
         return lambda x: q8_1.quantize(x, b).float()
-    if path != q8_1.MMQ or elem not in w4a4.GROUP:
-        raise ValueError(f"{mode} is mmq's on FP4 weights, not {path}'s on {elem}")
+    if path != q8_1.MMQ:
+        raise ValueError(f"{mode} is mmq's, not {path}'s")
     if mode == "fp4":
         return functools.partial(w4a4.values, elem)
     if mode == "fp4-static" and elem == "nvfp4" and scale is not None:

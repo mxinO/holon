@@ -94,9 +94,9 @@ def _gate(a: argparse.Namespace) -> int:
         if path.suffix == ".gguf":
             types = gguf.hf_types(path)
             nmse = {n: (types[re.sub(r"\[\d+\]$", "", n)], v) for n, v in gguf.gate(path, original).items()}
-            bound = {n: hf_quant.GATES.get(t, gguf.GATE) for n, (t, _) in nmse.items()}
+            bound, folded = {n: gguf.GATES.get(t, gguf.GATE) for n, (t, _) in nmse.items()}, []
         else:
-            nmse = hf_quant.gate(path, original)
+            nmse, folded = hf_quant.gate(path, original)
             bound = {n: hf_quant.GATES[elem] for n, (elem, _) in nmse.items()}
     by_role: dict[str, float] = {}
     for n, (_, v) in nmse.items():
@@ -106,7 +106,8 @@ def _gate(a: argparse.Namespace) -> int:
     meta = gguf.file_meta(path) if path.suffix == ".gguf" else golden.model_meta(path)
     report = {"model": meta["model"], "original": golden.model_meta(original)["model"], "plant": a.plant,
               "tensors": len(nmse), "max": max(v for _, v in nmse.values()), "max_by_role": by_role,
-              "gates": sorted(set(bound.values())), "over": len(over), "first_over": over[:8]}
+              "gates": sorted(set(bound.values())), "norms_folded": len(folded), "over": len(over),
+              "first_over": over[:8]}
     print(json.dumps(report, indent=1))
     if a.json:
         pathlib.Path(a.json).parent.mkdir(parents=True, exist_ok=True)

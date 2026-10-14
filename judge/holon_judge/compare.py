@@ -203,13 +203,14 @@ def _path_failures(floor: dict, cand: dict) -> list[str]:
     or fail a correct quantized cache (an exact one). A Tier B floor emulates one kernel path (`q8_1`) in one
     activation mode (`act`, default q8_1) for every quantized matmul: the candidate's calls while scoring must all
     have taken that `path/mode` (docs/m06-lowp.md D3: a run is scored against the floor of the mode it ran), and be
-    counted."""
+    counted. A recording made before M0.6 counted expert calls by path (`expert_calls`), all q8_1."""
     if floor.get("kv") != cand.get("kv"):
         return [f"the floor's KV format is {floor.get('kv') or 'the model dtype'}, the candidate's "
                 f"{cand.get('kv') or 'the model dtype'}"]
     if not floor.get("q8_1"):
         return []
-    want, calls = f"{floor['q8_1']}/{floor.get('act') or 'q8_1'}", cand.get("calls") or {}
+    want = f"{floor['q8_1']}/{floor.get('act') or 'q8_1'}"
+    calls = cand.get("calls") or {f"{path}/q8_1": n for path, n in (cand.get("expert_calls") or {}).items()}
     return ([] if calls.get(want) else [f"no calls counted on {want}, the floor's path and mode"]) + [
         f"{n} calls on {other}, the floor emulates {want}" for other, n in calls.items() if other != want and n]
 

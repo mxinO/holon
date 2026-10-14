@@ -26,6 +26,7 @@ from holon_std.moe.units import ExpertLinear
 from holon_std.weights.hf.source import HFSafetensors
 from holon_testing import hf_quant_files as hq
 from holon_testing.qwen3_5_files import LLAMA
+from holon_testing.ref_kernels import kernels as ref_kernels
 from safetensors.torch import load_file, save_file
 from transformers import AutoModelForCausalLM
 
@@ -112,6 +113,9 @@ def test_a_quantized_checkpoint_serves_what_transformers_computes(files, dialect
                 assert t.parts["scale2"].shape == () and t.parts["scale2"].view(torch.int32) == want.view(torch.int32)
     engine = _engine(quantized)
     assert _error(engine, _oracle(dense)) <= 1e-4
+    if moe:                                  # a 30B's stacks: decoded per call, only the routed experts
+        with mock.patch.object(ref_kernels, "CACHE_BYTES", 0):
+            assert _error(_engine(quantized), _oracle(dense)) <= 1e-4
     # The judge's golden: the file through its own map and the reference, one layer at a time (docs/m06-lowp.md §4.8);
     # compressed-tensors' NVFP4 decoding is within 2 ulp of the reference's (D10)
     r = compare(golden.record(str(dense), _prompt_set()), golden.record(str(quantized), _prompt_set())).overall
@@ -189,8 +193,9 @@ def test_the_tier_a_plants_fail(files, plant, dialect):
     ("ct-mxfp4", "mxfp4-scale-halved"),                          # M5
     ("quark", "mxfp4-scale-as-e4m3")])                           # M3
 def test_the_gate_holds_what_the_source_yields_to_the_original(files, tmp_path, dialect, plant):
-    """§4.8's gates: every tensor the engine's source yields (per expert; a norm's consumers with the norm folded in)
-    within its format's NMSE of the original; a dialect's or the reference's misreading of MXFP4 scales fails them."""
+    """§4.8's gates: every tensor the engine's source yields (per expert; a dense one exactly; a smoothed norm folded
+    into its consumers) within its format's NMSE of the original; a dialect's or the reference's misreading of MXFP4
+    scales fails them."""
     quantized, _ = files(dialect, True)
     original = quantized.parent / "tiny-True"
     if plant == "smoothed":                  # scale moved from each norm into its consumers' columns, as SmoothQuant
@@ -206,10 +211,12 @@ def test_the_gate_holds_what_the_source_yields_to_the_original(files, tmp_path, 
                         tensors[c] = w / s
         save_file(tensors, original / "model.safetensors")
     with PLANTS[plant]() if plant in PLANTS else contextlib.nullcontext():
-        nmse = gate(quantized, original)
+        nmse, folded = gate(quantized, original)
     over = [n for n, (elem, v) in nmse.items() if not v <= GATES[elem]]
-    assert len(nmse) == 2 * (4 * 3 + 7) + 3 and bool(over) == (plant in PLANTS), over
-    assert {elem for elem, _ in nmse.values()} == {ELEM[dialect], None}
+    assert bool(over) == (plant in PLANTS), over
+    assert len(folded) == (4 if plant == "smoothed" else 0)                  # 2 layers × 2 norms, folded if moved
+    assert len(nmse) == 2 * (4 * 3 + 9) + 3 - len(folded)
+    assert {elem for elem, _ in nmse.values()} == {ELEM[dialect], None} | ({"folded"} if folded else set())
 
 
 @pytest.mark.parametrize("dialect,moe,modes", [("ct-mxfp4", True, ["q8_1", "fp4"]),
@@ -224,9 +231,11 @@ def test_the_floors_emulate_each_activation_mode(files, dialect, moe, modes):
     kl = {"a16": compare(gold, plain).overall.kl_mean}
     for act in modes:
         floor = golden.record(str(quantized), prompts, torch.bfloat16, q8_1="mmq", act=act)
-        assert floor.meta["act"] == act and floor.meta["hf_reference"] and ("w4a4" in floor.meta) == (act != "q8_1")
+        assert floor.meta["act"] == act and floor.meta["hf_reference"] and floor.meta["emulation"]
         kl[act] = compare(gold, floor).overall.kl_mean
     assert kl["a16"] < kl["q8_1"] < min(kl[a] for a in modes if a != "q8_1"), kl
+    with pytest.raises(ValueError, match="Gate B"):           # FP8's floors are W8A8 / W8A16
+        golden.record(str(files("fp8", False)[0]), prompts, torch.bfloat16, q8_1="mmq")
 
 
 GPU = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
