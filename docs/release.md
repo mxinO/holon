@@ -1180,26 +1180,29 @@ came in with the step-3 record. Outside the files `main` changed, the tree equal
 
 ## 14. User interface (UX step)
 
-Status: **rev 1, design for the release panel's review** (2026-10-14); nothing is built. The owner's request: "`holon
-serve xxx` just works", and keep the interface easy to extend — this is the simplest case (one model × one GPU); more
-tuning options (multiple GPUs) and an autotune module that tunes the serving parameters come later. Built on a
-branch cut from M0.7's, so its ABI additions join M0.7's 0.2 bump; it merges into M0.7's branch before `main`. M0.7's
-steps 2–3 run in parallel: this step touches neither `std.ops`, `std.mixers.gqa`, `std.mixers.gdn` nor
-`kernels.ggml_cuda`.
+Status: **rev 2, after the release panel's review** (2026-10-14); nothing is built. Rev 1 (d7ef8c9) was reviewed by
+two release reviewers (serving / ABI; architecture / scope): no blocker, no major; their findings and the lead's
+decisions are resolved in §14.13. The owner's request: "`holon serve xxx` just works", and keep the interface easy to
+extend — this is the simplest case (one model × one GPU); more tuning options (multiple GPUs) and an autotune module
+that tunes the serving parameters come later. Built on a branch cut from M0.7's, so its ABI additions join M0.7's 0.2
+bump; it merges into M0.7's branch before `main`. M0.7's steps 2–3 run in parallel: this step touches neither
+`std.ops`, `std.mixers.gqa`, `std.mixers.gdn` nor `kernels.ggml_cuda`.
 
 ### 14.1 Goal and acceptance
 
 1. **Hub references.** `holon serve unsloth/Qwen3.8-27B-GGUF:UD-IQ3_S` and `holon serve Qwen/Qwen3-8B` download into
    the HF cache and serve from the lock, as a downloaded path does today; `holon serve unsloth/Qwen3.8-27B-GGUF` serves
-   the file this card has a verified lock for. With `HF_HUB_OFFLINE=1` a cached reference serves without the network.
+   the file this card has a verified lock for. The chosen file is always logged; a file larger than the GPU's memory is
+   refused before any download. With `HF_HUB_OFFLINE=1` a cached reference serves without the network.
 2. **Help.** `holon serve --help` gives every flag a help line; the engine flags' lines come from `EngineConfig` field
    metadata, so a field added without help fails the CLI test. It also lists every plugin option an installed plugin
    declares, and the plugins selectable per slot.
-3. **`holon models`** lists, for the visible GPU, every locked model under its servable name and whether `holon serve`
-   would start from this card's lock (verified), another card's (borrowed, unverified) or none (outdated).
+3. **`holon models`** lists, for the visible GPU, every locked model under a name `holon serve` accepts, and whether
+   `holon serve` would start from this card's lock (verified), another card's (borrowed, unverified) or none
+   (outdated).
 4. **Claude Code hint.** Once the server answers, `frontends.http` prints the environment lines with the served id.
 5. **Short model id** by default; `--plugin-options http.model_name=ID` renames it.
-6. **Core stays general.** No hub or format name in `holon.*` (the denylist gains `huggingface`); ≈ 105 core lines.
+6. **Core stays general.** No hub or format name in `holon.*` (the denylist gains `huggingface`); ≈ 125 core lines.
 7. **No extra propagation.** This step merges before M0.7's closing propagation, which covers it (§14.10).
 
 ### 14.2 The configuration model (how the interface extends)
@@ -1225,6 +1228,12 @@ There is no third kind: no environment-variable configuration (invariant 3) and 
 invariant 5's typed deployment file, when it comes, is these two groups in one file, layered between the lock and the
 flags; nothing here needs it.
 
+**Which options a plan records is derived, not declared.** `plan_of` leaves out an option exactly when every plugin
+declaring it is in the `frontend` slot, which the engine never loads (`http.drop_billing_header`, `http.model_name`):
+they cannot shape outputs, so they no longer show as lock differences or move `plan_id`. Undeclared keys stay planned.
+No manifest key says "unplanned", so no plugin can hide an output-shaping option. No committed lock carries a frontend
+option, so no `plan_id` moves.
+
 ### 14.3 Hub references (item 1)
 
 **Decision: weight-source plugins may resolve references; the core asks them and names no hub.** A weight source
@@ -1235,47 +1244,64 @@ safetensors files; the GGUF source needs one file among many, chosen by a quanti
 |---|---|---|
 | (a) as today: `hf download`, then a path | none | two commands, and the user must know which file suits the card: not "just works" |
 | (b) a hub plugin in a new slot, formats declaring fetch patterns in their manifests | a slot, a manifest key, a ≈ 60-line generic plugin | which files form a checkpoint, and how a tag picks one of twenty GGUF files, is format knowledge that patterns express badly |
-| (c) **an optional `resolve` hook on weight-source plugins** | one optional Protocol, ≈ 15 core lines, ≈ 65 plugin lines | chosen |
+| (c) **an optional `resolve` hook on weight-source plugins** | one optional Protocol and one record, ≈ 20 core lines, ≈ 75 plugin lines | chosen |
 | (d) the core calls the hub library | — | breaks invariant 1 |
 
 A second hub plugs into (c) without touching the sources: a plugin of slot `weight_source` that provides no source and
 only resolves (its fetch returns a local path, which the existing sources detect and read). (b) becomes worth it only
 if several hubs each need every format; that is the trigger, recorded.
 
-**The hook** (`holon.api.hooks`, optional, on the weight-source plugin object; ABI addition):
+**The hook** (`holon.api`; optional, on the weight-source plugin object; ABI additions):
 
 ```python
-class ResolvesRefs(Protocol):
-    def resolve(self, ref: str) -> Callable[[], str] | None:
-        """`ref` names a checkpoint that is not a local path (e.g. a hub id): None if this plugin does not fetch it,
-        else a function that fetches it into the plugin's cache and returns the local path. Claiming may look the
-        reference up but never downloads; a PluginError explains a reference recognised but not servable."""
+@dataclass(frozen=True)
+class Resolved:
+    what: str                       # what will be fetched, for the log, e.g. "<repo>/<file>"
+    nbytes: int | None              # its total size from the listing; None: unknown
+    fetch: Callable[[], str]        # downloads (into the plugin's cache) and returns the local path
+
+class ResolvesRefs(Protocol):       # holon.api.hooks
+    def resolve(self, ref: str) -> Resolved | None:
+        """`ref` names a checkpoint that is not a local path (e.g. a hub id): None if this plugin does not fetch it.
+        Claiming may look the reference up but never downloads; a PluginError explains a reference recognised but not
+        servable."""
 ```
 
-**The core** (`assembly.resolve_ref`; `holon serve` calls it first, in its own process):
-- a `ref` naming an existing path is that path; no plugin is asked;
-- otherwise every installed weight-source plugin with the hook is asked (with `--source K`, only the one providing
-  `weight_source.K`); a PluginError is kept as a hint;
-- exactly one claim → its fetch → the local path, which becomes `EngineConfig.model` and is detected as before; none →
-  `<ref>: no such file or directory, and no weight source resolves it` plus the hints; several → name one with
-  `--source`. Claims are separate from fetches, so an ambiguous reference never downloads twice.
+**The core** (`assembly.resolve_ref`; `holon serve` calls it first, in its own process), in this order:
+1. a `ref` naming an existing path is that path; nothing else is asked, so a local `org/repo` directory stays a path;
+2. the repository rule (D-repo, below);
+3. every installed weight-source plugin with the hook (with `--source K`, only the one providing `weight_source.K`); a
+   PluginError is kept as a hint. Exactly one claim → it is logged (`holon: fetching <what> (<size>)`); if `nbytes`
+   exceeds the GPU's total memory (`Fingerprint.vram_gib`; v0 has no offload) it is refused before downloading, naming
+   both sizes and `holon models`; else its fetch runs, and the local path becomes `EngineConfig.model` and is detected
+   as before. None → `<ref>: no such file or directory, and no weight source resolves it` plus the hints; several →
+   name one with `--source`. Claims are separate from fetches, so an ambiguous reference never downloads twice.
 
 The download happens before the supervisor starts, so engine processes and restarts get a local path. The lock is
-found by the build hash as before (D2): a hub-cache GGUF's blob name is its sha256, so no file is re-read. The library
-keeps its own configuration (`HF_HOME`; `HF_TOKEN` or `hf auth login` for gated repositories); core and std read no
-environment variable. Offline (`HF_HUB_OFFLINE=1`), claims and fetches use the cache alone, so a cached reference
-serves without the network. The std distribution declares `huggingface-hub`, already in the runtime closure through
-transformers, so the plans' `uv_lock` hash is unchanged.
+found by the build hash as before (D2): a hub-cache GGUF's blob name is its sha256, so no file is re-read.
+
+**The hub library** stays the plugins' and stays lazy: `huggingface_hub` is imported inside `resolve`, so serving a
+local path never imports it. It is declared in std's `pyproject.toml` (for `manifest-deps`; already in the runtime
+closure through transformers, so the plans' `uv_lock` hash is unchanged), not in the manifests' `[dependencies]
+python`, which list what loading the plugin needs. The library keeps its own configuration (`HF_HOME`; `HF_TOKEN` or
+`hf auth login` for gated repositories); core and std read no environment variable.
+
+**Network and cache.** A claim lists the repository on the hub; on a connection error it falls back to the cache's
+listing of that repository, and if that fails too, its PluginError names `HF_HUB_OFFLINE=1` and the cache. Offline
+(`HF_HUB_OFFLINE=1`), claims and fetches use the cache alone, so a tag chooses among the **cached** files only; the log
+line names the file chosen either way.
 
 **References** (the plugins' grammar; the core sees an opaque string):
 
 | reference | claimed by | fetched |
 |---|---|---|
-| `Qwen/Qwen3-8B` | `std.weights.hf`, if the repository has `config.json` | the config, index, tokenizer, template and safetensors files |
+| `Qwen/Qwen3-8B` | `std.weights.hf`, if the repository has `config.json` and `*.safetensors` files or a safetensors index | the config, index, tokenizer, template and safetensors files |
 | `unsloth/Qwen3.8-27B-GGUF:UD-IQ3_S` | `std.weights.gguf` | the one file the tag names (below) |
-| `unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S` (`.gguf` optional) | `std.weights.gguf` | that file: the form `holon models` prints, a model id's name |
-| `unsloth/Qwen3.8-27B-GGUF` | the core first (D-repo below), else `std.weights.gguf` | this card's verified file; else the repository's only GGUF file, else an error listing its tags |
+| `unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S` (`.gguf` optional) | `std.weights.gguf` | the file `<stem>.gguf`, searched in every directory of the repository: the GGUF source's name drops the directory (`std/holon_std/weights/gguf/source.py:47-49`). The form `holon models` prints |
+| `unsloth/Qwen3.8-27B-GGUF` | the core first (D-repo), else `std.weights.gguf` if the repository has `.gguf` files | this card's verified file; else the repository's only GGUF file, else an error listing its tags |
 
+- **Narrow claims:** the HF source needs safetensors weights, the GGUF source needs `.gguf` files, so a GGUF repository
+  that also ships a `config.json` is not ambiguous. A repository with both kinds of weights is (→ `--source`).
 - **Tag rule:** the `.gguf` files of the repository (any directory, multimodal projectors excluded) whose stem ends in
   `-TAG` or `.TAG`, case-insensitively; of several, the shortest stem, so `:Q4_K_M` takes `X-Q4_K_M` over
   `X-UD-Q4_K_M`; a tie or no match is an error listing the tags. llama.cpp's `-hf` takes the first file matching
@@ -1285,27 +1311,26 @@ transformers, so the plans' `uv_lock` hash is unchanged.
 - A reference starting with `/`, `.` or `~` is a path only; a typo of a local path that reaches a hub fails with the
   message above, which starts with "no such file or directory".
 
-**D-repo: a repository reference serves this card's verified file.** Before asking the plugins, the core looks for
-locked model ids whose name continues `<ref>/` (whole path segments). If exactly one of them has a verified lock for
-this card (§14.5's lookup), the reference becomes that name, logged
+**D-repo: a repository reference serves this card's verified file** (kept by the lead). After the local-path check
+and before the plugins, the core looks for locked model ids whose name continues `<ref>/` (whole path segments). If
+exactly one of them has a verified lock for this card (§14.5's lookup), the reference becomes that name, logged
 (`holon: unsloth/Qwen3.8-27B-GGUF -> unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S, this card's lock`). Several
 verified (the RTX 5080 locks two Qwen3-8B GGUF files) → an error listing them; none → the plugins see the reference
 as given. The rule uses names and path segments only; on every card it makes `holon serve unsloth/Qwen3.8-27B-GGUF`
-serve the release's file for that card (5080: UD-IQ3_S; 4090, 5090, 3090: UD-Q4_K_M). ≈ 10 core lines, separable
-(§14.12, question 1).
+serve the release's file for that card (5080: UD-IQ3_S; 4090, 5090, 3090: UD-Q4_K_M). ≈ 10 core lines.
 
 ### 14.4 Help for every flag (item 2)
 
 - **Engine settings.** Each `EngineConfig` field carries `metadata={"help": …}` through a small helper in
   `engine.py`; today's trailing comments become the help strings. `engine_flags` passes it to argparse and raises on a
   field without one, so every CLI test, and CI, fails until it has help. The rendered ABI listing ignores metadata, so
-  `core/abi.txt` does not move.
+  `EngineConfig`'s listing does not move.
 - **`holon serve --help`** shows two groups, "launch" and "serving settings (override the lock)", each line with
   `EngineConfig`'s default, plus `holon serve`'s two own defaults (§14.2). The epilog lists the plugin options and the
   plugins selectable with `--slots` (per slot of cardinality single or ordered_multi, the installed plugins), all read
   from manifests without importing a plugin.
-- **Plugin options are declared in the manifest**, by the plugin that reads them (ABI addition: section `[options]`,
-  `Option`, `Manifest.options` appended last):
+- **Plugin options are declared in the manifest**, by the plugin that reads them (ABI additions: section `[options]`,
+  `Option` exported from `holon.api`, `Manifest.options` appended last):
 
   ```toml
   [options]   # the EngineConfig.plugin_options keys this plugin reads
@@ -1315,12 +1340,18 @@ serve the release's file for that card (5080: UD-IQ3_S; 4090, 5090, 3090: UD-Q4_
 
   `Option(help: str, default: str | None = None, choices: tuple[str, ...] = ())`: `help` is required; `default` is
   display text; values stay the plugin's to parse. Several plugins may declare one key (`std.ops` and `std.moe` both
-  read `quant.act`); each is listed.
-- **Two checks before any engine start**, on the layered configuration: a key no installed plugin declares → a warning
-  naming it (a typo is ignored silently today); a value outside a declaring plugin's `choices` → an error naming the
-  plugin and its choices. Today such a value raises `ValueError` inside the engine's build, a start failure of kind
-  "error", retried 4 times before the fallback. `key=` still deletes. `choices` are declared only for closed sets
-  (`kv.format`, `quant.act`), and the plugin's own check stays authoritative.
+  read `quant.act`); each is listed. A manifest that uses an option key added in a later ABI raises its `core_abi`
+  floor (design §4.1, at build).
+- **Checks before any engine start**, on each history entry's layered configuration:
+  - a key no installed plugin declares → a **warning** naming it (a typo is ignored silently today); the key still
+    enters `plugin_options`, so the plan diff shows it;
+  - a value must be in the `choices` of **every** declaring plugin that has `choices`;
+  - a **flag's** value outside them → an error naming the plugins and their choices. Today such a value raises
+    `ValueError` inside the engine's build, a start failure of kind "error", retried 4 times before the fallback;
+  - a **lock's** value outside them (a lock older than a narrowed `choices`) → a warning, and that history entry is
+    dropped, so `[defaults + flags]` serves;
+  - `key=` still deletes. `choices` are declared only for closed sets (`kv.format`, `quant.act`), and the plugin's own
+    check stays authoritative.
 - **The declarations** (14 keys, 9 plugins):
 
   | plugin | keys |
@@ -1354,10 +1385,13 @@ serve one: holon serve <name>
 - For each model id under `--plans` (default as `holon serve`), the row is `plans.nearest_class` with the installed
   sources, the function `holon serve` uses, so the two cannot disagree. Verified rows first: they are the recommended
   files for this card (release §6 locks one file per model and card). An unreadable history is a warning row.
+- **Every name printed is servable.** `check_locks.py` requires a committed lock's name (its model id without
+  `@<build>`) to be `<org>/<repo>` or `<org>/<repo>/<stem>`; all committed ids are. A row under another `--plans`
+  whose name is not of that form (a lock written from a local directory) is marked "not servable by name".
 - Context and sequences come from the lock's `[engine]` (generic fields). Whether a file fits is not shown: a lock
   records no memory need. A verified lock fits by construction; a borrowed one from a larger card may fail its start
   and fall back to defaults, logged.
-- The name is servable as it stands (§14.3). No visible GPU → an error naming `CUDA_VISIBLE_DEVICES`.
+- No visible GPU → an error naming `CUDA_VISIBLE_DEVICES`.
 
 ### 14.6 Claude Code hint (item 4)
 
@@ -1375,13 +1409,14 @@ the plugin. A rollback keeps the id, so the lines stay valid.
 
 ### 14.7 The served model id (item 5)
 
-- **Default: the last path segment of the bundle's `model_name`**: `Qwen3.8-27B-UD-IQ3_S` instead of
-  `unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S`, `Qwen3-8B` instead of `Qwen/Qwen3-8B`; a local file's or
-  directory's name is unchanged. The frontend serves one model and ignores a request's `model` field, as today.
-- **`http.model_name=ID`** (a declared option) renames it, in `/v1/models`, the responses and the hint.
+- **Default: the last path segment of the bundle's `model_name`** (accepted by the lead): `Qwen3.8-27B-UD-IQ3_S`
+  instead of `unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S`, `Qwen3-8B` instead of `Qwen/Qwen3-8B`; a local file's or
+  directory's name is unchanged. The frontend serves one model and ignores a request's `model` field, as today, so
+  clients configured with the old id keep working.
+- **`http.model_name=ID`** (a declared option) renames it, in `/v1/models`, the responses and the hint. Declared only by
+  a frontend plugin, it is not planned (§14.2), so it shows as no lock difference.
 - **Not a core `--served-model-name` flag:** the id is the frontend's concern, and `FrontendPlugin.serve` carries no
-  name; adding one changes a plugin-implemented signature. Like `http.drop_billing_header` today, the option is
-  planned, so it shows as a lock difference (§14.12, question 3).
+  name; adding one changes a plugin-implemented signature.
 
 ### 14.8 Future multi-GPU: where it goes (not built)
 
@@ -1391,7 +1426,7 @@ the plugin. A rollback keeps the id, so the lines stay valid.
 | ranks | the `launcher` slot, one built-in local rank (design §8) | a launcher plugin, selected by `--slots launcher=…` or by the lock |
 | lock class | `<gpu>/<toolchain>` from `platform.fingerprint(device)` | the fingerprint of the device group, `<gpu>x<n>/<toolchain>` (e.g. `rtx-4090x2/cu130-torch2.11`): still two segments, so `plans/<model>/<class>/<n>.lock` and `nearest_class`'s glob hold. A mixed group is its own class; the interconnect joins the class only if evidence shows it matters |
 | borrowing | own class, same GPU, same SM, same toolchain | GPU count first: a 1-GPU lock may serve on one card of a 2-GPU host (as today); a 2-GPU lock is never borrowed by a 1-GPU host, where it could not start |
-| `holon models`, D-repo | the first visible GPU's class | the visible group's class |
+| `holon models`, D-repo, the size refusal | the first visible GPU's class and memory | the visible group's class and memory |
 
 `holon serve <model>` stays the command: a 2×4090 host finds `rtx-4090x2` locks first, so the layout comes from the
 lock, and `--tensor-parallel N` overrides it like any setting.
@@ -1411,13 +1446,17 @@ step, the declarations a search space needs: `EngineConfig` field metadata and `
    with p95 TTFT and gap guards, measured under the judge's L4 rules.
 3. **A driver:** start from the nearest lock and search coordinate-wise. Each candidate is a full engine start
    (minutes); a candidate that does not fit fails fast (`OutOfUnits`).
-4. **The judge as the gate** (design D5 and design §10.5's first row): settings that change only scheduling (`max_seqs`,
-   `max_step_tokens`, `chunk_with_decode`, speculation depth, `recurrent.checkpoints`) are judged bounded with L4
-   re-scoring; options that change numerics (`kv.format`, `quant.act`) need L2 against goldens and floors, which a
-   user install does not have. A first version would search scheduling settings only.
+4. **The judge as the gate** (design D5 and design §10.5's first row): settings that change only scheduling
+   (`max_seqs`, `max_step_tokens`, `chunk_with_decode`, speculation depth, `recurrent.checkpoints`) are judged bounded
+   with L4 re-scoring; options that change numerics (`kv.format`, `quant.act`) need L2 against goldens and floors,
+   which a user install does not have. A first version would search scheduling settings only.
 5. **A host-local lock**, written by the tools into a user plans directory: design §4.4's host-local history on top of
-   the tree's. `holon serve` would read it first (`--plans` taking several directories, the first lock found winning).
-6. **Packaging:** tools and judge as an optional extra of the install, and `tune` added as a `holon` subcommand
+   the tree's. `holon serve` would read several directories (`--plans` repeated) and rank across them: a current,
+   verified host-local lock first; then the tree's verified lock; then a borrowed one (`nearest_class`'s order). A
+   host-local lock that a `git pull` made outdated (it pins other code) falls through to the tree's.
+6. **One tuner, two entry points.** The user's `holon tune` and design §10.2's agent-facing `tune.submit(site, space?)`
+   drive the same tuner, the same judge gate and the same lock writer; they differ only in who starts them.
+7. **Packaging:** tools and judge as an optional extra of the install, and `tune` added as a `holon` subcommand
    through an entry-point group (`holon.commands`), so the core never imports the tools.
 
 This step builds none of it. It makes sure the tuner and `holon serve` will read the same declarations and write and
@@ -1425,84 +1464,106 @@ read the same lock.
 
 ### 14.10 ABI, locks, merge order
 
-- **ABI 0.2 additions**, inside M0.7's bump, under the minor rule: `hooks.ResolvesRefs`, `Option`, `Manifest.options`,
-  the manifest section `[options]`. `EngineConfig`'s listing is unchanged. `core/abi.txt` is regenerated at 0.2;
-  `check_abi.py --base main` passes. The contracts listings do not change.
+- **ABI 0.2 additions**, inside M0.7's bump, under the minor rule: `hooks.ResolvesRefs` and the `Resolved` record;
+  `Option`, exported from `holon.api`; `Manifest.options`, appended last; the manifest section `[options]`.
+  `EngineConfig`'s listing is unchanged. `core/abi.txt` is regenerated at 0.2; `check_abi.py --base main` passes. The
+  contracts listings do not change.
 - **Locks.** The core, `std.weights.hf` and `.gguf`, and the manifests gaining `[options]` change their `src`, so every
   lock pinning them is outdated. That is already true of every lock until M0.7's closing propagation (its step 6). This
   step merges into M0.7's branch before then, so the one propagation covers it. `frontends.http` is pinned by no lock.
   If the step misses that window, it costs one propagation of its own; release step 7 re-propagates everything anyway.
+  `plan_of`'s derived rule (§14.2) moves no committed `plan_id`: no committed lock has a frontend option.
 - **Documents at build:** README (quickstart: `holon models`, then `holon serve unsloth/Qwen3.8-27B-GGUF`; the Claude
   Code section points at the printed lines; Options: `holon serve --help`; Docker: mount a cache volume at the image's
-  `HF_HOME`), D8's quickstart block, design §4.1 (`[options]`), §5.5 (the `resolve` hook) and §7.8 (the hint and id).
-  The README freeze served the legibility benchmark, retired in §4.0.
+  `HF_HOME`), D8's quickstart block, design §4.1 (`[options]`, and the `core_abi` floor rule for later option keys),
+  §4.3 (which options are planned), §5.5 (the `resolve` hook) and §7.8 (the hint and id). The README freeze served
+  the legibility benchmark, retired in §4.0.
 
 ### 14.11 Core lines, tests, checks, estimate
 
 | core change | file | lines |
 |---|---|---|
-| reference resolution | `assembly.py` | ≈ 15 |
+| reference resolution, the log line, the size refusal | `assembly.py` | ≈ 20 |
 | D-repo | `cli.py` | ≈ 10 |
-| `holon models` | `cli.py` | ≈ 25 |
+| `holon models`, the servable-name mark | `cli.py` | ≈ 27 |
 | help: field metadata, `engine_flags`, groups | `engine.py`, `cli.py` | ≈ 15 net |
-| `[options]`: `Option`, parse, epilog, the two checks | `api/manifest.py`, `cli.py` | ≈ 30 |
-| `ResolvesRefs` | `api/hooks.py` | ≈ 8 |
-| **total** | | **≈ 105** (cap 6000) |
+| `[options]`: `Option`, parse, epilog, the checks (flags error, lock entry dropped) | `api/manifest.py`, `cli.py` | ≈ 35 |
+| derived planned options | `plans.py` | ≈ 5 |
+| `ResolvesRefs`, `Resolved` | `api/hooks.py`, `api/` | ≈ 14 |
+| **total** | | **≈ 125** (cap 6000) |
 
-Plugins: `std.weights.hf` ≈ 25, `std.weights.gguf` ≈ 40 (the tag rule a pure function), `frontends.http` ≈ 20,
-manifests ≈ 35 TOML lines.
+Plugins: `std.weights.hf` ≈ 30, `std.weights.gguf` ≈ 45 (the tag rule a pure function), `frontends.http` ≈ 20,
+manifests ≈ 35 TOML lines; `check_locks.py` gains the name rule (≈ 3 lines).
 
 **Tests** (CPU, lean: three extended, two new, no network):
 - `core/tests/test_plans.py`, the parametrized `serve_history` case, extended: per case the `holon models` row
   (verified, borrowed, outdated, none, the unreadable-history warning) and D-repo (`org/repo` → its locked name in
-  "lock", unchanged in "borrowed").
+  "lock", unchanged in "borrowed"; a local `org/repo` directory stays a path).
 - `core/tests/test_plugins.py`, **new**, parametrized over toy weight-source plugins with the hook: an existing path
-  asks none; one claim fetches once and the other never; none raises with both hints; two raise naming `--source`;
-  `source` asks one.
-- `core/tests/test_plugins.py`, **new**, `holon serve --help` over toy manifests: every `EngineConfig` field has a flag
-  and its help, the options and slots are listed; an undeclared key warns, a value outside `choices` fails, `key=`
-  passes. `core/tests/test_api.py`'s manifest example gains an `[options]` stanza.
+  asks none; one claim fetches once and the other never; a claim larger than the GPU is refused before its fetch;
+  none raises with both hints; two raise naming `--source`; `source` asks one.
+- `core/tests/test_plugins.py`, **new**, `holon serve --help` and the option checks over toy manifests: every
+  `EngineConfig` field has a flag and its help, the options and slots are listed; an undeclared key warns and stays in
+  `plugin_options`; a flag outside one of two declarers' `choices` fails; a lock value outside them drops that history
+  entry with a warning; `key=` passes; the planned options leave out a key declared only by a frontend plugin and keep
+  an undeclared one. `core/tests/test_api.py`'s manifest example gains an `[options]` stanza.
 - `plugins/tests/test_gguf_source.py`, extended: the tag rule over file lists (plain over `UD-`, case, a directory,
-  projectors excluded, splits refused, an unknown tag lists the tags, the `repo/stem` form), and both sources' claims
-  with the hub listing monkeypatched (HF claims only with `config.json`; a claim downloads nothing).
+  projectors excluded, splits refused, an unknown tag lists the tags, the `repo/stem` form found in a subdirectory),
+  and both sources' claims with the hub listing monkeypatched: HF claims only with `config.json` and safetensors, GGUF
+  a bare repository only with `.gguf` files, so a GGUF repository with a `config.json` has one claimant; a claim
+  downloads nothing and reports the size; a connection error falls back to the cache listing, and with both failing
+  the hint names `HF_HUB_OFFLINE=1`.
 - `plugins/tests/test_frontend_http.py`, extended: the short id and `http.model_name` in `/v1/models`, and the hint
   text.
 
 **Checks:** `scripts/ci/run_all.sh` green: the denylist with `huggingface`, core size, `check_abi --base main`,
-`manifest-deps` (huggingface-hub), `uv lock --check`, `check_locks`, `check_docs`, `check_private`. The CPU tests of
-`core`, `plugins/tests/test_gguf_source.py` and `test_frontend_http.py`. One recorded end-to-end run on the A5000, each
-heavy command memory-capped: `holon serve unsloth/Qwen3-0.6B-GGUF:Q4_K_M` and `holon serve Qwen/Qwen3-0.6B` download
-and answer a chat completion; the same with `HF_HUB_OFFLINE=1`; the hint's id matches `/v1/models`; `holon models`
-against a temporary plans directory holding a tools-written lock for this card shows it verified, and D-repo picks it.
+`manifest-deps` (huggingface-hub in std's `pyproject.toml`), `uv lock --check`, `check_locks` (with the name rule),
+`check_docs`, `check_private`. The CPU tests of `core`, `plugins/tests/test_gguf_source.py` and `test_frontend_http.py`.
+One recorded end-to-end run on the A5000, each heavy command memory-capped: `holon serve unsloth/Qwen3-0.6B-GGUF:Q4_K_M`
+and `holon serve Qwen/Qwen3-0.6B` download (the chosen file logged) and answer a chat completion; the same with
+`HF_HUB_OFFLINE=1`; a reference larger than 24 GiB is refused before downloading; the hint's id matches `/v1/models`;
+`holon models` against a temporary plans directory holding a tools-written lock for this card shows it verified, and
+D-repo picks it.
 
 | # | work | checks | days |
 |---|---|---|---|
-| 1 | this design through the release panel | review clean | 0.5 |
-| 2 | items 1–5, D-repo, the declarations except `gqa` / `std.ops`, tests, documents | CPU tests, `run_all.sh` | 2 |
+| 1 | this design through the release panel (rev 1 reviewed; rev 2 re-check) | clean | 0.5 |
+| 2 | items 1–5, D-repo, the declarations except `gqa` / `std.ops`, tests, documents | CPU tests, `run_all.sh` | 2.5 |
 | 3 | end-to-end run (above) | recorded here | 0.5 |
 | 4 | panel code review loop | clean | 0.5–1 |
 | 5 | after M0.7's steps 2–3: `kv.format` and `quant.act` declared, on M0.7's branch, before its propagation | `run_all.sh` | 0.1 |
 
-**≈ 3.5–4 days**, beside M0.7, off the release's critical path.
+**≈ 4–4.5 days**, beside M0.7, off the release's critical path.
 
-### 14.12 Risks and open questions
+### 14.12 Risks
 
-**Risks:**
 - **Re-uploaded hub files.** A repository that replaces a file in place (quantizers do) yields a new build: no lock,
   defaults, logged as "no current lock". The remedy is a propagation. A revision in the reference could come later
   (additive; `@` is taken by model ids, so another separator).
-- **Downloads before the lock is known.** The hub reports a GGUF file's sha256, so a later addition could warn, before
-  a 15 GB download, that no lock matches. Not now.
-- **`choices` drifting from code.** A manifest's list narrower than the plugin's would refuse a valid value. Mitigated
-  by declaring `choices` only for the two closed sets and by the error naming the manifest.
+- **A file that fits the card's memory but not with its KV cache** passes the size refusal (it compares weights with
+  total memory only) and fails its start as today (`OutOfUnits`, at once).
+- **`choices` drifting from code.** A manifest's list narrower than the plugin's would refuse a valid flag value.
+  Mitigated by declaring `choices` only for the two closed sets and by the error naming the manifest.
 - **Disk and gated repositories:** the HF cache grows (README), and gated repositories need `hf auth login` (the
   library's error, with that hint).
 
-**Questions for the lead (or the owner):**
-1. **D-repo** (a repository reference serves this card's verified file; ≈ 10 core lines): keep or cut?
-2. **The short default id** changes `/v1/models` for hub files: accept?
-3. **Frontend-only options are planned** (`http.drop_billing_header` since M0.5, `http.model_name` now), so they show
-   as lock differences and move `plan_id`. Options: leave it (honest, cosmetic), or let `plan_of` skip options declared
-   only by plugins that do not run in the engine, which `[options]` now makes possible (a `holon.core.plans` change).
-4. **An undeclared option:** a warning (proposed, so a plugin installed later or a test option still works) or an
-   error?
+### 14.13 Review of rev 1: findings and decisions, resolved
+
+| # | finding or question (reviewer: S = serving / ABI, A = architecture / scope; L = lead) | resolution |
+|---|---|---|
+| L1 | Keep the bare-repo rule? | Kept; the order is explicit: an existing local path, then D-repo, then the plugins (§14.3) |
+| L2 | The shorter `/v1/models` id | Accepted: the frontend ignores a request's `model`, so clients keep working (§14.7) |
+| L3 | An undeclared option: warn or error? | Warns; the key still enters `plugin_options`, so the plan diff shows it (§14.4) |
+| L4 | Frontend-only options are planned | Derived, not declared: `plan_of` skips an option exactly when every declaring plugin is in the `frontend` slot; undeclared keys stay planned; no new ABI key (§14.2) |
+| 1 | S, A: bare-repo claims ambiguous for GGUF repositories that ship a `config.json` | HF claims only with `config.json` and safetensors files or an index; GGUF claims a bare repository only with `.gguf` files (§14.3) |
+| 2 | Downloads start before a too-large file is known | The claim reports the listing's total size; the core refuses above the GPU's total memory before fetching (§14.3, ≈ 5 lines) |
+| 3 | `choices` checks underspecified | A flag outside is an error; a lock value outside warns and drops that history entry, so `[defaults + flags]` serves; with several declarers the value must be in every declarer's `choices` (§14.4) |
+| 4 | Offline and network behaviour | The chosen file is always logged; a connection error falls back to the cache listing, then to a hint naming `HF_HUB_OFFLINE=1`; offline, a tag sees only cached files; `repo/stem` searches every directory, since the GGUF source's name drops it (§14.3) |
+| 5 | Names `holon models` prints must be servable | `check_locks.py` requires `<org>/<repo>[/<stem>]` names for committed locks; other rows are marked "not servable by name" (§14.5) |
+| 6 | The hub import made serving a local path depend on the library | Imported lazily inside `resolve`; declared in std's `pyproject.toml` for `manifest-deps`, not in the manifests' `[dependencies] python` (§14.3) |
+| 7 | ABI items incomplete | `hooks.ResolvesRefs` and `Resolved`, `Option` exported, `Manifest.options` appended last, the `[options]` section; design §4.1 states that a manifest using a later option key raises its `core_abi` floor (§14.4, §14.10) |
+| 8 | Host-local and tree locks: which wins | Ranked across directories: a current, verified host-local lock, then the tree's verified lock, then borrowed; an outdated host-local lock falls through (§14.9 item 5) |
+| 9 | `holon tune` and the agent-facing `tune.submit` | One tuner, one judge gate, one lock writer; two entry points (§14.9 item 6) |
+
+Rev 1's `check_docs.py` misses (two commands in `docs/adding-a-model.md`) came from running it outside the project
+environment; in the project venv it passes.
