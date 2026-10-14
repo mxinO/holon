@@ -59,4 +59,4 @@ class GDNRewind:
 
 
 def supports(f: dict) -> bool:
-    return f["dtype"] in ("bfloat16", "float16", "float32") and 2 <= f["kernel_size"] <= 8
+    return f["dtype"] == "bfloat16" and 2 <= f["kernel_size"] <= 8          # the L0's dtype

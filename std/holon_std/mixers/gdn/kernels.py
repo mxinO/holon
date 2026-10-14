@@ -32,8 +32,8 @@ from zero state and never reads its unit, so a unit reused by a new sequence nee
   accepted [S], width) -> None`, with R ≤ R' rows of `width` tokens (row r's at r·width in each layer's x, a and b; its
   conv inputs before them in window[:, r]) and n_r = accepted[slots[r]] (int64) of its drafts accepted: in place,
   a and b ← −1e4 (in their dtype) at each row's tokens past its first 1 + n_r, and state[:, slots[r]] ← the last K-1
-  inputs of (window[:, r] ‖ the row's first 1 + n_r tokens of x). Rows sharing a unit (graph padding) write it in
-  any order. Facts: channels, kernel_size, heads_v, dtype.
+  inputs of (window[:, r] ‖ the row's first 1 + n_r tokens of x). A unit shared by several rows (graph padding)
+  is left unspecified (deterministic otherwise). Facts: channels, kernel_size, heads_v, dtype.
 """
 from __future__ import annotations
 
