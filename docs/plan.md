@@ -47,7 +47,7 @@ the code is our own plugin-native implementation. Only kernels may be borrowed, 
 | M0.5 | Qwen3-8B, Qwen3.8-27B | logits-processor lifecycle, host-token depth gate, drafts to the host, per-request errors, resume (`docs/m05-grammar.md` §3; the forward/sample split only if measured necessary) | xgrammar processor, parsers, one HTTP frontend with OpenAI, Anthropic and Responses routers |
 | M0.6 | Qwen3-8B / Qwen3-30B-A3B in FP8 (block-scaled), NVFP4 and MXFP4 | low-precision HF checkpoints, dense and MoE: weight-source dialects over `QTensor` parts, `qlinear` / `linear_experts` providers, judge tiers per format; RTX PRO 6000 (sm_120), FP8 also on sm_89 | fp8 / nvfp4 / mxfp4 dialects and kernels |
 | M0.7 | Qwen3-8B, Qwen3.8-27B GGUF | fused prefill glue (KV-store kernel, add+norm, q/k norm) and a model-specific megakernel experiment (design §5.7) | fused kernels in std and in the model package |
-| Release | every v0 model | packaging, quickstart, rtx-5090 / rtx-3090 locks, an agent demo; the legibility benchmark (§9) before the ABI freezes; the benchmark suite (decode, prefill, agent trace vs llama.cpp, FreeToken and SGLang where each runs) on the release classes | — |
+| Release | every v0 model | packaging, quickstart, rtx-5090 / rtx-3090 locks, an agent demo; the benchmark suite (decode, prefill, agent trace vs llama.cpp, FreeToken and SGLang where each runs) on the release classes | — |
 
 Order (user, 2026-10-13): M0.4 → M0.5 (whole: its grammar seam builds on verify); M0.6 runs in parallel, in its own
 worktree; then M0.7 and the release, which needs the benchmark suite first.
@@ -506,7 +506,7 @@ measured here).
 | S6 spike | CPU handshake inside a FULL graph on a desktop host | seam does not hold → redesign the graph/CPU seam before the core ABI freezes |
 | M0 | decode + mixed-trace TTFT/TPOT vs mini-sglang; CPU/step vs nano-vllm; core LOC | < 0.9× after two weeks of perf work, or core > 6k → move per-token input prep to GPU kernels and cut core scope before continuing |
 | M0.2 | core changes needed for MoE; approvals per week from propagation | > 1 core ABI change, or > 3 approvals/week → abstraction or machinery is wrong; simplify |
-| Before the release freezes the ABI (design D9; moved from "after M0.3" by the owner, 2026-10-14) | legibility benchmark: ≥ 3 runs per side, same agent and prompt, adding a model whose units already exist, from a branch point before its model package | Holon not ≥ 30% cheaper for the agent than a mini-sglang fork → collapse slots and nouns |
+| ~~Before the release freezes the ABI~~ — **retired by the owner (2026-10-14)** | legibility benchmark (agent cost to add a model vs a mini-sglang fork). An exploratory 1 + 1 pilot passed on both sides at ≈ 1.4–1.8× Holon's cost (one run each, within noise); Holon's advantage is isolation (no shared code touched), not agent cost per model (`docs/release.md` §4.0) | — |
 | Any | propagation sweep time; approvals/day | > 30 min or > 1/day → async propagation (design §4.6 trigger) |
 | M0.1 / M0.2 / M0.3 | GGUF decode **and prefill** tok/s vs llama.cpp on the same card and quant (RTX 5080), dense and MoE | < 0.8× on either after a perf pass → fix the GGUF kernel path (ported i-quant `mmq` or own Triton kernels for the slow types) before adding features |
 | v1 offload | MoE larger than VRAM on RTX 5080: decode tok/s vs FreeToken and Strata on the same node | < 0.8× → rework the offload path before adding features |

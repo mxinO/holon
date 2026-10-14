@@ -23,8 +23,9 @@ best-known, human-tuned defaults. Optionally, a trusted judge and a supervisor l
    with no agent involved.
 4. **Optional self-improvement** — when a capable agent and the user choose to, the agent can tune and replace
    plugins under a judge it cannot edit, with automatic rollback (§10). Nothing else depends on this layer.
-5. **Small and legible** — every plugin is small enough for a coding agent to hold in context (measured: plan
-   M0.3 legibility benchmark).
+5. **Small and legible** — every plugin is small enough for a coding agent to hold in context. Adding a model is
+   a new package that touches no shared code (isolation); a cost comparison against a mini-sglang fork was piloted and
+   retired as a gate (`docs/release.md` §4.0).
 6. **Competitive single-GPU performance** — within 10% of mini-sglang on decode and on mixed agent traffic, on the
    same GPU, for M0.
 

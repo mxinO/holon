@@ -17,8 +17,8 @@ A user with an RTX 3090, 4090, 5080 or 5090 installs Holon at the release tag, s
 one command, and points an OpenAI or Anthropic client, or Claude Code, at it; every published number comes from an
 evidence record. Acceptance (each a gate, §9):
 
-1. **Legibility** (§4): over n = 10 runs per side, Holon's median cost ≤ 0.70× a mini-sglang fork's for the same
-   agent adding Mixtral, under **both** costings of §4.4, both sides passing the same check; else §4.7.
+1. **Legibility — retired as a gate by the owner (2026-10-14; §4.0).** The exploratory pilot is reported as measured;
+   no counted runs, no verdict, no legibility claim in the README.
 2. **ABI 1.0** (§7): declared, enforced at load, listed and checked in CI.
 3. **Locks** (§6): every cell of the matrix written and approved at the release commit, in the release environment;
    `holon serve` reports a plan equal to the lock's on each class, or whose only diff is a reported `max_model_len`
@@ -185,6 +185,32 @@ new families or formats; v1's offload, VMM, sandbox and self-improvement; GPUs o
   CPU-only GitHub Actions run of `run_all.sh` and the CPU tests comes with publishing.
 
 ## 4. The legibility benchmark (plan §9, design D9)
+
+### 4.0 Status: retired as a gate (owner, 2026-10-14)
+
+The harness was built and validated (on the legibility branch, its §13.8: fixtures, δ, reference ports within 0.5δ,
+plants failing, `$STATIC` at both branch points, a sandboxed run harness). The owner approved an exploratory 1 + 1
+pilot (Claude Sonnet 5.5): **both sides passed the Mixtral check on their first try.** Cost (costing 2): Holon $0.36
+(21 turns, 8 files, +144 lines), mini-sglang $0.20 (13 turns, 4 files, +98 / −3). Up to the first passing check,
+Holon $0.24 and mini-sglang $0.17 (≈ 1.4×); after it, Holon's agent spent $0.12 on work the prompt did not ask for (a
+CPU test, a README line, the static checks three times), prompted by AGENTS.md's rules. Documentation reading was
+$0.055 of Holon's cost; neither agent opened design.md. One run per side is within noise (×1.8); no verdict.
+
+**What the pilot did show is isolation.** Holon's change was a new `models/mixtral/` package plus its entry point
+(and the unrequested test and README line): no shared code changed. mini-sglang's agent edited three shared files
+that every model uses — the MoE detection rule in `config.py` (from the model-type name to "has experts"), a
+Mixtral-specific default in the shared config, and a key-rename rule in the shared weight loader applied to every
+model's weights — checked only against two Qwen3 regression fixtures. Holon's per-model locks and byte-identical
+propagation (e.g. M0.6 Gate A: four new locks, all seven existing snapshot traces unchanged) are the evidence for that
+property.
+
+**Decision (owner, 2026-10-14):** Holon's advantage is isolation — adding or changing a model does not touch or affect
+other models — not a lower agent cost per model. The cost-based legibility gate (plan §9's row, acceptance 1, step 5)
+is retired; no counted runs. Recorded honestly: it is retired after an exploratory pilot that leaned against Holon on
+cost (≈ 1.4× to the first pass, ≈ 1.8× overall, one run each). Frictions the pilot surfaced (the bundle's tool /
+reasoning formats for a model without them, `derived_from`'s commit pin, AGENTS.md rules prompting unrequested work)
+are documentation and small-structure follow-ups; the frozen-docs rule (§13.6) lapses with the gate. The remainder of
+§4 is kept as the design of the retired benchmark.
 
 ### 4.1 Model
 
@@ -462,7 +488,7 @@ recipe terms, the model plugin protocol, manifest keys, how plugins register.
 | 3 | Baselines (§5.1): pins, SGLang backend, temperature option, `report.py`; smoke and tier-1 bars on the 3090 / 5090 — on current main | smoke matrix and bars recorded | 2 |
 | — | M0.6 Gate A merges (Gate B is off the critical path); M0.7 starts | — | — |
 | 4 | Documentation (D8), frozen at a recorded commit; then the legibility harness: fixtures, `$CHECK`, calibration, reference ports, plants, `$STATIC`, concept map, the squashed branch point | guide check; δ and port margins recorded; plants fail | 3 |
-| 5 | Legibility: 10 + 10 runs (the first 2 + 2 the pilot), 3 guide-free, verdict; on fail §4.5 / §4.7 | verdict record; owner informed | 3–4 |
+| 5 | ~~Legibility runs~~ — retired by the owner after the exploratory pilot (§4.0) | pilot recorded | — |
 | — | M0.7 closes: one propagation covering D1's environment, D2, the mechanism and grammar on the development classes | its gates; served plan = lock on rtx-5080 / 4090 (acceptance 3's form) | — |
 | 6 | ABI 1.0, versions 0.1.0; design §4.1 / §4.4 / §4.5 and plan §1 corrections; demo task committed (D7); panel review of steps 1–6; the squashed public root created locally | review clean | 2 |
 | 7 | Locks (§6) in the release environment on the public root: propagate all, tune the R cells, MTP decision (D3) | L2, snapshots ×3; approvals and sweep time recorded | 2 + 3 machine |
