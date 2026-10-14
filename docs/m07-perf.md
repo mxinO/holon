@@ -900,20 +900,27 @@ At 8 rows the candidate and its floor both sit well above the 4-row ones (KL p99
 mmq path's rounding, which the floor emulates; the verdict is against the floor of the same paths. `--max-seqs 4` (the
 locks' value). The 8-row floors took ≈ 27 min each on an RTX A5000.
 
-Records `m07-step1_l2-<n>_<class>`; the floors are `judge/goldens/qwen3.8-27b-ud-iq3_s/v1-bfloat16-rows8-rtx-5080-kv-q8_0-floor`
-and `judge/goldens/qwen3.8-27b-ud-q4_k_m/v1-bfloat16-rows8-rtx-5090-floor`.
+Records `m07-step1_l2-<n>_<class>`; the floors are
+`judge/goldens/qwen3.8-27b-ud-iq3_s/v1-bfloat16-rows8-rtx-5080-kv-q8_0-floor` and
+`judge/goldens/qwen3.8-27b-ud-q4_k_m/v1-bfloat16-rows8-rtx-5090-floor`.
 
 ### 12.7 Review
 
 One reviewer (correctness, architecture, numerics / tests) on the aggregate change. Round 1: no blocker; one major
-(the guard and the small-step L2 had not run yet: run above); round 2: none, four nits (fixed or recorded: the D9 label on the no-cast table, the floor flags' error, step 4's drafter predicate in §12.8; the per-shape floor test still skips without a GPU), six minors and nine nits. Fixed: per-shape floors tied
+(the guard and the small-step L2 had not run yet: run above), six minors and nine nits. Fixed: per-shape floors tied
 to the candidate's per-shape paths (they checked only the set of paths); `d2_table --variant` re-derives the whole
 no-cast table (it kept only the with-cast set's keys); `mmvq_rows` and the floors need no GPU; the refusal exempts
 deployments with a drafter; `triton_attn` fits to the class SM's table, not the test device's; the head's calls on a
 per-shape floor are checked by mode only; docs (§3.1, this section, the guide's `core_abi`). Recorded, not changed:
 the DFlash floor's `_q8_1_matmul` keys limits by unmerged tensor shapes (latent: its draft tensors have no entry);
 a step shorter than the floor's rows (a prompt's last) may take the other path; `--crossover`'s SM is not checked
-against the class.
+against the class. Round 2: no blocker, major or minor; four nits (fixed or recorded: the D9 label on the no-cast
+table, the floor flags' error, step 4's drafter predicate in §12.8; the per-shape floor test still skips without a
+GPU). Round 3 (the 8-row L2, the floors' routes recomputed without a GPU, §12 against the evidence): none.
+
+Suite at 34235ea (code as committed; two RTX A5000s): `pytest core std plugins judge testing tools` 1185 passed, 65
+skipped in 16 min 29 s (step 0's base: 1155 / 63, 18 min 55 s; the new L0's compiles are cached by Triton after the
+first run, ≈ 3 min cold); `scripts/ci/run_all.sh main` green.
 
 ### 12.8 For the lead
 
