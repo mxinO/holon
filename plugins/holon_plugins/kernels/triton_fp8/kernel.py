@@ -74,7 +74,16 @@ def decode_config(gpu: str, n: int, k: int, rows: int) -> Decode:
 
 
 # Pinned per (GPU class, out, in) from `bench/fp8_kernels.py sweep` (M = 512); others take `Prefill()`.
-PREFILL_CONFIGS: dict[tuple[str, int, int], Prefill] = {}
+PREFILL_CONFIGS: dict[tuple[str, int, int], Prefill] = {
+    ("rtx-5080", 6144, 4096): Prefill(128, 64, 4, 2),
+    ("rtx-5080", 4096, 4096): Prefill(64, 64, 4, 2),
+    ("rtx-5080", 24576, 4096): Prefill(64, 64, 4, 2),
+    ("rtx-5080", 4096, 12288): Prefill(64, 64, 4, 2),
+    ("rtx-4090", 6144, 4096): Prefill(128, 64, 4, 2),
+    ("rtx-4090", 4096, 4096): Prefill(128, 64, 4, 2),
+    ("rtx-4090", 24576, 4096): Prefill(128, 64, 4, 2),
+    ("rtx-4090", 4096, 12288): Prefill(128, 128, 8, 2),
+}
 
 
 def prefill_config(gpu: str, n: int, k: int) -> Prefill:

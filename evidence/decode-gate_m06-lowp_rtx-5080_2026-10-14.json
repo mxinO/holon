@@ -1,0 +1,678 @@
+{
+ "workload": "m06-b1-decode-gate",
+ "date": "2026-10-14",
+ "gpu_class": "rtx-5080/cu130-torch2.11",
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "commit": "55616dd",
+ "clock_screen": {
+  "load": "60 s of bf16 8192^2 matmuls, nvidia-smi every 250 ms",
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "samples": 232,
+  "sm_clock_mhz": {
+   "median": 2722.0,
+   "min": 2700.0,
+   "p5": 2700.0,
+   "max_sm": 3090.0
+  },
+  "thermal_slowdown_share": {
+   "sw": 0.0,
+   "hw": 0.0
+  },
+  "hw_slowdown_share": 0.0,
+  "power_cap_share": 0.5431034482758621
+ },
+ "command": {
+  "sweep": "python bench/fp8_kernels.py sweep --paths decode --model <Qwen/Qwen3-8B-FP8>",
+  "gate": "python bench/fp8_kernels.py gate --model 220b46e3b2180893580a4454f21f22d3ebb187d3 --gguf Qwen3-8B-FP8-Q8_0.gguf --llama-bench llama-q8_0-rtx-5080.json",
+  "llama": "llama-bench (llama.cpp cbe28bb3) -m <Q8_0 .gguf> -p 512 -n 128 -d 0,256 -ngl 99 -fa on -r 5 -o json"
+ },
+ "files": {
+  "fp8": "Qwen/Qwen3-8B-FP8 (its config.json gives the shapes)",
+  "q8_0": "its conversion by llama.cpp cbe28bb3's convert_hf_to_gguf.py --outtype q8_0 (FP8 dequantized, every matrix Q8_0)"
+ },
+ "claim": "acceptance 11: the W8A16 split-K decode kernel's per-shape times (M = 1..16, 36 layers) + the bf16 head + the non-GEMM decode time of Holon's Q8_0 decode on the same card predict >= 0.85x llama-bench's Q8_0 tg128 (median of repetitions 2-5) measured in the same job",
+ "results": {
+  "layers": 36,
+  "shapes": {
+   "qkv": {
+    "out": 6144,
+    "in": 4096,
+    "configs": {
+     "1": {
+      "block_n": 32,
+      "splits": 2,
+      "num_warps": 4,
+      "num_stages": 2
+     },
+     "16": {
+      "block_n": 32,
+      "splits": 2,
+      "num_warps": 4,
+      "num_stages": 2
+     }
+    },
+    "us": {
+     "1": 30.23,
+     "2": 31.18,
+     "3": 31.22,
+     "4": 31.25,
+     "5": 31.21,
+     "6": 31.2,
+     "7": 31.28,
+     "8": 31.28,
+     "9": 31.27,
+     "10": 31.31,
+     "11": 31.36,
+     "12": 31.37,
+     "13": 31.3,
+     "14": 31.38,
+     "15": 31.51,
+     "16": 31.6
+    },
+    "GB/s at M=1": 832
+   },
+   "o": {
+    "out": 4096,
+    "in": 4096,
+    "configs": {
+     "1": {
+      "block_n": 32,
+      "splits": 4,
+      "num_warps": 4,
+      "num_stages": 2
+     },
+     "16": {
+      "block_n": 16,
+      "splits": 4,
+      "num_warps": 2,
+      "num_stages": 3
+     }
+    },
+    "us": {
+     "1": 20.97,
+     "2": 21.64,
+     "3": 21.67,
+     "4": 21.62,
+     "5": 21.76,
+     "6": 21.77,
+     "7": 21.85,
+     "8": 21.87,
+     "9": 21.8,
+     "10": 21.78,
+     "11": 21.84,
+     "12": 21.83,
+     "13": 21.88,
+     "14": 21.9,
+     "15": 21.89,
+     "16": 21.69
+    },
+    "GB/s at M=1": 800
+   },
+   "gate_up": {
+    "out": 24576,
+    "in": 4096,
+    "configs": {
+     "1": {
+      "block_n": 16,
+      "splits": 1,
+      "num_warps": 4,
+      "num_stages": 3
+     },
+     "16": {
+      "block_n": 32,
+      "splits": 1,
+      "num_warps": 4,
+      "num_stages": 3
+     }
+    },
+    "us": {
+     "1": 115.07,
+     "2": 116.52,
+     "3": 116.62,
+     "4": 116.62,
+     "5": 117.01,
+     "6": 117.18,
+     "7": 117.41,
+     "8": 117.42,
+     "9": 117.61,
+     "10": 117.72,
+     "11": 117.82,
+     "12": 117.89,
+     "13": 117.96,
+     "14": 117.99,
+     "15": 118.25,
+     "16": 118.41
+    },
+    "GB/s at M=1": 875
+   },
+   "down": {
+    "out": 4096,
+    "in": 12288,
+    "configs": {
+     "1": {
+      "block_n": 64,
+      "splits": 8,
+      "num_warps": 4,
+      "num_stages": 2
+     },
+     "16": {
+      "block_n": 32,
+      "splits": 16,
+      "num_warps": 4,
+      "num_stages": 3
+     }
+    },
+    "us": {
+     "1": 59.83,
+     "2": 60.89,
+     "3": 60.87,
+     "4": 60.94,
+     "5": 60.9,
+     "6": 61.03,
+     "7": 61.03,
+     "8": 61.26,
+     "9": 61.18,
+     "10": 61.14,
+     "11": 61.43,
+     "12": 61.24,
+     "13": 61.38,
+     "14": 61.33,
+     "15": 61.37,
+     "16": 61.45
+    },
+    "GB/s at M=1": 841
+   }
+  },
+  "fp8_gemm_ms_per_step": 8.1396,
+  "bf16_head_us": 1394.94,
+  "q8_0_holon": {
+   "tg_tok_s": 100.92,
+   "step_ms": 9.9092,
+   "gemm_ms_per_step": 9.2341,
+   "gemm_launches_per_step": 290.0,
+   "other_kernels_ms_per_step": 0.8579,
+   "non_gemm_ms_per_step": 0.675,
+   "runs_step_ms": [
+    9.9093,
+    9.9092,
+    9.9091
+   ]
+  },
+  "predicted_step_ms": 10.2095,
+  "predicted_tg128": 97.95,
+  "llama_bench_q8_0_tg128": {
+   "mean": 101.19,
+   "runs": [
+    101.08,
+    101.22,
+    101.21,
+    101.22,
+    101.22
+   ],
+   "median_reps_2_5": 101.22,
+   "build": "cbe28bb3c"
+  },
+  "ratio": 0.968,
+  "gate": "pass (>= 0.85)"
+ },
+ "sweep_decode_top5": {
+  "6144x4096 M=1": [
+   {
+    "us": 30.26,
+    "GB/s": 832,
+    "config": {
+     "block_n": 32,
+     "splits": 2,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 30.26,
+    "GB/s": 832,
+    "config": {
+     "block_n": 16,
+     "splits": 2,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 30.58,
+    "GB/s": 823,
+    "config": {
+     "block_n": 64,
+     "splits": 4,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 30.6,
+    "GB/s": 823,
+    "config": {
+     "block_n": 16,
+     "splits": 1,
+     "num_warps": 4,
+     "num_stages": 3
+    }
+   },
+   {
+    "us": 30.62,
+    "GB/s": 822,
+    "config": {
+     "block_n": 16,
+     "splits": 4,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   }
+  ],
+  "6144x4096 M=16": [
+   {
+    "us": 31.59,
+    "GB/s": 797,
+    "config": {
+     "block_n": 32,
+     "splits": 2,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 31.68,
+    "GB/s": 794,
+    "config": {
+     "block_n": 16,
+     "splits": 2,
+     "num_warps": 2,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 31.77,
+    "GB/s": 792,
+    "config": {
+     "block_n": 32,
+     "splits": 2,
+     "num_warps": 4,
+     "num_stages": 3
+    }
+   },
+   {
+    "us": 32.06,
+    "GB/s": 785,
+    "config": {
+     "block_n": 16,
+     "splits": 4,
+     "num_warps": 2,
+     "num_stages": 3
+    }
+   },
+   {
+    "us": 32.06,
+    "GB/s": 785,
+    "config": {
+     "block_n": 64,
+     "splits": 4,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   }
+  ],
+  "4096x4096 M=1": [
+   {
+    "us": 21.01,
+    "GB/s": 798,
+    "config": {
+     "block_n": 32,
+     "splits": 4,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 21.45,
+    "GB/s": 782,
+    "config": {
+     "block_n": 16,
+     "splits": 2,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 21.53,
+    "GB/s": 779,
+    "config": {
+     "block_n": 128,
+     "splits": 2,
+     "num_warps": 8,
+     "num_stages": 3
+    }
+   },
+   {
+    "us": 21.61,
+    "GB/s": 776,
+    "config": {
+     "block_n": 128,
+     "splits": 2,
+     "num_warps": 8,
+     "num_stages": 4
+    }
+   },
+   {
+    "us": 21.7,
+    "GB/s": 773,
+    "config": {
+     "block_n": 32,
+     "splits": 2,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   }
+  ],
+  "4096x4096 M=16": [
+   {
+    "us": 21.71,
+    "GB/s": 773,
+    "config": {
+     "block_n": 16,
+     "splits": 4,
+     "num_warps": 2,
+     "num_stages": 3
+    }
+   },
+   {
+    "us": 22.25,
+    "GB/s": 754,
+    "config": {
+     "block_n": 32,
+     "splits": 4,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 22.28,
+    "GB/s": 753,
+    "config": {
+     "block_n": 16,
+     "splits": 8,
+     "num_warps": 2,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 22.44,
+    "GB/s": 748,
+    "config": {
+     "block_n": 128,
+     "splits": 2,
+     "num_warps": 8,
+     "num_stages": 4
+    }
+   },
+   {
+    "us": 22.46,
+    "GB/s": 747,
+    "config": {
+     "block_n": 32,
+     "splits": 2,
+     "num_warps": 2,
+     "num_stages": 3
+    }
+   }
+  ],
+  "24576x4096 M=1": [
+   {
+    "us": 115.0,
+    "GB/s": 875,
+    "config": {
+     "block_n": 16,
+     "splits": 1,
+     "num_warps": 4,
+     "num_stages": 3
+    }
+   },
+   {
+    "us": 115.45,
+    "GB/s": 872,
+    "config": {
+     "block_n": 64,
+     "splits": 8,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 115.57,
+    "GB/s": 871,
+    "config": {
+     "block_n": 16,
+     "splits": 8,
+     "num_warps": 2,
+     "num_stages": 3
+    }
+   },
+   {
+    "us": 115.58,
+    "GB/s": 871,
+    "config": {
+     "block_n": 64,
+     "splits": 4,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 115.6,
+    "GB/s": 871,
+    "config": {
+     "block_n": 32,
+     "splits": 4,
+     "num_warps": 2,
+     "num_stages": 3
+    }
+   }
+  ],
+  "24576x4096 M=16": [
+   {
+    "us": 118.05,
+    "GB/s": 853,
+    "config": {
+     "block_n": 32,
+     "splits": 1,
+     "num_warps": 4,
+     "num_stages": 3
+    }
+   },
+   {
+    "us": 118.26,
+    "GB/s": 851,
+    "config": {
+     "block_n": 64,
+     "splits": 1,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 118.41,
+    "GB/s": 850,
+    "config": {
+     "block_n": 32,
+     "splits": 1,
+     "num_warps": 2,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 119.12,
+    "GB/s": 845,
+    "config": {
+     "block_n": 32,
+     "splits": 2,
+     "num_warps": 4,
+     "num_stages": 3
+    }
+   },
+   {
+    "us": 119.26,
+    "GB/s": 844,
+    "config": {
+     "block_n": 32,
+     "splits": 2,
+     "num_warps": 2,
+     "num_stages": 3
+    }
+   }
+  ],
+  "4096x12288 M=1": [
+   {
+    "us": 60.14,
+    "GB/s": 837,
+    "config": {
+     "block_n": 64,
+     "splits": 8,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 60.44,
+    "GB/s": 833,
+    "config": {
+     "block_n": 32,
+     "splits": 16,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 60.56,
+    "GB/s": 831,
+    "config": {
+     "block_n": 32,
+     "splits": 8,
+     "num_warps": 2,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 60.87,
+    "GB/s": 827,
+    "config": {
+     "block_n": 32,
+     "splits": 4,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 60.87,
+    "GB/s": 827,
+    "config": {
+     "block_n": 64,
+     "splits": 16,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   }
+  ],
+  "4096x12288 M=16": [
+   {
+    "us": 61.69,
+    "GB/s": 816,
+    "config": {
+     "block_n": 32,
+     "splits": 16,
+     "num_warps": 4,
+     "num_stages": 3
+    }
+   },
+   {
+    "us": 62.2,
+    "GB/s": 809,
+    "config": {
+     "block_n": 16,
+     "splits": 8,
+     "num_warps": 2,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 62.31,
+    "GB/s": 808,
+    "config": {
+     "block_n": 32,
+     "splits": 16,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 62.38,
+    "GB/s": 807,
+    "config": {
+     "block_n": 32,
+     "splits": 4,
+     "num_warps": 4,
+     "num_stages": 2
+    }
+   },
+   {
+    "us": 62.44,
+    "GB/s": 806,
+    "config": {
+     "block_n": 16,
+     "splits": 16,
+     "num_warps": 2,
+     "num_stages": 3
+    }
+   }
+  ]
+ },
+ "llama_bench_q8_0": {
+  "pp512": {
+   "runs": [
+    7699.78,
+    8600.48,
+    8595.72,
+    8599.76,
+    8589.83
+   ],
+   "median_reps_2_5": 8597.74
+  },
+  "tg128": {
+   "runs": [
+    101.08,
+    101.22,
+    101.21,
+    101.22,
+    101.22
+   ],
+   "median_reps_2_5": 101.22
+  },
+  "pp512 @ d256": {
+   "runs": [
+    8386.88,
+    8063.59,
+    8461.81,
+    8465.98,
+    8470.2
+   ],
+   "median_reps_2_5": 8463.9
+  },
+  "tg128 @ d256": {
+   "runs": [
+    100.55,
+    100.7,
+    100.66,
+    100.71,
+    100.69
+   ],
+   "median_reps_2_5": 100.7
+  }
+ }
+}
