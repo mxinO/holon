@@ -1,6 +1,6 @@
 # Release (v0) — packaging, locks, legibility benchmark, benchmark suite, ABI freeze: design and plan
 
-Status: **revision 3.2, for review** (2026-10-14). Revs 1 (97c39ff), 2 (9534861) and 3 (41431b5) were reviewed by a panel of three
+Status: **revision 3.2, reviewed clean** (2026-10-14). Revs 1 (97c39ff), 2 (9534861) and 3 (41431b5) were reviewed by a panel of three
 (A: serving, packaging, ABI; B: methodology; C: architecture, scope); every finding is resolved in §12. Scope: plan
 §2's Release row ("every v0 model: packaging, quickstart, rtx-5090 / rtx-3090 locks, an agent demo; the legibility
 benchmark (§9) before the ABI freezes; the benchmark suite (decode, prefill, agent trace vs llama.cpp, FreeToken and
@@ -105,7 +105,7 @@ new families or formats; v1's offload, VMM, sandbox and self-improvement; GPUs o
       drafter's buffer, rope's `max_positions` fact);
     - today a paged pool requests units for one full-length sequence (`assembly.py` `_bind`), so a request that does
       not fit raises `OutOfUnits` before anything could clamp. With `clamp_context`, paged pools request a floor of
-      Σ ceil(r / page) units over the worst-step profile's rows r (= ceil(`max_step_tokens` / page) when the requested
+      Σ ceil(r / page) units (each pool its own page size) over the worst-step profile's rows r (= ceil(`max_step_tokens` / page) when the requested
       `max_model_len` ≥ `max_step_tokens`) instead; `max_model_len` = min(requested, the smallest paged pool's capacity
       in tokens), computed after the pools are materialized (`engine.py` L183, which needs the executor's profile) and
       before graph capture (L187: captured graphs bake in the position clamp, `executor.py:480`), and pushed into the
