@@ -28,10 +28,11 @@ PATHS = ("mmq", "mmvq", "prefill")         # kernels.ggml_cuda's two; kernels.tr
 
 def fp8_act(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """W8A8's activations (docs/m06-lowp.md D12): per row and 128 columns of f32 `x [R, in]`, a_s = max(amax, 1e-10)
-    / 448 and e4m3 of `x / a_s` (IEEE division, clamped to ±448, rounded to nearest even): `(e4m3 [R, in], a_s
+    / 448 and e4m3 of `x / a_s` (both IEEE divisions, clamped to ±448, rounded to nearest even): `(e4m3 [R, in], a_s
     [R, in / 128])`, bitwise `kernels.triton_fp8`'s (its L0)."""
     g = x.float().unflatten(-1, (-1, 128))
-    a_s = g.abs().amax(-1).clamp_min(1e-10) / 448
+    amax = g.abs().amax(-1).clamp_min(1e-10)
+    a_s = amax / torch.full_like(amax, 448.0)    # IEEE division: torch turns `/ 448` into a multiply by its reciprocal
     return (g / a_s[..., None]).clamp(-448, 448).to(torch.float8_e4m3fn).flatten(-2), a_s
 
 
