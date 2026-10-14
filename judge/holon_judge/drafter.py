@@ -258,20 +258,21 @@ def _emulation(draft: str, target: str):
 
 def _q8_1_matmul(named: list):
     """A reference's matmul for the GGUF tensors `named` [(reference name, tensor)]: llama.cpp's q8_1 rounding on the
-    kernel path its row count selects (the ggml plugin's own predicate, on this GPU); dense ones exact."""
+    kernel path its row count selects (the ggml plugin's own `mmvq_rows`, for this GPU's class); dense ones exact."""
     import numpy as np
+    from holon.core import platform
     from holon_plugins.kernels.ggml_cuda import extension, plugin
 
     from . import q8_1
 
     major, minor = torch.cuda.get_device_capability()
-    lib, index = extension.load(10 * major + minor), torch.cuda.current_device()
+    lib, fp = extension.load(10 * major + minor), platform.fingerprint(torch.device("cuda"))
     kinds = {}
     for name, t in named:
         kind = t.tensor_type.name.lower()
         if kind in ("f32", "f16", "bf16"):
             continue
-        limit = max((n for n in range(1, 9) if lib.use_mmvq(index, plugin.TYPES[kind], n)), default=0)
+        limit = plugin.mmvq_rows(fp, kind, "q8_1", int(t.shape[0]), int(t.shape[1]), lib)
         blocks = np.asarray(t.data)
         offs = {route: q8_1.offsets(blocks, kind, q8_1.blocking(kind, route).sum_group).float().cuda()
                 for route in (q8_1.MMVQ, q8_1.MMQ) if q8_1.blocking(kind, route).sum_group}

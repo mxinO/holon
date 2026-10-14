@@ -136,7 +136,7 @@ size_t holon_ggml_row_bytes(int type, int64_t in) {
     return in % ggml_blck_size(t) == 0 ? ggml_row_size(t, in) : 0;
 }
 
-int holon_ggml_use_mmvq(int type, int64_t rows) { return ggml_cuda_should_use_mmvq((ggml_type) type, device_cc(), rows); }
+int holon_ggml_use_mmvq(int type, int cc, int64_t rows) { return ggml_cuda_should_use_mmvq((ggml_type) type, cc, rows); }
 
 int holon_ggml_use_mmq(int type, int64_t rows) { return ggml_cuda_should_use_mmq((ggml_type) type, device_cc(), rows, 0); }
 
@@ -217,6 +217,13 @@ void holon_ggml_quantize_fp4(int type, const float * x, int64_t rows, int64_t in
     // as ggml_cuda_mul_mat_q quantizes a dense src1 for native FP4 (its float8 loads when aligned)
     quantize_mmq_fp4_cuda(x, nullptr, blocks, scale, (ggml_type) type, ggml_cuda_is_aligned(&src1, 32), in, in,
                           rows*in, rows*in, GGML_PAD(in, MATRIX_ROW_PADDING), rows, 1, 1, (cudaStream_t) stream);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+void holon_ggml_quantize_q8_1(int type, const void * x, int x_bf16, int64_t rows, int64_t in, void * y, void * stream) {
+    // as ggml_cuda_mul_mat_vec_q quantizes a contiguous src1
+    quantize_row_q8_1_cuda(x, act(x_bf16), nullptr, y, (ggml_type) type, in, in, rows*in, rows*in,
+                           GGML_PAD(in, MATRIX_ROW_PADDING), rows, 1, 1, (cudaStream_t) stream);
     CUDA_CHECK(cudaGetLastError());
 }
 

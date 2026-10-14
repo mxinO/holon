@@ -3,10 +3,12 @@
 the HF FP4 layouts (`"nvfp4/hf"`, `"mxfp4/hf"`, repacked by `prepare`), and its MoE routing and combine as
 `moe_topk@1` and `moe_combine@1` (op contracts: std.ops.kernels, std.moe.kernels).
 
-`qlinear` dispatches like llama.cpp, from the row count: `mmvq` up to the type's threshold on this device (it writes
-bf16 or f32 directly), else `mmq` in 512-row chunks (llama.cpp's ubatch) into a per-call f32 tensor that one cast
-turns into `out_dtype` (D5). Both quantize the activations in a workspace shared by every instance with the same
-`in`. `qembedding` is llama.cpp's `get_rows`.
+`qlinear` dispatches from the row count: `mmvq` up to `mmvq_rows` (it writes bf16 or f32 directly), else `mmq` in
+512-row chunks (llama.cpp's ubatch) into a per-call f32 tensor that one cast turns into `out_dtype` (D5).
+`mmvq_rows` is llama.cpp's threshold for the type at the class's compute capability, or the class's entry for the
+shape where a repeated sweep found mmq faster (docs/m07-perf.md D2, `CROSSOVER`); the judge's floors ask it too.
+Both quantize the activations in a workspace shared by every instance with the same `in`. `qembedding` is
+llama.cpp's `get_rows`.
 
 `linear_experts` is llama.cpp's MUL_MAT_ID per 512-token chunk: mmvq with ids up to the type's limit
 (`get_mmvq_mmid_max_batch`), for `glu="swiglu"` through its fused gate on the merged stack, else mmq with ids into
@@ -67,6 +69,12 @@ Q8_1 = {"mmvq": "q8_1", "mmq": "q8_1"}
 NATIVE_FP4 = {"mmvq": "q8_1", "mmq": "fp4"}
 PREC = {"q8_1": 30, "fp4": 40}
 ROW_PADDING = 512               # llama.cpp's MATRIX_ROW_PADDING: native W4A4's K step
+MMVQ_MAX = 8                    # llama.cpp's MMVQ_MAX_BATCH_SIZE: mmvq's most activation rows
+# The crossover per shape (docs/m07-perf.md D2): (GPU class, ggml type, in, out, mmq's activation mode) -> mmvq up to
+# this many rows, mmq above, where repeated graph-timed sweeps (bench/qmm_sweep.py) found mmq faster per call by at
+# least 3% and by more than 3 sd at every graphed row the entry moves (4, 7, 8), and the entries save at least 1% of
+# some lock's decode or verify step. Pinned by this plugin's `src`; every other shape keeps llama.cpp's rule.
+CROSSOVER: dict[tuple[str, str, int, int, str], int] = {}
 
 
 def ggml_type(layout: str) -> int | None:
@@ -127,6 +135,26 @@ def with_tail(blocks: torch.Tensor, nbytes: int, copy: bool = True) -> torch.Ten
     buf[blocks.numel():] = 0
     out = buf[:blocks.numel()].view(blocks.shape)
     return out.copy_(blocks) if copy else out
+
+
+def mmvq_rows(fingerprint, name: str, mode: str, k: int, out: int, lib=None) -> int:
+    """The most activation rows a `qlinear` of ggml type `name`, `in` = `k`, `out` rows, whose mmq path quantizes
+    activations in `mode` (`"q8_1"`, `"fp4"`), runs on mmvq on `fingerprint`'s class: its `CROSSOVER` entry, else
+    llama.cpp's threshold at the class's compute capability (an entry may only lower it, so mmvq runs every row count
+    up to it). `lib`: a loaded extension module (llama.cpp's rule is host code: any SM's module answers for any
+    class); default the current device's."""
+    if lib is None:
+        major, minor = torch.cuda.get_device_capability()
+        lib = extension.load(10 * major + minor)
+    cc = 10 * fingerprint.sm                         # llama.cpp's compute capability: 100 * major + 10 * minor
+    llama = max((n for n in range(1, MMVQ_MAX + 1) if lib.use_mmvq(cc, TYPES[name], n)), default=0)
+    entry = CROSSOVER.get((fingerprint.gpu, name, k, out, mode))
+    if entry is None:
+        return llama
+    if not 1 <= entry <= llama:
+        raise RuntimeError(f"kernels.ggml_cuda: the {fingerprint.gpu} entry for {name} {k}x{out} ({mode}) is "
+                           f"{entry} rows, not within 1..{llama} (llama.cpp's)")
+    return entry
 
 
 def _device(ctx) -> int:
@@ -209,8 +237,8 @@ class QLinear(_Matmul):
     def __init__(self, ext: Extension, act: dict[str, str], ctx, **facts) -> None:
         super().__init__(ext, act, ctx, facts)
         self.out_dtype = getattr(torch, facts["out_dtype"])
-        # llama.cpp's choice from the row count (`ne11 <= threshold`; fixed per graph bucket): mmvq, else mmq
-        self.mmvq_rows = max((n for n in range(1, 9) if self.lib.use_mmvq(self.device, self.type, n)), default=0)
+        # mmvq up to `mmvq_rows` (the class's, for this shape and mode; fixed per graph bucket), else mmq
+        self.mmvq_rows = mmvq_rows(ctx.fingerprint, self.name, act["mmq"], self.k, self.out, self.lib)
         self._uses_mmq(self.mmvq_rows, facts["layout"])
         self.workspace = ctx.workspace(f"ggml_cuda[in={self.k}]", self.lib.workspace_bytes(self.device, self.k, CHUNK))
         self.f32 = self._f32_workspace(ctx, CHUNK, facts["act_dtype"])

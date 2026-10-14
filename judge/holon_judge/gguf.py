@@ -218,29 +218,45 @@ def q8_1_experts(path: str | pathlib.Path, kernel_path: str):
 
 
 def mmvq_step(path: str | pathlib.Path) -> int:
-    """The largest step at which every quantized matmul of the file takes mmvq on the current GPU — dense ones by
-    llama.cpp's dense limit, expert stacks by its MoE one (the plugin's own predicates): Tier B's decode run. A GGUF's
-    tensors by their stored types; an HF checkpoint's quantized modules (`hf_quant.elems`) by the type kernels.ggml_cuda
-    repacks them into (docs/m06-lowp.md D8; one it has none for, e.g. FP8, is an error)."""
+    """The largest step at which every quantized matmul of the file takes mmvq on the current GPU — dense ones by the
+    ggml plugin's `mmvq_rows` for this GPU's class (q8_1 mode), expert stacks by llama.cpp's MoE limit: Tier B's
+    decode run. A GGUF's tensors by their stored types; an HF checkpoint's quantized modules (`hf_quant.elems`) by
+    the type kernels.ggml_cuda repacks them into (docs/m06-lowp.md D8; one it has none for, e.g. FP8, is an error).
+    The engine merges some projections (q/k/v, gate/up) into one matmul of another shape, so a dense matmul also
+    counts every class entry (`CROSSOVER`) of its type and `in`: the step is then at most what any merge could run."""
+    from holon.core import platform
     from holon_plugins.kernels.ggml_cuda import extension, plugin
 
     from . import hf_quant
 
     path = pathlib.Path(path)
     if path.suffix == ".gguf":
-        matmuls = {(t.tensor_type.name.lower(), t.name.endswith("_exps.weight")) for t in gguf.GGUFReader(path).tensors
+        matmuls = {(t.tensor_type.name.lower(), t.name.endswith("_exps.weight"), int(t.shape[0]), int(t.shape[1]))
+                   for t in gguf.GGUFReader(path).tensors
                    if t.tensor_type not in _DENSE and t.name != "token_embd.weight"}  # get_rows reads the embedding
     else:
-        matmuls = {(plugin.weight_type(f"{elem}/hf"), hf_quant.expert(m)) for m, elem in hf_quant.elems(path).items()}
-    if not matmuls or any(name is None for name, _ in matmuls):
+        with hf_quant.opened(path, meta=True) as (get, names):
+            matmuls = {(plugin.weight_type(f"{elem}/hf"), hf_quant.expert(m), *_in_out(get, names, m))
+                       for m, elem in hf_quant.elems(path).items()}
+    if not matmuls or any(name is None for name, *_ in matmuls):
         raise ValueError(f"{path.name}: a decode step needs quantized matmuls of kernels.ggml_cuda types only")
     major, minor = torch.cuda.get_device_capability()
     lib, device = extension.load(10 * major + minor), torch.cuda.current_device()
+    fp = platform.fingerprint(torch.device("cuda", device))
     limits = []
-    for name, stacked in matmuls:
-        use = lib.use_mmvq_id if stacked else lib.use_mmvq
-        limits.append(max((n for n in range(1, 9) if use(device, plugin.TYPES[name], n)), default=0))
+    for name, stacked, k, out in matmuls:
+        if stacked:
+            limits.append(max((n for n in range(1, 9) if lib.use_mmvq_id(device, plugin.TYPES[name], n)), default=0))
+            continue
+        outs = {out} | {o for g, t, i, o, mode in plugin.CROSSOVER if (g, t, i, mode) == (fp.gpu, name, k, "q8_1")}
+        limits += [plugin.mmvq_rows(fp, name, "q8_1", k, o, lib) for o in outs]
     return min(limits)
+
+
+def _in_out(get, names: set[str], module: str) -> tuple[int, int]:
+    """A quantized HF module's (in, out) from its codes' header ([..., out, in / 2] u8 for FP4)."""
+    w = get(f"{module}.weight_packed" if f"{module}.weight_packed" in names else f"{module}.weight")
+    return 2 * int(w.shape[-1]), int(w.shape[-2])
 
 
 def _emulated(linear: torch.nn.Linear, kind: str, kernel_path: str, offs: torch.Tensor | None,

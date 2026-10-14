@@ -100,10 +100,7 @@ void experts(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const a
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("row_bytes", [](int64_t type, int64_t in) { return holon_ggml_row_bytes(type, in); });
-    m.def("use_mmvq", [](int64_t device, int64_t type, int64_t rows) {
-        const c10::cuda::CUDAGuard guard(device);
-        return holon_ggml_use_mmvq(type, rows) != 0;
-    });
+    m.def("use_mmvq", [](int64_t cc, int64_t type, int64_t rows) { return holon_ggml_use_mmvq(type, cc, rows) != 0; });
     m.def("use_mmq", [](int64_t device, int64_t type, int64_t rows) {
         const c10::cuda::CUDAGuard guard(device);
         return holon_ggml_use_mmq(type, rows) != 0;
@@ -139,6 +136,15 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         check_f32(scale, "scale");
         holon_ggml_quantize_fp4(type, x.data_ptr<float>(), rows, in, blocks.data_ptr(), scale.data_ptr<float>(),
                                 stream());
+    });
+    m.def("quantize_q8_1", [](int64_t type, const at::Tensor & x, at::Tensor & y) {
+        const c10::cuda::CUDAGuard guard(x.device());
+        TORCH_CHECK(x.dim() == 2 && x.size(0) > 0, "x: [rows, in]");
+        const int64_t rows = x.size(0), in = x.size(1), padded = (in + 511) / 512 * 512;
+        check(x, x, {rows, in}, "x");
+        check(y, x, {rows * padded / 32 * 36}, "y");               // block_q8_1: 32 int8 values and a half2
+        TORCH_CHECK(y.scalar_type() == at::kByte, "y: uint8");
+        holon_ggml_quantize_q8_1(type, x.data_ptr(), bf16(x, "x"), rows, in, y.data_ptr(), stream());
     });
     m.def("get_rows", [](int64_t type, const at::Tensor & table, const at::Tensor & ids, at::Tensor & y) {
         const c10::cuda::CUDAGuard guard(y.device());

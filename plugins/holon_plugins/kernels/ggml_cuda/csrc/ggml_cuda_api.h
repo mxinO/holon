@@ -19,8 +19,10 @@ extern "C" {
 // Bytes of one row of `in` values of `type`; 0 if `in` is not a whole number of blocks.
 size_t holon_ggml_row_bytes(int type, int64_t in);
 
-// llama.cpp's dispatch for a matmul with `rows` activation rows on the current device.
-int holon_ggml_use_mmvq(int type, int64_t rows);
+// llama.cpp's dispatch for a matmul with `rows` activation rows: mmvq on a device of compute capability `cc`
+// (100 * major + 10 * minor, given explicitly: a host function, so any device may answer for another class), mmq on
+// the current device.
+int holon_ggml_use_mmvq(int type, int cc, int64_t rows);
 int holon_ggml_use_mmq(int type, int64_t rows);
 
 // The activation precision ggml_cuda_mul_mat_q will use for `type` asked for `prec` here (its exported
@@ -51,6 +53,10 @@ void holon_ggml_mmq(int type, int prec, const void * w, int64_t out, int64_t in,
 // quantizes them: block_fp4_mmq [in padded to 512 / 256][rows] into `blocks`, NVFP4's per-row scale into `scale`.
 void holon_ggml_quantize_fp4(int type, const float * x, int64_t rows, int64_t in, void * blocks, float * scale,
                              void * stream);
+
+// Benchmarks only: mmvq's q8_1 activations of x [rows, in] (f32 or bf16) for a matmul of `type`, as it quantizes
+// them (block_q8_1 per 32 values, rows of `in` padded to 512) into `y`: the quantize's own time (docs/m07-perf.md D8).
+void holon_ggml_quantize_q8_1(int type, const void * x, int x_bf16, int64_t rows, int64_t in, void * y, void * stream);
 
 // y[i] = dequantized row ids[i] of the table (rows of `hidden` values).
 void holon_ggml_get_rows(int type, const void * table, int64_t hidden, const int32_t * ids, int64_t n, void * y,

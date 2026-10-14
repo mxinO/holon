@@ -28,6 +28,7 @@
 
 Skips without a GPU; builds the extension (prebuild) into the user cache if it is missing.
 """
+import dataclasses
 import os
 import pathlib
 import subprocess
@@ -43,7 +44,7 @@ from holon_judge import l0, q8_1, w4a4
 from holon_judge.hf_quant import converter, dequantize_blocks, ulps
 from holon_judge.planted import PLANTS
 from holon_plugins.kernels.ggml_cuda import extension
-from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, FP4, NATIVE_FP4, PREC, Q8_1, TYPES
+from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, CROSSOVER, FP4, NATIVE_FP4, PREC, Q8_1, TYPES, mmvq_rows
 from holon_std.ops import reference
 from holon_std.weights.hf import reference as hf
 from holon_testing.qwen3_5_files import LLAMA
@@ -263,6 +264,33 @@ def test_qlinear_f32_out_and_empty(ctx):
     check_qlinear(kernel, "q4_k", blocks, (1, kernel.mmvq_rows + 1, CHUNK + 1))
     x = torch.empty(0, 4096, dtype=torch.bfloat16, device="cuda")
     assert kernel(x, {"blocks": device_blocks(blocks)}).shape == (0, OUT)
+
+
+# The classes locks are written for (plans/<model id>/<class>/<toolchain>/N.lock) and those with D2 entries.
+PLANS = pathlib.Path(__file__).resolve().parents[2] / "plans"
+LOCK_CLASSES = sorted({lock.parent.parent.name for lock in PLANS.rglob("*.lock")} | {c[0] for c in CROSSOVER})
+
+
+def test_qlinear_dispatch_is_mmvq_rows(sm):
+    """D2 (docs/m07-perf.md): the path `QLinear` actually takes per row count (its counted call) is `mmvq_rows`'s, for
+    every lock class (the build's fingerprint names the class; llama.cpp's rule is asked at this device's capability)
+    on every shape the class has an entry for and a k-quant it has none for; and llama.cpp's rule answers for another
+    class's compute capability (Q4_K: mmvq up to 8 rows on Ada, 5 on Blackwell)."""
+    lib, here = extension.load(sm), BuildContext(PluginSet(discover()), torch.device("cuda")).fingerprint
+    assert [mmvq_rows(dataclasses.replace(here, sm=s), "q4_k", "q8_1", 4096, OUT, lib) for s in (89, 120)] == [8, 5]
+    assert LOCK_CLASSES and all(1 <= rows <= 8 for rows in CROSSOVER.values())
+    for cls in LOCK_CLASSES:
+        ctx = BuildContext(PluginSet(discover()), torch.device("cuda"))
+        ctx.fingerprint = dataclasses.replace(here, gpu=cls)
+        shapes = {(t, k, out) for c, t, k, out, mode in CROSSOVER if (c, mode) == (cls, "q8_1")} | {("q4_k", 4096, OUT)}
+        for name, k, out in sorted(shapes):
+            kernel = qlinear(ctx, name, k, out=out).kernel
+            want = mmvq_rows(ctx.fingerprint, name, "q8_1", k, out, lib)
+            blocks = {"blocks": torch.zeros(out, lib.row_bytes(TYPES[name], k), dtype=torch.uint8, device="cuda")}
+            for rows in range(1, 10):
+                kernel.calls.clear()
+                kernel(activations(rows, k, seed=rows), blocks)
+                assert kernel.calls == {f"{'mmvq' if rows <= want else 'mmq'}/q8_1": 1}, (cls, name, k, out, rows)
 
 
 @pytest.mark.parametrize("name", sorted(TYPES))

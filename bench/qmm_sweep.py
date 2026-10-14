@@ -1,7 +1,8 @@
 """M0.7 step 0 (docs/m07-perf.md D1, D2, D8, D9): the ggml quantized matmul's time per call against its row count,
 graph-timed, for every (weight type, shape, activation mode) of the `qlinear` sites in the given locks — mmvq (rows
 1-8), mmq with today's f32 -> bf16 cast, mmq writing f32 (no cast: what D4 would cost at most), and llama.cpp's
-choice — and a read-only stream over 2 GiB (D8's bandwidth reference).
+choice — a read-only stream over 2 GiB (D8's bandwidth reference), and mmvq's q8_1 activation quantize alone per
+`in` (D8: the GEMV kernels' time is a call's less its quantize, graph-timed, no profile needed).
 
 Each variant is today's `QLinear` with its dispatch forced (`mmvq_rows`), so a call costs what the engine's does
 (the activation's q8_1 quantization, native FP4's f32 activation copy, NVFP4's `scale2`). Weights are the rows of
@@ -9,7 +10,11 @@ the lock's GGUF file's tensors of that type and input size (a call on random byt
 layouts get random codes with valid scales. They come in enough copies that the calls cycle through more than three
 times the L2 cache, as a step reads its weights from DRAM.
 
-    python bench/qmm_sweep.py --locks plans/.../N.lock ... [--rows 1 2 ... 9] [--json out]
+    python bench/qmm_sweep.py --locks plans/.../N.lock ... [--rows 1 2 ... 9] [--shapes iq3_s/5120x17408 ...]
+                              [--json out]
+
+`--shapes` keeps only those (type/in x out, mode q8_1 unless `/fp4` follows): step 1's repeated sweep of D2's
+candidates (docs/m07-perf.md D2).
 """
 from __future__ import annotations
 
@@ -141,12 +146,29 @@ def stream_gbs(gib: int = 2, reps: int = 10) -> dict:
             "gb_s_median": round(nbytes / sorted(times[1:])[reps // 2] / 1e9, 1)}
 
 
+def quantize_us(lib, ins: list[int], rows_list: list[int], calls: int = 200) -> list[dict]:
+    """mmvq's q8_1 quantize alone, graph-timed per call, for each `in` and row count (bf16 activations, the type
+    q4_k's: the layout is block_q8_1 for every type)."""
+    out = []
+    for k in ins:
+        us = {}
+        for rows in rows_list:
+            x = torch.randn(rows, k, dtype=torch.bfloat16, device="cuda")
+            y = torch.empty(rows * -(-k // 512) * 512 // 32 * 36, dtype=torch.uint8, device="cuda")
+            us[rows] = round(per_call_us(lambda i, x=x, y=y: lib.quantize_q8_1(ggml.TYPES["q4_k"], x, y), 1, calls), 3)
+        out.append({"in": k, "us": us})
+        print(json.dumps(out[-1]), flush=True)
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--locks", nargs="+", required=True)
     ap.add_argument("--rows", type=int, nargs="+", default=list(range(1, 10)))
+    ap.add_argument("--shapes", nargs="+", help="only these: type/<in>x<out>[/mode]")
     ap.add_argument("--json")
     args = ap.parse_args()
+    keep = None if not args.shapes else {s if s.count("/") == 2 else f"{s}/q8_1" for s in args.shapes}
     ctx = BuildContext(PluginSet(discover()), torch.device("cuda"))
     sm, ext = ctx.fingerprint.sm, ggml.Extension()
     l2 = torch.cuda.get_device_properties(0).L2_cache_size
@@ -155,12 +177,14 @@ def main() -> None:
     print(result["gpu"], "stream", result["stream"], flush=True)
     for (layout, k, n, mode), entry in sorted(sites(args.locks).items()):
         name = ggml.weight_type(layout)
-        if mode == "fp4" and sm != 120:
+        if mode == "fp4" and sm != 120 or keep is not None and f"{name}/{k}x{n}/{mode}" not in keep:
             continue
         facts = dict(entry["facts"], act_quant="a4" if mode == "fp4" else entry["facts"]["act_quant"])
         kernels = {dtype: ggml.QLinear(ext, MODES[mode], ctx, **(facts | {"out_dtype": dtype}))
                    for dtype in ("bfloat16", "float32")}
-        llama_rows = kernels["bfloat16"].mmvq_rows
+        lib = kernels["bfloat16"].lib                # llama.cpp's own rule, whatever the class's entry
+        llama_rows = max((r for r in range(1, ggml.MMVQ_MAX + 1) if lib.use_mmvq(10 * sm, ggml.TYPES[name], r)),
+                         default=0)
         weight = n * row_bytes(name, k)
         copies = max(2, math.ceil(3 * l2 / weight))
         blocks, source = weights(entry["files"], name, k, n, copies, kernels["bfloat16"].tail)
@@ -168,7 +192,7 @@ def main() -> None:
         parts = [{"blocks": b} | ({"scale2": scale2} if scale2 is not None else {}) for b in blocks]
         row = {"layout": layout, "type": name, "in": k, "out": n, "mode": mode, "locks": entry["locks"],
                "weight_mb": round(weight / 1e6, 2), "copies": copies, "weights": source,
-               "llama_mmvq_rows": llama_rows, "us": {}}
+               "llama_mmvq_rows": llama_rows, "mmvq_rows": kernels["bfloat16"].mmvq_rows, "us": {}}
         for rows in args.rows:
             x = torch.randn(rows, k, dtype=torch.bfloat16, device="cuda")
             us = {}
@@ -186,6 +210,7 @@ def main() -> None:
         torch.cuda.empty_cache()
         result["shapes"].append(row)
         print(json.dumps(row), flush=True)
+    result["quantize"] = quantize_us(ext(sm), sorted({x["in"] for x in result["shapes"]}), args.rows)
     if args.json:
         with open(args.json, "w") as f:
             json.dump(result, f, indent=1)
