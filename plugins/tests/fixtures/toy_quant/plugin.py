@@ -3,7 +3,10 @@ D5): `toy.int8/rows` holds int8 rows `q` [out, in], an f32 scale per G rows `sca
 ([] or [1]; per expert: [E, out, in], [E, out/G], E values; a merged gate/up stack's `scale2` is [2, E]). Every
 kernel's `prepare` folds `scale2` into `scale` and copies `q`, so the weight it reads (`toy.int8/folded`) shares no
 tensor with its source; `PREPARED` records each source it was handed and a copy of its parts, to check it was not
-modified."""
+modified.
+
+Matmuls register one spec per activation mode, as kernels.ggml_cuda does (`config["act"]`, path -> mode): one mode
+on both paths for `act_quant` a8 or a4, and, preferred under a4, the chunk path at 4 bits (docs/m07-perf.md §3.1)."""
 import torch
 from holon.api import Constraint, KernelSpec, Layout, QTensor, Scheme
 from holon_std.moe import reference as moe
@@ -63,10 +66,20 @@ class LinearExperts:
         return moe.linear_experts(x, dequantize(parts), ids, self.glu)
 
 
+ONE_MODE, TWO_MODES = {"rows": "q8", "chunk": "q8"}, {"rows": "q8", "chunk": "q4"}
+
+
 class Plugin:
     def register(self, regs) -> None:
-        for op, impl in (("qlinear", QLinear), ("qembedding", QEmbedding), ("linear_experts", LinearExperts)):
-            regs.kernels.add(op, KernelSpec(op=op, provider="tests.toy_quant", impl=impl,
-                                            requires=Constraint(devices=frozenset({"cpu"})),
-                                            supports=lambda f: f["layout"] == "toy.int8/rows",
-                                            props=frozenset({"deterministic", "graph_safe"})))
+        def add(op: str, impl, act_quant=None, priority: int = 10, act=None) -> None:
+            def supports(f: dict) -> bool:
+                return f["layout"] == "toy.int8/rows" and (act_quant is None or f["act_quant"] in act_quant)
+            regs.kernels.add(op, KernelSpec(
+                op=op, provider="tests.toy_quant", impl=impl, requires=Constraint(devices=frozenset({"cpu"})),
+                supports=supports, props=frozenset({"deterministic", "graph_safe"}), priority=priority,
+                config={"act": act} if act else {}))
+
+        add("qembedding", QEmbedding)
+        for op, impl in (("qlinear", QLinear), ("linear_experts", LinearExperts)):
+            add(op, impl, ("a4", "a8"), 10, ONE_MODE)
+            add(op, impl, ("a4",), 11, TWO_MODES)

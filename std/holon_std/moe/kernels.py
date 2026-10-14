@@ -14,7 +14,7 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   activation operand is rounded to the weight dtype before the product, with f32 accumulation. Facts: layout,
   experts, in, out, top_k, rows_per_token, glu, act_dtype, out_dtype, act_quant (`ACT_QUANT` for quantized layouts,
   as `qlinear@2`'s; `a16` for dense ones). An instance may define `prepare` as `qlinear@2`'s (logical shape [E,
-  out, in]).
+  out, in]); a spec's `config["act"]` is refused under mixed steps as `qlinear@2`'s.
 - `moe_combine@1`: instance `(y [T, k, H] of y_dtype, weights [T, k] f32, out [T, H])`: writes `Σ_j w[t, j] · y[t,
   j]`, accumulated in f32 in slot order, into `out` (of `dtype`). Facts: hidden, top_k, dtype, y_dtype.
 """

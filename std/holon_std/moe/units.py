@@ -30,6 +30,16 @@ def _act_quant(ctx) -> str:
     return act
 
 
+def _one_act_mode(ctx, spec, site: str) -> None:
+    """Mixed steps (`chunk_with_decode` > 0, docs/m07-perf.md §3.1) run decode rows and a prefill chunk in one call, on
+    the path the call's row count picks: a kernel whose paths compute in different activation modes (its spec's
+    `config["act"]`, path -> mode) would then run a decode row at a precision its unmixed step does not use."""
+    modes = spec.config.get("act", {})
+    if ctx.options.get("chunk_with_decode", 0) > 0 and len(set(modes.values())) > 1:
+        raise ValueError(f"{site}: chunk_with_decode > 0 needs one activation mode on every path; {spec.provider}'s "
+                         f"kernel computes {modes}")
+
+
 class ExpertLinear(nn.Module):
     """A stack of E experts' [out, in] weights, applied per (token, slot) by `linear_experts@2`.
 
@@ -115,7 +125,9 @@ class ExpertLinear(nn.Module):
                  "glu": self.glu, "act_dtype": _dtype(self.act_dtype), "out_dtype": "float32",
                  "act_quant": "a16" if self.layout is None else _act_quant(ctx)}
         site = "std.moe.experts[" + ",".join(f"{k}={v}" for k, v in facts.items()) + "]"
-        self._kernel = ctx.select_kernel(kernels.LINEAR_EXPERTS, site=site, **facts).impl(ctx, **facts)
+        spec = ctx.select_kernel(kernels.LINEAR_EXPERTS, site=site, **facts)
+        _one_act_mode(ctx, spec, site)
+        self._kernel = spec.impl(ctx, **facts)
         if self.layout is not None and hasattr(self._kernel, "prepare"):          # docs/m06-lowp.md D4
             q = QTensor(self.layout, (self.experts, self.out_features, self.in_features), self.parts)
             if (prepared := self._kernel.prepare(q)) is not q:

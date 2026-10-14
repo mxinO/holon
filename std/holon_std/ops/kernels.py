@@ -13,6 +13,9 @@
   An instance may define `prepare(q: QTensor) -> QTensor`, called once by the unit after binding: the weight in the
   layout the instance reads, losslessly, its first part the primary one, without modifying `q` (a tied head reads the
   embedding's parts); the unit keeps only what it returns. Without it the instance reads the parts as adopted.
+  A spec may name the activation mode each of its paths computes in, `config["act"]` (path -> mode); with the
+  deployment option `chunk_with_decode` > 0 (mixed steps: one call's rows take one path) the unit refuses, at bind,
+  a spec whose modes differ (docs/m07-perf.md §3.1).
 - `qembedding@1`: instance `(ids [T] int64, blocks [vocab, row_bytes] uint8) -> [T, hidden]`: rows of the
   dequantized table, of `dtype`. Facts: layout, vocab, hidden, dtype.
 Kernel instances are stateless across steps and safe to call inside CUDA graphs.

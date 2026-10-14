@@ -74,6 +74,23 @@ def test_quant_act_sets_the_fact_and_a16_is_refused():
         _linear(_ctx(**{"quant.act": "a16"}), _toy(4, H, seed=0))
 
 
+@pytest.mark.parametrize("act", ["a8", "a4"])
+def test_mixed_steps_refuse_kernels_with_two_activation_modes(act):
+    """docs/m07-perf.md §3.1: with `chunk_with_decode` > 0 a quantized linear and an expert stack refuse, at bind, a
+    kernel whose paths compute in different activation modes (the toy's a4 spec: chunks at 4 bits) — generically,
+    from its spec's `config["act"]`; one mode on both paths (a8) binds, and every kernel binds without mixed steps."""
+    for chunk in (0, 256):
+        ctx = _ctx(**{"quant.act": act})
+        ctx.options["chunk_with_decode"] = chunk
+        stacks = _stacks(ctx, lambda seed: _toy(128, 128, seed))
+        for unit in (_linear(ctx, _toy(4, H, seed=0)), type(stacks.gate).merge(stacks.gate, stacks.up)):
+            if chunk and act == "a4":
+                with pytest.raises(ValueError, match=r"needs one activation mode on every path; tests.toy_quant"):
+                    unit.bind_kernels(ctx)
+            else:
+                unit.bind_kernels(ctx)
+
+
 def test_a_tied_head_prepares_its_own_copy_of_the_embedding_parts():
     ctx, q = _ctx(), _toy(16, H, seed=1)
     embed = _unit(ctx, "std.ops.embedding@1", q, vocab=16, hidden=H)

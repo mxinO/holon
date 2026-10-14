@@ -64,7 +64,9 @@ class _Quantized:
         them (docs/m06-lowp.md D4), the primary part swapped into `param` so the source parts are released (a tied
         head has no `param`). `qembedding@1` has no `prepare`: a table is read as adopted."""
         site = f"std.ops.{self.op.split('@')[0]}[" + ",".join(f"{k}={v}" for k, v in self.facts.items()) + "]"
-        self._kernel = self.ctx.select_kernel(self.op, site=site, **self.facts).impl(self.ctx, **self.facts)
+        spec = self.ctx.select_kernel(self.op, site=site, **self.facts)
+        _one_act_mode(self.ctx, spec, site)
+        self._kernel = spec.impl(self.ctx, **self.facts)
         if self.op != kernels.QLINEAR or not hasattr(self._kernel, "prepare"):
             return parts
         q = QTensor(self.layout, shape, parts)
@@ -91,6 +93,16 @@ def _act_quant(ctx) -> str:
     if act not in kernels.ACT_QUANT:
         raise ValueError(f"quant.act {act!r}: one of {list(kernels.ACT_QUANT)} for quantized weights")
     return act
+
+
+def _one_act_mode(ctx, spec, site: str) -> None:
+    """Mixed steps (`chunk_with_decode` > 0, docs/m07-perf.md §3.1) run decode rows and a prefill chunk in one call, on
+    the path the call's row count picks: a kernel whose paths compute in different activation modes (its spec's
+    `config["act"]`, path -> mode) would then run a decode row at a precision its unmixed step does not use."""
+    modes = spec.config.get("act", {})
+    if ctx.options.get("chunk_with_decode", 0) > 0 and len(set(modes.values())) > 1:
+        raise ValueError(f"{site}: chunk_with_decode > 0 needs one activation mode on every path; {spec.provider}'s "
+                         f"kernel computes {modes}")
 
 
 def _dtype(t: torch.dtype) -> str:
