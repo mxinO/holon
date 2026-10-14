@@ -41,13 +41,16 @@ size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows);
 // to what llama.cpp allocates on every call. One process-wide counter: not per device, not thread-safe.
 size_t holon_ggml_workspace_high_water(void);
 
-// y = x @ W.T. mmvq: rows <= 8, y bf16 or f32, times `scale[0]` (NVFP4 only, rows = 1 only: llama.cpp fuses no
-// scale for more columns). mmq: y f32.
+// y = x @ W.T, times `scale[0]` (NVFP4 only; NULL: none) in f32 before one rounding to y's type, bf16 or f32. mmvq:
+// rows <= 8 (the scale in llama.cpp's fused epilogue at one row; above it in the unfused kernel's epilogue, after the
+// full reduction: docs/m07-perf.md D11). mmq: any rows (a call is sized by the workspace), the stream-k fixup's
+// partials kept in f32 until the rounding (D4).
 void holon_ggml_mmvq(int type, const void * w, int64_t out, int64_t in, const void * x, int x_bf16, int64_t rows,
                      void * y, int y_bf16, const float * scale, void * workspace, size_t workspace_bytes,
                      void * stream);
 void holon_ggml_mmq(int type, int prec, const void * w, int64_t out, int64_t in, const void * x, int x_bf16,
-                    int64_t rows, float * y, void * workspace, size_t workspace_bytes, void * stream);
+                    int64_t rows, void * y, int y_bf16, const float * scale, void * workspace, size_t workspace_bytes,
+                    void * stream);
 
 // Tests only: native mmq's FP4 activations of x [rows, in] f32 (`type` MXFP4, or NVFP4 on Blackwell), as it
 // quantizes them: block_fp4_mmq [in padded to 512 / 256][rows] into `blocks`, NVFP4's per-row scale into `scale`.

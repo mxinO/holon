@@ -3,8 +3,9 @@
 the HF FP4 layouts (`"nvfp4/hf"`, `"mxfp4/hf"`, repacked by `prepare`), and its MoE routing and combine as
 `moe_topk@1` and `moe_combine@1` (op contracts: std.ops.kernels, std.moe.kernels).
 
-`qlinear` dispatches from the row count: `mmvq` up to `mmvq_rows` (it writes bf16 or f32 directly), else `mmq` in
-512-row chunks (llama.cpp's ubatch) into a per-call f32 tensor that one cast turns into `out_dtype` (D5).
+`qlinear` dispatches from the row count: `mmvq` up to `mmvq_rows`, else `mmq` in 512-row chunks (llama.cpp's
+ubatch); both write `out_dtype` (bf16 or f32) directly, mmq's stream-k partials kept in f32 until its one rounding
+(docs/m07-perf.md D4).
 `mmvq_rows` is llama.cpp's threshold for the type at the class's compute capability, or the class's entry for the
 shape where a repeated sweep found mmq faster (docs/m07-perf.md D2, `CROSSOVER`); the judge's floors ask it too.
 Both quantize the activations in a workspace shared by every instance with the same `in`. `qembedding` is
@@ -27,9 +28,9 @@ which precision it will use (`mmq_prec`): a mismatch is an error.
 
 FP4 (D8): `prepare` repacks the HF layouts losslessly into ggml blocks (`repack`, llama.cpp's converter layouts);
 NVFP4's per-tensor or per-expert `scale2` ([1]; [E]; [2, E] for a merged gate/up stack) is applied in f32 before
-SwiGLU on every path: mmvq in llama.cpp's fused epilogue (one row dense; any tokens with ids), dense mmq and dense
-mmvq above one row in the f32 → `out_dtype` step, mmq with ids by our SwiGLU (gate/up) or `y *= scale2[ids]`
-(down). With `in` a multiple of 256 (all supported shapes) no q8_1 kernel reads past the weight blocks, so they need
+SwiGLU on every path: mmvq in llama.cpp's fused epilogue (one row dense; any tokens with ids), dense mmvq above
+one row in the unfused kernel's epilogue (docs/m07-perf.md D11), dense mmq in its store (D4) — each before the one
+rounding to `out_dtype` — and mmq with ids by our SwiGLU (gate/up) or `y *= scale2[ids]` (down). With `in` a multiple of 256 (all supported shapes) no q8_1 kernel reads past the weight blocks, so they need
 no padding (L0 poisons the bytes after them); native W4A4 steps K by 512 with no tail, so the `fp4` spec's
 `prepare` appends llama.cpp's allocation padding, the blocks of one row's values up to a multiple of 512 zeroed
 (`tail_bytes`), after each FP4 tensor or stack, and its calls check it is there.
@@ -293,26 +294,15 @@ class QLinear(_Matmul):
         y = torch.empty(rows, self.out, dtype=self.out_dtype, device=x.device)
         if rows == 0:
             return y
-        if rows <= self.mmvq_rows:
+        if rows <= self.mmvq_rows:                       # scale2 in its epilogue at any rows (D11)
             self._count("mmvq")
-            if scale2 is None or rows == 1:              # llama.cpp fuses scale2 into mmvq at one row only
-                self.lib.mmvq(self.type, blocks, x, y, scale2, self.workspace)
-            else:                                        # else it is its own f32 multiply, as ours
-                f32 = y if y.dtype == torch.float32 else torch.empty(rows, self.out, device=x.device)
-                self.lib.mmvq(self.type, blocks, x, f32, None, self.workspace)
-                torch.mul(f32, scale2, out=y)
+            self.lib.mmvq(self.type, blocks, x, y, scale2, self.workspace)
             return y
         self._count("mmq")
         blocks = self._mmq_blocks(parts)
-        f32 = None if y.dtype == torch.float32 else torch.empty(min(rows, CHUNK), self.out, device=x.device)
-        for start in range(0, rows, CHUNK):
-            xs, ys = x[start:start + CHUNK], y[start:start + CHUNK]
-            out = ys if f32 is None else f32[:len(xs)]
-            self.lib.mmq(self.type, self.prec, blocks, self._mmq_input(xs, self.f32), out, self.workspace)
-            if scale2 is not None:
-                torch.mul(out, scale2, out=ys)           # in f32, rounded once to out_dtype
-            elif f32 is not None:
-                ys.copy_(out)
+        for start in range(0, rows, CHUNK):              # scale2 in f32, then one rounding to out_dtype (D4)
+            self.lib.mmq(self.type, self.prec, blocks, self._mmq_input(x[start:start + CHUNK], self.f32),
+                         y[start:start + CHUNK], scale2, self.workspace)
         return y
 
 

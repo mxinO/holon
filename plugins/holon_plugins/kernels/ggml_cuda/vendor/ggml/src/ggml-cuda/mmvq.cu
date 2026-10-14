@@ -837,6 +837,11 @@ static __global__ void mul_mat_vec_q(
                         }
                     }
                 }
+                if constexpr (!has_fusion && type == GGML_TYPE_NVFP4) {
+                    if (fusion.x_scale) { // Holon: NVFP4's scale2 above one column (dense), after the full reduction
+                        result = ggml_cuda_mul_rn(result, *(const float *) fusion.x_scale);
+                    }
+                }
                 if (fusion.dst_bf16) {
                     ((nv_bfloat16 *) dst)[dst0 + j*stride_col_dst + i] = result;
                 } else {
@@ -1047,7 +1052,10 @@ static void mul_mat_vec_q_switch_fusion(
         }
     }
 
-    GGML_ASSERT(!has_fusion && "fusion only supported for ncols_dst=1");
+    // Holon: a dense scale alone (NVFP4's scale2) above one column, in the unfused kernel's epilogue
+    const bool scale_only = fusion.x_scale != nullptr && fusion.gate == nullptr && fusion.x_bias == nullptr &&
+                            fusion.gate_bias == nullptr && fusion.gate_scale == nullptr && ids == nullptr;
+    GGML_ASSERT((!has_fusion || scale_only) && "fusion only supported for ncols_dst=1");
 
     const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(block_nums, block_dims, nbytes_shared, stream);
     ggml_cuda_kernel_launch(mul_mat_vec_q<type, c_ncols_dst, false, small_k, halve_iters>, launch_params,
@@ -1465,7 +1473,7 @@ void ggml_cuda_mul_mat_vec_q(
     if (fusion) {
         const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
         GGML_ASSERT( !ids || dst->ne[2] <= get_mmvq_mmid_max_batch(src0->type, cc));
-        GGML_ASSERT(  ids || dst->ne[1] == 1);
+        GGML_ASSERT(  ids || dst->ne[1] == 1 || (fusion->x_scale && !fusion->gate && !fusion->x_bias)); // Holon: a scale above one column
         // Scale fusion is only allowed for NVFP4 currently as the cost of checking this at run-time in the prologue is
         // non-negligible for some models such as gpt-oss-20b
         GGML_ASSERT((fusion->x_scale == nullptr && fusion->gate_scale == nullptr) || src0->type == GGML_TYPE_NVFP4);

@@ -8,7 +8,10 @@
   emulated reference of the path taken (judge `q8_1`, MMA kernels: cc >= 7.5), NMSE <= 5e-4 against the
   unquantized oracle, run-to-run identical.
 - mmq's schedules at 512 rows, asserted from llama.cpp's own choice (tile I x J, nsm): stream-k with the fixup
-  pass (out = 300), one block per tile (out = nsm * I), and the model's out 4096 and 12288.
+  pass (out = 300), one block per tile (out = nsm * I), and the model's out 4096 and 12288. Under each, its bf16
+  output equals its f32 output cast (docs/m07-perf.md D4: the fixup's partials stay f32 until one rounding), and
+  NVFP4's `scale2` multiplies the f32 sum before that rounding (`torch.equal`, the fixup forced; native W4A4 too on
+  sm_120).
 - `convert` and `get_rows` (`qembedding`) against `gguf.quants.dequantize`: bit-identical for every type. FMA
   decision, measured on sm_86: with llama.cpp's flags (`-use_fast_math`, FMA contraction on) every value matches
   gguf-py bit for bit, affine types (Q4_1, Q5_1, Q2_K, Q4_K, Q5_K, IQ1_S) included, so nothing is built with
@@ -19,7 +22,8 @@
 - FP4 (docs/m06-lowp.md D8, §4.8; MXFP4 and NVFP4 are in the type sweeps above as ggml blocks): the HF layouts'
   `prepare` is lossless — gguf-py on its blocks × scale2 equals `reference.py` by value, the blocks are llama.cpp's
   converter's byte for byte, the source parts untouched — and the repack plants (N2, N3, M1) break it; `scale2` on
-  every path and output dtype against the q8_1 emulator in f64 on the reference weight, also in CUDA graphs. The
+  every path and output dtype against the q8_1 emulator in f64 on the reference weight, also in CUDA graphs; in mmvq's epilogue at rows 2–8 by value
+equal to the f32 multiply it replaced (docs/m07-perf.md D11). The
   precision check: mmq's precision is the spec's, and the default one (the N6 plant) is an error on sm_120 only;
   `quant.act = a4` selects native W4A4 on sm_120 and q8_1 elsewhere. Native FP4 activations: llama.cpp's quantizer
   against the emulator (`holon_judge.w4a4`: MXFP4 runs on any class, NVFP4 on sm_120), codes differing at a rate
@@ -224,6 +228,10 @@ def check_qlinear(kernel, name: str, blocks: np.ndarray | None, rows_list, parts
                 assert r.passed, f"{name} in={k} rows={rows} {path}: {r}"
         if rows > 1:
             assert not y[1].any(), f"{name} rows={rows}: zero row"
+        if parts is not None and "scale2" in parts and 1 < rows <= kernel.mmvq_rows:   # D11, by value: as the f32
+            f32 = torch.empty(rows, kernel.out, device="cuda")                       # multiply it replaces
+            kernel.lib.mmvq(kernel.type, parts["blocks"], x, f32, None, kernel.workspace)
+            assert torch.equal(y, (f32 * parts["scale2"]).to(y.dtype)), f"{name} rows={rows}: scale2 in mmvq"
         exact = reference.qlinear(x[normal], weight).double()
         nmse = ((y[normal].double() - exact) ** 2).sum() / (exact**2).sum()
         assert nmse <= NMSE, f"{name} in={k} rows={rows} {path}: NMSE {nmse:.2e}"
@@ -297,19 +305,30 @@ def test_qlinear_dispatch_is_mmvq_rows(sm):
 def test_mmq_schedules(ctx, sm, name):
     """mmq at CHUNK rows under each of llama.cpp's schedules, asserted from its own choice (`mmq_schedule`:
     0 tiling, 1 stream-k with one block per tile, 2 stream-k with the fixup pass) and from the kernels that launch
-    (so a refresh that moves llama.cpp's choice away from our mirror fails here)."""
+    (so a refresh that moves llama.cpp's choice away from our mirror fails here); its bf16 output is its f32 output
+    cast (D4), and with NVFP4's `scale2` (an HF layout) the f32 output times scale2, cast."""
     lib, k = extension.load(sm), 4096
     nsm = torch.cuda.get_device_properties().multi_processor_count
     kind, tile_i, _ = lib.mmq_schedule(0, TYPES[name], PREC["q8_1"], OUT, CHUNK)
     assert kind == 2, f"{name}: out={OUT} should take the stream-k fixup"
+    x = activations(CHUNK, k, seed=0)
     for out in (OUT, nsm * tile_i, 4096, 12288):
         kind = lib.mmq_schedule(0, TYPES[name], PREC["q8_1"], out, CHUNK)[0]
         assert out != nsm * tile_i or kind in (0, 1), f"{name}: out={out} (tiles a multiple of nsm) takes the fixup"
         kernel, blocks = qlinear(ctx, name, k, out=out), random_blocks(name, out, k, seed=out)
-        launched = _launches(kernel, activations(CHUNK, k, seed=0), {"blocks": device_blocks(blocks)})
+        w = {"blocks": device_blocks(blocks)}
+        launched = _launches(kernel, x, w)
         fixup = any("stream_k_fixup" in n for n in launched)
         assert fixup == (kind == 2), f"{name}: out={out} schedule {kind}, fixup launched: {fixup}"
         check_qlinear(kernel, name, blocks, (CHUNK,))
+        assert torch.equal(kernel(x, w), qlinear(ctx, name, k, "float32", out=out)(x, w).to(torch.bfloat16)), out
+    if name == "nvfp4":                                  # scale2, the fixup forced (out = OUT); native W4A4 on sm_120
+        for act_quant in ("a8", "a4") if sm == 120 else ("a8",):
+            kernel, f32 = (qlinear(ctx, "nvfp4/hf", k, dtype, act_quant=act_quant) for dtype in ("bfloat16", "float32"))
+            parts = prepared(kernel, name, hf_fp4(name, OUT, k, seed=1))
+            plain = f32(x, {"blocks": parts["blocks"]}) * parts["scale2"]          # today's: f32, then the multiply
+            assert torch.equal(f32(x, parts), plain) and torch.equal(kernel(x, parts), plain.to(torch.bfloat16))
+            assert kernel.calls == {f"mmq/{kernel.act['mmq']}": 1}
 
 
 def _launches(kernel, x: torch.Tensor, w: dict[str, torch.Tensor]) -> set[str]:
@@ -426,7 +445,7 @@ def test_hf_fp4_prepare_is_lossless_and_scale2_holds_on_every_path(ctx, elem):
     """Acceptance 4 on random weights: `prepare`'s ggml blocks, dequantized by gguf-py × scale2, equal the reference
     by value, and are llama.cpp's converter's byte for byte (with the pin's checkout, git-ignored under spikes/); the
     repack plants change them. Then `scale2` (one value
-    per tensor: the fused mmvq epilogue at one row, f32 then the multiply above it, the f32 → out_dtype step of mmq)
+    per tensor: mmvq's epilogue at every row count (D11), mmq's store (D4))
     against the q8_1 emulator on the reference weight, both output dtypes and both input dtypes."""
     plants = {"nvfp4": ("nvfp4-repack-nibbles-swapped", "nvfp4-repack-scales-permuted"),
               "mxfp4": ("mxfp4-repack-scale-off-by-one",)}[elem]
@@ -443,7 +462,7 @@ def test_hf_fp4_prepare_is_lossless_and_scale2_holds_on_every_path(ctx, elem):
                 bad = prepared(kernel, elem, parts)["blocks"]
             assert not torch.equal(dequantize_blocks(elem, bad, got.get("scale2")), weight), plant
         t = kernel.mmvq_rows
-        check_qlinear(kernel, f"{elem}/hf", None, (1, 2, t, t + 1, 64, CHUNK + 1), got, weight, act_dtype)
+        check_qlinear(kernel, f"{elem}/hf", None, (*range(1, t + 2), 64, CHUNK + 1), got, weight, act_dtype)
         assert set(kernel.calls) == {"mmvq/q8_1", "mmq/q8_1"}
 
 

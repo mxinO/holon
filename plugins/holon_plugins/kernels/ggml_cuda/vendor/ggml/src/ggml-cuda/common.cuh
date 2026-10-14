@@ -1590,6 +1590,13 @@ struct ggml_cuda_mm_fusion_args_device {
     bool dst_bf16 = false; // Holon: mul_mat_vec_q stores bf16 instead of f32 (dst is passed as void *)
 };
 
+// Holon: a * b in f32 without flushing subnormals (fast math would), as the f32 multiply by NVFP4's scale2 that a
+// fused epilogue replaces (torch's) does
+static __device__ __forceinline__ float ggml_cuda_mul_rn(float a, const float b) {
+    asm("mul.rn.f32 %0, %0, %1;" : "+f"(a) : "f"(b));
+    return a;
+}
+
 struct ggml_cuda_kernel_launch_params {
     dim3 block_nums;
     dim3 block_dims;

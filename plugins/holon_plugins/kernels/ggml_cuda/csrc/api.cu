@@ -177,17 +177,25 @@ size_t holon_ggml_workspace_high_water(void) {
     return used;
 }
 
-size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows) {
+namespace {
+
+// `fixup_tiles` partial f32 tiles per SM for the stream-k fixup: a dense call keeps two (each block's last, and the
+// end of its first, held in f32 for the fixup's single rounding: mmq.cuh, mmq_store), a call with ids one.
+size_t workspace_bytes(int64_t in, int64_t rows, int fixup_tiles) {
     const int64_t in_padded = GGML_PAD(in, MATRIX_ROW_PADDING);
     // mmq's q8_1 activations plus its tile padding (J <= 128 rows, rounded up to a load chunk of <= 512 ints);
     // mmvq's block_q8_1 and native FP4's block_fp4_mmq (half the bytes) need less
     const size_t q8_1 = (rows*in_padded/QK8_1_MMQ + 128) * sizeof(block_q8_1_mmq) + 512*sizeof(int);
     // native NVFP4's per-row activation scale, reserved on every workspace (one size per workspace name)
     const size_t row_scale = rows * sizeof(float);
-    // stream-k fixup: one partial I x J f32 tile per SM (I, J <= 128 on every config we build)
-    const size_t fixup = size_t(ggml_cuda_info().devices[ggml_cuda_get_device()].nsm) * 128*128 * sizeof(float);
+    // stream-k fixup: partial I x J f32 tiles per SM (I, J <= 128 on every config we build)
+    const size_t fixup = size_t(ggml_cuda_info().devices[ggml_cuda_get_device()].nsm) * fixup_tiles*128*128 * sizeof(float);
     return GGML_PAD(q8_1, POOL_ALIGN) + GGML_PAD(row_scale, POOL_ALIGN) + GGML_PAD(fixup, POOL_ALIGN);
 }
+
+} // namespace
+
+size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows) { return workspace_bytes(in, rows, 2); }
 
 void holon_ggml_mmvq(int type, const void * w, int64_t out, int64_t in, const void * x, int x_bf16, int64_t rows,
                      void * y, int y_bf16, const float * scale, void * workspace, size_t workspace_bytes,
@@ -203,12 +211,13 @@ void holon_ggml_mmvq(int type, const void * w, int64_t out, int64_t in, const vo
 }
 
 void holon_ggml_mmq(int type, int prec, const void * w, int64_t out, int64_t in, const void * x, int x_bf16,
-                    int64_t rows, float * y, void * workspace, size_t workspace_bytes, void * stream) {
+                    int64_t rows, void * y, int y_bf16, const float * scale, void * workspace, size_t workspace_bytes,
+                    void * stream) {
     call_context c(stream, workspace, workspace_bytes);
     const ggml_tensor src0 = matrix((ggml_type) type, w, in, out);
     const ggml_tensor src1 = matrix(act(x_bf16), x, in, rows);
-    ggml_tensor dst = with_prec(matrix(GGML_TYPE_F32, y, out, rows), prec);
-    ggml_cuda_mul_mat_q(c.ctx, &src0, &src1, nullptr, &dst);
+    ggml_tensor dst = with_prec(matrix(act(y_bf16), y, out, rows), prec);
+    ggml_cuda_mul_mat_q(c.ctx, &src0, &src1, nullptr, &dst, scale);
 }
 
 void holon_ggml_quantize_fp4(int type, const float * x, int64_t rows, int64_t in, void * blocks, float * scale,
@@ -258,8 +267,7 @@ size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int6
     // ids needs less
     const size_t ids_src1 = GGML_PAD(tokens*k*sizeof(int32_t), POOL_ALIGN);
     const size_t ids_dst = GGML_PAD((tokens*k + 127)*sizeof(int32_t), POOL_ALIGN);
-    return ids_src1 + ids_dst + GGML_PAD((experts + 1)*sizeof(int32_t), POOL_ALIGN) +
-           holon_ggml_workspace_bytes(in, tokens*k);
+    return ids_src1 + ids_dst + GGML_PAD((experts + 1)*sizeof(int32_t), POOL_ALIGN) + workspace_bytes(in, tokens*k, 1);
 }
 
 void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, int64_t in, const void * x, int x_bf16,

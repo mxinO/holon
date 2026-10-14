@@ -50,13 +50,11 @@ void matmul(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const at
     TORCH_CHECK(ws.scalar_type() == at::kByte && ws.device() == x.device() && ws.is_contiguous(), "workspace: uint8");
     TORCH_CHECK(rows > 0, "no rows");
     if (vec) {
-        TORCH_CHECK(!s || rows == 1, "mmvq: a scale only at one row");
         holon_ggml_mmvq(type, w.data_ptr(), out, in, x.data_ptr(), bf16(x, "x"), rows, y.data_ptr(), bf16(y, "y"),
                         scale(s, x, 1, "scale"), ws.data_ptr(), ws.numel(), stream());
     } else {
-        TORCH_CHECK(y.scalar_type() == at::kFloat, "mmq: y float32");
-        holon_ggml_mmq(type, prec, w.data_ptr(), out, in, x.data_ptr(), bf16(x, "x"), rows, y.data_ptr<float>(),
-                       ws.data_ptr(), ws.numel(), stream());
+        holon_ggml_mmq(type, prec, w.data_ptr(), out, in, x.data_ptr(), bf16(x, "x"), rows, y.data_ptr(), bf16(y, "y"),
+                       scale(s, x, 1, "scale"), ws.data_ptr(), ws.numel(), stream());
     }
 }
 
@@ -123,7 +121,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("mmvq", [](int64_t type, const at::Tensor & w, const at::Tensor & x, at::Tensor & y,
                      const std::optional<at::Tensor> & s, at::Tensor & ws) { matmul(true, type, 0, w, x, y, s, ws); });
     m.def("mmq", [](int64_t type, int64_t prec, const at::Tensor & w, const at::Tensor & x, at::Tensor & y,
-                    at::Tensor & ws) { matmul(false, type, prec, w, x, y, std::nullopt, ws); });
+                    const std::optional<at::Tensor> & s, at::Tensor & ws) { matmul(false, type, prec, w, x, y, s, ws); });
     m.def("quantize_fp4", [](int64_t type, const at::Tensor & x, at::Tensor & blocks, at::Tensor & scale) {
         const c10::cuda::CUDAGuard guard(x.device());
         TORCH_CHECK(x.dim() == 2 && x.size(0) > 0, "x: [rows, in]");
