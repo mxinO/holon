@@ -93,9 +93,20 @@ class _Dequantized:
         return self._cache[key]
 
     def _dequantize(self, parts: dict[str, torch.Tensor]) -> torch.Tensor:
+        if self.ggml == gguf.GGMLQuantizationType.MXFP4:
+            return ggml_mxfp4(parts["blocks"].cpu())
         if self.ggml is not None:
             return torch.from_numpy(gguf.quants.dequantize(np.asarray(parts["blocks"].cpu()), self.ggml))
         return hf.dequantize(self.elem, parts)
+
+
+def ggml_mxfp4(blocks: torch.Tensor) -> torch.Tensor:
+    """gguf-py's MXFP4 dequantization, vectorized in torch (gguf-py's runs on one core: a 30B's expert stacks, decoded
+    on every call, took ≈ 18 s a layer): per 32 values an e8m0 byte, then 16 bytes holding element j low and j + 16
+    high; `e2m1 · 2^(e − 127)` equals gguf-py's doubled table times half the scale by value."""
+    b = blocks.reshape(-1, 17)
+    codes = torch.cat((b[:, 1:] & 0x0F, b[:, 1:] >> 4), dim=-1)
+    return (hf.E2M1[codes.long()] * hf.e8m0(b[:, :1])).reshape(*blocks.shape[:-1], -1)
 
 
 class QLinear(_Dequantized):

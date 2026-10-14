@@ -98,3 +98,14 @@ def test_nvfp4_tensors_and_nan_mxfp4_scales_are_refused(tiny_checkpoint, tmp_pat
         f.write(b"\xff")
     with pytest.raises(ValueError, match=r"blk\.1\.ffn_down\.weight: an MXFP4 scale is NaN"):
         list(GGUFSource(file).tensors())
+
+
+def test_the_reference_kernels_decode_mxfp4_as_gguf_py():
+    """The reference kernels' vectorized MXFP4 decode (ref_kernels.ggml_mxfp4) is gguf-py's by value (its code 8 is
+    +0, ours −0), over every scale byte (but NaN's 0xFF) and code."""
+    from holon_testing.ref_kernels.kernels import ggml_mxfp4
+
+    blocks = torch.randint(0, 256, (255, 3, 17), dtype=torch.uint8)
+    blocks[:, :, 0] = torch.arange(255, dtype=torch.uint8)[:, None]
+    want = gguf.quants.dequantize(blocks.reshape(255, -1).numpy(), Q.MXFP4)
+    assert torch.equal(ggml_mxfp4(blocks.reshape(255, -1)), torch.from_numpy(want))
