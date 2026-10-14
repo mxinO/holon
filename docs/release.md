@@ -835,3 +835,8 @@ above is unchanged; what follows records results, deviations and decisions.
 2. **Core size:** +270 lines against ≈ 150 (breakdown above). The cap of 6000 is far off.
 3. **Lockless serving until M0.7:** models whose defaults do not fit (the 27B at `max_seqs` 64) need flags until
    their locks are propagated. The supervisor reports it at once rather than after 4 × `start_timeout`.
+
+**Lead decisions (2026-10-14):**
+1. **The CuTe DSL norms' cold-start compile is accepted and documented** (≈ 1 s per start, about 0.3 s per norm shape, in memory). Switching to FlashInfer's prebuildable CUDA norm module would change numerics (L0 plus a propagation) for a second per start. Acceptance 4's "compiles nothing but Triton" reads "compiles nothing but Triton and FlashInfer's CuTe DSL norms".
+2. **The core's +270 lines over the ≈ 150 budget is accepted** (4134 / 6000). About 40 of them moved from the tools, and about 55 are the hook Protocols §7 asks for.
+3. **The 27B cannot start without a lock on 24 GB, at the default `max_seqs` 64; this is recorded as a known limitation.** The defaults' recurrent state leaves no room for KV, and the start now fails at once rather than after 4 × `start_timeout`. Release locks cover the 27B on every class (§6). The README states the flags for unlocked large hybrids. Sizing `max_seqs` from the budget without a lock is deferred to v1: D2 keeps `max_seqs` exact.
