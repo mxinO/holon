@@ -911,3 +911,5 @@ bf16, are the same at either, and the GGUF prefill verdicts are f5a37b1's.
     cost the 8B FP8 more than its margin.
   - Fits record reserved minus allocated at the free-memory read.
   - The 8B FP8's predicted margin on the RTX 5080 is only 2.3K tokens (34.3K at 0.9 against 32K).
+- **Suite and CI** at 25f5e0a: full GPU suite (two A5000s) 1134 passed, 49 skipped, 20 min 54 s; `scripts/ci/run_all.sh`
+  green.
