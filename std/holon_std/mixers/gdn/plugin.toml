@@ -12,6 +12,7 @@ provides = [
     "op.causal_conv1d@1",
     "op.gated_delta_rule@1",
     "op.gated_rmsnorm@1",
+    "op.gdn_rewind@1",
 ]
 
 [properties]
