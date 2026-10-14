@@ -146,7 +146,7 @@ class Linear(nn.Module):
         return _Quantized(self._ctx, layout, kernels.QLINEAR, **{"in": self.in_features, "out": self.out_features},
                           act_dtype=dtype, out_dtype=dtype, act_quant=_act_quant(self._ctx))
 
-    def adopt(self, ctx, name: str, q, index: int | None = None) -> bool:
+    def adopt_weights(self, ctx, name: str, q, index: int | None = None) -> bool:
         if name != "weight" or index is not None or tuple(q.logical_shape) != (self.out_features, self.in_features):
             return False
         self._q, self.parts = self._quantized(q.layout), _hold(self.weight, q.parts, ctx.device)
@@ -200,7 +200,7 @@ class Embedding(nn.Module):
         self._q: _Quantized | None = None
         self.parts: dict[str, torch.Tensor] | None = None
 
-    def adopt(self, ctx, name: str, q, index: int | None = None) -> bool:
+    def adopt_weights(self, ctx, name: str, q, index: int | None = None) -> bool:
         if name != "weight" or index is not None or tuple(q.logical_shape) != (self.vocab, self.hidden):
             return False
         self._q = _Quantized(ctx, q.layout, kernels.QEMBEDDING, vocab=self.vocab, hidden=self.hidden,
@@ -238,7 +238,7 @@ class LMHead(nn.Module):
         return _Quantized(ctx, layout, kernels.QLINEAR, **{"in": self.hidden, "out": self.vocab},
                           act_dtype=_dtype(self.dtype), out_dtype="float32", act_quant=_act_quant(ctx))
 
-    def adopt(self, ctx, name: str, q, index: int | None = None) -> bool:
+    def adopt_weights(self, ctx, name: str, q, index: int | None = None) -> bool:
         if self._embed or name != "weight" or index is not None or tuple(q.logical_shape) != (self.vocab, self.hidden):
             return False
         self._q, self.parts = self._quantized(ctx, q.layout), _hold(self.weight, q.parts, ctx.device)

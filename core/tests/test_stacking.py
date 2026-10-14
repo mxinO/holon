@@ -86,7 +86,7 @@ class _Rows(nn.Module):
         self.w = nn.Parameter(torch.empty(slices, rows, cols), requires_grad=False)
         self.parts: dict[str, torch.Tensor] = {}
 
-    def adopt(self, ctx, name: str, q: QTensor, index: int | None = None) -> bool:
+    def adopt_weights(self, ctx, name: str, q: QTensor, index: int | None = None) -> bool:
         if name != "w" or q.layout != ROWS:
             return False
         if index is None or self.w.is_meta:

@@ -25,6 +25,7 @@ from .plugins import PluginError, PluginSet, discover
 from .supervisor import supervised
 
 AUTO_CONTEXT = 32768      # `--max-model-len auto`: the model's trained context, at most this
+SERVE_MAX_SEQS = 8        # `holon serve` without a lock (EngineConfig's 64 leaves a large hybrid no KV on 24 GB)
 
 
 def engine_flags(parser: argparse.ArgumentParser, given_only: bool = False) -> None:
@@ -77,14 +78,17 @@ def layered(base: dict[str, object], flags: dict[str, object]) -> dict[str, obje
 def serve_history(model: str, flags: dict[str, object], found: tuple | None, auto: int
                   ) -> list[tuple[EngineConfig, str | None]]:
     """The supervisor's history, oldest first: defaults + flags, then the lock (`plans.find`'s result) + flags. The
-    requested `max_model_len` is a flag's, else the lock's, else `auto`; every config clamps it to what fits."""
+    requested `max_model_len` is a flag's, else the lock's, else `auto`; every config clamps it to what fits. The
+    defaults serve at most SERVE_MAX_SEQS sequences unless `--max-seqs` says otherwise."""
     def config(base: dict[str, object]) -> EngineConfig:
         settings = {"clamp_context": True} | layered(base, flags)
         if settings.get("max_model_len", "auto") == "auto":
             settings["max_model_len"] = auto
         return EngineConfig(model=model, **settings)
 
-    history = [(config({}), None)]
+    if "max_seqs" not in flags:
+        _say(f"{'the fallback' if found else 'defaults'} without a lock: max_seqs {SERVE_MAX_SEQS} (--max-seqs)")
+    history = [(config({"max_seqs": SERVE_MAX_SEQS}), None)]
     if found is not None:
         history.append((config(plans.lock_overrides(found[0])), str(found[2])))
     return history
@@ -98,12 +102,19 @@ def auto_context(model_plugin: object, source: object) -> int:
 
 
 def find_lock(directory: pathlib.Path, source: object, plugins: PluginSet, device: str) -> tuple | None:
-    """The lock `holon serve` starts from (loudly: which, or why none)."""
+    """The lock `holon serve` starts from (loudly: which, or why none). A history it cannot read (two model ids for one
+    build, a lock edited by hand) is warned about, and defaults serve."""
     found = None
     if not directory.is_dir():
         _say(f"WARNING: no lock directory {directory}: serving defaults (name one with --plans)")
-    elif (found := plans.find(directory, source.identity(), platform.fingerprint(torch.device(device)),
-                              plans.current_srcs(plugins.installed))) is None:
+        return None
+    try:
+        found = plans.find(directory, source.identity(), platform.fingerprint(torch.device(device)),
+                           plans.current_srcs(plugins.installed))
+    except ValueError as e:
+        _say(f"WARNING: unreadable lock history: {e}; serving defaults")
+        return None
+    if found is None:
         _say(f"no current lock for {source.identity()} in {directory}: serving defaults")
     else:
         _say(f"starting from {found[2]}" + (f" (unverified: {found[0].plan.fingerprint_class}'s)" if found[1] else ""))

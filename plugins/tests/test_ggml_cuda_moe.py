@@ -353,7 +353,7 @@ def moe_layer(ctx, gate_up: str, down: str):
                                      ("down", down, H, INTER, 13)):
         s = stack(name, EQ, out, k, seed)
         q = QTensor(Layout(Scheme(f"ggml.{name}"), "gguf.native"), (EQ, out, k), {"blocks": torch.from_numpy(s.blocks)})
-        assert getattr(unit, part).adopt(ctx, "weight", q)
+        assert getattr(unit, part).adopt_weights(ctx, "weight", q)
         stacks.append(s)
     unit.finalize_weights(ctx)
     for module in unit.modules():

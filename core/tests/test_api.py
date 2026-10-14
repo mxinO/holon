@@ -152,7 +152,10 @@ def test_dataclass_replace_on_ref_is_not_supported():
         dataclasses.replace(Ref("a@1", x=1), name="b")
 
 
-LISTING = "abi {}\nprotocol Sampler() required, implemented by plugins\n  sample(self)\nconst X = 1\n"
+LISTING = ("abi {}\nprotocol Sampler() required, implemented by plugins\n  sample(self)\nconst X = 1\n"
+           "dataclass D\n  #0 a: int\n  #1 b: int = 0\n")
+FIELD = "  #1 b: int = 0\n"
+CONTRACTS = "op.rmsnorm@1  (std.ops)\n"
 
 
 @pytest.mark.parametrize("old, new, error", [
@@ -164,11 +167,18 @@ LISTING = "abi {}\nprotocol Sampler() required, implemented by plugins\n  sample
     ("1.0", LISTING.format("1.1").replace("  sample(self)\n", "  sample(self)\n  seed(self)\n"),   # plugins lack it
      "required plugin member"),
     ("1.0", LISTING.format("2.0").replace("  sample(self)\n", "  sample(self)\n  seed(self)\n"), None),
+    ("1.0", LISTING.format("1.1") + "  #2 c: int = 1\n", None),                       # a field appended with a default
+    ("1.0", LISTING.format("1.1") + "  #2 c: int\n", "needs a major"),               # without: callers lack it
+    ("1.0", LISTING.format("1.1").replace(FIELD, "  #1 c: int = 1\n  #2 b: int = 0\n"), "needs a major"),  # inserted
 ])
 def test_abi_listing_needs_the_right_bump(monkeypatch, old, new, error):
-    """`scripts/ci/check_abi.py`: what an ABI change requires of the version (release design §7)."""
+    """`scripts/ci/check_abi.py`: what an ABI change requires of the version; contracts are the plugins' own and
+    change by their majors (release design §7)."""
     monkeypatch.syspath_prepend(str(pathlib.Path(__file__).resolve().parents[2] / "scripts" / "ci"))
-    from check_abi import bump_error
+    from check_abi import bump_error, contract_error
 
     why = bump_error(LISTING.format(old), new)
     assert why is None if error is None else error in why
+    assert contract_error(CONTRACTS, CONTRACTS + "op.new@1  (std.ops)\n") is None             # new contracts are free
+    assert "without a new major" in contract_error(CONTRACTS, "op.rmsnorm@1  (other)\n")
+    assert contract_error(CONTRACTS, "op.rmsnorm@2  (std.ops)\n") is None

@@ -29,8 +29,11 @@ COPY . .
 RUN uv sync --frozen && rm -rf "$UV_CACHE_DIR"
 # Native code for every supported SM (no GPU needed to build): the GGUF kernels and FlashInfer's modules.
 # `--build-arg MAX_JOBS=N` caps the parallel compiles (default: every CPU).
+# Then every cache is writable by whichever user runs the container (`docker run --user`).
 ARG MAX_JOBS
-RUN holon prebuild --sm 86 89 120
+RUN holon prebuild --sm 86 89 120 \
+    && mkdir -p "$HF_HOME" "$TRITON_CACHE_DIR" "$CUTE_DSL_CACHE_DIR" \
+    && chmod -R a+rwX "$XDG_CACHE_HOME" "$HF_HOME"
 
 EXPOSE 8000
 ENTRYPOINT ["holon"]

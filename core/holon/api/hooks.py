@@ -31,8 +31,9 @@ class BindsKernels(Protocol):
 
 
 class AdoptsWeights(Protocol):
-    def adopt(self, ctx: BuildCtx, name: str, value: QTensor) -> bool:
-        """Take the quantized checkpoint tensor for parameter `name` as is (design §5.5); False: dequantize it."""
+    def adopt_weights(self, ctx: BuildCtx, name: str, value: QTensor, index: int | None = None) -> bool:
+        """Take the quantized checkpoint tensor for parameter `name` as is (design §5.5), or slice `index` of a stacked
+        one; False: dequantize it."""
 
 
 # -- mixers (unit classes) and their planners -----------------------------------------------------------------------

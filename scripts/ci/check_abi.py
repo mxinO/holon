@@ -1,20 +1,28 @@
 """The plugin ABI's listing (release design §7): what plugins may rely on, rendered from the code and compared with
 `core/abi.txt`. A difference fails unless the listing is regenerated (`--write`) with `holon.api.ABI` bumped: an
-addition needs a minor bump, a removal or change a major one (below 1.0: the minor number, as manifests' ranges read
+addition needs a minor bump; a removal or change, a member added to a required Protocol plugins implement, or a
+dataclass field added without a default needs a major one (below 1.0: the minor number, as manifests' ranges read
 it). Also fails when the core looks up a hook by name (`hasattr` / `getattr` with a literal) that no Protocol of
 `holon.api` declares.
 
-Listed: every public name of `holon.api` (dataclass fields in order with types and defaults; Protocol members with
+Listed: every public name of `holon.api` (dataclass fields by index with types and defaults; Protocol members with
 their signatures, required or optional, and who implements the Protocol), the optional hooks (`holon.api.hooks`),
-`EngineConfig`, the `BuildCtx.options` keys the core provides, the manifest schema, the string vocabularies (the
-API's and the IPC frame and failure kinds), and the `op.*` / `unit.*` contracts first-party plugins provide.
-Run in the project environment."""
+`EngineConfig`, the `BuildCtx.options` keys the core provides, the manifest schema and the string vocabularies (the
+API's and the IPC frame and failure kinds).
+
+The `op.*` / `unit.*` contracts the first-party plugins provide are the plugins' ABI, not the core's: each
+distribution lists its own (`std/contracts.txt`, `plugins/contracts.txt`). A new contract is free; one removed (or
+provided by another plugin) needs the same contract at a higher major.
+
+`--base REF` (run_all.sh passes its base ref) also holds every listing to these rules against REF's, so a change
+cannot skip its bump by regenerating the committed listing. Run in the project environment."""
 from __future__ import annotations
 
 import ast
 import dataclasses
 import enum
 import inspect
+import subprocess
 import sys
 import tomllib
 import typing
@@ -25,6 +33,7 @@ from holon.api import hooks, manifest
 from holon.core import engine, ipc
 
 LISTING = ROOT / "core" / "abi.txt"
+CONTRACTS = {"std": ROOT / "std" / "contracts.txt", "plugins": ROOT / "plugins" / "contracts.txt"}
 # Protocols the core implements and plugins call (the rest are implemented by plugins).
 CORE_IMPLEMENTS = {"BuildCtx", "EngineClient", "KernelRegistry", "Ledger", "Pool", "PrefixView",
                    "Registries", "Registry", "SeqView", "StepCtx", "TargetView"}
@@ -51,9 +60,9 @@ def render(name: str, obj: object, optional: bool = False) -> list[str]:
     if dataclasses.is_dataclass(obj):
         params = obj.__dataclass_params__
         head = f"dataclass {name}" + (" frozen" if params.frozen else "")
-        fields = [f"  {f.name}: {f.type}" + ("" if f.default is dataclasses.MISSING and f.default_factory is
-                                             dataclasses.MISSING else f" = {_default(f)}")
-                  for f in dataclasses.fields(obj)]
+        fields = [f"  #{i} {f.name}: {f.type}" + ("" if f.default is dataclasses.MISSING and f.default_factory is
+                                                  dataclasses.MISSING else f" = {_default(f)}")
+                  for i, f in enumerate(dataclasses.fields(obj))]
         return [head, *fields, *(f"  {m}" for m in _members(obj) if "(" in m)]
     if isinstance(obj, type) and issubclass(obj, enum.Enum):
         return [f"enum {name}", *(f"  {m.name} = {m.value!r}" for m in obj)]
@@ -71,7 +80,9 @@ def render(name: str, obj: object, optional: bool = False) -> list[str]:
 
 
 def _default(f: dataclasses.Field) -> str:
-    return f"{f.default_factory.__name__}()" if f.default is dataclasses.MISSING else repr(f.default)
+    if f.default is dataclasses.MISSING:
+        return f"{f.default_factory.__name__}()"
+    return f"frozenset({sorted(f.default)!r})" if isinstance(f.default, frozenset) else repr(f.default)
 
 
 def options_keys() -> list[str]:
@@ -90,13 +101,14 @@ def options_keys() -> list[str]:
     return sorted(keys)
 
 
-def contracts() -> list[str]:
+def contracts(dist: str) -> str:
+    """The `op.*` / `unit.*` contracts the plugins of distribution `dist` provide, one per line with its provider."""
     out = set()
-    for path in (*ROOT.glob("std/holon_std/**/plugin.toml"), *ROOT.glob("plugins/holon_plugins/**/plugin.toml")):
+    for path in ROOT.glob(f"{dist}/holon_{dist}/**/plugin.toml"):
         m = tomllib.loads(path.read_text())
         out |= {f"{r}  ({m['plugin']['name']})" for r in m.get("resources", {}).get("provides", ())
                 if r.startswith(("op.", "unit."))}
-    return sorted(out)
+    return "".join(f"{line}\n" for line in sorted(out))
 
 
 def listing() -> str:
@@ -116,7 +128,6 @@ def listing() -> str:
               *(f"{name} = {sorted(getattr(manifest, name).__args__)}" for name in ("Numerics", "GraphPolicy")),
               f"ipc frames = {sorted(k.decode() for k in ipc._DECODE)}",
               f"ipc failed kinds = {sorted({*ipc.FAILED_KINDS.values(), 'error'})}"]
-    lines += ["", "# op and unit contracts provided by first-party plugins", *contracts()]
     return "\n".join(lines) + "\n"
 
 
@@ -151,35 +162,73 @@ def _entries(listing: str) -> set[tuple[str, str]]:
 
 
 def bump_error(old: str, new: str) -> str | None:
-    """Why the listing `new` may not replace the committed `old` under its version, or None. A removal or change, or a
-    member added to a required Protocol plugins implement (plugins of the old ABI lack it), needs a major bump (below
-    1.0: the minor number, as manifests' ranges read it); any other addition a minor one."""
+    """Why the listing `new` may not replace `old` under its version, or None. A removal or change, a member added to a
+    required Protocol plugins implement (plugins of the old ABI lack it), or a dataclass field added without a default
+    (callers of the old ABI do not pass it) needs a major bump (below 1.0: the minor number, as manifests' ranges read
+    it); any other addition a minor one."""
     was, now, before, after = _version(old), _version(new), _entries(old), _entries(new)
-    breaking = sorted(line for _, line in before - after) + sorted(
-        line for head, line in after - before if line != head and "required, implemented by plugins" in head
-        and (head, head) in before)
+    def breaks(head: str, line: str) -> bool:
+        if line == head or (head, head) not in before:            # a new item
+            return False
+        return "required, implemented by plugins" in head or (head.startswith("dataclass ") and " = " not in line)
+
+    breaking = sorted(line for _, line in before - after) + sorted(line for head, line in after - before
+                                                                   if breaks(head, line))
     major = now[0] > was[0] or (was[0] == 0 and now[:2] > was[:2])
     if breaking and not major:
-        return f"a removal, change or required plugin member needs a major ABI bump (from {old.split()[1]}): " \
-               f"{breaking[:5]}"
+        return f"a removal, change, required plugin member or field without a default needs a major ABI bump " \
+               f"(from {old.split()[1]}): {breaking[:5]}"
     if not breaking and now <= was:
         return f"an addition needs a minor ABI bump (from {old.split()[1]})"
     return None
 
 
+def contract_error(old: str, new: str) -> str | None:
+    """Why the contracts listing `new` may not replace `old`, or None: a contract removed, or provided by another
+    plugin, needs the same contract at a higher major (its provider's breaking change); new contracts are free."""
+    def majors(listing: str) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for line in listing.splitlines():
+            name, major = api.parse_versioned(line.split()[0])
+            out[name] = max(out.get(name, 0), major)
+        return out
+
+    gone = sorted(set(old.splitlines()) - set(new.splitlines()))
+    newest = majors(new)
+    bad = [line for line in gone if newest.get(api.parse_versioned(line.split()[0])[0], 0)
+           <= api.parse_versioned(line.split()[0])[1]]
+    return f"contracts removed or changed without a new major: {bad[:5]}" if bad else None
+
+
+def _at(base: str, path) -> str | None:
+    """`path` as committed at `base` (None if absent there)."""
+    out = subprocess.run(["git", "show", f"{base}:{path.relative_to(ROOT)}"], cwd=ROOT, capture_output=True, text=True)
+    return out.stdout if out.returncode == 0 else None
+
+
 def main() -> None:
-    new = listing()
+    rendered = {LISTING: (listing(), bump_error)} | {path: (contracts(dist), contract_error)
+                                                      for dist, path in CONTRACTS.items()}
     msgs = hook_names()
-    if "--write" in sys.argv:
-        if LISTING.exists() and LISTING.read_text() != new and (why := bump_error(LISTING.read_text(), new)):
-            fail([why], "ABI listing written")
-        LISTING.write_text(new)
-    elif not LISTING.exists() or LISTING.read_text() != new:
-        old = LISTING.read_text().splitlines() if LISTING.exists() else []
-        msgs += [f"- {line}" for line in old if line not in new.splitlines()][:20]
-        msgs += [f"+ {line}" for line in new.splitlines() if line not in old][:20]
-        msgs.append("the ABI changed: bump holon.api.ABI and regenerate with `python scripts/ci/check_abi.py --write`")
-    fail(msgs, f"ABI {api.ABI} listing (core/abi.txt) and hook names")
+    base = sys.argv[sys.argv.index("--base") + 1] if "--base" in sys.argv else None
+    if base and subprocess.run(["git", "rev-parse", "--verify", "-q", base], cwd=ROOT, capture_output=True).returncode:
+        print(f"skip ABI bump check: base {base!r} not found")
+        base = None
+    for path, (new, rule) in rendered.items():
+        committed = path.read_text() if path.exists() else None
+        if "--write" in sys.argv:
+            if committed is not None and committed != new and (why := rule(committed, new)):
+                fail([f"{path.relative_to(ROOT)}: {why}"], "ABI listings written")
+            path.write_text(new)
+        elif committed != new:
+            old = (committed or "").splitlines()
+            msgs += [f"{path.relative_to(ROOT)}: - {line}" for line in old if line not in new.splitlines()][:20]
+            msgs += [f"{path.relative_to(ROOT)}: + {line}" for line in new.splitlines() if line not in old][:20]
+            msgs.append(f"{path.relative_to(ROOT)} changed: regenerate it with `python scripts/ci/check_abi.py "
+                        "--write` (core/abi.txt: after bumping holon.api.ABI)")
+        if base and (was := _at(base, path)) is not None and was != new and (why := rule(was, new)):
+            msgs.append(f"{path.relative_to(ROOT)} against {base}: {why}")
+    fail(msgs, f"ABI {api.ABI} listing (core/abi.txt), contracts and hook names")
 
 
 if __name__ == "__main__":

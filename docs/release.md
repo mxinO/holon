@@ -778,16 +778,18 @@ above is unchanged; what follows records results, deviations and decisions.
   - **String vocabularies** are now declared: `FINISH_REASONS`, `ERROR_KINDS` and `KERNEL_PROPS` (now enforced by
     `KernelSpec`).
   - **`scripts/ci/check_abi.py`** (in `run_all.sh`) renders `core/abi.txt`, which covers:
-    - names and signatures, dataclass fields in order with types and defaults;
+    - names and signatures, dataclass fields by index with types and defaults;
     - Protocol members, required or optional, and who implements each Protocol;
     - `EngineConfig`, the `BuildCtx.options` keys and the manifest schema;
-    - the vocabularies, the IPC frame and failed kinds;
-    - the `op.*` / `unit.*` contracts first-party plugins provide.
+    - the vocabularies, the IPC frame and failed kinds.
+
+    The `op.*` / `unit.*` contracts first-party plugins provide are listed per distribution
+    (`std/contracts.txt`, `plugins/contracts.txt`; §13.4).
 
     It fails on drift and on undeclared `hasattr` / `getattr` literals (a planted one fails). `--write` requires the
-    bump: an addition is minor; a removal, a change or a member added to a required plugin-implemented Protocol is
-    major (below 1.0, the minor number). The rule is tested. The listing was regenerated twice inside step 2, before
-    any lock.
+    bump: an addition is minor; a removal, a change, a member added to a required plugin-implemented Protocol or a
+    field added without a default is major (below 1.0, the minor number). The rule is tested, and CI holds it against
+    the base ref (§13.4). The listing was regenerated inside steps 1–2, before any lock.
 - **End to end on the GPU.** A current lock for Qwen3-8B Q4_K_M on rtx-a5000 was written by the tools into a
   temporary directory only. The file was then served under another path and name (a `--local-dir`-style copy, so the
   identity is `Qwen3-8B-Q4_K_M@120307ba529eb243`, not the hub's).
@@ -837,6 +839,55 @@ above is unchanged; what follows records results, deviations and decisions.
    their locks are propagated. The supervisor reports it at once rather than after 4 × `start_timeout`.
 
 **Lead decisions (2026-10-14):**
-1. **The CuTe DSL norms' cold-start compile is accepted and documented** (≈ 1 s per start, about 0.3 s per norm shape, in memory). Switching to FlashInfer's prebuildable CUDA norm module would change numerics (L0 plus a propagation) for a second per start. Acceptance 4's "compiles nothing but Triton" reads "compiles nothing but Triton and FlashInfer's CuTe DSL norms".
+1. **Escalated to the owner (acceptance changed after measuring), batched by the lead.** Pending the owner: **the
+   CuTe DSL norms' cold-start compile is accepted and documented** (≈ 1 s per start, about 0.3 s per norm shape, in memory). Switching to FlashInfer's prebuildable CUDA norm module would change numerics (L0 plus a propagation) for a second per start. Acceptance 4's "compiles nothing but Triton" reads "compiles nothing but Triton and FlashInfer's CuTe DSL norms".
 2. **The core's +270 lines over the ≈ 150 budget is accepted** (4134 / 6000). About 40 of them moved from the tools, and about 55 are the hook Protocols §7 asks for.
-3. **The 27B cannot start without a lock on 24 GB, at the default `max_seqs` 64; this is recorded as a known limitation.** The defaults' recurrent state leaves no room for KV, and the start now fails at once rather than after 4 × `start_timeout`. Release locks cover the 27B on every class (§6). The README states the flags for unlocked large hybrids. Sizing `max_seqs` from the budget without a lock is deferred to v1: D2 keeps `max_seqs` exact.
+3. **Revised after the panel's code review (reverses the first decision 3): `holon serve` without a lock serves at
+   `max_seqs` 8.** The defaults entry of the history (no lock found, `--no-lock`, and the fallback) gets a serve-only
+   default `max_seqs` of 8 (`cli.SERVE_MAX_SEQS`), logged and overridden by `--max-seqs`, applied like
+   `--max-model-len auto`. Tools, judge and bench keep `EngineConfig`'s 64. So design §4.4's "never refuses to serve"
+   holds for the 27B on a 24 GB card: checked on the RTX A5000, `holon serve` of Qwen3.8-27B UD-IQ3_S with no lock and
+   no flags starts in 76 s at `max_seqs` 8 and the full 32768 context, and answers a chat completion. A lock's
+   `max_seqs` stays exact (D2).
+
+### 13.4 Panel code review of steps 1–2 (two reviewers, scope and serving)
+
+Every finding is fixed, each with a test that fails before it where code changed.
+
+- **C-S1 (major): plugin contracts were under the core's ABI.** `core/abi.txt` listed every `op.*` / `unit.*`
+  contract, so a new std unit would have forced a `holon.api.ABI` bump: a core edit that re-propagates every lock
+  (design §4.5, invariant 9).
+  - Each distribution now lists its own contracts (`std/contracts.txt`, `plugins/contracts.txt`), rendered and
+    checked by `check_abi.py` under their own rule. A new contract is free; one removed or moved to another provider
+    needs the same contract at a higher major (`contract_error`, tested).
+  - `core/abi.txt` keeps `holon.api`, the hooks, `EngineConfig`, the options keys, the manifest schema and the
+    vocabularies.
+- **C-S2 (major): the no-lock 27B start.** The defaults entry now serves at `max_seqs` 8 (§13.3, lead decision 3
+  revised). Tested in the `serve_history` case and checked on the A5000.
+- **Scope minors.**
+  - Lead decision 1 is marked escalated.
+  - A toy CPU test for `holon prebuild` (`core/tests/test_plugins.py`): fixture plugins whose package-relative build
+    modules record their `--sm`, one subprocess per (plugin, SM), a plugin without `[build]` not run, and a non-zero
+    exit naming the failed (plugin, SM) after the rest ran.
+  - The units' `adopt` hook is renamed `adopt_weights` (`holon.api.hooks.AdoptsWeights`; std's ops and MoE units,
+    `build.load_weights`, design §5.5), so `adopt` is the state kinds' alone.
+- **Serving minors.**
+  1. **CI enforces the bump.** `run_all.sh` runs `check_abi.py --base <its base ref>`, which holds each listing
+     (`core/abi.txt` and both contracts listings) to its rule against the base's committed one. Main has none yet, so
+     the first one lands with this branch; against this branch's own earlier commit, the reformatted listing fails as
+     it should.
+  2. **Dataclass fields are rendered with their index**, so an insertion is a change (major). A field added without a
+     default is major; frozenset defaults render sorted. Tested.
+  3. **`cli.find_lock` catches `ValueError`** (two model ids for one build, a lock edited by hand), warns naming the
+     history or file, and serves defaults. Two cases were added to the `serve_history` test.
+  4. **The failed kind "plugin" is the resolver's alone.** A plugin's import or registration failure is now
+     `PluginLoadFailed` (a `PluginError`), sent as "error" and retried, since it may be transient. Tested through
+     `ipc`'s encoding.
+  5. **Dockerfile.** After the prebuild, the cache directory (XDG, FlashInfer, Triton, CuTe) and `HF_HOME` are made
+     writable by any user (`chmod -R a+rwX`, in the same layer), so `docker run --user` works. Checked: the image
+     rebuilds. As uid 12345, `holon prebuild --sm 86` (which takes the GGUF build lock in the cache) succeeds, and so
+     does a write into each cache directory and `HF_HOME`.
+
+The listings changed again inside the branch (reformatted, contracts split). The ABI stays 0.1: no lock, release or
+main commit refers to it yet.
+

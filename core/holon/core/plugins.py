@@ -24,6 +24,10 @@ class PluginError(RuntimeError):
     pass
 
 
+class PluginLoadFailed(PluginError):
+    """A plugin's import or registration raised (not the resolver): possibly transient, unlike other PluginErrors."""
+
+
 class Registry[T]:
     """A name → object table that refuses silent overwrites."""
 
@@ -233,6 +237,6 @@ class PluginSet:
             except PluginError:
                 raise
             except Exception as e:  # noqa: BLE001 — any import/registration failure becomes a named plugin error
-                raise PluginError(f"plugin {name!r} failed to load: {type(e).__name__}: {e}") from e
+                raise PluginLoadFailed(f"plugin {name!r} failed to load: {type(e).__name__}: {e}") from e
             self._loaded[name] = plugin
         return self._loaded[name]

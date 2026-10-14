@@ -34,7 +34,7 @@ import zmq.asyncio
 from holon.api import Abort, EngineRequest, RequestError, SamplingParams, TokenDelta
 
 from .memory import OutOfUnits
-from .plugins import PluginError
+from .plugins import PluginError, PluginLoadFailed
 
 _encode = msgspec.msgpack.encode
 _DECODE = {b"submit": msgspec.msgpack.Decoder(EngineRequest), b"abort": msgspec.msgpack.Decoder(Abort),
@@ -42,9 +42,10 @@ _DECODE = {b"submit": msgspec.msgpack.Decoder(EngineRequest), b"abort": msgspec.
            b"stats": msgspec.msgpack.Decoder(dict[str, Any]), b"ready": msgspec.msgpack.Decoder(dict[str, Any]),
            b"failed": msgspec.msgpack.Decoder(tuple[str, str])}
 _POLL_MS = 1000
-# Kinds of `failed` messages: "plugin" and "memory" fail every start of that configuration alike (a missing provider,
-# another plugin ABI, state that does not fit), "error" is anything else.
-FAILED_KINDS = {PluginError: "plugin", OutOfUnits: "memory"}
+# Kinds of `failed` messages, the first type that matches: "plugin" and "memory" fail every start of that configuration
+# alike (the resolver's errors — no provider, another plugin ABI, an unknown slot — and state that does not fit);
+# "error" is anything else, a plugin's own import or registration failure included (it may be transient).
+FAILED_KINDS = {PluginLoadFailed: "error", PluginError: "plugin", OutOfUnits: "memory"}
 
 
 def _failed(e: BaseException, prefix: str = "") -> list[bytes]:

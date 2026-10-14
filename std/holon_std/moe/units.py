@@ -33,8 +33,8 @@ def _act_quant(ctx) -> str:
 class ExpertLinear(nn.Module):
     """A stack of E experts' [out, in] weights, applied per (token, slot) by `linear_experts@2`.
 
-    Dense (an HF checkpoint) it is the parameter itself, layout `dense/<dtype>`. Quantized, `adopt` takes the whole
-    stack (a GGUF file's, whose parts hold the experts' rows in order) or one expert's slice at a time (the first
+    Dense (an HF checkpoint) it is the parameter itself, layout `dense/<dtype>`. Quantized, `adopt_weights` takes the
+    whole stack (a GGUF file's, whose parts hold the experts' rows in order) or one expert's slice at a time (the first
     materializes each part as [E, …] on the device, docs/m06-lowp.md D6); either way every part is held per expert,
     [E, …], the first (the primary part) by `weight`. `merge(gate, up)` builds one gate/up stack per expert that
     applies SwiGLU (`glu="swiglu"`); the kernel is bound after merges, and its `prepare`, if any, replaces the parts
@@ -58,7 +58,7 @@ class ExpertLinear(nn.Module):
             return f"dense/{_dtype(self.weight.dtype)}"
         return f"{self.layout.scheme.elem}/{self.layout.name}"
 
-    def adopt(self, ctx, name: str, q, index: int | None = None) -> bool:
+    def adopt_weights(self, ctx, name: str, q, index: int | None = None) -> bool:
         stack = (self.experts, self.out_features, self.in_features)
         if name != "weight" or tuple(q.logical_shape) != (stack if index is None else stack[1:]):
             return False

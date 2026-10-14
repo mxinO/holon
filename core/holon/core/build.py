@@ -310,13 +310,13 @@ def map_name(name: str, weights: WeightMap) -> tuple[str, str | None, int | None
 
 
 def _adopt(model: nn.Module, target: str, q: QTensor, transform: str | None, ctx: BuildContext, **index: int) -> None:
-    """Hand a quantized tensor to the unit owning `target`: `adopt(ctx, leaf, q)`, or `adopt(…, index=i)` for slice
-    `i` of a stack (the unit keeps its stack's first dimension while loading)."""
+    """Hand a quantized tensor to the unit owning `target`: `adopt_weights(ctx, leaf, q)`, or
+    `adopt_weights(…, index=i)` for slice `i` of a stack (the unit keeps its stack's first dimension while loading)."""
     if transform:
         raise PluginError(f"{target}: transform {transform!r} cannot apply to a quantized tensor")
     owner, _, leaf = target.rpartition(".")
     unit = model.get_submodule(owner)
-    if not getattr(unit, "adopt", None) or not unit.adopt(ctx, leaf, q, **index):
+    if not getattr(unit, "adopt_weights", None) or not unit.adopt_weights(ctx, leaf, q, **index):
         raise PluginError(f"{target}: {type(unit).__name__} cannot read layout {q.layout}")
 
 
@@ -348,8 +348,8 @@ def load_weights(model: nn.Module, ctx: BuildContext, tensors: Iterable[tuple[st
     unit's `finalize_weights`.
 
     A dense tensor is copied to the device in the parameter's dtype. A quantized one (`QTensor`) goes to the module
-    owning the parameter — `adopt(ctx, name, qtensor)`, with `index=i` for slice `i` of a stack, stores it in its own
-    form and returns True, or False if it cannot read that layout (design §5.5; the core never looks inside a
+    owning the parameter — `adopt_weights(ctx, name, qtensor)`, with `index=i` for slice `i` of a stack, stores it in
+    its own form and returns True, or False if it cannot read that layout (design §5.5; the core never looks inside a
     layout)."""
     weights = weights or model.spec.weights
     params = dict(model.named_parameters())

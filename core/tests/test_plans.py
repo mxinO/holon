@@ -52,27 +52,34 @@ def _lock(root, model_id, cls="rtx-4090/cu130-torch2.11", src="s1", sm=89):
     return locks.append(root, Lock(plan, sm=sm))
 
 
-@pytest.mark.parametrize("case", ["lock", "flags", "borrowed", "outdated", "none", "two ids"])
-def test_serve_starts_from_the_lock_of_its_build(tmp_path, case):
+@pytest.mark.parametrize("case", ["lock", "flags", "borrowed", "outdated", "none", "two ids", "corrupt"])
+def test_serve_starts_from_the_lock_of_its_build(tmp_path, capsys, case):
     """Found by the build alone (the file downloaded under another name); flags over the lock, dict flags per key and
-    `key=` deleting one; the lock's pins as preferences; defaults first in the history; `auto` from the model."""
+    `key=` deleting one; the lock's pins as preferences; defaults first in the history, at SERVE_MAX_SEQS and the
+    model's `auto` length; a history that cannot be read is warned about and defaults serve."""
     written = None
     if case != "none":
         written = _lock(tmp_path, f"org/repo/Qwen3-8B-Q4_K_M@{BUILD}", **{
             "borrowed": {"cls": "rtx-5080/cu130-torch2.11", "sm": 120}, "outdated": {"src": "s0"}}.get(case, {}))
     if case == "two ids":
         _lock(tmp_path, f"Qwen3-8B-Q4_K_M@{BUILD}")
-        with pytest.raises(ValueError, match="several model ids"):
-            plans.find(tmp_path, f"local@{BUILD}", FP, INSTALLED)
+    if case == "corrupt":
+        written.write_text(written.read_text().replace("4096", "4097"))
+    source = types.SimpleNamespace(config=lambda: {"n": 1000}, kind="toy", identity=lambda: f"local@{BUILD}")
+    found = cli.find_lock(tmp_path, source, types.SimpleNamespace(installed={}), "cpu")
+    if case in ("two ids", "corrupt"):
+        err = capsys.readouterr().err
+        assert found is None and "WARNING: unreadable lock history" in err
+        assert (str(written) if case == "corrupt" else "several model ids") in err
         return
     found = plans.find(tmp_path, f"local@{BUILD}", FP, INSTALLED)
     flags = {"plugin_options": {"b": "", "c": "3"}, "kernels": {"rope": "x"}, "max_seqs": 4} if case == "flags" else {}
     model = types.SimpleNamespace(trained_context=lambda cfg, kind: cfg["n"]) if case == "none" else object()
-    source = types.SimpleNamespace(config=lambda: {"n": 1000}, kind="toy")
     history = cli.serve_history("m", flags, found, cli.auto_context(model, source))
     defaults = history[0][0]
     assert history[0][1] is None and defaults.clamp_context and defaults.kernel_preferences == {}
     assert defaults.max_model_len == (1000 if case == "none" else cli.AUTO_CONTEXT)
+    assert defaults.max_seqs == (4 if case == "flags" else cli.SERVE_MAX_SEQS)
     if case in ("outdated", "none"):                            # an outdated lock is a missing one (design §4.4)
         assert found is None and len(history) == 1
         return

@@ -43,7 +43,7 @@ def _weight(q: QTensor) -> torch.Tensor:
 def _unit(ctx, ref: str, q: QTensor, **site):
     with torch.device("meta"):
         unit = ctx.unit(Ref(ref, **site))
-    assert unit.adopt(ctx, "weight", q)
+    assert unit.adopt_weights(ctx, "weight", q)
     return unit
 
 
@@ -142,10 +142,10 @@ def test_a_quantized_moe_stacks_its_experts_slice_by_slice(shape2):
               for i, p in enumerate(shapes)}
     for e in (3, 1, 0, 2):
         for p in shapes:
-            assert getattr(unit, p).adopt(ctx, "weight", slices[p, e], index=e)
+            assert getattr(unit, p).adopt_weights(ctx, "weight", slices[p, e], index=e)
     other = QTensor(Layout(Scheme("toy.int8"), "cols"), shapes["gate"], slices["gate", 0].parts)
-    assert not unit.gate.adopt(ctx, "weight", other, index=0)                          # another layout
-    assert not unit.gate.adopt(ctx, "weight", _toy(*shapes["gate"], seed=0, rows_per_scale=1), index=0)  # shapes
+    assert not unit.gate.adopt_weights(ctx, "weight", other, index=0)                  # another layout
+    assert not unit.gate.adopt_weights(ctx, "weight", _toy(*shapes["gate"], seed=0, rows_per_scale=1), index=0)  # shape
     assert {r: tuple(t.shape) for r, t in unit.gate.parts.items()} == {"q": (E, INTER, H), "scale": (E, 2),
                                                                        "scale2": (E, *shape2)}
     unit.finalize_weights(ctx)
@@ -190,7 +190,7 @@ def _stacks(ctx, slice_of):
         unit = ctx.unit(Ref("std.moe@1", experts=E, top_k=2, inter=128, renormalize=True), hidden=128, layer=0)
     for e in range(E):
         for i, p in enumerate(("gate", "up")):
-            assert getattr(unit, p).adopt(ctx, "weight", slice_of(10 * e + i), index=e)
+            assert getattr(unit, p).adopt_weights(ctx, "weight", slice_of(10 * e + i), index=e)
     return unit
 
 

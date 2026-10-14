@@ -600,7 +600,7 @@ class QTensor: layout: Layout; logical_shape: tuple[int, ...]; parts: dict[str, 
 
 **As built (M0.1).** Weight sources are detected from manifest `[support] detect` patterns (`config.json`,
 `*.gguf`), so no plugin is imported to decide. The model is built on the meta device; `load_weights` swaps each dense
-parameter in place and hands each `QTensor` to the unit owning the parameter (`adopt(ctx, name, qtensor)`), which
+parameter in place and hands each `QTensor` to the unit owning the parameter (`adopt_weights(ctx, name, qtensor)`), which
 stores it in its own form or refuses (a load error naming unit and layout); the core never looks inside a layout.
 GGUF tensors keep their stored blocks (`Layout(Scheme("ggml.<type>"), "gguf.native")`): llama.cpp's kernels read
 them directly, so GGUF needs no repack. Units bind the kernel of the layout they adopted in
