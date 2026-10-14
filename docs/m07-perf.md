@@ -1,6 +1,6 @@
 # M0.7 — performance: fused glue, mixed steps, a gated megakernel experiment
 
-Status: **revision 3.1, for review** (2026-10-14). Revs 1–3 were reviewed by a panel of three; every finding is
+Status: **revision 3.1, reviewed clean** (2026-10-14) by a panel of three (correctness, architecture, numerics / performance / tests) over four rounds; every finding is
 resolved in §10.
 
 Scope: plan §2 (M0.7: "fused prefill glue (KV-store kernel, add+norm, q/k norm) and a model-specific megakernel
