@@ -174,6 +174,10 @@ class Engine:
         # What rolls back after a verify (api.Rewindable): the target's modules and the slot objects. An auxiliary
         # model runs inside `Drafter.run`, after this: rolling it back is the drafter's call.
         slot_objects = [o for o in (sampler, verifier, drafter, self.policy) if callable(getattr(o, "rewind", None))]
+        # Slot objects with counters of their own (`stats()`), reported by `stats()` under their plugin's name.
+        self._reporters = [(p.single(slot, cfg.slots.get(slot)), o) for slot, o in (
+            ("sampler", sampler), ("verifier", verifier), ("drafter", drafter), ("draft_policy", self.policy),
+            ("logits_processor", self.processor)) if callable(getattr(o, "stats", None))]
         rewinders = [functools.partial(rewind_modules, model), *(o.rewind for o in slot_objects)]
         self.executor = Executor(cfg, self.device, model, self.spec.vocab, sampler, self.state, planners,
                                  verifier, drafter, pools=self.ledger.pools, rewinders=rewinders,
@@ -327,6 +331,8 @@ class Engine:
         if self.policy is not None:                  # the speculation counters (__init__)
             out |= {f"spec_{key}" if isinstance(key, str) else f"spec_rows_k{key[0]}_accepting_{key[1]}": n
                     for key, n in self.spec_counts.items()}
+        for plugin, o in self._reporters:
+            out |= {f"{plugin}.{key}": n for key, n in o.stats().items()}
         return out
 
     def generate(self, prompts: list[list[int]], params: SamplingParams | None = None) -> list[list[int]]:

@@ -81,6 +81,9 @@ class ToyMask:
                 buf[row.start + j] = EVEN if seen else ALL
             self.rows.append((seq.rid, seq.index, row.n, list(row.drafts)))
 
+    def stats(self) -> dict[str, int]:
+        return {"rows_filled": len(self.rows)}
+
     def apply(self, logits: torch.Tensor, mask: torch.Tensor, rows: torch.Tensor) -> None:
         r, v = logits.shape
         bits = mask[:, :, None] >> torch.arange(32, dtype=torch.int32, device=mask.device)

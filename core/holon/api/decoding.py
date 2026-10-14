@@ -7,6 +7,9 @@ shape axes of transforms and drafters are declared in their manifests.
 
 A LogitsProcessor constrains requests (design §7.6): it follows each one on the host (`open`, `ready`, `commit`,
 `close`), writes its masks at launch (`fill`) and applies them on the device before the sampler or verifier (`apply`).
+
+Any of these slot objects (sampler, verifier, drafter, draft policy, logits processor) may count what it does:
+an optional `stats() -> dict[str, int]`, reported in the engine's stats as `<plugin name>.<key>`.
 """
 from __future__ import annotations
 

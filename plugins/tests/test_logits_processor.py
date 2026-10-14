@@ -113,11 +113,13 @@ def test_constrained_outputs_are_the_masked_reference(tiny_checkpoint, masked, o
         assert any(overlapped) == (depth == "depth1-skip")
     if depth != "depth0":
         assert any(left_out) == (depth == "depth1-skip")
-    assert (engine.stats()["preemptions"] > 0) == (memory < 1 << 20)
+    stats = engine.stats()
+    assert (stats["preemptions"] > 0) == (memory < 1 << 20)
+    assert stats["testing.toy_mask.rows_filled"] == len(toy.rows) > 0     # a slot object's own counters
     if mode != "plain":
         assert any(drafts for *_, drafts in toy.rows)
     if mode == "right":
-        assert engine.stats()["spec_drafted"] > 0 and any(n > 1 for *_, n, _ in oracle.observed)
+        assert stats["spec_drafted"] > 0 and any(n > 1 for *_, n, _ in oracle.observed)
 
 
 def test_a_failing_constraint_ends_only_its_request(tiny_checkpoint, masked):  # noqa: F811

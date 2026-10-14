@@ -198,6 +198,9 @@ class XGrammar:
     def apply(self, logits: torch.Tensor, mask: torch.Tensor, rows: torch.Tensor) -> None:
         kernel.apply(logits, mask, rows)
 
+    def stats(self) -> dict[str, int]:
+        return {"drafts_refused": self.drafts_refused}
+
     # -- compiling -----------------------------------------------------------------------------------------------
     def _compile(self, key: str, text: str) -> None:
         queued = sum(self.vetted[k].seconds for k, f in self._compiling.items()

@@ -567,10 +567,10 @@ def test_constrained_outputs_are_the_masked_reference(e2e, mode):
     requests, refs, engines = e2e
     engine = engines["plain" if mode == "plain" else "spec"]
     _oracle(requests, refs, mode)
-    refused = engine.processor.drafts_refused
+    refused = engine.stats().get("grammar.xgrammar.drafts_refused")
     assert _outcomes(engine, requests) == _expected(requests, refs)
     if mode in ("wrong", "mixed"):
-        assert engine.processor.drafts_refused > refused
+        assert engine.stats()["grammar.xgrammar.drafts_refused"] > refused
 
 
 @pytest.mark.parametrize("plant", ["mask-column-shift", "no-rollback-after-probe", "mask-bit-order",
