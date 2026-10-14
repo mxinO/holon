@@ -4,7 +4,7 @@ version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "kernel"
 license = "Apache-2.0"
-core_abi = ">=0.1,<0.2"
+core_abi = ">=0.2,<0.3"
 
 [resources]
 provides = ["kernel.attention.paged_prefill@1", "kernel.attention.paged_decode@1", "kernel.rmsnorm@1",

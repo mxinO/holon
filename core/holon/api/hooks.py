@@ -55,6 +55,10 @@ class NeedsHostLens(Protocol):
     needs_host_lens: bool     # the planner reads lengths on the host: the scheduler keeps them exact
 
 
+class MixesRowKinds(Protocol):
+    mixes_row_kinds: bool     # the planner runs a step of decode rows then prefill chunks (`BatchPlan.n_decode`)
+
+
 class GraphKeyed(Protocol):
     graph_key: Any            # on planner metadata: steps whose keys differ get graphs of their own
 

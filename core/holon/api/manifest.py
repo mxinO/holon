@@ -16,18 +16,18 @@ from typing import Any, Literal, get_args
 
 from .terms import parse_versioned
 
-ABI = "0.1"    # the plugin ABI this core implements (design §4.5); manifests declare the range they need (`core_abi`)
+ABI = "0.2"    # the plugin ABI this core implements (design §4.5); manifests declare the range they need (`core_abi`)
 _COMPARE = {">=": operator.ge, ">": operator.gt, "<=": operator.le, "<": operator.lt, "==": operator.eq}
 
 
 def abi_allows(spec: str, version: str = ABI) -> bool:
-    """Whether `version` is in a manifest's `core_abi` range, comma-separated clauses such as ">=0.1,<0.2"."""
+    """Whether `version` is in a manifest's `core_abi` range, comma-separated clauses such as ">=0.2,<0.3"."""
     def key(v: str) -> tuple[int, ...]:
         return (*map(int, v.split(".")), 0, 0)[:3]
 
     clauses = [re.fullmatch(r"\s*(>=|<=|==|>|<)\s*(\d+(?:\.\d+){0,2})\s*", c) for c in spec.split(",")]
     if not all(clauses):
-        raise ValueError(f"core_abi {spec!r}: expected clauses such as '>=0.1,<0.2'")
+        raise ValueError(f"core_abi {spec!r}: expected clauses such as '>=0.2,<0.3'")
     return all(_COMPARE[m[1]](key(version), key(m[2])) for m in clauses)
 
 
@@ -124,7 +124,7 @@ class Manifest:
     entry: str                         # "module:attr", relative to the plugin package; imported only if selected
     slot: str
     license: str
-    core_abi: str                      # the plugin ABI versions it works with, e.g. ">=0.1,<0.2" (required)
+    core_abi: str                      # the plugin ABI versions it works with, e.g. ">=0.2,<0.3" (required)
     variant_of: str | None = None      # lineage of forks
     implements: str | None = None      # "<unit>@sem:<hash>" for numeric units, or "<slot>@<major>"
     derived_from: str | None = None    # copied recipes / explicit old-version copies

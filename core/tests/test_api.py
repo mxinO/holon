@@ -93,7 +93,7 @@ implements = "placement_policy@1"
 entry     = "lfu_decay:Plugin"
 slot      = "placement_policy"
 license   = "Apache-2.0"
-core_abi  = ">=0.1,<0.2"
+core_abi  = ">=0.2,<0.3"
 
 [resources]
 provides = ["placement.expert@1"]
@@ -124,13 +124,13 @@ def test_manifest_loads_design_example(tmp_path: pathlib.Path):
 
 
 @pytest.mark.parametrize("abi, extra, match", [
-    (">=0.1,<0.2", "[surprise]\nk=1\n", "unknown section"),
-    (">=0.1,<0.2", "[resources]\nprovide=['a@1']\n", "unknown keys"),
-    (">=0.1,<0.2", "[properties]\nnumerics='fast'\n", "invalid numerics"),
-    (">=0.1,<0.2", "[properties]\nmax_depth=1\n", "unknown keys"),  # removed: the depth gate comes from the processor
-    (">=0.1,<0.2", "[plugin_extra]\n", "unknown section"),
+    (">=0.2,<0.3", "[surprise]\nk=1\n", "unknown section"),
+    (">=0.2,<0.3", "[resources]\nprovide=['a@1']\n", "unknown keys"),
+    (">=0.2,<0.3", "[properties]\nnumerics='fast'\n", "invalid numerics"),
+    (">=0.2,<0.3", "[properties]\nmax_depth=1\n", "unknown keys"),  # removed: the depth gate comes from the processor
+    (">=0.2,<0.3", "[plugin_extra]\n", "unknown section"),
     (None, "", "core_abi missing"),                                  # required (release design §7)
-    (">=1.0,<2", "[surprise]\n", "does not admit this core's plugin ABI 0.1"),   # checked before the keys
+    (">=1.0,<2", "[surprise]\n", "does not admit this core's plugin ABI 0.2"),   # checked before the keys
     ("~=0.1", "", "expected clauses"),
 ])
 def test_manifest_rejects_mistakes_with_path(tmp_path: pathlib.Path, abi, extra, match):

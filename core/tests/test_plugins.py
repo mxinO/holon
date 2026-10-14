@@ -75,7 +75,7 @@ def _package(root, name, manifest="", **files):
     (root / name).mkdir()
     (root / name / "__init__.py").write_text("")
     (root / name / "plugin.toml").write_text(f'[plugin]\nname="{name}"\nversion="1"\nentry="plugin:Plugin"\n'
-                                             f'slot="kernel"\nlicense="MIT"\ncore_abi=">=0.1,<0.2"\n{manifest}')
+                                             f'slot="kernel"\nlicense="MIT"\ncore_abi=">=0.2,<0.3"\n{manifest}')
     for module, text in files.items():
         (root / name / f"{module}.py").write_text(text)
     return Installed(Manifest.load(root / name / "plugin.toml"), name, root / name)

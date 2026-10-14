@@ -137,6 +137,7 @@ class BatchPlan:
     publishes: list[InStepPublish] = dataclasses.field(default_factory=list)   # payloads the forward fills
     draft_k: int = 0                     # drafts this step's rows verify (verify width − 1), or a prefill step's drafts
                                          # for its prompt-ending rows; 0: no speculation
+    n_decode: int = 0                    # a mixed step's leading decode rows (the rest are prefill chunks); 0: unmixed
     ext: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 

@@ -1,4 +1,4 @@
-abi 0.1
+abi 0.2
 
 # holon.api
 dataclass Abort
@@ -22,7 +22,8 @@ dataclass BatchPlan
   #8 mem_ops: list[MemOp] = list()
   #9 publishes: list[InStepPublish] = list()
   #10 draft_k: int = 0
-  #11 ext: dict[str, Any] = dict()
+  #11 n_decode: int = 0
+  #12 ext: dict[str, Any] = dict()
 dataclass Binding frozen
   #0 impl: str
   #1 config: dict[str, Any] = dict()
@@ -114,7 +115,7 @@ dataclass InStepPublish frozen
   #1 spec: str
   #2 offset: int
   #3 payload: Payload
-const KERNEL_PROPS = ['batch_invariant', 'deterministic', 'graph_safe', 'needs_host_lens']
+const KERNEL_PROPS = ['batch_invariant', 'deterministic', 'graph_safe', 'mixes_row_kinds', 'needs_host_lens']
 protocol KernelRegistry() required, implemented by core
   add(self, op: 'str', spec: 'KernelSpec') -> 'None'
   get(self, op: 'str') -> 'list[KernelSpec]'
@@ -342,7 +343,6 @@ dataclass Scale frozen
 protocol SchedulePolicy() required, implemented by plugins
   order(self, waiting: 'list[Seq]') -> 'list[Seq]'
   victim(self, running: 'list[Seq]') -> 'Seq | None'
-  mix_phases(self) -> 'bool'
 dataclass Scheme frozen
   #0 elem: str
   #1 scales: tuple[Scale, ...] = ()
@@ -516,6 +516,8 @@ protocol GraphKeyed() optional, implemented by plugins
   graph_key: Any
 protocol KnowsCapacity() optional, implemented by plugins
   capacity(self, seq: 'SeqView') -> 'int'
+protocol MixesRowKinds() optional, implemented by plugins
+  mixes_row_kinds: bool
 protocol NeedsHostLens() optional, implemented by plugins
   needs_host_lens: bool
 protocol PayloadPool() optional, implemented by plugins
@@ -552,18 +554,20 @@ dataclass EngineConfig
   #6 max_model_len: int = 8192
   #7 clamp_context: bool = False
   #8 max_step_tokens: int = 4096
-  #9 memory_fraction: float = 0.9
-  #10 state_memory: int | None = None
-  #11 prefix_cache: bool = True
-  #12 overlap: bool = True
-  #13 cuda_graphs: bool = True
-  #14 max_draft_tokens: int = 0
-  #15 kernels: dict[str, str] = dict()
-  #16 kernel_preferences: dict[str, str] = dict()
-  #17 slots: dict[str, str] = dict()
-  #18 plugin_options: dict[str, object] = dict()
+  #9 chunk_with_decode: int = 0
+  #10 memory_fraction: float = 0.9
+  #11 state_memory: int | None = None
+  #12 prefix_cache: bool = True
+  #13 overlap: bool = True
+  #14 cuda_graphs: bool = True
+  #15 max_draft_tokens: int = 0
+  #16 kernels: dict[str, str] = dict()
+  #17 kernel_preferences: dict[str, str] = dict()
+  #18 slots: dict[str, str] = dict()
+  #19 plugin_options: dict[str, object] = dict()
 
 # BuildCtx.options keys the core provides
+chunk_with_decode
 kernel_preferences
 kernels
 max_draft_tokens

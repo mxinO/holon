@@ -27,7 +27,7 @@ def with_fake_kernel(tmp_path, monkeypatch) -> PluginSet:
         entry = "plugin:Plugin"
         slot = "kernel"
         license = "Apache-2.0"
-        core_abi = ">=0.1,<0.2"
+        core_abi = ">=0.2,<0.3"
 
         [resources]
         provides = ["kernel.rmsnorm@1"]

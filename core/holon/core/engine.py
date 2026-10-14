@@ -60,6 +60,7 @@ class EngineConfig:
     max_model_len: int = 8192                # prompt + generated tokens per request; pools always hold one
     clamp_context: bool = False              # pools may hold less: serve at most what they hold (`holon serve`)
     max_step_tokens: int = 4096
+    chunk_with_decode: int = 0               # prefill tokens a step with decode rows may also carry (0: none)
     memory_fraction: float = 0.9             # of the memory left after weights, for activations and state
     state_memory: int | None = None          # bytes for state pools; None: measure (GPU only)
     prefix_cache: bool = True                # reuse cached prompt blocks across requests (and payloads)
@@ -76,8 +77,9 @@ class EngineConfig:
         for name in ("page_size", "max_seqs", "max_model_len", "max_step_tokens"):
             if getattr(self, name) < 1:
                 raise ValueError(f"EngineConfig.{name} must be >= 1")
-        if self.max_draft_tokens < 0:
-            raise ValueError("EngineConfig.max_draft_tokens must be >= 0")
+        for name in ("max_draft_tokens", "chunk_with_decode"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"EngineConfig.{name} must be >= 0")
 
 
 @dataclasses.dataclass
@@ -124,6 +126,7 @@ class Engine:
         self.ledger = Ledger(self.device)
         options = {"page_size": cfg.page_size, "max_seqs": cfg.max_seqs, "max_model_len": cfg.max_model_len,
                    "max_step_tokens": cfg.max_step_tokens, "max_draft_tokens": cfg.max_draft_tokens,
+                   "chunk_with_decode": cfg.chunk_with_decode,
                    "kernels": cfg.kernels, "kernel_preferences": cfg.kernel_preferences, "plugins": cfg.plugin_options}
         self.ctx = BuildContext(p, self.device, cfg.dtype, options, ledger=self.ledger)
         bound, planners = bind_state(self.spec, self.ctx, p, self.ledger, cfg)

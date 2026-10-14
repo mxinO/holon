@@ -34,7 +34,8 @@ class Constraint:
         return self.cpu_isa <= isa
 
 
-KERNEL_PROPS = frozenset({"graph_safe", "deterministic", "batch_invariant", "needs_host_lens"})   # `KernelSpec.props`
+KERNEL_PROPS = frozenset({"graph_safe", "deterministic", "batch_invariant", "needs_host_lens",   # `KernelSpec.props`
+                          "mixes_row_kinds"})
 
 
 @dataclasses.dataclass(frozen=True, eq=False)

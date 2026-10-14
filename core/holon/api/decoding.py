@@ -43,9 +43,6 @@ class SchedulePolicy(Protocol):
 
     def victim(self, running: list[Seq]) -> Seq | None: ...
 
-    def mix_phases(self) -> bool:
-        """Whether prefill and decode rows may share one step (v0 FCFS: False)."""
-
 
 class PlanTransform(Protocol):
     def transform(self, plan: BatchPlan, seqs: list[Seq]) -> BatchPlan:

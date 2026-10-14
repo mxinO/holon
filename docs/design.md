@@ -173,7 +173,7 @@ derived_from = ""                         # optional; copied recipes / explicit 
 entry     = "lfu_decay:Plugin"            # imported only if selected
 slot      = "placement_policy"
 license   = "Apache-2.0"                  # SPDX; provenance hash for borrowed code in [provenance]
-core_abi  = ">=0.1,<0.2"                  # required; checked before anything else in the manifest
+core_abi  = ">=0.2,<0.3"                  # required; checked before anything else in the manifest
 
 [resources]
 provides = ["placement.expert@1"]
