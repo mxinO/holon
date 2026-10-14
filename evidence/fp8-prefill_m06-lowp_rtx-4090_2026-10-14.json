@@ -1,0 +1,304 @@
+{
+ "workload": "m06-b2-prefill",
+ "date": "2026-10-14",
+ "gpu_class": "rtx-4090/cu130-torch2.11",
+ "gpu": "NVIDIA GeForce RTX 4090",
+ "commit": {
+  "sweep": "4b1d6fc",
+  "e2e": "8f00005"
+ },
+ "command": {
+  "sweep": "python bench/fp8_kernels.py sweep --paths prefill --model 220b46e3b2180893580a4454f21f22d3ebb187d3",
+  "e2e": "python bench/llama_bench.py --model 220b46e3b2180893580a4454f21f22d3ebb187d3 -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384'"
+ },
+ "claim": "B2: prefill configs pinned from the M = 512 sweep (TFLOPS with activation quantization); a first in-process pp512 / tg128 of Qwen/Qwen3-8B-FP8 (B3 records the bars)",
+ "sweep_prefill_top5": {
+  "6144x4096 M=512": [
+   {
+    "us": 105.39,
+    "TFLOPS": 244.5,
+    "config": {
+     "block_m": 128,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 107.01,
+    "TFLOPS": 240.8,
+    "config": {
+     "block_m": 64,
+     "block_n": 128,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 114.02,
+    "TFLOPS": 226.0,
+    "config": {
+     "block_m": 64,
+     "block_n": 128,
+     "num_warps": 8,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 114.69,
+    "TFLOPS": 224.7,
+    "config": {
+     "block_m": 64,
+     "block_n": 128,
+     "num_warps": 8,
+     "num_stages": 4,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 117.25,
+    "TFLOPS": 219.8,
+    "config": {
+     "block_m": 128,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 4,
+     "group_m": 8
+    }
+   }
+  ],
+  "4096x4096 M=512": [
+   {
+    "us": 69.06,
+    "TFLOPS": 248.8,
+    "config": {
+     "block_m": 128,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 69.63,
+    "TFLOPS": 246.7,
+    "config": {
+     "block_m": 128,
+     "block_n": 128,
+     "num_warps": 8,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 69.63,
+    "TFLOPS": 246.7,
+    "config": {
+     "block_m": 128,
+     "block_n": 128,
+     "num_warps": 8,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 70.14,
+    "TFLOPS": 244.9,
+    "config": {
+     "block_m": 128,
+     "block_n": 128,
+     "num_warps": 8,
+     "num_stages": 4,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 73.73,
+    "TFLOPS": 233.0,
+    "config": {
+     "block_m": 64,
+     "block_n": 128,
+     "num_warps": 8,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   }
+  ],
+  "24576x4096 M=512": [
+   {
+    "us": 338.94,
+    "TFLOPS": 304.1,
+    "config": {
+     "block_m": 128,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 345.09,
+    "TFLOPS": 298.7,
+    "config": {
+     "block_m": 64,
+     "block_n": 128,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 358.32,
+    "TFLOPS": 287.7,
+    "config": {
+     "block_m": 128,
+     "block_n": 128,
+     "num_warps": 8,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 361.47,
+    "TFLOPS": 285.2,
+    "config": {
+     "block_m": 128,
+     "block_n": 128,
+     "num_warps": 8,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 362.9,
+    "TFLOPS": 284.0,
+    "config": {
+     "block_m": 128,
+     "block_n": 128,
+     "num_warps": 8,
+     "num_stages": 4,
+     "group_m": 8
+    }
+   }
+  ],
+  "4096x12288 M=512": [
+   {
+    "us": 197.12,
+    "TFLOPS": 261.5,
+    "config": {
+     "block_m": 128,
+     "block_n": 128,
+     "num_warps": 8,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 197.63,
+    "TFLOPS": 260.8,
+    "config": {
+     "block_m": 128,
+     "block_n": 128,
+     "num_warps": 8,
+     "num_stages": 4,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 198.14,
+    "TFLOPS": 260.1,
+    "config": {
+     "block_m": 128,
+     "block_n": 128,
+     "num_warps": 8,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 200.7,
+    "TFLOPS": 256.8,
+    "config": {
+     "block_m": 128,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 205.31,
+    "TFLOPS": 251.0,
+    "config": {
+     "block_m": 64,
+     "block_n": 128,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   }
+  ]
+ },
+ "e2e": {
+  "model": "Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4",
+  "gpu_class": "rtx-4090/cu130-torch2.11",
+  "engine": {
+   "device": "cuda",
+   "dtype": "torch.bfloat16",
+   "source": "None",
+   "page_size": "16",
+   "max_seqs": "32",
+   "max_model_len": "16384",
+   "max_step_tokens": "2048",
+   "memory_fraction": "0.9",
+   "state_memory": "None",
+   "prefix_cache": "False",
+   "overlap": "True",
+   "cuda_graphs": "True",
+   "max_draft_tokens": "0",
+   "kernels": "{}",
+   "slots": "{}",
+   "plugin_options": "{}"
+  },
+  "results": {
+   "pp512": {
+    "mean": 15110.3,
+    "sd": 10.77,
+    "runs": [
+     15104.36,
+     15119.81,
+     15105.58,
+     15098.32,
+     15123.42
+    ]
+   },
+   "tg128": {
+    "mean": 87.61,
+    "sd": 0.0,
+    "runs": [
+     87.61,
+     87.61,
+     87.61,
+     87.61,
+     87.6
+    ],
+    "cpu_ms_per_step_p50": 0.501
+   },
+   "tg128 @ d256": {
+    "mean": 87.34,
+    "sd": 0.01,
+    "runs": [
+     87.35,
+     87.35,
+     87.35,
+     87.34,
+     87.33
+    ],
+    "cpu_ms_per_step_p50": 0.497
+   }
+  }
+ }
+}

@@ -1,0 +1,304 @@
+{
+ "workload": "m06-b2-prefill",
+ "date": "2026-10-14",
+ "gpu_class": "rtx-5080/cu130-torch2.11",
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "commit": {
+  "sweep": "4b1d6fc",
+  "e2e": "8f00005"
+ },
+ "command": {
+  "sweep": "python bench/fp8_kernels.py sweep --paths prefill --model 220b46e3b2180893580a4454f21f22d3ebb187d3",
+  "e2e": "python bench/llama_bench.py --model 220b46e3b2180893580a4454f21f22d3ebb187d3 -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384'"
+ },
+ "claim": "B2: prefill configs pinned from the M = 512 sweep (TFLOPS with activation quantization); a first in-process pp512 / tg128 of Qwen/Qwen3-8B-FP8 (B3 records the bars)",
+ "sweep_prefill_top5": {
+  "6144x4096 M=512": [
+   {
+    "us": 153.33,
+    "TFLOPS": 168.1,
+    "config": {
+     "block_m": 128,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 154.18,
+    "TFLOPS": 167.1,
+    "config": {
+     "block_m": 64,
+     "block_n": 128,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 155.33,
+    "TFLOPS": 165.9,
+    "config": {
+     "block_m": 64,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 157.33,
+    "TFLOPS": 163.8,
+    "config": {
+     "block_m": 128,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 158.42,
+    "TFLOPS": 162.7,
+    "config": {
+     "block_m": 128,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 4,
+     "group_m": 8
+    }
+   }
+  ],
+  "4096x4096 M=512": [
+   {
+    "us": 112.51,
+    "TFLOPS": 152.7,
+    "config": {
+     "block_m": 64,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 116.69,
+    "TFLOPS": 147.2,
+    "config": {
+     "block_m": 64,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 116.74,
+    "TFLOPS": 147.2,
+    "config": {
+     "block_m": 32,
+     "block_n": 128,
+     "num_warps": 4,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 118.83,
+    "TFLOPS": 144.6,
+    "config": {
+     "block_m": 32,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 120.77,
+    "TFLOPS": 142.3,
+    "config": {
+     "block_m": 32,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   }
+  ],
+  "24576x4096 M=512": [
+   {
+    "us": 535.9,
+    "TFLOPS": 192.3,
+    "config": {
+     "block_m": 64,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 543.46,
+    "TFLOPS": 189.7,
+    "config": {
+     "block_m": 64,
+     "block_n": 128,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 545.36,
+    "TFLOPS": 189.0,
+    "config": {
+     "block_m": 128,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 555.78,
+    "TFLOPS": 185.5,
+    "config": {
+     "block_m": 64,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 568.93,
+    "TFLOPS": 181.2,
+    "config": {
+     "block_m": 32,
+     "block_n": 128,
+     "num_warps": 4,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   }
+  ],
+  "4096x12288 M=512": [
+   {
+    "us": 345.78,
+    "TFLOPS": 149.1,
+    "config": {
+     "block_m": 64,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 2,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 347.86,
+    "TFLOPS": 148.2,
+    "config": {
+     "block_m": 64,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 353.54,
+    "TFLOPS": 145.8,
+    "config": {
+     "block_m": 32,
+     "block_n": 128,
+     "num_warps": 4,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 363.14,
+    "TFLOPS": 141.9,
+    "config": {
+     "block_m": 32,
+     "block_n": 64,
+     "num_warps": 4,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   },
+   {
+    "us": 367.95,
+    "TFLOPS": 140.1,
+    "config": {
+     "block_m": 64,
+     "block_n": 256,
+     "num_warps": 8,
+     "num_stages": 3,
+     "group_m": 8
+    }
+   }
+  ]
+ },
+ "e2e": {
+  "model": "Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4",
+  "gpu_class": "rtx-5080/cu130-torch2.11",
+  "engine": {
+   "device": "cuda",
+   "dtype": "torch.bfloat16",
+   "source": "None",
+   "page_size": "16",
+   "max_seqs": "32",
+   "max_model_len": "16384",
+   "max_step_tokens": "2048",
+   "memory_fraction": "0.9",
+   "state_memory": "None",
+   "prefix_cache": "False",
+   "overlap": "True",
+   "cuda_graphs": "True",
+   "max_draft_tokens": "0",
+   "kernels": "{}",
+   "slots": "{}",
+   "plugin_options": "{}"
+  },
+  "results": {
+   "pp512": {
+    "mean": 10340.35,
+    "sd": 39.04,
+    "runs": [
+     10384.94,
+     10341.04,
+     10302.33,
+     10373.02,
+     10300.41
+    ]
+   },
+   "tg128": {
+    "mean": 95.73,
+    "sd": 0.02,
+    "runs": [
+     95.72,
+     95.72,
+     95.77,
+     95.71,
+     95.72
+    ],
+    "cpu_ms_per_step_p50": 0.416
+   },
+   "tg128 @ d256": {
+    "mean": 95.31,
+    "sd": 0.01,
+    "runs": [
+     95.31,
+     95.31,
+     95.32,
+     95.32,
+     95.3
+    ],
+    "cpu_ms_per_step_p50": 0.416
+   }
+  }
+ }
+}

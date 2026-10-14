@@ -913,3 +913,62 @@ bf16, are the same at either, and the GGUF prefill verdicts are f5a37b1's.
   - The 8B FP8's predicted margin on the RTX 5080 is only 2.3K tokens (34.3K at 0.9 against 32K).
 - **Suite and CI** at 25f5e0a: full GPU suite (two A5000s) 1134 passed, 49 skipped, 20 min 54 s; `scripts/ci/run_all.sh`
   green.
+
+**As built (Gate B: B1, B2).** Recorded deviations from rev 3 in steps B1 and B2 (`kernels.triton_fp8`).
+
+| item | rev 3 | as built |
+|---|---|---|
+| decode kernel | one W8A16 split-K kernel, M ≤ 16 | one kernel, two row kinds: one row as a vector product (f32 products summed per 128-wide K step, no `tl.dot`), 2–16 rows as one 16-row `tl.dot` tile. On the A5000 the vector form is 5–8% faster at M = 1. Split-K partials are summed by a second kernel in split order, as designed; many pinned configurations take one split |
+| configurations | pinned per (out, in) and class | per (class, out, in) and decode row kind (1, 16), and per (class, out, in) for prefill, from `bench/fp8_kernels.py sweep` (decode at M = 1 and 16 over block_n × splits × warps × stages; prefill at M = 512 over BM × BN × warps × stages); other shapes and classes take a default |
+| W8A8 activation rounding | `x / a_s` by `tl.math.div_rn`, clamped, to e4m3 | rounded to e4m3 by bit operations (`f32_to_e4m3`, ties to even). **Bug found in B2:** Triton lowers `.to(tl.float8e4nv)` on sm_89 through f16 rounded toward zero (`cvt.rz.f16.f32`, then `cvt.rn.satfinite.e4m3x2.f16x2`): a double rounding; sm_120 has a direct `cvt.rn.satfinite.e4m3x2.f32`. The L0 failed on the RTX 4090 (act quant not bitwise torch's; 5 W8A8 GEMM checks over budget) and passed on the RTX 5080. The bit rounding matches torch on 61.5M f32 values and every e4m3 midpoint ± 1 ulp; the L0's act quant check now holds every midpoint |
+| paths and modes | decode W8A16, prefill W8A8 | `config["act"] = {"decode": "bf16", "prefill": "fp8"}`; calls counted as `decode/bf16` and `prefill/fp8` (B3's floors read them) |
+| spec | one spec on sm ≥ 89 | as specified: `qlinear@2`, layout `fp8_e4m3/hf`, `in` and `out` multiples of 128, bf16 activations, bf16 or f32 out, `act_quant` a4 or a8 (8 bits is the lowest it uses). `prepare` returns the weight as adopted after checking the scales are f32, one per 128 × 128 block (the dialects allow other block sizes) |
+| decode gate shapes | "the 8B's 5 projection shapes" | the four the engine binds after merges (D5: q/k/v and gate/up merge for FP8 too): [6144, 4096], [4096, 4096], [24576, 4096], [4096, 12288]. The Q8_0 profile confirms it: 145 mmvq calls per step (36 × 4 + the head) |
+| non-GEMM decode time | "the existing GGUF decode profile on that card" | no per-card GGUF decode profile existed. Holon decodes the Q8_0 comparator file on the card (tg128 at batch 1, `bench/llama_bench.py`'s engine flags); non-GEMM = its median step time − the summed time of ggml's mmvq and q8_1 quantizer kernels per step (torch profiler, CUDA graphs on) |
+| Q8_0 comparator (D9) | llama.cpp's Q8_0 of the same checkpoint | `convert_hf_to_gguf.py` at `cbe28bb3` `--outtype q8_0` on `Qwen/Qwen3-8B-FP8` (its FP8 dequantization, then Q8_0 for every matrix, the head included), 8.71 GB |
+| sm_86 | non-goal; noted if the W8A16 kernel runs | the decode kernel runs and passes its L0 on the A5000 (bit decode, no fp8 type); the spec stays sm ≥ 89 (prefill needs e4m3 `tl.dot`) |
+| plants | §4.8 | in `planted.py` (`fp8_plants`, layer 18): `fp8-scale-transposed` (P1: scales read column-major), `fp8-scale-k-shifted` (P2), `fp8-act-scale-per-token` (P3), `fp8-subnormals-as-normals` (P4, decode), `fp8-o-proj-scales-1.25` (P7, through std.weights.hf's load as N8: `_scale2_scaled` became `_part_scaled(module, role, factor)`). The kernel plants wrap `kernel.decode` / `prefill` / `act_quant` in Python (eager steps only) |
+| L0's decode check | e4m3 → bf16 over the 254 finite codes | through the decode kernel itself (weight row r = code r, one-hot activations, one row and two), so P4 bites it; the random-weight GEMM checks do not see P4 (it moves only the smallest weights, as §4.8 predicts for L2) |
+| new files | the plugin | `plugins/holon_plugins/kernels/triton_fp8/` (kernel, plugin, manifest), `plugins/tests/test_triton_fp8.py`, `plugins/tests/memcheck_triton_fp8.py`, `bench/fp8_kernels.py`, the plants; no core or std change |
+
+**B1 results — acceptance 11, the decode gate: passes on both cards** (`evidence/decode-gate_m06-lowp_<class>_2026-10-14.json`;
+kernel at 55616dd). Clock screens: SM median 2722 MHz (RTX 5080, power cap active 54% of samples), 2715 MHz (RTX
+4090, 0%), no thermal slowdown. Times per decode step at batch 1 (36 layers):
+
+| | RTX 5080 | RTX 4090 |
+|---|---|---|
+| FP8 W8A16 per layer at M = 1, µs (qkv / o / gate_up / down) | 30.2 / 21.0 / 115.1 / 59.8 | 33.5 / 22.6 / 131.1 / 66.6 |
+| achieved bandwidth at M = 1, GB/s | 832 / 800 / 875 / 841 | 751 / 744 / 768 / 756 |
+| FP8 GEMMs per step | 8.14 ms | 9.14 ms |
+| bf16 head (cuBLAS, [1, 4096] × [151936, 4096]) | 1.39 ms | 1.68 ms |
+| non-GEMM (Holon Q8_0: step 9.91 / 10.71 ms − mmvq + q8_1 9.23 / 9.98 ms) | 0.68 ms | 0.73 ms |
+| predicted step / tg128 | 10.21 ms / 97.9 | 11.55 ms / 86.6 |
+| llama-bench Q8_0 tg128 (median of repetitions 2–5) | 101.2 | 91.7 |
+| **predicted / llama-bench** (gate ≥ 0.85) | **0.968** | **0.944** |
+
+M = 1 … 16 costs the same within 5% on every shape (the kernel stays bandwidth-bound). Holon's own Q8_0 decode
+runs 100.9 / 93.3 tok/s (llama-bench 101.2 / 91.7). The bf16 head is 14% of the 4090's predicted step (cuBLAS's GEMV
+reaches 743 GB/s there); a Q8_0 head costs llama.cpp about half that.
+
+**B2 results — acceptance 12: met** (`evidence/l0_m06-lowp_gate-b_2026-10-14.json`). `plugins/tests/test_triton_fp8.py`:
+9 passed on sm_120a (RTX 5080) and sm_89 (RTX 4090) with the default and then the pinned prefill configurations
+(4b1d6fc, 8f00005); memcheck 0 errors on both, twice. The first sm_89 run (55616dd) failed 6 of 8 (the double
+rounding above), sm_120a passed. Plants under L0 on both classes: P1 and P2 fail every GEMM check (5), P3 the act
+quant check and every W8A8 check (6), P4 the decode exactness check (2): all as predicted.
+
+A first end-to-end run of `Qwen/Qwen3-8B-FP8` in process (`bench/llama_bench.py`, the FP4 locks' flags; recorded in
+`evidence/fp8-prefill_m06-lowp_<class>_2026-10-14.json`, not B3's bars): tg128 95.7 (RTX 5080) and 87.6 (RTX 4090),
+0.946× and 0.955× llama-bench Q8_0, within 2.3% / 1.2% of the B1 prediction; pp512 10340 and 15110, **1.20× and
+1.16×** llama-bench Q8_0 (8598 / 13065), above §4.10's predicted 0.4–0.9× band (it assumed llama.cpp's int8 mmq
+near its peak, twice sm_89's fp8 rate; the prefill sweep's best W8A8 GEMMs reach 149–192 TFLOPS on the 5080 and
+245–304 on the 4090, activation quantization included).
+
+**Suite and CI** at 4b1d6fc (the later commits pin configurations for classes the A5000 is not): full GPU suite
+(`pytest core std plugins judge testing tools`, two A5000s) 1142 passed, 50 skipped (Gate A + the 8 new FP8 tests; the
+act quant check skips below sm_89), 23 min 30 s, none of the new tests among the 25 slowest (the FP8 file takes 5 s);
+`scripts/ci/run_all.sh` green.
+
+**For B3:** the W8A8 floor needs `modes.py`'s W8A8 emulation (bitwise this act quant: torch's e4m3 of `x / a_s`) and the
+decode path is scored against the existing A16 floor; the per-call allocations (split-K partials; the e4m3
+activations and their scales, 25 MB at 2048 tokens for `down`) are in the fit's measured peak step. Locks wait for the
+release and M0.7's propagation (lead).

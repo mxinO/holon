@@ -1,0 +1,66 @@
+{
+ "workload": "m06-b2-l0",
+ "date": "2026-10-14",
+ "command": {
+  "l0": "python -m pytest plugins/tests/test_triton_fp8.py",
+  "memcheck": "cd plugins && PYTORCH_NO_CUDA_MEMORY_CACHING=1 compute-sanitizer --tool memcheck python -m tests.memcheck_triton_fp8",
+  "plants": "the L0 inside each of judge planted.py's PLANTS['fp8-scale-transposed' | 'fp8-scale-k-shifted' | 'fp8-act-scale-per-token' | 'fp8-subnormals-as-normals'] (P1-P4)"
+ },
+ "claim": "acceptance 12: kernels.triton_fp8 L0 on sm_89 and sm_120a (dense, both path modes), memcheck clean; P1-P4 fail L0",
+ "classes": {
+  "rtx-5080": {
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "clock_sm_mhz_median": 2722.0,
+   "thermal_slowdown_share": {
+    "sw": 0.0,
+    "hw": 0.0
+   },
+   "first_run (55616dd, Triton's f32 -> e4m3 conversion)": [
+    "8 passed in 6.70s"
+   ],
+   "l0 (4b1d6fc, default prefill configs)": [
+    "9 passed in 9.23s"
+   ],
+   "l0 (8f00005, pinned prefill configs)": [
+    "9 passed in 8.45s"
+   ],
+   "memcheck (4b1d6fc / 8f00005)": [
+    "========= ERROR SUMMARY: 0 errors",
+    "========= ERROR SUMMARY: 0 errors"
+   ],
+   "plants (4b1d6fc)": {
+    "fp8-scale-transposed": "5 failed, 4 passed in 2.38s",
+    "fp8-scale-k-shifted": "5 failed, 4 passed in 2.16s",
+    "fp8-act-scale-per-token": "6 failed, 3 passed in 3.55s",
+    "fp8-subnormals-as-normals": "2 failed, 7 passed in 3.37s"
+   }
+  },
+  "rtx-4090": {
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "clock_sm_mhz_median": 2715.0,
+   "thermal_slowdown_share": {
+    "sw": 0.0,
+    "hw": 0.0
+   },
+   "first_run (55616dd, Triton's f32 -> e4m3 conversion)": [
+    "6 failed, 2 passed in 9.86s"
+   ],
+   "l0 (4b1d6fc, default prefill configs)": [
+    "9 passed in 11.72s"
+   ],
+   "l0 (8f00005, pinned prefill configs)": [
+    "9 passed in 11.23s"
+   ],
+   "memcheck (4b1d6fc / 8f00005)": [
+    "========= ERROR SUMMARY: 0 errors",
+    "========= ERROR SUMMARY: 0 errors"
+   ],
+   "plants (4b1d6fc)": {
+    "fp8-scale-transposed": "5 failed, 4 passed in 3.74s",
+    "fp8-scale-k-shifted": "5 failed, 4 passed in 3.81s",
+    "fp8-act-scale-per-token": "6 failed, 3 passed in 4.79s",
+    "fp8-subnormals-as-normals": "2 failed, 7 passed in 5.00s"
+   }
+  }
+ }
+}
