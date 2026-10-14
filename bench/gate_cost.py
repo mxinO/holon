@@ -11,7 +11,9 @@ the same pool; `--rounds` interleaved rounds of fresh engines (none, A, A′), o
 `bench/run.py --blocking-sync`), with the engine thread's CPU time per phase of each step (`schedule`, `fill`,
 `launch` without the fill, `commit`, and the whole `step`).
 
-The toy has neither a real mask fill nor a kernel, so the record also measures grammar.xgrammar's: its `fill` per
+Before the rounds, `--sizing-rounds` interleaved pairs of engines sized as deployed (`memory_fraction`), without and
+with the processor selected, give what selecting it costs: KV tokens, graphs, capture time (`--rounds 0`: only
+that). The toy has neither a real mask fill nor a kernel, so the record also measures grammar.xgrammar's: its `fill` per
 constrained step over JSON-schema requests on the same engine flags (drafts included, refused drafts counted), and its
 Triton `apply` per call for the row counts of a step, replayed from a CUDA graph.
 
@@ -24,6 +26,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import datetime
+import gc
 import hashlib
 import json
 import os
@@ -151,6 +154,8 @@ def gate_round(args, cfg_name: str, state_memory: int, corpus: list[int]) -> dic
                        if k.startswith("spec_") or k.endswith("rows_filled")}
     result["kv_tokens"] = _kv_tokens(engine)
     engine.close()
+    del engine
+    gc.collect()                                     # the engine's cycles hold its weights until then
     return result
 
 
@@ -181,6 +186,8 @@ def grammar_costs(args, state_memory: int) -> dict:
     stats = engine.stats()
     vocab, width, k = engine.spec.vocab, engine.processor.mask_width, engine.cfg.max_draft_tokens
     engine.close()
+    del engine
+    gc.collect()
     apply_us = {}
     for rows in sorted({1, 1 + k}):
         logits = torch.zeros(rows, vocab, device="cuda")
@@ -229,6 +236,8 @@ def unpinned(args, cfg_name: str) -> dict:
         engine = _engine(args, cfg_name, None)
     seen |= {"graphs": len(engine.executor.graphs), "kv_tokens": _kv_tokens(engine)}
     engine.close()
+    del engine
+    gc.collect()
     return seen
 
 
@@ -239,7 +248,8 @@ def main() -> None:
     parser.add_argument("--corpus", required=True, help="a JSONL prompt set (natural text)")
     parser.add_argument("--name", required=True)
     parser.add_argument("--engine-args", default="", help="engine flags, as for `holon serve`")
-    parser.add_argument("--rounds", type=int, default=4)
+    parser.add_argument("--rounds", type=int, default=4, help="0: only the sizing (KV tokens, graphs, capture)")
+    parser.add_argument("--sizing-rounds", type=int, default=1, help="interleaved engines sized as deployed")
     args = parser.parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     from worker import blocking_sync
@@ -249,25 +259,26 @@ def main() -> None:
     corpus = workloads.corpus(args.corpus)
     mock.patch.object(ToyMask, "apply", lambda self, logits, mask, rows: None).start()    # the toy's kernel: none
 
-    selected = {c: unpinned(args, c) for c in ("none", "A′")}     # what selecting the processor costs
-    state_memory = int(selected["A′"].pop("state_memory") * 0.98)  # every engine's pool: what A′'s measured
-    selected["none"].pop("state_memory")
+    sizing = [{c: unpinned(args, c) for c in ("none", "A′")} for _ in range(args.sizing_rounds)]
+    selected = {c: [r[c] for r in sizing] for c in ("none", "A′")}   # what selecting the processor costs
+    state_memory = int(min(r["state_memory"] for r in selected["A′"]) * 0.98)   # every engine's pool
+    print("sizing:", json.dumps(selected), flush=True)
     rounds = []
     for r in range(args.rounds):
         rounds.append({c: gate_round(args, c, state_memory, corpus) for c in CONFIGS})
         print(f"round {r}:", {c: [s["tpot_ms"] for s in rounds[-1][c]["single"]] for c in CONFIGS}, flush=True)
-    costs = grammar_costs(args, state_memory)
-    print(json.dumps(costs, indent=1), flush=True)
+    costs = grammar_costs(args, state_memory) if rounds else None
     date, gpu = datetime.date.today().isoformat(), gpu_class(args.gpu)
     record = {"workload": f"gate_cost_{args.name}", "date": date, "gpu_class": gpu, "model": model_id(args.model),
               "command": " ".join(["python bench/gate_cost.py", *(public(a, args.model) for a in [
                   "--gpu", str(args.gpu), "--model", args.model, "--corpus", args.corpus, "--name", args.name,
-                  "--rounds", str(args.rounds)])]) + f" --engine-args {shlex.quote(args.engine_args)}",
+                  "--rounds", str(args.rounds), "--sizing-rounds", str(args.sizing_rounds)])])
+              + f" --engine-args {shlex.quote(args.engine_args)}",
               "commit": git("rev-parse", "HEAD"), "state_memory": state_memory, "processor_selected": selected,
-              "summary": summarize(rounds, costs), "grammar": costs, "rounds": rounds}
-    out = ROOT / "evidence" / f"gate_cost_{args.name}_{gpu}_{date}.json"
+              **({"summary": summarize(rounds, costs), "grammar": costs, "rounds": rounds} if rounds else {})}
+    out = ROOT / "evidence" / f"gate_{'cost' if rounds else 'sizing'}_{args.name}_{gpu}_{date}.json"
     out.write_text(json.dumps(record, indent=1) + "\n")
-    print(json.dumps(record["summary"], indent=1))
+    print(json.dumps(record.get("summary"), indent=1))
     print(out)
 
 
