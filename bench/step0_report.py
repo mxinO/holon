@@ -164,57 +164,60 @@ def ratios(profiles: dict[str, dict]) -> list[dict]:
     return out
 
 
+def shapes_of(sweep: dict) -> dict[tuple, dict]:
+    return {(x["type"], x["in"], x["out"], x["mode"]): x for x in sweep["shapes"]}
+
+
 def d8(profile: dict, sweep: dict | None) -> dict:
     """D8's f on decode B1: bytes = the matmuls' weight bytes + the KV read (at the graphed window's context); B =
-    weight bytes / unprofiled GEMV time (the profiled time over the profiled-over-wall ratio); f = 1 - bytes / (B x
-    step). The step's idle time is outside f (r2 cancels): f = 1 - GEMV share of kernel time x (1 + KV / weights)."""
+    weight bytes / the step's GEMV time, priced call by call from the per-call sweep (graph-timed, unprofiled);
+    f = 1 - bytes / (B x step). The profile's GEMV time is kept beside it: profiled kernels overlap under PDL (r2 > 1
+    is overlap, not inflation), so the profile can't separate a GEMV from its neighbours."""
     row = profile["rows"]["decode_b1"]
-    r2 = row["ratio_graphed_profiled_over_wall"]
-    gemv_ms = row["graphed"]["cat"]["gemm"][1] / r2
     weights = row["gemm"]["weight_bytes"]
     kv = profile["kv_bytes_per_token"] * graphed_ctx(row)
+    shapes = shapes_of(sweep) if sweep else {}
+    calls = row["gemm"]["calls"]
+    priced = [(c, shapes.get((c["type"], c["in"], c["out"], c["mode"]))) for c in calls]
+    gemv_ms = sum(c["count"] * s["us"][str(c["rows"])]["llama"] for c, s in priced if s) / 1e3
+    out = {"step_ms": row["graphed_wall_ms"], "weights_gb": round(weights / 1e9, 4), "kv_gb": round(kv / 1e9, 5),
+           "gemv_ms_profiled": round(row["graphed"]["cat"]["gemm"][1], 3),
+           "stream_gb_s": sweep["stream"]["gb_s_best"] if sweep else None}
+    if not sweep or not all(s for _, s in priced):
+        return out | {"f": None}
     bw = weights / (gemv_ms / 1e3)
     f = 1 - (weights + kv) / (bw * row["graphed_wall_ms"] / 1e3)
-    return {"step_ms": row["graphed_wall_ms"], "weights_gb": round(weights / 1e9, 4), "kv_gb": round(kv / 1e9, 5),
-            "gemv_ms_unprofiled": round(gemv_ms, 3), "gemv_gb_s": round(bw / 1e9, 1),
-            "stream_gb_s": sweep["stream"]["gb_s_best"] if sweep else None, "f": round(f, 4),
-            "projection": {c: round(1 / (1 - f * c), 3) for c in (0.4, 0.55)},
-            "gate": "stop" if 1 / (1 - f * 0.55) < 1.15 else "prototype"}
+    return out | {"gemv_ms_sweep": round(gemv_ms, 3), "gemv_gb_s": round(bw / 1e9, 1), "f": round(f, 4),
+                  "projection": {c: round(1 / (1 - f * c), 3) for c in (0.4, 0.55)},
+                  "gate": "stop" if 1 / (1 - f * 0.55) < 1.15 else "prototype"}
+
+
+GRAPHED_ROWS = (4, 7, 8)       # graphed row counts where mmvq and mmq compete: buckets 4 and 8, the 7-row draft
+MARGIN = 0.03                  # an entry needs mmq faster than mmvq by at least this, per call
+
+
+def entry(shape: dict, variant: str) -> int | None:
+    """D2's per-shape limit (mmvq up to it, mmq above), or None (llama.cpp's rule): the smallest limit in {3, 6, 7}
+    below llama.cpp's for which every graphed row it moves to mmq is at least MARGIN faster there."""
+    llama = shape["llama_mmvq_rows"]
+    for limit in (3, 6, 7):
+        moved = [r for r in GRAPHED_ROWS if limit < r <= llama]
+        if limit < llama and moved and all(
+                shape["us"][str(r)][variant] <= (1 - MARGIN) * shape["us"][str(r)]["mmvq"] for r in moved):
+            return limit
+    return None
 
 
 def crossover(sweep: dict, profiles: dict[str, dict]) -> dict:
-    """Per (type, mode): llama.cpp's mmvq row limit here, and the limit a per-class table would take — mmvq for every
-    n up to it — from the shapes' per-call times summed with their per-step counts (today's cast; and without it,
-    D4), rows 1-8. Then each profiled decode / verify step's saving under that table, today (with the cast) and
-    after D4 (both sides without it); `partial` rows had calls beyond the sweep's rows (more than 9), not counted."""
-    weight = collections.Counter()
-    for rec in profiles.values():
-        for row in rec["rows"].values():
-            if row["kind"] != "prefill":
-                for c in row.get("gemm", {}).get("calls", []):
-                    key = (c["type"], c["in"], c["out"], c["mode"])
-                    weight[key] = max(weight[key], c["count"])
-    shapes = {(s["type"], s["in"], s["out"], s["mode"]): s for s in sweep["shapes"]}
-    table = {}
-    for t, mode in sorted({(s["type"], s["mode"]) for s in sweep["shapes"]}):
-        group = [s for k, s in shapes.items() if k[0] == t and k[3] == mode]
-        w = {id(s): weight.get((s["type"], s["in"], s["out"], s["mode"]), 1) for s in group}
-        entry = {"llama": group[0]["llama_mmvq_rows"], "shapes": len(group)}
-        for variant in ("mmq_cast", "mmq_f32"):
-            limit = 0
-            for n in range(1, 9):
-                vq = sum(w[id(s)] * s["us"][str(n)]["mmvq"] for s in group)
-                mq = sum(w[id(s)] * s["us"][str(n)][variant] for s in group)
-                if vq > mq:
-                    break
-                limit = n
-            entry["best_with_cast" if variant == "mmq_cast" else "best_no_cast"] = limit
-        table[f"{t}/{mode}"] = entry
+    """D2 keyed per shape (type, in, out, mode): each shape's entry (`entry`, with today's cast and without it, D4),
+    then each profiled decode / verify step's saving under the entries against llama.cpp's rule, per entry (calls of
+    more than 9 rows are mmq either way: `partial` marks rows that had some)."""
+    shapes = shapes_of(sweep)
+    table = {f"{k[0]}/{k[1]}x{k[2]}/{k[3]}": {"llama": s["llama_mmvq_rows"], "with_cast": entry(s, "mmq_cast"),
+                                              "no_cast": entry(s, "mmq_f32")} for k, s in shapes.items()}
+    table = {k: v for k, v in table.items() if v["with_cast"] is not None or v["no_cast"] is not None}
 
-    def call_us(key, rows, limit, variant):
-        s = shapes.get(key)
-        if s is None or str(rows) not in s["us"]:
-            return None
+    def call_us(s: dict, rows: int, limit: int, variant: str) -> float:
         u = s["us"][str(rows)]
         return u["mmvq"] if rows <= limit else u[variant]
 
@@ -225,44 +228,54 @@ def crossover(sweep: dict, profiles: dict[str, dict]) -> dict:
                 continue
             today = d2 = d4 = d2d4 = 0.0
             skipped = 0
-            by_type: collections.Counter = collections.Counter()
+            by_entry: collections.Counter = collections.Counter()
             for c in row.get("gemm", {}).get("calls", []):
-                key, e = (c["type"], c["in"], c["out"], c["mode"]), table.get(f"{c['type']}/{c['mode']}")
-                if e is None:
-                    continue
-                a = call_us(key, c["rows"], e["llama"], "mmq_cast")
-                b = call_us(key, c["rows"], e["best_with_cast"], "mmq_cast")
-                f = call_us(key, c["rows"], e["llama"], "mmq_f32")
-                d = call_us(key, c["rows"], e["best_no_cast"], "mmq_f32")
-                if None in (a, b, f, d):
+                key = (c["type"], c["in"], c["out"], c["mode"])
+                s = shapes.get(key)
+                if s is None or str(c["rows"]) not in s["us"]:
                     skipped += c["count"]
                     continue
-                today, d2 = today + c["count"] * a, d2 + c["count"] * b
-                d4, d2d4 = d4 + c["count"] * f, d2d4 + c["count"] * d
-                by_type[f"{c['type']}/{c['mode']}"] += c["count"] * (a - b)
+                e = table.get(f"{key[0]}/{key[1]}x{key[2]}/{key[3]}", {})
+                lim, lim4 = e.get("with_cast") or s["llama_mmvq_rows"], e.get("no_cast") or s["llama_mmvq_rows"]
+                a = call_us(s, c["rows"], s["llama_mmvq_rows"], "mmq_cast")
+                b = call_us(s, c["rows"], lim, "mmq_cast")
+                f = call_us(s, c["rows"], s["llama_mmvq_rows"], "mmq_f32")
+                d = call_us(s, c["rows"], lim4, "mmq_f32")
+                today, d2, d4, d2d4 = (today + c["count"] * a, d2 + c["count"] * b, d4 + c["count"] * f,
+                                       d2d4 + c["count"] * d)
+                if a > b:
+                    by_entry[f"{key[0]}/{key[1]}x{key[2]}"] += c["count"] * (a - b)
             if today:
                 step = row["graphed_wall_ms"]
-                steps.append({"model": name, "row": rk, "step_ms": step,
-                              "gemm_today_ms": round(today / 1e3, 3), "d2_saving_ms": round((today - d2) / 1e3, 3),
+                steps.append({"model": name, "row": rk, "step_ms": step, "d2_saving_ms": round((today - d2) / 1e3, 3),
                               "d2_share": round((today - d2) / 1e3 / step, 4),
-                              "d2_after_d4_share": round((d4 - d2d4) / 1e3 / step, 4),
-                              "partial": skipped > 0,                   # some calls beyond the sweep's rows
-                              "d2_share_by_type": {t: round(v / 1e3 / step, 4) for t, v in by_type.items() if v}})
-    return {"table": table, "steps": steps}
+                              "d2_after_d4_share": round((d4 - d2d4) / 1e3 / step, 4), "partial": skipped > 0,
+                              "d2_share_by_entry": {k: round(v / 1e3 / step, 4) for k, v in by_entry.items()}})
+    shipped = sorted({k for x in steps if x["d2_share"] >= DROP for k in x["d2_share_by_entry"]})
+    return {"table": table, "steps": steps, "shipped": shipped}
 
 
-def d9(sweep: dict, profile: dict, table: dict) -> dict:
-    """The target's 4-row / 1-row matmul time over its decode step's calls, at D2's table (with today's cast)."""
+def _mean(found: list[dict], rows: str, variant: str) -> float:
+    return sum(x["us"][rows][variant] for x in found) / len(found)
+
+
+def d9(sweeps: list[dict], profile: dict, table: dict) -> dict:
+    """The target's 4-row / 1-row matmul time over its decode step's calls at the D2 entries that ship (with today's
+    cast), each call's time the mean over the sweeps given; and the upside in ms: what its 4-row calls cost beyond
+    their 1-row time (what a small-batch matmul could recover at most)."""
     one = four = 0.0
-    shapes = {(s["type"], s["in"], s["out"], s["mode"]): s for s in sweep["shapes"]}
+    maps = [shapes_of(sw) for sw in sweeps]
     for c in profile["rows"]["decode_b1"]["gemm"]["calls"]:
-        s = shapes.get((c["type"], c["in"], c["out"], c["mode"]))
-        if s is None:
+        key = (c["type"], c["in"], c["out"], c["mode"])
+        found = [m[key] for m in maps if key in m]
+        if not found:
             continue
-        limit = table[f"{c['type']}/{c['mode']}"]["best_with_cast"]
-        one += c["count"] * s["us"]["1"]["mmvq"]
-        four += c["count"] * (s["us"]["4"]["mmvq"] if 4 <= limit else s["us"]["4"]["mmq_cast"])
-    return {"ratio_4_over_1": round(four / one, 4), "trigger": four / one > 1.25}
+        e = table.get(f"{key[0]}/{key[1]}x{key[2]}/{key[3]}", {})
+        limit = e.get("with_cast") or found[0]["llama_mmvq_rows"]
+        one += c["count"] * _mean(found, "1", "mmvq")
+        four += c["count"] * _mean(found, "4", "mmvq" if 4 <= limit else "mmq_cast")
+    return {"ratio_4_over_1": round(four / one, 4), "trigger": four / one > 1.25, "sweeps": len(sweeps),
+            "upside_ms": round((four - one) / 1e3, 2)}
 
 
 def main() -> None:
@@ -280,8 +293,9 @@ def main() -> None:
     if sweep:
         out["crossover"] = crossover(sweep, profiles)
         target = next((p for n, p in profiles.items() if n == "27b-plain"), None)
+        repeats = next(iter(load(args.dir, args.cls, "qmm-sweep-d9-repeat", exact=True).values()), {})
         if target:
-            out["d9"] = d9(sweep, target, out["crossover"]["table"])
+            out["d9"] = d9([sweep, *repeats.get("repeats", [])], target, out["crossover"]["table"])
     print(json.dumps(out, indent=1))
     if args.json:
         with open(args.json, "w") as f:

@@ -13,7 +13,6 @@ import argparse
 import dataclasses
 import datetime
 import json
-import os
 import random
 import shlex
 import statistics
@@ -33,10 +32,11 @@ STEADY = 0.9                               # p10 / p50 of the SM clock under loa
 
 
 class Sampler:
-    """nvidia-smi sampling one GPU every `ms` ms in the background: (time.time(), SM MHz, memory MHz, W, reasons)."""
+    """nvidia-smi sampling one GPU every `ms` ms in the background: (time.time(), SM MHz, memory MHz, W, reasons).
+    The GPU is torch's current device, named by its UUID: CUDA's device order need not be nvidia-smi's."""
 
-    def __init__(self, index: str | None = None, ms: int = 100) -> None:
-        index = index or os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0]
+    def __init__(self, ms: int = 100) -> None:
+        index = f"GPU-{torch.cuda.get_device_properties(torch.cuda.current_device()).uuid}"
         self.samples: list[tuple[float, float, float, float, int]] = []
         self.proc = subprocess.Popen(
             ["nvidia-smi", "-i", index, "--query-gpu=timestamp,clocks.sm,clocks.mem,power.draw,"

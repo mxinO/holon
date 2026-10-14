@@ -1,8 +1,9 @@
 # M0.7 — performance: fused glue, mixed steps, a gated megakernel experiment
 
-Status: **revision 3.1, reviewed clean** (2026-10-14) by a panel of three (correctness, architecture, numerics /
-performance / tests) over four rounds; every finding is resolved in §10. **Step 0 is done (§11); §5 is re-stated per
-class in §11.11, for the panel's review before steps 1–6.**
+Status: **rev 3.2, step 0 reviewed** (2026-10-14). Revision 3.1 was reviewed clean by a panel of three (correctness,
+architecture, numerics / performance / tests) over four rounds. Step 0 ran (§11), and the panel's review of it and the
+lead's decisions are in §10's "Step 0 panel round"; §1, §3.1, §4, §5, §6, §7 and §11 carry them. The panel re-checks
+this revision before step 1.
 
 Scope: plan §2 (M0.7: "fused prefill glue (KV-store kernel, add+norm, q/k norm) and a model-specific megakernel
 experiment (design §5.7)"), narrowed and extended by what M0.3–M0.5 recorded for M0.7: the verify-step glue
@@ -25,16 +26,23 @@ paths it touches. Acceptance:
 1. **Fusions shipped only where they pay** (D3–D6): each is measured incrementally (D3 on top of the bf16 `kv_write`;
    verify rows by per-step wall time, not TPOT) and kept only if its saving is ≥ max(0.5%, 3 sd of its row) on some
    release-class row (RTX 5080 / 4090 / 5090; graphed decode B1/B4/B8, verify steps, prefill 512/2048), else reverted
-   and recorded. Classification (D10): **bitwise** — D4, D5, D6's shared quantization, the bf16 `kv_write`; **bounded**
-   — D3, D6's gate/up + SwiGLU and GDN gating, judged by L0 and the L2 of §6, bounded where decode paths change.
-2. **Crossover entries shipped only where the sweep shows a gain** (D2): per (class, type, activation mode), only where
-   step 0's sweep shows ≥ 1% of a decode or verify step; each shipped entry delivers ≥ half its re-stated saving and no
-   guarded row (`holon_tg` batch 2 / 4 / 8, verify steps) regresses beyond its noise.
+   and recorded. Classification (D10): **bitwise** — D4, D5, D6's shared quantization, the bf16 `kv_write`, D11;
+   **bounded** — D3, D6's gate/up + SwiGLU and GDN gating, judged by L0 and the L2 of §6, bounded where decode paths
+   change. A bitwise fusion that is kept runs on every class (the 4090 included); D3, if kept, runs on every step,
+   prefill included. Per-class keep or drop applies only to the bounded items and to D2.
+2. **Crossover entries keyed per shape, shipped only where they pay** (D2): an entry per (class, type, in, out,
+   activation mode) where mmq beats mmvq at a row count graphed steps run (4, 8, the drafter's 7) by ≥ 3% per call
+   and by > 3 sd across repeated sweeps; the entries ship where their sum is ≥ 1% of some lock's decode or verify
+   row; the shipped set delivers ≥ half its re-stated saving, and rows 4 and 8 (`holon_tg` batch 4 / 8, verify steps)
+   are guarded on every lock whose shapes receive an entry, with no regression beyond noise. (This replaces rev 3.1's
+   per-(class, type, mode) reading, and the per-file reading proposed in §11.12; step 0 panel.)
 3. **Mixed steps** (D7), on plain (non-speculative) locks of the RTX 5080 (27B) and 4090, ≥ 4 rounds per arm: the
    per-request maximum inter-token gap improves ≥ 2× at p99 and max (p50 recorded); the paired TTFT ratio (the median
    over (session, turn) of TTFT_mixed / TTFT_base) is at most 1 + max(15%, 2 sd of the baseline rounds), and the
    long-prompt scenario's TTFT p99 regresses by at most 25%; throughput by at most max(5%, 2 sd of the baseline
-   rounds); TPOT p99 recorded, not gated; the mixed-steps counter > 0. Speculative locks record the alternation's gap and long-prompt TTFT only.
+   rounds); TPOT p99 recorded, not gated; the mixed-steps counter > 0. Speculative locks record the alternation's gap
+   and long-prompt TTFT only. D7 serves formats whose decode-row and chunk paths share an activation mode (§3.1): the
+   a8 GGUF locks; a deployment where they differ refuses `chunk_with_decode > 0` at startup.
 4. **Megakernel experiment** (D8): measured against a fixed speed-of-light gate on the RTX 5090 and 5080 after D3–D6;
    a one-layer prototype only on "go"; recorded either way. No core seam for it unless it goes.
 5. **Locks:** propagated once, at the close (bitwise changes keep snapshots byte-identical; D2 / D3 / D6's bounded
@@ -82,13 +90,20 @@ run before the release freezes the ABI, not in M0.7).
      leading decode rows — a 1-token prefill row looks like a decode row otherwise.
    - Planners: each attention / mixer planner exposes `mixes_row_kinds` (a kernel prop surfaced by the planner and read
      at build, like `needs_host_lens`, `engine.py:145`); `chunk_with_decode > 0` without a drafter and with a planner
-     that cannot mix fails at startup. Only steps with `n_decode > 0` take the per-row-kind path: decode rows first,
+     that cannot mix fails at startup. So does `chunk_with_decode > 0` when any `qlinear` site's activation mode
+     (its kernel spec's `config["act"]`) differs between the path its decode rows take and the path a chunk takes
+     (mmvq vs mmq: q8_1 vs native fp4, for instance) — the check compares modes generically, names no format, and
+     keeps a mixed step from running a row at a precision its unmixed step would not. Only steps with `n_decode > 0` take the per-row-kind path: decode rows first,
      so a mixed step is two contiguous token slices; GQA's prefill kernel takes both when its prop says it accepts 1-token rows, GDN runs
      chunked over the prefill slice and recurrent over the decode slice, re-basing published `row` indices for the
      chunked subset. Unmixed steps (all steps at the default) keep today's paths, so snapshots at 0 are unchanged.
    - Mixed steps run eagerly (graphs stay uniform). The worst-step memory profile runs a mixed step when the setting is
      > 0 (a chunk's activations alive through sampling).
-   - The dead `SchedulePolicy.mix_phases()` protocol (`core/holon/api/decoding.py:39`) is deleted (a holon.api minor).
+   - The dead `SchedulePolicy.mix_phases()` protocol (`core/holon/api/decoding.py:39`) is deleted.
+   - **ABI:** one commit at step 1 moves the ABI to 0.2 and carries every break and addition of M0.7 (`mix_phases`
+     removed; `BatchPlan.n_decode` and `EngineConfig.chunk_with_decode` added; the std.ops minors of D3 and D6), so the
+     release's step 6 sets 1.0 from it. The release's frozen guide names `core_abi >=0.1,<0.2`; it is updated after
+     the legibility runs (the legibility snapshot is already cut).
    - Toy proof: the toy state kinds across mixed steps with chunked prefill, constrained rows and preemption, outputs
      equal to today's schedule on CPU tiny models; startup failure for a non-mixing planner; a bounded check "mixed
      schedule vs today's" on GPU.
@@ -108,13 +123,17 @@ Line budget ≈ +90 (scheduler, `n_decode`, executor planning per row kind, vali
   the measured plain agent run). §5 is re-stated per class after step 0, before any code; a candidate below 1% of its
   step is dropped and recorded. Step 0 also builds the release benchmark runner the close and the release reuse (the
   per-request max inter-token gap added to `bench/driver.py`'s rows; a long-prompt scenario; TTFT paired per turn).
-- **D2. The crossover is a per-class table inside `kernels.ggml_cuda`**, keyed by (class, type, activation mode), with
-  llama.cpp's rule as the fallback, behind one exported function `mmvq_rows(fingerprint, type, mode)` used by
-  `QLinear` and by both judge sites (`drafter.py`, `gguf.py`); llama.cpp's fallback takes an explicit compute
+- **D2. The crossover is a per-class table inside `kernels.ggml_cuda`, keyed per shape**: (class, type, in, out,
+  activation mode), with llama.cpp's rule as the fallback, behind one exported function `mmvq_rows(fingerprint, type,
+  mode, in, out)` that `QLinear` calls with its `in` and `out`, as do both judge sites (`drafter.py`, `gguf.py`). An
+  entry is chosen per shape at the row counts graphed steps run — 4, 8 and the drafter's 7 — where mmq is faster than
+  mmvq by ≥ 3% per call and by > 3 sd across repeated sweeps (step 1 repeats step 0's sweep for the candidate shapes);
+  the entries ship where their sum on some lock's decode or verify row is ≥ 1% (§11.5 lists the candidates). Rows 4
+  and 8 are guarded on every lock whose shapes receive an entry. Step 0's per-type reading and §11.12's per-file
+  proposal are replaced by this (step 0 panel). llama.cpp's fallback takes an explicit compute
   capability (today's C API reads the current device's, `csrc/api.cu:111`), and the existing ggml plugin test asserts
   that `QLinear`'s actual dispatch per row count matches `mmvq_rows` for every lock class. The table is pinned by the plugin's `src` hash (as `triton_attn`'s class configs are), no
-  lock-to-kernel core path. Entries only where D1's sweep shows ≥ 1% of a step; a range check (≤ 8, mmvq for every n
-  up to it). Under M0.6's `fp4` mode a lower crossover moves 5–8-row steps from W4A8 to W4A4: a precision change,
+  lock-to-kernel core path. A range check per entry (≤ 8, mmvq for every n up to it). Under M0.6's `fp4` mode a lower crossover moves 5–8-row steps from W4A8 to W4A4: a precision change,
   judged by the small-step L2 of §6. The kernel is chosen by the row count the step actually runs (eager real rows,
   graphed bucket rows) — recorded.
 - **D3. Fused q/k-norm + RoPE + KV store** is a std op `attention.qk_rope_kv@1` under `std.mixers.gqa`, used only when
@@ -124,8 +143,9 @@ Line budget ≈ +90 (scheduler, `n_decode`, executor planning per row kind, vali
   without such a table makes the unit answer None) and a provider supports those facts — never by unit names; a future RoPE variant answers None and keeps the composition. Its reference is built by
   the judge from the composed units' references (unit isolation); the Triton provider covers bf16 and q8_0 KV, rounds
   to bf16 after the norm and after RoPE (before q8_0), handles T = 0; the model-only `_causal` build keeps the
-  composition. Bounded (not bitwise vs FlashInfer's rmsnorm reduction). The bf16 Triton `kv_write@1` provider (one
-  launch for k and v) is separate and bitwise.
+  composition. Bounded (not bitwise vs FlashInfer's rmsnorm reduction). If kept, it runs on every step, prefill
+  included (not per row kind). The bf16 Triton `kv_write@1` provider (one launch for k and v) is separate and
+  bitwise.
 - **D4. mmq writes bf16** through `vendor.patch`, keeping the stream-k fixup's partials in f32 until the final single
   rounding: bitwise equal to today's f32 + cast (`torch.equal` inside the existing `test_mmq_schedules`, which forces
   the fixup). Under M0.6, NVFP4's `scale2` multiplies after the fixup reduction (in the fixup kernel for fixup tiles,
@@ -144,7 +164,8 @@ Line budget ≈ +90 (scheduler, `n_decode`, executor planning per row kind, vali
     `qlinear_glu@1` is selected in `bind_kernels` and recorded as a lock site, never lazily. The ggml provider uses the
     vendored mmvq `fusion.gate` / `glu_op` at one column and the composition otherwise. Judged by L0 (the ggml case on
     q8_1-emulated accumulators, as the qlinear L0 is) and the `--max-step-tokens 1` L2 against the mmvq floor.
-  - **shared q8_1 quantization** (bitwise; built only if step 0 shows ≥ 1%): explicit, never a memo — an optional
+  - **shared q8_1 quantization** (bitwise; step 0 shows 1.5–1.9% of the 27B's decode on the 5080 / 5090; kept, it
+    runs on every class, the 4090's 0.96% included): explicit, never a memo — an optional
     `Linear.prepare_input(x)` (std.ops minor; an optional `prepare_input` and handle-accepting calls in the `qlinear@2`
     instance contract, documented in `std/holon_std/ops/kernels.py`; reference kernels return x) returning a
     provider-opaque handle that carries x, its key (path, ds layout, activation mode, shape) and a host-side
@@ -156,11 +177,17 @@ Line budget ≈ +90 (scheduler, `n_decode`, executor planning per row kind, vali
   - **GDN gating** in `kernels.fla` (bounded unless it matches torch's `exp` / `softplus` / `sigmoid` and the bf16 β
     cast; prefill only): L0 against the torch composition and the standard L2.
 - **D7. Mixed steps** (§3.1): default 0; plain locks opt in through `[engine]` with a cap chosen per class by step 4's
-  measurement on the recalibrated simulator and real runs (candidates 256 / 512).
+  measurement on the recalibrated simulator and real runs (candidates 256 / 512; the simulator fails cap 256 on the
+  4090, and leaves the 5090's 256 undecided until step 4). Only formats whose decode-row and chunk paths share an
+  activation mode (the a8 GGUF locks) can opt in (§3.1). On q8_0 KV a mixed step's decode rows go through
+  `_paged_prefill`, which has no KV split, so the simulator under-costs them; step 4 measures it, and may route the
+  decode slice through the decode kernel instead.
 - **D8. Megakernel experiment, gated on speed of light.** After D3–D6, per class (5090, 5080), on 8B Q4_K_M B1 decode:
   f = 1 − (bytes read per step) / (B × step time), with bytes = the weights read (the embedding table excluded) + KV,
-  and B = the bandwidth the step's GEMVs achieve, from unprofiled GEMV time (profiled times make B ≈ 2% low; D1's
-  second ratio corrects them) — so f excludes the GEMVs' own gap to peak, which a megakernel does not recover; a
+  and B = the bandwidth the step's GEMVs achieve, from unprofiled GEMV time — each call priced from the per-call sweep
+  (graph-timed), not from the profile: profiled kernels overlap under programmatic dependent launch, so D1's second
+  ratio above 1 is overlap, not profiler inflation, and a profiled GEMV sum is not the GEMVs' time — so f excludes
+  the GEMVs' own gap to peak, which a megakernel does not recover; a
   read-only stream over ≥ 1 GB is recorded beside it. Projected gain 1 / (1 − f·c) with c = 0.4–0.55 (the
   share of the gap to speed of light the published megakernels closed: Cohere 0.38, Hazy 0.56), reported at both
   ends. Stop if the projection at c = 0.55 is under 1.15× (f < 24%); otherwise build a one-layer prototype in
@@ -169,34 +196,66 @@ Line budget ≈ +90 (scheduler, `n_decode`, executor planning per row kind, vali
   decode-loop override, taps written by the megakernel), reviewed by this panel.
 - **D9. The small-batch quantized matmul leaves M0.7** as a follow-up gated by step 0's per-call sweep: the target's
   4-row / 1-row GEMM time ratio after D2 > 1.25 on a release class (it would be a row-dispatch path inside
-  `kernels.ggml_cuda` with its own `config["act"]` entry, not a new provider).
+  `kernels.ggml_cuda` with its own `config["act"]` entry, not a new provider). Step 0, at the per-shape table that
+  ships: 1.245 on the 5080 (the mean of four sweeps; not fired), 1.01 on the 4090, 1.10 on the 5090. Its upside is
+  recorded: 3.4 ms of the 5080's 27B 4-row calls over their 1-row time, about 12.6% of its MTP verify step (§11.7).
+  D9 stays outside M0.7.
 - **D10. Classify every change** bitwise or bounded before building (§1.1); target bitwise; propagate once at the close.
+- **D11. NVFP4's `scale2` inside mmvq for more than one column** (bitwise; step 0: 3.3–7.2% of NVFP4 decode B4/B8,
+  where the q8_1 path writes f32 and multiplies afterwards, `plugin.py:227-230`). A `vendor.patch` change to mmvq's
+  epilogue: the multiply per output element after the full reduction, as the one-column epilogue does, with the same
+  launch variant as today's unfused launch (nwarps, rows_per_cuda_block, small_k, halve_iters unchanged), writing
+  bf16 with one round-to-nearest-even rounding — so the result equals today's f32 × `scale2` → bf16. L0 inside the
+  existing qlinear loop at rows 2–8 with a `scale2` that is not a power of two, compared by value. The MoE path
+  (`mmvq_id`, `scale2` [2, E]) already applies the expert scales in llama.cpp's fused epilogue for any token count
+  (`plugin.py`'s docstring, "mmvq in llama.cpp's fused epilogue (one row dense; any tokens with ids)"); it is included
+  only if step 2's profile of the 30B NVFP4 at decode B4/B8 shows separate scale multiplies. Subject to §1.1's
+  keep-or-revert rule. Native W4A4's bf16 → f32 activation copy (6.7–7.0% of its prefill) is recorded only.
+- **`triton_attn` shared memory (a bug fix in step 1, not subject to keep or drop).** DFlash2's width-8 verify with bf16
+  KV fails graph capture on the RTX 5090: `paged_attention` needs 106,752 B of shared memory against sm_120's 101,376 B
+  (§11.4). The kernel caps BLOCK_M at 64 and tiles the query rows over the grid, with each row's arithmetic unchanged
+  (checked bitwise against today's kernel where today's compiles); if the compiled `metadata.shared` still exceeds the
+  device limit, `num_stages` drops, and only then `block_n` halves, bounded. The config is decided at build for the
+  deployment's declared widths (its verify widths and the draft block) and the effective one is recorded in the
+  site's lock entry. The existing `triton_attn` L0 is parametrized over every class config × declared width × KV
+  format × head_dim (head_dim 256, G = 6, NQ = 8 and 16, bf16 KV included), compiled offline for each target arch,
+  and asserts the compiled shared memory is within that target's limit.
+- **M0.6 follow-ups.** The FP4 repack holes (`kernels.ggml_cuda`'s `prepare` leaves ≈ 0.63 GiB reserved but unallocated
+  on the 30B NVFP4) are fixed in M0.7 by repacking into a destination allocated before the sources are freed: a
+  memory-only change, no numerics. The allocator-setting investigation is out of scope.
 
-## 5. Predictions (provisional; re-stated per class after step 0)
+## 5. Predictions (re-stated per class after step 0)
 
-| Item | Prediction |
-|---|---|
-| Crossover (D2) | 4090 k-quants ≈ 0 (bound 3.6 ms per DFlash verify step); 5080 already tuned; gains possible on sm_86 (rtx-3090) and i-quants (UD files) — sized by step 0 |
-| bf16 `kv_write` | 8B Q4_K_M B1 decode −2.5–3% (A5000) |
-| `qk_rope_kv` (D3), on top of `kv_write` | 8B Q4_K_M B1 −1.7–2.3%; 27B with q8_0 KV ≤ 0.3% (likely dropped by D1's rule); prefill 2048 −1–1.5% |
-| mmq bf16 out (D4) | GGUF prefill −1.5–3% on the consumer classes (−4–5% on the A5000) |
-| GDN rewind glue (D5) | verify step −2–3% (27B) |
-| D6 | 8B Q4_K_M B1 −2% (gate/up + SwiGLU); 27B decode ≈ −1% (shared quantization, decode only); prefill −0.6% (gating) |
-| Fusions combined | 8B Q4_K_M B1 decode −6–7%; bf16 −2%; GGUF prefill −3–5% |
-| Mixed steps (D7), plain locks | worst gap: 4090 511 → 97–154 ms, 5080 710–974 → 120–220 ms (gap p50 −13 to −35%, within seed noise — recorded only); TPOT p99 within noise; TTFT p50 +4–49% at cap 256 (cap 512 smaller) |
-| Long prompt, plain locks | 30K-token prompt behind decoders: 4090 9.3 s → ≈ 11.7 s at cap 256 (+26%), ≈ 9.1 s at cap 512; 5080 ≈ +8% at cap 256 — §1.3's +25% bar selects cap 512 on the 4090 |
-| Alternation, speculative locks | 2048-token prompt TTFT on the 4090: 618 ms → ≈ 1008 ms at cap 256 (+63%), ≈ 736 ms at cap 512 (+19%) |
-| Megakernel (D8) | A5000: weights 4.67 GB + KV 0.075 GB, GEMVs at 655–666 GB/s, step 8.64 ms → f ≈ 16–17.5% → 1.07–1.11× at c = 0.4–0.55: stop; consumer classes decided by their f |
+Rev 3.1's provisional predictions are replaced by step 0's measurements (§11; per class in §11.11). A saving is the
+largest over the release rows, as a share of its step; D3, D5 and gate/up + SwiGLU are upper bounds (the fused kernel
+is taken to cost nothing).
+
+| Item | 5080 | 4090 | 5090 |
+|---|---|---|---|
+| Crossover (D2, per shape) | 27B decode B8 −5.7%, DFlash verify −4.8% | none | 27B decode B8 −4.1%, DFlash verify −4.6% |
+| bf16 `kv_write` | 8B Q4_K_M B1 −2.2% | −1.5% | −3.5% |
+| `qk_rope_kv` (D3), on top (upper bound) | 8B B1 −1.9%; 27B ≤ 0.4%; prefill ≤ 1.0% | −1.7% | −2.9% |
+| mmq bf16 out (D4) | GGUF prefill −2.4–3.2%; NVFP4 −5.0% | −4.8–5.1%; −6.0% | −2.4–2.6%; −4.6% |
+| GDN rewind glue (D5, upper bound) | verify −3.4–4.2% | −3.4–4.1% | −5.3–6.1% |
+| gate/up + SwiGLU (D6, upper bound) | 8B B1 −1.6% | −1.1% | −2.4% |
+| shared q8_1 (D6) | 27B decode −1.5% | −0.96% | −1.9% |
+| GDN gating (D6) | prefill −0.3%: dropped | −0.4%: dropped | −0.4%: dropped |
+| NVFP4 `scale2` in mmvq (D11) | NVFP4 decode B4/B8 −3.5–4.2% | −3.3–3.6% | −6.2–7.2% |
+| Mixed steps (D7), plain 27B locks (simulated) | worst gap 2.7 s → 127 / 232 ms (cap 256 / 512); paired TTFT 1.02 / 1.00; long prompt +10% / +2% | → 94 / 151 ms; 1.26 (fails) / 1.01; +22% / +0.7% | → 71 / 123 ms; 1.12 (undecided) / 1.00; +20% / +5% |
+| Megakernel (D8), f today | 12.7%: stop | — | 22.1%: stop |
 
 ## 6. Judge
 
 - **Bitwise checks inside existing L0 loops:** D4 (`test_mmq_schedules`, fixup forced, plus the NVFP4 case), D5 (L1.5),
-  D6's shared quantization (a mixed-type pair of consumers through one handle), the bf16 `kv_write`.
+  D6's shared quantization (a mixed-type pair of consumers through one handle), the bf16 `kv_write`; D11 in the
+  qlinear loop at rows 2–8 with a `scale2` that is not a power of two (by value); `triton_attn`'s tiled query rows
+  bitwise against today's kernel, and its L0 parametrized over class config × declared width × KV format × head_dim
+  with the compiled shared memory checked against each target's limit (offline compiles for sm_86 / 89 / 120a).
 - **Bounded L0** (sm_86 / 89 / 120a + memcheck): D3 against the judge-composed reference, incl. partial rotary, the
   gated q layout and q8_0 1-token rows; `qlinear_glu@1` against its reference; GDN gating against the torch composition.
 - **Small-step L2 for the paths propagate never runs** (it scores prefill only and bounded runs batch 48): `holon_judge
   l2 --max-step-tokens 1` against the `*-mmvq-floor` goldens (gate/up + SwiGLU, D3's decode rows); `--max-step-tokens
-  8` and 4 against the floor of the path `mmvq_rows` picks (D2); floors recorded where missing (the 27B
+  8`, 7 and 4 against the floor of the path `mmvq_rows` picks (D2), on every lock whose shapes receive an entry; floors recorded where missing (the 27B
   `mmvq-kv-q8_0` floor for q8_0 locks; M0.6's fp4-mode floor for W4A4 entries). Bounded at `max_seqs` 1 and 8, the
   baseline at the same value.
 - **Plants (two new):** a KV slot off by one only at page boundaries (D3); a RoPE position off by one on decode rows
@@ -209,11 +268,11 @@ Line budget ≈ +90 (scheduler, `n_decode`, executor planning per row kind, vali
 | # | Work | Checks | Days |
 |---|---|---|---|
 | 0 | Re-measure on 5080 / 4090 / 5090 (D1); the benchmark runner with max-gap rows; §5 re-stated | records | 2 |
-| 1 | `mmvq_rows` and D2 table entries where the sweep pays | agreement test; guarded rows; small-step L2 | 1 |
-| 2 | bf16 `kv_write`, D4, D6 (bitwise first), D3 (bounded) | L0 ×3, L2, bounded; keep-or-revert per §1.1 | 4 |
+| 1 | The ABI 0.2 commit (§3.1); the `triton_attn` shared-memory fix; `mmvq_rows` per shape and D2's entries from a repeated sweep of the candidate shapes | `triton_attn` L0 (widths × configs × archs) and the bitwise check; agreement test; guarded rows 4 / 8; small-step L2 | 2 |
+| 2 | bf16 `kv_write`, D4, D11, D6 (bitwise first), D3 (bounded); the FP4 repack holes | L0 ×3, L2, bounded; keep-or-revert per §1.1; the 30B NVFP4 fit | 4.5 |
 | 3 | D5 glue | L1.5 bitwise; bounded spec | 1.5 |
-| 4 | Mixed steps (§3.1, D7); design §7.1 / §4.2 and plan §10 | core toy proof; bounded mixed-vs-today; agent + long prompt on 5080 / 4090 with A/A | 3 |
-| 5 | Megakernel gate (D8); prototype only on "go" | records | 1–5 |
+| 4 | Mixed steps (§3.1, D7; the activation-mode startup check); design §7.1 / §4.2 and plan §10 | core toy proof; bounded mixed-vs-today; agent + long prompt on 5080 / 4090 with A/A; the q8_0 decode rows' cost | 3 |
+| 5 | Megakernel gate (D8, GEMV time from the sweep or unprofiled); prototype only on "go" | records | 1–5 |
 | 6 | Close: locks once, bars, panel code review, plan status | review clean | 1.5 |
 
 ## 8. Memory and suite time
@@ -233,6 +292,22 @@ profile). Lean tests: bitwise checks live in existing L0 loops; two new plants, 
 - **The recalibrated simulator** still models, not measures: step 4's real runs decide.
 
 ## 10. Review findings, resolved
+
+**Step 0 panel round (rev 3.2, 2026-10-14).** No blocker; the lead's decisions on each finding:
+
+| Finding | Resolution |
+|---|---|
+| Numerics MAJOR: D2 per type (or per file) mixes shapes that win and lose | D2 keyed per shape (class, type, in, out, mode); `mmvq_rows` gains `in` / `out`, `QLinear` passes them; entries at rows 4, 8 and 7 with ≥ 3% per call and > 3 sd across repeats; shipped where their sum is ≥ 1% of some lock's row; rows 4 / 8 guarded on every lock with an entry; §1.2 reworded, the per-file reading recorded as replaced (§4 D2, §11.5) |
+| Architecture M1: mixed steps can run a row at another activation mode | `chunk_with_decode > 0` refuses at startup when any `qlinear` site's `config["act"]` differs between the decode-row and chunk paths (generic, no format names); D7 therefore serves the a8 GGUF locks (§1.3, §3.1, D7) |
+| Both MAJORs: `triton_attn` exceeds sm_120's shared memory (DFlash2 / bf16 KV on the 5090) | a step-1 bug fix, not keep-or-drop: BLOCK_M ≤ 64 with query rows tiled over the grid (per-row arithmetic unchanged, checked bitwise), then fewer `num_stages`, then a bounded `block_n` halving; decided at build for the declared widths and recorded in the lock entry; L0 over class config × width × KV format × head_dim with the compiled shared memory checked per arch (§4, §6, §7) |
+| Architecture m2, numerics m3: bitwise fusions dropped per class | bitwise fusions stay on everywhere once kept (shared q8_1 on the 4090 too); D3 runs on every step, prefill included; per-class keep / drop only for bounded items and D2 (§1.1, D3, D6, §11.11) |
+| New: NVFP4 `scale2` after mmvq above one column (3.3–7.2% of NVFP4 B4/B8) | D11 (bitwise): the multiply in mmvq's epilogue after the full reduction, today's launch variant, one RNE rounding to bf16; L0 in the qlinear loop at rows 2–8 with a non-power-of-two `scale2`, by value; the MoE path already fused (included only if step 2's profile says otherwise); keep-or-revert; the W4A4 activation copy recorded only (§4 D11) |
+| Numerics m2: D8's B from the profiled GEMV time / r2 | r2 > 1 is PDL overlap, not inflation; GEMV time priced from the per-call sweep: f 22.1% (5090) and 12.7% (5080), both stop today; step 5 uses the sweep or unprofiled time (§11.2, §11.6, D8) |
+| Numerics m4: D3, D5 and gate/up savings read as measured | labelled upper bounds; "other glue" on eager rows includes host idle (§5, §11.3, §11.11) |
+| Correctness m1: D9 at a table that will not ship | recomputed at the per-shape table: 1.245 over four sweeps, not fired; upside 3.4 ms (12.6% of the 5080's MTP verify step) recorded; D9 stays outside M0.7 (§11.7) |
+| Correctness m2: the clock sampler picked the GPU by `CUDA_VISIBLE_DEVICES` | `Sampler` names torch's current device by UUID (`bench/clock_check.py`). No test: `bench/` is outside the suite and a test would need a GPU and a second device order; checked by hand with `CUDA_VISIBLE_DEVICES=6,3` and device 1, which now samples physical GPU 3 (it sampled GPU 6 before) |
+| Correctness m3: q8_0 KV decode rows in mixed steps go through `_paged_prefill` (no KV split) | the simulator under-costs them; step 4 measures, and may route the decode slice through the decode kernel; the 5090's cap 256 is undecided until step 4 (D7, §11.8) |
+| Architecture m4: M0.6's follow-ups | the FP4 repack holes fixed in M0.7 (memory only, step 2); the allocator-setting investigation out of scope; one ABI 0.2 commit at step 1 with every break and addition (`mix_phases` removed, `n_decode`, `chunk_with_decode`, the std.ops minors), the release's step 6 sets 1.0; the frozen guide's `core_abi >=0.1,<0.2` is updated after the legibility runs (§3.1, §4) |
 
 **Rev 3** (no blocker or major; minors):
 
@@ -325,8 +400,10 @@ second desktop.
   is an A5000 clock effect. Its decode B1 rows (`m07-step0_profile-*_rtx-a5000`) give r1 = 1.01–1.13, with the SM
   clock at 1395–1500 MHz graphed against 1755–1905 MHz eager, at the power cap. On the consumer classes, graphed
   kernel time converts 1:1 into wall time.
-- **r2 is 0.99–1.04.** The profiler inflates graphed kernel sums by at most 4%. The shares below are profiled kernel
-  time divided by r2, and D8's B uses the unprofiled GEMV time.
+- **r2 is 0.99–1.04, and above 1 it is overlap, not profiler inflation** (step 0 panel): under programmatic
+  dependent launch a kernel starts before its predecessor ends, so the profiled kernel sum exceeds the wall. The
+  shares below are profiled kernel time divided by r2 (each category's share of the overlapped sum); D8's GEMV time
+  comes from the per-call sweep instead (§11.6).
 
 ### 11.3 Glue share per row
 
@@ -334,7 +411,7 @@ Share of the step, in %: graphed for decode and verify, eager wall for prefill. 
 - **cast:** mmq's f32 → bf16 cast, plus NVFP4's f32 × `scale2` → bf16 multiply (on mmq, and on mmvq above one row).
 - **bf16→f32:** native W4A4's activation copy.
 - **other glue:** everything else (residual adds, gates, copies, index ops, sampling, and the verify step's drafter and
-  rewind glue).
+  rewind glue). On the eager prefill rows the step is the wall, so "other glue" there also holds the host's idle time.
 
 | class | model | row | step ms | GEMM | attention | GDN | act quant | cast | bf16→f32 | KV store | q/k norm + rope | norms | silu·mul | other glue |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -429,65 +506,64 @@ step at the same batch.
   ran with q8_0 KV (`-kvq8`), so its decode ratio compares against a bf16-KV decode step. The 4090 runs the same
   bf16-KV verify. On sm_120 it fails (§11.11).
 
-### 11.5 The crossover sweep (D2)
+### 11.5 The crossover sweep (D2), keyed per shape
 
 `bench/qmm_sweep.py` timed today's `QLinear`, graph-timed, for every (type, in, out, mode) of the `qlinear` sites in the
 latest lock of every GGUF and FP4 checkpoint (107–113 shapes per class; real GGUF rows, random codes with valid scales
 for the HF NVFP4 layouts, enough copies to defeat L2). It records mmvq at rows 1–8, mmq with the cast and without it
-(rows 1–9), and llama.cpp's choice.
-- **Per (type, mode) table limit:** the largest n with mmvq at least as fast as mmq for every row up to n, summed over
-  the type's shapes weighted by their per-step calls.
-- **Step saving:** the profiled decode and verify steps' calls priced at that limit against llama.cpp's.
-- **Graph buckets:** graphed steps run at bucket rows (1, 2, 4, 8, …), so rows 8 (decode B5–B8, DFlash verify) and 4
-  (decode B3–B4, MTP verify B1) are the ones that matter.
+(rows 1–9), and llama.cpp's choice. Graphed steps run at bucket rows (1, 2, 4, 8, …) and drafts at their block, so
+mmvq and mmq compete at rows 4 (decode B3–B4, MTP verify B1), 8 (decode B5–B8, DFlash verify) and 7 (DFlash's draft).
 
-| class | type (q8_1) | llama.cpp's limit | measured (with cast / without) | step saving where it pays (with cast) |
-|---|---|---|---|---|
-| 5080 | iq3_s | 8 | 7 / 7 | 27B decode B8 −2.45%; DFlash verify B1 −2.07% |
-| 5080 | iq4_xs | 8 | 6 / 6 | decode B8 −1.36%; DFlash verify −1.15% |
-| 5080 | iq2_s, iq2_xxs, iq2_xs, iq3_xxs, iq1_s | 8 | 6–7 | decode B8 −0.84, −0.49, −0.33, −0.30, −0.10% (each < 1%) |
-| 5080 | q2_k, q3_k / q5_k / q6_k | 5 / 6 / 7 | 3 / 5 / 5 | ≤ 0.17% (rows 4–7 only) |
-| 4090 | every type | 8 (k-quants 4–8) | the same or higher | 0.0% on every row (llama.cpp's Ada rule holds) |
-| 5090 | iq4_xs | 8 | 6 / 6 | 27B decode B8 −3.76%; DFlash verify −2.93% |
-| 5090 | q6_k | 7 | 4 / 4 | DFlash verify −1.34% (its 5–7-row calls) |
-| 5090 | iq3_s, iq4_nl, iq2_xxs, iq3_xxs, q3_k | 8 / 5 | 6–7 / 3 | ≤ 0.2% each |
+**Per-shape entries (rev 3.2, D2).** A shape gets an entry — the smallest limit in {3, 6, 7} below llama.cpp's for
+which every graphed row it moves to mmq is ≥ 3% faster there — or keeps llama.cpp's rule
+(`step0_report.py`, `entry`). The entries ship where their sum on some lock's decode or verify row is ≥ 1%. Step 0 has
+one sweep per class (the 5080's 27B shapes four at rows 1 and 4), so the > 3 sd condition is applied at step 1 on a
+repeated sweep of these candidates.
 
-- The whole table saves 5.9% of the 5080's 27B decode B8 and 5.0% of its DFlash verify step. On the 5090 it saves 4.1%
-  and 4.5%, and on the 4090 nothing.
-- MTP verify at one row (4 rows) gains ≤ 0.15% everywhere: mmvq still wins at 4 rows for every type that matters.
-- Without the cast (after D4), the 5080's 27B B8 saving is 6.8% and the 5090's 4.6%. D4 itself is counted separately
-  (§11.11).
-- Native W4A4 (`nvfp4/fp4`) and NVFP4 at q8_1 keep llama.cpp's 8 on every class.
+| class | shapes with an entry | candidates on a ≥ 1% row (by type) | row savings, with today's cast (after D4) |
+|---|---|---|---|
+| 5080 | 45 | 26: iq4_xs 7, iq3_s 6, iq2_s 4, iq2_xxs 4, iq2_xs 3, iq1_s 1, iq3_xxs 1 | 27B decode B8 −5.7% (−6.8%); DFlash verify B1 −4.8% (−5.7%); decode B4 −0.24% |
+| 4090 | 4 (iq1_s, iq2_xxs) | none | under 0.1% on every row |
+| 5090 | 41 | 11: iq4_xs 5, iq4_nl 3, iq3_s 2, q6_k 1 (the 27B's 248320-row head) | 27B decode B8 −4.1% (−4.6%); DFlash verify B1 −4.6% (−5.0%); decode B4 −0.64% |
+
+- MTP verify at one row (4 rows) gains at most 0.5% (the 5090) on any class: mmvq still wins at 4 rows for nearly
+  every shape. The 4090 keeps llama.cpp's rule (its Ada tuning holds), and native W4A4 and NVFP4 at q8_1 keep 8 on
+  every class.
+- Rev 3.1 keyed the table per (class, type, mode); the per-type reading of this section's first version (iq3_s → 7,
+  iq4_xs → 6 on the 5080, …) and §11.12's per-file proposal are replaced by the per-shape table (step 0 panel).
 - The 5090 has no GGUF lock yet; its entries come from the files it borrows.
 
 ### 11.6 D8's f (8B Q4_K_M, B1 decode)
 
 - bytes = the matmuls' weight bytes (4.67 GB, the embedding table excluded), plus the KV read at the graphed window's
   context (0.088 GB).
-- B = weight bytes / the unprofiled GEMV time.
-- f = 1 − bytes / (B × step). The step's idle is outside f, and r2 cancels.
+- B = weight bytes / the step's GEMV time, each call priced from the per-call sweep (graph-timed, unprofiled; corrected
+  by the step 0 panel: the profiled GEMV sum divided by r2 is not the GEMVs' time when kernels overlap).
+- f = 1 − bytes / (B × step).
 
-| class | step ms | GEMV ms (unprofiled) | B (GB/s) | read-only stream, 2 GiB (GB/s) | f | projected gain, c = 0.4 / 0.55 | today's gate |
+| class | step ms | GEMV ms (sweep) | B (GB/s) | read-only stream, 2 GiB (GB/s) | f | projected gain, c = 0.4 / 0.55 | gate |
 |---|---|---|---|---|---|---|---|
-| 5080 | 6.54 | 5.40 | 865 | 913 | 15.9% | 1.068 / 1.096 | stop |
-| 4090 | 6.90 | 5.88 | 795 | 844 | 13.2% | 1.056 / 1.078 | (not a D8 class) |
-| 5090 | 4.14 | 3.04 | 1535 | 1683 | **25.2%** | 1.112 / **1.161** | prototype (f ≥ 24%) |
+| 5080 | 6.54 | 5.60 | 834 | 913 | 12.7% | 1.053 / 1.075 | stop |
+| 4090 | 6.90 | 5.95 | 785 | 844 | 12.1% | 1.051 / 1.071 | (not a D8 class) |
+| 5090 | 4.14 | 3.17 | 1474 | 1683 | 22.1% | 1.097 / 1.138 | stop |
 
-- **D8 is defined after D3–D6.** On the 5090, the surviving fusions are worth 9.3% of this step: kv_write 3.5%, D3
-  2.9%, gate/up + SwiGLU 2.4% and shared q8_1 0.5%. With them, f falls to 1 − 0.748 / 0.907 = **17.5%**, which
-  projects 1.075–1.107×. That predicts "stop" at step 5.
-- On the 5080, f falls from 15.9% to about 10.5% after the same fusions (6.0% of the step).
-- Step 5 measures the 5090 gate again after D3–D6, as designed.
+**Both D8 classes stop already today**, before D3–D6 shrink the step further. This section's first version (15.9% /
+25.2%, "prototype territory" on the 5090) took the profiled GEMV time divided by r2. Step 5 measures the gate after
+D3–D6 with the sweep's or an unprofiled GEMV time.
 
 ### 11.7 D9's trigger
 
-D9 is the target's 4-row / 1-row matmul time over its decode step's calls, at D2's table, with today's cast:
+D9 is the target's 4-row / 1-row matmul time over its decode step's calls, at the D2 entries that ship (per shape),
+with today's cast; each call's time is the mean over the sweeps available.
 
-| class | target | ratio | bar 1.25 |
-|---|---|---|---|
-| 5080 | 27B UD-IQ3_S | 1.250 in the full sweep; 1.243 / 1.245 / 1.246 in three repeats (mean of all four 1.246, sd 0.003) | at the bar; not fired on the mean |
-| 4090 | 27B UD-Q4_K_M | 1.014 | not fired |
-| 5090 | 27B UD-Q4_K_M | 1.108 | not fired |
+| class | target | ratio | bar 1.25 | upside (4-row calls over their 1-row time) |
+|---|---|---|---|---|
+| 5080 | 27B UD-IQ3_S | 1.245 (mean of four sweeps: the full one and three repeats; sd of the per-sweep ratios 0.003) | not fired | 3.4 ms, 12.6% of its 27.2 ms MTP verify step |
+| 4090 | 27B UD-Q4_K_M | 1.014 | not fired | 0.3 ms |
+| 5090 | 27B UD-Q4_K_M | 1.10 | not fired | 1.0 ms |
+
+D9 stays outside M0.7; the upside is recorded for the follow-up. (The step 0 panel's recomputation gave 1.2477 at its
+table; this one prices every call per shape at the entries above. Both are below 1.25.)
 
 ### 11.8 Mixed steps: the measured plain runs and the recalibrated simulator (D7)
 
@@ -560,6 +636,10 @@ Throughput is steady across rounds:
 
   The long prompt stalls the decoders for 14.3 s (5080), 9.0 s (4090) and 7.7 s (5090) today. Every cap brings that
   to one chunk: 87–318 ms in the simulator.
+- **Step 0 panel:** the 5090's cap 256 (paired TTFT 1.12, near the bar) is undecided until step 4's runs. On q8_0 KV
+  (the 5080's lock) a mixed step's decode rows go through `_paged_prefill`, which has no KV split, so the simulator
+  under-costs them; step 4 measures it and may route the decode slice through the decode kernel. D7 serves the a8 GGUF
+  locks only: a deployment whose decode-row and chunk paths differ in activation mode refuses mixed steps (§3.1).
 
 ### 11.9 The release cells re-measured at the pin (RTX 5090)
 
@@ -591,8 +671,8 @@ MoE decode path. Neither is an M0.7 candidate (§11.11).
   - `workloads.py` adds the `long_prompt` trace: three streams decoding from t = 0 (256 + 1024), then a 30,000-token
     prompt at t = 2 s.
 - **Measurement tools:**
-  - `step_profile.py`: per-row categories, verify regions, both ratios with clocks, and matmul calls, weight bytes and
-    distinct quantized inputs per step;
+  - `step_profile.py`: per-row categories, verify regions, both ratios with clocks (sampled by the device's UUID
+    since the step 0 panel), and matmul calls, weight bytes and distinct quantized inputs per step;
   - `qmm_sweep.py`;
   - `clock_check.py`;
   - `mixed_sim.py`;
@@ -616,46 +696,48 @@ MoE decode path. Neither is an M0.7 candidate (§11.11).
 
 ### 11.11 §5 re-stated per class
 
-A candidate survives on a class if it saves at least 1% of its step on some release row there (graphed decode
-B1/B4/B8, verify, prefill 512/2048). Shares are the largest over the rows; "—" means it does not apply.
+A bounded candidate survives on a class if it saves at least 1% of its step on some release row there (graphed decode
+B1/B4/B8, verify, prefill 512/2048). A bitwise candidate that survives on any class runs on every class (rev 3.2,
+§1.1). Shares are the largest over the rows; D3, D5 and gate/up + SwiGLU are upper bounds (the fused kernel is taken
+to cost nothing).
 
-| item | 5080 | 4090 | 5090 | verdict |
-|---|---|---|---|---|
-| D2 crossover | 27B B8 −5.9%, DFlash −5.0% (iq3_s → 7, iq4_xs → 6) | 0 | B8 −4.1%, DFlash −4.5% (iq4_xs → 6, q6_k → 4) | **keep** on 5080, 5090; **drop** on 4090 (llama.cpp's rule is already optimal there); per-type entries under 1% dropped (§11.5) |
-| bf16 `kv_write` | 8B B1 −2.2% (B8 −1.8%) | −1.5% (−1.3%) | −3.5% (−2.8%) | **keep** (8B, bf16-KV rows; the 27B's bf16-KV rows are 0.2%) |
-| D3 `qk_rope_kv` (on top) | 8B B1 −1.9% | −1.7% | −2.9% | **keep** for decode; prefill 0.5–1.0% and the 27B 0.2–0.4% (as predicted: ≤ 0.3%) |
-| D4 mmq bf16 out | prefill −2.4–3.2% (NVFP4 −5.0%, W4A4 −10.2%) | −4.8–5.1% (NVFP4 −6.0%) | −2.4–2.6% (NVFP4 −4.6%, W4A4 −9.2%); 27B B8 −1.3% | **keep** |
-| D5 rewind glue | verify −3.4–4.2% | −3.4–4.1% | −5.3–6.1% | **keep** |
-| D6 gate/up + SwiGLU | 8B B1 −1.6%, 27B B1 −1.1% | −1.1%, −0.7% | −2.4%, −1.35% | **keep** |
-| D6 shared q8_1 | 27B B1 −1.5% | −0.96% | −1.9% | **keep** on 5080, 5090; **drop** on 4090 (under 1%); 8B 0.2–0.3%, NVFP4 has no repeat |
-| D6 GDN gating | prefill −0.3% | −0.4% | −0.4% | **drop** everywhere: about 2 ms of an 838 ms step |
-| D7 mixed steps | cap 256 or 512 | cap 512 (256 fails paired TTFT) | cap 512 (256 at 1.12) | **keep**; step 4's real runs pick the cap |
-| D8 megakernel | f 15.9% → stop | — | f 25.2% today, 17.5% predicted after D3–D6 | gate re-measured at step 5 |
-| D9 small-batch matmul | 1.246 (at the bar) | 1.014 | 1.108 | not triggered |
+| item | kind | 5080 | 4090 | 5090 | verdict |
+|---|---|---|---|---|---|
+| D2 crossover, per shape | bounded | 27B B8 −5.7%, DFlash −4.8% (26 candidate entries) | none | B8 −4.1%, DFlash −4.6% (11) | **keep** on 5080, 5090 (entries confirmed by step 1's repeated sweep); none on the 4090 |
+| bf16 `kv_write` | bitwise | 8B B1 −2.2% (B8 −1.8%) | −1.5% (−1.3%) | −3.5% (−2.8%) | **keep**, every class |
+| D3 `qk_rope_kv` (on top; upper bound) | bounded | 8B B1 −1.9% | −1.7% | −2.9% | **keep** on every class (each ≥ 1%), on every step, prefill included |
+| D4 mmq bf16 out | bitwise | prefill −2.4–3.2% (NVFP4 −5.0%, W4A4 −10.2%) | −4.8–5.1% (NVFP4 −6.0%) | −2.4–2.6% (NVFP4 −4.6%, W4A4 −9.2%); 27B B8 −1.3% | **keep**, every class |
+| D5 rewind glue (upper bound) | bitwise | verify −3.4–4.2% | −3.4–4.1% | −5.3–6.1% | **keep**, every class |
+| D6 gate/up + SwiGLU (upper bound) | bounded | 8B B1 −1.6%, 27B B1 −1.1% | −1.1%, −0.7% | −2.4%, −1.35% | **keep** on every class |
+| D6 shared q8_1 | bitwise | 27B B1 −1.5% | −0.96% | −1.9% | **keep**, every class (the 4090 included) |
+| D6 GDN gating | bounded | prefill −0.3% | −0.4% | −0.4% | **drop** everywhere: about 2 ms of an 838 ms step |
+| D11 NVFP4 `scale2` in mmvq above one column | bitwise | NVFP4 B4/B8 −3.5–4.2% | −3.3–3.6% | −6.2–7.2% | **new, keep-or-revert at step 2**, every class |
+| D7 mixed steps | — | cap 256 or 512 | cap 512 (256 fails paired TTFT) | cap 512; 256 undecided | **keep**; step 4's real runs pick the cap; a8 GGUF locks only |
+| D8 megakernel | — | f 12.7% → stop | — | f 22.1% → stop | stop expected; step 5 re-measures after D3–D6 |
+| D9 small-batch matmul | — | 1.245 | 1.014 | 1.10 | not triggered; outside M0.7 |
+| `triton_attn` shared memory | bug fix | — | — | DFlash2 / bf16 KV fails capture | **fix at step 1** |
 
-**Measured, not in §5 (for the lead):**
-- **NVFP4 `scale2` after mmvq above one row:** 3.3–7.2% of NVFP4 decode B4/B8 on every class. llama.cpp fuses it into
-  mmvq at one row only; doing it above one row would be a vendor patch, as D4 is.
-- **Native W4A4's bf16 → f32 activation copy:** 6.7–7.0% of NVFP4 W4A4 prefill on sm_120. A quantizer that reads bf16
-  would remove it.
-- **The 5090's DFlash2 failure** with bf16 KV (§11.4): a `triton_attn` config for sm_120 at width 8.
-- **pp512 @ 8K (0.91–0.96) and the 30B-A3B tg128 (0.93)** are not ggml (§11.9).
+**Measured, not in §5:** native W4A4's bf16 → f32 activation copy, 6.7–7.0% of NVFP4 W4A4 prefill on sm_120 (recorded
+only); pp512 @ 8K (0.91–0.96) and the 30B-A3B's tg128 (0.93) are not ggml (§11.9).
 
-### 11.12 For the lead
+### 11.12 For the lead (step 0's report; answered by §10's step 0 panel round)
 
-1. **Re-stated §5 above, for the panel.** Every fusion survives on some class except GDN gating; shared q8_1 and the
-   D2 table drop on the 4090.
-2. **D2's per-entry rule.** Of the 5080's i-quant entries, only iq3_s and iq4_xs reach 1% alone (3.8% of decode B8
-   together). The other five add 2.0% between them, at under 1% each. Ship them as one entry per class ("i-quants →
-   6/7") or drop them? I recommend shipping the measured limits for every i-quant of the 27B file. They all come from
-   one sweep, and D2's small-step L2 covers them anyway.
-3. **D9 sits at its bar on the 5080:** 1.243–1.250 over four sweeps, mean 1.246. By the rule it does not fire. The
-   lead decides whether a ratio at the bar is a trigger.
-4. **D8 on the 5090 is in prototype territory today** (f 25.2%, 1.16× at c = 0.55). After the surviving fusions it is
-   predicted at 17.5% (stop). Step 5 decides after D3–D6, as designed.
-5. **The D7 cap per class (simulated):** 512 on the 4090, whose slow host makes cap 256 fail the paired-TTFT bar
-   (1.26); 256 or 512 on the 5080 and 5090. The predicted worst-gap gains are 11–28×.
-6. **New items** (not in §5): the NVFP4 `scale2` epilogue above one row, the bf16 W4A4 quantizer, the 5090
-   DFlash2/bf16-KV failure, and the attention-at-depth gap. Each is a follow-up or another milestone's work, not
-   M0.7's.
-7. **One desktop lost:** the first RTX 4090 desktop fell off the bus; all evidence comes from screened desktops.
+Step 0 asked the lead about D2's per-entry rule (proposing a per-file table), D9 at its bar, D8 on the 5090 (then read
+as 25.2%), the D7 cap per class, the items outside §5 and the lost desktop. The answers and corrections are §10's step
+0 panel round: D2 per shape (§11.5), D9 not fired (§11.7), D8 22.1% and stop (§11.6), the cap decided at step 4 with
+256 open on the 5090 (§11.8), D11 and the `triton_attn` fix added (§4), and bitwise fusions on every class (§11.11).
+
+### 11.13 After the step 0 panel (2026-10-14)
+
+- **Rebased onto `main` at 4a44fdc** (M0.6 Gate B: `kernels.triton_fp8`, `std.weights.hf`'s merge order). The rebase
+  had no conflicts; `uv sync --group dev` re-synced the venv. Full GPU suite (`pytest core std plugins judge testing
+  tools`, two A5000s): 1155 passed, 63 skipped, 18 min 55 s. `scripts/ci/run_all.sh` green.
+- **M0.6's merge-order change propagated on its own** (commit 9b1db33, `evidence/propagate_m06-merge-order_2026-10-14.json`):
+  every development-class lock that pins `std.weights.hf` — rtx-4090 Qwen3-8B bf16 (lock 11), nvidia Qwen3-8B NVFP4
+  (2), nvidia Qwen3-30B-A3B NVFP4 (2); rtx-5080 nvidia Qwen3-8B NVFP4 (2). Each passes L2 against its floor (the
+  bf16 floor; the W4A8 mmq floor for NVFP4), its propagate trace is byte-identical to the previous lock's, and the
+  snapshot ×3 at the new lock's settings and pins is run-identical. Approved under the delegation. The rtx-5090 bf16
+  lock (a release class) waits for the release's step 7. Desktops screened first (RTX 5080 2625 / 2662 MHz p10 /
+  p50, RTX 4090 2670 / 2670, no slowdown). The first RTX 4090 desktop of this run lost its GPU at its screen — the
+  same desktop that failed in step 0 — and was released; a third desktop ran the propagation.
+
