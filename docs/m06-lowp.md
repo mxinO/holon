@@ -249,7 +249,7 @@ implementation of the workload; bar = the engine users run for it on the card.
 ≈ +8 / −35 lines. The core passes an index and a `QTensor` it never opens. Toy proof in `core/tests/test_stacking.py`:
 a two-part layout (int8 rows + f32 row scales) adopted slice by slice by a toy stacked unit and read back; out of
 range, twice, missing, whole-then-sliced, a transform and a refusing unit are load errors. Sequencing (D-h): M0.4
-(`<user>/m04-spec`, which changes `build.py`, `load_weights` and `api/__init__.py`) merges to `main` first; Gate A's
+(the m04-spec branch, which changes `build.py`, `load_weights` and `api/__init__.py`) merges to `main` first; Gate A's
 core change rebases onto it, and its propagate runs after.
 
 ### 4.3 Units

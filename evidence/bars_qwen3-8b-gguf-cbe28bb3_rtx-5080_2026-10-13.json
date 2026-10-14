@@ -3,7 +3,7 @@
  "date": "2026-10-13",
  "gpu_class": "rtx-5080",
  "model": "unsloth/Qwen3-8B-GGUF Q4_K_M",
- "holon_commit": "a503daa (<user>/m06-lowp A0+A1 rebased on main)",
+ "holon_commit": "a503daa (m06-lowp A0+A1 rebased on main)",
  "ggml_pin": "cbe28bb3",
  "m01_reference": {
   "pp512": 8291,
