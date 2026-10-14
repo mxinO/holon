@@ -11,8 +11,9 @@ gate (D9); the forward/sample split stays deferred (M0.5 D2: 1.061× / 1.026×, 
 prior art are in the local research note `docs/brainstorm/m07-perf-research.md` ("R §n", taken on an RTX A5000) and in
 the reviewers' re-derivations recorded in §10; the consumer classes are re-measured first (step 0).
 
-Implementation starts after M0.5 and M0.6 merge into `main` (both change the core, the scheduler and the ggml plugin);
-step 0 runs on M0.6's ggml pin (`cbe28bb3`). The plan's M0.7 row is updated with this revision; design §7.1 / §4.2 and
+Implementation starts after M0.5 (merged) and M0.6's Gate A merge into `main` (both change the core, the scheduler and
+the ggml plugin; M0.7 needs Gate A's ggml pin `cbe28bb3` and fp4 mode, not Gate B's `triton_fp8`); step 0 runs on that
+pin. If Gate B merges after M0.7's close, it brings one more shared-change propagation (release design §9). The plan's M0.7 row is updated with this revision; design §7.1 / §4.2 and
 plan §10 (mixing as a core budget) are updated with step 4's code.
 
 ## 1. Goal and acceptance
