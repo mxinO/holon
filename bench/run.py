@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import getpass
 import hashlib
 import json
 import os
 import pathlib
 import re
 import shlex
+import socket
 import subprocess
 import sys
 
@@ -130,8 +132,11 @@ def reason(log: pathlib.Path) -> str:
     lines = [line.strip() for line in log.read_text(errors="replace").splitlines() if line.strip()]
     pick = next((line for line in lines if re.search(r"\b[\w.]*(Error|Exception): ", line)), None) or next(
         (line for line in lines if re.search(r"(?i)\berror\b", line)), None) or (lines or ["no output"])[-1]
-    pick = re.sub(r"(?<![\w.])(?:~|\.\.?/|/)[^\s'\",;)\]}]*", "<path>", pick)
-    pick = re.sub(r"(?<![\w.-])(?!127\.0\.0\.1:|localhost:)[\w.-]+:\d{2,5}\b", "<host>:<port>", pick)
+    for name, mark in ((socket.getfqdn(), "<host>"), (socket.gethostname(), "<host>"), (getpass.getuser(), "<user>")):
+        pick = pick.replace(name, mark) if len(name) > 2 else pick
+    pick = re.sub(r"[^\s'\",;()\[\]{}]*[/~][^\s'\",;()\[\]{}]*", "<path>", pick)     # any token with / or ~
+    pick = re.sub(r"\b\d+(?:\.\d+){3}:\d+|(?<![\w.-])(?!localhost:)(?=[\w.-]*[A-Za-z])[\w.-]+\]?:\d{2,5}\b",
+                  lambda m: m[0] if m[0].startswith("127.0.0.1:") else "<host>:<port>", pick)
     return re.sub(r"(?i)(driver\D*)\d[\d.]*", r"\1<version>", pick)[:300]
 
 
