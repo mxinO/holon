@@ -18,7 +18,8 @@
                                    # prefix cache on/off x overlap depth 1/0 on a multi-turn trace; or decode
                                    # graphs on vs off at a batch of N sessions
     python -m holon_judge constrained --model <.gguf> --jsb <JSONSchemaBench dir> --engine-args "<speculating>"
-                                   [--plant <bug>] [--json <file>]  # grammar + speculation vs grammar (M0.5 §5)
+                                   [--calibration <jsonl>] [--plant <bug>] [--json <file>]
+                                   # grammar + speculation vs grammar (M0.5 §5)
 
 `compare`, `l2`, `snapshot-diff`, `snapshot`, `bounded` and `constrained` exit with status 1 on a failed check.
 """
@@ -298,8 +299,9 @@ def _constrained(a: argparse.Namespace) -> int:
         return Engine(dataclasses.replace(base, max_model_len=a.max_len, **configs[name]))
 
     with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
+        calibration = [p.ids[:512] for p in PromptSet.load(a.calibration).prompts[:a.prompts]] if a.calibration else []
         report = constrained.judge(build, source.tokenizer(), lambda m: bundle.render_chat(m, enable_thinking=False),
-                                   pathlib.Path(a.jsb), a.prompts, a.max_tokens, a.k)
+                                   pathlib.Path(a.jsb), a.prompts, a.max_tokens, a.k, calibration)
     meta = gguf.file_meta(path) if path.suffix == ".gguf" else golden.model_meta(path)
     report |= {"model": meta["model"], "engine_args": a.engine_args, "plant": a.plant,
                "hardware": golden.hardware(torch.device("cuda")), "torch": torch.__version__}
@@ -415,6 +417,7 @@ def main(argv: list[str] | None = None) -> int:
     cs.add_argument("--jsb", required=True, help="JSONSchemaBench data directory (test parquets)")
     cs.add_argument("--engine-args", default="", help="EngineConfig flags that speculate")
     cs.add_argument("--prompts", type=int, default=64)
+    cs.add_argument("--calibration", help="a prompt set (natural text) whose unconstrained divergences calibrate")
     cs.add_argument("--max-tokens", type=int, default=512)
     cs.add_argument("--max-len", type=int, default=4096, help="max_model_len: prompt and output")
     cs.add_argument("--k", type=int, default=20)

@@ -4,7 +4,9 @@ acceptance 2, step 5; evidence record).
 For each dialect (OpenAI chat, Anthropic Messages, OpenAI Responses) and tool choice (auto, required / any, named):
 the user asks for the weather, the model calls `get_weather` (strict: its arguments follow the schema), the call's
 result goes back, and the model answers. Every request is sent twice, streamed and not, greedy: the streamed events
-reassembled must equal the non-streamed answer (ids aside) — the streaming parse equals the whole-text parse. Per
+reassembled must equal the non-streamed answer (ids aside) — the streaming parse equals the whole-text parse; where
+they differ, all three are kept (a repeat that hits the prefix cache may generate other text: the parse is only
+judged on the same text). Per
 request: what was parsed (calls, text), the finish / stop reason, TTFT; the first request with a constraint is the
 server's first sight of it (cold: vetting and compiling), its repeats are warm. With `--model`, the render and
 constraint build of each request (`pipeline.Chat`) is timed in this process with the model's bundle.
@@ -217,6 +219,7 @@ def main() -> None:
                     same = answers["stream"][0] == answers["whole"][0] == answers["warm"][0]
                     summary = answers["whole"][0]
                     row[turn] = {"summary": summary, "stream_equals_whole": same,
+                                 **({} if same else {"variants": {k: v[0] for k, v in answers.items()}}),
                                  "ttft_ms_cold": round(answers["stream"][1] * 1e3, 1),
                                  "ttft_ms_warm": round(answers["warm"][1] * 1e3, 1),
                                  "total_ms": round(answers["whole"][2] * 1e3, 1)}

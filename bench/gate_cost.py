@@ -29,6 +29,7 @@ import datetime
 import gc
 import hashlib
 import json
+import multiprocessing
 import os
 import shlex
 import statistics
@@ -216,9 +217,12 @@ def grammar_costs(args, state_memory: int) -> dict:
 
 
 def unpinned(args, cfg_name: str) -> dict:
-    """An engine sized as deployed (`memory_fraction`): its state bytes, KV tokens, graphs and capture time."""
+    """An engine sized as deployed (`memory_fraction`), in a process of its own (`main` spawns one per engine: one
+    process's earlier engines bias the free memory measured): its state bytes, KV tokens, graphs, capture time."""
     import torch
     from holon.core.executor import Executor
+    from holon_testing.toy_mask.plugin import ToyMask
+    mock.patch.object(ToyMask, "apply", lambda self, logits, mask, rows: None).start()
     seen, measure, capture = {}, Executor.state_memory, Executor.capture_graphs
 
     def state_memory(self, *a):
@@ -235,9 +239,6 @@ def unpinned(args, cfg_name: str) -> dict:
             mock.patch.object(Executor, "capture_graphs", capture_graphs):
         engine = _engine(args, cfg_name, None)
     seen |= {"graphs": len(engine.executor.graphs), "kv_tokens": _kv_tokens(engine)}
-    engine.close()
-    del engine
-    gc.collect()
     return seen
 
 
@@ -252,6 +253,8 @@ def main() -> None:
     parser.add_argument("--sizing-rounds", type=int, default=1, help="interleaved engines sized as deployed")
     args = parser.parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+    with multiprocessing.get_context("spawn").Pool(1, maxtasksperchild=1) as pool:   # before this process uses CUDA
+        sizing = [{c: pool.apply(unpinned, (args, c)) for c in ("none", "A′")} for _ in range(args.sizing_rounds)]
     from worker import blocking_sync
     blocking_sync()
     import workloads
@@ -259,7 +262,6 @@ def main() -> None:
     corpus = workloads.corpus(args.corpus)
     mock.patch.object(ToyMask, "apply", lambda self, logits, mask, rows: None).start()    # the toy's kernel: none
 
-    sizing = [{c: unpinned(args, c) for c in ("none", "A′")} for _ in range(args.sizing_rounds)]
     selected = {c: [r[c] for r in sizing] for c in ("none", "A′")}   # what selecting the processor costs
     state_memory = int(min(r["state_memory"] for r in selected["A′"]) * 0.98)   # every engine's pool
     print("sizing:", json.dumps(selected), flush=True)

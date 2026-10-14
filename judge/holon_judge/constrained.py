@@ -10,8 +10,10 @@ path (no logprobs) and again with logprobs (eager), so there are two pairs of ru
   or they first differ at a position where the reference — the plain engine's weights, eager, depth 0, no prefix
   cache, teacher-forced on the common prefix — is near a tie: its top-2 gap there, among the tokens a fresh matcher
   replaying the prefix allows (unmasked for free runs), is below the threshold. The threshold is `CONFIDENT_GAP`
-  raised to the largest first-divergence gap of the free pair, which speculation without a grammar (lossless since
-  M0.4) shows to be kernel noise: calibrated by the free runs, then applied to the constrained ones.
+  raised to the largest first-divergence gap of the free pair and of the calibration runs (natural-text prompts
+  continued unconstrained, as M0.4's spec-vs-plain runs), which speculation without a grammar (lossless since M0.4)
+  shows to be kernel noise: calibrated by the unconstrained runs, then applied to the constrained ones. Each
+  divergence of the logprob runs also records both engines' own (masked) logprobs of the two tokens.
 - **No errors.** No constrained request ends with `error` (a token its matcher refuses).
 - **Agreement.** How often the generated token is the reference's masked argmax — overall and where its masked
   top-2 gap is at least the threshold — for the speculating engine, at least the plain engine's minus the L2 slack or
@@ -44,6 +46,7 @@ SUBSETS = ("Glaiveai2K", "Github_easy")
 SYSTEM = "You need to generate a JSON object that matches the schema below."
 MAX_CHARS = 4000                # small schemas: compiled in milliseconds anywhere
 KL_EPS = 1e-9
+CALIBRATION = 128               # tokens each calibration prompt is continued by
 
 
 @dataclasses.dataclass
@@ -69,7 +72,7 @@ def schemas(jsb: pathlib.Path, n: int) -> list[tuple[str, dict]]:
 
 
 def generate(engine, prompts: list[list[int]], constraints: list[dict | None], max_tokens: int,
-             k: int | None) -> Run:
+             k: int | None, ignore_eos: bool = False) -> Run:
     """Every prompt, greedy; a constraint the processor's vetting queue cannot take yet waits for the engine."""
     rids = {}
     tokens, finish = [[] for _ in prompts], [""] * len(prompts)
@@ -88,7 +91,8 @@ def generate(engine, prompts: list[list[int]], constraints: list[dict | None], m
                 finish[i] = d.finish_reason
 
     for i, (p, c) in enumerate(zip(prompts, constraints, strict=True)):
-        params = SamplingParams(temperature=0.0, max_tokens=max_tokens, logprobs=k, ext={KEY: c} if c else {})
+        params = SamplingParams(temperature=0.0, max_tokens=max_tokens, logprobs=k, ext={KEY: c} if c else {},
+                                ignore_eos=ignore_eos)
         while True:
             try:
                 rids[engine.add(p, params)] = i
@@ -144,12 +148,17 @@ def _top(ids: list[int], lps: list[float], words: np.ndarray | None) -> tuple[in
     return allowed[0][0], allowed[0][1] - second
 
 
-def judge(build, tokenizer, render, jsb: pathlib.Path, n: int = 64, max_tokens: int = 512, k: int = 20) -> dict:
+def judge(build, tokenizer, render, jsb: pathlib.Path, n: int = 64, max_tokens: int = 512, k: int = 20,
+          calibration: list[list[int]] = ()) -> dict:
     """`build(name)` returns the "plain" or "spec" engine (the grammar processor selected) or the "reference" (none);
-    `render(messages)` the chat prompt's ids (thinking off); `tokenizer` the model's, for the fresh matchers."""
+    `render(messages)` the chat prompt's ids (thinking off); `tokenizer` the model's, for the fresh matchers;
+    `calibration`: natural-text prompts the engines also continue unconstrained (CALIBRATION tokens, `ignore_eos`),
+    whose first divergences calibrate the near-tie threshold with the free pair's (§5: M0.4's unconstrained
+    spec-vs-plain runs)."""
     items = schemas(jsb, n)
     prompts = [render([{"role": "system", "content": SYSTEM}, {"role": "user", "content": json.dumps(s)}])
                for _, s in items]
+    inputs = {"free": prompts, "grammar": prompts, "calibration": list(calibration)}
     constraints = [{"type": "json_schema", "schema": s, "strict": True} for _, s in items]
     runs: dict[str, Run] = {}
     counters = {}
@@ -161,53 +170,70 @@ def judge(build, tokenizer, render, jsb: pathlib.Path, n: int = 64, max_tokens: 
             runs[f"{name}/{mode}/lp"] = generate(engine, prompts, cs, max_tokens, k)
         counters[name] = {key: v - before.get(key, 0) for key, v in engine.stats().items()
                           if key.startswith("spec_") or key.endswith("drafts_refused")}
+        if calibration:
+            runs[f"{name}/calibration"] = generate(engine, inputs["calibration"], [None] * len(calibration),
+                                                   CALIBRATION, None, ignore_eos=True)
         engine.close()
         gc.collect()
 
     # Teacher-forced reference rows for every (prompt, output) of the runs.
-    seqs = sorted({(i, tuple(r.tokens[i])) for r in runs.values() for i in range(n)})
+    source = {"free": "json", "grammar": "json", "calibration": "calibration"}
+    seqs = sorted({(source[name.split("/")[1]], i, tuple(r.tokens[i])) for name, r in runs.items()
+                   for i in range(len(r.tokens))})
+    texts = {"json": prompts, "calibration": inputs["calibration"]}
     reference = build("reference")
-    rec = score(reference, PromptSet("constrained", "", [Prompt(str(j), "json", prompts[i] + list(out))
-                                                         for j, (i, out) in enumerate(seqs)]), k)
+    rec = score(reference, PromptSet("constrained", "", [Prompt(str(j), src, texts[src][i] + list(out))
+                                                         for j, (src, i, out) in enumerate(seqs)]), k)
     reference.close()
     gc.collect()
     rows = {}
-    for j, (i, out) in enumerate(seqs):
+    for j, (src, i, out) in enumerate(seqs):
         end = int(rec.offsets[j + 1])
-        rows[i, out] = (rec.topk_ids[end - len(out): end].tolist(), rec.topk_lp[end - len(out): end].tolist())
+        rows[src, i, out] = (rec.topk_ids[end - len(out): end].tolist(), rec.topk_lp[end - len(out): end].tolist())
     masks = Masks(tokenizer, vocab, stops)
 
     def masked(mode: str, i: int, out: tuple[int, ...]) -> list[tuple[int | None, float | None]]:
         words = masks.along(constraints[i], list(out)) if mode == "grammar" else [None] * len(out)
-        ids, lps = rows[i, out]
-        return [_top(a, b, w) if (w is not None or mode == "free") else (None, None)
+        ids, lps = rows[source[mode], i, out]
+        return [_top(a, b, w) if (w is not None or mode != "grammar") else (None, None)
                 for a, b, w in zip(ids, lps, words, strict=True)]
+
+    def own(run: Run, i: int, d: int, tokens: tuple[int | None, int | None]) -> dict | None:
+        """An engine's own (masked) logprobs of both divergent tokens (None: outside its top-k)."""
+        if run.logprobs is None or d >= len(run.logprobs[i][0]):
+            return None
+        ids, lps = run.logprobs[i][0][d], run.logprobs[i][1][d]
+        return {str(t): (lps[ids.index(t)] if t in ids else None) for t in tokens if t is not None}
 
     report: dict = {"prompts": n, "max_tokens": max_tokens, "k": k, "counters": counters,
                     "schemas": [sid for sid, _ in items]}
     gaps = {}
-    for mode in ("free", "grammar"):
-        for path in ("", "/lp"):
-            a, b = runs[f"plain/{mode}{path}"], runs[f"spec/{mode}{path}"]
-            diverged = []
-            for i in range(n):
-                d = _first_diff(a.tokens[i], b.tokens[i])
-                if d is not None:
-                    top, gap = masked(mode, i, tuple(a.tokens[i]))[d] if d < len(a.tokens[i]) else \
-                        masked(mode, i, tuple(b.tokens[i]))[d]
-                    diverged.append({"prompt": i, "at": d, "gap": gap, "reference_top": top,
-                                     "plain": a.tokens[i][d] if d < len(a.tokens[i]) else None,
-                                     "spec": b.tokens[i][d] if d < len(b.tokens[i]) else None})
-            gaps[mode + path] = diverged
-            report[f"{mode}{path}"] = {
-                "identical": n - len(diverged), "diverged": diverged,
-                "finish_mismatch_identical": sum(a.finish[i] != b.finish[i] for i in range(n)
-                                                 if _first_diff(a.tokens[i], b.tokens[i]) is None),
-                "errors": {"plain": a.finish.count("error"), "spec": b.finish.count("error")},
-                "finish": {"plain": {f: a.finish.count(f) for f in set(a.finish)},
-                           "spec": {f: b.finish.count(f) for f in set(b.finish)}},
-                "tokens": {"plain": sum(map(len, a.tokens)), "spec": sum(map(len, b.tokens))}}
-    free_gaps = [g["gap"] for path in ("free", "free/lp") for g in gaps[path] if g["gap"] is not None]
+    for mode, path in (("free", ""), ("free", "/lp"), ("grammar", ""), ("grammar", "/lp"), ("calibration", "")):
+        if f"plain/{mode}{path}" not in runs:
+            continue
+        a, b = runs[f"plain/{mode}{path}"], runs[f"spec/{mode}{path}"]
+        diverged = []
+        for i in range(len(a.tokens)):
+            d = _first_diff(a.tokens[i], b.tokens[i])
+            if d is not None:
+                top, gap = masked(mode, i, tuple(a.tokens[i]))[d] if d < len(a.tokens[i]) else \
+                    masked(mode, i, tuple(b.tokens[i]))[d]
+                pair = (a.tokens[i][d] if d < len(a.tokens[i]) else None,
+                        b.tokens[i][d] if d < len(b.tokens[i]) else None)
+                mine = {"own": {"plain": own(a, i, d, pair), "spec": own(b, i, d, pair)}} if a.logprobs else {}
+                diverged.append({"prompt": i, "at": d, "gap": gap, "reference_top": top, "plain": pair[0],
+                                 "spec": pair[1], **mine})
+        gaps[mode + path] = diverged
+        report[f"{mode}{path}"] = {
+            "identical": len(a.tokens) - len(diverged), "diverged": diverged,
+            "finish_mismatch_identical": sum(a.finish[i] != b.finish[i] for i in range(len(a.tokens))
+                                             if _first_diff(a.tokens[i], b.tokens[i]) is None),
+            "errors": {"plain": a.finish.count("error"), "spec": b.finish.count("error")},
+            "finish": {"plain": {f: a.finish.count(f) for f in set(a.finish)},
+                       "spec": {f: b.finish.count(f) for f in set(b.finish)}},
+            "tokens": {"plain": sum(map(len, a.tokens)), "spec": sum(map(len, b.tokens))}}
+    free_gaps = [g["gap"] for path in ("free", "free/lp", "calibration") for g in gaps.get(path, [])
+                 if g["gap"] is not None]
     threshold = max([CONFIDENT_GAP, *free_gaps])
     report["threshold"] = {"confident_gap": CONFIDENT_GAP, "free_first_divergence_gaps": sorted(free_gaps),
                            "used": threshold}
@@ -280,7 +306,7 @@ def judge(build, tokenizer, render, jsb: pathlib.Path, n: int = 64, max_tokens: 
 def table(report: dict) -> str:
     lines = [f"threshold {report['threshold']['used']:.3g} nats (free first-divergence gaps "
              f"{[round(g, 3) for g in report['threshold']['free_first_divergence_gaps']]})"]
-    for path in ("free", "free/lp", "grammar", "grammar/lp"):
+    for path in [p for p in ("free", "free/lp", "grammar", "grammar/lp", "calibration") if p in report]:
         r = report[path]
         lines.append(f"{path:11s} identical {r['identical']}/{report['prompts']}  errors {r['errors']}  first "
                      f"divergence gaps {[None if g['gap'] is None else round(g['gap'], 3) for g in r['diverged']]}")
