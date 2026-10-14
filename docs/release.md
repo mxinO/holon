@@ -1186,3 +1186,6 @@ came in with the step-3 record. Outside the files `main` changed, the tree equal
   not reserved (no wheels in v0).
 - **Cold start (escalated lead decision 1, §13.3): accepted.** FlashInfer's CuTe DSL norms compile in memory on each
   start (≈ 1 s). Acceptance 4 reads "compiles nothing but Triton and FlashInfer's CuTe DSL norms".
+- **Distribution (owner, 2026-10-14): v0 is a GitHub release only.** It is a tagged source release with release notes
+  and the Dockerfile, with no PyPI package and no pushed image. A full pip package with prebuilt wheels is v1 or v2
+  work (plan §10).
