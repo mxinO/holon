@@ -3,8 +3,9 @@
 Status: **revision 5, reviewed clean** (2026-10-13). Revs 1–5 were reviewed by a panel of three; every finding is
 resolved in §9. **Step 1 built** (2026-10-13): the core seams of §3 with the toy processor. **Step 2 built**
 (2026-10-13): the `grammar.xgrammar` plugin, pinned at xgrammar 0.2.8. **Step 3 built** (2026-10-13):
-`frontends/http`, the format parsers and constraint builders, the three dialects. Their records, deviations and §6's
-measurements are in §11.
+`frontends/http`, the format parsers and constraint builders, the three dialects. **Step 4 measured** (2026-10-14):
+D2's decision is A′, and the forward/sample split is deferred to M0.7. **Step 5 evidence** (2026-10-14): §11. Their
+records, deviations and §6's measurements are in §11.
 
 Scope: plan §8, amended (D1; plan §2 / §8 updated with this revision):
 - the core gets general logits-processor seams (§3); "core diff target zero" becomes "only the seams of §3, each
@@ -203,6 +204,10 @@ unread `max_depth` is removed (the gate comes from `open`).
   - **Predictions:** host time per constrained step 1–2 ms (commit, schedule, fill, launch); single stream 8B (6.5 ms
     step) **1.15–1.30×** — likely to trigger the split; 27B + MTP (a verify step ≈ 27 ms for 2.56 tokens) 1.04–1.07×.
     Mixed: A gives constrained rows ≈ 0.5× of free; A′ costs free rows the same 1.04–1.30× as single stream.
+  - **Decision (step 4, measured on the RTX 5080, §11): A′, the split deferred to M0.7.** Free rows under A′ slow by
+    1.050× (8B) and 1.016× (27B + MTP), under 1.15×; the single-stream penalty with grammar.xgrammar's fill and apply
+    added is 1.061× (8B) and 1.026× (27B + MTP), under 1.10× on both. Host time per constrained step was 0.4–0.8 ms,
+    not 1–2 ms, so both penalties came in under the predictions (8B 1.15–1.30×, 27B 1.04–1.07×).
   - The split's seam, sketched so step 6 is not designed while built: `launch_forward(N)` (prepare → trunk → head
     into a static logits buffer, its own graph) → commit N − 1 → `fill` → `launch_sample(N)` (apply → sampler or
     verifier → store → rewind → drafter, its own graph); only steps with mask rows split, `fill`'s contract is
@@ -831,3 +836,266 @@ For step 7 (deferred, both core):
 For step 5 (measure and record): the largest gap between events per stream; frontend CPU per token at the agent
 concurrency; TTFT split per dialect into render + constraint build, cold vetting + compile, and warm; and echo the
 effective `strict: false` in the Responses API's `tools`.
+
+### Step 4 (2026-10-14): D2's measurement
+
+`bench/gate_cost.py` on the RTX 5080 (`evidence/gate_cost_qwen3-8b-q4km_rtx-5080_2026-10-13.json`,
+`evidence/gate_cost_qwen3.8-27b-iq3s-mtp_rtx-5080_2026-10-13.json`; commit 8c59010). Same greedy requests (natural
+text cut from `judge/prompts/v1.jsonl` / `v1-qwen3_5.jsonl`, 256 tokens in, 256 out, `ignore_eos`) on fresh engines
+in interleaved rounds (none / A / A′; four rounds, the first discarded): `none` selects no processor; A and A′
+select the toy (`testing.toy_mask`) with a no-op `apply`, opening the constrained requests with a marker that never
+occurs (all-allowed masks). Every engine gets the same pinned `state_memory`. Engine-thread CPU time per phase under
+blocking-sync CUDA waits. Workloads: single stream (four requests, one at a time) and mixed (one constrained and three
+free, at once; two batches). Then grammar.xgrammar's `fill` per constrained step, on the same engine flags over a
+JSON-schema request (a person with an address: 4 requests), and its Triton `apply` per call (CUDA-graph replay) are
+measured and added.
+
+| | Qwen3-8B Q4_K_M | Qwen3.8-27B UD-IQ3_S + MTP (k 3 at batch 1, 2 above) |
+|---|---|---|
+| single stream TPOT, none / A / A′ (ms; spread over rounds) | 6.511 / 6.874 / 6.875 (≤ 0.03) | 9.486 / 9.717 / 9.712 (≤ 0.006) |
+| single-stream penalty A′, toy (per round) | 1.056 (1.048–1.056) | 1.024 (1.023–1.026) |
+| xgrammar fill per constrained step: mean / p50 / max (µs) | 36.6 / 23.3 / 1881 (1 column) | 73.8 / 68.2 / 896 (3.92 columns) |
+| Triton apply per call (µs) | 1.43 (1 row) | 1.74 (1 row), 3.14 (4 rows) |
+| **single-stream penalty A′ with fill and apply** (rule: split if > 1.10×) | **1.061** | **1.026** |
+| mixed, free rows' TPOT none / A / A′ (ms) | 7.333 / 7.281 / 7.696 | 14.239 / 14.233 / 14.466 |
+| **free rows' slowdown A / A′** (rule: A if A′ > 1.15×) | 0.993 / **1.050** | 1.000 / **1.016** |
+| constrained row vs free rows, while the free rows run, A / A′ | 2.00× / 1.00× | 1.86× / 0.91× |
+| host CPU per decode step, none → A′: schedule, fill, launch, commit; whole step (µs) | 32, 0, 279, 28; 371 → 34, 4, 307, 29; 407 | 40, 0, 603, 35; 717 → 43, 8, 650, 49; 790 |
+| wall per step, none → A′ (µs) | 6506 → 6871 | 27329 → 27980 (2.83 tokens per verify step) |
+| verify rows by k (per round) | — | k 3: 389, k 2: 754 |
+| verify steps overlapped, none / A′ | — | 571 / 32 of 571 |
+
+Decision (D2): **A′** (free rows 1.050× / 1.016× < 1.15×), and **the split is deferred to M0.7** (1.061× / 1.026×
+≤ 1.10× on both models). `Engine.commit_for_constrained` stays True. Against the predictions: host time per
+constrained step is 0.4 ms (8B) and 0.8 ms (27B), not 1–2 ms, so the 8B's penalty (1.061×) is under its predicted
+1.15–1.30× and the 27B's (1.026×) under 1.04–1.07×. Under A a constrained row decodes at half the free rows' rate,
+as predicted.
+
+Preconditions: under A′ every sequence's tokens and the verify rows by (k, accepted) equal the run without a
+processor, in every round. Under A they do not, deterministically: one sequence of the 8B's second mixed batch (the
+constrained one) and one free sequence of the 27B's first mixed batch differ, and the 27B's verify rows change (632
+vs 571 verify steps). A changes which rows share a step, and the GGUF kernels are not batch-invariant: on the 5080,
+the same 8B prompt gives three different greedy continuations alone, in a batch of two and in a batch of four (digests
+f70006ec…, c6920275…, ff3a4ca8…; one-off check through `gate_cost`'s helpers). A's timings are therefore compared on
+equal lengths (`ignore_eos`) rather than identical tokens; A′'s, which decide, are on identical tokens.
+
+What selecting a processor costs a deployment (§6; `evidence/gate_sizing_qwen3.8-27b-iq3s-mtp_rtx-5080_2026-10-13.json`,
+three interleaved rounds, each engine sized in a fresh process): the 27B + MTP at `--max-model-len 32768` has 37,808
+KV tokens without a processor and **35,616 with one (−5.8%)**: its state budget is 81 MB smaller (2.784 → 2.703 GB),
+and KV is the small remainder after the recurrent state; graphs 27 → 54, capture 2.9 → 5.7 s. The Qwen3-8B Q4_K_M
+(`evidence/gate_sizing_qwen3-8b-q4km_rtx-5080_2026-10-13.json`, `--max-seqs 16 --max-model-len 32768`) loses 0.13%
+(61,168 → 61,088 KV tokens); graphs 15 → 30, capture 0.6 → 1.0 s. Step 1 measured ≤ 1% on Qwen3-0.6B; the 27B's
+5.8% is a shortfall against that expectation. Traced (one engine per process, the sizing's components): the worst
+step's peak (505 MiB) and the graph pool's growth (206 MiB) are the same with and without the processor, and so is
+what torch allocates; the free memory the sizing reads is 86 MiB lower with it, outside torch's allocator — most
+likely the extra graphs' instantiated executables (the profile captures the largest bucket's graphs, twice as many
+with masked variants; a 27B graph has thousands of kernel nodes; not confirmed with a driver-level count). Capturing every graph then
+takes a further 518 vs 364 MiB outside the pools, which the 10% headroom absorbs (576 MiB stay free). Fewer masked
+graphs (e.g. only the widths and buckets constrained steps use) would win it back; not done (a capture-set change
+for the panel).
+
+Found on the way: an engine built after another in the same process sizes its pools from less free memory — a
+closed engine's reference cycles hold its weights until the collector runs (≈ 2 GB less free for the 27B + MTP's
+second engine without a collection), and with the collector run after each close, sizing the 27B in-process still
+came up short (a 2.26 GiB budget where one 32k-token request needs 2.43; not traced further). The first `gate_cost` record's `processor_selected` (27B:
+39,584 vs 6,432 KV tokens) is an artefact of that, superseded by the sizing record above, where each engine has its
+own process. D2's rounds were unaffected (every engine got the same pinned pool,
+and the workloads need ≤ 2k tokens).
+
+### Step 5 (2026-10-14): evidence
+
+**Core change: slot objects' own counters** (the architecture reviewer's seam, step-2 deferral): `Engine.stats()` adds
+an optional `stats() -> dict[str, int]` of every slot object — sampler, verifier, drafter, draft policy, logits
+processor — under `<plugin name>.<key>` (`engine.py` +6 lines, `api/decoding.py` documents it). Toy proof: the toy
+processor reports `rows_filled`, and `test_logits_processor.py`'s matrix asserts `testing.toy_mask.rows_filled` equals
+the rows it filled (fails without the seam). grammar.xgrammar reports `drafts_refused`, read by
+`test_grammar.py`'s speculation cases through the engine's stats. **Deviation:** the counter is
+`grammar.xgrammar.drafts_refused`, not D3's `spec_drafts_refused` (namespaced by plugin, as the seam reports every
+slot object); the refused-draft share is `grammar.xgrammar.drafts_refused / spec_drafted`. Core: 3868 code lines.
+
+**L0-mask on sm_89 and sm_120** (RTX 4090, RTX 5080, at ec9e90d): `pytest plugins/tests/test_grammar.py -k apply`
+3 passed on each; `compute-sanitizer --tool memcheck python -m tests.memcheck_grammar_apply` (152k, 248k and 1000-token
+vocabularies, padding rows): 0 errors on each. With step 2's sm_86 run, L0-mask holds on the three classes.
+
+**Conformance (D9), the precompile on an idle host** (`bench/conformance.py precompile`, RTX 4090 node's CPU,
+`evidence/conformance_precompile_rtx-4090_2026-10-14.json`): the filtered test split is 2,668 schemas (the eight
+subsets minus Github_trivial / ultra; 3 of the 13 unsatisfiable Glaive schemas are in the test split). Each schema
+goes through the server's own checks — D9's reject list, then the vetting worker with the plugin's defaults (two
+workers, 10 s, 256 MB budget, 64 MB size cap) — with its compile time recorded:
+
+| | 152k (Qwen3-8B) | 248k (Qwen3.8-27B) |
+|---|---|---|
+| accepted under strict (D9's predicate; predicted 64–67%) | 1634 (61.2%) | 1634 (61.2%) |
+| refused by vetting: compile timeouts (10 s) / xgrammar errors | 11 / 6 | 50 / 6 |
+| **declared coverage** (compiled / split) | **1617 (60.6%)** | **1578 (59.1%)** |
+| compile time of the compiled: p50 / p90 / p99 / max (ms) | 18 / 69 / 7325 / 8615 | 35 / 66 / 6158 / 9470 |
+| compiled size p50 / p99 / max (MB); peak growth max (MB) | 0.2 / 17.6 / 27.0; 19.4 | 0.2 / 13.7 / 21.5; 10.9 |
+
+Per subset (152k): Github_easy 406/577, Github_medium 305/586, Github_hard 121/368, Glaiveai2K 451/510,
+JsonSchemaStore 34/148, Kubernetes 184/320, Snowplow 98/121, WashingtonPost 18/38. Most rejections: `oneOf` 243,
+typed keywords without `type` 131 (+97 for `format`), embedded schema resources 79, loose patterns 67, `date-time` 62.
+**Shortfall:** strict acceptance is 61.2%, under the predicted 64–67% (the reject list grew in step 2: `time`,
+`email`, `ipv6`, the ECMA pattern rules, embedded resources), and the 248k tokenizer's timeouts cost 1.5 points more.
+
+**The 27B + MTP, 500 sampled schemas** (RTX 4090, `holon serve` with grammar.xgrammar and MTP as M0.4, `--max-seqs 4
+--max-model-len 32768`; `evidence/conformance_qwen3.8-27b-iq3s-mtp-500_rtx-4090_2026-10-14.json`; core and plugins
+as 8c59010). Passes: cold (the server's first sight of each schema, `max_tokens` 1, concurrency 2), warm (the same
+again), greedy (`max_tokens` 2048, concurrency 4), free (no `response_format`):
+- accepted 301, rejected 192 (400: the reject list) and 7 (503: compile timeouts, still refused after two retries);
+- **greedy: valid 293 of 293 judged (100%), 0 request-time errors**, 8 truncated;
+- **refused-draft share 1.11%** (436 of 39,328 drafts; predicted ≤ 15%); every verify step graphed, none overlapped
+  (A′);
+- **truncated share 2.66% vs 0.33% unconstrained on the same 301 schemas: +2.33 points — over the 2-point gate
+  (shortfall).** The 8 truncations: 2 whitespace runaways right after `{` (sp_218, sp_70 — the frontend strips a
+  text run's trailing whitespace, so they show as 2048 tokens with one character; the harness now counts them from
+  that), 3 number runaways (`"width": 0.0000…` for 2048 tokens: a JSON number has no length bound), 1 repetition
+  inside a string, 2 long but legitimate objects (also long unconstrained). Without the whitespace runaways the gap
+  is 1.66 points. S2-1's condition for a whitespace cap ("returns only if they appear") is met; the cap's cost,
+  measured (`evidence/whitespace_cap_cost_rtx-a5000_2026-10-14.json`): at 16, compiled grammars 3.4 / 6.7 MB (152k /
+  248k) instead of 0.2, mask fill p50 41–63 µs instead of 4–16, compile +3–9 ms; at 32, 6.8 / 13.2 MB. Not
+  applied: a decision for the panel (it trades every constrained step's fill time and the cache's capacity for two
+  runaways in 301), and number runaways need a bound of their own.
+- TTFT, cold / warm: p50 240 / 198 ms, p99 13,973 / 1,960 ms (the cold p99 is vetting and compiling: up to the 10 s
+  timeout); the largest gap between a greedy stream's events: p50 126 ms, p99 3.5 s, max 34 s — while other requests'
+  long prompts (up to 30k tokens) prefill in 2048-token chunks, a running stream gets no tokens (FCFS, no mixed
+  prefill/decode steps); keepalives are SSE comments, not counted;
+- frontend CPU per token at concurrency 4: 109 µs (greedy, chat with `response_format`), 74 µs (free).
+
+**The constrained bounded check (§5) on the 27B + MTP** (RTX A5000; `python -m holon_judge constrained`, new:
+`judge/holon_judge/constrained.py`; `evidence/constrained_bounded_qwen3.8-27b-iq3s-mtp_rtx-a5000_2026-10-14.json`).
+64 JSON-schema prompts (strict-accepted Glaiveai2K and Github_easy schemas under 4000 characters, alternating, chat
+rendered with thinking off), greedy, no `ignore_eos`, `max_tokens` 512, on a plain and a speculating engine (both
+with grammar.xgrammar), each free and constrained, on the production path and again with logprobs; a reference (the
+plain engine's config eager, depth 0, no prefix cache, one sequence at a time) re-scores every output teacher-forced,
+masked by a fresh matcher replay. Results:
+- constrained: 59 of 64 identical (58 of 64 in the logprob runs), **0 errors**, finish reasons equal wherever the
+  tokens are; the 5–6 first divergences fall at masked reference gaps of **0.006, 0.042, 0.093, 0.100, 0.111, 0.124
+  nats**, and at each both engines' own masked logprobs of the two tokens are within 0.15 nats of each other (a
+  near-tie on both sides, recorded per divergence);
+- masked agreement with the reference: plain 99.712% ± 0.118%, spec 99.692% ± 0.086%; at confident positions 100%
+  and 100% (3234 / 3313 positions);
+- KL(plain ‖ spec) over the positions before divergence: constrained p50 6.4e-7, p99 2.8e-3; free p50 3.6e-7, p99
+  2.6e-3 (budget 2×): within;
+- refused drafts 207 of 12,161 (1.7%).
+- **Verdict PASS, borderline:** the threshold is `CONFIDENT_GAP` (0.1) raised to the largest unconstrained
+  first-divergence gap — the free pair's (≤ 0.106) and 64 natural-text calibration prompts continued 128 tokens
+  unconstrained (§5: M0.4's spec-vs-plain runs) — and the calibration's largest gaps (7.93 and 1.13 nats) are both
+  in post-`<|im_end|>` text (`ignore_eos`): there the decode path (plain) and the prefill path (the reference's
+  teacher forcing, the verifier's rows) disagree, every plain configuration generating the same tokens (prefix
+  cache on / off, depth 0 / 1, graphs / eager, processor selected or not: checked one-off). Without those two, the
+  unconstrained gaps reach 0.229 and the constrained ones (≤ 0.124) stay under them; against the uncalibrated 0.1,
+  two constrained divergences (0.111, 0.124) would fail. Flagged for the panel (the threshold rule's calibration
+  should stop at the stop token).
+- The plants: `mask-column-shift` and `no-rollback-after-probe` FAIL it (63 of 64 constrained speculating requests
+  end with `error`, first divergences at masked gaps up to 15 nats, KL p99 10.4 / 0.16), as §5 requires
+  (`evidence/constrained_bounded_plant-*_rtx-a5000_2026-10-14.json`).
+- Found on the way: the first run (a reference that scored all sequences in one batch) failed with gaps 0.14–0.39 —
+  the GGUF kernels are not batch-invariant, so the reference's rows depended on which other sequences a run asked it
+  to score (the same divergence scored 0.045 in one run and 0.175 in another); the reference now scores one
+  sequence at a time. And the KL needed `p = 0` terms dropped (`compare.kl_topk`: a masked distribution's −∞
+  logprobs gave NaN; the bucketed-KL test gained a masked case that fails without it).
+
+**Round trips per dialect** (`bench/round_trips.py`, new; RTX 5080; `evidence/round_trips_qwen3-8b-q4km_rtx-5080_…`,
+`…_qwen3.8-27b-iq3s-mtp_rtx-5080_…`, at 425e167): OpenAI chat, Anthropic Messages and OpenAI Responses × tool choice
+named / required / auto (a strict `get_weather` beside a second tool), the call, its result, the answer; each
+request sent cold (streamed), then streamed and whole on the cached prefix. On **both models all 9 calls are
+`get_weather` with schema-valid arguments, all 9 answers use the result, and every streamed answer reassembles to the
+whole one** (the parse does not depend on how the text arrives). Cold requests generated the same as warm ones except
+two 27B answers (Anthropic and Responses after a named call: the first request without a cached prefix chose other
+words — not a parse difference). TTFT, cold (a new constraint: vetting and compiling) / warm: 8B 82–169 / 11–16 ms,
+27B 146–414 / 52–80 ms; the frontend's render and constraint build (`pipeline.Chat`, timed in-process): 0.39 ms (8B)
+and 0.62 ms (27B) per request, the same in each dialect. The 27B's counters: 0 refused drafts of 3015 (`auto` with a
+strict tool is constrained; its JSON was drafted right).
+
+**The Claude Code session** (`evidence/claude_code_session_rtx-5080_2026-10-14.json`): `holon serve` the 27B
+(UD-IQ3_S + MTP + grammar.xgrammar, §11's flags, `--host 0.0.0.0`) on an RTX 5080 node of the consumer cluster;
+Claude Code 2.1.296 (`claude -p … --allowedTools Read,Write,Edit,Bash,Glob,Grep --output-format json`) on the
+development host, reaching it through `bench/capture_proxy.py` (new: records each request's shape, never its text,
+header values redacted but the API version and beta flags). Task, in a scratch directory: read `inventory.csv`,
+compute the total value with a bash command, write `total.txt`, append a line to `report.md` with the Edit tool.
+**Completed:** 6 turns in 21 s, `total.txt` = `6.00`, `report.md` ends with `Total value: 6.00`, result `done`.
+Four `/v1/messages?beta=true` requests (streamed, `max_tokens` 32000, `thinking: {type: adaptive, display:
+omitted}`, `output_config: {effort: high}`, `context_management`, `metadata.user_id` a JSON string), 22 tools each
+with `$schema` and `additionalProperties: false` and no `cache_control`; three system blocks (the billing header,
+then two with `cache_control`); parallel `tool_use` in one turn; no `count_tokens` and no side calls to a small model
+(with nonessential traffic off); **`billing_headers_dropped` 4**, prefix tokens saved 52,544. R §5.4's unverified
+items are settled by this capture.
+- **Found and fixed (frontends.http):** the first attempt failed at once with a 400 — Claude Code sends `role:
+  "system"` messages inside `messages` (its per-turn reminders, beta `mid-conversation-system`), which the step-3
+  router refused. Now a system message before the first turn joins the system prompt and a later one becomes a user
+  turn (the Qwen templates take one leading system message; folding later ones into it would change every turn's
+  prefix — no prefix-cache hits, vLLM's documented trade-off); `test_anthropic_request_as_a_conversation` covers both
+  (fails before). Recorded as a deviation from step 3's Anthropic subset.
+
+**The 8B, the full filtered split** (RTX 5080, `holon serve` with grammar.xgrammar, `--max-seqs 16 --max-model-len
+32768`; `evidence/conformance_qwen3-8b-q4km-full_rtx-5080_2026-10-14.json`; core and plugins as 8c59010). Passes:
+cold and warm (`max_tokens` 1, concurrency 2), greedy, free, and sampled at T = 1 with seeds 0 and 1 (`max_tokens`
+2048, concurrency 16):
+- cold: accepted 1625 of 2668 (60.9%), rejected 1040 (400: the reject list) and 3 (503: compile timeouts); at
+  concurrency 16, 9–10 more are 503 "compiles are queued" (the helper backlog bound: the compiled-grammar cache does
+  not hold the whole split, so warm schemas recompile) — a client retrying later gets them;
+- **greedy: 1582 valid of 1583 judged, 1 invalid, 0 request-time errors.** The invalid one is a **reject-list hole,
+  found and fixed:** JsonSchemaStore's Ansible `vars` schema has `patternProperties` keyed by a pattern with a
+  negative lookahead, which xgrammar ignores (it warns), so a key the lookahead forbids (`hosts`) was admitted. Strict
+  requests now refuse lookarounds and backreferences in patterns (b77d45c; the oracle's hole list gained three cases
+  that fail before; of the split, only `vars` is newly refused). Under the fixed list: **1582 of 1582 (100%)**;
+- **sampled (T = 1): 1587 of 1587 (seed 0) and 1584 of 1584 (seed 1) valid, 0 errors**;
+- truncated: greedy 1.98% vs 3.72% unconstrained on the same 1615 schemas (−1.73 points; sampled −1.98 / −1.86):
+  **within the gate**. Of the 33 greedy truncations: 2 whitespace runaways (o78734, o82694), about 20 digit or
+  base64-like runaways inside unbounded numbers and strings (`0.0000…`, `1234567890…`), and long objects that the
+  unconstrained run also truncates;
+- TTFT cold / warm p50 119 / 76 ms, p99 9.2 / 4.7 s; largest gap between a greedy stream's events p50 90 ms, p99 3.7
+  s, max 36 s (a 30k-token prompt prefilling: FCFS, no mixed steps); frontend CPU 101 µs per token (greedy, 16
+  streams), 66 µs (free).
+
+**Frontend measurements at the agent concurrency** (`evidence/bench_m05-8b-agent-frontend_rtx-5080_2026-10-13.json`:
+`bench/run.py` on the agent trace, 4 streams, two rounds; `holon_http_chat`, new — the chat endpoint with six tools
+offered, so the reasoning and hermes parsers read every stream — beside `holon_http`, completions): the frontend
+process's CPU is **231 µs per generated token through chat, 209 µs through completions** (TPOT p50 7.0 / 7.4 ms; the
+frontend runs in its own process); the largest gap between a chat stream's events: p50 48 ms, p99 1.04 s, max 1.35
+s. The TTFT split per dialect: render and constraint build 0.4 ms (8B) / 0.6 ms (27B), the same in every dialect;
+cold constraint (vetting and compiling) 82–414 ms; warm 11–80 ms (round trips above); over the conformance split, cold
+vs warm p50 119 vs 76 ms (8B) and 240 vs 198 ms (27B).
+
+**Step-7 items done here** (cheap, both core): the `Parser` protocol and `FrontendBundle.reasoning_parser()` /
+`tool_parser()` are deleted (dead API: the frontend owns the formats; the three Qwen bundles and the test fake lose
+their stubs; design §7.8 updated); `FrontendPlugin.serve(…, options)` gets the deployment's
+`EngineConfig.plugin_options`, and `frontends.http` reads `http.drop_billing_header` (default true; `false`, `0`,
+`no`, `off` keep the block). No test covers the option's parsing (a one-line read; `build_app`'s flag is tested).
+
+New tooling (bench and judge, no core): `bench/gate_cost.py` (D2), `bench/conformance.py` (D9: precompile, passes,
+report), `bench/round_trips.py`, `bench/capture_proxy.py`, `bench/backends/holon_http_chat.py` (with the HTTP
+backends' per-stream event gaps and the frontend process's CPU time), `holon_judge constrained`. Full suite at
+425e167 on the A5000: 1021 passed, 55 skipped; `scripts/ci/run_all.sh`: clean (core 3868 code lines).
+
+Deviations (step 5):
+- `spec_drafts_refused` is `grammar.xgrammar.drafts_refused` (the general seam namespaces by plugin).
+- The constrained bounded check calibrates with natural-text runs as well as the free pair, and its reference scores
+  one sequence at a time; it ran on 64 Glaiveai2K / Github_easy schemas under 4000 characters (dev-host rule: no
+  heavy JSONSchemaBench compiles there).
+- The conformance runs' cold pass is the server-side precompile (each schema's first request, `max_tokens` 1,
+  concurrency 2) and the precompile pass proper ran offline through the same checks and workers; the runs were made
+  at fbced8f (core and plugins as 8c59010), before the lookaround fix, whose effect (one schema) is applied in the
+  text above, not re-run.
+- The truncation counts: whitespace runaways are counted from tokens without text, since the frontend strips a text
+  run's trailing whitespace (the first harness counted trailing whitespace and missed them).
+- The Claude Code session ran with the server on a consumer-cluster RTX 5080 node and the client on the development
+  host, over the network.
+
+For the panel (and the owner):
+1. **Truncation gate failed on the 27B + MTP** (+2.33 points; the 8B passes at −1.73). S2-1's condition for a
+   whitespace cap is met (2 runaways on the 27B's 301, 2 on the 8B's 1616); a cap of 16 costs 17–30× the compiled size
+   and 3–10× the mask fill (measured above). Number and string runaways (no length bound in JSON) are the larger
+   share and no cap helps them. Decide: the cap (16 or 32), a bound for numbers, or accept the shortfall.
+2. **The constrained bounded check passed only on its calibrated threshold**: its constrained divergences (≤ 0.124
+   nats) are near-ties next to the unconstrained ones (≤ 0.229), but two exceed the uncalibrated 0.1, and the
+   calibration's maximum (7.93) comes from post-EOS text where decode and prefill disagree. The calibration should
+   stop at the stop token (and the decode-vs-prefill gap after `<|im_end|>` belongs to M0.4's numerics).
+3. **The 27B's KV cost of selecting a processor is 5.8%**, from masked graphs' executables (not the pool); fewer
+   masked graphs would recover it.
+4. **Strict acceptance 61.2% vs the predicted 64–67%**; the reject list's growth since rev 5 is why; with the
+   lookaround fix the 8B's greedy conformance is 100% (1 invalid before it).
+5. Engines built one after another in one process size their pools from less free memory (≈ 2 GB less for the
+   27B + MTP's second engine): judges and benches that build several engines per process inherit it (they pin or
+   tolerate it today); `gate_cost` now sizes in fresh processes. Worth tracing in core (what `Engine.close` leaves
+   behind), outside this step's scope.

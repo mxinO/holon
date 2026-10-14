@@ -1,0 +1,1450 @@
+{
+ "prompts": 64,
+ "max_tokens": 512,
+ "k": 20,
+ "counters": {
+  "plain": {
+   "grammar.xgrammar.drafts_refused": 0
+  },
+  "spec": {
+   "spec_verify_steps": 810,
+   "spec_verify_steps_graphed": 405,
+   "spec_verify_steps_overlapped": 706,
+   "spec_drafted": 6022,
+   "spec_rows_k2_accepting_2": 2523,
+   "spec_rows_k2_accepting_0": 286,
+   "spec_rows_k2_accepting_1": 121,
+   "spec_rows_k3_accepting_2": 10,
+   "spec_rows_k3_accepting_3": 40,
+   "spec_rows_k3_accepting_1": 4,
+   "spec_rows_k3_accepting_0": 2,
+   "grammar.xgrammar.drafts_refused": 83
+  }
+ },
+ "schemas": [
+  "analyze_social_media_mentions_df9069d1",
+  "o10014",
+  "book_flight_05dcf13f",
+  "o10318",
+  "book_flight_67564629",
+  "o10876",
+  "book_flight_a15ee43f",
+  "o11173",
+  "book_flight_c933065e",
+  "o11513",
+  "calculate_age_difference_deb6496e",
+  "o11796",
+  "calculate_area_002918bf",
+  "o12086",
+  "calculate_area_00ff2c76",
+  "o12209",
+  "calculate_area_02854ed2",
+  "o12214",
+  "calculate_area_0286984a",
+  "o12215",
+  "calculate_area_033607ff",
+  "o12254",
+  "calculate_area_036f769a",
+  "o12494",
+  "calculate_area_06b6879e",
+  "o12626",
+  "calculate_area_06e98ab6",
+  "o12629",
+  "calculate_area_071c2ca5",
+  "o12647",
+  "calculate_area_0855a944",
+  "o13687",
+  "calculate_area_092f0b0f",
+  "o13977",
+  "calculate_area_0be17036",
+  "o13989",
+  "calculate_area_0f50c849",
+  "o14025",
+  "calculate_area_0ff86767",
+  "o14451",
+  "calculate_area_12486ef8",
+  "o14452",
+  "calculate_area_136fb2ed",
+  "o14464",
+  "calculate_area_146ca1e2",
+  "o14509",
+  "calculate_area_1589ca0a",
+  "o14530",
+  "calculate_area_1966c622",
+  "o15101",
+  "calculate_area_1b27a423",
+  "o15105",
+  "calculate_area_1ca2f5a2",
+  "o16365",
+  "calculate_area_1d0fcef9",
+  "o17139",
+  "calculate_area_202544c4",
+  "o17393",
+  "calculate_area_20a9a6ad",
+  "o17401",
+  "calculate_area_214862f8",
+  "o17543",
+  "calculate_area_219b3906",
+  "o17544"
+ ],
+ "free": {
+  "identical": 60,
+  "diverged": [
+   {
+    "prompt": 1,
+    "at": 9,
+    "gap": 0.17486190795898438,
+    "reference_top": 498,
+    "plain": 498,
+    "spec": 2958
+   },
+   {
+    "prompt": 7,
+    "at": 24,
+    "gap": 0.2593822479248047,
+    "reference_top": 660,
+    "plain": 45305,
+    "spec": 660
+   },
+   {
+    "prompt": 37,
+    "at": 22,
+    "gap": 0.028095245361328125,
+    "reference_top": 12929,
+    "plain": 12929,
+    "spec": 760
+   },
+   {
+    "prompt": 43,
+    "at": 10,
+    "gap": 0.047054290771484375,
+    "reference_top": 3081,
+    "plain": 3081,
+    "spec": 8422
+   }
+  ],
+  "finish_mismatch_identical": 0,
+  "errors": {
+   "plain": 0,
+   "spec": 0
+  },
+  "finish": {
+   "plain": {
+    "stop": 64
+   },
+   "spec": {
+    "stop": 64
+   }
+  },
+  "tokens": {
+   "plain": 3785,
+   "spec": 3784
+  }
+ },
+ "free/lp": {
+  "identical": 60,
+  "diverged": [
+   {
+    "prompt": 1,
+    "at": 9,
+    "gap": 0.17486190795898438,
+    "reference_top": 498,
+    "plain": 498,
+    "spec": 2958
+   },
+   {
+    "prompt": 7,
+    "at": 24,
+    "gap": 0.2593822479248047,
+    "reference_top": 660,
+    "plain": 45305,
+    "spec": 660
+   },
+   {
+    "prompt": 37,
+    "at": 22,
+    "gap": 0.028095245361328125,
+    "reference_top": 12929,
+    "plain": 12929,
+    "spec": 760
+   },
+   {
+    "prompt": 43,
+    "at": 10,
+    "gap": 0.047054290771484375,
+    "reference_top": 3081,
+    "plain": 3081,
+    "spec": 8422
+   }
+  ],
+  "finish_mismatch_identical": 0,
+  "errors": {
+   "plain": 0,
+   "spec": 0
+  },
+  "finish": {
+   "plain": {
+    "stop": 64
+   },
+   "spec": {
+    "stop": 64
+   }
+  },
+  "tokens": {
+   "plain": 3785,
+   "spec": 3784
+  }
+ },
+ "grammar": {
+  "identical": 1,
+  "diverged": [
+   {
+    "prompt": 0,
+    "at": 5,
+    "gap": 14.705234297245624,
+    "reference_top": 9410,
+    "plain": 9410,
+    "spec": null
+   },
+   {
+    "prompt": 1,
+    "at": 4,
+    "gap": 5.655347960069776,
+    "reference_top": 78134,
+    "plain": 78134,
+    "spec": null
+   },
+   {
+    "prompt": 2,
+    "at": 5,
+    "gap": 14.352763082759338,
+    "reference_top": 4028,
+    "plain": 4028,
+    "spec": null
+   },
+   {
+    "prompt": 3,
+    "at": 1,
+    "gap": 0.19415855407714844,
+    "reference_top": 198,
+    "plain": 198,
+    "spec": null
+   },
+   {
+    "prompt": 4,
+    "at": 5,
+    "gap": 14.991393464326393,
+    "reference_top": 4028,
+    "plain": 4028,
+    "spec": null
+   },
+   {
+    "prompt": 5,
+    "at": 1,
+    "gap": 3.201087959110737,
+    "reference_top": 198,
+    "plain": 198,
+    "spec": null
+   },
+   {
+    "prompt": 6,
+    "at": 4,
+    "gap": 8.376022212207317,
+    "reference_top": 56217,
+    "plain": 56217,
+    "spec": null
+   },
+   {
+    "prompt": 7,
+    "at": 4,
+    "gap": 9.401338782161474,
+    "reference_top": 2034,
+    "plain": 2034,
+    "spec": null
+   },
+   {
+    "prompt": 8,
+    "at": 5,
+    "gap": 14.254974383235094,
+    "reference_top": 4028,
+    "plain": 4028,
+    "spec": null
+   },
+   {
+    "prompt": 9,
+    "at": 4,
+    "gap": 11.14492815756239,
+    "reference_top": 68,
+    "plain": 68,
+    "spec": null
+   },
+   {
+    "prompt": 10,
+    "at": 4,
+    "gap": 12.83235559205059,
+    "reference_top": 8716,
+    "plain": 8716,
+    "spec": null
+   },
+   {
+    "prompt": 11,
+    "at": 4,
+    "gap": 10.590557378716767,
+    "reference_top": 3137,
+    "plain": 3137,
+    "spec": null
+   },
+   {
+    "prompt": 12,
+    "at": 0,
+    "gap": 0.16069412231445312,
+    "reference_top": 90,
+    "plain": 90,
+    "spec": 4754
+   },
+   {
+    "prompt": 13,
+    "at": 4,
+    "gap": 8.155898869037628,
+    "reference_top": 1211,
+    "plain": 1211,
+    "spec": null
+   },
+   {
+    "prompt": 14,
+    "at": 2,
+    "gap": 2.934717111289501,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 15,
+    "at": 4,
+    "gap": 11.469854237511754,
+    "reference_top": 3938,
+    "plain": 3938,
+    "spec": null
+   },
+   {
+    "prompt": 16,
+    "at": 5,
+    "gap": 9.92281461044331,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 17,
+    "at": 4,
+    "gap": 3.7419759929180145,
+    "reference_top": 2034,
+    "plain": 2034,
+    "spec": null
+   },
+   {
+    "prompt": 18,
+    "at": 0,
+    "gap": 0.3134040832519531,
+    "reference_top": 90,
+    "plain": 90,
+    "spec": 4754
+   },
+   {
+    "prompt": 19,
+    "at": 4,
+    "gap": 10.365719164721668,
+    "reference_top": 2034,
+    "plain": 2034,
+    "spec": null
+   },
+   {
+    "prompt": 20,
+    "at": 4,
+    "gap": 2.057733431458473,
+    "reference_top": 11882,
+    "plain": 11882,
+    "spec": null
+   },
+   {
+    "prompt": 21,
+    "at": 4,
+    "gap": 1.0045090019702911,
+    "reference_top": 12662,
+    "plain": 12662,
+    "spec": null
+   },
+   {
+    "prompt": 22,
+    "at": 2,
+    "gap": 3.010955862700939,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 23,
+    "at": 67,
+    "gap": 4.647358166053891,
+    "reference_top": 1,
+    "plain": 1,
+    "spec": 220
+   },
+   {
+    "prompt": 24,
+    "at": 4,
+    "gap": 1.6983738243579865,
+    "reference_top": 11882,
+    "plain": 11882,
+    "spec": null
+   },
+   {
+    "prompt": 25,
+    "at": 4,
+    "gap": 9.675319743342698,
+    "reference_top": 5317,
+    "plain": 5317,
+    "spec": null
+   },
+   {
+    "prompt": 26,
+    "at": 2,
+    "gap": 3.7575092744082212,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 27,
+    "at": 5,
+    "gap": 9.867855200005579,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": 1
+   },
+   {
+    "prompt": 28,
+    "at": 0,
+    "gap": 0.9663487076759338,
+    "reference_top": 90,
+    "plain": 4754,
+    "spec": 90
+   },
+   {
+    "prompt": 29,
+    "at": 4,
+    "gap": 1.1200961470603943,
+    "reference_top": 591,
+    "plain": 591,
+    "spec": null
+   },
+   {
+    "prompt": 30,
+    "at": 5,
+    "gap": 10.754264355568012,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 31,
+    "at": 8,
+    "gap": 7.036791666876525,
+    "reference_top": 487,
+    "plain": 487,
+    "spec": 1
+   },
+   {
+    "prompt": 32,
+    "at": 5,
+    "gap": 10.614280224748654,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 33,
+    "at": 5,
+    "gap": 9.947459723363863,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 34,
+    "at": 2,
+    "gap": 3.8702259119600058,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 35,
+    "at": 4,
+    "gap": 5.513277232646942,
+    "reference_top": 11987,
+    "plain": 11987,
+    "spec": null
+   },
+   {
+    "prompt": 36,
+    "at": 2,
+    "gap": 3.2910957001149654,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 37,
+    "at": 4,
+    "gap": 7.836195200681686,
+    "reference_top": 306,
+    "plain": 306,
+    "spec": null
+   },
+   {
+    "prompt": 38,
+    "at": 5,
+    "gap": 10.574706079321913,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 39,
+    "at": 4,
+    "gap": 8.03404792631045,
+    "reference_top": 28549,
+    "plain": 28549,
+    "spec": null
+   },
+   {
+    "prompt": 40,
+    "at": 5,
+    "gap": 10.706892611422518,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 41,
+    "at": 4,
+    "gap": 7.47512618964538,
+    "reference_top": 28549,
+    "plain": 28549,
+    "spec": null
+   },
+   {
+    "prompt": 42,
+    "at": 5,
+    "gap": 10.73616957835111,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 43,
+    "at": 4,
+    "gap": 5.056896241381764,
+    "reference_top": 591,
+    "plain": 591,
+    "spec": null
+   },
+   {
+    "prompt": 44,
+    "at": 5,
+    "gap": 9.835559848026605,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 45,
+    "at": 5,
+    "gap": 8.201585489703575,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 46,
+    "at": 4,
+    "gap": 1.6626644432544708,
+    "reference_top": 11882,
+    "plain": 11882,
+    "spec": null
+   },
+   {
+    "prompt": 47,
+    "at": 4,
+    "gap": 7.235288408817723,
+    "reference_top": 15846,
+    "plain": 15846,
+    "spec": null
+   },
+   {
+    "prompt": 48,
+    "at": 2,
+    "gap": 3.557855663821101,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 49,
+    "at": 15,
+    "gap": 8.90762855290086,
+    "reference_top": 487,
+    "plain": 487,
+    "spec": 1
+   },
+   {
+    "prompt": 50,
+    "at": 2,
+    "gap": 3.8018989488482475,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 51,
+    "at": 13,
+    "gap": 2.7915763705968857,
+    "reference_top": 487,
+    "plain": 487,
+    "spec": 1
+   },
+   {
+    "prompt": 53,
+    "at": 4,
+    "gap": 10.65370180096943,
+    "reference_top": 80119,
+    "plain": 80119,
+    "spec": null
+   },
+   {
+    "prompt": 54,
+    "at": 2,
+    "gap": 4.237213081680238,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 55,
+    "at": 22,
+    "gap": 3.9508324190974236,
+    "reference_top": 487,
+    "plain": 487,
+    "spec": 1
+   },
+   {
+    "prompt": 56,
+    "at": 0,
+    "gap": 0.3545799255371094,
+    "reference_top": 4754,
+    "plain": 4754,
+    "spec": 90
+   },
+   {
+    "prompt": 57,
+    "at": 4,
+    "gap": 4.742341980338097,
+    "reference_top": 3938,
+    "plain": 3938,
+    "spec": null
+   },
+   {
+    "prompt": 58,
+    "at": 2,
+    "gap": 3.8318499736487865,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 59,
+    "at": 4,
+    "gap": 8.783770024776459,
+    "reference_top": 1050,
+    "plain": 1050,
+    "spec": null
+   },
+   {
+    "prompt": 60,
+    "at": 5,
+    "gap": 10.215024591885594,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 61,
+    "at": 4,
+    "gap": 9.929818680509925,
+    "reference_top": 591,
+    "plain": 591,
+    "spec": null
+   },
+   {
+    "prompt": 62,
+    "at": 2,
+    "gap": 3.5486353747546673,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 63,
+    "at": 4,
+    "gap": 8.066571839153767,
+    "reference_top": 2256,
+    "plain": 2256,
+    "spec": null
+   }
+  ],
+  "finish_mismatch_identical": 0,
+  "errors": {
+   "plain": 0,
+   "spec": 63
+  },
+  "finish": {
+   "plain": {
+    "length": 3,
+    "stop": 61
+   },
+   "spec": {
+    "error": 63,
+    "stop": 1
+   }
+  },
+  "tokens": {
+   "plain": 4866,
+   "spec": 364
+  }
+ },
+ "grammar/lp": {
+  "identical": 1,
+  "diverged": [
+   {
+    "prompt": 0,
+    "at": 5,
+    "gap": 14.750909693553695,
+    "reference_top": 9410,
+    "plain": 9410,
+    "spec": null
+   },
+   {
+    "prompt": 1,
+    "at": 3,
+    "gap": 13.13829951977823,
+    "reference_top": 328,
+    "plain": 328,
+    "spec": null
+   },
+   {
+    "prompt": 2,
+    "at": 5,
+    "gap": 14.352763082759338,
+    "reference_top": 4028,
+    "plain": 4028,
+    "spec": null
+   },
+   {
+    "prompt": 3,
+    "at": 1,
+    "gap": 0.19415855407714844,
+    "reference_top": 198,
+    "plain": 198,
+    "spec": null
+   },
+   {
+    "prompt": 4,
+    "at": 5,
+    "gap": 14.991393464326393,
+    "reference_top": 4028,
+    "plain": 4028,
+    "spec": null
+   },
+   {
+    "prompt": 5,
+    "at": 1,
+    "gap": 3.201087959110737,
+    "reference_top": 198,
+    "plain": 198,
+    "spec": null
+   },
+   {
+    "prompt": 6,
+    "at": 4,
+    "gap": 8.376022212207317,
+    "reference_top": 56217,
+    "plain": 56217,
+    "spec": null
+   },
+   {
+    "prompt": 7,
+    "at": 4,
+    "gap": 9.401338782161474,
+    "reference_top": 2034,
+    "plain": 2034,
+    "spec": null
+   },
+   {
+    "prompt": 8,
+    "at": 5,
+    "gap": 14.254974383235094,
+    "reference_top": 4028,
+    "plain": 4028,
+    "spec": null
+   },
+   {
+    "prompt": 9,
+    "at": 4,
+    "gap": 11.14492815756239,
+    "reference_top": 68,
+    "plain": 68,
+    "spec": null
+   },
+   {
+    "prompt": 10,
+    "at": 4,
+    "gap": 12.83235559205059,
+    "reference_top": 8716,
+    "plain": 8716,
+    "spec": null
+   },
+   {
+    "prompt": 11,
+    "at": 4,
+    "gap": 10.590557378716767,
+    "reference_top": 3137,
+    "plain": 3137,
+    "spec": null
+   },
+   {
+    "prompt": 12,
+    "at": 0,
+    "gap": 0.16069412231445312,
+    "reference_top": 90,
+    "plain": 90,
+    "spec": 4754
+   },
+   {
+    "prompt": 13,
+    "at": 4,
+    "gap": 8.155898869037628,
+    "reference_top": 1211,
+    "plain": 1211,
+    "spec": null
+   },
+   {
+    "prompt": 14,
+    "at": 2,
+    "gap": 2.934717111289501,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 15,
+    "at": 4,
+    "gap": 11.469854237511754,
+    "reference_top": 3938,
+    "plain": 3938,
+    "spec": null
+   },
+   {
+    "prompt": 16,
+    "at": 5,
+    "gap": 9.92281461044331,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 17,
+    "at": 4,
+    "gap": 3.7419759929180145,
+    "reference_top": 2034,
+    "plain": 2034,
+    "spec": null
+   },
+   {
+    "prompt": 18,
+    "at": 0,
+    "gap": 0.3134040832519531,
+    "reference_top": 90,
+    "plain": 90,
+    "spec": 4754
+   },
+   {
+    "prompt": 19,
+    "at": 4,
+    "gap": 10.365719164721668,
+    "reference_top": 2034,
+    "plain": 2034,
+    "spec": null
+   },
+   {
+    "prompt": 20,
+    "at": 4,
+    "gap": 2.057733431458473,
+    "reference_top": 11882,
+    "plain": 11882,
+    "spec": null
+   },
+   {
+    "prompt": 21,
+    "at": 4,
+    "gap": 1.0045090019702911,
+    "reference_top": 12662,
+    "plain": 12662,
+    "spec": null
+   },
+   {
+    "prompt": 22,
+    "at": 2,
+    "gap": 3.010955862700939,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 23,
+    "at": 67,
+    "gap": 4.647358166053891,
+    "reference_top": 1,
+    "plain": 1,
+    "spec": 220
+   },
+   {
+    "prompt": 24,
+    "at": 4,
+    "gap": 1.6983738243579865,
+    "reference_top": 11882,
+    "plain": 11882,
+    "spec": null
+   },
+   {
+    "prompt": 25,
+    "at": 4,
+    "gap": 9.675319743342698,
+    "reference_top": 5317,
+    "plain": 5317,
+    "spec": null
+   },
+   {
+    "prompt": 26,
+    "at": 2,
+    "gap": 3.7575092744082212,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 27,
+    "at": 5,
+    "gap": 9.867855200005579,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": 1
+   },
+   {
+    "prompt": 28,
+    "at": 0,
+    "gap": 0.9663487076759338,
+    "reference_top": 90,
+    "plain": 4754,
+    "spec": 90
+   },
+   {
+    "prompt": 29,
+    "at": 4,
+    "gap": 1.1200961470603943,
+    "reference_top": 591,
+    "plain": 591,
+    "spec": null
+   },
+   {
+    "prompt": 30,
+    "at": 5,
+    "gap": 10.754264355568012,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 31,
+    "at": 8,
+    "gap": 7.036791666876525,
+    "reference_top": 487,
+    "plain": 487,
+    "spec": 1
+   },
+   {
+    "prompt": 32,
+    "at": 5,
+    "gap": 10.614280224748654,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 33,
+    "at": 5,
+    "gap": 9.947459723363863,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 34,
+    "at": 2,
+    "gap": 3.8702259119600058,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 35,
+    "at": 4,
+    "gap": 5.513277232646942,
+    "reference_top": 11987,
+    "plain": 11987,
+    "spec": null
+   },
+   {
+    "prompt": 36,
+    "at": 2,
+    "gap": 3.2910957001149654,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 37,
+    "at": 4,
+    "gap": 7.836195200681686,
+    "reference_top": 306,
+    "plain": 306,
+    "spec": null
+   },
+   {
+    "prompt": 38,
+    "at": 5,
+    "gap": 10.574706079321913,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 39,
+    "at": 4,
+    "gap": 8.03404792631045,
+    "reference_top": 28549,
+    "plain": 28549,
+    "spec": null
+   },
+   {
+    "prompt": 40,
+    "at": 5,
+    "gap": 10.706892611422518,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 41,
+    "at": 4,
+    "gap": 7.47512618964538,
+    "reference_top": 28549,
+    "plain": 28549,
+    "spec": null
+   },
+   {
+    "prompt": 42,
+    "at": 5,
+    "gap": 10.73616957835111,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 43,
+    "at": 4,
+    "gap": 5.056896241381764,
+    "reference_top": 591,
+    "plain": 591,
+    "spec": null
+   },
+   {
+    "prompt": 44,
+    "at": 5,
+    "gap": 9.835559848026605,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 45,
+    "at": 5,
+    "gap": 8.201585489703575,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 46,
+    "at": 4,
+    "gap": 1.6626644432544708,
+    "reference_top": 11882,
+    "plain": 11882,
+    "spec": null
+   },
+   {
+    "prompt": 47,
+    "at": 4,
+    "gap": 7.235288408817723,
+    "reference_top": 15846,
+    "plain": 15846,
+    "spec": null
+   },
+   {
+    "prompt": 48,
+    "at": 2,
+    "gap": 3.557855663821101,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 49,
+    "at": 15,
+    "gap": 8.90762855290086,
+    "reference_top": 487,
+    "plain": 487,
+    "spec": 1
+   },
+   {
+    "prompt": 50,
+    "at": 2,
+    "gap": 3.8018989488482475,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 51,
+    "at": 13,
+    "gap": 2.7915763705968857,
+    "reference_top": 487,
+    "plain": 487,
+    "spec": 1
+   },
+   {
+    "prompt": 53,
+    "at": 4,
+    "gap": 10.65370180096943,
+    "reference_top": 80119,
+    "plain": 80119,
+    "spec": null
+   },
+   {
+    "prompt": 54,
+    "at": 2,
+    "gap": 4.237213081680238,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 55,
+    "at": 22,
+    "gap": 3.9508324190974236,
+    "reference_top": 487,
+    "plain": 487,
+    "spec": 1
+   },
+   {
+    "prompt": 56,
+    "at": 0,
+    "gap": 0.3545799255371094,
+    "reference_top": 4754,
+    "plain": 4754,
+    "spec": 90
+   },
+   {
+    "prompt": 57,
+    "at": 4,
+    "gap": 4.742341980338097,
+    "reference_top": 3938,
+    "plain": 3938,
+    "spec": null
+   },
+   {
+    "prompt": 58,
+    "at": 2,
+    "gap": 3.8318499736487865,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 59,
+    "at": 4,
+    "gap": 8.783770024776459,
+    "reference_top": 1050,
+    "plain": 1050,
+    "spec": null
+   },
+   {
+    "prompt": 60,
+    "at": 5,
+    "gap": 10.215024591885594,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 61,
+    "at": 4,
+    "gap": 9.929818680509925,
+    "reference_top": 591,
+    "plain": 591,
+    "spec": null
+   },
+   {
+    "prompt": 62,
+    "at": 2,
+    "gap": 3.5486353747546673,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 63,
+    "at": 4,
+    "gap": 8.066571839153767,
+    "reference_top": 2256,
+    "plain": 2256,
+    "spec": null
+   }
+  ],
+  "finish_mismatch_identical": 0,
+  "errors": {
+   "plain": 0,
+   "spec": 63
+  },
+  "finish": {
+   "plain": {
+    "length": 3,
+    "stop": 61
+   },
+   "spec": {
+    "error": 63,
+    "stop": 1
+   }
+  },
+  "tokens": {
+   "plain": 4866,
+   "spec": 363
+  }
+ },
+ "threshold": {
+  "confident_gap": 0.1,
+  "free_first_divergence_gaps": [
+   0.028095245361328125,
+   0.028095245361328125,
+   0.047054290771484375,
+   0.047054290771484375,
+   0.17486190795898438,
+   0.17486190795898438,
+   0.2593822479248047,
+   0.2593822479248047
+  ],
+  "used": 0.2593822479248047
+ },
+ "agreement": {
+  "plain": {
+   "top1": {
+    "value": 0.9975334018499487,
+    "se": 0.0007854392409245253,
+    "n": 4865
+   },
+   "confident": {
+    "value": 0.9993752603082049,
+    "se": 0.0003782085998816782,
+    "n": 4802
+   },
+   "unresolved": 1
+  },
+  "spec": {
+   "top1": {
+    "value": 0.9697802197802198,
+    "se": 0.008506817737806887,
+    "n": 364
+   },
+   "confident": {
+    "value": 0.9719101123595506,
+    "se": 0.0083152609732996,
+    "n": 356
+   },
+   "unresolved": 0
+  },
+  "top1_margin": 0.0027769470673387315,
+  "confident_margin": 0.0025
+ },
+ "kl": {
+  "free": {
+   "positions": 3474,
+   "p50": 3.632693929691589e-07,
+   "p99": 0.002572875313670343,
+   "max": 0.03349596051598404,
+   "nan": 0
+  },
+  "grammar": {
+   "positions": 346,
+   "p50": 6.31554995995497e-05,
+   "p99": 10.37163711063658,
+   "max": 13.442576609370061,
+   "nan": 0
+  }
+ },
+ "failures": [
+  "grammar: error finishes {'plain': 0, 'spec': 63}",
+  "grammar: prompt 0 diverges at 5 with masked gap 14.705234297245624",
+  "grammar: prompt 1 diverges at 4 with masked gap 5.655347960069776",
+  "grammar: prompt 2 diverges at 5 with masked gap 14.352763082759338",
+  "grammar: prompt 4 diverges at 5 with masked gap 14.991393464326393",
+  "grammar: prompt 5 diverges at 1 with masked gap 3.201087959110737",
+  "grammar: prompt 6 diverges at 4 with masked gap 8.376022212207317",
+  "grammar: prompt 7 diverges at 4 with masked gap 9.401338782161474",
+  "grammar: prompt 8 diverges at 5 with masked gap 14.254974383235094",
+  "grammar: prompt 9 diverges at 4 with masked gap 11.14492815756239",
+  "grammar: prompt 10 diverges at 4 with masked gap 12.83235559205059",
+  "grammar: prompt 11 diverges at 4 with masked gap 10.590557378716767",
+  "grammar: prompt 13 diverges at 4 with masked gap 8.155898869037628",
+  "grammar: prompt 14 diverges at 2 with masked gap 2.934717111289501",
+  "grammar: prompt 15 diverges at 4 with masked gap 11.469854237511754",
+  "grammar: prompt 16 diverges at 5 with masked gap 9.92281461044331",
+  "grammar: prompt 17 diverges at 4 with masked gap 3.7419759929180145",
+  "grammar: prompt 18 diverges at 0 with masked gap 0.3134040832519531",
+  "grammar: prompt 19 diverges at 4 with masked gap 10.365719164721668",
+  "grammar: prompt 20 diverges at 4 with masked gap 2.057733431458473",
+  "grammar: prompt 21 diverges at 4 with masked gap 1.0045090019702911",
+  "grammar: prompt 22 diverges at 2 with masked gap 3.010955862700939",
+  "grammar: prompt 23 diverges at 67 with masked gap 4.647358166053891",
+  "grammar: prompt 24 diverges at 4 with masked gap 1.6983738243579865",
+  "grammar: prompt 25 diverges at 4 with masked gap 9.675319743342698",
+  "grammar: prompt 26 diverges at 2 with masked gap 3.7575092744082212",
+  "grammar: prompt 27 diverges at 5 with masked gap 9.867855200005579",
+  "grammar: prompt 28 diverges at 0 with masked gap 0.9663487076759338",
+  "grammar: prompt 29 diverges at 4 with masked gap 1.1200961470603943",
+  "grammar: prompt 30 diverges at 5 with masked gap 10.754264355568012",
+  "grammar: prompt 31 diverges at 8 with masked gap 7.036791666876525",
+  "grammar: prompt 32 diverges at 5 with masked gap 10.614280224748654",
+  "grammar: prompt 33 diverges at 5 with masked gap 9.947459723363863",
+  "grammar: prompt 34 diverges at 2 with masked gap 3.8702259119600058",
+  "grammar: prompt 35 diverges at 4 with masked gap 5.513277232646942",
+  "grammar: prompt 36 diverges at 2 with masked gap 3.2910957001149654",
+  "grammar: prompt 37 diverges at 4 with masked gap 7.836195200681686",
+  "grammar: prompt 38 diverges at 5 with masked gap 10.574706079321913",
+  "grammar: prompt 39 diverges at 4 with masked gap 8.03404792631045",
+  "grammar: prompt 40 diverges at 5 with masked gap 10.706892611422518",
+  "grammar: prompt 41 diverges at 4 with masked gap 7.47512618964538",
+  "grammar: prompt 42 diverges at 5 with masked gap 10.73616957835111",
+  "grammar: prompt 43 diverges at 4 with masked gap 5.056896241381764",
+  "grammar: prompt 44 diverges at 5 with masked gap 9.835559848026605",
+  "grammar: prompt 45 diverges at 5 with masked gap 8.201585489703575",
+  "grammar: prompt 46 diverges at 4 with masked gap 1.6626644432544708",
+  "grammar: prompt 47 diverges at 4 with masked gap 7.235288408817723",
+  "grammar: prompt 48 diverges at 2 with masked gap 3.557855663821101",
+  "grammar: prompt 49 diverges at 15 with masked gap 8.90762855290086",
+  "grammar: prompt 50 diverges at 2 with masked gap 3.8018989488482475",
+  "grammar: prompt 51 diverges at 13 with masked gap 2.7915763705968857",
+  "grammar: prompt 53 diverges at 4 with masked gap 10.65370180096943",
+  "grammar: prompt 54 diverges at 2 with masked gap 4.237213081680238",
+  "grammar: prompt 55 diverges at 22 with masked gap 3.9508324190974236",
+  "grammar: prompt 56 diverges at 0 with masked gap 0.3545799255371094",
+  "grammar: prompt 57 diverges at 4 with masked gap 4.742341980338097",
+  "grammar: prompt 58 diverges at 2 with masked gap 3.8318499736487865",
+  "grammar: prompt 59 diverges at 4 with masked gap 8.783770024776459",
+  "grammar: prompt 60 diverges at 5 with masked gap 10.215024591885594",
+  "grammar: prompt 61 diverges at 4 with masked gap 9.929818680509925",
+  "grammar: prompt 62 diverges at 2 with masked gap 3.5486353747546673",
+  "grammar: prompt 63 diverges at 4 with masked gap 8.066571839153767",
+  "grammar/lp: error finishes {'plain': 0, 'spec': 63}",
+  "grammar/lp: prompt 0 diverges at 5 with masked gap 14.750909693553695",
+  "grammar/lp: prompt 1 diverges at 3 with masked gap 13.13829951977823",
+  "grammar/lp: prompt 2 diverges at 5 with masked gap 14.352763082759338",
+  "grammar/lp: prompt 4 diverges at 5 with masked gap 14.991393464326393",
+  "grammar/lp: prompt 5 diverges at 1 with masked gap 3.201087959110737",
+  "grammar/lp: prompt 6 diverges at 4 with masked gap 8.376022212207317",
+  "grammar/lp: prompt 7 diverges at 4 with masked gap 9.401338782161474",
+  "grammar/lp: prompt 8 diverges at 5 with masked gap 14.254974383235094",
+  "grammar/lp: prompt 9 diverges at 4 with masked gap 11.14492815756239",
+  "grammar/lp: prompt 10 diverges at 4 with masked gap 12.83235559205059",
+  "grammar/lp: prompt 11 diverges at 4 with masked gap 10.590557378716767",
+  "grammar/lp: prompt 13 diverges at 4 with masked gap 8.155898869037628",
+  "grammar/lp: prompt 14 diverges at 2 with masked gap 2.934717111289501",
+  "grammar/lp: prompt 15 diverges at 4 with masked gap 11.469854237511754",
+  "grammar/lp: prompt 16 diverges at 5 with masked gap 9.92281461044331",
+  "grammar/lp: prompt 17 diverges at 4 with masked gap 3.7419759929180145",
+  "grammar/lp: prompt 18 diverges at 0 with masked gap 0.3134040832519531",
+  "grammar/lp: prompt 19 diverges at 4 with masked gap 10.365719164721668",
+  "grammar/lp: prompt 20 diverges at 4 with masked gap 2.057733431458473",
+  "grammar/lp: prompt 21 diverges at 4 with masked gap 1.0045090019702911",
+  "grammar/lp: prompt 22 diverges at 2 with masked gap 3.010955862700939",
+  "grammar/lp: prompt 23 diverges at 67 with masked gap 4.647358166053891",
+  "grammar/lp: prompt 24 diverges at 4 with masked gap 1.6983738243579865",
+  "grammar/lp: prompt 25 diverges at 4 with masked gap 9.675319743342698",
+  "grammar/lp: prompt 26 diverges at 2 with masked gap 3.7575092744082212",
+  "grammar/lp: prompt 27 diverges at 5 with masked gap 9.867855200005579",
+  "grammar/lp: prompt 28 diverges at 0 with masked gap 0.9663487076759338",
+  "grammar/lp: prompt 29 diverges at 4 with masked gap 1.1200961470603943",
+  "grammar/lp: prompt 30 diverges at 5 with masked gap 10.754264355568012",
+  "grammar/lp: prompt 31 diverges at 8 with masked gap 7.036791666876525",
+  "grammar/lp: prompt 32 diverges at 5 with masked gap 10.614280224748654",
+  "grammar/lp: prompt 33 diverges at 5 with masked gap 9.947459723363863",
+  "grammar/lp: prompt 34 diverges at 2 with masked gap 3.8702259119600058",
+  "grammar/lp: prompt 35 diverges at 4 with masked gap 5.513277232646942",
+  "grammar/lp: prompt 36 diverges at 2 with masked gap 3.2910957001149654",
+  "grammar/lp: prompt 37 diverges at 4 with masked gap 7.836195200681686",
+  "grammar/lp: prompt 38 diverges at 5 with masked gap 10.574706079321913",
+  "grammar/lp: prompt 39 diverges at 4 with masked gap 8.03404792631045",
+  "grammar/lp: prompt 40 diverges at 5 with masked gap 10.706892611422518",
+  "grammar/lp: prompt 41 diverges at 4 with masked gap 7.47512618964538",
+  "grammar/lp: prompt 42 diverges at 5 with masked gap 10.73616957835111",
+  "grammar/lp: prompt 43 diverges at 4 with masked gap 5.056896241381764",
+  "grammar/lp: prompt 44 diverges at 5 with masked gap 9.835559848026605",
+  "grammar/lp: prompt 45 diverges at 5 with masked gap 8.201585489703575",
+  "grammar/lp: prompt 46 diverges at 4 with masked gap 1.6626644432544708",
+  "grammar/lp: prompt 47 diverges at 4 with masked gap 7.235288408817723",
+  "grammar/lp: prompt 48 diverges at 2 with masked gap 3.557855663821101",
+  "grammar/lp: prompt 49 diverges at 15 with masked gap 8.90762855290086",
+  "grammar/lp: prompt 50 diverges at 2 with masked gap 3.8018989488482475",
+  "grammar/lp: prompt 51 diverges at 13 with masked gap 2.7915763705968857",
+  "grammar/lp: prompt 53 diverges at 4 with masked gap 10.65370180096943",
+  "grammar/lp: prompt 54 diverges at 2 with masked gap 4.237213081680238",
+  "grammar/lp: prompt 55 diverges at 22 with masked gap 3.9508324190974236",
+  "grammar/lp: prompt 56 diverges at 0 with masked gap 0.3545799255371094",
+  "grammar/lp: prompt 57 diverges at 4 with masked gap 4.742341980338097",
+  "grammar/lp: prompt 58 diverges at 2 with masked gap 3.8318499736487865",
+  "grammar/lp: prompt 59 diverges at 4 with masked gap 8.783770024776459",
+  "grammar/lp: prompt 60 diverges at 5 with masked gap 10.215024591885594",
+  "grammar/lp: prompt 61 diverges at 4 with masked gap 9.929818680509925",
+  "grammar/lp: prompt 62 diverges at 2 with masked gap 3.5486353747546673",
+  "grammar/lp: prompt 63 diverges at 4 with masked gap 8.066571839153767",
+  "agreement top1 0.9698 below plain 0.9975 - 0.0028",
+  "agreement confident 0.9719 below plain 0.9994 - 0.0025",
+  "KL p50 6.32e-05 above 7.28e-07 (2x the free pair's)",
+  "KL p99 10.4 above 0.00515 (2x the free pair's)"
+ ],
+ "passed": false,
+ "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+ "engine_args": "--max-seqs 4 --max-step-tokens 2048 --memory-fraction 0.9 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options recurrent.checkpoints=4 kv.format=q8_0 spec.k=1:3,3:2",
+ "plant": "mask-column-shift",
+ "hardware": "NVIDIA RTX A5000",
+ "torch": "2.11.0+cu130"
+}

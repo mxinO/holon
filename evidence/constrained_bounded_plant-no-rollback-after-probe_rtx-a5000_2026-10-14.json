@@ -1,0 +1,1912 @@
+{
+ "prompts": 64,
+ "max_tokens": 512,
+ "k": 20,
+ "counters": {
+  "plain": {
+   "grammar.xgrammar.drafts_refused": 0
+  },
+  "spec": {
+   "spec_verify_steps": 1092,
+   "spec_verify_steps_graphed": 545,
+   "spec_verify_steps_overlapped": 706,
+   "spec_drafted": 6768,
+   "spec_rows_k2_accepting_2": 2581,
+   "spec_rows_k2_accepting_0": 160,
+   "spec_rows_k2_accepting_1": 109,
+   "spec_rows_k3_accepting_2": 240,
+   "spec_rows_k3_accepting_3": 114,
+   "spec_rows_k3_accepting_1": 2,
+   "spec_rows_k3_accepting_0": 2,
+   "grammar.xgrammar.drafts_refused": 317
+  }
+ },
+ "schemas": [
+  "analyze_social_media_mentions_df9069d1",
+  "o10014",
+  "book_flight_05dcf13f",
+  "o10318",
+  "book_flight_67564629",
+  "o10876",
+  "book_flight_a15ee43f",
+  "o11173",
+  "book_flight_c933065e",
+  "o11513",
+  "calculate_age_difference_deb6496e",
+  "o11796",
+  "calculate_area_002918bf",
+  "o12086",
+  "calculate_area_00ff2c76",
+  "o12209",
+  "calculate_area_02854ed2",
+  "o12214",
+  "calculate_area_0286984a",
+  "o12215",
+  "calculate_area_033607ff",
+  "o12254",
+  "calculate_area_036f769a",
+  "o12494",
+  "calculate_area_06b6879e",
+  "o12626",
+  "calculate_area_06e98ab6",
+  "o12629",
+  "calculate_area_071c2ca5",
+  "o12647",
+  "calculate_area_0855a944",
+  "o13687",
+  "calculate_area_092f0b0f",
+  "o13977",
+  "calculate_area_0be17036",
+  "o13989",
+  "calculate_area_0f50c849",
+  "o14025",
+  "calculate_area_0ff86767",
+  "o14451",
+  "calculate_area_12486ef8",
+  "o14452",
+  "calculate_area_136fb2ed",
+  "o14464",
+  "calculate_area_146ca1e2",
+  "o14509",
+  "calculate_area_1589ca0a",
+  "o14530",
+  "calculate_area_1966c622",
+  "o15101",
+  "calculate_area_1b27a423",
+  "o15105",
+  "calculate_area_1ca2f5a2",
+  "o16365",
+  "calculate_area_1d0fcef9",
+  "o17139",
+  "calculate_area_202544c4",
+  "o17393",
+  "calculate_area_20a9a6ad",
+  "o17401",
+  "calculate_area_214862f8",
+  "o17543",
+  "calculate_area_219b3906",
+  "o17544"
+ ],
+ "free": {
+  "identical": 60,
+  "diverged": [
+   {
+    "prompt": 1,
+    "at": 9,
+    "gap": 0.17486190795898438,
+    "reference_top": 498,
+    "plain": 498,
+    "spec": 2958
+   },
+   {
+    "prompt": 7,
+    "at": 24,
+    "gap": 0.2593822479248047,
+    "reference_top": 660,
+    "plain": 45305,
+    "spec": 660
+   },
+   {
+    "prompt": 37,
+    "at": 22,
+    "gap": 0.028095245361328125,
+    "reference_top": 12929,
+    "plain": 12929,
+    "spec": 760
+   },
+   {
+    "prompt": 43,
+    "at": 10,
+    "gap": 0.047054290771484375,
+    "reference_top": 3081,
+    "plain": 3081,
+    "spec": 8422
+   }
+  ],
+  "finish_mismatch_identical": 0,
+  "errors": {
+   "plain": 0,
+   "spec": 0
+  },
+  "finish": {
+   "plain": {
+    "stop": 64
+   },
+   "spec": {
+    "stop": 64
+   }
+  },
+  "tokens": {
+   "plain": 3785,
+   "spec": 3784
+  }
+ },
+ "free/lp": {
+  "identical": 60,
+  "diverged": [
+   {
+    "prompt": 1,
+    "at": 9,
+    "gap": 0.17486190795898438,
+    "reference_top": 498,
+    "plain": 498,
+    "spec": 2958,
+    "own": {
+     "plain": {
+      "498": -0.66829913854599,
+      "2958": -0.7207702994346619
+     },
+     "spec": {
+      "498": -0.6975616216659546,
+      "2958": -0.690691351890564
+     }
+    }
+   },
+   {
+    "prompt": 7,
+    "at": 24,
+    "gap": 0.2593822479248047,
+    "reference_top": 660,
+    "plain": 45305,
+    "spec": 660,
+    "own": {
+     "plain": {
+      "45305": -1.929556131362915,
+      "660": -1.9300787448883057
+     },
+     "spec": {
+      "45305": -1.9586925506591797,
+      "660": -1.9212417602539062
+     }
+    }
+   },
+   {
+    "prompt": 37,
+    "at": 22,
+    "gap": 0.028095245361328125,
+    "reference_top": 12929,
+    "plain": 12929,
+    "spec": 760,
+    "own": {
+     "plain": {
+      "12929": -1.2554384469985962,
+      "760": -1.2719026803970337
+     },
+     "spec": {
+      "12929": -1.3035101890563965,
+      "760": -1.2076067924499512
+     }
+    }
+   },
+   {
+    "prompt": 43,
+    "at": 10,
+    "gap": 0.047054290771484375,
+    "reference_top": 3081,
+    "plain": 3081,
+    "spec": 8422,
+    "own": {
+     "plain": {
+      "3081": -1.2827247381210327,
+      "8422": -1.396257758140564
+     },
+     "spec": {
+      "3081": -1.3615235090255737,
+      "8422": -1.3303765058517456
+     }
+    }
+   }
+  ],
+  "finish_mismatch_identical": 0,
+  "errors": {
+   "plain": 0,
+   "spec": 0
+  },
+  "finish": {
+   "plain": {
+    "stop": 64
+   },
+   "spec": {
+    "stop": 64
+   }
+  },
+  "tokens": {
+   "plain": 3785,
+   "spec": 3784
+  }
+ },
+ "grammar": {
+  "identical": 0,
+  "diverged": [
+   {
+    "prompt": 0,
+    "at": 5,
+    "gap": 14.705234297245624,
+    "reference_top": 9410,
+    "plain": 9410,
+    "spec": null
+   },
+   {
+    "prompt": 1,
+    "at": 4,
+    "gap": 5.655347960069776,
+    "reference_top": 78134,
+    "plain": 78134,
+    "spec": null
+   },
+   {
+    "prompt": 2,
+    "at": 5,
+    "gap": 14.352763082759338,
+    "reference_top": 4028,
+    "plain": 4028,
+    "spec": null
+   },
+   {
+    "prompt": 3,
+    "at": 1,
+    "gap": 0.19415855407714844,
+    "reference_top": 198,
+    "plain": 198,
+    "spec": null
+   },
+   {
+    "prompt": 4,
+    "at": 5,
+    "gap": 14.991393464326393,
+    "reference_top": 4028,
+    "plain": 4028,
+    "spec": null
+   },
+   {
+    "prompt": 5,
+    "at": 1,
+    "gap": 3.201087959110737,
+    "reference_top": 198,
+    "plain": 198,
+    "spec": null
+   },
+   {
+    "prompt": 6,
+    "at": 4,
+    "gap": 8.376022212207317,
+    "reference_top": 56217,
+    "plain": 56217,
+    "spec": null
+   },
+   {
+    "prompt": 7,
+    "at": 4,
+    "gap": 9.401338782161474,
+    "reference_top": 2034,
+    "plain": 2034,
+    "spec": null
+   },
+   {
+    "prompt": 8,
+    "at": 5,
+    "gap": 14.254974383235094,
+    "reference_top": 4028,
+    "plain": 4028,
+    "spec": null
+   },
+   {
+    "prompt": 9,
+    "at": 4,
+    "gap": 11.14492815756239,
+    "reference_top": 68,
+    "plain": 68,
+    "spec": null
+   },
+   {
+    "prompt": 10,
+    "at": 4,
+    "gap": 12.83235559205059,
+    "reference_top": 8716,
+    "plain": 8716,
+    "spec": null
+   },
+   {
+    "prompt": 11,
+    "at": 4,
+    "gap": 10.590557378716767,
+    "reference_top": 3137,
+    "plain": 3137,
+    "spec": null
+   },
+   {
+    "prompt": 12,
+    "at": 0,
+    "gap": 0.16069412231445312,
+    "reference_top": 90,
+    "plain": 90,
+    "spec": 4754
+   },
+   {
+    "prompt": 13,
+    "at": 4,
+    "gap": 8.155898869037628,
+    "reference_top": 1211,
+    "plain": 1211,
+    "spec": null
+   },
+   {
+    "prompt": 14,
+    "at": 2,
+    "gap": 2.934717111289501,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 15,
+    "at": 4,
+    "gap": 11.469854237511754,
+    "reference_top": 3938,
+    "plain": 3938,
+    "spec": null
+   },
+   {
+    "prompt": 16,
+    "at": 5,
+    "gap": 9.92281461044331,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 17,
+    "at": 4,
+    "gap": 3.7419759929180145,
+    "reference_top": 2034,
+    "plain": 2034,
+    "spec": null
+   },
+   {
+    "prompt": 18,
+    "at": 0,
+    "gap": 0.3134040832519531,
+    "reference_top": 90,
+    "plain": 90,
+    "spec": 4754
+   },
+   {
+    "prompt": 19,
+    "at": 4,
+    "gap": 10.365719164721668,
+    "reference_top": 2034,
+    "plain": 2034,
+    "spec": null
+   },
+   {
+    "prompt": 20,
+    "at": 4,
+    "gap": 2.057733431458473,
+    "reference_top": 11882,
+    "plain": 11882,
+    "spec": null
+   },
+   {
+    "prompt": 21,
+    "at": 4,
+    "gap": 1.0045090019702911,
+    "reference_top": 12662,
+    "plain": 12662,
+    "spec": null
+   },
+   {
+    "prompt": 22,
+    "at": 2,
+    "gap": 3.010955862700939,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 23,
+    "at": 10,
+    "gap": 2.942579321563244,
+    "reference_top": 328,
+    "plain": 328,
+    "spec": null
+   },
+   {
+    "prompt": 24,
+    "at": 4,
+    "gap": 1.6983738243579865,
+    "reference_top": 11882,
+    "plain": 11882,
+    "spec": null
+   },
+   {
+    "prompt": 25,
+    "at": 4,
+    "gap": 9.675319743342698,
+    "reference_top": 5317,
+    "plain": 5317,
+    "spec": null
+   },
+   {
+    "prompt": 26,
+    "at": 2,
+    "gap": 3.7575092744082212,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 27,
+    "at": 4,
+    "gap": 6.926838145824149,
+    "reference_top": 16838,
+    "plain": 16838,
+    "spec": null
+   },
+   {
+    "prompt": 28,
+    "at": 0,
+    "gap": 0.9663487076759338,
+    "reference_top": 90,
+    "plain": 4754,
+    "spec": 90
+   },
+   {
+    "prompt": 29,
+    "at": 4,
+    "gap": 1.1200961470603943,
+    "reference_top": 591,
+    "plain": 591,
+    "spec": null
+   },
+   {
+    "prompt": 30,
+    "at": 5,
+    "gap": 10.754264355568012,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 31,
+    "at": 5,
+    "gap": 9.824581793742254,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 32,
+    "at": 5,
+    "gap": 10.614280224748654,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 33,
+    "at": 5,
+    "gap": 9.947459723363863,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 34,
+    "at": 2,
+    "gap": 3.8702259119600058,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 35,
+    "at": 4,
+    "gap": 5.513277232646942,
+    "reference_top": 11987,
+    "plain": 11987,
+    "spec": null
+   },
+   {
+    "prompt": 36,
+    "at": 2,
+    "gap": 3.2910957001149654,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 37,
+    "at": 4,
+    "gap": 7.836195200681686,
+    "reference_top": 306,
+    "plain": 306,
+    "spec": null
+   },
+   {
+    "prompt": 38,
+    "at": 5,
+    "gap": 10.574706079321913,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 39,
+    "at": 4,
+    "gap": 8.03404792631045,
+    "reference_top": 28549,
+    "plain": 28549,
+    "spec": null
+   },
+   {
+    "prompt": 40,
+    "at": 5,
+    "gap": 10.706892611422518,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 41,
+    "at": 4,
+    "gap": 7.47512618964538,
+    "reference_top": 28549,
+    "plain": 28549,
+    "spec": null
+   },
+   {
+    "prompt": 42,
+    "at": 5,
+    "gap": 10.73616957835111,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 43,
+    "at": 4,
+    "gap": 5.056896241381764,
+    "reference_top": 591,
+    "plain": 591,
+    "spec": null
+   },
+   {
+    "prompt": 44,
+    "at": 5,
+    "gap": 9.835559848026605,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 45,
+    "at": 3,
+    "gap": 12.197147091152146,
+    "reference_top": 328,
+    "plain": 328,
+    "spec": null
+   },
+   {
+    "prompt": 46,
+    "at": 4,
+    "gap": 1.6626644432544708,
+    "reference_top": 11882,
+    "plain": 11882,
+    "spec": null
+   },
+   {
+    "prompt": 47,
+    "at": 4,
+    "gap": 7.235288408817723,
+    "reference_top": 15846,
+    "plain": 15846,
+    "spec": null
+   },
+   {
+    "prompt": 48,
+    "at": 2,
+    "gap": 3.557855663821101,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 49,
+    "at": 5,
+    "gap": 8.281742998631671,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 50,
+    "at": 2,
+    "gap": 3.8018989488482475,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 51,
+    "at": 5,
+    "gap": 9.471795108285733,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 52,
+    "at": 2,
+    "gap": 2.8541125804185867,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 53,
+    "at": 4,
+    "gap": 10.570865878718905,
+    "reference_top": 80119,
+    "plain": 80119,
+    "spec": null
+   },
+   {
+    "prompt": 54,
+    "at": 2,
+    "gap": 4.225921769626439,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 55,
+    "at": 7,
+    "gap": 6.455586260184646,
+    "reference_top": 16,
+    "plain": 16,
+    "spec": 256
+   },
+   {
+    "prompt": 56,
+    "at": 0,
+    "gap": 1.1197891235351562,
+    "reference_top": 4754,
+    "plain": 4754,
+    "spec": 90
+   },
+   {
+    "prompt": 57,
+    "at": 4,
+    "gap": 4.782825447618961,
+    "reference_top": 3938,
+    "plain": 3938,
+    "spec": null
+   },
+   {
+    "prompt": 58,
+    "at": 2,
+    "gap": 3.5939692724496126,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 59,
+    "at": 4,
+    "gap": 8.948022434487939,
+    "reference_top": 1050,
+    "plain": 1050,
+    "spec": null
+   },
+   {
+    "prompt": 60,
+    "at": 5,
+    "gap": 10.51097202397068,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 61,
+    "at": 4,
+    "gap": 10.20213103108108,
+    "reference_top": 591,
+    "plain": 591,
+    "spec": null
+   },
+   {
+    "prompt": 62,
+    "at": 2,
+    "gap": 4.010600935667753,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null
+   },
+   {
+    "prompt": 63,
+    "at": 4,
+    "gap": 8.070682749152184,
+    "reference_top": 2256,
+    "plain": 2256,
+    "spec": null
+   }
+  ],
+  "finish_mismatch_identical": 0,
+  "errors": {
+   "plain": 0,
+   "spec": 63
+  },
+  "finish": {
+   "plain": {
+    "length": 3,
+    "stop": 61
+   },
+   "spec": {
+    "length": 1,
+    "error": 63
+   }
+  },
+  "tokens": {
+   "plain": 4866,
+   "spec": 755
+  }
+ },
+ "grammar/lp": {
+  "identical": 0,
+  "diverged": [
+   {
+    "prompt": 0,
+    "at": 5,
+    "gap": 14.750909693553695,
+    "reference_top": 9410,
+    "plain": 9410,
+    "spec": null,
+    "own": {
+     "plain": {
+      "9410": -7.152555099310121e-07
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 1,
+    "at": 3,
+    "gap": 13.13829951977823,
+    "reference_top": 328,
+    "plain": 328,
+    "spec": null,
+    "own": {
+     "plain": {
+      "328": -1.9073468138230965e-06
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 2,
+    "at": 5,
+    "gap": 14.352763082759338,
+    "reference_top": 4028,
+    "plain": 4028,
+    "spec": null,
+    "own": {
+     "plain": {
+      "4028": -7.152555099310121e-07
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 3,
+    "at": 1,
+    "gap": 0.19415855407714844,
+    "reference_top": 198,
+    "plain": 198,
+    "spec": null,
+    "own": {
+     "plain": {
+      "198": -0.6696093082427979
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 4,
+    "at": 5,
+    "gap": 14.991393464326393,
+    "reference_top": 4028,
+    "plain": 4028,
+    "spec": null,
+    "own": {
+     "plain": {
+      "4028": -3.576278118089249e-07
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 5,
+    "at": 1,
+    "gap": 3.201087959110737,
+    "reference_top": 198,
+    "plain": 198,
+    "spec": null,
+    "own": {
+     "plain": {
+      "198": -0.0316360667347908
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 6,
+    "at": 4,
+    "gap": 8.376022212207317,
+    "reference_top": 56217,
+    "plain": 56217,
+    "spec": null,
+    "own": {
+     "plain": {
+      "56217": -0.0003389737685211003
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 7,
+    "at": 4,
+    "gap": 9.401338782161474,
+    "reference_top": 2034,
+    "plain": 2034,
+    "spec": null,
+    "own": {
+     "plain": {
+      "2034": -2.9802276912960224e-06
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 8,
+    "at": 5,
+    "gap": 14.254974383235094,
+    "reference_top": 4028,
+    "plain": 4028,
+    "spec": null,
+    "own": {
+     "plain": {
+      "4028": -8.344646857949556e-07
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 9,
+    "at": 4,
+    "gap": 11.14492815756239,
+    "reference_top": 68,
+    "plain": 68,
+    "spec": null,
+    "own": {
+     "plain": {
+      "68": -2.3841855067985307e-07
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 10,
+    "at": 4,
+    "gap": 12.83235559205059,
+    "reference_top": 8716,
+    "plain": 8716,
+    "spec": null,
+    "own": {
+     "plain": {
+      "8716": 0.0
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 11,
+    "at": 4,
+    "gap": 10.590557378716767,
+    "reference_top": 3137,
+    "plain": 3137,
+    "spec": null,
+    "own": {
+     "plain": {
+      "3137": -1.7881377516459906e-06
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 12,
+    "at": 0,
+    "gap": 0.16069412231445312,
+    "reference_top": 90,
+    "plain": 90,
+    "spec": 4754,
+    "own": {
+     "plain": {
+      "90": -0.5261763334274292,
+      "4754": -0.8936976194381714
+     },
+     "spec": {
+      "90": -1.1890008449554443,
+      "4754": -0.36316078901290894
+     }
+    }
+   },
+   {
+    "prompt": 13,
+    "at": 4,
+    "gap": 8.155898869037628,
+    "reference_top": 1211,
+    "plain": 1211,
+    "spec": null,
+    "own": {
+     "plain": {
+      "1211": -6.603976362384856e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 14,
+    "at": 2,
+    "gap": 2.934717111289501,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -0.07383501529693604
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 15,
+    "at": 4,
+    "gap": 11.469854237511754,
+    "reference_top": 3938,
+    "plain": 3938,
+    "spec": null,
+    "own": {
+     "plain": {
+      "3938": -1.7881377516459906e-06
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 16,
+    "at": 5,
+    "gap": 9.92281461044331,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -5.435795901576057e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 17,
+    "at": 4,
+    "gap": 3.7419759929180145,
+    "reference_top": 2034,
+    "plain": 2034,
+    "spec": null,
+    "own": {
+     "plain": {
+      "2034": -0.029988182708621025
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 18,
+    "at": 0,
+    "gap": 0.3134040832519531,
+    "reference_top": 90,
+    "plain": 90,
+    "spec": 4754,
+    "own": {
+     "plain": {
+      "90": -0.41003790497779846,
+      "4754": -1.0895289182662964
+     },
+     "spec": {
+      "90": -0.8778223991394043,
+      "4754": -0.5373187065124512
+     }
+    }
+   },
+   {
+    "prompt": 19,
+    "at": 4,
+    "gap": 10.365719164721668,
+    "reference_top": 2034,
+    "plain": 2034,
+    "spec": null,
+    "own": {
+     "plain": {
+      "2034": -4.291525328881107e-06
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 20,
+    "at": 4,
+    "gap": 2.057733431458473,
+    "reference_top": 11882,
+    "plain": 11882,
+    "spec": null,
+    "own": {
+     "plain": {
+      "11882": -0.11311930418014526
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 21,
+    "at": 4,
+    "gap": 1.0045090019702911,
+    "reference_top": 12662,
+    "plain": 12662,
+    "spec": null,
+    "own": {
+     "plain": {
+      "12662": -0.30164405703544617
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 22,
+    "at": 2,
+    "gap": 3.010955862700939,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -0.030638020485639572
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 23,
+    "at": 10,
+    "gap": 2.942579321563244,
+    "reference_top": 328,
+    "plain": 328,
+    "spec": null,
+    "own": {
+     "plain": {
+      "328": -0.07970530539751053
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 24,
+    "at": 4,
+    "gap": 1.6983738243579865,
+    "reference_top": 11882,
+    "plain": 11882,
+    "spec": null,
+    "own": {
+     "plain": {
+      "11882": -0.16279464960098267
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 25,
+    "at": 4,
+    "gap": 9.675319743342698,
+    "reference_top": 5317,
+    "plain": 5317,
+    "spec": null,
+    "own": {
+     "plain": {
+      "5317": -6.985420623095706e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 26,
+    "at": 2,
+    "gap": 3.7575092744082212,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -0.023638572543859482
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 27,
+    "at": 4,
+    "gap": 6.926838145824149,
+    "reference_top": 16838,
+    "plain": 16838,
+    "spec": null,
+    "own": {
+     "plain": {
+      "16838": -0.0018594847060739994
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 28,
+    "at": 0,
+    "gap": 0.9663487076759338,
+    "reference_top": 90,
+    "plain": 4754,
+    "spec": 90,
+    "own": {
+     "plain": {
+      "4754": -0.6511551737785339,
+      "90": -0.736980140209198
+     },
+     "spec": {
+      "4754": -1.0669736862182617,
+      "90": -0.42166799306869507
+     }
+    }
+   },
+   {
+    "prompt": 29,
+    "at": 4,
+    "gap": 1.1200961470603943,
+    "reference_top": 591,
+    "plain": 591,
+    "spec": null,
+    "own": {
+     "plain": {
+      "591": -0.3347422778606415
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 30,
+    "at": 5,
+    "gap": 10.754264355568012,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -4.1126360883936286e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 31,
+    "at": 5,
+    "gap": 9.824581793742254,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -7.188061863416806e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 32,
+    "at": 5,
+    "gap": 10.614280224748654,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -2.586808113846928e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 33,
+    "at": 5,
+    "gap": 9.947459723363863,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -6.270212179515511e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 34,
+    "at": 2,
+    "gap": 3.8702259119600058,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -0.0165669247508049
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 35,
+    "at": 4,
+    "gap": 5.513277232646942,
+    "reference_top": 11987,
+    "plain": 11987,
+    "spec": null,
+    "own": {
+     "plain": {
+      "11987": -0.004355824552476406
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 36,
+    "at": 2,
+    "gap": 3.2910957001149654,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -0.03717563673853874
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 37,
+    "at": 4,
+    "gap": 7.836195200681686,
+    "reference_top": 306,
+    "plain": 306,
+    "spec": null,
+    "own": {
+     "plain": {
+      "306": -9.536738616588991e-07
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 38,
+    "at": 5,
+    "gap": 10.574706079321913,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -1.9311717551317997e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 39,
+    "at": 4,
+    "gap": 8.03404792631045,
+    "reference_top": 28549,
+    "plain": 28549,
+    "spec": null,
+    "own": {
+     "plain": {
+      "28549": -0.0005995621904730797
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 40,
+    "at": 5,
+    "gap": 10.706892611422518,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -3.433168603805825e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 41,
+    "at": 4,
+    "gap": 7.47512618964538,
+    "reference_top": 28549,
+    "plain": 28549,
+    "spec": null,
+    "own": {
+     "plain": {
+      "28549": -0.0005995621904730797
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 42,
+    "at": 5,
+    "gap": 10.73616957835111,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -3.45700973412022e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 43,
+    "at": 4,
+    "gap": 5.056896241381764,
+    "reference_top": 591,
+    "plain": 591,
+    "spec": null,
+    "own": {
+     "plain": {
+      "591": -0.00998903438448906
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 44,
+    "at": 5,
+    "gap": 9.835559848026605,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -4.2437604861333966e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 45,
+    "at": 3,
+    "gap": 12.197147091152146,
+    "reference_top": 328,
+    "plain": 328,
+    "spec": null,
+    "own": {
+     "plain": {
+      "328": -5.602820692729438e-06
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 46,
+    "at": 4,
+    "gap": 1.6626644432544708,
+    "reference_top": 11882,
+    "plain": 11882,
+    "spec": null,
+    "own": {
+     "plain": {
+      "11882": -0.21710999310016632
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 47,
+    "at": 4,
+    "gap": 7.235288408817723,
+    "reference_top": 15846,
+    "plain": 15846,
+    "spec": null,
+    "own": {
+     "plain": {
+      "15846": -0.0006138585740700364
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 48,
+    "at": 2,
+    "gap": 3.557855663821101,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -0.04078613594174385
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 49,
+    "at": 5,
+    "gap": 8.281742998631671,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -0.00034624303225427866
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 50,
+    "at": 2,
+    "gap": 3.8018989488482475,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -0.030283721163868904
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 51,
+    "at": 5,
+    "gap": 9.471795108285733,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -0.0001062098381225951
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 52,
+    "at": 2,
+    "gap": 2.8541125804185867,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -0.07073523849248886
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 53,
+    "at": 4,
+    "gap": 10.570865878718905,
+    "reference_top": 80119,
+    "plain": 80119,
+    "spec": null,
+    "own": {
+     "plain": {
+      "80119": -4.7205765440594405e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 54,
+    "at": 2,
+    "gap": 4.225921769626439,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -0.016528114676475525
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 55,
+    "at": 7,
+    "gap": 6.455586260184646,
+    "reference_top": 16,
+    "plain": 16,
+    "spec": 256,
+    "own": {
+     "plain": {
+      "16": -0.022694973275065422,
+      "256": null
+     },
+     "spec": {
+      "16": null,
+      "256": -1.341550350189209
+     }
+    }
+   },
+   {
+    "prompt": 56,
+    "at": 0,
+    "gap": 1.1197891235351562,
+    "reference_top": 4754,
+    "plain": 4754,
+    "spec": 90,
+    "own": {
+     "plain": {
+      "4754": -0.6446067094802856,
+      "90": -0.7441645860671997
+     },
+     "spec": {
+      "4754": -0.7187525629997253,
+      "90": -0.6681811213493347
+     }
+    }
+   },
+   {
+    "prompt": 57,
+    "at": 4,
+    "gap": 4.782825447618961,
+    "reference_top": 3938,
+    "plain": 3938,
+    "spec": null,
+    "own": {
+     "plain": {
+      "3938": -0.009108065627515316
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 58,
+    "at": 2,
+    "gap": 3.5939692724496126,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -0.027499543502926826
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 59,
+    "at": 4,
+    "gap": 8.948022434487939,
+    "reference_top": 1050,
+    "plain": 1050,
+    "spec": null,
+    "own": {
+     "plain": {
+      "1050": -1.9311717551317997e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 60,
+    "at": 5,
+    "gap": 10.51097202397068,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -5.447716102935374e-05
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 61,
+    "at": 4,
+    "gap": 10.20213103108108,
+    "reference_top": 591,
+    "plain": 591,
+    "spec": null,
+    "own": {
+     "plain": {
+      "591": -1.5497195136049413e-06
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 62,
+    "at": 2,
+    "gap": 4.010600935667753,
+    "reference_top": 763,
+    "plain": 763,
+    "spec": null,
+    "own": {
+     "plain": {
+      "763": -0.028218450024724007
+     },
+     "spec": null
+    }
+   },
+   {
+    "prompt": 63,
+    "at": 4,
+    "gap": 8.070682749152184,
+    "reference_top": 2256,
+    "plain": 2256,
+    "spec": null,
+    "own": {
+     "plain": {
+      "2256": -3.0278701160568744e-05
+     },
+     "spec": null
+    }
+   }
+  ],
+  "finish_mismatch_identical": 0,
+  "errors": {
+   "plain": 0,
+   "spec": 63
+  },
+  "finish": {
+   "plain": {
+    "length": 3,
+    "stop": 61
+   },
+   "spec": {
+    "length": 1,
+    "error": 63
+   }
+  },
+  "tokens": {
+   "plain": 4866,
+   "spec": 754
+  }
+ },
+ "threshold": {
+  "confident_gap": 0.1,
+  "free_first_divergence_gaps": [
+   0.028095245361328125,
+   0.028095245361328125,
+   0.047054290771484375,
+   0.047054290771484375,
+   0.17486190795898438,
+   0.17486190795898438,
+   0.2593822479248047,
+   0.2593822479248047
+  ],
+  "used": 0.2593822479248047
+ },
+ "agreement": {
+  "plain": {
+   "top1": {
+    "value": 0.9977389516957862,
+    "se": 0.0007488433219889234,
+    "n": 4865
+   },
+   "confident": {
+    "value": 0.9995836802664446,
+    "se": 0.00030403287541249963,
+    "n": 4804
+   },
+   "unresolved": 1
+  },
+  "spec": {
+   "top1": {
+    "value": 0.9723320158102767,
+    "se": 0.0110766276914334,
+    "n": 253
+   },
+   "confident": {
+    "value": 0.975609756097561,
+    "se": 0.010910354856730897,
+    "n": 246
+   },
+   "unresolved": 502
+  },
+  "top1_margin": 0.0026475609551231453,
+  "confident_margin": 0.0025
+ },
+ "kl": {
+  "free": {
+   "positions": 3474,
+   "p50": 3.632693929691589e-07,
+   "p99": 0.002572875313670343,
+   "max": 0.03349596051598404,
+   "nan": 0
+  },
+  "grammar": {
+   "positions": 240,
+   "p50": 6.493469512231052e-06,
+   "p99": 0.15511595283743487,
+   "max": 4.850964345254592,
+   "nan": 0
+  }
+ },
+ "failures": [
+  "grammar: error finishes {'plain': 0, 'spec': 63}",
+  "grammar: prompt 0 diverges at 5 with masked gap 14.705234297245624",
+  "grammar: prompt 1 diverges at 4 with masked gap 5.655347960069776",
+  "grammar: prompt 2 diverges at 5 with masked gap 14.352763082759338",
+  "grammar: prompt 4 diverges at 5 with masked gap 14.991393464326393",
+  "grammar: prompt 5 diverges at 1 with masked gap 3.201087959110737",
+  "grammar: prompt 6 diverges at 4 with masked gap 8.376022212207317",
+  "grammar: prompt 7 diverges at 4 with masked gap 9.401338782161474",
+  "grammar: prompt 8 diverges at 5 with masked gap 14.254974383235094",
+  "grammar: prompt 9 diverges at 4 with masked gap 11.14492815756239",
+  "grammar: prompt 10 diverges at 4 with masked gap 12.83235559205059",
+  "grammar: prompt 11 diverges at 4 with masked gap 10.590557378716767",
+  "grammar: prompt 13 diverges at 4 with masked gap 8.155898869037628",
+  "grammar: prompt 14 diverges at 2 with masked gap 2.934717111289501",
+  "grammar: prompt 15 diverges at 4 with masked gap 11.469854237511754",
+  "grammar: prompt 16 diverges at 5 with masked gap 9.92281461044331",
+  "grammar: prompt 17 diverges at 4 with masked gap 3.7419759929180145",
+  "grammar: prompt 18 diverges at 0 with masked gap 0.3134040832519531",
+  "grammar: prompt 19 diverges at 4 with masked gap 10.365719164721668",
+  "grammar: prompt 20 diverges at 4 with masked gap 2.057733431458473",
+  "grammar: prompt 21 diverges at 4 with masked gap 1.0045090019702911",
+  "grammar: prompt 22 diverges at 2 with masked gap 3.010955862700939",
+  "grammar: prompt 23 diverges at 10 with masked gap 2.942579321563244",
+  "grammar: prompt 24 diverges at 4 with masked gap 1.6983738243579865",
+  "grammar: prompt 25 diverges at 4 with masked gap 9.675319743342698",
+  "grammar: prompt 26 diverges at 2 with masked gap 3.7575092744082212",
+  "grammar: prompt 27 diverges at 4 with masked gap 6.926838145824149",
+  "grammar: prompt 28 diverges at 0 with masked gap 0.9663487076759338",
+  "grammar: prompt 29 diverges at 4 with masked gap 1.1200961470603943",
+  "grammar: prompt 30 diverges at 5 with masked gap 10.754264355568012",
+  "grammar: prompt 31 diverges at 5 with masked gap 9.824581793742254",
+  "grammar: prompt 32 diverges at 5 with masked gap 10.614280224748654",
+  "grammar: prompt 33 diverges at 5 with masked gap 9.947459723363863",
+  "grammar: prompt 34 diverges at 2 with masked gap 3.8702259119600058",
+  "grammar: prompt 35 diverges at 4 with masked gap 5.513277232646942",
+  "grammar: prompt 36 diverges at 2 with masked gap 3.2910957001149654",
+  "grammar: prompt 37 diverges at 4 with masked gap 7.836195200681686",
+  "grammar: prompt 38 diverges at 5 with masked gap 10.574706079321913",
+  "grammar: prompt 39 diverges at 4 with masked gap 8.03404792631045",
+  "grammar: prompt 40 diverges at 5 with masked gap 10.706892611422518",
+  "grammar: prompt 41 diverges at 4 with masked gap 7.47512618964538",
+  "grammar: prompt 42 diverges at 5 with masked gap 10.73616957835111",
+  "grammar: prompt 43 diverges at 4 with masked gap 5.056896241381764",
+  "grammar: prompt 44 diverges at 5 with masked gap 9.835559848026605",
+  "grammar: prompt 45 diverges at 3 with masked gap 12.197147091152146",
+  "grammar: prompt 46 diverges at 4 with masked gap 1.6626644432544708",
+  "grammar: prompt 47 diverges at 4 with masked gap 7.235288408817723",
+  "grammar: prompt 48 diverges at 2 with masked gap 3.557855663821101",
+  "grammar: prompt 49 diverges at 5 with masked gap 8.281742998631671",
+  "grammar: prompt 50 diverges at 2 with masked gap 3.8018989488482475",
+  "grammar: prompt 51 diverges at 5 with masked gap 9.471795108285733",
+  "grammar: prompt 52 diverges at 2 with masked gap 2.8541125804185867",
+  "grammar: prompt 53 diverges at 4 with masked gap 10.570865878718905",
+  "grammar: prompt 54 diverges at 2 with masked gap 4.225921769626439",
+  "grammar: prompt 55 diverges at 7 with masked gap 6.455586260184646",
+  "grammar: prompt 56 diverges at 0 with masked gap 1.1197891235351562",
+  "grammar: prompt 57 diverges at 4 with masked gap 4.782825447618961",
+  "grammar: prompt 58 diverges at 2 with masked gap 3.5939692724496126",
+  "grammar: prompt 59 diverges at 4 with masked gap 8.948022434487939",
+  "grammar: prompt 60 diverges at 5 with masked gap 10.51097202397068",
+  "grammar: prompt 61 diverges at 4 with masked gap 10.20213103108108",
+  "grammar: prompt 62 diverges at 2 with masked gap 4.010600935667753",
+  "grammar: prompt 63 diverges at 4 with masked gap 8.070682749152184",
+  "grammar/lp: error finishes {'plain': 0, 'spec': 63}",
+  "grammar/lp: prompt 0 diverges at 5 with masked gap 14.750909693553695",
+  "grammar/lp: prompt 1 diverges at 3 with masked gap 13.13829951977823",
+  "grammar/lp: prompt 2 diverges at 5 with masked gap 14.352763082759338",
+  "grammar/lp: prompt 4 diverges at 5 with masked gap 14.991393464326393",
+  "grammar/lp: prompt 5 diverges at 1 with masked gap 3.201087959110737",
+  "grammar/lp: prompt 6 diverges at 4 with masked gap 8.376022212207317",
+  "grammar/lp: prompt 7 diverges at 4 with masked gap 9.401338782161474",
+  "grammar/lp: prompt 8 diverges at 5 with masked gap 14.254974383235094",
+  "grammar/lp: prompt 9 diverges at 4 with masked gap 11.14492815756239",
+  "grammar/lp: prompt 10 diverges at 4 with masked gap 12.83235559205059",
+  "grammar/lp: prompt 11 diverges at 4 with masked gap 10.590557378716767",
+  "grammar/lp: prompt 13 diverges at 4 with masked gap 8.155898869037628",
+  "grammar/lp: prompt 14 diverges at 2 with masked gap 2.934717111289501",
+  "grammar/lp: prompt 15 diverges at 4 with masked gap 11.469854237511754",
+  "grammar/lp: prompt 16 diverges at 5 with masked gap 9.92281461044331",
+  "grammar/lp: prompt 17 diverges at 4 with masked gap 3.7419759929180145",
+  "grammar/lp: prompt 18 diverges at 0 with masked gap 0.3134040832519531",
+  "grammar/lp: prompt 19 diverges at 4 with masked gap 10.365719164721668",
+  "grammar/lp: prompt 20 diverges at 4 with masked gap 2.057733431458473",
+  "grammar/lp: prompt 21 diverges at 4 with masked gap 1.0045090019702911",
+  "grammar/lp: prompt 22 diverges at 2 with masked gap 3.010955862700939",
+  "grammar/lp: prompt 23 diverges at 10 with masked gap 2.942579321563244",
+  "grammar/lp: prompt 24 diverges at 4 with masked gap 1.6983738243579865",
+  "grammar/lp: prompt 25 diverges at 4 with masked gap 9.675319743342698",
+  "grammar/lp: prompt 26 diverges at 2 with masked gap 3.7575092744082212",
+  "grammar/lp: prompt 27 diverges at 4 with masked gap 6.926838145824149",
+  "grammar/lp: prompt 28 diverges at 0 with masked gap 0.9663487076759338",
+  "grammar/lp: prompt 29 diverges at 4 with masked gap 1.1200961470603943",
+  "grammar/lp: prompt 30 diverges at 5 with masked gap 10.754264355568012",
+  "grammar/lp: prompt 31 diverges at 5 with masked gap 9.824581793742254",
+  "grammar/lp: prompt 32 diverges at 5 with masked gap 10.614280224748654",
+  "grammar/lp: prompt 33 diverges at 5 with masked gap 9.947459723363863",
+  "grammar/lp: prompt 34 diverges at 2 with masked gap 3.8702259119600058",
+  "grammar/lp: prompt 35 diverges at 4 with masked gap 5.513277232646942",
+  "grammar/lp: prompt 36 diverges at 2 with masked gap 3.2910957001149654",
+  "grammar/lp: prompt 37 diverges at 4 with masked gap 7.836195200681686",
+  "grammar/lp: prompt 38 diverges at 5 with masked gap 10.574706079321913",
+  "grammar/lp: prompt 39 diverges at 4 with masked gap 8.03404792631045",
+  "grammar/lp: prompt 40 diverges at 5 with masked gap 10.706892611422518",
+  "grammar/lp: prompt 41 diverges at 4 with masked gap 7.47512618964538",
+  "grammar/lp: prompt 42 diverges at 5 with masked gap 10.73616957835111",
+  "grammar/lp: prompt 43 diverges at 4 with masked gap 5.056896241381764",
+  "grammar/lp: prompt 44 diverges at 5 with masked gap 9.835559848026605",
+  "grammar/lp: prompt 45 diverges at 3 with masked gap 12.197147091152146",
+  "grammar/lp: prompt 46 diverges at 4 with masked gap 1.6626644432544708",
+  "grammar/lp: prompt 47 diverges at 4 with masked gap 7.235288408817723",
+  "grammar/lp: prompt 48 diverges at 2 with masked gap 3.557855663821101",
+  "grammar/lp: prompt 49 diverges at 5 with masked gap 8.281742998631671",
+  "grammar/lp: prompt 50 diverges at 2 with masked gap 3.8018989488482475",
+  "grammar/lp: prompt 51 diverges at 5 with masked gap 9.471795108285733",
+  "grammar/lp: prompt 52 diverges at 2 with masked gap 2.8541125804185867",
+  "grammar/lp: prompt 53 diverges at 4 with masked gap 10.570865878718905",
+  "grammar/lp: prompt 54 diverges at 2 with masked gap 4.225921769626439",
+  "grammar/lp: prompt 55 diverges at 7 with masked gap 6.455586260184646",
+  "grammar/lp: prompt 56 diverges at 0 with masked gap 1.1197891235351562",
+  "grammar/lp: prompt 57 diverges at 4 with masked gap 4.782825447618961",
+  "grammar/lp: prompt 58 diverges at 2 with masked gap 3.5939692724496126",
+  "grammar/lp: prompt 59 diverges at 4 with masked gap 8.948022434487939",
+  "grammar/lp: prompt 60 diverges at 5 with masked gap 10.51097202397068",
+  "grammar/lp: prompt 61 diverges at 4 with masked gap 10.20213103108108",
+  "grammar/lp: prompt 62 diverges at 2 with masked gap 4.010600935667753",
+  "grammar/lp: prompt 63 diverges at 4 with masked gap 8.070682749152184",
+  "agreement top1 0.9723 below plain 0.9977 - 0.0026",
+  "agreement confident 0.9756 below plain 0.9996 - 0.0025",
+  "KL p50 6.49e-06 above 7.28e-07 (2x the free pair's)",
+  "KL p99 0.155 above 0.00515 (2x the free pair's)"
+ ],
+ "passed": false,
+ "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+ "engine_args": "--max-seqs 4 --max-step-tokens 2048 --memory-fraction 0.9 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options recurrent.checkpoints=4 kv.format=q8_0 spec.k=1:3,3:2",
+ "plant": "no-rollback-after-probe",
+ "hardware": "NVIDIA RTX A5000",
+ "torch": "2.11.0+cu130"
+}

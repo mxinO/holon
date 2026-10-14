@@ -1,0 +1,765 @@
+{
+ "workload": "conformance_qwen3-8b-q4km-full",
+ "date": "2026-10-14",
+ "gpu_class": "rtx-5080",
+ "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf",
+ "serve": "holon serve <model> --port 8000 --max-seqs 16 --max-model-len 32768 --slots logits_processor=grammar.xgrammar (commit fbced8f; core and plugins as 8c59010)",
+ "commit": "b77d45cb80354f7fcf71593e37d9aff0e5bd0275",
+ "method": "JSONSchemaBench conformance of strict JSON-schema requests (docs/m05-grammar.md D9, \u00a71 acceptance 1; evidence).\n\nThe schemas: the test splits of JSONSchemaBench minus Github_trivial / Github_ultra and the 13 unsatisfiable Glaive\nschemas (upstream issue 16), optionally a seeded sample. Three steps, each writing JSON lines into a work directory:\n\n- `precompile` (no server, CPU): per schema, the server's own checks for a strict request \u2014 the constraint check with\n  D9's reject list, then grammar.xgrammar's vetting worker (compile time, compiled size, peak growth; the 10 s\n  timeout, the size and memory caps) \u2014 for one tokenizer. Run on an idle host.\n- `run` (against `holon serve` with grammar.xgrammar): one pass of chat requests (the schema as the prompt, thinking\n  off, no stop strings, `--max-tokens`), constrained by `response_format` (strict) or not (`--free`), greedy or\n  sampled (`--temperature`, `--seed`); per request its status (a 400 / 503 is a rejection, with its reason), finish\n  reason, tokens, TTFT, the largest gap between its stream's events, and whether its output validates\n  (`validator_for(schema)`, format checks on; a request-time `error` finish counts invalid). The server's /metrics\n  before and after, and its frontend process's CPU time, beside it. A 503 is retried twice after 2 s.\n- `report`: the evidence record \u2014 declared coverage and rejections by reason per tokenizer, compile times, and per\n  pass: valid / (accepted \u2212 truncated), truncated share (beside the unconstrained pass's), truncations ending in a\n  whitespace run, TTFT cold (the server's first sight of a schema) vs warm, event gaps, frontend CPU per token.",
+ "prompt": {
+  "system": "You need to generate a JSON object that matches the schema below.",
+  "user": "<the schema's JSON text>"
+ },
+ "precompile": {},
+ "passes": {
+  "cold": {
+   "settings": {
+    "free": false,
+    "temperature": 0.0,
+    "seed": null,
+    "max_tokens": 1,
+    "concurrency": 2,
+    "sample": null,
+    "sample_seed": 0
+   },
+   "format_self_test": {
+    "duration": true,
+    "uri": true,
+    "uuid": true
+   },
+   "requests": 2668,
+   "accepted": 1625,
+   "rejected": {
+    "400": 1040,
+    "503": 3
+   },
+   "finish": {
+    "length": 1625
+   },
+   "truncated": 1625,
+   "truncated_share": 1.0,
+   "truncated_whitespace_runs": [],
+   "valid": 0,
+   "invalid": 0,
+   "validator_could_not_judge": 0,
+   "conformance": null,
+   "invalid_examples": [],
+   "unjudged_examples": [],
+   "tokens": 1625,
+   "ttft_ms": {
+    "n": 1625,
+    "p50": 118.6,
+    "p90": 950.6,
+    "p99": 9207.1,
+    "max": 16566.9
+   },
+   "max_gap_ms": {
+    "n": 1625,
+    "p50": 0.0,
+    "p90": 0.0,
+    "p99": 0.5,
+    "max": 1.1
+   },
+   "wall_s": 562.3,
+   "attempts_over_1": 3,
+   "frontend_cpu_us_per_token": 7415.4,
+   "engine_counters": {
+    "grammar.xgrammar.drafts_refused": 0
+   },
+   "rejection_reasons": {
+    "400: oneOf is not supported": 223,
+    "400: [\u2026] without type '\u2026' are not supported": 130,
+    "400: ['format'] without type 'string' are not supported": 97,
+    "400: an embedded schema resource ($schema, $id or id below the root)": 79,
+    "400: pattern '\u2026': \\S, [\u2026] and . are not supported (xgrammar's are ASCII-only)": 67,
+    "400: format 'date-time' is not supported": 62,
+    "400: [\u2026] beside anyOf are not supported": 41,
+    "400: allOf with two or more branches is not supported": 29,
+    "400: [\u2026] beside enum are not supported": 28,
+    "400: pattern beside [\u2026] is not supported": 27,
+    "400: required [\u2026] not in properties": 27,
+    "400: format 'date' is not supported": 26,
+    "400: prompt of N tokens leaves no room under max_model_len N": 24,
+    "400: format 'email' is not supported": 19,
+    "400: patternProperties beside properties is not supported (a name both match: xgrammar applies properties)": 17,
+    "400: dependencies is not supported": 16,
+    "400: uniqueItems is not supported": 15,
+    "400: [\u2026] beside allOf are not supported": 13,
+    "400: [\u2026] beside $ref are not supported": 11,
+    "400: additionalItems is not supported": 11,
+    "400: format 'path' is not supported": 11,
+    "400: format 'topic' is not supported": 11,
+    "400: format 'time' is not supported": 6,
+    "400: not is not supported": 6,
+    "400: multipleOf is not supported": 5,
+    "400: format 'url' is not supported": 4,
+    "400: format 'hostname' is not supported": 3,
+    "400: format 'byte' is not supported": 3,
+    "400: invalid constraint: Check failed: (false) is false: Integer exceeds maximum limit due to precision loss at N-bit boundar": 3,
+    "503: compiling the constraint took over N s": 3,
+    "400: format 'regex' is not supported": 2,
+    "400: format 'html-selector' is not supported": 2,
+    "400: format 'ipv4' is not supported": 2,
+    "400: if is not supported": 2,
+    "400: invalid constraint: minProperties is greater than the number of properties, but additional properties aren't allowed: N ": 1,
+    "400: format 'semver' is not supported": 1,
+    "400: invalid constraint: minItems is greater than the number of prefixItems, but additional items are not allowed: N > N": 1,
+    "400: format 'evenlength' is not supported": 1,
+    "400: format 'partial-date' is not supported": 1,
+    "400: format 'datetime' is not supported": 1,
+    "400: format '(\\\\d{2}-(\\\\d{2})-(\\\\d{4}))' is not supported": 1,
+    "400: format 'date-type' is not supported": 1,
+    "400: required ['\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '": 1,
+    "400: format 'full-date' is not supported": 1,
+    "400: format 'mongoId' is not supported": 1,
+    "400: pattern beside ['format'] is not supported": 1,
+    "400: invalid constraint: Check failed: (val <= MAX_INTN_AS_DOUBLE) is false: Integer exceeds maximum limit": 1,
+    "400: pattern beside ['format', 'maxLength'] is not supported": 1,
+    "400: /definitions/Vehicle/properties/Engine number: format 'text' is not supported": 1,
+    "400: format 'text' is not supported": 1,
+    "400: else is not supported": 1,
+    "400: contentMediaType is not supported": 1
+   }
+  },
+  "free": {
+   "settings": {
+    "free": true,
+    "temperature": 0.0,
+    "seed": null,
+    "max_tokens": 2048,
+    "concurrency": 16,
+    "sample": null,
+    "sample_seed": 0
+   },
+   "format_self_test": {
+    "duration": true,
+    "uri": true,
+    "uuid": true
+   },
+   "requests": 2668,
+   "accepted": 2644,
+   "rejected": {
+    "400": 24
+   },
+   "finish": {
+    "length": 141,
+    "stop": 2503
+   },
+   "truncated": 141,
+   "truncated_share": 0.0533,
+   "truncated_whitespace_runs": [],
+   "valid": 1983,
+   "invalid": 520,
+   "validator_could_not_judge": 0,
+   "conformance": 0.792249,
+   "invalid_examples": [
+    {
+     "id": "o63476",
+     "finish": "stop",
+     "why": "['definitions']: Additional properties are not allowed ('stringArray' was unexpected)"
+    },
+    {
+     "id": "o13687",
+     "finish": "stop",
+     "why": "[]: 'id' is a required property"
+    },
+    {
+     "id": "o40228",
+     "finish": "stop",
+     "why": "['registrationID']: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6' does not match '[a-zA-Z0-9_-]{162}'"
+    },
+    {
+     "id": "o35168",
+     "finish": "stop",
+     "why": "[]: 'timestamp' is a required property"
+    },
+    {
+     "id": "o6261",
+     "finish": "stop",
+     "why": "['config']: Additional properties are not allowed ('interval', 'retain' were unexpected)"
+    },
+    {
+     "id": "o80803",
+     "finish": "stop",
+     "why": "[]: Additional properties are not allowed ('$schema', 'additionalProperties', 'id', 'items', 'title', 'type' were unexpected)"
+    },
+    {
+     "id": "o90246",
+     "finish": "stop",
+     "why": "[]: {'title': 'Multi-dimensional Definition', 'type': 'object', 'properties': {'dimensionName': {'type': 'string', 'description': 'Type of dimension being used (ex. StdTime).'}, 'isSlice': {'type': 'boolean', 'description': 'Is slice?', 'default': True}, 'values': {'type': 'array', 'description': 'A"
+    },
+    {
+     "id": "o9953",
+     "finish": "stop",
+     "why": "['destinationId']: '550e8400-e29b-41d4-a716-446655440000' does not match '^[A-Fa-f\\\\d]{24}$'"
+    },
+    {
+     "id": "o31008",
+     "finish": "stop",
+     "why": "['builtin']: {'enum': ['MODIFIABLE', 'DELETABLE', 'IMMUTABLE', 'PARTITION_ALL'], 'readonly': True, 'type': 'object'} is not one of ['MODIFIABLE', 'DELETABLE', 'IMMUTABLE', 'PARTITION_ALL']"
+    },
+    {
+     "id": "o84097",
+     "finish": "stop",
+     "why": "[]: 'resourceDefinitions.connectionManagers' is a required property"
+    },
+    {
+     "id": "o73969",
+     "finish": "stop",
+     "why": "[]: 'gis' is a required property"
+    },
+    {
+     "id": "o66192",
+     "finish": "stop",
+     "why": "[]: 'process_type' is a required property"
+    },
+    {
+     "id": "o40353",
+     "finish": "stop",
+     "why": "[]: 'kty' is a required property"
+    },
+    {
+     "id": "o31032",
+     "finish": "stop",
+     "why": "['builtin']: {'enum': ['MODIFIABLE', 'DELETABLE', 'IMMUTABLE', 'PARTITION_ALL'], 'type': 'object'} is not one of ['MODIFIABLE', 'DELETABLE', 'IMMUTABLE', 'PARTITION_ALL']"
+    },
+    {
+     "id": "o10318",
+     "finish": "stop",
+     "why": "[]: {'items': [{'href': 'https://example.com/page1', 'rel': 'self'}, {'href': 'https://example.com/page2', 'rel': 'next'}], 'readOnly': True} is not of type 'array'"
+    },
+    {
+     "id": "o17543",
+     "finish": "stop",
+     "why": "['name']: 'ExampleForm' is too long"
+    },
+    {
+     "id": "o50682",
+     "finish": "stop",
+     "why": "['account_identifier']: '+valid_identifier123' does not match '^[\\\\\\\\+\\\\\\\\w-]{5,96}$'"
+    },
+    {
+     "id": "o30305",
+     "finish": "stop",
+     "why": "['builtin']: {'enum': ['MODIFIABLE', 'DELETABLE', 'IMMUTABLE', 'PARTITION_ALL'], 'readonly': True} is not one of ['MODIFIABLE', 'DELETABLE', 'IMMUTABLE', 'PARTITION_ALL']"
+    },
+    {
+     "id": "o66309",
+     "finish": "stop",
+     "why": "[]: 'field' is a required property"
+    },
+    {
+     "id": "o67463",
+     "finish": "stop",
+     "why": "[0, 1]: '' is not valid under any of the given schemas"
+    }
+   ],
+   "unjudged_examples": [],
+   "tokens": 919392,
+   "ttft_ms": {
+    "n": 2644,
+    "p50": 85.2,
+    "p90": 8463.2,
+    "p99": 45557.9,
+    "max": 70470.3
+   },
+   "max_gap_ms": {
+    "n": 2644,
+    "p50": 112.1,
+    "p90": 988.8,
+    "p99": 5342.4,
+    "max": 18378.4
+   },
+   "wall_s": 1789.9,
+   "attempts_over_1": 0,
+   "frontend_cpu_us_per_token": 66.2,
+   "engine_counters": {
+    "grammar.xgrammar.drafts_refused": 0
+   },
+   "rejection_reasons": {
+    "400: prompt of N tokens leaves no room under max_model_len N": 24
+   },
+   "truncated_vs_free": {
+    "schemas": 2637,
+    "share": 0.0523,
+    "free_share": 0.0523,
+    "points": 0.0
+   }
+  },
+  "greedy": {
+   "settings": {
+    "free": false,
+    "temperature": 0.0,
+    "seed": null,
+    "max_tokens": 2048,
+    "concurrency": 16,
+    "sample": null,
+    "sample_seed": 0
+   },
+   "format_self_test": {
+    "duration": true,
+    "uri": true,
+    "uuid": true
+   },
+   "requests": 2668,
+   "accepted": 1616,
+   "rejected": {
+    "400": 1040,
+    "503": 12
+   },
+   "finish": {
+    "length": 33,
+    "stop": 1583
+   },
+   "truncated": 33,
+   "truncated_share": 0.0204,
+   "truncated_whitespace_runs": [
+    "o78734",
+    "o82694"
+   ],
+   "valid": 1582,
+   "invalid": 1,
+   "validator_could_not_judge": 0,
+   "conformance": 0.999368,
+   "invalid_examples": [
+    {
+     "id": "vars",
+     "finish": "stop",
+     "why": "[]: {'playbook': 'example_playbook.yml', 'hosts': 'all', 'tasks': [{'name': 'Ensure HTTP is running', 'service': {'name': 'httpd', 'state': 'started', 'enabled': True}}], 'vars': {'http_port': 80, 'server_name': 'example.com'}} is not valid under any of the given schemas"
+    }
+   ],
+   "unjudged_examples": [],
+   "tokens": 266191,
+   "ttft_ms": {
+    "n": 1616,
+    "p50": 151.5,
+    "p90": 3909.5,
+    "p99": 14815.8,
+    "max": 29364.3
+   },
+   "max_gap_ms": {
+    "n": 1616,
+    "p50": 90.0,
+    "p90": 525.6,
+    "p99": 3684.5,
+    "max": 35794.5
+   },
+   "wall_s": 473.1,
+   "attempts_over_1": 28,
+   "frontend_cpu_us_per_token": 100.8,
+   "engine_counters": {
+    "grammar.xgrammar.drafts_refused": 0
+   },
+   "rejection_reasons": {
+    "400: oneOf is not supported": 223,
+    "400: [\u2026] without type '\u2026' are not supported": 130,
+    "400: ['format'] without type 'string' are not supported": 97,
+    "400: an embedded schema resource ($schema, $id or id below the root)": 79,
+    "400: pattern '\u2026': \\S, [\u2026] and . are not supported (xgrammar's are ASCII-only)": 67,
+    "400: format 'date-time' is not supported": 62,
+    "400: [\u2026] beside anyOf are not supported": 41,
+    "400: allOf with two or more branches is not supported": 29,
+    "400: [\u2026] beside enum are not supported": 28,
+    "400: pattern beside [\u2026] is not supported": 27,
+    "400: required [\u2026] not in properties": 27,
+    "400: format 'date' is not supported": 26,
+    "400: prompt of N tokens leaves no room under max_model_len N": 24,
+    "400: format 'email' is not supported": 19,
+    "400: patternProperties beside properties is not supported (a name both match: xgrammar applies properties)": 17,
+    "400: dependencies is not supported": 16,
+    "400: uniqueItems is not supported": 15,
+    "400: [\u2026] beside allOf are not supported": 13,
+    "400: [\u2026] beside $ref are not supported": 11,
+    "400: additionalItems is not supported": 11,
+    "400: format 'path' is not supported": 11,
+    "400: format 'topic' is not supported": 11,
+    "503: N.N s of constraint compiles are queued": 9,
+    "400: format 'time' is not supported": 6,
+    "400: not is not supported": 6,
+    "400: multipleOf is not supported": 5,
+    "400: format 'url' is not supported": 4,
+    "400: format 'hostname' is not supported": 3,
+    "400: format 'byte' is not supported": 3,
+    "400: invalid constraint: Check failed: (false) is false: Integer exceeds maximum limit due to precision loss at N-bit boundar": 3,
+    "503: compiling the constraint took over N s": 3,
+    "400: format 'regex' is not supported": 2,
+    "400: format 'html-selector' is not supported": 2,
+    "400: format 'ipv4' is not supported": 2,
+    "400: if is not supported": 2,
+    "400: invalid constraint: minProperties is greater than the number of properties, but additional properties aren't allowed: N ": 1,
+    "400: format 'semver' is not supported": 1,
+    "400: invalid constraint: minItems is greater than the number of prefixItems, but additional items are not allowed: N > N": 1,
+    "400: format 'evenlength' is not supported": 1,
+    "400: format 'partial-date' is not supported": 1,
+    "400: format 'datetime' is not supported": 1,
+    "400: format '(\\\\d{2}-(\\\\d{2})-(\\\\d{4}))' is not supported": 1,
+    "400: format 'date-type' is not supported": 1,
+    "400: required ['\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '": 1,
+    "400: format 'full-date' is not supported": 1,
+    "400: format 'mongoId' is not supported": 1,
+    "400: pattern beside ['format'] is not supported": 1,
+    "400: invalid constraint: Check failed: (val <= MAX_INTN_AS_DOUBLE) is false: Integer exceeds maximum limit": 1,
+    "400: pattern beside ['format', 'maxLength'] is not supported": 1,
+    "400: /definitions/Vehicle/properties/Engine number: format 'text' is not supported": 1,
+    "400: format 'text' is not supported": 1,
+    "400: else is not supported": 1,
+    "400: contentMediaType is not supported": 1
+   },
+   "truncated_vs_free": {
+    "schemas": 1615,
+    "share": 0.0198,
+    "free_share": 0.0372,
+    "points": -1.73
+   }
+  },
+  "sampled-s0": {
+   "settings": {
+    "free": false,
+    "temperature": 1.0,
+    "seed": 0,
+    "max_tokens": 2048,
+    "concurrency": 16,
+    "sample": null,
+    "sample_seed": 0
+   },
+   "format_self_test": {
+    "duration": true,
+    "uri": true,
+    "uuid": true
+   },
+   "requests": 2668,
+   "accepted": 1616,
+   "rejected": {
+    "400": 1040,
+    "503": 12
+   },
+   "finish": {
+    "length": 29,
+    "stop": 1587
+   },
+   "truncated": 29,
+   "truncated_share": 0.0179,
+   "truncated_whitespace_runs": [
+    "o78734"
+   ],
+   "valid": 1587,
+   "invalid": 0,
+   "validator_could_not_judge": 0,
+   "conformance": 1.0,
+   "invalid_examples": [],
+   "unjudged_examples": [],
+   "tokens": 262630,
+   "ttft_ms": {
+    "n": 1616,
+    "p50": 143.1,
+    "p90": 4558.8,
+    "p99": 8822.2,
+    "max": 10956.6
+   },
+   "max_gap_ms": {
+    "n": 1616,
+    "p50": 87.5,
+    "p90": 495.5,
+    "p99": 3180.6,
+    "max": 24779.1
+   },
+   "wall_s": 468.3,
+   "attempts_over_1": 26,
+   "frontend_cpu_us_per_token": 101.4,
+   "engine_counters": {
+    "grammar.xgrammar.drafts_refused": 0
+   },
+   "rejection_reasons": {
+    "400: oneOf is not supported": 223,
+    "400: [\u2026] without type '\u2026' are not supported": 130,
+    "400: ['format'] without type 'string' are not supported": 97,
+    "400: an embedded schema resource ($schema, $id or id below the root)": 79,
+    "400: pattern '\u2026': \\S, [\u2026] and . are not supported (xgrammar's are ASCII-only)": 67,
+    "400: format 'date-time' is not supported": 62,
+    "400: [\u2026] beside anyOf are not supported": 41,
+    "400: allOf with two or more branches is not supported": 29,
+    "400: [\u2026] beside enum are not supported": 28,
+    "400: pattern beside [\u2026] is not supported": 27,
+    "400: required [\u2026] not in properties": 27,
+    "400: format 'date' is not supported": 26,
+    "400: prompt of N tokens leaves no room under max_model_len N": 24,
+    "400: format 'email' is not supported": 19,
+    "400: patternProperties beside properties is not supported (a name both match: xgrammar applies properties)": 17,
+    "400: dependencies is not supported": 16,
+    "400: uniqueItems is not supported": 15,
+    "400: [\u2026] beside allOf are not supported": 13,
+    "400: [\u2026] beside $ref are not supported": 11,
+    "400: additionalItems is not supported": 11,
+    "400: format 'path' is not supported": 11,
+    "400: format 'topic' is not supported": 11,
+    "503: N.N s of constraint compiles are queued": 9,
+    "400: format 'time' is not supported": 6,
+    "400: not is not supported": 6,
+    "400: multipleOf is not supported": 5,
+    "400: format 'url' is not supported": 4,
+    "400: format 'hostname' is not supported": 3,
+    "400: format 'byte' is not supported": 3,
+    "400: invalid constraint: Check failed: (false) is false: Integer exceeds maximum limit due to precision loss at N-bit boundar": 3,
+    "503: compiling the constraint took over N s": 3,
+    "400: format 'regex' is not supported": 2,
+    "400: format 'html-selector' is not supported": 2,
+    "400: format 'ipv4' is not supported": 2,
+    "400: if is not supported": 2,
+    "400: invalid constraint: minProperties is greater than the number of properties, but additional properties aren't allowed: N ": 1,
+    "400: format 'semver' is not supported": 1,
+    "400: invalid constraint: minItems is greater than the number of prefixItems, but additional items are not allowed: N > N": 1,
+    "400: format 'evenlength' is not supported": 1,
+    "400: format 'partial-date' is not supported": 1,
+    "400: format 'datetime' is not supported": 1,
+    "400: format '(\\\\d{2}-(\\\\d{2})-(\\\\d{4}))' is not supported": 1,
+    "400: format 'date-type' is not supported": 1,
+    "400: required ['\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '": 1,
+    "400: format 'full-date' is not supported": 1,
+    "400: format 'mongoId' is not supported": 1,
+    "400: pattern beside ['format'] is not supported": 1,
+    "400: invalid constraint: Check failed: (val <= MAX_INTN_AS_DOUBLE) is false: Integer exceeds maximum limit": 1,
+    "400: pattern beside ['format', 'maxLength'] is not supported": 1,
+    "400: /definitions/Vehicle/properties/Engine number: format 'text' is not supported": 1,
+    "400: format 'text' is not supported": 1,
+    "400: else is not supported": 1,
+    "400: contentMediaType is not supported": 1
+   },
+   "truncated_vs_free": {
+    "schemas": 1615,
+    "share": 0.0173,
+    "free_share": 0.0372,
+    "points": -1.98
+   }
+  },
+  "sampled-s1": {
+   "settings": {
+    "free": false,
+    "temperature": 1.0,
+    "seed": 1,
+    "max_tokens": 2048,
+    "concurrency": 16,
+    "sample": null,
+    "sample_seed": 0
+   },
+   "format_self_test": {
+    "duration": true,
+    "uri": true,
+    "uuid": true
+   },
+   "requests": 2668,
+   "accepted": 1615,
+   "rejected": {
+    "400": 1040,
+    "503": 13
+   },
+   "finish": {
+    "length": 31,
+    "stop": 1584
+   },
+   "truncated": 31,
+   "truncated_share": 0.0192,
+   "truncated_whitespace_runs": [
+    "o78734",
+    "o61120",
+    "kb_1019_Normalized"
+   ],
+   "valid": 1584,
+   "invalid": 0,
+   "validator_could_not_judge": 0,
+   "conformance": 1.0,
+   "invalid_examples": [],
+   "unjudged_examples": [],
+   "tokens": 271174,
+   "ttft_ms": {
+    "n": 1615,
+    "p50": 137.9,
+    "p90": 4129.5,
+    "p99": 14328.3,
+    "max": 21893.2
+   },
+   "max_gap_ms": {
+    "n": 1615,
+    "p50": 86.9,
+    "p90": 534.2,
+    "p99": 3758.6,
+    "max": 73325.7
+   },
+   "wall_s": 477.5,
+   "attempts_over_1": 28,
+   "frontend_cpu_us_per_token": 97.8,
+   "engine_counters": {
+    "grammar.xgrammar.drafts_refused": 0
+   },
+   "rejection_reasons": {
+    "400: oneOf is not supported": 223,
+    "400: [\u2026] without type '\u2026' are not supported": 130,
+    "400: ['format'] without type 'string' are not supported": 97,
+    "400: an embedded schema resource ($schema, $id or id below the root)": 79,
+    "400: pattern '\u2026': \\S, [\u2026] and . are not supported (xgrammar's are ASCII-only)": 67,
+    "400: format 'date-time' is not supported": 62,
+    "400: [\u2026] beside anyOf are not supported": 41,
+    "400: allOf with two or more branches is not supported": 29,
+    "400: [\u2026] beside enum are not supported": 28,
+    "400: pattern beside [\u2026] is not supported": 27,
+    "400: required [\u2026] not in properties": 27,
+    "400: format 'date' is not supported": 26,
+    "400: prompt of N tokens leaves no room under max_model_len N": 24,
+    "400: format 'email' is not supported": 19,
+    "400: patternProperties beside properties is not supported (a name both match: xgrammar applies properties)": 17,
+    "400: dependencies is not supported": 16,
+    "400: uniqueItems is not supported": 15,
+    "400: [\u2026] beside allOf are not supported": 13,
+    "400: [\u2026] beside $ref are not supported": 11,
+    "400: additionalItems is not supported": 11,
+    "400: format 'path' is not supported": 11,
+    "400: format 'topic' is not supported": 11,
+    "503: N.N s of constraint compiles are queued": 10,
+    "400: format 'time' is not supported": 6,
+    "400: not is not supported": 6,
+    "400: multipleOf is not supported": 5,
+    "400: format 'url' is not supported": 4,
+    "400: format 'hostname' is not supported": 3,
+    "400: format 'byte' is not supported": 3,
+    "400: invalid constraint: Check failed: (false) is false: Integer exceeds maximum limit due to precision loss at N-bit boundar": 3,
+    "503: compiling the constraint took over N s": 3,
+    "400: format 'regex' is not supported": 2,
+    "400: format 'html-selector' is not supported": 2,
+    "400: format 'ipv4' is not supported": 2,
+    "400: if is not supported": 2,
+    "400: invalid constraint: minProperties is greater than the number of properties, but additional properties aren't allowed: N ": 1,
+    "400: format 'semver' is not supported": 1,
+    "400: invalid constraint: minItems is greater than the number of prefixItems, but additional items are not allowed: N > N": 1,
+    "400: format 'evenlength' is not supported": 1,
+    "400: format 'partial-date' is not supported": 1,
+    "400: format 'datetime' is not supported": 1,
+    "400: format '(\\\\d{2}-(\\\\d{2})-(\\\\d{4}))' is not supported": 1,
+    "400: format 'date-type' is not supported": 1,
+    "400: required ['\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '": 1,
+    "400: format 'full-date' is not supported": 1,
+    "400: format 'mongoId' is not supported": 1,
+    "400: pattern beside ['format'] is not supported": 1,
+    "400: invalid constraint: Check failed: (val <= MAX_INTN_AS_DOUBLE) is false: Integer exceeds maximum limit": 1,
+    "400: pattern beside ['format', 'maxLength'] is not supported": 1,
+    "400: /definitions/Vehicle/properties/Engine number: format 'text' is not supported": 1,
+    "400: format 'text' is not supported": 1,
+    "400: else is not supported": 1,
+    "400: contentMediaType is not supported": 1
+   },
+   "truncated_vs_free": {
+    "schemas": 1614,
+    "share": 0.0186,
+    "free_share": 0.0372,
+    "points": -1.86
+   }
+  },
+  "warm": {
+   "settings": {
+    "free": false,
+    "temperature": 0.0,
+    "seed": null,
+    "max_tokens": 1,
+    "concurrency": 2,
+    "sample": null,
+    "sample_seed": 0
+   },
+   "format_self_test": {
+    "duration": true,
+    "uri": true,
+    "uuid": true
+   },
+   "requests": 2668,
+   "accepted": 1625,
+   "rejected": {
+    "400": 1040,
+    "503": 3
+   },
+   "finish": {
+    "length": 1625
+   },
+   "truncated": 1625,
+   "truncated_share": 1.0,
+   "truncated_whitespace_runs": [],
+   "valid": 0,
+   "invalid": 0,
+   "validator_could_not_judge": 0,
+   "conformance": null,
+   "invalid_examples": [],
+   "unjudged_examples": [],
+   "tokens": 1625,
+   "ttft_ms": {
+    "n": 1625,
+    "p50": 75.7,
+    "p90": 791.1,
+    "p99": 4696.7,
+    "max": 8286.5
+   },
+   "max_gap_ms": {
+    "n": 1625,
+    "p50": 0.0,
+    "p90": 0.1,
+    "p99": 0.4,
+    "max": 6.2
+   },
+   "wall_s": 330.9,
+   "attempts_over_1": 3,
+   "frontend_cpu_us_per_token": 7058.5,
+   "engine_counters": {
+    "grammar.xgrammar.drafts_refused": 0
+   },
+   "rejection_reasons": {
+    "400: oneOf is not supported": 223,
+    "400: [\u2026] without type '\u2026' are not supported": 130,
+    "400: ['format'] without type 'string' are not supported": 97,
+    "400: an embedded schema resource ($schema, $id or id below the root)": 79,
+    "400: pattern '\u2026': \\S, [\u2026] and . are not supported (xgrammar's are ASCII-only)": 67,
+    "400: format 'date-time' is not supported": 62,
+    "400: [\u2026] beside anyOf are not supported": 41,
+    "400: allOf with two or more branches is not supported": 29,
+    "400: [\u2026] beside enum are not supported": 28,
+    "400: pattern beside [\u2026] is not supported": 27,
+    "400: required [\u2026] not in properties": 27,
+    "400: format 'date' is not supported": 26,
+    "400: prompt of N tokens leaves no room under max_model_len N": 24,
+    "400: format 'email' is not supported": 19,
+    "400: patternProperties beside properties is not supported (a name both match: xgrammar applies properties)": 17,
+    "400: dependencies is not supported": 16,
+    "400: uniqueItems is not supported": 15,
+    "400: [\u2026] beside allOf are not supported": 13,
+    "400: [\u2026] beside $ref are not supported": 11,
+    "400: additionalItems is not supported": 11,
+    "400: format 'path' is not supported": 11,
+    "400: format 'topic' is not supported": 11,
+    "400: format 'time' is not supported": 6,
+    "400: not is not supported": 6,
+    "400: multipleOf is not supported": 5,
+    "400: format 'url' is not supported": 4,
+    "400: format 'hostname' is not supported": 3,
+    "400: format 'byte' is not supported": 3,
+    "400: invalid constraint: Check failed: (false) is false: Integer exceeds maximum limit due to precision loss at N-bit boundar": 3,
+    "503: compiling the constraint took over N s": 3,
+    "400: format 'regex' is not supported": 2,
+    "400: format 'html-selector' is not supported": 2,
+    "400: format 'ipv4' is not supported": 2,
+    "400: if is not supported": 2,
+    "400: invalid constraint: minProperties is greater than the number of properties, but additional properties aren't allowed: N ": 1,
+    "400: format 'semver' is not supported": 1,
+    "400: invalid constraint: minItems is greater than the number of prefixItems, but additional items are not allowed: N > N": 1,
+    "400: format 'evenlength' is not supported": 1,
+    "400: format 'partial-date' is not supported": 1,
+    "400: format 'datetime' is not supported": 1,
+    "400: format '(\\\\d{2}-(\\\\d{2})-(\\\\d{4}))' is not supported": 1,
+    "400: format 'date-type' is not supported": 1,
+    "400: required ['\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '\u2026', '": 1,
+    "400: format 'full-date' is not supported": 1,
+    "400: format 'mongoId' is not supported": 1,
+    "400: pattern beside ['format'] is not supported": 1,
+    "400: invalid constraint: Check failed: (val <= MAX_INTN_AS_DOUBLE) is false: Integer exceeds maximum limit": 1,
+    "400: pattern beside ['format', 'maxLength'] is not supported": 1,
+    "400: /definitions/Vehicle/properties/Engine number: format 'text' is not supported": 1,
+    "400: format 'text' is not supported": 1,
+    "400: else is not supported": 1,
+    "400: contentMediaType is not supported": 1
+   }
+  }
+ }
+}
