@@ -31,9 +31,3 @@ class Bundle:
         text = self.tokenizer._tok.apply_chat_template(messages, tools=tools, tokenize=False,
                                                        add_generation_prompt=add_generation_prompt, **template_kwargs)
         return self.tokenizer.encode(text)
-
-    def reasoning_parser(self) -> None:
-        return None                                 # the frontend's think@1
-
-    def tool_parser(self, tools: list[dict[str, Any]]) -> None:
-        return None                                 # the frontend's hermes@1

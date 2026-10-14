@@ -228,7 +228,8 @@ def reason(message: str) -> str:
     message = re.sub(r"\(supported: .*\)", "", message)
     if "format" in message:
         return message.strip()[:120]
-    return re.sub(r"\d+", "N", re.sub(r"'[^']*'", "'…'", message)).strip()[:120]
+    message = re.sub(r"\[[^\]]*\]", "[…]", re.sub(r"'[^']*'", "'…'", message))
+    return re.sub(r"\d+", "N", message).strip()[:120]
 
 
 def summarize_pass(rows: list[dict], meta: dict) -> dict:

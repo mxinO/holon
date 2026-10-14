@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from .batch import SamplingParams
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator
+    from collections.abc import AsyncIterator
 
 
 @dataclasses.dataclass(slots=True)
@@ -89,17 +89,8 @@ class ToolCallEnd:
 ParseEvent = Text | Reasoning | ToolCallStart | ToolArgsDelta | ToolCallEnd
 
 
-class Parser(Protocol):
-    """Streaming reasoning/tool-call parser with a `channel()` state machine (design §7.8): the same events whether
-    the text arrives at once or in pieces."""
-
-    def feed(self, text: str) -> Iterator[ParseEvent]: ...
-
-    def channel(self) -> str: ...
-
-
 class FrontendBundle(Protocol):
-    """Shipped by the model plugin (`ModelPlugin.bundle(source)`): tokenizer, chat template, parsers. The formats its
+    """Shipped by the model plugin (`ModelPlugin.bundle(source)`): tokenizer and chat template. The formats its
     template writes reasoning and tool calls in are named with versions (e.g. "hermes@1", "think@1"); the frontend
     implements each named format once — its parser and its constraint builder."""
 
@@ -111,11 +102,6 @@ class FrontendBundle(Protocol):
     def render_chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                     add_generation_prompt: bool = True, **template_kwargs: Any) -> list[int]:
         """Token ids of a chat, rendered with the model's chat template."""
-
-    def reasoning_parser(self) -> Parser | None: ...
-
-    def tool_parser(self, tools: list[dict[str, Any]]) -> Parser | None:
-        """A parser of tool calls to `tools` (the request's, whose schemas type the argument values)."""
 
     # Optional: `constraint(tools, tool_choice, response_format) -> dict | None`, the constraint resource (a plain
     # dict for `SamplingParams.ext`, M0.5 design D6) for a template whose format the frontend does not build.
@@ -136,6 +122,8 @@ class EngineClient(Protocol):
 
 
 class FrontendPlugin(Protocol):
-    """A `frontend` slot plugin: serves an API (HTTP, …) over the engine client until cancelled."""
+    """A `frontend` slot plugin: serves an API (HTTP, …) over the engine client until cancelled; `options` are the
+    deployment's plugin options (`EngineConfig.plugin_options`), of which it reads its own namespace."""
 
-    async def serve(self, client: EngineClient, bundle: FrontendBundle, host: str, port: int) -> None: ...
+    async def serve(self, client: EngineClient, bundle: FrontendBundle, host: str, port: int,
+                    options: dict[str, object]) -> None: ...

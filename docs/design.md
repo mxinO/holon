@@ -1146,10 +1146,11 @@ Separate process. One frontend package serves the API dialects (M0.5 D7: OpenAI 
 Anthropic Messages as routers of one app over one pipeline: normalize → render → generate → reasoning/tool parse →
 typed events), using the model plugin's `FrontendBundle`: tokenizer, chat template, and the formats its template
 writes reasoning and tool calls in (`reasoning_format`, `tool_format`, versioned names such as "hermes@1"); the
-frontend implements each named format once — its streaming parser (`Parser.feed` yields typed events: `Text`,
-`Reasoning`, `ToolCallStart`, `ToolArgsDelta`, `ToolCallEnd`) and its constraint builder (a plain-dict resource in
-`SamplingParams.ext` that the logits processor's plugin declares and translates). Stop strings are matched in the
-frontend and trigger `abort`; stop tokens are checked at the engine's commit.
+frontend implements each named format once — its streaming parser (typed events: `Text`, `Reasoning`,
+`ToolCallStart`, `ToolArgsDelta`, `ToolCallEnd`) and its constraint builder (a plain-dict resource in
+`SamplingParams.ext` that the logits processor's plugin declares and translates). The frontend plugin gets the
+deployment's plugin options and reads its own namespace (e.g. `http.drop_billing_header`). Stop strings are matched in
+the frontend and trigger `abort`; stop tokens are checked at the engine's commit.
 
 The frontend↔engine protocol is a **language-neutral schema** (token ids, sampling params, deltas, logprobs;
 msgspec structs from which a protobuf/IDL file is generated and checked in CI), so the frontend can later be replaced by a native (e.g. Rust)

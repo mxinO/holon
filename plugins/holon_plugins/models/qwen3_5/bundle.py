@@ -37,12 +37,6 @@ class Bundle:
         return self.tokenizer._tok.apply_chat_template(messages, tools=tools, tokenize=False,
                                                        add_generation_prompt=add_generation_prompt, **template_kwargs)
 
-    def reasoning_parser(self) -> None:
-        return None                                 # the frontend's think@1
-
-    def tool_parser(self, tools: list[dict[str, Any]]) -> None:
-        return None                                 # the frontend's qwen_xml@1 / @2
-
 
 def _parsed(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Tool-call arguments sent as JSON text (OpenAI's wire form) as objects: the XML templates iterate them (the

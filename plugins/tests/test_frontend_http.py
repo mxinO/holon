@@ -57,11 +57,6 @@ class Bundle:
         text = "".join(f"<{m['role']}>{m.get('content') or ''}" for m in messages)
         return self.tokenizer.encode(text + "<assistant>" + self.tail)
 
-    def reasoning_parser(self):
-        return None
-
-    def tool_parser(self, tools):
-        return None
 
 
 class FakeEngine:

@@ -72,10 +72,11 @@ def main(argv: list[str] | None = None) -> None:
     async def run() -> None:
         if not args.supervised:
             async with engine_process(config) as client:
-                await frontend.serve(client, bundle, args.host, args.port)
+                await frontend.serve(client, bundle, args.host, args.port, config.plugin_options)
             return
         async with supervised([config]) as supervisor:      # the lock history arrives with the registry (§4.4)
-            serving = asyncio.ensure_future(frontend.serve(supervisor, bundle, args.host, args.port))
+            serving = asyncio.ensure_future(frontend.serve(supervisor, bundle, args.host, args.port,
+                                                           config.plugin_options))
             gave_up = asyncio.ensure_future(supervisor.failed())
             done, _ = await asyncio.wait({serving, gave_up}, return_when=asyncio.FIRST_COMPLETED)
             serving.cancel()
