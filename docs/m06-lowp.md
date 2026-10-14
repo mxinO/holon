@@ -1112,6 +1112,7 @@ before). Flags: the FP4 locks' (0.9, `max_seqs` 32, bf16 KV); a 16128-token prom
   Decode (A16 floor) and P1, P2 (gross) and P4 (decode) are unaffected.
 - **`MERGED` / `adjacent`** say that they follow the composites' `finalize_weights` merge lists.
 - **The RTX 4090 bars record** notes the voided first node.
+- **Suite and CI** at 7430d72: full GPU suite (two A5000s) 1168 passed, 50 skipped, 0 errors, 20 min 11 s; `scripts/ci/run_all.sh` green.
 
 **For M0.7** (recorded, not implemented):
 - **Propagation:** expect the merge-order change (`std.weights.hf` `adjacent`) to move every HF lock's KV sizes. Traces
