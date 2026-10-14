@@ -10,11 +10,16 @@ payload gets the K − 1 conv inputs before the position, all from the step's ow
 
 Speculative verify rows (M0.4 D6) leave both states at their pre-verify values S0: the conv window and the row's conv
 inputs and gates are saved, and the delta rule writes its final state to the padding slot's unit (a sink nothing
-reads). Once the verifier has accepted n drafts, `rewind` restores the conv window, recomputes the convolution, and
-reruns the delta rule from S0 over the row with a = b = −1e4 past its first 1 + n tokens — g = −exp(A)·softplus(−1e4)
-= 0 and β = sigmoid(−1e4) = 0 leave S unchanged there — writing the state after the accepted tokens, then sets the
-conv window at the accepted end. Both delta-rule calls are planned `per_token`, so the result is bitwise what 1 + n
-one-token decode steps would leave.
+reads). Once the verifier has accepted n drafts, `rewind` reruns the delta rule from S0 over the row with a = b = −1e4
+past its first 1 + n tokens — g = −exp(A)·softplus(−1e4) = 0 and β = sigmoid(−1e4) = 0 leave S unchanged there —
+writing the state after the accepted tokens; its convolution is recomputed from the saved window. Both delta-rule
+calls are planned `per_token`, so the result is bitwise what 1 + n one-token decode steps would leave.
+
+The glue runs once per step for every layer (docs/m07-perf.md D5): the replay buffers have a layer axis (one buffer
+per name, each layer's slice at its index in the group), and the group's first layer — `rewind_modules` visits layers
+in order; no counter, so graph warm-up and capture behave alike — masks every layer's saved gates and writes every
+layer's conv window at the accepted end into the pool, from window ‖ saved x. Each layer's convolution then takes the
+saved window buffer as its state (rows `arange(R)`), so it never touches the pool.
 """
 from __future__ import annotations
 
@@ -137,12 +142,15 @@ class GDN(nn.Module):
         self._state = None if conv_bound is None else (conv_bound, ssm_bound, conv_bound[0].layers.index(layer))
         self._rule = self._replay = None
         if conv_bound is not None and ctx.options.get("max_draft_tokens"):     # verify rows: what `rewind` reruns
-            rows = ctx.options["max_seqs"]
-            tokens, name = rows * (1 + ctx.options["max_draft_tokens"]), f"gdn.replay.{layer}"
-            self._replay = (ctx.static(name + ".x", (tokens, self.channels), ctx.dtype),
-                            ctx.static(name + ".a", (tokens, heads_v), ctx.dtype),
-                            ctx.static(name + ".b", (tokens, heads_v), ctx.dtype),
-                            ctx.static(name + ".window", (rows, self.channels, conv_kernel - 1), ctx.dtype))
+            rows, n = ctx.options["max_seqs"], len(conv_bound[0].layers)
+            tokens = rows * (1 + ctx.options["max_draft_tokens"])
+            self._shared = (ctx.static("gdn.replay.x", (n, tokens, self.channels), ctx.dtype),     # every layer's
+                            ctx.static("gdn.replay.a", (n, tokens, heads_v), ctx.dtype),
+                            ctx.static("gdn.replay.b", (n, tokens, heads_v), ctx.dtype),
+                            ctx.static("gdn.replay.window", (n, rows, self.channels, conv_kernel - 1), ctx.dtype))
+            self._replay = tuple(buf[self._state[2]] for buf in self._shared)                  # this layer's
+            self._rows = ctx.static("gdn.replay.rows", (rows,), torch.long)
+            self._rows.copy_(torch.arange(rows, device=self._rows.device))     # the replay conv's state rows
             self._sink = rows                       # the padding slot's unit: never read (graph padding rows only)
         if conv_bound is None:                     # a model-only build: whole sequences from zero state
             facts = {"heads_k": heads_k, "heads_v": heads_v, "head_k_dim": head_k_dim, "head_v_dim": head_v_dim,
@@ -151,11 +159,14 @@ class GDN(nn.Module):
 
     def _states(self, conv_pool=None, ssm_pool=None) -> tuple[torch.Tensor, torch.Tensor]:
         """This layer's view of the conv and delta-rule pools (the specs' own, or payload pools of their layout)."""
-        (conv_spec, own_conv), (_, own_ssm), index = self._state
-        conv_pool, ssm_pool, n = conv_pool or own_conv, ssm_pool or own_ssm, len(conv_spec.layers)
-        conv = conv_pool.view(self.conv_weight.dtype, (n, conv_pool.capacity, self.channels, self.kernel - 1))
-        ssm = ssm_pool.view(torch.float32, (n, ssm_pool.capacity, self.hv, self.dv, self.dk))
-        return conv[index], ssm[index]
+        (_, own_conv), (_, own_ssm), index = self._state
+        conv_pool, ssm_pool = conv_pool or own_conv, ssm_pool or own_ssm
+        ssm = ssm_pool.view(torch.float32, (-1, ssm_pool.capacity, self.hv, self.dv, self.dk))
+        return self._conv_states(conv_pool)[index], ssm[index]
+
+    def _conv_states(self, pool) -> torch.Tensor:
+        """Every layer's conv states in `pool`: [layers, units, C, K-1]."""
+        return pool.view(self.conv_weight.dtype, (-1, pool.capacity, self.channels, self.kernel - 1))
 
     def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
         t = x.shape[0]
@@ -205,19 +216,24 @@ class GDN(nn.Module):
         """After a verify step: the conv window and the delta-rule state after each row's accepted tokens (D6)."""
         if self._state is None or not (meta := ctx.meta(GROUP)).verify:
             return
-        conv_state, ssm_state = self._states()
         saved_x, saved_a, saved_b, window = self._replay
-        slots, qs, rows = meta.slots, meta.query_start, len(meta.slots)
-        t = int(ctx.batch.plan.n_query.sum())
-        width, kept = t // rows, self.kernel - 1
-        units = slots.long()
+        rows, t = len(meta.slots), int(ctx.batch.plan.n_query.sum())
+        if self._state[2] == 0:                  # the group's first layer: every layer's glue (D5)
+            self._restore(ctx, meta.slots.long(), rows, t)
+        mixed = self._conv(saved_x[:t], self.conv_weight, window, self._rows[:rows], meta.query_start, meta.has_init)
+        self._rule_call(meta.rule, meta.handle, mixed, saved_a[:t], saved_b[:t], self._states()[1], meta.slots,
+                        meta.has_init, out_slots=meta.slots)
+
+    def _restore(self, ctx, units: torch.Tensor, rows: int, t: int) -> None:
+        """Every layer's saved gates masked past each row's accepted tokens, and its conv window at the accepted end
+        written into the pool from window ‖ saved x."""
+        x, a, b, window = self._shared
+        n, width, kept = x.shape[0], t // rows, self.kernel - 1
         keep = 1 + ctx.seq_table.n_accept[units]                                   # tokens accepted per row
-        conv_state.index_copy_(0, units, window[:rows])
-        mixed = self._conv(saved_x[:t], self.conv_weight, conv_state, slots, qs, meta.has_init)
-        past = (torch.arange(width, device=keep.device) >= keep[:, None]).reshape(t, 1)
-        a = saved_a[:t].masked_fill(past, MASKED)
-        b = saved_b[:t].masked_fill(past, MASKED)
-        self._rule_call(meta.rule, meta.handle, mixed, a, b, ssm_state, slots, meta.has_init, out_slots=slots)
-        inputs = torch.cat([window[:rows], saved_x[:t].view(rows, width, -1).transpose(1, 2)], dim=2)
-        at = (keep[:, None] + torch.arange(kept, device=keep.device)).unsqueeze(1).expand(rows, self.channels, kept)
-        conv_state.index_copy_(0, units, inputs.gather(2, at))
+        past = (torch.arange(width, device=keep.device) >= keep[:, None]).reshape(1, t, 1)
+        a[:, :t].masked_fill_(past, MASKED)
+        b[:, :t].masked_fill_(past, MASKED)
+        inputs = torch.cat([window[:, :rows], x[:, :t].view(n, rows, width, -1).transpose(2, 3)], dim=3)
+        at = (keep[:, None] + torch.arange(kept, device=keep.device)).view(1, rows, 1, kept)
+        ends = inputs.gather(3, at.expand(n, -1, self.channels, -1))
+        self._conv_states(self._state[0][1]).index_copy_(1, units, ends)
