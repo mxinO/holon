@@ -25,7 +25,8 @@ def run(ctx, name: str, k: int, parts: dict, **facts) -> None:
             kernel(activations(rows, k, seed=rows), parts)
     for rows in (1, 2):
         kernel(kernel.prepare_input(activations(rows, k, seed=rows)), parts)
-    qlinear(ctx, name, k, op="qlinear_glu@1", **facts)(activations(1, k, seed=1), parts)
+    glu = {r: p[:296] if r == "blocks" else p for r, p in parts.items()}          # halves of 148 rows
+    qlinear(ctx, name, k, out=296, op="qlinear_glu@1", **facts)(activations(1, k, seed=1), glu)
 
 
 def main() -> None:

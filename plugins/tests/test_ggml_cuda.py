@@ -59,6 +59,7 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a G
 
 INS = (768, 2304, 4096, 12288)
 OUT = 300
+GLU_OUT = 296                   # a merged gate/up of OUT's first rows: halves of a multiple of 4 rows (qlinear_glu)
 MAX_STEP_TOKENS = 4096          # the engine's default step budget
 NMSE = 5e-4                     # llama.cpp test-backend-ops MUL_MAT threshold
 OUTLIER = 1000.0
@@ -232,11 +233,11 @@ def check_qlinear(kernel, name: str, blocks: np.ndarray | None, rows_list, parts
         y = kernel(x, w)
         assert torch.equal(y, kernel(x, w)), f"{name} rows={rows}: not run-to-run identical"
         ref = q8_1.matmul(x, weight, blocks, name.split("/")[0], path)
-        if glu is not None:
-            fused = glu(x, w)
+        if glu is not None:                                   # the first glu.out rows read as a merged gate/up
+            fused = glu(x, {r: p[:glu.out] if r == "blocks" else p for r, p in w.items()})
             assert (fused is None) == (rows != 1), f"{name} rows={rows}: glu fuses one row only"
             if fused is not None:
-                gate, up = ref.chunk(2, dim=-1)
+                gate, up = ref[:, :glu.out].chunk(2, dim=-1)
                 r = l0.check(fused, torch.nn.functional.silu(gate) * up, torch.bfloat16, k)
                 assert r.passed, f"{name} in={k} glu: {r}"
         if other is not None and path == q8_1.MMVQ:
@@ -279,7 +280,7 @@ def test_qlinear_random_blocks(ctx, name, k):
     rows = sorted({*range(1, 10), 64, 128, 256, CHUNK, CHUNK + 1, 2 * CHUNK + 1, MAX_STEP_TOKENS})
     second = "q6_k" if name == "q4_k" else "q4_k"                           # a consumer of another type (D6)
     other = (qlinear(ctx, second, k, out=64), {"blocks": device_blocks(random_blocks(second, 64, k, seed=1))})
-    glu = qlinear(ctx, name, k, op="qlinear_glu@1")
+    glu = qlinear(ctx, name, k, out=GLU_OUT, op="qlinear_glu@1")
     check_qlinear(kernel, name, random_blocks(name, OUT, k, seed=k), rows, glu=glu, other=other)
 
 
@@ -489,7 +490,7 @@ def test_hf_fp4_prepare_is_lossless_and_scale2_holds_on_every_path(ctx, elem):
                 bad = prepared(kernel, elem, parts)["blocks"]
             assert not torch.equal(dequantize_blocks(elem, bad, got.get("scale2")), weight), plant
         t = kernel.mmvq_rows
-        glu = qlinear(ctx, f"{elem}/hf", k, out_dtype, act_dtype=str(act_dtype)[6:], op="qlinear_glu@1")
+        glu = qlinear(ctx, f"{elem}/hf", k, out_dtype, GLU_OUT, act_dtype=str(act_dtype)[6:], op="qlinear_glu@1")
         check_qlinear(kernel, f"{elem}/hf", None, (*range(1, t + 2), 64, CHUNK + 1), got, weight, act_dtype, glu)
         assert set(kernel.calls) == {"mmvq/q8_1", "mmq/q8_1"}
 

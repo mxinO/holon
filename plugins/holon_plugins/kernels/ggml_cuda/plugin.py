@@ -469,7 +469,9 @@ def _supports_qlinear(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
 
 
 def _supports_qlinear_glu(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
-    return _supports_qlinear(f, act_quant, types) and f["glu"] == "swiglu" and f["out"] % 2 == 0
+    # each half a multiple of 4 rows: mmvq reads whole blocks of up to 4 rows at one column (small K: `nwarps` rows),
+    # so the up half's last block would read past the stack (memcheck, docs/m07-perf.md §13)
+    return _supports_qlinear(f, act_quant, types) and f["glu"] == "swiglu" and f["out"] % 8 == 0
 
 
 def _supports_qembedding(f: dict) -> bool:
