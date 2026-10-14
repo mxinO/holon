@@ -1,7 +1,8 @@
 # M0.7 — performance: fused glue, mixed steps, a gated megakernel experiment
 
-Status: **revision 3.1, reviewed clean** (2026-10-14) by a panel of three (correctness, architecture, numerics / performance / tests) over four rounds; every finding is
-resolved in §10.
+Status: **revision 3.1, reviewed clean** (2026-10-14) by a panel of three (correctness, architecture, numerics /
+performance / tests) over four rounds; every finding is resolved in §10. **Step 0 is done (§11); §5 is re-stated per
+class in §11.11, for the panel's review before steps 1–6.**
 
 Scope: plan §2 (M0.7: "fused prefill glue (KV-store kernel, add+norm, q/k norm) and a model-specific megakernel
 experiment (design §5.7)"), narrowed and extended by what M0.3–M0.5 recorded for M0.7: the verify-step glue
@@ -280,3 +281,381 @@ explicit handles); B5 → `fusion_facts()`, judge-built reference; B6 / M7 → s
 matmul out (D9); B8 / M1 → D4 bitwise, classify, propagate once; M4 / B9 → rewind glue only, providers kept; H2 → gap
 metric, A/A, recalibrated simulator; H3 → small-step L2; C-M3 → reworked plants; C-M4 → two timing ratios; C-M5 →
 restated savings; minors as listed in rev 2's table (git `c03c370`).
+
+## 11. Step 0 results (2026-10-14)
+
+Step 0 ran on the RTX 5080, 4090 and 5090 at the ggml pin `cbe28bb3` (the fixed CI worktree at 474674e; no core, std
+or plugin change). The tables are computed from the records (§11.10) by `bench/step0_report.py` (glue, candidates,
+timing ratios, D8, D2, D9) and `bench/mixed_sim.py` (D7); the method of each estimate is in their docstrings.
+- **Files:** Qwen3-8B Q4_K_M (rtx-5080 lock 7, every class); Qwen3.8-27B at its class's plain lock (UD-IQ3_S with q8_0
+  KV on the 5080; UD-Q4_K_M with bf16 KV on the 4090, borrowed by the 5090); the 27B with MTP (k 3 at one row, 2 at
+  four) and with DFlash2 (k 7); Qwen3-8B NVFP4 (q8_1 mode, and native W4A4 on sm_120); Qwen3-8B bf16 (4090, 5090).
+- **Rows:** decode B1/B4/B8 at a 512-token context; verify B1 (and B4 for MTP); prefill 512 / 2048, one request, one
+  step.
+
+### 11.1 Desktops and clocks
+
+Each desktop was screened before its evidence was recorded (`bench/clock_check.py`: 60 s of 27B decode at batch 4;
+nvidia-smi every 100 ms; the record keeps the GPU clock and the slowdown share only):
+
+| class | SM clock p10 / p50 / p90 (MHz) | thermal / hardware slowdown | at the power cap | verdict |
+|---|---|---|---|---|
+| RTX 5080 | 2670 / 2677 / 2685 | 0 | all samples | steady |
+| RTX 4090 | 2715 / 2715 / 2730 | 0 | none | steady |
+| RTX 5090 | 2565 / 2655 / 2707 | 0 | all samples | steady (p10 / p50 0.97) |
+
+"Steady" means p10 ≥ 0.9 × p50. The first RTX 4090 desktop lost its GPU a minute into its screen (it fell off the bus:
+`nvidia-smi` could no longer find the device). It was released with no record kept; every 4090 record comes from a
+second desktop.
+
+### 11.2 The two timing ratios (D1)
+
+- r1 = the unprofiled graphed wall / the eager kernel sum.
+- r2 = the profiled graphed kernel sum / the unprofiled graphed wall.
+- Both are per decode and verify row (`ratio_*` in the profile records). The SM clock was sampled over a 2 s graphed
+  window and a 2 s eager window.
+
+| class | r1 | r2 | SM clock, graphed vs eager windows |
+|---|---|---|---|
+| RTX 5080 | 0.966–1.005 | 0.995–1.036 | 2632–2760 vs 2655–2752 MHz |
+| RTX 4090 | 0.969–1.004 | 0.990–1.002 | equal, 2715–2730 MHz |
+| RTX 5090 | 0.948–1.010 | 0.990–1.042 | 2617–2872 vs 2752–2872 MHz |
+
+- **r1 never exceeds 1.05, so no clock investigation was due.** The 2–19% graphed excess of R §1.1 (open question 6)
+  is an A5000 clock effect. Its decode B1 rows (`m07-step0_profile-*_rtx-a5000`) give r1 = 1.01–1.13, with the SM
+  clock at 1395–1500 MHz graphed against 1755–1905 MHz eager, at the power cap. On the consumer classes, graphed
+  kernel time converts 1:1 into wall time.
+- **r2 is 0.99–1.04.** The profiler inflates graphed kernel sums by at most 4%. The shares below are profiled kernel
+  time divided by r2, and D8's B uses the unprofiled GEMV time.
+
+### 11.3 Glue share per row
+
+Share of the step, in %: graphed for decode and verify, eager wall for prefill. "—" means under 0.05%.
+- **cast:** mmq's f32 → bf16 cast, plus NVFP4's f32 × `scale2` → bf16 multiply (on mmq, and on mmvq above one row).
+- **bf16→f32:** native W4A4's activation copy.
+- **other glue:** everything else (residual adds, gates, copies, index ops, sampling, and the verify step's drafter and
+  rewind glue).
+
+| class | model | row | step ms | GEMM | attention | GDN | act quant | cast | bf16→f32 | KV store | q/k norm + rope | norms | silu·mul | other glue |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 5080 | 8b-q4_k_m | decode b1 | 6.54 | 82.6 | 3.6 | — | 3.0 | — | — | 4.2 | 1.9 | 1.8 | 1.6 | 1.4 |
+| 5080 | 8b-q4_k_m | decode b8 | 8.61 | 74.8 | 11.7 | — | 1.8 | 1.7 | — | 3.5 | 1.4 | 1.7 | 0.9 | 2.5 |
+| 5080 | 8b-q4_k_m | prefill 512 | 61.49 | 85.2 | 3.5 | — | 1.7 | 3.2 | — | 0.8 | 0.7 | 0.9 | 0.8 | 3.3 |
+| 5080 | 8b-q4_k_m | prefill 2048 | 251.64 | 82.4 | 6.5 | — | 2.2 | 3.1 | — | 0.5 | 0.5 | 0.7 | 2.4 | 1.7 |
+| 5080 | 27b-plain | decode b1 | 15.88 | 87.3 | 0.8 | 3.5 | 3.2 | — | — | 0.2 | 0.4 | 2.1 | 1.1 | 1.5 |
+| 5080 | 27b-plain | decode b4 | 20.81 | 85.2 | 1.2 | 5.7 | 2.6 | — | — | 0.1 | 0.3 | 1.9 | 0.8 | 2.2 |
+| 5080 | 27b-plain | decode b8 | 29.41 | 86.1 | 1.4 | 6.4 | 2.1 | 0.2 | — | 0.1 | 0.2 | 1.4 | 0.6 | 1.6 |
+| 5080 | 27b-plain | prefill 2048 | 838.00 | 83.7 | 1.8 | 3.8 | 2.3 | 2.4 | — | — | 0.1 | 0.9 | 1.9 | 2.9 |
+| 5080 | 27b-mtp | verify b1 | 27.21 | 81.2 | 0.8 | 5.8 | 2.1 | — | — | 0.2 | 0.3 | 1.6 | 0.7 | 7.3 |
+| 5080 | 27b-mtp | verify b4 | 36.08 | 79.3 | 1.4 | 8.6 | 1.3 | 1.2 | — | 0.1 | 0.2 | 1.1 | 0.4 | 6.2 |
+| 5080 | 27b-dflash2 | verify b1 | 34.76 | 80.2 | 1.0 | 6.2 | 1.9 | 0.2 | — | 0.1 | 0.3 | 1.2 | 0.5 | 8.3 |
+| 5080 | 8b-nvfp4 | decode b1 | 6.97 | 84.0 | 3.4 | — | 2.5 | — | — | 3.9 | 1.8 | 1.7 | 1.5 | 1.3 |
+| 5080 | 8b-nvfp4 | decode b8 | 9.38 | 74.3 | 10.4 | — | 2.2 | 3.5 | 0.1 | 3.2 | 1.3 | 1.6 | 1.1 | 2.2 |
+| 5080 | 8b-nvfp4 | prefill 2048 | 305.42 | 83.6 | 5.2 | — | 1.6 | 5.0 | — | 0.4 | 0.4 | 0.6 | 1.8 | 1.3 |
+| 5080 | 8b-nvfp4-a4 | prefill 2048 | 148.51 | 57.9 | 10.8 | — | 4.5 | 10.2 | 7.0 | 0.9 | 0.8 | 1.3 | 3.7 | 3.1 |
+| 4090 | 8b-q4_k_m | decode b1 | 6.90 | 85.2 | 3.5 | — | 2.4 | — | — | 2.9 | 1.7 | 1.8 | 1.1 | 1.4 |
+| 4090 | 8b-q4_k_m | decode b8 | 8.47 | 76.3 | 12.2 | — | 2.3 | — | — | 2.5 | 1.5 | 1.9 | 1.0 | 2.4 |
+| 4090 | 8b-q4_k_m | prefill 512 | 43.91 | 77.3 | 5.7 | — | 1.9 | 4.8 | — | 0.7 | 0.9 | 1.3 | 1.1 | 6.2 |
+| 4090 | 8b-q4_k_m | prefill 2048 | 164.90 | 74.3 | 7.0 | — | 3.5 | 5.1 | — | 0.5 | 0.7 | 1.0 | 4.2 | 3.9 |
+| 4090 | 27b-plain | decode b1 | 21.48 | 90.5 | 0.6 | 2.7 | 2.2 | — | — | 0.4 | 0.2 | 1.6 | 0.7 | 1.1 |
+| 4090 | 27b-plain | decode b4 | 23.73 | 86.3 | 1.1 | 5.6 | 2.2 | — | — | 0.4 | 0.2 | 1.7 | 0.7 | 1.9 |
+| 4090 | 27b-plain | decode b8 | 27.10 | 83.9 | 1.7 | 8.0 | 2.1 | — | — | 0.4 | 0.2 | 1.5 | 0.6 | 1.7 |
+| 4090 | 27b-plain | prefill 2048 | 570.29 | 74.8 | 1.3 | 5.5 | 3.9 | 4.9 | 0.1 | 0.1 | 0.1 | 1.5 | 2.9 | 5.0 |
+| 4090 | 27b-mtp | verify b1 | 30.87 | 83.1 | 0.8 | 5.1 | 1.8 | — | — | 0.4 | 0.2 | 1.4 | 0.5 | 6.6 |
+| 4090 | 27b-mtp | verify b4 | 40.30 | 80.9 | 1.0 | 8.0 | 1.5 | 1.1 | — | 0.3 | 0.2 | 1.1 | 0.4 | 5.5 |
+| 4090 | 27b-dflash2 | verify b1 | 31.51 | 78.5 | 1.1 | 6.4 | 1.9 | — | — | 0.5 | 0.3 | 1.4 | 0.5 | 9.3 |
+| 4090 | 8b-nvfp4 | decode b1 | 7.35 | 86.3 | 3.2 | — | 2.0 | — | — | 2.7 | 1.6 | 1.7 | 1.1 | 1.3 |
+| 4090 | 8b-nvfp4 | decode b8 | 8.90 | 74.5 | 11.4 | — | 1.9 | 3.3 | 0.1 | 2.4 | 1.4 | 1.8 | 0.9 | 2.3 |
+| 4090 | 8b-nvfp4 | prefill 2048 | 189.73 | 76.4 | 6.1 | — | 2.8 | 6.0 | — | 0.5 | 0.6 | 0.8 | 3.6 | 3.2 |
+| 4090 | 8b-bf16 | decode b1 | 19.15 | 95.6 | 1.2 | — | — | — | — | 1.0 | 0.6 | 0.7 | 0.4 | 0.4 |
+| 4090 | 8b-bf16 | decode b8 | 21.36 | 91.6 | 4.7 | — | — | — | — | 1.0 | 0.6 | 0.8 | 0.4 | 1.0 |
+| 4090 | 8b-bf16 | prefill 2048 | 194.06 | 86.2 | 5.9 | — | — | — | — | 0.4 | 0.6 | 1.2 | 3.0 | 2.7 |
+| 5090 | 8b-q4_k_m | decode b1 | 4.14 | 73.4 | 5.3 | — | 4.6 | — | — | 6.6 | 2.9 | 2.8 | 2.4 | 2.0 |
+| 5090 | 8b-q4_k_m | decode b8 | 5.66 | 68.8 | 10.6 | — | 2.8 | 2.5 | — | 5.3 | 2.2 | 2.5 | 1.5 | 3.7 |
+| 5090 | 8b-q4_k_m | prefill 512 | 33.90 | 81.4 | 5.8 | — | 1.9 | 2.4 | — | 1.0 | 1.0 | 0.9 | 0.9 | 4.8 |
+| 5090 | 8b-q4_k_m | prefill 2048 | 134.00 | 82.4 | 7.1 | — | 2.4 | 2.4 | — | 0.6 | 0.7 | 0.8 | 2.0 | 1.7 |
+| 5090 | 27b-plain | decode b1 | 11.76 | 83.2 | 1.0 | 3.9 | 4.3 | — | — | 1.1 | 0.5 | 2.7 | 1.4 | 2.0 |
+| 5090 | 27b-plain | decode b4 | 13.88 | 79.7 | 1.4 | 6.3 | 3.8 | — | — | 1.0 | 0.4 | 2.9 | 1.2 | 3.3 |
+| 5090 | 27b-plain | decode b8 | 16.77 | 78.6 | 1.8 | 8.0 | 3.0 | 1.3 | — | 0.8 | 0.4 | 2.3 | 1.0 | 2.8 |
+| 5090 | 27b-plain | prefill 2048 | 428.38 | 83.7 | 1.4 | 3.6 | 2.6 | 2.6 | 0.1 | 0.1 | 0.1 | 0.7 | 1.8 | 3.2 |
+| 5090 | 27b-mtp | verify b1 | 18.90 | 73.5 | 1.0 | 7.0 | 3.1 | — | — | 1.0 | 0.4 | 2.4 | 1.0 | 10.7 |
+| 5090 | 27b-mtp | verify b4 | 23.35 | 72.3 | 1.4 | 9.5 | 2.1 | 1.8 | — | 0.8 | 0.3 | 1.8 | 0.7 | 9.3 |
+| 5090 | 27b-dflash2-kvq8 | verify b1 | 21.52 | 69.5 | 1.8 | 8.5 | 2.5 | 1.2 | — | 0.2 | 0.4 | 1.9 | 0.8 | 13.1 |
+| 5090 | 8b-nvfp4 | decode b1 | 4.38 | 75.2 | 5.0 | — | 3.9 | — | 0.1 | 6.3 | 2.8 | 2.6 | 2.3 | 1.9 |
+| 5090 | 8b-nvfp4 | decode b8 | 6.09 | 65.3 | 9.7 | — | 3.6 | 6.2 | 0.1 | 4.8 | 2.0 | 2.3 | 2.4 | 3.4 |
+| 5090 | 8b-nvfp4 | prefill 2048 | 159.95 | 83.0 | 5.9 | — | 1.8 | 4.6 | — | 0.5 | 0.5 | 0.6 | 1.5 | 1.7 |
+| 5090 | 8b-nvfp4-a4 | prefill 2048 | 79.78 | 57.8 | 11.7 | — | 5.3 | 9.2 | 6.7 | 1.0 | 1.1 | 1.2 | 3.0 | 3.2 |
+| 5090 | 8b-bf16 | decode b1 | 10.17 | 92.2 | 1.9 | — | — | — | — | 2.1 | 1.1 | 1.0 | 0.7 | 0.9 |
+| 5090 | 8b-bf16 | decode b8 | 11.47 | 87.5 | 5.2 | — | — | — | 0.1 | 2.4 | 1.1 | 1.2 | 0.7 | 1.9 |
+| 5090 | 8b-bf16 | prefill 2048 | 152.03 | 88.8 | 6.3 | — | — | — | — | 0.5 | 0.6 | 0.6 | 1.7 | 1.6 |
+
+- **The GEMVs dominate decode:** 69–90% on the quantized files, 92–96% on bf16. The glue that a cheap fusion touches
+  is 1–7% per item.
+- **The glue share grows with the card.** On 8B Q4_K_M B1 decode, the KV store is 4.2% of the step on the 5080, 2.9%
+  on the 4090 and 6.6% on the 5090, and q/k norm + rope is 1.9%, 1.7% and 2.9%. A faster GEMV shrinks the step while
+  the glue stays the same.
+- **The cast costs 2.4–3.2% of quantized prefill on the 5080 and 5090, and 4.8–5.1% on the 4090.** On a 64–96 MB L2
+  card this is about half the A5000's share (R §1.2); the 4090 pays more than the Blackwell cards. On the 27B
+  (GDN) prefill rows the casts include a few outside mmq (510 casts per step against 463 matmul calls), so the
+  estimate is an upper bound of about 10% there.
+- **NVFP4 (q8_1 mode) pays for `scale2` above one row:** 3.3–6.2% of decode B8. The q8_1 path multiplies after mmvq
+  above one row (`plugin.py:227-230`); llama.cpp fuses it into mmvq at one row only. Native W4A4 prefill also pays
+  6.7–7.0% for the bf16 → f32 activation copy, on top of a 9–10% `scale2` share.
+- **Classifier note:** the records were made at 474674e, where GDN gating's `neg` kernels count as "other".
+
+### 11.4 Verify-step breakdown
+
+Region times are from the eager trace, scaled to the graphed step. "x decode" is the verify step over the plain decode
+step at the same batch.
+
+| class | drafter | row | step ms | x decode | trunk (its GEMM) | drafter | head | rewind (its glue) | verifier + rest |
+|---|---|---|---|---|---|---|---|---|---|
+| 5080 | 27b-mtp | verify b1 | 27.21 | 1.71 | 19.44 (16.70) | 4.74 | 0.96 | 1.95 (1.15) | 0.11 |
+| 5080 | 27b-mtp | verify b4 | 36.08 | 1.73 | 28.42 (24.20) | 3.62 | 1.04 | 2.89 (1.32) | 0.12 |
+| 5080 | 27b-dflash2 | verify b1 | 34.76 | 2.19 | 27.42 (24.14) | 3.49 | 1.01 | 2.30 (1.20) | 0.55 |
+| 4090 | 27b-mtp | verify b1 | 30.87 | 1.44 | 21.50 (18.49) | 5.86 | 1.26 | 2.11 (1.26) | 0.13 |
+| 4090 | 27b-mtp | verify b4 | 40.30 | 1.70 | 31.12 (26.63) | 4.34 | 1.61 | 3.10 (1.37) | 0.13 |
+| 4090 | 27b-dflash2 | verify b1 | 31.51 | 1.47 | 23.40 (20.01) | 3.86 | 1.32 | 2.36 (1.28) | 0.57 |
+| 5090 | 27b-mtp | verify b1 | 18.90 | 1.61 | 13.22 (10.52) | 3.09 | 0.66 | 1.83 (1.15) | 0.11 |
+| 5090 | 27b-mtp | verify b4 | 23.35 | 1.68 | 17.79 (14.07) | 2.40 | 0.69 | 2.36 (1.24) | 0.11 |
+| 5090 | 27b-dflash2-kvq8 | verify b1 | 21.52 | 1.83 | 15.69 (12.48) | 2.60 | 0.65 | 2.06 (1.15) | 0.51 |
+
+- **A verify step costs 1.44–2.19× a decode step.** The extra cost is mostly the trunk's wider GEMMs (+3.8 ms MTP and
+  +11.2 ms DFlash on the 5080), the drafter (2.4–5.9 ms) and the rewind (1.8–3.1 ms, 960 kernels).
+- **The rewind's glue (masking, the window rebuild, gather and index_copy) is 1.15–1.37 ms on every class:** 3.4–6.1%
+  of the step.
+- **DFlash2 with the borrowed lock's bf16 KV fails on the 5090.** Graph capture of the width-8 verify stops in
+  `triton_attn`'s `paged_attention`, which needs 106,752 B of shared memory against a 101,376 B limit. The row above
+  ran with q8_0 KV (`-kvq8`), so its decode ratio compares against a bf16-KV decode step. The 4090 runs the same
+  bf16-KV verify. On sm_120 it fails (§11.11).
+
+### 11.5 The crossover sweep (D2)
+
+`bench/qmm_sweep.py` timed today's `QLinear`, graph-timed, for every (type, in, out, mode) of the `qlinear` sites in the
+latest lock of every GGUF and FP4 checkpoint (107–113 shapes per class; real GGUF rows, random codes with valid scales
+for the HF NVFP4 layouts, enough copies to defeat L2). It records mmvq at rows 1–8, mmq with the cast and without it
+(rows 1–9), and llama.cpp's choice.
+- **Per (type, mode) table limit:** the largest n with mmvq at least as fast as mmq for every row up to n, summed over
+  the type's shapes weighted by their per-step calls.
+- **Step saving:** the profiled decode and verify steps' calls priced at that limit against llama.cpp's.
+- **Graph buckets:** graphed steps run at bucket rows (1, 2, 4, 8, …), so rows 8 (decode B5–B8, DFlash verify) and 4
+  (decode B3–B4, MTP verify B1) are the ones that matter.
+
+| class | type (q8_1) | llama.cpp's limit | measured (with cast / without) | step saving where it pays (with cast) |
+|---|---|---|---|---|
+| 5080 | iq3_s | 8 | 7 / 7 | 27B decode B8 −2.45%; DFlash verify B1 −2.07% |
+| 5080 | iq4_xs | 8 | 6 / 6 | decode B8 −1.36%; DFlash verify −1.15% |
+| 5080 | iq2_s, iq2_xxs, iq2_xs, iq3_xxs, iq1_s | 8 | 6–7 | decode B8 −0.84, −0.49, −0.33, −0.30, −0.10% (each < 1%) |
+| 5080 | q2_k, q3_k / q5_k / q6_k | 5 / 6 / 7 | 3 / 5 / 5 | ≤ 0.17% (rows 4–7 only) |
+| 4090 | every type | 8 (k-quants 4–8) | the same or higher | 0.0% on every row (llama.cpp's Ada rule holds) |
+| 5090 | iq4_xs | 8 | 6 / 6 | 27B decode B8 −3.76%; DFlash verify −2.93% |
+| 5090 | q6_k | 7 | 4 / 4 | DFlash verify −1.34% (its 5–7-row calls) |
+| 5090 | iq3_s, iq4_nl, iq2_xxs, iq3_xxs, q3_k | 8 / 5 | 6–7 / 3 | ≤ 0.2% each |
+
+- The whole table saves 5.9% of the 5080's 27B decode B8 and 5.0% of its DFlash verify step. On the 5090 it saves 4.1%
+  and 4.5%, and on the 4090 nothing.
+- MTP verify at one row (4 rows) gains ≤ 0.15% everywhere: mmvq still wins at 4 rows for every type that matters.
+- Without the cast (after D4), the 5080's 27B B8 saving is 6.8% and the 5090's 4.6%. D4 itself is counted separately
+  (§11.11).
+- Native W4A4 (`nvfp4/fp4`) and NVFP4 at q8_1 keep llama.cpp's 8 on every class.
+- The 5090 has no GGUF lock yet; its entries come from the files it borrows.
+
+### 11.6 D8's f (8B Q4_K_M, B1 decode)
+
+- bytes = the matmuls' weight bytes (4.67 GB, the embedding table excluded), plus the KV read at the graphed window's
+  context (0.088 GB).
+- B = weight bytes / the unprofiled GEMV time.
+- f = 1 − bytes / (B × step). The step's idle is outside f, and r2 cancels.
+
+| class | step ms | GEMV ms (unprofiled) | B (GB/s) | read-only stream, 2 GiB (GB/s) | f | projected gain, c = 0.4 / 0.55 | today's gate |
+|---|---|---|---|---|---|---|---|
+| 5080 | 6.54 | 5.40 | 865 | 913 | 15.9% | 1.068 / 1.096 | stop |
+| 4090 | 6.90 | 5.88 | 795 | 844 | 13.2% | 1.056 / 1.078 | (not a D8 class) |
+| 5090 | 4.14 | 3.04 | 1535 | 1683 | **25.2%** | 1.112 / **1.161** | prototype (f ≥ 24%) |
+
+- **D8 is defined after D3–D6.** On the 5090, the surviving fusions are worth 9.3% of this step: kv_write 3.5%, D3
+  2.9%, gate/up + SwiGLU 2.4% and shared q8_1 0.5%. With them, f falls to 1 − 0.748 / 0.907 = **17.5%**, which
+  projects 1.075–1.107×. That predicts "stop" at step 5.
+- On the 5080, f falls from 15.9% to about 10.5% after the same fusions (6.0% of the step).
+- Step 5 measures the 5090 gate again after D3–D6, as designed.
+
+### 11.7 D9's trigger
+
+D9 is the target's 4-row / 1-row matmul time over its decode step's calls, at D2's table, with today's cast:
+
+| class | target | ratio | bar 1.25 |
+|---|---|---|---|
+| 5080 | 27B UD-IQ3_S | 1.250 in the full sweep; 1.243 / 1.245 / 1.246 in three repeats (mean of all four 1.246, sd 0.003) | at the bar; not fired on the mean |
+| 4090 | 27B UD-Q4_K_M | 1.014 | not fired |
+| 5090 | 27B UD-Q4_K_M | 1.108 | not fired |
+
+### 11.8 Mixed steps: the measured plain runs and the recalibrated simulator (D7)
+
+**Measured** (`bench_m07-agent-plain_<class>`): 4 rounds per class of `bench/run.py --lock <the class's plain 27B
+lock> --backends holon --corpus judge/prompts/v1-qwen3_5.jsonl --traces agent long_prompt`. The two traces ran in
+one worker, so the agent trace ran at `max_model_len` 30208 (the long prompt's), not the lock's 32768 nor the agent
+trace's own 6400.
+
+Throughput is steady across rounds:
+- RTX 5080: 68.5–69.8 tok/s (sd 0.65, so 2 sd = 1.9%; §1.3's throughput bar stays 5%).
+- RTX 4090: 70.2–70.4 tok/s.
+- RTX 5090: 73.8 tok/s.
+
+**Simulator** (`bench/mixed_sim.py`):
+- **Calibrated per class:**
+  - graphed decode walls at contexts 512 and 4096 (`profile-27b-plain*`);
+  - eager prefill walls with their host floor, at histories 4096 and 16384 (`prefill-idle-27b*`; at 64 new tokens
+    the GPU idles 43% on the 4090 desktop, 38% on the 5090's and 3% on the 5080's);
+  - the KV pool's measured tokens.
+- **Prefix reuse is limited by the recurrent checkpoints**, modelled on a real engine run (an A5000 run logging every
+  admission's hit):
+  - one checkpoint per prompt, at its last aligned position, 4 units;
+  - a matched chain refreshes its checkpoints;
+  - a turn-0 prompt appending fewer than 64 tokens publishes the shared system prompt's checkpoint, which every later
+    turn then hits;
+  - own-session checkpoints are mostly evicted.
+- **Not modelled:** overlap's lag and admission order. The simulator has no fitted parameter.
+
+| class | trace | run | TTFT p50 / p99 ms | paired TTFT | TPOT p50 / p99 ms | max gap p50 / p99 / max ms | tok/s | prefix tokens saved |
+|---|---|---|---|---|---|---|---|---|
+| 5080 | agent | measured | 1266 / 7851 | — | 32.1 / 76.2 | 755 / 1862 / 1864 | 69.1 | 169k |
+| 5080 | agent | today | 1377 / 7968 | — | 32.9 / 75.0 | 1008 / 2672 / 2672 | 68.8 | 167k |
+| 5080 | agent | mixed:256 | 1213 / 9586 | 1.019 | 32.3 / 88.9 | 125 / 127 / 127 | 69.8 | 170k |
+| 5080 | agent | mixed:512 | 1073 / 8162 | 1.0 | 31.2 / 68.4 | 228 / 232 / 232 | 69.4 | 169k |
+| 5080 | long prompt | measured | 313 / 15032 | — | 35.5 / 35.5 | 14290 / 14293 / 14293 | 84.7 | 0k |
+| 5080 | long prompt | today | 345 / 14927 | — | 34.3 / 34.3 | 15394 / 15394 / 15394 | 87.5 | 0k |
+| 5080 | long prompt | mixed:256 | 345 / 16429 | 1.0 | 33.7 / 33.7 | 170 / 170 / 170 | 89.3 | 0k |
+| 5080 | long prompt | mixed:512 | 345 / 15225 | 1.0 | 33.5 / 33.5 | 318 / 318 / 318 | 89.6 | 0k |
+| 4090 | agent | measured | 541 / 6406 | — | 30.4 / 72.0 | 460 / 1298 / 1599 | 70.4 | 174k |
+| 4090 | agent | today | 508 / 6005 | — | 30.4 / 56.4 | 511 / 1778 / 1778 | 69.9 | 181k |
+| 4090 | agent | mixed:256 | 700 / 8550 | 1.262 | 31.5 / 54.1 | 92 / 94 / 94 | 69.2 | 168k |
+| 4090 | agent | mixed:512 | 550 / 6448 | 1.006 | 29.0 / 53.0 | 149 / 151 / 151 | 70.0 | 172k |
+| 4090 | long prompt | measured | 217 / 9498 | — | 32.8 / 32.8 | 8967 / 8988 / 8988 | 91.9 | 0k |
+| 4090 | long prompt | today | 230 / 9405 | — | 32.6 / 32.6 | 9699 / 9699 / 9699 | 92.5 | 0k |
+| 4090 | long prompt | mixed:256 | 230 / 11519 | 1.0 | 32.1 / 32.1 | 112 / 112 / 112 | 94.0 | 0k |
+| 4090 | long prompt | mixed:512 | 230 / 9468 | 1.0 | 31.3 / 31.3 | 188 / 188 / 188 | 96.2 | 0k |
+| 5090 | agent | measured | 318 / 1744 | — | 14.8 / 46.4 | 84 / 1634 / 1676 | 73.8 | 196k |
+| 5090 | agent | today | 244 / 1795 | — | 15.3 / 48.9 | 133 / 1947 / 1966 | 73.9 | 189k |
+| 5090 | agent | mixed:256 | 278 / 1637 | 1.118 | 15.3 / 40.2 | 70 / 71 / 71 | 73.6 | 206k |
+| 5090 | agent | mixed:512 | 242 / 1335 | 1.002 | 14.5 / 40.3 | 118 / 122 / 123 | 74.0 | 207k |
+| 5090 | long prompt | measured | 181 / 8082 | — | 22.2 / 22.2 | 7680 / 7692 / 7692 | 135.8 | 0k |
+| 5090 | long prompt | today | 187 / 7338 | — | 20.6 / 20.6 | 7562 / 7562 / 7562 | 145.7 | 0k |
+| 5090 | long prompt | mixed:256 | 187 / 8827 | 1.0 | 20.6 / 20.6 | 87 / 87 / 87 | 145.8 | 0k |
+| 5090 | long prompt | mixed:512 | 187 / 7672 | 1.0 | 20.2 / 20.2 | 153 / 153 / 153 | 148.7 | 0k |
+
+- **Calibration ("today" against "measured"):**
+  - TTFT p50 within 6–23% and TTFT p99 within 6%;
+  - TPOT p50 within 4%; TPOT p99 within 6%, except the 4090 (56 vs 72 ms);
+  - throughput and prefix reuse within 4%;
+  - long-prompt TTFT within 2–7%.
+  - The simulator overstates the worst gap by 11–43%: it has no overlap, and it counts a whole prefill step as a stall.
+- **Predictions for D7** (gate: gap p99 and max ≥ 2× better; paired TTFT ≤ 1.15; long-prompt TTFT p99 ≤ +25%;
+  throughput within 5%):
+
+  | class | cap 256 | cap 512 |
+  |---|---|---|
+  | 5080 | gap max 2672 → 127 ms (21×); paired TTFT 1.02; long TTFT +10.1%; passes | gap max 232 ms (11×); paired 1.00; long +2.0%; passes |
+  | 4090 | gap max 94 ms (19×); **paired TTFT 1.26: fails** (the slow host's eager floor); long +22.5% | gap max 151 ms (12×); paired 1.01; long +0.7%; passes |
+  | 5090 | gap max 71 ms (28×); paired 1.12; long +20.3%; passes, close to the TTFT bar | gap max 123 ms (16×); paired 1.00; long +4.6%; passes |
+
+  The long prompt stalls the decoders for 14.3 s (5080), 9.0 s (4090) and 7.7 s (5090) today. Every cap brings that
+  to one chunk: 87–318 ms in the simulator.
+
+### 11.9 The release cells re-measured at the pin (RTX 5090)
+
+`bench/bars.py`, 3 rounds, Holon's ggml at `cbe28bb3` (records `bars_release-m07-*_rtx-5090`; same desktop as §11.1):
+
+| file | pp512 | pp512 @ d8192 | tg128 | tg128 @ d8192 |
+|---|---|---|---|---|
+| Qwen3-8B Q4_K_M | 1.05 | **0.91** | **0.97** | 0.99 |
+| Qwen3-30B-A3B Q4_K_M | 1.09 | **0.94** | **0.93** | 0.98 |
+| Qwen3.8-27B UD-Q4_K_M | 1.11 | ≈ 0.96 | 1.03 | 1.05 |
+
+**The cells release step 3 flagged are unchanged at the pin.** The pp512 @ 8K and 5090 tg128 gaps do not come from the
+ggml commit, which is now the same on both sides. pp512 @ 8K is attention at depth: Holon's prefill attention against
+llama.cpp's flash attention, which grows from 7% of the 8B's prefill at no depth. tg128 0.93 on the 30B-A3B is the
+MoE decode path. Neither is an M0.7 candidate (§11.11).
+
+### 11.10 What step 0 built and recorded
+
+- **The release benchmark runner** (`bench/`, used by the close and the release):
+  - `driver.py` rows carry each request's maximum inter-token gap.
+  - `run.py` adds:
+    - arms: `holon@<label>` with `--arm <label>='<flags>'`, merged per key over the lock's or the environment's
+      flags; a label without flags is an A/A arm;
+    - paired TTFT, the median over (round, session, turn) against the first backend, also per round;
+    - gap p50 / p99 / max per trace;
+    - ABBA order across rounds;
+    - arm flags made public in the record.
+  - `report.py` prints the gap p99 and the paired ratio.
+  - `workloads.py` adds the `long_prompt` trace: three streams decoding from t = 0 (256 + 1024), then a 30,000-token
+    prompt at t = 2 s.
+- **Measurement tools:**
+  - `step_profile.py`: per-row categories, verify regions, both ratios with clocks, and matmul calls, weight bytes and
+    distinct quantized inputs per step;
+  - `qmm_sweep.py`;
+  - `clock_check.py`;
+  - `mixed_sim.py`;
+  - `step0_report.py`.
+- **Records**, `evidence/` (GPU names only, flags repo-relative):
+  - `m07-step0_{clock, qmm-sweep, profile-<row set>, prefill-idle-27b[-h16k], sim}_<class>_2026-10-14`;
+  - `bench_m07-agent-plain_<class>`;
+  - `bars_release-m07-*_rtx-5090`;
+  - `m07-step0_qmm-sweep-d9-repeat_rtx-5080`;
+  - the A5000 `profile-*_rtx-a5000` records: distinct quantized inputs per decode step, a property of the model.
+- **Code review:** one reviewer, two rounds. The findings, all fixed:
+  - NVFP4's `scale2` was credited to D4 on mmvq rows;
+  - "D2 after D4" was the sum of D2 and D4;
+  - an arm's dict flags replaced the environment's without a lock;
+  - arm flags were unscrubbed;
+  - paired TTFT lost its round ids;
+  - the simulator's chain refresh order and context slope were wrong;
+  - D8's KV context was wrong;
+  - bad flags without a lock aborted the run mid-way.
+- **No core, std or plugin change; no test added:** the bench is outside the suite, and no fix touched engine code.
+
+### 11.11 §5 re-stated per class
+
+A candidate survives on a class if it saves at least 1% of its step on some release row there (graphed decode
+B1/B4/B8, verify, prefill 512/2048). Shares are the largest over the rows; "—" means it does not apply.
+
+| item | 5080 | 4090 | 5090 | verdict |
+|---|---|---|---|---|
+| D2 crossover | 27B B8 −5.9%, DFlash −5.0% (iq3_s → 7, iq4_xs → 6) | 0 | B8 −4.1%, DFlash −4.5% (iq4_xs → 6, q6_k → 4) | **keep** on 5080, 5090; **drop** on 4090 (llama.cpp's rule is already optimal there); per-type entries under 1% dropped (§11.5) |
+| bf16 `kv_write` | 8B B1 −2.2% (B8 −1.8%) | −1.5% (−1.3%) | −3.5% (−2.8%) | **keep** (8B, bf16-KV rows; the 27B's bf16-KV rows are 0.2%) |
+| D3 `qk_rope_kv` (on top) | 8B B1 −1.9% | −1.7% | −2.9% | **keep** for decode; prefill 0.5–1.0% and the 27B 0.2–0.4% (as predicted: ≤ 0.3%) |
+| D4 mmq bf16 out | prefill −2.4–3.2% (NVFP4 −5.0%, W4A4 −10.2%) | −4.8–5.1% (NVFP4 −6.0%) | −2.4–2.6% (NVFP4 −4.6%, W4A4 −9.2%); 27B B8 −1.3% | **keep** |
+| D5 rewind glue | verify −3.4–4.2% | −3.4–4.1% | −5.3–6.1% | **keep** |
+| D6 gate/up + SwiGLU | 8B B1 −1.6%, 27B B1 −1.1% | −1.1%, −0.7% | −2.4%, −1.35% | **keep** |
+| D6 shared q8_1 | 27B B1 −1.5% | −0.96% | −1.9% | **keep** on 5080, 5090; **drop** on 4090 (under 1%); 8B 0.2–0.3%, NVFP4 has no repeat |
+| D6 GDN gating | prefill −0.3% | −0.4% | −0.4% | **drop** everywhere: about 2 ms of an 838 ms step |
+| D7 mixed steps | cap 256 or 512 | cap 512 (256 fails paired TTFT) | cap 512 (256 at 1.12) | **keep**; step 4's real runs pick the cap |
+| D8 megakernel | f 15.9% → stop | — | f 25.2% today, 17.5% predicted after D3–D6 | gate re-measured at step 5 |
+| D9 small-batch matmul | 1.246 (at the bar) | 1.014 | 1.108 | not triggered |
+
+**Measured, not in §5 (for the lead):**
+- **NVFP4 `scale2` after mmvq above one row:** 3.3–7.2% of NVFP4 decode B4/B8 on every class. llama.cpp fuses it into
+  mmvq at one row only; doing it above one row would be a vendor patch, as D4 is.
+- **Native W4A4's bf16 → f32 activation copy:** 6.7–7.0% of NVFP4 W4A4 prefill on sm_120. A quantizer that reads bf16
+  would remove it.
+- **The 5090's DFlash2 failure** with bf16 KV (§11.4): a `triton_attn` config for sm_120 at width 8.
+- **pp512 @ 8K (0.91–0.96) and the 30B-A3B tg128 (0.93)** are not ggml (§11.9).
+
+### 11.12 For the lead
+
+1. **Re-stated §5 above, for the panel.** Every fusion survives on some class except GDN gating; shared q8_1 and the
+   D2 table drop on the 4090.
+2. **D2's per-entry rule.** Of the 5080's i-quant entries, only iq3_s and iq4_xs reach 1% alone (3.8% of decode B8
+   together). The other five add 2.0% between them, at under 1% each. Ship them as one entry per class ("i-quants →
+   6/7") or drop them? I recommend shipping the measured limits for every i-quant of the 27B file. They all come from
+   one sweep, and D2's small-step L2 covers them anyway.
+3. **D9 sits at its bar on the 5080:** 1.243–1.250 over four sweeps, mean 1.246. By the rule it does not fire. The
+   lead decides whether a ratio at the bar is a trigger.
+4. **D8 on the 5090 is in prototype territory today** (f 25.2%, 1.16× at c = 0.55). After the surviving fusions it is
+   predicted at 17.5% (stop). Step 5 decides after D3–D6, as designed.
+5. **The D7 cap per class (simulated):** 512 on the 4090, whose slow host makes cap 256 fail the paired-TTFT bar
+   (1.26); 256 or 512 on the 5080 and 5090. The predicted worst-gap gains are 11–28×.
+6. **New items** (not in §5): the NVFP4 `scale2` epilogue above one row, the bf16 W4A4 quantizer, the 5090
+   DFlash2/bf16-KV failure, and the attention-at-depth gap. Each is a follow-up or another milestone's work, not
+   M0.7's.
+7. **One desktop lost:** the first RTX 4090 desktop fell off the bus; all evidence comes from screened desktops.

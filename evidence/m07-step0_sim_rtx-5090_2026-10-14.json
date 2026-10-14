@@ -1,0 +1,229 @@
+{
+ "command": "python bench/mixed_sim.py --decode evidence/m07-step0_profile-27b-plain_rtx-5090_2026-10-14.json evidence/m07-step0_profile-27b-plain-ctx4096_rtx-5090_2026-10-14.json --prefill-idle evidence/m07-step0_prefill-idle-27b_rtx-5090_2026-10-14.json evidence/m07-step0_prefill-idle-27b-h16k_rtx-5090_2026-10-14.json --measured evidence/bench_m07-agent-plain_rtx-5090_2026-10-14.json",
+ "commit": "f32392a",
+ "gpu_class": "rtx-5090",
+ "date": "2026-10-14",
+ "note": "a model, not a run: today's scheduler checked against the measured run ('measured'); mixed:<cap> are D7 predictions",
+ "costs": {
+  "decode": {
+   "1": 11.732,
+   "4": 13.759,
+   "8": 16.534
+  },
+  "per_row_ctx_ms": 4.94e-05,
+  "prefill_history": 4096,
+  "prefill": [
+   [
+    64,
+    44.96
+   ],
+   [
+    100,
+    56.82
+   ],
+   [
+    128,
+    54.04
+   ],
+   [
+    256,
+    68.68
+   ],
+   [
+    300,
+    86.07
+   ],
+   [
+    450,
+    121.29
+   ],
+   [
+    512,
+    119.09
+   ],
+   [
+    700,
+    175.25
+   ],
+   [
+    1024,
+    231.04
+   ],
+   [
+    1500,
+    354.65
+   ],
+   [
+    2048,
+    460.73
+   ]
+  ],
+  "alpha": 2.5423367818196608e-06
+ },
+ "settings": {
+  "max_seqs": 4,
+  "max_step_tokens": 2048,
+  "checkpoints": 4,
+  "kv_tokens": 196208
+ },
+ "traces": {
+  "agent": {
+   "today": {
+    "ttft_ms": {
+     "p50": 244.1,
+     "p99": 1795.1,
+     "max": 3152.0
+    },
+    "tpot_ms": {
+     "p50": 15.3,
+     "p99": 48.9
+    },
+    "max_gap_ms": {
+     "p50": 133.2,
+     "p99": 1947.0,
+     "max": 1965.7
+    },
+    "throughput_tok_s": 73.9,
+    "prefix_tokens_saved": 189248
+   },
+   "mixed:256": {
+    "ttft_ms": {
+     "p50": 277.5,
+     "p99": 1637.2,
+     "max": 1729.0
+    },
+    "tpot_ms": {
+     "p50": 15.3,
+     "p99": 40.2
+    },
+    "max_gap_ms": {
+     "p50": 69.6,
+     "p99": 70.9,
+     "max": 70.9
+    },
+    "throughput_tok_s": 73.6,
+    "prefix_tokens_saved": 206208,
+    "paired_ttft": 1.118
+   },
+   "mixed:512": {
+    "ttft_ms": {
+     "p50": 241.9,
+     "p99": 1335.1,
+     "max": 1843.4
+    },
+    "tpot_ms": {
+     "p50": 14.5,
+     "p99": 40.3
+    },
+    "max_gap_ms": {
+     "p50": 117.9,
+     "p99": 121.5,
+     "max": 123.0
+    },
+    "throughput_tok_s": 74.0,
+    "prefix_tokens_saved": 207360,
+    "paired_ttft": 1.002
+   },
+   "measured": {
+    "ttft_ms": {
+     "p50": 317.87,
+     "p90": 1105.89,
+     "p99": 1743.75,
+     "max": 2483.08
+    },
+    "tpot_ms": {
+     "p50": 14.82,
+     "p90": 25.66,
+     "p99": 46.39
+    },
+    "max_gap_ms": {
+     "p50": 83.58,
+     "p90": 778.08,
+     "p99": 1634.42,
+     "max": 1675.51
+    },
+    "throughput_tok_s": 73.8,
+    "prefix_tokens_saved": 196368
+   }
+  },
+  "long_prompt": {
+   "today": {
+    "ttft_ms": {
+     "p50": 187.0,
+     "p99": 7338.0,
+     "max": 7559.2
+    },
+    "tpot_ms": {
+     "p50": 20.6,
+     "p99": 20.6
+    },
+    "max_gap_ms": {
+     "p50": 7562.3,
+     "p99": 7562.3,
+     "max": 7562.3
+    },
+    "throughput_tok_s": 145.7,
+    "prefix_tokens_saved": 0
+   },
+   "mixed:256": {
+    "ttft_ms": {
+     "p50": 187.0,
+     "p99": 8826.9,
+     "max": 9094.1
+    },
+    "tpot_ms": {
+     "p50": 20.6,
+     "p99": 20.6
+    },
+    "max_gap_ms": {
+     "p50": 86.8,
+     "p99": 86.8,
+     "max": 86.8
+    },
+    "throughput_tok_s": 145.8,
+    "prefix_tokens_saved": 0,
+    "paired_ttft": 1.0
+   },
+   "mixed:512": {
+    "ttft_ms": {
+     "p50": 187.0,
+     "p99": 7672.5,
+     "max": 7904.1
+    },
+    "tpot_ms": {
+     "p50": 20.2,
+     "p99": 20.2
+    },
+    "max_gap_ms": {
+     "p50": 152.9,
+     "p99": 152.9,
+     "max": 152.9
+    },
+    "throughput_tok_s": 148.7,
+    "prefix_tokens_saved": 0,
+    "paired_ttft": 1.0
+   },
+   "measured": {
+    "ttft_ms": {
+     "p50": 180.99,
+     "p90": 8070.43,
+     "p99": 8081.99,
+     "max": 8083.96
+    },
+    "tpot_ms": {
+     "p50": 22.17,
+     "p90": 22.18,
+     "p99": 22.18
+    },
+    "max_gap_ms": {
+     "p50": 7680.0,
+     "p90": 7692.36,
+     "p99": 7692.36,
+     "max": 7692.36
+    },
+    "throughput_tok_s": 135.8,
+    "prefix_tokens_saved": 0
+   }
+  }
+ }
+}

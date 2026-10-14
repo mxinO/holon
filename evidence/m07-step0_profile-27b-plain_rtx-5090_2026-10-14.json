@@ -1,0 +1,2412 @@
+{
+ "command": "python bench/step_profile.py --name 27b-plain --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf --lock plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/4.lock (rows: see 'rows')",
+ "commit": "474674e",
+ "gpu_class": "rtx-5090",
+ "date": "2026-10-14",
+ "name": "27b-plain",
+ "gpu": "NVIDIA GeForce RTX 5090",
+ "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf",
+ "lock": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/4.lock",
+ "engine_args": "",
+ "engine": {
+  "device": "cuda",
+  "dtype": "torch.bfloat16",
+  "source": "gguf",
+  "page_size": 16,
+  "max_seqs": 8,
+  "max_model_len": 6144,
+  "clamp_context": false,
+  "max_step_tokens": 2048,
+  "memory_fraction": 0.9,
+  "state_memory": null,
+  "prefix_cache": false,
+  "overlap": true,
+  "cuda_graphs": true,
+  "max_draft_tokens": 0,
+  "kernels": {},
+  "kernel_preferences": {},
+  "slots": {},
+  "plugin_options": {
+   "recurrent.checkpoints": "4"
+  }
+ },
+ "kv_bytes_per_token": 65536.0,
+ "drafts": false,
+ "rows": {
+  "prefill_512": {
+   "kind": "prefill",
+   "tokens": 512,
+   "wall_ms": 107.447,
+   "eager": {
+    "kernels": 3478.0,
+    "kernel_ms": 105.0051,
+    "span_ms": 110.0821,
+    "cat": {
+     "gemm": [
+      709.0,
+      89.826
+     ],
+     "gdn core": [
+      384.0,
+      3.8145
+     ],
+     "f32 -> bf16 cast": [
+      508.0,
+      2.8124
+     ],
+     "act quant (q8_1 / fp4)": [
+      461.0,
+      2.2254
+     ],
+     "copy / cat / fill": [
+      305.0,
+      1.3644
+     ],
+     "attention": [
+      16.0,
+      0.89
+     ],
+     "silu*mul": [
+      64.0,
+      0.6356
+     ],
+     "gdn conv": [
+      96.0,
+      0.6303
+     ],
+     "rmsnorm": [
+      113.0,
+      0.503
+     ],
+     "add+rmsnorm (fused)": [
+      64.0,
+      0.4525
+     ],
+     "index / scalar ops": [
+      164.0,
+      0.4523
+     ],
+     "residual add": [
+      115.0,
+      0.4326
+     ],
+     "gates (sigmoid, mul, softplus, exp)": [
+      224.0,
+      0.4061
+     ],
+     "bf16 -> f32 copy": [
+      96.0,
+      0.187
+     ],
+     "kv store": [
+      36.0,
+      0.1546
+     ],
+     "q/k norm": [
+      32.0,
+      0.0875
+     ],
+     "rope": [
+      16.0,
+      0.0678
+     ],
+     "other elementwise": [
+      48.0,
+      0.0408
+     ],
+     "memcpy / memset": [
+      25.0,
+      0.0087
+     ],
+     "embedding": [
+      1.0,
+      0.0078
+     ],
+     "sampling / head": [
+      1.0,
+      0.0058
+     ]
+    }
+   },
+   "gemm": {
+    "weight_bytes": 15376691200,
+    "calls": [
+     {
+      "type": "iq3_s",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 1
+     },
+     {
+      "type": "iq3_s",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 3
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 3
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 12
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 8
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 21
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 20
+     },
+     {
+      "type": "iq4_xs",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 24
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 4
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 1
+     },
+     {
+      "type": "q3_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 24
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 29
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 6
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 18
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 11
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 2
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 9
+     },
+     {
+      "type": "q5_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 44
+     },
+     {
+      "type": "q5_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 22
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 12
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 248320,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 9
+     },
+     {
+      "type": "q6_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 1
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 48,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 96
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 512,
+      "count": 8
+     }
+    ]
+   },
+   "idle": 0.0227
+  },
+  "prefill_2048": {
+   "kind": "prefill",
+   "tokens": 2048,
+   "wall_ms": 428.385,
+   "eager": {
+    "kernels": 8360.0,
+    "kernel_ms": 425.8589,
+    "span_ms": 429.4463,
+    "cat": {
+     "gemm": [
+      2833.0,
+      358.7425
+     ],
+     "gdn core": [
+      384.0,
+      13.2375
+     ],
+     "act quant (q8_1 / fp4)": [
+      1841.0,
+      11.3047
+     ],
+     "f32 -> bf16 cast": [
+      1888.0,
+      11.2297
+     ],
+     "copy / cat / fill": [
+      305.0,
+      8.073
+     ],
+     "silu*mul": [
+      64.0,
+      7.7141
+     ],
+     "attention": [
+      16.0,
+      5.8216
+     ],
+     "gdn conv": [
+      96.0,
+      2.1369
+     ],
+     "rmsnorm": [
+      113.0,
+      1.7323
+     ],
+     "residual add": [
+      115.0,
+      1.6391
+     ],
+     "add+rmsnorm (fused)": [
+      64.0,
+      1.4562
+     ],
+     "gates (sigmoid, mul, softplus, exp)": [
+      224.0,
+      1.0271
+     ],
+     "index / scalar ops": [
+      164.0,
+      0.5238
+     ],
+     "kv store": [
+      36.0,
+      0.3606
+     ],
+     "q/k norm": [
+      32.0,
+      0.2928
+     ],
+     "bf16 -> f32 copy": [
+      96.0,
+      0.2787
+     ],
+     "rope": [
+      16.0,
+      0.2057
+     ],
+     "other elementwise": [
+      48.0,
+      0.0449
+     ],
+     "embedding": [
+      1.0,
+      0.0215
+     ],
+     "memcpy / memset": [
+      23.0,
+      0.0102
+     ],
+     "sampling / head": [
+      1.0,
+      0.0059
+     ]
+    }
+   },
+   "gemm": {
+    "weight_bytes": 15376691200,
+    "calls": [
+     {
+      "type": "iq3_s",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 1
+     },
+     {
+      "type": "iq3_s",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 3
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 3
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 12
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 8
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 21
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 20
+     },
+     {
+      "type": "iq4_xs",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 24
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 4
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 1
+     },
+     {
+      "type": "q3_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 24
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 29
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 6
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 18
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 11
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 2
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 9
+     },
+     {
+      "type": "q5_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 44
+     },
+     {
+      "type": "q5_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 22
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 12
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 248320,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 9
+     },
+     {
+      "type": "q6_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 1
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 48,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 96
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 2048,
+      "count": 8
+     }
+    ]
+   },
+   "idle": 0.0059
+  },
+  "decode_b1": {
+   "kind": "decode",
+   "batch": 1,
+   "ctx": 512,
+   "gemm": {
+    "weight_bytes": 15376691200,
+    "calls": [
+     {
+      "type": "iq3_s",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "iq3_s",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 3
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 3
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 12
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 8
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 21
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 20
+     },
+     {
+      "type": "iq4_xs",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 24
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 4
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q3_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 24
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 29
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 6
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 18
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 11
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 2
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 9
+     },
+     {
+      "type": "q5_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 44
+     },
+     {
+      "type": "q5_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 22
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 12
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 248320,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 9
+     },
+     {
+      "type": "q6_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 48,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 96
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 8
+     }
+    ]
+   },
+   "eager_wall_ms": 21.5863,
+   "eager": {
+    "kernels": 1605.1,
+    "kernel_ms": 12.0919,
+    "span_ms": 28.5796,
+    "cat": {
+     "gemm": [
+      461.0,
+      10.1131
+     ],
+     "act quant (q8_1 / fp4)": [
+      461.0,
+      0.5
+     ],
+     "gdn core": [
+      48.0,
+      0.255
+     ],
+     "gdn conv": [
+      96.0,
+      0.2202
+     ],
+     "rmsnorm": [
+      113.0,
+      0.1899
+     ],
+     "silu*mul": [
+      64.0,
+      0.1582
+     ],
+     "kv store": [
+      36.0,
+      0.1368
+     ],
+     "attention": [
+      32.0,
+      0.121
+     ],
+     "add+rmsnorm (fused)": [
+      64.0,
+      0.1126
+     ],
+     "residual add": [
+      67.0,
+      0.0788
+     ],
+     "copy / cat / fill": [
+      50.1,
+      0.0621
+     ],
+     "gates (sigmoid, mul, softplus, exp)": [
+      32.0,
+      0.0451
+     ],
+     "q/k norm": [
+      32.0,
+      0.0317
+     ],
+     "index / scalar ops": [
+      20.0,
+      0.0308
+     ],
+     "rope": [
+      16.0,
+      0.0241
+     ],
+     "sampling / head": [
+      1.0,
+      0.0059
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0052
+     ],
+     "embedding": [
+      1.0,
+      0.0015
+     ]
+    }
+   },
+   "graphed_wall_ms": 11.7616,
+   "graphed": {
+    "kernels": 1605.1,
+    "kernel_ms": 12.1088,
+    "span_ms": 11.8499,
+    "cat": {
+     "gemm": [
+      461.0,
+      10.073
+     ],
+     "act quant (q8_1 / fp4)": [
+      461.0,
+      0.5224
+     ],
+     "gdn core": [
+      48.0,
+      0.2569
+     ],
+     "gdn conv": [
+      96.0,
+      0.2153
+     ],
+     "rmsnorm": [
+      113.0,
+      0.2062
+     ],
+     "silu*mul": [
+      64.0,
+      0.1635
+     ],
+     "kv store": [
+      36.0,
+      0.1365
+     ],
+     "add+rmsnorm (fused)": [
+      64.0,
+      0.1219
+     ],
+     "attention": [
+      32.0,
+      0.1178
+     ],
+     "residual add": [
+      67.0,
+      0.0809
+     ],
+     "copy / cat / fill": [
+      50.1,
+      0.0649
+     ],
+     "gates (sigmoid, mul, softplus, exp)": [
+      32.0,
+      0.0456
+     ],
+     "q/k norm": [
+      32.0,
+      0.0348
+     ],
+     "index / scalar ops": [
+      20.0,
+      0.0327
+     ],
+     "rope": [
+      16.0,
+      0.0231
+     ],
+     "sampling / head": [
+      1.0,
+      0.0058
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0058
+     ],
+     "embedding": [
+      1.0,
+      0.0016
+     ]
+    }
+   },
+   "ratio_graphed_wall_over_eager_kernels": 0.9727,
+   "ratio_graphed_profiled_over_wall": 1.0295,
+   "clocks": {
+    "graphed": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2835.0,
+      "p50": 2835.0,
+      "p90": 2887.0
+     },
+     "mem_mhz": 13801.0,
+     "power_w": 401.8,
+     "slowdown_share": 0.0,
+     "power_cap_share": 1.0
+    },
+    "eager": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2835.0,
+      "p50": 2842.0,
+      "p90": 2842.0
+     },
+     "mem_mhz": 13801.0,
+     "power_w": 426.2,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.0
+    }
+   },
+   "spec": {},
+   "ctx_end": 911
+  },
+  "decode_b4": {
+   "kind": "decode",
+   "batch": 4,
+   "ctx": 512,
+   "gemm": {
+    "weight_bytes": 15376691200,
+    "calls": [
+     {
+      "type": "iq3_s",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "iq3_s",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 3
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 3
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 12
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 8
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 21
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 20
+     },
+     {
+      "type": "iq4_xs",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 24
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 4
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "q3_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 24
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 29
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 6
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 18
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 11
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 2
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 9
+     },
+     {
+      "type": "q5_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 44
+     },
+     {
+      "type": "q5_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 22
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 12
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 248320,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 9
+     },
+     {
+      "type": "q6_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 48,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 96
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 8
+     }
+    ]
+   },
+   "eager_wall_ms": 23.3957,
+   "eager": {
+    "kernels": 1749.1,
+    "kernel_ms": 14.1883,
+    "span_ms": 31.1761,
+    "cat": {
+     "gemm": [
+      461.0,
+      11.4265
+     ],
+     "gdn core": [
+      48.0,
+      0.6476
+     ],
+     "act quant (q8_1 / fp4)": [
+      461.0,
+      0.5047
+     ],
+     "copy / cat / fill": [
+      194.1,
+      0.2986
+     ],
+     "gdn conv": [
+      96.0,
+      0.2324
+     ],
+     "rmsnorm": [
+      113.0,
+      0.2156
+     ],
+     "attention": [
+      32.0,
+      0.1815
+     ],
+     "silu*mul": [
+      64.0,
+      0.1681
+     ],
+     "kv store": [
+      36.0,
+      0.1429
+     ],
+     "add+rmsnorm (fused)": [
+      64.0,
+      0.1426
+     ],
+     "residual add": [
+      67.0,
+      0.085
+     ],
+     "gates (sigmoid, mul, softplus, exp)": [
+      32.0,
+      0.0462
+     ],
+     "q/k norm": [
+      32.0,
+      0.0321
+     ],
+     "index / scalar ops": [
+      20.0,
+      0.0263
+     ],
+     "rope": [
+      16.0,
+      0.0245
+     ],
+     "sampling / head": [
+      1.0,
+      0.0072
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0053
+     ],
+     "embedding": [
+      1.0,
+      0.0014
+     ]
+    }
+   },
+   "graphed_wall_ms": 13.8771,
+   "graphed": {
+    "kernels": 1749.1,
+    "kernel_ms": 14.3739,
+    "span_ms": 14.0863,
+    "cat": {
+     "gemm": [
+      461.0,
+      11.454
+     ],
+     "gdn core": [
+      48.0,
+      0.6668
+     ],
+     "act quant (q8_1 / fp4)": [
+      461.0,
+      0.5516
+     ],
+     "copy / cat / fill": [
+      194.1,
+      0.3021
+     ],
+     "gdn conv": [
+      96.0,
+      0.2336
+     ],
+     "rmsnorm": [
+      113.0,
+      0.2335
+     ],
+     "attention": [
+      32.0,
+      0.1955
+     ],
+     "add+rmsnorm (fused)": [
+      64.0,
+      0.1813
+     ],
+     "silu*mul": [
+      64.0,
+      0.18
+     ],
+     "kv store": [
+      36.0,
+      0.1415
+     ],
+     "residual add": [
+      67.0,
+      0.0852
+     ],
+     "gates (sigmoid, mul, softplus, exp)": [
+      32.0,
+      0.0466
+     ],
+     "q/k norm": [
+      32.0,
+      0.0357
+     ],
+     "index / scalar ops": [
+      20.0,
+      0.0279
+     ],
+     "rope": [
+      16.0,
+      0.0242
+     ],
+     "sampling / head": [
+      1.0,
+      0.0071
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0056
+     ],
+     "embedding": [
+      1.0,
+      0.0016
+     ]
+    }
+   },
+   "ratio_graphed_wall_over_eager_kernels": 0.9781,
+   "ratio_graphed_profiled_over_wall": 1.0358,
+   "clocks": {
+    "graphed": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2685.0,
+      "p50": 2692.0,
+      "p90": 2857.0
+     },
+     "mem_mhz": 13801.0,
+     "power_w": 440.8,
+     "slowdown_share": 0.0,
+     "power_cap_share": 1.0
+    },
+    "eager": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2692.0,
+      "p50": 2775.0,
+      "p90": 2782.0
+     },
+     "mem_mhz": 13801.0,
+     "power_w": 474.9,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.0
+    }
+   },
+   "spec": {},
+   "ctx_end": 876
+  },
+  "decode_b8": {
+   "kind": "decode",
+   "batch": 8,
+   "ctx": 512,
+   "gemm": {
+    "weight_bytes": 15376691200,
+    "calls": [
+     {
+      "type": "iq3_s",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 1
+     },
+     {
+      "type": "iq3_s",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 3
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 3
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 12
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 8
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 21
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 20
+     },
+     {
+      "type": "iq4_xs",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 24
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 4
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 1
+     },
+     {
+      "type": "q3_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 24
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 29
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 6
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 18
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 11
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 2
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 9
+     },
+     {
+      "type": "q5_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 44
+     },
+     {
+      "type": "q5_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 22
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 12
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 248320,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 9
+     },
+     {
+      "type": "q6_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 1
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 48,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 96
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 8,
+      "count": 8
+     }
+    ]
+   },
+   "eager_wall_ms": 29.9223,
+   "eager": {
+    "kernels": 2246.1,
+    "kernel_ms": 17.0774,
+    "span_ms": 40.9209,
+    "cat": {
+     "gemm": [
+      710.0,
+      13.5186
+     ],
+     "gdn core": [
+      48.0,
+      1.0945
+     ],
+     "act quant (q8_1 / fp4)": [
+      461.0,
+      0.505
+     ],
+     "copy / cat / fill": [
+      193.1,
+      0.2987
+     ],
+     "attention": [
+      32.0,
+      0.2806
+     ],
+     "gdn conv": [
+      96.0,
+      0.2498
+     ],
+     "f32 -> bf16 cast": [
+      249.0,
+      0.2204
+     ],
+     "rmsnorm": [
+      113.0,
+      0.2182
+     ],
+     "silu*mul": [
+      64.0,
+      0.1671
+     ],
+     "add+rmsnorm (fused)": [
+      64.0,
+      0.1556
+     ],
+     "kv store": [
+      36.0,
+      0.1422
+     ],
+     "residual add": [
+      67.0,
+      0.0814
+     ],
+     "gates (sigmoid, mul, softplus, exp)": [
+      32.0,
+      0.0463
+     ],
+     "q/k norm": [
+      32.0,
+      0.0329
+     ],
+     "index / scalar ops": [
+      20.0,
+      0.026
+     ],
+     "rope": [
+      16.0,
+      0.0251
+     ],
+     "sampling / head": [
+      1.0,
+      0.0088
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0051
+     ],
+     "embedding": [
+      1.0,
+      0.0014
+     ]
+    }
+   },
+   "graphed_wall_ms": 16.7703,
+   "graphed": {
+    "kernels": 2246.1,
+    "kernel_ms": 16.9204,
+    "span_ms": 16.9876,
+    "cat": {
+     "gemm": [
+      710.0,
+      13.3042
+     ],
+     "gdn core": [
+      48.0,
+      1.1056
+     ],
+     "act quant (q8_1 / fp4)": [
+      461.0,
+      0.5134
+     ],
+     "attention": [
+      32.0,
+      0.3025
+     ],
+     "copy / cat / fill": [
+      193.1,
+      0.295
+     ],
+     "gdn conv": [
+      96.0,
+      0.249
+     ],
+     "f32 -> bf16 cast": [
+      249.0,
+      0.2232
+     ],
+     "rmsnorm": [
+      113.0,
+      0.221
+     ],
+     "add+rmsnorm (fused)": [
+      64.0,
+      0.1698
+     ],
+     "silu*mul": [
+      64.0,
+      0.164
+     ],
+     "kv store": [
+      36.0,
+      0.1405
+     ],
+     "residual add": [
+      67.0,
+      0.0839
+     ],
+     "gates (sigmoid, mul, softplus, exp)": [
+      32.0,
+      0.0443
+     ],
+     "q/k norm": [
+      32.0,
+      0.0362
+     ],
+     "index / scalar ops": [
+      20.0,
+      0.0272
+     ],
+     "rope": [
+      16.0,
+      0.0245
+     ],
+     "sampling / head": [
+      1.0,
+      0.0087
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0058
+     ],
+     "embedding": [
+      1.0,
+      0.0015
+     ]
+    }
+   },
+   "ratio_graphed_wall_over_eager_kernels": 0.982,
+   "ratio_graphed_profiled_over_wall": 1.009,
+   "clocks": {
+    "graphed": {
+     "samples": 19,
+     "sm_mhz": {
+      "p10": 2752.0,
+      "p50": 2752.0,
+      "p90": 2872.0
+     },
+     "mem_mhz": 13801.0,
+     "power_w": 382.6,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.895
+    },
+    "eager": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2760.0,
+      "p50": 2782.0,
+      "p90": 2782.0
+     },
+     "mem_mhz": 13801.0,
+     "power_w": 416.6,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.056
+    }
+   },
+   "spec": {},
+   "ctx_end": 834
+  }
+ },
+ "unclassified": {
+  "void at::native::vectorized_elementwise_kernel<4, at::native::neg_kernel_cuda(at::TensorIteratorBase&)::{lambda()#2}::op": 96
+ }
+}

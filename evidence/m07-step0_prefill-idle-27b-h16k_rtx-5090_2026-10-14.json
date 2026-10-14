@@ -1,0 +1,26 @@
+{
+ "command": "python bench/prefill_idle.py --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf --engine-args '--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 4 --plugin-options recurrent.checkpoints=4' --history 16384 --sizes 512 2048 -r 4",
+ "commit": "474674e",
+ "gpu_class": "rtx-5090",
+ "date": "2026-10-14",
+ "model": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+ "gpu": "NVIDIA GeForce RTX 5090",
+ "engine_args": "--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 4 --plugin-options recurrent.checkpoints=4 ",
+ "history": 16384,
+ "rows": [
+  {
+   "new_tokens": 512,
+   "steps": 1,
+   "wall_ms": 138.49,
+   "kernel_ms": 133.88,
+   "idle": 0.033
+  },
+  {
+   "new_tokens": 2048,
+   "steps": 1,
+   "wall_ms": 511.09,
+   "kernel_ms": 519.73,
+   "idle": -0.017
+  }
+ ]
+}

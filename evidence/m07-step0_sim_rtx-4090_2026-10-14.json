@@ -1,23 +1,14 @@
 {
  "command": "python bench/mixed_sim.py --decode evidence/m07-step0_profile-27b-plain_rtx-4090_2026-10-14.json evidence/m07-step0_profile-27b-plain-ctx4096_rtx-4090_2026-10-14.json --prefill-idle evidence/m07-step0_prefill-idle-27b_rtx-4090_2026-10-14.json evidence/m07-step0_prefill-idle-27b-h16k_rtx-4090_2026-10-14.json --measured evidence/bench_m07-agent-plain_rtx-4090_2026-10-14.json",
- "commit": "5af3985",
+ "commit": "f32392a",
  "gpu_class": "rtx-4090",
  "date": "2026-10-14",
  "note": "a model, not a run: today's scheduler checked against the measured run ('measured'); mixed:<cap> are D7 predictions",
  "costs": {
   "decode": {
-   "1": [
-    21.42,
-    8.3e-05
-   ],
-   "4": [
-    23.521,
-    0.000321
-   ],
-   "8": [
-    27.101,
-    0.0
-   ]
+   "1": 21.426,
+   "4": 23.533,
+   "8": 26.71
   },
   "per_row_ctx_ms": 8.18e-05,
   "prefill_history": 4096,
@@ -79,59 +70,59 @@
   "agent": {
    "today": {
     "ttft_ms": {
-     "p50": 498.9,
-     "p99": 6003.9,
-     "max": 6546.3
+     "p50": 507.7,
+     "p99": 6005.3,
+     "max": 6547.8
     },
     "tpot_ms": {
-     "p50": 29.7,
-     "p99": 56.3
+     "p50": 30.4,
+     "p99": 56.4
     },
     "max_gap_ms": {
-     "p50": 502.3,
+     "p50": 511.3,
      "p99": 1778.2,
      "max": 1778.2
     },
-    "throughput_tok_s": 70.2,
-    "prefix_tokens_saved": 184960
+    "throughput_tok_s": 69.9,
+    "prefix_tokens_saved": 181888
    },
    "mixed:256": {
     "ttft_ms": {
-     "p50": 651.5,
-     "p99": 8548.2,
-     "max": 8652.6
+     "p50": 699.9,
+     "p99": 8549.5,
+     "max": 8653.9
     },
     "tpot_ms": {
-     "p50": 31.3,
+     "p50": 31.5,
      "p99": 54.1
     },
     "max_gap_ms": {
-     "p50": 92.4,
+     "p50": 92.5,
      "p99": 94.4,
      "max": 94.5
     },
-    "throughput_tok_s": 70.2,
-    "prefix_tokens_saved": 177664,
-    "paired_ttft": 1.248
+    "throughput_tok_s": 69.2,
+    "prefix_tokens_saved": 168192,
+    "paired_ttft": 1.262
    },
    "mixed:512": {
     "ttft_ms": {
-     "p50": 549.5,
-     "p99": 6446.4,
-     "max": 7049.0
+     "p50": 549.8,
+     "p99": 6447.6,
+     "max": 7050.5
     },
     "tpot_ms": {
-     "p50": 28.9,
+     "p50": 29.0,
      "p99": 53.0
     },
     "max_gap_ms": {
-     "p50": 149.0,
+     "p50": 149.1,
      "p99": 151.1,
      "max": 151.1
     },
-    "throughput_tok_s": 70.4,
-    "prefix_tokens_saved": 175936,
-    "paired_ttft": 1.008
+    "throughput_tok_s": 70.0,
+    "prefix_tokens_saved": 172096,
+    "paired_ttft": 1.006
    },
    "measured": {
     "ttft_ms": {
@@ -159,8 +150,8 @@
    "today": {
     "ttft_ms": {
      "p50": 229.7,
-     "p99": 9404.3,
-     "max": 9688.0
+     "p99": 9405.0,
+     "max": 9688.8
     },
     "tpot_ms": {
      "p50": 32.6,
@@ -177,12 +168,12 @@
    "mixed:256": {
     "ttft_ms": {
      "p50": 229.7,
-     "p99": 11518.2,
-     "max": 11867.3
+     "p99": 11518.9,
+     "max": 11868.1
     },
     "tpot_ms": {
-     "p50": 32.0,
-     "p99": 32.0
+     "p50": 32.1,
+     "p99": 32.1
     },
     "max_gap_ms": {
      "p50": 112.1,
@@ -196,8 +187,8 @@
    "mixed:512": {
     "ttft_ms": {
      "p50": 229.7,
-     "p99": 9467.5,
-     "max": 9753.2
+     "p99": 9468.3,
+     "max": 9754.0
     },
     "tpot_ms": {
      "p50": 31.3,
