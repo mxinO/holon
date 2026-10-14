@@ -1177,3 +1177,12 @@ came in with the step-3 record. Outside the files `main` changed, the tree equal
   skipped silently here, as they were for Quark under M0.6.
 
 **Documentation frozen at eb9eef5 (2026-10-14).** Reviewer C's drift check after M0.6's Gate A merge: `docs/adding-a-model.md` and `AGENTS.md` are byte-identical to the reviewed bdabd9e, and the README differs only by the benchmark-placeholder cut. `check_docs` passes, the spot-checked facts hold on the rebased tree, and the four tailoring tests hold. Any later edit to these three files voids the legibility branch point (§4.2). Notes for the branch-point build: the strip list is matched by content (plan.md's §9 row is now at line 509), and the squashed branch point replaces the log, including commit messages that mention the benchmark.
+
+**Owner decisions (2026-10-14):**
+- **Publishing: a squashed root (owner question 1).** The private repository's history is kept as is, never rewritten.
+  The public repository receives one parentless commit holding exactly the release tree, tagged `v0.1.0`. From
+  step 6, local `main` continues from that root, so the release locks and records name public commits. The old line is
+  kept as an archive branch and on the private remote. Pushing still waits for the owner's go (step 11). PyPI names:
+  not reserved (no wheels in v0).
+- **Cold start (escalated lead decision 1, §13.3): accepted.** FlashInfer's CuTe DSL norms compile in memory on each
+  start (≈ 1 s). Acceptance 4 reads "compiles nothing but Triton and FlashInfer's CuTe DSL norms".
