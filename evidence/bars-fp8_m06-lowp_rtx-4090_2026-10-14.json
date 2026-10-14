@@ -1,0 +1,152 @@
+{
+ "workload": "m06-b3-bars-fp8",
+ "date": "2026-10-14",
+ "commit": "6f90dfe",
+ "clock_screen": {
+  "load": "60 s of bf16 8192^2 matmuls, nvidia-smi every 250 ms",
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "samples": 231,
+  "sm_clock_mhz": {
+   "median": 2670.0,
+   "min": 2655.0,
+   "p5": 2670.0,
+   "max_sm": 3105.0
+  },
+  "thermal_slowdown_share": {
+   "sw": 0.0,
+   "hw": 0.0
+  },
+  "hw_slowdown_share": 0.0,
+  "power_cap_share": 0.0
+ },
+ "command": {
+  "holon": "python bench/llama_bench.py --model 220b46e3b2180893580a4454f21f22d3ebb187d3 -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384'",
+  "llama": "llama-bench (llama.cpp cbe28bb3) -m <Q8_0 conversion of Qwen/Qwen3-8B-FP8> -p 512 -n 128 -d 0,256 -ngl 99 -fa on -r 5 -o json"
+ },
+ "claim": "acceptance 14 (speed): 8B FP8 tg128 >= 0.8x llama-bench Q8_0 of the same checkpoint; pp512 recorded against its prediction (0.4-0.9x); medians of repetitions 2-5",
+ "results": {
+  "pp512": {
+   "holon": 14891.38,
+   "llama_q8_0": 12892.37,
+   "ratio": 1.155
+  },
+  "tg128": {
+   "holon": 87.37,
+   "llama_q8_0": 91.54,
+   "ratio": 0.954
+  },
+  "tg128 @ d256": {
+   "holon": 87.1,
+   "llama_q8_0": 91.14,
+   "ratio": 0.956
+  }
+ },
+ "raw": {
+  "holon": {
+   "model": "Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4",
+   "gpu_class": "rtx-4090/cu130-torch2.11",
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "commit": "6f90dfe8f626766ff04e007fa8ec0a889746a8bb",
+   "command": "python bench/llama_bench.py --model 220b46e3b2180893580a4454f21f22d3ebb187d3 -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384' --json rtx-4090-bars-holon.json",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "32",
+    "max_model_len": "16384",
+    "clamp_context": "False",
+    "max_step_tokens": "2048",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "kernel_preferences": "{}",
+    "slots": "{}",
+    "plugin_options": "{}"
+   },
+   "results": {
+    "pp512": {
+     "mean": 14902.68,
+     "sd": 22.49,
+     "runs": [
+      14936.31,
+      14880.26,
+      14889.97,
+      14914.1,
+      14892.78
+     ]
+    },
+    "tg128": {
+     "mean": 87.37,
+     "sd": 0.01,
+     "runs": [
+      87.38,
+      87.38,
+      87.36,
+      87.36,
+      87.37
+     ],
+     "cpu_ms_per_step_p50": 0.496
+    },
+    "tg128 @ d256": {
+     "mean": 87.1,
+     "sd": 0.01,
+     "runs": [
+      87.11,
+      87.11,
+      87.1,
+      87.09,
+      87.1
+     ],
+     "cpu_ms_per_step_p50": 0.501
+    }
+   }
+  },
+  "llama_q8_0": {
+   "pp512": {
+    "runs": [
+     10648.01,
+     12884.47,
+     12939.67,
+     12861.11,
+     12900.28
+    ],
+    "median_reps_2_5": 12892.37
+   },
+   "tg128": {
+    "runs": [
+     91.37,
+     91.54,
+     91.54,
+     91.54,
+     91.54
+    ],
+    "median_reps_2_5": 91.54
+   },
+   "pp512 @ d256": {
+    "runs": [
+     12335.38,
+     11609.29,
+     12739.58,
+     12767.21,
+     12769.02
+    ],
+    "median_reps_2_5": 12753.4
+   },
+   "tg128 @ d256": {
+    "runs": [
+     90.91,
+     91.13,
+     91.14,
+     91.14,
+     91.14
+    ],
+    "median_reps_2_5": 91.14
+   }
+  }
+ }
+}

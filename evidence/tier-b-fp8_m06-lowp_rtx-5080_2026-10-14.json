@@ -1,0 +1,170 @@
+{
+ "workload": "m06-b3-tier-b-fp8",
+ "date": "2026-10-14",
+ "commit": "6f90dfe",
+ "clock_screen": {
+  "load": "60 s of bf16 8192^2 matmuls, nvidia-smi every 250 ms",
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "samples": 233,
+  "sm_clock_mhz": {
+   "median": 2677.0,
+   "min": 2602.0,
+   "p5": 2602.0,
+   "max_sm": 3090.0
+  },
+  "thermal_slowdown_share": {
+   "sw": 0.0,
+   "hw": 0.0
+  },
+  "hw_slowdown_share": 0.0,
+  "power_cap_share": 0.5021459227467812
+ },
+ "command": {
+  "prefill": "python -m holon_judge l2 --model <Qwen/Qwen3-8B-FP8> --prompts judge/prompts/v1.jsonl --golden judge/goldens/qwen3-8b-fp8/v1-fp32.safetensors --floor .../v1-bfloat16-prefill-fp8-floor.safetensors",
+  "decode": "python -m holon_judge l2 --model <Qwen/Qwen3-8B-FP8> --prompts judge/prompts/v1.jsonl --golden judge/goldens/qwen3-8b-fp8/v1-fp32.safetensors --floor .../v1-bfloat16-floor.safetensors --max-step-tokens 16",
+  "plants": "the same with --plant <name>",
+  "chunked": "python -m holon_judge bounded --model <Qwen/Qwen3-8B-FP8> --prompts judge/prompts/v1.jsonl --chunked 100"
+ },
+ "claim": "acceptance 13: 8B FP8 prefill (W8A8) against the W8A8 floor, decode (W8A16, steps of 16) against the A16 floor; FP8 plants (P1-P3, P7 on prefill, P4 on decode); chunked (100) vs one-shot prefill",
+ "results": {
+  "prefill": {
+   "kl_p99": 0.04306494347599722,
+   "floor_kl_p99": 0.04137404273095025,
+   "x_floor_p99": 1.041,
+   "x_floor_p50": 0.956,
+   "top1": 0.9813317878168563,
+   "floor_top1": 0.9820333709544581,
+   "dppl": 0.003732759386684315,
+   "passed": true,
+   "failures": [],
+   "calls": {
+    "decode/bf16": 0,
+    "prefill/fp8": 1296
+   },
+   "max_step_tokens": 4096
+  },
+  "decode": {
+   "kl_p99": 0.004469277199063674,
+   "floor_kl_p99": 0.005602881461797241,
+   "x_floor_p99": 0.798,
+   "x_floor_p50": 0.898,
+   "top1": 0.9896287710093646,
+   "floor_top1": 0.9896287710093646,
+   "dppl": 0.0003783693242106348,
+   "passed": true,
+   "failures": [],
+   "calls": {
+    "decode/bf16": 295344,
+    "prefill/fp8": 0
+   },
+   "max_step_tokens": 16
+  }
+ },
+ "plants": {
+  "fp8-scale-transposed": {
+   "kl_p99": 6.857870741835621,
+   "floor_kl_p99": 0.04137404273095025,
+   "x_floor_p99": 165.753,
+   "x_floor_p50": 25423.568,
+   "top1": 0.005978708476954519,
+   "floor_top1": 0.9820333709544581,
+   "dppl": 283064.80712965614,
+   "passed": false,
+   "failures": [
+    "top-1 0.5979% < 97.9533%",
+    "KL p50 4.914e+00 > 3.866e-04",
+    "KL p99 6.858e+00 > 8.275e-02",
+    "|\u0394PPL vs floor| 28241198.156% > 0.461%"
+   ],
+   "calls": {
+    "decode/bf16": 0,
+    "prefill/fp8": 1296
+   },
+   "max_step_tokens": 4096
+  },
+  "fp8-scale-k-shifted": {
+   "kl_p99": 9.758877070196416,
+   "floor_kl_p99": 0.04137404273095025,
+   "x_floor_p99": 235.87,
+   "x_floor_p50": 21165.95,
+   "top1": 0.18848183509745906,
+   "floor_top1": 0.9820333709544581,
+   "dppl": 522.8402434283772,
+   "passed": false,
+   "failures": [
+    "top-1 18.8482% < 97.9533%",
+    "KL p50 4.091e+00 > 3.866e-04",
+    "KL p99 9.759e+00 > 8.275e-02",
+    "|\u0394PPL vs floor| 52163.213% > 0.461%"
+   ],
+   "calls": {
+    "decode/bf16": 0,
+    "prefill/fp8": 1296
+   },
+   "max_step_tokens": 4096
+  },
+  "fp8-act-scale-per-token": {
+   "kl_p99": 0.06108921939286746,
+   "floor_kl_p99": 0.04137404273095025,
+   "x_floor_p99": 1.477,
+   "x_floor_p50": 1.461,
+   "top1": 0.977793368514169,
+   "floor_top1": 0.9820333709544581,
+   "dppl": 0.005639720251680169,
+   "passed": false,
+   "failures": [
+    "top-1 97.7793% < 97.9533%"
+   ],
+   "calls": {
+    "decode/bf16": 0,
+    "prefill/fp8": 1296
+   },
+   "max_step_tokens": 4096
+  },
+  "fp8-o-proj-scales-1.25": {
+   "kl_p99": 0.0932740429693833,
+   "floor_kl_p99": 0.04137404273095025,
+   "x_floor_p99": 2.254,
+   "x_floor_p50": 2.012,
+   "top1": 0.97483451789037,
+   "floor_top1": 0.9820333709544581,
+   "dppl": 0.008458867897975461,
+   "passed": false,
+   "failures": [
+    "top-1 97.4835% < 97.9533%",
+    "KL p50 3.890e-04 > 3.866e-04",
+    "KL p99 9.327e-02 > 8.275e-02",
+    "|\u0394PPL vs floor| 0.613% > 0.461%"
+   ],
+   "calls": {
+    "decode/bf16": 0,
+    "prefill/fp8": 1296
+   },
+   "max_step_tokens": 4096
+  },
+  "fp8-subnormals-as-normals": {
+   "kl_p99": 0.004629174302816577,
+   "floor_kl_p99": 0.005602881461797241,
+   "x_floor_p99": 0.826,
+   "x_floor_p50": 0.899,
+   "top1": 0.9905438794497148,
+   "floor_top1": 0.9896287710093646,
+   "dppl": 0.0011641173749757487,
+   "passed": true,
+   "failures": [],
+   "calls": {
+    "decode/bf16": 295344,
+    "prefill/fp8": 0
+   },
+   "max_step_tokens": 16
+  }
+ },
+ "chunked": [
+  "config                      n        top-1 \u00b1 SE    confident \u00b1 SE   regret    KL p50    KL p99   saved  verdict",
+  "baseline                24576   97.839% \u00b1 0.147%   98.725% \u00b1 0.103%   0.0035  1.20e-04  4.24e-02       0  PASS",
+  "prefix on, depth 1      24576   97.843% \u00b1 0.137%   98.774% \u00b1 0.087%   0.0032  1.21e-04  4.48e-02  154752  PASS",
+  "prefix on, depth 0      24576   97.843% \u00b1 0.137%   98.757% \u00b1 0.090%   0.0032  1.14e-04  4.41e-02  161616  PASS",
+  "prefix off, depth 1     24576   97.778% \u00b1 0.159%   98.696% \u00b1 0.112%   0.0035  1.02e-04  4.20e-02       0  PASS",
+  "chunked 100             24576   97.884% \u00b1 0.133%   98.683% \u00b1 0.090%   0.0035  1.02e-04  4.77e-02       0  PASS"
+ ]
+}

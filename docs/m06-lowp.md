@@ -972,3 +972,86 @@ act quant check skips below sm_89), 23 min 30 s, none of the new tests among the
 decode path is scored against the existing A16 floor; the per-call allocations (split-K partials; the e4m3
 activations and their scales, 25 MB at 2048 tokens for `down`) are in the fit's measured peak step. Locks wait for the
 release and M0.7's propagation (lead).
+
+**As built (B3, all but the locks).** Rebased onto `main` at 9d2708b (the release: uv, ABI 0.1, `manifest-deps`,
+`adopt_weights`); `kernels.triton_fp8`'s manifest carries `core_abi = ">=0.1,<0.2"`. It provides only a kernel (not
+listed in `contracts.txt`), imports nothing undeclared (`triton` is in its manifest and in holonlm-plugins), and has
+no `[build]` module (Triton JIT, as `triton_attn` / `triton_experts`). Recorded deviations from rev 3 in step B3:
+
+| item | rev 3 | as built |
+|---|---|---|
+| W8A8 floor | e4m3 per token per 128, IEEE division, ±448 | `holon_judge.modes`: mode `fp8` on `kernels.triton_fp8`'s path `prefill` (`golden --q8-1 prefill --act fp8`; `modes.PATHS`), `fp8_act` / `fp8_values`; an FP8 weight on any other path or mode, and `fp8` on another weight, are errors (`test_hf_quant.py`'s floors test extended, failing before). The FP8 L0 now checks the kernel's act quant bitwise against `modes.fp8_act` (one emulation, not the test's copy). Decode (W8A16) is scored against the existing A16 floor, as designed |
+| floor provenance | `emulation` hashes `q8_1.py`, `modes.py`, `w4a4.py`, `reference.py` | `modes.py` changed, so the hash moved; the FP4 code paths did not: the 8B NVFP4 W4A8 mmq floor re-recorded through the new code is bit-identical to the committed one, so the Gate A floors stay valid |
+| Tier B decode step | from the M ≤ 16 switch | `--max-step-tokens 16` (not `gguf.mmvq_step`, which refuses FP8); every trunk call `decode/bf16` |
+| fit | `empty_cache()` after load, merges and `prepare`, or confirm `expandable_segments` (Gate A close) | expandable segments take effect (every segment expandable; the release's engine checks it), and `platform.free_memory` already empties the cache before its read. Neither returns the hole: **finding below** |
+| RTX 4090 node | — | the first B3 node's clock screen read SM median 525 MHz with software thermal slowdown in 100% of samples; its bars (pp512 0.46×, tg128 0.47×) are void and its runs were moved aside (`local/`, not evidence). Everything on the 4090 was rerun on another node (2670 MHz, no slowdown) |
+
+**B3 results** (records `evidence/{tier-b-fp8,bars-fp8}_m06-lowp_<class>_2026-10-14.json`,
+`evidence/fit-fp8_m06-lowp_rtx-5080_2026-10-14.json`; commit 6f90dfe, the floor at 76cc7e1 only adds its report).
+Clock screens: RTX 5080 SM median 2677 MHz (power cap 50% of samples), RTX 4090 2670 MHz; no thermal slowdown.
+
+- **W8A8 floor** (bf16, one A5000; vs the golden): KL p99 4.14e-2, top-1 98.20% (A16: 5.60e-3, 98.96%). It is 3.3× the
+  8B NVFP4's W4A8 mmq floor (1.24e-2): the predicted order A16 < W4A8 < W8A8 holds, as §4.8 predicted (≈ 3×; sim 6e-2).
+- **Acceptance 13, Tier B: all pass.**
+
+  | class | prefill W8A8 vs W8A8 floor | decode W8A16 vs A16 floor (steps of 16) |
+  |---|---|---|
+  | RTX 5080 | 4.31e-2 (1.04×), top-1 98.13 / 98.20% | 4.47e-3 (0.80×), 98.96 / 98.96% |
+  | RTX 4090 | 4.27e-2 (1.03×), 98.20 / 98.20% | 4.56e-3 (0.81×), 98.94 / 98.96% |
+
+  Every trunk call on its floor's path and mode: prefill 1296 `prefill/fp8`, decode 295344 `decode/bf16`.
+- **Plants** (RTX 5080; multiples of the floor's KL p99):
+
+  | plant | run | result | predicted |
+  |---|---|---|---|
+  | P1 scales read transposed | prefill | fail, 166× (top-1 0.6%) | fail, > 10× ✓ |
+  | P2 scales shifted one K block | prefill | fail, 236× (top-1 18.8%) | fail, > 10× ✓ |
+  | P3 activation scale per token | prefill | **fail**: KL p99 1.48× (p50 1.46×), top-1 97.78% < budget 97.95% | **pass** (sim 1.3×): **outside the prediction** |
+  | P4 subnormals as normals | decode | pass, 0.83× (clean 0.80×) | pass (≤ 1.2×) ✓ |
+  | P7 o_proj scales × 1.25 | prefill | fail, 2.25× (top-1 97.48%) | 1.5–4×, fail if > 2× ✓ |
+
+  P3's cause: its KL multiple is near the simulation's (1.48× vs 1.3×), but it costs 0.42 top-1 points, beyond L2's
+  0.25-point slack. A per-token scale lets one outlier channel (Qwen3's hidden states carry a few) coarsen every
+  group of its row, which shows in the top-1 rate more than in the KL tail. The judge is more sensitive than
+  predicted, not less; δ unchanged.
+- **Bounded:** chunked (100) vs one-shot prefill, 8B FP8 on the RTX 5080: pass (with prefix on/off × depth 1/0).
+- **Acceptance 14, speed: met.** Holon / llama-bench Q8_0 of the same checkpoint, medians of repetitions 2–5:
+
+  | card | pp512 | tg128 | tg128 @ d256 |
+  |---|---|---|---|
+  | RTX 5080 | 10427 / 8534 (1.22×) | 95.4 / 101.0 (**0.944×**) | 95.0 / 100.5 (0.945×) |
+  | RTX 4090 | 14891 / 12892 (1.16×) | 87.4 / 91.5 (**0.954×**) | 87.1 / 91.1 (0.956×) |
+
+  tg128 is inside §4.10's predicted 0.85–1.0× and within 2.6% / 1.0% of B1's end-to-end prediction (97.9 / 86.6).
+  pp512 lands above its predicted 0.4–0.9× (as in B2's first run).
+- **Acceptance 14, memory: met at the named fallback only.** With bf16 KV, `max_seqs` 32 and a 16128-token prompt
+  served each time, the 8B FP8 fit on the RTX 5080 is:
+  - **30704 KV tokens at 0.9**, against ≥ 32K and the predicted 34.3K;
+  - **33792 at 0.98**, the fallback §4.9 names.
+
+  **Finding:** at the engine's free-memory read (after `empty_cache`), the allocator holds 0.87 GiB that is reserved
+  but not allocated: 71 free blocks of 2–28 MiB inside the main expandable segment. Expandable segments do not return
+  them. They are the source halves of the q/k/v merges. The source yields tensors in shard order, so each layer
+  loads as k, o, q, v. The merge allocates the 24 MiB q/k/v buffer anew, then frees the 4 MiB k and the 20 MiB
+  q + v run. The o_proj between them splits the two, so no later merge fits there: 36 × 24 MiB ≈ 864 MiB. The rest
+  of the sizing is as predicted: worst step 0.31 GiB, graph pool 0.26 GiB, free 5.32 GiB. Without the holes, 0.9
+  would give ≈ 36K tokens. The 8B NVFP4's q/k/v are half the size (A6: 51472 tokens, 1.3K under prediction).
+- **Suite and CI** after the rebase, at 76cc7e1: full GPU suite (two A5000s, the worktree's `uv sync --group dev`
+  `.venv`): 1164 passed, 50 skipped, **2 errors**, 23 min 40 s. `scripts/ci/run_all.sh` is green (ABI, manifest-deps,
+  `uv lock --check` included). The two errors are `test_dflash.py`'s q8_0-draft fixture: the llama.cpp converter it
+  runs imports `sentencepiece`, which the dev group does not install. They are the release's, not B3's: both tests
+  pass in the pre-release venv, and the same suite before B3's changes (a1942e3) has the same two errors.
+
+**For the lead (B3):**
+1. Acceptance 14's memory row is met at the named fallback (0.98: 33792 tokens), not at 0.9 (30704 < 32K). The
+   cause is general, not FP8's: merges leave the freed source halves as holes in the expandable segment that
+   `empty_cache` cannot return. There are three options, two of them outside this branch's scope:
+   - (a) accept the fallback, as §4.9 allows;
+   - (b) std.weights.hf yields each layer's merge partners adjacently (no core change; it changes the source's hash,
+     so every HF lock propagates);
+   - (c) the core's load_weights runs the merges as each layer completes, so the next layer's loads fill the holes,
+     or the ledger counts the allocator's reserved-but-free bytes the step's activations will reuse (core changes).
+2. P3 fails L2 where §4.8 predicted a pass: recorded with its cause, δ unchanged.
+3. The release's dev group lacks `sentencepiece`, which the llama.cpp converter in `test_dflash.py` needs (2 errors in
+   a fresh `uv sync --group dev`).
+4. Locks and snapshots (acceptance 15) wait for the release and M0.7's propagation.

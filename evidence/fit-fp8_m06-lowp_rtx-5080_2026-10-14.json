@@ -1,0 +1,118 @@
+{
+ "workload": "m06-b3-fit-fp8",
+ "date": "2026-10-14",
+ "commit": "6f90dfe",
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "command": "fit (local script): Engine(<Qwen/Qwen3-8B-FP8>, flags), pools, weights, allocator after load (empty_cache, reserved - allocated, expandable segments), then a 16128-token prompt served",
+ "claim": "acceptance 14 (memory): 8B FP8 on the RTX 5080 >= 32K KV tokens at memory_fraction 0.9, max_seqs 32, bf16 KV (34.3K predicted; fallback 0.98)",
+ "fits": {
+  "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384": {
+   "flags": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "load_s": 9.2,
+   "kv_tokens": 30704,
+   "pools": {
+    "state.kv": {
+     "units": 1919,
+     "unit_mib": 2.25,
+     "tokens": 30704
+    }
+   },
+   "weights_gib": 8.79,
+   "total_gib": 15.56,
+   "allocator_after_load": {
+    "reserved_minus_allocated_gib": 1.136,
+    "segments": 7,
+    "expandable_segments": 7
+   },
+   "long_prompt": 16128,
+   "generated": 64,
+   "long_s": 3.0,
+   "max_allocated_gib": 13.41
+  },
+  "--memory-fraction 0.98 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384": {
+   "flags": "--memory-fraction 0.98 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "load_s": 10.7,
+   "kv_tokens": 33792,
+   "pools": {
+    "state.kv": {
+     "units": 2112,
+     "unit_mib": 2.25,
+     "tokens": 33792
+    }
+   },
+   "weights_gib": 8.79,
+   "total_gib": 15.56,
+   "allocator_after_load": {
+    "reserved_minus_allocated_gib": 1.141,
+    "segments": 7,
+    "expandable_segments": 7
+   },
+   "long_prompt": 16128,
+   "generated": 64,
+   "long_s": 3.0,
+   "max_allocated_gib": 13.83
+  }
+ },
+ "sizing_at_0.9": {
+  "peak_memory": [
+   0.313387393951416
+  ],
+  "reserved_growth": [
+   0.259765625
+  ],
+  "at_free_read": {
+   "allocated": 8.954231262207031,
+   "reserved": 9.828125
+  },
+  "free_memory": [
+   5.3221435546875
+  ],
+  "segments": [
+   {
+    "size_mib": 4.0,
+    "allocated_mib": 2.9,
+    "expandable": true,
+    "pool": "(0, 0)"
+   },
+   {
+    "size_mib": 1400.0,
+    "allocated_mib": 1387.0,
+    "expandable": true,
+    "pool": "(0, 0)"
+   },
+   {
+    "size_mib": 12960.0,
+    "allocated_mib": 12088.9,
+    "expandable": true,
+    "pool": "(0, 0)"
+   },
+   {
+    "size_mib": 2.0,
+    "allocated_mib": 0.0,
+    "expandable": true,
+    "pool": "(0, 0)"
+   },
+   {
+    "size_mib": 4.0,
+    "allocated_mib": 0.0,
+    "expandable": true,
+    "pool": "(0, 1)"
+   },
+   {
+    "size_mib": 20.0,
+    "allocated_mib": 8.1,
+    "expandable": true,
+    "pool": "(0, 2)"
+   },
+   {
+    "size_mib": 260.0,
+    "allocated_mib": 0.0,
+    "expandable": true,
+    "pool": "(0, 1)"
+   }
+  ],
+  "kv_tokens": 30704
+ }
+}

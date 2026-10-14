@@ -1,0 +1,152 @@
+{
+ "workload": "m06-b3-bars-fp8",
+ "date": "2026-10-14",
+ "commit": "6f90dfe",
+ "clock_screen": {
+  "load": "60 s of bf16 8192^2 matmuls, nvidia-smi every 250 ms",
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "samples": 233,
+  "sm_clock_mhz": {
+   "median": 2677.0,
+   "min": 2602.0,
+   "p5": 2602.0,
+   "max_sm": 3090.0
+  },
+  "thermal_slowdown_share": {
+   "sw": 0.0,
+   "hw": 0.0
+  },
+  "hw_slowdown_share": 0.0,
+  "power_cap_share": 0.5021459227467812
+ },
+ "command": {
+  "holon": "python bench/llama_bench.py --model 220b46e3b2180893580a4454f21f22d3ebb187d3 -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384'",
+  "llama": "llama-bench (llama.cpp cbe28bb3) -m <Q8_0 conversion of Qwen/Qwen3-8B-FP8> -p 512 -n 128 -d 0,256 -ngl 99 -fa on -r 5 -o json"
+ },
+ "claim": "acceptance 14 (speed): 8B FP8 tg128 >= 0.8x llama-bench Q8_0 of the same checkpoint; pp512 recorded against its prediction (0.4-0.9x); medians of repetitions 2-5",
+ "results": {
+  "pp512": {
+   "holon": 10427.13,
+   "llama_q8_0": 8533.52,
+   "ratio": 1.222
+  },
+  "tg128": {
+   "holon": 95.37,
+   "llama_q8_0": 100.97,
+   "ratio": 0.945
+  },
+  "tg128 @ d256": {
+   "holon": 94.97,
+   "llama_q8_0": 100.48,
+   "ratio": 0.945
+  }
+ },
+ "raw": {
+  "holon": {
+   "model": "Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4",
+   "gpu_class": "rtx-5080/cu130-torch2.11",
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "commit": "6f90dfe8f626766ff04e007fa8ec0a889746a8bb",
+   "command": "python bench/llama_bench.py --model 220b46e3b2180893580a4454f21f22d3ebb187d3 -r 5 --blocking-sync --engine-args '--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384' --json rtx-5080-bars-holon.json",
+   "engine": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "None",
+    "page_size": "16",
+    "max_seqs": "32",
+    "max_model_len": "16384",
+    "clamp_context": "False",
+    "max_step_tokens": "2048",
+    "memory_fraction": "0.9",
+    "state_memory": "None",
+    "prefix_cache": "False",
+    "overlap": "True",
+    "cuda_graphs": "True",
+    "max_draft_tokens": "0",
+    "kernels": "{}",
+    "kernel_preferences": "{}",
+    "slots": "{}",
+    "plugin_options": "{}"
+   },
+   "results": {
+    "pp512": {
+     "mean": 10415.05,
+     "sd": 43.94,
+     "runs": [
+      10351.89,
+      10466.43,
+      10409.13,
+      10445.13,
+      10402.67
+     ]
+    },
+    "tg128": {
+     "mean": 95.37,
+     "sd": 0.01,
+     "runs": [
+      95.37,
+      95.37,
+      95.37,
+      95.36,
+      95.36
+     ],
+     "cpu_ms_per_step_p50": 0.405
+    },
+    "tg128 @ d256": {
+     "mean": 94.97,
+     "sd": 0.01,
+     "runs": [
+      94.98,
+      94.97,
+      94.97,
+      94.96,
+      94.97
+     ],
+     "cpu_ms_per_step_p50": 0.414
+    }
+   }
+  },
+  "llama_q8_0": {
+   "pp512": {
+    "runs": [
+     7723.93,
+     8544.7,
+     8509.46,
+     8533.89,
+     8533.15
+    ],
+    "median_reps_2_5": 8533.52
+   },
+   "tg128": {
+    "runs": [
+     100.88,
+     101.01,
+     101.0,
+     100.93,
+     100.94
+    ],
+    "median_reps_2_5": 100.97
+   },
+   "pp512 @ d256": {
+    "runs": [
+     8344.24,
+     8075.72,
+     8386.93,
+     8402.75,
+     8389.26
+    ],
+    "median_reps_2_5": 8388.1
+   },
+   "tg128 @ d256": {
+    "runs": [
+     100.32,
+     100.47,
+     100.49,
+     100.47,
+     100.5
+    ],
+    "median_reps_2_5": 100.48
+   }
+  }
+ }
+}

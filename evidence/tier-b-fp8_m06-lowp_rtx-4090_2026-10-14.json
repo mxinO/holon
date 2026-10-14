@@ -1,0 +1,61 @@
+{
+ "workload": "m06-b3-tier-b-fp8",
+ "date": "2026-10-14",
+ "commit": "6f90dfe",
+ "clock_screen": {
+  "load": "60 s of bf16 8192^2 matmuls, nvidia-smi every 250 ms",
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "samples": 231,
+  "sm_clock_mhz": {
+   "median": 2670.0,
+   "min": 2655.0,
+   "p5": 2670.0,
+   "max_sm": 3105.0
+  },
+  "thermal_slowdown_share": {
+   "sw": 0.0,
+   "hw": 0.0
+  },
+  "hw_slowdown_share": 0.0,
+  "power_cap_share": 0.0
+ },
+ "command": {
+  "prefill": "python -m holon_judge l2 --model <Qwen/Qwen3-8B-FP8> --prompts judge/prompts/v1.jsonl --golden judge/goldens/qwen3-8b-fp8/v1-fp32.safetensors --floor .../v1-bfloat16-prefill-fp8-floor.safetensors",
+  "decode": "python -m holon_judge l2 --model <Qwen/Qwen3-8B-FP8> --prompts judge/prompts/v1.jsonl --golden judge/goldens/qwen3-8b-fp8/v1-fp32.safetensors --floor .../v1-bfloat16-floor.safetensors --max-step-tokens 16"
+ },
+ "claim": "acceptance 13: 8B FP8 prefill (W8A8) against the W8A8 floor, decode (W8A16, steps of 16) against the A16 floor",
+ "results": {
+  "prefill": {
+   "kl_p99": 0.042653034306138045,
+   "floor_kl_p99": 0.04137404273095025,
+   "x_floor_p99": 1.031,
+   "x_floor_p50": 0.979,
+   "top1": 0.9819723637251014,
+   "floor_top1": 0.9820333709544581,
+   "dppl": 0.002480569097490471,
+   "passed": true,
+   "failures": [],
+   "calls": {
+    "decode/bf16": 0,
+    "prefill/fp8": 1296
+   },
+   "max_step_tokens": 4096
+  },
+  "decode": {
+   "kl_p99": 0.004562316524912799,
+   "floor_kl_p99": 0.005602881461797241,
+   "x_floor_p99": 0.814,
+   "x_floor_p50": 0.87,
+   "top1": 0.9893542384772596,
+   "floor_top1": 0.9896287710093646,
+   "dppl": 0.0005972464717873292,
+   "passed": true,
+   "failures": [],
+   "calls": {
+    "decode/bf16": 295344,
+    "prefill/fp8": 0
+   },
+   "max_step_tokens": 16
+  }
+ }
+}
