@@ -1149,3 +1149,5 @@ came in with the step-3 record. Outside the files `main` changed, the tree equal
   M0.7's propagation.
 - **Coverage note:** this venv has neither ModelOpt nor amd-quark, so `hf_quant`'s ModelOpt and Quark owner checks are
   skipped silently here, as they were for Quark under M0.6.
+
+**Documentation frozen at eb9eef5 (2026-10-14).** Reviewer C's drift check after M0.6's Gate A merge: `docs/adding-a-model.md` and `AGENTS.md` are byte-identical to the reviewed bdabd9e, and the README differs only by the benchmark-placeholder cut. `check_docs` passes, the spot-checked facts hold on the rebased tree, and the four tailoring tests hold. Any later edit to these three files voids the legibility branch point (§4.2). Notes for the branch-point build: the strip list is matched by content (plan.md's §9 row is now at line 509), and the squashed branch point replaces the log, including commit messages that mention the benchmark.
