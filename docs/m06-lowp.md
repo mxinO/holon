@@ -1055,3 +1055,40 @@ Clock screens: RTX 5080 SM median 2677 MHz (power cap 50% of samples), RTX 4090 
 3. The release's dev group lacks `sentencepiece`, which the llama.cpp converter in `test_dflash.py` needs (2 errors in
    a fresh `uv sync --group dev`).
 4. Locks and snapshots (acceptance 15) wait for the release and M0.7's propagation.
+
+**Decisions during Gate B (lead, 2026-10-14).**
+1. **Memory (acceptance 14):** the named fallback (0.98 → 33792 tokens) is accepted for Gate B, as §4.9 allows. Then
+   option (b): `std.weights.hf` yields each module's merge partners together (`source.adjacent`: HF's `q_proj` /
+   `k_proj` / `v_proj` and `gate_proj` / `up_proj` under one parent, moved to the first one's place, in merge order;
+   dense and quantized checkpoints). No core change. Test: `test_hf_quant.py::test_merge_partners_load_together`
+   (the source's load order, CPU, the FP8 fixture quantized and dense; failing before). The fits are re-measured at
+   0.9 (results below). KV sizes change, so locks move; M0.7's single propagation covers it, no locks now.
+2. **P3:** recorded as is, thresholds unchanged.
+3. **`sentencepiece`** joins the root `dev` group (`uv.lock` updated, re-synced): the two `test_dflash.py` errors are
+   gone (both pass).
+4. **Locks and snapshots** (acceptance 15) wait for the lead.
+
+**Results after decision 1** (`evidence/fit-merge-order_m06-lowp_2026-10-14.json`, commit 2eb40e4).
+Each fit was run twice on the same node and commit: once as built, and once with `adjacent` disabled (shard order, as
+before). Flags: the FP4 locks' (0.9, `max_seqs` 32, bf16 KV); a 16128-token prompt served each time. Clock screens
+2670 MHz on both cards, no thermal slowdown.
+
+| card | file | KV tokens, shard order → adjacent | reserved − allocated after load, GiB | predicted (§4.9) |
+|---|---|---|---|---|
+| RTX 5080 | Qwen 8B FP8 | 30704 → **35952** (+5248) | 1.14 → 0.32 | 34.3K |
+| RTX 5080 | nvidia 8B NVFP4 | 51488 → 53664 (+2176) | 0.77 → 0.45 | 52.8K |
+| RTX 4090 | amd-quark 30B MXFP4 | 24608 → **33632** (+9024) | 1.27 → 0.32 | 31.3K |
+| RTX 4090 | nvidia 30B NVFP4 | 35280 → 34128 (**−1152**) | 0.53 → 0.63 | 35.0K |
+
+- **Acceptance 14, memory: met at 0.9.** The 8B FP8 gets 35952 KV tokens (≥ 32K).
+  - At the engine's free-memory read the allocator now holds 0.07 GiB reserved but unallocated (0.87 GiB before).
+  - Free memory is 6.12 GiB (5.32 before); the worst step (0.31 GiB) and the graph pool (0.26 GiB) are unchanged.
+- **Gate A's amd-quark shortfall is gone:** 33632 tokens, above its predicted 31.3K.
+- **The nvidia 30B NVFP4 loses 1152 tokens** (34128 at 0.9). That is still above acceptance 8's 32K, but below the
+  35280 its rtx-4090 lock records. Its holes grow by 0.1 GiB. The probable cause is that its attention merges are
+  followed by `prepare`'s repack. The repacked blocks (weight and scales in one buffer) are larger than the
+  merged weight, so they cannot reuse the hole the adjacent sources leave. The KV sizes move for every HF lock; M0.7's
+  propagation takes them.
+- **Suite and CI** at 2eb40e4: full GPU suite (two A5000s, `.venv` from `uv sync --group dev` with `sentencepiece`)
+  1168 passed, 50 skipped, 0 errors, 20 min 26 s (+4: the two `test_dflash.py` tests now run, and the two
+  merge-order cases); `scripts/ci/run_all.sh` green.

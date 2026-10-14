@@ -1,0 +1,359 @@
+{
+ "workload": "m06-b3-fit-merge-order",
+ "date": "2026-10-14",
+ "commit": "2eb40e4",
+ "command": "fit (local script) at the FP4 locks' flags (--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384, bf16 KV): with std.weights.hf's adjacent merge partners, and on the same node and commit with them disabled (source.adjacent = identity: shard order, as before)",
+ "claim": "lead decision 1 (Gate B): std.weights.hf yields each module's merge partners together; acceptance 14's memory row re-measured at 0.9, and the amd-quark 30B fit (Gate A's shortfall)",
+ "clock_screens": {
+  "rtx-5080": {
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "sm_clock_mhz": {
+    "median": 2670.0,
+    "min": 2610.0,
+    "p5": 2610.0,
+    "max_sm": 3090.0
+   },
+   "thermal_slowdown_share": {
+    "sw": 0.0,
+    "hw": 0.0
+   },
+   "power_cap_share": 0.49356223175965663
+  },
+  "rtx-4090": {
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "sm_clock_mhz": {
+    "median": 2670.0,
+    "min": 2670.0,
+    "p5": 2670.0,
+    "max_sm": 3105.0
+   },
+   "thermal_slowdown_share": {
+    "sw": 0.0,
+    "hw": 0.0
+   },
+   "power_cap_share": 0.0
+  }
+ },
+ "fits": {
+  "rtx-5080 Qwen/Qwen3-8B-FP8": {
+   "adjacent": {
+    "flags": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "load_s": 72.2,
+    "kv_tokens": 35952,
+    "pools": {
+     "state.kv": {
+      "units": 2247,
+      "unit_mib": 2.25,
+      "tokens": 35952
+     }
+    },
+    "weights_gib": 8.79,
+    "total_gib": 15.56,
+    "allocator_after_load": {
+     "reserved_minus_allocated_gib": 0.317,
+     "segments": 9,
+     "expandable_segments": 9
+    },
+    "long_prompt": 16128,
+    "generated": 64,
+    "long_s": 3.0,
+    "max_allocated_gib": 14.13
+   },
+   "shard_order": {
+    "flags": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "load_s": 9.6,
+    "kv_tokens": 30704,
+    "pools": {
+     "state.kv": {
+      "units": 1919,
+      "unit_mib": 2.25,
+      "tokens": 30704
+     }
+    },
+    "weights_gib": 8.79,
+    "total_gib": 15.56,
+    "allocator_after_load": {
+     "reserved_minus_allocated_gib": 1.136,
+     "segments": 7,
+     "expandable_segments": 7
+    },
+    "long_prompt": 16128,
+    "generated": 64,
+    "long_s": 3.0,
+    "max_allocated_gib": 13.41
+   },
+   "kv_tokens_change": 5248
+  },
+  "rtx-5080 nvidia/Qwen3-8B-NVFP4": {
+   "adjacent": {
+    "flags": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "load_s": 20.1,
+    "kv_tokens": 53664,
+    "pools": {
+     "state.kv": {
+      "units": 3354,
+      "unit_mib": 2.25,
+      "tokens": 53664
+     }
+    },
+    "weights_gib": 5.96,
+    "total_gib": 15.56,
+    "allocator_after_load": {
+     "reserved_minus_allocated_gib": 0.452,
+     "segments": 7,
+     "expandable_segments": 7
+    },
+    "long_prompt": 16128,
+    "generated": 64,
+    "long_s": 3.7,
+    "max_allocated_gib": 13.75
+   },
+   "shard_order": {
+    "flags": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "load_s": 5.2,
+    "kv_tokens": 51488,
+    "pools": {
+     "state.kv": {
+      "units": 3218,
+      "unit_mib": 2.25,
+      "tokens": 51488
+     }
+    },
+    "weights_gib": 5.96,
+    "total_gib": 15.56,
+    "allocator_after_load": {
+     "reserved_minus_allocated_gib": 0.77,
+     "segments": 12,
+     "expandable_segments": 12
+    },
+    "long_prompt": 16128,
+    "generated": 64,
+    "long_s": 3.7,
+    "max_allocated_gib": 13.45
+   },
+   "kv_tokens_change": 2176
+  },
+  "rtx-4090 amd-quark/Qwen3-30B-A3B-MXFP4": {
+   "adjacent": {
+    "flags": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "load_s": 139.4,
+    "kv_tokens": 33632,
+    "pools": {
+     "state.kv": {
+      "units": 2102,
+      "unit_mib": 1.5,
+      "tokens": 33632
+     }
+    },
+    "weights_gib": 17.24,
+    "total_gib": 22.11,
+    "allocator_after_load": {
+     "reserved_minus_allocated_gib": 0.324,
+     "segments": 10,
+     "expandable_segments": 10
+    },
+    "long_prompt": 16128,
+    "generated": 64,
+    "long_s": 2.5,
+    "max_allocated_gib": 20.75
+   },
+   "shard_order": {
+    "flags": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "load_s": 81.5,
+    "kv_tokens": 24608,
+    "pools": {
+     "state.kv": {
+      "units": 1538,
+      "unit_mib": 1.5,
+      "tokens": 24608
+     }
+    },
+    "weights_gib": 17.24,
+    "total_gib": 22.11,
+    "allocator_after_load": {
+     "reserved_minus_allocated_gib": 1.268,
+     "segments": 12,
+     "expandable_segments": 12
+    },
+    "long_prompt": 16128,
+    "generated": 64,
+    "long_s": 2.5,
+    "max_allocated_gib": 19.92
+   },
+   "kv_tokens_change": 9024
+  },
+  "rtx-4090 nvidia/Qwen3-30B-A3B-NVFP4": {
+   "adjacent": {
+    "flags": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "load_s": 53.5,
+    "kv_tokens": 34128,
+    "pools": {
+     "state.kv": {
+      "units": 2133,
+      "unit_mib": 1.5,
+      "tokens": 34128
+     }
+    },
+    "weights_gib": 16.87,
+    "total_gib": 22.11,
+    "allocator_after_load": {
+     "reserved_minus_allocated_gib": 0.631,
+     "segments": 11,
+     "expandable_segments": 11
+    },
+    "long_prompt": 16128,
+    "generated": 64,
+    "long_s": 2.7,
+    "max_allocated_gib": 20.44
+   },
+   "shard_order": {
+    "flags": "--memory-fraction 0.9 --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "load_s": 49.6,
+    "kv_tokens": 35280,
+    "pools": {
+     "state.kv": {
+      "units": 2205,
+      "unit_mib": 1.5,
+      "tokens": 35280
+     }
+    },
+    "weights_gib": 16.87,
+    "total_gib": 22.11,
+    "allocator_after_load": {
+     "reserved_minus_allocated_gib": 0.525,
+     "segments": 10,
+     "expandable_segments": 10
+    },
+    "long_prompt": 16128,
+    "generated": 64,
+    "long_s": 2.7,
+    "max_allocated_gib": 20.55
+   },
+   "kv_tokens_change": -1152
+  }
+ },
+ "sizing_at_0.9_rtx-5080_fp8_adjacent": {
+  "peak_memory": [
+   0.313387393951416
+  ],
+  "reserved_growth": [
+   0.259765625
+  ],
+  "at_free_read": {
+   "allocated": 8.954231262207031,
+   "reserved": 9.02734375,
+   "segments": [
+    {
+     "size_mib": 4.0,
+     "free_blocks": 4,
+     "free_mib": 1.1,
+     "largest_free_mib": 1.08,
+     "free_blocks_over_2mib": 0
+    },
+    {
+     "size_mib": 1400.0,
+     "free_blocks": 1,
+     "free_mib": 13.0,
+     "largest_free_mib": 13.0,
+     "free_blocks_over_2mib": 1
+    },
+    {
+     "size_mib": 20.0,
+     "free_blocks": 2,
+     "free_mib": 11.9,
+     "largest_free_mib": 10.69,
+     "free_blocks_over_2mib": 1
+    },
+    {
+     "size_mib": 4640.0,
+     "free_blocks": 2,
+     "free_mib": 13.0,
+     "largest_free_mib": 7.0,
+     "free_blocks_over_2mib": 2
+    },
+    {
+     "size_mib": 3160.0,
+     "free_blocks": 2,
+     "free_mib": 24.0,
+     "largest_free_mib": 18.0,
+     "free_blocks_over_2mib": 2
+    },
+    {
+     "size_mib": 20.0,
+     "free_blocks": 2,
+     "free_mib": 11.9,
+     "largest_free_mib": 9.27,
+     "free_blocks_over_2mib": 2
+    }
+   ]
+  },
+  "free_memory": [
+   6.1229248046875
+  ],
+  "segments": [
+   {
+    "size_mib": 4.0,
+    "allocated_mib": 2.9,
+    "expandable": true,
+    "pool": "(0, 0)"
+   },
+   {
+    "size_mib": 1400.0,
+    "allocated_mib": 1387.0,
+    "expandable": true,
+    "pool": "(0, 0)"
+   },
+   {
+    "size_mib": 20.0,
+    "allocated_mib": 8.1,
+    "expandable": true,
+    "pool": "(0, 0)"
+   },
+   {
+    "size_mib": 4640.0,
+    "allocated_mib": 4627.0,
+    "expandable": true,
+    "pool": "(0, 0)"
+   },
+   {
+    "size_mib": 8200.0,
+    "allocated_mib": 8191.8,
+    "expandable": true,
+    "pool": "(0, 0)"
+   },
+   {
+    "size_mib": 2.0,
+    "allocated_mib": 0.0,
+    "expandable": true,
+    "pool": "(0, 0)"
+   },
+   {
+    "size_mib": 4.0,
+    "allocated_mib": 0.0,
+    "expandable": true,
+    "pool": "(0, 1)"
+   },
+   {
+    "size_mib": 20.0,
+    "allocated_mib": 8.1,
+    "expandable": true,
+    "pool": "(0, 2)"
+   },
+   {
+    "size_mib": 260.0,
+    "allocated_mib": 0.0,
+    "expandable": true,
+    "pool": "(0, 1)"
+   }
+  ],
+  "kv_tokens": 35952
+ }
+}
