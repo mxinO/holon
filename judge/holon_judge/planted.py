@@ -19,6 +19,8 @@
 - FP4 in `kernels.ggml_cuda` (docs/m06-lowp.md §4.8: N2–N6, N8, N8b, M1, M4): its repack, `scale2` paths, mmq
   precision and zeroed tail broken, and a checkpoint's `scale2` misread; each also fails L0 where L0 reaches it
   (plugins/tests/test_ggml_cuda*.py), N6 as the pre-launch precision check's error on sm_120.
+- FP8 in `kernels.triton_fp8` (§4.8: P1–P4, P7): its block scales, activation scales and weight decode misread, and a
+  checkpoint's block scales misread; P1–P4 also fail its L0 (plugins/tests/test_triton_fp8.py).
 
 The GGUF plants patch names, so they rely on how the engine reaches them: `_loaded` replaces `load_weights` and
 `resolve_model` in `holon.core.engine`'s namespace (it imports them by name), and the kernel plants wrap
@@ -434,16 +436,17 @@ def fp4_tail_not_zeroed() -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def _scale2_scaled(module: str, factor: float) -> Iterator[None]:
-    """N8, N8b: `module`'s NVFP4 `scale2` read × `factor` by std.weights.hf (the judge reads the checkpoint itself)."""
+def _part_scaled(module: str, role: str, factor: float) -> Iterator[None]:
+    """N8, N8b, P7: `module`'s `role` part (NVFP4 `scale2`, FP8 block `scale`) read × `factor` by std.weights.hf
+    (the judge reads the checkpoint itself)."""
     from holon_std.weights.hf import quant
 
     load = quant.load
 
     def planted(d, m, get):
         q = load(d, m, get)
-        if m.name == module and "scale2" in q.parts:
-            q.parts["scale2"] = q.parts["scale2"] * factor
+        if m.name == module and role in q.parts:
+            q.parts[role] = q.parts[role] * factor
         return q
     with mock.patch.object(quant, "load", planted):
         yield
@@ -458,10 +461,58 @@ def fp4_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextM
         "nvfp4-scale2-by-slot": scale2_by_slot,                                                            # N4
         "nvfp4-scale2-after-swiglu": scale2_after_swiglu,                                                  # N5
         "ggml-prec-default": ggml_prec_default,                                                            # N6, N6b
-        "nvfp4-o-proj-scale2-1.25": lambda: _scale2_scaled(o_proj, 1.25),                                  # N8
-        "nvfp4-o-proj-scale2-1.1": lambda: _scale2_scaled(o_proj, 1.1),                                    # N8b
+        "nvfp4-o-proj-scale2-1.25": lambda: _part_scaled(o_proj, "scale2", 1.25),                         # N8
+        "nvfp4-o-proj-scale2-1.1": lambda: _part_scaled(o_proj, "scale2", 1.1),                           # N8b
         "mxfp4-repack-scale-off-by-one": lambda: _fp4_blocks_edited("mxfp4", _e8m0_off_by_one),           # M1
         "fp4-tail-not-zeroed": fp4_tail_not_zeroed}                                                         # M4
+
+
+@contextlib.contextmanager
+def _fp8_kernel(scale: Callable | None = None, weight: Callable | None = None,
+                act_quant: Callable | None = None) -> Iterator[None]:
+    """kernels.triton_fp8 misreading its operands: every call's block scales (`scale(s)`, both paths), W8A16's weight
+    bytes (`weight(w)`, decode) or W8A8's activation quantizer (`act_quant`, prefill) replaced."""
+    from holon_plugins.kernels.triton_fp8 import kernel
+
+    decode, prefill = kernel.decode, kernel.prefill
+
+    def planted_decode(x, w, s, out_dtype, cfg):
+        return decode(x, weight(w) if weight else w, scale(s) if scale else s, out_dtype, cfg)
+
+    def planted_prefill(x, w, s, out_dtype, cfg):
+        return prefill(x, w, scale(s) if scale else s, out_dtype, cfg)
+    with (mock.patch.object(kernel, "decode", planted_decode), mock.patch.object(kernel, "prefill", planted_prefill),
+          mock.patch.object(kernel, "act_quant", act_quant or kernel.act_quant)):
+        yield
+
+
+def _column_major(s: torch.Tensor) -> torch.Tensor:
+    """P1: the block scales `[out / 128, in / 128]` read as if stored column-major (a transposed index)."""
+    return s.reshape(s.shape[1], s.shape[0]).T.contiguous()
+
+
+def _subnormals_as_normals(w: torch.Tensor) -> torch.Tensor:
+    """P4: e4m3 subnormals (exponent field 0, mantissa m > 0: m · 2^-9) decoded as normals ((1 + m / 8) · 2^-6)."""
+    mag = w & 0x7F
+    return torch.where((mag > 0) & (mag < 8), w | 0x08, w)
+
+
+def _act_scale_per_token(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """P3: W8A8's activation scale per row, not per row and 128 columns."""
+    a_s = x.float().abs().amax(-1, keepdim=True).clamp_min(1e-10) / 448
+    q = (x.float() / a_s).clamp(-448, 448).to(torch.float8_e4m3fn)
+    return q, a_s.expand(-1, x.shape[1] // 128).contiguous()
+
+
+def fp8_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:
+    """kernels.triton_fp8's plants (docs/m06-lowp.md §4.8, P1–P4) and a checkpoint's FP8 scales misread at
+    `layer`'s o_proj (P7). The kernel ones wrap its calls in Python: eager steps only (module docstring)."""
+    return {
+        "fp8-scale-transposed": lambda: _fp8_kernel(scale=_column_major),                                  # P1
+        "fp8-scale-k-shifted": lambda: _fp8_kernel(scale=lambda s: s.roll(-1, 1)),                         # P2
+        "fp8-act-scale-per-token": lambda: _fp8_kernel(act_quant=_act_scale_per_token),                    # P3
+        "fp8-subnormals-as-normals": lambda: _fp8_kernel(weight=_subnormals_as_normals),                   # P4
+        "fp8-o-proj-scales-1.25": lambda: _part_scaled(f"model.layers.{layer}.self_attn.o_proj", "scale", 1.25)}  # P7
 
 
 def _hf_experts(layer: int, edit: Callable[[int, str], tuple[int, str]]) -> Callable[[str], str]:
@@ -831,7 +882,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     # MoE Tier A and the bf16 HF path (Qwen3-30B-A3B: the one-layer plants at layer 24)
     **moe_plants(24), **hf_moe_plants(24, 128),
     # Quantized HF checkpoints (docs/m06-lowp.md §4.8)
-    **hf_quant_plants(18), **fp4_plants(18),
+    **hf_quant_plants(18), **fp4_plants(18), **fp8_plants(18),
     # MoE Tier B
     "ggml-experts-wrong-type": ggml_experts_wrong_type, "ggml-experts-stale-q8_1": ggml_experts_stale_q8_1,
     "rare-ggml-experts-stale-q8_1": lambda: ggml_experts_stale_q8_1(every=9973),

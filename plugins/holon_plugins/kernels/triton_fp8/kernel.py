@@ -7,7 +7,8 @@ e4m3 bits `[out, in]` uint8 and one f32 multiplier per 128 × 128 block, `scale 
   vector product (products in f32, summed per K step), 2–16 rows as one 16-row `tl.dot` tile. With more than one split
   the f32 partials are summed by a second kernel in split order (deterministic, no atomics).
 - `act_quant` (W8A8's activations): per row and 128 columns, `a_s = max(amax, 1e-10) / 448` and `x / a_s` by IEEE
-  division, clamped to ±448, rounded to e4m3 (round to nearest even): bitwise torch's `float8_e4m3fn` of the same.
+  division, clamped to ±448, rounded to e4m3 (to nearest even, by bit operations: `f32_to_e4m3`): bitwise torch's
+  `float8_e4m3fn` of the same.
 - `prefill` (W8A8, M > 16; e4m3 `tl.dot`, so sm ≥ 89): the activations quantized by `act_quant`, then tiles of
   `BM × BN` over K steps of 128, each step's f32 product scaled by `a_s` (per row) · the weight block's multiplier
   (the DeepSeek-V3 recipe, as SGLang / vLLM's `_w8a8_triton_block_scaled_mm` implement it: studied, not copied).
@@ -80,6 +81,13 @@ def prefill_config(gpu: str, n: int, k: int) -> Prefill:
     return PREFILL_CONFIGS.get((gpu, n, k)) or Prefill()
 
 
+def _check_tiles(n: int, k: int, block_n: int, splits: int) -> None:
+    """The kernels read whole column tiles and whole K splits, unmasked."""
+    if n % block_n or k % (BLOCK * splits):
+        raise ValueError(f"kernels.triton_fp8: [{n}, {k}] is not whole tiles of {block_n} columns and {splits} K splits"
+                         f" of {BLOCK}")
+
+
 @triton.jit
 def e4m3_to_bf16(w):
     """e4m3 bits (uint8) → bf16, exactly: a normal's exponent rebiased (7 → 127) and mantissa widened in place; a
@@ -135,6 +143,7 @@ def decode(x: torch.Tensor, weight: torch.Tensor, scale: torch.Tensor, out_dtype
     """`y [M, out]` of `out_dtype` for `x [M ≤ 16, in]` bf16 (unit stride along `in`)."""
     m, k = x.shape
     n = weight.shape[0]
+    _check_tiles(n, k, cfg.block_n, cfg.splits)
     y = torch.empty(m, n, dtype=out_dtype, device=x.device)
     if m == 0:
         return y
@@ -148,24 +157,38 @@ def decode(x: torch.Tensor, weight: torch.Tensor, scale: torch.Tensor, out_dtype
 
 
 @triton.jit
+def f32_to_e4m3(v):
+    """f32 (finite, |v| ≤ 448) → e4m3 bits (uint8), rounded to nearest even. Done here, not by `.to(tl.float8e4nv)`,
+    which Triton lowers on sm_89 through f16 rounded toward zero (`cvt.rz.f16.f32`, then `cvt.rn…e4m3x2.f16x2`): a
+    double rounding. Normals: the f32 bits rounded at mantissa bit 20 (ties to even), the exponent rebiased (127 →
+    7); subnormals (|v| < 2^-6): m = |v| · 2^9 rounded to an integer by f32 addition of 2^23 (ties to even)."""
+    bits = v.to(tl.int32, bitcast=True)
+    a = tl.abs(v)
+    abits = bits & 0x7FFFFFFF
+    normal = ((abits + 0x7FFFF + ((abits >> 20) & 1)) >> 20) - (120 << 3)
+    sub = ((a * 512.0 + 8388608.0) - 8388608.0).to(tl.int32)
+    return (tl.where(a < 0.015625, sub, normal) | ((bits >> 24) & 0x80)).to(tl.uint8)
+
+
+@triton.jit
 def _act_quant(x_ptr, q_ptr, s_ptr, k, stride_x, GROUP: tl.constexpr):
     row, g = tl.program_id(0), tl.program_id(1)
     cols = g * GROUP + tl.arange(0, GROUP)
     x = tl.load(x_ptr + row.to(tl.int64) * stride_x + cols).to(tl.float32)
     a_s = tl.maximum(tl.max(tl.abs(x)), 1e-10) / 448.0
     q = tl.clamp(tl.math.div_rn(x, a_s), -448.0, 448.0)
-    tl.store(q_ptr + row.to(tl.int64) * k + cols, q.to(tl.float8e4nv))
+    tl.store(q_ptr + row.to(tl.int64) * k + cols, f32_to_e4m3(q))
     tl.store(s_ptr + row * (k // GROUP) + g, a_s)
 
 
 def act_quant(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """`(e4m3 [R, in], a_s f32 [R, in / 128])` for `x [R, in]` (unit stride along `in`)."""
     r, k = x.shape
-    q = torch.empty(r, k, dtype=torch.float8_e4m3fn, device=x.device)
+    q = torch.empty(r, k, dtype=torch.uint8, device=x.device)
     s = torch.empty(r, k // BLOCK, dtype=torch.float32, device=x.device)
     if r:
         _act_quant[(r, k // BLOCK)](x, q, s, k, x.stride(0), BLOCK)
-    return q, s
+    return q.view(torch.float8_e4m3fn), s
 
 
 @triton.jit
@@ -200,6 +223,7 @@ def prefill(x: torch.Tensor, weight: torch.Tensor, scale: torch.Tensor, out_dtyp
     """`y [M, out]` of `out_dtype` for `x [M, in]` (unit stride along `in`), activations quantized by `act_quant`."""
     m, k = x.shape
     n = weight.shape[0]
+    _check_tiles(n, k, cfg.block_n, 1)
     y = torch.empty(m, n, dtype=out_dtype, device=x.device)
     if m == 0:
         return y

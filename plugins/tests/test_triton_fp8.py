@@ -1,9 +1,10 @@
 """L0 for kernels.triton_fp8 (docs/m06-lowp.md D12, §4.6, §4.8): FP8 block-scaled `qlinear` against its modes'
 emulations, on random e4m3 bytes (every finite code, subnormals and ±448 included) with distinct random block scales.
 
-- The bit decode: all 254 finite e4m3 codes to bf16 equal torch's `float8_e4m3fn` values (any class).
+- The bit decode: all 254 finite e4m3 codes read back through the decode kernel (one row and two) equal torch's
+  `float8_e4m3fn` values (any class).
 - `act_quant` (sm ≥ 89): bitwise torch's e4m3 of `x / a_s` (IEEE division, ±448) and its scales, rows of zeros,
-  outliers and values that round to e4m3 subnormals included.
+  outliers, values that round to e4m3 subnormals and every midpoint between e4m3 values (ties to even) included.
 - `qlinear` through the plugin's instance, rows T ∈ {0, 1, 7, 8, 9, 16, 17, 64, 512, 513, 2049} (the 16 / 17 mode
   switch) on a small shape and the 8B's projections (their pinned configurations): `l0.check` against W8A16 (the
   bf16 activations, T ≤ 16) or W8A8 (activations quantized as `act_quant`, T > 16) in f64, and the call counted on
@@ -69,27 +70,25 @@ def emulated(x: torch.Tensor, parts: dict[str, torch.Tensor]) -> torch.Tensor:
     return (q.double().unflatten(-1, (-1, kernel.BLOCK)) * a_s.double()[..., None]).flatten(-2) @ w.T
 
 
-def test_e4m3_decode_is_exact():
-    import triton
-    import triton.language as tl
-
-    @triton.jit
-    def decode(w_ptr, y_ptr, N: tl.constexpr):
-        i = tl.arange(0, N)
-        tl.store(y_ptr + i, kernel.e4m3_to_bf16(tl.load(w_ptr + i)))
-
+@pytest.mark.parametrize("rows", [1, 2])
+def test_e4m3_decode_is_exact(rows):
+    """Weight row r holds code r everywhere (scale 1), so a one-hot activation reads every code's value back."""
     codes = torch.arange(256, dtype=torch.uint8, device="cuda")
-    y = torch.empty(256, dtype=torch.bfloat16, device="cuda")
-    decode[(1,)](codes, y, 256)
+    parts = {"weight": codes[:, None].expand(256, 128).contiguous(), "scale": torch.ones(2, 1, device="cuda")}
+    x = torch.eye(rows, 128, dtype=torch.bfloat16, device="cuda")
+    y = kernel.decode(x, parts["weight"], parts["scale"], torch.float32, kernel.Decode())
     finite = FINITE.cuda().long()
-    want = codes.view(torch.float8_e4m3fn).bfloat16()
-    assert torch.equal(y[finite].view(torch.int16), want[finite].view(torch.int16))
+    assert torch.equal(y[:, finite], codes.view(torch.float8_e4m3fn).float()[finite].expand(rows, -1))
 
 
 @pytest.mark.skipif(not FP8_DOT, reason="e4m3 conversion needs sm >= 89")
 def test_act_quant_is_torchs():
     x = activations(67, 1024, 0)
     x[5] = torch.linspace(-1e-3, 1e-3, 1024).bfloat16()          # 448 · tiny / amax: e4m3 subnormals
+    values = torch.arange(127, dtype=torch.uint8).view(torch.float8_e4m3fn).float()
+    ties = torch.cat([(values[:-1] + values[1:]) / 2, values]).bfloat16()       # with amax 448, a_s = 1: x itself
+    x[6, :len(ties)], x[6, len(ties):] = ties.cuda(), 448.0
+    x[7] = -x[6]
     q, a_s = kernel.act_quant(x)
     q_ref, a_s_ref = act_quant_reference(x)
     assert torch.equal(a_s, a_s_ref)
