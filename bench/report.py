@@ -3,8 +3,8 @@ rendered from evidence, never copied by hand. Each table links its record; losse
 
 - `bars.py` records: per metric the gate statistic of Holon and of each llama.cpp build and their ratio; a ratio within
   2 sd of its per-round ratios of 1 is printed "≈"; one below the gate (0.8) is marked.
-- `run.py` records: per trace and backend TTFT / TPOT p50 / p99 and output tok/s; a backend that failed is "—" with
-  its error.
+- `run.py` records: per record and backend, TTFT / TPOT p50 per trace; a backend that failed is "—" with its
+  reason.
 
     python bench/report.py evidence/<record>.json ... [--relative-to docs]
 """
@@ -54,18 +54,21 @@ def bars(records: list[tuple[str, dict]]) -> str:
     return "\n\n".join(tables)
 
 
-def serving(link: str, r: dict) -> str:
-    failed = {run["backend"]: run["error"] for run in r["runs"] if "error" in run}
-    lines = [f"[{r['workload']}]({link}), {r['model']}, {r['gpu_class']}, {r['rounds']} round(s)", "",
-             "| trace | backend | TTFT p50 / p99 ms | TPOT p50 / p99 ms | out tok/s |", "|---|---|---|---|---|"]
-    for trace, by_backend in r["summary"].items():
+def serving(records: list[tuple[str, dict]]) -> str:
+    """One table over the records: a row per (record, backend), a column per trace (TTFT / TPOT p50 ms)."""
+    traces = list(dict.fromkeys(t for _, r in records for t in r["traces_sha256"]))
+    lines = ["| file (record) | GPU | backend | " + " | ".join(f"{t}: TTFT / TPOT p50 ms" for t in traces) + " |",
+             "|" + "---|" * (3 + len(traces))]
+    for link, r in records:
+        failed = {run["backend"]: run["error"] for run in r["runs"] if "error" in run}
         for b in r["order"]:
-            if b in by_backend:
-                s = by_backend[b]
-                lines.append(f"| {trace} | {b} | {s['ttft_ms']['p50']} / {s['ttft_ms']['p99']} | "
-                             f"{s['tpot_ms']['p50']} / {s['tpot_ms']['p99']} | {s['throughput_tok_s']} |")
-            else:
-                lines.append(f"| {trace} | {b} | — | — | — ({failed.get(b, 'not run')}) |")
+            cells = []
+            for t in traces:
+                s = r["summary"].get(t, {}).get(b)
+                cells.append(f"{s['ttft_ms']['p50']} / {s['tpot_ms']['p50']}" if s else "—")
+            if b in failed and not any(t in r["summary"] and b in r["summary"][t] for t in traces):
+                cells = [f"— ({failed[b]})"] + [""] * (len(traces) - 1)
+            lines.append(f"| [{r['workload']}]({link}) | {r['gpu_class']} | {b} | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
@@ -81,7 +84,8 @@ def main() -> None:
     loaded = [(os.path.relpath(p, args.relative_to), json.loads(pathlib.Path(p).read_text())) for p in args.records]
     bar_records = [(link, r) for link, r in loaded if "cell" in r]
     parts = [bars(bar_records)] if bar_records else []
-    parts += [serving(link, r) for link, r in loaded if "workload" in r]
+    run_records = [(link, r) for link, r in loaded if "workload" in r]
+    parts += [serving(run_records)] if run_records else []
     print("\n\n".join(parts))
 
 

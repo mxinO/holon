@@ -123,6 +123,14 @@ def read_lock(path: str) -> dict:
             "engine": plan.engine}
 
 
+def reason(log: pathlib.Path) -> str:
+    """A failed worker's reason for a record: its log's last error line, paths cut to their names (they are local)."""
+    lines = [line for line in log.read_text(errors="replace").splitlines() if line.strip()]
+    errors = [line for line in lines if re.match(r"\w*(Error|Exception)\b|\w+\.\w+Error\b", line)]
+    last = (errors or lines or ["no output"])[-1].strip()
+    return re.sub(r"(?:/[^/\s'\"]+)+/([^/\s'\"]+)", r"\1", last)[:300]
+
+
 def pct(xs: list[float], q: float) -> float | None:
     """Linear-interpolated percentile (q in [0, 100])."""
     if not xs:
@@ -197,7 +205,7 @@ def run_worker(backend: str, args: argparse.Namespace, out: pathlib.Path,
     with log.open("w") as f:
         rc = subprocess.run(cmd, env=env, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT).returncode
     if rc:
-        return None, f"exit code {rc}, log {log.relative_to(ROOT)}"
+        return None, f"exit code {rc}: {reason(log)}"
     return json.loads(out.read_text()), ""
 
 
