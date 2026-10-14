@@ -92,7 +92,9 @@ def public(arg: str, model: str) -> str:
     path = pathlib.Path(arg)
     if not path.is_absolute():                            # relative: published as is, unless it leaves the repo
         full = (pathlib.Path.cwd() / path).resolve()
-        return str(full.relative_to(ROOT)) if full.exists() and full.is_relative_to(ROOT) else arg
+        if full.exists():
+            return str(full.relative_to(ROOT)) if full.is_relative_to(ROOT) else path.name
+        return arg
     return str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else path.name
 
 
@@ -330,11 +332,12 @@ def main() -> None:
         if args.kv_format and args.kv_format != engine.get("plugin_options", {}).get("kv.format"):
             ap.error("under --lock the baselines' KV format is the lock's")
         args.kv_format = engine.get("plugin_options", {}).get("kv.format")
-        for var in ("HOLON_ENGINE_ARGS", "HOLON_SERVE_ARGS"):   # refuse bad hand-given flags before any run
-            for arm in ("", *args.arms.values()):
-                lock_flags(engine, SET_BY_WORKER, f"{os.environ.get(var, '')} {arm}")
         if not args.kv_tokens and args.backends[0] != "holon" and not all(b.startswith("holon") for b in args.backends):
             ap.error("--lock matches the baselines to Holon's KV tokens: list holon first, or give --kv-tokens")
+    for var in ("HOLON_ENGINE_ARGS", "HOLON_SERVE_ARGS"):       # refuse bad hand-given flags before any run
+        for arm in ("", *args.arms.values()):
+            lock_flags(args.lock["engine"] if args.lock else {}, SET_BY_WORKER, f"{os.environ.get(var, '')} {arm}",
+                       locked_kv=bool(args.lock))
     args.max_batch, args.max_step_tokens = args.max_batch or 64, args.max_step_tokens or 8192
 
     date = datetime.date.today().isoformat()

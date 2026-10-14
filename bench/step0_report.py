@@ -30,9 +30,9 @@ GROUPS = {                     # report column -> step_profile categories
     "GDN core + conv": ["gdn core", "gdn conv"],
 }
 DROP = 0.01                    # a candidate under 1% of its step is dropped (D1)
-# Decode steps a row ran before the middle of its graphed timing window (step_profile.py: eager warm-up 2, counter 1,
-# timed 32, traced 32, graphed warm-up 3, half of the timed 32): the context of its graphed wall, for records made
-# before `graphed_ctx` was recorded.
+# Decode steps (one token each: valid for decode rows only) a row ran before the middle of its graphed timing window
+# (step_profile.py: eager warm-up 2, counter 1, timed 32, traced 32, graphed warm-up 3, half of the timed 32): the
+# context of its graphed wall, for records made before `graphed_ctx` was recorded.
 GRAPHED_AT = 86
 MMVQ_MAX = 8                   # mmvq's most rows (llama.cpp's MMVQ_MAX_BATCH_SIZE)
 
@@ -41,11 +41,13 @@ def graphed_ctx(row: dict) -> float:
     return row.get("graphed_ctx", row["ctx"] + GRAPHED_AT)
 
 
-def load(directory: str, cls: str, what: str) -> dict[str, dict]:
-    """`{name: record}` of `m07-step0_<what>[-<name>]_<cls>_<date>.json`."""
+def load(directory: str, cls: str, what: str, exact: bool = False) -> dict[str, dict]:
+    """`{name: record}` of `m07-step0_<what>-<name>_<cls>_<date>.json` (`exact`: of `m07-step0_<what>_...` only)."""
     out = {}
     for path in sorted(glob.glob(os.path.join(directory, f"m07-step0_{what}*_{cls}_*.json"))):
         stem = os.path.basename(path).removeprefix("m07-step0_").rsplit("_", 2)[0]
+        if stem != what if exact else not stem.startswith(what + "-"):
+            continue
         with open(path) as f:
             out[stem.removeprefix(what).lstrip("-") or what] = json.load(f)
     return out
@@ -116,8 +118,8 @@ def candidates(profiles: dict[str, dict], shared: dict[str, float]) -> list[dict
             c["qk_rope_kv (D3)"] = cat.get("q/k norm", 0.0) + cat.get("rope", 0.0)
             c["mmq bf16 out (D4)"] = cat.get("f32 -> bf16 cast", 0.0)
             scale2 = 0.0 if cat.get("gdn core") else cat.get("gates (sigmoid, mul, softplus, exp)", 0.0)
-            if scale2:                                     # no GDN: the gates are NVFP4's f32 x scale2 -> bf16 writes
-                nvfp4_rows = [x["rows"] for x in row.get("gemm", {}).get("calls", []) if x["type"] == "nvfp4"]
+            nvfp4_rows = [x["rows"] for x in row.get("gemm", {}).get("calls", []) if x["type"] == "nvfp4"]
+            if scale2 and nvfp4_rows:                      # no GDN: the gates are NVFP4's f32 x scale2 -> bf16 writes
                 if row["kind"] == "prefill" or max(nvfp4_rows, default=0) > MMVQ_MAX:
                     c["mmq bf16 out (D4)"] += scale2       # mmq's write-back
                 else:                                      # mmvq above one row: D4 does not reach it
@@ -270,7 +272,7 @@ def main() -> None:
     ap.add_argument("--json")
     args = ap.parse_args()
     profiles = load(args.dir, args.cls, "profile")
-    sweep = next(iter(load(args.dir, args.cls, "qmm-sweep").values()), None)
+    sweep = next(iter(load(args.dir, args.cls, "qmm-sweep", exact=True).values()), None)
     out = {"class": args.cls, "glue": glue(profiles), "candidates": candidates(profiles, redundancy(args.dir)),
            "ratios": ratios(profiles)}
     if "8b-q4_k_m" in profiles:
