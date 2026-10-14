@@ -24,3 +24,6 @@ platforms = ["cuda"]
 source = "https://github.com/flashinfer-ai/flashinfer"
 commit = "v0.6.12"
 license = "Apache-2.0"
+
+[build]
+module = "prebuild"

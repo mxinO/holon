@@ -98,6 +98,7 @@ _SECTIONS: dict[str, set[str]] = {
     "tunables": None,  # any names; each value is validated as a Tunable
     "support": {"platforms", "detect"},
     "provenance": {"source", "commit", "license", "files"},
+    "build": {"module"},
 }
 
 
@@ -126,6 +127,8 @@ class Manifest:
     platforms: tuple[str, ...] = ()
     detect: tuple[str, ...] = ()       # weight sources: file-name patterns of their checkpoints (e.g. "config.json")
     provenance: Provenance | None = None
+    build: str | None = None           # a module of the plugin's package: `python -m <it> --sm N` builds its native
+    #                                    code for SM N ahead of time (`holon prebuild`; the CLI is part of the ABI)
 
     @property
     def cardinality(self) -> Cardinality:
@@ -166,6 +169,7 @@ class Manifest:
             platforms=tuple(data.get("support", {}).get("platforms", ())),
             detect=tuple(data.get("support", {}).get("detect", ())),
             provenance=_provenance(data["provenance"]) if "provenance" in data else None,
+            build=data.get("build", {}).get("module"),
         )
         if m.slot not in SLOTS:
             raise ValueError(f"unknown slot {m.slot!r}")

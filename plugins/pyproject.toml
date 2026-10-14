@@ -2,13 +2,16 @@
 name = "holonlm-plugins"
 version = "0.0.1"
 license = "Apache-2.0"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 description = "Holon first-party plugins: models, kernels, dialects, frontends"
-dependencies = ["holonlm"]  # std units are reached through Ref, never imported
-
-[project.optional-dependencies]
-http = ["fastapi", "uvicorn"]     # frontends.http (anyio and pydantic come with fastapi)
-grammar = ["xgrammar==0.2.8"]     # grammar.xgrammar (Apache-2.0; needs apache-tvm-ffi >= 0.1.11)
+dependencies = [                  # std units are reached through Ref, never imported
+    "holonlm",
+    "flashinfer-python==0.6.12",  # kernels.flashinfer
+    "triton==3.6.0",              # the Triton kernels (torch 2.11's pin)
+    "transformers",               # the models' bundles (tokenizers; pinned by holonlm-std)
+    "fastapi", "uvicorn",         # frontends.http (anyio and pydantic come with fastapi)
+    "xgrammar==0.2.8",            # grammar.xgrammar (Apache-2.0; needs apache-tvm-ffi >= 0.1.11)
+]
 
 [project.entry-points."holon.plugins"]
 "models.qwen3" = "holon_plugins.models.qwen3"

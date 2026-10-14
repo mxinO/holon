@@ -20,6 +20,13 @@ def fingerprint(device: torch.device) -> Fingerprint:
                        toolchain=toolchain, num_sms=p.multi_processor_count)
 
 
+def visible_sms() -> list[int]:
+    """The SMs of the visible CUDA devices, each once, e.g. [86, 120] (none without CUDA)."""
+    if not torch.cuda.is_available():
+        return []
+    return sorted({10 * a + b for a, b in map(torch.cuda.get_device_capability, range(torch.cuda.device_count()))})
+
+
 def _cuda(device: torch.device, what: str) -> None:
     if device.type != "cuda":
         raise ValueError(f"{what} is only measured on CUDA devices (device {device}); configure it explicitly")

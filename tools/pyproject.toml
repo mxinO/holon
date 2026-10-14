@@ -2,7 +2,7 @@
 name = "holonlm-tools"
 version = "0.0.1"
 license = "Apache-2.0"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 description = "Holon maintainer tools: lock impact, propagation and tuning (drive engines and the judge)"
 dependencies = ["holonlm", "holonlm-judge"]
 

@@ -2,9 +2,10 @@
 name = "holonlm-std"
 version = "0.0.1"
 license = "Apache-2.0"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 description = "Holon standard units: ops, blocks, ffn, mixers (each unit dir has plugin.toml + reference.py)"
-dependencies = ["holonlm"]
+dependencies = ["holonlm", "gguf>=0.17", "safetensors>=0.5",
+                "transformers==5.6.2"]   # the GGUF tokenizer and HF tokenizers are built with it (a runtime dependency)
 
 [project.entry-points."holon.plugins"]
 "std.ops" = "holon_std.ops"

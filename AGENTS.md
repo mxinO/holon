@@ -45,8 +45,12 @@ Studying code to write our own needs none of this; a comment naming what we foll
 
 ## Environment
 
-- Python env: `.venv` (uv, `--system-site-packages` over the conda torch 2.11+cu130 stack). Activate with
-  `. .venv/bin/activate`. Do not install into it ad hoc — add dependencies to the relevant `pyproject.toml`.
+- Python env: `uv sync --group dev` makes `.venv` from the committed `uv.lock` — uv's own Python 3.12, torch 2.11
+  from the PyTorch CUDA 13.0 index, every pin, the test-only plugins, the judge and the tools; no system
+  site-packages. Activate with `. .venv/bin/activate`. A user's `uv sync` installs the runtime distributions only.
+  Never install into it ad hoc: declare what a distribution imports in its `pyproject.toml` (CI's `manifest-deps`
+  checks it), then `uv lock` and commit `uv.lock`. Host needs: an NVIDIA driver for CUDA 13, the CUDA 13 toolkit
+  (nvcc), gcc/g++; `holon prebuild` builds the GGUF kernels and FlashInfer's modules for the visible GPUs.
 - Machine-specific notes (hosts, clusters, paths) live in `AGENTS.local.md`, which is not tracked; read it if
   present. Never commit private infrastructure details — host or cluster names, usernames, absolute paths — to
   tracked files, results included (`scripts/ci/check_private.py`).

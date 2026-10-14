@@ -1,14 +1,18 @@
-"""`python -m holon serve`: the engine in its own process, kept serving by the supervisor, behind a frontend plugin
-(design §7.7, §7.8)."""
+"""The `holon` command. `holon serve`: the engine in its own process, kept serving by the supervisor, behind a
+frontend plugin (design §7.7, §7.8). `holon prebuild`: build the installed plugins' native code for the visible GPUs
+ahead of time (release design D1)."""
 from __future__ import annotations
 
 import argparse
 import asyncio
 import dataclasses
+import subprocess
+import sys
 import typing
 
 import torch
 
+from . import platform
 from .assembly import resolve_model
 from .engine import EngineConfig
 from .ipc import engine_process
@@ -46,9 +50,28 @@ def engine_config(model: str, args: argparse.Namespace) -> EngineConfig:
     return EngineConfig(model=model, **values)
 
 
+def prebuild(sms: list[int]) -> None:
+    """Run every installed plugin's build module (manifest `[build] module`) once per SM, each in its own process:
+    `python -m <module> --sm N`. The modules choose their caches; the core resolves none."""
+    sms = sms or platform.visible_sms()
+    if not sms:
+        raise SystemExit("holon prebuild: no visible GPU; name the targets with --sm")
+    failed = []
+    for name, inst in sorted(discover().items()):
+        for sm in sms if inst.manifest.build else ():
+            print(f"holon prebuild: {name} for sm {sm}", flush=True)
+            module = f"{inst.package}.{inst.manifest.build}"
+            if subprocess.run([sys.executable, "-m", module, "--sm", str(sm)]).returncode:
+                failed.append(f"{name} (sm {sm})")
+    if failed:
+        raise SystemExit(f"holon prebuild: failed: {', '.join(failed)}")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="holon")
     sub = parser.add_subparsers(dest="command", required=True)
+    build = sub.add_parser("prebuild", help="build the plugins' native code for the visible GPUs ahead of time")
+    build.add_argument("--sm", type=int, nargs="+", default=[], help="target SMs, e.g. 86 89 120 (default: visible)")
     serve = sub.add_parser("serve", help="serve a model over a frontend plugin")
     serve.add_argument("model", help="checkpoint directory or file")
     serve.add_argument("--host", default="127.0.0.1")
@@ -58,6 +81,8 @@ def main(argv: list[str] | None = None) -> None:
                        help="restart a failed engine and resubmit its requests (default: on)")
     engine_flags(serve)
     args = parser.parse_args(argv)
+    if args.command == "prebuild":
+        return prebuild(args.sm)
     config = engine_config(args.model, args)
 
     plugins = PluginSet(discover())

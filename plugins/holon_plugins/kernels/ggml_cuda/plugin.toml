@@ -22,3 +22,6 @@ commit = "cbe28bb3cb0758f0c566a9a3561766821aeb0748"
 license = "MIT"
 files = ["vendor/", "vendor.patch", "SHA256SUMS", "vendor.sh", "csrc/shim.cu", "csrc/api.cu",
          "plugin.py"]   # csrc and plugin.py's FP4 repack: adapted
+
+[build]
+module = "prebuild"

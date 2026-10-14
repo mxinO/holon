@@ -6,6 +6,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import shutil
@@ -20,7 +21,8 @@ VENDOR, CSRC = HERE / "vendor", HERE / "csrc"
 CUDA_DIR = VENDOR / "ggml" / "src" / "ggml-cuda"
 NAME = "holon_ggml_cuda"
 PREBUILD = "python -m holon_plugins.kernels.ggml_cuda.prebuild"
-CACHE = pathlib.Path.home() / ".cache" / "holon" / "ggml_cuda"
+# The user cache (XDG), which an image pins to a path of its own (Dockerfile).
+CACHE = pathlib.Path(os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache") / "holon" / "ggml_cuda"
 
 ARCHS = {86: "86", 89: "89", 120: "120a"}     # 120a: the fp4 mmq instances need the arch-specific target
 NVCC_FLAGS = ("-std=c++17", "-O3", "-DNDEBUG", "-use_fast_math", "-extended-lambda", "-Xcompiler", "-fPIC")
