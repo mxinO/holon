@@ -1,0 +1,1062 @@
+{
+ "command": "python bench/step_profile.py --name 27b-plain-ctx4096 --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf --lock plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/4.lock (rows: see 'rows')",
+ "commit": "474674e",
+ "gpu_class": "rtx-4090",
+ "date": "2026-10-14",
+ "name": "27b-plain-ctx4096",
+ "gpu": "NVIDIA GeForce RTX 4090",
+ "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf",
+ "lock": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/4.lock",
+ "engine_args": "",
+ "engine": {
+  "device": "cuda",
+  "dtype": "torch.bfloat16",
+  "source": "gguf",
+  "page_size": 16,
+  "max_seqs": 4,
+  "max_model_len": 8192,
+  "clamp_context": false,
+  "max_step_tokens": 2048,
+  "memory_fraction": 0.9,
+  "state_memory": null,
+  "prefix_cache": false,
+  "overlap": true,
+  "cuda_graphs": true,
+  "max_draft_tokens": 0,
+  "kernels": {},
+  "kernel_preferences": {},
+  "slots": {},
+  "plugin_options": {
+   "recurrent.checkpoints": "4"
+  }
+ },
+ "kv_bytes_per_token": 65536.0,
+ "drafts": false,
+ "rows": {
+  "decode_b1": {
+   "kind": "decode",
+   "batch": 1,
+   "ctx": 4096,
+   "gemm": {
+    "weight_bytes": 15376691200,
+    "calls": [
+     {
+      "type": "iq3_s",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "iq3_s",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 3
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 3
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 12
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 8
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 21
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 20
+     },
+     {
+      "type": "iq4_xs",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 24
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 4
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q3_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 24
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 29
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 6
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 18
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 11
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 2
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 9
+     },
+     {
+      "type": "q5_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 44
+     },
+     {
+      "type": "q5_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 22
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 12
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 248320,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 9
+     },
+     {
+      "type": "q6_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 1
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 48,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 96
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 8
+     }
+    ]
+   },
+   "eager_wall_ms": 31.1025,
+   "eager": {
+    "kernels": 1605.1,
+    "kernel_ms": 21.9888,
+    "span_ms": 51.658,
+    "cat": {
+     "gemm": [
+      461.0,
+      19.5391
+     ],
+     "act quant (q8_1 / fp4)": [
+      461.0,
+      0.5145
+     ],
+     "attention": [
+      32.0,
+      0.4109
+     ],
+     "gdn core": [
+      48.0,
+      0.3484
+     ],
+     "gdn conv": [
+      96.0,
+      0.2391
+     ],
+     "rmsnorm": [
+      113.0,
+      0.2177
+     ],
+     "silu*mul": [
+      64.0,
+      0.1628
+     ],
+     "add+rmsnorm (fused)": [
+      64.0,
+      0.1344
+     ],
+     "kv store": [
+      36.0,
+      0.108
+     ],
+     "copy / cat / fill": [
+      50.1,
+      0.0872
+     ],
+     "residual add": [
+      67.0,
+      0.0751
+     ],
+     "gates (sigmoid, mul, softplus, exp)": [
+      32.0,
+      0.0481
+     ],
+     "q/k norm": [
+      32.0,
+      0.0348
+     ],
+     "index / scalar ops": [
+      20.0,
+      0.0325
+     ],
+     "rope": [
+      16.0,
+      0.0218
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0068
+     ],
+     "sampling / head": [
+      1.0,
+      0.0063
+     ],
+     "embedding": [
+      1.0,
+      0.0014
+     ]
+    }
+   },
+   "graphed_wall_ms": 21.774,
+   "graphed": {
+    "kernels": 1605.1,
+    "kernel_ms": 21.7574,
+    "span_ms": 21.8961,
+    "cat": {
+     "gemm": [
+      461.0,
+      19.4396
+     ],
+     "act quant (q8_1 / fp4)": [
+      461.0,
+      0.4659
+     ],
+     "attention": [
+      32.0,
+      0.4109
+     ],
+     "gdn core": [
+      48.0,
+      0.3465
+     ],
+     "gdn conv": [
+      96.0,
+      0.23
+     ],
+     "rmsnorm": [
+      113.0,
+      0.2089
+     ],
+     "silu*mul": [
+      64.0,
+      0.1532
+     ],
+     "add+rmsnorm (fused)": [
+      64.0,
+      0.1293
+     ],
+     "kv store": [
+      36.0,
+      0.0944
+     ],
+     "residual add": [
+      67.0,
+      0.0703
+     ],
+     "copy / cat / fill": [
+      50.1,
+      0.0653
+     ],
+     "gates (sigmoid, mul, softplus, exp)": [
+      32.0,
+      0.0416
+     ],
+     "index / scalar ops": [
+      20.0,
+      0.0334
+     ],
+     "q/k norm": [
+      32.0,
+      0.0327
+     ],
+     "rope": [
+      16.0,
+      0.0206
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0075
+     ],
+     "sampling / head": [
+      1.0,
+      0.0057
+     ],
+     "embedding": [
+      1.0,
+      0.0016
+     ]
+    }
+   },
+   "ratio_graphed_wall_over_eager_kernels": 0.9902,
+   "ratio_graphed_profiled_over_wall": 0.9992,
+   "clocks": {
+    "graphed": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2730.0,
+      "p50": 2730.0,
+      "p90": 2730.0
+     },
+     "mem_mhz": 10251.0,
+     "power_w": 250.6,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.0
+    },
+    "eager": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2730.0,
+      "p50": 2730.0,
+      "p90": 2730.0
+     },
+     "mem_mhz": 10251.0,
+     "power_w": 260.8,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.0
+    }
+   },
+   "spec": {},
+   "ctx_end": 4377
+  },
+  "decode_b4": {
+   "kind": "decode",
+   "batch": 4,
+   "ctx": 4096,
+   "gemm": {
+    "weight_bytes": 15376691200,
+    "calls": [
+     {
+      "type": "iq3_s",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "iq3_s",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 3
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "iq4_nl",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 3
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 12
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 8
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 21
+     },
+     {
+      "type": "iq4_xs",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 20
+     },
+     {
+      "type": "iq4_xs",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 6
+     },
+     {
+      "type": "iq4_xs",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 24
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 4
+     },
+     {
+      "type": "q3_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "q3_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 24
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 29
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 6
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 18
+     },
+     {
+      "type": "q4_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 5
+     },
+     {
+      "type": "q4_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 11
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 10240,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 12
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 12288,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 2
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 10
+     },
+     {
+      "type": "q5_k",
+      "in": 5120,
+      "out": 34816,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 9
+     },
+     {
+      "type": "q5_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 44
+     },
+     {
+      "type": "q5_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 22
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 12
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 17408,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 5120,
+      "out": 248320,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "q6_k",
+      "in": 6144,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 9
+     },
+     {
+      "type": "q6_k",
+      "in": 17408,
+      "out": 5120,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 1
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 48,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 96
+     },
+     {
+      "type": "q8_0",
+      "in": 5120,
+      "out": 1024,
+      "mode": "q8_1",
+      "rows": 4,
+      "count": 8
+     }
+    ]
+   },
+   "eager_wall_ms": 40.0772,
+   "eager": {
+    "kernels": 1748.1,
+    "kernel_ms": 25.1118,
+    "span_ms": 54.8191,
+    "cat": {
+     "gemm": [
+      461.0,
+      20.5894
+     ],
+     "attention": [
+      32.0,
+      1.3752
+     ],
+     "gdn core": [
+      48.0,
+      1.0722
+     ],
+     "act quant (q8_1 / fp4)": [
+      461.0,
+      0.5362
+     ],
+     "copy / cat / fill": [
+      193.1,
+      0.3418
+     ],
+     "gdn conv": [
+      96.0,
+      0.262
+     ],
+     "rmsnorm": [
+      113.0,
+      0.2343
+     ],
+     "add+rmsnorm (fused)": [
+      64.0,
+      0.182
+     ],
+     "silu*mul": [
+      64.0,
+      0.1677
+     ],
+     "kv store": [
+      36.0,
+      0.1107
+     ],
+     "residual add": [
+      67.0,
+      0.0771
+     ],
+     "gates (sigmoid, mul, softplus, exp)": [
+      32.0,
+      0.0573
+     ],
+     "q/k norm": [
+      32.0,
+      0.0355
+     ],
+     "index / scalar ops": [
+      20.0,
+      0.0303
+     ],
+     "rope": [
+      16.0,
+      0.0224
+     ],
+     "sampling / head": [
+      1.0,
+      0.0095
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0068
+     ],
+     "embedding": [
+      1.0,
+      0.0015
+     ]
+    }
+   },
+   "graphed_wall_ms": 24.8779,
+   "graphed": {
+    "kernels": 1748.1,
+    "kernel_ms": 24.8997,
+    "span_ms": 25.0596,
+    "cat": {
+     "gemm": [
+      461.0,
+      20.4971
+     ],
+     "attention": [
+      32.0,
+      1.3941
+     ],
+     "gdn core": [
+      48.0,
+      1.0723
+     ],
+     "act quant (q8_1 / fp4)": [
+      461.0,
+      0.517
+     ],
+     "copy / cat / fill": [
+      193.1,
+      0.2844
+     ],
+     "gdn conv": [
+      96.0,
+      0.2515
+     ],
+     "rmsnorm": [
+      113.0,
+      0.2234
+     ],
+     "add+rmsnorm (fused)": [
+      64.0,
+      0.1743
+     ],
+     "silu*mul": [
+      64.0,
+      0.1586
+     ],
+     "kv store": [
+      36.0,
+      0.0981
+     ],
+     "residual add": [
+      67.0,
+      0.0722
+     ],
+     "gates (sigmoid, mul, softplus, exp)": [
+      32.0,
+      0.0522
+     ],
+     "q/k norm": [
+      32.0,
+      0.0332
+     ],
+     "index / scalar ops": [
+      20.0,
+      0.0321
+     ],
+     "rope": [
+      16.0,
+      0.0211
+     ],
+     "sampling / head": [
+      1.0,
+      0.0087
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0076
+     ],
+     "embedding": [
+      1.0,
+      0.0017
+     ]
+    }
+   },
+   "ratio_graphed_wall_over_eager_kernels": 0.9907,
+   "ratio_graphed_profiled_over_wall": 1.0009,
+   "clocks": {
+    "graphed": {
+     "samples": 19,
+     "sm_mhz": {
+      "p10": 2520.0,
+      "p50": 2715.0,
+      "p90": 2715.0
+     },
+     "mem_mhz": 10251.0,
+     "power_w": 266.6,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.0
+    },
+    "eager": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2715.0,
+      "p50": 2715.0,
+      "p90": 2715.0
+     },
+     "mem_mhz": 10251.0,
+     "power_w": 314.8,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.0
+    }
+   },
+   "spec": {},
+   "ctx_end": 4362
+  }
+ },
+ "unclassified": {}
+}

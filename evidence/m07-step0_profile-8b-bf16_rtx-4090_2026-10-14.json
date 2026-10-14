@@ -1,0 +1,683 @@
+{
+ "command": "python bench/step_profile.py --name 8b-bf16 --model Qwen/Qwen3-8B@b968826d9c46 --lock plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-4090/cu130-torch2.11/10.lock (rows: see 'rows')",
+ "commit": "474674e",
+ "gpu_class": "rtx-4090",
+ "date": "2026-10-14",
+ "name": "8b-bf16",
+ "gpu": "NVIDIA GeForce RTX 4090",
+ "model": "Qwen/Qwen3-8B@b968826d9c46",
+ "lock": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-4090/cu130-torch2.11/10.lock",
+ "engine_args": "",
+ "engine": {
+  "device": "cuda",
+  "dtype": "torch.bfloat16",
+  "source": "hf_safetensors",
+  "page_size": 16,
+  "max_seqs": 64,
+  "max_model_len": 6144,
+  "clamp_context": false,
+  "max_step_tokens": 4096,
+  "memory_fraction": 0.9,
+  "state_memory": null,
+  "prefix_cache": false,
+  "overlap": true,
+  "cuda_graphs": true,
+  "max_draft_tokens": 0,
+  "kernels": {},
+  "kernel_preferences": {},
+  "slots": {},
+  "plugin_options": {}
+ },
+ "kv_bytes_per_token": 147456.0,
+ "drafts": false,
+ "rows": {
+  "prefill_512": {
+   "kind": "prefill",
+   "tokens": 512,
+   "wall_ms": 50.908,
+   "eager": {
+    "kernels": 740.0,
+    "kernel_ms": 52.3439,
+    "span_ms": 55.5284,
+    "cat": {
+     "gemm": [
+      145.0,
+      46.9393
+     ],
+     "attention": [
+      72.0,
+      2.4757
+     ],
+     "silu*mul": [
+      36.0,
+      0.9512
+     ],
+     "add+rmsnorm (fused)": [
+      36.0,
+      0.41
+     ],
+     "copy / cat / fill": [
+      112.0,
+      0.3575
+     ],
+     "kv store": [
+      76.0,
+      0.3175
+     ],
+     "residual add": [
+      39.0,
+      0.2675
+     ],
+     "q/k norm": [
+      72.0,
+      0.1873
+     ],
+     "rope": [
+      36.0,
+      0.1834
+     ],
+     "rmsnorm": [
+      37.0,
+      0.1603
+     ],
+     "memcpy / memset": [
+      58.0,
+      0.0433
+     ],
+     "index / scalar ops": [
+      19.0,
+      0.0427
+     ],
+     "sampling / head": [
+      1.0,
+      0.0058
+     ],
+     "bf16 -> f32 copy": [
+      1.0,
+      0.0025
+     ]
+    }
+   },
+   "gemm": {
+    "weight_bytes": 0,
+    "calls": []
+   },
+   "idle": -0.0282
+  },
+  "prefill_2048": {
+   "kind": "prefill",
+   "tokens": 2048,
+   "wall_ms": 194.055,
+   "eager": {
+    "kernels": 704.0,
+    "kernel_ms": 191.5553,
+    "span_ms": 194.1085,
+    "cat": {
+     "gemm": [
+      145.0,
+      167.3605
+     ],
+     "attention": [
+      36.0,
+      11.4515
+     ],
+     "silu*mul": [
+      36.0,
+      5.8874
+     ],
+     "add+rmsnorm (fused)": [
+      36.0,
+      1.8634
+     ],
+     "copy / cat / fill": [
+      112.0,
+      1.5924
+     ],
+     "residual add": [
+      39.0,
+      0.9218
+     ],
+     "kv store": [
+      76.0,
+      0.8558
+     ],
+     "rope": [
+      36.0,
+      0.6186
+     ],
+     "q/k norm": [
+      72.0,
+      0.4692
+     ],
+     "rmsnorm": [
+      37.0,
+      0.41
+     ],
+     "index / scalar ops": [
+      19.0,
+      0.0594
+     ],
+     "memcpy / memset": [
+      58.0,
+      0.0577
+     ],
+     "sampling / head": [
+      1.0,
+      0.0053
+     ],
+     "bf16 -> f32 copy": [
+      1.0,
+      0.0023
+     ]
+    }
+   },
+   "gemm": {
+    "weight_bytes": 0,
+    "calls": []
+   },
+   "idle": 0.0129
+  },
+  "decode_b1": {
+   "kind": "decode",
+   "batch": 1,
+   "ctx": 512,
+   "gemm": {
+    "weight_bytes": 0,
+    "calls": []
+   },
+   "eager_wall_ms": 19.469,
+   "eager": {
+    "kernels": 586.1,
+    "kernel_ms": 19.1634,
+    "span_ms": 28.1745,
+    "cat": {
+     "gemm": [
+      145.0,
+      18.3004
+     ],
+     "attention": [
+      72.0,
+      0.2315
+     ],
+     "kv store": [
+      76.0,
+      0.2091
+     ],
+     "silu*mul": [
+      36.0,
+      0.0793
+     ],
+     "q/k norm": [
+      72.0,
+      0.0772
+     ],
+     "add+rmsnorm (fused)": [
+      36.0,
+      0.0687
+     ],
+     "rmsnorm": [
+      37.0,
+      0.0659
+     ],
+     "rope": [
+      36.0,
+      0.0418
+     ],
+     "residual add": [
+      39.0,
+      0.0379
+     ],
+     "index / scalar ops": [
+      19.0,
+      0.0302
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0085
+     ],
+     "sampling / head": [
+      1.0,
+      0.0054
+     ],
+     "copy / cat / fill": [
+      5.1,
+      0.0053
+     ],
+     "bf16 -> f32 copy": [
+      1.0,
+      0.0022
+     ]
+    }
+   },
+   "graphed_wall_ms": 19.1483,
+   "graphed": {
+    "kernels": 586.1,
+    "kernel_ms": 19.1265,
+    "span_ms": 19.2214,
+    "cat": {
+     "gemm": [
+      145.0,
+      18.291
+     ],
+     "attention": [
+      72.0,
+      0.2353
+     ],
+     "kv store": [
+      76.0,
+      0.1908
+     ],
+     "silu*mul": [
+      36.0,
+      0.0792
+     ],
+     "q/k norm": [
+      72.0,
+      0.0726
+     ],
+     "add+rmsnorm (fused)": [
+      36.0,
+      0.0662
+     ],
+     "rmsnorm": [
+      37.0,
+      0.0634
+     ],
+     "rope": [
+      36.0,
+      0.0407
+     ],
+     "residual add": [
+      39.0,
+      0.0357
+     ],
+     "index / scalar ops": [
+      19.0,
+      0.03
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.009
+     ],
+     "copy / cat / fill": [
+      5.1,
+      0.0058
+     ],
+     "sampling / head": [
+      1.0,
+      0.0048
+     ],
+     "bf16 -> f32 copy": [
+      1.0,
+      0.002
+     ]
+    }
+   },
+   "ratio_graphed_wall_over_eager_kernels": 0.9992,
+   "ratio_graphed_profiled_over_wall": 0.9989,
+   "clocks": {
+    "graphed": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2730.0,
+      "p50": 2730.0,
+      "p90": 2730.0
+     },
+     "mem_mhz": 10251.0,
+     "power_w": 228.8,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.0
+    },
+    "eager": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2730.0,
+      "p50": 2730.0,
+      "p90": 2730.0
+     },
+     "mem_mhz": 10251.0,
+     "power_w": 286.1,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.0
+    }
+   },
+   "spec": {},
+   "ctx_end": 856
+  },
+  "decode_b4": {
+   "kind": "decode",
+   "batch": 4,
+   "ctx": 512,
+   "gemm": {
+    "weight_bytes": 0,
+    "calls": []
+   },
+   "eager_wall_ms": 21.2155,
+   "eager": {
+    "kernels": 658.1,
+    "kernel_ms": 20.8982,
+    "span_ms": 29.5114,
+    "cat": {
+     "gemm": [
+      145.0,
+      19.514
+     ],
+     "attention": [
+      72.0,
+      0.5143
+     ],
+     "kv store": [
+      76.0,
+      0.2261
+     ],
+     "copy / cat / fill": [
+      77.1,
+      0.1289
+     ],
+     "silu*mul": [
+      36.0,
+      0.1098
+     ],
+     "add+rmsnorm (fused)": [
+      36.0,
+      0.0872
+     ],
+     "rmsnorm": [
+      37.0,
+      0.0841
+     ],
+     "q/k norm": [
+      72.0,
+      0.0786
+     ],
+     "residual add": [
+      39.0,
+      0.0584
+     ],
+     "rope": [
+      36.0,
+      0.0491
+     ],
+     "index / scalar ops": [
+      19.0,
+      0.0294
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0087
+     ],
+     "sampling / head": [
+      1.0,
+      0.0058
+     ],
+     "bf16 -> f32 copy": [
+      1.0,
+      0.0037
+     ]
+    }
+   },
+   "graphed_wall_ms": 20.8119,
+   "graphed": {
+    "kernels": 658.1,
+    "kernel_ms": 20.8211,
+    "span_ms": 20.9039,
+    "cat": {
+     "gemm": [
+      145.0,
+      19.4817
+     ],
+     "attention": [
+      72.0,
+      0.5607
+     ],
+     "kv store": [
+      76.0,
+      0.2029
+     ],
+     "copy / cat / fill": [
+      77.1,
+      0.1094
+     ],
+     "silu*mul": [
+      36.0,
+      0.0976
+     ],
+     "add+rmsnorm (fused)": [
+      36.0,
+      0.0842
+     ],
+     "q/k norm": [
+      72.0,
+      0.0728
+     ],
+     "rmsnorm": [
+      37.0,
+      0.0721
+     ],
+     "rope": [
+      36.0,
+      0.0467
+     ],
+     "residual add": [
+      39.0,
+      0.0451
+     ],
+     "index / scalar ops": [
+      19.0,
+      0.0303
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.009
+     ],
+     "sampling / head": [
+      1.0,
+      0.0051
+     ],
+     "bf16 -> f32 copy": [
+      1.0,
+      0.0036
+     ]
+    }
+   },
+   "ratio_graphed_wall_over_eager_kernels": 0.9959,
+   "ratio_graphed_profiled_over_wall": 1.0004,
+   "clocks": {
+    "graphed": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2730.0,
+      "p50": 2730.0,
+      "p90": 2730.0
+     },
+     "mem_mhz": 10251.0,
+     "power_w": 209.4,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.0
+    },
+    "eager": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2730.0,
+      "p50": 2730.0,
+      "p90": 2730.0
+     },
+     "mem_mhz": 10251.0,
+     "power_w": 257.1,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.0
+    }
+   },
+   "spec": {},
+   "ctx_end": 838
+  },
+  "decode_b8": {
+   "kind": "decode",
+   "batch": 8,
+   "ctx": 512,
+   "gemm": {
+    "weight_bytes": 0,
+    "calls": []
+   },
+   "eager_wall_ms": 21.7229,
+   "eager": {
+    "kernels": 658.1,
+    "kernel_ms": 21.42,
+    "span_ms": 29.6742,
+    "cat": {
+     "gemm": [
+      145.0,
+      19.6216
+     ],
+     "attention": [
+      72.0,
+      0.9162
+     ],
+     "kv store": [
+      76.0,
+      0.2274
+     ],
+     "copy / cat / fill": [
+      77.1,
+      0.1296
+     ],
+     "silu*mul": [
+      36.0,
+      0.1103
+     ],
+     "add+rmsnorm (fused)": [
+      36.0,
+      0.088
+     ],
+     "rmsnorm": [
+      37.0,
+      0.0866
+     ],
+     "q/k norm": [
+      72.0,
+      0.0784
+     ],
+     "residual add": [
+      39.0,
+      0.0593
+     ],
+     "rope": [
+      36.0,
+      0.0502
+     ],
+     "index / scalar ops": [
+      19.0,
+      0.0309
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0087
+     ],
+     "sampling / head": [
+      1.0,
+      0.007
+     ],
+     "bf16 -> f32 copy": [
+      1.0,
+      0.0057
+     ]
+    }
+   },
+   "graphed_wall_ms": 21.3568,
+   "graphed": {
+    "kernels": 658.1,
+    "kernel_ms": 21.3909,
+    "span_ms": 21.4732,
+    "cat": {
+     "gemm": [
+      145.0,
+      19.5851
+     ],
+     "attention": [
+      72.0,
+      1.0136
+     ],
+     "kv store": [
+      76.0,
+      0.2058
+     ],
+     "copy / cat / fill": [
+      77.1,
+      0.1101
+     ],
+     "silu*mul": [
+      36.0,
+      0.0959
+     ],
+     "add+rmsnorm (fused)": [
+      36.0,
+      0.0853
+     ],
+     "rmsnorm": [
+      37.0,
+      0.0746
+     ],
+     "q/k norm": [
+      72.0,
+      0.074
+     ],
+     "rope": [
+      36.0,
+      0.048
+     ],
+     "residual add": [
+      39.0,
+      0.0461
+     ],
+     "index / scalar ops": [
+      19.0,
+      0.0316
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0091
+     ],
+     "sampling / head": [
+      1.0,
+      0.0063
+     ],
+     "bf16 -> f32 copy": [
+      1.0,
+      0.0053
+     ]
+    }
+   },
+   "ratio_graphed_wall_over_eager_kernels": 0.997,
+   "ratio_graphed_profiled_over_wall": 1.0016,
+   "clocks": {
+    "graphed": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2730.0,
+      "p50": 2730.0,
+      "p90": 2730.0
+     },
+     "mem_mhz": 10251.0,
+     "power_w": 213.1,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.0
+    },
+    "eager": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 2730.0,
+      "p50": 2730.0,
+      "p90": 2730.0
+     },
+     "mem_mhz": 10251.0,
+     "power_w": 263.2,
+     "slowdown_share": 0.0,
+     "power_cap_share": 0.0
+    }
+   },
+   "spec": {},
+   "ctx_end": 833
+  }
+ },
+ "unclassified": {}
+}

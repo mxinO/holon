@@ -1,0 +1,89 @@
+{
+ "command": "python bench/prefill_idle.py --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf --engine-args '--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 4 --plugin-options recurrent.checkpoints=4 kv.format=q8_0' --sizes 64 128 256 512 1024 2048 100 300 450 700 1500",
+ "commit": "474674e",
+ "gpu_class": "rtx-5080",
+ "date": "2026-10-14",
+ "model": "Qwen3.8-27B-UD-IQ3_S.gguf",
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "engine_args": "--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 4 --plugin-options recurrent.checkpoints=4 kv.format=q8_0",
+ "history": 4096,
+ "rows": [
+  {
+   "new_tokens": 64,
+   "steps": 1,
+   "wall_ms": 52.13,
+   "kernel_ms": 50.47,
+   "idle": 0.032
+  },
+  {
+   "new_tokens": 128,
+   "steps": 1,
+   "wall_ms": 72.14,
+   "kernel_ms": 70.34,
+   "idle": 0.025
+  },
+  {
+   "new_tokens": 256,
+   "steps": 1,
+   "wall_ms": 121.77,
+   "kernel_ms": 120.52,
+   "idle": 0.01
+  },
+  {
+   "new_tokens": 512,
+   "steps": 1,
+   "wall_ms": 226.08,
+   "kernel_ms": 223.43,
+   "idle": 0.012
+  },
+  {
+   "new_tokens": 1024,
+   "steps": 1,
+   "wall_ms": 447.29,
+   "kernel_ms": 443.69,
+   "idle": 0.008
+  },
+  {
+   "new_tokens": 2048,
+   "steps": 1,
+   "wall_ms": 900.92,
+   "kernel_ms": 896.76,
+   "idle": 0.005
+  },
+  {
+   "new_tokens": 100,
+   "steps": 1,
+   "wall_ms": 67.01,
+   "kernel_ms": 64.83,
+   "idle": 0.032
+  },
+  {
+   "new_tokens": 300,
+   "steps": 1,
+   "wall_ms": 153.41,
+   "kernel_ms": 153.61,
+   "idle": -0.001
+  },
+  {
+   "new_tokens": 450,
+   "steps": 1,
+   "wall_ms": 220.95,
+   "kernel_ms": 219.21,
+   "idle": 0.008
+  },
+  {
+   "new_tokens": 700,
+   "steps": 1,
+   "wall_ms": 317.32,
+   "kernel_ms": 315.24,
+   "idle": 0.007
+  },
+  {
+   "new_tokens": 1500,
+   "steps": 1,
+   "wall_ms": 667.72,
+   "kernel_ms": 665.51,
+   "idle": 0.003
+  }
+ ]
+}

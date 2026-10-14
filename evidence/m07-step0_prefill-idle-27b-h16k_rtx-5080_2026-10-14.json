@@ -1,0 +1,26 @@
+{
+ "command": "python bench/prefill_idle.py --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf --engine-args '--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 4 --plugin-options recurrent.checkpoints=4 kv.format=q8_0' --history 16384 --sizes 512 2048 -r 4",
+ "commit": "474674e",
+ "gpu_class": "rtx-5080",
+ "date": "2026-10-14",
+ "model": "Qwen3.8-27B-UD-IQ3_S.gguf",
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "engine_args": "--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 4 --plugin-options recurrent.checkpoints=4 kv.format=q8_0",
+ "history": 16384,
+ "rows": [
+  {
+   "new_tokens": 512,
+   "steps": 1,
+   "wall_ms": 275.87,
+   "kernel_ms": 272.87,
+   "idle": 0.011
+  },
+  {
+   "new_tokens": 2048,
+   "steps": 1,
+   "wall_ms": 1054.8,
+   "kernel_ms": 1051.54,
+   "idle": 0.003
+  }
+ ]
+}

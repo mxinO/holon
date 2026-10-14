@@ -1,0 +1,89 @@
+{
+ "command": "python bench/prefill_idle.py --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf --engine-args '--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 4 --plugin-options recurrent.checkpoints=4' --sizes 64 128 256 512 1024 2048 100 300 450 700 1500",
+ "commit": "474674e",
+ "gpu_class": "rtx-4090",
+ "date": "2026-10-14",
+ "model": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+ "gpu": "NVIDIA GeForce RTX 4090",
+ "engine_args": "--memory-fraction 0.9 --max-model-len 32768 --max-step-tokens 2048 --max-seqs 4 --plugin-options recurrent.checkpoints=4 ",
+ "history": 4096,
+ "rows": [
+  {
+   "new_tokens": 64,
+   "steps": 1,
+   "wall_ms": 72.66,
+   "kernel_ms": 41.35,
+   "idle": 0.431
+  },
+  {
+   "new_tokens": 128,
+   "steps": 1,
+   "wall_ms": 89.61,
+   "kernel_ms": 53.69,
+   "idle": 0.401
+  },
+  {
+   "new_tokens": 256,
+   "steps": 1,
+   "wall_ms": 91.01,
+   "kernel_ms": 81.15,
+   "idle": 0.108
+  },
+  {
+   "new_tokens": 512,
+   "steps": 1,
+   "wall_ms": 147.62,
+   "kernel_ms": 142.66,
+   "idle": 0.034
+  },
+  {
+   "new_tokens": 1024,
+   "steps": 1,
+   "wall_ms": 290.06,
+   "kernel_ms": 284.15,
+   "idle": 0.02
+  },
+  {
+   "new_tokens": 2048,
+   "steps": 1,
+   "wall_ms": 596.32,
+   "kernel_ms": 588.86,
+   "idle": 0.013
+  },
+  {
+   "new_tokens": 100,
+   "steps": 1,
+   "wall_ms": 93.76,
+   "kernel_ms": 49.72,
+   "idle": 0.47
+  },
+  {
+   "new_tokens": 300,
+   "steps": 1,
+   "wall_ms": 103.49,
+   "kernel_ms": 97.98,
+   "idle": 0.053
+  },
+  {
+   "new_tokens": 450,
+   "steps": 1,
+   "wall_ms": 144.63,
+   "kernel_ms": 139.2,
+   "idle": 0.038
+  },
+  {
+   "new_tokens": 700,
+   "steps": 1,
+   "wall_ms": 213.67,
+   "kernel_ms": 207.42,
+   "idle": 0.029
+  },
+  {
+   "new_tokens": 1500,
+   "steps": 1,
+   "wall_ms": 438.79,
+   "kernel_ms": 432.0,
+   "idle": 0.015
+  }
+ ]
+}

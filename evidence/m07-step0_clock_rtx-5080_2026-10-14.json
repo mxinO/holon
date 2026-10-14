@@ -1,0 +1,21 @@
+{
+ "command": "python bench/clock_check.py --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf --lock plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/4.lock --seconds 60 --batch 4",
+ "commit": "474674e",
+ "gpu_class": "rtx-5080",
+ "date": "2026-10-14",
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "seconds": 65.5,
+ "batch": 4,
+ "tok_s": 187.7,
+ "samples": 635,
+ "sm_mhz": {
+  "p10": 2670.0,
+  "p50": 2677.0,
+  "p90": 2685.0
+ },
+ "mem_mhz": 14801.0,
+ "power_w": 341.8,
+ "slowdown_share": 0.0,
+ "power_cap_share": 1.0,
+ "steady": true
+}

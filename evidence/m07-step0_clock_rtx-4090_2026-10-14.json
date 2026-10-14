@@ -1,0 +1,21 @@
+{
+ "command": "python bench/clock_check.py --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf --lock plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/4.lock --seconds 60 --batch 4",
+ "commit": "474674e",
+ "gpu_class": "rtx-4090",
+ "date": "2026-10-14",
+ "gpu": "NVIDIA GeForce RTX 4090",
+ "seconds": 73.7,
+ "batch": 4,
+ "tok_s": 166.7,
+ "samples": 717,
+ "sm_mhz": {
+  "p10": 2715.0,
+  "p50": 2715.0,
+  "p90": 2730.0
+ },
+ "mem_mhz": 10251.0,
+ "power_w": 395.4,
+ "slowdown_share": 0.0,
+ "power_cap_share": 0.0,
+ "steady": true
+}

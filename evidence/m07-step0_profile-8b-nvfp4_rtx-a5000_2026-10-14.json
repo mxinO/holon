@@ -1,0 +1,246 @@
+{
+ "command": "python bench/step_profile.py --name 8b-nvfp4 --model nvidia/Qwen3-8B-NVFP4@ccd10a893cbc --lock ../plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/1.lock --prefill --batches 1",
+ "commit": "ed25148",
+ "gpu_class": "rtx-a5000",
+ "date": "2026-10-14",
+ "purpose": "the distinct quantized inputs per decode step (gemm.inputs vs calls: D6's shared quantization; a property of the model, not the class)",
+ "name": "8b-nvfp4",
+ "gpu": "NVIDIA RTX A5000",
+ "model": "nvidia/Qwen3-8B-NVFP4@ccd10a893cbc",
+ "lock": "../plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/1.lock",
+ "engine_args": "",
+ "engine": {
+  "device": "cuda",
+  "dtype": "torch.bfloat16",
+  "source": "hf_safetensors",
+  "page_size": 16,
+  "max_seqs": 32,
+  "max_model_len": 4608,
+  "clamp_context": false,
+  "max_step_tokens": 2048,
+  "memory_fraction": 0.9,
+  "state_memory": null,
+  "prefix_cache": false,
+  "overlap": true,
+  "cuda_graphs": true,
+  "max_draft_tokens": 0,
+  "kernels": {},
+  "kernel_preferences": {},
+  "slots": {},
+  "plugin_options": {}
+ },
+ "kv_bytes_per_token": 147456.0,
+ "drafts": false,
+ "rows": {
+  "decode_b1": {
+   "kind": "decode",
+   "batch": 1,
+   "ctx": 512,
+   "gemm": {
+    "weight_bytes": 3906994176,
+    "inputs": 144,
+    "calls": [
+     {
+      "type": "nvfp4",
+      "in": 4096,
+      "out": 4096,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 36
+     },
+     {
+      "type": "nvfp4",
+      "in": 4096,
+      "out": 6144,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 36
+     },
+     {
+      "type": "nvfp4",
+      "in": 4096,
+      "out": 24576,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 36
+     },
+     {
+      "type": "nvfp4",
+      "in": 12288,
+      "out": 4096,
+      "mode": "q8_1",
+      "rows": 1,
+      "count": 36
+     }
+    ]
+   },
+   "eager_wall_ms": 17.2948,
+   "eager": {
+    "kernels": 730.1,
+    "kernel_ms": 9.8509,
+    "span_ms": 30.2518,
+    "cat": {
+     "gemm": [
+      145.0,
+      8.2538
+     ],
+     "kv store": [
+      76.0,
+      0.322
+     ],
+     "attention": [
+      72.0,
+      0.3139
+     ],
+     "act quant (q8_1 / fp4)": [
+      144.0,
+      0.2378
+     ],
+     "silu*mul": [
+      36.0,
+      0.146
+     ],
+     "q/k norm": [
+      72.0,
+      0.1352
+     ],
+     "add+rmsnorm (fused)": [
+      36.0,
+      0.1148
+     ],
+     "rmsnorm": [
+      37.0,
+      0.1082
+     ],
+     "residual add": [
+      39.0,
+      0.0733
+     ],
+     "rope": [
+      36.0,
+      0.0701
+     ],
+     "index / scalar ops": [
+      19.0,
+      0.0456
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0098
+     ],
+     "sampling / head": [
+      1.0,
+      0.0084
+     ],
+     "copy / cat / fill": [
+      5.1,
+      0.0084
+     ],
+     "bf16 -> f32 copy": [
+      1.0,
+      0.0035
+     ]
+    }
+   },
+   "graphed_wall_ms": 10.286,
+   "graphed": {
+    "kernels": 730.1,
+    "kernel_ms": 10.3853,
+    "span_ms": 10.4635,
+    "cat": {
+     "gemm": [
+      145.0,
+      8.7519
+     ],
+     "attention": [
+      72.0,
+      0.3367
+     ],
+     "kv store": [
+      76.0,
+      0.3334
+     ],
+     "act quant (q8_1 / fp4)": [
+      144.0,
+      0.2355
+     ],
+     "silu*mul": [
+      36.0,
+      0.1476
+     ],
+     "q/k norm": [
+      72.0,
+      0.1287
+     ],
+     "add+rmsnorm (fused)": [
+      36.0,
+      0.1179
+     ],
+     "rmsnorm": [
+      37.0,
+      0.1058
+     ],
+     "rope": [
+      36.0,
+      0.0745
+     ],
+     "residual add": [
+      39.0,
+      0.0689
+     ],
+     "index / scalar ops": [
+      19.0,
+      0.0517
+     ],
+     "memcpy / memset": [
+      11.1,
+      0.0114
+     ],
+     "copy / cat / fill": [
+      5.1,
+      0.0095
+     ],
+     "sampling / head": [
+      1.0,
+      0.0083
+     ],
+     "bf16 -> f32 copy": [
+      1.0,
+      0.0036
+     ]
+    }
+   },
+   "ratio_graphed_wall_over_eager_kernels": 1.0442,
+   "ratio_graphed_profiled_over_wall": 1.0097,
+   "clocks": {
+    "graphed": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 1455.0,
+      "p50": 1500.0,
+      "p90": 1515.0
+     },
+     "mem_mhz": 7601.0,
+     "power_w": 192.4,
+     "slowdown_share": 0.0,
+     "power_cap_share": 1.0
+    },
+    "eager": {
+     "samples": 18,
+     "sm_mhz": {
+      "p10": 1875.0,
+      "p50": 1905.0,
+      "p90": 1905.0
+     },
+     "mem_mhz": 7601.0,
+     "power_w": 214.5,
+     "slowdown_share": 0.0,
+     "power_cap_share": 1.0
+    }
+   },
+   "spec": {},
+   "ctx_end": 939
+  }
+ },
+ "unclassified": {}
+}
