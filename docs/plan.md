@@ -52,6 +52,13 @@ the code is our own plugin-native implementation. Only kernels may be borrowed, 
 Order (user, 2026-10-13): M0.4 → M0.5 (whole: its grammar seam builds on verify); M0.6 runs in parallel, in its own
 worktree; then M0.7 and the release, which needs the benchmark suite first.
 
+**M0.6 status (2026-10-14): Gate A met** (`docs/m06-lowp.md` §8; panel-clean at its close). FP4 (NVFP4, MXFP4) HF and
+GGUF checkpoints load through `qlinear@2` / `linear_experts@2` at W4A8 by default. Tier A, Tier B and the plants pass
+as recorded. Bars run 0.99–1.05× of llama-bench on the same bytes. Four new locks (rtx-5080 8B NVFP4; rtx-4090 8B and 30B NVFP4,
+MXFP4_MOE GGUF), with every existing snapshot byte-identical. W4A4 (`quant.act = a4`) stays opt-in: its pre-registered default rule is
+not met (KL p99 42–145× the W4A8 floor's, for ≈ 2.1× prefill speed), and acceptance 7 is met with a recorded deviation.
+Gate B (FP8 on `kernels.triton_fp8`) is off the v0 critical path (release design §9); M0.7 starts on Gate A.
+
 Expert caching/offload, KV offload, VMM and the optional self-improvement layer follow in v1 (§10); their core
 seams are built and spiked in M0 (design D8).
 
