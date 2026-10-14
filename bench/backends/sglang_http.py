@@ -39,7 +39,8 @@ class Backend(http.Backend):
 
     def _body(self, prompt: list[int], max_tokens: int) -> dict:
         return {"input_ids": prompt, "stream": True, "sampling_params": {
-            "max_new_tokens": max_tokens, "temperature": self.temperature, "ignore_eos": True}}
+            "max_new_tokens": max_tokens, "temperature": self.temperature, "top_k": -1, "top_p": 1.0, "min_p": 0.0,
+            "ignore_eos": True}}
 
     def info(self) -> dict:
         return {"config": {"flags": " ".join(self.flags)}, "version": self.version}

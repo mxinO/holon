@@ -24,7 +24,7 @@ class Prompts:
 
     def body(self, prompt: list[int], max_tokens: int) -> dict:
         return {"model": "m", "prompt": self.tok.decode(prompt), "max_tokens": max_tokens,
-                "temperature": self.temperature, "ignore_eos": True, "stream": True,
+                "temperature": self.temperature, "top_k": -1, "top_p": 1.0, "ignore_eos": True, "stream": True,
                 "stream_options": {"include_usage": True}}
 
     def parse(self, event: dict, state: dict) -> tuple[list[int], bool]:

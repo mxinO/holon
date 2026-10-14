@@ -28,7 +28,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BENCH = ROOT / "bench"
 ENVS = BENCH / ".envs"                                   # baseline venvs and sources (setup_baselines.sh)
-SOURCES = {"minisgl": "mini-sglang", "nanovllm": "nano-vllm"}
+SOURCES = {"minisgl": "mini-sglang", "nanovllm": "nano-vllm", "freetoken_http": "FreeToken"}
 SERVERS = ("llamaserver", "freetoken_http", "sglang_http")   # a server binary or venv of its own, and our client
 SET_BY_WORKER = ("max_seqs", "max_step_tokens", "max_model_len")   # from --max-batch, --max-step-tokens, the traces
 METHOD = (
@@ -75,9 +75,21 @@ def public(arg: str, model: str) -> str:
     return str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else path.name
 
 
-def lock_flags(engine: dict, skip: tuple[str, ...] = ()) -> list[str]:
+def lock_flags(engine: dict, skip: tuple[str, ...] = (), extra: str = "") -> list[str]:
     """`holon serve` flags that rebuild a lock's [engine] table (kernel pins are not flags: the default selection
-    runs; release design D2 makes them soft preferences)."""
+    runs; release design D2 makes them soft preferences), then the `extra` flags given by hand: those override, a
+    dict flag's items merged per key into the lock's (as D2's `holon serve` will)."""
+    engine, rest, key = {k: dict(v) if isinstance(v, dict) else v for k, v in engine.items()}, [], None
+    for arg in shlex.split(extra):
+        if arg.startswith("--"):
+            name = arg[2:].replace("-", "_")
+            key = name if name in ("plugin_options", "slots", "kernels") else None
+        if key and arg.startswith("--"):
+            engine.setdefault(key, {})
+        elif key:
+            engine[key].update([arg.split("=", 1)])
+        else:
+            rest.append(arg)
     flags = []
     for key, value in sorted(engine.items()):
         if key in skip:
@@ -89,7 +101,7 @@ def lock_flags(engine: dict, skip: tuple[str, ...] = ()) -> list[str]:
             flags += [flag, *(f"{k}={v}" for k, v in value.items())] if value else []
         else:
             flags += [flag, str(value)]
-    return flags
+    return flags + rest
 
 
 def read_lock(path: str) -> dict:
@@ -154,9 +166,9 @@ def run_worker(backend: str, args: argparse.Namespace, out: pathlib.Path,
     if backend.startswith("holon"):                  # this checkout, whatever copy the venv installed
         env["PYTHONPATH"] = os.pathsep.join(str(ROOT / d) for d in ("core", "std", "plugins"))
         python = sys.executable
-        if args.lock:                                # the lock's settings first: flags given by hand override them
+        if args.lock:                                # the lock's settings, then the flags given by hand
             for var in ("HOLON_ENGINE_ARGS", "HOLON_SERVE_ARGS"):
-                env[var] = shlex.join(lock_flags(args.lock["engine"], SET_BY_WORKER)) + " " + env.get(var, "")
+                env[var] = shlex.join(lock_flags(args.lock["engine"], SET_BY_WORKER, env.get(var, "")))
     else:                                            # a server's client runs here; in-process baselines in their venv
         env.pop("PYTHONPATH", None)
         python = sys.executable if backend in SERVERS else str(ENVS / backend / "bin" / "python")
@@ -225,7 +237,9 @@ def main() -> None:
         engine = args.lock["engine"]
         args.max_batch = args.max_batch or engine["max_seqs"]
         args.max_step_tokens = args.max_step_tokens or engine["max_step_tokens"]
-        args.kv_format = args.kv_format or engine["plugin_options"].get("kv.format")
+        args.kv_format = args.kv_format or engine.get("plugin_options", {}).get("kv.format")
+        if not args.kv_tokens and args.backends[0] != "holon":
+            ap.error("--lock matches the baselines to Holon's KV tokens: list holon first, or give --kv-tokens")
     args.max_batch, args.max_step_tokens = args.max_batch or 64, args.max_step_tokens or 8192
 
     date = datetime.date.today().isoformat()
@@ -237,7 +251,10 @@ def main() -> None:
     for r in range(args.rounds):
         for b in args.backends:
             print(f"round {r} {b} ...", flush=True)
-            res, err = run_worker(b, args, raw / f"r{r}-{b}.json", kv_tokens)
+            if args.lock and not kv_tokens and not b.startswith("holon"):
+                res, err = None, "not matched: Holon's KV tokens unknown (its run failed)"
+            else:
+                res, err = run_worker(b, args, raw / f"r{r}-{b}.json", kv_tokens)
             if res is None:
                 print(f"  failed:\n{err}", flush=True)
                 runs.append({"round": r, "backend": b, "error": err})
@@ -275,7 +292,8 @@ def main() -> None:
               "order": args.backends, "method": METHOD, "traces_sha256": traces,
               "matched": {"lock": args.lock and {k: v for k, v in args.lock.items() if k != "engine"},
                           "max_seqs": args.max_batch, "max_step_tokens": args.max_step_tokens,
-                          "kv_tokens": kv_tokens, "kv_format": args.kv_format, "temperature": args.temperature},
+                          "kv_tokens": kv_tokens, "kv_format": args.kv_format, "temperature": args.temperature,
+                          "samplers": "top_k / top_p / min_p off on every engine"},
               **({"corpus": {pathlib.Path(args.corpus).name: hashlib.sha256(pathlib.Path(args.corpus).read_bytes())
                              .hexdigest()[:16]}} if args.corpus else {}), "backends": infos,
               "summary": summary, "runs": runs}

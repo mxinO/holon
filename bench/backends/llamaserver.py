@@ -63,8 +63,8 @@ def version(binary: str) -> str:
 
 
 def _body(prompt: list[int], max_tokens: int, temperature: float) -> dict:
-    return {"prompt": prompt, "n_predict": max_tokens, "temperature": temperature, "ignore_eos": True, "stream": True,
-            "return_tokens": True, "cache_prompt": True}
+    return {"prompt": prompt, "n_predict": max_tokens, "temperature": temperature, "top_k": 0, "top_p": 1.0,
+            "min_p": 0.0, "ignore_eos": True, "stream": True, "return_tokens": True, "cache_prompt": True}
 
 
 def _parse(event: dict, state: dict) -> tuple[list[int], bool]:

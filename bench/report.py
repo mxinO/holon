@@ -19,13 +19,12 @@ import statistics
 GATE = 0.8
 
 
-def _ratio(holon: list[float], base: list[float], value: float) -> str:
-    """The ratio, "≈" when within 2 sd of its per-round values of 1, bold when under the gate."""
-    per_round = [h / b for h, b in zip(holon, base, strict=False)]
+def _ratio(value: float, per_round: list[float], gated: bool) -> str:
+    """The ratio, "≈" when within 2 sd of its per-round values of 1, bold when a gated one is under the gate."""
     text = f"{value:.2f}"
     if len(per_round) > 1 and abs(value - 1) < 2 * statistics.stdev(per_round):
         text = "≈ " + text
-    return f"**{text} (< {GATE})**" if value < GATE else text
+    return f"**{text} (< {GATE})**" if gated and value < GATE else text
 
 
 def bars(records: list[tuple[str, dict]]) -> str:
@@ -47,7 +46,7 @@ def bars(records: list[tuple[str, dict]]) -> str:
                 for b in builds:
                     ratio = res.get(f"ratio_{b}")
                     cells += [_num(res[b]["statistic"]), "—" if ratio is None else
-                              _ratio(res["holon"]["per_round"], res[b]["per_round"], ratio)]
+                              _ratio(ratio, res[f"ratio_{b}_per_round"], gated=b == "gate")]
                 lines.append("| " + " | ".join(cells) + " |")
         gpu = group[0][1]["gpu"]
         ggml = ", ".join(sorted({r["ggml"][:8] for _, r in group}))

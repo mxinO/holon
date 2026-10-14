@@ -22,11 +22,11 @@ import subprocess
 import sys
 import tomllib
 
+from backends.llamaserver import KV_TYPES
 from run import BENCH, ENVS, ROOT, git, gpu_class, lock_flags, model_id, public, read_lock
 
 GATE = 0.8
 METRICS = {(512, 0, 0): "pp512", (512, 0, 8192): "pp512 @ d8192", (0, 128, 0): "tg128", (0, 128, 8192): "tg128 @ d8192"}
-LLAMA_KV = {None: "f16", "q8_0": "q8_0"}               # Holon's kv.format -> llama.cpp's cache type (bf16 KV ~ f16)
 GGML = ROOT / "plugins" / "holon_plugins" / "kernels" / "ggml_cuda" / "plugin.toml"
 LLAMA_KEEP = ("build_commit", "n_batch", "n_ubatch", "type_k", "type_v", "flash_attn", "n_gpu_layers")  # no host info
 
@@ -61,12 +61,16 @@ def main() -> None:
     ap.add_argument("--llama", nargs="+", default=["gate", "upstream"], help="llama.cpp builds (bench/.envs)")
     ap.add_argument("--evidence-dir", default=str(ROOT / "evidence"))
     args = ap.parse_args()
+    if "gate" not in args.llama:
+        ap.error("the gate's build must run (--llama gate ...)")
     args.env = dict(os.environ, CUDA_DEVICE_ORDER="PCI_BUS_ID", CUDA_VISIBLE_DEVICES=str(args.gpu))
 
     lock = read_lock(args.lock)
     engine = lock.pop("engine")
+    if engine.get("max_draft_tokens"):
+        ap.error("bars are plain decoding (llama-bench drafts nothing): use a lock without speculation")
     engine_args = lock_flags(engine, skip=("max_model_len",))     # llama_bench.py sizes the context to its tests
-    kv = LLAMA_KV[engine["plugin_options"].get("kv.format")]
+    kv = KV_TYPES[engine.get("plugin_options", {}).get("kv.format")]
     llama_flags = ["-p", "512", "-n", "128", "-d", "0,8192", "-ngl", "99", "-fa", "on", "-ctk", kv, "-ctv", kv,
                    "-b", str(engine["max_step_tokens"]), "-ub", "512", "-r", "5", "-o", "json"]
     gpu = gpu_class(args.gpu)
@@ -88,20 +92,25 @@ def main() -> None:
                 else:
                     rounds[r][e], builds[e] = llama(ENVS / f"llama.cpp-{e}" / "bin" / "llama-bench", args,
                                                     llama_flags, out)
-            except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as err:
+            except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as err:
                 print(f"  failed: {err}; log {out.with_suffix('.log').relative_to(ROOT)}", flush=True)
-                rounds[r][e] = {"error": str(err).replace(str(ROOT) + "/", "")}
+                rounds[r][e] = {"error": type(err).__name__ + (f" (exit {err.returncode})" if isinstance(
+                    err, subprocess.CalledProcessError) else "")}       # the command names local paths
 
     results: dict[str, dict] = {}
     for metric in METRICS.values():
         res: dict = {}
-        for e in engines:
-            per_round = [round(statistics.median(rd[e][metric][1:5]), 2) for rd in rounds if metric in rd[e]]
-            res[e] = {"statistic": round(statistics.median(per_round), 2) if per_round else None,
-                      "per_round": per_round}
+        for e in engines:                       # per round: the median of repetitions 2-5 (None: the run failed)
+            per_round = [round(statistics.median(rd[e][metric][1:5]), 2) if metric in rd[e] else None
+                         for rd in rounds]
+            done = [x for x in per_round if x is not None]
+            res[e] = {"statistic": round(statistics.median(done), 2) if done else None, "per_round": per_round}
         for e in args.llama:
             if res["holon"]["statistic"] and res[e]["statistic"]:
                 res[f"ratio_{e}"] = round(res["holon"]["statistic"] / res[e]["statistic"], 3)
+                res[f"ratio_{e}_per_round"] = [round(h / b, 3) for h, b in zip(res["holon"]["per_round"],
+                                                                            res[e]["per_round"], strict=True)
+                                               if h is not None and b is not None]
         results[metric] = res
 
     dirty = git("status", "--porcelain", "--untracked-files=no", "--", ".", ":!evidence").splitlines()

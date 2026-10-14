@@ -10,7 +10,6 @@ import json
 import os
 import pathlib
 import shlex
-import subprocess
 import time
 
 from backends import http, text
@@ -21,9 +20,12 @@ PYTHON = pathlib.Path(__file__).resolve().parents[1] / ".envs" / "freetoken" / "
 
 class Backend(http.Backend):
     def __init__(self, model: str, max_batch: int, max_model_len: int, max_step_tokens: int, *,
-                 temperature: float = 0.0) -> None:
+                 temperature: float = 0.0, kv_tokens: int | None = None, kv_format: str | None = None) -> None:
+        if kv_format is not None:
+            raise ValueError(f"FreeToken is not matched to kv.format={kv_format} (its KV is the model dtype)")
         port = http.free_port()
         self.flags = ["--max-running-requests", str(max_batch), "--max-prefill-length", str(max_step_tokens),
+                      *(["--num-tokens", str(kv_tokens // 64 * 64)] if kv_tokens else []),   # whole pages
                       "--max-seq-len-override", str(text.headroom(max_model_len)),
                       "--memory-ratio", "0.9", "--served-model-name", "m",
                       *shlex.split(os.environ.get("FREETOKEN_ARGS", ""))]
@@ -32,13 +34,9 @@ class Backend(http.Backend):
         _wait_ok(port)                               # its /health answers 200 while still loading
         prompts = text.Prompts(model, temperature)
         super().__init__(server, "/v1/completions", prompts.body, prompts.parse)
-        package = subprocess.run([server.cmd[0], "-c", "import freetoken; print(freetoken.__file__)"],
-                                 capture_output=True, text=True).stdout.strip()
-        self.commit = subprocess.run(["git", "-C", os.path.dirname(package), "rev-parse", "HEAD"],
-                                     capture_output=True, text=True).stdout.strip()
 
     def info(self) -> dict:
-        return {"config": {"flags": " ".join(self.flags)}, "commit": self.commit}
+        return {"config": {"flags": " ".join(self.flags)}}
 
 
 def _wait_ok(port: int, timeout_s: float = 900) -> None:
