@@ -39,7 +39,7 @@ from holon_std.mixers.gqa import units as gqa
 from run import lock_flags, public, read_lock
 
 ARMS = ("base", "kv_write", "qk_rope_kv", "mmq_bf16", "scale2", "glu", "q8_1")
-STEPS = 32
+STEPS = 64
 
 
 def _index_put_write(self, k, v, kv, unit, off) -> None:
