@@ -170,18 +170,21 @@ def shapes_of(sweep: dict) -> dict[tuple, dict]:
 
 def d8(profile: dict, sweep: dict | None) -> dict:
     """D8's f on decode B1: bytes = the matmuls' weight bytes + the KV read (at the graphed window's context); B =
-    weight bytes / the step's GEMV time, priced call by call from the per-call sweep (graph-timed, unprofiled);
-    f = 1 - bytes / (B x step). The profile's GEMV time is kept beside it: profiled kernels overlap under PDL (r2 > 1
-    is overlap, not inflation), so the profile can't separate a GEMV from its neighbours."""
+    weight bytes / the step's GEMV time: its calls priced from the per-call sweep (graph-timed, unprofiled), less the
+    activation quantization each sweep call includes (the step's profiled q8_1 quantize time), so B is the GEMV
+    kernels' alone; f = 1 - bytes / (B x step). The profile's GEMV time is kept beside it: profiled kernels overlap
+    under PDL (r2 > 1 is overlap, not inflation), so the profile alone can't separate a GEMV from its neighbours."""
     row = profile["rows"]["decode_b1"]
     weights = row["gemm"]["weight_bytes"]
     kv = profile["kv_bytes_per_token"] * graphed_ctx(row)
     shapes = shapes_of(sweep) if sweep else {}
     calls = row["gemm"]["calls"]
     priced = [(c, shapes.get((c["type"], c["in"], c["out"], c["mode"]))) for c in calls]
-    gemv_ms = sum(c["count"] * s["us"][str(c["rows"])]["llama"] for c, s in priced if s) / 1e3
+    quantize_ms = row["graphed"]["cat"].get("act quant (q8_1 / fp4)", [0, 0.0])[1]
+    gemv_ms = sum(c["count"] * s["us"][str(c["rows"])]["llama"] for c, s in priced if s) / 1e3 - quantize_ms
     out = {"step_ms": row["graphed_wall_ms"], "weights_gb": round(weights / 1e9, 4), "kv_gb": round(kv / 1e9, 5),
            "gemv_ms_profiled": round(row["graphed"]["cat"]["gemm"][1], 3),
+           "quantize_ms_profiled": round(quantize_ms, 3),
            "stream_gb_s": sweep["stream"]["gb_s_best"] if sweep else None}
     if not sweep or not all(s for _, s in priced):
         return out | {"f": None}
@@ -295,7 +298,9 @@ def main() -> None:
         target = next((p for n, p in profiles.items() if n == "27b-plain"), None)
         repeats = next(iter(load(args.dir, args.cls, "qmm-sweep-d9-repeat", exact=True).values()), {})
         if target:
-            out["d9"] = d9([sweep, *repeats.get("repeats", [])], target, out["crossover"]["table"])
+            shipped = set(out["crossover"]["shipped"])          # D9 at the entries that ship, not every candidate
+            table = {k: v for k, v in out["crossover"]["table"].items() if k.rsplit("/", 1)[0] in shipped}
+            out["d9"] = d9([sweep, *repeats.get("repeats", [])], target, table)
     print(json.dumps(out, indent=1))
     if args.json:
         with open(args.json, "w") as f:

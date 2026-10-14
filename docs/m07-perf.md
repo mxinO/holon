@@ -1,9 +1,10 @@
 # M0.7 — performance: fused glue, mixed steps, a gated megakernel experiment
 
-Status: **rev 3.2, step 0 reviewed** (2026-10-14). Revision 3.1 was reviewed clean by a panel of three (correctness,
+Status: **rev 3.3, step 0 reviewed and re-checked** (2026-10-14). Revision 3.1 was reviewed clean by a panel of three (correctness,
 architecture, numerics / performance / tests) over four rounds. Step 0 ran (§11), and the panel's review of it and the
 lead's decisions are in §10's "Step 0 panel round"; §1, §3.1, §4, §5, §6, §7 and §11 carry them. The panel re-checks
-this revision before step 1.
+rev 3.2 before step 1; rev 3.3 fixes its findings (§10, "rev 3.2 re-check") and awaits the panel's final
+confirmation.
 
 Scope: plan §2 (M0.7: "fused prefill glue (KV-store kernel, add+norm, q/k norm) and a model-specific megakernel
 experiment (design §5.7)"), narrowed and extended by what M0.3–M0.5 recorded for M0.7: the verify-step glue
@@ -13,10 +14,11 @@ gate (D9); the forward/sample split stays deferred (M0.5 D2: 1.061× / 1.026×, 
 prior art are in the local research note `docs/brainstorm/m07-perf-research.md` ("R §n", taken on an RTX A5000) and in
 the reviewers' re-derivations recorded in §10; the consumer classes are re-measured first (step 0).
 
-Implementation starts after M0.5 (merged) and M0.6's Gate A merge into `main` (both change the core, the scheduler and
-the ggml plugin; M0.7 needs Gate A's ggml pin `cbe28bb3` and fp4 mode, not Gate B's `triton_fp8`); step 0 runs on that
-pin. If Gate B merges after M0.7's close, it brings one more shared-change propagation (release design §9). The plan's M0.7 row is updated with this revision; design §7.1 / §4.2 and
-plan §10 (mixing as a core budget) are updated with step 4's code.
+M0.5 and M0.6 (Gates A and B) are merged into `main`; this branch is rebased onto `main` at 4a44fdc, which includes
+Gate B's `kernels.triton_fp8` and `std.weights.hf`'s merge-order change. Step 0 ran at Gate A's ggml pin `cbe28bb3`
+(before Gate B's merge; no step-0 measurement touches Gate B's code), and Gate B's merge-order change was propagated
+to the development-class HF locks in a commit of its own (§11.13). The plan's M0.7 row is updated with this
+revision; design §7.1 / §4.2 and plan §10 (mixing as a core budget) are updated with step 4's code.
 
 ## 1. Goal and acceptance
 
@@ -42,7 +44,7 @@ paths it touches. Acceptance:
    long-prompt scenario's TTFT p99 regresses by at most 25%; throughput by at most max(5%, 2 sd of the baseline
    rounds); TPOT p99 recorded, not gated; the mixed-steps counter > 0. Speculative locks record the alternation's gap
    and long-prompt TTFT only. D7 serves formats whose decode-row and chunk paths share an activation mode (§3.1): the
-   a8 GGUF locks; a deployment where they differ refuses `chunk_with_decode > 0` at startup.
+   a8 GGUF locks; a deployment where they differ refuses `chunk_with_decode > 0` at bind time (§3.1).
 4. **Megakernel experiment** (D8): measured against a fixed speed-of-light gate on the RTX 5090 and 5080 after D3–D6;
    a one-layer prototype only on "go"; recorded either way. No core seam for it unless it goes.
 5. **Locks:** propagated once, at the close (bitwise changes keep snapshots byte-identical; D2 / D3 / D6's bounded
@@ -90,10 +92,13 @@ run before the release freezes the ABI, not in M0.7).
      leading decode rows — a 1-token prefill row looks like a decode row otherwise.
    - Planners: each attention / mixer planner exposes `mixes_row_kinds` (a kernel prop surfaced by the planner and read
      at build, like `needs_host_lens`, `engine.py:145`); `chunk_with_decode > 0` without a drafter and with a planner
-     that cannot mix fails at startup. So does `chunk_with_decode > 0` when any `qlinear` site's activation mode
-     (its kernel spec's `config["act"]`) differs between the path its decode rows take and the path a chunk takes
-     (mmvq vs mmq: q8_1 vs native fp4, for instance) — the check compares modes generically, names no format, and
-     keeps a mixed step from running a row at a precision its unmixed step would not. Only steps with `n_decode > 0` take the per-row-kind path: decode rows first,
+     that cannot mix fails at startup. The activation-mode refusal lives in std, not the core: `Linear` and the expert
+     linear unit (`ExpertLinear`), at bind time, read `chunk_with_decode` from `BuildCtx.options` and refuse when it is
+     > 0 and their bound kernel's activation mode (its spec's `config["act"]`) differs between the path decode rows
+     take and the path a chunk takes — for `qlinear@2` (mmvq vs mmq) and `linear_experts@2` (mmvq_id vs mmq_id: the 30B
+     NVFP4 under `fp4` runs W4A8 vs W4A4). The check compares modes generically and names no format; it keeps a mixed
+     step from running a row at a precision its unmixed step would not. `chunk_with_decode` joins the options the
+     core lists for `BuildCtx.options` in the ABI 0.2 commit. Only steps with `n_decode > 0` take the per-row-kind path: decode rows first,
      so a mixed step is two contiguous token slices; GQA's prefill kernel takes both when its prop says it accepts 1-token rows, GDN runs
      chunked over the prefill slice and recurrent over the decode slice, re-basing published `row` indices for the
      chunked subset. Unmixed steps (all steps at the default) keep today's paths, so snapshots at 0 are unchanged.
@@ -101,7 +106,8 @@ run before the release freezes the ABI, not in M0.7).
      > 0 (a chunk's activations alive through sampling).
    - The dead `SchedulePolicy.mix_phases()` protocol (`core/holon/api/decoding.py:39`) is deleted.
    - **ABI:** one commit at step 1 moves the ABI to 0.2 and carries every break and addition of M0.7 (`mix_phases`
-     removed; `BatchPlan.n_decode` and `EngineConfig.chunk_with_decode` added; the std.ops minors of D3 and D6), so the
+     removed; `BatchPlan.n_decode`, `EngineConfig.chunk_with_decode` and its `BuildCtx.options` key added; the std.ops
+     minors of D3 and D6), so the
      release's step 6 sets 1.0 from it. The release's frozen guide names `core_abi >=0.1,<0.2`; it is updated after
      the legibility runs (the legibility snapshot is already cut).
    - Toy proof: the toy state kinds across mixed steps with chunked prefill, constrained rows and preemption, outputs
@@ -128,7 +134,10 @@ Line budget ≈ +90 (scheduler, `n_decode`, executor planning per row kind, vali
   mode, in, out)` that `QLinear` calls with its `in` and `out`, as do both judge sites (`drafter.py`, `gguf.py`). An
   entry is chosen per shape at the row counts graphed steps run — 4, 8 and the drafter's 7 — where mmq is faster than
   mmvq by ≥ 3% per call and by > 3 sd across repeated sweeps (step 1 repeats step 0's sweep for the candidate shapes);
-  the entries ship where their sum on some lock's decode or verify row is ≥ 1% (§11.5 lists the candidates). Rows 4
+  the entries ship where their sum on some lock's decode or verify row is ≥ 1% (§11.5 lists the candidates). The
+  entries are chosen against today's mmq, which casts f32 → bf16; step 1's repeat sweep times both mmq variants (with
+  and without the cast), and once D4 is kept the entries are re-derived from the no-cast column before the single
+  propagation at the close (if D4 is reverted, they stay as chosen). Rows 4
   and 8 are guarded on every lock whose shapes receive an entry. Step 0's per-type reading and §11.12's per-file
   proposal are replaced by this (step 0 panel). llama.cpp's fallback takes an explicit compute
   capability (today's C API reads the current device's, `csrc/api.cu:111`), and the existing ggml plugin test asserts
@@ -184,21 +193,25 @@ Line budget ≈ +90 (scheduler, `n_decode`, executor planning per row kind, vali
   decode slice through the decode kernel instead.
 - **D8. Megakernel experiment, gated on speed of light.** After D3–D6, per class (5090, 5080), on 8B Q4_K_M B1 decode:
   f = 1 − (bytes read per step) / (B × step time), with bytes = the weights read (the embedding table excluded) + KV,
-  and B = the bandwidth the step's GEMVs achieve, from unprofiled GEMV time — each call priced from the per-call sweep
-  (graph-timed), not from the profile: profiled kernels overlap under programmatic dependent launch, so D1's second
-  ratio above 1 is overlap, not profiler inflation, and a profiled GEMV sum is not the GEMVs' time — so f excludes
+  and B = the bandwidth the step's GEMV kernels achieve, from unprofiled GEMV time — each call priced from the
+  per-call sweep (graph-timed), less the activation quantization each sweep call includes (the step's profiled q8_1
+  quantize time), so B is the GEMV kernels' alone; not from the profile: profiled kernels overlap under programmatic
+  dependent launch, so D1's second ratio above 1 is overlap, not profiler inflation — so f excludes
   the GEMVs' own gap to peak, which a megakernel does not recover; a
   read-only stream over ≥ 1 GB is recorded beside it. Projected gain 1 / (1 − f·c) with c = 0.4–0.55 (the
   share of the gap to speed of light the published megakernels closed: Cohere 0.38, Hazy 0.56), reported at both
   ends. Stop if the projection at c = 0.55 is under 1.15× (f < 24%); otherwise build a one-layer prototype in
   `models/qwen3/fast/` and go only if its L0 against the judge-built recipe reference passes and it projects ≥ 1.15×
   at B1 with no regression at B4–8. A go means a design addendum (core seams: one composite bound to many layers, a
-  decode-loop override, taps written by the megakernel), reviewed by this panel.
+  decode-loop override, taps written by the megakernel), reviewed by this panel. Step 0 (rev 3.3 method): f is 26.9%
+  on the 5090 (1.174× at c = 0.55: prototype territory today), 15.8% on the 5080 (stop) and 14.5% on the 4090; step 5
+  decides after D3–D6 with the same method.
 - **D9. The small-batch quantized matmul leaves M0.7** as a follow-up gated by step 0's per-call sweep: the target's
   4-row / 1-row GEMM time ratio after D2 > 1.25 on a release class (it would be a row-dispatch path inside
-  `kernels.ggml_cuda` with its own `config["act"]` entry, not a new provider). Step 0, at the per-shape table that
-  ships: 1.245 on the 5080 (the mean of four sweeps; not fired), 1.01 on the 4090, 1.10 on the 5090. Its upside is
-  recorded: 3.4 ms of the 5080's 27B 4-row calls over their 1-row time, about 12.6% of its MTP verify step (§11.7).
+  `kernels.ggml_cuda` with its own `config["act"]` entry, not a new provider). Step 0, at the entries that ship:
+  1.248 on the 5080 (the mean of four sweeps; not fired), 1.01 on the 4090, 1.11 on the 5090; recomputed once step
+  1's repeat sweep fixes the shipped set. Its upside is
+  recorded: 3.5 ms of the 5080's 27B 4-row calls over their 1-row time, about 12.8% of its MTP verify step (§11.7).
   D9 stays outside M0.7.
 - **D10. Classify every change** bitwise or bounded before building (§1.1); target bitwise; propagate once at the close.
 - **D11. NVFP4's `scale2` inside mmvq for more than one column** (bitwise; step 0: 3.3–7.2% of NVFP4 decode B4/B8,
@@ -215,11 +228,14 @@ Line budget ≈ +90 (scheduler, `n_decode`, executor planning per row kind, vali
   KV fails graph capture on the RTX 5090: `paged_attention` needs 106,752 B of shared memory against sm_120's 101,376 B
   (§11.4). The kernel caps BLOCK_M at 64 and tiles the query rows over the grid, with each row's arithmetic unchanged
   (checked bitwise against today's kernel where today's compiles); if the compiled `metadata.shared` still exceeds the
-  device limit, `num_stages` drops, and only then `block_n` halves, bounded. The config is decided at build for the
-  deployment's declared widths (its verify widths and the draft block) and the effective one is recorded in the
-  site's lock entry. The existing `triton_attn` L0 is parametrized over every class config × declared width × KV
-  format × head_dim (head_dim 256, G = 6, NQ = 8 and 16, bf16 KV included), compiled offline for each target arch,
-  and asserts the compiled shared memory is within that target's limit.
+  device limit, `num_stages` steps down to 1 (on sm_120 at BLOCK_M 64, head_dim 256 and bf16 only one stage fits),
+  and only then `block_n` halves, bounded. The bitwise check covers the stage fallback too (3 stages vs 1 at a shape
+  where both compile). The effective config is a deterministic function of (class, the site's facts, the declared
+  widths), decided at build: the class configs are pinned by the plugin's `src` hash and the widths (verify widths,
+  draft block) come from the lock's `[engine]`, so the lock pins it without a field of its own. The existing
+  `triton_attn` L0 is parametrized over every class config × declared width × KV format × head_dim (head_dim 256,
+  G = 6, NQ = 8 and 16, bf16 KV included), compiled offline for each target arch, and asserts the compiled shared
+  memory is within that target's limit.
 - **M0.6 follow-ups.** The FP4 repack holes (`kernels.ggml_cuda`'s `prepare` leaves ≈ 0.63 GiB reserved but unallocated
   on the 30B NVFP4) are fixed in M0.7 by repacking into a destination allocated before the sources are freed: a
   memory-only change, no numerics. The allocator-setting investigation is out of scope.
@@ -242,14 +258,14 @@ is taken to cost nothing).
 | GDN gating (D6) | prefill −0.3%: dropped | −0.4%: dropped | −0.4%: dropped |
 | NVFP4 `scale2` in mmvq (D11) | NVFP4 decode B4/B8 −3.5–4.2% | −3.3–3.6% | −6.2–7.2% |
 | Mixed steps (D7), plain 27B locks (simulated) | worst gap 2.7 s → 127 / 232 ms (cap 256 / 512); paired TTFT 1.02 / 1.00; long prompt +10% / +2% | → 94 / 151 ms; 1.26 (fails) / 1.01; +22% / +0.7% | → 71 / 123 ms; 1.12 (undecided) / 1.00; +20% / +5% |
-| Megakernel (D8), f today | 12.7%: stop | — | 22.1%: stop |
+| Megakernel (D8), f today | 15.8%: stop | 14.5% (not a D8 class) | 26.9%: prototype territory (1.174×); step 5 decides after D3–D6 |
 
 ## 6. Judge
 
 - **Bitwise checks inside existing L0 loops:** D4 (`test_mmq_schedules`, fixup forced, plus the NVFP4 case), D5 (L1.5),
   D6's shared quantization (a mixed-type pair of consumers through one handle), the bf16 `kv_write`; D11 in the
   qlinear loop at rows 2–8 with a `scale2` that is not a power of two (by value); `triton_attn`'s tiled query rows
-  bitwise against today's kernel, and its L0 parametrized over class config × declared width × KV format × head_dim
+  bitwise against today's kernel (the stage fallback included, 3 vs 1 stage), and its L0 parametrized over class config × declared width × KV format × head_dim
   with the compiled shared memory checked against each target's limit (offline compiles for sm_86 / 89 / 120a).
 - **Bounded L0** (sm_86 / 89 / 120a + memcheck): D3 against the judge-composed reference, incl. partial rotary, the
   gated q layout and q8_0 1-token rows; `qlinear_glu@1` against its reference; GDN gating against the torch composition.
@@ -293,6 +309,18 @@ profile). Lean tests: bitwise checks live in existing L0 loops; two new plants, 
 
 ## 10. Review findings, resolved
 
+**Rev 3.2 re-check (rev 3.3, 2026-10-14).**
+
+| Finding | Resolution |
+|---|---|
+| Correctness (major): D8 priced the activation quantize as GEMV | the GEMV kernels' time = the sweep's calls less the step's profiled q8_1 quantize time (`step0_report.d8`); f 26.9% on the 5090 (1.174×, prototype territory today), 15.8% on the 5080, 14.5% on the 4090; §5, §11.6 restated; step 5 decides after the fusions with the same method (D8) |
+| Correctness m1: D9 at every candidate, not the shipped set | computed at `shipped`: 1.2477 on the 5080 (not fired); recomputed after step 1's repeat sweep fixes the set (D9, §11.7) |
+| Correctness m2: `triton_attn`'s stage fallback stopped too early | `num_stages` steps down to 1 before `block_n` halves (one stage fits on sm_120 at BLOCK_M 64, head_dim 256, bf16); the bitwise check covers 3 vs 1 stage (§4, §6) |
+| Architecture m1: the activation-mode refusal belongs in std | `Linear` and `ExpertLinear` refuse at bind time from `BuildCtx.options`' `chunk_with_decode` (added to the listed options in the ABI 0.2 commit), for `qlinear@2` and `linear_experts@2` (§3.1) |
+| Architecture m2: "recorded in the lock entry" | dropped: the effective config is a deterministic function of (class, facts, declared widths), pinned by the plugin's `src` hash, the widths from the lock's `[engine]` (§4) |
+| Architecture m3: stale header | updated: Gate B is merged; the branch is rebased on 4a44fdc (header) |
+| Numerics m1: D2's entries assume today's cast, which D4 removes | step 1's repeat sweep times both mmq variants; with D4 kept the entries are re-derived from the no-cast column before the close's propagation; with D4 reverted they stay (D2) |
+
 **Step 0 panel round (rev 3.2, 2026-10-14).** No blocker; the lead's decisions on each finding:
 
 | Finding | Resolution |
@@ -302,9 +330,9 @@ profile). Lean tests: bitwise checks live in existing L0 loops; two new plants, 
 | Both MAJORs: `triton_attn` exceeds sm_120's shared memory (DFlash2 / bf16 KV on the 5090) | a step-1 bug fix, not keep-or-drop: BLOCK_M ≤ 64 with query rows tiled over the grid (per-row arithmetic unchanged, checked bitwise), then fewer `num_stages`, then a bounded `block_n` halving; decided at build for the declared widths and recorded in the lock entry; L0 over class config × width × KV format × head_dim with the compiled shared memory checked per arch (§4, §6, §7) |
 | Architecture m2, numerics m3: bitwise fusions dropped per class | bitwise fusions stay on everywhere once kept (shared q8_1 on the 4090 too); D3 runs on every step, prefill included; per-class keep / drop only for bounded items and D2 (§1.1, D3, D6, §11.11) |
 | New: NVFP4 `scale2` after mmvq above one column (3.3–7.2% of NVFP4 B4/B8) | D11 (bitwise): the multiply in mmvq's epilogue after the full reduction, today's launch variant, one RNE rounding to bf16; L0 in the qlinear loop at rows 2–8 with a non-power-of-two `scale2`, by value; the MoE path already fused (included only if step 2's profile says otherwise); keep-or-revert; the W4A4 activation copy recorded only (§4 D11) |
-| Numerics m2: D8's B from the profiled GEMV time / r2 | r2 > 1 is PDL overlap, not inflation; GEMV time priced from the per-call sweep: f 22.1% (5090) and 12.7% (5080), both stop today; step 5 uses the sweep or unprofiled time (§11.2, §11.6, D8) |
+| Numerics m2: D8's B from the profiled GEMV time / r2 (superseded by rev 3.3) | r2 > 1 is PDL overlap, not inflation; GEMV time priced from the per-call sweep: f 22.1% (5090) and 12.7% (5080), both stop today; step 5 uses the sweep or unprofiled time (§11.2, §11.6, D8) |
 | Numerics m4: D3, D5 and gate/up savings read as measured | labelled upper bounds; "other glue" on eager rows includes host idle (§5, §11.3, §11.11) |
-| Correctness m1: D9 at a table that will not ship | recomputed at the per-shape table: 1.245 over four sweeps, not fired; upside 3.4 ms (12.6% of the 5080's MTP verify step) recorded; D9 stays outside M0.7 (§11.7) |
+| Correctness m1: D9 at a table that will not ship (superseded by rev 3.3) | recomputed at the per-shape table: 1.245 over four sweeps, not fired; upside 3.4 ms (12.6% of the 5080's MTP verify step) recorded; D9 stays outside M0.7 (§11.7) |
 | Correctness m2: the clock sampler picked the GPU by `CUDA_VISIBLE_DEVICES` | `Sampler` names torch's current device by UUID (`bench/clock_check.py`). No test: `bench/` is outside the suite and a test would need a GPU and a second device order; checked by hand with `CUDA_VISIBLE_DEVICES=6,3` and device 1, which now samples physical GPU 3 (it sampled GPU 6 before) |
 | Correctness m3: q8_0 KV decode rows in mixed steps go through `_paged_prefill` (no KV split) | the simulator under-costs them; step 4 measures, and may route the decode slice through the decode kernel; the 5090's cap 256 is undecided until step 4 (D7, §11.8) |
 | Architecture m4: M0.6's follow-ups | the FP4 repack holes fixed in M0.7 (memory only, step 2); the allocator-setting investigation out of scope; one ABI 0.2 commit at step 1 with every break and addition (`mix_phases` removed, `n_decode`, `chunk_with_decode`, the std.ops minors), the release's step 6 sets 1.0; the frozen guide's `core_abi >=0.1,<0.2` is updated after the legibility runs (§3.1, §4) |
@@ -537,33 +565,37 @@ repeated sweep of these candidates.
 
 - bytes = the matmuls' weight bytes (4.67 GB, the embedding table excluded), plus the KV read at the graphed window's
   context (0.088 GB).
-- B = weight bytes / the step's GEMV time, each call priced from the per-call sweep (graph-timed, unprofiled; corrected
-  by the step 0 panel: the profiled GEMV sum divided by r2 is not the GEMVs' time when kernels overlap).
+- B = weight bytes / the GEMV kernels' time: the step's calls priced from the per-call sweep (graph-timed,
+  unprofiled), less the activation quantization each sweep call includes (the step's profiled q8_1 quantize time).
+  (Rev 3.2 kept the quantize inside the GEMV time, which lowered f; rev 3.1's first version took the profiled GEMV
+  sum divided by r2, which is not the GEMVs' time when kernels overlap.)
 - f = 1 − bytes / (B × step).
 
-| class | step ms | GEMV ms (sweep) | B (GB/s) | read-only stream, 2 GiB (GB/s) | f | projected gain, c = 0.4 / 0.55 | gate |
+| class | step ms | GEMV ms (sweep − quantize) | B (GB/s) | read-only stream, 2 GiB (GB/s) | f | projected gain, c = 0.4 / 0.55 | gate today |
 |---|---|---|---|---|---|---|---|
-| 5080 | 6.54 | 5.60 | 834 | 913 | 12.7% | 1.053 / 1.075 | stop |
-| 4090 | 6.90 | 5.95 | 785 | 844 | 12.1% | 1.051 / 1.071 | (not a D8 class) |
-| 5090 | 4.14 | 3.17 | 1474 | 1683 | 22.1% | 1.097 / 1.138 | stop |
+| 5080 | 6.54 | 5.61 − 0.20 = 5.41 | 864 | 913 | 15.8% | 1.067 / 1.095 | stop |
+| 4090 | 6.90 | 5.95 − 0.17 = 5.79 | 807 | 844 | 14.5% | 1.062 / 1.087 | (not a D8 class) |
+| 5090 | 4.14 | 3.17 − 0.20 = 2.97 | 1572 | 1683 | **26.9%** | 1.121 / **1.174** | prototype territory |
 
-**Both D8 classes stop already today**, before D3–D6 shrink the step further. This section's first version (15.9% /
-25.2%, "prototype territory" on the 5090) took the profiled GEMV time divided by r2. Step 5 measures the gate after
-D3–D6 with the sweep's or an unprofiled GEMV time.
+**The 5090 is in prototype territory today; the 5080 stops.** D8 is defined after D3–D6: if the surviving fusions
+saved their upper bounds on this step (9.3% of it: kv_write 3.5%, D3 2.9%, gate/up 2.4%, shared q8_1 0.5%), f would
+fall to about 19.4% (1.088 / 1.12: stop), but those are upper bounds. Step 5 decides after the fusions, with this
+same method.
 
 ### 11.7 D9's trigger
 
-D9 is the target's 4-row / 1-row matmul time over its decode step's calls, at the D2 entries that ship (per shape),
-with today's cast; each call's time is the mean over the sweeps available.
+D9 is the target's 4-row / 1-row matmul time over its decode step's calls, at the D2 entries that ship (`shipped`,
+per shape; recomputed once step 1's repeat sweep fixes the set), with today's cast; each call's time is the mean over
+the sweeps available.
 
 | class | target | ratio | bar 1.25 | upside (4-row calls over their 1-row time) |
 |---|---|---|---|---|
-| 5080 | 27B UD-IQ3_S | 1.245 (mean of four sweeps: the full one and three repeats; sd of the per-sweep ratios 0.003) | not fired | 3.4 ms, 12.6% of its 27.2 ms MTP verify step |
+| 5080 | 27B UD-IQ3_S | 1.248 (mean of four sweeps: the full one and three repeats; sd of the per-sweep ratios 0.003) | not fired | 3.5 ms, 12.8% of its 27.2 ms MTP verify step |
 | 4090 | 27B UD-Q4_K_M | 1.014 | not fired | 0.3 ms |
-| 5090 | 27B UD-Q4_K_M | 1.10 | not fired | 1.0 ms |
+| 5090 | 27B UD-Q4_K_M | 1.11 | not fired | 1.1 ms |
 
-D9 stays outside M0.7; the upside is recorded for the follow-up. (The step 0 panel's recomputation gave 1.2477 at its
-table; this one prices every call per shape at the entries above. Both are below 1.25.)
+D9 stays outside M0.7; the upside is recorded for the follow-up. (Rev 3.2 priced it at every candidate entry, 1.245;
+at the shipped set it is 1.2477, as the panel computed.)
 
 ### 11.8 Mixed steps: the measured plain runs and the recalibrated simulator (D7)
 
@@ -713,8 +745,8 @@ to cost nothing).
 | D6 GDN gating | bounded | prefill −0.3% | −0.4% | −0.4% | **drop** everywhere: about 2 ms of an 838 ms step |
 | D11 NVFP4 `scale2` in mmvq above one column | bitwise | NVFP4 B4/B8 −3.5–4.2% | −3.3–3.6% | −6.2–7.2% | **new, keep-or-revert at step 2**, every class |
 | D7 mixed steps | — | cap 256 or 512 | cap 512 (256 fails paired TTFT) | cap 512; 256 undecided | **keep**; step 4's real runs pick the cap; a8 GGUF locks only |
-| D8 megakernel | — | f 12.7% → stop | — | f 22.1% → stop | stop expected; step 5 re-measures after D3–D6 |
-| D9 small-batch matmul | — | 1.245 | 1.014 | 1.10 | not triggered; outside M0.7 |
+| D8 megakernel | — | f 15.8% → stop | (14.5%) | f 26.9% → prototype territory today | step 5 decides after D3–D6, same method |
+| D9 small-batch matmul | — | 1.248 | 1.014 | 1.11 | not triggered; outside M0.7; recomputed after step 1 |
 | `triton_attn` shared memory | bug fix | — | — | DFlash2 / bf16 KV fails capture | **fix at step 1** |
 
 **Measured, not in §5:** native W4A4's bf16 → f32 activation copy, 6.7–7.0% of NVFP4 W4A4 prefill on sm_120 (recorded
@@ -724,7 +756,8 @@ only); pp512 @ 8K (0.91–0.96) and the 30B-A3B's tg128 (0.93) are not ggml (§1
 
 Step 0 asked the lead about D2's per-entry rule (proposing a per-file table), D9 at its bar, D8 on the 5090 (then read
 as 25.2%), the D7 cap per class, the items outside §5 and the lost desktop. The answers and corrections are §10's step
-0 panel round: D2 per shape (§11.5), D9 not fired (§11.7), D8 22.1% and stop (§11.6), the cap decided at step 4 with
+0 panel round and the rev 3.2 re-check: D2 per shape (§11.5), D9 not fired (§11.7), D8 26.9% on the 5090 and
+decided at step 5 (§11.6), the cap decided at step 4 with
 256 open on the 5090 (§11.8), D11 and the `triton_attn` fix added (§4), and bitwise fusions on every class (§11.11).
 
 ### 11.13 After the step 0 panel (2026-10-14)
