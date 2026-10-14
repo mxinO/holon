@@ -7,7 +7,8 @@ CuTe DSL caches; recorded: the time until it serves (/health), the first chat co
 cache gained — FlashInfer's modules and the GGUF extension must gain nothing.
 
 Usage (from the repository root, inside Holon's .venv):
-  python bench/cold_start.py --gpu 2 --caches /tmp/caches <model>... [--out evidence/cold_start_<class>_<date>.json]
+  python bench/cold_start.py --gpu 2 --caches /tmp/caches <model>... [--flags "<serve flags of model 1>" ...]
+                             [--out evidence/cold_start_<class>_<date>.json]
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ import datetime
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -42,13 +44,13 @@ def request(port: int, path: str, body: dict | None = None, timeout: float = 5) 
         return json.loads(r.read())
 
 
-def start(model: str, gpu: int, caches: pathlib.Path, port: int, timeout: float) -> dict:
+def start(model: str, flags: str, gpu: int, caches: pathlib.Path, port: int, timeout: float) -> dict:
     shutil.rmtree(caches / "run", ignore_errors=True)
     before = watched(caches)
     env = os.environ | {"CUDA_VISIBLE_DEVICES": str(gpu), "FLASHINFER_WORKSPACE_BASE": str(caches / "fi"),
                         "XDG_CACHE_HOME": str(caches / "xdg"), "TRITON_CACHE_DIR": str(caches / "run" / "triton"),
                         "CUTE_DSL_CACHE_DIR": str(caches / "run" / "cute")}
-    command = [sys.executable, "-m", "holon", "serve", model, "--port", str(port)]
+    command = [sys.executable, "-m", "holon", "serve", model, "--port", str(port), *shlex.split(flags)]
     t0 = time.monotonic()
     proc = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
@@ -73,10 +75,11 @@ def start(model: str, gpu: int, caches: pathlib.Path, port: int, timeout: float)
         proc.terminate()
         log = proc.communicate(timeout=60)[0]
     after = watched(caches)
-    return {"model": model_id(model), "serving_s": round(ready, 1), "first_completion_s": round(first, 2),
+    return {"model": model_id(model), "flags": flags, "serving_s": round(ready, 1),
+            "first_completion_s": round(first, 2),
             "start_s": metrics.get("start_s"), "plan_id": metrics.get("plan_id"),
             "compiled": {k: len(after[k] - before[k]) for k in after},
-            "log": [line for line in log.splitlines() if line.startswith("holon:")]}
+            "log": [line.replace(f"{ROOT}/", "") for line in log.splitlines() if line.startswith("holon:")]}
 
 
 def main() -> None:
@@ -86,13 +89,14 @@ def main() -> None:
     ap.add_argument("--caches", type=pathlib.Path, required=True)
     ap.add_argument("--port", type=int, default=8123)
     ap.add_argument("--timeout", type=float, default=1800)
+    ap.add_argument("--flags", nargs="*", default=[], help="`holon serve` flags per model, in order")
     ap.add_argument("--out", type=pathlib.Path)
     a = ap.parse_args()
     from holon.core.supervisor import Policy
 
     rows = []
-    for model in a.models:
-        rows.append(start(model, a.gpu, a.caches, a.port, a.timeout))
+    for model, flags in zip(a.models, a.flags + [""] * (len(a.models) - len(a.flags)), strict=True):
+        rows.append(start(model, flags, a.gpu, a.caches, a.port, a.timeout))
         print(json.dumps(rows[-1]), flush=True)
     record = {"question": "What does a cold `holon serve` compile, and how long until it serves (D1)?",
               "date": datetime.date.today().isoformat(), "commit": git("rev-parse", "HEAD"),

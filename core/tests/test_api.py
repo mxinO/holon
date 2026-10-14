@@ -150,3 +150,25 @@ def test_api_imports_without_torch_or_numpy():
 def test_dataclass_replace_on_ref_is_not_supported():
     with pytest.raises(TypeError):
         dataclasses.replace(Ref("a@1", x=1), name="b")
+
+
+LISTING = "abi {}\nprotocol Sampler() required, implemented by plugins\n  sample(self)\nconst X = 1\n"
+
+
+@pytest.mark.parametrize("old, new, error", [
+    ("0.1", LISTING.format("0.1.1") + "const Y = 2\n", None),                      # an addition: minor
+    ("0.1", LISTING.format("0.1") + "const Y = 2\n", "needs a minor"),
+    ("1.0", LISTING.format("1.1") + "const Y = 2\n", None),
+    ("1.0", LISTING.format("1.1").replace("const X = 1\n", ""), "needs a major"),      # a removal: major
+    ("0.1", LISTING.format("0.2").replace("const X = 1\n", ""), None),                 # (below 1.0: the minor number)
+    ("1.0", LISTING.format("1.1").replace("  sample(self)\n", "  sample(self)\n  seed(self)\n"),   # plugins lack it
+     "required plugin member"),
+    ("1.0", LISTING.format("2.0").replace("  sample(self)\n", "  sample(self)\n  seed(self)\n"), None),
+])
+def test_abi_listing_needs_the_right_bump(monkeypatch, old, new, error):
+    """`scripts/ci/check_abi.py`: what an ABI change requires of the version (release design §7)."""
+    monkeypatch.syspath_prepend(str(pathlib.Path(__file__).resolve().parents[2] / "scripts" / "ci"))
+    from check_abi import bump_error
+
+    why = bump_error(LISTING.format(old), new)
+    assert why is None if error is None else error in why

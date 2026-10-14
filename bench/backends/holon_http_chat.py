@@ -12,6 +12,7 @@ import statistics
 import sys
 
 from backends import http, text
+from backends.holon_http import served
 
 PACKAGES = ("torch", "triton", "flashinfer-python")
 TOOLS = [{"type": "function", "function": {"name": name, "description": f"{name} a file or command",
@@ -47,7 +48,7 @@ class Backend(http.Backend):
 
     def info(self) -> dict:
         gaps = sorted(g * 1e3 for g in self.gaps)
-        return {"config": {"flags": " ".join(self.flags)}, "max_event_gap_ms": {
+        return {"config": {"flags": " ".join(self.flags)}, "served": served(self.server), "max_event_gap_ms": {
             "streams": len(gaps), "p50": round(statistics.median(gaps), 1),
             "p99": round(gaps[int(0.99 * (len(gaps) - 1))], 1), "max": round(gaps[-1], 1)} if gaps else None}
 

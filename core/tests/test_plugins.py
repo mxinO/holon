@@ -1,4 +1,6 @@
 """Loader and builder error paths, using the installed std plugins."""
+import importlib.metadata
+
 import pytest
 import torch
 from holon.api import Ref, WeightMap, WeightRule
@@ -53,3 +55,16 @@ def test_map_name_rules_root_and_skip():
     assert map_name("model.visual.patch.weight", wm) is None
     with pytest.raises(PluginError, match="no weight rule"):
         map_name("model.unknown.weight", wm)
+
+
+def test_a_plugin_of_another_abi_cannot_load(tmp_path, monkeypatch):
+    """Its manifest fails at discovery as a PluginError (a deployment that cannot start: no retry helps)."""
+    (tmp_path / "other_abi").mkdir()
+    (tmp_path / "other_abi" / "__init__.py").write_text("")
+    (tmp_path / "other_abi" / "plugin.toml").write_text(
+        '[plugin]\nname="x"\nversion="1"\nentry="p:P"\nslot="unit"\nlicense="MIT"\ncore_abi=">=1.0,<2"\n')
+    monkeypatch.syspath_prepend(str(tmp_path))
+    entry = importlib.metadata.EntryPoint("x", "other_abi", "holon.plugins")
+    monkeypatch.setattr(importlib.metadata, "entry_points", lambda group: [entry])
+    with pytest.raises(PluginError, match="does not admit this core's plugin ABI"):
+        discover()

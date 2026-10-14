@@ -1,0 +1,83 @@
+{
+ "question": "What does a cold `holon serve` compile, and how long until it serves (D1)?",
+ "date": "2026-10-14",
+ "commit": "290f7ae1e2a884354e3ba23681dd41226a329c8a",
+ "gpu_class": "rtx-a5000",
+ "start_timeout_s": 600.0,
+ "command": "python bench/cold_start.py --gpu 2 --caches <dir> unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf Qwen/Qwen3-8B@b968826d9c46 unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf",
+ "method": "Native code comes from `holon prebuild`, run beforehand with the same cache variables (FLASHINFER_WORKSPACE_BASE = <caches>/fi, XDG_CACHE_HOME = <caches>/xdg). Per model, `holon serve` starts in a fresh process with empty Triton and CuTe DSL caches; recorded: the time until it serves (/health), the first chat completion's latency, and what each JIT cache gained \u2014 FlashInfer's modules and the GGUF extension must gain nothing.",
+ "results": [
+  {
+   "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf",
+   "flags": "",
+   "serving_s": 20.0,
+   "first_completion_s": 0.34,
+   "start_s": 14.041971687227488,
+   "plan_id": "sha256:f9a8adec787b22d03eea2178e2edb77b5bdf4c2043427e8dda4d890864fd23d8",
+   "compiled": {
+    "flashinfer": 0,
+    "ggml_cuda": 0,
+    "triton": 12,
+    "cute_dsl": 0
+   },
+   "log": [
+    "holon: no current lock for unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243 in plans: serving defaults",
+    "holon: engine ready, plan sha256:f9a8adec787b22d03eea2178e2edb77b5bdf4c2043427e8dda4d890864fd23d8"
+   ]
+  },
+  {
+   "model": "Qwen/Qwen3-8B@b968826d9c46",
+   "flags": "",
+   "serving_s": 20.0,
+   "first_completion_s": 0.83,
+   "start_s": 13.84979185089469,
+   "plan_id": "sha256:24ebfa92006cb5dcccf132af81445dbf584f1ad0282391a90d628ada816f69af",
+   "compiled": {
+    "flashinfer": 0,
+    "ggml_cuda": 0,
+    "triton": 12,
+    "cute_dsl": 0
+   },
+   "log": [
+    "holon: no current lock for Qwen/Qwen3-8B@f1add50ee1c6e469 in plans: serving defaults",
+    "holon: engine ready, plan sha256:24ebfa92006cb5dcccf132af81445dbf584f1ad0282391a90d628ada816f69af"
+   ]
+  },
+  {
+   "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf",
+   "flags": "--max-seqs 4 --max-step-tokens 2048 --plugin-options kv.format=q8_0 recurrent.checkpoints=4",
+   "serving_s": 31.0,
+   "first_completion_s": 1.47,
+   "start_s": 23.96945908665657,
+   "plan_id": "sha256:b1707b7e0dd6cdc310586cb4831731847d3f680aa31b537ec467a5f84b303356",
+   "compiled": {
+    "flashinfer": 0,
+    "ggml_cuda": 0,
+    "triton": 40,
+    "cute_dsl": 0
+   },
+   "log": [
+    "holon: no current lock for unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e in plans: serving defaults",
+    "holon: engine ready, plan sha256:b1707b7e0dd6cdc310586cb4831731847d3f680aa31b537ec467a5f84b303356"
+   ]
+  },
+  {
+   "model": "unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf",
+   "flags": "",
+   "serving_s": 69.0,
+   "first_completion_s": 0.3,
+   "start_s": 61.04932293668389,
+   "plan_id": "sha256:b8f60b62c6ef5b7aa68190fcdc7bf64118a285e1d6695c8902f7a0725291d83a",
+   "compiled": {
+    "flashinfer": 0,
+    "ggml_cuda": 0,
+    "triton": 14,
+    "cute_dsl": 0
+   },
+   "log": [
+    "holon: no current lock for unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09 in plans: serving defaults",
+    "holon: engine ready, plan sha256:b8f60b62c6ef5b7aa68190fcdc7bf64118a285e1d6695c8902f7a0725291d83a"
+   ]
+  }
+ ]
+}

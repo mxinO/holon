@@ -33,8 +33,8 @@ def engine_flags(parser: argparse.ArgumentParser, given_only: bool = False) -> N
     arguments (they fall to a lock's settings), and `--max-model-len` also takes `auto`."""
     hints = typing.get_type_hints(EngineConfig)
     for f in dataclasses.fields(EngineConfig):
-        if f.name == "model":
-            continue
+        if f.name in ("model", "clamp_context") or (f.name == "kernel_preferences" and not given_only):
+            continue                                  # `holon serve` clamps; preferences come from locks
         flag, kind = "--" + f.name.replace("_", "-"), hints[f.name]
         default = argparse.SUPPRESS if given_only else [] if typing.get_origin(kind) is dict else f.default
         if kind is bool:

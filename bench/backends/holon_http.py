@@ -21,7 +21,7 @@ class Backend(http.Backend):
         super().__init__(server, "/v1/completions", _body, _parse)
 
     def info(self) -> dict:
-        return {"config": {"flags": " ".join(self.flags)}}
+        return {"config": {"flags": " ".join(self.flags)}, "served": served(self.server)}
 
     def stats(self) -> dict[str, int]:
         """The engine's counters (/metrics): prefix hits, and real drafts and verify rows by drafts accepted; the
@@ -29,6 +29,12 @@ class Backend(http.Backend):
         metrics = self.server.get("/metrics")
         return {k: v for k, v in metrics.items() if k == "prefix_tokens_saved" or k.startswith("spec_")} | {
             "frontend_cpu_ms": round(self.server.cpu_ms())}
+
+
+def served(server: http.Server) -> dict:
+    """What `holon serve` runs: the plan, the lock it started from (flags over it) and how the plan differs."""
+    metrics = server.get("/metrics")
+    return {key: metrics.get(key) for key in ("plan_id", "lock", "diff")}
 
 
 def _body(prompt: list[int], max_tokens: int) -> dict:

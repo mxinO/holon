@@ -20,7 +20,7 @@ import pathlib
 import sys
 
 import torch
-from holon.api import Lock
+from holon.api import Lock, parse_versioned
 from holon.core import plans, platform
 from holon.core.assembly import resolve_model
 from holon.core.cli import engine_config, engine_flags
@@ -51,11 +51,10 @@ def _start(a: argparse.Namespace, config: EngineConfig) -> tuple[Lock | None, di
     (`--new-model` asserts there is none) —, the kernel pins it implies here, and the model id to write under: the
     history of the checkpoint's build if there is one (whatever name the file has here), else its identity."""
     plugins = PluginSet(discover())
-    identity = resolve_model(plugins, config)[0].identity()
-    found = plans.model_ids(a.plans, identity.rpartition("@")[2])
-    if len(found) > 1:
-        raise SystemExit(f"{identity}: its build has histories under several model ids: {found}")
-    model_id = found[0] if found else identity
+    try:
+        model_id = plans.history_id(a.plans, resolve_model(plugins, config)[0].identity())
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
     fp = platform.fingerprint(torch.device(config.device))
     if a.cls:
         start = plans.newest(a.plans, model_id, a.cls)
@@ -78,7 +77,12 @@ def _start(a: argparse.Namespace, config: EngineConfig) -> tuple[Lock | None, di
 
 
 def _pins(lock: Lock) -> dict[str, str]:
-    return plans.lock_overrides(lock)["kernel_preferences"]       # the tools rebuild them as hard pins
+    """The lock's kernel choices, which the tools rebuild as hard pins (an op bound to two providers stays unpinned)."""
+    pins = plans.lock_overrides(lock)["kernel_preferences"]
+    ops = {parse_versioned(key.rpartition("/")[2])[0] for key in lock.plan.sites}
+    if split := sorted(ops - pins.keys()):
+        print(f"{lock.plan.model_id}: {split} bound to several providers; left to default priority")
+    return pins
 
 
 def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig, model_id: str) -> int:

@@ -1,7 +1,6 @@
 abi 0.1
 
 # holon.api
-const ABI = '0.1'
 dataclass Abort
   rid: str
 dataclass AuxSpec frozen

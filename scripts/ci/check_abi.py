@@ -102,7 +102,7 @@ def contracts() -> list[str]:
 def listing() -> str:
     lines = [f"abi {api.ABI}", "", "# holon.api"]
     for name in sorted(api.__all__):
-        if getattr(obj := getattr(api, name), "__module__", "") != hooks.__name__:      # hooks: listed below
+        if name != "ABI" and getattr(obj := getattr(api, name), "__module__", "") != hooks.__name__:  # hooks: below
             lines += render(name, obj)
     lines += ["", "# holon.api.hooks (optional)"]
     for name, obj in sorted(vars(hooks).items()):
@@ -137,31 +137,50 @@ def hook_names() -> list[str]:
     return out
 
 
-def _version(text: str) -> tuple[int, ...]:
-    return (*map(int, text.split(".")), 0, 0)[:3]
+def _version(listing: str) -> tuple[int, ...]:
+    return (*map(int, listing.split("\n", 1)[0].split()[1].split(".")), 0, 0)[:3]
+
+
+def _entries(listing: str) -> set[tuple[str, str]]:
+    """Each line of a listing with the item it belongs to (its last unindented line)."""
+    out, head = set(), ""
+    for line in listing.splitlines()[1:]:
+        head = line if not line.startswith("  ") else head
+        out.add((head, line))
+    return out
 
 
 def bump_error(old: str, new: str) -> str | None:
-    """Why `new` may not replace the committed listing `old`, or None."""
-    was, now = _version(old.split("\n", 1)[0].split()[1]), _version(api.ABI)
-    removed = set(old.splitlines()[1:]) - set(new.splitlines()[1:])
-    major = (now[0] > was[0]) or (was[0] == 0 and now[:2] > was[:2])
-    if removed and not major:
-        return f"a removal or change needs a major ABI bump (from {old.split()[1]}): {sorted(removed)[:5]}"
-    if not removed and now <= was:
+    """Why the listing `new` may not replace the committed `old` under its version, or None. A removal or change, or a
+    member added to a required Protocol plugins implement (plugins of the old ABI lack it), needs a major bump (below
+    1.0: the minor number, as manifests' ranges read it); any other addition a minor one."""
+    was, now, before, after = _version(old), _version(new), _entries(old), _entries(new)
+    breaking = sorted(line for _, line in before - after) + sorted(
+        line for head, line in after - before if line != head and "required, implemented by plugins" in head
+        and (head, head) in before)
+    major = now[0] > was[0] or (was[0] == 0 and now[:2] > was[:2])
+    if breaking and not major:
+        return f"a removal, change or required plugin member needs a major ABI bump (from {old.split()[1]}): " \
+               f"{breaking[:5]}"
+    if not breaking and now <= was:
         return f"an addition needs a minor ABI bump (from {old.split()[1]})"
     return None
 
 
-new = listing()
-msgs = hook_names()
-if "--write" in sys.argv:
-    if LISTING.exists() and LISTING.read_text() != new and (why := bump_error(LISTING.read_text(), new)):
-        fail([why], "ABI listing written")
-    LISTING.write_text(new)
-elif not LISTING.exists() or LISTING.read_text() != new:
-    old = LISTING.read_text().splitlines() if LISTING.exists() else []
-    msgs += [f"- {line}" for line in old if line not in new.splitlines()][:20]
-    msgs += [f"+ {line}" for line in new.splitlines() if line not in old][:20]
-    msgs.append("the ABI changed: bump holon.api.ABI and regenerate with `python scripts/ci/check_abi.py --write`")
-fail(msgs, f"ABI {api.ABI} listing (core/abi.txt) and hook names")
+def main() -> None:
+    new = listing()
+    msgs = hook_names()
+    if "--write" in sys.argv:
+        if LISTING.exists() and LISTING.read_text() != new and (why := bump_error(LISTING.read_text(), new)):
+            fail([why], "ABI listing written")
+        LISTING.write_text(new)
+    elif not LISTING.exists() or LISTING.read_text() != new:
+        old = LISTING.read_text().splitlines() if LISTING.exists() else []
+        msgs += [f"- {line}" for line in old if line not in new.splitlines()][:20]
+        msgs += [f"+ {line}" for line in new.splitlines() if line not in old][:20]
+        msgs.append("the ABI changed: bump holon.api.ABI and regenerate with `python scripts/ci/check_abi.py --write`")
+    fail(msgs, f"ABI {api.ABI} listing (core/abi.txt) and hook names")
+
+
+if __name__ == "__main__":
+    main()

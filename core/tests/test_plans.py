@@ -106,7 +106,9 @@ def test_the_clamp_serves_what_the_pools_hold_and_lock_pins_are_soft(tiny):
         Engine(cfg)
     engine = Engine(dataclasses.replace(cfg, clamp_context=True))
     assert (engine.cfg.max_model_len, engine.sched.max_model_len, cfg.max_model_len) == (32, 32, 64)
-    assert plans.plan_of(engine).engine["max_model_len"] == 32
+    plan = plans.plan_of(engine)          # a lock of the requested length: the clamp is the served plan's only diff
+    lock = locks.append(tiny / "plans", Lock(dataclasses.replace(plan, engine=plan.engine | {"max_model_len": 64})))
+    assert plans.served(engine, str(lock))["diff"] == ["engine:max_model_len: 64 -> 32"]
     kv = next(b for b in engine.state.bound if b.spec.name == "kv")       # past the clamp: only the null unit, where
     assert (engine.state.tables[kv.spec.group].host[:, 32 // 4:] == kv.pool.null).all()   # a verify row's overflow goes
     with pytest.raises(ValueError, match="no room under max_model_len 32"):
@@ -115,3 +117,41 @@ def test_the_clamp_serves_what_the_pools_hold_and_lock_pins_are_soft(tiny):
     assert len(out[0]) == 2                                        # stopped at the clamp ("length")
     with pytest.raises(PluginError, match="pinned provider 'kernels.fast'"):
         Engine(dataclasses.replace(cfg, clamp_context=True, kernels={"rmsnorm": "kernels.fast"}))
+
+
+UV_LOCK = """
+[[package]]
+name = "holonlm"
+version = "0.0.1"
+source = { editable = "core" }
+dependencies = [{ name = "torch", extra = ["cuda"] }]
+
+[[package]]
+name = "torch"
+version = "2.11.0"
+source = { registry = "https://example/cu130" }
+
+[package.optional-dependencies]
+cuda = [{ name = "nvrtc" }]
+
+[[package]]
+name = "nvrtc"
+version = "13.0.1"
+source = { registry = "https://example/simple" }
+
+[[package]]
+name = "pytest"
+version = "9.0"
+source = { registry = "https://example/simple" }
+"""
+
+
+def test_uv_lock_hashes_the_runtime_closure_extras_included(tmp_path):
+    def hashed(text):
+        (tmp_path / "uv.lock").write_text(text)
+        return plans.uv_lock(tmp_path / "uv.lock")
+
+    base = hashed(UV_LOCK)
+    assert hashed(UV_LOCK.replace('"9.0"', '"9.1"')) == base             # a dev-only pin moves no plan
+    assert hashed(UV_LOCK.replace('"13.0.1"', '"13.0.2"')) != base       # reached through torch's extra
+    assert plans.uv_lock(tmp_path / "absent.lock") == "none"

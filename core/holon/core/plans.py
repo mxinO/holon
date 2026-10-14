@@ -98,12 +98,15 @@ def uv_lock(path: pathlib.Path) -> str:
     if not path.is_file():
         return "none"
     packages = {p["name"]: p for p in tomllib.loads(path.read_text())["package"]}
-    seen, todo = set(), list(RUNTIME)
-    while todo:
-        if (name := todo.pop()) not in seen and name in packages:
-            seen.add(name)
-            todo += [d["name"] for d in packages[name].get("dependencies", [])]
-    return canonical_hash(sorted([n, packages[n].get("version", ""), packages[n]["source"]] for n in seen))
+    seen, todo = set(), [{"name": name} for name in RUNTIME]
+    while todo:                      # (package, extras) pairs: torch reaches the CUDA libraries through extras
+        dep = todo.pop()
+        if (key := (dep["name"], tuple(dep.get("extra", ())))) not in seen and dep["name"] in packages:
+            seen.add(key)
+            package = packages[dep["name"]]
+            todo += package.get("dependencies", [])
+            todo += [d for e in key[1] for d in package.get("optional-dependencies", {}).get(e, [])]
+    return canonical_hash(sorted({(n, packages[n].get("version", ""), str(packages[n]["source"])) for n, _ in seen}))
 
 
 def diff(a: Plan, b: Plan) -> dict[str, tuple[Any, Any]]:
@@ -123,10 +126,13 @@ def diff(a: Plan, b: Plan) -> dict[str, tuple[Any, Any]]:
 def served(engine: Any, lock: str | None) -> dict[str, Any]:
     """What an engine process reports once ready: its plan id and, started from `lock`, that lock and how the plan
     differs from it (planned under the lock's model id and commit, so only real differences show)."""
-    if lock is None:
-        return {"plan_id": plan_of(engine).plan_id, "lock": None, "diff": []}
-    want = read(lock).plan
-    plan = plan_of(engine, want.model_id, want.commit)
+    try:
+        if lock is None:
+            return {"plan_id": plan_of(engine).plan_id, "lock": None, "diff": []}
+        want = read(lock).plan
+        plan = plan_of(engine, want.model_id, want.commit)
+    except Exception as e:  # noqa: BLE001 — a report never stops serving
+        return {"plan_id": None, "lock": lock, "diff": [f"plan not computed: {type(e).__name__}: {e}"]}
     return {"plan_id": plan.plan_id, "lock": str(lock), "diff": [
         f"{k}: {old} -> {new}" if k.startswith("engine:") else k for k, (old, new) in diff(want, plan).items()]}
 
@@ -187,18 +193,24 @@ def model_ids(plans: str | pathlib.Path, build: str | None = None) -> list[str]:
     """The model ids with a lock history under `plans` (`<model_id>/<gpu>/<toolchain>/<n>.lock`); with `build`, those
     of that checkpoint build (`<name>@<build>`, whatever name its file was found under)."""
     root = pathlib.Path(plans)
-    ids = {p.relative_to(root).parents[2].as_posix() for p in root.rglob("*.lock")}
+    locks = (p.relative_to(root) for p in root.rglob("*.lock"))
+    ids = {p.parents[2].as_posix() for p in locks if len(p.parts) > 3}
     return sorted(i for i in ids if build is None or i.endswith(f"@{build}"))
+
+
+def history_id(plans: str | pathlib.Path, identity: str) -> str:
+    """The model id the checkpoint `identity` (`<name>@<build>`) has lock histories under, found by its build alone —
+    the same file downloaded elsewhere or renamed finds them —, else `identity` (a model without locks yet)."""
+    found = model_ids(plans, identity.rpartition("@")[2])
+    if len(found) > 1:
+        raise ValueError(f"{plans}: one checkpoint build has lock histories under several model ids: {found}")
+    return found[0] if found else identity
 
 
 def find(plans: str | pathlib.Path, identity: str, fp: Fingerprint, current: Mapping[str, str] | None = None
          ) -> tuple[Lock, bool, pathlib.Path] | None:
-    """The lock the checkpoint `identity` starts from (`nearest_class`), found by its build alone: the same file
-    downloaded elsewhere or renamed finds it. The engine and the tools share this lookup."""
-    found = model_ids(plans, identity.rpartition("@")[2])
-    if len(found) > 1:
-        raise ValueError(f"{plans}: one checkpoint build has lock histories under several model ids: {found}")
-    return nearest_class(plans, found[0], fp, current) if found else None
+    """The lock the checkpoint `identity` starts from: `nearest_class` of its history (`history_id`)."""
+    return nearest_class(plans, history_id(plans, identity), fp, current)
 
 
 def nearest_class(plans: str | pathlib.Path, model_id: str, fp: Fingerprint,
