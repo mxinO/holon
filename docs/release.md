@@ -894,3 +894,5 @@ After the fixes the full GPU suite (RTX A5000 ×2) gave 1037 passed and 55 skipp
 The listings changed again inside the branch (reformatted, contracts split). The ABI stays 0.1: no lock, release or
 main commit refers to it yet.
 
+
+**ABI bump policy (lead, 2026-10-14; scope reviewer's round-2 minor):** M0.6's Gate A merges into `main` first. Steps 1–2 then rebase onto it: M0.6's four unit `adopt(self, ctx, name, q, index=None)` definitions are renamed `adopt_weights`, `AdoptsWeights` takes the `index` parameter, and the listings land on `main` at ABI 0.1 for the first time, so nothing is compared yet. M0.7 builds on that `main`; its removal of `SchedulePolicy.mix_phases` is one bump to 0.2 inside M0.7, and its single propagation covers the manifests' `core_abi` edit. Step 6 sets 1.0.
