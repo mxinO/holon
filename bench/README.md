@@ -17,6 +17,9 @@ Same GPU, same model, same requests; every engine in its own environment; client
 | `run.py` | orchestrator: ABAB rounds of fresh worker processes, summaries, evidence record |
 | `setup_baselines.sh` | pinned baseline checkouts, builds and venvs under `bench/.envs/` (gitignored) |
 | `decode_kernels.py` | E2's per-kernel decode step micro-benchmark (separate from the harness) |
+| `step_profile.py` | M0.7 step 0: a deployment's step time by kernel category per row kind (prefill, decode, verify; graphed and eager), verify steps by region, D1's timing ratios with the GPU clocks, the matmul calls and weight bytes per step |
+| `qmm_sweep.py` | M0.7 step 0: the ggml matmul's time per call against rows (mmvq, mmq with and without the f32 → bf16 cast) for every qlinear shape and activation mode of the given locks, graph-timed on real weights; a read-only stream |
+| `clock_check.py` | the clock screen of a desktop before its evidence is recorded: SM clock percentiles and slowdown share under sustained decode |
 
 `workloads.py`, `driver.py` and `worker.py` are stdlib-only so they run unchanged in every engine's environment. The
 HTTP backends fit the same protocol: `add` posts a streaming request, `step` returns the tokens that arrived.
@@ -48,11 +51,19 @@ rejects temperature 0, so it samples at 1e-5 (argmax in practice); the others ar
   the tokens the engine generated) + a tool result (log-normal, median 256) and sometimes a user message, released
   after a tool latency (exponential, mean 0.5 s); short generations (24–192 tokens). 126 requests, contexts up to
   ~6.1k tokens, long shared prefixes.
+- **long_prompt**: three streams decoding from t=0 (prompt 256, output 1024), then a 30,000-token prompt (output 32)
+  at t = 2 s: how long the streams stall behind its prefill (their max inter-token gap), and its TTFT behind them.
 
 ## Metrics and method
 
 - **TTFT** = first token − release (arrival time, or the previous turn's last token + gap); **TPOT** = (last − first)
   / (tokens − 1); p50/p90/p99 pooled over rounds. **Throughput** = output tokens / (last token − first release).
+- **Max inter-token gap** = a request's largest time between two deliveries after its first token (a verify step's
+  tokens are one delivery); p50 / p99 / max over requests.
+- **Paired TTFT** = the median, over (round, session, turn), of a backend's TTFT over the first backend's in the same
+  round; per-round medians kept.
+- **Arms**: `--backends holon holon@mixed --arm mixed='<flags>'` runs Holon twice per round, the arm with those
+  engine flags over the lock's; a label without `--arm` is an A/A arm.
 - **decode tok/s** = tokens / wall time over decode steps at peak batch (steps returning no first token).
 - **CPU ms/step** (plan §3.4 item 3) = `time.process_time()` delta around `Backend.step()` on those decode steps.
   Run with `--blocking-sync`: the worker puts the CUDA primary context in blocking-sync mode (driver API, before

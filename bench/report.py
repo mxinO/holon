@@ -4,7 +4,8 @@ rendered from evidence, never copied by hand. Each table links its record; losse
 - `bars.py` records: per metric the gate statistic of Holon and of each llama.cpp build and their ratio; a ratio within
   2 sd of its per-round ratios of 1 is printed "≈"; one below the gate (0.8) is marked.
 - `run.py` records, the short form (the record holds p99s, throughput and KV tokens): per record and backend,
-  TTFT / TPOT p50 per trace; a backend that failed is "—" with its reason, one that failed some rounds says so.
+  TTFT / TPOT p50 and the max inter-token gap's p99 per trace (with the paired TTFT ratio to the first backend
+  where the record has it); a backend that failed is "—" with its reason, one that failed some rounds says so.
 
     python bench/report.py evidence/<record>.json ... [--relative-to docs]
 """
@@ -55,9 +56,11 @@ def bars(records: list[tuple[str, dict]]) -> str:
 
 
 def serving(records: list[tuple[str, dict]]) -> str:
-    """One table over the records: a row per (record, backend), a column per trace (TTFT / TPOT p50 ms)."""
+    """One table over the records: a row per (record, backend), a column per trace (TTFT / TPOT p50, max gap p99 ms;
+    "×r": the paired TTFT ratio to the record's first backend)."""
     traces = list(dict.fromkeys(t for _, r in records for t in r["traces_sha256"]))
-    lines = ["| record | model | GPU | backend | " + " | ".join(f"{t}: TTFT / TPOT p50 ms" for t in traces) + " |",
+    lines = ["| record | model | GPU | backend | "
+             + " | ".join(f"{t}: TTFT / TPOT p50, gap p99 ms" for t in traces) + " |",
              "|" + "---|" * (4 + len(traces))]
     for link, r in records:
         failed = {run["backend"]: run["error"].replace("|", "\\|") for run in r["runs"] if "error" in run}
@@ -69,7 +72,13 @@ def serving(records: list[tuple[str, dict]]) -> str:
             cells = []
             for t in traces:
                 s = r["summary"].get(t, {}).get(b)
-                cells.append(f"{s['ttft_ms']['p50']} / {s['tpot_ms']['p50']}" if s else "—")
+                if not s:
+                    cells.append("—")
+                    continue
+                gap = s.get("max_gap_ms", {}).get("p99")
+                paired = s.get("paired_ttft", {}).get("median")
+                cells.append(f"{s['ttft_ms']['p50']} / {s['tpot_ms']['p50']}, {'—' if gap is None else gap}"
+                             + ("" if paired is None else f" (×{paired:.2f})"))
             if not done:
                 cells = [f"— ({failed.get(b, 'not run')})"] + [""] * (len(traces) - 1)
             lines.append(f"| [{r['workload']}]({link}) | {r['model']} | {r['gpu_class']} | {label} | "

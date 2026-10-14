@@ -48,6 +48,12 @@ def decode(batch: int, prompt: int, output: int) -> list[dict]:
     return [{"id": i, "arrival": 0.0, "system": 0, "turns": [turn(prompt, output)]} for i in range(batch)]
 
 
+def long_prompt(decoders: int, prompt: int, output: int, long: int, at: float) -> list[dict]:
+    """`decoders` streams decoding from t=0, then one `long`-token prompt arriving at `at` s: how long the streams
+    stall behind its prefill (their max inter-token gap) and the long prompt's TTFT behind them."""
+    return decode(decoders, prompt, output) + [{"id": decoders, "arrival": at, "system": 0, "turns": [turn(long, 32)]}]
+
+
 def _lognormal(rng: random.Random, median: float, sigma: float, lo: int, hi: int) -> int:
     return min(hi, max(lo, round(rng.lognormvariate(math.log(median), sigma))))
 
@@ -105,6 +111,8 @@ def main() -> None:
     traces = {f"decode_b{b}": decode(b, args.decode_prompt, args.decode_output) for b in (1, 8, 64, 256)}
     traces["sharegpt"] = sharegpt(200, 2.0, args.seed)
     traces["agent"] = agent(24, 0.2, args.seed)
+    # Three streams fit every lock (max_seqs >= 4); 30k tokens fit a 32k context (M0.5's 36 s stall, M0.7 D1).
+    traces["long_prompt"] = long_prompt(3, 256, 1024, 30000, 2.0)
     for name, sessions in traces.items():
         write(out / f"{name}.jsonl", sessions)
         turns = sum(len(s["turns"]) for s in sessions)

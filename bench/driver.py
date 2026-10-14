@@ -2,7 +2,9 @@
 
 The driver owns the clock: it releases requests at their arrival times (or `gap` after the turn they continue),
 calls `Backend.step()` while work is in flight, and timestamps every token when `step()` hands it back — so an
-engine that reports a token one step late (overlap scheduling) is charged for it, as a client would be.
+engine that reports a token one step late (overlap scheduling) is charged for it, as a client would be. A request's
+row keeps its first and last token times and its largest inter-token gap (between two steps that hand it tokens;
+tokens handed back together, a verify step's, are one delivery).
 """
 from __future__ import annotations
 
@@ -36,14 +38,15 @@ class Request:
     release: float                       # seconds since replay start
     first: float | None = None
     last: float | None = None
+    max_gap: float = 0.0                 # the largest gap between two deliveries after the first token
     generated: list[int] = dataclasses.field(default_factory=list)
 
     def row(self) -> list:
         return [self.sid, self.turn, len(self.prompt), self.output, len(self.generated),
-                round(self.release, 6), round(self.first, 6), round(self.last, 6)]
+                round(self.release, 6), round(self.first, 6), round(self.last, 6), round(self.max_gap, 6)]
 
 
-ROW = ["sid", "turn", "prompt", "output", "generated", "release", "first", "last"]
+ROW = ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap"]
 _rids = itertools.count()               # unique across the replays of one process (warmup included)
 
 
@@ -83,6 +86,8 @@ def replay(backend: Backend, sessions: list[dict], salt: str,
                 continue
             if r.first is None:
                 r.first, firsts = w1 - t0, firsts + 1
+            elif toks:
+                r.max_gap = max(r.max_gap, w1 - t0 - r.last)
             r.last = w1 - t0
             r.generated += toks
             if finished:
