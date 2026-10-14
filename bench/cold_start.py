@@ -102,7 +102,8 @@ def main() -> None:
               "date": datetime.date.today().isoformat(), "commit": git("rev-parse", "HEAD"),
               "gpu_class": gpu_class(a.gpu), "start_timeout_s": Policy().start_timeout,
               "command": f"python bench/cold_start.py --gpu {a.gpu} --caches <dir> "
-                         + " ".join(model_id(m) for m in a.models),
+                         + " ".join(model_id(m) for m in a.models)
+                         + (" --flags " + " ".join(shlex.quote(f) for f in a.flags) if a.flags else ""),
               "method": __doc__.split("\n\n")[1].replace("\n", " "), "results": rows}
     if a.out:
         a.out.write_text(json.dumps(record, indent=1) + "\n")

@@ -625,3 +625,213 @@ state manager; the floor is Σ ceil(r / page) over the profile's rows (D2).
 | C-m6: README omissions | legibility result, models without locks, speculation off (D8) |
 | C-m7: carried CI items | closed or deferred in the release status; CPU-only Actions with publishing (§8, step 10) |
 | C-m8: core classifying option keys | `plugin_options` wholesale (D2) |
+
+## 13. As built (steps 1–2)
+
+Branch commits 55e30e5 (step 1), 290f7ae (step 2), 7eeb46a (review round 1), and the commits after them. The design
+above is unchanged; what follows records results, deviations and decisions.
+
+### 13.1 Step 1 — packaging (D1)
+
+- **Environment.** The root project depends on the three runtime distributions and builds an empty wheel
+  (`bypass-selection`). `[tool.uv]` has `default-groups = []`, `python-preference = "only-managed"` and one
+  environment (Linux x86-64). `.python-version` is 3.12 and every distribution requires `>=3.12,<3.13`. `uv.lock` holds
+  113 packages.
+  - **Pins.** torch 2.11.0+cu130 (from the cu130 index, `explicit`), Triton 3.6.0, FlashInfer 0.6.12, xgrammar
+    0.2.8 and **transformers 5.6.2** (released; the old venv ran 5.6.0.dev0).
+  - **Version changes from the old venv.** These were floating, now locked: numpy 2.5.4, msgspec 0.22.0, fastapi
+    0.143.0, uvicorn 0.54.0, safetensors 0.8.0, huggingface-hub 1.33.0 and nvidia-cutlass-dsl 4.8.0 (was 4.5.2).
+    xgrammar was 0.2.3 in the old venv even though plugins declared 0.2.8.
+  - **Extra nvcc.** FlashInfer's dependency `cuda-tile[tileiras]` pulls a pip `nvidia-cuda-nvcc` 13.2. It is unused:
+    FlashInfer's JIT runs the toolkit's nvcc 13.0.
+  - **The GDN L0 yardstick.** `plugins/tests/test_gdn_kernels.py` was pinned to 5.6.0.dev0, because its 2× bound is
+    set against HF's torch path. 5.6.2 keeps that path: `l2norm` and the recurrent function are identical, and the
+    chunked function only drops a mask the tril'd decay mask already applies (diffed). The L0 file passes at 5.6.2
+    (56 passed), so its pin now reads 5.6.2. The milestone skill's "pinned to 5.6.0.dev0" line is outside this tree.
+  - **The `dev` group** adds the test-only plugins, the judge, the tools, scipy (statistical tests) and jsonschema
+    (`bench/conformance.py`).
+- **Declared dependencies.** `manifest-deps` (`scripts/ci/check_manifest_deps.py`, in `run_all.sh`) scans each
+  distribution's imports and each manifest's `[dependencies] python`. Against the old metadata it fails on every core
+  import, so it bites. It found these undeclared imports, now declared:
+  - core: torch, numpy, msgspec, pyzmq;
+  - std: gguf, safetensors, **transformers** (the GGUF tokenizer — plan §1's "judge/test only" is the drift, corrected
+    in step 6);
+  - plugins: FlashInfer, Triton, transformers (the models' manifests list it), fastapi/uvicorn and xgrammar (the
+    `http` / `grammar` extras are gone);
+  - testing: safetensors, transformers;
+  - judge: transformers, safetensors, huggingface-hub, accelerate, xgrammar, pandas and pyarrow (the constrained
+    check).
+
+  `run_all.sh` also runs `uv lock --check`.
+- **`holon` console script** (`holon.core.cli:main`) with `serve` and `prebuild`.
+- **`holon prebuild [--sm N …]`.** It reads every installed manifest's new `[build] module` and runs
+  `python -m <package>.<module> --sm N` once per (plugin, SM). The SMs come from `holon.core.platform.visible_sms()`
+  unless given. The core resolves no cache variable.
+  - **The module is relative to the plugin's package**, like `entry`.
+  - **Deviation from the brief's wording:** `FLASHINFER_CUDA_ARCH_LIST` is set by FlashInfer's build module in its
+    own process (`kernels/flashinfer/prebuild.py`: 8.6 / 8.9 / 12.0f), as D1 specifies. It is not set by the core
+    command, which names no plugin's variables.
+  - **FlashInfer's module** builds every module the plugin can select: FA2 prefill for q ∈ {bf16, fp16}, KV ∈ {q, e4m3
+    from sm_89}, head dims {64, 128, 256}, plus rope and silu_and_mul. That is 8 modules on sm_86 and 14 on sm_89 and
+    sm_120.
+  - **ggml_cuda's existing `prebuild` is its build module.** Its cache now follows `XDG_CACHE_HOME`, and `MAX_JOBS`
+    caps its jobs.
+  - **Bug found by the image build:** torch's extension loader read the GPUs for an arch list, so a host without a GPU
+    could not build. The fix sets `TORCH_CUDA_ARCH_LIST` to the target. It changes no binary: the torch module is C++
+    only.
+  - **The `--sm N` CLI of build modules is ABI** (design §4.1's manifest example now shows `[build]`).
+  - **On this host:** `holon prebuild` for sm_86 took 2 min 13 s (FlashInfer 47 s, ggml ≈ 85 s at `MAX_JOBS=24`).
+- **Dockerfile.** `FROM nvidia/cuda:13.0.3-devel-ubuntu24.04` pinned by digest, build-essential, uv 0.11.1 by digest,
+  the source from `git archive`, `uv sync --frozen` and `holon prebuild --sm 86 89 120`.
+  - Every cache is pinned to a user-independent path: uv's Python and cache, XDG (ggml), FlashInfer, Triton, CuTe DSL
+    and HF.
+  - **It builds** (`git archive … | docker build --build-arg MAX_JOBS=16 -`, no GPU used). The prebuild for three SMs
+    took 458 s, and the image is 14.5 GB. In the image, `holon prebuild --sm 86` finds everything built (0 s), and its
+    ggml cache key equals the host's. Nothing was pushed.
+- **AGENTS.md** Environment section now describes `uv sync --group dev` and the host requirements. The task-routed
+  AGENTS.md is deferred to step 4.
+- **Checks.**
+  - **Fresh venv, no system site-packages** (`uv sync --group dev`): the CPU suite passes (586 passed, 482 GPU-only
+    skipped).
+  - **A user's `uv sync --frozen`** installs holon-workspace, holonlm, holonlm-std and holonlm-plugins only: no
+    holonlm-testing, pytest or scipy. Its plugin set has no `testing.*`, and `hf` and `holon` are on its path.
+  - **Cold start** (`bench/cold_start.py`, `evidence/cold_start_rtx-a5000_2026-10-14.json`, RTX A5000). This was
+    `holon serve` after `holon prebuild`, with empty Triton and CuTe caches; no lock is current (§13.2), so defaults
+    applied, and the 27B ran with its lock's settings as flags. FlashInfer and ggml compiled **nothing**. Triton
+    compiled 12–40 kernels.
+
+    | model | serving after | engine start | first completion |
+    |---|---|---|---|
+    | Qwen3-8B Q4_K_M | 20 s (86 s with a cold page cache, an earlier run) | 14 s | 0.34 s |
+    | Qwen3-8B bf16 | 20 s | 14 s | 0.83 s |
+    | Qwen3.8-27B UD-IQ3_S | 31 s | 24 s | 1.47 s |
+    | Qwen3-30B-A3B Q4_K_M | 69 s (17 GB read) | 61 s | 0.30 s |
+
+    Every start is ≤ 12% of `Policy.start_timeout` (600 s), which stays. Consumer cards are measured in step 10.
+  - **Finding: CuTe DSL compiles too.** FlashInfer 0.6.12's `rmsnorm` / `fused_add_rmsnorm` run CuTe DSL kernels
+    whenever `nvidia-cutlass-dsl` imports, and it is a hard dependency. They compile in memory at first use, about
+    0.3 s per norm shape, with no disk cache (measured; `CUTE_DSL_CACHE_DIR` stays empty).
+
+    So the strict reading of "a cold start compiles nothing but Triton" fails, by about 1 s per start. Making it hold
+    means FlashInfer's CUDA-JIT norm module (prebuildable), and that changes the norm kernels' numerics: an L0 check
+    and a propagation. This is left to the lead (§13.3).
+
+### 13.2 Step 2 — D2 and the ABI mechanism at 0.1
+
+- **Lookup.** `holon.core.plans.history_id(plans, identity)` finds the model id whose histories end in `@<build>`
+  (one at most), else the identity. `find` → `nearest_class` (newest per class, own class first, then the same GPU,
+  SM or toolchain; locks pinning other code are outdated). It returns the lock, `unverified` and its path.
+  - `holon serve` and the tools' `_start` share it. The tools write under the existing history's model id: `plan_of`
+    takes `model_id`.
+  - `check_locks.py` re-reads every lock (digest and `plan_id` recomputed by `canonical_hash`; the committed locks
+    are its golden vectors), rejects two model ids for one build, and keeps the no-`testing.*` rule. `--release` checks
+    that every newest lock pins this tree's sources; today every lock fails it, as expected until M0.7's propagation.
+- **Precedence** (`cli.serve_history`, `cli.layered`).
+  - Flags parse with no defaults (`given_only`), so only flags given override the lock. Dict flags merge per key, and
+    `key=` deletes a key. `--no-lock` serves defaults and flags; `--plans DIR` defaults to `plans/` of the tree holding
+    the core, with a loud warning if absent.
+  - The history is `[defaults + flags, lock + flags]`, and each entry carries its lock path (None for defaults).
+  - Lock pins become `EngineConfig.kernel_preferences` (`lock_overrides`). They are soft: a preferred provider that
+    cannot serve the site falls back to default priority, logged. `--kernels` stays hard. Both are unplanned
+    (`plans.NOT_PLANNED`).
+  - `lock_overrides` now leaves an op bound to two providers unpinned instead of raising. No committed lock has such
+    an op and no MTP lock exists yet; the tools print the ops they leave unpinned.
+  - `plugin_options` apply wholesale. A borrowed lock is used the same way.
+- **Memory.**
+  - **What stays the lock's.** `max_seqs` and `max_step_tokens` are taken as they are.
+  - **Requested length.** `EngineConfig.clamp_context` defaults to false and only `holon serve` sets it (it is no
+    longer a flag of the tools). The requested `max_model_len` is a flag's, else the lock's, else `auto`:
+    min(the model plugin's new optional `trained_context` hook, 32768). Qwen3 / Qwen3-MoE / Qwen3.5 read
+    `max_position_embeddings`, nested under `text_config` for Qwen3.5 HF configs: 40960 for Qwen3, 262144 for
+    Qwen3.8-27B, so 32768.
+  - **Pool floor.** With `clamp_context`, paged pools request Σ ceil(r / page) over `executor.profile_rows(cfg)`, the
+    profile's rows.
+  - **The clamp.** `Engine._clamp` sets `max_model_len` = min(requested, the smallest paged pool's tokens) after
+    `ledger.materialize` and before `reset_padding` / `capture_graphs`. It pushes the value into the engine's own
+    config copy (`Engine` now copies its config), `Scheduler.max_model_len` and `StateManager.limit` (block-table
+    columns past the clamp hold only the null unit). Build-time readers keep the requested value.
+  - **Tests.** The toy test shows a 64-token request that does not fit raising `OutOfUnits` without the clamp, and
+    being served at 32 with it. The served plan's only diff is `engine:max_model_len: 64 -> 32`. Mutations of the
+    clamp, the floor and the limit each fail it.
+- **Plan check.** `plan_of` (minus git), `unit_pin`, `diff`, `NOT_PLANNED` and `uv_lock` moved to `holon.core.plans`.
+  - **`uv_lock`** hashes the sorted (name, version, source) of the runtime distributions' closure in `uv.lock`, extras
+    included: torch reaches the CUDA libraries through them, a review finding. Dev-only pins move nothing.
+  - **What the engine process reports.** It computes its plan under the lock's model id and commit (`plans.served`,
+    which reports an error instead of failing a start). It sends `plan_id`, the lock path and the diff in its `ready`
+    frame. Each start logs them, and `/metrics` shows them (`Client.stats` adds the ready report).
+  - **Lock paths.** `--no-supervised` gets the lock path too. The bench's HTTP backends record what was served.
+- **Fallback.**
+  - The `failed` frame is (kind, error), kinds "plugin" / "memory" / "error" (`ipc.FAILED_KINDS`). A start failing
+    with `PluginError` or `OutOfUnits` rolls back (or gives up) at once; others after `rollback_crashes` tries.
+  - Manifest errors at discovery (another ABI) are `PluginError`.
+  - **Tests.** The rollback test checks the starts: 4 transient failures, then the good config, and one plugin-error
+    start before giving up.
+  - **Kept as it is:** the frontend keeps the newest entry's `plugin_options` after a rollback.
+- **ABI 0.1 mechanism.** `holon.api.ABI = "0.1"`.
+  - **`core_abi`** (e.g. `">=0.1,<0.2"`, `abi_allows`) is required in all 33 manifests, the test fixtures' included.
+    It is checked before the strict key parse. `slot_abi` is removed (design §4.1 / §4.5 updated, and §4.1's
+    entry-point text fixed).
+  - **Optional hooks.** The 22 hooks the core looks up by name, plus the new trained-context hook, are 23 small
+    optional Protocols in `holon.api.hooks`; the 23rd literal of the 23 in §7, `parent`, is allow-listed. The optional
+    members of `Mixer`, `Drafter`, `StateKind` and `DraftPolicy` moved there with their docs. Only `Rewindable` stays
+    exported from `holon.api` itself.
+  - **String vocabularies** are now declared: `FINISH_REASONS`, `ERROR_KINDS` and `KERNEL_PROPS` (now enforced by
+    `KernelSpec`).
+  - **`scripts/ci/check_abi.py`** (in `run_all.sh`) renders `core/abi.txt`, which covers:
+    - names and signatures, dataclass fields in order with types and defaults;
+    - Protocol members, required or optional, and who implements each Protocol;
+    - `EngineConfig`, the `BuildCtx.options` keys and the manifest schema;
+    - the vocabularies, the IPC frame and failed kinds;
+    - the `op.*` / `unit.*` contracts first-party plugins provide.
+
+    It fails on drift and on undeclared `hasattr` / `getattr` literals (a planted one fails). `--write` requires the
+    bump: an addition is minor; a removal, a change or a member added to a required plugin-implemented Protocol is
+    major (below 1.0, the minor number). The rule is tested. The listing was regenerated twice inside step 2, before
+    any lock.
+- **End to end on the GPU.** A current lock for Qwen3-8B Q4_K_M on rtx-a5000 was written by the tools into a
+  temporary directory only. The file was then served under another path and name (a `--local-dir`-style copy, so the
+  identity is `Qwen3-8B-Q4_K_M@120307ba529eb243`, not the hub's).
+  - `holon serve --plans <tmp> --plugin-options x.test=1` started from that lock, as newest history entry (config 1).
+  - The engine reported its `plan_id` with the only diff `engine:plugin_options: {} -> {'x.test': '1'}`, the flag
+    given. `/metrics` shows the same.
+- **Review.** One reviewer (correctness, architecture, tests) found 3 major, 4 minor and 3 nit issues in round 1, all
+  fixed in 7eeb46a:
+  - **Majors:** `uv_lock` ignored extras; `check_abi` blocked minor bumps after 1.0; a required plugin member passed
+    as minor.
+  - **Minors:** untested plan report and ABI discovery; a plan report could fail a start; bench backends now serving
+    from locks unrecorded; the tools' lookup duplicated.
+  - **Nits:** stray `.lock` files, clamp/preference flags in the tools, the parent's CUDA context (none, checked on
+    a GPU).
+
+  Round 2 reported one nit (the cold-start record's command omitted `--flags`), fixed. No findings remain.
+- **Tests added or changed.**
+  - `core/tests/test_plans.py`: the lookup / precedence / merge-delete / `auto` case (6 parameters), the clamp and
+    soft-pin engine test, and the `uv_lock` closure.
+  - `core/tests/test_api.py`: `core_abi` cases and the bump rule.
+  - `core/tests/test_plugins.py`: another ABI at discovery.
+  - `plugins/tests/test_supervisor.py`: the rollback test counts starts and covers the plugin-error kind; history
+    entries became tuples.
+  - The tools' tests moved to `plans.diff` and preferences. The duplicate `lock_overrides` test in core was removed.
+- **Suite at the end of step 2** (RTX A5000 ×2): `pytest core std plugins judge testing tools` gave 1031 passed and
+  55 skipped (models or GPUs absent here) in 14 min 50 s, in the uv venv; `scripts/ci/run_all.sh` is green. The
+  slowest test is still the rollback test (41 s, from 66 s: the plugin-error case gives up after one start).
+- **Core size:** 4134 code lines (3864 before: +270 against the ≈ 150 budgeted).
+  - About 40 of them moved from `holon_tools.locks` (`plan_of`, `diff`, `unit_pin`).
+  - About 55 are the hook Protocols §7 asks for.
+  - The rest are D2 (about 110), `holon prebuild` (about 15) and the ABI check in manifests (about 15).
+- **Not done here, as planned:** grammar in locks (M0.7's propagation); propagating or writing any lock; the plan §1 and
+  design §4.4 corrections (step 6).
+- **Every lock is outdated by this branch** (the core's and every manifest's `src` changed). Until M0.7's
+  propagation, `holon serve` finds no current lock and serves defaults, logged as "no current lock … serving defaults".
+  - **With defaults, the 27B does not start on a 24 GB card:** 64 sequences' recurrent state leave no room for KV, so
+    `OutOfUnits` gives up at once. It needs its lock's flags (`--max-seqs 4 --max-step-tokens 2048 --plugin-options
+    kv.format=q8_0 recurrent.checkpoints=4`).
+
+### 13.3 For the lead
+
+1. **CuTe DSL norms at a cold start (§13.1):** accept and document ≈ 0.3 s per norm shape as the one non-Triton
+   compile, or move FlashInfer's norms to the prebuildable CUDA-JIT module (a numerics change: L0, then M0.7's
+   propagation).
+2. **Core size:** +270 lines against ≈ 150 (breakdown above). The cap of 6000 is far off.
+3. **Lockless serving until M0.7:** models whose defaults do not fit (the 27B at `max_seqs` 64) need flags until
+   their locks are propagated. The supervisor reports it at once rather than after 4 × `start_timeout`.

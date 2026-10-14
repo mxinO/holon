@@ -4,7 +4,7 @@
  "commit": "290f7ae1e2a884354e3ba23681dd41226a329c8a",
  "gpu_class": "rtx-a5000",
  "start_timeout_s": 600.0,
- "command": "python bench/cold_start.py --gpu 2 --caches <dir> unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf Qwen/Qwen3-8B@b968826d9c46 unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf",
+ "command": "python bench/cold_start.py --gpu 2 --caches <dir> unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf Qwen/Qwen3-8B@b968826d9c46 unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf --flags '' '' '--max-seqs 4 --max-step-tokens 2048 --plugin-options kv.format=q8_0 recurrent.checkpoints=4' ''",
  "method": "Native code comes from `holon prebuild`, run beforehand with the same cache variables (FLASHINFER_WORKSPACE_BASE = <caches>/fi, XDG_CACHE_HOME = <caches>/xdg). Per model, `holon serve` starts in a fresh process with empty Triton and CuTe DSL caches; recorded: the time until it serves (/health), the first chat completion's latency, and what each JIT cache gained \u2014 FlashInfer's modules and the GGUF extension must gain nothing.",
  "results": [
   {

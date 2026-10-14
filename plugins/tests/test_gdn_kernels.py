@@ -46,9 +46,11 @@ DECODE_INIT = [True, False, True, True, False, True]
 DECODE_SLOTS = [0, UNITS - 1, 4, 2, 11, 6]
 RATIO = 2.0                                                    # × HF's bf16 error
 FLOOR = 2e-2                                                   # HF's bf16 error itself stays below this
-# The yardstick's transformers (the judge's): later versions l2-normalise q/k in f32, a smaller HF error against
-# which the same kernels measure ≈ 2.3× on mixed batches, so the ratio holds only for the version it was set on.
-HF_VERSION = "5.6.0.dev0"
+# The yardstick's transformers, the release in uv.lock: the bound was set at 5.6.0.dev0, whose torch path 5.6.2 keeps
+# (l2norm in bf16; the chunked path differs only by a mask the decay mask already applies). Later versions
+# l2-normalise q/k in f32, a smaller HF error against which the same kernels measure ≈ 2.3× on mixed batches, so the
+# ratio holds only for the torch path it was set on.
+HF_VERSION = "5.6.2"
 
 
 @pytest.fixture(autouse=True)
