@@ -1,0 +1,106 @@
+{
+ "workload": "whitespace_cap_cost",
+ "date": "2026-10-14",
+ "gpu_class": "rtx-a5000 (host CPU only)",
+ "xgrammar": "0.2.8",
+ "commit": "425e167",
+ "method": "S2-1's condition fired (whitespace runaways in step 5's conformance runs): what a cap of 16 or 32 costs, against no cap. xgrammar GrammarCompiler(max_threads=2, cache off) over the tool schema (strict) and json_object of bench/grammar_vetting.py, any_whitespace=True, max_whitespace_cnt=cap; fill: median per token over the pretty-printed samples of bench/grammar_vetting.py (one-off script, the same calls as grammar_vetting's row()).",
+ "results": [
+  {
+   "vocab": 151936,
+   "max_whitespace_cnt": null,
+   "constraint": "tool",
+   "compile_ms": 15.0,
+   "compiled_mb": 0.19,
+   "fill_us_p50": 3.9
+  },
+  {
+   "vocab": 151936,
+   "max_whitespace_cnt": null,
+   "constraint": "object",
+   "compile_ms": 15.0,
+   "compiled_mb": 0.14,
+   "fill_us_p50": 15.9
+  },
+  {
+   "vocab": 151936,
+   "max_whitespace_cnt": 16,
+   "constraint": "tool",
+   "compile_ms": 18.0,
+   "compiled_mb": 3.45,
+   "fill_us_p50": 47.1
+  },
+  {
+   "vocab": 151936,
+   "max_whitespace_cnt": 16,
+   "constraint": "object",
+   "compile_ms": 18.0,
+   "compiled_mb": 3.44,
+   "fill_us_p50": 62.6
+  },
+  {
+   "vocab": 151936,
+   "max_whitespace_cnt": 32,
+   "constraint": "tool",
+   "compile_ms": 26.0,
+   "compiled_mb": 6.78,
+   "fill_us_p50": 33.8
+  },
+  {
+   "vocab": 151936,
+   "max_whitespace_cnt": 32,
+   "constraint": "object",
+   "compile_ms": 25.0,
+   "compiled_mb": 6.77,
+   "fill_us_p50": 57.6
+  },
+  {
+   "vocab": 248320,
+   "max_whitespace_cnt": null,
+   "constraint": "tool",
+   "compile_ms": 29.0,
+   "compiled_mb": 0.27,
+   "fill_us_p50": 3.6
+  },
+  {
+   "vocab": 248320,
+   "max_whitespace_cnt": null,
+   "constraint": "object",
+   "compile_ms": 27.0,
+   "compiled_mb": 0.21,
+   "fill_us_p50": 14.9
+  },
+  {
+   "vocab": 248320,
+   "max_whitespace_cnt": 16,
+   "constraint": "tool",
+   "compile_ms": 38.0,
+   "compiled_mb": 6.72,
+   "fill_us_p50": 41.2
+  },
+  {
+   "vocab": 248320,
+   "max_whitespace_cnt": 16,
+   "constraint": "object",
+   "compile_ms": 35.0,
+   "compiled_mb": 6.71,
+   "fill_us_p50": 55.0
+  },
+  {
+   "vocab": 248320,
+   "max_whitespace_cnt": 32,
+   "constraint": "tool",
+   "compile_ms": 48.0,
+   "compiled_mb": 13.25,
+   "fill_us_p50": 38.5
+  },
+  {
+   "vocab": 248320,
+   "max_whitespace_cnt": 32,
+   "constraint": "object",
+   "compile_ms": 49.0,
+   "compiled_mb": 13.24,
+   "fill_us_p50": 57.1
+  }
+ ]
+}

@@ -20,7 +20,8 @@ Usage (from the repository root):
   python bench/conformance.py precompile --tokenizer <HF checkpoint> --jsb <data dir> --work <dir>
   python bench/conformance.py run --url http://127.0.0.1:8000 --jsb <data dir> --work <dir> --pass greedy \\
       [--sample 500] [--free] [--temperature 1 --seed 0] [--max-tokens 2048] [--concurrency 16] [--server-pid N]
-  python bench/conformance.py report --work <dir> --name <name> --gpu 0 --model <model id> --serve "<flags>"
+  python bench/conformance.py report --work <dir> --name <name> --gpu-class <class> --model <model id> \
+      --serve "<flags>"
 """
 from __future__ import annotations
 
@@ -232,6 +233,12 @@ def reason(message: str) -> str:
     return re.sub(r"\d+", "N", message).strip()[:120]
 
 
+def _whitespace_run(r: dict) -> bool:
+    """A truncated output that ran away in whitespace: it ends in a long run of it, or — as the frontend strips a text
+    run's trailing whitespace — most of its tokens left no text (under one character per four tokens)."""
+    return r["trailing_ws"] >= WHITESPACE_RUN or len(r.get("text", "").strip()) * 4 < (r.get("tokens") or 0)
+
+
 def summarize_pass(rows: list[dict], meta: dict) -> dict:
     ok = [r for r in rows if r.get("status") == 200]
     rejected = [r for r in rows if r.get("status") != 200]
@@ -245,7 +252,7 @@ def summarize_pass(rows: list[dict], meta: dict) -> dict:
                         for s in sorted({r.get("status") for r in rejected}, key=str)},
            "finish": {f: sum(r["finish"] == f for r in ok) for f in sorted({r["finish"] for r in ok}, key=str)},
            "truncated": len(truncated), "truncated_share": round(len(truncated) / len(ok), 4) if ok else None,
-           "truncated_whitespace_runs": sum(r["trailing_ws"] >= WHITESPACE_RUN for r in truncated),
+           "truncated_whitespace_runs": [r["id"] for r in truncated if _whitespace_run(r)],
            "valid": len(valid), "invalid": len(invalid), "validator_could_not_judge": len(unjudged),
            "conformance": round(len(valid) / (len(valid) + len(invalid)), 6) if valid or invalid else None,
            "invalid_examples": [{k: r.get(k) for k in ("id", "finish", "why")} for r in invalid[:20]],
@@ -286,7 +293,7 @@ def summarize_precompile(rows: list[dict]) -> dict:
 
 
 def report(args) -> None:
-    from run import ROOT, git, gpu_class
+    from run import ROOT, git
     work = args.work
     passes = {}
     for meta_path in sorted(work.glob("run_*.meta.json")):
@@ -306,7 +313,7 @@ def report(args) -> None:
                                               "points": round((share[p] - share["free"]) * 100, 2)}
     precompiled = {p.stem.split("_")[1]: summarize_precompile(_read(p))
                    for p in sorted(work.glob("precompile_*.jsonl"))}
-    date, gpu = datetime.date.today().isoformat(), gpu_class(args.gpu)
+    date, gpu = datetime.date.today().isoformat(), args.gpu_class
     record = {"workload": f"conformance_{args.name}", "date": date, "gpu_class": gpu, "model": args.model,
               "serve": args.serve, "commit": git("rev-parse", "HEAD"), "method": __doc__.split("Usage")[0].strip(),
               "prompt": {"system": SYSTEM, "user": "<the schema's JSON text>"}, "precompile": precompiled,
@@ -348,7 +355,7 @@ def main() -> None:
     rep = sub.choices["report"]
     for flag in ("--name", "--model", "--serve"):
         rep.add_argument(flag, required=True)
-    rep.add_argument("--gpu", type=int, default=0)
+    rep.add_argument("--gpu-class", required=True, help="where the passes ran (e.g. rtx-5080)")
     args = parser.parse_args()
     args.work.mkdir(parents=True, exist_ok=True)
     {"precompile": precompile, "run": lambda a: asyncio.run(run_pass(a)), "report": report}[args.command](args)

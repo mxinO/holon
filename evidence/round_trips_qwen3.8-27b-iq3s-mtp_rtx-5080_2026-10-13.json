@@ -1,0 +1,397 @@
+{
+ "workload": "round_trips_qwen3.8-27b-iq3s-mtp",
+ "date": "2026-10-13",
+ "gpu_class": "rtx-5080",
+ "served_model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+ "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf",
+ "command": "python bench/round_trips.py --name qwen3.8-27b-iq3s-mtp --max-tokens 1024 --model <the served checkpoint>",
+ "commit": "425e1677b5902baedfc1c9c507e26f1f14737886",
+ "method": "Tool-call round trips through every dialect of `frontends.http` on a served model (docs/m05-grammar.md \u00a71\nacceptance 2, step 5; evidence record).\n\nFor each dialect (OpenAI chat, Anthropic Messages, OpenAI Responses) and tool choice (auto, required / any, named):\nthe user asks for the weather, the model calls `get_weather` (strict: its arguments follow the schema), the call's\nresult goes back, and the model answers. Every request is sent twice, streamed and not, greedy: the streamed events\nreassembled must equal the non-streamed answer (ids aside) \u2014 the streaming parse equals the whole-text parse. Each\nrequest is sent three times: first streamed (cold: the server's first sight of the conversation and its constraint),\nthen streamed and whole, both on the prefix the first one cached \u2014 the same generation, so that a difference is the\nparser's (the cold one may differ: the GGUF kernels are not batch- or chunk-invariant). Per request: what was parsed\n(calls, text), the finish / stop reason, TTFT cold and warm. With `--model`, the render and\nconstraint build of each request (`pipeline.Chat`) is timed in this process with the model's bundle.",
+ "summary": {
+  "requests": 9,
+  "every_stream_equals_whole": true,
+  "called": 9,
+  "called_get_weather_valid": 9,
+  "answered": 9
+ },
+ "metrics": {
+  "waiting": 0,
+  "running": 0,
+  "preemptions": 0,
+  "prefix_tokens_saved": 21504,
+  "cached_blocks": 16,
+  "graphs": 54,
+  "spec_verify_steps": 1017,
+  "spec_verify_steps_graphed": 1017,
+  "spec_verify_steps_overlapped": 245,
+  "spec_drafted": 3015,
+  "spec_rows_k3_accepting_1": 124,
+  "spec_rows_k3_accepting_3": 573,
+  "spec_rows_k3_accepting_2": 246,
+  "spec_rows_k3_accepting_0": 62,
+  "grammar.xgrammar.drafts_refused": 0,
+  "crashes": 0,
+  "resubmitted": 0,
+  "quarantined": 0,
+  "rollbacks": 0,
+  "config": 0,
+  "restarts": 0,
+  "billing_headers_dropped": 0
+ },
+ "results": [
+  {
+   "dialect": "openai",
+   "choice": "named",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "The user is asking for the current weather in Paris in Celsius. I need to call the get_weather tool with city=\"Paris\" and unit=\"celsius\".",
+     "finish": "tool_calls"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 414.2,
+    "ttft_ms_warm": 62.5,
+    "total_ms": 605.4
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "It's currently 18\u00b0C in Paris with light rain.",
+     "reasoning": "The user asked for the weather in Paris in Celsius. The tool returned 18\u00b0C with light rain. I should provide a concise answer.",
+     "finish": "stop"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 171.7,
+    "ttft_ms_warm": 55.0,
+    "total_ms": 458.1
+   }
+  },
+  {
+   "dialect": "openai",
+   "choice": "required",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "The user is asking for the current weather in Paris in Celsius. I need to call the get_weather tool with city=\"Paris\" and unit=\"celsius\".",
+     "finish": "tool_calls"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 145.5,
+    "ttft_ms_warm": 53.0,
+    "total_ms": 604.6
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "It's currently 18\u00b0C in Paris with light rain.",
+     "reasoning": "The user asked for the weather in Paris in Celsius. The tool returned 18\u00b0C with light rain. I should provide a concise answer.",
+     "finish": "stop"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 53.4,
+    "ttft_ms_warm": 52.8,
+    "total_ms": 458.3
+   }
+  },
+  {
+   "dialect": "openai",
+   "choice": "auto",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "The user is asking for the current weather in Paris in Celsius. I need to call the get_weather tool with city=\"Paris\" and unit=\"celsius\".",
+     "finish": "tool_calls"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 52.6,
+    "ttft_ms_warm": 52.6,
+    "total_ms": 623.8
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "It's currently 18\u00b0C in Paris with light rain.",
+     "reasoning": "The user asked for the weather in Paris in Celsius. The tool returned 18\u00b0C with light rain. I should provide a concise answer.",
+     "finish": "stop"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 54.0,
+    "ttft_ms_warm": 53.7,
+    "total_ms": 458.6
+   }
+  },
+  {
+   "dialect": "openai",
+   "chat_build_ms_median": 0.62
+  },
+  {
+   "dialect": "anthropic",
+   "choice": "named",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "The user is asking for the current weather in Paris in Celsius. I should use the get_weather tool with city=\"Paris\" and unit=\"celsius\".",
+     "finish": "tool_use"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 249.4,
+    "ttft_ms_warm": 53.2,
+    "total_ms": 632.3
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "It's currently **18\u00b0C** in Paris, with **light rain**. You might want to bring an umbrella! \u2614",
+     "reasoning": "The tool returned the weather: 18 degrees Celsius, light rain. I'll report this to the user.",
+     "finish": "end_turn"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": false,
+    "ttft_ms_cold": 73.1,
+    "ttft_ms_warm": 79.7,
+    "total_ms": 594.2
+   }
+  },
+  {
+   "dialect": "anthropic",
+   "choice": "required",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "The user is asking for the current weather in Paris in Celsius. I should use the get_weather tool with city=\"Paris\" and unit=\"celsius\".",
+     "finish": "tool_use"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 159.9,
+    "ttft_ms_warm": 52.9,
+    "total_ms": 633.7
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "It's currently **18\u00b0C** in Paris, with **light rain**. You might want to bring an umbrella! \u2614",
+     "reasoning": "The tool returned the weather: 18 degrees Celsius, light rain. I'll report this to the user.",
+     "finish": "end_turn"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 53.0,
+    "ttft_ms_warm": 78.0,
+    "total_ms": 594.3
+   }
+  },
+  {
+   "dialect": "anthropic",
+   "choice": "auto",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "The user is asking for the current weather in Paris in Celsius. I should use the get_weather tool with city=\"Paris\" and unit=\"celsius\".",
+     "finish": "tool_use"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 77.3,
+    "ttft_ms_warm": 77.1,
+    "total_ms": 647.7
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "It's currently **18\u00b0C** in Paris, with **light rain**. You might want to bring an umbrella! \u2614",
+     "reasoning": "The tool returned the weather: 18 degrees Celsius, light rain. I'll report this to the user.",
+     "finish": "end_turn"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 78.3,
+    "ttft_ms_warm": 78.1,
+    "total_ms": 594.2
+   }
+  },
+  {
+   "dialect": "anthropic",
+   "chat_build_ms_median": 0.62
+  },
+  {
+   "dialect": "responses",
+   "choice": "named",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "The user is asking for the current weather in Paris in Celsius. I need to call the get_weather tool with city=\"Paris\" and unit=\"celsius\".",
+     "finish": "completed"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 67.4,
+    "ttft_ms_warm": 52.5,
+    "total_ms": 606.3
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "It's currently **18\u00b0C** in Paris, with **light rain**. You might want to bring an umbrella! \u2614",
+     "reasoning": "The tool returned the weather: 18 degrees Celsius, light rain. I'll report this to the user.",
+     "finish": "completed"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": false,
+    "ttft_ms_cold": 74.1,
+    "ttft_ms_warm": 54.2,
+    "total_ms": 571.6
+   }
+  },
+  {
+   "dialect": "responses",
+   "choice": "required",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "The user is asking for the current weather in Paris in Celsius. I need to call the get_weather tool with city=\"Paris\" and unit=\"celsius\".",
+     "finish": "completed"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 52.3,
+    "ttft_ms_warm": 52.6,
+    "total_ms": 606.5
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "It's currently **18\u00b0C** in Paris, with **light rain**. You might want to bring an umbrella! \u2614",
+     "reasoning": "The tool returned the weather: 18 degrees Celsius, light rain. I'll report this to the user.",
+     "finish": "completed"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 54.1,
+    "ttft_ms_warm": 54.1,
+    "total_ms": 571.1
+   }
+  },
+  {
+   "dialect": "responses",
+   "choice": "auto",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "The user is asking for the current weather in Paris in Celsius. I need to call the get_weather tool with city=\"Paris\" and unit=\"celsius\".",
+     "finish": "completed"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 53.0,
+    "ttft_ms_warm": 52.4,
+    "total_ms": 624.8
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "It's currently **18\u00b0C** in Paris, with **light rain**. You might want to bring an umbrella! \u2614",
+     "reasoning": "The tool returned the weather: 18 degrees Celsius, light rain. I'll report this to the user.",
+     "finish": "completed"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 54.2,
+    "ttft_ms_warm": 55.7,
+    "total_ms": 571.2
+   }
+  },
+  {
+   "dialect": "responses",
+   "chat_build_ms_median": 0.62
+  }
+ ]
+}

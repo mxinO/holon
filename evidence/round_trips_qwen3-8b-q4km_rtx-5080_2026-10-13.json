@@ -1,0 +1,389 @@
+{
+ "workload": "round_trips_qwen3-8b-q4km",
+ "date": "2026-10-13",
+ "gpu_class": "rtx-5080",
+ "served_model": "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M",
+ "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf",
+ "command": "python bench/round_trips.py --name qwen3-8b-q4km --max-tokens 1024 --model <the served checkpoint>",
+ "commit": "425e1677b5902baedfc1c9c507e26f1f14737886",
+ "method": "Tool-call round trips through every dialect of `frontends.http` on a served model (docs/m05-grammar.md \u00a71\nacceptance 2, step 5; evidence record).\n\nFor each dialect (OpenAI chat, Anthropic Messages, OpenAI Responses) and tool choice (auto, required / any, named):\nthe user asks for the weather, the model calls `get_weather` (strict: its arguments follow the schema), the call's\nresult goes back, and the model answers. Every request is sent twice, streamed and not, greedy: the streamed events\nreassembled must equal the non-streamed answer (ids aside) \u2014 the streaming parse equals the whole-text parse. Each\nrequest is sent three times: first streamed (cold: the server's first sight of the conversation and its constraint),\nthen streamed and whole, both on the prefix the first one cached \u2014 the same generation, so that a difference is the\nparser's (the cold one may differ: the GGUF kernels are not batch- or chunk-invariant). Per request: what was parsed\n(calls, text), the finish / stop reason, TTFT cold and warm. With `--model`, the render and\nconstraint build of each request (`pipeline.Chat`) is timed in this process with the model's bundle.",
+ "summary": {
+  "requests": 9,
+  "every_stream_equals_whole": true,
+  "called": 9,
+  "called_get_weather_valid": 9,
+  "answered": 9
+ },
+ "metrics": {
+  "waiting": 0,
+  "running": 0,
+  "preemptions": 0,
+  "prefix_tokens_saved": 15504,
+  "cached_blocks": 71,
+  "graphs": 30,
+  "grammar.xgrammar.drafts_refused": 0,
+  "crashes": 0,
+  "resubmitted": 0,
+  "quarantined": 0,
+  "rollbacks": 0,
+  "config": 0,
+  "restarts": 0,
+  "billing_headers_dropped": 0
+ },
+ "results": [
+  {
+   "dialect": "openai",
+   "choice": "named",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "Okay, the user is asking for the current weather in Paris using the tool, and they specified celsius. Let me check the available functions. There's get_weather which requires city and unit. The city here is Paris, and the unit should be celsius. So I need to call get_weather with those parameters. I should make sure the arguments are correctly formatted as JSON within the tool_call tags.",
+     "finish": "tool_calls"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 168.5,
+    "ttft_ms_warm": 15.3,
+    "total_ms": 762.2
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "The current weather in Paris is 18\u00b0C with light rain. Be sure to carry an umbrella! \ud83c\udf27\ufe0f",
+     "reasoning": "Okay, the user asked for the weather in Paris using Celsius. I called the get_weather function with city Paris and unit celsius. The response came back with temperature 18 and condition light rain. Now I need to present this information clearly. Let me check the units to make sure it's in Celsius as requested. The temperature is 18\u00b0C, and there's light rain. I should mention both the temperature and the condition. Keep the response straightforward and friendly. Maybe start with the current temperature, then the condition. Make sure to use the city name again to confirm the location. Alright, that should cover it.",
+     "finish": "stop"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 97.6,
+    "ttft_ms_warm": 14.9,
+    "total_ms": 1076.8
+   }
+  },
+  {
+   "dialect": "openai",
+   "choice": "required",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "Okay, the user is asking for the current weather in Paris using the tool, and they specified celsius. Let me check the available functions. There's get_weather which requires city and unit. The city here is Paris, and the unit should be celsius. So I need to call get_weather with those parameters. I should make sure the arguments are correctly formatted as JSON within the tool_call tags.",
+     "finish": "tool_calls"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 111.5,
+    "ttft_ms_warm": 14.6,
+    "total_ms": 761.4
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "The current weather in Paris is 18\u00b0C with light rain. Be sure to carry an umbrella! \ud83c\udf27\ufe0f",
+     "reasoning": "Okay, the user asked for the weather in Paris using Celsius. I called the get_weather function with city Paris and unit celsius. The response came back with temperature 18 and condition light rain. Now I need to present this information clearly. Let me check the units to make sure it's in Celsius as requested. The temperature is 18\u00b0C, and there's light rain. I should mention both the temperature and the condition. Keep the response straightforward and friendly. Maybe start with the current temperature, then the condition. Make sure to use the city name again to confirm the location. Alright, that should cover it.",
+     "finish": "stop"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 15.2,
+    "ttft_ms_warm": 14.9,
+    "total_ms": 1076.6
+   }
+  },
+  {
+   "dialect": "openai",
+   "choice": "auto",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "Okay, the user is asking for the current weather in Paris using the tool, and they specified celsius. Let me check the available functions. There's get_weather which requires city and unit. The city here is Paris, and the unit should be celsius. So I need to call get_weather with those parameters. I should make sure the arguments are correctly formatted as JSON within the tool_call tags.",
+     "finish": "tool_calls"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 14.4,
+    "ttft_ms_warm": 14.5,
+    "total_ms": 770.9
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "The current weather in Paris is 18\u00b0C with light rain. Be sure to carry an umbrella! \ud83c\udf27\ufe0f",
+     "reasoning": "Okay, the user asked for the weather in Paris using Celsius. I called the get_weather function with city Paris and unit celsius. The response came back with temperature 18 and condition light rain. Now I need to present this information clearly. Let me check the units to make sure it's in Celsius as requested. The temperature is 18\u00b0C, and there's light rain. I should mention both the temperature and the condition. Keep the response straightforward and friendly. Maybe start with the current temperature, then the condition. Make sure to use the city name again to confirm the location. Alright, that should cover it.",
+     "finish": "stop"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 14.7,
+    "ttft_ms_warm": 14.7,
+    "total_ms": 1077.1
+   }
+  },
+  {
+   "dialect": "openai",
+   "chat_build_ms_median": 0.39
+  },
+  {
+   "dialect": "anthropic",
+   "choice": "named",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "Okay, the user is asking for the current weather in Paris using the get_weather function, and they want it in Celsius. Let me check the tools provided. The get_weather function requires the city and unit parameters. The city here is Paris, and the unit should be \"celsius\" as specified. I need to make sure the arguments are correctly formatted in JSON. No other parameters are needed, so I'll call the function with just city and unit.",
+     "finish": "tool_use"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 114.5,
+    "ttft_ms_warm": 11.7,
+    "total_ms": 831.7
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "The current weather in Paris is **18\u00b0C** with **light rain**. \ud83c\udf27\ufe0f Let me know if you need further details!",
+     "reasoning": "Okay, the user asked for the weather in Paris using Celsius. I called the get_weather function with Paris and celsius. The response came back with 18\u00b0C and light rain. Now I need to present this information clearly. Let me start by stating the current weather in Paris. Mention the temperature first, then the condition. Make sure to note that it's in Celsius as requested. Keep it concise and friendly. Let me check if all the details are included and formatted correctly. Yep, looks good. Time to put it all together.",
+     "finish": "end_turn"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 14.8,
+    "ttft_ms_warm": 19.1,
+    "total_ms": 956.9
+   }
+  },
+  {
+   "dialect": "anthropic",
+   "choice": "required",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "Okay, the user is asking for the current weather in Paris using the get_weather function, and they want it in Celsius. Let me check the tools provided. The get_weather function requires the city and unit parameters. The city here is Paris, and the unit should be \"celsius\" as specified. I need to make sure the arguments are correctly formatted in JSON. No other parameters are needed, so I'll call the function with just city and unit.",
+     "finish": "tool_use"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 82.4,
+    "ttft_ms_warm": 11.4,
+    "total_ms": 832.4
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "The current weather in Paris is **18\u00b0C** with **light rain**. \ud83c\udf27\ufe0f Let me know if you need further details!",
+     "reasoning": "Okay, the user asked for the weather in Paris using Celsius. I called the get_weather function with Paris and celsius. The response came back with 18\u00b0C and light rain. Now I need to present this information clearly. Let me start by stating the current weather in Paris. Mention the temperature first, then the condition. Make sure to note that it's in Celsius as requested. Keep it concise and friendly. Let me check if all the details are included and formatted correctly. Yep, looks good. Time to put it all together.",
+     "finish": "end_turn"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 14.2,
+    "ttft_ms_warm": 18.8,
+    "total_ms": 957.9
+   }
+  },
+  {
+   "dialect": "anthropic",
+   "choice": "auto",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "Okay, the user is asking for the current weather in Paris using the get_weather function, and they want it in Celsius. Let me check the tools provided. The get_weather function requires the city and unit parameters. The city here is Paris, and the unit should be \"celsius\" as specified. I need to make sure the arguments are correctly formatted in JSON. No other parameters are needed, so I'll call the function with just city and unit.",
+     "finish": "tool_use"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 15.7,
+    "ttft_ms_warm": 15.9,
+    "total_ms": 807.2
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "The current weather in Paris is **18\u00b0C** with **light rain**. \ud83c\udf27\ufe0f Let me know if you need further details!",
+     "reasoning": "Okay, the user asked for the weather in Paris using Celsius. I called the get_weather function with Paris and celsius. The response came back with 18\u00b0C and light rain. Now I need to present this information clearly. Let me start by stating the current weather in Paris. Mention the temperature first, then the condition. Make sure to note that it's in Celsius as requested. Keep it concise and friendly. Let me check if all the details are included and formatted correctly. Yep, looks good. Time to put it all together.",
+     "finish": "end_turn"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 18.6,
+    "ttft_ms_warm": 18.9,
+    "total_ms": 957.1
+   }
+  },
+  {
+   "dialect": "anthropic",
+   "chat_build_ms_median": 0.39
+  },
+  {
+   "dialect": "responses",
+   "choice": "named",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "Okay, the user is asking for the current weather in Paris using the tool, and they specified celsius. Let me check the available functions. There's get_weather which requires city and unit. The city here is Paris, and the unit should be celsius. So I need to call get_weather with those parameters. I should make sure the arguments are correctly formatted as JSON within the tool_call tags.",
+     "finish": "completed"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 16.5,
+    "ttft_ms_warm": 14.6,
+    "total_ms": 760.8
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "The current weather in Paris is 18\u00b0C with light rain.",
+     "reasoning": "Okay, the user asked for the weather in Paris using Celsius. I called the get_weather function with city Paris and unit celsius. The response came back with temperature 18 and condition light rain. Now I need to present this information clearly. Let me check if the units are correct. Since they wanted Celsius, the 18 is in degrees Celsius. The condition is light rain, so I should mention that. Make sure the response is friendly and answers exactly what they asked. Maybe start with the current temperature and then the condition. Keep it concise.",
+     "finish": "completed"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 15.2,
+    "ttft_ms_warm": 11.9,
+    "total_ms": 906.1
+   }
+  },
+  {
+   "dialect": "responses",
+   "choice": "required",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "Okay, the user is asking for the current weather in Paris using the tool, and they specified celsius. Let me check the available functions. There's get_weather which requires city and unit. The city here is Paris, and the unit should be celsius. So I need to call get_weather with those parameters. I should make sure the arguments are correctly formatted as JSON within the tool_call tags.",
+     "finish": "completed"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 14.7,
+    "ttft_ms_warm": 14.7,
+    "total_ms": 760.8
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "The current weather in Paris is 18\u00b0C with light rain.",
+     "reasoning": "Okay, the user asked for the weather in Paris using Celsius. I called the get_weather function with city Paris and unit celsius. The response came back with temperature 18 and condition light rain. Now I need to present this information clearly. Let me check if the units are correct. Since they wanted Celsius, the 18 is in degrees Celsius. The condition is light rain, so I should mention that. Make sure the response is friendly and answers exactly what they asked. Maybe start with the current temperature and then the condition. Keep it concise.",
+     "finish": "completed"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 12.1,
+    "ttft_ms_warm": 12.2,
+    "total_ms": 905.9
+   }
+  },
+  {
+   "dialect": "responses",
+   "choice": "auto",
+   "call": {
+    "summary": {
+     "calls": [
+      [
+       "get_weather",
+       {
+        "city": "Paris",
+        "unit": "celsius"
+       }
+      ]
+     ],
+     "text": "",
+     "reasoning": "Okay, the user is asking for the current weather in Paris using the tool, and they specified celsius. Let me check the available functions. There's get_weather which requires city and unit. The city here is Paris, and the unit should be celsius. So I need to call get_weather with those parameters. I should make sure the arguments are correctly formatted as JSON within the tool_call tags.",
+     "finish": "completed"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 14.9,
+    "ttft_ms_warm": 14.6,
+    "total_ms": 770.7
+   },
+   "answer": {
+    "summary": {
+     "calls": [],
+     "text": "The current weather in Paris is 18\u00b0C with light rain.",
+     "reasoning": "Okay, the user asked for the weather in Paris using Celsius. I called the get_weather function with city Paris and unit celsius. The response came back with temperature 18 and condition light rain. Now I need to present this information clearly. Let me check if the units are correct. Since they wanted Celsius, the 18 is in degrees Celsius. The condition is light rain, so I should mention that. Make sure the response is friendly and answers exactly what they asked. Maybe start with the current temperature and then the condition. Keep it concise.",
+     "finish": "completed"
+    },
+    "stream_equals_whole": true,
+    "cold_generated_the_same": true,
+    "ttft_ms_cold": 12.1,
+    "ttft_ms_warm": 11.7,
+    "total_ms": 906.0
+   }
+  },
+  {
+   "dialect": "responses",
+   "chat_build_ms_median": 0.39
+  }
+ ]
+}

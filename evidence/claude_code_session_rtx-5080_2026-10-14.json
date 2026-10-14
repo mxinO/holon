@@ -1,0 +1,1171 @@
+{
+ "workload": "claude_code_session",
+ "date": "2026-10-14",
+ "gpu_class": "rtx-5080",
+ "where": "server: holon serve on an RTX 5080 node of the consumer cluster; client: Claude Code on the development host, over the network, through bench/capture_proxy.py (request shapes only, no text, header values redacted except the API version and beta flags)",
+ "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf",
+ "serve": "python -m holon serve <model> --host 0.0.0.0 --port 8000 --max-seqs 4 --max-model-len 32768 --max-step-tokens 2048 --memory-fraction 0.9 --max-draft-tokens 3 --slots logits_processor=grammar.xgrammar drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options recurrent.checkpoints=4 kv.format=q8_0 spec.k=1:3,3:2",
+ "commit": "9096691",
+ "client": {
+  "claude_code": "2.1.296",
+  "command": "claude -p <task> --allowedTools Read,Write,Edit,Bash,Glob,Grep --output-format json < /dev/null",
+  "env": [
+   "ANTHROPIC_BASE_URL=<the proxy>",
+   "ANTHROPIC_AUTH_TOKEN=holon",
+   "ANTHROPIC_MODEL=<served id>",
+   "ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL=<served id>",
+   "CLAUDE_CODE_SUBAGENT_MODEL=<served id>",
+   "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
+  ]
+ },
+ "task": {
+  "prompt": "In the current directory: (1) read inventory.csv; (2) run a bash command (python3 or awk) that computes the total value, the sum of qty*price over all rows; (3) write a file total.txt containing only that number with two decimals; (4) use the Edit tool to append the line 'Total value: <the number>' to the end of report.md. Then reply with the single word done.",
+  "scratch_directory": {
+   "inventory.csv": "item,qty,price / apple,3,0.5 / pear,2,0.75 / melon,1,3.0",
+   "report.md": "# Report / Inventory checked."
+  },
+  "expected": {
+   "total.txt": "6.00",
+   "report.md last line": "Total value: 6.00"
+  }
+ },
+ "outcome": {
+  "exit_code": 0,
+  "is_error": false,
+  "terminal_reason": "completed",
+  "num_turns": 6,
+  "result": "done",
+  "duration_ms": 20787,
+  "total.txt": "6.00",
+  "report.md last line": "Total value: 6.00",
+  "passed": true
+ },
+ "first_attempt": "HTTP 400 at the first request: Claude Code sends role 'system' messages inside messages (mid-conversation reminders), which the step-3 router refused; fixed in 9096691 (before the first turn they join the system prompt, later ones are user turns), then the session above",
+ "engine_counters_during_session": {
+  "billing_headers_dropped": 4,
+  "prefix_tokens_saved": 52544,
+  "spec_drafted": 1137,
+  "spec_verify_steps": 383,
+  "spec_rows_k3_accepting_0": 96,
+  "spec_rows_k3_accepting_1": 67,
+  "spec_rows_k3_accepting_2": 41,
+  "spec_rows_k3_accepting_3": 175,
+  "grammar.xgrammar.drafts_refused": 0
+ },
+ "requests": [
+  {
+   "method": "POST",
+   "path": "/v1/messages?beta=true",
+   "status": 200,
+   "headers": {
+    "accept": "application/json",
+    "accept-encoding": "<redacted>",
+    "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,effort-2025-11-24",
+    "anthropic-dangerous-direct-browser-access": "<redacted>",
+    "anthropic-version": "2023-06-01",
+    "authorization": "<redacted>",
+    "connection": "<redacted>",
+    "content-length": "<redacted>",
+    "content-type": "application/json",
+    "host": "<redacted>",
+    "user-agent": "<redacted>",
+    "x-app": "<redacted>",
+    "x-claude-code-session-id": "<redacted>",
+    "x-stainless-arch": "<redacted>",
+    "x-stainless-lang": "<redacted>",
+    "x-stainless-os": "<redacted>",
+    "x-stainless-package-version": "<redacted>",
+    "x-stainless-retry-count": "<redacted>",
+    "x-stainless-runtime": "<redacted>",
+    "x-stainless-runtime-version": "<redacted>",
+    "x-stainless-timeout": "<redacted>"
+   },
+   "keys": [
+    "context_management",
+    "max_tokens",
+    "messages",
+    "metadata",
+    "model",
+    "output_config",
+    "stream",
+    "system",
+    "thinking",
+    "tools"
+   ],
+   "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+   "max_tokens": 32000,
+   "stream": true,
+   "thinking": {
+    "type": "adaptive",
+    "display": "omitted"
+   },
+   "output_config": {
+    "effort": "high"
+   },
+   "context_management": {
+    "edits": [
+     {
+      "type": "clear_thinking_20251015",
+      "keep": "all"
+     }
+    ]
+   },
+   "metadata": {
+    "user_id": "{\"a_a\":\"<a>\",\"a_a\":\"\",\"a_a\":\"<a>-0a-0-a0-<a>\"}"
+   },
+   "system": [
+    {
+     "block": "text",
+     "chars": 73,
+     "billing_header": true
+    },
+    {
+     "block": "text+cache_control",
+     "chars": 62,
+     "billing_header": false
+    },
+    {
+     "block": "text+cache_control",
+     "chars": 5658,
+     "billing_header": false
+    }
+   ],
+   "tools": [
+    {
+     "name": "Agent",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Bash",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "CronCreate",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "CronDelete",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "CronList",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Edit",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "EnterWorktree",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ExitWorktree",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Glob",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Grep",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ListAgents",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "NotebookEdit",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Read",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ReportFindings",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ScheduleWakeup",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "SendMessage",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Skill",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "TaskStop",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "WebFetch",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "WebSearch",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Workflow",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Write",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    }
+   ],
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      "text:system-reminder",
+      "text:system-reminder",
+      "text:system-reminder",
+      "text"
+     ]
+    },
+    {
+     "role": "system",
+     "content": [
+      "text+cache_control"
+     ]
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/v1/messages?beta=true",
+   "status": 200,
+   "headers": {
+    "accept": "application/json",
+    "accept-encoding": "<redacted>",
+    "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,effort-2025-11-24",
+    "anthropic-dangerous-direct-browser-access": "<redacted>",
+    "anthropic-version": "2023-06-01",
+    "authorization": "<redacted>",
+    "connection": "<redacted>",
+    "content-length": "<redacted>",
+    "content-type": "application/json",
+    "host": "<redacted>",
+    "user-agent": "<redacted>",
+    "x-app": "<redacted>",
+    "x-claude-code-session-id": "<redacted>",
+    "x-stainless-arch": "<redacted>",
+    "x-stainless-lang": "<redacted>",
+    "x-stainless-os": "<redacted>",
+    "x-stainless-package-version": "<redacted>",
+    "x-stainless-retry-count": "<redacted>",
+    "x-stainless-runtime": "<redacted>",
+    "x-stainless-runtime-version": "<redacted>",
+    "x-stainless-timeout": "<redacted>"
+   },
+   "keys": [
+    "context_management",
+    "max_tokens",
+    "messages",
+    "metadata",
+    "model",
+    "output_config",
+    "stream",
+    "system",
+    "thinking",
+    "tools"
+   ],
+   "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+   "max_tokens": 32000,
+   "stream": true,
+   "thinking": {
+    "type": "adaptive",
+    "display": "omitted"
+   },
+   "output_config": {
+    "effort": "high"
+   },
+   "context_management": {
+    "edits": [
+     {
+      "type": "clear_thinking_20251015",
+      "keep": "all"
+     }
+    ]
+   },
+   "metadata": {
+    "user_id": "{\"a_a\":\"<a>\",\"a_a\":\"\",\"a_a\":\"<a>-0a-0-a0-<a>\"}"
+   },
+   "system": [
+    {
+     "block": "text",
+     "chars": 73,
+     "billing_header": true
+    },
+    {
+     "block": "text+cache_control",
+     "chars": 62,
+     "billing_header": false
+    },
+    {
+     "block": "text+cache_control",
+     "chars": 5658,
+     "billing_header": false
+    }
+   ],
+   "tools": [
+    {
+     "name": "Agent",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Bash",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "CronCreate",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "CronDelete",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "CronList",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Edit",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "EnterWorktree",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ExitWorktree",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Glob",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Grep",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ListAgents",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "NotebookEdit",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Read",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ReportFindings",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ScheduleWakeup",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "SendMessage",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Skill",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "TaskStop",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "WebFetch",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "WebSearch",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Workflow",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Write",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    }
+   ],
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      "text:system-reminder",
+      "text:system-reminder",
+      "text:system-reminder",
+      "text"
+     ]
+    },
+    {
+     "role": "system",
+     "content": "string"
+    },
+    {
+     "role": "assistant",
+     "content": [
+      "thinking",
+      "tool_use",
+      "tool_use"
+     ]
+    },
+    {
+     "role": "user",
+     "content": [
+      "tool_result",
+      "tool_result"
+     ]
+    },
+    {
+     "role": "system",
+     "content": [
+      "text+cache_control"
+     ]
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/v1/messages?beta=true",
+   "status": 200,
+   "headers": {
+    "accept": "application/json",
+    "accept-encoding": "<redacted>",
+    "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,effort-2025-11-24",
+    "anthropic-dangerous-direct-browser-access": "<redacted>",
+    "anthropic-version": "2023-06-01",
+    "authorization": "<redacted>",
+    "connection": "<redacted>",
+    "content-length": "<redacted>",
+    "content-type": "application/json",
+    "host": "<redacted>",
+    "user-agent": "<redacted>",
+    "x-app": "<redacted>",
+    "x-claude-code-session-id": "<redacted>",
+    "x-stainless-arch": "<redacted>",
+    "x-stainless-lang": "<redacted>",
+    "x-stainless-os": "<redacted>",
+    "x-stainless-package-version": "<redacted>",
+    "x-stainless-retry-count": "<redacted>",
+    "x-stainless-runtime": "<redacted>",
+    "x-stainless-runtime-version": "<redacted>",
+    "x-stainless-timeout": "<redacted>"
+   },
+   "keys": [
+    "context_management",
+    "max_tokens",
+    "messages",
+    "metadata",
+    "model",
+    "output_config",
+    "stream",
+    "system",
+    "thinking",
+    "tools"
+   ],
+   "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+   "max_tokens": 32000,
+   "stream": true,
+   "thinking": {
+    "type": "adaptive",
+    "display": "omitted"
+   },
+   "output_config": {
+    "effort": "high"
+   },
+   "context_management": {
+    "edits": [
+     {
+      "type": "clear_thinking_20251015",
+      "keep": "all"
+     }
+    ]
+   },
+   "metadata": {
+    "user_id": "{\"a_a\":\"<a>\",\"a_a\":\"\",\"a_a\":\"<a>-0a-0-a0-<a>\"}"
+   },
+   "system": [
+    {
+     "block": "text",
+     "chars": 73,
+     "billing_header": true
+    },
+    {
+     "block": "text+cache_control",
+     "chars": 62,
+     "billing_header": false
+    },
+    {
+     "block": "text+cache_control",
+     "chars": 5658,
+     "billing_header": false
+    }
+   ],
+   "tools": [
+    {
+     "name": "Agent",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Bash",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "CronCreate",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "CronDelete",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "CronList",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Edit",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "EnterWorktree",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ExitWorktree",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Glob",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Grep",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ListAgents",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "NotebookEdit",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Read",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ReportFindings",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ScheduleWakeup",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "SendMessage",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Skill",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "TaskStop",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "WebFetch",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "WebSearch",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Workflow",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Write",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    }
+   ],
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      "text:system-reminder",
+      "text:system-reminder",
+      "text:system-reminder",
+      "text"
+     ]
+    },
+    {
+     "role": "system",
+     "content": "string"
+    },
+    {
+     "role": "assistant",
+     "content": [
+      "thinking",
+      "tool_use",
+      "tool_use"
+     ]
+    },
+    {
+     "role": "user",
+     "content": [
+      "tool_result",
+      "tool_result"
+     ]
+    },
+    {
+     "role": "system",
+     "content": "string"
+    },
+    {
+     "role": "assistant",
+     "content": [
+      "thinking",
+      "tool_use"
+     ]
+    },
+    {
+     "role": "user",
+     "content": [
+      "tool_result"
+     ]
+    },
+    {
+     "role": "system",
+     "content": [
+      "text+cache_control"
+     ]
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/v1/messages?beta=true",
+   "status": 200,
+   "headers": {
+    "accept": "application/json",
+    "accept-encoding": "<redacted>",
+    "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,effort-2025-11-24",
+    "anthropic-dangerous-direct-browser-access": "<redacted>",
+    "anthropic-version": "2023-06-01",
+    "authorization": "<redacted>",
+    "connection": "<redacted>",
+    "content-length": "<redacted>",
+    "content-type": "application/json",
+    "host": "<redacted>",
+    "user-agent": "<redacted>",
+    "x-app": "<redacted>",
+    "x-claude-code-session-id": "<redacted>",
+    "x-stainless-arch": "<redacted>",
+    "x-stainless-lang": "<redacted>",
+    "x-stainless-os": "<redacted>",
+    "x-stainless-package-version": "<redacted>",
+    "x-stainless-retry-count": "<redacted>",
+    "x-stainless-runtime": "<redacted>",
+    "x-stainless-runtime-version": "<redacted>",
+    "x-stainless-timeout": "<redacted>"
+   },
+   "keys": [
+    "context_management",
+    "max_tokens",
+    "messages",
+    "metadata",
+    "model",
+    "output_config",
+    "stream",
+    "system",
+    "thinking",
+    "tools"
+   ],
+   "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+   "max_tokens": 32000,
+   "stream": true,
+   "thinking": {
+    "type": "adaptive",
+    "display": "omitted"
+   },
+   "output_config": {
+    "effort": "high"
+   },
+   "context_management": {
+    "edits": [
+     {
+      "type": "clear_thinking_20251015",
+      "keep": "all"
+     }
+    ]
+   },
+   "metadata": {
+    "user_id": "{\"a_a\":\"<a>\",\"a_a\":\"\",\"a_a\":\"<a>-0a-0-a0-<a>\"}"
+   },
+   "system": [
+    {
+     "block": "text",
+     "chars": 73,
+     "billing_header": true
+    },
+    {
+     "block": "text+cache_control",
+     "chars": 62,
+     "billing_header": false
+    },
+    {
+     "block": "text+cache_control",
+     "chars": 5658,
+     "billing_header": false
+    }
+   ],
+   "tools": [
+    {
+     "name": "Agent",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Bash",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "CronCreate",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "CronDelete",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "CronList",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Edit",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "EnterWorktree",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ExitWorktree",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Glob",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Grep",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ListAgents",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "NotebookEdit",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Read",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ReportFindings",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "ScheduleWakeup",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "SendMessage",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Skill",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "TaskStop",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "WebFetch",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "WebSearch",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Workflow",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    },
+    {
+     "name": "Write",
+     "type": "custom",
+     "$schema": true,
+     "additionalProperties_false": true,
+     "cache_control": false
+    }
+   ],
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      "text:system-reminder",
+      "text:system-reminder",
+      "text:system-reminder",
+      "text"
+     ]
+    },
+    {
+     "role": "system",
+     "content": "string"
+    },
+    {
+     "role": "assistant",
+     "content": [
+      "thinking",
+      "tool_use",
+      "tool_use"
+     ]
+    },
+    {
+     "role": "user",
+     "content": [
+      "tool_result",
+      "tool_result"
+     ]
+    },
+    {
+     "role": "system",
+     "content": "string"
+    },
+    {
+     "role": "assistant",
+     "content": [
+      "thinking",
+      "tool_use"
+     ]
+    },
+    {
+     "role": "user",
+     "content": [
+      "tool_result"
+     ]
+    },
+    {
+     "role": "system",
+     "content": "string"
+    },
+    {
+     "role": "assistant",
+     "content": [
+      "thinking",
+      "tool_use",
+      "tool_use"
+     ]
+    },
+    {
+     "role": "user",
+     "content": [
+      "tool_result",
+      "tool_result"
+     ]
+    },
+    {
+     "role": "system",
+     "content": [
+      "text+cache_control"
+     ]
+    }
+   ]
+  }
+ ]
+}

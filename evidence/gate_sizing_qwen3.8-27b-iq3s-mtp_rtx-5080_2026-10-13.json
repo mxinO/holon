@@ -1,0 +1,51 @@
+{
+ "workload": "gate_cost_qwen3.8-27b-iq3s-mtp",
+ "date": "2026-10-13",
+ "gpu_class": "rtx-5080",
+ "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf",
+ "command": "python bench/gate_cost.py --gpu 0 --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf --corpus judge/prompts/v1-qwen3_5.jsonl --name qwen3.8-27b-iq3s-mtp --rounds 0 --sizing-rounds 3 --engine-args '--max-seqs 4 --max-model-len 32768 --max-step-tokens 2048 --memory-fraction 0.9 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options recurrent.checkpoints=4 kv.format=q8_0 spec.k=1:3,3:2'",
+ "commit": "e5ec4b590dc46d63b0450a7447a46273dc957cf7",
+ "state_memory": 2649149496,
+ "processor_selected": {
+  "none": [
+   {
+    "state_memory": 2784373555,
+    "capture_s": 2.97,
+    "graphs": 27,
+    "kv_tokens": 37808
+   },
+   {
+    "state_memory": 2784373555,
+    "capture_s": 2.9,
+    "graphs": 27,
+    "kv_tokens": 37808
+   },
+   {
+    "state_memory": 2784373555,
+    "capture_s": 2.86,
+    "graphs": 27,
+    "kv_tokens": 37808
+   }
+  ],
+  "A\u2032": [
+   {
+    "state_memory": 2703213772,
+    "capture_s": 5.78,
+    "graphs": 54,
+    "kv_tokens": 35616
+   },
+   {
+    "state_memory": 2703213772,
+    "capture_s": 5.64,
+    "graphs": 54,
+    "kv_tokens": 35616
+   },
+   {
+    "state_memory": 2703213772,
+    "capture_s": 5.61,
+    "graphs": 54,
+    "kv_tokens": 35616
+   }
+  ]
+ }
+}

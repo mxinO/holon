@@ -203,7 +203,8 @@ def _local_violation(node: dict, root: Any, draft: int) -> str | None:
     patterns = [node["pattern"]] if "pattern" in node else []
     patterns += list(node.get("patternProperties", {}))
     if loose := next((p for p in patterns if _loose(p)), None):
-        return f"pattern {loose!r}: \\S, [^\\s] and . are not supported (xgrammar's are ASCII-only)"
+        return (f"pattern {loose!r}: \\S, [^\\s], ., lookarounds and backreferences are not supported (xgrammar's "
+                "\\s and . are ASCII-only; it ignores the others)")
     if "pattern" in node and keys & {"format", "minLength", "maxLength"}:
         return f"pattern beside {sorted(keys & {'format', 'minLength', 'maxLength'})} is not supported"
     if "format" in node and node["format"] not in FORMATS:
@@ -213,17 +214,18 @@ def _local_violation(node: dict, root: Any, draft: int) -> str | None:
 
 def _loose(pattern: str) -> bool:
     """Whether `pattern` has \\S, \\s inside a negated class, or `.` outside a class — which xgrammar reads more
-    loosely than ECMA 262 (its whitespace is ASCII's; its `.` takes U+2028 / U+2029, ECMA's ends a line there). One
+    loosely than ECMA 262 (its whitespace is ASCII's; its `.` takes U+2028 / U+2029, ECMA's ends a line there) — or a
+    lookaround or backreference, which xgrammar ignores (a group `(?` other than `(?:`; `\\1`–`\\9`, `\\k`). One
     linear scan: no regex over the client's text."""
     escaped, negated, first = False, None, 0    # negated: None outside a class; first: where its body starts
     for i, ch in enumerate(pattern):
         if escaped:
             escaped = False
-            if ch == "S" or (ch == "s" and negated):
+            if ch == "S" or (ch == "s" and negated) or (negated is None and ch in "123456789k"):
                 return True
         elif ch == "\\":
             escaped = True
-        elif negated is None and ch == ".":
+        elif negated is None and (ch == "." or (pattern.startswith("(?", i) and not pattern.startswith("(?:", i))):
             return True
         elif negated is None and ch == "[":
             negated = pattern.startswith("^", i + 1)

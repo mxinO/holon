@@ -146,6 +146,11 @@ HOLES = [
     *(({"type": "string", "pattern": p}, w) for p, w in (("^[a^]x[^\\s]$", "ax\u3000"), ("^[\\[]x[^\\s]$", "[x\u3000"),
                                                          ("^[\\^]x[^\\s]$", "^x\u3000"))),   # ECMA: U+3000 is \s
     *(({"type": "string", "pattern": "^a.b$"}, f"a{end}b") for end in "\u2028\u2029"),  # ECMA: . ends a line there
+    # Lookarounds and backreferences: xgrammar drops them (JSONSchemaBench's Ansible vars schema, step 5).
+    ({"type": "object", "additionalProperties": False,
+      "patternProperties": {"^(?!(hosts|vars)$)[a-z_]+$": {}}}, {"hosts": 1}),
+    ({"type": "string", "pattern": "^(?=x)[a-z]$"}, "a"),
+    ({"type": "string", "pattern": "^([a-z])\\1$"}, "ab"),
     ({"$schema": D4, "definitions": {"s": {"type": "string"}}, **_obj({"a": {
         "id": "http://example.com/inner", "definitions": {"s": {"type": "integer"}}, **_obj({"b": {
             "$ref": "#/definitions/s"}})}})}, {"a": {"b": "x"}}),
