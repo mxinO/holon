@@ -1011,7 +1011,7 @@ Clock screens: RTX 5080 SM median 2677 MHz (power cap 50% of samples), RTX 4090 
   | P7 o_proj scales × 1.25 | prefill | fail, 2.25× (top-1 97.48%) | 1.5–4×, fail if > 2× ✓ |
 
   P3's cause: its KL multiple is near the simulation's (1.48× vs 1.3×), but it costs 0.42 top-1 points, beyond L2's
-  0.25-point slack. A per-token scale lets one outlier channel (Qwen3's hidden states carry a few) coarsen every
+  0.25-point slack. Probably a per-token scale lets one outlier channel (Qwen3's hidden states carry a few) coarsen every
   group of its row, which shows in the top-1 rate more than in the KL tail. The judge is more sensitive than
   predicted, not less; δ unchanged.
 - **Bounded:** chunked (100) vs one-shot prefill, 8B FP8 on the RTX 5080: pass (with prefix on/off × depth 1/0).
