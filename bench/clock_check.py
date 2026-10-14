@@ -89,12 +89,13 @@ def main() -> None:
     engine = Engine(dataclasses.replace(cfg, max_seqs=max(cfg.max_seqs, args.batch), max_model_len=8192,
                                         prefix_cache=False))
     rng = random.Random(0)
+    prompts = lambda: [[rng.randrange(1000, 30000) for _ in range(256)] for _ in range(args.batch)]   # noqa: E731
+    engine.generate(prompts(), SamplingParams(temperature=0.0, max_tokens=16, ignore_eos=True))   # JIT builds, idle
     sampler = Sampler()
     tokens = 0
     start = time.time()
     while time.time() - start < args.seconds:
-        prompts = [[rng.randrange(1000, 30000) for _ in range(256)] for _ in range(args.batch)]
-        out = engine.generate(prompts, SamplingParams(temperature=0.0, max_tokens=1024, ignore_eos=True))
+        out = engine.generate(prompts(), SamplingParams(temperature=0.0, max_tokens=1024, ignore_eos=True))
         tokens += sum(map(len, out))
     torch.cuda.synchronize()
     end = time.time()
