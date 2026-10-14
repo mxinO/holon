@@ -326,6 +326,20 @@ def test_what_the_engine_cannot_honour_is_a_load_error(files, tmp_path, dialect,
         list(HFSafetensors(_edited(quantized, tmp_path / "edited", tensors, config)).tensors())
 
 
+@pytest.mark.parametrize("which", ["quantized", "dense"])
+def test_merge_partners_load_together(files, which):
+    """The source yields each layer's q/k/v and gate/up next to each other, so a merge frees one run the next merge
+    reuses, not holes split by o_proj (docs/m06-lowp.md §8, B3)."""
+    path = files("fp8", False)[which == "dense"]
+    modules = list(dict.fromkeys(n.rsplit(".", 1)[0] for n, _ in HFSafetensors(path).tensors()))
+    for partners in (("q_proj", "k_proj", "v_proj"), ("gate_proj", "up_proj")):
+        firsts = [i for i, m in enumerate(modules) if m.endswith(partners[0])]
+        assert firsts
+        for i in firsts:
+            parent = modules[i].rsplit(".", 1)[0]
+            assert modules[i:i + len(partners)] == [f"{parent}.{p}" for p in partners], modules[i - 2:i + 4]
+
+
 def test_hf_quant_config_json_is_read_and_hashed_into_the_identity(files, tmp_path):
     quantized, _ = files("modelopt", True)                       # its config only in hf_quant_config.json
     assert "quantization_config" not in json.loads((quantized / "config.json").read_text())

@@ -19,6 +19,28 @@ from safetensors import safe_open
 from . import quant
 
 _CACHE = pathlib.Path.home() / ".cache" / "holon" / "weights"     # weight-file digests remembered across restarts
+# HF's names of the projections a model may merge into one weight (docs/m06-lowp.md D5: attention's q/k/v, the FFN's
+# gate/up), each group in its merged order.
+MERGED = (("q_proj", "k_proj", "v_proj"), ("gate_proj", "up_proj"))
+
+
+def adjacent[T](items: list[T]) -> list[T]:
+    """`items` (tensor names, or quantized modules by `.name`; shard order) with each module's merge partners
+    (`MERGED`, under one parent) moved together, in the group's order, to where the first of them was. Shard order
+    sorts names, so a sibling would sit between partners (k, o, q, v): a merge would then free two runs no later
+    merge fits, which the allocator kept reserved past `empty_cache` (0.87 GiB for an 8B FP8, docs/m06-lowp.md §8,
+    B3). Together, each merge frees one run the next layer's merge reuses."""
+    member = {m: (g, i) for g, group in enumerate(MERGED) for i, m in enumerate(group)}
+    anchor, keys = {}, []
+    for pos, item in enumerate(items):
+        parts = (item if isinstance(item, str) else item.name).split(".")
+        hit = next(((".".join(parts[:j]), *member[p]) for j, p in enumerate(parts) if p in member), None)
+        if hit is None:
+            keys.append((pos, 0, pos))
+        else:
+            parent, group, index = hit
+            keys.append((anchor.setdefault((parent, group), pos), 1 + index, pos))
+    return [item for _, item in sorted(zip(keys, items, strict=True), key=lambda kv: kv[0])]
 
 
 class HFSafetensors:
@@ -57,14 +79,9 @@ class HFSafetensors:
         return AutoTokenizer.from_pretrained(self.path)
 
     def tensors(self) -> Iterator[tuple[str, torch.Tensor | QTensor]]:
-        """Every tensor in shard order. Quantized: every shard's header read first, each module's parts grouped by
-        the dialect into one `QTensor` under `<module>.weight` at its primary part's place, each part read once."""
-        if self._dialect is None:
-            for file in sorted(self.path.glob("*.safetensors")):
-                with safe_open(file, "pt", device=str(self.device)) as f:
-                    for name in f.keys():
-                        yield name, f.get_tensor(name)
-            return
+        """Every tensor in shard order, but each module's merge partners together (`adjacent`). Quantized: every
+        shard's header read first, each module's parts grouped by the dialect into one `QTensor` under
+        `<module>.weight` at its primary part's place, each part read once."""
         with contextlib.ExitStack() as stack:
             where = {}
             for file in sorted(self.path.glob("*.safetensors")):
@@ -73,11 +90,15 @@ class HFSafetensors:
                     raise ValueError(f"{file}: tensors also in an earlier shard: {sorted(twice)[:4]}")
                 where |= dict.fromkeys(f.keys(), f)
             get = lambda name: where[name].get_tensor(name)                   # noqa: E731
+            if self._dialect is None:
+                for name in adjacent(list(where)):
+                    yield name, get(name)
+                return
             plan, checks = quant.group(self._dialect, [(n, f.get_slice(n).get_dtype()) for n, f in where.items()])
             for name, want in checks.items():
                 if not bool((value := get(name)).eq(want).all()):
                     raise ValueError(f"{name} = {value.tolist()}: must be {want} (the engine does not apply it)")
-            for item in plan:
+            for item in adjacent(plan):
                 if isinstance(item, str):
                     yield item, get(item)
                 else:
