@@ -1104,3 +1104,48 @@ NVIDIA GeForce RTX 5090; Holon's ggml at 51ce9c11
 tree, no emphasis driven by the task, proportion, no mention). The deviation compromises nothing, because the control is
 the review of the text. The README's benchmark placeholder failed test 4, so it was removed; the result section is
 added after the verdict. A drift check of the frozen text follows M0.6's Gate A merge.
+
+### 13.7 Rebase onto M0.6 Gate A (2026-10-14)
+
+The release branch was rebased onto `main` at 936c1ab (M0.6 Gate A merged). The rebase is linear, so the step-3
+merge (ad2919f before the rebase) is gone. Its only content of its own, the lead's step-3 decisions in this document,
+came in with the step-3 record. Outside the files `main` changed, the tree equals the merge's. The commit hashes in
+§13.1–§13.6 name the commits before the rebase.
+
+- **Conflicts.**
+  - `kernels/ggml_cuda/plugin.toml`: kept M0.6's vendored commit and `plugin.py` provenance, and step 1's `[build]`.
+  - `holon.api.__all__`: the release's list without `Converter`, `Dialect` and `SchemeImpl`.
+  - `holon_tools.__main__`: M0.6's rule that a lock's pools seed checks on its own class only, with step 2's model id
+    passed to `EngineChecks`.
+  - `build.py`, std's `ops/units.py` and `moe/units.py`: M0.6's per-slice loading, with the hook renamed (below). The
+    release's `set(q.parts) != {"blocks"}` guard on `ExpertLinear` is dropped: M0.6's parts carry scales. The soft
+    kernel preference in `_choose` merged cleanly.
+  - `hooks.py`: `AdoptsWeights` takes `index` and keeps the docstring from the last pre-rebase commit (False is a load error).
+  - `bench/backends/holon_http.py`: `served()` and the temperature option are both kept.
+  - `docs/release.md`: replaced by the step-3 merge's text.
+  - Merged without conflict: `manifest.py`, `ops.py`, `plugins.py`, the judge, std's weights and `design.md` (§4.1's
+    entry-point fix, with M0.6's §5.5 and no dialect or converter registry).
+- **Rename, `adopt` → `adopt_weights` for units.** It is applied in the core's `_adopt`, std's `Linear`, `Embedding`,
+  `LMHead` and `ExpertLinear`, the toy `_Rows` in `core/tests/test_stacking.py`, `plugins/tests/test_quantized_units.py`
+  (`test_ggml_cuda_moe.py` already had it), and design §5.5 and the feature map. Each takes `index: int | None = None`,
+  as does `hooks.AdoptsWeights`. The state kinds' `adopt(seq, payload)` is unchanged.
+- **Listings, still ABI 0.1.** `main` has none, so they were written fresh and `check_abi.py --base main` passes.
+  - `core/abi.txt` loses `Converter`, `Dialect`, `SchemeImpl`, `Registries.{schemes, converters, dialects}` and the
+    `dialect` / `converter` slots, and `AdoptsWeights.adopt_weights` gains `index`.
+  - `std/contracts.txt`: `op.qlinear@1` → `@2`, `op.linear_experts@1` → `@2`.
+  - `plugins/contracts.txt` is unchanged.
+- **Manifests and dependencies.**
+  - Every manifest M0.6 changed already carried `core_abi`. The new test fixture `tests.toy_quant` now does too.
+  - manifest-deps found M0.6's new imports. The judge's `hf_quant` and testing's `hf_quant_files` use compressed-tensors,
+    now declared at 0.17.0, the version M0.6's owner checks ran (`uv.lock`: compressed-tensors 0.17.0 and loguru; 115
+    packages).
+  - ModelOpt and amd-quark are imported under `except ImportError` (test-only, "when importable"). manifest-deps now
+    skips such guarded imports.
+  - The judge loads llama.cpp's `conversion.base` from the checkout it is given via `importlib`, since it is not a
+    dependency.
+- **Suite** (RTX A5000 ×2, the uv venv): `pytest core std plugins judge testing tools` gave 1145 passed and 62 skipped
+  in 18 min 26 s. `run_all.sh` is green. The core is 4123 code lines: `main` has 3844, and steps 1–2 add 279.
+- **Not done, as planned:** no lock was written or propagated. Every lock is outdated by the release's core change until
+  M0.7's propagation.
+- **Coverage note:** this venv has neither ModelOpt nor amd-quark, so `hf_quant`'s ModelOpt and Quark owner checks are
+  skipped silently here, as they were for Quark under M0.6.
