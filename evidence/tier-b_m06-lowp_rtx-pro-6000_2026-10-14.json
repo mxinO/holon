@@ -1,0 +1,313 @@
+{
+ "workload": "m06-a5-tier-b",
+ "date": "2026-10-14",
+ "commit": "f5a37b1",
+ "hardware": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+ "command": "python -m holon_judge l2 --model <file> --prompts judge/prompts/v1.jsonl --golden <file>/v1-fp32 --floor <file>/v1-bfloat16-<path>[-fp4]-floor [--max-step-tokens <gguf.mmvq_step>] [--act a4] [--plant <bug>]",
+ "claim": "Tier B at a8 on sm_120 (the 30B NVFP4 and amd-quark 30B MXFP4, both paths; state pools 4 GiB on a shared host); M4 (the fp4 spec's tail left 0xFF): a8 passes (no tail), a4 at in = 768 gives NaN (no W4A4 floor for the 30B: scored against the W4A8 floor, which the mode check also refuses; the clean a4 run is beside); the structural test at a4 (prepared stacks with their tail) exact",
+ "results": {
+  "qwen3-30b-a3b-nvfp4-mmq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.983192508312235,
+    "top1_confident": 0.9915148490142252,
+    "kl_mean": 0.0033655547266591064,
+    "kl_p50": 0.00014858966406998997,
+    "kl_p99": 0.048693739260617715,
+    "kl_max": 3.029227724301701,
+    "dppl": 0.00041219711866100886,
+    "dppl_se": 0.0009359106956288657,
+    "missing": 0.035037977000274535
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9835890553030534,
+    "top1_confident": 0.9919203893186923,
+    "kl_mean": 0.0034672570251119074,
+    "kl_p50": 0.0001505307219022891,
+    "kl_p99": 0.04922038529786812,
+    "kl_max": 3.697089809746299,
+    "dppl": -0.00022441974676365762,
+    "dppl_se": 0.0007166486054759414,
+    "missing": 0.03594088399475338
+   },
+   "kl_p99_over_floor": 0.9893002455372243,
+   "candidate": {
+    "model": "nvidia/Qwen3-30B-A3B-NVFP4",
+    "hardware": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 7104,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "qwen3-30b-a3b-mxfp4-amd-quark-mmq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.984717689046152,
+    "top1_confident": 0.9930731068052046,
+    "kl_mean": 0.002585356710947245,
+    "kl_p50": 0.00010500498653659527,
+    "kl_p99": 0.032963618886471806,
+    "kl_max": 6.020698543698547,
+    "dppl": 0.0016212214080145947,
+    "dppl_se": 0.0007323656175347011,
+    "missing": 0.0314309245645609
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9851447396516487,
+    "top1_confident": 0.9931043090268027,
+    "kl_mean": 0.0026070534564671182,
+    "kl_p50": 0.00011865516292326147,
+    "kl_p99": 0.03605106956240377,
+    "kl_max": 1.4693810361026396,
+    "dppl": 0.0017116375833714714,
+    "dppl_se": 0.0007995948981773088,
+    "missing": 0.03275935698380258
+   },
+   "kl_p99_over_floor": 0.9143589714977072,
+   "candidate": {
+    "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+    "hardware": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 6240,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "qwen3-30b-a3b-nvfp4-mmvq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.983558551688375,
+    "top1_confident": 0.991546044422261,
+    "kl_mean": 0.0033207202386614453,
+    "kl_p50": 0.00014013829206708405,
+    "kl_p99": 0.044622917813417276,
+    "kl_max": 2.896944752479059,
+    "dppl": -0.000787538055861984,
+    "dppl_se": 0.0008284080350549549,
+    "missing": 0.034725314949821555
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9831009974682,
+    "top1_confident": 0.9912964811579735,
+    "kl_mean": 0.0037078402433992613,
+    "kl_p50": 0.0001471432039839818,
+    "kl_p99": 0.052320430411248946,
+    "kl_max": 2.3856661242051342,
+    "dppl": 0.0013823727178903713,
+    "dppl_se": 0.0007505242943248078,
+    "missing": 0.035515358569990545
+   },
+   "kl_p99_over_floor": 0.8528774985731635,
+   "candidate": {
+    "model": "nvidia/Qwen3-30B-A3B-NVFP4",
+    "hardware": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "max_step_tokens": 8,
+    "calls": {
+     "mmq/q8_1": 0,
+     "mmvq/q8_1": 787392
+    },
+    "head_calls": null
+   }
+  },
+  "qwen3-30b-a3b-mxfp4-amd-quark-mmvq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9852972577250404,
+    "top1_confident": 0.99297950014041,
+    "kl_mean": 0.0024437413450832204,
+    "kl_p50": 0.00010994297039593017,
+    "kl_p99": 0.03273228417990923,
+    "kl_max": 5.226062477129314,
+    "dppl": 0.0011640380824122416,
+    "dppl_se": 0.0008031191386408628,
+    "missing": 0.0317634139645548
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9849617179635787,
+    "top1_confident": 0.9927922868108209,
+    "kl_mean": 0.0026750754577681258,
+    "kl_p50": 0.00011711817517248005,
+    "kl_p99": 0.036127101956129205,
+    "kl_max": 1.1547337736478476,
+    "dppl": 0.00043535630346709967,
+    "dppl_se": 0.0007739353293412473,
+    "missing": 0.03288137144251594
+   },
+   "kl_p99_over_floor": 0.9060312731327727,
+   "candidate": {
+    "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+    "hardware": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "max_step_tokens": 8,
+    "calls": {
+     "mmq/q8_1": 0,
+     "mmvq/q8_1": 393696
+    },
+    "head_calls": null
+   }
+  }
+ },
+ "plants": {
+  "M4-a8-qwen3-30b-a3b-mxfp4-amd-quark-mmq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.984717689046152,
+    "top1_confident": 0.9930731068052046,
+    "kl_mean": 0.002585356710947245,
+    "kl_p50": 0.00010500498653659527,
+    "kl_p99": 0.032963618886471806,
+    "kl_max": 6.020698543698547,
+    "dppl": 0.0016212214080145947,
+    "dppl_se": 0.0007323656175347011,
+    "missing": 0.0314309245645609
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9851447396516487,
+    "top1_confident": 0.9931043090268027,
+    "kl_mean": 0.0026070534564671182,
+    "kl_p50": 0.00011865516292326147,
+    "kl_p99": 0.03605106956240377,
+    "kl_max": 1.4693810361026396,
+    "dppl": 0.0017116375833714714,
+    "dppl_se": 0.0007995948981773088,
+    "missing": 0.03275935698380258
+   },
+   "kl_p99_over_floor": 0.9143589714977072,
+   "candidate": {
+    "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+    "hardware": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 6240,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "M4-a4-qwen3-30b-a3b-mxfp4-amd-quark-mmq": {
+   "passed": false,
+   "failures": [
+    "no calls counted on mmq/q8_1, the floor's path and mode",
+    "6240 calls on mmq/fp4, the floor emulates mmq/q8_1",
+    "top-1 0.6040% < 98.2645%",
+    "KL p50 nan > 2.373e-04",
+    "KL p99 nan > 7.210e-02",
+    "|\u0394PPL vs floor| nan% > 0.533%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.006039715706311198,
+    "top1_confident": 0.006022028768448313,
+    "kl_mean": NaN,
+    "kl_p50": NaN,
+    "kl_p99": NaN,
+    "kl_max": NaN,
+    "dppl": NaN,
+    "dppl_se": NaN,
+    "missing": 0.9430344995882012
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9851447396516487,
+    "top1_confident": 0.9931043090268027,
+    "kl_mean": 0.0026070534564671182,
+    "kl_p50": 0.00011865516292326147,
+    "kl_p99": 0.03605106956240377,
+    "kl_max": 1.4693810361026396,
+    "dppl": 0.0017116375833714714,
+    "dppl_se": 0.0007995948981773088,
+    "missing": 0.03275935698380258
+   },
+   "kl_p99_over_floor": NaN,
+   "candidate": {
+    "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+    "hardware": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/fp4": 6240,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "clean-a4-qwen3-30b-a3b-mxfp4-amd-quark-mmq (M4's reference)": {
+   "passed": false,
+   "failures": [
+    "no calls counted on mmq/q8_1, the floor's path and mode",
+    "6240 calls on mmq/fp4, the floor emulates mmq/q8_1",
+    "top-1 93.4509% < 98.2645%",
+    "KL p50 2.837e-03 > 2.373e-04",
+    "KL p99 6.420e-01 > 7.210e-02",
+    "|\u0394PPL vs floor| 3.124% > 0.533%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9345087392856053,
+    "top1_confident": 0.945084089987207,
+    "kl_mean": 0.04490921068906825,
+    "kl_p50": 0.00283709392843432,
+    "kl_p99": 0.6419896879715193,
+    "kl_max": 9.578191539419961,
+    "dppl": 0.0330006317234809,
+    "dppl_se": 0.0035178891953481493,
+    "missing": 0.10966964585303358
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9851447396516487,
+    "top1_confident": 0.9931043090268027,
+    "kl_mean": 0.0026070534564671182,
+    "kl_p50": 0.00011865516292326147,
+    "kl_p99": 0.03605106956240377,
+    "kl_max": 1.4693810361026396,
+    "dppl": 0.0017116375833714714,
+    "dppl_se": 0.0007995948981773088,
+    "missing": 0.03275935698380258
+   },
+   "kl_p99_over_floor": 17.807784783201686,
+   "candidate": {
+    "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+    "hardware": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/fp4": 6240,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  }
+ },
+ "structure": {
+  "a4-qwen3-30b-a3b-mxfp4-amd-quark": {
+   "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+   "plant": null,
+   "mismatches": 0,
+   "first": []
+  },
+  "a4-qwen3-30b-a3b-nvfp4": {
+   "model": "nvidia/Qwen3-30B-A3B-NVFP4",
+   "plant": null,
+   "mismatches": 0,
+   "first": []
+  }
+ }
+}

@@ -1,0 +1,246 @@
+{
+ "workload": "m06-a5-tier-b",
+ "date": "2026-10-14",
+ "commit": "f5a37b1",
+ "hardware": "NVIDIA GeForce RTX 5080",
+ "command": "python -m holon_judge l2 --model <file> --prompts judge/prompts/v1.jsonl --golden <file>/v1-fp32 --floor <file>/v1-bfloat16-<path>[-fp4]-floor [--max-step-tokens <gguf.mmvq_step>] [--act a4] [--plant <bug>]",
+ "claim": "Tier B at a8 on sm_120 (8B NVFP4, both paths) against the W4A8 floors; N6 (op_params[3] left zero on the q8_1 spec) a Python error from the precision check before any launch; bounded: graphs vs eager at a4 (decode batches 3, 5, 12, 20) and chunked (100) vs one-shot prefill at a8 pass",
+ "clock_screen": {
+  "load": "60 s of bf16 8192^2 matmuls, nvidia-smi every 250 ms",
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "samples": 233,
+  "sm_clock_mhz": {
+   "median": 2677.0,
+   "min": 2602.0,
+   "p5": 2602.0,
+   "max_sm": 3090.0
+  },
+  "thermal_slowdown_share": {
+   "sw": 0.0,
+   "hw": 0.0
+  },
+  "hw_slowdown_share": 0.0,
+  "power_cap_share": 0.16738197424892703
+ },
+ "results": {
+  "qwen3-8b-nvfp4-mmq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9883476191928744,
+    "top1_confident": 0.9960236701211684,
+    "kl_mean": 0.0012319022787786668,
+    "kl_p50": 8.783237073305826e-05,
+    "kl_p99": 0.012957543232125543,
+    "kl_max": 5.688284462041875,
+    "dppl": 0.0013918445098046277,
+    "dppl_se": 0.00044516252850583575,
+    "missing": 0.019584845804227802
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9869139493029924,
+    "top1_confident": 0.9958045023325715,
+    "kl_mean": 0.0010866066443534282,
+    "kl_p50": 9.276431378843588e-05,
+    "kl_p99": 0.012432035549544392,
+    "kl_max": 0.5793764279805961,
+    "dppl": 0.0016297106640261584,
+    "dppl_se": 0.00030873543770328397,
+    "missing": 0.02025592532715127
+   },
+   "kl_p99_over_floor": 1.0422704456150311,
+   "candidate": {
+    "model": "nvidia/Qwen3-8B-NVFP4",
+    "hardware": "NVIDIA GeForce RTX 5080",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 1296,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "qwen3-8b-nvfp4-mmvq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9880730866607693,
+    "top1_confident": 0.9960549798052538,
+    "kl_mean": 0.0011048698444596355,
+    "kl_p50": 8.981448531205876e-05,
+    "kl_p99": 0.012551688639687503,
+    "kl_max": 1.251911546564436,
+    "dppl": 0.000981008670799495,
+    "dppl_se": 0.00043277235003941975,
+    "missing": 0.01963060122624531
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9877680505139859,
+    "top1_confident": 0.9955227151758039,
+    "kl_mean": 0.0011637053725555653,
+    "kl_p50": 9.84134386871059e-05,
+    "kl_p99": 0.014180035790287687,
+    "kl_max": 0.838303612794724,
+    "dppl": 0.001171134580671043,
+    "dppl_se": 0.0003056316796894523,
+    "missing": 0.020850745813378885
+   },
+   "kl_p99_over_floor": 0.8851662171603625,
+   "candidate": {
+    "model": "nvidia/Qwen3-8B-NVFP4",
+    "hardware": "NVIDIA GeForce RTX 5080",
+    "max_step_tokens": 8,
+    "calls": {
+     "mmq/q8_1": 0,
+     "mmvq/q8_1": 590544
+    },
+    "head_calls": null
+   }
+  }
+ },
+ "plants": {
+  "N6-qwen3-8b-nvfp4-mmq": {
+   "rc": 1,
+   "error": "RuntimeError: kernels.ggml_cuda: mmq would quantize nvfp4/hf activations at ggml_prec 40, its spec's mode 'q8_1' is 30",
+   "where": "load_weights -> bind_kernels: the first quantized linear's kernel instance, before warm-up and capture"
+  }
+ },
+ "bounded": {
+  "graphs-vs-eager-a4-3": {
+   "passed": true,
+   "sessions": 3,
+   "engine_args": "--plugin-options quant.act=a4",
+   "plant": null,
+   "configs": {
+    "baseline": {
+     "top1": 0.9329427083333334,
+     "kl_p50": 0.0057187691021982935,
+     "kl_p99": 0.5795251466446374,
+     "passed": true,
+     "failures": []
+    },
+    "graphs on": {
+     "top1": 0.9225260416666666,
+     "kl_p50": 0.0057187691021982935,
+     "kl_p99": 0.5795251466446374,
+     "passed": true,
+     "failures": []
+    }
+   }
+  },
+  "graphs-vs-eager-a4-5": {
+   "passed": true,
+   "sessions": 5,
+   "engine_args": "--plugin-options quant.act=a4",
+   "plant": null,
+   "configs": {
+    "baseline": {
+     "top1": 0.9296875,
+     "kl_p50": 0.0032143091637610857,
+     "kl_p99": 0.5162592234908158,
+     "passed": true,
+     "failures": []
+    },
+    "graphs on": {
+     "top1": 0.94609375,
+     "kl_p50": 0.0032143091637610857,
+     "kl_p99": 0.5162592234908158,
+     "passed": true,
+     "failures": []
+    }
+   }
+  },
+  "graphs-vs-eager-a4-12": {
+   "passed": true,
+   "sessions": 12,
+   "engine_args": "--plugin-options quant.act=a4",
+   "plant": null,
+   "configs": {
+    "baseline": {
+     "top1": 0.9298502604166666,
+     "kl_p50": 0.003051706723198311,
+     "kl_p99": 0.4590846313504036,
+     "passed": true,
+     "failures": []
+    },
+    "graphs on": {
+     "top1": 0.9298502604166666,
+     "kl_p50": 0.003051706723198311,
+     "kl_p99": 0.4590846313504036,
+     "passed": true,
+     "failures": []
+    }
+   }
+  },
+  "graphs-vs-eager-a4-20": {
+   "passed": true,
+   "sessions": 20,
+   "engine_args": "--plugin-options quant.act=a4",
+   "plant": null,
+   "configs": {
+    "baseline": {
+     "top1": 0.9271484375,
+     "kl_p50": 0.004210198448605946,
+     "kl_p99": 0.5607774082663459,
+     "passed": true,
+     "failures": []
+    },
+    "graphs on": {
+     "top1": 0.92744140625,
+     "kl_p50": 0.004210198448605946,
+     "kl_p99": 0.5607774082663459,
+     "passed": true,
+     "failures": []
+    }
+   }
+  },
+  "chunked-100": {
+   "passed": true,
+   "sessions": 48,
+   "engine_args": "",
+   "plant": null,
+   "configs": {
+    "baseline": {
+     "top1": 0.9856363932291666,
+     "kl_p50": 2.742995156986705e-05,
+     "kl_p99": 0.010500633871552766,
+     "passed": true,
+     "failures": []
+    },
+    "prefix on, depth 1": {
+     "top1": 0.984619140625,
+     "kl_p50": 4.444970462814714e-05,
+     "kl_p99": 0.011528565317065193,
+     "passed": true,
+     "failures": []
+    },
+    "prefix on, depth 0": {
+     "top1": 0.9857584635416666,
+     "kl_p50": 2.526550966731412e-05,
+     "kl_p99": 0.011747043904014426,
+     "passed": true,
+     "failures": []
+    },
+    "prefix off, depth 1": {
+     "top1": 0.9857991536458334,
+     "kl_p50": 2.765755367338154e-05,
+     "kl_p99": 0.010776909456202063,
+     "passed": true,
+     "failures": []
+    },
+    "chunked 100": {
+     "top1": 0.9854329427083334,
+     "kl_p50": 2.627483608668937e-05,
+     "kl_p99": 0.011460594409531257,
+     "passed": true,
+     "failures": []
+    }
+   }
+  }
+ },
+ "bounded_command": "python -m holon_judge bounded --model <file> --prompts judge/prompts/v1.jsonl (--graphs-vs-eager --sessions N --engine-args '--plugin-options quant.act=a4' | --chunked 100)"
+}

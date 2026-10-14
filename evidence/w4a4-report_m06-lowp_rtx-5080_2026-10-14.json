@@ -1,0 +1,145 @@
+{
+ "workload": "m06-a5-w4a4-report",
+ "date": "2026-10-14",
+ "commit": "f5a37b1",
+ "hardware": "NVIDIA GeForce RTX 5080",
+ "command": "python -m holon_judge l2 --model <8B file> --prompts judge/prompts/v1.jsonl --golden <file>/v1-fp32 --floor <file>/v1-bfloat16-mmq-fp4-floor --act a4 [--plant nvfp4-o-proj-scale2-1.25]",
+ "claim": "acceptance 7: the 8B NVFP4 and 8B MXFP4 at quant.act = a4 (prefill native W4A4-dynamic mmq) against the W4A4-dynamic floor; N9 (layer 18 o_proj scale2 x 1.25) predicted to pass (sim 1.01x); graphs vs eager at a4 in tier-b_m06-lowp_rtx-5080",
+ "results": {
+  "a4-qwen3-8b-nvfp4": {
+   "passed": false,
+   "failures": [
+    "top-1 93.7834% < 93.8231%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9378336332855444,
+    "top1_confident": 0.949153073045493,
+    "kl_mean": 0.03921913171021957,
+    "kl_p50": 0.0030465187807790168,
+    "kl_p99": 0.5485374536969304,
+    "kl_max": 13.14307864173928,
+    "dppl": 0.017340478334542466,
+    "dppl_se": 0.0035494386534854114,
+    "missing": 0.101267425189885
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9407314766799866,
+    "top1_confident": 0.9520335639813394,
+    "kl_mean": 0.03909551260797284,
+    "kl_p50": 0.0030703899163328496,
+    "kl_p99": 0.5261939724899662,
+    "kl_max": 13.703189404380883,
+    "dppl": 0.019173725622497962,
+    "dppl_se": 0.004138138887741669,
+    "missing": 0.10020132385687704
+   },
+   "kl_p99_over_floor": 1.0424624423218574,
+   "candidate": {
+    "model": "nvidia/Qwen3-8B-NVFP4",
+    "hardware": "NVIDIA GeForce RTX 5080",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/fp4": 1296,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "a4-qwen3-8b-mxfp4-yi30": {
+   "passed": false,
+   "failures": [
+    "top-1 88.2104% < 88.5033%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.8821035292682183,
+    "top1_confident": 0.8941729323308271,
+    "kl_mean": 0.1404611115980208,
+    "kl_p50": 0.015553836676454684,
+    "kl_p99": 2.025720435644538,
+    "kl_max": 27.936137496896492,
+    "dppl": 0.0942335958258933,
+    "dppl_se": 0.010293004440433141,
+    "missing": 0.18378885397919653
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.8875331726809627,
+    "top1_confident": 0.8990601503759399,
+    "kl_mean": 0.1341884039439091,
+    "kl_p50": 0.015209700333449228,
+    "kl_p99": 1.8686145086246764,
+    "kl_max": 27.48683949837178,
+    "dppl": 0.1015491558723624,
+    "dppl_se": 0.010790502188948047,
+    "missing": 0.18328859469847178
+   },
+   "kl_p99_over_floor": 1.084076157117871,
+   "candidate": {
+    "model": "Yi30/Qwen3-8B-MXFP4",
+    "hardware": "NVIDIA GeForce RTX 5080",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/fp4": 1296,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "N9-qwen3-8b-nvfp4": {
+   "passed": false,
+   "failures": [
+    "top-1 93.8230% < 93.8231%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9382301802763627,
+    "top1_confident": 0.9487147374682989,
+    "kl_mean": 0.042642764187991206,
+    "kl_p50": 0.003430107438348138,
+    "kl_p99": 0.5960293115638002,
+    "kl_max": 12.284500666662137,
+    "dppl": 0.021565007166213346,
+    "dppl_se": 0.003476596393342751,
+    "missing": 0.10398224689625721
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9407314766799866,
+    "top1_confident": 0.9520335639813394,
+    "kl_mean": 0.03909551260797284,
+    "kl_p50": 0.0030703899163328496,
+    "kl_p99": 0.5261939724899662,
+    "kl_max": 13.703189404380883,
+    "dppl": 0.019173725622497962,
+    "dppl_se": 0.004138138887741669,
+    "missing": 0.10020132385687704
+   },
+   "kl_p99_over_floor": 1.1327178620906109,
+   "candidate": {
+    "model": "nvidia/Qwen3-8B-NVFP4",
+    "hardware": "NVIDIA GeForce RTX 5080",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/fp4": 1296,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  }
+ },
+ "top1_paired_noise": [
+  "rtx-5080-a4-qwen3-8b-nvfp4               top1 93.7834% floor 94.0731% diff -0.2898% paired SE 0.1387% bar 0.3467% -> within; positions gained/lost (1044, 1139)",
+  "rtx-5080-N9-qwen3-8b-nvfp4               top1 93.8230% floor 94.0731% diff -0.2501% paired SE 0.1304% bar 0.3260% -> within; positions gained/lost (1036, 1118)",
+  "rtx-5080-a4-qwen3-8b-mxfp4-yi30          top1 88.2104% floor 88.7533% diff -0.5430% paired SE 0.1776% bar 0.4441% -> below; positions gained/lost (1661, 1839)"
+ ],
+ "noise_reference": {
+  "what": "the W4A4-dynamic floors recorded again on the RTX PRO 6000 (another bf16 realization of the same emulation), scored against the recorded floors as a candidate",
+  "lines": [
+   "qwen3-8b-nvfp4: second floor top-1 94.0121% vs 94.0731%: -0.0610% \u00b1 0.1281%; KL p99 5.597e-01 (1.06x); flips 1057/1077; L2: PASS",
+   "qwen3-8b-mxfp4-yi30: second floor top-1 88.3964% vs 88.7533%: -0.3569% \u00b1 0.2116%; KL p99 1.883e+00 (1.01x); flips 1686/1803; L2: FAIL top-1 88.3964% < 88.5033%"
+  ]
+ }
+}

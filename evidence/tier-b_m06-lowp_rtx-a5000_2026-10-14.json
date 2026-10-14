@@ -1,0 +1,965 @@
+{
+ "workload": "m06-a5-tier-b",
+ "date": "2026-10-14",
+ "commit": "f5a37b1",
+ "hardware": "NVIDIA RTX A5000",
+ "command": "python -m holon_judge l2 --model <file> --prompts judge/prompts/v1.jsonl --golden <file>/v1-fp32 --floor <file>/v1-bfloat16-<path>[-fp4]-floor [--max-step-tokens <gguf.mmvq_step>] [--act a4] [--plant <bug>]",
+ "claim": "Tier B at the default a8 (W4A8) on sm_86 against the W4A8 floor of the path taken (prefill whole prompts: mmq; decode in steps of gguf.mmvq_step tokens: mmvq), every quantized trunk call on the floor's path/mode; plants (multiples of the floor's KL p99): N2, N3 gross; N4 prefill fail 3-20x, decode pass; N5 prefill fail gross, decode pass; N6 pass on sm_86; N8 fail 4-8x; N8b 1.3-2.5x, fail if > 2x; M1 gross; M0.1's stale-q8_1 plants fail on the GGUF (its wrong-type plants have no twin type in the file); the structural test on the GPU (prepared ggml stacks read by gguf-py x scale2) exact, M1 fails it",
+ "results": {
+  "qwen3-8b-nvfp4-mmq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9887136625690144,
+    "top1_confident": 0.9963680766461066,
+    "kl_mean": 0.0010908081348493899,
+    "kl_p50": 8.8895659341065e-05,
+    "kl_p99": 0.011962449542830912,
+    "kl_max": 1.3582110457684953,
+    "dppl": 0.0011944227318311381,
+    "dppl_se": 0.00028244191708826,
+    "missing": 0.019859378336332854
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9869139493029924,
+    "top1_confident": 0.9958045023325715,
+    "kl_mean": 0.0010866066443534282,
+    "kl_p50": 9.276431378843588e-05,
+    "kl_p99": 0.012432035549544392,
+    "kl_max": 0.5793764279805961,
+    "dppl": 0.0016297106640261584,
+    "dppl_se": 0.00030873543770328397,
+    "missing": 0.02025592532715127
+   },
+   "kl_p99_over_floor": 0.9622277458231135,
+   "candidate": {
+    "model": "nvidia/Qwen3-8B-NVFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 1296,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "qwen3-30b-a3b-nvfp4-mmq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9837110697617668,
+    "top1_confident": 0.991546044422261,
+    "kl_mean": 0.0032522173681370273,
+    "kl_p50": 0.0001444966749137682,
+    "kl_p99": 0.04649733676787399,
+    "kl_max": 1.944175131723128,
+    "dppl": -0.00033587989143310027,
+    "dppl_se": 0.0013087698966563798,
+    "missing": 0.03516456700118964
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9835890553030534,
+    "top1_confident": 0.9919203893186923,
+    "kl_mean": 0.0034672570251119074,
+    "kl_p50": 0.0001505307219022891,
+    "kl_p99": 0.04922038529786812,
+    "kl_max": 3.697089809746299,
+    "dppl": -0.00022441974676365762,
+    "dppl_se": 0.0007166486054759414,
+    "missing": 0.03594088399475338
+   },
+   "kl_p99_over_floor": 0.9446764076811874,
+   "candidate": {
+    "model": "nvidia/Qwen3-30B-A3B-NVFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 7104,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "qwen3-30b-a3b-mxfp4-amd-quark-mmq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.984992221578257,
+    "top1_confident": 0.9931355112484009,
+    "kl_mean": 0.002771974369595792,
+    "kl_p50": 0.00011152777273741513,
+    "kl_p99": 0.03636081280461895,
+    "kl_max": 1.751758908241285,
+    "dppl": 0.0014448243286415258,
+    "dppl_se": 0.0008540080900925714,
+    "missing": 0.031449226733367905
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9851447396516487,
+    "top1_confident": 0.9931043090268027,
+    "kl_mean": 0.0026070534564671182,
+    "kl_p50": 0.00011865516292326147,
+    "kl_p99": 0.03605106956240377,
+    "kl_max": 1.4693810361026396,
+    "dppl": 0.0017116375833714714,
+    "dppl_se": 0.0007995948981773088,
+    "missing": 0.03275935698380258
+   },
+   "kl_p99_over_floor": 1.0085917906451851,
+   "candidate": {
+    "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 6240,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "qwen3-8b-nvfp4-mmvq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9875850288259159,
+    "top1_confident": 0.9955540248598892,
+    "kl_mean": 0.0010205691315572434,
+    "kl_p50": 9.109373866633013e-05,
+    "kl_p99": 0.011686020827506157,
+    "kl_max": 0.4518528233284474,
+    "dppl": 0.0010710607929853737,
+    "dppl_se": 0.0004559585739475947,
+    "missing": 0.019502486044596284
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9877680505139859,
+    "top1_confident": 0.9955227151758039,
+    "kl_mean": 0.0011637053725555653,
+    "kl_p50": 9.84134386871059e-05,
+    "kl_p99": 0.014180035790287687,
+    "kl_max": 0.838303612794724,
+    "dppl": 0.001171134580671043,
+    "dppl_se": 0.0003056316796894523,
+    "missing": 0.020850745813378885
+   },
+   "kl_p99_over_floor": 0.8241178654506817,
+   "candidate": {
+    "model": "nvidia/Qwen3-8B-NVFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 8,
+    "calls": {
+     "mmq/q8_1": 0,
+     "mmvq/q8_1": 590544
+    },
+    "head_calls": null
+   }
+  },
+  "qwen3-30b-a3b-nvfp4-mmvq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9830399902388433,
+    "top1_confident": 0.9917332168704767,
+    "kl_mean": 0.0033856010520055308,
+    "kl_p50": 0.00014656097151121277,
+    "kl_p99": 0.04915060276830481,
+    "kl_max": 2.088385114098857,
+    "dppl": 0.00021030089380254585,
+    "dppl_se": 0.0006770182591733557,
+    "missing": 0.03517219290485923
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9831009974682,
+    "top1_confident": 0.9912964811579735,
+    "kl_mean": 0.0037078402433992613,
+    "kl_p50": 0.0001471432039839818,
+    "kl_p99": 0.052320430411248946,
+    "kl_max": 2.3856661242051342,
+    "dppl": 0.0013823727178903713,
+    "dppl_se": 0.0007505242943248078,
+    "missing": 0.035515358569990545
+   },
+   "kl_p99_over_floor": 0.9394151076734526,
+   "candidate": {
+    "model": "nvidia/Qwen3-30B-A3B-NVFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 8,
+    "calls": {
+     "mmq/q8_1": 0,
+     "mmvq/q8_1": 787392
+    },
+    "head_calls": null
+   }
+  },
+  "qwen3-30b-a3b-mxfp4-amd-quark-mmvq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9850837324222921,
+    "top1_confident": 0.9928858934756155,
+    "kl_mean": 0.0025940713490295517,
+    "kl_p50": 0.00011628237603123644,
+    "kl_p99": 0.03633120589155303,
+    "kl_max": 2.728360551925262,
+    "dppl": 0.0014646366775248126,
+    "dppl_se": 0.0007131896070261216,
+    "missing": 0.031966263002165755
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9849617179635787,
+    "top1_confident": 0.9927922868108209,
+    "kl_mean": 0.0026750754577681258,
+    "kl_p50": 0.00011711817517248005,
+    "kl_p99": 0.036127101956129205,
+    "kl_max": 1.1547337736478476,
+    "dppl": 0.00043535630346709967,
+    "dppl_se": 0.0007739353293412473,
+    "missing": 0.03288137144251594
+   },
+   "kl_p99_over_floor": 1.0056496072026946,
+   "candidate": {
+    "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 7,
+    "calls": {
+     "mmq/q8_1": 0,
+     "mmvq/q8_1": 449952
+    },
+    "head_calls": null
+   }
+  },
+  "qwen3-30b-a3b-instruct-2507-mxfp4_moe-mmq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9840771131379068,
+    "top1_confident": 0.9928824506945098,
+    "kl_mean": 0.002339728763400061,
+    "kl_p50": 0.00016353272531285666,
+    "kl_p99": 0.026227715221744094,
+    "kl_max": 5.002792404275472,
+    "dppl": 0.0004207582745514709,
+    "dppl_se": 0.0007511758269072409,
+    "missing": 0.031354665527865054
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9846871854314736,
+    "top1_confident": 0.9934468378641081,
+    "kl_mean": 0.0024167732289097368,
+    "kl_p50": 0.00016811535661480213,
+    "kl_p99": 0.02812524872900962,
+    "kl_max": 3.41481728629666,
+    "dppl": 0.0008127186694442273,
+    "dppl_se": 0.0008280645518325679,
+    "missing": 0.032210291919592474
+   },
+   "kl_p99_over_floor": 0.932532738623985,
+   "candidate": {
+    "model": "Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 7104,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": {
+     "mmq/q8_1": 144,
+     "mmvq/q8_1": 10
+    }
+   }
+  },
+  "qwen3-30b-a3b-instruct-2507-mxfp4_moe-mmvq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9840161059085502,
+    "top1_confident": 0.9931959991220644,
+    "kl_mean": 0.002443493286658173,
+    "kl_p50": 0.00016120206132925785,
+    "kl_p99": 0.02596442658574211,
+    "kl_max": 4.405330803777888,
+    "dppl": 0.00098377712867774,
+    "dppl_se": 0.0010035492289313195,
+    "missing": 0.031729859988408625
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9843516456700119,
+    "top1_confident": 0.9936036120778854,
+    "kl_mean": 0.0025901590867674876,
+    "kl_p50": 0.0001697824174553487,
+    "kl_p99": 0.02802159249545491,
+    "kl_max": 9.34181833308914,
+    "dppl": 0.0010626866095825884,
+    "dppl_se": 0.0009447715039790155,
+    "missing": 0.032493975536101026
+   },
+   "kl_p99_over_floor": 0.926586402609114,
+   "candidate": {
+    "model": "Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 7,
+    "calls": {
+     "mmq/q8_1": 0,
+     "mmvq/q8_1": 899904
+    },
+    "head_calls": {
+     "mmq/q8_1": 0,
+     "mmvq/q8_1": 4728
+    }
+   }
+  },
+  "qwen3-30b-a3b-instruct-2507-mxfp4_moe-mmq-before-the-head-fix": {
+   "passed": false,
+   "failures": [
+    "10 calls on mmvq/q8_1, the floor emulates mmq/q8_1"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9840771131379068,
+    "top1_confident": 0.9928824506945098,
+    "kl_mean": 0.002339728763400061,
+    "kl_p50": 0.00016353272531285666,
+    "kl_p99": 0.026227715221744094,
+    "kl_max": 5.002792404275472,
+    "dppl": 0.0004207582745514709,
+    "dppl_se": 0.0007511758269072409,
+    "missing": 0.031354665527865054
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9846871854314736,
+    "top1_confident": 0.9934468378641081,
+    "kl_mean": 0.0024167732289097368,
+    "kl_p50": 0.00016811535661480213,
+    "kl_p99": 0.02812524872900962,
+    "kl_max": 3.41481728629666,
+    "dppl": 0.0008127186694442273,
+    "dppl_se": 0.0008280645518325679,
+    "missing": 0.032210291919592474
+   },
+   "kl_p99_over_floor": 0.932532738623985,
+   "candidate": {
+    "model": "Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 7248,
+     "mmvq/q8_1": 10
+    },
+    "head_calls": null
+   }
+  }
+ },
+ "plants": {
+  "N2-qwen3-8b-nvfp4-mmq": {
+   "passed": false,
+   "failures": [
+    "top-1 0.0000% < 98.4414%",
+    "KL p50 4.894e+00 > 1.855e-04",
+    "KL p99 6.375e+00 > 2.486e-02",
+    "|\u0394PPL vs floor| 2346628292.656% > 0.359%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.0,
+    "top1_confident": 0.0,
+    "kl_mean": 4.611514888021185,
+    "kl_p50": 4.894003123194533,
+    "kl_p99": 6.374742979074313,
+    "kl_max": 10.86207360584536,
+    "dppl": 23504526.17972236,
+    "dppl_se": 4558724.18014483,
+    "missing": 0.9997391940945002
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9869139493029924,
+    "top1_confident": 0.9958045023325715,
+    "kl_mean": 0.0010866066443534282,
+    "kl_p50": 9.276431378843588e-05,
+    "kl_p99": 0.012432035549544392,
+    "kl_max": 0.5793764279805961,
+    "dppl": 0.0016297106640261584,
+    "dppl_se": 0.00030873543770328397,
+    "missing": 0.02025592532715127
+   },
+   "kl_p99_over_floor": 512.7674348797959,
+   "candidate": {
+    "model": "nvidia/Qwen3-8B-NVFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 1296,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "N3-qwen3-8b-nvfp4-mmq": {
+   "passed": false,
+   "failures": [
+    "top-1 0.0000% < 98.4414%",
+    "KL p50 7.617e+00 > 1.855e-04",
+    "KL p99 9.208e+00 > 2.486e-02",
+    "|\u0394PPL vs floor| 46038604.619% > 0.359%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.0,
+    "top1_confident": 0.0,
+    "kl_mean": 7.321159873951493,
+    "kl_p50": 7.617214427276857,
+    "kl_p99": 9.208324977018718,
+    "kl_max": 9.51420007610316,
+    "dppl": 461136.3438686804,
+    "dppl_se": 114692.28865458847,
+    "missing": 0.983671415062685
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9869139493029924,
+    "top1_confident": 0.9958045023325715,
+    "kl_mean": 0.0010866066443534282,
+    "kl_p50": 9.276431378843588e-05,
+    "kl_p99": 0.012432035549544392,
+    "kl_max": 0.5793764279805961,
+    "dppl": 0.0016297106640261584,
+    "dppl_se": 0.00030873543770328397,
+    "missing": 0.02025592532715127
+   },
+   "kl_p99_over_floor": 740.6932630076161,
+   "candidate": {
+    "model": "nvidia/Qwen3-8B-NVFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 1296,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "N8-qwen3-8b-nvfp4-mmq": {
+   "passed": false,
+   "failures": [
+    "top-1 97.9105% < 98.4414%",
+    "KL p50 3.174e-04 > 1.855e-04",
+    "KL p99 6.058e-02 > 2.486e-02",
+    "|\u0394PPL vs floor| 0.408% > 0.359%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9791050239453375,
+    "top1_confident": 0.9879770813112496,
+    "kl_mean": 0.004954612956282965,
+    "kl_p50": 0.00031739781556957343,
+    "kl_p99": 0.0605849184523008,
+    "kl_max": 4.571752385113734,
+    "dppl": 0.005716242696535022,
+    "dppl_se": 0.0010544505327972598,
+    "missing": 0.03423268157276637
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9869139493029924,
+    "top1_confident": 0.9958045023325715,
+    "kl_mean": 0.0010866066443534282,
+    "kl_p50": 9.276431378843588e-05,
+    "kl_p99": 0.012432035549544392,
+    "kl_max": 0.5793764279805961,
+    "dppl": 0.0016297106640261584,
+    "dppl_se": 0.00030873543770328397,
+    "missing": 0.02025592532715127
+   },
+   "kl_p99_over_floor": 4.873290316043306,
+   "candidate": {
+    "model": "nvidia/Qwen3-8B-NVFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 1296,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "N8b-qwen3-8b-nvfp4-mmq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9851142360369703,
+    "top1_confident": 0.9939259212874542,
+    "kl_mean": 0.001758047982238129,
+    "kl_p50": 0.00012688891517009744,
+    "kl_p99": 0.021093895204126703,
+    "kl_max": 1.7684775521304401,
+    "dppl": 0.0018484322942776215,
+    "dppl_se": 0.0005978050604042636,
+    "missing": 0.02292194125003813
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9869139493029924,
+    "top1_confident": 0.9958045023325715,
+    "kl_mean": 0.0010866066443534282,
+    "kl_p50": 9.276431378843588e-05,
+    "kl_p99": 0.012432035549544392,
+    "kl_max": 0.5793764279805961,
+    "dppl": 0.0016297106640261584,
+    "dppl_se": 0.00030873543770328397,
+    "missing": 0.02025592532715127
+   },
+   "kl_p99_over_floor": 1.696737040371458,
+   "candidate": {
+    "model": "nvidia/Qwen3-8B-NVFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 1296,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "N6-qwen3-8b-nvfp4-mmq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9887136625690144,
+    "top1_confident": 0.9963680766461066,
+    "kl_mean": 0.0010908081348493899,
+    "kl_p50": 8.8895659341065e-05,
+    "kl_p99": 0.011962449542830912,
+    "kl_max": 1.3582110457684953,
+    "dppl": 0.0011944227318311381,
+    "dppl_se": 0.00028244191708826,
+    "missing": 0.019859378336332854
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9869139493029924,
+    "top1_confident": 0.9958045023325715,
+    "kl_mean": 0.0010866066443534282,
+    "kl_p50": 9.276431378843588e-05,
+    "kl_p99": 0.012432035549544392,
+    "kl_max": 0.5793764279805961,
+    "dppl": 0.0016297106640261584,
+    "dppl_se": 0.00030873543770328397,
+    "missing": 0.02025592532715127
+   },
+   "kl_p99_over_floor": 0.9622277458231135,
+   "candidate": {
+    "model": "nvidia/Qwen3-8B-NVFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 1296,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "N4-qwen3-30b-a3b-nvfp4-mmq": {
+   "passed": false,
+   "failures": [
+    "top-1 79.9439% < 98.1089%",
+    "KL p50 5.979e-02 > 3.011e-04",
+    "KL p99 4.988e+00 > 9.844e-02",
+    "|\u0394PPL vs floor| 31.143% > 0.503%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.7994387334899186,
+    "top1_confident": 0.8084913900673821,
+    "kl_mean": 0.41114817094430983,
+    "kl_p50": 0.059790710310757306,
+    "kl_p99": 4.988010163598818,
+    "kl_max": 15.132350443055875,
+    "dppl": 0.3111386469905645,
+    "dppl_se": 0.03748041664047813,
+    "missing": 0.3114586828539182
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9835890553030534,
+    "top1_confident": 0.9919203893186923,
+    "kl_mean": 0.0034672570251119074,
+    "kl_p50": 0.0001505307219022891,
+    "kl_p99": 0.04922038529786812,
+    "kl_max": 3.697089809746299,
+    "dppl": -0.00022441974676365762,
+    "dppl_se": 0.0007166486054759414,
+    "missing": 0.03594088399475338
+   },
+   "kl_p99_over_floor": 101.34033151940531,
+   "candidate": {
+    "model": "nvidia/Qwen3-30B-A3B-NVFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 7104,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "N4-qwen3-30b-a3b-nvfp4-mmvq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9830399902388433,
+    "top1_confident": 0.9917332168704767,
+    "kl_mean": 0.0033856010520055308,
+    "kl_p50": 0.00014656097151121277,
+    "kl_p99": 0.04915060276830481,
+    "kl_max": 2.088385114098857,
+    "dppl": 0.00021030089380254585,
+    "dppl_se": 0.0006770182591733557,
+    "missing": 0.03517219290485923
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9831009974682,
+    "top1_confident": 0.9912964811579735,
+    "kl_mean": 0.0037078402433992613,
+    "kl_p50": 0.0001471432039839818,
+    "kl_p99": 0.052320430411248946,
+    "kl_max": 2.3856661242051342,
+    "dppl": 0.0013823727178903713,
+    "dppl_se": 0.0007505242943248078,
+    "missing": 0.035515358569990545
+   },
+   "kl_p99_over_floor": 0.9394151076734526,
+   "candidate": {
+    "model": "nvidia/Qwen3-30B-A3B-NVFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 8,
+    "calls": {
+     "mmq/q8_1": 0,
+     "mmvq/q8_1": 787392
+    },
+    "head_calls": null
+   }
+  },
+  "N5-qwen3-30b-a3b-nvfp4-mmq": {
+   "passed": false,
+   "failures": [
+    "top-1 72.1075% < 98.1089%",
+    "KL p50 1.570e-01 > 3.011e-04",
+    "KL p99 8.375e+00 > 9.844e-02",
+    "|\u0394PPL vs floor| 119.098% > 0.503%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.7210749473812647,
+    "top1_confident": 0.7302845021212877,
+    "kl_mean": 0.8710944074173576,
+    "kl_p50": 0.1570094052662279,
+    "kl_p99": 8.374630924563311,
+    "kl_max": 30.19596964500611,
+    "dppl": 1.1904885510185117,
+    "dppl_se": 0.0795993226917643,
+    "missing": 0.40990757404752465
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9835890553030534,
+    "top1_confident": 0.9919203893186923,
+    "kl_mean": 0.0034672570251119074,
+    "kl_p50": 0.0001505307219022891,
+    "kl_p99": 0.04922038529786812,
+    "kl_max": 3.697089809746299,
+    "dppl": -0.00022441974676365762,
+    "dppl_se": 0.0007166486054759414,
+    "missing": 0.03594088399475338
+   },
+   "kl_p99_over_floor": 170.14557837941268,
+   "candidate": {
+    "model": "nvidia/Qwen3-30B-A3B-NVFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 7104,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "N5-qwen3-30b-a3b-nvfp4-mmvq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9830399902388433,
+    "top1_confident": 0.9917332168704767,
+    "kl_mean": 0.0033856010520055308,
+    "kl_p50": 0.00014656097151121277,
+    "kl_p99": 0.04915060276830481,
+    "kl_max": 2.088385114098857,
+    "dppl": 0.00021030089380254585,
+    "dppl_se": 0.0006770182591733557,
+    "missing": 0.03517219290485923
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9831009974682,
+    "top1_confident": 0.9912964811579735,
+    "kl_mean": 0.0037078402433992613,
+    "kl_p50": 0.0001471432039839818,
+    "kl_p99": 0.052320430411248946,
+    "kl_max": 2.3856661242051342,
+    "dppl": 0.0013823727178903713,
+    "dppl_se": 0.0007505242943248078,
+    "missing": 0.035515358569990545
+   },
+   "kl_p99_over_floor": 0.9394151076734526,
+   "candidate": {
+    "model": "nvidia/Qwen3-30B-A3B-NVFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 8,
+    "calls": {
+     "mmq/q8_1": 0,
+     "mmvq/q8_1": 787392
+    },
+    "head_calls": null
+   }
+  },
+  "M1-qwen3-30b-a3b-mxfp4-amd-quark-mmq": {
+   "passed": false,
+   "failures": [
+    "top-1 0.9060% < 98.2645%",
+    "KL p50 5.098e+00 > 2.373e-04",
+    "KL p99 9.621e+00 > 7.210e-02",
+    "|\u0394PPL vs floor| 30446807.363% > 0.533%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.009059573559466797,
+    "top1_confident": 0.009048644263471559,
+    "kl_mean": 5.069707974399529,
+    "kl_p50": 5.098123230718911,
+    "kl_p99": 9.620854240061389,
+    "kl_max": 16.320814569162568,
+    "dppl": 304989.21433502506,
+    "dppl_se": 55105.16204836724,
+    "missing": 0.9710215660555775
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9851447396516487,
+    "top1_confident": 0.9931043090268027,
+    "kl_mean": 0.0026070534564671182,
+    "kl_p50": 0.00011865516292326147,
+    "kl_p99": 0.03605106956240377,
+    "kl_max": 1.4693810361026396,
+    "dppl": 0.0017116375833714714,
+    "dppl_se": 0.0007995948981773088,
+    "missing": 0.03275935698380258
+   },
+   "kl_p99_over_floor": 266.86737333570255,
+   "candidate": {
+    "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 6240,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  },
+  "stale-qwen3-30b-a3b-instruct-2507-mxfp4_moe-mmq": {
+   "passed": false,
+   "failures": [
+    "top-1 94.4392% < 98.2187%",
+    "KL p50 1.196e-03 > 3.362e-04",
+    "KL p99 1.063e+00 > 5.625e-02",
+    "|\u0394PPL vs floor| 14.522% > 0.543%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9443919104413873,
+    "top1_confident": 0.9549117361176434,
+    "kl_mean": 0.09475488536013447,
+    "kl_p50": 0.0011960213909440788,
+    "kl_p99": 1.0628279220896313,
+    "kl_max": 30.674721271230556,
+    "dppl": 0.14614772582472985,
+    "dppl_se": 0.1417256900886267,
+    "missing": 0.08348381783241314
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9846871854314736,
+    "top1_confident": 0.9934468378641081,
+    "kl_mean": 0.0024167732289097368,
+    "kl_p50": 0.00016811535661480213,
+    "kl_p99": 0.02812524872900962,
+    "kl_max": 3.41481728629666,
+    "dppl": 0.0008127186694442273,
+    "dppl_se": 0.0008280645518325679,
+    "missing": 0.032210291919592474
+   },
+   "kl_p99_over_floor": 37.789103034434106,
+   "candidate": {
+    "model": "Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 7104,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": {
+     "mmq/q8_1": 144,
+     "mmvq/q8_1": 10
+    }
+   },
+   "fired": "{'mmq': 46, 'mmvq': 25}"
+  },
+  "experts-stale-qwen3-30b-a3b-instruct-2507-mxfp4_moe-mmq": {
+   "passed": false,
+   "failures": [
+    "top-1 94.3690% < 98.2187%",
+    "KL p50 9.647e-04 > 3.362e-04",
+    "KL p99 8.667e-01 > 5.625e-02",
+    "|\u0394PPL vs floor| 2.985% > 0.543%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9436903273037855,
+    "top1_confident": 0.9544727683190669,
+    "kl_mean": 0.04844647732230588,
+    "kl_p50": 0.0009646534359001356,
+    "kl_p99": 0.8667392219809393,
+    "kl_max": 13.18630534218684,
+    "dppl": 0.03069143014869588,
+    "dppl_se": 0.009094823722589834,
+    "missing": 0.09133087270841594
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9846871854314736,
+    "top1_confident": 0.9934468378641081,
+    "kl_mean": 0.0024167732289097368,
+    "kl_p50": 0.00016811535661480213,
+    "kl_p99": 0.02812524872900962,
+    "kl_max": 3.41481728629666,
+    "dppl": 0.0008127186694442273,
+    "dppl_se": 0.0008280645518325679,
+    "missing": 0.032210291919592474
+   },
+   "kl_p99_over_floor": 30.817122021998205,
+   "candidate": {
+    "model": "Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 7104,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": {
+     "mmq/q8_1": 144,
+     "mmvq/q8_1": 10
+    }
+   },
+   "fired": "{'mmq': 113, 'mmvq': 18}"
+  },
+  "experts-stale-qwen3-30b-a3b-instruct-2507-mxfp4_moe-mmvq": {
+   "passed": false,
+   "failures": [
+    "top-1 91.3004% < 98.1852%",
+    "KL p50 4.097e-03 > 3.396e-04",
+    "KL p99 4.643e+00 > 5.604e-02",
+    "|\u0394PPL vs floor| 17.934% > 0.584%"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9130036909373761,
+    "top1_confident": 0.9249365064434202,
+    "kl_mean": 0.1448177804605391,
+    "kl_p50": 0.004096917009701758,
+    "kl_p99": 4.643227158656815,
+    "kl_max": 18.824990321836047,
+    "dppl": 0.18058850583524094,
+    "dppl_se": 0.007438831277716024,
+    "missing": 0.12719244730500565
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9843516456700119,
+    "top1_confident": 0.9936036120778854,
+    "kl_mean": 0.0025901590867674876,
+    "kl_p50": 0.0001697824174553487,
+    "kl_p99": 0.02802159249545491,
+    "kl_max": 9.34181833308914,
+    "dppl": 0.0010626866095825884,
+    "dppl_se": 0.0009447715039790155,
+    "missing": 0.032493975536101026
+   },
+   "kl_p99_over_floor": 165.7017587208844,
+   "candidate": {
+    "model": "Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE",
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 7,
+    "calls": {
+     "mmq/q8_1": 0,
+     "mmvq/q8_1": 899904
+    },
+    "head_calls": {
+     "mmq/q8_1": 0,
+     "mmvq/q8_1": 4728
+    }
+   },
+   "fired": "{'mmq': 41, 'mmvq': 4657}"
+  }
+ },
+ "structure": {
+  "qwen3-30b-a3b-nvfp4": {
+   "model": "nvidia/Qwen3-30B-A3B-NVFP4",
+   "plant": null,
+   "mismatches": 0,
+   "first": []
+  },
+  "qwen3-30b-a3b-mxfp4-amd-quark": {
+   "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+   "plant": null,
+   "mismatches": 0,
+   "first": []
+  },
+  "M1-qwen3-30b-a3b-mxfp4-amd-quark": {
+   "model": "amd-quark/Qwen3-30B-A3B-MXFP4",
+   "plant": "mxfp4-repack-scale-off-by-one",
+   "mismatches": 18432,
+   "first": [
+    "model.layers.0.mlp.experts.0.gate_proj.weight",
+    "model.layers.0.mlp.experts.0.up_proj.weight",
+    "model.layers.0.mlp.experts.0.down_proj.weight",
+    "model.layers.0.mlp.experts.1.gate_proj.weight",
+    "model.layers.0.mlp.experts.1.up_proj.weight",
+    "model.layers.0.mlp.experts.1.down_proj.weight",
+    "model.layers.0.mlp.experts.2.gate_proj.weight",
+    "model.layers.0.mlp.experts.2.up_proj.weight"
+   ]
+  }
+ },
+ "structure_command": "python -m holon_judge structure --model <file> [--act a4] [--plant <bug>]"
+}

@@ -1,0 +1,327 @@
+{
+ "workload": "m06-a5-tier-b",
+ "date": "2026-10-14",
+ "commit": "f5a37b1",
+ "hardware": "NVIDIA GeForce RTX 4090",
+ "command": "python -m holon_judge l2 --model <file> --prompts judge/prompts/v1.jsonl --golden <file>/v1-fp32 --floor <file>/v1-bfloat16-<path>[-fp4]-floor [--max-step-tokens <gguf.mmvq_step>] [--act a4] [--plant <bug>]",
+ "claim": "Tier B at a8 on sm_89 (the GGUF MXFP4_MOE, both paths); N6 passes on sm_89; bounded graphs vs eager on the 30B NVFP4 (a8) at decode batches 3, 5, 12, 20 pass, the padding plant fails where the padded bucket's expert path is mmq (12) and passes on mmvq (5)",
+ "clock_screen": {
+  "load": "60 s of bf16 8192^2 matmuls, nvidia-smi every 250 ms",
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "samples": 231,
+  "sm_clock_mhz": {
+   "median": 2670.0,
+   "min": 2655.0,
+   "p5": 2670.0,
+   "max_sm": 3105.0
+  },
+  "thermal_slowdown_share": {
+   "sw": 0.0,
+   "hw": 0.0
+  },
+  "hw_slowdown_share": 0.0,
+  "power_cap_share": 0.0
+ },
+ "results": {
+  "qwen3-30b-a3b-instruct-2507-mxfp4_moe-mmq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9843821492846903,
+    "top1_confident": 0.9934468378641081,
+    "kl_mean": 0.0022782526911249777,
+    "kl_p50": 0.00016153648556217488,
+    "kl_p99": 0.02638921015101883,
+    "kl_max": 2.1217528672019728,
+    "dppl": 0.000964349107518227,
+    "dppl_se": 0.0008509592812951212,
+    "missing": 0.03155293902327426
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9846871854314736,
+    "top1_confident": 0.9934468378641081,
+    "kl_mean": 0.0024167732289097368,
+    "kl_p50": 0.00016811535661480213,
+    "kl_p99": 0.02812524872900962,
+    "kl_max": 3.41481728629666,
+    "dppl": 0.0008127186694442273,
+    "dppl_se": 0.0008280645518325679,
+    "missing": 0.032210291919592474
+   },
+   "kl_p99_over_floor": 0.938274729773317,
+   "candidate": {
+    "model": "Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE",
+    "hardware": "NVIDIA GeForce RTX 4090",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 7104,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": {
+     "mmq/q8_1": 144,
+     "mmvq/q8_1": 10
+    }
+   }
+  },
+  "qwen3-30b-a3b-instruct-2507-mxfp4_moe-mmvq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9852057468810054,
+    "top1_confident": 0.9940112250337064,
+    "kl_mean": 0.002178671219430569,
+    "kl_p50": 0.0001640845127528036,
+    "kl_p99": 0.02338510954662909,
+    "kl_max": 4.428561300566244,
+    "dppl": 0.00016683339665021874,
+    "dppl_se": 0.0008724101453050361,
+    "missing": 0.03207455083427386
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9843516456700119,
+    "top1_confident": 0.9936036120778854,
+    "kl_mean": 0.0025901590867674876,
+    "kl_p50": 0.0001697824174553487,
+    "kl_p99": 0.02802159249545491,
+    "kl_max": 9.34181833308914,
+    "dppl": 0.0010626866095825884,
+    "dppl_se": 0.0009447715039790155,
+    "missing": 0.032493975536101026
+   },
+   "kl_p99_over_floor": 0.8345389203137596,
+   "candidate": {
+    "model": "Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE",
+    "hardware": "NVIDIA GeForce RTX 4090",
+    "max_step_tokens": 8,
+    "calls": {
+     "mmq/q8_1": 0,
+     "mmvq/q8_1": 791537
+    },
+    "head_calls": null
+   }
+  },
+  "qwen3-30b-a3b-instruct-2507-mxfp4_moe-mmq-before-the-head-fix": {
+   "passed": false,
+   "failures": [
+    "10 calls on mmvq/q8_1, the floor emulates mmq/q8_1"
+   ],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9843821492846903,
+    "top1_confident": 0.9934468378641081,
+    "kl_mean": 0.0022782526911249777,
+    "kl_p50": 0.00016153648556217488,
+    "kl_p99": 0.02638921015101883,
+    "kl_max": 2.1217528672019728,
+    "dppl": 0.000964349107518227,
+    "dppl_se": 0.0008509592812951212,
+    "missing": 0.03155293902327426
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9846871854314736,
+    "top1_confident": 0.9934468378641081,
+    "kl_mean": 0.0024167732289097368,
+    "kl_p50": 0.00016811535661480213,
+    "kl_p99": 0.02812524872900962,
+    "kl_max": 3.41481728629666,
+    "dppl": 0.0008127186694442273,
+    "dppl_se": 0.0008280645518325679,
+    "missing": 0.032210291919592474
+   },
+   "kl_p99_over_floor": 0.938274729773317,
+   "candidate": {
+    "model": "Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE",
+    "hardware": "NVIDIA GeForce RTX 4090",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 7248,
+     "mmvq/q8_1": 10
+    },
+    "head_calls": null
+   }
+  }
+ },
+ "plants": {
+  "N6-qwen3-8b-nvfp4-mmq": {
+   "passed": true,
+   "failures": [],
+   "overall": {
+    "n": 32783,
+    "top1": 0.9875850288259159,
+    "top1_confident": 0.9955853345439745,
+    "kl_mean": 0.00106547312577711,
+    "kl_p50": 8.86948168799252e-05,
+    "kl_p99": 0.012644637330195994,
+    "kl_max": 0.7886333415698714,
+    "dppl": 0.001218023118756407,
+    "dppl_se": 0.0003504403966967458,
+    "missing": 0.019430802550102187
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9869139493029924,
+    "top1_confident": 0.9958045023325715,
+    "kl_mean": 0.0010866066443534282,
+    "kl_p50": 9.276431378843588e-05,
+    "kl_p99": 0.012432035549544392,
+    "kl_max": 0.5793764279805961,
+    "dppl": 0.0016297106640261584,
+    "dppl_se": 0.00030873543770328397,
+    "missing": 0.02025592532715127
+   },
+   "kl_p99_over_floor": 1.0171011239313414,
+   "candidate": {
+    "model": "nvidia/Qwen3-8B-NVFP4",
+    "hardware": "NVIDIA GeForce RTX 4090",
+    "max_step_tokens": 4096,
+    "calls": {
+     "mmq/q8_1": 1296,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   }
+  }
+ },
+ "bounded": {
+  "graphs-vs-eager-3": {
+   "passed": true,
+   "sessions": 3,
+   "engine_args": "",
+   "plant": null,
+   "configs": {
+    "baseline": {
+     "top1": 0.978515625,
+     "kl_p50": 0.00018318859073378546,
+     "kl_p99": 0.03215074391516824,
+     "passed": true,
+     "failures": []
+    },
+    "graphs on": {
+     "top1": 0.98046875,
+     "kl_p50": 0.00018318859073378546,
+     "kl_p99": 0.03215074391516824,
+     "passed": true,
+     "failures": []
+    }
+   }
+  },
+  "graphs-vs-eager-5": {
+   "passed": true,
+   "sessions": 5,
+   "engine_args": "",
+   "plant": null,
+   "configs": {
+    "baseline": {
+     "top1": 0.982421875,
+     "kl_p50": 5.1406178603230975e-05,
+     "kl_p99": 0.03237455441479653,
+     "passed": true,
+     "failures": []
+    },
+    "graphs on": {
+     "top1": 0.983984375,
+     "kl_p50": 5.1406178603230975e-05,
+     "kl_p99": 0.03237455441479653,
+     "passed": true,
+     "failures": []
+    }
+   }
+  },
+  "graphs-vs-eager-12": {
+   "passed": true,
+   "sessions": 12,
+   "engine_args": "",
+   "plant": null,
+   "configs": {
+    "baseline": {
+     "top1": 0.9827473958333334,
+     "kl_p50": 5.163772418532108e-05,
+     "kl_p99": 0.030905274968697518,
+     "passed": true,
+     "failures": []
+    },
+    "graphs on": {
+     "top1": 0.9825846354166666,
+     "kl_p50": 5.163772418532108e-05,
+     "kl_p99": 0.030905274968697518,
+     "passed": true,
+     "failures": []
+    }
+   }
+  },
+  "graphs-vs-eager-20": {
+   "passed": true,
+   "sessions": 20,
+   "engine_args": "",
+   "plant": null,
+   "configs": {
+    "baseline": {
+     "top1": 0.98330078125,
+     "kl_p50": 7.871772036363708e-05,
+     "kl_p99": 0.029272528616096062,
+     "passed": true,
+     "failures": []
+    },
+    "graphs on": {
+     "top1": 0.98154296875,
+     "kl_p50": 7.871772036363708e-05,
+     "kl_p99": 0.029272528616096062,
+     "passed": true,
+     "failures": []
+    }
+   }
+  },
+  "graphs-vs-eager-padding-plant-5": {
+   "passed": true,
+   "sessions": 5,
+   "engine_args": "",
+   "plant": "moe-padding-duplicate-ids",
+   "configs": {
+    "baseline": {
+     "top1": 0.982421875,
+     "kl_p50": 5.1406178603230975e-05,
+     "kl_p99": 0.03237455441479653,
+     "passed": true,
+     "failures": []
+    },
+    "graphs on": {
+     "top1": 0.983984375,
+     "kl_p50": 5.1406178603230975e-05,
+     "kl_p99": 0.03237455441479653,
+     "passed": true,
+     "failures": []
+    }
+   }
+  },
+  "graphs-vs-eager-padding-plant-12": {
+   "passed": false,
+   "sessions": 12,
+   "engine_args": "",
+   "plant": "moe-padding-duplicate-ids",
+   "configs": {
+    "baseline": {
+     "top1": 0.9827473958333334,
+     "kl_p50": 5.163772418532108e-05,
+     "kl_p99": 0.030905274968697518,
+     "passed": true,
+     "failures": []
+    },
+    "graphs on": {
+     "top1": 0.9514973958333334,
+     "kl_p50": 5.163772418532108e-05,
+     "kl_p99": 0.030905274968697518,
+     "passed": false,
+     "failures": [
+      "top1 0.9515 beyond 0.00787 of the baseline",
+      "confident 0.9562 beyond 0.0069 of the baseline"
+     ]
+    }
+   }
+  }
+ }
+}
