@@ -3,8 +3,8 @@ rendered from evidence, never copied by hand. Each table links its record; losse
 
 - `bars.py` records: per metric the gate statistic of Holon and of each llama.cpp build and their ratio; a ratio within
   2 sd of its per-round ratios of 1 is printed "≈"; one below the gate (0.8) is marked.
-- `run.py` records: per record and backend, TTFT / TPOT p50 per trace; a backend that failed is "—" with its
-  reason.
+- `run.py` records, the short form (the record holds p99s, throughput and KV tokens): per record and backend,
+  TTFT / TPOT p50 per trace; a backend that failed is "—" with its reason, one that failed some rounds says so.
 
     python bench/report.py evidence/<record>.json ... [--relative-to docs]
 """
@@ -57,18 +57,23 @@ def bars(records: list[tuple[str, dict]]) -> str:
 def serving(records: list[tuple[str, dict]]) -> str:
     """One table over the records: a row per (record, backend), a column per trace (TTFT / TPOT p50 ms)."""
     traces = list(dict.fromkeys(t for _, r in records for t in r["traces_sha256"]))
-    lines = ["| file (record) | GPU | backend | " + " | ".join(f"{t}: TTFT / TPOT p50 ms" for t in traces) + " |",
-             "|" + "---|" * (3 + len(traces))]
+    lines = ["| record | model | GPU | backend | " + " | ".join(f"{t}: TTFT / TPOT p50 ms" for t in traces) + " |",
+             "|" + "---|" * (4 + len(traces))]
     for link, r in records:
-        failed = {run["backend"]: run["error"] for run in r["runs"] if "error" in run}
+        failed = {run["backend"]: run["error"].replace("|", "\\|") for run in r["runs"] if "error" in run}
+        temperature = r.get("matched", {}).get("temperature")
         for b in r["order"]:
+            done = len({run["round"] for run in r["runs"] if run["backend"] == b and "error" not in run})
+            label = b + (f", T={temperature}" if temperature else "") + (
+                f" ({done}/{r['rounds']} rounds)" if 0 < done < r["rounds"] else "")
             cells = []
             for t in traces:
                 s = r["summary"].get(t, {}).get(b)
                 cells.append(f"{s['ttft_ms']['p50']} / {s['tpot_ms']['p50']}" if s else "—")
-            if b in failed and not any(t in r["summary"] and b in r["summary"][t] for t in traces):
-                cells = [f"— ({failed[b]})"] + [""] * (len(traces) - 1)
-            lines.append(f"| [{r['workload']}]({link}) | {r['gpu_class']} | {b} | " + " | ".join(cells) + " |")
+            if not done:
+                cells = [f"— ({failed.get(b, 'not run')})"] + [""] * (len(traces) - 1)
+            lines.append(f"| [{r['workload']}]({link}) | {r['model']} | {r['gpu_class']} | {label} | "
+                         + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 

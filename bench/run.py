@@ -124,12 +124,15 @@ def read_lock(path: str) -> dict:
 
 
 def reason(log: pathlib.Path) -> str:
-    """A failed worker's reason for a record: its log's first exception (a server's root cause comes before our
-    client's), else its last line; paths cut to their names (they are local)."""
+    """A failed worker's reason for a record, a hint (the log stays local): its first exception line (a server's
+    root cause comes before our client's), else its first error line, else its last line. Scrubbed for publishing:
+    paths, host:port pairs and driver versions are replaced."""
     lines = [line.strip() for line in log.read_text(errors="replace").splitlines() if line.strip()]
-    errors = [line for line in lines if re.match(r"[\w.]*(Error|Exception): ", line)]
-    first = (errors or lines[-1:] or ["no output"])[0]
-    return re.sub(r"(?:/[^/\s'\"]+)+/([^/\s'\"]+)", r"\1", first)[:300]
+    pick = next((line for line in lines if re.search(r"\b[\w.]*(Error|Exception): ", line)), None) or next(
+        (line for line in lines if re.search(r"(?i)\berror\b", line)), None) or (lines or ["no output"])[-1]
+    pick = re.sub(r"(?<![\w.])(?:~|\.\.?/|/)[^\s'\",;)\]}]*", "<path>", pick)
+    pick = re.sub(r"(?<![\w.-])(?!127\.0\.0\.1:|localhost:)[\w.-]+:\d{2,5}\b", "<host>:<port>", pick)
+    return re.sub(r"(?i)(driver\D*)\d[\d.]*", r"\1<version>", pick)[:300]
 
 
 def pct(xs: list[float], q: float) -> float | None:
