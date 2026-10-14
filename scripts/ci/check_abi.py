@@ -10,7 +10,8 @@ their signatures, required or optional, and who implements the Protocol), the op
 `EngineConfig`, the `BuildCtx.options` keys the core provides, the manifest schema and the string vocabularies (the
 API's and the IPC frame and failure kinds).
 
-The `op.*` / `unit.*` contracts the first-party plugins provide are the plugins' ABI, not the core's: each
+The contracts the first-party plugins provide (every resource but `kernel.*`, `arch.*`, `model.*`) are the plugins'
+ABI, not the core's: each
 distribution lists its own (`std/contracts.txt`, `plugins/contracts.txt`). A new contract is free; one removed (or
 provided by another plugin) needs the same contract at a higher major.
 
@@ -101,13 +102,18 @@ def options_keys() -> list[str]:
     return sorted(keys)
 
 
+NOT_CONTRACTS = ("kernel.", "arch.", "model.")     # implementations of contracts, and what a model plugin builds
+
+
 def contracts(dist: str) -> str:
-    """The `op.*` / `unit.*` contracts the plugins of distribution `dist` provide, one per line with its provider."""
+    """The contracts the plugins of distribution `dist` provide — every resource but kernels, architectures and models
+    (ops, units, state kinds, weight transforms, the grammar constraint, slot interfaces) —, one per line with its
+    provider."""
     out = set()
     for path in ROOT.glob(f"{dist}/holon_{dist}/**/plugin.toml"):
         m = tomllib.loads(path.read_text())
         out |= {f"{r}  ({m['plugin']['name']})" for r in m.get("resources", {}).get("provides", ())
-                if r.startswith(("op.", "unit."))}
+                if not r.startswith(NOT_CONTRACTS)}
     return "".join(f"{line}\n" for line in sorted(out))
 
 

@@ -862,6 +862,11 @@ Every finding is fixed, each with a test that fails before it where code changed
     needs the same contract at a higher major (`contract_error`, tested).
   - `core/abi.txt` keeps `holon.api`, the hooks, `EngineConfig`, the options keys, the manifest schema and the
     vocabularies.
+  - **Every provided resource is a contract** except implementations and what a model plugin builds (`kernel.*`,
+    `arch.*`, `model.*`; a last-round minor). Besides `op.*` and `unit.*`, that is `state_kind.*` (`paged@1`,
+    `recurrent@1`), `grammar.constraint@1`, the weight `transform.*`, and the slot interfaces (`drafter.*`,
+    `draft_policy.*`, `frontend.*`, `sampler.*`, `verifier.*`, `weight_source.*`). The listings were regenerated
+    (additions only) and the core ABI stays 0.1; the test asserts the coverage.
 - **C-S2 (major): the no-lock 27B start.** The defaults entry now serves at `max_seqs` 8 (§13.3, lead decision 3
   revised). Tested in the `serve_history` case and checked on the A5000.
 - **Scope minors.**
@@ -896,3 +901,13 @@ main commit refers to it yet.
 
 
 **ABI bump policy (lead, 2026-10-14; scope reviewer's round-2 minor):** M0.6's Gate A merges into `main` first. Steps 1–2 then rebase onto it: M0.6's four unit `adopt(self, ctx, name, q, index=None)` definitions are renamed `adopt_weights`, `AdoptsWeights` takes the `index` parameter, and the listings land on `main` at ABI 0.1 for the first time, so nothing is compared yet. M0.7 builds on that `main`; its removal of `SchedulePolicy.mix_phases` is one bump to 0.2 inside M0.7, and its single propagation covers the manifests' `core_abi` edit. Step 6 sets 1.0.
+
+**Notes for later steps (lead, last round on steps 1–2):**
+- **Merges that bring units (M0.6, M0.7) rename unit `adopt` to `adopt_weights`**: in the units, the core's call and
+  the tests. `check_abi`'s literal scan cannot catch a reintroduced `getattr(unit, "adopt")`, because the state kinds
+  still declare `adopt` (`RestoresPayloads`).
+- **The README's `docker run --user` example passes `-e HOME=<a writable path>`**, so the weight sources' file-hash
+  cache (under the home directory) persists across starts.
+- **The GitHub Actions job that comes with publishing fetches the base ref** (e.g. `fetch-depth: 0`, or a fetch of
+  `main`). Otherwise `check_abi.py --base` finds no base and skips the bump check.
+

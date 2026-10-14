@@ -175,10 +175,14 @@ def test_abi_listing_needs_the_right_bump(monkeypatch, old, new, error):
     """`scripts/ci/check_abi.py`: what an ABI change requires of the version; contracts are the plugins' own and
     change by their majors (release design §7)."""
     monkeypatch.syspath_prepend(str(pathlib.Path(__file__).resolve().parents[2] / "scripts" / "ci"))
-    from check_abi import bump_error, contract_error
+    from check_abi import bump_error, contract_error, contracts
 
     why = bump_error(LISTING.format(old), new)
     assert why is None if error is None else error in why
     assert contract_error(CONTRACTS, CONTRACTS + "op.new@1  (std.ops)\n") is None             # new contracts are free
     assert "without a new major" in contract_error(CONTRACTS, "op.rmsnorm@1  (other)\n")
     assert contract_error(CONTRACTS, "op.rmsnorm@2  (std.ops)\n") is None
+    listed = contracts("std") + contracts("plugins")                   # every provided resource but implementations
+    for resource in ("state_kind.paged@1", "grammar.constraint@1", "transform.qwen3_5.squeeze@1"):
+        assert f"{resource}  (" in listed
+    assert "kernel." not in listed and "arch." not in listed and "model." not in listed
