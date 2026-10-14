@@ -1,6 +1,19 @@
 # AGENTS.md — rules for anyone (human or coding agent) changing Holon
 
-Read `docs/design.md` (architecture) and `docs/plan.md` (milestones) first.
+## Where to start, by task
+
+| task | read |
+|---|---|
+| using or serving Holon | `README.md` |
+| adding a model | `docs/adding-a-model.md` |
+| core or ABI work (`core/`, `holon.api`, manifests, locks) | `docs/design.md`: §1 invariants, §3 vocabulary, §4 plugin system |
+| a kernel plugin | `docs/design.md` §5.3–§5.4, §5.6 (borrowing kernels) |
+| a std unit or another plugin (state, sampling, speculation, frontends) | `docs/design.md` §5–§7 and §9 (feature → plugin map) |
+| the judge, goldens, locks and their tools | `docs/design.md` §4.4, §4.6, §10.3; `judge/README.md`; `tools/README.md` |
+| benchmarks | `bench/README.md` |
+
+`docs/plan.md` (milestones) and the milestone documents (`docs/m0*.md`) record history and decisions; read them only
+for the item at hand, never as required reading.
 
 ## Code style
 
@@ -14,10 +27,16 @@ Read `docs/design.md` (architecture) and `docs/plan.md` (milestones) first.
 
 1. The core (`core/holon`) never names a model, layer type, quant format or feature.
 2. Plugins import only `holon.api`, their own package and declared third-party libraries; other units are
-   referenced with `Ref` and injected, never imported.
+   referenced with `Ref` and injected, never imported. Every distribution declares what it imports (`manifest-deps`);
+   production code never imports the test-only plugins (import-linter contracts in `pyproject.toml`).
 3. No module-level mutable state; no environment-variable configuration in core/std.
 4. No `torch.cuda` outside `holon.core.platform` and kernel plugins.
 5. Core stays ≤ 6000 code lines.
+6. The plugin ABI is listed in `core/abi.txt` and each distribution's provided contracts in `std/contracts.txt` and
+   `plugins/contracts.txt` (`scripts/ci/check_abi.py`); a change regenerates them with `--write` under the version
+   rule: a removal or change needs a bump, a new contract is free. Every manifest declares `core_abi`.
+7. Every committed lock re-reads with its digest (`scripts/ci/check_locks.py`); `uv.lock` matches the pyprojects;
+   vendored trees equal upstream plus their patch.
 
 ## Implementation policy
 
@@ -26,7 +45,15 @@ Read `docs/design.md` (architecture) and `docs/plan.md` (milestones) first.
 - No claim without a measurement. Every performance claim gets an evidence record (command, fingerprint class,
   plan_id or commit, raw numbers) under `evidence/` or the spike's `results/`.
 - Every bug fix comes with a test that fails before and passes after.
+- **Lean tests.** A new test catches something no existing test catches; otherwise extend or parametrize an existing
+  one. Share expensive setup (module-scoped engines, one run checked by several assertions), prefer tiny models on
+  the CPU, and use the GPU only where it is the point. Watch `pytest --durations`.
 - Never edit `judge/` goldens/snapshots or `plans/` locks by hand; they are written by the tools.
+
+## Commits
+
+- Sign off every commit and sign it: `git commit -S -s`.
+- Name no coding agent as an author or co-author.
 
 ## Third-party code
 
@@ -52,8 +79,8 @@ Studying code to write our own needs none of this; a comment naming what we foll
   checks it), then `uv lock` and commit `uv.lock`. Host needs: an NVIDIA driver for CUDA 13, the CUDA 13 toolkit
   (nvcc), gcc/g++; `holon prebuild` builds the GGUF kernels and FlashInfer's modules for the visible GPUs.
 - Machine-specific notes (hosts, clusters, paths) live in `AGENTS.local.md`, which is not tracked; read it if
-  present. Never commit private infrastructure details — host or cluster names, usernames, absolute paths — to
-  tracked files, results included (`scripts/ci/check_private.py`).
-- Consumer performance evidence comes from consumer desktops (RTX 5080/5090/4090); on shared test machines, run
+  present. Never commit private infrastructure details — host or cluster names, usernames, absolute paths, machine
+  details beyond the GPU name — to tracked files, results included (`scripts/ci/check_private.py`).
+- Consumer performance evidence comes from consumer desktops (RTX 5080/5090/4090/3090); on shared test machines, run
   one persistent container and build/test inside it rather than many short batch jobs.
 - Always pin GPUs explicitly (`CUDA_VISIBLE_DEVICES`) in scripts and spikes so parallel work does not collide.
