@@ -888,6 +888,9 @@ Every finding is fixed, each with a test that fails before it where code changed
      rebuilds. As uid 12345, `holon prebuild --sm 86` (which takes the GGUF build lock in the cache) succeeds, and so
      does a write into each cache directory and `HF_HOME`.
 
+After the fixes the full GPU suite (RTX A5000 ×2) gave 1037 passed and 55 skipped in 15 min 42 s, and
+`run_all.sh` is green. The core is 4144 code lines.
+
 The listings changed again inside the branch (reformatted, contracts split). The ABI stays 0.1: no lock, release or
 main commit refers to it yet.
 
