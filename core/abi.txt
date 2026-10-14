@@ -54,12 +54,6 @@ dataclass Constraint frozen
   #4 cpu_isa: frozenset[str] = frozenset([])
   #5 libs: frozenset[str] = frozenset([])
   allows(self, device: 'str', sm: 'int | None', isa: 'frozenset[str]' = frozenset()) -> 'bool'
-dataclass Converter frozen
-  #0 src: str
-  #1 dst: str
-  #2 fn: Callable[..., QTensor]
-  #3 lossless: bool = True
-  #4 cost: float = 1.0
 dataclass DeviceBatch
   #0 input_ids: torch.Tensor
   #1 positions: torch.Tensor
@@ -68,10 +62,6 @@ dataclass DeviceBatch
   #4 logits_index: torch.Tensor
   #5 logits_rows: torch.Tensor
   #6 meta: dict[str, Any] = dict()
-protocol Dialect() required, implemented by plugins
-  detect(self, meta: 'Mapping[str, Any]') -> 'bool'
-  source_layout(self, tensor_name: 'str', meta: 'Mapping[str, Any]') -> 'Layout'
-  name: str
 protocol DraftPolicy() required, implemented by plugins
   k(self, seqs: 'list[Seq]') -> 'int'
   observe(self, seq: 'Seq', k: 'int', n_draft: 'int', n_accept: 'int') -> 'None'
@@ -303,9 +293,6 @@ protocol Registries() required, implemented by core
   kernels: KernelRegistry
   units: Registry[Callable[..., Any]]
   state_kinds: Registry[StateKindFactory]
-  schemes: Registry[SchemeImpl]
-  converters: Registry[Converter]
-  dialects: Registry[Dialect]
   transforms: Registry[Callable[[Any], Any]]
   weight_sources: Registry[Callable[..., Any]]
 protocol Registry() required, implemented by core
@@ -317,7 +304,7 @@ dataclass Resource frozen
   #0 name: str
   #1 major: int
   classmethod parse(cls, text: 'str') -> 'Resource'
-const SLOTS = {'model': <Cardinality.SINGLE: 'single'>, 'platform': <Cardinality.SINGLE: 'single'>, 'launcher': <Cardinality.SINGLE: 'single'>, 'schedule_policy': <Cardinality.SINGLE: 'single'>, 'sampler': <Cardinality.SINGLE: 'single'>, 'verifier': <Cardinality.SINGLE: 'single'>, 'draft_policy': <Cardinality.SINGLE: 'single'>, 'eviction_policy': <Cardinality.SINGLE: 'single'>, 'unit': <Cardinality.PER_SITE: 'per_site'>, 'kernel': <Cardinality.PER_SITE: 'per_site'>, 'state_kind': <Cardinality.PER_SITE: 'per_site'>, 'placement_policy': <Cardinality.PER_SITE: 'per_site'>, 'codec': <Cardinality.PER_SITE: 'per_site'>, 'weight_source': <Cardinality.PER_SITE: 'per_site'>, 'plan_transform': <Cardinality.ORDERED_MULTI: 'ordered_multi'>, 'logits_processor': <Cardinality.ORDERED_MULTI: 'ordered_multi'>, 'checkpoint_policy': <Cardinality.ORDERED_MULTI: 'ordered_multi'>, 'frontend': <Cardinality.MULTI: 'multi'>, 'dialect': <Cardinality.MULTI: 'multi'>, 'converter': <Cardinality.MULTI: 'multi'>, 'tier': <Cardinality.MULTI: 'multi'>, 'mover': <Cardinality.MULTI: 'multi'>, 'drafter': <Cardinality.MULTI: 'multi'>, 'encoder': <Cardinality.MULTI: 'multi'>, 'connector': <Cardinality.MULTI: 'multi'>, 'exporter': <Cardinality.MULTI: 'multi'>}
+const SLOTS = {'model': <Cardinality.SINGLE: 'single'>, 'platform': <Cardinality.SINGLE: 'single'>, 'launcher': <Cardinality.SINGLE: 'single'>, 'schedule_policy': <Cardinality.SINGLE: 'single'>, 'sampler': <Cardinality.SINGLE: 'single'>, 'verifier': <Cardinality.SINGLE: 'single'>, 'draft_policy': <Cardinality.SINGLE: 'single'>, 'eviction_policy': <Cardinality.SINGLE: 'single'>, 'unit': <Cardinality.PER_SITE: 'per_site'>, 'kernel': <Cardinality.PER_SITE: 'per_site'>, 'state_kind': <Cardinality.PER_SITE: 'per_site'>, 'placement_policy': <Cardinality.PER_SITE: 'per_site'>, 'codec': <Cardinality.PER_SITE: 'per_site'>, 'weight_source': <Cardinality.PER_SITE: 'per_site'>, 'plan_transform': <Cardinality.ORDERED_MULTI: 'ordered_multi'>, 'logits_processor': <Cardinality.ORDERED_MULTI: 'ordered_multi'>, 'checkpoint_policy': <Cardinality.ORDERED_MULTI: 'ordered_multi'>, 'frontend': <Cardinality.MULTI: 'multi'>, 'tier': <Cardinality.MULTI: 'multi'>, 'mover': <Cardinality.MULTI: 'multi'>, 'drafter': <Cardinality.MULTI: 'multi'>, 'encoder': <Cardinality.MULTI: 'multi'>, 'connector': <Cardinality.MULTI: 'multi'>, 'exporter': <Cardinality.MULTI: 'multi'>}
 dataclass SampleOut
   #0 tokens: torch.Tensor
   #1 logprobs: torch.Tensor | None = None
@@ -360,8 +347,6 @@ dataclass Scheme frozen
   #0 elem: str
   #1 scales: tuple[Scale, ...] = ()
   #2 zero_point: bool = False
-protocol SchemeImpl() required, implemented by plugins
-  dequant_ref(self, q: 'QTensor') -> 'torch.Tensor'
 dataclass Seq
   #0 rid: str
   #1 tokens: list[int]
@@ -510,7 +495,7 @@ def to_term(obj: 'Any') -> 'Any'
 protocol AdmitsDrafts() optional, implemented by plugins
   admit(self, slot: 'int', tokens: 'list[int]') -> 'None'
 protocol AdoptsWeights() optional, implemented by plugins
-  adopt_weights(self, ctx: 'BuildCtx', name: 'str', value: 'QTensor') -> 'bool'
+  adopt_weights(self, ctx: 'BuildCtx', name: 'str', value: 'QTensor', index: 'int | None' = None) -> 'bool'
 protocol BindsKernels() optional, implemented by plugins
   bind_kernels(self, ctx: 'BuildCtx') -> 'None'
 protocol BuildsPolicy() optional, implemented by plugins

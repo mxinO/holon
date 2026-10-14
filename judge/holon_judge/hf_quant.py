@@ -20,6 +20,7 @@ norm patterns are the Qwen family's HF names (the judge's targets).
 from __future__ import annotations
 
 import contextlib
+import importlib
 import itertools
 import json
 import pathlib
@@ -328,8 +329,8 @@ def converter(root: str | pathlib.Path) -> Callable[[str, torch.Tensor, torch.Te
     `_nvfp4_pack` or `repack_mxfp4_blocks`."""
     path = list(sys.path)                    # restored: the converter adds its gguf-py, whose `tests` shadows ours
     sys.path.insert(0, str(root))
-    try:
-        from conversion.base import ModelBase
+    try:                                     # a module of that checkout, not a dependency
+        ModelBase = importlib.import_module("conversion.base").ModelBase
     finally:
         sys.path[:] = path
 

@@ -4,7 +4,8 @@ version = "0.0.1"
 license = "Apache-2.0"
 requires-python = ">=3.12,<3.13"
 description = "Test-only plugins for Holon (installed in the development environment, never with Holon)"
-dependencies = ["holonlm", "holonlm-std", "gguf", "safetensors", "transformers"]
+dependencies = ["holonlm", "holonlm-std", "gguf", "safetensors", "transformers",
+                "compressed-tensors==0.17.0"]  # hf_quant_files: its fixtures quantized by its own code (M0.6)
 
 [project.entry-points."holon.plugins"]
 "testing.ref_kernels" = "holon_testing.ref_kernels"

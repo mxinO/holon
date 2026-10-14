@@ -1,7 +1,8 @@
 """`manifest-deps` (release design D1): every distribution declares what it imports. Each third-party top-level
-module a distribution's package imports, and each module its plugin manifests list (`[dependencies] python`), must
-be provided (`importlib.metadata.packages_distributions`) by a distribution in its declared dependency closure — so
-an install of the distribution alone has it. Run in the project environment (`uv sync --group dev`)."""
+module a distribution's package imports (except optional ones, under a `try` catching ImportError), and each module
+its plugin manifests list (`[dependencies] python`), must be provided (`importlib.metadata.packages_distributions`)
+by a distribution in its declared dependency closure — so an install of the distribution alone has it. Run in the
+project environment (`uv sync --group dev`)."""
 from __future__ import annotations
 
 import ast
@@ -38,9 +39,22 @@ def closure(dist: str) -> set[str]:
     return seen
 
 
+def optional(tree: ast.AST) -> set[int]:
+    """ids of the import nodes under a `try` that catches ImportError: optional by construction (used when present)."""
+    def catches(h: ast.ExceptHandler) -> bool:
+        names = h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]
+        return any(isinstance(n, ast.Name) and n.id in ("ImportError", "ModuleNotFoundError") for n in names)
+
+    return {id(n) for t in ast.walk(tree) if isinstance(t, ast.Try) and any(map(catches, t.handlers))
+            for stmt in t.body for n in ast.walk(stmt)}
+
+
 def imports(path) -> set[str]:
-    out = set()
-    for node in ast.walk(ast.parse(path.read_text())):
+    out, tree = set(), ast.parse(path.read_text())
+    skip = optional(tree)
+    for node in ast.walk(tree):
+        if id(node) in skip:
+            continue
         if isinstance(node, ast.Import):
             out |= {a.name.split(".")[0] for a in node.names}
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:

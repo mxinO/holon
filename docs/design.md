@@ -571,7 +571,7 @@ are).
 
 ### 5.5 Quantization and weight loading
 
-Pipeline: `WeightSource (its format dialects) → QTensor(Layout(source)) → unit adopt → kernel prepare →
+Pipeline: `WeightSource (its format dialects) → QTensor(Layout(source)) → unit adopt_weights → kernel prepare →
 QTensor(Layout(kernel)) → Pool`.
 
 ```python
@@ -600,8 +600,8 @@ class QTensor: layout: Layout; logical_shape: tuple[int, ...]; parts: dict[str, 
 
 **As built (M0.1).** Weight sources are detected from manifest `[support] detect` patterns (`config.json`,
 `*.gguf`), so no plugin is imported to decide. The model is built on the meta device; `load_weights` swaps each dense
-parameter in place and hands each `QTensor` to the unit owning the parameter (`adopt_weights(ctx, name, qtensor)`), which
-stores it in its own form or refuses (a load error naming unit and layout); the core never looks inside a layout.
+parameter in place and hands each `QTensor` to the unit owning the parameter (`adopt_weights(ctx, name, qtensor)`),
+which stores it in its own form or refuses (a load error naming unit and layout); the core never looks inside a layout.
 GGUF tensors keep their stored blocks (`Layout(Scheme("ggml.<type>"), "gguf.native")`): llama.cpp's kernels read
 them directly, so GGUF needs no repack. Units bind the kernel of the layout they adopted in
 `bind_kernels`, after merges: same-type q/k/v and gate/up concatenate by rows (ggml rows are independent block
@@ -1234,7 +1234,7 @@ The dev machine has 8× RTX A5000; v1 includes a **TP=2 milestone** to prove the
 | KV offload (RAM/SSD, remote) | tiers, mover, placement policy, connector | PrefixIndex tier payloads, BLOCKED, per-layer events |
 | KVMem-style bounded window | `windowed_retrieval` StateKind, HostPlannedResolver, re-RoPE prepare kernel | StateKind emits positions; namespace |
 | Expert cache / offload | expert TieredStore, DeviceResolver, placement policies, MoE op with CPU miss compute | stable Pools, stream-memop CPU handshake, `quiesce`, VMM resize (v1) |
-| Quant formats | weight-source dialect, scheme, layout, kernels (`prepare`) | kernel registry, per-slice `adopt` |
+| Quant formats | weight-source dialect, scheme, layout, kernels (`prepare`) | kernel registry, per-slice `adopt_weights` |
 | Linear attention (GDN, KDA, Mamba2) | mixer + `Slot` state (`draft_slots`), page-boundary checkpoints, checkpoint policy + codec | fixed-point prefix hits, device Rewindable |
 | DeepSeek sparse attention / V4 compressed KV | `dsa_mla` mixer: MLA `Paged` + indexer `Paged(page_group)` + compressed `Paged(tokens_per_unit)` | `page_group`, `tokens_per_unit`, `alignment` |
 | Speculative decoding | drafter, draft policy, verifier, plan transform | taps, shared modules, Rewindable, verify graphs, sub-steps, aux models |
