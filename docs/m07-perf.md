@@ -1784,7 +1784,11 @@ lock existed by then). Record `evidence/propagate_m07-close_2026-10-15.json`.
   their props (`serves_decode_rows`); GGUF merged gate/ups a `qlinear_glu@1` site (Q4_K fuses; other types compose,
   §13.9), and `kernels.ggml_cuda`'s `src` pins its per-shape crossover and glu types; the speculative-only
   `gdn_rewind@1` is not recorded (no lock drafts). Every trace moved (logprob deltas from the second step on: the
-  fusions' numerics); the 27B's 4090 ΔPPL moved most, against the floor and in the good direction (−1.8% ± 0.7%).
+  fusions' numerics). The 27B's 4090 lock (UD-Q4_K_M) drifted most: ΔPPL against the fp32 golden −1.80% ± 0.69%
+  (a deviation, not an improvement; M0.6's previous lock already had −1.43% ± 1.36%, within one SE), and KL p99
+  0.740 → 0.893 (+21%; p50 4.26e-4 → 4.49e-4), inside the 2× floor budget (≤ 1.30); the 5080's 27B barely moved (KL
+  p99 0.628 → 0.639). D3 is the only bounded change on that lock's prefill path; an L2 A/B with `qk_rope_kv` composed
+  would attribute it (not run).
   KV pools are measured afresh where the previous lock's snapshot did not record its pool bytes (the GGUF and bf16
   locks), else reused, as `propagate` does.
 - **The trace carries mixed steps at C 512:** the snapshot trace at the rtx-5080 27B lock's flags ran 61 mixed steps
