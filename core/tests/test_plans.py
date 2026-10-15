@@ -80,7 +80,7 @@ def test_serve_starts_from_the_lock_of_its_build(tmp_path, capsys, monkeypatch, 
         with pytest.raises(SystemExit, match="several models have a lock for this GPU, name one: org/repo/Qwen3-8B-Q"):
             cli.repo_ref("org/repo", listed)
     else:
-        assert cli.repo_ref("org/repo", listed) == ("org/repo/Qwen3-8B-Q4_K_M" if case == "lock" else "org/repo")
+        assert cli.repo_ref("org/repo/", listed) == ("org/repo/Qwen3-8B-Q4_K_M" if case == "lock" else "org/repo")
     assert cli.repo_ref("org/rep", listed) == "org/rep"                         # whole path segments only
     assert cli.repo_ref("org", listed) == "org"                                 # a repository, not an organisation
     monkeypatch.chdir(tmp_path)

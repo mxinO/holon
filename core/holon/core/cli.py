@@ -179,6 +179,7 @@ def models_table(rows: list[tuple[str, object]]) -> list[str]:
 def repo_ref(ref: str, rows: list[tuple[str, object]]) -> str:
     """A repository reference (`<org>/<repo>`) under which exactly one locked model has a verified lock for this GPU
     names that model (whole path segments; release design §14.3); several are an error; none leaves `ref` as it is."""
+    ref = ref.rstrip("/")
     verified = sorted(m.rpartition("@")[0] for m, found in rows if isinstance(found, tuple) and not found[1])
     under = [name for name in verified if ref.count("/") == 1 and name.startswith(ref + "/")]
     if len(under) > 1:
