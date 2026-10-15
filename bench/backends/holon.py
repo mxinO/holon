@@ -42,8 +42,9 @@ class Backend:
         return self.engine.has_work()
 
     def stats(self) -> dict[str, int]:
-        """Counters (the worker reports each trace's increase)."""
-        return {"prefix_tokens_saved": self.engine.stats()["prefix_tokens_saved"]}
+        """Counters (the worker reports each trace's increase): prefix hits, mixed steps, preemptions, drafts."""
+        return {k: v for k, v in self.engine.stats().items()
+                if k in ("prefix_tokens_saved", "mixed_steps", "preemptions") or k.startswith("spec_")}
 
     def info(self) -> dict:
         pools = [p for p in self.engine.ledger.pools.values() if p.tokens_per_unit]

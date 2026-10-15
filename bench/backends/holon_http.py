@@ -30,8 +30,8 @@ class Backend(http.Backend):
         """The engine's counters (/metrics): prefix hits, and real drafts and verify rows by drafts accepted; the
         frontend process's CPU time."""
         metrics = self.server.get("/metrics")
-        return {k: v for k, v in metrics.items() if k == "prefix_tokens_saved" or k.startswith("spec_")} | {
-            "frontend_cpu_ms": round(self.server.cpu_ms())}
+        kept = {k: v for k, v in metrics.items() if k in ("prefix_tokens_saved", "mixed_steps") or k[:5] == "spec_"}
+        return kept | {"frontend_cpu_ms": round(self.server.cpu_ms())}
 
 
 def served(server: http.Server) -> dict:
