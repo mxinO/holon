@@ -34,6 +34,26 @@ def tokens(salt: str, key: str, n: int, corpus: list[int] | None = None) -> list
     return [rng.randrange(*VOCAB) for _ in range(n)]
 
 
+def appends(salt: str, session: dict, corpus: list[int] | None = None) -> list[list[int]]:
+    """Each turn's new tokens. Uniform ids per (session, turn); on a corpus, one walk from a seeded offset through the
+    text outside the system prompt's span (`tokens(salt, "system", …)`), so no context repeats a span of itself, as a
+    conversation's own text would not (overlapping draws made half of a 25K-token context verbatim repeats, which
+    inflates speculative acceptance)."""
+    turns, sid = session["turns"], session["id"]
+    if not corpus:
+        return [tokens(salt, f"{sid}.{i}", t["append"]) for i, t in enumerate(turns)]
+    start = random.Random(f"{salt}:system").randrange(len(corpus))     # the system prompt's offset, as in `tokens`
+    rest = (corpus[start:] + corpus[:start])[session["system"]:] if session["system"] else corpus
+    need = sum(t["append"] for t in turns)
+    if need > len(rest):
+        raise ValueError(f"session {sid} appends {need} tokens; the corpus has {len(rest)} outside its system prompt")
+    at, out = random.Random(f"{salt}:{sid}").randrange(len(rest)), []
+    for t in turns:
+        out.append([rest[(at + j) % len(rest)] for j in range(t["append"])])
+        at += t["append"]
+    return out
+
+
 def corpus(path: str | pathlib.Path) -> list[int]:
     """A JSONL prompt set's token ids (`ids` per line), concatenated."""
     return [t for line in pathlib.Path(path).read_text().splitlines() if line for t in json.loads(line)["ids"]]
@@ -112,9 +132,10 @@ def main() -> None:
     traces = {f"decode_b{b}": decode(b, args.decode_prompt, args.decode_output) for b in (1, 8, 64, 256)}
     traces["sharegpt"] = sharegpt(200, 2.0, args.seed)
     traces["agent"] = agent(24, 0.2, args.seed)
-    # Claude-Code-shaped (release D3's MTP decision): its ≈ 16K-token system prompt and tool schemas shared by a few
-    # concurrent sessions of 10-16 turns each (≥ 200 requests); replayed on natural text at Claude Code's temperature.
-    traces["claude_code"] = agent(16, 0.05, args.seed, system=16384, later=(10, 16))
+    # Claude-Code-shaped (release D3's MTP decision): its ≈ 16K-token system prompt and tool schemas shared by 16
+    # sessions of 11-17 turns (≥ 200 requests), one starting every 40 s on average, so about two overlap; replayed on
+    # natural text (--corpus) at Claude Code's temperature.
+    traces["claude_code"] = agent(16, 0.025, args.seed, system=16384, later=(10, 16))
     # Three streams fit every lock (max_seqs >= 4); 30k tokens fit a 32k context (M0.5's 36 s stall, M0.7 D1).
     traces["long_prompt"] = long_prompt(3, 256, 1024, 30000, 2.0)
     for name, sessions in traces.items():

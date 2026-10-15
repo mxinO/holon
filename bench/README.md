@@ -20,6 +20,7 @@ Same GPU, same model, same requests; every engine in its own environment; client
 | `step_profile.py` | M0.7 step 0: a deployment's step time by kernel category per row kind (prefill, decode, verify; graphed and eager), verify steps by region, D1's timing ratios with the GPU clocks, the matmul calls and weight bytes per step |
 | `qmm_sweep.py` | M0.7 step 0: the ggml matmul's time per call against rows (mmvq, mmq with and without the f32 → bf16 cast) for every qlinear shape and activation mode of the given locks, graph-timed on real weights; a read-only stream |
 | `d8_gate.py` | M0.7 step 5: D8's megakernel gate (f and its projection) from paired `step_profile.py`, `qmm_sweep.py` and `glu_sweep.py` records, profile-free (the GEMVs priced per call, less their isolated q8_1 quantize) |
+| `mtp_decision.py` | release design D3's MTP default rule from `run.py` records of a plain lock against MTP over it (`holon@mtp`): per-round TPOT, p95 gap and p95 TTFT ratios, the power estimate after 4 rounds, the verdict |
 | `clock_check.py` | the clock screen of a desktop before its evidence is recorded: SM clock percentiles and slowdown share under sustained decode |
 
 `workloads.py`, `driver.py` and `worker.py` are stdlib-only so they run unchanged in every engine's environment. The
@@ -52,8 +53,14 @@ rejects temperature 0, so it samples at 1e-5 (argmax in practice); the others ar
   the tokens the engine generated) + a tool result (log-normal, median 256) and sometimes a user message, released
   after a tool latency (exponential, mean 0.5 s); short generations (24–192 tokens). 126 requests, contexts up to
   ~6.1k tokens, long shared prefixes.
+- **claude_code**: the agent workload shaped like Claude Code's traffic (release design D3): a 16,384-token shared
+  system prompt (instructions + tool schemas), 16 sessions starting at 0.025/s (about two overlap), 11–17 turns each;
+  225 requests, contexts up to 25.8K tokens. Run with `--corpus` and the client's `--temperature 1.0`.
 - **long_prompt**: three streams decoding from t=0 (prompt 256, output 1024), then a 30,000-token prompt (output 32)
   at t = 2 s: how long the streams stall behind its prefill (their max inter-token gap), and its TTFT behind them.
+
+With `--corpus`, prompts are spans of natural text: the system prompt from a seeded offset, and each session's turns
+one walk through the text outside it from the session's own offset, so no context repeats a span of itself.
 
 ## Metrics and method
 

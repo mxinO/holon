@@ -14,7 +14,7 @@ import itertools
 import time
 from typing import Protocol
 
-from workloads import tokens
+from workloads import appends, tokens
 
 Delta = tuple[int, list[int], bool]     # (request id, new token ids, finished)
 
@@ -56,6 +56,7 @@ def replay(backend: Backend, sessions: list[dict], salt: str,
     tokens) record per step; CPU time is the whole process's, measured around `step()` only."""
     system = tokens(salt, "system", max(s["system"] for s in sessions), corpus)
     by_id = {s["id"]: s for s in sessions}
+    new = {s["id"]: appends(salt, s, corpus) for s in sessions}
     ready = [(s["arrival"], s["id"], 0, []) for s in sessions]   # (release, sid, turn, history)
     heapq.heapify(ready)
     live: dict[int, Request] = {}
@@ -67,7 +68,7 @@ def replay(backend: Backend, sessions: list[dict], salt: str,
         while ready and ready[0][0] <= now:
             release, sid, i, history = heapq.heappop(ready)
             s, t = by_id[sid], by_id[sid]["turns"][i]
-            prompt = (history or system[:s["system"]]) + tokens(salt, f"{sid}.{i}", t["append"], corpus)
+            prompt = (history or system[:s["system"]]) + new[sid][i]
             rid = next(_rids)
             live[rid] = Request(sid, i, prompt, t["output"], release)
             backend.add(rid, prompt, t["output"])
