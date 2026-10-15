@@ -783,7 +783,7 @@ class Ledger:                     # the core's (holon.core.memory); plugins requ
     def rebalance(self, targets: dict[str, int]) -> Ticket        # applied between steps (v1)
 
 class Pool:                       # plugins see name, unit_bytes, capacity, num_free, view(), alloc() (holon.api)
-    # the VMM members below are (planned; returns as a minor ABI addition):
+    # planned VMM members (each a minor ABI addition when it lands):
     base: int                     # stable device address for the pool's lifetime
     capacity_dev: Tensor          # device scalar; in-graph resolvers will read it
     def alloc(self, n) -> Tensor; def free(self, ids) -> None; def refcount(...)
@@ -800,9 +800,9 @@ class Pool:                       # plugins see name, unit_bytes, capacity, num_
   page group (`page_group`) get one shared unit count. Startup fails
   with a per-pool report if any `min_units` cannot be met.
 - v0 implements `fixed`; a pool's buffer is stable for its lifetime. The VMM contract (stable base address, device
-  capacity scalar, declared resize mode, shrink callbacks) is (planned; returns as a minor ABI addition) with `vmm` (cuMem-backed live resize,
-  Strata-style) in v1; plugins using today's `Pool` members need no change.
-- One ledger per device; a pool carrying its device is (planned; returns as a minor ABI addition) with multi-device memory.
+  capacity scalar, declared resize mode, shrink callbacks) is planned with `vmm` (cuMem-backed live resize,
+  Strata-style) in v1, each member a minor ABI addition; plugins using today's `Pool` members need no change.
+- One ledger per device; pools carrying their device is planned with multi-device memory (a minor ABI addition).
 
 ### 6.2 StateSpec and StateKind
 
@@ -846,11 +846,11 @@ v0 decision: **one pool per StateSpec**. Shared padded pools are an opt-in v1 ex
 ### 6.3 PrefixIndex
 
 - Core-owned; one per engine. Key: `(namespace, block_hash_chain)`; value: `{spec_name: Payload | Tombstone}`.
-  A payload's tier is (planned; returns as a minor ABI addition) with offload.
+  A payload's tier is planned with offload (a minor ABI addition).
 - `namespace = hash(model_id, weight_version, adapter_id, mm_salt, statekind_versions)` — prevents silent
   corruption across weight updates, adapters, multimodal inputs and StateKind upgrades.
-- Hit length is a fixed point over all specs (no `isinstance`); `hit_length` returns a `HitLen` (its length; a cost,
-  so a hit that lives on SSD is not scored like a VRAM hit, is (planned; returns as a minor ABI addition)):
+- Hit length is a fixed point over all specs (no `isinstance`); `hit_length` returns a `HitLen`: its length today,
+  and later a cost, so a hit that lives on SSD is not scored like a VRAM hit (planned: a minor ABI addition):
 
 ```python
 L = upto
@@ -902,7 +902,7 @@ while True:
   the Seq runs while ops wait on per-layer ready events `ctx.ready(spec, layer)`.
 - Load futures **reserve their destination pages** in the ledger when issued and are **cancellable**: abort and
   preemption cancel the future and release its pages.
-- Load futures and per-layer ready events are (planned; returns as a minor ABI addition) with offload; `BLOCKED` exists in v0 (a
+- Load futures and per-layer ready events are planned with offload (minor ABI additions); `BLOCKED` exists in v0 (a
   logits processor's `ready` uses it). Designing them up front is what keeps a connector API from growing as vLLM's
   did (~45 methods).
 
@@ -1289,8 +1289,8 @@ v0 runs one GPU, but the core keeps these seams so datacenter features are plugi
 | Expert parallel | MoE is a coarse Op owning routing/dispatch | `moe.ep_dispatch` (DeepEP-style) |
 | Pipeline parallel | `inflight_depth = N` | `pp.stage_split` |
 | DP-attention | a `plan_transform` slot (planned) with a collective hook in the schedule region | `dp_attention.pad` |
-| PD disaggregation | `BLOCKED`; async store import/export and per-layer events (planned; returns as a minor ABI addition) | connector (planned slot) + a schedule-policy role |
-| Multi-device memory | Ledger per device; Pool carries device (planned; returns as a minor ABI addition) | — |
+| PD disaggregation | `BLOCKED`; async store import/export and per-layer events (planned: minor ABI additions) | connector (planned slot) + a schedule-policy role |
+| Multi-device memory | Ledger per device; a Pool carrying its device (planned: a minor ABI addition) | — |
 | Other platforms | `holon.core.platform` (~15 functions); lint bans `torch.cuda` elsewhere | a `platform` slot (planned): `platform.rocm`, `platform.cpu` |
 
 The dev machine has 8× RTX A5000; v1 includes a **TP=2 milestone** to prove the seam. Its core side — the `launcher`
@@ -1303,7 +1303,7 @@ milestone measures how small the core diff is.
 
 | Feature | Plugins | Core seams used |
 |---|---|---|
-| KV offload (RAM/SSD, remote) | tiers, mover, placement policy, connector (planned slots) | `BLOCKED`; PrefixIndex tier payloads and per-layer events (planned; returns as a minor ABI addition) |
+| KV offload (RAM/SSD, remote) | tiers, mover, placement policy, connector (planned slots) | `BLOCKED`; PrefixIndex tier payloads and per-layer events (planned: minor ABI additions) |
 | KVMem-style bounded window | `windowed_retrieval` StateKind, HostPlannedResolver, re-RoPE prepare kernel | StateKind emits positions; namespace |
 | Expert cache / offload | expert TieredStore, DeviceResolver, placement policies, MoE op with CPU miss compute | stable Pools, stream-memop CPU handshake, `quiesce`, VMM resize (v1) |
 | Quant formats | weight-source dialect, scheme, layout, kernels (`prepare`) | kernel registry, per-slice `adopt_weights` |

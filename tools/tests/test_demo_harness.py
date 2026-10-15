@@ -60,6 +60,9 @@ def test_the_project_and_the_scoring_environment_are_checked(tmp_path, project):
     assert demo.digest(project) == demo.PROJECT_DIGEST
     changed = tmp_path / "project"
     demo.write_tree(project, changed)
+    (changed / ".pytest_cache").mkdir()                     # a local pytest run's cache is not the project
+    (changed / ".pytest_cache" / "README.md").write_text("x")
+    assert demo.digest(demo.load_project(changed)) == demo.PROJECT_DIGEST
     (changed / "tests" / "test_money.py").write_text("")
     with pytest.raises(ValueError, match="pre-registered"):
         demo.load_project(changed)
@@ -74,6 +77,9 @@ def test_the_project_and_the_scoring_environment_are_checked(tmp_path, project):
         (site / tamper).write_text("import os\n")
         assert demo.site_digest([site]) != before
         before = demo.site_digest([site])
+    loaded = demo.scoring_modules()                         # everything a scoring run imports, the stdlib included
+    for module in ("iniconfig/__init__.py", "pluggy/__init__.py", "_pytest/junitxml.py", "xml/etree/ElementTree.py"):
+        assert any(f.endswith(module) for f in loaded), module
 
 
 def test_claude_code_is_pinned_by_path_version_and_hash(tmp_path, monkeypatch):
@@ -95,7 +101,7 @@ def test_the_record_keeps_counts_and_shapes_never_text_or_host_paths(tmp_path, p
     assert demo.scrub("plan not computed: OSError: [Errno 2] /data/u/x/plans/a/b/1.lock and /opt/y/z.py") == \
         "plan not computed: OSError: [Errno 2] plans/a/b/1.lock and <path>"
     assert demo.lock_class("plans/unsloth/R/F@b/rtx-5080/cu130-torch2.11/5.lock") == "rtx-5080"
-    assert demo.lock_class(None) is None
+    assert demo.lock_class(None) is None and demo.lock_class("<path>") is None
     events = [{"type": "assistant", "message": {"id": i, "content": []}} for i in ("m1", "m1", "m2")]
     assert demo.turns(events) == 2 and demo.turns([*events, {"type": "result", "num_turns": 7}]) == 7
     rows = [{"method": "POST", "path": "/v1/messages?beta=true", "status": 200, "ttft_ms": 10.0, "total_ms": 110.0,
@@ -110,6 +116,13 @@ def test_the_record_keeps_counts_and_shapes_never_text_or_host_paths(tmp_path, p
     diff = demo.shop_diff(project, work)
     assert "+    return f\"{sign}{cents // 100}.{cents % 100:02d}\"" in diff and demo.private_ok(diff)
     assert not demo.private_ok(f"see {pathlib.Path.home()}/notes")
+    outside = tmp_path / "elsewhere"                         # a linked shop/ is not read
+    outside.mkdir()
+    (outside / "secret.txt").write_text("not the agent's")
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    (linked / "shop").symlink_to(outside)
+    assert demo.shop_diff(project, linked) == "<no shop/ package>"
 
 
 def test_the_proxy_records_stop_reasons_and_length_refusals_without_text():

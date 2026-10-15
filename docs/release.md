@@ -149,8 +149,8 @@ new families or formats; v1's offload, VMM, sandbox and self-improvement; GPUs o
   bug and a missing function; task: make `pytest` pass without editing tests), committed in step 6. `holon serve` the
   class's 27B lock (5080: UD-IQ3_S; 4090: UD-Q4_K_M); Claude Code at a pinned version, headless, the M0.5 environment;
   3 runs per class, after one uncounted smoke run of M0.5's Claude Code session task (`docs/m05-grammar.md`) at the
-  pinned version against the same `holon serve`. Success: the harness restores the tests from its own copy, then
-  `pytest` passes (as built: §15.5, §15.9). Recorded: turns,
+  pinned version against the same `holon serve`. Success: the harness scores the agent's `shop/` against its own
+  copy of the tests and `pytest` passes (as built: §15.5, §15.9). Recorded: turns,
   wall time, served and prefix-saved tokens, TTFT / TPOT, the sampling parameters Claude Code sends, the tool-call
   sequence (no file text). Every miss is published; a smaller task, if any, is pre-registered as a new task and
   reported beside it. Claude Code's auto-compaction assumes a far larger window than the 32K served; the README says so.
@@ -1821,9 +1821,11 @@ the 32K context, not a claim of general agent capability (the README says so).
 - **Success:** after the session, pytest runs in a fresh directory holding only the agent's `shop/` (regular files;
   links are not followed) and the harness's own copy of `tests/`, under the harness's interpreter with its empty
   configuration (`-c`), `--noconftest`, no plugin autoload and no `PYTEST_*` variables; all 40 must pass. Anything
-  failing while scoring (a timeout past 10 minutes included) is a recorded miss. The interpreter's pytest, `_pytest`,
-  pluggy, `*.pth` files and any `sitecustomize` / `usercustomize` are hashed before and after each run: a change
-  makes the run **invalid** (recorded, not scored). Before the runs the harness checks that the project fails as
+  failing while scoring (a timeout past 10 minutes included) is a recorded miss. The interpreter and every module file
+  a scoring run imports (pytest, pluggy, iniconfig, the stdlib, extension modules: found by a probe scored the same
+  way), with the site directories' `*.pth` files and any `sitecustomize` / `usercustomize`, are hashed before and
+  after each run: a change makes the run **invalid** (recorded, not scored). Not guarded: the shared libraries the
+  interpreter links (libpython, libc). Before the runs the harness checks that the project fails as
   registered and that `--gpu-class` is the served lock's class. Runs are sequential on one server, so a later run may
   hit the prefix cache an earlier one filled (the same system prompt and tools), as a user's next session would.
 - **Recorded per run:** validity, success and counts, turns (derived from the stream's assistant messages when a
@@ -1923,4 +1925,13 @@ declarations into ABI 1.0. Every code fix below has a test that fails without it
   under `bench/.out/demo/`; `served.diff` scrubbed like the lock; any scoring failure a miss, links not followed,
   `--gpu-class` checked against the lock's class. Optional hidden report-only tests were not added.
   `scripts/ci/check_private.py` now runs its scan in `main()`, so the harness reuses its patterns.
+- **Listing note:** enums (`Status`, `TokenSrc`, `Cardinality`) stay one member per line, as before, so a new member
+  is a minor addition; `FINISH_REASONS` and `ERROR_KINDS` are vocabularies a client switches over, so a new value is
+  major.
+- **Review of the fixes** (the step's reviewer): no blocker or major; three minors fixed, each with a failing-first
+  test in `tools/tests/test_demo_harness.py` — the recorded `shop/` diff followed a linked `shop/` (now refused, as
+  scoring does); the digest guard covered only pytest and pluggy (now every module file a scoring run imports, found
+  by a probe, and the interpreter; the shared libraries it links are stated as unguarded); a lock path outside
+  `plans/` crashed the class check (now refused with its message). Nits fixed: hidden files (a local
+  `.pytest_cache`) are outside the project digest; the "planned" phrasing in design §6 / §8 / §9; D7's success line.
 

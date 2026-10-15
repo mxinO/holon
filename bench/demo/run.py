@@ -14,9 +14,10 @@ Isolation and scoring:
 - a run **succeeds** if, after the session (whatever its outcome), pytest passes all 40 tests in a fresh directory
   holding only the agent's `shop/` (regular files: links are not followed) and the harness's own copy of `tests/`,
   run by the harness's interpreter with its own configuration (no project configuration, `conftest.py` or plugin
-  autoload). That interpreter's pytest, `_pytest`, pluggy, `*.pth` and `sitecustomize` / `usercustomize` are hashed
-  before and after every run: a change makes the run **invalid** (recorded, not scored). Anything failing while
-  scoring is a recorded miss.
+  autoload). That interpreter and every module file a scoring run imports, with the `*.pth` files and any
+  `sitecustomize` / `usercustomize`, are hashed before and after every run: a change makes the run **invalid**
+  (recorded, not scored); not guarded are the shared libraries it links. Anything failing while scoring is a
+  recorded miss.
 Every run is recorded, misses and invalid runs included. Runs are sequential on one server, so a later run may hit
 the prefix cache an earlier one filled (the same system prompt and tools), as a user's next session would. A smaller
 task, if one is ever needed, is a new pre-registered task reported beside this one.
@@ -76,18 +77,20 @@ SCORING_TIMEOUT_S = 600
 TESTS = 40
 SEEDED = {"passed": 23, "failed": 17}
 FILE_TOOLS = {"Read", "Write", "Edit", "NotebookEdit"}
-GUARDED = ("pytest", "_pytest", "pluggy")                 # the scoring's packages, hashed around every run
+GUARDED = ("pytest", "_pytest", "pluggy")                 # the scoring's packages, hashed whole around every run
 ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 ABSOLUTE = re.compile(r"(?<![\w.])/[^\s:'\"(),\]]+")
 SAMPLING = ("model", "max_tokens", "temperature", "top_p", "top_k", "thinking", "output_config", "stop_sequences")
 
 
 def tree(root: pathlib.Path) -> dict[str, bytes]:
-    """The regular files under `root` (links not followed, no bytecode caches), by relative path."""
+    """The regular files under `root` (links not followed; no bytecode caches or hidden files, e.g. `.pytest_cache`),
+    by relative path."""
     out = {}
     for path in sorted(root.rglob("*")):
         rel = path.relative_to(root)
-        if "__pycache__" not in rel.parts and path.is_file() and not any(
+        if "__pycache__" not in rel.parts and not any(part.startswith(".") for part in rel.parts) and \
+                path.is_file() and not any(
                 (root / pathlib.Path(*rel.parts[:i])).is_symlink() for i in range(1, len(rel.parts) + 1)):
             out[str(rel)] = path.read_bytes()
     return out
@@ -134,12 +137,9 @@ def score(work: pathlib.Path, tests: dict[str, bytes]) -> dict:
             scored, report, ini = tmp / "scored", tmp / "junit.xml", tmp / "pytest.ini"
             write_tree({f"shop/{k}": v for k, v in tree(shop).items()} | tests, scored)
             ini.write_text("[pytest]\n")                   # not the project's configuration
-            env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTEST_", "PYTHON"))}
-            env |= {"PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
             try:
-                run = subprocess.run([sys.executable, "-m", "pytest", "-q", "-c", str(ini), "--rootdir", str(scored),
-                                      "--noconftest", "-p", "no:cacheprovider", f"--junitxml={report}", "tests"],
-                                     cwd=scored, env=env, capture_output=True, text=True, timeout=SCORING_TIMEOUT_S)
+                run = subprocess.run([sys.executable, "-m", "pytest", *_pytest_args(ini, scored, report)], cwd=scored,
+                                     env=_scoring_env(), capture_output=True, text=True, timeout=SCORING_TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 return out | {"timed_out": True}
             counts = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
@@ -155,12 +155,45 @@ def score(work: pathlib.Path, tests: dict[str, bytes]) -> dict:
         return out | {"error": type(e).__name__}
 
 
+def _scoring_env() -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTEST_", "PYTHON"))}
+    return env | {"PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+
+
+def _pytest_args(ini: pathlib.Path, rootdir: pathlib.Path, report: pathlib.Path) -> list[str]:
+    return ["-q", "-c", str(ini), "--rootdir", str(rootdir), "--noconftest", "-p", "no:cacheprovider",
+            f"--junitxml={report}", "tests"]
+
+
+PROBE = """import json, sys, pytest
+pytest.main(sys.argv[1:])
+print(json.dumps(sorted({f for m in list(sys.modules.values()) if isinstance(f := getattr(m, "__file__", None), str)})))
+"""
+
+
+def scoring_modules() -> list[str]:
+    """The files of every module a scoring run imports (pytest, its plugins and dependencies, the stdlib, extension
+    modules): a probe scored the same way, on a one-test directory."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        (tmp / "tests").mkdir()
+        (tmp / "tests" / "test_probe.py").write_text("def test_probe():\n    pass\n")
+        (ini := tmp / "pytest.ini").write_text("[pytest]\n")
+        out = subprocess.run([sys.executable, "-c", PROBE, *_pytest_args(ini, tmp, tmp / "junit.xml")], cwd=tmp,
+                             env=_scoring_env(), capture_output=True, text=True, timeout=120, check=True)
+        return [f for f in json.loads(out.stdout.strip().splitlines()[-1]) if not f.startswith(str(tmp))]
+
+
 def site_digest(dirs: list[pathlib.Path] | None = None) -> str:
-    """A hash of what the scoring imports from the harness's interpreter: pytest, `_pytest` and pluggy, the `*.pth`
-    files, and any `sitecustomize` / `usercustomize`."""
+    """A hash of what the scoring runs on: the interpreter and every module file a scoring run imports
+    (`scoring_modules`), plus pytest, `_pytest` and pluggy, the `*.pth` files and any `sitecustomize` /
+    `usercustomize` of the site directories (`dirs`: given, only these are hashed). The shared libraries the
+    interpreter links (libpython, libc) are not."""
+    files: dict[str, bytes] = {}
     if dirs is None:
         dirs = [pathlib.Path(d) for d in (*site.getsitepackages(), site.getusersitepackages(), *sys.path) if d]
-    files: dict[str, bytes] = {}
+        files = {f: pathlib.Path(f).read_bytes() for f in (os.path.realpath(sys.executable), *scoring_modules())
+                 if pathlib.Path(f).is_file()}
     for d in dict.fromkeys(dirs):
         if not d.is_dir():
             continue
@@ -216,8 +249,9 @@ def scrub(text: str) -> str:
 
 
 def lock_class(lock: str | None) -> str | None:
-    """The GPU class of a lock path, `plans/<model id>/<class>/<toolchain>/<n>.lock`."""
-    return pathlib.PurePosixPath(lock).parts[-3] if lock else None
+    """The GPU class of a lock path, `plans/<model id>/<class>/<toolchain>/<n>.lock`; None for anything else."""
+    parts = pathlib.PurePosixPath(lock).parts if lock else ()
+    return parts[-3] if len(parts) >= 5 and parts[0] == "plans" else None
 
 
 def turns(events: list[dict]) -> int | None:
@@ -231,8 +265,11 @@ def turns(events: list[dict]) -> int | None:
 
 def shop_diff(project: dict[str, bytes], work: pathlib.Path) -> str:
     """The agent's change to `shop/` against the project as registered, as a unified diff."""
+    shop = work / "shop"
+    if shop.is_symlink() or not shop.is_dir():           # as scoring: a linked package is not read
+        return "<no shop/ package>"
     before = {k: v for k, v in project.items() if k.startswith("shop/")}
-    after = {f"shop/{k}": v for k, v in tree(work / "shop").items()} if (work / "shop").is_dir() else {}
+    after = {f"shop/{k}": v for k, v in tree(shop).items()}
     out = []
     for name in sorted(before.keys() | after.keys()):
         old, new = (d.get(name, b"").decode(errors="replace").splitlines(True) for d in (before, after))
