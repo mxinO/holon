@@ -2,8 +2,8 @@
 shape of the given locks, graph-timed: `qlinear_glu` (mmvq's fused gate, `silu(gate) · up` from the f32 sums) vs
 `qlinear` writing [1, 2·inter] in bf16, then FlashInfer's `silu_and_mul`.
 
-A lock's merged gate/up sites are its `qlinear` sites whose `out` is twice another site's `in` (down's input is the
-intermediate size). Weights as bench/qmm_sweep.py's: the GGUF file's rows of that type and input size (else random
+A lock's merged gate/up sites are its `qlinear` sites whose `out` is twice the lock's largest `in` (down's input,
+the intermediate size). Weights as bench/qmm_sweep.py's: the GGUF file's rows of that type and input size (else random
 bytes with valid FP4 scales), copies cycled beyond three times the L2 cache.
 
     python bench/glu_sweep.py --locks plans/.../N.lock ... [--json out]
@@ -32,10 +32,13 @@ def main() -> None:
     ctx = BuildContext(PluginSet(discover()), torch.device("cuda"))
     ext, l2 = ggml.Extension(), torch.cuda.get_device_properties(0).L2_cache_size
     found = {key: e for key, e in sites(a.locks).items() if key[3] == "q8_1"}
-    inters = {k for (_, k, _, _) in found}
+    inter = {}                                        # per lock: its largest `in`, down's (the intermediate size)
+    for (_, k, _, _), e in found.items():
+        for lock in e["locks"]:
+            inter[lock] = max(inter.get(lock, 0), k)
     result = {"gpu": torch.cuda.get_device_name(), "sm": ctx.fingerprint.sm, "shapes": []}
     for (layout, k, n, mode), entry in sorted(found.items()):
-        if n // 2 not in inters or n % 8:
+        if n % 8 or not any(n == 2 * inter[lock] for lock in entry["locks"]):
             continue
         name, facts = ggml.weight_type(layout), dict(entry["facts"], out_dtype="bfloat16")
         fused = ggml.QLinearGlu(ext, MODES[mode], ctx, **facts, glu="swiglu")
