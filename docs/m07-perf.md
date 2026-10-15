@@ -3,8 +3,7 @@
 Status: **rev 3.3, steps 0–4 built** (2026-10-15; §11 step 0, §12 step 1, §13 step 2, §14 step 3, §15 step 4). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
 architecture, numerics / performance / tests) over four rounds. Step 0 ran (§11), and the panel's review of it and the
 lead's decisions are in §10's "Step 0 panel round"; §1, §3.1, §4, §5, §6, §7 and §11 carry them. The panel re-checks
-rev 3.2 before step 1; rev 3.3 fixes its findings (§10, "rev 3.2 re-check") and awaits the panel's final
-confirmation.
+rev 3.2 before step 1; rev 3.3 fixes its findings (§10, "rev 3.2 re-check").
 
 Scope: plan §2 (M0.7: "fused prefill glue (KV-store kernel, add+norm, q/k norm) and a model-specific megakernel
 experiment (design §5.7)"), narrowed and extended by what M0.3–M0.5 recorded for M0.7: the verify-step glue
@@ -1395,8 +1394,13 @@ p10 / p50 2737 / 2737 MHz, RTX 4090 2670 / 2685, RTX 5090 2565 / 2655; no therma
 the 5090 at the power cap in every sample, as in §11.1; all steady. A first RTX 5090 desktop (screened steady, p10 /
 p50 2467 / 2542) fell off the bus (Xid 79) in round 2 of the plain run: released, no record kept; a second desktop
 ran everything. Its screen after the runs read p10 / p50 1927 / 2512 MHz (power cap, no thermal slowdown: not
-steady); every arm's per-round throughput in its records is within 0.3% of its other rounds, so the dip came late
-or briefly. The 5080 (2737 / 2737) and the 4090 (2670 / 2670) were steady after their runs too.
+steady); in its records the long prompt's per-round throughput spreads up to 2.2% (today's arm; 1.6% at 512), the
+agent trace's (paced by arrivals) 0.1%; the cap-512 verdict holds with that margin (paired TTFT 1.02, long TTFT p99
++15.8%). The 5080 (2737 / 2737) and the 4090 (2670 / 2670) were steady after their runs too.
+
+Every record ran at cd6fb5c, before review round 1's fixes (870ae2c), which change no measured path: the minimum
+chunk was unreachable under the build check, and the alternation's clamp binds only when C exceeds `max_step_tokens`
+(the locks' 2048 against 512).
 
 ### 15.1 What was built
 
@@ -1459,13 +1463,15 @@ Core: 4366 code lines (4321 at the step's base; +45). Docs: design §7.1 and §4
   | Qwen3.8-27B UD-IQ3_S, q8_0 KV (GQA two calls; GDN per row kind) | 99.284% | 99.190% | 99.268% | 648 / 568 | PASS |
   | Qwen3-8B Q4_K_M, bf16 KV (GQA one call, FlashInfer) | 98.657% | 98.454% | 98.433% | 648 / 18 | PASS |
 
-  Every KL quantile passes too. These runs size the pools by `--memory-fraction 0.9`, so they ran the mixed
+  Every KL quantile passes too. The 8B's prefix-on, depth-1 configuration mixed only 18 steps (its turns hit the
+  cache), so FlashInfer's one-call path with prefix hits at depth 1 is thinly covered on the GPU; the CPU test covers
+  it for correctness. These runs size the pools by `--memory-fraction 0.9`, so they ran the mixed
   worst-step profile; so did every desktop run below.
 - **The decode-row check (B)** is §6's last item: the decode-position plant fails it on both KV formats.
 
 ### 15.3 GQA's decode rows on q8_0 KV (§10 correctness m3): decided by measurement
 
-`bench/mixed_step.py` on each class's plain 27B lock: three requests decode while an 8192-token prompt prefills in
+`bench/mixed_step.py` on each class's plain 27B model with its lock's `[engine]` values as flags (no kernel pins): three requests decode while an 8192-token prompt prefills in
 512-token chunks beside them (16 mixed steps), or, "long", decoders at 8K / 16K / 24K beside a 4096-token prompt;
 each mixed step timed synchronously; four rounds per arm, ABBA, the arms flipping the planners' `prefill_mixes`.
 Records `evidence/m07-step4_mixed-step*_<class>_2026-10-15.json`.
@@ -1477,9 +1483,8 @@ Records `evidence/m07-step4_mixed-step*_<class>_2026-10-15.json`.
 | RTX 5090 (bf16, FlashInfer) | 126.4 / 127.0 | **125.0** / 127.1 | one call (prop) |
 
 On q8_0 the decode rows cost nothing extra in one call while their contexts are short, and 28 ms of a 229 ms step
-when they are long (one program walks each row's whole KV); FlashInfer's prefill serves them 1–2% better than two
-calls. A microbenchmark on the A5000 agreed (q8_0: +0.6 to +22.5 ms per step over 16 layers in one call against +1.2
-to +3.9 ms in two). In two calls the decode rows' attention is the decode kernel's, as in an unmixed decode step.
+when they are long (one program walks each row's whole KV); FlashInfer's prefill serves them as well as or up to 2%
+better than two calls (the 5090's short case, 0.5%, is within its sd). In two calls the decode rows' attention is the decode kernel's, as in an unmixed decode step.
 
 ### 15.4 §1.3's bars on the plain locks (cap per class)
 
@@ -1505,14 +1510,15 @@ on the 4090; throughput's max(5%, 2 sd) is 5% everywhere. Records `evidence/benc
 - **Cap 512 on every class** (the 4090 as predicted, §11.8; the 5090's undecided 256 fails; the 5080 too, where the
   simulator passed it). 256 fails the paired TTFT everywhere and the long prompt's TTFT p99 everywhere: a prompt
   takes twice the mixed steps, each paying the eager step's fixed cost (§11.8's host floor; not measured here).
-- **Against the simulator** (§11.8): the gaps land at or under its predictions (the 5080's 512: 240 against 232 ms
-  at p99; the 4090's 165 against 151 ms), but the costs are larger: paired TTFT 1.10 / 1.04 / 1.02 at 512 against
+- **Against the simulator** (§11.8): the gaps land 3–9% above its predictions at 512 (p99 240 against 232 ms on the
+  5080, 165 against 151 on the 4090, 134 against 123 on the 5090), and the costs are larger: paired TTFT 1.10 / 1.04 / 1.02 at 512 against
   1.00 / 1.01 / 1.00, and the long prompt's TTFT p99 +14–16% against +2.0 / +0.7 / +4.6%. The simulator charged a
   mixed step the prefill of chunk + decode rows; the measured step also pays eager launches and the decode rows'
   attention, which it under-costed (its own note).
 - TPOT p99 (recorded, not gated) at 512: 70 against 98 ms on the 5080, 60 against 70 on the 4090, 33 against 32 on
   the 5090.
-- Every arm's throughput is within 0.3% of today's at 512.
+- At 512 the agent trace's throughput is within 0.3% of today's on every class; the long prompt's is −2.1% on the
+  5080 and within 0.1% elsewhere.
 
 ### 15.5 Speculative deployments: alternation (recorded)
 
@@ -1535,7 +1541,7 @@ mix: a prefill step capped at C alternates with a verify step.
 - Alternation brings the long prompt's stall to one capped step (39× at 512) but the agent trace's gap only 2.4–4.9×:
   a verify step waits for a whole capped prefill step, and decoders still wait behind it every other step.
 - The long prompt's TTFT p99 rises 19–26% at 512 (44–64% at 256): every other step is a verify step. Its throughput
-  falls 0.7–2.7% at 512. §5 predicted that alternation helps
+  falls 0.7–2.9% at 512. §5 predicted that alternation helps
   less and costs long-prompt TTFT; mixing verify rows (§9) is the follow-up that would close it.
 
 ### 15.6 Deviations and decisions
@@ -1550,6 +1556,8 @@ mix: a prefill step capped at C alternates with a verify step.
   `EngineConfig` keep the configured one.
 - **The alternation's prefill step without waiting decoders takes the full budget**, as §3.1's "else take the
   schedulable kind" reads; with a drafter its budget is min(C, `max_step_tokens`) (review round 1's fix).
+- **No A/A arm ran** (§1.3, §7 name one): the paired-TTFT and throughput bars' sd is today's arm's over its four
+  rounds (`bench/mixed_bars.py`), which §10's rev-3 C-m2 also reads as the A/A noise.
 - **The 5090** borrows the 4090's lock (no 5090 GGUF lock yet), as at step 0.
 
 ### 15.7 Review
@@ -1562,7 +1570,9 @@ size), the decode-row check's bitwise branch depending on cuBLAS (now exact by c
 profile untested on the CPU (recorded: the GPU bounded and desktop runs exercise it, §15.2), the bounded test's mixed
 configuration in every run (now in one, with the "no step mixed" failure shown), `check_locks` not checking
 `choices` (now does); nits fixed. Round 2: nothing at blocker, major or minor; the documentation items (this
-section) and one test nit, fixed.
+section) and one test nit, fixed. Round 3 (this section against its records, every cell recomputed): no blocker or
+major; four minors in the text (the 5090's round spread, the gaps against the simulator, the long prompt's
+throughput at 512, the records' commit) and nits, all fixed.
 
 ### 15.8 Suite
 
