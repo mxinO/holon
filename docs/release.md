@@ -2054,7 +2054,8 @@ Revised once after the step's reviewer read rev 1 (928d993), still before any re
   - `chunk_with_decode` stays the lock's 512, so the MTP arm runs M0.7's alternation (§15.5). This run is the
     alternation's measurement on this trace.
 - **Command**, ABBA rounds of fresh processes (D3 says ABAB; run.py alternates the order each round, so neither arm
-  always runs first). A run-on uses another `--name`, the first record's lock, and the target's remaining rounds.
+  always runs first). A run-on uses another `--name`, the first record's lock, and the target's remaining rounds; a
+  re-run of rounds whose plain arm failed, as many rounds as were lost.
   ```
   python bench/run.py --name release7-mtp-<class>[-<part>] --gpu 0 --model <27B file> --lock <27B lock> \
       --backends holon holon@mtp --arm mtp='<the flags above>' --rounds 4 --temperature 1.0 \
