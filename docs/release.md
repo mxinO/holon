@@ -1777,7 +1777,7 @@ Plugin manifests keep their own unit versions (1.0.0).
 
 - **design.md**
   - §3: the Plan has no tunables; `Event` is planned; `Platform` is the core's device layer, not a slot.
-  - §4.1: the manifest example is a `draft_policy` plugin with ABI 1.0's sections only (it parses: the test's copy);
+  - §4.1: the manifest example is a `draft_policy` plugin with ABI 1.0's sections only (`core/tests/test_api.py` parses it from the design);
     resources are matched as strings and registrations checked against `provides` (the claim of a Protocol check
     after import was never built).
   - §4.2: the slot table is ABI 1.0's; the planned slots are listed as future minor additions.
@@ -1804,7 +1804,8 @@ Plugin manifests keep their own unit versions (1.0.0).
   and specified by the tests, is missing. As committed: **17 failed, 23 passed**.
 - **The run** (`bench/demo/run.py`): a fresh copy of the project in a temporary directory; Claude Code **2.1.300**
   (refused otherwise; M0.5's session ran 2.1.296), `claude -p <prompt> --allowedTools Read,Write,Edit,Bash,Glob,Grep
-  --output-format stream-json --verbose`, the M0.5 environment variables, auto-update off, a fresh
+  --output-format stream-json --verbose`, M0.5's environment variables plus the Sonnet and Opus model aliases and
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` (all recorded in `client.env`), auto-update off, a fresh
   `CLAUDE_CONFIG_DIR` (no user settings, memory or hooks), `NO_PROXY` for the local proxy, the harness's Python first
   on `PATH`; through `bench/capture_proxy.py`; stopped after 30 minutes (its whole process group, also after a
   normal end) and scored as it stands. The prompt: "The Python package `shop` in the current directory fails its
@@ -1850,4 +1851,30 @@ One reviewer on the aggregate change. Round 1: one major and six minors, all fix
 - **Nits, fixed:** the design example's `derived_from` follows the `<plugin>@<commit>` form, and the test now
   parses the example from `docs/design.md` itself; a blank line in `hooks.py`; the record lists the client's
   environment variables; the harness's server calls bypass HTTP proxies; the warm prefix cache across runs is stated.
+
+Round 2 confirmed every fix: no findings beyond two wording nits in this section, fixed.
+
+### 15.7 Suite and CI
+
+Full GPU suite at b604aa9 (two RTX A5000s, the worktree's uv venv; `pytest core std plugins judge testing tools`):
+**1210 passed, 65 skipped in 20 min 45 s**, the same counts as M0.7's close (1210 / 65): no test was added, two were
+reshaped (`test_api`'s design-example and defaulted-field cases), one lost an argument (`test_locks`' tunables). An
+earlier run at b38d6c7 had one failure, `tools/tests/test_gpu_lock.py::test_first_lock_for_qwen3_0_6b`, caused by
+editing core files while it ran (the core's `src` moved between its two `propagate` calls); it passes at b604aa9.
+`scripts/ci/run_all.sh main` is green (import contracts 8 kept). The wall time is above the close's 17 min 59 s on a
+shared host; the slowest tests are unchanged (the MoE kernel setup, the supervisor's rollback tests).
+
+### 15.8 For the lead
+
+1. **The cut went beyond step 6's row** (§15.1's second table: about 40 more names, each with no reader), because
+   removing any of them after 1.0 would be a major bump. The kept list records each name kept with no reader and the
+   reason. `Pool.num_free` was added: a plugin read it without the ABI declaring it.
+2. **Every committed lock is outdated** (the core's and every plugin's `src`, and `uv_lock` 922c0a6d… → 609cd0a7…);
+   `holon serve` serves borrowed or default settings until step 7's propagation. No `plan_id` moved.
+3. **Claude Code is pinned at 2.1.300** (the version installed now; M0.5 ran 2.1.296). Step 9 needs exactly that
+   version (`DISABLE_AUTOUPDATER` is set for the runs, but the installed binary must be at it). The fresh
+   `CLAUDE_CONFIG_DIR` keeps the user's settings, memory and hooks out; it has not met a real session yet (step 9).
+4. **The README has no `core_abi` example**, so nothing there changed. Its lock table is still M0.7 §17.7's item for
+   step 10.
+5. Not done here, as instructed: the squashed public root, any change to `main`, any lock.
 
