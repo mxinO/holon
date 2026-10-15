@@ -92,7 +92,8 @@ class _Quantized:
     def _select(self, op: str, facts: dict, provider: str | None = None):
         """The instance of `op`'s kernel for `facts` (a lock site named by them), and its spec. With `provider`, only
         that provider's kernel will do: none (None, no site recorded) when it has no candidate here, and an error when
-        the deployment's choice is another provider's (a pin), which would read parts it did not prepare."""
+        the deployment's choice is another provider's (a pin, or a provider of higher priority), which would read
+        parts it did not prepare."""
         site = f"std.ops.{op.split('@')[0]}[" + ",".join(f"{k}={v}" for k, v in facts.items()) + "]"
         if provider is not None and all(s.provider != provider for s in self.ctx.candidates(op, facts)):
             return None, None

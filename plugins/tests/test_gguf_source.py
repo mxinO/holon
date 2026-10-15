@@ -112,6 +112,7 @@ REPOS = {"o/gguf": {"Qwen3-8B-Q4_K_M.gguf": 5, "Qwen3-8B-UD-Q4_K_M.gguf": 6, "Qw
          "o/hf": {"config.json": 1, "model-00001-of-00002.safetensors": 7, "model-00002-of-00002.safetensors": 7,
                   "model.safetensors.index.json": 1, "tokenizer.json": 2, "original/consolidated.safetensors": 99,
                   "consolidated.safetensors": 99, "README.md": 1}}
+REPOS["o/hf-unindexed"] = REPOS["o/hf"]                # its index cannot be fetched: every top-level weight file
 
 
 G, H = "gguf", "hf"
@@ -130,6 +131,7 @@ UNREACHABLE = "the hub is unreachable (ConnectError; offline, HF_HUB_OFFLINE=1 s
     ("o/two", {G: "several GGUF files in o/two"}),       # a split set is a file too: not "the only one"
     ("o/hf", {H: ("o/hf (5 files)", 18)}),               # top-level files the index names: not original/, README.md,
                                                          # or a consolidated copy beside the shards
+    ("o/hf-unindexed", {H: ("o/hf-unindexed (6 files)", 117)}),
     ("./o/hf", {}),                                      # a path, never a reference
     ("cached:o/gguf:Q4_K_M", {G: ("o/gguf/Qwen3-8B-Q4_K_M.gguf", 5),        # the hub unreachable: the cache's listing
                               H: None}),
@@ -168,8 +170,11 @@ def test_hub_references_are_claimed_by_one_source(tmp_path, monkeypatch, ref, wa
     index = tmp_path / "index.json"                                           # the HF index: the shards only
     index.write_text(json.dumps({"weight_map": {"a": "model-00001-of-00002.safetensors",
                                                 "b": "model-00002-of-00002.safetensors"}}))
-    monkeypatch.setattr(huggingface_hub, "hf_hub_download",
-                        lambda repo, path: str(index) if path.endswith(".index.json") else f"fetched {repo} {path}")
+    def download(repo, path):
+        if repo == "o/hf-unindexed":
+            raise OSError(repo)
+        return str(index) if path.endswith(".index.json") else f"fetched {repo} {path}"
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", download)
     monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda repo, allow_patterns: f"fetched {allow_patterns}")
     for name, hub in ((G, gguf_hub), (H, hf_hub)):
         expect = want.get(name)
@@ -188,4 +193,5 @@ def test_hub_references_are_claimed_by_one_source(tmp_path, monkeypatch, ref, wa
         else:
             files = ["config.json", "model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors",
                      "model.safetensors.index.json", "tokenizer.json"]
+            files = sorted(files + ["consolidated.safetensors"]) if ref.endswith("unindexed") else files
             assert claim.fetch() == f"fetched {files}"

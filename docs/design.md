@@ -268,8 +268,8 @@ There is no separate database. The **Registry** is the git history of lockfiles 
   (benchmarking tools such as `holon tune`, in the spirit of FreeToken's `ft bench bw`), so every class ships
   at the best configuration we know — no agent is involved. Class and shape tables inside a kernel plugin (M0.7:
   `kernels.triton_attn`'s launch configs per class, `kernels.ggml_cuda`'s crossover per class and shape and its fused
-  gate/up types) are tuned defaults pinned by the plugin's `src`, not lock fields: retuning one moves every lock that
-  uses the plugin (one propagation), and a lock records what they chose through its sites' configs and `[engine]`.
+  gate/up types) are tuned defaults pinned by the plugin's `src` (and chosen by the lock's class), not lock fields:
+  retuning one moves every lock that uses the plugin (one propagation).
 - **Fingerprint class** = GPU SKU (a slug of the product name, e.g. `rtx-5090`, which fixes SM and VRAM) +
   toolchain majors (CUDA, torch; the torch pin implies Triton), e.g. `rtx-5090/cu130-torch2.11`. GPU UUID, driver
   build and measured bandwidths are recorded in evidence only. **Lock classes during development:** `rtx-5080`

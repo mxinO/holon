@@ -10,7 +10,8 @@
 - TPOT p99 (recorded), and the mixed steps counted.
 
 `--aa`: the A/A of the paired TTFT instead — today's arm against itself, round against round, per (session, turn)
-(run.py's pairing): the median over every ordered pair of rounds, and the sd of the per-pair medians.
+(run.py's pairing), each unordered pair of rounds once (both orders would pool r with 1/r: a median of 1 by
+construction): the per-pair medians, their sd and the one farthest from 1.
 
     python bench/mixed_bars.py <record.json> [--aa] [--json out]
 """
@@ -64,16 +65,17 @@ def bars(record: dict) -> dict:
 
 
 def aa(record: dict) -> dict:
-    """Per trace: today's paired TTFT against itself (`run.paired_ttft`), each ordered pair of its rounds as a round."""
+    """Per trace: today's paired TTFT against itself (`run.paired_ttft`), each unordered pair of rounds as a round."""
     base_name = record["order"][0] if isinstance(record["order"], list) else "holon"
     out = {}
     for trace in record["summary"]:
         runs = [r for r in record["runs"] if r["trace"] == trace and r["backend"] == base_name]
-        pairs = list(itertools.permutations(runs, 2))
+        pairs = list(itertools.combinations(sorted(runs, key=lambda r: r["round"]), 2))
         paired = run.paired_ttft([dict(a, round=n) for n, (a, _) in enumerate(pairs)],
                                  [dict(b, round=n) for n, (_, b) in enumerate(pairs)])
         medians = list(paired["per_round"].values())
-        out[trace] = {"rounds": len(runs), "pairs": len(pairs), "median": paired["median"], "per_pair": medians,
+        out[trace] = {"rounds": len(runs), "pairs": len(pairs), "per_pair": medians,
+                      "farthest": max(medians, key=lambda m: abs(m - 1)),
                       "sd": round(statistics.stdev(medians), 4) if len(medians) > 1 else None}
     return out
 
@@ -87,8 +89,8 @@ def main() -> None:
     if args.aa:
         result = aa(json.load(open(args.record)))
         for trace, t in result.items():
-            print(f"{trace}: A/A paired TTFT median {t['median']} over {t['pairs']} ordered pairs of {t['rounds']} "
-                  f"rounds; per-pair medians sd {t['sd']}")
+            print(f"{trace}: A/A paired TTFT over {t['pairs']} pairs of {t['rounds']} rounds: per-pair medians "
+                  f"{t['per_pair']}, sd {t['sd']}, farthest from 1 {t['farthest']}")
         if args.json:
             with open(args.json, "w") as f:
                 json.dump({"source": args.record.rsplit("/", 1)[-1], "aa": result}, f, indent=1)

@@ -28,8 +28,12 @@ def resolve(ref: str) -> Resolved | None:
             raise ValueError(f"{ref}: its cached snapshot holds no safetensors checkpoint (config.json and weights)")
         return None
     if INDEX in files:
-        named = set(indexed(ref).values())
-        files = {p: n for p, n in files.items() if not p.endswith(".safetensors") or p in named}
+        try:
+            named = set(indexed(ref).values())
+        except Exception:  # noqa: BLE001 — the index only trims: without it, every top-level weight file is fetched
+            named = None
+        if named is not None:
+            files = {p: n for p, n in files.items() if not p.endswith(".safetensors") or p in named}
 
     def fetch() -> str:
         from huggingface_hub import snapshot_download

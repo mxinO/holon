@@ -1,0 +1,108 @@
+{
+ "workload": "m07-close-aa",
+ "date": "2026-10-15",
+ "commit": "the close commit adding mixed_bars --aa (unordered pairs)",
+ "command": "python bench/mixed_bars.py evidence/bench_m07-step4-plain_<class>_2026-10-14.json --aa",
+ "claim": "docs/m07-perf.md \u00a715.6: the A/A of \u00a71.3's paired TTFT from the step-4 records \u2014 today's arm against itself, each unordered pair of its 4 rounds, per (session, turn)",
+ "classes": {
+  "rtx-5080": {
+   "source": "bench_m07-step4-plain_rtx-5080_2026-10-14.json",
+   "aa": {
+    "agent": {
+     "rounds": 4,
+     "pairs": 6,
+     "per_pair": [
+      1.0002,
+      1.0,
+      0.9996,
+      0.9999,
+      0.9995,
+      0.9996
+     ],
+     "farthest": 0.9995,
+     "sd": 0.0003
+    },
+    "long_prompt": {
+     "rounds": 4,
+     "pairs": 6,
+     "per_pair": [
+      1.0,
+      1.0008,
+      1.0003,
+      1.0007,
+      1.0003,
+      0.9996
+     ],
+     "farthest": 1.0008,
+     "sd": 0.0004
+    }
+   }
+  },
+  "rtx-4090": {
+   "source": "bench_m07-step4-plain_rtx-4090_2026-10-14.json",
+   "aa": {
+    "agent": {
+     "rounds": 4,
+     "pairs": 6,
+     "per_pair": [
+      0.9999,
+      0.9998,
+      1.0001,
+      0.9998,
+      1.0002,
+      1.0002
+     ],
+     "farthest": 0.9998,
+     "sd": 0.0002
+    },
+    "long_prompt": {
+     "rounds": 4,
+     "pairs": 6,
+     "per_pair": [
+      0.9991,
+      0.9999,
+      1.0,
+      1.0008,
+      1.0009,
+      1.0001
+     ],
+     "farthest": 0.9991,
+     "sd": 0.0007
+    }
+   }
+  },
+  "rtx-5090": {
+   "source": "bench_m07-step4-plain_rtx-5090_2026-10-14.json",
+   "aa": {
+    "agent": {
+     "rounds": 4,
+     "pairs": 6,
+     "per_pair": [
+      1.001,
+      1.001,
+      0.9988,
+      0.9999,
+      0.9978,
+      0.9979
+     ],
+     "farthest": 0.9978,
+     "sd": 0.0015
+    },
+    "long_prompt": {
+     "rounds": 4,
+     "pairs": 6,
+     "per_pair": [
+      1.0073,
+      0.9996,
+      1.0027,
+      0.9924,
+      0.9955,
+      1.0031
+     ],
+     "farthest": 0.9924,
+     "sd": 0.0054
+    }
+   }
+  }
+ }
+}

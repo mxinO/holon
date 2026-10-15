@@ -973,7 +973,7 @@ gains the two ops). Desktops were clock-screened before their records (`bench/cl
   then selects `qlinear_glu@1` beside `qlinear@2` when the qlinear spec lists it in `config["fused"]` and the chosen glu
   kernel is the same provider's (it reads the parts that provider's `prepare` made). `glu(x)` returns None where the
   kernel does not fuse the call, and SwiGLU composes. ggml's `QLinearGlu` is mmvq's fused gate at one row
-  (`holon_ggml_mmvq`'s `gate`), for `GLU_TYPES` = {Q4_K, Q5_K, NVFP4} only (§13.4), halves of a multiple of 4 rows.
+  (`holon_ggml_mmvq`'s `gate`), for `GLU_TYPES` = {Q4_K, Q5_K, NVFP4} only (§13.4; Q5_K dropped at the close, §17), halves of a multiple of 4 rows.
 - **D6, shared q8_1:** `Linear.prepare_input(x)` returns the kernel's handle (ggml: `Prepared(x, key, buffer,
   generation)`): on the mmvq path `x` is quantized once (`quantize_q8_1`, as mmvq does) into `ggml_cuda.q8_1[in=…]`, a
   buffer of its own per `in`; every `prepare_input` into it takes the next generation (`Extension`, by the buffer's
@@ -1077,7 +1077,7 @@ class, in % of the step (− = faster), with its sd:
   some `in`, e.g. the 27B's
   5120 × 12288; the sweep picked them by a looser rule, since fixed; they are not gate/ups and are not read here.) On
   the 5080's 27B UD-IQ3_S lock the fusion as first built cost 0.47% of the B1 step. Hence `GLU_TYPES` = {Q4_K, Q5_K,
-  NVFP4}, chosen on the 5080 and 4090: the types clearly faster on both (iq4_nl, +0.5% on the 5080, composes as
+  NVFP4} (Q5_K dropped at the close, §17), chosen on the 5080 and 4090: the types clearly faster on both (iq4_nl, +0.5% on the 5080, composes as
   marginal; Q2_K has no gate/up in the locks swept and composes). The 5090's sweep, which came after, keeps them within
   0.4% of the composition at the 27B's shape and faster at the 8B's. With the set, the 27B row is within noise on the
   5080 and the 5090 (−0.14 ± 0.17%), and −0.17% on the 4090. Each sweep is one run without an sd: Q5_K (+0.6 / +1.5 /
@@ -1559,10 +1559,10 @@ mix: a prefill step capped at C alternates with a verify step.
 - **The alternation's prefill step without waiting decoders takes the full budget**, as §3.1's "else take the
   schedulable kind" reads; with a drafter its budget is min(C, `max_step_tokens`) (review round 1's fix).
 - **The A/A, from the records** (§1.3, §7 name one; no separate arm ran): today's arm against itself, round against
-  round, per (session, turn) (`bench/mixed_bars.py --aa`; `evidence/m07-close_aa_2026-10-15.json`): the paired TTFT's
-  median is 1.000 on every class and trace (12 ordered pairs of 4 rounds), the sd of the per-pair medians 0.0002–0.0015
-  on the agent trace and 0.0005 / 0.0006 / 0.0052 on the long prompt (5080 / 4090 / 5090) — far inside the 1.15 bar.
-  The paired-TTFT and throughput bars' sd is today's arm's over its four rounds (§10's rev-3 C-m2).
+  round, per (session, turn), each of the 6 pairs of its 4 rounds once (`bench/mixed_bars.py --aa`;
+  `evidence/m07-close_aa_2026-10-15.json`). The per-pair medians lie within 0.9978–1.0010 on the agent trace (sd 0.0003
+  / 0.0002 / 0.0015 on the 5080 / 4090 / 5090) and 0.9924–1.0073 on the long prompt (sd 0.0004 / 0.0007 / 0.0054) — far
+  inside the 1.15 bar. The paired-TTFT and throughput bars' sd is today's arm's over its four rounds (§10's rev-3 C-m2).
 - **The 5090** borrows the 4090's lock (no 5090 GGUF lock yet), as at step 0.
 
 ### 15.7 Review
