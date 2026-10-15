@@ -16,7 +16,8 @@
   decision, measured on sm_86: with llama.cpp's flags (`-use_fast_math`, FMA contraction on) every value matches
   gguf-py bit for bit, affine types (Q4_1, Q5_1, Q2_K, Q4_K, Q5_K, IQ1_S) included, so nothing is built with
   `-fmad=false`; the one exception is the sign of zero in Q4_0's convert ((8 - 8) * d is +0 for negative d).
-- CUDA graphs: captured calls replay bitwise like eager ones (PDL launches on sm_120a), also on new inputs.
+- CUDA graphs: captured calls replay bitwise like eager ones (PDL launches on sm_120a), also on new inputs; the
+  fused gate/up and a prepared input read by two consumers too.
 - Workspace: every call takes at most what `workspace_bytes` sizes for its rows (the pool's high-water mark,
   `Sized`), so an undersized formula fails at any row count.
 - FP4 (docs/m06-lowp.md D8, §4.8; MXFP4 and NVFP4 are in the type sweeps above as ggml blocks): the HF layouts'
@@ -417,28 +418,45 @@ def test_qembedding_real_table(ctx):
     assert same_bits(got, dequantize(t.tensor_type.name.lower(), rows))
 
 
-@pytest.mark.parametrize("name", ["q4_k", "q6_k", "q2_k", "iq3_xxs", "iq2_s", "q8_0", "nvfp4/hf"])
-def test_cuda_graph_replays_bitwise(ctx, name):
+@pytest.mark.parametrize(("name", "use"), [*((n, "qlinear") for n in ("q4_k", "q6_k", "q2_k", "iq3_xxs", "iq2_s",
+                                                                       "q8_0", "nvfp4/hf")),
+                                           ("q4_k", "glu"), ("nvfp4/hf", "glu"), ("q4_k", "prepared")])
+def test_cuda_graph_replays_bitwise(ctx, name, use):
+    """A captured call replays bitwise like the eager one, also on new inputs: `qlinear`; the fused gate/up at one row
+    (D6, `glu`); one `prepare_input` read by two consumers of the same `in` (D6, `prepared`: a Q4_K and a Q6_K
+    linear), whose host-side decision to read the prepared buffer is captured — against their eager calls, each
+    quantizing for itself."""
     k = 4096
-    kernel = qlinear(ctx, name, k)
-    w = prepared(kernel, "nvfp4", hf_fp4("nvfp4", OUT, k, seed=3)) if name == "nvfp4/hf" else \
-        {"blocks": device_blocks(random_blocks(name, OUT, k, seed=3))}
-    for rows in (1, 2, kernel.mmvq_rows + 1, CHUNK + 1):
+    out = GLU_OUT if use == "glu" else OUT
+    kernel = qlinear(ctx, name, k, out=out, op="qlinear_glu@1" if use == "glu" else "qlinear@2")
+    w = prepared(kernel, "nvfp4", hf_fp4("nvfp4", out, k, seed=3)) if name == "nvfp4/hf" else \
+        {"blocks": device_blocks(random_blocks(name, out, k, seed=3))}
+    second = qlinear(ctx, "q6_k", k, out=64), {"blocks": device_blocks(random_blocks("q6_k", 64, k, seed=4))}
+
+    def call(x, eager=False):
+        if use != "prepared":
+            return (kernel(x, w),)
+        h = x if eager else kernel.prepare_input(x)
+        return kernel(h, w), second[0](h, second[1])
+
+    for rows in (1,) if use == "glu" else (1, 2, kernel.mmvq_rows) if use == "prepared" else \
+            (1, 2, kernel.mmvq_rows + 1, CHUNK + 1):
         x = activations(rows, k, seed=11)
-        eager = kernel(x, w)
+        eager = call(x, eager=True)
+        assert all(e is not None for e in eager), f"{name} {use} rows={rows}: not fused"
         stream = torch.cuda.Stream()
         stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(stream):
-            kernel(x, w)                                   # warm-up on the capture stream
+            call(x)                                        # warm-up on the capture stream
         torch.cuda.current_stream().wait_stream(stream)
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
-            y = kernel(x, w)
+            y = call(x)
         graph.replay()
-        assert torch.equal(y, eager), f"{name} rows={rows}: replay differs from eager"
+        assert all(map(torch.equal, y, eager)), f"{name} {use} rows={rows}: replay differs from eager"
         x.copy_(activations(rows, k, seed=12))
         graph.replay()
-        assert torch.equal(y, kernel(x, w)), f"{name} rows={rows}: replay on new input differs"
+        assert all(map(torch.equal, y, call(x, eager=True))), f"{name} {use} rows={rows}: replay on new input differs"
 
 
 def test_pdl_survives_graph_capture(ctx, sm):

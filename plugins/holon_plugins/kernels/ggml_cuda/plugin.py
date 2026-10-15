@@ -81,11 +81,12 @@ NATIVE_FP4 = {"mmvq": "q8_1", "mmq": "fp4"}
 PREC = {"q8_1": 30, "fp4": 40}
 ROW_PADDING = 512               # llama.cpp's MATRIX_ROW_PADDING: native W4A4's K step
 MMVQ_MAX = 8                    # llama.cpp's MMVQ_MAX_BATCH_SIZE: mmvq's most activation rows
-# The types whose merged gate/up runs mmvq's fused gate (qlinear_glu, docs/m07-perf.md D6, §13.4): where
+# The types whose merged gate/up runs mmvq's fused gate (qlinear_glu, docs/m07-perf.md D6, §13.4, §17): where
 # bench/glu_sweep.py found it faster per call than the matmul and FlashInfer's silu_and_mul at the locks' gate/up
-# shapes on the RTX 5080 and 4090, and within 0.4% on the 5090 (evidence/m07-step2_glu-sweep_<class>); most i-quants
-# and Q3_K ran it 1–10% slower, so they compose.
-GLU_TYPES = frozenset({"q4_k", "q5_k", "nvfp4"})
+# shapes on the RTX 5080 and 4090 by more than a sweep's noise, and within 0.4% on the 5090
+# (evidence/m07-step2_glu-sweep_<class>), and the step-level A/B kept it (the 8B rows). Q5_K (+0.6 / +1.5 / −0.3%,
+# within noise, no L2 of its own) composes, as do most i-quants and Q3_K, which ran it 1–10% slower.
+GLU_TYPES = frozenset({"q4_k", "nvfp4"})
 # The crossover per shape (docs/m07-perf.md D2): (GPU class, ggml type, in, out, mmq's activation mode) -> mmvq up to
 # this many rows, mmq above, where repeated graph-timed sweeps (bench/qmm_sweep.py) found mmq faster per call by at
 # least 3% and by more than 3 sd at every graphed row the entry moves (4, 7, 8), and the entries save at least 1% of

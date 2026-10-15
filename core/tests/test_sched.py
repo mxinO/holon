@@ -85,18 +85,21 @@ def _seq(rid: int, prompt: int, gen: int) -> Seq:
 
 
 @pytest.mark.parametrize("mode", ["today", "mixed", "alternating"])
-@pytest.mark.parametrize("seed", range(40))
-def test_every_request_finishes_when_one_max_request_fits(seed, mode):
-    """Liveness, with mixed steps (`chunk_with_decode` > 0) and, with a drafter, alternating steps too."""
-    rng = random.Random(seed)
-    max_len = 40
-    seqs = [_seq(i, p := rng.randint(1, max_len - 1), rng.randint(1, max_len - p)) for i in range(rng.randint(1, 12))]
-    state = FakeState(capacity=rng.randint(max_len, 3 * max_len), slots=(slots := rng.randint(1, 4)))
-    cap = rng.randint(1, 20) if mode != "today" else 0      # the engine's check: max_step_tokens >= slots + cap
-    _run(Scheduler(state, max_step_tokens=rng.randint(slots + cap if mode == "mixed" else 1, 50), max_model_len=10**9,
-                   draft_k=(lambda seqs: 0) if mode == "alternating" else None, chunk_with_decode=cap), seqs)
-    assert all(s.status is Status.FINISHED for s in seqs)
-    assert state.held == {} and len(state.slots) > 0
+def test_every_request_finishes_when_one_max_request_fits(mode):
+    """Liveness over 40 random workloads, with mixed steps (`chunk_with_decode` > 0) and, with a drafter, alternating
+    steps too."""
+    for seed in range(40):
+        rng = random.Random(seed)
+        max_len = 40
+        seqs = [_seq(i, p := rng.randint(1, max_len - 1), rng.randint(1, max_len - p))
+                for i in range(rng.randint(1, 12))]
+        state = FakeState(capacity=rng.randint(max_len, 3 * max_len), slots=(slots := rng.randint(1, 4)))
+        cap = rng.randint(1, 20) if mode != "today" else 0      # the engine's check: max_step_tokens >= slots + cap
+        _run(Scheduler(state, max_step_tokens=rng.randint(slots + cap if mode == "mixed" else 1, 50),
+                       max_model_len=10**9, draft_k=(lambda seqs: 0) if mode == "alternating" else None,
+                       chunk_with_decode=cap), seqs)
+        assert all(s.status is Status.FINISHED for s in seqs), seed
+        assert state.held == {} and len(state.slots) > 0, seed
 
 
 def _commit(plan, rows, sched):

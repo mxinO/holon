@@ -174,8 +174,9 @@ GROUP = {128: 8, 256: 6}           # query heads per KV head: Qwen3-30B-A3B; Qwe
 def test_triton_attn_configs_fit_every_class(cls, head_dim, layout):
     """docs/m07-perf.md §4: the launch config a class's verify kernel runs at each width a deployment declares, compiled
     for the class's SM, takes at most its shared memory — the config `fitted` at build (on the class's own device;
-    here with its fingerprint), checked per width at one split and several. Before the fix the RTX 5090's pinned
-    (64, 4, 3) took 106,752 B at head_dim 256, 6 heads per KV head, 8 rows, bf16 KV (DFlash2 failed graph capture)."""
+    here with its fingerprint), checked at one split and several for the widest width that runs each config (shared
+    memory grows with BLOCK_M, and so with the width). Before the fix the RTX 5090's pinned (64, 4, 3) took 106,752 B
+    at head_dim 256, 6 heads per KV head, 8 rows, bf16 KV (DFlash2 failed graph capture)."""
     sm, g = CLASSES[cls], GROUP[head_dim]
     if layout == "kv.hnd.fp8" and sm < 89:
         pytest.skip("fp8 KV from sm_89")
@@ -183,11 +184,12 @@ def test_triton_attn_configs_fit_every_class(cls, head_dim, layout):
     ctx.fingerprint = dataclasses.replace(ctx.fingerprint, gpu=cls, sm=sm)
     kernel = Verify(ctx, heads=4 * g, kv_heads=4, head_dim=head_dim, page=PAGE, q_dtype="bfloat16",
                     kv_dtype=kv_dtype(layout, "bfloat16"), layout=layout, max_seqs=MAX_SEQS)
-    for width in WIDTHS:
+    widest = {kernel.cfg(width): width for width in sorted(WIDTHS)}           # each config at its widest width
+    for cfg, width in widest.items():
         for splits in (1, 2):
-            used = triton_attn.shared_bytes(kernel.cfg(width), sm, nq=width, g=g, d=head_dim, page=PAGE,
+            used = triton_attn.shared_bytes(cfg, sm, nq=width, g=g, d=head_dim, page=PAGE,
                                             fmt=FORMAT[layout], causal=True, window=0, dtype="bfloat16", splits=splits)
-            assert used <= triton_attn.SHARED[sm], (width, splits, kernel.cfg(width), used)
+            assert used <= triton_attn.SHARED[sm], (width, splits, cfg, used)
 
 
 @pytest.mark.parametrize("masks", [{}, {"causal": False, "window": 16}], ids=["causal", "block-window"])

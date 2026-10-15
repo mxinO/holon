@@ -242,7 +242,12 @@ def test_a_decode_row_is_the_last_prefill_row(tmp_path, layout):
     The last token's output agrees within the attention budget (another kernel computes it), and the KV it wrote is
     bitwise: inputs in {−1, 0, 1} and projection weights in {−1, 0, 1} / 8 make every projection exact whatever the
     matmul's order, so the same write lands at the same position; T − 1 = 16 opens a page. A decode-only position
-    error, which every relative judge misses (docs/m07-perf.md §13.7), fails the KV check."""
+    error, which every relative judge misses (docs/m07-perf.md §13.7), fails the KV check.
+
+    Captured too (docs/m07-perf.md §17): one request's decode row captured into a CUDA graph at position P, then
+    replayed at P, P + 1 (a page's first token) and P + 2, each step staged on the host as the engine stages a graphed
+    step; output and KV bitwise another request's eager decode rows of the same tokens. A host-side decision captured
+    into the graph (stale on replay) fails it."""
     path = save(tiny_hf(4, seed=1, dim=64), tmp_path)
     engine = Engine(EngineConfig(str(path), dtype=torch.bfloat16, cuda_graphs=False, overlap=False, page_size=PAGE,
                                  max_seqs=2, max_step_tokens=64, max_model_len=128, state_memory=8 << 20,
@@ -254,12 +259,16 @@ def test_a_decode_row_is_the_last_prefill_row(tmp_path, layout):
     for linear in (m for m in gqa_unit.modules() if hasattr(m, "in_features") and m.weight is not None):
         linear.weight.copy_(torch.randint(-1, 2, linear.weight.shape) / 8)
 
+    def stage(seq, t):
+        """The host half of a step of `t` tokens of `seq` (static device buffers, as a graphed step's)."""
+        assert engine.state.reserve(seq, t)
+        n = np.array([t], np.int32)
+        return engine.executor._context(host_plan(0, np.array([seq.slot], np.int32),
+                                                  np.array([seq.num_computed], np.int32), n, n * 0 + 1,
+                                                  np.zeros(t, np.int64)))
+
     def run(seq, x):
-        assert engine.state.reserve(seq, len(x))
-        n = np.array([len(x)], np.int32)
-        ctx = engine.executor._context(host_plan(0, np.array([seq.slot], np.int32),
-                                                 np.array([seq.num_computed], np.int32), n, n * 0 + 1,
-                                                 np.zeros(len(x), np.int64)))
+        ctx = stage(seq, len(x))
         engine.executor._prepare(ctx)
         seq.num_computed += len(x)
         return gqa_unit(x, ctx)[-1]
@@ -280,6 +289,24 @@ def test_a_decode_row_is_the_last_prefill_row(tmp_path, layout):
             assert all(torch.equal(a, b) for a, b in zip(got, want, strict=True)), t
             for s in seqs:
                 engine.state.release(s)
+        start = 2 * PAGE - 1                                    # replays at 31, 32 (opens a page) and 33
+        x = torch.randint(-1, 2, (start + 3, 64), device="cuda").to(torch.bfloat16)
+        graphed, eager = seqs = [Seq(str(i), [0] * (start + 3), SamplingParams(seed=0)) for i in (2, 3)]
+        assert all(engine.state.admit(s) for s in seqs)
+        run(graphed, x[:start]), run(eager, x[:start])
+        static, graph = x[start:start + 1].clone(), torch.cuda.CUDAGraph()
+        for pos in range(start, start + 3):
+            want = run(eager, x[pos:pos + 1])                   # eager first: every kernel warm before the capture
+            ctx = stage(graphed, 1)
+            static.copy_(x[pos:pos + 1])
+            if pos == start:
+                with torch.cuda.graph(graph):
+                    engine.executor._prepare(ctx)
+                    out = gqa_unit(static, ctx)
+            graph.replay()
+            graphed.num_computed += 1
+            assert torch.equal(out[-1], want), pos
+            assert all(torch.equal(a, b) for a, b in zip(written(graphed, pos), written(eager, pos), strict=True)), pos
     engine.close()
 
 
