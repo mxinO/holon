@@ -1,7 +1,13 @@
 import gc
+import os
 
-import pytest
-import torch
+# Expandable allocator segments from the session's first CUDA allocation, as launchers set them (the engine requires
+# them, and its in-process fallback cannot convert segments earlier tests cached: an engine whose small pools landed
+# there failed its check). Read when CUDA's allocator starts, so setting it at collection is early enough.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+import pytest  # noqa: E402
+import torch  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

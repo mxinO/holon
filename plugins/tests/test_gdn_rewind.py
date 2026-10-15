@@ -93,11 +93,7 @@ def gpu_engine(tmp_path_factory):
     if not torch.cuda.is_available():
         pytest.skip("needs a GPU")
     path = save(tiny_hf(4, seed=1, dim=64), tmp_path_factory.mktemp("tiny_qwen3_5_gpu"))
-    # Pools sized from free memory, not a fixed state_memory: fresh segments, which show the allocator setting even
-    # where earlier tests left cached ones (the startup profile runs the oracle drafter: it needs a sequence).
-    _oracle([[1]], [[1]], "right")
-    engine = _engine(path, device="cuda", dtype=torch.bfloat16, cuda_graphs=False, page_size=16, state_memory=None,
-                     memory_fraction=0.1)
+    engine = _engine(path, device="cuda", dtype=torch.bfloat16, cuda_graphs=False, page_size=16)
     yield engine
     engine.close()
 

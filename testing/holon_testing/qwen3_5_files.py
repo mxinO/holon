@@ -20,17 +20,17 @@ TOKENIZER = sorted(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen
 
 
 def tiny_config(heads_v: int, vocab: int = 320, dim: int = 16) -> Qwen3_5TextConfig:
-    """2 key heads (so tiled and grouped value-head orders differ), `heads_v` value heads of `dim`, layers alternating
-    linear and full attention, partial rotary with mrope sections. At dim 64 (the GPU kernels' sizes) the attention
-    heads are 128 wide with 32 rotary dims (FlashInfer's rope needs them); 32 wide with 8 otherwise."""
-    head, rotary = (32, 8) if dim <= 16 else (2 * dim, 32)
+    """2 key heads (so tiled and grouped value-head orders differ), `heads_v` value heads of `dim` (64 for the GPU
+    kernels; attention heads of max(32, dim)), layers alternating linear and full attention, partial rotary (8 dims)
+    with mrope sections."""
+    head = max(32, dim)
     return Qwen3_5TextConfig(
         vocab_size=vocab, hidden_size=64, intermediate_size=96, num_hidden_layers=4, layer_types=None,
         full_attention_interval=2, num_attention_heads=4, num_key_value_heads=2, head_dim=head,
         linear_num_key_heads=2, linear_num_value_heads=heads_v, linear_key_head_dim=dim, linear_value_head_dim=dim,
         linear_conv_kernel_dim=4, tie_word_embeddings=False, attn_implementation="eager", eos_token_id=None,
-        rope_parameters={"rope_type": "default", "rope_theta": 1e7, "partial_rotary_factor": rotary / head,
-                         "mrope_section": [rotary // 4, rotary // 8, rotary // 8], "mrope_interleaved": True})
+        rope_parameters={"rope_type": "default", "rope_theta": 1e7, "partial_rotary_factor": 8 / head,
+                         "mrope_section": [2, 1, 1], "mrope_interleaved": True})
 
 
 def tiny_hf(heads_v: int, seed: int = 0, vocab: int = 320, dim: int = 16) -> torch.nn.Module:
