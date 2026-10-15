@@ -57,7 +57,8 @@ GGUF checkpoints load through `qlinear@2` / `linear_experts@2` at W4A8 by defaul
 as recorded. Bars run 0.99–1.05× of llama-bench on the same bytes. Four new locks (rtx-5080 8B NVFP4; rtx-4090 8B and 30B NVFP4,
 MXFP4_MOE GGUF), with every existing snapshot byte-identical. W4A4 (`quant.act = a4`) stays opt-in: its pre-registered default rule is
 not met (KL p99 42–145× the W4A8 floor's, for ≈ 2.1× prefill speed), and acceptance 7 is met with a recorded deviation.
-Gate B (FP8 on `kernels.triton_fp8`) is off the v0 critical path (release design §9); M0.7 starts on Gate A.
+Gate B (FP8 on `kernels.triton_fp8`) is off the v0 critical path (release design §9); M0.7 starts on Gate A. **Gate B met** (2026-10-15): its FP8 locks
+(acceptance 15) came with M0.7's closing propagation (§8a.1).
 
 Expert caching/offload, KV offload, VMM and the optional self-improvement layer follow in v1 (§10); their core
 seams are built and spiked in M0 (design D8).
@@ -498,6 +499,38 @@ accepted (owner, 2026-10-14). Found on the way: GGUF kernels are not batch-invar
 sequence at a time); xgrammar silently ignores lookarounds and mid-pattern anchors (refused under strict); Claude Code
 sends `system` messages inside `messages`. Next: M0.7 (mixed prefill/decode steps answer the 34–36 s stream stalls
 measured here).
+
+## 8a. M0.7 — performance
+
+Work (`docs/m07-perf.md`): fused glue (bf16 KV store; q/k-norm + RoPE + KV store, `attention.qk_rope_kv@1`; mmq writing
+bf16; NVFP4's `scale2` in mmvq's epilogue; gate/up + SwiGLU; one q8_1 quantization per shared input; the GDN rewind's
+glue in one launch), the mmvq/mmq crossover per class and shape, mixed prefill/decode steps without speculation
+(`chunk_with_decode`), and a megakernel experiment gated on speed of light.
+
+### 8a.1 Status (2026-10-15): acceptance met
+
+Design and evidence: `docs/m07-perf.md` (rev 3.3, reviewed clean; §11–§16 as built per step, §17 the close: the close
+panel's findings, the propagation, acceptance and deviations); records `evidence/m07-step*_*`, `bench_m07-step4-*`,
+`m07-close_aa_*`, `propagate_m07-close_*`.
+
+| # | Result |
+|---|---|
+| 1 | Fusions kept where they pay, on every class: bf16 `kv_write` (8B B1 −2.4 to −6.4%), D3 `qk_rope_kv` (8B B4 −2.9 to −5.2%), mmq bf16 (prefill −3.5 to −7.2%), NVFP4 `scale2` in mmvq (B4 −3.4 to −7.2%), gate/up + SwiGLU (8B B1 −0.65 to −1.6%; Q4_K and NVFP4 only), shared q8_1 (27B −0.5 to −0.9%), GDN rewind glue (verify −2.1 to −5.0%); GDN gating dropped (< 1%) |
+| 2 | Crossover per (class, type, in, out, mode): 25 RTX 5080 and 11 RTX 5090 entries; decode B8 +4.5% / +3.4%, DFlash verify −4.5% / −3.5%; small-step L2 passing; none on the 4090 |
+| 3 | Mixed steps at cap 512 on the plain 27B locks (RTX 5080, 4090; 5090 too): agent max-gap p99 7.5–13× better, paired TTFT 1.02–1.10, long-prompt TTFT p99 +14–16%, throughput within 0.3% (long prompt −2.1% on the 5080); cap 256 fails the TTFT bars everywhere |
+| 4 | Megakernel gate: **stop** — f 8.6% (RTX 5080) and 15.6% (RTX 5090) after the fusions, 1.050× / 1.094× at c = 0.55, under 1.15× |
+| 5 | One propagation at the close: 11 development-class locks and 2 new (M0.6 Gate B's 8B FP8 on the 5080 and 4090), every lock with the grammar processor, the plain 27B locks with `chunk_with_decode` 512; L2 passing and snapshots run-identical ×3 on all 13; 13 approvals (delegated) |
+| 6 | Core: ABI 0.2 (`BatchPlan.n_decode`, `EngineConfig.chunk_with_decode`, the planner hook `MixesRowKinds`, the kernel prop `serves_decode_rows`, `BuildCtx.candidates`; `SchedulePolicy.mix_phases` removed), each with a toy proof; 4369 / 6000 lines; full GPU suite 16 min 50 s (18 min 55 s at the start) |
+
+Decisions: D2 keyed per shape, not per type (step 0 panel); D7's cap 512 by measurement (the simulator under-costs
+mixed steps); D8 stops; D9 (small-batch quantized matmul) stays outside M0.7 (1.24 on the 5080, under 1.25); the FP4
+repack holes measured, not fixed; `chunk_with_decode` in `BuildCtx.options` is the engine's effective value (0 under a
+drafter). Found on the way: D11's first build slowed 8-row NVFP4 steps by 8.5% (a per-element `scale2` load); mmvq's
+fused gate is slower than the composition for most i-quants; the decode-row RoPE plant passed every relative judge
+(`bounded`'s floor moves with it) — a decode-row check at the attention unit, eager and captured, now covers it; three
+of four RTX 5090 desktops failed in a step (thermal throttling, Xid 79). Plan §9: 13 approvals in one day at the close
+(the "> 1 / day" trigger fires, recorded: async propagation is v1's); sweeps 10 and 18 min per class. Next: the release
+(ABI 1.0 at its step 6, the release-class locks and the MTP decision at step 7).
 
 ## 9. Kill / pivot criteria
 

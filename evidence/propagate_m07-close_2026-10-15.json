@@ -1,0 +1,433 @@
+{
+ "workload": "m07-close-propagation",
+ "date": "2026-10-15",
+ "commit": "f0b9100",
+ "environment": {
+  "uv_lock": "sha256:922c0a6d81da3f9c72023a5871bfe7ae0f8d966a178d2724c0cfaced38fb5660",
+  "venv": "uv sync --frozen --group dev (the release uv environment; uv 0.11.1, CPython 3.12.12), in a CUDA 13.0 container",
+  "torch": "2.11.0+cu130"
+ },
+ "hardware": [
+  "NVIDIA GeForce RTX 5080",
+  "NVIDIA GeForce RTX 4090"
+ ],
+ "command": {
+  "existing": "python -m holon_tools propagate <model> --approve --golden <v1-fp32> --floor <floor of its path and KV format> --prompts <v1 | v1-qwen3_5> <the lock's [engine] as flags> --slots logits_processor=grammar.xgrammar [--chunk-with-decode 512: the plain 27B locks]",
+  "new": "python -m holon_tools tune Qwen/Qwen3-8B-FP8 [--new-model: rtx-5080] --approve --golden qwen3-8b-fp8/v1-fp32 --floor qwen3-8b-fp8/v1-bfloat16-prefill-fp8-floor --max-seqs 32 --max-step-tokens 2048 --max-model-len 16384 --slots logits_processor=grammar.xgrammar",
+  "snapshot": "python -m holon_judge snapshot --model <model> --prompts <same> --runs 3 --engine-args <the new lock's [engine] and kernel pins>"
+ },
+ "clock_screens": {
+  "rtx-5080": {
+   "clock": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "sm_mhz": {
+     "p10": 2737.0,
+     "p50": 2745.0,
+     "p90": 2752.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 1.0,
+    "steady": true
+   },
+   "clock_after": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "sm_mhz": {
+     "p10": 2737.0,
+     "p50": 2745.0,
+     "p90": 2752.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 1.0,
+    "steady": true
+   }
+  },
+  "rtx-4090": {
+   "clock": {
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "sm_mhz": {
+     "p10": 2685.0,
+     "p50": 2685.0,
+     "p90": 2700.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 0.0,
+    "steady": true
+   },
+   "clock_after": {
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "sm_mhz": {
+     "p10": 2685.0,
+     "p50": 2685.0,
+     "p90": 2685.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 0.0,
+    "steady": true
+   }
+  }
+ },
+ "sweep_seconds": {
+  "rtx-5080": 602,
+  "rtx-4090": 1081
+ },
+ "approvals": 13,
+ "locks": {
+  "rtx-5080/27b-ud-iq3_s": {
+   "verdict": "approve",
+   "overall": "33372 97.495% 98.360% 2.23e-04 6.39e-01 2.56e+01 +0.665% \u00b1 0.456% 3.62%",
+   "floor": "33372 97.540% 98.382% 2.58e-04 7.12e-01 1.84e+01 +0.656% \u00b1 0.495% 3.69%",
+   "vs floor": "+0.009% \u00b1 0.805%",
+   "budget": "\u226597.290% \u22645.17e-04 \u22641.42e+00 \u22642.001%",
+   "passed": true,
+   "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/5.lock",
+   "trace": [
+    "snapshot trace differs from the lock's: step 1: deltas differ for (request, sequence) [(0, 0), (3, 0), (4, 0)]",
+    "trace covered step widths 1-5, prefix tokens saved 2048"
+   ],
+   "engine": [
+    "engine:chunk_with_decode: - -> 512",
+    "engine:slots: {} -> {'logits_processor': 'grammar.xgrammar'}"
+   ],
+   "changes": 105,
+   "tok_s": [],
+   "snapshot_x3": {
+    "run_identical": true,
+    "pools": {
+     "state.conv_state": 5,
+     "plugin.conv_state.checkpoints": 4,
+     "state.ssm_state": 5,
+     "plugin.ssm_state.checkpoints": 4,
+     "state.kv": 3513
+    },
+    "steps": 579
+   },
+   "seconds": 143
+  },
+  "rtx-5080/30b-ud-iq3_xxs": {
+   "verdict": "approve",
+   "overall": "32783 98.252% 99.120% 1.84e-04 5.68e-02 3.71e+00 +0.003% \u00b1 0.116% 4.08%",
+   "floor": "32783 98.331% 99.123% 1.86e-04 5.93e-02 3.98e+00 -0.031% \u00b1 0.105% 4.16%",
+   "vs floor": "+0.035% \u00b1 0.127%",
+   "budget": "\u226598.081% \u22643.73e-04 \u22641.19e-01 \u22640.568%",
+   "passed": true,
+   "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS@dbe47df66091cac6/rtx-5080/cu130-torch2.11/6.lock",
+   "trace": [
+    "snapshot trace differs from the lock's: step 1: deltas differ for (request, sequence) [(3, 0), (4, 0)]",
+    "trace covered step widths 1-32, prefix tokens saved 2064"
+   ],
+   "engine": [
+    "engine:chunk_with_decode: - -> 0",
+    "engine:slots: {} -> {'logits_processor': 'grammar.xgrammar'}"
+   ],
+   "changes": 116,
+   "tok_s": [],
+   "snapshot_x3": {
+    "run_identical": true,
+    "pools": {
+     "state.kv": 1159
+    },
+    "steps": 130
+   },
+   "seconds": 141
+  },
+  "rtx-5080/8b-nvfp4": {
+   "verdict": "approve",
+   "overall": "32783 98.774% 99.577% 9.13e-05 1.29e-02 9.24e-01 +0.067% \u00b1 0.045% 1.96%",
+   "floor": "32783 98.691% 99.580% 9.28e-05 1.24e-02 5.79e-01 +0.163% \u00b1 0.031% 2.03%",
+   "vs floor": "-0.096% \u00b1 0.053%",
+   "budget": "\u226598.441% \u22641.86e-04 \u22642.49e-02 \u22640.359%",
+   "passed": true,
+   "wrote": "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-5080/cu130-torch2.11/3.lock",
+   "trace": [
+    "snapshot trace differs from the lock's: step 1: deltas differ for (request, sequence) [(3, 0), (4, 0)]",
+    "trace covered step widths 1-32, prefix tokens saved 2064"
+   ],
+   "engine": [
+    "engine:chunk_with_decode: - -> 0",
+    "engine:slots: {} -> {'logits_processor': 'grammar.xgrammar'}"
+   ],
+   "changes": 91,
+   "tok_s": [],
+   "snapshot_x3": {
+    "run_identical": true,
+    "pools": {
+     "state.kv": 3322
+    },
+    "steps": 130
+   },
+   "seconds": 72
+  },
+  "rtx-5080/8b-q4_k_m": {
+   "verdict": "approve",
+   "overall": "32783 98.426% 99.284% 1.60e-04 3.54e-02 4.37e+00 +0.301% \u00b1 0.119% 2.96%",
+   "floor": "32783 98.356% 99.262% 1.63e-04 3.58e-02 6.02e+00 +0.357% \u00b1 0.115% 3.02%",
+   "vs floor": "-0.056% \u00b1 0.091%",
+   "budget": "\u226598.106% \u22643.27e-04 \u22647.17e-02 \u22640.477%",
+   "passed": true,
+   "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/8.lock",
+   "trace": [
+    "snapshot trace differs from the lock's: step 1: deltas differ for (request, sequence) [(3, 0), (4, 0)]",
+    "trace covered step widths 1-39, 41-48, prefix tokens saved 2064"
+   ],
+   "engine": [
+    "engine:chunk_with_decode: - -> 0",
+    "engine:slots: {} -> {'logits_processor': 'grammar.xgrammar'}"
+   ],
+   "changes": 95,
+   "tok_s": [],
+   "snapshot_x3": {
+    "run_identical": true,
+    "pools": {
+     "state.kv": 3714
+    },
+    "steps": 98
+   },
+   "seconds": 73
+  },
+  "rtx-5080/8b-ud-iq3_xxs": {
+   "verdict": "approve",
+   "overall": "32783 98.899% 99.730% 1.03e-04 1.33e-02 2.09e+00 +0.048% \u00b1 0.058% 2.14%",
+   "floor": "32783 98.871% 99.680% 1.18e-04 1.53e-02 1.27e+00 -0.007% \u00b1 0.081% 2.23%",
+   "vs floor": "+0.055% \u00b1 0.077%",
+   "budget": "\u226598.621% \u22642.35e-04 \u22643.06e-02 \u22640.442%",
+   "passed": true,
+   "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-UD-IQ3_XXS@495e28b50d2373d0/rtx-5080/cu130-torch2.11/8.lock",
+   "trace": [
+    "snapshot trace differs from the lock's: step 1: deltas differ for (request, sequence) [(3, 0), (4, 0)]",
+    "trace covered step widths 1-49, 51-57, 59, 61-64, prefix tokens saved 2064"
+   ],
+   "engine": [
+    "engine:chunk_with_decode: - -> 0",
+    "engine:slots: {} -> {'logits_processor': 'grammar.xgrammar'}"
+   ],
+   "changes": 96,
+   "tok_s": [],
+   "snapshot_x3": {
+    "run_identical": true,
+    "pools": {
+     "state.kv": 4269
+    },
+    "steps": 69
+   },
+   "seconds": 66
+  },
+  "rtx-5080/8b-fp8": {
+   "verdict": "approve",
+   "overall": "32783 98.142% 99.022% 1.84e-04 4.26e-02 2.84e+00 +0.217% \u00b1 0.094% 3.10%",
+   "floor": "32783 98.173% 99.063% 1.99e-04 4.18e-02 4.01e+00 +0.282% \u00b1 0.075% 3.15%",
+   "vs floor": "-0.066% \u00b1 0.127%",
+   "budget": "\u226597.923% \u22643.98e-04 \u22648.37e-02 \u22640.516%",
+   "passed": true,
+   "wrote": "plans/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-5080/cu130-torch2.11/1.lock",
+   "trace": [
+    "trace covered step widths 1-32, prefix tokens saved 2064"
+   ],
+   "engine": [],
+   "changes": 0,
+   "tok_s": [
+    "attention.paged_decode: kernels.triton_attn 758.6 tok/s, kernels.flashinfer 752.5 tok/s"
+   ],
+   "snapshot_x3": {
+    "run_identical": true,
+    "pools": {
+     "state.kv": 2213
+    },
+    "steps": 130
+   },
+   "seconds": 107
+  },
+  "rtx-4090/27b-ud-q4_k_m": {
+   "verdict": "approve",
+   "overall": "33372 97.114% 98.003% 4.49e-04 8.93e-01 2.42e+01 -1.804% \u00b1 0.688% 4.48%",
+   "floor": "33372 96.947% 97.923% 4.16e-04 6.48e-01 2.21e+01 +0.018% \u00b1 0.894% 4.43%",
+   "vs floor": "-1.822% \u00b1 0.749%",
+   "budget": "\u226596.697% \u22648.33e-04 \u22641.30e+00 \u22642.123%",
+   "passed": true,
+   "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/5.lock",
+   "trace": [
+    "snapshot trace differs from the lock's: step 1: deltas differ for (request, sequence) [(0, 0), (3, 0), (4, 0)]",
+    "trace covered step widths 1-5, prefix tokens saved 2048"
+   ],
+   "engine": [
+    "engine:chunk_with_decode: - -> 512",
+    "engine:slots: {} -> {'logits_processor': 'grammar.xgrammar'}"
+   ],
+   "changes": 94,
+   "tok_s": [],
+   "snapshot_x3": {
+    "run_identical": true,
+    "pools": {
+     "state.conv_state": 5,
+     "plugin.conv_state.checkpoints": 4,
+     "state.ssm_state": 5,
+     "plugin.ssm_state.checkpoints": 4,
+     "state.kv": 3850
+    },
+    "steps": 579
+   },
+   "seconds": 184
+  },
+  "rtx-4090/30b-mxfp4_moe": {
+   "verdict": "approve",
+   "overall": "32783 98.429% 99.323% 1.58e-04 2.64e-02 5.02e+00 +0.170% \u00b1 0.092% 3.19%",
+   "floor": "32783 98.469% 99.345% 1.68e-04 2.81e-02 3.41e+00 +0.081% \u00b1 0.083% 3.22%",
+   "vs floor": "+0.089% \u00b1 0.089%",
+   "budget": "\u226598.219% \u22643.36e-04 \u22645.63e-02 \u22640.471%",
+   "passed": true,
+   "wrote": "plans/Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@84e3f62a338c23dd/rtx-4090/cu130-torch2.11/2.lock",
+   "trace": [
+    "snapshot trace differs from the lock's: step 1: deltas differ for (request, sequence) [(3, 0), (4, 0), (30, 0)]",
+    "trace covered step widths 1-32, prefix tokens saved 2064"
+   ],
+   "engine": [
+    "engine:chunk_with_decode: - -> 0",
+    "engine:slots: {} -> {'logits_processor': 'grammar.xgrammar'}"
+   ],
+   "changes": 113,
+   "tok_s": [],
+   "snapshot_x3": {
+    "run_identical": true,
+    "pools": {
+     "state.kv": 2611
+    },
+    "steps": 130
+   },
+   "seconds": 162
+  },
+  "rtx-4090/30b-nvfp4": {
+   "verdict": "approve",
+   "overall": "32783 98.399% 99.245% 1.43e-04 4.85e-02 2.15e+00 +0.082% \u00b1 0.107% 3.47%",
+   "floor": "32783 98.359% 99.192% 1.51e-04 4.92e-02 3.70e+00 -0.022% \u00b1 0.072% 3.59%",
+   "vs floor": "+0.104% \u00b1 0.116%",
+   "budget": "\u226598.109% \u22643.01e-04 \u22649.84e-02 \u22640.503%",
+   "passed": true,
+   "wrote": "plans/nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99/rtx-4090/cu130-torch2.11/3.lock",
+   "trace": [
+    "snapshot trace differs from the lock's: step 1: deltas differ for (request, sequence) [(3, 0), (4, 0)]",
+    "trace covered step widths 1-32, prefix tokens saved 2064"
+   ],
+   "engine": [
+    "engine:chunk_with_decode: - -> 0",
+    "engine:slots: {} -> {'logits_processor': 'grammar.xgrammar'}"
+   ],
+   "changes": 112,
+   "tok_s": [],
+   "snapshot_x3": {
+    "run_identical": true,
+    "pools": {
+     "state.kv": 2137
+    },
+    "steps": 130
+   },
+   "seconds": 155
+  },
+  "rtx-4090/30b-q4_k_m": {
+   "verdict": "approve",
+   "overall": "32783 98.258% 99.025% 1.83e-04 6.11e-02 3.53e+00 +0.079% \u00b1 0.148% 4.03%",
+   "floor": "32783 98.219% 99.056% 1.81e-04 5.88e-02 4.76e+00 +0.162% \u00b1 0.096% 4.05%",
+   "vs floor": "-0.083% \u00b1 0.139%",
+   "budget": "\u226597.969% \u22643.63e-04 \u22641.18e-01 \u22640.588%",
+   "passed": true,
+   "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-4090/cu130-torch2.11/6.lock",
+   "trace": [
+    "snapshot trace differs from the lock's: step 0: deltas differ for (request, sequence) [(3, 0), (4, 0), (16, 0), (39, 0), (41, 0)]",
+    "trace covered step widths 1-49, 51-57, 59, 61-64, prefix tokens saved 2064"
+   ],
+   "engine": [
+    "engine:chunk_with_decode: - -> 0",
+    "engine:slots: {} -> {'logits_processor': 'grammar.xgrammar'}"
+   ],
+   "changes": 115,
+   "tok_s": [],
+   "snapshot_x3": {
+    "run_identical": true,
+    "pools": {
+     "state.kv": 1658
+    },
+    "steps": 68
+   },
+   "seconds": 163
+  },
+  "rtx-4090/8b-bf16": {
+   "verdict": "approve",
+   "overall": "32783 98.990% 99.800% 3.79e-05 4.70e-03 1.82e-01 +0.014% \u00b1 0.020% 1.31%",
+   "floor": "32783 98.929% 99.794% 4.48e-05 5.76e-03 1.09e+00 +0.090% \u00b1 0.030% 1.40%",
+   "vs floor": "-0.076% \u00b1 0.037%",
+   "budget": "\u226598.679% \u22648.95e-05 \u22641.15e-02 \u22640.343%",
+   "passed": true,
+   "wrote": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-4090/cu130-torch2.11/12.lock",
+   "trace": [
+    "snapshot trace differs from the lock's: step 0: deltas differ for (request, sequence) [(3, 0), (4, 0), (38, 0)]",
+    "trace covered step widths 1-49, 51-57, 59, 61-64, prefix tokens saved 2064"
+   ],
+   "engine": [
+    "engine:chunk_with_decode: - -> 0",
+    "engine:slots: {} -> {'logits_processor': 'grammar.xgrammar'}"
+   ],
+   "changes": 85,
+   "tok_s": [],
+   "snapshot_x3": {
+    "run_identical": true,
+    "pools": {
+     "state.kv": 2049
+    },
+    "steps": 68
+   },
+   "seconds": 148
+  },
+  "rtx-4090/8b-nvfp4": {
+   "verdict": "approve",
+   "overall": "32783 98.697% 99.521% 8.96e-05 1.22e-02 4.62e-01 +0.063% \u00b1 0.057% 1.96%",
+   "floor": "32783 98.691% 99.580% 9.28e-05 1.24e-02 5.79e-01 +0.163% \u00b1 0.031% 2.03%",
+   "vs floor": "-0.100% \u00b1 0.065%",
+   "budget": "\u226598.441% \u22641.86e-04 \u22642.49e-02 \u22640.359%",
+   "passed": true,
+   "wrote": "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/3.lock",
+   "trace": [
+    "snapshot trace differs from the lock's: step 1: deltas differ for (request, sequence) [(3, 0), (4, 0), (5, 0)]",
+    "trace covered step widths 1-32, prefix tokens saved 2064"
+   ],
+   "engine": [
+    "engine:chunk_with_decode: - -> 0",
+    "engine:slots: {} -> {'logits_processor': 'grammar.xgrammar'}"
+   ],
+   "changes": 91,
+   "tok_s": [],
+   "snapshot_x3": {
+    "run_identical": true,
+    "pools": {
+     "state.kv": 5969
+    },
+    "steps": 130
+   },
+   "seconds": 82
+  },
+  "rtx-4090/8b-fp8": {
+   "verdict": "approve",
+   "overall": "32783 98.194% 99.078% 1.87e-04 4.17e-02 3.64e+00 +0.155% \u00b1 0.067% 3.11%",
+   "floor": "32783 98.173% 99.063% 1.99e-04 4.18e-02 4.01e+00 +0.282% \u00b1 0.075% 3.15%",
+   "vs floor": "-0.127% \u00b1 0.092%",
+   "budget": "\u226597.923% \u22643.98e-04 \u22648.37e-02 \u22640.481%",
+   "passed": true,
+   "wrote": "plans/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-4090/cu130-torch2.11/1.lock",
+   "trace": [
+    "snapshot trace differs from the lock's: step 1: deltas differ for (request, sequence) [(3, 0), (4, 0), (5, 0)]",
+    "trace covered step widths 1-32, prefix tokens saved 2064"
+   ],
+   "engine": [],
+   "changes": 0,
+   "tok_s": [
+    "attention.paged_decode: kernels.triton_attn 661.2 tok/s, kernels.flashinfer 520.7 tok/s"
+   ],
+   "snapshot_x3": {
+    "run_identical": true,
+    "pools": {
+     "state.kv": 4878
+    },
+    "steps": 130
+   },
+   "seconds": 178
+  }
+ },
+ "trace_mixes": "the snapshot trace on the 27B UD-IQ3_S at the rtx-5080 lock's flags (RTX A5000): 61 mixed steps (engine stats), so the trace carries a capped chunk beside decoders"
+}

@@ -1,6 +1,8 @@
 # M0.7 — performance: fused glue, mixed steps, a gated megakernel experiment
 
-Status: **rev 3.3, steps 0–5 built** (2026-10-15; §11 step 0, §12 step 1, §13 step 2, §14 step 3, §15 step 4, §16 step 5: D8 stops). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
+Status: **closed, acceptance met** (2026-10-15; §17: the close panel's findings fixed, the single propagation, acceptance
+and deviations). Rev 3.3, steps 0–5 built (§11 step 0, §12 step 1, §13 step 2, §14 step 3, §15 step 4, §16 step 5: D8
+stops). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
 architecture, numerics / performance / tests) over four rounds. Step 0 ran (§11), and the panel's review of it and the
 lead's decisions are in §10's "Step 0 panel round"; §1, §3.1, §4, §5, §6, §7 and §11 carry them. The panel re-checks
 rev 3.2 before step 1; rev 3.3 fixes its findings (§10, "rev 3.2 re-check").
@@ -973,7 +975,8 @@ gains the two ops). Desktops were clock-screened before their records (`bench/cl
   then selects `qlinear_glu@1` beside `qlinear@2` when the qlinear spec lists it in `config["fused"]` and the chosen glu
   kernel is the same provider's (it reads the parts that provider's `prepare` made). `glu(x)` returns None where the
   kernel does not fuse the call, and SwiGLU composes. ggml's `QLinearGlu` is mmvq's fused gate at one row
-  (`holon_ggml_mmvq`'s `gate`), for `GLU_TYPES` = {Q4_K, Q5_K, NVFP4} only (§13.4; Q5_K dropped at the close, §17), halves of a multiple of 4 rows.
+  (`holon_ggml_mmvq`'s `gate`), for `GLU_TYPES` = {Q4_K, Q5_K, NVFP4} only (§13.4; Q5_K dropped at the close, §17),
+  halves of a multiple of 4 rows.
 - **D6, shared q8_1:** `Linear.prepare_input(x)` returns the kernel's handle (ggml: `Prepared(x, key, buffer,
   generation)`): on the mmvq path `x` is quantized once (`quantize_q8_1`, as mmvq does) into `ggml_cuda.q8_1[in=…]`, a
   buffer of its own per `in`; every `prepare_input` into it takes the next generation (`Extension`, by the buffer's
@@ -1077,7 +1080,8 @@ class, in % of the step (− = faster), with its sd:
   some `in`, e.g. the 27B's
   5120 × 12288; the sweep picked them by a looser rule, since fixed; they are not gate/ups and are not read here.) On
   the 5080's 27B UD-IQ3_S lock the fusion as first built cost 0.47% of the B1 step. Hence `GLU_TYPES` = {Q4_K, Q5_K,
-  NVFP4} (Q5_K dropped at the close, §17), chosen on the 5080 and 4090: the types clearly faster on both (iq4_nl, +0.5% on the 5080, composes as
+  NVFP4} (Q5_K dropped at the close, §17), chosen on the 5080 and 4090: the types clearly faster on both (iq4_nl,
+  +0.5% on the 5080, composes as
   marginal; Q2_K has no gate/up in the locks swept and composes). The 5090's sweep, which came after, keeps them within
   0.4% of the composition at the 27B's shape and faster at the 8B's. With the set, the 27B row is within noise on the
   5080 and the 5090 (−0.14 ± 0.17%), and −0.17% on the 4090. Each sweep is one run without an sd: Q5_K (+0.6 / +1.5 /
@@ -1666,3 +1670,183 @@ either way"). What is left beside the GEMVs on the 5090's B1 step, profiled: 0.6
 - `bench/step_profile.py`: the counter counts `QLinearGlu`'s fused calls (marked `glu`) and the embedding bytes;
   a composed glu call is counted once, as the plain qlinear it runs. Step 0's records are unaffected (no glu then).
 - No engine, core, std or plugin change; no test (the bench is outside the suite).
+
+## 17. Close (2026-10-15)
+
+### 17.1 The close panel's findings, fixed
+
+Commits 03692ce (numerics), 6959f22 (architecture), 94bb0d9 (correctness) and f0b9100 (review round 1). Every code fix
+has a test that fails without it (run against the code before it).
+
+**Numerics.**
+- **MAJOR, graph replay of the fused decode kernels.** `test_cuda_graph_replays_bitwise` (`plugins/tests/test_ggml_cuda.py`)
+  gains the fused gate/up at one row (Q4_K, and NVFP4's HF layout with its `scale2`) and one `prepare_input` read by
+  two consumers of the same `in` (a Q4_K and a Q6_K linear), whose host-side decision to read the prepared buffer is
+  captured; each replays bitwise its eager calls, also on new inputs. The decode-row check
+  (`test_attention_kv_quant.py::test_a_decode_row_is_the_last_prefill_row`) gains a captured variant: one request's
+  decode row of the GQA unit (D3's fused `qk_rope_kv` selected) captured at position 31, replayed at 31, 32 (opens a
+  page) and 33, each step staged on the host as the engine stages a graphed step; output and KV bitwise another
+  request's eager decode rows, on bf16 and q8_0 KV.
+- **Graph-only plants, verified once (not kept):** the GQA planner deciding decode rows' write slots on the host at
+  plan time (correct eagerly, stale on replay) fails the captured decode-row check at position 32 on both KV formats,
+  while its eager part passes; `prepare_input` memoising by input address (skips the quantize on a re-used address)
+  fails the new prepared graph case on new inputs while the eager L0 (`check_qlinear`, Q4_K) passes. The clean code
+  passes both.
+- **Minors.** `GLU_TYPES` = {Q4_K, NVFP4}: Q5_K (+0.6 / +1.5 / −0.3% in §13.4's sweeps, within a sweep's noise, no L2
+  of its own) composes; it is a table change, the L0 asserts each type fuses or composes as the set says. §15.6's "no
+  A/A arm" is replaced by the A/A from the records (`bench/mixed_bars.py --aa`). `test_triton_attn_configs_fit_every_class`
+  compiles each fitted config once, at the widest width that runs it (shared memory grows with BLOCK_M). The scheduler
+  liveness test is 3 cases (one per mode) looping over its 40 workloads.
+- **MTP acceptance is unchanged** by M0.7's fusions: tokens per verify step on the agent trace (k 3 and 2; step 4's MTP
+  records, today's arm) 2.78 on the RTX 5080 and 2.85 on the 4090, against M0.4's 2.78 / 2.82 (m04-spec §10).
+
+**Architecture.**
+- **`_Quantized._select`** chooses `qlinear_glu@1` among `BuildCtx.candidates` of the qlinear's provider before
+  anything is recorded: when only another provider serves it, no site is recorded and SwiGLU composes (before, the
+  lock recorded a binding that never ran); when the deployment would choose another provider's (a pin or a higher
+  priority), the build refuses, naming the pin that fixes it. `candidates(op, facts)` joins the `BuildCtx` protocol
+  (ABI 0.2, unmerged: an addition), read-only and recording nothing; `ChildContext` delegates it. Toy proof:
+  `test_quantized_units.py::test_a_glu_kernel_of_another_provider_binds_no_site` (both cases).
+- **The kernel prop is `serves_decode_rows`** (FlashInfer's prefill; GQA runs a mixed step's decode rows in one call
+  when its prefill kernel has it). The planner attribute stays `mixes_row_kinds`. `core/abi.txt` regenerated at 0.2.
+- **`BuildCtx.options["chunk_with_decode"]` is the engine's effective value** (0 under a drafter, as
+  `max_draft_tokens` is 0 without one); std's activation-mode refusal (`std.ops`, `std.moe`) reads that key alone.
+  `test_plans.py::test_mixed_steps_need_room_mixing_planners_and_no_drafter` builds an n-gram deployment (options 0,
+  the scheduler keeps 6); the toy refusal test's (256, drafts 3) case now refuses (it bound before).
+- **Design:** §4.4 and §5.7 (class and shape tables in kernel plugins are tuned defaults pinned by `src`; retuning moves
+  every lock that uses the plugin); §5.3 (fused ops over several units: `fusion_facts()`, `config["fused"]`, the
+  judge's oracle `holon_judge.fused` for `qk_rope_kv`, which has no `reference.py`, provider-filtered selection and
+  `prepare_input` handles); §5.5 (`holon serve`'s model-name grammar — a path, `<org>/<repo>`, `<org>/<repo>:<TAG>`,
+  `<org>/<repo>/<file>` — part of the CLI contract; release §7 lists it with the frozen surface); §5.6 (the crossover
+  from the per-class, per-shape table with llama.cpp's rule as fallback; mmq writes bf16 with the `scale2` epilogue);
+  §7.1 (the options key and the prop).
+- **Unused ABI names** — `SLOTS` entries no plugin fills, the dead `SchedulePolicy`, the parsed-but-unused
+  `[tunables]` / `Binding.tunables` — are cut at release step 6 (with ABI 1.0), not here.
+
+**Correctness.**
+- **Alternation inherited from a plain lock.** A plain lock's `chunk_with_decode` 512 turns on alternation when drafting
+  flags are layered over it (with a drafter the units see 0 and steps never mix; the scheduler alternates only when
+  C > 0 and a drafter exists). The README says so (Options, "Mixed steps"), with `--chunk-with-decode 0` to turn it off;
+  release step 7's per-lock MTP decision sets `chunk_with_decode` explicitly in every speculative lock.
+- **HF hub resolver:** with `model.safetensors.index.json`, only the safetensors files it names (plus the config,
+  tokenizer and template files) are fetched and sized; the index alone is fetched to know them (the hook's contract:
+  "never downloads weights"); if it cannot be fetched, every top-level weight file is, as before. Test cases: a
+  consolidated copy beside the shards is left out; an unfetchable index keeps it.
+- **Draft floors route by the engine's merged shapes:** `drafter.row_limits` asks `mmvq_rows` for the matmul the engine
+  runs (`gguf.merged`, the same `MERGES` as `engine_shapes`; `gguf.module_name` maps a draft's or MTP block's GGUF
+  names), not per tensor. Test: on the RTX 5090 an IQ4_XS gate/up merges to 5120x34816 (7 rows), its own 5120x17408
+  is 6. No committed floor moves (the DFlash and MTP floors were recorded on an A5000, which has no entry).
+- **`hint()`** names `[::1]` for a `::` bind (an IPv6-only socket answers it; 127.0.0.1 may not).
+
+**Review.** One reviewer on the aggregate change. Round 1: no blocker or major; six minors (the A/A median pooled r with
+1/r and was 1 by construction — unordered pairs now; an unfetchable index raised past `claim_ref`'s hints — falls back;
+design §4.4 claimed locks record the tables' choices; stale §13 notes and §17 citations; `_select`'s docstring; README
+ahead of the locks — lands with them) and four nits (`candidates` takes a dict where `select_kernel` takes keywords;
+the captured check's output rests on cuBLAS picking one algorithm in capture and eager; one unused consumer per
+graph case; GQA's `_fusion` raises instead of composing when the kernel's `supports` refuses the facts — pre-existing,
+recorded for the release's review, not changed).
+
+### 17.2 The single propagation (§7 step 6)
+
+Every development-class lock propagated once, at the final code (f0b9100), in the release uv environment (`uv sync
+--frozen --group dev` from the committed `uv.lock`: CPython 3.12.12, torch 2.11.0+cu130, Triton 3.6.0; the plans'
+`uv_lock` sha256:922c0a6d…), in a CUDA 13.0 container on one RTX 5080 and one RTX 4090 desktop. Each desktop was
+clock-screened before and after: RTX 5080 SM p10 / p50 2737 / 2745–2752 MHz, at the power cap, no slowdown; RTX 4090
+2685 / 2685 MHz, no slowdown; both steady. Every lock gains `slots logits_processor = grammar.xgrammar` (release D3);
+the plain 27B locks gain `chunk_with_decode = 512` (§15.9); the others record `chunk_with_decode = 0` (a new
+`[engine]` key, M0.7's ABI 0.2). Per lock: `holon_tools propagate --approve` (L2 against the golden and the floor of its
+path and KV format, the trace twice), then `holon_judge snapshot --runs 3` at the new lock's settings and pins. M0.6
+Gate B's 8B FP8 locks are new: `tune --new-model` on the RTX 5080, then on the RTX 4090 `tune` from the 5080's lock
+(its first for the class, as M0.6's second-class locks; a first try with `--new-model` was refused because the 5080's
+lock existed by then). Record `evidence/propagate_m07-close_2026-10-15.json`.
+
+| class | lock | floor | top-1 (floor; budget) | KL p99 (floor; budget) | ΔPPL vs floor (budget) | snapshot ×3 | approved | s |
+|---|---|---|---|---|---|---|---|---|
+| RTX 5080 | Qwen3-30B-A3B UD-IQ3_XXS → 6 | mmq | 98.25% (98.33; ≥ 98.08) | 5.68e-2 (5.93e-2; ≤ 0.119) | +0.035% ± 0.127% (≤ 0.568%) | identical | ✓ | 141 |
+| RTX 5080 | Qwen3-8B Q4_K_M → 8 | mmq | 98.43% (98.36; ≥ 98.11) | 3.54e-2 (3.58e-2; ≤ 7.17e-2) | −0.056% ± 0.091% (≤ 0.477%) | identical | ✓ | 73 |
+| RTX 5080 | Qwen3-8B UD-IQ3_XXS → 8 | mmq | 98.90% (98.87; ≥ 98.62) | 1.33e-2 (1.53e-2; ≤ 3.06e-2) | +0.055% ± 0.077% (≤ 0.442%) | identical | ✓ | 66 |
+| RTX 5080 | Qwen3.8-27B UD-IQ3_S, q8_0 KV → 5 (C 512) | mmq, q8_0 KV | 97.50% (97.54; ≥ 97.29) | 0.639 (0.712; ≤ 1.42) | +0.009% ± 0.805% (≤ 2.001%) | identical | ✓ | 143 |
+| RTX 5080 | nvidia Qwen3-8B NVFP4 → 3 | mmq (W4A8) | 98.77% (98.69; ≥ 98.44) | 1.29e-2 (1.24e-2; ≤ 2.49e-2) | −0.096% ± 0.053% (≤ 0.359%) | identical | ✓ | 72 |
+| RTX 5080 | **Qwen3-8B FP8 → 1 (new)** | W8A8 prefill | 98.14% (98.17; ≥ 97.92) | 4.26e-2 (4.18e-2; ≤ 8.37e-2) | −0.066% ± 0.127% (≤ 0.516%) | identical | ✓ | 107 |
+| RTX 4090 | Qwen3-8B bf16 → 12 | bf16 | 98.99% (98.93; ≥ 98.68) | 4.70e-3 (5.76e-3; ≤ 1.15e-2) | −0.076% ± 0.037% (≤ 0.343%) | identical | ✓ | 148 |
+| RTX 4090 | Qwen3-30B-A3B Q4_K_M → 6 | mmq | 98.26% (98.22; ≥ 97.97) | 6.11e-2 (5.88e-2; ≤ 0.118) | −0.083% ± 0.139% (≤ 0.588%) | identical | ✓ | 163 |
+| RTX 4090 | Qwen3.8-27B UD-Q4_K_M → 5 (C 512) | mmq | 97.11% (96.95; ≥ 96.70) | 0.893 (0.648; ≤ 1.30) | −1.822% ± 0.749% (≤ 2.123%) | identical | ✓ | 184 |
+| RTX 4090 | nvidia Qwen3-8B NVFP4 → 3 | mmq (W4A8) | 98.70% (98.69; ≥ 98.44) | 1.22e-2 (1.24e-2; ≤ 2.49e-2) | −0.100% ± 0.065% (≤ 0.359%) | identical | ✓ | 82 |
+| RTX 4090 | nvidia Qwen3-30B-A3B NVFP4 → 3 | mmq (W4A8) | 98.40% (98.36; ≥ 98.11) | 4.85e-2 (4.92e-2; ≤ 9.84e-2) | +0.104% ± 0.116% (≤ 0.503%) | identical | ✓ | 155 |
+| RTX 4090 | Qwen3-30B-A3B-2507 MXFP4_MOE → 2 | mmq (W4A8) | 98.43% (98.47; ≥ 98.22) | 2.64e-2 (2.81e-2; ≤ 5.63e-2) | +0.089% ± 0.089% (≤ 0.471%) | identical | ✓ | 162 |
+| RTX 4090 | **Qwen3-8B FP8 → 1 (new)** | W8A8 prefill | 98.19% (98.17; ≥ 97.92) | 4.17e-2 (4.18e-2; ≤ 8.37e-2) | −0.127% ± 0.092% (≤ 0.481%) | identical | ✓ | 178 |
+
+- **Every verdict passes:** L2 within budget against the floor of the lock's path and KV format, and the snapshot
+  trace run-identical ×3 (and twice inside `propagate`). **13 approvals** under the owner's delegation, one per lock
+  (11 propagations, 2 new locks), each committed with this section.
+- **What moved, as expected:** the core's and most plugins' `src` (ABI 0.2, the UX step, M0.7's code); every GQA
+  layer gains an `attention.qk_rope_kv@1` site and its `kv_write@1` config the `fused` list; FlashInfer's prefill sites
+  their props (`serves_decode_rows`); GGUF merged gate/ups a `qlinear_glu@1` site (Q4_K fuses; other types compose,
+  §13.9), and `kernels.ggml_cuda`'s `src` pins its per-shape crossover and glu types; the speculative-only
+  `gdn_rewind@1` is not recorded (no lock drafts). Every trace moved (logprob deltas from the second step on: the
+  fusions' numerics); the 27B's 4090 ΔPPL moved most, against the floor and in the good direction (−1.8% ± 0.7%).
+  KV pools are measured afresh where the previous lock's snapshot did not record its pool bytes (the GGUF and bf16
+  locks), else reused, as `propagate` does.
+- **The trace carries mixed steps at C 512:** the snapshot trace at the rtx-5080 27B lock's flags ran 61 mixed steps
+  (engine stats, on an RTX A5000), so §1.5's "capped chunk beside decoders" is in every plain 27B lock's trace.
+- **Sweep time and approvals against plan §9's triggers:** RTX 5080 10.0 min (6 locks), RTX 4090 18.0 min (7 locks,
+  the FP8 retry included); the classes ran in parallel, ≈ 20 min of wall time. Under the 30-minute trigger per class.
+  **The approvals trigger fires:** 13 approvals in one day against "> 1 / day". Recorded, not a blocker (release §6:
+  it schedules async propagation for v1). The count is what one propagation per milestone close costs with every
+  changed plan needing an approval while changed-line coverage is not recorded (design §4.6); release step 7 adds
+  another round of the same size.
+- **Release classes untouched** (release step 7): the rtx-5090 Qwen3-8B bf16 lock (6) pins pre-M0.7 code and is
+  outdated; no rtx-3090 lock exists.
+
+### 17.3 Acceptance (§1)
+
+| # | item | status |
+|---|---|---|
+| 1 | fusions shipped only where they pay | **met**: the bf16 `kv_write`, D3, D4, D11, D6 (glu and shared q8_1) and D5 kept on every class by §1.1's rule (§13.3, §14.2); GDN gating dropped at step 0 (< 1%); glu's types narrowed to Q4_K and NVFP4 (§13.4, §17.1) |
+| 2 | crossover entries per shape where they pay | **met**: 25 RTX 5080 and 11 RTX 5090 entries (the no-cast column), rows 4 / 8 guarded, ≥ half the re-stated saving delivered, small-step L2 passing (§12.3, §12.6, §13.5); the 4090 has none |
+| 3 | mixed steps on plain locks | **met at cap 512** on the RTX 5080 and 4090 (and the 5090), ≥ 4 rounds per arm: gap p99 / max 7.3–13×, paired TTFT 1.02–1.10 (bar 1.15 / 1.18), long-prompt TTFT p99 +14–16% (≤ 25%), throughput within 0.3% / 2.1%; cap 256 fails everywhere (§15.4). Speculative alternation recorded (§15.5). The A/A comes from the records, not an arm (§15.6) |
+| 4 | megakernel experiment | **met: stop**, recorded (f 8.6% / 15.6%, 1.050× / 1.094× at c = 0.55; §16) |
+| 5 | locks propagated once, at the close | **met** (§17.2): 11 propagated, 2 new (M0.6 Gate B's FP8), all approved under the delegation; the trace gains a capped chunk beside decoders (61 mixed steps) |
+| 6 | core only §3's seams, toy-proven, ≤ 6000 lines; suite time does not grow | **met with a deviation**: core 4369 / 6000 lines; besides §3.1's seams, `BuildCtx.candidates` (close panel, toy-proven, §17.1); full GPU suite 16 min 50 s against step 0's base 18 min 55 s |
+
+### 17.4 Deviations from the design, all recorded where they were made
+
+- §12.1: the std.ops minors landed with their code at step 2, not in the ABI commit.
+- §12.4: `triton_attn`'s row tiling is bitwise only where Triton keeps its warp layout (head_dim 256; one ulp at 128).
+- §12.5 / §15.6: std's activation-mode refusal stands down under a drafter — at the close by reading the engine's
+  effective `chunk_with_decode` (§17.1), no longer `max_draft_tokens`.
+- §13.8: the FP4 repack holes (an M0.6 follow-up) measured, not fixed.
+- §13.9: fused kernels are offered through `config["fused"]`; D3's oracle lives in the judge; glu kept per type.
+- §13.7 / §6: the decode-row RoPE plant passed `bounded` (prediction missed); the decode-row check (§6, step 4) and,
+  at the close, its captured variant cover it.
+- §14.1: D5 first built as torch ops, then the design's one launch.
+- §15.6: the minimum chunk is gone (it could never bind); GQA's planner always mixes (the prop picks one call or two).
+- D9 stays on step 1's with-cast table (§13.12).
+- §17.1: a core seam beyond §3 (`BuildCtx.candidates`, read-only); the build refuses a cross-provider glu choice
+  instead of composing.
+
+### 17.5 Decisions taken at the close (lead, under the owner's delegation)
+
+- The close panel's findings fixed as §17.1 records; the panel re-checks before the merge.
+- The 13 locks approved and committed, every verdict passing; the approvals trigger recorded (§17.2).
+- `chunk_with_decode` 512 on the plain 27B locks, 0 recorded on every other lock; release step 7's MTP decision sets
+  it explicitly for speculative locks.
+- Unused ABI names cut at release step 6 (§17.1).
+- M0.6 Gate B's acceptance 15 (FP8 locks) closed here (`docs/m06-lowp.md`).
+
+### 17.6 Suite and CI
+
+Full GPU suite at 94bb0d9 (two RTX A5000s; `pytest core std plugins judge testing tools`): 1209 passed, 65 skipped in
+16 min 50 s (step 4: 1320 / 65 in 17 min 54 s; the liveness test's 120 cases are 3 now, −117; +6 new cases: 3 graph
+replay, 2 glu-provider and the draft-floor test; the captured decode row is inside an existing test).
+`scripts/ci/run_all.sh main` green.
+
+### 17.7 For the lead
+
+- **13 approvals in one day** (plan §9's "> 1 / day" fires; recorded, not a blocker); sweep times under 30 min.
+- **README's lock table is stale** for M0.6's files ("TBD (M0.6 merge): … not in this tree yet"): the NVFP4,
+  MXFP4_MOE and now FP8 locks are in `plans/`. Release step 10 rewrites the table; noted, not changed here.
+- **GQA's `_fusion`** raises when the KV writer offers `qk_rope_kv` but the fused kernel refuses the units' facts (a
+  pre-existing pattern of the one fixed in `_select`; review nit): a `candidates` check there would compose. For the
+  release review.
+- **The rtx-5090 bf16 lock is outdated** until release step 7.
