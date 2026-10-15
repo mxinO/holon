@@ -520,7 +520,7 @@ panel's findings, the propagation, acceptance and deviations); records `evidence
 | 3 | Mixed steps at cap 512 on the plain 27B locks (RTX 5080, 4090; 5090 too): agent max-gap p99 7.5–13× better, paired TTFT 1.02–1.10, long-prompt TTFT p99 +14–16%, throughput within 0.3% (long prompt −2.1% on the 5080); cap 256 fails the TTFT bars everywhere |
 | 4 | Megakernel gate: **stop** — f 8.6% (RTX 5080) and 15.6% (RTX 5090) after the fusions, 1.050× / 1.094× at c = 0.55, under 1.15× |
 | 5 | One propagation at the close: 11 development-class locks and 2 new (M0.6 Gate B's 8B FP8 on the 5080 and 4090), every lock with the grammar processor, the plain 27B locks with `chunk_with_decode` 512; L2 passing and snapshots run-identical ×3 on all 13; 13 approvals (delegated) |
-| 6 | Core: ABI 0.2 (`BatchPlan.n_decode`, `EngineConfig.chunk_with_decode`, the planner hook `MixesRowKinds`, the kernel prop `serves_decode_rows`, `BuildCtx.candidates`; `SchedulePolicy.mix_phases` removed), each with a toy proof; 4369 / 6000 lines; full GPU suite 16 min 50 s (18 min 55 s at the start) |
+| 6 | Core: ABI 0.2 (`BatchPlan.n_decode`, `EngineConfig.chunk_with_decode`, the planner hook `MixesRowKinds`, the kernel prop `serves_decode_rows`, `BuildCtx.candidates`; `SchedulePolicy.mix_phases` removed), each with a toy proof; 4369 / 6000 lines; full GPU suite 1210 passed in 17 min 59 s (1155 in 18 min 55 s at the start) |
 
 Decisions: D2 keyed per shape, not per type (step 0 panel); D7's cap 512 by measurement (the simulator under-costs
 mixed steps); D8 stops; D9 (small-batch quantized matmul) stays outside M0.7 (1.24 on the 5080, under 1.25); the FP4

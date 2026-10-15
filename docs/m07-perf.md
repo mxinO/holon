@@ -1807,7 +1807,7 @@ lock existed by then). Record `evidence/propagate_m07-close_2026-10-15.json`.
 | 3 | mixed steps on plain locks | **met at cap 512** on the RTX 5080 and 4090 (and the 5090), ≥ 4 rounds per arm: gap p99 / max 7.3–13×, paired TTFT 1.02–1.10 (bar 1.15 / 1.18), long-prompt TTFT p99 +14–16% (≤ 25%), throughput within 0.3% / 2.1%; cap 256 fails everywhere (§15.4). Speculative alternation recorded (§15.5). The A/A comes from the records, not an arm (§15.6) |
 | 4 | megakernel experiment | **met: stop**, recorded (f 8.6% / 15.6%, 1.050× / 1.094× at c = 0.55; §16) |
 | 5 | locks propagated once, at the close | **met** (§17.2): 11 propagated, 2 new (M0.6 Gate B's FP8), all approved under the delegation; the trace gains a capped chunk beside decoders (61 mixed steps) |
-| 6 | core only §3's seams, toy-proven, ≤ 6000 lines; suite time does not grow | **met with a deviation**: core 4369 / 6000 lines; besides §3.1's seams, `BuildCtx.candidates` (close panel, toy-proven, §17.1); full GPU suite 16 min 50 s against step 0's base 18 min 55 s |
+| 6 | core only §3's seams, toy-proven, ≤ 6000 lines; suite time does not grow | **met with a deviation**: core 4369 / 6000 lines; besides §3.1's seams, `BuildCtx.candidates` (close panel, toy-proven, §17.1); full GPU suite 17 min 59 s at the close against step 0's base 18 min 55 s |
 
 ### 17.4 Deviations from the design, all recorded where they were made
 
@@ -1838,7 +1838,8 @@ lock existed by then). Record `evidence/propagate_m07-close_2026-10-15.json`.
 
 Full GPU suite at 94bb0d9 (two RTX A5000s; `pytest core std plugins judge testing tools`): 1209 passed, 65 skipped in
 16 min 50 s (step 4: 1320 / 65 in 17 min 54 s; the liveness test's 120 cases are 3 now, −117; +6 new cases: 3 graph
-replay, 2 glu-provider and the draft-floor test; the captured decode row is inside an existing test).
+replay, 2 glu-provider and the draft-floor test; the captured decode row is inside an existing test). Final, at
+442d3ab (the round-1 fixes and the locks in): 1210 passed, 65 skipped in 17 min 59 s (+1: the unindexed hub case);
 `scripts/ci/run_all.sh main` green.
 
 ### 17.7 For the lead
