@@ -1,0 +1,4211 @@
+{
+ "workload": "D8's gate: Qwen3-8B Q4_K_M decode B1 (graphed, 512-token prompts), every kept fusion; three paired rounds",
+ "gpu_class": "rtx-5080",
+ "date": "2026-10-15",
+ "commit": "b66b002",
+ "command": {
+  "clock_screen": "python bench/clock_check.py --model unsloth/Qwen3.8-27B-GGUF@<snapshot>/Qwen3.8-27B-UD-IQ3_S.gguf --lock plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/4.lock --seconds 60 --batch 4 (after: --seconds 30)",
+  "per_round": [
+   "python bench/step_profile.py --name 8b-q4_k_m --model unsloth/Qwen3-8B-GGUF@<snapshot>/Qwen3-8B-Q4_K_M.gguf --lock plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/7.lock --prefill --batches 1 4 8",
+   "python bench/qmm_sweep.py --locks plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/7.lock",
+   "python bench/glu_sweep.py --locks plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/7.lock"
+  ],
+  "gate": "python bench/d8_gate.py --profiles profile_{1,2,3} --sweeps sweep_{1,2,3} --glu glu_{1,2,3}"
+ },
+ "clock_screen": {
+  "before": {
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "seconds": 64.1,
+   "batch": 4,
+   "tok_s": 191.6,
+   "samples": 621,
+   "sm_mhz": {
+    "p10": 2737.0,
+    "p50": 2737.0,
+    "p90": 2752.0
+   },
+   "mem_mhz": 14801.0,
+   "power_w": 346.8,
+   "slowdown_share": 0.0,
+   "power_cap_share": 1.0,
+   "steady": true
+  },
+  "after": {
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "seconds": 42.8,
+   "batch": 4,
+   "tok_s": 191.5,
+   "samples": 408,
+   "sm_mhz": {
+    "p10": 2737.0,
+    "p50": 2737.0,
+    "p90": 2752.0
+   },
+   "mem_mhz": 14801.0,
+   "power_w": 349.1,
+   "slowdown_share": 0.0,
+   "power_cap_share": 1.0,
+   "steady": true
+  }
+ },
+ "gate": {
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "rounds": [
+   {
+    "step_ms": 6.0866,
+    "graphed_ctx": 598,
+    "weights_gb": 4.670533632,
+    "embedding_bytes": 2304,
+    "kv_gb": 0.088178688,
+    "swept_ms": 5.578308,
+    "quantize_ms": 0.11872000000000002,
+    "gemv_ms": 5.459588,
+    "gemv_ms_profiled": 5.5191,
+    "quantize_ms_profiled": 0.1598,
+    "calls": 163,
+    "stream_gb_s": 913.1,
+    "gemv_gb_s": 855.5,
+    "f": 0.0861,
+    "projection": {
+     "0.4": 1.036,
+     "0.55": 1.05
+    },
+    "gate": "stop"
+   },
+   {
+    "step_ms": 6.0871,
+    "graphed_ctx": 598,
+    "weights_gb": 4.670533632,
+    "embedding_bytes": 2304,
+    "kv_gb": 0.088178688,
+    "swept_ms": 5.57984,
+    "quantize_ms": 0.11799599999999999,
+    "gemv_ms": 5.461844,
+    "gemv_ms_profiled": 5.5213,
+    "quantize_ms_profiled": 0.1601,
+    "calls": 163,
+    "stream_gb_s": 913.3,
+    "gemv_gb_s": 855.1,
+    "f": 0.0858,
+    "projection": {
+     "0.4": 1.036,
+     "0.55": 1.05
+    },
+    "gate": "stop"
+   },
+   {
+    "step_ms": 6.0873,
+    "graphed_ctx": 598,
+    "weights_gb": 4.670533632,
+    "embedding_bytes": 2304,
+    "kv_gb": 0.088178688,
+    "swept_ms": 5.5794440000000005,
+    "quantize_ms": 0.11814,
+    "gemv_ms": 5.461304,
+    "gemv_ms_profiled": 5.5203,
+    "quantize_ms_profiled": 0.1601,
+    "calls": 163,
+    "stream_gb_s": 912.4,
+    "gemv_gb_s": 855.2,
+    "f": 0.0859,
+    "projection": {
+     "0.4": 1.036,
+     "0.55": 1.05
+    },
+    "gate": "stop"
+   }
+  ],
+  "mean": {
+   "step_ms": 6.087,
+   "graphed_ctx": 598,
+   "weights_gb": 4.670533632,
+   "embedding_bytes": 2304,
+   "kv_gb": 0.088178688,
+   "swept_ms": 5.579197333333333,
+   "quantize_ms": 0.11828533333333334,
+   "gemv_ms": 5.460912,
+   "gemv_ms_profiled": 5.5202333333333335,
+   "quantize_ms_profiled": 0.16,
+   "calls": 163,
+   "stream_gb_s": 912.9333333333333,
+   "gemv_gb_s": 855.3,
+   "f": 0.0859,
+   "projection": {
+    "0.4": 1.036,
+    "0.55": 1.05
+   },
+   "gate": "stop"
+  },
+  "f_sd": 0.0002
+ },
+ "rounds": [
+  {
+   "profile": {
+    "name": "8b-q4_k_m",
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf",
+    "lock": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/7.lock",
+    "engine_args": "",
+    "engine": {
+     "device": "cuda",
+     "dtype": "torch.bfloat16",
+     "source": "gguf",
+     "page_size": 16,
+     "max_seqs": 48,
+     "max_model_len": 4608,
+     "clamp_context": false,
+     "max_step_tokens": 2048,
+     "chunk_with_decode": 0,
+     "memory_fraction": 0.9,
+     "state_memory": null,
+     "prefix_cache": false,
+     "overlap": true,
+     "cuda_graphs": true,
+     "max_draft_tokens": 0,
+     "kernels": {},
+     "kernel_preferences": {},
+     "slots": {},
+     "plugin_options": {}
+    },
+    "kv_bytes_per_token": 147456.0,
+    "drafts": false,
+    "llama_crossover": false,
+    "rows": {
+     "decode_b1": {
+      "kind": "decode",
+      "batch": 1,
+      "ctx": 512,
+      "gemm": {
+       "weight_bytes": 4670533632,
+       "embedding_bytes": 2304,
+       "inputs": 145,
+       "calls": [
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 5120,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 6144,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 24576,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 36,
+         "glu": true
+        },
+        {
+         "type": "q4_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 1024,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 151936,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 1
+        },
+        {
+         "type": "q6_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        }
+       ]
+      },
+      "eager_wall_ms": 7.9081,
+      "eager": {
+       "kernels": 569.1,
+       "kernel_ms": 6.1432,
+       "span_ms": 12.9674,
+       "cat": {
+        "gemm": [
+         163.0,
+         5.5165
+        ],
+        "attention": [
+         72.0,
+         0.2264
+        ],
+        "act quant (q8_1 / fp4)": [
+         145.0,
+         0.1446
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0546
+        ],
+        "rmsnorm": [
+         37.0,
+         0.053
+        ],
+        "residual add": [
+         39.0,
+         0.0488
+        ],
+        "rope": [
+         36.0,
+         0.0459
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0287
+        ],
+        "kv store": [
+         4.0,
+         0.0062
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0061
+        ],
+        "sampling / head": [
+         1.0,
+         0.0057
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0055
+        ],
+        "embedding": [
+         1.0,
+         0.0014
+        ]
+       }
+      },
+      "graphed_wall_ms": 6.0866,
+      "graphed_ctx": 598,
+      "graphed": {
+       "kernels": 569.1,
+       "kernel_ms": 6.1756,
+       "span_ms": 6.1347,
+       "cat": {
+        "gemm": [
+         163.0,
+         5.5191
+        ],
+        "attention": [
+         72.0,
+         0.2379
+        ],
+        "act quant (q8_1 / fp4)": [
+         145.0,
+         0.1598
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0588
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0563
+        ],
+        "residual add": [
+         39.0,
+         0.0447
+        ],
+        "rope": [
+         36.0,
+         0.0437
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0303
+        ],
+        "kv store": [
+         4.0,
+         0.0061
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0059
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0058
+        ],
+        "sampling / head": [
+         1.0,
+         0.0057
+        ],
+        "embedding": [
+         1.0,
+         0.0015
+        ]
+       }
+      },
+      "ratio_graphed_wall_over_eager_kernels": 0.9908,
+      "ratio_graphed_profiled_over_wall": 1.0146,
+      "clocks": {
+       "graphed": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2812.0,
+         "p50": 2812.0,
+         "p90": 2835.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 235.3,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       },
+       "eager": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2805.0,
+         "p50": 2805.0,
+         "p90": 2812.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 222.0,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       }
+      },
+      "spec": {},
+      "ctx_end": 1187
+     },
+     "decode_b4": {
+      "kind": "decode",
+      "batch": 4,
+      "ctx": 512,
+      "gemm": {
+       "weight_bytes": 4670533632,
+       "embedding_bytes": 9216,
+       "inputs": 145,
+       "calls": [
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 5120,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 6144,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 24576,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 1024,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 151936,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 1
+        },
+        {
+         "type": "q6_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        }
+       ]
+      },
+      "eager_wall_ms": 9.7731,
+      "eager": {
+       "kernels": 605.1,
+       "kernel_ms": 6.979,
+       "span_ms": 12.4626,
+       "cat": {
+        "gemm": [
+         163.0,
+         5.9013
+        ],
+        "attention": [
+         72.0,
+         0.5113
+        ],
+        "act quant (q8_1 / fp4)": [
+         145.0,
+         0.1839
+        ],
+        "silu*mul": [
+         36.0,
+         0.1038
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0716
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0632
+        ],
+        "rope": [
+         36.0,
+         0.0489
+        ],
+        "residual add": [
+         39.0,
+         0.0453
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0243
+        ],
+        "sampling / head": [
+         1.0,
+         0.0068
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0061
+        ],
+        "kv store": [
+         4.0,
+         0.0058
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0054
+        ],
+        "embedding": [
+         1.0,
+         0.0013
+        ]
+       }
+      },
+      "graphed_wall_ms": 6.8456,
+      "graphed_ctx": 598,
+      "graphed": {
+       "kernels": 605.1,
+       "kernel_ms": 7.0734,
+       "span_ms": 6.9702,
+       "cat": {
+        "gemm": [
+         163.0,
+         5.9254
+        ],
+        "attention": [
+         72.0,
+         0.5595
+        ],
+        "act quant (q8_1 / fp4)": [
+         145.0,
+         0.186
+        ],
+        "silu*mul": [
+         36.0,
+         0.1057
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0806
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0711
+        ],
+        "rope": [
+         36.0,
+         0.047
+        ],
+        "residual add": [
+         39.0,
+         0.0462
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0257
+        ],
+        "sampling / head": [
+         1.0,
+         0.0068
+        ],
+        "kv store": [
+         4.0,
+         0.0063
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.006
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0057
+        ],
+        "embedding": [
+         1.0,
+         0.0014
+        ]
+       }
+      },
+      "ratio_graphed_wall_over_eager_kernels": 0.9809,
+      "ratio_graphed_profiled_over_wall": 1.0333,
+      "clocks": {
+       "graphed": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2685.0,
+         "p50": 2692.0,
+         "p90": 2782.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 309.9,
+        "slowdown_share": 0.0,
+        "power_cap_share": 1.0
+       },
+       "eager": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2685.0,
+         "p50": 2745.0,
+         "p90": 2745.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 302.6,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       }
+      },
+      "spec": {},
+      "ctx_end": 1140
+     },
+     "decode_b8": {
+      "kind": "decode",
+      "batch": 8,
+      "ctx": 512,
+      "gemm": {
+       "weight_bytes": 4670533632,
+       "embedding_bytes": 18432,
+       "inputs": 145,
+       "calls": [
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 5120,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 6144,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 24576,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 1024,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 151936,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 1
+        },
+        {
+         "type": "q6_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        }
+       ]
+      },
+      "eager_wall_ms": 10.949,
+      "eager": {
+       "kernels": 785.1,
+       "kernel_ms": 7.8556,
+       "span_ms": 14.7867,
+       "cat": {
+        "gemm": [
+         325.0,
+         6.4076
+        ],
+        "attention": [
+         72.0,
+         0.9159
+        ],
+        "act quant (q8_1 / fp4)": [
+         163.0,
+         0.1669
+        ],
+        "silu*mul": [
+         36.0,
+         0.0822
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0724
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0636
+        ],
+        "rope": [
+         36.0,
+         0.0504
+        ],
+        "residual add": [
+         39.0,
+         0.0442
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0243
+        ],
+        "sampling / head": [
+         1.0,
+         0.0094
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0061
+        ],
+        "kv store": [
+         4.0,
+         0.0058
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0055
+        ],
+        "embedding": [
+         1.0,
+         0.0013
+        ]
+       }
+      },
+      "graphed_wall_ms": 7.9249,
+      "graphed_ctx": 598,
+      "graphed": {
+       "kernels": 785.1,
+       "kernel_ms": 7.8967,
+       "span_ms": 8.0294,
+       "cat": {
+        "gemm": [
+         325.0,
+         6.3824
+        ],
+        "attention": [
+         72.0,
+         0.9946
+        ],
+        "act quant (q8_1 / fp4)": [
+         163.0,
+         0.1526
+        ],
+        "silu*mul": [
+         36.0,
+         0.0787
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0741
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0654
+        ],
+        "rope": [
+         36.0,
+         0.0485
+        ],
+        "residual add": [
+         39.0,
+         0.0465
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0255
+        ],
+        "sampling / head": [
+         1.0,
+         0.0093
+        ],
+        "kv store": [
+         4.0,
+         0.006
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0058
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0057
+        ],
+        "embedding": [
+         1.0,
+         0.0015
+        ]
+       }
+      },
+      "ratio_graphed_wall_over_eager_kernels": 1.0088,
+      "ratio_graphed_profiled_over_wall": 0.9964,
+      "clocks": {
+       "graphed": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2820.0,
+         "p50": 2820.0,
+         "p90": 2835.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 205.5,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       },
+       "eager": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2812.0,
+         "p50": 2812.0,
+         "p90": 2820.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 212.7,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       }
+      },
+      "spec": {},
+      "ctx_end": 1076
+     }
+    },
+    "unclassified": {}
+   },
+   "qmm_sweep": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "sm": 120,
+    "l2_mb": 64,
+    "stream": {
+     "bytes": 2147483648,
+     "gb_s_best": 913.1,
+     "gb_s_median": 911.4
+    },
+    "shapes": [
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 4096,
+      "out": 4096,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 9.44,
+      "copies": 22,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 12.44,
+        "mmq_cast": 17.06,
+        "mmq_f32": 17.04,
+        "llama": 12.44
+       },
+       "2": {
+        "mmvq": 12.51,
+        "mmq_cast": 17.07,
+        "mmq_f32": 17.05,
+        "llama": 12.51
+       },
+       "3": {
+        "mmvq": 12.68,
+        "mmq_cast": 17.06,
+        "mmq_f32": 17.07,
+        "llama": 12.68
+       },
+       "4": {
+        "mmvq": 13.48,
+        "mmq_cast": 17.06,
+        "mmq_f32": 17.07,
+        "llama": 13.48
+       },
+       "5": {
+        "mmvq": 14.18,
+        "mmq_cast": 17.26,
+        "mmq_f32": 17.22,
+        "llama": 14.18
+       },
+       "6": {
+        "mmvq": 16.06,
+        "mmq_cast": 17.28,
+        "mmq_f32": 17.29,
+        "llama": 17.28
+       },
+       "7": {
+        "mmvq": 17.84,
+        "mmq_cast": 17.27,
+        "mmq_f32": 17.27,
+        "llama": 17.27
+       },
+       "8": {
+        "mmvq": 19.62,
+        "mmq_cast": 17.24,
+        "mmq_f32": 17.26,
+        "llama": 17.24
+       },
+       "9": {
+        "mmq_cast": 18.75,
+        "mmq_f32": 18.72,
+        "llama": 18.75
+       }
+      }
+     },
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 4096,
+      "out": 5120,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 11.8,
+      "copies": 18,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 14.4,
+        "mmq_cast": 18.24,
+        "mmq_f32": 18.23,
+        "llama": 14.4
+       },
+       "2": {
+        "mmvq": 14.5,
+        "mmq_cast": 18.26,
+        "mmq_f32": 18.3,
+        "llama": 14.5
+       },
+       "3": {
+        "mmvq": 14.89,
+        "mmq_cast": 18.29,
+        "mmq_f32": 18.28,
+        "llama": 14.89
+       },
+       "4": {
+        "mmvq": 15.9,
+        "mmq_cast": 18.31,
+        "mmq_f32": 18.27,
+        "llama": 15.9
+       },
+       "5": {
+        "mmvq": 16.96,
+        "mmq_cast": 18.36,
+        "mmq_f32": 18.36,
+        "llama": 16.96
+       },
+       "6": {
+        "mmvq": 18.82,
+        "mmq_cast": 18.41,
+        "mmq_f32": 18.37,
+        "llama": 18.41
+       },
+       "7": {
+        "mmvq": 21.19,
+        "mmq_cast": 18.4,
+        "mmq_f32": 18.41,
+        "llama": 18.4
+       },
+       "8": {
+        "mmvq": 23.52,
+        "mmq_cast": 18.41,
+        "mmq_f32": 18.41,
+        "llama": 18.41
+       },
+       "9": {
+        "mmq_cast": 19.95,
+        "mmq_f32": 19.93,
+        "llama": 19.95
+       }
+      }
+     },
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 4096,
+      "out": 6144,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 14.16,
+      "copies": 15,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 17.61,
+        "mmq_cast": 22.31,
+        "mmq_f32": 22.26,
+        "llama": 17.61
+       },
+       "2": {
+        "mmvq": 17.68,
+        "mmq_cast": 22.26,
+        "mmq_f32": 22.27,
+        "llama": 17.68
+       },
+       "3": {
+        "mmvq": 17.88,
+        "mmq_cast": 22.24,
+        "mmq_f32": 22.26,
+        "llama": 17.88
+       },
+       "4": {
+        "mmvq": 18.89,
+        "mmq_cast": 22.27,
+        "mmq_f32": 22.28,
+        "llama": 18.89
+       },
+       "5": {
+        "mmvq": 19.47,
+        "mmq_cast": 22.46,
+        "mmq_f32": 22.45,
+        "llama": 19.47
+       },
+       "6": {
+        "mmvq": 22.0,
+        "mmq_cast": 22.48,
+        "mmq_f32": 22.46,
+        "llama": 22.48
+       },
+       "7": {
+        "mmvq": 24.82,
+        "mmq_cast": 22.49,
+        "mmq_f32": 22.46,
+        "llama": 22.49
+       },
+       "8": {
+        "mmvq": 27.39,
+        "mmq_cast": 22.44,
+        "mmq_f32": 22.45,
+        "llama": 22.44
+       },
+       "9": {
+        "mmq_cast": 23.94,
+        "mmq_f32": 23.92,
+        "llama": 23.94
+       }
+      }
+     },
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 4096,
+      "out": 24576,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 56.62,
+      "copies": 4,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 63.84,
+        "mmq_cast": 71.88,
+        "mmq_f32": 71.9,
+        "llama": 63.84
+       },
+       "2": {
+        "mmvq": 63.87,
+        "mmq_cast": 71.96,
+        "mmq_f32": 71.97,
+        "llama": 63.87
+       },
+       "3": {
+        "mmvq": 64.06,
+        "mmq_cast": 72.13,
+        "mmq_f32": 72.1,
+        "llama": 64.06
+       },
+       "4": {
+        "mmvq": 66.25,
+        "mmq_cast": 72.03,
+        "mmq_f32": 72.1,
+        "llama": 66.25
+       },
+       "5": {
+        "mmvq": 68.31,
+        "mmq_cast": 72.29,
+        "mmq_f32": 72.31,
+        "llama": 68.31
+       },
+       "6": {
+        "mmvq": 78.79,
+        "mmq_cast": 72.29,
+        "mmq_f32": 72.28,
+        "llama": 72.29
+       },
+       "7": {
+        "mmvq": 90.14,
+        "mmq_cast": 72.31,
+        "mmq_f32": 72.34,
+        "llama": 72.31
+       },
+       "8": {
+        "mmvq": 100.79,
+        "mmq_cast": 72.29,
+        "mmq_f32": 72.37,
+        "llama": 72.29
+       },
+       "9": {
+        "mmq_cast": 74.84,
+        "mmq_f32": 75.01,
+        "llama": 74.84
+       }
+      }
+     },
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 12288,
+      "out": 4096,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 28.31,
+      "copies": 8,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 33.69,
+        "mmq_cast": 38.95,
+        "mmq_f32": 38.98,
+        "llama": 33.69
+       },
+       "2": {
+        "mmvq": 33.97,
+        "mmq_cast": 39.0,
+        "mmq_f32": 38.96,
+        "llama": 33.97
+       },
+       "3": {
+        "mmvq": 34.99,
+        "mmq_cast": 38.97,
+        "mmq_f32": 39.01,
+        "llama": 34.99
+       },
+       "4": {
+        "mmvq": 35.99,
+        "mmq_cast": 39.09,
+        "mmq_f32": 39.03,
+        "llama": 35.99
+       },
+       "5": {
+        "mmvq": 37.78,
+        "mmq_cast": 39.21,
+        "mmq_f32": 39.32,
+        "llama": 37.78
+       },
+       "6": {
+        "mmvq": 42.84,
+        "mmq_cast": 39.2,
+        "mmq_f32": 39.21,
+        "llama": 39.2
+       },
+       "7": {
+        "mmvq": 48.43,
+        "mmq_cast": 39.22,
+        "mmq_f32": 39.23,
+        "llama": 39.22
+       },
+       "8": {
+        "mmvq": 53.78,
+        "mmq_cast": 39.28,
+        "mmq_f32": 39.39,
+        "llama": 39.28
+       },
+       "9": {
+        "mmq_cast": 41.09,
+        "mmq_f32": 40.93,
+        "llama": 41.09
+       }
+      }
+     },
+     {
+      "layout": "ggml.q6_k/gguf.native",
+      "type": "q6_k",
+      "in": 4096,
+      "out": 1024,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 3.44,
+      "copies": 59,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 7,
+      "mmvq_rows": 7,
+      "us": {
+       "1": {
+        "mmvq": 6.12,
+        "mmq_cast": 11.1,
+        "mmq_f32": 11.08,
+        "llama": 6.12
+       },
+       "2": {
+        "mmvq": 6.53,
+        "mmq_cast": 11.1,
+        "mmq_f32": 11.1,
+        "llama": 6.53
+       },
+       "3": {
+        "mmvq": 6.88,
+        "mmq_cast": 11.09,
+        "mmq_f32": 11.09,
+        "llama": 6.88
+       },
+       "4": {
+        "mmvq": 6.77,
+        "mmq_cast": 11.1,
+        "mmq_f32": 11.09,
+        "llama": 6.77
+       },
+       "5": {
+        "mmvq": 9.4,
+        "mmq_cast": 11.26,
+        "mmq_f32": 11.25,
+        "llama": 9.4
+       },
+       "6": {
+        "mmvq": 8.82,
+        "mmq_cast": 11.23,
+        "mmq_f32": 11.25,
+        "llama": 8.82
+       },
+       "7": {
+        "mmvq": 9.74,
+        "mmq_cast": 11.25,
+        "mmq_f32": 11.25,
+        "llama": 9.74
+       },
+       "8": {
+        "mmvq": 9.43,
+        "mmq_cast": 11.28,
+        "mmq_f32": 11.26,
+        "llama": 11.28
+       },
+       "9": {
+        "mmq_cast": 12.01,
+        "mmq_f32": 12.0,
+        "llama": 12.01
+       }
+      }
+     },
+     {
+      "layout": "ggml.q6_k/gguf.native",
+      "type": "q6_k",
+      "in": 4096,
+      "out": 151936,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 510.5,
+      "copies": 2,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 7,
+      "mmvq_rows": 7,
+      "us": {
+       "1": {
+        "mmvq": 559.44,
+        "mmq_cast": 604.48,
+        "mmq_f32": 605.46,
+        "llama": 559.44
+       },
+       "2": {
+        "mmvq": 560.84,
+        "mmq_cast": 605.51,
+        "mmq_f32": 607.04,
+        "llama": 560.84
+       },
+       "3": {
+        "mmvq": 561.97,
+        "mmq_cast": 606.5,
+        "mmq_f32": 608.18,
+        "llama": 561.97
+       },
+       "4": {
+        "mmvq": 565.62,
+        "mmq_cast": 607.2,
+        "mmq_f32": 609.18,
+        "llama": 565.62
+       },
+       "5": {
+        "mmvq": 569.27,
+        "mmq_cast": 607.92,
+        "mmq_f32": 610.33,
+        "llama": 569.27
+       },
+       "6": {
+        "mmvq": 626.36,
+        "mmq_cast": 608.76,
+        "mmq_f32": 611.35,
+        "llama": 626.36
+       },
+       "7": {
+        "mmvq": 702.4,
+        "mmq_cast": 609.35,
+        "mmq_f32": 612.4,
+        "llama": 702.4
+       },
+       "8": {
+        "mmvq": 796.54,
+        "mmq_cast": 609.84,
+        "mmq_f32": 613.23,
+        "llama": 609.84
+       },
+       "9": {
+        "mmq_cast": 624.81,
+        "mmq_f32": 629.62,
+        "llama": 624.81
+       }
+      }
+     },
+     {
+      "layout": "ggml.q6_k/gguf.native",
+      "type": "q6_k",
+      "in": 12288,
+      "out": 4096,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 41.29,
+      "copies": 5,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 7,
+      "mmvq_rows": 7,
+      "us": {
+       "1": {
+        "mmvq": 53.11,
+        "mmq_cast": 56.08,
+        "mmq_f32": 56.06,
+        "llama": 53.11
+       },
+       "2": {
+        "mmvq": 55.1,
+        "mmq_cast": 56.05,
+        "mmq_f32": 56.04,
+        "llama": 55.1
+       },
+       "3": {
+        "mmvq": 56.58,
+        "mmq_cast": 56.1,
+        "mmq_f32": 56.06,
+        "llama": 56.58
+       },
+       "4": {
+        "mmvq": 57.43,
+        "mmq_cast": 56.11,
+        "mmq_f32": 56.15,
+        "llama": 57.43
+       },
+       "5": {
+        "mmvq": 57.22,
+        "mmq_cast": 56.21,
+        "mmq_f32": 56.3,
+        "llama": 57.22
+       },
+       "6": {
+        "mmvq": 56.78,
+        "mmq_cast": 56.27,
+        "mmq_f32": 56.48,
+        "llama": 56.78
+       },
+       "7": {
+        "mmvq": 60.01,
+        "mmq_cast": 56.34,
+        "mmq_f32": 56.41,
+        "llama": 60.01
+       },
+       "8": {
+        "mmvq": 68.11,
+        "mmq_cast": 56.49,
+        "mmq_f32": 56.55,
+        "llama": 56.49
+       },
+       "9": {
+        "mmq_cast": 58.13,
+        "mmq_f32": 58.16,
+        "llama": 58.13
+       }
+      }
+     }
+    ],
+    "quantize": [
+     {
+      "in": 4096,
+      "us": {
+       "1": 0.676,
+       "2": 0.731,
+       "3": 0.905,
+       "4": 0.911,
+       "5": 1.001,
+       "6": 1.024,
+       "7": 1.042,
+       "8": 1.018,
+       "9": 1.049
+      }
+     },
+     {
+      "in": 12288,
+      "us": {
+       "1": 0.913,
+       "2": 1.016,
+       "3": 1.049,
+       "4": 1.063,
+       "5": 0.979,
+       "6": 1.085,
+       "7": 1.085,
+       "8": 1.092,
+       "9": 1.096
+      }
+     }
+    ]
+   },
+   "glu_sweep": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "sm": 120,
+    "shapes": [
+     {
+      "type": "q4_k",
+      "in": 4096,
+      "out": 24576,
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "us": {
+       "fused": 64.508,
+       "composed": 66.033
+      },
+      "saving_pct": 2.31
+     }
+    ]
+   }
+  },
+  {
+   "profile": {
+    "name": "8b-q4_k_m",
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf",
+    "lock": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/7.lock",
+    "engine_args": "",
+    "engine": {
+     "device": "cuda",
+     "dtype": "torch.bfloat16",
+     "source": "gguf",
+     "page_size": 16,
+     "max_seqs": 48,
+     "max_model_len": 4608,
+     "clamp_context": false,
+     "max_step_tokens": 2048,
+     "chunk_with_decode": 0,
+     "memory_fraction": 0.9,
+     "state_memory": null,
+     "prefix_cache": false,
+     "overlap": true,
+     "cuda_graphs": true,
+     "max_draft_tokens": 0,
+     "kernels": {},
+     "kernel_preferences": {},
+     "slots": {},
+     "plugin_options": {}
+    },
+    "kv_bytes_per_token": 147456.0,
+    "drafts": false,
+    "llama_crossover": false,
+    "rows": {
+     "decode_b1": {
+      "kind": "decode",
+      "batch": 1,
+      "ctx": 512,
+      "gemm": {
+       "weight_bytes": 4670533632,
+       "embedding_bytes": 2304,
+       "inputs": 145,
+       "calls": [
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 5120,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 6144,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 24576,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 36,
+         "glu": true
+        },
+        {
+         "type": "q4_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 1024,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 151936,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 1
+        },
+        {
+         "type": "q6_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        }
+       ]
+      },
+      "eager_wall_ms": 7.7575,
+      "eager": {
+       "kernels": 569.1,
+       "kernel_ms": 6.1435,
+       "span_ms": 13.1228,
+       "cat": {
+        "gemm": [
+         163.0,
+         5.5168
+        ],
+        "attention": [
+         72.0,
+         0.2266
+        ],
+        "act quant (q8_1 / fp4)": [
+         145.0,
+         0.1444
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0546
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0529
+        ],
+        "residual add": [
+         39.0,
+         0.0487
+        ],
+        "rope": [
+         36.0,
+         0.0458
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0286
+        ],
+        "kv store": [
+         4.0,
+         0.0061
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0061
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0058
+        ],
+        "sampling / head": [
+         1.0,
+         0.0057
+        ],
+        "embedding": [
+         1.0,
+         0.0014
+        ]
+       }
+      },
+      "graphed_wall_ms": 6.0871,
+      "graphed_ctx": 598,
+      "graphed": {
+       "kernels": 569.1,
+       "kernel_ms": 6.1788,
+       "span_ms": 6.1375,
+       "cat": {
+        "gemm": [
+         163.0,
+         5.5213
+        ],
+        "attention": [
+         72.0,
+         0.238
+        ],
+        "act quant (q8_1 / fp4)": [
+         145.0,
+         0.1601
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0589
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0565
+        ],
+        "residual add": [
+         39.0,
+         0.0447
+        ],
+        "rope": [
+         36.0,
+         0.0438
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0304
+        ],
+        "kv store": [
+         4.0,
+         0.0062
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0059
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0058
+        ],
+        "sampling / head": [
+         1.0,
+         0.0057
+        ],
+        "embedding": [
+         1.0,
+         0.0015
+        ]
+       }
+      },
+      "ratio_graphed_wall_over_eager_kernels": 0.9908,
+      "ratio_graphed_profiled_over_wall": 1.0151,
+      "clocks": {
+       "graphed": {
+        "samples": 19,
+        "sm_mhz": {
+         "p10": 2812.0,
+         "p50": 2812.0,
+         "p90": 2835.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 232.8,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       },
+       "eager": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2805.0,
+         "p50": 2805.0,
+         "p90": 2812.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 226.1,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       }
+      },
+      "spec": {},
+      "ctx_end": 1193
+     },
+     "decode_b4": {
+      "kind": "decode",
+      "batch": 4,
+      "ctx": 512,
+      "gemm": {
+       "weight_bytes": 4670533632,
+       "embedding_bytes": 9216,
+       "inputs": 145,
+       "calls": [
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 5120,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 6144,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 24576,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 1024,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 151936,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 1
+        },
+        {
+         "type": "q6_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        }
+       ]
+      },
+      "eager_wall_ms": 9.6897,
+      "eager": {
+       "kernels": 605.1,
+       "kernel_ms": 6.9786,
+       "span_ms": 12.6098,
+       "cat": {
+        "gemm": [
+         163.0,
+         5.9012
+        ],
+        "attention": [
+         72.0,
+         0.5112
+        ],
+        "act quant (q8_1 / fp4)": [
+         145.0,
+         0.1838
+        ],
+        "silu*mul": [
+         36.0,
+         0.1038
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0715
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0631
+        ],
+        "rope": [
+         36.0,
+         0.0488
+        ],
+        "residual add": [
+         39.0,
+         0.0451
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0243
+        ],
+        "sampling / head": [
+         1.0,
+         0.0068
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0062
+        ],
+        "kv store": [
+         4.0,
+         0.0058
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0057
+        ],
+        "embedding": [
+         1.0,
+         0.0013
+        ]
+       }
+      },
+      "graphed_wall_ms": 6.8434,
+      "graphed_ctx": 598,
+      "graphed": {
+       "kernels": 605.1,
+       "kernel_ms": 7.0736,
+       "span_ms": 6.971,
+       "cat": {
+        "gemm": [
+         163.0,
+         5.926
+        ],
+        "attention": [
+         72.0,
+         0.5594
+        ],
+        "act quant (q8_1 / fp4)": [
+         145.0,
+         0.186
+        ],
+        "silu*mul": [
+         36.0,
+         0.1058
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0804
+        ],
+        "rmsnorm": [
+         37.0,
+         0.071
+        ],
+        "rope": [
+         36.0,
+         0.0471
+        ],
+        "residual add": [
+         39.0,
+         0.0461
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0256
+        ],
+        "sampling / head": [
+         1.0,
+         0.0068
+        ],
+        "kv store": [
+         4.0,
+         0.0062
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.006
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0056
+        ],
+        "embedding": [
+         1.0,
+         0.0015
+        ]
+       }
+      },
+      "ratio_graphed_wall_over_eager_kernels": 0.9806,
+      "ratio_graphed_profiled_over_wall": 1.0336,
+      "clocks": {
+       "graphed": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2692.0,
+         "p50": 2715.0,
+         "p90": 2790.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 303.2,
+        "slowdown_share": 0.0,
+        "power_cap_share": 1.0
+       },
+       "eager": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2685.0,
+         "p50": 2745.0,
+         "p90": 2745.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 307.1,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       }
+      },
+      "spec": {},
+      "ctx_end": 1142
+     },
+     "decode_b8": {
+      "kind": "decode",
+      "batch": 8,
+      "ctx": 512,
+      "gemm": {
+       "weight_bytes": 4670533632,
+       "embedding_bytes": 18432,
+       "inputs": 145,
+       "calls": [
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 5120,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 6144,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 24576,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 1024,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 151936,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 1
+        },
+        {
+         "type": "q6_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        }
+       ]
+      },
+      "eager_wall_ms": 10.9529,
+      "eager": {
+       "kernels": 785.1,
+       "kernel_ms": 7.8539,
+       "span_ms": 14.7802,
+       "cat": {
+        "gemm": [
+         325.0,
+         6.4066
+        ],
+        "attention": [
+         72.0,
+         0.9157
+        ],
+        "act quant (q8_1 / fp4)": [
+         163.0,
+         0.167
+        ],
+        "silu*mul": [
+         36.0,
+         0.0822
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0723
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0635
+        ],
+        "rope": [
+         36.0,
+         0.0504
+        ],
+        "residual add": [
+         39.0,
+         0.044
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0243
+        ],
+        "sampling / head": [
+         1.0,
+         0.0093
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0061
+        ],
+        "kv store": [
+         4.0,
+         0.0058
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0054
+        ],
+        "embedding": [
+         1.0,
+         0.0013
+        ]
+       }
+      },
+      "graphed_wall_ms": 7.9219,
+      "graphed_ctx": 598,
+      "graphed": {
+       "kernels": 785.1,
+       "kernel_ms": 7.8971,
+       "span_ms": 8.0289,
+       "cat": {
+        "gemm": [
+         325.0,
+         6.3827
+        ],
+        "attention": [
+         72.0,
+         0.995
+        ],
+        "act quant (q8_1 / fp4)": [
+         163.0,
+         0.1527
+        ],
+        "silu*mul": [
+         36.0,
+         0.0787
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0741
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0653
+        ],
+        "rope": [
+         36.0,
+         0.0485
+        ],
+        "residual add": [
+         39.0,
+         0.0466
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0253
+        ],
+        "sampling / head": [
+         1.0,
+         0.0092
+        ],
+        "kv store": [
+         4.0,
+         0.006
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0059
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0057
+        ],
+        "embedding": [
+         1.0,
+         0.0015
+        ]
+       }
+      },
+      "ratio_graphed_wall_over_eager_kernels": 1.0087,
+      "ratio_graphed_profiled_over_wall": 0.9969,
+      "clocks": {
+       "graphed": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2820.0,
+         "p50": 2820.0,
+         "p90": 2835.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 205.8,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       },
+       "eager": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2812.0,
+         "p50": 2820.0,
+         "p90": 2820.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 214.2,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       }
+      },
+      "spec": {},
+      "ctx_end": 1077
+     }
+    },
+    "unclassified": {}
+   },
+   "qmm_sweep": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "sm": 120,
+    "l2_mb": 64,
+    "stream": {
+     "bytes": 2147483648,
+     "gb_s_best": 913.3,
+     "gb_s_median": 911.9
+    },
+    "shapes": [
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 4096,
+      "out": 4096,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 9.44,
+      "copies": 22,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 12.48,
+        "mmq_cast": 17.05,
+        "mmq_f32": 17.03,
+        "llama": 12.48
+       },
+       "2": {
+        "mmvq": 12.52,
+        "mmq_cast": 17.07,
+        "mmq_f32": 17.06,
+        "llama": 12.52
+       },
+       "3": {
+        "mmvq": 12.7,
+        "mmq_cast": 17.09,
+        "mmq_f32": 17.06,
+        "llama": 12.7
+       },
+       "4": {
+        "mmvq": 13.5,
+        "mmq_cast": 17.05,
+        "mmq_f32": 17.06,
+        "llama": 13.5
+       },
+       "5": {
+        "mmvq": 14.18,
+        "mmq_cast": 17.27,
+        "mmq_f32": 17.25,
+        "llama": 14.18
+       },
+       "6": {
+        "mmvq": 16.08,
+        "mmq_cast": 17.27,
+        "mmq_f32": 17.23,
+        "llama": 17.27
+       },
+       "7": {
+        "mmvq": 17.84,
+        "mmq_cast": 17.29,
+        "mmq_f32": 17.26,
+        "llama": 17.29
+       },
+       "8": {
+        "mmvq": 19.58,
+        "mmq_cast": 17.24,
+        "mmq_f32": 17.26,
+        "llama": 17.24
+       },
+       "9": {
+        "mmq_cast": 18.65,
+        "mmq_f32": 18.64,
+        "llama": 18.65
+       }
+      }
+     },
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 4096,
+      "out": 5120,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 11.8,
+      "copies": 18,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 14.39,
+        "mmq_cast": 18.24,
+        "mmq_f32": 18.19,
+        "llama": 14.39
+       },
+       "2": {
+        "mmvq": 14.48,
+        "mmq_cast": 18.28,
+        "mmq_f32": 18.29,
+        "llama": 14.48
+       },
+       "3": {
+        "mmvq": 14.88,
+        "mmq_cast": 18.26,
+        "mmq_f32": 18.31,
+        "llama": 14.88
+       },
+       "4": {
+        "mmvq": 15.87,
+        "mmq_cast": 18.32,
+        "mmq_f32": 18.28,
+        "llama": 15.87
+       },
+       "5": {
+        "mmvq": 16.97,
+        "mmq_cast": 18.42,
+        "mmq_f32": 18.37,
+        "llama": 16.97
+       },
+       "6": {
+        "mmvq": 18.85,
+        "mmq_cast": 18.39,
+        "mmq_f32": 18.41,
+        "llama": 18.39
+       },
+       "7": {
+        "mmvq": 21.23,
+        "mmq_cast": 18.41,
+        "mmq_f32": 18.42,
+        "llama": 18.41
+       },
+       "8": {
+        "mmvq": 23.51,
+        "mmq_cast": 18.4,
+        "mmq_f32": 18.42,
+        "llama": 18.4
+       },
+       "9": {
+        "mmq_cast": 19.82,
+        "mmq_f32": 19.81,
+        "llama": 19.82
+       }
+      }
+     },
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 4096,
+      "out": 6144,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 14.16,
+      "copies": 15,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 17.62,
+        "mmq_cast": 22.29,
+        "mmq_f32": 22.23,
+        "llama": 17.62
+       },
+       "2": {
+        "mmvq": 17.69,
+        "mmq_cast": 22.28,
+        "mmq_f32": 22.25,
+        "llama": 17.69
+       },
+       "3": {
+        "mmvq": 17.89,
+        "mmq_cast": 22.28,
+        "mmq_f32": 22.26,
+        "llama": 17.89
+       },
+       "4": {
+        "mmvq": 18.84,
+        "mmq_cast": 22.25,
+        "mmq_f32": 22.24,
+        "llama": 18.84
+       },
+       "5": {
+        "mmvq": 19.38,
+        "mmq_cast": 22.46,
+        "mmq_f32": 22.48,
+        "llama": 19.38
+       },
+       "6": {
+        "mmvq": 21.99,
+        "mmq_cast": 22.49,
+        "mmq_f32": 22.48,
+        "llama": 22.49
+       },
+       "7": {
+        "mmvq": 24.71,
+        "mmq_cast": 22.48,
+        "mmq_f32": 22.51,
+        "llama": 22.48
+       },
+       "8": {
+        "mmvq": 27.48,
+        "mmq_cast": 22.46,
+        "mmq_f32": 22.48,
+        "llama": 22.46
+       },
+       "9": {
+        "mmq_cast": 23.95,
+        "mmq_f32": 23.93,
+        "llama": 23.95
+       }
+      }
+     },
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 4096,
+      "out": 24576,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 56.62,
+      "copies": 4,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 63.85,
+        "mmq_cast": 71.94,
+        "mmq_f32": 71.95,
+        "llama": 63.85
+       },
+       "2": {
+        "mmvq": 63.9,
+        "mmq_cast": 71.98,
+        "mmq_f32": 71.97,
+        "llama": 63.9
+       },
+       "3": {
+        "mmvq": 64.08,
+        "mmq_cast": 72.01,
+        "mmq_f32": 72.02,
+        "llama": 64.08
+       },
+       "4": {
+        "mmvq": 66.28,
+        "mmq_cast": 72.07,
+        "mmq_f32": 72.1,
+        "llama": 66.28
+       },
+       "5": {
+        "mmvq": 68.34,
+        "mmq_cast": 72.22,
+        "mmq_f32": 72.29,
+        "llama": 68.34
+       },
+       "6": {
+        "mmvq": 78.97,
+        "mmq_cast": 72.17,
+        "mmq_f32": 72.25,
+        "llama": 72.17
+       },
+       "7": {
+        "mmvq": 90.25,
+        "mmq_cast": 72.25,
+        "mmq_f32": 72.3,
+        "llama": 72.25
+       },
+       "8": {
+        "mmvq": 101.04,
+        "mmq_cast": 72.31,
+        "mmq_f32": 72.41,
+        "llama": 72.31
+       },
+       "9": {
+        "mmq_cast": 74.9,
+        "mmq_f32": 74.99,
+        "llama": 74.9
+       }
+      }
+     },
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 12288,
+      "out": 4096,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 28.31,
+      "copies": 8,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 33.67,
+        "mmq_cast": 38.98,
+        "mmq_f32": 38.96,
+        "llama": 33.67
+       },
+       "2": {
+        "mmvq": 34.04,
+        "mmq_cast": 38.96,
+        "mmq_f32": 39.02,
+        "llama": 34.04
+       },
+       "3": {
+        "mmvq": 34.97,
+        "mmq_cast": 38.97,
+        "mmq_f32": 38.99,
+        "llama": 34.97
+       },
+       "4": {
+        "mmvq": 36.01,
+        "mmq_cast": 39.08,
+        "mmq_f32": 39.08,
+        "llama": 36.01
+       },
+       "5": {
+        "mmvq": 37.73,
+        "mmq_cast": 39.23,
+        "mmq_f32": 39.2,
+        "llama": 37.73
+       },
+       "6": {
+        "mmvq": 42.64,
+        "mmq_cast": 39.2,
+        "mmq_f32": 39.24,
+        "llama": 39.2
+       },
+       "7": {
+        "mmvq": 48.72,
+        "mmq_cast": 39.23,
+        "mmq_f32": 39.19,
+        "llama": 39.23
+       },
+       "8": {
+        "mmvq": 53.81,
+        "mmq_cast": 39.34,
+        "mmq_f32": 39.33,
+        "llama": 39.34
+       },
+       "9": {
+        "mmq_cast": 40.95,
+        "mmq_f32": 40.93,
+        "llama": 40.95
+       }
+      }
+     },
+     {
+      "layout": "ggml.q6_k/gguf.native",
+      "type": "q6_k",
+      "in": 4096,
+      "out": 1024,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 3.44,
+      "copies": 59,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 7,
+      "mmvq_rows": 7,
+      "us": {
+       "1": {
+        "mmvq": 6.12,
+        "mmq_cast": 11.09,
+        "mmq_f32": 11.1,
+        "llama": 6.12
+       },
+       "2": {
+        "mmvq": 6.53,
+        "mmq_cast": 11.1,
+        "mmq_f32": 11.1,
+        "llama": 6.53
+       },
+       "3": {
+        "mmvq": 6.89,
+        "mmq_cast": 11.09,
+        "mmq_f32": 11.09,
+        "llama": 6.89
+       },
+       "4": {
+        "mmvq": 6.76,
+        "mmq_cast": 11.12,
+        "mmq_f32": 11.12,
+        "llama": 6.76
+       },
+       "5": {
+        "mmvq": 9.45,
+        "mmq_cast": 11.26,
+        "mmq_f32": 11.26,
+        "llama": 9.45
+       },
+       "6": {
+        "mmvq": 8.81,
+        "mmq_cast": 11.25,
+        "mmq_f32": 11.24,
+        "llama": 8.81
+       },
+       "7": {
+        "mmvq": 9.72,
+        "mmq_cast": 11.28,
+        "mmq_f32": 11.26,
+        "llama": 9.72
+       },
+       "8": {
+        "mmvq": 9.38,
+        "mmq_cast": 11.3,
+        "mmq_f32": 11.29,
+        "llama": 11.3
+       },
+       "9": {
+        "mmq_cast": 12.03,
+        "mmq_f32": 12.01,
+        "llama": 12.03
+       }
+      }
+     },
+     {
+      "layout": "ggml.q6_k/gguf.native",
+      "type": "q6_k",
+      "in": 4096,
+      "out": 151936,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 510.5,
+      "copies": 2,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 7,
+      "mmvq_rows": 7,
+      "us": {
+       "1": {
+        "mmvq": 559.46,
+        "mmq_cast": 604.39,
+        "mmq_f32": 605.4,
+        "llama": 559.46
+       },
+       "2": {
+        "mmvq": 560.9,
+        "mmq_cast": 605.64,
+        "mmq_f32": 606.9,
+        "llama": 560.9
+       },
+       "3": {
+        "mmvq": 561.98,
+        "mmq_cast": 606.47,
+        "mmq_f32": 608.18,
+        "llama": 561.98
+       },
+       "4": {
+        "mmvq": 565.77,
+        "mmq_cast": 607.33,
+        "mmq_f32": 609.25,
+        "llama": 565.77
+       },
+       "5": {
+        "mmvq": 569.32,
+        "mmq_cast": 608.15,
+        "mmq_f32": 610.4,
+        "llama": 569.32
+       },
+       "6": {
+        "mmvq": 627.22,
+        "mmq_cast": 608.63,
+        "mmq_f32": 611.36,
+        "llama": 627.22
+       },
+       "7": {
+        "mmvq": 704.17,
+        "mmq_cast": 609.32,
+        "mmq_f32": 612.3,
+        "llama": 704.17
+       },
+       "8": {
+        "mmvq": 798.03,
+        "mmq_cast": 609.75,
+        "mmq_f32": 613.35,
+        "llama": 609.75
+       },
+       "9": {
+        "mmq_cast": 624.74,
+        "mmq_f32": 629.75,
+        "llama": 624.74
+       }
+      }
+     },
+     {
+      "layout": "ggml.q6_k/gguf.native",
+      "type": "q6_k",
+      "in": 12288,
+      "out": 4096,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 41.29,
+      "copies": 5,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 7,
+      "mmvq_rows": 7,
+      "us": {
+       "1": {
+        "mmvq": 53.15,
+        "mmq_cast": 56.08,
+        "mmq_f32": 56.07,
+        "llama": 53.15
+       },
+       "2": {
+        "mmvq": 55.05,
+        "mmq_cast": 56.03,
+        "mmq_f32": 56.1,
+        "llama": 55.05
+       },
+       "3": {
+        "mmvq": 56.44,
+        "mmq_cast": 56.09,
+        "mmq_f32": 56.14,
+        "llama": 56.44
+       },
+       "4": {
+        "mmvq": 57.44,
+        "mmq_cast": 56.11,
+        "mmq_f32": 56.1,
+        "llama": 57.44
+       },
+       "5": {
+        "mmvq": 57.34,
+        "mmq_cast": 56.39,
+        "mmq_f32": 56.51,
+        "llama": 57.34
+       },
+       "6": {
+        "mmvq": 56.83,
+        "mmq_cast": 56.39,
+        "mmq_f32": 56.41,
+        "llama": 56.83
+       },
+       "7": {
+        "mmvq": 59.86,
+        "mmq_cast": 56.44,
+        "mmq_f32": 56.48,
+        "llama": 59.86
+       },
+       "8": {
+        "mmvq": 68.14,
+        "mmq_cast": 56.4,
+        "mmq_f32": 56.53,
+        "llama": 56.4
+       },
+       "9": {
+        "mmq_cast": 58.23,
+        "mmq_f32": 58.1,
+        "llama": 58.23
+       }
+      }
+     }
+    ],
+    "quantize": [
+     {
+      "in": 4096,
+      "us": {
+       "1": 0.672,
+       "2": 0.727,
+       "3": 0.901,
+       "4": 0.903,
+       "5": 0.991,
+       "6": 1.022,
+       "7": 1.036,
+       "8": 1.014,
+       "9": 1.044
+      }
+     },
+     {
+      "in": 12288,
+      "us": {
+       "1": 0.907,
+       "2": 1.012,
+       "3": 1.042,
+       "4": 1.065,
+       "5": 0.977,
+       "6": 1.081,
+       "7": 1.087,
+       "8": 1.09,
+       "9": 1.096
+      }
+     }
+    ]
+   },
+   "glu_sweep": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "sm": 120,
+    "shapes": [
+     {
+      "type": "q4_k",
+      "in": 4096,
+      "out": 24576,
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "us": {
+       "fused": 64.5,
+       "composed": 66.033
+      },
+      "saving_pct": 2.32
+     }
+    ]
+   }
+  },
+  {
+   "profile": {
+    "name": "8b-q4_k_m",
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf",
+    "lock": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/7.lock",
+    "engine_args": "",
+    "engine": {
+     "device": "cuda",
+     "dtype": "torch.bfloat16",
+     "source": "gguf",
+     "page_size": 16,
+     "max_seqs": 48,
+     "max_model_len": 4608,
+     "clamp_context": false,
+     "max_step_tokens": 2048,
+     "chunk_with_decode": 0,
+     "memory_fraction": 0.9,
+     "state_memory": null,
+     "prefix_cache": false,
+     "overlap": true,
+     "cuda_graphs": true,
+     "max_draft_tokens": 0,
+     "kernels": {},
+     "kernel_preferences": {},
+     "slots": {},
+     "plugin_options": {}
+    },
+    "kv_bytes_per_token": 147456.0,
+    "drafts": false,
+    "llama_crossover": false,
+    "rows": {
+     "decode_b1": {
+      "kind": "decode",
+      "batch": 1,
+      "ctx": 512,
+      "gemm": {
+       "weight_bytes": 4670533632,
+       "embedding_bytes": 2304,
+       "inputs": 145,
+       "calls": [
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 5120,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 6144,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 24576,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 36,
+         "glu": true
+        },
+        {
+         "type": "q4_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 1024,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 151936,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 1
+        },
+        {
+         "type": "q6_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 1,
+         "count": 18
+        }
+       ]
+      },
+      "eager_wall_ms": 7.9036,
+      "eager": {
+       "kernels": 569.1,
+       "kernel_ms": 6.144,
+       "span_ms": 12.9354,
+       "cat": {
+        "gemm": [
+         163.0,
+         5.5169
+        ],
+        "attention": [
+         72.0,
+         0.2269
+        ],
+        "act quant (q8_1 / fp4)": [
+         145.0,
+         0.1445
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0545
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0528
+        ],
+        "residual add": [
+         39.0,
+         0.0488
+        ],
+        "rope": [
+         36.0,
+         0.0458
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0287
+        ],
+        "kv store": [
+         4.0,
+         0.0062
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0061
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0058
+        ],
+        "sampling / head": [
+         1.0,
+         0.0057
+        ],
+        "embedding": [
+         1.0,
+         0.0014
+        ]
+       }
+      },
+      "graphed_wall_ms": 6.0873,
+      "graphed_ctx": 598,
+      "graphed": {
+       "kernels": 569.1,
+       "kernel_ms": 6.1775,
+       "span_ms": 6.1369,
+       "cat": {
+        "gemm": [
+         163.0,
+         5.5203
+        ],
+        "attention": [
+         72.0,
+         0.2381
+        ],
+        "act quant (q8_1 / fp4)": [
+         145.0,
+         0.1601
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0589
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0564
+        ],
+        "residual add": [
+         39.0,
+         0.0448
+        ],
+        "rope": [
+         36.0,
+         0.0437
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0304
+        ],
+        "kv store": [
+         4.0,
+         0.0061
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0058
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0058
+        ],
+        "sampling / head": [
+         1.0,
+         0.0057
+        ],
+        "embedding": [
+         1.0,
+         0.0015
+        ]
+       }
+      },
+      "ratio_graphed_wall_over_eager_kernels": 0.9908,
+      "ratio_graphed_profiled_over_wall": 1.0148,
+      "clocks": {
+       "graphed": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2812.0,
+         "p50": 2812.0,
+         "p90": 2820.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 227.4,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       },
+       "eager": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2805.0,
+         "p50": 2805.0,
+         "p90": 2812.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 227.0,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       }
+      },
+      "spec": {},
+      "ctx_end": 1190
+     },
+     "decode_b4": {
+      "kind": "decode",
+      "batch": 4,
+      "ctx": 512,
+      "gemm": {
+       "weight_bytes": 4670533632,
+       "embedding_bytes": 9216,
+       "inputs": 145,
+       "calls": [
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 5120,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 6144,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 24576,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 1024,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 151936,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 1
+        },
+        {
+         "type": "q6_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 4,
+         "count": 18
+        }
+       ]
+      },
+      "eager_wall_ms": 9.6692,
+      "eager": {
+       "kernels": 605.1,
+       "kernel_ms": 6.9795,
+       "span_ms": 12.5687,
+       "cat": {
+        "gemm": [
+         163.0,
+         5.9008
+        ],
+        "attention": [
+         72.0,
+         0.5115
+        ],
+        "act quant (q8_1 / fp4)": [
+         145.0,
+         0.1841
+        ],
+        "silu*mul": [
+         36.0,
+         0.1041
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0717
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0633
+        ],
+        "rope": [
+         36.0,
+         0.0489
+        ],
+        "residual add": [
+         39.0,
+         0.0452
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0243
+        ],
+        "sampling / head": [
+         1.0,
+         0.0069
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0062
+        ],
+        "kv store": [
+         4.0,
+         0.0058
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0054
+        ],
+        "embedding": [
+         1.0,
+         0.0013
+        ]
+       }
+      },
+      "graphed_wall_ms": 6.8456,
+      "graphed_ctx": 598,
+      "graphed": {
+       "kernels": 605.1,
+       "kernel_ms": 7.0734,
+       "span_ms": 6.9717,
+       "cat": {
+        "gemm": [
+         163.0,
+         5.9248
+        ],
+        "attention": [
+         72.0,
+         0.5594
+        ],
+        "act quant (q8_1 / fp4)": [
+         145.0,
+         0.1859
+        ],
+        "silu*mul": [
+         36.0,
+         0.1061
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0806
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0711
+        ],
+        "rope": [
+         36.0,
+         0.0471
+        ],
+        "residual add": [
+         39.0,
+         0.0462
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0258
+        ],
+        "sampling / head": [
+         1.0,
+         0.0068
+        ],
+        "kv store": [
+         4.0,
+         0.0063
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.006
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0057
+        ],
+        "embedding": [
+         1.0,
+         0.0014
+        ]
+       }
+      },
+      "ratio_graphed_wall_over_eager_kernels": 0.9808,
+      "ratio_graphed_profiled_over_wall": 1.0333,
+      "clocks": {
+       "graphed": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2692.0,
+         "p50": 2700.0,
+         "p90": 2775.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 301.5,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.889
+       },
+       "eager": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2692.0,
+         "p50": 2730.0,
+         "p90": 2745.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 307.6,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.111
+       }
+      },
+      "spec": {},
+      "ctx_end": 1142
+     },
+     "decode_b8": {
+      "kind": "decode",
+      "batch": 8,
+      "ctx": 512,
+      "gemm": {
+       "weight_bytes": 4670533632,
+       "embedding_bytes": 18432,
+       "inputs": 145,
+       "calls": [
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 5120,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 6144,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        },
+        {
+         "type": "q4_k",
+         "in": 4096,
+         "out": 24576,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 36
+        },
+        {
+         "type": "q4_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 1024,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        },
+        {
+         "type": "q6_k",
+         "in": 4096,
+         "out": 151936,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 1
+        },
+        {
+         "type": "q6_k",
+         "in": 12288,
+         "out": 4096,
+         "mode": "q8_1",
+         "rows": 8,
+         "count": 18
+        }
+       ]
+      },
+      "eager_wall_ms": 10.9022,
+      "eager": {
+       "kernels": 785.1,
+       "kernel_ms": 7.8542,
+       "span_ms": 14.7853,
+       "cat": {
+        "gemm": [
+         325.0,
+         6.407
+        ],
+        "attention": [
+         72.0,
+         0.9152
+        ],
+        "act quant (q8_1 / fp4)": [
+         163.0,
+         0.1669
+        ],
+        "silu*mul": [
+         36.0,
+         0.0823
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0723
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0635
+        ],
+        "rope": [
+         36.0,
+         0.0503
+        ],
+        "residual add": [
+         39.0,
+         0.0443
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0243
+        ],
+        "sampling / head": [
+         1.0,
+         0.0094
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0062
+        ],
+        "kv store": [
+         4.0,
+         0.0058
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0054
+        ],
+        "embedding": [
+         1.0,
+         0.0013
+        ]
+       }
+      },
+      "graphed_wall_ms": 7.9238,
+      "graphed_ctx": 598,
+      "graphed": {
+       "kernels": 785.1,
+       "kernel_ms": 7.8964,
+       "span_ms": 8.0311,
+       "cat": {
+        "gemm": [
+         325.0,
+         6.382
+        ],
+        "attention": [
+         72.0,
+         0.9949
+        ],
+        "act quant (q8_1 / fp4)": [
+         163.0,
+         0.1525
+        ],
+        "silu*mul": [
+         36.0,
+         0.0787
+        ],
+        "add+rmsnorm (fused)": [
+         36.0,
+         0.0741
+        ],
+        "rmsnorm": [
+         37.0,
+         0.0655
+        ],
+        "rope": [
+         36.0,
+         0.0485
+        ],
+        "residual add": [
+         39.0,
+         0.0467
+        ],
+        "index / scalar ops": [
+         18.0,
+         0.0254
+        ],
+        "sampling / head": [
+         1.0,
+         0.0092
+        ],
+        "kv store": [
+         4.0,
+         0.006
+        ],
+        "copy / cat / fill": [
+         6.1,
+         0.0058
+        ],
+        "memcpy / memset": [
+         11.1,
+         0.0057
+        ],
+        "embedding": [
+         1.0,
+         0.0015
+        ]
+       }
+      },
+      "ratio_graphed_wall_over_eager_kernels": 1.0089,
+      "ratio_graphed_profiled_over_wall": 0.9965,
+      "clocks": {
+       "graphed": {
+        "samples": 19,
+        "sm_mhz": {
+         "p10": 2820.0,
+         "p50": 2820.0,
+         "p90": 2835.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 202.7,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       },
+       "eager": {
+        "samples": 18,
+        "sm_mhz": {
+         "p10": 2812.0,
+         "p50": 2820.0,
+         "p90": 2820.0
+        },
+        "mem_mhz": 14801.0,
+        "power_w": 212.8,
+        "slowdown_share": 0.0,
+        "power_cap_share": 0.0
+       }
+      },
+      "spec": {},
+      "ctx_end": 1075
+     }
+    },
+    "unclassified": {}
+   },
+   "qmm_sweep": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "sm": 120,
+    "l2_mb": 64,
+    "stream": {
+     "bytes": 2147483648,
+     "gb_s_best": 912.4,
+     "gb_s_median": 911.1
+    },
+    "shapes": [
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 4096,
+      "out": 4096,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 9.44,
+      "copies": 22,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 12.46,
+        "mmq_cast": 17.04,
+        "mmq_f32": 17.02,
+        "llama": 12.46
+       },
+       "2": {
+        "mmvq": 12.52,
+        "mmq_cast": 17.06,
+        "mmq_f32": 17.06,
+        "llama": 12.52
+       },
+       "3": {
+        "mmvq": 12.69,
+        "mmq_cast": 17.09,
+        "mmq_f32": 17.06,
+        "llama": 12.69
+       },
+       "4": {
+        "mmvq": 13.51,
+        "mmq_cast": 17.08,
+        "mmq_f32": 17.08,
+        "llama": 13.51
+       },
+       "5": {
+        "mmvq": 14.21,
+        "mmq_cast": 17.25,
+        "mmq_f32": 17.23,
+        "llama": 14.21
+       },
+       "6": {
+        "mmvq": 16.08,
+        "mmq_cast": 17.27,
+        "mmq_f32": 17.25,
+        "llama": 17.27
+       },
+       "7": {
+        "mmvq": 17.79,
+        "mmq_cast": 17.26,
+        "mmq_f32": 17.27,
+        "llama": 17.26
+       },
+       "8": {
+        "mmvq": 19.58,
+        "mmq_cast": 17.24,
+        "mmq_f32": 17.24,
+        "llama": 17.24
+       },
+       "9": {
+        "mmq_cast": 18.79,
+        "mmq_f32": 18.69,
+        "llama": 18.79
+       }
+      }
+     },
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 4096,
+      "out": 5120,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 11.8,
+      "copies": 18,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 14.39,
+        "mmq_cast": 18.27,
+        "mmq_f32": 18.24,
+        "llama": 14.39
+       },
+       "2": {
+        "mmvq": 14.48,
+        "mmq_cast": 18.3,
+        "mmq_f32": 18.28,
+        "llama": 14.48
+       },
+       "3": {
+        "mmvq": 14.91,
+        "mmq_cast": 18.28,
+        "mmq_f32": 18.29,
+        "llama": 14.91
+       },
+       "4": {
+        "mmvq": 15.9,
+        "mmq_cast": 18.29,
+        "mmq_f32": 18.31,
+        "llama": 15.9
+       },
+       "5": {
+        "mmvq": 16.93,
+        "mmq_cast": 18.38,
+        "mmq_f32": 18.39,
+        "llama": 16.93
+       },
+       "6": {
+        "mmvq": 18.82,
+        "mmq_cast": 18.35,
+        "mmq_f32": 18.4,
+        "llama": 18.35
+       },
+       "7": {
+        "mmvq": 21.2,
+        "mmq_cast": 18.41,
+        "mmq_f32": 18.41,
+        "llama": 18.41
+       },
+       "8": {
+        "mmvq": 23.5,
+        "mmq_cast": 18.41,
+        "mmq_f32": 18.39,
+        "llama": 18.41
+       },
+       "9": {
+        "mmq_cast": 19.82,
+        "mmq_f32": 19.8,
+        "llama": 19.82
+       }
+      }
+     },
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 4096,
+      "out": 6144,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 14.16,
+      "copies": 15,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 17.62,
+        "mmq_cast": 22.3,
+        "mmq_f32": 22.27,
+        "llama": 17.62
+       },
+       "2": {
+        "mmvq": 17.7,
+        "mmq_cast": 22.25,
+        "mmq_f32": 22.29,
+        "llama": 17.7
+       },
+       "3": {
+        "mmvq": 17.86,
+        "mmq_cast": 22.27,
+        "mmq_f32": 22.29,
+        "llama": 17.86
+       },
+       "4": {
+        "mmvq": 18.89,
+        "mmq_cast": 22.29,
+        "mmq_f32": 22.32,
+        "llama": 18.89
+       },
+       "5": {
+        "mmvq": 19.49,
+        "mmq_cast": 22.43,
+        "mmq_f32": 22.46,
+        "llama": 19.49
+       },
+       "6": {
+        "mmvq": 22.01,
+        "mmq_cast": 22.46,
+        "mmq_f32": 22.47,
+        "llama": 22.46
+       },
+       "7": {
+        "mmvq": 24.8,
+        "mmq_cast": 22.48,
+        "mmq_f32": 22.48,
+        "llama": 22.48
+       },
+       "8": {
+        "mmvq": 27.72,
+        "mmq_cast": 22.53,
+        "mmq_f32": 22.54,
+        "llama": 22.53
+       },
+       "9": {
+        "mmq_cast": 24.03,
+        "mmq_f32": 24.01,
+        "llama": 24.03
+       }
+      }
+     },
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 4096,
+      "out": 24576,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 56.62,
+      "copies": 4,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 63.85,
+        "mmq_cast": 71.94,
+        "mmq_f32": 71.93,
+        "llama": 63.85
+       },
+       "2": {
+        "mmvq": 63.9,
+        "mmq_cast": 72.0,
+        "mmq_f32": 72.05,
+        "llama": 63.9
+       },
+       "3": {
+        "mmvq": 64.09,
+        "mmq_cast": 72.13,
+        "mmq_f32": 72.02,
+        "llama": 64.09
+       },
+       "4": {
+        "mmvq": 66.23,
+        "mmq_cast": 72.07,
+        "mmq_f32": 72.19,
+        "llama": 66.23
+       },
+       "5": {
+        "mmvq": 68.29,
+        "mmq_cast": 72.21,
+        "mmq_f32": 72.25,
+        "llama": 68.29
+       },
+       "6": {
+        "mmvq": 78.8,
+        "mmq_cast": 72.24,
+        "mmq_f32": 72.27,
+        "llama": 72.24
+       },
+       "7": {
+        "mmvq": 90.09,
+        "mmq_cast": 72.27,
+        "mmq_f32": 72.36,
+        "llama": 72.27
+       },
+       "8": {
+        "mmvq": 100.78,
+        "mmq_cast": 72.29,
+        "mmq_f32": 72.4,
+        "llama": 72.29
+       },
+       "9": {
+        "mmq_cast": 74.82,
+        "mmq_f32": 75.01,
+        "llama": 74.82
+       }
+      }
+     },
+     {
+      "layout": "ggml.q4_k/gguf.native",
+      "type": "q4_k",
+      "in": 12288,
+      "out": 4096,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 28.31,
+      "copies": 8,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 5,
+      "mmvq_rows": 5,
+      "us": {
+       "1": {
+        "mmvq": 33.69,
+        "mmq_cast": 38.95,
+        "mmq_f32": 38.95,
+        "llama": 33.69
+       },
+       "2": {
+        "mmvq": 33.98,
+        "mmq_cast": 39.02,
+        "mmq_f32": 38.99,
+        "llama": 33.98
+       },
+       "3": {
+        "mmvq": 35.0,
+        "mmq_cast": 38.97,
+        "mmq_f32": 38.97,
+        "llama": 35.0
+       },
+       "4": {
+        "mmvq": 35.99,
+        "mmq_cast": 39.07,
+        "mmq_f32": 39.06,
+        "llama": 35.99
+       },
+       "5": {
+        "mmvq": 37.77,
+        "mmq_cast": 39.2,
+        "mmq_f32": 39.27,
+        "llama": 37.77
+       },
+       "6": {
+        "mmvq": 42.81,
+        "mmq_cast": 39.14,
+        "mmq_f32": 39.23,
+        "llama": 39.14
+       },
+       "7": {
+        "mmvq": 48.42,
+        "mmq_cast": 39.19,
+        "mmq_f32": 39.2,
+        "llama": 39.19
+       },
+       "8": {
+        "mmvq": 53.78,
+        "mmq_cast": 39.26,
+        "mmq_f32": 39.35,
+        "llama": 39.26
+       },
+       "9": {
+        "mmq_cast": 41.0,
+        "mmq_f32": 40.9,
+        "llama": 41.0
+       }
+      }
+     },
+     {
+      "layout": "ggml.q6_k/gguf.native",
+      "type": "q6_k",
+      "in": 4096,
+      "out": 1024,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 3.44,
+      "copies": 59,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 7,
+      "mmvq_rows": 7,
+      "us": {
+       "1": {
+        "mmvq": 6.13,
+        "mmq_cast": 11.09,
+        "mmq_f32": 11.1,
+        "llama": 6.13
+       },
+       "2": {
+        "mmvq": 6.53,
+        "mmq_cast": 11.11,
+        "mmq_f32": 11.12,
+        "llama": 6.53
+       },
+       "3": {
+        "mmvq": 6.89,
+        "mmq_cast": 11.1,
+        "mmq_f32": 11.09,
+        "llama": 6.89
+       },
+       "4": {
+        "mmvq": 6.78,
+        "mmq_cast": 11.13,
+        "mmq_f32": 11.12,
+        "llama": 6.78
+       },
+       "5": {
+        "mmvq": 9.44,
+        "mmq_cast": 11.26,
+        "mmq_f32": 11.26,
+        "llama": 9.44
+       },
+       "6": {
+        "mmvq": 8.83,
+        "mmq_cast": 11.26,
+        "mmq_f32": 11.27,
+        "llama": 8.83
+       },
+       "7": {
+        "mmvq": 9.72,
+        "mmq_cast": 11.26,
+        "mmq_f32": 11.27,
+        "llama": 9.72
+       },
+       "8": {
+        "mmvq": 9.43,
+        "mmq_cast": 11.28,
+        "mmq_f32": 11.31,
+        "llama": 11.28
+       },
+       "9": {
+        "mmq_cast": 12.02,
+        "mmq_f32": 12.01,
+        "llama": 12.02
+       }
+      }
+     },
+     {
+      "layout": "ggml.q6_k/gguf.native",
+      "type": "q6_k",
+      "in": 4096,
+      "out": 151936,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 510.5,
+      "copies": 2,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 7,
+      "mmvq_rows": 7,
+      "us": {
+       "1": {
+        "mmvq": 559.46,
+        "mmq_cast": 604.38,
+        "mmq_f32": 605.41,
+        "llama": 559.46
+       },
+       "2": {
+        "mmvq": 560.89,
+        "mmq_cast": 605.52,
+        "mmq_f32": 607.02,
+        "llama": 560.89
+       },
+       "3": {
+        "mmvq": 562.0,
+        "mmq_cast": 606.45,
+        "mmq_f32": 608.16,
+        "llama": 562.0
+       },
+       "4": {
+        "mmvq": 565.67,
+        "mmq_cast": 607.23,
+        "mmq_f32": 609.25,
+        "llama": 565.67
+       },
+       "5": {
+        "mmvq": 569.34,
+        "mmq_cast": 607.96,
+        "mmq_f32": 610.36,
+        "llama": 569.34
+       },
+       "6": {
+        "mmvq": 626.97,
+        "mmq_cast": 608.8,
+        "mmq_f32": 611.43,
+        "llama": 626.97
+       },
+       "7": {
+        "mmvq": 703.3,
+        "mmq_cast": 609.27,
+        "mmq_f32": 612.4,
+        "llama": 703.3
+       },
+       "8": {
+        "mmvq": 797.49,
+        "mmq_cast": 609.61,
+        "mmq_f32": 613.45,
+        "llama": 609.61
+       },
+       "9": {
+        "mmq_cast": 624.97,
+        "mmq_f32": 629.74,
+        "llama": 624.97
+       }
+      }
+     },
+     {
+      "layout": "ggml.q6_k/gguf.native",
+      "type": "q6_k",
+      "in": 12288,
+      "out": 4096,
+      "mode": "q8_1",
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weight_mb": 41.29,
+      "copies": 5,
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "llama_mmvq_rows": 7,
+      "mmvq_rows": 7,
+      "us": {
+       "1": {
+        "mmvq": 53.15,
+        "mmq_cast": 56.1,
+        "mmq_f32": 56.09,
+        "llama": 53.15
+       },
+       "2": {
+        "mmvq": 55.02,
+        "mmq_cast": 56.08,
+        "mmq_f32": 56.04,
+        "llama": 55.02
+       },
+       "3": {
+        "mmvq": 56.52,
+        "mmq_cast": 56.12,
+        "mmq_f32": 56.05,
+        "llama": 56.52
+       },
+       "4": {
+        "mmvq": 57.41,
+        "mmq_cast": 56.14,
+        "mmq_f32": 56.18,
+        "llama": 57.41
+       },
+       "5": {
+        "mmvq": 57.28,
+        "mmq_cast": 56.26,
+        "mmq_f32": 56.35,
+        "llama": 57.28
+       },
+       "6": {
+        "mmvq": 56.74,
+        "mmq_cast": 56.26,
+        "mmq_f32": 56.48,
+        "llama": 56.74
+       },
+       "7": {
+        "mmvq": 59.94,
+        "mmq_cast": 56.4,
+        "mmq_f32": 56.42,
+        "llama": 59.94
+       },
+       "8": {
+        "mmvq": 68.11,
+        "mmq_cast": 56.55,
+        "mmq_f32": 56.47,
+        "llama": 56.55
+       },
+       "9": {
+        "mmq_cast": 58.12,
+        "mmq_f32": 58.06,
+        "llama": 58.12
+       }
+      }
+     }
+    ],
+    "quantize": [
+     {
+      "in": 4096,
+      "us": {
+       "1": 0.672,
+       "2": 0.735,
+       "3": 0.905,
+       "4": 0.909,
+       "5": 0.995,
+       "6": 1.02,
+       "7": 1.036,
+       "8": 1.012,
+       "9": 1.044
+      }
+     },
+     {
+      "in": 12288,
+      "us": {
+       "1": 0.911,
+       "2": 1.012,
+       "3": 1.047,
+       "4": 1.065,
+       "5": 0.979,
+       "6": 1.077,
+       "7": 1.085,
+       "8": 1.09,
+       "9": 1.098
+      }
+     }
+    ]
+   },
+   "glu_sweep": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "sm": 120,
+    "shapes": [
+     {
+      "type": "q4_k",
+      "in": 4096,
+      "out": 24576,
+      "locks": {
+       "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+      },
+      "weights": "Qwen3-8B-Q4_K_M.gguf",
+      "us": {
+       "fused": 64.494,
+       "composed": 66.018
+      },
+      "saving_pct": 2.31
+     }
+    ]
+   }
+  }
+ ]
+}

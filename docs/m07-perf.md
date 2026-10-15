@@ -1,6 +1,6 @@
 # M0.7 — performance: fused glue, mixed steps, a gated megakernel experiment
 
-Status: **rev 3.3, steps 0–4 built** (2026-10-15; §11 step 0, §12 step 1, §13 step 2, §14 step 3, §15 step 4). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
+Status: **rev 3.3, steps 0–5 built** (2026-10-15; §11 step 0, §12 step 1, §13 step 2, §14 step 3, §15 step 4, §16 step 5: D8 stops). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
 architecture, numerics / performance / tests) over four rounds. Step 0 ran (§11), and the panel's review of it and the
 lead's decisions are in §10's "Step 0 panel round"; §1, §3.1, §4, §5, §6, §7 and §11 carry them. The panel re-checks
 rev 3.2 before step 1; rev 3.3 fixes its findings (§10, "rev 3.2 re-check").
@@ -204,7 +204,8 @@ Line budget ≈ +90 (scheduler, `n_decode`, executor planning per row kind, vali
   at B1 with no regression at B4–8. A go means a design addendum (core seams: one composite bound to many layers, a
   decode-loop override, taps written by the megakernel), reviewed by this panel. Step 0 (rev 3.3 method): f is 26.9%
   on the 5090 (1.174× at c = 0.55: prototype territory today), 15.8% on the 5080 (stop) and 14.5% on the 4090; step 5
-  decides after D3–D6 with the same method.
+  decides after D3–D6 with the same method. Step 5 (§16, the quantize isolated and graph-timed): 15.6% on the 5090
+  (1.094×) and 8.6% on the 5080 (1.050×): **stop**.
 - **D9. The small-batch quantized matmul leaves M0.7** as a follow-up gated by step 0's per-call sweep: the target's
   4-row / 1-row GEMM time ratio after D2 > 1.25 on a release class (it would be a row-dispatch path inside
   `kernels.ggml_cuda` with its own `config["act"]` entry, not a new provider). Step 0, at the entries that ship:
@@ -258,6 +259,7 @@ is taken to cost nothing).
 | NVFP4 `scale2` in mmvq (D11) | NVFP4 decode B4/B8 −3.5–4.2% | −3.3–3.6% | −6.2–7.2% |
 | Mixed steps (D7), plain 27B locks (simulated) | worst gap 2.7 s → 127 / 232 ms (cap 256 / 512); paired TTFT 1.02 / 1.00; long prompt +10% / +2% | → 94 / 151 ms; 1.26 (fails) / 1.01; +22% / +0.7% | → 71 / 123 ms; 1.12 (undecided) / 1.00; +20% / +5% |
 | Megakernel (D8), f today | 15.8%: stop | 14.5% (not a D8 class) | 26.9%: prototype territory (1.174×); step 5 decides after D3–D6 |
+| Megakernel (D8), step 5 (§16) | 8.6% (1.050×): stop | — | 15.6% (1.094×): **stop** |
 
 ## 6. Judge
 
@@ -1612,10 +1614,52 @@ profile-free (`bench/d8_gate.py`, from paired rounds of `step_profile.py`, `qmm_
   under 1.15× at c = 0.55 (f < 24%).
 
 `step_profile.py`'s counter now counts the fused gate/up calls (`QLinearGlu` has its own `__call__`, which it missed:
-at the head it would have dropped 36 calls and 1.4 GB from the step) and the embedding bytes.
+at the head it would have dropped the 36 gate/up calls, 2.04 GB of the step's 4.67 GB) and the embedding bytes.
 
 **Prediction.** Step 2's A/B measured this step with every fusion at 3.684 ms on the 5090 and 6.09 ms on the 5080
 (§13.3's records), against step 0's 4.14 and 6.54 ms; the GEMVs are nearly unchanged (glu only fuses the SwiGLU into
 the gate/up GEMV), and the isolated quantize (≈ 0.7–1 µs per call, §12.3) is a little under the profiled one. So
 f ≈ 1 − (≈ 3.06 ms of bytes at B) / 3.68 ms ≈ **17% on the 5090 (≈ 1.10× at c = 0.55: stop)** and ≈ **9% on the
 5080 (stop)**: the fusions took most of the glue a megakernel would have recovered.
+
+### 16.2 Results (b66b002, 2026-10-15)
+
+Each desktop was clock-screened before and after (`bench/clock_check.py`, 27B decode at batch 4): RTX 5090 SM p10 /
+p50 2565 / 2655 MHz before and 2542 / 2595 after, RTX 5080 2737 / 2737 both times; no thermal or hardware slowdown, at
+the power cap in every sample (as in §11.1); steady. Three paired rounds per class (a profile, a sweep and a glu sweep
+each); the table gives their means. Records `evidence/m07-step5_d8_<class>_2026-10-15.json` (the raw records of
+every round, the screens and `d8_gate.py`'s output).
+
+| class | step ms | GEMV ms (swept − isolated quantize) | B (GB/s) | read-only stream, 2 GiB (GB/s) | f (per round) | projected gain, c = 0.4 / 0.55 | gate |
+|---|---|---|---|---|---|---|---|
+| RTX 5080 | 6.087 | 5.579 − 0.118 = 5.461 | 855 | 913 | **8.6%** (8.61 / 8.58 / 8.59) | 1.036 / **1.050** | **stop** |
+| RTX 5090 | 3.705 | 3.187 − 0.117 = 3.069 | 1522 | 1682 | **15.6%** (15.65 / 15.62 / 15.54) | 1.067 / **1.094** | **stop** |
+
+- bytes per step: weights 4.6705 GB (163 calls, 36 of them the fused gate/up), KV 0.0882 GB (598 tokens of context in
+  the graphed window), the embedding row 2,304 bytes.
+- The isolated quantize is 0.72–0.73 µs per call at one row on both classes (145 of the 163 calls quantize in the
+  step; every swept call does), against the profile's 0.16 ms per step. The profiled GEMV sum (3.153 / 5.519 ms) is
+  2.7% / 1.1% above the swept GEMV time: the PDL overlap of §11.2 (r2 1.026 / 1.015 here).
+- **Where step 0's f went.** Step 0's records under this method (its sweep's calls less the isolated quantize):
+  5090 f 25.0% (1.159×), 5080 14.5% (1.087×) — the method alone moved step 0's 26.9% to 25.0%. The GEMV time is
+  unchanged (3.05 → 3.07 ms on the 5090), and the step fell from 4.14 to 3.71 ms (−10.6%: the bf16 `kv_write`, D3,
+  glu; §13.3): the fusions took the glue a megakernel would have recovered.
+- **Even against the stream's bandwidth** (B = 1682 GB/s, which credits the megakernel with the GEMVs' own gap to
+  peak, which D8 excludes), the 5090's f is 23.6% (1.104 / 1.149×) and the 5080's 14.4% (1.061 / 1.086×): under
+  the bar either way.
+- Against the prediction (§16.1: ≈ 17% and ≈ 9%, stop): as predicted; the 5090's f is ≈ 1.4 points lower (its GEMVs
+  took 3.07 ms against the estimate's ≈ 3.0, and its step 3.705 ms against §13.3's 3.684).
+
+### 16.3 Verdict: stop
+
+f is under 24% on both D8 classes (the projection at c = 0.55 is 1.094× on the 5090 and 1.050× on the 5080, under
+1.15×), so D8 stops here: no prototype in `models/qwen3/fast/`, no design addendum and no core seam (§1.4: "recorded
+either way"). What is left beside the GEMVs on the 5090's B1 step, profiled: 0.65 of 3.80 ms of kernel time
+(attention 0.23 ms, quantize 0.16, norms 0.12, rope and residual 0.09).
+
+### 16.4 What changed
+
+- `bench/d8_gate.py` (new): D8's f from paired records, profile-free (§16.1).
+- `bench/step_profile.py`: the counter counts `QLinearGlu`'s fused calls (marked `glu`) and the embedding bytes;
+  a composed glu call is counted once, as the plain qlinear it runs. Step 0's records are unaffected (no glu then).
+- No engine, core, std or plugin change; no test (the bench is outside the suite).
