@@ -1595,3 +1595,27 @@ main` is green.
   close's propagation for any such lock; none is committed).
 - **Another RTX 5090 desktop fell off the bus** (Xid 79) mid-run; a second one ran every 5090 row.
 - **Speculative alternation** helps the gaps less and costs long-prompt TTFT (§15.5): recorded, not gated, as §1.3 says.
+
+## 16. As built (step 5): D8's gate
+
+### 16.1 Method and prediction (fixed before measuring)
+
+D8's f on 8B Q4_K_M decode B1 (the rtx-5080 lock 7, every class, as at step 0), at the head with every kept fusion,
+profile-free (`bench/d8_gate.py`, from paired rounds of `step_profile.py`, `qmm_sweep.py` and `glu_sweep.py`):
+
+- **bytes** = the weights the step's matmuls read (the fused gate/up's whole stack and the head included) + the
+  embedding rows it gathers (one row: 2,304 bytes) + the KV read at the graphed window's context;
+- **GEMV time** = each call of the step priced from the per-call sweep (graph-timed, unprofiled; the fused gate/up
+  call from the glu sweep's fused time) less the isolated, graph-timed q8_1 quantize of its `in` (`qmm_sweep.py`'s
+  `quantize`), which every swept call includes; B = weight bytes / GEMV time;
+- f = 1 − bytes / (B × step), step the unprofiled graphed wall; projection 1 / (1 − f·c) at c = 0.4 and 0.55; stop
+  under 1.15× at c = 0.55 (f < 24%).
+
+`step_profile.py`'s counter now counts the fused gate/up calls (`QLinearGlu` has its own `__call__`, which it missed:
+at the head it would have dropped 36 calls and 1.4 GB from the step) and the embedding bytes.
+
+**Prediction.** Step 2's A/B measured this step with every fusion at 3.684 ms on the 5090 and 6.09 ms on the 5080
+(§13.3's records), against step 0's 4.14 and 6.54 ms; the GEMVs are nearly unchanged (glu only fuses the SwiGLU into
+the gate/up GEMV), and the isolated quantize (≈ 0.7–1 µs per call, §12.3) is a little under the profiled one. So
+f ≈ 1 − (≈ 3.06 ms of bytes at B) / 3.68 ms ≈ **17% on the 5090 (≈ 1.10× at c = 0.55: stop)** and ≈ **9% on the
+5080 (stop)**: the fusions took most of the glue a megakernel would have recovered.

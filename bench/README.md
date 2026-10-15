@@ -19,6 +19,7 @@ Same GPU, same model, same requests; every engine in its own environment; client
 | `decode_kernels.py` | E2's per-kernel decode step micro-benchmark (separate from the harness) |
 | `step_profile.py` | M0.7 step 0: a deployment's step time by kernel category per row kind (prefill, decode, verify; graphed and eager), verify steps by region, D1's timing ratios with the GPU clocks, the matmul calls and weight bytes per step |
 | `qmm_sweep.py` | M0.7 step 0: the ggml matmul's time per call against rows (mmvq, mmq with and without the f32 → bf16 cast) for every qlinear shape and activation mode of the given locks, graph-timed on real weights; a read-only stream |
+| `d8_gate.py` | M0.7 step 5: D8's megakernel gate (f and its projection) from paired `step_profile.py`, `qmm_sweep.py` and `glu_sweep.py` records, profile-free (the GEMVs priced per call, less their isolated q8_1 quantize) |
 | `clock_check.py` | the clock screen of a desktop before its evidence is recorded: SM clock percentiles and slowdown share under sustained decode |
 
 `workloads.py`, `driver.py` and `worker.py` are stdlib-only so they run unchanged in every engine's environment. The

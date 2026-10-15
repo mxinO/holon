@@ -172,41 +172,54 @@ def regions(events: list[dict], steps: int, classify: Classifier) -> dict:
 
 
 class GemmCounter:
-    """Counts the ggml qlinear calls (type, in, out, mode, rows), the weight bytes they read and, on decode and verify
-    steps, the distinct inputs they quantize (the same tensor, unchanged, quantized by several calls: D6's shared
-    quantization; the inputs are held for the step so no address is reused), while active."""
+    """Counts the ggml qlinear calls (type, in, out, mode, rows; `glu` for mmvq's fused gate/up + SwiGLU, D6), the
+    weight bytes they read, the embedding rows' bytes the step gathers and, on decode and verify steps, the distinct
+    inputs they quantize (the same tensor, unchanged, quantized by several calls: D6's shared quantization; the inputs
+    are held for the step so no address is reused), while active."""
 
     def __init__(self) -> None:
         self.calls: collections.Counter = collections.Counter()
-        self.bytes = 0
+        self.bytes = self.embedding_bytes = 0
         self.inputs: dict[tuple, torch.Tensor] = {}
         self.active = False
-        original = ggml.QLinear.__call__
 
-        def counted(kernel, x, parts):
-            if self.active:
-                rows = x if isinstance(x, torch.Tensor) else x.x       # a prepared input's (D6)
-                self.calls[(kernel.name, kernel.k, kernel.out, kernel.act["mmq"], len(rows))] += 1
-                self.bytes += parts["blocks"].numel() * parts["blocks"].element_size()
-                if len(rows) <= 64:
-                    self.inputs[(id(rows), rows._version)] = rows
-            return original(kernel, x, parts)
+        def counting(original, glu: bool):
+            def counted(kernel, x, parts):
+                y = original(kernel, x, parts)
+                if self.active and not (glu and y is None):             # a glu call that composes is counted there
+                    rows = x if isinstance(x, torch.Tensor) else x.x    # a prepared input's (D6)
+                    self.calls[(kernel.name, kernel.k, kernel.out, kernel.act["mmq"], len(rows), glu)] += 1
+                    self.bytes += parts["blocks"].numel() * parts["blocks"].element_size()
+                    if len(rows) <= 64:
+                        self.inputs[(id(rows), rows._version)] = rows
+                return y
+            return counted
 
-        ggml.QLinear.__call__ = counted
+        def embedded(original):
+            def counted(kernel, ids, blocks):
+                if self.active:                                         # blocks: [vocab, row bytes]
+                    self.embedding_bytes += len(ids) * blocks.nbytes // len(blocks)
+                return original(kernel, ids, blocks)
+            return counted
+
+        ggml.QLinear.__call__ = counting(ggml.QLinear.__call__, False)
+        ggml.QLinearGlu.__call__ = counting(ggml.QLinearGlu.__call__, True)
+        ggml.QEmbedding.__call__ = embedded(ggml.QEmbedding.__call__)
 
     def __call__(self, fn) -> dict:
         self.calls.clear()
         self.inputs.clear()
-        self.bytes, self.active = 0, True
+        self.bytes = self.embedding_bytes = 0
+        self.active = True
         try:
             fn()
             torch.cuda.synchronize()
         finally:
             self.active = False
         inputs, self.inputs = len(self.inputs), {}
-        return {"weight_bytes": self.bytes, "inputs": inputs or None,
+        return {"weight_bytes": self.bytes, "embedding_bytes": self.embedding_bytes, "inputs": inputs or None,
                 "calls": [{"type": t, "in": k, "out": n, "mode": m, "rows": r, "count": c}
-                          for (t, k, n, m, r), c in sorted(self.calls.items())]}
+                          | ({"glu": True} if g else {}) for (t, k, n, m, r, g), c in sorted(self.calls.items())]}
 
 
 def annotate(engine: Engine) -> None:
