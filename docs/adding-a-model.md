@@ -101,7 +101,7 @@ package's op contracts and oracles, `reference.py`, came one commit earlier). La
 ## Mechanics
 
 **Manifest.** `[plugin]` takes `name`, `version`, `entry = "plugin:Plugin"`, `slot = "model"`, `license` and
-`core_abi` (required: the ABI range, e.g. `">=0.2,<0.3"`); unknown sections or keys are errors
+`core_abi` (required: the ABI range, `">=1.0,<2.0"`); unknown sections or keys are errors
 (`core/holon/api/manifest.py`). `[dependencies] python` lists the third-party modules the package imports.
 See [design §4.1](design.md#41-manifest).
 

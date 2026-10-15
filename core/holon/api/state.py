@@ -1,7 +1,7 @@
 """Per-request state: allocation shapes, state kinds, memory operations (design §6.2–§6.4).
 
 The core allocates only two shapes — `Paged` (grows with tokens) and `Slot` (fixed size per request). What the state
-*means* (prefix hits, rollback, forking) is defined by a `StateKind`, bound by the core to one spec and its pool, so
+*means* (prefix hits, rollback) is defined by a `StateKind`, bound by the core to one spec and its pool, so
 the core never names a layer type.
 """
 from __future__ import annotations
@@ -82,17 +82,15 @@ class MemOp:
 @dataclasses.dataclass(frozen=True, slots=True)
 class HitLen:
     length: int
-    cost: float = 0.0            # tier cost: a hit on SSD is not scored like a hit in VRAM
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Payload:
     """What a StateKind publishes into the PrefixIndex for one block: units of the pool named `pool` (the index holds
-    the publisher's reference on them), on some tier."""
+    the publisher's reference on them)."""
 
     units: tuple[int, ...]
     pool: str
-    tier: str = "vram"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -110,7 +108,6 @@ class SeqView(Protocol):
     """Read-only view of one request, as state kinds see it. `tokens` and `units()` are the live lists (no copies,
     this runs per request per step): kinds must not mutate them."""
 
-    slot: int
     num_computed: int            # host mirror (upper bound while a step is in flight)
     tokens: tuple[int, ...]
     prompt_len: int
@@ -144,10 +141,6 @@ class StateKind(Protocol):
 
     # Optional hooks (`holon.api.hooks`): KnowsCapacity, CutsPrefill, PublishesPayloads, PayloadPool,
     # RestoresPayloads.
-
-    def reclaimable(self, seq: SeqView) -> list[int]: ...
-
-    def fork(self, src: SeqView, dsts: list[SeqView]) -> list[MemOp]: ...
 
 
 class StateKindFactory(Protocol):

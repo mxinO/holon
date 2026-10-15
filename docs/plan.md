@@ -23,14 +23,17 @@ types (k-quants Q2_K–Q6_K, i-quants IQ1–IQ4, e.g. `unsloth/Qwen3.8-27B-GGUF`
 (GPTQ/AWQ INT4) follow in v1. FP8, NVFP4 and MXFP4 checkpoints (dense and MoE) have their own milestone, M0.6,
 developed on Blackwell (RTX PRO 6000, sm_120: native FP8 and FP4 tensor cores) with FP8 also on sm_89.
 
-Runtime dependencies (v0): `torch`, `triton`, `safetensors`, `tokenizers`, `jinja2`, `flashinfer` (JIT caches
-pre-built), vendored GDN ops from vLLM's `third_party/flash_linear_attention` (subset, Apache-2.0, `vllm.*` imports
-stripped; **not** pip `fla-core`), ggml-derived GGUF CUDA kernels (dequant, mmvq, mmq, MoE — from SGLang's
-copy of vLLM's adaptation of llama.cpp ggml-cuda, MIT/Apache-2.0, built as our own Torch extension),
-`gguf` (reader reference), `xgrammar`, `fastapi`/`uvicorn`, `pyzmq` + `msgspec`.
-Judge/test only: `transformers` (golden recording, in an environment **without** fla), `hypothesis`, `numpy`,
-`scipy`. Baselines in separate pinned environments under `bench/`: mini-sglang, nano-vllm, vLLM (bf16 paths) and
-llama.cpp `llama-server` + kvmem-llama.cpp (GGUF paths).
+Runtime dependencies (v0; declared per distribution, pinned in `uv.lock`, release design D1): the core: `torch`
+(2.11, CUDA 13), `numpy`, `msgspec`, `pyzmq`; std: `gguf` (the GGUF reader), `safetensors`, `huggingface-hub` (hub
+references), **`transformers`** (tokenizers and chat templates, the GGUF tokenizer included; a released version,
+5.6.2); plugins: `flashinfer-python` (JIT modules prebuilt by `holon prebuild`), `triton`, `xgrammar`,
+`fastapi` / `uvicorn`, `transformers`. Vendored, as our own plugins: GDN ops from vLLM's
+`third_party/flash_linear_attention` (subset, Apache-2.0 / MIT, `vllm.*` imports stripped; **not** pip `fla-core`)
+and llama.cpp's ggml CUDA kernels (dequant, mmvq, mmq, MoE; MIT, built as our own Torch extension). Judge and tests
+only (the `dev` group): `accelerate`, `pandas` / `pyarrow`, `compressed-tensors`, `scipy`, `jsonschema`, `pytest`;
+golden recording runs transformers in an environment **without** fla. Baselines in separate pinned environments
+under `bench/` (`bench/README.md`): llama.cpp (`llama-bench`, `llama-server`), SGLang and FreeToken for the release
+suite; mini-sglang and nano-vllm (bf16 paths) from M0.
 
 **Implementation policy (D6):** references are studied, not copied. Each work item names what it learns from;
 the code is our own plugin-native implementation. Only kernels may be borrowed, under design §5.6.

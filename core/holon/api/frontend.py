@@ -56,8 +56,6 @@ class Abort:
 
 
 class Tokenizer(Protocol):
-    eos_token_ids: frozenset[int]
-
     def encode(self, text: str) -> list[int]: ...
 
     def decode(self, ids: list[int]) -> str: ...

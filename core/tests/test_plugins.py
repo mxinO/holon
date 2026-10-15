@@ -63,7 +63,7 @@ def test_a_plugin_of_another_abi_cannot_load(tmp_path, monkeypatch):
     (tmp_path / "other_abi").mkdir()
     (tmp_path / "other_abi" / "__init__.py").write_text("")
     (tmp_path / "other_abi" / "plugin.toml").write_text(
-        '[plugin]\nname="x"\nversion="1"\nentry="p:P"\nslot="unit"\nlicense="MIT"\ncore_abi=">=1.0,<2"\n')
+        '[plugin]\nname="x"\nversion="1"\nentry="p:P"\nslot="unit"\nlicense="MIT"\ncore_abi=">=0.2,<0.3"\n')
     monkeypatch.syspath_prepend(str(tmp_path))
     entry = importlib.metadata.EntryPoint("x", "other_abi", "holon.plugins")
     monkeypatch.setattr(importlib.metadata, "entry_points", lambda group: [entry])
@@ -76,7 +76,7 @@ def _package(root, name, manifest="", slot="kernel", **files):
     (root / name).mkdir()
     (root / name / "__init__.py").write_text("")
     (root / name / "plugin.toml").write_text(f'[plugin]\nname="{name}"\nversion="1"\nentry="plugin:Plugin"\n'
-                                             f'slot="{slot}"\nlicense="MIT"\ncore_abi=">=0.2,<0.3"\n{manifest}')
+                                             f'slot="{slot}"\nlicense="MIT"\ncore_abi=">=1.0,<2.0"\n{manifest}')
     for module, text in files.items():
         (root / name / f"{module}.py").write_text(text)
     return Installed(Manifest.load(root / name / "plugin.toml"), name, root / name)

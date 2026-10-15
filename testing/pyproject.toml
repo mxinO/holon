@@ -1,6 +1,6 @@
 [project]
 name = "holonlm-testing"
-version = "0.0.1"
+version = "0.1.0"
 license = "Apache-2.0"
 requires-python = ">=3.12,<3.13"
 description = "Test-only plugins for Holon (installed in the development environment, never with Holon)"

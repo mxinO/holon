@@ -36,7 +36,7 @@ from holon.core import engine, ipc
 LISTING = ROOT / "core" / "abi.txt"
 CONTRACTS = {"std": ROOT / "std" / "contracts.txt", "plugins": ROOT / "plugins" / "contracts.txt"}
 # Protocols the core implements and plugins call (the rest are implemented by plugins).
-CORE_IMPLEMENTS = {"BuildCtx", "EngineClient", "KernelRegistry", "Ledger", "Pool", "PrefixView",
+CORE_IMPLEMENTS = {"BuildCtx", "EngineClient", "KernelRegistry", "Pool", "PrefixView",
                    "Registries", "Registry", "SeqView", "StepCtx", "TargetView"}
 OWN_ATTRIBUTES = {"parent"}   # looked up on the core's own objects (a child build context's parent), not on plugins
 
@@ -131,7 +131,7 @@ def listing() -> str:
     lines += ["", "# manifest sections and keys",
               *(f"[{s}] {sorted(keys) if keys else '<any>'}" for s, keys in manifest._SECTIONS.items())]
     lines += ["", "# string vocabularies",
-              *(f"{name} = {sorted(getattr(manifest, name).__args__)}" for name in ("Numerics", "GraphPolicy")),
+              *(f"{name} = {sorted(getattr(manifest, name).__args__)}" for name in ("Numerics",)),
               f"ipc frames = {sorted(k.decode() for k in ipc._DECODE)}",
               f"ipc failed kinds = {sorted({*ipc.FAILED_KINDS.values(), 'error'})}"]
     return "\n".join(lines) + "\n"

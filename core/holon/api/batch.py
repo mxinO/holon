@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-from collections.abc import Hashable
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
@@ -32,7 +31,6 @@ class TokenSrc(enum.IntEnum):
 
     HOST = 0
     DEVICE_LAST = 1          # the token sampled by the previous step, still on device
-    DEVICE_DRAFT = 2         # a draft token proposed on device
 
 
 @dataclasses.dataclass(slots=True)
@@ -86,7 +84,6 @@ class Seq:
     constrained: bool = False            # a logits processor masks its rows (launched only with every token committed)
     status: Status = Status.WAITING
     finish_reason: str | None = None
-    ext: dict[str, Any] = dataclasses.field(default_factory=dict)  # namespaced plugin state; core never reads
 
     def __post_init__(self) -> None:
         if not self.prompt_len:
@@ -114,11 +111,10 @@ class SeqTable:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class ShapeKey:
-    """Graph bucket: padded sizes plus finite plugin-declared axes, e.g. (("spec.q", 4),)."""
+    """Graph bucket: padded sizes."""
 
     n_tokens: int
     n_seqs: int
-    axes: tuple[tuple[str, Hashable], ...] = ()
 
 
 @dataclasses.dataclass(slots=True, eq=False)
@@ -138,7 +134,6 @@ class BatchPlan:
     draft_k: int = 0                     # drafts this step's rows verify (verify width − 1), or a prefill step's drafts
                                          # for its prompt-ending rows; 0: no speculation
     n_decode: int = 0                    # a mixed step's leading decode rows (the rest are prefill chunks); 0: unmixed
-    ext: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass(slots=True, eq=False)
@@ -151,7 +146,6 @@ class DeviceBatch:
     slots: torch.Tensor                  # [B]
     logits_index: torch.Tensor           # tokens whose logits are computed (the last of each sampled row)
     logits_rows: torch.Tensor            # [R] batch row of each logits_index entry
-    meta: dict[str, Any] = dataclasses.field(default_factory=dict)  # per planner
 
 
 @dataclasses.dataclass(slots=True, eq=False)

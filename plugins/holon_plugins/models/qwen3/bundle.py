@@ -9,7 +9,6 @@ from typing import Any
 class Tokenizer:
     def __init__(self, source: Any) -> None:
         self._tok = source.tokenizer()
-        self.eos_token_ids = source.eos_token_ids
 
     def encode(self, text: str) -> list[int]:
         return self._tok.encode(text, add_special_tokens=False)

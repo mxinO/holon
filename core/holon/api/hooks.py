@@ -9,7 +9,6 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    import torch
 
     from .batch import StepCtx
     from .decoding import DraftPolicy
@@ -136,9 +135,9 @@ class Rewindable(Protocol):
     loaded slot object defining `rewind` (an auxiliary model's modules are rolled back by the drafter that runs them,
     `Drafter.run`). Paged state needs none — it rewinds by length."""
 
-    def rewind(self, ctx: StepCtx, path: torch.Tensor | None = None) -> None:
+    def rewind(self, ctx: StepCtx) -> None:
         """Device-side, graph-capturable: after the verifier wrote `ctx.seq_table.n_accept` for the step's verify rows,
-        keep only what their accepted tokens produced. `path` stays None until tree verification."""
+        keep only what their accepted tokens produced."""
 
 
 class Reports(Protocol):

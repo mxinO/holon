@@ -110,6 +110,19 @@ python bench/run.py --name release-qwen3-8b-q4_k_m --gpu 0 --model <file.gguf> -
 python bench/report.py evidence/bars_release-*_rtx-5090_*.json      # Markdown tables linking their records
 ```
 
+## Agent demo (release design D7)
+
+`demo/run.py` runs the pre-registered demo task: Claude Code (pinned, headless) makes the tests of `demo/project/`
+pass without editing them — a seeded bug and a missing function across three modules — against a running `holon
+serve`, through `capture_proxy.py`. Success, the scoring (the harness restores the tests from its own copy, then runs
+`pytest`) and what is recorded are fixed in its docstring; it never records file text.
+
+```bash
+holon serve unsloth/Qwen3.8-27B-GGUF                 # the card's 27B lock
+python bench/demo/run.py --server http://127.0.0.1:8000 --gpu-class rtx-5080 --runs 3 \
+    --out evidence/demo_rtx-5080_<date>.json
+```
+
 ## Reproduce
 
 ```bash

@@ -1,7 +1,9 @@
 """A recording proxy between a client (Claude Code) and a server: forwards every request unchanged, streams the answer
 back, and writes one JSON line per request describing its shape — never its text, and no header values except the
 API version and beta flags (docs/m05-grammar.md R §5.4's unverified items: headers, `metadata.user_id`'s shape,
-streaming, the tool list, `cache_control`, side calls). `--raw` also keeps the bodies, for local inspection only.
+streaming, the tool list, `cache_control`, side calls). Each line also has the request's timing at the proxy (first
+streamed content after `ttft_ms`, the whole answer after `total_ms`) and the token counts the server reported
+(`usage`). `--raw` also keeps the bodies, for local inspection only.
 
 Usage:
   python bench/capture_proxy.py --upstream http://<server>:8000 --port 18080 --out <requests.jsonl> [--raw <file>]
@@ -13,6 +15,7 @@ import http.client
 import json
 import re
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -61,6 +64,21 @@ def summary(method: str, path: str, headers: dict[str, str], body: dict | None, 
     return out
 
 
+def usage(answer: bytes) -> dict[str, int]:
+    """The token counts an Anthropic answer reports: a whole message's `usage`, or a stream's (`message_start` gives
+    the input tokens, the last `message_delta` the output tokens)."""
+    out: dict[str, int] = {}
+    for line in answer.decode(errors="replace").splitlines() or [""]:
+        text = line[5:].strip() if line.startswith("data:") else line
+        try:
+            event = json.loads(text)
+        except ValueError:
+            continue
+        if isinstance(event, dict):
+            out |= (event.get("message") or event).get("usage") or {}
+    return {k: v for k, v in out.items() if k in ("input_tokens", "output_tokens")}
+
+
 def serve(upstream: str, port: int, out: str, raw: str | None) -> None:
     target = urllib.parse.urlsplit(upstream)
     lock = threading.Lock()
@@ -70,6 +88,7 @@ def serve(upstream: str, port: int, out: str, raw: str | None) -> None:
 
         def _forward(self) -> None:
             data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            start, first, answer = time.perf_counter(), None, bytearray()
             conn = http.client.HTTPConnection(target.hostname, target.port, timeout=3600)
             headers = {k: v for k, v in self.headers.items() if k.lower() not in ("host", "connection")}
             conn.request(self.command, self.path, data, headers)
@@ -81,15 +100,20 @@ def serve(upstream: str, port: int, out: str, raw: str | None) -> None:
             self.send_header("Transfer-Encoding", "chunked")
             self.end_headers()
             while chunk := resp.read1(65536):
+                answer += chunk
+                if first is None and b"content_block_delta" in answer[-len(chunk) - 32:]:
+                    first = time.perf_counter()
                 self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
                 self.wfile.flush()
+            end = time.perf_counter()
             self.wfile.write(b"0\r\n\r\n")
             try:
                 body = json.loads(data) if data else None
             except ValueError:
                 body = None
             record = summary(self.command, self.path, {k.lower(): v for k, v in self.headers.items()}, body,
-                             resp.status)
+                             resp.status) | {"ttft_ms": first and round((first - start) * 1e3, 1),
+                                             "total_ms": round((end - start) * 1e3, 1), "usage": usage(answer)}
             with lock:
                 with open(out, "a") as f:
                     f.write(json.dumps(record) + "\n")

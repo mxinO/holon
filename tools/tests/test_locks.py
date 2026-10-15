@@ -32,11 +32,10 @@ def test_lock_round_trip_is_exact():
 def test_round_trip_of_nested_tuples_and_unicode():
     plan = _plan()
     odd = Binding("kernels.fast", {"facts": {"shape": (1, (2, 3)), "név": "ünï\tcode", "neg": -1.5e-300},
-                                   "launch": {"tiles": [64, 128], "split": {"k": 2}}}, {"warps": 4})
+                                   "launch": {"tiles": [64, 128], "split": {"k": 2}}})
     plan = dataclasses.replace(plan, sites=plan.sites | {"ü site/rmsnorm@1": odd})
     back = plans.loads(locks.dumps(Lock(plan)))
     assert back.plan.plan_id == plan.plan_id
-    assert back.plan.sites["ü site/rmsnorm@1"].tunables == {"warps": 4}
 
 
 @pytest.mark.parametrize("edit", [('"kernels.fast" }', '"std.mixers.gqa" }'),     # a binding (in the plan)

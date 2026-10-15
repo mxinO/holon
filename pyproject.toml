@@ -1,6 +1,6 @@
 [project]
 name = "holon-workspace"
-version = "0.0.0"
+version = "0.1.0"
 license = "Apache-2.0"
 requires-python = ">=3.12,<3.13"
 description = "Holon installed from source: the runtime distributions (`uv sync --frozen`; release design D1)"

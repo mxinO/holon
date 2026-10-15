@@ -17,6 +17,3 @@ class Paged:
 
     def capacity(self, seq) -> int:
         return len(seq.units(self.spec.name)) * self.page
-
-    def reclaimable(self, seq) -> list[int]:
-        return []

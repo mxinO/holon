@@ -16,7 +16,7 @@ def padded(plan: BatchPlan, rows: int, slot: int, width: int = 1) -> BatchPlan:
     out = host_plan(plan.step, pad(plan.slots, slot), pad(plan.start_upper, 0), pad(plan.n_query, width),
                     pad(plan.n_logits, width), pad(plan.host_tokens, 0, extra * width),
                     pad(plan.token_src, TokenSrc.HOST))
-    out.mem_ops, out.publishes, out.ext, out.draft_k = plan.mem_ops, plan.publishes, plan.ext, plan.draft_k
+    out.mem_ops, out.publishes, out.draft_k = plan.mem_ops, plan.publishes, plan.draft_k
     return out
 
 

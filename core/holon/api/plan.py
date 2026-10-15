@@ -21,11 +21,10 @@ class UnitPin:
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class Binding:
-    """What runs at one site: a unit or kernel, with its pinned config and tunables."""
+    """What runs at one site: a unit or kernel, with its pinned config."""
 
     impl: str
     config: dict[str, Any] = dataclasses.field(default_factory=dict)
-    tunables: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass(frozen=True, eq=False)

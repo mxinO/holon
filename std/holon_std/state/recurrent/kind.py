@@ -43,9 +43,6 @@ class Recurrent:
     def capacity(self, seq) -> int:
         return 1 << 62
 
-    def reclaimable(self, seq) -> list[int]:
-        return []
-
     def next_publish(self, seq) -> int | None:
         """The next position after the request's computed tokens where the policy checkpoints (none without
         checkpoint units)."""
@@ -91,6 +88,3 @@ class Recurrent:
     def adopt(self, seq, payload: Payload) -> list[MemOp]:
         return [MemOp(self.payload_pool, np.array(payload.units), self.pool.name, np.array(seq.units(self.spec.name)),
                       "pre_forward")]
-
-    def fork(self, src, dsts) -> list[MemOp]:
-        return []                                  # not built in M0.3: n > 1 siblings adopt the first's checkpoints

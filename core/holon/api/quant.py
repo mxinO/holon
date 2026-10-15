@@ -6,39 +6,26 @@ concrete tensors. The plugins that read a layout interpret it; the core only car
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import torch
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class Scale:
-    dtype: str                       # e.g. "fp16", "e4m3"
-    group: tuple[int, int]           # (rows, cols) covered by one scale; (-1, -1) = per tensor
-    level: int = 1                   # 1 = applied to elements; 2 = a scale of scales (double quantization)
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
 class Scheme:
-    """What the stored numbers mean; `elem` names the element format, interpreted by the plugins that read it."""
+    """What the stored numbers mean; `elem` names the element format (its scales included), interpreted by the
+    plugins that read it."""
 
     elem: str
-    scales: tuple[Scale, ...] = ()
-    zero_point: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Layout:
-    """How the bytes are arranged, e.g. `Layout(Scheme("bf16"), "rowmajor")`. `params` are sorted (key, value)."""
+    """How the bytes are arranged, e.g. `Layout(Scheme("ggml.q4_k"), "gguf.native")`."""
 
     scheme: Scheme
     name: str
-    params: tuple[tuple[str, Any], ...] = ()
-    readable_by: frozenset[str] = frozenset({"cuda"})
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "params", tuple(sorted(self.params)))
 
 
 @dataclasses.dataclass(slots=True, eq=False)

@@ -22,12 +22,10 @@ from .decoding import (
     LogitsProcessor,
     LogitsProcessorPlugin,
     MaskRow,
-    PlanTransform,
     RequestError,
     SampleOut,
     Sampler,
     SamplerPlugin,
-    SchedulePolicy,
     TargetView,
     Verifier,
     VocabView,
@@ -51,8 +49,8 @@ from .frontend import (
     ToolCallStart,
 )
 from .hooks import Rewindable  # the optional hooks: `holon.api.hooks`
-from .manifest import ABI, SLOTS, Cardinality, Manifest, Option, Provenance, Resource, Tunable
-from .memory import Ledger, Pool
+from .manifest import ABI, SLOTS, Cardinality, Manifest, Option, Provenance, Resource
+from .memory import Pool
 from .mixer import Mixer, Planner
 from .model import (
     AuxSpec,
@@ -68,8 +66,8 @@ from .model import (
 )
 from .ops import KERNEL_PROPS, Constraint, KernelRegistry, KernelSpec, Plugin, Registries, Registry
 from .plan import Binding, Lock, Plan, UnitPin
-from .platform import Fingerprint, Platform
-from .quant import Layout, QTensor, Scale, Scheme
+from .platform import Fingerprint
+from .quant import Layout, QTensor, Scheme
 from .state import (
     HitLen,
     InStepPublish,
@@ -85,20 +83,18 @@ from .state import (
     StateSpec,
     rewind_modules,
 )
-from .telemetry import Event
 from .terms import Ref, canonical_hash, parse_versioned, to_term
 
 __all__ = [
     "ABI", "ERROR_KINDS", "FINISH_REASONS", "KERNEL_PROPS", "SLOTS", "Abort", "AuxSpec", "Batch", "BatchPlan",
     "Binding", "BuildCtx", "Cardinality", "Constraint", "DeviceBatch", "DraftPolicy", "Drafter", "DrafterPlugin",
-    "EngineClient", "EngineRequest", "Event", "Fingerprint", "FrontendBundle", "FrontendPlugin", "HitLen",
-    "InStepPublish", "KernelRegistry", "KernelSpec", "LayerDecl", "Layout", "Ledger", "Lock", "LogitsProcessor",
-    "LogitsProcessorPlugin", "Logprobs", "Manifest", "MaskRow", "MemOp", "Mixer", "ModelPlugin", "ModelSpec", "Option",
-    "Paged", "Pages", "ParseEvent", "Payload", "Plan", "PlanTransform", "Planner", "Platform", "Plugin", "Pool",
-    "PrefixView", "Provenance", "QTensor", "Reasoning", "Ref", "Registries", "Registry", "RequestError", "Resolved",
-    "Resource", "Rewindable", "SampleOut", "Sampler", "SamplerPlugin", "SamplingParams", "Scale", "SchedulePolicy",
-    "Scheme", "Seq", "SeqTable", "SeqView", "ShapeKey", "Slot", "StateKind", "StateKindFactory", "StateSpec", "Status",
-    "StepCtx", "TargetView", "Text", "TokenDelta", "TokenSrc", "Tokenizer", "ToolArgsDelta", "ToolCallEnd",
-    "ToolCallStart", "Tunable", "Unit", "UnitPin", "Verifier", "VocabView", "WeightMap", "WeightRule", "WeightSource",
-    "canonical_hash", "parse_versioned", "rewind_modules", "sequence_seed", "to_term",
+    "EngineClient", "EngineRequest", "Fingerprint", "FrontendBundle", "FrontendPlugin", "HitLen", "InStepPublish",
+    "KernelRegistry", "KernelSpec", "LayerDecl", "Layout", "Lock", "LogitsProcessor", "LogitsProcessorPlugin",
+    "Logprobs", "Manifest", "MaskRow", "MemOp", "Mixer", "ModelPlugin", "ModelSpec", "Option", "Paged", "Pages",
+    "ParseEvent", "Payload", "Plan", "Planner", "Plugin", "Pool", "PrefixView", "Provenance", "QTensor", "Reasoning",
+    "Ref", "Registries", "Registry", "RequestError", "Resolved", "Resource", "Rewindable", "SampleOut", "Sampler",
+    "SamplerPlugin", "SamplingParams", "Scheme", "Seq", "SeqTable", "SeqView", "ShapeKey", "Slot", "StateKind",
+    "StateKindFactory", "StateSpec", "Status", "StepCtx", "TargetView", "Text", "TokenDelta", "TokenSrc", "Tokenizer",
+    "ToolArgsDelta", "ToolCallEnd", "ToolCallStart", "Unit", "UnitPin", "Verifier", "VocabView", "WeightMap",
+    "WeightRule", "WeightSource", "canonical_hash", "parse_versioned", "rewind_modules", "sequence_seed", "to_term",
 ]

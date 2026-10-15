@@ -1,9 +1,8 @@
-"""Scheduling, sampling and speculative decoding roles (design §7.3, §7.6).
+"""Sampling, speculative decoding and logits processing roles (design §7.6).
 
 Speculative decoding is three roles: a DraftPolicy picks k per step, a Drafter proposes (writing the SeqTable's draft
 tokens and counts, and its own state, possibly through auxiliary models and sub-steps), and a Verifier replaces the
-Sampler for the step's verify rows. Rollback is the core's `rewind` fan-out to Rewindables (api.hooks). Ordering and
-shape axes of transforms and drafters are declared in their manifests.
+Sampler for the step's verify rows. Rollback is the core's `rewind` fan-out to Rewindables (api.hooks).
 
 A LogitsProcessor constrains requests (design §7.6): it follows each one on the host (`open`, `ready`, `commit`,
 `close`), writes its masks at launch (`fill`) and applies them on the device before the sampler or verifier (`apply`).
@@ -23,7 +22,7 @@ if TYPE_CHECKING:
     import numpy as np
     import torch
 
-    from .batch import BatchPlan, SamplingParams, Seq, StepCtx
+    from .batch import SamplingParams, Seq, StepCtx
     from .model import AuxSpec, BuildCtx, ModelSpec
     from .quant import QTensor
 
@@ -36,17 +35,6 @@ class SampleOut:
     logprobs: torch.Tensor | None = None       # [R] logprob of each sampled token
     top_ids: torch.Tensor | None = None        # [R, k]
     top_logprobs: torch.Tensor | None = None   # [R, k]
-
-
-class SchedulePolicy(Protocol):
-    def order(self, waiting: list[Seq]) -> list[Seq]: ...
-
-    def victim(self, running: list[Seq]) -> Seq | None: ...
-
-
-class PlanTransform(Protocol):
-    def transform(self, plan: BatchPlan, seqs: list[Seq]) -> BatchPlan:
-        """Host-side: rewrite the step's plan; `seqs` are the scheduled requests, row-aligned with the plan."""
 
 
 class RequestError(ValueError):

@@ -56,9 +56,10 @@ def test_hash_is_pinned():
 
 
 def test_defaulted_fields_do_not_change_identity():
-    assert canonical_hash(_spec()) == canonical_hash(_spec(position_fn=None))
+    rooted = lambda root: dataclasses.replace(_spec(), weights=WeightMap("hf_safetensors", rules=(), root=root))  # noqa: E731
+    assert canonical_hash(_spec()) == canonical_hash(rooted(""))
     assert canonical_hash(_spec()) != canonical_hash(_spec(heads=16))
-    assert canonical_hash(_spec()) != canonical_hash(_spec(position_fn="mrope"))
+    assert canonical_hash(_spec()) != canonical_hash(rooted("model."))
 
 
 def test_hash_is_order_independent_for_dicts_and_sets():
@@ -86,59 +87,50 @@ def test_plan_id_is_order_independent_and_excludes_verification():
 
 DESIGN_EXAMPLE = """
 [plugin]
-name      = "expert_cache.lfu_decay"
+name      = "spec.adaptive_k"
 version   = "0.3.1"
-variant_of = "expert_cache.lfu@src:aa10"
-implements = "placement_policy@1"
-entry     = "lfu_decay:Plugin"
-slot      = "placement_policy"
+derived_from = "std.spec.fixed_k"
+entry     = "adaptive:Plugin"
+slot      = "draft_policy"
 license   = "Apache-2.0"
-core_abi  = ">=0.2,<0.3"
+core_abi  = ">=1.0,<2.0"
 
 [resources]
-provides = ["placement.expert@1"]
-requires = ["store.tiered@1", "telemetry.router_hist@1"]
+provides = ["draft_policy.adaptive_k@1"]
 
 [properties]
-numerics    = "policy"
-graph_policy = "host"
+numerics = "policy"
 
 [dependencies]
 python = []
 
-[tunables]
-decay     = { type = "float", range = [0.5, 0.999], default = 0.7, apply = "live" }
-swap_cap  = { type = "int",   range = [0, 512],     default = 96, log = true, apply = "restart" }
-
 [support]
-platforms = ["cuda>=sm_80"]
+platforms = ["cuda"]
 
 [options]
-"cache.policy" = { help = "eviction order", default = "lfu", choices = ["lfu", "lru"] }
-"cache.limit" = { help = "experts kept" }
+"spec.k_max" = { help = "the largest k it picks", default = "3", choices = ["2", "3", "4"] }
+"spec.window" = { help = "steps of acceptance history it reads" }
 """
 
 
 def test_manifest_loads_design_example(tmp_path: pathlib.Path):
     (tmp_path / "plugin.toml").write_text(DESIGN_EXAMPLE)
     m = Manifest.load(tmp_path / "plugin.toml")
-    assert m.requires == (Resource("store.tiered", 1), Resource("telemetry.router_hist", 1))
-    assert m.tunables["decay"].range == (0.5, 0.999) and m.cardinality.value == "per_site"
-    hash(m.tunables["swap_cap"])
-    assert m.options["cache.policy"].choices == ("lfu", "lru") and m.options["cache.limit"].default is None
+    assert m.provides == (Resource("draft_policy.adaptive_k", 1),) and m.cardinality.value == "single"
+    assert m.options["spec.k_max"].choices == ("2", "3", "4") and m.options["spec.window"].default is None
 
 
 @pytest.mark.parametrize("abi, extra, match", [
-    (">=0.2,<0.3", "[surprise]\nk=1\n", "unknown section"),
-    (">=0.2,<0.3", "[resources]\nprovide=['a@1']\n", "unknown keys"),
-    (">=0.2,<0.3", "[properties]\nnumerics='fast'\n", "invalid numerics"),
-    (">=0.2,<0.3", "[properties]\nmax_depth=1\n", "unknown keys"),  # removed: the depth gate comes from the processor
-    (">=0.2,<0.3", "[plugin_extra]\n", "unknown section"),
-    (">=0.2,<0.3", "[options]\n'a.b' = { default = '1' }\n", "help"),            # an option needs its help line
-    (">=0.2,<0.3", "[options]\n'a.b' = { help = 'x', choices = 'a8' }\n", "strings"),
-    (">=0.2,<0.3", "[options]\n'a.b' = { help = 'x', choices = [4, 8] }\n", "strings"),
+    (">=1.0,<2.0", "[surprise]\nk=1\n", "unknown section"),
+    (">=1.0,<2.0", "[resources]\nprovide=['a@1']\n", "unknown keys"),
+    (">=1.0,<2.0", "[properties]\nnumerics='fast'\n", "invalid numerics"),
+    (">=1.0,<2.0", "[properties]\nmax_depth=1\n", "unknown keys"),  # removed: the depth gate comes from the processor
+    (">=1.0,<2.0", "[plugin_extra]\n", "unknown section"),
+    (">=1.0,<2.0", "[options]\n'a.b' = { default = '1' }\n", "help"),            # an option needs its help line
+    (">=1.0,<2.0", "[options]\n'a.b' = { help = 'x', choices = 'a8' }\n", "strings"),
+    (">=1.0,<2.0", "[options]\n'a.b' = { help = 'x', choices = [4, 8] }\n", "strings"),
     (None, "", "core_abi missing"),                                  # required (release design §7)
-    (">=1.0,<2", "[surprise]\n", "does not admit this core's plugin ABI 0.2"),   # checked before the keys
+    (">=0.2,<0.3", "[surprise]\n", "does not admit this core's plugin ABI 1.0"),   # checked before the keys
     ("~=0.1", "", "expected clauses"),
 ])
 def test_manifest_rejects_mistakes_with_path(tmp_path: pathlib.Path, abi, extra, match):

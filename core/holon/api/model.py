@@ -64,7 +64,6 @@ class ModelSpec:
     norm: Ref
     lm_head: Ref
     weights: WeightMap
-    position_fn: str | None = None      # e.g. a multi-section rope; default: arange
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

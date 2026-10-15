@@ -4,7 +4,7 @@ import types
 
 import pytest
 import torch
-from holon.api import Layout, QTensor, Scale, Scheme, WeightMap, WeightRule
+from holon.api import Layout, QTensor, Scheme, WeightMap, WeightRule
 from holon.core.build import BuildContext, _fill_slice, load_weights, map_name
 from holon.core.plugins import PluginError, PluginSet, discover
 from torch import nn
@@ -74,7 +74,7 @@ def test_a_parameter_is_filled_whole_or_by_slices_not_both(ctx, whole_first):
 
 
 
-ROWS = Layout(Scheme("toy.int8", (Scale("f32", (1, -1)),)), "rows")     # int8 rows, an f32 scale per row
+ROWS = Layout(Scheme("toy.int8"), "rows")     # int8 rows, an f32 scale per row
 
 
 class _Rows(nn.Module):

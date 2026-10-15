@@ -4,7 +4,7 @@ version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "logits_processor"
 license = "Apache-2.0"
-core_abi = ">=0.2,<0.3"
+core_abi = ">=1.0,<2.0"
 
 [resources]
 provides = ["grammar.constraint@1"]

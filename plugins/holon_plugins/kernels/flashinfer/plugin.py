@@ -115,10 +115,10 @@ class Plugin:
     def register(self, regs) -> None:
         # fp8 KV from sm_89 on, where e4m3 converts in hardware (on sm_86 FlashInfer converts in software, 4-5x slower
         # than bf16; spike S1)
-        for layout, supports, sm_min in (("kv.hnd", _supports, 80), ("kv.hnd.fp8", _supports_fp8, 89)):
+        for supports, sm_min in ((_supports, 80), (_supports_fp8, 89)):         # kv.hnd, kv.hnd.fp8
             for op, impl in (("attention.paged_prefill", Prefill), ("attention.paged_decode", Decode)):
                 regs.kernels.add(op, KernelSpec(
-                    op=op, provider="kernels.flashinfer", impl=impl, in_layouts={"kv": layout},
+                    op=op, provider="kernels.flashinfer", impl=impl,
                     requires=Constraint(sm_min=sm_min, sm_max=129), supports=supports,
                     props=frozenset({"deterministic", "needs_host_lens"}
                                     | ({"serves_decode_rows"} if op == "attention.paged_prefill" else set())),

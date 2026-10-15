@@ -133,7 +133,7 @@ Sixteen nouns. Each is a type in `holon.api` (the plugin ABI) with its runtime i
 | # | Noun | One-line definition | § |
 |---|---|---|---|
 | 1 | Manifest | Declarative plugin description, readable without import | 4.1 |
-| 2 | Plan | Resolved, serializable deployment: plugins, bindings, tunables, fingerprint | 4.3 |
+| 2 | Plan | Resolved, serializable deployment: plugins, bindings, engine settings, fingerprint | 4.3 |
 | 3 | Registry | Git-backed lock history per (model, fingerprint class) + evidence; holds tuned defaults | 4.4 |
 | 4 | ModelSpec | A model's declaration (emitted by a pure recipe): layers, taps, draft heads, encoders | 5.1 |
 | 5 | Op | Typed signature + reference implementation | 5.3 |
@@ -146,8 +146,8 @@ Sixteen nouns. Each is a type in `holon.api` (the plugin ABI) with its runtime i
 | 12 | Batch | One step: host plan (SoA) + static device mirror | 7.2 |
 | 13 | Rewindable | Device-side commit/rollback contract for per-sequence state | 7.5 |
 | 14 | StepLoop | Fixed timing regions, overlap depth, graphs, control plane | 7.3 |
-| 15 | Event | Core-measured telemetry record | 7.9 |
-| 16 | Platform | Thin device abstraction (streams, events, pinned mem, graphs, IPC) | 8 |
+| 15 | Event | Core-measured telemetry record (planned; not in ABI 1.0) | 7.9 |
+| 16 | Platform | Thin device abstraction (streams, events, pinned mem, graphs): the core's `holon.core.platform`, not a plugin slot | 8 |
 
 Hot-structure interfaces — PrefixIndex, slot/page allocator, batch builder — operate on numpy struct-of-arrays
 behind narrow interfaces, so a native (Rust via PyO3) implementation can replace them without changing callers
@@ -165,65 +165,65 @@ the plugin's package, whose directory holds `plugin.toml`).
 
 ```toml
 [plugin]
-name      = "expert_cache.lfu_decay"
+name      = "spec.adaptive_k"
 version   = "0.3.1"
-variant_of = "expert_cache.lfu@src:aa10"  # optional; set for forks (lineage)
-implements = "placement_policy@1"         # numeric units: "<unit>@sem:<hash>" — the judge loads that oracle
-derived_from = ""                         # optional; copied recipes / explicit old-version copies (lineage only)
-entry     = "lfu_decay:Plugin"            # imported only if selected
-slot      = "placement_policy"
-license   = "Apache-2.0"                  # SPDX; provenance hash for borrowed code in [provenance]
-core_abi  = ">=0.2,<0.3"                  # required; checked before anything else in the manifest
+derived_from = "std.spec.fixed_k"         # optional; copied code / explicit old-version copies (lineage only)
+entry     = "adaptive:Plugin"             # "module:attr" in the plugin's package; imported only if selected
+slot      = "draft_policy"
+license   = "Apache-2.0"                  # SPDX; borrowed code is declared in [provenance]
+core_abi  = ">=1.0,<2.0"                  # required; checked before anything else in the manifest
 
 [resources]
-provides = ["placement.expert@1"]
-requires = ["store.tiered@1", "telemetry.router_hist@1"]   # matching major = compatible
+provides = ["draft_policy.adaptive_k@1"]  # typed `ns.name@major`; a matching major is compatible
+# requires = [...]         # kernels: the op contracts they implement, e.g. ["op.qlinear@2"]
 
 [properties]
-numerics    = "policy"     # policy | exact | bounded | approx   (§10.3)
-graph_policy = "host"      # full | piecewise | eager | host   (§7.4); also after/before, shape_axes
+numerics = "policy"        # policy | exact | bounded | approx   (§10.3); also after / before (ordered_multi slots)
 
 [dependencies]             # third-party imports allowed for this plugin (invariant 2)
 python = []
 
 # [reference]              # numeric units only (omitted for policy plugins like this one):
-# module = "reference.py"  # the oracle module; sem = hash(reference.py + param schema)
-
-[tunables]
-decay     = { type = "float", range = [0.5, 0.999], default = 0.7, apply = "live" }     # live | restart
-swap_cap  = { type = "int",   range = [0, 512],     default = 96, log = true, apply = "restart" }
-# A tunable is judged under the numerics class of the plugin that owns it.
+# module = "reference.py"  # the oracle module; sem = hash(reference.py)
 
 [support]
-platforms = ["cuda"]                  # device names only; SM limits live in KernelSpec.requires
+platforms = ["cuda"]       # device names only; SM limits live in KernelSpec.requires
 
 # [build]                  # plugins with native code (kernels): `python -m <package>.<module> --sm N` builds it
 # module = "prebuild"      # ahead of time for SM N (`holon prebuild`; the CLI is part of the ABI)
 
+# [provenance]             # borrowed code (AGENTS.md "Third-party code"): source, commit, license, files
+
 [options]                  # the EngineConfig.plugin_options keys it reads: help, default (display text), choices
-"expert_cache.policy" = { help = "eviction order", default = "lfu_decay", choices = ["lfu_decay", "lru"] }
+"spec.k_max" = { help = "the largest k it picks", default = "3", choices = ["2", "3", "4"] }
 # A manifest using an option key added in a later ABI raises its `core_abi` floor to that ABI.
 ```
 
-Resource names are **typed**: each `ns.name@major` is registered in `holon.api.resources` and bound to a
-Protocol. The resolver matches strings without importing plugins; after import it checks each provider object
-against the Protocol (`runtime_checkable` + signature check).
+Resource names are **typed** `ns.name@major`: the resolver matches them as strings without importing plugins (a
+matching major is compatible), and a plugin may register only the names its manifest provides. The contracts the
+first-party distributions provide are listed per distribution (`std/contracts.txt`, `plugins/contracts.txt`, §4.5).
 
 ### 4.2 Slots and cardinality
 
 | Cardinality | Meaning | Slots |
 |---|---|---|
-| `single` | exactly one per Plan | model, platform, launcher, schedule_policy (none in v0: scheduling and its mixing budget are the core's, §7.1), sampler, verifier, draft_policy, eviction_policy (prefix index) |
-| `per_site` | bound per site (layer, op instance, state spec, store) | unit (mixers, ffn/MoE, norms, blocks, ops — anything a recipe names by `Ref`), kernel, state_kind, placement_policy, codec, weight_source |
-| `ordered_multi` | ordered list, `after`/`before` in the manifest | plan_transform, logits_processor (v0: at most one, selected via `EngineConfig.slots`), checkpoint_policy |
-| `multi` | any number, keyed by name | frontend, tier, mover, drafter, encoder, connector, exporter |
+| `single` | exactly one per Plan | model, sampler, verifier, draft_policy |
+| `per_site` | bound per site (layer, op instance, state spec) | unit (mixers, ffn/MoE, norms, blocks, ops — anything a recipe names by `Ref`), kernel, state_kind, weight_source |
+| `ordered_multi` | ordered list, `after`/`before` in the manifest | logits_processor (v0: at most one, selected via `EngineConfig.slots`) |
+| `multi` | any number, keyed by name | frontend, drafter (v0: one per deployment) |
+
+These are ABI 1.0's slots (`holon.api.SLOTS`): each has plugins and the core loads them. Slots planned for later
+features join when their first plugin does, each a minor ABI addition: `launcher` (§8), `placement_policy`, `tier`,
+`mover` and `connector` (offload, §6.5, §9), `eviction_policy` (prefix index, §6.3), `checkpoint_policy` and `codec`
+(§9), `plan_transform` (§8), `encoder` (VLM), `exporter` (§7.9), `schedule_policy` (scheduling and its mixing
+budget are the core's in v0, §7.1). Where later sections name them, they describe those plans.
 
 A `Ref("a.b.c@1")` is served by the installed plugin whose name is the longest prefix of the unit name (e.g.
 `std.ops` serves `std.ops.rmsnorm`), and whose version major equals the Ref's major. Everything the resolver needs
 (resources, numerics, graph policy, depth, ordering, shape axes) lives in the manifest; runtime classes never repeat
 it.
 
-Every slot has a judge-owned contract suite (§10.3); per-slot ABI versions return when a slot needs one (§4.5).
+Per-slot ABI versions return when a slot needs one (§4.5).
 
 ### 4.3 Resolution → Plan
 
@@ -234,7 +234,7 @@ Every slot has a judge-owned contract suite (§10.3); per-slot ABI versions retu
    reachability (§5.5); then pick by deployment pin → the model's lock for this fingerprint class → default priority.
 5. Check `ShapeKey` axes are finite; compute graph policy per ShapeKey class (weakest wins).
 6. Emit the **Plan**: model_id, fingerprint class, recipe hash, commit, uv.lock hash, per-unit `src`/`sem` (one
-   version each) and per-site bindings with pinned configs and tunables; `plan_id = canonical_hash(plan)`. The
+   version each) and per-site bindings with pinned configs; `plan_id = canonical_hash(plan)`. The
    **Lock** file stores the Plan plus its verification results (`snapshot`, `uncovered` sites), which may be
    re-recorded without changing `plan_id` (§4.6). Whether a lock was borrowed from the nearest class (`unverified`)
    is decided when the engine starts, not stored.
@@ -260,11 +260,14 @@ for model B can therefore never change model A's binding silently.
 There is no separate database. The **Registry** is the git history of lockfiles plus evidence records:
 
 - **One linear history per (model, fingerprint class):** `plans/<model_id>/<class>/<n>.lock`. The newest lock is
-  what the engine runs. Rollback = restart on the previous lock in the history. With the optional layer (§10), a host's history is
+  what the engine runs. A lock pins the code of its commit (`(commit, lock)`, §4.6): in the source tree, rolling back
+  to an earlier lock means serving its commit. In an install, every older lock pins other code, so `holon serve`
+  serves the newest lock that pins the installed code, and its supervisor falls back to defaults, not to an earlier
+  lock, when a start fails (release design D2). With the optional layer (§10), a host's history is
   main's locks plus host-local promotion commits on top; when the host pulls a new main, the supervisor re-runs
   propagation from its own newest lock (so promotions are carried forward or dropped by the same checked
   transition), or a promotion is upstreamed to main by PR.
-- **Tuned defaults live in the lock.** Kernel configs and tunables are tuned by us per fingerprint class
+- **Tuned defaults live in the lock.** Kernel choices and engine settings are tuned by us per fingerprint class
   (benchmarking tools such as `holon tune`, in the spirit of FreeToken's `ft bench bw`), so every class ships
   at the best configuration we know — no agent is involved. Class and shape tables inside a kernel plugin (M0.7:
   `kernels.triton_attn`'s launch configs per class, `kernels.ggml_cuda`'s crossover per class and shape and its fused
@@ -286,8 +289,9 @@ There is no separate database. The **Registry** is the git history of lockfiles 
 **Implemented (M0).** The core reads locks (`holon.core.plans`: `read`/`loads`, `history`/`newest`,
 `nearest_class(plans, model_id, fingerprint, current_srcs)` → `(lock, unverified)` — own class, then same GPU, same
 SM, same toolchain; with `current_srcs`, locks pinning other code are skipped — and `lock_overrides(lock)` →
-EngineConfig overrides: the engine settings and a kernel pin per op, as per-site pins are not expressible yet). The
-tools compute and write them (`holon_tools.locks`): `plan_of(engine)` reads the Plan off a built engine — `model_id`
+EngineConfig overrides: the engine settings and a kernel preference per op, as per-site pins are not expressible
+yet). `plan_of(engine)` (`holon.core.plans`, shared by `holon serve` and the tools, which write locks with
+`holon_tools.locks`) reads the Plan off a built engine — `model_id`
 from the weight source (`<hub id or directory name>@<16 hex of config + weight file hashes>`), the class from
 `platform.fingerprint`, `recipe = canonical_hash(spec)`, `commit`, `uv_lock`, a `[units]` pin for the core (unit
 `holon`) and every plugin whose code runs (the units built, the kernels bound, model, weight source, sampler, state
@@ -304,19 +308,35 @@ next to the history (`<class>/snapshots/<hash>.json`). The snapshot trace is the
 to 64, seeded n > 1, logprobs, prompt logprobs; each run records the step widths and prefix tokens saved). The
 commands are `python -m holon_tools impact | propagate | tune` (`tools/README.md`). Until changed-line coverage is
 recorded, every changed plan needs one approval with the byte-identical trace as evidence; auto-advance is an explicit
-opt-in (`--allow-uncovered-advance`). Not yet: changed-line coverage, the engine starting from the lock (the
-supervisor's job, with `unverified` pins as soft preferences), L2-regression-vs-current-lock for approvals, and the
-`isolation-check` CI job.
+opt-in (`--allow-uncovered-advance`). Since the release (design D2 in `docs/release.md`), `holon serve` starts from
+the lock it finds by the weight file's build hash, with flags over it, its kernel pins as soft preferences, and
+reports the served plan's difference from the lock. Not yet: changed-line coverage, L2-regression-vs-current-lock for
+approvals, and the `isolation-check` CI job.
 
 ### 4.5 Versioning
 
-- `core_abi` is semver over `holon.api.ABI`, listed in `core/abi.txt` and checked in CI (`scripts/ci/check_abi.py`);
-  per-slot versions (`slot_abi`) return, additively, when a slot first needs one (release design §7).
+- **The plugin ABI is 1.0, frozen at the release** (release design §7). `holon.api.ABI` is the version; every
+  manifest declares the range it works with (`core_abi = ">=1.0,<2.0"`), checked before anything else when the
+  manifest is read. `core/abi.txt` lists the frozen surface (`holon.api`'s names and signatures, dataclass fields
+  in order, Protocol members marked required or optional, `SLOTS`, `EngineConfig`, the `BuildCtx.options` keys, the
+  manifest schema, the string vocabularies, the IPC frames); `scripts/ci/check_abi.py` renders it from the code and
+  holds every change to the rule against the base branch: an addition (a name, an optional Protocol or member, a
+  field with a default, a manifest key, a slot) is a minor bump; a removal or change, a required member added to a
+  Protocol plugins implement, or a field without a default is a major bump — a reviewed core ABI change
+  (invariant 9) with a codemod for the first-party plugins. Each distribution's provided contracts (`op.*`,
+  `unit.*`, …) are its own ABI, listed in `std/contracts.txt` and `plugins/contracts.txt`: a new one is free, a
+  removed or changed one needs a new major. Per-slot versions (`slot_abi`) return, additively, when a slot first
+  needs one.
+- **Cut before the freeze** (release step 6, `docs/release.md` §15): the names nothing used — the slots of §4.2's
+  planned list, `SchedulePolicy`, `PlanTransform`, the `Platform` Protocol, `Event`, the `Ledger` Protocol, `Scale`,
+  manifest `[tunables]` (and `Tunable`, `Binding.tunables`), `variant_of`, `implements`, `graph_policy` and
+  `shape_axes`, and unused fields and members (listed there). Where §5–§10 sketch them, they describe plans, each
+  a minor addition when its first user lands; `core/abi.txt` is authoritative.
 - Units follow the one-version rule with additive-only interface minors, never-changing defaults and
   "breaker pays" majors; changes reach each model only through propagation (§4.6) — models do not individually
   adopt std versions.
-- Core ABI minors keep one-minor compatibility shims (v1+). v0 is pre-1.0: ABI may break, but every break runs
-  the full `holon check` over first-party plugins.
+- A plugin built for 1.x runs on every later 1.y core: minors only add. Every change reaches the committed locks
+  through propagation (the core's `src` is in every lock).
 
 ### 4.6 Reuse and propagation
 
@@ -412,7 +432,7 @@ class ModelSpec:
     shared: list[str]                # "embed", "lm_head" (for draft heads)
     draft_heads: list[DraftHeadDecl] # MTP layers, their own LayerDecls, taps consumed
     encoders: list[EncoderDecl]      # VLM towers (v1)
-    position_fn: str | None          # e.g. "mrope"; default arange
+    position_fn: str | None          # e.g. "mrope"; default arange (v1, with VLMs; not in ABI 1.0)
     params: list[ParamSpec]          # shapes + sharding semantics (col/row/expert/replicated, fused groups);
                                      # a fused group (qkv, gate/up) is legal only if all members share one
                                      # source Layout — mixed-type GGUF files ("UD" builds) fall back to separate
@@ -549,13 +569,10 @@ def linear_ref(x, w, bias=None): return x @ w.layout.scheme.dequant_ref(w).T + (
 class KernelSpec:
     op: str; provider: str; version: str            # version = source hash
     impl: Callable
-    in_layouts: dict[str, LayoutPattern]; out_layouts: dict[str, LayoutPattern]
-    device: str                                     # "cuda" | "cpu" | ...
-    requires: Constraint                            # sm range, CPU ISA, library availability
-    supports: Callable[[ShapeCtx], bool] | None
-    props: frozenset[str]                           # graph_safe, batch_invariant, deterministic, needs_host_lens,
+    requires: Constraint                            # devices and SM range
+    supports: Callable[[ShapeCtx], bool] | None     # layouts are facts it checks (e.g. `layout = "kv.hnd"`)
+    props: frozenset[str]                           # graph_safe, deterministic, needs_host_lens,
                                                     # serves_decode_rows (`KERNEL_PROPS`)
-    tunables: dict | None
     priority: int = 0                               # agent variants register < 0 until promoted
     config: dict | None = None                      # pinned launch config (tiles, warps, splits) — no autotune
 
@@ -602,12 +619,10 @@ QTensor(Layout(kernel)) → Pool`.
 
 ```python
 @dataclass(frozen=True)
-class Scheme:  elem: str; scales: tuple[Scale, ...]; zero_point: bool = False
-    def dequant_ref(self, t: QTensor) -> Tensor      # mandatory, used by the oracle
+class Scheme:  elem: str               # the element format and its scales, e.g. "ggml.q4_k"; read by the plugins
 
 @dataclass(frozen=True)
-class Layout:  scheme: Scheme; name: str; params: frozenset; readable_by: frozenset[str]
-    def tensors(self, logical_shape) -> dict[str, TensorDesc]   # bytes derived, never duplicated
+class Layout:  scheme: Scheme; name: str    # how the bytes are arranged, e.g. "gguf.native"
 
 @dataclass
 class QTensor: layout: Layout; logical_shape: tuple[int, ...]; parts: dict[str, Tensor]
@@ -759,14 +774,14 @@ change; fast paths are judged bounded unless they keep the reference reduction o
 ### 6.1 Ledger and pools
 
 ```python
-class Ledger:
+class Ledger:                     # the core's (holon.core.memory); plugins request pools through BuildCtx.pool
     def request(self, name: str, unit_bytes: int, min_units: int, pref_units: int, priority: int,
                 resize: Literal["fixed", "recapture", "vmm"], device: DeviceId) -> Pool
     def rebalance(self, targets: dict[str, int]) -> Ticket        # applied between steps (v1)
 
-class Pool:
+class Pool:                       # plugins see name, unit_bytes, capacity, num_free, view(), alloc() (holon.api)
     base: int                     # stable device address for the pool's lifetime
-    capacity_dev: Tensor          # device scalar; in-graph resolvers read it
+    capacity_dev: Tensor          # device scalar; in-graph resolvers will read it (v1)
     def alloc(self, n) -> Tensor; def free(self, ids) -> None; def refcount(...)
     def on_shrink(self, cb) -> None
 ```
@@ -806,18 +821,17 @@ class StateSpec:
 class StateKind(Rewindable, Protocol):   # e.g. paged_kv, ssm_checkpoint (plugins); bound by the core to ONE spec
                                          # and its pool: factory(spec, pool, ctx) -> StateKind
     def units_needed(self, seq: SeqView, new_tokens: int) -> int
-    def reclaimable(self, seq: SeqView) -> list[int]
-    def hit_length(self, idx: PrefixView, upto: int) -> HitLen               # (length, tier cost)
+    def hit_length(self, idx: PrefixView, upto: int) -> HitLen               # (length; a tier cost with offload)
     def publish(self, seq: SeqView, upto: int) -> tuple[Payload, list[MemOp]] | None
     def adopt(self, seq: SeqView, payload: Payload) -> list[MemOp]
-    def fork(self, src: SeqView, dsts: list[SeqView]) -> list[MemOp]         # n>1, parallel tool branches
+    # planned, not in ABI 1.0: reclaimable(seq) (ring buffers), fork(src, dsts) (n > 1 siblings share by prefix hits)
     # optional (M0.3), for state reused through payloads: cut(seq, start, n) -> n' (a prefill row may end where
     # the kind publishes), next_publish(seq) -> position | None, payload_pool (the pool the index may evict from)
     # Page tables and slot indices are filled into DeviceBatch by the core (it owns allocation); mixer planners
     # read them. publish/adopt return MemOps (§6.3). Callbacks are per request; the core vectorises them.
 ```
 
-Ring buffers = `Slot` sized to the window, or `Paged` + `reclaimable`. A new mixer with a novel state shape
+Ring buffers = `Slot` sized to the window, or `Paged` + a planned `reclaimable`. A new mixer with a novel state shape
 reduces to `Paged(tokens_per_unit=…)` or `Slot` + its own `StateKind`; global shared state uses a plugin-owned
 Pool.
 
@@ -914,7 +928,6 @@ class Seq:
     num_computed: int
     status: WAITING | RUNNING | BLOCKED(future) | PREEMPTED | FINISHED(reason)
     params: SamplingParams                       # .ext[ns] for plugin params
-    ext: dict[str, Any]                          # namespaced plugin state; core never reads
 ```
 
 **SeqTable (core, device-authoritative).** Per-slot device tensors — `num_computed`, `last_token`, `n_accept`,
@@ -944,16 +957,14 @@ class BatchPlan:                     # host, struct-of-arrays, mutable by schedu
     step: int
     slots, n_query, n_logits: np.ndarray
     start_upper: np.ndarray          # upper bound on first query position; exact value lives in SeqTable
-    token_src: np.ndarray            # HOST | DEVICE_LAST | DEVICE_DRAFT  (overlap-safe placeholders)
+    token_src: np.ndarray            # HOST | DEVICE_LAST  (overlap-safe placeholders)
     host_tokens: np.ndarray
     mem_ops: list[MemOp]
-    shape: ShapeKey                  # padded bucket + open plugin axes
-    ext: dict[str, Any]
+    shape: ShapeKey                  # padded bucket
 
 @dataclass(frozen=True)
 class ShapeKey:
-    n_tokens: int; n_seqs: int | None
-    axes: tuple[tuple[str, Hashable], ...]       # e.g. (("spec.q", 4),) — finite, declared by plugins
+    n_tokens: int; n_seqs: int       # plugin-declared axes (e.g. (("spec.q", 4),)) are planned, not in ABI 1.0
 
 class Batch:                         # plan + static device mirror built by the core
     plan: BatchPlan
@@ -1028,16 +1039,16 @@ step first whenever it holds a constrained row, so constrained Seqs decode every
 their overlap (D2's A′, chosen by measurement; the variant that left the Seq out of the step was removed). A
 manifest-declared per-plugin depth (`max_depth`) was removed unread: the gate comes from the processor's
 `open`. Device-side `rewind` runs inside the step's graph, right after the Sampler/Verifier, so the next step's
-device inputs (`DEVICE_LAST`/`DEVICE_DRAFT`) are already consistent.
+device inputs (`DEVICE_LAST`) are already consistent.
 
 ### 7.4 CUDA graphs
 
 - Graph units: `launch_forward` and `launch_sample`.
-- Capture set = bucketed `n_tokens`/`n_seqs` × product of declared `ShapeKey` axes, filtered, capped by a memory
-  budget. Unbounded axes are rejected at resolve.
-- Each plugin declares `graph_policy` ∈ {`full`, `piecewise`, `eager`, `host`}; the resolver takes the weakest
-  per ShapeKey class. `host` means the plugin never runs inside a graph — it runs on the CPU between replays
-  (placement-policy `adapt()`, schedulers). v0 implements FULL (decode/verify) and EAGER (prefill); PIECEWISE is v1.
+- Capture set = bucketed `n_tokens`/`n_seqs`, capped by a memory budget (plugin-declared `ShapeKey` axes are a
+  planned addition).
+- v0 implements FULL (decode/verify) and EAGER (prefill); PIECEWISE is v1. A per-plugin graph policy (`full`,
+  `piecewise`, `eager`, `host`: the resolver taking the weakest) is planned with PIECEWISE; in v0 a planner whose
+  kernel offers no `graph_key` keeps its steps eager (below).
 - **v0 (implemented in E6)**: decode-only steps without logprobs are padded to a batch-size bucket (1, 2, 4, 8, 16,
   24, 32, 48, 64, … up to `max_seqs`) and replayed from a graph keyed by (bucket, row width, the sampler's `variant` — its host-side branches —, each planner's `graph_key`). A planner whose
   kernel offers no `graph_key` keeps the step eager. The graph covers forward, sampling and the SeqTable write; inputs
@@ -1052,7 +1063,7 @@ device inputs (`DEVICE_LAST`/`DEVICE_DRAFT`) are already consistent.
   and the graph pool does not fragment the budget.
 - **CPU work inside a FULL graph** (CPU expert compute, Strata/FreeToken style) uses a one-word handshake per
   layer with a persistent native CPU worker (spike S6): the graph signals REQ, the worker computes on pinned
-  memory and answers DONE, the graph waits. `Platform` exposes this as a signal/wait pair with two
+  memory and answers DONE, the graph waits. `holon.core.platform` exposes this as a signal/wait pair with two
   implementations chosen per fingerprint class by measurement — a one-thread spin kernel (1.9–2.8 µs per
   handshake on the A5000 server and RTX 4090/5080/5090 desktops; the default) and stream memory operations
   (`cuStreamWriteValue`/`WaitValue`, 6–10 µs under load; for display GPUs with a kernel watchdog, laptops and
@@ -1214,8 +1225,8 @@ frontend stays Python.
 
 ### 7.9 Telemetry
 
-`Event` records emitted per step to a ring buffer (shared memory to the supervisor) and optionally to exporters
-(Prometheus/OTel plugins):
+Planned (not in ABI 1.0): `Event` records emitted per step to a ring buffer (shared memory to the supervisor) and
+optionally to exporters (Prometheus/OTel plugins, an `exporter` slot):
 
 ```
 {plan_id, step, ts, phase_us{schedule,transform,forward,fill,sample,commit},
@@ -1226,7 +1237,8 @@ frontend stays Python.
 Slot objects (sampler, verifier, drafter, draft policy, logits processor) may count what they do: an optional
 `stats()` whose counters `Engine.stats()` reports as `<plugin name>.<key>` beside the core's (M0.5).
 
-Phase timings are measured by the core with CUDA events for **diagnosis and agent guidance**. Verdicts and canaries
+In v0, `/metrics` reports the engine's and the slot objects' counters. Phase timings, when measured by the core
+with CUDA events, serve **diagnosis and agent guidance**. Verdicts and canaries
 never rely on them, because candidate code may share the engine process: the judge measures performance
 client-side and checks outputs by teacher-forced re-scoring out of process (§10.3, §10.4).
 
@@ -1269,13 +1281,13 @@ v0 runs one GPU, but the core keeps these seams so datacenter features are plugi
 
 | Feature | Seam in core (v0) | Plugin (later) |
 |---|---|---|
-| Tensor parallel | `ParamSpec` sharding semantics; collectives are registered Ops (`allreduce`, `allgather`); Plan is serializable and broadcast; engine always runs the SPMD path (world_size=1 in v0); a `launcher` slot (single) starts ranks — v0 builtin launches one local rank; sampler/processors declare sharded-vs-gathered logits | `tp.nccl` collective kernels; TP-aware linear layouts; `launcher.torchrun`/`launcher.ray` |
+| Tensor parallel | `ParamSpec` sharding semantics; collectives are registered Ops (`allreduce`, `allgather`); Plan is serializable and broadcast; engine always runs the SPMD path (world_size=1 in v0); a `launcher` slot (single, planned) starts ranks — v0 launches one local rank; sampler/processors declare sharded-vs-gathered logits | `tp.nccl` collective kernels; TP-aware linear layouts; `launcher.torchrun`/`launcher.ray` |
 | Expert parallel | MoE is a coarse Op owning routing/dispatch | `moe.ep_dispatch` (DeepEP-style) |
 | Pipeline parallel | `inflight_depth = N` | `pp.stage_split` |
-| DP-attention | PlanTransform with a collective hook in the schedule region | `dp_attention.pad` |
-| PD disaggregation | `BLOCKED(future)`, async store import/export, per-layer events | connector + schedule-policy role |
+| DP-attention | a `plan_transform` slot (planned) with a collective hook in the schedule region | `dp_attention.pad` |
+| PD disaggregation | `BLOCKED(future)`, async store import/export, per-layer events | connector (planned slot) + a schedule-policy role |
 | Multi-device memory | Ledger per device; Pool carries device | — |
-| Other platforms | `Platform` (~15 functions); lint bans `torch.cuda` elsewhere | `platform.rocm`, `platform.cpu` |
+| Other platforms | `holon.core.platform` (~15 functions); lint bans `torch.cuda` elsewhere | a `platform` slot (planned): `platform.rocm`, `platform.cpu` |
 
 The dev machine has 8× RTX A5000; v1 includes a **TP=2 milestone** to prove the seam with zero core diff.
 
@@ -1285,16 +1297,16 @@ The dev machine has 8× RTX A5000; v1 includes a **TP=2 milestone** to prove the
 
 | Feature | Plugins | Core seams used |
 |---|---|---|
-| KV offload (RAM/SSD, remote) | tiers, mover, placement policy, connector | PrefixIndex tier payloads, BLOCKED, per-layer events |
+| KV offload (RAM/SSD, remote) | tiers, mover, placement policy, connector (planned slots) | PrefixIndex tier payloads, BLOCKED, per-layer events |
 | KVMem-style bounded window | `windowed_retrieval` StateKind, HostPlannedResolver, re-RoPE prepare kernel | StateKind emits positions; namespace |
 | Expert cache / offload | expert TieredStore, DeviceResolver, placement policies, MoE op with CPU miss compute | stable Pools, stream-memop CPU handshake, `quiesce`, VMM resize (v1) |
 | Quant formats | weight-source dialect, scheme, layout, kernels (`prepare`) | kernel registry, per-slice `adopt_weights` |
-| Linear attention (GDN, KDA, Mamba2) | mixer + `Slot` state (`draft_slots`), page-boundary checkpoints, checkpoint policy + codec | fixed-point prefix hits, device Rewindable |
+| Linear attention (GDN, KDA, Mamba2) | mixer + `Slot` state (`draft_slots`), page-boundary checkpoints (in v0 the recurrent state kind's options; checkpoint policy and codec slots planned) | fixed-point prefix hits, device Rewindable |
 | DeepSeek sparse attention / V4 compressed KV | `dsa_mla` mixer: MLA `Paged` + indexer `Paged(page_group)` + compressed `Paged(tokens_per_unit)` | `page_group`, `tokens_per_unit`, `alignment` |
-| Speculative decoding | drafter, draft policy, verifier, plan transform | taps, shared modules, Rewindable, verify graphs, sub-steps, aux models |
+| Speculative decoding | drafter, draft policy, verifier | taps, shared modules, Rewindable, verify graphs, sub-steps, aux models |
 | Structured output / tool calls | xgrammar logits processor (host matcher rolled back after each draft probe), frontend parsers and constraint builders by the bundle's formats | logits-processor lifecycle, host-token gate, drafts on the host, `RequestError`, `resume_output`, masks staged through the Uploader on every sampling path |
-| LoRA (v1) | adapter op context, ShapeKey axis | namespace, ops read `Batch.dev`/`ext` |
-| VLM (v1) | encoder plugin, content-hash encoder cache | `position_fn`, `ext` annotations |
+| LoRA (v1) | adapter op context, ShapeKey axis (planned) | namespace, ops read `Batch.dev` |
+| VLM (v1) | encoder plugin (a planned slot), content-hash encoder cache | `position_fn` (planned), `SamplingParams.ext` annotations |
 
 Detailed walk-throughs (DeepSeek-V4-class on 16 GB, Qwen3.8-Flash-Next hybrid, new mixer type X) were worked
 through during the design reviews.

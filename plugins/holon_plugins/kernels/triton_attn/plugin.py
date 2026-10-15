@@ -217,7 +217,7 @@ class Plugin:
                 ("attention.paged_verify", Verify, "kv.hnd.fp8", fp8_sms),
                 ("attention.paged_prefill", Prefill, "kv.hnd.q8_0", anywhere)):
             regs.kernels.add(op, KernelSpec(
-                op=op, provider="kernels.triton_attn", impl=impl, in_layouts={"kv": layout}, requires=requires,
+                op=op, provider="kernels.triton_attn", impl=impl, requires=requires,
                 supports=_supports(layout, impl is not Prefill),
                 props=props if impl is not Prefill else frozenset({"deterministic"}),
                 priority=10))

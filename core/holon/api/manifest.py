@@ -16,18 +16,18 @@ from typing import Any, Literal, get_args
 
 from .terms import parse_versioned
 
-ABI = "0.2"    # the plugin ABI this core implements (design §4.5); manifests declare the range they need (`core_abi`)
+ABI = "1.0"    # the plugin ABI this core implements (design §4.5); manifests declare the range they need (`core_abi`)
 _COMPARE = {">=": operator.ge, ">": operator.gt, "<=": operator.le, "<": operator.lt, "==": operator.eq}
 
 
 def abi_allows(spec: str, version: str = ABI) -> bool:
-    """Whether `version` is in a manifest's `core_abi` range, comma-separated clauses such as ">=0.2,<0.3"."""
+    """Whether `version` is in a manifest's `core_abi` range, comma-separated clauses such as ">=1.0,<2.0"."""
     def key(v: str) -> tuple[int, ...]:
         return (*map(int, v.split(".")), 0, 0)[:3]
 
     clauses = [re.fullmatch(r"\s*(>=|<=|==|>|<)\s*(\d+(?:\.\d+){0,2})\s*", c) for c in spec.split(",")]
     if not all(clauses):
-        raise ValueError(f"core_abi {spec!r}: expected clauses such as '>=0.2,<0.3'")
+        raise ValueError(f"core_abi {spec!r}: expected clauses such as '>=1.0,<2.0'")
     return all(_COMPARE[m[1]](key(version), key(m[2])) for m in clauses)
 
 
@@ -38,19 +38,17 @@ class Cardinality(enum.Enum):
     MULTI = "multi"                  # any number, keyed by name
 
 
+# The slots a plugin may fill: each has plugins and the core loads them. A new slot is a minor ABI addition
+# (design §4.2).
 SLOTS: types.MappingProxyType[str, Cardinality] = types.MappingProxyType({
-    **dict.fromkeys(["model", "platform", "launcher", "schedule_policy", "sampler", "verifier", "draft_policy",
-                     "eviction_policy"], Cardinality.SINGLE),
-    **dict.fromkeys(["unit", "kernel", "state_kind", "placement_policy", "codec", "weight_source"],
-                    Cardinality.PER_SITE),
-    **dict.fromkeys(["plan_transform", "logits_processor", "checkpoint_policy"], Cardinality.ORDERED_MULTI),
-    **dict.fromkeys(["frontend", "tier", "mover", "drafter", "encoder", "connector", "exporter"], Cardinality.MULTI),
+    **dict.fromkeys(["model", "sampler", "verifier", "draft_policy"], Cardinality.SINGLE),
+    **dict.fromkeys(["unit", "kernel", "state_kind", "weight_source"], Cardinality.PER_SITE),
+    "logits_processor": Cardinality.ORDERED_MULTI,
+    **dict.fromkeys(["frontend", "drafter"], Cardinality.MULTI),
 })
 
 Numerics = Literal["policy", "exact", "bounded", "approx"]
-GraphPolicy = Literal["full", "piecewise", "eager", "host"]
 _NUMERICS = set(get_args(Numerics))
-_GRAPH = set(get_args(GraphPolicy))
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -66,32 +64,6 @@ class Resource:
 
     def __str__(self) -> str:
         return f"{self.name}@{self.major}"
-
-
-TunableType = Literal["int", "float", "bool", "choice"]
-TunableApply = Literal["live", "restart"]
-_TUNABLE_PY = {"int": int, "float": (int, float), "bool": bool}
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class Tunable:
-    type: TunableType
-    default: Any
-    range: tuple[Any, Any] | None = None
-    choices: tuple[Any, ...] | None = None
-    log: bool = False
-    apply: TunableApply = "restart"
-
-    def __post_init__(self) -> None:
-        if self.type not in get_args(TunableType) or self.apply not in get_args(TunableApply):
-            raise ValueError(f"invalid tunable type/apply: {self.type!r}/{self.apply!r}")
-        py = _TUNABLE_PY.get(self.type)
-        if py and (not isinstance(self.default, py) or (self.type != "bool" and isinstance(self.default, bool))):
-            raise ValueError(f"{self.type} tunable has default {self.default!r}")
-        if self.type == "choice" and (not self.choices or self.default not in self.choices):
-            raise ValueError(f"choice tunable: default {self.default!r} not in {self.choices!r}")
-        if self.range is not None and not self.range[0] <= self.default <= self.range[1]:
-            raise ValueError(f"tunable default {self.default!r} outside range {self.range!r}")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -122,12 +94,11 @@ class Provenance:
 
 
 _SECTIONS: dict[str, set[str]] = {
-    "plugin": {"name", "version", "entry", "slot", "license", "core_abi", "variant_of", "implements", "derived_from"},
+    "plugin": {"name", "version", "entry", "slot", "license", "core_abi", "derived_from"},
     "resources": {"provides", "requires"},
-    "properties": {"numerics", "graph_policy", "after", "before", "shape_axes"},
+    "properties": {"numerics", "after", "before"},
     "dependencies": {"python"},
     "reference": {"module"},
-    "tunables": None,  # any names; each value is validated as a Tunable
     "support": {"platforms", "detect"},
     "provenance": {"source", "commit", "license", "files"},
     "build": {"module"},
@@ -142,20 +113,15 @@ class Manifest:
     entry: str                         # "module:attr", relative to the plugin package; imported only if selected
     slot: str
     license: str
-    core_abi: str                      # the plugin ABI versions it works with, e.g. ">=0.2,<0.3" (required)
-    variant_of: str | None = None      # lineage of forks
-    implements: str | None = None      # "<unit>@sem:<hash>" for numeric units, or "<slot>@<major>"
+    core_abi: str                      # the plugin ABI versions it works with, e.g. ">=1.0,<2.0" (required)
     derived_from: str | None = None    # copied recipes / explicit old-version copies
     provides: tuple[Resource, ...] = ()
-    requires: tuple[Resource, ...] = ()
+    requires: tuple[Resource, ...] = ()  # kernels: the op contracts they implement
     numerics: Numerics = "exact"
-    graph_policy: GraphPolicy = "full"
     after: tuple[str, ...] = ()        # ordering for ordered_multi slots
     before: tuple[str, ...] = ()
-    shape_axes: dict[str, tuple[Any, ...]] = dataclasses.field(default_factory=dict)  # finite graph-capture axes
     dependencies: tuple[str, ...] = ()  # third-party top-level modules it imports (invariant 2)
     reference: str | None = None       # oracle module of a numeric unit
-    tunables: dict[str, Tunable] = dataclasses.field(default_factory=dict)
     platforms: tuple[str, ...] = ()
     detect: tuple[str, ...] = ()       # weight sources: file-name patterns of their checkpoints (e.g. "config.json")
     provenance: Provenance | None = None
@@ -196,13 +162,10 @@ class Manifest:
             provides=tuple(map(Resource.parse, res.get("provides", ()))),
             requires=tuple(map(Resource.parse, res.get("requires", ()))),
             numerics=props.get("numerics", "exact"),
-            graph_policy=props.get("graph_policy", "full"),
             after=tuple(props.get("after", ())),
             before=tuple(props.get("before", ())),
-            shape_axes={k: tuple(v) for k, v in props.get("shape_axes", {}).items()},
             dependencies=tuple(data.get("dependencies", {}).get("python", ())),
             reference=data.get("reference", {}).get("module"),
-            tunables={k: _tunable(v) for k, v in data.get("tunables", {}).items()},
             platforms=tuple(data.get("support", {}).get("platforms", ())),
             detect=tuple(data.get("support", {}).get("detect", ())),
             provenance=_provenance(data["provenance"]) if "provenance" in data else None,
@@ -213,18 +176,10 @@ class Manifest:
         )
         if m.slot not in SLOTS:
             raise ValueError(f"unknown slot {m.slot!r}")
-        if m.numerics not in _NUMERICS or m.graph_policy not in _GRAPH:
-            raise ValueError(f"invalid numerics/graph_policy: {m.numerics!r}/{m.graph_policy!r}")
+        if m.numerics not in _NUMERICS:
+            raise ValueError(f"invalid numerics: {m.numerics!r}")
         return m
 
 
 def _provenance(v: dict[str, Any]) -> Provenance:
     return Provenance(**{**v, "files": tuple(v.get("files", ()))})
-
-
-def _tunable(v: dict[str, Any]) -> Tunable:
-    v = dict(v)
-    for key in ("range", "choices"):
-        if key in v:
-            v[key] = tuple(v[key])
-    return Tunable(**v)

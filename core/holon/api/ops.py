@@ -9,7 +9,7 @@ import dataclasses
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable
 
     from .state import StateKindFactory
 
@@ -22,20 +22,13 @@ class Constraint:
     sm_max: int | None = None
     sms: frozenset[int] = frozenset()      # exactly these (e.g. the SMs a prebuilt binary carries)
     devices: frozenset[str] = frozenset({"cuda"})
-    cpu_isa: frozenset[str] = frozenset()  # e.g. {"avx2"}
-    libs: frozenset[str] = frozenset()     # third-party libraries that must import
 
-    def allows(self, device: str, sm: int | None, isa: frozenset[str] = frozenset()) -> bool:
-        if device not in self.devices:
-            return False
-        if sm is not None and ((self.sm_min and sm < self.sm_min) or (self.sm_max and sm > self.sm_max)
-                               or (self.sms and sm not in self.sms)):
-            return False
-        return self.cpu_isa <= isa
+    def allows(self, device: str, sm: int | None) -> bool:
+        return device in self.devices and (sm is None or not ((self.sm_min and sm < self.sm_min) or (
+            self.sm_max and sm > self.sm_max) or (self.sms and sm not in self.sms)))
 
 
-KERNEL_PROPS = frozenset({"graph_safe", "deterministic", "batch_invariant", "needs_host_lens",   # `KernelSpec.props`
-                          "serves_decode_rows"})
+KERNEL_PROPS = frozenset({"graph_safe", "deterministic", "needs_host_lens", "serves_decode_rows"})  # KernelSpec.props
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -43,8 +36,6 @@ class KernelSpec:
     op: str
     provider: str
     impl: Callable[..., Any]
-    in_layouts: dict[str, str] = dataclasses.field(default_factory=dict)   # role -> layout pattern
-    out_layouts: dict[str, str] = dataclasses.field(default_factory=dict)
     requires: Constraint = Constraint()
     supports: Callable[[Any], bool] | None = None  # shape predicate, evaluated at plan time
     props: frozenset[str] = frozenset()            # of KERNEL_PROPS
@@ -60,8 +51,6 @@ class Registry[T](Protocol):
     def add(self, key: str, value: T) -> None: ...
 
     def get(self, key: str) -> T: ...
-
-    def items(self) -> Iterable[tuple[str, T]]: ...
 
 
 class KernelRegistry(Protocol):
