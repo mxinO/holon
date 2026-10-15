@@ -1669,7 +1669,7 @@ partial cache declined silently; M5 the hub test not checking HF's claim or cach
 nits (slots and several-verified untested, `Option` types, a single file beside a split set, `listing`'s messages,
 the hint's IPv6 host and port), all fixed; round 2, one nit (the split-set rule broader than its comment), fixed with
 two findings of the end-to-end run (the traceback, an organisation expanded); round 3, two nits (a trailing `/` no longer
-stripped, §14.3's text), fixed. No findings remain.
+stripped, §14.3's text), fixed; round 4 confirmed clean (one wording nit, fixed).
 
 **For the lead.**
 1. Core +192 lines against ≈ 125 (breakdown above); 4321 / 6000.
@@ -1677,5 +1677,6 @@ stripped, §14.3's text), fixed. No findings remain.
 3. The follow-up on M0.7's branch after its steps 2–3, before its propagation: `[options]` for `std.mixers.gqa`
    (`kv.format`: `q8_0`, `fp8`; default the model dtype) and `std.ops` (`quant.act`: `a4`, `a8`; default `a8`). Until
    then those two keys draw the undeclared-option warning on the development branches.
-4. This branch changes the core's, `std.weights.*`'s and six manifests' `src`: it must merge into M0.7's branch before
+4. This branch changes the `src` of the core, `std.weights.*` and the six lock-pinned plugins gaining `[options]`
+   (`frontends.http`, the seventh, is pinned by no lock): it must merge into M0.7's branch before
    M0.7's closing propagation, which then covers it. No lock was written or committed here.
