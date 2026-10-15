@@ -69,15 +69,16 @@ def sharegpt(n: int, rate: float, seed: int) -> list[dict]:
     return out
 
 
-def agent(sessions: int, rate: float, seed: int, system: int = 1536) -> list[dict]:
+def agent(sessions: int, rate: float, seed: int, system: int = 1536, later: tuple[int, int] = (2, 7)) -> list[dict]:
     """Mixed agent multi-turn tool trace: sessions start as a Poisson process at `rate`/s and share a `system`
-    prompt (instructions + tool schemas). The first turn adds a user task; each later turn adds a tool result
-    (log-normal, median 256 tokens), sometimes followed by a user message, after a tool latency gap (exponential,
-    mean 0.5 s). Generations are short tool calls or answers (24-192 tokens). Prefixes are long and shared."""
+    prompt (instructions + tool schemas). The first turn adds a user task; each of the `later` (a range) turns adds a
+    tool result (log-normal, median 256 tokens), sometimes followed by a user message, after a tool latency gap
+    (exponential, mean 0.5 s). Generations are short tool calls or answers (24-192 tokens). Prefixes are long and
+    shared."""
     rng, t, out = random.Random(seed), 0.0, []
     for i in range(sessions):
         turns = [turn(_lognormal(rng, 150, 0.6, 16, 1024), rng.randint(24, 192))]
-        for _ in range(rng.randint(2, 7)):
+        for _ in range(rng.randint(*later)):
             append = _lognormal(rng, 256, 0.9, 16, 2048) + (rng.randint(8, 96) if rng.random() < 0.3 else 0)
             turns.append(turn(append, rng.randint(24, 192), rng.expovariate(2.0)))
         out.append({"id": i, "arrival": round(t, 4), "system": system, "turns": turns})
@@ -111,6 +112,9 @@ def main() -> None:
     traces = {f"decode_b{b}": decode(b, args.decode_prompt, args.decode_output) for b in (1, 8, 64, 256)}
     traces["sharegpt"] = sharegpt(200, 2.0, args.seed)
     traces["agent"] = agent(24, 0.2, args.seed)
+    # Claude-Code-shaped (release D3's MTP decision): its ≈ 16K-token system prompt and tool schemas shared by a few
+    # concurrent sessions of 10-16 turns each (≥ 200 requests); replayed on natural text at Claude Code's temperature.
+    traces["claude_code"] = agent(16, 0.05, args.seed, system=16384, later=(10, 16))
     # Three streams fit every lock (max_seqs >= 4); 30k tokens fit a 32k context (M0.5's 36 s stall, M0.7 D1).
     traces["long_prompt"] = long_prompt(3, 256, 1024, 30000, 2.0)
     for name, sessions in traces.items():
