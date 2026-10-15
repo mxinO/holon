@@ -492,7 +492,7 @@ recipe terms, the model plugin protocol, manifest keys, how plugins register.
 | 4 | Documentation (D8), frozen at a recorded commit; then the legibility harness: fixtures, `$CHECK`, calibration, reference ports, plants, `$STATIC`, concept map, the squashed branch point | guide check; δ and port margins recorded; plants fail | 3 |
 | 5 | ~~Legibility runs~~ — retired by the owner after the exploratory pilot (§4.0) | pilot recorded | — |
 | — | M0.7 closes: one propagation covering D1's environment, D2, the mechanism and grammar on the development classes | its gates; served plan = lock on rtx-5080 / 4090 (acceptance 3's form) | — |
-| 6 | ABI 1.0, versions 0.1.0; design §4.1 / §4.4 / §4.5 and plan §1 corrections; demo task committed (D7); panel review of steps 1–6; the squashed public root created locally | review clean | 2 |
+| 6 | ABI 1.0, versions 0.1.0 — first cut the names nothing uses (M0.7 §17: the `SLOTS` with no plugin and that the core never loads, the dead `SchedulePolicy` Protocol, manifest `[tunables]` / `Binding.tunables`; re-adding one later is a minor bump); design §4.1 / §4.4 / §4.5 and plan §1 corrections; demo task committed (D7); panel review of steps 1–6; the squashed public root created locally | review clean | 2 |
 | 7 | Locks (§6) in the release environment on the public root: propagate all, tune the R cells, MTP decision (D3) | L2, snapshots ×3; approvals and sweep time recorded | 2 + 3 machine |
 | 8 | Benchmark suite (§5), after step 7 | records; gate | 1.5 + 3 machine |
 | 9 | Agent demo (D7) | record | 0.5 |
