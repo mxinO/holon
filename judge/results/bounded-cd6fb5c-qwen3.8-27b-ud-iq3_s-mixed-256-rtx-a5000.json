@@ -1,0 +1,149 @@
+{
+ "sessions": 48,
+ "turns": 4,
+ "system_len": 512,
+ "max_tokens": 128,
+ "results": {
+  "baseline": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": false,
+    "overlap": false
+   },
+   "top1": {
+    "value": 0.9928385416666666,
+    "se": 0.0006790105402153849,
+    "n": 24576
+   },
+   "confident": {
+    "value": 0.9971105423924709,
+    "se": 0.0003869316821593394,
+    "n": 24226
+   },
+   "regret": {
+    "value": 0.0015094989745800074,
+    "se": 0.00029465457741299447,
+    "n": 24576
+   },
+   "kl": {
+    "kl": {
+     "value": 0.0018209638178150564,
+     "se": 0.00016175525535185804,
+     "n": 24576
+    },
+    "p50": 8.560062532538168e-05,
+    "p99": 0.023626258585515328,
+    "p50_se": 7.996155157768133e-06,
+    "p99_se": 0.0031127621994214093
+   },
+   "tokens_saved": 0,
+   "mixed_steps": 0,
+   "margins": {
+    "top1": 0.0025,
+    "confident": 0.0025,
+    "kl_p50": 8.560062532538168e-05,
+    "kl_p99": 0.023626258585515328
+   },
+   "failures": [],
+   "passed": true
+  },
+  "mixed 256": {
+   "config": {
+    "cuda_graphs": true,
+    "prefix_cache": false,
+    "overlap": false,
+    "chunk_with_decode": 256
+   },
+   "top1": {
+    "value": 0.9919026692708334,
+    "se": 0.0007192939709716874,
+    "n": 24576
+   },
+   "confident": {
+    "value": 0.9964496552862981,
+    "se": 0.0005114322041633857,
+    "n": 24223
+   },
+   "regret": {
+    "value": 0.0022452961105348854,
+    "se": 0.0004446051487460173,
+    "n": 24576
+   },
+   "kl": {
+    "kl": {
+     "value": 0.0028086664470786844,
+     "se": 0.0005651515114144408,
+     "n": 24576
+    },
+    "p50": 9.46036631028095e-05,
+    "p99": 0.023967455360789498,
+    "p50_se": 8.937575348318905e-06,
+    "p99_se": 0.0033962287114846614
+   },
+   "tokens_saved": 0,
+   "mixed_steps": 648,
+   "margins": {
+    "top1": 0.0025,
+    "confident": 0.0025,
+    "kl_p50": 8.560062532538168e-05,
+    "kl_p99": 0.023626258585515328
+   },
+   "failures": [],
+   "passed": true
+  },
+  "mixed 256, prefix on, depth 1": {
+   "config": {
+    "cuda_graphs": true,
+    "chunk_with_decode": 256,
+    "prefix_cache": true,
+    "overlap": true
+   },
+   "top1": {
+    "value": 0.99267578125,
+    "se": 0.0007659937547115098,
+    "n": 24576
+   },
+   "confident": {
+    "value": 0.996821596631718,
+    "se": 0.00037280782587777937,
+    "n": 24226
+   },
+   "regret": {
+    "value": 0.001203820562902062,
+    "se": 0.00019485283604637452,
+    "n": 24576
+   },
+   "kl": {
+    "kl": {
+     "value": 0.0020660212295911377,
+     "se": 0.0002858752037850978,
+     "n": 24576
+    },
+    "p50": 9.472244051778348e-05,
+    "p99": 0.0248675409519013,
+    "p50_se": 8.609949117343051e-06,
+    "p99_se": 0.004140396942701898
+   },
+   "tokens_saved": 21312,
+   "mixed_steps": 568,
+   "margins": {
+    "top1": 0.0025,
+    "confident": 0.0025,
+    "kl_p50": 8.560062532538168e-05,
+    "kl_p99": 0.023626258585515328
+   },
+   "failures": [],
+   "passed": true
+  }
+ },
+ "passed": true,
+ "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+ "dtype": "bfloat16",
+ "graphs_vs_eager": false,
+ "spec_vs_plain": false,
+ "mixed": 256,
+ "engine_args": "--plugin-options kv.format=q8_0 --max-seqs 8 --memory-fraction 0.9",
+ "hardware": "NVIDIA RTX A5000",
+ "torch": "2.11.0+cu130",
+ "plant": null
+}

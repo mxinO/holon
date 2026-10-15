@@ -1,0 +1,185 @@
+{
+ "workload": "m07-step4-mixed-step",
+ "date": "2026-10-15",
+ "commit": "cd6fb5c",
+ "gpu_class": "rtx-5080",
+ "clock": {
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "seconds": 64.1,
+  "batch": 4,
+  "tok_s": 191.6,
+  "samples": 621,
+  "sm_mhz": {
+   "p10": 2737.0,
+   "p50": 2737.0,
+   "p90": 2752.0
+  },
+  "mem_mhz": 14801.0,
+  "power_w": 348.0,
+  "slowdown_share": 0.0,
+  "power_cap_share": 1.0,
+  "steady": true
+ },
+ "commands": [
+  "python bench/mixed_step.py --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf --engine-args '--max-model-len 32768 --max-seqs 4 --max-step-tokens 2048 --plugin-options kv.format=q8_0 recurrent.checkpoints=4 --memory-fraction 0.9' --chunk 512 --rounds 4",
+  "python bench/mixed_step.py --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf --engine-args '--max-model-len 32768 --max-seqs 4 --max-step-tokens 2048 --plugin-options kv.format=q8_0 recurrent.checkpoints=4 --memory-fraction 0.9' --chunk 512 --contexts 8192 16384 24576 --prompt 4096 --rounds 4"
+ ],
+ "short": {
+  "model": "Qwen3.8-27B-UD-IQ3_S.gguf",
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "engine_args": "--max-model-len 32768 --max-seqs 4 --max-step-tokens 2048 --plugin-options kv.format=q8_0 recurrent.checkpoints=4 --memory-fraction 0.9",
+  "chunk": 512,
+  "contexts": [
+   2048,
+   4096,
+   6144
+  ],
+  "prompt": 8192,
+  "declared_prefill_mixes": [
+   false
+  ],
+  "rounds": {
+   "one call": [
+    {
+     "round": 0,
+     "mixed_ms_p50": 234.394,
+     "mixed_steps": 16,
+     "decode_ms_p50": 21.248
+    },
+    {
+     "round": 1,
+     "mixed_ms_p50": 234.606,
+     "mixed_steps": 16,
+     "decode_ms_p50": 21.267
+    },
+    {
+     "round": 2,
+     "mixed_ms_p50": 234.616,
+     "mixed_steps": 16,
+     "decode_ms_p50": 21.258
+    },
+    {
+     "round": 3,
+     "mixed_ms_p50": 234.617,
+     "mixed_steps": 16,
+     "decode_ms_p50": 21.256
+    }
+   ],
+   "two calls": [
+    {
+     "round": 0,
+     "mixed_ms_p50": 234.645,
+     "mixed_steps": 16,
+     "decode_ms_p50": 21.242
+    },
+    {
+     "round": 1,
+     "mixed_ms_p50": 234.754,
+     "mixed_steps": 16,
+     "decode_ms_p50": 21.25
+    },
+    {
+     "round": 2,
+     "mixed_ms_p50": 234.703,
+     "mixed_steps": 16,
+     "decode_ms_p50": 21.246
+    },
+    {
+     "round": 3,
+     "mixed_ms_p50": 235.539,
+     "mixed_steps": 16,
+     "decode_ms_p50": 21.243
+    }
+   ]
+  },
+  "summary": {
+   "one call": {
+    "mixed_ms": 234.558,
+    "sd": 0.11
+   },
+   "two calls": {
+    "mixed_ms": 234.91,
+    "sd": 0.422
+   }
+  }
+ },
+ "long": {
+  "model": "Qwen3.8-27B-UD-IQ3_S.gguf",
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "engine_args": "--max-model-len 32768 --max-seqs 4 --max-step-tokens 2048 --plugin-options kv.format=q8_0 recurrent.checkpoints=4 --memory-fraction 0.9",
+  "chunk": 512,
+  "contexts": [
+   8192,
+   16384,
+   24576
+  ],
+  "prompt": 4096,
+  "declared_prefill_mixes": [
+   false
+  ],
+  "rounds": {
+   "one call": [
+    {
+     "round": 0,
+     "mixed_ms_p50": 256.815,
+     "mixed_steps": 8,
+     "decode_ms_p50": 23.918
+    },
+    {
+     "round": 1,
+     "mixed_ms_p50": 256.948,
+     "mixed_steps": 8,
+     "decode_ms_p50": 23.952
+    },
+    {
+     "round": 2,
+     "mixed_ms_p50": 256.877,
+     "mixed_steps": 8,
+     "decode_ms_p50": 23.942
+    },
+    {
+     "round": 3,
+     "mixed_ms_p50": 256.956,
+     "mixed_steps": 8,
+     "decode_ms_p50": 23.931
+    }
+   ],
+   "two calls": [
+    {
+     "round": 0,
+     "mixed_ms_p50": 228.864,
+     "mixed_steps": 8,
+     "decode_ms_p50": 23.927
+    },
+    {
+     "round": 1,
+     "mixed_ms_p50": 228.794,
+     "mixed_steps": 8,
+     "decode_ms_p50": 23.929
+    },
+    {
+     "round": 2,
+     "mixed_ms_p50": 228.861,
+     "mixed_steps": 8,
+     "decode_ms_p50": 23.931
+    },
+    {
+     "round": 3,
+     "mixed_ms_p50": 228.873,
+     "mixed_steps": 8,
+     "decode_ms_p50": 23.933
+    }
+   ]
+  },
+  "summary": {
+   "one call": {
+    "mixed_ms": 256.899,
+    "sd": 0.066
+   },
+   "two calls": {
+    "mixed_ms": 228.848,
+    "sd": 0.036
+   }
+  }
+ }
+}

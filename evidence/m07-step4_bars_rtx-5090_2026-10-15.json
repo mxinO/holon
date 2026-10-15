@@ -1,0 +1,199 @@
+{
+ "source": "bench_m07-step4-plain_rtx-5090_2026-10-14.json",
+ "bars": {
+  "agent": {
+   "baseline": "holon",
+   "baseline_rounds": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "ttft_bar": 1.15,
+   "throughput_bar": 0.05,
+   "arms": {
+    "holon": {
+     "rounds": 4,
+     "gap_ms": {
+      "p50": 69.41,
+      "p90": 732.06,
+      "p99": 1217.18,
+      "max": 1218.07
+     },
+     "ttft_ms": {
+      "p50": 283.27,
+      "p90": 759.8,
+      "p99": 1269.36,
+      "max": 1283.42
+     },
+     "tpot_p99_ms": 32.19,
+     "throughput_tok_s": 74.0,
+     "mixed_steps": 0
+    },
+    "holon@m256": {
+     "rounds": 4,
+     "gap_ms": {
+      "p50": 64.27,
+      "p90": 73.48,
+      "p99": 78.07,
+      "max": 80.47
+     },
+     "ttft_ms": {
+      "p50": 333.32,
+      "p90": 1078.17,
+      "p99": 1698.97,
+      "max": 2541.55
+     },
+     "tpot_p99_ms": 35.91,
+     "throughput_tok_s": 73.8,
+     "mixed_steps": 2155,
+     "gap_x": {
+      "p50": 1.08,
+      "p99": 15.59,
+      "max": 15.14
+     },
+     "paired_ttft": 1.2032,
+     "ttft_p99_change": 0.3384,
+     "throughput_change": -0.0027,
+     "passes": {
+      "gap \u2265 2\u00d7 (p99, max)": true,
+      "paired TTFT \u2264 1.150": false,
+      "TTFT p99 \u2264 +25%": false,
+      "throughput within 5.0%": true,
+      "mixed steps > 0": true
+     }
+    },
+    "holon@m512": {
+     "rounds": 4,
+     "gap_ms": {
+      "p50": 81.36,
+      "p90": 126.98,
+      "p99": 133.52,
+      "max": 326.59
+     },
+     "ttft_ms": {
+      "p50": 334.34,
+      "p90": 942.0,
+      "p99": 1499.8,
+      "max": 2033.34
+     },
+     "tpot_p99_ms": 33.06,
+     "throughput_tok_s": 73.9,
+     "mixed_steps": 1148,
+     "gap_x": {
+      "p50": 0.85,
+      "p99": 9.12,
+      "max": 3.73
+     },
+     "paired_ttft": 1.0212,
+     "ttft_p99_change": 0.1815,
+     "throughput_change": -0.0014,
+     "passes": {
+      "gap \u2265 2\u00d7 (p99, max)": true,
+      "paired TTFT \u2264 1.150": true,
+      "TTFT p99 \u2264 +25%": true,
+      "throughput within 5.0%": true,
+      "mixed steps > 0": true
+     }
+    }
+   }
+  },
+  "long_prompt": {
+   "baseline": "holon",
+   "baseline_rounds": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "ttft_bar": 1.15,
+   "throughput_bar": 0.05,
+   "arms": {
+    "holon": {
+     "rounds": 4,
+     "gap_ms": {
+      "p50": 7139.49,
+      "p90": 7165.83,
+      "p99": 7165.83,
+      "max": 7165.83
+     },
+     "ttft_ms": {
+      "p50": 171.9,
+      "p90": 7516.46,
+      "p99": 7527.74,
+      "max": 7527.84
+     },
+     "tpot_p99_ms": 23.02,
+     "throughput_tok_s": 132.1,
+     "mixed_steps": 0
+    },
+    "holon@m256": {
+     "rounds": 4,
+     "gap_ms": {
+      "p50": 91.19,
+      "p90": 92.54,
+      "p99": 92.54,
+      "max": 92.54
+     },
+     "ttft_ms": {
+      "p50": 169.44,
+      "p90": 9550.17,
+      "p99": 9637.94,
+      "max": 9648.4
+     },
+     "tpot_p99_ms": 23.09,
+     "throughput_tok_s": 131.1,
+     "mixed_steps": 472,
+     "gap_x": {
+      "p50": 78.29,
+      "p99": 77.43,
+      "max": 77.43
+     },
+     "paired_ttft": 0.9853,
+     "ttft_p99_change": 0.2803,
+     "throughput_change": -0.0076,
+     "passes": {
+      "gap \u2265 2\u00d7 (p99, max)": true,
+      "paired TTFT \u2264 1.150": true,
+      "TTFT p99 \u2264 +25%": false,
+      "throughput within 5.0%": true,
+      "mixed steps > 0": true
+     }
+    },
+    "holon@m512": {
+     "rounds": 4,
+     "gap_ms": {
+      "p50": 170.94,
+      "p90": 174.32,
+      "p99": 174.32,
+      "max": 174.32
+     },
+     "ttft_ms": {
+      "p50": 169.37,
+      "p90": 8655.34,
+      "p99": 8713.1,
+      "max": 8717.48
+     },
+     "tpot_p99_ms": 22.99,
+     "throughput_tok_s": 132.0,
+     "mixed_steps": 236,
+     "gap_x": {
+      "p50": 41.77,
+      "p99": 41.11,
+      "max": 41.11
+     },
+     "paired_ttft": 0.9914,
+     "ttft_p99_change": 0.1575,
+     "throughput_change": -0.0008,
+     "passes": {
+      "gap \u2265 2\u00d7 (p99, max)": true,
+      "paired TTFT \u2264 1.150": true,
+      "TTFT p99 \u2264 +25%": true,
+      "throughput within 5.0%": true,
+      "mixed steps > 0": true
+     }
+    }
+   }
+  }
+ }
+}

@@ -1,6 +1,6 @@
 # M0.7 — performance: fused glue, mixed steps, a gated megakernel experiment
 
-Status: **rev 3.3, step 2 built** (2026-10-14; §12 step 1, §13 step 2). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
+Status: **rev 3.3, steps 0–4 built** (2026-10-15; §11 step 0, §12 step 1, §13 step 2, §14 step 3, §15 step 4). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
 architecture, numerics / performance / tests) over four rounds. Step 0 ran (§11), and the panel's review of it and the
 lead's decisions are in §10's "Step 0 panel round"; §1, §3.1, §4, §5, §6, §7 and §11 carry them. The panel re-checks
 rev 3.2 before step 1; rev 3.3 fixes its findings (§10, "rev 3.2 re-check") and awaits the panel's final
@@ -283,9 +283,10 @@ is taken to cost nothing).
   GQA unit of a tiny Qwen3.5 on the GPU kernels (D3's fused op selected; partial rotary, the gated q layout, a norm
   offset), bf16 and q8_0 KV: prefill T tokens against prefill T − 1 then the last as a one-token decode row, T 17 (the
   decode row opens a page) and 40. The last token's output agrees within the attention budget (another kernel computes
-  it: usage 0.006 of 1), and the KV it wrote is bitwise (its k and v projections are; otherwise within the budget).
-  Verified once: the decode-row plant `qk-rope-kv-decode-position` fails it on both formats (the KV differs by up to
-  0.75 in bf16; its output alone would pass, usage 0.24, since only 8 of 64 dims rotate), the clean build passes.
+  it: usage 0.006 of 1), and the KV it wrote is bitwise (inputs in {−1, 0, 1} and projection weights in {−1, 0, 1}
+  / 8 make the projections exact whatever the matmul's order; review round 1). Verified once: the decode-row plant
+  `qk-rope-kv-decode-position` fails it on both formats (with random inputs the KV differed by up to 0.75 in bf16 and
+  the output alone would pass, usage 0.24, since only 8 of 64 dims rotate), the clean build passes.
 - **Locks:** propagated once at the close; the snapshot trace gains a capped chunk beside decoders when D7 ships.
 
 ## 7. Steps
@@ -1383,3 +1384,204 @@ pools, then with measured ones in eb1756b); 8f3827e sets `PYTORCH_CUDA_ALLOC_CON
   `testing/holon_testing/qwen3_5_files.py` (`tiny_config`'s head size, for the GPU case), `plugins/tests/conftest.py`
   (expandable allocator segments from the session's start, §13.5) and `judge/holon_judge/planted.py` (the two plants'
   fired counts).
+
+
+## 15. As built (step 4, 2026-10-15): mixed steps, option declarations, the decode-row check
+
+Commits c793674 (the UX follow-up: plugin options declared), fc8b1d8 (the decode-row check), aec742f (mixed steps),
+cd6fb5c (`bench/mixed_step.py`, the backends' counters), 870ae2c (review round 1), f567fe8 (`bench/mixed_bars.py`) and
+this section's. Desktops screened first (`bench/clock_check.py`, 60 s of 27B decode at batch 4): RTX 5080 SM clock
+p10 / p50 2737 / 2737 MHz, RTX 4090 2670 / 2685, RTX 5090 2565 / 2655; no thermal or hardware slowdown; the 5080 and
+the 5090 at the power cap in every sample, as in §11.1; all steady. A first RTX 5090 desktop (screened steady, p10 /
+p50 2467 / 2542) fell off the bus (Xid 79) in round 2 of the plain run: released, no record kept; a second desktop
+ran everything. Its screen after the runs read p10 / p50 1927 / 2512 MHz (power cap, no thermal slowdown: not
+steady); every arm's per-round throughput in its records is within 0.3% of its other rounds, so the dip came late
+or briefly. The 5080 (2737 / 2737) and the 4090 (2670 / 2670) were steady after their runs too.
+
+### 15.1 What was built
+
+- **Plugin options (the UX step's follow-up, release §14.14).** `std.mixers.gqa` declares `kv.format` (choices
+  `q8_0`, `fp8`; default the model dtype) and `std.ops` `quant.act` (`a4`, `a8`; default `a8`; `std.moe` already
+  did). No other key an engine-side plugin reads was undeclared, so `holon serve` warns on none. `check_locks.py`
+  fails a committed lock that sets an option no installed plugin declares, or a value outside its declarers'
+  `choices` (it failed on the rtx-5080 27B locks' `kv.format` before). ABI unchanged.
+- **The scheduler** (`sched.py`, §3.1): with `chunk_with_decode` C > 0 and no drafter, the decode rows are reserved
+  first (they may preempt lower-ranked requests, as today's decode step does), then prefill chunks of up to
+  min(C, `max_step_tokens` − decode rows) tokens; `BatchPlan.n_decode` is the count of leading decode rows, set only
+  when the step also has a chunk (a step whose chunks find nothing is today's graphed decode step). A step with
+  nothing to decode prefills up to `max_step_tokens`, as today. With a drafter: a prefill step of min(C,
+  `max_step_tokens`) tokens alternates with a decode / verify step while a running request could decode, else the
+  step takes the kind that can (a prefill step with no decoder waiting takes the full budget).
+- **The drafter predicate** (§12.8): the engine builds a drafter when `max_draft_tokens` > 0 and a draft policy is
+  installed; units see `max_draft_tokens` 0 otherwise (`BuildCtx.options`), so the scheduler, std's activation-mode
+  refusal and GDN's replay buffers share the engine's predicate.
+- **Build checks:** with mixing, `max_step_tokens` ≥ `max_seqs` + C (a `ValueError` naming both), and every planner
+  must have `mixes_row_kinds` (a `PluginError` naming the groups); the core's default planner has it (kernels read
+  `Pages` alike in every step).
+- **The executor:** a step with `n_decode` > 0 is never graphed; the worst-step profile runs, when steps mix,
+  `max_seqs` − 1 decode rows beside a C-token chunk, sampled with the chunk's activations alive. The engine's
+  `stats()` counts `mixed_steps`.
+- **GQA** (`std.mixers.gqa`): its planner always mixes. A mixed step's decode rows go through the prefill kernel in
+  one call when the prefill kernel's spec has the `mixes_row_kinds` prop (FlashInfer's prefill, which splits a long
+  row's KV), else (triton_attn's q8_0 prefill, one program per row and head over the whole KV) through the decode
+  kernel, beside the prefill kernel's call on the chunks (`_Split`, the rows sliced by `_rows`). Unmixed steps keep
+  today's paths.
+- **GDN** (`std.mixers.gdn`): a mixed step's delta rule is planned per row kind — the decode rows as a decode step
+  (the recurrent kernel), the chunks as a prefill step (chunked), with their in-step checkpoints' rows re-based —
+  and run as two calls; the convolution runs over all rows at once, as before.
+- **The judge:** `holon_judge bounded --mixed C` judges `chunk_with_decode` C (prefix off, depth 0; and prefix on,
+  depth 1) against today's schedule; a configuration that set C but mixed no step fails. **The bench:**
+  `bench/mixed_step.py` (a mixed step's wall by GQA's path), `bench/mixed_bars.py` (§1.3's bars from a `run.py`
+  record); the in-process and HTTP backends report `mixed_steps` and `preemptions`.
+
+Core: 4366 code lines (4321 at the step's base; +45). Docs: design §7.1 and §4.2, plan §10.
+
+### 15.2 Checks
+
+- **Toy proof, CPU** (`core/tests`): the scheduler's liveness test runs three modes (today, mixed, alternating) over
+  40 random workloads each and checks every step's shape — decode rows first, chunks within C, never mixed with a
+  drafter, a capped prefill step followed by a decode step whenever a request could decode, every step within
+  `max_step_tokens` (it failed on review round 1's alternation bug); mutations that put chunks first, ignore the cap
+  or never alternate each fail it. `test_mixed_steps_need_room_mixing_planners_and_no_drafter`: the build's two
+  refusals (a toy planner without `mixes_row_kinds`), and drafts without a draft policy mix (`max_draft_tokens` 0
+  for the units).
+- **Outputs equal to today's, CPU** (`plugins/tests/test_qwen3_5_engine.py::test_mixed_steps_compute_what_todays_steps_do`):
+  a tiny Qwen3.5 (GQA and GDN, recurrent checkpoints), six requests — chunked prompts beside decoding ones, two
+  constrained by `testing.toy_mask`, one sampled — with prefix hits on a second pass (roomy) or preemption: tokens
+  equal to today's and logprobs within 1e-5, for C 8 (GQA's two calls) and 72 (one call; a chunk then holds an
+  in-step checkpoint). Mutations that drop GDN's row re-base, the chunk call's snapshot, or GQA's `query_start` re-base
+  each fail it.
+- **GPU bounded, mixed vs today** (RTX A5000, `--mixed 256 --max-seqs 8`, 48 sessions × 4 turns; records
+  `judge/results/bounded-cd6fb5c-*-mixed-256-rtx-a5000.json`):
+
+  | model (path) | baseline top-1 | mixed 256 | mixed 256, prefix on, depth 1 | mixed steps | verdict |
+  |---|---|---|---|---|---|
+  | Qwen3.8-27B UD-IQ3_S, q8_0 KV (GQA two calls; GDN per row kind) | 99.284% | 99.190% | 99.268% | 648 / 568 | PASS |
+  | Qwen3-8B Q4_K_M, bf16 KV (GQA one call, FlashInfer) | 98.657% | 98.454% | 98.433% | 648 / 18 | PASS |
+
+  Every KL quantile passes too. These runs size the pools by `--memory-fraction 0.9`, so they ran the mixed
+  worst-step profile; so did every desktop run below.
+- **The decode-row check (B)** is §6's last item: the decode-position plant fails it on both KV formats.
+
+### 15.3 GQA's decode rows on q8_0 KV (§10 correctness m3): decided by measurement
+
+`bench/mixed_step.py` on each class's plain 27B lock: three requests decode while an 8192-token prompt prefills in
+512-token chunks beside them (16 mixed steps), or, "long", decoders at 8K / 16K / 24K beside a 4096-token prompt;
+each mixed step timed synchronously; four rounds per arm, ABBA, the arms flipping the planners' `prefill_mixes`.
+Records `evidence/m07-step4_mixed-step*_<class>_2026-10-15.json`.
+
+| class (KV) | contexts 2K–6K: one call / two calls (ms) | contexts 8K–24K: one call / two calls (ms) | path kept |
+|---|---|---|---|
+| RTX 5080 (q8_0, triton_attn) | 234.6 / 234.9 | 256.9 / **228.8** (−10.9%) | two calls (no prop) |
+| RTX 4090 (bf16, FlashInfer) | **161.4** / 163.0 | **160.3** / 163.3 | one call (prop) |
+| RTX 5090 (bf16, FlashInfer) | 126.4 / 127.0 | **125.0** / 127.1 | one call (prop) |
+
+On q8_0 the decode rows cost nothing extra in one call while their contexts are short, and 28 ms of a 229 ms step
+when they are long (one program walks each row's whole KV); FlashInfer's prefill serves them 1–2% better than two
+calls. A microbenchmark on the A5000 agreed (q8_0: +0.6 to +22.5 ms per step over 16 layers in one call against +1.2
+to +3.9 ms in two). In two calls the decode rows' attention is the decode kernel's, as in an unmixed decode step.
+
+### 15.4 §1.3's bars on the plain locks (cap per class)
+
+`bench/run.py --lock <the class's plain 27B lock> --backends holon holon@m256 holon@m512 --arm m256='--chunk-with-decode
+256' --arm m512='--chunk-with-decode 512' --rounds 4 --traces agent long_prompt` (each arm four rounds, ABBA; the
+27B UD-IQ3_S with q8_0 KV on the 5080, the 4090's UD-Q4_K_M with bf16 KV on the 4090 and the 5090), then
+`bench/mixed_bars.py`. The paired TTFT bar is 1 + max(15%, 2 sd of today's per-round TTFT medians) — 1.15, and 1.18
+on the 4090; throughput's max(5%, 2 sd) is 5% everywhere. Records `evidence/bench_m07-step4-plain_<class>_*` and
+`m07-step4_bars_<class>_2026-10-15.json`.
+
+| class | cap | agent: max gap p99 / max (×) | paired TTFT | agent tok/s | long prompt: gap max (×) | long TTFT p99 | mixed steps | verdict |
+|---|---|---|---|---|---|---|---|---|
+| RTX 5080 | today | 1793 / 1794 ms | — | 71.0 | 13650 ms | 14332 ms | 0 | |
+| RTX 5080 | 256 | 139 / 292 (12.9× / 6.1×) | **1.298** | 69.0 (−2.8%) | 204 (67×) | **+34.6%** (tok/s −6.5%) | 3017 | fails |
+| RTX 5080 | **512** | 240 / 246 (7.5× / 7.3×) | 1.103 | 70.8 (−0.3%) | 338 (40×) | +14.3% | 1560 | **passes** |
+| RTX 4090 | today | 2144 / 2146 ms | — | 70.3 | 8712 ms | 9182 ms | 0 | |
+| RTX 4090 | 256 | 107 / 403 (20× / 5.3×) | **1.196** | 69.3 (−1.4%) | 112 (78×) | **+26.9%** | 3083 | fails |
+| RTX 4090 | **512** | 165 / 165 (13× / 13×) | 1.036 | 70.3 (0.0%) | 204 (43×) | +14.5% | 1620 | **passes** |
+| RTX 5090 | today | 1217 / 1218 ms | — | 74.0 | 7166 ms | 7528 ms | 0 | |
+| RTX 5090 | 256 | 78 / 80 (16× / 15×) | **1.203** | 73.8 (−0.3%) | 93 (77×) | **+28.0%** | 2155 | fails |
+| RTX 5090 | **512** | 134 / 327 (9.1× / 3.7×) | 1.021 | 73.9 (−0.1%) | 174 (41×) | +15.8% | 1148 | **passes** |
+
+- **Cap 512 on every class** (the 4090 as predicted, §11.8; the 5090's undecided 256 fails; the 5080 too, where the
+  simulator passed it). 256 fails the paired TTFT everywhere and the long prompt's TTFT p99 everywhere: a prompt
+  takes twice the mixed steps, each paying the eager step's fixed cost (§11.8's host floor; not measured here).
+- **Against the simulator** (§11.8): the gaps land at or under its predictions (the 5080's 512: 240 against 232 ms
+  at p99; the 4090's 165 against 151 ms), but the costs are larger: paired TTFT 1.10 / 1.04 / 1.02 at 512 against
+  1.00 / 1.01 / 1.00, and the long prompt's TTFT p99 +14–16% against +2.0 / +0.7 / +4.6%. The simulator charged a
+  mixed step the prefill of chunk + decode rows; the measured step also pays eager launches and the decode rows'
+  attention, which it under-costed (its own note).
+- TPOT p99 (recorded, not gated) at 512: 70 against 98 ms on the 5080, 60 against 70 on the 4090, 33 against 32 on
+  the 5090.
+- Every arm's throughput is within 0.3% of today's at 512.
+
+### 15.5 Speculative deployments: alternation (recorded)
+
+The same runs with MTP over each plain lock (`--max-draft-tokens 3`, drafter `drafters.mtp`, `fixed_k`, greedy
+verifier, `spec.k=1:3,3:2`), two rounds per arm, ABBA; records `evidence/bench_m07-step4-mtp_<class>_*`. Steps never
+mix: a prefill step capped at C alternates with a verify step.
+
+| class | C | agent: max gap p99 / max (ms) | paired TTFT | long prompt: gap max | long TTFT p99 | long prompt tok/s |
+|---|---|---|---|---|---|---|
+| RTX 5080 | today | 1908 / 2060 | — | 14061 ms | 14748 ms | 110.7 |
+| RTX 5080 | 256 | 767 / 777 | 1.233 | 223 ms | +44.3% | 101.4 |
+| RTX 5080 | 512 | 799 / 799 (2.4× / 2.6×) | 1.002 | 360 ms (39×) | +18.6% | 107.7 |
+| RTX 4090 | today | 1683 / 1916 | — | 8900 ms | 9394 ms | 125.3 |
+| RTX 4090 | 256 | 506 / 566 | 1.274 | 144 ms | +63.9% | 118.2 |
+| RTX 4090 | 512 | 342 / 554 (4.9× / 3.5×) | 1.007 | 227 ms (39×) | +25.8% | 124.4 |
+| RTX 5090 | today | 880 / 1061 | — | 7110 ms | 7461 ms | 198.4 |
+| RTX 5090 | 256 | 201 / 301 | 1.019 | 106 ms | +46.8% | 186.4 |
+| RTX 5090 | 512 | 369 / 386 (2.4× / 2.7×) | 1.001 | 182 ms (39×) | +22.7% | 192.7 |
+
+- Alternation brings the long prompt's stall to one capped step (39× at 512) but the agent trace's gap only 2.4–4.9×:
+  a verify step waits for a whole capped prefill step, and decoders still wait behind it every other step.
+- The long prompt's TTFT p99 rises 19–26% at 512 (44–64% at 256): every other step is a verify step. Its throughput
+  falls 0.7–2.7% at 512. §5 predicted that alternation helps
+  less and costs long-prompt TTFT; mixing verify rows (§9) is the follow-up that would close it.
+
+### 15.6 Deviations and decisions
+
+- **The minimum chunk is gone.** §3.1's "at least min(64, `chunk_with_decode`)" can never bind: the build's
+  `max_step_tokens` ≥ `max_seqs` + C leaves every mixed step room for the whole C (the review found the clamp dead;
+  the simulator's rule is the same). The chunk is min(C, `max_step_tokens` − decode rows) = C.
+- **GQA's planner always declares `mixes_row_kinds`:** its two-call path serves any decode and prefill kernels, so
+  the kernel prop chooses one call or two rather than gating the build; std's planners never refuse. The refusal is
+  the core's, for planners that lack the attribute (proved with a toy planner).
+- **`max_draft_tokens` in `BuildCtx.options` is the engine's effective value** (0 without a drafter); the lock and
+  `EngineConfig` keep the configured one.
+- **The alternation's prefill step without waiting decoders takes the full budget**, as §3.1's "else take the
+  schedulable kind" reads; with a drafter its budget is min(C, `max_step_tokens`) (review round 1's fix).
+- **The 5090** borrows the 4090's lock (no 5090 GGUF lock yet), as at step 0.
+
+### 15.7 Review
+
+One reviewer on the aggregate change (A, B, C). Round 1: no blocker; one major — with a drafter, the alternation's
+capped prefill step could exceed `max_step_tokens` when C did (no build check applies with a drafter), crashing the
+step's buffers (reproduced on CPU) — fixed with a test that fails before; five minors, all fixed or recorded: the dead
+minimum chunk (dropped; the liveness test now draws only configurations the engine accepts and checks every step's
+size), the decode-row check's bitwise branch depending on cuBLAS (now exact by construction), the mixed worst-step
+profile untested on the CPU (recorded: the GPU bounded and desktop runs exercise it, §15.2), the bounded test's mixed
+configuration in every run (now in one, with the "no step mixed" failure shown), `check_locks` not checking
+`choices` (now does); nits fixed. Round 2: nothing at blocker, major or minor; the documentation items (this
+section) and one test nit, fixed.
+
+### 15.8 Suite
+
+Full GPU suite at f567fe8 (two RTX A5000s; `pytest core std plugins judge testing tools`): 1320 passed, 65 skipped in
+17 min 54 s (step 3: 1192 / 65 in 18 min 13 s; 1233 at this step's base). The new cases: the scheduler's liveness test
+in three modes (40 → 120 cases, ≈ 2 s on the CPU), the build test, the mixed-vs-today engine test (4 cases, ≈ 11 s),
+the decode-row L0 (2 cases, ≈ 3 s), and two bounded configurations in one existing CPU test. `scripts/ci/run_all.sh
+main` is green.
+
+### 15.9 For the lead
+
+- **Cap 512 on every class** for the close's propagation (`[engine] chunk_with_decode = 512` on the plain locks
+  that serve a8 GGUF: the 5080's and the 4090's 27B; the 5090 borrows). Cap 256 fails §1.3 everywhere, the 5080
+  included, where the simulator passed it.
+- **The simulator under-costs mixed steps:** paired TTFT and long-prompt TTFT p99 cost 2–14 points more than it
+  predicted at 512 (§15.4), still inside the bars.
+- **GQA's q8_0 decode rows go through the decode kernel** (two calls) by measurement (§15.3); FlashInfer keeps one call.
+- **The drafter predicate** is now one: units see `max_draft_tokens` 0 without a drafter (§15.6), which also drops
+  GDN's replay buffers and rewind site for deployments that set drafts without a policy (a lock difference at the
+  close's propagation for any such lock; none is committed).
+- **Another RTX 5090 desktop fell off the bus** (Xid 79) mid-run; a second one ran every 5090 row.
+- **Speculative alternation** helps the gaps less and costs long-prompt TTFT (§15.5): recorded, not gated, as §1.3 says.

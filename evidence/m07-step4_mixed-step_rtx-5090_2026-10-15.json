@@ -1,0 +1,185 @@
+{
+ "workload": "m07-step4-mixed-step",
+ "date": "2026-10-15",
+ "commit": "cd6fb5c",
+ "gpu_class": "rtx-5090",
+ "clock": {
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "seconds": 71.4,
+  "batch": 4,
+  "tok_s": 286.6,
+  "samples": 694,
+  "sm_mhz": {
+   "p10": 2565.0,
+   "p50": 2655.0,
+   "p90": 2700.0
+  },
+  "mem_mhz": 13801.0,
+  "power_w": 600.0,
+  "slowdown_share": 0.0,
+  "power_cap_share": 1.0,
+  "steady": true
+ },
+ "commands": [
+  "python bench/mixed_step.py --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf --engine-args '--max-model-len 32768 --max-seqs 4 --max-step-tokens 2048 --plugin-options recurrent.checkpoints=4 --memory-fraction 0.9' --chunk 512 --rounds 4",
+  "python bench/mixed_step.py --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf --engine-args '--max-model-len 32768 --max-seqs 4 --max-step-tokens 2048 --plugin-options recurrent.checkpoints=4 --memory-fraction 0.9' --chunk 512 --contexts 8192 16384 24576 --prompt 4096 --rounds 4"
+ ],
+ "short": {
+  "model": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "engine_args": "--max-model-len 32768 --max-seqs 4 --max-step-tokens 2048 --plugin-options recurrent.checkpoints=4 --memory-fraction 0.9",
+  "chunk": 512,
+  "contexts": [
+   2048,
+   4096,
+   6144
+  ],
+  "prompt": 8192,
+  "declared_prefill_mixes": [
+   true
+  ],
+  "rounds": {
+   "one call": [
+    {
+     "round": 0,
+     "mixed_ms_p50": 125.115,
+     "mixed_steps": 16,
+     "decode_ms_p50": 14.28
+    },
+    {
+     "round": 1,
+     "mixed_ms_p50": 126.197,
+     "mixed_steps": 16,
+     "decode_ms_p50": 14.376
+    },
+    {
+     "round": 2,
+     "mixed_ms_p50": 126.808,
+     "mixed_steps": 16,
+     "decode_ms_p50": 14.407
+    },
+    {
+     "round": 3,
+     "mixed_ms_p50": 127.436,
+     "mixed_steps": 16,
+     "decode_ms_p50": 14.53
+    }
+   ],
+   "two calls": [
+    {
+     "round": 0,
+     "mixed_ms_p50": 126.618,
+     "mixed_steps": 16,
+     "decode_ms_p50": 14.316
+    },
+    {
+     "round": 1,
+     "mixed_ms_p50": 126.174,
+     "mixed_steps": 16,
+     "decode_ms_p50": 14.341
+    },
+    {
+     "round": 2,
+     "mixed_ms_p50": 127.437,
+     "mixed_steps": 16,
+     "decode_ms_p50": 14.441
+    },
+    {
+     "round": 3,
+     "mixed_ms_p50": 127.678,
+     "mixed_steps": 16,
+     "decode_ms_p50": 14.452
+    }
+   ]
+  },
+  "summary": {
+   "one call": {
+    "mixed_ms": 126.389,
+    "sd": 0.989
+   },
+   "two calls": {
+    "mixed_ms": 126.977,
+    "sd": 0.702
+   }
+  }
+ },
+ "long": {
+  "model": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "engine_args": "--max-model-len 32768 --max-seqs 4 --max-step-tokens 2048 --plugin-options recurrent.checkpoints=4 --memory-fraction 0.9",
+  "chunk": 512,
+  "contexts": [
+   8192,
+   16384,
+   24576
+  ],
+  "prompt": 4096,
+  "declared_prefill_mixes": [
+   true
+  ],
+  "rounds": {
+   "one call": [
+    {
+     "round": 0,
+     "mixed_ms_p50": 124.517,
+     "mixed_steps": 8,
+     "decode_ms_p50": 16.057
+    },
+    {
+     "round": 1,
+     "mixed_ms_p50": 125.259,
+     "mixed_steps": 8,
+     "decode_ms_p50": 16.241
+    },
+    {
+     "round": 2,
+     "mixed_ms_p50": 125.008,
+     "mixed_steps": 8,
+     "decode_ms_p50": 16.196
+    },
+    {
+     "round": 3,
+     "mixed_ms_p50": 125.207,
+     "mixed_steps": 8,
+     "decode_ms_p50": 16.077
+    }
+   ],
+   "two calls": [
+    {
+     "round": 0,
+     "mixed_ms_p50": 127.037,
+     "mixed_steps": 8,
+     "decode_ms_p50": 16.156
+    },
+    {
+     "round": 1,
+     "mixed_ms_p50": 127.64,
+     "mixed_steps": 8,
+     "decode_ms_p50": 16.286
+    },
+    {
+     "round": 2,
+     "mixed_ms_p50": 126.474,
+     "mixed_steps": 8,
+     "decode_ms_p50": 16.164
+    },
+    {
+     "round": 3,
+     "mixed_ms_p50": 127.194,
+     "mixed_steps": 8,
+     "decode_ms_p50": 16.271
+    }
+   ]
+  },
+  "summary": {
+   "one call": {
+    "mixed_ms": 124.998,
+    "sd": 0.338
+   },
+   "two calls": {
+    "mixed_ms": 127.086,
+    "sd": 0.481
+   }
+  }
+ }
+}
