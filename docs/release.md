@@ -1881,8 +1881,8 @@ Full GPU suite (two RTX A5000s, the worktree's uv venv; `pytest core std plugins
 6e0f1fa, **1217 passed, 65 skipped in 17 min 51 s** (+7: the per-element listing case and the six harness tests,
 ≈ 3 s on the CPU). An earlier run at b38d6c7 had one failure, `tools/tests/test_gpu_lock.py::test_first_lock_for_qwen3_0_6b`,
 caused by editing core files while it ran (the core's `src` moved between its two `propagate` calls); it passes
-since. `scripts/ci/run_all.sh main` is green at every commit (import contracts 8 kept). The final commit (the
-after-run guard) is re-run in full too (below).
+since. `scripts/ci/run_all.sh main` is green at every commit (import contracts 8 kept). At 826287b (the after-run
+guard, the last code change): **1217 passed, 65 skipped in 16 min 59 s**; `run_all.sh main` green.
 
 ### 15.8 For the lead
 
