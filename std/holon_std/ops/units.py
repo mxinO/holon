@@ -79,7 +79,8 @@ class _Quantized:
         released (a tied head has no `param`). `qembedding@1` has no `prepare`: a table is read as adopted."""
         self._kernel, spec = self._select(self.op, self.facts)
         if glu is not None and kernels.QLINEAR_GLU in spec.config.get("fused", ()):
-            self._glu = self._select(kernels.QLINEAR_GLU, self.facts | {"glu": glu})[0]
+            fused, glu_spec = self._select(kernels.QLINEAR_GLU, self.facts | {"glu": glu})
+            self._glu = fused if glu_spec.provider == spec.provider else None    # it reads the parts `prepare` made
         if self.op != kernels.QLINEAR or not hasattr(self._kernel, "prepare"):
             return parts
         q = QTensor(self.layout, shape, parts)

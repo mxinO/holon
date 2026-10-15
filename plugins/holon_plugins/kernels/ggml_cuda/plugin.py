@@ -235,7 +235,7 @@ class Extension:
         return self.modules[sm]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, eq=False)
 class Prepared:
     """`QLinear.prepare_input`'s handle (std.ops.kernels, `qlinear@2`): `x`, and, when its rows take mmvq, the buffer
     holding its q8_1 activations as written at `generation` for `key` (path, activation mode, rows, `in`)."""
@@ -334,8 +334,8 @@ class QLinear(_Matmul):
 
     def __call__(self, x, parts: dict[str, torch.Tensor]) -> torch.Tensor:
         xq = None
-        if isinstance(x, Prepared):
-            xq, x = self._prepared(x), x.x
+        if not isinstance(x, torch.Tensor):               # a prepare_input handle: ours (maybe ready), or another's
+            xq, x = self._prepared(x) if isinstance(x, Prepared) else None, x.x
         x, rows, blocks, scale2 = x.contiguous(), len(x), parts["blocks"], parts.get("scale2")
         y = torch.empty(rows, self.out, dtype=self.out_dtype, device=x.device)
         if rows == 0:
@@ -354,10 +354,11 @@ class QLinear(_Matmul):
 
 class QLinearGlu(QLinear):
     """`qlinear_glu@1` (glu "swiglu") on a merged gate/up of `out` rows: mmvq's fused gate at one row (D6), None
-    above."""
+    above — and None for halves that are not a multiple of 4 rows: mmvq reads whole blocks of up to 4 rows at one
+    column (small K: `nwarps` rows), so the up half's last block would read past the stack (memcheck)."""
 
     def __call__(self, x: torch.Tensor, parts: dict[str, torch.Tensor]) -> torch.Tensor | None:
-        if len(x) != 1 or self.mmvq_rows < 1:
+        if len(x) != 1 or self.mmvq_rows < 1 or self.out // 2 % 4:
             return None
         self._count("mmvq")
         blocks, half = parts["blocks"], self.out // 2
@@ -471,9 +472,7 @@ def _supports_qlinear(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
 
 
 def _supports_qlinear_glu(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
-    # each half a multiple of 4 rows: mmvq reads whole blocks of up to 4 rows at one column (small K: `nwarps` rows),
-    # so the up half's last block would read past the stack (memcheck, docs/m07-perf.md §13)
-    return _supports_qlinear(f, act_quant, types) and f["glu"] == "swiglu" and f["out"] % 8 == 0
+    return _supports_qlinear(f, act_quant, types) and f["glu"] == "swiglu" and f["out"] % 2 == 0
 
 
 def _supports_qembedding(f: dict) -> bool:

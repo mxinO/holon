@@ -190,7 +190,7 @@ class GQA(nn.Module):
         else:
             h = getattr(self.q_proj, "prepare_input", lambda x: x)(x)
             q, k, v = self.q_proj(h), self.k_proj(h), self.v_proj(h)
-        return (q.reshape(t, self.heads, -1), k.reshape(t, self.kv_heads, self.head_dim),
+        return (q.reshape(t, self.heads, self.q_width // self.heads), k.reshape(t, self.kv_heads, self.head_dim),
                 v.reshape(t, self.kv_heads, self.head_dim))
 
     def _gate(self, q: torch.Tensor) -> torch.Tensor | None:

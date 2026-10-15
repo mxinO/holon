@@ -280,8 +280,10 @@ def test_qlinear_random_blocks(ctx, name, k):
     rows = sorted({*range(1, 10), 64, 128, 256, CHUNK, CHUNK + 1, 2 * CHUNK + 1, MAX_STEP_TOKENS})
     second = "q6_k" if name == "q4_k" else "q4_k"                           # a consumer of another type (D6)
     other = (qlinear(ctx, second, k, out=64), {"blocks": device_blocks(random_blocks(second, 64, k, seed=1))})
-    glu = qlinear(ctx, name, k, out=GLU_OUT, op="qlinear_glu@1")
-    check_qlinear(kernel, name, random_blocks(name, OUT, k, seed=k), rows, glu=glu, other=other)
+    glu, blocks = qlinear(ctx, name, k, out=GLU_OUT, op="qlinear_glu@1"), random_blocks(name, OUT, k, seed=k)
+    check_qlinear(kernel, name, blocks, rows, glu=glu, other=other)
+    halves_of_150 = qlinear(ctx, name, k, op="qlinear_glu@1")          # not 4-row blocks: served, and composed
+    assert halves_of_150(activations(1, k, seed=1), {"blocks": device_blocks(blocks)}) is None
 
 
 def test_qlinear_real_tensors(ctx, real):

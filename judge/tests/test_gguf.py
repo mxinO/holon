@@ -1,6 +1,9 @@
 """GGUF on the judge's side (M0.1 design §4.6), on a tiny Qwen3 written as a Q8_0 GGUF: a file's golden is the golden
 of its dequantized weights, the per-tensor gate, and Tier A — the engine on the dequantized weights — with each
 planted bug wired."""
+import json
+import pathlib
+
 import gguf
 import numpy as np
 import pytest
@@ -91,3 +94,33 @@ def test_tier_b_floor_rounds_every_quantized_linear_input_to_q8_1(files, tiny_ch
                                   crossover="rtx-5090:120")
         assert set(per_shape.meta["routes"].values()) == {kernel_path} and per_shape.meta["step_rows"] == rows
         assert torch.equal(per_shape.target_lp, floor.target_lp) and torch.equal(per_shape.topk_lp, floor.topk_lp)
+
+
+GOLDENS = pathlib.Path(__file__).resolve().parents[1] / "goldens"
+CLASS_SM = {"rtx-5080": 120, "rtx-5090": 120, "rtx-4090": 89, "rtx-3090": 86}      # the lock classes' SMs
+
+
+@pytest.mark.parametrize("floor", sorted(GOLDENS.glob("*/*-rows*-floor.safetensors")), ids=lambda p: p.stem)
+def test_a_per_shape_floor_routes_as_the_table_does(floor):
+    """D2 (docs/m07-perf.md §6): a committed per-shape floor emulates each shape on the path the ggml plugin's
+    `mmvq_rows` picks today at its step rows on its class (`compare` refuses a candidate whose paths differ), so a
+    change to the crossover table that moves a shape must re-record the floor. Needs the GGUF file and a prebuilt
+    extension (llama.cpp's rule is host code), no GPU."""
+    from holon.api import Fingerprint
+    from holon_plugins.kernels.ggml_cuda import extension, plugin
+    from huggingface_hub.constants import HF_HUB_CACHE
+    from safetensors import safe_open
+
+    meta = json.loads(safe_open(floor, "pt").metadata()["meta"])
+    org, repo, name = meta["model"].split("/")
+    path = next(pathlib.Path(HF_HUB_CACHE).glob(f"models--{org}--{repo}/snapshots/*/{name}.gguf"), None)
+    if path is None:
+        pytest.skip(f"{meta['model']} not cached")
+    try:
+        plugin.rule_module(CLASS_SM[meta["crossover"]])
+    except extension.NotBuilt:
+        pytest.skip("no prebuilt ggml extension")
+    paths = judge_gguf.row_paths(path, meta["step_rows"], Fingerprint(gpu=meta["crossover"],
+                                 sm=CLASS_SM[meta["crossover"]], vram_gib=0, toolchain=""))
+    routes = {f"{t}/{k}x{o}": paths[n] for n, (t, k, o) in judge_gguf.engine_shapes(path).items()}
+    assert meta["routes"] == routes

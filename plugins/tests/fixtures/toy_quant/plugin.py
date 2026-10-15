@@ -51,8 +51,9 @@ class QLinear:
         return Handle(x)
 
     def __call__(self, x, parts: dict[str, torch.Tensor]) -> torch.Tensor:
-        CALLS.append("qlinear(handle)" if isinstance(x, Handle) else "qlinear")
-        x = x.x if isinstance(x, Handle) else x
+        handle = not isinstance(x, torch.Tensor)              # ours or another provider's: its `x`
+        CALLS.append("qlinear(handle)" if handle else "qlinear")
+        x = x.x if handle else x
         return (x.float() @ dequantize(parts).T).to(getattr(torch, self.facts["out_dtype"]))
 
 

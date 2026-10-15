@@ -711,6 +711,15 @@ static __global__ void mul_mat_vec_q(
         }
     }
 
+    // Holon: NVFP4's per-tensor scale2 for the unfused epilogue (above one column), loaded before the K loop as the
+    // fused path prefetches its scales: a load in the epilogue would stall every output element on its latency
+    [[maybe_unused]] float scale2 = 1.0f;
+    if constexpr (!has_fusion && type == GGML_TYPE_NVFP4) {
+        if (fusion.x_scale) {
+            scale2 = *(const float *) fusion.x_scale;
+        }
+    }
+
     // partial sum for each thread
     float tmp[ncols_dst][rows_per_cuda_block] = {{0.0f}};
     float tmp_gate[ncols_dst][rows_per_cuda_block] = {{0.0f}};
@@ -839,7 +848,7 @@ static __global__ void mul_mat_vec_q(
                 }
                 if constexpr (!has_fusion && type == GGML_TYPE_NVFP4) {
                     if (fusion.x_scale) { // Holon: NVFP4's scale2 above one column (dense), after the full reduction
-                        result = ggml_cuda_mul_rn(result, *(const float *) fusion.x_scale);
+                        result = ggml_cuda_mul_rn(result, scale2);
                     }
                 }
                 if (fusion.dst_bf16) {
