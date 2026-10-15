@@ -217,17 +217,21 @@ def test_scoring_reads_no_bytecode_it_did_not_write(tmp_path):
 
 
 def test_a_series_resumes_into_its_own_record(tmp_path):
-    header = {"scorer_reference": "sha256:r", "gpu_class": "rtx-5080", "commit": "c1",
-              "client": {"binary_sha256": "sha256:b"}, "runs": []}
+    header = {"scorer_reference": "sha256:r", "gpu_class": "rtx-5080", "commit": "c1", "model": "Q-27B",
+              "served": {"plan_id": "sha256:p"}, "client": {"binary_sha256": "sha256:b"}, "runs_planned": 3, "runs": []}
     out = tmp_path / "demo.json"
     assert demo.series_record(out, False, header)["runs"] == []
     out.write_text(demo.json.dumps(header | {"runs": [{"success": False, "invalid": "changed"}]}))
     with pytest.raises(SystemExit, match="exists"):
         demo.series_record(out, False, header)                          # never overwritten
     assert len(demo.series_record(out, True, header)["runs"]) == 1     # resumed: appended to
-    for key, other in (("scorer_reference", "sha256:x"), ("gpu_class", "rtx-4090"), ("commit", "c2")):
+    assert demo.series_record(out, True, header | {"runs_planned": 5})["runs_planned"] == 3   # its plan, not --runs
+    for key, other in (("scorer_reference", "sha256:x"), ("gpu_class", "rtx-4090"), ("commit", "c2"),
+                       ("model", "Q-8B")):
         with pytest.raises(SystemExit, match=key):
             demo.series_record(out, True, header | {key: other})
+    with pytest.raises(SystemExit, match="plan_id"):
+        demo.series_record(out, True, header | {"served": {"plan_id": "sha256:other"}})
     with pytest.raises(SystemExit, match="binary_sha256"):
         demo.series_record(out, True, header | {"client": {"binary_sha256": "sha256:other"}})
     with pytest.raises(SystemExit, match="no record"):

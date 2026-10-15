@@ -1828,8 +1828,9 @@ the 32K context, not a claim of general agent capability (the README says so).
   after each run against one reference digest taken before run 1 (`scorer_reference`, recorded): a run starts only
   in that environment, and a change makes the run **invalid** — not scored, **counted as a miss and published** —
   and stops the series until the environment is restored. A resumed series passes `--reference` (which must match)
-  and appends to its own record (`--out`, which must exist and name the same reference, class, commit and binary)
-  for the runs left; a new series never overwrites a record. Scoring reads bytecode only from a fresh empty
+  and appends to its own record (`--out`, which must exist and name the same reference, class, commit, model, served
+  plan and binary) for the runs left of the plan it recorded (`runs_planned`; `--runs` is then ignored); a new
+  series never overwrites a record. Scoring reads bytecode only from a fresh empty
   `PYTHONPYCACHEPREFIX`, so a crafted `.pyc` beside a hashed source is never run. Not guarded: the shared libraries
   the interpreter links (libpython, libc). Before every run the harness's own files (`bench/`, `scripts/ci/`) must
   equal their commit (`git status`), and the run's venv, as made and before its session, must hold the first run's
@@ -1961,4 +1962,7 @@ declarations into ABI 1.0. Every code fix below has a test that fails without it
   is run without it, as the test shows). A resumed series (`--reference`) loads its `--out`, checks its scorer
   reference, class, commit and binary sha256, appends and runs only the runs left; without `--reference` an existing
   `--out` is refused (`series_record`). CPU tests and `run_all.sh main` green.
+- **Two resume safeguards** (the reviewer's optional items, one commit, a failing-first test): the record stores
+  `runs_planned` when the series starts, and a resume runs `runs_planned − len(runs)`, ignoring `--runs`; a resume
+  also requires the record's `model` and `served.plan_id`. CPU tests and `run_all.sh main` green.
 

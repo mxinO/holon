@@ -258,7 +258,8 @@ def venv_change(bin_dir: pathlib.Path, made: str) -> str | None:
 
 def series_record(out: pathlib.Path, resume: bool, header: dict) -> dict:
     """The series' record: new (never overwriting one), or, resuming a stopped series, its record, which must be
-    the same series (scorer reference, class, commit, Claude Code binary) and is appended to."""
+    the same series (scorer reference, class, commit, model, served plan, Claude Code binary) and is appended to up
+    to the runs it planned."""
     if not resume:
         if out.exists():
             raise SystemExit(f"{out} exists: a new series writes a new record (resume one with --reference)")
@@ -266,9 +267,11 @@ def series_record(out: pathlib.Path, resume: bool, header: dict) -> dict:
     if not out.is_file():
         raise SystemExit(f"{out}: no record to resume")
     record = json.loads(out.read_text())
-    for key in ("scorer_reference", "gpu_class", "commit"):
+    for key in ("scorer_reference", "gpu_class", "commit", "model"):
         if record.get(key) != header[key]:
             raise SystemExit(f"{out}: another series ({key} {record.get(key)!r} != {header[key]!r})")
+    if (record.get("served") or {}).get("plan_id") != header["served"]["plan_id"]:
+        raise SystemExit(f"{out}: another series (served plan_id)")
     if record.get("client", {}).get("binary_sha256") != header["client"]["binary_sha256"]:
         raise SystemExit(f"{out}: another series (client binary_sha256)")
     return record
@@ -514,7 +517,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--server", help="the running `holon serve`, e.g. http://127.0.0.1:8000")
     parser.add_argument("--gpu-class", help="the server's GPU class; must be its lock's (e.g. rtx-5080)")
-    parser.add_argument("--runs", type=int, default=3, help="the series' runs (a resumed series runs the rest)")
+    parser.add_argument("--runs", type=int, default=3, help="the series' runs (a resumed series runs the rest of "
+                                                             "its recorded plan)")
     parser.add_argument("--out", type=pathlib.Path, help="the evidence record to write")
     parser.add_argument("--claude", default="claude", help="the Claude Code executable")
     parser.add_argument("--score", type=pathlib.Path, help="only score a copy of this project directory")
@@ -553,10 +557,10 @@ def main() -> None:
                          "timeout_s": TIMEOUT_S, "env": CLIENT_ENV,
                          "command": "claude -p <prompt> --allowedTools <tools> --output-format stream-json --verbose"},
               "task": {"prompt": PROMPT, "project": PROJECT_DIGEST, "tests": TESTS, "seeded": SEEDED},
-              "scorer_reference": reference, "runs": []}
+              "scorer_reference": reference, "runs_planned": args.runs, "runs": []}
     record = series_record(args.out, bool(args.reference), header)
     first_venv = record["runs"][0].get("venv_pytest") if record["runs"] else None
-    for i in range(len(record["runs"]), args.runs):
+    for i in range(len(record["runs"]), record["runs_planned"]):    # a resumed series: its own plan, not --runs
         if dirty := harness_dirty():
             sys.exit(f"the harness changed during the series: {dirty}")
         check_environment(reference)
