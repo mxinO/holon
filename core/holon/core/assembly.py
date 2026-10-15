@@ -75,7 +75,9 @@ def detect_source(plugins: PluginSet, model: str) -> str:
 
 
 class _PagesPlanner:
-    """Default planner: kernels read the core's `Pages` directly."""
+    """Default planner: kernels read the core's `Pages` directly, the same for every step (mixed ones included)."""
+
+    mixes_row_kinds = True
 
     def plan_bounds(self, batch: Batch, pages: Any) -> Any:
         return pages

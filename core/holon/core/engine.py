@@ -135,12 +135,22 @@ class Engine:
         self.eos = source.eos_token_ids
 
         self.ledger = Ledger(self.device)
+        # Speculative decoding (design §7.6) needs drafts enabled and a draft policy installed: then a drafter is built.
+        # Units see `max_draft_tokens` 0 without one, so they and the scheduler share this one predicate.
+        drafting = bool(cfg.max_draft_tokens) and any(True for _ in p.by_slot("draft_policy"))
+        mixing = cfg.chunk_with_decode if not drafting else 0
+        if mixing and cfg.max_step_tokens < cfg.max_seqs + mixing:
+            raise ValueError(f"chunk_with_decode {mixing}: max_step_tokens must hold max_seqs decode rows and the "
+                             f"chunk ({cfg.max_seqs} + {mixing}), not {cfg.max_step_tokens}")
         options = {"page_size": cfg.page_size, "max_seqs": cfg.max_seqs, "max_model_len": cfg.max_model_len,
-                   "max_step_tokens": cfg.max_step_tokens, "max_draft_tokens": cfg.max_draft_tokens,
+                   "max_step_tokens": cfg.max_step_tokens, "max_draft_tokens": cfg.max_draft_tokens if drafting else 0,
                    "chunk_with_decode": cfg.chunk_with_decode,
                    "kernels": cfg.kernels, "kernel_preferences": cfg.kernel_preferences, "plugins": cfg.plugin_options}
         self.ctx = BuildContext(p, self.device, cfg.dtype, options, ledger=self.ledger)
         bound, planners = bind_state(self.spec, self.ctx, p, self.ledger, cfg)
+        if mixing and (still := [g for g, planner in planners.items() if not getattr(planner, "mixes_row_kinds", 0)]):
+            raise PluginError(f"chunk_with_decode > 0: the planners of {still} cannot run decode rows and prefill "
+                              "chunks in one step (`mixes_row_kinds`)")
         model = build_model(self.spec, self.ctx)
         load_weights(model, self.ctx, source.tensors())
 
@@ -152,8 +162,9 @@ class Engine:
         # Speculation counters (stats()): verify steps (graphed, launched at depth 1), real drafts verified, and
         # verify rows by (k, drafts accepted).
         self.spec_counts = collections.Counter()
+        self.mixed_steps = 0                       # steps that carried decode rows and prefill chunks (stats())
         substeps, sub_planners = (0, 0), {}
-        if cfg.max_draft_tokens and any(True for _ in p.by_slot("draft_policy")):
+        if drafting:
             pick = lambda slot: p.load(p.single(slot, cfg.slots.get(slot)))        # noqa: E731
             policy, verifier = pick("draft_policy"), pick("verifier")
             self.policy = policy.build(self.ctx) if hasattr(policy, "build") else policy
@@ -184,7 +195,8 @@ class Engine:
         host_lens = any(getattr(planner, "needs_host_lens", False) for planner in planners.values())
         self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len,
                                draft_k=self._draft_k if self.policy is not None else None,
-                               lookahead=getattr(drafter, "lookahead", None), host_lens_only=host_lens)
+                               lookahead=getattr(drafter, "lookahead", None), host_lens_only=host_lens,
+                               chunk_with_decode=cfg.chunk_with_decode)
         # What rolls back after a verify (api.Rewindable): the target's modules and the slot objects. An auxiliary
         # model runs inside `Drafter.run`, after this: rolling it back is the drafter's call.
         slot_objects = [o for o in (sampler, verifier, drafter, self.policy) if callable(getattr(o, "rewind", None))]
@@ -354,6 +366,7 @@ class Engine:
     def stats(self) -> dict[str, int]:
         out = {"waiting": len(self.sched.waiting), "running": len(self.sched.running),
                "preemptions": self.sched.preemptions, "prefix_tokens_saved": self.state.tokens_saved,
+               "mixed_steps": self.mixed_steps,
                "cached_blocks": len(self.state.index.entries) if self.state.index is not None else 0,
                "graphs": len(self.executor.graphs) if self.executor and self.executor.graphs is not None else 0}
         if self.policy is not None:                  # the speculation counters (__init__)
@@ -400,6 +413,7 @@ class Engine:
                 raise RuntimeError("the scheduler made no progress with requests pending")
             return deltas
         step = self._launch(*scheduled)
+        self.mixed_steps += scheduled[0].n_decode > 0
         if self.policy is not None and any(m > 1 for _, _, m in step.rows):
             self.spec_counts.update(verify_steps=1, verify_steps_graphed=step.out.graphed,
                              verify_steps_overlapped=prev is not None)

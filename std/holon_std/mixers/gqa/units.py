@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
+import numpy as np
 import torch
 from holon.api import Paged, Ref, StateSpec
 from torch import nn
@@ -31,18 +32,30 @@ class AttnMeta:
 
 
 class Planner:
-    """Owns this group's kernel instances; each step is all prefill chunks, all decode rows or all verify rows of one
-    width (v0 scheduler)."""
+    """Owns this group's kernel instances; a step is all prefill chunks, all decode rows, all verify rows of one
+    width, or (`BatchPlan.n_decode` > 0) decode rows then prefill chunks: a mixed step (docs/m07-perf.md §3.1). Its
+    decode rows go through the prefill kernel when that kernel's spec has the `mixes_row_kinds` prop (it serves
+    them as well as the decode kernel, e.g. by splitting their KV), else through the decode kernel and the chunks
+    through the prefill kernel, as two calls."""
 
-    def __init__(self, prefill: Any, decode: Any, verify: Any, needs_host_lens: bool) -> None:
+    mixes_row_kinds = True
+
+    def __init__(self, prefill: Any, decode: Any, verify: Any, needs_host_lens: bool, prefill_mixes: bool) -> None:
         self.prefill, self.decode, self.verify = prefill, decode, verify
         # Decode steps plan from host lengths (e.g. FlashInfer), so a request whose length is only known on the
         # device (an uncommitted verify row) must sit them out; the core reads this (design §7.3).
         self.needs_host_lens = needs_host_lens
+        self.prefill_mixes = prefill_mixes
 
     def plan_bounds(self, batch, pages) -> AttnMeta:
-        n_query, n_logits = batch.plan.n_query, batch.plan.n_logits
-        if (n_query == 1).all():
+        n_query, n_logits, n = batch.plan.n_query, batch.plan.n_logits, batch.plan.n_decode
+        if n and not self.prefill_mixes:
+            decode, chunks = (_rows(batch, pages, a, b) for a, b in ((0, n), (n, len(n_query))))
+            kernel = _Split(n, self.decode, self.prefill)
+            return AttnMeta(kernel, (self.decode.plan(*decode), self.prefill.plan(*chunks)), pages)
+        if n:
+            kernel = self.prefill
+        elif (n_query == 1).all():
             kernel = self.decode
         elif (n_logits == n_query).all() and (n_query == n_query[0]).all():
             kernel = self.verify
@@ -56,6 +69,38 @@ class Planner:
         prepare = getattr(meta.kernel, "prepare", None)          # in-graph part of a kernel's plan (optional)
         if prepare is not None:
             prepare(meta.handle)
+
+
+@dataclasses.dataclass(frozen=True)
+class _Split:
+    """A mixed step's attention as two calls: its `n` decode rows (one token each, first) by the decode kernel, the
+    prefill chunks after them by the prefill kernel. Eager only (no `graph_key`)."""
+
+    n: int
+    decode: Any
+    prefill: Any
+
+    def prepare(self, handle) -> None:
+        for kernel, h in zip((self.decode, self.prefill), handle, strict=True):
+            if (prepare := getattr(kernel, "prepare", None)) is not None:
+                prepare(h)
+
+    def run(self, q: torch.Tensor, kv, handle) -> torch.Tensor:
+        return torch.cat([self.decode.run(q[:self.n], kv, handle[0]), self.prefill.run(q[self.n:], kv, handle[1])])
+
+
+def _rows(batch, pages, lo: int, hi: int) -> tuple[Any, Any]:
+    """Rows lo … hi-1 of a step as a batch and pages of their own (a mixed step's slices; host plan, device views)."""
+    plan, dev = batch.plan, batch.dev
+    qs = np.concatenate([[0], np.cumsum(plan.n_query)])
+    t0, t1 = int(qs[lo]), int(qs[hi])
+    sub = dataclasses.replace(plan, slots=plan.slots[lo:hi], n_query=plan.n_query[lo:hi],
+                              n_logits=plan.n_logits[lo:hi], start_upper=plan.start_upper[lo:hi],
+                              token_src=plan.token_src[lo:hi], n_decode=0)
+    sub_dev = dataclasses.replace(dev, input_ids=dev.input_ids[t0:t1], positions=dev.positions[t0:t1],
+                                  query_start=dev.query_start[lo:hi + 1] - t0, slots=dev.slots[lo:hi])
+    return (type(batch)(sub, sub_dev),
+            dataclasses.replace(pages, lens=pages.lens[lo:hi], write_index=pages.write_index[t0:t1]))
 
 
 class GQA(nn.Module):
@@ -108,11 +153,12 @@ class GQA(nn.Module):
                  "layout": layout, "max_seqs": ctx.options["max_seqs"]} | cls.masks(params)
         if ctx.options.get("planner.device_lens"):   # lengths only on the device (drafter sub-steps): verify kernel
             verify = ctx.select_kernel(kernels.VERIFY, site=specs[0].group, **facts).impl(ctx, **facts)
-            return Planner(verify, verify, verify, needs_host_lens=False)
+            return Planner(verify, verify, verify, needs_host_lens=False, prefill_mixes=False)
         ops = (kernels.PREFILL, kernels.DECODE, kernels.VERIFY)
         chosen = [ctx.select_kernel(op, site=specs[0].group, **facts) for op in ops]
-        decode_props = chosen[1].props
-        return Planner(*(spec.impl(ctx, **facts) for spec in chosen), needs_host_lens="needs_host_lens" in decode_props)
+        return Planner(*(spec.impl(ctx, **facts) for spec in chosen),
+                       needs_host_lens="needs_host_lens" in chosen[1].props,
+                       prefill_mixes="mixes_row_kinds" in chosen[0].props)
 
     def __init__(self, ctx, *, layer: int, hidden: int, heads: int, kv_heads: int, head_dim: int, rope: Ref,
                  qk_norm: Ref | None = None, output_gate: str = "none", causal: bool = True, window: int = 0) -> None:

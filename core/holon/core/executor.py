@@ -201,6 +201,7 @@ class Executor:
 
     def _worst_step(self, plan: BatchPlan) -> None:
         """The largest prefill, a prompt-logprob chunk, a filtered sampling step over every slot with logprobs,
+        (with mixed steps) every slot but one decoding beside a full chunk, sampled with the chunk's activations alive,
         (when drafting) a verify step over every slot's 1 + k rows, then its rewind and the drafter's run with its
         sub-steps (eager: logprob steps are never graphed), and the logits processor's masks on every one of those
         rows."""
@@ -220,6 +221,16 @@ class Executor:
         ctx = self._context(decode)
         self._prepare(ctx)
         self.sampler.sample(torch.zeros(n, self.vocab, device=self.device), ctx)
+        if self.cfg.chunk_with_decode and self.drafter is None and n > 1:
+            rows = np.array([1] * (n - 1) + [min(self.cfg.chunk_with_decode, self.cfg.max_model_len)], np.int32)
+            mixed = host_plan(0, np.arange(n, dtype=np.int32), np.zeros(n, dtype=np.int32), rows, np.ones_like(rows),
+                              np.zeros(int(rows.sum()), dtype=np.int64))
+            mixed.n_decode = n - 1
+            ctx = self._context(mixed)
+            self._prepare(ctx)
+            h = self.model.trunk(ctx)
+            self.sampler.sample(self._logits(ctx, h), ctx)
+            del h
         if self.drafter is not None:                 # the verifier's own buffers (filtered, with logprobs)
             width = np.full(n, 1 + self.cfg.max_draft_tokens, dtype=np.int32)
             verify = host_plan(0, np.arange(n, dtype=np.int32), np.zeros(n, dtype=np.int32), width, width,
@@ -293,7 +304,7 @@ class Executor:
         width = int(plan.n_query.max(initial=1))
         uniform = bool((plan.n_query == width).all() and (plan.n_logits == width).all())   # decode or verify rows
         graphed = (self.graphs is not None and prompt is None and not logprobs        # graphs return tokens only
-                   and uniform and rows <= self.buckets[-1])
+                   and uniform and not plan.n_decode and rows <= self.buckets[-1])      # mixed steps run eagerly
         if graphed:
             plan = padded(plan, next(b for b in self.buckets if b >= rows), self.state.padding_slot, width)
             exact = np.concatenate([exact, np.ones(len(plan.slots) - rows, dtype=bool)])   # padding: start 0

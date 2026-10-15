@@ -51,6 +51,8 @@ class GDNMeta:
     graph_key: Any
     verify: bool = False                             # every row a verify row (planned per token; `rewind` follows)
     rewind: Any = None                               # the group's `gdn_rewind` instance (speculative deployments)
+    n_decode: int = 0                                # a mixed step: its leading decode rows, planned as such …
+    chunks: Any = None                               # … and the delta rule's plan of the prefill rows after them
     has_init: torch.Tensor | None = None
     ssm_pool: str | None = None                      # in-step checkpoints: the delta-rule payloads' pool (the
     conv: tuple[str, torch.Tensor, torch.Tensor] | None = None   # kernel has their rows); the conv payloads' pool,
@@ -58,21 +60,29 @@ class GDNMeta:
 
 
 class Planner:
+    """The group's delta-rule plans per step. A mixed step (`BatchPlan.n_decode` n > 0, docs/m07-perf.md §3.1) is
+    planned per row kind: its n decode rows as a decode step's (the recurrent kernel), the prefill chunks after them
+    as a prefill step's (chunked, their in-step checkpoints' rows re-based), so each row computes as in its own
+    unmixed step."""
+
+    mixes_row_kinds = True
+
     def __init__(self, rule: Any, conv_kernel: int, rewind: Any = None) -> None:
         self.rule, self.window, self.rewind = rule, conv_kernel - 1, rewind
 
     def plan_bounds(self, batch, pages) -> GDNMeta:
-        plan = batch.plan
+        plan, n = batch.plan, batch.plan.n_decode
         lens = plan.n_query.tolist()
-        decode = all(n == 1 for n in lens)
-        verify = bool(len(lens)) and not decode and bool((plan.n_logits == plan.n_query).all())
+        decode = all(t == 1 for t in lens) and not n
+        verify = bool(len(lens)) and not decode and not n and bool((plan.n_logits == plan.n_query).all())
         if not verify and bool((plan.n_logits > 1).any()):      # rewind needs every row of a step to be a verify row
             raise RuntimeError("gdn: a step mixing verify rows with other rows")
         pubs = {spec: [p for p in plan.publishes if p.spec == spec] for spec in (CONV, SSM)}
-        ssm = [(p.row, p.offset, p.payload.units[0]) for p in pubs[SSM]]
-        meta = GDNMeta(self.rule, self.rule.plan(lens, ssm, per_token=verify), batch.dev.slots, batch.dev.query_start,
+        ssm = [(p.row - n, p.offset, p.payload.units[0]) for p in pubs[SSM]]
+        meta = GDNMeta(self.rule, self.rule.plan(lens[:n] if n else lens, () if n else ssm, per_token=verify),
+                       batch.dev.slots, batch.dev.query_start,
                        ("gdn", len(lens)) if decode else ("gdn.verify", len(lens), lens[0]) if verify else None,
-                       verify, self.rewind)
+                       verify, self.rewind, n, self.rule.plan(lens[n:], ssm) if n else None)
         if ssm:
             meta.ssm_pool = pubs[SSM][0].payload.pool
         if conv := pubs[CONV]:                   # the window before each position, from the step's rows
@@ -213,7 +223,13 @@ class GDN(nn.Module):
                 self._states(conv_pool=ctx.pool(pool))[0].index_copy_(0, units, window.to(conv_state.dtype))
             if meta.ssm_pool is not None:
                 snapshot = self._states(ssm_pool=ctx.pool(meta.ssm_pool))[1]
-        o = self._rule_call(rule, handle, mixed, a, b, ssm_state, slots, has_init, snapshot, out_slots)
+        if self._state is not None and meta.chunks is not None:     # a mixed step: decode rows, then the chunks
+            n = meta.n_decode
+            o = torch.cat([self._rule_call(rule, handle, mixed[:n], a[:n], b[:n], ssm_state, slots[:n], has_init[:n]),
+                           self._rule_call(rule, meta.chunks, mixed[n:], a[n:], b[n:], ssm_state, slots[n:],
+                                           has_init[n:], snapshot)])
+        else:
+            o = self._rule_call(rule, handle, mixed, a, b, ssm_state, slots, has_init, snapshot, out_slots)
         o = self._norm(o, self.in_proj_z(h).reshape(t, self.hv, self.dv), self.norm_weight)
         return self.out_proj(o.reshape(t, self.hv * self.dv))
 

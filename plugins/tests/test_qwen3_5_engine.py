@@ -2,6 +2,8 @@
 Slot pools across chunked prefill and decode, against transformers; and prefix reuse through checkpoints — a request
 that adopts a checkpoint computes exactly what it computes without the cache (the reference recurrence is exact in
 f32, so resuming is bitwise)."""
+import dataclasses
+
 import pytest
 import torch
 from holon.api import SamplingParams
@@ -145,6 +147,47 @@ def test_more_sessions_than_checkpoint_units(tiny):
     pool = hot.ledger.pool("plugin.ssm_state.checkpoints")                      # nothing leaked: the index holds
     held = [p for e in hot.state.index.entries.values() for p in e.payloads.values() if p.pool == pool.name]
     assert pool.capacity - pool.num_free == len(held)                           # every used unit
+
+
+MASK = "toy.even_after@1"
+
+
+@pytest.mark.parametrize("memory", [8 << 20, 300 << 10], ids=["roomy", "preempting"])
+def test_mixed_steps_compute_what_todays_steps_do(tiny, memory):
+    """docs/m07-perf.md §3.1: with `chunk_with_decode` the same requests — chunked prompts beside decoding ones, two
+    constrained by the toy processor, one sampled, a second pass hitting the prefix cache's checkpoints (roomy), or
+    preempted — give today's tokens, and logprobs within batching's ulps. Mixed steps run GQA's decode rows
+    through the decode kernel (the reference prefill does not declare `mixes_row_kinds`) or, flipped, through the
+    prefill kernel, and GDN's per row kind with their in-step checkpoints re-based."""
+    _, path, prompts = tiny
+    g = torch.Generator().manual_seed(7)
+    prompts = prompts + [torch.randint(0, 320, (n,), generator=g).tolist() for n in (90, 12)]
+    greedy = SamplingParams(temperature=0.0, max_tokens=12, logprobs=1, ignore_eos=True)
+    requests = [(p, dataclasses.replace(greedy, ext={MASK: {"marker": p[-1]}}) if i in (1, 4) else
+                 dataclasses.replace(greedy, temperature=1.0, seed=3) if i == 2 else greedy)
+                for i, p in enumerate(prompts)]
+
+    def served(engine):
+        rids = [engine.add(p, params) for p, params in requests]
+        out = {r: ([], []) for r in rids}
+        while engine.has_work():
+            for d in engine.step():
+                out[d.rid][0].extend(d.token_ids)
+                out[d.rid][1].extend(d.logprobs.token)
+        return [out[r] for r in rids]
+
+    kw = {"state_memory": memory, "max_model_len": 160, "slots": {"logits_processor": "testing.toy_mask"}}
+    today = served(_engine(path, **kw))
+    assert all(t % 2 == 0 for i in (1, 4) for t in today[i][0])                 # the constraint bites
+    for cap, one_call in ((8, False), (72, True)):            # 72: a chunk may hold an in-step checkpoint
+        engine = _engine(path, chunk_with_decode=cap, max_step_tokens=96, **kw)
+        engine.executor.planners["kv"].prefill_mixes = one_call
+        for _ in range(2):
+            for (toks, lps), (want, want_lps) in zip(served(engine), today, strict=True):
+                assert toks == want and max(abs(a - b) for a, b in zip(lps, want_lps, strict=True)) < 1e-5
+        stats = engine.stats()
+        assert stats["mixed_steps"] > 0
+        assert stats["preemptions"] > 0 if memory < 8 << 20 else stats["prefix_tokens_saved"] > 0
 
 
 class _Seq:

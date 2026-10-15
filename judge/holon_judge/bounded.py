@@ -229,9 +229,11 @@ def compare_configs(build, configs: dict[str, dict], trace: Trace, k: int = 20, 
         values = {"top1": agree.top1.value, "confident": agree.confident.value, "kl_p50": div.p50, "kl_p99": div.p99}
         failures = [f"{what} {values[what]:.4g} beyond {margin:.3g} of the baseline"
                     for what, (ok, margin) in checks.items() if not ok]
+        if name != "baseline" and configs[name].get("chunk_with_decode") and not stats["mixed_steps"]:
+            failures.append("no step mixed decode rows with prefill chunks")
         results[name] = {"config": {"cuda_graphs": True} | (baseline if name == "baseline" else configs[name]),
                          **dataclasses.asdict(agree), "kl": dataclasses.asdict(div),
-                         "tokens_saved": stats["prefix_tokens_saved"],
+                         "tokens_saved": stats["prefix_tokens_saved"], "mixed_steps": stats["mixed_steps"],
                          "margins": {what: margin for what, (_, margin) in checks.items()},
                          "failures": failures, "passed": not failures}
     return {"sessions": sessions, "turns": len(trace.chunks[0]), "system_len": len(trace.system),

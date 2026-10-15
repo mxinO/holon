@@ -26,6 +26,12 @@ Constrained requests (a logits processor masks their rows from their committed t
 out while it has a row in flight (the engine may commit that row first), and while BLOCKED (its processor is not
 ready), without holding up the requests queued behind it.
 
+Mixed steps (`chunk_with_decode` C > 0; docs/m07-perf.md §3.1): without a drafter, a step whose running requests
+decode also carries prefill chunks — its decode rows first (`BatchPlan.n_decode` of them, each reserved before any
+chunk), then chunks of up to C tokens (at least min(64, C)); a step with nothing to decode prefills up to
+`max_step_tokens`, as today. With a drafter rows never mix: a prefill step capped at C alternates with a decode
+(verify) step while both kinds can run, else the step takes the kind that can.
+
 Liveness: the pools always hold one request of the engine's maximum length, and every unit is held by some request
 or only by the prefix cache, which evicts such units before anyone is preempted. So the top-ranked request fits once
 everything below it is preempted, and every step makes progress.
@@ -42,6 +48,8 @@ from holon.api import BatchPlan, Seq, Status, TokenSrc
 from .batching import host_plan
 from .state import StateManager
 
+MIN_CHUNK = 64          # a mixed step's chunk is at least min(MIN_CHUNK, chunk_with_decode): decoders cannot starve it
+
 
 def _host_tokens(seq: Seq, start: int, n: int, on_device: bool) -> list[int]:
     """A row's input tokens as far as the host knows them; the rest (the last sampled token while it is pending,
@@ -53,8 +61,10 @@ def _host_tokens(seq: Seq, start: int, n: int, on_device: bool) -> list[int]:
 class Scheduler:
     def __init__(self, state: StateManager, max_step_tokens: int, max_model_len: int,
                  draft_k: Callable[[list[Seq]], int] | None = None, lookahead: Callable[[int], int] | None = None,
-                 host_lens_only: bool = False) -> None:
+                 host_lens_only: bool = False, chunk_with_decode: int = 0) -> None:
         self.state, self.max_step_tokens, self.max_model_len = state, max_step_tokens, max_model_len
+        self.chunk_with_decode = chunk_with_decode
+        self._prefilled = False                   # with a drafter and C > 0: the last step prefilled (alternation)
         self.draft_k, self.host_lens_only = draft_k, host_lens_only
         self.lookahead = lookahead or (lambda k: 0)
         self._k = 0                               # the step being scheduled: its plan's draft_k
@@ -71,7 +81,7 @@ class Scheduler:
             self.waiting.append(seq)
 
     def schedule(self) -> tuple[BatchPlan, list[Seq]] | None:
-        rows = self._prefill() or self._decode()
+        rows, n_decode = self._rows()
         if not rows:
             return None
         seqs, n_query, n_logits = (list(c) for c in zip(*rows, strict=True))
@@ -86,11 +96,31 @@ class Scheduler:
         self._step += 1
         plan = host_plan(self._step, np.array([s.slot for s in seqs], dtype=np.int32), np.array(starts, np.int32),
                          np.array(n_query, np.int32), np.array(n_logits, np.int32), np.array(tokens, np.int64), src)
-        plan.draft_k = self._k
+        plan.draft_k, plan.n_decode = self._k, n_decode
         return plan, seqs
 
-    def _prefill(self) -> list[tuple[Seq, int, int]]:
-        rows, budget, ahead = [], self.max_step_tokens, None
+    def _rows(self) -> tuple[list[tuple[Seq, int, int]], int]:
+        """The step's rows (seq, query tokens, logits rows) and how many leading ones are mixed-in decode rows."""
+        cap = self.chunk_with_decode
+        if not cap:
+            return self._prefill(self.max_step_tokens) or self._decode(), 0
+        if self.draft_k is None:                  # mixed: decode rows first, then a capped chunk
+            decode = self._decode()
+            if not decode:
+                return self._prefill(self.max_step_tokens), 0
+            chunks = self._prefill(max(min(cap, self.max_step_tokens - len(decode)), min(MIN_CHUNK, cap)))
+            return decode + chunks, len(decode) if chunks else 0
+        ready = bool(self._ready())               # a drafter: alternate while both kinds can run
+        if self._prefilled and ready:
+            rows = self._decode()
+            self._prefilled = not rows
+            return rows or self._prefill(cap), 0
+        rows = self._prefill(cap if ready else self.max_step_tokens)
+        self._prefilled = bool(rows)
+        return rows or self._decode(), 0
+
+    def _prefill(self, budget: int) -> list[tuple[Seq, int, int]]:
+        rows, ahead = [], None
         self._k = 0
         for seq in list(self.waiting):
             if seq.pending or seq.status is Status.BLOCKED:      # preempted while its decode was in flight: wait for
@@ -111,9 +141,13 @@ class Scheduler:
             budget -= n
         return rows
 
+    def _ready(self) -> list[Seq]:
+        """The running requests a decode step may take."""
+        return [s for s in self.running if not self._at_limit(s) and not (self.host_lens_only and s.inexact)
+                and not (s.constrained and s.pending)]
+
     def _decode(self) -> list[tuple[Seq, int, int]]:
-        ready = [s for s in self.running if not self._at_limit(s) and not (self.host_lens_only and s.inexact)
-                 and not (s.constrained and s.pending)]
+        ready = self._ready()
         self._k = k = self.draft_k(ready) if self.draft_k is not None and ready else 0
         need = 1 + k + (self.lookahead(k) if k else 0)
         rows, capacity, limit = [], self.state.capacity, self.max_model_len

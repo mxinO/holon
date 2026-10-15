@@ -108,7 +108,9 @@ class Verify(Decode):
 
 class Prefill:
     """Ragged chunk rows, each continuing its sequence (bottom-right causal), for KV formats FlashInfer cannot read.
-    Planned from the host's row counts alone; slots, query starts and lengths are read on the device in `run`."""
+    Planned from the host's row counts alone; slots, query starts and lengths are read on the device in `run`. One
+    program walks a row's whole KV (no split), so a mixed step's decode rows go to the decode kernel instead (no
+    `mixes_row_kinds`; docs/m07-perf.md §15)."""
 
     def __init__(self, ctx, **facts) -> None:
         pass

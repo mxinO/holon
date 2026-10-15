@@ -316,6 +316,11 @@ def _bounded(a: argparse.Namespace) -> int:
         baseline = bounded.BASELINE | reference
         configs = {"spec, prefix on, depth 1": {"prefix_cache": True, "overlap": True},
                    "spec, depth 0": dict(bounded.BASELINE)}
+    elif a.mixed:                                        # mixed steps (docs/m07-perf.md §3.1) vs today's schedule
+        baseline = bounded.BASELINE
+        configs = {f"mixed {a.mixed}": bounded.BASELINE | {"chunk_with_decode": a.mixed},
+                   f"mixed {a.mixed}, prefix on, depth 1": {"chunk_with_decode": a.mixed, "prefix_cache": True,
+                                                            "overlap": True}}
     else:
         baseline = bounded.BASELINE
         configs = {f"prefix {'on' if p else 'off'}, depth {int(o)}": {"prefix_cache": p, "overlap": o}
@@ -326,7 +331,7 @@ def _bounded(a: argparse.Namespace) -> int:
         report = bounded.compare_configs(build, configs, trace, a.k, baseline, reference)
     meta = gguf.file_meta(path) if path.suffix == ".gguf" else golden.model_meta(path)
     report |= {"model": meta["model"], "dtype": a.dtype, "graphs_vs_eager": a.graphs_vs_eager,
-               "spec_vs_plain": a.spec_vs_plain, "engine_args": a.engine_args,
+               "spec_vs_plain": a.spec_vs_plain, "mixed": a.mixed, "engine_args": a.engine_args,
                "hardware": golden.hardware(torch.device("cuda")), "torch": torch.__version__, "plant": a.plant}
     print(bounded.table(report))
     if a.json:
@@ -496,6 +501,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--sessions", type=int, default=48, help="concurrent sessions: the decode batch")
     b.add_argument("--graphs-vs-eager", action="store_true", help="judge graphed decode against an eager baseline")
     b.add_argument("--chunked", type=int, help="also judge prefill in chunks of this many tokens")
+    b.add_argument("--mixed", type=int, help="judge mixed steps (this chunk_with_decode) against today's schedule")
     b.add_argument("--spec-vs-plain", action="store_true",
                    help="judge speculative decoding (the engine args' drafter, policy, verifier) against plain")
     b.add_argument("--engine-args", default="", help="EngineConfig flags, as for `holon serve`")

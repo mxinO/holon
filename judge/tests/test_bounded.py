@@ -11,7 +11,8 @@ from holon_judge.planted import PLANTS
 
 CONFIGS = {"prefix on, depth 1": {"prefix_cache": True, "overlap": True},
            "prefix on, depth 0": {"prefix_cache": True, "overlap": False},
-           "prefix off, depth 1": {"prefix_cache": False, "overlap": True}}
+           "prefix off, depth 1": {"prefix_cache": False, "overlap": True},
+           "mixed 8": {"prefix_cache": False, "overlap": False, "chunk_with_decode": 8}}     # docs/m07-perf.md §3.1
 
 
 def test_mean_has_a_cluster_robust_standard_error():
@@ -78,6 +79,7 @@ def test_configurations_agree_with_the_reference_and_the_prefix_cache_saves(run)
     assert results["baseline"]["top1"]["n"] == results["prefix on, depth 1"]["top1"]["n"] == 8 * 3 * 12
     assert results["prefix on, depth 1"]["top1"]["value"] > 0.99
     assert results["baseline"]["tokens_saved"] == 0 and results["prefix on, depth 1"]["tokens_saved"] > 0
+    assert results["baseline"]["mixed_steps"] == 0 and results["mixed 8"]["mixed_steps"] > 0
 
 
 @pytest.mark.parametrize("plant, broken", [

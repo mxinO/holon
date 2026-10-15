@@ -45,13 +45,28 @@ class FakeState:
 
 
 def _run(sched: Scheduler, seqs: list[Seq], max_steps: int = 10_000) -> int:
-    """Drive the scheduler like the engine (token = 0); returns the steps taken."""
+    """Drive the scheduler like the engine (token = 0); returns the steps taken. Checks each step's shape: a mixed
+    step (`n_decode` > 0) is its decode rows, then capped chunks; with a drafter, no step mixes and a capped prefill
+    step is followed by a decode step whenever a running request could decode."""
     for seq in seqs:
         sched.add(seq)
+    cap, drafting, prefilled = sched.chunk_with_decode, sched.draft_k is not None, False
     for step in range(max_steps):
         if not (sched.waiting or sched.running):
             return step
+        could_decode = bool(sched._ready())
         plan, rows = sched.schedule()
+        decoding = [seq.status is Status.RUNNING for seq in rows]
+        n, chunk = plan.n_decode, int(plan.n_query[plan.n_decode:].sum())
+        assert decoding == [True] * n + [False] * (len(rows) - n) or (not n and all(decoding)), step
+        assert (n > 0) == (0 < n < len(rows)) and (not n or (cap and not drafting))
+        if not cap:
+            assert all(decoding) or not any(decoding)                       # today: never mixed
+        elif n:
+            assert (plan.n_query[:n] == 1).all() and chunk <= max(min(cap, sched.max_step_tokens - n), min(64, cap))
+        elif drafting and not any(decoding):
+            assert not (prefilled and could_decode) and chunk <= (cap if could_decode else sched.max_step_tokens)
+        prefilled = not any(decoding)
         for seq, n, sampled in zip(rows, plan.n_query, plan.n_logits, strict=True):
             assert seq.num_computed == plan.start_upper[list(rows).index(seq)]
             seq.num_computed += int(n)
@@ -68,13 +83,17 @@ def _seq(rid: int, prompt: int, gen: int) -> Seq:
     return Seq(str(rid), [1] * prompt, SamplingParams(max_tokens=gen), prompt_len=prompt)
 
 
+@pytest.mark.parametrize("mode", ["today", "mixed", "alternating"])
 @pytest.mark.parametrize("seed", range(40))
-def test_every_request_finishes_when_one_max_request_fits(seed):
+def test_every_request_finishes_when_one_max_request_fits(seed, mode):
+    """Liveness, with mixed steps (`chunk_with_decode` > 0) and, with a drafter, alternating steps too."""
     rng = random.Random(seed)
     max_len = 40
     seqs = [_seq(i, p := rng.randint(1, max_len - 1), rng.randint(1, max_len - p)) for i in range(rng.randint(1, 12))]
     state = FakeState(capacity=rng.randint(max_len, 3 * max_len), slots=rng.randint(1, 4))
-    _run(Scheduler(state, max_step_tokens=rng.randint(1, 50), max_model_len=10**9), seqs)
+    _run(Scheduler(state, max_step_tokens=rng.randint(1, 50), max_model_len=10**9,
+                   draft_k=(lambda seqs: 0) if mode == "alternating" else None,
+                   chunk_with_decode=rng.randint(1, 20) if mode != "today" else 0), seqs)
     assert all(s.status is Status.FINISHED for s in seqs)
     assert state.held == {} and len(state.slots) > 0
 

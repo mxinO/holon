@@ -9,9 +9,10 @@ import pytest
 import torch
 from holon.api import Binding, Fingerprint, Lock, Plan, SamplingParams, UnitPin
 from holon.core import cli, plans
+from holon.core import engine as engine_module
 from holon.core.engine import Engine, EngineConfig
 from holon.core.memory import OutOfUnits
-from holon.core.plugins import PluginError
+from holon.core.plugins import PluginError, PluginSet, discover
 from holon_tools import locks
 
 
@@ -144,6 +145,37 @@ def test_the_clamp_serves_what_the_pools_hold_and_lock_pins_are_soft(tiny):
     assert len(out[0]) == 2                                        # stopped at the clamp ("length")
     with pytest.raises(PluginError, match="pinned provider 'kernels.fast'"):
         Engine(dataclasses.replace(cfg, clamp_context=True, kernels={"rmsnorm": "kernels.fast"}))
+
+
+class _Planner:
+    """A toy planner that cannot run decode rows and prefill chunks in one step (no `mixes_row_kinds`)."""
+
+    def __init__(self, planner) -> None:
+        self.plan_bounds, self.prepare_device = planner.plan_bounds, planner.prepare_device
+
+
+def test_mixed_steps_need_room_mixing_planners_and_no_drafter(tiny, monkeypatch):
+    """docs/m07-perf.md §3.1, at build: `chunk_with_decode` > 0 needs `max_step_tokens` >= max_seqs + the chunk and
+    planners that mix; drafts without an installed draft policy build no drafter, so steps mix (units see
+    `max_draft_tokens` 0) — with one, they alternate and nothing is checked."""
+    cfg = EngineConfig(str(tiny), device="cpu", dtype=torch.float32, page_size=4, max_seqs=2, max_step_tokens=8,
+                       max_model_len=64, state_memory=1 << 20, chunk_with_decode=7)
+    with pytest.raises(ValueError, match=r"must hold max_seqs decode rows and the chunk \(2 \+ 7\), not 8"):
+        Engine(cfg)
+    cfg = dataclasses.replace(cfg, chunk_with_decode=6)
+    bind = engine_module.bind_state
+    monkeypatch.setattr(engine_module, "bind_state", lambda *a: (lambda bound, planners: (
+        bound, {g: _Planner(p) for g, p in planners.items()}))(*bind(*a)))
+    with pytest.raises(PluginError, match=r"planners of \['kv'\] cannot run decode rows and prefill chunks"):
+        Engine(cfg)
+    no_policy = PluginSet({n: i for n, i in discover().items() if i.manifest.slot != "draft_policy"})
+    with pytest.raises(PluginError, match="cannot run decode rows"):
+        Engine(dataclasses.replace(cfg, max_draft_tokens=3), no_policy)
+    monkeypatch.setattr(engine_module, "bind_state", bind)
+    engine = Engine(dataclasses.replace(cfg, max_draft_tokens=3), no_policy)
+    assert engine.policy is None and engine.sched.draft_k is None and engine.ctx.options["max_draft_tokens"] == 0
+    out = engine.generate([list(range(5)), list(range(30))], SamplingParams(temperature=0.0, max_tokens=8))
+    assert [len(o) for o in out] == [8, 8] and engine.stats()["mixed_steps"] > 0
 
 
 UV_LOCK = """
