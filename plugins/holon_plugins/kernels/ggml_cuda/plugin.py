@@ -81,6 +81,10 @@ NATIVE_FP4 = {"mmvq": "q8_1", "mmq": "fp4"}
 PREC = {"q8_1": 30, "fp4": 40}
 ROW_PADDING = 512               # llama.cpp's MATRIX_ROW_PADDING: native W4A4's K step
 MMVQ_MAX = 8                    # llama.cpp's MMVQ_MAX_BATCH_SIZE: mmvq's most activation rows
+# The types whose merged gate/up runs mmvq's fused gate (qlinear_glu, docs/m07-perf.md D6): where bench/glu_sweep.py
+# found it faster per call than the matmul and FlashInfer's silu_and_mul on the RTX 5080, 4090 and 5090 (the locks'
+# gate/up shapes); the i-quants, Q2_K and Q3_K ran it 1–10% slower, so they compose.
+GLU_TYPES = frozenset({"q4_k", "q5_k", "nvfp4"})
 # The crossover per shape (docs/m07-perf.md D2): (GPU class, ggml type, in, out, mmq's activation mode) -> mmvq up to
 # this many rows, mmq above, where repeated graph-timed sweeps (bench/qmm_sweep.py) found mmq faster per call by at
 # least 3% and by more than 3 sd at every graphed row the entry moves (4, 7, 8), and the entries save at least 1% of
@@ -353,12 +357,13 @@ class QLinear(_Matmul):
 
 
 class QLinearGlu(QLinear):
-    """`qlinear_glu@1` (glu "swiglu") on a merged gate/up of `out` rows: mmvq's fused gate at one row (D6), None
-    above — and None for halves that are not a multiple of 4 rows: mmvq reads whole blocks of up to 4 rows at one
-    column (small K: `nwarps` rows), so the up half's last block would read past the stack (memcheck)."""
+    """`qlinear_glu@1` (glu "swiglu") on a merged gate/up of `out` rows: mmvq's fused gate at one row for the types
+    where it pays (`GLU_TYPES`, D6), else None (the caller composes) — and None for halves that are not a multiple of
+    4 rows: mmvq reads whole blocks of up to 4 rows at one column (small K: `nwarps` rows), so the up half's last
+    block would read past the stack (memcheck)."""
 
     def __call__(self, x: torch.Tensor, parts: dict[str, torch.Tensor]) -> torch.Tensor | None:
-        if len(x) != 1 or self.mmvq_rows < 1 or self.out // 2 % 4:
+        if len(x) != 1 or self.mmvq_rows < 1 or self.out // 2 % 4 or self.name not in GLU_TYPES:
             return None
         self._count("mmvq")
         blocks, half = parts["blocks"], self.out // 2

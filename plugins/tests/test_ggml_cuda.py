@@ -49,7 +49,17 @@ from holon_judge import l0, q8_1, w4a4
 from holon_judge.hf_quant import converter, dequantize_blocks, ulps
 from holon_judge.planted import PLANTS
 from holon_plugins.kernels.ggml_cuda import extension
-from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, CROSSOVER, FP4, NATIVE_FP4, PREC, Q8_1, TYPES, mmvq_rows
+from holon_plugins.kernels.ggml_cuda.plugin import (
+    CHUNK,
+    CROSSOVER,
+    FP4,
+    GLU_TYPES,
+    NATIVE_FP4,
+    PREC,
+    Q8_1,
+    TYPES,
+    mmvq_rows,
+)
 from holon_std.ops import reference
 from holon_std.weights.hf import reference as hf
 from holon_testing.qwen3_5_files import LLAMA
@@ -281,9 +291,10 @@ def test_qlinear_random_blocks(ctx, name, k):
     second = "q6_k" if name == "q4_k" else "q4_k"                           # a consumer of another type (D6)
     other = (qlinear(ctx, second, k, out=64), {"blocks": device_blocks(random_blocks(second, 64, k, seed=1))})
     glu, blocks = qlinear(ctx, name, k, out=GLU_OUT, op="qlinear_glu@1"), random_blocks(name, OUT, k, seed=k)
-    check_qlinear(kernel, name, blocks, rows, glu=glu, other=other)
+    check_qlinear(kernel, name, blocks, rows, glu=glu if name in GLU_TYPES else None, other=other)
+    x, w = activations(1, k, seed=1), {"blocks": device_blocks(blocks)}
     halves_of_150 = qlinear(ctx, name, k, op="qlinear_glu@1")          # not 4-row blocks: served, and composed
-    assert halves_of_150(activations(1, k, seed=1), {"blocks": device_blocks(blocks)}) is None
+    assert halves_of_150(x, w) is None and (name in GLU_TYPES or glu(x, w) is None)       # the others compose
 
 
 def test_qlinear_real_tensors(ctx, real):
@@ -493,7 +504,8 @@ def test_hf_fp4_prepare_is_lossless_and_scale2_holds_on_every_path(ctx, elem):
             assert not torch.equal(dequantize_blocks(elem, bad, got.get("scale2")), weight), plant
         t = kernel.mmvq_rows
         glu = qlinear(ctx, f"{elem}/hf", k, out_dtype, GLU_OUT, act_dtype=str(act_dtype)[6:], op="qlinear_glu@1")
-        check_qlinear(kernel, f"{elem}/hf", None, (*range(1, t + 2), 64, CHUNK + 1), got, weight, act_dtype, glu)
+        check_qlinear(kernel, f"{elem}/hf", None, (*range(1, t + 2), 64, CHUNK + 1), got, weight, act_dtype,
+                      glu if elem in GLU_TYPES else None)
         assert set(kernel.calls) == {"mmvq/q8_1", "mmq/q8_1"}
 
 

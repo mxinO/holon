@@ -28,6 +28,7 @@ def main() -> None:
     ap.add_argument("--locks", nargs="+", required=True)
     ap.add_argument("--json")
     a = ap.parse_args()
+    ggml.GLU_TYPES = frozenset(ggml.TYPES)            # time the fused kernel for every type: the sweep decides the set
     ctx = BuildContext(PluginSet(discover()), torch.device("cuda"))
     ext, l2 = ggml.Extension(), torch.cuda.get_device_properties(0).L2_cache_size
     found = {key: e for key, e in sites(a.locks).items() if key[3] == "q8_1"}
@@ -44,8 +45,9 @@ def main() -> None:
         scale2 = torch.ones(1, device="cuda") if name == "nvfp4" else None
         parts = [{"blocks": b} | ({"scale2": scale2} if scale2 is not None else {}) for b in blocks]
         x = torch.randn(1, k, dtype=torch.bfloat16, device="cuda")
-        us = {"fused": per_call_us(lambda i: fused(x, parts[i]), copies, 200),
-              "composed": per_call_us(lambda i: flashinfer.silu_and_mul(plain(x, parts[i])), copies, 200)}
+        us = {"fused": per_call_us(lambda i, f=fused, x=x, p=parts: f(x, p[i]), copies, 200),
+              "composed": per_call_us(lambda i, f=plain, x=x, p=parts: flashinfer.silu_and_mul(f(x, p[i])), copies,
+                                      200)}
         row = {"type": name, "in": k, "out": n, "locks": entry["locks"], "weights": source,
                "us": {v: round(t, 3) for v, t in us.items()},
                "saving_pct": round((us["composed"] - us["fused"]) / us["composed"] * 100, 2)}
