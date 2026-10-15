@@ -219,10 +219,18 @@ class GatedRMSNorm:
         return gdn.gated_rmsnorm(o, z, weight, self.eps)
 
 
+class GDNRewind:
+    def __init__(self, ctx, *, channels: int, kernel_size: int, heads_v: int, dtype: str) -> None:
+        pass
+
+    def __call__(self, state, window, x, a, b, slots, accepted, width):
+        gdn.gdn_rewind(state, window, x, a, b, slots, accepted, width)
+
+
 BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul": SiluMul,
          "attention.paged_prefill": PagedAttention, "attention.paged_decode": PagedAttention,
          "attention.paged_verify": PagedAttention, "attention.causal": CausalAttention,
          "qlinear": QLinear, "qlinear_glu": QLinearGlu, "qembedding": QEmbedding, "linear_experts": LinearExperts,
          "moe_topk": MoeTopk,
          "moe_combine": MoeCombine, "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule,
-         "gated_rmsnorm": GatedRMSNorm, "kv_write": KvWrite}
+         "gated_rmsnorm": GatedRMSNorm, "gdn_rewind": GDNRewind, "kv_write": KvWrite}

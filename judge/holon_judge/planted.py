@@ -64,38 +64,53 @@ def adoption_off_by_one() -> Iterator[None]:
         yield
 
 
+def _when() -> str:
+    """Where a planted path runs: in a graph capture (then on every replay) or eagerly."""
+    return "captured" if torch.cuda.is_available() and torch.cuda.is_current_stream_capturing() else "eager"
+
+
 @contextlib.contextmanager
 def replay_off_by_one() -> Iterator[None]:
     """Speculation on a recurrent mixer: the GDN rewind keeps the state after n accepted tokens, not 1 + n (the
-    verify row's own input token is lost whenever a draft was accepted)."""
-    from holon_std.mixers.gdn.units import GDN
+    verify row's own input token is lost whenever a draft was accepted). Reports how often it fired: verify steps
+    (the group's first layer, whose rewind writes every layer's windows), eagerly and in graph captures (a captured
+    rewind fires on every replay); the startup profile and graph warm-up are included."""
+    from holon_std.mixers.gdn.units import GDN, GROUP
 
-    rewind = GDN.rewind
+    rewind, fired = GDN.rewind, collections.Counter()
 
     def off_by_one(self, ctx):
         n_accept = ctx.seq_table.n_accept
         before = n_accept.clone()
         n_accept.sub_(1).clamp_(min=0)
+        if self._state is not None and self._state[2] == 0 and ctx.meta(GROUP).verify:
+            fired[_when()] += 1
         rewind(self, ctx)
         n_accept.copy_(before)
 
     with mock.patch.object(GDN, "rewind", off_by_one):
         yield
+    print(f"plant replay-off-by-one fired: {dict(fired)}", file=sys.stderr)
 
 
 @contextlib.contextmanager
 def verify_writes_state() -> Iterator[None]:
     """Speculation on a recurrent mixer: a verify row's delta rule writes its final state over the live one (no
-    sink), so the replay starts from the state after every draft, rejected ones included."""
+    sink), so the replay starts from the state after every draft, rejected ones included. Reports how often it fired:
+    verify steps (the group's first layer's verify call; the rewind's `out_slots` are its slots), eagerly and in graph
+    captures; the startup profile and graph warm-up are included."""
     from holon_std.mixers.gdn.units import GDN
 
-    call = GDN._rule_call
+    call, fired = GDN._rule_call, collections.Counter()
 
     def live(self, rule, handle, mixed, a, b, ssm_state, slots, has_init, snapshot=None, out_slots=None):
+        if out_slots is not None and out_slots is not slots and self._state[2] == 0:
+            fired[_when()] += 1
         return call(self, rule, handle, mixed, a, b, ssm_state, slots, has_init, snapshot, None)
 
     with mock.patch.object(GDN, "_rule_call", live):
         yield
+    print(f"plant verify-writes-state fired: {dict(fired)}", file=sys.stderr)
 
 
 @contextlib.contextmanager

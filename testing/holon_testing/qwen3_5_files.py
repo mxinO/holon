@@ -19,22 +19,24 @@ LLAMA = ROOT / "spikes" / "s2_gguf" / "third_party" / "llama.cpp"
 TOKENIZER = sorted(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3.8-27B/snapshots/*"))
 
 
-def tiny_config(heads_v: int, vocab: int = 320) -> Qwen3_5TextConfig:
-    """2 key heads (so tiled and grouped value-head orders differ), `heads_v` value heads, layers alternating
-    linear and full attention, partial rotary with mrope sections."""
+def tiny_config(heads_v: int, vocab: int = 320, dim: int = 16) -> Qwen3_5TextConfig:
+    """2 key heads (so tiled and grouped value-head orders differ), `heads_v` value heads of `dim` (64 for the GPU
+    kernels; attention heads of max(32, dim)), layers alternating linear and full attention, partial rotary (8 dims)
+    with mrope sections."""
+    head = max(32, dim)
     return Qwen3_5TextConfig(
         vocab_size=vocab, hidden_size=64, intermediate_size=96, num_hidden_layers=4, layer_types=None,
-        full_attention_interval=2, num_attention_heads=4, num_key_value_heads=2, head_dim=32,
-        linear_num_key_heads=2, linear_num_value_heads=heads_v, linear_key_head_dim=16, linear_value_head_dim=16,
+        full_attention_interval=2, num_attention_heads=4, num_key_value_heads=2, head_dim=head,
+        linear_num_key_heads=2, linear_num_value_heads=heads_v, linear_key_head_dim=dim, linear_value_head_dim=dim,
         linear_conv_kernel_dim=4, tie_word_embeddings=False, attn_implementation="eager", eos_token_id=None,
-        rope_parameters={"rope_type": "default", "rope_theta": 1e7, "partial_rotary_factor": 0.25,
+        rope_parameters={"rope_type": "default", "rope_theta": 1e7, "partial_rotary_factor": 8 / head,
                          "mrope_section": [2, 1, 1], "mrope_interleaved": True})
 
 
-def tiny_hf(heads_v: int, seed: int = 0, vocab: int = 320) -> torch.nn.Module:
+def tiny_hf(heads_v: int, seed: int = 0, vocab: int = 320, dim: int = 16) -> torch.nn.Module:
     """A random model whose norms, A_log and dt_bias are randomised too (their initial values would hide mistakes)."""
     torch.manual_seed(seed)
-    model = hf.Qwen3_5ForCausalLM(tiny_config(heads_v, vocab)).eval()
+    model = hf.Qwen3_5ForCausalLM(tiny_config(heads_v, vocab, dim)).eval()
     with torch.no_grad():
         for name, p in model.named_parameters():
             if name.endswith(("norm.weight", "A_log", "dt_bias")):

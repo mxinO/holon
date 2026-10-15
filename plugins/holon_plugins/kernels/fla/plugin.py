@@ -10,7 +10,9 @@ gathered into a scratch (zeros without has_init) and the final states scattered 
 (`snapshots`) is the chunk kernel's own f32 state at the chunk where it falls (patched: stored into the payload
 unit). `plan` builds the chunk indices, offsets and snapshot rows on the host, so no call syncs; a decode handle
 depends on the row count only and its tensors belong to the instance, so decode calls capture into CUDA graphs and
-replay for any inputs of that shape."""
+replay for any inputs of that shape.
+
+Also `gdn_rewind@1` (`rewind.py`, ours): a verify step's rewind glue for every GDN layer in one launch (D5)."""
 from __future__ import annotations
 
 import dataclasses
@@ -20,10 +22,11 @@ import torch
 import torch.nn.functional as F
 from holon.api import Constraint, KernelSpec
 
+from . import rewind
 from .vendor import chunk_gated_delta_rule, fused_sigmoid_gating_delta_rule_update
 from .vendor.utils import FLA_CHUNK_SIZE
 
-OP = "gated_delta_rule"
+OP, REWIND = "gated_delta_rule", "gdn_rewind"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -126,6 +129,6 @@ def _supports(f: dict) -> bool:
 
 class Plugin:
     def register(self, regs) -> None:
-        regs.kernels.add(OP, KernelSpec(op=OP, provider="kernels.fla", impl=GatedDeltaRule,
-                                        requires=Constraint(sm_min=80), supports=_supports,
-                                        props=frozenset({"graph_safe", "deterministic"})))
+        for op, impl, supports in ((OP, GatedDeltaRule, _supports), (REWIND, rewind.GDNRewind, rewind.supports)):
+            regs.kernels.add(op, KernelSpec(op=op, provider="kernels.fla", impl=impl, requires=Constraint(sm_min=80),
+                                            supports=supports, props=frozenset({"graph_safe", "deterministic"})))

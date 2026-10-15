@@ -16,6 +16,8 @@ K = 4, in both v-head orders, plus a small shape at head dim 64.
 - Exactness: a 64-aligned split (128 then 72 tokens) bitwise equal to one shot (both ops); a decode step (conv, rule,
   norm) replayed from a CUDA graph with new inputs bitwise equal to eager; runs repeat bitwise; plan and call
   never sync with the host.
+- `gdn_rewind` (docs/m07-perf.md D5) bitwise equal to its oracle on three layers at once, every row accepting a
+  different number of drafts, at the widths of MTP and DFlash2.
 - Plants that must fail: conv1d without its state carry; has_init ignored (states read when False); a row on slot 0
   skipped (fla's original `<= 0` sentinel, rebuilt from the vendored source).
 
@@ -600,3 +602,25 @@ def test_verify_replay_does_not_drift_from_decoding(shape):
         _verify_replay(rule, x, g, spec, slots, accepted, q)
         _decode_steps(rule, x, g, plain, slots, accepted, q)
     assert _close(spec[slots], plain[slots])
+
+
+@pytest.mark.parametrize("width", [4, 8])
+@pytest.mark.parametrize("shape", ["qwen3.8-27b", "small"])
+def test_rewind_glue_is_its_oracle(shape, width):
+    # Rows on slot 0, the last unit and a middle one (a fourth row buffer unused), accepting 0, width − 1 and some
+    # drafts; the oracle leaves every other unit, row and gate untouched, so whole-tensor equality covers them.
+    hk, hv, d = SHAPES[shape]
+    c, layers, slots = channels(hk, hv, d), 3, [0, UNITS - 1, 6]
+    glue = select("gdn_rewind@1", channels=c, kernel_size=KERNEL, heads_v=hv, dtype="bfloat16")
+    accepted = torch.zeros(UNITS, dtype=torch.long, device="cuda")
+    accepted[slots] = dev([0, width - 1, width // 2], torch.long)
+    bufs = [torch.randn(layers, UNITS, c, KERNEL - 1, device="cuda").bfloat16(),
+            torch.randn(layers, 4, c, KERNEL - 1, device="cuda").bfloat16(),
+            torch.randn(layers, 4 * width, c, device="cuda").bfloat16(),
+            torch.randn(layers, 4 * width, hv, device="cuda").bfloat16(),
+            torch.randn(layers, 4 * width, hv, device="cuda").bfloat16()]
+    got, want = [t.clone() for t in bufs], [t.clone() for t in bufs]
+    glue(*got, dev(slots, torch.long), accepted, width)
+    ref.gdn_rewind(*want, dev(slots, torch.long), accepted, width)
+    assert all(torch.equal(g, w) for g, w in zip(got, want, strict=True))
+    assert not torch.equal(got[0], bufs[0]) and not torch.equal(got[3], bufs[3])

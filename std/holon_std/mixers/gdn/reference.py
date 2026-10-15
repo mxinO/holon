@@ -6,6 +6,8 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 
+from .kernels import MASKED
+
 L2_EPS = 1e-6
 
 
@@ -84,3 +86,18 @@ def gated_rmsnorm(o: torch.Tensor, z: torch.Tensor, weight: torch.Tensor, eps: f
     x = o.float()
     normed = (x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)).to(o.dtype)
     return ((weight * normed).float() * F.silu(z.float())).to(o.dtype)
+
+
+def gdn_rewind(state: torch.Tensor, window: torch.Tensor, x: torch.Tensor, a: torch.Tensor, b: torch.Tensor,
+               slots: torch.Tensor, accepted: torch.Tensor, width: int) -> None:
+    """Every layer's gates masked past each row's accepted tokens, and its conv state at the accepted end from
+    window ‖ x (pure data movement: any provider is bitwise this)."""
+    layers, rows, kept = x.shape[0], len(slots), state.shape[-1]
+    t, units = rows * width, slots.long()
+    keep = 1 + accepted[units]
+    past = (torch.arange(width, device=keep.device) >= keep[:, None]).reshape(1, t, 1)
+    a[:, :t].masked_fill_(past, MASKED)
+    b[:, :t].masked_fill_(past, MASKED)
+    inputs = torch.cat([window[:, :rows], x[:, :t].view(layers, rows, width, -1).transpose(2, 3)], dim=3)
+    at = (keep[:, None] + torch.arange(kept, device=keep.device)).view(1, rows, 1, kept)
+    state.index_copy_(1, units, inputs.gather(3, at.expand(layers, -1, x.shape[2], -1)))

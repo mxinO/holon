@@ -7,8 +7,8 @@ license = "Apache-2.0"
 core_abi = ">=0.2,<0.3"
 
 [resources]
-provides = ["kernel.gated_delta_rule@1"]
-requires = ["op.gated_delta_rule@1"]
+provides = ["kernel.gated_delta_rule@1", "kernel.gdn_rewind@1"]
+requires = ["op.gated_delta_rule@1", "op.gdn_rewind@1"]
 
 [properties]
 numerics = "bounded"

@@ -27,8 +27,17 @@ from zero state and never reads its unit, so a unit reused by a new sequence nee
 - `gated_rmsnorm@1`: instance `(o [T, H, D], z [T, H, D], weight [D]) -> [T, H, D]`: per head
   `weight · (o · rsqrt(mean(o²) + eps)) · silu(z)`, the norm in f32 cast to o's dtype before the weight (HF's
   `RMSNormGated`), the gate in f32. Facts: dim, eps, dtype.
+- `gdn_rewind@1` (after a verify step, every layer of a state group at once; docs/m07-perf.md D5): instance
+  `(state [L, units, C, K-1], window [L, R', C, K-1], x [L, T', C], a [L, T', Hv], b [L, T', Hv], slots [R],
+  accepted [S], width) -> None`, with R ≤ R' rows of `width` tokens (row r's at r·width in each layer's x, a and b; its
+  conv inputs before them in window[:, r]) and n_r = accepted[slots[r]] (int64) of its drafts accepted: in place,
+  a and b ← −1e4 (in their dtype) at each row's tokens past its first 1 + n_r, and state[:, slots[r]] ← the last K-1
+  inputs of (window[:, r] ‖ the row's first 1 + n_r tokens of x). A unit shared by several rows (graph padding)
+  is left unspecified (deterministic otherwise). Facts: channels, kernel_size, heads_v, dtype.
 """
 from __future__ import annotations
 
 CAUSAL_CONV1D, GATED_DELTA_RULE, GATED_RMSNORM = "causal_conv1d@1", "gated_delta_rule@1", "gated_rmsnorm@1"
+GDN_REWIND = "gdn_rewind@1"
+MASKED = -1e4                      # gdn_rewind's gates past the accepted tokens: the delta rule's identity step
 ORDERS = ("grouped", "tiled")
