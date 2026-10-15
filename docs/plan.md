@@ -63,8 +63,8 @@ not met (KL p99 42–145× the W4A8 floor's, for ≈ 2.1× prefill speed), and a
 Gate B (FP8 on `kernels.triton_fp8`) is off the v0 critical path (release design §9); M0.7 starts on Gate A. **Gate B met** (2026-10-15): its FP8 locks
 (acceptance 15) came with M0.7's closing propagation (§8a.1).
 
-Expert caching/offload, KV offload, VMM and the optional self-improvement layer follow in v1 (§10); their core
-seams are built and spiked in M0 (design D8).
+Expert caching/offload, KV offload, VMM and the optional self-improvement layer follow in v1 (§10); the M0 seams they
+build on and the additive core seams they still need are listed in design D8.
 
 **Acceptance vocabulary** (design §7.10): **run-identical** = byte-identical run to run on the model's snapshot
 trace (fixed multi-Seq composition covering all graph buckets, chunked prefill, depth 1); **bounded** = within judge
@@ -559,7 +559,8 @@ or records why not.
   v2). It needs prebuilt wheels with Holon's CUDA extensions compiled for the pinned torch / CUDA stack and every
   supported SM, a CI build and test matrix on each card class, and `pip install holonlm` serving without a local CUDA
   toolkit.
-- **Expert caching/offload** on the M0 seams (SeqTable, MemOps, `quiesce`, S6 stream-memop CPU worker):
+- **Expert caching/offload** on the M0 seams (SeqTable, MemOps, `drain`) plus additive core seams (design D8; the S6 stream-memop CPU worker was
+  spiked only):
   TieredStore, in-graph DeviceResolver with double-buffered residency, placement policies (LRU, profile-seeded
   decayed LFU), CPU miss compute (GGUF experts computed on the CPU, Strata-style, with ggml CPU kernels) — MoE
   models larger than VRAM on RTX 5080 16 GB (consumer desktop): Qwen3.5-35B-A3B at Q4_K_M and above, then larger

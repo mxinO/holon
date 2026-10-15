@@ -18,7 +18,10 @@ best-known, human-tuned defaults. Optionally, a trusted judge and a supervisor l
 1. **Isolation with reuse** — adding or changing one model never changes another model's output, while code is
    shared in small units. Enforced by per-model lockfiles that change only through that model's judged transition
    (§4.6) and per-model lock histories (§4.4).
-2. **Extensibility** — features in §9 land as plugins with an empty `git diff core/`.
+2. **Extensibility** — features land as plugins. A new instance of an existing plugin kind (model, kernel, weight
+   format, drafter, sampler, logits processor, frontend …) needs no core change; a new kind of capability (as
+   speculation in M0.4, grammar in M0.5, offload in v1) first adds a small, reviewed, additive core seam — an ABI
+   minor version, so existing plugins keep working — then lands as plugins (owner, 2026-10-15).
 3. **Best-known defaults** — every supported (model, GPU class) ships tuned by us; the engine performs at its best
    with no agent involved.
 4. **Optional self-improvement** — when a capable agent and the user choose to, the agent can tune and replace
@@ -42,14 +45,14 @@ to host-side policies and live tunables).
 
 | # | Decision |
 |---|---|
-| D1 | Single consumer GPU first. Datacenter features (TP/EP/PP, PD, DP-attention) must be addable as plugins; the core keeps the seams (§8). |
+| D1 | Single consumer GPU first. Datacenter features (TP/EP/PP, PD, DP-attention) must be addable as plugins; their core seams are planned additive ABI minors (§8), not built in v0. |
 | D2 | Model ladder: Qwen3 dense → Qwen3-MoE → Qwen3.5 GDN hybrid ([plan §2](plan.md)). |
 | D3 | Borrow existing kernels first (FlashInfer, flash-linear-attention, Triton MoE, …) **only if they fit the plugin contract** (§5.6); otherwise write our own. |
 | D4 | Python control plane; native/Triton kernels; CUDA graphs on the hot path. The plugin API stays Python; hot core structures and the frontend may later be replaced by Rust modules behind unchanged interfaces, only when profiling triggers it (§12). |
 | D5 | Self-improvement is an **optional capability** for capable agents and explicit user intent (e.g. a strong agent served by Holon). The engine itself ships best-known, human-tuned defaults and never depends on it. When used, auto-promotion is limited to policy/kernel/tunable scope under the judge; core, judge, ABI and `approx` numerics need a human (§10.5). |
 | D6 | References (mini-sglang, nano-vllm, vLLM Model Runner V2, SGLang, FreeToken, Strata) are studied, not copied: control-plane code is our own plugin-native implementation. Only kernels may be borrowed, under §5.6. |
 | D7 | Hardware: development on RTX A5000s (sm_86). Consumer performance evidence on consumer desktop machines — RTX 5080 16 GB and RTX 5090 32 GB (sm_120), RTX 4090 (sm_89). Optional Blackwell workstation (RTX PRO 6000 96 GB, sm_120) for sm_120 kernel work and large-memory tasks. Datacenter path (H100, GB200) later. Shared test machines are used through one persistent container per machine: builds, tests and benchmarks run inside it repeatedly rather than as many short batch jobs. |
-| D8 | Expert caching/offload arrives in v1, but its core seams (device SeqTable, MemOps, `quiesce`, stream-memop CPU handshake) are built and spiked in M0 so it lands without core changes. |
+| D8 | Expert caching/offload arrives in v1. Built in M0: the device SeqTable, MemOps (publish / adopt), BLOCKED requests and `drain`; spiked only: the stream-memop CPU handshake (S6). Its offload slots, payload tiers, hit costs, load futures, per-layer events and Pool resize members return as additive ABI minors, each a reviewed core change (invariant 9; owner, 2026-10-15). |
 | D9 | Quantization priority follows the deployment target. Consumer/edge GPUs: llama.cpp GGUF sub-4-bit formats (k-quants, i-quants, e.g. `unsloth/Qwen3.8-27B-GGUF`) — v0. HF-ecosystem GPTQ/AWQ INT4 and FP8 — v1. NVFP4/MXFP4, which mainly serve large-memory datacenter GPUs — v2. |
 
 ---
@@ -1305,7 +1308,7 @@ milestone measures how small the core diff is.
 |---|---|---|
 | KV offload (RAM/SSD, remote) | tiers, mover, placement policy, connector (planned slots) | `BLOCKED`; PrefixIndex tier payloads and per-layer events (planned: minor ABI additions) |
 | KVMem-style bounded window | `windowed_retrieval` StateKind, HostPlannedResolver, re-RoPE prepare kernel | StateKind emits positions; namespace |
-| Expert cache / offload | expert TieredStore, DeviceResolver, placement policies, MoE op with CPU miss compute | stable Pools, stream-memop CPU handshake, `quiesce`, VMM resize (v1) |
+| Expert cache / offload | expert TieredStore, DeviceResolver, placement policies, MoE op with CPU miss compute | stable Pools, `drain`; planned: the stream-memop CPU handshake (spiked in S6), VMM resize (v1) |
 | Quant formats | weight-source dialect, scheme, layout, kernels (`prepare`) | kernel registry, per-slice `adopt_weights` |
 | Linear attention (GDN, KDA, Mamba2) | mixer + `Slot` state (`draft_slots`), page-boundary checkpoints (in v0 the recurrent state kind's options; checkpoint policy and codec slots planned) | fixed-point prefix hits, device Rewindable |
 | DeepSeek sparse attention / V4 compressed KV | `dsa_mla` mixer: MLA `Paged` + indexer `Paged(page_group)` + compressed `Paged(tokens_per_unit)` | `page_group`, `tokens_per_unit`, `alignment` |
