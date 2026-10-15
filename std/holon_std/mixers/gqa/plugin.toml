@@ -20,5 +20,8 @@ provides = [
 [properties]
 numerics = "exact"
 
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"kv.format" = { help = "KV cache format", default = "the model dtype", choices = ["q8_0", "fp8"] }
+
 [reference]
 module = "reference"
