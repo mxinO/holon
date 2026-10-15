@@ -1,5 +1,6 @@
 """Bounded comparison of engine configurations: cluster standard errors, the checks, a clean CPU run end to end, and
 planted bugs it must catch."""
+import contextlib
 import math
 
 import pytest
@@ -66,10 +67,8 @@ def run(tiny_checkpoint, tiny_prompts):
                                    **{"max_step_tokens": 32, "max_seqs": 4} | overrides))
 
     def compare(plant=None, configs=CONFIGS):
-        if plant is None:
+        with PLANTS[plant]() if plant else contextlib.nullcontext():
             return bounded.compare_configs(build, configs, trace, k=5)
-        with PLANTS[plant]():
-            return bounded.compare_configs(build, CONFIGS, trace, k=5)
     return compare
 
 
