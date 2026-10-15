@@ -97,7 +97,11 @@ dataclass InStepPublish frozen
   #1 spec: str
   #2 offset: int
   #3 payload: Payload
-const KERNEL_PROPS = ['deterministic', 'graph_safe', 'needs_host_lens', 'serves_decode_rows']
+const KERNEL_PROPS
+  deterministic
+  graph_safe
+  needs_host_lens
+  serves_decode_rows
 protocol KernelRegistry() required, implemented by core
   add(self, op: 'str', spec: 'KernelSpec') -> 'None'
   get(self, op: 'str') -> 'list[KernelSpec]'
@@ -262,7 +266,18 @@ dataclass Resource frozen
   #0 name: str
   #1 major: int
   classmethod parse(cls, text: 'str') -> 'Resource'
-const SLOTS = {'model': <Cardinality.SINGLE: 'single'>, 'sampler': <Cardinality.SINGLE: 'single'>, 'verifier': <Cardinality.SINGLE: 'single'>, 'draft_policy': <Cardinality.SINGLE: 'single'>, 'unit': <Cardinality.PER_SITE: 'per_site'>, 'kernel': <Cardinality.PER_SITE: 'per_site'>, 'state_kind': <Cardinality.PER_SITE: 'per_site'>, 'weight_source': <Cardinality.PER_SITE: 'per_site'>, 'logits_processor': <Cardinality.ORDERED_MULTI: 'ordered_multi'>, 'frontend': <Cardinality.MULTI: 'multi'>, 'drafter': <Cardinality.MULTI: 'multi'>}
+const SLOTS
+  draft_policy: single
+  drafter: multi
+  frontend: multi
+  kernel: per_site
+  logits_processor: ordered_multi
+  model: single
+  sampler: single
+  state_kind: per_site
+  unit: per_site
+  verifier: single
+  weight_source: per_site
 dataclass SampleOut
   #0 tokens: torch.Tensor
   #1 logprobs: torch.Tensor | None = None
@@ -512,17 +527,52 @@ planner.device_lens
 plugins
 
 # manifest sections and keys
-[plugin] ['core_abi', 'derived_from', 'entry', 'license', 'name', 'slot', 'version']
-[resources] ['provides', 'requires']
-[properties] ['after', 'before', 'numerics']
-[dependencies] ['python']
-[reference] ['module']
-[support] ['detect', 'platforms']
-[provenance] ['commit', 'files', 'license', 'source']
-[build] ['module']
+[plugin]
+  core_abi
+  derived_from
+  entry
+  license
+  name
+  slot
+  version
+[resources]
+  provides
+  requires
+[properties]
+  after
+  before
+  numerics
+[dependencies]
+  python
+[reference]
+  module
+[support]
+  detect
+  platforms
+[provenance]
+  commit
+  files
+  license
+  source
+[build]
+  module
 [options] <any>
 
 # string vocabularies
-Numerics = ['approx', 'bounded', 'exact', 'policy']
-ipc frames = ['abort', 'control', 'deltas', 'failed', 'ready', 'stats', 'submit']
-ipc failed kinds = ['error', 'memory', 'plugin']
+Numerics
+  approx
+  bounded
+  exact
+  policy
+ipc frames
+  abort
+  control
+  deltas
+  failed
+  ready
+  stats
+  submit
+ipc failed kinds
+  error
+  memory
+  plugin

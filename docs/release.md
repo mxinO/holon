@@ -148,7 +148,9 @@ new families or formats; v1's offload, VMM, sandbox and self-improvement; GPUs o
 - **D7 — Agent demo, pre-registered.** `bench/demo/`: a small Python project (three modules, tests failing on a seeded
   bug and a missing function; task: make `pytest` pass without editing tests), committed in step 6. `holon serve` the
   class's 27B lock (5080: UD-IQ3_S; 4090: UD-Q4_K_M); Claude Code at a pinned version, headless, the M0.5 environment;
-  3 runs per class. Success: the harness restores the tests from its own copy, then `pytest` passes. Recorded: turns,
+  3 runs per class, after one uncounted smoke run of M0.5's Claude Code session task (`docs/m05-grammar.md`) at the
+  pinned version against the same `holon serve`. Success: the harness restores the tests from its own copy, then
+  `pytest` passes (as built: §15.5, §15.9). Recorded: turns,
   wall time, served and prefix-saved tokens, TTFT / TPOT, the sampling parameters Claude Code sends, the tool-call
   sequence (no file text). Every miss is published; a smaller task, if any, is pre-registered as a new task and
   reported beside it. Claude Code's auto-compaction assumes a far larger window than the 32K served; the README says so.
@@ -1731,7 +1733,7 @@ the tools, bench or scripts; implemented by a plugin; set by a manifest). A name
   | batches | `ShapeKey` and `BatchPlan.shape`, `TokenSrc.DEVICE_DRAFT`, `Seq.ext`, `BatchPlan.ext`, `DeviceBatch.meta` | never read (`BatchPlan.shape` was only written by `batching.host_plan`, `BatchPlan.ext` only copied by `batching.padded`); the core keys its graphs itself |
   | model, frontend | `ModelSpec.position_fn`, `Tokenizer.eos_token_ids` (and the three bundles' assignments) | the stop set is the weight source's (`WeightSource.eos_token_ids`) |
   | memory | `Pool.device`, `segments`, `base`, `capacity_dev`, `incref`, `decref`, `copy`; `Registry.items` | the core uses them on its own pools; no plugin does |
-  | hooks | `Rewindable.rewind`'s `path` | no caller passes it and its implementers do not accept it |
+  | hooks | `Rewindable.rewind`'s `path` | no caller passes it and its implementers do not accept it; tree verification brings it back as a new optional hook, not a parameter (a new parameter changes a plugin-implemented signature: major) |
 
 - **Added, a declaration the code already relied on:** `Pool.num_free` (the recurrent state kind reads it before
   publishing a checkpoint).
@@ -1759,7 +1761,8 @@ Core: 4369 → 4235 code lines.
 
 - `holon.api.ABI = "1.0"`. All 38 manifests (first-party, `holonlm-testing`'s and the test fixtures') and the
   manifests written inline by tests declare `core_abi = ">=1.0,<2.0"`.
-- `core/abi.txt` regenerated: 30 lines added, 111 removed: the removals and reorderings of §15.1 plus `Pool.num_free`.
+- `core/abi.txt` regenerated (+89 / −120 against main): the removals and reorderings of §15.1, `Pool.num_free`, and,
+  after the panel (§15.9), set-like items listed one element per line.
   The contracts listings (`std/contracts.txt`, `plugins/contracts.txt`) do not change. `check_abi.py --base main`
   accepts it as a major bump (0.2 → 1.0); `check_abi.py` no longer renders the `GraphPolicy` vocabulary.
 - **Every committed lock is outdated, as expected:** the core's `src`, every manifest's (each changed its
@@ -1797,42 +1800,57 @@ Plugin manifests keep their own unit versions (1.0.0).
 
 ### 15.5 The demo task (D7), pre-registered
 
-`bench/demo/` (stdlib-only project; nothing here runs it — step 9 does):
+`bench/demo/` (stdlib-only project; nothing here runs it — step 9 does). It is a small three-module fix chosen to fit
+the 32K context, not a claim of general agent capability (the README says so).
 - **The project** (`bench/demo/project/`): a shop in three modules — `money` (prices as integer cents), `cart`,
   `discounts` (rules and checkout) — and 40 tests. Seeded: `money.format_cents` drops the zero padding of the cents
   (`5` → `0.5`), which fails tests in all three modules; `discounts.buy_n_get_one`, named in the module's docstring
-  and specified by the tests, is missing. As committed: **17 failed, 23 passed**.
-- **The run** (`bench/demo/run.py`): a fresh copy of the project in a temporary directory; Claude Code **2.1.300**
-  (refused otherwise; M0.5's session ran 2.1.296), `claude -p <prompt> --allowedTools Read,Write,Edit,Bash,Glob,Grep
-  --output-format stream-json --verbose`, M0.5's environment variables plus the Sonnet and Opus model aliases and
+  and specified by the tests, is missing. As committed: **17 failed, 23 passed**. Its digest is registered in
+  `run.py` (`PROJECT_DIGEST`); the harness reads the project once and refuses another.
+- **The run** (`bench/demo/run.py`): a fresh copy written from that in-memory project, and a disposable venv with the
+  harness's pytest version (installed offline by uv) first on the agent's `PATH`. Claude Code **2.1.300** (M0.5's
+  session ran 2.1.296): the binary is resolved once to its real path, its sha256 recorded, and path, hash and version
+  re-checked before every run. `claude -p <prompt> --allowedTools Read,Write,Edit,Bash,Glob,Grep --output-format
+  stream-json --verbose`, M0.5's environment variables plus the Sonnet and Opus model aliases and
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` (all recorded in `client.env`), auto-update off, a fresh
-  `CLAUDE_CONFIG_DIR` (no user settings, memory or hooks), `NO_PROXY` for the local proxy, the harness's Python first
-  on `PATH`; through `bench/capture_proxy.py`; stopped after 30 minutes (its whole process group, also after a
-  normal end) and scored as it stands. The prompt: "The Python package `shop` in the current directory fails its
-  tests. Fix the package so that `python -m pytest` passes, without editing any file under tests/. When the tests
-  pass, reply with the single word done."
-- **Success:** after the session, pytest runs in a fresh directory holding only the agent's `shop/` and the
-  harness's own copy of `tests/` (read before the session), with the harness's empty configuration (`-c`),
-  `--noconftest`, no plugin autoload and no `PYTEST_*` variables; all 40 must pass (a scoring run past 10 minutes is
-  a miss). Before the runs it checks that the committed project fails as above. Not guarded: the agent runs the
-  harness's own Python and could change its installed packages. Runs are sequential on one server, so a later run
-  may hit the prefix cache an earlier one filled (the same system prompt and tools), as a user's next session would.
-- **Recorded per run:** success and counts, turns, wall time, exit and result kind, the tool-call sequence (tool, a
-  file tool's path inside the project or `<outside>`, the program a Bash command starts, whether it failed — no file
-  text, no arguments), the sampling parameters of the requests Claude Code sent (`model`, `max_tokens`,
-  `temperature`, `top_p`, `top_k`, `thinking`, `output_config`, `stop_sequences`, deduplicated), the tokens served
-  (input and output as the server reported them), the prefix tokens saved (the engine's counter over the run), TTFT
-  and TPOT per request at the proxy. The record also has the served plan, its lock (from `plans/`) and the diff, the
-  project's digest and the commit.
-- **`capture_proxy.py`** now adds to each request's line `ttft_ms` (the first `content_block_delta`), `total_ms`
-  and `usage` (a whole message's, or a stream's `message_start` and last `message_delta`).
-- **Checked here, without the demo:** the scoring (`run.py --score`) gives 23 / 17 on the project as committed and
-  40 / 0 on a reference fix (not committed); with that fix, deleting a test file, adding a skipping test, a
-  `conftest.py` that clears the collection and a `pytest.ini` with `-k nothing` all score as the fix alone; on the
-  unfixed project those two, and a `pytest.py` that writes a passing JUnit report (in the root and in `shop/`), still
-  score 23 / 17. A whole run against a fake server and a fake `claude` (one proxied streamed request, one tool call,
-  a background process left running) recorded the turns, the tool call, the request's sampling parameters, tokens,
-  TTFT and TPOT, the prefix-saved delta and the lock path from `plans/` on, and killed the background process.
+  `CLAUDE_CONFIG_DIR` (no user settings, memory or hooks), `NO_PROXY` for the local proxy; through
+  `bench/capture_proxy.py`; stopped after 30 minutes (its whole process group, also after a normal end) and scored
+  as it stands. The prompt: "The Python package `shop` in the current directory fails its tests. Fix the package so
+  that `python -m pytest` passes, without editing any file under tests/. When the tests pass, reply with the single
+  word done."
+- **Success:** after the session, pytest runs in a fresh directory holding only the agent's `shop/` (regular files;
+  links are not followed) and the harness's own copy of `tests/`, under the harness's interpreter with its empty
+  configuration (`-c`), `--noconftest`, no plugin autoload and no `PYTEST_*` variables; all 40 must pass. Anything
+  failing while scoring (a timeout past 10 minutes included) is a recorded miss. The interpreter's pytest, `_pytest`,
+  pluggy, `*.pth` files and any `sitecustomize` / `usercustomize` are hashed before and after each run: a change
+  makes the run **invalid** (recorded, not scored). Before the runs the harness checks that the project fails as
+  registered and that `--gpu-class` is the served lock's class. Runs are sequential on one server, so a later run may
+  hit the prefix cache an earlier one filled (the same system prompt and tools), as a user's next session would.
+- **Recorded per run:** validity, success and counts, turns (derived from the stream's assistant messages when a
+  session times out), wall time, exit and result kind, the tool-call sequence (tool, a file tool's path inside the
+  project or `<outside>`, the program a Bash command starts, whether it failed — no file text, no arguments), the final
+  `shop/` diff (synthetic and public; withheld if `check_private`'s patterns match it), per request: status, input and
+  output tokens, TTFT, TPOT, stop reason, a length refusal; counts per HTTP status, length refusals, the peak context,
+  the distinct sampling parameters (`model`, `max_tokens`, `temperature`, `top_p`, `top_k`, `thinking`,
+  `output_config`, `stop_sequences`), the tokens served and the prefix tokens saved (the engine's counter over the
+  run). The record also has the served plan, its lock (from `plans/`) and the diff (host paths scrubbed), the
+  binary's sha256, the project's digest and the commit. Each session's stream and the proxy's lines are kept under
+  the gitignored `bench/.out/demo/`.
+- **Step 9's procedure:** `holon serve` the class's 27B lock; one uncounted smoke run of M0.5's Claude Code session
+  task at 2.1.300 against it; then the 3 counted runs.
+- **`capture_proxy.py`** adds to each request's line `ttft_ms` (the first `content_block_delta`), `total_ms`,
+  `usage` (a whole message's, or a stream's `message_start` and last `message_delta`), the stop reason, and for an
+  error its type and whether it refused the prompt's length (`max_model_len`) — never its text.
+- **Checked here, without the demo:** `tools/tests/test_demo_harness.py` (CPU, ≈ 2 s): the scoring (seeded 23 / 17;
+  a module linked to a fixed copy outside is not followed; a dangling link and a failing pytest are recorded misses),
+  the project and environment digests, the binary pin, the record's helpers (scrubbing, the lock's class, turns from
+  the stream, per-request counts, the `shop/` diff and its private check), the proxy's facts and the per-run venv.
+  By hand: `run.py --score` gives 40 / 0 on a reference fix (not committed); with it, deleting a test file, adding a
+  skipping test, a clearing `conftest.py` and a `pytest.ini` with `-k nothing` score as the fix alone; on the unfixed
+  project those two and a `pytest.py` faking a JUnit pass (in the root or in `shop/`) still score 23 / 17. A whole run
+  against a fake server and a fake `claude` recorded the fields above, found the run's venv first on the session's
+  `PATH` (`command -v pytest`), refused a `--gpu-class` other than the lock's, and killed a background process the
+  session left.
 
 ### 15.6 Review
 
@@ -1877,4 +1895,32 @@ shared host; the slowest tests are unchanged (the MoE kernel setup, the supervis
 4. **The README has no `core_abi` example**, so nothing there changed. Its lock table is still M0.7 §17.7's item for
    step 10.
 5. Not done here, as instructed: the squashed public root, any change to `main`, any lock.
+
+### 15.9 The release panel's review of step 6 (fixed)
+
+Design goal 2 and D8 are held unchanged while the owner chooses between restating them and restoring the v1 seam
+declarations into ABI 1.0. Every code fix below has a test that fails without it (run against the code before it).
+- **Per-element ABI listing (major).** `check_abi.py` lists `SLOTS` (`const SLOTS` then `  tier: multi`-style lines),
+  `KERNEL_PROPS`, each manifest section's keys, `Numerics`, the IPC frames and the failure kinds one element per line:
+  an element added is a minor addition, one removed or changed (a slot's cardinality included) major. Ordered
+  vocabularies a consumer switches over (`FINISH_REASONS`, `ERROR_KINDS`) and the `ParseEvent` union stay one line,
+  so any new value is major (a comment says why). `core/abi.txt` regenerated at 1.0. Test:
+  `test_api.py::test_set_like_abi_items_change_by_element` (a slot, a manifest key and a prop added at 1.1 pass; a
+  removal, a cardinality change and a new finish reason need a major).
+- **Serving minors:** design §4.5 and §15.1 say `Rewindable.rewind`'s `path` returns as a new optional hook, not a
+  parameter (a parameter changes a plugin-implemented signature: major); design §4.3 step 2 is defaults < lock <
+  flags, the typed deployment file future.
+- **Architecture:** design §6.1 (the Pool's VMM members, a pool's device), §6.3 (a payload's tier, `hit_length`'s
+  cost), §6.4 (load futures, per-layer events), §7.7 (`StateKind.fork`; `n > 1` shares by prefix adoption), §8 (the
+  `launcher` slot and TP's core side, PD's and multi-device memory's seams) and §9's KV-offload row are marked
+  "planned; returns as a minor ABI addition". The README describes the demo as what it is (above).
+- **Demo harness (M1, major), isolation:** each run's own venv first on the agent's `PATH`; scoring by the harness's
+  interpreter after its packages' digest check (a change: an invalid run); each run's project written from the
+  in-memory copy checked against the registered digest.
+- **Demo harness minors:** the binary pinned by real path, sha256 and version, re-checked before each run; the
+  uncounted smoke in step 9's procedure (D7); per-request records, counts per status, length refusals, the peak
+  context, turns from the stream on a timeout; the final `shop/` diff in the record (private-checked) and transcripts
+  under `bench/.out/demo/`; `served.diff` scrubbed like the lock; any scoring failure a miss, links not followed,
+  `--gpu-class` checked against the lock's class. Optional hidden report-only tests were not added.
+  `scripts/ci/check_private.py` now runs its scan in `main()`, so the harness reuses its patterns.
 

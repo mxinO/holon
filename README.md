@@ -165,6 +165,10 @@ The server drops Claude Code's per-request billing-header system block, which wo
 (`holon serve <model> --plugin-options http.drop_billing_header=false` keeps it; `/metrics` counts the drops).
 Claude Code's auto-compaction assumes a far larger window than the 32K tokens served at most by default.
 
+The release's agent demo (`bench/demo/`, recorded at release) is a small fix in a three-module Python project — a
+seeded bug and a missing function — chosen to fit that 32K context. It shows the served model completing such a task
+through Claude Code; it is not a claim of general agent capability.
+
 ## Options
 
 Flags override the lock, which overrides the defaults; `holon serve --help` lists every flag (one per engine

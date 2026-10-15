@@ -22,7 +22,7 @@ VENDORED = ("plugins/holon_plugins/kernels/ggml_cuda/vendor/", "spikes/s2_gguf/t
 SELF = "scripts/ci/check_private.py"         # its patterns name what they look for
 
 
-def _patterns() -> re.Pattern[str]:
+def patterns() -> re.Pattern[str]:
     local = ROOT / ".private-patterns"
     extra = [] if not local.is_file() else [
         line.strip() for line in local.read_text().splitlines() if line.strip() and not line.startswith("#")]
@@ -43,14 +43,20 @@ def _safetensors_meta(path) -> str:
     return "\n".join(f"{k}: {v}" for k, v in header.get("__metadata__", {}).items())
 
 
-pat = _patterns()
-msgs = []
-for name in _files():
-    if pat.search(name):
-        msgs.append(f"{name}: private name in the file name")
-    try:
-        text = _safetensors_meta(ROOT / name) if name.endswith(".safetensors") else (ROOT / name).read_text()
-    except (UnicodeDecodeError, OSError, ValueError):
-        continue
-    msgs += [f"{name}:{i}: {m.group(0)!r}" for i, line in enumerate(text.splitlines(), 1) if (m := pat.search(line))]
-fail(msgs[:40] + ([f"… {len(msgs) - 40} more"] if len(msgs) > 40 else []), "no private infrastructure details")
+def main() -> None:
+    pat = patterns()
+    msgs = []
+    for name in _files():
+        if pat.search(name):
+            msgs.append(f"{name}: private name in the file name")
+        try:
+            text = _safetensors_meta(ROOT / name) if name.endswith(".safetensors") else (ROOT / name).read_text()
+        except (UnicodeDecodeError, OSError, ValueError):
+            continue
+        msgs += [f"{name}:{i}: {m.group(0)!r}" for i, line in enumerate(text.splitlines(), 1)
+                 if (m := pat.search(line))]
+    fail(msgs[:40] + ([f"… {len(msgs) - 40} more"] if len(msgs) > 40 else []), "no private infrastructure details")
+
+
+if __name__ == "__main__":
+    main()

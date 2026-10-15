@@ -119,6 +119,30 @@ def test_manifest_rejects_mistakes_with_path(tmp_path: pathlib.Path, abi, extra,
     assert "plugin.toml" in str(e.value)
 
 
+def test_set_like_abi_items_change_by_element(monkeypatch):
+    """`SLOTS`, the manifest's keys, `KERNEL_PROPS` and the string vocabularies are listed one element per line: an
+    element added at 1.1 is a minor addition, one removed or changed is major. An ordered vocabulary consumers switch
+    over (finish reasons, error kinds) stays one line, so any new value is major."""
+    monkeypatch.syspath_prepend(str(pathlib.Path(__file__).resolve().parents[2] / "scripts" / "ci"))
+    from check_abi import bump_error, elements, render, sections
+    from holon.api import Cardinality as C
+
+    def listing(version, slots, keys, props=("deterministic",), reasons=("stop",)):
+        return "\n".join([f"abi {version}", *render("SLOTS", slots), *sections({"plugin": keys, "options": None}),
+                          *render("KERNEL_PROPS", frozenset(props)), *elements("Numerics", ["exact"]),
+                          *render("FINISH_REASONS", tuple(reasons))]) + "\n"
+
+    base = listing("1.0", {"model": C.SINGLE}, {"name"})
+    for added in (listing("1.1", {"model": C.SINGLE, "tier": C.MULTI}, {"name"}),
+                  listing("1.1", {"model": C.SINGLE}, {"name", "variant_of"}),
+                  listing("1.1", {"model": C.SINGLE}, {"name"}, props=("deterministic", "batch_invariant"))):
+        assert bump_error(base, added) is None
+    for broken in (listing("1.1", {}, {"name"}), listing("1.1", {"model": C.MULTI}, {"name"}),
+                   listing("1.1", {"model": C.SINGLE}, set()), listing("1.1", {"model": C.SINGLE}, {"name"}, props=()),
+                   listing("1.1", {"model": C.SINGLE}, {"name"}, reasons=("stop", "length"))):
+        assert "needs a major" in bump_error(base, broken)
+
+
 def test_api_imports_without_torch_or_numpy():
     code = "import sys, holon.api; print(any(m in sys.modules for m in ('torch', 'numpy')))"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.strip()

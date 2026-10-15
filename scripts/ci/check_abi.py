@@ -76,8 +76,27 @@ def render(name: str, obj: object, optional: bool = False) -> list[str]:
         return [f"class {name}({', '.join(b.__name__ for b in obj.__bases__)})", *(f"  {m}" for m in _members(obj))]
     if callable(obj):
         return [f"def {name}{inspect.signature(obj)}"]
-    value = dict(obj) if isinstance(obj, typing.Mapping) else sorted(obj) if isinstance(obj, frozenset) else obj
-    return [f"const {name} = {value!r}"]
+    if isinstance(obj, typing.Mapping):                 # e.g. SLOTS: one entry per line, so a new one is an addition
+        return elements(f"const {name}", (f"{k}: {getattr(v, 'value', v)}" for k, v in sorted(obj.items())))
+    if isinstance(obj, frozenset):                      # e.g. KERNEL_PROPS
+        return elements(f"const {name}", sorted(obj))
+    # Ordered vocabularies a consumer switches over (FINISH_REASONS, ERROR_KINDS) and unions (ParseEvent) stay one
+    # line: a new value breaks a consumer that handles each one, so any change is major.
+    return [f"const {name} = {obj!r}"]
+
+
+def elements(head: str, values: typing.Iterable[str]) -> list[str]:
+    """A set-like item, one element per line under its head: an element added is an addition (minor), one removed or
+    changed a removal (major)."""
+    return [head, *(f"  {v}" for v in values)]
+
+
+def sections(schema: dict[str, set[str] | None]) -> list[str]:
+    """The manifest schema: each section's keys one per line; a section taking any keys on one line."""
+    out = []
+    for section, keys in schema.items():
+        out += elements(f"[{section}]", sorted(keys)) if keys is not None else [f"[{section}] <any>"]
+    return out
 
 
 def _default(f: dataclasses.Field) -> str:
@@ -129,11 +148,11 @@ def listing() -> str:
     lines += ["", "# EngineConfig", *render("EngineConfig", engine.EngineConfig)]
     lines += ["", "# BuildCtx.options keys the core provides", *options_keys()]
     lines += ["", "# manifest sections and keys",
-              *(f"[{s}] {sorted(keys) if keys else '<any>'}" for s, keys in manifest._SECTIONS.items())]
+              *sections(manifest._SECTIONS)]
     lines += ["", "# string vocabularies",
-              *(f"{name} = {sorted(getattr(manifest, name).__args__)}" for name in ("Numerics",)),
-              f"ipc frames = {sorted(k.decode() for k in ipc._DECODE)}",
-              f"ipc failed kinds = {sorted({*ipc.FAILED_KINDS.values(), 'error'})}"]
+              *elements("Numerics", sorted(manifest.Numerics.__args__)),
+              *elements("ipc frames", sorted(k.decode() for k in ipc._DECODE)),
+              *elements("ipc failed kinds", sorted({*ipc.FAILED_KINDS.values(), "error"}))]
     return "\n".join(lines) + "\n"
 
 

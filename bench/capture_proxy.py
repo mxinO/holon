@@ -3,7 +3,8 @@ back, and writes one JSON line per request describing its shape — never its te
 API version and beta flags (docs/m05-grammar.md R §5.4's unverified items: headers, `metadata.user_id`'s shape,
 streaming, the tool list, `cache_control`, side calls). Each line also has the request's timing at the proxy (first
 streamed content after `ttft_ms`, the whole answer after `total_ms`) and the token counts the server reported
-(`usage`). `--raw` also keeps the bodies, for local inspection only.
+(`usage`), its stop reason, and an error's type and whether it refused the prompt's length. `--raw` also keeps the
+bodies, for local inspection only.
 
 Usage:
   python bench/capture_proxy.py --upstream http://<server>:8000 --port 18080 --out <requests.jsonl> [--raw <file>]
@@ -64,20 +65,30 @@ def summary(method: str, path: str, headers: dict[str, str], body: dict | None, 
     return out
 
 
-def usage(answer: bytes) -> dict[str, int]:
-    """The token counts an Anthropic answer reports: a whole message's `usage`, or a stream's (`message_start` gives
-    the input tokens, the last `message_delta` the output tokens)."""
-    out: dict[str, int] = {}
+def facts(answer: bytes) -> dict:
+    """What an Anthropic answer reports, never its text: the token counts (a whole message's `usage`, or a stream's:
+    `message_start` gives the input tokens, the last `message_delta` the output tokens), the stop reason, and for an
+    error its type and whether it refused the prompt's length (the engine's `max_model_len` refusal)."""
+    out: dict = {"usage": {}}
     for line in answer.decode(errors="replace").splitlines() or [""]:
         text = line[5:].strip() if line.startswith("data:") else line
         try:
             event = json.loads(text)
         except ValueError:
             continue
-        if isinstance(event, dict):
-            body = event["message"] if isinstance(event.get("message"), dict) else event
-            out |= body.get("usage") if isinstance(body.get("usage"), dict) else {}
-    return {k: v for k, v in out.items() if k in ("input_tokens", "output_tokens")}
+        if not isinstance(event, dict):
+            continue
+        body = event["message"] if isinstance(event.get("message"), dict) else event
+        usage = body.get("usage")
+        out["usage"] |= {k: v for k, v in usage.items() if k in ("input_tokens", "output_tokens")} \
+            if isinstance(usage, dict) else {}
+        stop = (event.get("delta") or {}).get("stop_reason") if isinstance(event.get("delta"), dict) else None
+        if stop := stop or body.get("stop_reason"):
+            out["stop_reason"] = stop
+        if isinstance(error := event.get("error"), dict):     # an error answer, or a stream's `error` event
+            out["error_type"] = error.get("type")
+            out["length_refused"] = "max_model_len" in str(error.get("message", ""))
+    return out
 
 
 def serve(upstream: str, port: int, out: str, raw: str | None) -> None:
@@ -114,7 +125,7 @@ def serve(upstream: str, port: int, out: str, raw: str | None) -> None:
                 body = None
             record = summary(self.command, self.path, {k.lower(): v for k, v in self.headers.items()}, body,
                              resp.status) | {"ttft_ms": first and round((first - start) * 1e3, 1),
-                                             "total_ms": round((end - start) * 1e3, 1), "usage": usage(answer)}
+                                             "total_ms": round((end - start) * 1e3, 1)} | facts(answer)
             with lock:
                 with open(out, "a") as f:
                     f.write(json.dumps(record) + "\n")

@@ -112,10 +112,14 @@ python bench/report.py evidence/bars_release-*_rtx-5090_*.json      # Markdown t
 
 ## Agent demo (release design D7)
 
-`demo/run.py` runs the pre-registered demo task: Claude Code (pinned, headless) makes the tests of `demo/project/`
-pass without editing them — a seeded bug and a missing function across three modules — against a running `holon
-serve`, through `capture_proxy.py`. Success, the scoring (the harness restores the tests from its own copy, then runs
-`pytest`) and what is recorded are fixed in its docstring; it never records file text.
+`demo/run.py` runs the pre-registered demo task: Claude Code (pinned by version, path and hash, headless) fixes the
+package of `demo/project/` — a seeded bug and a missing function across three modules, a small task chosen to fit
+the 32K context, not a claim of general agent capability — against a running `holon serve`, through
+`capture_proxy.py`. Each run gets a fresh copy of the project (checked against its registered digest) and its own
+venv; it is scored by the harness's interpreter on the agent's `shop/` and the harness's own tests, and is invalid if
+that interpreter's pytest changed. What is recorded is fixed in its docstring: no file text but the synthetic `shop/`
+diff; transcripts stay in `bench/.out/demo/`. Step 9 runs one uncounted smoke of M0.5's Claude Code session task
+first.
 
 ```bash
 holon serve unsloth/Qwen3.8-27B-GGUF                 # the card's 27B lock
