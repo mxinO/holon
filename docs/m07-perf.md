@@ -1558,8 +1558,11 @@ mix: a prefill step capped at C alternates with a verify step.
   `EngineConfig` keep the configured one.
 - **The alternation's prefill step without waiting decoders takes the full budget**, as §3.1's "else take the
   schedulable kind" reads; with a drafter its budget is min(C, `max_step_tokens`) (review round 1's fix).
-- **No A/A arm ran** (§1.3, §7 name one): the paired-TTFT and throughput bars' sd is today's arm's over its four
-  rounds (`bench/mixed_bars.py`), which §10's rev-3 C-m2 also reads as the A/A noise.
+- **The A/A, from the records** (§1.3, §7 name one; no separate arm ran): today's arm against itself, round against
+  round, per (session, turn) (`bench/mixed_bars.py --aa`; `evidence/m07-close_aa_2026-10-15.json`): the paired TTFT's
+  median is 1.000 on every class and trace (12 ordered pairs of 4 rounds), the sd of the per-pair medians 0.0002–0.0015
+  on the agent trace and 0.0005 / 0.0006 / 0.0052 on the long prompt (5080 / 4090 / 5090) — far inside the 1.15 bar.
+  The paired-TTFT and throughput bars' sd is today's arm's over its four rounds (§10's rev-3 C-m2).
 - **The 5090** borrows the 4090's lock (no 5090 GGUF lock yet), as at step 0.
 
 ### 15.7 Review

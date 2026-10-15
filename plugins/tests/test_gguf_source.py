@@ -111,7 +111,7 @@ REPOS = {"o/gguf": {"Qwen3-8B-Q4_K_M.gguf": 5, "Qwen3-8B-UD-Q4_K_M.gguf": 6, "Qw
                    "BF16/Qwen3-8B-BF16-00002-of-00002.gguf": 2},
          "o/hf": {"config.json": 1, "model-00001-of-00002.safetensors": 7, "model-00002-of-00002.safetensors": 7,
                   "model.safetensors.index.json": 1, "tokenizer.json": 2, "original/consolidated.safetensors": 99,
-                  "README.md": 1}}
+                  "consolidated.safetensors": 99, "README.md": 1}}
 
 
 G, H = "gguf", "hf"
@@ -128,7 +128,8 @@ UNREACHABLE = "the hub is unreachable (ConnectError; offline, HF_HUB_OFFLINE=1 s
     ("o/gguf", {G: "several GGUF files"}),               # its config.json does not make it the HF source's
     ("o/one", {G: ("o/one/Qwen3-8B-Q4_K_M.gguf", 5)}),
     ("o/two", {G: "several GGUF files in o/two"}),       # a split set is a file too: not "the only one"
-    ("o/hf", {H: ("o/hf (5 files)", 18)}),               # top-level files only: not original/, not README.md
+    ("o/hf", {H: ("o/hf (5 files)", 18)}),               # top-level files the index names: not original/, README.md,
+                                                         # or a consolidated copy beside the shards
     ("./o/hf", {}),                                      # a path, never a reference
     ("cached:o/gguf:Q4_K_M", {G: ("o/gguf/Qwen3-8B-Q4_K_M.gguf", 5),        # the hub unreachable: the cache's listing
                               H: None}),
@@ -164,7 +165,11 @@ def test_hub_references_are_claimed_by_one_source(tmp_path, monkeypatch, ref, wa
     monkeypatch.setattr(constants, "HF_HUB_CACHE", str(tmp_path))
     monkeypatch.setattr(constants, "HF_HUB_OFFLINE", False)
     monkeypatch.setattr(huggingface_hub.HfApi, "list_repo_tree", tree)
-    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda repo, path: f"fetched {repo} {path}")
+    index = tmp_path / "index.json"                                           # the HF index: the shards only
+    index.write_text(json.dumps({"weight_map": {"a": "model-00001-of-00002.safetensors",
+                                                "b": "model-00002-of-00002.safetensors"}}))
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download",
+                        lambda repo, path: str(index) if path.endswith(".index.json") else f"fetched {repo} {path}")
     monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda repo, allow_patterns: f"fetched {allow_patterns}")
     for name, hub in ((G, gguf_hub), (H, hf_hub)):
         expect = want.get(name)

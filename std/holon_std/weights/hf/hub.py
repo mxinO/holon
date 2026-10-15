@@ -4,6 +4,7 @@ never needs it; its own configuration applies (`HF_HOME`, `HF_TOKEN`, `HF_HUB_OF
 from __future__ import annotations
 
 import fnmatch
+import json
 import pathlib
 import re
 
@@ -11,11 +12,13 @@ from holon.api import Resolved
 
 REPO = re.compile(r"\w[\w.-]*/\w[\w.-]*")          # `<org>/<name>`: a hub repository id
 FILES = ("*.json", "*.safetensors", "*.jinja", "*.txt", "*.model", "*.tiktoken")   # what a checkpoint directory reads
+INDEX = "model.safetensors.index.json"
 
 
 def resolve(ref: str) -> Resolved | None:
     """A repository with `config.json` and safetensors weights (files or an index): its top-level files the source
-    reads. Anything else is not this plugin's (None)."""
+    reads — with an index, only the weight files it names (a repository may also ship other weights, e.g. a
+    consolidated copy). Anything else is not this plugin's (None)."""
     if not REPO.fullmatch(ref):
         return None
     found, cached = listing(ref)
@@ -24,6 +27,9 @@ def resolve(ref: str) -> Resolved | None:
         if cached:                                    # the hub unreachable: say what the cache lacks
             raise ValueError(f"{ref}: its cached snapshot holds no safetensors checkpoint (config.json and weights)")
         return None
+    if INDEX in files:
+        named = set(indexed(ref).values())
+        files = {p: n for p, n in files.items() if not p.endswith(".safetensors") or p in named}
 
     def fetch() -> str:
         from huggingface_hub import snapshot_download
@@ -31,6 +37,14 @@ def resolve(ref: str) -> Resolved | None:
         return snapshot_download(ref, allow_patterns=sorted(files))
 
     return Resolved(f"{ref} ({len(files)} files)", sum(files.values()), fetch)
+
+
+def indexed(repo: str) -> dict[str, str]:
+    """The repository's safetensors index (tensor -> file): the index file alone is fetched (from the cache if there),
+    to know which weight files to size and fetch."""
+    from huggingface_hub import hf_hub_download
+
+    return json.loads(pathlib.Path(hf_hub_download(repo, INDEX)).read_text())["weight_map"]
 
 
 def listing(repo: str) -> tuple[dict[str, int], bool]:

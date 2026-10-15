@@ -9,13 +9,19 @@
 - throughput against today's, against max(5%, 2 sd of today's per-round throughput, relative);
 - TPOT p99 (recorded), and the mixed steps counted.
 
-    python bench/mixed_bars.py <record.json> [--json out]
+`--aa`: the A/A of the paired TTFT instead — today's arm against itself, round against round, per (session, turn)
+(run.py's pairing): the median over every ordered pair of rounds, and the sd of the per-pair medians.
+
+    python bench/mixed_bars.py <record.json> [--aa] [--json out]
 """
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import statistics
+
+import run
 
 
 def _rel_sd(values: list[float]) -> float:
@@ -57,11 +63,36 @@ def bars(record: dict) -> dict:
     return out
 
 
+def aa(record: dict) -> dict:
+    """Per trace: today's paired TTFT against itself (`run.paired_ttft`), each ordered pair of its rounds as a round."""
+    base_name = record["order"][0] if isinstance(record["order"], list) else "holon"
+    out = {}
+    for trace in record["summary"]:
+        runs = [r for r in record["runs"] if r["trace"] == trace and r["backend"] == base_name]
+        pairs = list(itertools.permutations(runs, 2))
+        paired = run.paired_ttft([dict(a, round=n) for n, (a, _) in enumerate(pairs)],
+                                 [dict(b, round=n) for n, (_, b) in enumerate(pairs)])
+        medians = list(paired["per_round"].values())
+        out[trace] = {"rounds": len(runs), "pairs": len(pairs), "median": paired["median"], "per_pair": medians,
+                      "sd": round(statistics.stdev(medians), 4) if len(medians) > 1 else None}
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("record")
+    ap.add_argument("--aa", action="store_true", help="today's arm against itself (paired TTFT)")
     ap.add_argument("--json")
     args = ap.parse_args()
+    if args.aa:
+        result = aa(json.load(open(args.record)))
+        for trace, t in result.items():
+            print(f"{trace}: A/A paired TTFT median {t['median']} over {t['pairs']} ordered pairs of {t['rounds']} "
+                  f"rounds; per-pair medians sd {t['sd']}")
+        if args.json:
+            with open(args.json, "w") as f:
+                json.dump({"source": args.record.rsplit("/", 1)[-1], "aa": result}, f, indent=1)
+        return
     result = bars(json.load(open(args.record)))
     for trace, t in result.items():
         print(f"## {trace} (paired TTFT bar {t['ttft_bar']}, throughput bar {t['throughput_bar']:.1%})")

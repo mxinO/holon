@@ -169,5 +169,6 @@ class TrainedContext(Protocol):
 class ResolvesRefs(Protocol):
     def resolve(self, ref: str) -> Resolved | None:
         """On a weight-source plugin: `ref` names a checkpoint that is not a local path (e.g. a hub id). None if this
-        plugin does not fetch it. Claiming may look the reference up but never downloads; a ValueError explains a
-        reference recognised but not servable (`holon serve` shows it when no plugin claims the reference)."""
+        plugin does not fetch it. Claiming may look the reference up (a listing, a small index) but never downloads
+        weights; a ValueError explains a reference recognised but not servable (`holon serve` shows it when no plugin
+        claims the reference)."""

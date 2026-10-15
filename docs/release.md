@@ -433,6 +433,8 @@ One lock per model's recommended file per card (✓ on main, **R** new, — borr
 - The `op.*@major` contracts (`attention.paged_decode@1`, `qlinear@2`, …) and std unit interfaces (`name@major`,
   knobs whose defaults never change).
 - The lock format, the fingerprint class format, `canonical_hash` and `src_hash`.
+- `holon serve`'s model-name grammar: a path, `<org>/<repo>`, `<org>/<repo>:<TAG>`, `<org>/<repo>/<file>` (design
+  §5.5; the weight sources own it beyond `<org>/<repo>`, §14.3).
 - Not frozen: `holon.core` internals, the judge, the tools.
 
 **Mechanism:**
@@ -1263,8 +1265,8 @@ class Resolved:
 class ResolvesRefs(Protocol):       # holon.api.hooks
     def resolve(self, ref: str) -> Resolved | None:
         """`ref` names a checkpoint that is not a local path (e.g. a hub id): None if this plugin does not fetch it.
-        Claiming may look the reference up but never downloads; a ValueError explains a reference recognised but not
-        servable (plugins cannot import the core's PluginError)."""
+        Claiming may look the reference up (a listing, a small index) but never downloads weights; a ValueError
+        explains a reference recognised but not servable (plugins cannot import the core's PluginError)."""
 ```
 
 **The core** (`cli.local_model`; `holon serve` calls it first, in its own process, after checking the option flags
@@ -1299,7 +1301,7 @@ transformers cached) is said so by each source, rather than declined silently.
 
 | reference | claimed by | fetched |
 |---|---|---|
-| `Qwen/Qwen3-8B` | `std.weights.hf`, if the repository has `config.json` and `*.safetensors` files or a safetensors index | the config, index, tokenizer, template and safetensors files |
+| `Qwen/Qwen3-8B` | `std.weights.hf`, if the repository has `config.json` and `*.safetensors` files or a safetensors index | the config, index, tokenizer and template files and the safetensors files — with an index, only those it names (fetched to size them; M0.7 §17) |
 | `unsloth/Qwen3.8-27B-GGUF:UD-IQ3_S` | `std.weights.gguf` | the one file the tag names (below) |
 | `unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S` (`.gguf` optional) | `std.weights.gguf` | the file `<stem>.gguf`, searched in every directory of the repository: the GGUF source's name drops the directory (`std/holon_std/weights/gguf/source.py:47-49`). The form `holon models` prints |
 | `unsloth/Qwen3.8-27B-GGUF` | the core first (D-repo), else `std.weights.gguf` if the repository has `.gguf` files | this card's verified file; else the repository's only GGUF file, else an error listing its tags |

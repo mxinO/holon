@@ -173,6 +173,10 @@ declares is warned about; a flag's value outside an option's choices is refused 
 lock's is warned about and that lock not used.
 
 - **Turn speculation off:** `holon serve <model> --max-draft-tokens 0`.
+- **Mixed steps:** the plain Qwen3.8-27B locks set `--chunk-with-decode 512`: a step that decodes may also carry up to
+  512 prompt tokens, so a long prompt does not stall the streams already decoding. Turn speculation on over such a
+  lock (a drafter and `--max-draft-tokens N`) and the same setting instead alternates a prefill step of at most 512
+  tokens with a verify step. `--chunk-with-decode 0` turns both off.
 - **Ignore the lock:** `holon serve <model> --no-lock` serves defaults and your flags. Use it if a start hangs: the
   server retries a start that fails other than with a plugin or memory error 4 times, each up to 600 s, before falling
   back to defaults.

@@ -201,6 +201,12 @@ def engine_shapes(path: str | pathlib.Path) -> dict[str, tuple[str, int, int]]:
                for t in reader.tensors if t.tensor_type not in _DENSE and t.name != "token_embd.weight"
                and not t.name.endswith("_exps.weight")
                and not (q35 is not None and re.match(rf"blk\.{q35['layers']}\.", t.name))}
+    return merged(linears)
+
+
+def merged(linears: dict[str, tuple[str, int, int]]) -> dict[str, tuple[str, int, int]]:
+    """Each linear (`<owner>.<HF module>` -> (ggml type, in, out)) -> the shape of the matmul the engine runs it in:
+    its own, or its merged group's (`MERGES`, under one owner: same type and input; `Linear.merge`)."""
     out = dict(linears)
     for owner in sorted({name.rsplit(".", 2)[0] for name in linears}):
         for group in MERGES:
@@ -208,6 +214,12 @@ def engine_shapes(path: str | pathlib.Path) -> dict[str, tuple[str, int, int]]:
             if all(n in linears and out[n] == linears[n] for n in names) and len({linears[n][:2] for n in names}) == 1:
                 out |= dict.fromkeys(names, (*linears[names[0]][:2], sum(linears[n][2] for n in names)))
     return out
+
+
+def module_name(name: str) -> str:
+    """A GGUF layer tensor's `blk.<i>.<HF module>` (the key `merged` groups by; a drafter's layers too), else `name`."""
+    m = re.fullmatch(r"(blk\.\d+)\.(\w+)\.weight", name)
+    return f"{m[1]}.{_LAYER[m[2]]}" if m is not None and m[2] in _LAYER else name
 
 
 def row_paths(path: str | pathlib.Path, rows: int, fingerprint) -> dict[str, str]:

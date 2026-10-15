@@ -256,23 +256,41 @@ def _emulation(draft: str, target: str):
     return _q8_1_matmul(named)
 
 
+def row_limits(named: list, fingerprint, lib=None) -> dict[str, tuple[str, int]]:
+    """Each quantized tensor of `named` [(reference name, GGUF tensor)] -> (ggml type, the most rows its matmul runs
+    on mmvq on `fingerprint`'s class): the ggml plugin's `mmvq_rows` for the matmul the engine runs it in — merged
+    with its siblings (`gguf.merged`: a drafter's q/k/v, gate/up), not the tensor's own shape. Dense ones are left
+    out."""
+    from holon_plugins.kernels.ggml_cuda import plugin
+
+    from . import gguf as judge_gguf
+
+    quantized = [(name, t) for name, t in named if t.tensor_type.name.lower() not in ("f32", "f16", "bf16")]
+    shapes = judge_gguf.merged({judge_gguf.module_name(t.name): (t.tensor_type.name.lower(), int(t.shape[0]),
+                                                                 int(t.shape[1])) for _, t in quantized})
+    out = {}
+    for name, t in quantized:
+        kind, k, rows = shapes[judge_gguf.module_name(t.name)]
+        out[name] = (kind, plugin.mmvq_rows(fingerprint, kind, "q8_1", k, rows, lib))
+    return out
+
+
 def _q8_1_matmul(named: list):
     """A reference's matmul for the GGUF tensors `named` [(reference name, tensor)]: llama.cpp's q8_1 rounding on the
-    kernel path its row count selects (the ggml plugin's own `mmvq_rows`, for this GPU's class); dense ones exact."""
+    kernel path its row count selects (`row_limits`, for this GPU's class); dense ones exact."""
     import numpy as np
     from holon.core import platform
-    from holon_plugins.kernels.ggml_cuda import extension, plugin
+    from holon_plugins.kernels.ggml_cuda import extension
 
     from . import q8_1
 
     major, minor = torch.cuda.get_device_capability()
-    lib, fp = extension.load(10 * major + minor), platform.fingerprint(torch.device("cuda"))
+    limits = row_limits(named, platform.fingerprint(torch.device("cuda")), extension.load(10 * major + minor))
     kinds = {}
     for name, t in named:
-        kind = t.tensor_type.name.lower()
-        if kind in ("f32", "f16", "bf16"):
+        if name not in limits:
             continue
-        limit = plugin.mmvq_rows(fp, kind, "q8_1", int(t.shape[0]), int(t.shape[1]), lib)
+        kind, limit = limits[name]
         blocks = np.asarray(t.data)
         offs = {route: q8_1.offsets(blocks, kind, q8_1.blocking(kind, route).sum_group).float().cuda()
                 for route in (q8_1.MMVQ, q8_1.MMQ) if q8_1.blocking(kind, route).sum_group}

@@ -40,8 +40,10 @@ class _Server(uvicorn.Server):
 
 
 def hint(host: str, port: int, model_id: str) -> str:
-    """The lines that point clients, and Claude Code, at this server."""
-    host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else f"[{host}]" if ":" in host else host
+    """The lines that point clients, and Claude Code, at this server: a wildcard bind by its loopback address (IPv6's
+    `::` by `[::1]`, which an IPv6-only socket also answers)."""
+    host = {"0.0.0.0": "127.0.0.1", "": "127.0.0.1", "::": "::1"}.get(host, host)
+    host = f"[{host}]" if ":" in host else host
     url = f"http://{host}:{port}"
     model = shlex.quote(model_id)
     return (f"holon: serving {model_id} at {url} (OpenAI: /v1; Anthropic: /v1/messages)\n"

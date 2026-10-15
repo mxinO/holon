@@ -100,3 +100,28 @@ def test_a_gguf_mtp_chain_passes_and_its_swapped_concat_fails(tiny_qwen3_5_gguf,
     monkeypatch.setattr(units.MTPHead, "__init__", lambda self, ctx, **kw: init(self, ctx, **{**kw, "order":
                                                                                                "hidden_first"}))
     assert judged().passed is False
+
+
+def test_a_draft_floor_routes_by_the_engine_s_merged_shapes():
+    """The DFlash and MTP floors' GGUF matmuls take the path of the matmul the engine runs (docs/m07-perf.md §17): a
+    draft's gate and up merged, as the target's floors do (`gguf.merged`) — on the RTX 5090 IQ4_XS's 5120x34816 entry
+    is 7 rows, the gate's own 5120x17408 6. Needs a prebuilt extension (llama.cpp's rule is host code), no GPU."""
+    import types
+
+    import gguf
+    from holon.api import Fingerprint
+    from holon_plugins.kernels.ggml_cuda import extension, plugin
+
+    try:
+        lib = plugin.rule_module(120)
+    except extension.NotBuilt:
+        pytest.skip("no prebuilt ggml extension")
+
+    def tensor(name: str, k: int, out: int, kind: str = "IQ4_XS"):
+        return types.SimpleNamespace(name=name, tensor_type=gguf.GGMLQuantizationType[kind], shape=(k, out))
+    named = [(f"layers.0.mlp.{p}_proj.weight", tensor(f"blk.0.ffn_{p}.weight", *shape))
+             for p, shape in (("gate", (5120, 17408)), ("up", (5120, 17408)), ("down", (17408, 5120)))]
+    named.append(("layers.0.input_layernorm.weight", tensor("blk.0.attn_norm.weight", 5120, 1, "F32")))
+    limits = drafter.row_limits(named, Fingerprint(gpu="rtx-5090", sm=120, vram_gib=0, toolchain=""), lib)
+    assert limits == {"layers.0.mlp.gate_proj.weight": ("iq4_xs", 7), "layers.0.mlp.up_proj.weight": ("iq4_xs", 7),
+                      "layers.0.mlp.down_proj.weight": ("iq4_xs", 6)}
