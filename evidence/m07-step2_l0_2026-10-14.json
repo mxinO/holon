@@ -1,0 +1,36 @@
+{
+ "workload": "m07-step2 L0 and memcheck on the release classes",
+ "date": "2026-10-14",
+ "commands": {
+  "l0": "python -m pytest -q plugins/tests/test_ggml_cuda.py plugins/tests/test_ggml_cuda_moe.py plugins/tests/test_attention_kv_quant.py (phase 2: test_ggml_cuda.py only)",
+  "memcheck": "cd plugins && PYTORCH_NO_CUDA_MEMORY_CACHING=1 compute-sanitizer --tool memcheck python -m tests.memcheck_ggml_cuda | tests.memcheck_triton_attn"
+ },
+ "runs": {
+  "rtx-5080@74574e0": {
+   "l0": "322 passed, 1 skipped, 10 warnings in 350.70s (0:05:50)",
+   "memcheck_ggml_cuda": "========= ERROR SUMMARY: 12 errors",
+   "memcheck_triton_attn": "========= ERROR SUMMARY: 2 errors"
+  },
+  "rtx-5080@e14b311": {
+   "l0": "143 passed, 1 warning in 125.46s (0:02:05)",
+   "memcheck_ggml_cuda": "========= ERROR SUMMARY: 0 errors",
+   "memcheck_triton_attn": null
+  },
+  "rtx-4090@74574e0": {
+   "l0": "314 passed, 9 skipped, 10 warnings in 576.96s (0:09:36)",
+   "memcheck_ggml_cuda": "========= ERROR SUMMARY: 12 errors",
+   "memcheck_triton_attn": "========= ERROR SUMMARY: 0 errors"
+  },
+  "rtx-4090@e14b311": {
+   "l0": "137 passed, 6 skipped, 1 warning in 150.88s (0:02:30)",
+   "memcheck_ggml_cuda": "========= ERROR SUMMARY: 0 errors",
+   "memcheck_triton_attn": null
+  },
+  "rtx-5090@eb9aeaa": {
+   "l0": "322 passed, 1 skipped, 10 warnings in 339.16s (0:05:39)",
+   "memcheck_ggml_cuda": "========= ERROR SUMMARY: 0 errors",
+   "memcheck_triton_attn": "========= ERROR SUMMARY: 0 errors"
+  }
+ },
+ "notes": "memcheck_ggml_cuda's 12 errors at 74574e0 are the fused gate reading past the up half at out 300 (fixed in 0308bbc: 0 errors after); the RTX 5080's memcheck_triton_attn ran out of memory under the sanitizer (16 GB) before the new cases; sm_120a is covered by the RTX 5090"
+}

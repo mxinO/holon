@@ -1,6 +1,6 @@
 # M0.7 — performance: fused glue, mixed steps, a gated megakernel experiment
 
-Status: **rev 3.3, step 2 built, its RTX 5090 rows pending** (2026-10-14; §12 step 1, §13 step 2). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
+Status: **rev 3.3, step 2 built** (2026-10-14; §12 step 1, §13 step 2). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
 architecture, numerics / performance / tests) over four rounds. Step 0 ran (§11), and the panel's review of it and the
 lead's decisions are in §10's "Step 0 panel round"; §1, §3.1, §4, §5, §6, §7 and §11 carry them. The panel re-checks
 rev 3.2 before step 1; rev 3.3 fixes its findings (§10, "rev 3.2 re-check") and awaits the panel's final
@@ -1085,11 +1085,25 @@ is unchanged (same 8-row paths); the 5090's was re-recorded (`holon_judge golden
 rtx-5090:120`, fe0fbc1). `judge/tests/test_gguf.py::test_a_per_shape_floor_routes_as_the_table_does` (CPU) now ties
 every committed per-shape floor to the table: it failed on the old 5090 floor. The 8-row L2 on the RTX 5080 at
 48ef045 (D3 and D4 in): top-1 97.44% (≥ 97.30%), KL p99 0.592 (floor 0.704), ΔPPL vs floor +0.28% ± 0.40%: PASS
-(`evidence/m07-step2_l2-8_rtx-5080_2026-10-14.json`). RTX5090_D2
+(`evidence/m07-step2_l2-8_rtx-5080_2026-10-14.json`). On the RTX 5090 at eb9aeaa, against the re-recorded floor:
+top-1 97.15% (≥ 96.77%), KL p99 0.714 (floor 0.713), ΔPPL vs floor −1.04% ± 0.80%: PASS
+(`evidence/m07-step2_l2-8_rtx-5090_2026-10-14.json`). The 5090's guard again (ABBA, the entries against
+`--llama-crossover`): tg128 at batch 4 295.6 against 295.6 tok/s (0.0%), at batch 8 513.1 against 496.1 (**+3.4%**),
+DFlash2 verify B1 20.16 against 20.89 ms (**−3.5%**). Step 1 had +3.1% and −3.5%
+(`evidence/m07-step2_guard_rtx-5090_2026-10-14.json`). The 5080's moved entries change row 7 only, which no guard
+row runs.
 
 ### 13.6 The RTX 5090
 
-RTX5090_SECTION
+Three desktops failed before a fourth ran it:
+- one throttled at its clock screen (SM p10 / p50 1927 / 2340 MHz, not steady) and was released;
+- one throttled too (1687 / 2077) and then lost its GPU (`CUDA unknown error`) — no record kept;
+- one passed L0, memcheck and its screen, then fell off the bus two rounds into the 8B's A/B (Xid 79).
+
+The fourth (SM p10 / p50 2617 / 2670 MHz, steady, at the power cap) ran everything at eb9aeaa, the final code: the
+L0 (322 passed, 1 skipped), both memchecks (0 errors), every A/B arm (§13.3), the glu sweep (§13.4), the 8-row L2 and
+the guard (§13.5). The 27B plain lock's rows are noisier on the 5090 than on the other classes (sd up to 1–4% on
+B4 and prefill), but every verdict rests on rows with sd ≤ 0.35%.
 
 ### 13.7 Plants (verified once, not kept as tests)
 
@@ -1183,7 +1197,12 @@ One reviewer (correctness, architecture, numerics / tests) on the aggregate chan
 - **Round 2:** no blocker or major; one minor (evidence records for the round's new claims: written,
   `evidence/m07-step2_*`) and four nits: the glu provider checked before its activation-mode check (fixed); the
   per-type glu sites (recorded in §13.9); `GLU_TYPES` per class (§13.4); the docs (this section).
-- REVIEW_ROUND3
+- **Round 3** (§13, the evidence, the engine_shapes cache): no blocker or major; three minors.
+  - The §13.7 metrics and mechanism, now corrected: mean KL against regret, the one-sided spec-vs-plain check, the
+    fired counts and the plant's 1-token L2 added to the record, and §6 amended.
+  - `glu_sweep`'s gate/up rule was too loose; fixed (eb9aeaa), and §13.4 reads only the real gate/up shapes.
+  - The lead list: the 5090 items, the corrected judge-gap options, lock churn.
+  - Nits: the cache key (documented); the committed placeholders (filled).
 
 ### 13.11 Suite
 
@@ -1207,7 +1226,7 @@ gained assertions. `scripts/ci/run_all.sh main` is green.
   plugin produces, would also leave a site that never runs), and every GQA layer an `attention.qk_rope_kv@1` site.
   The single propagation touches every GGUF and HF lock.
 - **GDN** (§13.9): step 2's three-line edit to `gdn/units.py` needs a rebase with step 3's D5.
-- **The RTX 5090 desktops:** RTX5090_LEAD.
+- **The RTX 5090 desktops:** three of the four 5090 desktops tried failed (§13.6); every 5090 verdict comes from the fourth, at the final code.
 - **glu is small** (0.55–1.0% of the 8B's B1 step, nothing on the 27B) and type-dependent. It is kept by §1.1's rule.
   Dropping it would remove `qlinear_glu@1`, `Linear.use_glu` / `glu` and `QLinearGlu`.
 - **A latent read in plain mmvq:** at small K, llama.cpp's one-column kernel reads whole blocks of up to 4 rows, so a

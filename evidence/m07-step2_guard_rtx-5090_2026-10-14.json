@@ -1,0 +1,39 @@
+{
+ "workload": "m07-step2 D2 guard on the RTX 5090 after the re-derived table (rows 4 and 8; ABBA d2 / llama / llama / d2)",
+ "date": "2026-10-14",
+ "commit": "eb9aeaa (tg), a917b1f (DFlash: step_profile's counter fix)",
+ "commands": {
+  "tg": "python bench/holon_tg.py --model unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M.gguf --engine-args '--max-step-tokens 2048 --plugin-options recurrent.checkpoints=4' --batch 4 8 -n 128 -r 5 [--llama-crossover]",
+  "dflash": "python bench/step_profile.py --name 27b-dflash2 --model <27B UD-Q4_K_M> --lock plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/4.lock --engine-args '<DFlash2 k 7>' --prefill --batches 1 [--llama-crossover]"
+ },
+ "runs": {
+  "guard-1-d2-tg": {
+   "b4": 296.2,
+   "b8": 513.27
+  },
+  "guard-2-llama-tg": {
+   "b4": 295.89,
+   "b8": 496.27
+  },
+  "guard-3-llama-tg": {
+   "b4": 295.36,
+   "b8": 495.98
+  },
+  "guard-4-d2-tg": {
+   "b4": 295.06,
+   "b8": 512.83
+  },
+  "guard-1-d2-dflash": {
+   "verify_b1_graphed_wall_ms": 20.1603
+  },
+  "guard-2-llama-dflash": {
+   "verify_b1_graphed_wall_ms": 20.887
+  },
+  "guard-3-llama-dflash": {
+   "verify_b1_graphed_wall_ms": 20.8999
+  },
+  "guard-4-d2-dflash": {
+   "verify_b1_graphed_wall_ms": 20.1669
+  }
+ }
+}

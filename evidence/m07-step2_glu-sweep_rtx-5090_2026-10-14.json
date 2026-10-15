@@ -1,0 +1,179 @@
+{
+ "command": "python bench/glu_sweep.py --locks <the 8B Q4_K_M, 27B UD-IQ3_S, 27B UD-Q4_K_M and 8B NVFP4 locks>",
+ "commit": "eb9aeaa",
+ "date": "2026-10-14",
+ "note": "gate/up shapes are out = 2 x the lock's largest in (4096x24576, 5120x34816); records before eb9aeaa also hold other shapes picked by a looser rule",
+ "gpu": "NVIDIA GeForce RTX 5090",
+ "sm": 120,
+ "shapes": [
+  {
+   "type": "iq2_s",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 44.053,
+    "composed": 43.608
+   },
+   "saving_pct": -1.02
+  },
+  {
+   "type": "iq2_xs",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 40.499,
+    "composed": 39.388
+   },
+   "saving_pct": -2.82
+  },
+  {
+   "type": "iq2_xxs",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 38.811,
+    "composed": 36.932
+   },
+   "saving_pct": -5.09
+  },
+  {
+   "type": "iq3_s",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 55.501,
+    "composed": 53.546
+   },
+   "saving_pct": -3.65
+  },
+  {
+   "type": "iq3_xxs",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 49.459,
+    "composed": 46.977
+   },
+   "saving_pct": -5.28
+  },
+  {
+   "type": "iq4_nl",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "us": {
+    "fused": 62.753,
+    "composed": 63.128
+   },
+   "saving_pct": 0.59
+  },
+  {
+   "type": "iq4_xs",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true,
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 60.972,
+    "composed": 59.79
+   },
+   "saving_pct": -1.98
+  },
+  {
+   "type": "q3_k",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "us": {
+    "fused": 53.28,
+    "composed": 51.324
+   },
+   "saving_pct": -3.81
+  },
+  {
+   "type": "q4_k",
+   "in": 4096,
+   "out": 24576,
+   "locks": {
+    "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+   },
+   "weights": "Qwen3-8B-Q4_K_M.gguf",
+   "us": {
+    "fused": 36.23,
+    "composed": 37.833
+   },
+   "saving_pct": 4.24
+  },
+  {
+   "type": "q4_k",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "us": {
+    "fused": 63.343,
+    "composed": 63.283
+   },
+   "saving_pct": -0.09
+  },
+  {
+   "type": "q5_k",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "us": {
+    "fused": 76.691,
+    "composed": 76.433
+   },
+   "saving_pct": -0.34
+  },
+  {
+   "type": "nvfp4",
+   "in": 4096,
+   "out": 24576,
+   "locks": {
+    "nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-5080": true
+   },
+   "weights": "random",
+   "us": {
+    "fused": 35.54,
+    "composed": 37.718
+   },
+   "saving_pct": 5.77
+  }
+ ]
+}
