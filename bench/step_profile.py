@@ -185,10 +185,11 @@ class GemmCounter:
 
         def counted(kernel, x, parts):
             if self.active:
-                self.calls[(kernel.name, kernel.k, kernel.out, kernel.act["mmq"], len(x))] += 1
+                rows = x if isinstance(x, torch.Tensor) else x.x       # a prepared input's (D6)
+                self.calls[(kernel.name, kernel.k, kernel.out, kernel.act["mmq"], len(rows))] += 1
                 self.bytes += parts["blocks"].numel() * parts["blocks"].element_size()
-                if len(x) <= 64:
-                    self.inputs[(id(x), x._version)] = x
+                if len(rows) <= 64:
+                    self.inputs[(id(rows), rows._version)] = rows
             return original(kernel, x, parts)
 
         ggml.QLinear.__call__ = counted

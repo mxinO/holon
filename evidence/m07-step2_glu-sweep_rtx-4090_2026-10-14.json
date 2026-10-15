@@ -2,6 +2,7 @@
  "command": "python bench/glu_sweep.py --locks <the 8B Q4_K_M, 27B UD-IQ3_S, 27B UD-Q4_K_M and 8B NVFP4 locks>",
  "commit": "e14b311",
  "date": "2026-10-14",
+ "note": "gate/up shapes are out = 2 x the lock's largest in (4096x24576, 5120x34816); records before eb9aeaa also hold other shapes picked by a looser rule",
  "gpu": "NVIDIA GeForce RTX 4090",
  "sm": 89,
  "shapes": [

@@ -1,6 +1,6 @@
 # M0.7 — performance: fused glue, mixed steps, a gated megakernel experiment
 
-Status: **rev 3.3, step 2 built** (2026-10-14; §12 step 1, §13 step 2). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
+Status: **rev 3.3, step 2 built, its RTX 5090 rows pending** (2026-10-14; §12 step 1, §13 step 2). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
 architecture, numerics / performance / tests) over four rounds. Step 0 ran (§11), and the panel's review of it and the
 lead's decisions are in §10's "Step 0 panel round"; §1, §3.1, §4, §5, §6, §7 and §11 carry them. The panel re-checks
 rev 3.2 before step 1; rev 3.3 fixes its findings (§10, "rev 3.2 re-check") and awaits the panel's final
@@ -275,7 +275,7 @@ is taken to cost nothing).
   `mmvq-kv-q8_0` floor for q8_0 locks; M0.6's fp4-mode floor for W4A4 entries). Bounded at `max_seqs` 1 and 8, the
   baseline at the same value.
 - **Plants (two new):** a KV slot off by one only at page boundaries (D3); a RoPE position off by one on decode rows
-  only (D3; bounded catches it). Re-verified with a "fired" count > 0: `ggml_stale_q8_1` (after D6), `replay_off_by_one`
+  only (D3; predicted caught by bounded; it is not: §13.7). Re-verified with a "fired" count > 0: `ggml_stale_q8_1` (after D6), `replay_off_by_one`
   and `verify_writes_state` (after D5). Plants are verified once, not kept as tests.
 - **Locks:** propagated once at the close; the snapshot trace gains a capped chunk beside decoders when D7 ships.
 
@@ -985,7 +985,7 @@ gains the two ops). Desktops were clock-screened before their records (`bench/cl
 ### 13.2 Checks
 
 - **Bitwise, in the existing L0 loops** (sm_86 locally, sm_89 on the RTX 4090, sm_120a on the RTX 5080; plus the RTX
-  5090 at 74574e0): `test_mmq_schedules` asserts mmq's bf16 output is its f32 output cast under each schedule (the
+  5090 at eb9aeaa): `test_mmq_schedules` asserts mmq's bf16 output is its f32 output cast under each schedule (the
   fixup forced at out 300), and with NVFP4's `scale2` (an HF layout, native W4A4 too on sm_120) the f32 output times
   scale2, cast; a mutation that rounds the staged partial before the fixup fails all 20 types. D11: in
   `check_qlinear`, rows 2–8 equal by value the f32 mmvq times scale2 (scale2 not a power of two). Shared q8_1: in
@@ -999,13 +999,14 @@ gains the two ops). Desktops were clock-screened before their records (`bench/cl
   layout, offset 1; 64), bf16 and fp16, T = 1, 300 (rows across pages, any order) and 0: q' and the model-dtype cache
   within the L0 budget of a norm over head_dim, v copied exactly, no other byte touched, and the q8_0 write bitwise the
   reference write of the kernel's own model-dtype k.
-- **L0 runs:** RTX 5080 322 passed / 1 skipped, RTX 4090 314 / 9 (`test_ggml_cuda`, `_moe`, `test_attention_kv_quant`,
-  at 74574e0); at e14b311 `test_ggml_cuda` again: 143 passed (5080), 137 / 6 (4090).
+- **L0 runs** (`test_ggml_cuda`, `_moe`, `test_attention_kv_quant`): RTX 5080 322 passed / 1 skipped and RTX 4090
+  314 / 9 at 74574e0, then `test_ggml_cuda` again at e14b311: 143 passed (5080), 137 / 6 (4090); RTX 5090 322 / 1 at
+  eb9aeaa (`evidence/m07-step2_l0_2026-10-14.json`).
 - **memcheck** (`compute-sanitizer`): `memcheck_ggml_cuda` (now also bf16 / f32 outputs at 513 rows, the fused gate,
   prepared inputs) found the fused gate reading past the up half at out 300 (halves of 150 rows: mmvq reads whole
-  4-row blocks at small K) — fixed (0308bbc), then 0 errors on sm_86, sm_89 and sm_120a. `memcheck_triton_attn` (now
-  also the model-dtype write and the fused kernel): 0 errors on sm_86, sm_89 and sm_120a (the 5090); on the 5080 it ran
-  out of memory under the sanitizer before reaching them (16 GB; not a finding).
+  4-row blocks at small K) — fixed (0308bbc), then 0 errors on sm_86, sm_89 and sm_120a (5080, 5090).
+  `memcheck_triton_attn` (now also the model-dtype write and the fused kernel): 0 errors on sm_89 and on sm_120a (the
+  5090); on the 5080 it ran out of memory under the sanitizer before reaching them (16 GB; not a finding).
 - **L2** (RTX A5000, `holon_judge l2`, against the floor of the path; `--max-seqs 4` for small steps):
 
   | model | steps | floor | top-1 (floor) | KL p99 (floor) | ΔPPL vs floor | verdict |
@@ -1033,12 +1034,12 @@ class, in % of the step (− = faster), with its sd:
 
 | fusion | kind | RTX 5080 | RTX 4090 | RTX 5090 | verdict |
 |---|---|---|---|---|---|
-| `kv_write` (bf16 copy) | bitwise | 8B Q4_K_M B1 −3.73 ± 0.10 (NVFP4 B1 −3.38) | 8B B1 −2.40 ± 0.04; 8B bf16 B1 −0.81 | RTX5090_KV | **kept**, every class |
-| D3 `qk_rope_kv` (on top of the copy) | bounded | 8B B4 −3.02 ± 0.17; NVFP4 B4 −3.30; 27B B1 −0.51; prefill 512 −0.61 | 8B B4 −2.92 ± 0.03; bf16 B4 −1.04; 27B B1 −0.33 | RTX5090_D3 | **kept**: RTX5090_D3V |
-| D4 mmq bf16 | bitwise | 8B prefill 512 −3.52 ± 0.10; NVFP4 2048 −5.19; W4A4 −11.02; 27B prefill −3.47, B8 −0.94; MTP B4 −1.15 | 8B prefill −6.48 ± 0.10; NVFP4 −7.19; 27B prefill −7.03; MTP B4 −1.35 | RTX5090_D4 | **kept**, every class |
-| D11 `scale2` in mmvq | bitwise | NVFP4 B4 −4.97 ± 0.04, B8 −3.62 ± 0.08 | NVFP4 B4 −3.37 ± 0.03, B8 −1.94 | RTX5090_D11 | **kept**, every class |
-| D6 gate/up + SwiGLU (`GLU_TYPES`) | bounded | 8B B1 −0.78 ± 0.07; NVFP4 B1 −0.94 ± 0.03; 27B UD-IQ3_S ±0 | 8B B1 −0.65 ± 0.03; NVFP4 −0.55 ± 0.02; 27B UD-Q4_K_M B1 −0.17 | RTX5090_GLU | **kept**: RTX5090_GLUV |
-| D6 shared q8_1 | bitwise | 27B B1 −0.65 ± 0.01, B4 −0.62; MTP verify B1 −0.56 | 27B B4 −0.94 ± 0.003, B1 −0.90; MTP / DFlash verify B1 −0.71 | RTX5090_Q8 | **kept**, every class |
+| `kv_write` (bf16 copy) | bitwise | 8B Q4_K_M B1 −3.73 ± 0.10 (NVFP4 B1 −3.38) | 8B B1 −2.40 ± 0.04; 8B bf16 B1 −0.81 | 8B B1 −6.37 ± 0.04 (NVFP4 B1 −5.80; bf16 B4 −2.18) | **kept**, every class |
+| D3 `qk_rope_kv` (on top of the copy) | bounded | 8B B4 −3.02 ± 0.17; NVFP4 B4 −3.30; 27B B1 −0.51; prefill 512 −0.61 | 8B B4 −2.92 ± 0.03; bf16 B4 −1.04; 27B B1 −0.33 | 8B B4 −5.15 ± 0.34; NVFP4 B4 −5.44; bf16 B4 −2.21; 27B B1 −0.73; DFlash verify −0.72 | **kept**: every class (each saves ≥ 2%) |
+| D4 mmq bf16 | bitwise | 8B prefill 512 −3.52 ± 0.10; NVFP4 2048 −5.19; W4A4 −11.02; 27B prefill −3.47, B8 −0.94; MTP B4 −1.15 | 8B prefill −6.48 ± 0.10; NVFP4 −7.19; 27B prefill −7.03; MTP B4 −1.35 | 8B prefill 2048 −4.64 ± 0.12; NVFP4 −5.40; W4A4 −10.18; 27B B8 −1.76; DFlash verify −1.58; MTP B4 −1.75 | **kept**, every class |
+| D11 `scale2` in mmvq | bitwise | NVFP4 B4 −4.97 ± 0.04, B8 −3.62 ± 0.08 | NVFP4 B4 −3.37 ± 0.03, B8 −1.94 | NVFP4 B4 −7.24 ± 0.32, B8 −4.91 | **kept**, every class |
+| D6 gate/up + SwiGLU (`GLU_TYPES`) | bounded | 8B B1 −0.78 ± 0.07; NVFP4 B1 −0.94 ± 0.03; 27B UD-IQ3_S ±0 | 8B B1 −0.65 ± 0.03; NVFP4 −0.55 ± 0.02; 27B UD-Q4_K_M B1 −0.17 | 8B B1 −1.58 ± 0.04; NVFP4 B1 −2.06; 27B UD-Q4_K_M B1 −0.14 ± 0.17 (noise) | **kept**: every class (8B B1 −0.65 to −1.58%) |
+| D6 shared q8_1 | bitwise | 27B B1 −0.65 ± 0.01, B4 −0.62; MTP verify B1 −0.56 | 27B B4 −0.94 ± 0.003, B1 −0.90; MTP / DFlash verify B1 −0.71 | 27B B1 −0.88 ± 0.14; MTP verify B1 −0.49 | **kept**, every class |
 
 - Every other cell is within noise of zero, as expected where a fusion has no work (the copy under q8_0 KV, D11
   without NVFP4, glu above one row, shared q8_1 on the 8B whose projections merge). Records
@@ -1055,13 +1056,18 @@ class, in % of the step (− = faster), with its sd:
   saving: the epilogue loaded `scale2` from global memory per output element, a dependent load on every row's store.
   Loaded once before the K loop (bf30ced), the same step saves 5.0% at B4 and 3.6% at B8 (and 3.4 / 1.9% on the 4090).
   The by-value check covers the move (the same f32 into the same multiply).
-- **mmvq's fused gate is not a free win.** `bench/glu_sweep.py` (graph-timed per call, the locks' merged gate/up
-  shapes, real GGUF rows) against the matmul plus FlashInfer's `silu_and_mul`: faster for Q4_K (+2.4% / +2.1% on
-  the 8B's 4096 × 24576, RTX 5080 / 4090), Q5_K (+0.6 / +1.5%) and NVFP4 (+2.8 / +1.6%); slower for every i-quant on
-  the 5080 (iq2_xs −5.9%, iq2_xxs −8.3%, iq3_s −2.5%, iq3_xxs −8.1%, iq4_xs −2.9%), and Q3_K (−3.9 / −9.8%). On the
-  5080's 27B UD-IQ3_S lock the fusion as first built cost 0.47% of the B1 step. Hence `GLU_TYPES` = {Q4_K, Q5_K,
-  NVFP4} (types fused on both classes; iq4_nl / iq4_xs, faster on the 4090 only, compose), after which the 27B row is
-  within noise on the 5080 and −0.17% on the 4090. Records `evidence/m07-step2_glu-sweep_<class>_2026-10-14.json`.
+- **mmvq's fused gate is not a free win.** `bench/glu_sweep.py` (graph-timed per call, real GGUF rows) against the
+  matmul plus FlashInfer's `silu_and_mul`, at the locks' gate/up shapes (8B 4096 × 24576, 27B 5120 × 34816), RTX
+  5080 / 4090: Q4_K +2.4 / +2.1% (8B), +0.1 / +2.1% (27B); Q5_K +0.6 / +1.5%; NVFP4 +2.8 / +1.6%; iq4_nl +0.5 / +1.3%;
+  iq2_s +0.3 / −2.2%; iq4_xs −2.9 / +1.1%; iq3_s −2.5 / −1.2%; iq3_xxs −8.1 / −2.1%; iq2_xs −5.9 / −4.4%; iq2_xxs
+  −8.3 / −4.4%; Q3_K −3.9 / −9.8%. On the RTX 5090: Q4_K +4.2% (8B) and −0.1% (27B), Q5_K −0.3%, NVFP4 +5.8%,
+  iq4_nl +0.6%, the other i-quants −1.0 to −5.3%, Q3_K −3.8%. (The records also hold other shapes whose out is twice some `in`, e.g. the 27B's
+  5120 × 12288; the sweep picked them by a looser rule, since fixed; they are not gate/ups and are not read here.) On
+  the 5080's 27B UD-IQ3_S lock the fusion as first built cost 0.47% of the B1 step. Hence `GLU_TYPES` = {Q4_K, Q5_K,
+  NVFP4}, chosen on the 5080 and 4090: the types clearly faster on both (iq4_nl, +0.5% on the 5080, composes as
+  marginal; Q2_K has no gate/up in the locks swept and composes). The 5090's sweep, which came after, keeps them within
+  0.4% of the composition at the 27B's shape and faster at the 8B's. With the set, the 27B row is within noise on the
+  5080 and the 5090 (−0.14 ± 0.17%), and −0.17% on the 4090. Records `evidence/m07-step2_glu-sweep_<class>_2026-10-14.json`.
 - **memcheck caught the fused gate reading past the up half** of a gate/up whose halves are not a multiple of 4 rows
   (§13.2). Real models' intermediate sizes are multiples of 8; such halves now compose.
 - **The CPU reference provider fuses gate/up at every row count** (`testing.ref_kernels`' `qlinear` lists
@@ -1095,17 +1101,22 @@ RTX5090_SECTION
 
 - **The decode-row plant is not caught.** It shifts every decode row's rotation, and `bounded` judges each
   configuration against a baseline that runs the same decode rows. So the bug moves the floor itself: the
-  baseline's agreement with the teacher-forced reference falls from 98.66% to 98.33% (± 0.12%), and its KL mean
-  rises from 0.0017 to 0.0121 (× 7). But every configuration still sits within the margin of that shifted floor.
-  Two other checks also pass with it:
-  - `holon_judge l2 --max-step-tokens 1` (8B: top-1 99.06%, the clean run's): rotation is relative, and in
-    1-token steps every token, keys included, shifts by the same one position;
-  - `bounded --spec-vs-plain` on the 27B UD-IQ3_S with MTP (fired 110298 times): its decode rows are the 27B's 16
-    attention layers of 64, and the error is small there (baseline KL mean 0.0020).
-  The judges see the bug only as an absolute drop that none of them gates. For the lead (§13.12). D3's kernel
-  itself is held to the positions it is given by its L0.
+  baseline's agreement with the teacher-forced reference falls from 98.66% to 98.33% (± 0.12%), its mean KL rises
+  from 0.0020 to 0.0117 (× 5.7; regret 0.0017 → 0.0121), and its KL p50 / p99 rise from 7.8e-5 / 0.024 to 1.6e-4 /
+  0.037. Every configuration still sits within the margin of that shifted floor. Two other checks pass with it too:
+  - `holon_judge l2 --max-step-tokens 1` (8B: top-1 99.06% and KL p99 9.6e-3, the clean run's; fired 1181952 times).
+    Rotation is relative, and in 1-token steps every token, keys included, shifts by the same one position.
+  - `bounded --spec-vs-plain` on the 27B UD-IQ3_S with MTP (fired 110298 times). Its checks are one-sided (a
+    configuration may only be worse than the floor), and the spec configurations' verify rows are not decode rows:
+    only the drafter's 1-token rows carry the bug, while the plain baseline carries it on every decode row. So the
+    configurations are cleaner than their floor (KL p99 0.018 against 0.032) and pass by construction.
+  No existing check should have caught it: D3's L0 takes positions as given, and the GPU engine test's greedy
+  agreement (≥ 75% of 16 tokens) is coarse. An absolute floor at today's margins would not catch it either (98.33%
+  clears 98.66% less the bounded margin; both KL quantiles pass). What separates it is the mean KL (0.0020 ± 0.0001
+  clean against 0.0117) or the regret, or a GPU check of GQA on T tokens as one prefill against prefill(T − 1) plus
+  one decode row. For the lead (§13.12).
 - `bounded` without a plant (§6: at `max_seqs` 8 and 1, the baseline at the same value): every configuration PASS,
-  at both (8 / 1: baseline top-1 98.66% / 98.63%; prefix on, depth 1: 98.54% / 98.57%). BOUNDED_SPEC
+  at both (8 / 1: baseline top-1 98.66% / 98.63%; prefix on, depth 1: 98.54% / 98.57%).
 - Records: `evidence/m07-step2_l2_rtx-a5000_2026-10-14.json` (the L2 runs, the plants and the bounded reports).
 
 ### 13.8 The FP4 repack holes (M0.6 follow-up): measured, not fixed
@@ -1188,10 +1199,13 @@ gained assertions. `scripts/ci/run_all.sh main` is green.
   remains.
 - **A judge gap: the decode-row RoPE plant passes** (§13.7). §6 predicted that `bounded` catches it. It does not:
   the check is relative to a baseline that carries the same bug, and the small-step L2 is blind to a uniform shift.
-  The bug is visible only as an absolute fall of the baseline's agreement (−0.33 pt) and a 7× KL mean, which no
-  check gates. Options: an absolute floor for `bounded`'s baseline (a recorded clean value per model), or a
-  configuration that decodes from a prefilled prefix against teacher-forced scoring. Either is a judge change, so
-  not taken here.
+  An absolute floor at today's margins would not catch it either. What would: a gate on `bounded`'s mean KL or regret
+  against a recorded clean value (0.0020 → 0.0117 here), or a GPU check of GQA prefilling T tokens against
+  prefill(T − 1) plus one decode row. Both are judge changes, not taken here.
+- **Lock churn at the close:** every `qlinear@2` and `kv_write@1` site's recorded config gains `fused`, every merged
+  gate/up gains a `qlinear_glu@1` site (also for types that compose: §13.9; a cross-provider glu, which no installed
+  plugin produces, would also leave a site that never runs), and every GQA layer an `attention.qk_rope_kv@1` site.
+  The single propagation touches every GGUF and HF lock.
 - **GDN** (§13.9): step 2's three-line edit to `gdn/units.py` needs a rebase with step 3's D5.
 - **The RTX 5090 desktops:** RTX5090_LEAD.
 - **glu is small** (0.55–1.0% of the 8B's B1 step, nothing on the 27B) and type-dependent. It is kept by §1.1's rule.
