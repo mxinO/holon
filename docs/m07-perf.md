@@ -931,3 +931,135 @@ first run, ≈ 3 min cold); `scripts/ci/run_all.sh main` green.
   draft policy is also installed (`engine.py:145`); step 4 mixes only when `max_draft_tokens` is 0, or both use the
   engine's own predicate.
 - `main` gained 899b661 (the legibility gate retired) after this branch's base; the branch is not rebased.
+
+
+## 13. As built (step 3, 2026-10-14): D5
+
+Commits 016903f (the glue once per step, as torch ops in std), bcdfbc7 (`gdn_rewind@1`, one launch), 12bb917 (review
+nits), eb1756b (measured pools; reverted) and 8f3827e (expandable segments from the session's start, §13.5), and this
+section's. Desktops screened first (`bench/clock_check.py`, 60 s of 27B decode at batch 4): RTX 5080
+SM clock p10 / p50 2677 / 2707 MHz, RTX 4090 2715 / 2715, RTX 5090 2497 / 2587 (0.7% of samples with a slowdown
+reason); the 5080 and the 5090 at the power cap in every sample, as in §11.1; all steady. (The torch composition's
+session ran on another 5090 desktop at p50 2647 MHz; each saving is a ratio within its own session.)
+
+### 13.1 What changed
+
+- **The replay buffers have a layer axis:** one static buffer per name (`gdn.replay.{x,a,b,window}`, [layers, …]),
+  each GDN layer's slice at its index in the state group; the same total as the per-layer buffers they replace.
+- **`gdn_rewind@1`** (std.mixers.gdn contract and oracle; a new contract, so `std/contracts.txt` gains a line and no
+  version moves): after a verify step, for every layer of the group at once, the saved gates a and b ← −1e4 past each
+  row's 1 + n accepted tokens and the conv state at the accepted end ← the last K − 1 inputs of window ‖ saved x,
+  written into the pool. The planner selects it at the group's site for speculative deployments (a lock site
+  `recurrent/gdn_rewind@1` beside the delta rule's; no lock under `plans/` drafts today, so none changes before the
+  close's propagation). Providers: `kernels.fla`'s `rewind.py` (ours, Triton, bf16: one launch, a program per
+  (layer, row, 256 channels), reading K − 1 tokens per row and writing the pool directly) and `testing.ref_kernels`
+  (the oracle).
+- **`GDN.rewind`:** the group's first layer (index 0; `rewind_modules` visits a model's layers in order, as the design
+  says, no counter) calls `gdn_rewind`; then every layer runs `causal_conv1d` over its saved x with the saved window
+  buffer as the state (rows `arange(R)`, a static buffer), so the provider dirties only that buffer, and the delta rule
+  as before. The provider calls are today's; results are bitwise today's for every unit but the padding sink.
+- **Deviation, then back to the design:** the first build (016903f) ran the per-step glue as ≈ 11 torch ops in std,
+  no new contract. The review found that it held every layer's window ‖ x at once (n · R · C · (2(K − 1) + W) · 2
+  bytes: ≈ 79 MB at 8 rows and k 3 on the 27B, ≈ 0.9 GB at 64 rows and k 7, charged by the startup profile against the
+  state pools) and read all of saved x; bcdfbc7 is the design's one launch. Both measure alike (§13.2), the kernel
+  0–0.4 points better.
+
+### 13.2 Keep-or-revert (§1.1): kept, every class
+
+Per-step graphed wall of the verify step (`bench/step_profile.py`, 32 steps per window, the lock's flags; 27B
+UD-IQ3_S with q8_0 KV on the 5080, UD-Q4_K_M with bf16 KV on the 4090 and the 5090, the 4090's lock borrowed): eight
+rounds per desktop, A B B A B A A B, A = std at the base 1b9d38e (by `PYTHONPATH`), B = 12bb917, four of each. The bar
+is max(0.5%, 3 sd), sd the larger arm's over its four rounds. Records `evidence/m07-step3_d5_<class>_2026-10-14`
+(with the torch composition's same rounds at 016903f).
+
+| class | row | base ms | D5 ms | saving | 3 sd | torch composition | rewind kernels (eager) | rewind glue ms (eager) |
+|---|---|---|---|---|---|---|---|---|
+| RTX 5080 | MTP verify B1 | 26.914 | 25.979 | **3.5%** | 0.26% | 3.3% | 960 → 289 | 1.16 → 0.22 |
+| RTX 5080 | MTP verify B4 | 35.472 | 34.504 | **2.7%** | 0.14% | 2.3% | 960 → 289 | 1.30 → 0.23 |
+| RTX 5080 | DFlash2 verify B1 | 32.661 | 31.715 | **2.9%** | 0.07% | 2.7% | 960 → 289 | 1.19 → 0.22 |
+| RTX 4090 | MTP verify B1 | 30.878 | 29.975 | **2.9%** | 0.34% | 2.8% | 960 → 289 | 1.29 → 0.25 |
+| RTX 4090 | MTP verify B4 | 40.284 | 39.432 | **2.1%** | 0.32% | 2.1% | 960 → 289 | 1.40 → 0.27 |
+| RTX 4090 | DFlash2 verify B1 | 31.459 | 30.586 | **2.8%** | 0.52% | 2.7% | 960 → 289 | 1.32 → 0.25 |
+| RTX 5090 | MTP verify B1 | 18.848 | 17.912 | **5.0%** | 0.19% | 4.9% | 960 → 289 | 1.15 → 0.22 |
+| RTX 5090 | MTP verify B4 | 23.310 | 22.295 | **4.4%** | 0.15% | 4.0% | 960 → 289 | 1.23 → 0.23 |
+| RTX 5090 | DFlash2 verify B1 | 20.872 | 19.946 | **4.4%** | 0.08% | 4.4% | 960 → 289 | 1.16 → 0.22 |
+
+- **Every row passes its bar;** against the design's upper bounds (§5, §11.11: −3.4–4.2% on the 5080, −3.4–4.1% on
+  the 4090, −5.3–6.1% on the 5090), measured 2.7–3.5%, 2.1–2.9% and 4.4–5.0%: the bounds took the fused launch to cost
+  nothing, and the rewind keeps the provider's own copies (below).
+- **The rewind's 289 kernels** are `gdn_rewind` and, per layer, the conv (2), the delta rule (1) and 3 copies: the
+  vendored `fused_sigmoid_gating_delta_rule_update` wrapper copies q, k and v (`.contiguous()` of split views of the
+  conv's output, contiguous only at one token) on every call of more than one token — the rewind, the verify trunk
+  and decode above one row. The rewind's 0.22–0.27 ms of glue left is those copies (0.21–0.25 ms) and the fused
+  launch itself (4–18 µs; `step_profile` leaves `_rewind` unclassified). Outside D5 (the provider calls stay as
+  locked); recorded for the lead (§13.6).
+
+### 13.3 Judge
+
+- **L1.5, bitwise, eager and graphed** (`plugins/tests/test_gdn_rewind.py::test_rewind_is_the_decode_steps_bitwise`):
+  every GDN layer of a tiny Qwen3.5 runs a verify step, then the model's rewind (`rewind_modules`), n accepted of 3 for
+  n < k and n = k, rows on two slots and a third untouched. CPU (reference kernels): every layer's conv window and
+  delta-rule state bitwise 1 + n one-token decode calls. GPU (64-wide heads on `kernels.fla` / `gdn_triton`, bf16):
+  conv windows bitwise one-token calls, the delta rule bitwise one per-token call over the accepted tokens (m04-spec
+  §1.3's fallback), and the verify step plus rewind captured into a CUDA graph at another acceptance and replayed:
+  bitwise the eager run on every unit but the sink. It checked the first layer alone before; mutations each fail it
+  (windows written for layer 0 only, gates masked for layer 0 only, the replay conv on the pool, no trigger); the
+  base passes it.
+- **L0** (`test_gdn_kernels.py::test_rewind_glue_is_its_oracle`): the Triton kernel bitwise its oracle on three
+  layers, rows on slot 0, the last unit and another, accepting 0, some and width − 1 drafts, at widths 4 and 8, on the
+  27B's shape (C 10240, Hv 48) and a small one; the oracle leaves every other unit, row and gate as it was.
+- **Bounded spec vs plain** (RTX A5000, 12bb917; the 27B UD-IQ3_S with q8_0 KV, `--max-seqs 8`, M0.4's
+  configurations; the judge's default 48 sessions × 4 turns, 24,576 scored positions per configuration, where M0.4
+  ran 8 sessions). Top-1 of the speculating configurations (prefix on at depth 1; depth 0) against the plain baseline's
+  99.036%, and the plants' fired counts (verify steps whose first GDN layer reached the planted path). Eager: every
+  verify step of both configurations' logprob runs (logprob steps are not graphed), plus each graph's warm-up and the
+  startup profiles; captured: the verify graphs of both engines, whose replays in the plain runs are not counted — the
+  plain runs' top-1 and the logprob runs' KL both fail. Records
+  `judge/results/bounded-12bb917-qwen3.8-27b-ud-iq3_s-spec-*`.
+
+  | drafter | clean | `replay-off-by-one` | `verify-writes-state` |
+  |---|---|---|---|
+  | MTP (k 1:3, 3:2) | 99.129% / 99.162%: **PASS** | 75.63% / 77.45%: **FAIL**; fired 3014 eager, 60 captured | 95.56% / 95.55%: **FAIL**; fired 2528 eager, 60 captured |
+  | DFlash2 Q4_K_M (k 7) | 99.129% / 99.137%: **PASS** | 82.30% / 82.59%: **FAIL**; fired 2321 eager, 30 captured | 89.51% / 89.27%: **FAIL**; fired 1908 eager, 30 captured |
+
+  Every plant fails on top-1, confident top-1 and both KL percentiles; the clean runs pass every check.
+
+### 13.4 Review
+
+One reviewer on the aggregate change. Round 1 (016903f): no blocker; one major — the torch composition's transient
+(§13.1) — fixed by the one-launch op; two minors fixed (the plants counted every layer and the startup profile without
+saying so: they now count the group's first layer per verify step, profile and warm-up included; `GDN.rewind` names
+its dependence on `rewind_modules`' order — the core's docstring is left alone, step 3 touches no core); nits fixed
+(the shared `arange` written once, explicit layer counts in the pool views). Round 2 (bcdfbc7, with the kernel run
+bitwise against the oracle under Triton's interpreter over f32 / f16 / bf16, widths 2–8, K 2–5 and channel counts off
+the block): no blocker, major or minor; nits fixed in 12bb917 (a unit shared by padding rows is unspecified in the
+contract; the provider serves bf16, its L0's dtype). Round 3 (this section and the records, every summary recomputed
+from its runs): no blocker or major; two minors fixed (the design's predictions misquoted; one 3 sd cell) and three
+nits (the glue left split into copies and launch; the screen's power-cap share; the 5090 sessions' clocks).
+Round 4 (the bounded table, its fired counts, and eb1756b): no blocker or major; two minors fixed (one top-1
+rounding; the fired counts' reading) and nits; its residual risk (small state pools in a cached segment) then
+happened, and 8f3827e takes its suggested fix. Round 5 (8f3827e and the §13 edits): no blocker, major or minor;
+nits (line wrapping, eb1756b marked reverted, §13.5 names the allocator fix). Round 6 (the suite line, against its
+three logs): one minor fixed (the new cases are the 3 GPU rewind and 4 L0 cases, +7) and two nits; nothing open.
+
+### 13.5 Suite
+
+Full GPU suite at 8f3827e (two RTX A5000s): `pytest core std plugins judge testing tools` 1192 passed, 65 skipped in
+18 min 13 s (step 1: 1185 / 65, 16 min 29 s; the new cases: 3 GPU rewind cases and 4 L0 cases, +7; the 3 CPU rewind
+cases now check every layer). The first two full runs failed the 3 GPU rewind cases: the tiny engine's small state
+pools landed in a segment earlier tests had cached before the engine's in-process allocator setting (with fixed
+pools, then with measured ones in eb1756b); 8f3827e sets `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` in
+`plugins/tests/conftest.py` at collection, as launchers do. `scripts/ci/run_all.sh main` green.
+
+### 13.6 For the lead
+
+- **D5 is kept on every class** (2.1–3.5% of the 5080's and 4090's verify steps, 4.4–5.0% of the 5090's).
+- **The vendored delta-rule wrapper's q / k / v copies** (§13.2): measured in the rewind, 0.21–0.25 ms per verify step
+  on the 27B (≈ 1% of the step); the verify trunk's and decode's calls above one row pay likewise. A candidate for
+  step 2's or a later fusion pass, which would touch `kernels.fla`'s `vendor.patch` (strided q / k / v in the fused
+  recurrent kernel).
+- **A new lock site** `recurrent/gdn_rewind@1` (speculative builds only) is recorded at the close's propagation.
+- **Files outside the lead's list:** `testing/holon_testing/ref_kernels` (the CPU provider every op needs),
+  `testing/holon_testing/qwen3_5_files.py` (`tiny_config`'s head size, for the GPU case), `plugins/tests/conftest.py`
+  (expandable allocator segments from the session's start, §13.5) and `judge/holon_judge/planted.py` (the two plants'
+  fired counts).
