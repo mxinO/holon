@@ -1285,9 +1285,9 @@ v0 runs one GPU, but the core keeps these seams so datacenter features are plugi
 
 | Feature | Seam in core (v0) | Plugin (later) |
 |---|---|---|
-| Tensor parallel | `ParamSpec` sharding semantics; collectives are registered Ops (`allreduce`, `allgather`); Plan is serializable and broadcast; engine always runs the SPMD path (world_size=1 in v0); a `launcher` slot (single; planned, returns as a minor ABI addition) starts ranks — v0 launches one local rank; sampler/processors declare sharded-vs-gathered logits | `tp.nccl` collective kernels; TP-aware linear layouts; `launcher.torchrun`/`launcher.ray` |
+| Tensor parallel | Built in v0: the Plan is serializable. Planned (each returns as a minor ABI addition): `ParamSpec` sharding semantics; collectives as registered Ops (`allreduce`, `allgather`); an SPMD engine path (v0 runs one process, one rank); a `launcher` slot (single) that starts ranks; sampler / processors declaring sharded-vs-gathered logits | `tp.nccl` collective kernels; TP-aware linear layouts; `launcher.torchrun`/`launcher.ray` |
 | Expert parallel | MoE is a coarse Op owning routing/dispatch | `moe.ep_dispatch` (DeepEP-style) |
-| Pipeline parallel | `inflight_depth = N` | `pp.stage_split` |
+| Pipeline parallel | Planned: `inflight_depth = N` (v0 has depth 0 or 1, `overlap`) | `pp.stage_split` |
 | DP-attention | a `plan_transform` slot (planned) with a collective hook in the schedule region | `dp_attention.pad` |
 | PD disaggregation | `BLOCKED`; async store import/export and per-layer events (planned: minor ABI additions) | connector (planned slot) + a schedule-policy role |
 | Multi-device memory | Ledger per device; a Pool carrying its device (planned: a minor ABI addition) | — |
