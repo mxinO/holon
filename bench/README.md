@@ -60,7 +60,8 @@ rejects temperature 0, so it samples at 1e-5 (argmax in practice); the others ar
   at t = 2 s: how long the streams stall behind its prefill (their max inter-token gap), and its TTFT behind them.
 
 With `--corpus`, prompts are spans of natural text: the system prompt from a seeded offset, and each session's turns
-one walk through the text outside it from the session's own offset, so no context repeats a span of itself.
+one walk through the text outside it from the session's own offset, so no context repeats a span of itself. Records
+taken before release step 7 drew each turn at its own offset, so their corpus prompts differ from a replay today.
 
 ## Metrics and method
 

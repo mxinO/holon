@@ -12,8 +12,9 @@ Over the n rounds (mean and standard error of the per-round ratios):
 - **one power estimate**, from the first 4 rounds: with their mean and sd held, the fewest rounds (≤ 8) at which every
   criterion would pass. None when a mean fails (more rounds would not change it) or no count up to 8 passes: plain.
   Otherwise the run goes on to that count, and the rule is applied once there: on, or plain;
-- no verdict before 4 rounds or between 4 and the target; none past 8 rounds; never on if a round lost an arm or
-  ran fewer than 200 requests.
+- the target is rounded up to an even count (ABBA pairs); no verdict before 4 rounds or between 4 and the target,
+  and more rounds than the target are refused; never on if MTP's arm failed or ran fewer than 200 requests in a
+  round. A round whose plain arm alone failed is not counted: it is re-run.
 
 The records must agree (model, class, lock plan, trace, corpus, arms) and sample at temperature 1.0. Also reported:
 the pooled p99s as point estimates, each arm's KV tokens, prefix tokens saved and preemptions, and MTP's accepted
@@ -47,26 +48,32 @@ def _metrics(run: dict) -> dict:
             "requests": len(rows), "stats": run.get("stats", {}), "_gap": gap, "_ttft": ttft}
 
 
-def rounds(records: list[dict], trace: str, plain: str, mtp: str) -> tuple[list[dict], list[str]]:
-    """Each complete round's metrics per arm, the records' rounds in order; and every arm's error, by round."""
-    out, errors = [], []
+def rounds(records: list[dict], trace: str, plain: str, mtp: str) -> tuple[list[dict], dict, list[int]]:
+    """Each complete round's metrics per arm, the records' rounds in order; the incomplete rounds, as "mtp" (MTP's arm
+    failed or ran short: counts against MTP) and "rerun" (only the plain arm did: re-run, not counted); and each
+    record's complete rounds."""
+    out, lost, per_record = [], {"mtp": [], "rerun": []}, []
     for k, record in enumerate(records):
         by_round: dict[int, dict] = {}
         for run in record["runs"]:
-            if run["backend"] not in (plain, mtp):
-                continue
-            if "error" in run:
-                errors.append(f"record {k} round {run['round']} {run['backend']}: {run['error']}")
-            elif run["trace"] == trace:
-                by_round.setdefault(run["round"], {})[run["backend"]] = _metrics(run)
+            if run["backend"] in (plain, mtp) and ("error" in run or run["trace"] == trace):
+                by_round.setdefault(run["round"], {})[run["backend"]] = run
+        complete = 0
         for r, arms in sorted(by_round.items()):
-            if len(arms) < 2:
-                errors.append(f"record {k} round {r}: only {', '.join(arms)}")
-            elif min(a["requests"] for a in arms.values()) < MIN_REQUESTS:
-                errors.append(f"record {k} round {r}: fewer than {MIN_REQUESTS} requests")
+            ok = {b: run for b, run in arms.items() if "error" not in run}
+            short = {b for b, run in ok.items() if len(run["requests"]) < MIN_REQUESTS}
+            what = f"record {k} round {r}: " + "; ".join(
+                f"{b} {arms[b]['error'] if b in arms and 'error' in arms[b] else 'short' if b in short else 'missing'}"
+                for b in (plain, mtp) if b not in ok or b in short)
+            if mtp not in ok or mtp in short:
+                lost["mtp"].append(what)
+            elif plain not in ok or plain in short:
+                lost["rerun"].append(what)
             else:
-                out.append(arms)
-    return out, errors
+                out.append({b: _metrics(run) for b, run in ok.items()})
+                complete += 1
+        per_record.append(complete)
+    return out, lost, per_record
 
 
 def check(records: list[dict], paths: list[str]) -> None:
@@ -77,6 +84,8 @@ def check(records: list[dict], paths: list[str]) -> None:
     for key in SAME:
         if len({json.dumps(r.get(key), sort_keys=True) for r in records}) > 1:
             raise SystemExit(f"the records differ in {key}")
+    if any(not r["matched"].get("lock") for r in records):
+        raise SystemExit("D3 compares the arms over a lock (run.py --lock)")
     if len({r["matched"]["lock"]["plan_id"] for r in records}) > 1:
         raise SystemExit("the records ran different locks")
     if any(r["matched"]["temperature"] != TEMPERATURE for r in records):
@@ -103,20 +112,23 @@ def passes(mean: dict, sd: dict, n: int) -> dict:
 
 
 def target(mean: dict, sd: dict) -> int | None:
-    """D3's one power estimate, from the first 4 rounds: the round count to run to, or None (plain)."""
+    """D3's one power estimate, from the first 4 rounds: the round count to run to, rounded up to even (ABBA pairs),
+    or None (plain)."""
     if 1 - mean["tpot_p50"] < TPOT_GAIN or mean["gap_p95"] > TAIL_BOUND or mean["ttft_p95"] > TAIL_BOUND:
         return None
-    return next((m for m in range(POWER_AFTER, MAX_ROUNDS + 1) if all(passes(mean, sd, m).values())), None)
+    m = next((m for m in range(POWER_AFTER, MAX_ROUNDS + 1) if all(passes(mean, sd, m).values())), None)
+    return None if m is None else m + m % 2
 
 
-def decide(per_round: list[dict], errors: list[str], plain: str, mtp: str) -> dict:
+def decide(per_round: list[dict], lost: dict, plain: str, mtp: str) -> dict:
+    """The verdict on exactly the rounds D3 allows: 4, or the power estimate's target."""
     n = len(per_round)
     if n < POWER_AFTER:
-        return {"rounds": n, "errors": errors, "verdict": f"run on to {POWER_AFTER} rounds"}
-    if n > MAX_ROUNDS:
-        raise SystemExit(f"{n} rounds: D3 runs at most {MAX_ROUNDS}")
+        return {"rounds": n, "lost": lost, "verdict": f"run on to {POWER_AFTER} rounds"}
     ratios = {k: [r[mtp][k] / r[plain][k] for r in per_round] for k in KEYS}
     goal = target(*summary(ratios, POWER_AFTER))
+    if n > (goal or POWER_AFTER):
+        raise SystemExit(f"{n} rounds: the power estimate at 4 rounds allows {goal or POWER_AFTER}")
     mean, sd = summary(ratios, n)
     now = passes(mean, sd, n)
     if goal is None:
@@ -126,7 +138,7 @@ def decide(per_round: list[dict], errors: list[str], plain: str, mtp: str) -> di
     elif not all(now.values()):
         verdict = f"plain (the rule fails at {n} rounds)"
     else:
-        verdict = "plain (a round lost an arm or ran short)" if errors else "on"
+        verdict = "plain (MTP's arm failed or ran short in a round)" if lost["mtp"] else "on"
     se = {k: sd[k] / math.sqrt(n) for k in KEYS}
     arms = {}
     for arm in (plain, mtp):
@@ -142,7 +154,7 @@ def decide(per_round: list[dict], errors: list[str], plain: str, mtp: str) -> di
             **({"accepted_per_k3_row": round(sum(a * c for a, c in k3.items()) / sum(k3.values()), 3)}
                if sum(k3.values()) else {})}
     return {
-        "rounds": n, "errors": errors, "power_target": goal,
+        "rounds": n, "lost": lost, "power_target": goal,
         "per_round_ms": [{arm: {k: round(r[arm][k] * 1e3, 2) for k in KEYS} for arm in (plain, mtp)}
                          for r in per_round],
         "ratios": {k: [round(x, 4) for x in v] for k, v in ratios.items()},
@@ -161,10 +173,12 @@ def main() -> None:
     args = ap.parse_args()
     records = [json.load(open(p)) for p in args.records]
     check(records, args.records)
-    per_round, errors = rounds(records, args.trace, args.plain, args.mtp)
+    per_round, lost, per_record = rounds(records, args.trace, args.plain, args.mtp)
+    if len(records) > 1 and per_record[0] < POWER_AFTER:
+        raise SystemExit(f"the first record holds the power estimate's {POWER_AFTER} rounds; give it first")
     result = {"sources": [p.rsplit("/", 1)[-1] for p in args.records], "trace": args.trace,
               "kv_tokens": {b: i.get("kv_tokens") for b, i in records[0]["backends"].items()},
-              **decide(per_round, errors, args.plain, args.mtp)}
+              **decide(per_round, lost, args.plain, args.mtp)}
     print(json.dumps({k: v for k, v in result.items() if k != "per_round_ms"}, indent=1))
     if args.json:
         with open(args.json, "w") as f:

@@ -2012,7 +2012,8 @@ Revised once after the step's reviewer read rev 1 (928d993), still before any re
       --arm m512='--chunk-with-decode 512' --rounds 4 --traces bench/traces/agent.jsonl bench/traces/long_prompt.jsonl
   python bench/mixed_bars.py <record>
   ```
-  The worker sizes `max_model_len` from the traces (30,208 tokens), as in M0.7. The locks' own contexts are 8K and 16K.
+  The worker sizes `max_model_len` from the traces (30,208 tokens), as in M0.7. The locks' own contexts are 8K and
+  16K, so a served lock refuses the 30K prompt, and the stall it can see behind a prompt it accepts is smaller.
 - **512 is set where every bar of §15.4's verdict passes:**
   - on the agent trace: max gap p99 and max ≥ 2×, the paired TTFT ≤ 1 + max(15%, 2 sd), and throughput within
     max(5%, 2 sd);
@@ -2053,7 +2054,7 @@ Revised once after the step's reviewer read rev 1 (928d993), still before any re
   - `chunk_with_decode` stays the lock's 512, so the MTP arm runs M0.7's alternation (§15.5). This run is the
     alternation's measurement on this trace.
 - **Command**, ABBA rounds of fresh processes (D3 says ABAB; run.py alternates the order each round, so neither arm
-  always runs first). A run-on uses another `--name` and an even round count.
+  always runs first). A run-on uses another `--name`, the first record's lock, and the target's remaining rounds.
   ```
   python bench/run.py --name release7-mtp-<class>[-<part>] --gpu 0 --model <27B file> --lock <27B lock> \
       --backends holon holon@mtp --arm mtp='<the flags above>' --rounds 4 --temperature 1.0 \
@@ -2066,9 +2067,11 @@ Revised once after the step's reviewer read rev 1 (928d993), still before any re
   - **On** if 1 − mean(TPOT ratio) ≥ 5% and ≥ 2 SE, and for both the gap and the TTFT, mean + t(0.90, n − 1) · SE ≤
     1.10.
   - **One power estimate, from the first 4 rounds.** With their mean and sd held, it finds the fewest rounds (≤ 8) at
-    which every criterion would pass. If a mean fails, or no count up to 8 passes, the lock stays plain. Otherwise the
-    run goes on to that count, and the rule is applied once there.
-  - **Never on** if a round lost an arm or ran fewer than 200 requests.
+    which every criterion would pass, rounded up to an even count. If a mean fails, or no count up to 8 passes, the
+    lock stays plain. Otherwise the run goes on to that count, and the rule is applied once there. More rounds than
+    the target are refused.
+  - **Never on** if MTP's arm failed or ran fewer than 200 requests in a round. A round whose plain arm alone failed
+    (a desktop's fault) is not counted and is re-run.
   - The records must agree (model, class, lock plan, trace, corpus, arms) and sample at 1.0.
   - **Also reported:** the pooled p99s, as point estimates; each arm's KV tokens (the 5080's 27B: 56,208 plain and
     37,392 with MTP in M0.7 step 4's records, `evidence/bench_m07-step4-{plain,mtp}_rtx-5080_*`); prefix tokens saved
