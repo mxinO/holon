@@ -275,7 +275,8 @@ is taken to cost nothing).
   `mmvq-kv-q8_0` floor for q8_0 locks; M0.6's fp4-mode floor for W4A4 entries). Bounded at `max_seqs` 1 and 8, the
   baseline at the same value.
 - **Plants (two new):** a KV slot off by one only at page boundaries (D3); a RoPE position off by one on decode rows
-  only (D3; predicted caught by bounded; it is not: §13.7). Re-verified with a "fired" count > 0: `ggml_stale_q8_1` (after D6), `replay_off_by_one`
+  only (D3; predicted caught by bounded; it is not: §13.7). Re-verified with a "fired" count > 0: `ggml_stale_q8_1`
+  (after D6), `replay_off_by_one`
   and `verify_writes_state` (after D5). Plants are verified once, not kept as tests.
 - **Locks:** propagated once at the close; the snapshot trace gains a capped chunk beside decoders when D7 ships.
 
@@ -1046,7 +1047,8 @@ class, in % of the step (− = faster), with its sd:
   `evidence/m07-step2_ab_<class>_2026-10-14.json` (all arms at 74574e0; the NVFP4 deployment again after §13.4's
   fix at e14b311; glu with `GLU_TYPES` at 1d96857).
 - Against §11.11 (5080 / 4090): the copy saves 3.7 / 2.4% of 8B B1 (step 0's KV-store share 2.2 / 1.5%: the
-  index_put pair cost more wall than its kernel time), D3 2.0 / 1.7% of 8B B1 (bound 1.9 / 1.7%), D4 3.5–5.2 / 6.1–7.2% of
+  index_put pair cost more wall than its kernel time), D3 2.0 / 1.7% of 8B B1 (bound 1.9 / 1.7%), D4 3.5–5.2 /
+  6.1–7.2% of
   prefill (bound 2.4–5.0 / 4.8–6.0%), D11 5.0 / 3.4% of NVFP4 B4 (bound 3.5–4.2 / 3.3–3.6%), glu 0.8 / 0.7% of 8B B1
   (bound 1.6 / 1.1%), shared q8_1 0.65 / 0.9% of 27B B1 (bound 1.5 / 0.96%).
 
@@ -1061,13 +1063,16 @@ class, in % of the step (− = faster), with its sd:
   5080 / 4090: Q4_K +2.4 / +2.1% (8B), +0.1 / +2.1% (27B); Q5_K +0.6 / +1.5%; NVFP4 +2.8 / +1.6%; iq4_nl +0.5 / +1.3%;
   iq2_s +0.3 / −2.2%; iq4_xs −2.9 / +1.1%; iq3_s −2.5 / −1.2%; iq3_xxs −8.1 / −2.1%; iq2_xs −5.9 / −4.4%; iq2_xxs
   −8.3 / −4.4%; Q3_K −3.9 / −9.8%. On the RTX 5090: Q4_K +4.2% (8B) and −0.1% (27B), Q5_K −0.3%, NVFP4 +5.8%,
-  iq4_nl +0.6%, the other i-quants −1.0 to −5.3%, Q3_K −3.8%. (The records also hold other shapes whose out is twice some `in`, e.g. the 27B's
+  iq4_nl +0.6%, the other i-quants −1.0 to −5.3%, Q3_K −3.8%. (The records also hold other shapes whose out is twice
+  some `in`, e.g. the 27B's
   5120 × 12288; the sweep picked them by a looser rule, since fixed; they are not gate/ups and are not read here.) On
   the 5080's 27B UD-IQ3_S lock the fusion as first built cost 0.47% of the B1 step. Hence `GLU_TYPES` = {Q4_K, Q5_K,
   NVFP4}, chosen on the 5080 and 4090: the types clearly faster on both (iq4_nl, +0.5% on the 5080, composes as
   marginal; Q2_K has no gate/up in the locks swept and composes). The 5090's sweep, which came after, keeps them within
   0.4% of the composition at the 27B's shape and faster at the 8B's. With the set, the 27B row is within noise on the
-  5080 and the 5090 (−0.14 ± 0.17%), and −0.17% on the 4090. Records `evidence/m07-step2_glu-sweep_<class>_2026-10-14.json`.
+  5080 and the 5090 (−0.14 ± 0.17%), and −0.17% on the 4090. Each sweep is one run without an sd: Q5_K (+0.6 / +1.5 /
+  −0.3%) and iq4_nl (+0.5 / +1.3 / +0.6%) are within its noise and could go either way; the set stands on the step-
+  level A/B of the 8B rows. Records `evidence/m07-step2_glu-sweep_<class>_2026-10-14.json`.
 - **memcheck caught the fused gate reading past the up half** of a gate/up whose halves are not a multiple of 4 rows
   (§13.2). Real models' intermediate sizes are multiples of 8; such halves now compose.
 - **The CPU reference provider fuses gate/up at every row count** (`testing.ref_kernels`' `qlinear` lists
@@ -1173,7 +1178,8 @@ B4 and prefill), but every verdict rests on rows with sd ≤ 0.35%.
   rebase over.
 - **D11's MoE clause** does not apply: the 30B NVFP4's B4 / B8 decode runs no separate scale multiply (§13.1).
 - **The FP4 repack holes are not fixed** (§13.8).
-- **Step 2's measurement method** is in-process A/B on one engine (`bench/fusion_ab.py`), not separate builds per commit.
+- **Step 2's measurement method** is in-process A/B on one engine (`bench/fusion_ab.py`), not separate builds per
+  commit.
   Each fusion is switched off by restoring the code it replaced, with the two approximations named in §13.3.
 - **`bench/`** gains `fusion_ab.py` and `glu_sweep.py`. `qmm_sweep.py`'s "mmq_cast" variant now times D4's path
   (mmq writes bf16).
@@ -1226,7 +1232,8 @@ gained assertions. `scripts/ci/run_all.sh main` is green.
   plugin produces, would also leave a site that never runs), and every GQA layer an `attention.qk_rope_kv@1` site.
   The single propagation touches every GGUF and HF lock.
 - **GDN** (§13.9): step 2's three-line edit to `gdn/units.py` needs a rebase with step 3's D5.
-- **The RTX 5090 desktops:** three of the four 5090 desktops tried failed (§13.6); every 5090 verdict comes from the fourth, at the final code.
+- **The RTX 5090 desktops:** three of the four 5090 desktops tried failed (§13.6); every 5090 verdict comes from the
+  fourth, at the final code.
 - **glu is small** (0.55–1.0% of the 8B's B1 step, nothing on the 27B) and type-dependent. It is kept by §1.1's rule.
   Dropping it would remove `qlinear_glu@1`, `Linear.use_glu` / `glu` and `QLinearGlu`.
 - **A latent read in plain mmvq:** at small K, llama.cpp's one-column kernel reads whole blocks of up to 4 rows, so a
