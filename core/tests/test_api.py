@@ -85,39 +85,17 @@ def test_plan_id_is_order_independent_and_excludes_verification():
     assert Lock(a, snapshot="sha256:s1").plan.plan_id == Lock(a, snapshot="sha256:s2").plan.plan_id
 
 
-DESIGN_EXAMPLE = """
-[plugin]
-name      = "spec.adaptive_k"
-version   = "0.3.1"
-derived_from = "std.spec.fixed_k"
-entry     = "adaptive:Plugin"
-slot      = "draft_policy"
-license   = "Apache-2.0"
-core_abi  = ">=1.0,<2.0"
-
-[resources]
-provides = ["draft_policy.adaptive_k@1"]
-
-[properties]
-numerics = "policy"
-
-[dependencies]
-python = []
-
-[support]
-platforms = ["cuda"]
-
-[options]
-"spec.k_max" = { help = "the largest k it picks", default = "3", choices = ["2", "3", "4"] }
-"spec.window" = { help = "steps of acceptance history it reads" }
-"""
+DESIGN = pathlib.Path(__file__).parents[2] / "docs" / "design.md"
 
 
 def test_manifest_loads_design_example(tmp_path: pathlib.Path):
-    (tmp_path / "plugin.toml").write_text(DESIGN_EXAMPLE)
+    """Design §4.1's manifest example, read from the design, parses."""
+    text = DESIGN.read_text()
+    start = text.index("```toml\n", text.index("### 4.1 Manifest")) + len("```toml\n")
+    (tmp_path / "plugin.toml").write_text(text[start:text.index("```", start)])
     m = Manifest.load(tmp_path / "plugin.toml")
     assert m.provides == (Resource("draft_policy.adaptive_k", 1),) and m.cardinality.value == "single"
-    assert m.options["spec.k_max"].choices == ("2", "3", "4") and m.options["spec.window"].default is None
+    assert m.options["spec.k_max"].choices == ("2", "3", "4") and m.options["spec.k_max"].default == "3"
 
 
 @pytest.mark.parametrize("abi, extra, match", [

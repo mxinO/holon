@@ -22,7 +22,7 @@ class Scheme:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Layout:
-    """How the bytes are arranged, e.g. `Layout(Scheme("ggml.q4_k"), "gguf.native")`."""
+    """How the bytes are arranged, e.g. `Layout(Scheme("bf16"), "rowmajor")`."""
 
     scheme: Scheme
     name: str

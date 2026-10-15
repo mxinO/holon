@@ -109,14 +109,6 @@ class SeqTable:
     draft_q: torch.Tensor | None = None        # [S, k_max, Kq] fp32: … and its probabilities
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
-class ShapeKey:
-    """Graph bucket: padded sizes."""
-
-    n_tokens: int
-    n_seqs: int
-
-
 @dataclasses.dataclass(slots=True, eq=False)
 class BatchPlan:
     """Host-side plan for one step, struct-of-arrays over the step's rows (one row per scheduled Seq)."""
@@ -128,7 +120,6 @@ class BatchPlan:
     start_upper: np.ndarray              # [B] upper bound on the first query position; exact value in SeqTable
     token_src: np.ndarray                # [B] TokenSrc
     host_tokens: np.ndarray              # flat tokens for HOST rows
-    shape: ShapeKey
     mem_ops: list[MemOp] = dataclasses.field(default_factory=list)
     publishes: list[InStepPublish] = dataclasses.field(default_factory=list)   # payloads the forward fills
     draft_k: int = 0                     # drafts this step's rows verify (verify width − 1), or a prefill step's drafts
@@ -138,7 +129,7 @@ class BatchPlan:
 
 @dataclasses.dataclass(slots=True, eq=False)
 class DeviceBatch:
-    """Static device buffers for one ShapeKey; positions and lengths are exact (written on device)."""
+    """Static device buffers for one step's shape; positions and lengths are exact (written on device)."""
 
     input_ids: torch.Tensor
     positions: torch.Tensor

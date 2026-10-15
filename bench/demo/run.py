@@ -1,12 +1,15 @@
 """The agent demo (release design D7), pre-registered before any run: Claude Code at a pinned version, headless,
 against a running `holon serve`, makes a small project's tests pass.
 
-The task: `project/` (three modules of a shop: `money`, `cart`, `discounts`) fails 17 of its 40 tests on a seeded
-bug and a missing function. Claude Code gets `PROMPT` in a fresh copy of it, with the tools M0.5's session allowed.
-A run **succeeds** if, after the session (whatever its outcome), the harness puts back the tests from its own copy
-— read before the session; files the agent added under `tests/` go — and `pytest`, run without the project's
-configuration or any `conftest.py`, passes all 40. Every run is recorded, misses included. A smaller task, if one is
-ever needed, is a new pre-registered task reported beside this one.
+The task: `project/` (the package `shop`, three modules: `money`, `cart`, `discounts`) fails 17 of its 40 tests on a
+seeded bug and a missing function. Claude Code gets `PROMPT` in a fresh copy of it, with the tools M0.5's session
+allowed, stopped after `TIMEOUT_S`. A run **succeeds** if, after the session (whatever its outcome), pytest passes
+all 40 tests in a fresh directory holding only the agent's `shop/` and the harness's own copy of `tests/` (read
+before the session), with the harness's configuration: no project configuration, no `conftest.py`, no plugin
+autoload, nothing else of the agent's on the import path. Not guarded: the agent runs the harness's own Python, whose
+installed packages it could change. Every run is recorded, misses included. Runs are sequential on one server, so a
+later run may hit the prefix cache an earlier one filled (the system prompt and tool list are the same), as a user's
+next session would. A smaller task, if one is ever needed, is a new pre-registered task reported beside this one.
 
 Recorded per run: success and the test counts, turns, wall time, the tool-call sequence (tool, the file's path
 inside the project or the program a Bash command runs, and whether the call failed — never file text or command
@@ -26,8 +29,10 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -40,13 +45,19 @@ HERE = pathlib.Path(__file__).resolve().parent
 PROJECT = HERE / "project"
 ROOT = HERE.parents[1]
 CLAUDE_CODE = "2.1.300"               # the pinned version (`claude --version`); M0.5's session ran 2.1.296
-PROMPT = ("The Python project in the current directory has failing tests. Make `python -m pytest` pass without "
-          "editing any file under tests/. When the tests pass, reply with the single word done.")
+PROMPT = ("The Python package `shop` in the current directory fails its tests. Fix the package so that "
+          "`python -m pytest` passes, without editing any file under tests/. When the tests pass, reply with the "
+          "single word done.")
 TOOLS = "Read,Write,Edit,Bash,Glob,Grep"
+CLIENT_ENV = ["ANTHROPIC_BASE_URL=<the proxy>", "ANTHROPIC_AUTH_TOKEN=holon",
+              "ANTHROPIC_MODEL, ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL, CLAUDE_CODE_SUBAGENT_MODEL=<served id>",
+              "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1", "CLAUDE_CONFIG_DIR=<fresh>",
+              "NO_PROXY=127.0.0.1,localhost"]
 TIMEOUT_S = 1800                      # a session still running after 30 min is stopped and scored as it stands
 TESTS = 40
 SEEDED = {"passed": 23, "failed": 17}
 FILE_TOOLS = {"Read", "Write", "Edit", "NotebookEdit"}
+ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 SAMPLING = ("model", "max_tokens", "temperature", "top_p", "top_k", "thinking", "output_config", "stop_sequences")
 
 
@@ -63,32 +74,40 @@ def digest(files: dict[str, bytes]) -> str:
 
 
 def score(work: pathlib.Path, tests: dict[str, bytes]) -> dict:
-    """Put the tests back from `tests` (the harness's copy), then run pytest with no project configuration and no
-    conftest; success is every test passing."""
-    shutil.rmtree(work / "tests", ignore_errors=True)
-    for name, data in tests.items():
-        (work / name).parent.mkdir(parents=True, exist_ok=True)
-        (work / name).write_bytes(data)
+    """Run the harness's tests (`tests`, its own copy) against the agent's `shop/` alone, in a fresh directory, with
+    the harness's pytest configuration; success is every test passing."""
+    out = {"success": False, "passed": 0, "failed": 0, "skipped": 0, "pytest_exit": None, "timed_out": False}
     with tempfile.TemporaryDirectory() as tmp:
-        report, ini = pathlib.Path(tmp) / "junit.xml", pathlib.Path(tmp) / "pytest.ini"
+        tmp = pathlib.Path(tmp)
+        scored, report, ini = tmp / "scored", tmp / "junit.xml", tmp / "pytest.ini"
+        if not (work / "shop").is_dir():
+            return out
+        shutil.copytree(work / "shop", scored / "shop", ignore=shutil.ignore_patterns("__pycache__"))
+        for name, data in tests.items():
+            (scored / name).parent.mkdir(parents=True, exist_ok=True)
+            (scored / name).write_bytes(data)
         ini.write_text("[pytest]\n")                   # not the project's configuration
         env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTEST_", "PYTHON"))}
-        out = subprocess.run([sys.executable, "-m", "pytest", "-q", "-c", str(ini), "--rootdir", str(work),
-                              "--noconftest", "-p", "no:cacheprovider", f"--junitxml={report}", "tests"],
-                             cwd=work, env=env | {"PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, text=True,
-                             timeout=600)
+        env |= {"PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+        try:
+            run = subprocess.run([sys.executable, "-m", "pytest", "-q", "-c", str(ini), "--rootdir", str(scored),
+                                  "--noconftest", "-p", "no:cacheprovider", f"--junitxml={report}", "tests"],
+                                 cwd=scored, env=env, capture_output=True, text=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            return out | {"timed_out": True}
         counts = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
         if report.exists():
             suite = ET.parse(report).getroot()
             suite = suite if suite.tag == "testsuite" else suite.find("testsuite")
             counts = {k: int(suite.get(k, 0)) for k in counts}
     passed = counts["tests"] - counts["failures"] - counts["errors"] - counts["skipped"]
-    return {"success": out.returncode == 0 and passed == TESTS, "passed": passed, "skipped": counts["skipped"],
-            "failed": counts["failures"] + counts["errors"], "pytest_exit": out.returncode}
+    return out | {"success": run.returncode == 0 and passed == TESTS, "passed": passed, "skipped": counts["skipped"],
+                  "failed": counts["failures"] + counts["errors"], "pytest_exit": run.returncode}
 
 
 def _get(server: str, path: str) -> dict:
-    with urllib.request.urlopen(server.rstrip("/") + path, timeout=60) as r:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))      # never through an HTTP proxy
+    with opener.open(server.rstrip("/") + path, timeout=60) as r:
         return json.load(r)
 
 
@@ -115,14 +134,15 @@ def tool_calls(events: list[dict], work: pathlib.Path) -> list[dict]:
                 call, args = {"tool": block.get("name")}, block.get("input") or {}
                 if call["tool"] in FILE_TOOLS and isinstance(path := args.get("file_path") or args.get(
                         "notebook_path"), str):
-                    target = (work / path).resolve()
+                    target = (work / os.path.expanduser(path)).resolve()
                     call["path"] = str(target.relative_to(work)) if target.is_relative_to(work) else "<outside>"
                 elif call["tool"] == "Bash" and isinstance(args.get("command"), str):
                     try:
                         words = shlex.split(args["command"])
                     except ValueError:
                         words = args["command"].split()
-                    call["program"] = pathlib.Path(words[0]).name if words else ""
+                    words = [w for w in words if not ASSIGNMENT.match(w)] or [""]      # `VAR=value cmd`
+                    call["program"] = pathlib.Path(words[0]).name
                 by_id[block.get("id")] = call
                 calls.append(call)
             elif block.get("type") == "tool_result" and block.get("tool_use_id") in by_id:
@@ -132,7 +152,7 @@ def tool_calls(events: list[dict], work: pathlib.Path) -> list[dict]:
 
 def requests_summary(rows: list[dict]) -> dict:
     """What Claude Code sent and was served, from the proxy's records."""
-    messages = [r for r in rows if r.get("path", "").startswith("/v1/messages") and r.get("method") == "POST"]
+    messages = [r for r in rows if r.get("path", "").split("?")[0] == "/v1/messages" and r.get("method") == "POST"]
     ttft = [r["ttft_ms"] for r in messages if r.get("ttft_ms") is not None]
     tpot = [round((r["total_ms"] - r["ttft_ms"]) / (r["usage"]["output_tokens"] - 1), 2) for r in messages
             if r.get("ttft_ms") is not None and r.get("usage", {}).get("output_tokens", 0) > 1]
@@ -158,23 +178,34 @@ def run_once(server: str, model: str, claude: str, tests: dict[str, bytes]) -> d
                     if s.connect_ex(("127.0.0.1", port)) == 0:
                         break
                 time.sleep(0.1)
+            else:
+                raise RuntimeError(f"the capture proxy did not start (exit {proxy.poll()})")
             env = {k: v for k, v in os.environ.items() if not k.startswith(("ANTHROPIC_", "CLAUDE_", "PYTEST_"))}
             env |= {"ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}", "ANTHROPIC_AUTH_TOKEN": "holon",
                     "ANTHROPIC_MODEL": model, "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
                     "ANTHROPIC_DEFAULT_SONNET_MODEL": model, "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
                     "CLAUDE_CODE_SUBAGENT_MODEL": model, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-                    "DISABLE_AUTOUPDATER": "1",
+                    "DISABLE_AUTOUPDATER": "1", "NO_PROXY": "127.0.0.1,localhost",
                     "CLAUDE_CONFIG_DIR": str(tmp / "claude"),          # no user settings, memory or hooks
                     "PATH": f"{pathlib.Path(sys.executable).parent}{os.pathsep}{env.get('PATH', '')}"}
             saved = _get(server, "/metrics").get("prefix_tokens_saved", 0)
             start, timed_out = time.perf_counter(), False
-            try:
-                out = subprocess.run([claude, "-p", PROMPT, "--allowedTools", TOOLS, "--output-format", "stream-json",
-                                      "--verbose"], cwd=work, env=env, stdin=subprocess.DEVNULL, capture_output=True,
-                                     text=True, timeout=TIMEOUT_S)
-                stdout, code = out.stdout, out.returncode
-            except subprocess.TimeoutExpired as e:
-                stdout, code, timed_out = (e.stdout or b"").decode(errors="replace"), None, True
+            with open(tmp / "session.jsonl", "w") as log:   # a file, not a pipe: what the session leaves running
+                session = subprocess.Popen([claude, "-p", PROMPT, "--allowedTools", TOOLS, "--output-format",
+                                            "stream-json", "--verbose"], cwd=work, env=env, stdin=subprocess.DEVNULL,
+                                           stdout=log, stderr=subprocess.DEVNULL, start_new_session=True)
+                try:
+                    session.wait(timeout=TIMEOUT_S)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                finally:                             # the session and anything it left running
+                    try:
+                        os.killpg(session.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    session.wait()
+            stdout = (tmp / "session.jsonl").read_text(errors="replace")
+            code = None if timed_out else session.returncode
             wall = time.perf_counter() - start
             saved = _get(server, "/metrics").get("prefix_tokens_saved", 0) - saved
         finally:
@@ -227,7 +258,7 @@ def main() -> None:
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     record = {"workload": "agent_demo", "date": datetime.date.today().isoformat(), "gpu_class": args.gpu_class,
               "commit": commit, "model": model, "served": {k: metrics.get(k) for k in ("plan_id", "lock", "diff")},
-              "client": {"claude_code": CLAUDE_CODE, "allowed_tools": TOOLS, "timeout_s": TIMEOUT_S,
+              "client": {"claude_code": CLAUDE_CODE, "allowed_tools": TOOLS, "timeout_s": TIMEOUT_S, "env": CLIENT_ENV,
                          "command": "claude -p <prompt> --allowedTools <tools> --output-format stream-json --verbose"},
               "task": {"prompt": PROMPT, "project": digest(tree(PROJECT)), "tests": TESTS, "seeded": SEEDED},
               "runs": []}

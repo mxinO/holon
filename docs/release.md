@@ -1694,3 +1694,160 @@ stripped, §14.3's text), fixed; round 4 confirmed clean (one wording nit, fixed
 4. This branch changes the `src` of the core, `std.weights.*` and the six lock-pinned plugins gaining `[options]`
    (`frontends.http`, the seventh, is pinned by no lock): it must merge into M0.7's branch before
    M0.7's closing propagation, which then covers it. No lock was written or committed here.
+
+## 15. As built (step 6)
+
+Branch `release6` from local `main` at 47429a0 (M0.7 merged); commits b38d6c7 (the step) and the ones after it. The
+design above holds; what follows records what was cut, the freeze, the corrections and the demo task. Not done here,
+as planned: the panel review of steps 1–6 and the squashed public root (the lead's), and no lock was written or
+propagated.
+
+### 15.1 Cut before the freeze
+
+Every name in `core/abi.txt` was checked for a use (read or written by the core, std, plugins, testing, the judge,
+the tools, bench or scripts; implemented by a plugin; set by a manifest). A name only declared, or only exercised by
+`core/tests`, went; re-adding one later is a minor bump.
+
+- **As listed in step 6's row (M0.7 §17):**
+  - the 13 `SLOTS` with no plugin, which the core never loads: `schedule_policy`, `platform`, `launcher`,
+    `eviction_policy`, `placement_policy`, `codec`, `plan_transform`, `checkpoint_policy`, `tier`, `mover`,
+    `encoder`, `connector`, `exporter`. Nothing in the tree used one (one test manifest example named
+    `placement_policy`; it became a `draft_policy` example, as design §4.1's did). `SLOTS` keeps `model`, `sampler`,
+    `verifier`, `draft_policy` (single), `unit`, `kernel`, `state_kind`, `weight_source` (per site),
+    `logits_processor` (ordered multi), `frontend`, `drafter` (multi);
+  - `SchedulePolicy`;
+  - manifest `[tunables]`, `Manifest.tunables`, `Tunable` and `Binding.tunables`. No lock carries tunables
+    (canonical terms omit defaulted fields), so no committed `plan_id` moves: `check_locks.py` passes.
+- **Found by the sweep, also cut:**
+
+  | where | cut | why nothing needed it |
+  |---|---|---|
+  | `holon.api` | `PlanTransform`, `Platform`, `Ledger`, `Event` (`api/telemetry.py`), `Scale` | the first two belonged to cut slots; the device layer is the core's `holon.core.platform`, which never implemented `Platform`; plugins get pools through `BuildCtx.pool`, never a ledger; no `Event` is built; no `Scale` is |
+  | manifest | `variant_of`, `implements`, `graph_policy` (and its vocabulary), `shape_axes` | set by no manifest, read by nothing |
+  | `Constraint` | `cpu_isa`, `libs`, and `allows`' `isa` argument | never set; `libs` was not even checked |
+  | `KernelSpec` | `in_layouts`, `out_layouts`; the prop `batch_invariant` | two kernel plugins set `in_layouts`, nothing read it (layouts are facts `supports` checks) |
+  | `Scheme`, `Layout` | `scales`, `zero_point`; `params`, `readable_by` | every scheme and layout is built from its two names |
+  | state | `HitLen.cost`, `Payload.tier`, `SeqView.slot`; `StateKind.reclaimable` and `fork` (and std's two stubs) | the tiers are v1's; the core never called either required member |
+  | batches | `ShapeKey` and `BatchPlan.shape`, `TokenSrc.DEVICE_DRAFT`, `Seq.ext`, `BatchPlan.ext`, `DeviceBatch.meta` | never read (`BatchPlan.shape` was only written by `batching.host_plan`, `BatchPlan.ext` only copied by `batching.padded`); the core keys its graphs itself |
+  | model, frontend | `ModelSpec.position_fn`, `Tokenizer.eos_token_ids` (and the three bundles' assignments) | the stop set is the weight source's (`WeightSource.eos_token_ids`) |
+  | memory | `Pool.device`, `segments`, `base`, `capacity_dev`, `incref`, `decref`, `copy`; `Registry.items` | the core uses them on its own pools; no plugin does |
+  | hooks | `Rewindable.rewind`'s `path` | no caller passes it and its implementers do not accept it |
+
+- **Added, a declaration the code already relied on:** `Pool.num_free` (the recurrent state kind reads it before
+  publishing a checkpoint).
+- **Kept with no reader, and why:**
+  - `[resources] requires`: declared by every kernel manifest (the op contracts each implements). Cutting it is a
+    nine-manifest churn, and it is what a resolver check of design invariant 7 would read.
+  - `after` / `before` and the `ordered_multi` cardinality: the declared contract of the `logits_processor` slot (v0
+    loads at most one). Changing a slot's cardinality after 1.0 would be major; ordering a second processor needs
+    them.
+  - `numerics` and its four values: set by most manifests; the judge's tiers are defined per class (§10.3).
+  - `derived_from`, `license`, `[provenance]`: lineage and third-party metadata (`docs/adding-a-model.md`,
+    `check_provenance.py` reads the provenance keys).
+  - `ERROR_KINDS`, `FINISH_REASONS`: the frozen vocabularies of §7 (their values are used).
+  - `to_term`: it defines `canonical_hash`'s encoding, which §7 freezes. `Ref.param` and `Ref.with_`: the
+    recipe-side API of `Ref` (tests and one plugin test use them).
+  - `Status.PREEMPTED` (the core sets it; plugins see `Seq.status`); `SamplingParams`' three penalties (the frontend
+    carries them, the core refuses non-neutral values); `Slot.draft_slots` and `WeightMap.root` (implemented by the
+    core and toy-tested, set by no plugin yet); `LayerDecl.kind` (set by the recipes, part of their hash);
+    `Registries.ops` (std registers each op contract's oracle, checked against its manifest); `graph_safe` (recorded
+    in lock props).
+
+Core: 4369 → 4235 code lines.
+
+### 15.2 ABI 1.0
+
+- `holon.api.ABI = "1.0"`. All 38 manifests (first-party, `holonlm-testing`'s and the test fixtures') and the
+  manifests written inline by tests declare `core_abi = ">=1.0,<2.0"`.
+- `core/abi.txt` regenerated: 30 lines added, 111 removed: the removals and reorderings of §15.1 plus `Pool.num_free`.
+  The contracts listings (`std/contracts.txt`, `plugins/contracts.txt`) do not change. `check_abi.py --base main`
+  accepts it as a major bump (0.2 → 1.0); `check_abi.py` no longer renders the `GraphPolicy` vocabulary.
+- **Every committed lock is outdated, as expected:** the core's `src`, every manifest's (each changed its
+  `core_abi`) and the two kernel plugins', std's two state kinds' and the three bundles' sources moved, and the plans'
+  `uv_lock` hash moves with the distributions' versions (sha256:922c0a6d… → sha256:609cd0a7…). No `plan_id` of a
+  committed lock changes (`check_locks.py`). Release step 7 propagates on the public root.
+
+### 15.3 Versions
+
+Every distribution (`holonlm`, `-std`, `-plugins`, `-testing`, `-judge`, `-tools`) and the root `holon-workspace` are
+0.1.0, and so is `holon.__version__` (the core's unit version in locks). `uv.lock` was updated (seven version lines).
+Plugin manifests keep their own unit versions (1.0.0).
+
+### 15.4 Corrections
+
+- **design.md**
+  - §3: the Plan has no tunables; `Event` is planned; `Platform` is the core's device layer, not a slot.
+  - §4.1: the manifest example is a `draft_policy` plugin with ABI 1.0's sections only (it parses: the test's copy);
+    resources are matched as strings and registrations checked against `provides` (the claim of a Protocol check
+    after import was never built).
+  - §4.2: the slot table is ABI 1.0's; the planned slots are listed as future minor additions.
+  - §4.3: per-site bindings carry configs, not tunables.
+  - §4.4: rollback in an install (an older lock pins other code: `holon serve` serves the newest lock pinning the
+    installed code and falls back to defaults, D2); `holon serve` starts from the lock; `plan_of` lives in
+    `holon.core.plans`.
+  - §4.5: the frozen ABI, the bump rule, the contracts listings and the cut list; "pre-1.0, may break" is gone.
+  - §5–§9: the sketches no longer present cut names as current (`KernelSpec`, `Scheme` / `Layout`, the `Pool` plugins
+    see, `StateKind`, `Seq`, `BatchPlan` / `ShapeKey`, graph policies, `Event`, §8's platform and launcher rows, §9's
+    offload, checkpoint, encoder and plan-transform rows).
+- **plan.md §1**: the runtime dependencies per distribution, transformers among them (the GGUF tokenizer), and
+  today's vendored kernels, test-only packages and baselines.
+- **docs/adding-a-model.md**: the `core_abi` example. The README has no `core_abi` example (nothing to change).
+- M0.7 §17's other notes stay where §17.7 put them: the README's lock table (step 10), GQA's `_fusion` (the release
+  review).
+
+### 15.5 The demo task (D7), pre-registered
+
+`bench/demo/` (stdlib-only project; nothing here runs it — step 9 does):
+- **The project** (`bench/demo/project/`): a shop in three modules — `money` (prices as integer cents), `cart`,
+  `discounts` (rules and checkout) — and 40 tests. Seeded: `money.format_cents` drops the zero padding of the cents
+  (`5` → `0.5`), which fails tests in all three modules; `discounts.buy_n_get_one`, named in the module's docstring
+  and specified by the tests, is missing. As committed: **17 failed, 23 passed**.
+- **The run** (`bench/demo/run.py`): a fresh copy of the project in a temporary directory; Claude Code **2.1.300**
+  (refused otherwise; M0.5's session ran 2.1.296), `claude -p <prompt> --allowedTools Read,Write,Edit,Bash,Glob,Grep
+  --output-format stream-json --verbose`, the M0.5 environment variables, auto-update off, a fresh
+  `CLAUDE_CONFIG_DIR` (no user settings, memory or hooks), `NO_PROXY` for the local proxy, the harness's Python first
+  on `PATH`; through `bench/capture_proxy.py`; stopped after 30 minutes (its whole process group, also after a
+  normal end) and scored as it stands. The prompt: "The Python package `shop` in the current directory fails its
+  tests. Fix the package so that `python -m pytest` passes, without editing any file under tests/. When the tests
+  pass, reply with the single word done."
+- **Success:** after the session, pytest runs in a fresh directory holding only the agent's `shop/` and the
+  harness's own copy of `tests/` (read before the session), with the harness's empty configuration (`-c`),
+  `--noconftest`, no plugin autoload and no `PYTEST_*` variables; all 40 must pass (a scoring run past 10 minutes is
+  a miss). Before the runs it checks that the committed project fails as above. Not guarded: the agent runs the
+  harness's own Python and could change its installed packages. Runs are sequential on one server, so a later run
+  may hit the prefix cache an earlier one filled (the same system prompt and tools), as a user's next session would.
+- **Recorded per run:** success and counts, turns, wall time, exit and result kind, the tool-call sequence (tool, a
+  file tool's path inside the project or `<outside>`, the program a Bash command starts, whether it failed — no file
+  text, no arguments), the sampling parameters of the requests Claude Code sent (`model`, `max_tokens`,
+  `temperature`, `top_p`, `top_k`, `thinking`, `output_config`, `stop_sequences`, deduplicated), the tokens served
+  (input and output as the server reported them), the prefix tokens saved (the engine's counter over the run), TTFT
+  and TPOT per request at the proxy. The record also has the served plan, its lock (from `plans/`) and the diff, the
+  project's digest and the commit.
+- **`capture_proxy.py`** now adds to each request's line `ttft_ms` (the first `content_block_delta`), `total_ms`
+  and `usage` (a whole message's, or a stream's `message_start` and last `message_delta`).
+- **Checked here, without the demo:** the scoring (`run.py --score`) gives 23 / 17 on the project as committed and
+  40 / 0 on a reference fix (not committed); with that fix, deleting a test file, adding a skipping test, a
+  `conftest.py` that clears the collection and a `pytest.ini` with `-k nothing` all score as the fix alone; on the
+  unfixed project those two, and a `pytest.py` that writes a passing JUnit report (in the root and in `shop/`), still
+  score 23 / 17. A whole run against a fake server and a fake `claude` (one proxied streamed request, one tool call,
+  a background process left running) recorded the turns, the tool call, the request's sampling parameters, tokens,
+  TTFT and TPOT, the prefix-saved delta and the lock path from `plans/` on, and killed the background process.
+
+### 15.6 Review
+
+One reviewer on the aggregate change. Round 1: one major and six minors, all fixed.
+- **Major:** a `pytest.py` in the project root replaced pytest in the scoring and could fake a pass. The scoring now
+  runs in a fresh directory with only the agent's `shop/` and the harness's tests (the prompt names the package).
+- **Minors:**
+  - a scoring timeout or a session's leftover processes could crash the harness; the scoring timeout is now a miss,
+    and the session's process group is killed (its output goes to a file, so a leftover process cannot hold a pipe:
+    found by the fake run);
+  - `ShapeKey` and `BatchPlan.shape` were never read: cut;
+  - `count_tokens` requests counted as messages;
+  - a Bash command's `VAR=value` prefix and a `~` path could leak argument text;
+  - the proxy's usage parse raised on a non-dict `message`, and the harness went on when the proxy did not start;
+  - design §3 and §4.2–§4.3 still named cut features.
+- **Nits, fixed:** the design example's `derived_from` follows the `<plugin>@<commit>` form, and the test now
+  parses the example from `docs/design.md` itself; a blank line in `hooks.py`; the record lists the client's
+  environment variables; the harness's server calls bypass HTTP proxies; the warm prefix cache across runs is stated.
+

@@ -75,7 +75,8 @@ def usage(answer: bytes) -> dict[str, int]:
         except ValueError:
             continue
         if isinstance(event, dict):
-            out |= (event.get("message") or event).get("usage") or {}
+            body = event["message"] if isinstance(event.get("message"), dict) else event
+            out |= body.get("usage") if isinstance(body.get("usage"), dict) else {}
     return {k: v for k, v in out.items() if k in ("input_tokens", "output_tokens")}
 
 

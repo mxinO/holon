@@ -9,7 +9,6 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-
     from .batch import StepCtx
     from .decoding import DraftPolicy
     from .mixer import Planner

@@ -128,7 +128,8 @@ to host-side policies and live tunables).
 
 ## 3. Core vocabulary
 
-Sixteen nouns. Each is a type in `holon.api` (the plugin ABI) with its runtime in `holon.core`.
+Sixteen nouns. Each is a type in `holon.api` (the plugin ABI) with its runtime in `holon.core`, except Event
+(planned) and Platform (the core's device layer).
 
 | # | Noun | One-line definition | § |
 |---|---|---|---|
@@ -167,7 +168,7 @@ the plugin's package, whose directory holds `plugin.toml`).
 [plugin]
 name      = "spec.adaptive_k"
 version   = "0.3.1"
-derived_from = "std.spec.fixed_k"         # optional; copied code / explicit old-version copies (lineage only)
+derived_from = "std.spec.fixed_k@a1b2c3d" # optional; copied code / explicit old-version copies (lineage only)
 entry     = "adaptive:Plugin"             # "module:attr" in the plugin's package; imported only if selected
 slot      = "draft_policy"
 license   = "Apache-2.0"                  # SPDX; borrowed code is declared in [provenance]
@@ -220,8 +221,7 @@ budget are the core's in v0, §7.1). Where later sections name them, they descri
 
 A `Ref("a.b.c@1")` is served by the installed plugin whose name is the longest prefix of the unit name (e.g.
 `std.ops` serves `std.ops.rmsnorm`), and whose version major equals the Ref's major. Everything the resolver needs
-(resources, numerics, graph policy, depth, ordering, shape axes) lives in the manifest; runtime classes never repeat
-it.
+(resources, numerics, ordering, the build module, options) lives in the manifest; runtime classes never repeat it.
 
 Per-slot ABI versions return when a slot needs one (§4.5).
 
@@ -232,7 +232,7 @@ Per-slot ABI versions return when a slot needs one (§4.5).
 3. The model plugin's `ModelSpec` enumerates **sites** (each mixer, op, state spec, draft head).
 4. For each site: filter candidates by resources, platform/fingerprint constraints, `supports(shape)`, layout
    reachability (§5.5); then pick by deployment pin → the model's lock for this fingerprint class → default priority.
-5. Check `ShapeKey` axes are finite; compute graph policy per ShapeKey class (weakest wins).
+5. Graph buckets are the core's (§7.4); plugin-declared shape axes and graph policies are planned (§4.5).
 6. Emit the **Plan**: model_id, fingerprint class, recipe hash, commit, uv.lock hash, per-unit `src`/`sem` (one
    version each) and per-site bindings with pinned configs; `plan_id = canonical_hash(plan)`. The
    **Lock** file stores the Plan plus its verification results (`snapshot`, `uncovered` sites), which may be
@@ -328,7 +328,7 @@ approvals, and the `isolation-check` CI job.
   removed or changed one needs a new major. Per-slot versions (`slot_abi`) return, additively, when a slot first
   needs one.
 - **Cut before the freeze** (release step 6, `docs/release.md` §15): the names nothing used — the slots of §4.2's
-  planned list, `SchedulePolicy`, `PlanTransform`, the `Platform` Protocol, `Event`, the `Ledger` Protocol, `Scale`,
+  planned list, `SchedulePolicy`, `PlanTransform`, the `Platform` Protocol, `Event`, the `Ledger` Protocol, `Scale`, `ShapeKey`,
   manifest `[tunables]` (and `Tunable`, `Binding.tunables`), `variant_of`, `implements`, `graph_policy` and
   `shape_axes`, and unused fields and members (listed there). Where §5–§10 sketch them, they describe plans, each
   a minor addition when its first user lands; `core/abi.txt` is authoritative.
@@ -960,11 +960,8 @@ class BatchPlan:                     # host, struct-of-arrays, mutable by schedu
     token_src: np.ndarray            # HOST | DEVICE_LAST  (overlap-safe placeholders)
     host_tokens: np.ndarray
     mem_ops: list[MemOp]
-    shape: ShapeKey                  # padded bucket
-
-@dataclass(frozen=True)
-class ShapeKey:
-    n_tokens: int; n_seqs: int       # plugin-declared axes (e.g. (("spec.q", 4),)) are planned, not in ABI 1.0
+    # a `ShapeKey` (padded bucket + plugin-declared axes, e.g. (("spec.q", 4),)) is planned, not in ABI 1.0:
+    # the core keys its graphs itself (§7.4)
 
 class Batch:                         # plan + static device mirror built by the core
     plan: BatchPlan
@@ -1044,7 +1041,7 @@ device inputs (`DEVICE_LAST`) are already consistent.
 ### 7.4 CUDA graphs
 
 - Graph units: `launch_forward` and `launch_sample`.
-- Capture set = bucketed `n_tokens`/`n_seqs`, capped by a memory budget (plugin-declared `ShapeKey` axes are a
+- Capture set = bucketed `n_tokens`/`n_seqs`, capped by a memory budget (plugin-declared shape axes are a
   planned addition).
 - v0 implements FULL (decode/verify) and EAGER (prefill); PIECEWISE is v1. A per-plugin graph policy (`full`,
   `piecewise`, `eager`, `host`: the resolver taking the weakest) is planned with PIECEWISE; in v0 a planner whose
@@ -1305,7 +1302,7 @@ The dev machine has 8× RTX A5000; v1 includes a **TP=2 milestone** to prove the
 | DeepSeek sparse attention / V4 compressed KV | `dsa_mla` mixer: MLA `Paged` + indexer `Paged(page_group)` + compressed `Paged(tokens_per_unit)` | `page_group`, `tokens_per_unit`, `alignment` |
 | Speculative decoding | drafter, draft policy, verifier | taps, shared modules, Rewindable, verify graphs, sub-steps, aux models |
 | Structured output / tool calls | xgrammar logits processor (host matcher rolled back after each draft probe), frontend parsers and constraint builders by the bundle's formats | logits-processor lifecycle, host-token gate, drafts on the host, `RequestError`, `resume_output`, masks staged through the Uploader on every sampling path |
-| LoRA (v1) | adapter op context, ShapeKey axis (planned) | namespace, ops read `Batch.dev` |
+| LoRA (v1) | adapter op context, a shape axis (planned) | namespace, ops read `Batch.dev` |
 | VLM (v1) | encoder plugin (a planned slot), content-hash encoder cache | `position_fn` (planned), `SamplingParams.ext` annotations |
 
 Detailed walk-throughs (DeepSeek-V4-class on 16 GB, Qwen3.8-Flash-Next hybrid, new mixer type X) were worked

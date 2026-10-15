@@ -18,11 +18,10 @@ dataclass BatchPlan
   #4 start_upper: np.ndarray
   #5 token_src: np.ndarray
   #6 host_tokens: np.ndarray
-  #7 shape: ShapeKey
-  #8 mem_ops: list[MemOp] = list()
-  #9 publishes: list[InStepPublish] = list()
-  #10 draft_k: int = 0
-  #11 n_decode: int = 0
+  #7 mem_ops: list[MemOp] = list()
+  #8 publishes: list[InStepPublish] = list()
+  #9 draft_k: int = 0
+  #10 n_decode: int = 0
 dataclass Binding frozen
   #0 impl: str
   #1 config: dict[str, Any] = dict()
@@ -324,9 +323,6 @@ protocol SeqView() required, implemented by core
   num_computed: int
   tokens: tuple[int, ...]
   prompt_len: int
-dataclass ShapeKey frozen
-  #0 n_tokens: int
-  #1 n_seqs: int
 dataclass Slot frozen
   #0 unit_bytes: int
   #1 draft_slots: int = 0
