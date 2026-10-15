@@ -56,7 +56,7 @@ def test_scoring_reads_only_the_agents_regular_files_and_never_raises(tmp_path, 
     assert not failed["success"] and failed["error"] == "OSError"
 
 
-def test_the_project_and_the_scoring_environment_are_checked(tmp_path, project):
+def test_the_project_and_the_scoring_environment_are_checked(tmp_path, project, monkeypatch):
     assert demo.digest(project) == demo.PROJECT_DIGEST
     changed = tmp_path / "project"
     demo.write_tree(project, changed)
@@ -77,6 +77,12 @@ def test_the_project_and_the_scoring_environment_are_checked(tmp_path, project):
         (site / tamper).write_text("import os\n")
         assert demo.site_digest([site]) != before
         before = demo.site_digest([site])
+    guarded = demo.site_digest()                            # a run's validity: the same digest, and it still runs
+    assert demo.invalid_after(guarded) is None
+    assert "changed" in demo.invalid_after("sha256:other")
+    monkeypatch.setattr(demo, "scoring_modules", lambda: (_ for _ in ()).throw(subprocess.TimeoutExpired("p", 1)))
+    assert "TimeoutExpired" in demo.invalid_after(guarded)
+    monkeypatch.undo()
     loaded = demo.scoring_modules()                         # everything a scoring run imports, the stdlib included
     for module in ("iniconfig/__init__.py", "pluggy/__init__.py", "_pytest/junitxml.py", "xml/etree/ElementTree.py"):
         assert any(f.endswith(module) for f in loaded), module

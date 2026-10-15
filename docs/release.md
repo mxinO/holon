@@ -1876,13 +1876,13 @@ Round 2 confirmed every fix: no findings beyond two wording nits in this section
 
 ### 15.7 Suite and CI
 
-Full GPU suite at b604aa9 (two RTX A5000s, the worktree's uv venv; `pytest core std plugins judge testing tools`):
-**1210 passed, 65 skipped in 20 min 45 s**, the same counts as M0.7's close (1210 / 65): no test was added, two were
-reshaped (`test_api`'s design-example and defaulted-field cases), one lost an argument (`test_locks`' tunables). An
-earlier run at b38d6c7 had one failure, `tools/tests/test_gpu_lock.py::test_first_lock_for_qwen3_0_6b`, caused by
-editing core files while it ran (the core's `src` moved between its two `propagate` calls); it passes at b604aa9.
-`scripts/ci/run_all.sh main` is green (import contracts 8 kept). The wall time is above the close's 17 min 59 s on a
-shared host; the slowest tests are unchanged (the MoE kernel setup, the supervisor's rollback tests).
+Full GPU suite (two RTX A5000s, the worktree's uv venv; `pytest core std plugins judge testing tools`): at b604aa9,
+**1210 passed, 65 skipped in 20 min 45 s**, the same counts as M0.7's close (1210 / 65); after the panel's fixes, at
+6e0f1fa, **1217 passed, 65 skipped in 17 min 51 s** (+7: the per-element listing case and the six harness tests,
+≈ 3 s on the CPU). An earlier run at b38d6c7 had one failure, `tools/tests/test_gpu_lock.py::test_first_lock_for_qwen3_0_6b`,
+caused by editing core files while it ran (the core's `src` moved between its two `propagate` calls); it passes
+since. `scripts/ci/run_all.sh main` is green at every commit (import contracts 8 kept). The final commit (the
+after-run guard) is re-run in full too (below).
 
 ### 15.8 For the lead
 
@@ -1932,6 +1932,8 @@ declarations into ABI 1.0. Every code fix below has a test that fails without it
   test in `tools/tests/test_demo_harness.py` — the recorded `shop/` diff followed a linked `shop/` (now refused, as
   scoring does); the digest guard covered only pytest and pluggy (now every module file a scoring run imports, found
   by a probe, and the interpreter; the shared libraries it links are stated as unguarded); a lock path outside
-  `plans/` crashed the class check (now refused with its message). Nits fixed: hidden files (a local
+  `plans/` crashed the class check (now refused with its message). Its confirmation found one more minor, fixed with a
+  failing-first test: the after-run digest could raise (a pytest the agent broke) and lose the run; now any failure
+  there makes the run invalid, recorded and not scored (`invalid_after`). Nits fixed: hidden files (a local
   `.pytest_cache`) are outside the project digest; the "planned" phrasing in design §6 / §8 / §9; D7's success line.
 

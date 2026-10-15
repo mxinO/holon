@@ -205,6 +205,15 @@ def site_digest(dirs: list[pathlib.Path] | None = None) -> str:
     return digest(files)
 
 
+def invalid_after(guarded: str) -> str | None:
+    """Why a run is invalid, by the scoring environment after it: changed, or no longer able to run the probe (the
+    run is then recorded and not scored); None if it is as before."""
+    try:
+        return None if site_digest() == guarded else "the scoring interpreter's modules changed during the run"
+    except Exception as e:                                 # a broken pytest must not lose the run
+        return f"the scoring interpreter no longer runs its probe ({type(e).__name__})"
+
+
 def make_venv(dest: pathlib.Path) -> pathlib.Path:
     """A disposable venv with this interpreter's pytest version, installed offline (uv's cache); its bin directory."""
     uv = shutil.which("uv")
@@ -411,9 +420,9 @@ def run_once(server: str, model: str, claude: pathlib.Path, project: dict[str, b
                 pass
         result = next((e for e in reversed(events) if e.get("type") == "result"), {})
         rows = [json.loads(line) for line in captured.read_text().splitlines()] if captured.exists() else []
-        invalid = site_digest() != guarded
+        invalid = invalid_after(guarded)
         diff = shop_diff(project, work)
-        return {"invalid": "the scoring interpreter's packages changed during the run" if invalid else None,
+        return {"invalid": invalid,
                 "scored": None if invalid else score(work, tests), "wall_s": round(wall, 1), "timed_out": timed_out,
                 "exit_code": None if timed_out else session.returncode, "turns": turns(events),
                 "result_subtype": result.get("subtype"), "is_error": result.get("is_error"),
