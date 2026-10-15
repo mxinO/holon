@@ -27,10 +27,11 @@ class Backend(http.Backend):
         return {"config": {"flags": " ".join(self.flags)}, "served": served(self.server)}
 
     def stats(self) -> dict[str, int]:
-        """The engine's counters (/metrics): prefix hits, and real drafts and verify rows by drafts accepted; the
-        frontend process's CPU time."""
+        """The engine's counters (/metrics): prefix hits, mixed steps, preemptions, and real drafts and verify rows by
+        drafts accepted; the frontend process's CPU time."""
         metrics = self.server.get("/metrics")
-        kept = {k: v for k, v in metrics.items() if k in ("prefix_tokens_saved", "mixed_steps") or k[:5] == "spec_"}
+        kept = {k: v for k, v in metrics.items() if k in ("prefix_tokens_saved", "mixed_steps", "preemptions")
+                or k.startswith("spec_")}
         return kept | {"frontend_cpu_ms": round(self.server.cpu_ms())}
 
 

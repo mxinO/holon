@@ -6,8 +6,8 @@
   `holon serve <name>` fetches it (`<org>/<repo>` or `<org>/<repo>/<stem>`: what `holon models` prints);
 - locks never pin test-only plugins (the `testing.*` distribution). The tools plan and write locks for any engine —
   their own tests write CPU locks on the reference kernels into temporary directories — so this is enforced here;
-- every plugin option a lock sets is declared by an installed plugin (manifest `[options]`), so `holon serve` serves
-  a committed lock without the undeclared-option warning.
+- every plugin option a lock sets is declared by an installed plugin (manifest `[options]`), with a value in its
+  `choices`, so `holon serve` serves a committed lock without a warning and never drops it.
 
 `--release` (before a release tag) also checks that every newest lock pins the unit sources of this tree. Run in the
 project environment."""
@@ -30,8 +30,10 @@ for path in sorted(PLANS.rglob("*.lock")):
         msgs.append(str(e).replace(str(ROOT) + "/", ""))
         continue
     msgs += [f"{path.relative_to(ROOT)}: pins {unit}" for unit in lock.plan.units if unit.startswith("testing.")]
+    options = lock.plan.engine.get("plugin_options", {})
     msgs += [f"{path.relative_to(ROOT)}: no installed plugin declares the option {key}"
-             for key in lock.plan.engine.get("plugin_options", {}) if key not in declared]
+             for key in options if key not in declared]
+    msgs += [f"{path.relative_to(ROOT)}: {bad}" for bad in cli.outside_choices(options, declared)]
 builds = collections.defaultdict(list)
 for model_id in plans.model_ids(PLANS):
     builds[model_id.rpartition("@")[2]].append(model_id)

@@ -523,7 +523,8 @@ measured here).
   MoE (e.g. Qwen3.5-122B-A10B, Qwen3.8-Flash-Next) — compared with FreeToken and Strata on the same nodes.
 - KV offload to pinned RAM / SSD (connector-chosen BLOCKED vs layer-wise, cancellable futures, demote/pin eviction).
 - VMM ledger + live rebalance KV ↔ experts through `quiesce` (run-identical after shrink/regrow).
-- Mixed prefill/decode scheduling policy + PIECEWISE graphs; depth 2; radix PrefixIndex if profiles warrant.
+- PIECEWISE graphs for mixed prefill/decode steps (mixing itself is M0.7's core budget `chunk_with_decode`, design
+  §7.1; mixing verify rows is its follow-up, `docs/m07-perf.md` §9); depth 2; radix PrefixIndex if profiles warrant.
 - HF-ecosystem quantization: GPTQ/AWQ INT4 (W4A16), and FP8 on sm_86 (W8A16 via uint8 bit-decode; native FP8,
   NVFP4 and MXFP4 are M0.6); TP=2 on 2× A5000 (zero core diff); `update_weights`; LoRA; Qwen3.5 VLM.
 - **Optional self-improvement layer** (design §10): supervisor, improve API (first-version tool set), sandbox

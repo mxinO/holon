@@ -11,8 +11,9 @@ from holon_judge.planted import PLANTS
 
 CONFIGS = {"prefix on, depth 1": {"prefix_cache": True, "overlap": True},
            "prefix on, depth 0": {"prefix_cache": True, "overlap": False},
-           "prefix off, depth 1": {"prefix_cache": False, "overlap": True},
-           "mixed 8": {"prefix_cache": False, "overlap": False, "chunk_with_decode": 8}}     # docs/m07-perf.md §3.1
+           "prefix off, depth 1": {"prefix_cache": False, "overlap": True}}
+MIXED = {"mixed 8": {"prefix_cache": False, "overlap": False, "chunk_with_decode": 8},       # docs/m07-perf.md §3.1
+         "mixed 8, one sequence": {"prefix_cache": False, "overlap": False, "chunk_with_decode": 8, "max_seqs": 1}}
 
 
 def test_mean_has_a_cluster_robust_standard_error():
@@ -61,21 +62,22 @@ def run(tiny_checkpoint, tiny_prompts):
 
     def build(**overrides):
         return Engine(EngineConfig(model=str(tiny_checkpoint), device="cpu", dtype=torch.float32, page_size=4,
-                                   max_seqs=4, max_model_len=trace.max_len, state_memory=1 << 21,
-                                   **{"max_step_tokens": 32} | overrides))
+                                   max_model_len=trace.max_len, state_memory=1 << 21,
+                                   **{"max_step_tokens": 32, "max_seqs": 4} | overrides))
 
-    def compare(plant=None):
+    def compare(plant=None, configs=CONFIGS):
         if plant is None:
-            return bounded.compare_configs(build, CONFIGS, trace, k=5)
+            return bounded.compare_configs(build, configs, trace, k=5)
         with PLANTS[plant]():
             return bounded.compare_configs(build, CONFIGS, trace, k=5)
     return compare
 
 
 def test_configurations_agree_with_the_reference_and_the_prefix_cache_saves(run):
-    report = run()
-    assert report["passed"], bounded.table(report)
+    report = run(configs=CONFIGS | MIXED)
     results = report["results"]
+    assert results.pop("mixed 8, one sequence")["failures"] == ["no step mixed decode rows with prefill chunks"]
+    assert all(r["passed"] for r in results.values()), bounded.table(report)
     assert results["baseline"]["top1"]["n"] == results["prefix on, depth 1"]["top1"]["n"] == 8 * 3 * 12
     assert results["prefix on, depth 1"]["top1"]["value"] > 0.99
     assert results["baseline"]["tokens_saved"] == 0 and results["prefix on, depth 1"]["tokens_saved"] > 0

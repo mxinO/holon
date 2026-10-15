@@ -90,7 +90,9 @@ class _Split:
 
 
 def _rows(batch, pages, lo: int, hi: int) -> tuple[Any, Any]:
-    """Rows lo … hi-1 of a step as a batch and pages of their own (a mixed step's slices; host plan, device views)."""
+    """Rows lo … hi-1 of a step as a batch and pages of their own (a mixed step's slices; host plan, device views):
+    what attention kernels plan and run from. Host tokens, the shape key, publishes and the logits indices stay the
+    step's — no attention kernel reads them."""
     plan, dev = batch.plan, batch.dev
     qs = np.concatenate([[0], np.cumsum(plan.n_query)])
     t0, t1 = int(qs[lo]), int(qs[hi])

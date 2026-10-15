@@ -1,7 +1,7 @@
 """Scheduling: which requests run in the next step and how many tokens each (design §7.1).
 
-v0 policy (FCFS, no phase mixing): if waiting requests can be admitted the step prefills them, in chunks bounded by
-the token budget; otherwise it decodes every running request.
+Policy (FCFS): if waiting requests can be admitted the step prefills them, in chunks bounded by the token budget;
+otherwise it decodes every running request — unless steps mix (below).
 
 Requests are ranked running (oldest first), then waiting (queue order). When a request cannot get the state it
 needs, and releasing the admitted requests below it would make room, the lowest-ranked of them is preempted by
@@ -28,9 +28,10 @@ ready), without holding up the requests queued behind it.
 
 Mixed steps (`chunk_with_decode` C > 0; docs/m07-perf.md §3.1): without a drafter, a step whose running requests
 decode also carries prefill chunks — its decode rows first (`BatchPlan.n_decode` of them, each reserved before any
-chunk), then chunks of up to C tokens (at least min(64, C)); a step with nothing to decode prefills up to
-`max_step_tokens`, as today. With a drafter rows never mix: a prefill step capped at C alternates with a decode
-(verify) step while both kinds can run, else the step takes the kind that can.
+chunk), then chunks of up to C tokens (the engine checks `max_step_tokens` >= max_seqs + C, so a step always has room
+for them); a step with nothing to decode prefills up to `max_step_tokens`, as today. With a drafter rows never mix: a
+prefill step capped at C alternates with a decode (verify) step while both kinds can run, else the step takes the
+kind that can.
 
 Liveness: the pools always hold one request of the engine's maximum length, and every unit is held by some request
 or only by the prefix cache, which evicts such units before anyone is preempted. So the top-ranked request fits once
@@ -47,8 +48,6 @@ from holon.api import BatchPlan, Seq, Status, TokenSrc
 
 from .batching import host_plan
 from .state import StateManager
-
-MIN_CHUNK = 64          # a mixed step's chunk is at least min(MIN_CHUNK, chunk_with_decode): decoders cannot starve it
 
 
 def _host_tokens(seq: Seq, start: int, n: int, on_device: bool) -> list[int]:
@@ -108,9 +107,9 @@ class Scheduler:
             decode = self._decode()
             if not decode:
                 return self._prefill(self.max_step_tokens), 0
-            chunks = self._prefill(max(min(cap, self.max_step_tokens - len(decode)), min(MIN_CHUNK, cap)))
+            chunks = self._prefill(min(cap, self.max_step_tokens - len(decode)))
             return decode + chunks, len(decode) if chunks else 0
-        ready = bool(self._ready())               # a drafter: alternate while both kinds can run
+        ready, cap = bool(self._ready()), min(cap, self.max_step_tokens)    # a drafter: alternate while both can run
         if self._prefilled and ready:
             rows = self._decode()
             self._prefilled = not rows

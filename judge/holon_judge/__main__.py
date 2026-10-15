@@ -306,6 +306,8 @@ def _bounded(a: argparse.Namespace) -> int:
         return Engine(dataclasses.replace(base, **overrides))
 
     reference = None
+    if sum(map(bool, (a.graphs_vs_eager, a.spec_vs_plain, a.mixed))) > 1:
+        raise SystemExit("bounded: --graphs-vs-eager, --spec-vs-plain and --mixed are separate comparisons")
     if a.graphs_vs_eager:                                # every decode step a batch of `sessions` rows, padded
         baseline = bounded.BASELINE | {"cuda_graphs": False}
         configs = {"graphs on": bounded.BASELINE | {"cuda_graphs": True}}

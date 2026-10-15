@@ -213,7 +213,7 @@ against the Protocol (`runtime_checkable` + signature check).
 
 | Cardinality | Meaning | Slots |
 |---|---|---|
-| `single` | exactly one per Plan | model, platform, launcher, schedule_policy, sampler, verifier, draft_policy, eviction_policy (prefix index) |
+| `single` | exactly one per Plan | model, platform, launcher, schedule_policy (none in v0: scheduling and its mixing budget are the core's, §7.1), sampler, verifier, draft_policy, eviction_policy (prefix index) |
 | `per_site` | bound per site (layer, op instance, state spec, store) | unit (mixers, ffn/MoE, norms, blocks, ops — anything a recipe names by `Ref`), kernel, state_kind, placement_policy, codec, weight_source |
 | `ordered_multi` | ordered list, `after`/`before` in the manifest | plan_transform, logits_processor (v0: at most one, selected via `EngineConfig.slots`), checkpoint_policy |
 | `multi` | any number, keyed by name | frontend, tier, mover, drafter, encoder, connector, exporter |
@@ -891,9 +891,14 @@ becomes exact at commit (the pattern of vLLM Model Runner V2's `states.py`, impl
 lets overlap and speculative decoding coexist: the host never needs `n_accept` of step N−1 to launch step N.
 
 Scheduling mechanism is phase-free (vLLM v1 idea): each Seq wants `len(tokens) + drafts − num_computed` tokens and
-a token budget covers prefill chunks, decode and verify uniformly. The v0 FCFS **policy** never mixes prefill and
-decode rows in one step, so decode steps always run in a FULL graph (mini-sglang's choice); a mixing policy is a v1
-plugin together with PIECEWISE graphs.
+a token budget covers prefill chunks, decode and verify uniformly. By default the FCFS scheduler never mixes prefill
+and decode rows in one step, so decode steps always run in a FULL graph (mini-sglang's choice). Mixing is a core
+budget, not a policy plugin (M0.7, `docs/m07-perf.md` §3.1): with `EngineConfig.chunk_with_decode` C > 0 and no
+drafter, a step whose running requests decode also carries prefill chunks — its decode rows first
+(`BatchPlan.n_decode`), then chunks of up to C tokens (`max_step_tokens` ≥ max_seqs + C is checked at build) — so a long prompt no longer stalls the
+decoders for its whole prefill. Mixed steps run eagerly; every planner must declare `mixes_row_kinds` (it plans the
+two row kinds of such a step, each as its unmixed step would), else the engine refuses to start. With a drafter, rows
+never mix: a prefill step capped at C alternates with a decode/verify step. PIECEWISE graphs for mixed steps are v1.
 
 ### 7.2 Batch
 

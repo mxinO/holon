@@ -59,11 +59,12 @@ def _run(sched: Scheduler, seqs: list[Seq], max_steps: int = 10_000) -> int:
         decoding = [seq.status is Status.RUNNING for seq in rows]
         n, chunk = plan.n_decode, int(plan.n_query[plan.n_decode:].sum())
         assert decoding == [True] * n + [False] * (len(rows) - n) or (not n and all(decoding)), step
+        assert int(plan.n_query.sum()) <= max(sched.max_step_tokens, len(rows) if all(decoding) else 0)
         assert (n > 0) == (0 < n < len(rows)) and (not n or (cap and not drafting))
         if not cap:
             assert all(decoding) or not any(decoding)                       # today: never mixed
         elif n:
-            assert (plan.n_query[:n] == 1).all() and chunk <= max(min(cap, sched.max_step_tokens - n), min(64, cap))
+            assert (plan.n_query[:n] == 1).all() and chunk <= cap
         elif drafting and not any(decoding):
             assert not (prefilled and could_decode) and chunk <= (cap if could_decode else sched.max_step_tokens)
         prefilled = not any(decoding)
@@ -90,10 +91,10 @@ def test_every_request_finishes_when_one_max_request_fits(seed, mode):
     rng = random.Random(seed)
     max_len = 40
     seqs = [_seq(i, p := rng.randint(1, max_len - 1), rng.randint(1, max_len - p)) for i in range(rng.randint(1, 12))]
-    state = FakeState(capacity=rng.randint(max_len, 3 * max_len), slots=rng.randint(1, 4))
-    _run(Scheduler(state, max_step_tokens=rng.randint(1, 50), max_model_len=10**9,
-                   draft_k=(lambda seqs: 0) if mode == "alternating" else None,
-                   chunk_with_decode=rng.randint(1, 20) if mode != "today" else 0), seqs)
+    state = FakeState(capacity=rng.randint(max_len, 3 * max_len), slots=(slots := rng.randint(1, 4)))
+    cap = rng.randint(1, 20) if mode != "today" else 0      # the engine's check: max_step_tokens >= slots + cap
+    _run(Scheduler(state, max_step_tokens=rng.randint(slots + cap if mode == "mixed" else 1, 50), max_model_len=10**9,
+                   draft_k=(lambda seqs: 0) if mode == "alternating" else None, chunk_with_decode=cap), seqs)
     assert all(s.status is Status.FINISHED for s in seqs)
     assert state.held == {} and len(state.slots) > 0
 

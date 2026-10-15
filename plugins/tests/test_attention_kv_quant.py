@@ -240,8 +240,9 @@ def test_a_decode_row_is_the_last_prefill_row(tmp_path, layout):
     """The GQA unit with its selected kernels (D3's fused op included) on a tiny Qwen3.5 — partial rotary, the gated q
     layout, a norm offset: prefilling T tokens against prefilling T − 1 then decoding the last as a one-token row.
     The last token's output agrees within the attention budget (another kernel computes it), and the KV it wrote is
-    bitwise where its projections are (the same write at the same position); T − 1 = 16 opens a page. A decode-only
-    position error, which every relative judge misses (docs/m07-perf.md §13.7), fails the KV check."""
+    bitwise: inputs in {−1, 0, 1} and projection weights in {−1, 0, 1} / 8 make every projection exact whatever the
+    matmul's order, so the same write lands at the same position; T − 1 = 16 opens a page. A decode-only position
+    error, which every relative judge misses (docs/m07-perf.md §13.7), fails the KV check."""
     path = save(tiny_hf(4, seed=1, dim=64), tmp_path)
     engine = Engine(EngineConfig(str(path), dtype=torch.bfloat16, cuda_graphs=False, overlap=False, page_size=PAGE,
                                  max_seqs=2, max_step_tokens=64, max_model_len=128, state_memory=8 << 20,
@@ -250,6 +251,8 @@ def test_a_decode_row_is_the_last_prefill_row(tmp_path, layout):
     assert gqa_unit._fused is not None and gqa_unit.gated
     table = next(iter(engine.state.tables.values())).host
     torch.manual_seed(0)
+    for linear in (m for m in gqa_unit.modules() if hasattr(m, "in_features") and m.weight is not None):
+        linear.weight.copy_(torch.randint(-1, 2, linear.weight.shape) / 8)
 
     def run(seq, x):
         assert engine.state.reserve(seq, len(x))
@@ -267,20 +270,14 @@ def test_a_decode_row_is_the_last_prefill_row(tmp_path, layout):
 
     with torch.no_grad():
         for t in (17, 40):
-            x = torch.randn(t, 64, device="cuda", dtype=torch.bfloat16)
+            x = torch.randint(-1, 2, (t, 64), device="cuda").to(torch.bfloat16)
             prefill, decode = seqs = [Seq(str(i), [0] * t, SamplingParams(seed=0)) for i in range(2)]
             assert all(engine.state.admit(s) for s in seqs)
             last = run(prefill, x)
             run(decode, x[:-1])
             assert usage(run(decode, x[-1:]), last) <= 1, t
-            same = [torch.equal(p[-1], d[0]) for p, d in zip(gqa_unit._projections(x), gqa_unit._projections(x[-1:]),
-                                                              strict=True)]
             got, want = written(decode, t - 1), written(prefill, t - 1)
-            if all(same[1:]):                                                        # k and v projected alike
-                assert all(torch.equal(a, b) for a, b in zip(got, want, strict=True)), t
-            else:
-                assert usage(dequantized(tuple(got)) if layout == Q8 else got[0], dequantized(tuple(want))
-                             if layout == Q8 else want[0]) <= 1, t
+            assert all(torch.equal(a, b) for a, b in zip(got, want, strict=True)), t
             for s in seqs:
                 engine.state.release(s)
     engine.close()
