@@ -14,7 +14,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from holon.api import AuxSpec, Batch, ModelSpec, Paged, Ref, StateSpec, canonical_hash
+from holon.api import AuxSpec, Batch, ModelSpec, Paged, Ref, Resolved, StateSpec, canonical_hash
 
 from .build import BuildContext, load_weights
 from .executor import profile_rows
@@ -35,6 +35,29 @@ def open_source(plugins: PluginSet, path: str, kind: str | None = None) -> Any:
     kind = kind or detect_source(plugins, path)
     plugins.load(plugins.owner(f"weight_source.{kind}")[0])
     return plugins.regs.weight_sources.get(kind)(path)
+
+
+def claim_ref(plugins: PluginSet, ref: str, kind: str | None = None) -> Resolved:
+    """The one weight-source plugin's claim of `ref`, a model reference that is not a local path (e.g. a hub id),
+    through the optional `resolve` hook; with `kind`, only the plugin providing that weight source is asked. A
+    ValueError from a hook is a hint, shown when no plugin claims the reference."""
+    claims, hints = {}, []
+    for name, inst in sorted(plugins.installed.items()):
+        provides = {r.name for r in inst.manifest.provides}
+        if inst.manifest.slot != "weight_source" or (kind is not None and f"weight_source.{kind}" not in provides):
+            continue
+        resolve = getattr(plugins.load(name), "resolve", None)
+        try:
+            if resolve is not None and (claim := resolve(ref)) is not None:
+                claims[name] = claim
+        except ValueError as e:
+            hints.append(f"{name}: {e}")
+    if len(claims) > 1:
+        raise PluginError(f"{ref}: several weight sources resolve it ({sorted(claims)}); name one with --source")
+    if not claims:
+        raise PluginError(f"{ref}: no such file or directory, and no weight source resolves it"
+                          + "".join(f"\n  {h}" for h in hints))
+    return claims.popitem()[1]
 
 
 def detect_source(plugins: PluginSet, model: str) -> str:

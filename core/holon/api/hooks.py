@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from .batch import StepCtx
     from .decoding import DraftPolicy
     from .mixer import Planner
-    from .model import AuxSpec, BuildCtx
+    from .model import AuxSpec, BuildCtx, Resolved
     from .quant import QTensor
     from .state import HitLen, MemOp, Payload, PrefixView, SeqView, StateSpec
 
@@ -163,3 +163,11 @@ class TrainedContext(Protocol):
         """The context length the checkpoint was trained for (`holon serve --max-model-len auto` serves at most
         that); None: unknown."""
 
+
+
+# -- weight sources ---------------------------------------------------------------------------------------------------
+class ResolvesRefs(Protocol):
+    def resolve(self, ref: str) -> Resolved | None:
+        """On a weight-source plugin: `ref` names a checkpoint that is not a local path (e.g. a hub id). None if this
+        plugin does not fetch it. Claiming may look the reference up but never downloads; a ValueError explains a
+        reference recognised but not servable (`holon serve` shows it when no plugin claims the reference)."""

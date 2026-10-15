@@ -19,3 +19,6 @@ numerics = "exact"
 
 [reference]
 module = "reference"
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"quant.act" = { help = "activation precision of quantized weights' matmuls", default = "a8", choices = ["a4", "a8"] }

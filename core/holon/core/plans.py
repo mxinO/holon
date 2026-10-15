@@ -78,12 +78,23 @@ def plan_of(engine: Any, model_id: str | None = None, commit: str = "unknown") -
     # An option naming another checkpoint (a drafter's) is planned as that checkpoint's identity, not its host path.
     opened = engine.ctx.sources
     sources = {k: opened[str(v)] for k, v in settings["plugin_options"].items() if str(v) in opened}
-    settings["plugin_options"] = {k: v for k, v in settings["plugin_options"].items() if k not in sources}
+    unplanned = sources.keys() | frontend_options(engine.plugins.installed)
+    settings["plugin_options"] = {k: v for k, v in settings["plugin_options"].items() if k not in unplanned}
     cls = platform.fingerprint(engine.device).cls
     return Plan(model_id=model_id or engine.source.identity(), fingerprint_class=cls,
                 recipe=canonical_hash(engine.spec), commit=commit, uv_lock=uv_lock(TREE / "uv.lock"), units=units,
                 sites=sites, engine={k: str(v).removeprefix("torch.") if isinstance(v, torch.dtype) else v
                                      for k, v in settings.items()}, sources=sources)
+
+
+def frontend_options(installed: Mapping[str, Installed]) -> set[str]:
+    """The plugin options declared only by frontend plugins, which the engine never loads: they cannot shape outputs,
+    so plans leave them out. An undeclared option stays planned (release design §14.2)."""
+    slots: dict[str, set[str]] = {}
+    for inst in installed.values():
+        for key in inst.manifest.options:
+            slots.setdefault(key, set()).add(inst.manifest.slot)
+    return {key for key, found in slots.items() if found == {"frontend"}}
 
 
 def unit_pin(inst: Installed) -> UnitPin:

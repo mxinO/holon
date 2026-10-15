@@ -8,3 +8,7 @@ core_abi = ">=0.2,<0.3"
 
 [resources]
 provides = ["drafter.ngram@1"]
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"ngram.max" = { help = "longest suffix looked up in the request's own history", default = "3" }
+"ngram.min" = { help = "shortest suffix looked up", default = "2" }

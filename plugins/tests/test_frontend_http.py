@@ -339,10 +339,24 @@ def test_invalid_request_is_400(http, engine, body):
 
 # -- other endpoints --------------------------------------------------------------------------------------------------
 
-def test_models_health_metrics(http):
+def test_models_health_metrics(http, engine, bundle, monkeypatch):
+    """The served id: the checkpoint name's last segment, or `http.model_name`; the startup hint names it."""
+    from holon_plugins.frontends.http.plugin import hint
+
     assert [m["id"] for m in http.get("/v1/models").json()["data"]] == ["toy"]
     assert http.get("/health").status_code == 200
     assert http.get("/metrics").json() == {"waiting": 0, "running": 1, "billing_headers_dropped": 0}
+    monkeypatch.setattr(bundle, "model_name", "org/repo/Qwen3-8B-Q4_K_M")
+    for model_id, want in ((None, "Qwen3-8B-Q4_K_M"), ("mine", "mine")):
+        client = TestClient(build_app(engine, bundle, model_id=model_id))
+        assert [m["id"] for m in client.get("/v1/models").json()["data"]] == [want]
+    assert client.post("/v1/messages", json={"model": "anything", "max_tokens": 2, "messages": [
+        {"role": "user", "content": "Hi"}]}).json()["model"] == "mine"
+    assert hint("0.0.0.0", 8001, "a b") == (
+        "holon: serving a b at http://127.0.0.1:8001 (OpenAI: /v1; Anthropic: /v1/messages)\nholon: Claude Code:\n"
+        "  ANTHROPIC_BASE_URL=http://127.0.0.1:8001 ANTHROPIC_AUTH_TOKEN=holon ANTHROPIC_MODEL='a b' "
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL='a b' CLAUDE_CODE_SUBAGENT_MODEL='a b' claude")
+    assert "ANTHROPIC_BASE_URL=http://[::1]:8001 " in hint("::1", 8001, "m")
 
 
 # -- client disconnect ------------------------------------------------------------------------------------------------

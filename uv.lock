@@ -468,6 +468,7 @@ source = { editable = "std" }
 dependencies = [
     { name = "gguf", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "holonlm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "huggingface-hub", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "safetensors", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "transformers", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
@@ -476,6 +477,7 @@ dependencies = [
 requires-dist = [
     { name = "gguf", specifier = ">=0.17" },
     { name = "holonlm", editable = "core" },
+    { name = "huggingface-hub", specifier = ">=1.0" },
     { name = "safetensors", specifier = ">=0.5" },
     { name = "transformers", specifier = "==5.6.2" },
 ]

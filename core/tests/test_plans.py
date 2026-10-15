@@ -53,26 +53,46 @@ def _lock(root, model_id, cls="rtx-4090/cu130-torch2.11", src="s1", sm=89):
 
 
 @pytest.mark.parametrize("case", ["lock", "flags", "borrowed", "outdated", "none", "two ids", "corrupt"])
-def test_serve_starts_from_the_lock_of_its_build(tmp_path, capsys, case):
+def test_serve_starts_from_the_lock_of_its_build(tmp_path, capsys, monkeypatch, case):
     """Found by the build alone (the file downloaded under another name); flags over the lock, dict flags per key and
     `key=` deleting one; the lock's pins as preferences; defaults first in the history, at SERVE_MAX_SEQS and the
-    model's `auto` length; a history that cannot be read is warned about and defaults serve."""
+    model's `auto` length; a history that cannot be read is warned about and defaults serve. `holon models` shows the
+    same verdict per model, and a repository reference names the one model under it locked for this card (an existing
+    local path stays a path)."""
     written = None
     if case != "none":
         written = _lock(tmp_path, f"org/repo/Qwen3-8B-Q4_K_M@{BUILD}", **{
             "borrowed": {"cls": "rtx-5080/cu130-torch2.11", "sm": 120}, "outdated": {"src": "s0"}}.get(case, {}))
     if case == "two ids":
         _lock(tmp_path, f"Qwen3-8B-Q4_K_M@{BUILD}")
+    if case == "flags":                                    # a second file of the repository, also locked here
+        _lock(tmp_path, "org/repo/Qwen3-8B-UD-IQ3_XXS@0123456789abcdef")
     if case == "corrupt":
         written.write_text(written.read_text().replace("4096", "4097"))
+    listed = cli.locked_models(tmp_path, FP, INSTALLED)
+    rows = dict(row.split(maxsplit=1) for row in cli.models_table(listed))
+    want = {"lock": "this card's lock 1; context 4096, 8 sequences", "flags": "this card's lock 1",
+            "borrowed": "rtx-5080's lock 1, unverified", "outdated": "outdated", "corrupt": "unreadable",
+            "two ids": "unreadable: "}.get(case)                  # as `holon serve` reads it: two ids, one build
+    assert rows["org/repo/Qwen3-8B-Q4_K_M"].startswith(want) if want else rows == {}
+    assert rows.get("Qwen3-8B-Q4_K_M", "not servable by name").endswith("not servable by name")
+    if case == "flags":
+        with pytest.raises(SystemExit, match="several models have a lock for this GPU, name one: org/repo/Qwen3-8B-Q"):
+            cli.repo_ref("org/repo", listed)
+    else:
+        assert cli.repo_ref("org/repo/", listed) == ("org/repo/Qwen3-8B-Q4_K_M" if case == "lock" else "org/repo")
+    assert cli.repo_ref("org/rep", listed) == "org/rep"                         # whole path segments only
+    assert cli.repo_ref("org", listed) == "org"                                 # a repository, not an organisation
+    monkeypatch.chdir(tmp_path)
+    if case == "lock":                                     # `org/repo` is a directory here: a path, never expanded
+        assert cli.local_model("org/repo", None, None, listed, FP) == "org/repo"
     source = types.SimpleNamespace(config=lambda: {"n": 1000}, kind="toy", identity=lambda: f"local@{BUILD}")
-    found = cli.find_lock(tmp_path, source, types.SimpleNamespace(installed={}), "cpu")
+    found = cli.find_lock(tmp_path, source, FP, INSTALLED)
     if case in ("two ids", "corrupt"):
         err = capsys.readouterr().err
         assert found is None and "WARNING: unreadable lock history" in err
         assert (str(written) if case == "corrupt" else "several model ids") in err
         return
-    found = plans.find(tmp_path, f"local@{BUILD}", FP, INSTALLED)
     flags = {"plugin_options": {"b": "", "c": "3"}, "kernels": {"rope": "x"}, "max_seqs": 4} if case == "flags" else {}
     model = types.SimpleNamespace(trained_context=lambda cfg, kind: cfg["n"]) if case == "none" else object()
     history = cli.serve_history("m", flags, found, cli.auto_context(model, source))

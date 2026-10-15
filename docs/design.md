@@ -199,6 +199,10 @@ platforms = ["cuda"]                  # device names only; SM limits live in Ker
 
 # [build]                  # plugins with native code (kernels): `python -m <package>.<module> --sm N` builds it
 # module = "prebuild"      # ahead of time for SM N (`holon prebuild`; the CLI is part of the ABI)
+
+[options]                  # the EngineConfig.plugin_options keys it reads: help, default (display text), choices
+"expert_cache.policy" = { help = "eviction order", default = "lfu_decay", choices = ["lfu_decay", "lru"] }
+# A manifest using an option key added in a later ABI raises its `core_abi` floor to that ABI.
 ```
 
 Resource names are **typed**: each `ns.name@major` is registered in `holon.api.resources` and bound to a
@@ -237,6 +241,9 @@ Every slot has a judge-owned contract suite (§10.3); per-slot ABI versions retu
 7. Import only the selected entries; each plugin registers its kernels/kinds into explicit registries
    passed to `Plugin.register(regs)` (no module-level registries, invariant 4); construct; bind callables. The hot
    path never does a registry lookup.
+
+Engine-side plugins declare every plugin option they read (`[options]`, §4.1); a plan records the deployment's options,
+except a key declared only by frontend plugins, which the engine never loads (release design §14.2).
 
 The Plan is the unit of deployment, A/B, promotion and rollback. It is serializable so every rank of a future
 SPMD deployment can load the identical Plan (§8).
@@ -598,6 +605,9 @@ class QTensor: layout: Layout; logical_shape: tuple[int, ...]; parts: dict[str, 
   ledger whether to store both; otherwise picks a layout readable by both.
 - Post-repack artifacts may be cached on disk keyed by `(source hash, layout, kernel version, sm)` (v1).
 - KV cache formats are Layouts too, so attention kernels and state kinds negotiate page size/dtype via layouts.
+- A weight-source plugin may also resolve a model reference that is not a local path (optional hook `resolve(ref)` →
+  `Resolved(what, nbytes, fetch)`, e.g. a hub id fetched into the hub's cache; release design §14.3): `holon serve`
+  asks every weight source, exactly one must claim, and the core names no hub.
 
 **As built (M0.1).** Weight sources are detected from manifest `[support] detect` patterns (`config.json`,
 `*.gguf`), so no plugin is imported to decide. The model is built on the meta device; `load_weights` swaps each dense
@@ -1150,7 +1160,9 @@ writes reasoning and tool calls in (`reasoning_format`, `tool_format`, versioned
 frontend implements each named format once — its streaming parser (typed events: `Text`, `Reasoning`,
 `ToolCallStart`, `ToolArgsDelta`, `ToolCallEnd`) and its constraint builder (a plain-dict resource in
 `SamplingParams.ext` that the logits processor's plugin declares and translates). The frontend plugin gets the
-deployment's plugin options and reads its own namespace (e.g. `http.drop_billing_header`). Stop strings are matched in
+deployment's plugin options and reads its own namespace (e.g. `http.drop_billing_header`; `http.model_name`, the served
+id, by default the checkpoint name's last segment); once it listens it prints how to reach it, Claude Code's environment
+included (release design §14.6). Stop strings are matched in
 the frontend and trigger `abort`; stop tokens are checked at the engine's commit.
 
 The frontend↔engine protocol is a **language-neutral schema** (token ids, sampling params, deltas, logprobs;

@@ -34,7 +34,7 @@ Row = tuple[str, float | None, list[tuple[str, float]] | None]
 MASKED = -9999.0       # the logprob reported for a token a constrained request may not take (−inf: not JSON)
 
 
-def router(client: EngineClient, bundle: FrontendBundle) -> APIRouter:
+def router(client: EngineClient, bundle: FrontendBundle, model_id: str) -> APIRouter:
     r = APIRouter()
     tok = bundle.tokenizer
 
@@ -60,7 +60,7 @@ def router(client: EngineClient, bundle: FrontendBundle) -> APIRouter:
 
     async def _respond(request: Request, req: GenerationRequest, fmt: ChatCompletion | Completion,
                        gens: list[AsyncIterator[Piece]], rid: str, n_prompt: int, n: int) -> Response:
-        envelope = {"id": rid, "object": fmt.object, "created": int(time.time()), "model": bundle.model_name}
+        envelope = {"id": rid, "object": fmt.object, "created": int(time.time()), "model": model_id}
         if req.stream:
             # Wait for the first piece before answering, so that a rejected request gets its error status.
             first = await unless_disconnected(request, anext(gens[0]))

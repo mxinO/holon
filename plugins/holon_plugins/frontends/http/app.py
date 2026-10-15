@@ -15,8 +15,17 @@ from . import anthropic, openai, responses
 from .web import BadRequest
 
 
-def build_app(client: EngineClient, bundle: FrontendBundle, drop_billing_header: bool = True) -> FastAPI:
-    """`drop_billing_header`: drop Claude Code's per-request billing-header system block (D7; counted in /metrics)."""
+def served_id(model_name: str) -> str:
+    """The default served model id: the last path segment of the checkpoint's name (`Qwen3-8B` for `Qwen/Qwen3-8B`;
+    release design §14.7). The app serves one model and ignores a request's `model`: any id a client sends works."""
+    return model_name.rpartition("/")[2]
+
+
+def build_app(client: EngineClient, bundle: FrontendBundle, drop_billing_header: bool = True,
+              model_id: str | None = None) -> FastAPI:
+    """`drop_billing_header`: drop Claude Code's per-request billing-header system block (D7; counted in /metrics).
+    `model_id`: the id served (default `served_id` of the bundle's model name)."""
+    model_id = model_id or served_id(bundle.model_name)
     app = FastAPI(title="Holon")
     started = int(time.time())
     counters = {"billing_headers_dropped": 0}
@@ -45,10 +54,10 @@ def build_app(client: EngineClient, bundle: FrontendBundle, drop_billing_header:
 
     @app.get("/v1/models")
     async def models() -> dict[str, Any]:
-        return {"object": "list", "data": [{"id": bundle.model_name, "object": "model", "created": started,
+        return {"object": "list", "data": [{"id": model_id, "object": "model", "created": started,
                                             "owned_by": "holon"}]}
 
-    app.include_router(openai.router(client, bundle))
-    app.include_router(anthropic.router(client, bundle, drop_billing_header, counters))
-    app.include_router(responses.router(client, bundle))
+    app.include_router(openai.router(client, bundle, model_id))
+    app.include_router(anthropic.router(client, bundle, model_id, drop_billing_header, counters))
+    app.include_router(responses.router(client, bundle, model_id))
     return app

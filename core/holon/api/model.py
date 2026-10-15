@@ -158,6 +158,15 @@ class WeightSource(Protocol):
         hash of the files that define the weights. Path segments joined by "/" (e.g. a hub id) are allowed."""
 
 
+@dataclasses.dataclass(frozen=True)
+class Resolved:
+    """A weight-source plugin's claim of a model reference that is not a local path (`hooks.ResolvesRefs`)."""
+
+    what: str                          # what will be fetched, for the log (e.g. "<repository>/<file>")
+    nbytes: int | None                 # its total size, from the listing; None: unknown
+    fetch: Callable[[], str]           # fetches it (into the plugin's cache) and returns the local path
+
+
 class ModelPlugin(Protocol):
     """Declares the architectures it builds as `arch.<name>@1` resources in its manifest."""
 
