@@ -189,9 +189,11 @@ MERGES = (("self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj"), ("self_a
           ("mlp.gate_proj", "mlp.up_proj"))
 
 
+@functools.cache
 def engine_shapes(path: str | pathlib.Path) -> dict[str, tuple[str, int, int]]:
     """Each quantized dense linear of the file (HF module name) -> (ggml type, in, out) of the matmul the engine runs it
-    in: its own shape, or its merged group's (`MERGES`: same type and input; `Linear.merge`)."""
+    in: its own shape, or its merged group's (`MERGES`: same type and input; `Linear.merge`). Read once per path (a
+    27B file's reader takes ≈ 10 s); callers must not modify the result."""
     reader = gguf.GGUFReader(path)
     q35 = _qwen35(reader.fields)
     linears = {hf_name(t.name).removesuffix(".weight"): (t.tensor_type.name.lower(), int(t.shape[0]), int(t.shape[1]))

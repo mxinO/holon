@@ -931,3 +931,152 @@ first run, ≈ 3 min cold); `scripts/ci/run_all.sh main` green.
   draft policy is also installed (`engine.py:145`); step 4 mixes only when `max_draft_tokens` is 0, or both use the
   engine's own predicate.
 - `main` gained 899b661 (the legibility gate retired) after this branch's base; the branch is not rebased.
+
+## 13. As built (step 2, 2026-10-14)
+
+Commits 35560a8 (`kv_write`), 0cea1e5 (D4, D11), 5156f24 and 48b5534 (D6, D3), 83bd092 (D2 re-derived), fe0fbc1
+(the RTX 5090 rows-8 floor), 1d96857 (`GLU_TYPES`) and the review and measurement fixes after them. No core change:
+core 4129 code lines, as at step 1. No ABI change: the std.ops minors (`qlinear_glu@1`, `attention.qk_rope_kv@1`,
+`Linear.prepare_input` / `use_glu` / `glu`, `fusion_facts`, rope@1's `cos_sin`) are std contracts (`std/contracts.txt`
+gains the two ops). Desktops were clock-screened before their records (`bench/clock_check.py`): RTX 5080 p10 / p50
+2662 / 2685 MHz, RTX 4090 2670 / 2685 MHz, both steady, no thermal or hardware slowdown. RTX 5090: see §13.6.
+
+### 13.1 What was built
+
+- **`kv_write@1`, model-dtype layout:** a Triton copy of k and v in one launch (`triton_attn` `write_model`; it was two
+  index_put kernels). Bitwise: `test_kv_write_is_the_reference_bitwise` now covers `kv.hnd` too.
+- **D4, mmq writes bf16** (`vendor.patch`, mmq.cuh): every store goes through `mmq_store` — NVFP4's per-tensor
+  `scale2` multiplied in f32 (`ggml_cuda_mul_rn`: `mul.rn.f32` without fast math's flush to zero, as torch's multiply),
+  then one rounding to the dst's type. A dense stream-k tile split over blocks is never rounded early: the block that
+  finishes a tile it did not start (`stage_end`, exactly the blocks the fixup kernel adds partials for) keeps its part
+  in f32 in a second half of the fixup buffer, and the fixup kernel rounds `end + sum` once. The ids (MoE) path is
+  unchanged. The workspace formula sizes two fixup tiles per SM for dense calls, one with ids. `QLinear` lost its
+  per-call f32 tensor and cast.
+- **D11, `scale2` in mmvq above one column** (mmvq.cu): a scale-only fusion runs today's unfused kernel (same nwarps,
+  rows per block, small_k, halve_iters), whose epilogue multiplies after the full reduction (`mul_rn`), then rounds
+  once; `scale2` is loaded before the K loop (§13.4). The MoE path: a profile of the 30B NVFP4's eager decode steps at
+  B4 / B8 (A5000, its rtx-4090 lock) shows no separate multiply (mmvq with ids fuses its expert scales up to 8 tokens:
+  `get_mmvq_mmid_max_batch` is 8 for NVFP4 from Turing on), so D11 stays dense, as D11 says.
+- **D6, gate/up + SwiGLU:** `qlinear_glu@1` (std.ops; oracle `reference.qlinear_glu`, CPU provider in
+  `testing.ref_kernels`). `SwiGLU.finalize_weights` calls `use_glu("swiglu")` on its merged gate/up; `Linear.bind_kernels`
+  then selects `qlinear_glu@1` beside `qlinear@2` when the qlinear spec lists it in `config["fused"]` and the chosen glu
+  kernel is the same provider's (it reads the parts that provider's `prepare` made). `glu(x)` returns None where the
+  kernel does not fuse the call, and SwiGLU composes. ggml's `QLinearGlu` is mmvq's fused gate at one row
+  (`holon_ggml_mmvq`'s `gate`), for `GLU_TYPES` = {Q4_K, Q5_K, NVFP4} only (§13.4), halves of a multiple of 4 rows.
+- **D6, shared q8_1:** `Linear.prepare_input(x)` returns the kernel's handle (ggml: `Prepared(x, key, buffer,
+  generation)`): on the mmvq path `x` is quantized once (`quantize_q8_1`, as mmvq does) into `ggml_cuda.q8_1[in=…]`, a
+  buffer of its own per `in`; every `prepare_input` into it takes the next generation (`Extension`, by the buffer's
+  address), and a call reads the buffer only if the handle's key (path, mode, rows, `in`) is its own and the
+  generation is the buffer's last, else it quantizes `x` (mmvq with a pre-quantized src1, `vendor.patch`). Users: GQA's
+  unmerged projections, SwiGLU's unmerged gate and up, and GDN's four in-projections (three lines in
+  `gdn/units.py`'s forward: the one edit step 2 makes in GDN; see §13.9). Dense linears and other providers take the
+  handle's `x`.
+- **D3, `attention.qk_rope_kv@1`** (std.mixers.gqa's contract; no oracle of its own, the judge composes the units'
+  references in `holon_judge/fused.py`): GQA uses it when `q_norm` and `k_norm` answer the same `fusion_facts()`
+  (norm op, eps, offset), `rope` answers (op, rotary_dim, theta, max_positions, and its kernel's `cos_sin` table, now part
+  of rope@1's instance contract: FlashInfer's rope names it), and the kv_write spec lists the op in `config["fused"]`
+  (kernel props are a closed core vocabulary, so the promise lives in the spec's config; triton_attn lists it for the
+  model-dtype and q8_0 layouts, not fp8). Then on every step, prefill included, one Triton launch (`_qk_rope_kv`, one
+  program per token and head) norms and rotates q (the gated layout read in place: each head's first D of 2D) and k,
+  rounding to the model dtype after the norm and after the rotation, writes k and v (q8_0 through the same
+  `_store_q8_0` as `kv_write`), and returns q. The drafters' `write_kv` takes the same path; the model-only build keeps
+  the composition.
+
+### 13.2 Checks
+
+- **Bitwise, in the existing L0 loops** (sm_86 locally, sm_89 on the RTX 4090, sm_120a on the RTX 5080; plus the RTX
+  5090 at 74574e0): `test_mmq_schedules` asserts mmq's bf16 output is its f32 output cast under each schedule (the
+  fixup forced at out 300), and with NVFP4's `scale2` (an HF layout, native W4A4 too on sm_120) the f32 output times
+  scale2, cast; a mutation that rounds the staged partial before the fixup fails all 20 types. D11: in
+  `check_qlinear`, rows 2–8 equal by value the f32 mmvq times scale2 (scale2 not a power of two). Shared q8_1: in
+  `check_qlinear`, one `prepare_input` serves the kernel and a Q4_K (or Q6_K) consumer of the same `in` bitwise as their
+  own calls, and a handle a later `prepare_input` overwrote is not read (ignoring the generation fails). `kv_write`:
+  the model-dtype copy in the kv_write loop. Also, mmq against the step-1 build on sm_86: 81 cases (9 types, out 300 /
+  6144 / 12288, rows 9 / 64 / 512) bitwise in bf16 and f32.
+- **Bounded L0:** `qlinear_glu` at one row against `silu(gate) · up` of the q8_1-emulated sums (`l0.check`, bf16 budget)
+  for the fused types, both FP4 layouts' `scale2`; the other types and halves not of 4-row blocks compose (asserted).
+  `test_qk_rope_kv_is_the_composition`: three geometries (head_dim 128 full rotary; 256 with rotary 64 and the gated q
+  layout, offset 1; 64), bf16 and fp16, T = 1, 300 (rows across pages, any order) and 0: q' and the model-dtype cache
+  within the L0 budget of a norm over head_dim, v copied exactly, no other byte touched, and the q8_0 write bitwise the
+  reference write of the kernel's own model-dtype k.
+- **L0 runs:** RTX 5080 322 passed / 1 skipped, RTX 4090 314 / 9 (`test_ggml_cuda`, `_moe`, `test_attention_kv_quant`,
+  at 74574e0); at e14b311 `test_ggml_cuda` again: 143 passed (5080), 137 / 6 (4090).
+- **memcheck** (`compute-sanitizer`): `memcheck_ggml_cuda` (now also bf16 / f32 outputs at 513 rows, the fused gate,
+  prepared inputs) found the fused gate reading past the up half at out 300 (halves of 150 rows: mmvq reads whole
+  4-row blocks at small K) — fixed (0308bbc), then 0 errors on sm_86, sm_89 and sm_120a. `memcheck_triton_attn` (now
+  also the model-dtype write and the fused kernel): 0 errors on sm_86, sm_89 and sm_120a (the 5090); on the 5080 it ran
+  out of memory under the sanitizer before reaching them (16 GB; not a finding).
+- **L2** (RTX A5000, `holon_judge l2`, against the floor of the path; `--max-seqs 4` for small steps):
+
+  | model | steps | floor | top-1 (floor) | KL p99 (floor) | ΔPPL vs floor | verdict |
+  |---|---|---|---|---|---|---|
+  | Qwen3-8B Q4_K_M | 1 token (D3 decode rows, glu) | mmvq | 99.06% (99.08%) | 9.7e-3 (1.10e-2) | +0.008% ± 0.072% | PASS |
+  | Qwen3-8B Q4_K_M | whole prompts (D3 prefill, D4) | mmq | 98.44% (98.36%) | 3.5e-2 (3.6e-2) | −0.089% ± 0.126% | PASS |
+  | Qwen3.8-27B UD-IQ3_S, q8_0 KV | 1 token (D3 gated q, partial rotary, q8_0 1-token rows; shared q8_1) | mmvq, q8_0 KV | 97.92% (98.03%) | 0.330 (0.306) | +0.37% ± 0.39% | PASS |
+  | Qwen3.8-27B UD-IQ3_S, q8_0 KV | whole prompts | mmq, q8_0 KV | 97.51% (97.54%) | 0.628 (0.712) | +0.20% ± 0.59% | PASS |
+  | Qwen3-8B NVFP4 | 1 token | mmvq (W4A8) | 98.72% (98.78%) | 1.2e-2 (1.4e-2) | −0.041% ± 0.040% | PASS |
+  | Qwen3-8B NVFP4 | whole prompts | mmq (W4A8) | 98.74% (98.69%) | 1.3e-2 (1.2e-2) | −0.057% ± 0.060% | PASS |
+
+  The 27B's 1-token run predates `GLU_TYPES` (its i-quant gate/ups were still fused): the shipped code composes them.
+
+### 13.3 Keep or revert (§1.1)
+
+`bench/fusion_ab.py` on one engine per deployment: the arms add the fusions in order (`base`: every step-1 path
+restored in-process; then `kv_write`, `qk_rope_kv`, `mmq_bf16`, `scale2`, `glu`, `q8_1`), each arm's saving against
+the previous one; six rounds in ABBA order; graphed decode / verify rows by per-step wall over 64 steps (graphs
+re-captured per arm), eager prefill by wall (median of 3). The sd is that of the six per-round differences; a row
+passes at mean ≥ max(0.5%, 3 sd). Two approximations of the `base` arm: its f32 mmq is the new stream-k path (bitwise
+the old one, §13.2) and its crossover is the re-derived table. Deployments: Qwen3-8B Q4_K_M (rtx-5080 lock 7), the
+class's 27B plain lock (UD-IQ3_S with q8_0 KV on the 5080, UD-Q4_K_M on the 4090) with MTP and DFlash2 verify steps,
+Qwen3-8B NVFP4 (rtx-5080 lock 2; native W4A4 prefill on sm_120), Qwen3-8B bf16 (4090). The best release row per
+class, in % of the step (− = faster), with its sd:
+
+| fusion | kind | RTX 5080 | RTX 4090 | RTX 5090 | verdict |
+|---|---|---|---|---|---|
+| `kv_write` (bf16 copy) | bitwise | 8B Q4_K_M B1 −3.73 ± 0.10 (NVFP4 B1 −3.38) | 8B B1 −2.40 ± 0.04; 8B bf16 B1 −0.81 | RTX5090_KV | **kept**, every class |
+| D3 `qk_rope_kv` (on top of the copy) | bounded | 8B B4 −3.02 ± 0.17; NVFP4 B4 −3.30; 27B B1 −0.51; prefill 512 −0.61 | 8B B4 −2.92 ± 0.03; bf16 B4 −1.04; 27B B1 −0.33 | RTX5090_D3 | **kept**: RTX5090_D3V |
+| D4 mmq bf16 | bitwise | 8B prefill 512 −3.52 ± 0.10; NVFP4 2048 −5.19; W4A4 −11.02; 27B prefill −3.47, B8 −0.94; MTP B4 −1.15 | 8B prefill −6.48 ± 0.10; NVFP4 −7.19; 27B prefill −7.03; MTP B4 −1.35 | RTX5090_D4 | **kept**, every class |
+| D11 `scale2` in mmvq | bitwise | NVFP4 B4 −4.97 ± 0.04, B8 −3.62 ± 0.08 | NVFP4 B4 −3.37 ± 0.03, B8 −1.94 | RTX5090_D11 | **kept**, every class |
+| D6 gate/up + SwiGLU (`GLU_TYPES`) | bounded | 8B B1 −0.78 ± 0.07; NVFP4 B1 −0.94 ± 0.03; 27B UD-IQ3_S ±0 | 8B B1 −0.65 ± 0.03; NVFP4 −0.55 ± 0.02; 27B UD-Q4_K_M B1 −0.17 | RTX5090_GLU | **kept**: RTX5090_GLUV |
+| D6 shared q8_1 | bitwise | 27B B1 −0.65 ± 0.01, B4 −0.62; MTP verify B1 −0.56 | 27B B4 −0.94 ± 0.003, B1 −0.90; MTP / DFlash verify B1 −0.71 | RTX5090_Q8 | **kept**, every class |
+
+- Every other cell is within noise of zero, as expected where a fusion has no work (the copy under q8_0 KV, D11
+  without NVFP4, glu above one row, shared q8_1 on the 8B whose projections merge). Records
+  `evidence/m07-step2_ab_<class>_2026-10-14.json` (all arms at 74574e0; the NVFP4 deployment again after §13.4's
+  fix at e14b311; glu with `GLU_TYPES` at 1d96857).
+- Against §11.11's upper bounds (5080 / 4090): the copy saves 3.7 / 2.4% of 8B B1 (bound 2.2 / 1.5% — the
+  index_put pair cost more than its kernel time), D3 2.0 / 1.7% of 8B B1 (bound 1.9 / 1.7%), D4 3.5–5.2 / 6.1–7.2% of
+  prefill (bound 2.4–5.0 / 4.8–6.0%), D11 5.0 / 3.4% of NVFP4 B4 (bound 3.5–4.2 / 3.3–3.6%), glu 0.8 / 0.7% of 8B B1
+  (bound 1.6 / 1.1%), shared q8_1 0.65 / 0.9% of 27B B1 (bound 1.5 / 0.96%).
+
+### 13.4 Found on the way
+
+- **D11 slowed 8-row NVFP4 steps by 8.5% on the RTX 5080** as first built (−0.5% at B4), against an expected 3.5–4.2%
+  saving: the epilogue loaded `scale2` from global memory per output element, a dependent load on every row's store.
+  Loaded once before the K loop (bf30ced), the same step saves 5.0% at B4 and 3.6% at B8 (and 3.4 / 1.9% on the 4090).
+  The by-value check covers the move (the same f32 into the same multiply).
+- **mmvq's fused gate is not a free win.** `bench/glu_sweep.py` (graph-timed per call, the locks' merged gate/up
+  shapes, real GGUF rows) against the matmul plus FlashInfer's `silu_and_mul`: faster for Q4_K (+2.4% / +2.1% on
+  the 8B's 4096 × 24576, RTX 5080 / 4090), Q5_K (+0.6 / +1.5%) and NVFP4 (+2.8 / +1.6%); slower for every i-quant on
+  the 5080 (iq2_xs −5.9%, iq2_xxs −8.3%, iq3_s −2.5%, iq3_xxs −8.1%, iq4_xs −2.9%), and Q3_K (−3.9 / −9.8%). On the
+  5080's 27B UD-IQ3_S lock the fusion as first built cost 0.47% of the B1 step. Hence `GLU_TYPES` = {Q4_K, Q5_K,
+  NVFP4} (types fused on both classes; iq4_nl / iq4_xs, faster on the 4090 only, compose), after which the 27B row is
+  within noise on the 5080 and −0.17% on the 4090. Records `evidence/m07-step2_glu-sweep_<class>_2026-10-14.json`.
+- **memcheck caught the fused gate reading past the up half** of a gate/up whose halves are not a multiple of 4 rows
+  (§13.2). Real models' intermediate sizes are multiples of 8; such halves now compose.
+- **The CPU reference provider fuses gate/up at every row count** (`testing.ref_kernels`' `qlinear` lists
+  `qlinear_glu@1`), so CPU engine tests run `Linear.glu`; the toy provider (`tests.toy_quant`, one row like ggml)
+  covers the composed path and the handles.
+- **D11's rounding of subnormals** differs by row count as before: one column keeps llama.cpp's fused epilogue
+  (fast-math, flushes), more columns multiply with `mul_rn` (keeps them, as torch's multiply did).
+
+### 13.5 D2 re-derived from the no-cast column
+
+D4 is kept, so `CROSSOVER` is step 1's no-cast table (`evidence/m07-step1_d2-no-cast_<class>`; 83bd092): 25 RTX 5080
+entries (iq2_xs 5120x17408 and iq4_xs 5120x12288 move from 7 to 6: row 7 only) and 11 RTX 5090 entries (iq3_s /
+iq4_xs 5120x17408 from 7 to 6, and iq4_nl 5120x17408 gains 7 — its 8-row path moves to mmq). The 5080's rows-8 floor
+is unchanged (same 8-row paths); the 5090's was re-recorded (`holon_judge golden --q8-1 rows --rows 8 --crossover
+rtx-5090:120`, fe0fbc1). `judge/tests/test_gguf.py::test_a_per_shape_floor_routes_as_the_table_does` (CPU) now ties
+every committed per-shape floor to the table: it failed on the old 5090 floor. The 8-row L2 on the RTX 5080 at
+48ef045 (D3 and D4 in): top-1 97.44% (≥ 97.30%), KL p99 0.592 (floor 0.704), ΔPPL vs floor +0.28% ± 0.40%: PASS
+(`evidence/m07-step2_l2-8_rtx-5080_2026-10-14.json`). RTX5090_D2
