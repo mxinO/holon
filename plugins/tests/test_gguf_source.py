@@ -103,30 +103,42 @@ def test_identity_and_detection(source):
 
 REPOS = {"o/gguf": {"Qwen3-8B-Q4_K_M.gguf": 5, "Qwen3-8B-UD-Q4_K_M.gguf": 6, "Qwen3-8B-UD-IQ3_XXS.gguf": 4,
                     "BF16/Qwen3-8B-BF16-00001-of-00002.gguf": 9, "BF16/Qwen3-8B-BF16-00002-of-00002.gguf": 9,
-                    "UD-Q8_K_XL/Qwen3-8B-UD-Q8_K_XL.gguf": 8, "mmproj-F16.gguf": 1, "config.json": 1, "README.md": 1},
+                    "UD-Q8_K_XL/Qwen3-8B-UD-Q8_K_XL.gguf": 8, "mmproj-F16.gguf": 1, "config.json": 1, "README.md": 1,
+                    "Qwen3-8B-F16.gguf": 3, "F16/Qwen3-8B-F16-00001-of-00002.gguf": 2,
+                    "F16/Qwen3-8B-F16-00002-of-00002.gguf": 2},
          "o/one": {"Qwen3-8B-Q4_K_M.gguf": 5},
          "o/hf": {"config.json": 1, "model-00001-of-00002.safetensors": 7, "model-00002-of-00002.safetensors": 7,
                   "model.safetensors.index.json": 1, "tokenizer.json": 2, "original/consolidated.safetensors": 99,
                   "README.md": 1}}
 
 
+G, H = "gguf", "hf"
+UNREACHABLE = "the hub is unreachable (ConnectError; offline, HF_HUB_OFFLINE=1 serves cached models), and"
+
+
 @pytest.mark.parametrize("ref, want", [
-    ("o/gguf:Q4_K_M", ("gguf", "o/gguf/Qwen3-8B-Q4_K_M.gguf", 5)),          # the plain file, not UD-Q4_K_M
-    ("o/gguf:ud-q4_k_m", ("gguf", "o/gguf/Qwen3-8B-UD-Q4_K_M.gguf", 6)),
-    ("o/gguf/Qwen3-8B-UD-Q8_K_XL", ("gguf", "o/gguf/UD-Q8_K_XL/Qwen3-8B-UD-Q8_K_XL.gguf", 8)),   # in a directory
-    ("o/gguf:BF16", "o/gguf: Qwen3-8B-BF16 is split into 2 files"),
-    ("o/gguf:Q2_K", "no GGUF file tagged Q2_K in o/gguf; name one as o/gguf:<TAG> or o/gguf/<name>: Qwen3-8B-BF16, "),
-    ("o/gguf", "several GGUF files"),                    # a config.json does not make it the HF source's
-    ("o/one", ("gguf", "o/one/Qwen3-8B-Q4_K_M.gguf", 5)),
-    ("o/hf", ("hf", "o/hf (5 files)", 18)),              # top-level files only: not original/, not README.md
-    ("./o/hf", None),                                    # a path, never a reference
-    ("cached:o/gguf:Q4_K_M", ("gguf", "o/gguf/Qwen3-8B-Q4_K_M.gguf", 5)),   # the hub unreachable: the cache's listing
-    ("cached:o/hf", "the hub is unreachable (ConnectError) and o/hf is not in the HF cache (offline, set HF_HUB_OFF"),
+    ("o/gguf:Q4_K_M", {G: ("o/gguf/Qwen3-8B-Q4_K_M.gguf", 5)}),            # the plain file, not UD-Q4_K_M
+    ("o/gguf:ud-q4_k_m", {G: ("o/gguf/Qwen3-8B-UD-Q4_K_M.gguf", 6)}),
+    ("o/gguf/Qwen3-8B-UD-Q8_K_XL", {G: ("o/gguf/UD-Q8_K_XL/Qwen3-8B-UD-Q8_K_XL.gguf", 8)}),   # in a directory
+    ("o/gguf:BF16", {G: "o/gguf: Qwen3-8B-BF16 is split into 2 files"}),
+    ("o/gguf:F16", {G: ("o/gguf/Qwen3-8B-F16.gguf", 3)}),                    # the single file beside a split set
+    ("o/gguf:Q2_K", {G: "no GGUF file tagged Q2_K in o/gguf; name one as o/gguf:<TAG> or o/gguf/<name>: Qwen3-8B-B"}),
+    ("o/gguf", {G: "several GGUF files"}),               # its config.json does not make it the HF source's
+    ("o/one", {G: ("o/one/Qwen3-8B-Q4_K_M.gguf", 5)}),
+    ("o/hf", {H: ("o/hf (5 files)", 18)}),               # top-level files only: not original/, not README.md
+    ("./o/hf", {}),                                      # a path, never a reference
+    ("cached:o/gguf:Q4_K_M", {G: ("o/gguf/Qwen3-8B-Q4_K_M.gguf", 5),        # the hub unreachable: the cache's listing
+                              H: None}),
+    ("cached:o/gguf", {G: ("o/gguf/Qwen3-8B-Q4_K_M.gguf", 5),               # the only cached file
+                       H: "o/gguf: its cached snapshot holds no safetensors checkpoint"}),
+    ("cached:o/hf", {G: f"{UNREACHABLE} o/hf is not in the HF cache", H: f"{UNREACHABLE} o/hf is not in the HF cache"}),
 ])
 def test_hub_references_are_claimed_by_one_source(tmp_path, monkeypatch, ref, want):
-    """A reference is claimed by the source whose files the repository holds (HF: config.json and safetensors; GGUF:
-    .gguf files), the file a tag names chosen without the order of the listing mattering; claiming downloads nothing
-    (the fetch is called here with the hub's download functions faked); unreachable, the cached snapshot is listed."""
+    """Each source's `resolve` on a faked hub: a reference is claimed by the source whose files the repository holds
+    (HF: config.json and safetensors; GGUF: .gguf files), the file a tag names chosen without the listing's order
+    mattering; claiming downloads nothing (the fetch runs here on faked download functions); unreachable, the cached
+    snapshot is listed, and what it lacks is said. `want`: per source, its claim (what, bytes), its error's start, or
+    None (not its reference; a source left out is None)."""
     import huggingface_hub
     from holon_std.weights.gguf import hub as gguf_hub
     from holon_std.weights.hf import hub as hf_hub
@@ -141,7 +153,7 @@ def test_hub_references_are_claimed_by_one_source(tmp_path, monkeypatch, ref, wa
         return [type("RepoFile", (), {"path": p, "size": n})() for p, n in REPOS[repo].items()]
 
     cached, ref = ref.startswith("cached:"), ref.removeprefix("cached:")
-    snapshot = tmp_path / "models--o--gguf" / "snapshots" / "abc"
+    snapshot = tmp_path / "models--o--gguf" / "snapshots" / "abc"            # the cache: one GGUF file of o/gguf
     snapshot.mkdir(parents=True)
     (snapshot / "Qwen3-8B-Q4_K_M.gguf").write_bytes(b"12345")
     (tmp_path / "models--o--gguf" / "refs").mkdir()
@@ -151,21 +163,21 @@ def test_hub_references_are_claimed_by_one_source(tmp_path, monkeypatch, ref, wa
     monkeypatch.setattr(huggingface_hub.HfApi, "list_repo_tree", tree)
     monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda repo, path: f"fetched {repo} {path}")
     monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda repo, allow_patterns: f"fetched {allow_patterns}")
-    claims = {}
-    try:
-        claims = {name: c for name, hub in (("gguf", gguf_hub), ("hf", hf_hub)) if (c := hub.resolve(ref))}
-    except ValueError as e:
-        assert isinstance(want, str) and str(e).startswith(want)
-        return
-    if want is None:
-        assert claims == {}
-        return
-    (name, claim), = claims.items()
-    assert (name, claim.what, claim.nbytes) == want
-    if name == "gguf":
-        org, repo, path = want[1].split("/", 2)
-        assert claim.fetch() == f"fetched {org}/{repo} {path}"
-    else:
-        files = ["config.json", "model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors",
-                 "model.safetensors.index.json", "tokenizer.json"]
-        assert claim.fetch() == f"fetched {files}"
+    for name, hub in ((G, gguf_hub), (H, hf_hub)):
+        expect = want.get(name)
+        try:
+            claim = hub.resolve(ref)
+        except ValueError as e:
+            assert isinstance(expect, str) and str(e).startswith(expect), (name, str(e))
+            continue
+        if expect is None:
+            assert claim is None, name
+            continue
+        assert (claim.what, claim.nbytes) == expect, name
+        if name == G:
+            org, repo, path = expect[0].split("/", 2)
+            assert claim.fetch() == f"fetched {org}/{repo} {path}"
+        else:
+            files = ["config.json", "model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors",
+                     "model.safetensors.index.json", "tokenizer.json"]
+            assert claim.fetch() == f"fetched {files}"

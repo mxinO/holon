@@ -65,17 +65,22 @@ def test_serve_starts_from_the_lock_of_its_build(tmp_path, capsys, monkeypatch, 
             "borrowed": {"cls": "rtx-5080/cu130-torch2.11", "sm": 120}, "outdated": {"src": "s0"}}.get(case, {}))
     if case == "two ids":
         _lock(tmp_path, f"Qwen3-8B-Q4_K_M@{BUILD}")
+    if case == "flags":                                    # a second file of the repository, also locked here
+        _lock(tmp_path, "org/repo/Qwen3-8B-UD-IQ3_XXS@0123456789abcdef")
     if case == "corrupt":
         written.write_text(written.read_text().replace("4096", "4097"))
     listed = cli.locked_models(tmp_path, FP, INSTALLED)
     rows = dict(row.split(maxsplit=1) for row in cli.models_table(listed))
     want = {"lock": "this card's lock 1; context 4096, 8 sequences", "flags": "this card's lock 1",
             "borrowed": "rtx-5080's lock 1, unverified", "outdated": "outdated", "corrupt": "unreadable",
-            "two ids": "this card's lock 1"}.get(case)
+            "two ids": "unreadable: "}.get(case)                  # as `holon serve` reads it: two ids, one build
     assert rows["org/repo/Qwen3-8B-Q4_K_M"].startswith(want) if want else rows == {}
     assert rows.get("Qwen3-8B-Q4_K_M", "not servable by name").endswith("not servable by name")
-    assert cli.repo_ref("org/repo", listed) == ("org/repo/Qwen3-8B-Q4_K_M" if case in ("lock", "flags", "two ids")
-                                                else "org/repo")
+    if case == "flags":
+        with pytest.raises(SystemExit, match="several models have a lock for this GPU, name one: org/repo/Qwen3-8B-Q"):
+            cli.repo_ref("org/repo", listed)
+    else:
+        assert cli.repo_ref("org/repo", listed) == ("org/repo/Qwen3-8B-Q4_K_M" if case == "lock" else "org/repo")
     assert cli.repo_ref("org/rep", listed) == "org/rep"                         # whole path segments only
     monkeypatch.chdir(tmp_path)
     if case == "lock":                                     # `org/repo` is a directory here: a path, never expanded

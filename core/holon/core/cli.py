@@ -144,12 +144,13 @@ def find_lock(directory: pathlib.Path, source: object, fp: Fingerprint, current:
 
 
 def locked_models(directory: pathlib.Path, fp: Fingerprint, current: Mapping[str, str]) -> list[tuple[str, object]]:
-    """Every model id with lock histories under `directory`, as `holon serve` would start it on `fp`: with
-    `plans.nearest_class`'s result (None: outdated), or the ValueError that stops reading its history."""
+    """Every model id with lock histories under `directory`, as `holon serve` would start it on `fp` (the same lookup:
+    `plans.history_id`, `nearest_class`): with its result (None: outdated), or the ValueError that stops `holon serve`
+    reading its history (e.g. two model ids for one build)."""
     rows: list[tuple[str, object]] = []
     for model_id in plans.model_ids(directory) if directory.is_dir() else ():
         try:
-            rows.append((model_id, plans.nearest_class(directory, model_id, fp, current)))
+            rows.append((model_id, plans.nearest_class(directory, plans.history_id(directory, model_id), fp, current)))
         except ValueError as e:
             rows.append((model_id, e))
     return rows
@@ -218,15 +219,19 @@ def outside_choices(options: Mapping[str, object], declared: Mapping[str, Mappin
             if value != "" for name, o in declared.get(key, {}).items() if o.choices and str(value) not in o.choices]
 
 
-def checked_options(history: list[tuple[EngineConfig, str | None]], flags: Mapping[str, object],
-                    declared: Mapping[str, Mapping[str, Option]]) -> list[tuple[EngineConfig, str | None]]:
-    """The option checks before any start: a key no plugin declares is warned about (it is still served and planned);
-    a flag's value outside a declaring plugin's `choices` is an error; a lock whose value is outside them is warned
-    about and dropped from the history, so defaults and flags serve."""
-    for key in sorted({k for cfg, _ in history for k in cfg.plugin_options} - declared.keys()):
-        _say(f"WARNING: no installed plugin declares the option {key} (`holon serve --help` lists them)")
+def check_flags(flags: Mapping[str, object], declared: Mapping[str, Mapping[str, Option]]) -> None:
+    """A flag's option value outside a declaring plugin's `choices` is an error, before anything is fetched."""
     if bad := outside_choices(flags.get("plugin_options", {}), declared):
         raise SystemExit("holon: --plugin-options " + "; ".join(bad))
+
+
+def checked_options(history: list[tuple[EngineConfig, str | None]],
+                    declared: Mapping[str, Mapping[str, Option]]) -> list[tuple[EngineConfig, str | None]]:
+    """The option checks before any start (the flags passed `check_flags`): a key no plugin declares is warned about
+    (it is still served and planned); a lock whose value is outside a declaring plugin's `choices` is warned about
+    and dropped from the history, so defaults and flags serve."""
+    for key in sorted({k for cfg, _ in history for k in cfg.plugin_options} - declared.keys()):
+        _say(f"WARNING: no installed plugin declares the option {key} (`holon serve --help` lists them)")
     kept = []
     for cfg, lock in history:
         if lock is not None and (bad := outside_choices(cfg.plugin_options, declared)):
@@ -318,16 +323,17 @@ def main(argv: list[str] | None = None) -> None:
         return list_models(args.plans, installed)
     flags = engine_settings(args)
 
-    plugins = PluginSet(installed)
+    plugins, declared = PluginSet(installed), declared_options(installed)
+    check_flags(flags, declared)
     device = torch.device(flags.get("device", "cuda"))
     fp, current = platform.fingerprint(device), plans.current_srcs(installed)
-    rows = [] if args.no_lock else locked_models(args.plans, fp, current)
+    rows = locked_models(args.plans, fp, current)          # names this card's file even under --no-lock
     sized = None if args.no_size_check or device.type != "cuda" else fp
     model = local_model(args.model, plugins, flags.get("source"), rows, sized)
     source, model_plugin = resolve_model(plugins, EngineConfig(model, source=flags.get("source")))
     found = None if args.no_lock else find_lock(args.plans, source, fp, current)
     history = serve_history(model, flags, found, auto_context(model_plugin, source))
-    history = checked_options(history, flags, declared_options(installed))
+    history = checked_options(history, declared)
     config, lock = history[-1]
     bundle = model_plugin.bundle(source)
     names = [m.name for m in plugins.by_slot("frontend")]

@@ -18,8 +18,11 @@ def resolve(ref: str) -> Resolved | None:
     reads. Anything else is not this plugin's (None)."""
     if not REPO.fullmatch(ref):
         return None
-    files = {p: n for p, n in listing(ref).items() if "/" not in p and any(fnmatch.fnmatch(p, f) for f in FILES)}
+    found, cached = listing(ref)
+    files = {p: n for p, n in found.items() if "/" not in p and any(fnmatch.fnmatch(p, f) for f in FILES)}
     if "config.json" not in files or not any(p.endswith((".safetensors", ".safetensors.index.json")) for p in files):
+        if cached:                                    # the hub unreachable: say what the cache lacks
+            raise ValueError(f"{ref}: its cached snapshot holds no safetensors checkpoint (config.json and weights)")
         return None
 
     def fetch() -> str:
@@ -30,25 +33,26 @@ def resolve(ref: str) -> Resolved | None:
     return Resolved(f"{ref} ({len(files)} files)", sum(files.values()), fetch)
 
 
-def listing(repo: str) -> dict[str, int]:
-    """Path in the repository -> size: the hub's listing; offline or unreachable, the cached snapshot's. A ValueError
-    says why neither is there."""
+def listing(repo: str) -> tuple[dict[str, int], bool]:
+    """Path in the repository -> size, and whether it came from the cache: the hub's listing; offline or unreachable,
+    the cached snapshot's. A ValueError says why neither is there."""
     from huggingface_hub import HfApi, constants, errors
 
     error = "HF_HUB_OFFLINE is set"
     if not constants.HF_HUB_OFFLINE:
         try:
-            return {f.path: f.size for f in HfApi().list_repo_tree(repo, recursive=True) if hasattr(f, "size")}
+            return {f.path: f.size for f in HfApi().list_repo_tree(repo, recursive=True) if hasattr(f, "size")}, False
+        except errors.HFValidationError as e:
+            raise ValueError(f"{repo}: not a hub repository id ({e})") from None
         except errors.GatedRepoError:
             raise ValueError(f"{repo} is gated: accept its terms on the hub, then `hf auth login`") from None
         except errors.RepositoryNotFoundError:
             raise ValueError(f"{repo}: no such repository on the hub (private ones need `hf auth login`)") from None
         except Exception as e:  # noqa: BLE001 — a connection failure: the cache may still have it
-            error = f"the hub is unreachable ({type(e).__name__})"
+            error = f"the hub is unreachable ({type(e).__name__}; offline, HF_HUB_OFFLINE=1 serves cached models)"
     root = pathlib.Path(constants.HF_HUB_CACHE, "models--" + repo.replace("/", "--"))
     ref = root / "refs" / "main"
     snapshot = root / "snapshots" / ref.read_text().strip() if ref.is_file() else None
     if snapshot is None or not snapshot.is_dir():
-        raise ValueError(f"{error} and {repo} is not in the HF cache (offline, set HF_HUB_OFFLINE=1 to serve cached "
-                         "models without the network)")
-    return {p.relative_to(snapshot).as_posix(): p.stat().st_size for p in snapshot.rglob("*") if p.is_file()}
+        raise ValueError(f"{error}, and {repo} is not in the HF cache")
+    return {p.relative_to(snapshot).as_posix(): p.stat().st_size for p in snapshot.rglob("*") if p.is_file()}, True

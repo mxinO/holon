@@ -135,6 +135,8 @@ def test_manifest_loads_design_example(tmp_path: pathlib.Path):
     (">=0.2,<0.3", "[properties]\nmax_depth=1\n", "unknown keys"),  # removed: the depth gate comes from the processor
     (">=0.2,<0.3", "[plugin_extra]\n", "unknown section"),
     (">=0.2,<0.3", "[options]\n'a.b' = { default = '1' }\n", "help"),            # an option needs its help line
+    (">=0.2,<0.3", "[options]\n'a.b' = { help = 'x', choices = 'a8' }\n", "strings"),
+    (">=0.2,<0.3", "[options]\n'a.b' = { help = 'x', choices = [4, 8] }\n", "strings"),
     (None, "", "core_abi missing"),                                  # required (release design §7)
     (">=1.0,<2", "[surprise]\n", "does not admit this core's plugin ABI 0.2"),   # checked before the keys
     ("~=0.1", "", "expected clauses"),

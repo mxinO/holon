@@ -1263,20 +1263,22 @@ class Resolved:
 class ResolvesRefs(Protocol):       # holon.api.hooks
     def resolve(self, ref: str) -> Resolved | None:
         """`ref` names a checkpoint that is not a local path (e.g. a hub id): None if this plugin does not fetch it.
-        Claiming may look the reference up but never downloads; a PluginError explains a reference recognised but not
-        servable."""
+        Claiming may look the reference up but never downloads; a ValueError explains a reference recognised but not
+        servable (plugins cannot import the core's PluginError)."""
 ```
 
-**The core** (`assembly.resolve_ref`; `holon serve` calls it first, in its own process), in this order:
+**The core** (`cli.local_model`; `holon serve` calls it first, in its own process, after checking the option flags
+(§14.4), so a bad flag never costs a download), in this order:
 1. a `ref` naming an existing path is that path; nothing else is asked, so a local `org/repo` directory stays a path;
-2. the repository rule (D-repo, below);
-3. every installed weight-source plugin with the hook (with `--source K`, only the one providing `weight_source.K`); a
-   PluginError is kept as a hint. Exactly one claim → it is logged (`holon: fetching <what> (<size>)`). **The size
-   refusal** applies only when the device is CUDA, `Fingerprint.vram_gib > 0` and `nbytes` is known: `nbytes >
-   vram_gib × 2³⁰` (bytes against the card's total memory; v0 has no offload) is refused before downloading, naming both
-   sizes, `holon models` and the launch flag `--no-size-check`, which skips it. Else its fetch runs, and the local path
-   becomes `EngineConfig.model` and is detected as before. None → `<ref>: no such file or directory, and no weight source resolves it` plus the hints; several →
-   name one with `--source`. Claims are separate from fetches, so an ambiguous reference never downloads twice.
+2. the repository rule (D-repo, below), which also applies under `--no-lock`: it only names the file;
+3. every installed weight-source plugin with the hook (`assembly.claim_ref`; with `--source K`, only the one providing
+   `weight_source.K`); a hook's ValueError is kept as a hint. Exactly one claim → it is logged (`holon: <ref>: <what>
+   (<size>)`). **The size refusal** applies only when the device is CUDA, `Fingerprint.vram_gib > 0` and `nbytes` is
+   known: `nbytes > vram_gib × 2³⁰` (bytes against the card's total memory; v0 has no offload) is refused before
+   downloading, naming both sizes, `holon models` and the launch flag `--no-size-check`, which skips it. Else its fetch
+   runs, and the local path becomes `EngineConfig.model` and is detected as before. None → `<ref>: no such file or
+   directory, and no weight source resolves it` plus the hints; several → name one with `--source`. Claims are
+   separate from fetches, so an ambiguous reference never downloads twice.
 
 The download happens before the supervisor starts, so engine processes and restarts get a local path. The lock is
 found by the build hash as before (D2): a hub-cache GGUF's blob name is its sha256, so no file is re-read.
@@ -1288,9 +1290,10 @@ python`, which list what loading the plugin needs. The library keeps its own con
 `hf auth login` for gated repositories); core and std read no environment variable.
 
 **Network and cache.** A claim lists the repository on the hub; on a connection error it falls back to the cache's
-listing of that repository, and if that fails too, its PluginError names `HF_HUB_OFFLINE=1` and the cache. Offline
+listing of that repository, and if that fails too, its ValueError names `HF_HUB_OFFLINE=1` and the cache. Offline
 (`HF_HUB_OFFLINE=1`), claims and fetches use the cache alone, so a tag chooses among the **cached** files only; the log
-line names the file chosen either way.
+line names the file chosen either way. A cached snapshot that lacks what a source needs (e.g. only the tokenizer files
+transformers cached) is said so by each source, rather than declined silently.
 
 **References** (the plugins' grammar; the core sees an opaque string):
 
@@ -1328,8 +1331,8 @@ serve the release's file for that card (5080: UD-IQ3_S; 4090, 5090, 3090: UD-Q4_
   `EngineConfig`'s listing does not move.
 - **`holon serve --help`** shows two groups, "launch" and "serving settings (override the lock)", each line with
   `EngineConfig`'s default, plus `holon serve`'s two own defaults (§14.2). The epilog lists the plugin options and the
-  plugins selectable with `--slots` (per slot of cardinality single or ordered_multi, the installed plugins), all read
-  from manifests without importing a plugin.
+  plugins selectable with `--slots` (every slot not bound per site, except the model, chosen by architecture, and the
+  frontend, chosen by `--frontend`), all read from manifests without importing a plugin.
 - **Plugin options are declared in the manifest**, by the plugin that reads them (ABI additions: section `[options]`,
   `Option` exported from `holon.api`, `Manifest.options` appended last):
 
@@ -1347,8 +1350,9 @@ serve the release's file for that card (5080: UD-IQ3_S; 4090, 5090, 3090: UD-Q4_
   - a key no installed plugin declares → a **warning** naming it (a typo is ignored silently today); the key still
     enters `plugin_options`, so the plan diff shows it;
   - a value must be in the `choices` of **every** declaring plugin that has `choices`;
-  - a **flag's** value outside them → an error naming the plugins and their choices. Today such a value raises
-    `ValueError` inside the engine's build, a start failure of kind "error", retried 4 times before the fallback;
+  - a **flag's** value outside them → an error naming the plugins and their choices, before the model is fetched.
+    Today such a value raises `ValueError` inside the engine's build, a start failure of kind "error", retried 4 times
+    before the fallback;
   - a **lock's** value outside them (a lock older than a narrowed `choices`) → a warning, and that history entry is
     dropped, so `[defaults + flags]` serves;
   - `key=` still deletes. `choices` are declared only for closed sets (`kv.format`, `quant.act`), and the plugin's own

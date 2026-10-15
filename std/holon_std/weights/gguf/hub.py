@@ -22,8 +22,11 @@ def resolve(ref: str) -> Resolved | None:
         repo, tag, stem = "/".join(parts[:2]), None, "/".join(parts[2:]).removesuffix(".gguf")
     if not REPO.fullmatch(repo):
         return None
-    files = {p: n for p, n in listing(repo).items() if p.endswith(".gguf") and "mmproj" not in p.lower()}
+    found, cached = listing(repo)
+    files = {p: n for p, n in found.items() if p.endswith(".gguf") and "mmproj" not in p.lower()}
     if not files and tag is None and not stem:
+        if cached:                                    # the hub unreachable: say what the cache lacks
+            raise ValueError(f"{repo}: its cached snapshot holds no GGUF file")
         return None                                   # not a GGUF repository: another source's
     path = pick(sorted(files), tag, stem, repo)
 
@@ -46,6 +49,8 @@ def pick(files: list[str], tag: str | None, stem: str, repo: str) -> str:
     else:
         found = [p for p, s in whole.items() if not stem or s == stem]
     split = [p for p in found if whole[p] != pathlib.PurePosixPath(p).stem]
+    if split and len(split) < len(found):             # a single file beside a split set of the same name: the file
+        found, split = [p for p in found if p not in split], []
     if len(found) == 1 and not split:
         return found[0]
     if found and len(split) == len(found) and len({whole[p] for p in found}) == 1:
@@ -55,25 +60,26 @@ def pick(files: list[str], tag: str | None, stem: str, repo: str) -> str:
                      + (", ".join(sorted(set(whole.values()))) or "it has none"))
 
 
-def listing(repo: str) -> dict[str, int]:
-    """Path in the repository -> size: the hub's listing; offline or unreachable, the cached snapshot's. A ValueError
-    says why neither is there."""
+def listing(repo: str) -> tuple[dict[str, int], bool]:
+    """Path in the repository -> size, and whether it came from the cache: the hub's listing; offline or unreachable,
+    the cached snapshot's. A ValueError says why neither is there."""
     from huggingface_hub import HfApi, constants, errors
 
     error = "HF_HUB_OFFLINE is set"
     if not constants.HF_HUB_OFFLINE:
         try:
-            return {f.path: f.size for f in HfApi().list_repo_tree(repo, recursive=True) if hasattr(f, "size")}
+            return {f.path: f.size for f in HfApi().list_repo_tree(repo, recursive=True) if hasattr(f, "size")}, False
+        except errors.HFValidationError as e:
+            raise ValueError(f"{repo}: not a hub repository id ({e})") from None
         except errors.GatedRepoError:
             raise ValueError(f"{repo} is gated: accept its terms on the hub, then `hf auth login`") from None
         except errors.RepositoryNotFoundError:
             raise ValueError(f"{repo}: no such repository on the hub (private ones need `hf auth login`)") from None
         except Exception as e:  # noqa: BLE001 — a connection failure: the cache may still have it
-            error = f"the hub is unreachable ({type(e).__name__})"
+            error = f"the hub is unreachable ({type(e).__name__}; offline, HF_HUB_OFFLINE=1 serves cached models)"
     root = pathlib.Path(constants.HF_HUB_CACHE, "models--" + repo.replace("/", "--"))
     ref = root / "refs" / "main"
     snapshot = root / "snapshots" / ref.read_text().strip() if ref.is_file() else None
     if snapshot is None or not snapshot.is_dir():
-        raise ValueError(f"{error} and {repo} is not in the HF cache (offline, set HF_HUB_OFFLINE=1 to serve cached "
-                         "models without the network)")
-    return {p.relative_to(snapshot).as_posix(): p.stat().st_size for p in snapshot.rglob("*") if p.is_file()}
+        raise ValueError(f"{error}, and {repo} is not in the HF cache")
+    return {p.relative_to(snapshot).as_posix(): p.stat().st_size for p in snapshot.rglob("*") if p.is_file()}, True

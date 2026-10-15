@@ -176,16 +176,18 @@ def test_model_references_resolve_through_one_weight_source(tmp_path, monkeypatc
 
 
 def test_serve_help_and_option_checks_follow_the_declarations(tmp_path, monkeypatch, capsys):
-    """Every engine flag has its field's help line; the options installed plugins declare are listed; before a start, an
-    undeclared option is warned about and kept, a flag outside a declaring plugin's `choices` (any of them) fails, a
-    lock's value outside them drops that lock from the history; options only frontends declare are not planned."""
+    """Every engine flag has its field's help line; the options installed plugins declare, and the plugins `--slots`
+    selects among, are listed; a flag outside a declaring plugin's `choices` (any of them) fails before the model is
+    fetched; an undeclared option is warned about and kept, a lock's value outside the choices drops that lock from
+    the history; options only frontends declare are not planned."""
     from holon.core import cli, plans
     from holon.core.engine import EngineConfig
 
     options = {"toy_eng": ('"k.fmt" = { help = "a format", choices = ["x", "y"] }\n'
                            '"k.both" = { help = "both read it", choices = ["x", "y"] }', "unit"),
                "toy_eng2": ('"k.both" = { help = "both", choices = ["x"] }', "unit"),
-               "toy_front": ('"f.name" = { help = "the served name" }', "frontend")}
+               "toy_front": ('"f.name" = { help = "the served name" }', "frontend"),
+               "toy_sampler": ('', "sampler")}
     installed = {name: _package(tmp_path, name, f"[options]\n{body}\n", slot) for name, (body, slot) in options.items()}
     monkeypatch.setattr(cli, "discover", lambda: installed)
     with pytest.raises(SystemExit):
@@ -195,14 +197,18 @@ def test_serve_help_and_option_checks_follow_the_declarations(tmp_path, monkeypa
         if f.name not in ("model", "clamp_context"):
             assert f"--{f.name.replace('_', '-')}" in text and " ".join(f.metadata["help"].split()) in text
     assert "k.fmt a format (one of: x, y) [toy_eng]" in text and "f.name the served name [toy_front]" in text
+    assert text.endswith("selectable plugins (--slots SLOT=PLUGIN): sampler toy_sampler")
+
+    monkeypatch.setattr(cli, "local_model", lambda *a: pytest.fail("fetched before the flags were checked"))
+    with pytest.raises(SystemExit, match=r"k.both=y: not one of x \(toy_eng2\)"):
+        cli.main(["serve", "org/repo:TAG", "--device", "cpu", "--plugin-options", "k.both=y"])
 
     declared = cli.declared_options(installed)
     history = [(EngineConfig("m", plugin_options={"zz": "1", "k.fmt": "x"}), None),
                (EngineConfig("m", plugin_options={"zz": "1", "k.fmt": "z"}), "1.lock")]
-    assert cli.checked_options(history, {"plugin_options": {"zz": "1", "k.fmt": ""}}, declared) == history[:1]
+    cli.check_flags({"plugin_options": {"zz": "1", "k.fmt": ""}}, declared)      # undeclared, or deleting: no error
+    assert cli.checked_options(history, declared) == history[:1]
     err = capsys.readouterr().err
     assert "WARNING: no installed plugin declares the option zz" in err
     assert "1.lock: k.fmt=z: not one of x, y (toy_eng); serving defaults" in err
-    with pytest.raises(SystemExit, match=r"k.both=y: not one of x \(toy_eng2\)"):
-        cli.checked_options(history, {"plugin_options": {"k.both": "y"}}, declared)
     assert plans.frontend_options(installed) == {"f.name"}

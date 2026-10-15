@@ -22,25 +22,27 @@ class Plugin:
         model_id = str(options.get("http.model_name") or served_id(bundle.model_name))
         config = uvicorn.Config(build_app(client, bundle, drop, model_id), host=host, port=port, lifespan="off",
                                 log_level="info")
-        await _Server(config, hint(host, port, model_id)).serve()
+        await _Server(config, model_id).serve()
 
 
 class _Server(uvicorn.Server):
     """Prints how to reach the server once it listens (release design §14.6)."""
 
-    def __init__(self, config: uvicorn.Config, text: str) -> None:
+    def __init__(self, config: uvicorn.Config, model_id: str) -> None:
         super().__init__(config)
-        self.text = text
+        self.model_id = model_id
 
     async def startup(self, sockets=None) -> None:
         await super().startup(sockets)
-        if self.started:
-            print(self.text, file=sys.stderr, flush=True)
+        if self.started:              # the port bound (`--port 0` picks one)
+            port = self.servers[0].sockets[0].getsockname()[1] if self.servers else self.config.port
+            print(hint(self.config.host, port, self.model_id), file=sys.stderr, flush=True)
 
 
 def hint(host: str, port: int, model_id: str) -> str:
     """The lines that point clients, and Claude Code, at this server."""
-    url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::', '') else host}:{port}"
+    host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else f"[{host}]" if ":" in host else host
+    url = f"http://{host}:{port}"
     model = shlex.quote(model_id)
     return (f"holon: serving {model_id} at {url} (OpenAI: /v1; Anthropic: /v1/messages)\n"
             f"holon: Claude Code:\n  ANTHROPIC_BASE_URL={url} ANTHROPIC_AUTH_TOKEN=holon ANTHROPIC_MODEL={model} "

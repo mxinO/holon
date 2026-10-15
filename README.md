@@ -104,7 +104,7 @@ uv run holon serve unsloth/Qwen3.8-27B-GGUF           # this card's locked file,
 |---|---|
 | `unsloth/Qwen3.8-27B-GGUF:UD-IQ3_S` | the repository's GGUF file whose name ends in `-UD-IQ3_S` (any case; `:Q4_K_M` takes `…-Q4_K_M.gguf` over `…-UD-Q4_K_M.gguf`) |
 | `unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S` | that file, as `holon models` names it |
-| `unsloth/Qwen3.8-27B-GGUF` | the file this card has a lock for; else the repository's only GGUF file, else an error listing them |
+| `unsloth/Qwen3.8-27B-GGUF` | the file this card has a verified lock for (`holon models`: "this card's lock"); else the repository's only GGUF file, else an error listing them |
 | `Qwen/Qwen3-8B` | an HF safetensors checkpoint |
 
 The log names the file chosen and its size; a file larger than the GPU's memory is refused before downloading
@@ -169,7 +169,8 @@ Claude Code's auto-compaction assumes a far larger window than the 32K tokens se
 
 Flags override the lock, which overrides the defaults; `holon serve --help` lists every flag (one per engine
 setting), every plugin option the installed plugins read, and the plugins `--slots` selects among. An option no plugin
-declares is warned about; a value outside an option's choices is refused before the server starts.
+declares is warned about; a flag's value outside an option's choices is refused before anything is downloaded, and a
+lock's is warned about and that lock not used.
 
 - **Turn speculation off:** `holon serve <model> --max-draft-tokens 0`.
 - **Ignore the lock:** `holon serve <model> --no-lock` serves defaults and your flags. Use it if a start hangs: the

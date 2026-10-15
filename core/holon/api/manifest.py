@@ -106,6 +106,9 @@ class Option:
     def __post_init__(self) -> None:
         if not isinstance(self.help, str) or not self.help:
             raise ValueError("an option needs a help string")
+        strings = (*self.choices, self.default or "") if isinstance(self.choices, tuple) else (None,)
+        if not all(isinstance(x, str) for x in strings):
+            raise ValueError(f"an option's default and choices are strings: {self.default!r}, {self.choices!r}")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -204,7 +207,8 @@ class Manifest:
             detect=tuple(data.get("support", {}).get("detect", ())),
             provenance=_provenance(data["provenance"]) if "provenance" in data else None,
             build=data.get("build", {}).get("module"),
-            options={k: Option(**{**v, "choices": tuple(v.get("choices", ()))})
+            options={k: Option(**{**v, "choices": tuple(v["choices"]) if isinstance(v.get("choices"), list)
+                                  else v.get("choices", ())})
                      for k, v in data.get("options", {}).items()},
         )
         if m.slot not in SLOTS:

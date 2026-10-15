@@ -356,6 +356,7 @@ def test_models_health_metrics(http, engine, bundle, monkeypatch):
         "holon: serving a b at http://127.0.0.1:8001 (OpenAI: /v1; Anthropic: /v1/messages)\nholon: Claude Code:\n"
         "  ANTHROPIC_BASE_URL=http://127.0.0.1:8001 ANTHROPIC_AUTH_TOKEN=holon ANTHROPIC_MODEL='a b' "
         "ANTHROPIC_DEFAULT_HAIKU_MODEL='a b' CLAUDE_CODE_SUBAGENT_MODEL='a b' claude")
+    assert "ANTHROPIC_BASE_URL=http://[::1]:8001 " in hint("::1", 8001, "m")
 
 
 # -- client disconnect ------------------------------------------------------------------------------------------------
