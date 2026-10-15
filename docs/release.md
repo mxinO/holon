@@ -1781,9 +1781,9 @@ Plugin manifests keep their own unit versions (1.0.0).
 
 - **design.md**
   - §3: the Plan has no tunables; `Event` is planned; `Platform` is the core's device layer, not a slot.
-  - §4.1: the manifest example is a `draft_policy` plugin with ABI 1.0's sections only (`core/tests/test_api.py` parses it from the design);
-    resources are matched as strings and registrations checked against `provides` (the claim of a Protocol check
-    after import was never built).
+  - §4.1: the manifest example is a `draft_policy` plugin with ABI 1.0's sections only (`core/tests/test_api.py` parses
+    it from the design); resources are matched as strings and registrations checked against `provides` (the claim of a
+    Protocol check after import was never built).
   - §4.2: the slot table is ABI 1.0's; the planned slots are listed as future minor additions.
   - §4.3: per-site bindings carry configs, not tunables.
   - §4.4: rollback in an install (an older lock pins other code: `holon serve` serves the newest lock pinning the
@@ -1827,22 +1827,26 @@ the 32K context, not a claim of general agent capability (the README says so).
   way), with the site directories' `*.pth` files and any `sitecustomize` / `usercustomize`, are hashed before and
   after each run against one reference digest taken before run 1 (`scorer_reference`, recorded): a run starts only
   in that environment, and a change makes the run **invalid** — not scored, **counted as a miss and published** —
-  and stops the series until the environment is restored (a resumed series passes `--reference` and must match it).
-  Not guarded: the shared libraries the interpreter links (libpython, libc). Before every run the harness's own files
-  (`bench/`, `scripts/ci/`) must equal their commit (`git status`), and the run's venv must hold the first run's
-  pytest (its site-packages' digest); otherwise the series stops before the run. Before the runs the harness checks that the project fails as
-  registered and that `--gpu-class` is the served lock's class. Runs are sequential on one server, so a later run may
+  and stops the series until the environment is restored. A resumed series passes `--reference` (which must match)
+  and appends to its own record (`--out`, which must exist and name the same reference, class, commit and binary)
+  for the runs left; a new series never overwrites a record. Scoring reads bytecode only from a fresh empty
+  `PYTHONPYCACHEPREFIX`, so a crafted `.pyc` beside a hashed source is never run. Not guarded: the shared libraries
+  the interpreter links (libpython, libc). Before every run the harness's own files (`bench/`, `scripts/ci/`) must
+  equal their commit (`git status`), and the run's venv, as made and before its session, must hold the first run's
+  pytest (its site-packages' digest); otherwise the series stops before the run. What an agent then installs into
+  its own venv is allowed and recorded. Before the runs the harness checks that the project fails as registered and
+  that `--gpu-class` is the served lock's class. Runs are sequential on one server, so a later run may
   hit the prefix cache an earlier one filled (the same system prompt and tools), as a user's next session would.
-- **Recorded per run:** success (a miss when invalid), validity, the scoring's counts, the venv's pytest digest, turns (derived from the stream's assistant messages when a
-  session times out), wall time, exit and result kind, the tool-call sequence (tool, a file tool's path inside the
-  project or `<outside>`, the program a Bash command starts, whether it failed — no file text, no arguments), the final
-  `shop/` diff (synthetic and public; withheld if `check_private`'s patterns match it), per request: status, input and
-  output tokens, TTFT, TPOT, stop reason, a length refusal; counts per HTTP status, length refusals, the peak context,
-  the distinct sampling parameters (`model`, `max_tokens`, `temperature`, `top_p`, `top_k`, `thinking`,
-  `output_config`, `stop_sequences`), the tokens served and the prefix tokens saved (the engine's counter over the
-  run). The record also has the served plan, its lock (from `plans/`) and the diff (host paths scrubbed), the
-  binary's sha256, the project's digest and the commit. Each session's stream and the proxy's lines are kept under
-  the gitignored `bench/.out/demo/`.
+- **Recorded per run:** success (a miss when invalid), validity, the scoring's counts, the venv's digest as made and
+  whether the agent changed it, turns (derived from the stream's assistant messages when a session times out), wall
+  time, exit and result kind, the tool-call sequence (tool, a file tool's path inside the project or `<outside>`, the
+  program a Bash command starts, whether it failed — no file text, no arguments), the final `shop/` diff (synthetic and
+  public; withheld if `check_private`'s patterns match it), per request: status, input and output tokens, TTFT, TPOT,
+  stop reason, a length refusal; counts per HTTP status, length refusals, the peak context, the distinct sampling
+  parameters (`model`, `max_tokens`, `temperature`, `top_p`, `top_k`, `thinking`, `output_config`, `stop_sequences`),
+  the tokens served and the prefix tokens saved (the engine's counter over the run). The record also has the served
+  plan, its lock (from `plans/`) and the diff (host paths scrubbed), the binary's sha256, the project's digest and the
+  commit. Each session's stream and the proxy's lines are kept under the gitignored `bench/.out/demo/`.
 - **Step 9's procedure:** `holon serve` the class's 27B lock; one uncounted smoke run of M0.5's Claude Code session
   task at 2.1.300 against it; then the 3 counted runs.
 - **`capture_proxy.py`** adds to each request's line `ttft_ms` (the first `content_block_delta`), `total_ms`,
@@ -1883,11 +1887,11 @@ Round 2 confirmed every fix: no findings beyond two wording nits in this section
 
 Full GPU suite (two RTX A5000s, the worktree's uv venv; `pytest core std plugins judge testing tools`): at b604aa9,
 **1210 passed, 65 skipped in 20 min 45 s**, the same counts as M0.7's close (1210 / 65); after the panel's fixes, at
-6e0f1fa, **1217 passed, 65 skipped in 17 min 51 s** (+7: the per-element listing case and the six harness tests,
-≈ 3 s on the CPU). An earlier run at b38d6c7 had one failure, `tools/tests/test_gpu_lock.py::test_first_lock_for_qwen3_0_6b`,
-caused by editing core files while it ran (the core's `src` moved between its two `propagate` calls); it passes
-since. `scripts/ci/run_all.sh main` is green at every commit (import contracts 8 kept). At 826287b (the after-run
-guard, the last code change): **1217 passed, 65 skipped in 16 min 59 s**; `run_all.sh main` green.
+6e0f1fa, **1217 passed, 65 skipped in 17 min 51 s** (+7: the per-element listing case and the six harness tests, ≈ 3 s
+on the CPU). An earlier run at b38d6c7 had one failure, `tools/tests/test_gpu_lock.py::test_first_lock_for_qwen3_0_6b`,
+caused by editing core files while it ran (the core's `src` moved between its two `propagate` calls); it passes since.
+`scripts/ci/run_all.sh main` is green at every commit (import contracts 8 kept). At 826287b (the after-run guard, the
+last change outside `bench/` and its test): **1217 passed, 65 skipped in 16 min 59 s**; `run_all.sh main` green.
 
 ### 15.8 For the lead
 
@@ -1949,4 +1953,12 @@ declarations into ABI 1.0. Every code fix below has a test that fails without it
   the first run's (`venv_digest`, the site-packages by relative path, without the dist-info `RECORD`s, which hash
   the venv's own scripts); `shop_diff()` records a failure instead of raising. CPU tests and `run_all.sh main` green;
   no GPU suite (bench-only change).
+- **Their re-check of that round** (each with a failing-first test): the venv's digest is taken as made, before the
+  session, and used both for the check against the first run's and in the record (`prepare_venv`); a change the
+  agent makes to its own venv is recorded as "agent changed its venv" (`venv_change`), never a stop — before, an
+  agent installing into its venv stopped run 2 falsely, and a removed venv could lose the run. Scoring and its probe
+  read bytecode only from a fresh empty `PYTHONPYCACHEPREFIX` (a crafted `.pyc` matching its source's size and time
+  is run without it, as the test shows). A resumed series (`--reference`) loads its `--out`, checks its scorer
+  reference, class, commit and binary sha256, appends and runs only the runs left; without `--reference` an existing
+  `--out` is refused (`series_record`). CPU tests and `run_all.sh main` green.
 

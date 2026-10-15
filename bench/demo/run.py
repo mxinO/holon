@@ -142,8 +142,10 @@ def score(work: pathlib.Path, tests: dict[str, bytes]) -> dict:
             write_tree({f"shop/{k}": v for k, v in tree(shop).items()} | tests, scored)
             ini.write_text("[pytest]\n")                   # not the project's configuration
             try:
+                (pycache := tmp / "pycache").mkdir()
                 run = subprocess.run([sys.executable, "-m", "pytest", *_pytest_args(ini, scored, report)], cwd=scored,
-                                     env=_scoring_env(), capture_output=True, text=True, timeout=SCORING_TIMEOUT_S)
+                                     env=_scoring_env(pycache), capture_output=True, text=True,
+                                     timeout=SCORING_TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 return out | {"timed_out": True}
             counts = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
@@ -159,9 +161,12 @@ def score(work: pathlib.Path, tests: dict[str, bytes]) -> dict:
         return out | {"error": type(e).__name__}
 
 
-def _scoring_env() -> dict[str, str]:
+def _scoring_env(pycache: pathlib.Path) -> dict[str, str]:
+    """Scoring's environment: no plugin autoload, and bytecode only from `pycache`, a fresh empty directory, so a
+    crafted `.pyc` beside a source file (which the digests do not hash) is never read."""
     env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTEST_", "PYTHON"))}
-    return env | {"PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+    return env | {"PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+                  "PYTHONPYCACHEPREFIX": str(pycache)}
 
 
 def _pytest_args(ini: pathlib.Path, rootdir: pathlib.Path, report: pathlib.Path) -> list[str]:
@@ -183,8 +188,9 @@ def scoring_modules() -> list[str]:
         (tmp / "tests").mkdir()
         (tmp / "tests" / "test_probe.py").write_text("def test_probe():\n    pass\n")
         (ini := tmp / "pytest.ini").write_text("[pytest]\n")
+        (pycache := tmp / "pycache").mkdir()
         out = subprocess.run([sys.executable, "-c", PROBE, *_pytest_args(ini, tmp, tmp / "junit.xml")], cwd=tmp,
-                             env=_scoring_env(), capture_output=True, text=True, timeout=120, check=True)
+                             env=_scoring_env(pycache), capture_output=True, text=True, timeout=120, check=True)
         return [f for f in json.loads(out.stdout.strip().splitlines()[-1]) if not f.startswith(str(tmp))]
 
 
@@ -230,6 +236,42 @@ def venv_digest(bin_dir: pathlib.Path) -> str:
     (packages,) = bin_dir.parent.glob("lib/python*/site-packages")
     # without the dist-info RECORDs: they hash the venv's scripts, whose shebangs carry the venv's path
     return digest({k: v for k, v in tree(packages).items() if not k.endswith(".dist-info/RECORD")})
+
+
+def prepare_venv(dest: pathlib.Path, first: str | None) -> tuple[pathlib.Path, str]:
+    """A run's venv and its digest as made, before the session: it must be the first run's."""
+    bin_dir = make_venv(dest)
+    if first is not None and (made := venv_digest(bin_dir)) != first:
+        raise SystemExit(f"this run's venv holds another pytest than the first run's ({made} != {first}; uv's cache "
+                         "changed?): the series stops")
+    return bin_dir, venv_digest(bin_dir)
+
+
+def venv_change(bin_dir: pathlib.Path, made: str) -> str | None:
+    """After the session: whether the agent changed its own venv (allowed, recorded)."""
+    try:
+        after = venv_digest(bin_dir)
+    except Exception as e:                                 # removed or rebuilt by the agent
+        return f"agent changed its venv: unreadable ({type(e).__name__})"
+    return None if after == made else f"agent changed its venv: {after}"
+
+
+def series_record(out: pathlib.Path, resume: bool, header: dict) -> dict:
+    """The series' record: new (never overwriting one), or, resuming a stopped series, its record, which must be
+    the same series (scorer reference, class, commit, Claude Code binary) and is appended to."""
+    if not resume:
+        if out.exists():
+            raise SystemExit(f"{out} exists: a new series writes a new record (resume one with --reference)")
+        return header
+    if not out.is_file():
+        raise SystemExit(f"{out}: no record to resume")
+    record = json.loads(out.read_text())
+    for key in ("scorer_reference", "gpu_class", "commit"):
+        if record.get(key) != header[key]:
+            raise SystemExit(f"{out}: another series ({key} {record.get(key)!r} != {header[key]!r})")
+    if record.get("client", {}).get("binary_sha256") != header["client"]["binary_sha256"]:
+        raise SystemExit(f"{out}: another series (client binary_sha256)")
+    return record
 
 
 def outcome(invalid: str | None, scored: dict | None) -> dict:
@@ -400,9 +442,7 @@ def run_once(server: str, model: str, claude: pathlib.Path, project: dict[str, b
         tmp = pathlib.Path(tmp)
         work = tmp / "project"
         write_tree(project, work)
-        venv = make_venv(tmp / "venv")
-        if first_venv is not None and venv_digest(venv) != first_venv:
-            raise SystemExit("this run's venv has another pytest than the first run's (uv's cache changed?)")
+        venv, made = prepare_venv(tmp / "venv", first_venv)
         port, captured = _free_port(), tmp / "requests.jsonl"
         proxy = subprocess.Popen([sys.executable, str(ROOT / "bench" / "capture_proxy.py"), "--upstream", server,
                                   "--port", str(port), "--out", str(captured)])
@@ -460,7 +500,8 @@ def run_once(server: str, model: str, claude: pathlib.Path, project: dict[str, b
         invalid = invalid_after(reference)
         diff = shop_diff(project, work)
         return outcome(invalid, None if invalid else score(work, tests)) | {
-                "venv_pytest": venv_digest(venv), "wall_s": round(wall, 1), "timed_out": timed_out,
+                "venv_pytest": made, "venv_after": venv_change(venv, made), "wall_s": round(wall, 1),
+                "timed_out": timed_out,
                 "exit_code": None if timed_out else session.returncode, "turns": turns(events),
                 "result_subtype": result.get("subtype"), "is_error": result.get("is_error"),
                 "replied_done": (result.get("result") or "").strip() == "done", "prefix_tokens_saved": saved,
@@ -473,11 +514,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--server", help="the running `holon serve`, e.g. http://127.0.0.1:8000")
     parser.add_argument("--gpu-class", help="the server's GPU class; must be its lock's (e.g. rtx-5080)")
-    parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--runs", type=int, default=3, help="the series' runs (a resumed series runs the rest)")
     parser.add_argument("--out", type=pathlib.Path, help="the evidence record to write")
     parser.add_argument("--claude", default="claude", help="the Claude Code executable")
     parser.add_argument("--score", type=pathlib.Path, help="only score a copy of this project directory")
-    parser.add_argument("--reference", help="resume a stopped series: its recorded scorer reference digest")
+    parser.add_argument("--reference", help="resume a stopped series: its recorded scorer reference digest; "
+                                            "--out is then its record, appended to")
     args = parser.parse_args()
     project = load_project()
     tests = {k: v for k, v in project.items() if k.startswith("tests/")}
@@ -505,15 +547,16 @@ def main() -> None:
         sys.exit(f"--gpu-class {args.gpu_class} is not the served lock's class ({served['lock']})")
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    record = {"workload": "agent_demo", "date": datetime.date.today().isoformat(), "gpu_class": args.gpu_class,
+    header = {"workload": "agent_demo", "date": datetime.date.today().isoformat(), "gpu_class": args.gpu_class,
               "commit": commit, "model": model, "served": served,
               "client": {"claude_code": CLAUDE_CODE, "binary_sha256": claude_sha, "allowed_tools": TOOLS,
                          "timeout_s": TIMEOUT_S, "env": CLIENT_ENV,
                          "command": "claude -p <prompt> --allowedTools <tools> --output-format stream-json --verbose"},
               "task": {"prompt": PROMPT, "project": PROJECT_DIGEST, "tests": TESTS, "seeded": SEEDED},
               "scorer_reference": reference, "runs": []}
-    first_venv = None
-    for i in range(args.runs):
+    record = series_record(args.out, bool(args.reference), header)
+    first_venv = record["runs"][0].get("venv_pytest") if record["runs"] else None
+    for i in range(len(record["runs"]), args.runs):
         if dirty := harness_dirty():
             sys.exit(f"the harness changed during the series: {dirty}")
         check_environment(reference)

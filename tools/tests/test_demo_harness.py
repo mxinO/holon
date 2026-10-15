@@ -181,8 +181,54 @@ def test_a_series_runs_only_on_a_clean_harness_and_its_reference_environment(tmp
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")
 def test_every_runs_venv_has_the_first_runs_pytest(tmp_path):
-    first = demo.venv_digest(demo.make_venv(tmp_path / "a"))
-    second = demo.make_venv(tmp_path / "b")
-    assert demo.venv_digest(second) == first
+    """Each venv is checked as made, before its session: what an agent installs into its own venv afterwards is
+    recorded, not held against the next run."""
+    first_bin, first = demo.prepare_venv(tmp_path / "a", None)
+    assert demo.venv_change(first_bin, first) is None
+    (next(first_bin.parent.glob("lib/python*/site-packages")) / "agent_installed.py").write_text("")
+    assert demo.venv_change(first_bin, first).startswith("agent changed its venv: sha256:")
+    second, digest = demo.prepare_venv(tmp_path / "b", first)
+    assert digest == first
     (next(second.parent.glob("lib/python*/site-packages")) / "_pytest" / "main.py").write_text("")
-    assert demo.venv_digest(second) != first
+    with pytest.raises(SystemExit, match="first run's"):
+        demo.prepare_venv(tmp_path / "c", demo.venv_digest(second))
+    shutil.rmtree(second.parent / "lib")
+    assert "unreadable" in demo.venv_change(second, first)
+
+
+def test_scoring_reads_no_bytecode_it_did_not_write(tmp_path):
+    """A crafted `.pyc` beside a module (matching its source's size and time) is not what scoring runs."""
+    import py_compile
+    pkg = tmp_path / "site" / "guarded"
+    pkg.mkdir(parents=True)
+    (src := pkg / "mod.py").write_text("X=2\n")
+    py_compile.compile(str(src), cfile=str(pkg / "__pycache__" / f"mod.{demo.sys.implementation.cache_tag}.pyc"))
+    stat = src.stat()
+    src.write_text("X=1\n")
+    os_ = __import__("os")
+    os_.utime(src, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    code = ["-c", "import guarded.mod as m; print(m.X)"]
+    plain = subprocess.run([demo.sys.executable, *code], cwd=tmp_path / "site", capture_output=True, text=True)
+    assert plain.stdout.strip() == "2"                                  # the crafted bytecode, without the prefix
+    with demo.tempfile.TemporaryDirectory() as prefix:
+        scoring = subprocess.run([demo.sys.executable, *code], cwd=tmp_path / "site", capture_output=True, text=True,
+                                 env=demo._scoring_env(pathlib.Path(prefix)))
+    assert scoring.stdout.strip() == "1"
+
+
+def test_a_series_resumes_into_its_own_record(tmp_path):
+    header = {"scorer_reference": "sha256:r", "gpu_class": "rtx-5080", "commit": "c1",
+              "client": {"binary_sha256": "sha256:b"}, "runs": []}
+    out = tmp_path / "demo.json"
+    assert demo.series_record(out, False, header)["runs"] == []
+    out.write_text(demo.json.dumps(header | {"runs": [{"success": False, "invalid": "changed"}]}))
+    with pytest.raises(SystemExit, match="exists"):
+        demo.series_record(out, False, header)                          # never overwritten
+    assert len(demo.series_record(out, True, header)["runs"]) == 1     # resumed: appended to
+    for key, other in (("scorer_reference", "sha256:x"), ("gpu_class", "rtx-4090"), ("commit", "c2")):
+        with pytest.raises(SystemExit, match=key):
+            demo.series_record(out, True, header | {key: other})
+    with pytest.raises(SystemExit, match="binary_sha256"):
+        demo.series_record(out, True, header | {"client": {"binary_sha256": "sha256:other"}})
+    with pytest.raises(SystemExit, match="no record"):
+        demo.series_record(tmp_path / "missing.json", True, header)
