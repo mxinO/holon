@@ -79,8 +79,8 @@ class _Quantized:
         released (a tied head has no `param`). `qembedding@1` has no `prepare`: a table is read as adopted."""
         self._kernel, spec = self._select(self.op, self.facts)
         if glu is not None and kernels.QLINEAR_GLU in spec.config.get("fused", ()):
-            fused, glu_spec = self._select(kernels.QLINEAR_GLU, self.facts | {"glu": glu})
-            self._glu = fused if glu_spec.provider == spec.provider else None    # it reads the parts `prepare` made
+            # only from the same provider: it reads the parts that provider's `prepare` made
+            self._glu = self._select(kernels.QLINEAR_GLU, self.facts | {"glu": glu}, provider=spec.provider)[0]
         if self.op != kernels.QLINEAR or not hasattr(self._kernel, "prepare"):
             return parts
         q = QTensor(self.layout, shape, parts)
@@ -89,10 +89,13 @@ class _Quantized:
         self.layout = prepared.layout                    # what the parts now are (the site's facts keep the adopted)
         return dict(prepared.parts) if param is None else _hold(param, prepared.parts, self.ctx.device)
 
-    def _select(self, op: str, facts: dict):
-        """The instance of `op`'s kernel for `facts` (a lock site named by them), and its spec."""
+    def _select(self, op: str, facts: dict, provider: str | None = None):
+        """The instance of `op`'s kernel for `facts` (a lock site named by them), and its spec; no instance (None)
+        when the chosen kernel is not `provider`'s, if given."""
         site = f"std.ops.{op.split('@')[0]}[" + ",".join(f"{k}={v}" for k, v in facts.items()) + "]"
         spec = self.ctx.select_kernel(op, site=site, **facts)
+        if provider is not None and spec.provider != provider:
+            return None, spec
         _one_act_mode(self.ctx, spec, site)
         return spec.impl(self.ctx, **facts), spec
 
