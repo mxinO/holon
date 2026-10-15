@@ -278,6 +278,14 @@ is taken to cost nothing).
   only (D3; predicted caught by bounded; it is not: §13.7). Re-verified with a "fired" count > 0: `ggml_stale_q8_1`
   (after D6), `replay_off_by_one`
   and `verify_writes_state` (after D5). Plants are verified once, not kept as tests.
+- **Decode consistency at the attention unit** (the lead's decision after §13.7's judge gap, step 4):
+  `plugins/tests/test_attention_kv_quant.py::test_a_decode_row_is_the_last_prefill_row`, in the GQA L0 module. The
+  GQA unit of a tiny Qwen3.5 on the GPU kernels (D3's fused op selected; partial rotary, the gated q layout, a norm
+  offset), bf16 and q8_0 KV: prefill T tokens against prefill T − 1 then the last as a one-token decode row, T 17 (the
+  decode row opens a page) and 40. The last token's output agrees within the attention budget (another kernel computes
+  it: usage 0.006 of 1), and the KV it wrote is bitwise (its k and v projections are; otherwise within the budget).
+  Verified once: the decode-row plant `qk-rope-kv-decode-position` fails it on both formats (the KV differs by up to
+  0.75 in bf16; its output alone would pass, usage 0.24, since only 8 of 64 dims rotate), the clean build passes.
 - **Locks:** propagated once at the close; the snapshot trace gains a capped chunk beside decoders when D7 ships.
 
 ## 7. Steps

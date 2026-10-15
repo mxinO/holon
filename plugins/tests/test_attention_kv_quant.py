@@ -1,7 +1,7 @@
 """L0 for quantized KV (docs/m03-qwen38.md D6): `kv_write@1` bitwise against the reference write (the model-dtype
 layout's Triton copy too, docs/m07-perf.md D3), `attention.qk_rope_kv@1` against the judge's composition of the units'
 references (D3: partial rotary, the gated q layout, 1-token rows; its q8_0 write bitwise the reference's write of
-its own model-dtype k), and every kernel
+its own model-dtype k), the GQA unit's decode row against its last prefill row (bitwise KV), and every kernel
 that reads q8_0 or fp8 against `reference.paged_attention` reading the same stored cache — the reference dequantizes
 it, so the comparison isolates the kernel's error from the format's — within the attention budget of
 test_attention_kernels. Plants that must fail: q8_0 scales read from another head, and a step attending to its own
@@ -11,13 +11,19 @@ Caches are laid out as std.mixers.gqa lays out one layer (q8_0: each unit's valu
 segment). K and V have per-head magnitudes (×½, ×1, ×2), so a scale from another head is far outside the budget, and
 K an outlier channel per 32 values, as real keys do.
 """
+import numpy as np
 import pytest
 import torch
+from holon.api import SamplingParams, Seq
+from holon.core.batching import host_plan
 from holon.core.build import BuildContext
+from holon.core.engine import Engine, EngineConfig
 from holon.core.plugins import PluginError, PluginSet, discover
 from holon_judge import fused, l0
 from holon_std.mixers.gqa import kernels as gqa_kernels
 from holon_std.mixers.gqa import reference as gqa
+from holon_std.mixers.gqa.units import GQA
+from holon_testing.qwen3_5_files import save, tiny_hf
 from holon_testing.ref_kernels.kernels import PagedAttention
 
 from .test_attention_kernels import (
@@ -227,6 +233,57 @@ def test_qk_rope_kv_is_the_composition(heads, kv_heads, head_dim, rotary_dim, ga
                 if t:
                     gqa.kv_write(caches[MODEL][unit, 0, :, off].cpu(), v.cpu(), want, unit.cpu(), off.cpu())
                 assert torch.equal(raw_bytes(ours), raw_bytes(want)), t
+
+
+@pytest.mark.parametrize("layout", [MODEL, Q8])
+def test_a_decode_row_is_the_last_prefill_row(tmp_path, layout):
+    """The GQA unit with its selected kernels (D3's fused op included) on a tiny Qwen3.5 — partial rotary, the gated q
+    layout, a norm offset: prefilling T tokens against prefilling T − 1 then decoding the last as a one-token row.
+    The last token's output agrees within the attention budget (another kernel computes it), and the KV it wrote is
+    bitwise where its projections are (the same write at the same position); T − 1 = 16 opens a page. A decode-only
+    position error, which every relative judge misses (docs/m07-perf.md §13.7), fails the KV check."""
+    path = save(tiny_hf(4, seed=1, dim=64), tmp_path)
+    engine = Engine(EngineConfig(str(path), dtype=torch.bfloat16, cuda_graphs=False, overlap=False, page_size=PAGE,
+                                 max_seqs=2, max_step_tokens=64, max_model_len=128, state_memory=8 << 20,
+                                 plugin_options={"kv.format": "q8_0"} if layout == Q8 else {}))
+    gqa_unit = next(m for m in engine.executor.model.modules() if isinstance(m, GQA))
+    assert gqa_unit._fused is not None and gqa_unit.gated
+    table = next(iter(engine.state.tables.values())).host
+    torch.manual_seed(0)
+
+    def run(seq, x):
+        assert engine.state.reserve(seq, len(x))
+        n = np.array([len(x)], np.int32)
+        ctx = engine.executor._context(host_plan(0, np.array([seq.slot], np.int32),
+                                                 np.array([seq.num_computed], np.int32), n, n * 0 + 1,
+                                                 np.zeros(len(x), np.int64)))
+        engine.executor._prepare(ctx)
+        seq.num_computed += len(x)
+        return gqa_unit(x, ctx)[-1]
+
+    def written(seq, pos):
+        cache = gqa_unit._kv_layer()
+        return [c[table[seq.slot, pos // PAGE], :, :, pos % PAGE] for c in (cache if layout == Q8 else (cache,))]
+
+    with torch.no_grad():
+        for t in (17, 40):
+            x = torch.randn(t, 64, device="cuda", dtype=torch.bfloat16)
+            prefill, decode = seqs = [Seq(str(i), [0] * t, SamplingParams(seed=0)) for i in range(2)]
+            assert all(engine.state.admit(s) for s in seqs)
+            last = run(prefill, x)
+            run(decode, x[:-1])
+            assert usage(run(decode, x[-1:]), last) <= 1, t
+            same = [torch.equal(p[-1], d[0]) for p, d in zip(gqa_unit._projections(x), gqa_unit._projections(x[-1:]),
+                                                              strict=True)]
+            got, want = written(decode, t - 1), written(prefill, t - 1)
+            if all(same[1:]):                                                        # k and v projected alike
+                assert all(torch.equal(a, b) for a, b in zip(got, want, strict=True)), t
+            else:
+                assert usage(dequantized(tuple(got)) if layout == Q8 else got[0], dequantized(tuple(want))
+                             if layout == Q8 else want[0]) <= 1, t
+            for s in seqs:
+                engine.state.release(s)
+    engine.close()
 
 
 def test_kv_write_q8_0_is_ggufs_own():
