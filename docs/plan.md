@@ -552,6 +552,10 @@ or records why not.
 ## 10. v1 and v2 (outline; detailed plans written when v0 lands)
 
 **v1 — consumer-GPU story**
+- **A full pip package** (owner, 2026-10-14: v0 ships on GitHub only, as a tagged source release; pip comes in v1 or
+  v2). It needs prebuilt wheels with Holon's CUDA extensions compiled for the pinned torch / CUDA stack and every
+  supported SM, a CI build and test matrix on each card class, and `pip install holonlm` serving without a local CUDA
+  toolkit.
 - **Expert caching/offload** on the M0 seams (SeqTable, MemOps, `quiesce`, S6 stream-memop CPU worker):
   TieredStore, in-graph DeviceResolver with double-buffered residency, placement policies (LRU, profile-seeded
   decayed LFU), CPU miss compute (GGUF experts computed on the CPU, Strata-style, with ggml CPU kernels) — MoE
