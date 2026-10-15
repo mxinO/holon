@@ -2,6 +2,7 @@
 unit hands its kernel every part by role (`qlinear@2`, `linear_experts@2`), binds after merges with the `act_quant`
 fact, keeps only what the kernel's `prepare` returns, merges parts by shape, and stacks experts slice by slice; a
 merged gate/up binds the fused activation, and one input prepares once for several linears (docs/m07-perf.md D6)."""
+import dataclasses
 import pathlib
 import types
 
@@ -79,14 +80,15 @@ def test_quant_act_sets_the_fact_and_a16_is_refused():
 def test_mixed_steps_refuse_kernels_with_two_activation_modes(act):
     """docs/m07-perf.md §3.1: with `chunk_with_decode` > 0 a quantized linear and an expert stack refuse, at bind, a
     kernel whose paths compute in different activation modes (the toy's a4 spec: chunks at 4 bits) — generically,
-    from its spec's `config["act"]`; one mode on both paths (a8) binds, and every kernel binds without mixed steps:
-    the setting at 0, or a drafter (steps alternate)."""
-    for chunk, drafts in ((0, 0), (256, 3), (256, 0)):
+    from its spec's `config["act"]`; one mode on both paths (a8) binds, and every kernel binds without mixed steps
+    (the option at 0: the engine passes 0 with a drafter, whose steps alternate). The units read that option alone,
+    not `max_draft_tokens` (§17)."""
+    for chunk, drafts in ((0, 3), (256, 3), (256, 0)):
         ctx = _ctx(**{"quant.act": act})
         ctx.options |= {"chunk_with_decode": chunk, "max_draft_tokens": drafts}
         stacks = _stacks(ctx, lambda seed: _toy(128, 128, seed))
         for unit in (_linear(ctx, _toy(4, H, seed=0)), type(stacks.gate).merge(stacks.gate, stacks.up)):
-            if chunk and not drafts and act == "a4":
+            if chunk and act == "a4":
                 with pytest.raises(ValueError, match=r"needs one activation mode on every path; tests.toy_quant"):
                     unit.bind_kernels(ctx)
             else:
@@ -135,6 +137,22 @@ def test_linears_merge_parts_by_shape(second, shape2, merges):
     torch.testing.assert_close(merged(x), torch.cat([x @ _weight(q).T for q in qs], dim=-1))
 
 
+def _swiglu(ctx, up_scale2: float):
+    """A toy SwiGLU, its weights adopted and bound (gate and up merge when their scale2 agree), and its dense
+    weights."""
+    with torch.device("meta"):
+        ffn = ctx.unit(Ref("std.ffn.swiglu@1", inter=INTER), hidden=H)
+    qs = {"gate": _toy(INTER, H, seed=6), "up": _toy(INTER, H, seed=7, scale2=up_scale2),
+          "down": _toy(H, INTER, seed=8)}
+    for n, q in qs.items():
+        assert getattr(ffn, f"{n}_proj").adopt_weights(ctx, "weight", q)
+    ffn.finalize_weights(ctx)
+    for m in ffn.modules():
+        if hasattr(m, "bind_kernels"):
+            m.bind_kernels(ctx)
+    return ffn, {n: _weight(q) for n, q in qs.items()}
+
+
 def test_a_merged_gate_up_fuses_its_activation_and_linears_share_a_prepared_input():
     """D6: SwiGLU's merged gate/up binds `qlinear_glu@1` (a lock site) because its `qlinear@2` spec lists it in
     `config["fused"]`; at one row the output is the fused kernel's, at two the composition (the toy fuses one row, as
@@ -142,17 +160,7 @@ def test_a_merged_gate_up_fuses_its_activation_and_linears_share_a_prepared_inpu
     Unmerged (another scale2 apiece), gate and up share one `prepare_input`, which a dense linear takes too."""
     for scale2, merged in ((0.5, True), (0.25, False)):
         ctx = _ctx()
-        with torch.device("meta"):
-            ffn = ctx.unit(Ref("std.ffn.swiglu@1", inter=INTER), hidden=H)
-        qs = {"gate": _toy(INTER, H, seed=6), "up": _toy(INTER, H, seed=7, scale2=scale2),
-              "down": _toy(H, INTER, seed=8)}
-        weights = {n: _weight(q) for n, q in qs.items()}
-        for n, q in qs.items():
-            assert getattr(ffn, f"{n}_proj").adopt_weights(ctx, "weight", q)
-        ffn.finalize_weights(ctx)
-        for m in ffn.modules():
-            if hasattr(m, "bind_kernels"):
-                m.bind_kernels(ctx)
+        ffn, weights = _swiglu(ctx, scale2)
         assert (ffn._gate_up is not None) == merged
         assert any(k.endswith("/qlinear_glu@1") for k in ctx.kernels) == merged
         for rows in (1, 2):
@@ -170,6 +178,33 @@ def test_a_merged_gate_up_fuses_its_activation_and_linears_share_a_prepared_inpu
     torch.utils.swap_tensors(linear.weight, torch.nn.Parameter(dense.weight.detach().clone(), requires_grad=False))
     x = _x(3, seed=9)
     assert linear.prepare_input(x) is x and torch.equal(linear(Handle(x)), dense(x))   # a dense linear: x itself
+
+
+@pytest.mark.parametrize("ours", [False, True], ids=["another-only", "another-chosen"])
+def test_a_glu_kernel_of_another_provider_binds_no_site(monkeypatch, ours):
+    """A merged gate/up's `qlinear_glu@1` must be its `qlinear@2` kernel's provider's, which reads the parts that
+    provider prepared (`BuildCtx.candidates`, docs/m07-perf.md §17): when only another provider serves it, no site is
+    recorded and SwiGLU composes; when the deployment would choose another provider's over it, the build refuses."""
+    ctx = _ctx()
+    kernels, get = ctx.plugins.regs.kernels, ctx.plugins.regs.kernels.get
+
+    def candidates(op: str) -> list:
+        if op != "qlinear_glu":
+            return get(op)
+        other = [dataclasses.replace(s, provider="tests.other", priority=20) for s in get(op)]
+        return other + (get(op) if ours else [])
+    monkeypatch.setattr(kernels, "get", candidates)
+    if ours:
+        with pytest.raises(ValueError, match="would run tests.other's kernel on tests.toy_quant's prepared parts"):
+            _swiglu(ctx, 0.5)
+        return
+    ffn, weights = _swiglu(ctx, 0.5)
+    assert ffn._gate_up is not None and not any(k.endswith("/qlinear_glu@1") for k in ctx.kernels)
+    CALLS.clear()
+    x = _x(1, seed=1)
+    want = (torch.nn.functional.silu(x @ weights["gate"].T) * (x @ weights["up"].T)) @ weights["down"].T
+    torch.testing.assert_close(ffn(x), want, rtol=1e-5, atol=1e-3)
+    assert CALLS == ["qlinear", "qlinear"]
 
 
 @pytest.mark.parametrize("ref, site", [("std.ops.linear@1", dict(out_features=4, in_features=H)),

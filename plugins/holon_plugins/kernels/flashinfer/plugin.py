@@ -2,7 +2,7 @@
 (op contract: std.mixers.gqa; adoption per design §5.6 and spike S1).
 
 Prefill uses the FA2 paged-prefill wrapper (bottom-right causal, so a chunk attends to the context before it; its
-plan splits a long row's KV, so it also serves a mixed step's decode rows: `mixes_row_kinds`, docs/m07-perf.md §3.1);
+plan splits a long row's KV, so it also serves a mixed step's decode rows: `serves_decode_rows`, docs/m07-perf.md §3.1);
 decode uses the tensor-core decode wrapper. Both plan on the host every step from the block table's host mirror.
 Both read KV in the model dtype (`kv.hnd`) or in e4m3 (`kv.hnd.fp8`, with a bf16/fp16 q, from sm_89 on).
 Each instance alternates two wrappers: a wrapper stages its plan through one pinned buffer with an asynchronous
@@ -121,7 +121,7 @@ class Plugin:
                     op=op, provider="kernels.flashinfer", impl=impl, in_layouts={"kv": layout},
                     requires=Constraint(sm_min=sm_min, sm_max=129), supports=supports,
                     props=frozenset({"deterministic", "needs_host_lens"}
-                                    | ({"mixes_row_kinds"} if op == "attention.paged_prefill" else set())),
+                                    | ({"serves_decode_rows"} if op == "attention.paged_prefill" else set())),
                     priority=10 if op == "attention.paged_prefill" else 5))
         for op, impl, supports in (("rmsnorm", ops.RMSNorm, _half), ("add_rmsnorm", ops.AddRMSNorm, _half),
                                    ("rope", ops.Rope, _rope), ("silu_mul", ops.SiluMul, _half)):

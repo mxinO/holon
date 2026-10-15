@@ -170,6 +170,9 @@ class ChildContext:
     def select_kernel(self, op: str, *, site: str, **facts: Any) -> KernelSpec:
         return self.parent.select_kernel(op, site=f"{self.namespace}.{site}", **facts)
 
+    def candidates(self, op: str, facts: dict[str, Any]) -> list[KernelSpec]:
+        return self.parent.candidates(op, facts)
+
     def state(self, spec_name: str, layer: int) -> tuple[Any, Any] | None:
         return self.parent.state(f"{self.namespace}.{spec_name}", layer)
 

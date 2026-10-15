@@ -35,7 +35,7 @@ class Constraint:
 
 
 KERNEL_PROPS = frozenset({"graph_safe", "deterministic", "batch_invariant", "needs_host_lens",   # `KernelSpec.props`
-                          "mixes_row_kinds"})
+                          "serves_decode_rows"})
 
 
 @dataclasses.dataclass(frozen=True, eq=False)

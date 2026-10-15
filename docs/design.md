@@ -266,7 +266,10 @@ There is no separate database. The **Registry** is the git history of lockfiles 
   transition), or a promotion is upstreamed to main by PR.
 - **Tuned defaults live in the lock.** Kernel configs and tunables are tuned by us per fingerprint class
   (benchmarking tools such as `holon tune`, in the spirit of FreeToken's `ft bench bw`), so every class ships
-  at the best configuration we know — no agent is involved.
+  at the best configuration we know — no agent is involved. Class and shape tables inside a kernel plugin (M0.7:
+  `kernels.triton_attn`'s launch configs per class, `kernels.ggml_cuda`'s crossover per class and shape and its fused
+  gate/up types) are tuned defaults pinned by the plugin's `src`, not lock fields: retuning one moves every lock that
+  uses the plugin (one propagation), and a lock records what they chose through its sites' configs and `[engine]`.
 - **Fingerprint class** = GPU SKU (a slug of the product name, e.g. `rtx-5090`, which fixes SM and VRAM) +
   toolchain majors (CUDA, torch; the torch pin implies Triton), e.g. `rtx-5090/cu130-torch2.11`. GPU UUID, driver
   build and measured bandwidths are recorded in evidence only. **Lock classes during development:** `rtx-5080`
@@ -519,6 +522,20 @@ def linear_ref(x, w, bias=None): return x @ w.layout.scheme.dequant_ref(w).T + (
   reference is the oracle and defines the unit's `sem` hash.
 - **Fusion in v0 = explicit composites** called by models/mixers. A composite's decomposition is its reference.
   No torch.compile in the core. (Inductor may be used as a kernel provider for a single op.)
+- **Fused kernels over several units (M0.7, `docs/m07-perf.md` D3, D6).** A unit whose injected units compose an
+  op it can run as one kernel asks them for their facts (an optional `fusion_facts()`: GQA's q/k norms and rope, which
+  also names the rope kernel's cos/sin table) and asks the base op's spec whether its provider serves the fused op:
+  the base spec lists it in `config["fused"]` (kernel props are a closed core vocabulary, so the promise lives in the
+  spec's config; `kv_write@1` → `attention.qk_rope_kv@1`, `qlinear@2` → `qlinear_glu@1`). A fused op over several
+  units has no `reference.py` of its own when its reference is the composition: `attention.qk_rope_kv@1`'s oracle is
+  `holon_judge.fused`, built by the judge from the composed units' references (unit isolation; as level 3 of §5.7,
+  the composite's own decomposition never judges it). A fused op the unit asks for by provider (`qlinear_glu@1`
+  reads the parts its `qlinear@2` provider's `prepare` made) is chosen among `BuildCtx.candidates` of that provider
+  before anything is recorded, so a lock never pins a binding that cannot run. Shared inputs are explicit:
+  `Linear.prepare_input(x)` returns a provider-opaque handle (ggml: the q8_1 activations, keyed and stamped with a
+  host-side generation) that the caller passes to every consumer of `x` and drops after them; a consumer whose key
+  or generation does not match computes from the carried `x`, so no stale buffer is ever read and graph capture
+  records the right path.
 - **MoE (M0.2, `std.moe`):** `unit.std.moe@1` composes three ops, each with a reference: `moe_topk@1` (f32
   softmax, top-k, renormalised), `linear_experts@2` (a stack of E experts applied per (token, slot), format-general
   through a `layout` fact, its parts by role and per expert `[E, …]` since M0.6; a merged gate/up stack applies
@@ -536,7 +553,8 @@ class KernelSpec:
     device: str                                     # "cuda" | "cpu" | ...
     requires: Constraint                            # sm range, CPU ISA, library availability
     supports: Callable[[ShapeCtx], bool] | None
-    props: frozenset[str]                           # graph_safe, batch_invariant, deterministic, host_node
+    props: frozenset[str]                           # graph_safe, batch_invariant, deterministic, needs_host_lens,
+                                                    # serves_decode_rows (`KERNEL_PROPS`)
     tunables: dict | None
     priority: int = 0                               # agent variants register < 0 until promoted
     config: dict | None = None                      # pinned launch config (tiles, warps, splits) — no autotune
@@ -608,6 +626,13 @@ class QTensor: layout: Layout; logical_shape: tuple[int, ...]; parts: dict[str, 
 - A weight-source plugin may also resolve a model reference that is not a local path (optional hook `resolve(ref)` →
   `Resolved(what, nbytes, fetch)`, e.g. a hub id fetched into the hub's cache; release design §14.3): `holon serve`
   asks every weight source, exactly one must claim, and the core names no hub.
+- **`holon serve`'s model names are part of the CLI contract** (frozen with the ABI): a path (anything starting with
+  `/`, `.` or `~`, or naming an existing file or directory); `<org>/<repo>` (a repository: this card's verified file
+  where a lock names one, else what its weight source claims — a safetensors checkpoint, or the repository's only
+  GGUF file); `<org>/<repo>:<TAG>` (the GGUF file whose stem ends in `-TAG` or `.TAG`, the shortest of several);
+  `<org>/<repo>/<file>` (`.gguf` optional: the file of that stem in any directory of the repository; the form `holon
+  models` prints and locks' model ids use, before the `@<hash>`). Weight sources own the grammar beyond `<org>/<repo>`
+  (release design §14.3); a change to it is a CLI change.
 
 **As built (M0.1).** Weight sources are detected from manifest `[support] detect` patterns (`config.json`,
 `*.gguf`), so no plugin is imported to decide. The model is built on the meta device; `load_weights` swaps each dense
@@ -660,6 +685,11 @@ Adopted kernels, decided by the M0 spikes (evidence and raw numbers in `spikes/s
   in 512-row chunks above it, the q8_1 workspace declared to the ledger, no weight padding (`in` % 256 = 0; checked
   under compute-sanitizer). On the RTX 5080 Qwen3-8B Q4_K_M prefills at 1.04× and decodes at 0.98× llama.cpp
   (UD-IQ3_XXS: 1.06×, 0.97×).
+  **M0.7:** the mmvq/mmq crossover comes from a table per class and shape (`CROSSOVER`: (class, type, in, out, mmq's
+  activation mode) → mmvq's most rows, entries only where repeated graph-timed sweeps found mmq faster), with
+  llama.cpp's own rule as the fallback at the class's compute capability (`mmvq_rows`, which the judge's floors ask
+  too); mmq writes bf16 itself (stream-k partials kept in f32 until one rounding), with NVFP4's per-tensor `scale2`
+  multiplied in its epilogue before that rounding, as mmvq's epilogue does above one column.
   **Extended in M0.2** with llama.cpp's MoE kernels: `mul_mat_id` (mmvq with ids, its fused SwiGLU on the merged
   gate/up stack; mmq with ids, then our f32 SwiGLU), `topk-moe.cu` and `moe-weighted-reduction.cu`, patched to the
   contracts' layouts (ids at row stride k; the combine stores bf16). Qwen3-30B-A3B prefills at 1.02–1.11× and
@@ -711,7 +741,10 @@ plugins/models/<model>/
 | 5 Hand-written forward | full model-owned `build`/`weights`, possibly native | escape hatch; still uses core scheduler, ledger, prefix index, frontends, judge | L2 vs HF + L1.5; **human** |
 
 Rules: model-specific code never appears as `model_type`/architecture branches in shared units (invariant 10); a
-specialization that proves generic graduates into std as a new knob or unit through propagation (§4.6).
+specialization that proves generic graduates into std as a new knob or unit through propagation (§4.6). Class and
+shape tables inside a shared kernel plugin (§4.4: launch configs per class, the GGUF crossover per class and shape)
+are tuned defaults pinned by that plugin's `src`, keyed by facts, never by model: retuning one moves every lock that
+uses the plugin.
 Level-1, -2 and -4 specializations are kernel/policy/tunable-scope changes, so the self-improving agent may tune and
 replace them within §10.5. Level 3 and level 5, any `model` slot binding, and any `build`/`weights` override are
 model changes (human), regardless of what the closure diff of recipe and `sem` hashes shows (§10.3).
@@ -897,8 +930,11 @@ budget, not a policy plugin (M0.7, `docs/m07-perf.md` §3.1): with `EngineConfig
 drafter, a step whose running requests decode also carries prefill chunks — its decode rows first
 (`BatchPlan.n_decode`), then chunks of up to C tokens (`max_step_tokens` ≥ max_seqs + C is checked at build) — so a long prompt no longer stalls the
 decoders for its whole prefill. Mixed steps run eagerly; every planner must declare `mixes_row_kinds` (it plans the
-two row kinds of such a step, each as its unmixed step would), else the engine refuses to start. With a drafter, rows
-never mix: a prefill step capped at C alternates with a decode/verify step. PIECEWISE graphs for mixed steps are v1.
+two row kinds of such a step, each as its unmixed step would), else the engine refuses to start; a prefill kernel whose
+spec has the prop `serves_decode_rows` runs a mixed step's decode rows too (GQA: one call instead of two). With a
+drafter, rows never mix: a prefill step capped at C alternates with a decode/verify step. Units read
+`BuildCtx.options["chunk_with_decode"]`, the engine's effective value: C without a drafter, 0 with one (as
+`max_draft_tokens` is 0 without one). PIECEWISE graphs for mixed steps are v1.
 
 ### 7.2 Batch
 

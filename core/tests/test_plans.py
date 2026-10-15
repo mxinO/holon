@@ -157,7 +157,8 @@ class _Planner:
 def test_mixed_steps_need_room_mixing_planners_and_no_drafter(tiny, monkeypatch):
     """docs/m07-perf.md §3.1, at build: `chunk_with_decode` > 0 needs `max_step_tokens` >= max_seqs + the chunk and
     planners that mix; drafts without an installed draft policy build no drafter, so steps mix (units see
-    `max_draft_tokens` 0) — with one, they alternate and nothing is checked."""
+    `max_draft_tokens` 0) — with one, they alternate, nothing is checked, and units see `chunk_with_decode` 0 (the
+    engine's effective value)."""
     cfg = EngineConfig(str(tiny), device="cpu", dtype=torch.float32, page_size=4, max_seqs=2, max_step_tokens=8,
                        max_model_len=64, state_memory=1 << 20, chunk_with_decode=7)
     with pytest.raises(ValueError, match=r"must hold max_seqs decode rows and the chunk \(2 \+ 7\), not 8"):
@@ -174,8 +175,13 @@ def test_mixed_steps_need_room_mixing_planners_and_no_drafter(tiny, monkeypatch)
     monkeypatch.setattr(engine_module, "bind_state", bind)
     engine = Engine(dataclasses.replace(cfg, max_draft_tokens=3), no_policy)
     assert engine.policy is None and engine.sched.draft_k is None and engine.ctx.options["max_draft_tokens"] == 0
+    assert engine.ctx.options["chunk_with_decode"] == 6
     out = engine.generate([list(range(5)), list(range(30))], SamplingParams(temperature=0.0, max_tokens=8))
     assert [len(o) for o in out] == [8, 8] and engine.stats()["mixed_steps"] > 0
+    drafting = Engine(dataclasses.replace(cfg, max_step_tokens=4, max_draft_tokens=3, slots={
+        "drafter": "drafters.ngram", "draft_policy": "std.spec.fixed_k", "verifier": "std.spec.greedy"}))
+    assert drafting.policy is not None and drafting.sched.chunk_with_decode == 6
+    assert drafting.ctx.options["chunk_with_decode"] == 0 and drafting.ctx.options["max_draft_tokens"] == 3
 
 
 UV_LOCK = """

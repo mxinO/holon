@@ -90,12 +90,16 @@ class _Quantized:
         return dict(prepared.parts) if param is None else _hold(param, prepared.parts, self.ctx.device)
 
     def _select(self, op: str, facts: dict, provider: str | None = None):
-        """The instance of `op`'s kernel for `facts` (a lock site named by them), and its spec; no instance (None)
-        when the chosen kernel is not `provider`'s, if given."""
+        """The instance of `op`'s kernel for `facts` (a lock site named by them), and its spec. With `provider`, only
+        that provider's kernel will do: none (None, no site recorded) when it has no candidate here, and an error when
+        the deployment's choice is another provider's (a pin), which would read parts it did not prepare."""
         site = f"std.ops.{op.split('@')[0]}[" + ",".join(f"{k}={v}" for k, v in facts.items()) + "]"
+        if provider is not None and all(s.provider != provider for s in self.ctx.candidates(op, facts)):
+            return None, None
         spec = self.ctx.select_kernel(op, site=site, **facts)
         if provider is not None and spec.provider != provider:
-            return None, spec
+            raise ValueError(f"{site}: {op} would run {spec.provider}'s kernel on {provider}'s prepared parts; "
+                             f"pin `kernels {op.split('@')[0]}={provider}`")
         _one_act_mode(self.ctx, spec, site)
         return spec.impl(self.ctx, **facts), spec
 
@@ -133,12 +137,12 @@ def _act_quant(ctx) -> str:
 
 
 def _one_act_mode(ctx, spec, site: str) -> None:
-    """Mixed steps (`chunk_with_decode` > 0 without a drafter, docs/m07-perf.md §3.1; with one, steps alternate and
-    never mix) run decode rows and a prefill chunk in one call, on the path the call's row count picks: a kernel whose
-    paths compute in different activation modes (its spec's `config["act"]`, path -> mode) would then run a decode row
-    at a precision its unmixed step does not use. (`max_draft_tokens` is 0 unless the engine builds a drafter.)"""
-    modes, mixes = spec.config.get("act", {}), not ctx.options.get("max_draft_tokens")
-    if mixes and ctx.options.get("chunk_with_decode", 0) > 0 and len(set(modes.values())) > 1:
+    """Mixed steps (`chunk_with_decode` > 0, docs/m07-perf.md §3.1) run decode rows and a prefill chunk in one call, on
+    the path the call's row count picks: a kernel whose paths compute in different activation modes (its spec's
+    `config["act"]`, path -> mode) would then run a decode row at a precision its unmixed step does not use. The
+    option is the engine's effective value: 0 with a drafter, whose steps alternate and never mix."""
+    modes = spec.config.get("act", {})
+    if ctx.options.get("chunk_with_decode", 0) > 0 and len(set(modes.values())) > 1:
         raise ValueError(f"{site}: chunk_with_decode > 0 needs one activation mode on every path; {spec.provider}'s "
                          f"kernel computes {modes}")
 

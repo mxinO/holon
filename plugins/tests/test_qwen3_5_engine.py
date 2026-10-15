@@ -157,7 +157,7 @@ def test_mixed_steps_compute_what_todays_steps_do(tiny, memory):
     """docs/m07-perf.md §3.1: with `chunk_with_decode` the same requests — chunked prompts beside decoding ones, two
     constrained by the toy processor, one sampled, a second pass hitting the prefix cache's checkpoints (roomy), or
     preempted — give today's tokens, and logprobs within batching's ulps. Mixed steps run GQA's decode rows
-    through the decode kernel (the reference prefill does not declare `mixes_row_kinds`) or, flipped, through the
+    through the decode kernel (the reference prefill does not declare `serves_decode_rows`) or, flipped, through the
     prefill kernel, and GDN's per row kind with their in-step checkpoints re-based."""
     _, path, prompts = tiny
     g = torch.Generator().manual_seed(7)

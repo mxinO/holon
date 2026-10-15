@@ -34,7 +34,7 @@ class AttnMeta:
 class Planner:
     """Owns this group's kernel instances; a step is all prefill chunks, all decode rows, all verify rows of one
     width, or (`BatchPlan.n_decode` > 0) decode rows then prefill chunks: a mixed step (docs/m07-perf.md §3.1). Its
-    decode rows go through the prefill kernel when that kernel's spec has the `mixes_row_kinds` prop (it serves
+    decode rows go through the prefill kernel when that kernel's spec has the `serves_decode_rows` prop (it serves
     them as well as the decode kernel, e.g. by splitting their KV), else through the decode kernel and the chunks
     through the prefill kernel, as two calls."""
 
@@ -160,7 +160,7 @@ class GQA(nn.Module):
         chosen = [ctx.select_kernel(op, site=specs[0].group, **facts) for op in ops]
         return Planner(*(spec.impl(ctx, **facts) for spec in chosen),
                        needs_host_lens="needs_host_lens" in chosen[1].props,
-                       prefill_mixes="mixes_row_kinds" in chosen[0].props)
+                       prefill_mixes="serves_decode_rows" in chosen[0].props)
 
     def __init__(self, ctx, *, layer: int, hidden: int, heads: int, kv_heads: int, head_dim: int, rope: Ref,
                  qk_norm: Ref | None = None, output_gate: str = "none", causal: bool = True, window: int = 0) -> None:

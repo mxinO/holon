@@ -31,6 +31,7 @@ dataclass Binding frozen
 protocol BuildCtx() required, implemented by core
   unit(self, ref: 'Ref', **site: 'Any') -> 'Unit'
   select_kernel(self, op: 'str', *, site: 'str', **facts: 'Any') -> 'KernelSpec'
+  candidates(self, op: 'str', facts: 'dict[str, Any]') -> 'list[KernelSpec]'
   state(self, spec_name: 'str', layer: 'int') -> 'tuple[StateSpec, Pool] | None'
   static(self, name: 'str', shape: 'tuple[int, ...]', dtype: 'torch.dtype') -> 'torch.Tensor'
   workspace(self, name: 'str', nbytes: 'int') -> 'torch.Tensor'
@@ -115,7 +116,7 @@ dataclass InStepPublish frozen
   #1 spec: str
   #2 offset: int
   #3 payload: Payload
-const KERNEL_PROPS = ['batch_invariant', 'deterministic', 'graph_safe', 'mixes_row_kinds', 'needs_host_lens']
+const KERNEL_PROPS = ['batch_invariant', 'deterministic', 'graph_safe', 'needs_host_lens', 'serves_decode_rows']
 protocol KernelRegistry() required, implemented by core
   add(self, op: 'str', spec: 'KernelSpec') -> 'None'
   get(self, op: 'str') -> 'list[KernelSpec]'

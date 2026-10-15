@@ -93,6 +93,10 @@ class BuildCtx(Protocol):
         and priority, or pinned by the deployment; recorded for the lock under `site` (design §5.4). The caller
         creates its own instances with `spec.impl(ctx, **facts)` — instances hold plans, so they are not shared."""
 
+    def candidates(self, op: str, facts: dict[str, Any]) -> list[KernelSpec]:
+        """Every kernel for versioned `op` that runs here and supports `facts`, before any choice: nothing is recorded
+        (a unit that needs one provider's kernel asks first, then selects — or binds no site)."""
+
     def state(self, spec_name: str, layer: int) -> tuple[StateSpec, Pool] | None:
         """The spec and pool holding state `spec_name` for `layer` (e.g. its KV pages); None in a model-only build,
         where units run without state (attention over each whole sequence)."""
