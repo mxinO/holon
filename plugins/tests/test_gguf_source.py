@@ -107,6 +107,8 @@ REPOS = {"o/gguf": {"Qwen3-8B-Q4_K_M.gguf": 5, "Qwen3-8B-UD-Q4_K_M.gguf": 6, "Qw
                     "Qwen3-8B-F16.gguf": 3, "F16/Qwen3-8B-F16-00001-of-00002.gguf": 2,
                     "F16/Qwen3-8B-F16-00002-of-00002.gguf": 2},
          "o/one": {"Qwen3-8B-Q4_K_M.gguf": 5},
+         "o/two": {"Qwen3-8B-Q2_K.gguf": 1, "BF16/Qwen3-8B-BF16-00001-of-00002.gguf": 2,
+                   "BF16/Qwen3-8B-BF16-00002-of-00002.gguf": 2},
          "o/hf": {"config.json": 1, "model-00001-of-00002.safetensors": 7, "model-00002-of-00002.safetensors": 7,
                   "model.safetensors.index.json": 1, "tokenizer.json": 2, "original/consolidated.safetensors": 99,
                   "README.md": 1}}
@@ -125,6 +127,7 @@ UNREACHABLE = "the hub is unreachable (ConnectError; offline, HF_HUB_OFFLINE=1 s
     ("o/gguf:Q2_K", {G: "no GGUF file tagged Q2_K in o/gguf; name one as o/gguf:<TAG> or o/gguf/<name>: Qwen3-8B-B"}),
     ("o/gguf", {G: "several GGUF files"}),               # its config.json does not make it the HF source's
     ("o/one", {G: ("o/one/Qwen3-8B-Q4_K_M.gguf", 5)}),
+    ("o/two", {G: "several GGUF files in o/two"}),       # a split set is a file too: not "the only one"
     ("o/hf", {H: ("o/hf (5 files)", 18)}),               # top-level files only: not original/, not README.md
     ("./o/hf", {}),                                      # a path, never a reference
     ("cached:o/gguf:Q4_K_M", {G: ("o/gguf/Qwen3-8B-Q4_K_M.gguf", 5),        # the hub unreachable: the cache's listing

@@ -177,10 +177,10 @@ def models_table(rows: list[tuple[str, object]]) -> list[str]:
 
 
 def repo_ref(ref: str, rows: list[tuple[str, object]]) -> str:
-    """A reference to a repository under which exactly one locked model has a verified lock for this GPU names that
-    model (whole path segments; release design §14.3); several are an error; none leaves `ref` as it is."""
+    """A repository reference (`<org>/<repo>`) under which exactly one locked model has a verified lock for this GPU
+    names that model (whole path segments; release design §14.3); several are an error; none leaves `ref` as it is."""
     verified = sorted(m.rpartition("@")[0] for m, found in rows if isinstance(found, tuple) and not found[1])
-    under = [name for name in verified if name.startswith(ref.rstrip("/") + "/")]
+    under = [name for name in verified if ref.count("/") == 1 and name.startswith(ref + "/")]
     if len(under) > 1:
         raise SystemExit(f"holon: {ref}: several models have a lock for this GPU, name one: {', '.join(under)}")
     if under:
@@ -195,7 +195,10 @@ def local_model(ref: str, plugins: PluginSet, kind: str | None, rows: list[tuple
     check), then fetched."""
     if pathlib.Path(ref).exists():
         return ref
-    claim = claim_ref(plugins, repo_ref(ref, rows), kind)
+    try:
+        claim = claim_ref(plugins, repo_ref(ref, rows), kind)
+    except PluginError as e:                                  # a user's mistake: the message, not a traceback
+        raise SystemExit(f"holon: {e}") from None
     size = f"{claim.nbytes / 2**30:.1f} GiB" if claim.nbytes else "size unknown"
     _say(f"{ref}: {claim.what} ({size})")
     if fp is not None and fp.vram_gib > 0 and claim.nbytes and claim.nbytes > fp.vram_gib * 2**30:

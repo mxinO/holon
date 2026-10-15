@@ -49,8 +49,9 @@ def pick(files: list[str], tag: str | None, stem: str, repo: str) -> str:
     else:
         found = [p for p, s in whole.items() if not stem or s == stem]
     split = [p for p in found if whole[p] != pathlib.PurePosixPath(p).stem]
-    if split and len(split) < len(found):             # a single file beside a split set of the same name: the file
-        found, split = [p for p in found if p not in split], []
+    singles = {whole[p] for p in found if p not in split}     # a single file beside a split set of its name: the file
+    found = [p for p in found if p not in split or whole[p] not in singles]
+    split = [p for p in split if p in found]
     if len(found) == 1 and not split:
         return found[0]
     if found and len(split) == len(found) and len({whole[p] for p in found}) == 1:
