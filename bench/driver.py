@@ -1,6 +1,7 @@
 """Backend-agnostic trace replay with client-side timing (stdlib-only: runs inside every backend's environment).
 
-The driver owns the clock: it releases requests at their arrival times (or `gap` after the turn they continue),
+The driver owns the clock: it releases requests at their arrival times (or `gap` after the turn they continue, or
+`arrival` after the session they follow, `after`),
 calls `Backend.step()` while work is in flight, and timestamps every token when `step()` hands it back — so an
 engine that reports a token one step late (overlap scheduling) is charged for it, as a client would be. A request's
 row keeps its first and last token times and its largest inter-token gap (between two steps that hand it tokens;
@@ -57,7 +58,8 @@ def replay(backend: Backend, sessions: list[dict], salt: str,
     system = tokens(salt, "system", max(s["system"] for s in sessions), corpus)
     by_id = {s["id"]: s for s in sessions}
     new = {s["id"]: appends(salt, s, corpus) for s in sessions}
-    ready = [(s["arrival"], s["id"], 0, []) for s in sessions]   # (release, sid, turn, history)
+    ready = [(s["arrival"], s["id"], 0, []) for s in sessions if "after" not in s]   # (release, sid, turn, history)
+    followers = {s["after"]: s for s in sessions if "after" in s}
     heapq.heapify(ready)
     live: dict[int, Request] = {}
     done: list[Request] = []
@@ -98,6 +100,8 @@ def replay(backend: Backend, sessions: list[dict], salt: str,
                 if r.turn + 1 < len(s["turns"]):
                     nxt = s["turns"][r.turn + 1]
                     heapq.heappush(ready, (r.last + nxt["gap"], r.sid, r.turn + 1, r.prompt + r.generated))
+                elif (f := followers.get(r.sid)) is not None:
+                    heapq.heappush(ready, (r.last + f["arrival"], f["id"], 0, []))
         steps.append((w1 - w0, c1 - c0, sum(len(d[1]) for d in deltas), firsts))
     while backend.has_work():            # drain in-flight work so the next replay starts clean
         backend.step()
@@ -107,5 +111,5 @@ def replay(backend: Backend, sessions: list[dict], salt: str,
 def warmup_sessions(sessions: list[dict], max_output: int = 16) -> list[dict]:
     """First turns of every session, all at t=0 with short outputs: compiles/captures the prefill and decode shapes
     the measured replay will hit (replayed under another salt, so no prompt is cached for the measured run)."""
-    return [{**s, "arrival": 0.0, "turns": [{**s["turns"][0], "output": min(s["turns"][0]["output"], max_output)}]}
-            for s in sessions]
+    return [{**{k: v for k, v in s.items() if k != "after"}, "arrival": 0.0,
+             "turns": [{**s["turns"][0], "output": min(s["turns"][0]["output"], max_output)}]} for s in sessions]

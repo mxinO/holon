@@ -1,9 +1,11 @@
 """Deterministic benchmark workloads, stored as JSONL token-length specs (one session per line).
 
-A session is a list of turns. Turn 0's prompt is `system` tokens shared by every session of the trace followed by
-`append` tokens of its own; turn i > 0 is released `gap` seconds after turn i-1 finished and its prompt is turn
-i-1's prompt + the tokens turn i-1 generated + `append` new tokens (a tool result and/or user message). Every turn
-generates exactly `output` tokens (ignore_eos). A plain request is a one-turn session without a system prompt.
+A session is a list of turns, released at `arrival` seconds, or with `after` that many seconds after session `after`'s
+last turn finished (a closed loop: one client running sessions one after another). Turn 0's prompt is `system` tokens
+shared by every session of the trace followed by `append` tokens of its own; turn i > 0 is released `gap` seconds
+after turn i-1 finished and its prompt is turn i-1's prompt + the tokens turn i-1 generated + `append` new tokens (a
+tool result and/or user message). Every turn generates exactly `output` tokens (ignore_eos). A plain request is a
+one-turn session without a system prompt.
 
 Specs hold lengths only; token ids are drawn at replay time from a seeded stream (`tokens`), so every backend sees
 the same prompts: uniform ids by default, or spans of a natural-text corpus (`corpus`: a judge prompt set's token
@@ -106,6 +108,15 @@ def agent(sessions: int, rate: float, seed: int, system: int = 1536, later: tupl
     return out
 
 
+def lanes(sessions: list[dict], n: int, seed: int) -> list[dict]:
+    """`n` clients each running its share of `sessions` one after another (closed loop): session i starts after
+    session i - n has finished and a pause (exponential, mean 2 s); the first n start 5 s apart. However fast the
+    engine, n sessions overlap."""
+    rng = random.Random(seed)
+    return [{**s, "arrival": round(5.0 * i if i < n else rng.expovariate(0.5), 4),
+             **({"after": i - n} if i >= n else {})} for i, s in enumerate(sessions)]
+
+
 def context_len(session: dict) -> int:
     """Tokens in the session's last turn once generated: the longest context it reaches."""
     return session["system"] + sum(t["append"] + t["output"] for t in session["turns"])
@@ -133,9 +144,9 @@ def main() -> None:
     traces["sharegpt"] = sharegpt(200, 2.0, args.seed)
     traces["agent"] = agent(24, 0.2, args.seed)
     # Claude-Code-shaped (release D3's MTP decision): its ≈ 16K-token system prompt and tool schemas shared by 16
-    # sessions of 11-17 turns (≥ 200 requests), one starting every 40 s on average, so about two overlap; replayed on
-    # natural text (--corpus) at Claude Code's temperature.
-    traces["claude_code"] = agent(16, 0.025, args.seed, system=16384, later=(10, 16))
+    # sessions of 11-17 turns (≥ 200 requests), run by two clients one after another, so two overlap on every card;
+    # replayed on natural text (--corpus) at Claude Code's temperature.
+    traces["claude_code"] = lanes(agent(16, 0.025, args.seed, system=16384, later=(10, 16)), 2, args.seed)
     # Three streams fit every lock (max_seqs >= 4); 30k tokens fit a 32k context (M0.5's 36 s stall, M0.7 D1).
     traces["long_prompt"] = long_prompt(3, 256, 1024, 30000, 2.0)
     for name, sessions in traces.items():

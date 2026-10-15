@@ -2029,9 +2029,13 @@ Revised once after the step's reviewer read rev 1 (928d993), still before any re
 - **Trace.** `bench/traces/claude_code.jsonl` is new in `bench/workloads.py`.
   - It is the agent workload (M0.7's runner) with a 16,384-token shared system prompt, standing for Claude Code's
     system prompt and its 22 tool schemas.
-  - 16 sessions of 11–17 turns each give 225 requests per round, with contexts up to 25.8K tokens. A session starts
-    every 40 s on average, so about two overlap: several sessions, as D3 asks, without the trace saturating the
-    slowest card.
+  - 16 sessions of 11–17 turns each give 225 requests per round, with contexts up to 25.8K tokens. Two clients run
+    them one after another (closed loop: `workloads.lanes`, a pause of 2 s on average between a client's sessions),
+    so two sessions overlap on every card: several sessions, as D3 asks.
+  - Why closed loop (found by a local smoke on an RTX A5000, before any measurement): with sessions arriving at
+    fixed times, a slower card holds more sessions open at once. Beyond the lock's 4 recurrent checkpoints
+    (`recurrent.checkpoints=4`), a session's next turn finds its checkpoint evicted and re-prefills its whole 17–25K
+    context. Arrivals every 20 s (rev 1) and every 40 s (rev 2) both saturated the A5000.
   - Generations keep the agent workload's 24–192 tokens (mean 106). Claude Code's own turns run longer: its capture
     averaged ≈ 265 tokens per request, thinking included. This weighs the prefill-driven tail metrics more, a bias
     towards plain.

@@ -54,8 +54,9 @@ rejects temperature 0, so it samples at 1e-5 (argmax in practice); the others ar
   after a tool latency (exponential, mean 0.5 s); short generations (24–192 tokens). 126 requests, contexts up to
   ~6.1k tokens, long shared prefixes.
 - **claude_code**: the agent workload shaped like Claude Code's traffic (release design D3): a 16,384-token shared
-  system prompt (instructions + tool schemas), 16 sessions starting at 0.025/s (about two overlap), 11–17 turns each;
-  225 requests, contexts up to 25.8K tokens. Run with `--corpus` and the client's `--temperature 1.0`.
+  system prompt (instructions + tool schemas), 16 sessions run by two clients one after another (closed loop: a
+  session starts when its client's previous one finished, `after`), 11–17 turns each; 225 requests, contexts up to
+  25.8K tokens. Run with `--corpus` and the client's `--temperature 1.0`.
 - **long_prompt**: three streams decoding from t=0 (prompt 256, output 1024), then a 30,000-token prompt (output 32)
   at t = 2 s: how long the streams stall behind its prefill (their max inter-token gap), and its TTFT behind them.
 
