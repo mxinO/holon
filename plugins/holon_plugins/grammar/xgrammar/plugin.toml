@@ -14,3 +14,8 @@ numerics = "exact"
 
 [dependencies]
 python = ["xgrammar", "numpy", "torch", "triton"]   # xgrammar pinned in plugins/pyproject.toml (extra "grammar")
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"grammar.workers" = { help = "vetting worker processes", default = "2" }
+"grammar.timeout" = { help = "seconds a constraint's vetting may take", default = "10" }
+"grammar.budget" = { help = "MB a vetting worker's memory may grow by in one job before it is killed", default = "256" }

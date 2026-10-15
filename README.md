@@ -23,7 +23,8 @@ Other GPUs: GGUF files refuse at startup (the GGUF kernels are built for SM 86, 
 are untested.
 
 Architectures: Qwen3 (`models.qwen3`), Qwen3-MoE (`models.qwen3_moe`) and the Qwen3.5 hybrid (`models.qwen3_5`, which
-also serves Qwen3.8), from HF safetensors directories or GGUF files. The recommended file per card and its lock:
+also serves Qwen3.8), from HF safetensors directories or GGUF files. The recommended file per card and its lock
+(`holon models` lists them for the card it runs on):
 
 | model file (hub repository) | RTX 5080 | RTX 4090 | RTX 5090 | RTX 3090 |
 |---|---|---|---|---|
@@ -50,7 +51,7 @@ this card. If it does not start with a plugin or memory error, the server falls 
 
 **Served without a lock** (defaults, logged): every other checkpoint of the three architectures, for example
 Qwen3.5 4B / 9B and the bf16 Qwen3.8-27B and Qwen3-30B-A3B (large-memory paths). Defaults serve at most 8 sequences
-(`holon serve <file> --max-seqs N` changes it) and a context of min(the model's trained context, 32768) tokens,
+(`holon serve <model> --max-seqs N` changes it) and a context of min(the model's trained context, 32768) tokens,
 clamped to what fits.
 
 ## Install
@@ -78,6 +79,8 @@ Build it from the release tag, never from a working directory:
 ```bash
 git archive --format=tar v0.1.0 | docker build -t holon:v0.1.0 -           # --build-arg MAX_JOBS=N caps compiles
 docker run --gpus all -p 8000:8000 -v <model dir>:/models holon:v0.1.0 serve /models/<file> --host 0.0.0.0
+docker run --gpus all -p 8000:8000 -e HF_HOME=/hf -v <hf cache dir>:/hf holon:v0.1.0 \
+  serve unsloth/Qwen3.8-27B-GGUF --host 0.0.0.0                            # a hub model, kept in <hf cache dir>
 ```
 
 As another user, give the container a writable home, so the cache of weight-file hashes (`~/.cache/holon/weights`)
@@ -91,11 +94,25 @@ docker run --gpus all --user "$(id -u):$(id -g)" -e HOME=/cache -v <cache dir>:/
 ## Quickstart
 
 ```bash
-uv run hf download unsloth/Qwen3.8-27B-GGUF Qwen3.8-27B-UD-IQ3_S.gguf --local-dir models   # RTX 5080; else UD-Q4_K_M
-uv run holon serve models/Qwen3.8-27B-UD-IQ3_S.gguf   # starts from this card's lock; the log names it
+uv run holon models                                   # the models locked for this card, by name
+uv run holon serve unsloth/Qwen3.8-27B-GGUF           # this card's locked file, downloaded into the HF cache
 ```
 
-`holon serve` listens on `127.0.0.1:8000` (`holon serve <file> --host H --port P`) and checks no API key: do not
+`holon serve` takes a local file or directory, or a Hugging Face Hub reference, downloaded into the HF cache once:
+
+| reference | serves |
+|---|---|
+| `unsloth/Qwen3.8-27B-GGUF:UD-IQ3_S` | the repository's GGUF file whose name ends in `-UD-IQ3_S` (any case; `:Q4_K_M` takes `…-Q4_K_M.gguf` over `…-UD-Q4_K_M.gguf`) |
+| `unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S` | that file, as `holon models` names it |
+| `unsloth/Qwen3.8-27B-GGUF` | the file this card has a lock for; else the repository's only GGUF file, else an error listing them |
+| `Qwen/Qwen3-8B` | an HF safetensors checkpoint |
+
+The log names the file chosen and its size; a file larger than the GPU's memory is refused before downloading
+(`--no-size-check` skips that). The hub's own settings apply: `hf auth login` for gated repositories, `HF_HOME` for the
+cache, and `HF_HUB_OFFLINE=1` to serve cached models without the network (a tag then sees only the cached files).
+Split GGUF files (`-00001-of-0000N.gguf`) are not supported.
+
+`holon serve` listens on `127.0.0.1:8000` (`holon serve <model> --host H --port P`) and checks no API key: do not
 expose it beyond a trusted network. Its log says which lock it starts from, or why none:
 
 ```text
@@ -110,8 +127,9 @@ A borrowed lock adds `(unverified: <class>'s)`; no lock logs
 The `differs from the lock` lines list every setting that differs from the lock: the flags you gave, and
 `max_model_len` when the lock's context does not fit this card's memory. `/metrics` reports the same plan.
 
-The served model id is in `/v1/models` (`curl http://127.0.0.1:8000/v1/models`): the file name without `.gguf` for a
-file outside the HF cache. Clients (`pip install openai anthropic` in your own environment):
+The served model id is in `/v1/models` (`curl http://127.0.0.1:8000/v1/models`): the checkpoint's name without its
+repository, e.g. `Qwen3.8-27B-UD-IQ3_S` (`--plugin-options http.model_name=ID` sets another); the server ignores the
+model a request names. Clients (`pip install openai anthropic` in your own environment):
 
 ```python
 from openai import OpenAI
@@ -136,35 +154,38 @@ The server also answers `/v1/completions`, `/v1/responses`, `/v1/messages/count_
 
 ### Claude Code
 
-```bash
-ANTHROPIC_BASE_URL=http://127.0.0.1:8000 ANTHROPIC_AUTH_TOKEN=holon ANTHROPIC_MODEL=<id from /v1/models> \
-ANTHROPIC_DEFAULT_HAIKU_MODEL=<same> CLAUDE_CODE_SUBAGENT_MODEL=<same> claude
+Once it listens, the server prints the line that starts Claude Code against it, with its model id:
+
+```text
+holon: Claude Code:
+  ANTHROPIC_BASE_URL=http://127.0.0.1:8000 ANTHROPIC_AUTH_TOKEN=holon ANTHROPIC_MODEL=Qwen3.8-27B-UD-IQ3_S ANTHROPIC_DEFAULT_HAIKU_MODEL=Qwen3.8-27B-UD-IQ3_S CLAUDE_CODE_SUBAGENT_MODEL=Qwen3.8-27B-UD-IQ3_S claude
 ```
 
 The server drops Claude Code's per-request billing-header system block, which would otherwise defeat prefix caching
-(`holon serve <file> --plugin-options http.drop_billing_header=false` keeps it; `/metrics` counts the drops).
+(`holon serve <model> --plugin-options http.drop_billing_header=false` keeps it; `/metrics` counts the drops).
 Claude Code's auto-compaction assumes a far larger window than the 32K tokens served at most by default.
 
 ## Options
 
 Flags override the lock, which overrides the defaults; `holon serve --help` lists every flag (one per engine
-setting).
+setting), every plugin option the installed plugins read, and the plugins `--slots` selects among. An option no plugin
+declares is warned about; a value outside an option's choices is refused before the server starts.
 
-- **Turn speculation off:** `holon serve <file> --max-draft-tokens 0`.
-- **Ignore the lock:** `holon serve <file> --no-lock` serves defaults and your flags. Use it if a start hangs: the
+- **Turn speculation off:** `holon serve <model> --max-draft-tokens 0`.
+- **Ignore the lock:** `holon serve <model> --no-lock` serves defaults and your flags. Use it if a start hangs: the
   server retries a start that fails other than with a plugin or memory error 4 times, each up to 600 s, before falling
   back to defaults.
 - **Change or delete one key of the lock:** dict flags merge per key, and `key=` (empty value) deletes the lock's
-  setting: `holon serve <file> --plugin-options kv.format=` serves the default KV format, and
-  `holon serve <file> --slots logits_processor=` deselects the grammar processor.
+  setting: `holon serve <model> --plugin-options kv.format=` serves the default KV format, and
+  `holon serve <model> --slots logits_processor=` deselects the grammar processor.
 - **Mixed-GPU hosts:** Holon serves on one GPU, the first visible one, and picks the lock of its class. Pin the card,
-  for the prebuild too: `CUDA_VISIBLE_DEVICES=1 uv run holon serve <file>`.
-- **Other locks:** `holon serve <file> --plans DIR` reads lock histories from `DIR` (default: `plans/` of this tree).
+  for the prebuild too: `CUDA_VISIBLE_DEVICES=1 uv run holon serve <model>`.
+- **Other locks:** `holon serve <model> --plans DIR` reads lock histories from `DIR` (default: `plans/` of this tree).
 
 ### Structured output
 
 The release locks select the grammar processor `grammar.xgrammar`. With `--no-lock` or without a lock,
-`holon serve <file> --slots logits_processor=grammar.xgrammar` selects it; without it, constrained requests are
+`holon serve <model> --slots logits_processor=grammar.xgrammar` selects it; without it, constrained requests are
 refused. Constrained:
 `response_format` with `json_schema` or `json_object` (OpenAI chat and Responses), `tool_choice` `required` or a named
 tool, `parallel_tool_calls: false`, and `strict: true` tools. `tool_choice: auto` stays unconstrained unless a tool is
@@ -192,7 +213,7 @@ start. A file outside the HF cache is hashed once to find its lock; the hash is 
 ## Known limitations
 
 - One GPU per server; no offload: the model and its KV cache must fit the card.
-- The context is at most 32768 tokens by default (`holon serve <file> --max-model-len N`), and less when it does not
+- The context is at most 32768 tokens by default (`holon serve <model> --max-model-len N`), and less when it does not
   fit.
 - Under a grammar, an output can run on in whitespace, digits or a string the schema admits until `max_tokens`: on the
   27B with MTP, 2.66% of constrained outputs were truncated against 0.33% unconstrained, over a 2-point gate that was

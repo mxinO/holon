@@ -13,3 +13,6 @@ provides = ["drafter.dflash@1", "unit.drafters.dflash.draft@1"]
 
 [reference]
 module = "reference"
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"dflash.path" = { help = "the draft model's checkpoint (required with this drafter)" }

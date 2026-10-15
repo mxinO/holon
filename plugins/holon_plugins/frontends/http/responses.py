@@ -55,7 +55,7 @@ class ResponsesRequest(BaseModel):
                             self.tool_choice or ("auto" if tools else "none"), self.parallel_tool_calls, fmt)
 
 
-def router(client: EngineClient, bundle: FrontendBundle) -> APIRouter:
+def router(client: EngineClient, bundle: FrontendBundle, model_id: str) -> APIRouter:
     r = APIRouter()
 
     @r.post("/v1/responses")
@@ -69,7 +69,7 @@ def router(client: EngineClient, bundle: FrontendBundle) -> APIRouter:
                                 ext=chat.ext)
         rid = f"resp_{uuid.uuid4().hex}"
         gen = pieces(client, bundle, chat, params, rid, [])
-        head = {"id": rid, "object": "response", "created_at": int(time.time()), "model": bundle.model_name,
+        head = {"id": rid, "object": "response", "created_at": int(time.time()), "model": model_id,
                 "error": None, "incomplete_details": None, "parallel_tool_calls": req.parallel_tool_calls}
         if req.stream:
             first = await unless_disconnected(request, anext(gen))

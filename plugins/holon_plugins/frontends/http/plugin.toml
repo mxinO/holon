@@ -11,3 +11,7 @@ provides = ["frontend.openai@1", "frontend.anthropic@1", "frontend.openai_respon
 
 [dependencies]
 python = ["fastapi", "uvicorn", "pydantic", "anyio"]
+
+[options]
+"http.drop_billing_header" = { help = "drop Claude Code's per-request billing-header system block, which defeats prefix caching (false, 0, no, off keep it)", default = "true" }
+"http.model_name" = { help = "the model id served in /v1/models and responses", default = "the checkpoint's name, its last path segment" }

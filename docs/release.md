@@ -174,10 +174,10 @@ new families or formats; v1's offload, VMM, sandbox and self-improvement; GPUs o
   git clone --branch v0.1.0 <repository> holon && cd holon
   uv sync --frozen                     # Python 3.12, torch 2.11 + CUDA 13 and every pin from uv.lock
   uv run holon prebuild                # GGUF kernels and FlashInfer modules for the visible GPUs, once
-  uv run hf download unsloth/Qwen3.8-27B-GGUF Qwen3.8-27B-UD-IQ3_S.gguf --local-dir models  # 16 GB; else UD-Q4_K_M
-  uv run holon serve models/Qwen3.8-27B-UD-IQ3_S.gguf   # starts from this card's lock; the log names it
-  ANTHROPIC_BASE_URL=http://127.0.0.1:8000 ANTHROPIC_AUTH_TOKEN=holon ANTHROPIC_MODEL=<id from /v1/models> \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL=<same> CLAUDE_CODE_SUBAGENT_MODEL=<same> claude
+  uv run holon models                  # the models locked for this card, by name
+  uv run holon serve unsloth/Qwen3.8-27B-GGUF   # this card's locked file, into the HF cache; prints the Claude Code line
+  ANTHROPIC_BASE_URL=http://127.0.0.1:8000 ANTHROPIC_AUTH_TOKEN=holon ANTHROPIC_MODEL=<the printed id> \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL=<same> CLAUDE_CODE_SUBAGENT_MODEL=<same> claude   # (§14)
   ```
 - **D9 — Lean tests.** No new suite: the `test_plans.py` case (D2); one `test_plugins.py` case (a missing or
   out-of-range `core_abi`); static scripts in `run_all.sh`: the `manifest-deps` import scan, `check_abi.py`, the guide
@@ -1180,9 +1180,9 @@ came in with the step-3 record. Outside the files `main` changed, the tree equal
 
 ## 14. User interface (UX step)
 
-Status: **rev 2, after the release panel's review** (2026-10-14); nothing is built. Rev 1 (d7ef8c9) was reviewed by
+Status: **rev 2.1, confirmed by the release panel** (2026-10-14); built, see §14.14. Rev 1 (d7ef8c9) was reviewed by
 two release reviewers (serving / ABI; architecture / scope): no blocker, no major; their findings and the lead's
-decisions are resolved in §14.13. The owner's request: "`holon serve xxx` just works", and keep the interface easy to
+decisions are resolved in §14.13; rev 2 (2932427) was confirmed with three small items, folded in (§14.13). The owner's request: "`holon serve xxx` just works", and keep the interface easy to
 extend — this is the simplest case (one model × one GPU); more tuning options (multiple GPUs) and an autotune module
 that tunes the serving parameters come later. Built on a branch cut from M0.7's, so its ABI additions join M0.7's 0.2
 bump; it merges into M0.7's branch before `main`. M0.7's steps 2–3 run in parallel: this step touches neither
@@ -1214,7 +1214,7 @@ bump; it merges into M0.7's branch before `main`. M0.7's steps 2–3 run in para
   layer **defaults < lock < flags** (D2); the defaults are `EngineConfig`'s, except `holon serve`'s two (at most 8
   sequences without a lock, `--max-model-len auto`), which its help states.
 - **Launch arguments** say where and how the process runs: the model reference, `--host`, `--port`, `--frontend`,
-  `--plans`, `--no-lock`, `--supervised`. They are per host, like memory budgets, so no lock records them.
+  `--plans`, `--no-lock`, `--no-size-check`, `--supervised`. They are per host, like memory budgets, so no lock records them.
 
 | a new … | goes into | and gets, with no other code |
 |---|---|---|
@@ -1271,10 +1271,11 @@ class ResolvesRefs(Protocol):       # holon.api.hooks
 1. a `ref` naming an existing path is that path; nothing else is asked, so a local `org/repo` directory stays a path;
 2. the repository rule (D-repo, below);
 3. every installed weight-source plugin with the hook (with `--source K`, only the one providing `weight_source.K`); a
-   PluginError is kept as a hint. Exactly one claim → it is logged (`holon: fetching <what> (<size>)`); if `nbytes`
-   exceeds the GPU's total memory (`Fingerprint.vram_gib`; v0 has no offload) it is refused before downloading, naming
-   both sizes and `holon models`; else its fetch runs, and the local path becomes `EngineConfig.model` and is detected
-   as before. None → `<ref>: no such file or directory, and no weight source resolves it` plus the hints; several →
+   PluginError is kept as a hint. Exactly one claim → it is logged (`holon: fetching <what> (<size>)`). **The size
+   refusal** applies only when the device is CUDA, `Fingerprint.vram_gib > 0` and `nbytes` is known: `nbytes >
+   vram_gib × 2³⁰` (bytes against the card's total memory; v0 has no offload) is refused before downloading, naming both
+   sizes, `holon models` and the launch flag `--no-size-check`, which skips it. Else its fetch runs, and the local path
+   becomes `EngineConfig.model` and is detected as before. None → `<ref>: no such file or directory, and no weight source resolves it` plus the hints; several →
    name one with `--source`. Claims are separate from fetches, so an ambiguous reference never downloads twice.
 
 The download happens before the supervisor starts, so engine processes and restarts get a local path. The lock is
@@ -1427,6 +1428,7 @@ the plugin. A rollback keeps the id, so the lines stay valid.
 | lock class | `<gpu>/<toolchain>` from `platform.fingerprint(device)` | the fingerprint of the device group, `<gpu>x<n>/<toolchain>` (e.g. `rtx-4090x2/cu130-torch2.11`): still two segments, so `plans/<model>/<class>/<n>.lock` and `nearest_class`'s glob hold. A mixed group is its own class; the interconnect joins the class only if evidence shows it matters |
 | borrowing | own class, same GPU, same SM, same toolchain | GPU count first: a 1-GPU lock may serve on one card of a 2-GPU host (as today); a 2-GPU lock is never borrowed by a 1-GPU host, where it could not start |
 | `holon models`, D-repo, the size refusal | the first visible GPU's class and memory | the visible group's class and memory |
+| the size refusal with offload | weights against the card's memory (v0 has no offload) | once an offload plugin is selected (v1's expert offload, e.g. a `tier` slot plugin), the check compares against device memory plus that plugin's declared capacity, so "fits" stays out of the core and v1's larger-than-VRAM MoE stays servable |
 
 `holon serve <model>` stays the command: a 2×4090 host finds `rtx-4090x2` locks first, so the layout comes from the
 lock, and `--tensor-parallel N` overrides it like any setting.
@@ -1476,7 +1478,7 @@ read the same lock.
 - **Documents at build:** README (quickstart: `holon models`, then `holon serve unsloth/Qwen3.8-27B-GGUF`; the Claude
   Code section points at the printed lines; Options: `holon serve --help`; Docker: mount a cache volume at the image's
   `HF_HOME`), D8's quickstart block, design §4.1 (`[options]`, and the `core_abi` floor rule for later option keys),
-  §4.3 (which options are planned), §5.5 (the `resolve` hook) and §7.8 (the hint and id). The README freeze served
+  §4.3 (engine-side plugins declare every option they read; a key declared only by a frontend is unplanned), §5.5 (the `resolve` hook) and §7.8 (the hint and id). The README freeze served
   the legibility benchmark, retired in §4.0.
 
 ### 14.11 Core lines, tests, checks, estimate
@@ -1500,8 +1502,8 @@ manifests ≈ 35 TOML lines; `check_locks.py` gains the name rule (≈ 3 lines).
   (verified, borrowed, outdated, none, the unreadable-history warning) and D-repo (`org/repo` → its locked name in
   "lock", unchanged in "borrowed"; a local `org/repo` directory stays a path).
 - `core/tests/test_plugins.py`, **new**, parametrized over toy weight-source plugins with the hook: an existing path
-  asks none; one claim fetches once and the other never; a claim larger than the GPU is refused before its fetch;
-  none raises with both hints; two raise naming `--source`; `source` asks one.
+  asks none; one claim fetches once and the other never; a claim larger than the GPU is refused before its fetch,
+  and fetched with `--no-size-check` or on a CPU device; none raises with both hints; two raise naming `--source`; `source` asks one.
 - `core/tests/test_plugins.py`, **new**, `holon serve --help` and the option checks over toy manifests: every
   `EngineConfig` field has a flag and its help, the options and slots are listed; an undeclared key warns and stays in
   `plugin_options`; a flag outside one of two declarers' `choices` fails; a lock value outside them drops that history
@@ -1564,6 +1566,10 @@ D-repo picks it.
 | 7 | ABI items incomplete | `hooks.ResolvesRefs` and `Resolved`, `Option` exported, `Manifest.options` appended last, the `[options]` section; design §4.1 states that a manifest using a later option key raises its `core_abi` floor (§14.4, §14.10) |
 | 8 | Host-local and tree locks: which wins | Ranked across directories: a current, verified host-local lock, then the tree's verified lock, then borrowed; an outdated host-local lock falls through (§14.9 item 5) |
 | 9 | `holon tune` and the agent-facing `tune.submit` | One tuner, one judge gate, one lock writer; two entry points (§14.9 item 6) |
+
+**Rev 2 re-check (both reviewers confirmed; three small items, folded in):** the size refusal gains `--no-size-check`
+and applies only on CUDA with `vram_gib > 0` and a known size, compared in bytes (§14.3); the offload row (§14.8);
+the CPU case in the `resolve_ref` test (§14.11); design §4.3's sentence on declared options (§14.10).
 
 Rev 1's `check_docs.py` misses (two commands in `docs/adding-a-model.md`) came from running it outside the project
 environment; in the project venv it passes.

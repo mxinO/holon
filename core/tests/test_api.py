@@ -112,6 +112,10 @@ swap_cap  = { type = "int",   range = [0, 512],     default = 96, log = true, ap
 
 [support]
 platforms = ["cuda>=sm_80"]
+
+[options]
+"cache.policy" = { help = "eviction order", default = "lfu", choices = ["lfu", "lru"] }
+"cache.limit" = { help = "experts kept" }
 """
 
 
@@ -121,6 +125,7 @@ def test_manifest_loads_design_example(tmp_path: pathlib.Path):
     assert m.requires == (Resource("store.tiered", 1), Resource("telemetry.router_hist", 1))
     assert m.tunables["decay"].range == (0.5, 0.999) and m.cardinality.value == "per_site"
     hash(m.tunables["swap_cap"])
+    assert m.options["cache.policy"].choices == ("lfu", "lru") and m.options["cache.limit"].default is None
 
 
 @pytest.mark.parametrize("abi, extra, match", [
@@ -129,6 +134,7 @@ def test_manifest_loads_design_example(tmp_path: pathlib.Path):
     (">=0.2,<0.3", "[properties]\nnumerics='fast'\n", "invalid numerics"),
     (">=0.2,<0.3", "[properties]\nmax_depth=1\n", "unknown keys"),  # removed: the depth gate comes from the processor
     (">=0.2,<0.3", "[plugin_extra]\n", "unknown section"),
+    (">=0.2,<0.3", "[options]\n'a.b' = { default = '1' }\n", "help"),            # an option needs its help line
     (None, "", "core_abi missing"),                                  # required (release design §7)
     (">=1.0,<2", "[surprise]\n", "does not admit this core's plugin ABI 0.2"),   # checked before the keys
     ("~=0.1", "", "expected clauses"),

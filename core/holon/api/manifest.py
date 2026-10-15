@@ -95,6 +95,20 @@ class Tunable:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class Option:
+    """A plugin option the plugin reads (`EngineConfig.plugin_options`, manifest `[options]`): its help line, its
+    default as display text, and, for a closed set, the values it accepts (`holon serve` checks them before a start)."""
+
+    help: str
+    default: str | None = None
+    choices: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.help, str) or not self.help:
+            raise ValueError("an option needs a help string")
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class Provenance:
     """Where borrowed code comes from (design §5.6 rule 5)."""
 
@@ -114,6 +128,7 @@ _SECTIONS: dict[str, set[str]] = {
     "support": {"platforms", "detect"},
     "provenance": {"source", "commit", "license", "files"},
     "build": {"module"},
+    "options": None,   # any keys (the option names); each value is validated as an Option
 }
 
 
@@ -143,6 +158,7 @@ class Manifest:
     provenance: Provenance | None = None
     build: str | None = None           # a module of the plugin's package: `python -m <it> --sm N` builds its native
     #                                    code for SM N ahead of time (`holon prebuild`; the CLI is part of the ABI)
+    options: dict[str, Option] = dataclasses.field(default_factory=dict)   # the plugin options it reads
 
     @property
     def cardinality(self) -> Cardinality:
@@ -188,6 +204,8 @@ class Manifest:
             detect=tuple(data.get("support", {}).get("detect", ())),
             provenance=_provenance(data["provenance"]) if "provenance" in data else None,
             build=data.get("build", {}).get("module"),
+            options={k: Option(**{**v, "choices": tuple(v.get("choices", ()))})
+                     for k, v in data.get("options", {}).items()},
         )
         if m.slot not in SLOTS:
             raise ValueError(f"unknown slot {m.slot!r}")

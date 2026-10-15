@@ -19,6 +19,7 @@ import itertools
 import secrets
 import sys
 import time
+from typing import Any
 
 import numpy as np
 import torch
@@ -49,29 +50,39 @@ from .state import StateManager
 BLOCKED_POLL_S = 0.005       # how often a server whose only requests wait for their logits processor steps
 
 
+def _setting(default: object, help: str) -> Any:
+    """An EngineConfig field with its help line (`holon serve --help`); a dict default is a fresh dict per config."""
+    if isinstance(default, dict):
+        return dataclasses.field(default_factory=dict, metadata={"help": help})
+    return dataclasses.field(default=default, metadata={"help": help})
+
+
 @dataclasses.dataclass
 class EngineConfig:
-    model: str                               # checkpoint directory
-    device: str = "cuda"
-    dtype: torch.dtype = torch.bfloat16
-    source: str | None = None                # weight source kind; None: detected from the checkpoint
-    page_size: int = 16
-    max_seqs: int = 64
-    max_model_len: int = 8192                # prompt + generated tokens per request; pools always hold one
-    clamp_context: bool = False              # pools may hold less: serve at most what they hold (`holon serve`)
-    max_step_tokens: int = 4096
-    chunk_with_decode: int = 0               # prefill tokens a step with decode rows may also carry (0: none)
-    memory_fraction: float = 0.9             # of the memory left after weights, for activations and state
-    state_memory: int | None = None          # bytes for state pools; None: measure (GPU only)
-    prefix_cache: bool = True                # reuse cached prompt blocks across requests (and payloads)
-    overlap: bool = True                     # schedule step N while step N-1 runs (depth 1); False: depth 0
-    cuda_graphs: bool = True                 # replay decode steps from CUDA graphs, per batch-size bucket
-    max_draft_tokens: int = 0                # speculative decoding: drafts per verify row at most (0: off)
-    kernels: dict[str, str] = dataclasses.field(default_factory=dict)   # op name -> pinned kernel provider
-    # op name -> preferred provider (a lock's pins): used where it supports the site, else default priority
-    kernel_preferences: dict[str, str] = dataclasses.field(default_factory=dict)
-    slots: dict[str, str] = dataclasses.field(default_factory=dict)     # slot -> plugin, where several are installed
-    plugin_options: dict[str, object] = dataclasses.field(default_factory=dict)   # read by plugins, never the core
+    """Every engine setting: one flag each in `holon serve` and the tools, recorded in plans and locks unless
+    `plans.NOT_PLANNED` (release design §14.2). A field needs a help line (`_setting`)."""
+
+    model: str = dataclasses.field(metadata={"help": "checkpoint directory or file"})
+    device: str = _setting("cuda", "torch device to serve on")
+    dtype: torch.dtype = _setting(torch.bfloat16, "activation dtype, by torch name (e.g. bfloat16)")
+    source: str | None = _setting(None, "weight-source kind; default: detected from the checkpoint")
+    page_size: int = _setting(16, "tokens per page of paged state")
+    max_seqs: int = _setting(64, "sequences served at once")
+    max_model_len: int = _setting(8192, "prompt + generated tokens per request; pools always hold one")
+    clamp_context: bool = _setting(False, "pools may hold less: serve at most what they hold (`holon serve`)")
+    max_step_tokens: int = _setting(4096, "tokens one step computes at most")
+    chunk_with_decode: int = _setting(0, "prefill tokens a step with decode rows may also carry (0: none)")
+    memory_fraction: float = _setting(0.9, "of the memory left after weights, for activations and state")
+    state_memory: int | None = _setting(None, "bytes for state pools; default: measured (GPU only)")
+    prefix_cache: bool = _setting(True, "reuse cached prompt blocks across requests (and payloads)")
+    overlap: bool = _setting(True, "schedule step N while step N-1 runs (depth 1); off: depth 0")
+    cuda_graphs: bool = _setting(True, "replay decode steps from CUDA graphs, per batch-size bucket")
+    max_draft_tokens: int = _setting(0, "speculative decoding: drafts per verify row at most (0: off)")
+    kernels: dict[str, str] = _setting({}, "op name -> pinned kernel provider")
+    kernel_preferences: dict[str, str] = _setting(
+        {}, "op name -> preferred provider (a lock's pins): used where it supports the site, else default priority")
+    slots: dict[str, str] = _setting({}, "slot -> plugin, where several are installed")
+    plugin_options: dict[str, object] = _setting({}, "plugin options, read by plugins, never the core")
 
     def __post_init__(self) -> None:
         for name in ("page_size", "max_seqs", "max_model_len", "max_step_tokens"):

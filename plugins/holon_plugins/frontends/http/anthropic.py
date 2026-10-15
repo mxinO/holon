@@ -50,8 +50,8 @@ def error_body(status: int, message: str) -> dict[str, Any]:
     return {"type": "error", "error": {"type": kind, "message": message}}
 
 
-def router(client: EngineClient, bundle: FrontendBundle, drop_billing_header: bool, counters: dict[str, int]
-           ) -> APIRouter:
+def router(client: EngineClient, bundle: FrontendBundle, model_id: str, drop_billing_header: bool,
+           counters: dict[str, int]) -> APIRouter:
     r = APIRouter()
 
     def prepare(req: CountRequest) -> Chat:
@@ -70,7 +70,7 @@ def router(client: EngineClient, bundle: FrontendBundle, drop_billing_header: bo
                                 max_tokens=req.max_tokens, ext=chat.ext)
         rid = f"msg_{uuid.uuid4().hex}"
         gen = pieces(client, bundle, chat, params, rid, [s for s in req.stop_sequences or [] if s])
-        message = {"id": rid, "type": "message", "role": "assistant", "model": bundle.model_name}
+        message = {"id": rid, "type": "message", "role": "assistant", "model": model_id}
         if req.stream:
             first = await unless_disconnected(request, anext(gen))
             if first is None:

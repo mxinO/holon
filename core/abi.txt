@@ -186,6 +186,7 @@ dataclass Manifest frozen
   #20 detect: tuple[str, ...] = ()
   #21 provenance: Provenance | None = None
   #22 build: str | None = None
+  #23 options: dict[str, Option] = dict()
   classmethod load(cls, path: 'pathlib.Path') -> 'Manifest'
 dataclass MaskRow
   #0 seq: Seq
@@ -213,6 +214,10 @@ dataclass ModelSpec frozen
   #6 lm_head: Ref
   #7 weights: WeightMap
   #8 position_fn: str | None = None
+dataclass Option frozen
+  #0 help: str
+  #1 default: str | None = None
+  #2 choices: tuple[str, ...] = ()
 dataclass Paged frozen
   #0 unit_bytes: int
   #1 tokens_per_unit: int
@@ -301,6 +306,10 @@ protocol Registry() required, implemented by core
   get(self, key: 'str') -> 'T'
   items(self) -> 'Iterable[tuple[str, T]]'
 class RequestError(ValueError)
+dataclass Resolved frozen
+  #0 what: str
+  #1 nbytes: int | None
+  #2 fetch: Callable[[], str]
 dataclass Resource frozen
   #0 name: str
   #1 major: int
@@ -529,6 +538,8 @@ protocol PublishesPayloads() optional, implemented by plugins
   publish(self, seq: 'SeqView', upto: 'int', in_step: 'bool' = False) -> 'tuple[Payload, list[MemOp]] | None'
 protocol Reports() optional, implemented by plugins
   stats(self) -> 'dict[str, int]'
+protocol ResolvesRefs() optional, implemented by plugins
+  resolve(self, ref: 'str') -> 'Resolved | None'
 protocol RestoresPayloads() optional, implemented by plugins
   hit_length(self, idx: 'PrefixView', upto: 'int') -> 'HitLen'
   adopt(self, seq: 'SeqView', payload: 'Payload') -> 'list[MemOp]'
@@ -588,6 +599,7 @@ plugins
 [support] ['detect', 'platforms']
 [provenance] ['commit', 'files', 'license', 'source']
 [build] ['module']
+[options] <any>
 
 # string vocabularies
 Numerics = ['approx', 'bounded', 'exact', 'policy']
