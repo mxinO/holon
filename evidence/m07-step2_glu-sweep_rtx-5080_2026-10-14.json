@@ -1,0 +1,376 @@
+{
+ "command": "python bench/glu_sweep.py --locks <the 8B Q4_K_M, 27B UD-IQ3_S, 27B UD-Q4_K_M and 8B NVFP4 locks>",
+ "commit": "e14b311",
+ "date": "2026-10-14",
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "sm": 120,
+ "shapes": [
+  {
+   "type": "iq2_s",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 77.397,
+    "composed": 77.598
+   },
+   "saving_pct": 0.26
+  },
+  {
+   "type": "iq2_xs",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 74.442,
+    "composed": 70.294
+   },
+   "saving_pct": -5.9
+  },
+  {
+   "type": "iq2_xxs",
+   "in": 5120,
+   "out": 12288,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 28.332,
+    "composed": 25.164
+   },
+   "saving_pct": -12.59
+  },
+  {
+   "type": "iq2_xxs",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 71.229,
+    "composed": 65.76
+   },
+   "saving_pct": -8.32
+  },
+  {
+   "type": "iq3_s",
+   "in": 5120,
+   "out": 10240,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 32.31,
+    "composed": 30.854
+   },
+   "saving_pct": -4.72
+  },
+  {
+   "type": "iq3_s",
+   "in": 5120,
+   "out": 12288,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 38.138,
+    "composed": 36.007
+   },
+   "saving_pct": -5.92
+  },
+  {
+   "type": "iq3_s",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 98.282,
+    "composed": 95.915
+   },
+   "saving_pct": -2.47
+  },
+  {
+   "type": "iq3_xxs",
+   "in": 5120,
+   "out": 10240,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 29.436,
+    "composed": 27.704
+   },
+   "saving_pct": -6.25
+  },
+  {
+   "type": "iq3_xxs",
+   "in": 5120,
+   "out": 12288,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 35.358,
+    "composed": 32.06
+   },
+   "saving_pct": -10.28
+  },
+  {
+   "type": "iq3_xxs",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 90.351,
+    "composed": 83.599
+   },
+   "saving_pct": -8.08
+  },
+  {
+   "type": "iq4_nl",
+   "in": 5120,
+   "out": 10240,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "us": {
+    "fused": 35.816,
+    "composed": 35.329
+   },
+   "saving_pct": -1.38
+  },
+  {
+   "type": "iq4_nl",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "us": {
+    "fused": 113.498,
+    "composed": 114.038
+   },
+   "saving_pct": 0.47
+  },
+  {
+   "type": "iq4_xs",
+   "in": 5120,
+   "out": 10240,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true,
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 34.875,
+    "composed": 33.616
+   },
+   "saving_pct": -3.75
+  },
+  {
+   "type": "iq4_xs",
+   "in": 5120,
+   "out": 12288,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true,
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 42.455,
+    "composed": 39.695
+   },
+   "saving_pct": -6.95
+  },
+  {
+   "type": "iq4_xs",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true,
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 111.08,
+    "composed": 107.984
+   },
+   "saving_pct": -2.87
+  },
+  {
+   "type": "q2_k",
+   "in": 5120,
+   "out": 10240,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 25.172,
+    "composed": 23.043
+   },
+   "saving_pct": -9.24
+  },
+  {
+   "type": "q2_k",
+   "in": 5120,
+   "out": 12288,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080": true
+   },
+   "weights": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "us": {
+    "fused": 29.1,
+    "composed": 26.885
+   },
+   "saving_pct": -8.24
+  },
+  {
+   "type": "q3_k",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "us": {
+    "fused": 94.209,
+    "composed": 90.66
+   },
+   "saving_pct": -3.91
+  },
+  {
+   "type": "q4_k",
+   "in": 4096,
+   "out": 24576,
+   "locks": {
+    "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080": true
+   },
+   "weights": "Qwen3-8B-Q4_K_M.gguf",
+   "us": {
+    "fused": 64.504,
+    "composed": 66.09
+   },
+   "saving_pct": 2.4
+  },
+  {
+   "type": "q4_k",
+   "in": 5120,
+   "out": 10240,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "us": {
+    "fused": 35.999,
+    "composed": 35.403
+   },
+   "saving_pct": -1.68
+  },
+  {
+   "type": "q4_k",
+   "in": 5120,
+   "out": 12288,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "us": {
+    "fused": 42.359,
+    "composed": 41.681
+   },
+   "saving_pct": -1.63
+  },
+  {
+   "type": "q4_k",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "us": {
+    "fused": 114.034,
+    "composed": 114.126
+   },
+   "saving_pct": 0.08
+  },
+  {
+   "type": "q5_k",
+   "in": 5120,
+   "out": 10240,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "us": {
+    "fused": 42.875,
+    "composed": 42.471
+   },
+   "saving_pct": -0.95
+  },
+  {
+   "type": "q5_k",
+   "in": 5120,
+   "out": 12288,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "us": {
+    "fused": 51.133,
+    "composed": 50.332
+   },
+   "saving_pct": -1.59
+  },
+  {
+   "type": "q5_k",
+   "in": 5120,
+   "out": 34816,
+   "locks": {
+    "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090": true
+   },
+   "weights": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "us": {
+    "fused": 137.645,
+    "composed": 138.516
+   },
+   "saving_pct": 0.63
+  },
+  {
+   "type": "nvfp4",
+   "in": 4096,
+   "out": 24576,
+   "locks": {
+    "nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-5080": true
+   },
+   "weights": "random",
+   "us": {
+    "fused": 64.272,
+    "composed": 66.11
+   },
+   "saving_pct": 2.78
+  }
+ ]
+}

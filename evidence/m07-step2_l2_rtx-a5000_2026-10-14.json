@@ -1,0 +1,1061 @@
+{
+ "workload": "m07-step2 L2: small-step (1 token) and prefill runs for D3 / D4 / D6 / D11, and the plants",
+ "date": "2026-10-14",
+ "commits": "8b runs at 74574e0..0308bbc, 27B 1-token at 0308bbc (before GLU_TYPES), the rest at 1d96857",
+ "runs": {
+  "8b-q4km-1": {
+   "command": "python -m holon_judge l2 --model unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf --prompts judge/prompts/v1.jsonl --golden judge/goldens/qwen3-8b-q4_k_m/v1-fp32.safetensors --floor judge/goldens/qwen3-8b-q4_k_m/v1-bfloat16-mmvq-floor.safetensors --max-step-tokens 1 --max-seqs 4",
+   "commit": "48b5534..",
+   "passed": true,
+   "overall": {
+    "n": 32783,
+    "top1": 0.9905743830643932,
+    "top1_confident": 0.9973722079709691,
+    "kl_mean": 0.000926440994456494,
+    "kl_p50": 5.735545008201244e-05,
+    "kl_p99": 0.009718010858178092,
+    "kl_max": 0.7651144812956975,
+    "dppl": 0.000674888103510964,
+    "dppl_se": 0.0005243055397549729,
+    "missing": 0.01838757892810298
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9907574047524632,
+    "top1_confident": 0.9975599074016143,
+    "kl_mean": 0.0010700623446398088,
+    "kl_p50": 6.176956182091981e-05,
+    "kl_p99": 0.010985925596909005,
+    "kl_max": 1.0517731582406926,
+    "dppl": 0.000590332570708985,
+    "dppl_se": 0.0005823838450223849,
+    "missing": 0.019009852667541103
+   },
+   "failures": [],
+   "candidate": {
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 1,
+    "kv": null,
+    "calls": {
+     "mmvq/q8_1": 5314734
+    },
+    "head_calls": {
+     "mmvq/q8_1": 32807
+    }
+   },
+   "plant_fired": []
+  },
+  "8b-q4km-prefill": {
+   "command": "python -m holon_judge l2 --model unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf --prompts judge/prompts/v1.jsonl --golden judge/goldens/qwen3-8b-q4_k_m/v1-fp32.safetensors --floor judge/goldens/qwen3-8b-q4_k_m/v1-bfloat16-mmq-floor.safetensors",
+   "commit": "48b5534..",
+   "passed": true,
+   "overall": {
+    "n": 32783,
+    "top1": 0.9843821492846903,
+    "top1_confident": 0.9928674216354877,
+    "kl_mean": 0.002785593021011979,
+    "kl_p50": 0.00016346408197810523,
+    "kl_p99": 0.0348238490542773,
+    "kl_max": 2.720162960496037,
+    "dppl": 0.0026745375585998403,
+    "dppl_se": 0.000570373141065185,
+    "missing": 0.029541225635237776
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.983558551688375,
+    "top1_confident": 0.9926171557279609,
+    "kl_mean": 0.003555283298817123,
+    "kl_p50": 0.00016342733444873477,
+    "kl_p99": 0.03584411049493482,
+    "kl_max": 6.020456772618163,
+    "dppl": 0.003570412079377443,
+    "dppl_se": 0.0011505231228376728,
+    "missing": 0.030236708049903912
+   },
+   "failures": [],
+   "candidate": {
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "kv": null,
+    "calls": {
+     "mmq/q8_1": 1458,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": {
+     "mmq/q8_1": 144,
+     "mmvq/q8_1": 10
+    }
+   },
+   "plant_fired": []
+  },
+  "27b-iq3s-1": {
+   "command": "python -m holon_judge l2 --model unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S.gguf --prompts judge/prompts/v1-qwen3_5.jsonl --golden judge/goldens/qwen3.8-27b-ud-iq3_s/v1-fp32.safetensors --floor judge/goldens/qwen3.8-27b-ud-iq3_s/v1-bfloat16-mmvq-kv-q8_0-floor.safetensors --max-step-tokens 1 --max-seqs 4 --kv q8_0",
+   "commit": "48b5534..",
+   "passed": true,
+   "overall": {
+    "n": 33372,
+    "top1": 0.979174157976747,
+    "top1_confident": 0.9875462392108508,
+    "kl_mean": 0.03207444851371805,
+    "kl_p50": 0.00017040731852639902,
+    "kl_p99": 0.33024166396714716,
+    "kl_max": 29.029535077096845,
+    "dppl": -4.5825226876386096e-05,
+    "dppl_se": 0.003343035624338214,
+    "missing": 0.029346458108594032
+   },
+   "floor": {
+    "n": 33372,
+    "top1": 0.9802529066283111,
+    "top1_confident": 0.9874537607891491,
+    "kl_mean": 0.0349171974770288,
+    "kl_p50": 0.0001686185559885969,
+    "kl_p99": 0.3056817254946595,
+    "kl_max": 26.18507553260617,
+    "dppl": -0.0036899559200267162,
+    "dppl_se": 0.004687384825630853,
+    "missing": 0.029722521874625433
+   },
+   "failures": [],
+   "candidate": {
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 1,
+    "kv": "q8_0",
+    "calls": {
+     "mmvq/q8_1": 15428952
+    },
+    "head_calls": {
+     "mmvq/q8_1": 33396
+    }
+   },
+   "plant_fired": []
+  },
+  "27b-iq3s-prefill": {
+   "command": "python -m holon_judge l2 --model unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S.gguf --prompts judge/prompts/v1-qwen3_5.jsonl --golden judge/goldens/qwen3.8-27b-ud-iq3_s/v1-fp32.safetensors --floor judge/goldens/qwen3.8-27b-ud-iq3_s/v1-bfloat16-mmq-kv-q8_0-floor.safetensors --kv q8_0",
+   "commit": "48b5534..",
+   "passed": true,
+   "overall": {
+    "n": 33372,
+    "top1": 0.9750689200527388,
+    "top1_confident": 0.9837237977805179,
+    "kl_mean": 0.0526858800690307,
+    "kl_p50": 0.00025352941061363983,
+    "kl_p99": 0.6278658354476304,
+    "kl_max": 29.802510555007856,
+    "dppl": 0.008521297701872875,
+    "dppl_se": 0.005208424936408508,
+    "missing": 0.036337348675536375
+   },
+   "floor": {
+    "n": 33372,
+    "top1": 0.9753985376962723,
+    "top1_confident": 0.9838162762022195,
+    "kl_mean": 0.051130391707128735,
+    "kl_p50": 0.0002583113666689902,
+    "kl_p99": 0.7115561282245638,
+    "kl_max": 18.35081186079564,
+    "dppl": 0.006556478259695387,
+    "dppl_se": 0.004952043382961406,
+    "missing": 0.03686174038115786
+   },
+   "failures": [],
+   "candidate": {
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "kv": "q8_0",
+    "calls": {
+     "mmq/q8_1": 6468,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": {
+     "mmq/q8_1": 143,
+     "mmvq/q8_1": 15
+    }
+   },
+   "plant_fired": []
+  },
+  "8b-nvfp4-1": {
+   "command": "python -m holon_judge l2 --model nvidia/Qwen3-8B-NVFP4 --prompts judge/prompts/v1.jsonl --golden judge/goldens/qwen3-8b-nvfp4/v1-fp32.safetensors --floor judge/goldens/qwen3-8b-nvfp4/v1-bfloat16-mmvq-floor.safetensors --max-step-tokens 1 --max-seqs 4",
+   "commit": "48b5534..",
+   "passed": true,
+   "overall": {
+    "n": 32783,
+    "top1": 0.9871884818350974,
+    "top1_confident": 0.9956166442280597,
+    "kl_mean": 0.0009745974219146474,
+    "kl_p50": 8.490269943272002e-05,
+    "kl_p99": 0.011778163992182249,
+    "kl_max": 0.34152300800107654,
+    "dppl": 0.0007648454585874796,
+    "dppl_se": 0.00038985096931481235,
+    "missing": 0.019467406887716195
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9877680505139859,
+    "top1_confident": 0.9955227151758039,
+    "kl_mean": 0.0011637053725555653,
+    "kl_p50": 9.84134386871059e-05,
+    "kl_p99": 0.014180035790287687,
+    "kl_max": 0.838303612794724,
+    "dppl": 0.001171134580671043,
+    "dppl_se": 0.0003056316796894523,
+    "missing": 0.020850745813378885
+   },
+   "failures": [],
+   "candidate": {
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 1,
+    "kv": null,
+    "calls": {
+     "mmvq/q8_1": 4724208
+    },
+    "head_calls": null
+   },
+   "plant_fired": []
+  },
+  "8b-nvfp4-prefill": {
+   "command": "python -m holon_judge l2 --model nvidia/Qwen3-8B-NVFP4 --prompts judge/prompts/v1.jsonl --golden judge/goldens/qwen3-8b-nvfp4/v1-fp32.safetensors --floor judge/goldens/qwen3-8b-nvfp4/v1-bfloat16-mmq-floor.safetensors",
+   "commit": "48b5534..",
+   "passed": true,
+   "overall": {
+    "n": 32783,
+    "top1": 0.9874020071378459,
+    "top1_confident": 0.9955540248598892,
+    "kl_mean": 0.0010560735723202195,
+    "kl_p50": 8.858063595725127e-05,
+    "kl_p99": 0.012852151382097474,
+    "kl_max": 0.6478836490640588,
+    "dppl": 0.0010608751196252901,
+    "dppl_se": 0.000494551529745335,
+    "missing": 0.019388097489552513
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9869139493029924,
+    "top1_confident": 0.9958045023325715,
+    "kl_mean": 0.0010866066443534282,
+    "kl_p50": 9.276431378843588e-05,
+    "kl_p99": 0.012432035549544392,
+    "kl_max": 0.5793764279805961,
+    "dppl": 0.0016297106640261584,
+    "dppl_se": 0.00030873543770328397,
+    "missing": 0.02025592532715127
+   },
+   "failures": [],
+   "candidate": {
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "kv": null,
+    "calls": {
+     "mmq/q8_1": 1296,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": null
+   },
+   "plant_fired": []
+  },
+  "plant-page-slot": {
+   "command": "python -m holon_judge l2 --model unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf --prompts judge/prompts/v1.jsonl --golden judge/goldens/qwen3-8b-q4_k_m/v1-fp32.safetensors --floor judge/goldens/qwen3-8b-q4_k_m/v1-bfloat16-mmq-floor.safetensors --plant qk-rope-kv-page-slot",
+   "commit": "48b5534..",
+   "passed": false,
+   "overall": {
+    "n": 32783,
+    "top1": 0.7477351066101333,
+    "top1_confident": 0.7580554338985172,
+    "kl_mean": 0.6329647886119658,
+    "kl_p50": 0.12118399523766983,
+    "kl_p99": 6.253851166727763,
+    "kl_max": 23.741038615194558,
+    "dppl": 0.7447248267021275,
+    "dppl_se": 0.07024452790737329,
+    "missing": 0.3767226916389592
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.983558551688375,
+    "top1_confident": 0.9926171557279609,
+    "kl_mean": 0.003555283298817123,
+    "kl_p50": 0.00016342733444873477,
+    "kl_p99": 0.03584411049493482,
+    "kl_max": 6.020456772618163,
+    "dppl": 0.003570412079377443,
+    "dppl_se": 0.0011505231228376728,
+    "missing": 0.030236708049903912
+   },
+   "failures": [
+    "top-1 74.7735% < 98.1059%",
+    "KL p50 1.212e-01 > 3.269e-04",
+    "KL p99 6.254e+00 > 7.169e-02",
+    "|\u0394PPL vs floor| 73.852% > 0.657%"
+   ],
+   "candidate": {
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 4096,
+    "kv": null,
+    "calls": {
+     "mmq/q8_1": 1458,
+     "mmvq/q8_1": 0
+    },
+    "head_calls": {
+     "mmq/q8_1": 144,
+     "mmvq/q8_1": 10
+    }
+   },
+   "plant_fired": [
+    "plant qk-rope-kv-page-slot fired: {'calls': 2520}"
+   ]
+  },
+  "plant-stale-27b-1": {
+   "command": "python -m holon_judge l2 --model unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S.gguf --prompts judge/prompts/v1-qwen3_5.jsonl --golden judge/goldens/qwen3.8-27b-ud-iq3_s/v1-fp32.safetensors --floor judge/goldens/qwen3.8-27b-ud-iq3_s/v1-bfloat16-mmvq-kv-q8_0-floor.safetensors --max-step-tokens 1 --max-seqs 4 --kv q8_0 --plant ggml-stale-q8_1",
+   "commit": "48b5534..",
+   "passed": false,
+   "overall": {
+    "n": 33372,
+    "top1": 0.777687882056814,
+    "top1_confident": 0.7893033292231812,
+    "kl_mean": 0.6506810725729626,
+    "kl_p50": 0.07712330176773063,
+    "kl_p99": 9.682681637093673,
+    "kl_max": 30.385664454584074,
+    "dppl": 0.04735982056308387,
+    "dppl_se": 0.2464265580349875,
+    "missing": 0.3074508570058732
+   },
+   "floor": {
+    "n": 33372,
+    "top1": 0.9802529066283111,
+    "top1_confident": 0.9874537607891491,
+    "kl_mean": 0.0349171974770288,
+    "kl_p50": 0.0001686185559885969,
+    "kl_p99": 0.3056817254946595,
+    "kl_max": 26.18507553260617,
+    "dppl": -0.0036899559200267162,
+    "dppl_se": 0.004687384825630853,
+    "missing": 0.029722521874625433
+   },
+   "failures": [
+    "top-1 77.7688% < 97.7753%",
+    "KL p50 7.712e-02 > 3.372e-04",
+    "KL p99 9.683e+00 > 6.114e-01",
+    "|\u0394PPL vs floor| 5.124% > 1.907%"
+   ],
+   "candidate": {
+    "hardware": "NVIDIA RTX A5000",
+    "max_step_tokens": 1,
+    "kv": "q8_0",
+    "calls": {
+     "mmvq/q8_1": 15428952
+    },
+    "head_calls": {
+     "mmvq/q8_1": 33396
+    }
+   },
+   "plant_fired": [
+    "plant ggml-stale-q8_1 fired: {'mmvq': 56162, 'mmvq, prepared': 103362}"
+   ]
+  }
+ },
+ "bounded": {
+  "plant-decode-position": {
+   "sessions": 48,
+   "turns": 4,
+   "system_len": 512,
+   "max_tokens": 128,
+   "results": {
+    "baseline": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": false,
+      "overlap": false
+     },
+     "top1": {
+      "value": 0.9833170572916666,
+      "se": 0.0010956306611831885,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.9911148017438239,
+      "se": 0.0006420946796453409,
+      "n": 24085
+     },
+     "regret": {
+      "value": 0.01205562959269931,
+      "se": 0.00295083685086245,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.01169902553801596,
+       "se": 0.0029542117506831593,
+       "n": 24576
+      },
+      "p50": 0.00015903046127914764,
+      "p99": 0.03668636493597262,
+      "p50_se": 5.819266714824932e-05,
+      "p99_se": 0.002681419106434336
+     },
+     "tokens_saved": 0,
+     "margins": {
+      "top1": 0.0038736393509926663,
+      "confident": 0.0025,
+      "kl_p50": 0.00020574214777929363,
+      "kl_p99": 0.03668636493597262
+     },
+     "failures": [],
+     "passed": true
+    },
+    "prefix on, depth 1": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": true,
+      "overlap": true
+     },
+     "top1": {
+      "value": 0.9807535807291666,
+      "se": 0.001276716042228463,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.990459923346109,
+      "se": 0.0006740073742131794,
+      "n": 24004
+     },
+     "regret": {
+      "value": 0.014032842712670876,
+      "se": 0.00298195230363549,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.013363622450627962,
+       "se": 0.00328214146420309,
+       "n": 24576
+      },
+      "p50": 0.00012091259697246079,
+      "p99": 0.04267928237083166,
+      "p50_se": 5.395909008506297e-05,
+      "p99_se": 0.004509290065786541
+     },
+     "tokens_saved": 164880,
+     "margins": {
+      "top1": 0.0038736393509926663,
+      "confident": 0.0025,
+      "kl_p50": 0.00020574214777929363,
+      "kl_p99": 0.03668636493597262
+     },
+     "failures": [],
+     "passed": true
+    },
+    "prefix on, depth 0": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": true,
+      "overlap": false
+     },
+     "top1": {
+      "value": 0.9802652994791666,
+      "se": 0.001262398212312697,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.9895425381218231,
+      "se": 0.000620115389507519,
+      "n": 24002
+     },
+     "regret": {
+      "value": 0.017934834121357806,
+      "se": 0.0033111180674872585,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.012928915694173954,
+       "se": 0.0031406588361929024,
+       "n": 24576
+      },
+      "p50": 0.00017381353686497696,
+      "p99": 0.038162883753961596,
+      "p50_se": 6.171382759928139e-05,
+      "p99_se": 0.00306166069855302
+     },
+     "tokens_saved": 167376,
+     "margins": {
+      "top1": 0.0038736393509926663,
+      "confident": 0.0025,
+      "kl_p50": 0.00020574214777929363,
+      "kl_p99": 0.03668636493597262
+     },
+     "failures": [],
+     "passed": true
+    },
+    "prefix off, depth 1": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": false,
+      "overlap": true
+     },
+     "top1": {
+      "value": 0.9833170572916666,
+      "se": 0.0010956306611831885,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.9911148017438239,
+      "se": 0.0006420946796453409,
+      "n": 24085
+     },
+     "regret": {
+      "value": 0.01205562959269931,
+      "se": 0.00295083685086245,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.01169902553801596,
+       "se": 0.0029542117506831593,
+       "n": 24576
+      },
+      "p50": 0.00015903046127914764,
+      "p99": 0.03668636493597262,
+      "p50_se": 5.819266714824932e-05,
+      "p99_se": 0.002681419106434336
+     },
+     "tokens_saved": 0,
+     "margins": {
+      "top1": 0.0038736393509926663,
+      "confident": 0.0025,
+      "kl_p50": 0.00020574214777929363,
+      "kl_p99": 0.03668636493597262
+     },
+     "failures": [],
+     "passed": true
+    }
+   },
+   "passed": true,
+   "model": "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M",
+   "dtype": "bfloat16",
+   "graphs_vs_eager": false,
+   "spec_vs_plain": false,
+   "engine_args": "--max-seqs 8",
+   "hardware": "NVIDIA RTX A5000",
+   "torch": "2.11.0+cu130",
+   "plant": "qk-rope-kv-decode-position"
+  },
+  "seqs1": {
+   "sessions": 48,
+   "turns": 4,
+   "system_len": 512,
+   "max_tokens": 128,
+   "results": {
+    "baseline": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": false,
+      "overlap": false
+     },
+     "top1": {
+      "value": 0.986328125,
+      "se": 0.0012016816424817135,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.9939004149377594,
+      "se": 0.0005320051601123544,
+      "n": 24100
+     },
+     "regret": {
+      "value": 0.0018883597367675975,
+      "se": 0.00017135023065440713,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.002146724902818879,
+       "se": 9.696097584053648e-05,
+       "n": 24576
+      },
+      "p50": 8.305978664884465e-05,
+      "p99": 0.02543106430614615,
+      "p50_se": 4.9187721611428545e-05,
+      "p99_se": 0.0013032524378836386
+     },
+     "tokens_saved": 0,
+     "margins": {
+      "top1": 0.00424858619113104,
+      "confident": 0.0025,
+      "kl_p50": 0.0001739048575127861,
+      "kl_p99": 0.02543106430614615
+     },
+     "failures": [],
+     "passed": true
+    },
+    "prefix on, depth 1": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": true,
+      "overlap": true
+     },
+     "top1": {
+      "value": 0.9857177734375,
+      "se": 0.0011905933769816687,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.9929260985352862,
+      "se": 0.000664343617674986,
+      "n": 24032
+     },
+     "regret": {
+      "value": 0.0022406805437640287,
+      "se": 0.000245828205829415,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.0022837989801017503,
+       "se": 0.00014546982532504692,
+       "n": 24576
+      },
+      "p50": 9.547481467550372e-05,
+      "p99": 0.026538451392948484,
+      "p50_se": 4.984848471562189e-05,
+      "p99_se": 0.0010225372362859164
+     },
+     "tokens_saved": 168960,
+     "margins": {
+      "top1": 0.00424858619113104,
+      "confident": 0.0025,
+      "kl_p50": 0.0001739048575127861,
+      "kl_p99": 0.02543106430614615
+     },
+     "failures": [],
+     "passed": true
+    },
+    "prefix on, depth 0": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": true,
+      "overlap": false
+     },
+     "top1": {
+      "value": 0.9864095052083334,
+      "se": 0.001197393999108359,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.9933460866672211,
+      "se": 0.0006419023787567021,
+      "n": 24046
+     },
+     "regret": {
+      "value": 0.0019816503117908724,
+      "se": 0.00017396472829346802,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.002240574767075927,
+       "se": 0.00014456524755611545,
+       "n": 24576
+      },
+      "p50": 8.582750480968853e-05,
+      "p99": 0.026467429950105977,
+      "p50_se": 4.6516893691173683e-05,
+      "p99_se": 0.0008353772270999862
+     },
+     "tokens_saved": 170496,
+     "margins": {
+      "top1": 0.00424858619113104,
+      "confident": 0.0025,
+      "kl_p50": 0.0001739048575127861,
+      "kl_p99": 0.02543106430614615
+     },
+     "failures": [],
+     "passed": true
+    },
+    "prefix off, depth 1": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": false,
+      "overlap": true
+     },
+     "top1": {
+      "value": 0.986328125,
+      "se": 0.0012016816424817135,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.9939004149377594,
+      "se": 0.0005320051601123544,
+      "n": 24100
+     },
+     "regret": {
+      "value": 0.0018883597367675975,
+      "se": 0.00017135023065440713,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.002146724902818879,
+       "se": 9.696097584053648e-05,
+       "n": 24576
+      },
+      "p50": 8.305978664884465e-05,
+      "p99": 0.02543106430614615,
+      "p50_se": 4.9187721611428545e-05,
+      "p99_se": 0.0013032524378836386
+     },
+     "tokens_saved": 0,
+     "margins": {
+      "top1": 0.00424858619113104,
+      "confident": 0.0025,
+      "kl_p50": 0.0001739048575127861,
+      "kl_p99": 0.02543106430614615
+     },
+     "failures": [],
+     "passed": true
+    }
+   },
+   "passed": true,
+   "model": "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M",
+   "dtype": "bfloat16",
+   "graphs_vs_eager": false,
+   "spec_vs_plain": false,
+   "engine_args": "--max-seqs 1",
+   "hardware": "NVIDIA RTX A5000",
+   "torch": "2.11.0+cu130",
+   "plant": null
+  },
+  "seqs8": {
+   "sessions": 48,
+   "turns": 4,
+   "system_len": 512,
+   "max_tokens": 128,
+   "results": {
+    "baseline": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": false,
+      "overlap": false
+     },
+     "top1": {
+      "value": 0.986572265625,
+      "se": 0.0012453870675784085,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.9941022552643601,
+      "se": 0.0006735600666757251,
+      "n": 24077
+     },
+     "regret": {
+      "value": 0.001659773525413281,
+      "se": 0.00017454137138267248,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.00203706287124901,
+       "se": 0.00011923557935377312,
+       "n": 24576
+      },
+      "p50": 7.839572617355836e-05,
+      "p99": 0.023743169989886775,
+      "p50_se": 4.409443413235643e-05,
+      "p99_se": 0.0011334499304160735
+     },
+     "tokens_saved": 0,
+     "margins": {
+      "top1": 0.004403108203433609,
+      "confident": 0.0025,
+      "kl_p50": 0.00015589736693786397,
+      "kl_p99": 0.023743169989886775
+     },
+     "failures": [],
+     "passed": true
+    },
+    "prefix on, depth 1": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": true,
+      "overlap": true
+     },
+     "top1": {
+      "value": 0.9853515625,
+      "se": 0.0011630690120613548,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.9926849542809643,
+      "se": 0.0006848109914216697,
+      "n": 24060
+     },
+     "regret": {
+      "value": 0.002118159662738132,
+      "se": 0.00022733784932406332,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.002353042081193684,
+       "se": 0.000124112736995191,
+       "n": 24576
+      },
+      "p50": 0.00010274095942324296,
+      "p99": 0.02741281812898273,
+      "p50_se": 5.5483117054789036e-05,
+      "p99_se": 0.0008088600786092912
+     },
+     "tokens_saved": 165328,
+     "margins": {
+      "top1": 0.004403108203433609,
+      "confident": 0.0025,
+      "kl_p50": 0.00015589736693786397,
+      "kl_p99": 0.023743169989886775
+     },
+     "failures": [],
+     "passed": true
+    },
+    "prefix on, depth 0": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": true,
+      "overlap": false
+     },
+     "top1": {
+      "value": 0.9857177734375,
+      "se": 0.0012297169008311751,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.9928123312144252,
+      "se": 0.0006912391841276883,
+      "n": 24069
+     },
+     "regret": {
+      "value": 0.0021440794662339613,
+      "se": 0.00023718790756674236,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.0023206279602499885,
+       "se": 0.000125891595104882,
+       "n": 24576
+      },
+      "p50": 9.83399632298833e-05,
+      "p99": 0.02663417391777846,
+      "p50_se": 5.175221846118186e-05,
+      "p99_se": 0.0008658747733584594
+     },
+     "tokens_saved": 167472,
+     "margins": {
+      "top1": 0.004403108203433609,
+      "confident": 0.0025,
+      "kl_p50": 0.00015589736693786397,
+      "kl_p99": 0.023743169989886775
+     },
+     "failures": [],
+     "passed": true
+    },
+    "prefix off, depth 1": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": false,
+      "overlap": true
+     },
+     "top1": {
+      "value": 0.986572265625,
+      "se": 0.0012453870675784085,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.9941022552643601,
+      "se": 0.0006735600666757251,
+      "n": 24077
+     },
+     "regret": {
+      "value": 0.001659773525413281,
+      "se": 0.00017454137138267248,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.00203706287124901,
+       "se": 0.00011923557935377312,
+       "n": 24576
+      },
+      "p50": 7.839572617355836e-05,
+      "p99": 0.023743169989886775,
+      "p50_se": 4.409443413235643e-05,
+      "p99_se": 0.0011334499304160735
+     },
+     "tokens_saved": 0,
+     "margins": {
+      "top1": 0.004403108203433609,
+      "confident": 0.0025,
+      "kl_p50": 0.00015589736693786397,
+      "kl_p99": 0.023743169989886775
+     },
+     "failures": [],
+     "passed": true
+    }
+   },
+   "passed": true,
+   "model": "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M",
+   "dtype": "bfloat16",
+   "graphs_vs_eager": false,
+   "spec_vs_plain": false,
+   "engine_args": "--max-seqs 8",
+   "hardware": "NVIDIA RTX A5000",
+   "torch": "2.11.0+cu130",
+   "plant": null
+  },
+  "spec-vs-plain-plant-decode-position": {
+   "sessions": 48,
+   "turns": 4,
+   "system_len": 512,
+   "max_tokens": 128,
+   "results": {
+    "baseline": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": false,
+      "overlap": false,
+      "max_draft_tokens": 0
+     },
+     "top1": {
+      "value": 0.9924723307291666,
+      "se": 0.0007332630902878442,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.9971116154322262,
+      "se": 0.0004177589942766896,
+      "n": 24235
+     },
+     "regret": {
+      "value": 0.002008282984509909,
+      "se": 0.00043934521043705635,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.0029319631654334496,
+       "se": 0.00041912661189211084,
+       "n": 24576
+      },
+      "p50": 9.575778478771701e-05,
+      "p99": 0.03220506759117872,
+      "p50_se": 9.952198212611405e-06,
+      "p99_se": 0.004887786337871729
+     },
+     "tokens_saved": 0,
+     "margins": {
+      "top1": 0.0025924765176816916,
+      "confident": 0.0025,
+      "kl_p50": 9.575778478771701e-05,
+      "kl_p99": 0.03220506759117872
+     },
+     "failures": [],
+     "passed": true
+    },
+    "spec, prefix on, depth 1": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": true,
+      "overlap": true
+     },
+     "top1": {
+      "value": 0.9911295572916666,
+      "se": 0.0008182054793564333,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.9971067206745474,
+      "se": 0.00040590034369029004,
+      "n": 24194
+     },
+     "regret": {
+      "value": 0.0013672994124741915,
+      "se": 0.00021513661285046406,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.002884778059467403,
+       "se": 0.0006930366741774983,
+       "n": 24576
+      },
+      "p50": 0.00010034839928516677,
+      "p99": 0.026356358537084113,
+      "p50_se": 8.765248088827776e-06,
+      "p99_se": 0.003724260875481719
+     },
+     "tokens_saved": 3456,
+     "margins": {
+      "top1": 0.0025924765176816916,
+      "confident": 0.0025,
+      "kl_p50": 9.575778478771701e-05,
+      "kl_p99": 0.03220506759117872
+     },
+     "failures": [],
+     "passed": true
+    },
+    "spec, depth 0": {
+     "config": {
+      "cuda_graphs": true,
+      "prefix_cache": false,
+      "overlap": false
+     },
+     "top1": {
+      "value": 0.9911702473958334,
+      "se": 0.0008366614027171113,
+      "n": 24576
+     },
+     "confident": {
+      "value": 0.996241843561576,
+      "se": 0.0004807821469270076,
+      "n": 24214
+     },
+     "regret": {
+      "value": 0.001614979902418175,
+      "se": 0.00023810338185377409,
+      "n": 24576
+     },
+     "kl": {
+      "kl": {
+       "value": 0.0016233356256684431,
+       "se": 0.0001985037596400158,
+       "n": 24576
+      },
+      "p50": 9.13327611515197e-05,
+      "p99": 0.017938001675051614,
+      "p50_se": 9.373389597908537e-06,
+      "p99_se": 0.0019785542847406113
+     },
+     "tokens_saved": 0,
+     "margins": {
+      "top1": 0.0025924765176816916,
+      "confident": 0.0025,
+      "kl_p50": 9.575778478771701e-05,
+      "kl_p99": 0.03220506759117872
+     },
+     "failures": [],
+     "passed": true
+    }
+   },
+   "passed": true,
+   "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+   "dtype": "bfloat16",
+   "graphs_vs_eager": false,
+   "spec_vs_plain": true,
+   "engine_args": "--max-seqs 4 --max-step-tokens 2048 --memory-fraction 0.9 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options recurrent.checkpoints=4 kv.format=q8_0 spec.k=1:3,3:2",
+   "hardware": "NVIDIA RTX A5000",
+   "torch": "2.11.0+cu130",
+   "plant": "qk-rope-kv-decode-position"
+  }
+ }
+}

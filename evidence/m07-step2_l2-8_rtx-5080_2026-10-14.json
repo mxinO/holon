@@ -1,0 +1,141 @@
+{
+ "command": "python -m holon_judge l2 --model unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S.gguf --prompts judge/prompts/v1-qwen3_5.jsonl --golden judge/goldens/qwen3.8-27b-ud-iq3_s/v1-fp32.safetensors --floor judge/goldens/qwen3.8-27b-ud-iq3_s/v1-bfloat16-rows8-rtx-5080-kv-q8_0-floor.safetensors --max-step-tokens 8 --max-seqs 4 --kv q8_0",
+ "commit": "48ef045",
+ "gpu_class": "rtx-5080",
+ "date": "2026-10-14",
+ "golden": {
+  "source": "hf",
+  "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+  "revision": null,
+  "dtype": "float32",
+  "device": "cpu",
+  "hardware": "cpu",
+  "threads": 44,
+  "prompts": "v1-qwen3_5.jsonl",
+  "prompts_sha256": "80bf5a54bd350923484251e1a09fedf72e87f7a12a326edcd162055b44c83f55",
+  "weight_source": null,
+  "max_step_tokens": null,
+  "q8_1": null,
+  "act": null,
+  "kv": null,
+  "moe_block": null,
+  "experts": null,
+  "calls": null,
+  "head_calls": null,
+  "gpu_class": null
+ },
+ "candidate": {
+  "source": "holon",
+  "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+  "revision": null,
+  "dtype": "bfloat16",
+  "device": "cuda",
+  "hardware": "NVIDIA GeForce RTX 5080",
+  "threads": null,
+  "prompts": "v1-qwen3_5.jsonl",
+  "prompts_sha256": "80bf5a54bd350923484251e1a09fedf72e87f7a12a326edcd162055b44c83f55",
+  "weight_source": "gguf",
+  "max_step_tokens": 8,
+  "q8_1": null,
+  "act": null,
+  "kv": "q8_0",
+  "moe_block": null,
+  "experts": null,
+  "calls": {
+   "mmq/q8_1": 1156198,
+   "mmvq/q8_1": 773114
+  },
+  "head_calls": {
+   "mmq/q8_1": 4138,
+   "mmvq/q8_1": 103
+  },
+  "gpu_class": "rtx-5080"
+ },
+ "overall": {
+  "n": 33372,
+  "top1": 0.9743797195253506,
+  "top1_confident": 0.9836313193588163,
+  "kl_mean": 0.05072214043217719,
+  "kl_p50": 0.000251980503712682,
+  "kl_p99": 0.5919908512444717,
+  "kl_max": 19.181019269536506,
+  "dppl": 0.005686155321364719,
+  "dppl_se": 0.005098526392865207,
+  "missing": 0.03623846338247633
+ },
+ "categories": {
+  "chat": {
+   "n": 8167,
+   "top1": 0.991551365250398,
+   "top1_confident": 0.9983694970525524,
+   "kl_mean": 0.0009298114372823449,
+   "kl_p50": 0.00015708202337613098,
+   "kl_p99": 0.009532141319852324,
+   "kl_max": 0.25493506638279956,
+   "dppl": -0.00024145380098252234,
+   "dppl_se": 0.001664747235515556,
+   "missing": 0.02019713481082405
+  },
+  "code": {
+   "n": 9308,
+   "top1": 0.9876450365277181,
+   "top1_confident": 0.9948220777790019,
+   "kl_mean": 0.013170503282887287,
+   "kl_p50": 9.972699148871585e-05,
+   "kl_p99": 0.07603675983646817,
+   "kl_max": 12.63386459133375,
+   "dppl": 0.0026132642672589057,
+   "dppl_se": 0.0024415319072483782,
+   "missing": 0.026498710786420285
+  },
+  "recall": {
+   "n": 8846,
+   "top1": 0.9683472756047932,
+   "top1_confident": 0.981801103675003,
+   "kl_mean": 0.043063602456971856,
+   "kl_p50": 0.0007142004874684429,
+   "kl_p99": 0.2905716532579614,
+   "kl_max": 19.181019269536506,
+   "dppl": 0.0255132249021999,
+   "dppl_se": 0.01205006677152608,
+   "missing": 0.03364797648654759
+  },
+  "agent": {
+   "n": 7051,
+   "top1": 0.9445468727840023,
+   "top1_confident": 0.9540229885057471,
+   "kl_mean": 0.16757535507060617,
+   "kl_p50": 0.0003234776001618175,
+   "kl_p99": 6.191038223375035,
+   "kl_max": 18.18830973922699,
+   "dppl": -0.007904831358908931,
+   "dppl_se": 0.014777251016397985,
+   "missing": 0.0709261097716636
+  }
+ },
+ "floor": {
+  "n": 33372,
+  "top1": 0.9755183986575572,
+  "top1_confident": 0.9838779284833539,
+  "kl_mean": 0.05051412780324726,
+  "kl_p50": 0.0002566360810869117,
+  "kl_p99": 0.7036437467131417,
+  "kl_max": 19.955001808573684,
+  "dppl": 0.0028885510027952584,
+  "dppl_se": 0.006175420742769461,
+  "missing": 0.03693665348196092
+ },
+ "budgets": {
+  "top1_min": 0.9730183986575572,
+  "kl_p50_max": 0.0005132721621738234,
+  "kl_p99_max": 1.4072874934262833,
+  "dppl_max": 0.012384344198362889
+ },
+ "failures": [],
+ "dppl_vs_floor": [
+  0.002789546571024382,
+  0.003953737679345155
+ ],
+ "drafter": null,
+ "passed": true
+}

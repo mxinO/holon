@@ -1,6 +1,6 @@
 # M0.7 — performance: fused glue, mixed steps, a gated megakernel experiment
 
-Status: **rev 3.3, step 1 built** (2026-10-14; §12). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
+Status: **rev 3.3, step 2 built** (2026-10-14; §12 step 1, §13 step 2). Step 0 reviewed and re-checked. Revision 3.1 was reviewed clean by a panel of three (correctness,
 architecture, numerics / performance / tests) over four rounds. Step 0 ran (§11), and the panel's review of it and the
 lead's decisions are in §10's "Step 0 panel round"; §1, §3.1, §4, §5, §6, §7 and §11 carry them. The panel re-checks
 rev 3.2 before step 1; rev 3.3 fixes its findings (§10, "rev 3.2 re-check") and awaits the panel's final
@@ -1044,8 +1044,8 @@ class, in % of the step (− = faster), with its sd:
   without NVFP4, glu above one row, shared q8_1 on the 8B whose projections merge). Records
   `evidence/m07-step2_ab_<class>_2026-10-14.json` (all arms at 74574e0; the NVFP4 deployment again after §13.4's
   fix at e14b311; glu with `GLU_TYPES` at 1d96857).
-- Against §11.11's upper bounds (5080 / 4090): the copy saves 3.7 / 2.4% of 8B B1 (bound 2.2 / 1.5% — the
-  index_put pair cost more than its kernel time), D3 2.0 / 1.7% of 8B B1 (bound 1.9 / 1.7%), D4 3.5–5.2 / 6.1–7.2% of
+- Against §11.11 (5080 / 4090): the copy saves 3.7 / 2.4% of 8B B1 (step 0's KV-store share 2.2 / 1.5%: the
+  index_put pair cost more wall than its kernel time), D3 2.0 / 1.7% of 8B B1 (bound 1.9 / 1.7%), D4 3.5–5.2 / 6.1–7.2% of
   prefill (bound 2.4–5.0 / 4.8–6.0%), D11 5.0 / 3.4% of NVFP4 B4 (bound 3.5–4.2 / 3.3–3.6%), glu 0.8 / 0.7% of 8B B1
   (bound 1.6 / 1.1%), shared q8_1 0.65 / 0.9% of 27B B1 (bound 1.5 / 0.96%).
 
@@ -1080,3 +1080,126 @@ rtx-5090:120`, fe0fbc1). `judge/tests/test_gguf.py::test_a_per_shape_floor_route
 every committed per-shape floor to the table: it failed on the old 5090 floor. The 8-row L2 on the RTX 5080 at
 48ef045 (D3 and D4 in): top-1 97.44% (≥ 97.30%), KL p99 0.592 (floor 0.704), ΔPPL vs floor +0.28% ± 0.40%: PASS
 (`evidence/m07-step2_l2-8_rtx-5080_2026-10-14.json`). RTX5090_D2
+
+### 13.6 The RTX 5090
+
+RTX5090_SECTION
+
+### 13.7 Plants (verified once, not kept as tests)
+
+| plant | check | prediction | result |
+|---|---|---|---|
+| `qk-rope-kv-page-slot` (D3: a token opening a page written one slot late) | L2, Qwen3-8B Q4_K_M, whole prompts, mmq floor | FAIL | FAIL: top-1 74.8% (≥ 98.11%), KL p99 6.25; fired on 2520 calls |
+| `qk-rope-kv-decode-position` (D3: decode rows rotated one position late) | `bounded`, Qwen3-8B Q4_K_M, `--max-seqs 8` | FAIL | **PASS** (prediction missed): every configuration PASS; fired on 443232 calls |
+| `ggml-stale-q8_1` (re-verified after D6: a stale workspace, now also on prepared inputs) | L2, 27B UD-IQ3_S, 1-token steps, q8_0 KV, mmvq floor | FAIL | FAIL: top-1 77.8% (≥ 97.78%), KL p99 9.68; fired 56162 times on plain mmvq calls and 103362 on prepared inputs |
+
+- **The decode-row plant is not caught.** It shifts every decode row's rotation, and `bounded` judges each
+  configuration against a baseline that runs the same decode rows. So the bug moves the floor itself: the
+  baseline's agreement with the teacher-forced reference falls from 98.66% to 98.33% (± 0.12%), and its KL mean
+  rises from 0.0017 to 0.0121 (× 7). But every configuration still sits within the margin of that shifted floor.
+  Two other checks also pass with it:
+  - `holon_judge l2 --max-step-tokens 1` (8B: top-1 99.06%, the clean run's): rotation is relative, and in
+    1-token steps every token, keys included, shifts by the same one position;
+  - `bounded --spec-vs-plain` on the 27B UD-IQ3_S with MTP (fired 110298 times): its decode rows are the 27B's 16
+    attention layers of 64, and the error is small there (baseline KL mean 0.0020).
+  The judges see the bug only as an absolute drop that none of them gates. For the lead (§13.12). D3's kernel
+  itself is held to the positions it is given by its L0.
+- `bounded` without a plant (§6: at `max_seqs` 8 and 1, the baseline at the same value): every configuration PASS,
+  at both (8 / 1: baseline top-1 98.66% / 98.63%; prefix on, depth 1: 98.54% / 98.57%). BOUNDED_SPEC
+- Records: `evidence/m07-step2_l2_rtx-a5000_2026-10-14.json` (the L2 runs, the plants and the bounded reports).
+
+### 13.8 The FP4 repack holes (M0.6 follow-up): measured, not fixed
+
+- **The fit, RTX 4090** (the nvidia 30B NVFP4 at its rtx-4090 lock 2's flags, 48ef045): 34192 KV tokens (the lock
+  records 34128); at the engine's free-memory read the allocator holds **0.355 GiB** reserved but unallocated
+  (0.332 GiB right after the weights load; M0.6's 0.63 GiB was read at another point of the build). Record
+  `evidence/m07-step2_fit-30b-nvfp4_rtx-4090_2026-10-14.json`.
+- **Where the holes come from** (A5000, the allocator's history after load, by the site that freed the block now
+  inside a hole): 192 MiB from the bind of the MoE gate/up stacks (`_hold` releasing a merged stack after `prepare`'s
+  repack), 108 + 30 MiB from the merges themselves (`ExpertLinear.merge`, `Linear.merge` releasing their sources),
+  53 MiB from attention linears' bind, 52 + 12 + 5 MiB from the repack's chunk transients. Without the merges (a
+  probe that refuses them) the holes are 0.08 GiB. Each phase transforms N same-size tensors allocate-then-free, which
+  leaves about one tensor's worth unfilled; and torch's expandable segments return only page-aligned free blocks to
+  the driver (a probe: a 25 MiB free block between two live ones at an unaligned offset stays mapped after
+  `empty_cache`; whole 2 MiB-aligned blocks are released).
+- **Two fixes tried, both worse, reverted:** (1) repacking to the host and uploading after the unit releases the
+  source (free before allocate, a std `_hold` change): holes 0.552 GiB, KV −2.1K tokens on the A5000; (2) padding
+  each repacked buffer to whole 2 MiB pages: holes 0.269 GiB but 0.087 GiB more allocated, net worse.
+- **Not fixed.** The remaining hole is about one MoE layer's merge-and-repack (≈ 0.3 GiB, ≈ 3.4K KV tokens at the
+  30B's 96 KiB per token). A real fix needs either the merge and the repack in one allocation (the merge handing
+  `prepare` its sources) or free-before-allocate in std's merges as well — std and kernel contract changes beyond
+  "memory only" — or an allocator setting (out of M0.7's scope, §4). For the lead (§13.12).
+
+### 13.9 Deviations and decisions
+
+- **How a unit learns a fused kernel exists.** The design says "a provider supports those facts", but `BuildCtx` has no
+  optional selection (`select_kernel` raises when nothing serves), and kernel props are a closed core vocabulary
+  (`KERNEL_PROPS`). The base op's spec says it instead: `config["fused"]` lists the fused ops its provider serves for
+  its facts (qlinear@2 → `qlinear_glu@1`; kv_write@1 → `attention.qk_rope_kv@1`, model-dtype and q8_0 layouts). That
+  is std's documented convention (`std/holon_std/ops/kernels.py`, `mixers/gqa/kernels.py`), with no core change.
+- **D3's reference** lives in the judge (`holon_judge/fused.py`), composed from the units' oracles. std.mixers.gqa
+  registers no oracle for the op. There is no CPU provider: the reference rope kernel names no table, so CPU builds
+  keep the composition. fp8 KV composes too.
+- **glu is kept per type as well as per class.** `GLU_TYPES` is one set for every class: the types whose fused gate
+  was faster on every class swept (§13.4). For a merged gate/up of another type the provider still binds a
+  `qlinear_glu@1` site that never fuses: the lock records it, and the call composes.
+- **The GDN mixer is edited** (5156f24, three lines in `forward`) although step 3 works in `gdn/units.py`: D6's shared
+  quantization pays on the 27B through GDN's four in-projections. The diff is separate and small, for step 3 to
+  rebase over.
+- **D11's MoE clause** does not apply: the 30B NVFP4's B4 / B8 decode runs no separate scale multiply (§13.1).
+- **The FP4 repack holes are not fixed** (§13.8).
+- **Step 2's measurement method** is in-process A/B on one engine (`bench/fusion_ab.py`), not separate builds per commit.
+  Each fusion is switched off by restoring the code it replaced, with the two approximations named in §13.3.
+- **`bench/`** gains `fusion_ab.py` and `glu_sweep.py`. `qmm_sweep.py`'s "mmq_cast" variant now times D4's path
+  (mmq writes bf16).
+- **Tests added:**
+  - `test_qk_rope_kv_is_the_composition` (D3's L0);
+  - the toy proof in `test_quantized_units`;
+  - `test_a_per_shape_floor_routes_as_the_table_does` (CPU; ≈ 19 s when the 27B files are cached, else skipped).
+  The rest are assertions inside existing loops.
+
+### 13.10 Review
+
+One reviewer (correctness, architecture, numerics / tests) on the aggregate change.
+- **Round 1:** no blocker, two majors, three minors, five nits.
+  - The majors: the 5090 floor no longer matched the re-derived table (fixed: re-recorded, plus the CPU test that
+    failed on the old floor); `qlinear_glu`'s support was narrower than `config["fused"]` promised, so a merged
+    gate/up with halves not of 4-row blocks would fail to build (fixed: any even `out` is served, and those halves
+    compose).
+  - The minors: GQA at T = 0; another provider's handle reaching ggml; a glu kernel from another provider than the
+    qlinear's. All fixed.
+  - The nits were fixed or are recorded in §13.3 / §13.4.
+- **Round 2:** no blocker or major; one minor (evidence records for the round's new claims: written,
+  `evidence/m07-step2_*`) and four nits: the glu provider checked before its activation-mode check (fixed); the
+  per-type glu sites (recorded in §13.9); `GLU_TYPES` per class (§13.4); the docs (this section).
+- REVIEW_ROUND3
+
+### 13.11 Suite
+
+Full GPU suite at 9de4222 (`pytest core std plugins judge testing tools`, one RTX A5000 while the other ran a
+bounded check): 1200 passed, 65 skipped, 18 min 46 s. Step 1 had 1185 / 65 in 16 min 29 s on two GPUs. The added
+tests are the D3 L0 (6 cases, ≈ 13 s), the CPU per-shape floor test (≈ 19 s) and the toy proof; the existing loops
+gained assertions. `scripts/ci/run_all.sh main` is green.
+
+### 13.12 For the lead
+
+- **FP4 repack holes** (§13.8): not fixed, measured. The fix needs a std / kernel contract change (merge and repack in
+  one allocation) or an allocator setting. Decide whether to take it into M0.7 or leave it as the follow-up it
+  remains.
+- **A judge gap: the decode-row RoPE plant passes** (§13.7). §6 predicted that `bounded` catches it. It does not:
+  the check is relative to a baseline that carries the same bug, and the small-step L2 is blind to a uniform shift.
+  The bug is visible only as an absolute fall of the baseline's agreement (−0.33 pt) and a 7× KL mean, which no
+  check gates. Options: an absolute floor for `bounded`'s baseline (a recorded clean value per model), or a
+  configuration that decodes from a prefilled prefix against teacher-forced scoring. Either is a judge change, so
+  not taken here.
+- **GDN** (§13.9): step 2's three-line edit to `gdn/units.py` needs a rebase with step 3's D5.
+- **The RTX 5090 desktops:** RTX5090_LEAD.
+- **glu is small** (0.55–1.0% of the 8B's B1 step, nothing on the 27B) and type-dependent. It is kept by §1.1's rule.
+  Dropping it would remove `qlinear_glu@1`, `Linear.use_glu` / `glu` and `QLinearGlu`.
+- **A latent read in plain mmvq:** at small K, llama.cpp's one-column kernel reads whole blocks of up to 4 rows, so a
+  quantized linear whose `out` is not a multiple of 4 reads past its weights. llama.cpp's own buffers are padded;
+  Holon's are not. No supported model has such a shape. The fused gate's case was fixed (§13.2); the plain qlinear
+  is unchanged and its L0 uses out 300.
+- **D9** stays on step 1's with-cast table (step 1's review). It is not recomputed on the no-cast table.
+- **UX follow-up** (after the UX branch merges): the manifest `[options]` declarations for `std.mixers.gqa`
+  (`kv.format`), `std.ops` and `std.moe` (`quant.act`). Step 2 adds no option keys.
