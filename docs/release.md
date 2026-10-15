@@ -1966,3 +1966,71 @@ declarations into ABI 1.0. Every code fix below has a test that fails without it
   `runs_planned` when the series starts, and a resume runs `runs_planned − len(runs)`, ignoring `--runs`; a resume
   also requires the record's `model` and `served.plan_id`. CPU tests and `run_all.sh main` green.
 
+
+## 16. As built (step 7)
+
+Branch `release7` from local `main` at 3642a61 (the squashed public root, ABI 1.0, versions 0.1.0). Every lock and
+record of this step names a commit on that line. The release environment is `uv sync --frozen --group dev` from the
+committed `uv.lock` (CPython 3.12.12, torch 2.11.0+cu130, Triton 3.6.0) inside a CUDA 13.0 container, one per desktop.
+
+### 16.1 Method, fixed before any result was read
+
+**Desktops.** Each one is clock-screened before its work and again after it (`bench/clock_check.py`: 60 s of 27B
+decode at batch 4). It is used only if its SM clock holds steady (p10 / p50 ≥ 0.9), and the screen's GPU clock and
+slowdown share are recorded beside its evidence.
+
+**Locks** (§6).
+- The development classes' locks are propagated first with nothing added (pins only). A trace that moves is explained.
+- The **R** cells are written next with `tune --class <the nearest class>`, using that lock's `[engine]`: the 8B
+  Q4_K_M from the rtx-5080's, every other cell from the rtx-4090's. The 5090's bf16 lock is refreshed with
+  `propagate`, gaining the grammar processor and `chunk_with_decode` 0.
+- Every lock gets L2 against the floor of its path and KV format, and `holon_judge snapshot --runs 3` at its
+  settings and pins. It is approved only if both pass.
+
+**`chunk_with_decode` (plan §8a.1's follow-up).**
+- The plain 27B locks keep 512 (M0.7 §15.4).
+- The a8 8B / 30B GGUF locks are measured at 512 against today's 0, with `bench/run.py --lock <lock> --backends holon
+  holon@m512 --rounds 4 --traces agent long_prompt` and `bench/mixed_bars.py`, as in M0.7 §15.4. This covers every
+  class's 8B Q4_K_M and 30B Q4_K_M, the 5080's 8B UD-IQ3_XXS and 30B UD-IQ3_XXS, and the 4090's 30B MXFP4_MOE. A
+  class without its own lock yet runs the nearest class's settings.
+- 512 is set where every bar of §15.4's verdict passes:
+  - on the agent trace: max gap p99 and max ≥ 2×, the paired TTFT ≤ 1 + max(15%, 2 sd), and throughput within
+    max(5%, 2 sd);
+  - on the long prompt: TTFT p99 ≤ +25%;
+  - and mixed steps > 0.
+- Elsewhere the lock keeps 0, and the failing bar is recorded.
+- The bf16, NVFP4 and FP8 locks keep 0. They are outside the follow-up, and only the a8 GGUF paths were measured.
+- **Prediction:** the gap bars pass everywhere. On the 8B the long prompt's TTFT p99 is the bar at risk: four times the
+  steps, each paying the eager mixed step's fixed cost, against a model 3× faster than the 27B.
+
+**MTP (D3), per 27B lock** (the 5080's UD-IQ3_S; the 4090's, 5090's and 3090's UD-Q4_K_M).
+- **Trace.** `bench/traces/claude_code.jsonl` is new in `bench/workloads.py`. It is the agent workload (M0.7's runner)
+  with a 16,384-token shared system prompt (Claude Code's system prompt and its 22 tool schemas), 16 sessions starting
+  every 20 s on average, and 11–17 turns each: 225 requests per round, contexts up to 25.8K tokens. Prompts are cut
+  from natural text (`--corpus judge/prompts/v1-qwen3_5.jsonl`).
+- **Sampling.** Temperature 1.0. Claude Code's captured requests (`evidence/claude_code_session_rtx-5080_2026-10-14.json`)
+  carry no `temperature`, `top_p` or `top_k`, so the Messages API's default of 1.0 applies, as in Holon's Anthropic
+  frontend. top-k, top-p and min-p are off.
+- **Arms.** Plain is the class's 27B lock (`chunk_with_decode` 512). MTP is the same lock plus `--max-draft-tokens 3
+  --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.rejection --plugin-options
+  spec.k=1:3,3:2`.
+  - The verifier is rejection sampling: lossless at T = 1 and greedy-exact at T = 0 (M0.4 D5). `std.spec.greedy`
+    accepts sampled rows less often.
+  - The k schedule is M0.4's.
+  - `chunk_with_decode` stays the lock's 512, so the MTP arm runs M0.7's alternation (§15.5). This run is the
+    alternation's measurement on this trace.
+- **Procedure.** ABBA rounds of fresh processes (`bench/run.py --backends holon holon@mtp --temperature 1.0`).
+  `bench/mtp_decision.py` applies the rule:
+  - **Per-round values:** the median TPOT, the p95 of the per-request maximum gap, and the p95 TTFT, each as the
+    ratio MTP / plain.
+  - **The rule:** **on** if 1 − mean(TPOT ratio) ≥ 5% and ≥ 2 SE, and for both the gap and the TTFT,
+    mean + t(0.90, n − 1) · SE ≤ 1.10.
+  - **After 4 rounds:** if a mean already fails, the decision is plain. Otherwise the run continues to the fewest
+    rounds (≤ 8) at which, with the same mean and sd, every criterion would pass. If no count up to 8 would pass, or 8
+    rounds pass without the rule holding, the decision is plain.
+  - The pooled p99s are reported as point estimates.
+- **The lock's spelling.** A speculative lock records `chunk_with_decode` 512 explicitly, as measured.
+- **Prediction: plain on every class.** TPOT improves well past 5%, but the p95 gap fails: plain mixes decode rows
+  into capped prefill steps, while MTP alternates, so its decoders wait a whole capped step (M0.7 §15.5: agent-trace
+  gap p99 799 against 240 ms on the 5080). On the 5080, MTP's smaller KV pool (37K against 56K tokens) adds
+  evictions under 25K-token sessions.
