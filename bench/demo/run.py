@@ -18,6 +18,10 @@ Isolation and scoring:
   `sitecustomize` / `usercustomize`, are hashed before and after every run: a change makes the run **invalid**
   (recorded, not scored); not guarded are the shared libraries it links. Anything failing while scoring is a
   recorded miss.
+A series' scoring environment is hashed once, before run 1 (`scorer_reference`, recorded); every run starts only
+in it and is checked against it after; a run that changed it is invalid — a miss, published as such — and the series
+stops until the environment is restored (a resumed series passes `--reference`). Before every run the harness's own
+files (`bench/`, `scripts/ci/`) must equal their commit, and the run's venv must hold the first run's pytest.
 Every run is recorded, misses and invalid runs included. Runs are sequential on one server, so a later run may hit
 the prefix cache an earlier one filled (the same system prompt and tools), as a user's next session would. A smaller
 task, if one is ever needed, is a new pre-registered task reported beside this one.
@@ -205,6 +209,34 @@ def site_digest(dirs: list[pathlib.Path] | None = None) -> str:
     return digest(files)
 
 
+def check_environment(reference: str) -> None:
+    """Before every run: the scoring environment is the series' reference (taken once, before run 1). After a run
+    that changed it, the series stops until it is restored."""
+    if site_digest() != reference:
+        raise SystemExit("the scoring interpreter's modules differ from the series' reference: restore them (the "
+                         "series stops here; a resumed one passes --reference)")
+
+
+def harness_dirty(root: pathlib.Path = ROOT) -> list[str]:
+    """The harness's files (`bench/`, `scripts/ci/`) that differ from the commit, untracked ones included."""
+    out = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all", "--",
+                          "bench", "scripts/ci"], capture_output=True, text=True, check=True).stdout
+    return sorted(line[3:] for line in out.splitlines() if line.strip())
+
+
+def venv_digest(bin_dir: pathlib.Path) -> str:
+    """A run's venv's site-packages (pytest, its dependencies, the `.pth` files), by relative path: every run's must
+    be the first run's."""
+    (packages,) = bin_dir.parent.glob("lib/python*/site-packages")
+    # without the dist-info RECORDs: they hash the venv's scripts, whose shebangs carry the venv's path
+    return digest({k: v for k, v in tree(packages).items() if not k.endswith(".dist-info/RECORD")})
+
+
+def outcome(invalid: str | None, scored: dict | None) -> dict:
+    """A run's result: an invalid run is a miss, published as such."""
+    return {"success": invalid is None and bool(scored and scored["success"]), "invalid": invalid, "scored": scored}
+
+
 def invalid_after(guarded: str) -> str | None:
     """Why a run is invalid, by the scoring environment after it: changed, or no longer able to run the probe (the
     run is then recorded and not scored); None if it is as before."""
@@ -277,13 +309,16 @@ def shop_diff(project: dict[str, bytes], work: pathlib.Path) -> str:
     shop = work / "shop"
     if shop.is_symlink() or not shop.is_dir():           # as scoring: a linked package is not read
         return "<no shop/ package>"
-    before = {k: v for k, v in project.items() if k.startswith("shop/")}
-    after = {f"shop/{k}": v for k, v in tree(shop).items()}
-    out = []
-    for name in sorted(before.keys() | after.keys()):
-        old, new = (d.get(name, b"").decode(errors="replace").splitlines(True) for d in (before, after))
-        out += difflib.unified_diff(old, new, f"a/{name}", f"b/{name}")
-    return "".join(out)
+    try:
+        before = {k: v for k, v in project.items() if k.startswith("shop/")}
+        after = {f"shop/{k}": v for k, v in tree(shop).items()}
+        out = []
+        for name in sorted(before.keys() | after.keys()):
+            old, new = (d.get(name, b"").decode(errors="replace").splitlines(True) for d in (before, after))
+            out += difflib.unified_diff(old, new, f"a/{name}", f"b/{name}")
+        return "".join(out)
+    except Exception as e:                                 # a run is never lost to its record
+        return f"<diff failed: {type(e).__name__}>"
 
 
 def private_ok(text: str) -> bool:
@@ -358,14 +393,16 @@ def requests_summary(rows: list[dict]) -> dict:
             "sampling": [json.loads(s) for s in sampling], "requests": per}
 
 
-def run_once(server: str, model: str, claude: pathlib.Path, project: dict[str, bytes], keep: pathlib.Path) -> dict:
+def run_once(server: str, model: str, claude: pathlib.Path, project: dict[str, bytes], keep: pathlib.Path,
+             reference: str, first_venv: str | None) -> dict:
     tests = {k: v for k, v in project.items() if k.startswith("tests/")}
     with tempfile.TemporaryDirectory(prefix="holon-demo-") as tmp:
         tmp = pathlib.Path(tmp)
         work = tmp / "project"
         write_tree(project, work)
         venv = make_venv(tmp / "venv")
-        guarded = site_digest()
+        if first_venv is not None and venv_digest(venv) != first_venv:
+            raise SystemExit("this run's venv has another pytest than the first run's (uv's cache changed?)")
         port, captured = _free_port(), tmp / "requests.jsonl"
         proxy = subprocess.Popen([sys.executable, str(ROOT / "bench" / "capture_proxy.py"), "--upstream", server,
                                   "--port", str(port), "--out", str(captured)])
@@ -420,10 +457,10 @@ def run_once(server: str, model: str, claude: pathlib.Path, project: dict[str, b
                 pass
         result = next((e for e in reversed(events) if e.get("type") == "result"), {})
         rows = [json.loads(line) for line in captured.read_text().splitlines()] if captured.exists() else []
-        invalid = invalid_after(guarded)
+        invalid = invalid_after(reference)
         diff = shop_diff(project, work)
-        return {"invalid": invalid,
-                "scored": None if invalid else score(work, tests), "wall_s": round(wall, 1), "timed_out": timed_out,
+        return outcome(invalid, None if invalid else score(work, tests)) | {
+                "venv_pytest": venv_digest(venv), "wall_s": round(wall, 1), "timed_out": timed_out,
                 "exit_code": None if timed_out else session.returncode, "turns": turns(events),
                 "result_subtype": result.get("subtype"), "is_error": result.get("is_error"),
                 "replied_done": (result.get("result") or "").strip() == "done", "prefix_tokens_saved": saved,
@@ -440,6 +477,7 @@ def main() -> None:
     parser.add_argument("--out", type=pathlib.Path, help="the evidence record to write")
     parser.add_argument("--claude", default="claude", help="the Claude Code executable")
     parser.add_argument("--score", type=pathlib.Path, help="only score a copy of this project directory")
+    parser.add_argument("--reference", help="resume a stopped series: its recorded scorer reference digest")
     args = parser.parse_args()
     project = load_project()
     tests = {k: v for k, v in project.items() if k.startswith("tests/")}
@@ -448,6 +486,11 @@ def main() -> None:
         return
     if not (args.server and args.gpu_class and args.out):
         parser.error("--server, --gpu-class and --out are needed for runs")
+    if dirty := harness_dirty():
+        sys.exit(f"the harness differs from its commit: {dirty}")
+    reference = site_digest()                            # the scoring environment, once for the whole series
+    if args.reference and reference != args.reference:
+        sys.exit("the scoring interpreter's modules differ from the stopped series' reference: restore them")
     claude, claude_sha = resolve_claude(args.claude)
     with tempfile.TemporaryDirectory() as tmp:          # the project as registered fails as pre-registered
         write_tree(project, work := pathlib.Path(tmp) / "project")
@@ -468,13 +511,18 @@ def main() -> None:
                          "timeout_s": TIMEOUT_S, "env": CLIENT_ENV,
                          "command": "claude -p <prompt> --allowedTools <tools> --output-format stream-json --verbose"},
               "task": {"prompt": PROMPT, "project": PROJECT_DIGEST, "tests": TESTS, "seeded": SEEDED},
-              "runs": []}
+              "scorer_reference": reference, "runs": []}
+    first_venv = None
     for i in range(args.runs):
+        if dirty := harness_dirty():
+            sys.exit(f"the harness changed during the series: {dirty}")
+        check_environment(reference)
         check_claude(claude, claude_sha)
         keep = OUT / f"{stamp}_{args.gpu_class}_run{i + 1}"
-        record["runs"].append(run_once(args.server, model, claude, project, keep))
+        run = run_once(args.server, model, claude, project, keep, reference, first_venv)
+        first_venv = first_venv or run["venv_pytest"]
+        record["runs"].append(run)
         args.out.write_text(json.dumps(record, indent=1) + "\n")      # kept after every run
-        run = record["runs"][-1]
         print(f"run {i + 1}: {run['invalid'] or json.dumps(run['scored'])}", flush=True)
 
 

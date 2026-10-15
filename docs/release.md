@@ -150,7 +150,8 @@ new families or formats; v1's offload, VMM, sandbox and self-improvement; GPUs o
   class's 27B lock (5080: UD-IQ3_S; 4090: UD-Q4_K_M); Claude Code at a pinned version, headless, the M0.5 environment;
   3 runs per class, after one uncounted smoke run of M0.5's Claude Code session task (`docs/m05-grammar.md`) at the
   pinned version against the same `holon serve`. Success: the harness scores the agent's `shop/` against its own
-  copy of the tests and `pytest` passes (as built: §15.5, §15.9). Recorded: turns,
+  copy of the tests and `pytest` passes. A run that changes the scoring environment is invalid: it counts as a miss
+  and is published (as built: §15.5, §15.9). Recorded: turns,
   wall time, served and prefix-saved tokens, TTFT / TPOT, the sampling parameters Claude Code sends, the tool-call
   sequence (no file text). Every miss is published; a smaller task, if any, is pre-registered as a new task and
   reported beside it. Claude Code's auto-compaction assumes a far larger window than the 32K served; the README says so.
@@ -1824,11 +1825,15 @@ the 32K context, not a claim of general agent capability (the README says so).
   failing while scoring (a timeout past 10 minutes included) is a recorded miss. The interpreter and every module file
   a scoring run imports (pytest, pluggy, iniconfig, the stdlib, extension modules: found by a probe scored the same
   way), with the site directories' `*.pth` files and any `sitecustomize` / `usercustomize`, are hashed before and
-  after each run: a change makes the run **invalid** (recorded, not scored). Not guarded: the shared libraries the
-  interpreter links (libpython, libc). Before the runs the harness checks that the project fails as
+  after each run against one reference digest taken before run 1 (`scorer_reference`, recorded): a run starts only
+  in that environment, and a change makes the run **invalid** — not scored, **counted as a miss and published** —
+  and stops the series until the environment is restored (a resumed series passes `--reference` and must match it).
+  Not guarded: the shared libraries the interpreter links (libpython, libc). Before every run the harness's own files
+  (`bench/`, `scripts/ci/`) must equal their commit (`git status`), and the run's venv must hold the first run's
+  pytest (its site-packages' digest); otherwise the series stops before the run. Before the runs the harness checks that the project fails as
   registered and that `--gpu-class` is the served lock's class. Runs are sequential on one server, so a later run may
   hit the prefix cache an earlier one filled (the same system prompt and tools), as a user's next session would.
-- **Recorded per run:** validity, success and counts, turns (derived from the stream's assistant messages when a
+- **Recorded per run:** success (a miss when invalid), validity, the scoring's counts, the venv's pytest digest, turns (derived from the stream's assistant messages when a
   session times out), wall time, exit and result kind, the tool-call sequence (tool, a file tool's path inside the
   project or `<outside>`, the program a Bash command starts, whether it failed — no file text, no arguments), the final
   `shop/` diff (synthetic and public; withheld if `check_private`'s patterns match it), per request: status, input and
@@ -1936,4 +1941,12 @@ declarations into ABI 1.0. Every code fix below has a test that fails without it
   failing-first test: the after-run digest could raise (a pytest the agent broke) and lose the run; now any failure
   there makes the run invalid, recorded and not scored (`invalid_after`). Nits fixed: hidden files (a local
   `.pytest_cache`) are outside the project digest; the "planned" phrasing in design §6 / §8 / §9; D7's success line.
+- **The methodology reviewer's last harness items**, each with a failing-first test in
+  `tools/tests/test_demo_harness.py`: one scorer reference digest per series, taken in `main()` before run 1, checked
+  before and after every run (`check_environment`, `invalid_after`); an invalid run is a miss and published
+  (`outcome`), and the series stops until the environment is restored; the harness refuses to start a run while
+  `bench/` or `scripts/ci/` differ from the commit (`harness_dirty`) or when the run's venv holds another pytest than
+  the first run's (`venv_digest`, the site-packages by relative path, without the dist-info `RECORD`s, which hash
+  the venv's own scripts); `shop_diff()` records a failure instead of raising. CPU tests and `run_all.sh main` green;
+  no GPU suite (bench-only change).
 

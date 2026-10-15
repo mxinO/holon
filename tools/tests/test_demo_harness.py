@@ -148,3 +148,41 @@ def test_each_run_gets_its_own_venv_with_pytest(tmp_path):
     out = subprocess.run([str(bin_dir / "python"), "-m", "pytest", "--version"], capture_output=True, text=True)
     assert out.returncode == 0 and "pytest" in out.stdout + out.stderr
     assert (bin_dir / "pytest").exists()
+
+
+def test_a_series_runs_only_on_a_clean_harness_and_its_reference_environment(tmp_path, monkeypatch, project):
+    repo = tmp_path / "repo"
+    for path in ("bench/demo/run.py", "scripts/ci/check_private.py", "docs/x.md"):
+        (repo / path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / path).write_text("x\n")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run([*git, "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run([*git, "-C", str(repo), "commit", "-qm", "x"], check=True)
+    assert demo.harness_dirty(repo) == []
+    (repo / "docs" / "x.md").write_text("y\n")                       # outside the harness: fine
+    (repo / "bench" / "new.py").write_text("")
+    (repo / "scripts" / "ci" / "check_private.py").write_text("y\n")
+    assert demo.harness_dirty(repo) == ["bench/new.py", "scripts/ci/check_private.py"]
+    # one reference for the whole series: a run starts only in it
+    monkeypatch.setattr(demo, "site_digest", lambda dirs=None: "sha256:now")
+    demo.check_environment("sha256:now")
+    with pytest.raises(SystemExit, match="restore"):
+        demo.check_environment("sha256:reference")
+    # an invalid run is a miss, published as such; a scored run's success is its scoring's
+    assert demo.outcome("changed", None) == {"success": False, "invalid": "changed", "scored": None}
+    assert demo.outcome(None, {"success": True})["success"]
+    # the shop/ diff never loses the run
+    monkeypatch.setattr(demo, "tree", lambda root: (_ for _ in ()).throw(OSError("boom")))
+    work = tmp_path / "work"
+    (work / "shop").mkdir(parents=True)
+    assert demo.shop_diff(project, work) == "<diff failed: OSError>"
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")
+def test_every_runs_venv_has_the_first_runs_pytest(tmp_path):
+    first = demo.venv_digest(demo.make_venv(tmp_path / "a"))
+    second = demo.make_venv(tmp_path / "b")
+    assert demo.venv_digest(second) == first
+    (next(second.parent.glob("lib/python*/site-packages")) / "_pytest" / "main.py").write_text("")
+    assert demo.venv_digest(second) != first
