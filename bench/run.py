@@ -344,6 +344,9 @@ def main() -> None:
             ap.error(f"--arm {label}: {', '.join(SET_BY_WORKER)} are set for every backend (--max-batch, ...)")
     if unknown := set(args.arms) - {b.partition("@")[2] for b in args.backends}:
         ap.error(f"--arm {', '.join(sorted(unknown))}: no backend of that label")
+    families = [{b.partition("@")[2] for b in args.backends if b.startswith("holon") == holon} for holon in (1, 0)]
+    if shared := (families[0] & families[1]) - {""}:            # one label's flags are one engine's
+        ap.error(f"{', '.join(sorted(shared))}: an arm label of both Holon and a server; give each its own")
     if len(set(args.backends)) < len(args.backends):
         ap.error("--backends: each backend once (another arm of one: <backend>@<label>)")
     if args.lock:

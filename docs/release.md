@@ -2388,8 +2388,20 @@ prompts cut from natural text (`--corpus`: judge prompt set v1 for Qwen3, v1-qwe
 - **Holon served** (`holon_http`: `holon serve` starting from the lock, which the record's `served` block shows) is the
   number compared with the servers. The in-process engine (`holon`) runs first in every record. Its KV tokens size
   every baseline's cache (§5.2's flags, unchanged), and its row is reported.
-- The context is the traces' (30,208 tokens, for the long prompt) on every engine. It is above the 8B / 30B locks'
-  8K / 16K, as in §16.5.
+- The context is the traces' on every engine: 30,208 tokens with the long prompt, above the 8B locks' 8K as in §16.5
+  and below the 27B locks' 32K; 768 for the decode-only records. Served Holon's plan differs from its lock in that
+  setting only; `report.py` refuses a row whose served lock or plan differs otherwise.
+- `decode_b8` runs at most `max_seqs` at once: 4 on every 27B lock.
+- `llama-server` is the gate pin's build. Commands, per record:
+  ```
+  python bench/run.py --name release-<cell> --gpu 0 --model <file> --lock <the class's lock> --rounds 4 \
+      --corpus <prompt set> --traces bench/traces/{decode_b1,decode_b8,agent,long_prompt}.jsonl \
+      --backends holon holon_http [holon_http@aa] llamaserver           # GGUF (the A/A arm: 8B Q4_K_M)
+      --backends holon holon_http sglang_http freetoken_http            # HF (decode-only: 3 rounds, two traces)
+      --backends holon@mtp holon_http@mtp llamaserver@mtp3 \
+          --arm mtp='<step 7's MTP flags>' --arm mtp3='--spec-type draft-mtp --spec-draft-n-max 3'   # the 27B with MTP
+  python bench/bars.py --name <cell> --gpu 0 --model <file> --lock <the class's lock> --rounds 3
+  ```
 - **A/A**: a second served Holon arm (`holon_http@aa`, no flags) in the 8B Q4_K_M record of every class, on every
   trace. Its per-round ratios to `holon_http` are the noise floor printed beside the ratios.
 - **MTP** (the 27B): Holon's arm is step 7's (`--max-draft-tokens 3`, `drafters.mtp`, `spec.k=1:3,3:2`, the
@@ -2397,6 +2409,13 @@ prompts cut from natural text (`--corpus`: judge prompt set v1 for Qwen3, v1-qwe
   on the same four traces, greedy, on natural text, and are matched to the MTP arm's KV tokens. The tables are labelled
   with trace and sampling. They add accepted / drafted, tokens per verify row, the depth-1 share of verify steps and
   the share of output tokens that end a 16-gram already in their context.
+  - The speedup over plain is taken across two records of the same desktop (the plain cell's), so it is **unpaired**;
+    `report.py` names the plain record it used.
+  - `decode_b1` is **one prompt**: every round replays the same greedy continuation, so its rounds measure timing
+    noise, not prompts. `decode_b8`'s 8 prompts are quoted beside it.
+  - Greedy MTP emits plain decoding's tokens, so both arms repeat alike. A trace whose output repeats more than twice
+    the corpus's own share (§16.1: 8.2% of its 16-grams, so above 0.164) has its speedup labelled "inflated by
+    repetition".
 - **Ratios are the claim**, rendered by `bench/report.py` as Holon's advantage: the baseline's TTFT p50, TPOT p50 and
   max-gap p99 over Holon's, and Holon's output tok/s over the baseline's. "≈" marks a ratio within 2 sd of its per-round
   ratios of 1. Absolute numbers are per board.
@@ -2406,8 +2425,10 @@ it is reported to the lead, not fixed in this step** (the lead's instruction; §
 release" waits for the lead's call). Every cell is published, losses included. A baseline that fails on a file is "—"
 with its recorded reason, unpatched.
 
-**Predictions** (§5.3, compared, not gated):
+**Predictions** (§5.3, compared, not gated; each as Holon's advantage, `report.py`'s direction):
 - GGUF tg128 0.97–1.05× and pp512 1.04–1.20× the pin;
-- the agent trace's TTFT p50 well below `llama-server`'s;
-- bf16 8B decode 0.98–1.0× FreeToken's; SGLang has no prior record;
-- the 27B with MTP 1.5–1.9× plain's single-stream TPOT (decode B1, greedy, natural text).
+- on the agent trace, Holon's TTFT p50 advantage over `llama-server` ≥ 2× ("well below"; M0.1's prior was 228 / 57 ms,
+  4×);
+- the bf16 8B's TPOT p50 advantage over FreeToken 0.98–1.0 on `decode_b1` and `decode_b8`; SGLang has no prior
+  record;
+- the 27B with MTP 1.5–1.9× plain's TPOT p50 on `decode_b1` (greedy, natural text).

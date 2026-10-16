@@ -5,19 +5,21 @@ GPU class (absolute numbers are per board; ratios are the claim).
 - `bars.py` records (`--tables bars`): per metric the gate statistic of Holon and of each llama.cpp build and their
   ratio; a ratio within 2 sd of its per-round ratios of 1 is printed "≈"; one below the gate (0.8) is marked.
 - `run.py` records:
-  - `ratios`: Holon served (`holon_http`, or an arm of it) against every baseline of its record, per trace — TTFT p50,
-    TPOT p50, the max inter-token gap's p99 and output throughput, each as Holon's advantage (> 1: Holon faster; the
-    baseline's latency over Holon's, Holon's throughput over the baseline's), "≈" as above from the per-round ratios;
-    a baseline that failed is "—" with its reason.
+  - `ratios`: Holon served (`holon_http`, or the arm of it that speculates as the baseline does) against every
+    baseline of its record, per trace — TTFT p50, TPOT p50, the max inter-token gap's p99 and output throughput, each
+    as Holon's advantage (> 1: Holon faster; the baseline's latency over Holon's, Holon's throughput over the
+    baseline's): per round over the rounds both completed, their median printed, "≈" as above, the paired rounds
+    counted; a baseline that failed is "—" with its reason, and so is a row whose served plan is not the matched
+    lock's (only the context may differ). The baselines' KV tokens are checked against the first Holon arm's.
   - `absolute`: per record, trace and backend, TTFT p50 / p99, TPOT p50 / p99, the max gap p50 / p99 / max (ms),
     output tok/s and the rounds that ran; KV tokens per record.
-  - `spec`: the speculating backends (drafts in their counters), labelled with trace and sampling: TPOT p50, the
-    speedup over the same engine plain (the same trace and sampling, its record first, else a record of the same
-    model and class),
+  - `spec`: every backend of a record that speculates, labelled with trace and sampling (a failed arm "— (reason)"):
+    TPOT p50, the speedup over the same engine plain on the same trace, prompts and sampling (this record's arm,
+    "paired", else the one other record of the model and class, named and "unpaired"),
     accepted / drafted, tokens per verify row and the depth-1 share of verify steps (Holon's counters), the share of
     output tokens repeating their context.
-  - `aa`: A/A arms (`holon_http@aa`, no flags) against `holon_http`: the per-round ratios and their mean and sd, the
-    noise floor of the ratios above.
+  - `aa`: A/A arms (`holon_http@aa`, no flags) against `holon_http`, in the ratios' direction: the per-round ratios
+    and their mean and sd, the noise floor of the ratios above.
 
     python bench/report.py evidence/<record>.json ... [--relative-to docs] [--tables bars ratios absolute spec aa]
 """
@@ -62,7 +64,8 @@ def _by_class(records: list[tuple[str, dict]]) -> list[tuple[str, list[tuple[str
 
 
 def bars(records: list[tuple[str, dict]]) -> str:
-    """One table per GPU class."""
+    """One table per GPU class. A ratio from fewer rounds than the record ran says so; a gate never measured is
+    marked."""
     tables = []
     for _, group in _by_class(records):
         builds = sorted({b for _, r in group for b in r["llama_cpp"]}, key=lambda b: b != "gate")
@@ -77,9 +80,14 @@ def bars(records: list[tuple[str, dict]]) -> str:
             for metric, res in r["results"].items():
                 cells = [f"[{r['cell']}]({link})", lock, metric, _num(res["holon"]["statistic"])]
                 for b in builds:
-                    ratio = res.get(f"ratio_{b}")
-                    cells += [_num(res.get(b, {}).get("statistic")), "—" if ratio is None else
-                              _ratio(ratio, res[f"ratio_{b}_per_round"], gated=b == "gate")]
+                    ratio, per_round = res.get(f"ratio_{b}"), res.get(f"ratio_{b}_per_round", [])
+                    if ratio is None:
+                        cell = "**— (gate not measured)**" if b == "gate" else "—"
+                    else:
+                        cell = _ratio(ratio, per_round, gated=b == "gate")
+                        n = len(res["holon"]["per_round"])
+                        cell += f" ({len(per_round)}/{n} rounds)" if len(per_round) < n else ""
+                    cells += [_num(res.get(b, {}).get("statistic")), cell]
                 lines.append("| " + " | ".join(cells) + " |")
         gpu = next((r["gpu"] for _, r in group if r.get("gpu")), group[0][1]["gpu_class"])
         ggml = ", ".join(sorted({r["ggml"][:8] for _, r in group}))
@@ -99,24 +107,48 @@ def _failed(r: dict, backend: str) -> str | None:
     return next((run["error"] for run in r["runs"] if run["backend"] == backend), "not run").replace("|", "\\|")
 
 
-def _advantage(r: dict, holon: str, base: str, trace: str) -> list[str]:
-    """Holon's advantage over `base` per metric: pooled, with "≈" from the per-round ratios."""
-    pooled = (r["summary"][trace][holon], r["summary"][trace][base])
+def _paired(r: dict, holon: str, base: str, trace: str, get: Callable[[dict], float | None],
+            higher: bool) -> list[float]:
+    """Holon's advantage over `base` per round both completed (rounds matched by index)."""
     mine, theirs = _per_round(r, holon, trace), _per_round(r, base, trace)
-    cells = []
-    for _, get, higher in METRICS:
-        h, b = get(pooled[0]), get(pooled[1])
-        if not h or not b:
-            cells.append("—")
-            continue
-        per_round = [(get(mine[k]) / get(theirs[k])) if higher else (get(theirs[k]) / get(mine[k]))
-                     for k in mine.keys() & theirs.keys() if get(mine[k]) and get(theirs[k])]
-        cells.append(_ratio(h / b if higher else b / h, per_round))
-    return cells
+    return [(get(mine[k]) / get(theirs[k])) if higher else (get(theirs[k]) / get(mine[k]))
+            for k in sorted(mine.keys() & theirs.keys()) if get(mine[k]) and get(theirs[k])]
 
 
-def _holon_served(r: dict) -> str | None:
-    return next((b for b in r["order"] if b.partition("@")[0] == SERVED and not b.endswith("@aa")), None)
+def _speculates(r: dict, backend: str) -> bool | None:
+    """Whether a backend drafted on any trace (None: it never ran)."""
+    runs = [s for by_backend in r["summary"].values() if (s := by_backend.get(backend))]
+    return any(s["stats"].get("spec_drafted") for s in runs) if runs else None
+
+
+def _served(r: dict, base: str) -> str | None:
+    """The served Holon arm a baseline is set against: the one that speculates as the baseline does (A/A arms
+    aside)."""
+    arms = [b for b in r["order"] if b.partition("@")[0] == SERVED and not b.endswith("@aa")]
+    if len(arms) > 1 and (want := _speculates(r, base)) is not None:
+        arms = [b for b in arms if _speculates(r, b) in (want, None)] or arms
+    return arms[0] if arms else None
+
+
+def _served_check(r: dict, holon: str) -> str | None:
+    """Why served Holon's plan is not the matched lock's (only the context may differ), or None."""
+    served = r["backends"].get(holon, {}).get("served") or {}
+    lock = (r.get("matched", {}).get("lock") or {}).get("path")
+    if not lock:
+        return None
+    if served.get("lock") != lock:
+        return f"served from {served.get('lock')}, matched {lock}"
+    other = [d for d in served.get("diff") or [] if not d.startswith("engine:max_model_len")]
+    return f"served plan differs: {', '.join(other)}" if other else None
+
+
+def _kv_check(r: dict) -> str:
+    """The baselines' KV tokens and whether they are the first (in-process) Holon arm's."""
+    kv, first = r.get("matched", {}).get("kv_tokens"), r["order"][0]
+    if not kv:
+        return ""
+    own = r["backends"].get(first, {}).get("kv_tokens")
+    return f"KV {kv} tokens" + ("" if own == kv else f" (≠ {first}'s {own})")
 
 
 def _label(r: dict) -> str:
@@ -126,23 +158,29 @@ def _label(r: dict) -> str:
 
 
 def ratios(records: list[tuple[str, dict]]) -> str:
+    """Per round the advantage over the rounds both engines completed; the median over those rounds, "≈" within 2 sd
+    of 1, and the paired rounds."""
     tables = []
     for cls, group in _by_class(records):
-        head = ["record", "model", "trace (sampling, prompts)", "Holon served vs", *(m[0] for m in METRICS)]
+        head = ["record", "model", "trace (sampling, prompts; max seqs)", "Holon served vs", *(m[0] for m in METRICS),
+                "paired rounds"]
         lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
         for link, r in group:
-            holon = _holon_served(r)
-            if holon is None:
-                continue
-            bases = [b for b in r["order"] if not b.startswith("holon")]
-            for trace in r["traces_sha256"]:
-                for b in bases:
-                    lead = [f"[{r['workload']}]({link})", r["model"], f"{trace} ({_label(r)})", b]
-                    why = _failed(r, b) or _failed(r, holon)
-                    if why or b not in r["summary"].get(trace, {}) or holon not in r["summary"].get(trace, {}):
-                        cells = [f"— ({why or 'no result on this trace'})"] + [""] * (len(METRICS) - 1)
+            name = f"[{r['workload']}]({link})" + (f" ({kv})" if (kv := _kv_check(r)) else "")
+            for b in (b for b in r["order"] if not b.startswith("holon")):
+                holon = _served(r, b)
+                if holon is None:
+                    continue
+                for trace in r["traces_sha256"]:
+                    lead = [name, r["model"], f"{trace} ({_label(r)}; {r['matched']['max_seqs']})", f"{holon} vs {b}"]
+                    why = _failed(r, b) or _failed(r, holon) or _served_check(r, holon)
+                    pairs = {m: _paired(r, holon, b, trace, get, higher) for m, get, higher in METRICS}
+                    n = max(len(v) for v in pairs.values())
+                    if why or not n:
+                        cells = [f"— ({why or 'no result on this trace'})"] + [""] * len(METRICS)
                     else:
-                        cells = _advantage(r, holon, b, trace)
+                        cells = [_ratio(statistics.median(v), v) if v else "—" for v in pairs.values()]
+                        cells.append(f"{n}/{r['rounds']}" + (" (1 round)" if n == 1 else ""))
                     lines.append("| " + " | ".join(lead + cells) + " |")
         if len(lines) > 2:
             tables.append(f"{cls}: Holon's advantage (> 1: Holon faster or higher)\n\n" + "\n".join(lines))
@@ -156,8 +194,7 @@ def absolute(records: list[tuple[str, dict]]) -> str:
                 "out tok/s", "rounds"]
         lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
         for link, r in group:
-            kv = r.get("matched", {}).get("kv_tokens")
-            name = f"[{r['workload']}]({link})" + (f" (KV {kv} tokens)" if kv else "")
+            name = f"[{r['workload']}]({link})" + (f" ({kv})" if (kv := _kv_check(r)) else "")
             for trace in r["traces_sha256"]:
                 for b in r["order"]:
                     s = r["summary"].get(trace, {}).get(b)
@@ -184,44 +221,62 @@ def _spec(stats: dict) -> tuple[str, str, str]:
             f"{stats.get('spec_verify_steps_overlapped', 0) / steps:.3f}" if steps else "—")
 
 
+def _plain(group: list[tuple[str, dict]], r: dict, base: str, trace: str) -> tuple[str, dict | None]:
+    """The same engine without drafts on the same trace (same prompts and sampling): this record's arm, else the one
+    other record of the model and class that has it ("paired" or the record's link; ambiguity refused)."""
+    def fits(p: dict) -> bool:
+        s = p["summary"].get(trace, {}).get(base)
+        return bool(s) and not s["stats"].get("spec_drafted") and p["model"] == r["model"] \
+            and _label(p) == _label(r) and p["traces_sha256"].get(trace) == r["traces_sha256"][trace]
+    if fits(r):
+        return "paired", r["summary"][trace][base]
+    others = [(link, p) for link, p in group if p is not r and fits(p)]
+    if len(others) != 1:
+        return ("ambiguous" if others else "none"), None
+    return f"[{others[0][1]['workload']}]({others[0][0]}), unpaired", others[0][1]["summary"][trace][base]
+
+
 def spec(records: list[tuple[str, dict]]) -> str:
+    """Every backend of a record that speculates (a failed arm as "— (reason)"); the speedup's plain arm is named."""
     tables = []
     for cls, group in _by_class(records):
         head = ["record", "trace (sampling, prompts)", "backend", "TPOT p50 ms", "speedup over its plain (TPOT p50)",
-                "accepted / drafted", "tokens per verify row", "depth-1 share", "repeated output"]
+                "plain from", "accepted / drafted", "tokens per verify row", "depth-1 share", "repeated output"]
         lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
         for link, r in group:
-            for trace, by_backend in r["summary"].items():
-                for b, s in by_backend.items():
+            if not any(_speculates(r, b) for b in r["order"]):
+                continue
+            for trace in r["traces_sha256"]:
+                for b in r["order"]:
+                    lead = f"| [{r['workload']}]({link}) | {trace} ({_label(r)}) | {b} |"
+                    s = r["summary"].get(trace, {}).get(b)
+                    if not s:
+                        lines.append(f"{lead} — ({_failed(r, b) or 'no result'}) |" + " |" * (len(head) - 4))
+                        continue
                     if not s["stats"].get("spec_drafted"):
                         continue
-                    base = b.partition("@")[0]           # the same engine without drafts, this record first
-                    plain = next((p["summary"][trace][base] for _, p in sorted(group, key=lambda g: g[1] is not r)
-                                  if p["model"] == r["model"] and _label(p) == _label(r)
-                                  and base in p["summary"].get(trace, {})
-                                  and not p["summary"][trace][base]["stats"].get("spec_drafted")), None)
+                    source, plain = _plain(group, r, b.partition("@")[0], trace)
                     tpot = s["tpot_ms"]["p50"]
                     speedup = f"{plain['tpot_ms']['p50'] / tpot:.2f}" if plain else "—"
                     rep = s.get("repeated_share")
-                    lines.append(f"| [{r['workload']}]({link}) | {trace} ({_label(r)}) | {b} | {tpot} | {speedup} | "
-                                 + " | ".join(_spec(s["stats"])) + f" | {'—' if rep is None else f'{rep:.3f}'} |")
+                    lines.append(f"{lead} {tpot} | {speedup} | {source} | " + " | ".join(_spec(s["stats"]))
+                                 + f" | {'—' if rep is None else f'{rep:.3f}'} |")
         if len(lines) > 2:
             tables.append(f"{cls}: speculation\n\n" + "\n".join(lines))
     return "\n\n".join(tables)
 
 
 def aa(records: list[tuple[str, dict]]) -> str:
+    """The A/A arm's advantage over `holon_http`, in the ratios' direction: per round, then mean ± sd."""
     head = ["record", "GPU", "trace", *(f"{m[0]}: rounds; mean ± sd" for m in METRICS)]
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for link, r in records:
         if f"{SERVED}@aa" not in r["order"]:
             continue
         for trace in r["traces_sha256"]:
-            mine, ref = _per_round(r, f"{SERVED}@aa", trace), _per_round(r, SERVED, trace)
             cells = []
-            for _, get, _higher in METRICS:
-                xs = [get(mine[k]) / get(ref[k]) for k in sorted(mine.keys() & ref.keys())
-                      if get(mine[k]) and get(ref[k])]
+            for _, get, higher in METRICS:
+                xs = _paired(r, f"{SERVED}@aa", SERVED, trace, get, higher)
                 spread = f"; {statistics.mean(xs):.3f} ± {statistics.stdev(xs):.3f}" if len(xs) > 1 else ""
                 cells.append(", ".join(f"{x:.3f}" for x in xs) + spread)
             lines.append(f"| [{r['workload']}]({link}) | {r['gpu_class']} | {trace} | " + " | ".join(cells) + " |")

@@ -14,7 +14,7 @@ Same GPU, same model, same requests; every engine in its own environment; client
 | `bars.py` | the release gate's bars: `llama_bench.py` against `llama-bench` at the gate pin and upstream, ABBA rounds, at a lock's settings |
 | `report.py` | Markdown tables (README, release record) rendered from `bars.py` and `run.py` records: the gate's bars; Holon served against each baseline as ratios; absolute numbers per board; speculation; A/A |
 | `worker.py` | runs one backend over a list of traces inside that backend's venv; writes raw JSON |
-| `run.py` | orchestrator: ABAB rounds of fresh worker processes, summaries, evidence record |
+| `run.py` | orchestrator: ABBA rounds of fresh worker processes, summaries, evidence record |
 | `setup_baselines.sh` | pinned baseline checkouts, builds and venvs under `bench/.envs/` (gitignored) |
 | `decode_kernels.py` | E2's per-kernel decode step micro-benchmark (separate from the harness) |
 | `step_profile.py` | M0.7 step 0: a deployment's step time by kernel category per row kind (prefill, decode, verify; graphed and eager), verify steps by region, D1's timing ratios with the GPU clocks, the matmul calls and weight bytes per step |
@@ -87,7 +87,7 @@ taken before release step 7 drew each turn at its own offset, so their corpus pr
 - Timestamps are client-side: a token counts when `step()` returns it, so overlap engines are charged their one-
   step reporting delay. Warmup (every session's first turn at t=0, 16 output tokens, other prompt tokens so nothing
   is cached for the measured run) is excluded.
-- **ABAB**: every round runs each backend once in a fresh process (model load, warmup, all traces), rounds ≥ 2.
+- **ABBA**: every round runs each backend once in a fresh process (model load, warmup, all traces), in reverse order on odd rounds; rounds ≥ 2.
 - Evidence: `evidence/bench_<workload>_<gpu-class>_<date>.json` with the command, commit, GPU class, baseline
   commits and package versions, engine configs and KV capacities, per-request rows and summaries. Raw per-step
   timings and worker logs stay in `bench/.out/` (gitignored).
