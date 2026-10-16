@@ -1,0 +1,201 @@
+{
+ "cell": "qwen3-8b-ud-iq3_xxs",
+ "date": "2026-10-16",
+ "gpu_class": "rtx-5080",
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-UD-IQ3_XXS.gguf",
+ "command": "python bench/bars.py --name qwen3-8b-ud-iq3_xxs --gpu 0 --model unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-UD-IQ3_XXS.gguf --lock plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-UD-IQ3_XXS@495e28b50d2373d0/rtx-5080/cu130-torch2.11/9.lock --rounds 3 --evidence-dir rtx-5080",
+ "commit": "dce655ff06c7f9ce6b9810a950e986d440f61c55",
+ "ggml": "cbe28bb3cb0758f0c566a9a3561766821aeb0748",
+ "lock": {
+  "path": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-UD-IQ3_XXS@495e28b50d2373d0/rtx-5080/cu130-torch2.11/9.lock",
+  "plan_id": "sha256:71d17cb995e0df9662f5f4734af18dcf289eb87c3cff6309ed7a822af2715bee",
+  "fingerprint_class": "rtx-5080/cu130-torch2.11",
+  "borrowed": false
+ },
+ "holon": {
+  "engine_args": "--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-seqs 64 --max-step-tokens 2048 --overlap --page-size 16 --prefix-cache --slots logits_processor=grammar.xgrammar --source gguf",
+  "engine": {
+   "device": "cuda",
+   "dtype": "torch.bfloat16",
+   "source": "gguf",
+   "page_size": "16",
+   "max_seqs": "64",
+   "max_model_len": "8712",
+   "clamp_context": "False",
+   "max_step_tokens": "2048",
+   "chunk_with_decode": "0",
+   "memory_fraction": "0.9",
+   "state_memory": "None",
+   "prefix_cache": "True",
+   "overlap": "True",
+   "cuda_graphs": "True",
+   "max_draft_tokens": "0",
+   "kernels": "{}",
+   "kernel_preferences": "{}",
+   "slots": "{'logits_processor': 'grammar.xgrammar'}",
+   "plugin_options": "{}"
+  }
+ },
+ "llama_cpp": {
+  "gate": {
+   "flags": "-p 512 -n 128 -d 0,8192 -ngl 99 -fa on -ctk f16 -ctv f16 -b 2048 -ub 512 -r 5 -o json",
+   "build_commit": "cbe28bb3c",
+   "n_batch": 2048,
+   "n_ubatch": 512,
+   "type_k": "f16",
+   "type_v": "f16",
+   "flash_attn": 1,
+   "n_gpu_layers": 99
+  },
+  "upstream": {
+   "flags": "-p 512 -n 128 -d 0,8192 -ngl 99 -fa on -ctk f16 -ctv f16 -b 2048 -ub 512 -r 5 -o json",
+   "build_commit": "f12aaa344",
+   "n_batch": 2048,
+   "n_ubatch": 512,
+   "type_k": "f16",
+   "type_v": "f16",
+   "flash_attn": 1,
+   "n_gpu_layers": 99
+  }
+ },
+ "method": "ABBA rounds of fresh processes; per round the median of repetitions 2-5 (of 5 after a warm-up); statistic = median over rounds; gate: Holon >= 0.8x llama.cpp's gate build on every metric",
+ "results": {
+  "pp512": {
+   "holon": {
+    "statistic": 8923.79,
+    "per_round": [8949.17, 8907.18, 8923.79]
+   },
+   "gate": {
+    "statistic": 8103.74,
+    "per_round": [8103.74, 8102.95, 8108.72]
+   },
+   "upstream": {
+    "statistic": 8132.95,
+    "per_round": [8136.27, 8132.95, 8131.86]
+   },
+   "ratio_gate": 1.101,
+   "ratio_gate_per_round": [1.104, 1.099, 1.101],
+   "ratio_upstream": 1.097,
+   "ratio_upstream_per_round": [1.1, 1.095, 1.097]
+  },
+  "pp512 @ d8192": {
+   "holon": {
+    "statistic": 5625.6,
+    "per_round": [5628.49, 5625.6, 5621.67]
+   },
+   "gate": {
+    "statistic": 6206.59,
+    "per_round": [6229.14, 6206.59, 6198.71]
+   },
+   "upstream": {
+    "statistic": 6107.37,
+    "per_round": [6111.58, 6107.37, 6106.12]
+   },
+   "ratio_gate": 0.906,
+   "ratio_gate_per_round": [0.904, 0.906, 0.907],
+   "ratio_upstream": 0.921,
+   "ratio_upstream_per_round": [0.921, 0.921, 0.921]
+  },
+  "tg128": {
+   "holon": {
+    "statistic": 219.35,
+    "per_round": [219.39, 219.35, 219.34]
+   },
+   "gate": {
+    "statistic": 209.13,
+    "per_round": [209.16, 209.13, 209.1]
+   },
+   "upstream": {
+    "statistic": 209.06,
+    "per_round": [209.04, 209.1, 209.06]
+   },
+   "ratio_gate": 1.049,
+   "ratio_gate_per_round": [1.049, 1.049, 1.049],
+   "ratio_upstream": 1.049,
+   "ratio_upstream_per_round": [1.05, 1.049, 1.049]
+  },
+  "tg128 @ d8192": {
+   "holon": {
+    "statistic": 168.68,
+    "per_round": [168.76, 168.68, 168.63]
+   },
+   "gate": {
+    "statistic": 161.82,
+    "per_round": [161.87, 161.82, 161.76]
+   },
+   "upstream": {
+    "statistic": 161.6,
+    "per_round": [161.79, 161.6, 161.59]
+   },
+   "ratio_gate": 1.042,
+   "ratio_gate_per_round": [1.043, 1.042, 1.042],
+   "ratio_upstream": 1.044,
+   "ratio_upstream_per_round": [1.043, 1.044, 1.044]
+  }
+ },
+ "below_gate": [],
+ "incomplete": [],
+ "rounds": [
+  {
+   "holon": {
+    "pp512": [8960.99, 8963.53, 8926.61, 8949.16, 8949.19],
+    "pp512 @ d8192": [5641.44, 5641.51, 5672.63, 5610.46, 5615.46],
+    "tg128": [219.82, 219.4, 219.41, 219.39, 219.32],
+    "tg128 @ d8192": [169.24, 169.15, 168.83, 168.7, 168.66]
+   },
+   "gate": {
+    "pp512": [7492.18, 8123.11, 8101.72, 8102.25, 8105.22],
+    "tg128": [208.689, 209.156, 209.163, 209.185, 209.139],
+    "pp512 @ d8192": [6162.51, 5956.08, 6224.47, 6233.8, 6234.72],
+    "tg128 @ d8192": [161.436, 161.847, 161.854, 161.892, 161.899]
+   },
+   "upstream": {
+    "pp512": [7492.34, 8143.18, 8134.62, 8134.5, 8137.93],
+    "tg128": [208.595, 209.033, 209.047, 209.023, 209.056],
+    "pp512 @ d8192": [6059.39, 5836.79, 6119.06, 6115.5, 6107.66],
+    "tg128 @ d8192": [161.301, 161.774, 161.789, 161.785, 161.791]
+   }
+  },
+  {
+   "upstream": {
+    "pp512": [7475.4, 8144.81, 8132.97, 8132.93, 8131],
+    "tg128": [208.565, 209.087, 209.1, 209.115, 209.108],
+    "pp512 @ d8192": [6045.52, 5824.09, 6123.37, 6104.39, 6110.35],
+    "tg128 @ d8192": [161.251, 161.629, 161.597, 161.608, 161.6]
+   },
+   "gate": {
+    "pp512": [7490.37, 8091.41, 8103.15, 8104.51, 8102.75],
+    "tg128": [208.533, 209.143, 209.151, 209.111, 209.085],
+    "pp512 @ d8192": [6153.89, 5936.62, 6205.39, 6207.79, 6215.64],
+    "tg128 @ d8192": [161.345, 161.852, 161.786, 161.827, 161.806]
+   },
+   "holon": {
+    "pp512": [8982.66, 8947.74, 8878.54, 8899.4, 8914.97],
+    "pp512 @ d8192": [5625.38, 5635.94, 5637.27, 5614.49, 5615.26],
+    "tg128": [219.42, 219.38, 219.36, 219.33, 219.3],
+    "tg128 @ d8192": [168.91, 168.77, 168.67, 168.69, 168.61]
+   }
+  },
+  {
+   "holon": {
+    "pp512": [8947.99, 8927.42, 8920.16, 8906.27, 8952.66],
+    "pp512 @ d8192": [5655.84, 5625.86, 5628.92, 5614.73, 5617.49],
+    "tg128": [219.43, 219.36, 219.34, 219.35, 219.25],
+    "tg128 @ d8192": [168.68, 168.73, 168.62, 168.65, 168.58]
+   },
+   "gate": {
+    "pp512": [7502.98, 8112.45, 8106.92, 8108.17, 8109.26],
+    "tg128": [208.56, 209.112, 209.108, 209.086, 208.938],
+    "pp512 @ d8192": [6163.75, 5937.55, 6196.58, 6200.84, 6208.37],
+    "tg128 @ d8192": [161.355, 161.77, 161.73, 161.747, 161.784]
+   },
+   "upstream": {
+    "pp512": [7461.4, 8129.89, 8135.93, 8130.27, 8133.46],
+    "tg128": [208.49, 209.067, 209.053, 209.078, 209.037],
+    "pp512 @ d8192": [6052.76, 5827.7, 6109.92, 6107.96, 6104.28],
+    "tg128 @ d8192": [161.225, 161.608, 161.613, 161.569, 161.581]
+   }
+  }
+ ]
+}
