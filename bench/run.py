@@ -10,7 +10,8 @@ lock's `max_seqs` and step budget for every backend, its KV format for the basel
 (the first in-process `holon` run's, or `--kv-tokens`) as the baselines' KV cache size.
 
 Arms: a backend named `<backend>@<label>` is another arm of the same engine, with `--arm <label>='<flags>'` added to
-Holon's engine flags (over the lock's); a label without flags is an A/A arm. Every backend's TTFT is also paired per
+its flags — Holon's engine flags (over the lock's), a server's own (`ARGS_ENV`: e.g. llama-server's speculation flags);
+a label without flags is an A/A arm. Every backend's TTFT is also paired per
 (session, turn) with the first backend's of the same round (`paired_ttft`: the median of the per-request ratios).
 
 Usage (from the repository root, inside Holon's .venv):
@@ -39,12 +40,14 @@ ENVS = BENCH / ".envs"                                   # baseline venvs and so
 SOURCES = {"minisgl": "mini-sglang", "nanovllm": "nano-vllm", "freetoken_http": "FreeToken"}
 SERVERS = ("llamaserver", "freetoken_http", "sglang_http")   # a server binary or venv of its own, and our client
 SET_BY_WORKER = ("max_seqs", "max_step_tokens", "max_model_len")   # from --max-batch, --max-step-tokens, the traces
+ARGS_ENV = {"llamaserver": "LLAMA_SERVER_ARGS", "sglang_http": "SGLANG_ARGS", "freetoken_http": "FREETOKEN_ARGS"}
 METHOD = (
     "In-process engines driven by bench/driver.py, one scheduling step per call; client-side timestamps taken when "
     "a step returns a token. TTFT = first token - release (arrival, or previous turn's last token + gap); TPOT = "
     "(last - first) / (tokens - 1) per request; throughput = output tokens / (last token - first release). Decode "
     "steps = steps at peak batch that return no first token; decode tok/s = their tokens / their wall time. Max "
-    "gap = a request's largest time between two deliveries after its first token. Paired TTFT = the median over "
+    "gap = a request's largest time between two deliveries after its first token. Repeated share = output tokens "
+    "ending a 16-gram already in their request's prompt or output / output tokens. Paired TTFT = the median over "
     "(round, session, turn) of TTFT / the first backend's TTFT in the same round. CPU "
     "ms/step = time.process_time() delta around step() on those steps, measured with --blocking-sync (CUDA "
     "primary context in blocking-sync mode and torch events created blocking, so waiting for the GPU sleeps and "
@@ -57,10 +60,12 @@ BACKENDS = ("holon", "holon_http", "holon_http_text", "holon_http_chat", "llamas
 
 
 def backend_name(name: str) -> str:
-    """A backend, or an arm of a Holon backend (`holon@mixed`)."""
+    """A backend, or an arm of one that takes flags (`holon@mixed`, `llamaserver@mtp`)."""
     base, at, label = name.partition("@")
-    if base not in BACKENDS or at and not (base.startswith("holon") and re.fullmatch(r"[\w.-]+", label)):
-        raise argparse.ArgumentTypeError(f"{name!r}: one of {', '.join(BACKENDS)}, or <holon backend>@<label>")
+    armable = base.startswith("holon") or base in ARGS_ENV
+    if base not in BACKENDS or at and not (armable and re.fullmatch(r"[\w.-]+", label)):
+        raise argparse.ArgumentTypeError(f"{name!r}: one of {', '.join(BACKENDS)}, or <backend>@<label> for "
+                                         f"holon*, {', '.join(ARGS_ENV)}")
     return name
 
 
@@ -185,13 +190,15 @@ def summarize(cases: list[dict], columns: list[str], cpu_time: bool) -> dict:
     """Request percentiles pooled over `cases` (one per round); throughputs averaged over them. CPU time per step
     only when measured (`cpu_time`): with spinning CUDA waits it is just wall time."""
     ttft, tpot, gap, tput, wall, cpu = [], [], [], [], [], []
-    batch = short = dec_steps = dec_tok = 0
+    batch = short = dec_steps = dec_tok = repeats = generated = 0
     for case in cases:
         rows = [dict(zip(columns, r, strict=True)) for r in case["requests"]]
         ttft += [r["first"] - r["release"] for r in rows]
         tpot += [(r["last"] - r["first"]) / (r["generated"] - 1) for r in rows if r["generated"] > 1]
         gap += [r["max_gap"] for r in rows if r["generated"] > 1 and "max_gap" in r]   # older records lack it
         short += sum(r["generated"] != r["output"] for r in rows)
+        repeats += sum(r.get("repeated", 0) for r in rows)              # older records lack it
+        generated += sum(r["generated"] for r in rows)
         span = max(r["last"] for r in rows) - min(r["release"] for r in rows)
         tput.append(sum(r["generated"] for r in rows) / span)
         peak = max(s[2] for s in case["steps"])
@@ -209,6 +216,7 @@ def summarize(cases: list[dict], columns: list[str], cpu_time: bool) -> dict:
                        "cpu_ms_p50": None if not cpu else round(pct(cpu, 50) * 1e3, 3),
                        "cpu_ms_mean": None if not cpu else round(sum(cpu) / len(cpu) * 1e3, 3)},
             "wrong_length": short,
+            **({"repeated_share": round(repeats / generated, 4)} if "repeated" in columns and generated else {}),
             "prompt_tokens": sum(r[columns.index("prompt")] for c in cases for r in c["requests"]),
             "stats": {k: sum(c["stats"].get(k, 0) for c in cases)
                       for k in sorted({k for c in cases for k in c.get("stats", {})})}}
@@ -251,6 +259,9 @@ def run_worker(backend: str, args: argparse.Namespace, out: pathlib.Path,
     else:                                            # a server's client runs here; in-process baselines in their venv
         env.pop("PYTHONPATH", None)
         python = sys.executable if backend in SERVERS else str(ENVS / backend / "bin" / "python")
+        if label:                                    # the arm's flags after the server's own
+            var = ARGS_ENV[backend]
+            env[var] = " ".join(filter(None, (env.get(var, ""), args.arms.get(label, ""))))
         match = [*(["--kv-tokens", str(kv_tokens)] if kv_tokens else []),
                  *(["--kv-format", args.kv_format] if args.kv_format else [])]
     cmd = [python, str(BENCH / "worker.py"), "--backend", backend, "--model", args.model, "--traces", *args.traces,
@@ -304,7 +315,8 @@ def main() -> None:
     ap.add_argument("--backends", nargs="+", default=["holon", "minisgl"], type=backend_name,
                     help=f"from {', '.join(BACKENDS)}; <holon backend>@<label> for another arm")
     ap.add_argument("--arm", action="append", default=[], metavar="LABEL=FLAGS",
-                    help="Holon engine flags of the arms named <holon backend>@LABEL (over the lock's)")
+                    help="flags of the arms named <backend>@LABEL: Holon's engine flags (over the lock's), a "
+                         "server's own")
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--lock", help="a lock file: Holon runs its engine settings, the baselines are matched to it")
     ap.add_argument("--max-batch", type=int, help="max running sequences, every backend (default: the lock's, or 64)")
@@ -332,8 +344,10 @@ def main() -> None:
         if args.kv_format and args.kv_format != engine.get("plugin_options", {}).get("kv.format"):
             ap.error("under --lock the baselines' KV format is the lock's")
         args.kv_format = engine.get("plugin_options", {}).get("kv.format")
-        if not args.kv_tokens and args.backends[0] != "holon" and not all(b.startswith("holon") for b in args.backends):
-            ap.error("--lock matches the baselines to Holon's KV tokens: list holon first, or give --kv-tokens")
+        if not args.kv_tokens and args.backends[0].partition("@")[0] != "holon" and not all(
+                b.startswith("holon") for b in args.backends):
+            ap.error("--lock matches the baselines to Holon's KV tokens: list holon (or an arm of it) first, or give "
+                     "--kv-tokens")
     for var in ("HOLON_ENGINE_ARGS", "HOLON_SERVE_ARGS"):       # refuse bad hand-given flags before any run
         for arm in ("", *args.arms.values()):
             lock_flags(args.lock["engine"] if args.lock else {}, SET_BY_WORKER, f"{os.environ.get(var, '')} {arm}",
@@ -357,7 +371,7 @@ def main() -> None:
                 print(f"  failed:\n{err}", flush=True)
                 runs.append({"round": r, "backend": b, "error": err})
                 continue
-            if args.lock and not kv_tokens:                 # Holon's, for the baselines after it
+            if args.lock and not kv_tokens:                 # in-process Holon's, for the baselines after it
                 kv_tokens = res["info"].get("kv_tokens")
             if b not in infos:
                 info = res["info"]

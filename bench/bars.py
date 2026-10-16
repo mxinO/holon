@@ -1,9 +1,10 @@
 """The release gate's bars (release design §5.3, plan §9) on one GGUF file and card: Holon's in-process pp512 and tg128
 at depth 0 and 8192 (`llama_bench.py`) against `llama-bench` at the gate pin and at the newest upstream
 (`setup_baselines.sh`), every engine at the lock's settings — Holon its engine settings, llama-bench the lock's KV
-format and step budget (`-ctk/-ctv`, `-b`) with `-ub 512`. ABAB: each round runs every engine once, each in a fresh
-process. A round's value per metric is the median of repetitions 2-5 (of 5, after a warm-up); the gate statistic is
-the median over rounds; the gate is Holon >= 0.8x the pin on every metric. The record names the ggml commit Holon ran
+format and step budget (`-ctk/-ctv`, `-b`) with `-ub 512`. ABBA: each round runs every engine once, each in a fresh
+process, in reverse order on odd rounds (no engine always first). A round's value per metric is the median of
+repetitions 2-5 (of 5, after a warm-up); the gate statistic is the median over rounds; the gate is Holon >= 0.8x the
+pin on every metric. The record names the ggml commit Holon ran
 (`kernels.ggml_cuda`'s vendored tree) and each llama.cpp build's.
 
     python bench/bars.py --name <cell> --gpu 0 --model <file.gguf> --lock <lock file> [--rounds 3]
@@ -83,7 +84,7 @@ def main() -> None:
     holon_record: dict = {}
     for r in range(args.rounds):
         rounds.append({})
-        for e in engines:
+        for e in engines if r % 2 == 0 else reversed(engines):
             print(f"round {r} {e} ...", flush=True)
             out = raw / f"r{r}-{e}.json"
             try:
@@ -124,7 +125,8 @@ def main() -> None:
         "lock": lock | {"borrowed": not lock["fingerprint_class"].startswith(gpu + "/")},
         "holon": {"engine_args": shlex.join(engine_args), "engine": holon_record.get("engine")},
         "llama_cpp": {e: {"flags": shlex.join(llama_flags), **builds.get(e, {})} for e in args.llama},
-        "method": "per round the median of repetitions 2-5 (of 5 after a warm-up); statistic = median over rounds; "
+        "method": "ABBA rounds of fresh processes; per round the median of repetitions 2-5 (of 5 after a warm-up); "
+                  "statistic = median over rounds; "
                   f"gate: Holon >= {GATE}x llama.cpp's gate build on every metric",
         "results": results,
         "below_gate": [m for m, res in results.items() if res.get("ratio_gate", GATE) < GATE],
