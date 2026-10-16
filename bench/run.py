@@ -108,6 +108,16 @@ def public_flags(flags: str, model: str) -> str:
     return shlex.join(public(a, model) for a in shlex.split(flags))
 
 
+def public_info(info: dict, model: str) -> dict:
+    """A backend's info fit for a published record: server flags and the served lock name local files."""
+    if "flags" in info.get("config", {}):
+        flags = " ".join(public(a, model) for a in shlex.split(info["config"]["flags"]))
+        info = info | {"config": info["config"] | {"flags": flags}}
+    if (info.get("served") or {}).get("lock"):
+        info = info | {"served": info["served"] | {"lock": public(info["served"]["lock"], model)}}
+    return info
+
+
 def lock_flags(engine: dict, skip: tuple[str, ...] = (), extra: str = "", locked_kv: bool = True) -> list[str]:
     """`holon serve` flags that rebuild a lock's [engine] table (kernel pins are not flags: the default selection
     runs; release design D2 makes them soft preferences), then the `extra` flags given by hand: those override, a
@@ -375,10 +385,7 @@ def main() -> None:
             if args.lock and not kv_tokens:                 # in-process Holon's, for the baselines after it
                 kv_tokens = res["info"].get("kv_tokens")
             if b not in infos:
-                info = res["info"]
-                if "flags" in info.get("config", {}):        # server flags name local files (drafts, …)
-                    flags = " ".join(public(a, args.model) for a in shlex.split(info["config"]["flags"]))
-                    info = info | {"config": info["config"] | {"flags": flags}}
+                info = public_info(res["info"], args.model)
                 base = b.partition("@")[0]
                 infos[b] = info | ({"commit": git("rev-parse", "HEAD", cwd=ENVS / "src" / SOURCES[base])}
                                    if base in SOURCES else {})
