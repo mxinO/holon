@@ -28,20 +28,22 @@ also serves Qwen3.8), from HF safetensors directories or GGUF files. The recomme
 
 | model file (hub repository) | RTX 5080 | RTX 4090 | RTX 5090 | RTX 3090 |
 |---|---|---|---|---|
-| Qwen3-8B bf16 (`Qwen/Qwen3-8B`) | does not fit | lock | lock † | lock † |
-| Qwen3-8B Q4_K_M (`unsloth/Qwen3-8B-GGUF`) | lock | lock † | lock † | lock † |
-| Qwen3-8B UD-IQ3_XXS (`unsloth/Qwen3-8B-GGUF`) | lock | borrowed, unverified | borrowed, unverified | borrowed, unverified |
-| Qwen3-30B-A3B UD-IQ3_XXS (`unsloth/Qwen3-30B-A3B-GGUF`) | lock | borrowed, unverified | borrowed, unverified | borrowed, unverified |
-| Qwen3-30B-A3B Q4_K_M (`unsloth/Qwen3-30B-A3B-GGUF`) | does not fit (17.3 GiB) | lock | lock † | lock † |
-| Qwen3.8-27B UD-IQ3_S (`unsloth/Qwen3.8-27B-GGUF`) | lock | borrowed, unverified | borrowed, unverified | borrowed, unverified |
-| Qwen3.8-27B UD-Q4_K_M (`unsloth/Qwen3.8-27B-GGUF`) | does not fit (15.3 GiB) | lock | lock † | lock † |
+| Qwen3-8B bf16 (`Qwen/Qwen3-8B`) | does not fit | this card's lock | this card's lock | this card's lock |
+| Qwen3-8B Q4_K_M (`unsloth/Qwen3-8B-GGUF`) | this card's lock | this card's lock | this card's lock | this card's lock |
+| Qwen3-8B UD-IQ3_XXS (`unsloth/Qwen3-8B-GGUF`) | this card's lock | borrowed, unverified | borrowed, unverified | borrowed, unverified |
+| Qwen3-8B NVFP4 (`nvidia/Qwen3-8B-NVFP4`) | this card's lock | this card's lock | borrowed, unverified | borrowed, unverified |
+| Qwen3-8B FP8 (`Qwen/Qwen3-8B-FP8`) | this card's lock | this card's lock | borrowed, unverified | not served (FP8 needs SM 89 or newer) |
+| Qwen3-30B-A3B UD-IQ3_XXS (`unsloth/Qwen3-30B-A3B-GGUF`) | this card's lock | borrowed, unverified | borrowed, unverified | borrowed, unverified |
+| Qwen3-30B-A3B Q4_K_M (`unsloth/Qwen3-30B-A3B-GGUF`) | does not fit (17.3 GiB) | this card's lock | this card's lock | this card's lock |
+| Qwen3-30B-A3B NVFP4 (`nvidia/Qwen3-30B-A3B-NVFP4`) | does not fit (16.9 GiB) | this card's lock | borrowed, unverified | borrowed, unverified |
+| Qwen3-30B-A3B-Instruct-2507 MXFP4_MOE (`Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE`) | does not fit (15.9 GiB) | this card's lock | borrowed, unverified | borrowed, unverified |
+| Qwen3.8-27B UD-IQ3_S (`unsloth/Qwen3.8-27B-GGUF`) | this card's lock | borrowed, unverified | borrowed, unverified | borrowed, unverified |
+| Qwen3.8-27B UD-Q4_K_M (`unsloth/Qwen3.8-27B-GGUF`) | does not fit (15.3 GiB) | this card's lock | this card's lock | this card's lock |
 
-† TBD (release step 7): written in the release environment at release step 7, where every other lock is also
-re-propagated and the 27B locks' speculation (MTP) is decided.
-
-TBD (M0.6 merge): the low-precision files (Qwen3-8B NVFP4 and FP8, Qwen3-30B-A3B NVFP4 and MXFP4_MOE) are not in this
-tree yet. Their locks are planned on the RTX 5080 and 4090; on the 5090 and 3090 they would borrow, unverified (FP8 not
-on the 3090).
+**This card's lock**: written and verified on this card (L2 against the judge's floor, the snapshot trace identical
+over three runs), in the release environment (`docs/release.md` §16). Every lock selects the grammar processor. The
+Qwen3.8-27B locks serve without speculation: MTP decodes 11–45% faster per token, but on a Claude-Code-shaped trace a
+speculating stream's longest pauses grew 1.1–3.1× (`docs/release.md` §16.6); to serve with it, see Options.
 
 **Borrowed, unverified.** Locks are found by the checkpoint's build hash, so a file downloaded anywhere, under any
 name, finds its lock. Without a lock for this card, `holon serve` borrows the nearest class's: the same GPU on another
@@ -176,7 +178,9 @@ setting), every plugin option the installed plugins read, and the plugins `--slo
 declares is warned about; a flag's value outside an option's choices is refused before anything is downloaded, and a
 lock's is warned about and that lock not used.
 
-- **Turn speculation off:** `holon serve <model> --max-draft-tokens 0`.
+- **Speculation (MTP) on the Qwen3.8-27B:** `holon serve <model> --max-draft-tokens 3 --slots drafter=drafters.mtp
+  draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options spec.k=1:3,3:2`; `--max-draft-tokens 0`
+  turns speculation off.
 - **Mixed steps:** the plain Qwen3.8-27B locks set `--chunk-with-decode 512`: a step that decodes may also carry up to
   512 prompt tokens, so a long prompt does not stall the streams already decoding. Turn speculation on over such a
   lock (a drafter and `--max-draft-tokens N`) and the same setting instead alternates a prefill step of at most 512

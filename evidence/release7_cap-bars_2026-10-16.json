@@ -1,0 +1,1412 @@
+{
+ "workload": "release7-cap-bars",
+ "date": "2026-10-16",
+ "rule": "docs/release.md \u00a716.1 (M0.7 \u00a71.3 as read in \u00a715.4)",
+ "command": "python bench/mixed_bars.py <evidence/bench_release7-cap-<file>_<class>_2026-10-15.json>",
+ "cells": {
+  "rtx-3090/27b-ud-q4_k_m-c0": {
+   "source": "bench_release7-cap-27b-ud-q4_k_m-c0_rtx-3090_2026-10-15.json",
+   "bars": {
+    "agent": {
+     "baseline": "holon@c0",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon@c0": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 991.57,
+        "p90": 1416.95,
+        "p99": 4309.97,
+        "max": 4313.39
+       },
+       "ttft_ms": {
+        "p50": 8550.85,
+        "p90": 14231.25,
+        "p99": 16592.89,
+        "max": 17758.3
+       },
+       "tpot_p99_ms": 123.66,
+       "throughput_tok_s": 52.8,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 335.83,
+        "p90": 353.03,
+        "p99": 359.51,
+        "max": 359.8
+       },
+       "ttft_ms": {
+        "p50": 9779.77,
+        "p90": 15928.75,
+        "p99": 18448.48,
+        "max": 18949.32
+       },
+       "tpot_p99_ms": 124.0,
+       "throughput_tok_s": 51.5,
+       "mixed_steps": 1808,
+       "gap_x": {
+        "p50": 2.95,
+        "p99": 11.99,
+        "max": 11.99
+       },
+       "paired_ttft": 1.0685,
+       "ttft_p99_change": 0.1118,
+       "throughput_change": -0.0246,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": true,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    },
+    "long_prompt": {
+     "baseline": "holon@c0",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon@c0": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 18685.23,
+        "p90": 18688.89,
+        "p99": 18688.89,
+        "max": 18688.89
+       },
+       "ttft_ms": {
+        "p50": 450.58,
+        "p90": 19664.46,
+        "p99": 19666.46,
+        "max": 19666.58
+       },
+       "tpot_p99_ms": 48.42,
+       "throughput_tok_s": 62.1,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 432.34,
+        "p90": 433.24,
+        "p99": 433.24,
+        "max": 433.24
+       },
+       "ttft_ms": {
+        "p50": 450.66,
+        "p90": 22320.61,
+        "p99": 22331.27,
+        "max": 22332.41
+       },
+       "tpot_p99_ms": 49.36,
+       "throughput_tok_s": 61.0,
+       "mixed_steps": 236,
+       "gap_x": {
+        "p50": 43.22,
+        "p99": 43.14,
+        "max": 43.14
+       },
+       "paired_ttft": 1.0008,
+       "ttft_p99_change": 0.1355,
+       "throughput_change": -0.0177,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": true,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    }
+   },
+   "verdict": {
+    "chunk_with_decode": 512,
+    "failing_bars": []
+   }
+  },
+  "rtx-3090/30b-q4_k_m": {
+   "source": "bench_release7-cap-30b-q4_k_m_rtx-3090_2026-10-15.json",
+   "bars": {
+    "agent": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 6.94,
+        "p90": 100.64,
+        "p99": 225.73,
+        "max": 269.33
+       },
+       "ttft_ms": {
+        "p50": 101.72,
+        "p90": 263.4,
+        "p99": 537.91,
+        "max": 584.96
+       },
+       "tpot_p99_ms": 14.64,
+       "throughput_tok_s": 77.2,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 6.93,
+        "p90": 79.97,
+        "p99": 134.16,
+        "max": 143.22
+       },
+       "ttft_ms": {
+        "p50": 102.62,
+        "p90": 273.39,
+        "p99": 489.85,
+        "max": 554.21
+       },
+       "tpot_p99_ms": 14.36,
+       "throughput_tok_s": 77.2,
+       "mixed_steps": 252,
+       "gap_x": {
+        "p50": 1.0,
+        "p99": 1.68,
+        "max": 1.88
+       },
+       "paired_ttft": 1.002,
+       "ttft_p99_change": -0.0893,
+       "throughput_change": 0.0,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": false,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    },
+    "long_prompt": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 11758.86,
+        "p90": 11845.84,
+        "p99": 11845.84,
+        "max": 11845.84
+       },
+       "ttft_ms": {
+        "p50": 194.96,
+        "p90": 12629.61,
+        "p99": 12727.48,
+        "max": 12741.63
+       },
+       "tpot_p99_ms": 22.64,
+       "throughput_tok_s": 133.5,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 373.74,
+        "p90": 375.55,
+        "p99": 375.55,
+        "max": 375.55
+       },
+       "ttft_ms": {
+        "p50": 198.67,
+        "p90": 14756.33,
+        "p99": 14770.31,
+        "max": 14771.11
+       },
+       "tpot_p99_ms": 24.06,
+       "throughput_tok_s": 125.7,
+       "mixed_steps": 236,
+       "gap_x": {
+        "p50": 31.46,
+        "p99": 31.54,
+        "max": 31.54
+       },
+       "paired_ttft": 1.0205,
+       "ttft_p99_change": 0.1605,
+       "throughput_change": -0.0584,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": true,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": false,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    }
+   },
+   "verdict": {
+    "chunk_with_decode": 0,
+    "failing_bars": [
+     "agent: gap \u2265 2\u00d7 (p99, max)"
+    ]
+   }
+  },
+  "rtx-3090/8b-q4_k_m": {
+   "source": "bench_release7-cap-8b-q4_k_m_rtx-3090_2026-10-15.json",
+   "bars": {
+    "agent": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 11.92,
+        "p90": 159.24,
+        "p99": 224.29,
+        "max": 315.14
+       },
+       "ttft_ms": {
+        "p50": 81.38,
+        "p90": 200.89,
+        "p99": 383.36,
+        "max": 435.74
+       },
+       "tpot_p99_ms": 15.16,
+       "throughput_tok_s": 76.6,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 11.96,
+        "p90": 104.7,
+        "p99": 140.38,
+        "max": 145.58
+       },
+       "ttft_ms": {
+        "p50": 85.97,
+        "p90": 215.27,
+        "p99": 418.46,
+        "max": 483.62
+       },
+       "tpot_p99_ms": 15.29,
+       "throughput_tok_s": 76.6,
+       "mixed_steps": 357,
+       "gap_x": {
+        "p50": 1.0,
+        "p99": 1.6,
+        "max": 2.16
+       },
+       "paired_ttft": 1.015,
+       "ttft_p99_change": 0.0916,
+       "throughput_change": 0.0,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": false,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    },
+    "long_prompt": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 11001.8,
+        "p90": 11063.24,
+        "p99": 11063.24,
+        "max": 11063.24
+       },
+       "ttft_ms": {
+        "p50": 158.33,
+        "p90": 11217.5,
+        "p99": 11265.08,
+        "max": 11272.75
+       },
+       "tpot_p99_ms": 22.06,
+       "throughput_tok_s": 137.9,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 304.0,
+        "p90": 309.31,
+        "p99": 309.31,
+        "max": 309.31
+       },
+       "ttft_ms": {
+        "p50": 156.4,
+        "p90": 12662.99,
+        "p99": 12710.82,
+        "max": 12711.93
+       },
+       "tpot_p99_ms": 22.8,
+       "throughput_tok_s": 132.8,
+       "mixed_steps": 236,
+       "gap_x": {
+        "p50": 36.19,
+        "p99": 35.77,
+        "max": 35.77
+       },
+       "paired_ttft": 1.034,
+       "ttft_p99_change": 0.1283,
+       "throughput_change": -0.037,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": true,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    }
+   },
+   "verdict": {
+    "chunk_with_decode": 0,
+    "failing_bars": [
+     "agent: gap \u2265 2\u00d7 (p99, max)"
+    ]
+   }
+  },
+  "rtx-4090/30b-mxfp4_moe": {
+   "source": "bench_release7-cap-30b-mxfp4_moe_rtx-4090_2026-10-15.json",
+   "bars": {
+    "agent": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 5.78,
+        "p90": 32.21,
+        "p99": 57.67,
+        "max": 66.28
+       },
+       "ttft_ms": {
+        "p50": 44.6,
+        "p90": 96.33,
+        "p99": 187.82,
+        "max": 214.14
+       },
+       "tpot_p99_ms": 8.77,
+       "throughput_tok_s": 78.2,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 5.78,
+        "p90": 32.04,
+        "p99": 44.95,
+        "max": 46.96
+       },
+       "ttft_ms": {
+        "p50": 45.86,
+        "p90": 98.17,
+        "p99": 194.04,
+        "max": 201.04
+       },
+       "tpot_p99_ms": 8.2,
+       "throughput_tok_s": 78.2,
+       "mixed_steps": 223,
+       "gap_x": {
+        "p50": 1.0,
+        "p99": 1.28,
+        "max": 1.41
+       },
+       "paired_ttft": 1.0018,
+       "ttft_p99_change": 0.0331,
+       "throughput_change": 0.0,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": false,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    },
+    "long_prompt": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 4611.72,
+        "p90": 4612.01,
+        "p99": 4612.01,
+        "max": 4612.01
+       },
+       "ttft_ms": {
+        "p50": 75.81,
+        "p90": 4743.05,
+        "p99": 4743.57,
+        "max": 4743.6
+       },
+       "tpot_p99_ms": 12.13,
+       "throughput_tok_s": 248.7,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 197.49,
+        "p90": 197.53,
+        "p99": 197.53,
+        "max": 197.53
+       },
+       "ttft_ms": {
+        "p50": 75.7,
+        "p90": 7298.34,
+        "p99": 7298.95,
+        "max": 7298.99
+       },
+       "tpot_p99_ms": 14.21,
+       "throughput_tok_s": 212.5,
+       "mixed_steps": 236,
+       "gap_x": {
+        "p50": 23.35,
+        "p99": 23.35,
+        "max": 23.35
+       },
+       "paired_ttft": 0.9999,
+       "ttft_p99_change": 0.5387,
+       "throughput_change": -0.1456,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": true,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": false,
+        "throughput within 5.0%": false,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    }
+   },
+   "verdict": {
+    "chunk_with_decode": 0,
+    "failing_bars": [
+     "agent: gap \u2265 2\u00d7 (p99, max)",
+     "long prompt: TTFT p99 \u2264 +25%"
+    ]
+   }
+  },
+  "rtx-4090/30b-q4_k_m-agent": {
+   "source": "bench_release7-cap-30b-q4_k_m-agent_rtx-4090_2026-10-15.json",
+   "bars": {
+    "agent": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 5.37,
+        "p90": 33.44,
+        "p99": 105.76,
+        "max": 109.3
+       },
+       "ttft_ms": {
+        "p50": 46.03,
+        "p90": 100.83,
+        "p99": 195.44,
+        "max": 226.38
+       },
+       "tpot_p99_ms": 8.4,
+       "throughput_tok_s": 78.2,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 4.44,
+        "p90": 33.52,
+        "p99": 55.95,
+        "max": 73.18
+       },
+       "ttft_ms": {
+        "p50": 46.49,
+        "p90": 103.39,
+        "p99": 208.24,
+        "max": 221.23
+       },
+       "tpot_p99_ms": 8.21,
+       "throughput_tok_s": 78.3,
+       "mixed_steps": 220,
+       "gap_x": {
+        "p50": 1.21,
+        "p99": 1.89,
+        "max": 1.49
+       },
+       "paired_ttft": 1.0013,
+       "ttft_p99_change": 0.0655,
+       "throughput_change": 0.0013,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": false,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    }
+   },
+   "verdict": {
+    "chunk_with_decode": 0,
+    "failing_bars": [
+     "agent: gap \u2265 2\u00d7 (p99, max)"
+    ],
+    "note": "agent trace only: the long prompt's 30K context did not fit"
+   }
+  },
+  "rtx-4090/8b-q4_k_m": {
+   "source": "bench_release7-cap-8b-q4_k_m_rtx-4090_2026-10-15.json",
+   "bars": {
+    "agent": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 7.89,
+        "p90": 52.59,
+        "p99": 84.56,
+        "max": 91.88
+       },
+       "ttft_ms": {
+        "p50": 38.39,
+        "p90": 81.04,
+        "p99": 145.86,
+        "max": 153.8
+       },
+       "tpot_p99_ms": 9.54,
+       "throughput_tok_s": 77.7,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 7.88,
+        "p90": 35.63,
+        "p99": 56.0,
+        "max": 58.52
+       },
+       "ttft_ms": {
+        "p50": 39.57,
+        "p90": 83.27,
+        "p99": 153.33,
+        "max": 180.03
+       },
+       "tpot_p99_ms": 9.47,
+       "throughput_tok_s": 77.7,
+       "mixed_steps": 316,
+       "gap_x": {
+        "p50": 1.0,
+        "p99": 1.51,
+        "max": 1.57
+       },
+       "paired_ttft": 1.0044,
+       "ttft_p99_change": 0.0512,
+       "throughput_change": 0.0,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": false,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    },
+    "long_prompt": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 3857.6,
+        "p90": 3859.07,
+        "p99": 3859.07,
+        "max": 3859.07
+       },
+       "ttft_ms": {
+        "p50": 57.93,
+        "p90": 3924.74,
+        "p99": 3926.14,
+        "max": 3926.36
+       },
+       "tpot_p99_ms": 12.31,
+       "throughput_tok_s": 273.3,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 152.92,
+        "p90": 153.09,
+        "p99": 153.09,
+        "max": 153.09
+       },
+       "ttft_ms": {
+        "p50": 57.85,
+        "p90": 5817.13,
+        "p99": 5821.59,
+        "max": 5822.31
+       },
+       "tpot_p99_ms": 12.5,
+       "throughput_tok_s": 241.7,
+       "mixed_steps": 236,
+       "gap_x": {
+        "p50": 25.23,
+        "p99": 25.21,
+        "max": 25.21
+       },
+       "paired_ttft": 0.9994,
+       "ttft_p99_change": 0.4828,
+       "throughput_change": -0.1156,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": true,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": false,
+        "throughput within 5.0%": false,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    }
+   },
+   "verdict": {
+    "chunk_with_decode": 0,
+    "failing_bars": [
+     "agent: gap \u2265 2\u00d7 (p99, max)",
+     "long prompt: TTFT p99 \u2264 +25%"
+    ]
+   }
+  },
+  "rtx-5080/30b-ud-iq3_xxs-agent": {
+   "source": "bench_release7-cap-30b-ud-iq3_xxs-agent_rtx-5080_2026-10-15.json",
+   "bars": {
+    "agent": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 4.67,
+        "p90": 50.34,
+        "p99": 97.81,
+        "max": 98.45
+       },
+       "ttft_ms": {
+        "p50": 57.83,
+        "p90": 136.06,
+        "p99": 289.71,
+        "max": 301.39
+       },
+       "tpot_p99_ms": 8.33,
+       "throughput_tok_s": 78.3,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 4.66,
+        "p90": 48.68,
+        "p99": 61.16,
+        "max": 65.71
+       },
+       "ttft_ms": {
+        "p50": 58.69,
+        "p90": 136.87,
+        "p99": 262.09,
+        "max": 323.01
+       },
+       "tpot_p99_ms": 8.01,
+       "throughput_tok_s": 78.3,
+       "mixed_steps": 210,
+       "gap_x": {
+        "p50": 1.0,
+        "p99": 1.6,
+        "max": 1.5
+       },
+       "paired_ttft": 1.0019,
+       "ttft_p99_change": -0.0953,
+       "throughput_change": 0.0,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": false,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    }
+   },
+   "verdict": {
+    "chunk_with_decode": 0,
+    "failing_bars": [
+     "agent: gap \u2265 2\u00d7 (p99, max)"
+    ],
+    "note": "agent trace only: the long prompt's 30K context did not fit"
+   }
+  },
+  "rtx-5080/8b-q4_k_m": {
+   "source": "bench_release7-cap-8b-q4_k_m_rtx-5080_2026-10-15.json",
+   "bars": {
+    "agent": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 7.23,
+        "p90": 75.16,
+        "p99": 123.74,
+        "max": 132.99
+       },
+       "ttft_ms": {
+        "p50": 51.03,
+        "p90": 122.41,
+        "p99": 222.55,
+        "max": 230.07
+       },
+       "tpot_p99_ms": 10.81,
+       "throughput_tok_s": 77.7,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 7.24,
+        "p90": 62.74,
+        "p99": 81.36,
+        "max": 112.52
+       },
+       "ttft_ms": {
+        "p50": 52.19,
+        "p90": 126.4,
+        "p99": 222.57,
+        "max": 230.51
+       },
+       "tpot_p99_ms": 10.52,
+       "throughput_tok_s": 77.7,
+       "mixed_steps": 276,
+       "gap_x": {
+        "p50": 1.0,
+        "p99": 1.52,
+        "max": 1.18
+       },
+       "paired_ttft": 1.003,
+       "ttft_p99_change": 0.0001,
+       "throughput_change": 0.0,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": false,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    },
+    "long_prompt": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 6129.73,
+        "p90": 6135.75,
+        "p99": 6135.75,
+        "max": 6135.75
+       },
+       "ttft_ms": {
+        "p50": 87.72,
+        "p90": 6242.55,
+        "p99": 6247.38,
+        "max": 6248.13
+       },
+       "tpot_p99_ms": 14.41,
+       "throughput_tok_s": 227.1,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 174.61,
+        "p90": 174.64,
+        "p99": 174.64,
+        "max": 174.64
+       },
+       "ttft_ms": {
+        "p50": 87.75,
+        "p90": 7141.36,
+        "p99": 7141.75,
+        "max": 7141.75
+       },
+       "tpot_p99_ms": 14.4,
+       "throughput_tok_s": 219.3,
+       "mixed_steps": 236,
+       "gap_x": {
+        "p50": 35.11,
+        "p99": 35.13,
+        "max": 35.13
+       },
+       "paired_ttft": 1.0003,
+       "ttft_p99_change": 0.1432,
+       "throughput_change": -0.0343,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": true,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    }
+   },
+   "verdict": {
+    "chunk_with_decode": 0,
+    "failing_bars": [
+     "agent: gap \u2265 2\u00d7 (p99, max)"
+    ]
+   }
+  },
+  "rtx-5080/8b-ud-iq3_xxs": {
+   "source": "bench_release7-cap-8b-ud-iq3_xxs_rtx-5080_2026-10-15.json",
+   "bars": {
+    "agent": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 5.72,
+        "p90": 63.36,
+        "p99": 108.9,
+        "max": 121.19
+       },
+       "ttft_ms": {
+        "p50": 45.28,
+        "p90": 119.53,
+        "p99": 222.49,
+        "max": 227.18
+       },
+       "tpot_p99_ms": 9.06,
+       "throughput_tok_s": 78.2,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 5.65,
+        "p90": 54.84,
+        "p99": 74.67,
+        "max": 77.6
+       },
+       "ttft_ms": {
+        "p50": 45.4,
+        "p90": 124.89,
+        "p99": 253.51,
+        "max": 259.39
+       },
+       "tpot_p99_ms": 8.84,
+       "throughput_tok_s": 78.2,
+       "mixed_steps": 268,
+       "gap_x": {
+        "p50": 1.01,
+        "p99": 1.46,
+        "max": 1.56
+       },
+       "paired_ttft": 1.003,
+       "ttft_p99_change": 0.1394,
+       "throughput_change": 0.0,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": false,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    },
+    "long_prompt": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 5950.21,
+        "p90": 5951.85,
+        "p99": 5951.85,
+        "max": 5951.85
+       },
+       "ttft_ms": {
+        "p50": 83.01,
+        "p90": 6063.05,
+        "p99": 6067.45,
+        "max": 6068.06
+       },
+       "tpot_p99_ms": 13.63,
+       "throughput_tok_s": 246.1,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 172.67,
+        "p90": 173.45,
+        "p99": 173.45,
+        "max": 173.45
+       },
+       "ttft_ms": {
+        "p50": 83.1,
+        "p90": 7031.4,
+        "p99": 7043.3,
+        "max": 7043.52
+       },
+       "tpot_p99_ms": 13.62,
+       "throughput_tok_s": 234.8,
+       "mixed_steps": 236,
+       "gap_x": {
+        "p50": 34.46,
+        "p99": 34.31,
+        "max": 34.31
+       },
+       "paired_ttft": 0.9998,
+       "ttft_p99_change": 0.1608,
+       "throughput_change": -0.0459,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": true,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    }
+   },
+   "verdict": {
+    "chunk_with_decode": 0,
+    "failing_bars": [
+     "agent: gap \u2265 2\u00d7 (p99, max)"
+    ]
+   }
+  },
+  "rtx-5090/30b-q4_k_m": {
+   "source": "bench_release7-cap-30b-q4_k_m_rtx-5090_2026-10-15.json",
+   "bars": {
+    "agent": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 2.94,
+        "p90": 25.06,
+        "p99": 81.68,
+        "max": 107.55
+       },
+       "ttft_ms": {
+        "p50": 32.78,
+        "p90": 81.22,
+        "p99": 140.4,
+        "max": 155.47
+       },
+       "tpot_p99_ms": 6.04,
+       "throughput_tok_s": 79.2,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 2.93,
+        "p90": 21.45,
+        "p99": 47.04,
+        "max": 51.39
+       },
+       "ttft_ms": {
+        "p50": 32.75,
+        "p90": 81.7,
+        "p99": 154.75,
+        "max": 155.93
+       },
+       "tpot_p99_ms": 5.91,
+       "throughput_tok_s": 79.2,
+       "mixed_steps": 172,
+       "gap_x": {
+        "p50": 1.0,
+        "p99": 1.74,
+        "max": 2.09
+       },
+       "paired_ttft": 1.0009,
+       "ttft_p99_change": 0.1022,
+       "throughput_change": 0.0,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": false,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    },
+    "long_prompt": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 3519.43,
+        "p90": 3524.13,
+        "p99": 3524.13,
+        "max": 3524.13
+       },
+       "ttft_ms": {
+        "p50": 66.21,
+        "p90": 3797.7,
+        "p99": 3801.92,
+        "max": 3802.45
+       },
+       "tpot_p99_ms": 8.86,
+       "throughput_tok_s": 340.5,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 113.54,
+        "p90": 113.64,
+        "p99": 113.64,
+        "max": 113.64
+       },
+       "ttft_ms": {
+        "p50": 66.15,
+        "p90": 4615.29,
+        "p99": 4626.66,
+        "max": 4628.47
+       },
+       "tpot_p99_ms": 9.37,
+       "throughput_tok_s": 322.0,
+       "mixed_steps": 236,
+       "gap_x": {
+        "p50": 31.0,
+        "p99": 31.01,
+        "max": 31.01
+       },
+       "paired_ttft": 1.0009,
+       "ttft_p99_change": 0.2169,
+       "throughput_change": -0.0543,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": true,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": false,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    }
+   },
+   "verdict": {
+    "chunk_with_decode": 0,
+    "failing_bars": [
+     "agent: gap \u2265 2\u00d7 (p99, max)"
+    ]
+   }
+  },
+  "rtx-5090/8b-q4_k_m": {
+   "source": "bench_release7-cap-8b-q4_k_m_rtx-5090_2026-10-15.json",
+   "bars": {
+    "agent": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 4.13,
+        "p90": 33.48,
+        "p99": 60.13,
+        "max": 61.38
+       },
+       "ttft_ms": {
+        "p50": 25.58,
+        "p90": 68.55,
+        "p99": 119.28,
+        "max": 123.81
+       },
+       "tpot_p99_ms": 5.43,
+       "throughput_tok_s": 79.0,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 4.14,
+        "p90": 28.47,
+        "p99": 39.79,
+        "max": 39.94
+       },
+       "ttft_ms": {
+        "p50": 26.18,
+        "p90": 69.28,
+        "p99": 122.9,
+        "max": 135.45
+       },
+       "tpot_p99_ms": 5.38,
+       "throughput_tok_s": 79.0,
+       "mixed_steps": 232,
+       "gap_x": {
+        "p50": 1.0,
+        "p99": 1.51,
+        "max": 1.54
+       },
+       "paired_ttft": 1.0017,
+       "ttft_p99_change": 0.0303,
+       "throughput_change": 0.0,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": false,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    },
+    "long_prompt": {
+     "baseline": "holon",
+     "baseline_rounds": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "ttft_bar": 1.15,
+     "throughput_bar": 0.05,
+     "arms": {
+      "holon": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 3235.7,
+        "p90": 3238.61,
+        "p99": 3238.61,
+        "max": 3238.61
+       },
+       "ttft_ms": {
+        "p50": 47.85,
+        "p90": 3301.0,
+        "p99": 3303.88,
+        "max": 3304.21
+       },
+       "tpot_p99_ms": 7.67,
+       "throughput_tok_s": 394.0,
+       "mixed_steps": 0
+      },
+      "holon@m512": {
+       "rounds": 4,
+       "gap_ms": {
+        "p50": 88.24,
+        "p90": 88.28,
+        "p99": 88.28,
+        "max": 88.28
+       },
+       "ttft_ms": {
+        "p50": 47.77,
+        "p90": 3674.38,
+        "p99": 3679.61,
+        "max": 3679.67
+       },
+       "tpot_p99_ms": 7.78,
+       "throughput_tok_s": 387.9,
+       "mixed_steps": 236,
+       "gap_x": {
+        "p50": 36.67,
+        "p99": 36.69,
+        "max": 36.69
+       },
+       "paired_ttft": 0.9996,
+       "ttft_p99_change": 0.1137,
+       "throughput_change": -0.0155,
+       "passes": {
+        "gap \u2265 2\u00d7 (p99, max)": true,
+        "paired TTFT \u2264 1.150": true,
+        "TTFT p99 \u2264 +25%": true,
+        "throughput within 5.0%": true,
+        "mixed steps > 0": true
+       }
+      }
+     }
+    }
+   },
+   "verdict": {
+    "chunk_with_decode": 0,
+    "failing_bars": [
+     "agent: gap \u2265 2\u00d7 (p99, max)"
+    ]
+   }
+  }
+ },
+ "verdict_rule": "\u00a716.1: agent trace gap \u2265 2\u00d7 (p99, max), paired TTFT, throughput, mixed steps; long prompt TTFT p99 \u2264 +25%; other entries of `passes` are mixed_bars.py's, not \u00a716.1's"
+}

@@ -536,7 +536,8 @@ of four RTX 5090 desktops failed in a step (thermal throttling, Xid 79). Plan §
 (ABI 1.0 at its step 6, the release-class locks and the MTP decision at step 7). Follow-up, not covered by D7's
 measurement: the a8 8B / 30B GGUF locks (the 8B Q4_K_M on the RTX 5080 is where M0.5 measured the 36 s stall) stay at
 `chunk_with_decode = 0` because only the 27B was measured; release step 7 measures cap 512 on them against §1.3's bars
-or records why not.
+or records why not. Measured at release step 7 (`docs/release.md` §16.5): the long prompt's stall falls 23–37× at 512, but the
+agent trace's gap bar (≥ 2×) fails on every such lock, whose agent gaps are already short, so they keep 0.
 
 ## 9. Kill / pivot criteria
 

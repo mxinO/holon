@@ -1,0 +1,139 @@
+{
+ "workload": "release7-mtp-decision",
+ "rule": "docs/release.md \u00a716.1 (release design D3)",
+ "command": "python bench/mtp_decision.py bench_release7-mtp-rtx-3090_rtx-3090_2026-10-15.json",
+ "sources": [
+  "bench_release7-mtp-rtx-3090_rtx-3090_2026-10-15.json"
+ ],
+ "trace": "claude_code",
+ "kv_tokens": {
+  "holon": 86672,
+  "holon@mtp": 73200
+ },
+ "rounds": 4,
+ "lost": {
+  "mtp": [],
+  "rerun": []
+ },
+ "power_target": null,
+ "per_round_ms": [
+  {
+   "holon": {
+    "tpot_p50": 29.69,
+    "gap_p95": 511.08,
+    "ttft_p95": 18751.64
+   },
+   "holon@mtp": {
+    "tpot_p50": 26.34,
+    "gap_p95": 1554.81,
+    "ttft_p95": 19434.37
+   }
+  },
+  {
+   "holon": {
+    "tpot_p50": 29.84,
+    "gap_p95": 503.62,
+    "ttft_p95": 17025.96
+   },
+   "holon@mtp": {
+    "tpot_p50": 27.08,
+    "gap_p95": 1560.28,
+    "ttft_p95": 17187.71
+   }
+  },
+  {
+   "holon": {
+    "tpot_p50": 29.87,
+    "gap_p95": 499.19,
+    "ttft_p95": 18570.85
+   },
+   "holon@mtp": {
+    "tpot_p50": 25.97,
+    "gap_p95": 1465.17,
+    "ttft_p95": 16857.61
+   }
+  },
+  {
+   "holon": {
+    "tpot_p50": 29.59,
+    "gap_p95": 511.28,
+    "ttft_p95": 18413.58
+   },
+   "holon@mtp": {
+    "tpot_p50": 26.22,
+    "gap_p95": 1491.35,
+    "ttft_p95": 17198.92
+   }
+  }
+ ],
+ "ratios": {
+  "tpot_p50": [
+   0.887,
+   0.9073,
+   0.8695,
+   0.8861
+  ],
+  "gap_p95": [
+   3.0422,
+   3.0981,
+   2.9351,
+   2.9169
+  ],
+  "ttft_p95": [
+   1.0364,
+   1.0095,
+   0.9077,
+   0.934
+  ]
+ },
+ "mean": {
+  "tpot_p50": 0.887493,
+  "gap_p95": 2.998082,
+  "ttft_p95": 0.971923
+ },
+ "se": {
+  "tpot_p50": 0.0077,
+  "gap_p95": 0.0433,
+  "ttft_p95": 0.0304
+ },
+ "tpot_gain": 0.1125,
+ "upper_90": {
+  "gap_p95": 3.069,
+  "ttft_p95": 1.0218
+ },
+ "passes": {
+  "tpot": true,
+  "gap_p95": false,
+  "ttft_p95": true
+ },
+ "verdict": "plain (the power estimate at 4 rounds: a mean fails, or no count up to 8 passes)",
+ "arms": {
+  "holon": {
+   "tpot_p50_ms_median_of_rounds": 29.77,
+   "gap_p99_ms_pooled": 1392.9,
+   "ttft_p99_ms_pooled": 21437.1,
+   "requests_per_round": [
+    225,
+    225,
+    225,
+    225
+   ],
+   "prefix_tokens_saved": 14257856,
+   "preemptions": 0
+  },
+  "holon@mtp": {
+   "tpot_p50_ms_median_of_rounds": 26.28,
+   "gap_p99_ms_pooled": 1685.2,
+   "ttft_p99_ms_pooled": 23323.3,
+   "requests_per_round": [
+    225,
+    225,
+    225,
+    225
+   ],
+   "prefix_tokens_saved": 14038464,
+   "preemptions": 0,
+   "accepted_per_k3_row": 1.704
+  }
+ }
+}

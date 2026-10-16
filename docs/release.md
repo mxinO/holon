@@ -2092,3 +2092,253 @@ Revised once after the step's reviewer read rev 1 (928d993), still before any re
     compares alternation with mixing on it. From §15.4–§15.5, the long-prompt TTFT p99 ratio MTP / plain at 512 was
     ≈ 1.05–1.12.
   - On the 5080, MTP's smaller KV pool adds evictions when two ≈ 25K-token sessions overlap.
+
+### 16.2 Desktops and clock screens
+
+One desktop per class, each in a CUDA 13.0 container running the fixed CI worktree (commits 3642a61 → aa26cb2; only
+`bench/` and this document changed between them). Clocks are SM MHz p10 / p50 under 60 s of 27B decode at batch 4;
+"slowdown" is the share of loaded samples under a thermal or hardware slowdown, "power cap" the share at the power
+limit.
+
+| class | before the work | after it | used |
+|---|---|---|---|
+| RTX 5080 | 2640 / 2640, slowdown 0, power cap 1.00 | 2640 / 2647, slowdown 0, power cap 0.99 | yes |
+| RTX 4090 (desktop A) | 255 / 330, slowdown 1.00 | — | no: thermally throttled |
+| RTX 4090 (desktop B) | 285 / 345, slowdown 1.00 | — | no: thermally throttled |
+| RTX 4090 (desktop C) | 2670 / 2685, slowdown 0, power cap 0 | 2670 / 2670, slowdown 0, power cap 0 | yes |
+| RTX 5090 | 2565 / 2647, slowdown 0, power cap 1.00 | 2160 / 2572 and, repeated, 2107 / 2550 (p10 / p50 0.84, 0.83), slowdown 0, power cap 1.00 | yes: a deviation (below) |
+| RTX 3090 (desktop C) | 1395 / 1440, slowdown 0.99, power cap 0.01 | — (fell off the bus: node failure during the 27B's cap bars) | yes, up to the failure: a deviation (below) |
+| RTX 3090 (desktop D) | 1650 / 1665, slowdown 0, power cap 1.00 | 1620 / 1650 after lock 1, 1620 / 1635 after lock 2; slowdown 0, power cap 1.00 | yes: the 27B cap bars and locks |
+
+- **The 3090 desktop** is step 3's desktop C (§13.5): under thermal slowdown in nearly every sample but at steady
+  clocks (p10 / p50 0.97), as there.
+- **Two deviations from §16.1's screen rule, kept with their reasons.** The 5090's after-screen fails the 0.9 ratio,
+  and desktop C has no after-screen. Desktop C's work (three locks, two cap cells, the MTP rounds) rests on its
+  before-screen; its locks are numerics, and its cap and MTP ratios are far from their thresholds (cap gaps 1.6–2.2×
+  against 2×, which fail anyway; MTP gap ratios 2.9–3.1 against 1.10).
+- **The 5090's after-screen dipped under its power cap** (no thermal slowdown), and a repeat confirmed it. Its decode
+  rate fell 1–3% (286 → 282 and 277 tok/s). Nothing it recorded rests on absolute clocks:
+  - its lock verdicts are numerics;
+  - its bars and MTP rounds are paired ABBA ratios, and the MTP record's plain TPOT held 13.79–13.92 ms over its four
+    rounds, the last of them minutes before the dip was measured;
+  - its MTP decision is not near a threshold (§16.6), and of its cap ratios only the 30B's gap max (2.09×) is near the
+    2× bar, on a cell its p99 (1.74×) fails anyway.
+
+### 16.3 The development classes, propagated (pins only)
+
+Every rtx-5080 and rtx-4090 lock was propagated at its own `[engine]` with nothing added (`holon_tools propagate
+--approve`: L2 against the floor of its path and KV format, the trace twice), then `holon_judge snapshot --runs 3` at
+the new lock's settings and pins. What moved is the pinned sources: the core's and every plugin's `src` (ABI 1.0, the
+`core_abi` of every manifest, step 6's cuts) and the plans' `uv_lock` (sha256:609cd0a7…). **Every snapshot trace is
+byte-identical to its lock's**, as expected where only pins move, and every L2 line equals M0.7's close (§17.2 of
+`docs/m07-perf.md`) to the printed digit. Record: `evidence/release7_locks_2026-10-16.json`.
+
+| class | lock | floor | top-1 (floor; budget) | KL p99 (floor; budget) | ΔPPL vs floor (budget) | trace | snapshot ×3 | s |
+|---|---|---|---|---|---|---|---|---|
+| RTX 5080 | Qwen3-30B-A3B UD-IQ3_XXS → 7 | mmq | 98.25% (98.33; ≥ 98.08) | 5.68e-2 (5.93e-2; ≤ 0.119) | +0.035% ± 0.127% (≤ 0.568%) | identical | identical | 173 |
+| RTX 5080 | Qwen3-8B Q4_K_M → 9 | mmq | 98.43% (98.36; ≥ 98.11) | 3.54e-2 (3.58e-2; ≤ 7.17e-2) | −0.056% ± 0.091% (≤ 0.477%) | identical | identical | 81 |
+| RTX 5080 | Qwen3-8B UD-IQ3_XXS → 9 | mmq | 98.90% (98.87; ≥ 98.62) | 1.33e-2 (1.53e-2; ≤ 3.06e-2) | +0.055% ± 0.077% (≤ 0.442%) | identical | identical | 69 |
+| RTX 5080 | Qwen3.8-27B UD-IQ3_S, q8_0 KV → 6 (C 512) | mmq, q8_0 KV | 97.50% (97.54; ≥ 97.29) | 0.639 (0.712; ≤ 1.42) | +0.009% ± 0.805% (≤ 2.001%) | identical | identical | 206 |
+| RTX 5080 | nvidia Qwen3-8B NVFP4 → 4 | mmq (W4A8) | 98.77% (98.69; ≥ 98.44) | 1.29e-2 (1.24e-2; ≤ 2.49e-2) | −0.096% ± 0.053% (≤ 0.359%) | identical | identical | 85 |
+| RTX 5080 | Qwen3-8B FP8 → 2 | W8A8 prefill | 98.14% (98.17; ≥ 97.92) | 4.26e-2 (4.18e-2; ≤ 8.37e-2) | −0.066% ± 0.127% (≤ 0.516%) | identical | identical | 88 |
+| RTX 4090 | Qwen3-8B bf16 → 13 | bf16 | 98.99% (98.93; ≥ 98.68) | 4.70e-3 (5.76e-3; ≤ 1.15e-2) | −0.076% ± 0.037% (≤ 0.343%) | identical | identical | 179 |
+| RTX 4090 | Qwen3-30B-A3B Q4_K_M → 7 | mmq | 98.26% (98.22; ≥ 97.97) | 6.11e-2 (5.88e-2; ≤ 0.118) | −0.083% ± 0.139% (≤ 0.588%) | identical | identical | 197 |
+| RTX 4090 | Qwen3.8-27B UD-Q4_K_M → 6 (C 512) | mmq | 97.11% (96.95; ≥ 96.70) | 0.893 (0.648; ≤ 1.30) | −1.822% ± 0.749% (≤ 2.123%) | identical | identical | 284 |
+| RTX 4090 | nvidia Qwen3-8B NVFP4 → 4 | mmq (W4A8) | 98.70% (98.69; ≥ 98.44) | 1.22e-2 (1.24e-2; ≤ 2.49e-2) | −0.100% ± 0.065% (≤ 0.359%) | identical | identical | 100 |
+| RTX 4090 | nvidia Qwen3-30B-A3B NVFP4 → 4 | mmq (W4A8) | 98.40% (98.36; ≥ 98.11) | 4.85e-2 (4.92e-2; ≤ 9.84e-2) | +0.104% ± 0.116% (≤ 0.503%) | identical | identical | 175 |
+| RTX 4090 | Qwen3-30B-A3B-2507 MXFP4_MOE → 3 | mmq (W4A8) | 98.43% (98.47; ≥ 98.22) | 2.64e-2 (2.81e-2; ≤ 5.63e-2) | +0.089% ± 0.089% (≤ 0.471%) | identical | identical | 193 |
+| RTX 4090 | Qwen3-8B FP8 → 2 | W8A8 prefill | 98.19% (98.17; ≥ 97.92) | 4.17e-2 (4.18e-2; ≤ 8.37e-2) | −0.127% ± 0.092% (≤ 0.481%) | identical | identical | 120 |
+
+The 4090's 27B carries M0.7's recorded drift unchanged (ΔPPL against the golden −1.80%, KL p99 0.893, inside the
+floor budget; `docs/m07-perf.md` §17.2): the same numbers, as a byte-identical trace implies.
+
+### 16.4 The release classes' locks (the **R** cells)
+
+Each written with `tune --class <nearest> --approve` from the nearest class's newest lock, at that lock's `[engine]`
+and the decided `chunk_with_decode` (§16.5) and MTP setting (§16.6), then snapshots ×3. `tune` re-picks the decode
+pins on the card (`attention.paged_decode`: Triton over FlashInfer on every class here). A trace "moved" is against
+the source lock, another class's: every one is new for its class. The 5090's bf16 lock 6 pinned pre-M0.7 code (B9),
+so its refresh carries M0.7's fusions too; its trace moved for that reason.
+
+| class | lock | from | top-1 (floor; budget) | KL p99 (floor; budget) | ΔPPL vs floor (budget) | snapshot ×3 | s |
+|---|---|---|---|---|---|---|---|
+| RTX 5090 | Qwen3-8B bf16 → 7 (refresh) | its lock 6 | 98.93% (98.93; ≥ 98.68) | 4.79e-3 (5.76e-3; ≤ 1.15e-2) | −0.047% ± 0.041% (≤ 0.353%) | identical | 152 |
+| RTX 5090 | Qwen3-8B Q4_K_M → 1 | rtx-5080 9 | 98.45% (98.36; ≥ 98.11) | 3.64e-2 (3.58e-2; ≤ 7.17e-2) | −0.035% ± 0.087% (≤ 0.469%) | identical | 112 |
+| RTX 5090 | Qwen3-30B-A3B Q4_K_M → 1 | rtx-4090 6 | 98.34% (98.22; ≥ 97.97) | 5.67e-2 (5.88e-2; ≤ 0.118) | −0.010% ± 0.110% (≤ 0.524%) | identical | 174 |
+| RTX 5090 | Qwen3.8-27B UD-Q4_K_M → 1 (C 512, plain) | rtx-4090 6 | 97.16% (96.95; ≥ 96.70) | 0.743 (0.648; ≤ 1.30) | +0.378% ± 0.685% (≤ 1.963%) | identical | 251 |
+| RTX 3090 | Qwen3-8B bf16 → 1 | rtx-4090 12 | 98.95% (98.93; ≥ 98.68) | 4.65e-3 (5.76e-3; ≤ 1.15e-2) | −0.027% ± 0.031% (≤ 0.328%) | identical | 223 |
+| RTX 3090 | Qwen3-8B Q4_K_M → 1 | rtx-5080 9 | 98.34% (98.36; ≥ 98.11) | 3.67e-2 (3.58e-2; ≤ 7.17e-2) | +0.015% ± 0.074% (≤ 0.435%) | identical | 170 |
+| RTX 3090 | Qwen3-30B-A3B Q4_K_M → 1 | rtx-4090 6 | 98.33% (98.22; ≥ 97.97) | 5.81e-2 (5.88e-2; ≤ 0.118) | +0.081% ± 0.133% (≤ 0.582%) | identical | 270 |
+| RTX 3090 | Qwen3.8-27B UD-Q4_K_M → 1 (C 0: invalid, below) | rtx-4090 6 | 97.10% (96.95; ≥ 96.70) | 0.750 (0.648; ≤ 1.30) | −0.382% ± 0.609% (≤ 1.774%) | identical | 465 |
+| RTX 3090 | Qwen3.8-27B UD-Q4_K_M → 2 (C 512, plain) | its lock 1 | 97.10% (96.95; ≥ 96.70) | 0.750 (0.648; ≤ 1.30) | −0.382% ± 0.609% (≤ 1.774%) | identical | 377 |
+| RTX 4090 | Qwen3-8B Q4_K_M → 1 | rtx-5080 9 | 98.47% (98.36; ≥ 98.11) | 3.63e-2 (3.58e-2; ≤ 7.17e-2) | −0.046% ± 0.093% (≤ 0.484%) | identical | 140 |
+
+**The 3090's 27B took two locks: a deviation.** Its cap bars (the only class M0.7 did not measure) first ran its
+arm against the 4090 source lock's own settings, which already set 512: an A/A (gap ×1.00, paired TTFT 1.000; not
+kept). A script took that for a failure and wrote lock 1 at `chunk_with_decode` 0. Re-run on the same desktop
+against an explicit 0 (`--backends holon@c0 holon@m512`), the bars pass: agent gap p99 / max 4310 / 4313 → 360 / 360
+ms (12×), paired TTFT 1.069 (bar 1.15), throughput −2.5%, long-prompt gap max 18.7 s → 433 ms (43×) at +13.6% TTFT
+p99, 1808 mixed steps (`evidence/bench_release7-cap-27b-ud-q4_k_m-c0_rtx-3090_2026-10-15.json`). Lock 2 sets 512 by
+`propagate` (L2 unchanged, a prefill check; trace moved by the mixed steps; snapshots identical ×3). Lock 1 stays in
+the history, approved on its own passing verdict. The 3090's MTP rounds ran against the 512 settings, the lock's
+now. No other cap cell had this baseline: every 8B / 30B lock sets 0, so its `holon` arm was today's 0.
+
+The 5090's and 3090's 30B and the 3090's bf16 started from the 4090's locks as they stood before its propagation (the
+4090 desktop came free last); `tune` takes only the source's `[engine]` and its pins that run here, so the source's
+outdated `src` pins carry nothing into the new lock (every one pins this tree; §16.9).
+
+### 16.5 `chunk_with_decode` on the a8 8B / 30B GGUF locks (plan §8a.1's follow-up)
+
+512 against today's 0, 4 rounds ABBA, at each lock's settings (§16.1); records
+`evidence/bench_release7-cap-<file>_<class>_2026-10-15.json`, bars `evidence/release7_cap-bars_2026-10-16.json`. The
+paired-TTFT bar is 1.15 and the throughput bar 5% in every cell (today's rounds vary far less than either).
+
+| class | file | agent: max gap p99 / max, today → 512 (×) | paired TTFT | agent tok/s | long prompt: gap max (×) | long TTFT p99 | long tok/s | mixed steps | verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| RTX 5080 | 8B Q4_K_M | 124 / 133 → 81 / 113 ms (1.52× / 1.18×) | 1.003 | +0.0% | 6136 → 175 ms (35×) | +14.3% | −3.4% | 276 | 0: agent gap |
+| RTX 5080 | 8B UD-IQ3_XXS | 109 / 121 → 75 / 78 ms (1.46× / 1.56×) | 1.003 | +0.0% | 5952 → 173 ms (34×) | +16.1% | −4.6% | 268 | 0: agent gap |
+| RTX 5080 | 30B UD-IQ3_XXS | 98 / 98 → 61 / 66 ms (1.60× / 1.50×) | 1.002 | +0.0% | not run (below) | — | — | 210 | 0: agent gap |
+| RTX 4090 | 8B Q4_K_M | 85 / 92 → 56 / 59 ms (1.51× / 1.57×) | 1.004 | +0.0% | 3859 → 153 ms (25×) | **+48.3%** | −11.6% | 316 | 0: agent gap, long TTFT |
+| RTX 4090 | 30B Q4_K_M | 106 / 109 → 56 / 73 ms (1.89× / 1.49×) | 1.001 | +0.1% | not run (below) | — | — | 220 | 0: agent gap |
+| RTX 4090 | 30B MXFP4_MOE | 58 / 66 → 45 / 47 ms (1.28× / 1.41×) | 1.002 | +0.0% | 4612 → 198 ms (23×) | **+53.9%** | −14.6% | 223 | 0: agent gap, long TTFT |
+| RTX 5090 | 8B Q4_K_M | 60 / 61 → 40 / 40 ms (1.51× / 1.54×) | 1.002 | +0.0% | 3239 → 88 ms (37×) | +11.4% | −1.6% | 232 | 0: agent gap |
+| RTX 5090 | 30B Q4_K_M | 82 / 108 → 47 / 51 ms (1.74× / 2.09×) | 1.001 | +0.0% | 3524 → 114 ms (31×) | +21.7% | −5.4% | 172 | 0: agent gap (p99) |
+| RTX 3090 | 8B Q4_K_M | 224 / 315 → 140 / 146 ms (1.60× / 2.16×) | 1.015 | +0.0% | 11063 → 309 ms (36×) | +12.8% | −3.7% | 357 | 0: agent gap (p99) |
+| RTX 3090 | 30B Q4_K_M | 226 / 269 → 134 / 143 ms (1.68× / 1.88×) | 1.002 | +0.0% | 11846 → 376 ms (32×) | +16.1% | −5.8% | 252 | 0: agent gap |
+
+- **Every lock keeps 0, by the rule fixed in §16.1.** The bar that fails everywhere is the agent trace's gap (≥ 2×
+  at p99 and max): on these models today's agent gaps are already short (58–315 ms; the 27B's were 1.2–2.1 s, M0.7
+  §15.4), so mixing has little to remove there. The prediction was wrong on both counts: it said the gap bars pass
+  everywhere (they fail everywhere), and that the long prompt's TTFT is the bar at risk, which held only on the 4090,
+  whose 8B and MXFP4_MOE fail it too (+48%, +54%).
+- **The stall the follow-up was about does fall:** the long prompt's gap max drops 23–37× (to 88–376 ms), at +11–22%
+  TTFT p99 on that prompt (the 4090's two: +48% and +54%) and 2–15% of its throughput. Whether to read the gap bar on the long
+  prompt for these models is a change of the bar after seeing results, so it goes to the lead (§16.10), not decided
+  here.
+- **Two cells could not run the long prompt** at its 30,208-token context: the 5080's 30B UD-IQ3_XXS ran out of GPU
+  memory at load in every round, and the 4090's 30B Q4_K_M ran out of KV units (`OutOfUnits`: 1622 < 1889; the
+  record keeps the error), where the same lock's settings fit the 3090's 30K run. Both were measured on the agent trace alone; their locks serve 16K
+  and 8K, below the long prompt anyway.
+- The bf16, NVFP4, FP8 locks keep 0 (§16.1). The plain 27B locks keep 512; the 3090's 27B, measured here, passes
+  (§16.4).
+
+### 16.6 MTP (D3): plain on every 27B lock
+
+Four ABBA rounds per class on `claude_code` (225 requests per arm and round, temperature 1.0, natural text), plain
+lock against MTP over it (§16.1). Records `evidence/bench_release7-mtp-<class>_<class>_2026-10-15.json`, decisions
+`evidence/release7_mtp-decision_<class>_2026-10-16.json`. Per-round ratios are MTP / plain; the bound is the one-sided
+90% upper bound; the p99s are pooled point estimates.
+
+| class (lock) | TPOT p50, plain → MTP (ratios) | gain (≥ 5% and ≥ 2 SE) | p95 max gap, plain → MTP (ratios; bound ≤ 1.10) | p95 TTFT (ratios; bound ≤ 1.10) | p99 gap / TTFT, plain → MTP | KV tokens, plain / MTP | accepted per k = 3 row | verdict |
+|---|---|---|---|---|---|---|---|---|
+| RTX 5080 (UD-IQ3_S, q8_0 KV) | 20.26 → 14.36 ms (0.706, 0.711, 0.726, 0.699) | 28.9% ± 0.6% ✓ | 308 → 938 ms (3.05, 3.05, 2.90, 3.06; **3.08**) ✗ | 10.0 → 10.1 s (1.025, 1.026, 0.991, 0.952; 1.027) ✓ | 836 → 1039 ms / 12.4 → 13.5 s | 57,920 / 39,424 | 1.66 | **plain** (a mean fails) |
+| RTX 4090 (UD-Q4_K_M) | 25.23 → 13.97 ms (0.562, 0.553, 0.547, 0.554) | 44.6% ± 0.3% ✓ | 428 → 613 ms (1.30, 1.43, 1.44, 1.38; **1.44**) ✗ | 6.5 → 7.0 s (1.101, 1.091, 1.060, 0.975; **1.104**) ✗ | 556 → 664 ms / 8.2 → 9.0 s | 61,312 / 49,072 | 1.73 | **plain** (a mean fails) |
+| RTX 5090 (UD-Q4_K_M, the 4090's settings) | 13.82 → 8.41 ms (0.599, 0.601, 0.611, 0.613) | 39.4% ± 0.4% ✓ | 383 → 459 ms (1.14, 2.82, 1.20, 1.21; **2.26**) ✗ | 5.2 → 5.2 s (0.975, 0.998, 1.019, 1.109; 1.073) ✓ | 435 → 508 ms / 6.1 → 7.0 s | 195,056 / 175,264 | 1.68 | **plain** (a mean fails) |
+| RTX 3090 (UD-Q4_K_M, the 4090's settings) | 29.77 → 26.28 ms (0.887, 0.907, 0.870, 0.886) | 11.2% ± 0.8% ✓ | 507 → 1523 ms (3.04, 3.10, 2.94, 2.92; **3.07**) ✗ | 18.5 → 17.2 s (1.036, 1.010, 0.908, 0.934; 1.022) ✓ | 1393 → 1685 ms / 21.4 → 23.3 s | 86,672 / 73,200 | 1.70 | **plain** (a mean fails) |
+
+- **As predicted, the gap decides.** MTP improves the median TPOT by 11–45%, past both TPOT criteria, and its p95
+  TTFT is non-inferior except on the 4090 (bounds 1.02–1.07; the 4090's 1.104). But its p95 per-request maximum gap is 1.1–3.1× plain's. The plain lock
+  mixes decode rows into its capped prefill steps, while MTP alternates a whole capped prefill step with a verify
+  step (M0.7 §15.5), so a speculating stream waits behind every prefill chunk of the other session.
+- **Since a mean fails, the power estimate stops the run at 4 rounds** (no count up to 8 could pass). The decision is
+  not near a threshold on any class. The 5090's round 1 has a plain-arm gap p95 of 163 ms against 383–388 in its
+  other rounds (that arm's per-request gaps cluster near its p95); without that round the ratios are 1.14–1.21, still
+  above 1.10.
+- **The 5080's KV pool** falls from 57,920 to 39,424 tokens under MTP, as D3 stated (58K → 39.6K). No preemption
+  happened in either arm on any class: two ≈ 25K-token sessions fit, prefix hits held (14.1M tokens saved in each
+  5080 arm), so the gap result is the scheduling, not memory.
+- **Acceptance** (1.66–1.73 accepted drafts per k = 3 verify row) is below the capture of M0.5's Claude Code session
+  (1.78), so the trace does not flatter MTP; the TPOT gain is if anything conservative.
+- **Both arms are recorded** (the tables above and the records). The locks stay plain: `chunk_with_decode` 512, no
+  drafter. MTP remains one flag set away (README, Options); D3's off switch is moot.
+
+### 16.7 Approvals and sweep times against plan §9's triggers
+
+- **Approvals, one per change, all under the owner's delegation with every verdict passing: 23.**
+  - The 13 development-class propagations (§16.3).
+  - The 9 **R** cells (§16.4): the 5090's bf16 refresh and three new locks; the 3090's four; the 4090's 8B Q4_K_M.
+  - One second change: the 3090's 27B to `chunk_with_decode` 512 after its invalid first bars (§16.4). Otherwise the
+    cap stayed 0 (§16.5) and MTP off (§16.6), and every lock was written once at its decided settings.
+- **Sweep time per class** (lock writes with their snapshots ×3, excluding the bars and MTP rounds):
+
+  | class | sweep |
+  |---|---|
+  | RTX 5080 | 11.7 min (6 locks) |
+  | RTX 4090 | 20.8 + 2.3 min (8 locks) |
+  | RTX 5090 | 2.5 + 4.8 + 4.2 min (4 locks) |
+  | RTX 3090 | 11.1 + 7.8 + 6.3 min (5 locks) |
+
+  Each is under the 30-minute trigger.
+- **The approvals trigger fires** again: 23 approvals in a day against "> 1 / day", as at M0.7's close (13). It is
+  recorded, not a blocker (§6); async propagation is v1's. A release refresh is one approval per lock per class while
+  changed-line coverage is not recorded (design §4.6).
+- **Machine time** besides the sweeps:
+  - the cap bars took about 30 min per cell (8B / 30B) and 1 h for the 3090's 27B (twice, §16.4);
+  - the MTP rounds took 1.2 h (5090), 1.9 h (5080), 1.6 h (4090) and 3.1 h (3090) for 4 rounds.
+
+### 16.8 Review
+
+One reviewer on the step's method and code (the bench changes and this section), with re-reviews until no finding
+remained.
+- **Rev 1 of §16.1 and `bench/mtp_decision.py`: no blocker, five majors, all fixed before any result was read**
+  (the first cap runs had started, with the correct arms; their bars do not depend on the fixes).
+  - The power step was recomputed at every look; it now comes from the first 4 rounds only.
+  - The corpus prompts repeated 53% of a context, which inflates MTP's acceptance; turns are now one walk per session.
+  - Records were combined unchecked: duplicates, other experiments and the temperature are now refused.
+  - A crashed arm was dropped silently, and "on" was possible before 4 rounds; both are now refused.
+  - The written commands were incomplete; the cap command, as written, ran an A/A.
+- **Rev 1's minors:**
+  - the verifier's rationale was wrong for deterministic drafts, so the arm uses the exact-match verifier, M0.5's and
+    §15.5's;
+  - the cold first turns and the checkpoint behaviour are named, with prefix hits and preemptions reported;
+  - the lock-write order and the 3090's unmeasured 27B cap (now measured);
+  - Claude Code's longer outputs;
+  - the KV sources.
+- **Rev 2: one major, fixed.** Rounds run past the power target gave the rule a second look. The target is now rounded
+  up to an even count and decided once, and more rounds are refused. Its minors were also fixed: plain-arm faults are
+  re-run instead of counted against MTP, a record without a lock is refused, and the first record must hold the
+  estimate's rounds.
+- **Rev 3: one minor and two nits, fixed.** A re-run after an early plain-arm fault was blocked; a lost MTP arm now
+  gives plain at once; the re-run's round count is stated.
+- **Found by the local smoke, after rev 3 and before any MTP measurement** (the first cap bars, which do not use the
+  trace, had finished): open arrivals saturated a slow card, so the
+  trace became two closed-loop clients (§16.1).
+- **The final review of the aggregate change** (records, locks, this section, README): no blocker; three majors —
+  the 3090's 27B baseline (§16.4), two cited records not yet written, the clock deviations unlabelled — and four
+  minors (the prediction reported selectively, the long-prompt reading's coverage, the order of the lock commits,
+  "before any measurement"), all fixed; its re-check found nothing above nit, and the two nits (the bars record's
+  verdicts, this line) are fixed.
+
+### 16.9 `check_locks --release`, suite and CI
+
+- `python scripts/ci/check_locks.py --release`: **passes** — every newest lock (each model × class) pins this tree's
+  sources.
+- Full GPU suite (two RTX A5000s, the release uv venv; `pytest core std plugins judge testing tools`) at aa26cb2, whose
+  code equals the final tree's: **1221 passed, 65 skipped in 18 min 53 s** (1217 / 65 at step 6's 826287b; its
+  later review rounds added harness tests). This step changes no code outside `bench/`.
+- `scripts/ci/run_all.sh main`: green with every lock in (import contracts 8 kept).
+
+### 16.10 For the lead
+
+1. **`chunk_with_decode` on the 8B / 30B GGUF locks stays 0 everywhere (§16.5)**, by the bars fixed before measuring:
+   the agent trace's gap bar (≥ 2×) fails on every cell because those agent gaps are already short. The long prompt's
+   stall (today 3.2–11.8 s at a 30K prompt; M0.5 saw 36 s) still falls 23–37× at 512 for +11–22% of that prompt's TTFT
+   (+48–54% on the 4090's 8B and MXFP4_MOE). Reading the gap bar on the long prompt would set 512 on 6 of the 8 cells
+   measured there (not the 4090's two; the 5080's 30B UD-IQ3_XXS and the 4090's 30B Q4_K_M have no long-prompt data) —
+   a change of the bar after seeing results, so yours to decide; it would cost one approval per lock changed.
+2. **MTP is off in every 27B lock (§16.6).** It is 11–45% faster per token, but a speculating stream's p95 longest
+   pause is 1.1–3.1× plain's because verify steps alternate with capped prefill steps instead of mixing (M0.7 §9's
+   follow-up, mixing verify rows into prefill steps, is what would change this). On the 4090 its p95 TTFT bound
+   (1.104) also fails.
+3. **The approvals trigger fired** (23 in a day); every sweep was under 30 min (§16.7).
+4. **Desktops:** two 4090 desktops were thermally throttled to ≈ 330 MHz and rejected (≈ 1.5 h lost in the queue);
+   the 3090 that ran most of the 3090 work fell off the bus during the 27B's cap bars, which were re-run from the
+   start on another, steady 3090, so it has no after-screen; the 5090's after-screen dipped under its power cap. Both
+   are recorded as deviations from §16.1's screen rule (§16.2).
+5. **The 3090's 27B took two approvals** (§16.4): its first cap run compared 512 with 512, a script wrote lock 1 at 0
+   from it, and the corrected run (against 0) passed, so lock 2 sets 512. Lock 1 stays in the history.
+6. **Bench changes that outlive the step:** `--corpus` replays now walk the corpus per session, so corpus-based records
+   taken before this step do not replay to the same prompts (bench/README says so); traces may chain sessions
+   (`after`).
+7. **Not done here, as planned:** the benchmark suite (step 8), the clean installs (step 10). The README's lock table
+   is rewritten (every model per card: this card's lock, borrowed or neither); the performance section stays step 8's.
