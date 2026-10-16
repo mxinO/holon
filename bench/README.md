@@ -139,6 +139,18 @@ python bench/demo/run.py --server http://127.0.0.1:8000 --gpu-class rtx-5080 --r
     --out evidence/demo_rtx-5080_<date>.json
 ```
 
+`demo/pi_run.py` is a report-only test with the pi coding agent instead (OpenAI chat completions, through
+`capture_proxy.py --metrics`, which adds each request's prefix tokens saved): D7's task scored as D7, and a
+`workloads` task on a copy of this directory's `workloads.py` and `driver.py` with a seeded suite and the harness's
+own tests (`demo/workloads_task/`). `--report` adds the speed and endpoint summary to the record
+(`docs/agent-test-pi-rtx5090.md`).
+
+```bash
+python bench/demo/pi_run.py --server http://127.0.0.1:8000 --gpu-class rtx-5090 --pi <prefix>/node_modules/.bin/pi \
+    --task demo --runs 3 --out evidence/agent_test_pi_rtx-5090_<date>.json
+python bench/demo/pi_run.py --report evidence/agent_test_pi_rtx-5090_<date>.json
+```
+
 ## Reproduce
 
 ```bash
