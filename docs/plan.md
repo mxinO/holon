@@ -622,6 +622,10 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   where templates or agents keep the reasoning in later prompts and answers are long. It needs the answer's tokens
   as the template re-renders them (a checkpoint at the last aligned position the next prompt shares) and a payload
   unit per finished request.
+- **One version file:** a root `VERSION` read by every distribution at build time (hatchling's version source),
+  `holon.__version__` from the installed metadata, and the plan's runtime-closure hash reading `VERSION` for the
+  workspace's own packages (`uv.lock` records them as dynamic). It changes the core, so it lands with the next relock
+  (with the item below); until then `scripts/bump_version.py` sets every version at once.
 - **Locks pin only the code that can change outputs** (kernels, model math, scheduling, sampling), not version
   strings, comments or response-reporting fields. Today a unit's `src` hashes every source file of its directory, the
   core's included, so v0.1.1 (a `TokenDelta` field for usage reporting, a comment, the version string) outdated all 22

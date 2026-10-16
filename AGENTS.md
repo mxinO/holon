@@ -54,6 +54,8 @@ for the item at hand, never as required reading.
 
 - Sign off every commit and sign it: `git commit -S -s`.
 - Name no coding agent as an author or co-author.
+- Bump the version with `python scripts/bump_version.py X.Y.Z` (every `pyproject.toml`, `holon.__version__`,
+  `uv.lock`); CI's `check_version.py` fails if they disagree.
 
 ## Third-party code
 
