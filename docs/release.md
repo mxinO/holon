@@ -3376,8 +3376,8 @@ Each class's 27B lock was propagated at its own `[engine]` plus `--max-model-len
   on an RTX A5000 (sm_86) the 32K and 48K settings record one trace (the record's `trace_check`). Its L2 moved with it
   (ΔPPL vs floor −0.382% → −1.420%, KL p99 0.750 → 0.733, inside the budget). The 3090's 8B and 30B traces did not move
   on this desktop (§19.2): only the 27B's differs between the two desktops. Approved as a passing verdict whose trace
-  change is explained; the lead may prefer to treat a trace that differs across desktops of one class as an item for
-  v1's `isolation-check` (plan §8b.1).
+  change is located to the desktop (cause not identified); a trace that differs across desktops of one class is an item
+  for v1's `isolation-check` (plan §8b.1).
 - **The published numbers stand.** Step 8 served the 27B at the traces' 30,208-token context, not the lock's (§17.1),
   and step 9's demo ran at 32K; a larger `max_model_len` changes the RoPE table's length and the block tables' width,
   not the kernels (the traces above are byte-identical).
