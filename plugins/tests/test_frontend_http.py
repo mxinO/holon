@@ -283,6 +283,57 @@ def test_chat(http, bundle):
     assert body["usage"]["prompt_tokens"] == len("<user>Hi<assistant>")
 
 
+def test_developer_messages_are_system_messages(http, bundle):
+    """OpenAI's `developer` role (sent by pi for reasoning models) reaches the template as `system`: the leading run
+    joins one system prompt, a later one stays a later system message; Responses' instructions join it too."""
+    messages = [{"role": "system", "content": "A"}, {"role": "developer", "content": "B"},
+                {"role": "user", "content": "Hi"}, {"role": "developer", "content": "C"}]
+    assert http.post("/v1/chat/completions", json={"messages": messages}).status_code == 200
+    assert bundle.rendered[-1][0] == [{"role": "system", "content": "A\nB"}, {"role": "user", "content": "Hi"},
+                                      {"role": "system", "content": "C"}]
+    assert http.post("/v1/responses", json={"instructions": "A", "input": [
+        {"role": "developer", "content": "B"}, {"role": "user", "content": "Hi"}]}).status_code == 200
+    assert bundle.rendered[-1][0] == [{"role": "system", "content": "A\nB"}, {"role": "user", "content": "Hi"}]
+
+
+class EffortBundle(Bundle):
+    """A template with effort levels, as Qwen3.8's: it refuses any other level and writes the one it gets."""
+
+    def render_chat(self, messages, tools=None, add_generation_prompt=True, **kw):
+        if kw.get("reasoning_effort", "xhigh") not in ("low", "medium", "xhigh"):
+            raise ValueError(f"Unexpected reasoning effort {kw['reasoning_effort']}")
+        ids = super().render_chat(messages, tools, add_generation_prompt, **kw)
+        return [*ids, *self.tokenizer.encode(kw.get("reasoning_effort", ""))]
+
+
+@pytest.mark.parametrize("bundle_type", [EffortBundle, Bundle])
+def test_reasoning_effort_reaches_the_template(bundle_type):
+    """Each dialect's effort field sets the template's level: a level the template takes as it is, another one of
+    the clients' scale as the nearest it takes (`minimal` the lowest), anything else a 400 naming the levels; none
+    keeps the template's default, and `chat_template_kwargs` wins. A template without levels ignores the scale."""
+    bundle = bundle_type()
+    http = TestClient(build_app(FakeEngine(max_prompt=4096), bundle))
+    user = [{"role": "user", "content": "Hi"}]
+
+    def chat(**fields):
+        r = http.post("/v1/chat/completions", json={"messages": user} | fields)
+        return r.status_code, bundle.rendered[-1][2] if r.status_code == 200 else r.json()["error"]["message"]
+
+    levels = bundle_type is EffortBundle
+    assert chat() == (200, {})
+    for asked, level in (("medium", "medium"), ("minimal", "low"), ("high", "xhigh"), ("max", "xhigh")):
+        assert chat(reasoning_effort=asked) == (200, {"reasoning_effort": level} if levels else {})
+    assert chat(reasoning_effort="high", chat_template_kwargs={"reasoning_effort": "low"}) == (
+        200, {"reasoning_effort": "low"})
+    status, message = chat(reasoning_effort="banana")
+    assert status == 400 and "minimal, low, medium, high, xhigh, max" in message
+    assert ("takes low, medium, xhigh" in message) == levels
+    r = http.post("/v1/messages", json={"max_tokens": 8, "messages": user, "output_config": {"effort": "high"}})
+    assert r.status_code == 200 and bundle.rendered[-1][2] == ({"reasoning_effort": "xhigh"} if levels else {})
+    r = http.post("/v1/responses", json={"input": "Hi", "reasoning": {"effort": "low"}})
+    assert r.status_code == 200 and bundle.rendered[-1][2] == ({"reasoning_effort": "low"} if levels else {})
+
+
 def test_chat_stream_n2_usage(http):
     r = http.post("/v1/chat/completions", json={
         "messages": [{"role": "user", "content": "Hi"}], "n": 2, "stream": True,
@@ -829,6 +880,66 @@ def test_bundle_formats_follow_the_template(name, module, fmt):
     text = bundle.tokenizer.decode(ids)
     rendered = text[text.rindex("<tool_call>"):].rstrip()               # the template lists the format first
     assert _answer(_coalesced(TOOLS[fmt]([WEATHER]).feed(rendered, final=True))) == [("call", "get_weather", args)]
+
+
+PI_TOOLS = [{"type": "function", "function": {"name": "read", "description": "Read a file", "strict": False,
+                                               "parameters": {"type": "object", "properties": {
+                                                   "path": {"type": "string"}}, "required": ["path"]}}},
+            {"type": "function", "function": {"name": "bash", "description": "Run a command", "strict": False,
+                                              "parameters": {"type": "object", "properties": {
+                                                  "command": {"type": "string"}}, "required": ["command"]}}}]
+
+
+@pytest.mark.parametrize("repo, file, module, levels", [
+    ("Qwen/Qwen3-8B", None, "qwen3", None),
+    ("unsloth/Qwen3-8B-GGUF", "Qwen3-8B-Q4_K_M.gguf", "qwen3", None),
+    ("Qwen/Qwen3-30B-A3B", None, "qwen3_moe", None),
+    ("unsloth/Qwen3-30B-A3B-GGUF", "Qwen3-30B-A3B-Q4_K_M.gguf", "qwen3_moe", None),
+    ("Qwen/Qwen3.5-9B", None, "qwen3_5", None),
+    ("Qwen/Qwen3.8-27B", None, "qwen3_5", ("low", "medium", "xhigh")),
+    ("unsloth/Qwen3.8-27B-GGUF", "Qwen3.8-27B-UD-Q4_K_M.gguf", "qwen3_5", ("low", "medium", "high", "xhigh"))])
+def test_pi_requests_keep_their_system_prompt_on_every_shipped_template(repo, file, module, levels):
+    """pi's request shape for a reasoning model (a `developer` system prompt, text-part user content, a replayed
+    assistant turn with `reasoning_content` and tool calls, `reasoning_effort`) renders on every shipped template with
+    its system prompt kept and no 400 (the HF Qwen3.8 / 3.5 templates refuse `developer`, the Qwen3 ones drop it);
+    the Qwen3.8 templates' effort levels are read off them and change the prompt."""
+    import importlib
+    import types
+
+    from transformers import AutoTokenizer
+
+    snap = max(pathlib.Path.home().glob(f".cache/huggingface/hub/models--{repo.replace('/', '--')}/snapshots/*"),
+               default=None)
+    if snap is None or (file and not (snap / file).exists()):
+        pytest.skip(f"needs {repo} {file or ''} in the local Hugging Face cache")
+    if file:
+        from holon_std.weights.gguf.source import GGUFSource
+        source = GGUFSource(snap / file)
+    else:
+        tok = AutoTokenizer.from_pretrained(snap)
+        source = types.SimpleNamespace(name=repo, tokenizer=lambda: tok, eos_token_ids=frozenset())
+    bundle = importlib.import_module(f"holon_plugins.models.{module}.bundle").Bundle(source)
+    engine = FakeEngine(max_prompt=1 << 20)
+    http = TestClient(build_app(engine, bundle))
+    call = {"id": "call_1", "type": "function", "function": {"name": "read", "arguments": '{"path": "a.py"}'}}
+    messages = [{"role": "developer", "content": "You are pi. SYSTEM-PROMPT-MARKER"},
+                {"role": "user", "content": [{"type": "text", "text": "Fix the tests."}]},
+                {"role": "assistant", "content": None, "reasoning_content": "Read it first.", "tool_calls": [call]},
+                {"role": "tool", "content": "print(1)", "tool_call_id": "call_1"}]
+
+    def prompt(**fields):
+        r = http.post("/v1/chat/completions", json={
+            "messages": messages, "tools": PI_TOOLS, "stream": True, "stream_options": {"include_usage": True},
+            "store": False, "max_completion_tokens": 64} | fields)
+        assert r.status_code == 200, r.text
+        return bundle.tokenizer.decode(engine.requests[-1][0])
+
+    assert prompt(reasoning_effort="medium").count("SYSTEM-PROMPT-MARKER") == 1
+    from holon_plugins.frontends.http.pipeline import Efforts
+    assert Efforts(bundle).levels == levels
+    if levels:
+        assert prompt(reasoning_effort="low") != prompt(reasoning_effort="xhigh") == prompt()
+        assert prompt(reasoning_effort="minimal") == prompt(reasoning_effort="low")
 
 
 # -- round trips: a tiny Qwen3 on the CPU, Qwen3-0.6B on the GPU, served through the app ----------------------------

@@ -2,7 +2,8 @@
 
 Unknown fields are ignored, since OpenAI clients send many; known ones we cannot honour yet are rejected rather than
 silently changing what a request means. Extensions follow vLLM's names (top_k, min_p, repetition_penalty,
-stop_token_ids, ignore_eos, chat_template_kwargs, return_token_ids).
+stop_token_ids, ignore_eos, chat_template_kwargs, return_token_ids). `developer` messages are system messages and
+`reasoning_effort` sets the template's effort level (`pipeline.system_first`, `pipeline.Efforts`).
 """
 from __future__ import annotations
 
@@ -101,6 +102,7 @@ class ChatRequest(GenerationRequest):
     logprobs: bool = False
     top_logprobs: int | None = Field(None, ge=0, le=20)
     chat_template_kwargs: dict[str, Any] = {}
+    reasoning_effort: str | None = None                 # to the template's level (pipeline.Efforts)
 
     @field_validator("messages")
     @classmethod
@@ -132,7 +134,7 @@ class ChatRequest(GenerationRequest):
     def conversation(self) -> Conversation:
         choice = self.tool_choice or ("auto" if self.tools else "none")
         return Conversation(self.messages, self.tools or [], choice, self.parallel_tool_calls, self.response_format,
-                            self.chat_template_kwargs)
+                            self.chat_template_kwargs, self.reasoning_effort)
 
     def params(self, ext: dict[str, Any]) -> SamplingParams:
         logprobs = (self.top_logprobs or 0) if self.logprobs else None

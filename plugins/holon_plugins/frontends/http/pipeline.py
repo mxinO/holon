@@ -27,6 +27,8 @@ from .web import BadRequest
 
 KEY = "grammar.constraint@1"        # the constraint resource (D6), served by the selected logits processor
 _TAIL = 16                          # prompt tokens whose text tells whether the template opened the reasoning
+# Reasoning-effort levels OpenAI's and Anthropic's clients send, lowest first (`Efforts`).
+SCALE = ("minimal", "low", "medium", "high", "xhigh", "max")
 
 
 @dataclasses.dataclass
@@ -40,6 +42,52 @@ class Conversation:
     parallel_tool_calls: bool = True
     response_format: dict[str, Any] | None = None       # a json_schema or json_object constraint
     template_kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
+    reasoning_effort: str | None = None                  # the dialect's effort field (`Efforts`)
+
+
+class Efforts:
+    """The reasoning-effort levels the bundle's chat template takes (its `reasoning_effort` variable), read off the
+    template once, when a request first names an effort: the levels of `SCALE` it renders, if it refuses an unknown
+    one; every level, if some level changes the prompt but nothing is refused; none, if no level changes it (the
+    template has no effort setting)."""
+
+    def __init__(self, bundle: FrontendBundle) -> None:
+        self.bundle = bundle
+        self._levels: tuple[str, ...] | None = None
+        self._read = False
+
+    @property
+    def levels(self) -> tuple[str, ...] | None:
+        if not self._read:
+            self._levels, self._read = self._probe(), True
+        return self._levels
+
+    def _probe(self) -> tuple[str, ...] | None:
+        def render(**kw: Any) -> list[int] | None:
+            try:
+                return self.bundle.render_chat([{"role": "user", "content": "Hi"}], **kw)
+            except Exception:  # noqa: BLE001 — a template refusing the value
+                return None
+        rendered = {level: render(reasoning_effort=level) for level in SCALE}
+        if render(reasoning_effort="holon-unknown-level") is None:
+            return tuple(level for level, ids in rendered.items() if ids is not None) or None
+        return SCALE if any(ids != render() for ids in rendered.values()) else None
+
+    def resolve(self, value: str) -> str | None:
+        """The template's level for a requested effort: the level itself if the template takes it, else the nearest
+        level it takes on `SCALE` (the higher of two as near; so `minimal` is the lowest one). None for a template
+        without levels: the effort is accepted and has no effect, as before. A value off the scale is refused."""
+        levels = self.levels
+        if value not in SCALE:
+            takes = f"; this model's template takes {', '.join(levels)}, the others map to the nearest" if levels \
+                else ""
+            raise BadRequest(f"reasoning_effort {value!r}: one of {', '.join(SCALE)}{takes}")
+        if levels is None:
+            return None
+        if value in levels:
+            return value
+        at = SCALE.index(value)
+        return min(levels, key=lambda level: (abs(SCALE.index(level) - at), -SCALE.index(level)))
 
 
 class Chat:
@@ -50,7 +98,7 @@ class Chat:
     or a strict tool — the call envelope, and each call's arguments by its schema (strict for a strict tool) — or for
     a response format; the two together are refused."""
 
-    def __init__(self, bundle: FrontendBundle, conv: Conversation) -> None:
+    def __init__(self, bundle: FrontendBundle, conv: Conversation, efforts: Efforts | None = None) -> None:
         tools = [] if conv.tool_choice == "none" else conv.tools
         names = [t["function"]["name"] for t in tools]
         named = conv.tool_choice.get("name") if isinstance(conv.tool_choice, dict) else None
@@ -58,8 +106,12 @@ class Chat:
             raise BadRequest(f"tool_choice {conv.tool_choice!r} needs tools")
         if named is not None and named not in names:
             raise BadRequest(f"tool_choice names {named!r}, which is not among the tools")
+        kwargs = conv.template_kwargs
+        if conv.reasoning_effort is not None and "reasoning_effort" not in kwargs:     # the raw knob wins
+            level = (efforts or Efforts(bundle)).resolve(conv.reasoning_effort)
+            kwargs = kwargs | ({"reasoning_effort": level} if level else {})
         try:
-            self.ids = bundle.render_chat(conv.messages, tools=tools or None, **conv.template_kwargs)
+            self.ids = bundle.render_chat(system_first(conv.messages), tools=tools or None, **kwargs)
         except Exception as e:  # noqa: BLE001 — a template that rejects the conversation is a client error
             raise BadRequest(f"chat template: {e}") from e
         self.tail = bundle.tokenizer.decode(self.ids[-_TAIL:])
@@ -92,6 +144,18 @@ class Chat:
     def parser(self) -> Parse:
         reasoning = self.reasoning(self.tail, self.ends) if self.reasoning else None
         return Parse(reasoning, formats.TOOLS[self.tool_format](self.tools) if self.tool_format else None)
+
+
+def system_first(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """OpenAI's `developer` messages as `system` ones (the chat templates know only `system`): the leading run of them
+    becomes one system message, its texts joined by newlines; a later one stays where it is, as a later system
+    message does."""
+    messages = [{**m, "role": "system"} if m.get("role") == "developer" else m for m in messages]
+    lead = next((i for i, m in enumerate(messages) if m.get("role") != "system"), len(messages))
+    if lead < 2:
+        return messages
+    text = "\n".join(m.get("content") or "" for m in messages[:lead])
+    return [{"role": "system", "content": text}, *messages[lead:]]
 
 
 class Parse:

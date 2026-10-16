@@ -24,7 +24,7 @@ from holon.api import (
     ToolCallStart,
 )
 
-from .pipeline import Blocks, Chat, pieces
+from .pipeline import Blocks, Chat, Efforts, pieces
 from .schemas import ChatRequest, CompletionRequest, GenerationRequest
 from .stream import Piece, generate
 from .web import BadRequest, EventStream, collect, failure, rejected, unless_disconnected
@@ -34,7 +34,7 @@ Row = tuple[str, float | None, list[tuple[str, float]] | None]
 MASKED = -9999.0       # the logprob reported for a token a constrained request may not take (−inf: not JSON)
 
 
-def router(client: EngineClient, bundle: FrontendBundle, model_id: str) -> APIRouter:
+def router(client: EngineClient, bundle: FrontendBundle, model_id: str, efforts: Efforts) -> APIRouter:
     r = APIRouter()
     tok = bundle.tokenizer
 
@@ -53,7 +53,7 @@ def router(client: EngineClient, bundle: FrontendBundle, model_id: str) -> APIRo
 
     @r.post("/v1/chat/completions")
     async def chat(req: ChatRequest, request: Request) -> Response:
-        prepared = Chat(bundle, req.conversation())
+        prepared = Chat(bundle, req.conversation(), efforts)
         rid, params = f"chatcmpl-{uuid.uuid4().hex}", req.params(prepared.ext)
         gen = pieces(client, bundle, prepared, params, rid, req.stops)
         return await _respond(request, req, ChatCompletion(tok), [gen], rid, len(prepared.ids), params.n)

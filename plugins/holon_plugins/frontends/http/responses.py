@@ -1,8 +1,8 @@
 """OpenAI Responses (`/v1/responses`), the minimal subset of R §5.2 over the chat pipeline: `input` as text or items
 (messages, `function_call`, `function_call_output`, `reasoning`), `instructions`, function tools, `tool_choice`,
-`parallel_tool_calls`, `text.format`, `max_output_tokens`, sampling and `stream`. Nothing is stored: `store`,
-`previous_response_id` and `background` are refused. The answer is a list of output items — reasoning, message,
-function_call — or their server-sent events."""
+`parallel_tool_calls`, `text.format`, `reasoning.effort`, `max_output_tokens`, sampling and `stream`. Nothing is
+stored: `store`, `previous_response_id` and `background` are refused. The answer is a list of output items —
+reasoning, message, function_call — or their server-sent events."""
 from __future__ import annotations
 
 import json
@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse, Response
 from holon.api import EngineClient, FrontendBundle, SamplingParams
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .pipeline import Block, Blocks, Chat, Conversation, pieces
+from .pipeline import Block, Blocks, Chat, Conversation, Efforts, pieces
 from .schemas import response_format, tool_choice
 from .stream import Piece
 from .web import BadRequest, EventStream, collect, failure, rejected, unless_disconnected
@@ -31,6 +31,7 @@ class ResponsesRequest(BaseModel):
     tool_choice: str | dict[str, Any] | None = None
     parallel_tool_calls: bool = True
     text: dict[str, Any] | None = None
+    reasoning: dict[str, Any] | None = None             # its `effort`: the template's level (pipeline.Efforts)
     max_output_tokens: int | None = Field(None, ge=1)
     temperature: float = Field(1.0, ge=0)
     top_p: float = Field(1.0, gt=0, le=1)
@@ -52,10 +53,11 @@ class ResponsesRequest(BaseModel):
         tools = [_tool(t) for t in self.tools or []]
         fmt = response_format((self.text or {}).get("format"))
         return Conversation(_messages(self.instructions, self.input), tools,
-                            self.tool_choice or ("auto" if tools else "none"), self.parallel_tool_calls, fmt)
+                            self.tool_choice or ("auto" if tools else "none"), self.parallel_tool_calls, fmt,
+                            reasoning_effort=(self.reasoning or {}).get("effort"))
 
 
-def router(client: EngineClient, bundle: FrontendBundle, model_id: str) -> APIRouter:
+def router(client: EngineClient, bundle: FrontendBundle, model_id: str, efforts: Efforts) -> APIRouter:
     r = APIRouter()
 
     @r.post("/v1/responses")
@@ -64,7 +66,7 @@ def router(client: EngineClient, bundle: FrontendBundle, model_id: str) -> APIRo
             conv = req.conversation()
         except ValueError as e:
             raise BadRequest(str(e)) from e
-        chat = Chat(bundle, conv)
+        chat = Chat(bundle, conv, efforts)
         params = SamplingParams(temperature=req.temperature, top_p=req.top_p, max_tokens=req.max_output_tokens,
                                 ext=chat.ext)
         rid = f"resp_{uuid.uuid4().hex}"

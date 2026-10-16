@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from holon.api import EngineClient, FrontendBundle
 
 from . import anthropic, openai, responses
+from .pipeline import Efforts
 from .web import BadRequest
 
 
@@ -57,7 +58,8 @@ def build_app(client: EngineClient, bundle: FrontendBundle, drop_billing_header:
         return {"object": "list", "data": [{"id": model_id, "object": "model", "created": started,
                                             "owned_by": "holon"}]}
 
-    app.include_router(openai.router(client, bundle, model_id))
-    app.include_router(anthropic.router(client, bundle, model_id, drop_billing_header, counters))
-    app.include_router(responses.router(client, bundle, model_id))
+    efforts = Efforts(bundle)                             # the template's effort levels, read once, when needed
+    app.include_router(openai.router(client, bundle, model_id, efforts))
+    app.include_router(anthropic.router(client, bundle, model_id, drop_billing_header, counters, efforts))
+    app.include_router(responses.router(client, bundle, model_id, efforts))
     return app

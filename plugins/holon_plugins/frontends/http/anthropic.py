@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse, Response
 from holon.api import EngineClient, FrontendBundle, SamplingParams
 from pydantic import BaseModel, Field
 
-from .pipeline import Block, Blocks, Chat, Conversation, pieces
+from .pipeline import Block, Blocks, Chat, Conversation, Efforts, pieces
 from .stream import Piece
 from .web import BadRequest, EventStream, collect, failure, rejected, unless_disconnected
 
@@ -34,6 +34,7 @@ class CountRequest(BaseModel):
     tools: list[dict[str, Any]] | None = None
     tool_choice: dict[str, Any] | None = None
     thinking: dict[str, Any] | None = None
+    output_config: dict[str, Any] | None = None          # its `effort`: the template's level (pipeline.Efforts)
 
 
 class MessagesRequest(CountRequest):
@@ -51,13 +52,13 @@ def error_body(status: int, message: str) -> dict[str, Any]:
 
 
 def router(client: EngineClient, bundle: FrontendBundle, model_id: str, drop_billing_header: bool,
-           counters: dict[str, int]) -> APIRouter:
+           counters: dict[str, int], efforts: Efforts) -> APIRouter:
     r = APIRouter()
 
     def prepare(req: CountRequest) -> Chat:
         conv, dropped = conversation(req, drop_billing_header)
         counters["billing_headers_dropped"] += dropped
-        return Chat(bundle, conv)
+        return Chat(bundle, conv, efforts)
 
     @r.post("/v1/messages/count_tokens")
     async def count_tokens(req: CountRequest) -> dict[str, int]:
@@ -126,7 +127,8 @@ def conversation(req: CountRequest, drop_billing_header: bool) -> tuple[Conversa
         raise BadRequest(f"tool_choice {choice!r}: auto, any, tool or none")
     kwargs = {"enable_thinking": False} if (req.thinking or {}).get("type") == "disabled" else {}
     conv = Conversation(messages, [_tool(t) for t in req.tools or []], tool_choice,
-                        not choice.get("disable_parallel_tool_use", False), None, kwargs)
+                        not choice.get("disable_parallel_tool_use", False), None, kwargs,
+                        (req.output_config or {}).get("effort"))
     return conv, dropped
 
 
