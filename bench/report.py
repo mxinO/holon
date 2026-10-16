@@ -33,6 +33,7 @@ import statistics
 from collections.abc import Callable
 
 GATE = 0.8
+INFLATED = 0.164          # repeated output above twice the corpus's own 16-gram share (release §16.1, §17.1)
 SERVED = "holon_http"
 # (column, value from a summary, higher is better)
 METRICS: list[tuple[str, Callable[[dict], float | None], bool]] = [
@@ -131,13 +132,16 @@ def _served(r: dict, base: str) -> str | None:
 
 
 def _served_check(r: dict, holon: str) -> str | None:
-    """Why served Holon's plan is not the matched lock's (only the context may differ), or None."""
+    """Why served Holon's plan is not the matched lock's, or None: it must start from that lock, and differ only in
+    the context — or, for an arm with flags of its own (MTP), in whatever those flags set."""
     served = r["backends"].get(holon, {}).get("served") or {}
     lock = (r.get("matched", {}).get("lock") or {}).get("path")
     if not lock:
         return None
     if served.get("lock") != lock:
         return f"served from {served.get('lock')}, matched {lock}"
+    if r.get("arms", {}).get(holon.partition("@")[2]):
+        return None
     other = [d for d in served.get("diff") or [] if not d.startswith("engine:max_model_len")]
     return f"served plan differs: {', '.join(other)}" if other else None
 
@@ -254,11 +258,14 @@ def spec(records: list[tuple[str, dict]]) -> str:
                         lines.append(f"{lead} — ({_failed(r, b) or 'no result'}) |" + " |" * (len(head) - 4))
                         continue
                     if not s["stats"].get("spec_drafted"):
+                        if r.get("arms", {}).get(b.partition("@")[2]):     # an arm meant to draft
+                            lines.append(f"{lead} — (no drafts) |" + " |" * (len(head) - 4))
                         continue
                     source, plain = _plain(group, r, b.partition("@")[0], trace)
                     tpot = s["tpot_ms"]["p50"]
-                    speedup = f"{plain['tpot_ms']['p50'] / tpot:.2f}" if plain else "—"
                     rep = s.get("repeated_share")
+                    speedup = f"{plain['tpot_ms']['p50'] / tpot:.2f}" if plain else "—"
+                    speedup += " (inflated by repetition)" if plain and rep is not None and rep > INFLATED else ""
                     lines.append(f"{lead} {tpot} | {speedup} | {source} | " + " | ".join(_spec(s["stats"]))
                                  + f" | {'—' if rep is None else f'{rep:.3f}'} |")
         if len(lines) > 2:

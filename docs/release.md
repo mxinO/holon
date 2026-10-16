@@ -2389,15 +2389,17 @@ prompts cut from natural text (`--corpus`: judge prompt set v1 for Qwen3, v1-qwe
   number compared with the servers. The in-process engine (`holon`) runs first in every record. Its KV tokens size
   every baseline's cache (§5.2's flags, unchanged), and its row is reported.
 - The context is the traces' on every engine: 30,208 tokens with the long prompt, above the 8B locks' 8K as in §16.5
-  and below the 27B locks' 32K; 768 for the decode-only records. Served Holon's plan differs from its lock in that
-  setting only; `report.py` refuses a row whose served lock or plan differs otherwise.
+  and below the 27B locks' 32K; 768 for the decode-only records. Served Holon must start from the matched lock, and
+  its plan differ only in that setting (an MTP arm: also in what its flags set); `report.py` refuses a row otherwise.
 - `decode_b8` runs at most `max_seqs` at once: 4 on every 27B lock.
 - `llama-server` is the gate pin's build. Commands, per record:
   ```
   python bench/run.py --name release-<cell> --gpu 0 --model <file> --lock <the class's lock> --rounds 4 \
       --corpus <prompt set> --traces bench/traces/{decode_b1,decode_b8,agent,long_prompt}.jsonl \
       --backends holon holon_http [holon_http@aa] llamaserver           # GGUF (the A/A arm: 8B Q4_K_M)
-      --backends holon holon_http sglang_http freetoken_http            # HF (decode-only: 3 rounds, two traces)
+      --backends holon holon_http sglang_http freetoken_http            # the bf16 8B
+  python bench/run.py ... --rounds 3 --traces bench/traces/{decode_b1,decode_b8}.jsonl \
+      --backends holon holon_http sglang_http freetoken_http            # NVFP4 / FP8 (decode-only)
       --backends holon@mtp holon_http@mtp llamaserver@mtp3 \
           --arm mtp='<step 7's MTP flags>' --arm mtp3='--spec-type draft-mtp --spec-draft-n-max 3'   # the 27B with MTP
   python bench/bars.py --name <cell> --gpu 0 --model <file> --lock <the class's lock> --rounds 3
@@ -2412,7 +2414,7 @@ prompts cut from natural text (`--corpus`: judge prompt set v1 for Qwen3, v1-qwe
   - The speedup over plain is taken across two records of the same desktop (the plain cell's), so it is **unpaired**;
     `report.py` names the plain record it used.
   - `decode_b1` is **one prompt**: every round replays the same greedy continuation, so its rounds measure timing
-    noise, not prompts. `decode_b8`'s 8 prompts are quoted beside it.
+    noise, not prompts. `decode_b8`'s 8 prompts are quoted beside it (on the 27B, at most 4 at once: not single-stream).
   - Greedy MTP emits plain decoding's tokens, so both arms repeat alike. A trace whose output repeats more than twice
     the corpus's own share (§16.1: 8.2% of its 16-grams, so above 0.164) has its speedup labelled "inflated by
     repetition".
