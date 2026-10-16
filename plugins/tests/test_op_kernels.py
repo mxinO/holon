@@ -82,6 +82,8 @@ def test_prebuilt_modules_load_without_compiling(tmp_path):
     subprocess.run([sys.executable, "-c", prebuild], env=env, check=True, capture_output=True)
     built = {p: p.stat().st_mtime_ns for p in tmp_path.rglob("silu_and_mul/*.so")}
     assert built, "prebuild built no silu_and_mul module"
+    every = set(tmp_path.rglob("*.so"))
     load = "from flashinfer.jit import gen_act_and_mul_module; gen_act_and_mul_module('silu').build_and_load()"
     subprocess.run([sys.executable, "-c", load], env=env, check=True, capture_output=True)
     assert {p: p.stat().st_mtime_ns for p in built} == built, "the first load compiled the prebuilt module again"
+    assert set(tmp_path.rglob("*.so")) == every, "the first load built a module prebuild did not (another SM's?)"

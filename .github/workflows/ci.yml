@@ -9,15 +9,18 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:                                   # a newer push to the same ref cancels the run in progress
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   cpu:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
         with:
           fetch-depth: 0                       # check_abi.py and check_core_diff.sh compare with the base branch
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e    # v6.8.0
         with:
           version: "0.11.1"
       - name: environment (uv.lock, dev group)
@@ -28,3 +31,6 @@ jobs:
         env:
           CUDA_VISIBLE_DEVICES: ""
         run: . .venv/bin/activate && python -m pytest core std plugins judge testing tools -q -p no:cacheprovider
+      - name: trim the uv cache
+        if: always()
+        run: uv cache prune --ci

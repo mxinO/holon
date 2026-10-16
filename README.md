@@ -80,7 +80,8 @@ uv run holon prebuild                # GGUF kernels and FlashInfer modules for t
 ### Docker
 
 The `Dockerfile` installs the same environment for hosts without a CUDA toolkit and prebuilds for SM 86, 89 and 120.
-Build it from the release tag, never from a working directory:
+Build it from the release tag, never from a working directory; the build takes ≈ 10–15 min on a many-core host, and
+the image is ≈ 14.8 GB:
 
 ```bash
 git archive --format=tar v0.1.0 | docker build -t holon:v0.1.0 -           # --build-arg MAX_JOBS=N caps compiles
@@ -154,6 +155,7 @@ print(r.choices[0].message.content)        # the reasoning, if any, is in r.choi
 import anthropic
 
 client = anthropic.Anthropic(base_url="http://127.0.0.1:8000", api_key="holon")
+model = "Qwen3.8-27B-UD-IQ3_S"             # the served id (/v1/models); the server ignores the model a request names
 msg = client.messages.create(model=model, max_tokens=512,
                              messages=[{"role": "user", "content": "Name three prime numbers."}])
 print("".join(b.text for b in msg.content if b.type == "text"))   # thinking blocks come first
@@ -175,7 +177,9 @@ The server drops Claude Code's per-request billing-header system block, which wo
 Serve the Qwen3.8-27B for Claude Code: its locks serve 49,152 tokens of context. Claude Code 2.1.300 sends, besides
 its main loop, side requests of ≈ 31K input tokens (`docs/release.md` §18.2), which a 32K context would fit with about
 1K tokens to spare. Its auto-compaction assumes a far larger window than 49,152 tokens, so a long session reaches the
-served limit first.
+served limit first. On an RTX 5080 that also drives a display, the 49,152-token context leaves ≈ 200 MiB of headroom,
+so it may be clamped to what fits; the log shows it (`differs from the lock: engine:max_model_len: …`). The side
+requests need it to stay above ≈ 32K.
 
 The release's agent demo (`bench/demo/`) is a small fix in a three-module Python project — a seeded bug and a missing
 function — chosen to fit a 32K context. It shows the served model completing such a task through Claude Code; it
@@ -183,7 +187,9 @@ is not a claim of general agent capability. **Result** (pre-registered, Claude C
 scored by the harness's own copy of the tests): **3 of 3 runs passed on the RTX 5080 (UD-IQ3_S) and 3 of 3 on the
 RTX 4090 (UD-Q4_K_M)**, in 13–16 turns and 2–5 minutes each (`evidence/agent_demo_rtx-5080_2026-10-16.json`,
 `evidence/agent_demo_rtx-4090_2026-10-15.json`; `docs/release.md` §18). Claude Code sends no temperature, so the
-server's default (1.0) applies. The demo ran at the 27B locks' earlier 32K context (§19 of `docs/release.md`).
+server's default (1.0) applies. The demo ran on the locks as they stood at release step 9, at the 27B's earlier 32K
+context; the shipped locks differ in that context and in the FlashInfer plugin's `src`, with byte-identical snapshot
+traces (`docs/release.md` §19.1–§19.2).
 
 ## Options
 
@@ -243,14 +249,18 @@ start. A file outside the HF cache is hashed once to find its lock; the hash is 
 - **Context.** The Qwen3.8-27B locks serve 49,152 tokens; the 8B and 30B locks 8,192 or 16,384 (`holon models` and
   the lock files show each); without a lock, min(the model's trained context, 32768). `holon serve <model>
   --max-model-len N` changes it, and a context that does not fit the card's memory is clamped to what does (logged).
-- **Speculation is off in every lock.** On the Qwen3.8-27B, MTP decodes 11–45% faster per token, but on a
-  Claude-Code-shaped trace a speculating stream's longest pauses (p95 per-request maximum gap) grew 1.1–3.1×, past the
-  ≤ 1.10× rule fixed before measuring (`docs/release.md` §16.6). Turn it on with the flags under Options.
+- **Speculation is off in every lock.** On the Qwen3.8-27B, MTP gave 11–45% lower TPOT on a sampled
+  Claude-Code-shaped trace, but a speculating stream's longest pauses (p95 per-request maximum gap) grew 1.1–3.1×, past
+  the ≤ 1.10× rule fixed before measuring (`docs/release.md` §16.6). Turn it on with the flags under Options.
 - **A long prompt stalls the streams already decoding** on the locks that set `chunk_with_decode` 0: every 8B and 30B
   lock. Behind a 30K-token prompt (with the context raised to fit it) the stall was 3.2–11.8 s; `holon serve <model>
   --chunk-with-decode 512` mixes decoding into those prefill steps and cut it 23–37×, for 11–22% more time to that
   prompt's first token (48–54% on two RTX 4090 cells) and 2–15% of its throughput (`docs/release.md` §16.5). The
   Qwen3.8-27B locks set 512.
+- **On an RTX 5080 that also drives a display**, the Qwen3.8-27B's 49,152-token context leaves ≈ 200 MiB of headroom
+  and may be clamped to what fits (logged); Claude Code's ≈ 31K side requests need it above ≈ 32K.
+- **Traces are run-identical on one machine, not across machines:** two RTX 3090 desktops recorded different
+  Qwen3.8-27B snapshot traces at the same lock, both within the judge's L2 budget (`docs/release.md` §19.1).
 - **No authentication:** the server checks no API key; do not expose it beyond a trusted network.
 - **Every start compiles FlashInfer's CuTe DSL norms** in memory (about 1 s; First start).
 - **M0.6's low-precision files on the RTX 5090 and RTX 3090** (8B NVFP4 and FP8, 30B NVFP4, 30B MXFP4_MOE) run with
@@ -264,7 +274,8 @@ start. A file outside the HF cache is hashed once to find its lock; the hash is 
 ## Performance
 
 Measured at release step 8 on one desktop per card, each clock-screened before and after, with Holon serving from that
-card's lock. **Ratios are the claim**: absolute tokens per second belong to one board. Each ratio below is Holon's
+card's lock as it stood then. The shipped locks differ from those in the Qwen3.8-27B's context and in the FlashInfer
+plugin's `src`, with byte-identical snapshot traces (`docs/release.md` §19.1–§19.2). **Ratios are the claim**: absolute tokens per second belong to one board. Each ratio below is Holon's
 advantage (above 1, Holon is faster) as a range over the four cards; the tables per card, file and trace, rendered by
 `bench/report.py` from the evidence records they link, are in
 [docs/release.md §17](docs/release.md#17-as-built-step-8), with the method and the absolute numbers per board.
@@ -275,9 +286,10 @@ advantage (above 1, Holon is faster) as a range over the four cards; the tables 
 | the same, prefill (pp512) | 1.00–1.15× at depth 0, 0.89–1.07× at depth 8192 |
 | `holon serve` against `llama-server` (the same pin, matched to the lock's batch, step budget, KV format and KV size), Qwen3-8B Q4_K_M and the card's Qwen3.8-27B, TPOT p50 | 1.07–1.15× at batch 1, 1.20–1.66× at batch 8, 1.33–1.77× on the agent trace |
 | the same, output throughput | 1.03–1.90× |
-| the same, TTFT of the 30K-token prompt | 0.98–1.17× |
+| the same, TTFT of the 30K-token prompt, Qwen3.8-27B | 0.98–1.07× (both engines decode the other streams meanwhile) |
+| the same, TTFT of the 30K-token prompt, Qwen3-8B Q4_K_M | 1.03–1.17×, where Holon's lock stalls those streams instead (Where Holon loses) |
 | `holon serve` against SGLang 0.5.21 and FreeToken `74a38777`, Qwen3-8B bf16 | TPOT p50 0.99–1.02× (0.82× on the RTX 4090's long prompt), throughput 1.00–1.03× |
-| the Qwen3.8-27B with MTP (off in the locks) against plain decoding, `holon serve`, TPOT p50 | 1.51–1.60× at batch 8, 1.27–1.88× on the agent trace |
+| the Qwen3.8-27B with MTP (off in the locks) against plain decoding, `holon serve`, TPOT p50, greedy | 1.51–1.60× at batch 8, 1.27–1.88× on the agent trace |
 
 The gate is ≥ 0.8× the pin on every metric of every GGUF cell, and every cell passes it. Serving runs greedy on
 natural-text prompts in 4 ABBA rounds (decode-only files: 3): `decode_b1` / `decode_b8` are 1 or 8 requests of 256 +
@@ -302,11 +314,14 @@ Where Holon loses:
   all eight together.
 - **The streams behind the 30K prompt** on the locks with `chunk_with_decode` 0 (Known limitations): the 8B Q4_K_M's
   longest pause is 0.09–0.14× llama.cpp's, and on the RTX 4090's bf16 8B 0.01–0.02× SGLang's and FreeToken's, with
-  TPOT 0.82×. The 27B locks mix, and there Holon's pause is 2.6–4.1× shorter.
+  TPOT 0.82×. The 27B locks mix, and there Holon's pause is 3.6–4.0× shorter on three cards; on the RTX
+  4090 the ratio is within its rounds' spread (≈).
 - **First tokens on the NVFP4 files against SGLang:** 0.22–0.69× on the RTX 5080's 8B and the RTX 4090's 30B; the
-  5080's 8B NVFP4 also decodes at 0.90× SGLang's speed at batch 8 (throughput 0.82×).
+  5080's 8B NVFP4 also decodes at 0.90× SGLang's speed at batch 8 (throughput 0.82×), and the 4090's 30B NVFP4
+  throughput at batch 8 is 0.98×.
 - **Smaller losses on FP8:** `decode_b8` TTFT 0.89–0.97× SGLang's and 0.94–0.96× FreeToken's, the RTX 5080's
-  `decode_b1` TTFT 0.97× FreeToken's, the RTX 4090's `decode_b8` longest pause 0.94× FreeToken's.
+  `decode_b1` TTFT 0.97× FreeToken's, the RTX 4090's `decode_b8` longest pause 0.94× FreeToken's; on the bf16 8B,
+  the RTX 3090's `decode_b8` TTFT is 0.98× SGLang's.
 - **Prefill at depth 8192** is under the pin on every 8B / 30B cell: 0.89–0.91× on the RTX 5080, 0.94–0.96× on the
   RTX 4090 and 5090, 0.98–0.99× on the RTX 3090 (the gate is 0.8×).
 

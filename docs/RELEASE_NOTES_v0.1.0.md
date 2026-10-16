@@ -44,21 +44,25 @@ architectures serve with defaults.
 
 ## Results
 
-Measured at release steps 8 and 9 on one clock-screened desktop per card; ratios are Holon's advantage (above 1, Holon
-is faster), ranges over the four cards. Every number comes from an evidence record; the full tables, losses included,
-are in `docs/release.md` §17 and the README's Performance section.
+Measured at release steps 8 and 9 on one clock-screened desktop per card, on the locks as they stood then; the shipped
+locks differ in the Qwen3.8-27B's context and in the FlashInfer plugin's `src`, with byte-identical snapshot traces
+(`docs/release.md` §19.1–§19.2). Ratios are Holon's advantage (above 1, Holon is faster), ranges over the four cards.
+Every number comes from an evidence record; the full tables, losses included, are in `docs/release.md` §17 and the
+README's Performance section.
 
 - **The release gate passes on every GGUF cell:** in-process decode (tg128) 1.04–1.11× `llama-bench` at the llama.cpp
   commit Holon vendors, prefill (pp512) 1.00–1.15× at depth 0 and 0.89–1.07× at depth 8192 (gate: ≥ 0.8×).
 - **`holon serve` against `llama-server`** (GGUF, matched batch, step budget and KV): TPOT p50 1.07–1.15× at batch 1,
-  1.20–1.66× at batch 8, 1.33–1.77× on the agent trace; output throughput 1.03–1.90×; the 30K-token prompt's own TTFT
-  0.98–1.17×.
+  1.20–1.66× at batch 8, 1.33–1.77× on the agent trace; output throughput 1.03–1.90×. TTFT of a 30K-token prompt
+  arriving behind three streams: 0.98–1.07× on the Qwen3.8-27B (both engines decode the other streams meanwhile), and
+  1.03–1.17× on the Qwen3-8B Q4_K_M, where Holon's lock stalls those streams instead (below).
 - **Against SGLang 0.5.21 and FreeToken** on the bf16 Qwen3-8B: parity, TPOT 0.99–1.02× (0.82× on the RTX 4090's long
   prompt), throughput 1.00–1.03×.
 - **MTP on the Qwen3.8-27B** (off in the locks): 1.51–1.60× plain decoding's TPOT at batch 8, 1.27–1.88× on the agent
-  trace (unpaired, greedy).
+  trace (unpaired, greedy; the RTX 5080's batch 8 is inflated by repetitive output).
 - **Agent demo:** Claude Code 2.1.300 on each card's 27B lock fixed a small seeded Python project in 3 of 3 runs on the
-  RTX 5080 and 3 of 3 on the RTX 4090 (pre-registered; not a claim of general agent capability).
+  RTX 5080 and 3 of 3 on the RTX 4090 (pre-registered; not a claim of general agent capability), at the 27B locks'
+  earlier 32K context.
 
 Caveats: `llama-server` saves its previous slot to its RAM prompt cache (`--cache-ram`, on by default) before starting
 a request, so the TTFT ratios on short requests (up to 43× on the long-prompt trace's streams, 1.6–9.3× on the agent
@@ -70,7 +74,8 @@ Where Holon loses:
   of a burst before the rest have prefilled;
 - the streams behind a 30K prompt on the locks without mixed steps (every 8B and 30B lock): 0.09–0.14× llama.cpp's
   longest pause on the 8B Q4_K_M, 0.01–0.02× SGLang's and FreeToken's on the RTX 4090's bf16 8B;
-- first tokens on the NVFP4 files against SGLang (0.22–0.69×), and small FP8 losses (0.89–0.97×);
+- first tokens on the NVFP4 files against SGLang (0.22–0.69×), and small losses on FP8 (0.89–0.97×), on the RTX 4090's
+  30B NVFP4 batch-8 throughput (0.98× SGLang's) and on the RTX 3090's bf16 batch-8 TTFT (0.98× SGLang's);
 - prefill at depth 8192 on the 8B / 30B cells, 0.89–0.99× the pinned llama.cpp.
 
 ## Known limitations
@@ -78,8 +83,12 @@ Where Holon loses:
 - One GPU per server, no offload.
 - Context: 49,152 tokens on the Qwen3.8-27B locks, 8,192–16,384 on the 8B and 30B locks, at most 32,768 without a
   lock by default (`--max-model-len N`).
-- Speculation (MTP) is off in every lock: its longest pauses failed the rule fixed before measuring. The README's
-  Options section has the flags that turn it on.
+- Speculation (MTP) is off in every lock: 11–45% lower TPOT on a sampled Claude-Code-shaped trace, but its longest
+  pauses failed the rule fixed before measuring. The README's Options section has the flags that turn it on.
+- On an RTX 5080 that also drives a display, the Qwen3.8-27B's 49,152-token context may be clamped to what fits
+  (≈ 200 MiB of headroom; logged); Claude Code's ≈ 31K side requests need it above ≈ 32K.
+- Snapshot traces are run-identical on one machine: two RTX 3090 desktops recorded different Qwen3.8-27B traces at the
+  same lock, both within the judge's L2 budget.
 - On the locks without mixed steps (every 8B and 30B lock) a long prompt stalls the streams already decoding;
   `--chunk-with-decode 512` mixes them.
 - No authentication: do not expose the server beyond a trusted network.
