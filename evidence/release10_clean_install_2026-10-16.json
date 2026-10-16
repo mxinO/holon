@@ -45,13 +45,15 @@
   },
   "rtx-4090": {
    "gpu": "NVIDIA GeForce RTX 4090",
+   "commit": "f7854cd (re-recorded after the release panel: the README's two snippets run separately, each self-contained)",
    "seconds": {
-    "clone": 12.9,
-    "uv_sync_frozen": 15.6,
-    "prebuild": 458.7,
-    "models": 1.7,
-    "serve_ready_incl_download": 49.0,
-    "clients": 4.0
+    "clone": 14.4,
+    "uv_sync_frozen": 15.2,
+    "prebuild": 451.6,
+    "models": 1.8,
+    "serve_ready_incl_download": 90.0,
+    "chat": 2.3,
+    "message": 1.9
    },
    "served_file": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M.gguf",
    "lock": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/8.lock",
@@ -59,8 +61,8 @@
    "served_plan_id": "sha256:f4d7ac6610fc8f4084431f4660a29eeab35346ccef963a54de41888696e9c70c",
    "diff": [],
    "plan_equals_lock": true,
-   "chat_completion": "2, 3, and 5",
-   "anthropic_message": null,
+   "chat_completion": "2, 3, and 5.",
+   "anthropic_message": "2, 3, 5",
    "long_prompt": {
     "prompt_tokens": 46063,
     "finish": "length",
@@ -71,7 +73,8 @@
     ".triton/cache": 228
    },
    "first_start_compiled": "Triton kernels only",
-   "hub_tries": 1
+   "hub_tries": 1,
+   "earlier run at f30f9bb": "served the same lock 8 (plan equal, no diff), prebuild 458.7 s, ready in 49 s, Triton only; its Anthropic answer was '2, 3, 5', which that record's parser (it matched '2, 3, and 5' only) left null"
   },
   "rtx-5090": {
    "gpu": "NVIDIA GeForce RTX 5090",
@@ -136,6 +139,7 @@
  },
  "notes": [
   "cached_ops/tmp holds FlashInfer's empty per-module file locks, taken when it loads a module",
-  "a first run of this procedure at a4ecb9e (RTX 5080) and a5dbcbf (the others), before f86c182, served the lock and answered both clients on the RTX 5080, 4090 and 5090; on the RTX 3090 the hub listing failed once with an HTTP error (that run had no retry; this one needed none). Its first starts compiled FlashInfer's silu_and_mul (and on bf16 KV the prefill module) again after holon prebuild: fixed in f86c182 (release \u00a719.2)"
+  "a first run of this procedure at a4ecb9e (RTX 5080) and a5dbcbf (the others), before f86c182, served the lock and answered both clients on the RTX 5080, 4090 and 5090; on the RTX 3090 the hub listing failed once with an HTTP error (that run had no retry; this one needed none). Its first starts compiled FlashInfer's silu_and_mul (and on bf16 KV the prefill module) again after holon prebuild: fixed in f86c182 (release \u00a719.2)",
+  "the chat_completion / anthropic_message fields are each snippet's printed answer; the RTX 4090's was re-recorded at f7854cd with each README snippet run on its own"
  ]
 }

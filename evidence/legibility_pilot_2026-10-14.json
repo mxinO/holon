@@ -1,0 +1,32 @@
+{
+ "workload": "legibility-pilot",
+ "date": "2026-10-14",
+ "what": "release §4.0's exploratory 1 + 1 pilot of the retired legibility benchmark: an agent adds Mixtral (MixtralForCausalLM) to Holon and to mini-sglang 9a91cfa, each from its own branch point; not counted, no verdict (one run per side is within noise, about x1.8)",
+ "agent": {"client": "Claude Code 2.1.299 (pinned build), headless", "model": "Claude Sonnet 5.5 (every call)"},
+ "success": "the harness's finish: three checks with a fresh checker ($CHECK $MIXTRAL against the reference within the calibrated delta) and the static checks ($STATIC)",
+ "costing": {
+  "costing 1": "total_cost_usd from Claude Code's JSON result (prices the 1-hour cache writes at the 5-minute rate)",
+  "costing 2": "recomputed per API call at list prices, 1-hour cache writes at 2x input (release §4.4)"
+ },
+ "runs": [
+  {"side": "Holon", "success": true, "first_check": "passed (0.46 delta)",
+   "cost_usd": {"costing 1": 0.305, "costing 2": 0.363, "costing 2 up to the first passing check": 0.24,
+                "documentation reading (costing 2)": 0.055},
+   "turns": 21, "api_calls": 19, "wall_s": 270, "check_s": 107, "output_tokens": 9350, "thinking_tokens": 1444,
+   "final_context_tokens": 44000,
+   "diff": {"files": 8, "lines_added": 144, "lines_removed": 1,
+            "shared_code_changed": false,
+            "what": "a new models/mixtral package and its entry point; unrequested: a CPU test and a README line"}},
+  {"side": "mini-sglang", "success": true, "first_check": "passed (0.37 delta)",
+   "cost_usd": {"costing 1": 0.171, "costing 2": 0.196, "costing 2 up to the first passing check": 0.17,
+                "documentation reading (costing 2)": 0.0},
+   "turns": 13, "api_calls": 12, "wall_s": 170, "check_s": 123, "output_tokens": 4228, "thinking_tokens": 1016,
+   "final_context_tokens": 32000,
+   "diff": {"files": 4, "lines_added": 98, "lines_removed": 3,
+            "shared_code_changed": true,
+            "what": "the MoE detection rule and a Mixtral default in the shared config, a key rename in the shared weight loader"}}
+ ],
+ "ratios_holon_over_minisglang": {"costing 1": 1.78, "costing 2": 1.85, "up to the first passing check (costing 2)": 1.41},
+ "spend_usd": {"costing 1": 0.54, "costing 2": 0.62, "note": "the two runs plus two one-turn smokes"},
+ "not_published": "the transcripts and the harness (the legibility branch's bench/legibility/) stay local; this summary is what release §4.0 and plan §9 quote"
+}

@@ -191,13 +191,14 @@ new families or formats; v1's offload, VMM, sandbox and self-improvement; GPUs o
 
 ### 4.0 Status: retired as a gate (owner, 2026-10-14)
 
-The harness was built and validated (on the legibility branch, its §13.8: fixtures, δ, reference ports within 0.5δ,
+The harness was built and validated (on the legibility branch, not published; its §13.8: fixtures, δ, reference ports within 0.5δ,
 plants failing, `$STATIC` at both branch points, a sandboxed run harness). The owner approved an exploratory 1 + 1
 pilot (Claude Sonnet 5.5): **both sides passed the Mixtral check on their first try.** Cost (costing 2): Holon $0.36
 (21 turns, 8 files, +144 lines), mini-sglang $0.20 (13 turns, 4 files, +98 / −3). Up to the first passing check,
 Holon $0.24 and mini-sglang $0.17 (≈ 1.4×); after it, Holon's agent spent $0.12 on work the prompt did not ask for (a
 CPU test, a README line, the static checks three times), prompted by AGENTS.md's rules. Documentation reading was
-$0.055 of Holon's cost; neither agent opened design.md. One run per side is within noise (×1.8); no verdict.
+$0.055 of Holon's cost; neither agent opened design.md. One run per side is within noise (×1.8); no verdict. Record
+(per run: both costings, turns, files changed, success): `evidence/legibility_pilot_2026-10-14.json`.
 
 **What the pilot did show is isolation.** Holon's change was a new `models/mixtral/` package plus its entry point
 (and the unrequested test and README line): no shared code changed. mini-sglang's agent edited three shared files
@@ -238,7 +239,7 @@ Qwen3-Next (no GDN in mini-sglang: kernel porting on one side); SmolLM3 (NoPE: a
 
 - **Holon:** main after M0.6 Gate A merges, with steps 1, 2 and 4 (packaging, D2, the documentation of D8), as **one
   squashed commit**, its tree and log grepped for Mixtral and the benchmark. Stripped from the shipped tree at the
-  branch point: `docs/release.md`, `bench/legibility/`, design.md goal 5's "(measured: plan M0.3 legibility
+  branch point: `docs/release.md`, `bench/legibility/` (not published), design.md goal 5's "(measured: plan M0.3 legibility
   benchmark)", `docs/m03-qwen38.md` D9, plan.md's Release-row clause "the legibility benchmark (§9) before the ABI
   freezes" and its §9 legibility row, and `docs/m07-perf.md`'s non-goal sentence on the benchmark if that file is on
   main. Any later documentation edit voids the branch point. M0.7 changes no model-facing surface; if that surface
@@ -480,7 +481,11 @@ recipe terms, the model plugin protocol, manifest keys, how plugins register.
 - **Step 10's scan:** `check_private.py`'s full pattern set over every blob of the public line, goldens' and results'
   safetensors metadata included, and every commit message; zero hits. No matched value is printed into a tracked file.
 - Also before asking: `check_provenance.py` green, `THIRD_PARTY_NOTICES.md` complete, release notes (what v0 serves,
-  the §6 matrix, results, the legibility result, known limitations, recorded shortfalls), the tag.
+  the §6 matrix, results, known limitations, recorded shortfalls), the tag.
+- **Step 11's procedure, on the owner's go:** the owner chooses the public repository; a docs-only commit fills in its
+  URL where the README and the release notes say `<repository>` (nothing else changes, so no lock moves); then the tag
+  `v0.1.0` on that commit, the push of the public line and the tag, the repository made public, and the CPU-only
+  workflow (`.github/workflows/ci.yml`) runs on that push.
 - **On the owner's go only:** push the public line and the tag; make the repository public; enable the CPU-only GitHub
   Actions run. The Dockerfile ships; a published image and PyPI wheels do not (v1).
 
@@ -500,7 +505,7 @@ recipe terms, the model plugin protocol, manifest keys, how plugins register.
 | 8 | Benchmark suite (§5), after step 7 | records; gate | 1.5 + 3 machine |
 | 9 | Agent demo (D7) | record | 0.5 |
 | 10 | Clean install by the README on each class; `check_locks --release`; history scan (§8); notices; release notes; release status in plan.md closing or deferring each carried CI item (`no-arch-branches`, `reference-provenance`, `isolation-check`, the IPC IDL); panel code review | review clean; zero scan hits | 2 |
-| 11 | **Owner's go**, then publishing (§8) | — | 0.5 |
+| 11 | **Owner's go**, then publishing (§8): a docs-only commit filling in the public URL for `<repository>`, the tag, the push | — | 0.5 |
 
 **Schedule, conditional on a legibility pass:** M0.6 Gate A's rest (A4–A6, ≈ 7–9 days) → M0.7 (14–18 days; steps 1–5
 run beside it) → steps 6–11 (≈ 12–14 days with 7 and 8 sequential, machine days included) ≈ 33–41 days, **≈ 5–7
@@ -1129,7 +1134,7 @@ NVIDIA GeForce RTX 5090; Holon's ggml at 51ce9c11
 
 ### 13.6 Step 4, documentation (drafted 2026-10-14; frozen after M0.6's Gate A merge)
 
-`README.md`, `docs/adding-a-model.md` (≈ 3.3K tokens) and the task-routed `AGENTS.md`, together with `scripts/ci/check_docs.py` in `run_all.sh`, landed in bdabd9e. The writer was told not to read §4 or `bench/legibility/`. **Deviation, recorded for the experiment:** two of the writer's repository searches matched four single lines of §4: a planned guide size (≈ 4K), a mention of a reinstall, and the pinned agent settings. The lines it saw are those of §4 near lines 222, 227, 286 and 289 of this file at 7a65d28. It read nothing else of §4 and never saw the target model. The guide's length and reinstall section follow the writer's brief, which predates those lines. The tailoring review (reviewer C) and the freeze happen before any reference port or pilot.
+`README.md`, `docs/adding-a-model.md` (≈ 3.3K tokens) and the task-routed `AGENTS.md`, together with `scripts/ci/check_docs.py` in `run_all.sh`, landed in bdabd9e. The writer was told not to read §4 or `bench/legibility/` (not published). **Deviation, recorded for the experiment:** two of the writer's repository searches matched four single lines of §4: a planned guide size (≈ 4K), a mention of a reinstall, and the pinned agent settings. The lines it saw are those of §4 near lines 222, 227, 286 and 289 of this file at 7a65d28. It read nothing else of §4 and never saw the target model. The guide's length and reinstall section follow the writer's brief, which predates those lines. The tailoring review (reviewer C) and the freeze happen before any reference port or pilot.
 
 **Tailoring review (reviewer C, 2026-10-14): the guide and AGENTS.md's routing pass all four tests** (derivable from the
 tree, no emphasis driven by the task, proportion, no mention). The deviation compromises nothing, because the control is
@@ -3366,8 +3371,8 @@ Each class's 27B lock was propagated at its own `[engine]` plus `--max-model-len
 - **Every card's KV pool holds one 48K sequence** (49,152 tokens; the 5080's with 6K to spare: its pool fell from
   57,920 at 32K, §16.6). The clean installs then served each lock with no context clamp (§19.3), and a 46,063-token
   request completed on every card.
-- **The RTX 3090's trace moved with the desktop, not the context.** Lock 2 was written on step 7's desktop D; this is
-  another RTX 3090 (step 8's). On it, the trace recorded at lock 2's own settings (32K) equals the new lock's (48K), and
+- **The RTX 3090's trace moved with the desktop, not the context; the cause is not identified.** Lock 2 was written on
+  step 7's desktop D; this is another RTX 3090 (step 8's). On it, the trace recorded at lock 2's own settings (32K) equals the new lock's (48K), and
   on an RTX A5000 (sm_86) the 32K and 48K settings record one trace (the record's `trace_check`). Its L2 moved with it
   (ΔPPL vs floor −0.382% → −1.420%, KL p99 0.750 → 0.733, inside the budget). The 3090's 8B and 30B traces did not move
   on this desktop (§19.2): only the 27B's differs between the two desktops. Approved as a passing verdict whose trace
@@ -3408,12 +3413,16 @@ README's steps, timed: `git clone` of the branch (f30f9bb), `uv sync --frozen`, 
 models`, `uv run holon serve unsloth/Qwen3.8-27B-GGUF` (the hub reference, which downloads this card's locked file),
 then the README's OpenAI and Anthropic snippets in their own venv, `/metrics`, and a 46K-token request.
 
-| class | clone | `uv sync --frozen` | `holon prebuild` | `holon serve` ready (download included) | file | served plan = lock | chat / message | 46,063-token request | first start compiled |
+| class | clone | `uv sync --frozen` | `holon prebuild` | `holon serve` ready (download included) | file | served plan = lock | chat completion / Anthropic message | 46,063-token request | first start compiled |
 |---|---|---|---|---|---|---|---|---|---|
-| RTX 5080 | 11.4 s | 16.7 s | 230.9 s | 42 s | UD-IQ3_S, 11.2 GiB | yes, lock 8, no diff | "2, 3, and 5" / same | 24.5 s | Triton only (261 files) |
-| RTX 4090 | 12.9 s | 15.6 s | 458.7 s | 49 s | UD-Q4_K_M, 15.3 GiB | yes, lock 8, no diff | same / same | 15.7 s | Triton only (228) |
-| RTX 5090 | 10.7 s | 15.5 s | 238.3 s | 55 s | UD-Q4_K_M, 15.3 GiB | yes, lock 3, no diff | same / same | 12.0 s | Triton only (228) |
-| RTX 3090 | 11.2 s | 16.3 s | 272.2 s | 51 s | UD-Q4_K_M, 15.3 GiB | yes, lock 4, no diff | same / same | 31.8 s | Triton only (228) |
+| RTX 5080 | 11.4 s | 16.7 s | 230.9 s | 42 s | UD-IQ3_S, 11.2 GiB | yes, lock 8, no diff | "2, 3, and 5" / "2, 3, and 5" | 24.5 s | Triton only (261 files) |
+| RTX 4090 (at f7854cd) | 14.4 s | 15.2 s | 451.6 s | 90 s | UD-Q4_K_M, 15.3 GiB | yes, lock 8, no diff | "2, 3, and 5." / "2, 3, 5" | 15.7 s | Triton only (228) |
+| RTX 5090 | 10.7 s | 15.5 s | 238.3 s | 55 s | UD-Q4_K_M, 15.3 GiB | yes, lock 3, no diff | "2, 3, and 5." / "2, 3, and 5" | 12.0 s | Triton only (228) |
+| RTX 3090 | 11.2 s | 16.3 s | 272.2 s | 51 s | UD-Q4_K_M, 15.3 GiB | yes, lock 4, no diff | "2, 3, and 5." / "2, 3, and 5" | 31.8 s | Triton only (228) |
+
+The RTX 4090's row was re-recorded after the release panel (§19.9), with the README's two snippets each run on its own:
+the first record had left its Anthropic answer null because its parser matched only "2, 3, and 5", and the answer was
+"2, 3, 5". Its earlier run at f30f9bb served the same lock 8 with no diff (prebuild 458.7 s, ready in 49 s).
 
 - **Acceptance 3's form holds:** the served `plan_id` equals the newest lock's on every class, with an empty diff
   (no `max_model_len` clamp). `holon models` lists each card's locks with their contexts, the 27B at 49,152.
@@ -3438,7 +3447,7 @@ build needs no GPU), nothing pushed: at a5dbcbf it built in 588 s; at f86c182, w
 ### 19.5 Checks
 
 - `python scripts/ci/check_locks.py --release`: **passes**, every newest lock pins this tree.
-- **History scan of the public line** (release §8): every commit from the root 3642a61 to HEAD, every blob reachable
+- **History scan of the public line** (release §8), at bb40608 (re-run after §19.9's fixes: below): every commit from the root 3642a61 to HEAD, every blob reachable
   from HEAD (every version of every path, safetensors by their header metadata as `check_private.py` reads them), every
   path name, commit message and author / committer identity, against `check_private.py`'s full pattern set (GENERIC,
   MACHINE and `.private-patterns`). Counts only; the scanner and its output stay local.
@@ -3487,7 +3496,48 @@ build needs no GPU), nothing pushed: at a5dbcbf it built in 588 s; at f86c182, w
 3. **The RTX 3090's 27B trace differs between two RTX 3090 desktops** at the same settings (§19.1); its L2 still passes.
    Approved. It matters for v1's `isolation-check`, which must reproduce a lock byte for byte on whichever desktop of
    the class it gets.
-4. **Clean install passes on all four classes** (§19.3): 5–9 min from clone to a served request, the served plan equal
+4. **Clean install passes on all four classes** (§19.3): 5–10 min from clone to a served request, the served plan equal
    to the lock. The first attempt on the RTX 3090 met a hub HTTP error during a burst of anonymous listings.
 5. **History scan: zero hits** on the public line outside the vendored upstream trees (§19.5).
 6. Not done, as instructed: no push, no tag, no remote touched, `main` untouched. Every desktop allocation is released.
+
+### 19.9 The release panel's review of bb40608 (fixed)
+
+No blockers. Every finding is fixed on the branch; the CPU tests and `run_all.sh main` were run after them (below).
+- **Methodology (major), the 30K prompt's TTFT** is split by model in the README and the release notes so it cannot
+  read as faster long prefill: 0.98–1.07× on the Qwen3.8-27B (both engines decode the other streams meanwhile) and
+  1.03–1.17× on the Qwen3-8B Q4_K_M, where Holon's lock stalls those streams instead.
+- **Methodology (minors):**
+  - the 27B's pause behind the 30K prompt: 3.6–4.0× on three cards (the RTX 3090's paired median is 4.046, printed
+    4.05 in §17.4's table and 4.0 here) and ≈ on the RTX 4090 (2.64, within its rounds' spread), not "2.6–4.1×";
+  - two losses added: the RTX 4090's 30B NVFP4 `decode_b8` throughput, 0.98× SGLang's (paired median 0.984), and the
+    RTX 3090's bf16 `decode_b8` TTFT, 0.98× SGLang's (0.981);
+  - MTP: "11–45% lower TPOT on a sampled Claude-Code-shaped trace" in Known limitations, the table's MTP row labelled
+    greedy, and the release notes now say the RTX 5080's batch 8 is inflated by repetition;
+  - wherever measured numbers appear (README Performance, the Claude Code section's demo, the release notes): they ran
+    on the locks of steps 8 / 9, and the shipped locks differ in the 27B's context and the FlashInfer plugin's `src`,
+    with byte-identical traces; the release notes' demo line says it ran at the earlier 32K context.
+- **Serving (minors):**
+  - the RTX 4090's clean install re-recorded with an Anthropic message (§19.3);
+  - the README's Anthropic snippet names its model itself (the server ignores it);
+  - the Claude Code section and Known limitations: on an RTX 5080 that also drives a display the 27B's context may be
+    clamped (≈ 200 MiB of headroom at 49,152: the pool holds 55,120 tokens of ≈ 34 KiB each), logged; Claude Code's
+    side requests need it above ≈ 32K;
+  - CI: `actions/checkout` (v4.4.0) and `astral-sh/setup-uv` (v6.8.0) pinned by commit SHA, a concurrency group that
+    cancels older runs of a ref, `uv cache prune --ci`; `test_prebuilt_modules_load_without_compiling` also asserts that
+    the load adds no shared object anywhere in the workspace, so a host whose GPU is another SM cannot pass it falsely.
+- **Scope (minors):**
+  - §19.1 says the RTX 3090's trace difference between desktops has no identified cause, and Known limitations say
+    traces are run-identical on one machine;
+  - §4.0's legibility-branch and `bench/legibility/` references and the m04 / m05 / m07 citations of
+    `docs/brainstorm/…` are marked "(not published)"; the pilot's numbers quoted in §4.0 and plan §9 have a record,
+    `evidence/legibility_pilot_2026-10-14.json` (per run: both costings, turns, files changed, success; no
+    transcripts, no paths);
+  - `<repository>` stays a placeholder: step 11's procedure (§8, §9) starts with a docs-only commit that fills in the
+    public URL the owner chooses, before the tag; §8's release-notes contents no longer list the legibility result;
+  - the README's Docker section gives the image size (≈ 14.8 GB) and the build time (≈ 10–15 min; 588 s and 850 s
+    here).
+- **After the fixes:** CPU tests (no GPU visible) 707 passed, 580 skipped in 7 min 55 s (the prebuild test skips without a GPU); the prebuild test on a GPU: passes; `run_all.sh main`:
+  green (import contracts 8 kept).
+- **History scan re-run** at this section's commit, as in §19.5: 32 commits (one root), 1825 blobs, 1990 path names,
+  zero hits outside the paths `check_private.py` skips (the same 3 upstream blobs and `check_private.py` itself).
