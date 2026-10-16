@@ -3558,3 +3558,12 @@ and four merge-commit messages carrying the username through branch names. Keepi
 those strings in place — e.g. `git filter-repo --replace-text` / `--replace-message` over the private patterns — which
 keeps every commit and its structure but rewrites SHAs from the first affected commit on (locks and records naming old
 SHAs then need the same kind of map, or a re-propagation). The owner decides at that point.
+
+**History scrubbed (owner, 2026-10-16).** The owner keeps the full history and will publish it, so its private strings
+were scrubbed in place: 209 historical blob versions (8 of them safetensors headers' metadata) and 4 commit messages,
+each match replaced by a neutral token (`<cpu>`, `<host>`, `<path>`, …), every commit kept and re-signed, the tip tree
+unchanged; a full re-scan of every blob, path and message reachable from `main` finds no private string.
+`check_private` gained patterns for CPU model numbers without a brand word and for specific kernel versions, which the
+scrub found the old set missed. `evidence/history_scrub_commit_map_2026-10-16.txt` maps old SHAs to new. The squashed
+line and the pre-scrub lines stay local and are never pushed: their spike README still names CPUs. Before the
+repository goes public, GitHub must drop the unscrubbed objects the private remote already holds (§20).

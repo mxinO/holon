@@ -62,8 +62,8 @@ clamped to what fits.
 
 ## Install
 
-Install the release tag. Steps 7–10's locks and records name commits of the release line as first built; the same commits, identical in
-content, are on `main` under new SHAs (`evidence/v0_release_line_sha_map_2026-10-16.txt` maps them).
+Install the release tag. Steps 7–10's locks and records name commits of the release line as first built; the same commits are on `main` under new SHAs, with identical code and a privacy-scrubbed spike README (`evidence/v0_release_line_sha_map_2026-10-16.txt` maps them; `evidence/history_scrub_commit_map_2026-10-16.txt` maps
+older SHAs).
 
 Host requirements: Linux x86-64, an NVIDIA driver supporting CUDA 13, the CUDA 13 toolkit (`nvcc` on `PATH` or under
 `CUDA_HOME`), gcc / g++, and [uv](https://docs.astral.sh/uv/). uv brings Python 3.12, torch 2.11 for CUDA 13.0 and
