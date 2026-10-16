@@ -615,6 +615,13 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   mismatch at a site, `build`/`weights` override, multi-site composite — are rejected or routed to proposals; (4)
   sandbox escape tests (forbidden write/read/network) fail.
 - Reuse machinery and native modules only at their triggers (design §4.6, §12).
+- **A recurrent-state checkpoint at the end of each answer** (GDN hybrids, `std.state.recurrent`): today the
+  `prompt_end` policy checkpoints only where a prompt ends, so an agent's next turn reuses the previous prompt but
+  prefills the previous answer again, even when it is sent back verbatim. In the pi test on an RTX 5090 that answer
+  was 44% of the uncached input tokens and ≈ 2% of wall time (`docs/agent-test-pi-rtx5090.md` §2); the gain grows
+  where templates or agents keep the reasoning in later prompts and answers are long. It needs the answer's tokens
+  as the template re-renders them (a checkpoint at the last aligned position the next prompt shares) and a payload
+  unit per finished request.
 
 **v2 — breadth**
 - DeepSeek-class: DSA indexer (page groups), V4 compressed KV (`tokens_per_unit`) — correctness on reduced-layer
