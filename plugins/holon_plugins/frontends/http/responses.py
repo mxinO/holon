@@ -103,8 +103,7 @@ def _messages(instructions: str | None, items: str | list[dict[str, Any]]) -> li
     for item in [{"role": "user", "content": items}] if isinstance(items, str) else items:
         kind = item.get("type", "message")
         if kind == "message":
-            role = {"developer": "system"}.get(item.get("role"), item.get("role"))
-            messages.append({"role": role, "content": _text(item.get("content"))})
+            messages.append({"role": item.get("role"), "content": _text(item.get("content"))})   # developer: Chat
         elif kind == "function_call":
             if not (messages and messages[-1]["role"] == "assistant"):
                 messages.append({"role": "assistant", "content": ""})

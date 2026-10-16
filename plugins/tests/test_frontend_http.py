@@ -286,8 +286,9 @@ def test_chat(http, bundle):
 
 
 def test_developer_messages_are_system_messages(http, bundle):
-    """OpenAI's `developer` role (sent by pi for reasoning models) reaches the template as `system`: the leading run
-    joins one system prompt, a later one stays a later system message; Responses' instructions join it too."""
+    """OpenAI's `developer` role (sent by pi for reasoning models) reaches the template as `system`: a leading run
+    holding one joins one system prompt, a later one stays a later system message; Responses' instructions join it
+    too; leading system messages alone are left as they are."""
     messages = [{"role": "system", "content": "A"}, {"role": "developer", "content": "B"},
                 {"role": "user", "content": "Hi"}, {"role": "developer", "content": "C"}]
     assert http.post("/v1/chat/completions", json={"messages": messages}).status_code == 200
@@ -296,6 +297,9 @@ def test_developer_messages_are_system_messages(http, bundle):
     assert http.post("/v1/responses", json={"instructions": "A", "input": [
         {"role": "developer", "content": "B"}, {"role": "user", "content": "Hi"}]}).status_code == 200
     assert bundle.rendered[-1][0] == [{"role": "system", "content": "A\nB"}, {"role": "user", "content": "Hi"}]
+    two = [{"role": "system", "content": "A"}, {"role": "system", "content": "B"}, {"role": "user", "content": "Hi"}]
+    assert http.post("/v1/chat/completions", json={"messages": two}).status_code == 200
+    assert bundle.rendered[-1][0] == two
 
 
 class EffortBundle(Bundle):
@@ -327,6 +331,7 @@ def test_reasoning_effort_reaches_the_template(bundle_type):
         assert chat(reasoning_effort=asked) == (200, {"reasoning_effort": level} if levels else {})
     assert chat(reasoning_effort="high", chat_template_kwargs={"reasoning_effort": "low"}) == (
         200, {"reasoning_effort": "low"})
+    assert chat(reasoning_effort="none") == (200, {"enable_thinking": False})        # OpenAI's no reasoning
     status, message = chat(reasoning_effort="banana")
     assert status == 400 and "minimal, low, medium, high, xhigh, max" in message
     assert ("takes low, medium, xhigh" in message) == levels

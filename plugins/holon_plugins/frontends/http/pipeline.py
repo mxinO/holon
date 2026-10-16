@@ -74,14 +74,15 @@ class Efforts:
         return SCALE if any(ids != render() for ids in rendered.values()) else None
 
     def resolve(self, value: str) -> str | None:
-        """The template's level for a requested effort: the level itself if the template takes it, else the nearest
-        level it takes on `SCALE` (the higher of two as near; so `minimal` is the lowest one). None for a template
-        without levels: the effort is accepted and has no effect, as before. A value off the scale is refused."""
+        """The template's level for a requested effort (OpenAI's "none" turns thinking off instead, in `Chat`): the
+        level itself if the template takes it, else the nearest level it takes on `SCALE` (the higher of two as near;
+        so `minimal` is the lowest one). None for a template without levels: the effort is accepted and has no
+        effect, as before. A value off the scale is refused."""
         levels = self.levels
         if value not in SCALE:
             takes = f"; this model's template takes {', '.join(levels)}, the others map to the nearest" if levels \
                 else ""
-            raise BadRequest(f"reasoning_effort {value!r}: one of {', '.join(SCALE)}{takes}")
+            raise BadRequest(f"reasoning_effort {value!r}: none or one of {', '.join(SCALE)}{takes}")
         if levels is None:
             return None
         if value in levels:
@@ -107,7 +108,9 @@ class Chat:
         if named is not None and named not in names:
             raise BadRequest(f"tool_choice names {named!r}, which is not among the tools")
         kwargs = conv.template_kwargs
-        if conv.reasoning_effort is not None and "reasoning_effort" not in kwargs:     # the raw knob wins
+        if conv.reasoning_effort == "none":           # OpenAI's no reasoning: thinking off, as Anthropic's disabled
+            kwargs = {"enable_thinking": False} | kwargs
+        elif conv.reasoning_effort is not None and "reasoning_effort" not in kwargs:     # the raw knob wins
             level = (efforts or Efforts(bundle)).resolve(conv.reasoning_effort)
             kwargs = kwargs | ({"reasoning_effort": level} if level else {})
         try:
@@ -147,15 +150,14 @@ class Chat:
 
 
 def system_first(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """OpenAI's `developer` messages as `system` ones (the chat templates know only `system`): the leading run of them
-    becomes one system message, its texts joined by newlines; a later one stays where it is, as a later system
-    message does."""
-    messages = [{**m, "role": "system"} if m.get("role") == "developer" else m for m in messages]
-    lead = next((i for i, m in enumerate(messages) if m.get("role") != "system"), len(messages))
-    if lead < 2:
-        return messages
-    text = "\n".join(m.get("content") or "" for m in messages[:lead])
-    return [{"role": "system", "content": text}, *messages[lead:]]
+    """OpenAI's `developer` messages as `system` ones (the chat templates know only `system`): a leading run of
+    system and developer messages that holds a developer one becomes one system message, its texts joined by
+    newlines; a later developer message stays where it is, as a later system message does."""
+    lead = next((i for i, m in enumerate(messages) if m.get("role") not in ("system", "developer")), len(messages))
+    joined = any(m.get("role") == "developer" for m in messages[:lead]) and lead > 1
+    head = [{"role": "system", "content": "\n".join(m.get("content") or "" for m in messages[:lead])}] if joined \
+        else messages[:lead]
+    return [{**m, "role": "system"} if m.get("role") == "developer" else m for m in head + messages[lead:]]
 
 
 class Parse:

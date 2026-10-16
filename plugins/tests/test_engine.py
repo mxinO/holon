@@ -51,7 +51,7 @@ def tiny_case(tiny_checkpoint):
 def _released(engine):
     """No request holds anything; every unit is free or held only by the prefix cache."""
     index = engine.state.index
-    ok = engine.state.held == {}
+    ok = engine.state.held == {} and not engine._hits      # nor a prefix-hit count it never reported
     for b in engine.state.bound:
         cached = index.cached(b.spec.name) if index else np.zeros(b.pool.capacity, dtype=bool)
         refs = b.pool.refcount(np.arange(b.pool.capacity))
