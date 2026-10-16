@@ -245,7 +245,7 @@ records it links, and losses are included. **Ratios are the claim**: absolute to
 `llama-bench` on the same GGUF file and card. They run at llama.cpp `cbe28bb3`, the commit Holon's GGUF kernels vendor,
 and at upstream `f12aaa34` (2026-10-16), in 3 ABBA rounds. The release gate is ≥ 0.8× the pin on every metric, and
 every cell passes it: decode is 1.04–1.11× the pin on every card. Prefill is 1.00–1.15× at depth 0 and 0.89–1.07× at
-depth 8192. "≈" marks a ratio within 2 sd of its per-round ratios of 1.
+depth 8192, under the 1.04–1.20× predicted. "≈" marks a ratio within 2 sd of its per-round ratios of 1.
 
 NVIDIA GeForce RTX 3090; Holon's ggml at cbe28bb3
 
@@ -330,15 +330,21 @@ Holon's, or Holon's output tok/s over the baseline's. Above 1, Holon is faster. 
 reason.
 - `decode_b1` / `decode_b8`: 1 or 8 requests of 256 + 256 tokens.
 - `agent`: 24 multi-turn tool sessions.
-- `long_prompt`: a 30K-token prompt arriving behind three streams.
+- `long_prompt`: a 30K-token prompt arriving behind three streams. Its TTFT p50 is the three streams'.
+
+Against `llama-server` the long prompt's large TTFT ratios (4.7–43×) are mostly `llama-server` saving its previous slot
+to its default RAM prompt cache before it starts the three streams. The 30K request's own TTFT is 0.98–1.17× llama.cpp's
+(`docs/release.md` §17.4).
 
 Where Holon loses:
-- **The longest pause on `decode_b8`.** Of 8 requests sent together, Holon starts the first one alone and pauses it
-  while it prefills the other seven. The baselines start all eight together.
+- **The longest pause on `decode_b8`.** Of 8 requests sent together over HTTP, `holon serve` starts the first 1–3 at
+  once. It pauses them for 57–320 ms while the rest prefill, on the 8B / 30B files. The baselines start all eight
+  together.
 - **The streams behind the 30K prompt** on every lock but the 27B's. Those locks do not mix decoding into prefill
   (`chunk_with_decode` 0, `docs/release.md` §16.5), so on the bf16 8B even TPOT falls to 0.82× on the RTX 4090.
 - **First tokens on the NVFP4 files against SGLang:** 0.22–0.69× on the RTX 5080's 8B and the RTX 4090's 30B. The
   5080's 8B NVFP4 also decodes at 0.90× SGLang's speed at batch 8.
+- **Smaller losses** on FP8 and NVFP4 (0.89–0.98×), in the tables.
 
 rtx-3090: Holon's advantage (> 1: Holon faster or higher)
 

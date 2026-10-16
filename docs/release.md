@@ -2672,29 +2672,42 @@ rtx-5090: Holon's advantage (> 1: Holon faster or higher)
 | [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | long_prompt (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 36.62 | 1.51 | 0.09 | 1.74 | 4/4 |
 
 What the ratios show:
-- **llama.cpp, GGUF.** On every class Holon decodes faster on every trace:
+- **llama.cpp, GGUF.** On every class Holon decodes faster on every trace, or ≈ (the 3090's 27B long prompt, TPOT
+  ≈ 0.96):
   - TPOT p50 1.07–1.15× at batch 1, 1.20–1.66× at batch 8 and 1.33–1.77× on the agent trace;
   - output throughput 1.03–1.90×;
   - TTFT p50 1.56–9.3× on `decode_b1`, `decode_b8` and the agent trace.
-- **The long prompt's TTFT ratios (4.7–43×) are mostly llama-server's own host prompt cache.** In one log examined
-  (the 4090's 8B, round 1), the three short streams waited ≈ 2.65 s. In that time `llama-server` saved the previous
-  slot's state to its RAM prompt cache (`--cache-ram`, on by default) and evicted older entries. Their prompt eval took
-  170 ms. The 27B's 0.24 s TTFT at batch 1 may have the same cause, but it was not examined. The method kept each
-  engine's prefix caching at its default (§5.2), so these numbers stand as measured. A `-cram 0` run would separate
-  this cost; it is not part of this step.
+- **The long prompt's TTFT ratios against llama.cpp (4.7–43×) are the three short streams', and they are mostly
+  `llama-server`'s own host prompt cache.**
+  - The trace's TTFT p50 is its three 256-token streams'. Against `llama-server`, Holon's advantage there is 4.7–52×
+    (llama.cpp 1.6–12 s, Holon 0.05–0.46 s).
+  - The 30K request's own TTFT ratio is 0.98–1.17×.
+  - The streams' wait sits in every round. In the one log examined (the 4090's 8B, round 1), the streams waited
+    ≈ 2.65 s while `llama-server` saved the previous slot's state to its RAM prompt cache (`--cache-ram`, on by
+    default) and evicted older entries. Their prompt eval took 170 ms.
+  - The 27B's 0.24 s TTFT at batch 1, and the agent trace's TTFT ratios, were not examined for the same effect.
+  - The method kept each engine's prefix caching at its default (§5.2), so these numbers stand as measured. A
+    `-cram 0` run would separate this cost; it is not part of this step.
+  - Against SGLang and FreeToken, the 4090's bf16 30K request starts 5.2× later than Holon's (23.7 s against 4.5 s).
+    Their 32,528-token cache holds the three streams and the 30K prompt only once the streams finish, whereas Holon
+    stalls the streams instead (below). On the 5090 and 3090 the 30K TTFT is 1.00–1.02×.
 - **Holon's losses:**
-  - *The longest pause on `decode_b8`: 0.15–0.63× llama.cpp's, 0.06–0.27× SGLang's.* Of 8 requests sent at once over
-    HTTP, `holon serve` starts the first alone. Its first token comes at about 30–85 ms instead of about 140, and it
-    then pauses for about 80–120 ms while the other seven prefill (`chunk_with_decode` 0 on these locks; the 27B's
-    `max_seqs` is 4). The in-process engine, which takes all eight at once, shows no such pause: its rows are in §17.7.
-    The p99 of 32 pauses is that one request's.
+  - *The longest pause on `decode_b8`: 0.15–0.63× llama.cpp's, 0.06–0.27× SGLang's.*
+    - On the 8B / 30B files, the 8 requests reach `holon serve` over HTTP a few milliseconds apart. Holon starts the
+      first 1–3 at once; their first tokens come at 41–197 ms. Those requests then pause for 57–320 ms while the rest
+      prefill (`chunk_with_decode` 0 on these locks). The in-process engine takes all eight at once and shows no such
+      pause (§17.7). The baselines start all eight together. The p99 of 32 pauses is one of those first requests'.
+    - On the 27B (`max_seqs` 4, on every engine, `-np 4` included), four requests wait for the first four to finish.
+      There the in-process engine pauses longer (167–453 ms) than the served one (111–207 ms).
   - *The streams behind the 30K prompt, on locks that keep `chunk_with_decode` 0 (§16.5).* The 8B Q4_K_M's longest
     pause is 0.09–0.14× llama.cpp's. On the 4090's bf16 8B it is 0.01–0.02× SGLang's and FreeToken's, and that 8B's
     TPOT p50 is 0.82×. On the 5090's and 3090's bf16 the pause is ≈ 1.0×: those baselines stall too. The 27B locks mix,
     and there Holon wins this pause by 2.6–4.1×.
   - *First tokens on the NVFP4 files against SGLang:* 0.48× / 0.22× (8B, 5080, B1 / B8) and 0.69× / 0.48× (30B, 4090).
-    The 5080's 8B NVFP4 also decodes at 0.90× SGLang's speed at batch 8 (throughput 0.82×). FP8 `decode_b8` TTFT is
-    0.89–0.97× SGLang's and 0.94–0.96× FreeToken's.
+    The 5080's 8B NVFP4 also decodes at 0.90× SGLang's speed at batch 8 (throughput 0.82×), and the 4090's 30B NVFP4
+    throughput at batch 8 is 0.98×.
+  - *Smaller losses on FP8:* `decode_b8` TTFT 0.89–0.97× SGLang's and 0.94–0.96× FreeToken's, the 5080's `decode_b1`
+    TTFT 0.97× FreeToken's, and the 4090's `decode_b8` longest pause 0.94× FreeToken's.
 - **SGLang and FreeToken, bf16 8B: parity.** TPOT 0.99–1.02× (the 4090's long prompt aside, 0.82×), throughput
   1.00–1.03×, and TTFT 0.98–1.53× SGLang's and ≈ 1.00–1.12× FreeToken's.
 
@@ -2779,14 +2792,21 @@ rtx-5090: speculation
   - ≈ 0.98× on the 3090's long prompt, the exception;
   - throughput 1.05–1.58×.
 
-  On batch 8, the agent trace and the long prompt, Holon accepts more of its drafts: 0.74–0.94 against llama.cpp's
-  0.69–0.78. At batch 1 the two are within 0.02.
+  On batch 8, the agent trace and the long prompt, served Holon accepts more of its drafts: 0.74–0.92 against
+  llama.cpp's 0.69–0.78. At batch 1 the two are within 0.023.
 - **Speedup over plain, Holon served.**
   - At batch 1 it is 2.05–2.57× on three classes, every one inflated by repetition: one prompt's greedy continuation
     repeats 23–24% of its 16-grams. On the 3090 that continuation does not loop (1.9%), and the speedup is 2.09×.
   - Batch 8 gives 1.51–1.60×; the 5080's batch 8 is inflated.
   - The agent trace gives 1.27–1.88×, and no agent row is inflated (0.08–0.15).
 - **Depth-1 share ≥ 0.993** on every Holon arm, and 2.5–3.6 tokens per verify row.
+- **MTP's greedy text is not plain's.** §17.1 said greedy MTP emits plain decoding's tokens, so both arms repeat alike.
+  The records show otherwise: verify steps and batch shapes change the numerics, so the greedy continuations diverge.
+  - On the 3090's `decode_b1`, plain repeats 0.231 of its 16-grams and MTP 0.019.
+  - On the 5090's long prompt, MTP repeats 0.032 in-process and 0.347 served.
+
+  The repetition label therefore reads the MTP arm's own share. The 3090's 2.09× sets MTP's non-looping text against
+  plain's looping one. Plain TPOT barely depends on the text, so that is the cleanest batch-1 speedup of the four.
 
 ### 17.6 A/A noise
 
@@ -2813,8 +2833,8 @@ class. Its ratios are in the advantage direction.
 | [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) | rtx-5090 | long_prompt | 1.002, 0.997, 1.002, 1.008; 1.002 ± 0.004 | 1.001, 1.000, 1.000, 0.999; 1.000 ± 0.001 | 1.001, 0.999, 1.001, 0.999; 1.000 ± 0.001 | 1.001, 1.000, 1.001, 0.999; 1.000 ± 0.001 |
 
 - **TPOT and throughput are within ±0.3%** in every round on every class.
-- **TTFT p50 is within ±3%,** except on two long prompts: one 4090 round at 0.95, and the 5080's rounds at 0.98–1.14
-  (sd 0.08).
+- **TTFT p50 is within ±3.5%** (the lowest round is the 4090's `decode_b1`, at 0.968), except on two long prompts:
+  one 4090 round at 0.95, and the 5080's rounds at 0.98–1.14 (sd 0.08).
 - **The longest-pause p99 is the noisy metric on the short traces:** sd up to 0.14 on `decode_b1` / `decode_b8`, and
   0.31 on the 3090's agent trace. Its p99 rests on one request's pause, so the pause ratios on those traces (§17.4)
   carry the "≈" rule's per-round spread, and differences under about 30% there are not claims.
@@ -3115,8 +3135,8 @@ One more FreeToken failure was the bench's, not FreeToken's (§17.10). It was fi
 
 | prediction (§17.1) | result |
 |---|---|
-| GGUF tg128 0.97–1.05× the pin | 1.04–1.11×: above the band on every class |
-| GGUF pp512 1.04–1.20× the pin | 1.00–1.15×: below the band on the 4090's 30B Q4_K_M (1.01) and MXFP4_MOE (1.00); not predicted at 8K, 0.89–1.07× |
+| GGUF tg128 0.97–1.05× the pin | 1.04–1.11×: at or above the band's top; within it on 3 of the 28 tg128 metrics (≤ 1.050 unrounded), above it on 25 |
+| GGUF pp512 1.04–1.20× the pin | depth 0, 1.00–1.15×: below the band on the 4090's 30B Q4_K_M (1.01) and MXFP4_MOE (1.00). Depth 8192 (read against the same band in step 3, §13.5), 0.89–1.07×: **a miss**, with 11 of 14 cells below 1.04 (unrounded; the 5090's 27B is 1.038) |
 | agent TTFT p50 advantage over `llama-server` ≥ 2× | 8B Q4_K_M 3.5–5.5× ✓; 27B 2.8–9.3× ✓ except the 3090's 1.57× ✗ |
 | bf16 8B TPOT p50 advantage over FreeToken 0.98–1.0 (B1, B8) | 1.01–1.02: just above the band |
 | 27B with MTP 1.5–1.9× plain's TPOT p50 on `decode_b1` | 2.05–2.57×: above the band; three of four classes are inflated by repetition, and the 3090's (not inflated) is 2.09× |
@@ -3133,9 +3153,12 @@ One more FreeToken failure was the bench's, not FreeToken's (§17.10). It was fi
    past Qwen3-8B's 40,960-position RoPE table, and FreeToken refused it. The 5090's first bf16 run lost FreeToken in its
    first two rounds. It was stopped, the cap was fixed at dce655f (at most the model's trained context), and the cell
    was re-run whole. The other classes' bf16 and HF cells ran at dce655f. The invalid run's log is kept local.
-4. **Records name two commits:** f08bba0 (the 27B plain and MTP records, the 5090's 8B Q4_K_M) and dce655f (the rest).
-   Between them only `bench/` changed: the served lock's public path, the arm-label check, the FreeToken cap and
-   `report.py`.
+4. **Records name two commits.**
+   - f08bba0: the bars of the 3090, 4090 and 5090; those classes' 27B plain and MTP records; the 5090's 8B Q4_K_M.
+   - dce655f: the rest, the 5080's records included.
+
+   Between the two, `bench/` changed (the served lock's public path, the arm-label check, the FreeToken cap,
+   `report.py`), and so did this document's §17.1. No engine code changed.
 5. **One field of the f08bba0 records was rewritten at publication:** `served.lock`, from the CI worktree's absolute
    path to the repository-relative one, as `run.py` writes it from 15b684d. No measurement changed.
 6. **`report.py`'s served-plan check accepts the RoPE sites a context change re-keys.** The first record showed that
@@ -3143,6 +3166,8 @@ One more FreeToken failure was the bench's, not FreeToken's (§17.10). It was fi
    row would print "—".
 7. **Record dates** follow the desktop's local clock: 2026-10-15 for runs before its midnight, 2026-10-16 after.
 8. **The decode-only HF records ran 3 rounds (ABA),** as §17.1 planned, so their positions are not balanced.
+9. **§17.1's statement that greedy MTP repeats as plain does is wrong** (§17.5). §17.1 is left as fixed, and the
+   label reads each arm's own share.
 
 ### 17.11 Review
 
@@ -3159,7 +3184,19 @@ any result was read, except the final review.
 - **Round 2: one major, fixed.** The served-plan check would have refused every MTP row. The repetition label is
   applied, and arms without drafts are shown.
 - **Round 3: clean, with one nit, fixed.**
-- **The final review of the aggregate change:** {{final_review}}
+- **The final review of the aggregate change: no blocker; two majors, both fixed.**
+  - The long-prompt TTFT ratios were published in the README without the `--cache-ram` caveat. They are the short
+    streams' TTFT; the 30K request's own ratio is now quoted.
+  - The pp512-at-8K prediction had been re-read as "not predicted"; it is now reported as a miss.
+- **Its six minors, all fixed in the prose:**
+  - the commit list in the deviations;
+  - "faster on every trace";
+  - the `decode_b8` pause explanation's numbers, and its 27B case;
+  - three unlisted small losses;
+  - MTP's greedy text differing from plain's;
+  - tg128 "above the band".
+
+  Every table regenerates byte for byte from the records, and the records are clean of private details.
 
 ### 17.12 For the lead
 
@@ -3173,10 +3210,11 @@ any result was read, except the final review.
    - NVFP4 first tokens against SGLang.
 
    No engine bug appeared, and no engine code was changed.
-3. **The long-prompt TTFT ratios (up to 43×) flatter Holon.** They include `llama-server` saving its previous slot to
-   its default RAM prompt cache, ≈ 2.65 s in the log examined. They are published as measured with that note. Your
-   call whether the README should also show a `-cram 0` column; that would mean one more llama-server run per GGUF
-   cell.
+3. **The long-prompt TTFT ratios (up to 43×) flatter Holon.** They are the three short streams', which wait for
+   `llama-server` to save its previous slot to its default RAM prompt cache (≈ 2.65 s in the log examined). The 30K
+   request's own TTFT is 0.98–1.17× llama.cpp's. They are published as measured with that note. Your call whether the
+   README should also show a `-cram 0` column, which would cost one more llama-server run per GGUF cell. The agent
+   trace's 1.6–9.3× TTFT ratios were not examined for the same effect.
 4. **MTP:** Holon's is faster per token than llama.cpp's, and it accepts more of its drafts. Its single-stream speedup
    over plain (2.05–2.57×) is inflated by a looping prompt on three classes. The honest numbers are batch 8 (1.5–1.6×)
    and the agent trace (1.3–1.9×). The locks stay plain (§16.6).
