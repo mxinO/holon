@@ -229,7 +229,7 @@ def requests_summary(rows: list[dict]) -> dict:
                     else None, "stop_reason": r.get("stop_reason"), "error_type": r.get("error_type"),
                     "tool_calls": [c["name"] for c in r.get("tool_calls") or []],
                     "tool_args_json": all(c["args_json"] for c in r.get("tool_calls") or []),
-                    "markup": r.get("markup") or [], "stream": r.get("stream"),
+                    "markup": r.get("markup") or [], "sse": r.get("sse"),
                     "content_chars": r.get("content_chars"), "reasoning_chars": r.get("reasoning_chars")})
     statuses = collections.Counter(str(r.get("status")) for r in rows)
     shapes = {"keys": sorted({k for r in chats for k in r.get("keys") or []}),
@@ -355,11 +355,11 @@ def summarize(record: dict) -> dict:
                          "replied_done": run["replied_done"]})
             for j, r in enumerate(served["requests"]):
                 rows.append(r)
-                clean = r["status"] == 200 and (r["stream"] or {}).get("done") and not (r["stream"] or {}).get(
+                clean = r["status"] == 200 and (r["sse"] or {}).get("done") and not (r["sse"] or {}).get(
                     "bad_lines") and r["stop_reason"] in ("stop", "tool_calls", "length")
                 if not clean or r["markup"] or not r["tool_args_json"]:
                     issues.append({"task": task, "run": i + 1, "request": j + 1, **{k: r[k] for k in (
-                        "status", "stop_reason", "error_type", "stream", "markup", "tool_calls", "tool_args_json",
+                        "status", "stop_reason", "error_type", "sse", "markup", "tool_calls", "tool_args_json",
                         "input_tokens", "output_tokens")}})
     ok = [r for r in rows if r["status"] == 200]
     tpot = [r["tpot_ms"] for r in ok if r["tpot_ms"]]

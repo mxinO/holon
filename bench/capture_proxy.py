@@ -111,7 +111,7 @@ def openai_facts(answer: bytes) -> dict:
     text: the token counts as `usage` (`input_tokens`, `output_tokens`, and `cached_tokens` if the server gave
     them), the finish reason, the tool calls made and whether each one's arguments parse as a JSON object, whether
     the content or the reasoning carries tool-call or reasoning markup, their lengths, and for a stream whether it
-    ended with `[DONE]` and how many of its data lines were not JSON. An error as in `facts`."""
+    ended with `[DONE]` and how many of its data lines were not JSON (`sse`). An error as in `facts`."""
     out: dict = {"usage": {}}
     content, reasoning, calls, stream, bad, done = [], [], {}, False, 0, False
     for line in answer.decode(errors="replace").splitlines() or [""]:
@@ -155,7 +155,7 @@ def openai_facts(answer: bytes) -> dict:
     out["markup"] = sorted({f"{where}:{m}" for where, text in (("content", content), ("reasoning", reasoning))
                             for m in (*TOOL_MARKUP, *THINK_MARKUP) if m in text})
     if stream:
-        out["stream"] = {"done": done, "bad_lines": bad}
+        out["sse"] = {"done": done, "bad_lines": bad}
     return out
 
 

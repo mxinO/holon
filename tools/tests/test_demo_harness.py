@@ -155,10 +155,10 @@ def test_the_proxy_reads_openai_chat_answers_without_text():
     assert proxy.openai_facts(sse) == {
         "usage": {"input_tokens": 50, "output_tokens": 9}, "stop_reason": "tool_calls",
         "tool_calls": [{"name": "read", "args_json": True}], "content_chars": 0, "reasoning_chars": 3, "markup": [],
-        "stream": {"done": True, "bad_lines": 0}}
+        "sse": {"done": True, "bad_lines": 0}}
     leaked = chunk({"content": "<tool_call>\n<function=read>"}, "stop") + b"data: {oops\n\n"
     assert proxy.openai_facts(leaked)["markup"] == ["content:<function=", "content:<tool_call>"]
-    assert proxy.openai_facts(leaked)["stream"] == {"done": False, "bad_lines": 1}
+    assert proxy.openai_facts(leaked)["sse"] == {"done": False, "bad_lines": 1}
     error = json.dumps({"error": {"type": "BadRequest", "message": "chat template: Unexpected message role."}})
     assert proxy.openai_facts(error.encode())["error_type"] == "BadRequest"
     shape = proxy.summary("POST", "/v1/chat/completions", {}, {
