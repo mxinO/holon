@@ -1,0 +1,30 @@
+# CPU-only CI (release design D9 / §8): the static checks of scripts/ci/run_all.sh and the test suite without a GPU
+# (GPU tests skip themselves). It runs once the repository is published; GPU checks (judge, snapshots, locks'
+# isolation-check) need GPU runners and stay manual (docs/plan.md, release status).
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cpu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0                       # check_abi.py and check_core_diff.sh compare with the base branch
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.1"
+      - name: environment (uv.lock, dev group)
+        run: uv sync --frozen --group dev
+      - name: static checks
+        run: . .venv/bin/activate && bash scripts/ci/run_all.sh origin/main
+      - name: tests (CPU)
+        env:
+          CUDA_VISIBLE_DEVICES: ""
+        run: . .venv/bin/activate && python -m pytest core std plugins judge testing tools -q -p no:cacheprovider
