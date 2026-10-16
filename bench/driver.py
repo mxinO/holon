@@ -5,7 +5,9 @@ The driver owns the clock: it releases requests at their arrival times (or `gap`
 calls `Backend.step()` while work is in flight, and timestamps every token when `step()` hands it back — so an
 engine that reports a token one step late (overlap scheduling) is charged for it, as a client would be. A request's
 row keeps its first and last token times and its largest inter-token gap (between two steps that hand it tokens;
-tokens handed back together, a verify step's, are one delivery).
+tokens handed back together, a verify step's, are one delivery), and, counted after the replay, how many of its
+output tokens repeat its own context: end a `REPEAT_N`-gram seen earlier in the prompt or output (greedy loops
+inflate speculative acceptance).
 """
 from __future__ import annotations
 
@@ -44,10 +46,22 @@ class Request:
 
     def row(self) -> list:
         return [self.sid, self.turn, len(self.prompt), self.output, len(self.generated),
-                round(self.release, 6), round(self.first, 6), round(self.last, 6), round(self.max_gap, 6)]
+                round(self.release, 6), round(self.first, 6), round(self.last, 6), round(self.max_gap, 6),
+                repeated(self.prompt, self.generated)]
 
 
-ROW = ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap"]
+ROW = ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"]
+REPEAT_N = 16                           # as release design §16.1's measure of the corpus' own repeats
+
+
+def repeated(prompt: list[int], output: list[int], n: int = REPEAT_N) -> int:
+    """Output tokens that end an n-gram already seen in prompt + output before it."""
+    seq, seen, count = prompt + output, set(), 0
+    for end in range(n, len(seq) + 1):
+        gram = tuple(seq[end - n:end])
+        count += end > len(prompt) and gram in seen
+        seen.add(gram)
+    return count
 _rids = itertools.count()               # unique across the replays of one process (warmup included)
 
 

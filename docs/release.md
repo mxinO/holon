@@ -2343,6 +2343,885 @@ remained.
 7. **Not done here, as planned:** the benchmark suite (step 8), the clean installs (step 10). The README's lock table
    is rewritten (every model per card: this card's lock, borrowed or neither); the performance section stays step 8's.
 
+## 17. As built (step 8)
+
+Branch `release8` from local `main` at 8e1f300 (step 7's locks). Only `bench/` changes; every record names its commit.
+The environment is step 7's: `uv sync --frozen --group dev` from the committed `uv.lock` inside a CUDA 13.0 container,
+one per desktop.
+
+### 17.1 Method, fixed before any result was read
+
+**Desktops.** One per class, clock-screened before and after its work as in §16.1 (`bench/clock_check.py`, 60 s of 27B
+decode at batch 4, at the class's own 27B lock); used if the SM clock holds (p10 / p50 ≥ 0.9). The screens are
+recorded beside the evidence (§17.2).
+
+**Engines and pins.**
+
+| engine | pin |
+|---|---|
+| Holon | the class's newest lock of each file (§16); this branch's commit |
+| llama.cpp, the gate | `cbe28bb3` (Holon's vendored ggml) |
+| llama.cpp, upstream | `f12aaa34`, HEAD on 2026-10-16, re-pinned for this step (§5.1); an ungated column |
+| SGLang | 0.5.21 |
+| FreeToken | `74a38777` |
+
+**Cells** (§5.2), each at the class's own lock; a file without one on the class is not run (borrowed locks are
+unverified there):
+
+| class | bars (GGUF) | serving: decode B1 / B8, agent, long prompt (4 rounds) | serving: decode B1 / B8 (3 rounds) |
+|---|---|---|---|
+| RTX 5080 | 8B Q4_K_M, 8B UD-IQ3_XXS, 30B UD-IQ3_XXS, 27B UD-IQ3_S (q8_0 KV) | 8B Q4_K_M; 27B UD-IQ3_S plain and with MTP | 8B NVFP4, 8B FP8 |
+| RTX 4090 | 8B Q4_K_M, 30B Q4_K_M, 30B MXFP4_MOE, 27B UD-Q4_K_M | 8B Q4_K_M; 27B UD-Q4_K_M plain and with MTP; 8B bf16 | 8B NVFP4, 30B NVFP4, 8B FP8 |
+| RTX 5090 | 8B Q4_K_M, 30B Q4_K_M, 27B UD-Q4_K_M | 8B Q4_K_M; 27B UD-Q4_K_M plain and with MTP; 8B bf16 | — |
+| RTX 3090 | 8B Q4_K_M, 30B Q4_K_M, 27B UD-Q4_K_M | 8B Q4_K_M; 27B UD-Q4_K_M plain and with MTP; 8B bf16 | — |
+
+The decode-only rows are the HF files of tier 2 (§5.2 gives them bars, which llama.cpp cannot run on safetensors), set
+against SGLang and FreeToken where they load (§5.1).
+
+**Bars** (the gate): `bench/bars.py`, 3 rounds, at the lock's settings, against `llama-bench` at the gate pin and
+upstream. A round now runs the engines in reverse order on odd rounds (ABBA; step 3 ran ABAB). The gate statistic is
+§5.3's: per round the median of repetitions 2–5, then the median over rounds, for pp512 and tg128 at depth 0 and
+8192, each ≥ 0.8× the pin.
+
+**Serving**: `bench/run.py`, ABBA rounds of fresh processes, greedy, `ignore_eos`, every engine's prefix cache on,
+prompts cut from natural text (`--corpus`: judge prompt set v1 for Qwen3, v1-qwen3_5 for the 27B).
+- **Holon served** (`holon_http`: `holon serve` starting from the lock, which the record's `served` block shows) is the
+  number compared with the servers. The in-process engine (`holon`) runs first in every record. Its KV tokens size
+  every baseline's cache (§5.2's flags, unchanged), and its row is reported.
+- The context is the traces' on every engine: 30,208 tokens with the long prompt, above the 8B locks' 8K as in §16.5
+  and below the 27B locks' 32K; 768 for the decode-only records. Served Holon must start from the matched lock, and
+  its plan differ only in that setting and the RoPE sites whose facts hold it (`max_positions`; an MTP arm: also in
+  what its flags set); `report.py` refuses a row otherwise.
+- `decode_b8` runs at most `max_seqs` at once: 4 on every 27B lock.
+- `llama-server` is the gate pin's build. Commands, per record:
+  ```
+  python bench/run.py --name release-<cell> --gpu 0 --model <file> --lock <the class's lock> --rounds 4 \
+      --corpus <prompt set> --traces bench/traces/{decode_b1,decode_b8,agent,long_prompt}.jsonl \
+      --backends holon holon_http [holon_http@aa] llamaserver           # GGUF (the A/A arm: 8B Q4_K_M)
+      --backends holon holon_http sglang_http freetoken_http            # the bf16 8B
+      --backends holon@mtp holon_http@mtp llamaserver@mtp3 \
+          --arm mtp='<step 7's MTP flags>' --arm mtp3='--spec-type draft-mtp --spec-draft-n-max 3'   # the 27B with MTP
+  python bench/run.py ... --rounds 3 --traces bench/traces/{decode_b1,decode_b8}.jsonl \
+      --backends holon holon_http sglang_http freetoken_http            # NVFP4 / FP8 (decode-only)
+  python bench/bars.py --name <cell> --gpu 0 --model <file> --lock <the class's lock> --rounds 3
+  ```
+- **A/A**: a second served Holon arm (`holon_http@aa`, no flags) in the 8B Q4_K_M record of every class, on every
+  trace. Its per-round ratios to `holon_http` are the noise floor printed beside the ratios.
+- **MTP** (the 27B): Holon's arm is step 7's (`--max-draft-tokens 3`, `drafters.mtp`, `spec.k=1:3,3:2`, the
+  exact-match verifier), in-process and served. llama.cpp's is `--spec-type draft-mtp --spec-draft-n-max 3`. They run
+  on the same four traces, greedy, on natural text, and are matched to the MTP arm's KV tokens. The tables are labelled
+  with trace and sampling. They add accepted / drafted, tokens per verify row, the depth-1 share of verify steps and
+  the share of output tokens that end a 16-gram already in their context.
+  - The speedup over plain is taken across two records of the same desktop (the plain cell's), so it is **unpaired**;
+    `report.py` names the plain record it used.
+  - `decode_b1` is **one prompt**: every round replays the same greedy continuation, so its rounds measure timing
+    noise, not prompts. `decode_b8`'s 8 prompts are quoted beside it (on the 27B, at most 4 at once: not
+    single-stream).
+  - Greedy MTP emits plain decoding's tokens, so both arms repeat alike. A trace whose output repeats more than twice
+    the corpus's own share (§16.1: 8.2% of its 16-grams, so above 0.164) has its speedup labelled "inflated by
+    repetition".
+- **Ratios are the claim**, rendered by `bench/report.py` as Holon's advantage: the baseline's TTFT p50, TPOT p50 and
+  max-gap p99 over Holon's, and Holon's output tok/s over the baseline's. "≈" marks a ratio within 2 sd of its per-round
+  ratios of 1. Absolute numbers are per board.
+
+**Gate and reporting.** The only gate is the bars' statistic on every GGUF cell, ≥ 0.8× the gate pin. **A cell below
+it is reported to the lead, not fixed in this step** (the lead's instruction; §5.3's "fixed and re-measured before
+release" waits for the lead's call). Every cell is published, losses included. A baseline that fails on a file is "—"
+with its recorded reason, unpatched.
+
+**Predictions** (§5.3, compared, not gated; each as Holon's advantage, `report.py`'s direction):
+- GGUF tg128 0.97–1.05× and pp512 1.04–1.20× the pin;
+- on the agent trace, Holon's TTFT p50 advantage over `llama-server` ≥ 2× ("well below"; M0.1's prior was 228 / 57 ms,
+  4×);
+- the bf16 8B's TPOT p50 advantage over FreeToken 0.98–1.0 on `decode_b1` and `decode_b8`; SGLang has no prior
+  record;
+- the 27B with MTP 1.5–1.9× plain's TPOT p50 on `decode_b1` (greedy, natural text).
+
+### 17.2 Desktops and clock screens
+
+One desktop per class, in a CUDA 13.0 container, ran the fixed CI worktree. The table gives SM clock p10 / p50 in MHz
+under 60 s of 27B decode at batch 4. "Power cap" is the share of loaded samples at the power limit. Every screen held
+(p10 / p50 ≥ 0.9), and none saw a thermal or hardware slowdown. Records: `evidence/release8_clock_<class>_2026-10-16.json`.
+
+| class | before the work | after it |
+|---|---|---|
+| RTX 5080 | 2677 / 2692, power cap 1.00 | 2677 / 2677, power cap 1.00 |
+| RTX 4090 | 2670 / 2670, power cap 0 | 2670 / 2685, power cap 0 |
+| RTX 5090 | 2565 / 2647, power cap 1.00 | 2520 / 2602, power cap 1.00 |
+| RTX 3090 | 1665 / 1680, power cap 1.00 | 1650 / 1650, power cap 1.00 |
+
+- Each class ran on a single desktop from start to finish. None was rejected and none failed. Desktops known to be bad
+  from steps 3 and 7 were excluded.
+- The RTX 5080 came free 5.5 h after the other three and ran last.
+
+### 17.3 The gate: bars against `llama-bench`
+
+Holon's in-process pp512 and tg128, at depth 0 and 8192, ran against `llama-bench` at the gate pin (`cbe28bb3`) and at
+upstream (`f12aaa34`). Each class ran its own lock, in 3 ABBA rounds; Holon's ggml is the gate pin's.
+
+**No GGUF cell is below 0.8× the pin on any gated metric**, so acceptance item 5's gate passes on all four classes.
+Every record has all its rounds, and `below_gate` and `incomplete` are empty in each.
+
+| metric | RTX 5080 | RTX 4090 | RTX 5090 | RTX 3090 |
+|---|---|---|---|---|
+| pp512 | 1.08–1.15 | 1.00–1.09 | 1.09–1.14 | 1.09 |
+| pp512 @ d8192 | 0.89–1.05 | 0.94–1.05 | 0.94–1.04 | 0.98–1.07 |
+| tg128 | 1.05–1.06 | 1.05–1.09 | 1.06–1.09 | 1.06–1.09 |
+| tg128 @ d8192 | 1.04–1.08 | 1.05–1.11 | 1.08–1.10 | 1.05–1.09 |
+
+- **The lowest ratio is prefill at depth 8192.** The 5080 measures 0.89 (30B UD-IQ3_XXS), 0.90 (8B Q4_K_M) and 0.91
+  (8B UD-IQ3_XXS). The 8B / 30B cells of the 4090 and 5090 measure 0.94–0.96. This is step 3's pp512-at-8K gap, and it
+  is now at the same pin.
+- The 27B is ≥ 1.04 everywhere.
+- Upstream lies within ±0.04 of the pin on every cell: no upstream gain is in sight.
+
+NVIDIA GeForce RTX 3090; Holon's ggml at cbe28bb3
+
+| file (record) | lock | metric | Holon t/s | llama.cpp gate (cbe28bb3c) t/s | Holon / gate | llama.cpp upstream (f12aaa344) t/s | Holon / upstream |
+|---|---|---|---|---|---|---|---|
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | pp512 | 5223.2 | 4775.0 | 1.09 | 4752.1 | 1.10 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | pp512 @ d8192 | 3335.4 | 3381.0 | 0.99 | 3366.2 | 0.99 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | tg128 | 234.4 | 214.4 | 1.09 | 214.9 | 1.09 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | tg128 @ d8192 | 193.1 | 177.7 | 1.09 | 177.5 | 1.09 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | pp512 | 1732.4 | 1594.6 | 1.09 | 1652.5 | 1.05 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | pp512 @ d8192 | 1558.4 | 1454.4 | 1.07 | 1500.9 | 1.04 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | tg128 | 47.2 | 44.7 | 1.06 | 44.7 | 1.06 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | tg128 @ d8192 | 45.9 | 43.6 | 1.05 | 43.6 | 1.05 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | pp512 | 5803.1 | 5307.3 | 1.09 | 5283.5 | 1.10 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | pp512 @ d8192 | 3822.6 | 3880.8 | 0.98 | 3902.1 | 0.98 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | tg128 | 154.2 | 142.1 | 1.08 | 142.2 | 1.08 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | tg128 @ d8192 | 128.0 | 118.9 | 1.08 | 118.8 | 1.08 |
+
+NVIDIA GeForce RTX 4090; Holon's ggml at cbe28bb3
+
+| file (record) | lock | metric | Holon t/s | llama.cpp gate (cbe28bb3c) t/s | Holon / gate | llama.cpp upstream (f12aaa344) t/s | Holon / upstream |
+|---|---|---|---|---|---|---|---|
+| [qwen3-30b-a3b-mxfp4_moe](../evidence/bars_release-qwen3-30b-a3b-mxfp4_moe_rtx-4090_2026-10-16.json) | rtx-4090 | pp512 | 10794.1 | 10745.9 | 1.00 | 10682.6 | 1.01 |
+| [qwen3-30b-a3b-mxfp4_moe](../evidence/bars_release-qwen3-30b-a3b-mxfp4_moe_rtx-4090_2026-10-16.json) | rtx-4090 | pp512 @ d8192 | 7438.7 | 7944.1 | 0.94 | 7912.2 | 0.94 |
+| [qwen3-30b-a3b-mxfp4_moe](../evidence/bars_release-qwen3-30b-a3b-mxfp4_moe_rtx-4090_2026-10-16.json) | rtx-4090 | tg128 | 242.3 | 222.3 | 1.09 | 222.2 | 1.09 |
+| [qwen3-30b-a3b-mxfp4_moe](../evidence/bars_release-qwen3-30b-a3b-mxfp4_moe_rtx-4090_2026-10-16.json) | rtx-4090 | tg128 @ d8192 | 198.3 | 178.4 | 1.11 | 178.1 | 1.11 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | pp512 | 10155.9 | 10087.8 | 1.01 | 10026.6 | 1.01 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | pp512 @ d8192 | 7211.0 | 7663.5 | 0.94 | 7629.9 | 0.94 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | tg128 | 271.1 | 249.8 | 1.08 | 249.7 | 1.09 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | tg128 @ d8192 | 217.4 | 195.8 | 1.11 | 195.5 | 1.11 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | pp512 | 3758.2 | 3435.7 | 1.09 | 3500.0 | 1.07 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | pp512 @ d8192 | 3358.2 | 3190.3 | 1.05 | 3240.6 | 1.04 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | tg128 | 47.5 | 45.1 | 1.05 | 45.1 | 1.05 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | tg128 @ d8192 | 46.1 | 43.8 | 1.05 | 43.8 | 1.05 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | pp512 | 12892.7 | 12366.8 | 1.04 | 12300.6 | 1.05 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | pp512 @ d8192 | 8871.1 | 9307.8 | 0.95 | 9354.4 | 0.95 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | tg128 | 154.9 | 146.6 | 1.06 | 146.6 | 1.06 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | tg128 @ d8192 | 127.3 | 120.5 | 1.06 | 120.4 | 1.06 |
+
+NVIDIA GeForce RTX 5080; Holon's ggml at cbe28bb3
+
+| file (record) | lock | metric | Holon t/s | llama.cpp gate (cbe28bb3c) t/s | Holon / gate | llama.cpp upstream (f12aaa344) t/s | Holon / upstream |
+|---|---|---|---|---|---|---|---|
+| [qwen3-30b-a3b-ud-iq3_xxs](../evidence/bars_release-qwen3-30b-a3b-ud-iq3_xxs_rtx-5080_2026-10-16.json) | rtx-5080 | pp512 | 8136.7 | 7364.8 | 1.10 | 7342.7 | 1.11 |
+| [qwen3-30b-a3b-ud-iq3_xxs](../evidence/bars_release-qwen3-30b-a3b-ud-iq3_xxs_rtx-5080_2026-10-16.json) | rtx-5080 | pp512 @ d8192 | 4961.4 | 5601.6 | 0.89 | 5487.6 | 0.90 |
+| [qwen3-30b-a3b-ud-iq3_xxs](../evidence/bars_release-qwen3-30b-a3b-ud-iq3_xxs_rtx-5080_2026-10-16.json) | rtx-5080 | tg128 | 261.9 | 246.1 | 1.06 | 246.1 | 1.06 |
+| [qwen3-30b-a3b-ud-iq3_xxs](../evidence/bars_release-qwen3-30b-a3b-ud-iq3_xxs_rtx-5080_2026-10-16.json) | rtx-5080 | tg128 @ d8192 | 211.8 | 197.2 | 1.07 | 197.3 | 1.07 |
+| [qwen3.8-27b-ud-iq3_s](../evidence/bars_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) | rtx-5080 | pp512 | 2544.0 | 2219.4 | 1.15 | 2298.2 | 1.11 |
+| [qwen3.8-27b-ud-iq3_s](../evidence/bars_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) | rtx-5080 | pp512 @ d8192 | 2153.9 | 2052.8 | 1.05 | 2127.9 | 1.01 |
+| [qwen3.8-27b-ud-iq3_s](../evidence/bars_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) | rtx-5080 | tg128 | 63.8 | 60.1 | 1.06 | 60.1 | 1.06 |
+| [qwen3.8-27b-ud-iq3_s](../evidence/bars_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) | rtx-5080 | tg128 @ d8192 | 61.6 | 56.8 | 1.08 | 56.8 | 1.08 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) | rtx-5080 | pp512 | 8684.4 | 8015.6 | 1.08 | 7979.4 | 1.09 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) | rtx-5080 | pp512 @ d8192 | 5546.6 | 6138.6 | 0.90 | 6004.8 | 0.92 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) | rtx-5080 | tg128 | 166.3 | 158.4 | 1.05 | 158.3 | 1.05 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) | rtx-5080 | tg128 @ d8192 | 136.0 | 129.4 | 1.05 | 129.3 | 1.05 |
+| [qwen3-8b-ud-iq3_xxs](../evidence/bars_release-qwen3-8b-ud-iq3_xxs_rtx-5080_2026-10-16.json) | rtx-5080 | pp512 | 8923.8 | 8103.7 | 1.10 | 8132.9 | 1.10 |
+| [qwen3-8b-ud-iq3_xxs](../evidence/bars_release-qwen3-8b-ud-iq3_xxs_rtx-5080_2026-10-16.json) | rtx-5080 | pp512 @ d8192 | 5625.6 | 6206.6 | 0.91 | 6107.4 | 0.92 |
+| [qwen3-8b-ud-iq3_xxs](../evidence/bars_release-qwen3-8b-ud-iq3_xxs_rtx-5080_2026-10-16.json) | rtx-5080 | tg128 | 219.3 | 209.1 | 1.05 | 209.1 | 1.05 |
+| [qwen3-8b-ud-iq3_xxs](../evidence/bars_release-qwen3-8b-ud-iq3_xxs_rtx-5080_2026-10-16.json) | rtx-5080 | tg128 @ d8192 | 168.7 | 161.8 | 1.04 | 161.6 | 1.04 |
+
+NVIDIA GeForce RTX 5090; Holon's ggml at cbe28bb3
+
+| file (record) | lock | metric | Holon t/s | llama.cpp gate (cbe28bb3c) t/s | Holon / gate | llama.cpp upstream (f12aaa344) t/s | Holon / upstream |
+|---|---|---|---|---|---|---|---|
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-5090_2026-10-16.json) | rtx-5090 | pp512 | 12736.4 | 11581.0 | 1.10 | 11540.7 | 1.10 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-5090_2026-10-16.json) | rtx-5090 | pp512 @ d8192 | 8630.5 | 9026.6 | 0.96 | 8907.0 | 0.97 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-5090_2026-10-16.json) | rtx-5090 | tg128 | 387.5 | 362.5 | 1.07 | 363.1 | 1.07 |
+| [qwen3-30b-a3b-q4_k_m](../evidence/bars_release-qwen3-30b-a3b-q4_k_m_rtx-5090_2026-10-16.json) | rtx-5090 | tg128 @ d8192 | 325.9 | 295.4 | 1.10 | 295.2 | 1.10 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) | rtx-5090 | pp512 | 4763.2 | 4174.9 | 1.14 | 4321.3 | 1.10 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) | rtx-5090 | pp512 @ d8192 | 4103.4 | 3953.1 | 1.04 | 4079.7 | 1.01 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) | rtx-5090 | tg128 | 87.3 | 82.4 | 1.06 | 82.4 | 1.06 |
+| [qwen3.8-27b-ud-q4_k_m](../evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) | rtx-5090 | tg128 @ d8192 | 84.9 | 78.6 | 1.08 | 78.6 | 1.08 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-15.json) | rtx-5090 | pp512 | 15458.6 | 14140.0 | 1.09 | 14085.5 | 1.10 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-15.json) | rtx-5090 | pp512 @ d8192 | 10311.7 | 10920.8 | 0.94 | 10714.7 | 0.96 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-15.json) | rtx-5090 | tg128 | 275.1 | 253.2 | 1.09 | 253.2 | 1.09 |
+| [qwen3-8b-q4_k_m](../evidence/bars_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-15.json) | rtx-5090 | tg128 @ d8192 | 227.2 | 207.8 | 1.09 | 207.7 | 1.09 |
+
+### 17.4 Serving: Holon against llama.cpp, SGLang and FreeToken
+
+Holon served (`holon serve` from the lock) ran against each baseline in the same record's rounds. Each ratio is Holon's
+advantage, so above 1 Holon is faster. "≈" marks a ratio within 2 sd of its per-round ratios of 1. The baselines'
+cache is Holon's in-process KV tokens, given in the record column, and the in-process engine's rows are in §17.7.
+Every served Holon row passed `report.py`'s check: it started from the matched lock, and its plan differs only in the
+context and the RoPE sites keyed by it.
+
+rtx-3090: Holon's advantage (> 1: Holon faster or higher)
+
+| record | model | trace (sampling, prompts; max seqs) | Holon served vs | TTFT p50 | TPOT p50 | max gap p99 | out tok/s | paired rounds |
+|---|---|---|---|---|---|---|---|---|
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | decode_b1 (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 2.87 | 1.05 | 1.20 | 1.16 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | decode_b8 (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 1.62 | 1.29 | ≈ 1.97 | 1.39 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | agent (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 1.51 | 1.31 | 6.74 | 1.22 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | long_prompt (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | ≈ 20.83 | ≈ 0.98 | 4.06 | 1.30 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | decode_b1 (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 2.56 | 1.08 | 3.19 | 1.12 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | decode_b8 (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 1.56 | 1.22 | 0.35 | 1.36 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | agent (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 1.57 | 1.44 | 7.43 | 1.25 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | long_prompt (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 30.57 | ≈ 0.96 | 4.05 | 1.19 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | Qwen/Qwen3-8B@b968826d9c46 | decode_b1 (greedy, v1.jsonl; 64) | holon_http vs sglang_http | 1.26 | 1.00 | ≈ 1.00 | 1.01 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | Qwen/Qwen3-8B@b968826d9c46 | decode_b8 (greedy, v1.jsonl; 64) | holon_http vs sglang_http | 0.98 | 1.01 | 0.06 | 1.01 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | Qwen/Qwen3-8B@b968826d9c46 | agent (greedy, v1.jsonl; 64) | holon_http vs sglang_http | ≈ 0.99 | 0.99 | 1.07 | 1.00 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | Qwen/Qwen3-8B@b968826d9c46 | long_prompt (greedy, v1.jsonl; 64) | holon_http vs sglang_http | ≈ 1.23 | 1.01 | 1.02 | 1.01 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | Qwen/Qwen3-8B@b968826d9c46 | decode_b1 (greedy, v1.jsonl; 64) | holon_http vs freetoken_http | ≈ 1.01 | 1.01 | 1.02 | 1.01 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | Qwen/Qwen3-8B@b968826d9c46 | decode_b8 (greedy, v1.jsonl; 64) | holon_http vs freetoken_http | ≈ 1.00 | 1.01 | ≈ 1.03 | 1.01 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | Qwen/Qwen3-8B@b968826d9c46 | agent (greedy, v1.jsonl; 64) | holon_http vs freetoken_http | 1.12 | 1.01 | 1.10 | 1.00 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | Qwen/Qwen3-8B@b968826d9c46 | long_prompt (greedy, v1.jsonl; 64) | holon_http vs freetoken_http | ≈ 1.09 | 1.00 | ≈ 1.00 | 1.00 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | decode_b1 (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 1.59 | 1.14 | 1.32 | 1.15 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | decode_b8 (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 1.84 | 1.24 | 0.16 | 1.30 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | agent (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 3.82 | 1.50 | 5.79 | 1.04 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | long_prompt (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 22.18 | 1.32 | 0.10 | 1.47 | 4/4 |
+
+rtx-4090: Holon's advantage (> 1: Holon faster or higher)
+
+| record | model | trace (sampling, prompts; max seqs) | Holon served vs | TTFT p50 | TPOT p50 | max gap p99 | out tok/s | paired rounds |
+|---|---|---|---|---|---|---|---|---|
+| [release-qwen3-30b-a3b-nvfp4](../evidence/bench_release-qwen3-30b-a3b-nvfp4_rtx-4090_2026-10-16.json) (KV 34960 tokens) | nvidia/Qwen3-30B-A3B-NVFP4@2538ded2a4ed | decode_b1 (greedy, v1.jsonl; 32) | holon_http vs sglang_http | 0.69 | 1.14 | 1.14 | 1.12 | 3/3 |
+| [release-qwen3-30b-a3b-nvfp4](../evidence/bench_release-qwen3-30b-a3b-nvfp4_rtx-4090_2026-10-16.json) (KV 34960 tokens) | nvidia/Qwen3-30B-A3B-NVFP4@2538ded2a4ed | decode_b8 (greedy, v1.jsonl; 32) | holon_http vs sglang_http | 0.48 | 1.03 | 0.24 | 0.98 | 3/3 |
+| [release-qwen3-30b-a3b-nvfp4](../evidence/bench_release-qwen3-30b-a3b-nvfp4_rtx-4090_2026-10-16.json) (KV 34960 tokens) | nvidia/Qwen3-30B-A3B-NVFP4@2538ded2a4ed | decode_b1 (greedy, v1.jsonl; 32) | holon_http vs freetoken_http | — (exit code 1: [2026-10-16\|04:10:01\|FrontendAPI] ERROR    Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |  |  |  |
+| [release-qwen3-30b-a3b-nvfp4](../evidence/bench_release-qwen3-30b-a3b-nvfp4_rtx-4090_2026-10-16.json) (KV 34960 tokens) | nvidia/Qwen3-30B-A3B-NVFP4@2538ded2a4ed | decode_b8 (greedy, v1.jsonl; 32) | holon_http vs freetoken_http | — (exit code 1: [2026-10-16\|04:10:01\|FrontendAPI] ERROR    Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |  |  |  |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | decode_b1 (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 4.39 | 1.09 | 1.29 | 1.22 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | decode_b8 (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 1.68 | 1.29 | 2.77 | 1.42 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | agent (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 5.02 | 1.93 | 4.72 | 1.17 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | long_prompt (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | ≈ 14.40 | 1.09 | 3.83 | 1.32 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | decode_b1 (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 3.84 | 1.07 | 3.18 | 1.12 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | decode_b8 (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 1.69 | 1.23 | 0.63 | 1.40 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | agent (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 9.29 | 1.77 | 11.58 | 1.30 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | long_prompt (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 40.77 | ≈ 1.04 | ≈ 2.64 | 1.33 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | Qwen/Qwen3-8B@b968826d9c46 | decode_b1 (greedy, v1.jsonl; 64) | holon_http vs sglang_http | 1.53 | 1.00 | 1.01 | 1.01 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | Qwen/Qwen3-8B@b968826d9c46 | decode_b8 (greedy, v1.jsonl; 64) | holon_http vs sglang_http | 1.04 | 1.01 | 0.14 | 1.01 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | Qwen/Qwen3-8B@b968826d9c46 | agent (greedy, v1.jsonl; 64) | holon_http vs sglang_http | 1.02 | 1.01 | 1.08 | 1.00 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | Qwen/Qwen3-8B@b968826d9c46 | long_prompt (greedy, v1.jsonl; 64) | holon_http vs sglang_http | 1.15 | 0.82 | 0.01 | 1.03 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | Qwen/Qwen3-8B@b968826d9c46 | decode_b1 (greedy, v1.jsonl; 64) | holon_http vs freetoken_http | 1.03 | 1.01 | 1.02 | 1.01 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | Qwen/Qwen3-8B@b968826d9c46 | decode_b8 (greedy, v1.jsonl; 64) | holon_http vs freetoken_http | ≈ 1.00 | 1.01 | 1.08 | 1.01 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | Qwen/Qwen3-8B@b968826d9c46 | agent (greedy, v1.jsonl; 64) | holon_http vs freetoken_http | 1.09 | 1.01 | 1.12 | 1.00 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | Qwen/Qwen3-8B@b968826d9c46 | long_prompt (greedy, v1.jsonl; 64) | holon_http vs freetoken_http | ≈ 1.00 | 0.82 | 0.02 | 1.03 | 4/4 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-4090_2026-10-16.json) (KV 78176 tokens) | Qwen/Qwen3-8B-FP8@220b46e3b218 | decode_b1 (greedy, v1.jsonl; 32) | holon_http vs sglang_http | 1.37 | 1.39 | 1.40 | 1.39 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-4090_2026-10-16.json) (KV 78176 tokens) | Qwen/Qwen3-8B-FP8@220b46e3b218 | decode_b8 (greedy, v1.jsonl; 32) | holon_http vs sglang_http | 0.97 | 1.16 | 0.18 | 1.15 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-4090_2026-10-16.json) (KV 78176 tokens) | Qwen/Qwen3-8B-FP8@220b46e3b218 | decode_b1 (greedy, v1.jsonl; 32) | holon_http vs freetoken_http | ≈ 1.01 | 1.06 | 1.08 | 1.06 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-4090_2026-10-16.json) (KV 78176 tokens) | Qwen/Qwen3-8B-FP8@220b46e3b218 | decode_b8 (greedy, v1.jsonl; 32) | holon_http vs freetoken_http | 0.96 | 1.04 | 0.94 | 1.03 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-4090_2026-10-16.json) (KV 95504 tokens) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | decode_b1 (greedy, v1.jsonl; 32) | holon_http vs sglang_http | 1.32 | 1.09 | 1.09 | 1.09 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-4090_2026-10-16.json) (KV 95504 tokens) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | decode_b8 (greedy, v1.jsonl; 32) | holon_http vs sglang_http | ≈ 1.01 | ≈ 1.00 | 0.27 | ≈ 1.00 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-4090_2026-10-16.json) (KV 95504 tokens) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | decode_b1 (greedy, v1.jsonl; 32) | holon_http vs freetoken_http | — (exit code 1: [2026-10-16\|03:55:24\|FrontendAPI] ERROR    Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |  |  |  |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-4090_2026-10-16.json) (KV 95504 tokens) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | decode_b8 (greedy, v1.jsonl; 32) | holon_http vs freetoken_http | — (exit code 1: [2026-10-16\|03:55:24\|FrontendAPI] ERROR    Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |  |  |  |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | decode_b1 (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 2.02 | 1.11 | 1.29 | 1.12 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | decode_b8 (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 2.69 | 1.55 | 0.25 | 1.63 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | agent (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 4.02 | 1.43 | 9.28 | 1.04 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | long_prompt (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 43.26 | 1.65 | 0.09 | 1.90 | 4/4 |
+
+rtx-5080: Holon's advantage (> 1: Holon faster or higher)
+
+| record | model | trace (sampling, prompts; max seqs) | Holon served vs | TTFT p50 | TPOT p50 | max gap p99 | out tok/s | paired rounds |
+|---|---|---|---|---|---|---|---|---|
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf | decode_b1 (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 3.04 | 1.10 | 2.13 | 1.21 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf | decode_b8 (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 1.50 | 1.20 | 1.98 | 1.40 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf | agent (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 2.47 | 1.39 | 4.09 | 1.08 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf | long_prompt (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 5.14 | 1.10 | 3.62 | 1.31 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf | decode_b1 (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 2.71 | 1.09 | 3.23 | 1.13 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf | decode_b8 (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 1.57 | 1.20 | 0.35 | 1.34 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf | agent (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 4.94 | 1.53 | 6.30 | 1.25 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf | long_prompt (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 4.72 | 1.23 | 3.61 | 1.26 | 4/4 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-5080_2026-10-16.json) (KV 35536 tokens) | Qwen/Qwen3-8B-FP8@220b46e3b218 | decode_b1 (greedy, v1.jsonl; 32) | holon_http vs sglang_http | 1.19 | 1.07 | 1.06 | 1.07 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-5080_2026-10-16.json) (KV 35536 tokens) | Qwen/Qwen3-8B-FP8@220b46e3b218 | decode_b8 (greedy, v1.jsonl; 32) | holon_http vs sglang_http | 0.89 | 1.03 | 0.10 | 1.02 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-5080_2026-10-16.json) (KV 35536 tokens) | Qwen/Qwen3-8B-FP8@220b46e3b218 | decode_b1 (greedy, v1.jsonl; 32) | holon_http vs freetoken_http | 0.97 | 1.02 | 1.02 | 1.02 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-5080_2026-10-16.json) (KV 35536 tokens) | Qwen/Qwen3-8B-FP8@220b46e3b218 | decode_b8 (greedy, v1.jsonl; 32) | holon_http vs freetoken_http | 0.94 | 1.10 | 1.10 | 1.09 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-5080_2026-10-16.json) (KV 53024 tokens) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | decode_b1 (greedy, v1.jsonl; 32) | holon_http vs sglang_http | 0.48 | 1.05 | 1.05 | 1.04 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-5080_2026-10-16.json) (KV 53024 tokens) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | decode_b8 (greedy, v1.jsonl; 32) | holon_http vs sglang_http | 0.22 | 0.90 | 0.06 | 0.82 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-5080_2026-10-16.json) (KV 53024 tokens) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | decode_b1 (greedy, v1.jsonl; 32) | holon_http vs freetoken_http | — (exit code 1: [2026-10-16\|09:00:04\|FrontendAPI] ERROR    Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |  |  |  |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-5080_2026-10-16.json) (KV 53024 tokens) | nvidia/Qwen3-8B-NVFP4@ccd10a893cbc | decode_b8 (greedy, v1.jsonl; 32) | holon_http vs freetoken_http | — (exit code 1: [2026-10-16\|09:00:04\|FrontendAPI] ERROR    Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |  |  |  |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | decode_b1 (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 1.61 | 1.09 | 1.18 | 1.10 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | decode_b8 (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 1.89 | 1.41 | 0.15 | 1.46 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | agent (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 3.53 | 1.35 | 6.80 | 1.03 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | long_prompt (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 21.72 | 1.50 | 0.14 | 1.64 | 4/4 |
+
+rtx-5090: Holon's advantage (> 1: Holon faster or higher)
+
+| record | model | trace (sampling, prompts; max seqs) | Holon served vs | TTFT p50 | TPOT p50 | max gap p99 | out tok/s | paired rounds |
+|---|---|---|---|---|---|---|---|---|
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | decode_b1 (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 4.63 | 1.12 | 1.27 | 1.30 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | decode_b8 (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 1.86 | 1.44 | 2.95 | 1.58 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | agent (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 3.72 | 1.66 | 11.00 | 1.05 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | long_prompt (greedy, v1-qwen3_5.jsonl; 4) | holon_http@mtp vs llamaserver@mtp3 | 10.61 | 1.17 | 4.00 | 1.47 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | decode_b1 (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 3.87 | 1.10 | 3.24 | 1.16 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | decode_b8 (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 1.79 | 1.22 | 0.44 | 1.44 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | agent (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 2.83 | 1.47 | 13.40 | 1.06 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-Q4_K_M.gguf | long_prompt (greedy, v1-qwen3_5.jsonl; 4) | holon_http vs llamaserver | 10.24 | 1.13 | 4.03 | 1.20 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | Qwen/Qwen3-8B@b968826d9c46 | decode_b1 (greedy, v1.jsonl; 64) | holon_http vs sglang_http | 1.38 | 1.01 | ≈ 1.01 | 1.01 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | Qwen/Qwen3-8B@b968826d9c46 | decode_b8 (greedy, v1.jsonl; 64) | holon_http vs sglang_http | 1.07 | 1.02 | 0.11 | 1.02 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | Qwen/Qwen3-8B@b968826d9c46 | agent (greedy, v1.jsonl; 64) | holon_http vs sglang_http | ≈ 0.98 | 1.01 | 1.07 | 1.00 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | Qwen/Qwen3-8B@b968826d9c46 | long_prompt (greedy, v1.jsonl; 64) | holon_http vs sglang_http | ≈ 1.09 | 1.02 | 1.02 | 1.02 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | Qwen/Qwen3-8B@b968826d9c46 | decode_b1 (greedy, v1.jsonl; 64) | holon_http vs freetoken_http | 1.05 | 1.02 | 1.04 | 1.02 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | Qwen/Qwen3-8B@b968826d9c46 | decode_b8 (greedy, v1.jsonl; 64) | holon_http vs freetoken_http | ≈ 1.00 | 1.02 | ≈ 1.07 | 1.02 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | Qwen/Qwen3-8B@b968826d9c46 | agent (greedy, v1.jsonl; 64) | holon_http vs freetoken_http | 1.12 | 1.02 | 1.08 | 1.00 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | Qwen/Qwen3-8B@b968826d9c46 | long_prompt (greedy, v1.jsonl; 64) | holon_http vs freetoken_http | ≈ 1.06 | 1.02 | 1.00 | 1.02 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | decode_b1 (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 2.24 | 1.15 | 1.24 | 1.18 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | decode_b8 (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 2.80 | 1.66 | 0.24 | 1.76 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | agent (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 5.48 | 1.33 | 12.26 | 1.03 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf | long_prompt (greedy, v1.jsonl; 48) | holon_http vs llamaserver | 36.62 | 1.51 | 0.09 | 1.74 | 4/4 |
+
+What the ratios show:
+- **llama.cpp, GGUF.** On every class Holon decodes faster on every trace, or ≈ (the 3090's 27B long prompt, TPOT
+  ≈ 0.96):
+  - TPOT p50 1.07–1.15× at batch 1, 1.20–1.66× at batch 8 and 1.33–1.77× on the agent trace;
+  - output throughput 1.03–1.90×;
+  - TTFT p50 1.56–9.3× on `decode_b1`, `decode_b8` and the agent trace.
+- **The long prompt's TTFT ratios against llama.cpp (4.7–43×) are the three short streams', and they are mostly
+  `llama-server`'s own host prompt cache.**
+  - The trace's TTFT p50 is its three 256-token streams'. As a ratio of each record's median stream TTFT (not the
+    table's paired statistic), Holon's advantage over `llama-server` is 4.7–52× (llama.cpp 1.6–12 s, Holon 0.05–0.46 s).
+  - The 30K request's own TTFT ratio is 0.98–1.17×.
+  - The streams' wait sits in every round. In the one log examined (the 4090's 8B, round 1), the streams waited
+    ≈ 2.65 s while `llama-server` saved the previous slot's state to its RAM prompt cache (`--cache-ram`, on by
+    default) and evicted older entries. Their prompt eval took 170 ms.
+  - The 27B's 0.24 s TTFT at batch 1, and the agent trace's TTFT ratios, were not examined for the same effect.
+  - The method kept each engine's prefix caching at its default (§5.2), so these numbers stand as measured. A
+    `-cram 0` run would separate this cost; it is not part of this step.
+  - Against SGLang and FreeToken, the 4090's bf16 30K request starts 5.2× later than Holon's (23.7 s against 4.5 s).
+    Their 32,528-token cache holds the three streams and the 30K prompt only once the streams finish, whereas Holon
+    stalls the streams instead (below). On the 5090 and 3090 the 30K TTFT is 1.00–1.02×.
+- **Holon's losses:**
+  - *The longest pause on `decode_b8`: 0.15–0.63× llama.cpp's, 0.06–0.27× SGLang's.*
+    - On the 8B / 30B files, the 8 requests reach `holon serve` over HTTP a few milliseconds apart. Holon starts the
+      first 1–3 at once; their first tokens come at 41–197 ms. Those requests then pause for 57–320 ms while the rest
+      prefill (`chunk_with_decode` 0 on these locks). The in-process engine takes all eight at once and shows no such
+      pause (§17.7). The baselines start all eight together. The p99 of 32 pauses is one of those first requests'.
+    - On the 27B (`max_seqs` 4, on every engine, `-np 4` included), four requests wait for the first four to finish.
+      There the in-process engine pauses longer (167–453 ms) than the served one (111–207 ms).
+  - *The streams behind the 30K prompt, on locks that keep `chunk_with_decode` 0 (§16.5).* The 8B Q4_K_M's longest
+    pause is 0.09–0.14× llama.cpp's. On the 4090's bf16 8B it is 0.01–0.02× SGLang's and FreeToken's, and that 8B's
+    TPOT p50 is 0.82×. On the 5090's and 3090's bf16 the pause is ≈ 1.0×: those baselines stall too. The 27B locks mix,
+    and there Holon wins this pause by 2.6–4.1×.
+  - *First tokens on the NVFP4 files against SGLang:* 0.48× / 0.22× (8B, 5080, B1 / B8) and 0.69× / 0.48× (30B, 4090).
+    The 5080's 8B NVFP4 also decodes at 0.90× SGLang's speed at batch 8 (throughput 0.82×), and the 4090's 30B NVFP4
+    throughput at batch 8 is 0.98×.
+  - *Smaller losses on FP8:* `decode_b8` TTFT 0.89–0.97× SGLang's and 0.94–0.96× FreeToken's, the 5080's `decode_b1`
+    TTFT 0.97× FreeToken's, and the 4090's `decode_b8` longest pause 0.94× FreeToken's.
+- **SGLang and FreeToken, bf16 8B: parity.** TPOT 0.99–1.02× (the 4090's long prompt aside, 0.82×), throughput
+  1.00–1.03×, and TTFT 0.98–1.53× SGLang's and ≈ 1.00–1.12× FreeToken's.
+
+### 17.5 Speculation: the 27B with MTP
+
+Greedy on natural text (`v1-qwen3_5`), on the four traces, MTP arms only; the KV size is the MTP arm's. The speedup is
+each engine's TPOT p50 against its own plain arm on the same desktop. It is unpaired: it comes from the plain record,
+named in the table. "Inflated by repetition" marks a trace whose output repeats more than 0.164 of its 16-grams
+(§17.1). The locks stay plain (§16.6).
+
+rtx-3090: speculation
+
+| record | trace (sampling, prompts) | backend | TPOT p50 ms | speedup over its plain (TPOT p50) | plain from | accepted / drafted | tokens per verify row | depth-1 share | repeated output |
+|---|---|---|---|---|---|---|---|---|---|
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) | decode_b1 (greedy, v1-qwen3_5.jsonl) | holon@mtp | 10.11 | 2.09 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json), unpaired | 0.836 | 3.51 | 1.000 | 0.019 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) | decode_b1 (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 10.07 | 2.09 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json), unpaired | 0.836 | 3.51 | 1.000 | 0.019 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) | decode_b1 (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 10.54 | 2.16 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json), unpaired | 0.859 | — | — | 0.238 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) | decode_b8 (greedy, v1-qwen3_5.jsonl) | holon@mtp | 18.04 | 1.64 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json), unpaired | 0.752 | 2.51 | 1.000 | 0.088 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) | decode_b8 (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 18.47 | 1.60 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json), unpaired | 0.747 | 2.51 | 0.999 | 0.088 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) | decode_b8 (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 23.2 | 1.56 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json), unpaired | 0.693 | — | — | 0.108 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) | agent (greedy, v1-qwen3_5.jsonl) | holon@mtp | 39.19 | 1.27 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json), unpaired | 0.805 | 2.74 | 1.000 | 0.108 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) | agent (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 39.15 | 1.27 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json), unpaired | 0.800 | 2.73 | 1.000 | 0.099 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) | agent (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 52.81 | 1.34 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json), unpaired | 0.711 | — | — | 0.134 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) | long_prompt (greedy, v1-qwen3_5.jsonl) | holon@mtp | 35.76 | 1.38 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json), unpaired | 0.893 | 2.82 | 1.000 | 0.226 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) | long_prompt (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 35.72 | 1.38 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json), unpaired | 0.893 | 2.82 | 1.000 | 0.241 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) | long_prompt (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 37.86 | 1.05 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json), unpaired | 0.766 | — | — | 0.281 |
+
+rtx-4090: speculation
+
+| record | trace (sampling, prompts) | backend | TPOT p50 ms | speedup over its plain (TPOT p50) | plain from | accepted / drafted | tokens per verify row | depth-1 share | repeated output |
+|---|---|---|---|---|---|---|---|---|---|
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) | decode_b1 (greedy, v1-qwen3_5.jsonl) | holon@mtp | 8.23 | 2.56 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json), unpaired | 0.878 | 3.63 | 1.000 | 0.238 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) | decode_b1 (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 8.22 | 2.57 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json), unpaired | 0.878 | 3.63 | 1.000 | 0.238 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) | decode_b1 (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 8.93 | 2.54 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json), unpaired | 0.894 | — | — | 0.238 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) | decode_b8 (greedy, v1-qwen3_5.jsonl) | holon@mtp | 15.53 | 1.53 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json), unpaired | 0.760 | 2.54 | 0.995 | 0.126 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) | decode_b8 (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 15.59 | 1.51 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json), unpaired | 0.766 | 2.55 | 0.995 | 0.118 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) | decode_b8 (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 20.36 | 1.42 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json), unpaired | 0.709 | — | — | 0.142 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) | agent (greedy, v1-qwen3_5.jsonl) | holon@mtp | 15.52 | 1.86 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json), unpaired | 0.766 | 2.92 | 0.996 | 0.109 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) | agent (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 16.62 | 1.77 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json), unpaired | 0.757 | 2.90 | 0.994 | 0.084 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) | agent (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 31.98 | 1.63 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json), unpaired | 0.712 | — | — | 0.146 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) | long_prompt (greedy, v1-qwen3_5.jsonl) | holon@mtp | 22.53 | 1.43 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json), unpaired | 0.941 | 2.89 | 1.000 | 0.453 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) | long_prompt (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 22.53 | 1.43 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json), unpaired | 0.903 | 2.84 | 0.999 | 0.366 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) | long_prompt (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 24.84 | 1.27 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json), unpaired | 0.776 | — | — | 0.302 |
+
+rtx-5080: speculation
+
+| record | trace (sampling, prompts) | backend | TPOT p50 ms | speedup over its plain (TPOT p50) | plain from | accepted / drafted | tokens per verify row | depth-1 share | repeated output |
+|---|---|---|---|---|---|---|---|---|---|
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) | decode_b1 (greedy, v1-qwen3_5.jsonl) | holon@mtp | 7.62 | 2.05 (inflated by repetition) | [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json), unpaired | 0.800 | 3.40 | 1.000 | 0.227 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) | decode_b1 (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 7.61 | 2.05 (inflated by repetition) | [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json), unpaired | 0.800 | 3.40 | 1.000 | 0.227 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) | decode_b1 (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 8.38 | 2.03 (inflated by repetition) | [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json), unpaired | 0.789 | — | — | 0.227 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) | decode_b8 (greedy, v1-qwen3_5.jsonl) | holon@mtp | 12.8 | 1.65 (inflated by repetition) | [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json), unpaired | 0.829 | 2.67 | 1.000 | 0.305 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) | decode_b8 (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 13.58 | 1.54 (inflated by repetition) | [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json), unpaired | 0.810 | 2.64 | 0.996 | 0.281 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) | decode_b8 (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 16.26 | 1.54 (inflated by repetition) | [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json), unpaired | 0.726 | — | — | 0.259 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) | agent (greedy, v1-qwen3_5.jsonl) | holon@mtp | 17.73 | 1.66 | [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json), unpaired | 0.773 | 2.88 | 0.997 | 0.081 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) | agent (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 17.37 | 1.85 | [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json), unpaired | 0.773 | 2.89 | 0.997 | 0.091 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) | agent (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 24.53 | 2.00 | [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json), unpaired | 0.719 | — | — | 0.128 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) | long_prompt (greedy, v1-qwen3_5.jsonl) | holon@mtp | 27.22 | 1.31 (inflated by repetition) | [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json), unpaired | 0.919 | 2.85 | 1.000 | 0.369 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) | long_prompt (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 27.39 | 1.30 (inflated by repetition) | [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json), unpaired | 0.916 | 2.85 | 1.000 | 0.363 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) | long_prompt (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 29.98 | 1.46 (inflated by repetition) | [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json), unpaired | 0.733 | — | — | 0.302 |
+
+rtx-5090: speculation
+
+| record | trace (sampling, prompts) | backend | TPOT p50 ms | speedup over its plain (TPOT p50) | plain from | accepted / drafted | tokens per verify row | depth-1 share | repeated output |
+|---|---|---|---|---|---|---|---|---|---|
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) | decode_b1 (greedy, v1-qwen3_5.jsonl) | holon@mtp | 4.9 | 2.33 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json), unpaired | 0.878 | 3.63 | 1.000 | 0.238 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) | decode_b1 (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 4.89 | 2.34 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json), unpaired | 0.878 | 3.63 | 1.000 | 0.238 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) | decode_b1 (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 5.48 | 2.29 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json), unpaired | 0.859 | — | — | 0.238 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) | decode_b8 (greedy, v1-qwen3_5.jsonl) | holon@mtp | 8.74 | 1.58 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json), unpaired | 0.758 | 2.52 | 0.995 | 0.107 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) | decode_b8 (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 8.83 | 1.56 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json), unpaired | 0.765 | 2.54 | 0.995 | 0.108 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) | decode_b8 (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 12.44 | 1.35 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json), unpaired | 0.712 | — | — | 0.115 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) | agent (greedy, v1-qwen3_5.jsonl) | holon@mtp | 7.73 | 1.84 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json), unpaired | 0.736 | 3.01 | 0.995 | 0.083 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) | agent (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 7.46 | 1.88 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json), unpaired | 0.744 | 3.04 | 0.993 | 0.100 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) | agent (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 12.15 | 1.70 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json), unpaired | 0.712 | — | — | 0.145 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) | long_prompt (greedy, v1-qwen3_5.jsonl) | holon@mtp | 15.28 | 1.46 | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json), unpaired | 0.839 | 2.73 | 1.000 | 0.032 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) | long_prompt (greedy, v1-qwen3_5.jsonl) | holon_http@mtp | 15.08 | 1.49 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json), unpaired | 0.920 | 2.86 | 0.999 | 0.347 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) | long_prompt (greedy, v1-qwen3_5.jsonl) | llamaserver@mtp3 | 17.65 | 1.44 (inflated by repetition) | [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json), unpaired | 0.709 | — | — | 0.266 |
+
+- **Holon's MTP is faster per token than llama.cpp's on every class and trace except one.** Served TPOT p50, MTP
+  against MTP:
+  - 1.05–1.12× at batch 1, 1.20–1.44× at batch 8 and 1.31–1.93× on the agent trace;
+  - ≈ 0.98× on the 3090's long prompt, the exception;
+  - throughput 1.05–1.58×.
+
+  On batch 8, the agent trace and the long prompt, served Holon accepts more of its drafts: 0.74–0.92 against
+  llama.cpp's 0.69–0.78. At batch 1 the two are within 0.023.
+- **Speedup over plain, Holon served.**
+  - At batch 1 it is 2.05–2.57× on three classes, every one inflated by repetition: one prompt's greedy continuation
+    repeats 23–24% of its 16-grams. On the 3090 that continuation does not loop (1.9%), and the speedup is 2.09×.
+  - Batch 8 gives 1.51–1.60×; the 5080's batch 8 is inflated.
+  - The agent trace gives 1.27–1.88×, and no agent row is inflated (0.08–0.15).
+- **Depth-1 share ≥ 0.993** on every Holon arm, and 2.5–3.6 tokens per verify row.
+- **MTP's greedy text is not plain's.** §17.1 said greedy MTP emits plain decoding's tokens, so both arms repeat alike.
+  The records show otherwise: verify steps and batch shapes change the numerics, so the greedy continuations diverge.
+  - On the 3090's `decode_b1`, plain repeats 0.231 of its 16-grams and MTP 0.019.
+  - On the 5090's long prompt, MTP repeats 0.032 in-process and 0.347 served.
+
+  The repetition label therefore reads the MTP arm's own share. The 3090's 2.09× sets MTP's non-looping text against
+  plain's looping one. Plain TPOT barely depends on the text, so that is the cleanest batch-1 speedup of the four.
+
+### 17.6 A/A noise
+
+A second served Holon arm with no flags (`holon_http@aa`) ran against `holon_http` in the 8B Q4_K_M record of each
+class. Its ratios are in the advantage direction.
+
+| record | GPU | trace | TTFT p50: rounds; mean ± sd | TPOT p50: rounds; mean ± sd | max gap p99: rounds; mean ± sd | out tok/s: rounds; mean ± sd |
+|---|---|---|---|---|---|---|
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | decode_b1 | 1.013, 1.001, 0.998, 1.020; 1.008 ± 0.010 | 1.000, 1.000, 1.000, 1.000; 1.000 ± 0.000 | 1.017, 1.012, 1.006, 0.783; 0.954 ± 0.114 | 1.001, 0.999, 0.999, 1.000; 1.000 ± 0.001 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | decode_b8 | 0.999, 0.998, 0.999, 0.984; 0.995 ± 0.008 | 1.003, 0.997, 0.996, 0.999; 0.999 ± 0.003 | 1.000, 1.001, 0.996, 1.181; 1.045 ± 0.091 | 1.002, 0.997, 0.997, 0.998; 0.999 ± 0.003 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | agent | 0.981, 1.014, 0.990, 1.003; 0.997 ± 0.014 | 1.000, 1.000, 1.000, 1.000; 1.000 ± 0.000 | 0.717, 1.382, 0.720, 0.949; 0.942 ± 0.313 | 1.000, 1.000, 1.000, 1.000; 1.000 ± 0.000 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) | rtx-3090 | long_prompt | 0.998, 1.000, 0.984, 1.002; 0.996 ± 0.008 | 1.001, 0.999, 0.999, 0.999; 1.000 ± 0.001 | 1.001, 0.998, 0.998, 0.999; 0.999 ± 0.002 | 1.001, 0.999, 0.999, 0.999; 1.000 ± 0.001 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | decode_b1 | 0.978, 0.991, 1.007, 0.968; 0.986 ± 0.017 | 1.000, 1.000, 1.000, 1.000; 1.000 ± 0.000 | 0.781, 0.968, 0.997, 0.997; 0.936 ± 0.104 | 1.000, 1.000, 1.000, 1.000; 1.000 ± 0.000 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | decode_b8 | 1.002, 1.000, 1.007, 1.011; 1.005 ± 0.005 | 1.000, 1.000, 1.001, 1.000; 1.000 ± 0.001 | 1.000, 1.004, 1.000, 0.995; 0.999 ± 0.004 | 1.000, 1.000, 1.001, 1.000; 1.000 ± 0.000 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | agent | 1.001, 0.997, 0.998, 1.010; 1.001 ± 0.006 | 0.999, 1.001, 0.999, 1.001; 1.000 ± 0.002 | 0.998, 1.001, 0.998, 1.003; 1.000 ± 0.003 | 1.000, 1.000, 1.000, 1.000; 1.000 ± 0.000 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) | rtx-4090 | long_prompt | 0.950, 1.003, 0.986, 1.000; 0.985 ± 0.025 | 0.998, 1.001, 1.001, 1.000; 1.000 ± 0.001 | 0.999, 1.002, 1.002, 1.000; 1.000 ± 0.001 | 0.999, 1.000, 1.000, 1.000; 1.000 ± 0.001 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) | rtx-5080 | decode_b1 | 1.002, 0.998, 1.001, 1.005; 1.002 ± 0.003 | 1.000, 1.000, 1.000, 1.000; 1.000 ± 0.000 | 1.010, 1.005, 0.998, 1.002; 1.004 ± 0.005 | 1.000, 0.999, 1.000, 1.000; 1.000 ± 0.000 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) | rtx-5080 | decode_b8 | 0.996, 0.983, 1.014, 1.020; 1.003 ± 0.017 | 1.000, 1.000, 1.000, 1.000; 1.000 ± 0.000 | 0.998, 1.160, 0.861, 0.860; 0.970 ± 0.142 | 1.000, 0.998, 1.001, 1.002; 1.000 ± 0.002 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) | rtx-5080 | agent | 0.999, 1.002, 0.979, 0.987; 0.992 ± 0.011 | 1.001, 1.000, 1.000, 1.001; 1.001 ± 0.001 | 1.001, 0.999, 1.000, 1.002; 1.000 ± 0.001 | 1.000, 1.000, 1.000, 1.000; 1.000 ± 0.000 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) | rtx-5080 | long_prompt | 1.114, 0.978, 1.142, 1.005; 1.060 ± 0.081 | 0.998, 0.998, 1.000, 1.000; 0.999 ± 0.001 | 1.000, 1.001, 1.000, 1.000; 1.000 ± 0.000 | 1.000, 1.000, 1.000, 1.000; 1.000 ± 0.000 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) | rtx-5090 | decode_b1 | 1.004, 0.997, 0.987, 1.010; 1.000 ± 0.010 | 1.000, 1.000, 1.000, 1.000; 1.000 ± 0.000 | 0.913, 1.010, 1.130, 0.964; 1.004 ± 0.093 | 1.000, 1.000, 0.999, 1.000; 1.000 ± 0.000 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) | rtx-5090 | decode_b8 | 1.012, 1.007, 1.021, 1.006; 1.012 ± 0.007 | 1.000, 1.000, 1.000, 1.000; 1.000 ± 0.000 | 1.015, 1.006, 0.848, 1.001; 0.967 ± 0.080 | 1.000, 1.000, 1.001, 1.000; 1.000 ± 0.000 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) | rtx-5090 | agent | 0.994, 1.014, 0.991, 0.985; 0.996 ± 0.012 | 1.000, 1.002, 1.000, 1.000; 1.001 ± 0.001 | 1.003, 1.002, 1.000, 0.998; 1.001 ± 0.002 | 1.000, 1.000, 1.000, 1.000; 1.000 ± 0.000 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) | rtx-5090 | long_prompt | 1.002, 0.997, 1.002, 1.008; 1.002 ± 0.004 | 1.001, 1.000, 1.000, 0.999; 1.000 ± 0.001 | 1.001, 0.999, 1.001, 0.999; 1.000 ± 0.001 | 1.001, 1.000, 1.001, 0.999; 1.000 ± 0.001 |
+
+- **TPOT and throughput are within ±0.3%** in every round on every class.
+- **TTFT p50 is within ±3.5%** (the lowest round is the 4090's `decode_b1`, at 0.968), except on two long prompts:
+  one 4090 round at 0.95, and the 5080's rounds at 0.98–1.14 (sd 0.08).
+- **The longest-pause p99 is the noisy metric on the short traces:** sd up to 0.14 on `decode_b1` / `decode_b8`, and
+  0.31 on the 3090's agent trace. Its p99 rests on one request's pause, so the pause ratios on those traces (§17.4)
+  carry the "≈" rule's per-round spread, and differences under about 30% there are not claims.
+
+### 17.7 Absolute numbers per board
+
+Every engine, trace and record, as the M0.7 runner reports them:
+- TTFT and TPOT, p50 / p99;
+- the per-request maximum inter-token gap, p50 / p99 / max;
+- output throughput, and the rounds that ran.
+
+These numbers are per board; the claim is the ratios above.
+
+rtx-3090
+
+| record | trace | backend | TTFT p50 / p99 ms | TPOT p50 / p99 ms | max gap p50 / p99 / max ms | out tok/s | rounds |
+|---|---|---|---|---|---|---|---|
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | decode_b1 | holon@mtp | 164.6 / 164.93 | 10.11 / 10.13 | 35.9 / 36.31 / 36.32 | 93.4 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | decode_b1 | holon_http@mtp | 165.76 / 166.07 | 10.07 / 10.09 | 35.78 / 36.26 / 36.27 | 93.7 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | decode_b1 | llamaserver@mtp3 | 475.98 / 478.42 | 10.54 / 10.55 | 42.79 / 43.02 / 43.02 | 80.9 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | decode_b8 | holon@mtp | 2667.12 / 6328.96 | 18.04 / 22.16 | 150.15 / 206.32 / 206.32 | 197.1 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | decode_b8 | holon_http@mtp | 2715.66 / 6499.52 | 18.47 / 23.2 | 149.69 / 249.26 / 249.44 | 192.7 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | decode_b8 | llamaserver@mtp3 | 4276.2 / 9878.42 | 23.2 / 29.77 | 437.04 / 793.02 / 793.3 | 139.0 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | agent | holon@mtp | 4873.13 / 13118.2 | 39.19 / 99.12 | 356.43 / 390.43 / 497.88 | 60.7 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | agent | holon_http@mtp | 4995.72 / 12113.3 | 39.15 / 100.87 | 356.52 / 388.32 / 389.54 | 61.0 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | agent | llamaserver@mtp3 | 7827.09 / 23030.44 | 52.81 / 121.35 | 1158.25 / 2711.2 / 2835.87 | 49.9 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | long_prompt | holon@mtp | 465.86 / 23577.48 | 35.76 / 36.62 | 457.44 / 458.08 / 458.08 | 81.9 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | long_prompt | holon_http@mtp | 517.36 / 23616.68 | 35.72 / 37.67 | 456.95 / 458.07 / 458.07 | 81.7 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-3090_2026-10-16.json) (KV 73088 tokens) | long_prompt | llamaserver@mtp3 | 5099.25 / 27491.42 | 37.86 / 44.68 | 1856.36 / 1870.42 / 1870.48 | 63.8 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | decode_b1 | holon | 154.2 / 154.58 | 21.11 / 21.11 | 21.25 / 21.27 / 21.27 | 46.3 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | decode_b1 | holon_http | 155.7 / 156.11 | 21.09 / 21.1 | 21.42 / 21.45 / 21.45 | 46.3 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | decode_b1 | llamaserver | 398.14 / 398.71 | 22.81 / 22.82 | 68.26 / 68.33 / 68.33 | 41.2 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | decode_b8 | holon | 4503.48 / 8576.14 | 29.67 / 30.73 | 237.91 / 453.29 / 453.29 | 128.6 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | decode_b8 | holon_http | 4546.79 / 8710.32 | 29.54 / 30.53 | 148.24 / 301.67 / 301.71 | 127.3 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | decode_b8 | llamaserver | 7119.17 / 12653.16 | 36.18 / 36.22 | 40.45 / 108.36 / 108.41 | 93.6 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | agent | holon | 9853.9 / 18602.59 | 49.87 / 123.23 | 334.33 / 359.03 / 360.84 | 51.7 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | agent | holon_http | 9676.93 / 18604.32 | 49.76 / 123.22 | 334.33 / 359.72 / 360.84 | 51.6 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | agent | llamaserver | 14940.93 / 28143.13 | 70.98 / 158.09 | 1245.7 / 2665.28 / 3287.99 | 41.3 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | long_prompt | holon | 451.05 / 22331.94 | 49.47 / 49.48 | 433.13 / 433.36 / 433.36 | 60.8 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | long_prompt | holon_http | 469.1 / 22342.51 | 49.47 / 49.53 | 433.25 / 433.61 / 433.62 | 60.8 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-3090_2026-10-15.json) (KV 86560 tokens) | long_prompt | llamaserver | 23789.51 / 25150.16 | 39.83 / 55.37 | 554.71 / 1755.02 / 1755.03 | 51.0 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | decode_b1 | holon | 66.53 / 67.17 | 19.71 / 19.71 | 19.81 / 19.82 / 19.82 | 50.3 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | decode_b1 | holon_http | 68.43 / 68.9 | 19.69 / 19.69 | 19.95 / 20.1 / 20.1 | 50.3 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | decode_b1 | sglang_http | 86.22 / 86.29 | 19.75 / 19.75 | 20.04 / 20.1 / 20.1 | 50.0 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | decode_b1 | freetoken_http | 69.09 / 69.2 | 19.9 / 19.91 | 20.25 / 20.3 / 20.3 | 49.8 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | decode_b8 | holon | 405.73 / 405.94 | 20.19 / 20.19 | 20.64 / 20.64 / 20.64 | 368.8 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | decode_b8 | holon_http | 436.91 / 438.26 | 20.17 / 21.56 | 20.78 / 372.31 / 372.33 | 367.0 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | decode_b8 | sglang_http | 427.86 / 429.2 | 20.36 / 20.37 | 21.7 / 22.25 / 22.25 | 364.5 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | decode_b8 | freetoken_http | 435.2 / 435.8 | 20.42 / 21.85 | 22.78 / 384.24 / 384.29 | 363.2 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | agent | holon | 131.97 / 428.68 | 22.12 / 26.91 | 115.3 / 413.73 / 429.25 | 72.5 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | agent | holon_http | 153.28 / 448.96 | 22.12 / 26.91 | 115.72 / 413.81 / 414.0 | 72.4 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | agent | sglang_http | 152.82 / 477.58 | 21.9 / 27.97 | 119.69 / 442.56 / 443.34 | 72.5 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | agent | freetoken_http | 170.91 / 452.44 | 22.38 / 28.48 | 143.79 / 455.15 / 456.05 | 72.3 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | long_prompt | holon | 187.68 / 9864.21 | 29.84 / 29.85 | 9848.23 / 9855.33 / 9855.33 | 101.1 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | long_prompt | holon_http | 185.84 / 9887.53 | 29.85 / 29.95 | 9841.58 / 9855.54 / 9855.54 | 101.1 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | long_prompt | sglang_http | 210.78 / 10053.43 | 30.11 / 30.12 | 10012.7 / 10029.72 / 10029.73 | 100.1 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-3090_2026-10-16.json) (KV 43360 tokens) | long_prompt | freetoken_http | 186.59 / 9944.54 | 29.99 / 30.12 | 9851.95 / 9865.08 / 9865.1 | 100.5 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | decode_b1 | holon | 47.28 / 47.42 | 6.5 / 6.5 | 6.61 / 6.62 / 6.62 | 150.2 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | decode_b1 | holon_http | 49.08 / 49.75 | 6.49 / 6.49 | 6.74 / 6.85 / 6.85 | 150.3 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | decode_b1 | holon_http@aa | 48.64 / 49.13 | 6.49 / 6.49 | 6.74 / 8.44 / 8.49 | 150.2 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | decode_b1 | llamaserver | 78.06 / 78.66 | 7.38 / 7.4 | 8.88 / 8.9 / 8.9 | 130.6 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | decode_b8 | holon | 338.97 / 339.39 | 14.28 / 14.32 | 14.83 / 14.85 / 14.85 | 514.5 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | decode_b8 | holon_http | 347.17 / 347.98 | 14.22 / 14.87 | 15.05 / 178.39 / 178.39 | 516.2 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | decode_b8 | holon_http@aa | 347.85 / 348.76 | 14.23 / 14.82 | 14.87 / 162.17 / 162.2 | 515.4 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | decode_b8 | llamaserver | 639.51 / 644.27 | 17.65 / 17.75 | 21.88 / 31.83 / 35.27 | 398.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | agent | holon | 72.73 / 334.86 | 7.53 / 13.18 | 10.32 / 211.11 / 334.81 | 77.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | agent | holon_http | 77.5 / 334.74 | 7.52 / 13.13 | 10.36 / 209.15 / 267.04 | 77.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | agent | holon_http@aa | 77.29 / 334.84 | 7.52 / 13.13 | 10.35 / 210.39 / 267.82 | 77.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | agent | llamaserver | 287.16 / 1588.23 | 11.28 / 31.43 | 58.49 / 1082.83 / 1321.25 | 73.8 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | long_prompt | holon | 131.25 / 9035.72 | 18.25 / 18.27 | 8852.84 / 8862.39 / 8862.39 | 165.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | long_prompt | holon_http | 134.6 / 9043.32 | 18.25 / 18.32 | 8834.8 / 8850.54 / 8850.55 | 165.1 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | long_prompt | holon_http@aa | 136.72 / 9052.87 | 18.25 / 18.34 | 8842.55 / 8864.92 / 8864.93 | 165.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-3090_2026-10-16.json) (KV 112912 tokens) | long_prompt | llamaserver | 2983.26 / 10407.14 | 24.01 / 24.04 | 901.53 / 902.51 / 902.51 | 112.7 | 4/4 |
+
+rtx-4090
+
+| record | trace | backend | TTFT p50 / p99 ms | TPOT p50 / p99 ms | max gap p50 / p99 / max ms | out tok/s | rounds |
+|---|---|---|---|---|---|---|---|
+| [release-qwen3-30b-a3b-nvfp4](../evidence/bench_release-qwen3-30b-a3b-nvfp4_rtx-4090_2026-10-16.json) (KV 34960 tokens) | decode_b1 | holon | 50.88 / 51.06 | 4.29 / 4.3 | 4.4 / 4.4 / 4.4 | 223.5 | 3/3 |
+| [release-qwen3-30b-a3b-nvfp4](../evidence/bench_release-qwen3-30b-a3b-nvfp4_rtx-4090_2026-10-16.json) (KV 34960 tokens) | decode_b1 | holon_http | 53.39 / 53.43 | 4.3 / 4.3 | 4.53 / 4.56 / 4.56 | 222.9 | 3/3 |
+| [release-qwen3-30b-a3b-nvfp4](../evidence/bench_release-qwen3-30b-a3b-nvfp4_rtx-4090_2026-10-16.json) (KV 34960 tokens) | decode_b1 | sglang_http | 36.2 / 36.57 | 4.88 / 4.89 | 5.19 / 5.21 / 5.21 | 199.9 | 3/3 |
+| [release-qwen3-30b-a3b-nvfp4](../evidence/bench_release-qwen3-30b-a3b-nvfp4_rtx-4090_2026-10-16.json) (KV 34960 tokens) | decode_b1 | freetoken_http | — (exit code 1: [2026-10-16\|04:10:01\|FrontendAPI] ERROR    Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |  |  |  |
+| [release-qwen3-30b-a3b-nvfp4](../evidence/bench_release-qwen3-30b-a3b-nvfp4_rtx-4090_2026-10-16.json) (KV 34960 tokens) | decode_b8 | holon | 221.36 / 221.48 | 11.49 / 11.49 | 12.23 / 12.24 / 12.24 | 649.7 | 3/3 |
+| [release-qwen3-30b-a3b-nvfp4](../evidence/bench_release-qwen3-30b-a3b-nvfp4_rtx-4090_2026-10-16.json) (KV 34960 tokens) | decode_b8 | holon_http | 254.93 / 257.36 | 11.44 / 11.66 | 12.35 / 58.99 / 59.13 | 645.6 | 3/3 |
+| [release-qwen3-30b-a3b-nvfp4](../evidence/bench_release-qwen3-30b-a3b-nvfp4_rtx-4090_2026-10-16.json) (KV 34960 tokens) | decode_b8 | sglang_http | 122.52 / 123.33 | 11.76 / 11.79 | 12.86 / 13.22 / 13.23 | 655.7 | 3/3 |
+| [release-qwen3-30b-a3b-nvfp4](../evidence/bench_release-qwen3-30b-a3b-nvfp4_rtx-4090_2026-10-16.json) (KV 34960 tokens) | decode_b8 | freetoken_http | — (exit code 1: [2026-10-16\|04:10:01\|FrontendAPI] ERROR    Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |  |  |  |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | decode_b1 | holon@mtp | 88.51 / 88.6 | 8.23 / 8.23 | 29.69 / 29.69 / 29.7 | 117.1 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | decode_b1 | holon_http@mtp | 90.28 / 90.56 | 8.22 / 8.22 | 29.76 / 29.79 / 29.79 | 117.1 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | decode_b1 | llamaserver@mtp3 | 395.91 / 396.58 | 8.93 / 8.93 | 38.29 / 38.45 / 38.46 | 95.8 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | decode_b8 | holon@mtp | 2133.56 / 5021.68 | 15.53 / 18.92 | 106.2 / 126.46 / 126.46 | 232.4 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | decode_b8 | holon_http@mtp | 2167.46 / 5013.98 | 15.59 / 19.08 | 106.6 / 153.32 / 153.34 | 230.0 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | decode_b8 | llamaserver@mtp3 | 3578.32 / 8541.86 | 20.36 / 26.23 | 353.47 / 433.28 / 433.29 | 164.0 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | agent | holon@mtp | 465.98 / 3098.78 | 15.52 / 34.42 | 128.62 / 188.72 / 303.59 | 73.5 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | agent | holon_http@mtp | 482.71 / 3044.11 | 16.62 / 44.48 | 127.99 / 576.52 / 576.61 | 73.5 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | agent | llamaserver@mtp3 | 2409.87 / 8301.87 | 31.98 / 92.25 | 821.73 / 2543.28 / 3495.65 | 62.9 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | long_prompt | holon@mtp | 220.19 / 11819.02 | 22.53 / 22.9 | 227.03 / 227.24 / 227.24 | 131.3 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | long_prompt | holon_http@mtp | 267.16 / 11832.6 | 22.53 / 23.72 | 227.0 / 227.11 / 227.11 | 128.3 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-4090_2026-10-16.json) (KV 49072 tokens) | long_prompt | llamaserver@mtp3 | 3911.57 / 15717.87 | 24.84 / 27.31 | 868.01 / 880.48 / 881.78 | 93.8 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | decode_b1 | holon | 81.12 / 81.22 | 21.09 / 21.09 | 21.18 / 21.18 / 21.18 | 46.9 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | decode_b1 | holon_http | 82.58 / 84.87 | 21.09 / 21.09 | 21.33 / 21.4 / 21.4 | 46.9 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | decode_b1 | llamaserver | 318.02 / 318.46 | 22.65 / 22.66 | 67.8 / 67.85 / 67.85 | 42.0 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | decode_b8 | holon | 3378.75 / 6494.42 | 23.71 / 24.13 | 125.62 / 228.72 / 228.72 | 164.7 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | decode_b8 | holon_http | 3388.26 / 6577.92 | 23.55 / 24.02 | 94.97 / 131.89 / 131.92 | 163.7 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | decode_b8 | llamaserver | 5744.24 / 10207.52 | 28.93 / 28.98 | 33.9 / 86.22 / 86.28 | 116.5 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | agent | holon | 610.33 / 6822.57 | 28.84 / 59.59 | 155.38 / 164.23 / 164.25 | 70.2 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | agent | holon_http | 582.88 / 6880.69 | 29.41 / 59.54 | 155.64 / 164.41 / 165.93 | 70.4 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | agent | llamaserver | 5533.01 / 14138.32 | 52.09 / 124.44 | 797.45 / 1902.67 / 2656.66 | 54.1 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | long_prompt | holon | 209.64 / 10519.35 | 32.19 / 32.21 | 203.78 / 204.02 / 204.02 | 93.6 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | long_prompt | holon_http | 239.78 / 10551.13 | 32.21 / 32.22 | 204.02 / 204.19 / 204.19 | 93.5 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-4090_2026-10-15.json) (KV 61312 tokens) | long_prompt | llamaserver | 11255.78 / 13006.18 | 31.64 / 40.1 | 300.82 / 782.64 / 782.64 | 70.3 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | decode_b1 | holon | 31.01 / 31.16 | 18.8 / 18.8 | 18.92 / 18.95 / 18.95 | 53.1 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | decode_b1 | holon_http | 32.77 / 32.88 | 18.8 / 18.8 | 19.04 / 19.07 / 19.07 | 53.0 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | decode_b1 | sglang_http | 50.06 / 50.4 | 18.89 / 18.89 | 19.2 / 19.22 / 19.22 | 52.6 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | decode_b1 | freetoken_http | 33.65 / 33.87 | 19.01 / 19.01 | 19.37 / 19.42 / 19.42 | 52.5 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | decode_b8 | holon | 185.91 / 186.11 | 20.73 / 20.73 | 21.2 / 21.43 / 21.43 | 374.3 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | decode_b8 | holon_http | 198.04 / 198.47 | 20.72 / 21.32 | 21.24 / 169.45 / 169.49 | 373.6 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | decode_b8 | sglang_http | 205.48 / 205.84 | 20.87 / 20.87 | 22.37 / 22.85 / 22.89 | 370.6 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | decode_b8 | freetoken_http | 198.29 / 198.61 | 20.87 / 21.51 | 21.77 / 182.61 / 182.68 | 371.0 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | agent | holon | 69.23 / 193.64 | 21.37 / 23.99 | 46.15 / 192.9 / 193.18 | 72.9 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | agent | holon_http | 88.89 / 214.28 | 21.43 / 23.99 | 51.28 / 193.02 / 193.25 | 72.9 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | agent | sglang_http | 91.29 / 230.59 | 21.58 / 24.21 | 46.74 / 209.1 / 219.57 | 72.8 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | agent | freetoken_http | 96.8 / 217.68 | 21.62 / 24.27 | 70.27 / 215.33 / 215.38 | 72.8 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | long_prompt | holon | 73.33 / 4521.4 | 25.02 / 25.64 | 4495.13 / 4496.48 / 4496.48 | 120.9 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | long_prompt | holon_http | 84.35 / 4531.33 | 25.04 / 25.63 | 4494.6 / 4495.72 / 4495.73 | 120.9 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | long_prompt | sglang_http | 96.39 / 23702.61 | 20.61 / 24.25 | 22.24 / 24.67 / 24.67 | 117.3 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-4090_2026-10-16.json) (KV 32528 tokens) | long_prompt | freetoken_http | 84.38 / 23705.88 | 20.64 / 24.31 | 57.65 / 69.64 / 69.64 | 117.3 | 4/4 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-4090_2026-10-16.json) (KV 78176 tokens) | decode_b1 | holon | 23.62 / 23.93 | 11.22 / 11.22 | 11.32 / 11.32 / 11.32 | 88.8 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-4090_2026-10-16.json) (KV 78176 tokens) | decode_b1 | holon_http | 25.97 / 26.0 | 11.21 / 11.21 | 11.44 / 11.52 / 11.52 | 88.7 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-4090_2026-10-16.json) (KV 78176 tokens) | decode_b1 | sglang_http | 35.6 / 35.6 | 15.62 / 15.62 | 15.96 / 15.96 / 15.96 | 63.7 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-4090_2026-10-16.json) (KV 78176 tokens) | decode_b1 | freetoken_http | 25.92 / 26.24 | 11.9 / 11.9 | 12.32 / 12.99 / 13.01 | 83.7 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-4090_2026-10-16.json) (KV 78176 tokens) | decode_b8 | holon | 115.56 / 115.84 | 12.41 / 12.41 | 12.86 / 12.92 / 12.92 | 624.6 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-4090_2026-10-16.json) (KV 78176 tokens) | decode_b8 | holon_http | 131.44 / 133.49 | 12.4 / 12.74 | 13.02 / 97.21 / 97.22 | 621.7 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-4090_2026-10-16.json) (KV 78176 tokens) | decode_b8 | sglang_http | 127.92 / 128.29 | 14.33 / 14.35 | 15.86 / 16.45 / 16.48 | 541.3 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-4090_2026-10-16.json) (KV 78176 tokens) | decode_b8 | freetoken_http | 125.67 / 126.45 | 12.85 / 13.16 | 13.91 / 91.14 / 91.15 | 601.8 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-4090_2026-10-16.json) (KV 95504 tokens) | decode_b1 | holon | 26.65 / 26.71 | 6.93 / 6.93 | 7.03 / 7.04 / 7.04 | 142.7 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-4090_2026-10-16.json) (KV 95504 tokens) | decode_b1 | holon_http | 28.62 / 28.67 | 6.92 / 6.93 | 7.12 / 7.17 / 7.17 | 142.7 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-4090_2026-10-16.json) (KV 95504 tokens) | decode_b1 | sglang_http | 37.3 / 37.73 | 7.51 / 7.51 | 7.75 / 7.79 / 7.79 | 131.1 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-4090_2026-10-16.json) (KV 95504 tokens) | decode_b1 | freetoken_http | — (exit code 1: [2026-10-16\|03:55:24\|FrontendAPI] ERROR    Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |  |  |  |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-4090_2026-10-16.json) (KV 95504 tokens) | decode_b8 | holon | 169.78 / 170.63 | 8.09 / 8.1 | 8.55 / 8.56 / 8.56 | 916.5 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-4090_2026-10-16.json) (KV 95504 tokens) | decode_b8 | holon_http | 180.87 / 182.22 | 8.08 / 8.47 | 8.7 / 102.13 / 102.18 | 913.0 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-4090_2026-10-16.json) (KV 95504 tokens) | decode_b8 | sglang_http | 182.52 / 199.93 | 8.08 / 8.09 | 25.66 / 26.01 / 26.03 | 913.2 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-4090_2026-10-16.json) (KV 95504 tokens) | decode_b8 | freetoken_http | — (exit code 1: [2026-10-16\|03:55:24\|FrontendAPI] ERROR    Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |  |  |  |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | decode_b1 | holon | 24.12 / 25.59 | 6.49 / 6.5 | 6.63 / 6.71 / 6.72 | 152.3 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | decode_b1 | holon_http | 25.53 / 26.1 | 6.49 / 6.49 | 6.75 / 7.45 / 7.47 | 152.3 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | decode_b1 | holon_http@aa | 25.95 / 26.22 | 6.49 / 6.49 | 6.81 / 9.48 / 9.56 | 152.3 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | decode_b1 | llamaserver | 51.55 / 51.89 | 7.19 / 7.21 | 8.71 / 8.77 / 8.77 | 135.8 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | decode_b8 | holon | 147.66 / 147.85 | 7.68 / 7.68 | 8.15 / 8.54 / 8.54 | 972.2 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | decode_b8 | holon_http | 158.57 / 159.64 | 7.67 / 7.96 | 8.26 / 78.71 / 78.73 | 968.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | decode_b8 | holon_http@aa | 157.77 / 158.44 | 7.67 / 7.96 | 8.29 / 78.8 / 78.84 | 968.4 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | decode_b8 | llamaserver | 426.28 / 431.28 | 11.86 / 11.88 | 16.1 / 18.4 / 18.42 | 593.3 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | agent | holon | 38.2 / 145.89 | 7.29 / 9.54 | 7.89 / 84.63 / 92.27 | 77.7 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | agent | holon_http | 44.35 / 153.1 | 7.28 / 9.77 | 7.95 / 84.55 / 92.12 | 77.7 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | agent | holon_http@aa | 44.54 / 153.16 | 7.28 / 9.77 | 7.98 / 84.52 / 92.18 | 77.7 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | agent | llamaserver | 184.91 / 1577.87 | 10.41 / 22.37 | 27.69 / 951.6 / 1018.5 | 74.7 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | long_prompt | holon | 58.07 / 3920.32 | 11.05 / 12.32 | 3852.31 / 3859.16 / 3859.16 | 273.3 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | long_prompt | holon_http | 65.53 / 3945.91 | 11.05 / 12.31 | 3858.09 / 3858.64 / 3858.64 | 273.1 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | long_prompt | holon_http@aa | 65.98 / 3945.73 | 11.06 / 12.31 | 3851.99 / 3858.34 / 3858.34 | 273.1 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-4090_2026-10-16.json) (KV 102080 tokens) | long_prompt | llamaserver | 2844.95 / 4641.07 | 18.28 / 18.3 | 351.57 / 352.05 / 352.05 | 144.1 | 4/4 |
+
+rtx-5080
+
+| record | trace | backend | TTFT p50 / p99 ms | TPOT p50 / p99 ms | max gap p50 / p99 / max ms | out tok/s | rounds |
+|---|---|---|---|---|---|---|---|
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | decode_b1 | holon@mtp | 112.39 / 112.43 | 7.62 / 7.62 | 25.99 / 26.04 / 26.04 | 124.6 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | decode_b1 | holon_http@mtp | 113.25 / 113.56 | 7.61 / 7.61 | 26.0 / 26.04 / 26.04 | 124.7 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | decode_b1 | llamaserver@mtp3 | 345.32 / 345.58 | 8.38 / 8.39 | 55.49 / 55.57 / 55.58 | 103.1 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | decode_b8 | holon@mtp | 1971.63 / 4265.31 | 12.8 / 16.17 | 108.48 / 173.32 / 173.32 | 267.5 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | decode_b8 | holon_http@mtp | 1999.92 / 4763.84 | 13.58 / 16.9 | 108.69 / 198.1 / 209.14 | 260.0 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | decode_b8 | llamaserver@mtp3 | 3051.35 / 7516.29 | 16.26 / 22.96 | 314.75 / 366.33 / 366.35 | 184.7 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | agent | holon@mtp | 778.65 / 6763.58 | 17.73 / 75.05 | 233.99 / 807.47 / 820.82 | 73.0 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | agent | holon_http@mtp | 673.84 / 6722.27 | 17.37 / 61.95 | 194.6 / 672.29 / 812.62 | 73.0 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | agent | llamaserver@mtp3 | 1646.42 / 7285.22 | 24.53 / 87.4 | 430.95 / 2037.37 / 2427.17 | 67.6 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | long_prompt | holon@mtp | 313.88 / 17760.56 | 27.22 / 27.7 | 364.7 / 365.15 / 365.15 | 108.4 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | long_prompt | holon_http@mtp | 351.22 / 17778.28 | 27.39 / 27.68 | 365.0 / 365.22 / 365.22 | 108.3 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s-mtp](../evidence/bench_release-qwen3.8-27b-ud-iq3_s-mtp_rtx-5080_2026-10-16.json) (KV 37344 tokens) | long_prompt | llamaserver@mtp3 | 1808.75 / 17630.73 | 29.98 / 36.52 | 1322.41 / 1324.08 / 1324.09 | 83.5 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | decode_b1 | holon | 105.58 / 105.8 | 15.62 / 15.64 | 15.73 / 15.77 / 15.77 | 62.6 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | decode_b1 | holon_http | 106.43 / 106.6 | 15.62 / 15.62 | 15.8 / 15.88 / 15.88 | 62.6 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | decode_b1 | llamaserver | 288.83 / 289.41 | 17.02 / 17.03 | 51.04 / 51.07 / 51.07 | 55.3 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | decode_b8 | holon | 3207.66 / 6035.04 | 21.1 / 21.71 | 169.09 / 318.08 / 318.08 | 181.7 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | decode_b8 | holon_http | 3211.68 / 6146.43 | 20.94 / 21.62 | 105.42 / 210.31 / 210.31 | 180.2 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | decode_b8 | llamaserver | 5033.13 / 8909.77 | 25.1 / 25.14 | 27.97 / 74.95 / 74.96 | 133.8 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | agent | holon | 925.19 / 8530.88 | 29.46 / 63.42 | 230.59 / 253.26 / 256.68 | 70.5 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | agent | holon_http | 1028.21 / 8174.67 | 32.13 / 74.02 | 232.74 / 250.74 / 251.83 | 69.4 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | agent | llamaserver | 4959.31 / 13244.3 | 49.1 / 96.62 | 924.35 / 1710.58 / 1933.13 | 55.7 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | long_prompt | holon | 312.61 / 16628.82 | 35.59 / 35.62 | 341.98 / 342.15 / 342.15 | 84.5 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | long_prompt | holon_http | 331.37 / 16637.36 | 35.57 / 35.65 | 341.96 / 342.71 / 342.71 | 84.5 | 4/4 |
+| [release-qwen3.8-27b-ud-iq3_s](../evidence/bench_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json) (KV 56208 tokens) | long_prompt | llamaserver | 1573.23 / 16332.11 | 43.73 / 43.75 | 1232.88 / 1233.73 / 1233.73 | 67.0 | 4/4 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-5080_2026-10-16.json) (KV 35536 tokens) | decode_b1 | holon | 28.54 / 30.97 | 10.11 / 10.11 | 10.19 / 10.21 / 10.21 | 98.2 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-5080_2026-10-16.json) (KV 35536 tokens) | decode_b1 | holon_http | 29.66 / 29.99 | 10.11 / 10.11 | 10.29 / 10.39 / 10.39 | 98.2 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-5080_2026-10-16.json) (KV 35536 tokens) | decode_b1 | sglang_http | 35.31 / 35.37 | 10.79 / 10.79 | 10.95 / 11.01 / 11.01 | 91.8 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-5080_2026-10-16.json) (KV 35536 tokens) | decode_b1 | freetoken_http | 28.56 / 28.97 | 10.29 / 10.29 | 10.51 / 10.58 / 10.58 | 96.5 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-5080_2026-10-16.json) (KV 35536 tokens) | decode_b8 | holon | 166.35 / 166.98 | 10.88 / 10.88 | 11.21 / 11.22 / 11.22 | 696.3 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-5080_2026-10-16.json) (KV 35536 tokens) | decode_b8 | holon_http | 174.92 / 176.12 | 10.88 / 11.39 | 11.3 / 140.35 / 144.9 | 694.5 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-5080_2026-10-16.json) (KV 35536 tokens) | decode_b8 | sglang_http | 156.58 / 156.91 | 11.19 / 11.19 | 12.15 / 12.51 / 12.53 | 680.4 | 3/3 |
+| [release-qwen3-8b-fp8](../evidence/bench_release-qwen3-8b-fp8_rtx-5080_2026-10-16.json) (KV 35536 tokens) | decode_b8 | freetoken_http | 164.43 / 164.95 | 11.95 / 12.48 | 12.57 / 147.2 / 147.27 | 637.7 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-5080_2026-10-16.json) (KV 53024 tokens) | decode_b1 | holon | 38.27 / 38.29 | 6.49 / 6.49 | 6.58 / 6.6 / 6.6 | 151.2 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-5080_2026-10-16.json) (KV 53024 tokens) | decode_b1 | holon_http | 39.29 / 39.53 | 6.49 / 6.49 | 6.61 / 6.63 / 6.63 | 151.1 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-5080_2026-10-16.json) (KV 53024 tokens) | decode_b1 | sglang_http | 18.99 / 19.27 | 6.83 / 6.83 | 6.96 / 7.01 / 7.01 | 145.4 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-5080_2026-10-16.json) (KV 53024 tokens) | decode_b1 | freetoken_http | — (exit code 1: [2026-10-16\|09:00:04\|FrontendAPI] ERROR    Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |  |  |  |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-5080_2026-10-16.json) (KV 53024 tokens) | decode_b8 | holon | 274.64 / 274.81 | 8.22 / 8.23 | 8.58 / 8.6 / 8.6 | 863.3 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-5080_2026-10-16.json) (KV 53024 tokens) | decode_b8 | holon_http | 281.96 / 282.27 | 8.22 / 8.75 | 8.6 / 141.38 / 141.39 | 861.3 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-5080_2026-10-16.json) (KV 53024 tokens) | decode_b8 | sglang_http | 63.36 / 63.47 | 7.38 / 7.38 | 8.24 / 8.55 / 8.56 | 1053.1 | 3/3 |
+| [release-qwen3-8b-nvfp4](../evidence/bench_release-qwen3-8b-nvfp4_rtx-5080_2026-10-16.json) (KV 53024 tokens) | decode_b8 | freetoken_http | — (exit code 1: [2026-10-16\|09:00:04\|FrontendAPI] ERROR    Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor) |  |  |  |  |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | decode_b1 | holon | 31.78 / 31.79 | 6.05 / 6.05 | 6.14 / 6.15 / 6.15 | 162.5 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | decode_b1 | holon_http | 33.06 / 33.13 | 6.05 / 6.05 | 6.2 / 6.27 / 6.27 | 162.5 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | decode_b1 | holon_http@aa | 33.02 / 33.09 | 6.05 / 6.05 | 6.18 / 6.21 / 6.21 | 162.4 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | decode_b1 | llamaserver | 53.17 / 53.31 | 6.62 / 6.62 | 7.33 / 7.35 / 7.35 | 147.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | decode_b8 | holon | 226.02 / 226.21 | 7.65 / 7.66 | 7.98 / 7.98 / 7.98 | 940.5 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | decode_b8 | holon_http | 232.06 / 232.75 | 7.65 / 8.08 | 8.05 / 118.35 / 118.37 | 938.8 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | decode_b8 | holon_http@aa | 228.79 / 233.21 | 7.65 / 8.09 | 8.03 / 118.44 / 118.45 | 939.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | decode_b8 | llamaserver | 438.52 / 442.0 | 10.75 / 10.77 | 13.24 / 15.15 / 15.16 | 643.7 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | agent | holon | 49.94 / 218.75 | 6.81 / 10.68 | 7.21 / 122.2 / 131.33 | 77.7 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | agent | holon_http | 56.35 / 219.36 | 6.79 / 10.67 | 7.27 / 122.3 / 131.19 | 77.7 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | agent | holon_http@aa | 56.59 / 219.38 | 6.79 / 10.67 | 7.24 / 122.21 / 131.43 | 77.7 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | agent | llamaserver | 198.5 / 1071.86 | 9.17 / 20.12 | 29.86 / 876.29 / 1055.71 | 75.3 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | long_prompt | holon | 86.41 / 6159.39 | 13.13 / 14.22 | 6041.34 / 6045.51 / 6045.51 | 229.7 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | long_prompt | holon_http | 89.46 / 6168.16 | 13.13 / 14.2 | 6043.48 / 6045.17 / 6045.19 | 229.6 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | long_prompt | holon_http@aa | 90.23 / 6168.01 | 13.15 / 14.22 | 6042.13 / 6044.32 / 6044.32 | 229.6 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5080_2026-10-16.json) (KV 59296 tokens) | long_prompt | llamaserver | 1946.9 / 7076.72 | 19.75 / 19.77 | 835.84 / 837.15 / 837.15 | 140.1 | 4/4 |
+
+rtx-5090
+
+| record | trace | backend | TTFT p50 / p99 ms | TPOT p50 / p99 ms | max gap p50 / p99 / max ms | out tok/s | rounds |
+|---|---|---|---|---|---|---|---|
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | decode_b1 | holon@mtp | 66.11 / 66.16 | 4.9 / 4.9 | 17.68 / 17.69 / 17.7 | 194.9 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | decode_b1 | holon_http@mtp | 67.18 / 67.25 | 4.89 / 4.89 | 17.69 / 17.74 / 17.74 | 194.9 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | decode_b1 | llamaserver@mtp3 | 310.38 / 312.66 | 5.48 / 5.49 | 22.55 / 22.66 / 22.66 | 150.0 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | decode_b8 | holon@mtp | 1243.85 / 2865.79 | 8.74 / 10.6 | 64.81 / 86.12 / 86.12 | 411.1 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | decode_b8 | holon_http@mtp | 1292.36 / 3026.16 | 8.83 / 10.7 | 64.76 / 102.11 / 102.14 | 408.1 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | decode_b8 | llamaserver@mtp3 | 2403.21 / 5453.38 | 12.44 / 15.91 | 254.86 / 454.64 / 455.03 | 258.9 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | agent | holon@mtp | 234.2 / 1490.68 | 7.73 / 29.08 | 62.45 / 149.49 / 457.08 | 76.1 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | agent | holon_http@mtp | 239.97 / 1608.71 | 7.46 / 27.41 | 39.24 / 149.52 / 219.33 | 76.1 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | agent | llamaserver@mtp3 | 840.02 / 3283.42 | 12.15 / 39.79 | 140.05 / 1648.89 / 2358.05 | 72.2 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | long_prompt | holon@mtp | 171.31 / 9141.01 | 15.28 / 15.96 | 179.58 / 180.61 / 180.61 | 188.3 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | long_prompt | holon_http@mtp | 201.22 / 9163.21 | 15.08 / 15.69 | 179.55 / 181.07 / 181.08 | 195.3 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m-mtp](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m-mtp_rtx-5090_2026-10-16.json) (KV 175264 tokens) | long_prompt | llamaserver@mtp3 | 2050.74 / 9711.1 | 17.65 / 22.0 | 720.4 / 721.1 / 721.14 | 135.8 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | decode_b1 | holon | 61.7 / 61.71 | 11.44 / 11.44 | 11.51 / 11.51 / 11.51 | 86.0 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | decode_b1 | holon_http | 62.38 / 62.65 | 11.43 / 11.43 | 11.59 / 11.6 / 11.6 | 86.0 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | decode_b1 | llamaserver | 241.94 / 243.51 | 12.53 / 12.54 | 37.53 / 37.58 / 37.58 | 74.5 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | decode_b8 | holon | 2019.23 / 3896.69 | 13.85 / 14.24 | 87.78 / 166.67 / 166.67 | 278.6 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | decode_b8 | holon_http | 2050.14 / 3958.55 | 13.77 / 14.15 | 59.36 / 111.23 / 111.26 | 276.1 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | decode_b8 | llamaserver | 3674.78 / 6402.93 | 16.82 / 16.85 | 19.75 / 50.23 / 50.26 | 191.8 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | agent | holon | 333.44 / 1475.22 | 14.19 / 33.03 | 79.59 / 131.12 / 133.57 | 74.0 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | agent | holon_http | 331.33 / 1687.45 | 13.99 / 32.25 | 71.49 / 132.93 / 133.35 | 73.8 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | agent | llamaserver | 934.86 / 4750.82 | 20.64 / 65.5 | 209.48 / 1831.48 / 2233.99 | 69.6 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | long_prompt | holon | 166.38 / 8542.42 | 22.37 / 22.52 | 167.84 / 169.84 / 169.84 | 134.4 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | long_prompt | holon_http | 186.86 / 8584.53 | 22.52 / 22.57 | 168.02 / 170.8 / 170.8 | 133.7 | 4/4 |
+| [release-qwen3.8-27b-ud-q4_k_m](../evidence/bench_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json) (KV 195056 tokens) | long_prompt | llamaserver | 1874.32 / 8987.79 | 25.4 / 25.52 | 676.96 / 688.15 / 688.16 | 111.4 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | decode_b1 | holon | 22.66 / 22.77 | 9.84 / 9.84 | 9.92 / 9.94 / 9.94 | 101.2 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | decode_b1 | holon_http | 23.44 / 23.52 | 9.83 / 9.83 | 9.95 / 9.96 / 9.96 | 101.1 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | decode_b1 | sglang_http | 32.25 / 32.35 | 9.89 / 9.89 | 10.04 / 10.13 / 10.13 | 100.2 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | decode_b1 | freetoken_http | 24.59 / 24.9 | 10.05 / 10.05 | 10.33 / 10.42 / 10.42 | 99.0 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | decode_b8 | holon | 143.34 / 143.65 | 10.81 / 10.81 | 11.07 / 11.08 / 11.08 | 706.7 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | decode_b8 | holon_http | 141.36 / 142.55 | 10.8 / 11.23 | 11.15 / 118.66 / 118.8 | 707.2 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | decode_b8 | sglang_http | 151.02 / 151.35 | 10.98 / 10.99 | 11.93 / 12.25 / 12.27 | 693.7 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | decode_b8 | freetoken_http | 141.36 / 141.56 | 11.05 / 11.51 | 11.6 / 126.73 / 126.74 | 692.1 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | agent | holon | 39.44 / 137.81 | 10.66 / 12.49 | 11.3 / 129.75 / 137.63 | 76.5 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | agent | holon_http | 49.92 / 148.22 | 10.66 / 12.47 | 11.69 / 129.69 / 137.4 | 76.5 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | agent | sglang_http | 48.83 / 156.9 | 10.8 / 12.7 | 11.75 / 139.13 / 144.55 | 76.5 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | agent | freetoken_http | 55.79 / 150.16 | 10.85 / 12.84 | 24.06 / 140.04 / 150.67 | 76.4 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | long_prompt | holon | 54.95 / 3377.93 | 14.06 / 14.06 | 3367.94 / 3371.15 / 3371.15 | 215.0 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | long_prompt | holon_http | 64.61 / 3396.72 | 14.06 / 14.09 | 3369.02 / 3369.82 / 3369.82 | 214.8 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | long_prompt | sglang_http | 66.54 / 3444.72 | 14.3 / 14.31 | 3423.58 / 3428.54 / 3428.54 | 211.2 | 4/4 |
+| [release-qwen3-8b-bf16](../evidence/bench_release-qwen3-8b-bf16_rtx-5090_2026-10-16.json) (KV 92464 tokens) | long_prompt | freetoken_http | 64.57 / 3431.03 | 14.31 / 14.35 | 3383.47 / 3390.17 / 3390.18 | 211.1 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | decode_b1 | holon | 19.04 / 19.12 | 3.67 / 3.67 | 3.73 / 3.75 / 3.75 | 268.2 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | decode_b1 | holon_http | 19.94 / 20.01 | 3.66 / 3.66 | 4.0 / 4.25 / 4.25 | 268.3 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | decode_b1 | holon_http@aa | 19.83 / 20.23 | 3.66 / 3.66 | 4.03 / 4.18 / 4.19 | 268.3 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | decode_b1 | llamaserver | 44.67 / 45.49 | 4.22 / 4.23 | 4.99 / 5.0 / 5.0 | 228.3 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | decode_b8 | holon | 118.45 / 118.83 | 4.87 / 4.87 | 5.14 / 5.15 / 5.15 | 1504.9 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | decode_b8 | holon_http | 127.08 / 127.79 | 4.86 / 5.07 | 5.24 / 56.9 / 56.91 | 1499.1 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | decode_b8 | holon_http@aa | 126.12 / 126.47 | 4.86 / 5.09 | 5.24 / 62.74 / 62.74 | 1499.7 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | decode_b8 | llamaserver | 356.76 / 360.18 | 8.05 / 8.07 | 10.83 / 12.95 / 12.97 | 850.2 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | agent | holon | 25.48 / 117.95 | 4.01 / 5.42 | 4.13 / 59.78 / 61.0 | 79.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | agent | holon_http | 28.83 / 122.0 | 4.0 / 5.41 | 4.2 / 59.76 / 61.0 | 79.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | agent | holon_http@aa | 29.05 / 122.07 | 4.0 / 5.41 | 4.19 / 59.81 / 61.0 | 79.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | agent | llamaserver | 155.02 / 1011.94 | 5.34 / 13.48 | 8.45 / 740.72 / 842.32 | 76.8 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | long_prompt | holon | 47.52 / 3269.4 | 7.61 / 7.62 | 3202.05 / 3206.08 / 3206.08 | 396.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | long_prompt | holon_http | 52.91 / 3280.55 | 7.61 / 7.64 | 3201.64 / 3207.41 / 3207.41 | 395.9 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | long_prompt | holon_http@aa | 52.93 / 3281.82 | 7.61 / 7.64 | 3201.83 / 3207.39 / 3207.4 | 396.0 | 4/4 |
+| [release-qwen3-8b-q4_k_m](../evidence/bench_release-qwen3-8b-q4_k_m_rtx-5090_2026-10-16.json) (KV 162016 tokens) | long_prompt | llamaserver | 1934.17 / 3385.32 | 11.49 / 11.5 | 298.64 / 299.03 / 299.03 | 226.8 | 4/4 |
+
+### 17.8 Baselines that failed (published as "—")
+
+| baseline | file | classes | reason (record) |
+|---|---|---|---|
+| FreeToken `74a38777` | nvidia Qwen3-8B NVFP4 | RTX 5080, RTX 4090 | `WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor`, at load in every round (as in step 3) |
+| FreeToken `74a38777` | nvidia Qwen3-30B-A3B NVFP4 | RTX 4090 | the same |
+
+Every other baseline ran every round of every cell:
+- llama.cpp, including MTP and the 5080's q8_0 KV;
+- SGLang on every HF file, the 30B NVFP4 on the 4090 included (step 3's failure was on the 5090, which has no lock
+  for it);
+- FreeToken on bf16 and FP8.
+
+One more FreeToken failure was the bench's, not FreeToken's (§17.10). It was fixed, and the cell was re-run.
+
+### 17.9 Predictions against results
+
+| prediction (§17.1) | result |
+|---|---|
+| GGUF tg128 0.97–1.05× the pin | 1.04–1.11×: at or above the band's top; within it on 3 of the 28 tg128 metrics (≤ 1.050 unrounded), above it on 25 |
+| GGUF pp512 1.04–1.20× the pin | depth 0, 1.00–1.15×: below the band on the 4090's 30B Q4_K_M (1.01) and MXFP4_MOE (1.00). Depth 8192 (read against the same band in step 3, §13.5), 0.89–1.07×: **a miss**, with 11 of 14 cells below 1.04 (unrounded; the 5090's 27B is 1.038) |
+| agent TTFT p50 advantage over `llama-server` ≥ 2× | 8B Q4_K_M 3.5–5.5× ✓; 27B 2.8–9.3× ✓ except the 3090's 1.57× ✗ |
+| bf16 8B TPOT p50 advantage over FreeToken 0.98–1.0 (B1, B8) | 1.01–1.02: just above the band |
+| 27B with MTP 1.5–1.9× plain's TPOT p50 on `decode_b1` | 2.05–2.57×: above the band; three of four classes are inflated by repetition, and the 3090's (not inflated) is 2.09× |
+
+### 17.10 Deviations
+
+1. **llama.cpp upstream was built on the development host** (CUDA 13.0 nvcc), not in the desktop container. It has a
+   portable CPU target (`GGML_NATIVE=OFF` with AVX2 / FMA / F16C / BMI2), so one build runs on every desktop. The CPU
+   flags matter only to the CPU backend; every layer runs on the GPU. The gate's build is step 3's, unchanged.
+2. **A raw-output name collision.** The first launch on the 3090 and 5090 collided in `bench/.out`: two classes, the
+   same name, the same second. The run was stopped within two minutes, before any record was written, and relaunched
+   at f08bba0, which names raw outputs by class.
+3. **FreeToken's text-mode context, the bench's bug.** `freetoken_http` asked for 1.5× the trace's context (45,312),
+   past Qwen3-8B's 40,960-position RoPE table, and FreeToken refused it. The 5090's first bf16 run lost FreeToken in its
+   first two rounds. It was stopped, the cap was fixed at dce655f (at most the model's trained context), and the cell
+   was re-run whole. The other classes' bf16 and HF cells ran at dce655f. The invalid run's log is kept local.
+4. **Records name two commits.**
+   - f08bba0: the bars of the 3090, 4090 and 5090; those classes' 27B plain and MTP records; the 5090's 8B Q4_K_M.
+   - dce655f: the rest, the 5080's records included.
+
+   Between the two, `bench/` changed (the served lock's public path, the arm-label check, the FreeToken cap,
+   `report.py`), and so did this document's §17.1. No engine code changed.
+5. **One field of the f08bba0 records was rewritten at publication:** `served.lock`, from the CI worktree's absolute
+   path to the repository-relative one, as `run.py` writes it from 15b684d. No measurement changed.
+6. **`report.py`'s served-plan check accepts the RoPE sites a context change re-keys.** The first record showed that
+   `max_model_len` reaches the RoPE sites' facts (`max_positions`). That changes no number; without it every served
+   row would print "—".
+7. **Record dates** follow the desktop's local clock: 2026-10-15 for runs before its midnight, 2026-10-16 after.
+8. **The decode-only HF records ran 3 rounds (ABA),** as §17.1 planned, so their positions are not balanced.
+9. **§17.1's statement that greedy MTP repeats as plain does is wrong** (§17.5). §17.1 is left as fixed, and the
+   label reads each arm's own share.
+
+### 17.11 Review
+
+One reviewer covered the method and tooling, with re-reviews until no finding remained. All its findings came before
+any result was read, except the final review.
+- **Round 1: no blocker, three majors, all fixed.**
+  - The served lock's absolute path reached records.
+  - The ratios hid partial failures and were not paired; they are now medians of per-round paired ratios with the
+    paired rounds counted.
+  - The MTP batch-1 claim rested on one greedy prompt that may loop; the caveat, the unpaired speedup and the
+    repetition label were pre-registered.
+- **Round 1's minors:** the served arm matched by speculation, the commands, the shared arm labels refused, max seqs
+  shown, ungated cells marked, the predictions made checkable, and the KV check.
+- **Round 2: one major, fixed.** The served-plan check would have refused every MTP row. The repetition label is
+  applied, and arms without drafts are shown.
+- **Round 3: clean, with one nit, fixed.**
+- **The final review of the aggregate change: no blocker; two majors, both fixed.**
+  - The long-prompt TTFT ratios were published in the README without the `--cache-ram` caveat. They are the short
+    streams' TTFT; the 30K request's own ratio is now quoted.
+  - The pp512-at-8K prediction had been re-read as "not predicted"; it is now reported as a miss.
+- **Its six minors, all fixed in the prose:**
+  - the commit list in the deviations;
+  - "faster on every trace";
+  - the `decode_b8` pause explanation's numbers, and its 27B case;
+  - three unlisted small losses;
+  - MTP's greedy text differing from plain's;
+  - tg128 "above the band".
+
+  Every table regenerates byte for byte from the records, and the records are clean of private details.
+
+### 17.12 For the lead
+
+1. **The gate passes on all four classes.** No GGUF cell is under 0.8× the pin. The lowest is the 5080's prefill at
+   depth 8192: 0.89–0.91× on its 8B and 30B cells. The 4090 and 5090 8B / 30B cells sit at 0.94–0.96× (§17.3).
+   Decode is 1.04–1.11× everywhere.
+2. **Serving against llama.cpp is a clear win on decode, with three published losses** (§17.4):
+   - `decode_b8`'s first-request pause: the served path starts the first request alone, then prefills the rest
+     unmixed;
+   - the streams' stall behind a 30K prompt on the `chunk_with_decode` 0 locks, which is your open §16.10 item 1;
+   - NVFP4 first tokens against SGLang.
+
+   No engine bug appeared, and no engine code was changed.
+3. **The long-prompt TTFT ratios (up to 43×) flatter Holon.** They are the three short streams', which wait for
+   `llama-server` to save its previous slot to its default RAM prompt cache (≈ 2.65 s in the log examined). The 30K
+   request's own TTFT is 0.98–1.17× llama.cpp's. They are published as measured with that note. Your call whether the
+   README should also show a `-cram 0` column, which would cost one more llama-server run per GGUF cell. The agent
+   trace's 1.6–9.3× TTFT ratios were not examined for the same effect.
+4. **MTP:** Holon's is faster per token than llama.cpp's, and it accepts more of its drafts. Its single-stream speedup
+   over plain (2.05–2.57×) is inflated by a looping prompt on three classes. The honest numbers are batch 8 (1.5–1.6×)
+   and the agent trace (1.3–1.9×). The locks stay plain (§16.6).
+5. **Baselines that failed:** only FreeToken, on the NVFP4 files, at weight load, as in step 3 (§17.8).
+6. **Cluster:** the RTX 5080 waited 5.5 h in the queue, and its suite finished 5 h after the others. Every allocation
+   is released.
+
 ## 18. As built (step 9)
 
 Branch `release9` from local `main` at 8e1f300. The agent demo (D7) as pre-registered in §15.5 and §15.9, with the

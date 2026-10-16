@@ -1,0 +1,39 @@
+{
+ "step": "release step 8",
+ "class": "rtx-5080",
+ "method": "bench/clock_check.py, 60 s of 27B decode at batch 4 at the class's 27B lock; steady = SM clock p10 / p50 >= 0.9",
+ "before": {
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "seconds": 64.6,
+  "batch": 4,
+  "tok_s": 190.2,
+  "samples": 626,
+  "sm_mhz": {
+   "p10": 2677.0,
+   "p50": 2692.0,
+   "p90": 2715.0
+  },
+  "mem_mhz": 14801.0,
+  "power_w": 344.5,
+  "slowdown_share": 0.0,
+  "power_cap_share": 1.0,
+  "steady": true
+ },
+ "after": {
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "seconds": 64.7,
+  "batch": 4,
+  "tok_s": 190.1,
+  "samples": 626,
+  "sm_mhz": {
+   "p10": 2677.0,
+   "p50": 2677.0,
+   "p90": 2715.0
+  },
+  "mem_mhz": 14801.0,
+  "power_w": 348.1,
+  "slowdown_share": 0.0,
+  "power_cap_share": 1.0,
+  "steady": true
+ }
+}

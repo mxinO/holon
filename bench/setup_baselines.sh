@@ -11,7 +11,7 @@ NANOVLLM_COMMIT=bb823b3e06983d71485a8e1f23715ebd87d98ef8   # 2026-04-26
 # llama.cpp: the gate runs at the commit kernels.ggml_cuda vendors once M0.6 Gate A merges (release design D5); the
 # newest upstream is a second, ungated column, re-pinned when the suite runs.
 LLAMA_GATE=cbe28bb3cb0758f0c566a9a3561766821aeb0748
-LLAMA_UPSTREAM=df18bee11e96557b07aa7b12db0976f3c7ac9165   # upstream HEAD, 2026-10-14
+LLAMA_UPSTREAM=f12aaa344c971556ec35be054d7aac1d901fd510   # upstream HEAD, 2026-10-16 (release step 8)
 LLAMA_ARCHS="86;89;120a"                                   # the release classes: sm_86, sm_89, sm_120 (fp4 needs 120a)
 FREETOKEN_COMMIT=74a387777708b9650a027494bcb37d2ab9cf2443  # 2026-10-10 (torch 2.14.1, sglang-kernel 0.4.9)
 SGLANG_VERSION=0.5.21                                      # 2026-10-01 release (torch 2.13.0, CUDA 13)
