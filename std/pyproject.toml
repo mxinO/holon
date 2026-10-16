@@ -1,6 +1,6 @@
 [project]
 name = "holonlm-std"
-version = "0.1.0"
+version = "0.1.1"
 license = "Apache-2.0"
 requires-python = ">=3.12,<3.13"
 description = "Holon standard units: ops, blocks, ffn, mixers (each unit dir has plugin.toml + reference.py)"
