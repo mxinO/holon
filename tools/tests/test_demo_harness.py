@@ -21,6 +21,7 @@ def _module(name: str, path: str):
 
 demo = _module("demo_run", "bench/demo/run.py")
 proxy = _module("capture_proxy", "bench/capture_proxy.py")
+pi = _module("pi_run", "bench/demo/pi_run.py")
 FIX = ("{cents % 100}\"", "{cents % 100:02d}\"")
 
 
@@ -140,6 +141,70 @@ def test_the_proxy_records_stop_reasons_and_length_refusals_without_text():
                                                                 "max_model_len 32768"}}).encode()
     assert proxy.facts(refused) == {"usage": {}, "error_type": "invalid_request_error", "length_refused": True}
     assert proxy.facts(b'{"message": "oops", "usage": "x"}') == {"usage": {}}
+
+
+def test_the_proxy_reads_openai_chat_answers_without_text():
+    def chunk(delta, finish=None):
+        return b"data: " + json.dumps({"object": "chat.completion.chunk", "choices": [
+            {"index": 0, "delta": delta, "finish_reason": finish}]}).encode() + b"\n\n"
+    call = {"index": 0, "id": "call_1", "type": "function", "function": {"name": "read", "arguments": ""}}
+    sse = (chunk({"role": "assistant", "reasoning_content": "hmm"}) + chunk({"tool_calls": [call]})
+           + chunk({"tool_calls": [{"index": 0, "function": {"arguments": '{"path": '}}]})
+           + chunk({"tool_calls": [{"index": 0, "function": {"arguments": '"a.py"}'}}]}, "tool_calls")
+           + b'data: {"choices": [], "usage": {"prompt_tokens": 50, "completion_tokens": 9}}\n\ndata: [DONE]\n\n')
+    assert proxy.openai_facts(sse) == {
+        "usage": {"input_tokens": 50, "output_tokens": 9}, "stop_reason": "tool_calls",
+        "tool_calls": [{"name": "read", "args_json": True}], "content_chars": 0, "reasoning_chars": 3, "markup": [],
+        "stream": {"done": True, "bad_lines": 0}}
+    leaked = chunk({"content": "<tool_call>\n<function=read>"}, "stop") + b"data: {oops\n\n"
+    assert proxy.openai_facts(leaked)["markup"] == ["content:<function=", "content:<tool_call>"]
+    assert proxy.openai_facts(leaked)["stream"] == {"done": False, "bad_lines": 1}
+    error = json.dumps({"error": {"type": "BadRequest", "message": "chat template: Unexpected message role."}})
+    assert proxy.openai_facts(error.encode())["error_type"] == "BadRequest"
+    shape = proxy.summary("POST", "/v1/chat/completions", {}, {
+        "messages": [{"role": "developer", "content": "sys"}, {"role": "assistant", "content": None,
+                                                              "tool_calls": [], "reasoning_content": "r"}],
+        "tools": [{"type": "function", "function": {"name": "read", "parameters": {}, "strict": False}}],
+        "max_completion_tokens": 16384, "reasoning_effort": "medium"}, 200)
+    assert shape["messages"] == [
+        {"role": "developer", "content": "string"},
+        {"role": "assistant", "content": "null", "fields": ["reasoning_content", "tool_calls"]}]
+    assert shape["tools"][0]["name"] == "read" and shape["tools"][0]["strict"] is False
+    assert shape["reasoning_effort"] == "medium" and "sys" not in json.dumps(shape)
+
+
+def test_the_pi_workloads_task_is_scored_by_the_harness_tests_and_the_agents_own(tmp_path):
+    files = pi.workloads_project()
+    assert pi.pytest_counts(files)["passed"] == pi.SEEDED_TESTS
+    demo.write_tree(files, work := tmp_path / "work")
+    assert pi.score_workloads(work, files)["harness"]["failed"] == pi.HIDDEN_TESTS
+    module = work / "workloads.py"
+    module.write_text(module.read_text().replace("def load(path", '''def trace_stats(sessions):
+    out = {"sessions": len(sessions), "requests": 0, "prompt_tokens": 0, "output_tokens": 0,
+           "max_context": max(map(context_len, sessions), default=0)}
+    for s in sessions:
+        context = s["system"]
+        for t in s["turns"]:
+            out["requests"] += 1
+            out["prompt_tokens"] += context + t["append"]
+            out["output_tokens"] += t["output"]
+            context += t["append"] + t["output"]
+    return out
+
+
+def load(path''').replace("    args = ap.parse_args()\n", """    ap.add_argument("--stats")
+    args = ap.parse_args()
+    if args.stats:
+        return print(json.dumps(trace_stats(load(args.stats))))
+"""))
+    no_tests = pi.score_workloads(work, files)
+    assert no_tests["harness"]["passed"] == pi.SEEDED_TESTS + pi.HIDDEN_TESTS and not no_tests["success"]
+    (work / "tests" / "test_stats.py").write_text("import workloads\n\n\ndef test_empty():\n"
+                                                  "    assert workloads.trace_stats([])['requests'] == 0\n")
+    (work / "tests" / "test_workloads.py").write_text("")       # the seeded tests are restored for the harness's run
+    assert pi.score_workloads(work, files)["success"] is False  # but the agent's own suite must keep them
+    demo.write_tree({"tests/test_workloads.py": files["tests/test_workloads.py"]}, work)
+    assert pi.score_workloads(work, files)["success"]
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")
