@@ -75,7 +75,8 @@ def main() -> None:
     llama_flags = ["-p", "512", "-n", "128", "-d", "0,8192", "-ngl", "99", "-fa", "on", "-ctk", kv, "-ctv", kv,
                    "-b", str(engine["max_step_tokens"]), "-ub", "512", "-r", "5", "-o", "json"]
     gpu = gpu_class(args.gpu)
-    raw = BENCH / ".out" / f"bars_{args.name}_{datetime.datetime.now():%Y%m%d-%H%M%S}"
+    stamp = f"{gpu}_{datetime.datetime.now():%Y%m%d-%H%M%S}"     # several cards run one checkout
+    raw = BENCH / ".out" / f"bars_{args.name}_{stamp}"
     raw.mkdir(parents=True)
 
     engines = ["holon", *args.llama]

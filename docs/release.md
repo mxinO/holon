@@ -2342,3 +2342,72 @@ remained.
    (`after`).
 7. **Not done here, as planned:** the benchmark suite (step 8), the clean installs (step 10). The README's lock table
    is rewritten (every model per card: this card's lock, borrowed or neither); the performance section stays step 8's.
+
+## 17. As built (step 8)
+
+Branch `release8` from local `main` at 8e1f300 (step 7's locks). Only `bench/` changes; every record names its commit.
+The environment is step 7's: `uv sync --frozen --group dev` from the committed `uv.lock` inside a CUDA 13.0 container,
+one per desktop.
+
+### 17.1 Method, fixed before any result was read
+
+**Desktops.** One per class, clock-screened before and after its work as in §16.1 (`bench/clock_check.py`, 60 s of 27B
+decode at batch 4, at the class's own 27B lock); used if the SM clock holds (p10 / p50 ≥ 0.9). The screens are
+recorded beside the evidence (§17.2).
+
+**Engines and pins.**
+
+| engine | pin |
+|---|---|
+| Holon | the class's newest lock of each file (§16); this branch's commit |
+| llama.cpp, the gate | `cbe28bb3` (Holon's vendored ggml) |
+| llama.cpp, upstream | `f12aaa34`, HEAD on 2026-10-16, re-pinned for this step (§5.1); an ungated column |
+| SGLang | 0.5.21 |
+| FreeToken | `74a38777` |
+
+**Cells** (§5.2), each at the class's own lock; a file without one on the class is not run (borrowed locks are
+unverified there):
+
+| class | bars (GGUF) | serving: decode B1 / B8, agent, long prompt (4 rounds) | serving: decode B1 / B8 (3 rounds) |
+|---|---|---|---|
+| RTX 5080 | 8B Q4_K_M, 8B UD-IQ3_XXS, 30B UD-IQ3_XXS, 27B UD-IQ3_S (q8_0 KV) | 8B Q4_K_M; 27B UD-IQ3_S plain and with MTP | 8B NVFP4, 8B FP8 |
+| RTX 4090 | 8B Q4_K_M, 30B Q4_K_M, 30B MXFP4_MOE, 27B UD-Q4_K_M | 8B Q4_K_M; 27B UD-Q4_K_M plain and with MTP; 8B bf16 | 8B NVFP4, 30B NVFP4, 8B FP8 |
+| RTX 5090 | 8B Q4_K_M, 30B Q4_K_M, 27B UD-Q4_K_M | 8B Q4_K_M; 27B UD-Q4_K_M plain and with MTP; 8B bf16 | — |
+| RTX 3090 | 8B Q4_K_M, 30B Q4_K_M, 27B UD-Q4_K_M | 8B Q4_K_M; 27B UD-Q4_K_M plain and with MTP; 8B bf16 | — |
+
+The decode-only rows are the HF files of tier 2 (§5.2 gives them bars, which llama.cpp cannot run on safetensors), set
+against SGLang and FreeToken where they load (§5.1).
+
+**Bars** (the gate): `bench/bars.py`, 3 rounds, at the lock's settings, against `llama-bench` at the gate pin and
+upstream. A round now runs the engines in reverse order on odd rounds (ABBA; step 3 ran ABAB). The gate statistic is
+§5.3's: per round the median of repetitions 2–5, then the median over rounds, for pp512 and tg128 at depth 0 and
+8192, each ≥ 0.8× the pin.
+
+**Serving**: `bench/run.py`, ABBA rounds of fresh processes, greedy, `ignore_eos`, every engine's prefix cache on,
+prompts cut from natural text (`--corpus`: judge prompt set v1 for Qwen3, v1-qwen3_5 for the 27B).
+- **Holon served** (`holon_http`: `holon serve` starting from the lock, which the record's `served` block shows) is the
+  number compared with the servers. The in-process engine (`holon`) runs first in every record. Its KV tokens size
+  every baseline's cache (§5.2's flags, unchanged), and its row is reported.
+- The context is the traces' (30,208 tokens, for the long prompt) on every engine. It is above the 8B / 30B locks'
+  8K / 16K, as in §16.5.
+- **A/A**: a second served Holon arm (`holon_http@aa`, no flags) in the 8B Q4_K_M record of every class, on every
+  trace. Its per-round ratios to `holon_http` are the noise floor printed beside the ratios.
+- **MTP** (the 27B): Holon's arm is step 7's (`--max-draft-tokens 3`, `drafters.mtp`, `spec.k=1:3,3:2`, the
+  exact-match verifier), in-process and served. llama.cpp's is `--spec-type draft-mtp --spec-draft-n-max 3`. They run
+  on the same four traces, greedy, on natural text, and are matched to the MTP arm's KV tokens. The tables are labelled
+  with trace and sampling. They add accepted / drafted, tokens per verify row, the depth-1 share of verify steps and
+  the share of output tokens that end a 16-gram already in their context.
+- **Ratios are the claim**, rendered by `bench/report.py` as Holon's advantage: the baseline's TTFT p50, TPOT p50 and
+  max-gap p99 over Holon's, and Holon's output tok/s over the baseline's. "≈" marks a ratio within 2 sd of its per-round
+  ratios of 1. Absolute numbers are per board.
+
+**Gate and reporting.** The only gate is the bars' statistic on every GGUF cell, ≥ 0.8× the gate pin. **A cell below
+it is reported to the lead, not fixed in this step** (the lead's instruction; §5.3's "fixed and re-measured before
+release" waits for the lead's call). Every cell is published, losses included. A baseline that fails on a file is "—"
+with its recorded reason, unpatched.
+
+**Predictions** (§5.3, compared, not gated):
+- GGUF tg128 0.97–1.05× and pp512 1.04–1.20× the pin;
+- the agent trace's TTFT p50 well below `llama-server`'s;
+- bf16 8B decode 0.98–1.0× FreeToken's; SGLang has no prior record;
+- the 27B with MTP 1.5–1.9× plain's single-stream TPOT (decode B1, greedy, natural text).

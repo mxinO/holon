@@ -107,7 +107,7 @@ python bench/run.py --name serve --gpu 0 --model <file.gguf> --backends holon_ht
 
 Every comparison is matched to a Holon lock (`--lock`): Holon runs the lock's engine settings, every backend the lock's
 `max_seqs` and step budget, the baselines its KV format and Holon's measured KV tokens (from the first in-process
-`holon` run, so list it first). Flags per baseline: `llama-server -ngl 99 -fa on -kvu -np <max_seqs> -c <KV tokens> -b
+`holon` run, so list it, or an arm of it, first). Flags per baseline: `llama-server -ngl 99 -fa on -kvu -np <max_seqs> -c <KV tokens> -b
 <step budget> -ub 512 -ctk/-ctv <format>`; SGLang `--max-running-requests`, `--chunked-prefill-size`,
 `--max-total-tokens`, `--kv-cache-dtype`, `--mem-fraction-static 0.9`; FreeToken as in `freetoken_http.py`. A baseline
 without the lock's KV format (llama.cpp has no FP8 KV, SGLang no q8_0) refuses to run. `--temperature` samples instead

@@ -356,7 +356,8 @@ def main() -> None:
 
     date = datetime.date.today().isoformat()
     gpu = gpu_class(args.gpu)
-    raw = BENCH / ".out" / f"{args.name}_{datetime.datetime.now():%Y%m%d-%H%M%S}"
+    stamp = f"{gpu}_{datetime.datetime.now():%Y%m%d-%H%M%S}"     # several cards run one checkout
+    raw = BENCH / ".out" / f"{args.name}_{stamp}"
     raw.mkdir(parents=True)
     runs, infos = [], {}
     kv_tokens = args.kv_tokens
