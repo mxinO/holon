@@ -1,0 +1,707 @@
+{
+ "workload": "agent_demo",
+ "date": "2026-10-15",
+ "gpu_class": "rtx-4090",
+ "commit": "8e1f300c4a2c73169a650d90754dfe7e43f722ae",
+ "model": "Qwen3.8-27B-UD-Q4_K_M",
+ "served": {
+  "plan_id": "sha256:58fdba97f047210a31eddf76938443e52c84641c32484915019ab1ef730cd9d0",
+  "lock": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/6.lock",
+  "diff": []
+ },
+ "client": {
+  "claude_code": "2.1.300",
+  "binary_sha256": "sha256:674deba0bba9aee479f4503c438b49303b6fdd304b9a471b14977aaec5215453",
+  "allowed_tools": "Read,Write,Edit,Bash,Glob,Grep",
+  "timeout_s": 1800,
+  "env": [
+   "ANTHROPIC_BASE_URL=<the proxy>",
+   "ANTHROPIC_AUTH_TOKEN=holon",
+   "ANTHROPIC_MODEL, ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL, CLAUDE_CODE_SUBAGENT_MODEL=<served id>",
+   "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+   "DISABLE_AUTOUPDATER=1",
+   "CLAUDE_CONFIG_DIR=<fresh>",
+   "NO_PROXY=127.0.0.1,localhost",
+   "PATH=<the run's venv>:\u2026"
+  ],
+  "command": "claude -p <prompt> --allowedTools <tools> --output-format stream-json --verbose"
+ },
+ "task": {
+  "prompt": "The Python package `shop` in the current directory fails its tests. Fix the package so that `python -m pytest` passes, without editing any file under tests/. When the tests pass, reply with the single word done.",
+  "project": "sha256:f5c8bb8704fbcc78ba90382828d9d9a4920ff1aa902ef231a98db03165fd2f25",
+  "tests": 40,
+  "seeded": {
+   "passed": 23,
+   "failed": 17
+  }
+ },
+ "scorer_reference": "sha256:7c5357d337e5616522b82e0847a762f1ac6d2450610a850a2c27c710b3581bd8",
+ "runs_planned": 3,
+ "runs": [
+  {
+   "success": true,
+   "invalid": null,
+   "scored": {
+    "success": true,
+    "passed": 40,
+    "failed": 0,
+    "skipped": 0,
+    "pytest_exit": 0,
+    "timed_out": false,
+    "symlinks_skipped": 0
+   },
+   "venv_pytest": "sha256:50f26d61e9cb5c304ec49d27139cc33bbc4be34bb183ed22c3db4b75d84e2d25",
+   "venv_after": null,
+   "wall_s": 210.9,
+   "timed_out": false,
+   "exit_code": 0,
+   "turns": 15,
+   "result_subtype": "success",
+   "is_error": false,
+   "replied_done": true,
+   "prefix_tokens_saved": 150400,
+   "tool_calls": [
+    {
+     "tool": "Bash",
+     "program": "find",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "shop/__init__.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "shop/money.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "shop/discounts.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "shop/cart.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "tests/test_money.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "tests/test_discounts.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "tests/test_cart.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "pyproject.toml",
+     "error": false
+    },
+    {
+     "tool": "Bash",
+     "program": "python",
+     "error": false
+    },
+    {
+     "tool": "Edit",
+     "path": "shop/money.py",
+     "error": false
+    },
+    {
+     "tool": "Edit",
+     "path": "shop/discounts.py",
+     "error": false
+    },
+    {
+     "tool": "Edit",
+     "path": "shop/discounts.py",
+     "error": false
+    },
+    {
+     "tool": "Bash",
+     "program": "python",
+     "error": false
+    }
+   ],
+   "shop_diff": "--- a/shop/discounts.py\n+++ b/shop/discounts.py\n@@ -24,6 +24,17 @@\n     return rule\n \n \n+def buy_n_get_one(sku: str, n: int) -> Rule:\n+    if n <= 0:\n+        raise ValueError(f\"n must be positive: {n}\")\n+\n+    def rule(cart: Cart) -> tuple[str, int] | None:\n+        line = cart.lines.get(sku)\n+        off = (line.qty // (n + 1)) * line.unit_cents if line else 0\n+        return (f\"buy {n} get 1 {sku}\", off) if off else None\n+    return rule\n+\n+\n def checkout(cart: Cart, rules: list[Rule]) -> list[str]:\n     \"\"\"The receipt: the cart's item lines, then one line per rule that applies, in the order given ('<label>\n     -<cents off>'), then 'TOTAL <total>'. Discounts never take the total below zero.\"\"\"\n--- a/shop/money.py\n+++ b/shop/money.py\n@@ -15,7 +15,7 @@\n     \"\"\"350 -> '3.50', 5 -> '0.05', 1205 -> '12.05', -125 -> '-1.25'.\"\"\"\n     sign = \"-\" if cents < 0 else \"\"\n     cents = abs(cents)\n-    return f\"{sign}{cents // 100}.{cents % 100}\"\n+    return f\"{sign}{cents // 100}.{cents % 100:02d}\"\n \n \n def percent_of(cents: int, percent: int) -> int:\n",
+   "served": {
+    "messages": 11,
+    "statuses": {
+     "200": 11
+    },
+    "length_refusals": 0,
+    "peak_context": 32055,
+    "input_tokens": 270418,
+    "output_tokens": 7460,
+    "sampling": [
+     {
+      "max_tokens": 10240,
+      "model": "Qwen3.8-27B-UD-Q4_K_M"
+     },
+     {
+      "max_tokens": 2112,
+      "model": "Qwen3.8-27B-UD-Q4_K_M",
+      "stop_sequences": [
+       "</block>"
+      ]
+     },
+     {
+      "max_tokens": 32000,
+      "model": "Qwen3.8-27B-UD-Q4_K_M",
+      "output_config": {
+       "effort": "high"
+      },
+      "thinking": {
+       "display": "updates",
+       "type": "adaptive"
+      }
+     }
+    ],
+    "requests": [
+     {
+      "status": 200,
+      "input_tokens": 16789,
+      "output_tokens": 105,
+      "ttft_ms": 4860.4,
+      "tpot_ms": 22.49,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 17055,
+      "output_tokens": 176,
+      "ttft_ms": 144.9,
+      "tpot_ms": 22.51,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 18886,
+      "output_tokens": 146,
+      "ttft_ms": 638.7,
+      "tpot_ms": 22.65,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 20696,
+      "output_tokens": 3816,
+      "ttft_ms": 639.4,
+      "tpot_ms": 22.94,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 30966,
+      "output_tokens": 1015,
+      "ttft_ms": null,
+      "tpot_ms": null,
+      "stop_reason": "end_turn",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 30940,
+      "output_tokens": 552,
+      "ttft_ms": null,
+      "tpot_ms": null,
+      "stop_reason": "end_turn",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 25170,
+      "output_tokens": 405,
+      "ttft_ms": 1541.0,
+      "tpot_ms": 23.16,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 25722,
+      "output_tokens": 449,
+      "ttft_ms": 268.2,
+      "tpot_ms": 23.19,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 26248,
+      "output_tokens": 178,
+      "ttft_ms": 276.8,
+      "tpot_ms": 23.35,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 31462,
+      "output_tokens": 593,
+      "ttft_ms": null,
+      "tpot_ms": null,
+      "stop_reason": "end_turn",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 26484,
+      "output_tokens": 25,
+      "ttft_ms": 166.8,
+      "tpot_ms": 23.24,
+      "stop_reason": "end_turn",
+      "length_refused": false
+     }
+    ]
+   }
+  },
+  {
+   "success": true,
+   "invalid": null,
+   "scored": {
+    "success": true,
+    "passed": 40,
+    "failed": 0,
+    "skipped": 0,
+    "pytest_exit": 0,
+    "timed_out": false,
+    "symlinks_skipped": 0
+   },
+   "venv_pytest": "sha256:50f26d61e9cb5c304ec49d27139cc33bbc4be34bb183ed22c3db4b75d84e2d25",
+   "venv_after": null,
+   "wall_s": 131.3,
+   "timed_out": false,
+   "exit_code": 0,
+   "turns": 13,
+   "result_subtype": "success",
+   "is_error": false,
+   "replied_done": true,
+   "prefix_tokens_saved": 120448,
+   "tool_calls": [
+    {
+     "tool": "Bash",
+     "program": "find",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "shop/__init__.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "shop/money.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "shop/discounts.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "shop/cart.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "tests/test_money.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "tests/test_discounts.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "tests/test_cart.py",
+     "error": false
+    },
+    {
+     "tool": "Bash",
+     "program": "cat",
+     "error": false
+    },
+    {
+     "tool": "Edit",
+     "path": "shop/money.py",
+     "error": false
+    },
+    {
+     "tool": "Edit",
+     "path": "shop/discounts.py",
+     "error": false
+    },
+    {
+     "tool": "Bash",
+     "program": "python",
+     "error": false
+    }
+   ],
+   "shop_diff": "--- a/shop/discounts.py\n+++ b/shop/discounts.py\n@@ -24,6 +24,17 @@\n     return rule\n \n \n+def buy_n_get_one(sku: str, n: int) -> Rule:\n+    if n <= 0:\n+        raise ValueError(f\"n must be positive: {n}\")\n+\n+    def rule(cart: Cart) -> tuple[str, int] | None:\n+        line = cart.lines.get(sku)\n+        free = line.qty // (n + 1) if line else 0\n+        return (f\"buy {n} get 1 {sku}\", line.unit_cents * free) if free else None\n+    return rule\n+\n+\n def checkout(cart: Cart, rules: list[Rule]) -> list[str]:\n     \"\"\"The receipt: the cart's item lines, then one line per rule that applies, in the order given ('<label>\n     -<cents off>'), then 'TOTAL <total>'. Discounts never take the total below zero.\"\"\"\n--- a/shop/money.py\n+++ b/shop/money.py\n@@ -15,7 +15,7 @@\n     \"\"\"350 -> '3.50', 5 -> '0.05', 1205 -> '12.05', -125 -> '-1.25'.\"\"\"\n     sign = \"-\" if cents < 0 else \"\"\n     cents = abs(cents)\n-    return f\"{sign}{cents // 100}.{cents % 100}\"\n+    return f\"{sign}{cents // 100}.{cents % 100:02d}\"\n \n \n def percent_of(cents: int, percent: int) -> int:\n",
+   "served": {
+    "messages": 9,
+    "statuses": {
+     "200": 9
+    },
+    "length_refusals": 0,
+    "peak_context": 32057,
+    "input_tokens": 207235,
+    "output_tokens": 4502,
+    "sampling": [
+     {
+      "max_tokens": 10240,
+      "model": "Qwen3.8-27B-UD-Q4_K_M"
+     },
+     {
+      "max_tokens": 2112,
+      "model": "Qwen3.8-27B-UD-Q4_K_M",
+      "stop_sequences": [
+       "</block>"
+      ]
+     },
+     {
+      "max_tokens": 32000,
+      "model": "Qwen3.8-27B-UD-Q4_K_M",
+      "output_config": {
+       "effort": "high"
+      },
+      "thinking": {
+       "display": "updates",
+       "type": "adaptive"
+      }
+     }
+    ],
+    "requests": [
+     {
+      "status": 200,
+      "input_tokens": 16789,
+      "output_tokens": 106,
+      "ttft_ms": 4869.0,
+      "tpot_ms": 22.5,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 17056,
+      "output_tokens": 175,
+      "ttft_ms": 145.0,
+      "tpot_ms": 22.52,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 18886,
+      "output_tokens": 130,
+      "ttft_ms": 638.7,
+      "tpot_ms": 22.66,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 20680,
+      "output_tokens": 2430,
+      "ttft_ms": 639.5,
+      "tpot_ms": 22.89,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 23260,
+      "output_tokens": 473,
+      "ttft_ms": 905.8,
+      "tpot_ms": 23.01,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 23880,
+      "output_tokens": 180,
+      "ttft_ms": 283.1,
+      "tpot_ms": 23.15,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 31296,
+      "output_tokens": 761,
+      "ttft_ms": null,
+      "tpot_ms": null,
+      "stop_reason": "end_turn",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 31270,
+      "output_tokens": 224,
+      "ttft_ms": null,
+      "tpot_ms": null,
+      "stop_reason": "end_turn",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 24118,
+      "output_tokens": 23,
+      "ttft_ms": 158.7,
+      "tpot_ms": 23.08,
+      "stop_reason": "end_turn",
+      "length_refused": false
+     }
+    ]
+   }
+  },
+  {
+   "success": true,
+   "invalid": null,
+   "scored": {
+    "success": true,
+    "passed": 40,
+    "failed": 0,
+    "skipped": 0,
+    "pytest_exit": 0,
+    "timed_out": false,
+    "symlinks_skipped": 0
+   },
+   "venv_pytest": "sha256:50f26d61e9cb5c304ec49d27139cc33bbc4be34bb183ed22c3db4b75d84e2d25",
+   "venv_after": null,
+   "wall_s": 196.6,
+   "timed_out": false,
+   "exit_code": 0,
+   "turns": 15,
+   "result_subtype": "success",
+   "is_error": false,
+   "replied_done": false,
+   "prefix_tokens_saved": 126272,
+   "tool_calls": [
+    {
+     "tool": "Bash",
+     "program": "find",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "shop/__init__.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "shop/money.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "shop/discounts.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "shop/cart.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "tests/test_money.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "tests/test_discounts.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "tests/test_cart.py",
+     "error": false
+    },
+    {
+     "tool": "Read",
+     "path": "pyproject.toml",
+     "error": false
+    },
+    {
+     "tool": "Bash",
+     "program": "python",
+     "error": false
+    },
+    {
+     "tool": "Bash",
+     "program": "python",
+     "error": false
+    },
+    {
+     "tool": "Edit",
+     "path": "shop/money.py",
+     "error": false
+    },
+    {
+     "tool": "Edit",
+     "path": "shop/discounts.py",
+     "error": false
+    },
+    {
+     "tool": "Bash",
+     "program": "python",
+     "error": false
+    }
+   ],
+   "shop_diff": "--- a/shop/discounts.py\n+++ b/shop/discounts.py\n@@ -24,6 +24,21 @@\n     return rule\n \n \n+def buy_n_get_one(sku: str, n: int) -> Rule:\n+    if n <= 0:\n+        raise ValueError(f\"n must be positive: {n}\")\n+\n+    def rule(cart: Cart) -> tuple[str, int] | None:\n+        line = cart.lines.get(sku)\n+        if line is None:\n+            return None\n+        free = line.qty // (n + 1)\n+        if not free:\n+            return None\n+        return (f\"buy {n} get 1 {sku}\", free * line.unit_cents)\n+    return rule\n+\n+\n def checkout(cart: Cart, rules: list[Rule]) -> list[str]:\n     \"\"\"The receipt: the cart's item lines, then one line per rule that applies, in the order given ('<label>\n     -<cents off>'), then 'TOTAL <total>'. Discounts never take the total below zero.\"\"\"\n--- a/shop/money.py\n+++ b/shop/money.py\n@@ -15,7 +15,7 @@\n     \"\"\"350 -> '3.50', 5 -> '0.05', 1205 -> '12.05', -125 -> '-1.25'.\"\"\"\n     sign = \"-\" if cents < 0 else \"\"\n     cents = abs(cents)\n-    return f\"{sign}{cents // 100}.{cents % 100}\"\n+    return f\"{sign}{cents // 100}.{cents % 100:02d}\"\n \n \n def percent_of(cents: int, percent: int) -> int:\n",
+   "served": {
+    "messages": 11,
+    "statuses": {
+     "200": 11
+    },
+    "length_refusals": 0,
+    "peak_context": 32396,
+    "input_tokens": 275917,
+    "output_tokens": 6426,
+    "sampling": [
+     {
+      "max_tokens": 10240,
+      "model": "Qwen3.8-27B-UD-Q4_K_M"
+     },
+     {
+      "max_tokens": 2112,
+      "model": "Qwen3.8-27B-UD-Q4_K_M",
+      "stop_sequences": [
+       "</block>"
+      ]
+     },
+     {
+      "max_tokens": 32000,
+      "model": "Qwen3.8-27B-UD-Q4_K_M",
+      "output_config": {
+       "effort": "high"
+      },
+      "thinking": {
+       "display": "updates",
+       "type": "adaptive"
+      }
+     }
+    ],
+    "requests": [
+     {
+      "status": 200,
+      "input_tokens": 16792,
+      "output_tokens": 110,
+      "ttft_ms": 4874.0,
+      "tpot_ms": 22.5,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 17070,
+      "output_tokens": 342,
+      "ttft_ms": 153.4,
+      "tpot_ms": 22.53,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 20769,
+      "output_tokens": 1513,
+      "ttft_ms": 1233.2,
+      "tpot_ms": 22.87,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 30966,
+      "output_tokens": 1430,
+      "ttft_ms": null,
+      "tpot_ms": null,
+      "stop_reason": "end_turn",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 30940,
+      "output_tokens": 508,
+      "ttft_ms": null,
+      "tpot_ms": null,
+      "stop_reason": "end_turn",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 22874,
+      "output_tokens": 808,
+      "ttft_ms": 762.1,
+      "tpot_ms": 23.02,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 31028,
+      "output_tokens": 366,
+      "ttft_ms": null,
+      "tpot_ms": null,
+      "stop_reason": "end_turn",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 24039,
+      "output_tokens": 761,
+      "ttft_ms": 459.7,
+      "tpot_ms": 23.08,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 24949,
+      "output_tokens": 112,
+      "ttft_ms": 377.1,
+      "tpot_ms": 23.3,
+      "stop_reason": "tool_use",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 31334,
+      "output_tokens": 156,
+      "ttft_ms": null,
+      "tpot_ms": null,
+      "stop_reason": "end_turn",
+      "length_refused": false
+     },
+     {
+      "status": 200,
+      "input_tokens": 25156,
+      "output_tokens": 320,
+      "ttft_ms": 169.6,
+      "tpot_ms": 23.15,
+      "stop_reason": "end_turn",
+      "length_refused": false
+     }
+    ]
+   }
+  }
+ ]
+}

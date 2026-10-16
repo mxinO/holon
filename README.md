@@ -167,9 +167,14 @@ The server drops Claude Code's per-request billing-header system block, which wo
 (`holon serve <model> --plugin-options http.drop_billing_header=false` keeps it; `/metrics` counts the drops).
 Claude Code's auto-compaction assumes a far larger window than the 32K tokens served at most by default.
 
-The release's agent demo (`bench/demo/`, recorded at release) is a small fix in a three-module Python project — a
-seeded bug and a missing function — chosen to fit that 32K context. It shows the served model completing such a task
-through Claude Code; it is not a claim of general agent capability.
+The release's agent demo (`bench/demo/`) is a small fix in a three-module Python project — a seeded bug and a missing
+function — chosen to fit that 32K context. It shows the served model completing such a task through Claude Code; it
+is not a claim of general agent capability. **Result** (pre-registered, Claude Code 2.1.300, each card's 27B lock,
+scored by the harness's own copy of the tests): **3 of 3 runs passed on the RTX 5080 (UD-IQ3_S) and 3 of 3 on the
+RTX 4090 (UD-Q4_K_M)**, in 13–16 turns and 2–5 minutes each (`evidence/agent_demo_rtx-5080_2026-10-16.json`,
+`evidence/agent_demo_rtx-4090_2026-10-15.json`; `docs/release.md` §18). Claude Code sends no temperature, so the
+server's default (1.0) applies. Claude Code 2.1.300 also sends side requests of ≈ 31K tokens, which fit the 32K
+window with little room.
 
 ## Options
 

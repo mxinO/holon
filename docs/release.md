@@ -2342,3 +2342,112 @@ remained.
    (`after`).
 7. **Not done here, as planned:** the benchmark suite (step 8), the clean installs (step 10). The README's lock table
    is rewritten (every model per card: this card's lock, borrowed or neither); the performance section stays step 8's.
+
+## 18. As built (step 9)
+
+Branch `release9` from local `main` at 8e1f300. The agent demo (D7) as pre-registered in §15.5 and §15.9, with the
+harness (`bench/demo/run.py`, `bench/capture_proxy.py`) unchanged: `bench/` and `scripts/ci/` equalled 8e1f300 before
+every run, and nothing in the engine changed. Records: `evidence/agent_demo_rtx-5080_2026-10-16.json` and
+`evidence/agent_demo_rtx-4090_2026-10-15.json` (the counted series),
+`evidence/claude_code_smoke_rtx-5080_2026-10-16.json` and `evidence/claude_code_smoke_rtx-4090_2026-10-15.json` (the
+uncounted smoke); each session's stream and the proxy's lines are kept under the gitignored `bench/.out/demo/`.
+
+### 18.1 Method
+
+- **Where.** One desktop per class, clock-screened before and after (as §16.1), in a CUDA 13.0 container running this
+  worktree at 8e1f300 in its own `uv sync --group dev` environment (CPython 3.12.12, torch 2.11.0+cu130). The server,
+  the proxy and Claude Code all ran on the desktop: `holon serve` on 127.0.0.1:8000, Claude Code through the proxy on
+  another local port (M0.5's session ran its client on another host, over the network).
+- **The server.** `holon serve <the class's GGUF file in the HF cache> --port 8000`, no other flag: it starts from the
+  class's newest lock (it prints `starting from …/<n>.lock`; the served `plan_id` equals the lock's, `/metrics` shows
+  no diff). The hub form `holon serve unsloth/Qwen3.8-27B-GGUF` names the same file and lock but refused to start
+  offline (`HF_HUB_OFFLINE is set, and unsloth/Qwen3.8-27B-GGUF is not in the HF cache`): the shared cache was filled
+  by revision and has no `refs/main`, which the hub plugin's offline lookup reads (§14.3), not an engine fault. The
+  path inside the cache resolves to the same model id (`unsloth/Qwen3.8-27B-GGUF/<stem>@<build>`).
+- **The client.** Claude Code 2.1.300 (sha256 `674deba0…5215453`), passed as `--claude`: a copy of the installed
+  versioned binary, since the launcher had moved on to 2.1.301. The harness's client environment only:
+  `ANTHROPIC_AUTH_TOKEN=holon` (a dummy), no credentials, a fresh `CLAUDE_CONFIG_DIR`; every request the proxy saw was
+  a `POST /v1/messages` to the local server. Each run's venv got pytest 9.1.1 from a uv cache filled beforehand
+  (offline install, as the harness does).
+- **The smoke first.** M0.5's Claude Code session task (prompt and files as
+  `evidence/claude_code_session_rtx-5080_2026-10-14.json`) at 2.1.300 against the same server, in the harness's
+  client environment, `--output-format json` as in M0.5. The counted series would start only if every request of it
+  was answered 2xx and the session exited 0.
+
+| class | screened under (60 s, batch 4) | before (SM MHz p10 / p50) | after | used |
+|---|---|---|---|---|
+| RTX 5080 | the 27B UD-IQ3_S lock 6 | 2647 / 2670, slowdown 0, power cap 1.00 | 2647 / 2662, slowdown 0, power cap 1.00 | yes |
+| RTX 4090 | the 27B UD-Q4_K_M lock 6 | 2685 / 2685, slowdown 0, power cap 0 | 2670 / 2670, slowdown 0, power cap 0 | yes |
+
+Both desktops are the same models as step 7's (§16.2). The 5080 came from a second pool of identical desktops: the
+first pool's 5080s were all held for hours.
+
+### 18.2 The smoke (uncounted)
+
+| class | outcome | turns | wall s | requests (all 200) | input / output tokens | TTFT p50 (max) ms | TPOT p50 ms | billing headers dropped | prefix saved |
+|---|---|---|---|---|---|---|---|---|---|
+| RTX 5080 | completed: `total.txt` = `6.00`, `report.md` ends `Total value: 6.00`, reply `done` | 6 | 59 | 6 | 130,733 / 1,118 | 224 (8,587) | 16.8 | 6 | 51,072 |
+| RTX 4090 | completed, the same | 6 | 64 | 7 | 148,580 / 1,592 | 138 (6,823) | 22.6 | 7 | 68,544 |
+
+No 4xx and no 5xx: nothing in 2.1.300's request shapes needed a frontend change. What changed since M0.5's capture
+at 2.1.296 (all served):
+- the main loop's first request carries a new top-level `safeguards` key, and its betas add
+  `dangerous-tool-use-2026-09-03` and `afk-mode-2026-01-31` and no longer list `mid-conversation-system-2026-04-07`
+  (`role: "system"` messages inside `messages` still come, and are served as M0.5 fixed);
+- **side requests**, which M0.5's session did not send: non-streamed, no tools, one user message, a ≈ 140K-character
+  system prompt (≈ 31K tokens), either `max_tokens` 2112 with `stop_sequences: ["</block>"]` or `max_tokens` 10240.
+  They come with nonessential traffic off; 2–6 per session here. At 30.9–31.5K input tokens they fill the 32K window
+  to within ≈ 1.3K tokens; the engine ends a request at `max_model_len`, and every one ended `end_turn`.
+
+### 18.3 The counted runs
+
+All six runs **passed** (40 / 0 in the harness's scoring), none invalid, none timed out; every session exited 0 with
+result `success`, and no agent changed its venv. "Requests" counts the main loop's streamed requests + the side
+requests. TTFT is the proxy's time to the first `content_block_delta` of a streamed request (the side requests are
+not streamed), TPOT the rest of the stream over the output tokens. Peak context is input + output tokens of one
+request, the main loop's / any request's. "done" is whether the final reply was exactly the requested word (not
+scored).
+
+| class | run | scored | turns | wall s | requests | input / output tokens | prefix saved | TTFT p50 (max) ms | TPOT p50 ms | peak context | length refusals | "done" |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| RTX 5080 | 1 | pass, 40 / 0 | 15 | 208 | 8 + 4 | 302,381 / 7,409 | 140,992 | 1,739 (7,429) | 17.1 | 27,178 / 31,935 | 0 | no |
+| RTX 5080 | 2 | pass, 40 / 0 | 14 | 171 | 6 + 4 | 253,120 / 5,543 | 99,328 | 1,908 (7,450) | 17.1 | 25,130 / 31,811 | 0 | yes |
+| RTX 5080 | 3 | pass, 40 / 0 | 16 | 292 | 9 + 6 | 395,441 / 10,166 | 162,752 | 2,630 (7,451) | 17.2 | 28,707 / 32,337 | 0 | yes |
+| RTX 4090 | 1 | pass, 40 / 0 | 15 | 211 | 8 + 3 | 270,418 / 7,460 | 150,400 | 458 (4,860) | 23.1 | 26,509 / 32,055 | 0 | yes |
+| RTX 4090 | 2 | pass, 40 / 0 | 13 | 131 | 7 + 2 | 207,235 / 4,502 | 120,448 | 639 (4,869) | 22.9 | 24,141 / 32,057 | 0 | yes |
+| RTX 4090 | 3 | pass, 40 / 0 | 15 | 197 | 7 + 4 | 275,917 / 6,426 | 126,272 | 460 (4,874) | 23.0 | 25,476 / 32,396 | 0 | no |
+
+- **Result: D7 succeeds on both classes, 3 of 3 each** (the bar: ≥ 2 of 3 per class). No miss to publish.
+- **The agents' path** was the same in all six: `find`; `Read` of every file of the package, the three test files
+  and (in five runs) `pyproject.toml`; `python` 1–4 times (the tests, a check; one run also `cat`); one `Edit` to
+  `money.py` and one or two to `discounts.py`. No tool call failed, every file tool's path was inside the project,
+  and no agent changed its venv. Every diff (in the records) zero-pads the cents in `format_cents` and adds
+  `buy_n_get_one`.
+- **The first request of each session** (≈ 17K tokens: system prompt, tools, the task) is the TTFT maximum
+  (4.9 s on the 4090, 7.4 s on the 5080). The main loop's context peaked at 24–29K tokens; the side requests set
+  each run's overall peak.
+- **Sampling parameters Claude Code sent** (the same on both classes): the main loop `max_tokens` 32000,
+  `thinking: {type: adaptive, display: updates}` (`display: omitted` under the smoke's `--output-format json`),
+  `output_config: {effort: high}`; the side requests `max_tokens` 2112 + `stop_sequences ["</block>"]`, or 10240.
+  **No `temperature`, `top_p` or `top_k` in any request**, so every request sampled at the server's Anthropic
+  defaults: temperature 1.0, top-p 1.0, top-k off. Thinking was on (`adaptive`).
+
+### 18.4 Checks
+
+`scripts/ci/check_private.py` passes on the whole tree, records and `shop/` diffs included. The two series share one
+scorer reference digest (the same environment) and one venv pytest digest. No code changed, so no suite was run.
+
+### 18.5 For the lead
+
+1. **D7 passes: 6 of 6 counted runs** (5080 3 / 3, 4090 3 / 3), after a clean smoke on each class. The README
+   reports it.
+2. **Claude Code 2.1.300 sends ≈ 31K-token side requests** (§18.2) that 2.1.296 did not. They fit the 32K served
+   window by ≈ 1.3K tokens. A longer system prompt in a later Claude Code, or a lock with a smaller
+   `max_model_len`, would turn them into length refusals; what Claude Code does then was not tested. Worth a line in
+   the README's known limitations if the next version grows them.
+3. **`holon serve <hub ref>` offline needs a cache with `refs/main`**; a cache filled by revision only (as the shared
+   development cache is) is refused (§18.1). Expected behaviour of the hub library, but a user who copies a cache
+   could meet it; the error message says what is missing.
+4. **Claude Code sends no `temperature`, `top_p` or `top_k`**, so the server's Anthropic defaults (temperature 1.0)
+   decide; the demo ran sampled, not greedy.
+5. Not done here, as instructed: no engine change, no push, `main` untouched.
