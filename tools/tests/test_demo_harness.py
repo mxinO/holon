@@ -204,6 +204,7 @@ def load(path''').replace("    args = ap.parse_args()\n", """    ap.add_argument
     (work / "tests" / "test_workloads.py").write_text("")       # the seeded tests are restored for the harness's run
     assert pi.score_workloads(work, files)["success"] is False  # but the agent's own suite must keep them
     demo.write_tree({"tests/test_workloads.py": files["tests/test_workloads.py"]}, work)
+    (work / "pytest.py").write_text("raise SystemExit(0)\n")      # an agent's module never shadows the scorer's
     assert pi.score_workloads(work, files)["success"]
 
 

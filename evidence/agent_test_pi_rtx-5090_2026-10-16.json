@@ -3133,6 +3133,7 @@
    ]
   },
   "prefix_cache": {
+   "requests": 42,
    "input_tokens": 333274,
    "cached_tokens": 270592,
    "hit_rate": 0.8119

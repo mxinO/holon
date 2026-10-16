@@ -6,8 +6,10 @@ request's timing at the proxy (the first streamed content, or an OpenAI stream's
 whole answer after `total_ms`) and the token counts the server reported (`usage`), its stop reason, and an error's
 type and whether it refused the prompt's length; an OpenAI chat answer also its tool calls and whether their
 arguments parse, whether its text carries tool-call or reasoning markup, and whether its stream was well formed
-(`openai_facts`). `--metrics` adds the prefix tokens the server saved for each request (its `/metrics` counter
-before and after; `null` when requests overlapped). `--raw` also keeps the bodies, for local inspection only.
+(`openai_facts`). An OpenAI stream's TTFT assumes the server sends its first chunk with the first token, as Holon
+does; one that sends a role-only chunk first would read near zero. `--metrics` adds the prefix tokens the server
+saved for each request (its `/metrics` counter before and after; `null` when requests overlapped). `--raw` also
+keeps the bodies, for local inspection only.
 
 Usage:
   python bench/capture_proxy.py --upstream http://<server>:8000 --port 18080 --out <requests.jsonl> [--metrics]
@@ -192,33 +194,36 @@ def serve(upstream: str, port: int, out: str, raw: str | None, metrics: bool = F
                     flight["started"] += 1
                     mine, shared = flight["started"], flight["now"] > 1
                 saved = _saved(upstream.rstrip("/"))
-            start, first, answer = time.perf_counter(), None, bytearray()
-            conn = http.client.HTTPConnection(target.hostname, target.port, timeout=3600)
-            headers = {k: v for k, v in self.headers.items() if k.lower() not in ("host", "connection")}
-            conn.request(self.command, self.path, data, headers)
-            resp = conn.getresponse()
-            self.send_response(resp.status)
-            for k, v in resp.getheaders():
-                if k.lower() not in ("transfer-encoding", "connection", "content-length"):
-                    self.send_header(k, v)
-            self.send_header("Transfer-Encoding", "chunked")
-            self.end_headers()
-            while chunk := resp.read1(65536):
-                answer += chunk
-                if first is None and (b"content_block_delta" in (window := answer[-len(chunk) - 32:]) or
-                                      b"chat.completion.chunk" in window):
-                    first = time.perf_counter()
-                self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
-                self.wfile.flush()
-            end = time.perf_counter()
-            self.wfile.write(b"0\r\n\r\n")
-            prefix = {}
-            if counted:
-                after = _saved(upstream.rstrip("/"))
-                with lock:
-                    flight["now"] -= 1
-                    alone = not shared and flight["started"] == mine      # none ran beside it
-                prefix = {"prefix_tokens_saved": after - saved if alone and None not in (saved, after) else None}
+            after = None
+            try:
+                start, first, answer = time.perf_counter(), None, bytearray()
+                conn = http.client.HTTPConnection(target.hostname, target.port, timeout=3600)
+                headers = {k: v for k, v in self.headers.items() if k.lower() not in ("host", "connection")}
+                conn.request(self.command, self.path, data, headers)
+                resp = conn.getresponse()
+                self.send_response(resp.status)
+                for k, v in resp.getheaders():
+                    if k.lower() not in ("transfer-encoding", "connection", "content-length"):
+                        self.send_header(k, v)
+                self.send_header("Transfer-Encoding", "chunked")
+                self.end_headers()
+                while chunk := resp.read1(65536):
+                    answer += chunk
+                    if first is None and (b"content_block_delta" in (window := answer[-len(chunk) - 32:]) or
+                                          b"chat.completion.chunk" in window):
+                        first = time.perf_counter()
+                    self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
+                    self.wfile.flush()
+                end = time.perf_counter()
+                self.wfile.write(b"0\r\n\r\n")
+                after = _saved(upstream.rstrip("/")) if counted else None
+            finally:                                   # an aborted request still leaves the server
+                if counted:
+                    with lock:
+                        flight["now"] -= 1
+                        alone = not shared and flight["started"] == mine      # none ran beside it
+            prefix = {"prefix_tokens_saved": after - saved if alone and None not in (saved, after) else None} \
+                if counted else {}
             try:
                 body = json.loads(data) if data else None
             except ValueError:

@@ -168,8 +168,8 @@ anything else. pi's levels also include `minimal`, so forwarding the field unche
 ### Finding 3 (not reported): cached tokens in `usage`
 
 The final usage chunk has `prompt_tokens`, `completion_tokens` and `total_tokens`, with no
-`prompt_tokens_details.cached_tokens`. pi reads that field, so it showed 0 cache reads on every turn, while the
-server saved 81% of the input tokens (below). This is not a correctness problem, but a client cannot see the prefix
+`prompt_tokens_details.cached_tokens`. pi reads that field, so its usage showed 0 cache reads on all 57 answers (in
+pi's own session files, kept locally with the transcripts), while the server saved 81% of the input tokens (below). This is not a correctness problem, but a client cannot see the prefix
 cache.
 
 ### Other observations
@@ -202,12 +202,12 @@ These figures cover the 42 counted requests (5 sessions). Contexts ran from 1.6K
 
 | input tokens | requests | TPOT p50 (min–max) | tok/s at p50 |
 |---|---|---|---|
-| < 4,096 | 12 | 11.65 ms (11.60–11.77) | 85.8 |
-| 4,096–8,191 | 10 | 11.86 ms (11.79–12.30) | 84.3 |
+| < 4,096 | 12 | 11.64 ms (11.60–11.77) | 85.9 |
+| 4,096–8,191 | 10 | 11.85 ms (11.79–12.30) | 84.4 |
 | 8,192–12,287 | 11 | 12.05 ms (11.89–12.64) | 83.0 |
 | 12,288–16,383 | 9 | 12.23 ms (12.15–12.65) | 81.8 |
 
-Below 4K tokens decode runs at 85.8 tok/s, 2% under tg128 (measured at depth 0). No 8–16K decode figure was
+Below 4K tokens decode runs at 85.9 tok/s, 2% under tg128 (measured at depth 0). No 8–16K decode figure was
 published for this card to compare against.
 
 **Prefill by context size:**
@@ -218,8 +218,8 @@ published for this card to compare against.
 | 8,192–16,384 | 20 | 708 | 199 ms | 3,531 tok/s |
 
 TTFT here includes things pp512 does not: the HTTP round trip, template rendering and tokenization, scheduling, and
-the first decode step. That overhead weighs most on short uncached spans: the 8–16K bin's requests mostly append a
-few hundred tokens. The 9 requests with at least 2,048 uncached tokens reached 3,824–4,593 tok/s.
+the first decode step. That overhead weighs most on short uncached spans: 13 of the 8–16K bin's 20 requests had
+fewer than 1,000 uncached tokens (249–5,113, median 708). The 9 requests with at least 2,048 uncached tokens reached 3,824–4,593 tok/s.
 
 **What the uncached tokens are.** Each session's first request (pi's system prompt, 4 tools and the task: 1.6–1.8K
 tokens) was uncached, with TTFT 344–417 ms. After that, 44% of all uncached input tokens (27,646 of 62,682) was the
@@ -247,22 +247,24 @@ about 61 s.
 
 ## 3. Task outcomes
 
-The token columns read input / cached / output. TTFT is the p50, with the maximum in brackets. Peak context is input
-plus output of one request. "done" is whether the final reply was exactly the requested word (not scored).
+The token columns read input / cached / output. TTFT and TPOT are the run's medians (interpolated, as `--report`
+computes them), TTFT with its maximum in brackets. Peak context is input plus output of one request. "done" is
+whether the final reply was exactly the requested word (not scored).
 
 | series | run | scored | turns | wall s | tokens in / cached / out | TTFT p50 (max) ms | TPOT p50 ms | peak context | tool calls / failed | "done" |
 |---|---|---|---|---|---|---|---|---|---|---|
 | smoke, minimal provider | 1 | pass, 40 / 0 | 7 | 42 | 34,866 / 26,112 / 3,151 | 344 (588) | 11.72 | 8,632 | 13 / 0 | yes |
-| smoke, documented provider | 1 | pass, 40 / 0 | 8 | 57 | 53,627 / 42,752 / 4,409 | 340 (631) | 11.95 | 10,923 | 15 / 0 | no |
-| demo | 1 | pass, 40 / 0 | 8 | 46 | 46,588 / 37,248 / 3,521 | 331 (604) | 11.86 | 9,283 | 14 / 0 | no |
+| smoke, documented provider | 1 | pass, 40 / 0 | 8 | 57 | 53,627 / 42,752 / 4,409 | 310 (631) | 11.90 | 10,923 | 15 / 0 | no |
+| demo | 1 | pass, 40 / 0 | 8 | 46 | 46,588 / 37,248 / 3,521 | 254 (604) | 11.82 | 9,283 | 14 / 0 | no |
 | demo | 2 | pass, 40 / 0 | 7 | 53 | 38,048 / 28,608 / 4,031 | 344 (636) | 11.84 | 9,312 | 13 / 0 | yes |
-| demo | 3 | pass, 40 / 0 | 8 | 74 | 48,864 / 37,440 / 5,760 | 352 (817) | 11.94 | 11,282 | 14 / 0 | no |
+| demo | 3 | pass, 40 / 0 | 8 | 74 | 48,864 / 37,440 / 5,760 | 351 (817) | 11.88 | 11,282 | 14 / 0 | no |
 | workloads | 1 | pass: harness 14 / 0, own suite 14 / 0 | 9 | 99 | 92,566 / 76,352 / 7,545 | 312 (1,222) | 12.19 | 16,120 | 10 / 0 | yes |
-| workloads | 2 | pass: harness 14 / 0, own suite 13 / 0 | 10 | 100 | 107,208 / 90,944 / 7,438 | 386 (717) | 12.23 | 16,290 | 12 / 0 | no |
+| workloads | 2 | pass: harness 14 / 0, own suite 13 / 0 | 10 | 100 | 107,208 / 90,944 / 7,438 | 330 (717) | 12.22 | 16,290 | 12 / 0 | no |
 
 - **Demo runs.** All took the same path: `find`, a `read` of every package and test file
   and `pyproject.toml` (often 5 reads in one answer), one `edit` each to `money.py` and `discounts.py`, and pytest
-  through `bash`. Every diff zero-pads the cents and adds `buy_n_get_one`.
+  through `bash`. The record names a bash call by its first word, which is `cd` for pi's `cd <dir> && …`
+  commands; the local transcripts show those calls ran pytest (and, in the workloads runs, the new CLI). Every diff zero-pads the cents and adds `buy_n_get_one`.
 - **Workloads runs.** These listed the directory (`find` or `ls`), read `workloads.py`, `driver.py` and the seeded tests, edited `workloads.py` once or
   twice, wrote `tests/test_stats.py` (5 and 4 new tests), and ran the suite and the CLI.
 - **Next to Claude Code's D7 runs** (`docs/release.md` §18.3: 13–16 turns, 131–292 s on an RTX 4090 or 5080): pi

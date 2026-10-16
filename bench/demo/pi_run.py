@@ -118,11 +118,11 @@ def pytest_counts(files: dict[str, bytes]) -> dict:
 
 def score_workloads(work: pathlib.Path, seeded: dict[str, bytes]) -> dict:
     """The `workloads` task's scoring: the harness's tests (the seeded ones restored, and its own) against the agent's
-    modules; then the agent's own suite as it left it, which must pass with more than the seeded tests and one test
-    file naming `trace_stats`."""
+    modules (the project's module names only); then the agent's own suite as it left it, which must pass with more
+    than the seeded tests and one test file naming `trace_stats`."""
     try:
         files = demo.tree(work)
-        modules = {k: v for k, v in files.items() if "/" not in k and k.endswith(".py")}
+        modules = {k: v for k, v in files.items() if k in seeded and k.endswith(".py")}   # never an agent's pytest.py
         traces = {k: v for k, v in seeded.items() if k.startswith("traces/")}
         harness = pytest_counts(modules | traces | {k: v for k, v in seeded.items() if k.startswith("tests/")}
                                 | {HIDDEN: (TASK / "hidden_test_trace_stats.py").read_bytes()})
@@ -376,7 +376,8 @@ def summarize(record: dict) -> dict:
                                "ttft_ms_p50": pct([r["ttft_ms"] for r in sel], 0.5),
                                "prefill_tok_s_p50": pct([rate(r) for r in sel], 0.5)})
     large = [rate(r) for r in timed if r["input_tokens"] - r["cached_tokens"] >= 512]
-    n_in = sum(r["input_tokens"] or 0 for r in ok)
+    known = [r for r in ok if r["cached_tokens"] is not None]          # requests whose saved tokens were counted
+    n_in = sum(r["input_tokens"] or 0 for r in known)
     return {
         "requests": len(rows), "ok": len(ok), "issues": issues, "runs": runs,
         "decode": {"requests": len(tpot), "tpot_ms_p50": pct(tpot, 0.5), "tpot_ms_p90": pct(tpot, 0.9),
@@ -386,8 +387,9 @@ def summarize(record: dict) -> dict:
                     "uncached_at_least_512": {"requests": len(large), "tok_s_p50": pct(large, 0.5),
                                               "tok_s_p10": pct(large, 0.1), "tok_s_p90": pct(large, 0.9)},
                     "by_context": by_context},
-        "prefix_cache": {"input_tokens": n_in, "cached_tokens": sum(r["cached_tokens"] or 0 for r in ok),
-                         "hit_rate": round(sum(r["cached_tokens"] or 0 for r in ok) / n_in, 4) if n_in else None},
+        "prefix_cache": {"requests": len(known), "input_tokens": n_in,
+                         "cached_tokens": sum(r["cached_tokens"] for r in known),
+                         "hit_rate": round(sum(r["cached_tokens"] for r in known) / n_in, 4) if n_in else None},
         "latency": {"ttft_ms_p50": pct([r["ttft_ms"] for r in ok if r["ttft_ms"]], 0.5),
                     "ttft_ms_p90": pct([r["ttft_ms"] for r in ok if r["ttft_ms"]], 0.9),
                     "request_ms_p50": pct([r["total_ms"] for r in ok], 0.5),
