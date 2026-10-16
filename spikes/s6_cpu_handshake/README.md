@@ -333,9 +333,9 @@ GEMV bandwidth (`cpu_task`, 225 MiB sweep, per-layer µs / GB/s; 1 / 2 / 4 / 8 t
 | 5090 desktop | 61 / 51.7 | 45 / 69.8 | 43 / 73.4 | 46 / 67.8 |
 
 The 5080 and 5090 desktops saturate at **66–73 GB/s with 2–4 threads**, the 4090 desktop at **32–36 GB/s**. More than 4 threads buys
-nothing for a bandwidth-bound expert GEMV, so a desktop CPU-expert pool needs ≤ 4 compute threads. The 96 MB L3
-of the <cpu> matters: in `overlap` (N = 24, 72 MiB of weights) the per-layer CPU task drops to 12–15 µs
-(L3-resident) vs 43–47 µs from DRAM; the <cpu> (2 × 16 MB L3) stays at ~94 µs.
+nothing for a bandwidth-bound expert GEMV, so a desktop CPU-expert pool needs ≤ 4 compute threads. A large CPU L3 cache
+matters: in `overlap` (N = 24, 72 MiB of weights) the per-layer CPU task drops to 12–15 µs (L3-resident) vs
+43–47 µs from DRAM; on the desktop with a smaller L3 it stays at ~94 µs.
 
 **Does a hot worker starve the Python loop?** `pyloop`: each step runs a fixed pure-Python workload (`py_work`,
 p50 µs), then replays the 75-layer graph (≤ 2 in flight). Alone = same workload, no GPU, worker idle:

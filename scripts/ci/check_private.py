@@ -16,7 +16,8 @@ from _common import ROOT, fail
 
 GENERIC = [r"/home/[\w.-]+", r"/Users/[\w.-]+", r"/scratch[\w.-]*/"]
 MACHINE = [r"\b(?:EPYC|Xeon|Threadripper|Ryzen)\b", r"\bCore\(TM\)", r"\bZen ?[1-6]\b", r"\bDDR[3-6]\b",
-           r"\bdriver[ _:=\"]{1,4}\d{3}\.\d+"]
+           r"\bdriver[ _:=\"]{1,4}\d{3}\.\d+",
+           r"\b[1-9]\d{3}X(?:3D)?\b", r"\bi[3579]-\d{4,5}[A-Z]{0,2}\b", r"\bLinux \d+\.\d{2,}"]
 # Upstream files (public, pinned by SHA256SUMS or a commit) can match the patterns; our patches on them are checked.
 VENDORED = ("plugins/holon_plugins/kernels/ggml_cuda/vendor/", "spikes/s2_gguf/third_party/")
 SELF = "scripts/ci/check_private.py"         # its patterns name what they look for
