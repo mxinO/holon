@@ -29,6 +29,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import statistics
 from collections.abc import Callable
 
@@ -131,6 +132,11 @@ def _served(r: dict, base: str) -> str | None:
     return arms[0] if arms else None
 
 
+# What the traces' context changes in a served plan: the setting, and the RoPE sites, whose facts hold the table's
+# length (`max_positions`; their kernel preference is the lock's still).
+CONTEXT = re.compile(r"engine:max_model_len: |site:.*/[\w.]*rope[\w.]*@\d+$")
+
+
 def _served_check(r: dict, holon: str) -> str | None:
     """Why served Holon's plan is not the matched lock's, or None: it must start from that lock, and differ only in
     the context — or, for an arm with flags of its own (MTP), in whatever those flags set."""
@@ -142,7 +148,7 @@ def _served_check(r: dict, holon: str) -> str | None:
         return f"served from {served.get('lock')}, matched {lock}"
     if r.get("arms", {}).get(holon.partition("@")[2]):
         return None
-    other = [d for d in served.get("diff") or [] if not d.startswith("engine:max_model_len")]
+    other = [d for d in served.get("diff") or [] if not CONTEXT.match(d)]
     return f"served plan differs: {', '.join(other)}" if other else None
 
 

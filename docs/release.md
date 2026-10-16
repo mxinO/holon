@@ -2390,7 +2390,8 @@ prompts cut from natural text (`--corpus`: judge prompt set v1 for Qwen3, v1-qwe
   every baseline's cache (§5.2's flags, unchanged), and its row is reported.
 - The context is the traces' on every engine: 30,208 tokens with the long prompt, above the 8B locks' 8K as in §16.5
   and below the 27B locks' 32K; 768 for the decode-only records. Served Holon must start from the matched lock, and
-  its plan differ only in that setting (an MTP arm: also in what its flags set); `report.py` refuses a row otherwise.
+  its plan differ only in that setting and the RoPE sites whose facts hold it (`max_positions`; an MTP arm: also in
+  what its flags set); `report.py` refuses a row otherwise.
 - `decode_b8` runs at most `max_seqs` at once: 4 on every 27B lock.
 - `llama-server` is the gate pin's build. Commands, per record:
   ```
