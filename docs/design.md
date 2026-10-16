@@ -319,7 +319,8 @@ approvals, and the `isolation-check` CI job.
 
 ### 4.5 Versioning
 
-- **The plugin ABI is 1.0, frozen at the release** (release design §7). `holon.api.ABI` is the version; every
+- **The plugin ABI was frozen at 1.0 at the release** (release design §7) and is 1.1 since v0.1.1 (an additive
+  `TokenDelta` field). `holon.api.ABI` is the version; every
   manifest declares the range it works with (`core_abi = ">=1.0,<2.0"`), checked before anything else when the
   manifest is read. `core/abi.txt` lists the frozen surface (`holon.api`'s names and signatures, dataclass fields
   in order, Protocol members marked required or optional, `SLOTS`, `EngineConfig`, the `BuildCtx.options` keys, the

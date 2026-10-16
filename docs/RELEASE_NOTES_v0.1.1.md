@@ -8,8 +8,9 @@ A patch release: three fixes to the OpenAI-compatible and Anthropic endpoints, f
 
 - **`developer` messages are system messages.** `/v1/chat/completions` passed them to the chat template as they were:
   the HF Qwen3.8 and Qwen3.5 templates refused them (400) and the Qwen3 templates dropped them, with an agent's whole
-  system prompt. pi sends its system prompt this way for reasoning models. Every route now renders them as `system`;
-  a leading run of system and developer messages that holds one becomes one system prompt.
+  system prompt. pi sends its system prompt this way for reasoning models. Both OpenAI routes (chat completions and
+  Responses) now render them as `system`; a leading run of system and developer messages that holds one becomes one
+  system prompt.
 - **`reasoning_effort` takes effect.** Chat's `reasoning_effort`, the Responses API's `reasoning.effort` and
   Anthropic's `output_config.effort` were ignored. They now set the chat template's level where it has levels (the
   Qwen3.8 templates): a level the template has is used as it is; another level of the clients' scale (`minimal` …
@@ -41,7 +42,8 @@ snapshot trace byte-identical to the previous lock's and run-identical over thre
 | RTX 5080 | 6 | 8 min 19 s |
 | RTX 5090 | 4 | 9 min 31 s |
 
-Performance is unchanged: the same kernels, settings and outputs. The pi re-run on the RTX 5090's new lock
+Performance was not re-measured: the kernels, settings and outputs are the same, and the pi re-run's decode TPOT p50
+(11.79 ms) is within v0.1.0's runs on that card (11.72–11.90 ms). The pi re-run on the RTX 5090's new lock
 (`evidence/agent_test_pi_v011_rtx-5090_2026-10-16.json`) passed the demo task at three thinking levels, with the level
 changing the rendered prompt and pi reporting the server's cache reads.
 
