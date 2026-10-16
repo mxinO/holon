@@ -26,7 +26,7 @@ class Backend(http.Backend):
         port = http.free_port()
         self.flags = ["--max-running-requests", str(max_batch), "--max-prefill-length", str(max_step_tokens),
                       *(["--num-tokens", str(kv_tokens // 64 * 64)] if kv_tokens else []),   # whole pages
-                      "--max-seq-len-override", str(text.headroom(max_model_len)),
+                      "--max-seq-len-override", str(text.headroom(max_model_len, model)),
                       "--memory-ratio", "0.9", "--served-model-name", "m",
                       *shlex.split(os.environ.get("FREETOKEN_ARGS", ""))]
         server = http.Server([os.environ.get("FREETOKEN_PYTHON", str(PYTHON)), "-m", "freetoken", "--model-path", model,

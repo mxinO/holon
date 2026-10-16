@@ -5,14 +5,20 @@ carries the server's own count, which settles the total. Generated tokens come b
 server returns ids here), so a multi-turn history holds the same text for every server."""
 from __future__ import annotations
 
+import json
 import pathlib
 
 from tokenizers import Tokenizer
 
 
-def headroom(max_model_len: int) -> int:
-    """A context limit for text prompts: decoded and re-encoded, a trace's token ids can come back longer."""
-    return -(-max_model_len * 3 // 2 // 256) * 256
+def headroom(max_model_len: int, model: str | None = None) -> int:
+    """A context limit for text prompts: decoded and re-encoded, a trace's token ids can come back longer. With the
+    model, at most its trained context (`max_position_embeddings`), which a server may refuse to exceed."""
+    limit = -(-max_model_len * 3 // 2 // 256) * 256
+    path = pathlib.Path(model or "")
+    if model is not None and (file := (path if path.is_dir() else path.parent) / "config.json").exists():
+        limit = min(limit, max(max_model_len, json.loads(file.read_text()).get("max_position_embeddings", limit)))
+    return limit
 
 
 class Prompts:
