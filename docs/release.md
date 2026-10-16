@@ -2398,10 +2398,10 @@ prompts cut from natural text (`--corpus`: judge prompt set v1 for Qwen3, v1-qwe
       --corpus <prompt set> --traces bench/traces/{decode_b1,decode_b8,agent,long_prompt}.jsonl \
       --backends holon holon_http [holon_http@aa] llamaserver           # GGUF (the A/A arm: 8B Q4_K_M)
       --backends holon holon_http sglang_http freetoken_http            # the bf16 8B
-  python bench/run.py ... --rounds 3 --traces bench/traces/{decode_b1,decode_b8}.jsonl \
-      --backends holon holon_http sglang_http freetoken_http            # NVFP4 / FP8 (decode-only)
       --backends holon@mtp holon_http@mtp llamaserver@mtp3 \
           --arm mtp='<step 7's MTP flags>' --arm mtp3='--spec-type draft-mtp --spec-draft-n-max 3'   # the 27B with MTP
+  python bench/run.py ... --rounds 3 --traces bench/traces/{decode_b1,decode_b8}.jsonl \
+      --backends holon holon_http sglang_http freetoken_http            # NVFP4 / FP8 (decode-only)
   python bench/bars.py --name <cell> --gpu 0 --model <file> --lock <the class's lock> --rounds 3
   ```
 - **A/A**: a second served Holon arm (`holon_http@aa`, no flags) in the 8B Q4_K_M record of every class, on every
@@ -2414,7 +2414,8 @@ prompts cut from natural text (`--corpus`: judge prompt set v1 for Qwen3, v1-qwe
   - The speedup over plain is taken across two records of the same desktop (the plain cell's), so it is **unpaired**;
     `report.py` names the plain record it used.
   - `decode_b1` is **one prompt**: every round replays the same greedy continuation, so its rounds measure timing
-    noise, not prompts. `decode_b8`'s 8 prompts are quoted beside it (on the 27B, at most 4 at once: not single-stream).
+    noise, not prompts. `decode_b8`'s 8 prompts are quoted beside it (on the 27B, at most 4 at once: not
+    single-stream).
   - Greedy MTP emits plain decoding's tokens, so both arms repeat alike. A trace whose output repeats more than twice
     the corpus's own share (§16.1: 8.2% of its 16-grams, so above 0.164) has its speedup labelled "inflated by
     repetition".
