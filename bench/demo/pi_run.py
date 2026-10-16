@@ -153,7 +153,9 @@ def diff(before: dict[str, bytes], work: pathlib.Path, task: str) -> str:
 
 def pi_identity(pi: pathlib.Path, env: dict[str, str]) -> dict:
     """pi's version (it must be the pinned one), node's, and a digest of the installed packages' code."""
-    version = subprocess.run([str(pi), "--version"], capture_output=True, text=True, env=env, check=True).stdout.strip()
+    # pi prints its version on stderr when stdin is not a TTY
+    version = subprocess.run([str(pi), "--version"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, env=env, check=True).stdout.strip()
     if version != PI:
         raise SystemExit(f"pi {version!r}: this test is pinned at {PI}")
     node = subprocess.run(["node", "--version"], capture_output=True, text=True, env=env, check=True).stdout.strip()
