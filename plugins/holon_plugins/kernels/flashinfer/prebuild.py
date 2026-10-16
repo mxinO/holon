@@ -6,6 +6,10 @@ FlashInfer keeps them in its cache, one directory per target architecture (`$FLA
 flashinfer/<version>/<arch>/cached_ops`, default base: the home directory); an engine on a GPU of that SM loads them
 and compiles nothing. Every module the plugin's kernels can select is built: paged prefill and tensor-core decode
 (FlashInfer's FA2 prefill module) for each supported q dtype, KV dtype and head dim, rope and silu_and_mul.
+
+Each module is built by its own ninja, in its own directory: FlashInfer runs that build before it loads a module, and
+ninja recompiles a module whose directory has no build log — which a combined build (`build_jit_specs`, one log for
+all) leaves, so every module compiled again at first use.
 """
 from __future__ import annotations
 
@@ -37,10 +41,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--sm", type=int, required=True, choices=sorted(ARCHS))
     sm = p.parse_args(argv).sm
     os.environ["FLASHINFER_CUDA_ARCH_LIST"] = ARCHS[sm]      # read when flashinfer is imported: this process only
-    from flashinfer.jit import build_jit_specs, env
+    from flashinfer.jit import env
 
     built, t = specs(sm), time.perf_counter()
-    build_jit_specs(built)
+    for spec in built:
+        spec.build(verbose=False)
     print(f"sm {sm}: {len(built)} FlashInfer modules in {env.FLASHINFER_JIT_DIR} ({time.perf_counter() - t:.0f} s)",
           flush=True)
 

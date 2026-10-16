@@ -1,4 +1,8 @@
 """L0: FlashInfer kernels for the per-token ops against the std oracles (bf16/fp16)."""
+import os
+import subprocess
+import sys
+
 import pytest
 import torch
 from holon.core.build import BuildContext
@@ -62,3 +66,22 @@ def test_silu_mul(dtype):
     fast, ref = _pair("silu_mul@1", **facts)
     gate_up = torch.randn(17, 2 * 12288, device="cuda", dtype=dtype)
     _close(fast(gate_up), ref(gate_up))
+
+
+def test_prebuilt_modules_load_without_compiling(tmp_path):
+    """`holon prebuild`'s FlashInfer modules are what a first start loads: FlashInfer runs each module's own ninja build
+    before loading it, so a module prebuilt without its directory's ninja log compiled again at first use (found by
+    the release's clean install). One module (silu_and_mul) stands for all."""
+    env = {**os.environ, "FLASHINFER_WORKSPACE_BASE": str(tmp_path)}
+    env.pop("FLASHINFER_CUDA_ARCH_LIST", None)
+    sm = "".join(map(str, torch.cuda.get_device_capability()))
+    prebuild = ("import holon_plugins.kernels.flashinfer.prebuild as p\n"
+                "from flashinfer.jit import gen_act_and_mul_module\n"
+                "p.specs = lambda sm: [gen_act_and_mul_module('silu')]\n"
+                f"p.main(['--sm', '{sm}'])")
+    subprocess.run([sys.executable, "-c", prebuild], env=env, check=True, capture_output=True)
+    built = {p: p.stat().st_mtime_ns for p in tmp_path.rglob("silu_and_mul/*.so")}
+    assert built, "prebuild built no silu_and_mul module"
+    load = "from flashinfer.jit import gen_act_and_mul_module; gen_act_and_mul_module('silu').build_and_load()"
+    subprocess.run([sys.executable, "-c", load], env=env, check=True, capture_output=True)
+    assert {p: p.stat().st_mtime_ns for p in built} == built, "the first load compiled the prebuilt module again"
