@@ -174,7 +174,7 @@ new families or formats; v1's offload, VMM, sandbox and self-improvement; GPUs o
     while serving makes a supervisor restart import new code — stop the server first). Quickstart (fixed by step 10):
 
   ```bash
-  git clone --branch v0.1.0 <repository> holon && cd holon
+  git clone --branch v0.1.0 https://github.com/mxinO/holon.git holon && cd holon
   uv sync --frozen                     # Python 3.12, torch 2.11 + CUDA 13 and every pin from uv.lock
   uv run holon prebuild                # GGUF kernels and FlashInfer modules for the visible GPUs, once
   uv run holon models                  # the models locked for this card, by name

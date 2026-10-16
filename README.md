@@ -70,7 +70,7 @@ Host requirements: Linux x86-64, an NVIDIA driver supporting CUDA 13, the CUDA 1
 every pinned dependency from `uv.lock`.
 
 ```bash
-git clone --branch v0.1.0 <repository> holon && cd holon
+git clone --branch v0.1.0 https://github.com/mxinO/holon.git holon && cd holon
 uv sync --frozen                     # Python 3.12, torch 2.11 + CUDA 13 and every pin from uv.lock
 uv run holon prebuild                # GGUF kernels and FlashInfer modules for the visible GPUs, once
 ```

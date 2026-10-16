@@ -104,7 +104,7 @@ older SHAs).
 Linux x86-64, an NVIDIA driver for CUDA 13, the CUDA 13 toolkit, gcc / g++ and [uv](https://docs.astral.sh/uv/):
 
 ```bash
-git clone --branch v0.1.0 <repository> holon && cd holon
+git clone --branch v0.1.0 https://github.com/mxinO/holon.git holon && cd holon
 uv sync --frozen
 uv run holon prebuild
 uv run holon serve unsloth/Qwen3.8-27B-GGUF
