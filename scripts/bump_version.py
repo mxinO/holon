@@ -12,7 +12,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PYPROJECTS = ["pyproject.toml", *(f"{d}/pyproject.toml" for d in ("core", "std", "plugins", "judge", "testing", "tools"))]
+DISTS = ("core", "std", "plugins", "judge", "testing", "tools")
+PYPROJECTS = ["pyproject.toml", *(f"{d}/pyproject.toml" for d in DISTS)]
 CORE = "core/holon/__init__.py"
 
 
