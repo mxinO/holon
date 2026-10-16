@@ -3541,3 +3541,20 @@ No blockers. Every finding is fixed on the branch; the CPU tests and `run_all.sh
   green (import contracts 8 kept).
 - **History scan re-run** at this section's commit, as in §19.5: 32 commits (one root), 1825 blobs, 1990 path names,
   zero hits outside the paths `check_private.py` skips (the same 3 upstream blobs and `check_private.py` itself).
+
+## 20. History (owner, 2026-10-16)
+
+**`main` keeps the full development history.** v0 is released inside the private repository (tag `v0.1.0`, a
+private GitHub release); the repository goes public with v1 or v2, history included. This supersedes §8's squashed
+public root and the 2026-10-14 decision to publish one. The 32 commits built on the squashed root (steps 7–10) were
+re-parented onto the full history with identical trees, messages, authors and dates (re-signed); the tip's tree is
+byte-identical. The squashed line is kept as the branch `archive/squashed-v0-line`, since steps 7–10's locks and
+records name its SHAs; `evidence/v0_release_line_sha_map_2026-10-16.txt` maps each to its commit on `main`.
+
+**Before the repository goes public (recorded so it is not forgotten).** The history holds private strings the current
+tree does not (step 6's scan, §15 and the release review): 182 historical blob versions with machine details (CPU
+models, memory generations, driver versions) in old spike results, judge goldens and results and three evidence files,
+and four merge-commit messages carrying the username through branch names. Keeping the history public means scrubbing
+those strings in place — e.g. `git filter-repo --replace-text` / `--replace-message` over the private patterns — which
+keeps every commit and its structure but rewrites SHAs from the first affected commit on (locks and records naming old
+SHAs then need the same kind of map, or a re-propagation). The owner decides at that point.
