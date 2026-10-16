@@ -34,6 +34,7 @@ import statistics
 from collections.abc import Callable
 
 GATE = 0.8
+ANSI = re.compile(r"\x1b?\[[0-9;]*m")
 INFLATED = 0.164          # repeated output above twice the corpus's own 16-gram share (release §16.1, §17.1)
 SERVED = "holon_http"
 # (column, value from a summary, higher is better)
@@ -106,7 +107,8 @@ def _failed(r: dict, backend: str) -> str | None:
     """A backend's failure reason if it never ran; else None."""
     if any(run["backend"] == backend and "error" not in run for run in r["runs"]):
         return None
-    return next((run["error"] for run in r["runs"] if run["backend"] == backend), "not run").replace("|", "\\|")
+    why = next((run["error"] for run in r["runs"] if run["backend"] == backend), "not run")
+    return ANSI.sub("", why).replace("|", "\\|")                  # a server's log colours its lines
 
 
 def _paired(r: dict, holon: str, base: str, trace: str, get: Callable[[dict], float | None],

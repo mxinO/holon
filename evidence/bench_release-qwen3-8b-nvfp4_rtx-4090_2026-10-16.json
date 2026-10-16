@@ -1,0 +1,1374 @@
+{
+ "workload": "release-qwen3-8b-nvfp4",
+ "date": "2026-10-16",
+ "command": "python bench/run.py --name release-qwen3-8b-nvfp4 --gpu 0 --model nvidia/Qwen3-8B-NVFP4@ccd10a893cbc --lock plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/4.lock --rounds 3 --corpus judge/prompts/v1.jsonl --traces bench/traces/decode_b1.jsonl bench/traces/decode_b8.jsonl --evidence-dir rtx-4090 --backends holon holon_http sglang_http freetoken_http",
+ "commit": "dce655ff06c7f9ce6b9810a950e986d440f61c55",
+ "gpu_class": "rtx-4090",
+ "model": "nvidia/Qwen3-8B-NVFP4@ccd10a893cbc",
+ "rounds": 3,
+ "order": ["holon", "holon_http", "sglang_http", "freetoken_http"],
+ "method": "In-process engines driven by bench/driver.py, one scheduling step per call; client-side timestamps taken when a step returns a token. TTFT = first token - release (arrival, or previous turn's last token + gap); TPOT = (last - first) / (tokens - 1) per request; throughput = output tokens / (last token - first release). Decode steps = steps at peak batch that return no first token; decode tok/s = their tokens / their wall time. Max gap = a request's largest time between two deliveries after its first token. Repeated share = output tokens ending a 16-gram already in their request's prompt or output / output tokens. Paired TTFT = the median over (round, session, turn) of TTFT / the first backend's TTFT in the same round. CPU ms/step = time.process_time() delta around step() on those steps, measured with --blocking-sync (CUDA primary context in blocking-sync mode and torch events created blocking, so waiting for the GPU sleeps and is not counted). Greedy, ignore_eos, fixed output lengths; warmup on the same shapes with other prompt tokens, excluded. HTTP backends (llamaserver, holon_http; bench/backends/http.py): streamed requests, a token timestamped when its chunk arrives; their 'steps' are client polls, so decode tok/s and CPU ms/step do not apply to them.",
+ "traces_sha256": {
+  "decode_b1": "cc41d53b03df6007",
+  "decode_b8": "b611e5615472d7c1"
+ },
+ "matched": {
+  "lock": {
+   "path": "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/4.lock",
+   "plan_id": "sha256:e8fcd51c74a2a6c18109283c8e2ed8151880ab6a0557c28c1ee0550b4b5ba92e",
+   "fingerprint_class": "rtx-4090/cu130-torch2.11"
+  },
+  "max_seqs": 32,
+  "max_step_tokens": 2048,
+  "kv_tokens": 95504,
+  "kv_format": null,
+  "temperature": 0.0,
+  "samplers": "top_k / top_p / min_p off on every engine"
+ },
+ "corpus": {
+  "v1.jsonl": "5157b507f2553584"
+ },
+ "backends": {
+  "holon": {
+   "config": {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "source": "hf_safetensors",
+    "page_size": 16,
+    "max_seqs": 32,
+    "max_model_len": 768,
+    "clamp_context": false,
+    "max_step_tokens": 2048,
+    "chunk_with_decode": 0,
+    "memory_fraction": 0.9,
+    "state_memory": null,
+    "prefix_cache": true,
+    "overlap": true,
+    "cuda_graphs": true,
+    "max_draft_tokens": 0,
+    "kernels": {},
+    "kernel_preferences": {},
+    "slots": {
+     "logits_processor": "grammar.xgrammar"
+    },
+    "plugin_options": {}
+   },
+   "fingerprint": "rtx-4090/cu130-torch2.11",
+   "kv_tokens": 95504,
+   "load_s": 35.0,
+   "blocking_sync": false,
+   "packages": {
+    "torch": "2.11.0+cu130",
+    "triton": "3.6.0",
+    "flashinfer-python": "0.6.12"
+   }
+  },
+  "holon_http": {
+   "config": {
+    "flags": "--max-seqs 32 --max-model-len 768 --max-step-tokens 2048 --chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --overlap --page-size 16 --prefix-cache --slots logits_processor=grammar.xgrammar --source hf_safetensors"
+   },
+   "served": {
+    "plan_id": "sha256:c11ced708d985faf09110c7584584bbfd75fd2b624ca90038cc116d3a98e8a5c",
+    "lock": "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/4.lock",
+    "diff": [
+     "site:std.mixers.gqa[layer=0]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=10]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=11]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=12]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=13]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=14]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=15]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=16]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=17]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=18]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=19]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=1]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=20]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=21]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=22]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=23]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=24]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=25]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=26]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=27]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=28]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=29]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=2]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=30]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=31]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=32]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=33]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=34]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=35]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=3]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=4]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=5]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=6]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=7]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=8]/attention.qk_rope_kv@1",
+     "site:std.mixers.gqa[layer=9]/attention.qk_rope_kv@1",
+     "site:std.ops.rope[head_dim=128]/rope@1",
+     "engine:max_model_len: 16384 -> 768"
+    ]
+   },
+   "load_s": 25.5,
+   "blocking_sync": false,
+   "packages": {
+    "torch": "2.11.0+cu130",
+    "triton": "3.6.0",
+    "flashinfer-python": "0.6.12"
+   }
+  },
+  "sglang_http": {
+   "config": {
+    "flags": "--max-running-requests 32 --chunked-prefill-size 2048 --max-total-tokens 95504 --kv-cache-dtype auto --mem-fraction-static 0.9 --context-length 768 --skip-tokenizer-init"
+   },
+   "version": "0.5.21",
+   "load_s": 411.4,
+   "blocking_sync": false,
+   "packages": {}
+  }
+ },
+ "summary": {
+  "decode_b1": {
+   "holon": {
+    "requests": 3,
+    "ttft_ms": {
+     "p50": 26.65,
+     "p90": 26.7,
+     "p99": 26.71,
+     "max": 26.71
+    },
+    "tpot_ms": {
+     "p50": 6.93,
+     "p90": 6.93,
+     "p99": 6.93
+    },
+    "max_gap_ms": {
+     "p50": 7.03,
+     "p90": 7.04,
+     "p99": 7.04,
+     "max": 7.04
+    },
+    "throughput_tok_s": 142.7,
+    "throughput_per_round": [142.7, 142.7, 142.7],
+    "decode": {
+     "batch": 1,
+     "steps": 765,
+     "tok_s": 144.3,
+     "wall_ms_p50": 6.928,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.0078,
+    "prompt_tokens": 768,
+    "stats": {
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "holon_http": {
+    "requests": 3,
+    "ttft_ms": {
+     "p50": 28.62,
+     "p90": 28.66,
+     "p99": 28.67,
+     "max": 28.67
+    },
+    "tpot_ms": {
+     "p50": 6.92,
+     "p90": 6.93,
+     "p99": 6.93
+    },
+    "max_gap_ms": {
+     "p50": 7.12,
+     "p90": 7.16,
+     "p99": 7.17,
+     "max": 7.17
+    },
+    "throughput_tok_s": 142.7,
+    "throughput_per_round": [142.6, 142.7, 142.7],
+    "decode": {
+     "batch": 1,
+     "steps": 765,
+     "tok_s": 144.5,
+     "wall_ms_p50": 6.923,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.0078,
+    "prompt_tokens": 768,
+    "stats": {
+     "frontend_cpu_ms": 220,
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    },
+    "paired_ttft": {
+     "vs": "holon",
+     "median": 1.0757,
+     "per_round": {
+      "0": 1.0799,
+      "1": 1.0532,
+      "2": 1.0757
+     },
+     "pairs": 3
+    }
+   },
+   "sglang_http": {
+    "requests": 3,
+    "ttft_ms": {
+     "p50": 37.3,
+     "p90": 37.65,
+     "p99": 37.73,
+     "max": 37.74
+    },
+    "tpot_ms": {
+     "p50": 7.51,
+     "p90": 7.51,
+     "p99": 7.51
+    },
+    "max_gap_ms": {
+     "p50": 7.75,
+     "p90": 7.79,
+     "p99": 7.79,
+     "max": 7.79
+    },
+    "throughput_tok_s": 131.1,
+    "throughput_per_round": [131.0, 131.1, 131.1],
+    "decode": {
+     "batch": 1,
+     "steps": 765,
+     "tok_s": 133.2,
+     "wall_ms_p50": 7.508,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.0,
+    "prompt_tokens": 768,
+    "stats": {},
+    "paired_ttft": {
+     "vs": "holon",
+     "median": 1.3989,
+     "per_round": {
+      "0": 1.4243,
+      "1": 1.3962,
+      "2": 1.3989
+     },
+     "pairs": 3
+    }
+   }
+  },
+  "decode_b8": {
+   "holon": {
+    "requests": 24,
+    "ttft_ms": {
+     "p50": 169.78,
+     "p90": 170.63,
+     "p99": 170.63,
+     "max": 170.63
+    },
+    "tpot_ms": {
+     "p50": 8.09,
+     "p90": 8.1,
+     "p99": 8.1
+    },
+    "max_gap_ms": {
+     "p50": 8.55,
+     "p90": 8.56,
+     "p99": 8.56,
+     "max": 8.56
+    },
+    "throughput_tok_s": 916.5,
+    "throughput_per_round": [915.7, 917.1, 916.8],
+    "decode": {
+     "batch": 8,
+     "steps": 765,
+     "tok_s": 988.9,
+     "wall_ms_p50": 8.094,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.1455,
+    "prompt_tokens": 6144,
+    "stats": {
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "holon_http": {
+    "requests": 24,
+    "ttft_ms": {
+     "p50": 180.87,
+     "p90": 182.12,
+     "p99": 182.22,
+     "max": 182.23
+    },
+    "tpot_ms": {
+     "p50": 8.08,
+     "p90": 8.35,
+     "p99": 8.47
+    },
+    "max_gap_ms": {
+     "p50": 8.7,
+     "p90": 73.91,
+     "p99": 102.13,
+     "max": 102.18
+    },
+    "throughput_tok_s": 913.0,
+    "throughput_per_round": [912.3, 913.4, 913.3],
+    "decode": {
+     "batch": 7,
+     "steps": 5,
+     "tok_s": 3748.3,
+     "wall_ms_p50": 0.32,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.12,
+    "prompt_tokens": 6144,
+    "stats": {
+     "frontend_cpu_ms": 570,
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    },
+    "paired_ttft": {
+     "vs": "holon",
+     "median": 1.066,
+     "per_round": {
+      "0": 1.0587,
+      "1": 1.0661,
+      "2": 1.0727
+     },
+     "pairs": 24
+    }
+   },
+   "sglang_http": {
+    "requests": 24,
+    "ttft_ms": {
+     "p50": 182.52,
+     "p90": 198.06,
+     "p99": 199.93,
+     "max": 200.1
+    },
+    "tpot_ms": {
+     "p50": 8.08,
+     "p90": 8.08,
+     "p99": 8.09
+    },
+    "max_gap_ms": {
+     "p50": 25.66,
+     "p90": 25.89,
+     "p99": 26.01,
+     "max": 26.03
+    },
+    "throughput_tok_s": 913.2,
+    "throughput_per_round": [912.5, 912.8, 914.2],
+    "decode": {
+     "batch": 8,
+     "steps": 22,
+     "tok_s": 8378.7,
+     "wall_ms_p50": 0.424,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.1104,
+    "prompt_tokens": 6144,
+    "stats": {},
+    "paired_ttft": {
+     "vs": "holon",
+     "median": 1.071,
+     "per_round": {
+      "0": 1.0693,
+      "1": 1.071,
+      "2": 1.1653
+     },
+     "pairs": 24
+    }
+   }
+  }
+ },
+ "runs": [
+  {
+   "round": 0,
+   "backend": "holon",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 26.5,
+     "p90": 26.5,
+     "p99": 26.5,
+     "max": 26.5
+    },
+    "tpot_ms": {
+     "p50": 6.93,
+     "p90": 6.93,
+     "p99": 6.93
+    },
+    "max_gap_ms": {
+     "p50": 7.04,
+     "p90": 7.04,
+     "p99": 7.04,
+     "max": 7.04
+    },
+    "throughput_tok_s": 142.7,
+    "throughput_per_round": [142.7],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 144.3,
+     "wall_ms_p50": 6.929,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.0078,
+    "prompt_tokens": 256,
+    "stats": {
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.026498, 1.794411, 0.007036, 2]
+   ],
+   "stats": {
+    "preemptions": 0,
+    "prefix_tokens_saved": 0,
+    "mixed_steps": 0
+   }
+  },
+  {
+   "round": 0,
+   "backend": "holon",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 170.63,
+     "p90": 170.63,
+     "p99": 170.63,
+     "max": 170.63
+    },
+    "tpot_ms": {
+     "p50": 8.1,
+     "p90": 8.1,
+     "p99": 8.1
+    },
+    "max_gap_ms": {
+     "p50": 8.55,
+     "p90": 8.55,
+     "p99": 8.55,
+     "max": 8.55
+    },
+    "throughput_tok_s": 915.7,
+    "throughput_per_round": [915.7],
+    "decode": {
+     "batch": 8,
+     "steps": 255,
+     "tok_s": 988.1,
+     "wall_ms_p50": 8.101,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.1455,
+    "prompt_tokens": 2048,
+    "stats": {
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.170633, 2.23665, 0.008554, 11],
+    [1, 0, 256, 256, 256, 0.0, 0.170633, 2.23665, 0.008554, 24],
+    [2, 0, 256, 256, 256, 0.0, 0.170633, 2.23665, 0.008554, 0],
+    [3, 0, 256, 256, 256, 0.0, 0.170633, 2.23665, 0.008554, 0],
+    [4, 0, 256, 256, 256, 0.0, 0.170633, 2.23665, 0.008554, 174],
+    [5, 0, 256, 256, 256, 0.0, 0.170633, 2.23665, 0.008554, 62],
+    [6, 0, 256, 256, 256, 0.0, 0.170633, 2.23665, 0.008554, 3],
+    [7, 0, 256, 256, 256, 0.0, 0.170633, 2.23665, 0.008554, 24]
+   ],
+   "stats": {
+    "preemptions": 0,
+    "prefix_tokens_saved": 0,
+    "mixed_steps": 0
+   }
+  },
+  {
+   "round": 0,
+   "backend": "holon_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 28.62,
+     "p90": 28.62,
+     "p99": 28.62,
+     "max": 28.62
+    },
+    "tpot_ms": {
+     "p50": 6.93,
+     "p90": 6.93,
+     "p99": 6.93
+    },
+    "max_gap_ms": {
+     "p50": 7.1,
+     "p90": 7.1,
+     "p99": 7.1,
+     "max": 7.1
+    },
+    "throughput_tok_s": 142.6,
+    "throughput_per_round": [142.6],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 144.4,
+     "wall_ms_p50": 6.929,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.0078,
+    "prompt_tokens": 256,
+    "stats": {
+     "frontend_cpu_ms": 70,
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.028616, 1.794893, 0.007102, 2]
+   ],
+   "stats": {
+    "preemptions": 0,
+    "prefix_tokens_saved": 0,
+    "mixed_steps": 0,
+    "frontend_cpu_ms": 70
+   }
+  },
+  {
+   "round": 0,
+   "backend": "holon_http",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 180.66,
+     "p90": 180.74,
+     "p99": 180.74,
+     "max": 180.74
+    },
+    "tpot_ms": {
+     "p50": 8.09,
+     "p90": 8.21,
+     "p99": 8.44
+    },
+    "max_gap_ms": {
+     "p50": 8.72,
+     "p90": 36.91,
+     "p99": 95.65,
+     "max": 102.18
+    },
+    "throughput_tok_s": 912.3,
+    "throughput_per_round": [912.3],
+    "decode": {
+     "batch": 7,
+     "steps": 1,
+     "tok_s": 27674.4,
+     "wall_ms_p50": 0.253,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.1099,
+    "prompt_tokens": 2048,
+    "stats": {
+     "frontend_cpu_ms": 190,
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.084619, 2.244549, 0.102177, 0],
+    [1, 0, 256, 256, 256, 0.0, 0.18046, 2.244605, 0.008693, 24],
+    [2, 0, 256, 256, 256, 0.0, 0.180569, 2.244906, 0.008932, 0],
+    [3, 0, 256, 256, 256, 0.0, 0.180569, 2.244668, 0.008503, 0],
+    [4, 0, 256, 256, 256, 0.0, 0.180741, 2.244906, 0.008723, 174],
+    [5, 0, 256, 256, 256, 0.0, 0.180741, 2.244906, 0.008723, 0],
+    [6, 0, 256, 256, 256, 0.0, 0.180741, 2.244906, 0.008723, 3],
+    [7, 0, 256, 256, 256, 0.0, 0.180741, 2.244906, 0.008723, 24]
+   ],
+   "stats": {
+    "preemptions": 0,
+    "prefix_tokens_saved": 0,
+    "mixed_steps": 0,
+    "frontend_cpu_ms": 190
+   }
+  },
+  {
+   "round": 0,
+   "backend": "sglang_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 37.74,
+     "p90": 37.74,
+     "p99": 37.74,
+     "max": 37.74
+    },
+    "tpot_ms": {
+     "p50": 7.51,
+     "p90": 7.51,
+     "p99": 7.51
+    },
+    "max_gap_ms": {
+     "p50": 7.79,
+     "p90": 7.79,
+     "p99": 7.79,
+     "max": 7.79
+    },
+    "throughput_tok_s": 131.0,
+    "throughput_per_round": [131.0],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 133.1,
+     "wall_ms_p50": 7.507,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.0,
+    "prompt_tokens": 256,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.037742, 1.95377, 0.007793, 0]
+   ]
+  },
+  {
+   "round": 0,
+   "backend": "sglang_http",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 182.47,
+     "p90": 187.84,
+     "p99": 198.87,
+     "max": 200.1
+    },
+    "tpot_ms": {
+     "p50": 8.08,
+     "p90": 8.08,
+     "p99": 8.09
+    },
+    "max_gap_ms": {
+     "p50": 25.74,
+     "p90": 25.85,
+     "p99": 25.85,
+     "max": 25.85
+    },
+    "throughput_tok_s": 912.5,
+    "throughput_per_round": [912.5],
+    "decode": {
+     "batch": 7,
+     "steps": 4,
+     "tok_s": 14380.8,
+     "wall_ms_p50": 0.495,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.085,
+    "prompt_tokens": 2048,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.182291, 2.243125, 0.025695, 0],
+    [1, 0, 256, 256, 256, 0.0, 0.182291, 2.243337, 0.025801, 0],
+    [2, 0, 256, 256, 256, 0.0, 0.182591, 2.243438, 0.025501, 11],
+    [3, 0, 256, 256, 256, 0.0, 0.182519, 2.243705, 0.025741, 0],
+    [4, 0, 256, 256, 256, 0.0, 0.182412, 2.243958, 0.025849, 136],
+    [5, 0, 256, 256, 256, 0.0, 0.182412, 2.244203, 0.025849, 0],
+    [6, 0, 256, 256, 256, 0.0, 0.182519, 2.244074, 0.025741, 3],
+    [7, 0, 256, 256, 256, 0.0, 0.200097, 2.244334, 0.00974, 24]
+   ]
+  },
+  {
+   "round": 0,
+   "backend": "freetoken_http",
+   "error": "exit code 1: \u001b[1m[2026-10-16|03:55:24|FrontendAPI]\u001b[0m \u001b[31mERROR   \u001b[0m Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor"
+  },
+  {
+   "round": 1,
+   "backend": "freetoken_http",
+   "error": "exit code 1: \u001b[1m[2026-10-16|03:55:58|FrontendAPI]\u001b[0m \u001b[31mERROR   \u001b[0m Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor"
+  },
+  {
+   "round": 1,
+   "backend": "sglang_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 37.3,
+     "p90": 37.3,
+     "p99": 37.3,
+     "max": 37.3
+    },
+    "tpot_ms": {
+     "p50": 7.51,
+     "p90": 7.51,
+     "p99": 7.51
+    },
+    "max_gap_ms": {
+     "p50": 7.75,
+     "p90": 7.75,
+     "p99": 7.75,
+     "max": 7.75
+    },
+    "throughput_tok_s": 131.1,
+    "throughput_per_round": [131.1],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 133.1,
+     "wall_ms_p50": 7.509,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.0,
+    "prompt_tokens": 256,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.037297, 1.953276, 0.007754, 0]
+   ]
+  },
+  {
+   "round": 1,
+   "backend": "sglang_http",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 181.72,
+     "p90": 187.07,
+     "p99": 198.16,
+     "max": 199.39
+    },
+    "tpot_ms": {
+     "p50": 8.08,
+     "p90": 8.09,
+     "p99": 8.09
+    },
+    "max_gap_ms": {
+     "p50": 25.86,
+     "p90": 25.97,
+     "p99": 26.03,
+     "max": 26.03
+    },
+    "throughput_tok_s": 912.8,
+    "throughput_per_round": [912.8],
+    "decode": {
+     "batch": 6,
+     "steps": 17,
+     "tok_s": 15308.3,
+     "wall_ms_p50": 0.396,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.1382,
+    "prompt_tokens": 2048,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.181789, 2.242635, 0.025619, 69],
+    [1, 0, 256, 256, 256, 0.0, 0.181404, 2.242225, 0.025945, 0],
+    [2, 0, 256, 256, 256, 0.0, 0.181718, 2.242467, 0.025855, 0],
+    [3, 0, 256, 256, 256, 0.0, 0.181718, 2.243077, 0.025855, 0],
+    [4, 0, 256, 256, 256, 0.0, 0.181718, 2.242867, 0.025855, 187],
+    [5, 0, 256, 256, 256, 0.0, 0.181718, 2.243553, 0.025908, 0],
+    [6, 0, 256, 256, 256, 0.0, 0.181718, 2.243408, 0.026032, 3],
+    [7, 0, 256, 256, 256, 0.0, 0.199388, 2.243408, 0.009849, 24]
+   ]
+  },
+  {
+   "round": 1,
+   "backend": "holon_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 28.14,
+     "p90": 28.14,
+     "p99": 28.14,
+     "max": 28.14
+    },
+    "tpot_ms": {
+     "p50": 6.92,
+     "p90": 6.92,
+     "p99": 6.92
+    },
+    "max_gap_ms": {
+     "p50": 7.12,
+     "p90": 7.12,
+     "p99": 7.12,
+     "max": 7.12
+    },
+    "throughput_tok_s": 142.7,
+    "throughput_per_round": [142.7],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 144.5,
+     "wall_ms_p50": 6.922,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.0078,
+    "prompt_tokens": 256,
+    "stats": {
+     "frontend_cpu_ms": 60,
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.028136, 1.793812, 0.007125, 2]
+   ],
+   "stats": {
+    "preemptions": 0,
+    "prefix_tokens_saved": 0,
+    "mixed_steps": 0,
+    "frontend_cpu_ms": 60
+   }
+  },
+  {
+   "round": 1,
+   "backend": "holon_http",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 180.89,
+     "p90": 181.03,
+     "p99": 181.06,
+     "max": 181.07
+    },
+    "tpot_ms": {
+     "p50": 8.08,
+     "p90": 8.2,
+     "p99": 8.43
+    },
+    "max_gap_ms": {
+     "p50": 8.69,
+     "p90": 36.62,
+     "p99": 95.24,
+     "max": 101.76
+    },
+    "throughput_tok_s": 913.4,
+    "throughput_per_round": [913.4],
+    "decode": {
+     "batch": 7,
+     "steps": 2,
+     "tok_s": 22933.4,
+     "wall_ms_p50": 0.305,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.1401,
+    "prompt_tokens": 2048,
+    "stats": {
+     "frontend_cpu_ms": 190,
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.085053, 2.24175, 0.101758, 0],
+    [1, 0, 256, 256, 256, 0.0, 0.180869, 2.24198, 0.008697, 24],
+    [2, 0, 256, 256, 256, 0.0, 0.180762, 2.24198, 0.008697, 0],
+    [3, 0, 256, 256, 256, 0.0, 0.180869, 2.24198, 0.008697, 0],
+    [4, 0, 256, 256, 256, 0.0, 0.181013, 2.24208, 0.008678, 174],
+    [5, 0, 256, 256, 256, 0.0, 0.181013, 2.24198, 0.008577, 62],
+    [6, 0, 256, 256, 256, 0.0, 0.180919, 2.242023, 0.008621, 3],
+    [7, 0, 256, 256, 256, 0.0, 0.181066, 2.24198, 0.008538, 24]
+   ],
+   "stats": {
+    "preemptions": 0,
+    "prefix_tokens_saved": 0,
+    "mixed_steps": 0,
+    "frontend_cpu_ms": 190
+   }
+  },
+  {
+   "round": 1,
+   "backend": "holon",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 26.71,
+     "p90": 26.71,
+     "p99": 26.71,
+     "max": 26.71
+    },
+    "tpot_ms": {
+     "p50": 6.93,
+     "p90": 6.93,
+     "p99": 6.93
+    },
+    "max_gap_ms": {
+     "p50": 7.03,
+     "p90": 7.03,
+     "p99": 7.03,
+     "max": 7.03
+    },
+    "throughput_tok_s": 142.7,
+    "throughput_per_round": [142.7],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 144.4,
+     "wall_ms_p50": 6.926,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.0078,
+    "prompt_tokens": 256,
+    "stats": {
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.026714, 1.793842, 0.007033, 2]
+   ],
+   "stats": {
+    "preemptions": 0,
+    "prefix_tokens_saved": 0,
+    "mixed_steps": 0
+   }
+  },
+  {
+   "round": 1,
+   "backend": "holon",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 169.67,
+     "p90": 169.67,
+     "p99": 169.67,
+     "max": 169.67
+    },
+    "tpot_ms": {
+     "p50": 8.09,
+     "p90": 8.09,
+     "p99": 8.09
+    },
+    "max_gap_ms": {
+     "p50": 8.55,
+     "p90": 8.55,
+     "p99": 8.55,
+     "max": 8.55
+    },
+    "throughput_tok_s": 917.1,
+    "throughput_per_round": [917.1],
+    "decode": {
+     "batch": 8,
+     "steps": 255,
+     "tok_s": 989.4,
+     "wall_ms_p50": 8.094,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.1455,
+    "prompt_tokens": 2048,
+    "stats": {
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.169675, 2.233094, 0.008552, 11],
+    [1, 0, 256, 256, 256, 0.0, 0.169675, 2.233094, 0.008552, 24],
+    [2, 0, 256, 256, 256, 0.0, 0.169675, 2.233094, 0.008552, 0],
+    [3, 0, 256, 256, 256, 0.0, 0.169675, 2.233094, 0.008552, 0],
+    [4, 0, 256, 256, 256, 0.0, 0.169675, 2.233094, 0.008552, 174],
+    [5, 0, 256, 256, 256, 0.0, 0.169675, 2.233094, 0.008552, 62],
+    [6, 0, 256, 256, 256, 0.0, 0.169675, 2.233094, 0.008552, 3],
+    [7, 0, 256, 256, 256, 0.0, 0.169675, 2.233094, 0.008552, 24]
+   ],
+   "stats": {
+    "preemptions": 0,
+    "prefix_tokens_saved": 0,
+    "mixed_steps": 0
+   }
+  },
+  {
+   "round": 2,
+   "backend": "holon",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 26.65,
+     "p90": 26.65,
+     "p99": 26.65,
+     "max": 26.65
+    },
+    "tpot_ms": {
+     "p50": 6.93,
+     "p90": 6.93,
+     "p99": 6.93
+    },
+    "max_gap_ms": {
+     "p50": 7.03,
+     "p90": 7.03,
+     "p99": 7.03,
+     "max": 7.03
+    },
+    "throughput_tok_s": 142.7,
+    "throughput_per_round": [142.7],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 144.4,
+     "wall_ms_p50": 6.928,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.0078,
+    "prompt_tokens": 256,
+    "stats": {
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.026654, 1.79399, 0.007026, 2]
+   ],
+   "stats": {
+    "preemptions": 0,
+    "prefix_tokens_saved": 0,
+    "mixed_steps": 0
+   }
+  },
+  {
+   "round": 2,
+   "backend": "holon",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 169.78,
+     "p90": 169.78,
+     "p99": 169.78,
+     "max": 169.78
+    },
+    "tpot_ms": {
+     "p50": 8.09,
+     "p90": 8.09,
+     "p99": 8.09
+    },
+    "max_gap_ms": {
+     "p50": 8.56,
+     "p90": 8.56,
+     "p99": 8.56,
+     "max": 8.56
+    },
+    "throughput_tok_s": 916.8,
+    "throughput_per_round": [916.8],
+    "decode": {
+     "batch": 8,
+     "steps": 255,
+     "tok_s": 989.1,
+     "wall_ms_p50": 8.091,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.1455,
+    "prompt_tokens": 2048,
+    "stats": {
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.16978, 2.233743, 0.008559, 11],
+    [1, 0, 256, 256, 256, 0.0, 0.16978, 2.233743, 0.008559, 24],
+    [2, 0, 256, 256, 256, 0.0, 0.16978, 2.233743, 0.008559, 0],
+    [3, 0, 256, 256, 256, 0.0, 0.16978, 2.233743, 0.008559, 0],
+    [4, 0, 256, 256, 256, 0.0, 0.16978, 2.233743, 0.008559, 174],
+    [5, 0, 256, 256, 256, 0.0, 0.16978, 2.233743, 0.008559, 62],
+    [6, 0, 256, 256, 256, 0.0, 0.16978, 2.233743, 0.008559, 3],
+    [7, 0, 256, 256, 256, 0.0, 0.16978, 2.233743, 0.008559, 24]
+   ],
+   "stats": {
+    "preemptions": 0,
+    "prefix_tokens_saved": 0,
+    "mixed_steps": 0
+   }
+  },
+  {
+   "round": 2,
+   "backend": "holon_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 28.67,
+     "p90": 28.67,
+     "p99": 28.67,
+     "max": 28.67
+    },
+    "tpot_ms": {
+     "p50": 6.92,
+     "p90": 6.92,
+     "p99": 6.92
+    },
+    "max_gap_ms": {
+     "p50": 7.17,
+     "p90": 7.17,
+     "p99": 7.17,
+     "max": 7.17
+    },
+    "throughput_tok_s": 142.7,
+    "throughput_per_round": [142.7],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 144.5,
+     "wall_ms_p50": 6.92,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.0078,
+    "prompt_tokens": 256,
+    "stats": {
+     "frontend_cpu_ms": 90,
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.028672, 1.794191, 0.007172, 2]
+   ],
+   "stats": {
+    "preemptions": 0,
+    "prefix_tokens_saved": 0,
+    "mixed_steps": 0,
+    "frontend_cpu_ms": 90
+   }
+  },
+  {
+   "round": 2,
+   "backend": "holon_http",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 182.12,
+     "p90": 182.19,
+     "p99": 182.23,
+     "max": 182.23
+    },
+    "tpot_ms": {
+     "p50": 8.08,
+     "p90": 8.19,
+     "p99": 8.43
+    },
+    "max_gap_ms": {
+     "p50": 8.69,
+     "p90": 36.71,
+     "p99": 95.43,
+     "max": 101.96
+    },
+    "throughput_tok_s": 913.3,
+    "throughput_per_round": [913.3],
+    "decode": {
+     "batch": 7,
+     "steps": 2,
+     "tok_s": 1652.1,
+     "wall_ms_p50": 4.237,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.1099,
+    "prompt_tokens": 2048,
+    "stats": {
+     "frontend_cpu_ms": 190,
+     "mixed_steps": 0,
+     "preemptions": 0,
+     "prefix_tokens_saved": 0
+    }
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.0855, 2.242039, 0.101958, 0],
+    [1, 0, 256, 256, 256, 0.0, 0.181907, 2.242117, 0.008568, 24],
+    [2, 0, 256, 256, 256, 0.0, 0.181978, 2.242284, 0.008735, 0],
+    [3, 0, 256, 256, 256, 0.0, 0.182124, 2.242159, 0.008692, 0],
+    [4, 0, 256, 256, 256, 0.0, 0.182124, 2.242284, 0.008598, 174],
+    [5, 0, 256, 256, 256, 0.0, 0.182124, 2.242432, 0.008746, 0],
+    [6, 0, 256, 256, 256, 0.0, 0.182229, 2.242336, 0.00865, 3],
+    [7, 0, 256, 256, 256, 0.0, 0.18218, 2.242432, 0.008691, 24]
+   ],
+   "stats": {
+    "preemptions": 0,
+    "prefix_tokens_saved": 0,
+    "mixed_steps": 0,
+    "frontend_cpu_ms": 190
+   }
+  },
+  {
+   "round": 2,
+   "backend": "sglang_http",
+   "trace": "decode_b1",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 1,
+    "ttft_ms": {
+     "p50": 37.28,
+     "p90": 37.28,
+     "p99": 37.28,
+     "max": 37.28
+    },
+    "tpot_ms": {
+     "p50": 7.51,
+     "p90": 7.51,
+     "p99": 7.51
+    },
+    "max_gap_ms": {
+     "p50": 7.75,
+     "p90": 7.75,
+     "p99": 7.75,
+     "max": 7.75
+    },
+    "throughput_tok_s": 131.1,
+    "throughput_per_round": [131.1],
+    "decode": {
+     "batch": 1,
+     "steps": 255,
+     "tok_s": 133.2,
+     "wall_ms_p50": 7.507,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.0,
+    "prompt_tokens": 256,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.037285, 1.953049, 0.007749, 0]
+   ]
+  },
+  {
+   "round": 2,
+   "backend": "sglang_http",
+   "trace": "decode_b8",
+   "columns": ["sid", "turn", "prompt", "output", "generated", "release", "first", "last", "max_gap", "repeated"],
+   "summary": {
+    "requests": 8,
+    "ttft_ms": {
+     "p50": 197.84,
+     "p90": 198.03,
+     "p99": 198.07,
+     "max": 198.08
+    },
+    "tpot_ms": {
+     "p50": 8.01,
+     "p90": 8.01,
+     "p99": 8.01
+    },
+    "max_gap_ms": {
+     "p50": 9.26,
+     "p90": 9.68,
+     "p99": 9.87,
+     "max": 9.89
+    },
+    "throughput_tok_s": 914.2,
+    "throughput_per_round": [914.2],
+    "decode": {
+     "batch": 8,
+     "steps": 1,
+     "tok_s": 1017.8,
+     "wall_ms_p50": 7.86,
+     "cpu_ms_p50": null,
+     "cpu_ms_mean": null
+    },
+    "wrong_length": 0,
+    "repeated_share": 0.1079,
+    "prompt_tokens": 2048,
+    "stats": {}
+   },
+   "requests": [
+    [0, 0, 256, 256, 256, 0.0, 0.197654, 2.239371, 0.00864, 0],
+    [1, 0, 256, 256, 256, 0.0, 0.197573, 2.239163, 0.008833, 12],
+    [2, 0, 256, 256, 256, 0.0, 0.197874, 2.239554, 0.008849, 11],
+    [3, 0, 256, 256, 256, 0.0, 0.198078, 2.239933, 0.009202, 0],
+    [4, 0, 256, 256, 256, 0.0, 0.197731, 2.239762, 0.009432, 171],
+    [5, 0, 256, 256, 256, 0.0, 0.197802, 2.240324, 0.009887, 0],
+    [6, 0, 256, 256, 256, 0.0, 0.197932, 2.240324, 0.009593, 3],
+    [7, 0, 256, 256, 256, 0.0, 0.198005, 2.240047, 0.009316, 24]
+   ]
+  },
+  {
+   "round": 2,
+   "backend": "freetoken_http",
+   "error": "exit code 1: \u001b[1m[2026-10-16|04:01:38|FrontendAPI]\u001b[0m \u001b[31mERROR   \u001b[0m Backend supervisor: WeightLoadError: RuntimeError: chunk expects at least a 1-dimensional tensor"
+  }
+ ]
+}
