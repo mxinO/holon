@@ -181,15 +181,17 @@ def models_json(base_url: str, model: str, context: int, compat: dict) -> dict:
 
 def session_facts(events: list[dict], work: pathlib.Path) -> dict:
     """What pi's event stream says about the session, without text: turns (assistant messages), stop reasons, error
-    messages (scrubbed), retries, compactions, the tool calls, whether the final reply was "done"."""
+    messages (scrubbed), retries, compactions, the tool calls, whether the final reply was "done", and the usage pi
+    itself read off each answer (`input` uncached, `cacheRead`, `output`)."""
     work, stops, errors, calls, by_id = work.resolve(), collections.Counter(), [], [], {}
     turns = retries = compactions = 0
-    final = ""
+    final, usage = "", []
     for e in events:
         kind = e.get("type")
         if kind == "message_end" and (m := e.get("message") or {}).get("role") == "assistant":
             turns += 1
             stops[str(m.get("stopReason"))] += 1
+            usage.append({k: (m.get("usage") or {}).get(k) for k in ("input", "cacheRead", "output")})
             if m.get("errorMessage"):
                 errors.append(demo.scrub(str(m["errorMessage"]))[:300])
             final = "".join(b.get("text", "") for b in m.get("content") or [] if b.get("type") == "text")
@@ -212,7 +214,8 @@ def session_facts(events: list[dict], work: pathlib.Path) -> dict:
         retries += kind == "auto_retry_start"
         compactions += kind == "compaction_start"
     return {"turns": turns, "stop_reasons": dict(stops), "errors": errors, "retries": retries,
-            "compactions": compactions, "tool_calls": calls, "replied_done": final.strip() == "done"}
+            "compactions": compactions, "tool_calls": calls, "replied_done": final.strip() == "done",
+            "pi_usage": usage}
 
 
 def requests_summary(rows: list[dict]) -> dict:
@@ -251,7 +254,7 @@ def requests_summary(rows: list[dict]) -> dict:
 
 
 def run_once(server: str, model: str, pi: pathlib.Path, task: str, files: dict[str, bytes], keep: pathlib.Path,
-             reference: str, first_venv: str | None, context: int, compat: dict) -> dict:
+             reference: str, first_venv: str | None, context: int, compat: dict, thinking: str | None = None) -> dict:
     with tempfile.TemporaryDirectory(prefix="holon-pi-") as tmp:
         tmp = pathlib.Path(tmp)
         work, home, config, sessions = tmp / "project", tmp / "home", tmp / "pi", tmp / "sessions"
@@ -278,6 +281,7 @@ def run_once(server: str, model: str, pi: pathlib.Path, task: str, files: dict[s
             start, timed_out = time.perf_counter(), False
             with open(tmp / "events.jsonl", "w") as log:      # a file, not a pipe: what the session leaves running
                 session = subprocess.Popen([str(pi), "--mode", "json", "--provider", "holon", "--model", model,
+                                            *(["--thinking", thinking] if thinking else []),
                                             "--session-dir", str(sessions), PROMPTS[task]], cwd=work, env=env,
                                            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                                            start_new_session=True)
@@ -401,8 +405,8 @@ def summarize(record: dict) -> dict:
 
 def series_header(args: argparse.Namespace, model: str, reference: str, files: dict[str, bytes]) -> dict:
     return {"task": args.task, "prompt": PROMPTS[args.task], "project": demo.digest(files),
-            "compat": args.compat, "models_json": models_json("http://127.0.0.1:<proxy>/v1", model, args.context,
-                                                              COMPAT[args.compat]),
+            "compat": args.compat, "thinking": args.thinking,
+            "models_json": models_json("http://127.0.0.1:<proxy>/v1", model, args.context, COMPAT[args.compat]),
             "scorer_reference": reference, "runs_planned": args.runs, "runs": []}
 
 
@@ -416,6 +420,7 @@ def main() -> None:
     parser.add_argument("--compat", choices=sorted(COMPAT), default="documented")
     parser.add_argument("--context", type=int, default=49152, help="the served context, given to pi")
     parser.add_argument("--series", help="the series' name in the record (default: the task)")
+    parser.add_argument("--thinking", help="pi's thinking level (--thinking; default: pi's own, medium)")
     parser.add_argument("--out", type=pathlib.Path, help="the record; a new series is added to an existing one")
     parser.add_argument("--report", type=pathlib.Path, help="add the summary to this record and print it")
     args = parser.parse_args()
@@ -477,7 +482,7 @@ def main() -> None:
         demo.check_environment(reference)
         keep = OUT / f"{stamp}_{args.gpu_class}_{name}_run{i + 1}"
         run = run_once(args.server, model, args.pi, args.task, files, keep, reference, first_venv, args.context,
-                       COMPAT[args.compat])
+                       COMPAT[args.compat], args.thinking)
         first_venv = first_venv or run["venv_pytest"]
         series["runs"].append(run)
         args.out.write_text(json.dumps(record, indent=1) + "\n")      # kept after every run
