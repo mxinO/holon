@@ -114,7 +114,7 @@ pi's request shape in the counted runs:
 In the minimal-provider smoke run, `developer` replaces `system` and `reasoning_effort: "medium"` replaces
 `chat_template_kwargs`.
 
-### Finding 1 (frontend bug, latent here): `developer` messages reach the chat template as they are
+### Finding 1 (frontend bug, latent here; fixed in v0.1.1): `developer` messages reach the chat template as they are
 
 **Request shape.** pi's default for a model marked `reasoning: true`:
 
@@ -145,7 +145,7 @@ run against a live server on those models.
 to `false`. Mapping `developer` to `system` in the chat route, as the Responses route does, would cover every
 template. Not fixed here, as instructed.
 
-### Finding 2 (field ignored): top-level `reasoning_effort`
+### Finding 2 (field ignored; fixed in v0.1.1): top-level `reasoning_effort`
 
 pi's default provider sends its thinking level as a top-level `reasoning_effort` (default `"medium"`). The chat
 route ignores unknown fields (`schemas.py`), so the model always thinks at the template's default, `xhigh`. Measured
@@ -165,7 +165,7 @@ One caution for a fix: this template accepts `low`, `medium`, `high` (read as `x
 anything else. pi's levels also include `minimal`, so forwarding the field unchecked would turn a silent no-op into a
 400.
 
-### Finding 3 (not reported): cached tokens in `usage`
+### Finding 3 (not reported; fixed in v0.1.1): cached tokens in `usage`
 
 The final usage chunk has `prompt_tokens`, `completion_tokens` and `total_tokens`, with no
 `prompt_tokens_details.cached_tokens`. pi reads that field, so its usage showed 0 cache reads on all 57 answers (in
@@ -270,6 +270,42 @@ whether the final reply was exactly the requested word (not scored).
 - **Next to Claude Code's D7 runs** (`docs/release.md` §18.3: 13–16 turns, 131–292 s on an RTX 4090 or 5080): pi
   takes about half the turns. Its system prompt and tools are ≈ 1.6K tokens against Claude Code's ≈ 17K, and it
   sends no side requests. Different cards, so the times are not a comparison.
+
+## Fixed in v0.1.1
+
+The three findings are fixed in v0.1.1 (`docs/RELEASE_NOTES_v0.1.1.md`):
+
+1. **`developer` messages** are system messages on every route; a leading run of system and developer messages that
+   holds one becomes one system prompt. pi's request shape now renders with its system prompt kept and no 400 on all
+   seven shipped template files (Qwen3-8B and Qwen3-30B-A3B as HF and GGUF, Qwen3.5-9B HF, Qwen3.8-27B as HF and
+   GGUF; a CPU test renders each).
+2. **`reasoning_effort`** (and the Responses API's `reasoning.effort`, Anthropic's `output_config.effort`) sets the
+   template's level: a level the template has as it is, another level of the clients' scale as the nearest one it
+   has (`minimal` the lowest), `none` turns thinking off, anything else is a 400. Templates without levels ignore
+   the scale.
+3. **Cached tokens** are reported per request, counted by the engine at the request's first admission:
+   `usage.prompt_tokens_details.cached_tokens` here (and the other routes' equivalents). This needed a core field
+   (`TokenDelta.cached_tokens`, plugin ABI 1.1) and a propagation of every lock, with byte-identical traces.
+
+**Re-run** ([`evidence/agent_test_pi_v011_rtx-5090_2026-10-16.json`](../evidence/agent_test_pi_v011_rtx-5090_2026-10-16.json)):
+the same RTX 5090 desktop, clock-screened (before p10 / p50 2550 / 2640 MHz, steady; after 2047 / 2505, not steady
+under the power cap, no thermal slowdown), serving v0.1.1's propagated lock 4, and pi 0.73.1 with the docs' minimal
+provider (no `compat`: it sends `developer` and `reasoning_effort`). One demo run per thinking level:
+
+| pi thinking level | sent `reasoning_effort` | template level | first prompt tokens | scored | turns | wall s | output tokens | cache reads pi reported (sum) |
+|---|---|---|---|---|---|---|---|---|
+| medium (pi's default) | medium | medium | 1,589 | pass, 40 / 0 | 7 | 23 | 1,611 | 23,680 |
+| low | low | low | 1,616 | pass, 40 / 0 | 9 | 39 | 2,953 | 41,920 |
+| high | high | high (the template reads it as xhigh) | 1,628 | pass, 40 / 0 | 10 | 39 | 2,928 | 51,520 |
+
+- **The thinking level takes effect.** Each level renders a different prompt: the template writes no instruction at
+  `medium`, a short one at `low`, the long `xhigh` one at `high`. v0.1.0 ignored the field and always wrote the
+  `xhigh` instruction (1,627 tokens on this prompt then). With one run per level the output lengths do not show a
+  trend.
+- **pi shows cache reads.** Every request after a session's first reported a non-zero `cached_tokens`, which pi
+  read as `cacheRead` (up to 9,152 tokens per request); on all 26 requests the server's count equalled the
+  proxy's `/metrics` measurement. Hit rate 82.3%, decode TPOT p50 11.79 ms (84.8 tok/s).
+- All 26 requests were 200 with clean streams, every tool call parsed, and no markup was left in the content.
 
 ## Not covered
 

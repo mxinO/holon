@@ -62,15 +62,18 @@ clamped to what fits.
 
 ## Install
 
-Install the release tag. Steps 7–10's locks and records name commits of the release line as first built; the same commits are on `main` under new SHAs, with identical code and a privacy-scrubbed spike README (`evidence/v0_release_line_sha_map_2026-10-16.txt` maps them; `evidence/history_scrub_commit_map_2026-10-16.txt` maps
-older SHAs).
+Install the release tag (v0.1.1: [docs/RELEASE_NOTES_v0.1.1.md](docs/RELEASE_NOTES_v0.1.1.md)). Steps 7–10's locks
+and records name commits of the release line as first built; the same commits are on `main` under new SHAs, with
+identical code and a privacy-scrubbed spike README (`evidence/v0_release_line_sha_map_2026-10-16.txt` maps them;
+`evidence/history_scrub_commit_map_2026-10-16.txt` maps older SHAs). v0.1.1's locks were carried to its code with
+byte-identical snapshot traces.
 
 Host requirements: Linux x86-64, an NVIDIA driver supporting CUDA 13, the CUDA 13 toolkit (`nvcc` on `PATH` or under
 `CUDA_HOME`), gcc / g++, and [uv](https://docs.astral.sh/uv/). uv brings Python 3.12, torch 2.11 for CUDA 13.0 and
 every pinned dependency from `uv.lock`.
 
 ```bash
-git clone --branch v0.1.0 https://github.com/mxinO/holon.git holon && cd holon
+git clone --branch v0.1.1 https://github.com/mxinO/holon.git holon && cd holon
 uv sync --frozen                     # Python 3.12, torch 2.11 + CUDA 13 and every pin from uv.lock
 uv run holon prebuild                # GGUF kernels and FlashInfer modules for the visible GPUs, once
 ```
@@ -85,9 +88,9 @@ Build it from the release tag, never from a working directory; the build takes �
 the image is ≈ 14.8 GB:
 
 ```bash
-git archive --format=tar v0.1.0 | docker build -t holon:v0.1.0 -           # --build-arg MAX_JOBS=N caps compiles
-docker run --gpus all -p 8000:8000 -v <model dir>:/models holon:v0.1.0 serve /models/<file> --host 0.0.0.0
-docker run --gpus all -p 8000:8000 -e HF_HOME=/hf -v <hf cache dir>:/hf holon:v0.1.0 \
+git archive --format=tar v0.1.1 | docker build -t holon:v0.1.1 -           # --build-arg MAX_JOBS=N caps compiles
+docker run --gpus all -p 8000:8000 -v <model dir>:/models holon:v0.1.1 serve /models/<file> --host 0.0.0.0
+docker run --gpus all -p 8000:8000 -e HF_HOME=/hf -v <hf cache dir>:/hf holon:v0.1.1 \
   serve unsloth/Qwen3.8-27B-GGUF --host 0.0.0.0                            # a hub model, kept in <hf cache dir>
 ```
 
@@ -96,7 +99,7 @@ persists across starts instead of each start re-reading the file:
 
 ```bash
 docker run --gpus all --user "$(id -u):$(id -g)" -e HOME=/cache -v <cache dir>:/cache \
-  -p 8000:8000 -v <model dir>:/models holon:v0.1.0 serve /models/<file> --host 0.0.0.0
+  -p 8000:8000 -v <model dir>:/models holon:v0.1.1 serve /models/<file> --host 0.0.0.0
 ```
 
 ## Quickstart
@@ -164,6 +167,19 @@ print("".join(b.text for b in msg.content if b.type == "text"))   # thinking blo
 
 The server also answers `/v1/completions`, `/v1/responses`, `/v1/messages/count_tokens` and `/health`.
 
+- **System prompts:** OpenAI's `developer` messages are system messages; a leading run of system and developer
+  messages holding one becomes one system prompt.
+- **Reasoning effort:** chat's `reasoning_effort`, the Responses API's `reasoning.effort` and Anthropic's
+  `output_config.effort` set the chat template's level where the template has levels (the Qwen3.8 templates: `low`,
+  `medium`, `xhigh`, and `high` in the Unsloth GGUF files). Another level of the clients' scale (`minimal` … `max`)
+  takes the nearest level the template has (`minimal` the lowest, the higher of two as near); `none` turns thinking
+  off; any other value is a 400 naming the levels. Templates without levels (Qwen3, Qwen3.5) ignore the scale's
+  values. `chat_template_kwargs.reasoning_effort` still sets the template's variable directly.
+- **Cached tokens:** usage reports the prompt tokens the prefix cache served, per request:
+  `usage.prompt_tokens_details.cached_tokens` (chat and text completions), `usage.input_tokens_details.cached_tokens`
+  (Responses), and Anthropic's `cache_read_input_tokens`, with `input_tokens` the rest of the prompt (Anthropic's
+  convention: a client adds the two).
+
 ### Claude Code
 
 Once it listens, the server prints the line that starts Claude Code against it, with its model id:
@@ -188,9 +204,12 @@ is not a claim of general agent capability. **Result** (pre-registered, Claude C
 scored by the harness's own copy of the tests): **3 of 3 runs passed on the RTX 5080 (UD-IQ3_S) and 3 of 3 on the
 RTX 4090 (UD-Q4_K_M)**, in 13–16 turns and 2–5 minutes each (`evidence/agent_demo_rtx-5080_2026-10-16.json`,
 `evidence/agent_demo_rtx-4090_2026-10-15.json`; `docs/release.md` §18). Claude Code sends no temperature, so the
-server's default (1.0) applies. The demo ran on the locks as they stood at release step 9, at the 27B's earlier 32K
-context; the shipped locks differ in that context and in the FlashInfer plugin's `src`, with byte-identical snapshot
-traces (`docs/release.md` §19.1–§19.2).
+server's default (1.0) applies; its `output_config.effort` (`high`) selects the Qwen3.8 template's highest level, which
+was the template's default before v0.1.1. Since v0.1.1 its usage shows the prefix cache's reads as
+`cache_read_input_tokens`, apart from `input_tokens`. The demo ran on the locks as they stood at release step 9, at
+the 27B's earlier 32K context; the shipped locks differ in that context, in the FlashInfer plugin's `src` and in
+v0.1.1's core, with byte-identical snapshot traces (`docs/release.md` §19.1–§19.2,
+[docs/RELEASE_NOTES_v0.1.1.md](docs/RELEASE_NOTES_v0.1.1.md)).
 
 ## Options
 

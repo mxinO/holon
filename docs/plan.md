@@ -622,6 +622,13 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   where templates or agents keep the reasoning in later prompts and answers are long. It needs the answer's tokens
   as the template re-renders them (a checkpoint at the last aligned position the next prompt shares) and a payload
   unit per finished request.
+- **Locks pin only the code that can change outputs** (kernels, model math, scheduling, sampling), not version
+  strings, comments or response-reporting fields. Today a unit's `src` hashes every source file of its directory, the
+  core's included, so v0.1.1 (a `TokenDelta` field for usage reporting, a comment, the version string) outdated all 22
+  locks and needed a propagation round on four card classes for byte-identical traces. `src_hash` and the `holon`
+  unit pin are frozen in ABI 1.0 and in every committed lock, so narrowing them (e.g. hashing the modules a model's
+  step imports, without docstrings and comments, and leaving the frontend-facing records out) is a deliberate v1
+  change with its own lock migration.
 
 **v2 — breadth**
 - DeepSeek-class: DSA indexer (page groups), V4 compressed KV (`tokens_per_unit`) — correctness on reduced-layer

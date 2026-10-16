@@ -1,0 +1,1513 @@
+{
+ "workload": "agent_test_pi",
+ "date": "2026-10-16",
+ "gpu_class": "rtx-5090",
+ "commit": "cfb295838d697f70dbc2496ff5cd22e1bf2b8efb",
+ "model": "Qwen3.8-27B-UD-Q4_K_M",
+ "served": {
+  "plan_id": "sha256:2304b82eacf3952a9fdf3d8abeea897b96ae0e74884e2f8c07e954951593fe5b",
+  "lock": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-5090/cu130-torch2.11/4.lock",
+  "diff": []
+ },
+ "client": {
+  "pi": "0.73.1",
+  "node": "v24.18.0",
+  "packages_digest": "sha256:3f8972bdff2cc484aa5697802077a2ece9999f0e282ae253265e63828c06fa7f",
+  "tools": "read, bash, edit, write (pi's defaults)",
+  "timeout_s": 1800,
+  "command": "pi --mode json --provider holon --model <served id> --session-dir <tmp> <prompt>",
+  "env": [
+   "HOME",
+   "LANG",
+   "NO_PROXY",
+   "PATH",
+   "PI_CODING_AGENT_DIR",
+   "PI_OFFLINE",
+   "PI_SKIP_VERSION_CHECK",
+   "PI_TELEMETRY",
+   "TERM",
+   "VIRTUAL_ENV"
+  ]
+ },
+ "series": {
+  "demo_thinking_medium": {
+   "task": "demo",
+   "prompt": "The Python package `shop` in the current directory fails its tests. Fix the package so that `python -m pytest` passes, without editing any file under tests/. When the tests pass, reply with the single word done.",
+   "project": "sha256:f5c8bb8704fbcc78ba90382828d9d9a4920ff1aa902ef231a98db03165fd2f25",
+   "compat": "none",
+   "thinking": "medium",
+   "models_json": {
+    "providers": {
+     "holon": {
+      "baseUrl": "http://127.0.0.1:<proxy>/v1",
+      "api": "openai-completions",
+      "apiKey": "holon",
+      "models": [
+       {
+        "id": "Qwen3.8-27B-UD-Q4_K_M",
+        "reasoning": true,
+        "contextWindow": 49152
+       }
+      ]
+     }
+    }
+   },
+   "scorer_reference": "sha256:63f32ffb8fefa316871ff83fa93afbd91fa90694d5c2952269e9ca700df79854",
+   "runs_planned": 1,
+   "runs": [
+    {
+     "success": true,
+     "invalid": null,
+     "scored": {
+      "success": true,
+      "passed": 40,
+      "failed": 0,
+      "skipped": 0,
+      "pytest_exit": 0,
+      "timed_out": false,
+      "symlinks_skipped": 0
+     },
+     "venv_pytest": "sha256:50f26d61e9cb5c304ec49d27139cc33bbc4be34bb183ed22c3db4b75d84e2d25",
+     "venv_after": null,
+     "wall_s": 23.1,
+     "timed_out": false,
+     "exit_code": 0,
+     "non_json_output_lines": 0,
+     "turns": 7,
+     "stop_reasons": {
+      "toolUse": 6,
+      "stop": 1
+     },
+     "errors": [],
+     "retries": 0,
+     "compactions": 0,
+     "tool_calls": [
+      {
+       "tool": "bash",
+       "program": "find",
+       "error": false
+      },
+      {
+       "tool": "bash",
+       "program": "cat",
+       "error": false
+      },
+      {
+       "tool": "bash",
+       "program": "cat",
+       "error": false
+      },
+      {
+       "tool": "edit",
+       "path": "shop/money.py",
+       "error": false
+      },
+      {
+       "tool": "edit",
+       "path": "shop/discounts.py",
+       "error": true
+      },
+      {
+       "tool": "edit",
+       "path": "shop/discounts.py",
+       "error": false
+      },
+      {
+       "tool": "bash",
+       "program": "python",
+       "error": false
+      }
+     ],
+     "replied_done": true,
+     "pi_usage": [
+      {
+       "input": 1589,
+       "cacheRead": 0,
+       "output": 70
+      },
+      {
+       "input": 393,
+       "cacheRead": 1536,
+       "output": 53
+      },
+      {
+       "input": 1478,
+       "cacheRead": 1920,
+       "output": 63
+      },
+      {
+       "input": 1461,
+       "cacheRead": 3392,
+       "output": 968
+      },
+      {
+       "input": 1107,
+       "cacheRead": 4800,
+       "output": 250
+      },
+      {
+       "input": 310,
+       "cacheRead": 5888,
+       "output": 111
+      },
+      {
+       "input": 200,
+       "cacheRead": 6144,
+       "output": 96
+      }
+     ],
+     "prefix_tokens_saved": 23680,
+     "preemptions": 0,
+     "diff": "--- a/shop/discounts.py\n+++ b/shop/discounts.py\n@@ -12,6 +12,19 @@\n from .money import format_cents, percent_of\n \n Rule = Callable[[Cart], \"tuple[str, int] | None\"]\n+\n+\n+def buy_n_get_one(sku: str, n: int) -> Rule:\n+    if n <= 0:\n+        raise ValueError(f\"n must be positive: {n}\")\n+\n+    def rule(cart: Cart) -> tuple[str, int] | None:\n+        line = cart.lines.get(sku)\n+        if line is None:\n+            return None\n+        free = line.qty // (n + 1)\n+        return (f\"buy {n} get 1 {sku}\", line.unit_cents * free) if free else None\n+    return rule\n \n \n def percent_off(prefix: str, percent: int) -> Rule:\n--- a/shop/money.py\n+++ b/shop/money.py\n@@ -15,7 +15,7 @@\n     \"\"\"350 -> '3.50', 5 -> '0.05', 1205 -> '12.05', -125 -> '-1.25'.\"\"\"\n     sign = \"-\" if cents < 0 else \"\"\n     cents = abs(cents)\n-    return f\"{sign}{cents // 100}.{cents % 100}\"\n+    return f\"{sign}{cents // 100}.{cents % 100:02d}\"\n \n \n def percent_of(cents: int, percent: int) -> int:\n",
+     "served": {
+      "requests_total": 7,
+      "chat_requests": 7,
+      "statuses": {
+       "200": 7
+      },
+      "peak_context": 6440,
+      "input_tokens": 30218,
+      "cached_tokens": 23680,
+      "output_tokens": 1611,
+      "shapes": {
+       "keys": [
+        "max_completion_tokens",
+        "messages",
+        "model",
+        "reasoning_effort",
+        "store",
+        "stream",
+        "stream_options",
+        "tools"
+       ],
+       "roles": [
+        "assistant",
+        "developer",
+        "tool",
+        "user"
+       ],
+       "message_fields": [
+        "assistant.reasoning_content",
+        "assistant.tool_calls",
+        "tool.tool_call_id"
+       ],
+       "content_kinds": [
+        "assistant:null",
+        "assistant:string",
+        "developer:string",
+        "tool:string",
+        "user:parts"
+       ],
+       "tools": [
+        {
+         "$schema": false,
+         "additionalProperties_false": false,
+         "cache_control": false,
+         "name": "bash",
+         "strict": false,
+         "type": "function"
+        },
+        {
+         "$schema": false,
+         "additionalProperties_false": false,
+         "cache_control": false,
+         "name": "read",
+         "strict": false,
+         "type": "function"
+        },
+        {
+         "$schema": false,
+         "additionalProperties_false": false,
+         "cache_control": false,
+         "name": "write",
+         "strict": false,
+         "type": "function"
+        },
+        {
+         "$schema": false,
+         "additionalProperties_false": true,
+         "cache_control": false,
+         "name": "edit",
+         "strict": false,
+         "type": "function"
+        }
+       ]
+      },
+      "sampling": [
+       {
+        "max_completion_tokens": 16384,
+        "model": "Qwen3.8-27B-UD-Q4_K_M",
+        "reasoning_effort": "medium",
+        "store": false,
+        "stream": true,
+        "stream_options": {
+         "include_usage": true
+        }
+       }
+      ],
+      "requests": [
+       {
+        "status": 200,
+        "input_tokens": 1589,
+        "cached_tokens": 0,
+        "usage_cached_tokens": 0,
+        "output_tokens": 70,
+        "ttft_ms": 443.3,
+        "total_ms": 1259.0,
+        "tpot_ms": 11.82,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "bash"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 37
+       },
+       {
+        "status": 200,
+        "input_tokens": 1929,
+        "cached_tokens": 1536,
+        "usage_cached_tokens": 1536,
+        "output_tokens": 53,
+        "ttft_ms": 99.8,
+        "total_ms": 702.0,
+        "tpot_ms": 11.58,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "bash"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 18
+       },
+       {
+        "status": 200,
+        "input_tokens": 3398,
+        "cached_tokens": 1920,
+        "usage_cached_tokens": 1920,
+        "output_tokens": 63,
+        "ttft_ms": 313.0,
+        "total_ms": 1036.5,
+        "tpot_ms": 11.67,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "bash"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 83
+       },
+       {
+        "status": 200,
+        "input_tokens": 4853,
+        "cached_tokens": 3392,
+        "usage_cached_tokens": 3392,
+        "output_tokens": 968,
+        "ttft_ms": 310.9,
+        "total_ms": 11669.2,
+        "tpot_ms": 11.75,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "edit",
+         "edit"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 109,
+        "reasoning_chars": 1460
+       },
+       {
+        "status": 200,
+        "input_tokens": 5907,
+        "cached_tokens": 4800,
+        "usage_cached_tokens": 4800,
+        "output_tokens": 250,
+        "ttft_ms": 253.0,
+        "total_ms": 3186.0,
+        "tpot_ms": 11.78,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "edit"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 125
+       },
+       {
+        "status": 200,
+        "input_tokens": 6198,
+        "cached_tokens": 5888,
+        "usage_cached_tokens": 5888,
+        "output_tokens": 111,
+        "ttft_ms": 91.0,
+        "total_ms": 1387.5,
+        "tpot_ms": 11.79,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "bash"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 231
+       },
+       {
+        "status": 200,
+        "input_tokens": 6344,
+        "cached_tokens": 6144,
+        "usage_cached_tokens": 6144,
+        "output_tokens": 96,
+        "ttft_ms": 70.1,
+        "total_ms": 1190.1,
+        "tpot_ms": 11.79,
+        "stop_reason": "stop",
+        "error_type": null,
+        "tool_calls": [],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 4,
+        "reasoning_chars": 257
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "demo_thinking_low": {
+   "task": "demo",
+   "prompt": "The Python package `shop` in the current directory fails its tests. Fix the package so that `python -m pytest` passes, without editing any file under tests/. When the tests pass, reply with the single word done.",
+   "project": "sha256:f5c8bb8704fbcc78ba90382828d9d9a4920ff1aa902ef231a98db03165fd2f25",
+   "compat": "none",
+   "thinking": "low",
+   "models_json": {
+    "providers": {
+     "holon": {
+      "baseUrl": "http://127.0.0.1:<proxy>/v1",
+      "api": "openai-completions",
+      "apiKey": "holon",
+      "models": [
+       {
+        "id": "Qwen3.8-27B-UD-Q4_K_M",
+        "reasoning": true,
+        "contextWindow": 49152
+       }
+      ]
+     }
+    }
+   },
+   "scorer_reference": "sha256:63f32ffb8fefa316871ff83fa93afbd91fa90694d5c2952269e9ca700df79854",
+   "runs_planned": 1,
+   "runs": [
+    {
+     "success": true,
+     "invalid": null,
+     "scored": {
+      "success": true,
+      "passed": 40,
+      "failed": 0,
+      "skipped": 0,
+      "pytest_exit": 0,
+      "timed_out": false,
+      "symlinks_skipped": 0
+     },
+     "venv_pytest": "sha256:50f26d61e9cb5c304ec49d27139cc33bbc4be34bb183ed22c3db4b75d84e2d25",
+     "venv_after": null,
+     "wall_s": 39.1,
+     "timed_out": false,
+     "exit_code": 0,
+     "non_json_output_lines": 0,
+     "turns": 9,
+     "stop_reasons": {
+      "toolUse": 8,
+      "stop": 1
+     },
+     "errors": [],
+     "retries": 0,
+     "compactions": 0,
+     "tool_calls": [
+      {
+       "tool": "bash",
+       "program": "find",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "shop/money.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "shop/discounts.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "shop/cart.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "shop/__init__.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "tests/test_money.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "tests/test_discounts.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "tests/test_cart.py",
+       "error": false
+      },
+      {
+       "tool": "bash",
+       "program": "cd",
+       "error": false
+      },
+      {
+       "tool": "bash",
+       "program": "cd",
+       "error": false
+      },
+      {
+       "tool": "edit",
+       "path": "shop/money.py",
+       "error": false
+      },
+      {
+       "tool": "edit",
+       "path": "shop/discounts.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "shop/discounts.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "shop/money.py",
+       "error": false
+      },
+      {
+       "tool": "bash",
+       "program": "cd",
+       "error": false
+      }
+     ],
+     "replied_done": true,
+     "pi_usage": [
+      {
+       "input": 1616,
+       "cacheRead": 0,
+       "output": 89
+      },
+      {
+       "input": 382,
+       "cacheRead": 1600,
+       "output": 170
+      },
+      {
+       "input": 1608,
+       "cacheRead": 1920,
+       "output": 137
+      },
+      {
+       "input": 1545,
+       "cacheRead": 3520,
+       "output": 71
+      },
+      {
+       "input": 368,
+       "cacheRead": 5056,
+       "output": 1334
+      },
+      {
+       "input": 1810,
+       "cacheRead": 5376,
+       "output": 892
+      },
+      {
+       "input": 984,
+       "cacheRead": 7168,
+       "output": 123
+      },
+      {
+       "input": 1062,
+       "cacheRead": 8128,
+       "output": 111
+      },
+      {
+       "input": 184,
+       "cacheRead": 9152,
+       "output": 26
+      }
+     ],
+     "prefix_tokens_saved": 41920,
+     "preemptions": 0,
+     "diff": "--- a/shop/discounts.py\n+++ b/shop/discounts.py\n@@ -24,6 +24,19 @@\n     return rule\n \n \n+def buy_n_get_one(sku: str, n: int) -> Rule:\n+    if n <= 0:\n+        raise ValueError(f\"n must be positive: {n}\")\n+\n+    def rule(cart: Cart) -> tuple[str, int] | None:\n+        line = cart.lines.get(sku)\n+        if line is None:\n+            return None\n+        free = line.qty // (n + 1)\n+        return (f\"buy {n} get 1 {sku}\", free * line.unit_cents) if free else None\n+    return rule\n+\n+\n def checkout(cart: Cart, rules: list[Rule]) -> list[str]:\n     \"\"\"The receipt: the cart's item lines, then one line per rule that applies, in the order given ('<label>\n     -<cents off>'), then 'TOTAL <total>'. Discounts never take the total below zero.\"\"\"\n--- a/shop/money.py\n+++ b/shop/money.py\n@@ -15,7 +15,7 @@\n     \"\"\"350 -> '3.50', 5 -> '0.05', 1205 -> '12.05', -125 -> '-1.25'.\"\"\"\n     sign = \"-\" if cents < 0 else \"\"\n     cents = abs(cents)\n-    return f\"{sign}{cents // 100}.{cents % 100}\"\n+    return f\"{sign}{cents // 100}.{cents % 100:02d}\"\n \n \n def percent_of(cents: int, percent: int) -> int:\n",
+     "served": {
+      "requests_total": 9,
+      "chat_requests": 9,
+      "statuses": {
+       "200": 9
+      },
+      "peak_context": 9362,
+      "input_tokens": 51479,
+      "cached_tokens": 41920,
+      "output_tokens": 2953,
+      "shapes": {
+       "keys": [
+        "max_completion_tokens",
+        "messages",
+        "model",
+        "reasoning_effort",
+        "store",
+        "stream",
+        "stream_options",
+        "tools"
+       ],
+       "roles": [
+        "assistant",
+        "developer",
+        "tool",
+        "user"
+       ],
+       "message_fields": [
+        "assistant.reasoning_content",
+        "assistant.tool_calls",
+        "tool.tool_call_id"
+       ],
+       "content_kinds": [
+        "assistant:null",
+        "assistant:string",
+        "developer:string",
+        "tool:string",
+        "user:parts"
+       ],
+       "tools": [
+        {
+         "$schema": false,
+         "additionalProperties_false": false,
+         "cache_control": false,
+         "name": "bash",
+         "strict": false,
+         "type": "function"
+        },
+        {
+         "$schema": false,
+         "additionalProperties_false": false,
+         "cache_control": false,
+         "name": "read",
+         "strict": false,
+         "type": "function"
+        },
+        {
+         "$schema": false,
+         "additionalProperties_false": false,
+         "cache_control": false,
+         "name": "write",
+         "strict": false,
+         "type": "function"
+        },
+        {
+         "$schema": false,
+         "additionalProperties_false": true,
+         "cache_control": false,
+         "name": "edit",
+         "strict": false,
+         "type": "function"
+        }
+       ]
+      },
+      "sampling": [
+       {
+        "max_completion_tokens": 16384,
+        "model": "Qwen3.8-27B-UD-Q4_K_M",
+        "reasoning_effort": "low",
+        "store": false,
+        "stream": true,
+        "stream_options": {
+         "include_usage": true
+        }
+       }
+      ],
+      "requests": [
+       {
+        "status": 200,
+        "input_tokens": 1616,
+        "cached_tokens": 0,
+        "usage_cached_tokens": 0,
+        "output_tokens": 89,
+        "ttft_ms": 334.3,
+        "total_ms": 1352.5,
+        "tpot_ms": 11.57,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "bash"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 48
+       },
+       {
+        "status": 200,
+        "input_tokens": 1982,
+        "cached_tokens": 1600,
+        "usage_cached_tokens": 1600,
+        "output_tokens": 170,
+        "ttft_ms": 88.2,
+        "total_ms": 2048.5,
+        "tpot_ms": 11.6,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "read",
+         "read",
+         "read",
+         "read"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 25
+       },
+       {
+        "status": 200,
+        "input_tokens": 3528,
+        "cached_tokens": 1920,
+        "usage_cached_tokens": 1920,
+        "output_tokens": 137,
+        "ttft_ms": 342.1,
+        "total_ms": 1931.9,
+        "tpot_ms": 11.69,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "read",
+         "read",
+         "read"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 66
+       },
+       {
+        "status": 200,
+        "input_tokens": 5065,
+        "cached_tokens": 3520,
+        "usage_cached_tokens": 3520,
+        "output_tokens": 71,
+        "ttft_ms": 336.7,
+        "total_ms": 1158.7,
+        "tpot_ms": 11.74,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "bash"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 40
+       },
+       {
+        "status": 200,
+        "input_tokens": 5424,
+        "cached_tokens": 5056,
+        "usage_cached_tokens": 5056,
+        "output_tokens": 1334,
+        "ttft_ms": 96.5,
+        "total_ms": 15817.4,
+        "tpot_ms": 11.79,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "bash"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 59,
+        "reasoning_chars": 3051
+       },
+       {
+        "status": 200,
+        "input_tokens": 7186,
+        "cached_tokens": 5376,
+        "usage_cached_tokens": 5376,
+        "output_tokens": 892,
+        "ttft_ms": 405.7,
+        "total_ms": 10958.8,
+        "tpot_ms": 11.84,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "edit",
+         "edit"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 269,
+        "reasoning_chars": 1165
+       },
+       {
+        "status": 200,
+        "input_tokens": 8152,
+        "cached_tokens": 7168,
+        "usage_cached_tokens": 7168,
+        "output_tokens": 123,
+        "ttft_ms": 237.6,
+        "total_ms": 1685.6,
+        "tpot_ms": 11.87,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "read",
+         "read"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 66,
+        "reasoning_chars": 124
+       },
+       {
+        "status": 200,
+        "input_tokens": 9190,
+        "cached_tokens": 8128,
+        "usage_cached_tokens": 8128,
+        "output_tokens": 111,
+        "ttft_ms": 259.4,
+        "total_ms": 1569.7,
+        "tpot_ms": 11.91,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "bash"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 36,
+        "reasoning_chars": 183
+       },
+       {
+        "status": 200,
+        "input_tokens": 9336,
+        "cached_tokens": 9152,
+        "usage_cached_tokens": 9152,
+        "output_tokens": 26,
+        "ttft_ms": 70.9,
+        "total_ms": 369.0,
+        "tpot_ms": 11.92,
+        "stop_reason": "stop",
+        "error_type": null,
+        "tool_calls": [],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 4,
+        "reasoning_chars": 79
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "demo_thinking_high": {
+   "task": "demo",
+   "prompt": "The Python package `shop` in the current directory fails its tests. Fix the package so that `python -m pytest` passes, without editing any file under tests/. When the tests pass, reply with the single word done.",
+   "project": "sha256:f5c8bb8704fbcc78ba90382828d9d9a4920ff1aa902ef231a98db03165fd2f25",
+   "compat": "none",
+   "thinking": "high",
+   "models_json": {
+    "providers": {
+     "holon": {
+      "baseUrl": "http://127.0.0.1:<proxy>/v1",
+      "api": "openai-completions",
+      "apiKey": "holon",
+      "models": [
+       {
+        "id": "Qwen3.8-27B-UD-Q4_K_M",
+        "reasoning": true,
+        "contextWindow": 49152
+       }
+      ]
+     }
+    }
+   },
+   "scorer_reference": "sha256:63f32ffb8fefa316871ff83fa93afbd91fa90694d5c2952269e9ca700df79854",
+   "runs_planned": 1,
+   "runs": [
+    {
+     "success": true,
+     "invalid": null,
+     "scored": {
+      "success": true,
+      "passed": 40,
+      "failed": 0,
+      "skipped": 0,
+      "pytest_exit": 0,
+      "timed_out": false,
+      "symlinks_skipped": 0
+     },
+     "venv_pytest": "sha256:50f26d61e9cb5c304ec49d27139cc33bbc4be34bb183ed22c3db4b75d84e2d25",
+     "venv_after": null,
+     "wall_s": 38.9,
+     "timed_out": false,
+     "exit_code": 0,
+     "non_json_output_lines": 0,
+     "turns": 10,
+     "stop_reasons": {
+      "toolUse": 9,
+      "stop": 1
+     },
+     "errors": [],
+     "retries": 0,
+     "compactions": 0,
+     "tool_calls": [
+      {
+       "tool": "bash",
+       "program": "find",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "shop/money.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "shop/discounts.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "shop/cart.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "shop/__init__.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "tests/test_money.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "tests/test_discounts.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "tests/test_cart.py",
+       "error": false
+      },
+      {
+       "tool": "bash",
+       "program": "python",
+       "error": false
+      },
+      {
+       "tool": "edit",
+       "path": "shop/money.py",
+       "error": false
+      },
+      {
+       "tool": "edit",
+       "path": "shop/discounts.py",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "shop/discounts.py",
+       "error": false
+      },
+      {
+       "tool": "bash",
+       "program": "python",
+       "error": false
+      },
+      {
+       "tool": "read",
+       "path": "shop/money.py",
+       "error": false
+      },
+      {
+       "tool": "bash",
+       "program": "grep",
+       "error": false
+      }
+     ],
+     "replied_done": true,
+     "pi_usage": [
+      {
+       "input": 1628,
+       "cacheRead": 0,
+       "output": 64
+      },
+      {
+       "input": 285,
+       "cacheRead": 1600,
+       "output": 125
+      },
+      {
+       "input": 1530,
+       "cacheRead": 1856,
+       "output": 93
+      },
+      {
+       "input": 1551,
+       "cacheRead": 3328,
+       "output": 1452
+      },
+      {
+       "input": 2036,
+       "cacheRead": 4864,
+       "output": 743
+      },
+      {
+       "input": 841,
+       "cacheRead": 6848,
+       "output": 53
+      },
+      {
+       "input": 601,
+       "cacheRead": 7680,
+       "output": 80
+      },
+      {
+       "input": 140,
+       "cacheRead": 8256,
+       "output": 218
+      },
+      {
+       "input": 347,
+       "cacheRead": 8384,
+       "output": 82
+      },
+      {
+       "input": 173,
+       "cacheRead": 8704,
+       "output": 18
+      }
+     ],
+     "prefix_tokens_saved": 51520,
+     "preemptions": 0,
+     "diff": "--- a/shop/discounts.py\n+++ b/shop/discounts.py\n@@ -24,6 +24,18 @@\n     return rule\n \n \n+def buy_n_get_one(sku: str, n: int) -> Rule:\n+    if n <= 0:\n+        raise ValueError(f\"n must be positive: {n}\")\n+\n+    def rule(cart: Cart) -> tuple[str, int] | None:\n+        free = cart.quantity(sku) // (n + 1)\n+        if not free:\n+            return None\n+        return (f\"buy {n} get 1 {sku}\", cart.lines[sku].unit_cents * free)\n+    return rule\n+\n+\n def checkout(cart: Cart, rules: list[Rule]) -> list[str]:\n     \"\"\"The receipt: the cart's item lines, then one line per rule that applies, in the order given ('<label>\n     -<cents off>'), then 'TOTAL <total>'. Discounts never take the total below zero.\"\"\"\n--- a/shop/money.py\n+++ b/shop/money.py\n@@ -15,7 +15,7 @@\n     \"\"\"350 -> '3.50', 5 -> '0.05', 1205 -> '12.05', -125 -> '-1.25'.\"\"\"\n     sign = \"-\" if cents < 0 else \"\"\n     cents = abs(cents)\n-    return f\"{sign}{cents // 100}.{cents % 100}\"\n+    return f\"{sign}{cents // 100}.{cents % 100:02d}\"\n \n \n def percent_of(cents: int, percent: int) -> int:\n",
+     "served": {
+      "requests_total": 10,
+      "chat_requests": 10,
+      "statuses": {
+       "200": 10
+      },
+      "peak_context": 8895,
+      "input_tokens": 60652,
+      "cached_tokens": 51520,
+      "output_tokens": 2928,
+      "shapes": {
+       "keys": [
+        "max_completion_tokens",
+        "messages",
+        "model",
+        "reasoning_effort",
+        "store",
+        "stream",
+        "stream_options",
+        "tools"
+       ],
+       "roles": [
+        "assistant",
+        "developer",
+        "tool",
+        "user"
+       ],
+       "message_fields": [
+        "assistant.reasoning_content",
+        "assistant.tool_calls",
+        "tool.tool_call_id"
+       ],
+       "content_kinds": [
+        "assistant:null",
+        "assistant:string",
+        "developer:string",
+        "tool:string",
+        "user:parts"
+       ],
+       "tools": [
+        {
+         "$schema": false,
+         "additionalProperties_false": false,
+         "cache_control": false,
+         "name": "bash",
+         "strict": false,
+         "type": "function"
+        },
+        {
+         "$schema": false,
+         "additionalProperties_false": false,
+         "cache_control": false,
+         "name": "read",
+         "strict": false,
+         "type": "function"
+        },
+        {
+         "$schema": false,
+         "additionalProperties_false": false,
+         "cache_control": false,
+         "name": "write",
+         "strict": false,
+         "type": "function"
+        },
+        {
+         "$schema": false,
+         "additionalProperties_false": true,
+         "cache_control": false,
+         "name": "edit",
+         "strict": false,
+         "type": "function"
+        }
+       ]
+      },
+      "sampling": [
+       {
+        "max_completion_tokens": 16384,
+        "model": "Qwen3.8-27B-UD-Q4_K_M",
+        "reasoning_effort": "high",
+        "store": false,
+        "stream": true,
+        "stream_options": {
+         "include_usage": true
+        }
+       }
+      ],
+      "requests": [
+       {
+        "status": 200,
+        "input_tokens": 1628,
+        "cached_tokens": 0,
+        "usage_cached_tokens": 0,
+        "output_tokens": 64,
+        "ttft_ms": 340.6,
+        "total_ms": 1070.8,
+        "tpot_ms": 11.59,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "bash"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 65
+       },
+       {
+        "status": 200,
+        "input_tokens": 1885,
+        "cached_tokens": 1600,
+        "usage_cached_tokens": 1600,
+        "output_tokens": 125,
+        "ttft_ms": 74.1,
+        "total_ms": 1513.5,
+        "tpot_ms": 11.61,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "read",
+         "read",
+         "read",
+         "read"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 55
+       },
+       {
+        "status": 200,
+        "input_tokens": 3386,
+        "cached_tokens": 1856,
+        "usage_cached_tokens": 1856,
+        "output_tokens": 93,
+        "ttft_ms": 324.2,
+        "total_ms": 1401.1,
+        "tpot_ms": 11.71,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "read",
+         "read",
+         "read"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 31
+       },
+       {
+        "status": 200,
+        "input_tokens": 4879,
+        "cached_tokens": 3328,
+        "usage_cached_tokens": 3328,
+        "output_tokens": 1452,
+        "ttft_ms": 340.8,
+        "total_ms": 17452.3,
+        "tpot_ms": 11.79,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "bash"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 45,
+        "reasoning_chars": 3419
+       },
+       {
+        "status": 200,
+        "input_tokens": 6900,
+        "cached_tokens": 4864,
+        "usage_cached_tokens": 4864,
+        "output_tokens": 743,
+        "ttft_ms": 451.7,
+        "total_ms": 9245.1,
+        "tpot_ms": 11.85,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "edit",
+         "edit"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 220,
+        "reasoning_chars": 1078
+       },
+       {
+        "status": 200,
+        "input_tokens": 7689,
+        "cached_tokens": 6848,
+        "usage_cached_tokens": 6848,
+        "output_tokens": 53,
+        "ttft_ms": 203.9,
+        "total_ms": 821.9,
+        "tpot_ms": 11.88,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "read"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 110
+       },
+       {
+        "status": 200,
+        "input_tokens": 8281,
+        "cached_tokens": 7680,
+        "usage_cached_tokens": 7680,
+        "output_tokens": 80,
+        "ttft_ms": 160.6,
+        "total_ms": 1100.8,
+        "tpot_ms": 11.9,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "bash"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 164
+       },
+       {
+        "status": 200,
+        "input_tokens": 8396,
+        "cached_tokens": 8256,
+        "usage_cached_tokens": 8256,
+        "output_tokens": 218,
+        "ttft_ms": 62.9,
+        "total_ms": 2647.0,
+        "tpot_ms": 11.91,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "read"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 408,
+        "reasoning_chars": 130
+       },
+       {
+        "status": 200,
+        "input_tokens": 8731,
+        "cached_tokens": 8384,
+        "usage_cached_tokens": 8384,
+        "output_tokens": 82,
+        "ttft_ms": 105.1,
+        "total_ms": 1073.6,
+        "tpot_ms": 11.96,
+        "stop_reason": "tool_calls",
+        "error_type": null,
+        "tool_calls": [
+         "bash"
+        ],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 0,
+        "reasoning_chars": 95
+       },
+       {
+        "status": 200,
+        "input_tokens": 8877,
+        "cached_tokens": 8704,
+        "usage_cached_tokens": 8704,
+        "output_tokens": 18,
+        "ttft_ms": 70.1,
+        "total_ms": 272.4,
+        "tpot_ms": 11.9,
+        "stop_reason": "stop",
+        "error_type": null,
+        "tool_calls": [],
+        "tool_args_json": true,
+        "markup": [],
+        "sse": {
+         "done": true,
+         "bad_lines": 0
+        },
+        "content_chars": 4,
+        "reasoning_chars": 44
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "summary": {
+  "requests": 26,
+  "ok": 26,
+  "issues": [],
+  "runs": [
+   {
+    "task": "demo_thinking_medium",
+    "run": 1,
+    "success": true,
+    "turns": 7,
+    "wall_s": 23.1,
+    "requests": 7,
+    "input_tokens": 30218,
+    "cached_tokens": 23680,
+    "output_tokens": 1611,
+    "peak_context": 6440,
+    "tool_calls": 7,
+    "tool_errors": 1,
+    "retries": 0,
+    "compactions": 0,
+    "replied_done": true
+   },
+   {
+    "task": "demo_thinking_low",
+    "run": 1,
+    "success": true,
+    "turns": 9,
+    "wall_s": 39.1,
+    "requests": 9,
+    "input_tokens": 51479,
+    "cached_tokens": 41920,
+    "output_tokens": 2953,
+    "peak_context": 9362,
+    "tool_calls": 15,
+    "tool_errors": 0,
+    "retries": 0,
+    "compactions": 0,
+    "replied_done": true
+   },
+   {
+    "task": "demo_thinking_high",
+    "run": 1,
+    "success": true,
+    "turns": 10,
+    "wall_s": 38.9,
+    "requests": 10,
+    "input_tokens": 60652,
+    "cached_tokens": 51520,
+    "output_tokens": 2928,
+    "peak_context": 8895,
+    "tool_calls": 15,
+    "tool_errors": 0,
+    "retries": 0,
+    "compactions": 0,
+    "replied_done": true
+   }
+  ],
+  "decode": {
+   "requests": 26,
+   "tpot_ms_p50": 11.79,
+   "tpot_ms_p90": 11.91,
+   "tok_s_at_tpot_p50": 84.8,
+   "tok_s_at_tpot_p90": 84.0
+  },
+  "prefill": {
+   "requests": 26,
+   "uncached_tok_s_p50": 4132.99,
+   "uncached_at_least_512": {
+    "requests": 16,
+    "tok_s_p50": 4529.24,
+    "tok_s_p10": 3918.14,
+    "tok_s_p90": 4750.92
+   },
+   "by_context": [
+    {
+     "input_tokens": "0-8192",
+     "requests": 20,
+     "uncached_p50": 1469.5,
+     "ttft_ms_p50": 311.95,
+     "prefill_tok_s_p50": 4418.46
+    },
+    {
+     "input_tokens": "8192-16384",
+     "requests": 6,
+     "uncached_p50": 265.5,
+     "ttft_ms_p50": 88.0,
+     "prefill_tok_s_p50": 2948.41
+    }
+   ]
+  },
+  "prefix_cache": {
+   "requests": 26,
+   "input_tokens": 142349,
+   "cached_tokens": 117120,
+   "hit_rate": 0.8228
+  },
+  "latency": {
+   "ttft_ms_p50": 245.3,
+   "ttft_ms_p90": 373.9,
+   "request_ms_p50": 1394.3,
+   "request_ms_p90": 11314.0,
+   "output_tokens_p50": 103.5
+  },
+  "run_wall_s_p50": 38.9
+ }
+}
