@@ -539,6 +539,42 @@ measurement: the a8 8B / 30B GGUF locks (the 8B Q4_K_M on the RTX 5080 is where 
 or records why not. Measured at release step 7 (`docs/release.md` §16.5): the long prompt's stall falls 23–37× at 512, but the
 agent trace's gap bar (≥ 2×) fails on every such lock, whose agent gaps are already short, so they keep 0.
 
+## 8b. Release
+
+Work (`docs/release.md`): packaging and `holon serve` from the lock, ABI 1.0, the public root, the release-class locks,
+the benchmark suite, the agent demo, the clean install. Publishing (step 11) waits for the owner's go.
+
+### 8b.1 Status (2026-10-16): ready for the owner's go, after the lead's final panel review
+
+Design and evidence: `docs/release.md` (rev 3.2, reviewed clean; §13–§19 as built per step); records
+`evidence/release7_*`, `bench_release*`, `bars_release*`, `release8_clock_*`, `agent_demo_*`, `release10_*`.
+
+| # | Acceptance (release §1) | Result |
+|---|---|---|
+| 1 | Legibility | retired as a gate by the owner (§4.0); no claim |
+| 2 | ABI 1.0 | declared, enforced at load, listed in `core/abi.txt` and checked by `check_abi.py` (§15) |
+| 3 | Locks | every cell written and approved in the release environment (§16, §19.1–§19.2); `holon serve` reports a plan equal to the lock on each class, no clamp (§19.3) |
+| 4 | Packaging | a clean install by the README on each class served a chat completion and an Anthropic message; after the prebuild fix a first start compiles only Triton kernels (and FlashInfer's CuTe DSL norms in memory); the Dockerfile builds (§19.3–§19.4) |
+| 5 | Benchmarks | all four classes; every GGUF cell ≥ 0.8× llama.cpp at the vendored pin; every cell published, losses included (§17) |
+| 6 | Agent demo | 3 of 3 on the RTX 5080 and 3 of 3 on the RTX 4090 (§18) |
+| 7 | Public root | built (§15) and scanned: zero hits outside the vendored upstream trees over every commit, blob and message of the public line (§19.5); the owner's go pending |
+
+**Carried CI items** (plan §3.5, §3.6; release §9 step 10):
+
+| item | disposition |
+|---|---|
+| `no-arch-branches` (design invariant 10) | **deferred to v1.** The core is covered by `check_core_denylist.py`; std and other shared units by review and the import contracts (no plugin imports another). A scan of std at the release found no `model_type` or architecture branch; the GGUF tokenizer keeps a table of pre-tokenizers keyed by the file's `tokenizer.ggml.pre`, as llama.cpp does — data, not a branch. A lint over std (the denylist's names, with an allow-list for that table and docstrings) is v1's |
+| `reference-provenance` | **closed for v0.** Each unit's oracle (`reference.py`) is inside its unit directory, so every lock's `src` pin (and `sem` where declared) covers it; `check_locks.py` re-reads every lock, and `--release` fails when a newest lock does not pin this tree's sources, a changed oracle included. Loading the oracle from a reviewed commit by `sem` (design §4.6) matters once an untrusted candidate can edit code: it comes with v1's self-improvement layer |
+| `isolation-check` (propagate on trusted GPU runners) | **deferred to v1** (it needs scheduled GPU runners per class). In v0 it is a manual step: every lock change was propagated on the class's desktop with snapshots ×3 (§16, §19), and `check_locks.py --release` holds every newest lock to this tree. Step 10 found what such a runner must handle: one class's trace can differ between two desktops of the same GPU (the RTX 3090's 27B, §19.1) |
+| the IPC IDL (design §7.8) | **deferred to its trigger** (a native frontend, design §12). The IPC records (`EngineRequest`, `TokenDelta`, `Abort`) are frozen in ABI 1.0's listing, so `check_abi.py` already fails on any change to them; the generated IDL file adds nothing until a second implementation reads it |
+| CPU-only GitHub Actions run | **prepared:** `.github/workflows/ci.yml` runs `run_all.sh` and the CPU tests (707 passed, 579 skipped locally without a GPU); it runs once the repository is published (step 11), not before |
+
+Decisions: the 27B locks' context raised to 49,152 (lead, after §18's ≈ 31K side requests); the FlashInfer prebuild
+fixed and every lock re-propagated (§19.2); MTP off and `chunk_with_decode` 0 on the 8B / 30B locks stay as decided at
+step 7 (README, Known limitations). Found on the way: the prebuild left every FlashInfer module to compile again at first
+use; an RTX 3090 desktop records another 27B trace than the one the lock was written on; the hub listing failed once
+with an HTTP error while four desktops listed it within minutes. Next: step 11 on the owner's go (§8 of `docs/release.md`).
+
 ## 9. Kill / pivot criteria
 
 | When | Measure | Pivot if |

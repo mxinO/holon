@@ -1,0 +1,529 @@
+{
+ "workload": "release10-locks",
+ "date": "2026-10-16",
+ "commit": "a5538fa (the locks name it; step 10's branch from main)",
+ "decision": "the Qwen3.8-27B locks' max_model_len 32768 -> 49152 (lead): Claude Code 2.1.300's side requests of about 31K input tokens left about 1.3K tokens in 32K (release §18)",
+ "environment": {
+  "venv": "uv sync --frozen --group dev (the release uv environment; uv 0.11.1, CPython 3.12.12), in a CUDA 13.0 container",
+  "torch": "2.11.0+cu130",
+  "triton": "3.6.0"
+ },
+ "command": {
+  "propagate": "python -m holon_tools propagate <model> --approve --golden <v1-fp32> --floor <floor of its path and KV format> --prompts judge/prompts/v1-qwen3_5.jsonl <the lock's [engine] as flags> --max-model-len 49152",
+  "snapshot": "python -m holon_judge snapshot --model <model> --prompts judge/prompts/v1-qwen3_5.jsonl --runs 3 --engine-args <the new lock's [engine] and kernel pins>",
+  "kv_pool": "the engine built at the new lock's [engine] (no context clamp): the paged pool's capacity in tokens",
+  "clock": "python bench/clock_check.py --model <file> --lock <the class's 27B lock> --seconds 60 --batch 4"
+ },
+ "classes": {
+  "rtx-5080": {
+   "clock": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "tok_s": 192.0,
+    "sm_mhz": {
+     "p10": 2715.0,
+     "p50": 2730.0,
+     "p90": 2745.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 1.0,
+    "steady": true
+   },
+   "clock_after": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "tok_s": 191.2,
+    "sm_mhz": {
+     "p10": 2700.0,
+     "p50": 2715.0,
+     "p90": 2737.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 1.0,
+    "steady": true
+   },
+   "from": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/6.lock",
+   "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/7.lock",
+   "verdict": "approve",
+   "change": "engine:max_model_len: 32768 -> 49152",
+   "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+   "overall": "33372  97.495%    98.360%  2.23e-04  6.39e-01  2.56e+01  +0.665% ± 0.456%   3.62%",
+   "floor": "33372  97.540%    98.382%  2.58e-04  7.12e-01  1.84e+01  +0.656% ± 0.495%   3.69%",
+   "vs floor": "+0.009% ± 0.805%",
+   "budget": "≥97.290%            ≤5.17e-04 ≤1.42e+00                     ≤2.001%",
+   "passed": true,
+   "seconds": {
+    "propagate": 138,
+    "snapshot_x3": 71
+   },
+   "snapshot_x3": {
+    "run_identical": true,
+    "steps": 579,
+    "step_widths": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ]
+   },
+   "kv_pool_tokens": 55120
+  },
+  "rtx-4090": {
+   "clock": {
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "tok_s": 169.0,
+    "sm_mhz": {
+     "p10": 2670.0,
+     "p50": 2685.0,
+     "p90": 2685.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 0.0,
+    "steady": true
+   },
+   "clock_after": {
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "tok_s": 168.9,
+    "sm_mhz": {
+     "p10": 2670.0,
+     "p50": 2670.0,
+     "p90": 2670.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 0.0,
+    "steady": true
+   },
+   "from": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/6.lock",
+   "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/7.lock",
+   "verdict": "approve",
+   "change": "engine:max_model_len: 32768 -> 49152",
+   "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+   "overall": "33372  97.114%    98.003%  4.49e-04  8.93e-01  2.42e+01  -1.804% ± 0.688%   4.48%",
+   "floor": "33372  96.947%    97.923%  4.16e-04  6.48e-01  2.21e+01  +0.018% ± 0.894%   4.43%",
+   "vs floor": "-1.822% ± 0.749%",
+   "budget": "≥96.697%            ≤8.33e-04 ≤1.30e+00                     ≤2.123%",
+   "passed": true,
+   "seconds": {
+    "propagate": 178,
+    "snapshot_x3": 96
+   },
+   "snapshot_x3": {
+    "run_identical": true,
+    "steps": 579,
+    "step_widths": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ]
+   },
+   "kv_pool_tokens": 61888
+  },
+  "rtx-5090": {
+   "clock": {
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "tok_s": 284.6,
+    "sm_mhz": {
+     "p10": 2505.0,
+     "p50": 2610.0,
+     "p90": 2685.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 1.0,
+    "steady": true
+   },
+   "clock_after": {
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "tok_s": 283.7,
+    "sm_mhz": {
+     "p10": 2490.0,
+     "p50": 2535.0,
+     "p90": 2632.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 1.0,
+    "steady": true
+   },
+   "from": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-5090/cu130-torch2.11/1.lock",
+   "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-5090/cu130-torch2.11/2.lock",
+   "verdict": "approve",
+   "change": "engine:max_model_len: 32768 -> 49152",
+   "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+   "overall": "33372  97.156%    98.114%  4.15e-04  7.43e-01  2.93e+01  +0.397% ± 0.515%   4.46%",
+   "floor": "33372  96.947%    97.923%  4.16e-04  6.48e-01  2.21e+01  +0.018% ± 0.894%   4.43%",
+   "vs floor": "+0.378% ± 0.685%",
+   "budget": "≥96.697%            ≤8.33e-04 ≤1.30e+00                     ≤1.963%",
+   "passed": true,
+   "seconds": {
+    "propagate": 269,
+    "snapshot_x3": 62
+   },
+   "snapshot_x3": {
+    "run_identical": true,
+    "steps": 579,
+    "step_widths": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ]
+   },
+   "kv_pool_tokens": 195056
+  },
+  "rtx-3090": {
+   "clock": {
+    "gpu": "NVIDIA GeForce RTX 3090",
+    "tok_s": 139.0,
+    "sm_mhz": {
+     "p10": 1680.0,
+     "p50": 1695.0,
+     "p90": 1710.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 1.0,
+    "steady": true
+   },
+   "clock_after": {
+    "gpu": "NVIDIA GeForce RTX 3090",
+    "tok_s": 137.3,
+    "sm_mhz": {
+     "p10": 1650.0,
+     "p50": 1665.0,
+     "p90": 1695.0
+    },
+    "slowdown_share": 0.0,
+    "power_cap_share": 1.0,
+    "steady": true
+   },
+   "from": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-3090/cu130-torch2.11/2.lock",
+   "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-3090/cu130-torch2.11/3.lock",
+   "verdict": "approve",
+   "change": "engine:max_model_len: 32768 -> 49152",
+   "trace": "snapshot trace differs from the lock's: step 49: deltas differ for (request, sequence) [(16, 0)]",
+   "overall": "33372  97.093%    98.006%  4.51e-04  7.33e-01  3.04e+01  -1.402% ± 0.725%   4.51%",
+   "floor": "33372  96.947%    97.923%  4.16e-04  6.48e-01  2.21e+01  +0.018% ± 0.894%   4.43%",
+   "vs floor": "-1.420% ± 1.077%",
+   "budget": "≥96.697%            ≤8.33e-04 ≤1.30e+00                     ≤2.943%",
+   "passed": true,
+   "seconds": {
+    "propagate": 302,
+    "snapshot_x3": 106
+   },
+   "snapshot_x3": {
+    "run_identical": true,
+    "steps": 579,
+    "step_widths": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ]
+   },
+   "kv_pool_tokens": 86848,
+   "trace_check": {
+    "what": "the snapshot trace recorded once on this desktop at lock 2's own settings (32K) and at lock 3's (48K), kernel pins as the locks'",
+    "lock 2 settings": "sha256:965e02cd47fc647590fdb943fb372e42db9ac66af4fe9e801166946108587fcf",
+    "lock 3 settings": "sha256:965e02cd47fc647590fdb943fb372e42db9ac66af4fe9e801166946108587fcf",
+    "lock 2's [snapshot] trace": "sha256:c1f9b15850dacde0a367ea6479384fcbc7e80827b678e3de83158da47d5eb50f",
+    "on an RTX A5000 (sm_86), lock 2 settings vs + --max-model-len 49152": "one trace for both (sha256:b21f65c3c50b5209dc206a0398e9aed5af62f17cfd959533b577c63d9756182b)",
+    "reading": "the trace moved with the desktop, not the context: lock 2 was written on another RTX 3090 desktop (release §16.2's desktop D)"
+   }
+  }
+ },
+ "sweep after the prebuild fix": {
+  "why": "kernels.flashinfer's prebuild.py changed (f86c182), so its src moved in every lock that pins it: all 22 newest locks",
+  "command": {
+   "propagate": "python -m holon_tools propagate <model> --approve --golden <v1-fp32> --floor <floor of its path and KV format> --prompts <v1 | v1-qwen3_5> <the lock's [engine] as flags>",
+   "snapshot": "python -m holon_judge snapshot --model <model> --prompts <same> --runs 3 --engine-args <the new lock's [engine] and kernel pins>"
+  },
+  "commit": "f86c182 (the locks name it)",
+  "classes": {
+   "rtx-5080": {
+    "sweep_s": 652,
+    "locks": {
+     "30b-ud-iq3_xxs": {
+      "from": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS@dbe47df66091cac6/rtx-5080/cu130-torch2.11/7.lock",
+      "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS@dbe47df66091cac6/rtx-5080/cu130-torch2.11/8.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.252%    99.120%  1.84e-04  5.68e-02  3.71e+00  +0.003% ± 0.116%   4.08%",
+      "vs floor": "+0.035% ± 0.127%",
+      "budget": "≥98.081%            ≤3.73e-04 ≤1.19e-01                     ≤0.568%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 152
+     },
+     "8b-q4_k_m": {
+      "from": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/9.lock",
+      "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/10.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.426%    99.284%  1.60e-04  3.54e-02  4.37e+00  +0.301% ± 0.119%   2.96%",
+      "vs floor": "-0.056% ± 0.091%",
+      "budget": "≥98.106%            ≤3.27e-04 ≤7.17e-02                     ≤0.477%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 75
+     },
+     "8b-ud-iq3_xxs": {
+      "from": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-UD-IQ3_XXS@495e28b50d2373d0/rtx-5080/cu130-torch2.11/9.lock",
+      "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-UD-IQ3_XXS@495e28b50d2373d0/rtx-5080/cu130-torch2.11/10.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.899%    99.730%  1.03e-04  1.33e-02  2.09e+00  +0.048% ± 0.058%   2.14%",
+      "vs floor": "+0.055% ± 0.077%",
+      "budget": "≥98.621%            ≤2.35e-04 ≤3.06e-02                     ≤0.442%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 66
+     },
+     "27b-ud-iq3_s": {
+      "from": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/7.lock",
+      "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/8.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "33372  97.495%    98.360%  2.23e-04  6.39e-01  2.56e+01  +0.665% ± 0.456%   3.62%",
+      "vs floor": "+0.009% ± 0.805%",
+      "budget": "≥97.290%            ≤5.17e-04 ≤1.42e+00                     ≤2.001%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 195
+     },
+     "8b-nvfp4": {
+      "from": "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-5080/cu130-torch2.11/4.lock",
+      "wrote": "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-5080/cu130-torch2.11/5.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.774%    99.577%  9.13e-05  1.29e-02  9.24e-01  +0.067% ± 0.045%   1.96%",
+      "vs floor": "-0.096% ± 0.053%",
+      "budget": "≥98.441%            ≤1.86e-04 ≤2.49e-02                     ≤0.359%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 75
+     },
+     "8b-fp8": {
+      "from": "plans/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-5080/cu130-torch2.11/2.lock",
+      "wrote": "plans/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-5080/cu130-torch2.11/3.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.142%    99.022%  1.84e-04  4.26e-02  2.84e+00  +0.217% ± 0.094%   3.10%",
+      "vs floor": "-0.066% ± 0.127%",
+      "budget": "≥97.923%            ≤3.98e-04 ≤8.37e-02                     ≤0.516%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 89
+     }
+    }
+   },
+   "rtx-4090": {
+    "sweep_s": 1248,
+    "locks": {
+     "8b-bf16": {
+      "from": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-4090/cu130-torch2.11/13.lock",
+      "wrote": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-4090/cu130-torch2.11/14.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.990%    99.800%  3.79e-05  4.70e-03  1.82e-01  +0.014% ± 0.020%   1.31%",
+      "vs floor": "-0.076% ± 0.037%",
+      "budget": "≥98.679%            ≤8.95e-05 ≤1.15e-02                     ≤0.343%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 166
+     },
+     "30b-q4_k_m": {
+      "from": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-4090/cu130-torch2.11/7.lock",
+      "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-4090/cu130-torch2.11/8.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.258%    99.025%  1.83e-04  6.11e-02  3.53e+00  +0.079% ± 0.148%   4.03%",
+      "vs floor": "-0.083% ± 0.139%",
+      "budget": "≥97.969%            ≤3.63e-04 ≤1.18e-01                     ≤0.588%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 184
+     },
+     "27b-ud-q4_k_m": {
+      "from": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/7.lock",
+      "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/8.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "33372  97.114%    98.003%  4.49e-04  8.93e-01  2.42e+01  -1.804% ± 0.688%   4.48%",
+      "vs floor": "-1.822% ± 0.749%",
+      "budget": "≥96.697%            ≤8.33e-04 ≤1.30e+00                     ≤2.123%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 266
+     },
+     "8b-nvfp4": {
+      "from": "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/4.lock",
+      "wrote": "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/5.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.697%    99.521%  8.96e-05  1.22e-02  4.62e-01  +0.063% ± 0.057%   1.96%",
+      "vs floor": "-0.100% ± 0.065%",
+      "budget": "≥98.441%            ≤1.86e-04 ≤2.49e-02                     ≤0.359%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 87
+     },
+     "30b-nvfp4": {
+      "from": "plans/nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99/rtx-4090/cu130-torch2.11/4.lock",
+      "wrote": "plans/nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99/rtx-4090/cu130-torch2.11/5.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.399%    99.245%  1.43e-04  4.85e-02  2.15e+00  +0.082% ± 0.107%   3.47%",
+      "vs floor": "+0.104% ± 0.116%",
+      "budget": "≥98.109%            ≤3.01e-04 ≤9.84e-02                     ≤0.503%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 160
+     },
+     "30b-mxfp4_moe": {
+      "from": "plans/Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@84e3f62a338c23dd/rtx-4090/cu130-torch2.11/3.lock",
+      "wrote": "plans/Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@84e3f62a338c23dd/rtx-4090/cu130-torch2.11/4.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.429%    99.323%  1.58e-04  2.64e-02  5.02e+00  +0.170% ± 0.092%   3.19%",
+      "vs floor": "+0.089% ± 0.089%",
+      "budget": "≥98.219%            ≤3.36e-04 ≤5.63e-02                     ≤0.471%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 172
+     },
+     "8b-fp8": {
+      "from": "plans/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-4090/cu130-torch2.11/2.lock",
+      "wrote": "plans/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-4090/cu130-torch2.11/3.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.194%    99.078%  1.87e-04  4.17e-02  3.64e+00  +0.155% ± 0.067%   3.11%",
+      "vs floor": "-0.127% ± 0.092%",
+      "budget": "≥97.923%            ≤3.98e-04 ≤8.37e-02                     ≤0.481%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 120
+     },
+     "8b-q4_k_m": {
+      "from": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-4090/cu130-torch2.11/1.lock",
+      "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-4090/cu130-torch2.11/2.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.472%    99.315%  1.62e-04  3.63e-02  1.69e+00  +0.311% ± 0.056%   2.95%",
+      "vs floor": "-0.046% ± 0.093%",
+      "budget": "≥98.106%            ≤3.27e-04 ≤7.17e-02                     ≤0.484%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 93
+     }
+    }
+   },
+   "rtx-5090": {
+    "sweep_s": 515,
+    "locks": {
+     "8b-bf16": {
+      "from": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-5090/cu130-torch2.11/7.lock",
+      "wrote": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-5090/cu130-torch2.11/8.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.929%    99.790%  3.88e-05  4.79e-03  4.91e-01  +0.043% ± 0.018%   1.32%",
+      "vs floor": "-0.047% ± 0.041%",
+      "budget": "≥98.679%            ≤8.95e-05 ≤1.15e-02                     ≤0.353%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 130
+     },
+     "8b-q4_k_m": {
+      "from": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5090/cu130-torch2.11/1.lock",
+      "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5090/cu130-torch2.11/2.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.453%    99.284%  1.61e-04  3.64e-02  4.88e+00  +0.322% ± 0.072%   2.96%",
+      "vs floor": "-0.035% ± 0.087%",
+      "budget": "≥98.106%            ≤3.27e-04 ≤7.17e-02                     ≤0.469%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 67
+     },
+     "30b-q4_k_m": {
+      "from": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-5090/cu130-torch2.11/1.lock",
+      "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-5090/cu130-torch2.11/2.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.338%    99.147%  1.81e-04  5.67e-02  3.35e+00  +0.151% ± 0.084%   3.96%",
+      "vs floor": "-0.010% ± 0.110%",
+      "budget": "≥97.969%            ≤3.63e-04 ≤1.18e-01                     ≤0.524%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 134
+     },
+     "27b-ud-q4_k_m": {
+      "from": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-5090/cu130-torch2.11/2.lock",
+      "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-5090/cu130-torch2.11/3.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "33372  97.156%    98.114%  4.15e-04  7.43e-01  2.93e+01  +0.397% ± 0.515%   4.46%",
+      "vs floor": "+0.378% ± 0.685%",
+      "budget": "≥96.697%            ≤8.33e-04 ≤1.30e+00                     ≤1.963%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 184
+     }
+    }
+   },
+   "rtx-3090": {
+    "sweep_s": 690,
+    "locks": {
+     "8b-bf16": {
+      "from": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-3090/cu130-torch2.11/1.lock",
+      "wrote": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-3090/cu130-torch2.11/2.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.954%    99.806%  3.79e-05  4.65e-03  5.22e-01  +0.063% ± 0.016%   1.28%",
+      "vs floor": "-0.027% ± 0.031%",
+      "budget": "≥98.679%            ≤8.95e-05 ≤1.15e-02                     ≤0.328%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 165
+     },
+     "8b-q4_k_m": {
+      "from": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-3090/cu130-torch2.11/1.lock",
+      "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-3090/cu130-torch2.11/2.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.338%    99.221%  1.63e-04  3.67e-02  3.14e+00  +0.372% ± 0.097%   2.95%",
+      "vs floor": "+0.015% ± 0.074%",
+      "budget": "≥98.106%            ≤3.27e-04 ≤7.17e-02                     ≤0.435%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 92
+     },
+     "30b-q4_k_m": {
+      "from": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-3090/cu130-torch2.11/1.lock",
+      "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-3090/cu130-torch2.11/2.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "32783  98.325%    99.125%  1.77e-04  5.81e-02  1.51e+00  +0.243% ± 0.131%   4.01%",
+      "vs floor": "+0.081% ± 0.133%",
+      "budget": "≥97.969%            ≤3.63e-04 ≤1.18e-01                     ≤0.582%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 166
+     },
+     "27b-ud-q4_k_m": {
+      "from": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-3090/cu130-torch2.11/3.lock",
+      "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-3090/cu130-torch2.11/4.lock",
+      "verdict": "approve",
+      "trace": "snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+      "overall": "33372  97.093%    98.006%  4.51e-04  7.33e-01  3.04e+01  -1.402% ± 0.725%   4.51%",
+      "vs floor": "-1.420% ± 1.077%",
+      "budget": "≥96.697%            ≤8.33e-04 ≤1.30e+00                     ≤2.943%",
+      "passed": true,
+      "snapshot_x3_run_identical": true,
+      "seconds": 267
+     }
+    }
+   }
+  }
+ }
+}

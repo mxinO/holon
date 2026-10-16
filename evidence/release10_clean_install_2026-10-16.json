@@ -1,0 +1,141 @@
+{
+ "workload": "release10-clean-install",
+ "date": "2026-10-16",
+ "commit": "f30f9bb (a fresh clone of the release branch's tree; the release tag does not exist yet)",
+ "procedure": [
+  "one desktop per class (the step's clock-screened desktops), in a CUDA 13.0 devel container: the README's host requirements (driver, CUDA 13 toolkit, gcc / g++) plus a uv 0.11.1 binary",
+  "a clean environment (env -i): HOME, the uv cache, uv's Python store and the HF cache all new and empty on the desktop's local disk; PATH without any venv; no proxy or HF variables; online",
+  "git clone of the branch; uv sync --frozen; uv run holon prebuild; uv run holon models",
+  "uv run holon serve unsloth/Qwen3.8-27B-GGUF (downloads the card's locked file into the empty HF cache)",
+  "the README's two client snippets (OpenAI chat completion, then Anthropic message) in their own uv venv with openai and anthropic",
+  "/metrics: the served plan_id and its diff against the lock",
+  "a 46K-token chat request (max_tokens 8) against the 27B lock's 49,152-token context",
+  "kernel cache files (FlashInfer, the GGUF kernels, Triton) listed with sizes and mtimes before and after the first start"
+ ],
+ "classes": {
+  "rtx-5080": {
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "seconds": {
+    "clone": 11.4,
+    "uv_sync_frozen": 16.7,
+    "prebuild": 230.9,
+    "models": 1.2,
+    "serve_ready_incl_download": 42.0,
+    "clients": 3.3
+   },
+   "served_file": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S.gguf",
+   "lock": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/8.lock",
+   "lock_plan_id": "sha256:e90f401804eafb9e3b1c6ee95c4a4bc92184fc4bed888babcec25200a7fb961e",
+   "served_plan_id": "sha256:e90f401804eafb9e3b1c6ee95c4a4bc92184fc4bed888babcec25200a7fb961e",
+   "diff": [],
+   "plan_equals_lock": true,
+   "chat_completion": "2, 3, and 5",
+   "anthropic_message": "2, 3, and 5",
+   "long_prompt": {
+    "prompt_tokens": 46063,
+    "finish": "length",
+    "seconds": 24.5
+   },
+   "first_start_cache_files_added_or_changed": {
+    ".cache/flashinfer/0.6.12/120f/cached_ops/tmp": 1,
+    ".triton/cache": 261
+   },
+   "first_start_compiled": "Triton kernels only",
+   "hub_tries": 1
+  },
+  "rtx-4090": {
+   "gpu": "NVIDIA GeForce RTX 4090",
+   "seconds": {
+    "clone": 12.9,
+    "uv_sync_frozen": 15.6,
+    "prebuild": 458.7,
+    "models": 1.7,
+    "serve_ready_incl_download": 49.0,
+    "clients": 4.0
+   },
+   "served_file": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "lock": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/8.lock",
+   "lock_plan_id": "sha256:f4d7ac6610fc8f4084431f4660a29eeab35346ccef963a54de41888696e9c70c",
+   "served_plan_id": "sha256:f4d7ac6610fc8f4084431f4660a29eeab35346ccef963a54de41888696e9c70c",
+   "diff": [],
+   "plan_equals_lock": true,
+   "chat_completion": "2, 3, and 5",
+   "anthropic_message": null,
+   "long_prompt": {
+    "prompt_tokens": 46063,
+    "finish": "length",
+    "seconds": 15.7
+   },
+   "first_start_cache_files_added_or_changed": {
+    ".cache/flashinfer/0.6.12/89/cached_ops/tmp": 2,
+    ".triton/cache": 228
+   },
+   "first_start_compiled": "Triton kernels only",
+   "hub_tries": 1
+  },
+  "rtx-5090": {
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "seconds": {
+    "clone": 10.7,
+    "uv_sync_frozen": 15.5,
+    "prebuild": 238.3,
+    "models": 1.2,
+    "serve_ready_incl_download": 55.0,
+    "clients": 2.8
+   },
+   "served_file": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "lock": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-5090/cu130-torch2.11/3.lock",
+   "lock_plan_id": "sha256:d1daeb2344ed986daaeccb2dd49d62c0d8da6dccea7ddd0d0d0251f66f643e09",
+   "served_plan_id": "sha256:d1daeb2344ed986daaeccb2dd49d62c0d8da6dccea7ddd0d0d0251f66f643e09",
+   "diff": [],
+   "plan_equals_lock": true,
+   "chat_completion": "2, 3, and 5.",
+   "anthropic_message": "2, 3, and 5",
+   "long_prompt": {
+    "prompt_tokens": 46063,
+    "finish": "length",
+    "seconds": 12.0
+   },
+   "first_start_cache_files_added_or_changed": {
+    ".cache/flashinfer/0.6.12/120f/cached_ops/tmp": 2,
+    ".triton/cache": 228
+   },
+   "first_start_compiled": "Triton kernels only",
+   "hub_tries": 1
+  },
+  "rtx-3090": {
+   "gpu": "NVIDIA GeForce RTX 3090",
+   "seconds": {
+    "clone": 11.2,
+    "uv_sync_frozen": 16.3,
+    "prebuild": 272.2,
+    "models": 1.8,
+    "serve_ready_incl_download": 51.0,
+    "clients": 3.9
+   },
+   "served_file": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M.gguf",
+   "lock": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-3090/cu130-torch2.11/4.lock",
+   "lock_plan_id": "sha256:3e9123c1851656455abb2d248e3af8335bd6724938ff358871551d9c42788c9a",
+   "served_plan_id": "sha256:3e9123c1851656455abb2d248e3af8335bd6724938ff358871551d9c42788c9a",
+   "diff": [],
+   "plan_equals_lock": true,
+   "chat_completion": "2, 3, and 5.",
+   "anthropic_message": "2, 3, and 5",
+   "long_prompt": {
+    "prompt_tokens": 46063,
+    "finish": "length",
+    "seconds": 31.8
+   },
+   "first_start_cache_files_added_or_changed": {
+    ".cache/flashinfer/0.6.12/86/cached_ops/tmp": 2,
+    ".triton/cache": 228
+   },
+   "first_start_compiled": "Triton kernels only",
+   "hub_tries": 1
+  }
+ },
+ "notes": [
+  "cached_ops/tmp holds FlashInfer's empty per-module file locks, taken when it loads a module",
+  "a first run of this procedure at a4ecb9e (RTX 5080) and a5dbcbf (the others), before f86c182, served the lock and answered both clients on the RTX 5080, 4090 and 5090; on the RTX 3090 the hub listing failed once with an HTTP error (that run had no retry; this one needed none). Its first starts compiled FlashInfer's silu_and_mul (and on bf16 KV the prefill module) again after holon prebuild: fixed in f86c182 (release \u00a719.2)"
+ ]
+}

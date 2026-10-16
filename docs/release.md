@@ -3330,3 +3330,164 @@ scorer reference digest (the same environment) and one venv pytest digest. No co
 4. **Claude Code sends no `temperature`, `top_p` or `top_k`**, so the server's Anthropic defaults (temperature 1.0)
    decide; the demo ran sampled, not greedy.
 5. Not done here, as instructed: no engine change, no push, `main` untouched.
+
+## 19. As built (step 10)
+
+Branch `release10` from local `main` at a5538fa (steps 6–9 on the public root). Records:
+`evidence/release10_locks_2026-10-16.json` (§19.1–§19.2) and `evidence/release10_clean_install_2026-10-16.json`
+(§19.3). One desktop per class, the same models as steps 7–9's, each clock-screened before its work (SM MHz p10 / p50
+under 60 s of 27B decode at batch 4; power cap is the share of samples at the power limit; no thermal or hardware
+slowdown on any) and after the context change:
+
+| class | before | after | used |
+|---|---|---|---|
+| RTX 5080 | 2715 / 2730, power cap 1.00 | 2700 / 2715, power cap 1.00 | yes |
+| RTX 4090 | 2670 / 2685, power cap 0 | 2670 / 2670, power cap 0 | yes |
+| RTX 5090 | 2505 / 2610, power cap 1.00 | 2490 / 2535, power cap 1.00 | yes |
+| RTX 3090 | 1680 / 1695, power cap 1.00 | 1650 / 1665, power cap 1.00 | yes |
+
+The step changes one file of engine code, `plugins/holon_plugins/kernels/flashinfer/prebuild.py` (§19.2), a bug the
+clean install found; everything else is locks, records and documents.
+
+### 19.1 The Qwen3.8-27B locks at 49,152 tokens (lead decision)
+
+Claude Code 2.1.300 sends side requests of ≈ 31K input tokens, which left ≈ 1.3K tokens in the 32K context (§18.2).
+Each class's 27B lock was propagated at its own `[engine]` plus `--max-model-len 49152` (`holon_tools propagate
+--approve`: L2 against the floor of its path and KV format, the snapshot trace twice), then `holon_judge snapshot --runs
+3` at the new lock; the KV pool was read from an engine built at the new lock without the context clamp.
+
+| class | lock | top-1 (floor; budget) | KL p99 (floor; budget) | ΔPPL vs floor (budget) | trace | snapshot ×3 | KV pool, tokens | s |
+|---|---|---|---|---|---|---|---|---|
+| RTX 5080 | UD-IQ3_S, q8_0 KV, 6 → 7 | 97.50% (97.54; ≥ 97.29) | 0.639 (0.712; ≤ 1.42) | +0.009% ± 0.805% (≤ 2.001%) | identical | identical | 55,120 | 138 + 71 |
+| RTX 4090 | UD-Q4_K_M, 6 → 7 | 97.11% (96.95; ≥ 96.70) | 0.893 (0.648; ≤ 1.30) | −1.822% ± 0.749% (≤ 2.123%) | identical | identical | 61,888 | 178 + 96 |
+| RTX 5090 | UD-Q4_K_M, 1 → 2 | 97.16% (96.95; ≥ 96.70) | 0.743 (0.648; ≤ 1.30) | +0.378% ± 0.685% (≤ 1.963%) | identical | identical | 195,056 | 269 + 62 |
+| RTX 3090 | UD-Q4_K_M, 2 → 3 | 97.09% (96.95; ≥ 96.70) | 0.733 (0.648; ≤ 1.30) | −1.420% ± 1.077% (≤ 2.943%) | **moved: the desktop** | identical | 86,848 | 302 + 106 |
+
+- **Every card's KV pool holds one 48K sequence** (49,152 tokens; the 5080's with 6K to spare: its pool fell from
+  57,920 at 32K, §16.6). The clean installs then served each lock with no context clamp (§19.3), and a 46,063-token
+  request completed on every card.
+- **The RTX 3090's trace moved with the desktop, not the context.** Lock 2 was written on step 7's desktop D; this is
+  another RTX 3090 (step 8's). On it, the trace recorded at lock 2's own settings (32K) equals the new lock's (48K), and
+  on an RTX A5000 (sm_86) the 32K and 48K settings record one trace (the record's `trace_check`). Its L2 moved with it
+  (ΔPPL vs floor −0.382% → −1.420%, KL p99 0.750 → 0.733, inside the budget). The 3090's 8B and 30B traces did not move
+  on this desktop (§19.2): only the 27B's differs between the two desktops. Approved as a passing verdict whose trace
+  change is explained; the lead may prefer to treat a trace that differs across desktops of one class as an item for
+  v1's `isolation-check` (plan §8b.1).
+- **The published numbers stand.** Step 8 served the 27B at the traces' 30,208-token context, not the lock's (§17.1),
+  and step 9's demo ran at 32K; a larger `max_model_len` changes the RoPE table's length and the block tables' width,
+  not the kernels (the traces above are byte-identical).
+- **Approvals: 4**, each a passing verdict under the owner's delegation; commits e69e4d2 and a5dbcbf.
+
+### 19.2 A bug the clean install found: FlashInfer's modules compiled again after `holon prebuild`
+
+- **Found:** the first clean installs listed the cache files a first start adds. After `holon prebuild`, the RTX 5080's
+  first start rebuilt FlashInfer's `silu_and_mul` (nvcc, 2.6 s) and the RTX 5090's also the bf16 prefill module.
+  Acceptance 4 ("a cold start compiles nothing but Triton kernels") and the README's First start section were false.
+- **Cause:** FlashInfer runs a module's own ninja build before loading it, and ninja recompiles a module whose directory
+  has no build log. The prebuild used `build_jit_specs`, one combined ninja build whose log sits in the parent
+  directory, so every prebuilt module compiled again at its first use (on an A5000: `silu_and_mul` 4.3 s, the bf16
+  head-dim-256 prefill module 13.8 s, rope 40.5 s; once per install, then cached).
+- **Fix** (f86c182): each module is built by its own ninja, in its own directory. Test, failing before and passing after:
+  `plugins/tests/test_op_kernels.py::test_prebuilt_modules_load_without_compiling` (prebuild one module into a fresh
+  workspace, load it in another process, its `.so` unchanged). Measured after the fix: the prefill, rope and silu modules
+  load in ≤ 0.03 s with nothing rebuilt. The cost: `holon prebuild` builds the modules one after another, 231–459 s on
+  the desktops against 191–382 s before.
+- **Every lock re-propagated:** the fix moves `kernels.flashinfer`'s `src`, which all 22 newest locks pin. Each was
+  propagated on its class at its own `[engine]`, pins only, with snapshots ×3 at the new lock (commit f30f9bb). **All 22
+  pass with the trace byte-identical to the previous lock's and L2 equal to it to the printed digit**; snapshots
+  run-identical. Sweep times: RTX 5080 10.9 min (6 locks), RTX 4090 20.8 min (8), RTX 5090 8.6 min (4), RTX 3090
+  11.5 min (4), each under plan §9's 30 minutes. **Approvals: 22.**
+- **Approvals this step: 26**, against plan §9's "> 1 / day": the trigger fires again, recorded (async propagation is
+  v1's).
+
+### 19.3 Clean install by the README
+
+On each class's desktop, in a CUDA 13.0 devel container (the README's host requirements plus a uv 0.11.1 binary), with
+`env -i`: an empty HOME, uv cache, Python store and HF cache on the desktop's local disk, no venv on `PATH`, online. The
+README's steps, timed: `git clone` of the branch (f30f9bb), `uv sync --frozen`, `uv run holon prebuild`, `uv run holon
+models`, `uv run holon serve unsloth/Qwen3.8-27B-GGUF` (the hub reference, which downloads this card's locked file),
+then the README's OpenAI and Anthropic snippets in their own venv, `/metrics`, and a 46K-token request.
+
+| class | clone | `uv sync --frozen` | `holon prebuild` | `holon serve` ready (download included) | file | served plan = lock | chat / message | 46,063-token request | first start compiled |
+|---|---|---|---|---|---|---|---|---|---|
+| RTX 5080 | 11.4 s | 16.7 s | 230.9 s | 42 s | UD-IQ3_S, 11.2 GiB | yes, lock 8, no diff | "2, 3, and 5" / same | 24.5 s | Triton only (261 files) |
+| RTX 4090 | 12.9 s | 15.6 s | 458.7 s | 49 s | UD-Q4_K_M, 15.3 GiB | yes, lock 8, no diff | same / same | 15.7 s | Triton only (228) |
+| RTX 5090 | 10.7 s | 15.5 s | 238.3 s | 55 s | UD-Q4_K_M, 15.3 GiB | yes, lock 3, no diff | same / same | 12.0 s | Triton only (228) |
+| RTX 3090 | 11.2 s | 16.3 s | 272.2 s | 51 s | UD-Q4_K_M, 15.3 GiB | yes, lock 4, no diff | same / same | 31.8 s | Triton only (228) |
+
+- **Acceptance 3's form holds:** the served `plan_id` equals the newest lock's on every class, with an empty diff
+  (no `max_model_len` clamp). `holon models` lists each card's locks with their contexts, the 27B at 49,152.
+- **Acceptance 4 holds after §19.2's fix:** the first start added Triton cache files and FlashInfer's empty file locks,
+  nothing under FlashInfer's modules or the GGUF kernels. The CuTe DSL norms compile in memory (README, First start).
+- **Timings are this network's:** `uv sync` fetched ≈ 5.6 GB of wheels and the hub download ran at several hundred
+  MB/s; a home connection takes longer. `holon prebuild` is a desktop's 16 threads.
+- **The first run of this procedure** (before the fix) served and answered on the RTX 5080, 4090 and 5090. On the RTX
+  3090 the hub listing failed once with an HTTP error (`the hub is unreachable (HfHubHTTPError …)`), four desktops having
+  listed the hub within a few minutes without a token; this run started the classes three minutes apart, allowed one
+  retry, and needed none. A user's single listing is not this burst, but the message could be clearer about what the
+  hub answered: noted for v1.
+- **Offline with a hub name** needs the cache's `refs/main` (§18.1); the README now says to serve the file's path in a
+  cache filled another way.
+
+### 19.4 Docker
+
+`git archive --format=tar <commit> | docker build --build-arg MAX_JOBS=16 -t <name> -`, on the development host (the
+build needs no GPU), nothing pushed: at a5dbcbf it built in 588 s; at f86c182, with the per-module prebuild for SM 86,
+89 and 120, in 850 s. The image was built, not run.
+
+### 19.5 Checks
+
+- `python scripts/ci/check_locks.py --release`: **passes**, every newest lock pins this tree.
+- **History scan of the public line** (release §8): every commit from the root 3642a61 to HEAD, every blob reachable
+  from HEAD (every version of every path, safetensors by their header metadata as `check_private.py` reads them), every
+  path name, commit message and author / committer identity, against `check_private.py`'s full pattern set (GENERIC,
+  MACHINE and `.private-patterns`). Counts only; the scanner and its output stay local.
+
+  | scanned | count | hits |
+  |---|---|---|
+  | commits (one root, 3642a61) | 30 | 0 in messages, 0 in identities |
+  | blobs | 1814 (71 safetensors) | 0 |
+  | path names | 1989 | 0 |
+  | paths `check_private.py` skips: the vendored upstream trees | — | 3 blobs (links to NVIDIA's public CUDA documentation in upstream ggml sources) |
+  | the other skipped path: `check_private.py` itself (its patterns name what they look for) | — | 1 blob (its own MACHINE pattern) |
+
+- `scripts/ci/check_provenance.py` and both `vendor.sh --check`: pass; `THIRD_PARTY_NOTICES.md` is unchanged and
+  current (the step adds no third-party code).
+- `scripts/ci/check_private.py` on the whole tree: passes.
+
+### 19.6 Documents
+
+- **README:** the pitch is isolation (adding a model touches no shared code; each model has its own lock), with no
+  legibility or agent-cost claim. Performance is a summary table, the caveats and the losses, linking §17 for the
+  tables: the long-prompt number is the 30K request's own TTFT (0.98–1.17×); the streams' (up to 43×) and the other
+  traces' TTFT ratios carry `llama-server`'s `--cache-ram` caveat; MTP is quoted at batch 8 (1.51–1.60×) and on the
+  agent trace (1.27–1.88×), unpaired, not single-stream. Known limitations add MTP off and how to turn it on, the
+  long-prompt stall on `chunk_with_decode` 0 locks and `--chunk-with-decode 512`, the context per lock, no
+  authentication, the CuTe norm compile and M0.6's borrowed files; Quickstart says how to serve offline from a cache
+  without `refs/main`. 546 → 323 lines.
+- **Release notes** for the GitHub release page: `docs/RELEASE_NOTES_v0.1.0.md`.
+- **Release status** in `docs/plan.md` §8b.1, with each carried CI item closed or deferred.
+- **`.github/workflows/ci.yml`:** a CPU-only run of `run_all.sh` and the tests on push and pull request. Nothing remote
+  is enabled: it runs once the line is pushed (step 11).
+
+### 19.7 Suite and CI
+
+- Full GPU suite (four RTX A5000s, the worktree's uv venv; `pytest core std plugins judge testing tools`) at f86c182, the
+  final code: **1222 passed, 65 skipped in 18 min 58 s** (1221 / 65 at step 7, + the prebuild test).
+- CPU only (no GPU visible), at a5538fa: 707 passed, 579 skipped in 8 min 13 s — what the workflow will run.
+- `scripts/ci/run_all.sh main`: green (import contracts 8 kept).
+
+### 19.8 For the lead
+
+1. **The 27B locks serve 49,152 tokens on all four classes** (4 approvals, §19.1). Every KV pool holds a 48K sequence;
+   the RTX 5080's has 6K tokens to spare.
+2. **A bug fixed in engine code** (§19.2, f86c182, with a failing-first test): `holon prebuild` left every FlashInfer
+   module to compile again at first use. The fix moved the plugin's `src`, so all 22 locks were re-propagated (22
+   approvals, every trace byte-identical): **26 approvals this step**, the plan §9 trigger fires again.
+3. **The RTX 3090's 27B trace differs between two RTX 3090 desktops** at the same settings (§19.1); its L2 still passes.
+   Approved. It matters for v1's `isolation-check`, which must reproduce a lock byte for byte on whichever desktop of
+   the class it gets.
+4. **Clean install passes on all four classes** (§19.3): 5–9 min from clone to a served request, the served plan equal
+   to the lock. The first attempt on the RTX 3090 met a hub HTTP error during a burst of anonymous listings.
+5. **History scan: zero hits** on the public line outside the vendored upstream trees (§19.5).
+6. Not done, as instructed: no push, no tag, no remote touched, `main` untouched. Every desktop allocation is released.
