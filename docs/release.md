@@ -2679,8 +2679,8 @@ What the ratios show:
   - TTFT p50 1.56–9.3× on `decode_b1`, `decode_b8` and the agent trace.
 - **The long prompt's TTFT ratios against llama.cpp (4.7–43×) are the three short streams', and they are mostly
   `llama-server`'s own host prompt cache.**
-  - The trace's TTFT p50 is its three 256-token streams'. Against `llama-server`, Holon's advantage there is 4.7–52×
-    (llama.cpp 1.6–12 s, Holon 0.05–0.46 s).
+  - The trace's TTFT p50 is its three 256-token streams'. As a ratio of each record's median stream TTFT (not the
+    table's paired statistic), Holon's advantage over `llama-server` is 4.7–52× (llama.cpp 1.6–12 s, Holon 0.05–0.46 s).
   - The 30K request's own TTFT ratio is 0.98–1.17×.
   - The streams' wait sits in every round. In the one log examined (the 4090's 8B, round 1), the streams waited
     ≈ 2.65 s while `llama-server` saved the previous slot's state to its RAM prompt cache (`--cache-ram`, on by
