@@ -332,12 +332,15 @@ def pct(values: list[float], q: float) -> float | None:
 
 
 def summarize(record: dict) -> dict:
-    """Speed and endpoint facts over every counted run of a record: decode speed (1000 / TPOT) of requests with at
-    least 2 output tokens; prefill speed of the uncached input ((input − cached) / TTFT) overall and by context size;
-    the prefix-cache hit rate; per-request latency; per-run outcomes; and every request that was not a clean 200
-    stream, left markup in its text or made a tool call whose arguments did not parse."""
+    """Speed and endpoint facts over every counted run of a record (series not named `smoke…`): decode speed
+    (1000 / TPOT) of requests with at least 2 output tokens; prefill speed of the uncached input ((input − cached) /
+    TTFT) overall and by context size; the prefix-cache hit rate; per-request latency; per-run outcomes; and every
+    request that was not a clean 200 stream, left markup in its text or made a tool call whose arguments did not
+    parse."""
     rows, runs, issues = [], [], []
     for task, series in record["series"].items():
+        if task.startswith("smoke"):                       # uncounted
+            continue
         for i, run in enumerate(series["runs"]):
             served = run["served"]
             runs.append({"task": task, "run": i + 1, "success": run["success"], "turns": run["turns"],
