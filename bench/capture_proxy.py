@@ -84,7 +84,8 @@ def summary(method: str, path: str, headers: dict[str, str], body: dict | None, 
 
 def facts(answer: bytes) -> dict:
     """What an Anthropic answer reports, never its text: the token counts (a whole message's `usage`, or a stream's:
-    `message_start` gives the input tokens, the last `message_delta` the output tokens), the stop reason, and for an
+    `message_start` gives the input tokens and the cache reads counted apart, the last `message_delta` the output
+    tokens), the stop reason, and for an
     error its type and whether it refused the prompt's length (the engine's `max_model_len` refusal)."""
     out: dict = {"usage": {}}
     for line in answer.decode(errors="replace").splitlines() or [""]:
@@ -97,7 +98,8 @@ def facts(answer: bytes) -> dict:
             continue
         body = event["message"] if isinstance(event.get("message"), dict) else event
         usage = body.get("usage")
-        out["usage"] |= {k: v for k, v in usage.items() if k in ("input_tokens", "output_tokens")} \
+        out["usage"] |= {k: v for k, v in usage.items() if k in ("input_tokens", "output_tokens",
+                                                                 "cache_read_input_tokens")} \
             if isinstance(usage, dict) else {}
         stop = (event.get("delta") or {}).get("stop_reason") if isinstance(event.get("delta"), dict) else None
         if stop := stop or body.get("stop_reason"):

@@ -224,6 +224,7 @@ def requests_summary(rows: list[dict]) -> dict:
         usage, ttft = r.get("usage") or {}, r.get("ttft_ms")
         n_in, n_out = usage.get("input_tokens"), usage.get("output_tokens")
         per.append({"status": r.get("status"), "input_tokens": n_in, "cached_tokens": r.get("prefix_tokens_saved"),
+                    "usage_cached_tokens": usage.get("cached_tokens"),          # what the server's usage reported
                     "output_tokens": n_out, "ttft_ms": ttft, "total_ms": r.get("total_ms"),
                     "tpot_ms": round((r["total_ms"] - ttft) / (n_out - 1), 2) if ttft is not None and (n_out or 0) > 1
                     else None, "stop_reason": r.get("stop_reason"), "error_type": r.get("error_type"),

@@ -185,7 +185,10 @@ class Engine:
             self.processor = p.load(p.single("logits_processor", cfg.slots["logits_processor"])).build(
                 self.ctx, VocabView(self.spec.vocab, self.eos, source.tokenizer))
 
+        self._hits: dict[Seq, int | None] = {}            # first admission's prefix hit, None once reported
+
         def admit(seq: Seq) -> None:
+            self._hits.setdefault(seq, seq.num_computed)   # the prefix hit of its first admission only
             sampler.admit(seq.slot, seq.params)
             if admit_draft is not None:
                 admit_draft(seq.slot, seq.tokens)
@@ -336,6 +339,7 @@ class Engine:
                 continue
             self.sched.finish(seq, reason)
             self._prompt_lp.pop(seq, None)
+            self._hits.pop(seq, None)
             deltas.append(TokenDelta(rid, [], seq.index, finish_reason=reason, error=error, kind=kind))
         if seqs and seqs[0].constrained:
             self._blocked.pop(rid, None)
@@ -576,7 +580,10 @@ class Engine:
                 lps[0][at: at + len(out)], [t[:k] for t in lps[1][at: at + len(out)]],
                 [t[:k] for t in lps[2][at: at + len(out)]])
             prompt_lp = self._prompt_lp.pop(seq, None) if self._prompt_lp else None
-            deltas.append(TokenDelta(seq.rid, out, seq.index, logprobs, prompt_lp, reason))
+            cached = self._hits.pop(seq, None) if reason else self._hits.get(seq)
+            if cached is not None and not reason:
+                self._hits[seq] = None
+            deltas.append(TokenDelta(seq.rid, out, seq.index, logprobs, prompt_lp, reason, cached_tokens=cached))
         for seq, spec, at, payload in step.publishes:    # after this commit's blocks are cached
             self.state.register(seq, spec, at, payload)
         return deltas

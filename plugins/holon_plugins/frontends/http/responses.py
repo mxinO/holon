@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .pipeline import Block, Blocks, Chat, Conversation, Efforts, pieces
 from .schemas import response_format, tool_choice
-from .stream import Piece
+from .stream import Piece, cached
 from .web import BadRequest, EventStream, collect, failure, rejected, unless_disconnected
 
 
@@ -90,7 +90,7 @@ def router(client: EngineClient, bundle: FrontendBundle, model_id: str, efforts:
         blocks = Blocks(_call_id)
         blocks.push([e for p in ps for e in p.events])
         return JSONResponse(_response(head, blocks, ps[-1].finish_reason, len(chat.ids),
-                                      sum(len(p.token_ids) for p in ps)))
+                                      sum(len(p.token_ids) for p in ps), cached(ps)))
 
     return r
 
@@ -161,13 +161,14 @@ def _part(text: str) -> dict[str, Any]:
     return {"type": "output_text", "text": text, "annotations": []}
 
 
-def _response(head: dict[str, Any], blocks: Blocks, reason: str | None, n_prompt: int, n_output: int
-              ) -> dict[str, Any]:
+def _response(head: dict[str, Any], blocks: Blocks, reason: str | None, n_prompt: int, n_output: int,
+              n_cached: int) -> dict[str, Any]:
     incomplete = reason == "length"
     return {**head, "status": "incomplete" if incomplete else "completed",
             "incomplete_details": {"reason": "max_output_tokens"} if incomplete else None,
             "output": [_item(b, i) for i, b in enumerate(blocks.blocks)],
-            "usage": {"input_tokens": n_prompt, "output_tokens": n_output, "total_tokens": n_prompt + n_output}}
+            "usage": {"input_tokens": n_prompt, "output_tokens": n_output, "total_tokens": n_prompt + n_output,
+                      "input_tokens_details": {"cached_tokens": n_cached}}}
 
 
 async def _events(head: dict[str, Any], n_prompt: int, first: Piece, gen: AsyncIterator[Piece]) -> AsyncIterator[str]:
@@ -211,5 +212,5 @@ async def _events(head: dict[str, Any], n_prompt: int, first: Piece, gen: AsyncI
                         yield sse("response.content_part.done", **ids, part=_part(b.text))
                     yield sse("response.output_item.done", **at, item=_item(b, i))
             p = await anext(gen, None)
-    final = _response(head, blocks, reason, n_prompt, n_output)
+    final = _response(head, blocks, reason, n_prompt, n_output, cached([first]))
     yield sse(f"response.{final['status']}", response=final)

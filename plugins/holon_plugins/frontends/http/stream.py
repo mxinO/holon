@@ -25,6 +25,7 @@ class Piece:
     error: str | None = None
     kind: str | None = None            # the error's kind (TokenDelta.kind)
     events: list[ParseEvent] = dataclasses.field(default_factory=list)
+    cached_tokens: int | None = None   # on a choice's first piece: its prompt tokens the prefix cache served
 
 
 class Choice:
@@ -48,7 +49,8 @@ class Choice:
             self.unsent, self.finish_reason = self.unsent[:min(hits)], "stop"
         end = len(self.unsent) if self.finish_reason else max(0, len(self.unsent) - self.hold)
         text, self.unsent = self.unsent[:end], self.unsent[end:]
-        return Piece(d.index, text, d.token_ids, d.logprobs, d.prompt_logprobs, self.finish_reason)
+        return Piece(d.index, text, d.token_ids, d.logprobs, d.prompt_logprobs, self.finish_reason,
+                     cached_tokens=d.cached_tokens)
 
 
 async def generate(client: EngineClient, tokenizer: Tokenizer, prompt_ids: list[int], params: SamplingParams,
@@ -79,3 +81,8 @@ async def generate(client: EngineClient, tokenizer: Tokenizer, prompt_ids: list[
             await deltas.aclose()   # type: ignore[attr-defined]  # an async generator in practice
             if running:
                 await client.abort(rid)
+
+
+def cached(pieces: list[Piece]) -> int:
+    """A prompt's tokens the prefix cache served: its first sequence's count (0 if the engine gave none)."""
+    return next((p.cached_tokens for p in pieces if p.index == 0 and p.cached_tokens is not None), 0)

@@ -108,7 +108,7 @@ def test_manifest_loads_design_example(tmp_path: pathlib.Path):
     (">=1.0,<2.0", "[options]\n'a.b' = { help = 'x', choices = 'a8' }\n", "strings"),
     (">=1.0,<2.0", "[options]\n'a.b' = { help = 'x', choices = [4, 8] }\n", "strings"),
     (None, "", "core_abi missing"),                                  # required (release design §7)
-    (">=0.2,<0.3", "[surprise]\n", "does not admit this core's plugin ABI 1.0"),   # checked before the keys
+    (">=0.2,<0.3", "[surprise]\n", "does not admit this core's plugin ABI 1.1"),   # checked before the keys
     ("~=0.1", "", "expected clauses"),
 ])
 def test_manifest_rejects_mistakes_with_path(tmp_path: pathlib.Path, abi, extra, match):

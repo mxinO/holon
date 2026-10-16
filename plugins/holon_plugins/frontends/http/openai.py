@@ -1,5 +1,6 @@
 """OpenAI chat and text completions (`/v1/chat/completions`, `/v1/completions`; bodies in `schemas.py`): choices and
-stream chunks — chat with reasoning and tool calls, streamed as `tool_calls` deltas — logprobs, usage."""
+stream chunks — chat with reasoning and tool calls, streamed as `tool_calls` deltas — logprobs, usage (with the
+prompt tokens the prefix cache served, `prompt_tokens_details.cached_tokens`)."""
 from __future__ import annotations
 
 import itertools
@@ -26,7 +27,7 @@ from holon.api import (
 
 from .pipeline import Blocks, Chat, Efforts, pieces
 from .schemas import ChatRequest, CompletionRequest, GenerationRequest
-from .stream import Piece, generate
+from .stream import Piece, cached, generate
 from .web import BadRequest, EventStream, collect, failure, rejected, unless_disconnected
 
 # A token's logprob row: its text, its logprob (None for the unscored first prompt token) and the ranked top-k.
@@ -79,7 +80,8 @@ def router(client: EngineClient, bundle: FrontendBundle, model_id: str, efforts:
         choices = [fmt.choice(i, p) | ({"token_ids": p.token_ids} if req.return_token_ids else {})
                    for i, p in enumerate(merged)]
         n_completion = sum(len(p.token_ids) for pieces in results for p in pieces)
-        return JSONResponse({**envelope, "choices": choices, "usage": usage(n_prompt, n_completion)})
+        n_cached = sum(cached(pieces) for pieces in results)
+        return JSONResponse({**envelope, "choices": choices, "usage": usage(n_prompt, n_completion, n_cached)})
 
     return r
 
@@ -91,7 +93,7 @@ async def _events(fmt: ChatCompletion | Completion, envelope: dict[str, Any], fi
     choice still running with "error"."""
     seen: set[int] = set()
     finished: set[int] = set()
-    n_completion = 0
+    n_completion = n_cached = 0
     async with aclosing(gen):
         p: Piece | None = first
         while p is not None:
@@ -100,6 +102,7 @@ async def _events(fmt: ChatCompletion | Completion, envelope: dict[str, Any], fi
                     yield _event({**envelope, "choices": [fmt.failed(k)]})
                 break
             n_completion += len(p.token_ids)
+            n_cached = cached([p]) or n_cached
             if p.finish_reason:
                 finished.add(p.index)
             chunks = fmt.chunks(p, p.index not in seen, token_ids)
@@ -109,7 +112,7 @@ async def _events(fmt: ChatCompletion | Completion, envelope: dict[str, Any], fi
                                                                 else {})]})
             p = await anext(gen, None)
     if n_prompt is not None:
-        yield _event({**envelope, "choices": [], "usage": usage(n_prompt, n_completion)})
+        yield _event({**envelope, "choices": [], "usage": usage(n_prompt, n_completion, n_cached)})
     yield "data: [DONE]\n\n"
 
 
@@ -129,9 +132,11 @@ def merge(pieces: list[Piece], index: int, failed: bool) -> Piece:
         events=[e for p in pieces for e in p.events])
 
 
-def usage(prompt_tokens: int, completion_tokens: int) -> dict[str, int]:
+def usage(prompt_tokens: int, completion_tokens: int, cached_tokens: int) -> dict[str, Any]:
+    """OpenAI's usage; `cached_tokens`: prompt tokens the prefix cache served (the engine's count)."""
     return {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens}
+            "total_tokens": prompt_tokens + completion_tokens,
+            "prompt_tokens_details": {"cached_tokens": cached_tokens}}
 
 
 def _rows(tok: Tokenizer, ids: list[int], lp: Logprobs) -> list[Row]:

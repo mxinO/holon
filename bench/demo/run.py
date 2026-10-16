@@ -424,6 +424,8 @@ def requests_summary(rows: list[dict]) -> dict:
     for r in messages:
         usage, ttft = r.get("usage") or {}, r.get("ttft_ms")
         n_in, n_out = usage.get("input_tokens"), usage.get("output_tokens")
+        if n_in is not None:                         # Anthropic counts cache reads apart (v0.1.1): the whole prompt
+            n_in += usage.get("cache_read_input_tokens") or 0
         per.append({"status": r.get("status"), "input_tokens": n_in, "output_tokens": n_out, "ttft_ms": ttft,
                     "tpot_ms": round((r["total_ms"] - ttft) / (n_out - 1), 2) if ttft is not None and (n_out or 0) > 1
                     else None, "stop_reason": r.get("stop_reason"), "length_refused": bool(r.get("length_refused"))})

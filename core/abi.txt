@@ -1,4 +1,4 @@
-abi 1.0
+abi 1.1
 
 # holon.api
 dataclass Abort
@@ -385,6 +385,7 @@ dataclass TokenDelta
   #5 finish_reason: str | None = None
   #6 error: str | None = None
   #7 kind: str | None = None
+  #8 cached_tokens: int | None = None
 enum TokenSrc
   HOST = 0
   DEVICE_LAST = 1

@@ -215,15 +215,31 @@ def test_n_sequences_per_request(tiny_checkpoint, tiny_case):
     assert first == run(sampled) and len({tuple(s) for s in first}) > 1
 
 
+def _counts(engine, prompts, params=GREEDY):
+    """Each sequence's tokens and the `cached_tokens` of its deltas, by (request, sequence)."""
+    for p in prompts:
+        engine.add(p, params)
+    out: dict[tuple[str, int], tuple[list[int], list[int | None]]] = {}
+    while engine.has_work():
+        for d in engine.step():
+            tokens, counts = out.setdefault((d.rid, d.index), ([], []))
+            tokens.extend(d.token_ids)
+            counts.append(d.cached_tokens)
+    return [out[k] for k in sorted(out, key=lambda k: (int(k[0]), k[1]))]
+
+
 def test_prefix_cache_hits_are_exact_across_turns(tiny_checkpoint, tiny_case):
     prompts, _ = tiny_case
     hf = AutoModelForCausalLM.from_pretrained(tiny_checkpoint, dtype=torch.float32).eval()
     engine = _tiny_engine(tiny_checkpoint, max_model_len=96)
-    first = engine.generate([prompts[3]], GREEDY)[0]
+    ((first, counts),) = _counts(engine, [prompts[3]])
+    assert counts[0] == 0 and set(counts[1:]) == {None}                    # reported once, on the first delta
     saved = engine.state.tokens_saved
     second_turn = prompts[3] + first + prompts[1]                 # a follow-up: history plus a new message
-    assert engine.generate([second_turn], GREEDY) == _hf_greedy(hf, [second_turn], GREEDY.max_tokens)
-    assert engine.state.tokens_saved - saved == (len(prompts[3] + first) - 1) // 4 * 4   # whole cached blocks
+    ((second, counts),) = _counts(engine, [second_turn])
+    assert second == _hf_greedy(hf, [second_turn], GREEDY.max_tokens)[0]
+    hit = (len(prompts[3] + first) - 1) // 4 * 4                          # whole cached blocks
+    assert engine.state.tokens_saved - saved == hit and counts[0] == hit and set(counts[1:]) == {None}
     assert engine.generate([prompts[3]], GREEDY) == [first] and _released(engine)
 
 
@@ -232,8 +248,13 @@ def test_prefix_cache_under_memory_pressure(tiny_checkpoint, tiny_case):
     prompts, expected = tiny_case
     engine = _tiny_engine(tiny_checkpoint, state_memory=12 * 2048)
     for _ in range(2):
-        assert engine.generate(prompts, GREEDY) == expected
-    assert engine.state.tokens_saved > 0 and _released(engine)
+        saved = engine.state.tokens_saved
+        runs = _counts(engine, prompts)
+        assert [tokens for tokens, _ in runs] == expected
+        # one count per sequence, from its first admission: re-admissions after preemption hit their own blocks
+        assert all(counts[0] is not None and set(counts[1:]) <= {None} for _, counts in runs)
+        assert sum(counts[0] for _, counts in runs) <= engine.state.tokens_saved - saved
+    assert engine.state.tokens_saved > 0 and engine.sched.preemptions > 0 and _released(engine)
 
 
 def test_siblings_adopt_the_first_sequence_prompt(tiny_checkpoint, tiny_case):

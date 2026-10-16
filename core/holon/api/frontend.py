@@ -48,6 +48,7 @@ class TokenDelta:
     finish_reason: str | None = None   # of FINISH_REASONS
     error: str | None = None           # why the request was rejected (finish_reason "error")
     kind: str | None = None            # and the error's kind (ERROR_KINDS; `RequestError`)
+    cached_tokens: int | None = None   # on a sequence's first delta: its prompt tokens the prefix cache served
 
 
 @dataclasses.dataclass(slots=True)

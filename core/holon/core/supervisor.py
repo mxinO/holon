@@ -68,6 +68,7 @@ class _Request:
     queue: asyncio.Queue[TokenDelta] = dataclasses.field(default_factory=asyncio.Queue)
     out: dict[int, list[int]] = dataclasses.field(default_factory=dict)    # tokens streamed, per sequence
     done: set[int] = dataclasses.field(default_factory=set)               # finished sequences
+    cached: set[int] = dataclasses.field(default_factory=set)             # sequences whose prefix hit was sent
     engine: EngineProcess | None = None      # the engine it runs on; None while it waits or once it is done
     pumps: dict[str, asyncio.Task[None]] = dataclasses.field(default_factory=dict)   # engine rid -> task
     strikes: int = 0                         # crashes it was in flight for
@@ -77,6 +78,13 @@ class _Request:
     @property
     def finished(self) -> bool:
         return len(self.done) == self.params.n
+
+    def first_count(self, d: TokenDelta) -> None:
+        """Pass on a sequence's prefix hit (`cached_tokens`) only the first time: a resumed sequence's engine also
+        counts the tokens it streamed before, which the cache did not save the client."""
+        if d.cached_tokens is not None:
+            d.cached_tokens = None if d.index in self.cached else d.cached_tokens
+            self.cached.add(d.index)
 
     def submissions(self) -> list[tuple[str, list[int], SamplingParams, int | None, int]]:
         """Engine requests (rid, tokens, params, sequence index, output tokens resumed) that continue it: the whole
@@ -228,6 +236,7 @@ class Supervisor:
                 if d.finish_reason == "error" and d.error == engine.client.failure:
                     break                                         # the engine failed, not this request
                 d.rid, d.index = req.rid, d.index if index is None else index
+                req.first_count(d)
                 req.out.setdefault(d.index, []).extend(d.token_ids)
                 req.queue.put_nowait(d)
                 if d.finish_reason == "error":                    # the request failed: its other sequences end too

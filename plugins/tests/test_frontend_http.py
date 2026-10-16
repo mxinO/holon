@@ -66,9 +66,9 @@ class FakeEngine:
     `fail_after`, the request fails (kind "engine") after that many steps; with `pause`, it is quiet that many seconds
     after its first step."""
 
-    def __init__(self, max_prompt=64, endless=False, outputs=OUTPUTS, fail_after=None, pause=0.0):
+    def __init__(self, max_prompt=64, endless=False, outputs=OUTPUTS, fail_after=None, pause=0.0, cached=None):
         self.max_prompt, self.endless, self.outputs, self.fail_after = max_prompt, endless, outputs, fail_after
-        self.pause = pause
+        self.pause, self.cached = pause, cached        # `cached`: the prefix hit each sequence's first delta reports
         self.requests, self.aborted = [], []
 
     async def generate(self, token_ids, params: SamplingParams, rid=None, resume_output=0):
@@ -97,7 +97,8 @@ class FakeEngine:
                     token, reason = seq[step]
                     yield TokenDelta(rid, [token], index=i, logprobs=self._lp([token], params.logprobs),
                                      prompt_logprobs=self._lp(token_ids[1:], params.prompt_logprobs)
-                                     if i == 0 and step == 0 else None, finish_reason=reason)
+                                     if i == 0 and step == 0 else None, finish_reason=reason,
+                                     cached_tokens=self.cached + i if step == 0 and self.cached is not None else None)
             await asyncio.sleep(0)
 
     @staticmethod
@@ -184,7 +185,8 @@ def test_completion(http, engine):
     (choice,) = body["choices"]
     assert choice["text"] == OUTPUTS[0] and choice["finish_reason"] == "stop" and choice["logprobs"] is None
     assert body["usage"] == {"prompt_tokens": 2, "completion_tokens": len(OUTPUTS[0].encode()) + 1,
-                             "total_tokens": 2 + len(OUTPUTS[0].encode()) + 1}
+                             "total_tokens": 2 + len(OUTPUTS[0].encode()) + 1, "prompt_tokens_details": {
+                                 "cached_tokens": 0}}
     assert engine.requests[0][0] == [ord("H"), ord("i")] and engine.aborted == []
 
 
@@ -332,6 +334,32 @@ def test_reasoning_effort_reaches_the_template(bundle_type):
     assert r.status_code == 200 and bundle.rendered[-1][2] == ({"reasoning_effort": "xhigh"} if levels else {})
     r = http.post("/v1/responses", json={"input": "Hi", "reasoning": {"effort": "low"}})
     assert r.status_code == 200 and bundle.rendered[-1][2] == ({"reasoning_effort": "low"} if levels else {})
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_usage_reports_the_prompt_tokens_the_cache_served(stream):
+    """The engine's prefix hit (each sequence's first delta) in every dialect's usage, streamed or not: OpenAI's
+    `prompt_tokens_details.cached_tokens` (the first sequence's; a batch's prompts summed), Responses'
+    `input_tokens_details.cached_tokens`, Anthropic's `cache_read_input_tokens` with `input_tokens` the rest."""
+    http = TestClient(build_app(FakeEngine(max_prompt=4096, cached=4), Bundle()))
+    user, opts = [{"role": "user", "content": "Hi"}], {"stream": stream} | (
+        {"stream_options": {"include_usage": True}} if stream else {})
+
+    def body(r):
+        assert r.status_code == 200
+        return _events(r)[-1] if stream else r.json()
+    usage = body(http.post("/v1/chat/completions", json={"messages": user, "n": 2} | opts))["usage"]
+    assert usage["prompt_tokens_details"] == {"cached_tokens": 4}
+    if not stream:                                                 # a batch: one count per prompt
+        usage = http.post("/v1/completions", json={"prompt": ["Hi", "Ho"], "max_tokens": 5}).json()["usage"]
+        assert usage["prompt_tokens_details"] == {"cached_tokens": 8}
+    r = http.post("/v1/responses", json={"input": "Hi", "stream": stream})
+    usage = (_sse(r)[-1][1]["response"] if stream else r.json())["usage"]
+    assert usage["input_tokens_details"] == {"cached_tokens": 4}
+    n_prompt = len("<user>Hi<assistant>")
+    r = http.post("/v1/messages", json={"messages": user, "max_tokens": 8, "stream": stream})
+    usage = _sse(r)[0][1]["message"]["usage"] if stream else r.json()["usage"]
+    assert (usage["input_tokens"], usage["cache_read_input_tokens"]) == (n_prompt - 4, 4)
 
 
 def test_chat_stream_n2_usage(http):
@@ -1012,8 +1040,9 @@ CITY = {"type": "function", "function": {"name": "get_weather", "strict": True, 
 
 
 def _round_trip(http, dialect):
-    """A forced call, then the conversation with its result: (the call's arguments, the second answer's prompt
-    tokens beyond the first's, the second answer's status)."""
+    """A forced call, then the conversation with its result: (the call's arguments, whether it was a call, the second
+    answer's prompt tokens beyond the first's, the second answer's status, its prompt tokens the prefix cache
+    served)."""
     question = "What is the weather in Paris?"
     if dialect == "chat":
         body = {"messages": [{"role": "user", "content": question}], "tools": [CITY], "temperature": 0,
@@ -1024,8 +1053,10 @@ def _round_trip(http, dialect):
         args, n_prompt = json.loads(call["function"]["arguments"]), first["usage"]["prompt_tokens"]
         body["messages"] += [first["choices"][0]["message"], {"role": "tool", "tool_call_id": call["id"],
                                                                "content": "Sunny"}]
-        second = http.post("/v1/chat/completions", json=body | {"max_tokens": 4})
-        return args, finish == "tool_calls", second.json()["usage"]["prompt_tokens"] - n_prompt, second.status_code
+        r = http.post("/v1/chat/completions", json=body | {"max_tokens": 4})
+        second = r.json()["usage"]
+        return (args, finish == "tool_calls", second["prompt_tokens"] - n_prompt, r.status_code,
+                second["prompt_tokens_details"]["cached_tokens"])
     if dialect == "messages":
         tool = {"name": "get_weather", "input_schema": CITY["function"]["parameters"], "strict": True}
         body = {"messages": [{"role": "user", "content": question}], "tools": [tool], "temperature": 0,
@@ -1034,27 +1065,33 @@ def _round_trip(http, dialect):
                                                              "stream": True}))
         start = next(d["content_block"] for e, d in events if e == "content_block_start")
         args = json.loads("".join(d["delta"]["partial_json"] for e, d in events if e == "content_block_delta"))
-        n_prompt = events[0][1]["message"]["usage"]["input_tokens"]
+        used = events[0][1]["message"]["usage"]
+        n_prompt = used["input_tokens"] + used["cache_read_input_tokens"]           # Anthropic's split
         body["messages"] += [{"role": "assistant", "content": [start | {"input": args}]}, {"role": "user", "content": [
             {"type": "tool_result", "tool_use_id": start["id"], "content": "Sunny"}]}]
-        second = http.post("/v1/messages", json=body | {"max_tokens": 4})
-        stop = events[-2][1]["delta"]["stop_reason"]
-        return args, stop == "tool_use", second.json()["usage"]["input_tokens"] - n_prompt, second.status_code
+        r = http.post("/v1/messages", json=body | {"max_tokens": 4})
+        second, stop = r.json()["usage"], events[-2][1]["delta"]["stop_reason"]
+        return (args, stop == "tool_use", second["input_tokens"] + second["cache_read_input_tokens"] - n_prompt,
+                r.status_code,
+                second["cache_read_input_tokens"])
     body = {"input": question, "tools": [{"type": "function", **CITY["function"]}], "temperature": 0,
             "max_output_tokens": 100}
     first = http.post("/v1/responses", json=body | {"tool_choice": {"type": "function", "name": "get_weather"}}).json()
     (call,) = first["output"]
     body["input"] = [{"role": "user", "content": question}, call,
                      {"type": "function_call_output", "call_id": call["call_id"], "output": "Sunny"}]
-    second = http.post("/v1/responses", json=body | {"max_output_tokens": 4})
-    n_more = second.json()["usage"]["input_tokens"] - first["usage"]["input_tokens"]
-    return json.loads(call["arguments"]), call["type"] == "function_call", n_more, second.status_code
+    r = http.post("/v1/responses", json=body | {"max_output_tokens": 4})
+    second = r.json()["usage"]
+    n_more = second["input_tokens"] - first["usage"]["input_tokens"]
+    return (json.loads(call["arguments"]), call["type"] == "function_call", n_more, r.status_code,
+            second["input_tokens_details"]["cached_tokens"])
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
 def test_round_trip_on_a_tiny_model(tiny, dialect):
-    args, called, n_more, status = _round_trip(tiny, dialect)
+    args, called, n_more, status, cached = _round_trip(tiny, dialect)
     assert args["city"] in ("Paris", "Rome") and called and n_more > 0 and status == 200
+    assert cached > 0                                    # the second turn reused the first's prompt, and says so
 
 
 def test_round_trip_on_qwen3_0_6b():

@@ -20,7 +20,7 @@ from holon.api import EngineClient, FrontendBundle, SamplingParams
 from pydantic import BaseModel, Field
 
 from .pipeline import Block, Blocks, Chat, Conversation, Efforts, pieces
-from .stream import Piece
+from .stream import Piece, cached
 from .web import BadRequest, EventStream, collect, failure, rejected, unless_disconnected
 
 BILLING = "x-anthropic-billing-header:"
@@ -90,8 +90,8 @@ def router(client: EngineClient, bundle: FrontendBundle, model_id: str, drop_bil
         blocks.push([e for p in ps for e in p.events])
         return JSONResponse({**message, "content": [_block(b) for b in blocks.blocks] or [_block(Block("text"))],
                              "stop_reason": _stop(ps[-1].finish_reason, blocks), "stop_sequence": None,
-                             "usage": {"input_tokens": len(chat.ids),
-                                       "output_tokens": sum(len(p.token_ids) for p in ps)}})
+                             "usage": _usage(len(chat.ids), cached(ps)) | {
+                                 "output_tokens": sum(len(p.token_ids) for p in ps)}})
 
     return r
 
@@ -175,6 +175,13 @@ def _tool(tool: dict[str, Any]) -> dict[str, Any]:
     return {"type": "function", "function": fn | {"parameters": tool.get("input_schema") or {"type": "object"}}}
 
 
+def _usage(n_prompt: int, n_cached: int) -> dict[str, int]:
+    """Anthropic's input usage: `input_tokens` excludes the prompt tokens read from the prefix cache, which
+    `cache_read_input_tokens` counts (clients add them up); Holon writes no cache entries a client pays for."""
+    return {"input_tokens": n_prompt - n_cached, "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": n_cached}
+
+
 def _tool_id() -> str:
     return f"toolu_{uuid.uuid4().hex[:24]}"
 
@@ -197,7 +204,7 @@ async def _events(message: dict[str, Any], n_prompt: int, first: Piece, gen: Asy
     output tokens); message_stop. A failure after the first token is an `error` event."""
     yield _sse("message_start", {"type": "message_start", "message": {
         **message, "content": [], "stop_reason": None, "stop_sequence": None,
-        "usage": {"input_tokens": n_prompt, "output_tokens": 0}}})
+        "usage": _usage(n_prompt, cached([first])) | {"output_tokens": 0}}})
     blocks, n_output, reason = Blocks(_tool_id), 0, None
     async with aclosing(gen):
         p: Piece | None = first
