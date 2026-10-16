@@ -3567,3 +3567,13 @@ unchanged; a full re-scan of every blob, path and message reachable from `main` 
 scrub found the old set missed. `evidence/history_scrub_commit_map_2026-10-16.txt` maps old SHAs to new. The squashed
 line and the pre-scrub lines stay local and are never pushed: their spike README still names CPUs. Before the
 repository goes public, GitHub must drop the unscrubbed objects the private remote already holds (§20).
+
+## 21. Released (2026-10-16)
+
+v0.1.0 is tagged (signed) and released on the private repository's GitHub release page, with
+`docs/RELEASE_NOTES_v0.1.0.md` as its text (owner's go, 2026-10-16). The remote's `main` was force-updated from the
+unscrubbed M0.3-era line to the scrubbed full history, and its old M0.3 branch deleted; the remote now holds `main` and
+the tag only. The repository stays private until v1 / v2. Before it goes public: ask GitHub Support to purge the
+unreferenced unscrubbed objects (§20), and never push the `local-only/…` branches or any branch built on them.
+The CI workflow did not start on the first push: the account's Actions billing (private repositories are billed;
+public ones are free) — an account setting, not a code failure; the same checks pass locally.

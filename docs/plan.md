@@ -557,7 +557,7 @@ Design and evidence: `docs/release.md` (rev 3.2, reviewed clean; §13–§19 as 
 | 4 | Packaging | a clean install by the README on each class served a chat completion and an Anthropic message; after the prebuild fix a first start compiles only Triton kernels (and FlashInfer's CuTe DSL norms in memory); the Dockerfile builds (§19.3–§19.4) |
 | 5 | Benchmarks | all four classes; every GGUF cell ≥ 0.8× llama.cpp at the vendored pin; every cell published, losses included (§17) |
 | 6 | Agent demo | 3 of 3 on the RTX 5080 and 3 of 3 on the RTX 4090 (§18) |
-| 7 | History | superseded by the owner (2026-10-16): `main` keeps the full history; the squashed line is archived (release §20). Before the repository goes public (v1 / v2), the history's private strings are scrubbed (§20) |
+| 7 | History | superseded by the owner (2026-10-16): `main` keeps the full history; the squashed line is archived (release §20). The history's private strings were scrubbed in place (§20); v0.1.0 released privately (§21) |
 
 **Carried CI items** (plan §3.5, §3.6; release §9 step 10):
 
