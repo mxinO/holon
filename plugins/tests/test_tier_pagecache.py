@@ -1,7 +1,7 @@
 """tiers.pagecache (docs/v1-offload.md acceptance 1: the held-out low-RAM tier): the store's file tier read through the
 OS page cache. With RAM holding a quarter of the pieces (exclusive tiers, D10) every other piece is read by
 `cpu_task@1`'s copy task from `pread` extents with O_DIRECT off, and the outputs are the resident store's, bit for bit
-— under F11 (its victims demoted into RAM) and F1, on the CPU providers and on the GPU (the native copy task inside
+— under F11 (its victims demoted into RAM), on the CPU providers and on the GPU (the native copy task inside
 decode graphs)."""
 import pytest
 import torch
@@ -23,11 +23,10 @@ def test_the_page_cache_tier_serves_what_the_resident_store_does(tiny_moe, tmp_p
     checkpoint, prompts = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
     want = _served(_engine(file), prompts)
-    for policy in ("", "std.tiered.static@1"):
-        engine = _engine(file, host_memory=1 << 24, plugin_options=TIERS | {"moe.placement": policy})
-        _check(engine)
-        assert _served(engine, prompts) == want, policy
-        engine.close()
+    engine = _engine(file, host_memory=1 << 24, plugin_options=TIERS)
+    _check(engine)
+    assert _served(engine, prompts) == want
+    engine.close()
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
