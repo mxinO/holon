@@ -236,7 +236,7 @@ miss path that changes the graph shape (a new node between resolve and combine) 
   oracle), and the std apply kernel only unmaps and logs them (counts unchanged, panel B-r4.4-1, A-r4.4-2). A lent
   slot stays owned by its layer: on return it is that layer's first victim, ranked below every resident and filled
   unconditionally by the next admission, so the cache never shrinks (an L1 test: cache size unchanged after a lend
-  and its return, panel A-r4.4-1); and after the prompt they return to admission as empty slots, refilled by fetch-on-miss — no host edit,
+  and its return, panel A-r4.4-1). No host edit,
   no refill copy (panel C's replay: ≤ 1.3% even with random picks, against ≈ 12% for a standing 0.5 GB reserve).
   Host-edit policies keep two-phase lending. "Prefill rows never change residency" means they never admit; lending
   evicts by rule.
@@ -419,7 +419,7 @@ and a CPU provider, in `testing` for std's):
 
 | Contract | Signature (sketch) | Notes |
 |---|---|---|
-| `moe_resolve@1` | `(ids [T,k], weights, map, layer, plan table, state…, row kinds) → slot_ids [T,k], fetch list, CPU jobs, counts, delta` | deterministic; misses → the rank's null slot; a negative id is dropped (no fetch, no job, no count); padding rows masked; variants with other semantics are contracts their policy plugins own (D3) |
+| `moe_resolve@1` | `(ids [T,k], weights, map, layer, plan table, state…, row kinds) → slot_ids [T,k], fetch list, CPU jobs, counts, delta` | deterministic; misses → the rank's null slot; a negative id is dropped (no fetch, no job, no count); padding rows masked; variants with other semantics are contracts their policy plugins own (D3), each with its `lend(n)` op for device-owned policies |
 | `moe_route_transform@1` | `(ids, weights, map) → ids, weights` | signature only; each transform's contract is its plugin's (D3); `approx` only, bound by explicit option |
 | `expert_fetch@1` | `(fetch list, host aliases, staging slots)` | in-graph zero-copy gather (dynamic-address DMA is not graph-safe); a DMA variant with a host-planned resolve if M1 shows the gather < 0.9× DMA |
 | `expert_prefetch@1` | `start(next layer's non-resident list, ring slots)`, `wait(layer)` | F7's in-step copy stream and its events stay inside the kernel plugin (D8) |
