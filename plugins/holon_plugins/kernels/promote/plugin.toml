@@ -1,0 +1,20 @@
+[plugin]
+name = "kernels.promote"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+core_abi = ">=1.0,<2.0"
+
+[resources]   # placement.promote's resolve contract on CUDA (it composes the store's own moe_resolve@1)
+provides = ["kernel.moe_resolve.promote@1"]
+requires = ["op.moe_resolve.promote@1", "op.moe_resolve@1"]
+
+[properties]
+numerics = "exact"
+
+[support]
+platforms = ["cuda"]
+
+[build]
+module = "prebuild"

@@ -25,6 +25,7 @@ dependencies = [                  # std units are reached through Ref, never imp
 "kernels.expert_io" = "holon_plugins.kernels.expert_io"
 "kernels.cpu_task" = "holon_plugins.kernels.cpu_task"
 "kernels.ggml_cpu" = "holon_plugins.kernels.ggml_cpu"
+"kernels.promote" = "holon_plugins.kernels.promote"
 "kernels.fla" = "holon_plugins.kernels.fla"
 "kernels.gdn_triton" = "holon_plugins.kernels.gdn_triton"
 "drafters.mtp" = "holon_plugins.drafters.mtp"
@@ -35,6 +36,7 @@ dependencies = [                  # std units are reached through Ref, never imp
 "placement.lfu" = "holon_plugins.placement.lfu"
 "placement.lru" = "holon_plugins.placement.lru"
 "placement.profile_decay" = "holon_plugins.placement.profile_decay"
+"placement.promote" = "holon_plugins.placement.promote"
 
 [build-system]
 requires = ["hatchling"]
