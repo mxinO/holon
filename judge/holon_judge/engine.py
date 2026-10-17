@@ -15,6 +15,7 @@ from holon.api import Logprobs, SamplingParams, TokenDelta
 
 from . import gguf
 from .golden import hardware, model_meta, resolve_model
+from .placement import cpu_split, split_digest
 from .recording import Prompt, PromptSet, Recording, tail_from_topk
 
 
@@ -41,6 +42,7 @@ def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None
     limits = {f"{k.name}/{k.k}x{k.out}": k.mmvq_rows for k in [*_kernels(engine), *_kernels(engine, head=True)]
               if isinstance(getattr(k, "mmvq_rows", None), int)}
     before, head_before = _total(counters), _total(head)
+    split = cpu_split(engine) if hasattr(engine, "ctx") else None     # F5b: its floor must know the CPU's experts
     params = SamplingParams(max_tokens=1, temperature=0.0, prompt_logprobs=k)
     index = {engine.add(p.ids, params): i for i, p in enumerate(prompts.prompts)}
     parts: list[list[Logprobs]] = [[] for _ in prompts.prompts]
@@ -55,7 +57,8 @@ def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None
     calls = {name: {key: n - start.get(key, 0) for key, n in sorted(_total(c).items())}
              for name, c, start in (("calls", counters, before), ("head_calls", head, head_before)) if c}
     return Recording.from_rows(rows, prompts.meta() | {"source": "holon", "wall_s": wall} | (meta or {}) | calls
-                               | ({"kv": kv} if kv else {}) | ({"mmvq_rows": limits} if limits else {}))
+                               | ({"kv": kv} if kv else {}) | ({"mmvq_rows": limits} if limits else {})
+                               | ({"cpu_split": split_digest(split)} if split else {}))
 
 
 def _total(counters: list[dict[str, int]]) -> dict[str, int]:

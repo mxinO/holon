@@ -5,7 +5,8 @@
     python -m holon_tools propagate <model> [--class C] [--new-model] [--approve] [--plans plans]
                                     --golden <fp32 golden> --floor <floor> [--prompts judge/prompts/v1.jsonl]
                                     [engine flags: --device --dtype --max-seqs ...]
-    python -m holon_tools tune <model> [--ops op ...] [--batch 8] [--tokens 64] [the flags of propagate]
+    python -m holon_tools tune <model> [--ops op ...] [--batch 8] [--tokens 64] [--cpu-split] [--no-lock]
+                                [--json record] [the flags of propagate]
     python -m holon_tools profile <model> [--prompts judge/prompts/v1.jsonl] [--max-tokens 64]
                                   [--name profile.json] [engine flags: --host-memory ...]
 
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import pathlib
 import sys
 
@@ -117,12 +119,31 @@ def _propagate(a: argparse.Namespace) -> int:
 
 def _tune(a: argparse.Namespace) -> int:
     config = engine_config(str(checkpoint_dir(a.model)), a)
-    start, pins, model_id = _start(a, config)
+    start, pins, model_id = (None, {}, None) if a.no_lock else _start(a, config)
     base = dataclasses.replace(config, kernels=pins)
     engine = Engine(base)
     resolved = _pins(Lock(locks.plan_of(engine)))  # every tuned op starts pinned to what the base resolves to
     ops = tune.candidates(engine, tuple(a.ops))
-    del engine
+    store = engine.ctx.shared_objects.get("std.moe.offload")
+    misses = store and store.top_k * base.max_seqs * (1 + base.max_draft_tokens)   # a graphed pass's most
+    isa = engine.ctx.fingerprint.cpu_isa
+    engine.close()
+    del engine, store
+    record = {}
+    if a.cpu_split:                                  # F5b first: the kernels are then tuned with its decision in
+        if not misses:
+            raise SystemExit("--cpu-split: the engine flags must offload experts (--plugin-options moe.store=…)")
+        prompts = [p.ids for p in PromptSet.load(a.prompts).prompts]
+
+        def with_options(extra: dict[str, str]) -> float:
+            trial = dataclasses.replace(base, plugin_options=base.plugin_options | extra)
+            return tune.decode_rate(trial, a.batch, tokens=a.tokens, prompts=prompts)
+        extra, record["cpu_split"] = tune.split(with_options, misses, isa)
+        print(f"F5b: F5a {record['cpu_split']['f5a']:.1f} tok/s; threads at half the misses " + ", ".join(
+            f"{t}: {r:.1f}" for t, r in record["cpu_split"]["threads_at_half"].items()) + "; shares " + ", ".join(
+            f"{s}: {r:.1f}" for s, r in record["cpu_split"]["shares"].items()) + f"; gain "
+            f"{record['cpu_split']['gain']:+.1%}: " + (f"taken ({extra})" if extra else "F5a stays"))
+        base = dataclasses.replace(base, plugin_options=base.plugin_options | extra)
 
     def rate(trial: dict[str, str]) -> float:
         return tune.decode_rate(dataclasses.replace(base, kernels=trial), a.batch, tokens=a.tokens)
@@ -130,6 +151,10 @@ def _tune(a: argparse.Namespace) -> int:
     pins, rates = tune.tune(resolved, ops, rate)
     for op, by in rates.items():
         print(f"{op}: " + ", ".join(f"{p} {r:.1f} tok/s" for p, r in sorted(by.items(), key=lambda x: -x[1])))
+    if a.json:
+        pathlib.Path(a.json).write_text(json.dumps(record | {"kernel_rates": rates}, indent=1) + "\n")
+    if a.no_lock:
+        return 0
     return _run(a, start, dataclasses.replace(base, kernels=pins), model_id)
 
 
@@ -170,6 +195,9 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--ops", nargs="+", default=list(tune.OPS))
             p.add_argument("--batch", type=int, default=8)
             p.add_argument("--tokens", type=int, default=64)
+            p.add_argument("--cpu-split", action="store_true", help="decide F5b (an offloaded MoE's CPU share) first")
+            p.add_argument("--no-lock", action="store_true", help="measure and report only; write no lock")
+            p.add_argument("--json", help="write the measured rates here")
 
     f = sub.add_parser("profile", help="a routing profile for the offload store's warm start, beside the checkpoint")
     f.add_argument("model", help="checkpoint file or directory, or hub id")

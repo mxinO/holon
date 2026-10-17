@@ -20,6 +20,7 @@ from holon_std.weights.hf import reference as hf_reference
 from . import hf_quant, modes, moe, w4a4
 from . import kv as kv_format
 from . import q8_1 as q8_1_emulator
+from .placement import split_digest
 from .recording import PromptSet, Recording
 
 DTYPES = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}
@@ -87,7 +88,7 @@ def topk_rows(logits: torch.Tensor, target: torch.Tensor, k: int, rows: int = 25
 def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, device: str = "cpu",
            k: int = 20, config: str | None = None, q8_1: str | None = None, pure_hf: bool = False,
            kv: str | None = None, act: str | None = None, stream: bool = False, rows: int | None = None,
-           crossover: str | None = None) -> Recording:
+           crossover: str | None = None, cpu_split: dict | None = None) -> Recording:
     """Record top-k teacher-forced logprobs of `model` (hub id, checkpoint directory, or a .gguf file with the HF
     `config` it was made from: the dense model of its dequantized weights, M0.1 §4.6) over `prompts`. `q8_1` ("mmq"
     or "mmvq"; "prefill" for FP8): every quantized linear computes as the kernels on that path (Tier B's floor), its
@@ -98,7 +99,9 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
     A GGUF, a quantized HF checkpoint (its weights as `hf_quant` reads them, docs/m06-lowp.md §4.8) or, with
     `stream`, a dense one runs one decoder layer at a time (`_streamed`), so its weights are never all held; a dense
     HF checkpoint otherwise loads through transformers. A floor (not fp32) of an MoE model runs the D3-mirroring MoE
-    block (`moe.mirror`, M0.2 §4.6) unless `pure_hf`; the fp32 golden is always HF's own model."""
+    block (`moe.mirror`, M0.2 §4.6) unless `pure_hf`; the fp32 golden is always HF's own model. `cpu_split`
+    (`placement.cpu_split`'s): a GGUF MoE floor path-aware for F5b (docs/v1-offload.md §6), the experts that split
+    sends to the CPU on ggml-cpu's activations."""
     path = resolve_model(model)
     if act is not None and not q8_1:
         raise ValueError(f"activation mode {act!r} without a kernel path to emulate it on")
@@ -124,7 +127,9 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
             routes = gguf.row_paths(path, rows, Fingerprint(gpu=gpu, sm=int(sm), vram_gib=0, toolchain=""))
             per_shape = {"step_rows": rows, "crossover": gpu, "routes": {
                 f"{t}/{k}x{o}": routes[name] for name, (t, k, o) in gguf.engine_shapes(path).items()}}
-        experts = gguf.q8_1_experts(path, q8_1) if q8_1 and mirrored else None
+        if cpu_split and not (q8_1 in ("mmq", "mmvq") and mirrored):
+            raise ValueError("a CPU split goes with a GGUF MoE floor on mmq or mmvq")
+        experts = gguf.q8_1_experts(path, q8_1, cpu_split) if q8_1 and mirrored else None
 
         def prepare(module: torch.nn.Module, prefix: str) -> None:
             if q8_1:
@@ -135,7 +140,7 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
         config_sha256 = hashlib.sha256((hf_config / "config.json").read_bytes()).hexdigest()
         source = gguf.file_meta(path) | {"q8_1": q8_1, "config": model_meta(hf_config)["model"],
                                          "config_sha256": config_sha256} | _moe_meta(mirrored) | _emulation_meta(q8_1) \
-            | per_shape
+            | per_shape | ({"cpu_split": split_digest(cpu_split)} if cpu_split else {})
         with kv_format.emulate(kv):
             rows, wall = _streamed(_skeleton(hf_config), lambda select: dict(gguf.hf_state(path, select)), "blk.",
                                    prompts, k, dtype, device, mirrored, prepare)

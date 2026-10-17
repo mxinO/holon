@@ -55,8 +55,9 @@ ACT = ("a4", "a8")                 # the quant.act option (docs/m06-lowp.md D3)
 def _golden(a: argparse.Namespace) -> int:
     if a.threads:
         torch.set_num_threads(a.threads)
+    split = json.loads(pathlib.Path(a.cpu_split).read_text()) if a.cpu_split else None
     rec = golden.record(a.model, PromptSet.load(a.prompts), golden.DTYPES[a.dtype], a.device, a.k, a.config,
-                        a.q8_1, a.pure_hf, a.kv, a.act, a.stream, a.rows, a.crossover)
+                        a.q8_1, a.pure_hf, a.kv, a.act, a.stream, a.rows, a.crossover, split)
     rec.save(a.out)
     print(json.dumps(rec.meta | {"bytes": pathlib.Path(a.out).stat().st_size}, indent=1))
     return 0
@@ -401,6 +402,8 @@ def main(argv: list[str] | None = None) -> int:
                    "docs/m06-lowp.md §4.8)")
     g.add_argument("--stream", action="store_true", help="a dense HF checkpoint one decoder layer at a time (GGUF "
                    "files and quantized checkpoints always are)")
+    g.add_argument("--cpu-split", help="F5b's frozen split (JSON, `holon_judge.placement.cpu_split`): a path-aware "
+                                        "floor, the CPU's experts on ggml-cpu's activations")
     g.add_argument("--prompts", required=True)
     g.add_argument("--out", required=True)
     g.add_argument("--threads", type=int, default=0, help="CPU threads; pin it to re-record a golden bitwise")

@@ -38,9 +38,9 @@ class Resolve:
         self.staging = staging
 
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
-                 errors, delta, n_delta, group, last, clock):
+                 errors, delta, n_delta, group, plan, jobs, last, clock):
         out = reference.moe_resolve_lru(ids, kinds, residency, host, limits, self.staging, last, clock, group, ring,
-                                        stage, empty, int(n_empty[0]))
+                                        stage, empty, int(n_empty[0]), plan)
         counts += out["counts"]
         routed |= out["routed"]
         misses.clamp_(min=int(out["n_fetch"].max()))
@@ -56,7 +56,10 @@ class Resolve:
         n_delta += len(out["records"])
         n_empty.fill_(out["n_empty"])
         errors |= out["errors"]
-        return out["slots"], out["fetch"], out["n_fetch"]
+        jobs[0, 0] = len(out["jobs"])
+        for i, row in enumerate(out["jobs"]):
+            jobs[1 + i, :len(row)] = torch.tensor(row)
+        return out["slots"], out["fetch"], out["n_fetch"], out["cpu"]
 
     def lend(self, need, residency, classes, last, clock) -> torch.Tensor:
         return reference.lend(need.cpu().numpy(), residency, classes, last, clock)

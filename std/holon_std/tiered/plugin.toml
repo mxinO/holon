@@ -7,7 +7,9 @@ license = "Apache-2.0"
 core_abi = ">=1.2,<2.0"   # shared objects, host pools, fill pools, step hooks, extents
 
 [resources]
-provides = ["unit.std.tiered.store@1", "unit.std.tiered.pinned@1", "unit.std.tiered.static@1"]
+provides = ["unit.std.tiered.store@1", "unit.std.tiered.pinned@1", "unit.std.tiered.gguf_direct@1",
+            "unit.std.tiered.static@1"]
 
 [properties]
 numerics = "exact"
+
