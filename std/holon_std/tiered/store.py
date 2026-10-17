@@ -134,7 +134,7 @@ class TieredStore:
         self.taps: list[Callable[[object, dict], None]] = []
         self._copies: dict[int, list[MemOp]] = {}               # launch -> the swaps' copies handed in then
         self._mode: str | None = None                           # the step being launched borrows: ring or stage
-        self._borrowing: dict[int, str] = {}                    # step -> how it borrowed, until its commit
+        self._borrowing: dict[int, str] = {}                    # step -> how it borrowed (its forward), until commit
         self.lending = False                                    # the layout lends (`after_materialize`)
         self.lent: Lent | None = None                           # its lent slots, from its first resolve to its end
         self.borrowed = {"ring": 0, "stage": 0}                 # steps that borrowed slots, by use (since a seed)
@@ -325,8 +325,6 @@ class TieredStore:
             self._mode = "stage"                                 # a pass's misses may pass the staging slots
         else:
             self._mode = None
-        if self._mode is not None:
-            self._borrowing[step.step] = self._mode
         reach, self._written = max(at, self._written), at          # the last step's rows become padding
         writes = [(self.kinds[:reach], kinds[:reach])] * bool(reach) + self.residency.writes(step.step)
         return writes, self._copies.pop(step.step, [])
@@ -334,7 +332,8 @@ class TieredStore:
     def after_commit(self, step, telemetry) -> None:
         if errors := {name: int(t[0]) for name, t in telemetry.items() if "errors" in name and int(t[0])}:
             raise RuntimeError(f"{self.name}: step {step.step}'s kernels flagged errors {errors} (errors: 1 = a "
-                               "corrupt residency entry, 2 = the delta log overflowed; edit_errors: a host edit's "
+                               "corrupt residency entry, 2 = the delta log overflowed, 4 = a step's lent slots fell "
+                               "short of a pass's staging; edit_errors: a host edit's "
                                "precondition failed; kernel_errors: the kernel's bits)")
         mode = self._borrowing.pop(step.step, None)
         misses = int(telemetry["misses"][0])
@@ -367,7 +366,8 @@ class TieredStore:
 
     def begin(self) -> None:
         """At the step's first resolve (after its words are zeroed and its edits applied): its lent slots, if any."""
-        if self._mode is not None:
+        if self._mode is not None:                 # a graphed step never gets here: it never borrows
+            self._borrowing[self._step] = self._mode
             self.lend_needs.zero_()
             self.lent = Lent(self, self._mode)
             self.lent.begin()

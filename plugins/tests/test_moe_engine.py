@@ -10,7 +10,7 @@ import gguf
 import numpy as np
 import pytest
 import torch
-from holon.api import SamplingParams
+from holon.api import RowKind, SamplingParams
 from holon.core.batching import host_plan
 from holon.core.engine import Engine, EngineConfig
 from holon_std.moe.offload import KEY, PASS
@@ -371,6 +371,13 @@ def test_a_cache_too_small_to_lend_stages_instead(tiny_moe, tmp_path):
         assert _served(engine, prompts) == want
     assert store.lending and store.borrowed["ring"] == 0 and store.borrowed["stage"] > 0
     assert parity(trace)["first_differing_step"] is None and trace.mirrored
+    one = np.ones(10, np.int32)
+    borrowed, plan = dict(store.borrowed), host_plan(99, np.arange(10, dtype=np.int32), 0 * one, one, one,
+                                                    np.zeros(10, np.int64))
+    plan.row_kind = np.full(10, RowKind.PREFILL, dtype=np.int8)       # ten one-token last chunks: a graphed step,
+    store.before_launch(plan)                                          # whose forward (no Python) borrows nothing
+    store.after_commit(plan, {name: t.clone() for name, t in store.telemetry.items()})
+    assert store.borrowed == borrowed
 
 
 def test_the_delta_log_holds_a_steps_admissions_and_lending(tiny_moe, tmp_path):

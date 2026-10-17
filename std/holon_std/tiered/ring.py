@@ -57,7 +57,9 @@ class Lent:
         # a pass's misses past the ring (an earlier pass's admissions unmapped them) go to the graphed steps' staging
         # slots; a stage step's to the pool's first ones
         graphed = torch.cat([s.stage, s.stage[:, -1:].expand(roles, s.prefill - s.stage.shape[1])], 1)
-        s.stage_tab.copy_(torch.where(ring_ok, graphed[None], s.pool[:, :s.prefill][classes]))
+        lent = s.pool[:, :s.prefill][classes]
+        lent = torch.where(lent >= 0, lent, graphed[None, :, -1:])         # short (SHORT): never past the arena
+        s.stage_tab.copy_(torch.where(ring_ok, graphed[None], lent))
         if self.mode == "ring":
             self._ring(res, classes, want // BUFFERS, ring_ok)
             for g in range(min(BUFFERS, groups)):
