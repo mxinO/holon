@@ -30,6 +30,9 @@ dependencies = [                  # std units are reached through Ref, never imp
 "drafters.ngram" = "holon_plugins.drafters.ngram"
 "frontends.http" = "holon_plugins.frontends.http"
 "grammar.xgrammar" = "holon_plugins.grammar.xgrammar"
+"placement.lfu" = "holon_plugins.placement.lfu"
+"placement.lru" = "holon_plugins.placement.lru"
+"placement.profile_decay" = "holon_plugins.placement.profile_decay"
 
 [build-system]
 requires = ["hatchling"]

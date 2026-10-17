@@ -1,7 +1,14 @@
 #pragma once
 
-// Holon: the most (token, expert) pairs one call sorts (mm_ids_helper's largest instance: 1024 threads x 16)
-#define GGML_CUDA_MM_IDS_MAX_PAIRS 16384
+// Holon: the most (token, expert) pairs one block sorts (mm_ids_helper's largest instance: 1024 threads x 16)
+#define GGML_CUDA_MM_IDS_BLOCK_PAIRS 16384
+
+// Holon: the most (token, expert) pairs one call sorts: past GGML_CUDA_MM_IDS_BLOCK_PAIRS, the device-wide path (an
+// eager prefill pass of up to 4,096 rows at top-8, docs/v1-offload.md D8)
+#define GGML_CUDA_MM_IDS_MAX_PAIRS 32768
+
+// Holon: the scratch bytes the helper takes for a call of n_pairs pairs (the device-wide path's; 0 for the others)
+size_t ggml_cuda_mm_ids_scratch_bytes(int n_pairs);
 
 // Holon: violated preconditions the helper reports (or'd into its `errors` word); the rows it names are not computed
 #define GGML_CUDA_MM_IDS_ERR_SLOTS   1 // more distinct slots than the call's bound (ids_slots)
@@ -35,8 +42,9 @@ static inline int ggml_cuda_mm_ids_nz(const int64_t n_experts, const int64_t n_t
 // ids_src1[pair] = r). expert_bounds holds n_z + 1 bounds, the first compact row of each listed slot in ascending
 // order and then the end of their rows, followed by the n_z slots themselves (0 past the active ones);
 // n_z = ggml_cuda_mm_ids_nz. Pairs mmq does not compute (an id out of range, slots past n_z, a slot's pairs past
-// max_cols, mmq's column tiles) set their GGML_CUDA_MM_IDS_ERR_* bit in *errors (if not NULL).
+// max_cols, mmq's column tiles) set their GGML_CUDA_MM_IDS_ERR_* bit in *errors (if not NULL). `scratch`: at least
+// ggml_cuda_mm_ids_scratch_bytes device bytes, 256-byte aligned.
 void ggml_cuda_launch_mm_ids_helper(
         const int32_t * ids, int32_t * ids_src1, int32_t * ids_dst, int32_t * expert_bounds,
         int n_experts, int n_z, int n_tokens, int n_expert_used, int nchannels_y, int si1, int sis1, bool write_inverse,
-        int max_cols, int32_t * errors, cudaStream_t stream);
+        int max_cols, int32_t * errors, void * scratch, cudaStream_t stream);

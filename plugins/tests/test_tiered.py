@@ -32,21 +32,34 @@ class _Ctx:
         return torch.zeros(shape, dtype=dtype)
 
 
-def test_map_edits_apply_at_launch_c_plus_2_and_only_where_they_name():
+def test_map_edits_apply_at_launch_c_plus_2_only_where_they_name_and_hold():
     """An edit decided at commit 7 reaches the device at launch 9 as its own entries: what the device changed in
-    between elsewhere in the map (a device resolver's admission) stays; the edit list is empty after its launch."""
+    between elsewhere in the map (a device resolver's admission) stays; the edit list is empty after its launch. An
+    edit whose precondition fails (the device changed its entry) is not applied and raises the edit error word. The
+    host mirror follows at the commit of the launch's step, the device's delta log after it."""
     m = ResidencyMap(_Ctx(), "t", (2, 4, 2))
     m.host[0, 1] = [5, 6]
     m.seed()
     assert m.device[0, 1].tolist() == [5, 6]
-    m.edit(7, [(0, 1, 0, -1), (1, 3, 1, 9), (1, 3, 1, 8)])        # the last edit of an entry wins
-    assert m.writes(8) == [] and m.host[0, 1, 0] == 5
-    m.device[1, 0, 0] = 42                                        # the device admits an expert meanwhile
-    for dst, values in m.writes(9):                               # as the core runs `before_launch` writes
+    m.edit(7, [(0, 1, 0, 5, -1), (1, 3, 1, -1, 9), (1, 3, 1, 9, 8), (1, 2, 0, -1, 4)])   # the last value of an entry
+    m.edit(7, [(0, 1, 1, 6, 3)], later=2)                                                  # wins, its first expectation
+    assert m.writes(8) == []
+    m.device[1, 0, 0], m.device[1, 2, 0] = 42, 7          # the device admits an expert meanwhile, and one edit's entry
+    for dst, values in m.writes(9):                       # as the core runs `before_launch` writes
         dst.copy_(torch.from_numpy(values))
-    m.apply()                                                     # the step's first resolve
+    errors = torch.zeros(1, dtype=torch.int32)
+    m.apply(errors)                                       # the step's first resolve
     assert m.device[0, 1].tolist() == [-1, 6] and m.device[1, 3, 1] == 8 and m.device[1, 0, 0] == 42
-    assert m.host[1, 3, 1] == 8 and m.writes(9) == []
-    m.device[0, 1, 1] = 7
-    m.apply()                                                     # a step without edits changes nothing
-    assert m.device[0, 1].tolist() == [-1, 7]
+    assert m.device[1, 2, 0] == 7 and int(errors[0]) == 1                  # the failed precondition: flagged, kept
+    m.commit(8, np.zeros((0, 3), dtype=np.int32))
+    assert m.host[0, 1, 0] == 5                                            # launch 9 is past commit 8
+    m.commit(9, np.array([[1, 1, 0]], dtype=np.int32))                     # the device: item 1 took item 0's slots
+    assert m.host[0, 1, 0] == -1 and m.host[1, 3, 1] == 8 and m.host[1, 1].tolist() == [-1, -1]
+    m.device[0, 1, 0] = 7
+    errors.zero_()
+    m.apply(errors)                                       # a step without edits changes nothing
+    assert m.device[0, 1].tolist() == [7, 6] and not errors.any() and m.writes(10) == []
+    for dst, values in m.writes(11):
+        dst.copy_(torch.from_numpy(values))
+    m.apply(errors)
+    assert m.device[0, 1, 1] == 3 and not errors.any()

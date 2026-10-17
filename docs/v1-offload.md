@@ -160,7 +160,9 @@ A new policy, tier or transform is a plugin naming its own Ref. A policy that ne
 not know (F4's in-graph LRU, F10's promotion) is **a contract the policy plugin owns** (`op.moe_resolve.<variant>@1`:
 `moe_resolve@1`'s signature plus the declared state, so the store calls it unchanged; its own `reference.py` and CPU
 provider in the plugin's directory; L0 runs any plugin-supplied oracle), so it lands without a std or `testing` diff
-(panel B-r2-1). Route transforms follow the same rule. What one plugin cannot do: a
+(panel B-r2-1). After the std offload API's tag (step 6), a resolve variant ships its own CUDA provider in its own
+kernel plugin: `kernels.expert_io` takes no new policy codes then (it serves `@1`, `lfu` and `lru`, built with the
+API). Route transforms follow the same rule. What one plugin cannot do: a
 miss path that changes the graph shape (a new node between resolve and combine) is a std minor of the offload store
 — recorded, not hidden.
 
@@ -505,6 +507,13 @@ The KV floor grows with context (30B-A3B: 96 KiB per token in bf16, ≈ 3 GB at 
 routes ≈ 2.4 GB of experts per token on Maya-S; above ≈ 85% hits its decode is GPU-bound (≈ 4.7 ms of GPU reads
 against ≈ 3.4 ms of misses at 90%), below it miss-bound. Host RAM per desktop class is checked before scheduling
 (not recorded here).
+
+As built (step 3b, §14): staging is min(E, k × a graphed step's tokens) per class — k × `max_seqs` × (1 + drafts) —,
+since prefill steps borrow their staging and ring slots from the cache (D4's device lending) and give them back; a
+layout whose cache cannot lend a prefill pass's (min(E, k × 512) per class) keeps that much staging instead. The
+vehicle at the gate (`max_seqs` 1, no drafts) keeps 8 staging slots per class instead of 128 (≈ 0.47 GB more cache
+on the 5080). The startup profile runs a streaming step's 4,096-token expert passes; on the A5000 vehicle its peak is
+0.48 GB either way (512- or 4,096-token passes: the trunk's other activations set it).
 
 ## 8. Step 0 — measure before freezing
 
@@ -894,3 +903,237 @@ Decided while building, against the text above:
   `holon_tools profile` (step 3) writes them there, a profile lies beside the checkpoint; a bundle-shipped profile
   then needs the store to resolve the model plugin's bundle, decided with the tool. The store's options share the `moe.` prefix: `moe.store`,
   `moe.placement`, `moe.placement.profile`, `moe.tiers`, `moe.cache`.
+
+### Step 3a as built (2026-10-17): the placement policies
+
+Built: `placement.lfu@1` (F11, the offload store's default: the only tier, pinned RAM, holds every expert),
+`placement.lru@1` (F4) and `placement.profile_decay@1` (F2–F3), each its own plugin under
+`plugins/holon_plugins/placement/`; the device-owned two own their resolve contracts `moe_resolve.lfu@1` /
+`moe_resolve.lru@1` (oracle `reference.py` and CPU provider in the plugin, CUDA provider in `kernels.expert_io`), each
+with its `lend(n)`; F2's warm start for every policy (`std.tiered.static@1` included); std completions in `std.tiered`
+(policies built with `items` / `roles`; per-group device state `[groups, *shape]`, zeroed at each seed and passed to
+the policy's variant by name; the delta log in the telemetry; host-edit preconditions; two-phase swaps as S2 MemOps;
+route taps; `TieredStore.lend`); `holon_judge.placement` (`route_dump`, the L1 policy-parity check); six plants;
+`holon_tools profile`. Evidence: `spikes/x3_policies/README.md`, `evidence/x3_policies_rtx-a5000_2026-10-17.json` — on
+the A5000 F11 (2,115 in-graph admissions per run at 25%), F2–F3 (16 swap rounds) and F4 snapshots are byte-identical
+to `std.moe@1` all-resident and run-identical ×3 (F11, F2–F3), the n-gram-drafter run too; natural, capped and
+adaptive placements are identical to each other; F11's per-step residency equals its replay oracle exactly on every
+trace recorded (up to 23,163 admissions over 255 decode steps), and the device's map ends equal to the host mirror;
+every plant fires and is caught (table in the README). All at `52e1bed`, after the review fixes below.
+
+Decided while building, against the text above:
+- **Scheduler row kinds (B-s2-6) not built: it is an ABI major** (built additively in step 3b: `BatchPlan.row_kind`). Filling `BatchPlan.n_decode` on every step changes
+  the field's meaning ("a mixed step's leading decode rows; 0: unmixed", `core/holon/api/batch.py:127`), which
+  readers rely on: `std.mixers.gqa`'s planner splits any step with `n_decode` > 0 into a decode and a prefill call
+  (`std/holon_std/mixers/gqa/units.py:51-55`), `std.mixers.gdn` plans such a step per row kind and never as a decode or
+  verify step (`std/holon_std/mixers/gdn/units.py:74-77`), and the core runs it eagerly (`core/holon/core/executor.py:320`,
+  counted as mixed at `core/holon/core/engine.py:455`) — every decode step would lose its graph. Under §4.5 that is a
+  change, not an addition. The additive way is a new `BatchPlan` field with a default (e.g. the leading decode and
+  verify rows of every step, or a per-row kind array), filled by the scheduler — a minor, for the owner to decide.
+  Until then the store narrows step 2's heuristic (a fix, review finding 1): a row whose every query token has
+  logits counts as decode only in a step all of whose rows do (or among a mixed step's leading rows), so a one-token
+  last prompt chunk beside other prompt rows is prefill — before, it counted, and one past the step's first 512-token
+  expert pass made F11 decay twice in a step and pick victims a pass could not see (`test_only_decode_steps_count_and_
+  decay` fails without the fix). What remains of step 2's deviation: a step made only of one-token last chunks counts
+  as decode (its rows, at most `max_seqs`, lie in one pass). The parity check records what the device counted and each
+  step's routed experts from its eager resolves.
+- **The fetch list names each miss's slot.** An admitted miss is gathered straight into its victim's slots (D4), so
+  `moe_resolve@1` returns `fetch [R, 2, staging]` (host unit, then the slot) and `expert_fetch@1` takes those pairs
+  (its `first` argument is gone); `moe_resolve@1` also takes the delta log (`delta`, `n_delta`) and the layer's index,
+  which @1 leaves alone and the variants append to. Both contracts changed in place: they are not on main, and the std
+  offload API is tagged at step 6.
+- **The delta log** is `[groups × items, 3]` int32 records, appended in a deterministic order (layer by layer, pairing
+  order within one), with an `OVERFLOW` bit past its end: `(layer, a, b)` — a took b's slots in every role, b went to
+  the RAM tier (−1) —, `(layer, −1, b)` — b lent. The host mirror is brought to each commit c (host edits launched by
+  c, then step c's records), the same on the overlapped and synchronous paths, and the policy reads it.
+- **Host edits carry a precondition** (the value the entry must hold at the apply); one that fails is not applied and
+  sets the store's `edit_errors` word, so the commit stops the engine (D4's device error flag; never a trap).
+- **Two-phase swaps.** A host policy returns swaps (as many items in as out per layer); the store unmaps the outgoing
+  item at launch c + 2, hands in a MemOp copying the incoming item's host units into its slots with `after` = c + 2
+  and `lands_by` = c + 2 + d (d = 2), and maps it at c + 2 + d. MemOps copy whole pool units of one shape, so the
+  arena pool and the host pools share one unit, the classes' greatest common divisor (36,864 bytes on the vehicle;
+  arenas aligned to its least common multiple with 4,096). `profile_decay` counts steps with decode rows (as the
+  replay counts decode steps) and skips a round while its last swaps are not in the host's view.
+- **Decay and counts once per step**: a variant decays (or ticks) in each call that holds a routed entry of a
+  `DECODE` row, so under a policy with device state the store requires a step's decode and verify rows to lie in one
+  expert pass (`max_seqs` × (1 + `max_draft_tokens`) ≤ `std.moe@1`'s 512-token chunk; refused otherwise), and the row
+  kinds above keep them in the first. F11's arithmetic is exact f32 (× 0.915 rounded, then one rounded
+  + 1.0 per entry, no FMA); its victims are experts resident in every role routed by no live entry of the call;
+  candidates missing in every role, routed by a decode or verify row.
+- **`lend(n)`** returns the picks as a `[layers, experts]` mask; the CUDA provider is eager torch ops (ring steps are
+  never graphed), the CPU provider the oracle; `TieredStore.lend` unmaps and logs them and must run in the step's
+  forward after its first resolve (which zeroes the log and the error words) — the ring that calls it, and D4's
+  return of a lent slot as its layer's first victim (until then a lent slot is not refilled), are step 3b's.
+- **The parity check also checks the device's map against the host mirror** once every launched step has committed
+  (a kernel that changes the map without logging it would otherwise pass).
+- **Cost** (corrected after the panel, C: the first figure was compared with §13's band as if that band were F11's
+  alone; it is the whole offload path's): a variant's resolve adds 2.5 / 2.3 / 1.3 µs per layer call with candidates
+  to pair at 1 / 8 / 64 decode rows on the A5000, ≈ 0.7 µs when a call has none (it exits before ranking; the
+  ranking runs over compacted lists of packed keys, a victim ranked past the candidates stops counting); end to end
+  with every expert cached, 5.663 ms per token under `static` against 5.703 under F11 (+0.04; `std.moe@1` 5.343).
+  That +0.04 ms is the all-cached figure, where no call has candidates (corrected after the step-3 panel, C): at
+  batch 1 and 1K context 29.5% of decode layer calls have candidates at 47% cached and 62.3% at 25% (measured), so
+  F11 adds ≈ 0.06 ms per token at the natural fit and ≈ 0.09 ms at 25% (panel C's estimate: 0.08 / 0.11).
+- **Plants:** `lfu-victim-needed` and `lfu-shared-victim` set plant bits the variant kernel reads (`MoeResolve.plant`,
+  zero otherwise; judge-only). A needed victim's rows then read staging slot k (the victim was no miss), not its
+  overwritten slot, as §6 describes. Their verdict (panel C, recorded): on an mmq step the patched mmq's id-error word
+  (a slot repeated in a row) stops the engine before a wrong byte is emitted — the snapshot trace, step 3; on
+  decode-only steps (mmvq, which checks no ids) the snapshot differs and the parity check fails — the decode trace:
+  `lfu-victim-needed` differs at step 11 (parity at step 6; 959 needed victims taken), `lfu-shared-victim` at step 4
+  (parity at step 4, and the device's map no longer the mirror; 3,623 shared victims). The other weak prediction:
+  `owner-race` with its
+  check removed is deterministic — the snapshot differs (and the parity check with it) in every run, run-identical
+  holds. `map-before-landing` failed both checks (all three runs differ from all-resident; run 0 differs from runs
+  1–2). L2 was not run for the plants (§6 predicts it fails too); the exact checks above are their verdicts.
+- **Profiles** are written beside the checkpoint by `holon_tools profile` (`--name`, default `profile.json`) — for a
+  hub-cache checkpoint that is the snapshot directory; shipping them in model bundles stays open (§5).
+- **What the parity check leaves to step 3b:** traces with prompts in mixed steps, device lending and its return
+  (cache size unchanged), and the one-slot-per-expert rule across a step's row kinds; `route_dump` already takes a
+  step's routed experts from its eager resolves for them.
+
+
+### Step 3b as built (2026-10-17): D8's prefill ring, device lending and its return, row kinds, the route transforms' call site
+
+Built (commits from `7e4a49b`; the panel's 3a findings in their own commits, listed in the README):
+- **Row kinds in the core** (`7e4a49b`, ABI 1.3, additive): `BatchPlan.row_kind`, a per-row `RowKind` (prefill,
+  decode, verify; None: not known), filled by the scheduler on every step it plans (mixed steps and drafter
+  alternation included; core/tests/test_sched.py); `n_decode` keeps its meaning. The store reads it, so a one-token last
+  prompt chunk is a prefill row in every step (§14 step 2's remaining deviation is gone; failing-without test).
+- **D8** (`std.tiered.ring.Lent`): a step of at least `moe.ring_tokens` prompt tokens (default 512, §13's 5080
+  crossover) borrows, at its first resolve, every empty slot and then the policy's `lend(n)` (whole experts, the
+  coldest) until a double buffer holds two layers' misses per class; each layer's missing pieces stream into their
+  half on a copy engine (`expert_prefetch@1`, kernels.expert_io: DMA on its own stream after the work enqueued, a wait
+  before the layer's resolve), layer l + 1's while layer l computes, and its resolve reads them in place (the
+  resolve's `ring` table: no fetch); the step's expert passes are one per chunk of up to 4,096 tokens (the router and
+  top-k still per 512-token chunk, the step's last partial chunk a pass of its own), and kernels.ggml_cuda's arena
+  binding takes 2,048 rows per mmq call (`ID_PAIRS` ÷ top-8; each row bitwise a 512-row call's, L0; 4,096 since the step-3 panel's fixes, below). A smaller prompt
+  step borrows its misses' staging the same way when its pass could exceed the staging slots. At the step's end every
+  borrowed slot returns to its layer as an empty slot — the layer's first victim, which the policy's next admissions
+  fill unconditionally (`moe_resolve@1`'s `empty` stack; records `(layer, a, −2 − j)`): the cache never shrinks (CPU
+  test, per class).
+- **Staging sized for graphed steps** (§7), the per-step miss check against that step's staging width.
+- **The route transforms' call site**: `moe.route_transform = <name>` binds a plugin's
+  `moe_route_transform.<name>@1` between the top-k and the resolve, with the map the resolve reads (after the step's
+  lending, ring pieces present); offload store only (a resident store refuses it at build); a negative id is dropped
+  end to end (null slot, no fetch, no count, zero contribution). A toy fixture (`tests.drop_last`) proves it; no
+  transform plugin ships (A1 is held out to step 7).
+- **Parity extended**: the route dump records each step's victims' scope (the resolve marks what the call holding
+  the decode rows routed), its lending (`lend(n)` calls) and the layers' empty slots; `placement.lfu`'s `replay` models
+  borrowing, lending, the return and empty slots as first victims, and carried scores; the check also compares the
+  device's map with the host mirror at the end.
+
+Evidence (A5000, `spikes/x3_policies/README.md` "Step 3b", `evidence/x3_policies_rtx-a5000_2026-10-17.json`
+`step_3b`): every placement snapshot-identical to all-resident with borrowing on — F11 at 25% ×3, 47%, the fill, 10%;
+the n-gram drafter; the decode trace and mixed steps (`chunk_with_decode`), 3 ring and 35 staging borrowings —, F2–F3
+×3 run-identical; F11 equal to `replay` at every step of every run (up to 23,300 admissions) with the device's map
+the host mirror. Prefill at 25% cached: 554 → 3,340 tok/s at 4K (6.0×), 542 → 896 at 1K; at 47% 4,049 tok/s at 4K
+against 3,595 all-resident (whose passes stay at 512 tokens). The plant `lent-slot-still-mapped` fails parity at step
+1 and the snapshot at step 6 (decode trace) or stops the engine by the id-error word (snapshot trace); `owner-race`
+under borrowing is stopped by its precondition flag.
+
+Decided while building, against the text above:
+- **The ring returns empty (R0), as D4 says** — not the replay's marginally better R1. The M6 replay of three returns
+  (`spikes/x3_policies/replay5/`: R0 empty, R1 refilled from the layer's streamed experts by decode score, R2 by the
+  pass's routing) puts R1 ≤ 0.3% ahead on whole traces and 1.0–1.4% on single long prompts; keeping R1's experts needs
+  either paid copies at the return (which the replay shows erase the gain) or a ring layout where a layer's keepers are
+  never reused by later layers, which the double buffer does not have.
+- **Prompt-time admission is not built** (deferred since, §13: its own policy plugin if step 4 needs it; the coordinator's item 5, folded into the panel's item 4): the same replay
+  finds that counting prefill rows at a routing-proportional weight (`12 × the expert's prefill entries ÷ the step's
+  prefill rows`) and letting their misses compete as candidates — admitted only where they land free (staged or
+  streamed into the victim's slot) — beats D4's "prefill never admits" by 2.1% / 0.7% (agent / mixed, whole traces) and
+  9% / 6% on single long prompts at 47% cached, never worse in any held-out cell; counting +1 per entry (variant B)
+  loses 4–7%. That changes D4: it goes to the panel before it is built.
+- **Lending reads the map back** (superseded by the step-3 panel's fixes, below: lending is the device's): DMA needs host addresses, so a borrowing step synchronizes at its first resolve (the
+  map, the empty stacks, then each `lend` call's picks: two or three syncs per borrowing step, none after); empty slots
+  are borrowed first (the replay's assumption too), so consecutive prompt steps do not drain the cache.
+- **Ring sizing** (superseded below): two halves of the largest per-class miss count over the layers (lending makes misses, so the
+  sizing iterates, at most four `lend` calls); one half if fewer slots are lent, routed staging if not even that.
+- **Only device-owned policies borrow** (F11, F4); host policies (`static`, `profile_decay`) keep a pass's staging and
+  never stream (D4's two-phase lending for host policies is not built). So does a layout whose cache cannot lend a
+  pass's staging (decided at each materialize). A step's pass size is not the layout's: it is 4,096 tokens whenever
+  the policy is device-owned, the step has at least `ring_tokens` tokens and a pass's misses fit the prefill staging
+  (every expert of a layer), so the startup profile — on minimum pools, where a fill cache holds nothing to lend —
+  measures the large pass the served steps run (review fix, failing-without test).
+- **`moe.ring_tokens` stays at 512** (measured on the A5000 since, below), §13's crossover on the 5080: deriving it per class from M6's coverage and the
+  class's compute needs the bar card's compute (step 4). On the A5000 streaming wins at 1K already (below).
+- **4,096-row mmq calls are not built** (built since, below): the id helper sorts 16,384 pairs per call (1,024 threads × 16); 4,096 rows
+  at top-8 need a larger instance in the vendored helper (a vendor-patch extension with its own L0). The 2,048-row
+  calls are what §13's gap diagnosis modelled at ≈ 10.0K tok/s on the 5080 (≈ 11.9K with 4,096-row calls).
+- **Victims are per call, the parity oracle's per step**: the resolve marks its victims' scope (`routed` |= 2 by the
+  call holding the decode rows; every call ORs its own mark, so a later pass keeps it), and the route dump hands that
+  to the oracle, so a mixed step spanning passes is modelled as the device runs it.
+- **The CPU reference's expert GEMM rounds a row by its expert's batch**: dropping one route changes other rows' bits
+  on the CPU (`linear_experts`' oracle multiplies per expert); the GPU kernels are row-invariant (D4's L0), so the
+  transform's CPU test compares within rounding.
+- **The delta log** is a region of 2 × items records per layer (panel A: admissions ≤ misses, lends ≤ residents,
+  returns ≤ lends), ≈ 147 KB copied to the host per step on the vehicle.
+
+### Step 3's panel fixes (2026-10-18)
+
+Panel A, B and C's findings on step 3, in their own commits (README "Step 3's panel fixes"); the panel's decision on
+prompt-time admission (deferred, §13) is recorded there.
+- **Graph padding is `RowKind.PADDING`** (`6cebfbb`, additive, ABI 1.3's listing): `padded()` gave padding rows
+  the bucket's decode or verify kind, so a unit reading the padded plan's kinds would have counted padding.
+- **No row-kind guess** (`ce10352`): the store refuses a launched plan without `row_kind`; the startup profile's and
+  capture's plans never reach `before_launch` (the executor calls it only in `launch`).
+- **4,096-row mmq calls** (`d070b40`, vendor patch): mmq's id helper sorts up to 32,768 pairs per call — past one
+  block's 16,384, a device-wide path (cub's device radix sort on the compact path's keys and bits, then its rows,
+  bounds and checks in four more kernels, scratch from the call's workspace); the per-slot and compact paths and the
+  locks are unchanged. L0: a 4,096-row call's rows are bitwise the 512-row calls', and the new path flags its three
+  preconditions as the others. Only eager prefill passes reach it (`linear_experts_arena@1` takes a whole D8 pass).
+- **Lending is the device's** (`7846044`, `4773e5f`, `b191782`): a borrowing step's lent slots, ring and stage tables
+  are written by its own kernels, with no host sync (a GPU test runs `Lent` under sync-debug errors).
+  - `lend(need per class)` (each variant's contract; CUDA: sorts and scans): whole experts in the policy's order,
+    ties by expert id then layer — so lending spreads over the layers (8–9 experts per layer for a 1K prompt at 25%,
+    420 in all) instead of emptying the first layers (576 before: 18 layers' every cached expert) —, for each class
+    the first `need` of them holding its slots.
+  - The ring's halves are sized after lending: `ROUNDS` = 4 rounds of twice the most misses of a layer, less what
+    is held, the last asking for the worst case; a ring still short (a cache that cannot lend more) stages instead,
+    the device's choice (`ring_ok`, the stage width in telemetry; no single-buffer ring any more: small caches stage
+    where 3b streamed). Each class's lent slots are pooled (empty slots first); a layer's role takes its half's slots
+    in expert order; a step's misses past the ring go to the graphed staging slots.
+  - The copies are `expert_prefetch@1` from device tables: the fetch kernel (zero-copy reads of the mapped host
+    pool) on its own stream, one small CTA per class — DMA needs host addresses, which only a sync gives; the SM copy
+    costs the pass compute (A5000, 4K at 25%: 4,716 tok/s with one CTA, 3,968 with the staging fetch's eight, DMA
+    5,127).
+  - The return is the device's too, in the lend records' order (call, then expert id), which the host mirror
+    replays at the commit (`ResidencyMap.commit(…, returned=True)`); a step is booked as borrowing when its forward
+    borrows (a graphed step of one-token last chunks never does).
+- **Both ring-copy paths, one option** (`1e3bd15`, the coordinator's decision on the trade-off above):
+  `moe.ring_copy = sm | dma`. `sm` is the device lending above, its copies on a small kernel, no host sync; `dma`
+  keeps the same device lending and tables (spread lending, the need per class, the staging fallback, the mirror's
+  replay) and reads the copy list back once per streaming step — its one host sync (prefill steps are eager) — to copy
+  on copy engines (`cudaMemcpyBatchAsync` from the pinned host pool; `expert_prefetch@1` takes the list on the device
+  or on the host). Default `sm` until step 4 measures both on the 5080; the lock records the choice (a plugin
+  option). `tune` today pins decode kernels from a decode benchmark only: choosing `ring_copy` per card class needs a
+  prefill rate in it, step 4's. A5000, 25% / 47% cached (tok/s, median of 6): 1K 1,682 / 2,352 (sm) against
+  1,748 / 2,365 (dma), 4K 4,731 / 4,819 against 5,304 / 5,493 (dma +12–14% where the pass is compute-bound); TPOT p99
+  on the agent trace 127.4 / 125.3 ms (sm), 136.1 / 119.8 (dma), 121.8 / 120.9 (off) — within the rounds' spread.
+  Both paths snapshot-identical to all-resident at 25% and F11 equal to `replay` at every step (dma: the snapshot
+  trace and mixed steps; sm above); the GPU test runs `sm`'s lending under sync-debug errors and counts `dma`'s one
+  explicit sync per streaming step.
+- **F11's cost** (`4283bbf`): the +0.04 ms per token was all-cached; with candidates ≈ 0.06 ms at 47% and ≈ 0.09 ms
+  at 25% (step 3a's bullet above).
+
+Measured (an A5000 copying host to device at 26 GB/s; step 3b's prefill figures came from one copying at 12.4 GB/s —
+that is why its 1K prefill sat at its own bound, 896 tok/s, not ≈ 2.5× below):
+- **1K prefill, nsys** (25% cached): before, 600 ms per step, copies busy 573 ms (14.8 GB, 25.9 GB/s): PCIe-bound, the
+  bytes 12% over the layers' misses because lending emptied whole layers; after (lending spread, one copy CTA per
+  class), 618 ms, the copies busy 603 ms — still PCIe-bound, ≈ 83% of the bound the misses alone set (≈ 0.51 s; the
+  SM copies run a little under the DMA's rate).
+- **Stage against ring** (tok/s, one request of N tokens, median of 6; `prefill.py`):
+
+| N | 512 | 1K | 2K | 4K |
+|---|---|---|---|---|
+| all-resident | 3,489 | 3,585 | 3,550 | 3,482 |
+| 25%: stage / ring | 853 / 852 | 973 / 1,686 | 957 / 3,307 | 978 / 4,680 |
+| 47%: stage / ring | 1,079 / 1,186 | 1,228 / 2,337 | 1,204 / 4,446 | 1,226 / 4,777 |
+
+  D8's crossover on the A5000 is ≈ 512 tokens (equal at 25%, the ring 10% ahead at 47%): `moe.ring_tokens` stays at
+  512, measured. Against the DMA ring with 2,048-row calls (3b's code on this card): 1K +5% / +34%, 2K +25% / +32%
+  (lending spread), 4K −4% / −1% (4,096-row calls gained ≈ 5–7%, the SM copies cost ≈ 8–9%).
+- **TPOT p99 on the agent trace** (`tpot.py`: mixed steps, `chunk_with_decode` 512, `max_seqs` 8, 47% cached; two
+  rounds per arm): before (lending on the host, two or three syncs per borrowing step) 131.3 / 128.8 ms with
+  borrowing on, 133.7 / 131.9 off; after 126.0 / 121.5 on, 132.0 / 124.0 off — borrowing never cost TPOT p99 here,
+  and without its syncs it is ≈ 3% under the arm without borrowing (rounds vary by ≈ 5%). The per-request maximum
+  gap's p99: before 669 / 735 ms on against 609 / 550 off; after 536 / 523 on against 629 / 631 off.

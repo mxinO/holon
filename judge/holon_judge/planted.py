@@ -22,6 +22,12 @@
 - The fused q/k norm + rope + KV write (docs/m07-perf.md D3, §6): a token that opens a page written one slot late
   (L2 fails; so would its L0), and decode rows rotated one position late (`bounded`: the configurations' decode
   rows against the reference's teacher-forced prefill rows).
+- Expert offload (docs/v1-offload.md §6, the snapshots with adaptive placement on: spikes/x3_policies): a staged
+  miss read from the neighbouring slot; a two-phase swap's copy unordered and unwaited (with an unseeded delay on
+  the copy stream), or its map to another swap's slot; a host edit in F11's device-owned cache (with the
+  precondition check, and without it); F11's victims chosen without the step's needs, or two admissions into one
+  victim's slot (the kernel's plant bits); a lent slot returned while still mapped to its expert. Each reports how
+  often it fired.
 
 The GGUF plants patch names, so they rely on how the engine reaches them: `_loaded` replaces `load_weights` and
 `resolve_model` in `holon.core.engine`'s namespace (it imports them by name), and the kernel plants wrap
@@ -43,6 +49,7 @@ import sys
 from collections.abc import Callable, Iterator
 from unittest import mock
 
+import numpy as np
 import torch
 
 
@@ -877,6 +884,190 @@ def closing_tokens_masked() -> Iterator[None]:
         yield
 
 
+def _store_tap(tap: Callable) -> contextlib.AbstractContextManager:
+    """`tap(store, step, record)` on every tiered store built inside the context (as a route tap)."""
+    from holon_std.tiered import store as tiered
+
+    init = tiered.TieredStore.__init__
+
+    def planted(self, ctx, **kw):
+        init(self, ctx, **kw)
+        self.taps.append(functools.partial(tap, self))
+    return mock.patch.object(tiered.TieredStore, "__init__", planted)
+
+
+@contextlib.contextmanager
+def resolve_off_by_one() -> Iterator[None]:
+    """Every staged miss reads the next staging slot (the last one the first): a miss maps to the neighbouring slot.
+    Reports the resolves it wrapped (captured ones fire on every replay) and the steps with misses."""
+    from holon_std.tiered.resolver import DeviceResolver
+
+    call, fired = DeviceResolver.__call__, collections.Counter()
+
+    def planted(self, ids, first):
+        slots = call(self, ids, first)
+        k, staging = self.store.top_k, self.store.staging
+        fired[_when()] += 1
+        return torch.where((slots >= k) & (slots < k + staging), k + (slots - k + 1) % staging, slots)
+
+    def missed(store, step, record):
+        fired["steps with misses"] += bool((record["routed"] & ~(store.residency.host >= 0).all(-1)).any())
+    with mock.patch.object(DeviceResolver, "__call__", planted), _store_tap(missed):
+        yield
+    print(f"plant resolve-off-by-one fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def map_before_landing(most: float = 2e-3) -> Iterator[None]:
+    """A two-phase swap's copy keeps neither its ordering after the unmap step nor the map step's wait: it starts on
+    the copy stream at once (while the steps launched before it may still read the victim's slots), after an unseeded
+    delay of 0–`most` seconds, and the map step does not wait for it. Reports the copies."""
+    import random
+
+    from holon.core import memory
+    from holon_std.tiered import store as tiered
+
+    copy, run = tiered.SlotClass.copy, memory.Copies._run
+    fired, rng = collections.Counter(), random.SystemRandom()
+    cycles = int(most * torch.cuda.get_device_properties(torch.cuda.current_device()).clock_rate * 1e3) \
+        if torch.cuda.is_available() else 0
+
+    def planted_copy(self, unit, slot, after, lands_by):
+        fired["copies"] += 1
+        return dataclasses.replace(copy(self, unit, slot, after, lands_by), after=None)
+
+    def planted_run(self, ops, after):
+        self.stream.run(lambda: torch.cuda._sleep(rng.randrange(cycles)) if cycles else None)
+        return run(self, ops, after)
+    unwaited = mock.patch.object(memory.Copies, "launching", lambda self, step: self.landing.pop(step, None))
+    with mock.patch.object(tiered.SlotClass, "copy", planted_copy), unwaited, \
+            mock.patch.object(memory.Copies, "_run", planted_run):
+        yield
+    print(f"plant map-before-landing fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def map_stale_slot() -> Iterator[None]:
+    """A two-phase swap maps each incoming item to the slot the previous swap of its role and class freed (the first
+    to the last one's): a deterministic map to a slot already reassigned. Reports the rotated maps."""
+    from holon_std.tiered import store as tiered
+
+    swap, fired = tiered.TieredStore._swap, collections.Counter()
+
+    def planted(self, commit, swaps):
+        edit = self.residency.edit
+
+        def rotated(commit, entries, later=0):
+            if later:
+                groups = self.layers
+                by: dict = {}
+                for n, (g, _, r, _, _) in enumerate(entries):
+                    by.setdefault((r, self.groups[groups[g]][r].name), []).append(n)
+                entries = list(entries)
+                for ns in (ns for ns in by.values() if len(ns) > 1):
+                    slots = [entries[n][4] for n in ns]
+                    for n, slot in zip(ns, slots[-1:] + slots[:-1], strict=True):
+                        entries[n] = (*entries[n][:4], slot)
+                    fired["maps"] += len(ns)
+            return edit(commit, entries, later)
+        self.residency.edit = rotated
+        try:
+            return swap(self, commit, swaps)
+        finally:
+            del self.residency.edit
+    with mock.patch.object(tiered.TieredStore, "_swap", planted):
+        yield
+    print(f"plant map-stale-slot fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def owner_race(checked: bool = True) -> Iterator[None]:
+    """At every commit of a step with decode rows, a host lending edit in F11's device-owned cache: the coldest
+    resident of the layer with the most admissions that step (by the device's scores; the store's view of it, one
+    step behind the device at the edit's launch) is unmapped at launch c + 2 and its slots filled with another
+    piece's bytes (a ring would), copied after that step. The edit's precondition fails, and stops the engine, once
+    the device has moved that expert in between; `checked=False` removes the check (the edit applies regardless).
+    Reports the edits issued."""
+    from holon_std.tiered import residency as maps
+    from holon_std.tiered.store import LAND
+
+    fired, apply = collections.Counter(), maps.ResidencyMap.apply
+
+    def lend(store, step, record):
+        records = record["records"]
+        if not len(records):
+            return
+        g = int(collections.Counter(records[:, 0].tolist()).most_common(1)[0][0])
+        view, groups = store.residency.host, store.layers
+        whole = (view[g] >= 0).all(-1)
+        if not whole.any():                                  # every expert of the layer lent or gone: none to take
+            return
+        score = store.state["score"][g].float().cpu().numpy()
+        x = int(min(whole.nonzero()[0], key=lambda e: (score[e], e)))
+        store.residency.edit(step.step, [(g, x, r, int(view[g, x, r]), -1) for r in range(store.roles)])
+        copies = store._copies.setdefault(step.step + maps.LAG, [])
+        for r, c in store.groups[groups[g]].items():
+            copies.append(c.copy(0, int(view[g, x, r]), step.step + maps.LAG, step.step + maps.LAG + LAND))
+        fired["edits"] += 1
+
+    def unchecked(self, errors):
+        index, _, value = self._list
+        self._flat.scatter_(0, index, value.int())
+        self._clear()
+    with _store_tap(lend), mock.patch.object(maps.ResidencyMap, "apply", apply if checked else unchecked):
+        yield
+    print(f"plant owner-race{'' if checked else '-unchecked'} fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def _lfu_kernel(bit: int, name: str, fires: Callable) -> Iterator[None]:
+    """kernels.expert_io's resolve with plant bit `bit` set (the variants read it); `fires(records, counts)` counts a
+    step's firings from its delta log, at its commit before the store checks the step's error words."""
+    from holon_plugins.kernels.expert_io import plugin
+    from holon_std.tiered import store as tiered
+
+    fired, commit = collections.Counter(), tiered.TieredStore.after_commit
+
+    def counted(self, step, telemetry):
+        delta, n = telemetry["delta"].numpy(), telemetry["n_delta"].numpy()
+        records = np.concatenate([delta[g, :n[g]] for g in range(len(n))])
+        fired["admissions"] += len(records)
+        fired["fired"] += fires(records, telemetry["counts"].numpy())
+        return commit(self, step, telemetry)
+    with mock.patch.object(plugin.MoeResolve, "plant", bit), mock.patch.object(tiered.TieredStore, "after_commit",
+                                                                               counted):
+        yield
+    print(f"plant {name} fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def lent_slot_still_mapped() -> Iterator[None]:
+    """A prefill step's lending (D4) logs its experts unmapped but leaves them mapped: their slots serve the step's
+    ring or staging and come back as empty slots while the experts still name them. Reports the experts lent."""
+    from holon_std.tiered import store as tiered
+
+    lend, fired = tiered.TieredStore.lend, collections.Counter()
+
+    def planted(self, *args):
+        before = self.residency.device.clone()
+        picked = lend(self, *args)
+        self.residency.device.copy_(before)                     # the unmap undone
+        fired["lent"] += picked.sum()                          # a tensor: the step goes on without a host sync
+        return picked
+    with mock.patch.object(tiered.TieredStore, "lend", planted):
+        yield
+    print(f"plant lent-slot-still-mapped fired: { {k: int(v) for k, v in fired.items()} }", file=sys.stderr)
+
+
+def _shared(records, counts) -> int:
+    """Admissions into a victim slot an earlier admission of the step took."""
+    seen, n = set(), 0
+    for g, _, b in records.tolist():
+        n += (g, b) in seen
+        seen.add((g, b))
+    return n
+
+
 QWEN35_PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "qwen35-tiled-as-grouped": lambda: _qwen35_facts(order="grouped"),
     "qwen35-rotary-all-dims": lambda: _qwen35_facts(rotary_dim=256, sections=[]),     # partial_rotary_factor read as 1
@@ -908,6 +1099,14 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     **QWEN35_PLANTS,
     # The fused q/k norm + rope + KV write (docs/m07-perf.md D3)
     "qk-rope-kv-page-slot": qk_rope_kv_page_slot, "qk-rope-kv-decode-position": qk_rope_kv_decode_position,
+    # Expert offload with adaptive placement (docs/v1-offload.md §6; spikes/x3_policies)
+    "resolve-off-by-one": resolve_off_by_one, "map-before-landing": map_before_landing,
+    "map-stale-slot": map_stale_slot, "owner-race": owner_race,
+    "owner-race-unchecked": lambda: owner_race(checked=False),
+    "lfu-victim-needed": lambda: _lfu_kernel(1, "lfu-victim-needed",           # victims the step's decode rows route
+                                             lambda r, c: int(sum(c[g, b] > 0 for g, _, b in r.tolist()))),
+    "lfu-shared-victim": lambda: _lfu_kernel(2, "lfu-shared-victim", _shared),
+    "lent-slot-still-mapped": lent_slot_still_mapped,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)

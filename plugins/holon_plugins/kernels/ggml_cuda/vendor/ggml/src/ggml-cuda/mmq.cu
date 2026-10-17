@@ -299,9 +299,13 @@ void ggml_cuda_mul_mat_q(
         const int si1  = ids->nb[1] / ggml_element_size(ids);
         const int sis1 = nb12 / nb11;
 
+        ggml_cuda_pool_alloc<char> ids_scratch(ctx.pool()); // Holon: the device-wide helper's (mmid.cuh)
+        if (const size_t nbytes = ggml_cuda_mm_ids_scratch_bytes(ne12*n_expert_used)) {
+            ids_scratch.alloc(nbytes);
+        }
         ggml_cuda_launch_mm_ids_helper((const int32_t *) ids->data, ids_src1.get(), ids_dst.get(), expert_bounds.get(),
             ne02, n_z, ne12, n_expert_used, ne11, si1, sis1, /*write_inverse =*/ dedup_bcast,
-            /*max_cols =*/ (ne12 + J_best - 1)/J_best*J_best, ids_errors, stream); // Holon: mmq's column tiles per slot
+            /*max_cols =*/ (ne12 + J_best - 1)/J_best*J_best, ids_errors, ids_scratch.ptr, stream); // Holon: mmq's column tiles per slot
         CUDA_CHECK(cudaGetLastError());
     }
 

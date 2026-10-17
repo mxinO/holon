@@ -67,7 +67,12 @@ QLINEAR, QLINEAR_GLU, QEMBEDDING = "qlinear", "qlinear_glu", "qembedding"
 LINEAR_EXPERTS, MOE_TOPK, MOE_COMBINE = "linear_experts", "moe_topk", "moe_combine"
 LINEAR_EXPERTS_ARENA = "linear_experts_arena"     # the same kernel over an offload store's arena (ids are its slots)
 CHUNK = 512                     # mmq rows per call: llama.cpp's ubatch; sizes the workspace and the f32 buffer
-ID_PAIRS = 16384                # the most (token, expert) pairs mmq's id helper sorts per call (mmid.cuh)
+ID_PAIRS = 32768                # the most (token, expert) pairs mmq's id helper sorts per call (mmid.cuh)
+PASS_ROWS = 4096                # the largest expert pass of a prefill chunk (docs/v1-offload.md D8)
+# An offload arena's calls carry one expert pass of a large prefill chunk (D8): mmq takes the pass's rows in one call
+# where the id helper sorts them (4,096 at top-8: its device-wide path past one block's 16,384 pairs), in whole
+# CHUNKs, so a row's chunk and path stay the reference's (the pass's caller cuts its last partial chunk off); a
+# call's rows are bitwise the same at any rows per call.
 # The bits mmq's id helper ors into `LinearExperts.errors` for a violated precondition (GGML_CUDA_MM_IDS_ERR_*)
 ID_ERRORS = {"slots": 1,        # more distinct slots in a call's ids than `LinearExperts.slots`
              "range": 2,        # an id outside the stack's slots
@@ -405,6 +410,7 @@ class LinearExperts(_Matmul):
         self.out_y = self.out // 2 if self.swiglu else self.out
         # llama.cpp's choice per chunk from its token count (fixed per graph bucket): mmvq with ids, else mmq
         self.mmvq_tokens = max((n for n in range(1, 9) if self.lib.use_mmvq_id(self.device, self.type, n)), default=0)
+        self.chunk = max(CHUNK, min(PASS_ROWS, ID_PAIRS // self.top_k) // CHUNK * CHUNK) if "slots" in facts else CHUNK
         self._uses_mmq(self.mmvq_tokens, facts["layout"])
         # the most distinct slots a call's ids name: one per expert, plus per routing rank one standing in for a miss
         # or a padding row (an offload arena's null slots, docs/v1-offload.md D5); it bounds mmq's compact launch, which
@@ -415,9 +421,9 @@ class LinearExperts(_Matmul):
         self.errors = ctx.static("ggml_cuda.id_errors", (1,), torch.int32)
         # its size depends on in, k (the id maps, the activations per slot) and E (expert_bounds): all three name it
         self.workspace = ctx.workspace(
-            f"ggml_cuda.id[in={self.k},top_k={self.top_k},experts={self.experts}]",
-            self.lib.workspace_bytes_id(self.device, self.k, CHUNK, self.top_k, self.slots))
-        self.f32 = self._f32_workspace(ctx, CHUNK * facts["rows_per_token"], facts["act_dtype"])
+            f"ggml_cuda.id[in={self.k},top_k={self.top_k},experts={self.experts},rows={self.chunk}]",
+            self.lib.workspace_bytes_id(self.device, self.k, self.chunk, self.top_k, self.slots))
+        self.f32 = self._f32_workspace(ctx, self.chunk * facts["rows_per_token"], facts["act_dtype"])
 
     def __call__(self, x: torch.Tensor, parts: dict[str, torch.Tensor], ids: torch.Tensor) -> torch.Tensor:
         x, ids, blocks = x.contiguous(), ids.contiguous(), parts["blocks"]
@@ -430,8 +436,8 @@ class LinearExperts(_Matmul):
         tokens = len(ids)
         y = torch.empty(tokens, self.top_k, self.out_y, device=x.device)
         gate_up = None          # mmq's f32 gate/up output before our SwiGLU, a per-call activation
-        for start in range(0, tokens, CHUNK):
-            xs, ids_c, ys = x[start:start + CHUNK], ids[start:start + CHUNK], y[start:start + CHUNK]
+        for start in range(0, tokens, self.chunk):
+            xs, ids_c, ys = x[start:start + self.chunk], ids[start:start + self.chunk], y[start:start + self.chunk]
             if len(ids_c) <= self.mmvq_tokens:
                 self._count("mmvq")
                 self.lib.mmvq_id(self.type, blocks.view(-1, blocks.shape[-1]), xs, ids_c, ys, self.swiglu,
@@ -445,7 +451,7 @@ class LinearExperts(_Matmul):
                     self._scale_slots(ys, up_scale, ids_c)
                 continue
             if gate_up is None:
-                gate_up = torch.empty(min(tokens, CHUNK), self.top_k, self.out, device=x.device)
+                gate_up = torch.empty(min(tokens, self.chunk), self.top_k, self.out, device=x.device)
             self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, gate_up[:len(ids_c)], self.workspace, self.slots,
                             self.errors)
             self._swiglu(gate_up[:len(ids_c)], ys, gate_scale, up_scale, ids_c)

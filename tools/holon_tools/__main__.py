@@ -1,10 +1,13 @@
-"""Command line: the `holon impact | propagate | tune` commands of design §4.4 and §4.6.
+"""Command line: the `holon impact | propagate | tune` commands of design §4.4 and §4.6, and `profile`
+(docs/v1-offload.md F2).
 
     python -m holon_tools impact <unit | path | A..B>... [--plans plans]
     python -m holon_tools propagate <model> [--class C] [--new-model] [--approve] [--plans plans]
                                     --golden <fp32 golden> --floor <floor> [--prompts judge/prompts/v1.jsonl]
                                     [engine flags: --device --dtype --max-seqs ...]
     python -m holon_tools tune <model> [--ops op ...] [--batch 8] [--tokens 64] [the flags of propagate]
+    python -m holon_tools profile <model> [--prompts judge/prompts/v1.jsonl] [--max-tokens 64]
+                                  [--name profile.json] [engine flags: --host-memory ...]
 
 `propagate` and `tune` exit 0 when nothing needs doing or the lock was written, 2 when the new lock needs an
 approval (re-run with --approve to write it), 1 on failure.
@@ -30,7 +33,7 @@ from holon_judge.golden import resolve_model as checkpoint_dir
 from holon_judge.recording import PromptSet
 from holon_judge.snapshot import Snapshot, trace
 
-from . import impact, locks, propagate, tune
+from . import impact, locks, profile, propagate, tune
 
 DEFAULT_PROMPTS = pathlib.Path(__file__).resolve().parents[2] / "judge" / "prompts" / "v1.jsonl"
 
@@ -130,6 +133,14 @@ def _tune(a: argparse.Namespace) -> int:
     return _run(a, start, dataclasses.replace(base, kernels=pins), model_id)
 
 
+def _profile(a: argparse.Namespace) -> int:
+    model = checkpoint_dir(a.model)
+    counts = profile.profile(engine_config(str(model), a), [p.ids for p in PromptSet.load(a.prompts).prompts],
+                             a.max_tokens)
+    print(f"wrote {profile.write(pathlib.Path(model), a.name, counts)}: moe.placement.profile={a.name}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m holon_tools")
     sub = ap.add_subparsers(required=True)
@@ -159,6 +170,14 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--ops", nargs="+", default=list(tune.OPS))
             p.add_argument("--batch", type=int, default=8)
             p.add_argument("--tokens", type=int, default=64)
+
+    f = sub.add_parser("profile", help="a routing profile for the offload store's warm start, beside the checkpoint")
+    f.add_argument("model", help="checkpoint file or directory, or hub id")
+    f.add_argument("--prompts", default=str(DEFAULT_PROMPTS), help="prompt set whose generations are counted")
+    f.add_argument("--max-tokens", type=int, default=64, help="greedy tokens generated per prompt")
+    f.add_argument("--name", default="profile.json", help="the profile's file name, beside the checkpoint")
+    engine_flags(f)
+    f.set_defaults(run=_profile)
 
     a = ap.parse_args(argv)
     return a.run(a)

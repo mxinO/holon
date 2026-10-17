@@ -1,39 +1,56 @@
 """std.tiered.store@1: the engine's one tiered store of offloaded pieces (docs/v1-offload.md D5) — slot classes with
-VRAM arenas and host tiers, the residency map, the placement policy, the per-step row kinds and counts.
+VRAM arenas and host tiers, the residency map, the placement policy and its device state, the per-step row kinds,
+counts and delta log.
 
 A client (the MoE offload store, `std.moe.offload@1`) adds every piece while its model is finalized — (group, item,
 role), its class and the checkpoint extents its bytes come from — and asks for each group's `DeviceResolver` when it
 binds kernels. Then, through the engine's hooks:
 
 - `before_materialize`: one VRAM pool for every class's arena — a fill pool growing to every piece, or the size
-  `cache` pins — and per class a mapped host pool of the tier, filled from the extents;
+  `cache` pins — and per class a mapped host pool of the tier, filled from the extents; both pools' unit is the
+  classes' common divisor, so a between-step copy of a piece is a MemOp of whole units;
 - `after_materialize` (after every materialize): the policy seeds whole items within the pool's bytes (and each
   class's pinned slots); then each class's arena `[S, unit]` is laid out in the pool — `top_k` null slots (zero
   weights, one per routing rank), `staging` slots, then the cache slots its seeded pieces fill —, the map reset to
-  the tier and the seed copied in;
-- `before_launch`: the step's row kinds per token (decode and verify rows: a mixed step's leading rows, or a row
-  whose every query token has logits; prefill rows the others, so a one-token last prompt chunk counts as decode;
-  graph padding past them), written as far as this step's or the last one's tokens reach; the map edits due, which
-  the step's first resolve applies, zeroing the step's counts too (in the forward: in a graph, on the stream);
-- `after_commit`: the staging invariant (a layer's distinct misses fit its staging slots: F5a has no fallback; `misses`
-  is the running maximum since the last materialize), then the policy's edits from the step's counts.
+  the tier and the seed copied in, the policy's device state zeroed;
+- `before_launch`: the step's row kinds per token (decode and verify rows by the plan's `row_kind`, which the
+  scheduler fills on every step it launches — a plan without it is refused; prefill rows the others, so a step's
+  decode rows lie in its first expert pass; graph padding past them), written as far as this step's or the last
+  one's tokens reach; the map edits due, which the step's first resolve applies, zeroing the step's counts, error
+  words and delta log too (in the forward: in a graph, on the stream); the copies of two-phase swaps due;
+- `after_commit`: the error words, the staging invariant (a layer's distinct misses fit its staging slots: F5a has no
+  fallback; `misses` is the running maximum since the last materialize), the host mirror brought to the step (host
+  edits launched by it, then the device's delta log), the route taps, then the policy's swaps from the step's counts.
+
+A host policy's swap is two-phase (D4): decided at commit c, the outgoing item is unmapped at launch c + 2 (its
+routes become misses), its slots are overwritten with the incoming item's bytes by a MemOp on the core's copy stream
+after step c + 2's device work, and launch c + 2 + `LAND` waits for that copy before the incoming item is mapped
+there. Every host edit carries the value it expects (a failed precondition stops the engine at that step's commit).
 """
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
+import math
 import pathlib
+from collections.abc import Callable
 
 import numpy as np
 import torch
-from holon.api import Extent, Ref
+from holon.api import Extent, MemOp, Ref, RowKind
 
 from . import files
-from .residency import ResidencyMap
-from .resolver import DeviceResolver
+from .residency import LAG, ResidencyMap
+from .resolver import EXPERT_PREFETCH, DeviceResolver
+from .ring import ROUNDS, Lent
 
 PADDING, DECODE, PREFILL = 0, 1, 2           # row kinds (std.moe.kernels, `moe_resolve@1`)
-ALIGN = 4096                                 # each class's arena starts at a multiple of it
+ALIGN = 4096                                 # each class's arena starts at a multiple of it (and of the pool's unit)
+LAND = 2                                     # d: launches between a swap's unmap and its map (D4)
+LOG = 2                                      # the delta log's records per group, per item
+FLOOR = 4                                    # F2: each group's hottest items before the global ranking
+POLICY = "placement.lfu@1"                   # F11, the default where the RAM tier holds every expert (D10, §13)
 
 
 @dataclasses.dataclass(eq=False)
@@ -72,30 +89,60 @@ class SlotClass:
 
     def units(self) -> torch.Tensor:
         """The host pool as the device reads it, [pieces, unit] bytes."""
-        return self.host.device_view(torch.uint8, (self.host.capacity, self.unit_bytes))
+        return self.host.device_view(torch.uint8, (len(self.pieces), self.unit_bytes))
+
+    def copy(self, unit: int, slot: int, after: int, lands_by: int) -> MemOp:
+        """A MemOp copying host unit `unit` into arena slot `slot`, as whole units of the two pools."""
+        per, base = self.unit_bytes // self.pool.unit_bytes, self.at // self.pool.unit_bytes
+        run = np.arange(per)
+        return MemOp(self.host.name, unit * per + run, self.pool.name, base + slot * per + run, after=after,
+                     lands_by=lands_by)
 
 
 class TieredStore:
-    def __init__(self, ctx, *, name: str, items: int, roles: int, top_k: int, staging: int, policy: Ref | str,
+    def __init__(self, ctx, *, name: str, items: int, roles: int, top_k: int, staging: int, prefill: int = 0,
+                 ring_tokens: int = 0, ring_copy: str = "sm", policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "") -> None:
-        self.ctx, self.name, self.items, self.roles, self.top_k, self.staging = ctx, name, items, roles, top_k, staging
-        self.policy = ctx.unit(policy if isinstance(policy, Ref) else Ref(policy))
-        if self.policy.resolve_variant is not None or self.policy.device_state():
-            raise NotImplementedError(f"{name}: policies with resolve variants or device state land in step 3")
+        self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
+        # `staging`: slots for the graphed steps' misses; `prefill`: a prefill pass's (lent in its step when more, so
+        # a pinned cache must be able to lend that many: else the staging slots hold them, as before D8);
+        # `ring_tokens`: the prompt tokens of a step from which it streams through the ring (D8; 0: never)
+        # `ring_copy`: the ring's copies on the device's SMs from its own tables ("sm"), or by copy engines from the
+        # tables read back once per streaming step ("dma")
+        self.staging, self.prefill, self.ring_tokens = staging, max(prefill, staging), ring_tokens
+        if ring_copy not in ("sm", "dma"):
+            raise ValueError(f"{name}: ring_copy {ring_copy!r}: sm or dma")
+        self.ring_copy = ring_copy
         self.tiers = [ctx.unit(Ref(t)) for t in tiers]
         if len(self.tiers) != 1 or not self.tiers[0].device_readable:
             raise NotImplementedError(f"{name}: one device-readable host tier (F5a), not {list(tiers)}")
+        ref = policy if isinstance(policy, Ref) else Ref(policy or POLICY)    # POLICY: the one tier holds every expert
+        self.policy, self.policy_ref = ctx.unit(ref, items=items, roles=roles), ref.target       # (pinned, inclusive)
         self._cache, self._profile = _parse_cache(cache), profile
         self.classes: dict[str, SlotClass] = {}
         self.groups: dict[int, dict[int, SlotClass]] = {}       # group -> role -> its class
         self.residency: ResidencyMap | None = None              # the device tables, once a resolver is asked for
+        self.resolvers: list[DeviceResolver] = []
         tokens = max(ctx.options.get("max_step_tokens", 1),
                      ctx.options.get("max_seqs", 1) * (1 + ctx.options.get("max_draft_tokens", 0)))
         self._kinds, self._written = np.zeros(tokens, dtype=np.uint8), 0     # host side; the prefix not PADDING
         self.kinds = ctx.static(f"{name}.kinds", (tokens,), torch.uint8)
-        self.misses = ctx.static(f"{name}.misses", (1,), torch.int32)   # a running maximum (`moe_resolve@1`)
+        self.misses = ctx.static(f"{name}.misses", (1,), torch.int32)   # the step's most (`moe_resolve@1`)
         self.errors = ctx.static(f"{name}.errors", (1,), torch.int32)   # `moe_resolve@1`'s, zeroed each step
+        self.edit_errors = ctx.static(f"{name}.edit_errors", (1,), torch.int32)   # host edits' preconditions
         self.peak_misses = 0                    # the most distinct misses a layer had (`misses`, at commits)
+        # Route taps: (step, record) at each commit; the record holds the step's routing `counts` [G, E] of decode
+        # and verify rows, the experts any of its rows `routed` [G, E] (bool) and its victims' `scope` (what the call
+        # holding its decode rows routed, under a variant), the delta log's `records` [n, 3] and,
+        # when it borrowed slots (its empty ones, then lent), its `lends` (each `lend(need)` call's need per class;
+        # else None).
+        self.taps: list[Callable[[object, dict], None]] = []
+        self._copies: dict[int, list[MemOp]] = {}               # launch -> the swaps' copies handed in then
+        self._mode: str | None = None                           # the step being launched borrows: ring or stage
+        self._borrowing: dict[int, str] = {}                    # step -> how it borrowed (its forward), until commit
+        self.lending = False                                    # the layout lends (`after_materialize`)
+        self.lent: Lent | None = None                           # its lent slots, from its first resolve to its end
+        self.borrowed = {"ring": 0, "stage": 0}                 # steps that borrowed slots, by use (since a seed)
 
     # -- while the model is finalized and bound ------------------------------------------------------------------------
     def add(self, group: int, item: int, role: int, cls: str, unit_bytes: int, extents: list[Extent]) -> SlotClass:
@@ -115,36 +162,98 @@ class TieredStore:
 
     def resolver(self, group: int) -> DeviceResolver:
         if self.residency is None:
+            pinned = [c.cap for c in self.classes.values() if c.cache is not None]
+            if not self.policy.device_owned or any(cap < self.prefill for cap in pinned):
+                # A host policy lends two-phase (not built), a small pinned cache cannot lend a pass's staging: the
+                # staging slots hold a prefill pass's misses, and no step streams.
+                self.ring_tokens = 0
+                self.staging = self.prefill
+                for c in self.classes.values():
+                    c.staging = self.prefill
             self._order = {g: n for n, g in enumerate(sorted(self.groups))}
             shape = (len(self._order), self.items, self.roles)
             self.residency = ResidencyMap(self.ctx, self.name, shape)
             self.host_units = self.ctx.static(f"{self.name}.host", shape, torch.int32)
             self.counts = self.ctx.static(f"{self.name}.counts", shape[:2], torch.int32)
             self.limits = self.ctx.static(f"{self.name}.limits", (len(self._order), self.roles), torch.int32)
-            self.telemetry = {"counts": self.counts, "misses": self.misses, "errors": self.errors}
-            self.zeroed = [self.counts, self.errors]        # by the step's first resolve
+            self.state = {n: self.ctx.static(f"{self.name}.state.{n}", (len(self._order), *s), getattr(torch, dtype))
+                          for n, (s, dtype) in self.policy.device_state().items()}
+            self.routed = self.ctx.static(f"{self.name}.routed", shape[:2], torch.int32)
+            # The delta log, a region per group: a step's records of a group are its admissions (at most its misses,
+            # E − R for R resident), its lent items (at most R) and the lent slots' returns (at most as many): 2E bound
+            # them (+ a sink row for `lend`'s scatter).
+            log = self.ctx.static(f"{self.name}.delta", (shape[0], LOG * self.items + 1, 3), torch.int32)
+            self.delta, self.n_delta = log[:, :-1], self.ctx.static(f"{self.name}.n_delta", shape[:1], torch.int32)
+            self._log = log
+            self.telemetry = {"counts": self.counts, "routed": self.routed, "misses": self.misses,
+                              "errors": self.errors, "edit_errors": self.edit_errors, "delta": self.delta,
+                              "n_delta": self.n_delta}
+            self.zeroed = [self.counts, self.routed, self.misses, self.errors, self.edit_errors, self.n_delta]
+            self.ring = self.ctx.static(f"{self.name}.ring", shape, torch.int32)      # this step's ring slots
+            self.empty = self.ctx.static(f"{self.name}.empty", (shape[0], self.roles, self.items), torch.int32)
+            self.n_empty = self.ctx.static(f"{self.name}.n_empty", shape[:1], torch.int32)
+            # A borrowing step's tables (`Lent`, on the device): the empty slots it found, the lent experts' slots and
+            # `lend` call, each call's need per class, each class's pool of lent slots, the ring's copies, the stage
+            # lists, and whether the ring held (else the step staged) with the stage width its misses had.
+            n_classes = len(self.classes)
+            self.n_before = self.ctx.static(f"{self.name}.n_before", shape[:1], torch.int32)
+            self.lent_slots = self.ctx.static(f"{self.name}.lent_slots", shape, torch.int32)
+            self.lent_call = self.ctx.static(f"{self.name}.lent_call", shape[:2], torch.int32)
+            self.lend_needs = self.ctx.static(f"{self.name}.lend_needs", (ROUNDS, n_classes), torch.int64)
+            self.pool = self.ctx.static(f"{self.name}.pool", (n_classes, 2 * self.roles * math.prod(shape[:2]) + 1),
+                                        torch.int32)
+            self.ring_fetch = self.ctx.static(f"{self.name}.ring_fetch", (shape[0], self.roles, 2, self.items),
+                                              torch.int32)
+            self.ring_n = self.ctx.static(f"{self.name}.ring_n", (shape[0], self.roles), torch.int32)
+            self.stage_tab = self.ctx.static(f"{self.name}.stage_tab", (shape[0], self.roles, self.prefill),
+                                             torch.int32)
+            self.ring_ok = self.ctx.static(f"{self.name}.ring_ok", (1,), torch.int32)
+            pinned = self.ctx.device.type == "cuda"         # "dma": the copy list read back into pinned memory
+            self.ring_host = (torch.empty(self.ring_fetch.shape, dtype=torch.int32, pin_memory=pinned),
+                              torch.empty(self.ring_n.shape, dtype=torch.int32, pin_memory=pinned))
+            self.stage_width = self.ctx.static(f"{self.name}.stage_width", (1,), torch.int32)
+            self.telemetry |= {"lends": self.lend_needs, "ring_ok": self.ring_ok, "stage_width": self.stage_width}
+            # The staging slots' list: a graphed step's, or (a layout too small to lend) a prefill pass's.
+            self.stages = {n: self.ctx.static(f"{self.name}.stage.{n}", (self.roles, n), torch.int32)
+                           for n in {self.staging, self.prefill}}
+            self.layer_classes = [[self.groups[g][r] for r in range(self.roles)] for g in self.layers]
+            self.prefetch = {}
+            for c in self.classes.values():
+                facts = {"unit_bytes": c.unit_bytes}
+                self.prefetch[c.name] = self.ctx.select_kernel(
+                    EXPERT_PREFETCH, site=f"std.tiered[{self.name}].{c.name}", **(facts | {"copy": self.ring_copy})
+                ).impl(self.ctx, **facts, copy=self.ring_copy)
         g = self._order[group]
-        return DeviceResolver(self.ctx, self, [self.groups[group][r] for r in range(self.roles)],
-                              self.residency.device[g], self.host_units[g], self.limits[g], self.counts[g],
-                              first=g == 0)
+        self.resolvers.append(DeviceResolver(self.ctx, self, g, [self.groups[group][r] for r in range(self.roles)],
+                                             {n: t[g] for n, t in self.state.items()}))
+        return self.resolvers[-1]
+
+    @property
+    def layers(self) -> list[int]:
+        """The group (layer) ids, in map order: row g of the map, the counts and the records is layer `layers[g]`."""
+        return sorted(self.groups)
 
     def watch(self, errors: torch.Tensor) -> None:
         """A kernel's error word (`linear_experts_arena@1`'s `errors`): zeroed each step, a commit that finds it set
         stops the engine."""
         if not any(errors is t for t in self.zeroed):
-            self.telemetry[f"kernel_errors.{len(self.zeroed) - 2}"] = errors
+            self.telemetry[f"kernel_errors.{len(self.zeroed) - 6}"] = errors
             self.zeroed.append(errors)
 
     # -- engine hooks -------------------------------------------------------------------------------------------------
     def before_materialize(self, ctx) -> None:
         """Request the arena pool and every class's host pool, and fill the host pools from the checkpoint."""
         jobs, host = [], np.full(self.residency.host.shape, -1, dtype=np.int32)
-        for c in self.classes.values():
+        classes = list(self.classes.values())
+        self.granule = functools.reduce(math.gcd, (c.unit_bytes for c in classes))     # both pools' unit
+        self._align = math.lcm(self.granule, ALIGN)
+        for c in classes:
             if not 0 <= c.cap <= len(c.pieces):
                 raise ValueError(f"{self.name}: class {c.name}: {c.cap} cache slots of {len(c.pieces)} pieces")
             units = self.tiers[0].capacity(c.name, len(c.pieces))
-            c.host = ctx.pool(f"{self.name}.host.{c.name}", unit_bytes=c.unit_bytes, min_units=units,
-                              pref_units=units, device="host", mapped=True)
+            per = c.unit_bytes // self.granule
+            c.host = ctx.pool(f"{self.name}.host.{c.name}", unit_bytes=self.granule, min_units=units * per,
+                              pref_units=units * per, device="host", mapped=True)
             buffer = c.host.view(torch.uint8, (units, c.unit_bytes)).numpy()
             for piece, (g, i, r, extents) in enumerate(c.pieces):
                 self.tiers[0].admit(c.name, piece, piece)
@@ -153,32 +262,41 @@ class TieredStore:
                 for e in extents:
                     jobs.append((e, buffer[piece, at:at + e.nbytes]))
                     at += e.nbytes
-        classes = list(self.classes.values())
-        least = sum(c.bytes(0 if c.cache is None else c.cap) for c in classes) + ALIGN * len(classes)
-        most = sum(c.bytes(c.cap) for c in classes) + ALIGN * len(classes)
+        least = sum(c.bytes(0 if c.cache is None else c.cap) for c in classes) + self._align * len(classes)
+        most = sum(c.bytes(c.cap) for c in classes) + self._align * len(classes)
         fill = any(c.cache is None for c in classes)
-        self.granule = -(-min(c.unit_bytes for c in classes) // ALIGN) * ALIGN    # the pool's unit: about a piece
         self.arena = ctx.pool(f"{self.name}.arena", unit_bytes=self.granule, min_units=-(-least // self.granule),
                               pref_units=-(-most // self.granule), fill=fill)
         files.read(jobs)
         self._host = host
         self.host_units.copy_(torch.from_numpy(host))
+        self.class_table = np.array([[classes.index(self.groups[g][r]) for r in range(self.roles)]
+                                     for g in self._order])
+        self._class_index = torch.from_numpy(self.class_table).to(self.ctx.device)
 
     def after_materialize(self, ctx) -> None:
         """Seed the new pool: the policy's items within its bytes, each class's arena laid out for its share, the map
-        at the tier but for the seed, copied in."""
+        at the tier but for the seed, copied in; the policy's state, counts and words zeroed."""
         classes = list(self.classes.values())
         size = self.arena.capacity * self.granule
-        budget = _Budget(self, size - sum(c.bytes(0) for c in classes) - ALIGN * len(classes))
         groups = list(self._order)
-        seed = self.policy.seed(self._profile_counts(), budget)
+        # A layout lends a prefill pass's staging (D5) when every class can; else its staging slots hold that much.
+        for staging in sorted({self.staging, self.prefill}):
+            for c in classes:
+                c.staging = staging
+            budget = _Budget(self, size - sum(c.bytes(0) for c in classes) - self._align * len(classes))
+            seed = self.policy.seed(self._profile_counts(), budget)
+            self.lending = self.policy.device_owned and all(n >= self.prefill for n in budget.taken.values())
+            if self.lending or staging == self.prefill:
+                break
+        self.stage = self.stages[classes[0].staging]
         self.arena.view(torch.uint8, (size,)).zero_()         # the null slots; no slot left holding garbage
         free, arenas, at = {}, {}, 0
         for c in classes:
             c.pool, c.at, c.size = self.arena, at, c.null + c.staging + budget.taken[c.name]
-            at = -(-(at + c.size * c.unit_bytes) // ALIGN) * ALIGN
+            at = -(-(at + c.size * c.unit_bytes) // self._align) * self._align
             free[c.name] = list(range(c.size - 1, c.null + c.staging - 1, -1))      # popped lowest first
-            arenas[c.name] = c.slots(), c.host.view(torch.uint8, (c.host.capacity, c.unit_bytes))
+            arenas[c.name] = c.slots(), c.host.view(torch.uint8, (len(c.pieces), c.unit_bytes))
         self.residency.host[...] = -1                   # −1 − tier 0: every piece in the host tier
         if sorted(seed) != sorted(budget.granted):
             raise RuntimeError(f"{self.name}: the placement policy seeded other items than it took from the budget")
@@ -188,32 +306,136 @@ class TieredStore:
                 arena, units = arenas[c.name]
                 arena[slot].copy_(units[self._host[g, i, r]], non_blocking=True)
         self.residency.seed()
+        self._copies.clear()
+        self.ring.fill_(-1)
+        self.stage.copy_(self.top_k + torch.arange(self.stage.shape[1]).expand(self.roles, -1))
+        self._mode, self.lent = None, None
         self.limits.copy_(torch.tensor([[c.size for _, c in sorted(self.groups[g].items())] for g in groups]))
-        for t in (self.misses, self.kinds, *self.zeroed):
+        for t in (self.kinds, self.n_empty, *self.zeroed, *self.state.values()):
             t.zero_()
-        self._written = 0
+        self._written, self.peak_misses = 0, 0
+        self.borrowed = dict.fromkeys(self.borrowed, 0)
 
-    def before_launch(self, step) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list]:
-        kinds, at = self._kinds, 0
+    def before_launch(self, step) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list[MemOp]]:
+        self._step, kinds, at = step.step, self._kinds, 0
         kinds[:self._written] = PADDING
-        for row, (q, logits) in enumerate(zip(step.n_query.tolist(), step.n_logits.tolist(), strict=True)):
-            decode = row < step.n_decode or (not step.n_decode and q == logits)   # decode and verify rows
-            kinds[at:at + q] = DECODE if decode else PREFILL
+        if step.row_kind is None:                                    # launched plans are the scheduler's
+            raise ValueError(f"{self.name}: step {step.step} launched without row kinds (`BatchPlan.row_kind`)")
+        decode = np.isin(step.row_kind, (RowKind.DECODE, RowKind.VERIFY)).tolist()
+        for q, d in zip(step.n_query.tolist(), decode, strict=True):
+            kinds[at:at + q] = DECODE if d else PREFILL
             at += q
+        prompt = int(sum(q for q, d in zip(step.n_query.tolist(), decode, strict=True) if not d))
+        if not (self.lending and self.policy.device_owned):
+            self._mode = None
+        elif prompt and self.ring_tokens and prompt >= self.ring_tokens:
+            self._mode = "ring"
+        elif prompt and min(self.top_k * at, self.prefill) > self.stage.shape[1]:
+            self._mode = "stage"                                 # a pass's misses may pass the staging slots
+        else:
+            self._mode = None
         reach, self._written = max(at, self._written), at          # the last step's rows become padding
-        return [(self.kinds[:reach], kinds[:reach])] * bool(reach) + self.residency.writes(step.step), []
+        writes = [(self.kinds[:reach], kinds[:reach])] * bool(reach) + self.residency.writes(step.step)
+        return writes, self._copies.pop(step.step, [])
 
     def after_commit(self, step, telemetry) -> None:
         if errors := {name: int(t[0]) for name, t in telemetry.items() if "errors" in name and int(t[0])}:
-            raise RuntimeError(f"{self.name}: step {step.step}'s kernels flagged errors {errors} (moe_resolve@1: "
-                               "1 = a corrupt residency entry; kernel_errors: the kernel's bits)")
-        self.peak_misses = int(telemetry["misses"][0])
-        if self.peak_misses > self.staging:
-            raise RuntimeError(f"{self.name}: a layer had {self.peak_misses} distinct misses, {self.staging} staging "
-                               "slots")
-        if edits := self.policy.after_commit(telemetry["counts"].numpy(), self.residency.host):
-            raise NotImplementedError(f"{self.name}: the policy edits the map ({len(edits)} edits): two-phase edits "
-                                      "land in step 3")
+            raise RuntimeError(f"{self.name}: step {step.step}'s kernels flagged errors {errors} (errors: 1 = a "
+                               "corrupt residency entry, 2 = the delta log overflowed, 4 = a step's lent slots fell "
+                               "short of a pass's staging; edit_errors: a host edit's "
+                               "precondition failed; kernel_errors: the kernel's bits)")
+        mode = self._borrowing.pop(step.step, None)
+        misses = int(telemetry["misses"][0])
+        width = int(telemetry["stage_width"][0]) if mode else self.stage.shape[1]
+        self.peak_misses = max(self.peak_misses, misses)
+        if misses > width:
+            raise RuntimeError(f"{self.name}: a layer had {misses} distinct misses, {width} slots to stage them")
+        delta, n = telemetry["delta"].numpy(), telemetry["n_delta"].numpy()
+        routed = telemetry["routed"].numpy()
+        record = {"counts": telemetry["counts"].numpy(), "routed": (routed & 1).astype(bool),
+                  "scope": (routed & 2).astype(bool),           # what the call with decode rows routed (variants)
+                  "records": np.concatenate([delta[g, :n[g]] for g in range(len(n))]),
+                  "lends": telemetry["lends"].numpy().copy() if mode else None}   # None: borrowed nothing
+        if mode:
+            self.borrowed["ring" if mode == "ring" and int(telemetry["ring_ok"][0]) else "stage"] += 1
+        self.residency.commit(step.step, record["records"], returned=mode is not None)
+        for tap in self.taps:
+            tap(step, record)
+        if swaps := self.policy.after_commit(telemetry["counts"].numpy(), self.residency.host):
+            self._swap(step.step, swaps)
+
+    # -- a step's forward ---------------------------------------------------------------------------------------------
+    def large_passes(self, tokens: int) -> bool:
+        """A step of `tokens` takes one expert pass per chunk of up to 4,096 tokens (D8): when its prompt could stream
+        through the ring — by its size and the store's terms, never the layout's, so that the startup profile's worst
+        step (on minimum pools, where a fill cache holds nothing to lend) runs such passes too. A pass's misses fit a
+        prefill pass's staging (`prefill` = every item), lent or not."""
+        return (self.policy.device_owned and bool(self.ring_tokens) and tokens >= self.ring_tokens
+                and self.prefill >= self.items)
+
+    def begin(self) -> None:
+        """At the step's first resolve (after its words are zeroed and its edits applied): its lent slots, if any."""
+        if self._mode is not None:                 # a graphed step never gets here: it never borrows
+            self._borrowing[self._step] = self._mode
+            self.lend_needs.zero_()
+            self.lent = Lent(self, self._mode)
+            self.lent.begin()
+
+    def sources(self, g: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Layer g's ring and stage tables for the step (at its first pass)."""
+        return self.lent.sources(g) if self.lent is not None else (self.ring[g], self.stage)
+
+    def layer_done(self, g: int) -> None:
+        if self.lent is not None:
+            self.lent.done(g)
+            if g == len(self.groups) - 1:
+                self.lent = None
+
+    # -- the policy's means -------------------------------------------------------------------------------------------
+    def lend(self, need: torch.Tensor, call: int = 0) -> torch.Tensor:
+        """Device lending under a device-owned policy (D4; a prefill step's `Lent` calls it at the step's first
+        resolve, which zeroes the log and the error words, eagerly, no host sync): the whole experts its resolve
+        contract's `lend` picks for `need` (slots per class) are unmapped and logged `(group, −1, item)`, their slots
+        kept with the call's number for their return to their layers, empty, at the step's end; their scores stay.
+        Returns the picks [groups, items]."""
+        picked = self.resolvers[0].resolve.lend(need, self.residency.device, self._class_index, **self.state)
+        self.lent_slots.copy_(torch.where(picked[..., None], self.residency.device, self.lent_slots))
+        self.lent_call.masked_fill_(picked, call)
+        self.residency.device.masked_fill_(picked[..., None], -1)
+        groups, items = picked.shape
+        sink = self.delta.shape[1]
+        at = (self.n_delta[:, None] + picked.cumsum(1) - 1).long()           # each group's records after its own
+        at = torch.where(picked & (at < sink), at, sink)
+        g = torch.arange(groups, device=picked.device)[:, None].expand(groups, items)
+        e = torch.arange(items, device=picked.device)[None].expand(groups, items)
+        self._log.view(-1, 3).index_copy_(0, (g * (sink + 1) + at).reshape(-1),
+                                          torch.stack([g, -torch.ones_like(g), e], -1).reshape(-1, 3).int())
+        lent = picked.sum(1).int()
+        self.errors.bitwise_or_(((self.n_delta + lent) > sink).any().int() * 2)          # OVERFLOW
+        self.n_delta += lent
+        return picked
+
+    def _swap(self, commit: int, swaps: list[tuple[int, int, bool]]) -> None:
+        """A host policy's swaps, two-phase: the outgoing items unmapped at launch commit + 2, the incoming copied into
+        their slots after it and mapped at commit + 2 + LAND (every edit expecting what the host's view holds)."""
+        if self.policy.device_owned:
+            raise RuntimeError(f"{self.name}: the policy edits its device-owned cache")
+        moves: dict[int, tuple[list[int], list[int]]] = {}
+        for g, i, resident in swaps:
+            moves.setdefault(g, ([], []))[not resident].append(i)
+        view, groups, unmap, map_ = self.residency.host, list(self._order), [], []
+        copies = self._copies.setdefault(commit + LAG, [])
+        for g, (ins, outs) in moves.items():
+            if len(ins) != len(outs):
+                raise ValueError(f"{self.name}: group {g}: {len(ins)} items in, {len(outs)} out (a swap keeps slots)")
+            for a, b in zip(ins, outs, strict=True):
+                for r, c in self.groups[groups[g]].items():
+                    slot = int(view[g, b, r])
+                    unmap.append((g, b, r, slot, -1))
+                    map_.append((g, a, r, int(view[g, a, r]), slot))
+                    copies.append(c.copy(int(self._host[g, a, r]), slot, commit + LAG, commit + LAG + LAND))
+        self.residency.edit(commit, unmap)
+        self.residency.edit(commit, map_, later=LAND)
 
     # -- helpers ------------------------------------------------------------------------------------------------------
     def _profile_counts(self) -> np.ndarray:
@@ -253,6 +475,16 @@ class _Budget:
         for c in classes:
             self.taken[c.name] += 1
         return True
+
+    @staticmethod
+    def warm_start(profile: np.ndarray) -> list[tuple[int, int]]:
+        groups, items = profile.shape
+        ranked = np.lexsort((np.broadcast_to(np.arange(items), profile.shape), -profile), axis=-1)   # per group
+        floor = [(g, int(ranked[g, n])) for n in range(min(FLOOR, items)) for g in range(groups)]
+        group, item = np.divmod(np.arange(profile.size), items)
+        rest = np.lexsort((group, item, -profile.ravel()))
+        taken = set(floor)
+        return floor + [(int(group[x]), int(item[x])) for x in rest if (int(group[x]), int(item[x])) not in taken]
 
 
 def _parse_cache(text: str) -> dict[str, int | float]:
