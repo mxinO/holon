@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 import torch
 from holon.api import SamplingParams
+from holon.core.batching import host_plan
 from holon.core.engine import Engine, EngineConfig
 from holon_std.moe.offload import KEY, PASS
 from holon_std.moe.units import CHUNK
@@ -262,7 +263,7 @@ def test_only_decode_steps_count_and_decay(tiny_moe, tmp_path):
     """F11 decays and admits once per step, from its decode rows (docs/v1-offload.md D4): a one-token last prompt
     chunk is a prefill row (the scheduler's `row_kind`), beside other prompts even past the step's first 512-token
     expert pass (prompts of 1, 513 and 1 tokens in one step) and in a step of nothing else (three one-token prompts),
-    so the replay oracle still matches the device step by step."""
+    so the replay oracle still matches the device step by step; a plan without row kinds is refused."""
     from holon_judge.placement import parity, route_dump
 
     checkpoint, _ = tiny_moe
@@ -277,6 +278,10 @@ def test_only_decode_steps_count_and_decay(tiny_moe, tmp_path):
         assert report["first_differing_step"] is None and trace.mirrored and (report["admissions"] > 0 or
                                                                               max(map(len, prompts)) == 1), report
         assert not trace.steps[0]["counts"].any()                   # the prefill step: three prompts, none counted
+    store = engine.ctx.shared_objects[KEY]
+    with pytest.raises(ValueError, match="without row kinds"):            # no guess: every launched plan has them
+        store.before_launch(host_plan(0, np.zeros(1, np.int32), np.zeros(1, np.int32), np.ones(1, np.int32),
+                                      np.ones(1, np.int32), np.zeros(1, np.int64)))
 
 
 @pytest.mark.parametrize("policy", ["", "placement.lru@1"])
