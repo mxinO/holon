@@ -171,13 +171,15 @@ miss path that changes the graph shape (a new node between resolve and combine) 
   The two mmvq kernels (one row: generic; more: MoE) and mmq reduce in different orders, so **the path is the
   reference's**: `std.moe@1` cuts a step into 512-token chunks and the kernel picks mmvq or mmq from the chunk's row
   count, and every offload launch takes the path of the chunk its rows belong to, never its own (compacted) row
-  count. A chunk whose row count is at most the mmvq limit — every decode and verify step, and short prefill
-  chunks — is **never compacted** (one launch per class over all its rows, so the kernel picks exactly the
-  reference's mmvq kernel). Only chunks above the limit are compacted into ring and staging groups, and a group with
-  fewer rows than the limit + 1 is **padded with null-slot rows** up to it, so the kernel's own row count picks mmq,
-  as the reference chunk does — no contract change (adding a parameter to a signature kernel plugins implement would
-  be a major, design §4.5; panel B-r4-1, A-r4-4). Padding rows carry zero activations, read null slots and are discarded; each class pads to
-  its own type's mmvq limit + 1 (`use_mmvq_id` is per type); L0's tile-width range covers the padded launch. L0 checks, on every lock class including sm_120: an expert's
+  count. **Decode, verify and mixed steps are never compacted** (one launch per class over all their rows, whatever
+  the row count). In prefill, the mmvq limit is per ggml type (`use_mmvq_id`: 8 for Q4_K / Q6_K, 7 for IQ2_S and
+  IQ3_XXS, 6 for IQ3_S on Turing and newer), so the rule is **per class**: a class's launches are compacted into ring
+  and staging groups only when the chunk's row count exceeds that class's own limit, and a group with fewer rows
+  than that limit + 1 is **padded with null-slot rows** up to it, so the kernel's own row count picks mmq, as the
+  reference chunk does — no contract change (adding a parameter to a signature kernel plugins implement would be a
+  major, design §4.5; panel B-r4-1, A-r4-4, A-r4.2-1). Padding rows carry zero activations, read null slots and are
+  discarded. L0's tile-width range covers the padded launch, and L0 includes a chunk whose row count falls between
+  two classes' limits. L0 checks, on every lock class including sm_120: an expert's
   rows bitwise equal across slot counts {E, E+1, 16, 74}, slot permutations, compacted launches (T' ≤ the mmvq limit
   out of a step with T above it) and mmq tile widths 8–128.
 - **The default lock computes every expert on the GPU** (F5a only). Then every placement policy is exact, and
@@ -622,6 +624,7 @@ mixers (with FN / GLM); the end-of-answer checkpoint (plan §10). Its own doc mu
 | A-r4-2 later waits after a timeout | D6: every wait returns at once once the error flag is set |
 | A-r4-3 the gate / up merge reads and moves offloaded stacks | D5 / S4: extent pairs, no concatenation or move under the offload store |
 | A-r4-4 short prefill chunks take mmvq in the reference | D4: chunks at or below the mmvq limit are never compacted |
+| A-r4.2-1 the mmvq limit is per type | D4: the compaction rule and padding target are per class; decode / verify / mixed never compacted |
 | B-r4.2-1 S4's sequence form has no producer | S4 keeps one extent per part; gate / up pairs stay inside the store (its `merge` member: the resident store concatenates, the offload store records pairs) |
 
 **Drifts from `docs/design.md`, recorded:** §7.4 (the CPU handshake lives in a kernel plugin, not
