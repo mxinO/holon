@@ -1,53 +1,309 @@
 {
- "what": "kernels.ggml_cuda mmq with ids for one Qwen3-30B-A3B layer before vs after the forced-tiling and compact-active-slot vendor patches (docs/v1-offload.md D4), the compact launch capped at min(S, T\u00b7k, experts + top_k); a timing note, not a gate",
+ "what": "kernels.ggml_cuda mmq with ids for one Qwen3-30B-A3B layer before vs after the forced-tiling and compact-active-slot vendor patches (docs/v1-offload.md D4): the compact launch capped at min(S, T\u00b7k, experts + top_k), the per-slot id helper where the launch lists every slot anyway (at most 64 spare z entries) and S\u00b7T\u00b7k <= 2^20; a timing note, not a gate",
  "gpu": "RTX A5000",
  "sm": 86,
  "date": "2026-10-17",
  "base_commit": "e3f02d6 (before: llama.cpp cbe28bb3 + the vendor.patch of that commit)",
- "method": "linear_experts@2 through the plugin (LinearExperts), Q4_K gate/up 2048 -> 1536 (bf16 input, one row per token) then Q4_K down 768 -> 2048 (f32, one row per slot), top_k 8; the 128 experts at random slots of an S-slot arena (after: bound with experts = 128; before: experts = S, as the unpatched kernel sizes its workspace by the stack), every token on 8 random experts; GPU kernel time per layer (both calls) summed by kernel with torch.profiler over 50 iterations after 5 warm-ups",
+ "method": "linear_experts@2 through the plugin (LinearExperts), Q4_K gate/up 2048 -> 1536 (bf16 input, one row per token) then Q4_K down 768 -> 2048 (f32, one row per slot), top_k 8; the 128 experts at random slots of an S-slot arena (after: bound with experts = 128; before: experts = S, as the unpatched kernel sizes its workspace by the stack), every token on 8 random experts; GPU kernel time per layer (both calls) summed by kernel with torch.profiler over 50 iterations after 5 warm-ups; T = 9..64 are the batched-decode graph buckets that run mmq",
  "units": "microseconds per layer",
  "before": {
+  "S=128 T=9": {
+   "mul_mat_q": 309.5,
+   "mm_ids_helper": 6.1,
+   "quantize_mmq_q8_1": 4.5
+  },
+  "S=128 T=12": {
+   "mul_mat_q": 369.0,
+   "mm_ids_helper": 5.9,
+   "quantize_mmq_q8_1": 4.8
+  },
   "S=128 T=16": {
-   "mul_mat_q": 452.3,
+   "mul_mat_q": 461.2,
    "mm_ids_helper": 5.2,
    "quantize_mmq_q8_1": 5.2
   },
+  "S=128 T=24": {
+   "mul_mat_q": 725.6,
+   "mm_ids_helper": 7.0,
+   "quantize_mmq_q8_1": 5.8
+  },
+  "S=128 T=32": {
+   "mul_mat_q": 868.3,
+   "mm_ids_helper": 6.7,
+   "quantize_mmq_q8_1": 6.2
+  },
+  "S=128 T=48": {
+   "mul_mat_q": 1164.3,
+   "mm_ids_helper": 7.9,
+   "quantize_mmq_q8_1": 7.1
+  },
+  "S=128 T=64": {
+   "mul_mat_q": 1399.3,
+   "mm_ids_helper": 9.0,
+   "quantize_mmq_q8_1": 8.2
+  },
   "S=128 T=512": {
-   "mul_mat_q": 2536.9,
-   "mm_ids_helper": 44.4,
-   "quantize_mmq_q8_1": 42.0
+   "mul_mat_q": 2510.7,
+   "mm_ids_helper": 43.2,
+   "quantize_mmq_q8_1": 41.8
+  },
+  "S=3000 T=9": {
+   "mul_mat_q": 991.2,
+   "mm_ids_helper": 11.2,
+   "quantize_mmq_q8_1": 4.6
+  },
+  "S=3000 T=12": {
+   "mul_mat_q": 1070.0,
+   "mm_ids_helper": 11.5,
+   "quantize_mmq_q8_1": 4.8
   },
   "S=3000 T=16": {
-   "mul_mat_q": 1138.4,
-   "mm_ids_helper": 9.4,
+   "mul_mat_q": 1144.3,
+   "mm_ids_helper": 9.6,
    "quantize_mmq_q8_1": 5.0
   },
+  "S=3000 T=24": {
+   "mul_mat_q": 1921.8,
+   "mm_ids_helper": 13.4,
+   "quantize_mmq_q8_1": 5.4
+  },
+  "S=3000 T=32": {
+   "mul_mat_q": 2053.2,
+   "mm_ids_helper": 13.0,
+   "quantize_mmq_q8_1": 5.7
+  },
+  "S=3000 T=48": {
+   "mul_mat_q": 2365.8,
+   "mm_ids_helper": 17.2,
+   "quantize_mmq_q8_1": 6.7
+  },
+  "S=3000 T=64": {
+   "mul_mat_q": 2588.4,
+   "mm_ids_helper": 21.4,
+   "quantize_mmq_q8_1": 7.7
+  },
   "S=3000 T=512": {
-   "mul_mat_q": 7879.7,
-   "mm_ids_helper": 132.6,
-   "quantize_mmq_q8_1": 40.1
+   "mul_mat_q": 7787.6,
+   "mm_ids_helper": 130.7,
+   "quantize_mmq_q8_1": 39.9
   }
  },
  "after": {
+  "S=128 T=9": {
+   "mul_mat_q": 310.1,
+   "mm_ids_helper_per_slot": 5.8,
+   "quantize_mmq_q8_1": 4.5
+  },
+  "S=128 T=12": {
+   "mul_mat_q": 368.5,
+   "mm_ids_helper_per_slot": 5.6,
+   "quantize_mmq_q8_1": 4.8
+  },
   "S=128 T=16": {
-   "mul_mat_q": 447.3,
-   "mm_ids_helper": 7.9,
-   "quantize_mmq_q8_1": 4.9
+   "mul_mat_q": 445.5,
+   "quantize_mmq_q8_1": 5.0,
+   "mm_ids_helper_per_slot": 4.9
+  },
+  "S=128 T=24": {
+   "mul_mat_q": 776.2,
+   "mm_ids_helper_per_slot": 7.2,
+   "quantize_mmq_q8_1": 6.1
+  },
+  "S=128 T=32": {
+   "mul_mat_q": 862.2,
+   "mm_ids_helper_per_slot": 6.4,
+   "quantize_mmq_q8_1": 6.1
+  },
+  "S=128 T=48": {
+   "mul_mat_q": 1157.4,
+   "mm_ids_helper_per_slot": 7.6,
+   "quantize_mmq_q8_1": 7.1
+  },
+  "S=128 T=64": {
+   "mul_mat_q": 1400.1,
+   "mm_ids_helper_per_slot": 8.4,
+   "quantize_mmq_q8_1": 8.2
   },
   "S=128 T=512": {
-   "mul_mat_q": 2547.6,
-   "quantize_mmq_q8_1": 41.8,
-   "mm_ids_helper": 31.5
+   "mul_mat_q": 2511.8,
+   "quantize_mmq_q8_1": 41.6,
+   "mm_ids_helper_per_slot": 37.3
+  },
+  "S=3000 T=9": {
+   "mul_mat_q": 304.2,
+   "mm_ids_helper_compact": 8.9,
+   "quantize_mmq_q8_1": 4.6
+  },
+  "S=3000 T=12": {
+   "mul_mat_q": 370.7,
+   "mm_ids_helper_compact": 9.0,
+   "quantize_mmq_q8_1": 4.8
   },
   "S=3000 T=16": {
-   "mul_mat_q": 449.3,
-   "mm_ids_helper": 8.9,
+   "mul_mat_q": 450.9,
+   "mm_ids_helper_compact": 9.2,
    "quantize_mmq_q8_1": 5.1
   },
+  "S=3000 T=24": {
+   "mul_mat_q": 718.9,
+   "mm_ids_helper_compact": 10.6,
+   "quantize_mmq_q8_1": 5.7
+  },
+  "S=3000 T=32": {
+   "mul_mat_q": 868.6,
+   "mm_ids_helper_compact": 10.7,
+   "quantize_mmq_q8_1": 6.2
+  },
+  "S=3000 T=48": {
+   "mul_mat_q": 1158.7,
+   "mm_ids_helper_compact": 10.8,
+   "quantize_mmq_q8_1": 7.1
+  },
+  "S=3000 T=64": {
+   "mul_mat_q": 1407.4,
+   "mm_ids_helper_compact": 11.1,
+   "quantize_mmq_q8_1": 8.3
+  },
   "S=3000 T=512": {
-   "mul_mat_q": 2539.4,
+   "mul_mat_q": 2520.5,
    "quantize_mmq_q8_1": 41.9,
-   "mm_ids_helper": 37.8
+   "mm_ids_helper_compact": 38.3
+  }
+ },
+ "stream_k_model": {
+  "claim": "every existing MoE lock shape already tiles (one block per tile) on every lock class, so the forced tiling changes no lock's launch and the locks stay bitwise",
+  "rule": "llama.cpp cbe28bb3 launch_mul_mat_q (NVIDIA): tiling iff 100\u00b7tiles / (SMs\u00b7ceil(tiles/SMs)) >= 90, tiles = ceil(out/I)\u00b7ceil(T/J)\u00b7E, I = 128 for every MoE type on the Ampere and Blackwell configs",
+  "shapes": "Qwen3-30B-A3B (the MoE locks: Q4_K_M, UD-IQ3_XXS, MXFP4_MOE, NVFP4): E = 128, merged gate/up 1536 rows, down 2048 rows; T <= 512 per chunk, so at most 4 column tiles (ntx)",
+  "sms": {
+   "rtx-a5000": 64,
+   "rtx-3090": 82,
+   "rtx-5080": 84,
+   "rtx-4090": 128,
+   "rtx-5090": 170
+  },
+  "efficiency_percent": {
+   "rtx-a5000 gate_up 1536 rows ntx=1": 100,
+   "rtx-a5000 gate_up 1536 rows ntx=2": 100,
+   "rtx-a5000 gate_up 1536 rows ntx=3": 100,
+   "rtx-a5000 gate_up 1536 rows ntx=4": 100,
+   "rtx-a5000 down 2048 rows ntx=1": 100,
+   "rtx-a5000 down 2048 rows ntx=2": 100,
+   "rtx-a5000 down 2048 rows ntx=3": 100,
+   "rtx-a5000 down 2048 rows ntx=4": 100,
+   "rtx-3090 gate_up 1536 rows ntx=1": 98,
+   "rtx-3090 gate_up 1536 rows ntx=2": 98,
+   "rtx-3090 gate_up 1536 rows ntx=3": 98,
+   "rtx-3090 gate_up 1536 rows ntx=4": 99,
+   "rtx-3090 down 2048 rows ntx=1": 99,
+   "rtx-3090 down 2048 rows ntx=2": 99,
+   "rtx-3090 down 2048 rows ntx=3": 99,
+   "rtx-3090 down 2048 rows ntx=4": 99,
+   "rtx-5080 gate_up 1536 rows ntx=1": 96,
+   "rtx-5080 gate_up 1536 rows ntx=2": 98,
+   "rtx-5080 gate_up 1536 rows ntx=3": 99,
+   "rtx-5080 gate_up 1536 rows ntx=4": 98,
+   "rtx-5080 down 2048 rows ntx=1": 97,
+   "rtx-5080 down 2048 rows ntx=2": 99,
+   "rtx-5080 down 2048 rows ntx=3": 98,
+   "rtx-5080 down 2048 rows ntx=4": 99,
+   "rtx-4090 gate_up 1536 rows ntx=1": 100,
+   "rtx-4090 gate_up 1536 rows ntx=2": 100,
+   "rtx-4090 gate_up 1536 rows ntx=3": 100,
+   "rtx-4090 gate_up 1536 rows ntx=4": 100,
+   "rtx-4090 down 2048 rows ntx=1": 100,
+   "rtx-4090 down 2048 rows ntx=2": 100,
+   "rtx-4090 down 2048 rows ntx=3": 100,
+   "rtx-4090 down 2048 rows ntx=4": 100,
+   "rtx-5090 gate_up 1536 rows ntx=1": 90,
+   "rtx-5090 gate_up 1536 rows ntx=2": 95,
+   "rtx-5090 gate_up 1536 rows ntx=3": 96,
+   "rtx-5090 gate_up 1536 rows ntx=4": 97,
+   "rtx-5090 down 2048 rows ntx=1": 92,
+   "rtx-5090 down 2048 rows ntx=2": 96,
+   "rtx-5090 down 2048 rows ntx=3": 97,
+   "rtx-5090 down 2048 rows ntx=4": 98
+  },
+  "min_efficiency_percent": 90,
+  "not_exercised": "sm_120's native FP4 (W4A4) MoE mmq path: no lock uses it",
+  "checked": "on the RTX A5000, 630 outputs (E = 128 linear_experts on 9 types, gate/up, fused SwiGLU and down, T 9..1025, two routings; dense qlinear) bitwise equal before and after"
+ },
+ "decode_ab": {
+  "what": "end-to-end decode step of Qwen3-30B-A3B Q4_K_M at graph buckets 16, 32, 64 (mmq with ids, S = E = 128): base (e3f02d6 and its extension) vs patched; target <= 1% regression",
+  "command": "python bench/holon_tg.py --model Qwen3-30B-A3B-Q4_K_M.gguf --batch 16 32 64 -n 128 -r 3 (one fresh process per run; ms per step = 1000 \u00b7 batch / tokens per second, each run's mean of 3)",
+  "order": [
+   "base",
+   "patched",
+   "patched",
+   "base",
+   "base",
+   "patched",
+   "patched",
+   "base"
+  ],
+  "step_ms": {
+   "base": {
+    "16": [
+     28.302,
+     28.703,
+     28.783,
+     28.657
+    ],
+    "32": [
+     47.386,
+     48.202,
+     48.32,
+     48.064
+    ],
+    "64": [
+     78.917,
+     80.141,
+     80.354,
+     79.859
+    ]
+   },
+   "patched": {
+    "16": [
+     28.706,
+     28.728,
+     28.717,
+     28.815
+    ],
+    "32": [
+     48.18,
+     48.209,
+     48.172,
+     48.334
+    ],
+    "64": [
+     80.11,
+     80.198,
+     80.138,
+     80.282
+    ]
+   }
+  },
+  "summary": {
+   "b16": {
+    "base_median_ms": 28.68,
+    "base_sd_ms": 0.213,
+    "patched_median_ms": 28.723,
+    "patched_sd_ms": 0.05,
+    "delta_percent": 0.15
+   },
+   "b32": {
+    "base_median_ms": 48.133,
+    "base_sd_ms": 0.418,
+    "patched_median_ms": 48.195,
+    "patched_sd_ms": 0.075,
+    "delta_percent": 0.13
+   },
+   "b64": {
+    "base_median_ms": 80.0,
+    "base_sd_ms": 0.634,
+    "patched_median_ms": 80.168,
+    "patched_sd_ms": 0.076,
+    "delta_percent": 0.21
+   }
   }
  }
 }
