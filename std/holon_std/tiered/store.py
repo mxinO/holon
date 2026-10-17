@@ -309,13 +309,13 @@ class TieredStore:
             for c in classes:
                 for piece, (g, i, r, _) in enumerate(c.pieces):
                     _, host[self._order[g], i, r] = self.tiers[0].read(c.name, piece)
-        # A fill class's minimum caches nothing and cannot lend: its layout stages a prefill pass (after_materialize).
-        least = sum((c.null + self.prefill) * c.unit_bytes if c.cache is None else c.bytes(c.cap)
-                    for c in classes) + self._align * len(classes)
+        # One fill pool, pinned or not, so both profile the same minimum and grow above the paged floor alike (a fill's
+        # counts then pin exactly): its minimum caches nothing and cannot lend, so that layout stages a prefill pass
+        # (after_materialize); a pinned arena short of its pinned size is refused there.
+        least = sum((c.null + self.prefill) * c.unit_bytes for c in classes) + self._align * len(classes)
         most = sum(c.bytes(c.cap) for c in classes) + self._align * len(classes)
-        fill = any(c.cache is None for c in classes)
         self.arena = ctx.pool(f"{self.name}.arena", unit_bytes=self.granule, min_units=-(-least // self.granule),
-                              pref_units=-(-most // self.granule), fill=fill)
+                              pref_units=-(-most // self.granule), fill=True)
         self._host = host
         self.host_units.copy_(torch.from_numpy(host))
         self.class_table = np.array([[classes.index(self.groups[g][r]) for r in range(self.roles)]
@@ -354,6 +354,13 @@ class TieredStore:
         classes = list(self.classes.values())
         size = self.arena.capacity * self.granule
         groups = list(self._order)
+        ledger = self.ctx.ledger
+        sized = ledger is not None and any(p.capacity != p.min_units for p in ledger.pools.values() if not p.host)
+        if sized and all(c.cache is not None for c in classes) and self.arena.capacity < self.arena.pref_units:
+            raise RuntimeError(  # a sized materialize, not the startup profile's minimum pools (D4: pinned sizes)
+                f"{self.name}: the pinned cache ({', '.join(f'{c.name}={c.cap}' for c in classes)}) does not fit above "
+                f"the paged floor: the arena got {self.arena.capacity * self.granule / 2**30:.3f} of "
+                f"{self.arena.pref_units * self.granule / 2**30:.3f} GiB")
         # A layout lends a prefill pass's staging (D5) when every class can; else its staging slots hold that much.
         for staging in sorted({self.staging, self.prefill}):
             for c in classes:
