@@ -25,17 +25,18 @@ GATE_UP, DOWN = 0, 1                           # roles
 def _store(ctx, experts: int, top_k: int):
     """The engine's tiered store for MoE experts, built once by the first layer with the engine's context."""
     opts = ctx.options.get("plugins", {})
-    rows = ctx.options.get("max_seqs", 1) * (1 + ctx.options.get("max_draft_tokens", 0))
-    if rows > CHUNK:      # a policy's resolve decays and counts once per call with decode rows (docs/v1-offload.md D4)
-        raise NotImplementedError(f"std.moe.offload@1: {rows} decode and verify tokens per step pass one expert "
-                                  f"pass ({CHUNK} tokens)")
-    tokens = max(ctx.options.get("max_step_tokens", 1), rows)
+    tokens = max(ctx.options.get("max_step_tokens", 1), _rows(ctx))
     profile = str(opts.get("moe.placement.profile", ""))
     return ctx.unit(Ref("std.tiered.store@1", name="moe", items=experts, roles=2, top_k=top_k,
                         staging=min(experts, top_k * min(CHUNK, tokens)),
                         policy=str(opts.get("moe.placement", "")),
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
                         cache=str(opts.get("moe.cache", "")), profile=profile))
+
+
+def _rows(ctx) -> int:
+    """The most decode and verify tokens of a step."""
+    return ctx.options.get("max_seqs", 1) * (1 + ctx.options.get("max_draft_tokens", 0))
 
 
 class Offload(nn.Module):
@@ -47,6 +48,11 @@ class Offload(nn.Module):
         if ctx is not self.store.ctx:
             raise NotImplementedError("std.moe.offload@1: an auxiliary model's experts (an MTP layer's) need its "
                                       "sub-steps' row kinds; not yet")
+        policy = self.store.policy
+        if (policy.resolve_variant or policy.device_state()) and _rows(ctx) > CHUNK:
+            raise NotImplementedError(f"std.moe.offload@1: {policy.resolve_variant}'s state changes once per call "
+                                      f"with decode rows (D4), and {_rows(ctx)} decode and verify tokens of a step "
+                                      f"would pass one expert pass ({CHUNK} tokens)")
         if (self.store.items, self.store.top_k) != (experts, top_k):
             raise ValueError(f"std.moe.offload@1: layer {layer} has {experts} experts top-{top_k}, the store "
                              f"{self.store.items} top-{self.store.top_k}")

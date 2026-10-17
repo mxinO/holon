@@ -13,9 +13,10 @@ binds kernels. Then, through the engine's hooks:
   class's pinned slots); then each class's arena `[S, unit]` is laid out in the pool — `top_k` null slots (zero
   weights, one per routing rank), `staging` slots, then the cache slots its seeded pieces fill —, the map reset to
   the tier and the seed copied in, the policy's device state zeroed;
-- `before_launch`: the step's row kinds per token (decode and verify rows: a mixed step's leading rows, or a row
-  whose every query token has logits; prefill rows the others, so a one-token last prompt chunk counts as decode;
-  graph padding past them), written as far as this step's or the last one's tokens reach; the map edits due, which
+- `before_launch`: the step's row kinds per token (decode and verify rows: a mixed step's leading rows, or every row
+  of a step whose rows all have logits for every query token; prefill rows the others — so a one-token last prompt
+  chunk counts as decode only in a step of nothing else, and a step's decode rows lie in its first expert pass; graph
+  padding past them), written as far as this step's or the last one's tokens reach; the map edits due, which
   the step's first resolve applies, zeroing the step's counts, error words and delta log too (in the forward: in a
   graph, on the stream); the copies of two-phase swaps due;
 - `after_commit`: the error words, the staging invariant (a layer's distinct misses fit its staging slots: F5a has no
@@ -235,9 +236,9 @@ class TieredStore:
     def before_launch(self, step) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list[MemOp]]:
         self.step, kinds, at = step.step, self._kinds, 0
         kinds[:self._written] = PADDING
-        for row, (q, logits) in enumerate(zip(step.n_query.tolist(), step.n_logits.tolist(), strict=True)):
-            decode = row < step.n_decode or (not step.n_decode and q == logits)   # decode and verify rows
-            kinds[at:at + q] = DECODE if decode else PREFILL
+        uniform = not step.n_decode and bool((step.n_query == step.n_logits).all())    # a decode or verify step
+        for row, q in enumerate(step.n_query.tolist()):
+            kinds[at:at + q] = DECODE if row < step.n_decode or uniform else PREFILL
             at += q
         reach, self._written = max(at, self._written), at          # the last step's rows become padding
         writes = [(self.kinds[:reach], kinds[:reach])] * bool(reach) + self.residency.writes(step.step)
@@ -260,9 +261,11 @@ class TieredStore:
 
     # -- the policy's means -------------------------------------------------------------------------------------------
     def lend(self, n: int) -> torch.Tensor:
-        """Device lending under a device-owned policy (D4; step 3b's ring calls it at a ring step's launch, eagerly):
-        the whole experts its resolve contract's `lend` picks, until every class has `n` slots (or all it has), are
-        unmapped and logged `(group, −1, item)`; their scores stay. Returns the picks [groups, items]."""
+        """Device lending under a device-owned policy (D4; step 3b's ring calls it in a ring step's forward, eagerly,
+        after the step's first resolve, which zeroes the log and the error words): the whole experts its resolve
+        contract's `lend` picks, until every class has `n` slots (or all it has), are unmapped and logged `(group, −1,
+        item)`; their scores stay. Returns the picks [groups, items]. Lent slots are not refilled yet: D4's return
+        (a lent slot its layer's first victim) is step 3b's."""
         picked = self.resolvers[0].resolve.lend(n, self.residency.device, self._class_index, **self.state)
         self.residency.device.masked_fill_(picked[..., None], -1)
         flat = picked.reshape(-1)

@@ -3,16 +3,16 @@
 (spikes/x0_offload/m6/replay.py) extended to the device's terms — f32, decay on steps with decode rows, the device's
 tie-breaks.
 
-`moe_resolve.lfu@1` is `moe_resolve@1` (std.moe.kernels) plus the layer's decayed counts `score [E] f32` (state,
-zero at a seed). A call with a `DECODE` row first decays every score (× 0.915 in f32), then adds 1.0 (in f32, one
-add per entry) per entry of a `DECODE` row; then it pairs the call's candidates — experts routed by a `DECODE` row and
-missing in every role — by score descending with its victims — experts resident in every role (in cache slots)
-routed by no live entry of the call — by score ascending, ties by expert id; a candidate is admitted while its score
-is strictly greater than its victim's, and the first failing pair stops the pairing (the layer keeps its slots). An
-admitted expert takes its victim's slot in every role (the victim's entries become −1: the RAM tier holds every
+`moe_resolve.lfu@1` is `moe_resolve@1` (std.moe.kernels) plus the layer's decayed counts `score [E] f32` (state, zero at
+a seed). A call with a routed (not dropped) entry of a `DECODE` row first decays every score (× 0.915 in f32), then adds
+1.0 (in f32, one add per entry) per entry of a `DECODE` row; then it pairs the call's candidates — experts routed by a
+`DECODE` row and missing in every role — by score descending with its victims — experts resident in every role (in cache
+slots) routed by no live entry of the call — by score ascending, ties by expert id; a candidate is admitted while its
+score is strictly greater than its victim's, and the first failing pair stops the pairing (the layer keeps its slots).
+An admitted expert takes its victim's slot in every role (the victim's entries become −1: the RAM tier holds every
 expert under this policy, D10), is logged `(group, admitted, victim)` in pairing order, and is gathered straight into
-those slots; the call's other misses are staged as @1's. A call without `DECODE` rows (a prefill chunk) changes
-nothing but what @1 does.
+those slots; the call's other misses are staged as @1's. A call without such an entry (a prefill chunk) changes nothing
+but what @1 does.
 
 `lend(n, residency, classes, score)` picks whole resident experts, coldest by score first, ties by layer, then expert
 id, until every class has min(n, its resident slots) lent slots (an expert's role slots go together)."""

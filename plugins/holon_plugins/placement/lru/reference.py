@@ -1,15 +1,15 @@
 """Oracles of placement.lru (F4, docs/v1-offload.md D1: FreeToken's and llama.cpp's cache, as the M6 replay's `lru`,
 spikes/x0_offload/m6/replay.py): the contract `moe_resolve.lru@1`, call by call, and its `lend`.
 
-`moe_resolve.lru@1` is `moe_resolve@1` (std.moe.kernels) plus the layer's logical clock `clock [1] int32` and the
-step each expert was last routed `last [E] int32` (state, zero at a seed). A call with a `DECODE` row advances the
-clock by one and stamps every expert a `DECODE` row routes with it; then its candidates — experts routed by a `DECODE`
-row and missing in every role, in the order of their first `DECODE` entry (token, then rank) — take the slots of its
-victims — experts resident in every role (in cache slots) routed by no live entry of the call, least recently routed
-first, ties by expert id —, pair by pair while both last. An admitted expert takes its victim's slot in every role
-(the victim's entries become −1: the RAM tier holds every expert), is logged `(group, admitted, victim)` in pairing
-order and gathered straight into those slots; the call's other misses are staged as @1's. A call without `DECODE`
-rows changes nothing but what @1 does.
+`moe_resolve.lru@1` is `moe_resolve@1` (std.moe.kernels) plus the layer's logical clock `clock [1] int32` and the step
+each expert was last routed `last [E] int32` (state, zero at a seed). A call with a routed (not dropped) entry of a
+`DECODE` row advances the clock by one and stamps every expert a `DECODE` row routes with it; then its candidates —
+experts routed by a `DECODE` row and missing in every role, in the order of their first `DECODE` entry (token, then
+rank) — take the slots of its victims — experts resident in every role (in cache slots) routed by no live entry of the
+call, least recently routed first, ties by expert id —, pair by pair while both last. An admitted expert takes its
+victim's slot in every role (the victim's entries become −1: the RAM tier holds every expert), is logged `(group,
+admitted, victim)` in pairing order and gathered straight into those slots; the call's other misses are staged as @1's.
+A call without such an entry (a prefill chunk) changes nothing but what @1 does.
 
 `lend(n, residency, classes, last, clock)` picks whole resident experts, least recently routed first, ties by layer,
 then expert id, until every class has min(n, its resident slots) lent slots."""

@@ -859,9 +859,13 @@ Decided while building, against the text above:
   counted as mixed at `core/holon/core/engine.py:455`) — every decode step would lose its graph. Under §4.5 that is a
   change, not an addition. The additive way is a new `BatchPlan` field with a default (e.g. the leading decode and
   verify rows of every step, or a per-row kind array), filled by the scheduler — a minor, for the owner to decide.
-  Until then the store keeps its heuristic: a one-token last prompt chunk counts (and decays) as decode outside mixed
-  steps (step 2's deviation stands). The parity check is unaffected: `route_dump` records what the device counted, and
-  each step's routed experts from its eager resolves.
+  Until then the store narrows step 2's heuristic (a fix, review finding 1): a row whose every query token has
+  logits counts as decode only in a step all of whose rows do (or among a mixed step's leading rows), so a one-token
+  last prompt chunk beside other prompt rows is prefill — before, it counted, and one past the step's first 512-token
+  expert pass made F11 decay twice in a step and pick victims a pass could not see (`test_only_decode_steps_count_and_
+  decay` fails without the fix). What remains of step 2's deviation: a step made only of one-token last chunks counts
+  as decode (its rows, at most `max_seqs`, lie in one pass). The parity check records what the device counted and each
+  step's routed experts from its eager resolves.
 - **The fetch list names each miss's slot.** An admitted miss is gathered straight into its victim's slots (D4), so
   `moe_resolve@1` returns `fetch [R, 2, staging]` (host unit, then the slot) and `expert_fetch@1` takes those pairs
   (its `first` argument is gone); `moe_resolve@1` also takes the delta log (`delta`, `n_delta`) and the layer's index,
@@ -879,19 +883,24 @@ Decided while building, against the text above:
   arena pool and the host pools share one unit, the classes' greatest common divisor (36,864 bytes on the vehicle;
   arenas aligned to its least common multiple with 4,096). `profile_decay` counts steps with decode rows (as the
   replay counts decode steps) and skips a round while its last swaps are not in the host's view.
-- **Decay and counts once per step**: a variant decays (or ticks) in each call that holds a `DECODE` row, so the
-  store requires a step's decode and verify rows to lie in one expert pass (`max_seqs` × (1 + `max_draft_tokens`) ≤
-  `std.moe@1`'s 512-token chunk; refused otherwise). F11's arithmetic is exact f32 (× 0.915 rounded, then one rounded
+- **Decay and counts once per step**: a variant decays (or ticks) in each call that holds a routed entry of a
+  `DECODE` row, so under a policy with device state the store requires a step's decode and verify rows to lie in one
+  expert pass (`max_seqs` × (1 + `max_draft_tokens`) ≤ `std.moe@1`'s 512-token chunk; refused otherwise), and the row
+  kinds above keep them in the first. F11's arithmetic is exact f32 (× 0.915 rounded, then one rounded
   + 1.0 per entry, no FMA); its victims are experts resident in every role routed by no live entry of the call;
   candidates missing in every role, routed by a decode or verify row.
 - **`lend(n)`** returns the picks as a `[layers, experts]` mask; the CUDA provider is eager torch ops (ring steps are
   never graphed), the CPU provider the oracle; `TieredStore.lend` unmaps and logs them and must run in the step's
-  forward after its first resolve (which zeroes the log) — the ring that calls it is step 3b.
+  forward after its first resolve (which zeroes the log and the error words) — the ring that calls it, and D4's
+  return of a lent slot as its layer's first victim (until then a lent slot is not refilled), are step 3b's.
+- **The parity check also checks the device's map against the host mirror** once every launched step has committed
+  (a kernel that changes the map without logging it would otherwise pass).
 - **Cost:** a variant's resolve adds ≈ 4.7 µs per layer call on the A5000 (≈ 0.23 ms per decode step over 48 layers;
   §13's band for F11's pick and decay is 0.25–0.35 ms) after its ranking moved its keys to shared memory (≈ 10 µs
   before).
 - **Plants:** `lfu-victim-needed` and `lfu-shared-victim` set plant bits the variant kernel reads (`MoeResolve.plant`,
-  zero otherwise). Two predictions were too weak: both kernel plants put one slot twice in a row, which the patched
+  zero otherwise). A needed victim's rows then read staging slot k (the victim was no miss), not its overwritten
+  slot, as §6 describes. Two predictions were too weak: both kernel plants put one slot twice in a row, which the patched
   mmq's id-error word catches (the engine stops at step 3) before a wrong byte is emitted; and `owner-race` with its
   check removed is deterministic — the snapshot differs (and the parity check with it) in every run, run-identical
   holds. `map-before-landing` failed both checks (all three runs differ from all-resident; run 0 differs from runs

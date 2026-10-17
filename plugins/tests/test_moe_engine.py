@@ -240,17 +240,35 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
         with route_dump(engine) as trace:
             assert _served(engine, prompts) == want, policy
         resident = store.residency.host >= 0
-        assert (resident.all(-1) == resident.any(-1)).all() and resident[..., 0].sum(-1).tolist() == [2, 2]
-        if policy == "placement.profile_decay@1":                     # swaps landed through the copy stream
-            assert store.policy.rounds and (resident.all(-1) == store.policy.want).all(), store.policy.rounds
+        assert (resident.all(-1) == resident.any(-1)).all()
+        if policy == "placement.profile_decay@1":     # swaps through the copy stream; the last may still be landing
+            assert store.policy.rounds and (resident.all(-1) <= store.policy.want).all(), store.policy.rounds
         else:
-            assert trace.admissions > 0
+            assert trace.admissions > 0 and resident[..., 0].sum(-1).tolist() == [2, 2]
         if not policy:
-            assert parity(trace)["first_differing_step"] is None
+            assert parity(trace)["first_differing_step"] is None and trace.mirrored
             at, picked = int(store.n_delta[0]), store.lend(1)           # one slot of each class: one whole expert
             assert picked.sum() == 1 and (store.residency.device[picked] == -1).all()
             (g, e), = np.argwhere(picked.numpy()).tolist()
             assert store.delta[at].tolist() == [g, -1, e] and int(store.n_delta[0]) == at + 1     # logged
+
+
+def test_only_decode_steps_count_and_decay(tiny_moe, tmp_path):
+    """F11 decays and admits once per step, from its decode rows (docs/v1-offload.md D4): a one-token last prompt
+    chunk in a prefill step of several prompts is a prefill row, even past the step's first 512-token expert pass
+    (prompts of 1, 513 and 1 tokens in one step), so the replay oracle still matches the device step by step."""
+    from holon_judge.placement import parity, route_dump
+
+    checkpoint, _ = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
+    engine = _engine(file, max_step_tokens=1100, max_model_len=600, host_memory=1 << 24, plugin_options={
+        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25"})
+    prompts = [torch.randint(0, 512, (n,), generator=torch.Generator().manual_seed(n)).tolist() for n in (1, 513, 1)]
+    with route_dump(engine) as trace:
+        engine.generate(prompts, SamplingParams(temperature=0.0, max_tokens=6, ignore_eos=True))
+    report = parity(trace)
+    assert report["first_differing_step"] is None and report["admissions"] > 0 and trace.mirrored, report
+    assert not trace.steps[0]["counts"].any()                       # the prefill step: three prompts, none counted
 
 
 @pytest.fixture(scope="module")
@@ -300,8 +318,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
                                                                    "moe.cache": cache, "moe.placement": policy})
     store = engine.ctx.shared_objects["std.moe.offload"]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
-    store.after_commit = lambda step, t: routed.append((int(step.n_query[step.n_query == step.n_logits].sum()) * 2 * 2,
-                                                         int(t["counts"].sum()))) or commit(step, t)
+    store.after_commit = lambda step, t: routed.append((int(step.n_query.sum()) * 2 * 2 * bool(
+        (step.n_query == step.n_logits).all()), int(t["counts"].sum()))) or commit(step, t)   # decode, verify steps
     with route_dump(engine) as trace:
         assert _served(engine, prompts) == want
     assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
@@ -312,6 +330,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     if not policy:
         report = parity(trace)
         assert report["first_differing_step"] is None and (report["admissions"] > 0) == (cache == "*=0.25"), report
+        assert report["device_is_mirror"]
     elif policy == "placement.profile_decay@1":
         assert store.policy.rounds > 0
     experts = {k.rpartition("/")[2]: v["provider"] for k, v in engine.ctx.kernels.items() if "linear_experts" in k}

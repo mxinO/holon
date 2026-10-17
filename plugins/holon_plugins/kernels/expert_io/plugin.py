@@ -18,7 +18,8 @@ from . import extension
 
 RESOLVE, FETCH = "moe_resolve", "expert_fetch"
 POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
-ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory
+ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
+STATIC_BYTES = 6 * 4                       # its six static shared words
 
 
 class Modules:
@@ -89,7 +90,7 @@ class Plugin:
             words = 0 if code == 0 else 6           # the variants' per-expert tables
 
             def supports(f, w=words) -> bool:
-                return f["roles"] <= ROLES and (f["roles"] + w) * f["experts"] * 4 <= SHARED_BYTES
+                return f["roles"] <= ROLES and (f["roles"] + w) * f["experts"] * 4 + STATIC_BYTES <= SHARED_BYTES
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="kernels.expert_io", impl=functools.partial(MoeResolve, modules, op),
                 requires=requires, props=props, priority=10, supports=supports))
