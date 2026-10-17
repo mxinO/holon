@@ -194,7 +194,7 @@ class MoeResolve:
     def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.staging = staging
 
-    def __call__(self, ids, kinds, residency, host, limits, counts, misses, errors):
+    def __call__(self, ids, kinds, residency, host, limits, counts, misses, errors, delta, n_delta, group):
         slots, fetch, n_fetch, increments, bits = moe.moe_resolve(ids, kinds, residency, host, limits, self.staging)
         counts += increments
         misses.clamp_(min=int(n_fetch.max()))
@@ -206,8 +206,8 @@ class ExpertFetch:
     def __init__(self, ctx, *, unit_bytes: int, staging: int) -> None:
         pass
 
-    def __call__(self, fetch, n, src, dst, first):
-        dst.copy_(moe.expert_fetch(fetch, int(n[0]), src, dst, first))
+    def __call__(self, fetch, n, src, dst):
+        dst.copy_(moe.expert_fetch(fetch, int(n[0]), src, dst))
 
 
 class CausalConv1d:

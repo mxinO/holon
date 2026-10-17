@@ -7,8 +7,8 @@ license = "Apache-2.0"
 core_abi = ">=1.0,<2.0"
 
 [resources]
-provides = ["kernel.moe_resolve@1", "kernel.expert_fetch@1"]
-requires = ["op.moe_resolve@1", "op.expert_fetch@1"]
+provides = ["kernel.moe_resolve@1", "kernel.expert_fetch@1", "kernel.moe_resolve.lfu@1", "kernel.moe_resolve.lru@1"]
+requires = ["op.moe_resolve@1", "op.expert_fetch@1", "op.moe_resolve.lfu@1", "op.moe_resolve.lru@1"]
 
 [properties]
 numerics = "exact"

@@ -175,9 +175,14 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     in pinned host pools (filled from its extents), classes by (role, type, shape) — here gate/up Q8_0 and down
     Q4_0 —, every miss fetched into staging slots: the outputs are bitwise the resident store's whatever the cache
     holds (every expert by default, as many as a short fill pool's bytes hold, half, a profile's pick per class, none).
-    The static policy caches whole experts, item 0, 1, … of every layer, or a profile's hottest; a layer's distinct
-    misses never pass its staging slots, and a step that did would stop the engine."""
+    The static policy caches whole experts, F2's warm start: item 0, 1, … of every layer, or a profile's hottest; a
+    layer's distinct misses never pass its staging slots, and a step that did would stop the engine. The adaptive
+    policies (the default F11, F4, F2–F3's two-phase swaps through the copy stream) serve the same outputs at a
+    quarter of the experts while they move them; F11's residency, step by step, is its replay oracle's (L1 parity)."""
     import json as json_
+
+    from holon_judge.placement import parity, route_dump
+    from holon_tools import profile as tool  # `holon_tools profile`: decode routes, beside the file
 
     checkpoint, prompts = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
@@ -188,17 +193,18 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     for layer, (a, b) in enumerate(hot):
         counts[layer, [a, b]] = [9, 5]
     profile.write_text(json_.dumps({"layers": {str(layer): row for layer, row in enumerate(counts.tolist())}}))
+    static = {"moe.store": "std.moe.offload@1", "moe.placement": "std.tiered.static@1"}
     for cache, extra, floor, cached in (("", {}, None, 8), ("", {}, 1800, None), ("*=0.5", {}, None, 4), (
             "gate_up.q8_0.64x64=4,*=2", {"moe.placement.profile": profile.name}, None, 1), ("*=0", {}, None, 0)):
         engine = _engine(file, host_memory=1 << 24, paged_min_tokens=floor, plugin_options={
-            "moe.store": "std.moe.offload@1", "moe.cache": cache, **extra})
+            **static, "moe.cache": cache, **extra})
         store = engine.ctx.shared_objects["std.moe.offload"]
         counts = []                                                    # each committed step's routing counts
         store.policy.after_commit = lambda step, view, counts=counts: counts.append(step.sum()) or []
         assert _served(engine, prompts) == want, cache
         assert set(counts) <= {r * 2 * 2 for r in range(4)} and max(counts) == 12   # decode rows x top-2 x 2 layers
         assert sorted(store.classes) == ["down.q4_0.64x32", "gate_up.q8_0.64x64"]
-        assert {c.host.capacity for c in store.classes.values()} == {16}          # 2 layers x 8 experts each
+        assert {c.host.capacity * store.granule // c.unit_bytes for c in store.classes.values()} == {16}  # 2 x 8
         assert all(c.null == 2 and c.staging == 8 for c in store.classes.values())
         resident = store.residency.host >= 0                                     # [layer, expert, role]
         assert (resident.all(-1) == resident.any(-1)).all()                      # whole experts
@@ -221,6 +227,30 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     with pytest.raises(RuntimeError, match="distinct misses"):
         while engine.has_work():
             engine.step()
+    routes = tool.profile(EngineConfig(model=str(file), device="cpu", dtype=torch.float32, page_size=4, max_seqs=3,
+                                       max_step_tokens=10, max_model_len=40, state_memory=1 << 20,
+                                       host_memory=1 << 24), prompts, 4)
+    assert sorted(routes["layers"]) == ["0", "1"] and sum(map(sum, routes["layers"].values())) == 4 * 3 * 2 * 2
+    assert tool.write(file, "routes.json", routes) == tmp_path / "routes.json"
+    for policy in ("", "placement.lru@1", "placement.profile_decay@1"):
+        engine = _engine(file, host_memory=1 << 24, plugin_options={
+            "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.placement": policy,
+            "moe.placement.profile": "routes.json"})
+        store = engine.ctx.shared_objects["std.moe.offload"]
+        with route_dump(engine) as trace:
+            assert _served(engine, prompts) == want, policy
+        resident = store.residency.host >= 0
+        assert (resident.all(-1) == resident.any(-1)).all() and resident[..., 0].sum(-1).tolist() == [2, 2]
+        if policy == "placement.profile_decay@1":                     # swaps landed through the copy stream
+            assert store.policy.rounds and (resident.all(-1) == store.policy.want).all(), store.policy.rounds
+        else:
+            assert trace.admissions > 0
+        if not policy:
+            assert parity(trace)["first_differing_step"] is None
+            at, picked = int(store.n_delta[0]), store.lend(1)           # one slot of each class: one whole expert
+            assert picked.sum() == 1 and (store.residency.device[picked] == -1).all()
+            (g, e), = np.argwhere(picked.numpy()).tolist()
+            assert store.delta[at].tolist() == [g, -1, e] and int(store.n_delta[0]) == at + 1     # logged
 
 
 @pytest.fixture(scope="module")
@@ -253,25 +283,37 @@ def _gpu_engine(model, **kw) -> Engine:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("cache", ["", "*=0.25", "*=0"])     # arenas of 26, 14, 10 slots: stream-k unpatched
-def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, cache):
+@pytest.mark.parametrize("policy, cache", [("", ""), ("", "*=0.25"), ("", "*=0"), ("placement.lru@1", "*=0.25"),
+                                           ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25")])
+def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
     """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
-    resolve and zero-copy gather from mapped host pools), decode steps replayed from CUDA graphs and prefill chunked
-    past the mmvq limit: the offload store's streams and prompt logprobs are the resident store's, bit for bit. A
-    corrupt map entry is flagged by the resolve and stops the engine at the commit; the kernels' id-error word is
-    watched too. The arena pool is released when the ledger frees its pools (the startup profile reads free memory
-    then)."""
+    resolve, its F11 and F4 variants and zero-copy gather from mapped host pools), decode steps replayed from CUDA
+    graphs and prefill chunked past the mmvq limit: the offload store's streams and prompt logprobs are the resident
+    store's, bit for bit, under every placement policy (arenas of 26, 14, 10 slots: stream-k unpatched). F11's
+    residency, step by step, is its replay oracle's (L1 parity), with admissions in graphed and eager steps. A corrupt
+    map entry is flagged by the resolve and stops the engine at the commit; the kernels' id-error word is watched too.
+    The arena pool is released when the ledger frees its pools (the startup profile reads free memory then)."""
+    from holon_judge.placement import parity, route_dump
+
     file, prompts, want = gpu_moe
     engine = _gpu_engine(file, host_memory=1 << 26, plugin_options={"moe.store": "std.moe.offload@1",
-                                                                   "moe.cache": cache})
+                                                                   "moe.cache": cache, "moe.placement": policy})
     store = engine.ctx.shared_objects["std.moe.offload"]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query[step.n_query == step.n_logits].sum()) * 2 * 2,
                                                          int(t["counts"].sum()))) or commit(step, t)
-    assert _served(engine, prompts) == want
+    with route_dump(engine) as trace:
+        assert _served(engine, prompts) == want
     assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
     assert all(a == b for a, b in routed) and max(routed)[0] > 4      # top-2 x 2 layers; graph padding never counts
-    assert {v["provider"] for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")} == {"kernels.expert_io"}
+    variant = {"": "moe_resolve.lfu@1", "placement.lru@1": "moe_resolve.lru@1"}.get(policy, "moe_resolve@1")
+    assert {(k.rpartition("/")[2], v["provider"]) for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")
+            } == {(variant, "kernels.expert_io"), ("expert_fetch@1", "kernels.expert_io")}
+    if not policy:
+        report = parity(trace)
+        assert report["first_differing_step"] is None and (report["admissions"] > 0) == (cache == "*=0.25"), report
+    elif policy == "placement.profile_decay@1":
+        assert store.policy.rounds > 0
     experts = {k.rpartition("/")[2]: v["provider"] for k, v in engine.ctx.kernels.items() if "linear_experts" in k}
     assert experts == {"linear_experts_arena@1": "kernels.ggml_cuda"}            # arenas never bind @2
     words = [t for name, t in store.telemetry.items() if name.startswith("kernel_errors")]

@@ -1,6 +1,9 @@
 """The offload store's in-graph kernels as `moe_resolve@1` (one CTA: the layer's misses ranked by expert id, slots
-for every entry) and `expert_fetch@1` (the zero-copy gather of missed units from a mapped host pool into staging
-slots, 8 CTAs × 256 threads of 16-byte loads: step 0's M1, docs/v1-offload.md §13). Op contracts: std.moe.kernels.
+for every entry), its variants `moe_resolve.lfu@1` (F11) and `moe_resolve.lru@1` (F4) — the same CTA first updates
+the policy's state and admits misses into victims' slots —, and `expert_fetch@1` (the zero-copy gather of missed
+units from a mapped host pool into their slots, 8 CTAs × 256 threads of 16-byte loads: step 0's M1, docs/v1-offload.md
+§13). Op contracts: std.moe.kernels, and the placement plugins' (placement.lfu, placement.lru). A variant's `lend`
+runs eagerly (ring steps are never graphed) in torch ops.
 
 The native module is built ahead of time (`python -m holon_plugins.kernels.expert_io.prebuild`); without it an
 instance cannot be created and the error names that command."""
@@ -14,7 +17,8 @@ from holon.api import Constraint, KernelSpec
 from . import extension
 
 RESOLVE, FETCH = "moe_resolve", "expert_fetch"
-ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; `need` in static shared memory
+POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
+ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory
 
 
 class Modules:
@@ -30,24 +34,50 @@ class Modules:
 
 
 class MoeResolve:
-    def __init__(self, modules: Modules, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
-        self.lib, self.roles, self.staging = modules(ctx.fingerprint.sm), roles, staging
+    plant = 0                              # the judge's calibration bugs (variants; judge/holon_judge/planted.py)
 
-    def __call__(self, ids, kinds, residency, host, limits, counts, misses, errors):
+    def __init__(self, modules: Modules, op: str, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
+        self.lib, self.policy, self.roles, self.staging = modules(ctx.fingerprint.sm), POLICIES[op], roles, staging
+
+    def __call__(self, ids, kinds, residency, host, limits, counts, misses, errors, delta, n_delta, group, **state):
         tokens, k = ids.shape
         slots = torch.empty(self.roles, tokens, k, dtype=torch.int32, device=ids.device)
-        fetch = torch.empty(self.roles, self.staging, dtype=torch.int32, device=ids.device)
+        fetch = torch.empty(self.roles, 2, self.staging, dtype=torch.int32, device=ids.device)
         n_fetch = torch.empty(self.roles, dtype=torch.int32, device=ids.device)
-        self.lib.resolve(ids, kinds, residency, host, limits, counts, misses, errors, slots, fetch, n_fetch)
+        self.lib.resolve(self.policy, ids, kinds, residency, host, limits, counts, misses, errors, delta, n_delta,
+                         group, [state[n] for n in STATE[self.policy]], self.plant, slots, fetch, n_fetch)
         return slots, fetch, n_fetch
+
+    def lend(self, n: int, residency: torch.Tensor, classes: torch.Tensor, **state) -> torch.Tensor:
+        """Whole resident experts, coldest (LFU: by score; LRU: oldest) first, ties by layer then expert id, until every
+        class has min(n, its resident slots) of them."""
+        whole = (residency >= 0).all(-1).view(-1)                           # [G·E], in (layer, expert) order
+        key = (state["score"] if self.policy == 1 else state["last"]).reshape(-1)
+        key = torch.where(whole, key, torch.full_like(key, torch.finfo(torch.float32).max if key.is_floating_point()
+                                                          else torch.iinfo(key.dtype).max))
+        order = torch.sort(key, stable=True).indices                        # stable: ties keep (layer, expert) order
+        experts = residency.shape[1]
+        slots = torch.zeros(len(key), int(classes.max()) + 1, dtype=torch.int64, device=key.device)
+        for r in range(classes.shape[1]):                                   # [G·E, C]: the slots each expert holds
+            slots.scatter_add_(1, classes[:, r].repeat_interleave(experts)[:, None], whole.long()[:, None])
+        held = slots[order].cumsum(0)
+        need = held[-1].clamp(max=n)
+        reached = (held >= need).long().argmax(0)                           # each class's first index meeting its need
+        take = int(torch.where(need > 0, reached + 1, 0).max())
+        picked = torch.zeros(len(key), dtype=torch.bool, device=key.device)
+        picked[order[:take]] = True
+        return picked.view(residency.shape[:2])
+
+
+STATE = {0: (), 1: ("score",), 2: ("last", "clock")}       # each policy's state, as its contract names it
 
 
 class ExpertFetch:
     def __init__(self, modules: Modules, ctx, *, unit_bytes: int, staging: int) -> None:
         self.lib = modules(ctx.fingerprint.sm)
 
-    def __call__(self, fetch, n, src, dst, first: int) -> None:
-        self.lib.fetch(fetch, n, src, dst, first)
+    def __call__(self, fetch, n, src, dst) -> None:
+        self.lib.fetch(fetch, n, src, dst)
 
 
 class Plugin:
@@ -55,10 +85,14 @@ class Plugin:
         modules = Modules()
         props = frozenset({"graph_safe", "deterministic"})
         requires = Constraint(sms=frozenset(extension.ARCHS))
-        regs.kernels.add(RESOLVE, KernelSpec(
-            op=RESOLVE, provider="kernels.expert_io", impl=functools.partial(MoeResolve, modules), requires=requires,
-            supports=lambda f: f["roles"] <= ROLES and f["roles"] * f["experts"] * 4 <= SHARED_BYTES, props=props,
-            priority=10))
+        for op, code in POLICIES.items():
+            words = 0 if code == 0 else 6           # the variants' per-expert tables
+
+            def supports(f, w=words) -> bool:
+                return f["roles"] <= ROLES and (f["roles"] + w) * f["experts"] * 4 <= SHARED_BYTES
+            regs.kernels.add(op, KernelSpec(
+                op=op, provider="kernels.expert_io", impl=functools.partial(MoeResolve, modules, op),
+                requires=requires, props=props, priority=10, supports=supports))
         regs.kernels.add(FETCH, KernelSpec(
             op=FETCH, provider="kernels.expert_io", impl=functools.partial(ExpertFetch, modules), requires=requires,
             supports=lambda f: f["unit_bytes"] % 16 == 0, props=props, priority=10))

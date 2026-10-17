@@ -1,5 +1,6 @@
-"""std.tiered.static@1 (F1): a frozen residency map — the hottest items of a routing profile, else every group's
-items in id order taken round-robin across groups, as far as the cache slots go; never an edit after it."""
+"""std.tiered.static@1 (F1): a frozen residency map — F2's warm start (a routing profile's hottest items, 4 per group
+first; without one every group's items in id order, taken round-robin across groups), as far as the cache slots go;
+never an edit after it."""
 from __future__ import annotations
 
 import numpy as np
@@ -7,6 +8,7 @@ import numpy as np
 
 class Static:
     resolve_variant = None
+    device_owned = False
 
     def __init__(self, ctx, **site) -> None:
         pass
@@ -15,14 +17,7 @@ class Static:
         return {}
 
     def seed(self, profile: np.ndarray, budget) -> list[tuple[int, int]]:
-        return [(g, i) for g, i in ranking(profile) if budget.take(g, i)]
+        return [(g, i) for g, i in budget.warm_start(profile) if budget.take(g, i)]
 
     def after_commit(self, counts: np.ndarray, view: np.ndarray) -> list:
         return []
-
-
-def ranking(profile: np.ndarray) -> list[tuple[int, int]]:
-    """(group, item) pairs by count descending, ties by item, then group: under a flat profile (no profile: zeros),
-    item 0 of every group, then item 1, …, so every group gets the same share."""
-    group, item = np.divmod(np.arange(profile.size), profile.shape[1])
-    return [(int(group[x]), int(item[x])) for x in np.lexsort((group, item, -profile.ravel()))]

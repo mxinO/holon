@@ -63,7 +63,7 @@ def moe_combine(y: torch.Tensor, weights: torch.Tensor, dtype: torch.dtype) -> t
 
 def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, host: torch.Tensor,
                 limits: torch.Tensor, staging: int) -> tuple[torch.Tensor, ...]:
-    """The `moe_resolve@1` oracle: `(slots [R, T, k], fetch [R, staging] (−1 past n_fetch), n_fetch [R], counts [E],
+    """The `moe_resolve@1` oracle: `(slots [R, T, k], fetch [R, 2, staging] (−1 past n_fetch), n_fetch [R], counts [E],
     errors)`, `counts` the increments of this call, `errors` the bits it sets."""
     from .kernels import DECODE, PADDING, RANGE
 
@@ -74,7 +74,7 @@ def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor,
     live = (kinds[:, None] != PADDING) & (ids >= 0)                     # [T, k]: routed entries
     routed = ids.clamp_min(0)
     slots = torch.arange(k).expand(roles, t, k).clone()                 # null slot j by default
-    fetch = torch.full((roles, staging), -1, dtype=torch.int64)
+    fetch = torch.full((roles, 2, staging), -1, dtype=torch.int64)
     n_fetch = torch.zeros(roles, dtype=torch.int64)
     errors = 0
     for r in range(roles):
@@ -82,7 +82,7 @@ def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor,
         rank = {e: i for i, e in enumerate(missing)}
         n_fetch[r] = len(missing)
         for i, e in enumerate(missing[:staging]):
-            fetch[r, i] = host[e, r]
+            fetch[r, :, i] = torch.tensor([host[e, r], k + i])
         for a, j in live.nonzero().tolist():
             e = int(routed[a, j])
             at = int(residency[e, r])
@@ -97,9 +97,10 @@ def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor,
     return slots.int(), fetch.int(), n_fetch.int(), counts.int(), errors
 
 
-def expert_fetch(fetch: torch.Tensor, n: int, src: torch.Tensor, dst: torch.Tensor, first: int) -> torch.Tensor:
-    """The `expert_fetch@1` oracle: `dst` with units `src[fetch[i]]` at `first + i` for i < min(n, len(fetch))."""
+def expert_fetch(fetch: torch.Tensor, n: int, src: torch.Tensor, dst: torch.Tensor) -> torch.Tensor:
+    """The `expert_fetch@1` oracle: `dst` with units `src[fetch[0, i]]` in slots `fetch[1, i]` for i < min(n,
+    staging)."""
     out = dst.clone()
-    for i, unit in enumerate(fetch[:n].tolist()):
-        out[first + i] = src[unit].to(out.device)
+    for unit, slot in fetch[:, :n].T.tolist():
+        out[slot] = src[unit].to(out.device)
     return out

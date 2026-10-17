@@ -4,7 +4,8 @@ expert's gate and up extents (gate's rows, then up's: the resident merge's layou
 the class of its (role, ggml type, shape). Per chunk of tokens the layer's ids resolve to arena slots — misses
 gathered into staging slots — and `linear_experts_arena@1` runs over each class's arena.
 
-Options (EngineConfig.plugin_options): `moe.placement` (a policy's unit Ref; default `std.tiered.static@1`, F1),
+Options (EngineConfig.plugin_options): `moe.placement` (a policy's unit Ref; default `placement.lfu@1`, F11, while
+the RAM tier holds every expert — the only tier yet; `std.tiered.static@1` is F1),
 `moe.placement.profile` (routing counts, JSON `{"layers": {"<layer>": [count per expert]}}`, named relative to the
 checkpoint's directory), `moe.tiers` (host tiers' Refs,
 comma-separated; default `std.tiered.pinned@1`), `moe.cache` (cache slots per class, pinned: `<class>=<n>` or
@@ -24,12 +25,15 @@ GATE_UP, DOWN = 0, 1                           # roles
 def _store(ctx, experts: int, top_k: int):
     """The engine's tiered store for MoE experts, built once by the first layer with the engine's context."""
     opts = ctx.options.get("plugins", {})
-    tokens = max(ctx.options.get("max_step_tokens", 1),
-                 ctx.options.get("max_seqs", 1) * (1 + ctx.options.get("max_draft_tokens", 0)))
+    rows = ctx.options.get("max_seqs", 1) * (1 + ctx.options.get("max_draft_tokens", 0))
+    if rows > CHUNK:      # a policy's resolve decays and counts once per call with decode rows (docs/v1-offload.md D4)
+        raise NotImplementedError(f"std.moe.offload@1: {rows} decode and verify tokens per step pass one expert "
+                                  f"pass ({CHUNK} tokens)")
+    tokens = max(ctx.options.get("max_step_tokens", 1), rows)
     profile = str(opts.get("moe.placement.profile", ""))
     return ctx.unit(Ref("std.tiered.store@1", name="moe", items=experts, roles=2, top_k=top_k,
                         staging=min(experts, top_k * min(CHUNK, tokens)),
-                        policy=str(opts.get("moe.placement", "std.tiered.static@1")),
+                        policy=str(opts.get("moe.placement", "")),
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
                         cache=str(opts.get("moe.cache", "")), profile=profile))
 
