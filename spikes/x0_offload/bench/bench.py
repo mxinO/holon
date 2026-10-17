@@ -10,6 +10,7 @@ weights with ggml's quantizer).
 """
 
 import argparse
+import hashlib
 import json
 import os
 import statistics
@@ -317,12 +318,14 @@ def bitwise(ext, ex, cores, nmax: int) -> dict:
     x = torch.randn(1, 8, HIDDEN, generator=g)
     one, many = ext.Cpu(cores[:1]), ext.Cpu(cores[:nmax])
     checks = mism = 0
+    digest = hashlib.sha256()
     for e in (0, 37, 101):
         alone = torch.zeros(8, HIDDEN)
         for t in range(8):
             y = torch.zeros(1, 1, HIDDEN)
             one.run(ex.cls, ex.ptr, [e], x[:, t:t + 1].contiguous(), y)
             alone[t] = y[0, 0]
+        digest.update(alone.numpy().tobytes())
         for size in range(2, 9):
             for cpu in (one, many):
                 y = torch.zeros(1, size, HIDDEN)
@@ -334,7 +337,9 @@ def bitwise(ext, ex, cores, nmax: int) -> dict:
         many.run(ex.cls, ex.ptr, [e, e + 1, e + 2, e + 3], xs.contiguous(), y)
         checks += 1
         mism += not torch.equal(y[0].view(torch.int32), alone[:4].view(torch.int32))
-    return {"checks": checks, "mismatches": int(mism), "threads": [1, nmax], "group_sizes": [2, 8]}
+    # the outputs' digest: equal across builds iff the ISA tiers round alike (D7: a lock that uses F5b names the tier)
+    return {"checks": checks, "mismatches": int(mism), "threads": [1, nmax], "group_sizes": [2, 8],
+            "sha256": digest.hexdigest()}
 
 
 # ---------------------------------------------------------------------------------------------- M2
@@ -663,6 +668,8 @@ def main():
                            preexec_fn=lambda: os.sched_setaffinity(0, allowed))  # not this thread's one core
             sub = json.loads(child.read_text())
             res["m3_avx2"], res["env"]["avx2_build"] = sub["m3_avx2"], sub["env"]["ggml_cpu_build"]
+            res["m3_isa_bitwise_equal"] = {name: r["bitwise"]["sha256"] == res["m3_avx2"][name]["bitwise"]["sha256"]
+                                           for name, r in res["m3_native"].items()}
             child.unlink()
             save()
     if "m2" in only:
