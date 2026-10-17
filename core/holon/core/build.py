@@ -84,8 +84,7 @@ class BuildContext:
                 self.plugins.load(plugin)
         sm, tier = self.fingerprint.sm or None, self.fingerprint.cpu_isa
         return [s for s in self.plugins.regs.kernels.get(name)
-                if s.requires.allows(self.device.type, sm) and (not s.requires.cpu_isa or tier in s.requires.cpu_isa)
-                and (s.supports is None or s.supports(facts))]
+                if s.requires.allows(self.device.type, sm, cpu_isa=tier) and (s.supports is None or s.supports(facts))]
 
     def _choose(self, op: str, facts: dict[str, Any]) -> KernelSpec:
         name = parse_versioned(op)[0]

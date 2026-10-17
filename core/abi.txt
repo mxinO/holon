@@ -52,7 +52,7 @@ dataclass Constraint frozen
   #2 sms: frozenset[int] = frozenset([])
   #3 devices: frozenset[str] = frozenset(['cuda'])
   #4 cpu_isa: frozenset[str] = frozenset([])
-  allows(self, device: 'str', sm: 'int | None') -> 'bool'
+  allows(self, device: 'str', sm: 'int | None', *, cpu_isa: 'str' = '') -> 'bool'
 dataclass DeviceBatch
   #0 input_ids: torch.Tensor
   #1 positions: torch.Tensor
