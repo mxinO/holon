@@ -9,6 +9,7 @@
 namespace {
 
 constexpr int PADDING = 0, DECODE = 1;                 // row kinds (std.moe.kernels)
+constexpr int RANGE = 1;                               // error bit: a resident slot outside the arena's cache slots
 constexpr int RESOLVE_THREADS = 256;                   // 8 warps: one per role for the scans
 constexpr int FETCH_CTAS = 8, FETCH_THREADS = 256, FETCH_UNROLL = 8;   // step 0's M1: saturates PCIe
 
@@ -16,7 +17,8 @@ constexpr int FETCH_CTAS = 8, FETCH_THREADS = 256, FETCH_UNROLL = 8;   // step 0
 // by id (ballot scans), so staging slots and fetch entries are deterministic; then every entry gets its slot.
 __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __restrict__ kinds,
                           const int32_t * __restrict__ residency, const int32_t * __restrict__ host,
-                          int32_t * __restrict__ counts, int32_t * __restrict__ misses, int32_t * __restrict__ slots,
+                          const int32_t * __restrict__ limits, int32_t * __restrict__ counts,
+                          int32_t * __restrict__ misses, int32_t * __restrict__ errors, int32_t * __restrict__ slots,
                           int32_t * __restrict__ fetch, int32_t * __restrict__ n_fetch, int tokens, int k, int experts,
                           int roles, int staging) {
     extern __shared__ int32_t shared[];
@@ -68,8 +70,14 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         const int e = ids[i], j = i % k;
         const bool live = kinds[i / k] != PADDING && e >= 0;
         for (int r = 0; r < roles; ++r) {
-            const int32_t at = live ? residency[e * roles + r] : j;
-            slots[r * entries + i] = !live || at >= 0 ? at : k + min(need[r * experts + e], staging - 1);
+            int32_t at = live ? residency[e * roles + r] : j;
+            if (live && at < 0) {
+                at = k + min(need[r * experts + e], staging - 1);
+            } else if (live && (at < k + staging || at >= limits[r])) {     // corrupt: never read past the arena
+                at = j;
+                atomicOr(errors, RANGE);
+            }
+            slots[r * entries + i] = at;
         }
     }
 }
@@ -113,7 +121,8 @@ void check(const at::Tensor & t, const at::Tensor & like, at::ScalarType dtype, 
 cudaStream_t stream() { return at::cuda::getCurrentCUDAStream().stream(); }
 
 void resolve(const at::Tensor & ids, const at::Tensor & kinds, const at::Tensor & residency, const at::Tensor & host,
-             at::Tensor & counts, at::Tensor & misses, at::Tensor & slots, at::Tensor & fetch, at::Tensor & n_fetch) {
+             const at::Tensor & limits, at::Tensor & counts, at::Tensor & misses, at::Tensor & errors,
+             at::Tensor & slots, at::Tensor & fetch, at::Tensor & n_fetch) {
     const c10::cuda::CUDAGuard guard(ids.device());
     TORCH_CHECK(ids.is_cuda() && ids.dim() == 2 && residency.dim() == 2 && fetch.dim() == 2, "ids [T, k] on CUDA");
     const int64_t tokens = ids.size(0), k = ids.size(1), experts = residency.size(0), roles = residency.size(1);
@@ -123,16 +132,19 @@ void resolve(const at::Tensor & ids, const at::Tensor & kinds, const at::Tensor 
     check(kinds, ids, at::kByte, {tokens}, "kinds");
     check(residency, ids, at::kInt, {experts, roles}, "residency");
     check(host, ids, at::kInt, {experts, roles}, "host");
+    check(limits, ids, at::kInt, {roles}, "limits");
     check(counts, ids, at::kInt, {experts}, "counts");
     check(misses, ids, at::kInt, {1}, "misses");
+    check(errors, ids, at::kInt, {1}, "errors");
     check(slots, ids, at::kInt, {roles, tokens, k}, "slots");
     check(fetch, ids, at::kInt, {roles, staging}, "fetch");
     check(n_fetch, ids, at::kInt, {roles}, "n_fetch");
     const size_t smem = roles * experts * sizeof(int32_t);
     k_resolve<<<1, RESOLVE_THREADS, smem, stream()>>>(
         ids.data_ptr<int32_t>(), kinds.data_ptr<uint8_t>(), residency.data_ptr<int32_t>(), host.data_ptr<int32_t>(),
-        counts.data_ptr<int32_t>(), misses.data_ptr<int32_t>(), slots.data_ptr<int32_t>(), fetch.data_ptr<int32_t>(),
-        n_fetch.data_ptr<int32_t>(), tokens, k, experts, roles, staging);
+        limits.data_ptr<int32_t>(), counts.data_ptr<int32_t>(), misses.data_ptr<int32_t>(), errors.data_ptr<int32_t>(),
+        slots.data_ptr<int32_t>(), fetch.data_ptr<int32_t>(), n_fetch.data_ptr<int32_t>(), tokens, k, experts, roles,
+        staging);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -156,6 +168,6 @@ void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & s
 }  // namespace
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("resolve", &resolve, "moe_resolve@1 into slots, fetch, n_fetch (and counts, misses in place)");
+    m.def("resolve", &resolve, "moe_resolve@1 into slots, fetch, n_fetch (and counts, misses, errors in place)");
     m.def("fetch", &gather, "expert_fetch@1: dst[first + i] = src[fetch[i]] for i < min(n, len(fetch))");
 }

@@ -61,11 +61,11 @@ def moe_combine(y: torch.Tensor, weights: torch.Tensor, dtype: torch.dtype) -> t
     return acc.to(dtype)
 
 
-def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, host: torch.Tensor, staging: int
-                ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """The `moe_resolve@1` oracle: `(slots [R, T, k], fetch [R, staging] (−1 past n_fetch), n_fetch [R], counts [E])`,
-    `counts` the increments of this call."""
-    from .kernels import DECODE, PADDING
+def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, host: torch.Tensor,
+                limits: torch.Tensor, staging: int) -> tuple[torch.Tensor, ...]:
+    """The `moe_resolve@1` oracle: `(slots [R, T, k], fetch [R, staging] (−1 past n_fetch), n_fetch [R], counts [E],
+    errors)`, `counts` the increments of this call, `errors` the bits it sets."""
+    from .kernels import DECODE, PADDING, RANGE
 
     t, k = ids.shape
     experts, roles = residency.shape
@@ -76,6 +76,7 @@ def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor,
     slots = torch.arange(k).expand(roles, t, k).clone()                 # null slot j by default
     fetch = torch.full((roles, staging), -1, dtype=torch.int64)
     n_fetch = torch.zeros(roles, dtype=torch.int64)
+    errors = 0
     for r in range(roles):
         missing = sorted({e for e in routed[live].tolist() if residency[e, r] < 0})
         rank = {e: i for i, e in enumerate(missing)}
@@ -84,10 +85,16 @@ def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor,
             fetch[r, i] = host[e, r]
         for a, j in live.nonzero().tolist():
             e = int(routed[a, j])
-            slots[r, a, j] = residency[e, r] if residency[e, r] >= 0 else k + min(rank[e], staging - 1)
+            at = int(residency[e, r])
+            if at < 0:
+                slots[r, a, j] = k + min(rank[e], staging - 1)
+            elif k + staging <= at < int(limits[r]):
+                slots[r, a, j] = at
+            else:                                                       # corrupt: null slot j, flagged
+                errors |= RANGE
     counted = routed[live & (kinds[:, None] == DECODE)]
     counts = torch.bincount(counted, minlength=experts)
-    return slots.int(), fetch.int(), n_fetch.int(), counts.int()
+    return slots.int(), fetch.int(), n_fetch.int(), counts.int(), errors
 
 
 def expert_fetch(fetch: torch.Tensor, n: int, src: torch.Tensor, dst: torch.Tensor, first: int) -> torch.Tensor:

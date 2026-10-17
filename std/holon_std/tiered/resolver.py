@@ -9,10 +9,10 @@ RESOLVE, FETCH = "moe_resolve@1", "expert_fetch@1"
 
 
 class DeviceResolver:
-    def __init__(self, ctx, store, classes: list, residency: torch.Tensor, host: torch.Tensor,
+    def __init__(self, ctx, store, classes: list, residency: torch.Tensor, host: torch.Tensor, limits: torch.Tensor,
                  counts: torch.Tensor, first: bool) -> None:
         self.store, self.classes, self.first = store, classes, first
-        self.residency, self.host, self.counts = residency, host, counts
+        self.residency, self.host, self.limits, self.counts = residency, host, limits, counts
         facts = {"experts": store.items, "top_k": store.top_k, "roles": store.roles, "staging": store.staging}
         site = f"std.tiered[{store.name}]"
         self._resolve = ctx.select_kernel(RESOLVE, site=site, **facts).impl(ctx, **facts)
@@ -26,10 +26,12 @@ class DeviceResolver:
         kinds = self.store.kinds[first:first + len(ids)]
         if len(kinds) != len(ids):
             raise ValueError(f"tokens {first}…{first + len(ids)} past the step's {len(self.store.kinds)} row kinds")
-        if self.first and not first:          # the step's first resolve: its map edits, its counts from zero
+        if self.first and not first:          # the step's first resolve: its map edits; counts, errors from zero
             self.store.residency.apply()
-            self.store.counts.zero_()
-        slots, fetch, n = self._resolve(ids, kinds, self.residency, self.host, self.counts, self.store.misses)
+            for t in self.store.zeroed:
+                t.zero_()
+        slots, fetch, n = self._resolve(ids, kinds, self.residency, self.host, self.limits, self.counts,
+                                        self.store.misses, self.store.errors)
         for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
             gather(fetch[r], n[r:r + 1], c.units(), c.slots(), c.null)
         return slots

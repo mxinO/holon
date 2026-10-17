@@ -129,9 +129,9 @@ class ExpertLinear(nn.Module):
             if (prepared := self._kernel.prepare(q)) is not q:
                 self.layout, self.parts = prepared.layout, _hold(self.weight, prepared.parts, ctx.device)
 
-    def facts(self, ctx, experts: int | None = None) -> dict:
-        """Its `linear_experts@2` facts (`experts`: another stack size, e.g. an offload store's arena's)."""
-        return {"layout": self.layout_fact(), "experts": experts or self.experts, "in": self.in_features,
+    def facts(self, ctx) -> dict:
+        """Its `linear_experts@2` facts."""
+        return {"layout": self.layout_fact(), "experts": self.experts, "in": self.in_features,
                 "out": self.out_features, "top_k": self.top_k, "rows_per_token": self.rows_per_token,
                 "glu": self.glu, "act_dtype": _dtype(self.act_dtype), "out_dtype": "float32",
                 "act_quant": "a16" if self.layout is None else _act_quant(ctx)}

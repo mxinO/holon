@@ -77,6 +77,7 @@ class ArenaExperts(nn.Module):
                  extents: list[list[Extent]]) -> None:
         super().__init__()
         self._facts, self.layout, self.in_features = like.facts, like.layout, like.in_features   # (not a child)
+        self._store = owner.store
         self.glu, self.out = glu, out
         name = f"{('gate_up', 'down')[role]}.{like.layout.scheme.elem.removeprefix('ggml.')}.{out}x{like.in_features}"
         unit = sum(x[0].nbytes for x in extents)
@@ -85,8 +86,10 @@ class ArenaExperts(nn.Module):
         self._kernel = None
 
     def bind_kernels(self, ctx) -> None:
-        facts = self._facts(ctx, experts=self.cls.max_slots) | {"out": self.out, "glu": self.glu}
+        facts = self._facts(ctx) | {"out": self.out, "glu": self.glu}     # the layer's: E experts (arena: more slots)
         self._kernel = bind_experts(ctx, facts)
+        if (errors := getattr(self._kernel, "errors", None)) is not None:
+            self._store.watch(errors)
         if hasattr(self._kernel, "prepare"):
             q = QTensor(self.layout, (facts["experts"], self.out, self.in_features), {"blocks": torch.empty(0)})
             if self._kernel.prepare(q) is not q:

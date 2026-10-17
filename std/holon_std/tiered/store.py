@@ -52,11 +52,6 @@ class SlotClass:
     size: int = 0                               # made per use, so none outlives a materialize
 
     @property
-    def max_slots(self) -> int:
-        """Its arena's size when every piece is cached: what kernels over it are bound for."""
-        return self.null + self.staging + len(self.pieces)
-
-    @property
     def cap(self) -> int:
         """The most cache slots it may have."""
         n = len(self.pieces)
@@ -94,6 +89,7 @@ class TieredStore:
         self._kinds, self._written = np.zeros(tokens, dtype=np.uint8), 0     # host side; the prefix not PADDING
         self.kinds = ctx.static(f"{name}.kinds", (tokens,), torch.uint8)
         self.misses = ctx.static(f"{name}.misses", (1,), torch.int32)   # a running maximum (`moe_resolve@1`)
+        self.errors = ctx.static(f"{name}.errors", (1,), torch.int32)   # `moe_resolve@1`'s, zeroed each step
         self.peak_misses = 0                    # the most distinct misses a layer had (`misses`, at commits)
 
     # -- while the model is finalized and bound ------------------------------------------------------------------------
@@ -119,10 +115,20 @@ class TieredStore:
             self.residency = ResidencyMap(self.ctx, self.name, shape)
             self.host_units = self.ctx.static(f"{self.name}.host", shape, torch.int32)
             self.counts = self.ctx.static(f"{self.name}.counts", shape[:2], torch.int32)
-            self.telemetry = {"counts": self.counts, "misses": self.misses}
+            self.limits = self.ctx.static(f"{self.name}.limits", (len(self._order), self.roles), torch.int32)
+            self.telemetry = {"counts": self.counts, "misses": self.misses, "errors": self.errors}
+            self.zeroed = [self.counts, self.errors]        # by the step's first resolve
         g = self._order[group]
         return DeviceResolver(self.ctx, self, [self.groups[group][r] for r in range(self.roles)],
-                              self.residency.device[g], self.host_units[g], self.counts[g], first=g == 0)
+                              self.residency.device[g], self.host_units[g], self.limits[g], self.counts[g],
+                              first=g == 0)
+
+    def watch(self, errors: torch.Tensor) -> None:
+        """A kernel's error word (`linear_experts@2` instances may have one): zeroed each step, a commit that finds
+        it set stops the engine."""
+        if not any(errors is t for t in self.zeroed):
+            self.telemetry[f"kernel_errors.{len(self.zeroed) - 2}"] = errors
+            self.zeroed.append(errors)
 
     # -- engine hooks -------------------------------------------------------------------------------------------------
     def before_materialize(self, ctx) -> None:
@@ -177,7 +183,8 @@ class TieredStore:
                 arena, units = arenas[c.name]
                 arena[slot].copy_(units[self._host[g, i, r]], non_blocking=True)
         self.residency.seed()
-        for t in (self.counts, self.misses, self.kinds):
+        self.limits.copy_(torch.tensor([[c.size for _, c in sorted(self.groups[g].items())] for g in groups]))
+        for t in (self.misses, self.kinds, *self.zeroed):
             t.zero_()
         self._written = 0
 
@@ -192,6 +199,9 @@ class TieredStore:
         return [(self.kinds[:reach], kinds[:reach])] * bool(reach) + self.residency.writes(step.step), []
 
     def after_commit(self, step, telemetry) -> None:
+        if errors := {name: int(t[0]) for name, t in telemetry.items() if "errors" in name and int(t[0])}:
+            raise RuntimeError(f"{self.name}: step {step.step}'s kernels flagged errors {errors} (moe_resolve@1: "
+                               "1 = a corrupt residency entry; kernel_errors: the kernel's bits)")
         self.peak_misses = int(telemetry["misses"][0])
         if self.peak_misses > self.staging:
             raise RuntimeError(f"{self.name}: a layer had {self.peak_misses} distinct misses, {self.staging} staging "

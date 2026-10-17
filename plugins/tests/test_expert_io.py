@@ -3,16 +3,16 @@
 
 Resolve at E = 128, k = 8, two roles, 1 to 2049 tokens: decode, prefill and padding rows mixed, dropped routes
 (negative ids), experts resident in one role and missing in the other, the null slots shared by every padding row and
-dropped route of a rank; and past its staging slots (the miss count raised, overflowing misses on the last staging
-slot). Fetch: units gathered from a mapped host pool's device view (zero-copy) and from device memory, only the first
-n of the list, nothing else written."""
+dropped route of a rank; past its staging slots (the miss count raised, overflowing misses on the last staging
+slot); corrupt map entries (null slots read, the RANGE bit set). Fetch: units gathered from a mapped host pool's
+device view (zero-copy) and from device memory, only the first n of the list, nothing else written."""
 import pytest
 import torch
 from holon.core import platform
 from holon.core.build import BuildContext
 from holon.core.plugins import PluginSet, discover
 from holon_std.moe import reference
-from holon_std.moe.kernels import DECODE, EXPERT_FETCH, MOE_RESOLVE, PADDING, PREFILL
+from holon_std.moe.kernels import DECODE, EXPERT_FETCH, MOE_RESOLVE, PADDING, PREFILL, RANGE
 
 E, K, ROLES = 128, 8, 2
 DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU"))]
@@ -43,20 +43,31 @@ def routing(tokens: int, seed: int) -> dict[str, torch.Tensor]:
         residency[resident, r] = (K + 200 + torch.randperm(1000, generator=g)[:int(resident.sum())]).int()
     host = torch.stack([torch.randperm(E, generator=g) for _ in range(ROLES)], 1).int()
     counts = torch.randint(0, 50, (E,), generator=g).int()
-    return {"ids": ids, "kinds": kinds, "residency": residency, "host": host, "counts": counts}
+    limits = torch.full((ROLES,), K + 1200, dtype=torch.int32)
+    return {"ids": ids, "kinds": kinds, "residency": residency, "host": host, "limits": limits, "counts": counts}
 
 
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("tokens, staging", [(1, 8), (5, 40), (64, E), (513, E), (2049, E), (64, 16)])
 def test_resolve_matches_the_oracle(plugins, device, tokens, staging):
+    """At 64 tokens two resident entries are corrupt (in the staging slots; past the arena): their entries read
+    null slots and the RANGE bit is set."""
     provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
     resolve = kernel(plugins, device, MOE_RESOLVE, provider, experts=E, top_k=K, roles=ROLES, staging=staging)
     case = routing(tokens, seed=tokens + staging)
-    slots, fetch, n_fetch, increments = reference.moe_resolve(case["ids"], case["kinds"], case["residency"],
-                                                              case["host"], staging)
+    corrupt = tokens == 64
+    if corrupt:                                    # two routed experts' slots: inside staging, past the arena
+        live = case["ids"][case["kinds"] != PADDING]
+        e1, e2 = live[live >= 0][:2].tolist()
+        case["residency"][e1, 0], case["residency"][e2, 1] = K + 1, K + 1200
+    slots, fetch, n_fetch, increments, bits = reference.moe_resolve(
+        case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], staging)
     dev = {name: t.clone().to(device) for name, t in case.items()}
     misses = torch.full((1,), 3, dtype=torch.int32, device=device)
-    got = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["counts"], misses)
+    errors = torch.zeros(1, dtype=torch.int32, device=device)
+    got = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"], dev["counts"], misses,
+                  errors)
+    assert int(errors[0]) == bits == (RANGE if corrupt else 0)
     assert torch.equal(got[0].cpu(), slots) and torch.equal(got[2].cpu(), n_fetch)
     for r in range(ROLES):
         n = min(int(n_fetch[r]), staging)
@@ -66,7 +77,8 @@ def test_resolve_matches_the_oracle(plugins, device, tokens, staging):
     # the contract's own terms, on the oracle: null slot j for padding rows and dropped routes, staging past them
     null = (case["kinds"][:, None] == PADDING) | (case["ids"] < 0)
     assert (slots[:, null] == torch.arange(K).expand(tokens, K)[null]).all()
-    assert ((slots[:, ~null] >= K) & ((slots[:, ~null] < K + staging) | (slots[:, ~null] >= K + 200))).all()
+    if not corrupt:
+        assert ((slots[:, ~null] >= K) & ((slots[:, ~null] < K + staging) | (slots[:, ~null] >= K + 200))).all()
     assert (n_fetch > staging).any() == (staging == 16)            # the overflow case overflows
 
 

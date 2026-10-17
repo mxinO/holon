@@ -33,12 +33,12 @@ class MoeResolve:
     def __init__(self, modules: Modules, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.lib, self.roles, self.staging = modules(ctx.fingerprint.sm), roles, staging
 
-    def __call__(self, ids, kinds, residency, host, counts, misses):
+    def __call__(self, ids, kinds, residency, host, limits, counts, misses, errors):
         tokens, k = ids.shape
         slots = torch.empty(self.roles, tokens, k, dtype=torch.int32, device=ids.device)
         fetch = torch.empty(self.roles, self.staging, dtype=torch.int32, device=ids.device)
         n_fetch = torch.empty(self.roles, dtype=torch.int32, device=ids.device)
-        self.lib.resolve(ids, kinds, residency, host, counts, misses, slots, fetch, n_fetch)
+        self.lib.resolve(ids, kinds, residency, host, limits, counts, misses, errors, slots, fetch, n_fetch)
         return slots, fetch, n_fetch
 
 

@@ -252,19 +252,15 @@ def _gpu_engine(model, **kw) -> Engine:
                                max_step_tokens=256, max_model_len=512, cuda_graphs=True, overlap=True, **kw))
 
 
-# The unpatched expert-id mmq takes stream-k at these small arenas (10–14 slots against the stack's 8 on sm_86) and
-# splits K by the slot count; the forced-tiling vendor patch (docs/v1-offload.md D4) makes them pass, and strict
-# xfail then fails until the marks go.
-STREAM_K = pytest.mark.xfail(strict=True, reason="mmq's stream-k split depends on the arena's slot count (D4 patch)")
-
-
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("cache", ["", pytest.param("*=0.25", marks=STREAM_K), pytest.param("*=0", marks=STREAM_K)])
+@pytest.mark.parametrize("cache", ["", "*=0.25", "*=0"])     # arenas of 26, 14, 10 slots: stream-k unpatched
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, cache):
     """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
     resolve and zero-copy gather from mapped host pools), decode steps replayed from CUDA graphs and prefill chunked
-    past the mmvq limit: the offload store's streams and prompt logprobs are the resident store's, bit for bit. Its
-    arena pool is released when the ledger frees its pools (the startup profile reads the free memory then)."""
+    past the mmvq limit: the offload store's streams and prompt logprobs are the resident store's, bit for bit. A
+    corrupt map entry is flagged by the resolve and stops the engine at the commit; the kernels' id-error word is
+    watched too. The arena pool is released when the ledger frees its pools (the startup profile reads free memory
+    then)."""
     file, prompts, want = gpu_moe
     engine = _gpu_engine(file, host_memory=1 << 26, plugin_options={"moe.store": "std.moe.offload@1",
                                                                    "moe.cache": cache})
@@ -276,6 +272,15 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, cac
     assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
     assert all(a == b for a, b in routed) and max(routed)[0] > 4      # top-2 x 2 layers; graph padding never counts
     assert {v["provider"] for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")} == {"kernels.expert_io"}
+    words = [t for name, t in store.telemetry.items() if name.startswith("kernel_errors")]
+    assert len(words) == 1 and all(m._kernel.errors is words[0] for m in engine.executor.model.modules()
+                                   if hasattr(m, "cls"))          # the ggml id-error word, one per engine
+    if not cache:                                # a corrupt map entry: null slots read, the commit stops the engine
+        store.residency.device[0, :, 0] = 1 << 20
+        engine.add(prompts[0], GREEDY)
+        with pytest.raises(RuntimeError, match=r"flagged errors \{'errors': 1\}"):
+            while engine.has_work():
+                engine.step()
     held, nbytes = torch.cuda.memory_allocated(), store.arena.capacity * store.arena.unit_bytes
     store.arena._set(0)                         # as the ledger frees it: no view outlives the arena pool's buffer
     assert held - torch.cuda.memory_allocated() >= nbytes > 0
