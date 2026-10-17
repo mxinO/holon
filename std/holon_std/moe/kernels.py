@@ -44,7 +44,7 @@ then `staging` slots, then cache slots.
   `fetch[r, 1, i]` the slot it is gathered into, here `stage[r, i]` (the entries read it; the caller's staging slots, or
   slots lent for the call: distinct). `n_fetch[r]` counts them all, even past F (the caller must prevent it:
   `misses[0]` becomes the largest `n_fetch` it has seen, and a miss past F reads `stage[r, F − 1]`). `counts[e]` += 1
-  per entry of a `DECODE` row routed to e, resident or not (prefill rows never count); `routed[e]` = 1 when any live
+  per entry of a `DECODE` row routed to e, resident or not (prefill rows never count); `routed[e]` |= 1 when any live
   entry, of any row kind, routes e (the step's needs). The calls of one step accumulate into `counts` and `routed`,
   which the caller zeroes per step. Deterministic; `fetch` past `n_fetch` unspecified. Facts: experts, top_k, roles,
   staging (the caller's own staging slots, [k, k + staging): the cache slots start past them). `empty` (the layer's
@@ -58,13 +58,16 @@ then `staging` slots, then cache slots.
   b's slot in every role (b's entries became −1, the RAM tier's code); `(group, a, −2 − j)`: a took the layer's empty
   slots `empty[:, j]` (popped from the top: j = `n_empty` − 1 first); `(group, −1, b)`: b was unmapped (lent, by the
   caller) — and a miss it admits is gathered straight into its slot (its fetch entry names that slot, not a staging
-  slot), a ring piece too (its ring slot then goes unread). Its instance also has `lend(n, residency [G, E, R] int32,
-  classes [G, R] int64, **state of every group) -> picked [G, E] bool`: the whole experts (resident in every role) to
-  lend, in its policy's order, until each class c (`classes[g, r]`: role r's slots of group g are in class c) has min(n,
-  its resident slots) of them; the caller unmaps and logs them, and later returns their slots to their layers as empty.
+  slot), a ring piece too (its ring slot then goes unread). A call with `DECODE` rows (the one that picks victims)
+  also sets `routed[e]` |= 2 for every expert its live entries route: its victims' scope. Its instance also has
+  `lend(n, residency [G, E, R] int32, classes [G, R] int64, **state of every group) -> picked [G, E] bool`: the whole
+  experts (resident in every role) to lend, in its policy's order, until each class c (`classes[g, r]`: role r's slots
+  of group g are in class c) has min(n, its resident slots) of them; the caller unmaps and logs them, and later
+  returns their slots to their layers as empty.
 - `moe_route_transform@1` (signature only; `approx`, bound by the explicit option `moe.route_transform = <name>`,
   never by kernel priority): instance `(ids [T, k] int32, weights [T, k] f32, residency [E, R] int32) -> (ids, weights)`
-  between `moe_topk@1` and the resolve, with the layer's map; a negative id is dropped (the rank's null slot: no fetch,
+  between `moe_topk@1` and the resolve, with the layer's map as the resolve reads it (after the step's lending, its
+  ring pieces at their ring slots); a negative id is dropped (the rank's null slot: no fetch,
   no count, a zero contribution). Each transform's semantics are a contract its plugin owns,
   `moe_route_transform.<name>@1`, with its own oracle and provider (docs/v1-offload.md D3). Facts: experts, top_k.
 - `expert_fetch@1`: instance `(fetch [2, F] int32, n [1] int32, src [U, unit] uint8, dst [S, unit] uint8)`: copies unit

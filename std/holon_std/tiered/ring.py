@@ -20,8 +20,8 @@ BUFFERS = 2                                   # the ring's halves: layer l strea
 
 
 class Lent:
-    def __init__(self, store, mode: str, need: int) -> None:
-        self.store, self.mode, self.need = store, mode, need
+    def __init__(self, store, mode: str) -> None:
+        self.store, self.mode = store, mode
         self.lends: list[int] = []            # the `lend(n)` calls made, in order (the parity oracle's input)
 
     # -- at the step's first resolve -----------------------------------------------------------------------------------
@@ -86,7 +86,7 @@ class Lent:
         return want
 
     def _need_stage(self, classes: np.ndarray) -> np.ndarray:
-        return np.full(classes.max() + 1, self.need, dtype=np.int64)
+        return np.full(classes.max() + 1, self.store.prefill, dtype=np.int64)
 
     # -- per layer ----------------------------------------------------------------------------------------------------
     def _start(self, g: int) -> None:

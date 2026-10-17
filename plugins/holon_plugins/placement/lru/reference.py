@@ -48,6 +48,7 @@ def moe_resolve_lru(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
     seen[sorted(needed)] = 1
     records = []
     if decode.any():
+        seen[sorted(needed)] |= 2                                       # the victims' scope
         clock += 1
         last[counts > 0] = clock
         first = {}

@@ -52,6 +52,7 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
     seen[sorted(needed)] = 1
     records = []
     if (counts > 0).any():
+        seen[sorted(needed)] |= 2                                       # the victims' scope
         for e in range(experts):
             s = score[e] * DECAY
             for _ in range(int(counts[e])):

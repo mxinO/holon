@@ -11,7 +11,8 @@ import pytest
 import torch
 from holon.api import SamplingParams
 from holon.core.engine import Engine, EngineConfig
-from holon_std.moe.offload import KEY
+from holon_std.moe.offload import KEY, PASS
+from holon_std.moe.units import CHUNK
 from holon_testing.gguf_files import write
 from safetensors.torch import save_file
 from transformers import AutoModelForCausalLM, Qwen3MoeConfig, Qwen3MoeForCausalLM
@@ -225,7 +226,7 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     with pytest.raises(ValueError, match="relative to the checkpoint's directory"):   # plans record no host path
         _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
                                                            "moe.placement.profile": str(profile)})
-    store.staging = store.peak_misses - 1                                    # as if staging had been too small
+    store.stage = store.stage[:, :store.peak_misses - 1].contiguous()       # as if staging had been too small
     for p in prompts:
         engine.add([(t + 7) % 512 for t in p], GREEDY)                       # new prompts (no prefix-cache hit)
     with pytest.raises(RuntimeError, match="distinct misses"):
@@ -295,7 +296,9 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe, tmp_path, polic
         "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.placement": policy, "moe.ring_tokens": 10})
     store, mixed = engine.ctx.shared_objects[KEY], []
     store.taps.append(lambda step, record: mixed.append(step.n_decode > 0))
-    assert store.staging == 6 and store.prefill == 8
+    offload = engine.executor.model.layers[0].ffn._store
+    assert store.staging == 6 and store.prefill == 8 and store.lending
+    assert offload.pass_tokens(10) == PASS and offload.pass_tokens(9) == CHUNK     # the worst step profiles a pass
     held = []
 
     def size(step, record):           # per class: resident pieces + empty slots
@@ -315,6 +318,18 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe, tmp_path, polic
     if not policy:
         report = parity(trace)
         assert report["first_differing_step"] is None and report["lends"] and report["admissions"], report
+
+
+def test_a_cache_too_small_to_lend_stages_instead(tiny_moe, tmp_path):
+    """A layout whose cache cannot lend a prefill pass's staging (a fill pool of 3 experts per class over the paged
+    floor, F11 with the ring on) keeps its staging slots at a pass's size and never borrows: it serves as before."""
+    checkpoint, prompts = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
+    engine = _engine(file, host_memory=1 << 24, paged_min_tokens=1790, plugin_options={
+        "moe.store": "std.moe.offload@1", "moe.ring_tokens": 10})
+    store = engine.ctx.shared_objects[KEY]
+    assert not store.lending and store.stage.shape[1] == store.prefill
+    assert _served(engine, prompts) == _served(_engine(file), prompts) and store.borrowed == {"ring": 0, "stage": 0}
 
 
 def test_the_delta_log_holds_a_steps_admissions_and_lending(tiny_moe, tmp_path):

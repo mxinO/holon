@@ -2,9 +2,9 @@
 
 `route_dump(engine)` taps the engine's offload store (`std.moe.offload@1`'s `std.tiered.store@1`, through its route
 taps) while it runs: per committed step, its routing counts [layers, experts] of decode and verify rows, the experts
-any of its rows routed (the resolves' `routed` mask, graphed steps included), the delta records the device logged,
-and the residency (whole experts) the store's host mirror holds after the step — the device's map, from its delta
-log.
+the call holding its decode rows routed (the resolves' victims' scope, graphed steps included), the delta records the
+device logged, and the residency (whole experts) the store's host mirror holds after the step — the device's map,
+from its delta log.
 
 At the end, with every launched step committed, the device's map must be the mirror (`Trace.mirrored`): a kernel
 that changed the map without logging it shows there.
@@ -45,7 +45,7 @@ def route_dump(engine) -> Iterator[Trace]:
         trace.score = store.state["score"].cpu().numpy().copy()
 
     def tap(step, record) -> None:
-        trace.steps.append({"step": step.step, "counts": record["counts"].copy(), "needed": record["routed"].copy(),
+        trace.steps.append({"step": step.step, "counts": record["counts"].copy(), "needed": record["scope"].copy(),
                             "records": record["records"].copy(), "lends": record["lends"],
                             "resident": (store.residency.host >= 0).all(-1),
                             "empty": np.array([len(e) for e in store.residency.empty])})

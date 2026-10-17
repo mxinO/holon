@@ -130,6 +130,9 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
                 missing = missing && at < 0;
                 whole = whole && at >= k + staging && at < L.limits[r];
             }
+            if (live[e]) {                             // routed by the call that picks victims: the victims' scope
+                routed[e] |= 2;
+            }
             const bool is_cand = dec[e] && missing;
             const bool is_vict = !is_cand && whole && (!live[e] || (st.plant & PLANT_VICTIM_NEEDED));
             // Candidates hottest (LFU: score descending; LRU: routed first) first, victims coldest (least recent) first,

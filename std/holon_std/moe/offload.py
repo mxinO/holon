@@ -88,15 +88,16 @@ class Offload(nn.Module):
             self._transform = ctx.select_kernel(op, site=f"std.moe.offload[{self.layer}]",
                                                 **self._facts).impl(ctx, **self._facts)
 
-    def transform(self, ids: torch.Tensor, weights: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """The route transform's (`moe.route_transform`), with the layer's map; else the routes as they are."""
+    def transform(self, ids: torch.Tensor, weights: torch.Tensor, first: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """The route transform's (`moe.route_transform`), with the layer's map as the resolve will read it (after the
+        step's lending, the ring's pieces in their slots); else the routes as they are."""
         if self._transform is None:
             return ids, weights
-        return self._transform(ids, weights, self._resolver.residency)
+        return self._transform(ids, weights, self._resolver.present(first))
 
     def pass_tokens(self, tokens: int) -> int:
         """The expert pass of the step: one per large chunk in a streaming step (D8), else std.moe@1's chunk."""
-        return PASS if self.store.ring_step else CHUNK
+        return PASS if self.store.large_passes(tokens) else CHUNK
 
     def route(self, ids: torch.Tensor, first: int) -> torch.Tensor:
         """Each role's arena slots for `ids` (the step's tokens `first`…), misses fetched."""

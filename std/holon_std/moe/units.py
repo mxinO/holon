@@ -169,7 +169,7 @@ class Resident:
         return ids, ids
 
     @staticmethod
-    def transform(ids: torch.Tensor, weights: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def transform(ids: torch.Tensor, weights: torch.Tensor, first: int) -> tuple[torch.Tensor, torch.Tensor]:
         return ids, weights
 
     @staticmethod
@@ -238,7 +238,7 @@ class MoE(nn.Module):
             routes = [self._topk(nn.functional.linear(xc[c:c + CHUNK].float(), self.router))
                       for c in range(0, b - a, CHUNK)]
             weights, ids = routes[0] if len(routes) == 1 else (torch.cat(t) for t in zip(*routes, strict=True))
-            ids, weights = self._store.transform(ids, weights)
+            ids, weights = self._store.transform(ids, weights, a)
             gate_up, down = self._store.route(ids, a)
             h = self._gate_up(xc[:, None], gate_up)                   # [t, k, inter] f32, SwiGLU applied
             self._combine(self._down(h, down), weights, out[a:b])
