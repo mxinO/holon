@@ -26,7 +26,8 @@ class Uploader:
         """`fields`: name -> (maximum length, dtype)."""
         self._layout: dict[str, tuple[int, int, torch.dtype]] = {}       # name -> (byte offset, length, dtype)
         size = 0
-        for name, (n, dtype) in fields.items():
+        # Smallest first, so a small step's inputs lie together: its written ranges merge into one copy.
+        for name, (n, dtype) in sorted(fields.items(), key=lambda f: f[1][0] * f[1][1].itemsize):
             self._layout[name] = (size, n, dtype)
             size += -(-n * dtype.itemsize // _ALIGN) * _ALIGN
         self._device_arena = torch.zeros(size, dtype=torch.uint8, device=device)

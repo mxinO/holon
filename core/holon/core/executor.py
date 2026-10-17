@@ -62,7 +62,8 @@ class _Prep:
 
     lens: torch.Tensor             # [B] tokens held after the step (shared with every page group's Pages)
     start: torch.Tensor            # [B] the row's start (where the host knows it exactly)
-    input_at: torch.Tensor         # [B] where the device's last token goes: the row's first input, or a scratch element
+    inputs: torch.Tensor           # the step's input-ids buffer: `DeviceBatch.input_ids`, then a scratch element
+    input_at: torch.Tensor         # [B] where the device's last token goes: the row's first input, or the scratch
     logits_slots: torch.Tensor     # [L] the slot of each logits row
     logits_end: torch.Tensor | None = None    # [L] host-exact steps: the row's length after the step
     # Steps whose starts the device may hold (verify rows): positions, lengths and write indices derived on the device.
@@ -139,15 +140,19 @@ class Executor:
         logits_rows = seqs * (1 + cfg.max_draft_tokens)
         masks = {"mask": (logits_rows * processor.mask_width, torch.int32),
                  "mask_rows": (logits_rows, torch.int64)} if processor is not None else {}
-        self.uploader = Uploader(device, masks | state.upload_fields(seqs, tokens) | {
+        fields = lambda tokens: masks | state.upload_fields(seqs, tokens) | {    # noqa: E731
             "input_ids": (tokens + 1, torch.int64), "positions": (tokens, torch.int64),    # + the scratch element
             "query_start": (seqs + 1, torch.int64), "slots": (seqs, torch.int64),
             "logits_index": (tokens, torch.int64), "logits_rows": (tokens, torch.int64),   # verify rows: 1 + k each
             "start": (seqs, torch.int64), "input_at": (seqs, torch.int64), "logits_slots": (tokens, torch.int64),
             "logits_end": (tokens, torch.int64), "row_of_token": (tokens, torch.int64),
             "offset": (tokens, torch.int64), "n_query": (seqs, torch.int64), "exact": (seqs, torch.bool),
-            "draft_index": (tokens, torch.int64), "draft_from": (tokens, torch.int64)} | self._sub_fields(cfg))
-        self._input_ids, self._scratch = self.uploader.dev["input_ids"], tokens
+            "draft_index": (tokens, torch.int64), "draft_from": (tokens, torch.int64)} | self._sub_fields(cfg)
+        self.uploader = Uploader(device, fields(tokens))
+        # Steps of at most a decode or verify step's tokens (every graphed one) stage into an arena of that size, so
+        # their few bytes of inputs lie together and move in one copy.
+        self.small_tokens = logits_rows
+        self.small_uploader = Uploader(device, fields(logits_rows)) if logits_rows < tokens else self.uploader
         # Without a drafter no row verifies, so every row's start is the host's (design §7.3): a step's positions,
         # lengths and write indices are staged from the host, and the device moves only the tokens it holds.
         self.host_starts = drafter is None
@@ -459,7 +464,7 @@ class Executor:
         qstart = np.concatenate([[0], np.cumsum(n)])
         offset = np.arange(tokens) - np.repeat(qstart[:-1], n)
         start, logits_rows = plan.start_upper.astype(np.int64), np.repeat(np.arange(rows), plan.n_logits)
-        up = self.uploader
+        up = self.small_uploader if tokens <= self.small_tokens else self.uploader
         up.begin()
         batch = Batch(plan, DeviceBatch(
             input_ids=up.put("input_ids", plan.host_tokens),
@@ -470,8 +475,9 @@ class Executor:
             logits_rows=up.put("logits_rows", logits_rows),
         ))
         from_device = plan.token_src == TokenSrc.DEVICE_LAST
-        prep = _Prep(lens=up.dev["pages.lens"][:rows], start=up.put("start", start),
-                     input_at=up.put("input_at", np.where(from_device, qstart[:-1], self._scratch)),
+        inputs = up.dev["input_ids"]
+        prep = _Prep(lens=up.dev["pages.lens"][:rows], start=up.put("start", start), inputs=inputs,
+                     input_at=up.put("input_at", np.where(from_device, qstart[:-1], len(inputs) - 1)),
                      logits_slots=up.put("logits_slots", plan.slots[logits_rows].astype(np.int64)))
         positions = None
         if self.host_starts:
@@ -505,7 +511,7 @@ class Executor:
         pages = self.state.pages(plan, up, positions)
         drafting = plan.draft_k and plan.n_logits.any() and hasattr(self.drafter, "substeps")
         widths = self.drafter.substeps(plan.draft_k) if drafting else []
-        subs = [self._substep(plan, pages, i, q) for i, q in enumerate(widths)]
+        subs = [self._substep(up, plan, pages, i, q) for i, q in enumerate(widths)]
         up.end()
         # An auxiliary model's planners see the step's in-step publishes of its own specs only, under local names.
         local = {ns: local_batch(batch, ns) for ns in self.namespaces}
@@ -519,12 +525,12 @@ class Executor:
     def _namespace(self, group: str) -> str | None:
         return next((ns for ns in self.namespaces if group.startswith(ns + ".")), None)
 
-    def _substep(self, plan: BatchPlan, pages: dict[str, Any], i: int, q: int) -> StepContext:
+    def _substep(self, up: Uploader, plan: BatchPlan, pages: dict[str, Any], i: int, q: int) -> StepContext:
         """The host half of drafter sub-step `i`: q tokens for each sampled row of `plan`, over the auxiliary state
         groups; positions, lengths and write indices are derived on the device when the drafter asks for it."""
         if i >= self.substeps[0] or q > self.substeps[1]:
             raise RuntimeError(f"sub-step {i} of width {q}: beyond what the drafter declared ({self.substeps})")
-        up, f = self.uploader, f"sub{i}."
+        f = f"sub{i}."
         slots = plan.slots[plan.n_logits > 0]
         rows, tokens = len(slots), len(slots) * q
         sub_plan = host_plan(plan.step, slots, plan.start_upper[plan.n_logits > 0] + int(plan.n_query.max()) + q
@@ -561,7 +567,7 @@ class Executor:
         positions, lengths and write indices — all into static buffers, so this runs inside a captured graph too."""
         dev, prep = ctx.batch.dev, ctx.prep
         # A row's first input is the device's last token where it holds it (the other rows write the scratch element).
-        self._input_ids[prep.input_at] = self.last_token[dev.slots]
+        prep.inputs[prep.input_at] = self.last_token[dev.slots]
         if prep.exact is None:
             self.num_computed[dev.slots] = prep.start
         else:
