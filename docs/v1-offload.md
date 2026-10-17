@@ -234,9 +234,9 @@ The store is built once per engine by its factory on the **root** build context,
 layer) get the same object and its pools are not namespaced (panel A-r2-11). It learns its classes from the units
 that bind to it: each expert stack adopts its `QTensor` without copying (the GGUF source maps the file) and hands the
 store its layout and S4 extents; under the offload store the gate / up merge records per-expert extent pairs (gate
-rows, then up rows) and never concatenates or moves the stacks (a `merge` member of the store: the resident store concatenates as
-today, so `MoE.finalize_weights` has no branch) (today's merge reads and copies them to the device,
-which would read ≈ 12 GB on the vehicle at startup, panel A-r4-3). At S0's `before_materialize` — after every model, aux models included, is built and
+rows, then up rows) and never concatenates or moves the stacks — the merge is a member of the store, so the
+resident store concatenates as today and `MoE.finalize_weights` has no branch (today's merge would read ≈ 12 GB of the
+vehicle's experts and copy them to the device at startup, panel A-r4-3). At S0's `before_materialize` — after every model, aux models included, is built and
 loaded, before the first materialize — the store forms its classes (role, ggml type, shape), requests its VRAM fill
 pools and host pools, and fills the host pools from the extents with `O_DIRECT` reads (panel A-r3-2, B-r3-2: no
 architecture keys in std, and per-tensor types are known only from the tensor table). The startup memory profile materializes minimum pools and runs a worst step, then the
