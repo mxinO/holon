@@ -1369,10 +1369,9 @@ Evidence (`spikes/x6_cpu/README.md`), RTX A5000, the vehicle at 25% cached, the 
   trace byte-identical to `std.moe@1` all-resident under F11 (2,115 admissions, the replay's residency at every step,
   the device's map the mirror's) and under F1. The CPU and GPU engine tests run lfu and static at a quarter in RAM,
   bitwise resident, and F5b with exclusive tiers (both workers clean, bounded).
-- **Decode** (batch 1, 512 tokens, the prompt set's first prompt, ×2 interleaved arms of 3 rounds): RAM holding every
-  expert 70.9 / 71.2 tok/s; RAM half (12 GiB) 18.6 / 17.5 (0.25×); RAM 37.5% (10 GiB) 11.3 / 11.6 (0.16×) — RAM-short
-  is a fit mode (D10's 1.9–8.3×), here bound by the file's network reads. **F11 stays the default where RAM holds every
-  expert** (the default `moe.tiers` is the pinned tier alone).
+- **Decode**: measured (spike README, evidence record) but read from a network filesystem, so not quoted here (§13):
+  F9 is re-measured on a desktop NVMe. **F11 stays the default where RAM holds every expert** (the default `moe.tiers`
+  is the pinned tier alone).
 
 Decided while building, against the text above:
 - **No lending and no ring under exclusive tiers**: a lent expert would need a demotion first (not built); the store
