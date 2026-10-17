@@ -1,6 +1,6 @@
 # v1 — expert and KV offload: MoE models larger than VRAM on one consumer GPU
 
-Status: **draft rev 1** (2026-10-17), for the panel. No code yet. Evidence base: the local research note
+Status: **draft rev 1** (2026-10-17; Project Maya folded in from R §3.1b), for the panel. No code yet. Evidence base: the local research note
 `docs/brainstorm/v1-offload-research.md` (not published; "R §n" below), which cites every reference engine by
 `file:line` in its local clone.
 
@@ -21,14 +21,15 @@ models are model milestones of their own (D2); this document lists only what off
 | | Strata (primary) | Project Maya (GLM) | FreeToken | llama.cpp |
 |---|---|---|---|---|
 | Models | Qwen3.8-Flash-Next only | GLM-5.3-Flash only | many | many |
-| Expert tiers | VRAM cache over all experts pinned in RAM (or mmap of the files when RAM is short) | VRAM / RAM / NVMe | VRAM cache over pinned RAM | static: per-layer CPU or GPU; new `--moe-cache-mib` LRU |
-| Residency | seeded from a routing profile; every 4 windows up to 96 swaps by decayed routing counts (×0.7, gain ≥ 1.5) | three-tier, adapts while chatting (R §3.1b) | in-graph timestamp LRU, fetch on miss | fixed (LRU in the new cache) |
-| Decode miss | split: a share over PCIe to the GPU, the rest computed by the CPU in RAM, through in-graph spin waits; share `L/(L+1.85R)` refit from live timings | Strata's, plus NVMe reads | offload / CPU / hybrid by a bandwidth benchmark | CPU computes |
-| Prefill | non-resident experts stream through a ring, next layer during this layer's attention; a CPU share for small chunks | Strata's | every expert of the layer through a double buffer, evicting cached slots | selected experts uploaded for batches ≥ 32 |
-| KV / conversation state | RAM checkpoints, parked conversations, session files, KV streaming for sparse attention | (R §3.1b) | none | `--cache-ram` prompt blobs |
-| Output-changing defaults | route tail skip (missed low-rank experts dropped); timing-driven splits; CPU/GPU rounding changes with placement | expert skipping (R §3.1b) | — | — |
+| Expert tiers | VRAM cache over all experts pinned in RAM (or mmap of the files when RAM is short) | exclusive VRAM / pinned RAM / NVMe: each expert in exactly one; RAM sized from free RAM less 6 GB | VRAM cache over pinned RAM | static: per-layer CPU or GPU; new `--moe-cache-mib` LRU |
+| Residency | seeded from a routing profile; every 4 windows up to 96 swaps by decayed routing counts (×0.7, gain ≥ 1.5) | profile warm start; the device promotes a RAM or disk miss into one of 3 spare slots per layer; every step refills the spares by evicting the layer's LRU expert, demoted to RAM if hotter than RAM's victim, else disk-only | in-graph timestamp LRU, fetch on miss | fixed (LRU in the new cache) |
+| Decode miss | split: a share over PCIe to the GPU, the rest computed by the CPU in RAM, through in-graph spin waits; share `L/(L+1.85R)` refit from live timings | RAM: the CPU takes the coldest by count (a per-miss-count table, re-timed live), the GPU gathers the rest zero-copy; disk: the GPU waits while a host thread reads the expert from the GGUF with `O_DIRECT` | offload / CPU / hybrid by a bandwidth benchmark | CPU computes |
+| Prefill | non-resident experts stream through a ring, next layer during this layer's attention; a CPU share for small chunks | chunks up to 32K, buffers borrowed from the expert pool's tail; resident experts in place, routed misses staged, the next layer's likely RAM experts prestaged during attention | every expert of the layer through a double buffer, evicting cached slots | selected experts uploaded for batches ≥ 32 |
+| KV / conversation state | RAM checkpoints, parked conversations, session files, KV streaming for sparse attention | Strata's (4-position KV pages) | none | `--cache-ram` prompt blobs |
+| Output-changing defaults | route tail skip (missed low-rank experts dropped); timing-driven splits; CPU/GPU rounding changes with placement | no approximation by default (three expert-skip options, off); runs differ by timing (17 of 70 stream pairs identical by default, 70 of 70 with its fixed-placement recipe); MTP off on one GPU | — | — |
 
-Both leaders are single-model engines with large switch sets (Strata: 529 `STRATA_*` variables; R §3.1). Holon's
+Both leaders are single-model engines with large switch sets (Strata: 529 `STRATA_*` variables; R §3.1). Maya's
+CPU rows are checked bit-identical to ggml-cpu's dot product at first use, which fixes Strata's #152. Holon's
 offering is the same strategy set as plugins over any MoE model plugin, exact by default, with reproducible
 placement.
 
@@ -37,7 +38,7 @@ placement.
 Run MoE models whose experts do not fit in VRAM on one consumer GPU, at least as fast as the strongest
 single-model engine for that model, with every default strategy exact or bounded and runs reproducible.
 
-1. **Strategies are plugins** (D3). Shipped: ≥ 3 placement policies (static, profile + decayed counts, LRU),
+1. **Strategies are plugins** (D3). Shipped: ≥ 4 placement policies (static, profile + decayed counts, LRU, promote-on-fetch),
    2 miss paths (CPU compute, PCIe fetch) composed by a split, ≥ 2 KV tier plugins (pinned RAM, SSD), and one
    `approx` strategy (route tail skip, opt-in). Proof that a new strategy is one plugin: the second placement
    policy, the second miss path and the `approx` strategy each land in a commit whose diff touches only its own
@@ -58,8 +59,7 @@ single-model engine for that model, with every default strategy exact or bounded
    |---|---|---|---|
    | Strata, exact switches (`STRATA_ROUTE_TAIL_SKIP=0 STRATA_IQ_MT_MIN=1`) | Flash-Next IQ2_XS / IQ3_XXS on RTX 5080; IQ3_S on RTX 5090 | ≥ 1.0× | ≥ 0.9× |
    | Strata, defaults | same | ≥ 0.85× exact; ≥ 1.0× with Holon's `approx` tail skip | ≥ 0.9× |
-   | Project Maya, exact settings (R §3.1b) | GLM-5.3-Flash Maya-S on RTX 5090 | ≥ 1.0× | ≥ 0.9× |
-   | Project Maya, defaults | same | ≥ 0.85× exact; ≥ 1.0× with `approx` | ≥ 0.9× |
+   | Project Maya, defaults (no approximation; R §3.1b) and its fixed-placement recipe | GLM-5.3-Flash Maya-S on RTX 5090 | ≥ 1.0× | ≥ 0.9× |
    | FreeToken, llama.cpp (`--fit`, tuned `--n-cpu-moe`, `--moe-cache-mib`) | Qwen3.5-35B-A3B Q4_K_M on RTX 5080 (development gate) and both targets | ≥ 1.0× FreeToken; ≥ 1.5× llama.cpp | ≥ 1.0× |
 
    Plan §9's kill line applies: below 0.8× of the reference on decode after a performance pass, the offload path is
@@ -90,16 +90,17 @@ worker), **std** library:
 | F2 | Profile-seeded expert cache: VRAM slots filled from a ranked (layer, expert) profile | Strata X1 | H + D | on |
 | F3 | Adaptive swaps by decayed routing counts, on a fixed cadence of committed steps | Strata X2 | H | on |
 | F4 | LRU fetch-on-miss, victims chosen in the graph | FreeToken, llama.cpp cache | D | comparison arm |
-| F5 | CPU/PCIe split of decode misses through the in-graph handshake | Strata X4–X5 | D + C + H | on |
-| F6 | CPU expert kernels, misses of a verify window or batch grouped per expert | Strata X6–X7 | C | on |
+| F5 | CPU/PCIe split of decode misses through the in-graph handshake; which misses go to the CPU is the provider's rule (Strata: the last in routing order; Maya: the coldest by count) | Strata X4–X5, Maya G2 | D + C + H | on |
+| F6 | CPU expert kernels, misses of a verify window or batch grouped per expert, bitwise per token | Strata X6–X7, Maya G9 | C | on |
 | F7 | Prefill: non-resident experts stream through a ring, next layer during this layer | Strata X8 | D + std | on |
 | F8 | Prefill CPU share for small chunks | Strata X9 | C + H | only if step 0 shows ≥ 15% |
-| F9 | SSD expert tier under the RAM tier | Maya, Strata's low-RAM mode | std + H | on when RAM is short |
+| F9 | SSD expert tier under the RAM tier: `O_DIRECT` reads of the expert's bytes in the GGUF (no mmap, no copy of the file) | Maya G4–G5, Strata's low-RAM mode | std + C + H | on when RAM is short |
+| F10 | Promote-on-fetch: a fetched miss lands in one of a few spare slots per layer and becomes resident; each step's boundary refills the spares by evicting the layer's LRU (or least-counted) expert | Maya G1–G3 | D + H | comparison arm; default for models whose experts are large (GLM) if M6 says so |
 | K1 | Recurrent checkpoints demoted to a pinned-RAM tier | Strata C1 | std + H | on |
 | K2 | KV pages demoted to a pinned-RAM tier (parking; swap on preemption comes free) | Strata C2, llama.cpp `--cache-ram`, vLLM, HiCache | std + H | on |
 | K3 | SSD tier under K1/K2, surviving restarts | Strata C3, LMCache | std + H | opt-in |
 | K4 | KV streaming for sparse-attention mixers: full KV in RAM, a CLOCK cache of pages in VRAM | Strata C4 | D + std | with the model milestones |
-| A1 | Route tail skip (approx) | Strata A1 (default there) | H + D | off; `approx` |
+| A1 | Route tail skip and Maya's miss / disk skips (approx) | Strata A1 (default there), Maya AG1–AG3 (off there) | H + D | off; `approx` |
 
 Reason: Strata is where users are (26k stars in three weeks) and its set is complete; FreeToken's and llama.cpp's
 strategies are degenerate cases (F4, F1). Every strategy that changes outputs is an opt-in `approx` plugin (D4).
@@ -110,8 +111,9 @@ strategies are degenerate cases (F4, F1). Every strategy that changes outputs is
   Q8_0 elsewhere; Holon's `kernels.ggml_cuda` already has all of them).
 - Both are new architectures, built as model milestones in parallel with this one: Flash-Next needs QSA sparse
   attention with its indexer, the PLE n-gram table (28.8 GB, read a few rows per token from SSD), hyper-connections
-  and MTP; GLM-5.3-Flash needs MLA with the DSA indexer (top-2048), KDA linear attention, mHC (Sinkhorn
-  hyper-connections) and sigmoid `noaux_tc` routing. They share the indexer, hyper-connection and linear-attention
+  and MTP; GLM-5.3-Flash (45 layers: 11 MLA + DSA indexer (top-2048), 34 KDA; 288 experts top-8 + 1 shared, the first 3
+  layers dense) needs those mixers, mHC (Sinkhorn hyper-connections), a sigmoid `noaux_tc` router (`moe_topk@1` is
+  softmax only) and the SwiGLU clamp (10) in `linear_experts@2` — new kernel facts, not core. They share the indexer, hyper-connection and linear-attention
   patterns, so the second reuses the first's std units. GLM pulls DSA forward from plan v2.
 - **Development vehicle: Qwen3.5-35B-A3B Q4_K_M** (≈ 21 GB) on the RTX 5080 — its plugin exists, so offload work
   starts now; it is the development gate (acceptance 3, last row), not a headline target.
@@ -174,14 +176,17 @@ library). GPU work between signal and wait (hit GEMMs, the PCIe share) hides the
 ggml-cpu (MIT) at the same pin as `kernels.ggml_cuda` and runs `vec_dot` over GGUF blocks in place; it covers every
 type the targets use. Multi-token kernels for i-quants (one weight decode, up to 8 tokens) are borrowed from Strata
 (MIT, design §5.6) once M3 shows the gain. ISA tiers are kernel constraints (`Constraint.cpu_isa`, re-added), not
-ad hoc gates. Stretch: a CPU kernel that consumes the GPU's own q8_1 activations and reduces in mmvq's order —
+ad hoc gates. Faster CPU rows are admitted only bitwise equal to ggml-cpu's per-token dot (Maya checks this at first
+use; Holon checks it in L0 and keeps the check at load). Stretch: a CPU kernel that consumes the GPU's own q8_1 activations and reduces in mmvq's order —
 integer dot products are exact, so only the f32 reduction order must match; if M4 shows it bitwise at < 1.3× the
 ggml kernel's cost, residency policies become `exact`.
 
 **D8 — Prefill streams only what is missing.** From a chunk-coverage threshold up (M6; Strata uses 1024 tokens),
 layer l+1's non-resident experts stream through a ring on a copy stream while layer l runs; below it, routed-only
-staging. Resident experts are never re-sent and the ring does not evict cache slots (FreeToken's two prefill flaws,
-R §3.2). Prefill stays eager (design §7.4).
+staging. Resident experts are never re-sent (FreeToken's flaw, R §3.2). The ring's slots are lent by the offload store from
+its own arena's tail and refilled from the RAM tier after the prompt (Strata, Maya); that is plugin-internal, the
+arena being the store's pool. Maya's prestage of the next layer's likely RAM experts during attention is exact (it
+only moves bytes) and an F7 option measured in step 4. Prefill stays eager (design §7.4).
 
 **D9 — VRAM: experts fill what is left above a KV floor.** A plugin pool may declare `fill=True`: after weights,
 workspaces, graphs, slot state and fixed plugin pools, a deployment `kv_min_tokens` floor goes to paged KV, then the
@@ -191,22 +196,26 @@ defaults to `max_model_len` for one sequence, so long contexts still fit; the lo
 **D10 — Host tiers are std, accounted by the core.** Pinned host pools with a device alias are a core allocation
 (D9's ledger, S2); what lives in them — all experts, a hot subset over an SSD tier (F9), demoted KV pages and
 checkpoints (K1–K3) — is std and plugins. The RAM tier for experts holds all experts when they fit the host budget;
-otherwise the hottest by the profile, with F9 serving the rest from the GGUF files (pread / O_DIRECT, staged into
-pinned memory, R §3.1b for Maya's method).
+otherwise the hottest by the profile, with F9 serving the rest from the GGUF files (`O_DIRECT` reads of each expert's
+byte ranges into pinned host slots, Maya's method, R §3.1b). It needs the GGUF weight source to expose each expert
+slice's file offset and length (a std change, `std.weights.gguf`).
 
 **D11 — No predictive prefetch in the first set.** Strata's Foresight measured 0.91–1.00× on every box (R §3.1 E1).
 Re-open only if M6 shows next-layer recall ≥ 85% and M1 shows ≥ 30% idle PCIe time during decode.
 
 **D12 — Batching is first-class.** Misses of all rows in a step (decode rows, verify windows, mixed steps) are
 grouped per expert before the CPU and PCIe paths, so a miss is paid once per step. Strata turns batching off by
-default and its tail skip is off with batches; Holon's `max_seqs` stays as the lock sets it.
+default and its tail skip is off with batches; Maya batches up to 8 but sends each request's routes through the tiers
+one after another. Holon's `max_seqs` stays as the lock sets it.
 
 **D13 — VMM elastic pools are the second wave.** `Pool` resize `vmm` (stable base, a device capacity scalar,
 segment map/unmap through `quiesce`), so KV grows into the expert arena and shrinks back without recapturing graphs
 (Strata X3). It lands after F1–F9 and K1–K2, in this milestone if time allows, else as its own.
 
 **D14 — Comparison method.** Same card, same GGUF, same context and KV dtype, same host, drafting matched (MTP on
-for both or off for both). Every reference runs both its defaults and its exact settings. Metrics follow Strata's
+for both or off for both). Drafting is placement-aware: on one offloaded GPU MTP loses on GLM (consecutive tokens
+share about 1 of 8 experts per layer, so a 2-token verify costs about two tokens of PCIe; Maya turns it off), while
+Strata gains 1.6–1.8× from it on Flash-Next; the lock decides per (model, class) by measurement. Every reference runs both its defaults and its exact settings. Metrics follow Strata's
 tables: decode tok/s at 1K / 4K / 32K / 128K context (256 tokens, greedy), prefill at 1K / 4K / 32K, the agent
 trace (TTFT / TPOT p50 and p99, prefix reuse, wall time), expert hit rate and CPU / PCIe shares, peak VRAM and RAM,
 quality (L2 KL, top-1, ΔPPL against the Q8_0 or bf16 reference), run-to-run identity. Reference engines are built in
@@ -242,7 +251,8 @@ Each is the smallest general shape; none names experts, KV or formats. Each is p
 | S4 | **A pool that fills the rest** | fixed plugin pools at `pref_units` → `BuildCtx.pool(…, fill=True)` joins the split after a deployment `kv_min_tokens` floor (D9) | a toy fill pool and paged KV split a budget as specified |
 | S5 | **Prefix-index tiers** | drop-only LRU → `Payload.tier` and `HitLen.cost` restored; eviction may **demote** a payload or page run to a `kv_tier` plugin (`store(units) → handle`, `load(handle, dst) → Future`, `drop(handle)`); a hit below VRAM puts the request in `BLOCKED(future)` with destination units reserved and the future cancellable (abort, preemption) | a toy tier with a delayed future: the request waits, cancel releases the units, the resumed output equals the VRAM hit |
 
-Not core: the offload store, `TieredStore`, `DeviceResolver`, residency maps, placement policies, calibration, route
+An SSD miss inside a graph (F9) is an S1 CPU task: the worker reads the expert into a pinned host slot and writes the
+slot's address into mapped memory before answering, so the graph stays replayable. Not core: the offload store, `TieredStore`, `DeviceResolver`, residency maps, placement policies, calibration, route
 traces and profiles, the ring, checkpoint policies, the tiers themselves (design §6.5). Restored slot names
 (`placement_policy`, `kv_tier`, `checkpoint_policy`, `eviction_policy`) and `Constraint.cpu_isa` are ABI listing
 additions with their manifests' `core_abi` floor raised to 1.2.
@@ -305,11 +315,12 @@ Each plant must change only the configuration that uses its path (the all-reside
 | Qwen3.5-35B-A3B Q4_K_M | RTX 5080 16 GB | ≈ 2 GB | ≈ 19.5 GB (10,240 experts, ≈ 1.9 MB) | ≈ 11 GB ≈ 55% | ≈ 20 GB |
 | Qwen3.8-Flash-Next IQ2_XS | RTX 5080 16 GB | ≈ 6 GB | ≈ 36 GB (24,576 × ≈ 1.46 MB) | ≈ 7 GB ≈ 20% | ≈ 36 GB, plus the 28.8 GB PLE table on SSD |
 | Qwen3.8-Flash-Next IQ3_S | RTX 5090 32 GB | ≈ 6 GB | ≈ 50 GB | ≈ 22 GB ≈ 44% | ≈ 50 GB |
-| GLM-5.3-Flash Maya-S | RTX 5090 32 GB | ≈ 6 GB | ≈ 92 GB (12,096 × ≈ 7.6 MB) | ≈ 22 GB ≈ 24% | ≈ 92 GB, or the hottest part with F9 |
+| GLM-5.3-Flash Maya-S | RTX 5090 32 GB | ≈ 6 GB | ≈ 86 GB (12,096 × ≈ 7.1 MB) | ≈ 22 GB ≈ 26% | ≈ 86 GB, or the hottest part with F9 |
 
 Expert cache = card − non-expert weights − KV floor (≈ 1 GB at 32K, 8-bit KV) − graphs and workspaces (≈ 1.5 GB).
-GLM's routed bytes per token are ≈ 2.6 GB (8 × 42 layers × 7.6 MB), so its decode is bound by the miss path even at
-an 80% hit rate; it is the case F9 and the split are built for. Host RAM per desktop class is checked before
+GLM's routed bytes per token are ≈ 2.4 GB on Maya-S (R §3.1b), so its decode is bound by the miss path even at a
+90% hit rate; it is the case F9, F10 and the split are built for. Its KV is small (≈ 11 KiB per token, FP16 latent)
+and its KDA state ≈ 146 MiB per sequence. Host RAM per desktop class is checked before
 scheduling (not recorded here).
 
 ## 8. Step 0 — measure before freezing
