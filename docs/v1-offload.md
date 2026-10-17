@@ -783,3 +783,35 @@ re-added slots; Movers are S2 MemOps); §6.1 (the fill step and pinned split in 
 (per-layer ready events and layer-wise loading stay planned; prefix tiers move to milestone K); §7.10 (adaptive
 placement may run in snapshots when the consumer is placement-invariant); §9's expert-cache row (no VMM in the first
 wave). Design is updated with X's code, as M0.7 did.
+
+## 14. Step 2 as built (2026-10-17)
+
+`std.tiered` (TieredStore, ResidencyMap, the PlacementPolicy and Tier protocols, DeviceResolver, the pinned RAM tier
+`std.tiered.pinned@1`, the static policy `std.tiered.static@1`, the `O_DIRECT` extent reader), `std.moe.offload@1`
+bound by `moe.store` (absent: `std.moe.resident@1`, today's path), the contracts `moe_resolve@1` and
+`expert_fetch@1` (oracles in `std.moe.reference`, CPU providers in `testing.ref_kernels`, CUDA in the new
+`kernels.expert_io`), F1 and F5a. Evidence: `spikes/x2_store/README.md`, `evidence/x2_store_rtx-a5000_2026-10-17.json`
+— on the A5000 every fit (all, fill, 47%, 25%) is snapshot-identical to `std.moe@1` all-resident, run-identical ×3 at
+25%, with the unpatched ggml kernels (no stream-k at these shapes on sm_86); the offload path costs +0.20 ms per
+decode token with every expert cached; `mmap` + `cudaHostRegister` gathers at `cudaHostAlloc`'s rate (0.94–1.01×,
+noise between processes), huge pages or not.
+
+Decided while building, against the text above:
+- **Staging is min(E, k × a pass's tokens), a pass being `std.moe@1`'s 512-token chunk** — E for any real config
+  (128 per class on the vehicle, ≈ 0.54 GB with the null slots, not D5's ≈ 0.28 GB): prefill uses routed-only
+  staging until step 3's ring borrowing; then staging shrinks to D5's decode-sized count.
+- **One VRAM pool holds every class's arena.** The policy seeds whole experts within its bytes (and each class's
+  cap), then each class's arena — null, staging, the seeded cache slots — is laid out in it; per-class fill pools
+  grow one after another and starved the later classes. `moe.offload.cache` (`<class>=<slots or fraction>`, `*` for
+  the rest) therefore **caps** a class's cache slots and pins the pool's size; the seed decides each arena's (with
+  `static`, deterministically). Kernels over an arena are bound with `experts` = the class's largest arena (every
+  piece cached); a call's arena may hold fewer slots — `linear_experts@2`'s doc says so, every provider honours it.
+- **Row kinds come from the step's plan in `before_launch`:** a mixed step's leading rows and rows whose every query
+  token has logits are decode / verify, the rest prefill, tokens past them graph padding — so a one-token last
+  prompt chunk counts as decode outside mixed steps (D4 says prefill never counts; step 3 settles it with F11's
+  parity oracle). Counts are zeroed by a `before_launch` write, not in the graph.
+- **Not yet:** the delta log (its producer is step 3's device-owned resolvers), edits after the seed (two-phase
+  edits land with `profile_decay`; the store refuses them), an auxiliary model's experts through the store (an MTP
+  layer needs its sub-steps' row kinds; refused at build), `lfu` as the default (step 3; `static` until then).
+- The `Tier` protocol's members take the class name (a tier holds pieces of every class); the profile is JSON
+  `{"counts": [[per expert] per layer]}` (`moe.placement.profile`).
