@@ -63,12 +63,10 @@ class Lent:
         s.stage_tab.copy_(torch.where(ring_ok, graphed[None], lent))
         if self.mode == "ring":
             self._ring(res, classes, want // BUFFERS, ring_ok)
-            if s.ring_copy == "dma":                                         # the step's one host sync
+            if s.ring_copy == "dma":            # the step's one host sync: the second copy waits, after the first
                 fetch, n = s.ring_host
                 fetch.copy_(s.ring_fetch, non_blocking=True)
-                n.copy_(s.ring_n, non_blocking=True)
-                if res.is_cuda:
-                    torch.cuda.current_stream(res.device).synchronize()
+                n.copy_(s.ring_n)
             for g in range(min(BUFFERS, groups)):
                 self._start(g)
         s.stage_width.copy_(torch.where(ring_ok, s.staging, s.prefill).view(1))

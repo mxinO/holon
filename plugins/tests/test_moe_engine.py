@@ -4,6 +4,7 @@ same (dequantized) weights (docs/m02-moe.md, step 1)."""
 import contextlib
 import json
 import pathlib
+import warnings
 from unittest import mock
 
 import gguf
@@ -472,11 +473,12 @@ def gpu_moe(tmp_path_factory):
 
 
 @contextlib.contextmanager
-def _no_host_sync(cls, *methods):
-    """`cls`'s methods raise on any operation that waits for the device (a borrowing step's lending and ring)."""
+def _no_host_sync(cls, *methods, mode="error"):
+    """`cls`'s methods raise on any operation that waits for the device (a borrowing step's lending and ring), or
+    (`mode` "warn") warn of each."""
     def strict(fn):
         def run(*args, **kw):
-            torch.cuda.set_sync_debug_mode("error")
+            torch.cuda.set_sync_debug_mode(mode)
             try:
                 return fn(*args, **kw)
             finally:
@@ -519,19 +521,12 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query.sum()) * 2 * 4 * bool(
         (step.n_query == step.n_logits).all()), int(t["counts"].sum()))) or commit(step, t)   # decode, verify steps
-    syncs, sync = [], torch.cuda.Stream.synchronize               # "dma": one explicit sync per streaming step
-
-    def counted(stream):                                           # the one sync allowed: counted, not raised
-        syncs.append(stream)
-        mode = torch.cuda.get_sync_debug_mode()
-        torch.cuda.set_sync_debug_mode("default")
-        try:
-            return sync(stream)
-        finally:
-            torch.cuda.set_sync_debug_mode(mode)
-    with (route_dump(engine) as trace, _no_host_sync(Lent, "begin", "sources", "done"),
-          mock.patch.object(torch.cuda.Stream, "synchronize", counted)):
+    mode = "warn" if ring == "dma" else "error"                   # "dma": one sync per streaming step, counted
+    with (route_dump(engine) as trace, warnings.catch_warnings(record=True) as syncs,
+          _no_host_sync(Lent, "begin", "sources", "done", mode=mode)):
+        warnings.simplefilter("always")
         assert _served(engine, prompts) == want
+    syncs = [w for w in syncs if "called a synchronizing" in str(w.message)]
     assert len(syncs) == (store.borrowed["ring"] if ring == "dma" else 0), (len(syncs), store.borrowed)
     assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
     assert all(a == b for a, b in routed) and max(routed)[0] > 8      # top-2 x 4 layers; graph padding never counts
