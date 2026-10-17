@@ -3652,6 +3652,413 @@
    "share_25pct": 0.623,
    "ms_per_token_47pct": 0.06,
    "ms_per_token_25pct": 0.09
+  },
+  "ring_copy": {
+   "commit": "1e3bd15",
+   "exactness_and_parity": [
+    {
+     "name": "lfu25_dma",
+     "cache": "*=0.25",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "snapshot",
+     "run": 0,
+     "options": {
+      "copy": "dma"
+     },
+     "reference": "resident",
+     "build_s": 25.9,
+     "run_s": 30.9,
+     "peak_misses": 89,
+     "steps": 67,
+     "staging": 128,
+     "borrowed": {
+      "ring": 1,
+      "stage": 0
+     },
+     "admissions": 2252,
+     "records": 2672,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     },
+     "parity": {
+      "steps": 67,
+      "decode_steps": 64,
+      "borrowing_steps": 1,
+      "lends": 3,
+      "admissions": 2252,
+      "first_differing_step": null,
+      "device_is_mirror": true
+     },
+     "vs_resident": "identical"
+    },
+    {
+     "name": "lfu25_mixed_dma",
+     "cache": "*=0.25",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "decode",
+     "run": 0,
+     "options": {
+      "seqs": "8",
+      "chunk": "256",
+      "step": "512",
+      "copy": "dma"
+     },
+     "reference": "resident_decode_chunk256_seqs8_step512",
+     "build_s": 23.8,
+     "run_s": 90.7,
+     "peak_misses": 102,
+     "steps": 293,
+     "staging": 64,
+     "borrowed": {
+      "ring": 3,
+      "stage": 35
+     },
+     "admissions": 19773,
+     "records": 20193,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     },
+     "parity": {
+      "steps": 293,
+      "decode_steps": 290,
+      "borrowing_steps": 38,
+      "lends": 3,
+      "admissions": 19773,
+      "first_differing_step": null,
+      "device_is_mirror": true
+     },
+     "vs_resident": "identical"
+    },
+    {
+     "name": "lfu25_sm",
+     "cache": "*=0.25",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "snapshot",
+     "run": 0,
+     "options": {
+      "copy": "sm"
+     },
+     "reference": "resident",
+     "build_s": 31.5,
+     "run_s": 30.9,
+     "peak_misses": 89,
+     "steps": 67,
+     "staging": 128,
+     "borrowed": {
+      "ring": 1,
+      "stage": 0
+     },
+     "admissions": 2252,
+     "records": 2672,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     },
+     "parity": {
+      "steps": 67,
+      "decode_steps": 64,
+      "borrowing_steps": 1,
+      "lends": 3,
+      "admissions": 2252,
+      "first_differing_step": null,
+      "device_is_mirror": true
+     },
+     "vs_resident": "identical"
+    },
+    {
+     "name": "resident",
+     "cache": "resident",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "snapshot",
+     "run": 0,
+     "options": {},
+     "reference": "resident",
+     "build_s": 19.0,
+     "run_s": 4.0
+    },
+    {
+     "name": "resident_decode_chunk256_seqs8_step512",
+     "cache": "resident",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "decode",
+     "run": 0,
+     "options": {
+      "seqs": "8",
+      "chunk": "256",
+      "step": "512"
+     },
+     "reference": "resident_decode_chunk256_seqs8_step512",
+     "build_s": 5.8,
+     "run_s": 9.0
+    }
+   ],
+   "prefill_tok_s": {
+    "arms": [
+     {
+      "name": "sm25",
+      "cache": "*=0.25",
+      "ring_tokens": "512",
+      "ring_copy": "sm"
+     },
+     {
+      "name": "dma25",
+      "cache": "*=0.25",
+      "ring_tokens": "512",
+      "ring_copy": "dma"
+     },
+     {
+      "name": "sm47",
+      "cache": "*=0.47",
+      "ring_tokens": "512",
+      "ring_copy": "sm"
+     },
+     {
+      "name": "dma47",
+      "cache": "*=0.47",
+      "ring_tokens": "512",
+      "ring_copy": "dma"
+     }
+    ],
+    "rounds": 2,
+    "results": {
+     "sm25": {
+      "1024": {
+       "median_tok_s": 1681.8,
+       "runs": [
+        1673.0,
+        1679.8,
+        1683.9,
+        1687.4,
+        1688.5,
+        1674.9
+       ]
+      },
+      "4096": {
+       "median_tok_s": 4730.8,
+       "runs": [
+        4777.8,
+        4738.1,
+        4730.5,
+        4731.1,
+        4717.9,
+        4697.2
+       ]
+      }
+     },
+     "dma25": {
+      "1024": {
+       "median_tok_s": 1748.0,
+       "runs": [
+        1749.4,
+        1849.4,
+        1840.8,
+        1669.1,
+        1691.6,
+        1746.6
+       ]
+      },
+      "4096": {
+       "median_tok_s": 5304.4,
+       "runs": [
+        5161.8,
+        5388.6,
+        5474.7,
+        5285.0,
+        5053.1,
+        5323.8
+       ]
+      }
+     },
+     "sm47": {
+      "1024": {
+       "median_tok_s": 2351.8,
+       "runs": [
+        2350.9,
+        2354.0,
+        2356.0,
+        2350.1,
+        2352.8,
+        2325.8
+       ]
+      },
+      "4096": {
+       "median_tok_s": 4818.9,
+       "runs": [
+        4908.3,
+        4828.7,
+        4848.8,
+        4805.2,
+        4781.2,
+        4809.1
+       ]
+      }
+     },
+     "dma47": {
+      "1024": {
+       "median_tok_s": 2365.3,
+       "runs": [
+        1975.5,
+        2245.3,
+        2261.4,
+        2495.0,
+        2491.5,
+        2469.3
+       ]
+      },
+      "4096": {
+       "median_tok_s": 5492.7,
+       "runs": [
+        5553.8,
+        5501.9,
+        5480.1,
+        5519.7,
+        5470.3,
+        5483.5
+       ]
+      }
+     }
+    }
+   },
+   "tpot_agent_trace": {
+    "cache": "*=0.47",
+    "trace": "agent",
+    "max_seqs": 8,
+    "chunk_with_decode": 512,
+    "runs": [
+     {
+      "arm": "on",
+      "round": 0,
+      "requests": 126,
+      "steps": 3639,
+      "borrowed": {
+       "ring": 37,
+       "stage": 113
+      },
+      "tpot_ms": {
+       "p50": 92.75,
+       "p99": 127.44
+      },
+      "max_gap_ms": {
+       "p50": 343.7,
+       "p99": 490.9
+      },
+      "mixed_steps": 149
+     },
+     {
+      "arm": "dma",
+      "round": 0,
+      "requests": 126,
+      "steps": 3558,
+      "borrowed": {
+       "ring": 39,
+       "stage": 116
+      },
+      "tpot_ms": {
+       "p50": 96.42,
+       "p99": 136.05
+      },
+      "max_gap_ms": {
+       "p50": 368.5,
+       "p99": 589.3
+      },
+      "mixed_steps": 154
+     },
+     {
+      "arm": "off",
+      "round": 0,
+      "requests": 126,
+      "steps": 3632,
+      "borrowed": {
+       "ring": 0,
+       "stage": 0
+      },
+      "tpot_ms": {
+       "p50": 92.89,
+       "p99": 121.84
+      },
+      "max_gap_ms": {
+       "p50": 337.3,
+       "p99": 537.9
+      },
+      "mixed_steps": 154
+     },
+     {
+      "arm": "off",
+      "round": 1,
+      "requests": 126,
+      "steps": 3655,
+      "borrowed": {
+       "ring": 0,
+       "stage": 0
+      },
+      "tpot_ms": {
+       "p50": 90.59,
+       "p99": 120.85
+      },
+      "max_gap_ms": {
+       "p50": 338.5,
+       "p99": 537.8
+      },
+      "mixed_steps": 151
+     },
+     {
+      "arm": "dma",
+      "round": 1,
+      "requests": 126,
+      "steps": 3595,
+      "borrowed": {
+       "ring": 37,
+       "stage": 117
+      },
+      "tpot_ms": {
+       "p50": 91.99,
+       "p99": 119.83
+      },
+      "max_gap_ms": {
+       "p50": 352.2,
+       "p99": 548.5
+      },
+      "mixed_steps": 155
+     },
+     {
+      "arm": "on",
+      "round": 1,
+      "requests": 126,
+      "steps": 3632,
+      "borrowed": {
+       "ring": 39,
+       "stage": 114
+      },
+      "tpot_ms": {
+       "p50": 92.65,
+       "p99": 125.34
+      },
+      "max_gap_ms": {
+       "p50": 336.2,
+       "p99": 522.7
+      },
+      "mixed_steps": 153
+     }
+    ]
+   }
   }
  }
 }

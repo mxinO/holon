@@ -217,3 +217,17 @@ addresses without a sync) cost ≈ 8–9% at 4K, where the pass is compute-bound
 
 **F11's cost with candidates** (`candidates.py`): 29.5% of batch-1 decode layer calls have candidates at 47%
 cached, 62.3% at 25% → ≈ 0.06 / 0.09 ms per token (the +0.04 above is all-cached).
+
+**Both ring-copy paths** (`moe.ring_copy`, `1e3bd15`; prefill median of 6 over 2 interleaved rounds, TPOT two rounds per
+arm on the agent trace at 47% cached):
+
+| | 1K, 25% / 47% (tok/s) | 4K, 25% / 47% (tok/s) | TPOT p99 (ms) | max gap p99 (ms) |
+|---|---|---|---|---|
+| `sm` (default: SM copies, no host sync) | 1,682 / 2,352 | 4,731 / 4,819 | 127.4 / 125.3 | 491 / 523 |
+| `dma` (copy engines, one sync per streaming step) | 1,748 / 2,365 | 5,304 / 5,493 | 136.1 / 119.8 | 589 / 549 |
+| borrowing off | — | — | 121.8 / 120.9 | 538 / 538 |
+
+Exactness at 25%: `sm` and `dma` both snapshot-identical to all-resident on the snapshot trace (2,252 admissions, F11
+equal to `replay` at every step, the map the mirror); `dma` also on mixed steps (19,773 admissions, 3 ring and 35
+staging borrowings).
+

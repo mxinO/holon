@@ -1095,6 +1095,19 @@ prompt-time admission (deferred, §13) is recorded there.
   - The return is the device's too, in the lend records' order (call, then expert id), which the host mirror
     replays at the commit (`ResidencyMap.commit(…, returned=True)`); a step is booked as borrowing when its forward
     borrows (a graphed step of one-token last chunks never does).
+- **Both ring-copy paths, one option** (`1e3bd15`, the coordinator's decision on the trade-off above):
+  `moe.ring_copy = sm | dma`. `sm` is the device lending above, its copies on a small kernel, no host sync; `dma`
+  keeps the same device lending and tables (spread lending, the need per class, the staging fallback, the mirror's
+  replay) and reads the copy list back once per streaming step — its one host sync (prefill steps are eager) — to copy
+  on copy engines (`cudaMemcpyBatchAsync` from the pinned host pool; `expert_prefetch@1` takes the list on the device
+  or on the host). Default `sm` until step 4 measures both on the 5080; the lock records the choice (a plugin
+  option). `tune` today pins decode kernels from a decode benchmark only: choosing `ring_copy` per card class needs a
+  prefill rate in it, step 4's. A5000, 25% / 47% cached (tok/s, median of 6): 1K 1,682 / 2,352 (sm) against
+  1,748 / 2,365 (dma), 4K 4,731 / 4,819 against 5,304 / 5,493 (dma +12–14% where the pass is compute-bound); TPOT p99
+  on the agent trace 127.4 / 125.3 ms (sm), 136.1 / 119.8 (dma), 121.8 / 120.9 (off) — within the rounds' spread.
+  Both paths snapshot-identical to all-resident at 25% and F11 equal to `replay` at every step (dma: the snapshot
+  trace and mixed steps; sm above); the GPU test runs `sm`'s lending under sync-debug errors and counts `dma`'s one
+  explicit sync per streaming step.
 - **F11's cost** (`4283bbf`): the +0.04 ms per token was all-cached; with candidates ≈ 0.06 ms at 47% and ≈ 0.09 ms
   at 25% (step 3a's bullet above).
 
