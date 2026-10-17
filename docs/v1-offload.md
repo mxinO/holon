@@ -1391,3 +1391,48 @@ Decided while building, against the text above:
 After merging steps 3c and 3d (the router-prepared q8_1 input and the fused residual add), the snapshot trace was
 re-run on the A5000: F11 at 25% and the RAM-capped F11 (half the pieces in RAM, 12 GiB) byte-identical to the new
 all-resident, F5b run-identical ×2 (the full suite: 1,445 passed).
+
+### Step 7 as built (2026-10-17): the held-out plugins (acceptance 1)
+
+After the tag `v1-offload-std-api`, three strategies landed as plugin-only commits (`spikes/x7_heldout/README.md`,
+`evidence/x7_heldout_rtx-a5000_2026-10-17.json`). Each diff against the tag touches only its plugin directories, its
+test file and registration lines — one entry point per plugin in `plugins/pyproject.toml` and the generated listing
+`plugins/contracts.txt` —; `check_core_diff.sh` is empty and no `core/` or `std/` path changed:
+
+| Commits | Plugin | Checks (RTX A5000, the vehicle) |
+|---|---|---|
+| `8ce3f2e`, review fixes `9226253` | **F10** `placement.promote@1` (contract `moe_resolve.promote@1`: oracle, CPU provider, `lend`, replay oracle) + its kernel plugin `kernels.promote` (CUDA) | L0 exact on CPU and CUDA; snapshot at 25% byte-identical to `std.moe@1` all-resident on 3 fresh engines (8,474 promotions each); a decode trace byte-identical and its residency the replay's at all 258 steps |
+| `53f4a74`, `c217918` | **A1** `transforms.tail_skip` (contract `moe_route_transform.tail_skip@1`: oracle = CPU provider, Triton on CUDA) | L0 exact; `approx`: L2 at a frozen 25% placement against the mmvq floor top-1 97.15% (floor 98.54%), KL p50 5.10e-4 / p99 1.43e-1, ΔPPL +1.01% ± 0.22% vs the floor — outside the exact budgets, as §6 expected (human gate, never a default lock); decode at 25% cached under F11 46.45 → 51.67 tok/s (+11.2%) |
+| `642a020`, `11ff061` | **Page-cache tier** `tiers.pagecache@1` (a `Tier`: `pread` extents with O_DIRECT off) | RAM-capped (`host_memory` 12 GiB, RAM half the pieces): snapshot byte-identical to all-resident under F11 and F1 |
+
+The step-7 section of this document is its own commit, outside the plugin-only rule (docs are not plugin code).
+
+Decided while building, against the text above:
+- **F10 has no host part.** D4 puts F10's spare refill in the host's apply ("host → device in the same apply as the
+  victim's unmap"); the std API cannot express it plugin-only — a device-owned policy may not edit, and no host edit
+  hands a slot to a device-owned region. The refill runs in the graph at the layer call's end (the M6 replay's step
+  boundary, no lag): the whole cache, spares included, is device-owned, so acceptance 1's "host and in-graph parts"
+  is met by the in-graph part alone. The std change that would give D4's form (and an exact mirror, below): a delta
+  record "b's slots pushed on the layer's empty stack" that `ResidencyMap.commit` replays outside borrowing steps (today
+  it pushes only a borrowing step's lent slots), or a host edit into a device-owned region's free list.
+- **The host mirror lags F10's spares.** A spare's owner is unmapped on the device without a record (none of the
+  delta log's records says "slot kept by the device"); the record comes when another expert takes the spare
+  (`(group, a, owner)`), so until then the mirror maps the owner at the spare's slots. Nothing in std reads those
+  entries (no host edits, lending picks only device-resident experts, exclusive tiers refuse F10); the judge's
+  `route_dump` reads the mirror, so under F10 its `mirrored` is false and its residency counts owners — F10's parity
+  check reads the device's map instead (the spike's `run.py`, the test).
+- **The spares start absent** and the first decode call's boundary sets them up by LRU, ties by expert id (M6 set
+  them up at the seed from the profile's coldest; the store zeroes a policy's state at the seed). An owner promoted
+  back takes its own spare unlogged and unfetched (no list holds a spare's slots, so its bytes are intact).
+- **F10's CUDA provider composes** two one-CTA kernels around the store's own `moe_resolve@1` launch; the CPU's share
+  (F5b) is taken from the misses left after promotion.
+- **F10 under exclusive tiers is refused** (no heat to rank RAM by, and its unlogged evictions would bypass
+  `moe_tiers@1`'s placement of victims), though D10's replay found F10's spares best in 4 of 9 RAM-short cells:
+  RAM-short F10 needs the std record above.
+- **A1's best rank is over the expert pass's rows**, graph padding and other requests included (the transform sees no
+  row kinds): a request's drops depend on its batch, as Strata's do (it turns the skip off with parallel slots); the
+  human gate's L2 ran at one request per step.
+- **The page-cache tier's own decisions:** every piece, no pinned or device memory, files opened buffered with
+  random-access advice. Its decode against `gguf_direct` is not claimed: the checkpoint sits on a network filesystem
+  whose client cache served both (16.5 tok/s each once warm).
+- **Not built:** ARC (the bonus).

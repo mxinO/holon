@@ -1,0 +1,306 @@
+{
+ "what": "docs/v1-offload.md step 7: held-out plugins (acceptance 1)",
+ "gpu": "RTX A5000",
+ "gpu_class": "rtx-a5000",
+ "model": "Qwen3-30B-A3B Q4_K_M (unsloth GGUF)",
+ "commit": "11ff061",
+ "torch": "2.11.0+cu130",
+ "commands": [
+  "python spikes/x7_heldout/run.py <model.gguf> <dir> '<name>|<runs>|<trace>|<options>' ...",
+  "python spikes/x7_heldout/l2.py <model.gguf> cand.safetensors '<options>'",
+  "python -m holon_judge compare --golden judge/goldens/qwen3-30b-a3b-q4_k_m/v1-fp32.safetensors --candidate cand.safetensors --floor judge/goldens/qwen3-30b-a3b-q4_k_m/v1-bfloat16-mmvq-floor.safetensors",
+  "python spikes/x6_cpu/decode.py <model.gguf> out.json '<arm>|<options>' ... --batch 1 --tokens 256 --depth 512 --rounds 3 --engine-args '--host-memory <bytes> --max-model-len 4096'"
+ ],
+ "runs": {
+  "pagecache-f11_0": {
+   "name": "pagecache-f11",
+   "trace": "snapshot",
+   "options": {
+    "moe.store": "std.moe.offload@1",
+    "moe.cache": "*=0.25",
+    "moe.ram": "*=0.5",
+    "moe.tiers": "std.tiered.pinned@1,tiers.pagecache@1"
+   },
+   "run": 0,
+   "host_memory": 12884901888,
+   "build_s": 38.4,
+   "run_s": 49.9,
+   "diff": null,
+   "steps": 67,
+   "admissions_logged": 2108,
+   "peak_misses": 96,
+   "borrowed": {
+    "ring": 0,
+    "stage": 0
+   },
+   "exclusive": true,
+   "tiers": [
+    "Pinned",
+    "PageCache"
+   ],
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "ram_per_class": {
+    "gate_up.q4_k.1536x2048": 3072,
+    "down.q6_k.2048x768": 1536,
+    "down.q4_k.2048x768": 1536
+   }
+  },
+  "pagecache-f1_0": {
+   "name": "pagecache-f1",
+   "trace": "snapshot",
+   "options": {
+    "moe.store": "std.moe.offload@1",
+    "moe.cache": "*=0.25",
+    "moe.ram": "*=0.5",
+    "moe.tiers": "std.tiered.pinned@1,tiers.pagecache@1",
+    "moe.placement": "std.tiered.static@1"
+   },
+   "run": 0,
+   "host_memory": 12884901888,
+   "build_s": 22.2,
+   "run_s": 64.9,
+   "diff": null,
+   "steps": 67,
+   "admissions_logged": 0,
+   "peak_misses": 96,
+   "borrowed": {
+    "ring": 0,
+    "stage": 0
+   },
+   "exclusive": true,
+   "tiers": [
+    "Pinned",
+    "PageCache"
+   ],
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "ram_per_class": {
+    "gate_up.q4_k.1536x2048": 3072,
+    "down.q6_k.2048x768": 1536,
+    "down.q4_k.2048x768": 1536
+   }
+  },
+  "promote25-parity_0": {
+   "name": "promote25-parity",
+   "trace": "parity",
+   "options": {
+    "moe.store": "std.moe.offload@1",
+    "moe.cache": "*=0.25",
+    "moe.placement": "placement.promote@1"
+   },
+   "run": 0,
+   "host_memory": 21474836480,
+   "build_s": 20.2,
+   "run_s": 77.7,
+   "diff": null,
+   "steps": 258,
+   "admissions_logged": 32798,
+   "peak_misses": 47,
+   "borrowed": {
+    "ring": 3,
+    "stage": 0
+   },
+   "exclusive": false,
+   "tiers": [
+    "Pinned"
+   ],
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "ram_per_class": {
+    "gate_up.q4_k.1536x2048": 6144,
+    "down.q6_k.2048x768": 3072,
+    "down.q4_k.2048x768": 3072
+   },
+   "parity": {
+    "steps": 258,
+    "decode_steps": 255,
+    "borrowing_steps": 3,
+    "promotions_logged": 32798,
+    "first_differing_step": null,
+    "mirror_is_device_but_owners": true
+   }
+  },
+  "promote25_0": {
+   "name": "promote25",
+   "trace": "snapshot",
+   "options": {
+    "moe.store": "std.moe.offload@1",
+    "moe.cache": "*=0.25",
+    "moe.placement": "placement.promote@1"
+   },
+   "run": 0,
+   "host_memory": 21474836480,
+   "build_s": 25.6,
+   "run_s": 32.9,
+   "diff": null,
+   "steps": 67,
+   "admissions_logged": 8474,
+   "peak_misses": 90,
+   "borrowed": {
+    "ring": 1,
+    "stage": 0
+   },
+   "exclusive": false,
+   "tiers": [
+    "Pinned"
+   ],
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "ram_per_class": {
+    "gate_up.q4_k.1536x2048": 6144,
+    "down.q6_k.2048x768": 3072,
+    "down.q4_k.2048x768": 3072
+   }
+  },
+  "promote25_1": {
+   "name": "promote25",
+   "trace": "snapshot",
+   "options": {
+    "moe.store": "std.moe.offload@1",
+    "moe.cache": "*=0.25",
+    "moe.placement": "placement.promote@1"
+   },
+   "run": 1,
+   "host_memory": 21474836480,
+   "build_s": 22.4,
+   "run_s": 32.9,
+   "diff": null,
+   "steps": 67,
+   "admissions_logged": 8474,
+   "peak_misses": 90,
+   "borrowed": {
+    "ring": 1,
+    "stage": 0
+   },
+   "exclusive": false,
+   "tiers": [
+    "Pinned"
+   ],
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "ram_per_class": {
+    "gate_up.q4_k.1536x2048": 6144,
+    "down.q6_k.2048x768": 3072,
+    "down.q4_k.2048x768": 3072
+   }
+  },
+  "promote25_2": {
+   "name": "promote25",
+   "trace": "snapshot",
+   "options": {
+    "moe.store": "std.moe.offload@1",
+    "moe.cache": "*=0.25",
+    "moe.placement": "placement.promote@1"
+   },
+   "run": 2,
+   "host_memory": 21474836480,
+   "build_s": 21.3,
+   "run_s": 32.9,
+   "diff": null,
+   "steps": 67,
+   "admissions_logged": 8474,
+   "peak_misses": 90,
+   "borrowed": {
+    "ring": 1,
+    "stage": 0
+   },
+   "exclusive": false,
+   "tiers": [
+    "Pinned"
+   ],
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "ram_per_class": {
+    "gate_up.q4_k.1536x2048": 6144,
+    "down.q6_k.2048x768": 3072,
+    "down.q4_k.2048x768": 3072
+   }
+  },
+  "resident-parity_0": {
+   "name": "resident-parity",
+   "trace": "parity",
+   "options": {},
+   "run": 0,
+   "host_memory": 0,
+   "build_s": 8.9,
+   "run_s": 9.1
+  },
+  "resident_0": {
+   "name": "resident",
+   "trace": "snapshot",
+   "options": {},
+   "run": 0,
+   "host_memory": 0,
+   "build_s": 10.3,
+   "run_s": 3.9
+  }
+ },
+ "a1_l2_compare": "L2 unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M bfloat16 vs float32 golden, prompts v1.jsonl\n                n    top-1 top-1 conf    KL p50    KL p99    KL max         \u0394PPL \u00b1 SE missing\noverall     32783  97.154%    98.100%  5.10e-04  1.43e-01  3.88e+00  +0.940% \u00b1 0.184%   5.92%\nfloor       32783  98.536%    99.321%  1.18e-04  3.98e-02  2.79e+00  -0.064% \u00b1 0.107%   3.43%\nvs floor                                                             +1.005% \u00b1 0.218%\nbudget            \u226598.286%            \u22642.35e-04 \u22647.95e-02                     \u22640.629%\nchat         8061  97.159%    98.094%  4.67e-04  1.21e-01  3.08e+00  +0.322% \u00b1 0.256%   4.96%\ncode         8930  97.245%    97.951%  2.78e-04  1.91e-01  3.35e+00  +0.690% \u00b1 0.127%   5.54%\nrecall       8849  96.214%    97.781%  2.56e-03  9.03e-02  1.39e+00  +1.481% \u00b1 0.216%   5.55%\nagent        6943  98.228%    98.693%  1.31e-06  2.16e-01  3.88e+00  +1.294% \u00b1 0.653%   8.02%\nFAIL: top-1 97.1540% < 98.2858%; KL p50 5.102e-04 > 2.352e-04; KL p99 1.431e-01 > 7.951e-02; |\u0394PPL vs floor| 1.005% > 0.629%\n",
+ "a1_decode": {
+  "f11": {
+   "tok_s": [
+    46.416896912304246,
+    46.47455008289305,
+    46.57865993575324,
+    46.30729251818328,
+    46.37616626553407,
+    46.54856310078971
+   ],
+   "median": 46.44572349759865
+  },
+  "f11+a1": {
+   "tok_s": [
+    52.780989804185076,
+    51.04783437269717,
+    51.76839816889683,
+    52.52458210510519,
+    51.05865961423715,
+    51.566601520539116
+   ],
+   "median": 51.66749984471797
+  }
+ },
+ "pagecache_decode": {
+  "direct": {
+   "tok_s": [
+    5.006547051836979,
+    5.0070368866090345,
+    5.127542008090358,
+    17.013291494049785,
+    13.730317304606428,
+    16.504500219817142
+   ],
+   "median": 9.428929656348393
+  },
+  "pagecache": {
+   "tok_s": [
+    16.598985090565264,
+    16.536110080242647,
+    16.62699961151005,
+    16.492032567842262,
+    16.517418099616098,
+    16.512555136723293
+   ],
+   "median": 16.526764089929372
+  }
+ }
+}
