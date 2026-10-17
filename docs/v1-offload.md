@@ -1,7 +1,8 @@
 # v1 — expert offload: MoE models larger than VRAM on one consumer GPU
 
 Status: **rev 4.2, panel-clean** (2026-10-17: all three reviewers report nothing remaining after four rounds); its
-parameters freeze when step 0's evidence lands. Rev 1 drew 52 findings (A 20, B 15, C 17), rev 2
+parameters freeze when step 0's evidence lands. Rev 4.3 applies M6's evidence (§13: the default policy is `lfu`); rev 4.4 its panel round (10 + 7 findings), panel-clean
+again on 2026-10-17. Rev 1 drew 52 findings (A 20, B 15, C 17), rev 2
 27 (A 11, B 8, C 8), rev 3 20 (A 8, B 7, C 5); §12 logs each and where it is answered. No code yet. Evidence base: the local research note
 `docs/brainstorm/v1-offload-research.md` (not published; "R §n"), which cites every reference engine by `file:line`
 in its local clone; Project Maya is R §3.1b.
@@ -46,15 +47,15 @@ Run MoE models whose experts do not fit in VRAM on one consumer GPU, as fast as 
 for that model, with exact defaults and reproducible runs.
 
 1. **Strategies are plugins** (D3, D16).
-   - Shipped in X: placement policies `static` (F1), `profile_decay` (F2–F3) and `lru` (F4); miss paths PCIe fetch
+   - Shipped in X: placement policies `lfu` (F11, the default by §8's rule), `static` (F1), `profile_decay` (F2–F3,
+     Strata parity) and `lru` (F4); miss paths PCIe fetch
      (F5a) and CPU compute (F5b) with a per-miss-count split; the SSD tier (F9); prefill streaming (F7).
    - **Held-out proof:** the std offload API is tagged at the end of step 3. After the tag, three strategies land as
      commits whose diff touches only their own plugin directory and tests (no core, no std diff; checked with the
      existing `check_core_diff.sh` and `git diff --stat`): **F10** promote-on-fetch (host and in-graph parts, the
      hardest case: its `moe_resolve` variant is a contract the plugin owns, with its own `reference.py` and CPU
      provider, D3), **A1** route tail skip (`approx`), and **a tier this document does not design** — the
-     mmap / page-cache low-RAM tier the research note ranks first among the extras (LFU or ARC from M6's replay as a
-     bonus).
+     mmap / page-cache low-RAM tier the research note ranks first among the extras (ARC as a bonus).
    - Every core seam (§4) is proven first with a toy plugin in `core/tests`.
 2. **Exactness** (D4, §6):
    - **every placement is exact on the GPU path:** with the CPU share off (the default unless D4's rule picks the
@@ -110,9 +111,10 @@ tensors or fp4 activations (NVFP4 `scale2`, MXFP4) — X offloads GGUF integer-q
 | # | Strategy | Reference | Class | X default |
 |---|---|---|---|---|
 | F1 | Static split: a frozen residency map | llama.cpp `--n-cpu-moe` | H | fallback without a profile |
-| F2 | Profile-seeded expert cache: VRAM slots filled from a ranked (layer, expert) profile | Strata X1, Maya G6 | H | on |
-| F3 | Adaptive swaps by decayed routing counts on a fixed cadence of committed steps | Strata X2 | H | on |
-| F4 | LRU fetch-on-miss, logical-step timestamps, victims chosen in the graph | FreeToken, llama.cpp cache | D + H | comparison arm |
+| F2 | Profile-seeded expert cache: VRAM slots filled from a ranked (layer, expert) profile — 4 slots per layer first, then the global ranking | Strata X1, Maya G6 | H | on (the warm start of every policy) |
+| F3 | Adaptive swaps by decayed routing counts on a fixed cadence of committed steps | Strata X2 | H | Strata-parity arm (its swap copies cost PCIe that Strata's CPU-heavy split leaves idle; 22–52% slower than F11 with F5a, §13) |
+| F4 | LRU fetch-on-miss, logical-step timestamps, victims chosen in the graph | FreeToken, llama.cpp cache | D + H | comparison arm (within 7% of F11) |
+| F11 | **Decayed-count admission on fetch** (`lfu`): per-(layer, expert) counts, +1 per routed decode entry, ×0.915 per decode step; a miss is gathered straight into the coldest resident slot the step does not need when its count is higher, else into staging; the cache is device-owned, the host only seeds it | M6 (§13) | D + H | **on** |
 | F5a | Misses fetched over PCIe by an in-graph zero-copy gather into staging slots | Strata X5 mode 2, FreeToken | D | on |
 | F5b | Misses computed by the CPU in RAM through the in-graph handshake; which misses go to the CPU is the provider's rule (Strata: last in routing order; Maya: coldest by count) | Strata X4–X6, Maya G2, G9 | D + C | by D4's rule |
 | F7 | Prefill: non-resident experts stream through a ring, next layer during this layer, when D8's time rule says so; else routed-only staging | Strata X8, Maya | D + std | on |
@@ -147,7 +149,7 @@ the step's routing counts and return **edits** (D4). Plugin kinds, all chosen by
 | Kind | Option (example) | Contract | Instances in X |
 |---|---|---|---|
 | expert store | `moe.store = "std.moe.offload@1"` (absent: resident) | a std unit `ctx.unit(Ref)` binds | resident, offload |
-| placement policy (host) | `moe.placement = "plugins.placement.profile_decay@1"` | `PlacementPolicy` protocol in `std.tiered`: `seed(profile, budget) → edits`, `after_commit(counts, view) → edits`, `device_state() → {name: spec}`, `resolve_variant: str | None` (the contract name; None = `moe_resolve@1`) | static, profile_decay, lru |
+| placement policy (host) | `moe.placement = "plugins.placement.profile_decay@1"` | `PlacementPolicy` protocol in `std.tiered`: `seed(profile, budget) → edits`, `after_commit(counts, view) → edits`, `device_state() → {name: spec}`, `resolve_variant: str | None` (the contract name; None = `moe_resolve@1`) | lfu (default), static, profile_decay, lru |
 | miss path (device + CPU) | kernel selection through facts | `moe_resolve@1` (or a variant contract a policy plugin owns), `expert_fetch@1`, `cpu_experts@1`, `moe_patch_rows@1` (§5) | fetch, CPU |
 | expert tier (host) | `moe.tiers = ["std.tiered.pinned@1", "std.tiered.gguf_direct@1"]` | `Tier` protocol in `std.tiered`: `capacity(class) → slots`, `admit(expert, slot)`, `evict(expert)`, `device_readable: bool`, `read(expert) → descriptor` (`host_slot` for a device-readable tier; `pread(fd, offset, n)` or `memcpy(src, n)` for others), which the store hands to a generic copy task of `cpu_task@1` into pinned staging — so tiers stay pure Python | pinned RAM, SSD |
 | route transform (`approx`) | `moe.route_transform = "<name>"` — explicit option only, never by kernel priority; the name selects the contract `op.moe_route_transform.<name>@1` | std owns only the signature `(ids, weights, map) → ids, weights`; each transform is a contract its plugin owns (`op.moe_route_transform.<name>@1`, own oracle and CPU provider); a negative id means **dropped** (the rank's null slot, no fetch, no CPU job, no count), defined in `moe_resolve@1` before the tag | none in X before the tag; A1 after |
@@ -194,10 +196,11 @@ miss path that changes the graph shape (a new node between resolve and combine) 
   at c+2 the device apply kernel **unmaps** the victim (its routes become misses), the copy into the freed slot is an
   async MemOp ordered after that step's last read of the slot, and at c+2+d (d fixed, default 2) the apply kernel
   **maps** the new expert after the stream waits on the copy's event — a stall if it has not landed, never a
-  timing-dependent result. The ring's lent slots and RAM-tier victims follow the same rule.
+  timing-dependent result. Two-phase host edits serve the host-edit policies (`static` re-seeds, `profile_decay`)
+  and their ring lending; under the device-owned default (F11, F4) the cache has no host edits at all (below).
 - **One writer per map region.** The residency map is one device buffer written only by the apply kernel (host
-  edits, stream-ordered) and by in-graph resolvers for the regions the policy declares device-owned (F10's spares,
-  F4's victims). Host edits are **unconditional within host-owned regions**; a slot moves device → host only through
+  edits, stream-ordered) and by in-graph resolvers for the regions the policy declares device-owned (the whole cache
+  under F11 and F4; F10's spares). Host edits are **unconditional within host-owned regions**; a slot moves device → host only through
   an explicit release the device writes into its per-step delta log and the host acts on at a fixed lag, so a host
   copy never targets a slot the device may still map; host → device (F10's spare refill) happens in the same apply
   as the victim's unmap, with no copy. An edit whose precondition fails raises a device error flag (never a device
@@ -214,7 +217,30 @@ miss path that changes the graph shape (a new node between resolve and combine) 
   not fit), so placement never follows free memory at start (Maya's top non-determinism, R §3.1b).
 - **Placement invariance on the bar card.** Besides the bitwise references on a 24 GB card (§6), the RTX 5080's
   snapshots at the natural fit, the capped fit and with adaptive placement must be byte-identical to each other.
-- **Padding rows** (graph buckets) are masked in `moe_resolve`: no fetch, no CPU job, no counts.
+- **Row kinds.** `moe_resolve@1` takes a per-row kind code — padding, decode / verify, prefill — so in-graph policies
+  can tell them apart in mixed steps: padding rows are masked (no fetch, no CPU job, no counts); prefill rows never
+  count or admit (M6 and panel C: counting prompts costs 4–6%); decode and verify rows count every routed entry at
+  resolve time, rejected drafts included (acceptance is known only after the step; deterministic either way).
+- **F11's rule, as M6 replayed it** (`spikes/x0_offload/m6/replay.py`), specified in its contract and oracle, in this
+  order per step: decay (×0.915 in f32, on every step with at least one decode / verify row, graphed or eager;
+  prefill-only steps do not decay), then increments (+1.0 per counted entry, order-independent), then pairing: per
+  layer, the step's distinct misses (candidates, by count
+  descending) pair with the layer's residents the step does not need (victims, by count ascending), ties by expert
+  id; a candidate is admitted only if its count is strictly greater, the pairing stops at the first pair that fails,
+  and each layer keeps its seeded quota. An admitted miss is gathered straight into its victim's slots (gate / up and
+  down: the same layer, so the same classes); the rest go to staging. An expert needed by both a decode and a prefill
+  row in one step has one slot: its admitted slot if admitted, else its staging or ring slot, read by both.
+- **Lending under the device-owned default.** A ring-path step's slots are lent by the device: at the step's launch
+  the policy's own resolve contract picks **whole experts** through its `lend(n) → experts` device op until every
+  class has at least n lent slots (an expert's gate / up and down slots go together, so no expert is half-resident;
+  F11: the coldest by count, ties by layer, then expert id; F4: the oldest; a later policy its own rule, with its own
+  oracle), and the std apply kernel only unmaps and logs them (counts unchanged, panel B-r4.4-1, A-r4.4-2). A lent
+  slot stays owned by its layer: on return it is that layer's first victim, ranked below every resident and filled
+  unconditionally by the next admission, so the cache never shrinks (an L1 test: cache size unchanged after a lend
+  and its return, panel A-r4.4-1). No host edit,
+  no refill copy (panel C's replay: ≤ 1.3% even with random picks, against ≈ 12% for a standing 0.5 GB reserve).
+  Host-edit policies keep two-phase lending. "Prefill rows never change residency" means they never admit; lending
+  evicts by rule.
 
 **D5 — The offload store, one per engine.** `std.moe@1` keeps its interface and binds its store through
 `ctx.unit(Ref)` from the `moe.store` option. Every MoE layer (the MTP layer's included) gets the **same** store
@@ -231,7 +257,7 @@ object through `BuildCtx.shared` (S0). The store owns:
   carries a prefill chunk, mixed steps included, takes the ring-borrow path (slots lent from the arena tail, D8).
   A launch there that is not compacted (a mixed step, or a chunk at or below a class's limit) needs all of the
   layer's misses resident at once, so the store lends at least min(E, k × the step's tokens) slots per class for such
-  a step (the whole layer, 128 per class, for a mixed step on the vehicle), returned under D4's two-phase rule; the
+  a step (the whole layer, 128 per class, for a mixed step on the vehicle), lent and returned under D4's lending rule; the
   L1 "distinct misses ≤ slots" invariant covers ring-path steps too (panel A-r4.3-1); then cache slots;
 - the **residency map** `[L, E, roles] → slot | −1−tier` (tier codes say where a miss lives: RAM, SSD);
 - the host tiers, the policy object, the split table, the per-step count and delta buffers (D4).
@@ -286,8 +312,8 @@ without fast math and per-path reduction orders (panel C2); F5a-by-default makes
 non-resident experts through a ring while layer l runs if their bytes over the measured PCIe rate fit under layer l's
 compute at that chunk size, or beat routed-only staging's exposed transfer time; else routed-only staging (C6:
 coverage passes 50% at ≈ 64 tokens for top-8-of-256, so a coverage rule would stream almost always). Resident
-experts are never re-sent (FreeToken's flaw). Ring slots are lent from the store's own arena tail and returned under
-D4's two-phase rule — plugin-internal. Streaming layer l+1 during layer l needs a second stream inside one step: it
+experts are never re-sent (FreeToken's flaw). Ring slots are lent from the store's own arena under D4's lending rule
+(by the device under the default policy, two-phase under host-edit policies) — plugin-internal. Streaming layer l+1 during layer l needs a second stream inside one step: it
 belongs to a kernel-plugin op, `expert_prefetch@1` (provided with `expert_fetch@1`), which owns the copy stream and
 its per-layer events (invariant 6 allows `torch.cuda` in kernel plugins only). Maya's prestage of likely RAM experts
 is an F7 option measured in step 4. Prefill stays eager.
@@ -308,7 +334,16 @@ instead of ≈ 2.0% (C8). F9 reads the GGUF's byte ranges with `O_DIRECT`; weigh
 cache never double-counts the file. It needs each expert slice's file extent from the weight source (S4). The
 exclusive tier's victim window (panel A-r2-6): between a victim's unmap and its D2H demotion landing, its tier code
 says SSD (the file is always valid), never RAM; the demotion precedes the incoming H2D on the same copy stream; a RAM
-slot freed by a promotion is reused only after the map lands at c+2+d.
+slot freed by a promotion is reused only after the map lands at c+2+d. Under F11 an in-graph admission overwrites
+its victim in the same layer, with no time for a demotion: the victim becomes SSD-only (the tier code written in the
+graph, Maya's "else disk-only"), the admitted expert's RAM slot is released to the host through the delta log and
+reused only after the fixed lag, and promoting hot SSD-only experts back into RAM is a host policy acting at the lag.
+That churns: F11 admits ≈ 55 experts per decode token at 25% cached (panel C's replay), each sending a warm expert to
+SSD-only — ≈ 157 MB per token of SSD re-reads on the vehicle, more than its whole modelled step. So **F11 is the
+default only where RAM holds every expert** (X's development gate). Before step 5 the replay gains an exclusive RAM
+tier with an SSD rate and compares F11 with SSD-only victims, F11 with deferred admission (the miss staged this
+step, its victim demoted D2H, the map flipped at a fixed later step) and F10 with spares (Maya's structure); the
+RAM-short default is the least modelled time, confirmed by step 5's RAM-capped run (panel C-r4.4-1).
 
 **D11 — No predictive prefetch.** Strata's Foresight measured 0.91–1.00× on every box (R §3.1 E1) and Maya's
 read-ahead lost too (R §3.1b EG1). Re-open only if M6 shows next-layer recall ≥ 85% and M1 ≥ 30% idle PCIe time in
@@ -391,7 +426,7 @@ and a CPU provider, in `testing` for std's):
 
 | Contract | Signature (sketch) | Notes |
 |---|---|---|
-| `moe_resolve@1` | `(ids [T,k], weights, map, layer, plan table, state…, row mask) → slot_ids [T,k], fetch list, CPU jobs, counts, delta` | deterministic; misses → the rank's null slot; a negative id is dropped (no fetch, no job, no count); padding rows masked; variants with other semantics are contracts their policy plugins own (D3) |
+| `moe_resolve@1` | `(ids [T,k], weights, map, layer, plan table, state…, row kinds) → slot_ids [T,k], fetch list, CPU jobs, counts, delta` | deterministic; misses → the rank's null slot; a negative id is dropped (no fetch, no job, no count); padding rows masked; variants with other semantics are contracts their policy plugins own (D3), each with its `lend(n)` op for device-owned policies |
 | `moe_route_transform@1` | `(ids, weights, map) → ids, weights` | signature only; each transform's contract is its plugin's (D3); `approx` only, bound by explicit option |
 | `expert_fetch@1` | `(fetch list, host aliases, staging slots)` | in-graph zero-copy gather (dynamic-address DMA is not graph-safe); a DMA variant with a host-planned resolve if M1 shows the gather < 0.9× DMA |
 | `expert_prefetch@1` | `start(next layer's non-resident list, ring slots)`, `wait(layer)` | F7's in-step copy stream and its events stay inside the kernel plugin (D8) |
@@ -420,8 +455,13 @@ exercised in X (panel B-r2-8). The A5000
 runs the bf16 floor as today. FN and GLM take their engine floors the same way (no
 RTX PRO 6000 engine runs needed).
 
-Plants (`judge/holon_judge/planted.py`), predicted verdicts fixed now; each reports how often it fired, and the
-snapshot trace contains ≥ 8 swap rounds:
+Plants (`judge/holon_judge/planted.py`), predicted verdicts fixed now; each reports how often it fired. The
+exactness snapshots run twice — with F11 (≥ 64 in-graph admissions and ≥ 2 device lendings at the capped fit) and
+with `profile_decay` (≥ 8 swap rounds, where the two-phase plants bite). Because every placement is exact, a policy
+bug shows only as lost speed, so an L1 **policy-parity check** compares F11's per-step residency, read from the
+delta log, with an oracle extended from the M6 replay's `lfu` to D4's whole spec (f32, the device's tie-breaks and
+step order, row kinds, the one-slot-per-expert rule in mixed steps, whole-expert device lending and its return,
+per-role maps) — exactly — on a captured decode-only trace and on one with prompts and mixed steps:
 
 | Plant | Breaks | Predicted |
 |---|---|---|
@@ -429,7 +469,9 @@ snapshot trace contains ≥ 8 swap rounds:
 | `map_before_landing` | the map step skips the wait, the copy drops its `after` ordering, and an unseeded 0–2 ms delay is put on the copy stream before it, so reads at the map step race the copy | fails run-identical (race) or the snapshot identity against all-resident (stale bytes); which one is recorded |
 | `map_stale_slot` | a deterministic map to a slot already reassigned | snapshot differs; L2 fails |
 | `cpu_wait_skipped` | on 1% of layers the graph reads the CPU rows without waiting (F5b) | fails run-identical (a race) or L2 (stale rows read deterministically); which one is recorded |
-| `owner_race` | a host edit targets a slot in F4's device-owned victim region (step 3) | the precondition flag fires and the engine stops; with the check removed, run-identical fails |
+| `owner_race` | a host lending edit targets a slot of F11's device-owned cache (step 3) | the precondition flag fires and the engine stops; with the check removed, run-identical fails |
+| `lfu_victim_needed` | F11's victim mask ignores the step's needs, so a row reads a slot overwritten in the same step | snapshot against all-resident differs; L2 fails |
+| `lfu_shared_victim` | two misses of one layer are gathered into one victim slot | snapshot against all-resident differs; L2 fails |
 | `cpu_gate_up_order` | the CPU reads the merged gate / up halves swapped (F5b) | L2 fails; F5a configurations clean |
 
 Each plant changes only the configurations that use its path. Batch-invariance of `cpu_experts` is L0's own
@@ -480,9 +522,9 @@ rule; F8 only at ≥ 15% on < 1K-token chunks with a fixed share; A1 never in a 
 | 0 | M1–M3, M5–M7; host RAM per class | evidence; the panel reviews the parameters they set | 3 |
 | 1 | S0–S5 and the CLI change with toy proofs (ABI 1.2); the forced-tiling and compact-helper vendor patches | core tests; `check_abi --base` additive; LOC; L0 placement-invariance | 5 |
 | 2 | `std.tiered`, the offload store and options, class arenas with null and staging slots, `moe_resolve` / `expert_fetch` (CUDA + oracle + CPU provider), the pinned tier, `static` (F1), F5a | all-resident bitwise to `std.moe@1`; L0 | 5 |
-| 3 | `profile_decay` (F2–F3) and `lru` (F4, its own resolve contract), two-phase edits, route tap and profile tool, prefill streaming (F7); **tag the std offload API** | snapshots with adaptive placement on, ×3, and the n-gram drafter run; cross-placement identity; plants 1–3 and `owner_race` | 5 |
+| 3 | `lfu` (F11) and `lru` (F4), each with its own resolve contract, `profile_decay` (F2–F3) with two-phase edits, route tap and profile tool, prefill streaming (F7); **tag the std offload API** | snapshots with adaptive placement on, ×3, and the n-gram drafter run; cross-placement identity; plants 1–3 and `owner_race` | 5 |
 | 4 | Development gate, natural-fit rows, on the RTX 5080 vs FreeToken and llama.cpp (F5a lock); tune | acceptance 3 natural-fit rows vs the roofline; L4 | 3 |
-| 5 | F9 (SSD tier with I/O workers, exclusive RAM tier) | exactness; a RAM-capped run | 3 |
+| 5 | The replay's exclusive-tier comparison (D10), then F9 (SSD tier with I/O workers, exclusive RAM tier) and the RAM-short default | exactness; a RAM-capped run | 3 |
 | 6 | `kernels.cpu_task`, `kernels.ggml_cpu`, F5b with `plan[n]`, the path-aware floor; capped-fit rows and the F1 row with tune's lock | L0 incl. bitwise per token and per thread count; bounded L2; plants 4–5; tune's ≥ 5% rule decides the dev lock; acceptance 3 capped-fit and F1 rows | 5 |
 | 7 | Held-out plugins after the tag: F10, A1, the mmap / page-cache tier (acceptance 1) | plugin-only diffs; A1 judged as `approx` | 3 |
 | 8 | Close: full suite, panel code review, one propagation of the existing locks; D13 if time allows | acceptance 5–7 | 2 |
@@ -520,6 +562,44 @@ mixers (with FN / GLM); the end-of-answer checkpoint (plan §10). Its own doc mu
   sessions' TPOT p99 during a load ≤ 1.2×; multi-session throughput against Maya's measured ratio on the same trace.
 - Its core seam (prefix-index tiers: `Payload.tier`, `HitLen.cost`, demote, cancellable `BLOCKED(future)`, an
   `on_finish` publish) is designed there; the name stays `tier`, not `kv_tier` (it also stores checkpoints).
+
+## 13. Step 0 results and the decisions they set
+
+**M6 — routing traces and policy replay** (`spikes/x0_offload/m6/README.md`;
+`evidence/x0_m6_routing_qwen3-30b-a3b_rtx-a5000_2026-10-17.json`). Qwen3-30B-A3B Q4_K_M on one RTX A5000, eager;
+244,291 routed rows (61,979 decode) over four traces (agent, mixed, chat, code); decode-only replay with the same
+profile warm start for every policy, scored on held-out traces, time = (dense + hit + fetch) / 900 GB/s +
+(fetch + admission) / PCIe at placeholder rates 25 and 50 GB/s (M1 replaces them).
+
+| Held-out agent, cached | static | profile_decay | lru | promote_on_fetch | lfu | belady |
+|---|---|---|---|---|---|---|
+| 10%: hit % / ms per token (PCIe 25) | 12.7 / 38.4 | 36.9 / 29.5 | 43.4 / 25.7 | 33.4 / 29.9 | 43.0 / 25.8 | 60.9 / 18.3 |
+| 25% | 32.5 / 30.0 | 63.0 / 18.8 | 70.2 / 14.3 | 64.9 / 16.5 | 70.6 / 14.1 | 84.4 / 8.3 |
+| 47% | 55.5 / 20.3 | 85.4 / 8.8 | 89.6 / 6.1 | 88.0 / 6.8 | 90.3 / 5.8 | 95.6 / 3.5 |
+
+Decisions (by §8's rules, fixed before measuring):
+- **Default policy: `lfu` (F11).** Least modelled time in 26 of 30 held-out cells (`lru` in 4, at 10% cached, by
+  ≤ 0.6%). `profile_decay` loses on admission bytes, not counts: each swap copies the expert a second time (391 + 36
+  MB per token against `lfu`'s 311 at 25%); removing D4's lag recovers only ≈ 6%. Knobs moved held-out results by
+  ≤ 4% and changed no ranking; decay 0.915 per step (0.9 equal, 0.99 17% worse). L4 on the development gate checks
+  it against `lru` in ABBA rounds (≥ 4 per arm): `lfu` stays the default unless `lru` beats it by more than 2 sd
+  (the margin, ≤ 7%, is near L4's resolution, panel C). Its win assumes F5a — admission is free only because every
+  miss reaches the GPU — so where tune considers F5b, it chooses policy and split together, re-running the replay
+  model with M2 / M3's CPU rates. Consequence for D4 / D5: under F11 and F4 the whole cache is a device-owned region — a miss is gathered
+  straight into its victim slot in the graph, so there is no second copy and no host edit; the host seeds the cache
+  (`after_materialize`) and reads the delta log. Prefill rows never count or admit (they stage or stream, D8);
+  ring lending is done by the device (D4). D4's two-phase host edits remain for `static` re-seeds and `profile_decay`.
+- **Profiles transfer poorly** (routing is flat: the top 10% of experts take 23–36% of routes): the profile is a warm
+  start only (F2); no policy depends on it for steady state.
+- **D11 stays: no prefetch in X.** Next-layer recall is 84–87% at top-8 and 94.5–96% at top-12, so the recall half
+  of the trigger is borderline; but 40–46% of prefetched non-resident experts would go unused, and an idealized
+  overlap model loses everywhere except at 50 GB/s with 47% cached (+9%). Re-open after M1 measures idle PCIe time.
+- **D8 inputs:** a 64-token chunk touches ≈ 51% of a layer's experts, 1024 tokens ≈ 84%, 4096 tokens 94–97%. On the
+  A5000 routed-only staging wins below ≈ 256 tokens and streaming from ≈ 1K; the crossover is re-derived with M1's
+  compute on the bar cards.
+- **Verify windows share experts:** consecutive tokens share ≈ 3.5 of 8 experts per layer (2 / 3 / 4-token windows
+  touch 12.5 / 16.2 / 19.3); rows of different sequences in one step share almost none — D12's grouping pays within
+  a sequence's window, not across a batch.
 
 ## 12. Review log
 
@@ -631,6 +711,26 @@ mixers (with FN / GLM); the end-of-answer checkpoint (plan §10). Its own doc mu
 | A-r4.2-1 the mmvq limit is per type | D4: the compaction rule and padding target are per class; decode / verify / mixed never compacted |
 | A-r4.3-1 uncompacted ring-path steps need all of a layer's misses at once | D5: lend ≥ min(E, k × tokens) per class for such steps; L1 invariant extended |
 | B-r4.2-1 S4's sequence form has no producer | S4 keeps one extent per part; gate / up pairs stay inside the store (its `merge` member: the resident store concatenates, the offload store records pairs) |
+
+### Rev 4.3 → rev 4.4 (the panel on M6's decisions)
+
+| Finding | Resolution |
+|---|---|
+| A-r4.3d-1, B-r4.3-1, C-r4.3-1 [major] ring lending is a host edit in a device-owned cache | D4: under device-owned policies the device lends (coldest n per class at the step's launch, returned empty); two-phase lending stays for host-edit policies; `owner_race` planted on lending |
+| C-r4.3-2 [major] no plant or check reaches the default path | §6: snapshots with F11 (admissions, lendings) and `profile_decay`; L1 policy-parity check against the M6 replay; plants `lfu_victim_needed`, `lfu_shared_victim` |
+| A-r4.3d-2 F11's victim rule unspecified | D4: per-layer pairing as M6 replayed it, ties by expert id, in the contract and oracle |
+| A-r4.3d-3 counts for verify, mixed and decay steps | D4: row kinds; verify counts at resolve time; prefill never counts; decay on steps with decode / verify rows; one slot per expert per step |
+| A-r4.3d-4 F11 with the exclusive RAM tier | D10: the in-graph victim becomes SSD-only; RAM slot released via the delta log |
+| B-r4.3-2 the row mask only marks padding | D4 / §5: a row-kind code in `moe_resolve@1` |
+| B-r4.3-3 D3 / D4 text not updated for F11 | D3 instances, D4 regions and two-phase scope updated |
+| A-r4.4-1 lent slots are never refilled | D4: a returned slot is its layer's first victim, filled unconditionally; L1 cache-size test |
+| A-r4.4-2 per-class lending leaves experts half-resident | D4: lending picks whole experts until every class has n slots |
+| A-r4.4-3 parity cannot be exact as written | D4: step order decay → increments → pairing; parity on decode-only traces and on a replay extended with lending |
+| C-r4.4-1 [major] F11 churns victims onto SSD under an exclusive RAM tier | D10: F11 default only where RAM holds every expert; replay comparison of three variants before step 5 |
+| C-r4.4-2 per-class lending halves experts | as A-r4.4-2: whole-expert lending |
+| C-r4.4-3 the parity oracle covers decode only | §6: oracle extended to D4's whole spec; parity on a trace with prompts and mixed steps |
+| B-r4.4-1 the lending pick is a policy rule | D4: a `lend(n)` op in the policy-owned resolve contract; the apply kernel only unmaps and logs |
+| C-r4.3-3 F11's win assumes F5a | §13: tune chooses policy and split together for F5b candidates; ABBA rule for lfu vs lru |
 
 **Drifts from `docs/design.md`, recorded:** §7.4 (the CPU handshake lives in a kernel plugin, not
 `holon.core.platform`); §6.5 and §4.2 (placement policies and tiers are std protocols bound by open options, not
