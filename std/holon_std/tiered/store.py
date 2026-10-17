@@ -262,7 +262,9 @@ class TieredStore:
                 for e in extents:
                     jobs.append((e, buffer[piece, at:at + e.nbytes]))
                     at += e.nbytes
-        least = sum(c.bytes(0 if c.cache is None else c.cap) for c in classes) + self._align * len(classes)
+        # A fill class's minimum caches nothing and cannot lend: its layout stages a prefill pass (after_materialize).
+        least = sum((c.null + self.prefill) * c.unit_bytes if c.cache is None else c.bytes(c.cap)
+                    for c in classes) + self._align * len(classes)
         most = sum(c.bytes(c.cap) for c in classes) + self._align * len(classes)
         fill = any(c.cache is None for c in classes)
         self.arena = ctx.pool(f"{self.name}.arena", unit_bytes=self.granule, min_units=-(-least // self.granule),
