@@ -1,0 +1,2515 @@
+{
+ "name": "x4_gap",
+ "gpu": "rtx-5090",
+ "date": "2026-10-17",
+ "model": "unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf",
+ "commit": "b492595",
+ "engines": {
+  "llama.cpp": "f74e2fa6a31c (llama-server, --moe-cache-mib)",
+  "FreeToken": "21d9578bde22",
+  "Holon": "the v1-offload branch at b492595 (step 2: std.moe.offload@1, static placement, F5a)"
+ },
+ "method": "spikes/x4_gap/README.md: bench/offload_ctx.py's prompts and timing (fresh process per arm, 512 + 64 warm-up, one request per context generating 256 tokens, greedy, ignore_eos, a 33,792-token context allocated), interleaved rounds, medians; nsys 2025.3 with --cuda-graph-trace=node on one extra run per arm",
+ "commands": [
+  "python spikes/x4_gap/ctx.py run --name <q> --arms <arms.json> --rounds <n> --model <gguf> --contexts 1024 4096 --ctx 33792",
+  "nsys export --type sqlite <report>; python spikes/x4_gap/nsys_breakdown.py <sqlite>",
+  "python spikes/x4_gap/routing_profile.py <profile.json> <M6 agent.npz> <M6 mixed.npz>",
+  "python spikes/x4_gap/replay.py <holon trace.npz> ...",
+  "python spikes/x4_gap/record.py --runs <dir> --date <date> --commit <commit>"
+ ],
+ "question": "1: all-resident decode, batch 1",
+ "summary": {
+  "holon_res": {
+   "1024": {
+    "prefill_tps": {
+     "median": 13015.0466,
+     "min": 12997.2304,
+     "max": 13032.6511,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 389.2735,
+     "min": 388.7942,
+     "max": 389.4354,
+     "n": 3
+    }
+   },
+   "4096": {
+    "prefill_tps": {
+     "median": 11880.0775,
+     "min": 11874.1238,
+     "max": 11881.1818,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 361.4824,
+     "min": 361.4667,
+     "max": 361.6136,
+     "n": 3
+    }
+   }
+  },
+  "llama_res": {
+   "1024": {
+    "prefill_tps": {
+     "median": 11394.743,
+     "min": 11247.927,
+     "max": 11426.276,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 339.851,
+     "min": 339.624,
+     "max": 340.217,
+     "n": 3
+    }
+   },
+   "4096": {
+    "prefill_tps": {
+     "median": 10336.856,
+     "min": 10333.258,
+     "max": 10348.713,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 294.373,
+     "min": 294.334,
+     "max": 294.74,
+     "n": 3
+    }
+   }
+  },
+  "ft_fused": {
+   "1024": {
+    "prefill_tps": {
+     "median": 20305.402,
+     "min": 20305.1084,
+     "max": 20321.2992,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 340.641,
+     "min": 340.6242,
+     "max": 340.7769,
+     "n": 3
+    }
+   },
+   "4096": {
+    "prefill_tps": {
+     "median": 24206.0204,
+     "min": 24043.4088,
+     "max": 24241.983,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 322.0389,
+     "min": 321.9877,
+     "max": 322.0958,
+     "n": 3
+    }
+   }
+  },
+  "holon_off100": {
+   "1024": {
+    "prefill_tps": {
+     "median": 13059.0859,
+     "min": 13027.4702,
+     "max": 13059.8639,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 358.939,
+     "min": 358.9251,
+     "max": 358.9655,
+     "n": 3
+    },
+    "decode_steps": {
+     "median": 255,
+     "min": 255,
+     "max": 255,
+     "n": 3
+    },
+    "routed_per_token": {
+     "median": 384.0,
+     "min": 384.0,
+     "max": 384.0,
+     "n": 3
+    },
+    "misses_per_token": {
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 3
+    },
+    "hit_rate": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 3
+    },
+    "miss_mb_per_token": {
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 3
+    }
+   },
+   "4096": {
+    "prefill_tps": {
+     "median": 11882.274,
+     "min": 11878.2777,
+     "max": 11885.2469,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 334.871,
+     "min": 334.7224,
+     "max": 334.877,
+     "n": 3
+    },
+    "decode_steps": {
+     "median": 255,
+     "min": 255,
+     "max": 255,
+     "n": 3
+    },
+    "routed_per_token": {
+     "median": 384.0,
+     "min": 384.0,
+     "max": 384.0,
+     "n": 3
+    },
+    "misses_per_token": {
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 3
+    },
+    "hit_rate": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 3
+    },
+    "miss_mb_per_token": {
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 3
+    }
+   }
+  },
+  "ft_off100": {
+   "1024": {
+    "prefill_tps": {
+     "median": 2708.105,
+     "min": 2703.6654,
+     "max": 2716.0427,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 288.4254,
+     "min": 288.3604,
+     "max": 288.429,
+     "n": 3
+    },
+    "ft_layer_calls": {
+     "median": 12240,
+     "min": 12240,
+     "max": 12240,
+     "n": 3
+    },
+    "ft_active_per_layer": {
+     "median": 8.0,
+     "min": 8.0,
+     "max": 8.0,
+     "n": 3
+    },
+    "ft_missing_per_layer": {
+     "median": 0.1018,
+     "min": 0.1018,
+     "max": 0.1018,
+     "n": 3
+    },
+    "ft_miss_rate": {
+     "median": 0.0127,
+     "min": 0.0127,
+     "max": 0.0127,
+     "n": 3
+    },
+    "ft_fetched_per_layer": {
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 3
+    },
+    "ft_cpu_per_layer": {
+     "median": 0.1018,
+     "min": 0.1018,
+     "max": 0.1018,
+     "n": 3
+    },
+    "ft_fetch_rate": {
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 3
+    },
+    "ft_prefill_hit_rows": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "ft_prefill_rows": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    }
+   },
+   "4096": {
+    "prefill_tps": {
+     "median": 10799.1747,
+     "min": 10782.7875,
+     "max": 10827.4476,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 269.7,
+     "min": 269.6928,
+     "max": 269.7747,
+     "n": 3
+    },
+    "ft_layer_calls": {
+     "median": 12240,
+     "min": 12240,
+     "max": 12240,
+     "n": 3
+    },
+    "ft_active_per_layer": {
+     "median": 8.0,
+     "min": 8.0,
+     "max": 8.0,
+     "n": 3
+    },
+    "ft_missing_per_layer": {
+     "median": 0.1247,
+     "min": 0.1247,
+     "max": 0.1247,
+     "n": 3
+    },
+    "ft_miss_rate": {
+     "median": 0.0156,
+     "min": 0.0156,
+     "max": 0.0156,
+     "n": 3
+    },
+    "ft_fetched_per_layer": {
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 3
+    },
+    "ft_cpu_per_layer": {
+     "median": 0.1247,
+     "min": 0.1247,
+     "max": 0.1247,
+     "n": 3
+    },
+    "ft_fetch_rate": {
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 3
+    },
+    "ft_prefill_hit_rows": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "ft_prefill_rows": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    }
+   }
+  }
+ },
+ "ratios": {
+  "1024": {
+   "holon/llama-server": 1.145,
+   "holon/freetoken-fused": 1.143,
+   "holon offload store, all cached \u2212 resident (ms per token)": 0.217,
+   "freetoken offload, rate 1.0 \u2212 fused (ms per token)": 0.531
+  },
+  "4096": {
+   "holon/llama-server": 1.228,
+   "holon/freetoken-fused": 1.122,
+   "holon offload store, all cached \u2212 resident (ms per token)": 0.22,
+   "freetoken offload, rate 1.0 \u2212 fused (ms per token)": 0.603
+  }
+ },
+ "nsys_1k": {
+  "holon_res": {
+   "decode": {
+    "tokens": 255,
+    "window_us_per_token": 2648.5,
+    "busy_us_per_token": 2564.8,
+    "idle_us_per_token": 83.7,
+    "categories": {
+     "MoE expert GEMV (mmvq, ids)": {
+      "us_per_token": 899.8,
+      "launches_per_token": 96.0
+     },
+     "dense linear GEMV (mmvq)": {
+      "us_per_token": 520.7,
+      "launches_per_token": 120.0
+     },
+     "attention (incl. q/k norm, RoPE, KV write)": {
+      "us_per_token": 326.9,
+      "launches_per_token": 144.0
+     },
+     "router (gate GEMV + top-k)": {
+      "us_per_token": 280.8,
+      "launches_per_token": 144.0
+     },
+     "activation quant (q8_1)": {
+      "us_per_token": 274.9,
+      "launches_per_token": 193.0
+     },
+     "embedding / glue": {
+      "us_per_token": 177.0,
+      "launches_per_token": 127.03
+     },
+     "lm_head GEMV": {
+      "us_per_token": 152.9,
+      "launches_per_token": 1.0
+     },
+     "norms": {
+      "us_per_token": 142.9,
+      "launches_per_token": 97.0
+     },
+     "MoE combine": {
+      "us_per_token": 64.2,
+      "launches_per_token": 48.0
+     },
+     "sampling / logits": {
+      "us_per_token": 5.5,
+      "launches_per_token": 1.0
+     },
+     "memcpy D2D": {
+      "us_per_token": 2.5,
+      "launches_per_token": 3.0
+     },
+     "memcpy H2D": {
+      "us_per_token": 2.4,
+      "launches_per_token": 6.04
+     },
+     "memcpy D2H": {
+      "us_per_token": 0.6,
+      "launches_per_token": 1.0
+     }
+    },
+    "memcpy_bytes_per_token": {
+     "D2D": 20,
+     "H2D": 860,
+     "D2H": 8
+    },
+    "top_kernels": [
+     {
+      "category": "MoE expert GEMV (mmvq, ids)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       768,
+       8
+      ],
+      "us_per_token": 579.8
+     },
+     {
+      "category": "MoE expert GEMV (mmvq, ids)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       512,
+       8
+      ],
+      "us_per_token": 320.0
+     },
+     {
+      "category": "activation quant (q8_1)",
+      "kernel": "quantize_q8_1",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 274.9
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       2048,
+       1
+      ],
+      "us_per_token": 230.9
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "_paged_attn",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 182.1
+     },
+     {
+      "category": "lm_head GEMV",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       151936,
+       1
+      ],
+      "us_per_token": 152.9
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "topk_moe_cuda",
+      "grid": [
+       1,
+       1
+      ],
+      "us_per_token": 128.6
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       4608,
+       1
+      ],
+      "us_per_token": 120.5
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       5120,
+       1
+      ],
+      "us_per_token": 120.2
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "dot_kernel",
+      "grid": [
+       9,
+       1
+      ],
+      "us_per_token": 98.3
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "_merge_splits",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 93.0
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "unrolled_elementwise_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 91.9
+     },
+     {
+      "category": "norms",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tenso",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 79.6
+     },
+     {
+      "category": "MoE combine",
+      "kernel": "moe_weighted_reduction_f32",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 64.2
+     },
+     {
+      "category": "norms",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnormFusedAddRMSNormKerne",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 63.3
+     }
+    ],
+    "overlap_us": 286.3
+   },
+   "prefill": {
+    "tokens": 1024,
+    "window_us_per_token": 77.7,
+    "busy_us_per_token": 75.7,
+    "idle_us_per_token": 1.9,
+    "categories": {
+     "mmq (prefill GEMM)": {
+      "us_per_token": 60.3,
+      "launches_per_token": 0.61
+     },
+     "attention (incl. q/k norm, RoPE, KV write)": {
+      "us_per_token": 5.2,
+      "launches_per_token": 0.09
+     },
+     "embedding / glue": {
+      "us_per_token": 4.6,
+      "launches_per_token": 0.41
+     },
+     "activation quant (q8_1)": {
+      "us_per_token": 1.5,
+      "launches_per_token": 0.42
+     },
+     "activation (silu / glu)": {
+      "us_per_token": 1.2,
+      "launches_per_token": 0.09
+     },
+     "cuBLAS / CUTLASS GEMM": {
+      "us_per_token": 1.0,
+      "launches_per_token": 0.09
+     },
+     "MoE combine": {
+      "us_per_token": 1.0,
+      "launches_per_token": 0.09
+     },
+     "norms": {
+      "us_per_token": 0.4,
+      "launches_per_token": 0.09
+     },
+     "router (gate GEMV + top-k)": {
+      "us_per_token": 0.3,
+      "launches_per_token": 0.09
+     },
+     "sampling / logits": {
+      "us_per_token": 0.2,
+      "launches_per_token": 0.09
+     },
+     "lm_head GEMV": {
+      "us_per_token": 0.2,
+      "launches_per_token": 0.0
+     },
+     "memcpy H2D": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.01
+     },
+     "memcpy D2D": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.0
+     },
+     "memcpy D2H": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.0
+     }
+    },
+    "memcpy_bytes_per_token": {
+     "D2D": 16,
+     "H2D": 10,
+     "D2H": 0
+    },
+    "top_kernels": [
+     {
+      "category": "mmq (prefill GEMM)",
+      "kernel": "mul_mat_q",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 58.5
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "BatchPrefillWithPagedKVCacheKernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 4.3
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "mm_ids_helper_per_slot",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 3.8
+     },
+     {
+      "category": "mmq (prefill GEMM)",
+      "kernel": "mul_mat_q_stream_k_fixup",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.8
+     },
+     {
+      "category": "activation quant (q8_1)",
+      "kernel": "quantize_mmq_q8_1",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.5
+     },
+     {
+      "category": "activation (silu / glu)",
+      "kernel": "swiglu_f32",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.2
+     },
+     {
+      "category": "cuBLAS / CUTLASS GEMM",
+      "kernel": "Kernel2",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.0
+     },
+     {
+      "category": "MoE combine",
+      "kernel": "moe_weighted_reduction_f32",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.0
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "_qk_rope_kv",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.9
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "unrolled_elementwise_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.4
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "vectorized_elementwise_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.4
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "topk_moe_cuda",
+      "grid": [
+       64,
+       1
+      ],
+      "us_per_token": 0.3
+     },
+     {
+      "category": "norms",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnormFusedAddRMSNormKerne",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.2
+     },
+     {
+      "category": "sampling / logits",
+      "kernel": "splitKreduce_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.2
+     },
+     {
+      "category": "norms",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tenso",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.2
+     }
+    ],
+    "window_ms": 79.5
+   }
+  },
+  "llama_res": {
+   "decode": {
+    "tokens": 200,
+    "window_us_per_token": 3658.4,
+    "busy_us_per_token": 2758.4,
+    "idle_us_per_token": 900.0,
+    "categories": {
+     "dense linear GEMV (mmvq)": {
+      "us_per_token": 924.0,
+      "launches_per_token": 192.0
+     },
+     "MoE expert GEMV (mmvq, ids)": {
+      "us_per_token": 908.5,
+      "launches_per_token": 96.0
+     },
+     "attention (incl. q/k norm, RoPE, KV write)": {
+      "us_per_token": 851.4,
+      "launches_per_token": 240.0
+     },
+     "activation quant (q8_1)": {
+      "us_per_token": 617.6,
+      "launches_per_token": 289.0
+     },
+     "router (gate GEMV + top-k)": {
+      "us_per_token": 268.6,
+      "launches_per_token": 96.0
+     },
+     "norms": {
+      "us_per_token": 175.6,
+      "launches_per_token": 97.0
+     },
+     "lm_head GEMV": {
+      "us_per_token": 153.3,
+      "launches_per_token": 1.0
+     },
+     "MoE combine": {
+      "us_per_token": 69.0,
+      "launches_per_token": 48.0
+     },
+     "embedding / glue": {
+      "us_per_token": 62.8,
+      "launches_per_token": 51.0
+     },
+     "memcpy D2H": {
+      "us_per_token": 11.7,
+      "launches_per_token": 1.0
+     },
+     "memcpy H2D": {
+      "us_per_token": 3.1,
+      "launches_per_token": 9.0
+     }
+    },
+    "memcpy_bytes_per_token": {
+     "H2D": 27168,
+     "D2H": 607744
+    },
+    "top_kernels": [
+     {
+      "category": "activation quant (q8_1)",
+      "kernel": "quantize_q8_1",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 617.6
+     },
+     {
+      "category": "MoE expert GEMV (mmvq, ids)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       768,
+       8
+      ],
+      "us_per_token": 583.0
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       2048,
+       1
+      ],
+      "us_per_token": 394.7
+     },
+     {
+      "category": "MoE expert GEMV (mmvq, ids)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       512,
+       8
+      ],
+      "us_per_token": 325.5
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "flash_attn_combine_results",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 298.1
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "flash_attn_ext_vec",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 290.6
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       512,
+       1
+      ],
+      "us_per_token": 265.1
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       4096,
+       1
+      ],
+      "us_per_token": 264.2
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "rms_norm_mul_rope_f32",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 176.0
+     },
+     {
+      "category": "norms",
+      "kernel": "rms_norm_f32",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 175.6
+     },
+     {
+      "category": "lm_head GEMV",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       151936,
+       1
+      ],
+      "us_per_token": 153.3
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "mul_mat_vec_f",
+      "grid": [
+       128,
+       1
+      ],
+      "us_per_token": 140.8
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "topk_moe_cuda",
+      "grid": [
+       1,
+       1
+      ],
+      "us_per_token": 127.8
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "k_set_rows",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 86.7
+     },
+     {
+      "category": "MoE combine",
+      "kernel": "moe_weighted_reduction_f32",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 69.0
+     }
+    ],
+    "overlap_us": 1287.2
+   }
+  },
+  "ft_fused": {
+   "decode": {
+    "tokens": 255,
+    "window_us_per_token": 3055.8,
+    "busy_us_per_token": 2705.5,
+    "idle_us_per_token": 350.3,
+    "categories": {
+     "MoE expert GEMV (mmvq, ids)": {
+      "us_per_token": 832.4,
+      "launches_per_token": 95.98
+     },
+     "attention (incl. q/k norm, RoPE, KV write)": {
+      "us_per_token": 620.0,
+      "launches_per_token": 287.93
+     },
+     "dense linear GEMV (mmvq)": {
+      "us_per_token": 520.1,
+      "launches_per_token": 119.96
+     },
+     "activation quant (q8_1)": {
+      "us_per_token": 199.9,
+      "launches_per_token": 192.95
+     },
+     "router (gate GEMV + top-k)": {
+      "us_per_token": 198.2,
+      "launches_per_token": 95.98
+     },
+     "lm_head GEMV": {
+      "us_per_token": 151.5,
+      "launches_per_token": 1.0
+     },
+     "norms": {
+      "us_per_token": 136.7,
+      "launches_per_token": 96.97
+     },
+     "MoE combine": {
+      "us_per_token": 42.8,
+      "launches_per_token": 47.99
+     },
+     "embedding / glue": {
+      "us_per_token": 14.5,
+      "launches_per_token": 7.99
+     },
+     "memcpy D2D": {
+      "us_per_token": 6.4,
+      "launches_per_token": 5.98
+     },
+     "sampling / logits": {
+      "us_per_token": 5.1,
+      "launches_per_token": 1.0
+     },
+     "memcpy H2D": {
+      "us_per_token": 3.9,
+      "launches_per_token": 9.96
+     },
+     "memcpy D2H": {
+      "us_per_token": 0.6,
+      "launches_per_token": 1.0
+     }
+    },
+    "memcpy_bytes_per_token": {
+     "D2D": 453656,
+     "H2D": 1248,
+     "D2H": 4
+    },
+    "top_kernels": [
+     {
+      "category": "MoE expert GEMV (mmvq, ids)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       768,
+       8
+      ],
+      "us_per_token": 510.2
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "BatchPrefillWithPagedKVCacheKernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 324.5
+     },
+     {
+      "category": "MoE expert GEMV (mmvq, ids)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       512,
+       8
+      ],
+      "us_per_token": 322.2
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       2048,
+       1
+      ],
+      "us_per_token": 222.8
+     },
+     {
+      "category": "activation quant (q8_1)",
+      "kernel": "quantize_q8_1",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 199.9
+     },
+     {
+      "category": "lm_head GEMV",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       151936,
+       1
+      ],
+      "us_per_token": 151.5
+     },
+     {
+      "category": "norms",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnormFusedAddRMSNormKerne",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 135.1
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       5120,
+       1
+      ],
+      "us_per_token": 124.4
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       4608,
+       1
+      ],
+      "us_per_token": 116.3
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsrmsnormQKRMSNormKernel_object_at__ten",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 105.8
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "_router_triton_kernel",
+      "grid": [
+       1,
+       1
+      ],
+      "us_per_token": 100.4
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "kernel",
+      "grid": [
+       32,
+       1
+      ],
+      "us_per_token": 97.8
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "PersistentVariableLengthMergeStatesKernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 88.3
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       512,
+       1
+      ],
+      "us_per_token": 56.5
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "store_kv_cache",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 53.1
+     }
+    ],
+    "overlap_us": 26.6
+   },
+   "prefill": {
+    "tokens": 1024,
+    "window_us_per_token": 52.0,
+    "busy_us_per_token": 47.2,
+    "idle_us_per_token": 4.8,
+    "categories": {
+     "mmq (prefill GEMM)": {
+      "us_per_token": 35.2,
+      "launches_per_token": 0.3
+     },
+     "attention (incl. q/k norm, RoPE, KV write)": {
+      "us_per_token": 5.1,
+      "launches_per_token": 0.25
+     },
+     "embedding / glue": {
+      "us_per_token": 3.2,
+      "launches_per_token": 0.34
+     },
+     "activation quant (q8_1)": {
+      "us_per_token": 1.3,
+      "launches_per_token": 0.22
+     },
+     "MoE combine": {
+      "us_per_token": 0.6,
+      "launches_per_token": 0.05
+     },
+     "activation (silu / glu)": {
+      "us_per_token": 0.6,
+      "launches_per_token": 0.05
+     },
+     "norms": {
+      "us_per_token": 0.5,
+      "launches_per_token": 0.1
+     },
+     "cuBLAS / CUTLASS GEMM": {
+      "us_per_token": 0.3,
+      "launches_per_token": 0.05
+     },
+     "router (gate GEMV + top-k)": {
+      "us_per_token": 0.2,
+      "launches_per_token": 0.05
+     },
+     "lm_head GEMV": {
+      "us_per_token": 0.2,
+      "launches_per_token": 0.0
+     },
+     "sampling / logits": {
+      "us_per_token": 0.1,
+      "launches_per_token": 0.05
+     },
+     "MoE expert GEMV (mmvq, ids)": {
+      "us_per_token": 0.1,
+      "launches_per_token": 0.01
+     },
+     "dense linear GEMV (mmvq)": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.01
+     },
+     "memcpy H2D": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.02
+     },
+     "memcpy D2D": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.01
+     },
+     "memcpy D2H": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.0
+     }
+    },
+    "memcpy_bytes_per_token": {
+     "D2D": 12,
+     "H2D": 14,
+     "D2H": 0
+    },
+    "top_kernels": [
+     {
+      "category": "mmq (prefill GEMM)",
+      "kernel": "mul_mat_q",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 34.3
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "BatchPrefillWithPagedKVCacheKernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 4.4
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "mm_ids_helper",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 2.4
+     },
+     {
+      "category": "activation quant (q8_1)",
+      "kernel": "quantize_mmq_q8_1",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.3
+     },
+     {
+      "category": "mmq (prefill GEMM)",
+      "kernel": "mul_mat_q_stream_k_fixup",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.8
+     },
+     {
+      "category": "MoE combine",
+      "kernel": "moe_weighted_sum_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.6
+     },
+     {
+      "category": "activation (silu / glu)",
+      "kernel": "act_and_mul_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.6
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "mmq_store_dst",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.5
+     },
+     {
+      "category": "norms",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnormFusedAddRMSNormKerne",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.5
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsrmsnormQKRMSNormKernel_object_at__ten",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.3
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.3
+     },
+     {
+      "category": "cuBLAS / CUTLASS GEMM",
+      "kernel": "Kernel2",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.3
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "_router_triton_kernel",
+      "grid": [
+       512,
+       1
+      ],
+      "us_per_token": 0.2
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "mm_ids_tile_map",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.2
+     },
+     {
+      "category": "lm_head GEMV",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       151936,
+       1
+      ],
+      "us_per_token": 0.2
+     }
+    ],
+    "window_ms": 53.2
+   }
+  },
+  "holon_off100": {
+   "decode": {
+    "tokens": 255,
+    "window_us_per_token": 2871.4,
+    "busy_us_per_token": 2761.5,
+    "idle_us_per_token": 109.9,
+    "categories": {
+     "MoE expert GEMV (mmvq, ids)": {
+      "us_per_token": 836.4,
+      "launches_per_token": 96.0
+     },
+     "dense linear GEMV (mmvq)": {
+      "us_per_token": 516.8,
+      "launches_per_token": 120.0
+     },
+     "attention (incl. q/k norm, RoPE, KV write)": {
+      "us_per_token": 326.8,
+      "launches_per_token": 144.0
+     },
+     "router (gate GEMV + top-k)": {
+      "us_per_token": 275.0,
+      "launches_per_token": 144.0
+     },
+     "activation quant (q8_1)": {
+      "us_per_token": 210.6,
+      "launches_per_token": 193.0
+     },
+     "embedding / glue": {
+      "us_per_token": 190.3,
+      "launches_per_token": 132.98
+     },
+     "lm_head GEMV": {
+      "us_per_token": 152.7,
+      "launches_per_token": 1.0
+     },
+     "norms": {
+      "us_per_token": 143.8,
+      "launches_per_token": 97.0
+     },
+     "resolve / cache bookkeeping": {
+      "us_per_token": 103.6,
+      "launches_per_token": 48.0
+     },
+     "fetch (expert gather / copy)": {
+      "us_per_token": 69.4,
+      "launches_per_token": 96.0
+     },
+     "MoE combine": {
+      "us_per_token": 63.1,
+      "launches_per_token": 48.0
+     },
+     "sampling / logits": {
+      "us_per_token": 5.5,
+      "launches_per_token": 1.0
+     },
+     "memcpy D2H": {
+      "us_per_token": 3.3,
+      "launches_per_token": 5.0
+     },
+     "memcpy H2D": {
+      "us_per_token": 2.9,
+      "launches_per_token": 7.03
+     },
+     "memcpy D2D": {
+      "us_per_token": 2.5,
+      "launches_per_token": 2.99
+     }
+    },
+    "memcpy_bytes_per_token": {
+     "D2D": 20,
+     "H2D": 861,
+     "D2H": 24596
+    },
+    "top_kernels": [
+     {
+      "category": "MoE expert GEMV (mmvq, ids)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       768,
+       8
+      ],
+      "us_per_token": 516.5
+     },
+     {
+      "category": "MoE expert GEMV (mmvq, ids)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       512,
+       8
+      ],
+      "us_per_token": 319.9
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       2048,
+       1
+      ],
+      "us_per_token": 230.1
+     },
+     {
+      "category": "activation quant (q8_1)",
+      "kernel": "quantize_q8_1",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 210.6
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "_paged_attn",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 183.0
+     },
+     {
+      "category": "lm_head GEMV",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       151936,
+       1
+      ],
+      "us_per_token": 152.7
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "topk_moe_cuda",
+      "grid": [
+       1,
+       1
+      ],
+      "us_per_token": 120.7
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       4608,
+       1
+      ],
+      "us_per_token": 119.8
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       5120,
+       1
+      ],
+      "us_per_token": 117.8
+     },
+     {
+      "category": "resolve / cache bookkeeping",
+      "kernel": "k_resolve",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 103.6
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "dot_kernel",
+      "grid": [
+       9,
+       1
+      ],
+      "us_per_token": 97.9
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "unrolled_elementwise_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 95.5
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "_merge_splits",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 92.4
+     },
+     {
+      "category": "norms",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tenso",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 80.5
+     },
+     {
+      "category": "fetch (expert gather / copy)",
+      "kernel": "k_fetch",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 69.4
+     }
+    ]
+   },
+   "prefill": {
+    "tokens": 1024,
+    "window_us_per_token": 77.6,
+    "busy_us_per_token": 75.6,
+    "idle_us_per_token": 2.0,
+    "categories": {
+     "mmq (prefill GEMM)": {
+      "us_per_token": 60.5,
+      "launches_per_token": 0.61
+     },
+     "attention (incl. q/k norm, RoPE, KV write)": {
+      "us_per_token": 5.1,
+      "launches_per_token": 0.09
+     },
+     "embedding / glue": {
+      "us_per_token": 2.7,
+      "launches_per_token": 0.43
+     },
+     "activation quant (q8_1)": {
+      "us_per_token": 1.5,
+      "launches_per_token": 0.42
+     },
+     "resolve / cache bookkeeping": {
+      "us_per_token": 1.4,
+      "launches_per_token": 0.09
+     },
+     "activation (silu / glu)": {
+      "us_per_token": 1.2,
+      "launches_per_token": 0.09
+     },
+     "cuBLAS / CUTLASS GEMM": {
+      "us_per_token": 1.0,
+      "launches_per_token": 0.09
+     },
+     "MoE combine": {
+      "us_per_token": 1.0,
+      "launches_per_token": 0.09
+     },
+     "norms": {
+      "us_per_token": 0.4,
+      "launches_per_token": 0.09
+     },
+     "router (gate GEMV + top-k)": {
+      "us_per_token": 0.3,
+      "launches_per_token": 0.09
+     },
+     "sampling / logits": {
+      "us_per_token": 0.2,
+      "launches_per_token": 0.09
+     },
+     "fetch (expert gather / copy)": {
+      "us_per_token": 0.2,
+      "launches_per_token": 0.19
+     },
+     "lm_head GEMV": {
+      "us_per_token": 0.2,
+      "launches_per_token": 0.0
+     },
+     "memcpy H2D": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.01
+     },
+     "memcpy D2H": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.0
+     },
+     "memcpy D2D": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.0
+     }
+    },
+    "memcpy_bytes_per_token": {
+     "D2D": 16,
+     "H2D": 12,
+     "D2H": 24
+    },
+    "top_kernels": [
+     {
+      "category": "mmq (prefill GEMM)",
+      "kernel": "mul_mat_q",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 58.8
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "BatchPrefillWithPagedKVCacheKernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 4.3
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "mm_ids_helper_compact",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.8
+     },
+     {
+      "category": "mmq (prefill GEMM)",
+      "kernel": "mul_mat_q_stream_k_fixup",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.7
+     },
+     {
+      "category": "activation quant (q8_1)",
+      "kernel": "quantize_mmq_q8_1",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.5
+     },
+     {
+      "category": "resolve / cache bookkeeping",
+      "kernel": "k_resolve",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.4
+     },
+     {
+      "category": "activation (silu / glu)",
+      "kernel": "swiglu_f32",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.2
+     },
+     {
+      "category": "cuBLAS / CUTLASS GEMM",
+      "kernel": "Kernel2",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.0
+     },
+     {
+      "category": "MoE combine",
+      "kernel": "moe_weighted_reduction_f32",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.0
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "_qk_rope_kv",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.9
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "unrolled_elementwise_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.4
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "vectorized_elementwise_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.4
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "topk_moe_cuda",
+      "grid": [
+       64,
+       1
+      ],
+      "us_per_token": 0.3
+     },
+     {
+      "category": "norms",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnormFusedAddRMSNormKerne",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.2
+     },
+     {
+      "category": "sampling / logits",
+      "kernel": "splitKreduce_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.2
+     }
+    ],
+    "window_ms": 79.5
+   }
+  },
+  "ft_off100": {
+   "decode": {
+    "tokens": 255,
+    "window_us_per_token": 3589.2,
+    "busy_us_per_token": 3161.2,
+    "idle_us_per_token": 428.0,
+    "categories": {
+     "MoE expert GEMV (mmvq, ids)": {
+      "us_per_token": 822.7,
+      "launches_per_token": 95.99
+     },
+     "attention (incl. q/k norm, RoPE, KV write)": {
+      "us_per_token": 622.2,
+      "launches_per_token": 287.96
+     },
+     "dense linear GEMV (mmvq)": {
+      "us_per_token": 519.9,
+      "launches_per_token": 119.98
+     },
+     "fetch (expert gather / copy)": {
+      "us_per_token": 368.8,
+      "launches_per_token": 48.0
+     },
+     "activation quant (q8_1)": {
+      "us_per_token": 200.5,
+      "launches_per_token": 192.98
+     },
+     "router (gate GEMV + top-k)": {
+      "us_per_token": 191.7,
+      "launches_per_token": 95.99
+     },
+     "lm_head GEMV": {
+      "us_per_token": 151.9,
+      "launches_per_token": 1.0
+     },
+     "norms": {
+      "us_per_token": 139.8,
+      "launches_per_token": 96.99
+     },
+     "resolve / cache bookkeeping": {
+      "us_per_token": 92.9,
+      "launches_per_token": 48.0
+     },
+     "MoE combine": {
+      "us_per_token": 41.8,
+      "launches_per_token": 48.0
+     },
+     "embedding / glue": {
+      "us_per_token": 16.3,
+      "launches_per_token": 7.99
+     },
+     "memcpy H2D": {
+      "us_per_token": 6.7,
+      "launches_per_token": 9.96
+     },
+     "memcpy D2D": {
+      "us_per_token": 6.3,
+      "launches_per_token": 5.98
+     },
+     "sampling / logits": {
+      "us_per_token": 5.1,
+      "launches_per_token": 1.0
+     },
+     "memcpy D2H": {
+      "us_per_token": 2.5,
+      "launches_per_token": 1.0
+     }
+    },
+    "memcpy_bytes_per_token": {
+     "D2D": 452293,
+     "H2D": 1248,
+     "D2H": 4
+    },
+    "top_kernels": [
+     {
+      "category": "MoE expert GEMV (mmvq, ids)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       768,
+       8
+      ],
+      "us_per_token": 504.1
+     },
+     {
+      "category": "fetch (expert gather / copy)",
+      "kernel": "fast_index_copy_multi",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 368.8
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "BatchPrefillWithPagedKVCacheKernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 324.4
+     },
+     {
+      "category": "MoE expert GEMV (mmvq, ids)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       512,
+       8
+      ],
+      "us_per_token": 318.7
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       2048,
+       1
+      ],
+      "us_per_token": 225.9
+     },
+     {
+      "category": "activation quant (q8_1)",
+      "kernel": "quantize_q8_1",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 200.5
+     },
+     {
+      "category": "lm_head GEMV",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       151936,
+       1
+      ],
+      "us_per_token": 151.9
+     },
+     {
+      "category": "norms",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnormFusedAddRMSNormKerne",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 138.2
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       5120,
+       1
+      ],
+      "us_per_token": 123.4
+     },
+     {
+      "category": "dense linear GEMV (mmvq)",
+      "kernel": "mul_mat_vec_q",
+      "grid": [
+       4608,
+       1
+      ],
+      "us_per_token": 115.7
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsrmsnormQKRMSNormKernel_object_at__ten",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 106.4
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "kernel",
+      "grid": [
+       32,
+       1
+      ],
+      "us_per_token": 98.6
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "_router_triton_kernel",
+      "grid": [
+       1,
+       1
+      ],
+      "us_per_token": 93.1
+     },
+     {
+      "category": "resolve / cache bookkeeping",
+      "kernel": "_lru_ensure_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 92.9
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "PersistentVariableLengthMergeStatesKernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 89.7
+     }
+    ]
+   },
+   "prefill": {
+    "tokens": 1024,
+    "window_us_per_token": 376.8,
+    "busy_us_per_token": 366.9,
+    "idle_us_per_token": 9.9,
+    "categories": {
+     "memcpy H2D": {
+      "us_per_token": 363.7,
+      "launches_per_token": 0.16
+     },
+     "mmq (prefill GEMM)": {
+      "us_per_token": 35.7,
+      "launches_per_token": 0.3
+     },
+     "attention (incl. q/k norm, RoPE, KV write)": {
+      "us_per_token": 5.1,
+      "launches_per_token": 0.25
+     },
+     "embedding / glue": {
+      "us_per_token": 4.0,
+      "launches_per_token": 0.68
+     },
+     "activation quant (q8_1)": {
+      "us_per_token": 1.3,
+      "launches_per_token": 0.22
+     },
+     "MoE combine": {
+      "us_per_token": 0.6,
+      "launches_per_token": 0.05
+     },
+     "activation (silu / glu)": {
+      "us_per_token": 0.6,
+      "launches_per_token": 0.05
+     },
+     "norms": {
+      "us_per_token": 0.5,
+      "launches_per_token": 0.1
+     },
+     "cuBLAS / CUTLASS GEMM": {
+      "us_per_token": 0.3,
+      "launches_per_token": 0.05
+     },
+     "fetch (expert gather / copy)": {
+      "us_per_token": 0.2,
+      "launches_per_token": 0.0
+     },
+     "router (gate GEMV + top-k)": {
+      "us_per_token": 0.2,
+      "launches_per_token": 0.05
+     },
+     "lm_head GEMV": {
+      "us_per_token": 0.2,
+      "launches_per_token": 0.0
+     },
+     "sampling / logits": {
+      "us_per_token": 0.1,
+      "launches_per_token": 0.05
+     },
+     "memcpy D2H": {
+      "us_per_token": 0.1,
+      "launches_per_token": 0.05
+     },
+     "dense linear GEMV (mmvq)": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.0
+     },
+     "MoE expert GEMV (mmvq, ids)": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.0
+     },
+     "resolve / cache bookkeeping": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.0
+     },
+     "memcpy D2D": {
+      "us_per_token": 0.0,
+      "launches_per_token": 0.01
+     }
+    },
+    "memcpy_bytes_per_token": {
+     "D2D": 12,
+     "H2D": 17141774,
+     "D2H": 0
+    },
+    "top_kernels": [
+     {
+      "category": "mmq (prefill GEMM)",
+      "kernel": "mul_mat_q",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 34.8
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "BatchPrefillWithPagedKVCacheKernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 4.4
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "mm_ids_helper",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 2.3
+     },
+     {
+      "category": "activation quant (q8_1)",
+      "kernel": "quantize_mmq_q8_1",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 1.3
+     },
+     {
+      "category": "mmq (prefill GEMM)",
+      "kernel": "mul_mat_q_stream_k_fixup",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.8
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "vectorized_elementwise_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.8
+     },
+     {
+      "category": "MoE combine",
+      "kernel": "moe_weighted_sum_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.6
+     },
+     {
+      "category": "activation (silu / glu)",
+      "kernel": "act_and_mul_kernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.6
+     },
+     {
+      "category": "embedding / glue",
+      "kernel": "mmq_store_dst",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.5
+     },
+     {
+      "category": "norms",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnormFusedAddRMSNormKerne",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.5
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "kernel_cutlass_kernel_flashinfernormkernelsrmsnormQKRMSNormKernel_object_at__ten",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.3
+     },
+     {
+      "category": "attention (incl. q/k norm, RoPE, KV write)",
+      "kernel": "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.3
+     },
+     {
+      "category": "cuBLAS / CUTLASS GEMM",
+      "kernel": "Kernel2",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.3
+     },
+     {
+      "category": "fetch (expert gather / copy)",
+      "kernel": "fast_index_copy_multi",
+      "grid": [
+       0,
+       0
+      ],
+      "us_per_token": 0.2
+     },
+     {
+      "category": "router (gate GEMV + top-k)",
+      "kernel": "_router_triton_kernel",
+      "grid": [
+       512,
+       1
+      ],
+      "us_per_token": 0.2
+     }
+    ],
+    "window_ms": 385.9
+   }
+  }
+ },
+ "gap_1k_vs_llama": [
+  {
+   "component": "overlap (concurrent streams, subtracted)",
+   "holon_us": -286.3,
+   "ref_us": -1287.2,
+   "delta_us": 1000.9
+  },
+  {
+   "component": "idle (no kernel or copy on the GPU)",
+   "holon_us": 83.7,
+   "ref_us": 900.0,
+   "delta_us": -816.3
+  },
+  {
+   "component": "attention (incl. q/k norm, RoPE, KV write)",
+   "holon_us": 326.9,
+   "ref_us": 851.4,
+   "delta_us": -524.5
+  },
+  {
+   "component": "dense linear GEMV (mmvq)",
+   "holon_us": 520.7,
+   "ref_us": 924.0,
+   "delta_us": -403.3
+  },
+  {
+   "component": "activation quant (q8_1)",
+   "holon_us": 274.9,
+   "ref_us": 617.6,
+   "delta_us": -342.7
+  },
+  {
+   "component": "embedding / glue",
+   "holon_us": 177.0,
+   "ref_us": 62.8,
+   "delta_us": 114.2
+  },
+  {
+   "component": "norms",
+   "holon_us": 142.9,
+   "ref_us": 175.6,
+   "delta_us": -32.7
+  },
+  {
+   "component": "router (gate GEMV + top-k)",
+   "holon_us": 280.8,
+   "ref_us": 268.6,
+   "delta_us": 12.2
+  },
+  {
+   "component": "memcpy D2H",
+   "holon_us": 0.6,
+   "ref_us": 11.7,
+   "delta_us": -11.1
+  },
+  {
+   "component": "MoE expert GEMV (mmvq, ids)",
+   "holon_us": 899.8,
+   "ref_us": 908.5,
+   "delta_us": -8.7
+  },
+  {
+   "component": "sampling / logits",
+   "holon_us": 5.5,
+   "ref_us": 0.0,
+   "delta_us": 5.5
+  },
+  {
+   "component": "MoE combine",
+   "holon_us": 64.2,
+   "ref_us": 69.0,
+   "delta_us": -4.8
+  },
+  {
+   "component": "memcpy D2D",
+   "holon_us": 2.5,
+   "ref_us": 0.0,
+   "delta_us": 2.5
+  },
+  {
+   "component": "memcpy H2D",
+   "holon_us": 2.4,
+   "ref_us": 3.1,
+   "delta_us": -0.7
+  },
+  {
+   "component": "lm_head GEMV",
+   "holon_us": 152.9,
+   "ref_us": 153.3,
+   "delta_us": -0.4
+  }
+ ],
+ "gap_1k_vs_freetoken": [
+  {
+   "component": "attention (incl. q/k norm, RoPE, KV write)",
+   "holon_us": 326.9,
+   "ref_us": 620.0,
+   "delta_us": -293.1
+  },
+  {
+   "component": "idle (no kernel or copy on the GPU)",
+   "holon_us": 83.7,
+   "ref_us": 350.3,
+   "delta_us": -266.6
+  },
+  {
+   "component": "overlap (concurrent streams, subtracted)",
+   "holon_us": -286.3,
+   "ref_us": -26.6,
+   "delta_us": -259.7
+  },
+  {
+   "component": "embedding / glue",
+   "holon_us": 177.0,
+   "ref_us": 14.5,
+   "delta_us": 162.5
+  },
+  {
+   "component": "router (gate GEMV + top-k)",
+   "holon_us": 280.8,
+   "ref_us": 198.2,
+   "delta_us": 82.6
+  },
+  {
+   "component": "activation quant (q8_1)",
+   "holon_us": 274.9,
+   "ref_us": 199.9,
+   "delta_us": 75.0
+  },
+  {
+   "component": "MoE expert GEMV (mmvq, ids)",
+   "holon_us": 899.8,
+   "ref_us": 832.4,
+   "delta_us": 67.4
+  },
+  {
+   "component": "MoE combine",
+   "holon_us": 64.2,
+   "ref_us": 42.8,
+   "delta_us": 21.4
+  },
+  {
+   "component": "norms",
+   "holon_us": 142.9,
+   "ref_us": 136.7,
+   "delta_us": 6.2
+  },
+  {
+   "component": "memcpy D2D",
+   "holon_us": 2.5,
+   "ref_us": 6.4,
+   "delta_us": -3.9
+  },
+  {
+   "component": "memcpy H2D",
+   "holon_us": 2.4,
+   "ref_us": 3.9,
+   "delta_us": -1.5
+  },
+  {
+   "component": "lm_head GEMV",
+   "holon_us": 152.9,
+   "ref_us": 151.5,
+   "delta_us": 1.4
+  },
+  {
+   "component": "dense linear GEMV (mmvq)",
+   "holon_us": 520.7,
+   "ref_us": 520.1,
+   "delta_us": 0.6
+  },
+  {
+   "component": "sampling / logits",
+   "holon_us": 5.5,
+   "ref_us": 5.1,
+   "delta_us": 0.4
+  },
+  {
+   "component": "memcpy D2H",
+   "holon_us": 0.6,
+   "ref_us": 0.6,
+   "delta_us": 0.0
+  }
+ ],
+ "arms": [
+  {
+   "name": "holon_res",
+   "engine": "holon",
+   "flags": ""
+  },
+  {
+   "name": "llama_res",
+   "engine": "llama",
+   "flags": "-ngl 99 -fa on"
+  },
+  {
+   "name": "ft_fused",
+   "engine": "freetoken",
+   "flags": "--moe-strategy fused"
+  },
+  {
+   "name": "holon_off100",
+   "engine": "holon",
+   "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=*=1.0"
+  },
+  {
+   "name": "ft_off100",
+   "engine": "freetoken",
+   "flags": "--moe-strategy offload --moe-cache-rate 1.0"
+  }
+ ],
+ "nsys_arms": [
+  {
+   "name": "holon_res",
+   "engine": "holon",
+   "flags": "",
+   "contexts": [
+    1024
+   ],
+   "rounds": 1,
+   "nsys_context": 1024,
+   "wrap": "nsys profile -t cuda,nvtx --cuda-graph-trace=node --capture-range=cudaProfilerApi --capture-range-end=stop --sample=none --cpuctxsw=none -f true -o <report>"
+  },
+  {
+   "name": "llama_res",
+   "engine": "llama",
+   "flags": "-ngl 99 -fa on",
+   "contexts": [
+    1024
+   ],
+   "rounds": 1,
+   "nsys_context": 1024,
+   "server_wrap": "nsys profile -t cuda --cuda-graph-trace=node --sample=none --cpuctxsw=none -f true -o <report>"
+  },
+  {
+   "name": "ft_fused",
+   "engine": "freetoken",
+   "flags": "--moe-strategy fused",
+   "contexts": [
+    1024
+   ],
+   "rounds": 1,
+   "nsys_context": 1024,
+   "wrap": "nsys profile -t cuda,nvtx --cuda-graph-trace=node --capture-range=cudaProfilerApi --capture-range-end=stop --sample=none --cpuctxsw=none -f true -o <report>"
+  },
+  {
+   "name": "holon_off100",
+   "engine": "holon",
+   "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=*=1.0",
+   "contexts": [
+    1024
+   ],
+   "rounds": 1,
+   "nsys_context": 1024,
+   "wrap": "nsys profile -t cuda,nvtx --cuda-graph-trace=node --capture-range=cudaProfilerApi --capture-range-end=stop --sample=none --cpuctxsw=none -f true -o <report>"
+  },
+  {
+   "name": "ft_off100",
+   "engine": "freetoken",
+   "flags": "--moe-strategy offload --moe-cache-rate 1.0",
+   "contexts": [
+    1024
+   ],
+   "rounds": 1,
+   "nsys_context": 1024,
+   "wrap": "nsys profile -t cuda,nvtx --cuda-graph-trace=node --capture-range=cudaProfilerApi --capture-range-end=stop --sample=none --cpuctxsw=none -f true -o <report>"
+  }
+ ]
+}
