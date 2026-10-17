@@ -922,5 +922,73 @@
   "64 moe_resolve@1 5.5 us per call",
   "64 moe_resolve.lfu@1 10.3 us per call",
   "64 moe_resolve.lru@1 9.0 us per call"
- ]
+ ],
+ "plants_decode_trace": {
+  "commit": "5210c52",
+  "runs": [
+   {
+    "name": "p_shared_dec",
+    "cache": "*=0.25",
+    "policy": "placement.lfu@1",
+    "plant": "lfu-shared-victim",
+    "spec": "",
+    "trace": "decode",
+    "run": 0,
+    "build_s": 26.4,
+    "run_s": 20.0,
+    "peak_misses": 96,
+    "steps": 258,
+    "admissions": 14963,
+    "records": 14963,
+    "swap_rounds": null,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "parity": {
+     "steps": 258,
+     "decode_steps": 255,
+     "admissions": 14963,
+     "first_differing_step": 4,
+     "device_is_mirror": false
+    },
+    "vs_resident": "step 4: deltas differ for (request, sequence) [(3, 0), (5, 0)]"
+   },
+   {
+    "name": "p_vneed_dec",
+    "cache": "*=0.25",
+    "policy": "placement.lfu@1",
+    "plant": "lfu-victim-needed",
+    "spec": "",
+    "trace": "decode",
+    "run": 0,
+    "build_s": 34.4,
+    "run_s": 48.0,
+    "peak_misses": 96,
+    "steps": 258,
+    "admissions": 23913,
+    "records": 23913,
+    "swap_rounds": null,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "parity": {
+     "steps": 258,
+     "decode_steps": 255,
+     "admissions": 23913,
+     "first_differing_step": 6,
+     "device_is_mirror": true
+    },
+    "vs_resident": "step 11: deltas differ for (request, sequence) [(6, 0)]"
+   }
+  ],
+  "plants_fired": [
+   "plant lfu-victim-needed fired: {'admissions': 23913, 'fired': 959}",
+   "plant lfu-shared-victim fired: {'admissions': 14963, 'fired': 3623}"
+  ],
+  "command": "python spikes/x3_policies/run.py <gguf> <dir> 1 \"p_vneed_dec|*=0.25||lfu-victim-needed||decode\" \"p_shared_dec|*=0.25||lfu-shared-victim||decode\""
+ }
 }

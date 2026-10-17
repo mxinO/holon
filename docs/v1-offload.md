@@ -160,7 +160,9 @@ A new policy, tier or transform is a plugin naming its own Ref. A policy that ne
 not know (F4's in-graph LRU, F10's promotion) is **a contract the policy plugin owns** (`op.moe_resolve.<variant>@1`:
 `moe_resolve@1`'s signature plus the declared state, so the store calls it unchanged; its own `reference.py` and CPU
 provider in the plugin's directory; L0 runs any plugin-supplied oracle), so it lands without a std or `testing` diff
-(panel B-r2-1). Route transforms follow the same rule. What one plugin cannot do: a
+(panel B-r2-1). After the std offload API's tag (step 6), a resolve variant ships its own CUDA provider in its own
+kernel plugin: `kernels.expert_io` takes no new policy codes then (it serves `@1`, `lfu` and `lru`, built with the
+API). Route transforms follow the same rule. What one plugin cannot do: a
 miss path that changes the graph shape (a new node between resolve and combine) is a std minor of the offload store
 — recorded, not hidden.
 
@@ -947,9 +949,13 @@ Decided while building, against the text above:
   §13's band for F11's pick and decay is 0.25–0.35 ms) after its ranking moved its keys to shared memory (≈ 10 µs
   before).
 - **Plants:** `lfu-victim-needed` and `lfu-shared-victim` set plant bits the variant kernel reads (`MoeResolve.plant`,
-  zero otherwise). A needed victim's rows then read staging slot k (the victim was no miss), not its overwritten
-  slot, as §6 describes. Two predictions were too weak: both kernel plants put one slot twice in a row, which the patched
-  mmq's id-error word catches (the engine stops at step 3) before a wrong byte is emitted; and `owner-race` with its
+  zero otherwise; judge-only). A needed victim's rows then read staging slot k (the victim was no miss), not its
+  overwritten slot, as §6 describes. Their verdict (panel C, recorded): on an mmq step the patched mmq's id-error word
+  (a slot repeated in a row) stops the engine before a wrong byte is emitted — the snapshot trace, step 3; on
+  decode-only steps (mmvq, which checks no ids) the snapshot differs and the parity check fails — the decode trace:
+  `lfu-victim-needed` differs at step 11 (parity at step 6; 959 needed victims taken), `lfu-shared-victim` at step 4
+  (parity at step 4, and the device's map no longer the mirror; 3,623 shared victims). The other weak prediction:
+  `owner-race` with its
   check removed is deterministic — the snapshot differs (and the parity check with it) in every run, run-identical
   holds. `map-before-landing` failed both checks (all three runs differ from all-resident; run 0 differs from runs
   1–2). L2 was not run for the plants (§6 predicts it fails too); the exact checks above are their verdicts.

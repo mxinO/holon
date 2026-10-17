@@ -69,8 +69,8 @@ ms). Snapshot run times are not compared: route dumps synchronize eager steps an
 | `map-stale-slot` | F2–F3 `*=0.25` | snapshot differs | differs at step 10 | 2,752 rotated maps | F11 `*=0.25`: identical |
 | `owner-race` | F11 `*=0.25` | the precondition flag stops the engine | stopped at step 6 (`edit_errors`) | 3 edits | F1 `*=0.25`: identical (nothing to fire on) |
 | `owner-race-unchecked` | F11 `*=0.25` ×3 | run-identical fails | the snapshot differs at step 7 in all 3 runs, which are identical to each other (the overwrite lands before the victim's next read); the parity check also differs, at step 5 | 64 edits per run | — |
-| `lfu-victim-needed` | F11 `*=0.25` | snapshot differs | the engine stops at step 3: the arena kernel's id-error word (4: a slot repeated in a row) | 648 of 1,153 admissions took a needed victim | F2–F3 `*=0.25`: identical |
-| `lfu-shared-victim` | F11 `*=0.25` | snapshot differs | the engine stops at step 3, as above | 48 shared victims of 521 admissions | F2–F3 `*=0.25`: identical |
+| `lfu-victim-needed` | F11 `*=0.25` | snapshot differs (revised: on an mmq step the id-error word stops the engine; on decode-only steps the snapshot differs and parity fails) | the engine stops at step 3: the arena kernel's id-error word (4: a slot repeated in a row); on the decode trace the snapshot differs at step 11, parity at step 6 | 648 of 1,153 admissions took a needed victim (decode trace: 959 of 23,913) | F2–F3 `*=0.25`: identical |
+| `lfu-shared-victim` | F11 `*=0.25` | as above | the engine stops at step 3, as above; on the decode trace the snapshot and parity differ at step 4 | 48 shared victims of 521 admissions (decode trace: 3,623 of 14,963) | F2–F3 `*=0.25`: identical |
 
 ## What it decides
 

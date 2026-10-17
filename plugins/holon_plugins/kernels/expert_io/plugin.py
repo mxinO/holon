@@ -3,7 +3,9 @@ for every entry), its variants `moe_resolve.lfu@1` (F11) and `moe_resolve.lru@1`
 the policy's state and admits misses into victims' slots —, and `expert_fetch@1` (the zero-copy gather of missed
 units from a mapped host pool into their slots, 8 CTAs × 256 threads of 16-byte loads: step 0's M1, docs/v1-offload.md
 §13). Op contracts: std.moe.kernels, and the placement plugins' (placement.lfu, placement.lru). A variant's `lend`
-runs eagerly (ring steps are never graphed) in torch ops.
+runs eagerly (ring steps are never graphed) in torch ops. `MoeResolve.plant` is judge-only: the judge's calibration
+plants set its bits; production never does. After the std offload API's tag no new policy codes land here (a later
+variant ships its own CUDA provider, docs/v1-offload.md D3).
 
 The native module is built ahead of time (`python -m holon_plugins.kernels.expert_io.prebuild`); without it an
 instance cannot be created and the error names that command."""
@@ -35,7 +37,7 @@ class Modules:
 
 
 class MoeResolve:
-    plant = 0                              # the judge's calibration bugs (variants; judge/holon_judge/planted.py)
+    plant = 0                              # judge-only: the calibration bugs' bits (judge/holon_judge/planted.py)
 
     def __init__(self, modules: Modules, op: str, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.lib, self.policy, self.roles, self.staging = modules(ctx.fingerprint.sm), POLICIES[op], roles, staging
