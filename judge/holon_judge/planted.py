@@ -1000,6 +1000,8 @@ def owner_race(checked: bool = True) -> Iterator[None]:
         g = int(collections.Counter(records[:, 0].tolist()).most_common(1)[0][0])
         view, groups = store.residency.host, store.layers
         whole = (view[g] >= 0).all(-1)
+        if not whole.any():                                  # every expert of the layer lent or gone: none to take
+            return
         score = store.state["score"][g].float().cpu().numpy()
         x = int(min(whole.nonzero()[0], key=lambda e: (score[e], e)))
         store.residency.edit(step.step, [(g, x, r, int(view[g, x, r]), -1) for r in range(store.roles)])
