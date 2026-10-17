@@ -83,12 +83,16 @@ class EngineConfig:
         {}, "op name -> preferred provider (a lock's pins): used where it supports the site, else default priority")
     slots: dict[str, str] = _setting({}, "slot -> plugin, where several are installed")
     plugin_options: dict[str, object] = _setting({}, "plugin options, read by plugins, never the core")
+    host_memory: int = _setting(0, "bytes of page-locked host memory plugin pools may take (0: none)")
+    paged_min_tokens: int | None = _setting(
+        None, "tokens of paged state per pool sized before plugin fill pools grow; default: max_model_len")
+    loop_core: int | None = _setting(None, "CPU core to pin the engine loop to (e.g. one kept free of CPU workers)")
 
     def __post_init__(self) -> None:
         for name in ("page_size", "max_seqs", "max_model_len", "max_step_tokens"):
             if getattr(self, name) < 1:
                 raise ValueError(f"EngineConfig.{name} must be >= 1")
-        for name in ("max_draft_tokens", "chunk_with_decode"):
+        for name in ("max_draft_tokens", "chunk_with_decode", "host_memory"):
             if getattr(self, name) < 0:
                 raise ValueError(f"EngineConfig.{name} must be >= 0")
 
@@ -98,7 +102,7 @@ class _Inflight:
     """A launched step: per-row snapshots (seq, tokens computed, sampled) taken at launch, and its results."""
 
     rows: list[tuple[Seq, int, int]]          # (seq, tokens computed, logits rows: 0 | 1 | 1 + k)
-    k: int                                   # the plan's draft_k
+    plan: BatchPlan
     out: Launched
     sync: bool                               # commit at once (prompt logprobs were extracted on the host)
     publishes: list = dataclasses.field(default_factory=list)   # payloads to register at the commit
@@ -134,7 +138,8 @@ class Engine:
         self.spec = model_plugin.recipe(source.config(), source.kind)
         self.eos = source.eos_token_ids
 
-        self.ledger = Ledger(self.device)
+        floor = cfg.max_model_len if cfg.paged_min_tokens is None else cfg.paged_min_tokens
+        self.ledger = Ledger(self.device, host_memory=cfg.host_memory, paged_min_tokens=floor)
         # Speculative decoding (design §7.6) needs drafts enabled and a draft policy installed: then a drafter is built.
         # Units see `max_draft_tokens` 0 without one, and `chunk_with_decode` 0 with one (steps then alternate and never
         # mix), so they and the scheduler share this one predicate.
@@ -185,6 +190,14 @@ class Engine:
             self.processor = p.load(p.single("logits_processor", cfg.slots["logits_processor"])).build(
                 self.ctx, VocabView(self.spec.vocab, self.eos, source.tokenizer))
 
+        # Shared objects (`BuildCtx.shared`): their last pool requests, then a reset after every materialize.
+        self.shared = list(self.ctx.shared_objects.values())
+        for o in self.shared:
+            if hasattr(o, "before_materialize"):
+                o.before_materialize(self.ctx)
+        self.ledger.after_materialize = [functools.partial(o.after_materialize, self.ctx) for o in self.shared
+                                         if hasattr(o, "after_materialize")]
+
         self._hits: dict[Seq, int | None] = {}            # first admission's prefix hit, None once reported
 
         def admit(seq: Seq) -> None:
@@ -213,16 +226,18 @@ class Engine:
                                  verifier, drafter, pools=self.ledger.pools, rewinders=rewinders,
                                  sub_planners=sub_planners, substeps=substeps,
                                  namespaces=[ns for ns, _ in aux.modules] if aux is not None else [],
-                                 verify_widths=self._verify_widths(), processor=self.processor)
+                                 verify_widths=self._verify_widths(), processor=self.processor, shared=self.shared)
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None
                                 else self.executor.state_memory(self.ledger, cfg.memory_fraction))
         if cfg.clamp_context:
             self._clamp()
         self.state.reset_padding()
         for pool in self.ledger.pools.values():          # fresh segments, so they show the allocator setting
-            if pool.buffer is not None:                  # (a plugin pool may get no units)
+            if pool.buffer is not None and not pool.host:   # (a plugin pool may get no units)
                 platform.check_expandable(pool.buffer)
         self.executor.capture_graphs()
+        if cfg.loop_core is not None:
+            platform.pin_loop(cfg.loop_core)
 
         self._inflight: _Inflight | None = None
         self._ids = itertools.count()
@@ -362,9 +377,11 @@ class Engine:
         """Release the device memory now (graphs, state pools, weights) instead of whenever the garbage collector
         breaks the engine's reference cycles; the engine is unusable afterwards."""
         self.drain()
-        getattr(self.processor, "shutdown", lambda: None)()
+        for o in (self.processor, *self.shared):
+            getattr(o, "shutdown", lambda: None)()
+        platform.synchronize(self.device)               # the copy stream too, before host pools go
         self.executor = self._inflight = None
-        self.ledger.free()
+        self.ledger.free(host=True)
         gc.collect()
         platform.release_cache(self.device)
 
@@ -476,7 +493,7 @@ class Engine:
                     seq.inexact += 1
                 if seq.status is not running:
                     self.sched.finished_prefill(seq)
-        return _Inflight(rows, plan.draft_k, out, sync, ops.publishes)
+        return _Inflight(rows, plan, out, sync, ops.publishes)
 
     @staticmethod
     def _masks(rows: list[tuple[Seq, int, int]]) -> tuple[list[MaskRow], np.ndarray]:
@@ -509,6 +526,8 @@ class Engine:
         """Host bookkeeping once a step's results are on the host: tokens, finishing, publishing, streaming."""
         out = step.out
         out.done.synchronize()
+        for observe, telemetry in out.observed:         # shared objects, before any token is emitted
+            observe(step.plan, telemetry)
         tokens = out.tokens.tolist() if out.tokens is not None else []
         accepts = iter(out.accepts.tolist() if out.accepts is not None else [])
         drafts = out.drafts.tolist() if out.drafts is not None else None
@@ -534,7 +553,7 @@ class Engine:
             if seq.status is finished:             # finished at an earlier commit; this row was extra
                 continue
             if drafts is not None:
-                self.policy.observe(seq, step.k, drafts[i], accepted)
+                self.policy.observe(seq, step.plan.draft_k, drafts[i], accepted)
                 if m > 1:                            # this row verified what the last commit's drafts were
                     self.spec_counts["drafted"] += min(seq.n_draft, m - 1)
                     self.spec_counts[m - 1, accepted] += 1

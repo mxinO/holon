@@ -1,6 +1,8 @@
 """Device abstraction (design §8). The only place in the core allowed to touch `torch.cuda` (invariant 6)."""
 from __future__ import annotations
 
+import mmap
+import os
 import re
 from collections.abc import Callable
 
@@ -18,6 +20,11 @@ def fingerprint(device: torch.device) -> Fingerprint:
     words = [w for w in re.split(r"[\s_]+", p.name.lower()) if w not in ("nvidia", "geforce")]
     return Fingerprint(gpu="-".join(words), sm=10 * p.major + p.minor, vram_gib=round(p.total_memory / 2**30),
                        toolchain=toolchain, num_sms=p.multi_processor_count)
+
+
+def pin_loop(core: int) -> None:
+    """Run the calling thread, the engine loop, on CPU `core` only (e.g. one no CPU worker spins on)."""
+    os.sched_setaffinity(0, {core})
 
 
 def visible_sms() -> list[int]:
@@ -99,8 +106,39 @@ def pinned_empty(n: int, dtype: torch.dtype, device: torch.device) -> torch.Tens
     return torch.empty(n, dtype=dtype, pin_memory=device.type == "cuda")
 
 
+def host_memory(nbytes: int, device: torch.device, mapped: bool) -> torch.Tensor:
+    """Exactly `nbytes` of host memory in whole pages (an anonymous map), page-locked for CUDA by registering it — not
+    torch's pinned allocator, which rounds up to a power of two —, with `mapped` also addressable by kernels
+    (`device_alias`). Plain memory off CUDA. Release it with `free_host` before dropping it."""
+    out = torch.frombuffer(mmap.mmap(-1, nbytes), dtype=torch.uint8)     # the tensor keeps the map alive
+    if device.type == "cuda":
+        _check(torch.cuda.cudart().cudaHostRegister(out.data_ptr(), nbytes, 1 | 2 * mapped), "cudaHostRegister")
+    return out                                                           # (flags: portable, mapped)
+
+
+def free_host(t: torch.Tensor, device: torch.device) -> None:
+    if device.type == "cuda":
+        _check(torch.cuda.cudart().cudaHostUnregister(t.data_ptr()), "cudaHostUnregister")
+
+
+def device_alias(t: torch.Tensor, device: torch.device) -> torch.Tensor:
+    """`host_memory(…, mapped=True)` as a tensor on `device` over the same bytes (unified addressing: registered
+    memory has its host address on the device); `t` itself off CUDA."""
+    if device.type != "cuda":
+        return t
+    view = type("Mapped", (), {"__cuda_array_interface__": {
+        "shape": (t.numel(),), "typestr": "|u1", "data": (t.data_ptr(), False), "version": 3}})
+    return torch.as_tensor(view(), device=device)
+
+
+def _check(err: object, what: str) -> None:
+    if int(err):
+        raise RuntimeError(f"{what}: {torch.cuda.cudart().cudaGetErrorString(err)}")
+
+
 class Event:
-    """Orders host work after device work: `record()` in stream order, `synchronize()` waits for it on the host."""
+    """Orders host work after device work: `record()` in stream order, `synchronize()` waits for it on the host,
+    `wait()` makes work enqueued next on the current stream wait for it on the device."""
 
     def __init__(self, device: torch.device) -> None:
         self._event = torch.cuda.Event() if device.type == "cuda" else None
@@ -112,6 +150,31 @@ class Event:
     def synchronize(self) -> None:
         if self._event is not None:
             self._event.synchronize()
+
+    def wait(self) -> None:
+        if self._event is not None:
+            torch.cuda.current_stream().wait_event(self._event)
+
+
+class Stream:
+    """A stream beside the step's (the core's copies); off CUDA, work runs at once, in order."""
+
+    def __init__(self, device: torch.device) -> None:
+        self.device = device
+        self._stream = torch.cuda.Stream(device) if device.type == "cuda" else None
+
+    def run(self, fn: Callable[[], object], after: Event | None = None) -> Event:
+        """Enqueue `fn()`'s device work on this stream, after `after`; the event recorded once it is done."""
+        done = Event(self.device)
+        if self._stream is None:
+            fn()
+            return done
+        with torch.cuda.stream(self._stream):
+            if after is not None:
+                after.wait()
+            fn()
+            done.record()
+        return done
 
 
 class no_host_sync:  # noqa: N801 — used as a context manager

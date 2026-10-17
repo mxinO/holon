@@ -18,8 +18,8 @@ from holon.api import Batch, BatchPlan, DeviceBatch, Logprobs, MaskRow, Pages, S
 from . import platform
 from .batching import host_plan, padded
 from .build import StepContext, local_batch
-from .inputs import Uploader
-from .memory import Ledger, run_mem_ops
+from .inputs import Uploader, Writes
+from .memory import Copies, Ledger, run_mem_ops
 from .state import StateManager
 
 PROMPT_LOGPROB_CHUNK = 256     # rows of full-vocabulary logits materialized at once for prompt logprobs
@@ -53,6 +53,7 @@ class Launched:
     prompt_logprobs: list[Logprobs] = dataclasses.field(default_factory=list)   # per PromptRows, on the host now
     graphed: bool = False                    # replayed a captured graph
     draft_tokens: torch.Tensor | None = None   # per plan row: the drafts themselves (with a logits processor)
+    observed: list = dataclasses.field(default_factory=list)   # (a shared object's `after_commit`, its telemetry)
 
 
 @dataclasses.dataclass
@@ -112,13 +113,15 @@ class Executor:
                  planners: dict[str, Any], verifier: Any = None, drafter: Any = None,
                  pools: dict[str, Any] | None = None, rewinders: list[Any] = (),
                  sub_planners: dict[str, list[Any]] | None = None, substeps: tuple[int, int] = (0, 0),
-                 namespaces: list[str] = (), verify_widths: tuple[int, ...] = (), processor: Any = None) -> None:
+                 namespaces: list[str] = (), verify_widths: tuple[int, ...] = (), processor: Any = None,
+                 shared: list[Any] = ()) -> None:
         """`cfg`: the EngineConfig (sizes, graphs on or off); `pools`: every ledger pool, by name (for MemOps);
         `rewinders`: what rolls back past rejected drafts after each verify (`rewind(ctx)` callables);
         `sub_planners`: per auxiliary state group, one planner per drafter sub-step; `substeps`: how many sub-steps a
         step may have and their widest row (the drafter's declarations); `namespaces`: the auxiliary models';
         `verify_widths`: the verify-row widths (1 + k) the draft policy may ask for, captured as graphs; `processor`:
-        the logits processor, if one is selected."""
+        the logits processor, if one is selected; `shared`: the engine's shared objects, whose step hooks run around
+        each launch."""
         self.cfg, self.device, self.model, self.vocab, self.state = cfg, device, model, vocab, state
         self.pools = pools or {}
         self.sampler, self.planners, self.verifier, self.drafter = sampler, planners, verifier, drafter
@@ -161,6 +164,11 @@ class Executor:
         self._out_draft_tokens = [platform.pinned_empty(seqs * k, torch.int64, device).view(seqs, k)
                                   for _ in range(2)] if processor is not None and drafter is not None else None
         self._out_turn = 0
+        self.copies = Copies(device, self.pools)               # MemOps with `after` or `lands_by`
+        self.writes = Writes(device)                           # what shared objects write before a launch
+        self._before = [o.before_launch for o in shared if hasattr(o, "before_launch")]
+        self._observers = [o for o in shared if hasattr(o, "after_commit")]
+        self._telemetry: list[dict[str, tuple[torch.Tensor, list[torch.Tensor]]]] | None = None   # at first launch
 
     def _sub_fields(self, cfg: Any) -> dict[str, tuple[int, torch.dtype]]:
         """Static buffers of each drafter sub-step: up to `max_seqs` rows of the widest declared width."""
@@ -300,7 +308,12 @@ class Executor:
         knows; `logprobs`: some sampled row reports logprobs; `prompt` (not None: a prompt-logprob step) — those are
         computed now, on the host, so that step waits for the device; `masks`: the constrained rows (the logits
         processor fills their masks) and their logits rows."""
-        rows, n_sampled = len(plan.slots), int(plan.n_logits.sum())
+        rows, n_sampled, step = len(plan.slots), int(plan.n_logits.sum()), plan.step
+        writes, mem_ops = [], list(plan.mem_ops)        # with the shared objects' (`before_launch`)
+        for before in self._before:
+            w, ops = before(plan)
+            writes += w
+            mem_ops += ops
         width = int(plan.n_query.max(initial=1))
         uniform = bool((plan.n_query == width).all() and (plan.n_logits == width).all())   # decode or verify rows
         graphed = (self.graphs is not None and prompt is None and not logprobs        # graphs return tokens only
@@ -312,8 +325,13 @@ class Executor:
         key = self._graph_key(ctx, width) if graphed else None
         out = sampled = accepts = drafts = None
         recorded: list[Logprobs] = []
+        # Asynchronous MemOps go to the copy stream; this step waits for the copies landing by it, then the writes.
+        self.copies.add([op for op in mem_ops if op.after is not None or op.lands_by is not None], step)
+        mem_ops = [op for op in mem_ops if op.after is None and op.lands_by is None]
+        self.copies.launching(step)
+        self.writes.run(writes)
         # MemOps run eagerly in stream order around the forward, never inside a graph: their count varies per step.
-        run_mem_ops(plan.mem_ops, self.pools, "pre_forward")
+        run_mem_ops(mem_ops, self.pools, "pre_forward")
         if key is not None:
             sampled, accepts = self.graphs.run(key, lambda: self._decode(ctx))   # verify, rewind, drafter included
         else:
@@ -333,7 +351,7 @@ class Executor:
                 sampled = self._store(ctx, out.tokens)
             if self.drafter is not None:
                 self._run_drafter(ctx, h)           # its state for this step's tokens, then the next step's drafts
-        run_mem_ops(plan.mem_ops, self.pools, "post_sample")
+        run_mem_ops(mem_ops, self.pools, "post_sample")
         draft_tokens = None
         if sampled is not None and self.drafter is not None:
             slots = ctx.batch.dev.slots[:rows]
@@ -351,9 +369,21 @@ class Executor:
             if accepts is not None:
                 accepts = self._out_accepts[self._out_turn][: len(accepts)].copy_(accepts, non_blocking=True)
             self._out_turn ^= 1
+        observed = self._observe(step)
         done = platform.Event(self.device)
         done.record()
-        return Launched(tokens, accepts, drafts, lps, done, recorded, key is not None, draft_tokens)
+        self.copies.launched(step, done)
+        return Launched(tokens, accepts, drafts, lps, done, recorded, key is not None, draft_tokens, observed)
+
+    def _observe(self, step: int) -> list[tuple[Any, dict[str, torch.Tensor]]]:
+        """Copy the shared objects' telemetry to this launch's pinned host buffers (two per buffer, alternating: a
+        step's are read at its commit, which precedes the launch two steps later)."""
+        if self._telemetry is None:
+            self._telemetry = [{name: (t, [platform.pinned_empty(t.numel(), t.dtype, self.device).view(t.shape)
+                                           for _ in range(2)]) for name, t in getattr(o, "telemetry", {}).items()}
+                               for o in self._observers]
+        return [(o.after_commit, {name: host[step % 2].copy_(t, non_blocking=True) for name, (t, host) in tel.items()})
+                for o, tel in zip(self._observers, self._telemetry, strict=True)]
 
     def _decode(self, ctx: StepContext) -> tuple[torch.Tensor, torch.Tensor | None]:
         """A decode or verify step's device work from inputs to tokens (and accepted drafts), the rewind and the

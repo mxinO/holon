@@ -52,6 +52,7 @@ class BuildContext:
         self.aux: Any = None               # the engine's AuxModels, which `aux_model` builds into (engine builds)
         self.taps: dict[int, list[Any]] = {}   # layer -> consumers of the residual stream after it (`Model.trunk`)
         self.sources: dict[str, str] = {}      # path -> identity of every checkpoint `weight_source` opened (plans)
+        self.shared_objects: dict[str, Any] = {}   # key -> the engine's one object (`shared`)
 
     def unit_factory(self, ref: Ref) -> Any:
         """The registered factory (usually the unit class) serving `ref`, loading its plugin if needed."""
@@ -113,11 +114,15 @@ class BuildContext:
     def workspace(self, name: str, nbytes: int) -> torch.Tensor:
         return self.static(f"workspace.{name}", (nbytes,), torch.uint8)
 
-    def pool(self, name: str, *, unit_bytes: int, segments: int = 1, min_units: int = 0, pref_units: int = 0) -> Any:
+    def pool(self, name: str, **sizes: Any) -> Any:
         if self.ledger is None:
             raise PluginError(f"pool {name!r}: a model-only build has no memory ledger")
-        return self.ledger.plugin_pool(name, unit_bytes=unit_bytes, segments=segments, min_units=min_units,
-                                       pref_units=pref_units)
+        return self.ledger.plugin_pool(name, **sizes)
+
+    def shared(self, key: str, factory: Any) -> Any:
+        if key not in self.shared_objects:
+            self.shared_objects[key] = factory(self)
+        return self.shared_objects[key]
 
     def bind_state(self, spec: Any, pool: Any) -> None:
         """Make `pool` the state of `spec` for its layers (engine builds; model-only builds bind nothing)."""
@@ -187,6 +192,9 @@ class ChildContext:
 
     def pool(self, name: str, **sizes: Any) -> Any:
         return self.parent.pool(f"{self.namespace}.{name}", **sizes)
+
+    def shared(self, key: str, factory: Any) -> Any:
+        return self.parent.shared(key, factory)         # engine-global: built with the engine's context
 
 
 @dataclasses.dataclass

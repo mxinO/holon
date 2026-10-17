@@ -29,9 +29,11 @@ CORE_UNIT = "holon"          # the core pins its own source like a unit: a core 
 CORE_DIR = pathlib.Path(__file__).resolve().parents[1]
 TREE = CORE_DIR.parents[1]   # the source tree holding the core: its `plans/` and `uv.lock`
 RUNTIME = ("holonlm", "holonlm-std", "holonlm-plugins")     # what a user installs; `uv_lock` hashes their closure
-# EngineConfig fields a plan does not record: identified elsewhere (model_id, class, sites), per-host budgets, or how
-# the deployment was arrived at (pins and preferences show as sites; the clamp as `max_model_len`).
-NOT_PLANNED = {"model", "device", "kernels", "kernel_preferences", "memory_fraction", "state_memory", "clamp_context"}
+# EngineConfig fields a plan does not record: identified elsewhere (model_id, class, sites), per-host budgets and
+# cores (a plugin pins the pool sizes that matter in its own options), or how the deployment was arrived at (pins and
+# preferences show as sites; the clamp as `max_model_len`).
+NOT_PLANNED = {"model", "device", "kernels", "kernel_preferences", "memory_fraction", "state_memory", "clamp_context",
+               "host_memory", "paged_min_tokens", "loop_core"}
 _NOT_SOURCE_DIRS = {"__pycache__", "build", "dist"}
 _NOT_SOURCE_SUFFIXES = {".pyc", ".pyo", ".so"}
 
