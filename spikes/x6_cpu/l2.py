@@ -1,6 +1,6 @@
 """F5b's bounded L2 (docs/v1-offload.md §6): the vehicle with the CPU's share at a frozen placement
-(`std.tiered.static@1`) scored through the judge at one token per step (Tier B's decode path: every expert matmul mmvq, and F5b's rule per
-token), its split (the plan and the static placement) written for the path-aware floor:
+(`std.tiered.static@1`) scored through the judge at one token per step (Tier B's decode path: every expert matmul
+mmvq, and F5b's rule per token), its split (the plan and the static placement) written for the path-aware floor:
 
     python spikes/x6_cpu/l2.py <model.gguf> <candidate.safetensors> <split.json> "<plugin options k=v;k=v>" [plant]
 
