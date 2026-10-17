@@ -18,8 +18,12 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
   agree across the limit. Mixed types in one std.moe layer at 7 tokens (sm_86: IQ3_S gate/up on mmq, IQ4_XS down on
   mmvq); ids straight from `moe_topk`; CUDA graphs replayed with routing unlike the capture's at every decode
   bucket.
-- The padding plant (§4.6): padding rows with all k slots on one expert and the workspace pre-filled with a real
-  row's index change real rows on mmq and leave them alone on mmvq.
+- Placement (docs/v1-offload.md D4): mmq with ids always tiles, over a compact list of the active slots, so an
+  expert's rows are bitwise the same in arenas of 12, 13, 16 and 74 slots under any placement, at every tile width,
+  and in compacted launches padded with null-slot rows to the type's mmvq limit + 1 (Q4_K, Q6_K, IQ2_XXS, IQ2_S,
+  IQ3_XXS; gate/up and down). A slot repeated inside one token's ids stays outside the contract: the expert's pairs
+  past its T columns are never computed (llama.cpp's helper instead left stale entries that wrote over a real row,
+  which the §4.6 padding plant relied on; it no longer fires on mmq).
 - `moe_topk`: the reference's picks up to near-ties (fast-math `__expf` moves probabilities by a few ulps), its
   weights; ±inf and all-NaN rows give unique in-range ids; token counts off the kernel's 8-row blocks.
 - `moe_combine`: within 1 bf16 ulp of the reference, plus the f32 accumulation's rounding (the kernel's FMA) for
@@ -406,43 +410,97 @@ def test_graph_replay_follows_the_routing(ctx, qwen_stacks, name):
         assert torch.equal(y, layer()), f"{name} T={tokens}: replay on new routing differs from eager"
 
 
-@pytest.mark.parametrize("path", ["mmvq", "mmq"])
-@pytest.mark.parametrize("stage", ["gate_up", "down"])
-def test_padding_plant_changes_real_rows_on_mmq_only(ctx, lib, qwen_stacks, path, stage):
-    """The plant of design §4.6: padding rows with all k slots on one expert (a duplicate inside a row), the
-    `ggml_cuda.id` workspace pre-filled with a real row's index. mmq's compaction counts the duplicates in
-    `expert_bounds` but compacts each token once per expert, so the expert's range ends in k − 1 stale entries per
-    padding row: they write over the real row (and, on gate/up, scatter the padding input over its compact row).
-    mmvq applies each slot on its own: real rows are unchanged, bitwise. The stale entries are asserted in the
-    workspace (`ids_src1`, `ids_dst` with its J − 1 entries of read padding, `expert_bounds`, each padded to 256 B, as
-    mmq allocates them); which writer of a real row lands last is a race, so the changed output is the secondary check
-    (it held in 100/100 routings)."""
-    sg, sd = qwen_stacks["q4_k"]
-    s, kern = (sg, experts(ctx, "q4_k", H, 2 * INTER, 1, n=EQ)) if stage == "gate_up" else \
-        (sd, experts(ctx, "q4_k", INTER, H, K, n=EQ))
-    tokens = kern.mmvq_tokens if path == "mmvq" else 16
-    real, k_in = tokens - 2, s.weight.shape[2]
-    ids = uniform(tokens, EQ, seed=14)
-    x = gate_up_input(tokens, seed=14) if stage == "gate_up" else down_input(tokens, seed=14)
-    clean = kern(x, s.parts, ids)
-    victim = K + int(ids[1].argmin())          # token 1's slot on its lowest expert: computed before the plant's
-    planted = ids.clone()
-    planted[real:] = EQ - 2                    # after the victim's expert, and not the last (whose tail is unused)
-    kern.workspace.view(torch.int32).fill_(victim)
-    y = kern(x, s.parts, planted)
-    if path == "mmvq":
-        assert torch.equal(y[:real], clean[:real])
-    else:
-        j = lib.mmq_schedule(0, TYPES["q4_k"], PREC["q8_1"], s.weight.shape[1], tokens)[2]    # the tokens' tile
-        ws, n, n_dst = kern.workspace.view(torch.int32), -(-tokens * K // 64) * 64, -(-(tokens * K + j - 1) // 64) * 64
-        ids_dst, bounds = ws[n:n + n_dst], ws[n + n_dst:n + n_dst + EQ + 1]
-        lo, hi = int(bounds[EQ - 2]), int(bounds[EQ - 1])
-        assert hi - lo == int((planted == EQ - 2).sum()), "expert_bounds counts every slot of the expert"
-        stale = (K - 1) * (tokens - real)      # one compacted entry per token, k per padding row in the bounds
-        assert (ids_dst[hi - stale:hi] == victim).all() and (ids_dst[lo:hi - stale] != victim).all()
-        ref = emulated(kern, s, x, ids)[:real]
-        assert l0.check(clean[:real], ref, torch.bfloat16, k_in).passed
-        assert not l0.check(y[:real], ref, torch.bfloat16, k_in).passed, "the plant left the real rows alone"
+PLACED = ["q4_k", "q6_k", "iq2_xxs", "iq2_s", "iq3_xxs"]     # the vehicle's (Q4_K_M) and the IQ2 / IQ3 MoE quants'
+EP = 12                                                     # experts placed in an arena, k = 8 of them per token
+SLOTS = (EP, EP + 1, 16, 74)                                # docs/v1-offload.md D4's slot counts
+STAGES = {"gate_up": (H, 2 * INTER, 1), "down": (INTER, H, K)}          # in, out, input rows per token
+
+
+@dataclasses.dataclass
+class Arena:
+    """The EP experts of a stack placed among the slots of a class arena (D5), every other slot poisoned (0xFF bytes:
+    NaN scales) but the top K when there is room for them: the per-rank null slots, zero weights. Called with ids
+    < EP (an expert) or EP + j (rank j's null slot)."""
+
+    kernel: Sized
+    parts: dict[str, torch.Tensor]
+    table: torch.Tensor                                     # id -> slot
+
+    def __call__(self, x: torch.Tensor, ids: torch.Tensor) -> tuple[torch.Tensor, str]:
+        """The output and the path the kernel took."""
+        calls = dict(self.kernel.calls)
+        y = self.kernel(x, self.parts, self.table[ids.long()])
+        return y, next(p for p, n in self.kernel.calls.items() if n != calls.get(p, 0))
+
+
+def arena(ctx, s: Stack, stage: str, slots: int, placement: str) -> Arena:
+    k, out, rows = STAGES[stage]
+    null = slots >= EP + K
+    free = slots - K if null else slots
+    place = {"in order": torch.arange(EP), "reversed": torch.arange(EP).flip(0),
+             "random": torch.randperm(free, generator=torch.Generator().manual_seed(slots))[:EP]}[placement]
+    blocks = torch.full((slots, out, s.w.shape[-1]), 0xFF, dtype=torch.uint8, device="cuda")
+    blocks[place.cuda()] = s.parts["blocks"]
+    if null:
+        blocks[free:] = 0
+    table = torch.cat([place, torch.arange(free, slots)] if null else [place]).int().cuda()
+    return Arena(experts(ctx, s.name, k, out, rows, n=slots), {"blocks": blocks}, table)
+
+
+def placed_inputs(stage: str, tokens: int, seed: int) -> tuple[torch.Tensor, torch.Tensor]:
+    return (gate_up_input if stage == "gate_up" else down_input)(tokens, seed), uniform(tokens, EP, seed)
+
+
+@pytest.mark.parametrize("name", PLACED)
+@pytest.mark.parametrize("stage", sorted(STAGES))
+def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name, stage):
+    """D4's placement invariance on mmq with ids: an expert's rows are bitwise the same wherever an arena places it
+    (each of SLOTS with a random placement; at EP also reversed: permutations) and at every mmq tile width (token
+    counts from the mmvq limit + 1 to a 512-token chunk: J from 8 or 16 up to 128), all against one launch over EP
+    slots in order at 512 tokens. llama.cpp switched mmq with ids to stream-k below 90 % tile efficiency, splitting K
+    at points that move with the slot count: on every GPU at least one of SLOTS did (the dense schedule over the same
+    grid says so), and its rows differed."""
+    k, out, _ = STAGES[stage]
+    s = stack(name, EP, out, k, seed=21)
+    x, ids = placed_inputs(stage, CHUNK, seed=22)
+    ref, path = arena(ctx, s, stage, EP, "in order")(x, ids)
+    assert path == "mmq/q8_1"
+    device, typ = torch.cuda.current_device(), TYPES[name]
+    assert any(lib.mmq_schedule(device, typ, PREC["q8_1"], out * n, 64)[0] == 2 for n in SLOTS)
+    launches = [(n, "random", t) for n in SLOTS for t in (64, CHUNK)] + [(EP, "reversed", 64)]
+    a = arena(ctx, s, stage, SLOTS[-1], "random")
+    tiles = sorted({a.kernel.mmvq_tokens + 1, 16, 24, 32, 40, 48, 80, 96, 112, 128, 200})
+    widths = {lib.mmq_schedule(device, typ, PREC["q8_1"], out, t)[2] for t in tiles}
+    assert min(widths) <= 16 and max(widths) == 128 and len(widths) >= 9
+    for n, placement, tokens in launches + [(SLOTS[-1], "random", t) for t in tiles]:
+        y, path = (a if n == SLOTS[-1] else arena(ctx, s, stage, n, placement))(x[:tokens], ids[:tokens])
+        assert path == "mmq/q8_1" and torch.equal(y, ref[:tokens]), f"{name} {stage}: {n} slots {placement}, T={tokens}"
+
+
+@pytest.mark.parametrize("name", PLACED)
+@pytest.mark.parametrize("stage", sorted(STAGES))
+def test_compacted_launches_equal_the_chunk_s(ctx, name, stage):
+    """D4's compaction: a launch over a subset of a chunk's rows, in any order, padded with null-slot rows (zero
+    activations, rank j's ids on its own null slot, repeated across the padding rows) up to the type's mmvq limit + 1
+    so the kernel takes mmq, gives those rows bitwise as the chunk's launch does, and zero padding rows; a subset
+    above the limit needs no padding. Chunks of 64 rows, and of 8, between the limits on Turing and newer (Q4_K,
+    Q6_K, IQ2_XXS 8: the chunk takes mmvq and is never compacted; IQ2_S, IQ3_XXS 7: mmq, compacted)."""
+    k, out, _ = STAGES[stage]
+    a = arena(ctx, stack(name, EP, out, k, seed=21), stage, SLOTS[-1], "random")
+    t, gen = a.kernel.mmvq_tokens, torch.Generator().manual_seed(24)
+    for chunk in (8, 64):
+        x, ids = placed_inputs(stage, chunk, seed=chunk)
+        y, path = a(x, ids)
+        if chunk <= t:
+            assert path == "mmvq/q8_1"
+            continue
+        for r in sorted({1, t, min(2 * t, chunk - 1)}):
+            rows, pad = torch.randperm(chunk, generator=gen)[:r].cuda(), max(0, t + 1 - r)
+            xg = torch.cat([x[rows], x.new_zeros(pad, *x.shape[1:])])
+            ids_g = torch.cat([ids[rows], (EP + torch.arange(K, dtype=torch.int32, device="cuda")).expand(pad, K)])
+            yg, path = a(xg, ids_g)
+            what = f"{name} {stage}: {r} of {chunk} rows + {pad} padding"
+            assert path == "mmq/q8_1" and torch.equal(yg[:r], y[rows]) and not yg[r:].any(), what
 
 
 def topk(ctx, n: int, k: int = K, renormalize: bool = True):
@@ -580,9 +638,10 @@ def test_moe_layer_binds_its_activation_dtypes_and_f32_outputs(ctx):
 
 
 def test_the_workspace_formula_with_ids_is_tight(ctx, lib):
-    """Negative control with ids on a J = 128 shape with the stream-k fixup: 8 experts of 384 rows at 512 tokens are
-    3 · 8 · 4 = 96 tiles (dense mmq_schedule over out · E rows mirrors that grid when out is a multiple of I). The
-    formula exceeds what the call takes by at most its spare."""
+    """Negative control with ids on a J = 128 shape where llama.cpp took the stream-k fixup: 8 experts of 384 rows at
+    512 tokens are 3 · 8 · 4 = 96 tiles (dense mmq_schedule over out · E rows mirrors that grid when out is a multiple
+    of I). With ids mmq now always tiles, and the formula, which has no fixup term, exceeds what the call takes by at
+    most its spare."""
     n, out, device = 8, 384, torch.cuda.current_device()
     if lib.mmq_schedule(device, TYPES["q4_k"], PREC["q8_1"], out * n, CHUNK) != (2, 128, 128):
         pytest.skip("96 tiles need no stream-k fixup on this GPU's SM count")

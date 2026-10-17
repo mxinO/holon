@@ -1,0 +1,53 @@
+{
+ "what": "kernels.ggml_cuda mmq with ids for one Qwen3-30B-A3B layer before vs after the forced-tiling and compact-active-slot vendor patches (docs/v1-offload.md D4); a timing note, not a gate",
+ "gpu": "RTX A5000",
+ "sm": 86,
+ "date": "2026-10-17",
+ "base_commit": "e3f02d6 (before: llama.cpp cbe28bb3 + the vendor.patch of that commit)",
+ "method": "linear_experts@2 through the plugin (LinearExperts), Q4_K gate/up 2048 -> 1536 (bf16 input, one row per token) then Q4_K down 768 -> 2048 (f32, one row per slot), top_k 8; the 128 experts at random slots of an S-slot arena, every token on 8 random experts; GPU kernel time per layer (both calls) summed by kernel with torch.profiler over 50 iterations after 5 warm-ups",
+ "units": "microseconds per layer",
+ "before": {
+  "S=128 T=16": {
+   "mul_mat_q": 452.3,
+   "mm_ids_helper": 5.2,
+   "quantize_mmq_q8_1": 5.2
+  },
+  "S=128 T=512": {
+   "mul_mat_q": 2536.9,
+   "mm_ids_helper": 44.4,
+   "quantize_mmq_q8_1": 42.0
+  },
+  "S=3000 T=16": {
+   "mul_mat_q": 1138.4,
+   "mm_ids_helper": 9.4,
+   "quantize_mmq_q8_1": 5.0
+  },
+  "S=3000 T=512": {
+   "mul_mat_q": 7879.7,
+   "mm_ids_helper": 132.6,
+   "quantize_mmq_q8_1": 40.1
+  }
+ },
+ "after": {
+  "S=128 T=16": {
+   "mul_mat_q": 456.0,
+   "mm_ids_helper": 8.0,
+   "quantize_mmq_q8_1": 5.2
+  },
+  "S=128 T=512": {
+   "mul_mat_q": 2556.3,
+   "quantize_mmq_q8_1": 41.9,
+   "mm_ids_helper": 31.9
+  },
+  "S=3000 T=16": {
+   "mul_mat_q": 453.0,
+   "mm_ids_helper": 8.6,
+   "quantize_mmq_q8_1": 5.1
+  },
+  "S=3000 T=512": {
+   "mul_mat_q": 8296.3,
+   "quantize_mmq_q8_1": 40.7,
+   "mm_ids_helper": 32.4
+  }
+ }
+}

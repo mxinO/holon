@@ -287,7 +287,8 @@ void ggml_cuda_mul_mat_q(
 
     ggml_cuda_pool_alloc<int32_t> ids_src1(ctx.pool(), ne_get_rows);
     ggml_cuda_pool_alloc<int32_t> ids_dst(ctx.pool(), ne_get_rows + J_best-1); // Needs to be padded for unconditional memory access.
-    ggml_cuda_pool_alloc<int32_t> expert_bounds(ctx.pool(), ne02 + 1);
+    const int n_z = ggml_cuda_mm_ids_nz(ne02, ne12, n_expert_used); // Holon: compact z entries, then their slots (mmid.cuh)
+    ggml_cuda_pool_alloc<int32_t> expert_bounds(ctx.pool(), 2*n_z + 1);
 
     // gate/up activations are broadcast across experts (ne11 == 1): quantize each token once and
     // scatter to its slots. ids_src1 then holds the inverse map (token slot -> compact row).
@@ -344,12 +345,13 @@ void ggml_cuda_mul_mat_q(
                                          ne11 * ne10_padded * sizeof(block_q8_1) / (QK8_1 * sizeof(int));
     const int64_t s13 = ne12*s12;
 
-    // Note that ne02 is used instead of ne12 because the number of y channels determines the z dimension of the CUDA grid.
+    // Note that n_z is used instead of ne12 because the number of y channels determines the z dimension of the CUDA grid.
+    // Holon: n_z compact entries, not the ne02 slots; each names its slot after expert_bounds (mmid.cuh)
     const mmq_args args = {
         src0_d, src0->type, (const int *) src1_q8_1.get(), ids_dst.get(), expert_bounds.get(), dst_d,
         src1_scale.ptr,
         ne00, ne01, ne_get_rows, s01, ne_get_rows, s1,
-        ne02, ne02, s02, s12, s2,
+        n_z, n_z, s02, s12, s2,
         ne03, ne13, s03, s13, s3,
         ne12, J_best};
 

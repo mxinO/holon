@@ -9,6 +9,7 @@
 #include "common.cuh"
 #include "convert.cuh"
 #include "getrows.cuh"
+#include "mmid.cuh"
 #include "mmq.cuh"
 #include "mmvq.cuh"
 #include "moe-weighted-reduction.cuh"
@@ -180,7 +181,7 @@ size_t holon_ggml_workspace_high_water(void) {
 namespace {
 
 // `fixup_tiles` partial f32 tiles per SM for the stream-k fixup: a dense call keeps two (each block's last, and the
-// end of its first, held in f32 for the fixup's single rounding: mmq.cuh, mmq_store), a call with ids one.
+// end of its first, held in f32 for the fixup's single rounding: mmq.cuh, mmq_store), a call with ids none (it tiles).
 size_t workspace_bytes(int64_t in, int64_t rows, int fixup_tiles) {
     const int64_t in_padded = GGML_PAD(in, MATRIX_ROW_PADDING);
     // mmq's q8_1 activations plus its tile padding (J <= 128 rows, rounded up to a load chunk of <= 512 ints);
@@ -270,11 +271,12 @@ int holon_ggml_use_mmvq_id(int type, int64_t tokens) {
 
 size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int64_t experts) {
     // as ggml_cuda_mul_mat_q allocates with ids: ids_src1, ids_dst (padded by J - 1 <= 127 for its unconditional
-    // reads), expert_bounds, then q8_1 and the fixup as a dense call over the tokens·k (token, slot) rows; mmvq with
-    // ids needs less
+    // reads), expert_bounds and the slots of the compact launch's z entries (mmid.cuh), then q8_1 as a dense call
+    // over the tokens·k (token, slot) rows; no stream-k fixup (mmq with ids always tiles); mmvq with ids needs less
     const size_t ids_src1 = GGML_PAD(tokens*k*sizeof(int32_t), POOL_ALIGN);
     const size_t ids_dst = GGML_PAD((tokens*k + 127)*sizeof(int32_t), POOL_ALIGN);
-    return ids_src1 + ids_dst + GGML_PAD((experts + 1)*sizeof(int32_t), POOL_ALIGN) + workspace_bytes(in, tokens*k, 1);
+    const size_t bounds = GGML_PAD((2*ggml_cuda_mm_ids_nz(experts, tokens, k) + 1)*sizeof(int32_t), POOL_ALIGN);
+    return ids_src1 + ids_dst + bounds + workspace_bytes(in, tokens*k, 0);
 }
 
 void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, int64_t in, const void * x, int x_bf16,

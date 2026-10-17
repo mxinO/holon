@@ -66,6 +66,7 @@ from . import extension
 QLINEAR, QLINEAR_GLU, QEMBEDDING = "qlinear", "qlinear_glu", "qembedding"
 LINEAR_EXPERTS, MOE_TOPK, MOE_COMBINE = "linear_experts", "moe_topk", "moe_combine"
 CHUNK = 512                     # mmq rows per call: llama.cpp's ubatch; sizes the workspace and the f32 buffer
+ID_PAIRS = 16384                # the most (token, expert) pairs mmq's id helper sorts per call (mmid.cuh)
 # Supported ggml types (design §4.6) and their ggml type ids.
 TYPES = {"q4_0": 2, "q4_1": 3, "q5_0": 6, "q5_1": 7, "q8_0": 8, "q2_k": 10, "q3_k": 11, "q4_k": 12, "q5_k": 13,
          "q6_k": 14, "iq2_xxs": 16, "iq2_xs": 17, "iq3_xxs": 18, "iq1_s": 19, "iq4_nl": 20, "iq3_s": 21, "iq2_s": 22,
@@ -491,7 +492,8 @@ def _supports_linear_experts(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
     # out_y a multiple of 4: mmvq with ids at one token bounds a block's rows (up to 4) by the slot stride, not out_y
     swiglu = f["glu"] == "swiglu"
     return (_supports_matmul(f, act_quant, types) and f["out_dtype"] == "float32" and f["glu"] in ("none", "swiglu")
-            and f["out"] % (8 if swiglu else 4) == 0 and f["rows_per_token"] in (1, f["top_k"]))
+            and f["out"] % (8 if swiglu else 4) == 0 and f["rows_per_token"] in (1, f["top_k"])
+            and CHUNK * f["top_k"] <= ID_PAIRS)
 
 
 def _supports_moe_topk(f: dict) -> bool:
