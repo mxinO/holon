@@ -5,11 +5,12 @@ A client (the MoE offload store, `std.moe.offload@1`) adds every piece while its
 role), its class and the checkpoint extents its bytes come from — and asks for each group's `DeviceResolver` when it
 binds kernels. Then, through the engine's hooks:
 
-- `before_materialize`: per class, an arena `[S, unit]` in VRAM — `top_k` null slots (zero weights, one per routing
-  rank), `staging` slots, then cache slots: a fill pool growing to every piece, or the size `cache` pins — and a mapped
-  host pool per tier, filled from the extents;
-- `after_materialize` (after every materialize): null slots zeroed, the map reset to the tiers, the policy's seed
-  admitted and copied into cache slots;
+- `before_materialize`: one VRAM pool for every class's arena — a fill pool growing to every piece, or the size
+  `cache` pins — and per class a mapped host pool of the tier, filled from the extents;
+- `after_materialize` (after every materialize): the policy seeds whole items within the pool's bytes (and each
+  class's pinned slots); then each class's arena `[S, unit]` is laid out in the pool — `top_k` null slots (zero
+  weights, one per routing rank), `staging` slots, then the cache slots its seeded pieces fill —, the map reset to
+  the tier and the seed copied in;
 - `before_launch`: the step's row kinds per token (decode and verify rows: a mixed step's leading rows, or a row
   whose every query token has logits; prefill rows the others, so a one-token last prompt chunk counts as decode;
   graph padding past them), its counts zeroed, the map edits due;
@@ -31,29 +32,39 @@ from .residency import ResidencyMap
 from .resolver import DeviceResolver
 
 PADDING, DECODE, PREFILL = 0, 1, 2           # row kinds (std.moe.kernels, `moe_resolve@1`)
+ALIGN = 4096                                 # each class's arena starts at a multiple of it
 
 
 @dataclasses.dataclass(eq=False)
 class SlotClass:
-    """Pieces of one role, ggml type and shape, from every group: one arena, one host pool per tier."""
+    """Pieces of one role, ggml type and shape, from every group: an arena in the store's pool, a host pool."""
 
     name: str
     unit_bytes: int
     null: int                                   # null slots [0, null), then staging slots
     staging: int
     pieces: list[tuple[int, int, int, list[Extent]]] = dataclasses.field(default_factory=list)  # group, item, role
-    cache: int | None = None                    # pinned cache slots (None: fill)
-    arena: object = None                        # its pools (`BuildCtx.pool`), from `before_materialize`
-    host: object = None
+    cache: int | float | None = None            # pinned cache slots, or a fraction of its pieces (None: fill)
+    host: object = None                         # its host pool (`BuildCtx.pool`), from `before_materialize`
+    arena: torch.Tensor | None = None           # [S, unit] bytes in the store's pool, from `after_materialize`
 
     @property
     def max_slots(self) -> int:
         """Its arena's size when every piece is cached: what kernels over it are bound for."""
         return self.null + self.staging + len(self.pieces)
 
+    @property
+    def cap(self) -> int:
+        """The most cache slots it may have."""
+        n = len(self.pieces)
+        return n if self.cache is None else self.cache if isinstance(self.cache, int) else round(self.cache * n)
+
+    def bytes(self, cached: int) -> int:
+        return (self.null + self.staging + cached) * self.unit_bytes
+
     def slots(self) -> torch.Tensor:
         """The arena as [S, unit] bytes (valid until the next materialize)."""
-        return self.arena.view(torch.uint8, (self.arena.capacity, self.unit_bytes))
+        return self.arena
 
     def units(self) -> torch.Tensor:
         """The host pool as the device reads it, [pieces, unit] bytes."""
@@ -105,23 +116,19 @@ class TieredStore:
             self.host_units = self.ctx.static(f"{self.name}.host", shape, torch.int32)
             self.counts = self.ctx.static(f"{self.name}.counts", shape[:2], torch.int32)
             self.telemetry = {"counts": self.counts, "misses": self.misses}
+            self._zeros = np.zeros(shape[:2], dtype=np.int32)          # the counts of a step, before it
         g = self._order[group]
         return DeviceResolver(self.ctx, self, [self.groups[group][r] for r in range(self.roles)],
                               self.residency.device[g], self.host_units[g], self.counts[g])
 
     # -- engine hooks -------------------------------------------------------------------------------------------------
     def before_materialize(self, ctx) -> None:
-        """Request every class's arena and host pool, and fill the host pools from the checkpoint."""
+        """Request the arena pool and every class's host pool, and fill the host pools from the checkpoint."""
         jobs, host = [], np.full(self.residency.host.shape, -1, dtype=np.int32)
         for c in self.classes.values():
-            base, n = c.null + c.staging, len(c.pieces)
-            pref = n if c.cache is None else c.cache if isinstance(c.cache, int) else round(c.cache * n)
-            if not 0 <= pref <= n:
-                raise ValueError(f"{self.name}: class {c.name}: {pref} cache slots of {n} pieces")
-            c.arena = ctx.pool(f"{self.name}.arena.{c.name}", unit_bytes=c.unit_bytes,
-                               min_units=base + (0 if c.cache is None else pref), pref_units=base + pref,
-                               fill=c.cache is None)
-            units = self.tiers[0].capacity(c.name, n)
+            if not 0 <= c.cap <= len(c.pieces):
+                raise ValueError(f"{self.name}: class {c.name}: {c.cap} cache slots of {len(c.pieces)} pieces")
+            units = self.tiers[0].capacity(c.name, len(c.pieces))
             c.host = ctx.pool(f"{self.name}.host.{c.name}", unit_bytes=c.unit_bytes, min_units=units,
                               pref_units=units, device="host", mapped=True)
             buffer = c.host.view(torch.uint8, (units, c.unit_bytes)).numpy()
@@ -132,23 +139,39 @@ class TieredStore:
                 for e in extents:
                     jobs.append((e, buffer[piece, at:at + e.nbytes]))
                     at += e.nbytes
+        classes = list(self.classes.values())
+        least = sum(c.bytes(0 if c.cache is None else c.cap) for c in classes) + ALIGN * len(classes)
+        most = sum(c.bytes(c.cap) for c in classes) + ALIGN * len(classes)
+        fill = any(c.cache is None for c in classes)
+        self.granule = -(-min(c.unit_bytes for c in classes) // ALIGN) * ALIGN    # the pool's unit: about a piece
+        self.arena = ctx.pool(f"{self.name}.arena", unit_bytes=self.granule, min_units=-(-least // self.granule),
+                              pref_units=-(-most // self.granule), fill=fill)
         files.read(jobs)
         self._host = host
         self.host_units.copy_(torch.from_numpy(host))
 
     def after_materialize(self, ctx) -> None:
-        """Reset the device state of the new pools: null slots, the map at the tiers, the policy's seed cached."""
-        free, arenas, units = {}, {}, {}
-        for c in self.classes.values():
-            arenas[c.name], units[c.name] = c.slots(), c.host.view(torch.uint8, (c.host.capacity, c.unit_bytes))
-            arenas[c.name].zero_()                          # the null slots; no slot left holding garbage
-            free[c.name] = list(range(c.arena.capacity - 1, c.null + c.staging - 1, -1))   # popped lowest first
-        self.residency.host[...] = -1                   # −1 − tier 0: every piece in the host tier
+        """Seed the new pool: the policy's items within its bytes, each class's arena laid out for its share, the map
+        at the tier but for the seed, copied in."""
+        classes = list(self.classes.values())
+        size = self.arena.capacity * self.granule
+        budget = _Budget(self, size - sum(c.bytes(0) for c in classes) - ALIGN * len(classes))
         groups = list(self._order)
-        for g, i in self.policy.seed(self._profile_counts(), _Budget(self, free, groups)):
+        seed = self.policy.seed(self._profile_counts(), budget)
+        pool, at = self.arena.view(torch.uint8, (size,)), 0
+        pool.zero_()                                          # the null slots; no slot left holding garbage
+        free = {}
+        for c in classes:
+            n = c.null + c.staging + budget.taken[c.name]
+            c.arena = pool[at:at + n * c.unit_bytes].view(n, c.unit_bytes)
+            at = -(-(at + n * c.unit_bytes) // ALIGN) * ALIGN
+            free[c.name] = list(range(n - 1, c.null + c.staging - 1, -1))      # popped lowest first
+        self.residency.host[...] = -1                   # −1 − tier 0: every piece in the host tier
+        for g, i in seed:
             for r, c in self.groups[groups[g]].items():
                 slot = self.residency.host[g, i, r] = free[c.name].pop()
-                arenas[c.name][slot].copy_(units[c.name][self._host[g, i, r]], non_blocking=True)
+                c.arena[slot].copy_(c.host.view(torch.uint8, (c.host.capacity, c.unit_bytes))[self._host[g, i, r]],
+                                    non_blocking=True)
         self.residency.seed()
         for t in (self.counts, self.misses, self.kinds):
             t.zero_()
@@ -161,7 +184,7 @@ class TieredStore:
             decode = row < step.n_decode or (not step.n_decode and q == logits)   # decode and verify rows
             kinds[at:at + q] = DECODE if decode else PREFILL
             at += q
-        return [(self.kinds, kinds), (self.counts, np.zeros(self.counts.shape, dtype=np.int32)),
+        return [(self.kinds, kinds), (self.counts, self._zeros),
                 *self.residency.writes(step.step)], []
 
     def after_commit(self, step, telemetry) -> None:
@@ -185,17 +208,21 @@ class TieredStore:
 
 
 class _Budget:
-    """Free cache slots per class while a policy seeds."""
+    """What a policy seeds within: the arena pool's bytes past every class's null and staging slots, each class's
+    pinned slots; an item takes a slot in each of its roles' classes."""
 
-    def __init__(self, store: TieredStore, free: dict[str, list[int]], groups: list[int]) -> None:
-        self.store, self.free, self.groups = store, {name: len(slots) for name, slots in free.items()}, groups
+    def __init__(self, store: TieredStore, nbytes: int) -> None:
+        self.left, self.taken = nbytes, dict.fromkeys(store.classes, 0)
+        self.classes = [list(store.groups[g].values()) for g in store._order]      # per group (in map order)
 
     def take(self, group: int, item: int) -> bool:
-        classes = [c.name for c in self.store.groups[self.groups[group]].values()]
-        if any(self.free[c] < classes.count(c) for c in classes):
+        classes = self.classes[group]
+        cost = sum(c.unit_bytes for c in classes)
+        if cost > self.left or any(self.taken[c.name] + classes.count(c) > c.cap for c in classes):
             return False
+        self.left -= cost
         for c in classes:
-            self.free[c] -= 1
+            self.taken[c.name] += 1
         return True
 
 

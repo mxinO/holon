@@ -26,7 +26,7 @@ module = "reference"
 
 [options]   # the EngineConfig.plugin_options keys this plugin reads
 "quant.act" = { help = "activation precision of quantized weights' matmuls", default = "a8", choices = ["a4", "a8"] }
-"moe.store" = { help = "the expert store's unit Ref: std.moe.offload@1 offloads experts to host memory", default = "resident" }
+"moe.store" = { help = "the expert store's unit Ref: std.moe.offload@1 offloads experts to host memory", default = "std.moe.resident@1" }
 "moe.placement" = { help = "the offload store's placement policy (a unit Ref)", default = "std.tiered.static@1" }
 "moe.placement.profile" = { help = "routing counts seeding placement: JSON {\"counts\": [[per expert] per layer]}" }
 "moe.tiers" = { help = "the offload store's host tiers (unit Refs, comma-separated)", default = "std.tiered.pinned@1" }

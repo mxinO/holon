@@ -55,15 +55,17 @@ def _open(path: str) -> int:
 def _read_window(fd: int, path: str, lo: int, pieces: list[tuple[Extent, np.ndarray]]) -> None:
     hi = _up(max(e.offset + e.nbytes for e, _ in pieces))
     with mmap.mmap(-1, hi - lo) as buf:          # page-aligned, as O_DIRECT needs
-        view, got = memoryview(buf), 0
-        while got < hi - lo:
-            n = os.preadv(fd, [view[got:]], lo + got)
-            if n <= 0:
-                break
-            got += n
         data = np.frombuffer(buf, dtype=np.uint8)
-        for extent, dst in pieces:
-            if extent.offset + extent.nbytes > lo + got:
-                raise OSError(f"{path}: {extent} lies past the file's end")
-            dst[...] = data[extent.offset - lo:extent.offset - lo + extent.nbytes]
-        del data, view
+        try:
+            got = 0
+            while got < hi - lo:                 # a short read is the file's end (an O_DIRECT retry would be unaligned)
+                n = os.preadv(fd, [data[got:]], lo + got)
+                got += n
+                if n <= 0 or got % ALIGN:
+                    break
+            for extent, dst in pieces:
+                if extent.offset + extent.nbytes > lo + got:
+                    raise OSError(f"{path}: {extent} lies past the file's end")
+                dst[...] = data[extent.offset - lo:extent.offset - lo + extent.nbytes]
+        finally:
+            del data                             # the map closes only once no array exports it

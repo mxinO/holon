@@ -174,9 +174,9 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     """docs/v1-offload.md D4, D5, F1, F5a: with `moe.store = std.moe.offload@1` the experts stay in the file's map and
     in pinned host pools (filled from its extents), classes by (role, type, shape) — here gate/up Q8_0 and down
     Q4_0 —, every miss fetched into staging slots: the outputs are bitwise the resident store's whatever the cache
-    holds (every expert by default, half, a profile's pick per class, none). The static policy caches item 0, 1, … of
-    every layer, or a profile's hottest; a layer's distinct misses never pass its staging slots, and a step that
-    did would stop the engine."""
+    holds (every expert by default, as many as a short fill pool's bytes hold, half, a profile's pick per class, none).
+    The static policy caches whole experts, item 0, 1, … of every layer, or a profile's hottest; a layer's distinct
+    misses never pass its staging slots, and a step that did would stop the engine."""
     import json as json_
 
     checkpoint, prompts = tiny_moe
@@ -188,9 +188,9 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     for layer, (a, b) in enumerate(hot):
         counts[layer, [a, b]] = [9, 5]
     profile.write_text(json_.dumps({"counts": counts.tolist()}))
-    for cache, extra, cached in (("", {}, 8), ("*=0.5", {}, 4), ("gate_up.q8_0.64x64=4,*=2", {
-            "moe.placement.profile": str(profile)}, 1), ("*=0", {}, 0)):
-        engine = _engine(file, host_memory=1 << 24, plugin_options={
+    for cache, extra, floor, cached in (("", {}, None, 8), ("", {}, 1800, None), ("*=0.5", {}, None, 4), (
+            "gate_up.q8_0.64x64=4,*=2", {"moe.placement.profile": str(profile)}, None, 1), ("*=0", {}, None, 0)):
+        engine = _engine(file, host_memory=1 << 24, paged_min_tokens=floor, plugin_options={
             "moe.store": "std.moe.offload@1", "moe.offload.cache": cache, **extra})
         store = engine.ctx.shared_objects["std.moe.offload"]
         assert _served(engine, prompts) == want, cache
@@ -199,11 +199,16 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
         assert all(c.null == 2 and c.staging == 8 for c in store.classes.values())
         resident = store.residency.host >= 0                                     # [layer, expert, role]
         assert (resident.all(-1) == resident.any(-1)).all()                      # whole experts
-        assert resident[..., 0].sum(-1).tolist() == [cached] * 2
+        per_layer = resident[..., 0].sum(-1).tolist()
+        if cached is None:             # a fill pool short of every expert: whole experts as far as its bytes go
+            cached = per_layer[0]
+            assert 0 < cached < 8 and per_layer[1] in (cached - 1, cached)
+            assert len(store.classes["gate_up.q8_0.64x64"].slots()) == 2 + 8 + sum(per_layer)
+        assert per_layer == [cached] * 2 or floor
         if extra:
             assert [sorted(np.flatnonzero(r).tolist()) for r in resident[..., 0]] == [[3], [6]]
         elif cached:
-            assert resident[:, :cached].all()
+            assert resident[:, :per_layer[1]].all()
         assert 0 < store.peak_misses <= store.staging if cached < 8 else store.peak_misses == 0
     store.staging = store.peak_misses - 1                                    # as if staging had been too small
     engine.add(prompts[0], GREEDY)
