@@ -59,8 +59,8 @@ def m3(d, key):
                 rows))
 
 
-def m2(d):
-    m = d["m2"]
+def m2(d, key="m2"):
+    m = d[key]
     rows = [[r["threads"], r["mode"], f(r["cpu_us_per_expert"]), f(r["gpu_gbps"])] for r in m["steady"]]
     print(f"expert {m['expert_bytes'] / 1e6:.2f} MB, gather {m['gather_config']}")
     print(table(["CPU threads", "GPU traffic", "CPU µs/expert", "GPU GB/s"], rows))
@@ -121,6 +121,7 @@ def main():
         print(f"\n## {d['tag']} ({d['env']['gpu']}, CPU {d['env']['isa_tier']})\n")
         for name, fn in (("m1", m1), ("m3_native", lambda d: m3(d, "m3_native")),
                          ("m3_avx2", lambda d: m3(d, "m3_avx2")), ("m3_isa_bitwise_equal", isa), ("m2", m2),
+                         ("m2_iq2_xs", lambda d: m2(d, "m2_iq2_xs")),
                          ("m5", m5), ("m7", m7), ("prefill", prefill)):
             if name in d:
                 print(f"\n### {name}\n")

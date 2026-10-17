@@ -188,7 +188,7 @@ def real_class(ext, file: str, layer: int, label: str) -> Experts:
     return Experts(ext, label, p["gate"][0], p["down"][0], p["gate"][1], p["up"][1], p["down"][1])
 
 
-def quantized_classes(ext, n: int = 16) -> list[Experts]:
+def quantized_classes(ext, n: int = 16, names=("iq2_xxs", "iq2_xs", "iq2_s"), maya: bool = True) -> list[Experts]:
     """IQ2_XXS / IQ2_XS / IQ2_S experts quantized from n real Q4_K experts (layer 6: Q4_K gate, up, down), uniform
     importance (no imatrix: the bytes and the compute are the type's; the accuracy is not the point); and the Maya-S
     mix (IQ2_XXS gate/up, IQ2_S down) from the same."""
@@ -198,15 +198,18 @@ def quantized_classes(ext, n: int = 16) -> list[Experts]:
         t, data = src[role]
         f32[role] = ext.dequantize(t, torch.from_numpy(np.ascontiguousarray(data[:n])), n * rows, cols)
     q = {}
-    for name in ("iq2_xxs", "iq2_xs", "iq2_s"):
+    host = os.sched_getaffinity(0)
+    os.sched_setaffinity(0, set(worker_cores()))  # the quantizer's threads inherit this thread's CPUs
+    for name in names:
         t0 = time.time()
         for role, cols in (("gate", HIDDEN), ("up", HIDDEN), ("down", INTER)):
             q[name, role] = ext.quantize(T[name], f32[role], torch.ones(cols), 8).view(n, -1).numpy()
         log(f"quantized {n} experts to {name} in {time.time() - t0:.1f}s")
-    out = [Experts(ext, name, T[name], T[name], q[name, "gate"], q[name, "up"], q[name, "down"])
-           for name in ("iq2_xxs", "iq2_xs", "iq2_s")]
-    out.append(Experts(ext, "iq2_xxs+iq2_s (Maya-S mix)", T["iq2_xxs"], T["iq2_s"], q["iq2_xxs", "gate"],
-                       q["iq2_xxs", "up"], q["iq2_s", "down"]))
+    os.sched_setaffinity(0, host)
+    out = [Experts(ext, name, T[name], T[name], q[name, "gate"], q[name, "up"], q[name, "down"]) for name in names]
+    if maya:
+        out.append(Experts(ext, "iq2_xxs+iq2_s (Maya-S mix)", T["iq2_xxs"], T["iq2_s"], q["iq2_xxs", "gate"],
+                           q["iq2_xxs", "up"], q["iq2_s", "down"]))
     return out
 
 
@@ -687,6 +690,10 @@ def main():
     if "m2" in only:
         m2_threads = [int(t) for t in ARGS.m2_threads.split(",") if int(t) <= len(worker_cores())]
         res["m2"] = m2(ext, q4k_q6k, res.get("m1"), m2_threads, 150 if ARGS.quick else 300)
+        save()
+    if "m2iq" in only:  # the split for an i-quant expert (Flash-Next-like IQ2_XS: compute-bound on the CPU)
+        iq = quantized_classes(ext, 16, ("iq2_xs",), maya=False)[0]
+        res["m2_iq2_xs"] = m2(ext, iq, res.get("m1"), [4, 6], 150 if ARGS.quick else 300)
         save()
     if "m5" in only:
         res["m5"] = m5(ext, q4k_q6k, ARGS.m5_threads, *(((1, 8), (1, 10), 20) if ARGS.quick else ()))
