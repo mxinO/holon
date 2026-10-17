@@ -685,6 +685,16 @@ rows clear 1.5× at 1K / 4K and straddle at 32K. By §8's rule the cache rows go
 So the cache rows' prediction moves back toward the bars, with the FreeToken decode row the tightest; the owner
 decides the bars with step 4's measurements.
 
+**Re-banded after step 3 (panel C, 2026-10-18)**, from x4-gap's `lfu` replay plus F11's measured cost with candidates
+(≈ 0.08 ms per token at 47%, ≈ 0.11 ms at 25%; the +0.04 ms was the all-cached figure): vs FreeToken ≈ 0.97× / 0.95× at
+1K / 4K natural (bar 1.0×: miss) and ≈ 1.05× / 0.94× capped; vs llama.cpp's pinned cache ≈ 1.10× / 1.13× natural
+(bar 1.1×: on the bar at 1K); the default-cache and static-split rows clear. Levers, by size: x4-gap's kernel rows
+(glue, router GEMV, q8_1 quantization; ≈ 0.25 ms, +4–5% on every row) — taken as **step 3c** before the gate, since
+the FreeToken row needs it; then prompt-time admission (+1.5–2% on whole traces, +9% / +6% on single long prompts at
+47%), **deferred**: built only if step 4's FreeToken decode row lands within ≈ 2% of its bar, and then as its own
+policy plugin (`placement.lfu_prompt@1`, which needs a std "adopt a lent slot" record before the tag), not as a
+change to D4 or F11 (panel A's four determinism conditions apply). 32K is replayed before the owner decides.
+
 **Contradictions with the research note, recorded:** CPU compute is not a second link beside PCIe (they share host
 memory); ggml-cpu's AVX2 and AVX-512 builds agree bitwise; "≤ 4 threads saturate DRAM" (S6) holds only for Q4_K
 single-token jobs; these desktops' NVMe reads ≈ 2.6 GB/s, not 7–14. The vendored ggml-cpu for `kernels.ggml_cpu`
