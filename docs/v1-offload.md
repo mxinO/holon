@@ -1374,3 +1374,7 @@ Decided while building, against the text above:
 - **Heat across layers**: RAM's coldest is compared on F11's scores of every layer, which within a decode step are one
   decay apart before and after the calling layer (deterministic; a small skew, recorded).
 - **The SSD tier's evidence is a network filesystem's**: M7's local NVMe rates (2.6 GB/s) are not re-measured here.
+
+After merging steps 3c and 3d (the router-prepared q8_1 input and the fused residual add), the snapshot trace was
+re-run on the A5000: F11 at 25% and the RAM-capped F11 (half the pieces in RAM, 12 GiB) byte-identical to the new
+all-resident, F5b run-identical ×2 (the full suite: 1,445 passed).
