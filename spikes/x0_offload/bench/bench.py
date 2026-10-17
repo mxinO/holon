@@ -96,10 +96,22 @@ def env_facts(ext) -> dict:
     feats = ext.cpu_features()
     return {"gpu": p.name, "sm": f"{p.major}.{p.minor}", "torch": torch.__version__, "torch_cuda": torch.version.cuda,
             "nvcc": sh("nvcc --version | tail -1"), "python": sys.version.split()[0],
-            "ggml_cpu_build": feats, "isa_tier": "x86-avx512" if feats["avx512"] else "x86-avx2",
+            "isa_tier": "x86-avx512" if feats["avx512"] else "x86-avx2",   # a tier name only, no CPU details
             "llama_cpp_commit": sh(f"git -C {ARGS.llama} rev-parse HEAD"),
             "commit": sh(f"git -C {HERE} rev-parse HEAD"), "dirty": bool(sh(f"git -C {HERE} status --porcelain -- .")),
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES")}
+
+
+def public_command(argv: list[str]) -> str:
+    """The command line with no machine paths: paths inside the checkout as <repo>/..., others as <local>."""
+    roots = [REPO, Path(sh(f"git -C {HERE} rev-parse --git-common-dir")).resolve().parent]  # this checkout first
+    out = [Path(argv[0]).name]
+    for a in argv[1:]:
+        if a.startswith("/"):
+            root = next((r for r in roots if Path(a).resolve().is_relative_to(r)), None)
+            a = f"<repo>/{Path(a).resolve().relative_to(root)}" if root else "<local>"
+        out.append(a)
+    return " ".join(out)
 
 
 def summarize(xs) -> dict:
@@ -623,7 +635,7 @@ def main():
     only = set(ARGS.only.split(","))
     out = Path(ARGS.out)
     res = json.loads(out.read_text()) if ARGS.merge and out.exists() else {}
-    res.setdefault("runs", []).append({"command": " ".join([Path(sys.argv[0]).name] + sys.argv[1:]),
+    res.setdefault("runs", []).append({"command": public_command(sys.argv),
                                        "date": time.strftime("%Y-%m-%d"), "env": env_facts(ext)})
     res.update({"tag": ARGS.tag, "env": res["runs"][-1]["env"], "host_core": host_core(),
                 "worker_cores": worker_cores()})
@@ -667,7 +679,7 @@ def main():
                             str(ARGS.llama)] + (["--quick"] if ARGS.quick else []), check=True,
                            preexec_fn=lambda: os.sched_setaffinity(0, allowed))  # not this thread's one core
             sub = json.loads(child.read_text())
-            res["m3_avx2"], res["env"]["avx2_build"] = sub["m3_avx2"], sub["env"]["ggml_cpu_build"]
+            res["m3_avx2"], res["env"]["avx2_build_isa_tier"] = sub["m3_avx2"], sub["env"]["isa_tier"]
             res["m3_isa_bitwise_equal"] = {name: r["bitwise"]["sha256"] == res["m3_avx2"][name]["bitwise"]["sha256"]
                                            for name, r in res["m3_native"].items()}
             child.unlink()
