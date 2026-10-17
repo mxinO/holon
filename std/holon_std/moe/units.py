@@ -168,6 +168,15 @@ class Resident:
         """The ids each stack reads for tokens `first`…: the experts' own."""
         return ids, ids
 
+    @staticmethod
+    def pass_tokens(tokens: int) -> int:
+        """Tokens per expert pass: one chunk."""
+        return CHUNK
+
+    @staticmethod
+    def finish() -> None:
+        pass
+
 
 def _store(ctx, **site):
     """The expert store the `moe.store` plugin option names (a unit Ref, e.g. `std.moe.offload@1`); resident without
@@ -211,11 +220,19 @@ class MoE(nn.Module):
         self._down = self._store.stack(self.down)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = torch.empty_like(x)
-        for a in range(0, x.shape[0], CHUNK):
-            xc = x[a:a + CHUNK]
-            weights, ids = self._topk(nn.functional.linear(xc.float(), self.router))
+        """The router and top-k per CHUNK tokens; the expert path per pass of the store's size (a CHUNK, or whole
+        CHUNKs in a streaming offload step: the step's last partial chunk is a pass of its own, so every row's chunk
+        and kernel path are a chunk's)."""
+        out, tokens = torch.empty_like(x), x.shape[0]
+        size, full = self._store.pass_tokens(tokens), tokens // CHUNK * CHUNK
+        passes = [(a, min(a + size, full)) for a in range(0, full, size)] + [(full, tokens)] * (full < tokens)
+        for a, b in passes:
+            xc = x[a:b]
+            routes = [self._topk(nn.functional.linear(xc[c:c + CHUNK].float(), self.router))
+                      for c in range(0, b - a, CHUNK)]
+            weights, ids = routes[0] if len(routes) == 1 else (torch.cat(t) for t in zip(*routes, strict=True))
             gate_up, down = self._store.route(ids, a)
             h = self._gate_up(xc[:, None], gate_up)                   # [t, k, inter] f32, SwiGLU applied
-            self._combine(self._down(h, down), weights, out[a:a + CHUNK])
+            self._combine(self._down(h, down), weights, out[a:b])
+        self._store.finish()
         return out

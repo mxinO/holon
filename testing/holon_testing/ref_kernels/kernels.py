@@ -194,9 +194,10 @@ class MoeResolve:
     def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.staging = staging
 
-    def __call__(self, ids, kinds, residency, host, limits, counts, routed, misses, errors, delta, n_delta, group):
+    def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
+                 errors, delta, n_delta, group):
         slots, fetch, n_fetch, increments, seen, bits = moe.moe_resolve(ids, kinds, residency, host, limits,
-                                                                        self.staging)
+                                                                        self.staging, ring, stage)
         counts += increments
         routed |= seen
         misses.clamp_(min=int(n_fetch.max()))
@@ -210,6 +211,17 @@ class ExpertFetch:
 
     def __call__(self, fetch, n, src, dst):
         dst.copy_(moe.expert_fetch(fetch, int(n[0]), src, dst))
+
+
+class ExpertPrefetch:
+    def __init__(self, ctx, *, unit_bytes: int) -> None:
+        pass
+
+    def start(self, key, pairs, src, dst):          # at once: a CPU step has nothing to overlap
+        dst.copy_(moe.expert_prefetch(pairs, src, dst))
+
+    def wait(self, key):
+        pass
 
 
 class CausalConv1d:
@@ -262,5 +274,6 @@ BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul"
          "qlinear": QLinear, "qlinear_glu": QLinearGlu, "qembedding": QEmbedding, "linear_experts": LinearExperts,
          "linear_experts_arena": LinearExperts,
          "moe_topk": MoeTopk, "moe_combine": MoeCombine, "moe_resolve": MoeResolve, "expert_fetch": ExpertFetch,
+         "expert_prefetch": ExpertPrefetch,
          "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule, "gated_rmsnorm": GatedRMSNorm,
          "gdn_rewind": GDNRewind, "kv_write": KvWrite}

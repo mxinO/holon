@@ -62,33 +62,37 @@ def moe_combine(y: torch.Tensor, weights: torch.Tensor, dtype: torch.dtype) -> t
 
 
 def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, host: torch.Tensor,
-                limits: torch.Tensor, staging: int) -> tuple[torch.Tensor, ...]:
-    """The `moe_resolve@1` oracle: `(slots [R, T, k], fetch [R, 2, staging] (−1 past n_fetch), n_fetch [R], counts [E],
+                limits: torch.Tensor, staging: int, ring: torch.Tensor | None = None,
+                stage: torch.Tensor | None = None) -> tuple[torch.Tensor, ...]:
+    """The `moe_resolve@1` oracle: `(slots [R, T, k], fetch [R, 2, F] (−1 past n_fetch), n_fetch [R], counts [E],
     routed [E], errors)`, `counts` the increments of this call, `routed` the experts it saw routed, `errors` the bits it
-    sets."""
+    sets. `ring` defaults to none, `stage` to the staging slots k + i."""
     from .kernels import DECODE, PADDING, RANGE
 
     t, k = ids.shape
     experts, roles = residency.shape
+    ring = torch.full((experts, roles), -1) if ring is None else ring.long().cpu()
+    stage = (k + torch.arange(staging)).expand(roles, staging) if stage is None else stage.long().cpu()
     ids, kinds = ids.long().cpu(), kinds.long().cpu()
     residency, host = residency.long().cpu(), host.long().cpu()
     live = (kinds[:, None] != PADDING) & (ids >= 0)                     # [T, k]: routed entries
     routed = ids.clamp_min(0)
     slots = torch.arange(k).expand(roles, t, k).clone()                 # null slot j by default
-    fetch = torch.full((roles, 2, staging), -1, dtype=torch.int64)
+    width = stage.shape[1]
+    fetch = torch.full((roles, 2, width), -1, dtype=torch.int64)
     n_fetch = torch.zeros(roles, dtype=torch.int64)
     errors = 0
     for r in range(roles):
-        missing = sorted({e for e in routed[live].tolist() if residency[e, r] < 0})
+        missing = sorted({e for e in routed[live].tolist() if residency[e, r] < 0 and ring[e, r] < 0})
         rank = {e: i for i, e in enumerate(missing)}
         n_fetch[r] = len(missing)
-        for i, e in enumerate(missing[:staging]):
-            fetch[r, :, i] = torch.tensor([host[e, r], k + i])
+        for i, e in enumerate(missing[:width]):
+            fetch[r, :, i] = torch.tensor([host[e, r], stage[r, i]])
         for a, j in live.nonzero().tolist():
             e = int(routed[a, j])
-            at = int(residency[e, r])
-            if at < 0:
-                slots[r, a, j] = k + min(rank[e], staging - 1)
+            at = int(residency[e, r]) if residency[e, r] >= 0 else int(ring[e, r])
+            if e in rank:
+                slots[r, a, j] = stage[r, min(rank[e], width - 1)]
             elif k + staging <= at < int(limits[r]):
                 slots[r, a, j] = at
             else:                                                       # corrupt: null slot j, flagged
@@ -105,5 +109,13 @@ def expert_fetch(fetch: torch.Tensor, n: int, src: torch.Tensor, dst: torch.Tens
     staging)."""
     out = dst.clone()
     for unit, slot in fetch[:, :n].T.tolist():
+        out[slot] = src[unit].to(out.device)
+    return out
+
+
+def expert_prefetch(pairs, src: torch.Tensor, dst: torch.Tensor) -> torch.Tensor:
+    """The `expert_prefetch@1` oracle (a `start` and its `wait`): `dst` with unit `src[u]` in slot s for each (u, s)."""
+    out = dst.clone()
+    for unit, slot in torch.as_tensor(pairs).tolist():
         out[slot] = src[unit].to(out.device)
     return out

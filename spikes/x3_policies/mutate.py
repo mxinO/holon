@@ -53,7 +53,8 @@ def main() -> None:
     seed, counts, needed, resident = z["seed"], list(z["counts"]), list(z["needed"]), z["resident"]
     first = lambda got: next((i for i, (a, b) in enumerate(zip(got, resident, strict=True))  # noqa: E731
                               if not (a == b).all()), None)
-    print("oracle:", first(lfu.replay(seed, counts, needed)))
+    steps = [{"counts": c, "needed": n} for c, n in zip(counts, needed, strict=True)]
+    print("oracle:", first([s["resident"] for s in lfu.replay(seed, steps)]))
     for mut, text in MUTATIONS.items():
         print(f"{mut} ({text}):", first(replay(seed, counts, needed, mut)))
 

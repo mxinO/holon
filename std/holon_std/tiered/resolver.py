@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import torch
 
-RESOLVE, FETCH = "moe_resolve@1", "expert_fetch@1"
+RESOLVE, FETCH, EXPERT_PREFETCH = "moe_resolve@1", "expert_fetch@1", "expert_prefetch@1"
 
 
 class DeviceResolver:
@@ -30,12 +30,21 @@ class DeviceResolver:
         if len(kinds) != len(ids):
             raise ValueError(f"tokens {first}…{first + len(ids)} past the step's {len(store.kinds)} row kinds")
         if not self.group and not first:      # the step's first resolve: counts and error words from zero, its edits
-            for t in store.zeroed:
+            for t in store.zeroed:            # (and lent slots, in a prefill step)
                 t.zero_()
             store.residency.apply(store.edit_errors)
+            store.begin()
+        if not first:
+            self.ring, self.stage = store.sources(self.group)
         slots, fetch, n = self.resolve(ids, kinds, self.residency, self.host, self.limits, self.counts,
-                                       store.routed[self.group], store.misses, store.errors, store.delta[self.group],
-                                       store.n_delta[self.group:self.group + 1], self.group, **self.state)
+                                       store.routed[self.group], self.ring, self.stage, store.empty[self.group],
+                                       store.n_empty[self.group:self.group + 1], store.misses, store.errors,
+                                       store.delta[self.group], store.n_delta[self.group:self.group + 1], self.group,
+                                       **self.state)
         for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
             gather(fetch[r], n[r:r + 1], c.units(), c.slots())
         return slots
+
+    def done(self) -> None:
+        """After the layer's expert passes (the step's ring moves on)."""
+        self.store.layer_done(self.group)

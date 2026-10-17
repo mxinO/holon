@@ -27,11 +27,15 @@ class ResidencyMap:
         self._list = ctx.static(f"{name}.residency_edits", (3, size), torch.int64)  # (index, expected, value)
         self._edits: dict[int, dict[int, tuple[int, int]]] = {}    # launch -> flat index -> (expected, value)
         self._launched: dict[int, np.ndarray] = {}                # launch -> its triples, until a commit mirrors them
+        self.empty: list[list[np.ndarray]] = [[] for _ in range(shape[0])]   # per group: its empty slots (a stack)
+        self._returns: dict[int, list] = {}                       # step -> the lent slots it gave back
 
     def seed(self) -> None:
         """The host mirror to the device now (after a materialize, before any step), dropping pending edits."""
         self._edits.clear()
         self._launched.clear()
+        self._returns.clear()
+        self.empty = [[] for _ in self.empty]
         self.device.copy_(torch.from_numpy(self.host))
         self._flat[-1] = 0
         self._clear()
@@ -64,17 +68,31 @@ class ResidencyMap:
         self._flat.scatter_(0, index, torch.where(ok, value.int(), now))
         self._clear()
 
+    def give_back(self, step: int, owners: list) -> None:
+        """Step `step` borrowed every empty slot and lent ones and gave them all back ((group, its slot per role)) to
+        their groups' empty stacks, in that order (after its records)."""
+        self._returns[step] = owners
+
     def commit(self, step: int, records: np.ndarray) -> None:
         """The host mirror after step `step`: the host edits launched by it, then the step's delta log `records`
-        ((group, a, b): a took b's slots, b unmapped; (group, −1, b): b unmapped)."""
+        ((group, a, b): a took b's slots, b unmapped; (group, a, −2 − j): a took the group's empty slots j, popped;
+        (group, −1, b): b unmapped), then the slots the step gave back."""
         flat = self.host.reshape(-1)
         for launch in sorted(x for x in self._launched if x <= step):
             index, _, value = self._launched.pop(launch)
             flat[index] = value
         for g, a, b in records.tolist():
+            if b <= -2:
+                self.host[g, a] = self.empty[g][-2 - b]
+                del self.empty[g][-2 - b:]
+                continue
             if a >= 0:
                 self.host[g, a] = self.host[g, b]
             self.host[g, b] = -1
+        if (owners := self._returns.pop(step, None)) is not None:
+            self.empty = [[] for _ in self.empty]
+            for g, slots in owners:
+                self.empty[g].append(np.asarray(slots))
 
     def _clear(self) -> None:
         self._list[0].fill_(len(self._flat) - 1)

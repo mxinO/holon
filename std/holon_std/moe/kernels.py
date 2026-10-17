@@ -31,40 +31,51 @@ then `staging` slots, then cache slots.
   @2's (`reference.linear_experts`, over the arena).
 
 - `moe_resolve@1`: instance `(ids [T, k] int32, kinds [T] uint8, residency [E, R] int32, host [E, R] int32, limits [R]
-  int32, counts [E] int32, routed [E] int32, misses [1] int32, errors [1] int32, delta [D, 3] int32, n_delta [1] int32,
-  group: int) ->
-  (slots [R, T, k] int32, fetch [R, 2, staging] int32, n_fetch [R] int32)`, for one layer's R roles (gate/up, down:
-  each in its own arena of `limits[r]` slots). `kinds` per token (`PADDING`, `DECODE` for decode and verify rows,
-  `PREFILL`); `residency[e, r]` the arena slot of expert e's role r, or −1 − tier when it is not in VRAM; `host[e, r]`
-  its unit in the host tier the device reads. Entry (t, j) of a padding row, or with `ids[t, j]` < 0 (a dropped route),
-  gets null slot j: no fetch, no count. Otherwise a resident expert gets its slot — a cache slot, in [k + staging,
-  limits[r]); any other is corrupt: the entry gets null slot j and `errors[0]` |= `RANGE` —; the layer's distinct
-  missing experts of role r, by expert id ascending, are fetch entries i: `fetch[r, 0, i]` = `host[e, r]`, `fetch[r, 1,
-  i]` the slot it is gathered into, here staging slot `k + i` (the entries read it). `n_fetch[r]` counts them all, even
-  past `staging` (the caller must prevent it: `misses[0]` becomes the largest `n_fetch` it has seen, and a miss past
-  `staging` reads the last staging slot). `counts[e]` += 1 per entry of a `DECODE` row routed to e, resident or not
-  (prefill rows never count); `routed[e]` = 1 when any live entry, of any row kind, routes e (the step's needs). The
-  calls of one step accumulate into `counts` and `routed`, which the caller zeroes per step. Deterministic; `fetch`
-  past `n_fetch` unspecified. Facts: experts, top_k, roles, staging. `delta` (the layer's region of the delta log),
-  `n_delta` (its count) and `group` (the layer's index in the map) serve the variants: @1 leaves them as they are.
+  int32, counts [E] int32, routed [E] int32, ring [E, R] int32, stage [R, F] int32, empty [R, P] int32, n_empty [1]
+  int32, misses [1] int32, errors [1] int32, delta [D, 3] int32, n_delta [1] int32, group: int) -> (slots [R, T, k]
+  int32, fetch [R, 2, F] int32, n_fetch [R] int32)`, for one layer's R roles (gate/up, down: each in its own arena of
+  `limits[r]` slots). `kinds` per token (`PADDING`, `DECODE` for decode and verify rows, `PREFILL`); `residency[e, r]`
+  the arena slot of expert e's role r, or −1 − tier when it is not in VRAM; `ring[e, r]`, for this call, the slot a
+  non-resident piece was streamed into (−1: none); `host[e, r]` its unit in the host tier the device reads. Entry (t,
+  j) of a padding row, or with `ids[t, j]` < 0 (a dropped route), gets null slot j: no fetch, no count. Otherwise a
+  resident expert gets its slot, a ring piece its ring slot — a cache slot, in [k + staging, limits[r]); any other is
+  corrupt: the entry gets null slot j and `errors[0]` |= `RANGE` —; the layer's distinct missing pieces of role r
+  (neither resident nor in the ring), by expert id ascending, are fetch entries i: `fetch[r, 0, i]` = `host[e, r]`,
+  `fetch[r, 1, i]` the slot it is gathered into, here `stage[r, i]` (the entries read it; the caller's staging slots, or
+  slots lent for the call: distinct). `n_fetch[r]` counts them all, even past F (the caller must prevent it:
+  `misses[0]` becomes the largest `n_fetch` it has seen, and a miss past F reads `stage[r, F − 1]`). `counts[e]` += 1
+  per entry of a `DECODE` row routed to e, resident or not (prefill rows never count); `routed[e]` = 1 when any live
+  entry, of any row kind, routes e (the step's needs). The calls of one step accumulate into `counts` and `routed`,
+  which the caller zeroes per step. Deterministic; `fetch` past `n_fetch` unspecified. Facts: experts, top_k, roles,
+  staging (the caller's own staging slots, [k, k + staging): the cache slots start past them). `empty` (the layer's
+  empty cache slots per role, the first `n_empty` of them), `delta` (the layer's region of the delta log), `n_delta`
+  (its count) and `group` (the layer's index in the map) serve the variants: @1 leaves them as they are.
 - Variants (docs/v1-offload.md D3): `moe_resolve.<policy>@1`, a contract its placement policy's plugin owns (its own
   oracle and CPU provider), takes @1's arguments, then the policy's device state by name (`device_state`), and keeps
-  @1's terms except where it says otherwise. It may change `residency` (the regions its policy owns) and then logs
-  each change in the delta log: records appended at `n_delta`, which it advances (past D a record is dropped and
-  `errors[0]` |= `OVERFLOW`), in a deterministic order — `(group, a, b)`: expert a took expert b's slot in every role
-  (b's entries became −1, the RAM tier's code), `(group, −1, b)`: b was unmapped (lent) — and a miss it admits is
-  gathered straight into its slot (its fetch entry names that slot, not a staging slot). Its instance also has
-  `lend(n, residency [G, E, R] int32, classes [G, R] int64, **state of every group) -> picked [G, E] bool`: the whole
-  experts (resident in every role) to lend, in its policy's order, until each class c (`classes[g, r]`: role r's slots
-  of group g are in class c) has min(n, its resident slots) of them; the caller unmaps and logs them.
-- `expert_fetch@1`: instance `(fetch [2, staging] int32, n [1] int32, src [U, unit] uint8, dst [S, unit] uint8)`:
-  copies unit `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, staging), in the graph (`src` may be a
-  mapped host pool's device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging.
+  @1's terms except where it says otherwise. It may change `residency` (the regions its policy owns) and the layer's
+  `empty` slots, and then logs each change in the delta log: records appended at `n_delta`, which it advances (past D
+  a record is dropped and `errors[0]` |= `OVERFLOW`), in a deterministic order — `(group, a, b)`: expert a took expert
+  b's slot in every role (b's entries became −1, the RAM tier's code); `(group, a, −2 − j)`: a took the layer's empty
+  slots `empty[:, j]` (popped from the top: j = `n_empty` − 1 first); `(group, −1, b)`: b was unmapped (lent, by the
+  caller) — and a miss it admits is gathered straight into its slot (its fetch entry names that slot, not a staging
+  slot), a ring piece too (its ring slot then goes unread). Its instance also has `lend(n, residency [G, E, R] int32,
+  classes [G, R] int64, **state of every group) -> picked [G, E] bool`: the whole experts (resident in every role) to
+  lend, in its policy's order, until each class c (`classes[g, r]`: role r's slots of group g are in class c) has min(n,
+  its resident slots) of them; the caller unmaps and logs them, and later returns their slots to their layers as empty.
+- `expert_fetch@1`: instance `(fetch [2, F] int32, n [1] int32, src [U, unit] uint8, dst [S, unit] uint8)`: copies unit
+  `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, F), in the graph (`src` may be a mapped host pool's
+  device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging.
+- `expert_prefetch@1` (D8's ring, eager steps only): an instance has `start(key: int, pairs, src [U, unit] uint8, dst
+  [S, unit] uint8)` — `src` a host pool (pinned host memory), `dst` an arena: copies unit `src[u]` to slot `dst[s]` for
+  each (u, s) of `pairs` (host int64 [n, 2]) on the provider's own copy stream (a copy engine), after all the work
+  enqueued on the current stream so far, and returns at once; and `wait(key)`: the current stream's later work waits
+  until key's copies have landed (each key waited for once). Facts: unit_bytes.
 """
 from __future__ import annotations
 
 MOE_TOPK, LINEAR_EXPERTS, MOE_COMBINE = "moe_topk@1", "linear_experts@2", "moe_combine@1"
 MOE_RESOLVE, EXPERT_FETCH, LINEAR_EXPERTS_ARENA = "moe_resolve@1", "expert_fetch@1", "linear_experts_arena@1"
+EXPERT_PREFETCH = "expert_prefetch@1"
 PADDING, DECODE, PREFILL = 0, 1, 2   # `moe_resolve@1`'s row kinds
 RANGE, OVERFLOW = 1, 2               # error bits: a resident slot outside the arena's cache slots; a delta record past
                                      # the log (the variants)

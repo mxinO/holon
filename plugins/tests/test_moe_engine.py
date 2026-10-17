@@ -225,7 +225,8 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
         _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
                                                            "moe.placement.profile": str(profile)})
     store.staging = store.peak_misses - 1                                    # as if staging had been too small
-    engine.add(prompts[0], GREEDY)
+    for p in prompts:
+        engine.add([(t + 7) % 512 for t in p], GREEDY)                       # new prompts (no prefix-cache hit)
     with pytest.raises(RuntimeError, match="distinct misses"):
         while engine.has_work():
             engine.step()
@@ -274,6 +275,41 @@ def test_only_decode_steps_count_and_decay(tiny_moe, tmp_path):
         assert report["first_differing_step"] is None and trace.mirrored and (report["admissions"] > 0 or
                                                                               max(map(len, prompts)) == 1), report
         assert not trace.steps[0]["counts"].any()                   # the prefill step: three prompts, none counted
+
+
+@pytest.mark.parametrize("policy", ["", "placement.lru@1"])
+def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe, tmp_path, policy):
+    """D4's device lending and D8 on the CPU: a step of 10 prompt tokens (its whole budget) streams every layer's
+    missing experts through a ring of lent slots (`moe.ring_tokens`), a smaller one stages its misses in lent slots
+    (its staging slots hold a graphed step's, 3 rows × top-2); the slots come back empty, each its layer's first
+    victim: the outputs are the resident store's, the cache never shrinks (per class, resident pieces + empty slots
+    stay the seed's), and F11's residency, empty slots included, is its replay oracle's at every step."""
+    from holon_judge.placement import parity, route_dump
+
+    checkpoint, prompts = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
+    want = _served(_engine(file), prompts)
+    engine = _engine(file, host_memory=1 << 24, plugin_options={
+        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.placement": policy, "moe.ring_tokens": 10})
+    store = engine.ctx.shared_objects[KEY]
+    assert store.staging == 6 and store.prefill == 8
+    held = []
+
+    def size(step, record):           # per class: resident pieces + empty slots
+        per = np.zeros(len(store.classes), dtype=np.int64)
+        for g, row in enumerate(store.residency.host):
+            for r in range(store.roles):
+                per[store.class_table[g, r]] += int((row[:, r] >= 0).sum()) + len(store.residency.empty[g])
+        held.append(per)
+    store.taps.append(size)
+    with route_dump(engine) as trace:
+        assert _served(engine, prompts) == want
+    assert store.borrowed["ring"] and store.borrowed["stage"], store.borrowed
+    assert all((h == held[0]).all() for h in held) and held[0].tolist() == [8, 8]
+    assert trace.mirrored
+    if not policy:
+        report = parity(trace)
+        assert report["first_differing_step"] is None and report["lends"] and report["admissions"], report
 
 
 def test_the_delta_log_holds_a_steps_admissions_and_lending(tiny_moe, tmp_path):
@@ -334,7 +370,8 @@ def _gpu_engine(model, **kw) -> Engine:
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("policy, cache", [("", ""), ("", "*=0.25"), ("", "*=0"), ("placement.lru@1", "*=0.25"),
-                                           ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25")])
+                                           ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25"),
+                                           ("", "*=0.5 ring")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
     """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
     resolve, its F11 and F4 variants and zero-copy gather from mapped host pools), decode steps replayed from CUDA
@@ -346,8 +383,10 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     from holon_judge.placement import parity, route_dump
 
     file, prompts, want = gpu_moe
-    engine = _gpu_engine(file, host_memory=1 << 26, plugin_options={"moe.store": "std.moe.offload@1",
-                                                                   "moe.cache": cache, "moe.placement": policy})
+    cache, ring = cache.partition(" ")[::2]          # "ring": steps of 32 prompt tokens or more stream (D8)
+    engine = _gpu_engine(file, host_memory=1 << 26, plugin_options={
+        "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
+        "moe.ring_tokens": 32 if ring else 512})
     store = engine.ctx.shared_objects[KEY]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query.sum()) * 2 * 2 * bool(
@@ -358,11 +397,12 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     assert all(a == b for a, b in routed) and max(routed)[0] > 4      # top-2 x 2 layers; graph padding never counts
     variant = {"": "moe_resolve.lfu@1", "placement.lru@1": "moe_resolve.lru@1"}.get(policy, "moe_resolve@1")
     assert {(k.rpartition("/")[2], v["provider"]) for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")
-            } == {(variant, "kernels.expert_io"), ("expert_fetch@1", "kernels.expert_io")}
+            } == {(variant, "kernels.expert_io"), ("expert_fetch@1", "kernels.expert_io"),
+                  ("expert_prefetch@1", "kernels.expert_io")}
     if not policy:
         report = parity(trace)
-        assert report["first_differing_step"] is None and (report["admissions"] > 0) == (cache == "*=0.25"), report
-        assert report["device_is_mirror"]
+        assert report["first_differing_step"] is None and (report["admissions"] > 0) == (cache in ("*=0.25", "*=0.5"))
+        assert report["device_is_mirror"] and bool(store.borrowed["ring"]) == bool(ring), (report, store.borrowed)
     elif policy == "placement.profile_decay@1":
         assert store.policy.rounds > 0
     experts = {k.rpartition("/")[2]: v["provider"] for k, v in engine.ctx.kernels.items() if "linear_experts" in k}

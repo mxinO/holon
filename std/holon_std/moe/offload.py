@@ -9,7 +9,9 @@ the RAM tier holds every expert — the only tier yet; `std.tiered.static@1` is 
 `moe.placement.profile` (routing counts, JSON `{"layers": {"<layer>": [count per expert]}}`, named relative to the
 checkpoint's directory), `moe.tiers` (host tiers' Refs,
 comma-separated; default `std.tiered.pinned@1`), `moe.cache` (cache slots per class, pinned: `<class>=<n>` or
-`<class>=<fraction>`, `*` for every class not named; default: fill free VRAM)."""
+`<class>=<fraction>`, `*` for every class not named; default: fill free VRAM), `moe.ring_tokens` (D8: a step of at
+least this many prompt tokens streams every layer's missing experts through lent ring slots in passes of up to
+`PASS` tokens; 0: never; default 512)."""
 from __future__ import annotations
 
 import torch
@@ -21,15 +23,17 @@ from .units import CHUNK, ExpertLinear, bind_experts
 
 GATE_UP, DOWN = 0, 1                           # roles
 KEY = "std.moe.offload"                        # the store's shared-object key (`ctx.shared`, the engine's lookup)
+RING_TOKENS = 512                              # D8: a step of this many prompt tokens streams (§13: the 5080's)
+PASS = 4096                                    # a streaming step's expert pass, at most (D8)
 
 
 def _store(ctx, experts: int, top_k: int):
     """The engine's tiered store for MoE experts, built once by the first layer with the engine's context."""
     opts = ctx.options.get("plugins", {})
-    tokens = max(ctx.options.get("max_step_tokens", 1), _rows(ctx))
     profile = str(opts.get("moe.placement.profile", ""))
     return ctx.unit(Ref("std.tiered.store@1", name="moe", items=experts, roles=2, top_k=top_k,
-                        staging=min(experts, top_k * min(CHUNK, tokens)),
+                        staging=min(experts, top_k * _rows(ctx)), prefill=min(experts, top_k * CHUNK),
+                        ring_tokens=int(opts.get("moe.ring_tokens", RING_TOKENS)),
                         policy=str(opts.get("moe.placement", "")),
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
                         cache=str(opts.get("moe.cache", "")), profile=profile))
@@ -77,9 +81,16 @@ class Offload(nn.Module):
     def bind_kernels(self, ctx) -> None:
         self._resolver = self.store.resolver(self.layer)
 
+    def pass_tokens(self, tokens: int) -> int:
+        """The expert pass of the step: one per large chunk in a streaming step (D8), else std.moe@1's chunk."""
+        return PASS if self.store.ring_step else CHUNK
+
     def route(self, ids: torch.Tensor, first: int) -> torch.Tensor:
         """Each role's arena slots for `ids` (the step's tokens `first`…), misses fetched."""
         return self._resolver(ids, first)
+
+    def finish(self) -> None:
+        self._resolver.done()
 
 
 class ArenaExperts(nn.Module):

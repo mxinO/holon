@@ -493,6 +493,25 @@ def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name
         assert path == "mmq/q8_1" and torch.equal(y, ref[:tokens]), f"{name} {stage}: {n} slots {placement}, T={tokens}"
 
 
+@pytest.mark.parametrize("name", ["q4_k", "q6_k"])
+@pytest.mark.parametrize("stage", sorted(STAGES))
+def test_an_arena_call_of_many_chunks_gives_the_chunks_rows(ctx, name, stage):
+    """D8's expert passes: the arena binding (`linear_experts_arena@1`) takes 2,048 rows per mmq call at top-8 (the id
+    helper's 16,384 pairs, in whole 512-row chunks), and each row is bitwise what a 512-row call — the reference
+    chunk's — gives it, with every expert of the layer in its arena."""
+    k, out, rows = STAGES[stage]
+    s = stack(name, EP, out, k, seed=31)
+    facts = {"layout": f"ggml.{name}/gguf.native", "experts": EP, "in": k, "out": out, "top_k": K,
+             "rows_per_token": rows, "glu": "none", "act_dtype": "bfloat16", "out_dtype": "float32", "act_quant": "a8",
+             "slots": EP + K}
+    kernel = ctx.select_kernel("linear_experts_arena@1", site="l0", **facts).impl(ctx, **facts)
+    assert kernel.chunk == 2048
+    parts = {"blocks": torch.cat([s.parts["blocks"], torch.zeros_like(s.parts["blocks"][:K])])}
+    x, ids = placed_inputs(stage, 2560, seed=32)
+    y = kernel(x, parts, ids)
+    assert torch.equal(y, torch.cat([kernel(x[a:a + CHUNK], parts, ids[a:a + CHUNK]) for a in range(0, 2560, CHUNK)]))
+
+
 @pytest.mark.parametrize("name", PLACED)
 @pytest.mark.parametrize("stage", sorted(STAGES))
 @pytest.mark.parametrize("path", sorted(HELPERS))

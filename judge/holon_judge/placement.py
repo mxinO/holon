@@ -28,6 +28,7 @@ class Trace:
     steps: list[dict] = dataclasses.field(default_factory=list)   # step, counts, needed, records, resident
     mirrored: bool | None = None                       # at the end: the device's map is the host mirror's
     score: np.ndarray | None = None                    # F11's scores at the start
+    classes: np.ndarray | None = None                  # [layers, roles] -> the slot class (lending counts per class)
 
     @property
     def admissions(self) -> int:
@@ -39,13 +40,15 @@ def route_dump(engine) -> Iterator[Trace]:
     from holon_std.moe.offload import KEY
 
     store = engine.ctx.shared_objects[KEY]
-    trace = Trace((store.residency.host >= 0).all(-1).copy())
+    trace = Trace((store.residency.host >= 0).all(-1).copy(), classes=store.class_table)
     if "score" in store.state:
         trace.score = store.state["score"].cpu().numpy().copy()
 
     def tap(step, record) -> None:
         trace.steps.append({"step": step.step, "counts": record["counts"].copy(), "needed": record["routed"].copy(),
-                            "records": record["records"].copy(), "resident": (store.residency.host >= 0).all(-1)})
+                            "records": record["records"].copy(), "lends": record["lends"],
+                            "resident": (store.residency.host >= 0).all(-1),
+                            "empty": np.array([len(e) for e in store.residency.empty])})
     store.taps.append(tap)
     try:
         yield trace
@@ -59,8 +62,11 @@ def parity(trace: Trace) -> dict:
     """The replay against the device, step by step: the first step that differs (None: none), and what was compared."""
     from holon_plugins.placement.lfu.reference import replay
 
-    want = replay(trace.seed, [s["counts"] for s in trace.steps], [s["needed"] for s in trace.steps], trace.score)
-    differs = next((s["step"] for w, s in zip(want, trace.steps, strict=True) if not np.array_equal(w, s["resident"])),
+    want = replay(trace.seed, trace.steps, trace.score, trace.classes)
+    differs = next((s["step"] for w, s in zip(want, trace.steps, strict=True)
+                    if not (np.array_equal(w["resident"], s["resident"]) and np.array_equal(w["empty"], s["empty"]))),
                    None)
     return {"steps": len(trace.steps), "decode_steps": sum(bool(s["counts"].any()) for s in trace.steps),
+            "borrowing_steps": sum(s["lends"] is not None for s in trace.steps),
+            "lends": sum(len(s["lends"] or ()) for s in trace.steps),
             "admissions": trace.admissions, "first_differing_step": differs, "device_is_mirror": trace.mirrored}

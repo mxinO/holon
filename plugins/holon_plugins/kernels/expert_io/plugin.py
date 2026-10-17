@@ -18,7 +18,7 @@ from holon.api import Constraint, KernelSpec
 
 from . import extension
 
-RESOLVE, FETCH = "moe_resolve", "expert_fetch"
+RESOLVE, FETCH, PREFETCH = "moe_resolve", "expert_fetch", "expert_prefetch"
 POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
 ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
 STATIC_BYTES = 7 * 4                       # its static shared words (and the variants' alignment word)
@@ -42,14 +42,15 @@ class MoeResolve:
     def __init__(self, modules: Modules, op: str, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.lib, self.policy, self.roles, self.staging = modules(ctx.fingerprint.sm), POLICIES[op], roles, staging
 
-    def __call__(self, ids, kinds, residency, host, limits, counts, routed, misses, errors, delta, n_delta, group,
-                 **state):
+    def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
+                 errors, delta, n_delta, group, **state):
         tokens, k = ids.shape
         slots = torch.empty(self.roles, tokens, k, dtype=torch.int32, device=ids.device)
-        fetch = torch.empty(self.roles, 2, self.staging, dtype=torch.int32, device=ids.device)
+        fetch = torch.empty(self.roles, 2, stage.shape[1], dtype=torch.int32, device=ids.device)
         n_fetch = torch.empty(self.roles, dtype=torch.int32, device=ids.device)
-        self.lib.resolve(self.policy, ids, kinds, residency, host, limits, counts, routed, misses, errors, delta,
-                         n_delta, group, [state[n] for n in STATE[self.policy]], self.plant, slots, fetch, n_fetch)
+        self.lib.resolve(self.policy, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty,
+                         misses, errors, delta, n_delta, group, [state[n] for n in STATE[self.policy]], self.plant,
+                         slots, fetch, n_fetch, self.staging)
         return slots, fetch, n_fetch
 
     def lend(self, n: int, residency: torch.Tensor, classes: torch.Tensor, **state) -> torch.Tensor:
@@ -84,6 +85,23 @@ class ExpertFetch:
         self.lib.fetch(fetch, n, src, dst)
 
 
+class ExpertPrefetch:
+    """D8's ring copies: DMA on a stream of its own, each key's end an event the compute stream waits on."""
+
+    def __init__(self, modules: Modules, ctx, *, unit_bytes: int) -> None:
+        self.lib, self.stream, self.landed = modules(ctx.fingerprint.sm), torch.cuda.Stream(ctx.device), {}
+
+    def start(self, key: int, pairs, src: torch.Tensor, dst: torch.Tensor) -> None:
+        self.stream.wait_stream(torch.cuda.current_stream(dst.device))     # after the work enqueued so far
+        pairs = torch.as_tensor(pairs, dtype=torch.int64).reshape(-1, 2).contiguous()
+        self.lib.copy_pairs(src, dst, pairs, self.stream.cuda_stream)
+        self.landed[key] = torch.cuda.Event()
+        self.landed[key].record(self.stream)
+
+    def wait(self, key: int) -> None:
+        torch.cuda.current_stream().wait_event(self.landed.pop(key))
+
+
 class Plugin:
     def register(self, regs) -> None:
         modules = Modules()
@@ -97,6 +115,9 @@ class Plugin:
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="kernels.expert_io", impl=functools.partial(MoeResolve, modules, op),
                 requires=requires, props=props, priority=10, supports=supports))
+        regs.kernels.add(PREFETCH, KernelSpec(
+            op=PREFETCH, provider="kernels.expert_io", impl=functools.partial(ExpertPrefetch, modules),
+            requires=requires, props=frozenset({"deterministic"}), priority=10))
         regs.kernels.add(FETCH, KernelSpec(
             op=FETCH, provider="kernels.expert_io", impl=functools.partial(ExpertFetch, modules), requires=requires,
             supports=lambda f: f["unit_bytes"] % 16 == 0, props=props, priority=10))

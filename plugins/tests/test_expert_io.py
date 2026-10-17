@@ -19,7 +19,7 @@ from holon.core import platform
 from holon.core.build import BuildContext
 from holon.core.plugins import PluginSet, discover
 from holon_std.moe import reference
-from holon_std.moe.kernels import DECODE, EXPERT_FETCH, MOE_RESOLVE, PADDING, PREFILL, RANGE
+from holon_std.moe.kernels import DECODE, EXPERT_FETCH, EXPERT_PREFETCH, MOE_RESOLVE, PADDING, PREFILL, RANGE
 
 E, K, ROLES = 128, 8, 2
 DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU"))]
@@ -38,10 +38,11 @@ def kernel(plugins, device: str, op: str, provider: str, **facts):
     return spec.impl(ctx, **facts)
 
 
-def routing(tokens: int, seed: int, whole: bool = False) -> dict[str, torch.Tensor]:
+def routing(tokens: int, seed: int, whole: bool = False, ring: bool = False) -> dict[str, torch.Tensor]:
     """Unique ids per row (some dropped), row kinds of every sort, a map with about half the pieces resident (in
     distinct slots past the null and staging slots, per role; `whole`: both roles of an expert alike, but for a few)
-    and host units a permutation."""
+    and host units a permutation. `ring`: a third of the missing pieces streamed into ring slots, misses staged into a
+    lent list of slots, and the layer's empty slots, some of them still free; else none, and the staging slots."""
     g = torch.Generator().manual_seed(seed)
     ids = torch.stack([torch.randperm(E, generator=g)[:K] for _ in range(tokens)]).int()
     ids[torch.rand(tokens, K, generator=g) < 0.05] = -1                      # dropped routes
@@ -51,10 +52,23 @@ def routing(tokens: int, seed: int, whole: bool = False) -> dict[str, torch.Tens
     for r in range(ROLES):
         here = resident ^ (torch.rand(E, generator=g) < 0.04) if whole else torch.rand(E, generator=g) < 0.5
         residency[here, r] = (K + 200 + torch.randperm(1000, generator=g)[:int(here.sum())]).int()
-    host = torch.stack([torch.randperm(E, generator=g) for _ in range(ROLES)], 1).int()
-    counts = torch.randint(0, 50, (E,), generator=g).int()
-    limits = torch.full((ROLES,), K + 1200, dtype=torch.int32)
-    return {"ids": ids, "kinds": kinds, "residency": residency, "host": host, "limits": limits, "counts": counts}
+    streamed = (residency < 0) & (torch.rand(E, ROLES, generator=g) < 0.33) & ring
+    case = {"ids": ids, "kinds": kinds, "residency": residency,
+            "host": torch.stack([torch.randperm(E, generator=g) for _ in range(ROLES)], 1).int(),
+            "limits": torch.full((ROLES,), K + 2000, dtype=torch.int32),
+            "counts": torch.randint(0, 50, (E,), generator=g).int(),
+            "ring": torch.where(streamed, K + 1300 + torch.randperm(E * ROLES, generator=g).view(E, ROLES), -1).int(),
+            "empty": (K + 1600 + torch.randperm(40, generator=g)[:8]).expand(ROLES, 8).int().clone(),
+            "n_empty": torch.tensor([3 if ring else 0], dtype=torch.int32)}
+    return case
+
+
+def _stage(case: dict, staging: int, ring: bool) -> torch.Tensor:
+    """The slots staged misses go to: lent slots (a shuffled run past the ring's) or the staging slots."""
+    if not ring:
+        return (K + torch.arange(staging)).expand(ROLES, staging).int().contiguous()
+    g = torch.Generator().manual_seed(staging)
+    return (K + 1700 + torch.stack([torch.randperm(E, generator=g) for _ in range(ROLES)])).int()
 
 
 def _log(capacity: int, n: int, device: str) -> tuple[torch.Tensor, torch.Tensor]:
@@ -62,33 +76,40 @@ def _log(capacity: int, n: int, device: str) -> tuple[torch.Tensor, torch.Tensor
             torch.full((1,), n, dtype=torch.int32, device=device))
 
 
+SOURCES = ("staging", "ring")
+
+
 @pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("sources", SOURCES)
 @pytest.mark.parametrize("tokens, staging", [(1, 8), (5, 40), (64, E), (513, E), (2049, E), (64, 16)])
-def test_resolve_matches_the_oracle(plugins, device, tokens, staging):
+def test_resolve_matches_the_oracle(plugins, device, sources, tokens, staging):
     """At 64 tokens two resident entries are corrupt (in the staging slots; past the arena): their entries read
-    null slots and the RANGE bit is set."""
+    null slots and the RANGE bit is set. With a ring, its pieces are read in place (no fetch), and the misses go to the
+    lent list."""
     provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
     resolve = kernel(plugins, device, MOE_RESOLVE, provider, experts=E, top_k=K, roles=ROLES, staging=staging)
-    case = routing(tokens, seed=tokens + staging)
+    ring = sources == "ring"
+    case = routing(tokens, seed=tokens + staging, ring=ring)
+    stage = _stage(case, staging, ring)
     corrupt = tokens == 64
     if corrupt:                                    # two routed experts' slots: inside staging, past the arena
         live = case["ids"][case["kinds"] != PADDING]
         e1, e2 = live[live >= 0][:2].tolist()
-        case["residency"][e1, 0], case["residency"][e2, 1] = K + 1, K + 1200
+        case["residency"][e1, 0], case["residency"][e2, 1] = K + 1, K + 2000
     slots, fetch, n_fetch, increments, seen, bits = reference.moe_resolve(
-        case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], staging)
-    dev = {name: t.clone().to(device) for name, t in case.items()}
+        case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], staging, case["ring"], stage)
+    dev = {name: t.clone().to(device) for name, t in (case | {"stage": stage}).items()}
     misses = torch.full((1,), 3, dtype=torch.int32, device=device)
     errors = torch.zeros(1, dtype=torch.int32, device=device)
     delta, n_delta = _log(4, 2, device)
     routed = torch.zeros(E, dtype=torch.int32, device=device)
     routed[0] = 1                                                            # the step's earlier calls' needs stay
     got = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"], dev["counts"], routed,
-                  misses, errors, delta, n_delta, 5)
+                  dev["ring"], dev["stage"], dev["empty"], dev["n_empty"], misses, errors, delta, n_delta, 5)
     assert int(errors[0]) == bits == (RANGE if corrupt else 0)
     assert torch.equal(got[0].cpu(), slots) and torch.equal(got[2].cpu(), n_fetch)
     for r in range(ROLES):
-        n = min(int(n_fetch[r]), staging)
+        n = min(int(n_fetch[r]), stage.shape[1])
         assert torch.equal(got[1][r, :, :n].cpu(), fetch[r, :, :n])
     assert torch.equal(dev["counts"].cpu(), case["counts"] + increments)
     assert torch.equal(routed.cpu(), seen | (torch.arange(E) == 0).int())
@@ -98,8 +119,12 @@ def test_resolve_matches_the_oracle(plugins, device, tokens, staging):
     null = (case["kinds"][:, None] == PADDING) | (case["ids"] < 0)
     assert (slots[:, null] == torch.arange(K).expand(tokens, K)[null]).all()
     if not corrupt:
-        assert ((slots[:, ~null] >= K) & ((slots[:, ~null] < K + staging) | (slots[:, ~null] >= K + 200))).all()
-    assert (n_fetch > staging).any() == (staging == 16)            # the overflow case overflows
+        lo, live = K + 1700 if ring else K, slots[:, ~null]
+        assert (((live >= lo) & (live < lo + stage.shape[1])) | (live >= K + 200)).all()
+    assert (n_fetch > stage.shape[1]).any() == (staging == 16 and not ring)       # the overflow case overflows
+    if ring and tokens > 1:
+        assert (n_fetch < torch.tensor([len({e for e in case["ids"][~null].tolist() if case["residency"][e, r] < 0})
+                                        for r in range(ROLES)])).all()          # the ring's pieces are not fetched
 
 
 def _state(policy: str, seed: int) -> dict[str, torch.Tensor]:
@@ -112,36 +137,41 @@ def _state(policy: str, seed: int) -> dict[str, torch.Tensor]:
 
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("policy", sorted(VARIANTS))
+@pytest.mark.parametrize("sources", SOURCES)
 @pytest.mark.parametrize("tokens, kinds", [(1, "decode"), (6, "decode"), (12, "mixed"), (300, "mixed"),
                                            (64, "prefill"), (6, "overflow")])
-def test_resolve_variants_match_their_oracles(plugins, device, policy, tokens, kinds):
-    """A variant's every output and write: slots, fetch list (admitted misses into their victims' slots), counts,
-    misses, the map, the state, the delta log after the records already in it — and the overflow case, whose log
-    holds one record more than it has room for (the records past it dropped, OVERFLOW raised). 300 tokens route to
-    every expert: no victim, nothing admitted; a prefill chunk counts nothing."""
+def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, tokens, kinds):
+    """A variant's every output and write: slots, fetch list (admitted misses into their victims' or the layer's empty
+    slots), counts, misses, the map, the empty slots left, the state, the delta log after the records already in it —
+    and the overflow case, whose log holds one record more than it has room for (the records past it dropped,
+    OVERFLOW raised). 300 tokens route to every expert: no victim (with a ring, only empty slots), a prefill chunk
+    counts nothing. With a ring, a candidate streamed into it is still admitted (and fetched into its new slot)."""
     op = f"moe_resolve.{policy}@1"
     provider = f"placement.{policy}" if device == "cpu" else "kernels.expert_io"
     resolve = kernel(plugins, device, op, provider, experts=E, top_k=K, roles=ROLES, staging=E)
     oracle = getattr(importlib.import_module(f"holon_plugins.placement.{policy}.reference"), f"moe_resolve_{policy}")
-    case, state = routing(tokens, seed=tokens + len(kinds), whole=True), _state(policy, tokens)
+    ring = sources == "ring"
+    case, state = routing(tokens, seed=tokens + len(kinds), whole=True, ring=ring), _state(policy, tokens)
+    stage = _stage(case, E, ring)
     if kinds == "decode":
         case["kinds"][:] = DECODE
     elif kinds in ("prefill", "overflow"):
         case["kinds"][:] = DECODE if kinds == "overflow" else PREFILL
-    want = oracle(case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], E, *state.values(), 3)
+    want = oracle(case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], E, *state.values(), 3,
+                  case["ring"], stage, case["empty"], int(case["n_empty"][0]))
     capacity = 2 + (len(want["records"]) - 1 if kinds == "overflow" else E)
     delta, n_delta = _log(capacity, 2, device)
-    dev = {name: t.clone().to(device) for name, t in (case | state).items()}
+    dev = {name: t.clone().to(device) for name, t in (case | state | {"stage": stage}).items()}
     misses, errors = torch.zeros(1, dtype=torch.int32, device=device), torch.zeros(1, dtype=torch.int32, device=device)
     routed = torch.zeros(E, dtype=torch.int32, device=device)
     slots, fetch, n_fetch = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"],
-                                    dev["counts"], routed, misses, errors, delta, n_delta, 3,
-                                    **{n: dev[n] for n in state})
+                                    dev["counts"], routed, dev["ring"], dev["stage"], dev["empty"], dev["n_empty"],
+                                    misses, errors, delta, n_delta, 3, **{n: dev[n] for n in state})
     assert torch.equal(slots.cpu(), want["slots"]) and torch.equal(n_fetch.cpu(), want["n_fetch"])
     for r in range(ROLES):
         assert torch.equal(fetch[r, :, :int(n_fetch[r])].cpu(), want["fetch"][r, :, :int(n_fetch[r])])
     assert torch.equal(dev["counts"].cpu(), case["counts"] + want["counts"]) and int(misses[0]) == n_fetch.max()
-    assert torch.equal(routed.cpu(), want["routed"])
+    assert torch.equal(routed.cpu(), want["routed"]) and int(dev["n_empty"][0]) == want["n_empty"]
     assert torch.equal(dev["residency"].cpu(), want["residency"])
     for name in state:
         assert torch.equal(dev[name].cpu(), want[name].to(dev[name].dtype)), name
@@ -150,16 +180,17 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, tokens, k
     assert int(errors[0]) == (2 if kinds == "overflow" else 0)          # OVERFLOW
     # the contract's own terms, on the oracle
     counted = kinds != "prefill"
-    assert bool(len(records)) == (tokens < 300 and counted) and bool(want["counts"].sum() > 0) == counted
+    assert bool(len(records)) == ((tokens < 300 or ring) and counted) and bool(want["counts"].sum() > 0) == counted
+    assert not (ring and counted) or any(b < -1 for _, _, b in want["records"])       # empty slots taken first
     admitted = {a for _, a, _ in want["records"]}
     for _, a, b in want["records"]:          # whole experts: a took b's slot in every role, b now in the RAM tier
-        assert torch.equal(want["residency"][a], case["residency"][b]) and (want["residency"][b] == -1).all()
-        assert not ((case["ids"] == b) & (case["kinds"][:, None] != PADDING)).any()      # b routed by no live entry
+        source = case["empty"][:, -2 - b] if b < 0 else case["residency"][b]
+        assert torch.equal(want["residency"][a], source) and (b < 0 or (want["residency"][b] == -1).all())
+        assert b < 0 or not ((case["ids"] == b) & (case["kinds"][:, None] != PADDING)).any()   # b routed by no row
         for r in range(ROLES):
             row = (want["fetch"][r, 0, :int(want["n_fetch"][r])] == case["host"][a, r]).nonzero()
-            assert want["fetch"][r, 1, row].item() == case["residency"][b, r]   # gathered straight into its slot
-    staged = want["fetch"][:, 1][want["fetch"][:, 1] >= 0]
-    assert (staged[staged < K + E] >= K).all() and len(admitted) == len(records)
+            assert want["fetch"][r, 1, row].item() == source[r]                  # gathered straight into its slot
+    assert len(admitted) == len(records)
 
 
 def _lfu_call(plugins, device: str, ids, kinds, resident: dict[int, int], score: dict[int, float]) -> dict:
@@ -178,9 +209,12 @@ def _lfu_call(plugins, device: str, ids, kinds, resident: dict[int, int], score:
     words = [torch.zeros(1, dtype=torch.int32, device=device) for _ in range(3)]
     zeros = {n: torch.zeros(E, *shape, dtype=torch.int32, device=device) for n, shape in
              (("host", (ROLES,)), ("counts", ()), ("routed", ()), ("delta", (3,)))}
+    ring = torch.full((E, ROLES), -1, dtype=torch.int32, device=device)
+    stage = torch.full((ROLES, 1), 2, dtype=torch.int32, device=device)
+    empty = torch.zeros(ROLES, 1, dtype=torch.int32, device=device)
     resolve(dev["ids"], dev["kinds"], dev["residency"], zeros["host"], torch.full((ROLES,), 40, dtype=torch.int32,
-            device=device), zeros["counts"], zeros["routed"], words[0], words[1], zeros["delta"], words[2], 0,
-            score=dev["score"])
+            device=device), zeros["counts"], zeros["routed"], ring, stage, empty, words[0].clone(), words[0],
+            words[1], zeros["delta"], words[2], 0, score=dev["score"])
     delta = zeros["delta"]
     return {"residency": dev["residency"].cpu(), "score": dev["score"].cpu().numpy(),
             "records": [tuple(r) for r in delta[:int(words[2][0])].cpu().tolist()]}
@@ -253,3 +287,23 @@ def test_fetch_gathers_the_listed_units(plugins, device, mapped):
     fetch_(units.to(device), torch.tensor([n], dtype=torch.int32, device=device), src, dst)
     assert torch.equal(dst.cpu(), want)
     assert torch.equal(want[K + 29], data[2]) and not torch.equal(want[K + 4], data[0])
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_prefetch_copies_the_listed_units_before_its_wait(plugins, device):
+    """`expert_prefetch@1` (D8's ring): units of a pinned host pool (the store's allocation) into the listed slots, a
+    run of consecutive ones in one copy, landed once the current stream has waited for the key; nothing else
+    written."""
+    provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
+    unit = 4096 + 48
+    prefetch = kernel(plugins, device, EXPERT_PREFETCH, provider, unit_bytes=unit)
+    g = torch.Generator().manual_seed(1)
+    data = torch.randint(0, 256, (10, unit), dtype=torch.uint8, generator=g)
+    src = platform.host_memory(data.numel(), torch.device(device), mapped=False).view(10, unit)
+    src.copy_(data)
+    dst = torch.randint(0, 256, (30, unit), dtype=torch.uint8, generator=g).to(device)
+    pairs = [[7, 3], [8, 4], [9, 5], [2, 20], [0, 11]]
+    want = reference.expert_prefetch(pairs, data, dst.cpu())
+    prefetch.start(5, pairs, src, dst)
+    prefetch.wait(5)
+    assert torch.equal(dst.cpu(), want) and torch.equal(want[4], data[8])
