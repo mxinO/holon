@@ -1,6 +1,7 @@
 """Op contracts std.ops owns. Their oracles are in `reference.py`; kernels come from kernel plugins.
 
-- `rmsnorm@1`: instance `(x [..., dim], weight) -> y`. Facts: dim, eps, offset, dtype.
+- `rmsnorm@1`: instance `(x [..., dim], weight) -> y`, a new tensor: `x` is not modified (the model's head reads the
+  trunk's output itself, which a drafter and prompt logprobs read again after it). Facts: dim, eps, offset, dtype.
 - `add_rmsnorm@1`: instance `(x, residual, weight) -> (normed, residual + x)`; may update `x` and `residual` in
   place (callers pass tensors they no longer need). Facts as rmsnorm.
 - `rope@1`: instance `(q [T, Hq, D], k [T, Hk, D], positions [T]) -> (q, k)`, neox (half-split) rotation of the

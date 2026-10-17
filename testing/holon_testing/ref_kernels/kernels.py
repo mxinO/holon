@@ -146,6 +146,8 @@ class LinearExperts:
         self.errors = torch.zeros(1, dtype=torch.int32)        # `linear_experts_arena@1`'s word: never set here
 
     def __call__(self, x, parts, ids):
+        if not isinstance(x, torch.Tensor):            # another provider's prepared handle: the tensor it stands for
+            x = x.x
         if self.quantized is None:
             weight = parts["weight"]
             y = moe.linear_experts(x, weight, ids, self.glu, operand_dtype=weight.dtype)

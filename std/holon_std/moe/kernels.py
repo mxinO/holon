@@ -22,6 +22,8 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   silu(gate) · up` in f32 (out_y = out/2); with `glu = "none"`, out_y = out. A dense layout's activation operand is
   rounded to the weight dtype before the product, with f32 accumulation. An instance may accept, in place of `x`, a
   handle its own provider's `moe_router@1` prepared for it (`route_prepare`; once stale, it reads the handle's x).
+  Every such handle exposes `.x`, the tensor it stands for, so a consumer that does not know the handle (another
+  provider's instance, a composition) falls back on `handle.x`.
   Facts: layout, experts, in, out, top_k, rows_per_token, glu, act_dtype, out_dtype, act_quant (`ACT_QUANT` for
   quantized layouts, as `qlinear@2`'s; `a16` for dense ones). An instance may define `prepare` as `qlinear@2`'s (logical
   shape [E, out, in]); a spec's `config["act"]` is refused under mixed steps as `qlinear@2`'s.
@@ -39,9 +41,10 @@ then `staging` slots, then cache slots.
   out_y]` as @2's, except that `parts` hold an arena of S slots per role, `ids` are arena slots (< S), and a call's
   ids name at most `experts + top_k` distinct slots (a layer's E experts, plus one null slot per rank). Its facts are
   @2's for the layer (`experts` = E) plus `slots`, the most slots an arena of the stack's class holds (a call's may
-  hold fewer). An instance has `errors`, a device int32 word [1] its calls or violation bits into (zero: none; bits
-  are the provider's), which the caller zeroes. Same results as @2 over the stack those slots hold: the oracle is
-  @2's (`reference.linear_experts`, over the arena).
+  hold fewer). It may accept a prepared handle in place of `x` as @2's (exposing `.x`, the tensor it stands for, which
+  a consumer that does not know the handle reads instead). An instance has `errors`, a device int32 word [1] its
+  calls or violation bits into (zero: none; bits are the provider's), which the caller zeroes. Same results as @2
+  over the stack those slots hold: the oracle is @2's (`reference.linear_experts`, over the arena).
 
 - `moe_resolve@1`: instance `(ids [T, k] int32, kinds [T] uint8, residency [E, R] int32, host [E, R] int32, limits [R]
   int32, counts [E] int32, routed [E] int32, ring [E, R] int32, stage [R, F] int32, empty [R, P] int32, n_empty [1]

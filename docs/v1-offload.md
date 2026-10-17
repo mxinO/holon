@@ -1200,3 +1200,55 @@ Decided while building:
   - A faster selection tail.
 - **Locks:** decode routing is no longer cuBLAS's bits, and MoE sites name `moe_router@1` (not `moe_topk@1`). The
   existing locks are propagated once, at X's close, with the router's L2 above as its bounded verdict.
+
+### Step 3d as built (2026-10-17): the step loop's per-step index and copy kernels
+
+A small core round, no ABI change (`check_abi --base main` adds nothing to the branch's 1.3), on step 3c's "not
+built" item: the core issued 25 kernels, 2 device copies and 6 host-to-device copies per batch-1 decode step (plus the
+tokens' copy back). Commits `b60328f` (prep), `5452833` (upload); `cdd4785` holds two std nits from 3c's panel.
+Evidence: `spikes/x3d_core/README.md` (the per-step inventory before and after, by phase and issuer),
+`evidence/x3d_core_rtx-5090_2026-10-17.json`, `evidence/x3d_core_rtx-a5000_2026-10-17.json`. Core 4,602 code lines.
+
+| Change | Class | Saving per decode step, RTX 5090: 30B resident / 30B offload 47% / 8B, at 1K | Verdict |
+|---|---|---|---|
+| prep: without a drafter every start is the host's (§7.3), so positions, page lengths, write indices and the store's slots and lengths are staged; the device moves only its last tokens and writes the SeqTable; no logits gather when every token is a logits row | bitwise | 0.022 / 0.019 / 0.022 ms (0.91 / 0.68 / 0.58%, sd ≤ 0.06) | kept |
+| upload: steps of at most a decode / verify step's tokens stage into an arena of that size, fields smallest first: one copy | bitwise | 0.013 / 0.021 / 0.013 ms (0.55 / 0.78 / 0.36%, sd ≤ 0.05) | kept (30B rows) |
+| telemetry: the shared objects' telemetry gathered on the device and copied to the host once | bitwise | — / 0.001 ms (0.04%) / — | dropped |
+
+- **Per step, core-issued:** 25 kernels + 2 D2D + 6 H2D + 1 D2H → 5 kernels + 1 H2D + 1 D2H (Qwen3-30B-A3B and
+  Qwen3-8B alike). What is left: the last tokens' gather and write into the inputs, the SeqTable start write, the
+  store's two writes, one upload, the tokens' copy back.
+- **Totals, decode:** −0.036 ms per step on the 5090 30B resident (2.44 → 2.40 ms, 1.5%), −0.040 at 47%, −0.035 on
+  the 8B; −0.025 ms on the A5000. `holon_tg` on the 5090, 30B resident: 419.2 → 424.6 tok/s at 1K and 387.2 → 392.0 at
+  4K (×1.013, −0.030 ms per token); the A5000 does not resolve it end to end (README).
+- **Judge:** snapshots identical to bdd8422 for the 30B (resident and `*=0.47`) and the 8B on the A5000; the offload
+  store identical to all-resident. A tiny-engine test checks the host-staged inputs against the device-derived ones at
+  every step.
+
+Decided while building:
+- **The condition is static: no drafter.** Only verify rows make a start inexact, and only a drafter makes verify
+  rows; the executor raises if a step without one still brings an inexact row. Engines with a drafter keep the device
+  derivation unchanged (`Executor._derive`), so graphs need no new key. The SeqTable start write stays in both paths:
+  a plugin may read `num_computed` during a step.
+- **The first inputs by a scratch element:** each row's device-held token is gathered from `last_token` and written at
+  its first input, or, for a row whose first input is the host's, at one element past the step's tokens. Two kernels
+  instead of four, the same in both paths.
+- **The head reads `h` itself** when every token is a logits row (graphed steps always): `rmsnorm@1` returns a new
+  tensor and, as its contract now states (the panel's finding; L0 checks both providers), never writes `x`, so a
+  drafter or prompt logprobs reading `h` after it see it unchanged.
+- **Two arenas, not one compact layout:** the small arena has fixed offsets like the large one (graphs bake its
+  addresses); packing each step's fields by size would have made the addresses depend on what a step writes. It
+  repeats the fields that do not scale with tokens (block-table rows, masks): ≈ 8 MB per page group at 256 sequences
+  of 128K tokens, once on the device and twice pinned, allocated before `state_memory` reads the free memory.
+- **Found on the way:** the A/B saves about 1 µs per kernel removed, far less than the inventory's profiled µs
+  (node tracing inflates small kernels); the A5000's rows drift ≈ 2% over a run as the card warms, so it resolves
+  none of these changes and the verdicts come from a 5090 desktop.
+- **Not built** (README "Not done"): the telemetry copy (dropped); std's per-step kernels — the greedy sampler's unused
+  parameter gather, the gqa planner's write unit / offset (a `Pages` field would be an ABI change), FlashInfer's plan
+  copy and in-graph `prepare`; the tokens' copy inside the graph (one graph per output buffer).
+- **Also (std, `cdd4785`):** the ffn unit interface's optional member is `add_residual(x, residual)` (was `add`;
+  `moe_combine@1`'s instance `add` is unchanged), and the `linear_experts@2` / `linear_experts_arena@1` contract text
+  says a prepared handle exposes `.x`, the tensor it stands for, for consumers that do not know it; the panel found
+  the in-tree experts providers did not honour it (ggml's took only its own `Prepared`, the reference a tensor), so
+  both now read any other handle's `.x` (`7305168`, tested on both). `_Prep.host_staged` names the host-staged path
+  explicitly (`d73a2a2`).

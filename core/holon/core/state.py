@@ -419,12 +419,17 @@ class StateManager:
             fields |= t.fields(f"{group}.table") | {f"{group}.write": (max_tokens, torch.int64)}
         return fields
 
-    def pages(self, plan: BatchPlan, up: Uploader) -> dict[str, Pages]:
+    def pages(self, plan: BatchPlan, up: Uploader, positions: np.ndarray | None = None) -> dict[str, Pages]:
         """This step's view of every page group. The block tables are synced now; lengths and write indices are
-        static buffers the engine's device prep fills from the device SeqTable (see `Executor._prepare`)."""
+        static buffers the engine's device prep fills from the device SeqTable (see `Executor._prepare`), or, given
+        the step's `positions` (exact on the host), write indices are staged from the host tables now."""
         rows, tokens = len(plan.slots), int(plan.n_query.sum())
+        slot_of_token = None if positions is None else np.repeat(plan.slots, plan.n_query)
         out = {}
         for group, t in self.tables.items():
             t.sync(up, f"{group}.table")
+            if positions is not None:
+                unit = t.host[slot_of_token, positions // t.page].astype(np.int64)
+                up.put(f"{group}.write", unit * t.page + positions % t.page)
             out[group] = Pages(t.page, t.dev, t.host, up.dev["pages.lens"][:rows], up.dev[f"{group}.write"][:tokens])
         return out

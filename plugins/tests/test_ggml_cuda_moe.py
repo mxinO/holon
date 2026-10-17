@@ -44,6 +44,7 @@ Skips without a GPU; builds the extension (prebuild) into the user cache if it i
 """
 import dataclasses
 import os
+import types
 
 import numpy as np
 import pytest
@@ -715,7 +716,8 @@ def test_the_router_prepares_the_gate_up_input(ctx, lib):
     """`route_prepare` (step 3c): at every token count on the gate/up's mmvq path the handle it returns gives the
     gate/up output bitwise that of the layer input itself (its q8_1 written by the router's launch, read in place of
     a quantize: other activations written into the handle's buffer are what it reads); a handle whose buffer a later
-    write took falls back to its x; above the path it returns the tensor."""
+    write took falls back to its x; another provider's handle is read as its `.x`; above the path it returns the
+    tensor."""
     unit, _ = moe_layer(ctx, "q4_k", "q4_k")
     gate_up = unit._gate_up.kernel
     assert unit._prepare is not None and 0 < gate_up.mmvq_tokens <= 8
@@ -728,6 +730,7 @@ def test_the_router_prepares_the_gate_up_input(ctx, lib):
             assert isinstance(xin, torch.Tensor) and torch.equal(xin, x[:, None])
             continue
         assert isinstance(xin, Prepared) and torch.equal(unit._gate_up(xin, ids), want)
+        assert torch.equal(unit._gate_up(types.SimpleNamespace(x=x[:, None]), ids), want), "a foreign handle's .x"
         lib.quantize_q8_1(TYPES["q4_k"], other, xin.buffer)             # the buffer, generation unchanged: read
         assert torch.equal(unit._gate_up(xin, ids), unit._gate_up(other[:, None], ids)), "the handle's q8_1 unread"
         unit._prepare(other, unit.router, gate_up)                     # the buffer's next write

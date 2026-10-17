@@ -251,9 +251,9 @@ class MoE(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self._forward(x, None)
 
-    def add(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
+    def add_residual(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
         """`residual + self(x)`, the add in the combine's kernel where it has one (`moe_combine@1`'s `add`): bitwise
-        the composition (std.blocks' optional ffn capability)."""
+        the composition (the ffn unit interface's optional member, std.blocks.prenorm)."""
         if not hasattr(self._combine, "add"):
             return residual + self._forward(x, None)
         return self._forward(x, residual)
