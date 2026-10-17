@@ -28,6 +28,15 @@ class Layout:
     name: str
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class Extent:
+    """Where a part's bytes lie unmodified in a checkpoint file, so they can be read again without the part."""
+
+    path: str
+    offset: int
+    nbytes: int
+
+
 @dataclasses.dataclass(slots=True, eq=False)
 class QTensor:
     """A typed weight: logical shape + layout + the concrete tensors (parts) that hold it."""
@@ -35,3 +44,5 @@ class QTensor:
     layout: Layout
     logical_shape: tuple[int, ...]
     parts: dict[str, torch.Tensor]
+    extents: dict[str, Extent] = dataclasses.field(default_factory=dict)  # per part, from the weight source; none
+                                                                          # for a part a kernel's `prepare` repacked

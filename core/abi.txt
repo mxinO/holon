@@ -76,6 +76,10 @@ dataclass EngineRequest
   #1 token_ids: list[int]
   #2 params: SamplingParams
   #3 resume_output: int = 0
+dataclass Extent frozen
+  #0 path: str
+  #1 offset: int
+  #2 nbytes: int
 const FINISH_REASONS = ('stop', 'length', 'abort', 'error')
 dataclass Fingerprint frozen
   #0 gpu: str
@@ -242,6 +246,7 @@ dataclass QTensor
   #0 layout: Layout
   #1 logical_shape: tuple[int, ...]
   #2 parts: dict[str, torch.Tensor]
+  #3 extents: dict[str, Extent] = dict()
 dataclass Reasoning
   #0 text: str
 dataclass Ref frozen

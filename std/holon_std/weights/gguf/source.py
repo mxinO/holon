@@ -1,6 +1,6 @@
 """A llama.cpp GGUF file, self-contained as in llama.cpp: tensors, configuration, tokenizer, chat template and stop
 set all come from the file (M0.1 D3). Quantized tensors stay in their stored blocks (`gguf.native`) and are read
-lazily from a copy-on-write memory map."""
+lazily from a copy-on-write memory map; each says where its blocks lie in the file (`QTensor.extents`)."""
 from __future__ import annotations
 
 import hashlib
@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 import torch
 from gguf import GGMLQuantizationType
-from holon.api import Layout, QTensor, Scheme
+from holon.api import Extent, Layout, QTensor, Scheme
 
 from . import reader
 
@@ -76,7 +76,8 @@ class GGUFSource:
                 if t.type == GGMLQuantizationType.MXFP4 and (data.reshape(t.rows, -1, 17)[..., 0] == 0xFF).any():
                     raise ValueError(f"{t.name}: an MXFP4 scale is NaN (e8m0 0xFF)")     # as std.weights.hf's
                 layout = Layout(Scheme(f"ggml.{t.type.name.lower()}"), "gguf.native")
-                yield t.name, QTensor(layout, t.shape, {"blocks": torch.from_numpy(data)})
+                yield t.name, QTensor(layout, t.shape, {"blocks": torch.from_numpy(data)},
+                                      {"blocks": Extent(str(self.path), t.offset, data.nbytes)})
 
     def tokenizer(self) -> Any:
         from .tokenizer import build
