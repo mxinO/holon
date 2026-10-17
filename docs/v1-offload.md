@@ -648,6 +648,25 @@ cannot close it); the capped rows and the F1 row are judged after step 6 with tu
 rate is re-measured at step 2 on the store's own allocation (`mmap` + `cudaHostRegister`, with and without huge
 pages), since M1 used `cudaHostAlloc` (panel C-r4.5-5).
 
+**Reference engines on the RTX 5080** (`spikes/x4_refs/README.md`, `evidence/x4_refs_rtx-5080_2026-10-17.json`;
+llama.cpp f74e2fa with `--moe-cache-mib`, FreeToken 21d9578; 3 interleaved rounds). Decode tok/s at 1K / 4K / 32K,
+natural fit (≈ 47%) | capped (≈ 25%):
+
+| Arm | Natural | Capped |
+|---|---|---|
+| llama.cpp `--fit` default | 78.2 / 76.3 / 61.5 | 46.6 / 45.7 / 39.9 |
+| llama.cpp tuned `--n-cpu-moe` | 88.4 / 83.1 / 67.2 (66% resident) | 47.4 / 45.5 / 40.6 |
+| llama.cpp `--moe-cache-mib`, default (mmap) | 159.1 / 109.2 / 81.7 | 54.6 / 46.9 / 42.5 |
+| llama.cpp `--moe-cache-mib`, pinned (`--load-mode none`) | 188.8 / 147.2 / 102.0 | 100.3 / 87.0 / 70.5 |
+| FreeToken (`auto` = `offload`) | 213.8 / 175.3 / 111.4 | 115.6 / 109.5 / 76.6 |
+
+llama.cpp's host sync is ≈ 19.5 µs per MoE layer (0.94 ms of a 5.4 ms step); its GPU work is 3.93 ms per token
+(the roofline assumed 4.5); its cache hits 95.2% at 47%. FreeToken prefills 2.7K / 10.7K / 5.4K tok/s (it streams
+every expert once per chunk of up to 8K). **Re-banded:** the natural-fit row against the pinned cache is
+1.02–1.11× / 1.00–1.07× / 0.98–1.02× at 1K / 4K / 32K (bar 1.1×; 1.09–1.17× even if Holon's kernels matched
+llama.cpp's), against FreeToken 0.84–1.04× (bar 1.0×), against llama.cpp's default cache 1.22–1.53×; the static-split
+rows clear 1.5× at 1K / 4K and straddle at 32K. By §8's rule the cache rows go to the owner before step 4.
+
 **Contradictions with the research note, recorded:** CPU compute is not a second link beside PCIe (they share host
 memory); ggml-cpu's AVX2 and AVX-512 builds agree bitwise; "≤ 4 threads saturate DRAM" (S6) holds only for Q4_K
 single-token jobs; these desktops' NVMe reads ≈ 2.6 GB/s, not 7–14. The vendored ggml-cpu for `kernels.ggml_cpu`
