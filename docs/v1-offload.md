@@ -431,7 +431,8 @@ and a CPU provider, in `testing` for std's):
 | `moe_route_transform@1` | `(ids, weights, map) → ids, weights` | signature only; each transform's contract is its plugin's (D3); `approx` only, bound by explicit option |
 | `expert_fetch@1` | `(fetch list, host aliases, staging slots)` | in-graph zero-copy gather (dynamic-address DMA is not graph-safe); a DMA variant with a host-planned resolve if M1 shows the gather < 0.9× DMA |
 | `expert_prefetch@1` | `start(next layer's non-resident list, ring slots)`, `wait(layer)` | F7's in-step copy stream and its events stay inside the kernel plugin (D8) |
-| `linear_experts@2` | unchanged, over a class arena `[S, …]`; compacted prefill groups are padded with null-slot rows so the kernel's own row count picks the reference chunk's path (D4) | the forced-tiling and compact-active-slot patches inside `kernels.ggml_cuda` |
+| `linear_experts@2` | unchanged; arenas use `linear_experts_arena@1` (below) | — |
+| `linear_experts_arena@1` | @2 over a class arena `[S, …]`: ids are arena slots, at most E + top_k distinct per call; facts @2's for the layer (E) plus `slots`; an `errors` word; @2's oracle. Compacted prefill groups are padded with null-slot rows so the kernel's own row count picks the reference chunk's path (D4) | `kernels.ggml_cuda` (its @2 kernel, with the forced-tiling and compact-active-slot patches) and `testing.ref_kernels` register it |
 | `cpu_experts@1` (CPU) | `(jobs grouped by expert, activations, host blocks, mapped f32 rows)` | bitwise per token across group sizes and thread counts; ISA constraint |
 | `moe_patch_rows@1` | `(y [T,k,H], CPU rows, job map)` | before `moe_combine@1` |
 | `cpu_task@1` | `signal(slot)`, `wait(slot)` graph ops + worker service | `kernels.cpu_task` (D6); fail-open: errors answer DONE and raise a flag |
@@ -809,9 +810,11 @@ Decided while building, against the text above:
   cap), then each class's arena — null, staging, the seeded cache slots — is laid out in it; per-class fill pools
   grow one after another and starved the later classes. `moe.cache` (`<class>=<slots or fraction>`, `*` for
   the rest) therefore **caps** a class's cache slots and pins the pool's size; the seed decides each arena's (with
-  `static`, deterministically). Kernels over an arena are bound with the layer's facts (`experts` = E): the arena
-  holds more slots, a call names at most E + top_k of them (the patched mmq's compact launch bound) —
-  `linear_experts@2`'s doc says so.
+  `static`, deterministically). Kernels over an arena are bound through `linear_experts_arena@1` (§5), not
+  `linear_experts@2`, whose input domain (a stack of E experts) stays as it is: a contract of its own, with the
+  layer's facts (`experts` = E) plus the class's largest arena (`slots`), ids that are arena slots and at most
+  E + top_k of them distinct per call (the patched mmq's compact launch bound), and a declared `errors` word; resident
+  MoE keeps @2, so resident locks' kernel sites do not move.
 - **Errors reach the commit.** `moe_resolve@1` takes each role's arena size and flags a resident slot outside the
   cache slots (RANGE; the entry reads a null slot), and the store watches the kernels' error words (kernels.ggml_cuda's
   id-error word); the step's first resolve zeroes them, a commit that finds one set stops the engine.
@@ -826,5 +829,7 @@ Decided while building, against the text above:
   layer needs its sub-steps' row kinds; refused at build), `lfu` as the default (step 3; `static` until then).
 - The `Tier` protocol's members take the class name (a tier holds pieces of every class); the profile
   (`moe.placement.profile`) is a JSON file `{"layers": {"<layer>": [count per expert]}}` named relative to the
-  checkpoint's directory, so a plan records no host path. The store's options share the `moe.` prefix: `moe.store`,
+  checkpoint's directory, so a plan records no host path. §5 says profiles ship in model bundles: until
+  `holon_tools profile` (step 3) writes them there, a profile lies beside the checkpoint; a bundle-shipped profile
+  then needs the store to resolve the model plugin's bundle, decided with the tool. The store's options share the `moe.` prefix: `moe.store`,
   `moe.placement`, `moe.placement.profile`, `moe.tiers`, `moe.cache`.
