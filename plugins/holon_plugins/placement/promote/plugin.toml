@@ -1,0 +1,16 @@
+[plugin]
+name = "placement.promote"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "unit"
+license = "Apache-2.0"
+core_abi = ">=1.0,<2.0"
+
+[resources]   # the policy, its resolve contract (oracle: reference.py) and the contract's CPU provider
+provides = ["unit.placement.promote@1", "op.moe_resolve.promote@1", "kernel.moe_resolve.promote@1"]
+
+[properties]
+numerics = "exact"
+
+[reference]
+module = "reference"
