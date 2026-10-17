@@ -34,9 +34,9 @@ NAMES = {v: k for k, v in T.items()}
 # its Q6_K-down and Q4_K-down layers), GLM-like Maya-S expert.
 BLOBS = {"1.46MB": 1_460_000 // 256 * 256, "2.8MB": 2_856_960, "7.1MB": 7_100_000 // 256 * 256}
 MB = 1e6
-# Host arenas tile the real experts over this many slots (distinct addresses): a CPU sweep over > 1 GB of experts
-# reads DRAM even on a desktop L3 of up to 96 MB, as decode does (each layer's experts are revisited only after the
-# other 47 layers' ~1 GB).
+# Host arenas tile the real experts over this many slots (distinct addresses): a CPU sweep over 0.5-1.2 GB of experts
+# reads DRAM even past a large desktop L3, as decode does (each layer's experts are revisited only after the other
+# 47 layers' ~1 GB).
 SLOTS = 384
 _CORES: list[int] = []
 

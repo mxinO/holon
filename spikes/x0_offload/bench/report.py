@@ -64,11 +64,15 @@ def m2(d, key="m2"):
     rows = [[r["threads"], r["mode"], f(r["cpu_us_per_expert"]), f(r["gpu_gbps"])] for r in m["steady"]]
     print(f"expert {m['expert_bytes'] / 1e6:.2f} MB, gather {m['gather_config']}")
     print(table(["CPU threads", "GPU traffic", "CPU µs/expert", "GPU GB/s"], rows))
-    for nt, s in m["split"].items():
-        print(f"\nsplit at {nt} threads:")
-        rows = [[n, p["k"], f(p["fetch_only_us"]), f(p["path_us"]), f"{100 * p['gain']:.0f}%"]
-                for n, p in s["plan"].items()]
-        print(table(["misses n", "plan[n] (CPU)", "fetch-only µs", "split µs", "gain"], rows))
+    ts = list(m["split"])
+    print("\nper-miss-count split: plan[n] = misses the CPU takes, path = max(CPU, gather) at the best k; gain vs "
+          "fetch-only")
+    rows = []
+    for n in m["split"][ts[0]]["plan"]:
+        ps = [m["split"][t]["plan"][n] for t in ts]
+        rows.append([n, f(ps[0]["fetch_only_us"])] + [f"{p['k']} / {f(p['path_us'])} / {100 * p['gain']:.0f}%"
+                                                       for p in ps])
+    print(table(["misses n", "fetch-only µs"] + [f"{t} threads: plan[n] / µs / gain" for t in ts], rows))
 
 
 def m5(d):
