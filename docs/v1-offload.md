@@ -716,7 +716,7 @@ pinned cache: on or just over their bars, with no margin.
 
 **F5b prediction for the RTX 5080, fixed before step 4's tune** (panel C, 2026-10-18): the A5000's +55% at 25% cached
 (PCIe 4.0 gather ≈ 26 GB/s beside a server CPU's memory) does not carry over; on the 5080 the gather (≈ 47.5 GB/s) and
-the CPU (≈ 45 GB/s) share dual-channel DDR5 (≈ 55 GB/s together, M2), so F5b is expected to add ≈ 5–8% at the capped
+the CPU (≈ 45 GB/s) share the desktop's host memory (≈ 55 GB/s together, M2), so F5b is expected to add ≈ 5–8% at the capped
 fit and may only just clear D4's 5% rule; tune decides per class (no share carried across classes). Step 5's
 RAM-capped decode numbers were read from a network filesystem and are not quoted; F9 is re-measured on a desktop NVMe
 before GLM's RAM-short runs. A supervisor restarts the engine process after a `cpu_task` TIMEOUT (a stuck worker is
