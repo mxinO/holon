@@ -55,10 +55,16 @@ victims ascending, a failing pair fails every later one). The
 rounding rules are L0's: the kernel's scores are compared bit for bit with the oracle's, and an L0 case checks the
 decay-then-count order by hand.
 
-**Cost of a variant's resolve** (`bench_resolve.py`, per layer call, 3 identical rounds): `moe_resolve@1` 4.1 / 4.2 /
-5.5 µs at 1 / 8 / 64 decode rows, `moe_resolve.lfu@1` 8.8 / 9.1 / 10.3, `moe_resolve.lru@1` 8.0 / 8.2 / 9.0 — F11
-adds ≈ 4.7 µs per layer, ≈ 0.23 ms per decode step over 48 layers (§13's band for F11's pick and decay: 0.25–0.35
-ms). Snapshot run times are not compared: route dumps synchronize eager steps and two runs shared the host.
+**Cost of a variant's resolve** (corrected after the panel's review, which found the first version's claim
+double-counted: §13's 0.25–0.35 ms band was the whole offload path's, not F11's alone). `bench_resolve.py`, per layer
+call, each call from the same map and state so that it pairs (restoring copies 5.0 µs, in every arm, subtracted here;
+2 identical rounds): `moe_resolve@1` 3.8 / 4.4 / 5.6 µs at 1 / 8 / 64 decode rows, `moe_resolve.lfu@1` 6.3 / 6.7 /
+6.9, `moe_resolve.lru@1` 6.1 / 6.4 / 6.7 — F11 adds 2.5 / 2.3 / 1.3 µs per layer with candidates to pair (it was 4.7–
+8.8 µs before the review: no early exit, an all-pairs ranking over every expert), ≈ 0.7 µs when a call has none (it
+exits before ranking). End to end, decode tg128 at 1K context, batch 1, every expert cached (`bench/holon_tg.py`, 2–3
+interleaved rounds): `std.moe@1` 5.343 ms per token, the offload store under `static` 5.663 (+0.32: step 2's path),
+under F11 5.703 (+0.04 over `static`), under F4 5.675. Snapshot run times are not compared: route dumps synchronize
+eager steps and two runs shared the host.
 
 **Plants** (`judge/holon_judge/planted.py`; predicted in design §6 before running):
 

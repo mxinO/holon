@@ -508,6 +508,13 @@ routes ≈ 2.4 GB of experts per token on Maya-S; above ≈ 85% hits its decode 
 against ≈ 3.4 ms of misses at 90%), below it miss-bound. Host RAM per desktop class is checked before scheduling
 (not recorded here).
 
+As built (step 3b, §14): staging is min(E, k × a graphed step's tokens) per class — k × `max_seqs` × (1 + drafts) —,
+since prefill steps borrow their staging and ring slots from the cache (D4's device lending) and give them back; a
+layout whose cache cannot lend a prefill pass's (min(E, k × 512) per class) keeps that much staging instead. The
+vehicle at the gate (`max_seqs` 1, no drafts) keeps 8 staging slots per class instead of 128 (≈ 0.47 GB more cache
+on the 5080). The startup profile measures a streaming step's 4,096-token expert pass (≈ 0.47 GB of f32 activations
+on the vehicle, against ≈ 0.06 GB for a 512-token one), which the cache yields.
+
 ## 8. Step 0 — measure before freezing
 
 On the RTX 5080 and 5090 desktops (the bar cards), one heavy job at a time under `MemoryMax`, results in `evidence/`.
@@ -945,9 +952,11 @@ Decided while building, against the text above:
   return of a lent slot as its layer's first victim (until then a lent slot is not refilled), are step 3b's.
 - **The parity check also checks the device's map against the host mirror** once every launched step has committed
   (a kernel that changes the map without logging it would otherwise pass).
-- **Cost:** a variant's resolve adds ≈ 4.7 µs per layer call on the A5000 (≈ 0.23 ms per decode step over 48 layers;
-  §13's band for F11's pick and decay is 0.25–0.35 ms) after its ranking moved its keys to shared memory (≈ 10 µs
-  before).
+- **Cost** (corrected after the panel, C: the first figure was compared with §13's band as if that band were F11's
+  alone; it is the whole offload path's): a variant's resolve adds 2.5 / 2.3 / 1.3 µs per layer call with candidates
+  to pair at 1 / 8 / 64 decode rows on the A5000, ≈ 0.7 µs when a call has none (it exits before ranking; the
+  ranking runs over compacted lists of packed keys, a victim ranked past the candidates stops counting); end to end
+  with every expert cached, 5.663 ms per token under `static` against 5.703 under F11 (+0.04; `std.moe@1` 5.343).
 - **Plants:** `lfu-victim-needed` and `lfu-shared-victim` set plant bits the variant kernel reads (`MoeResolve.plant`,
   zero otherwise; judge-only). A needed victim's rows then read staging slot k (the victim was no miss), not its
   overwritten slot, as §6 describes. Their verdict (panel C, recorded): on an mmq step the patched mmq's id-error word

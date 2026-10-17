@@ -49,6 +49,10 @@ def arm(plugins, op: str, tokens: int):
     dev = {k: v.cuda() for k, v in (case | state).items()}
     words = [torch.zeros(1, dtype=torch.int32, device="cuda") for _ in range(3)]
     routed = torch.zeros(E, dtype=torch.int32, device="cuda")
+    ring = torch.full((E, ROLES), -1, dtype=torch.int32, device="cuda")
+    stage = (K + torch.arange(E, dtype=torch.int32, device="cuda")).expand(ROLES, E).contiguous()
+    empty, n_empty = torch.zeros(ROLES, E, dtype=torch.int32, device="cuda"), torch.zeros(1, dtype=torch.int32,
+                                                                                         device="cuda")
     delta = torch.zeros(10000, 3, dtype=torch.int32, device="cuda")
     kw = {n: dev[n] for n in state}
     restore = [dev["residency"], dev["counts"], *kw.values()]
@@ -59,8 +63,8 @@ def arm(plugins, op: str, tokens: int):
         for t, s in zip(restore, saved, strict=True):     # the call's starting map and state
             t.copy_(s)
         words[2].zero_()
-        resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"], dev["counts"], routed,
-                words[0], words[1], delta, words[2], 0, **kw)
+        resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"], dev["counts"], routed, ring,
+                stage, empty, n_empty, words[0], words[1], delta, words[2], 0, **kw)
 
     def copies():
         for t, s in zip(restore, saved, strict=True):
