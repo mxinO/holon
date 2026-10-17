@@ -667,6 +667,24 @@ every expert once per chunk of up to 8K). **Re-banded:** the natural-fit row aga
 llama.cpp's), against FreeToken 0.84–1.04× (bar 1.0×), against llama.cpp's default cache 1.22–1.53×; the static-split
 rows clear 1.5× at 1K / 4K and straddle at 32K. By §8's rule the cache rows go to the owner before step 4.
 
+**Where the gap is** (`spikes/x4_gap/README.md`, `evidence/x4_gap_rtx-5090_2026-10-17.json`,
+`evidence/x4_gap_rtx-5080_2026-10-17.json`): it is placement policy and prefill design, not kernels.
+- All-resident decode on the RTX 5090: Holon 389 / 362 tok/s at 1K / 4K against llama-server 340 / 294 and FreeToken
+  341 / 322 — §13's 0.93× came from llama-bench, which has no server loop; Holon's remaining 0.41 ms per token
+  against FreeToken is glue, router GEMV, the stacked gate/up GEMV and q8_1 quantization. Offload overhead fully
+  cached: Holon +0.22 ms, FreeToken +0.53–0.60 ms.
+- Offload decode at 47% on the RTX 5080: Holon's step-2 static policy misses 592 MB per token against FreeToken's
+  52 MB (gather rates ≈ 41 vs 43 GB/s); replayed `lfu` on Holon's own routing predicts 0.97–0.99× FreeToken and
+  1.12–1.15× llama.cpp's pinned cache (1.03–1.05× / 1.19–1.22× at FreeToken's miss bytes). The last ≈ 0.4 ms is
+  FreeToken admitting the prompt's experts during prefill — step 3b re-checks D4's "prefill never admits" with
+  M6's replay before changing it.
+- Prefill at 4K on the 5080: FreeToken 10.7K tok/s (all experts streamed once, overlapped); Holon as built 2.0K
+  (1.38 s of 2.0 s refetching per 512-token pass); measured probes 4.9K with 4,096-token expert passes and 6.6K with
+  2,048-row mmq calls; modelled D8 with overlap ≈ 10.0K (2,048-row mmq) to ≈ 11.9K (4,096-row, needs the helper's
+  `ID_PAIRS` above 16,384). Step 3b builds D8 with large passes, copy-engine overlap and ≥ 2,048-row mmq calls.
+So the cache rows' prediction moves back toward the bars, with the FreeToken decode row the tightest; the owner
+decides the bars with step 4's measurements.
+
 **Contradictions with the research note, recorded:** CPU compute is not a second link beside PCIe (they share host
 memory); ggml-cpu's AVX2 and AVX-512 builds agree bitwise; "≤ 4 threads saturate DRAM" (S6) holds only for Q4_K
 single-token jobs; these desktops' NVMe reads ≈ 2.6 GB/s, not 7–14. The vendored ggml-cpu for `kernels.ggml_cpu`
