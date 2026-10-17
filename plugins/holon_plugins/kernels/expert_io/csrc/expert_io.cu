@@ -15,6 +15,9 @@ constexpr int PADDING = 0, DECODE = 1;                 // row kinds (std.moe.ker
 constexpr int RANGE = 1, OVERFLOW = 2;                 // error bits: a corrupt slot; a delta record past the log
 constexpr int RESOLVE_THREADS = 256;                   // 8 warps: one per role for the scans
 constexpr int FETCH_CTAS = 8, FETCH_THREADS = 256, FETCH_UNROLL = 8;   // step 0's M1: saturates PCIe
+// The ring's copies run beside a prefill pass's compute, so they hold as few SMs as still keep PCIe near full (one
+// small CTA per class, many reads in flight; A5000: more CTAs slow the pass's mmq by more than they gain)
+constexpr int BESIDE_CTAS = 1, BESIDE_UNROLL = 16;
 
 // The resolve's policies: `moe_resolve@1`, and the variants of the placement plugins kernels.expert_io serves
 // (`moe_resolve.lfu@1`: F11, `moe_resolve.lru@1`: F4; their contracts and oracles are the plugins').
@@ -266,27 +269,28 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
     }
 }
 
-// Every CTA walks every fetched unit; its threads move FETCH_UNROLL 16-byte words each per trip, all loads before all
-// stores, so a CTA keeps blockDim * FETCH_UNROLL * 16 bytes of reads in flight (zero-copy reads of host memory).
+// Every CTA walks every fetched unit; its threads move UNROLL 16-byte words each per trip, all loads before all
+// stores, so a CTA keeps blockDim * UNROLL * 16 bytes of reads in flight (zero-copy reads of host memory).
+template <int UNROLL>
 __global__ void k_fetch(const int32_t * __restrict__ fetch, const int32_t * __restrict__ n, const uint4 * __restrict__ src,
                         uint4 * __restrict__ dst, int64_t words, int staging) {
     const int count = min(*n, staging);
-    const int64_t stride = int64_t(gridDim.x) * blockDim.x * FETCH_UNROLL;
+    const int64_t stride = int64_t(gridDim.x) * blockDim.x * UNROLL;
     for (int b = 0; b < count; ++b) {
         const uint4 * __restrict__ s = src + int64_t(fetch[b]) * words;
         uint4 * __restrict__ d = dst + int64_t(fetch[staging + b]) * words;
-        for (int64_t base = int64_t(blockIdx.x) * blockDim.x * FETCH_UNROLL + threadIdx.x; base < words;
+        for (int64_t base = int64_t(blockIdx.x) * blockDim.x * UNROLL + threadIdx.x; base < words;
              base += stride) {
-            uint4 v[FETCH_UNROLL];
+            uint4 v[UNROLL];
 #pragma unroll
-            for (int u = 0; u < FETCH_UNROLL; ++u) {
+            for (int u = 0; u < UNROLL; ++u) {
                 const int64_t i = base + int64_t(u) * blockDim.x;
                 if (i < words) {
                     v[u] = s[i];
                 }
             }
 #pragma unroll
-            for (int u = 0; u < FETCH_UNROLL; ++u) {
+            for (int u = 0; u < UNROLL; ++u) {
                 const int64_t i = base + int64_t(u) * blockDim.x;
                 if (i < words) {
                     d[i] = v[u];
@@ -362,7 +366,7 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & src, at::Tensor & dst) {
+void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & src, at::Tensor & dst, bool beside) {
     const c10::cuda::CUDAGuard guard(dst.device());
     TORCH_CHECK(dst.is_cuda() && dst.dim() == 2 && src.dim() == 2 && dst.size(1) == src.size(1) && dst.size(1) % 16 == 0,
                 "src [U, unit], dst [S, unit] with unit a multiple of 16 bytes");
@@ -373,9 +377,16 @@ void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & s
     check(dst, dst, at::kByte, {dst.size(0), dst.size(1)}, "dst");
     TORCH_CHECK(reinterpret_cast<uintptr_t>(src.data_ptr()) % 16 == 0 && reinterpret_cast<uintptr_t>(dst.data_ptr()) % 16 == 0,
                 "src and dst 16-byte aligned");
-    k_fetch<<<FETCH_CTAS, FETCH_THREADS, 0, stream()>>>(
-        fetch.data_ptr<int32_t>(), n.data_ptr<int32_t>(), reinterpret_cast<const uint4 *>(src.data_ptr()),
-        reinterpret_cast<uint4 *>(dst.data_ptr()), dst.size(1) / 16, int(fetch.size(1)));
+    const auto * f = fetch.data_ptr<int32_t>();
+    const auto * from = reinterpret_cast<const uint4 *>(src.data_ptr());
+    auto * to = reinterpret_cast<uint4 *>(dst.data_ptr());
+    if (beside) {
+        k_fetch<BESIDE_UNROLL><<<BESIDE_CTAS, FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, dst.size(1) / 16,
+                                                                          int(fetch.size(1)));
+    } else {
+        k_fetch<FETCH_UNROLL><<<FETCH_CTAS, FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, dst.size(1) / 16,
+                                                                         int(fetch.size(1)));
+    }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -384,5 +395,6 @@ void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & s
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("resolve", &resolve, "moe_resolve@1 (policy 0) or a variant into slots, fetch, n_fetch (and the counts, misses, "
           "errors, delta log, map and state in place)");
-    m.def("fetch", &gather, "expert_fetch@1: dst[fetch[1, i]] = src[fetch[0, i]] for i < min(n, staging)");
+    m.def("fetch", &gather, "expert_fetch@1 (beside: expert_prefetch@1's, on few SMs): dst[fetch[1, i]] = src[fetch[0, i]] "
+          "for i < min(n, staging)");
 }

@@ -77,7 +77,7 @@ class ExpertFetch:
         self.lib = modules(ctx.fingerprint.sm)
 
     def __call__(self, fetch, n, src, dst) -> None:
-        self.lib.fetch(fetch, n, src, dst)
+        self.lib.fetch(fetch, n, src, dst, False)
 
 
 class ExpertPrefetch:
@@ -91,7 +91,7 @@ class ExpertPrefetch:
     def start(self, key: int, fetch: torch.Tensor, n: torch.Tensor, src: torch.Tensor, dst: torch.Tensor) -> None:
         self.stream.wait_stream(torch.cuda.current_stream(dst.device))     # after the work enqueued so far
         with torch.cuda.stream(self.stream):
-            self.lib.fetch(fetch, n, src, dst)
+            self.lib.fetch(fetch, n, src, dst, True)
         self.landed[key] = torch.cuda.Event()
         self.landed[key].record(self.stream)
 
