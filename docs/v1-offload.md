@@ -2,7 +2,7 @@
 
 Status: **rev 4.2, panel-clean** (2026-10-17: all three reviewers report nothing remaining after four rounds); its
 parameters freeze when step 0's evidence lands. Rev 4.3 applies M6's evidence (§13: the default policy is `lfu`); rev 4.4 its panel round (10 + 7 findings), panel-clean
-again on 2026-10-17. Rev 1 drew 52 findings (A 20, B 15, C 17), rev 2
+again on 2026-10-17; rev 4.5 sets the parameters from the desktop benches (§13) — the design is frozen. Rev 1 drew 52 findings (A 20, B 15, C 17), rev 2
 27 (A 11, B 8, C 8), rev 3 20 (A 8, B 7, C 5); §12 logs each and where it is answered. No code yet. Evidence base: the local research note
 `docs/brainstorm/v1-offload-research.md` (not published; "R §n"), which cites every reference engine by `file:line`
 in its local clone; Project Maya is R §3.1b.
@@ -600,6 +600,40 @@ Decisions (by §8's rules, fixed before measuring):
 - **Verify windows share experts:** consecutive tokens share ≈ 3.5 of 8 experts per layer (2 / 3 / 4-token windows
   touch 12.5 / 16.2 / 19.3); rows of different sequences in one step share almost none — D12's grouping pays within
   a sequence's window, not across a batch.
+
+**M1, M2, M3, M5, M7 and prefill compute on the RTX 5080 and 5090 desktops** (`spikes/x0_offload/bench/README.md`;
+`evidence/x0_bench_rtx-5080_2026-10-17.json`, `evidence/x0_bench_rtx-5090_2026-10-17.json`). Both cards behave alike.
+
+| Measure | Result | Decision |
+|---|---|---|
+| M1 fetch | pinned copies 46.6–48.4 GB/s; `cudaMemcpyBatchAsync` 46.7–48.4; the in-graph SM gather 46.6–48.3 (47.5–48.3 at 2.8 MB), **0.97–1.02× DMA** at N ≥ 8, saturating with 2–8 CTAs of 256 threads; inside a CUDA graph 46–48 | `expert_fetch@1` is the in-graph gather (8 CTAs × 256 threads, unroll 8); the DMA variant and the host-planned resolve are not needed |
+| M3 CPU experts (ggml-cpu, µs per expert) | Q4_K_M experts 128–148 at 1 thread, 59–69 at 4 threads (≈ 45 GB/s, memory-bound from 2–4 threads); i-quants 254–417 at 1 thread, 39–70 at 7 threads (compute-bound); AVX-512 and AVX2 builds equally fast; **0 bitwise mismatches** (alone vs groups of 2–8, 1 vs 7 threads, one job vs a batch) and **AVX-512 vs AVX2 bitwise equal for all eight classes** | D7's contract holds for ggml-cpu as is; D6: compute threads from tune — 2–4 for Q4_K decode, all non-loop cores for i-quants and multi-token jobs; a work-stealing pool (a static split let one slowed core stall every batch 1.6×); S5's tier stays in F5b lock classes, but a lock is split by tier only where the tiers' outputs differ |
+| M2 contention (6 threads) | CPU expert 63–65 µs alone, 112–114 under the gather (1.8×), 148 under DMA (2.3×); the gather 47.5 → 27.5 GB/s, DMA 46.6 → 34.1 GB/s beside the CPU. CPU and PCIe share host memory: together ≈ 55 GB/s, so the split adds ≈ 15% miss throughput, not a second link | `plan[n]` ≈ n / 2 for Q4_K_M (5080: 1 1 2 2 3 3 4 5 5 6; 5090: 1 1 2 2 3 3 4 4 5 6 for n = 1…10; flat within ±1), ≈ 0.4 n for IQ2_XS; F5b's modelled decode gain ≈ 2% at 1 miss per layer, 5–6% at 2, 8% at 4, 10% at 6 — it clears D4's 5% bar only from ≈ 2 misses per layer (hit ≤ ≈ 75%): likely at the capped fit, marginal at the natural fit. With F5b on, between-step copies use the gather, never DMA beside the CPU lane |
+| M5 handshake (4 threads, 48 layers) | 2.1–2.9 µs per layer at rows 1–2, ≤ 3.8 at rows 4, 2.6–6.5 at rows 8 (the CPU rows' read-back); device- vs host-planned within 0.4 µs; ≥ 96.6% of CPU time hidden behind equal GPU work; all in-graph CPU results bitwise equal to ggml-cpu | D5's device-planned resolve stands; `cpu_task@1` as designed |
+| M7 local NVMe (`O_DIRECT`) | 1.7–2.4 GB/s at queue depth 1 (0.74–0.80 ms per 1.46 MB, 1.3 ms per 2.8 MB); 2.5–2.7 GB/s from depth 2 or two `pread` workers | F9: 2 I/O workers at depth 2; a disk miss ≈ 20× a RAM miss on these drives; re-measured on a Gen4 / Gen5 SSD before GLM's RAM-short runs. The bar desktops hold every expert of the vehicle, Flash-Next and GLM's Maya-S in RAM, so F9 matters for smaller hosts |
+| Prefill: one layer's expert GEMMs (mmq) vs streaming its non-resident experts | 5080: 0.78 / 1.27 / 2.72 / 10.97 ms at 64 / 256 / 1024 / 4096 tokens; 5090: 0.42 / 0.71 / 1.50 / 6.00 ms; streaming 4.3 ms at 47% resident, 6.1 ms at 25% | D8: from 64 tokens the vehicle routes 127–128 of 128 experts, so streaming and routed-only staging move the same bytes and D8 always streams; it hides behind compute only from ≈ 2K-token chunks on the 5080 (3–4K on the 5090), so offload locks take larger prefill chunks (tune picks; Strata reads 8K) |
+
+**Roofline for acceptance 3** (written before step 4 measures; RTX 5080, Qwen3-30B-A3B, batch 1, 32K): all-resident GPU work
+≈ 4.5 ms per token (estimated from existing locks), fetch at 47.5 GB/s, CPU experts at ≈ 45 GB/s alone, M6's bytes
+per token (`lfu`: ≈ 102 MB fetched at 47%, ≈ 311 MB at 25%; `lru` ≈ 10–30% more), llama.cpp's cache with ≈ 25 µs of
+host sync per layer, FreeToken's gather at ≈ 31 GB/s:
+
+| Row | Natural fit (≈ 47%) | Capped (≈ 25%) |
+|---|---|---|
+| Holon F5a, ms per token | ≈ 6.6 | ≈ 11.0 (≈ 10.2 with F5b) |
+| vs llama.cpp static split (bar 1.5×) | ≈ 2.6× | ≈ 2.0× |
+| vs llama.cpp `--moe-cache-mib` (bar 1.1×) | ≈ 1.15–1.2× (borderline) | ≈ 1.15× (≈ 1.25× with F5b) |
+| vs FreeToken (bar 1.0×) | ≈ 1.25× | ≈ 1.2× |
+| F1 (static) vs llama.cpp static split (bar 0.95×) | ≈ 0.95–1.0× with F5a, above with F5b | — |
+| Prefill vs llama.cpp (bar 1.0×) | both PCIe-bound at the same bytes per chunk; ≥ 1.0× with Holon's larger chunks | same |
+
+Every row is predicted to pass; the `--moe-cache-mib` natural-fit row is the tightest. By §8's rule nothing moves;
+if step 4 measures it below the bar, it is judged again after step 6 with tune's lock.
+
+**Contradictions with the research note, recorded:** CPU compute is not a second link beside PCIe (they share host
+memory); ggml-cpu's AVX2 and AVX-512 builds agree bitwise; "≤ 4 threads saturate DRAM" (S6) holds only for Q4_K
+single-token jobs; these desktops' NVMe reads ≈ 2.6 GB/s, not 7–14. The vendored ggml-cpu for `kernels.ggml_cpu`
+builds from the vendored llama.cpp's pin (51ce9c1) unless step 6 aligns it with `kernels.ggml_cuda`'s.
 
 ## 12. Review log
 
