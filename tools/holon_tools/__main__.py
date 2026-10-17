@@ -8,7 +8,7 @@
     python -m holon_tools tune <model> [--ops op ...] [--batch 8] [--tokens 64] [--cpu-split] [--no-lock]
                                 [--json record] [the flags of propagate]
     python -m holon_tools profile <model> [--prompts judge/prompts/v1.jsonl] [--max-tokens 64]
-                                  [--name profile.json] [engine flags: --host-memory ...]
+                                  [--name <stem>.profile.json] [engine flags: --host-memory ...]
 
 `propagate` and `tune` exit 0 when nothing needs doing or the lock was written, 2 when the new lock needs an
 approval (re-run with --approve to write it), 1 on failure.
@@ -162,7 +162,8 @@ def _profile(a: argparse.Namespace) -> int:
     model = checkpoint_dir(a.model)
     counts, directory = profile.profile(engine_config(str(model), a),
                                         [p.ids for p in PromptSet.load(a.prompts).prompts], a.max_tokens)
-    print(f"wrote {profile.write(directory, a.name, counts)}: moe.placement.profile={a.name}")
+    name = a.name or profile.default_name(pathlib.Path(model))
+    print(f"wrote {profile.write(directory, name, counts)}: moe.placement.profile={name}")
     return 0
 
 
@@ -203,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("model", help="checkpoint file or directory, or hub id")
     f.add_argument("--prompts", default=str(DEFAULT_PROMPTS), help="prompt set whose generations are counted")
     f.add_argument("--max-tokens", type=int, default=64, help="greedy tokens generated per prompt")
-    f.add_argument("--name", default="profile.json", help="the profile's file name, beside the checkpoint")
+    f.add_argument("--name", help="the profile's file name, beside the checkpoint (default: <stem>.profile.json)")
     engine_flags(f)
     f.set_defaults(run=_profile)
 

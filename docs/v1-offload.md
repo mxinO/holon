@@ -1001,7 +1001,9 @@ Decided while building, against the text above:
   check removed is deterministic — the snapshot differs (and the parity check with it) in every run, run-identical
   holds. `map-before-landing` failed both checks (all three runs differ from all-resident; run 0 differs from runs
   1–2). L2 was not run for the plants (§6 predicts it fails too); the exact checks above are their verdicts.
-- **Profiles** are written beside the checkpoint by `holon_tools profile` (`--name`, default `profile.json`) — for a
+- **Profiles** are written beside the checkpoint by `holon_tools profile` (`--name`, default `<stem>.profile.json`
+  since step 4: profiles of two files share a hub cache's blob directory; each records the files it was counted on,
+  `[name, bytes]` as the store reads them, and the store refuses it on others) — for a
   hub-cache checkpoint that is its blob directory (step 4's fix: the store reads beside the file the weight source
   resolves, and the tool wrote beside the snapshot link, so a hub-cache profile was never found; both now take
   `TieredStore.profile_dir`); shipping them in model bundles stays open (§5).

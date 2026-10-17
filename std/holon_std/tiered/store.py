@@ -33,6 +33,7 @@ import dataclasses
 import functools
 import json
 import math
+import os
 import pathlib
 from collections.abc import Callable
 
@@ -592,17 +593,29 @@ class TieredStore:
         cache's snapshot links resolve into its blob directory), so `holon_tools profile` writes where this reads."""
         return pathlib.Path(next(iter(self.classes.values())).pieces[0][3][0].path).parent
 
+    @property
+    def checkpoint(self) -> list[list]:
+        """The files the pieces are read from, `[name, bytes]` each (as resolved: a hub cache's blob is named by its
+        content hash), which a profile records: profiles of different files may share a directory (a hub cache's
+        blobs)."""
+        paths = {e.path for c in self.classes.values() for *_, extents in c.pieces for e in extents}
+        return sorted([os.path.basename(p), os.path.getsize(p)] for p in paths)
+
     def _profile_counts(self) -> np.ndarray:
-        """`profile`'s routing counts by group: a JSON file `{"layers": {"<group>": [count per item]}}` beside the
-        checkpoint (its name relative to the checkpoint's directory, so plans record no host path); groups it does not
-        name count zero."""
+        """`profile`'s routing counts by group: a JSON file `{"checkpoint": …, "layers": {"<group>": [count per
+        item]}}` beside the checkpoint (its name relative to the checkpoint's directory, so plans record no host path),
+        refused unless it was counted on this checkpoint's files; groups it does not name count zero."""
         counts = np.zeros(self.residency.host.shape[:2])
         if not self._profile:
             return counts
         name = pathlib.PurePath(self._profile)
         if name.is_absolute() or ".." in name.parts:
             raise ValueError(f"{self.name}: profile {self._profile!r}: a name relative to the checkpoint's directory")
-        for group, row in json.loads((self.profile_dir / name).read_text())["layers"].items():
+        data = json.loads((self.profile_dir / name).read_text())
+        if data.get("checkpoint") != self.checkpoint:
+            raise ValueError(f"{self.name}: profile {self._profile} was counted on {data.get('checkpoint')}, not on "
+                             f"this checkpoint {self.checkpoint} (`holon_tools profile` writes one per file)")
+        for group, row in data["layers"].items():
             if int(group) not in self._order or len(row) != self.items:
                 raise ValueError(f"{self.name}: profile {self._profile}: group {group} with {len(row)} counts; the "
                                  f"groups are {sorted(self._order)} of {self.items} items")
