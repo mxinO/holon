@@ -1,7 +1,7 @@
 # v1 — expert offload: MoE models larger than VRAM on one consumer GPU
 
 Status: **rev 4.2, panel-clean** (2026-10-17: all three reviewers report nothing remaining after four rounds); its
-parameters freeze when step 0's evidence lands. Rev 1 drew 52 findings (A 20, B 15, C 17), rev 2
+parameters freeze when step 0's evidence lands. Rev 4.3 applies M6's evidence (§13: the default policy is `lfu`). Rev 1 drew 52 findings (A 20, B 15, C 17), rev 2
 27 (A 11, B 8, C 8), rev 3 20 (A 8, B 7, C 5); §12 logs each and where it is answered. No code yet. Evidence base: the local research note
 `docs/brainstorm/v1-offload-research.md` (not published; "R §n"), which cites every reference engine by `file:line`
 in its local clone; Project Maya is R §3.1b.
@@ -46,15 +46,15 @@ Run MoE models whose experts do not fit in VRAM on one consumer GPU, as fast as 
 for that model, with exact defaults and reproducible runs.
 
 1. **Strategies are plugins** (D3, D16).
-   - Shipped in X: placement policies `static` (F1), `profile_decay` (F2–F3) and `lru` (F4); miss paths PCIe fetch
+   - Shipped in X: placement policies `lfu` (F11, the default by §8's rule), `static` (F1), `profile_decay` (F2–F3,
+     Strata parity) and `lru` (F4); miss paths PCIe fetch
      (F5a) and CPU compute (F5b) with a per-miss-count split; the SSD tier (F9); prefill streaming (F7).
    - **Held-out proof:** the std offload API is tagged at the end of step 3. After the tag, three strategies land as
      commits whose diff touches only their own plugin directory and tests (no core, no std diff; checked with the
      existing `check_core_diff.sh` and `git diff --stat`): **F10** promote-on-fetch (host and in-graph parts, the
      hardest case: its `moe_resolve` variant is a contract the plugin owns, with its own `reference.py` and CPU
      provider, D3), **A1** route tail skip (`approx`), and **a tier this document does not design** — the
-     mmap / page-cache low-RAM tier the research note ranks first among the extras (LFU or ARC from M6's replay as a
-     bonus).
+     mmap / page-cache low-RAM tier the research note ranks first among the extras (ARC as a bonus).
    - Every core seam (§4) is proven first with a toy plugin in `core/tests`.
 2. **Exactness** (D4, §6):
    - **every placement is exact on the GPU path:** with the CPU share off (the default unless D4's rule picks the
@@ -110,9 +110,10 @@ tensors or fp4 activations (NVFP4 `scale2`, MXFP4) — X offloads GGUF integer-q
 | # | Strategy | Reference | Class | X default |
 |---|---|---|---|---|
 | F1 | Static split: a frozen residency map | llama.cpp `--n-cpu-moe` | H | fallback without a profile |
-| F2 | Profile-seeded expert cache: VRAM slots filled from a ranked (layer, expert) profile | Strata X1, Maya G6 | H | on |
-| F3 | Adaptive swaps by decayed routing counts on a fixed cadence of committed steps | Strata X2 | H | on |
-| F4 | LRU fetch-on-miss, logical-step timestamps, victims chosen in the graph | FreeToken, llama.cpp cache | D + H | comparison arm |
+| F2 | Profile-seeded expert cache: VRAM slots filled from a ranked (layer, expert) profile — 4 slots per layer first, then the global ranking | Strata X1, Maya G6 | H | on (the warm start of every policy) |
+| F3 | Adaptive swaps by decayed routing counts on a fixed cadence of committed steps | Strata X2 | H | Strata-parity arm (its swap copies cost PCIe that Strata's CPU-heavy split leaves idle; 22–52% slower than F11 with F5a, §13) |
+| F4 | LRU fetch-on-miss, logical-step timestamps, victims chosen in the graph | FreeToken, llama.cpp cache | D + H | comparison arm (within 7% of F11) |
+| F11 | **Decayed-count admission on fetch** (`lfu`): per-(layer, expert) counts, +1 per routed decode entry, ×0.915 per decode step; a miss is gathered straight into the coldest resident slot the step does not need when its count is higher, else into staging; the cache is device-owned, the host only seeds it | M6 (§13) | D + H | **on** |
 | F5a | Misses fetched over PCIe by an in-graph zero-copy gather into staging slots | Strata X5 mode 2, FreeToken | D | on |
 | F5b | Misses computed by the CPU in RAM through the in-graph handshake; which misses go to the CPU is the provider's rule (Strata: last in routing order; Maya: coldest by count) | Strata X4–X6, Maya G2, G9 | D + C | by D4's rule |
 | F7 | Prefill: non-resident experts stream through a ring, next layer during this layer, when D8's time rule says so; else routed-only staging | Strata X8, Maya | D + std | on |
@@ -480,7 +481,7 @@ rule; F8 only at ≥ 15% on < 1K-token chunks with a fixed share; A1 never in a 
 | 0 | M1–M3, M5–M7; host RAM per class | evidence; the panel reviews the parameters they set | 3 |
 | 1 | S0–S5 and the CLI change with toy proofs (ABI 1.2); the forced-tiling and compact-helper vendor patches | core tests; `check_abi --base` additive; LOC; L0 placement-invariance | 5 |
 | 2 | `std.tiered`, the offload store and options, class arenas with null and staging slots, `moe_resolve` / `expert_fetch` (CUDA + oracle + CPU provider), the pinned tier, `static` (F1), F5a | all-resident bitwise to `std.moe@1`; L0 | 5 |
-| 3 | `profile_decay` (F2–F3) and `lru` (F4, its own resolve contract), two-phase edits, route tap and profile tool, prefill streaming (F7); **tag the std offload API** | snapshots with adaptive placement on, ×3, and the n-gram drafter run; cross-placement identity; plants 1–3 and `owner_race` | 5 |
+| 3 | `lfu` (F11) and `lru` (F4), each with its own resolve contract, `profile_decay` (F2–F3) with two-phase edits, route tap and profile tool, prefill streaming (F7); **tag the std offload API** | snapshots with adaptive placement on, ×3, and the n-gram drafter run; cross-placement identity; plants 1–3 and `owner_race` | 5 |
 | 4 | Development gate, natural-fit rows, on the RTX 5080 vs FreeToken and llama.cpp (F5a lock); tune | acceptance 3 natural-fit rows vs the roofline; L4 | 3 |
 | 5 | F9 (SSD tier with I/O workers, exclusive RAM tier) | exactness; a RAM-capped run | 3 |
 | 6 | `kernels.cpu_task`, `kernels.ggml_cpu`, F5b with `plan[n]`, the path-aware floor; capped-fit rows and the F1 row with tune's lock | L0 incl. bitwise per token and per thread count; bounded L2; plants 4–5; tune's ≥ 5% rule decides the dev lock; acceptance 3 capped-fit and F1 rows | 5 |
@@ -520,6 +521,41 @@ mixers (with FN / GLM); the end-of-answer checkpoint (plan §10). Its own doc mu
   sessions' TPOT p99 during a load ≤ 1.2×; multi-session throughput against Maya's measured ratio on the same trace.
 - Its core seam (prefix-index tiers: `Payload.tier`, `HitLen.cost`, demote, cancellable `BLOCKED(future)`, an
   `on_finish` publish) is designed there; the name stays `tier`, not `kv_tier` (it also stores checkpoints).
+
+## 13. Step 0 results and the decisions they set
+
+**M6 — routing traces and policy replay** (`spikes/x0_offload/m6/README.md`;
+`evidence/x0_m6_routing_qwen3-30b-a3b_rtx-a5000_2026-10-17.json`). Qwen3-30B-A3B Q4_K_M on one RTX A5000, eager;
+244,291 routed rows (61,979 decode) over four traces (agent, mixed, chat, code); decode-only replay with the same
+profile warm start for every policy, scored on held-out traces, time = (dense + hit + fetch) / 900 GB/s +
+(fetch + admission) / PCIe at placeholder rates 25 and 50 GB/s (M1 replaces them).
+
+| Held-out agent, cached | static | profile_decay | lru | promote_on_fetch | lfu | belady |
+|---|---|---|---|---|---|---|
+| 10%: hit % / ms per token (PCIe 25) | 12.7 / 38.4 | 36.9 / 29.5 | 43.4 / 25.7 | 33.4 / 29.9 | 43.0 / 25.8 | 60.9 / 18.3 |
+| 25% | 32.5 / 30.0 | 63.0 / 18.8 | 70.2 / 14.3 | 64.9 / 16.5 | 70.6 / 14.1 | 84.4 / 8.3 |
+| 47% | 55.5 / 20.3 | 85.4 / 8.8 | 89.6 / 6.1 | 88.0 / 6.8 | 90.3 / 5.8 | 95.6 / 3.5 |
+
+Decisions (by §8's rules, fixed before measuring):
+- **Default policy: `lfu` (F11).** Least modelled time in 26 of 30 held-out cells (`lru` in 4, at 10% cached, by
+  ≤ 0.6%). `profile_decay` loses on admission bytes, not counts: each swap copies the expert a second time (391 + 36
+  MB per token against `lfu`'s 311 at 25%); removing D4's lag recovers only ≈ 6%. Knobs moved held-out results by
+  ≤ 4% and changed no ranking; decay 0.915 per step (0.9 equal, 0.99 17% worse). L4 on the development gate confirms
+  it (step 4). Consequence for D4 / D5: under F11 and F4 the whole cache is a device-owned region — a miss is gathered
+  straight into its victim slot in the graph, so there is no second copy and no host edit; the host seeds the cache
+  (`after_materialize`) and reads the delta log. Prefill rows never change residency or counts (they stage or
+  stream, D8). D4's two-phase host edits remain for `static` re-seeds and `profile_decay`.
+- **Profiles transfer poorly** (routing is flat: the top 10% of experts take 23–36% of routes): the profile is a warm
+  start only (F2); no policy depends on it for steady state.
+- **D11 stays: no prefetch in X.** Next-layer recall is 84–87% at top-8 and 94.5–96% at top-12, so the recall half
+  of the trigger is borderline; but 40–46% of prefetched non-resident experts would go unused, and an idealized
+  overlap model loses everywhere except at 50 GB/s with 47% cached (+9%). Re-open after M1 measures idle PCIe time.
+- **D8 inputs:** a 64-token chunk touches ≈ 51% of a layer's experts, 1024 tokens ≈ 84%, 4096 tokens 94–97%. On the
+  A5000 routed-only staging wins below ≈ 256 tokens and streaming from ≈ 1K; the crossover is re-derived with M1's
+  compute on the bar cards.
+- **Verify windows share experts:** consecutive tokens share ≈ 3.5 of 8 experts per layer (2 / 3 / 4-token windows
+  touch 12.5 / 16.2 / 19.3); rows of different sequences in one step share almost none — D12's grouping pays within
+  a sequence's window, not across a batch.
 
 ## 12. Review log
 
