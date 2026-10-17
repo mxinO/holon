@@ -12,6 +12,7 @@ provides = [
     "unit.std.moe.resident@1",
     "unit.std.moe.offload@1",
     "op.moe_topk@1",
+    "op.moe_router@1",
     "op.linear_experts@2",
     "op.moe_combine@1",
     "op.moe_resolve@1",

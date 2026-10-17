@@ -1,7 +1,7 @@
 """llama.cpp's quantized CUDA kernels (vendored at a pinned commit, M0.1 design §4.4, M0.2 design §4.3) as
 `qlinear@2`, `qembedding@1` and `linear_experts@2` kernels for ggml block layouts (`"ggml.<type>/gguf.native"`) and
 the HF FP4 layouts (`"nvfp4/hf"`, `"mxfp4/hf"`, repacked by `prepare`), and its MoE routing and combine as
-`moe_topk@1` and `moe_combine@1` (op contracts: std.ops.kernels, std.moe.kernels).
+`moe_topk@1`, `moe_router@1` and `moe_combine@1` (op contracts: std.ops.kernels, std.moe.kernels).
 
 `qlinear` dispatches from the row count: `mmvq` up to `mmvq_rows`, else `mmq` in 512-row chunks (llama.cpp's
 ubatch); both write `out_dtype` (bf16 or f32) directly, mmq's stream-k partials kept in f32 until its one rounding
@@ -21,9 +21,11 @@ counts them), else quantizes `x` itself. `qlinear_glu` (D6): mmvq's fused gate a
 `linear_experts` is llama.cpp's MUL_MAT_ID per 512-token chunk: mmvq with ids up to the type's limit
 (`get_mmvq_mmid_max_batch`), for `glu="swiglu"` through its fused gate on the merged stack, else mmq with ids into
 f32, followed for swiglu by our f32 SwiGLU. Its workspace (`ggml_cuda.id[…]`) holds mmq's id maps besides the
-activations. `moe_topk` is `topk-moe.cu` (softmax, top k, renormalised) and `moe_combine`
+activations. `moe_topk` is `topk-moe.cu` (softmax, top k, renormalised), `moe_router` our router kernel beside it
+(the f32 router GEMV from bf16 activations, then `moe_topk`'s selection, in one launch), and `moe_combine`
 `moe-weighted-reduction.cu`, both patched to the contracts' layouts (ids at row stride k; the combine stores bf16
-into the caller's `out`).
+into the caller's `out`, and its `add` the residual stream plus the rounded sum, rounded again: docs/v1-offload.md
+§14, step 3c).
 
 Activation modes (docs/m06-lowp.md D3, D8, §4.5, §4.7): one spec per mode, `config["act"]` naming each path's
 activation format. `q8_1` (every class, every type, `act_quant` a4 or a8): q8_1 activations on both paths, so
@@ -64,7 +66,7 @@ from holon.api import Constraint, KernelSpec, Layout, QTensor, Scheme
 from . import extension
 
 QLINEAR, QLINEAR_GLU, QEMBEDDING = "qlinear", "qlinear_glu", "qembedding"
-LINEAR_EXPERTS, MOE_TOPK, MOE_COMBINE = "linear_experts", "moe_topk", "moe_combine"
+LINEAR_EXPERTS, MOE_TOPK, MOE_ROUTER, MOE_COMBINE = "linear_experts", "moe_topk", "moe_router", "moe_combine"
 LINEAR_EXPERTS_ARENA = "linear_experts_arena"     # the same kernel over an offload store's arena (ids are its slots)
 CHUNK = 512                     # mmq rows per call: llama.cpp's ubatch; sizes the workspace and the f32 buffer
 ID_PAIRS = 32768                # the most (token, expert) pairs mmq's id helper sorts per call (mmid.cuh)
@@ -406,6 +408,7 @@ class QEmbedding:
 class LinearExperts(_Matmul):
     def __init__(self, ext: Extension, act: dict[str, str], ctx, **facts) -> None:
         super().__init__(ext, act, ctx, facts)
+        self.ext, self.rows_per_token = ext, facts["rows_per_token"]
         self.experts, self.top_k, self.swiglu = facts["experts"], facts["top_k"], facts["glu"] == "swiglu"
         self.out_y = self.out // 2 if self.swiglu else self.out
         # llama.cpp's choice per chunk from its token count (fixed per graph bucket): mmvq with ids, else mmq
@@ -424,8 +427,32 @@ class LinearExperts(_Matmul):
             f"ggml_cuda.id[in={self.k},top_k={self.top_k},experts={self.experts},rows={self.chunk}]",
             self.lib.workspace_bytes_id(self.device, self.k, self.chunk, self.top_k, self.slots))
         self.f32 = self._f32_workspace(ctx, self.chunk * facts["rows_per_token"], facts["act_dtype"])
+        # prepared inputs (`MoeRouter.route_prepare`): QLinear's buffer for this `in`, the same generations
+        self.q8_1 = ctx.workspace(f"ggml_cuda.q8_1[in={self.k}]", q8_1_bytes(MMVQ_MAX, self.k))
 
-    def __call__(self, x: torch.Tensor, parts: dict[str, torch.Tensor], ids: torch.Tensor) -> torch.Tensor:
+    def prepare_buffer(self, tokens: int) -> torch.Tensor | None:
+        """Where `tokens` tokens' q8_1 activations go for this instance's mmvq to read (one input row per token, on
+        the mmvq path), else None."""
+        return self.q8_1[:q8_1_bytes(tokens, self.k)] if self.rows_per_token == 1 and 0 < tokens <= self.mmvq_tokens \
+            else None
+
+    def prepared(self, x: torch.Tensor, buffer: torch.Tensor) -> Prepared:
+        """`x` [T, in] with its q8_1 activations just written into `buffer` (`prepare_buffer`'s): a handle standing for
+        `x[:, None]`, valid until the buffer's next write."""
+        generation = self.ext.written[self.q8_1.data_ptr()] = next(self.ext.generations)
+        return Prepared(x[:, None], ("mmvq", "q8_1", len(x), self.k), buffer, generation)
+
+    def _prepared(self, x: Prepared) -> torch.Tensor | None:
+        """The q8_1 activations `x` carries, if this call's mmvq computes exactly them and no later write has
+        overwritten them; else None."""
+        if x.key != ("mmvq", "q8_1", len(x.x), self.k) or self.prepare_buffer(len(x.x)) is None:
+            return None
+        return x.buffer if self.ext.written.get(x.buffer.data_ptr()) == x.generation else None
+
+    def __call__(self, x, parts: dict[str, torch.Tensor], ids: torch.Tensor) -> torch.Tensor:
+        xq = None
+        if isinstance(x, Prepared):                    # `MoeRouter.route_prepare`'s handle (maybe stale: then x)
+            xq, x = self._prepared(x), x.x
         x, ids, blocks = x.contiguous(), ids.contiguous(), parts["blocks"]
         # NVFP4's scale2 per expert: [E], or [2, E] (gate's row, up's) for a merged gate/up stack
         scale2 = parts.get("scale2")
@@ -441,7 +468,7 @@ class LinearExperts(_Matmul):
             if len(ids_c) <= self.mmvq_tokens:
                 self._count("mmvq")
                 self.lib.mmvq_id(self.type, blocks.view(-1, blocks.shape[-1]), xs, ids_c, ys, self.swiglu,
-                                 gate_scale, up_scale, self.workspace)
+                                 gate_scale, up_scale, self.workspace, xq=xq)
                 continue
             self._count("mmq")
             w, xs = self._mmq_blocks(parts).view(-1, blocks.shape[-1]), self._mmq_input(xs, self.f32)
@@ -480,6 +507,43 @@ class MoeTopk:
         return weights, ids
 
 
+class MoeRouter:
+    """`moe_router@1`: decode and verify calls (up to `rows` tokens) in one launch — topk-moe.cu's router kernel, ours
+    through vendor.patch: per row and expert four warps' f32 fma chains over quarters of hidden, each closed by the
+    warp's xor tree, added in order, then `moe_topk`'s selection on those logits in the last block of the row's tile;
+    larger calls (prompt chunks) as `moe_topk@1` composed with the f32 linear, as before (a row's logits follow its
+    call's path, as `qlinear`'s mmvq / mmq). Its logits scratch is a workspace, its tile counters a static buffer each
+    call leaves zeroed."""
+
+    def __init__(self, ext: Extension, ctx, *, hidden: int, experts: int, top_k: int, renormalize: bool,
+                 dtype: str) -> None:
+        self.top_k, self.renormalize, self.lib = top_k, renormalize, ext(ctx.fingerprint.sm)
+        self.topk = MoeTopk(ext, ctx, experts=experts, top_k=top_k, renormalize=renormalize)
+        self.rows = self.lib.moe_router_rows()
+        self.logits = ctx.workspace(f"ggml_cuda.router[experts={experts}]", self.rows * experts * 4)
+        self.done = ctx.static("ggml_cuda.router_done", (self.lib.moe_router_tiles(self.rows),), torch.int32)
+
+    def __call__(self, x: torch.Tensor, router: torch.Tensor, xq: torch.Tensor | None = None):
+        if not 0 < len(x) <= self.rows:
+            return self.topk(torch.nn.functional.linear(x.float(), router))
+        x = x.contiguous()
+        if x.data_ptr() % 16:                                # the kernel's vector loads
+            x = x.clone()
+        weights = torch.empty(len(x), self.top_k, device=x.device)
+        ids = torch.empty(len(x), self.top_k, dtype=torch.int32, device=x.device)
+        logits = self.logits.view(torch.float32)[:len(x) * router.shape[0]].view(len(x), -1)
+        self.lib.moe_router(x, router, logits, self.done, weights, ids, self.renormalize, xq=xq)
+        return weights, ids
+
+    def route_prepare(self, x: torch.Tensor, router: torch.Tensor, experts):
+        """`moe_router@1`'s result and the experts' input `x[:, None]`: for this provider's `linear_experts` instance
+        `experts` on its mmvq path, a handle to x's q8_1 activations written by the router's launch (no quantize of
+        its own; std.moe.kernels), else the tensor."""
+        buffer = experts.prepare_buffer(len(x)) if isinstance(experts, LinearExperts) and len(x) <= self.rows else None
+        weights, ids = self(x, router, buffer)
+        return weights, ids, x[:, None] if buffer is None else experts.prepared(x, buffer)
+
+
 class MoeCombine:
     def __init__(self, ext: Extension, ctx, **facts) -> None:
         self.lib = ext(ctx.fingerprint.sm)
@@ -487,6 +551,11 @@ class MoeCombine:
     def __call__(self, y: torch.Tensor, weights: torch.Tensor, out: torch.Tensor) -> None:
         if len(y):
             self.lib.moe_combine(y.contiguous(), weights.contiguous(), out)
+
+    def add(self, y: torch.Tensor, weights: torch.Tensor, residual: torch.Tensor, out: torch.Tensor) -> None:
+        """`residual` + the combine into `out`, in the combine's kernel (bitwise the unfused add)."""
+        if len(y):
+            self.lib.moe_combine(y.contiguous(), weights.contiguous(), out, residual.contiguous())
 
 
 def _supports_matmul(f: dict, act_quant: tuple[str, ...], types) -> bool:
@@ -520,6 +589,10 @@ def _supports_moe_topk(f: dict) -> bool:
     return 0 < e <= 512 and e & (e - 1) == 0 and 0 < f["top_k"] <= e     # topk-moe.cu's instances
 
 
+def _supports_moe_router(f: dict) -> bool:
+    return _supports_moe_topk(f) and f["top_k"] <= 32 and f["hidden"] % 512 == 0 and f["dtype"] in DTYPES
+
+
 def _supports_moe_combine(f: dict) -> bool:
     return f["dtype"] == "bfloat16" and f["y_dtype"] == "float32"
 
@@ -545,4 +618,5 @@ class Plugin:
                     functools.partial(supports, act_quant=act_quant, types=types), sms, priority, act)
         add(QEMBEDDING, functools.partial(QEmbedding, ext), _supports_qembedding)
         add(MOE_TOPK, functools.partial(MoeTopk, ext), _supports_moe_topk)
+        add(MOE_ROUTER, functools.partial(MoeRouter, ext), _supports_moe_router)
         add(MOE_COMBINE, functools.partial(MoeCombine, ext), _supports_moe_combine)

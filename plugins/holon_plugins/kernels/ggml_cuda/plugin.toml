@@ -9,9 +9,9 @@ core_abi = ">=1.0,<2.0"
 [resources]
 provides = ["kernel.qlinear@2", "kernel.qlinear_glu@1", "kernel.qembedding@1", "kernel.linear_experts@2",
             "kernel.linear_experts_arena@1",
-            "kernel.moe_topk@1", "kernel.moe_combine@1"]
+            "kernel.moe_topk@1", "kernel.moe_router@1", "kernel.moe_combine@1"]
 requires = ["op.qlinear@2", "op.qlinear_glu@1", "op.qembedding@1", "op.linear_experts@2", "op.linear_experts_arena@1",
-            "op.moe_topk@1",
+            "op.moe_topk@1", "op.moe_router@1",
             "op.moe_combine@1"]
 
 [properties]

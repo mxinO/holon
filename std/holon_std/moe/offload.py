@@ -135,7 +135,13 @@ class ArenaExperts(nn.Module):
                 raise ValueError(f"std.moe.offload@1: {facts['layout']}'s kernel repacks its weights; the offload "
                                  "store serves stacks as the checkpoint stores them")
 
-    def forward(self, x: torch.Tensor, slots: torch.Tensor) -> torch.Tensor:
+    @property
+    def kernel(self):
+        """Its bound `linear_experts_arena@1` instance."""
+        return self._kernel
+
+    def forward(self, x, slots: torch.Tensor) -> torch.Tensor:
+        """`x` [T, R, in], or a handle a `moe_router@1` instance prepared for this kernel (std.moe.kernels)."""
         arena = self.cls.slots()
         return self._kernel(x, {"blocks": arena.view(len(arena), self.out, -1)}, slots)
 
