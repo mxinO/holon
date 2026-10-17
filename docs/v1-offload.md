@@ -176,8 +176,8 @@ miss path that changes the graph shape (a new node between resolve and combine) 
   reference's mmvq kernel). Only chunks above the limit are compacted into ring and staging groups, and a group with
   fewer rows than the limit + 1 is **padded with null-slot rows** up to it, so the kernel's own row count picks mmq,
   as the reference chunk does — no contract change (adding a parameter to a signature kernel plugins implement would
-  be a major, design §4.5; panel B-r4-1, A-r4-4). Padding rows read null slots and are discarded; L0's tile-width
-  range covers the padded launch. L0 checks, on every lock class including sm_120: an expert's
+  be a major, design §4.5; panel B-r4-1, A-r4-4). Padding rows carry zero activations, read null slots and are discarded; each class pads to
+  its own type's mmvq limit + 1 (`use_mmvq_id` is per type); L0's tile-width range covers the padded launch. L0 checks, on every lock class including sm_120: an expert's
   rows bitwise equal across slot counts {E, E+1, 16, 74}, slot permutations, compacted launches (T' ≤ the mmvq limit
   out of a step with T above it) and mmq tile widths 8–128.
 - **The default lock computes every expert on the GPU** (F5a only). Then every placement policy is exact, and
