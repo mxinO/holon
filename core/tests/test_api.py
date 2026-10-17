@@ -203,3 +203,28 @@ def test_abi_listing_needs_the_right_bump(monkeypatch, old, new, error):
     for resource in ("state_kind.paged@1", "grammar.constraint@1", "transform.qwen3_5.squeeze@1"):
         assert f"{resource}  (" in listed
     assert "kernel." not in listed and "arch." not in listed and "model." not in listed
+
+
+def test_the_core_diff_report_names_core_changes_from_scripts_ci(tmp_path):
+    """`scripts/ci/check_core_diff.sh` (invariant 9's report) lists the core files changed since a base; run_all.sh
+    calls it from scripts/ci, where a relative `core/` pathspec matched nothing, so it always reported none."""
+    script = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "ci" / "check_core_diff.sh"
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", "-c",
+                        "commit.gpgsign=false", *args], check=True, capture_output=True)
+
+    def report(base):
+        return subprocess.run(["bash", str(script), base], cwd=tmp_path / "scripts" / "ci", capture_output=True,
+                              text=True, check=True).stdout
+    (tmp_path / "scripts" / "ci").mkdir(parents=True)
+    (tmp_path / "core").mkdir()
+    (tmp_path / "core" / "a.py").write_text("a = 1\n")
+    git("init", "-q")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    git("branch", "base")
+    assert report("base").startswith("ok   core-diff (empty)")
+    (tmp_path / "core" / "a.py").write_text("a = 2\n")
+    git("commit", "-qam", "change")
+    assert "core/a.py" in report("base")
