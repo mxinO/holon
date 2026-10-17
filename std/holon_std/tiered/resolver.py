@@ -1,18 +1,22 @@
 """A group's in-graph resolve and fetch (docs/v1-offload.md D5): its routed ids to arena slots per role through the
 residency map (`moe_resolve@1`, or the policy's variant contract with the policy's device state), every miss gathered
 from the host tier into its slot — a staging slot, or the slot a device-owned policy admitted it into
-(`expert_fetch@1`, F5a)."""
+(`expert_fetch@1`, F5a). Under exclusive tiers (D10) `moe_tiers@1` then places the call's victims and SSD misses, the
+I/O worker reads its SSD pieces (`cpu_task@1`'s copy task), and after the gather the victims are demoted into their RAM
+units and the admitted moved from staging into their slots."""
 from __future__ import annotations
 
 import torch
 
 RESOLVE, FETCH, EXPERT_PREFETCH = "moe_resolve@1", "expert_fetch@1", "expert_prefetch@1"
+TIERS, CPU_TASK = "moe_tiers@1", "cpu_task@1"
 
 
 class DeviceResolver:
     def __init__(self, ctx, store, group: int, classes: list, state: dict[str, torch.Tensor]) -> None:
         self.store, self.group, self.classes, self.state = store, group, classes, state
         self._prepared = False                # the pass is prepared, not yet resolved
+        self.io_slot = None                   # exclusive tiers: its SSD reads' slot on the I/O worker
         self.residency, self.host = store.residency.device[group], store.host_units[group]
         self.limits, self.counts = store.limits[group], store.counts[group]
         facts = {"experts": store.items, "top_k": store.top_k, "roles": store.roles, "staging": store.staging}
@@ -55,6 +59,8 @@ class DeviceResolver:
         if len(kinds) != len(ids):
             raise ValueError(f"tokens {first}…{first + len(ids)} past the step's {len(store.kinds)} row kinds")
         self.prepare(first)
+        if store.exclusive:
+            store.call_start.copy_(store.n_delta[self.group:self.group + 1])
         slots, fetch, n, cpu = self.resolve(
             ids, kinds, self.residency, self.host, self.limits, self.counts, store.routed[self.group], self.ring,
             self.stage, store.empty[self.group], store.n_empty[self.group:self.group + 1], store.misses, store.errors,
@@ -63,8 +69,20 @@ class DeviceResolver:
         self._prepared = False
         if before_fetch is not None:
             before_fetch(cpu)
+        if store.exclusive:
+            g = self.group
+            store.tier_op(ids, kinds, g, fetch, n, self.stage, store.delta[g], store.call_start,
+                          store.n_delta[g:g + 1], store.residency.device, store.host_units, store.piece,
+                          store.classes32, store.owner, store.capacity, store.heat, store.io_device(), store.moves,
+                          store.n_moves)
+            store.io.signal(self.io_slot)
+            store.io.wait(self.io_slot)
         for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
             gather(fetch[r], n[r:r + 1], c.units(), c.slots())
+        if store.exclusive:
+            for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
+                gather(store.moves[r, 0:2], store.n_moves[r, 0:1], c.slots(), c.units())      # demotions
+                gather(store.moves[r, 2:4], store.n_moves[r, 1:2], c.slots(), c.slots())      # admitted, staged
         return slots, cpu
 
     def done(self) -> None:

@@ -9,6 +9,7 @@ import numpy as np
 class Static:
     resolve_variant = None
     device_owned = False
+    heat = None                   # under exclusive RAM: no displacement (keeps take free units only)
 
     def __init__(self, ctx, **site) -> None:
         pass

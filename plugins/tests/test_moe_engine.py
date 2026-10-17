@@ -489,6 +489,41 @@ def test_the_cpus_share_computes_a_passs_lowest_ranked_misses(tiny_moe, tmp_path
     assert CPU not in engine.ctx.shared_objects and _served(engine, prompts) == want
 
 
+def test_exclusive_tiers_serve_what_the_resident_store_does(tiny_moe, tmp_path):
+    """docs/v1-offload.md D10, F9: with RAM holding a quarter of the pieces (`moe.ram`) and the checkpoint's file the
+    rest (std.tiered.gguf_direct@1), every expert lives in one of VRAM, RAM and the SSD: SSD misses are read by the
+    copy task, F11's victims demoted into RAM (the admitted staged, then moved), decode SSD reads kept — and the
+    outputs are the resident store's bit for bit, F11's VRAM residency its replay's, the RAM units owned once each and
+    the map's tier codes where they say. Without a slower tier, or under a device policy with no heat (F4), the store
+    refuses a short RAM."""
+    from holon_judge.placement import parity, route_dump
+
+    checkpoint, prompts = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
+    want = _served(_engine(file), prompts)
+    short = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25",
+             "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    for policy in ("", "std.tiered.static@1"):
+        engine = _engine(file, host_memory=1 << 24, plugin_options=short | {"moe.placement": policy})
+        store = engine.ctx.shared_objects[KEY]
+        with route_dump(engine) as trace:
+            assert _served(engine, prompts) == want, policy
+        assert store.exclusive and {c.held for c in store.classes.values()} == {4} and trace.mirrored
+        if not policy:
+            assert parity(trace)["first_differing_step"] is None and trace.admissions > 0
+        res, host = store.residency.device.numpy(), store.host_units.numpy()
+        assert ((res == -1) == (host >= 0)).all() and ((res >= 0).all(-1) == (res >= 0).any(-1)).all()
+        for k, c in enumerate(store.classes.values()):        # each RAM unit holds one piece, the one the map says
+            owner = store.owner[k].numpy()
+            g, e = np.divmod(owner[owner >= 0], store.items)
+            role = [next(r for r, x in store.groups[store.layers[gg]].items() if x is c) for gg in g]
+            assert len(set(owner[owner >= 0])) == len(g) and (host[g, e, role] == np.flatnonzero(owner >= 0)).all()
+        engine.close()
+    for refused in ({"moe.tiers": "std.tiered.pinned@1"}, {"moe.placement": "placement.lru@1"}):
+        with pytest.raises(NotImplementedError, match="fewer pieces"):
+            _engine(file, host_memory=1 << 24, plugin_options=short | refused)
+
+
 @pytest.fixture(scope="module")
 def gpu_moe(tmp_path_factory):
     """A random Qwen3-MoE as a GGUF of two expert classes, hidden and expert widths 1024 (an mmq tile then runs
@@ -539,12 +574,14 @@ def _gpu_engine(model, **kw) -> Engine:
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("policy, cache", [("", ""), ("", "*=0.25"), ("", "*=0"), ("placement.lru@1", "*=0.25"),
                                            ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25"),
-                                           ("", "*=0.5 ring"), ("", "*=0.5 dma")])
+                                           ("", "*=0.5 ring"), ("", "*=0.5 dma"), ("", "*=0.25 ssd"),
+                                           ("std.tiered.static@1", "*=0.25 ssd")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
     """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
     resolve, its F11 and F4 variants and zero-copy gather from mapped host pools), decode steps replayed from CUDA
     graphs and prefill chunked past the mmvq limit: the offload store's streams and prompt logprobs are the resident
-    store's, bit for bit, under every placement policy (arenas of 42, 18, 10 slots: stream-k unpatched). F11's
+    store's, bit for bit, under every placement policy (arenas of 42, 18, 10 slots: stream-k unpatched), and with RAM
+    holding a quarter of the experts (exclusive tiers, D10: SSD reads on the I/O worker inside decode graphs). F11's
     residency, step by step, is its replay oracle's (L1 parity), with admissions in graphed and eager steps, the ring's
     copies on SMs or on copy engines; a borrowing step's lending and ring never wait for the device (with copy
     engines, but for one explicit sync to read the copy list). A
@@ -555,9 +592,12 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
 
     file, prompts, want = gpu_moe
     cache, ring = cache.partition(" ")[::2]          # "ring" / "dma": steps of 32 prompt tokens or more stream (D8),
-    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={       # their copies on SMs / copy engines
+    ssd = ring == "ssd"                              # their copies on SMs / copy engines; "ssd": RAM holds a quarter
+    ring = "" if ssd else ring
+    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
-        "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm"})
+        "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm"} | (
+        {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}))
     store = engine.ctx.shared_objects[KEY]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query.sum()) * 2 * 4 * bool(
@@ -574,7 +614,11 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     variant = {"": "moe_resolve.lfu@1", "placement.lru@1": "moe_resolve.lru@1"}.get(policy, "moe_resolve@1")
     assert {(k.rpartition("/")[2], v["provider"]) for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")
             } == {(variant, "kernels.expert_io"), ("expert_fetch@1", "kernels.expert_io"),
-                  ("expert_prefetch@1", "kernels.expert_io")}
+                  ("expert_prefetch@1", "kernels.expert_io")} | ({("moe_tiers@1", "kernels.expert_io"),
+                                                                 ("cpu_task@1", "kernels.cpu_task")} if ssd else set())
+    if ssd:                                          # the SSD reads ran on the I/O worker, fail-open untouched
+        io = engine.ctx.shared_objects["cpu_task.io"].native
+        assert store.exclusive and io.served() > 0 and io.flag() == 0
     if not policy:
         report = parity(trace)
         assert report["first_differing_step"] is None and (report["admissions"] > 0) == (cache in ("*=0.25", "*=0.5"))

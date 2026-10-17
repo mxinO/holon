@@ -20,7 +20,7 @@ from holon.api import Constraint, KernelSpec
 
 from . import extension
 
-RESOLVE, FETCH, PREFETCH, PATCH = "moe_resolve", "expert_fetch", "expert_prefetch", "moe_patch_rows"
+RESOLVE, FETCH, PREFETCH, PATCH, TIERS = "moe_resolve", "expert_fetch", "expert_prefetch", "moe_patch_rows", "moe_tiers"
 POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
 ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
 STATIC_BYTES = 9 * 4                       # its static shared words (and the variants' alignment word)
@@ -119,11 +119,24 @@ class MoePatchRows:
         self.lib.patch(y, rows, cpu)
 
 
+class MoeTiers:
+    def __init__(self, modules: Modules, ctx, *, experts: int, top_k: int, roles: int) -> None:
+        self.lib = modules(ctx.fingerprint.sm)
+
+    def __call__(self, ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece, classes,
+                 owner, capacity, heat, io, moves, n_moves) -> None:
+        self.lib.tiers(ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece, classes,
+                       owner, capacity, heat, io, moves, n_moves)
+
+
 class Plugin:
     def register(self, regs) -> None:
         modules = Modules()
         props = frozenset({"graph_safe", "deterministic"})
         requires = Constraint(sms=frozenset(extension.ARCHS))
+        regs.kernels.add(TIERS, KernelSpec(
+            op=TIERS, provider="kernels.expert_io", impl=functools.partial(MoeTiers, modules), requires=requires,
+            supports=lambda f: f["roles"] <= ROLES, props=props, priority=10))
         regs.kernels.add(PATCH, KernelSpec(
             op=PATCH, provider="kernels.expert_io", impl=functools.partial(MoePatchRows, modules), requires=requires,
             props=props, priority=10))

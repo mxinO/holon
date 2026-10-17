@@ -4,6 +4,7 @@ protocol fails open: a failing task, a hung task (the spin wait's time bound) an
 watchdog) each raise the error word, and once the flag is set every later wait returns at once."""
 import time
 
+import numpy as np
 import pytest
 import torch
 from holon.core import platform
@@ -103,3 +104,39 @@ def test_the_protocol_fails_open(lib, memop):
     torch.cuda.synchronize()
     assert int(errors[0]) & 2 and time.perf_counter() - t0 < 1.5      # one time bound, not five
     worker.stop()
+
+
+def test_the_copy_task_reads_each_requested_piece_into_its_unit(lib, tmp_path):
+    """F9's copy task: per role, the requested pieces' extents (unaligned, two per piece, an O_DIRECT descriptor read
+    through its aligned superset) read in order into the requested units, on two threads; nothing else written; the
+    oracle (std.moe.reference `copy_task`) agrees; a request past the pieces fails the task."""
+    import os
+
+    from holon_std.moe import reference
+
+    data = np.random.default_rng(0).integers(0, 256, 3 * 4096 * 10 + 123, dtype=np.uint8)
+    path = tmp_path / "experts.bin"
+    path.write_bytes(data.tobytes())
+    plain = os.open(path, os.O_RDONLY)
+    try:
+        direct, flag = os.open(path, os.O_RDONLY | os.O_DIRECT), 1
+    except OSError:                                         # a filesystem without O_DIRECT
+        direct, flag = plain, 0
+    pieces = [[(7, 1000), (5000, 2000)], [(9001, 3000), (40000, 0)], [(100, 50), (120000, 2950)]]
+    desc = torch.tensor([[(fd, f, off, n) for off, n in piece] for piece in pieces for fd, f in [(direct, flag)]],
+                        dtype=torch.int64)
+    desc[1, :, 0:2] = torch.tensor([plain, 0])              # one piece through a buffered descriptor
+    want = torch.zeros(5, 3000, dtype=torch.uint8)
+    req = torch.tensor([[2, 0], [2, 4], [0, 1], [0, 0]], dtype=torch.int32)
+    units = want.clone()
+    reference.copy_task([(desc, want, req)])
+    for unit, piece in ((4, 2), (1, 0)):
+        expect = np.concatenate([data[off:off + n] for off, n in pieces[piece]])
+        assert np.array_equal(want[unit].numpy(), expect)
+    task = lib.CopyTask([(desc, units, req)])
+    assert task.run(2) == 0 and torch.equal(units, want)
+    req[1] = torch.tensor([3, 0])                           # a piece past the descriptors
+    assert task.run(2) != 0
+    os.close(plain)
+    if flag:
+        os.close(direct)

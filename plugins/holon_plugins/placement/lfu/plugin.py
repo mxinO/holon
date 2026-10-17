@@ -17,6 +17,7 @@ OP = "moe_resolve.lfu"
 class Lfu:
     resolve_variant = OP + "@1"
     device_owned = True                       # the whole cache: no host edits
+    heat = "score"                            # an exclusive RAM tier ranks by it (D10)
 
     def __init__(self, ctx, *, items: int, roles: int, **site) -> None:
         self.items = items

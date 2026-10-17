@@ -92,6 +92,21 @@ class CpuTask:
     def wait(self, slot: int) -> None:
         self.service.native.wait(slot, self.errors)
 
+    def copy(self, roles) -> CopyTask:
+        """The generic copy task (F9) over `roles`: per role (descriptors, units, requests), host tensors."""
+        return CopyTask(self.service.lib.CopyTask(list(roles)))
+
+
+class CopyTask:
+    """A `cpu_task@1` task: callable (runs now, on one thread), `native` its ABI handle."""
+
+    def __init__(self, task) -> None:
+        self._task, self.native = task, task.native()
+
+    def __call__(self) -> None:
+        if self._task.run(1):
+            raise RuntimeError("cpu_task@1's copy task failed (a bad request or a short read)")
+
 
 def parse_cores(text: str) -> list[int]:
     """"2-5,8" -> [2, 3, 4, 5, 8]."""

@@ -59,7 +59,8 @@ def route_dump(engine) -> Iterator[Trace]:
     try:
         yield trace
         if not engine.has_work():                      # every launched step committed: the log told the host all
-            trace.mirrored = np.array_equal(store.residency.device.cpu().numpy(), store.residency.host)
+            device = store.residency.device.cpu().numpy()       # (VRAM slots; tier codes collapsed: the host mirror
+            trace.mirrored = np.array_equal(np.maximum(device, -1), np.maximum(store.residency.host, -1))  # has none)
     finally:
         store.taps.remove(tap)
 

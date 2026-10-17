@@ -111,7 +111,7 @@ class _Layer:
 
     @staticmethod
     def units(cls) -> torch.Tensor:
-        return cls.host.view(torch.uint8, (len(cls.pieces), cls.unit_bytes))
+        return cls.host_view()
 
     @property
     def native(self):

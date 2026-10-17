@@ -243,6 +243,9 @@ class CpuTask:
     def wait(self, slot: int) -> None:
         pass
 
+    def copy(self, roles):
+        return lambda: moe.copy_task(roles)
+
 
 class CpuExperts:
     """`cpu_experts@1`'s oracle; a task over fixed buffers runs it (synchronous only: no `native`)."""
@@ -255,6 +258,26 @@ class CpuExperts:
 
     def task(self, jobs, x, gate_up, down, rows):
         return lambda: self(jobs, x, gate_up, down, rows)
+
+
+class MoeTiers:
+    """`moe_tiers@1`'s oracle, writing in place what the contract writes."""
+
+    def __init__(self, ctx, **facts) -> None:
+        pass
+
+    def __call__(self, ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece, classes,
+                 owner, capacity, heat, io, moves, n_moves) -> None:
+        records = [tuple(r) for r in delta[int(start[0]):int(n_delta[0])].tolist()]
+        out = moe.moe_tiers(ids, kinds, group, fetch, n_fetch, stage, records, residency, host, piece, classes, owner,
+                            capacity, heat)
+        for name, t in (("fetch", fetch), ("residency", residency), ("host", host), ("owner", owner),
+                        ("moves", moves), ("n_moves", n_moves)):
+            t.copy_(out[name])
+        for r, rows in enumerate(out["io"]):
+            io[r, 0, 0] = len(rows)
+            for i, row in enumerate(rows):
+                io[r, 1 + i] = torch.tensor(row)
 
 
 class MoePatchRows:
@@ -319,6 +342,6 @@ BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul"
          "linear_experts_arena": LinearExperts,
          "moe_topk": MoeTopk, "moe_combine": MoeCombine, "moe_resolve": MoeResolve, "expert_fetch": ExpertFetch,
          "expert_prefetch": ExpertPrefetch, "cpu_task": CpuTask, "cpu_experts": CpuExperts,
-         "moe_patch_rows": MoePatchRows,
+         "moe_patch_rows": MoePatchRows, "moe_tiers": MoeTiers,
          "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule, "gated_rmsnorm": GatedRMSNorm,
          "gdn_rewind": GDNRewind, "kv_write": KvWrite}

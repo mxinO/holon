@@ -321,7 +321,8 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             const unsigned below = (1u << lane) - 1;
             const int rank = seen + __popc(all & below), srank = staged + __popc(mine & below);
             if (v != 0 && rank < L.F) {
-                units[rank] = L.host[e * roles + warp];
+                const int32_t unit = L.host[e * roles + warp];
+                units[rank] = unit >= 0 ? unit : -2 - e;   // no device-readable tier holds it: moe_tiers@1's
                 dst[rank] = v == 1 ? stage[min(srank, L.F - 1)] : -2 - v;
             }
             if (v == 1) {
@@ -460,6 +461,306 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
         misses.data_ptr<int32_t>(), errors.data_ptr<int32_t>(), delta.data_ptr<int32_t>(), n_delta.data_ptr<int32_t>(),
         int(group), int(delta.size(0)), st, slots.data_ptr<int32_t>(), fetch.data_ptr<int32_t>(),
         n_fetch.data_ptr<int32_t>(), cpu.data_ptr<int32_t>(), tokens, k, experts, roles, staging);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+// moe_tiers@1 (std.moe.kernels): one CTA after a layer call's resolve keeps the RAM tier exclusive and provides the
+// pieces no device-readable tier holds. Decisions run in order (admissions in record order, then the SSD misses by id)
+// on thread 0; the searches they need (a class's first free RAM unit, RAM's coldest expert of the layer's classes) are
+// block-wide reductions every thread joins, in lockstep (the loop conditions read shared memory only).
+struct Tiers {
+    int32_t * residency, * host;                       // [G, E, R]
+    const int32_t * piece, * classes;                  // [G, E, R], [G, R]
+    int32_t * owner;                                   // [C, U]
+    const int32_t * capacity;                          // [C]
+    const float * heat;                                // [G, E] or null
+    int32_t * io, * moves, * n_moves;                  // [R, 1 + F, 2], [R, 4, F], [R, 2]
+    int groups, units;
+};
+
+constexpr int TIER_THREADS = 256;
+
+// The first free unit of class c (-1: none), every thread joining.
+__device__ int first_free(const Tiers & T, int c, int * red) {
+    int best = INT_MAX;
+    for (int u = threadIdx.x; u < T.capacity[c]; u += blockDim.x) {
+        if (T.owner[c * T.units + u] < 0) {
+            best = min(best, u);
+            break;                                     // a thread's later units are larger
+        }
+    }
+    red[threadIdx.x] = best;
+    __syncthreads();
+    for (int w = blockDim.x / 2; w > 0; w /= 2) {
+        if (threadIdx.x < w) {
+            red[threadIdx.x] = min(red[threadIdx.x], red[threadIdx.x + w]);
+        }
+        __syncthreads();
+    }
+    const int out = red[0];
+    __syncthreads();
+    return out == INT_MAX ? -1 : out;
+}
+
+// RAM's coldest whole expert of layer g's classes, strictly colder than `than`, not routed by the call in layer g and
+// not placed by it (-1: none): its index g' * E + e', least (heat, index).
+__device__ int coldest(const Tiers & T, int g, int roles, int experts, float than, const int32_t * flags,
+                       float * hk, int * ik) {
+    float bh = INFINITY;
+    int bi = INT_MAX;
+    for (int x = threadIdx.x; x < T.groups * experts; x += blockDim.x) {
+        const int gg = x / experts, e = x % experts;
+        bool ok = !(gg == g && flags[e] & (1 | 4));    // routed by the call (1), placed by it (4)
+        for (int r = 0; r < roles && ok; ++r) {
+            ok = T.classes[gg * roles + r] == T.classes[g * roles + r] && T.residency[x * roles + r] == -1;
+        }
+        if (ok) {
+            const float h = T.heat[x];
+            if (h < bh || (h == bh && x < bi)) {
+                bh = h;
+                bi = x;
+            }
+        }
+    }
+    hk[threadIdx.x] = bh;
+    ik[threadIdx.x] = bi;
+    __syncthreads();
+    for (int w = blockDim.x / 2; w > 0; w /= 2) {
+        if (threadIdx.x < w) {
+            const float h = hk[threadIdx.x + w];
+            const int i = ik[threadIdx.x + w];
+            if (h < hk[threadIdx.x] || (h == hk[threadIdx.x] && i < ik[threadIdx.x])) {
+                hk[threadIdx.x] = h;
+                ik[threadIdx.x] = i;
+            }
+        }
+        __syncthreads();
+    }
+    const float h = hk[0];
+    const int i = ik[0];
+    __syncthreads();
+    return i != INT_MAX && h < than ? i : -1;
+}
+
+// Expert e of layer g into RAM: `given` units (one per role) if not null, else free units of every class, else the
+// coldest's (displaced to the SSD), else the SSD. Thread 0 writes; `units` gets the result (-1: the SSD).
+__device__ void place(const Tiers & T, int g, int e, int roles, int experts, const int * given, int32_t * flags,
+                      int * units, int * red, float * hk) {
+    __shared__ int ok;
+    if (given == nullptr) {
+        if (threadIdx.x == 0) {
+            ok = 1;
+        }
+        for (int r = 0; r < roles; ++r) {
+            const int u = first_free(T, T.classes[g * roles + r], red);
+            if (threadIdx.x == 0) {
+                units[r] = u;
+                ok = ok && u >= 0;
+            }
+            __syncthreads();
+        }
+        if (!ok) {
+            const int x = T.heat ? coldest(T, g, roles, experts, T.heat[g * experts + e], flags, hk, red) : -1;
+            if (threadIdx.x == 0) {
+                for (int r = 0; r < roles; ++r) {
+                    units[r] = x >= 0 ? T.host[x * roles + r] : -1;
+                    if (x >= 0) {
+                        T.residency[x * roles + r] = -2;
+                        T.host[x * roles + r] = -1;
+                    }
+                }
+            }
+        }
+    } else if (threadIdx.x == 0) {
+        for (int r = 0; r < roles; ++r) {
+            units[r] = given[r];
+        }
+    }
+    if (threadIdx.x == 0) {
+        const int self = g * experts + e;
+        for (int r = 0; r < roles; ++r) {
+            const int c = T.classes[g * roles + r];
+            if (units[0] >= 0) {
+                T.owner[c * T.units + units[r]] = self;
+            }
+            T.residency[self * roles + r] = units[0] >= 0 ? -1 : -2;
+            T.host[self * roles + r] = units[0] >= 0 ? units[r] : -1;
+        }
+        if (units[0] >= 0) {
+            flags[e] |= 4;
+        }
+    }
+    __syncthreads();
+}
+
+__global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __restrict__ kinds, int g, int32_t * fetch,
+                        const int32_t * n_fetch, const int32_t * stage, const int32_t * delta, const int32_t * start,
+                        const int32_t * n_delta, Tiers T, int tokens, int k, int experts, int roles, int F) {
+    extern __shared__ int32_t flags[];                 // [experts]: 1 routed, 2 by a DECODE row, 4 placed, 8 admitted,
+    __shared__ int red[TIER_THREADS];                  // 16 an SSD miss
+    __shared__ float hk[TIER_THREADS];
+    __shared__ int units[8], src[8], staged[8], n_adm;
+    const int tid = threadIdx.x, entries = tokens * k, n_rec = *n_delta - *start;
+    for (int e = tid; e < experts; e += blockDim.x) {
+        flags[e] = 0;
+    }
+    __syncthreads();
+    for (int i = tid; i < entries; i += blockDim.x) {
+        const int e = ids[i], kd = kinds[i / k];
+        if (kd != PADDING && e >= 0) {
+            atomicOr(&flags[e], kd == DECODE ? 3 : 1);
+        }
+    }
+    for (int r = 0; r < roles; ++r) {
+        for (int i = tid; i < min(n_fetch[r], F); i += blockDim.x) {
+            const int s0 = fetch[(r * 2) * F + i];
+            if (s0 <= -2) {
+                atomicOr(&flags[-2 - s0], 16);
+            }
+        }
+    }
+    if (tid == 0) {
+        n_adm = 0;
+        for (int i = 0; i < n_rec; ++i) {
+            const int * rec = delta + (*start + i) * 3;
+            if (rec[1] >= 0) {
+                flags[rec[1]] |= 8;
+                ++n_adm;
+            }
+        }
+        for (int r = 0; r < roles; ++r) {
+            staged[r] = n_fetch[r] - n_adm;
+            T.n_moves[r * 2] = T.n_moves[r * 2 + 1] = 0;
+            T.io[r * (1 + F) * 2] = 0;
+        }
+    }
+    __syncthreads();
+    int j = 0;
+    for (int i = 0; i < n_rec; ++i) {                  // 1. admissions (uniform: every thread reads the same record)
+        const int * rec = delta + (*start + i) * 3;
+        const int a = rec[1], b = rec[2];
+        if (a < 0) {
+            continue;
+        }
+        if (tid == 0) {
+            for (int r = 0; r < roles; ++r) {
+                const int slot = T.residency[(g * experts + a) * roles + r];
+                int at = 0;
+                while (at < min(n_fetch[r], F) && fetch[(r * 2 + 1) * F + at] != slot) {
+                    ++at;
+                }
+                src[r] = fetch[(r * 2) * F + at];
+                if (b >= 0) {                          // into a victim's slot: staged, then moved there
+                    const int to = stage[r * F + staged[r] + j];
+                    fetch[(r * 2 + 1) * F + at] = to;
+                    const int m = T.n_moves[r * 2 + 1]++;
+                    T.moves[(r * 4 + 2) * F + m] = to;
+                    T.moves[(r * 4 + 3) * F + m] = slot;
+                } else if (src[r] >= 0) {              // into an empty slot: its RAM unit freed
+                    T.owner[T.classes[g * roles + r] * T.units + src[r]] = -1;
+                }
+            }
+        }
+        __syncthreads();
+        if (b >= 0) {
+            bool from_ram = true;
+            for (int r = 0; r < roles; ++r) {
+                from_ram = from_ram && src[r] >= 0;
+            }
+            __shared__ int given[8], victim[8];
+            if (tid == 0) {
+                for (int r = 0; r < roles; ++r) {
+                    victim[r] = T.residency[(g * experts + a) * roles + r];
+                    given[r] = src[r];
+                    if (from_ram) {
+                        T.owner[T.classes[g * roles + r] * T.units + src[r]] = -1;
+                    }
+                }
+            }
+            __syncthreads();
+            place(T, g, b, roles, experts, from_ram ? given : nullptr, flags, units, red, hk);
+            if (tid == 0 && units[0] >= 0) {
+                for (int r = 0; r < roles; ++r) {
+                    const int m = T.n_moves[r * 2]++;
+                    T.moves[(r * 4) * F + m] = victim[r];
+                    T.moves[(r * 4 + 1) * F + m] = units[r];
+                }
+            }
+            ++j;
+        }
+        if (tid == 0) {
+            for (int r = 0; r < roles; ++r) {
+                T.host[(g * experts + a) * roles + r] = -1;
+            }
+        }
+        __syncthreads();
+    }
+    for (int e = 0; e < experts; ++e) {                // 2. keeps, 3. the reads (uniform: shared flags)
+        if (!(flags[e] & 16)) {
+            continue;
+        }
+        bool kept = false;
+        if (!(flags[e] & 8) && (flags[e] & 2)) {
+            place(T, g, e, roles, experts, nullptr, flags, units, red, hk);
+            kept = units[0] >= 0;
+        }
+        if (tid == 0) {
+            for (int r = 0; r < roles; ++r) {
+                int at = 0;
+                while (fetch[(r * 2) * F + at] != -2 - e) {
+                    ++at;
+                }
+                const int unit = kept ? units[r] : T.capacity[T.classes[g * roles + r]] + at;
+                int32_t * io = T.io + r * (1 + F) * 2;
+                const int n = io[0]++;
+                io[2 + 2 * n] = T.piece[(g * experts + e) * roles + r];
+                io[3 + 2 * n] = unit;
+                fetch[(r * 2) * F + at] = unit;
+            }
+        }
+        __syncthreads();
+    }
+}
+
+void tiers(const at::Tensor & ids, const at::Tensor & kinds, int64_t group, at::Tensor & fetch, const at::Tensor & n_fetch,
+           const at::Tensor & stage, const at::Tensor & delta, const at::Tensor & start, const at::Tensor & n_delta,
+           at::Tensor & residency, at::Tensor & host, const at::Tensor & piece, const at::Tensor & classes,
+           at::Tensor & owner, const at::Tensor & capacity, const c10::optional<at::Tensor> & heat, at::Tensor & io,
+           at::Tensor & moves, at::Tensor & n_moves) {
+    const c10::cuda::CUDAGuard guard(ids.device());
+    const int64_t tokens = ids.size(0), k = ids.size(1), groups = residency.size(0), experts = residency.size(1),
+                  roles = residency.size(2), F = stage.size(1);
+    TORCH_CHECK(roles <= 8 && F > 0, "at most 8 roles, a stage list");
+    check(ids, ids, at::kInt, {tokens, k}, "ids");
+    check(kinds, ids, at::kByte, {tokens}, "kinds");
+    check(fetch, ids, at::kInt, {roles, 2, F}, "fetch");
+    check(n_fetch, ids, at::kInt, {roles}, "n_fetch");
+    check(stage, ids, at::kInt, {roles, F}, "stage");
+    check(delta, ids, at::kInt, {delta.size(0), 3}, "delta");
+    check(start, ids, at::kInt, {1}, "start");
+    check(n_delta, ids, at::kInt, {1}, "n_delta");
+    check(residency, ids, at::kInt, {groups, experts, roles}, "residency");
+    check(host, ids, at::kInt, {groups, experts, roles}, "host");
+    check(piece, ids, at::kInt, {groups, experts, roles}, "piece");
+    check(classes, ids, at::kInt, {groups, roles}, "classes");
+    check(owner, ids, at::kInt, {owner.size(0), owner.size(1)}, "owner");
+    check(capacity, ids, at::kInt, {owner.size(0)}, "capacity");
+    check(io, ids, at::kInt, {roles, 1 + F, 2}, "io");
+    check(moves, ids, at::kInt, {roles, 4, F}, "moves");
+    check(n_moves, ids, at::kInt, {roles, 2}, "n_moves");
+    const float * h = nullptr;
+    if (heat.has_value()) {
+        check(*heat, ids, at::kFloat, {groups, experts}, "heat");
+        h = heat->data_ptr<float>();
+    }
+    Tiers T{residency.data_ptr<int32_t>(), host.data_ptr<int32_t>(), piece.data_ptr<int32_t>(),
+            classes.data_ptr<int32_t>(), owner.data_ptr<int32_t>(), capacity.data_ptr<int32_t>(), h,
+            io.data_ptr<int32_t>(), moves.data_ptr<int32_t>(), n_moves.data_ptr<int32_t>(), int(groups),
+            int(owner.size(1))};
+    k_tiers<<<1, TIER_THREADS, experts * sizeof(int32_t), stream()>>>(
+        ids.data_ptr<int32_t>(), kinds.data_ptr<uint8_t>(), int(group), fetch.data_ptr<int32_t>(),
+        n_fetch.data_ptr<int32_t>(), stage.data_ptr<int32_t>(), delta.data_ptr<int32_t>(), start.data_ptr<int32_t>(),
+        n_delta.data_ptr<int32_t>(), T, int(tokens), int(k), int(experts), int(roles), int(F));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -603,6 +904,7 @@ void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at:
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("resolve", &resolve, "moe_resolve@1 (policy 0) or a variant into slots, fetch, n_fetch (and the counts, misses, "
           "errors, delta log, map and state in place)");
+    m.def("tiers", &tiers, "moe_tiers@1: the call's admissions and SSD misses through the exclusive RAM tier");
     m.def("publish", &publish, "moe_patch_rows@1's publish: x's rows with a CPU entry into the CPU's mapped rows");
     m.def("patch", &patch, "moe_patch_rows@1: y[t, j] = rows[cpu[t, j]] where it is >= 0");
     m.def("copy_batch", &copy_batch, "expert_prefetch@1 from the host's list: copy-engine DMA on a stream");

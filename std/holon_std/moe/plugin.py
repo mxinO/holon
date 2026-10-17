@@ -11,5 +11,6 @@ class Plugin:
                            (kernels.MOE_COMBINE, ref.moe_combine), (kernels.MOE_RESOLVE, ref.moe_resolve),
                            (kernels.EXPERT_FETCH, ref.expert_fetch), (kernels.EXPERT_PREFETCH, ref.expert_fetch),
                            (kernels.LINEAR_EXPERTS_ARENA, ref.linear_experts), (kernels.CPU_TASK, ref.cpu_task),
-                           (kernels.CPU_EXPERTS, ref.cpu_experts), (kernels.MOE_PATCH_ROWS, ref.moe_patch_rows)):
+                           (kernels.CPU_EXPERTS, ref.cpu_experts), (kernels.MOE_PATCH_ROWS, ref.moe_patch_rows),
+                           (kernels.MOE_TIERS, ref.moe_tiers)):
             regs.ops.add(op.split("@")[0], oracle)

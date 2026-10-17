@@ -41,7 +41,8 @@ then `staging` slots, then cache slots.
   j) of a padding row, or with `ids[t, j]` < 0 (a dropped route), gets null slot j: no fetch, no count. Otherwise a
   resident expert gets its slot, a ring piece its ring slot — a cache slot, in [k + staging, limits[r]); any other is
   corrupt: the entry gets null slot j and `errors[0]` |= `RANGE` —; the layer's distinct missing pieces of role r
-  (neither resident nor in the ring), by expert id ascending, are fetch entries i: `fetch[r, 0, i]` = `host[e, r]`,
+  (neither resident nor in the ring), by expert id ascending, are fetch entries i: `fetch[r, 0, i]` = `host[e, r]` (or
+  −2 − e where it is −1: a piece no device-readable tier holds, for `moe_tiers@1` to provide),
   `fetch[r, 1, i]` the slot it is gathered into, here `stage[r, i]` (the entries read it; the caller's staging slots, or
   slots lent for the call: distinct). `n_fetch[r]` counts them all, even past F (the caller must prevent it:
   `misses[0]` becomes the largest `n_fetch` it has seen, and a miss past F reads `stage[r, F − 1]`). `counts[e]` += 1
@@ -92,6 +93,35 @@ then `staging` slots, then cache slots.
   instance serves: `sm`, `fetch` and `n` on the device and `src` a mapped host pool's device view (no host sync);
   `dma`, them on the host and `src` the pinned host pool (copy engines). A provider declares the modes it supports.
 
+Host tiers past RAM (F9 and the exclusive RAM tier, docs/v1-offload.md D10): when RAM holds fewer pieces than the
+store, a piece lives in exactly one of VRAM, RAM (map code −1, `host` its unit) and the SSD (code −2: the checkpoint's
+file, always valid), and each layer call runs `moe_resolve → moe_tiers → [the SSD reads: cpu_task@1's copy task;
+signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (moves)`:
+
+- `moe_tiers@1`: instance `(ids [T, k] int32, kinds [T] uint8, group: int, fetch [R, 2, F] int32, n_fetch [R] int32,
+  stage [R, F] int32, delta [D, 3] int32, start [1] int32, n_delta [1] int32, residency [G, E, R] int32, host [G, E, R]
+  int32, piece [G, E, R] int32, classes [G, R] int32, owner [C, U] int32, capacity [C] int32, heat [G, E] f32 | None,
+  io [R, 1 + F, 2] int32, moves [R, 4, F] int32, n_moves [R, 2] int32)`, one layer call after its resolve (the
+  resolve's `fetch`, its records `delta[start : n_delta]`): every layer's map, RAM units and class piece indices,
+  each layer's role classes, each class's RAM units (`owner[c, u]`: the piece g·E + e, −1 free; units [0,
+  `capacity[c]`), then the class's I/O staging units capacity[c] + i), and the policy's heat (None: no displacement).
+  It provides the call's pieces no device-readable tier holds and keeps its RAM tier exclusive, in this order (ties
+  by expert id; one writer: a call's decisions see the earlier ones):
+  1. Its admissions (the records (group, a, b ≥ 0), in order): a is staged — its fetch entry gathers into a staging
+     slot `stage[r, n + j]` past the call's other misses, then moves (`moves[r, 2:4]`: that slot → b's slot, after the
+     demotions) —, and b, leaving VRAM, is placed: a's RAM units if a came from RAM (b's demotion `moves[r, 0:2]`:
+     b's slot → that unit, after the fetch read it), else a free unit of each of its classes, else the units of RAM's
+     coldest expert of its classes (least heat, then group, then id; not routed by the call, not placed by it) when b
+     is strictly hotter — that expert goes to the SSD —, else the SSD. An admission into an empty slot (b ≤ −2) needs
+     no move. An admitted a's RAM units go to b or are freed.
+  2. Its SSD misses (fetch sources −2 − e) routed by a `DECODE` row and not admitted, in a call with one: kept in RAM
+     (D10's keep rule) as b would be placed (free units, else the coldest when strictly colder), else not.
+  3. The SSD reads: per role the pieces (`piece`) and the units they land in — a kept piece its RAM unit, any other
+     the staging unit capacity[c] + i of its fetch entry i — in `io[r]` (n, then (piece, unit) pairs); those fetch
+     entries read that unit.
+  The map, `host` and `owner` take the call's result (a resident, b and kept pieces in RAM or on the SSD, displaced
+  experts on the SSD). `n_moves[r]` = (demotions, moves). Deterministic. Facts: experts, top_k, roles.
+
 The CPU's share of the misses (F5b, docs/v1-offload.md D5–D7): per layer the graph runs `moe_resolve → [publish the
 CPU jobs; signal] → expert_fetch → linear_experts_arena (gate/up, down) → [wait] → moe_patch_rows → moe_combine`.
 
@@ -103,7 +133,11 @@ CPU jobs; signal] → expert_fetch → linear_experts_arena (gate/up, down) → 
   at once, a wait gives up after a time bound, and once either happened every later wait returns at once (so a graph
   never waits forever and a drain ends). A task is the CPU kernel's (`cpu_experts@1`'s `task`): callable (runs it now),
   with `native` its handle for a native worker — `(ABI version, function, argument)` of the task ABI
-  (kernels.cpu_task's csrc/holon_cpu_task.h), absent where only a synchronous run is possible. The oracle runs a task.
+  (kernels.cpu_task's csrc/holon_cpu_task.h), absent where only a synchronous run is possible. An instance also has
+  `copy(roles) -> task`, the generic copy task (F9): per role `(descriptors [P, X, 4] int64, units [U, unit] uint8,
+  requests [1 + F, 2] int32)` (host tensors; a piece's extents (fd, O_DIRECT, offset, nbytes), nbytes 0 past them;
+  the request table `moe_tiers@1`'s `io[r]`): each requested piece's extents read in order into its unit. The oracle
+  runs a task.
 - `cpu_experts@1` (a CPU kernel): instance `(jobs [1 + J, 4 + T] int32, x [T, hidden] f32, gate_up [U, gu_unit] uint8,
   down [V, down_unit] uint8, rows [T·k, hidden] f32, threads: int = 1)`, host tensors: for each job (`moe_resolve@1`'s
   table) the expert whose gate/up piece is unit `gate_up[u]` (gate's `inter` rows, then up's, as the GGUF stores them)
@@ -128,6 +162,7 @@ MOE_TOPK, LINEAR_EXPERTS, MOE_COMBINE = "moe_topk@1", "linear_experts@2", "moe_c
 MOE_RESOLVE, EXPERT_FETCH, LINEAR_EXPERTS_ARENA = "moe_resolve@1", "expert_fetch@1", "linear_experts_arena@1"
 EXPERT_PREFETCH = "expert_prefetch@1"
 CPU_TASK, CPU_EXPERTS, MOE_PATCH_ROWS = "cpu_task@1", "cpu_experts@1", "moe_patch_rows@1"
+MOE_TIERS = "moe_tiers@1"
 PADDING, DECODE, PREFILL = 0, 1, 2   # `moe_resolve@1`'s row kinds
 RANGE, OVERFLOW, JOBS = 1, 2, 8      # error bits: a resident slot outside the arena's cache slots; a delta record past
                                      # the log (the variants); the CPU's share past its job table

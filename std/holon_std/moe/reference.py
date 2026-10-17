@@ -89,7 +89,7 @@ def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor,
         rank = {e: i for i, e in enumerate(missing)}
         n_fetch[r] = len(missing)
         for i, e in enumerate(missing[:width]):
-            fetch[r, :, i] = torch.tensor([host[e, r], stage[r, i]])
+            fetch[r, :, i] = torch.tensor([host[e, r] if host[e, r] >= 0 else -2 - e, stage[r, i]])
         for a, j in live.nonzero().tolist():
             e = int(routed[a, j])
             at = int(residency[e, r]) if residency[e, r] >= 0 else int(ring[e, r])
@@ -107,6 +107,101 @@ def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor,
     routed_[routed[live]] = 1
     routed_[sorted(taken)] |= 4                                         # the CPU's
     return slots.int(), fetch.int(), n_fetch.int(), counts.int(), routed_, errors, cpu, jobs
+
+
+def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.Tensor, n_fetch: torch.Tensor,
+              stage: torch.Tensor, records: list[tuple[int, int, int]], residency: torch.Tensor, host: torch.Tensor,
+              piece: torch.Tensor, classes: torch.Tensor, owner: torch.Tensor, capacity: torch.Tensor,
+              heat: torch.Tensor | None) -> dict:
+    """The `moe_tiers@1` oracle, one layer call after its resolve (`records`: the call's delta records): `fetch`,
+    `residency`, `host`, `owner` after it, `io` per role (n, then (piece, unit) pairs, as rows), `moves` [R, 4, F]
+    (demotions: slot, unit; moves: slot, slot) and `n_moves` [R, 2]."""
+    from .kernels import DECODE, PADDING
+
+    g, (_, experts, roles) = group, residency.shape
+    fetch, residency, host, owner = fetch.clone(), residency.clone(), host.clone(), owner.clone()
+    width = stage.shape[1]
+    live = (kinds.long()[:, None] != PADDING) & (ids >= 0)
+    routed = {int(e) for e in ids[live].tolist()}
+    decode = {int(e) for e in ids[live & (kinds.long()[:, None] == DECODE)].tolist()}
+    cls = classes[g].tolist()
+    moves = torch.full((roles, 4, width), -1, dtype=torch.int32)
+    n_moves = torch.zeros(roles, 2, dtype=torch.int32)
+    placed: set[tuple[int, int]] = set()
+
+    def free_units() -> list[int] | None:
+        units = [next((u for u in range(int(capacity[c])) if owner[c, u] < 0), None) for c in cls]
+        return None if None in units else units
+
+    def coldest(than: float) -> tuple[int, int] | None:
+        """RAM's coldest whole expert of the layer's classes, strictly colder than `than` (not routed, not placed)."""
+        if heat is None:
+            return None
+        best = None
+        for gg in range(residency.shape[0]):
+            if classes[gg].tolist() != cls:
+                continue
+            for e in range(experts):
+                if (residency[gg, e] == -1).all() and (gg, e) not in placed and not (gg == g and e in routed):
+                    key = (float(heat[gg, e]), gg, e)
+                    best = key if best is None or key < best else best
+        return None if best is None or not best[0] < than else best[1:]
+
+    def place(e: int, units: list[int] | None) -> list[int] | None:
+        """Expert e of this layer into RAM: `units` if given, else free units, else the coldest's; None: the SSD."""
+        if units is None:
+            units = free_units()
+        if units is None and (x := coldest(float(heat[g, e]) if heat is not None else 0.0)) is not None:
+            units = host[x[0], x[1]].tolist()
+            residency[x[0], x[1]] = -2
+            host[x[0], x[1]] = -1
+        if units is None:
+            residency[g, e], host[g, e] = -2, -1
+            return None
+        for c, u in zip(cls, units, strict=True):
+            owner[c, u] = g * experts + e
+        residency[g, e], host[g, e] = -1, torch.tensor(units, dtype=host.dtype)
+        placed.add((g, e))
+        return units
+
+    admitted = {a for _, a, _ in records if a >= 0}
+    staged = (n_fetch.long() - len(admitted)).tolist()
+    entry = {(r, int(fetch[r, 1, i])): i for r in range(roles) for i in range(min(int(n_fetch[r]), width))}
+    j = 0
+    for _, a, b in records:                                              # 1. admissions, in record order
+        if a < 0:
+            continue
+        slots = [int(residency[g, a, r]) for r in range(roles)]          # a's new slots (b's, or empty ones)
+        source = [int(fetch[r, 0, entry[r, slots[r]]]) for r in range(roles)]
+        for r, c in enumerate(cls):
+            if b >= 0:                                                   # into a victim's slot: staged, then moved
+                fetch[r, 1, entry[r, slots[r]]] = stage[r, staged[r] + j]
+                moves[r, 2:4, n_moves[r, 1]] = torch.tensor([int(stage[r, staged[r] + j]), slots[r]])
+                n_moves[r, 1] += 1
+            if source[r] >= 0:
+                owner[c, source[r]] = -1                                 # (b takes it, below, if it came from RAM)
+        if b >= 0:
+            units = place(b, source if all(u >= 0 for u in source) else None)
+            if units is not None:
+                for r in range(roles):
+                    moves[r, 0:2, n_moves[r, 0]] = torch.tensor([slots[r], units[r]])
+                    n_moves[r, 0] += 1
+            j += 1
+        host[g, a] = -1
+    io = [[] for _ in range(roles)]
+    ssd = sorted({-2 - int(fetch[r, 0, i]) for r in range(roles) for i in range(min(int(n_fetch[r]), width))
+                  if int(fetch[r, 0, i]) <= -2})
+    for e in ssd:                                                        # 2. keeps, 3. the reads
+        kept = None
+        if e not in admitted and e in decode:
+            kept = place(e, None)
+        for r, c in enumerate(cls):
+            i = next(i for i in range(min(int(n_fetch[r]), width)) if int(fetch[r, 0, i]) == -2 - e)
+            unit = kept[r] if kept is not None else int(capacity[c]) + i
+            io[r].append((int(piece[g, e, r]), unit))
+            fetch[r, 0, i] = unit
+    return {"fetch": fetch, "residency": residency, "host": host, "owner": owner, "io": io, "moves": moves,
+            "n_moves": n_moves}
 
 
 def cpu_share(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, ring: torch.Tensor,
@@ -214,6 +309,30 @@ def moe_publish_rows(x: torch.Tensor, cpu: torch.Tensor, out: torch.Tensor) -> t
 def cpu_task(task) -> None:
     """The `cpu_task@1` oracle: the task, run now."""
     task()
+
+
+def copy_task(roles) -> None:
+    """`cpu_task@1`'s copy task, run now: per role (descriptors [P, X, 4], units [U, unit], requests [1 + F, 2]) each
+    requested piece's extents (fd, direct, offset, nbytes) read in order into its unit (an O_DIRECT descriptor through
+    its aligned superset, into page-aligned memory)."""
+    import mmap
+    import os
+
+    for desc, units, req in roles:
+        for piece, unit in req[1:1 + int(req[0, 0])].tolist():
+            at = 0
+            for fd, direct, offset, nbytes in desc[piece].tolist():
+                if not nbytes:
+                    continue
+                lo, hi = (offset // 4096 * 4096, -(-(offset + nbytes) // 4096) * 4096) if direct else \
+                    (offset, offset + nbytes)
+                with mmap.mmap(-1, hi - lo) as buf:
+                    got = os.preadv(fd, [buf], lo)
+                    if got < offset + nbytes - lo:
+                        raise OSError(f"copy task: {nbytes} bytes at {offset}, {got - (offset - lo)} read")
+                    data = bytes(buf[offset - lo:offset - lo + nbytes])
+                units[unit, at:at + nbytes] = torch.frombuffer(bytearray(data), dtype=torch.uint8)
+                at += nbytes
 
 
 def expert_fetch(fetch: torch.Tensor, n: int, src: torch.Tensor, dst: torch.Tensor) -> torch.Tensor:

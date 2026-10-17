@@ -80,7 +80,8 @@ def moe_resolve_lru(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
         staged = {e: i for i, e in enumerate(e for e in missing if e not in admitted)}
         n_fetch[r] = len(missing)
         for i, e in enumerate(missing[:width]):
-            fetch[r, :, i] = torch.tensor([host[e, r], after[e, r] if e in admitted else stage[r, staged[e]]])
+            fetch[r, :, i] = torch.tensor([host[e, r] if host[e, r] >= 0 else -2 - e,            # (−2 − e: on no
+                                           after[e, r] if e in admitted else stage[r, staged[e]]])  # read tier)
         for a, j in live.nonzero().tolist():
             e = int(routed[a, j])
             if e in taken:

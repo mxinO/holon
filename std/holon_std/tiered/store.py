@@ -42,7 +42,7 @@ from holon.api import Extent, MemOp, Ref, RowKind
 
 from . import files
 from .residency import LAG, ResidencyMap
-from .resolver import EXPERT_PREFETCH, DeviceResolver
+from .resolver import CPU_TASK, EXPERT_PREFETCH, TIERS, DeviceResolver
 from .ring import ROUNDS, Lent
 
 PADDING, DECODE, PREFILL = 0, 1, 2           # row kinds (std.moe.kernels, `moe_resolve@1`)
@@ -63,7 +63,8 @@ class SlotClass:
     staging: int
     pieces: list[tuple[int, int, int, list[Extent]]] = dataclasses.field(default_factory=list)  # group, item, role
     cache: int | float | None = None            # pinned cache slots, or a fraction of its pieces (None: fill)
-    host: object = None                         # its host pool (`BuildCtx.pool`), from `before_materialize`
+    host: object = None                         # its host tier's pool (`Tier.units`), from `before_materialize`
+    held: int = 0                               # its RAM units (every piece but under an exclusive tier)
     pool: object = None                         # the store's arena pool, and where in it its arena lies (bytes,
     at: int = 0                                 # slots), from `after_materialize`: views of a pool's buffer are
     size: int = 0                               # made per use, so none outlives a materialize
@@ -88,8 +89,14 @@ class SlotClass:
         return whole[self.at:self.at + self.size * self.unit_bytes].view(self.size, self.unit_bytes)
 
     def units(self) -> torch.Tensor:
-        """The host pool as the device reads it, [pieces, unit] bytes."""
-        return self.host.device_view(torch.uint8, (len(self.pieces), self.unit_bytes))
+        """The host tier's pool as the device reads it, [units, unit] bytes (RAM units, then staging units)."""
+        return self.host.device_view(torch.uint8, (self.host.capacity * self.host.unit_bytes // self.unit_bytes,
+                                                   self.unit_bytes))
+
+    def host_view(self) -> torch.Tensor:
+        """The same pool as the host sees it."""
+        return self.host.view(torch.uint8, (self.host.capacity * self.host.unit_bytes // self.unit_bytes,
+                                            self.unit_bytes))
 
     def copy(self, unit: int, slot: int, after: int, lands_by: int) -> MemOp:
         """A MemOp copying host unit `unit` into arena slot `slot`, as whole units of the two pools."""
@@ -114,8 +121,11 @@ class TieredStore:
             raise ValueError(f"{name}: ring_copy {ring_copy!r}: sm or dma")
         self.ring_copy = ring_copy
         self.tiers = [ctx.unit(Ref(t)) for t in tiers]
-        if len(self.tiers) != 1 or not self.tiers[0].device_readable:
-            raise NotImplementedError(f"{name}: one device-readable host tier (F5a), not {list(tiers)}")
+        if not 1 <= len(self.tiers) <= 2 or not self.tiers[0].device_readable or \
+                any(t.device_readable for t in self.tiers[1:]):
+            raise NotImplementedError(f"{name}: a device-readable host tier, then at most one file tier, not "
+                                      f"{list(tiers)}")
+        self.exclusive = False                  # RAM holds fewer pieces than the store (D10): decided at the bind
         ref = policy if isinstance(policy, Ref) else Ref(policy or POLICY)    # POLICY: the one tier holds every expert
         self.policy, self.policy_ref = ctx.unit(ref, items=items, roles=roles), ref.target       # (pinned, inclusive)
         self._cache, self._profile = _parse_cache(cache), profile
@@ -163,9 +173,17 @@ class TieredStore:
     def resolver(self, group: int) -> DeviceResolver:
         if self.residency is None:
             pinned = [c.cap for c in self.classes.values() if c.cache is not None]
-            if not self.policy.device_owned or any(cap < self.prefill for cap in pinned):
-                # A host policy lends two-phase (not built), a small pinned cache cannot lend a pass's staging: the
-                # staging slots hold a prefill pass's misses, and no step streams.
+            for c in self.classes.values():
+                c.held = self.tiers[0].holds(c.name, len(c.pieces))
+            self.exclusive = any(c.held < len(c.pieces) for c in self.classes.values())
+            if self.exclusive and (len(self.tiers) < 2 or self.policy.device_owned and
+                                   getattr(self.policy, "heat", None) is None):
+                raise NotImplementedError(f"{self.name}: RAM holds fewer pieces than the store: a slower tier must "
+                                          f"hold the rest, and {self.policy_ref} name the heat it ranks by")
+            if not self.policy.device_owned or any(cap < self.prefill for cap in pinned) or self.exclusive:
+                # A host policy lends two-phase (not built), a small pinned cache cannot lend a pass's staging, an
+                # exclusive RAM tier would demote what it lends (not built): the staging slots hold a prefill pass's
+                # misses, and no step streams.
                 self.ring_tokens = 0
                 self.staging = self.prefill
                 for c in self.classes.values():
@@ -220,6 +238,8 @@ class TieredStore:
             self.stages = {n: self.ctx.static(f"{self.name}.stage.{n}", (self.roles, n), torch.int32)
                            for n in {self.staging, self.prefill}}
             self.layer_classes = [[self.groups[g][r] for r in range(self.roles)] for g in self.layers]
+            if self.exclusive:
+                self._exclusive_tables(shape)
             self.prefetch = {}
             for c in self.classes.values():
                 facts = {"unit_bytes": c.unit_bytes}
@@ -229,7 +249,28 @@ class TieredStore:
         g = self._order[group]
         self.resolvers.append(DeviceResolver(self.ctx, self, g, [self.groups[group][r] for r in range(self.roles)],
                                              {n: t[g] for n, t in self.state.items()}))
+        if self.exclusive:                       # its SSD reads: a copy task on the I/O worker, bound after materialize
+            self.reads.append(_Reads(self, g))
+            self.resolvers[-1].io_slot = self.io.bind(self.reads[-1])
         return self.resolvers[-1]
+
+    def _exclusive_tables(self, shape: tuple[int, int, int]) -> None:
+        """The exclusive tiers' device tables (`moe_tiers@1`'s), its kernel and the I/O worker (cpu_task@1, `io`)."""
+        classes = list(self.classes.values())
+        static = functools.partial(self.ctx.static, dtype=torch.int32)
+        self.piece = static(f"{self.name}.piece", shape)
+        self.classes32 = static(f"{self.name}.classes32", (shape[0], self.roles))
+        self.owner = static(f"{self.name}.owner", (len(classes), max(c.held for c in classes)))
+        self.capacity = static(f"{self.name}.capacity", (len(classes),))
+        self.call_start = static(f"{self.name}.call_start", (1,))
+        self.moves = static(f"{self.name}.moves", (self.roles, 4, self.prefill))
+        self.n_moves = static(f"{self.name}.n_moves", (self.roles, 2))
+        facts = {"experts": self.items, "top_k": self.top_k, "roles": self.roles}
+        self.tier_op = self.ctx.select_kernel(TIERS, site=f"std.tiered[{self.name}]", **facts).impl(self.ctx, **facts)
+        self.io = self.ctx.select_kernel(CPU_TASK, site=f"std.tiered[{self.name}].io", pool="io").impl(self.ctx,
+                                                                                                       pool="io")
+        self.reads: list[_Reads] = []
+        self.heat = self.state.get(getattr(self.policy, "heat", None) or "")
 
     @property
     def layers(self) -> list[int]:
@@ -245,37 +286,54 @@ class TieredStore:
 
     # -- engine hooks -------------------------------------------------------------------------------------------------
     def before_materialize(self, ctx) -> None:
-        """Request the arena pool and every class's host pool, and fill the host pools from the checkpoint."""
-        jobs, host = [], np.full(self.residency.host.shape, -1, dtype=np.int32)
+        """The tiers take their storage (the RAM tier its pool, filled when it holds every piece), the arena pool is
+        requested, and under exclusive tiers the I/O tables."""
         classes = list(self.classes.values())
         self.granule = functools.reduce(math.gcd, (c.unit_bytes for c in classes))     # both pools' unit
         self._align = math.lcm(self.granule, ALIGN)
         for c in classes:
             if not 0 <= c.cap <= len(c.pieces):
                 raise ValueError(f"{self.name}: class {c.name}: {c.cap} cache slots of {len(c.pieces)} pieces")
-            units = self.tiers[0].capacity(c.name, len(c.pieces))
-            per = c.unit_bytes // self.granule
-            c.host = ctx.pool(f"{self.name}.host.{c.name}", unit_bytes=self.granule, min_units=units * per,
-                              pref_units=units * per, device="host", mapped=True)
-            buffer = c.host.view(torch.uint8, (units, c.unit_bytes)).numpy()
-            for piece, (g, i, r, extents) in enumerate(c.pieces):
-                self.tiers[0].admit(c.name, piece, piece)
-                _, host[self._order[g], i, r] = self.tiers[0].read(c.name, piece)
-                at = 0
-                for e in extents:
-                    jobs.append((e, buffer[piece, at:at + e.nbytes]))
-                    at += e.nbytes
+            extents = [x for *_, x in c.pieces]
+            self.tiers[0].prepare(ctx, c.name, c.unit_bytes, extents, staging=c.staging if self.exclusive else 0,
+                                  granule=self.granule)
+            for t in self.tiers[1:]:
+                t.prepare(ctx, c.name, c.unit_bytes, extents)
+            c.host = self.tiers[0].units(c.name)
+        host = np.full(self.residency.host.shape, -1, dtype=np.int32)
+        if not self.exclusive:                   # inclusive: piece i in unit i, for good
+            for c in classes:
+                for piece, (g, i, r, _) in enumerate(c.pieces):
+                    _, host[self._order[g], i, r] = self.tiers[0].read(c.name, piece)
         least = sum(c.bytes(0 if c.cache is None else c.cap) for c in classes) + self._align * len(classes)
         most = sum(c.bytes(c.cap) for c in classes) + self._align * len(classes)
         fill = any(c.cache is None for c in classes)
         self.arena = ctx.pool(f"{self.name}.arena", unit_bytes=self.granule, min_units=-(-least // self.granule),
                               pref_units=-(-most // self.granule), fill=fill)
-        files.read(jobs)
         self._host = host
         self.host_units.copy_(torch.from_numpy(host))
         self.class_table = np.array([[classes.index(self.groups[g][r]) for r in range(self.roles)]
                                      for g in self._order])
         self._class_index = torch.from_numpy(self.class_table).to(self.ctx.device)
+        if self.exclusive:
+            piece = np.zeros(self.residency.host.shape, dtype=np.int32)
+            for c in classes:
+                for n, (g, i, r, _) in enumerate(c.pieces):
+                    piece[self._order[g], i, r] = n
+            self._pieces = dict.fromkeys(self.classes, piece)
+            self.piece.copy_(torch.from_numpy(piece))
+            self.classes32.copy_(torch.from_numpy(self.class_table.astype(np.int32)))
+            self.capacity.copy_(torch.tensor([c.held for c in classes], dtype=torch.int32))
+            rows = 2 * (1 + self.prefill)
+            self.io_pool = ctx.pool(f"{self.name}.io", unit_bytes=4 * rows, min_units=self.roles,
+                                    pref_units=self.roles, device="host", mapped=True)
+            self.descriptors = {}
+            for c in classes:
+                rows = [list(self.tiers[1].read(c.name, n)[1]) for n in range(len(c.pieces))]
+                width = max(map(len, rows))
+                self.descriptors[c.name] = torch.tensor([x + [(0, 0, 0, 0)] * (width - len(x)) for x in rows],
+                                                        dtype=torch.int64)
+            self._ram = {c.name: np.full(c.held, -1) for c in classes}      # what each RAM unit holds (host's view)
 
     def after_materialize(self, ctx) -> None:
         """Seed the new pool: the policy's items within its bytes, each class's arena laid out for its share, the map
@@ -289,7 +347,8 @@ class TieredStore:
                 c.staging = staging
             budget = _Budget(self, size - sum(c.bytes(0) for c in classes) - self._align * len(classes))
             seed = self.policy.seed(self._profile_counts(), budget)
-            self.lending = self.policy.device_owned and all(n >= self.prefill for n in budget.taken.values())
+            self.lending = self.policy.device_owned and not self.exclusive and \
+                all(n >= self.prefill for n in budget.taken.values())
             if self.lending or staging == self.prefill:
                 break
         self.stage = self.stages[classes[0].staging]
@@ -299,15 +358,22 @@ class TieredStore:
             c.pool, c.at, c.size = self.arena, at, c.null + c.staging + budget.taken[c.name]
             at = -(-(at + c.size * c.unit_bytes) // self._align) * self._align
             free[c.name] = list(range(c.size - 1, c.null + c.staging - 1, -1))      # popped lowest first
-            arenas[c.name] = c.slots(), c.host.view(torch.uint8, (len(c.pieces), c.unit_bytes))
-        self.residency.host[...] = -1                   # −1 − tier 0: every piece in the host tier
+            arenas[c.name] = c.slots(), c.host_view()
+        # −1 − tier: every piece in the RAM tier (inclusive), or on the SSD until placed (exclusive)
+        self.residency.host[...] = -2 if self.exclusive else -1
         if sorted(seed) != sorted(budget.granted):
             raise RuntimeError(f"{self.name}: the placement policy seeded other items than it took from the budget")
+        pending: dict[str, list[tuple[int, int]]] = {c.name: [] for c in classes}    # exclusive: (piece, slot)
         for g, i in seed:
             for r, c in self.groups[groups[g]].items():
                 slot = self.residency.host[g, i, r] = free[c.name].pop()
                 arena, units = arenas[c.name]
-                arena[slot].copy_(units[self._host[g, i, r]], non_blocking=True)
+                if self.exclusive:
+                    pending[c.name].append((self._piece_index(c, g, i, r), slot))
+                else:
+                    arena[slot].copy_(units[self._host[g, i, r]], non_blocking=True)
+        if self.exclusive:
+            self._seed_exclusive(seed, pending, arenas)
         self.residency.seed()
         self._copies.clear()
         self.ring.fill_(-1)
@@ -318,6 +384,60 @@ class TieredStore:
             t.zero_()
         self._written, self.peak_misses = 0, 0
         self.borrowed = dict.fromkeys(self.borrowed, 0)
+
+    def io_device(self) -> torch.Tensor:
+        """The SSD reads' request rows, as `moe_tiers@1` writes them (mapped)."""
+        return self.io_pool.device_view(torch.int32, (self.roles, 1 + self.prefill, 2))
+
+    def _piece_index(self, c: SlotClass, g: int, i: int, r: int) -> int:
+        """The class's index of group g's (in map order) item i's role r."""
+        return int(self._pieces[c.name][g, i, r])
+
+    def _seed_exclusive(self, seed: list[tuple[int, int]], pending: dict[str, list[tuple[int, int]]],
+                        arenas: dict) -> None:
+        """Exclusive tiers' seed (D10): the VRAM items' pieces read from the checkpoint into their slots (through the
+        staging units), then RAM: F2's order past the VRAM items, as far as every role's class has units (the RAM
+        units reloaded where they hold something else); every other piece on the SSD."""
+        groups, classes = list(self._order), list(self.classes.values())
+        for c in classes:                                   # VRAM, a staging batch at a time
+            arena, units = arenas[c.name]
+            batch, host = pending[c.name], units.numpy()
+            for at in range(0, len(batch), c.staging):
+                part = batch[at:at + c.staging]
+                files.read([(e, host[c.held + j, o:o + e.nbytes]) for j, (n, _) in enumerate(part)
+                            for e, o in _offsets(c.pieces[n][3])])
+                for j, (_, slot) in enumerate(part):
+                    arena[slot].copy_(units[c.held + j])
+        vram, used = set(seed), dict.fromkeys(self.classes, 0)
+        host, owner = np.full(self.residency.host.shape, -1, dtype=np.int32), np.full(tuple(self.owner.shape), -1,
+                                                                                        dtype=np.int32)
+        for g, i in _Budget.warm_start(self._profile_counts()):
+            role = self.groups[groups[g]]
+            if (g, i) in vram or any(used[c.name] >= c.held for c in role.values()):
+                continue
+            for r, c in role.items():
+                host[g, i, r] = used[c.name]
+                owner[classes.index(c), used[c.name]] = g * self.items + i
+                self.residency.host[g, i, r] = -1
+                used[c.name] += 1
+        held = self.owner.cpu().numpy()                      # what the device's RAM tier holds now
+        jobs = []
+        for k, c in enumerate(classes):
+            units = arenas[c.name][1].numpy()
+            for u in range(c.held):
+                want, now = owner[k, u], held[k, u] if self._ram[c.name][u] >= 0 else -1
+                if want >= 0 and want != now:
+                    g, i = divmod(int(want), self.items)
+                    r = next(r for r, x in self.groups[groups[g]].items() if x is c)
+                    extents = c.pieces[self._piece_index(c, g, i, r)][3]
+                    jobs += [(e, units[u, o:o + e.nbytes]) for e, o in _offsets(extents)]
+                self._ram[c.name][u] = want
+        files.read(jobs)
+        self._host = host
+        self.host_units.copy_(torch.from_numpy(host))
+        self.owner.copy_(torch.from_numpy(owner))
+        for reads in self.reads:
+            reads.bind()
 
     def before_launch(self, step) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list[MemOp]]:
         self._step, kinds, at = step.step, self._kinds, 0
@@ -368,6 +488,10 @@ class TieredStore:
             tap(step, record)
         if swaps := self.policy.after_commit(telemetry["counts"].numpy(), self.residency.host):
             self._swap(step.step, swaps)
+
+    def shutdown(self) -> None:
+        for t in self.tiers:
+            getattr(t, "shutdown", lambda: None)()
 
     # -- a step's forward ---------------------------------------------------------------------------------------------
     def large_passes(self, tokens: int) -> bool:
@@ -490,6 +614,37 @@ class _Budget:
         rest = np.lexsort((group, item, -profile.ravel()))
         taken = set(floor)
         return floor + [(int(group[x]), int(item[x])) for x in rest if (int(group[x]), int(item[x])) not in taken]
+
+
+def _offsets(extents: list[Extent]) -> list[tuple[Extent, int]]:
+    """Each extent with its offset in the piece (the pieces are their extents, concatenated)."""
+    out, at = [], 0
+    for e in extents:
+        out.append((e, at))
+        at += e.nbytes
+    return out
+
+
+class _Reads:
+    """A layer's SSD reads (exclusive tiers): `cpu_task@1`'s copy task over its roles' descriptors, RAM tier pools and
+    request rows, bound once the pools exist (the I/O worker reads `native` when it starts, after this)."""
+
+    def __init__(self, store: TieredStore, g: int) -> None:
+        self.store, self.g, self.task = store, g, None
+
+    def bind(self) -> None:
+        if self.task is None:
+            s = self.store
+            io = s.io_pool.view(torch.int32, (s.roles, 1 + s.prefill, 2))
+            self.task = s.io.copy([(s.descriptors[c.name], c.host_view(), io[r])
+                                   for r, c in enumerate(s.layer_classes[self.g])])
+
+    @property
+    def native(self):
+        return self.task.native
+
+    def __call__(self) -> None:
+        self.task()
 
 
 def _parse_cache(text: str) -> dict[str, int | float]:
