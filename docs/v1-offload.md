@@ -512,8 +512,8 @@ As built (step 3b, §14): staging is min(E, k × a graphed step's tokens) per cl
 since prefill steps borrow their staging and ring slots from the cache (D4's device lending) and give them back; a
 layout whose cache cannot lend a prefill pass's (min(E, k × 512) per class) keeps that much staging instead. The
 vehicle at the gate (`max_seqs` 1, no drafts) keeps 8 staging slots per class instead of 128 (≈ 0.47 GB more cache
-on the 5080). The startup profile measures a streaming step's 4,096-token expert pass (≈ 0.47 GB of f32 activations
-on the vehicle, against ≈ 0.06 GB for a 512-token one), which the cache yields.
+on the 5080). The startup profile runs a streaming step's 4,096-token expert passes; on the A5000 vehicle its peak is
+0.48 GB either way (512- or 4,096-token passes: the trunk's other activations set it).
 
 ## 8. Step 0 — measure before freezing
 
@@ -973,3 +973,80 @@ Decided while building, against the text above:
 - **What the parity check leaves to step 3b:** traces with prompts in mixed steps, device lending and its return
   (cache size unchanged), and the one-slot-per-expert rule across a step's row kinds; `route_dump` already takes a
   step's routed experts from its eager resolves for them.
+
+
+### Step 3b as built (2026-10-17): D8's prefill ring, device lending and its return, row kinds, the route transforms' call site
+
+Built (commits from `7e4a49b`; the panel's 3a findings in their own commits, listed in the README):
+- **Row kinds in the core** (`7e4a49b`, ABI 1.3, additive): `BatchPlan.row_kind`, a per-row `RowKind` (prefill,
+  decode, verify; None: not known), filled by the scheduler on every step it plans (mixed steps and drafter
+  alternation included; core/tests/test_sched.py); `n_decode` keeps its meaning. The store reads it, so a one-token last
+  prompt chunk is a prefill row in every step (§14 step 2's remaining deviation is gone; failing-without test).
+- **D8** (`std.tiered.ring.Lent`): a step of at least `moe.ring_tokens` prompt tokens (default 512, §13's 5080
+  crossover) borrows, at its first resolve, every empty slot and then the policy's `lend(n)` (whole experts, the
+  coldest) until a double buffer holds two layers' misses per class; each layer's missing pieces stream into their
+  half on a copy engine (`expert_prefetch@1`, kernels.expert_io: DMA on its own stream after the work enqueued, a wait
+  before the layer's resolve), layer l + 1's while layer l computes, and its resolve reads them in place (the
+  resolve's `ring` table: no fetch); the step's expert passes are one per chunk of up to 4,096 tokens (the router and
+  top-k still per 512-token chunk, the step's last partial chunk a pass of its own), and kernels.ggml_cuda's arena
+  binding takes 2,048 rows per mmq call (`ID_PAIRS` ÷ top-8; each row bitwise a 512-row call's, L0). A smaller prompt
+  step borrows its misses' staging the same way when its pass could exceed the staging slots. At the step's end every
+  borrowed slot returns to its layer as an empty slot — the layer's first victim, which the policy's next admissions
+  fill unconditionally (`moe_resolve@1`'s `empty` stack; records `(layer, a, −2 − j)`): the cache never shrinks (CPU
+  test, per class).
+- **Staging sized for graphed steps** (§7), the per-step miss check against that step's staging width.
+- **The route transforms' call site**: `moe.route_transform = <name>` binds a plugin's
+  `moe_route_transform.<name>@1` between the top-k and the resolve, with the map the resolve reads (after the step's
+  lending, ring pieces present); offload store only (a resident store refuses it at build); a negative id is dropped
+  end to end (null slot, no fetch, no count, zero contribution). A toy fixture (`tests.drop_last`) proves it; no
+  transform plugin ships (A1 is held out to step 7).
+- **Parity extended**: the route dump records each step's victims' scope (the resolve marks what the call holding
+  the decode rows routed), its lending (`lend(n)` calls) and the layers' empty slots; `placement.lfu`'s `replay` models
+  borrowing, lending, the return and empty slots as first victims, and carried scores; the check also compares the
+  device's map with the host mirror at the end.
+
+Evidence (A5000, `spikes/x3_policies/README.md` "Step 3b", `evidence/x3_policies_rtx-a5000_2026-10-17.json`
+`step_3b`): every placement snapshot-identical to all-resident with borrowing on — F11 at 25% ×3, 47%, the fill, 10%;
+the n-gram drafter; the decode trace and mixed steps (`chunk_with_decode`), 3 ring and 35 staging borrowings —, F2–F3
+×3 run-identical; F11 equal to `replay` at every step of every run (up to 23,300 admissions) with the device's map
+the host mirror. Prefill at 25% cached: 554 → 3,340 tok/s at 4K (6.0×), 542 → 896 at 1K; at 47% 4,049 tok/s at 4K
+against 3,595 all-resident (whose passes stay at 512 tokens). The plant `lent-slot-still-mapped` fails parity at step
+1 and the snapshot at step 6 (decode trace) or stops the engine by the id-error word (snapshot trace); `owner-race`
+under borrowing is stopped by its precondition flag.
+
+Decided while building, against the text above:
+- **The ring returns empty (R0), as D4 says** — not the replay's marginally better R1. The M6 replay of three returns
+  (`spikes/x3_policies/replay5/`: R0 empty, R1 refilled from the layer's streamed experts by decode score, R2 by the
+  pass's routing) puts R1 ≤ 0.3% ahead on whole traces and 1.0–1.4% on single long prompts; keeping R1's experts needs
+  either paid copies at the return (which the replay shows erase the gain) or a ring layout where a layer's keepers are
+  never reused by later layers, which the double buffer does not have.
+- **Prompt-time admission is not built** (the coordinator's item 5, folded into the panel's item 4): the same replay
+  finds that counting prefill rows at a routing-proportional weight (`12 × the expert's prefill entries ÷ the step's
+  prefill rows`) and letting their misses compete as candidates — admitted only where they land free (staged or
+  streamed into the victim's slot) — beats D4's "prefill never admits" by 2.1% / 0.7% (agent / mixed, whole traces) and
+  9% / 6% on single long prompts at 47% cached, never worse in any held-out cell; counting +1 per entry (variant B)
+  loses 4–7%. That changes D4: it goes to the panel before it is built.
+- **Lending reads the map back**: DMA needs host addresses, so a borrowing step synchronizes at its first resolve (the
+  map, the empty stacks, then each `lend` call's picks: two or three syncs per borrowing step, none after); empty slots
+  are borrowed first (the replay's assumption too), so consecutive prompt steps do not drain the cache.
+- **Ring sizing**: two halves of the largest per-class miss count over the layers (lending makes misses, so the
+  sizing iterates, at most four `lend` calls); one half if fewer slots are lent, routed staging if not even that.
+- **Only device-owned policies borrow** (F11, F4); host policies (`static`, `profile_decay`) keep a pass's staging and
+  never stream (D4's two-phase lending for host policies is not built). So does a layout whose cache cannot lend a
+  pass's staging (decided at each materialize). A step's pass size is not the layout's: it is 4,096 tokens whenever
+  the policy is device-owned, the step has at least `ring_tokens` tokens and a pass's misses fit the prefill staging
+  (every expert of a layer), so the startup profile — on minimum pools, where a fill cache holds nothing to lend —
+  measures the large pass the served steps run (review fix, failing-without test).
+- **`moe.ring_tokens` stays at 512**, §13's crossover on the 5080: deriving it per class from M6's coverage and the
+  class's compute needs the bar card's compute (step 4). On the A5000 streaming wins at 1K already (below).
+- **4,096-row mmq calls are not built**: the id helper sorts 16,384 pairs per call (1,024 threads × 16); 4,096 rows
+  at top-8 need a larger instance in the vendored helper (a vendor-patch extension with its own L0). The 2,048-row
+  calls are what §13's gap diagnosis modelled at ≈ 10.0K tok/s on the 5080 (≈ 11.9K with 4,096-row calls).
+- **Victims are per call, the parity oracle's per step**: the resolve marks its victims' scope (`routed` |= 2 by the
+  call holding the decode rows; every call ORs its own mark, so a later pass keeps it), and the route dump hands that
+  to the oracle, so a mixed step spanning passes is modelled as the device runs it.
+- **The CPU reference's expert GEMM rounds a row by its expert's batch**: dropping one route changes other rows' bits
+  on the CPU (`linear_experts`' oracle multiplies per expert); the GPU kernels are row-invariant (D4's L0), so the
+  transform's CPU test compares within rounding.
+- **The delta log** is a region of 2 × items records per layer (panel A: admissions ≤ misses, lends ≤ residents,
+  returns ≤ lends), ≈ 147 KB copied to the host per step on the vehicle.

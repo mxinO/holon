@@ -86,3 +86,65 @@ eager steps and two runs shared the host.
   and device lending are step 3b's (the parity check takes each step's routed experts from its eager resolves).
 - Every plant fires and is caught; two of the predictions were too weak (the id-error word stops the kernel plants
   before a wrong byte is emitted; the unchecked owner race is deterministic) — recorded in design §14.
+
+# Step 3b: D8's prefill ring, device lending and its return, row kinds, the route transforms' call site
+
+Same vehicle and engine as above; design §14 "Step 3b as built" says what was built. Commits: core row kinds
+`7e4a49b` (ABI 1.3); the panel's 3a findings — item 1 (resolve cost) `5210c52` + `5716d22`, item 2 (f32 hand case
+through both providers) `e5110da`, items 3 and 7 (plant verdicts, D3) `5f5451e`, item 4 (ring-return and prompt-time
+admission replay, `replay5/`) `8883e8d`, items 5 and 6 (delta-log capacity, public store surface) `5210c52`, item 8
+`7e4a49b`; step 3b `9cf9132`, `2bf880c`, `2af99f7`, `29f8979`, `dd1e930`, review fixes `16fbf27`, `f072463`.
+
+```bash
+python spikes/x3_policies/run.py <gguf> <dir> <runs> "<name>|<cache>|<policy>|<plant>|<spec>|[decode]|[seqs=,chunk=,step=,ring=]" ...
+python spikes/x3_policies/prefill.py <gguf> <json> <rounds> 1024 4096 -- "<name>|<cache>|<ring_tokens>" ...
+```
+
+**Exactness and parity** (runs at `16fbf27`; F11 and F2–F3 ×3, and the mixed, fill and no-ring runs again at
+`f072463`, with the same verdicts and counts). Every run is snapshot-identical to all-resident on its trace (the
+mixed trace's reference is all-resident with the same `max_seqs` 8, `chunk_with_decode` 256, `max_step_tokens` 512),
+and every F11 run equals `replay` at every step with the device's map the host mirror at the end:
+
+| Configuration | Trace | Admissions | Borrowing steps (ring / stage) | Parity steps (decode) | Run-identical |
+|---|---|---|---|---|---|
+| F11 `*=0.25` ×3 | snapshot | 2,368 | 1 / 0 (2 `lend` calls) | 67 (64) | ×3 |
+| F11 `*=0.47` | snapshot | 3,650 | 1 / 0 | 67 (64) | — |
+| F11 fill | snapshot | 0 (every expert cached) | 1 / 0 | 67 (64) | — |
+| F11 `*=0.25`, `ring_tokens` 0 (staging only) | snapshot | 2,115 | 0 / 0 | 67 (64) | — |
+| F11 `*=0.25`, n-gram drafter | snapshot | 1,630 | 1 / 0 | 66 (63) | — |
+| F11 `*=0.25` / `*=0.10`, `max_seqs` 8 | decode | 23,300 / 11,419 | 3 / 0 | 258 (255) | — |
+| F11 `*=0.25` / `*=0.10`, mixed steps | decode, chunked with decode | 19,823 / 9,867 | 3 / 35 | 293 (290) | — |
+| F2–F3 `*=0.25` ×3 | snapshot | 16 swap rounds | never borrows | — | ×3 |
+| F4 `*=0.25`; F1 static `*=0.47` | snapshot | 9,640; — | 1 / 0; never | — | — |
+
+The fill run caches every expert at `f072463` and 6,044 of 6,144 at `16fbf27`: the latter was the 16th engine
+built in one process (the free memory read at startup is lower there); the startup profile's peak is 0.48 GB with
+512- or 4,096-token passes alike (a probe on a fresh process).
+
+**Prefill throughput** (`prefill.py` at `2af99f7`, one request of N prompt tokens, one chunk, median of 9 runs over 3
+interleaved rounds; tok/s):
+
+| Arm | 1,024 | 4,096 |
+|---|---|---|
+| all-resident (`std.moe@1`) | 3,669 | 3,595 |
+| `*=0.25`, as built before D8 (512-token passes, misses staged) | 542 | 554 |
+| `*=0.25`, D8 (lent ring, 4,096-token passes, 2,048-row mmq calls) | 896 | 3,340 |
+| `*=0.47`, as built before D8 | 672 | 684 |
+| `*=0.47`, D8 | 1,110 | 4,049 |
+
+D8 is 6.0× the staged path at 4K and 25% cached, 1.65× at 1K (one layer's misses stream behind one layer's compute:
+at 1K the pass is short). At 47% D8's 4K prefill is 13% faster than all-resident, whose expert passes stay at 512
+tokens (`std.moe@1`'s binding; its larger calls are not this step's). 32K was not run.
+
+**Plants** (at `29f8979` and `2af99f7`; predicted in design §6 / the panel's item 3):
+
+| Plant | Target run | Predicted | Observed | Fired | Other configuration |
+|---|---|---|---|---|---|
+| `lent-slot-still-mapped` (a lent slot returned while its expert is still mapped) | F11 `*=0.25`, decode, `max_seqs` 8 | the snapshot and parity differ | parity differs at step 1 and the device's map is not the mirror; the snapshot differs at step 6 | 1,216 slots | F2–F3 `*=0.25`: identical (never lends; nothing fired) |
+| same | F11 `*=0.25`, snapshot | as above (on an mmq step the id-error word stops it) | the engine stops at step 11 (`kernel_errors` 4: a slot repeated in a row) | 1,216 slots | — |
+| `owner-race` under borrowing | F11 `*=0.25`, decode, `max_seqs` 8 | the precondition flag stops the engine | stopped at step 6 (`edit_errors`) | 2 edits | — |
+
+**The ring's return and prompt-time admission** (`replay5/report.md`, the M6 replay; panel item 4): the ring returns
+empty (R0) — keeping the streamed experts by decode score (R1) or the pass's routing (R2) gains ≤ 0.3% on whole
+traces and costs paid copies or a different ring layout. Counting prefill rows at a routing-proportional weight (Bw12)
+gains 2.1% / 0.7% (agent / mixed, 47%), never loses in a held-out cell; it changes D4 and goes to the panel unbuilt.
