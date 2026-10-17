@@ -2,7 +2,7 @@
 (docs/v1-offload.md F2).
 
     python -m holon_tools impact <unit | path | A..B>... [--plans plans]
-    python -m holon_tools propagate <model> [--class C] [--new-model] [--approve] [--plans plans]
+    python -m holon_tools propagate <model> [--class C] [--new-model] [--approve] [--allow-approx] [--plans plans]
                                     --golden <fp32 golden> --floor <floor> [--prompts judge/prompts/v1.jsonl]
                                     [engine flags: --device --dtype --max-seqs ...]
     python -m holon_tools tune <model> [--ops op ...] [--batch 8] [--tokens 64] [--cpu-split] [--no-lock]
@@ -11,7 +11,8 @@
                                   [--name <stem>.profile.json] [engine flags: --host-memory ...]
 
 `propagate` and `tune` exit 0 when nothing needs doing or the lock was written, 2 when the new lock needs an
-approval (re-run with --approve to write it), 1 on failure.
+approval (re-run with --approve to write it), 1 on failure — a lock binding an `approx` plugin (docs/v1-offload.md §6)
+included, unless --allow-approx says a human gated it.
 
 The lock's kernel pins carry over (they isolate a model from kernels installed since); engine settings come from the
 flags, so changing one is a visible plan change that goes through the checks.
@@ -106,7 +107,10 @@ def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig, model_
     outcome = propagate.decide(start, checks, sm, previous, a.allow_uncovered_advance)
     print(propagate.report(outcome))
     if outcome.verdict == "advance" or (outcome.verdict == "approve" and a.approve):
-        print(f"wrote {propagate.write(a.plans, outcome)}")
+        try:
+            print(f"wrote {propagate.write(a.plans, outcome, a.allow_approx)}")
+        except ValueError as e:
+            raise SystemExit(str(e)) from None
         return 0
     return {"unchanged": 0, "approve": 2}.get(outcome.verdict, 1)
 
@@ -187,6 +191,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--allow-uncovered-advance", action="store_true",
                        help="advance without approval on a byte-identical snapshot trace, although changed-line "
                             "coverage is not checked yet")
+        p.add_argument("--allow-approx", action="store_true",
+                       help="write a lock that binds an `approx` plugin (a human gate, never a default lock)")
         p.add_argument("--prompts", default=str(DEFAULT_PROMPTS), help="prompt set of L2 and the snapshot trace")
         p.add_argument("--golden", type=pathlib.Path, help="fp32 reference recording (judge golden)")
         p.add_argument("--floor", type=pathlib.Path, help="judge floor recording for the activation dtype")

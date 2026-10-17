@@ -69,9 +69,11 @@ CUDA_VISIBLE_DEVICES=<gpu> python -m holon_tools propagate Qwen/Qwen3-0.6B \
 
 Common flags: `--plans <dir>` (default `plans`), `--class C` (start from that class's newest lock; default this
 machine's class, else the nearest class's), `--prompts` (prompt set of L2 and of the snapshot trace; default
-`judge/prompts/v1.jsonl`), `--approve`, `--allow-uncovered-advance`, and every EngineConfig field as a flag
-(`--device`, `--dtype`, `--max-seqs`, …). `propagate`/`tune` exit 0 when nothing needs doing or the lock was
-written, 2 when the new lock waits for `--approve`, 1 on failure.
+`judge/prompts/v1.jsonl`), `--approve`, `--allow-uncovered-advance`, `--allow-approx`, and every EngineConfig field as
+a flag (`--device`, `--dtype`, `--max-seqs`, …). `propagate`/`tune` exit 0 when nothing needs doing or the lock was
+written, 2 when the new lock waits for `--approve`, 1 on failure. A plan that binds a plugin declaring
+`numerics = "approx"` (e.g. the route tail skip, `docs/v1-offload.md` §6) is never written without `--allow-approx`:
+such a lock is a human gate, never a default.
 
 `propagate` builds the plan the checked-out code resolves with the lock's kernel pins (they isolate the model from
 kernels installed since) and the engine settings given as flags (a changed setting is a plan change like any other),
