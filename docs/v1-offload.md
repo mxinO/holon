@@ -796,7 +796,9 @@ bound by `moe.store` (absent: `std.moe.resident@1`, today's path), the contracts
 25%, with the unpatched ggml kernels (stream-k never engages at the vehicle's arena sizes, ≥ 136 slots, on any card:
 for the vehicle the D4 patches cut the arenas' mmq launch cost, which grows with the slots, so no unpatched prefill
 timing feeds the roofline; a small-arena GPU test does take stream-k and waits for them); the offload path costs
-+0.20 ms per decode token with every expert cached; `mmap` + `cudaHostRegister` gathers at `cudaHostAlloc`'s rate (0.94–1.01×,
++0.20 ms per decode token with every expert cached; with the D4 patches merged the 100%, 47% and 25% fits stay
+identical (`evidence/x2_store_patched_rtx-a5000_2026-10-17.json`), and the full-fit trace runs as fast as
+all-resident (4.1 s against 4.0 s; 11.8 s unpatched); `mmap` + `cudaHostRegister` gathers at `cudaHostAlloc`'s rate (0.94–1.01×,
 noise between processes), huge pages or not.
 
 Decided while building, against the text above:
@@ -807,8 +809,12 @@ Decided while building, against the text above:
   cap), then each class's arena — null, staging, the seeded cache slots — is laid out in it; per-class fill pools
   grow one after another and starved the later classes. `moe.cache` (`<class>=<slots or fraction>`, `*` for
   the rest) therefore **caps** a class's cache slots and pins the pool's size; the seed decides each arena's (with
-  `static`, deterministically). Kernels over an arena are bound with `experts` = the class's largest arena (every
-  piece cached); a call's arena may hold fewer slots — `linear_experts@2`'s doc says so, every provider honours it.
+  `static`, deterministically). Kernels over an arena are bound with the layer's facts (`experts` = E): the arena
+  holds more slots, a call names at most E + top_k of them (the patched mmq's compact launch bound) —
+  `linear_experts@2`'s doc says so.
+- **Errors reach the commit.** `moe_resolve@1` takes each role's arena size and flags a resident slot outside the
+  cache slots (RANGE; the entry reads a null slot), and the store watches the kernels' error words (kernels.ggml_cuda's
+  id-error word); the step's first resolve zeroes them, a commit that finds one set stops the engine.
 - **Row kinds come from the step's plan in `before_launch`:** a mixed step's leading rows and rows whose every query
   token has logits are decode / verify, the rest prefill, tokens past them graph padding — so a one-token last
   prompt chunk counts as decode outside mixed steps (D4 says prefill never counts; step 3 settles it with F11's

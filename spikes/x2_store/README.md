@@ -47,10 +47,15 @@ The unpatched expert-id mmq is placement-invariant at the vehicle's arena sizes:
 2×768 and Q6_K down 768 → 2048, 9–512 tokens, arenas of 128–6,280 slots with the experts at random slots) ran no
 stream-k fixup kernel and gave bitwise-equal expert rows at every arena size — stream-k does not engage at ≥ 136
 slots on any card. It does at small arenas: the GPU engine test's model (8 experts of width 1024, arenas of 10–26
-slots) takes stream-k on sm_86 and differs from the 8-slot stack; those cases are strict xfails until the forced-tiling
-patch (D4) is merged. For the vehicle the D4 patches matter for the class arenas' launch cost, not for exactness:
-unpatched, the mmq grid grows with the arena's slots (7.9 ms against 2.5 ms per launch at S ≈ 3,000, T = 512, as
-measured on the patch branch), so no prefill timing from this unpatched branch feeds the roofline.
+slots) takes stream-k on sm_86 and differs from the 8-slot stack without the forced-tiling patch (D4), and passes
+with it. For the vehicle the D4 patches matter for the class arenas' launch cost, not for exactness: unpatched, the
+mmq grid grows with the arena's slots (7.9 ms against 2.5 ms per launch at S ≈ 3,000, T = 512, as measured on the
+patch branch), so no prefill timing from the unpatched runs feeds the roofline.
+
+**With the D4 patches merged** (`e074e9f`, `evidence/x2_store_patched_rtx-a5000_2026-10-17.json`): the `*=1.0`,
+`*=0.47` and `*=0.25` snapshots are again identical to all-resident (patched and unpatched all-resident agree too),
+and the full-fit trace takes 4.1 s against all-resident's 4.0 s (11.8 s unpatched; 18.0 s at 47%, 24.0 s at 25%,
+miss-bound).
 
 **Offload-path overhead** (decode tg128 at batch 1, depth 0; three interleaved rounds of five repetitions each):
 `std.moe@1` 5.160 ms per token, the offload store with every expert cached 5.357 ms: **+0.20 ms per token
@@ -72,7 +77,7 @@ rate. `platform.host_memory` needs no change for the gather.
 
 ## What it decides
 
-- Step 2's check passes on the A5000: every fit is bitwise all-resident, run-identical at the capped fit. Prefill
-  speed waits for the D4 patches (the arena launch cost above).
+- Step 2's check passes on the A5000, unpatched and patched: every fit is bitwise all-resident, run-identical at the
+  capped fit.
 - The roofline's overhead term is ≈ 0.2 ms per token at F5a with static placement.
 - The store keeps `mmap` + `cudaHostRegister` (exact bytes, D10); huge pages are neither needed nor harmful.
