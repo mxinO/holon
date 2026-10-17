@@ -5,8 +5,9 @@ the class of its (role, ggml type, shape). Per chunk of tokens the layer's ids r
 gathered into staging slots — and `linear_experts@2` runs over each class's arena.
 
 Options (EngineConfig.plugin_options): `moe.placement` (a policy's unit Ref; default `std.tiered.static@1`, F1),
-`moe.placement.profile` (routing counts, JSON `{"counts": [[…] per layer]}`), `moe.tiers` (host tiers' Refs,
-comma-separated; default `std.tiered.pinned@1`), `moe.offload.cache` (cache slots per class, pinned: `<class>=<n>` or
+`moe.placement.profile` (routing counts, JSON `{"layers": {"<layer>": [count per expert]}}`, named relative to the
+checkpoint's directory), `moe.tiers` (host tiers' Refs,
+comma-separated; default `std.tiered.pinned@1`), `moe.cache` (cache slots per class, pinned: `<class>=<n>` or
 `<class>=<fraction>`, `*` for every class not named; default: fill free VRAM)."""
 from __future__ import annotations
 
@@ -29,7 +30,7 @@ def _store(ctx, experts: int, top_k: int):
                         staging=min(experts, top_k * min(CHUNK, tokens)),
                         policy=str(opts.get("moe.placement", "std.tiered.static@1")),
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
-                        cache=str(opts.get("moe.offload.cache", "")), profile=profile))
+                        cache=str(opts.get("moe.cache", "")), profile=profile))
 
 
 class Offload(nn.Module):

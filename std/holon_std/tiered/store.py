@@ -13,9 +13,10 @@ binds kernels. Then, through the engine's hooks:
   the tier and the seed copied in;
 - `before_launch`: the step's row kinds per token (decode and verify rows: a mixed step's leading rows, or a row
   whose every query token has logits; prefill rows the others, so a one-token last prompt chunk counts as decode;
-  graph padding past them), its counts zeroed, the map edits due;
-- `after_commit`: the staging invariant (a layer's distinct misses fit its staging slots: F5a has no fallback), then
-  the policy's edits from the step's counts.
+  graph padding past them), written as far as this step's or the last one's tokens reach; the map edits due, which
+  the step's first resolve applies, zeroing the step's counts too (in the forward: in a graph, on the stream);
+- `after_commit`: the staging invariant (a layer's distinct misses fit its staging slots: F5a has no fallback; `misses`
+  is the running maximum since the last materialize), then the policy's edits from the step's counts.
 """
 from __future__ import annotations
 
@@ -90,9 +91,9 @@ class TieredStore:
         self.residency: ResidencyMap | None = None              # the device tables, once a resolver is asked for
         tokens = max(ctx.options.get("max_step_tokens", 1),
                      ctx.options.get("max_seqs", 1) * (1 + ctx.options.get("max_draft_tokens", 0)))
-        self._kinds = np.zeros(tokens, dtype=np.uint8)
+        self._kinds, self._written = np.zeros(tokens, dtype=np.uint8), 0     # host side; the prefix not PADDING
         self.kinds = ctx.static(f"{name}.kinds", (tokens,), torch.uint8)
-        self.misses = ctx.static(f"{name}.misses", (1,), torch.int32)
+        self.misses = ctx.static(f"{name}.misses", (1,), torch.int32)   # a running maximum (`moe_resolve@1`)
         self.peak_misses = 0                    # the most distinct misses a layer had (`misses`, at commits)
 
     # -- while the model is finalized and bound ------------------------------------------------------------------------
@@ -119,10 +120,9 @@ class TieredStore:
             self.host_units = self.ctx.static(f"{self.name}.host", shape, torch.int32)
             self.counts = self.ctx.static(f"{self.name}.counts", shape[:2], torch.int32)
             self.telemetry = {"counts": self.counts, "misses": self.misses}
-            self._zeros = np.zeros(shape[:2], dtype=np.int32)          # the counts of a step, before it
         g = self._order[group]
         return DeviceResolver(self.ctx, self, [self.groups[group][r] for r in range(self.roles)],
-                              self.residency.device[g], self.host_units[g], self.counts[g])
+                              self.residency.device[g], self.host_units[g], self.counts[g], first=g == 0)
 
     # -- engine hooks -------------------------------------------------------------------------------------------------
     def before_materialize(self, ctx) -> None:
@@ -179,17 +179,17 @@ class TieredStore:
         self.residency.seed()
         for t in (self.counts, self.misses, self.kinds):
             t.zero_()
+        self._written = 0
 
     def before_launch(self, step) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list]:
-        kinds = self._kinds
-        kinds[:] = PADDING
-        at = 0
+        kinds, at = self._kinds, 0
+        kinds[:self._written] = PADDING
         for row, (q, logits) in enumerate(zip(step.n_query.tolist(), step.n_logits.tolist(), strict=True)):
             decode = row < step.n_decode or (not step.n_decode and q == logits)   # decode and verify rows
             kinds[at:at + q] = DECODE if decode else PREFILL
             at += q
-        return [(self.kinds, kinds), (self.counts, self._zeros),
-                *self.residency.writes(step.step)], []
+        reach, self._written = max(at, self._written), at          # the last step's rows become padding
+        return [(self.kinds[:reach], kinds[:reach])] * bool(reach) + self.residency.writes(step.step), []
 
     def after_commit(self, step, telemetry) -> None:
         self.peak_misses = int(telemetry["misses"][0])
@@ -202,12 +202,21 @@ class TieredStore:
 
     # -- helpers ------------------------------------------------------------------------------------------------------
     def _profile_counts(self) -> np.ndarray:
-        shape = self.residency.host.shape[:2]
+        """`profile`'s routing counts by group: a JSON file `{"layers": {"<group>": [count per item]}}` beside the
+        checkpoint (its name relative to the checkpoint's directory, so plans record no host path); groups it does not
+        name count zero."""
+        counts = np.zeros(self.residency.host.shape[:2])
         if not self._profile:
-            return np.zeros(shape)
-        counts = np.asarray(json.loads(pathlib.Path(self._profile).read_text())["counts"], dtype=np.float64)
-        if counts.shape != shape:
-            raise ValueError(f"{self.name}: profile {self._profile} counts {counts.shape}, not [groups, items] {shape}")
+            return counts
+        name = pathlib.PurePath(self._profile)
+        if name.is_absolute() or ".." in name.parts:
+            raise ValueError(f"{self.name}: profile {self._profile!r}: a name relative to the checkpoint's directory")
+        checkpoint = pathlib.Path(next(iter(self.classes.values())).pieces[0][3][0].path).parent
+        for group, row in json.loads((checkpoint / name).read_text())["layers"].items():
+            if int(group) not in self._order or len(row) != self.items:
+                raise ValueError(f"{self.name}: profile {self._profile}: group {group} with {len(row)} counts; the "
+                                 f"groups are {sorted(self._order)} of {self.items} items")
+            counts[self._order[int(group)]] = row
         return counts
 
 

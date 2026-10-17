@@ -23,7 +23,7 @@ class PlacementPolicy(Protocol):
 
     def seed(self, profile: np.ndarray, budget: Budget) -> list[tuple[int, int]]:
         """After every materialize: the items to make resident, each first `budget.take`n; `profile` is routing
-        counts [groups, items] (`moe.placement.profile`; zeros without one)."""
+        counts [groups, items] (`moe.placement.profile`; zeros where it names no group, or without one)."""
 
     def after_commit(self, counts: np.ndarray, view: np.ndarray) -> list[tuple[int, int, bool]]:
         """At each commit: the step's routing counts [groups, items] of decode and verify rows, and the residency map

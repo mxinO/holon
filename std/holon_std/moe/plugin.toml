@@ -28,6 +28,6 @@ module = "reference"
 "quant.act" = { help = "activation precision of quantized weights' matmuls", default = "a8", choices = ["a4", "a8"] }
 "moe.store" = { help = "the expert store's unit Ref: std.moe.offload@1 offloads experts to host memory", default = "std.moe.resident@1" }
 "moe.placement" = { help = "the offload store's placement policy (a unit Ref)", default = "std.tiered.static@1" }
-"moe.placement.profile" = { help = "routing counts seeding placement: JSON {\"counts\": [[per expert] per layer]}" }
+"moe.placement.profile" = { help = "routing counts seeding placement: a JSON file {\"layers\": {\"<layer>\": [count per expert]}} named relative to the checkpoint's directory" }
 "moe.tiers" = { help = "the offload store's host tiers (unit Refs, comma-separated)", default = "std.tiered.pinned@1" }
-"moe.offload.cache" = { help = "VRAM cache slots per class, pinned: <class>=<slots or fraction>,… (* for the rest)", default = "fill free VRAM" }
+"moe.cache" = { help = "VRAM cache slots per class, pinned: <class>=<slots or fraction>,… (* for the rest)", default = "fill free VRAM" }

@@ -187,13 +187,16 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     counts = np.zeros((2, 8))
     for layer, (a, b) in enumerate(hot):
         counts[layer, [a, b]] = [9, 5]
-    profile.write_text(json_.dumps({"counts": counts.tolist()}))
+    profile.write_text(json_.dumps({"layers": {str(layer): row for layer, row in enumerate(counts.tolist())}}))
     for cache, extra, floor, cached in (("", {}, None, 8), ("", {}, 1800, None), ("*=0.5", {}, None, 4), (
-            "gate_up.q8_0.64x64=4,*=2", {"moe.placement.profile": str(profile)}, None, 1), ("*=0", {}, None, 0)):
+            "gate_up.q8_0.64x64=4,*=2", {"moe.placement.profile": profile.name}, None, 1), ("*=0", {}, None, 0)):
         engine = _engine(file, host_memory=1 << 24, paged_min_tokens=floor, plugin_options={
-            "moe.store": "std.moe.offload@1", "moe.offload.cache": cache, **extra})
+            "moe.store": "std.moe.offload@1", "moe.cache": cache, **extra})
         store = engine.ctx.shared_objects["std.moe.offload"]
+        counts = []                                                    # each committed step's routing counts
+        store.policy.after_commit = lambda step, view, counts=counts: counts.append(step.sum()) or []
         assert _served(engine, prompts) == want, cache
+        assert set(counts) <= {r * 2 * 2 for r in range(4)} and max(counts) == 12   # decode rows x top-2 x 2 layers
         assert sorted(store.classes) == ["down.q4_0.64x32", "gate_up.q8_0.64x64"]
         assert {c.host.capacity for c in store.classes.values()} == {16}          # 2 layers x 8 experts each
         assert all(c.null == 2 and c.staging == 8 for c in store.classes.values())
@@ -210,6 +213,9 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
         elif cached:
             assert resident[:, :per_layer[1]].all()
         assert 0 < store.peak_misses <= store.staging if cached < 8 else store.peak_misses == 0
+    with pytest.raises(ValueError, match="relative to the checkpoint's directory"):   # plans record no host path
+        _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
+                                                           "moe.placement.profile": str(profile)})
     store.staging = store.peak_misses - 1                                    # as if staging had been too small
     engine.add(prompts[0], GREEDY)
     with pytest.raises(RuntimeError, match="distinct misses"):
@@ -219,12 +225,13 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
 
 @pytest.fixture(scope="module")
 def gpu_moe(tmp_path_factory):
-    """A random Qwen3-MoE the GGUF kernels take (rows of 256 values), as a GGUF of two expert classes, its prompts
-    (decode-length to chunked prefill), and the resident store's outputs on the GPU."""
+    """A random Qwen3-MoE as a GGUF of two expert classes, hidden and expert widths 1024 (an mmq tile then runs
+    several K iterations: where stream-k engages it splits them), its prompts (decode-length to chunked prefill),
+    and the resident store's outputs on the GPU."""
     torch.manual_seed(1)
-    cfg = Qwen3MoeConfig(vocab_size=512, hidden_size=256, intermediate_size=512, moe_intermediate_size=256,
-                         num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=64,
-                         num_experts=16, num_experts_per_tok=4, norm_topk_prob=True, tie_word_embeddings=False,
+    cfg = Qwen3MoeConfig(vocab_size=512, hidden_size=1024, intermediate_size=1024, moe_intermediate_size=1024,
+                         num_hidden_layers=2, num_attention_heads=8, num_key_value_heads=2, head_dim=128,
+                         num_experts=8, num_experts_per_tok=2, norm_topk_prob=True, tie_word_embeddings=False,
                          eos_token_id=None)
     path = tmp_path_factory.mktemp("gpu_moe")
     model = Qwen3MoeForCausalLM(cfg)
@@ -245,8 +252,14 @@ def _gpu_engine(model, **kw) -> Engine:
                                max_step_tokens=256, max_model_len=512, cuda_graphs=True, overlap=True, **kw))
 
 
+# The unpatched expert-id mmq takes stream-k at these small arenas (10–14 slots against the stack's 8 on sm_86) and
+# splits K by the slot count; the forced-tiling vendor patch (docs/v1-offload.md D4) makes them pass, and strict
+# xfail then fails until the marks go.
+STREAM_K = pytest.mark.xfail(strict=True, reason="mmq's stream-k split depends on the arena's slot count (D4 patch)")
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("cache", ["", "*=0.25", "*=0"])
+@pytest.mark.parametrize("cache", ["", pytest.param("*=0.25", marks=STREAM_K), pytest.param("*=0", marks=STREAM_K)])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, cache):
     """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
     resolve and zero-copy gather from mapped host pools), decode steps replayed from CUDA graphs and prefill chunked
@@ -254,10 +267,14 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, cac
     arena pool is released when the ledger frees its pools (the startup profile reads the free memory then)."""
     file, prompts, want = gpu_moe
     engine = _gpu_engine(file, host_memory=1 << 26, plugin_options={"moe.store": "std.moe.offload@1",
-                                                                   "moe.offload.cache": cache})
+                                                                   "moe.cache": cache})
     store = engine.ctx.shared_objects["std.moe.offload"]
+    commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
+    store.after_commit = lambda step, t: routed.append((int(step.n_query[step.n_query == step.n_logits].sum()) * 2 * 2,
+                                                         int(t["counts"].sum()))) or commit(step, t)
     assert _served(engine, prompts) == want
     assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
+    assert all(a == b for a, b in routed) and max(routed)[0] > 4      # top-2 x 2 layers; graph padding never counts
     assert {v["provider"] for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")} == {"kernels.expert_io"}
     held, nbytes = torch.cuda.memory_allocated(), store.arena.capacity * store.arena.unit_bytes
     store.arena._set(0)                         # as the ledger frees it: no view outlives the arena pool's buffer
