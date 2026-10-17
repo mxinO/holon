@@ -337,6 +337,12 @@ slot freed by a promotion is reused only after the map lands at c+2+d. Under F11
 its victim in the same layer, with no time for a demotion: the victim becomes SSD-only (the tier code written in the
 graph, Maya's "else disk-only"), the admitted expert's RAM slot is released to the host through the delta log and
 reused only after the fixed lag, and promoting hot SSD-only experts back into RAM is a host policy acting at the lag.
+That churns: F11 admits ≈ 55 experts per decode token at 25% cached (panel C's replay), each sending a warm expert to
+SSD-only — ≈ 157 MB per token of SSD re-reads on the vehicle, more than its whole modelled step. So **F11 is the
+default only where RAM holds every expert** (X's development gate). Before step 5 the replay gains an exclusive RAM
+tier with an SSD rate and compares F11 with SSD-only victims, F11 with deferred admission (the miss staged this
+step, its victim demoted D2H, the map flipped at a fixed later step) and F10 with spares (Maya's structure); the
+RAM-short default is the least modelled time, confirmed by step 5's RAM-capped run (panel C-r4.4-1).
 
 **D11 — No predictive prefetch.** Strata's Foresight measured 0.91–1.00× on every box (R §3.1 E1) and Maya's
 read-ahead lost too (R §3.1b EG1). Re-open only if M6 shows next-layer recall ≥ 85% and M1 ≥ 30% idle PCIe time in
@@ -452,8 +458,9 @@ Plants (`judge/holon_judge/planted.py`), predicted verdicts fixed now; each repo
 exactness snapshots run twice — with F11 (≥ 64 in-graph admissions and ≥ 2 device lendings at the capped fit) and
 with `profile_decay` (≥ 8 swap rounds, where the two-phase plants bite). Because every placement is exact, a policy
 bug shows only as lost speed, so an L1 **policy-parity check** compares F11's per-step residency, read from the
-delta log, with the M6 replay's `lfu` (f32, the device's tie-breaks, D4's step order) — exactly — on a captured
-decode-only trace, and with the replay extended by the lending and return rule on a trace with prompts:
+delta log, with an oracle extended from the M6 replay's `lfu` to D4's whole spec (f32, the device's tie-breaks and
+step order, row kinds, the one-slot-per-expert rule in mixed steps, whole-expert device lending and its return,
+per-role maps) — exactly — on a captured decode-only trace and on one with prompts and mixed steps:
 
 | Plant | Breaks | Predicted |
 |---|---|---|
@@ -516,7 +523,7 @@ rule; F8 only at ≥ 15% on < 1K-token chunks with a fixed share; A1 never in a 
 | 2 | `std.tiered`, the offload store and options, class arenas with null and staging slots, `moe_resolve` / `expert_fetch` (CUDA + oracle + CPU provider), the pinned tier, `static` (F1), F5a | all-resident bitwise to `std.moe@1`; L0 | 5 |
 | 3 | `lfu` (F11) and `lru` (F4), each with its own resolve contract, `profile_decay` (F2–F3) with two-phase edits, route tap and profile tool, prefill streaming (F7); **tag the std offload API** | snapshots with adaptive placement on, ×3, and the n-gram drafter run; cross-placement identity; plants 1–3 and `owner_race` | 5 |
 | 4 | Development gate, natural-fit rows, on the RTX 5080 vs FreeToken and llama.cpp (F5a lock); tune | acceptance 3 natural-fit rows vs the roofline; L4 | 3 |
-| 5 | F9 (SSD tier with I/O workers, exclusive RAM tier) | exactness; a RAM-capped run | 3 |
+| 5 | The replay's exclusive-tier comparison (D10), then F9 (SSD tier with I/O workers, exclusive RAM tier) and the RAM-short default | exactness; a RAM-capped run | 3 |
 | 6 | `kernels.cpu_task`, `kernels.ggml_cpu`, F5b with `plan[n]`, the path-aware floor; capped-fit rows and the F1 row with tune's lock | L0 incl. bitwise per token and per thread count; bounded L2; plants 4–5; tune's ≥ 5% rule decides the dev lock; acceptance 3 capped-fit and F1 rows | 5 |
 | 7 | Held-out plugins after the tag: F10, A1, the mmap / page-cache tier (acceptance 1) | plugin-only diffs; A1 judged as `approx` | 3 |
 | 8 | Close: full suite, panel code review, one propagation of the existing locks; D13 if time allows | acceptance 5–7 | 2 |
@@ -718,6 +725,9 @@ Decisions (by §8's rules, fixed before measuring):
 | A-r4.4-1 lent slots are never refilled | D4: a returned slot is its layer's first victim, filled unconditionally; L1 cache-size test |
 | A-r4.4-2 per-class lending leaves experts half-resident | D4: lending picks whole experts until every class has n slots |
 | A-r4.4-3 parity cannot be exact as written | D4: step order decay → increments → pairing; parity on decode-only traces and on a replay extended with lending |
+| C-r4.4-1 [major] F11 churns victims onto SSD under an exclusive RAM tier | D10: F11 default only where RAM holds every expert; replay comparison of three variants before step 5 |
+| C-r4.4-2 per-class lending halves experts | as A-r4.4-2: whole-expert lending |
+| C-r4.4-3 the parity oracle covers decode only | §6: oracle extended to D4's whole spec; parity on a trace with prompts and mixed steps |
 | B-r4.4-1 the lending pick is a policy rule | D4: a `lend(n)` op in the policy-owned resolve contract; the apply kernel only unmaps and logs |
 | C-r4.3-3 F11's win assumes F5a | §13: tune chooses policy and split together for F5b candidates; ABBA rule for lfu vs lru |
 
