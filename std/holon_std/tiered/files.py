@@ -33,10 +33,10 @@ def read(jobs: list[tuple[Extent, np.ndarray]]) -> None:
                 lo = extent.offset // ALIGN * ALIGN
             run.append((extent, dst))
         windows.append((lo, run))
-        fd = _open(path)
+        fd, direct = _open(path)
         try:
             with concurrent.futures.ThreadPoolExecutor(WORKERS) as pool:
-                list(pool.map(functools.partial(_read_window, fd, path), *zip(*windows, strict=True)))
+                list(pool.map(functools.partial(_read_window, fd, direct, path), *zip(*windows, strict=True)))
         finally:
             os.close(fd)
 
@@ -45,23 +45,24 @@ def _up(n: int) -> int:
     return -(-n // ALIGN) * ALIGN
 
 
-def _open(path: str) -> int:
+def _open(path: str) -> tuple[int, bool]:
+    """The file's descriptor, and whether it reads with O_DIRECT."""
     try:
-        return os.open(path, os.O_RDONLY | os.O_DIRECT)
+        return os.open(path, os.O_RDONLY | os.O_DIRECT), True
     except OSError:                              # e.g. tmpfs: buffered reads
-        return os.open(path, os.O_RDONLY)
+        return os.open(path, os.O_RDONLY), False
 
 
-def _read_window(fd: int, path: str, lo: int, pieces: list[tuple[Extent, np.ndarray]]) -> None:
+def _read_window(fd: int, direct: bool, path: str, lo: int, pieces: list[tuple[Extent, np.ndarray]]) -> None:
     hi = _up(max(e.offset + e.nbytes for e, _ in pieces))
     with mmap.mmap(-1, hi - lo) as buf:          # page-aligned, as O_DIRECT needs
         data = np.frombuffer(buf, dtype=np.uint8)
         try:
             got = 0
-            while got < hi - lo:                 # a short read is the file's end (an O_DIRECT retry would be unaligned)
+            while got < hi - lo:                 # an unaligned O_DIRECT read is the file's end (a retry would fail)
                 n = os.preadv(fd, [data[got:]], lo + got)
                 got += n
-                if n <= 0 or got % ALIGN:
+                if n <= 0 or direct and got % ALIGN:
                     break
             for extent, dst in pieces:
                 if extent.offset + extent.nbytes > lo + got:

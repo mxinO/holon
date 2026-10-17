@@ -46,7 +46,9 @@ class SlotClass:
     pieces: list[tuple[int, int, int, list[Extent]]] = dataclasses.field(default_factory=list)  # group, item, role
     cache: int | float | None = None            # pinned cache slots, or a fraction of its pieces (None: fill)
     host: object = None                         # its host pool (`BuildCtx.pool`), from `before_materialize`
-    arena: torch.Tensor | None = None           # [S, unit] bytes in the store's pool, from `after_materialize`
+    pool: object = None                         # the store's arena pool, and where in it its arena lies (bytes,
+    at: int = 0                                 # slots), from `after_materialize`: views of a pool's buffer are
+    size: int = 0                               # made per use, so none outlives a materialize
 
     @property
     def max_slots(self) -> int:
@@ -64,7 +66,8 @@ class SlotClass:
 
     def slots(self) -> torch.Tensor:
         """The arena as [S, unit] bytes (valid until the next materialize)."""
-        return self.arena
+        whole = self.pool.view(torch.uint8, (self.pool.capacity * self.pool.unit_bytes,))
+        return whole[self.at:self.at + self.size * self.unit_bytes].view(self.size, self.unit_bytes)
 
     def units(self) -> torch.Tensor:
         """The host pool as the device reads it, [pieces, unit] bytes."""
@@ -158,20 +161,21 @@ class TieredStore:
         budget = _Budget(self, size - sum(c.bytes(0) for c in classes) - ALIGN * len(classes))
         groups = list(self._order)
         seed = self.policy.seed(self._profile_counts(), budget)
-        pool, at = self.arena.view(torch.uint8, (size,)), 0
-        pool.zero_()                                          # the null slots; no slot left holding garbage
-        free = {}
+        self.arena.view(torch.uint8, (size,)).zero_()         # the null slots; no slot left holding garbage
+        free, arenas, at = {}, {}, 0
         for c in classes:
-            n = c.null + c.staging + budget.taken[c.name]
-            c.arena = pool[at:at + n * c.unit_bytes].view(n, c.unit_bytes)
-            at = -(-(at + n * c.unit_bytes) // ALIGN) * ALIGN
-            free[c.name] = list(range(n - 1, c.null + c.staging - 1, -1))      # popped lowest first
+            c.pool, c.at, c.size = self.arena, at, c.null + c.staging + budget.taken[c.name]
+            at = -(-(at + c.size * c.unit_bytes) // ALIGN) * ALIGN
+            free[c.name] = list(range(c.size - 1, c.null + c.staging - 1, -1))      # popped lowest first
+            arenas[c.name] = c.slots(), c.host.view(torch.uint8, (c.host.capacity, c.unit_bytes))
         self.residency.host[...] = -1                   # −1 − tier 0: every piece in the host tier
+        if len(seed) * self.roles != sum(budget.taken.values()):
+            raise RuntimeError(f"{self.name}: the placement policy seeded items it did not take from the budget")
         for g, i in seed:
             for r, c in self.groups[groups[g]].items():
                 slot = self.residency.host[g, i, r] = free[c.name].pop()
-                c.arena[slot].copy_(c.host.view(torch.uint8, (c.host.capacity, c.unit_bytes))[self._host[g, i, r]],
-                                    non_blocking=True)
+                arena, units = arenas[c.name]
+                arena[slot].copy_(units[self._host[g, i, r]], non_blocking=True)
         self.residency.seed()
         for t in (self.counts, self.misses, self.kinds):
             t.zero_()

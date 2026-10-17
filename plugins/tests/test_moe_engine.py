@@ -250,7 +250,8 @@ def _gpu_engine(model, **kw) -> Engine:
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, cache):
     """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
     resolve and zero-copy gather from mapped host pools), decode steps replayed from CUDA graphs and prefill chunked
-    past the mmvq limit: the offload store's streams and prompt logprobs are the resident store's, bit for bit."""
+    past the mmvq limit: the offload store's streams and prompt logprobs are the resident store's, bit for bit. Its
+    arena pool is released when the ledger frees its pools (the startup profile reads the free memory then)."""
     file, prompts, want = gpu_moe
     engine = _gpu_engine(file, host_memory=1 << 26, plugin_options={"moe.store": "std.moe.offload@1",
                                                                    "moe.offload.cache": cache})
@@ -258,4 +259,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, cac
     assert _served(engine, prompts) == want
     assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
     assert {v["provider"] for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")} == {"kernels.expert_io"}
+    held, nbytes = torch.cuda.memory_allocated(), store.arena.capacity * store.arena.unit_bytes
+    store.arena._set(0)                         # as the ledger frees it: no view outlives the arena pool's buffer
+    assert held - torch.cuda.memory_allocated() >= nbytes > 0
     engine.close()
