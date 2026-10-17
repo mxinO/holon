@@ -250,8 +250,8 @@ Holon streams only the non-resident 53%, so it is compute-bound where FreeToken 
 
 ## Caveats
 
-- **Contexts.** Only 1K and 4K were measured: the 32K rows, and the RTX 5080's 32K natural fit, are not re-measured
-  here. The fits are those of `x4_refs`.
+- **Contexts.** Only 1K and 4K were measured here. The fits are those of `x4_refs`. The 32K rows are in
+  `README_32k.md`.
 - **Replays.** The policy replays use Holon's own decode routing, 255 steps per context. They model the miss bytes;
   their tok/s comes from Holon's measured bytes-to-time line. They were not run on the engine: step 3 builds `lfu`.
 - **FreeToken's miss bytes** use the mean expert size. Its Q6_K-down layers are 7% larger than the mean, Q4_K's 7%
