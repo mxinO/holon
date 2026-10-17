@@ -1402,10 +1402,14 @@ test file and registration lines — one entry point per plugin in `plugins/pypr
 | Commits | Plugin | Checks (RTX A5000, the vehicle) |
 |---|---|---|
 | `8ce3f2e`, review fixes `9226253` | **F10** `placement.promote@1` (contract `moe_resolve.promote@1`: oracle, CPU provider, `lend`, replay oracle) + its kernel plugin `kernels.promote` (CUDA) | L0 exact on CPU and CUDA; snapshot at 25% byte-identical to `std.moe@1` all-resident on 3 fresh engines (8,474 promotions each); a decode trace byte-identical and its residency the replay's at all 258 steps |
-| `53f4a74`, `c217918` | **A1** `transforms.tail_skip` (contract `moe_route_transform.tail_skip@1`: oracle = CPU provider, Triton on CUDA) | L0 exact; `approx`: L2 at a frozen 25% placement against the mmvq floor top-1 97.15% (floor 98.54%), KL p50 5.10e-4 / p99 1.43e-1, ΔPPL +1.01% ± 0.22% vs the floor — outside the exact budgets, as §6 expected (human gate, never a default lock); decode at 25% cached under F11 46.45 → 51.67 tok/s (+11.2%) |
+| `53f4a74`, `c217918` | **A1** `transforms.tail_skip` (contract `moe_route_transform.tail_skip@1`: oracle = CPU provider, Triton on CUDA) | L0 exact; `approx`: L2 at a frozen 25% placement against the mmvq floor top-1 97.15% (floor 98.54%), KL p50 5.10e-4 / p99 1.43e-1, ΔPPL +1.01% ± 0.22% vs the floor — outside the exact budgets, as §6 expected (human gate, never a default lock); against the no-skip candidate at F11's own placement (frozen at the end of a decode trace), rank 7: KL mean 9.63e-3 / top-1 97.32% at 25% cached, 7.32e-3 / 97.68% at 47% (top-20 bucketed KL, one token per step); decode at 25% cached under F11 46.45 → 51.67 tok/s (+11.2%) |
 | `642a020`, `11ff061` | **Page-cache tier** `tiers.pagecache@1` (a `Tier`: `pread` extents with O_DIRECT off) | RAM-capped (`host_memory` 12 GiB, RAM half the pieces): snapshot byte-identical to all-resident under F11 and F1 |
 
-The step-7 section of this document is its own commit, outside the plugin-only rule (docs are not plugin code).
+The new kinds' empty parent packages (`plugins/holon_plugins/transforms/__init__.py`, `plugins/holon_plugins/tiers/
+__init__.py`) are in the proof's file lists. The step-7 section of this document and the spike's evidence are their
+own commits, outside the plugin-only rule (docs and evidence are not plugin code). A1's figures for the human gate,
+comparable to Strata's, are tail skip against the no-skip candidate at the same frozen placement (the spike README
+has them by set, beside the golden-based ones).
 
 Decided while building, against the text above:
 - **F10 has no host part.** D4 puts F10's spare refill in the host's apply ("host → device in the same apply as the

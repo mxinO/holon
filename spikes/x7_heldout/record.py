@@ -1,10 +1,11 @@
 """Step 7's evidence record from the runs' outputs (docs/v1-offload.md acceptance 1):
 
-    python spikes/x7_heldout/record.py <snapshot dir> <a1 dir> <page-cache dir> <out.json> <commit>
+    python spikes/x7_heldout/record.py <snapshot dir> <a1 dir> <page-cache dir> <out.json> <commit> [<gate dir>]
 
 <snapshot dir>: run.py's metas and snapshots (F10 at 25% ×3, its decode-trace parity, the page-cache tier RAM-capped);
 <a1 dir>: `compare.txt` (holon_judge compare of A1's L2 candidate) and `decode_log.txt` (spikes/x6_cpu/decode.py's
-lines); <page-cache dir>: `decode_log.txt` (gguf_direct against the page-cache tier, RAM-capped)."""
+lines); <page-cache dir>: `decode_log.txt` (gguf_direct against the page-cache tier, RAM-capped); <gate dir>: A1's
+human-gate figures (`gate.json`, gate.py's) and the F11-representative placements they ran at (placement.py's metas)."""
 import json
 import pathlib
 import statistics
@@ -44,6 +45,18 @@ def main() -> None:
                   "--depth 512 --rounds 3 --engine-args '--host-memory <bytes> --max-model-len 4096'"],
               "runs": metas, "a1_l2_compare": (a1 / "compare.txt").read_text(),
               "a1_decode": arms(a1 / "decode_log.txt"), "pagecache_decode": arms(pc / "decode_log.txt")}
+    if len(sys.argv) > 6:
+        gate = pathlib.Path(sys.argv[6])
+        record["a1_gate"] = json.loads((gate / "gate.json").read_text()) | {
+            "placements": {p.name.removesuffix(".meta.json"): json.loads(p.read_text())
+                           for p in sorted(gate.glob("f11_*.meta.json"))},
+            "commands": ["python spikes/x7_heldout/placement.py <model.gguf> <dir> f11_25 '*=0.25' "
+                         "(and f11_47 '*=0.47')",
+                         "python spikes/x7_heldout/l2.py <dir>/<model.gguf> <dir>/noskip25.safetensors "
+                         "'moe.store=std.moe.offload@1;moe.cache=*=0.25;moe.placement=std.tiered.static@1;"
+                         "moe.placement.profile=f11_25.json' (skip25: + ';moe.route_transform=tail_skip'; 47 alike)",
+                         "python spikes/x7_heldout/gate.py <dir> <golden> <mmvq floor> gate.json 25 47 "
+                         "--extra warm25=<step-7 candidate>"]}
     out.write_text(json.dumps(record, indent=1) + "\n")
 
 

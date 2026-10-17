@@ -33,7 +33,12 @@ B="moe.store=std.moe.offload@1;moe.cache=*=0.25"
 python spikes/x6_cpu/decode.py $M a1.json "f11|$B" "f11+a1|$B;moe.route_transform=tail_skip" "f11|$B" \
     "f11+a1|$B;moe.route_transform=tail_skip" --batch 1 --tokens 256 --depth 512 --rounds 3 \
     --engine-args "--host-memory 21474836480 --max-model-len 4096"
-python spikes/x7_heldout/record.py <snapshot dir> <a1 dir> <page-cache dir> evidence/x7_heldout_rtx-a5000_<date>.json <commit>
+python spikes/x7_heldout/placement.py $M <gate dir> f11_25 '*=0.25'        # and f11_47 '*=0.47'
+python spikes/x7_heldout/l2.py <gate dir>/<model.gguf> <gate dir>/skip25.safetensors \
+    "moe.store=std.moe.offload@1;moe.cache=*=0.25;moe.placement=std.tiered.static@1;moe.placement.profile=f11_25.json;moe.route_transform=tail_skip"
+    # noskip25: the same without the transform; 47 alike
+python spikes/x7_heldout/gate.py <gate dir> <golden> <mmvq floor> gate.json 25 47 --extra warm25=cand.safetensors
+python spikes/x7_heldout/record.py <snapshot dir> <a1 dir> <page-cache dir> evidence/x7_heldout_rtx-a5000_<date>.json <commit> <gate dir>
 ```
 
 Snapshot runs use the step-3 engine settings (`max_seqs` 64, graphs and overlap on); the parity trace (the first 8
@@ -53,7 +58,9 @@ registration lines (an entry point in `plugins/pyproject.toml`, the generated co
 | `53f4a74` (+ `c217918`) | A1: `transforms/tail_skip/` | `plugins/tests/test_transform_tail_skip.py`; 1 entry point, 1 listing line |
 | `642a020` (+ `11ff061`) | page-cache tier: `tiers/pagecache/` | `plugins/tests/test_tier_pagecache.py`; 1 entry point, 1 listing line |
 
-(`transforms/__init__.py` and `tiers/__init__.py` are the new kinds' empty parent packages.)
+Two files sit just outside the plugin directories, both empty and both part of the proof's file lists: the new
+kinds' parent packages `plugins/holon_plugins/transforms/__init__.py` (in `53f4a74`) and
+`plugins/holon_plugins/tiers/__init__.py` (in `642a020`).
 
 ## Results
 
@@ -81,6 +88,26 @@ the mmvq floor — 32,783 positions:
 Outside the exact budgets, as §6 expected: A1 is `approx`, for the human gate (L2 plus a task check), never in a
 default lock. By set: chat ΔPPL +0.32%, code +0.69%, recall +1.48% (top-1 96.2%), agent +1.29%. A frozen 25% placement
 misses more than F11's adaptive one, so these drops are an upper bound for decode under F11.
+
+**A1's human gate, comparable to Strata's** (tail skip against the no-skip candidate at the same frozen placement,
+rank 7; `gate.py`, `placement.py`). The placements are F11's own at the end of the parity decode trace (8 × 256
+tokens, F11 from the warm start), frozen by `std.tiered.static@1` from a profile of exactly those experts (1,536 at
+25%, 2,888 at 47%: the static engines hold the same sets). Both candidates are scored at one token per step; the
+no-skip candidates of both fits are bitwise equal (F5a is exact at any placement). KL is the judge's top-20 bucketed
+KL(no-skip ‖ skip), a lower bound on the full vocabulary's; top-1 is argmax agreement; ΔPPL is paired against the
+no-skip candidate:
+
+| placement | KL mean | KL p50 | KL p99 | top-1 | ΔPPL vs no-skip |
+|---|---|---|---|---|---|
+| F11's at 25% cached | **9.63e-3** | 4.76e-4 | 1.36e-1 | **97.32%** | +0.62% ± 0.19% |
+| F11's at 47% cached (natural fit) | **7.32e-3** | 3.19e-4 | 1.07e-1 | **97.68%** | −0.12% ± 0.16% |
+| F2's warm start at 25% (the run above) | 1.12e-2 | 5.53e-4 | 1.59e-1 | 97.21% | +0.87% ± 0.20% |
+
+By set at F11's 25% / 47% (KL mean, top-1): chat 7.2e-3 / 5.0e-3, 97.5 / 98.0%; code 1.14e-2 / 8.9e-3, 97.5 / 97.8%;
+recall 8.7e-3 / 6.0e-3, 96.1 / 96.7%; agent 1.14e-2 / 9.6e-3, 98.4 / 98.5%. Against the fp32 golden (KL mean / top-1):
+the mmvq floor 3.08e-3 / 98.54%, no-skip 2.78e-3 / 98.57%, tail skip at F11's 25% 9.27e-3 / 97.33% and at 47%
+6.90e-3 / 97.72%. More cached, fewer misses to drop: the 47% placement's figures sit about a quarter under the 25%
+ones.
 
 **A1's decode** (batch 1, 512-token natural prompts, 256 tokens, F11 at 25% cached, A B A B, 3 rounds each):
 46.45 tok/s → **51.67 tok/s (+11.2%)** (rounds 46.3–46.6 against 51.0–52.8), inside Strata's +10–24%.

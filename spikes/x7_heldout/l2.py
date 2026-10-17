@@ -1,6 +1,6 @@
-"""A1's L2 (docs/v1-offload.md §6: `approx`, human-gated): the vehicle with `moe.route_transform = tail_skip` at a frozen
-placement (`std.tiered.static@1`, 25% cached) scored through the judge at one token per step (Tier B's decode path,
-every expert matmul mmvq), so the plain mmvq floor is its floor:
+"""A1's L2 (docs/v1-offload.md §6: `approx`, human-gated): the vehicle under the given options — a frozen placement
+(`std.tiered.static@1`, with or without `moe.route_transform = tail_skip`) — scored through the judge at one token per
+step (Tier B's decode path, every expert matmul mmvq), so the plain mmvq floor is its floor:
 
     python spikes/x7_heldout/l2.py <model.gguf> <candidate.safetensors> "<plugin options k=v;k=v>"
 
