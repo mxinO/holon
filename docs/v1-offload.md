@@ -345,6 +345,16 @@ default only where RAM holds every expert** (X's development gate). Before step 
 tier with an SSD rate and compares F11 with SSD-only victims, F11 with deferred admission (the miss staged this
 step, its victim demoted D2H, the map flipped at a fixed later step) and F10 with spares (Maya's structure); the
 RAM-short default is the least modelled time, confirmed by step 5's RAM-capped run (panel C-r4.4-1).
+**Replayed (2026-10-17, `spikes/x0_offload/m6/README_exclusive.md`, `evidence/x5_exclusive_tier_replay_2026-10-17.json`):
+the RAM-short default is F11 with deferred admission.** Over M6's held-out pairs at 10 / 25 / 47% VRAM and RAM
+holding 25 / 50 / 75% of the rest (SSD at 2.6 GB/s): SSD-only victims lose everywhere (1.2–3.7× the best; ≈ 235 MB
+per token of SSD re-reads at 25% cached, worse than D10's estimate because RAM drains); deferred admission is least
+in 5 of 9 cells and F10's spares in the other 4 by ≤ 2.7% with the flip at +2, and deferred admission wins all 45
+pair-cells with the flip at +1. Rules for step 5: the flip lands at the first launch where the demotion and staged
+copy are stream-ordered before it (+1 where the copy runs on the step stream, else +2 — an in-graph admission needs
+no host lag); a victim goes to a free RAM slot if one exists, else displaces RAM's coldest expert if hotter, else
+becomes SSD-only; a demand SSD read that is not admitted to VRAM stays in RAM (it is already in host memory; −2 to
+−28%). RAM-short is a fit mode, not a fast path: 1.9–8.3× slower than RAM holding every expert on these drives.
 
 **D11 — No predictive prefetch.** Strata's Foresight measured 0.91–1.00× on every box (R §3.1 E1) and Maya's
 read-ahead lost too (R §3.1b EG1). Re-open only if M6 shows next-layer recall ≥ 85% and M1 ≥ 30% idle PCIe time in
