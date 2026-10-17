@@ -21,8 +21,9 @@ def main() -> None:
         meta = json.loads(meta_path.read_text())
         snap = runs / f"{meta['name']}_{meta['run']}.json"
         decode = meta.get("trace") == "decode"
-        reference = runs / f"resident{'_ngram' * bool(meta['spec'])}{'_decode' * decode}_0.json"
-        if snap.is_file() and not meta["name"].startswith("resident"):
+        reference = runs / (meta.get("reference", f"resident{'_ngram' * bool(meta['spec'])}{'_decode' * decode}")
+                            + "_0.json")
+        if snap.is_file() and meta["cache"] != "resident":
             mine = Snapshot.load(snap)
             meta["vs_resident"] = diff(Snapshot.load(reference), mine) or "identical"
             if meta["run"]:

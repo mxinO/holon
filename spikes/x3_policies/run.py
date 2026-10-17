@@ -2,11 +2,12 @@
 placement on (docs/v1-offload.md §6, §9 step 3): `std.moe@1` all-resident, and the offload store at a fit under a
 placement policy, optionally with a planted bug or the n-gram drafter:
 
-    python spikes/x3_policies/run.py <model.gguf> <out dir> <runs> "<name>|<cache>|<policy>|<plant>|<spec>[|decode]" ...
+    python spikes/x3_policies/run.py <model.gguf> <out dir> <runs> "<name>|<cache>|<policy>|<plant>|<spec>[|<t>[|<o>]]"
 
 `<cache>` is `resident` or a `moe.cache` value; `<policy>` a `moe.placement` Ref (empty: the default, F11);
-`<plant>` a judge plant; `<spec>` `ngram` for the n-gram drafter (3 drafts, the rejection verifier); `decode`: the
-decode-heavy parity trace instead of the snapshot trace (the first 8 prompts, 256 greedy tokens each). Every
+`<plant>` a judge plant; `<spec>` `ngram` for the n-gram drafter (3 drafts, the rejection verifier); `<t>` `decode`: the
+decode-heavy parity trace instead of the snapshot trace (the first 8 prompts, 256 greedy tokens each); `<o>`:
+`seqs=<n>` (max_seqs) and `ring=<n>` (moe.ring_tokens), comma-separated. Every
 engine keeps enough KV that the trace never preempts. Each run writes its snapshot and a summary (admissions and delta
 records from the route dump, the policy's swap rounds, F11's L1 parity against its replay oracle, the error that
 stopped the engine if one did); the first run of each F11 configuration also writes its route trace (`.npz`).
@@ -43,16 +44,22 @@ def main() -> None:
     for config in sys.argv[4:]:
         name, cache, policy, plant, spec, *kind = config.split("|")
         trace = traces[kind[0] if kind else ""]
+        extra = dict(o.split("=") for o in (kind[1].split(",") if len(kind) > 1 and kind[1] else []))
         for run in range(runs):
             kw = dict(SPEC, plugin_options={"spec.k": "3", "spec.fallback": 2}) if spec else {}
             if cache != "resident":
                 kw = kw | dict(host_memory=20 << 30, plugin_options=kw.get("plugin_options", {}) | {
-                    "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy})
+                    "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy} | (
+                    {"moe.ring_tokens": int(extra["ring"])} if "ring" in extra else {}))
+            if "seqs" in extra:
+                kw["max_seqs"] = int(extra["seqs"])
             meta = {"name": name, "cache": cache, "policy": policy or "placement.lfu@1", "plant": plant,
-                    "spec": spec, "trace": kind[0] if kind else "snapshot", "run": run}
+                    "spec": spec, "trace": kind[0] if kind and kind[0] else "snapshot", "run": run, "options": extra,
+                    "reference": "resident" + "_ngram" * bool(spec) + "_decode" * bool(kind and kind[0])
+                    + (f"_s{extra['seqs']}" if "seqs" in extra else "")}
             t = time.time()
             with PLANTS[plant]() if plant else contextlib.nullcontext():
-                engine = Engine(EngineConfig(model=model, **ENGINE, **kw))
+                engine = Engine(EngineConfig(model=model, **(ENGINE | kw)))
                 meta["build_s"] = round(time.time() - t, 1)
                 store = engine.ctx.shared_objects.get(KEY)
                 dump = placement.route_dump(engine) if store is not None else contextlib.nullcontext()
@@ -64,7 +71,8 @@ def main() -> None:
                     meta["error"] = f"{type(e).__name__}: {e}"[:400]
                 meta["run_s"] = round(time.time() - t - meta["build_s"], 1)
             if store is not None:
-                meta |= {"peak_misses": store.peak_misses, "steps": len(routes.steps),
+                meta |= {"peak_misses": store.peak_misses, "steps": len(routes.steps), "staging": store.staging,
+                         "borrowed": dict(store.borrowed),
                          "admissions": routes.admissions,
                          "records": sum(len(s["records"]) for s in routes.steps),
                          "swap_rounds": getattr(store.policy, "rounds", None),
