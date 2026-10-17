@@ -18,7 +18,7 @@ the core at a time:
 
 | Milestone | Doc | Closes on | Core |
 |---|---|---|---|
-| **X — expert offload** (this doc) | `docs/v1-offload.md` | the development gate: Qwen3.5-35B-A3B on the RTX 5080, at its natural fit and at a capped ≈ 25% fit | S0–S5 (§4) |
+| **X — expert offload** (this doc) | `docs/v1-offload.md` | the development gate: Qwen3-30B-A3B on the RTX 5080, at its natural fit and at a capped ≈ 25% fit | S0–S5 (§4) |
 | K — KV and checkpoint tiers | own doc, after X | resume from RAM / SSD, exact; agent-trace TTFT and concurrency | prefix-index tiers (§11) |
 | FN — Qwen3.8-Flash-Next | own doc, in parallel with X | the model on Holon, then offload vs Strata (bars §1.4) | hyper-connection residual; listed now (§4.7) |
 | GLM — GLM-5.3-Flash | own doc, after FN's shared units | the model on Holon, then offload vs Project Maya (bars §1.4) | none expected beyond FN's |
@@ -60,9 +60,8 @@ for that model, with exact defaults and reproducible runs.
      snapshot;
    - with the CPU split on: run-identical over 3 fresh engines on the snapshot trace, and bounded (L2 within budget)
      against a path-aware floor (§6).
-3. **Development gate** (milestone X's close), Qwen3.5-35B-A3B Q4_K_M on the RTX 5080, same file and host, drafting
-   matched, medians of interleaved rounds, at the natural fit (≈ 45% of experts in VRAM at 32K) **and** capped to
-   ≈ 25%:
+3. **Development gate** (milestone X's close), Qwen3-30B-A3B Q4_K_M on the RTX 5080, same file and host, no drafting,
+   medians of interleaved rounds, at the natural fit (≈ 47% of experts in VRAM at 32K) **and** capped to ≈ 25%:
 
    | Against | Decode | Prefill |
    |---|---|---|
@@ -122,8 +121,11 @@ predictive prefetch (D11); a CPU kernel matching the GPU's rounding (D7).
   Every Maya quant and Unsloth's UD-IQ4_XS use upstream ggml types only, all in `kernels.ggml_cuda` (IQ1_M aside).
   GLM brings DSA forward from plan v2; its router and clamp are new kernel facts (`moe_topk` variant, a
   `linear_experts` fact), not core.
-- **Development vehicle: Qwen3.5-35B-A3B Q4_K_M** (≈ 21 GB) on the RTX 5080: its plugin exists, so offload starts
-  now. The lead chose it (the owner was asked; reversible).
+- **Development vehicle: Qwen3-30B-A3B Q4_K_M** (18.6 GB; 48 layers × 128 experts top-8) on the RTX 5080, where it
+  does not fit: its plugin (`models.qwen3_moe`) and its RTX 4090 locks exist, so offload starts now and the 4090 runs
+  the all-resident reference of the same file. FreeToken and llama.cpp run it too. (Rev 2 named Qwen3.5-35B-A3B and
+  said its plugin exists; it does not — `models.qwen3_5` has no MoE. Qwen3.6-35B-A3B, GDN + MoE with a shared expert,
+  is FN's natural first step and lands there.) The lead chose the vehicle (the owner was asked; reversible).
 - **Why four milestones** (panel B12): X must not wait on two model plugins; KV tiers share only S2 with experts and
   carry their own index invariants (§11); the model milestones need core of their own (§4.7), and one branch changes
   the core at a time. X's seams are designed with the model milestones' needs listed, so no seam is redesigned later.
@@ -337,8 +339,10 @@ gathers are kernels.
 | F5b split on | bounded | L2 against a **path-aware floor**: the Tier B floor emulates q8_1 for GPU experts and Q8_K for exactly the experts the frozen split sends to the CPU (a `Blocking(256, f32)` mode in the judge's q8_1 emulation plus the split rule); KL ratio predicted on the CPU before the GPU run (Q8_K's error is 1.3–2.7× q8_1's, panel C10); run-identical ×3 |
 | A1 tail skip | approx | human gate: L2 KL, top-1, task check; never in a default lock |
 
-Floors: the development vehicle's all-GPU floor is the offload store at F5a on the RTX 5080 itself (exact, so it is
-the all-resident floor); the A5000 runs the bf16 floor as today. FN and GLM take their engine floors the same way (no
+Floors: the development vehicle's all-resident reference is its RTX 4090 lock on the same file (the offload store
+at F5a on the RTX 5080 must match the 4090's all-resident output only where the two classes' kernels agree, so the
+bitwise check runs on one card: the 5080 offload store against the 5080 all-resident store with the experts forced
+resident through a smaller context); the A5000 runs the bf16 floor as today. FN and GLM take their engine floors the same way (no
 RTX PRO 6000 engine runs needed).
 
 Plants (`judge/holon_judge/planted.py`), predicted verdicts fixed now; each reports how often it fired, and the
@@ -361,12 +365,12 @@ Budget = (VRAM free after weights and the CUDA context) × `memory_fraction` 0.9
 
 | Model, file, context | Card | Non-expert weights | Expert bytes | Expert cache | Host tiers |
 |---|---|---|---|---|---|
-| Qwen3.5-35B-A3B Q4_K_M, 32K | RTX 5080 16 GB | ≈ 2 GB | ≈ 19.5 GB (10,240 × ≈ 1.9 MB) | ≈ 9 GB ≈ 45% (capped run ≈ 25%) | RAM ≈ 20 GB |
+| Qwen3-30B-A3B Q4_K_M, 32K | RTX 5080 16 GB | ≈ 1.2 GB | ≈ 17.4 GB (6,144 × ≈ 2.8 MB) | ≈ 8.2 GB ≈ 47% (capped run ≈ 25%) | RAM ≈ 18 GB |
 | Qwen3.8-Flash-Next IQ2_XS, 32K, MTP on | RTX 5080 16 GB | ≈ 3.7 GB + the MTP layer | ≈ 36 GB (24,576 × ≈ 1.46 MB) | ≈ 3.8–7 GB ≈ 11–20% (MTP-layer experts through the store or resident) | RAM ≈ 36 GB; PLE 28.8 GB on SSD |
 | Qwen3.8-Flash-Next IQ3_S, 32K | RTX 5090 32 GB | same | ≈ 50 GB | ≈ 18.7 GB ≈ 37% | RAM ≈ 50 GB |
 | GLM-5.3-Flash Maya-S, 32K, MTP off | RTX 5090 32 GB | ≈ 6.9 GB | ≈ 86 GB (12,096 × ≈ 7.1 MB) | ≈ 18 GB ≈ 21% | RAM exclusive + SSD on a 64 GB host |
 
-The KV floor grows with context (35B-A3B at 262K in bf16: ≈ 5 GB), so each benchmark lock names its context. GLM
+The KV floor grows with context (30B-A3B: 96 KiB per token in bf16, ≈ 3 GB at 32K), so each benchmark lock names its context. GLM
 routes ≈ 2.4 GB of experts per token on Maya-S; above ≈ 85% hits its decode is GPU-bound (≈ 4.7 ms of GPU reads
 against ≈ 3.4 ms of misses at 90%), below it miss-bound. Host RAM per desktop class is checked before scheduling
 (not recorded here).

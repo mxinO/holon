@@ -585,7 +585,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 | ~~Before the release freezes the ABI~~ — **retired by the owner (2026-10-14)** | legibility benchmark (agent cost to add a model vs a mini-sglang fork). An exploratory 1 + 1 pilot passed on both sides at ≈ 1.4–1.8× Holon's cost (one run each, within noise); Holon's advantage is isolation (no shared code touched), not agent cost per model (`docs/release.md` §4.0; record `evidence/legibility_pilot_2026-10-14.json`) | — |
 | Any | propagation sweep time; approvals/day | > 30 min or > 1/day → async propagation (design §4.6 trigger) |
 | M0.1 / M0.2 / M0.3 | GGUF decode **and prefill** tok/s vs llama.cpp on the same card and quant (RTX 5080), dense and MoE | < 0.8× on either after a perf pass → fix the GGUF kernel path (ported i-quant `mmq` or own Triton kernels for the slow types) before adding features |
-| v1 offload | MoE larger than VRAM, same file and card: decode tok/s vs Strata on Qwen3.8-Flash-Next (RTX 5080 / 5090), vs Project Maya on GLM-5.3-Flash (RTX 5090), vs FreeToken on the development vehicle Qwen3.5-35B-A3B (RTX 5080) (`docs/v1-offload.md` §1) | < 0.8× → rework the offload path before adding features |
+| v1 offload | MoE larger than VRAM, same file and card: decode tok/s vs Strata on Qwen3.8-Flash-Next (RTX 5080 / 5090), vs Project Maya on GLM-5.3-Flash (RTX 5090), vs FreeToken and llama.cpp on the development vehicle Qwen3-30B-A3B (RTX 5080) (`docs/v1-offload.md` §1) | < 0.8× → rework the offload path before adding features |
 
 ---
 
@@ -602,7 +602,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   of non-resident experts, an SSD expert tier — on additive core seams (design D8). Targets (owner, 2026-10-17):
   **Qwen3.8-Flash-Next** compared with Strata and **GLM-5.3-Flash** compared with Project Maya, each a model
   milestone of its own (Flash-Next: QSA + indexer, PLE n-gram table, hyper-connections; GLM: MLA + DSA indexer, KDA,
-  mHC); Qwen3.5-35B-A3B on the RTX 5080 is the development vehicle. Qwen3.5-122B-A10B is dropped.
+  mHC); Qwen3-30B-A3B on the RTX 5080 is the development vehicle. Qwen3.5-122B-A10B is dropped.
 - KV offload to pinned RAM / SSD (demote-on-evict tiers under the prefix index, cancellable `BLOCKED` loads; KV
   streaming for sparse-attention mixers with the model milestones), in `docs/v1-offload.md`.
 - VMM ledger + live rebalance KV ↔ experts through `quiesce` (run-identical after shrink/regrow).
