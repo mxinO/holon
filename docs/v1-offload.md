@@ -714,6 +714,14 @@ Holon bases on the 5080 plus the replayed `lfu` bytes): vs FreeToken 0.99× natu
 (≥ 1.35× / ≥ 1.64×). With step 3c's ≈ 0.25 ms the 32K cache rows reach ≈ 1.02–1.04× FreeToken and ≈ 1.11–1.12× the
 pinned cache: on or just over their bars, with no margin.
 
+**F5b prediction for the RTX 5080, fixed before step 4's tune** (panel C, 2026-10-18): the A5000's +55% at 25% cached
+(PCIe 4.0 gather ≈ 26 GB/s beside a server CPU's memory) does not carry over; on the 5080 the gather (≈ 47.5 GB/s) and
+the CPU (≈ 45 GB/s) share dual-channel DDR5 (≈ 55 GB/s together, M2), so F5b is expected to add ≈ 5–8% at the capped
+fit and may only just clear D4's 5% rule; tune decides per class (no share carried across classes). Step 5's
+RAM-capped decode numbers were read from a network filesystem and are not quoted; F9 is re-measured on a desktop NVMe
+before GLM's RAM-short runs. A supervisor restarts the engine process after a `cpu_task` TIMEOUT (a stuck worker is
+leaked by design).
+
 **Contradictions with the research note, recorded:** CPU compute is not a second link beside PCIe (they share host
 memory); ggml-cpu's AVX2 and AVX-512 builds agree bitwise; "≤ 4 threads saturate DRAM" (S6) holds only for Q4_K
 single-token jobs; these desktops' NVMe reads ≈ 2.6 GB/s, not 7–14. The vendored ggml-cpu for `kernels.ggml_cpu`
