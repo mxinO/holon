@@ -724,6 +724,15 @@ RAM-capped decode numbers were read from a network filesystem and are not quoted
 before GLM's RAM-short runs. A supervisor restarts the engine process after a `cpu_task` TIMEOUT (a stuck worker is
 leaked by design).
 
+**Owner decision on the gate (2026-10-18):** step 4 measured every natural-fit decode row passing (FreeToken
+1.08 / 1.06 / 1.03×, llama.cpp's pinned cache 1.21 / 1.25 / 1.12× at 1K / 4K / 32K; `spikes/x4_gate/README.md`) and the
+FreeToken prefill row missing at 4K and 32K (0.92× / 0.88×; 1.71× at 1K). The owner accepted the shortfall: it is
+recorded here, X closes with it, and MoE prefill speed becomes its own follow-up (plan §10). Cause: not offload — the
+expert GEMMs. FreeToken's all-resident prefill already runs 1.6–2.0× Holon's on the RTX 5090; Holon's expert path is
+ggml's mmq (activations re-quantized to q8_1, int8 MMA, calls of ≤ 4,096 rows), against FreeToken's prefill GEMM
+(≈ 200 ms of a 386 ms 4K prompt on the 5080, where its expert streaming is fully hidden). With D8 the streaming is
+overlapped and the prompt is compute-bound, so the GEMMs set the pace; at 32K attention's share grows as well.
+
 **Contradictions with the research note, recorded:** CPU compute is not a second link beside PCIe (they share host
 memory); ggml-cpu's AVX2 and AVX-512 builds agree bitwise; "≤ 4 threads saturate DRAM" (S6) holds only for Q4_K
 single-token jobs; these desktops' NVMe reads ≈ 2.6 GB/s, not 7–14. The vendored ggml-cpu for `kernels.ggml_cpu`
