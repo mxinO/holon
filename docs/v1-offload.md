@@ -50,7 +50,8 @@ for that model, with exact defaults and reproducible runs.
    - Shipped in X: placement policies `lfu` (F11, the default by §8's rule), `static` (F1), `profile_decay` (F2–F3,
      Strata parity) and `lru` (F4); miss paths PCIe fetch
      (F5a) and CPU compute (F5b) with a per-miss-count split; the SSD tier (F9); prefill streaming (F7).
-   - **Held-out proof:** the std offload API is tagged at the end of step 6, once every std change of X has landed
+   - **Held-out proof:** the std offload API is tagged at the end of step 6 (tag `v1-offload-std-api`, 2026-10-18, on the
+     merge of steps 6 and 5; `moe_resolve@1`'s argument list frozen as it stands), once every std change of X has landed
      (steps 5–6 still change std: the Tier protocol's storage, F9, F5b; panel B-s2-1). After the tag, three strategies land as
      commits whose diff touches only their own plugin directory and tests (no core, no std diff; checked with the
      existing `check_core_diff.sh` and `git diff --stat`): **F10** promote-on-fetch (host and in-graph parts, the
