@@ -431,7 +431,8 @@ and a CPU provider, in `testing` for std's):
 | `moe_route_transform@1` | `(ids, weights, map) → ids, weights` | signature only; each transform's contract is its plugin's (D3); `approx` only, bound by explicit option |
 | `expert_fetch@1` | `(fetch list, host aliases, staging slots)` | in-graph zero-copy gather (dynamic-address DMA is not graph-safe); a DMA variant with a host-planned resolve if M1 shows the gather < 0.9× DMA |
 | `expert_prefetch@1` | `start(next layer's non-resident list, ring slots)`, `wait(layer)` | F7's in-step copy stream and its events stay inside the kernel plugin (D8) |
-| `linear_experts@2` | unchanged, over a class arena `[S, …]`; compacted prefill groups are padded with null-slot rows so the kernel's own row count picks the reference chunk's path (D4) | the forced-tiling and compact-active-slot patches inside `kernels.ggml_cuda` |
+| `linear_experts@2` | unchanged; arenas use `linear_experts_arena@1` (below) | — |
+| `linear_experts_arena@1` | @2 over a class arena `[S, …]`: ids are arena slots, at most E + top_k distinct per call; facts @2's for the layer (E) plus `slots`; an `errors` word; @2's oracle. Compacted prefill groups are padded with null-slot rows so the kernel's own row count picks the reference chunk's path (D4) | `kernels.ggml_cuda` (its @2 kernel, with the forced-tiling and compact-active-slot patches) and `testing.ref_kernels` register it |
 | `cpu_experts@1` (CPU) | `(jobs grouped by expert, activations, host blocks, mapped f32 rows)` | bitwise per token across group sizes and thread counts; ISA constraint |
 | `moe_patch_rows@1` | `(y [T,k,H], CPU rows, job map)` | before `moe_combine@1` |
 | `cpu_task@1` | `signal(slot)`, `wait(slot)` graph ops + worker service | `kernels.cpu_task` (D6); fail-open: errors answer DONE and raise a flag |
@@ -784,3 +785,51 @@ re-added slots; Movers are S2 MemOps); §6.1 (the fill step and pinned split in 
 (per-layer ready events and layer-wise loading stay planned; prefix tiers move to milestone K); §7.10 (adaptive
 placement may run in snapshots when the consumer is placement-invariant); §9's expert-cache row (no VMM in the first
 wave). Design is updated with X's code, as M0.7 did.
+
+## 14. Step 2 as built (2026-10-17)
+
+`std.tiered` (TieredStore, ResidencyMap, the PlacementPolicy and Tier protocols, DeviceResolver, the pinned RAM tier
+`std.tiered.pinned@1`, the static policy `std.tiered.static@1`, the `O_DIRECT` extent reader), `std.moe.offload@1`
+bound by `moe.store` (absent: `std.moe.resident@1`, today's path), the contracts `moe_resolve@1` and
+`expert_fetch@1` (oracles in `std.moe.reference`, CPU providers in `testing.ref_kernels`, CUDA in the new
+`kernels.expert_io`), F1 and F5a. Evidence: `spikes/x2_store/README.md`, `evidence/x2_store_rtx-a5000_2026-10-17.json`
+— on the A5000 every fit (all, fill, 47%, 25%) is snapshot-identical to `std.moe@1` all-resident, run-identical ×3 at
+25%, with the unpatched ggml kernels (stream-k never engages at the vehicle's arena sizes, ≥ 136 slots, on any card:
+for the vehicle the D4 patches cut the arenas' mmq launch cost, which grows with the slots, so no unpatched prefill
+timing feeds the roofline; a small-arena GPU test does take stream-k and waits for them); the offload path costs
++0.20 ms per decode token with every expert cached; with the D4 patches merged the 100%, 47% and 25% fits stay
+identical (`evidence/x2_store_patched_rtx-a5000_2026-10-17.json`), and the full-fit trace runs as fast as
+all-resident (4.1 s against 4.0 s; 11.8 s unpatched); `mmap` + `cudaHostRegister` gathers at `cudaHostAlloc`'s rate (0.94–1.01×,
+noise between processes), huge pages or not.
+
+Decided while building, against the text above:
+- **Staging is min(E, k × a pass's tokens), a pass being `std.moe@1`'s 512-token chunk** — E for any real config
+  (128 per class on the vehicle, ≈ 0.54 GB with the null slots, not D5's ≈ 0.28 GB): prefill uses routed-only
+  staging until step 3's ring borrowing; then staging shrinks to D5's decode-sized count.
+- **One VRAM pool holds every class's arena.** The policy seeds whole experts within its bytes (and each class's
+  cap), then each class's arena — null, staging, the seeded cache slots — is laid out in it; per-class fill pools
+  grow one after another and starved the later classes. `moe.cache` (`<class>=<slots or fraction>`, `*` for
+  the rest) therefore **caps** a class's cache slots and pins the pool's size; the seed decides each arena's (with
+  `static`, deterministically). Kernels over an arena are bound through `linear_experts_arena@1` (§5), not
+  `linear_experts@2`, whose input domain (a stack of E experts) stays as it is: a contract of its own, with the
+  layer's facts (`experts` = E) plus the class's largest arena (`slots`), ids that are arena slots and at most
+  E + top_k of them distinct per call (the patched mmq's compact launch bound), and a declared `errors` word; resident
+  MoE keeps @2, so resident locks' kernel sites do not move.
+- **Errors reach the commit.** `moe_resolve@1` takes each role's arena size and flags a resident slot outside the
+  cache slots (RANGE; the entry reads a null slot), and the store watches the kernels' error words (kernels.ggml_cuda's
+  id-error word); the step's first resolve zeroes them, a commit that finds one set stops the engine.
+- **Row kinds come from the step's plan in `before_launch`:** a mixed step's leading rows and rows whose every query
+  token has logits are decode / verify, the rest prefill, tokens past them graph padding — so a one-token last
+  prompt chunk counts as decode outside mixed steps (D4 says prefill never counts; step 3 settles it with F11's
+  parity oracle). The step's first resolve zeroes its counts and applies its map edits in the forward; host edits
+  reach the device as their own entries (a scatter), never as the host's copy of the map, so device-owned regions
+  keep what the device wrote. `misses` is a running maximum since the last materialize.
+- **Not yet:** the delta log (its producer is step 3's device-owned resolvers), edits after the seed (two-phase
+  edits land with `profile_decay`; the store refuses them), an auxiliary model's experts through the store (an MTP
+  layer needs its sub-steps' row kinds; refused at build), `lfu` as the default (step 3; `static` until then).
+- The `Tier` protocol's members take the class name (a tier holds pieces of every class); the profile
+  (`moe.placement.profile`) is a JSON file `{"layers": {"<layer>": [count per expert]}}` named relative to the
+  checkpoint's directory, so a plan records no host path. §5 says profiles ship in model bundles: until
+  `holon_tools profile` (step 3) writes them there, a profile lies beside the checkpoint; a bundle-shipped profile
+  then needs the store to resolve the model plugin's bundle, decided with the tool. The store's options share the `moe.` prefix: `moe.store`,
+  `moe.placement`, `moe.placement.profile`, `moe.tiers`, `moe.cache`.

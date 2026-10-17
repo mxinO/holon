@@ -159,3 +159,131 @@ def test_the_structural_test_catches_a_misplaced_expert(tiny_moe, plant):
     with hf_moe_plants(layer=1, experts=8)[plant]():
         engine = _engine(checkpoint)
     assert mismatches(engine, checkpoint)
+
+
+def _served(engine, prompts) -> tuple[list, dict]:
+    """Greedy streams and prompt logprobs of `prompts`."""
+    rids = [engine.add(p, SamplingParams(temperature=0.0, max_tokens=1, prompt_logprobs=3)) for p in prompts]
+    got = {}
+    while engine.has_work():
+        got |= {d.rid: d.prompt_logprobs for d in engine.step() if d.prompt_logprobs is not None}
+    return engine.generate(prompts, GREEDY), [(got[r].token, got[r].top_ids, got[r].top) for r in rids]
+
+
+def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_path):
+    """docs/v1-offload.md D4, D5, F1, F5a: with `moe.store = std.moe.offload@1` the experts stay in the file's map and
+    in pinned host pools (filled from its extents), classes by (role, type, shape) — here gate/up Q8_0 and down
+    Q4_0 —, every miss fetched into staging slots: the outputs are bitwise the resident store's whatever the cache
+    holds (every expert by default, as many as a short fill pool's bytes hold, half, a profile's pick per class, none).
+    The static policy caches whole experts, item 0, 1, … of every layer, or a profile's hottest; a layer's distinct
+    misses never pass its staging slots, and a step that did would stop the engine."""
+    import json as json_
+
+    checkpoint, prompts = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
+    want = _served(_engine(file), prompts)
+    profile = tmp_path / "profile.json"
+    hot = [[3, 1], [6, 5]]                                       # per layer: the hottest experts, then the next
+    counts = np.zeros((2, 8))
+    for layer, (a, b) in enumerate(hot):
+        counts[layer, [a, b]] = [9, 5]
+    profile.write_text(json_.dumps({"layers": {str(layer): row for layer, row in enumerate(counts.tolist())}}))
+    for cache, extra, floor, cached in (("", {}, None, 8), ("", {}, 1800, None), ("*=0.5", {}, None, 4), (
+            "gate_up.q8_0.64x64=4,*=2", {"moe.placement.profile": profile.name}, None, 1), ("*=0", {}, None, 0)):
+        engine = _engine(file, host_memory=1 << 24, paged_min_tokens=floor, plugin_options={
+            "moe.store": "std.moe.offload@1", "moe.cache": cache, **extra})
+        store = engine.ctx.shared_objects["std.moe.offload"]
+        counts = []                                                    # each committed step's routing counts
+        store.policy.after_commit = lambda step, view, counts=counts: counts.append(step.sum()) or []
+        assert _served(engine, prompts) == want, cache
+        assert set(counts) <= {r * 2 * 2 for r in range(4)} and max(counts) == 12   # decode rows x top-2 x 2 layers
+        assert sorted(store.classes) == ["down.q4_0.64x32", "gate_up.q8_0.64x64"]
+        assert {c.host.capacity for c in store.classes.values()} == {16}          # 2 layers x 8 experts each
+        assert all(c.null == 2 and c.staging == 8 for c in store.classes.values())
+        resident = store.residency.host >= 0                                     # [layer, expert, role]
+        assert (resident.all(-1) == resident.any(-1)).all()                      # whole experts
+        per_layer = resident[..., 0].sum(-1).tolist()
+        if cached is None:             # a fill pool short of every expert: whole experts as far as its bytes go
+            cached = per_layer[0]
+            assert 0 < cached < 8 and per_layer[1] in (cached - 1, cached)
+            assert len(store.classes["gate_up.q8_0.64x64"].slots()) == 2 + 8 + sum(per_layer)
+        assert per_layer == [cached] * 2 or floor
+        if extra:
+            assert [sorted(np.flatnonzero(r).tolist()) for r in resident[..., 0]] == [[3], [6]]
+        elif cached:
+            assert resident[:, :per_layer[1]].all()
+        assert 0 < store.peak_misses <= store.staging if cached < 8 else store.peak_misses == 0
+    with pytest.raises(ValueError, match="relative to the checkpoint's directory"):   # plans record no host path
+        _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
+                                                           "moe.placement.profile": str(profile)})
+    store.staging = store.peak_misses - 1                                    # as if staging had been too small
+    engine.add(prompts[0], GREEDY)
+    with pytest.raises(RuntimeError, match="distinct misses"):
+        while engine.has_work():
+            engine.step()
+
+
+@pytest.fixture(scope="module")
+def gpu_moe(tmp_path_factory):
+    """A random Qwen3-MoE as a GGUF of two expert classes, hidden and expert widths 1024 (an mmq tile then runs
+    several K iterations: where stream-k engages it splits them), its prompts (decode-length to chunked prefill),
+    and the resident store's outputs on the GPU."""
+    torch.manual_seed(1)
+    cfg = Qwen3MoeConfig(vocab_size=512, hidden_size=1024, intermediate_size=1024, moe_intermediate_size=1024,
+                         num_hidden_layers=2, num_attention_heads=8, num_key_value_heads=2, head_dim=128,
+                         num_experts=8, num_experts_per_tok=2, norm_topk_prob=True, tie_word_embeddings=False,
+                         eos_token_id=None)
+    path = tmp_path_factory.mktemp("gpu_moe")
+    model = Qwen3MoeForCausalLM(cfg)
+    with torch.no_grad():
+        for layer in model.model.layers:
+            layer.mlp.gate.weight.mul_(8)
+    model.save_pretrained(path / "hf")
+    write(path / "hf", path / "moe.gguf", Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
+    prompts = [torch.randint(0, 512, (n,)).tolist() for n in (1, 7, 40, 300)]
+    engine = _gpu_engine(path / "moe.gguf")
+    want = _served(engine, prompts)
+    engine.close()
+    return path / "moe.gguf", prompts, want
+
+
+def _gpu_engine(model, **kw) -> Engine:
+    return Engine(EngineConfig(model=str(model), device="cuda", dtype=torch.bfloat16, page_size=16, max_seqs=4,
+                               max_step_tokens=256, max_model_len=512, cuda_graphs=True, overlap=True, **kw))
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("cache", ["", "*=0.25", "*=0"])     # arenas of 26, 14, 10 slots: stream-k unpatched
+def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, cache):
+    """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
+    resolve and zero-copy gather from mapped host pools), decode steps replayed from CUDA graphs and prefill chunked
+    past the mmvq limit: the offload store's streams and prompt logprobs are the resident store's, bit for bit. A
+    corrupt map entry is flagged by the resolve and stops the engine at the commit; the kernels' id-error word is
+    watched too. The arena pool is released when the ledger frees its pools (the startup profile reads free memory
+    then)."""
+    file, prompts, want = gpu_moe
+    engine = _gpu_engine(file, host_memory=1 << 26, plugin_options={"moe.store": "std.moe.offload@1",
+                                                                   "moe.cache": cache})
+    store = engine.ctx.shared_objects["std.moe.offload"]
+    commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
+    store.after_commit = lambda step, t: routed.append((int(step.n_query[step.n_query == step.n_logits].sum()) * 2 * 2,
+                                                         int(t["counts"].sum()))) or commit(step, t)
+    assert _served(engine, prompts) == want
+    assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
+    assert all(a == b for a, b in routed) and max(routed)[0] > 4      # top-2 x 2 layers; graph padding never counts
+    assert {v["provider"] for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")} == {"kernels.expert_io"}
+    experts = {k.rpartition("/")[2]: v["provider"] for k, v in engine.ctx.kernels.items() if "linear_experts" in k}
+    assert experts == {"linear_experts_arena@1": "kernels.ggml_cuda"}            # arenas never bind @2
+    words = [t for name, t in store.telemetry.items() if name.startswith("kernel_errors")]
+    assert len(words) == 1 and all(m._kernel.errors is words[0] for m in engine.executor.model.modules()
+                                   if hasattr(m, "cls"))          # the ggml id-error word, one per engine
+    if not cache:                                # a corrupt map entry: null slots read, the commit stops the engine
+        store.residency.device[0, :, 0] = 1 << 20
+        engine.add(prompts[0], GREEDY)
+        with pytest.raises(RuntimeError, match=r"flagged errors \{'errors': 1\}"):
+            while engine.has_work():
+                engine.step()
+    held, nbytes = torch.cuda.memory_allocated(), store.arena.capacity * store.arena.unit_bytes
+    store.arena._set(0)                         # as the ledger frees it: no view outlives the arena pool's buffer
+    assert held - torch.cuda.memory_allocated() >= nbytes > 0
+    engine.close()

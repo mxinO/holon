@@ -7,7 +7,7 @@ KV_LAYOUTS = ("kv.hnd", "kv.hnd.fp8", "kv.hnd.q8_0")    # every KV layout the pa
 # (std.weights.hf's reference), and dense stacks.
 HF = {"fp8_e4m3", "nvfp4", "mxfp4"}
 WEIGHT_SCHEMES = {"qlinear": {"ggml", *HF}, "qlinear_glu": {"ggml", *HF}, "qembedding": {"ggml"},
-                  "linear_experts": {"ggml", "dense", *HF}}
+                  "linear_experts": {"ggml", "dense", *HF}, "linear_experts_arena": {"ggml"}}
 
 
 def _reads(schemes: set[str]):

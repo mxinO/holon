@@ -92,7 +92,8 @@ forbidden_modules = ["holon_std"]
 [[tool.importlinter.contracts]]
 name = "std units are injected, never imported by each other"
 type = "independence"
-modules = ["holon_std.ops", "holon_std.blocks", "holon_std.ffn", "holon_std.moe", "holon_std.mixers.gqa", "holon_std.mixers.gdn",
+modules = ["holon_std.ops", "holon_std.blocks", "holon_std.ffn", "holon_std.moe", "holon_std.tiered",
+           "holon_std.mixers.gqa", "holon_std.mixers.gdn",
            "holon_std.state.paged", "holon_std.state.recurrent",
            "holon_std.sampling", "holon_std.weights.hf", "holon_std.weights.gguf", "holon_std.spec.greedy"]
 
@@ -101,6 +102,7 @@ name = "kernel plugins are selected by the core, never imported by each other"
 type = "independence"
 modules = ["holon_plugins.kernels.flashinfer", "holon_plugins.kernels.triton_attn",
            "holon_plugins.kernels.triton_experts", "holon_plugins.kernels.ggml_cuda", "holon_plugins.kernels.fla",
+           "holon_plugins.kernels.expert_io",
            "holon_plugins.kernels.gdn_triton"]
 
 [[tool.importlinter.contracts]]

@@ -11,12 +11,13 @@ provides = ["kernel.rmsnorm@1", "kernel.add_rmsnorm@1", "kernel.rope@1", "kernel
             "kernel.attention.paged_prefill@1", "kernel.attention.paged_decode@1", "kernel.attention.paged_verify@1",
             "kernel.attention.causal@1", "kernel.qlinear@2", "kernel.qlinear_glu@1", "kernel.qembedding@1",
             "kernel.linear_experts@2", "kernel.moe_topk@1", "kernel.moe_combine@1",
+            "kernel.moe_resolve@1", "kernel.expert_fetch@1", "kernel.linear_experts_arena@1",
             "kernel.causal_conv1d@1", "kernel.gated_delta_rule@1", "kernel.gated_rmsnorm@1", "kernel.gdn_rewind@1",
             "kernel.kv_write@1"]
 requires = ["op.rmsnorm@1", "op.add_rmsnorm@1", "op.rope@1", "op.silu_mul@1", "op.attention.paged_prefill@1",
             "op.attention.paged_decode@1", "op.attention.paged_verify@1", "op.attention.causal@1", "op.qlinear@2",
-            "op.qlinear_glu@1",
-            "op.qembedding@1", "op.linear_experts@2", "op.moe_topk@1", "op.moe_combine@1",
+            "op.qlinear_glu@1", "op.qembedding@1", "op.linear_experts@2", "op.moe_topk@1", "op.moe_combine@1",
+            "op.moe_resolve@1", "op.expert_fetch@1", "op.linear_experts_arena@1",
             "op.causal_conv1d@1", "op.gated_delta_rule@1", "op.gated_rmsnorm@1", "op.gdn_rewind@1", "op.kv_write@1"]
 
 [properties]

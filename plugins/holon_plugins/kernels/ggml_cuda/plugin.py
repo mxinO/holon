@@ -65,6 +65,7 @@ from . import extension
 
 QLINEAR, QLINEAR_GLU, QEMBEDDING = "qlinear", "qlinear_glu", "qembedding"
 LINEAR_EXPERTS, MOE_TOPK, MOE_COMBINE = "linear_experts", "moe_topk", "moe_combine"
+LINEAR_EXPERTS_ARENA = "linear_experts_arena"     # the same kernel over an offload store's arena (ids are its slots)
 CHUNK = 512                     # mmq rows per call: llama.cpp's ubatch; sizes the workspace and the f32 buffer
 ID_PAIRS = 16384                # the most (token, expert) pairs mmq's id helper sorts per call (mmid.cuh)
 # The bits mmq's id helper ors into `LinearExperts.errors` for a violated precondition (GGML_CUDA_MM_IDS_ERR_*)
@@ -532,7 +533,8 @@ class Plugin:
                                                      (NATIVE_FP4, frozenset({120}), 11, ("a4",), FP4)):
             for op, impl, supports in ((QLINEAR, QLinear, _supports_qlinear),
                                        (QLINEAR_GLU, QLinearGlu, _supports_qlinear_glu),
-                                       (LINEAR_EXPERTS, LinearExperts, _supports_linear_experts)):
+                                       (LINEAR_EXPERTS, LinearExperts, _supports_linear_experts),
+                                       (LINEAR_EXPERTS_ARENA, LinearExperts, _supports_linear_experts)):
                 add(op, functools.partial(impl, ext, act),
                     functools.partial(supports, act_quant=act_quant, types=types), sms, priority, act)
         add(QEMBEDDING, functools.partial(QEmbedding, ext), _supports_qembedding)
