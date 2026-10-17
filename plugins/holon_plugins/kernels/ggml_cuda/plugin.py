@@ -67,10 +67,12 @@ QLINEAR, QLINEAR_GLU, QEMBEDDING = "qlinear", "qlinear_glu", "qembedding"
 LINEAR_EXPERTS, MOE_TOPK, MOE_COMBINE = "linear_experts", "moe_topk", "moe_combine"
 LINEAR_EXPERTS_ARENA = "linear_experts_arena"     # the same kernel over an offload store's arena (ids are its slots)
 CHUNK = 512                     # mmq rows per call: llama.cpp's ubatch; sizes the workspace and the f32 buffer
-ID_PAIRS = 16384                # the most (token, expert) pairs mmq's id helper sorts per call (mmid.cuh)
-# An offload arena's calls carry one expert pass of a large prefill chunk (docs/v1-offload.md D8): mmq takes as many
-# rows per call as the id helper sorts (2,048 at top-8), in whole CHUNKs, so a row's chunk and path stay the reference's
-# (the pass's caller cuts its last partial chunk off); a call's rows are bitwise the same at any rows per call.
+ID_PAIRS = 32768                # the most (token, expert) pairs mmq's id helper sorts per call (mmid.cuh)
+PASS_ROWS = 4096                # the largest expert pass of a prefill chunk (docs/v1-offload.md D8)
+# An offload arena's calls carry one expert pass of a large prefill chunk (D8): mmq takes the pass's rows in one call
+# where the id helper sorts them (4,096 at top-8: its device-wide path past one block's 16,384 pairs), in whole
+# CHUNKs, so a row's chunk and path stay the reference's (the pass's caller cuts its last partial chunk off); a
+# call's rows are bitwise the same at any rows per call.
 # The bits mmq's id helper ors into `LinearExperts.errors` for a violated precondition (GGML_CUDA_MM_IDS_ERR_*)
 ID_ERRORS = {"slots": 1,        # more distinct slots in a call's ids than `LinearExperts.slots`
              "range": 2,        # an id outside the stack's slots
@@ -408,7 +410,7 @@ class LinearExperts(_Matmul):
         self.out_y = self.out // 2 if self.swiglu else self.out
         # llama.cpp's choice per chunk from its token count (fixed per graph bucket): mmvq with ids, else mmq
         self.mmvq_tokens = max((n for n in range(1, 9) if self.lib.use_mmvq_id(self.device, self.type, n)), default=0)
-        self.chunk = max(CHUNK, ID_PAIRS // self.top_k // CHUNK * CHUNK) if "slots" in facts else CHUNK
+        self.chunk = max(CHUNK, min(PASS_ROWS, ID_PAIRS // self.top_k) // CHUNK * CHUNK) if "slots" in facts else CHUNK
         self._uses_mmq(self.mmvq_tokens, facts["layout"])
         # the most distinct slots a call's ids name: one per expert, plus per routing rank one standing in for a miss
         # or a padding row (an offload arena's null slots, docs/v1-offload.md D5); it bounds mmq's compact launch, which

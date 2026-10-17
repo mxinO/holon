@@ -271,13 +271,15 @@ int holon_ggml_use_mmvq_id(int type, int64_t tokens) {
 
 size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int64_t slots) {
     // as ggml_cuda_mul_mat_q allocates with ids: ids_src1, ids_dst (padded by J - 1 <= 127 for its unconditional
-    // reads), expert_bounds and the slots of the compact launch's z entries (mmid.cuh), then q8_1 as a dense call
-    // over the tokens·k (token, slot) rows; no stream-k fixup (mmq with ids always tiles); mmvq with ids needs less
+    // reads), expert_bounds and the slots of the compact launch's z entries, the helper's scratch (mmid.cuh), then
+    // q8_1 as a dense call over the tokens·k (token, slot) rows; no stream-k fixup (mmq with ids always tiles); mmvq
+    // with ids needs less
     const size_t ids_src1 = GGML_PAD(tokens*k*sizeof(int32_t), POOL_ALIGN);
     const size_t ids_dst = GGML_PAD((tokens*k + 127)*sizeof(int32_t), POOL_ALIGN);
     const int64_t n_z = std::min(slots, tokens*k) + GGML_CUDA_MM_IDS_SPARE_Z; // ggml_cuda_mm_ids_nz's bound
     const size_t bounds = GGML_PAD((2*n_z + 1)*sizeof(int32_t), POOL_ALIGN);
-    return ids_src1 + ids_dst + bounds + workspace_bytes(in, tokens*k, 0);
+    const size_t helper = GGML_PAD(ggml_cuda_mm_ids_scratch_bytes(tokens*k), POOL_ALIGN); // the device-wide sort's
+    return ids_src1 + ids_dst + bounds + helper + workspace_bytes(in, tokens*k, 0);
 }
 
 void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, int64_t in, const void * x, int x_bf16,

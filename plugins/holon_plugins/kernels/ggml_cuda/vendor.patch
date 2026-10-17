@@ -30,22 +30,25 @@ diff -ruN a/ggml/src/ggml-cuda/common.cuh b/ggml/src/ggml-cuda/common.cuh
 diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 --- a/ggml/src/ggml-cuda/mmid.cu
 +++ b/ggml/src/ggml-cuda/mmid.cu
-@@ -1,179 +1,232 @@
+@@ -1,179 +1,391 @@
  #include "common.cuh"
  #include "mmid.cuh"
  
 -// To reduce shared memory use, store "it" and "iex_used" with 22/10 bits each.
 -struct mm_ids_helper_store {
 -    uint32_t data;
-+#include <cub/block/block_radix_sort.cuh>
-+#include <cub/block/block_scan.cuh>
- 
+-
 -    __device__ mm_ids_helper_store(const uint32_t it, const uint32_t iex_used) {
 -        data = (it & 0x003FFFFF) | (iex_used << 22);
 -    }
 -
 -    __device__ uint32_t it() const {
 -        return data & 0x003FFFFF;
++#include <cub/block/block_radix_sort.cuh>
++#include <cub/block/block_scan.cuh>
++#include <cub/device/device_radix_sort.cuh>
++#include <cub/device/device_scan.cuh>
++
 +// Holon: the helper is rewritten (docs/v1-offload.md D4). Both paths order the compact rows as ggml does, slots
 +// ascending and each slot's (token, iex) pairs in order, give every pair its own row (a slot repeated inside a row
 +// included), put pairs with an id outside [0, n_experts) last (no slot lists them), and report a violated
@@ -55,6 +58,9 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +// - compact: one block radix-sorts the pairs, keys `slot << pair_bits | pair` sorted on the slot bits (stable), and
 +//   lists the active slots; mmq launches over ggml_cuda_mm_ids_nz of them, which bounds it by the call's slots
 +//   instead of the stack's.
++// - device-wide (a call past one block's GGML_CUDA_MM_IDS_BLOCK_PAIRS): the compact path's keys sorted on the same
++//   bits by cub's device radix sort (stable), its rows, bounds and checks over the whole call in three more kernels
++//   and a device scan: the compact path's outputs, for an eager prefill pass's call of up to 4,096 rows.
 +
 +static __device__ __forceinline__ void mm_ids_error(int32_t * errors, const int bit) {
 +    if (errors) {
@@ -77,13 +83,13 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
      }
 -};
 -static_assert(sizeof(mm_ids_helper_store) == 4, "unexpected size for mm_ids_helper_store");
--
++}
+ 
 -// the generic path passes 0, which needs no padding since it never groups lanes by token
 -template <int n> struct mm_ids_pow2 { static constexpr int value = 2*mm_ids_pow2<(n + 1)/2>::value; };
 -template <>      struct mm_ids_pow2<1> { static constexpr int value = 1; };
 -template <>      struct mm_ids_pow2<0> { static constexpr int value = 1; };
-+}
- 
+-
 -// Helper function for mul_mat_id, converts ids to a more convenient format.
 -// ids_src1 describes how to permute the flattened column indices of src1 in order to get a compact src1 tensor sorted by expert.
 -// ids_dst describes the same mapping but for the dst tensor.
@@ -127,26 +133,6 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 -
 -    int nex_prev   = 0; // Number of columns for experts with a lower index.
 -    int it_compact = 0; // Running index for the compact slice of this expert.
--
--    if constexpr (n_expert_used_template == 0) {
--        // Generic implementation:
--        for (int it = 0; it < n_tokens; ++it) {
--            int iex_used = -1; // The index at which the expert is used, if any.
--            for (int iex = threadIdx.x; iex < n_expert_used; iex += warp_size) {
--                const int expert_used = ids[it*si1 + iex];
--                nex_prev += expert_used < expert;
--                if (expert_used == expert) {
--                    iex_used = iex;
--                }
--            }
--
--            if (iex_used != -1) {
--                store[it_compact] = mm_ids_helper_store(it, iex_used);
--            }
--
--            if (warp_reduce_any<warp_size>(iex_used != -1)) {
--                it_compact++;
--            }
 +    for (int i = lane; i < it_compact; i += WARP_SIZE) {
 +        mm_ids_write_row(ids_src1, ids_dst, pairs_mm_ids_helper[i], nex_prev + i, n_expert_used, nchannels_y, sis1, write_inverse);
 +    }
@@ -158,27 +144,23 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +        expert_bounds[n_experts + 1 + expert] = expert;
 +        if (it_compact > max_cols) {
 +            mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_COLUMNS);
-         }
--    } else {
--        // Implementation optimized for specific numbers of experts used:
--        // a warp holds a whole number of token slots, so the slot count is padded to a power of 2
--        constexpr int neu_padded = mm_ids_pow2<n_expert_used_template>::value;
--        static_assert(neu_padded <= warp_size && warp_size % neu_padded == 0, "bad n_expert_used");
--        for (int it0 = 0; it0 < n_tokens; it0 += warp_size/neu_padded) {
--            const int it = it0 + threadIdx.x / neu_padded;
--
--            const int iex = threadIdx.x % neu_padded; // The index at which the expert is used, if any.
--            const int expert_used = (neu_padded == n_expert_used || iex < n_expert_used) && it < n_tokens ?
--                ids[it*si1 + iex] : INT_MAX;
--            const int iex_used = expert_used == expert ? iex : -1;
--            nex_prev += expert_used < expert;
++        }
 +    } else if (it_compact > 0) {
 +        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
 +    }
 +}
  
--            // Whether the threads at this token position have used the expert:
--            const int it_compact_add_self = warp_reduce_any<neu_padded>(iex_used != -1);
+-    if constexpr (n_expert_used_template == 0) {
+-        // Generic implementation:
+-        for (int it = 0; it < n_tokens; ++it) {
+-            int iex_used = -1; // The index at which the expert is used, if any.
+-            for (int iex = threadIdx.x; iex < n_expert_used; iex += warp_size) {
+-                const int expert_used = ids[it*si1 + iex];
+-                nex_prev += expert_used < expert;
+-                if (expert_used == expert) {
+-                    iex_used = iex;
+-                }
+-            }
 +template <int threads, int items>
 +__launch_bounds__(threads, 1)
 +static __global__ void mm_ids_helper_compact(
@@ -191,17 +173,12 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +    __shared__ uint32_t last_slot[threads];
 +    __shared__ int n_valid;   // the rows with an id in range: the pairs past them have slot n_experts
  
--            // Do a scan over threads at lower token positions in warp to get the correct index for writing data:
--            int it_compact_add_lower = 0;
+-            if (iex_used != -1) {
+-                store[it_compact] = mm_ids_helper_store(it, iex_used);
+-            }
 +    const int tid = threadIdx.x;
 +    uint32_t keys[items]; // compact rows tid·items + q: a blocked arrangement, before and after the sort
- #pragma unroll
--            for (int offset = neu_padded; offset < warp_size; offset += neu_padded) {
--                const int tmp = __shfl_up_sync(0xFFFFFFFF, it_compact_add_self, offset, warp_size);
--                if (threadIdx.x >= static_cast<unsigned int>(offset)) {
--                    it_compact_add_lower += tmp;
--                }
--            }
++#pragma unroll
 +    for (int q = 0; q < items; ++q) {
 +        const int i = tid*items + q;
 +        const int id = i < n_pairs ? ids[(i / n_expert_used)*si1 + i % n_expert_used] : n_experts;
@@ -230,8 +207,8 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +    int n_active;
 +    block_scan(*(typename block_scan::TempStorage *) data_mm_ids_helper).ExclusiveSum(n_heads, z, n_active);
  
--            if (iex_used != -1) {
--                store[it_compact + it_compact_add_lower] = mm_ids_helper_store(it, iex_used);
+-            if (warp_reduce_any<warp_size>(iex_used != -1)) {
+-                it_compact++;
 +#pragma unroll
 +    for (int q = 0; q < items; ++q) {
 +        const int r = tid*items + q;
@@ -246,16 +223,101 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +            } else if (z == n_z) {
 +                expert_bounds[z] = r; // the end of the last listed slot's rows
              }
--
--            // The thread with the highest index in the warp always has the sum over the whole warp, use it to increment all threads:
--            it_compact += __shfl_sync(0xFFFFFFFF, it_compact_add_lower + it_compact_add_self, warp_size - 1, warp_size);
 +            ++z;
          }
+-    } else {
+-        // Implementation optimized for specific numbers of experts used:
+-        // a warp holds a whole number of token slots, so the slot count is padded to a power of 2
+-        constexpr int neu_padded = mm_ids_pow2<n_expert_used_template>::value;
+-        static_assert(neu_padded <= warp_size && warp_size % neu_padded == 0, "bad n_expert_used");
+-        for (int it0 = 0; it0 < n_tokens; it0 += warp_size/neu_padded) {
+-            const int it = it0 + threadIdx.x / neu_padded;
+-
+-            const int iex = threadIdx.x % neu_padded; // The index at which the expert is used, if any.
+-            const int expert_used = (neu_padded == n_expert_used || iex < n_expert_used) && it < n_tokens ?
+-                ids[it*si1 + iex] : INT_MAX;
+-            const int iex_used = expert_used == expert ? iex : -1;
+-            nex_prev += expert_used < expert;
 +        mm_ids_write_row(ids_src1, ids_dst, keys[q] & ((1u << pair_bits) - 1), r, n_expert_used, nchannels_y, sis1, write_inverse);
-     }
++    }
++    __syncthreads();
++    // the entries past the active slots are empty and name slot 0, which mmq never reads for them
++    for (int i = min(n_active, n_z + 1) + tid; i <= n_z; i += threads) {
++        expert_bounds[i] = n_valid;
++        if (i < n_z) {
++            expert_bounds[n_z + 1 + i] = 0;
++        }
++    }
++    __syncthreads();
++    for (int i = tid; i < min(n_active, n_z); i += threads) {
++        if (expert_bounds[i + 1] - expert_bounds[i] > max_cols) {
++            mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_COLUMNS);
++        }
++    }
++    if (tid == 0 && n_active > n_z) {
++        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_SLOTS);
++    }
++    if (tid == 0 && n_valid < n_pairs) {
++        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
++    }
++}
+ 
+-            // Whether the threads at this token position have used the expert:
+-            const int it_compact_add_self = warp_reduce_any<neu_padded>(iex_used != -1);
++template <int threads, int items>
++static void launch_mm_ids_helper_compact(
++        const int32_t * __restrict__ ids, int32_t * __restrict__ ids_src1, int32_t * __restrict__ ids_dst, int32_t * __restrict__ expert_bounds,
++        const int n_experts, const int n_z, const int n_pairs, const int pair_bits, const int slot_bits, const int n_expert_used,
++        const int nchannels_y, const int si1, const int sis1, const bool write_inverse, const int max_cols, int32_t * errors,
++        cudaStream_t stream) {
++    const size_t nbytes_shared = std::max(sizeof(typename cub::BlockRadixSort<uint32_t, threads, items>::TempStorage),
++                                          sizeof(typename cub::BlockScan<int, threads>::TempStorage));
++    CUDA_SET_SHARED_MEMORY_LIMIT((mm_ids_helper_compact<threads, items>), nbytes_shared);
++    mm_ids_helper_compact<threads, items><<<1, threads, nbytes_shared, stream>>>
++        (ids, ids_src1, ids_dst, expert_bounds, n_experts, n_z, n_pairs, pair_bits, slot_bits, n_expert_used, nchannels_y, si1,
++         sis1, write_inverse, max_cols, errors);
++}
+ 
+-            // Do a scan over threads at lower token positions in warp to get the correct index for writing data:
+-            int it_compact_add_lower = 0;
+-#pragma unroll
+-            for (int offset = neu_padded; offset < warp_size; offset += neu_padded) {
+-                const int tmp = __shfl_up_sync(0xFFFFFFFF, it_compact_add_self, offset, warp_size);
+-                if (threadIdx.x >= static_cast<unsigned int>(offset)) {
+-                    it_compact_add_lower += tmp;
+-                }
+-            }
++// The device-wide path's scratch: the keys before and after the sort, each row's head flag and its z (an exclusive
++// scan of the flags), the rows with an id in range and the active slots, then cub's temporary storage.
++struct mm_ids_scratch {
++    uint32_t * keys_in;
++    uint32_t * keys_out;
++    int * heads;
++    int * z;
++    int * n_valid;
++    int * n_active;
++    void * temp;
++    size_t temp_bytes;
++    size_t total_bytes;
++};
+ 
+-            if (iex_used != -1) {
+-                store[it_compact + it_compact_add_lower] = mm_ids_helper_store(it, iex_used);
+-            }
++static size_t mm_ids_align(const size_t n) {
++    return (n + 255) / 256 * 256;
++}
+ 
+-            // The thread with the highest index in the warp always has the sum over the whole warp, use it to increment all threads:
+-            it_compact += __shfl_sync(0xFFFFFFFF, it_compact_add_lower + it_compact_add_self, warp_size - 1, warp_size);
+-        }
+-    }
 -    nex_prev = warp_reduce_sum<warp_size>(nex_prev);
 -    ggml_cuda_syncwarp();
--
++static bool mm_ids_device_wide(const int64_t n_pairs) {
++    return n_pairs > GGML_CUDA_MM_IDS_BLOCK_PAIRS;
++}
+ 
 -    for (int itc = threadIdx.x; itc < it_compact; itc += warp_size) {
 -        const mm_ids_helper_store store_it = store[itc];
 -        const int it       = store_it.it();
@@ -266,42 +328,121 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 -            ids_src1[it*n_expert_used + iex_used] = nex_prev + itc;
 -        } else {
 -            ids_src1[nex_prev + itc] = it*sis1 + iex_used % nchannels_y;
-+    __syncthreads();
-+    // the entries past the active slots are empty and name slot 0, which mmq never reads for them
-+    for (int i = min(n_active, n_z + 1) + tid; i <= n_z; i += threads) {
+-        }
++// the layout over `base` (NULL: its size only)
++static mm_ids_scratch mm_ids_scratch_layout(char * base, const int n_pairs) {
++    size_t sort_bytes = 0;
++    size_t scan_bytes = 0;
++    CUDA_CHECK(cub::DeviceRadixSort::SortKeys(nullptr, sort_bytes, (const uint32_t *) nullptr, (uint32_t *) nullptr, n_pairs));
++    CUDA_CHECK(cub::DeviceScan::ExclusiveSum(nullptr, scan_bytes, (const int *) nullptr, (int *) nullptr, n_pairs));
++    const size_t words = mm_ids_align(n_pairs*sizeof(uint32_t));
++    mm_ids_scratch s = {};
++    s.temp_bytes = std::max(sort_bytes, scan_bytes);
++    s.total_bytes = 4*words + 256 + mm_ids_align(s.temp_bytes);
++    if (base != nullptr) {
++        s.keys_in  = (uint32_t *) base;
++        s.keys_out = (uint32_t *) (base + words);
++        s.heads    = (int *) (base + 2*words);
++        s.z        = (int *) (base + 3*words);
++        s.n_valid  = (int *) (base + 4*words);
++        s.n_active = s.n_valid + 1;
++        s.temp     = base + 4*words + 256;
+     }
++    return s;
++}
+ 
+-    if (threadIdx.x != 0) {
++size_t ggml_cuda_mm_ids_scratch_bytes(const int n_pairs) {
++    return mm_ids_device_wide(n_pairs) ? mm_ids_scratch_layout(nullptr, n_pairs).total_bytes : 0;
++}
++
++static __global__ void mm_ids_device_keys(
++        const int32_t * __restrict__ ids, uint32_t * __restrict__ keys, int * __restrict__ n_valid, const int n_experts,
++        const int n_pairs, const int pair_bits, const int n_expert_used, const int si1) {
++    const int i = blockIdx.x*blockDim.x + threadIdx.x;
++    if (i >= n_pairs) {
+         return;
+     }
++    const int id = ids[(i / n_expert_used)*si1 + i % n_expert_used];
++    keys[i] = uint32_t(0 <= id && id < n_experts ? id : n_experts) << pair_bits | i;
++    if (i == 0) {
++        *n_valid = n_pairs;
++    }
++}
+ 
+-    expert_bounds[expert] = nex_prev;
++// row r of the sorted keys: its compact row, whether it starts an active slot's range, where the pairs past every
++// slot's (an id out of range) start
++static __global__ void mm_ids_device_rows(
++        const uint32_t * __restrict__ keys, int * __restrict__ heads, int * __restrict__ n_valid, int32_t * __restrict__ ids_src1,
++        int32_t * __restrict__ ids_dst, const int n_experts, const int n_pairs, const int pair_bits, const int n_expert_used,
++        const int nchannels_y, const int sis1, const bool write_inverse) {
++    const int r = blockIdx.x*blockDim.x + threadIdx.x;
++    if (r >= n_pairs) {
++        return;
++    }
++    const uint32_t slot = keys[r] >> pair_bits;
++    const bool head = slot != (r > 0 ? keys[r - 1] >> pair_bits : UINT32_MAX);
++    heads[r] = head && slot < uint32_t(n_experts);
++    if (head && slot == uint32_t(n_experts)) {
++        *n_valid = r;
++    }
++    mm_ids_write_row(ids_src1, ids_dst, keys[r] & ((1u << pair_bits) - 1), r, n_expert_used, nchannels_y, sis1, write_inverse);
++}
+ 
+-    if (expert < static_cast<int>(gridDim.x) - 1) {
++static __global__ void mm_ids_device_bounds(
++        const uint32_t * __restrict__ keys, const int * __restrict__ heads, const int * __restrict__ z, int32_t * __restrict__ expert_bounds,
++        int * __restrict__ n_active, const int n_z, const int n_pairs, const int pair_bits) {
++    const int r = blockIdx.x*blockDim.x + threadIdx.x;
++    if (r >= n_pairs) {
++        return;
++    }
++    if (r == n_pairs - 1) {
++        *n_active = z[r] + heads[r];
++    }
++    if (!heads[r]) {
+         return;
+     }
++    if (z[r] < n_z) {
++        expert_bounds[z[r]] = r;
++        expert_bounds[n_z + 1 + z[r]] = keys[r] >> pair_bits;
++    } else if (z[r] == n_z) {
++        expert_bounds[z[r]] = r; // the end of the last listed slot's rows
++    }
++}
+ 
+-    expert_bounds[gridDim.x] = nex_prev + it_compact;
++// as the compact path's end: the entries past the active slots, then the checks
++static __global__ void mm_ids_device_finish(
++        int32_t * __restrict__ expert_bounds, const int * __restrict__ n_active_p, const int * __restrict__ n_valid_p,
++        const int n_z, const int n_pairs, const int max_cols, int32_t * __restrict__ errors) {
++    const int tid = threadIdx.x;
++    const int n_active = *n_active_p;
++    const int n_valid = *n_valid_p;
++    for (int i = min(n_active, n_z + 1) + tid; i <= n_z; i += blockDim.x) {
 +        expert_bounds[i] = n_valid;
 +        if (i < n_z) {
 +            expert_bounds[n_z + 1 + i] = 0;
-         }
-     }
--
--    if (threadIdx.x != 0) {
--        return;
++        }
++    }
 +    __syncthreads();
-+    for (int i = tid; i < min(n_active, n_z); i += threads) {
++    for (int i = tid; i < min(n_active, n_z); i += blockDim.x) {
 +        if (expert_bounds[i + 1] - expert_bounds[i] > max_cols) {
 +            mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_COLUMNS);
 +        }
-     }
--
--    expert_bounds[expert] = nex_prev;
--
--    if (expert < static_cast<int>(gridDim.x) - 1) {
--        return;
++    }
 +    if (tid == 0 && n_active > n_z) {
 +        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_SLOTS);
 +    }
 +    if (tid == 0 && n_valid < n_pairs) {
 +        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
-     }
--
--    expert_bounds[gridDim.x] = nex_prev + it_compact;
++    }
  }
  
 -template <int n_expert_used_template>
 -static void launch_mm_ids_helper(
-+template <int threads, int items>
-+static void launch_mm_ids_helper_compact(
++static void launch_mm_ids_helper_device(
          const int32_t * __restrict__ ids, int32_t * __restrict__ ids_src1, int32_t * __restrict__ ids_dst, int32_t * __restrict__ expert_bounds,
 -        const int n_experts, const int n_tokens, const int n_expert_used_var, const int nchannels_y, const int si1, const int sis1, const bool write_inverse, cudaStream_t stream) {
 -    GGML_ASSERT(n_tokens          < (1 << 22) && "too few bits in mm_ids_helper_store");
@@ -320,13 +461,19 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 -        (ids, ids_src1, ids_dst, expert_bounds, n_tokens, n_expert_used_var, nchannels_y, si1, sis1, write_inverse);
 +        const int n_experts, const int n_z, const int n_pairs, const int pair_bits, const int slot_bits, const int n_expert_used,
 +        const int nchannels_y, const int si1, const int sis1, const bool write_inverse, const int max_cols, int32_t * errors,
-+        cudaStream_t stream) {
-+    const size_t nbytes_shared = std::max(sizeof(typename cub::BlockRadixSort<uint32_t, threads, items>::TempStorage),
-+                                          sizeof(typename cub::BlockScan<int, threads>::TempStorage));
-+    CUDA_SET_SHARED_MEMORY_LIMIT((mm_ids_helper_compact<threads, items>), nbytes_shared);
-+    mm_ids_helper_compact<threads, items><<<1, threads, nbytes_shared, stream>>>
-+        (ids, ids_src1, ids_dst, expert_bounds, n_experts, n_z, n_pairs, pair_bits, slot_bits, n_expert_used, nchannels_y, si1,
-+         sis1, write_inverse, max_cols, errors);
++        void * scratch, cudaStream_t stream) {
++    GGML_ASSERT(scratch != nullptr && (uintptr_t) scratch % 256 == 0 && "mm_ids_helper's device-wide path needs its scratch");
++    mm_ids_scratch s = mm_ids_scratch_layout((char *) scratch, n_pairs);
++    const int threads = 256;
++    const int blocks = (n_pairs + threads - 1) / threads;
++    mm_ids_device_keys<<<blocks, threads, 0, stream>>>(ids, s.keys_in, s.n_valid, n_experts, n_pairs, pair_bits, n_expert_used, si1);
++    CUDA_CHECK(cub::DeviceRadixSort::SortKeys(s.temp, s.temp_bytes, s.keys_in, s.keys_out, n_pairs, pair_bits,
++                                              pair_bits + slot_bits, stream));
++    mm_ids_device_rows<<<blocks, threads, 0, stream>>>(s.keys_out, s.heads, s.n_valid, ids_src1, ids_dst, n_experts, n_pairs,
++                                                       pair_bits, n_expert_used, nchannels_y, sis1, write_inverse);
++    CUDA_CHECK(cub::DeviceScan::ExclusiveSum(s.temp, s.temp_bytes, s.heads, s.z, n_pairs, stream));
++    mm_ids_device_bounds<<<blocks, threads, 0, stream>>>(s.keys_out, s.heads, s.z, expert_bounds, s.n_active, n_z, n_pairs, pair_bits);
++    mm_ids_device_finish<<<1, 1024, 0, stream>>>(expert_bounds, s.n_active, s.n_valid, n_z, n_pairs, max_cols, errors);
  }
  
  void ggml_cuda_launch_mm_ids_helper(
@@ -358,7 +505,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 -            launch_mm_ids_helper< 0>(ids, ids_src1, ids_dst, expert_bounds, n_experts, n_tokens, n_expert_used, nchannels_y, si1, sis1, write_inverse, stream);
 -            break;
 +        const int n_experts, const int n_z, const int n_tokens, const int n_expert_used, const int nchannels_y, const int si1, const int sis1,
-+        const bool write_inverse, const int max_cols, int32_t * errors, cudaStream_t stream) {
++        const bool write_inverse, const int max_cols, int32_t * errors, void * scratch, cudaStream_t stream) {
 +    GGML_ASSERT(int64_t(n_tokens)*n_expert_used <= GGML_CUDA_MM_IDS_MAX_PAIRS && "too many (token, expert) pairs for mm_ids_helper");
 +    const int n_pairs = n_tokens*n_expert_used;
 +
@@ -389,6 +536,12 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +    }
 +    GGML_ASSERT(pair_bits + slot_bits <= 32 && "too few bits in mm_ids_helper's keys");
 +
++    if (mm_ids_device_wide(n_pairs)) {
++        launch_mm_ids_helper_device(ids, ids_src1, ids_dst, expert_bounds, n_experts, n_z, n_pairs, pair_bits, slot_bits,
++            n_expert_used, nchannels_y, si1, sis1, write_inverse, max_cols, errors, scratch, stream);
++        return;
++    }
++
 +#define LAUNCH_MM_IDS_HELPER(threads, items)                                                                              \
 +    launch_mm_ids_helper_compact<threads, items>(ids, ids_src1, ids_dst, expert_bounds, n_experts, n_z, n_pairs, pair_bits, \
 +        slot_bits, n_expert_used, nchannels_y, si1, sis1, write_inverse, max_cols, errors, stream)
@@ -403,7 +556,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +    } else if (n_pairs <= 4096) {
 +        LAUNCH_MM_IDS_HELPER(1024, 4);
 +    } else {
-+        static_assert(GGML_CUDA_MM_IDS_MAX_PAIRS == 1024*16, "the largest instance holds GGML_CUDA_MM_IDS_MAX_PAIRS");
++        static_assert(GGML_CUDA_MM_IDS_BLOCK_PAIRS == 1024*16, "the largest instance holds GGML_CUDA_MM_IDS_BLOCK_PAIRS");
 +        LAUNCH_MM_IDS_HELPER(1024, 16);
      }
 +#undef LAUNCH_MM_IDS_HELPER
@@ -411,11 +564,18 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 diff -ruN a/ggml/src/ggml-cuda/mmid.cuh b/ggml/src/ggml-cuda/mmid.cuh
 --- a/ggml/src/ggml-cuda/mmid.cuh
 +++ b/ggml/src/ggml-cuda/mmid.cuh
-@@ -1,5 +1,42 @@
+@@ -1,5 +1,50 @@
  #pragma once
  
-+// Holon: the most (token, expert) pairs one call sorts (mm_ids_helper's largest instance: 1024 threads x 16)
-+#define GGML_CUDA_MM_IDS_MAX_PAIRS 16384
++// Holon: the most (token, expert) pairs one block sorts (mm_ids_helper's largest instance: 1024 threads x 16)
++#define GGML_CUDA_MM_IDS_BLOCK_PAIRS 16384
++
++// Holon: the most (token, expert) pairs one call sorts: past GGML_CUDA_MM_IDS_BLOCK_PAIRS, the device-wide path (an
++// eager prefill pass of up to 4,096 rows at top-8, docs/v1-offload.md D8)
++#define GGML_CUDA_MM_IDS_MAX_PAIRS 32768
++
++// Holon: the scratch bytes the helper takes for a call of n_pairs pairs (the device-wide path's; 0 for the others)
++size_t ggml_cuda_mm_ids_scratch_bytes(int n_pairs);
 +
 +// Holon: violated preconditions the helper reports (or'd into its `errors` word); the rows it names are not computed
 +#define GGML_CUDA_MM_IDS_ERR_SLOTS   1 // more distinct slots than the call's bound (ids_slots)
@@ -449,12 +609,13 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cuh b/ggml/src/ggml-cuda/mmid.cuh
 +// ids_src1[pair] = r). expert_bounds holds n_z + 1 bounds, the first compact row of each listed slot in ascending
 +// order and then the end of their rows, followed by the n_z slots themselves (0 past the active ones);
 +// n_z = ggml_cuda_mm_ids_nz. Pairs mmq does not compute (an id out of range, slots past n_z, a slot's pairs past
-+// max_cols, mmq's column tiles) set their GGML_CUDA_MM_IDS_ERR_* bit in *errors (if not NULL).
++// max_cols, mmq's column tiles) set their GGML_CUDA_MM_IDS_ERR_* bit in *errors (if not NULL). `scratch`: at least
++// ggml_cuda_mm_ids_scratch_bytes device bytes, 256-byte aligned.
  void ggml_cuda_launch_mm_ids_helper(
          const int32_t * ids, int32_t * ids_src1, int32_t * ids_dst, int32_t * expert_bounds,
 -        int n_experts, int n_tokens, int n_expert_used, int nchannels_y, int si1, int sis1, bool write_inverse, cudaStream_t stream);
 +        int n_experts, int n_z, int n_tokens, int n_expert_used, int nchannels_y, int si1, int sis1, bool write_inverse,
-+        int max_cols, int32_t * errors, cudaStream_t stream);
++        int max_cols, int32_t * errors, void * scratch, cudaStream_t stream);
 diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
 --- a/ggml/src/ggml-cuda/mmq.cu
 +++ b/ggml/src/ggml-cuda/mmq.cu
@@ -527,17 +688,22 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
  
      // gate/up activations are broadcast across experts (ne11 == 1): quantize each token once and
      // scatter to its slots. ids_src1 then holds the inverse map (token slot -> compact row).
-@@ -296,7 +300,8 @@
+@@ -295,8 +299,13 @@
+         const int si1  = ids->nb[1] / ggml_element_size(ids);
          const int sis1 = nb12 / nb11;
  
++        ggml_cuda_pool_alloc<char> ids_scratch(ctx.pool()); // Holon: the device-wide helper's (mmid.cuh)
++        if (const size_t nbytes = ggml_cuda_mm_ids_scratch_bytes(ne12*n_expert_used)) {
++            ids_scratch.alloc(nbytes);
++        }
          ggml_cuda_launch_mm_ids_helper((const int32_t *) ids->data, ids_src1.get(), ids_dst.get(), expert_bounds.get(),
 -            ne02, ne12, n_expert_used, ne11, si1, sis1, /*write_inverse =*/ dedup_bcast, stream);
 +            ne02, n_z, ne12, n_expert_used, ne11, si1, sis1, /*write_inverse =*/ dedup_bcast,
-+            /*max_cols =*/ (ne12 + J_best - 1)/J_best*J_best, ids_errors, stream); // Holon: mmq's column tiles per slot
++            /*max_cols =*/ (ne12 + J_best - 1)/J_best*J_best, ids_errors, ids_scratch.ptr, stream); // Holon: mmq's column tiles per slot
          CUDA_CHECK(cudaGetLastError());
      }
  
-@@ -327,10 +332,10 @@
+@@ -327,10 +336,10 @@
                                          ne10_padded, ne11_flat, ne12_flat, ne13_flat, stream);
              }
          } else if (dedup_bcast) {
@@ -550,7 +716,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
                                     ne10_padded, ne11_flat, ne12_flat, ne13_flat, stream);
          }
          CUDA_CHECK(cudaGetLastError());
-@@ -341,12 +346,13 @@
+@@ -341,12 +350,13 @@
                                           ne11 * ne10_padded * sizeof(block_q8_1) / (QK8_1 * sizeof(int));
      const int64_t s13 = ne12*s12;
  
