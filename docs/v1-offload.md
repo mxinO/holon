@@ -427,6 +427,10 @@ planned (D13, milestone K).
   C4) belongs to milestone K.
 - **FN's shared expert** (Qwen3.6-35B-A3B, Flash-Next) composes beside `std.moe@1` at block level, not inside it, so X
   and FN do not both edit `std.moe`.
+- **FN / GLM and step 3c's prepared q8_1** (panel C, 2026-10-18): the router writes the routed gate/up input's q8_1
+  into `qlinear`'s shared per-width buffer; a shared expert's gate/up of the same width running in between makes the
+  handle stale and silently loses the 1.4–1.6% saving. Run the shared expert after the routed gate/up, or give the
+  router's handle its own buffer; check it with an L0 or nsys test on FN's layer.
 
 ## 5. std library and kernel contracts
 
