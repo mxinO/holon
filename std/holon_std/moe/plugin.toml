@@ -4,11 +4,13 @@ version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "unit"
 license = "Apache-2.0"
-core_abi = ">=1.0,<2.0"
+core_abi = ">=1.2,<2.0"   # the offload store: shared objects, host and fill pools, extents
 
 [resources]
 provides = [
     "unit.std.moe@1",
+    "unit.std.moe.resident@1",
+    "unit.std.moe.offload@1",
     "op.moe_topk@1",
     "op.linear_experts@2",
     "op.moe_combine@1",
@@ -24,3 +26,8 @@ module = "reference"
 
 [options]   # the EngineConfig.plugin_options keys this plugin reads
 "quant.act" = { help = "activation precision of quantized weights' matmuls", default = "a8", choices = ["a4", "a8"] }
+"moe.store" = { help = "the expert store's unit Ref: std.moe.offload@1 offloads experts to host memory", default = "resident" }
+"moe.placement" = { help = "the offload store's placement policy (a unit Ref)", default = "std.tiered.static@1" }
+"moe.placement.profile" = { help = "routing counts seeding placement: JSON {\"counts\": [[per expert] per layer]}" }
+"moe.tiers" = { help = "the offload store's host tiers (unit Refs, comma-separated)", default = "std.tiered.pinned@1" }
+"moe.offload.cache" = { help = "VRAM cache slots per class, pinned: <class>=<slots or fraction>,… (* for the rest)", default = "fill free VRAM" }

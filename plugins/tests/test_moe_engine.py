@@ -159,3 +159,98 @@ def test_the_structural_test_catches_a_misplaced_expert(tiny_moe, plant):
     with hf_moe_plants(layer=1, experts=8)[plant]():
         engine = _engine(checkpoint)
     assert mismatches(engine, checkpoint)
+
+
+def _served(engine, prompts) -> tuple[list, dict]:
+    """Greedy streams and prompt logprobs of `prompts`."""
+    rids = [engine.add(p, SamplingParams(temperature=0.0, max_tokens=1, prompt_logprobs=3)) for p in prompts]
+    got = {}
+    while engine.has_work():
+        got |= {d.rid: d.prompt_logprobs for d in engine.step() if d.prompt_logprobs is not None}
+    return engine.generate(prompts, GREEDY), [(got[r].token, got[r].top_ids, got[r].top) for r in rids]
+
+
+def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_path):
+    """docs/v1-offload.md D4, D5, F1, F5a: with `moe.store = std.moe.offload@1` the experts stay in the file's map and
+    in pinned host pools (filled from its extents), classes by (role, type, shape) — here gate/up Q8_0 and down
+    Q4_0 —, every miss fetched into staging slots: the outputs are bitwise the resident store's whatever the cache
+    holds (every expert by default, half, a profile's pick per class, none). The static policy caches item 0, 1, … of
+    every layer, or a profile's hottest; a layer's distinct misses never pass its staging slots, and a step that
+    did would stop the engine."""
+    import json as json_
+
+    checkpoint, prompts = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
+    want = _served(_engine(file), prompts)
+    profile = tmp_path / "profile.json"
+    hot = [[3, 1], [6, 5]]                                       # per layer: the hottest experts, then the next
+    counts = np.zeros((2, 8))
+    for layer, (a, b) in enumerate(hot):
+        counts[layer, [a, b]] = [9, 5]
+    profile.write_text(json_.dumps({"counts": counts.tolist()}))
+    for cache, extra, cached in (("", {}, 8), ("*=0.5", {}, 4), ("gate_up.q8_0.64x64=4,*=2", {
+            "moe.placement.profile": str(profile)}, 1), ("*=0", {}, 0)):
+        engine = _engine(file, host_memory=1 << 24, plugin_options={
+            "moe.store": "std.moe.offload@1", "moe.offload.cache": cache, **extra})
+        store = engine.ctx.shared_objects["std.moe.offload"]
+        assert _served(engine, prompts) == want, cache
+        assert sorted(store.classes) == ["down.q4_0.64x32", "gate_up.q8_0.64x64"]
+        assert {c.host.capacity for c in store.classes.values()} == {16}          # 2 layers x 8 experts each
+        assert all(c.null == 2 and c.staging == 8 for c in store.classes.values())
+        resident = store.residency.host >= 0                                     # [layer, expert, role]
+        assert (resident.all(-1) == resident.any(-1)).all()                      # whole experts
+        assert resident[..., 0].sum(-1).tolist() == [cached] * 2
+        if extra:
+            assert [sorted(np.flatnonzero(r).tolist()) for r in resident[..., 0]] == [[3], [6]]
+        elif cached:
+            assert resident[:, :cached].all()
+        assert 0 < store.peak_misses <= store.staging if cached < 8 else store.peak_misses == 0
+    store.staging = store.peak_misses - 1                                    # as if staging had been too small
+    engine.add(prompts[0], GREEDY)
+    with pytest.raises(RuntimeError, match="distinct misses"):
+        while engine.has_work():
+            engine.step()
+
+
+@pytest.fixture(scope="module")
+def gpu_moe(tmp_path_factory):
+    """A random Qwen3-MoE the GGUF kernels take (rows of 256 values), as a GGUF of two expert classes, its prompts
+    (decode-length to chunked prefill), and the resident store's outputs on the GPU."""
+    torch.manual_seed(1)
+    cfg = Qwen3MoeConfig(vocab_size=512, hidden_size=256, intermediate_size=512, moe_intermediate_size=256,
+                         num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=64,
+                         num_experts=16, num_experts_per_tok=4, norm_topk_prob=True, tie_word_embeddings=False,
+                         eos_token_id=None)
+    path = tmp_path_factory.mktemp("gpu_moe")
+    model = Qwen3MoeForCausalLM(cfg)
+    with torch.no_grad():
+        for layer in model.model.layers:
+            layer.mlp.gate.weight.mul_(8)
+    model.save_pretrained(path / "hf")
+    write(path / "hf", path / "moe.gguf", Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
+    prompts = [torch.randint(0, 512, (n,)).tolist() for n in (1, 7, 40, 300)]
+    engine = _gpu_engine(path / "moe.gguf")
+    want = _served(engine, prompts)
+    engine.close()
+    return path / "moe.gguf", prompts, want
+
+
+def _gpu_engine(model, **kw) -> Engine:
+    return Engine(EngineConfig(model=str(model), device="cuda", dtype=torch.bfloat16, page_size=16, max_seqs=4,
+                               max_step_tokens=256, max_model_len=512, cuda_graphs=True, overlap=True, **kw))
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("cache", ["", "*=0.25", "*=0"])
+def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, cache):
+    """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
+    resolve and zero-copy gather from mapped host pools), decode steps replayed from CUDA graphs and prefill chunked
+    past the mmvq limit: the offload store's streams and prompt logprobs are the resident store's, bit for bit."""
+    file, prompts, want = gpu_moe
+    engine = _gpu_engine(file, host_memory=1 << 26, plugin_options={"moe.store": "std.moe.offload@1",
+                                                                   "moe.offload.cache": cache})
+    store = engine.ctx.shared_objects["std.moe.offload"]
+    assert _served(engine, prompts) == want
+    assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
+    assert {v["provider"] for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")} == {"kernels.expert_io"}
+    engine.close()

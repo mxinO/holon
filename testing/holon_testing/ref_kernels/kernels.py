@@ -136,19 +136,25 @@ CACHE_BYTES = 128 << 20
 class LinearExperts:
     """Expert stacks: ggml layouts dequantized per expert (gguf-py, MXFP4 in torch), HF layouts per expert and unit by
     std.weights.hf's reference — cached when small (`CACHE_BYTES`), else per call; dense ones as stored, the
-    activation rounded to their dtype (the contract)."""
+    activation rounded to their dtype (the contract). A cached decode is checked against the stack's bytes: an offload
+    store's arena (up to `experts` slots) changes between calls."""
 
     def __init__(self, ctx, *, layout: str, experts: int, out: int, glu: str, out_dtype: str, **facts) -> None:
         self.quantized = None if layout.startswith("dense/") else _Dequantized(ctx, layout=layout)
         self.experts, self.out, self.glu, self.out_dtype = experts, out, glu, getattr(torch, out_dtype)
+        self._stacks: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}   # stack -> (its bytes, their decode)
 
     def __call__(self, x, parts, ids):
         if self.quantized is None:
             weight = parts["weight"]
             y = moe.linear_experts(x, weight, ids, self.glu, operand_dtype=weight.dtype)
         else:
-            if self.experts * self.out * x.shape[-1] * 4 <= CACHE_BYTES:
-                stack = self.quantized.dequantized(parts, lambda p: self._decode(p, range(self.experts)))
+            first = next(iter(parts.values()))
+            if len(first) * self.out * x.shape[-1] * 4 <= CACHE_BYTES:
+                key = (first.data_ptr(), first.shape)          # the decode is kept while the bytes stay the same
+                if key not in self._stacks or not torch.equal(self._stacks[key][0], first):
+                    self._stacks[key] = first.clone(), self._decode(parts, range(len(first)))
+                stack = self._stacks[key][1]
             else:
                 stack = self._decode(parts, ids.unique().tolist())
             y = moe.linear_experts(x, stack, ids, self.glu)
@@ -156,13 +162,13 @@ class LinearExperts:
 
     def _decode(self, parts, experts) -> torch.Tensor:
         """The f32 stack [E, out, in] with `experts` decoded (the others zero)."""
-        q = self.quantized
+        q, n = self.quantized, len(next(iter(parts.values())))
         if q.ggml is not None:
             rows = [q._dequantize({"blocks": parts["blocks"][e]}) for e in experts]
         else:
-            units = moe.expert_parts(parts, self.experts, merged=self.glu == "swiglu")
+            units = moe.expert_parts(parts, n, merged=self.glu == "swiglu")
             rows = [torch.cat([hf.dequantize(q.elem, u) for u in units[e]]) for e in experts]
-        stack = rows[0].new_zeros(self.experts, *rows[0].shape)
+        stack = rows[0].new_zeros(n, *rows[0].shape)
         stack[list(experts)] = torch.stack(rows)
         return stack
 

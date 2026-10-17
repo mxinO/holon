@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import torch
-from holon.api import QTensor
+from holon.api import QTensor, Ref
 from torch import nn
 
 from . import kernels
@@ -53,11 +53,12 @@ class ExpertLinear(nn.Module):
     SwiGLU output)."""
 
     def __init__(self, ctx, *, experts: int, in_features: int, out_features: int, top_k: int,
-                 rows_per_token: int, act_dtype: torch.dtype) -> None:
+                 rows_per_token: int, act_dtype: torch.dtype, device: torch.device | None = None) -> None:
         super().__init__()
         self.experts, self.in_features, self.out_features = experts, in_features, out_features
         self.top_k, self.rows_per_token, self.glu, self._ctx = top_k, rows_per_token, "none", ctx
-        self.act_dtype = act_dtype
+        self.act_dtype, self.device = act_dtype, device or ctx.device     # where its parts are held
+        self.extents = {}                          # a whole adopted stack's, per part (QTensor.extents)
         self.weight = nn.Parameter(torch.empty(experts, out_features, in_features, dtype=ctx.dtype),
                                    requires_grad=False)
         self.parts: dict[str, torch.Tensor] | None = {"weight": self.weight}     # by role; dense: the parameter
@@ -74,14 +75,14 @@ class ExpertLinear(nn.Module):
         if name != "weight" or tuple(q.logical_shape) != (stack if index is None else stack[1:]):
             return False
         if index is None:
-            self.layout = q.layout
+            self.layout, self.extents = q.layout, dict(q.extents)
             self.parts = _hold(self.weight, {r: t.unflatten(0, (self.experts, -1)) for r, t in q.parts.items()},
-                               ctx.device)
+                               self.device)
             return True
         if self.weight.is_meta:                              # the first slice: each part as [E, *its shape]
             self.layout = q.layout
-            self.parts = _hold(self.weight, {r: torch.empty(self.experts, *t.shape, dtype=t.dtype, device=ctx.device)
-                                             for r, t in q.parts.items()}, ctx.device)
+            self.parts = _hold(self.weight, {r: torch.empty(self.experts, *t.shape, dtype=t.dtype, device=self.device)
+                                             for r, t in q.parts.items()}, self.device)
         elif q.layout != self.layout or {r: (t.dtype, t.shape) for r, t in q.parts.items()} != \
                 {r: (t.dtype, t.shape[1:]) for r, t in self.parts.items()}:
             return False
@@ -110,9 +111,10 @@ class ExpertLinear(nn.Module):
         with torch.device("meta"):
             merged = ExpertLinear(gate._ctx, experts=gate.experts, in_features=gate.in_features,
                                   out_features=2 * gate.out_features, top_k=gate.top_k,
-                                  rows_per_token=gate.rows_per_token, act_dtype=gate.act_dtype)
+                                  rows_per_token=gate.rows_per_token, act_dtype=gate.act_dtype,
+                                  device=gate.device)
         merged.layout, merged.glu = gate.layout, "swiglu"
-        merged.parts = _hold(merged.weight, parts, gate._ctx.device)
+        merged.parts = _hold(merged.weight, parts, gate.device)
         gate.weight = up.weight = gate.parts = up.parts = None
         return merged
 
@@ -121,21 +123,57 @@ class ExpertLinear(nn.Module):
             return
         # once: `prepare` replaces the layout the facts are read from (a second bind would select for its output)
         assert self._kernel is None, "ExpertLinear.bind_kernels runs once"
-        facts = {"layout": self.layout_fact(), "experts": self.experts, "in": self.in_features,
-                 "out": self.out_features, "top_k": self.top_k, "rows_per_token": self.rows_per_token,
-                 "glu": self.glu, "act_dtype": _dtype(self.act_dtype), "out_dtype": "float32",
-                 "act_quant": "a16" if self.layout is None else _act_quant(ctx)}
-        site = "std.moe.experts[" + ",".join(f"{k}={v}" for k, v in facts.items()) + "]"
-        spec = ctx.select_kernel(kernels.LINEAR_EXPERTS, site=site, **facts)
-        _one_act_mode(ctx, spec, site)
-        self._kernel = spec.impl(ctx, **facts)
+        self._kernel = bind_experts(ctx, self.facts(ctx))
         if self.layout is not None and hasattr(self._kernel, "prepare"):          # docs/m06-lowp.md D4
             q = QTensor(self.layout, (self.experts, self.out_features, self.in_features), self.parts)
             if (prepared := self._kernel.prepare(q)) is not q:
                 self.layout, self.parts = prepared.layout, _hold(self.weight, prepared.parts, ctx.device)
 
+    def facts(self, ctx, experts: int | None = None) -> dict:
+        """Its `linear_experts@2` facts (`experts`: another stack size, e.g. an offload store's arena's)."""
+        return {"layout": self.layout_fact(), "experts": experts or self.experts, "in": self.in_features,
+                "out": self.out_features, "top_k": self.top_k, "rows_per_token": self.rows_per_token,
+                "glu": self.glu, "act_dtype": _dtype(self.act_dtype), "out_dtype": "float32",
+                "act_quant": "a16" if self.layout is None else _act_quant(ctx)}
+
     def forward(self, x: torch.Tensor, ids: torch.Tensor) -> torch.Tensor:
         return self._kernel(x, self.parts, ids)
+
+
+def bind_experts(ctx, facts: dict):
+    """The `linear_experts@2` kernel instance for `facts`, selected at its site."""
+    site = "std.moe.experts[" + ",".join(f"{k}={v}" for k, v in facts.items()) + "]"
+    spec = ctx.select_kernel(kernels.LINEAR_EXPERTS, site=site, **facts)
+    _one_act_mode(ctx, spec, site)
+    return spec.impl(ctx, **facts)
+
+
+class Resident:
+    """std.moe.resident@1, the default expert store: every expert in VRAM, as the weight source stacked it (docs/
+    v1-offload.md D5: the merge is the store's)."""
+
+    def __init__(self, ctx, **site) -> None:
+        self.device = ctx.device                       # where expert stacks are held
+
+    @staticmethod
+    def merge(gate: ExpertLinear, up: ExpertLinear) -> ExpertLinear | None:
+        return ExpertLinear.merge(gate, up)
+
+    @staticmethod
+    def stack(down: ExpertLinear) -> ExpertLinear:
+        return down
+
+    @staticmethod
+    def route(ids: torch.Tensor, first: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """The ids each stack reads for tokens `first`…: the experts' own."""
+        return ids, ids
+
+
+def _store(ctx, **site):
+    """The expert store the `moe.store` plugin option names (a unit Ref, e.g. `std.moe.offload@1`); resident without
+    it."""
+    target = ctx.options.get("plugins", {}).get("moe.store")
+    return Resident(ctx) if target is None else ctx.unit(target if isinstance(target, Ref) else Ref(target), **site)
 
 
 class MoE(nn.Module):
@@ -146,15 +184,17 @@ class MoE(nn.Module):
                  layer: int = 0) -> None:
         super().__init__()
         self.layer = layer
+        self._store = _store(ctx, layer=layer, experts=experts, top_k=top_k)
         self.router = nn.Parameter(torch.empty(experts, hidden, dtype=torch.float32), requires_grad=False)
-        stack = {"experts": experts, "top_k": top_k}
+        stack = {"experts": experts, "top_k": top_k, "device": self._store.device}
         self.gate = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1, act_dtype=ctx.dtype,
                                  **stack)
         self.up = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1, act_dtype=ctx.dtype,
                                **stack)
         self.down = ExpertLinear(ctx, in_features=inter, out_features=hidden, rows_per_token=top_k,
                                  act_dtype=torch.float32, **stack)          # the f32 SwiGLU output
-        self._gate_up: ExpertLinear | None = None
+        self._gate_up: ExpertLinear | None = None      # the expert store's stacks (`finalize_weights`)
+        self._down: ExpertLinear | None = None
         dtype = _dtype(ctx.dtype)
         topk = {"experts": experts, "top_k": top_k, "renormalize": renormalize}
         self._topk = ctx.select_kernel(kernels.MOE_TOPK, site=f"std.moe[experts={experts},top_k={top_k}]",
@@ -164,16 +204,18 @@ class MoE(nn.Module):
                                           **combine).impl(ctx, **combine)
 
     def finalize_weights(self, ctx) -> None:
-        self._gate_up = ExpertLinear.merge(self.gate, self.up)
+        self._gate_up = self._store.merge(self.gate, self.up)
         if self._gate_up is None:
             raise ValueError(f"layer {self.layer}: gate and up experts must share a layout to merge "
                              f"(gate {self.gate.layout_fact()}, up {self.up.layout_fact()})")
+        self._down = self._store.stack(self.down)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = torch.empty_like(x)
         for a in range(0, x.shape[0], CHUNK):
             xc = x[a:a + CHUNK]
             weights, ids = self._topk(nn.functional.linear(xc.float(), self.router))
-            h = self._gate_up(xc[:, None], ids)                       # [t, k, inter] f32, SwiGLU applied
-            self._combine(self.down(h, ids), weights, out[a:a + CHUNK])
+            gate_up, down = self._store.route(ids, a)
+            h = self._gate_up(xc[:, None], gate_up)                   # [t, k, inter] f32, SwiGLU applied
+            self._combine(self._down(h, down), weights, out[a:a + CHUNK])
         return out
