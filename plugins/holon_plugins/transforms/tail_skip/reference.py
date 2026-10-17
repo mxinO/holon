@@ -7,8 +7,8 @@ job, no count, a zero contribution — when e is missed (missing in some role of
 piece is present) and e's best routing rank over the call's rows (the least j' of the entries routing it) is at least
 `rank` (default 7, Strata's: the last rank of a top-8 router). Every entry of such an expert is dropped; resident
 experts, and missed ones some row routes better, are untouched. The weights are returned as they are: never
-renormalized. The call's rows are the expert pass's, graph padding included (the transform sees no row kinds), so a
-padded bucket's rows count too."""
+renormalized. The call's rows are the expert pass's: other requests' rows count (the transform sees no row kinds), graph
+padding does not (the store hands its rows in dropped, −1)."""
 from __future__ import annotations
 
 import torch

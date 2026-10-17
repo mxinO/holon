@@ -96,8 +96,8 @@ then `staging` slots, then cache slots.
 - `moe_route_transform@1` (signature only; `approx`, bound by the explicit option `moe.route_transform = <name>`,
   never by kernel priority): instance `(ids [T, k] int32, weights [T, k] f32, residency [E, R] int32) -> (ids, weights)`
   between `moe_topk@1` and the resolve, with the layer's map as the resolve reads it (after the step's lending, its
-  ring pieces at their ring slots); a negative id is dropped (the rank's null slot: no fetch,
-  no count, a zero contribution). Each transform's semantics are a contract its plugin owns,
+  ring pieces at their ring slots); graph padding rows arrive with every id −1; a negative id is dropped (the rank's
+  null slot: no fetch, no count, a zero contribution). Each transform's semantics are a contract its plugin owns,
   `moe_route_transform.<name>@1`, with its own oracle and provider (docs/v1-offload.md D3). Facts: experts, top_k.
 - `expert_fetch@1`: instance `(fetch [2, F] int32, n [1] int32, src [U, unit] uint8, dst [S, unit] uint8)`: copies unit
   `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, F), in the graph (`src` may be a mapped host pool's

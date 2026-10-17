@@ -109,10 +109,12 @@ class Offload(nn.Module):
 
     def transform(self, ids: torch.Tensor, weights: torch.Tensor, first: int) -> tuple[torch.Tensor, torch.Tensor]:
         """The route transform's (`moe.route_transform`), with the layer's map as the resolve will read it (after the
-        step's lending, the ring's pieces in their slots); else the routes as they are."""
+        step's lending, the ring's pieces in their slots) and graph padding's routes dropped (−1: the transform sees
+        the step's rows only); else the routes as they are."""
         if self._transform is None:
             return ids, weights
-        return self._transform(ids, weights, self._resolver.present(first))
+        padding = self.store.kinds[first:first + len(ids), None] == kernels.PADDING
+        return self._transform(torch.where(padding, -1, ids), weights, self._resolver.present(first))
 
     def pass_tokens(self, tokens: int) -> int:
         """The expert pass of the step: one per large chunk in a streaming step (D8), else std.moe@1's chunk."""

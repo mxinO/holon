@@ -15,6 +15,7 @@ import torch
 from holon.api import RowKind, SamplingParams
 from holon.core.batching import host_plan
 from holon.core.engine import Engine, EngineConfig
+from holon_std.moe.kernels import DECODE, PADDING
 from holon_std.moe.offload import KEY, PASS
 from holon_std.moe.units import CHUNK
 from holon_std.tiered.ring import Lent
@@ -483,6 +484,12 @@ def test_a_route_transform_drops_routes_end_to_end(tiny_moe, tmp_path):
         assert top_ids == top_ids_w
     counts = np.stack([s["counts"].sum(1) for s in trace.steps])       # per step and layer: one route per decode row
     assert DropLast.calls > calls and (counts[:, 0] == counts[:, 1]).all() and counts.max() == 3
+    # Graph padding reaches the transform dropped (every id −1), so a transform ranking a pass's rows (A1's best
+    # rank) never counts it: a decode row beside a padding row, as in a padded bucket.
+    engine.ctx.shared_objects[KEY].kinds[:2] = torch.tensor([DECODE, PADDING], dtype=torch.uint8)
+    offload = engine.executor.model.layers[1].ffn._store
+    got, _ = offload.transform(torch.tensor([[1, 2], [3, 4]], dtype=torch.int32), torch.ones(2, 2), 0)
+    assert got.tolist() == [[1, -1], [-1, -1]]
     with pytest.raises(ValueError, match="only an offload store serves"):
         Engine(EngineConfig(model=str(file), device="cpu", dtype=torch.float32, page_size=4, max_seqs=3,
                             max_step_tokens=10, max_model_len=40, state_memory=1 << 20,
