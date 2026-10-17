@@ -12,6 +12,8 @@ provides = [
     "op.moe_topk@1",
     "op.linear_experts@2",
     "op.moe_combine@1",
+    "op.moe_resolve@1",
+    "op.expert_fetch@1",
 ]
 
 [properties]

@@ -183,6 +183,25 @@ class MoeCombine:
         out.copy_(moe.moe_combine(y, weights, self.dtype))
 
 
+class MoeResolve:
+    def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
+        self.staging = staging
+
+    def __call__(self, ids, kinds, residency, host, counts, misses):
+        slots, fetch, n_fetch, increments = moe.moe_resolve(ids, kinds, residency, host, self.staging)
+        counts += increments
+        misses.clamp_(min=int(n_fetch.max()))
+        return slots, fetch, n_fetch
+
+
+class ExpertFetch:
+    def __init__(self, ctx, *, unit_bytes: int, staging: int) -> None:
+        pass
+
+    def __call__(self, fetch, n, src, dst, first):
+        dst.copy_(moe.expert_fetch(fetch, int(n[0]), src, dst, first))
+
+
 class CausalConv1d:
     def __init__(self, ctx, *, channels: int, kernel_size: int, dtype: str) -> None:
         pass
@@ -231,6 +250,6 @@ BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul"
          "attention.paged_prefill": PagedAttention, "attention.paged_decode": PagedAttention,
          "attention.paged_verify": PagedAttention, "attention.causal": CausalAttention,
          "qlinear": QLinear, "qlinear_glu": QLinearGlu, "qembedding": QEmbedding, "linear_experts": LinearExperts,
-         "moe_topk": MoeTopk,
-         "moe_combine": MoeCombine, "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule,
-         "gated_rmsnorm": GatedRMSNorm, "gdn_rewind": GDNRewind, "kv_write": KvWrite}
+         "moe_topk": MoeTopk, "moe_combine": MoeCombine, "moe_resolve": MoeResolve, "expert_fetch": ExpertFetch,
+         "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule, "gated_rmsnorm": GatedRMSNorm,
+         "gdn_rewind": GDNRewind, "kv_write": KvWrite}

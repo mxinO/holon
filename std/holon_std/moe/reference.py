@@ -59,3 +59,40 @@ def moe_combine(y: torch.Tensor, weights: torch.Tensor, dtype: torch.dtype) -> t
     for j in range(y.shape[1]):
         acc += weights[:, j, None].float() * y[:, j].float()
     return acc.to(dtype)
+
+
+def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, host: torch.Tensor, staging: int
+                ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """The `moe_resolve@1` oracle: `(slots [R, T, k], fetch [R, staging] (−1 past n_fetch), n_fetch [R], counts [E])`,
+    `counts` the increments of this call."""
+    from .kernels import DECODE, PADDING
+
+    t, k = ids.shape
+    experts, roles = residency.shape
+    ids, kinds = ids.long().cpu(), kinds.long().cpu()
+    residency, host = residency.long().cpu(), host.long().cpu()
+    live = (kinds[:, None] != PADDING) & (ids >= 0)                     # [T, k]: routed entries
+    routed = ids.clamp_min(0)
+    slots = torch.arange(k).expand(roles, t, k).clone()                 # null slot j by default
+    fetch = torch.full((roles, staging), -1, dtype=torch.int64)
+    n_fetch = torch.zeros(roles, dtype=torch.int64)
+    for r in range(roles):
+        missing = sorted({e for e in routed[live].tolist() if residency[e, r] < 0})
+        rank = {e: i for i, e in enumerate(missing)}
+        n_fetch[r] = len(missing)
+        for i, e in enumerate(missing[:staging]):
+            fetch[r, i] = host[e, r]
+        for a, j in live.nonzero().tolist():
+            e = int(routed[a, j])
+            slots[r, a, j] = residency[e, r] if residency[e, r] >= 0 else k + min(rank[e], staging - 1)
+    counted = routed[live & (kinds[:, None] == DECODE)]
+    counts = torch.bincount(counted, minlength=experts)
+    return slots.int(), fetch.int(), n_fetch.int(), counts.int()
+
+
+def expert_fetch(fetch: torch.Tensor, n: int, src: torch.Tensor, dst: torch.Tensor, first: int) -> torch.Tensor:
+    """The `expert_fetch@1` oracle: `dst` with units `src[fetch[i]]` at `first + i` for i < min(n, len(fetch))."""
+    out = dst.clone()
+    for i, unit in enumerate(fetch[:n].tolist()):
+        out[first + i] = src[unit].to(out.device)
+    return out

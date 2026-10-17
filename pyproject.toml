@@ -101,6 +101,7 @@ name = "kernel plugins are selected by the core, never imported by each other"
 type = "independence"
 modules = ["holon_plugins.kernels.flashinfer", "holon_plugins.kernels.triton_attn",
            "holon_plugins.kernels.triton_experts", "holon_plugins.kernels.ggml_cuda", "holon_plugins.kernels.fla",
+           "holon_plugins.kernels.expert_io",
            "holon_plugins.kernels.gdn_triton"]
 
 [[tool.importlinter.contracts]]
