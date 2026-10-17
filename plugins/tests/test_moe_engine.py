@@ -206,7 +206,7 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     import json as json_
 
     from holon_judge.placement import parity, route_dump
-    from holon_tools import profile as tool  # `holon_tools profile`: decode routes, beside the file
+    from holon_tools.__main__ import main  # `holon_tools profile`: decode routes, beside the file
 
     checkpoint, prompts = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
@@ -216,7 +216,8 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     counts = np.zeros((2, 8))
     for layer, (a, b) in enumerate(hot):
         counts[layer, [a, b]] = [9, 5]
-    profile.write_text(json_.dumps({"layers": {str(layer): row for layer, row in enumerate(counts.tolist())}}))
+    profile.write_text(json_.dumps({"checkpoint": [[file.name, file.stat().st_size]],
+                                    "layers": {str(layer): row for layer, row in enumerate(counts.tolist())}}))
     static = {"moe.store": "std.moe.offload@1", "moe.placement": "std.tiered.static@1"}
     for cache, extra, floor, cached in (("", {}, None, 8), ("", {}, 1800, None), ("*=0.5", {}, None, 4), (
             "gate_up.q8_0.64x64=4,*=2", {"moe.placement.profile": profile.name}, None, 1), ("*=0", {}, None, 0)):
@@ -237,6 +238,21 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
             cached = per_layer[0]
             assert 0 < cached < 8 and per_layer[1] in (cached - 1, cached)
             assert len(store.classes["gate_up.q8_0.64x64"].slots()) == 2 + 8 + sum(per_layer)
+            # Its counts pin exactly (D4: a lock pins the fill's slot counts); a pinned arena that does not get its
+            # size — one expert more than fits above the paged floor, or a budget leaving every pool at its minimum —
+            # refuses to serve at its first launch (the startup profile's minimum pools never launch), never taking
+            # the floor or running without its cache.
+            pins = [",".join(f"{c.name}={c.size - c.null - c.staging + more}" for c in store.classes.values())
+                    for more in (0, 1)]
+            exact = _engine(file, host_memory=1 << 24, paged_min_tokens=floor, plugin_options={
+                **static, "moe.cache": pins[0]})
+            assert (exact.ctx.shared_objects[KEY].residency.host >= 0).all(-1).sum(-1).tolist() == per_layer
+            assert _served(exact, prompts) == want
+            least = sum(p.min_units * p.unit_bytes for p in exact.ledger.pools.values() if not p.host)
+            for kw, pin in (({"paged_min_tokens": floor}, pins[1]), ({"state_memory": least}, pins[0])):
+                short = _engine(file, host_memory=1 << 24, plugin_options={**static, "moe.cache": pin}, **kw)
+                with pytest.raises(RuntimeError, match="does not fit above the paged floor"):
+                    _served(short, prompts)
         assert per_layer == [cached] * 2 or floor
         if extra:
             assert [sorted(np.flatnonzero(r).tolist()) for r in resident[..., 0]] == [[3], [6]]
@@ -252,15 +268,29 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     with pytest.raises(RuntimeError, match="distinct misses"):
         while engine.has_work():
             engine.step()
-    routes = tool.profile(EngineConfig(model=str(file), device="cpu", dtype=torch.float32, page_size=4, max_seqs=3,
-                                       max_step_tokens=10, max_model_len=40, state_memory=1 << 20,
-                                       host_memory=1 << 24), prompts, 4)
+    # `holon_tools profile` on a hub cache's snapshot link writes `<stem>.profile.json` beside the blob, where the
+    # store reads it, recording the file; another file's profile in that directory is refused, not used.
+    link = tmp_path / "snapshot" / "moe-a.gguf"
+    link.parent.mkdir()
+    link.symlink_to(file)
+    (tmp_path / "prompts.jsonl").write_text("".join(json_.dumps({"id": str(n), "category": "c", "ids": p}) + "\n"
+                                                    for n, p in enumerate(prompts)))
+    assert main(["profile", str(link), "--prompts", str(tmp_path / "prompts.jsonl"), "--max-tokens", "4", "--device",
+                 "cpu", "--dtype", "float32", "--page-size", "4", "--max-seqs", "3", "--max-step-tokens", "10",
+                 "--max-model-len", "40", "--state-memory", str(1 << 20), "--host-memory", str(1 << 24)]) == 0
+    routes = json_.loads((tmp_path / "moe-a.profile.json").read_text())
+    assert routes["checkpoint"] == [[file.name, file.stat().st_size]]
     assert sorted(routes["layers"]) == ["0", "1"] and sum(map(sum, routes["layers"].values())) == 4 * 3 * 2 * 2
-    assert tool.write(file, "routes.json", routes) == tmp_path / "routes.json"
+    (tmp_path / "other").mkdir()
+    other, _ = _gguf_and_dense(checkpoint, tmp_path / "other", Q.Q4_0)
+    other = other.rename(tmp_path / other.name)                     # another quant beside it in the blob directory
+    with pytest.raises(ValueError, match="was counted on"):
+        _engine(other, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
+                                                            "moe.placement.profile": "moe-a.profile.json"})
     for policy in ("", "placement.lru@1", "placement.profile_decay@1"):
-        engine = _engine(file, host_memory=1 << 24, plugin_options={
+        engine = _engine(link, host_memory=1 << 24, plugin_options={
             "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.placement": policy,
-            "moe.placement.profile": "routes.json"})
+            "moe.placement.profile": "moe-a.profile.json"})
         store = engine.ctx.shared_objects[KEY]
         with route_dump(engine) as trace:
             assert _served(engine, prompts) == want, policy
@@ -347,14 +377,19 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe_deep, tmp_path, 
 
 def test_the_startup_profile_runs_a_streaming_pass(tiny_moe, tmp_path):
     """The worst step of the startup profile runs on minimum pools, where a fill cache holds nothing to lend: its
-    expert passes are still a streaming step's (sized by the step's tokens, not by the layout)."""
+    expert passes are still a streaming step's (sized by the step's tokens, not by the layout). At batch 1 (staging
+    for one row, a pass's for prefill) the minimum pool still holds the layout that stages a pass."""
     checkpoint, _ = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
-    engine = _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
-                                                                 "moe.ring_tokens": 10})
+    engine = _engine(file, max_seqs=1, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
+                                                                             "moe.ring_tokens": 10})
+    store = engine.ctx.shared_objects[KEY]
+    assert store.staging < store.prefill
+    staged = sum((c.null + store.prefill) * c.unit_bytes + store._align for c in store.classes.values())
+    assert store.arena.min_units * store.arena.unit_bytes >= staged      # what it lays out below, alignment aside
     engine.ledger.materialize(None)                       # the profile's minimum pools
     offload = engine.executor.model.layers[0].ffn._store
-    assert not engine.ctx.shared_objects[KEY].lending and offload.pass_tokens(10) == PASS
+    assert not store.lending and offload.pass_tokens(10) == PASS
 
 
 def test_a_cache_too_small_to_lend_stages_instead(tiny_moe, tmp_path):

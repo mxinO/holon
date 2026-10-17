@@ -1,0 +1,22 @@
+[
+ {
+  "name": "holon_sm",
+  "engine": "holon",
+  "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610 moe.placement=placement.lfu@1 moe.ring_copy=sm"
+ },
+ {
+  "name": "holon_dma",
+  "engine": "holon",
+  "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610 moe.placement=placement.lfu@1 moe.ring_copy=dma"
+ },
+ {
+  "name": "holon_sm_prof",
+  "engine": "holon",
+  "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610 moe.placement=placement.lfu@1 moe.ring_copy=sm moe.placement.profile=profile_x4_gate.json"
+ },
+ {
+  "name": "holon_lru",
+  "engine": "holon",
+  "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610 moe.placement=placement.lru@1 moe.ring_copy=sm"
+ }
+]

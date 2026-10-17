@@ -33,6 +33,7 @@ import dataclasses
 import functools
 import json
 import math
+import os
 import pathlib
 from collections.abc import Callable
 
@@ -308,11 +309,14 @@ class TieredStore:
             for c in classes:
                 for piece, (g, i, r, _) in enumerate(c.pieces):
                     _, host[self._order[g], i, r] = self.tiers[0].read(c.name, piece)
-        least = sum(c.bytes(0 if c.cache is None else c.cap) for c in classes) + self._align * len(classes)
+        # One fill pool, pinned or not, so both profile the same minimum and grow above the paged floor alike (a fill's
+        # counts then pin exactly): its minimum caches nothing and cannot lend, so that layout stages a prefill pass
+        # (after_materialize); a pinned arena short of its pinned size is refused at the first launch (before_launch).
+        least = sum((c.null + self.prefill) * c.unit_bytes for c in classes) + self._align * len(classes)
         most = sum(c.bytes(c.cap) for c in classes) + self._align * len(classes)
-        fill = any(c.cache is None for c in classes)
         self.arena = ctx.pool(f"{self.name}.arena", unit_bytes=self.granule, min_units=-(-least // self.granule),
-                              pref_units=-(-most // self.granule), fill=fill)
+                              pref_units=-(-most // self.granule), fill=True)
+        self._pinned = -(-most // self.granule) if all(c.cache is not None for c in classes) else None
         self._host = host
         self.host_units.copy_(torch.from_numpy(host))
         self.class_table = np.array([[classes.index(self.groups[g][r]) for r in range(self.roles)]
@@ -393,6 +397,7 @@ class TieredStore:
         for t in (self.kinds, self.n_empty, *self.zeroed, *self.state.values()):
             t.zero_()
         self._written, self.peak_misses = 0, 0
+        self._sized = False                     # the arena's size is checked at the first launch after a materialize
         self.borrowed = dict.fromkeys(self.borrowed, 0)
 
     def io_device(self) -> torch.Tensor:
@@ -450,6 +455,9 @@ class TieredStore:
             reads.bind()
 
     def before_launch(self, step) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list[MemOp]]:
+        if not self._sized:                     # launches follow the final materialize (the startup profile's minimum
+            self._check_pinned()                # pools never launch): the arena's size is final here
+            self._sized = True
         self._step, kinds, at = step.step, self._kinds, 0
         kinds[:self._written] = PADDING
         if step.row_kind is None:                                    # launched plans are the scheduler's
@@ -584,18 +592,44 @@ class TieredStore:
         self.residency.edit(commit, map_, later=LAND)
 
     # -- helpers ------------------------------------------------------------------------------------------------------
+    def _check_pinned(self) -> None:
+        """D4: placement never follows free memory. A pinned arena that did not get its pinned size (it grows above
+        the paged floor like a fill) refuses to serve."""
+        if self._pinned is not None and self.arena.capacity < self._pinned:
+            raise RuntimeError(
+                f"{self.name}: the pinned cache ({', '.join(f'{c.name}={c.cap}' for c in self.classes.values())}) "
+                f"does not fit above the paged floor: the arena got {self.arena.capacity * self.granule / 2**30:.3f} "
+                f"of {self._pinned * self.granule / 2**30:.3f} GiB")
+
+    @property
+    def profile_dir(self) -> pathlib.Path:
+        """The directory a profile's name is relative to: the experts' file's, as the weight source reads it (a hub
+        cache's snapshot links resolve into its blob directory), so `holon_tools profile` writes where this reads."""
+        return pathlib.Path(next(iter(self.classes.values())).pieces[0][3][0].path).parent
+
+    @property
+    def checkpoint(self) -> list[list]:
+        """The files the pieces are read from, `[name, bytes]` each (as resolved: a hub cache's blob is named by its
+        content hash), which a profile records: profiles of different files may share a directory (a hub cache's
+        blobs)."""
+        paths = {e.path for c in self.classes.values() for *_, extents in c.pieces for e in extents}
+        return sorted([os.path.basename(p), os.path.getsize(p)] for p in paths)
+
     def _profile_counts(self) -> np.ndarray:
-        """`profile`'s routing counts by group: a JSON file `{"layers": {"<group>": [count per item]}}` beside the
-        checkpoint (its name relative to the checkpoint's directory, so plans record no host path); groups it does not
-        name count zero."""
+        """`profile`'s routing counts by group: a JSON file `{"checkpoint": …, "layers": {"<group>": [count per
+        item]}}` beside the checkpoint (its name relative to the checkpoint's directory, so plans record no host path),
+        refused unless it was counted on this checkpoint's files; groups it does not name count zero."""
         counts = np.zeros(self.residency.host.shape[:2])
         if not self._profile:
             return counts
         name = pathlib.PurePath(self._profile)
         if name.is_absolute() or ".." in name.parts:
             raise ValueError(f"{self.name}: profile {self._profile!r}: a name relative to the checkpoint's directory")
-        checkpoint = pathlib.Path(next(iter(self.classes.values())).pieces[0][3][0].path).parent
-        for group, row in json.loads((checkpoint / name).read_text())["layers"].items():
+        data = json.loads((self.profile_dir / name).read_text())
+        if data.get("checkpoint") != self.checkpoint:
+            raise ValueError(f"{self.name}: profile {self._profile} was counted on {data.get('checkpoint')}, not on "
+                             f"this checkpoint {self.checkpoint} (`holon_tools profile` writes one per file)")
+        for group, row in data["layers"].items():
             if int(group) not in self._order or len(row) != self.items:
                 raise ValueError(f"{self.name}: profile {self._profile}: group {group} with {len(row)} counts; the "
                                  f"groups are {sorted(self._order)} of {self.items} items")

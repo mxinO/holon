@@ -61,7 +61,7 @@ def holon_worker(a: argparse.Namespace, corpus: list[int]) -> dict:
     from holon.core.cli import engine_config, engine_flags
     from holon.core.engine import Engine
 
-    rec = {"on": False, "steps": [], "store": None}
+    rec = {"on": False, "steps": [], "misses": [], "store": None}
     try:
         from holon_std.tiered.store import TieredStore
     except ImportError:
@@ -72,7 +72,10 @@ def holon_worker(a: argparse.Namespace, corpus: list[int]) -> dict:
         def recorded(self, step, telemetry):
             rec["store"] = self
             if rec["on"]:
-                rec["steps"].append(np.flatnonzero(telemetry["counts"].numpy().reshape(-1)).astype(np.int32))
+                keys = np.flatnonzero(telemetry["counts"].numpy().reshape(-1)).astype(np.int32)
+                rec["steps"].append(keys)                 # the host mirror is still the previous commit's map:
+                rec["misses"].append(keys[~(self.residency.host >= 0).all(-1).reshape(-1)[keys]])   # this step's
+
             return commit(self, step, telemetry)
 
         TieredStore.after_commit = recorded
@@ -91,7 +94,7 @@ def holon_worker(a: argparse.Namespace, corpus: list[int]) -> dict:
     def request(ids: list[int], n: int, profile: bool = False) -> dict:
         params = SamplingParams(temperature=0.0, max_tokens=n, ignore_eos=True)
         stamps, done = [], False
-        rec["steps"] = []
+        rec["steps"], rec["misses"] = [], []
         with profiled(profile):
             torch.cuda.synchronize()
             t0 = time.perf_counter()
@@ -112,7 +115,7 @@ def holon_worker(a: argparse.Namespace, corpus: list[int]) -> dict:
         assert len(stamps) == n, (len(stamps), n)
         out = {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0])}
         if rec["store"] is not None and rec["steps"]:
-            out |= cache_counts(rec["store"], rec["steps"])
+            out |= cache_counts(rec["store"], rec["steps"], rec["misses"])
         return out
 
     off, p, n = offload_ctx.WARMUP
@@ -138,14 +141,14 @@ def holon_worker(a: argparse.Namespace, corpus: list[int]) -> dict:
     return out
 
 
-def cache_counts(store, steps: list) -> dict:
-    """Per decode token (batch 1: one decode row per step): routed experts, misses and the bytes F5a gathers."""
+def cache_counts(store, steps: list, misses: list) -> dict:
+    """Per decode token (batch 1: one decode row per step): routed experts, misses and the bytes F5a gathers. A step's
+    misses are its routed experts not resident when it ran (the map after the previous commit; until x4_gate's
+    follow-up they were counted against the request's last map, right only for a frozen placement)."""
     import numpy as np
-    resident = (store.residency.host >= 0).all(-1).reshape(-1)
     unit = np.array([sum(store.groups[g][r].unit_bytes for r in range(store.roles)) for g in sorted(store.groups)])
     item_bytes = np.repeat(unit, store.items)
     routed = sum(len(x) for x in steps)
-    misses = [x[~resident[x]] for x in steps]
     n = len(steps)
     return {"decode_steps": n, "routed_per_token": routed / n, "misses_per_token": sum(map(len, misses)) / n,
             "hit_rate": 1 - sum(map(len, misses)) / routed, "miss_mb_per_token": sum(item_bytes[m].sum()

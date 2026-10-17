@@ -1010,8 +1010,12 @@ Decided while building, against the text above:
   check removed is deterministic — the snapshot differs (and the parity check with it) in every run, run-identical
   holds. `map-before-landing` failed both checks (all three runs differ from all-resident; run 0 differs from runs
   1–2). L2 was not run for the plants (§6 predicts it fails too); the exact checks above are their verdicts.
-- **Profiles** are written beside the checkpoint by `holon_tools profile` (`--name`, default `profile.json`) — for a
-  hub-cache checkpoint that is the snapshot directory; shipping them in model bundles stays open (§5).
+- **Profiles** are written beside the checkpoint by `holon_tools profile` (`--name`, default `<stem>.profile.json`
+  since step 4: profiles of two files share a hub cache's blob directory; each records the files it was counted on,
+  `[name, bytes]` as the store reads them, and the store refuses it on others) — for a
+  hub-cache checkpoint that is its blob directory (step 4's fix: the store reads beside the file the weight source
+  resolves, and the tool wrote beside the snapshot link, so a hub-cache profile was never found; both now take
+  `TieredStore.profile_dir`); shipping them in model bundles stays open (§5).
 - **What the parity check leaves to step 3b:** traces with prompts in mixed steps, device lending and its return
   (cache size unchanged), and the one-slot-per-expert rule across a step's row kinds; `route_dump` already takes a
   step's routed experts from its eager resolves for them.
@@ -1400,3 +1404,54 @@ Decided while building, against the text above:
 After merging steps 3c and 3d (the router-prepared q8_1 input and the fused residual add), the snapshot trace was
 re-run on the A5000: F11 at 25% and the RAM-capped F11 (half the pieces in RAM, 12 GiB) byte-identical to the new
 all-resident, F5b run-identical ×2 (the full suite: 1,445 passed).
+
+
+### Step 4 (2026-10-17): the development gate's natural-fit rows on the RTX 5080
+
+Evidence: `spikes/x4_gate/README.md`, `evidence/x4_gate_rtx-5080_2026-10-17.json` (one desktop, one day, every arm
+interleaved; llama.cpp and FreeToken at x4_refs' pins).
+
+- **Natural fit:** 52.4% of the experts (3,220 / 1,610 / 1,610 cache slots), not ≈ 47%.
+  - The fill at a 33,792-token floor reaches 52.7%, but its counts do not start when pinned (≈ 18 MB short), so the
+    lock pins 8 experts fewer.
+- **Offload lock (F5a, scratch copy, committed at X's close per D15):**
+  - Settings: batch 1, 33,792 context, `lfu`, `moe.ring_copy=dma`, and a held-out routing profile as F2's warm
+    start.
+  - Verdict: L2 passes against the mmq floor (top-1 98.264%, KL p99 5.38e-2, ΔPPL vs floor −0.04%), and the
+    snapshot is run-identical ×3.
+- **`ring_copy` is `dma`.** Prefill is +37.5% / +10.0% / +2.5% at 1K / 4K / 32K, and decode is unchanged.
+- **The profile is kept.** Decode gains +2–4%.
+- **`lfu` stays the default.** `lru` is +0.04% at 4K, within 2 sd, and slower at 1K and 32K.
+- **Decode passes every natural-fit row:**
+  - FreeToken 1.08 / 1.06 / 1.03×;
+  - the pinned cache 1.21 / 1.25 / 1.12×;
+  - the default-mmap cache ≥ 1.34×;
+  - the static splits ≥ 1.79×.
+- **These land inside or above §13's bands after 3c and 3d.**
+- **Prefill passes against llama.cpp** (≥ 2.4×), **but misses against FreeToken at 4K (0.92×) and 32K (0.88×)**.
+  - 8K-token steps give only +2.3% at 32K, so they do not close it.
+  - **By §8 the FreeToken prefill rows go to the owner.**
+- **Exactness on the 5080:** natural F11, capped F11, natural `profile_decay` and natural `lru` snapshots are
+  byte-identical to each other, ×3 each, and F11 equals its replay oracle at every step.
+- **Capped rows** are recorded for step 6. Holon at 25% misses 205 MB per token at 4K on the 5080, as the replay
+  predicted. The 338 MB first reported was x4_gap `ctx.py`'s counter, which compared steps with the request's last
+  map; that is right only for a frozen placement (fixed in `3a1c7b5`).
+  - On the A5000, the true count is 214.5 MB against 206.9 for M6's `lfu` replay from the same start.
+  - The 3.7% difference is the prompt's ring step: it lent 454 of 1,536 cached experts and returned them empty (D4's
+    R0), and decode refills them.
+- **Two fixes, each with a test that failed before:**
+  - a fill arena's minimum now holds the staged-pass layout (batch 1 crashed at startup);
+  - profiles of hub-cache checkpoints are now found (above, step 3a's bullet).
+- **Follow-ups after the std API tag** (bug fixes found at the gate, kept minimal, called out for the panel):
+  - **`80681f0`:** a profile records the files it was counted on (`[name, bytes]` as the store reads them), and the
+    store refuses it on another checkpoint. `holon_tools profile` defaults to `<stem>.profile.json`, because a hub
+    cache's `blobs/` is shared.
+  - **`8c5a826`:** a pinned arena is a fill pool too.
+    - Its minimum is a prefill pass's staging, its preference the pinned size, so pinned and fill profile alike.
+    - An all-pinned arena short of its size refuses at the store's first launch (D4), rather than taking the paged
+      floor or running without its cache.
+      - Launches follow the final materialize, and the startup profile never launches.
+      - This is panel B's form (`bc3f25c`): no core field and no reading of the ledger, which is not in the plugin
+        ABI.
+    - On the 5080 the fill's 3,236 / 1,618 / 1,618 (52.7%) now pin as they are. The scratch lock was regenerated at
+      them with the same L2 and a snapshot run-identical ×3.
