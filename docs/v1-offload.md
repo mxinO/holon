@@ -1,7 +1,7 @@
 # v1 — expert offload: MoE models larger than VRAM on one consumer GPU
 
-Status: **draft rev 3** (2026-10-17), for the panel's re-review. Rev 1 drew 52 findings (A 20, B 15, C 17), rev 2
-27 (A 11, B 8, C 8); §12 logs each and where it is answered. No code yet. Evidence base: the local research note
+Status: **draft rev 4** (2026-10-17), for the panel's re-review. Rev 1 drew 52 findings (A 20, B 15, C 17), rev 2
+27 (A 11, B 8, C 8), rev 3 20 (A 8, B 7, C 5); §12 logs each and where it is answered. No code yet. Evidence base: the local research note
 `docs/brainstorm/v1-offload-research.md` (not published; "R §n"), which cites every reference engine by `file:line`
 in its local clone; Project Maya is R §3.1b.
 
@@ -91,7 +91,7 @@ for that model, with exact defaults and reproducible runs.
 5. **Memory:** pinned host memory is allocated exactly (no power-of-two rounding) and accounted against
    `host_memory`; VRAM and host splits are pinned by the lock; startup refuses with a per-pool report when a pinned
    split does not fit.
-6. **Core:** only the seams of §4, each an additive ABI minor (ABI 1.2), toy-proven; ≈ 450 new code lines
+6. **Core:** only the seams of §4, each an additive ABI minor (ABI 1.2), toy-proven; ≈ 480 new code lines
    (estimates in §4), core ≤ 6000 (4248 today). Suite time grows only by the new plugins' own tests.
 7. **Locks:** offload deployments get locks on the classes they run on; the existing locks are propagated once, at
    X's close (D15).
@@ -146,16 +146,17 @@ the step's routing counts and return **edits** (D4). Plugin kinds, all chosen by
 | Kind | Option (example) | Contract | Instances in X |
 |---|---|---|---|
 | expert store | `moe.store = "std.moe.offload@1"` (absent: resident) | a std unit `ctx.unit(Ref)` binds | resident, offload |
-| placement policy (host) | `moe.placement = "plugins.placement.profile_decay@1"` | `PlacementPolicy` protocol in `std.tiered`: `seed(profile, budget) → edits`, `after_commit(counts, view) → edits`, `device_state() → {name: spec}`, `resolve_variant: str` | static, profile_decay, lru |
+| placement policy (host) | `moe.placement = "plugins.placement.profile_decay@1"` | `PlacementPolicy` protocol in `std.tiered`: `seed(profile, budget) → edits`, `after_commit(counts, view) → edits`, `device_state() → {name: spec}`, `resolve_variant: str | None` (the contract name; None = `moe_resolve@1`) | static, profile_decay, lru |
 | miss path (device + CPU) | kernel selection through facts | `moe_resolve@1` (or a variant contract a policy plugin owns), `expert_fetch@1`, `cpu_experts@1`, `moe_patch_rows@1` (§5) | fetch, CPU |
-| expert tier (host) | `moe.tiers = ["std.tiered.pinned@1", "std.tiered.gguf_direct@1"]` | `Tier` protocol in `std.tiered` | pinned RAM, SSD |
-| route transform (`approx`) | `moe.route_transform = "<name>"` — explicit option only, never by kernel priority; the value is the selection fact its provider matches | `moe_route_transform@1` between `moe_topk` and `moe_resolve`; a negative id means **dropped** (the rank's null slot, no fetch, no CPU job, no count), defined in `moe_resolve@1` before the tag | none in X before the tag; A1 after |
+| expert tier (host) | `moe.tiers = ["std.tiered.pinned@1", "std.tiered.gguf_direct@1"]` | `Tier` protocol in `std.tiered`: `capacity(class) → slots`, `admit(expert, slot)`, `evict(expert)`, `device_readable: bool`, `read(expert) → descriptor` (`host_slot` for a device-readable tier; `pread(fd, offset, n)` or `memcpy(src, n)` for others), which the store hands to a generic copy task of `cpu_task@1` into pinned staging — so tiers stay pure Python | pinned RAM, SSD |
+| route transform (`approx`) | `moe.route_transform = "<name>"` — explicit option only, never by kernel priority; the value is the selection fact its provider matches | std owns only the signature `(ids, weights, map) → ids, weights`; each transform is a contract its plugin owns (`op.moe_route_transform.<name>@1`, own oracle and CPU provider); a negative id means **dropped** (the rank's null slot, no fetch, no CPU job, no count), defined in `moe_resolve@1` before the tag | none in X before the tag; A1 after |
 
 A new policy, tier or transform is a plugin naming its own Ref. A policy that needs device state declares it
-(`device_state`) and names its resolve variant (`resolve_variant`, a kernel fact). A variant whose semantics the std
-oracle does not know (F4's in-graph LRU, F10's promotion) is **a contract the policy plugin owns**
-(`op.moe_resolve.<variant>@1`, with its own `reference.py` and CPU provider in the plugin's directory; L0 runs any
-plugin-supplied oracle), so it lands without a std or `testing` diff (panel B-r2-1). What one plugin cannot do: a
+(`device_state`) and names its resolve contract (`resolve_variant`). A variant whose semantics the std oracle does
+not know (F4's in-graph LRU, F10's promotion) is **a contract the policy plugin owns** (`op.moe_resolve.<variant>@1`:
+`moe_resolve@1`'s signature plus the declared state, so the store calls it unchanged; its own `reference.py` and CPU
+provider in the plugin's directory; L0 runs any plugin-supplied oracle), so it lands without a std or `testing` diff
+(panel B-r2-1). Route transforms follow the same rule. What one plugin cannot do: a
 miss path that changes the graph shape (a new node between resolve and combine) is a std minor of the offload store
 — recorded, not hidden.
 
@@ -163,12 +164,16 @@ miss path that changes the graph shape (a new node between resolve and combine) 
 - **Placement-invariant GPU path.** An expert's output must not depend on how its GEMM is launched. The vendored
   expert-id mmq switches to stream-k when tile efficiency is < 90%, splitting K at points that depend on the slot
   count (`mmq.cuh:1471-1478, 1093-1094`; on the RTX 5080 it engages at 16–85 slots). X adds a vendor patch forcing
-  tiled mmq on the expert-id path, and a second one making the id helper emit a compact list of active slots, so mmq
-  launches over min(S, T·k) entries instead of S (class arenas would otherwise multiply the grid by S/E: 24× at the
-  vehicle's natural fit, panel A-r2-2; each tile is still one CTA in fixed K order, so invariance is unchanged).
-  The two mmvq kernels (T = 1 generic, T ≥ 2 MoE) and mmq reduce in different orders, so **every launch over a
-  layer picks its path from the step's row count T**, never from a compacted launch's own count (a ring group with 3
-  routed tokens from a 512-token chunk still runs mmq). L0 checks, on every lock class including sm_120: an expert's
+  tiled mmq on the expert-id path, and a second one rewriting the id helper to build a compact list of active slots
+  in O(T·k) (a stable sort of (slot, t·k + j) pairs) and launch mmq over min(S, T·k) entries instead of S (class
+  arenas would otherwise multiply both the grid and the helper's scan by S/E: 24× at the vehicle's natural fit,
+  panel A-r2-2; each tile is still one CTA in fixed K order, so invariance is unchanged).
+  The two mmvq kernels (one row: generic; more: MoE) and mmq reduce in different orders, so **the path is the
+  reference's**: `std.moe@1` cuts a step into 512-token chunks and the kernel picks mmvq or mmq from the chunk's row
+  count, and every offload launch takes the path of the chunk its rows belong to, never its own (compacted) row
+  count — `linear_experts@2` gains an optional `path_rows` argument for that (an additive contract minor). Decode and
+  verify launches are never compacted (one launch per class over all of a chunk's rows); only prefill's ring and
+  staging groups are, and they run mmq because their chunk does. L0 checks, on every lock class including sm_120: an expert's
   rows bitwise equal across slot counts {E, E+1, 16, 74}, slot permutations, compacted launches (T' ≤ the mmvq limit
   out of a step with T above it) and mmq tile widths 8–128.
 - **The default lock computes every expert on the GPU** (F5a only). Then every placement policy is exact, and
@@ -185,10 +190,12 @@ miss path that changes the graph shape (a new node between resolve and combine) 
   timing-dependent result. The ring's lent slots and RAM-tier victims follow the same rule.
 - **One writer per map region.** The residency map is one device buffer written only by the apply kernel (host
   edits, stream-ordered) and by in-graph resolvers for the regions the policy declares device-owned (F10's spares,
-  F4's victims). Host edits are **unconditional within host-owned regions**; a slot changes owner only through an
-  explicit release the device writes into its per-step delta log and the host acts on at a fixed lag, so a host copy
-  never targets a slot the device may still map. An edit whose precondition fails is an assertion error, not a skip
-  (a skip would leave the host's copy overwriting a mapped slot, panel A-r2-1). The delta log returns with the
+  F4's victims). Host edits are **unconditional within host-owned regions**; a slot moves device → host only through
+  an explicit release the device writes into its per-step delta log and the host acts on at a fixed lag, so a host
+  copy never targets a slot the device may still map; host → device (F10's spare refill) happens in the same apply
+  as the victim's unmap, with no copy. An edit whose precondition fails raises a device error flag (never a device
+  trap, whose error is sticky), checked at the commit of step c+2 before that step's tokens are emitted: the engine
+  stops with an error and discards the steps launched after it (panel A-r2-1, A-r3-5). The delta log returns with the
   counts, so the host's view is the device's, lagged by a fixed number of steps. Counts live in one device buffer
   zeroed in-graph each step and copied out through S1's per-launch pinned double buffer (a captured graph bakes in
   device addresses, so the device side is single-buffered).
@@ -209,17 +216,22 @@ object through `BuildCtx.shared` (S0). The store owns:
   layers and roles: Q4_K_M has Q6_K `ffn_down`; Maya-S has IQ2_XXS gate/up and IQ2_S / IQ3_XXS down). A class's
   arena is `[S, …]` with the contiguous expert stride `linear_experts@2` already assumes; its top k slots are **null
   slots** (zero weights), one per routing rank, so ids stay unique per token (ggml's id helper keeps one entry per
-  (token, expert): a shared null slot corrupts rows on the mmq path, panel A2); then staging slots for fetched misses,
-  min(E, k × the largest row count of any step, eager prefill included) per class, reused layer after layer —
-  128 per class for the vehicle (≈ 0.35 GB in total, in §7); "distinct misses of a layer ≤ staging" is an invariant
-  with an L1 test, since F5a has no fallback; then cache slots;
+  (token, expert): a shared null slot corrupts rows on the mmq path, panel A2); then staging slots for decode and
+  verify misses, min(E, k × the largest graphed row count) per class, reused layer after layer — 64 per class for
+  the vehicle at `max_seqs` 8 without drafting, ≈ 0.28 GB with the null slots across its three classes (Q4_K gate_up
+  1.77 MB, Q4_K down 0.885 MB, Q6_K down 1.29 MB; §7); "distinct misses of a layer ≤ staging" is an invariant with an
+  L1 test, since F5a has no fallback; prefill's routed-only staging borrows the ring slots lent from the arena tail
+  (D8); then cache slots;
 - the **residency map** `[L, E, roles] → slot | −1−tier` (tier codes say where a miss lives: RAM, SSD);
 - the host tiers, the policy object, the split table, the per-step count and delta buffers (D4).
 
 The store is built once per engine by its factory on the **root** build context, so an aux model's units (the MTP
-layer) get the same object and its pools are not namespaced (panel A-r2-11). It sizes its map and arenas from the
-weight source's config, aux layers included, before any pool request (an MTP layer is built after the target's
-weights load, panel B-r2-6). The startup memory profile materializes minimum pools and runs a worst step, then the
+layer) get the same object and its pools are not namespaced (panel A-r2-11). It learns its classes from the units
+that bind to it: each expert stack adopts its `QTensor` without copying (the GGUF source maps the file) and hands the
+store its layout and S4 extents. At S0's `before_materialize` — after every model, aux models included, is built and
+loaded, before the first materialize — the store forms its classes (role, ggml type, shape), requests its VRAM fill
+pools and host pools, and fills the host pools from the extents with `O_DIRECT` reads (panel A-r3-2, B-r3-2: no
+architecture keys in std, and per-tensor types are known only from the tensor table). The startup memory profile materializes minimum pools and runs a worst step, then the
 ledger re-materializes: `after_materialize` runs after **every** materialize, resetting device state and re-seeding,
 and the arena's minimum holds its null and staging slots (panel A-r2-3).
 
@@ -239,9 +251,11 @@ word per layer in mapped pinned memory, spin-kernel wait (memop wait on displays
 native worker, zero-copy payloads — ships as `kernels.cpu_task` (`[build]`, prebuilt like the other native plugins)
 providing `cpu_task@1` signal / wait ops and a worker service, shared through S0. The core keeps only the lifecycle:
 shared objects are shut down after `drain`, and the engine can pin its loop to a reserved core (`loop_core`). The
-core needs no abort hook because `cpu_task@1` is fail-open by contract: a task error or a dead worker answers DONE
-and raises an error flag that the store reports at the step's commit (an error, the engine stops), so a graph never
-spins forever and `drain` always returns (panel B-r2-7). Worker counts are tune's (S6 saturated DRAM with 2–4 threads); F9's I/O workers are separate
+core needs no abort hook because `cpu_task@1` is fail-open by contract: a task error answers DONE with an error
+flag; the spin-wait kernel is time-bounded (Maya bounds its wait at about 60 s) and on timeout raises the flag and
+proceeds, which covers a dead or hung worker; the memop flavour, which cannot time out, has a watchdog thread in the
+plugin that answers for a worker it finds dead. The store reports the flag at the step's commit (an error, the
+engine stops), so a graph never spins forever and `drain` always returns (panel B-r2-7, B-r3-7, A-r3-5). Worker counts are tune's (S6 saturated DRAM with 2–4 threads); F9's I/O workers are separate
 from compute workers, so a blocking read never stalls a layer's CPU experts.
 
 **D7 — CPU kernels: ggml-cpu, bitwise per token and per thread count.** `kernels.ggml_cpu` vendors ggml-cpu (MIT) at
@@ -270,8 +284,8 @@ remainder. The floor defaults to `max_model_len` for one sequence; benchmark loc
 everything above the floor (C15: returning VRAM to idle KV loses to Strata and Maya on single-user traces); the floor
 is the knob, set by L4. The lock pins the resulting slot counts (D4).
 
-**D10 — Host tiers: exact allocation, exclusive when RAM is short.** Host pools are allocated once, before weights
-load and outside the device profile cycle, with `cudaHostAlloc` or `mmap` + `cudaHostRegister` (torch's pinned
+**D10 — Host tiers: exact allocation, exclusive when RAM is short.** Host pools are allocated once, before the first
+materialize and outside the device profile cycle, filled from the weight extents, with `cudaHostAlloc` or `mmap` + `cudaHostRegister` (torch's pinned
 allocator rounds to a power of two: 86 GB would pin 128 GiB, panel A6), and accounted against `host_memory`. The
 RAM tier holds all experts when they fit; otherwise it is **exclusive of VRAM** (an expert lives in VRAM, RAM or SSD,
 moved by D2H demotion as Maya does): with an inclusive tier, GLM on a 64 GB host sends ≈ 7.5% of routes to SSD
@@ -327,15 +341,15 @@ None names experts, KV or formats. Each is proven first with a toy plugin.
 
 | # | Seam | Today → change | Toy proof | Lines |
 |---|---|---|---|---|
-| S0 | **Shared objects and their lifecycle** | none → `BuildCtx.shared(key, factory)`: one object per engine per key, engine-global across child (aux-model) contexts, the factory run with the root context; keys by convention the provider's resource name (`cpu_task.worker`); hooks it may implement: `after_materialize(ctx)` (after **every** materialize, before graph capture: reset and seed), `shutdown()` (after `drain`; generalizes `ShutsDown`); EngineConfig `loop_core` | two toy units, one in an aux context, share one object; it re-seeds a pool after each materialize and stops after drain | 70 |
+| S0 | **Shared objects and their lifecycle** | none → `BuildCtx.shared(key, factory)`: one object per engine per key, engine-global across child (aux-model) contexts, the factory run with the root context; keys by convention the provider's resource name (`cpu_task.worker`); hooks it may implement: `before_materialize(ctx)` (once, after every model and aux model is built and loaded, before the first materialize: request pools), `after_materialize(ctx)` (after **every** materialize, before graph capture: reset and seed), `shutdown()` (after `drain`; generalizes `ShutsDown`); EngineConfig `loop_core` | two toy units, one in an aux context, share one object; it requests a pool in `before_materialize`, re-seeds it after each materialize and stops after drain | 80 |
 | S1 | **Step hooks** | planner `prepare_device` only → a shared object may register `before_launch(step) → (writes, mem_ops)` (device writes and MemOps enqueued before the replay, stream-ordered) and `after_commit(step, telemetry)` (declared device telemetry buffers, copied D2H with the step's tokens into a per-launch pinned double buffer) | a toy counter and a map edit applied at launch c+2 under depth 1 and on the synchronous paths alike | 80 |
-| S2 | **Host pools and async cross-device MemOps** | device pools only; eager equal-shape MemOps → `BuildCtx.pool(…, device="host", mapped=True)`: allocated before weights load with `cudaHostAlloc` or `mmap` + `cudaHostRegister`, exact bytes against EngineConfig `host_memory`, a device alias; a MemOp may cross host ↔ device and carry `after` (an event of a step) and `lands_by` (a later step whose launch waits on it); the core runs it on a copy stream | a toy unit demotes a unit to host and back, bitwise; a late copy stalls the `lands_by` step, never skips it | 200 |
+| S2 | **Host pools and async cross-device MemOps** | device pools only; eager equal-shape MemOps → `BuildCtx.pool(…, device="host", mapped=True)`, requested at the latest in S0's `before_materialize` and allocated once, outside the device profile cycle, with `cudaHostAlloc` or `mmap` + `cudaHostRegister`, exact bytes against EngineConfig `host_memory`, a device alias; a MemOp may cross host ↔ device and carry `after` (an event of a step) and `lands_by` (a later step whose launch waits on it); the core runs it on a copy stream | a toy unit demotes a unit to host and back, bitwise; a late copy stalls the `lands_by` step, never skips it | 200 |
 | S3 | **Fill pools** | fixed plugin pools → `BuildCtx.pool(…, fill=True, priority=p)`, filled after EngineConfig `paged_min_tokens`, capped at `pref_units`; a lock pins sizes through the owning plugin's own option (D4), so the core records nothing new | a toy fill pool and paged state split a budget | 40 |
 | S4 | **Weight extents** | `QTensor` parts carry tensors only → an optional per-part `extent(path, offset, nbytes)` for unmodified file slices (absent when a kernel's `prepare` repacked them) | the toy weight source reports extents that read back bitwise | 20 |
-| S5 | **CPU facts** | `Fingerprint` has none → `Fingerprint.cpu_isa` (a tier = a prebuilt compiler flag set such as `x86-avx2`, `x86-avx512`, never `-march=native` or a CPU model) and `Constraint.cpu_isa`. A lock that runs CPU kernels carries the tier inside its class's first segment (`rtx-5080+x86-avx2/cu130-torch2.11`, keeping the two-segment layout lock discovery globs); `nearest_class` never borrows across tiers; a host of another tier starts from such a lock unverified, with the CPU path failing over to F5a (exact) | a toy CPU kernel selected by tier; class ranking with and without a tier | 40 |
-| — | **CLI size check** | refuses checkpoints larger than VRAM → refuses those larger than VRAM plus EngineConfig `host_memory` (0 by default, so today's behaviour stands; generic, no store named, invariant 1) | — | 10 |
+| S5 | **CPU facts** | `Fingerprint` has none → `Fingerprint.cpu_isa` (a tier = a prebuilt compiler flag set such as `x86-avx2`, `x86-avx512`, never `-march=native` or a CPU model) and `Constraint.cpu_isa`. A lock that runs CPU kernels carries the tier inside its class's first segment (`rtx-5080+x86-avx2/cu130-torch2.11`, keeping the two-segment layout lock discovery globs); for a host of tier t the lookup order is `gpu+t/…`, then `gpu/…`, then another tier's lock unverified; the **store** forces F5a there (tune records the split's tier in a store option, and the store zeroes `plan[n]` when it differs from `ctx.fingerprint.cpu_isa`) | a toy CPU kernel selected by tier; class ranking with and without a tier | 40 |
+| — | **CLI size check** | refuses checkpoints larger than VRAM → refuses only when it is larger than VRAM **and** EngineConfig `host_memory` is 0 (the default, so today's behaviour stands); with `host_memory` > 0 the deployment opted in and the build's per-pool report judges fit (generic, no store named, invariant 1; GLM's 93 GB file on a 32 GB card with ≈ 58 GB of host budget must not be refused) | — | 10 |
 
-≈ 440 lines. Not core: the store, `TieredStore`, tiers, residency maps, policies, calibration, route traces and
+≈ 480 lines. Not core: the store, `TieredStore`, tiers, residency maps, policies, calibration, route traces and
 profiles, the ring (design §6.5). No slot is re-added; `quiesce`, layer-wise loading and per-layer ready events stay
 planned (D13, milestone K).
 
@@ -357,15 +371,16 @@ planned (D13, milestone K).
 `PlacementPolicy` and `Tier` protocols, `DeviceResolver`; profile and trace tooling (`route_dump` from the
 `after_commit` counts; `holon_tools profile` ranks (layer, expert) pairs; profiles ship in model bundles).
 
-Kernel contracts (owned by `std.moe`; each with `reference.py` and a CPU provider in `testing`):
+Kernel contracts (owned by `std.moe`, except the policy- and transform-owned variants of D3; each with `reference.py`
+and a CPU provider, in `testing` for std's):
 
 | Contract | Signature (sketch) | Notes |
 |---|---|---|
 | `moe_resolve@1` | `(ids [T,k], weights, map, layer, plan table, state…, row mask) → slot_ids [T,k], fetch list, CPU jobs, counts, delta` | deterministic; misses → the rank's null slot; a negative id is dropped (no fetch, no job, no count); padding rows masked; variants with other semantics are contracts their policy plugins own (D3) |
-| `moe_route_transform@1` | `(ids, weights, map) → ids, weights` | `approx` only, bound by explicit option |
+| `moe_route_transform@1` | `(ids, weights, map) → ids, weights` | signature only; each transform's contract is its plugin's (D3); `approx` only, bound by explicit option |
 | `expert_fetch@1` | `(fetch list, host aliases, staging slots)` | in-graph zero-copy gather (dynamic-address DMA is not graph-safe); a DMA variant with a host-planned resolve if M1 shows the gather < 0.9× DMA |
-| `expert_prefetch@1` | `(next layer's non-resident list, ring slots) → per-layer event` | F7's in-step copy stream, owned by the kernel plugin (D8) |
-| `linear_experts@2` | unchanged, over a class arena `[S, …]`; path chosen from the step's T (D4) | the forced-tiling and compact-active-slot patches inside `kernels.ggml_cuda` |
+| `expert_prefetch@1` | `start(next layer's non-resident list, ring slots)`, `wait(layer)` | F7's in-step copy stream and its events stay inside the kernel plugin (D8) |
+| `linear_experts@2` | over a class arena `[S, …]`; gains an optional `path_rows` (an additive minor): the row count of the chunk whose path the launch takes (D4) | the forced-tiling and compact-active-slot patches inside `kernels.ggml_cuda` |
 | `cpu_experts@1` (CPU) | `(jobs grouped by expert, activations, host blocks, mapped f32 rows)` | bitwise per token across group sizes and thread counts; ISA constraint |
 | `moe_patch_rows@1` | `(y [T,k,H], CPU rows, job map)` | before `moe_combine@1` |
 | `cpu_task@1` | `signal(slot)`, `wait(slot)` graph ops + worker service | `kernels.cpu_task` (D6); fail-open: errors answer DONE and raise a flag |
@@ -396,10 +411,10 @@ snapshot trace contains ≥ 8 swap rounds:
 | Plant | Breaks | Predicted |
 |---|---|---|
 | `resolve_off_by_one` | a miss maps to the neighbouring slot | snapshot differs; L2 fails |
-| `map_before_landing` | the map happens in the unmap step (d = 0) without waiting, so the GEMM races the copy | run-identical fails (timing-dependent); L2 may pass |
+| `map_before_landing` | the map step skips the wait, the copy drops its `after` ordering, and an unseeded 0–2 ms delay is put on the copy stream before it, so reads at the map step race the copy | fails run-identical (race) or the snapshot identity against all-resident (stale bytes); which one is recorded |
 | `map_stale_slot` | a deterministic map to a slot already reassigned | snapshot differs; L2 fails |
 | `cpu_wait_skipped` | on 1% of layers the graph reads the CPU rows without waiting (F5b) | fails run-identical (a race) or L2 (stale rows read deterministically); which one is recorded |
-| `owner_race` | the device promotes into a slot the host is refilling (F10 with a host edit on a device-owned slot) | the apply kernel's precondition assertion fires; without it, L2 fails |
+| `owner_race` | a host edit targets a slot in F4's device-owned victim region (step 3) | the precondition flag fires and the engine stops; with the check removed, run-identical fails |
 | `cpu_gate_up_order` | the CPU reads the merged gate / up halves swapped (F5b) | L2 fails; F5a configurations clean |
 
 Each plant changes only the configurations that use its path. Batch-invariance of `cpu_experts` is L0's own
@@ -412,7 +427,7 @@ Budget = (VRAM free after weights and the CUDA context) × `memory_fraction` −
 
 | Model, file, context | Card | Non-expert weights | Expert bytes | Expert cache | Host tiers |
 |---|---|---|---|---|---|
-| Qwen3-30B-A3B Q4_K_M, 32K | RTX 5080 16 GB | ≈ 1.2 GB | ≈ 17.6 GB (6,144 × ≈ 2.86 MB) | ≈ 8.2 GB ≈ 47% incl. ≈ 0.35 GB of null and staging slots (capped run ≈ 25%) | RAM ≈ 18 GB |
+| Qwen3-30B-A3B Q4_K_M, 32K | RTX 5080 16 GB | ≈ 1.2 GB | ≈ 17.6 GB (6,144 × ≈ 2.86 MB) | ≈ 8.2 GB ≈ 47% incl. ≈ 0.28 GB of null and staging slots (capped run ≈ 25%) | RAM ≈ 18 GB |
 | Qwen3.8-Flash-Next IQ2_XS, 32K, MTP on | RTX 5080 16 GB | ≈ 3.7 GB + the MTP layer | ≈ 36 GB (24,576 × ≈ 1.46 MB) | ≈ 3.8–7 GB ≈ 11–20% (MTP-layer experts through the store or resident) | RAM ≈ 36 GB; PLE 28.8 GB on SSD |
 | Qwen3.8-Flash-Next IQ3_S, 32K | RTX 5090 32 GB | same | ≈ 50 GB | ≈ 18.7 GB ≈ 37% | RAM ≈ 50 GB |
 | GLM-5.3-Flash Maya-S, 32K, MTP off | RTX 5090 32 GB | ≈ 6.9 GB | ≈ 86 GB (12,096 × ≈ 7.1 MB) | ≈ 18 GB ≈ 21% | RAM exclusive + SSD on a 64 GB host |
@@ -431,12 +446,13 @@ On the RTX 5080 and 5090 desktops (the bar cards), one heavy job at a time under
 | M1 | H2D: pinned copies, `cudaMemcpyBatchAsync` of expert-sized blobs, the zero-copy SM gather (8–128 CTAs); the gather's best rate as a ratio to DMA; per-layer prefill expert compute vs chunk size (64–4096 tokens) on the bar cards | the fetch path's rate — gather ≥ 0.9× DMA, else the DMA `expert_fetch` variant lands before step 4; ring depth; D8's rule |
 | M2 | Contention: CPU expert GEMV concurrent with the gather; per-expert cost per path under contention | `plan[n]` (D4); whether F5b can gain ≥ 5% at all |
 | M3 | CPU expert throughput: ggml-cpu `vec_dot` on Q4_K / IQ2_XXS / IQ2_S / IQ2_XS / IQ3_XXS / IQ3_S experts, 1–8 tokens, AVX2 vs AVX-512, 1–N threads; Strata's kernels beside them | F5b's worth; borrowing multi-token kernels; worker counts |
-| M5 | Handshake with a real payload: k ≤ 10 jobs per layer, rows 1–8, device- vs host-planned | D5's plan location; `cpu_task@1` |
+| M5 | Handshake with a real payload: k ≤ 10 jobs per layer, rows 1–8, device- vs host-planned; a prototype of host-issued copy-engine fetches while a graph kernel spins (Strata's DMA mode hung a driver lock, #31) | D5's plan location; `cpu_task@1`; whether the DMA `expert_fetch` variant is viable |
 | M6 | Routing traces of the development vehicle (A5000) on the agent and mixed traces; offline replay of static, profile_decay (0.7 / 4 / 96 / 1.5), lru, promote-on-fetch, LFU, Belady at 10–60% cached, reporting **bytes per token per path** (hit, fetch, admission, CPU, SSD) converted to time with M1–M3's rates; profile transfer between traces; distinct experts per step and window; next-layer recall | the default policy and its knobs; D8's rule (with M1's compute); D11 |
 | M7 | NVMe `O_DIRECT` reads of expert-sized ranges at queue depths 1–32 with 1–8 I/O workers | F9's reader |
 
 Step 0 closes with a roofline (M1–M3 rates, M6's bytes per path) predicting every row of acceptance 3, written
-before step 4 measures them.
+before step 4 measures them. A natural-fit row the roofline predicts to miss its bar moves after step 6 (judged with
+tune's lock), or goes back to the owner before step 4 if F5b cannot plausibly close it.
 
 Decision rules (fixed now): the default policy is the one with the least modelled time per token on M6's held-out
 trace, confirmed by L4 on the development gate; F5b enters a lock only at ≥ 5% decode gain (D4); F7 by D8's time
@@ -447,7 +463,7 @@ rule; F8 only at ≥ 15% on < 1K-token chunks with a fixed share; A1 never in a 
 | Step | Work | Checks | Days |
 |---|---|---|---|
 | 0 | M1–M3, M5–M7; host RAM per class | evidence; the panel reviews the parameters they set | 3 |
-| 1 | S0–S5 and the CLI change with toy proofs (ABI 1.2); the forced-tiling vendor patch | core tests; `check_abi --base` additive; LOC; L0 placement-invariance | 5 |
+| 1 | S0–S5 and the CLI change with toy proofs (ABI 1.2); the forced-tiling and compact-helper vendor patches, `path_rows` | core tests; `check_abi --base` additive; LOC; L0 placement-invariance | 5 |
 | 2 | `std.tiered`, the offload store and options, class arenas with null and staging slots, `moe_resolve` / `expert_fetch` (CUDA + oracle + CPU provider), the pinned tier, `static` (F1), F5a | all-resident bitwise to `std.moe@1`; L0 | 5 |
 | 3 | `profile_decay` (F2–F3) and `lru` (F4, its own resolve contract), two-phase edits, route tap and profile tool, prefill streaming (F7); **tag the std offload API** | snapshots with adaptive placement on, ×3, and the n-gram drafter run; cross-placement identity; plants 1–3 and `owner_race` | 5 |
 | 4 | Development gate, natural-fit rows, on the RTX 5080 vs FreeToken and llama.cpp (F5a lock); tune | acceptance 3 natural-fit rows vs the roofline; L4 | 3 |
@@ -570,6 +586,28 @@ mixers (with FN / GLM); the end-of-answer checkpoint (plan §10). Its own doc mu
 | C-r2-5 floor cannot know the CPU set under adaptive placement | §6: F5b's L2 runs with placement frozen |
 | C-r2-7 contexts | acceptance 3 and D14: ≤ 32K on the vehicle |
 | C-r2-8 prefill compute measured on the wrong card | §8: in M1 on the bar cards |
+
+### Rev 3 → rev 4
+
+| Finding | Resolution |
+|---|---|
+| A-r3-1 [major] "path from the step's T" differs from `std.moe@1`'s 512-token chunks; `linear_experts@2` cannot be told the path | D4: the path is the reference's (the chunk's row count); `path_rows` optional argument; decode / verify never compacted |
+| A-r3-2, B-r3-2 [major] arenas cannot be sized from the config; std would learn architecture keys | S0 `before_materialize`; D5: classes from adopted layouts and extents; host pools filled from extents |
+| A-r3-3 the id helper still scans S × T·k | D4: helper rewritten to an O(T·k) compact list |
+| A-r3-4, C-r3-1 [major] `map_before_landing` still cannot fail | §6: drops `after`, adds an unseeded delay on the copy stream; prediction covers race or stale bytes |
+| A-r3-5, B-r3-7 fail-open has no mechanism for a dead worker; assertion mechanism | D6: time-bounded spin, watchdog for memops; D4: device error flag checked at commit, later steps discarded |
+| A-r3-6 host → device direction | D4: in the same apply as the unmap, no copy |
+| A-r3-7 S5 borrowing contradiction | S5: lookup order `gpu+t`, `gpu`, other tier unverified; the store forces F5a |
+| A-r3-8, C-r3-2 staging undercounted, sized for prefill | D5: decode / verify sizing, ≈ 0.28 GB; prefill borrows ring slots; §7 |
+| B-r3-1 [major] A1's transform needs std / testing edits | D3 / §5: transforms are plugin-owned contracts; std owns the signature and the drop |
+| B-r3-3 the CLI check refuses GLM | CLI row: refuse only when larger than VRAM and `host_memory` = 0 |
+| B-r3-4 `resolve_variant` described two ways | D3: it is the contract name, None = `moe_resolve@1`; §5 header |
+| B-r3-5 `Tier` protocol unspecified | D3: members sketched; non-device-readable reads go through a generic `cpu_task@1` copy task, tiers stay pure Python |
+| B-r3-6 `linear_experts@2` "unchanged"; `expert_prefetch@1` returns an event | §5: `path_rows` minor; `start` / `wait(layer)` ops |
+| B-r3-7 line totals; S5 fallback owner | §4 ≈ 480 lines; the store owns the fallback |
+| C-r3-3 which mmvq kernel runs on a compacted launch | D4: decode / verify launches are never compacted |
+| C-r3-4 DMA variant mechanism; roofline-miss rule | M5 prototypes host-issued DMA beside a spinning graph; §8 rule: the row moves after step 6 or goes to the owner |
+| C-r3-5 `owner_race` before F10 exists | §6: planted on F4's device-owned region at step 3; prediction corrected |
 
 **Drifts from `docs/design.md`, recorded:** §7.4 (the CPU handshake lives in a kernel plugin, not
 `holon.core.platform`); §6.5 and §4.2 (placement policies and tiers are std protocols bound by open options, not
