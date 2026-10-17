@@ -1,0 +1,860 @@
+{
+ "gpu": "rtx-a5000",
+ "date": "2026-10-17",
+ "model": "unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf",
+ "commit": "3015a3c",
+ "method": "spikes/x3c_kernels/ab.py: one engine per deployment, the changes switched in process (each arm's graphs captured again), graphed decode at batch 1 by per-step wall after a prompt of 1,024 and 4,096 tokens (and eager prefill of one prompt); a warm-up round, then ABBA rounds; a change's saving against the previous arm, its sd that of the per-round differences",
+ "ab": {
+  "resident": {
+   "engine_args": "",
+   "rounds": 8,
+   "steps": 256,
+   "times_ms": {
+    "base": [
+     {
+      "prefill_512": 134.5500871539116,
+      "prefill_4096": 1103.277713060379,
+      "decode_1024": 5.36149280378595,
+      "decode_4096": 5.834628740558401
+     },
+     {
+      "prefill_512": 138.17762210965157,
+      "prefill_4096": 1129.2199306190014,
+      "decode_1024": 5.451942037325352,
+      "decode_4096": 5.9290520584909245
+     },
+     {
+      "prefill_512": 138.05898278951645,
+      "prefill_4096": 1129.130259156227,
+      "decode_1024": 5.471387019497342,
+      "decode_4096": 5.933024309342727
+     },
+     {
+      "prefill_512": 138.33588361740112,
+      "prefill_4096": 1131.83169439435,
+      "decode_1024": 5.459985724883154,
+      "decode_4096": 5.935550158028491
+     },
+     {
+      "prefill_512": 138.59020546078682,
+      "prefill_4096": 1131.9401375949383,
+      "decode_1024": 5.465986003400758,
+      "decode_4096": 5.9357037680456415
+     },
+     {
+      "prefill_512": 139.06026259064674,
+      "prefill_4096": 1131.9693177938461,
+      "decode_1024": 5.463057750603184,
+      "decode_4096": 5.9371255920268595
+     },
+     {
+      "prefill_512": 138.5013870894909,
+      "prefill_4096": 1132.0713497698307,
+      "decode_1024": 5.468591130920686,
+      "decode_4096": 5.937828245805576
+     },
+     {
+      "prefill_512": 138.9588601887226,
+      "prefill_4096": 1131.8239606916904,
+      "decode_1024": 5.458705229102634,
+      "decode_4096": 5.930220781010576
+     }
+    ],
+    "residual": [
+     {
+      "prefill_512": 135.50139218568802,
+      "prefill_4096": 1108.1176027655602,
+      "decode_1024": 5.377810855861753,
+      "decode_4096": 5.831620801473036
+     },
+     {
+      "prefill_512": 137.76947185397148,
+      "prefill_4096": 1125.3859028220177,
+      "decode_1024": 5.4146449256222695,
+      "decode_4096": 5.881061792024411
+     },
+     {
+      "prefill_512": 138.28862085938454,
+      "prefill_4096": 1129.355974495411,
+      "decode_1024": 5.410705416579731,
+      "decode_4096": 5.886893253773451
+     },
+     {
+      "prefill_512": 138.42512294650078,
+      "prefill_4096": 1129.6032890677452,
+      "decode_1024": 5.434713370050304,
+      "decode_4096": 5.890029438887723
+     },
+     {
+      "prefill_512": 138.51939514279366,
+      "prefill_4096": 1130.5155158042908,
+      "decode_1024": 5.420690969913267,
+      "decode_4096": 5.892673914786428
+     },
+     {
+      "prefill_512": 138.57800513505936,
+      "prefill_4096": 1129.7083087265491,
+      "decode_1024": 5.418677188572474,
+      "decode_4096": 5.8909800864057615
+     },
+     {
+      "prefill_512": 138.3027508854866,
+      "prefill_4096": 1130.5131539702415,
+      "decode_1024": 5.41955504741054,
+      "decode_4096": 5.883200487005524
+     },
+     {
+      "prefill_512": 138.45326006412506,
+      "prefill_4096": 1129.3737702071667,
+      "decode_1024": 5.418682252638973,
+      "decode_4096": 5.889531399589032
+     }
+    ],
+    "router": [
+     {
+      "prefill_512": 136.94757595658302,
+      "prefill_4096": 1111.439436674118,
+      "decode_1024": 5.235619319137186,
+      "decode_4096": 5.710241006454453
+     },
+     {
+      "prefill_512": 137.35923916101456,
+      "prefill_4096": 1119.315579533577,
+      "decode_1024": 5.28584340645466,
+      "decode_4096": 5.752049866714515
+     },
+     {
+      "prefill_512": 138.9346346259117,
+      "prefill_4096": 1128.7536583840847,
+      "decode_1024": 5.286855724989437,
+      "decode_4096": 5.755200647399761
+     },
+     {
+      "prefill_512": 138.38423416018486,
+      "prefill_4096": 1129.4963993132114,
+      "decode_1024": 5.286750267259777,
+      "decode_4096": 5.757044214988127
+     },
+     {
+      "prefill_512": 139.5380087196827,
+      "prefill_4096": 1129.9911066889763,
+      "decode_1024": 5.290040178806521,
+      "decode_4096": 5.760580563219264
+     },
+     {
+      "prefill_512": 138.59516754746437,
+      "prefill_4096": 1129.9139633774757,
+      "decode_1024": 5.288044529152103,
+      "decode_4096": 5.758984218118712
+     },
+     {
+      "prefill_512": 139.14097473025322,
+      "prefill_4096": 1129.6949796378613,
+      "decode_1024": 5.2905695483786985,
+      "decode_4096": 5.767142356489785
+     },
+     {
+      "prefill_512": 138.81538063287735,
+      "prefill_4096": 1130.2477940917015,
+      "decode_1024": 5.29132253723219,
+      "decode_4096": 5.772655349574052
+     }
+    ],
+    "prepare": [
+     {
+      "prefill_512": 137.0653100311756,
+      "prefill_4096": 1115.212608128786,
+      "decode_1024": 5.195065154111944,
+      "decode_4096": 5.664834578055888
+     },
+     {
+      "prefill_512": 136.93393766880035,
+      "prefill_4096": 1116.9220320880413,
+      "decode_1024": 5.206891932175495,
+      "decode_4096": 5.67372512887232
+     },
+     {
+      "prefill_512": 138.75770196318626,
+      "prefill_4096": 1128.557913005352,
+      "decode_1024": 5.26114902459085,
+      "decode_4096": 5.707804026314989
+     },
+     {
+      "prefill_512": 138.36467266082764,
+      "prefill_4096": 1128.2799616456032,
+      "decode_1024": 5.251854949165136,
+      "decode_4096": 5.714826780604199
+     },
+     {
+      "prefill_512": 138.8714350759983,
+      "prefill_4096": 1130.7745836675167,
+      "decode_1024": 5.246062471996993,
+      "decode_4096": 5.705123228835873
+     },
+     {
+      "prefill_512": 139.08766210079193,
+      "prefill_4096": 1130.0398297607899,
+      "decode_1024": 5.247740235063247,
+      "decode_4096": 5.715243794838898
+     },
+     {
+      "prefill_512": 139.06121253967285,
+      "prefill_4096": 1132.467370480299,
+      "decode_1024": 5.242940504103899,
+      "decode_4096": 5.715128776500933
+     },
+     {
+      "prefill_512": 138.87979090213776,
+      "prefill_4096": 1129.8236809670925,
+      "decode_1024": 5.2452319650910795,
+      "decode_4096": 5.705759816919453
+     }
+    ]
+   }
+  },
+  "offload-0.47": {
+   "engine_args": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=*=0.47",
+   "rounds": 8,
+   "steps": 256,
+   "times_ms": {
+    "base": [
+     {
+      "decode_1024": 5.734020509407856,
+      "decode_4096": 6.243463940336369
+     },
+     {
+      "decode_1024": 5.80842568888329,
+      "decode_4096": 6.2702569557586685
+     },
+     {
+      "decode_1024": 5.808173955301754,
+      "decode_4096": 6.335251338896342
+     },
+     {
+      "decode_1024": 5.852842165040784,
+      "decode_4096": 6.318126441328786
+     },
+     {
+      "decode_1024": 5.86373898840975,
+      "decode_4096": 6.346197929815389
+     },
+     {
+      "decode_1024": 5.851809750311077,
+      "decode_4096": 6.3125300948740914
+     },
+     {
+      "decode_1024": 5.85087199578993,
+      "decode_4096": 6.33775292953942
+     },
+     {
+      "decode_1024": 5.852170172147453,
+      "decode_4096": 6.313120262348093
+     }
+    ],
+    "residual": [
+     {
+      "decode_1024": 5.768765724496916,
+      "decode_4096": 6.2195932114264
+     },
+     {
+      "decode_1024": 5.786706431536004,
+      "decode_4096": 6.241307070013136
+     },
+     {
+      "decode_1024": 5.808907269965857,
+      "decode_4096": 6.26932640443556
+     },
+     {
+      "decode_1024": 5.825348605867475,
+      "decode_4096": 6.269236386287957
+     },
+     {
+      "decode_1024": 5.815085271024145,
+      "decode_4096": 6.2568913417635486
+     },
+     {
+      "decode_1024": 5.851633322890848,
+      "decode_4096": 6.292782258242369
+     },
+     {
+      "decode_1024": 5.823302650242113,
+      "decode_4096": 6.273569277254865
+     },
+     {
+      "decode_1024": 5.810512826428749,
+      "decode_4096": 6.295593542745337
+     }
+    ],
+    "router": [
+     {
+      "decode_1024": 5.605691345408559,
+      "decode_4096": 6.088998037739657
+     },
+     {
+      "decode_1024": 5.633267865050584,
+      "decode_4096": 6.113625335274264
+     },
+     {
+      "decode_1024": 5.673669482348487,
+      "decode_4096": 6.129194734967314
+     },
+     {
+      "decode_1024": 5.671905033523217,
+      "decode_4096": 6.136704585514963
+     },
+     {
+      "decode_1024": 5.6783102481858805,
+      "decode_4096": 6.137023578048684
+     },
+     {
+      "decode_1024": 5.678755594999529,
+      "decode_4096": 6.167940344312228
+     },
+     {
+      "decode_1024": 5.677453998941928,
+      "decode_4096": 6.151481546112336
+     },
+     {
+      "decode_1024": 5.673886800650507,
+      "decode_4096": 6.190587941091508
+     }
+    ],
+    "prepare": [
+     {
+      "decode_1024": 5.6198520614998415,
+      "decode_4096": 6.085566070396453
+     },
+     {
+      "decode_1024": 5.600260818027891,
+      "decode_4096": 6.06222078204155
+     },
+     {
+      "decode_1024": 5.644062766805291,
+      "decode_4096": 6.106608780100942
+     },
+     {
+      "decode_1024": 5.620777345029637,
+      "decode_4096": 6.083177373511717
+     },
+     {
+      "decode_1024": 5.654919281369075,
+      "decode_4096": 6.123151339124888
+     },
+     {
+      "decode_1024": 5.6391394609818235,
+      "decode_4096": 6.097302961279638
+     },
+     {
+      "decode_1024": 5.670162339811213,
+      "decode_4096": 6.115059368312359
+     },
+     {
+      "decode_1024": 5.628734710626304,
+      "decode_4096": 6.10642675019335
+     }
+    ]
+   }
+  }
+ },
+ "changes": {
+  "residual": {
+   "what": "the layer's residual add in the MoE combine's kernel (moe_combine@1's add)",
+   "class": "bitwise",
+   "rows": {
+    "resident/prefill_512": {
+     "ms": 0.0494,
+     "pct": 0.033,
+     "sd_pct": 0.356,
+     "median_ms": {
+      "before": 138.4186,
+      "after": 138.3639
+     }
+    },
+    "resident/prefill_4096": {
+     "ms": 1.0864,
+     "pct": 0.095,
+     "sd_pct": 0.238,
+     "median_ms": {
+      "before": 1131.8278,
+      "after": 1129.4885
+     }
+    },
+    "resident/decode_1024": {
+     "ms": 0.0357,
+     "pct": 0.653,
+     "sd_pct": 0.428,
+     "median_ms": {
+      "before": 5.4615,
+      "after": 5.4187
+     }
+    },
+    "resident/decode_4096": {
+     "ms": 0.0409,
+     "pct": 0.689,
+     "sd_pct": 0.267,
+     "median_ms": {
+      "before": 5.9343,
+      "after": 5.8882
+     }
+    },
+    "offload-0.47/decode_1024": {
+     "ms": 0.0165,
+     "pct": 0.28,
+     "sd_pct": 0.466,
+     "median_ms": {
+      "before": 5.8513,
+      "after": 5.8128
+     }
+    },
+    "offload-0.47/decode_4096": {
+     "ms": 0.0448,
+     "pct": 0.709,
+     "sd_pct": 0.415,
+     "median_ms": {
+      "before": 6.3156,
+      "after": 6.2693
+     }
+    }
+   },
+   "verdict": {
+    "passes_on": [],
+    "pays": false
+   }
+  },
+  "router": {
+   "what": "moe_router@1: the router GEMV from bf16 and the softmax top-k in one launch (decode / verify)",
+   "class": "bounded",
+   "rows": {
+    "resident/prefill_512": {
+     "ms": -0.4846,
+     "pct": -0.353,
+     "sd_pct": 0.452,
+     "median_ms": {
+      "before": 138.3639,
+      "after": 138.7053
+     }
+    },
+    "resident/prefill_4096": {
+     "ms": 0.4651,
+     "pct": 0.041,
+     "sd_pct": 0.234,
+     "median_ms": {
+      "before": 1129.4885,
+      "after": 1129.5957
+     }
+    },
+    "resident/decode_1024": {
+     "ms": 0.1326,
+     "pct": 2.448,
+     "sd_pct": 0.152,
+     "median_ms": {
+      "before": 5.4187,
+      "after": 5.2875
+     }
+    },
+    "resident/decode_4096": {
+     "ms": 0.1265,
+     "pct": 2.151,
+     "sd_pct": 0.12,
+     "median_ms": {
+      "before": 5.8882,
+      "after": 5.758
+     }
+    },
+    "offload-0.47/decode_1024": {
+     "ms": 0.1497,
+     "pct": 2.575,
+     "sd_pct": 0.234,
+     "median_ms": {
+      "before": 5.8128,
+      "after": 5.6738
+     }
+    },
+    "offload-0.47/decode_4096": {
+     "ms": 0.1253,
+     "pct": 2.001,
+     "sd_pct": 0.169,
+     "median_ms": {
+      "before": 6.2693,
+      "after": 6.1369
+     }
+    }
+   },
+   "verdict": {
+    "passes_on": [
+     "resident/decode_1024",
+     "resident/decode_4096",
+     "offload-0.47/decode_1024",
+     "offload-0.47/decode_4096"
+    ],
+    "pays": true
+   }
+  },
+  "prepare": {
+   "what": "the router's launch writes the gate/up input's q8_1 (route_prepare): no quantize launch",
+   "class": "bitwise",
+   "rows": {
+    "resident/prefill_512": {
+     "ms": 0.0867,
+     "pct": 0.062,
+     "sd_pct": 0.253,
+     "median_ms": {
+      "before": 138.7053,
+      "after": 138.8146
+     }
+    },
+    "resident/prefill_4096": {
+     "ms": -0.4031,
+     "pct": -0.036,
+     "sd_pct": 0.181,
+     "median_ms": {
+      "before": 1129.5957,
+      "after": 1129.1908
+     }
+    },
+    "resident/decode_1024": {
+     "ms": 0.0448,
+     "pct": 0.847,
+     "sd_pct": 0.293,
+     "median_ms": {
+      "before": 5.2875,
+      "after": 5.2456
+     }
+    },
+    "resident/decode_4096": {
+     "ms": 0.0539,
+     "pct": 0.937,
+     "sd_pct": 0.22,
+     "median_ms": {
+      "before": 5.758,
+      "after": 5.7068
+     }
+    },
+    "offload-0.47/decode_1024": {
+     "ms": 0.0269,
+     "pct": 0.474,
+     "sd_pct": 0.378,
+     "median_ms": {
+      "before": 5.6738,
+      "after": 5.6339
+     }
+    },
+    "offload-0.47/decode_4096": {
+     "ms": 0.042,
+     "pct": 0.683,
+     "sd_pct": 0.454,
+     "median_ms": {
+      "before": 6.1369,
+      "after": 6.1019
+     }
+    }
+   },
+   "verdict": {
+    "passes_on": [
+     "resident/decode_4096"
+    ],
+    "pays": true
+   }
+  }
+ },
+ "end_to_end": {
+  "resident": {
+   "tg128 @ d1024": {
+    "tok_s": {
+     "base": [
+      184.68,
+      181.89,
+      181.52,
+      180.71
+     ],
+     "final": [
+      191.04,
+      190.98,
+      189.44,
+      188.65
+     ]
+    },
+    "median_tok_s": {
+     "base": 181.70499999999998,
+     "final": 190.20999999999998
+    },
+    "speedup": 1.0468,
+    "ms_per_token_saved": 0.2263,
+    "sd_ms": 0.0338
+   },
+   "tg128 @ d4096": {
+    "tok_s": {
+     "base": [
+      171.16,
+      169.39,
+      169.15,
+      168.72
+     ],
+     "final": [
+      177.19,
+      176.7,
+      175.68,
+      175.59
+     ]
+    },
+    "median_tok_s": {
+     "base": 169.26999999999998,
+     "final": 176.19
+    },
+    "speedup": 1.0409,
+    "ms_per_token_saved": 0.2237,
+    "sd_ms": 0.0193
+   }
+  },
+  "offload-0.47": {
+   "tg128 @ d1024": {
+    "tok_s": {
+     "base": [
+      119.64,
+      119.65,
+      116.1,
+      119.53
+     ],
+     "final": [
+      120.67,
+      121.77,
+      122.16,
+      122.21
+     ]
+    },
+    "median_tok_s": {
+     "base": 119.58500000000001,
+     "final": 121.965
+    },
+    "speedup": 1.0199,
+    "ms_per_token_saved": 0.2069,
+    "sd_ms": 0.1541
+   },
+   "tg128 @ d4096": {
+    "tok_s": {
+     "base": [
+      140.65,
+      140.22,
+      134.63,
+      141.31
+     ],
+     "final": [
+      143.81,
+      146.07,
+      144.11,
+      146.0
+     ]
+    },
+    "median_tok_s": {
+     "base": 140.435,
+     "final": 145.055
+    },
+    "speedup": 1.0329,
+    "ms_per_token_saved": 0.2894,
+    "sd_ms": 0.1429
+   }
+  }
+ },
+ "nsys": {
+  "resident/base": {
+   "window_us_per_token": 5627.8,
+   "busy_us_per_token": 5524.3,
+   "idle_us_per_token": 103.5,
+   "categories": {
+    "router (gate GEMV + top-k)": {
+     "us_per_token": 370.1,
+     "launches_per_token": 96.0
+    },
+    "embedding / glue": {
+     "us_per_token": 280.1,
+     "launches_per_token": 127.06
+    },
+    "activation quant (q8_1)": {
+     "us_per_token": 296.7,
+     "launches_per_token": 193.0
+    },
+    "MoE combine": {
+     "us_per_token": 127.7,
+     "launches_per_token": 48.0
+    },
+    "MoE expert GEMV (mmvq, ids)": {
+     "us_per_token": 2165.7,
+     "launches_per_token": 96.0
+    },
+    "dense linear GEMV (mmvq)": {
+     "us_per_token": 1096.2,
+     "launches_per_token": 120.0
+    },
+    "norms": {
+     "us_per_token": 251.6,
+     "launches_per_token": 97.0
+    }
+   }
+  },
+  "resident/final": {
+   "window_us_per_token": 5383.2,
+   "busy_us_per_token": 5295.4,
+   "idle_us_per_token": 87.7,
+   "categories": {
+    "router (gate GEMV + top-k)": {
+     "us_per_token": 357.8,
+     "launches_per_token": 48.0
+    },
+    "embedding / glue": {
+     "us_per_token": 71.7,
+     "launches_per_token": 31.06
+    },
+    "activation quant (q8_1)": {
+     "us_per_token": 230.5,
+     "launches_per_token": 145.0
+    },
+    "MoE combine": {
+     "us_per_token": 144.2,
+     "launches_per_token": 48.0
+    },
+    "MoE expert GEMV (mmvq, ids)": {
+     "us_per_token": 2189.1,
+     "launches_per_token": 96.0
+    },
+    "dense linear GEMV (mmvq)": {
+     "us_per_token": 1107.4,
+     "launches_per_token": 120.0
+    },
+    "norms": {
+     "us_per_token": 250.4,
+     "launches_per_token": 97.0
+    }
+   }
+  },
+  "offload-0.47/base": {
+   "window_us_per_token": 6533.1,
+   "busy_us_per_token": 6313.2,
+   "idle_us_per_token": 219.9,
+   "categories": {
+    "router (gate GEMV + top-k)": {
+     "us_per_token": 360.5,
+     "launches_per_token": 96.0
+    },
+    "embedding / glue": {
+     "us_per_token": 308.1,
+     "launches_per_token": 147.06
+    },
+    "activation quant (q8_1)": {
+     "us_per_token": 287.3,
+     "launches_per_token": 193.0
+    },
+    "MoE combine": {
+     "us_per_token": 124.0,
+     "launches_per_token": 48.0
+    },
+    "MoE expert GEMV (mmvq, ids)": {
+     "us_per_token": 2119.0,
+     "launches_per_token": 96.0
+    },
+    "dense linear GEMV (mmvq)": {
+     "us_per_token": 1072.9,
+     "launches_per_token": 120.0
+    },
+    "norms": {
+     "us_per_token": 245.0,
+     "launches_per_token": 97.0
+    }
+   }
+  },
+  "offload-0.47/final": {
+   "window_us_per_token": 6262.3,
+   "busy_us_per_token": 6067.1,
+   "idle_us_per_token": 195.2,
+   "categories": {
+    "router (gate GEMV + top-k)": {
+     "us_per_token": 348.8,
+     "launches_per_token": 48.0
+    },
+    "embedding / glue": {
+     "us_per_token": 107.5,
+     "launches_per_token": 51.06
+    },
+    "activation quant (q8_1)": {
+     "us_per_token": 221.3,
+     "launches_per_token": 145.0
+    },
+    "MoE combine": {
+     "us_per_token": 139.1,
+     "launches_per_token": 48.0
+    },
+    "MoE expert GEMV (mmvq, ids)": {
+     "us_per_token": 2132.0,
+     "launches_per_token": 96.0
+    },
+    "dense linear GEMV (mmvq)": {
+     "us_per_token": 1078.9,
+     "launches_per_token": 120.0
+    },
+    "norms": {
+     "us_per_token": 244.2,
+     "launches_per_token": 97.0
+    }
+   }
+  }
+ },
+ "judge": {
+  "l0": {
+   "rtx-a5000 (sm_86)": "plugins/tests/test_ggml_cuda_moe.py, test_moe_engine.py, test_quantized_units.py, judge/tests at 7ea4b34: 228 passed, 5 skipped; mutations caught: a flushing (ftz) residual add, the selection's renormalising sum in another lane order",
+   "rtx-5090 (sm_120a)": "plugins/tests/test_ggml_cuda_moe.py at 3015a3c: 107 passed, 1 skipped"
+  },
+  "l2_router": {
+   "command": "python -m holon_judge l2 --model <gguf> --prompts judge/prompts/v1.jsonl --golden judge/goldens/qwen3-30b-a3b-q4_k_m/v1-fp32.safetensors --floor judge/goldens/qwen3-30b-a3b-q4_k_m/v1-bfloat16-mmvq-floor.safetensors --max-step-tokens 1 --max-seqs 4",
+   "gpu": "NVIDIA RTX A5000",
+   "after (5473c4a)": {
+    "top1": 0.98569,
+    "kl_p99": 0.03740288351975489,
+    "dppl": 0.0007327829180205973,
+    "dppl_se": 0.00092892813436278,
+    "floor_top1": 0.98536,
+    "floor_kl_p99": 0.039753018243976174,
+    "budgets": {
+     "top1_min": 0.9828582649543971,
+     "kl_p50_max": 0.00023519159039685122,
+     "kl_p99_max": 0.07950603648795235,
+     "dppl_max": 0.005208187025233953
+    },
+    "failures": [],
+    "dppl_vs_floor": [
+     0.0013773611238363185,
+     0.0010832748100935814
+    ],
+    "drafter": null,
+    "passed": true
+   },
+   "before (c79f968)": {
+    "top1": 0.98594,
+    "kl_p99": 0.038113285350112415,
+    "dppl": -0.0010180901574844332,
+    "dppl_se": 0.0006617429794291168,
+    "floor_top1": 0.98536,
+    "floor_kl_p99": 0.039753018243976174,
+    "budgets": {
+     "top1_min": 0.9828582649543971,
+     "kl_p50_max": 0.00023519159039685122,
+     "kl_p99_max": 0.07950603648795235,
+     "dppl_max": 0.005453408619353537
+    },
+    "failures": [],
+    "dppl_vs_floor": [
+     -0.00037463969989969025,
+     0.0011813634477414146
+    ],
+    "drafter": null,
+    "passed": true
+   }
+  },
+  "snapshots": {
+   "trace": "spikes/x2_store/exact.py (judge snapshot trace, v1.jsonl), resident and moe.cache=*=0.47, RTX A5000",
+   "8e606ec (residual) vs c79f968": "identical, both fits",
+   "5473c4a (router) vs 8e606ec": "differs (bounded: step 6, request 5), both fits",
+   "3015a3c (q8_1) vs 5473c4a": "identical, both fits",
+   "7ea4b34 (review fixes) vs 3015a3c": "identical, both fits",
+   "offload *=0.47 vs resident, at 8e606ec, 3015a3c and 7ea4b34": "identical"
+  }
+ }
+}

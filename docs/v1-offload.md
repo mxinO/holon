@@ -1137,3 +1137,60 @@ that is why its 1K prefill sat at its own bound, 896 tok/s, not ≈ 2.5× below)
   borrowing on, 133.7 / 131.9 off; after 126.0 / 121.5 on, 132.0 / 124.0 off — borrowing never cost TPOT p99 here,
   and without its syncs it is ≈ 3% under the arm without borrowing (rounds vary by ≈ 5%). The per-request maximum
   gap's p99: before 669 / 735 ms on against 609 / 550 off; after 536 / 523 on against 629 / 631 off.
+
+### Step 3c as built (2026-10-17): the MoE decode glue kernels
+
+Taken before the gate because the FreeToken decode row needs it (§13, "Re-banded after step 3"). Commits `8e606ec`
+(residual), `5473c4a` (router), `3015a3c` (q8_1), `7ea4b34` (the review's fixes; one reviewer, clean on re-review).
+Evidence: `spikes/x3c_kernels/README.md`, `evidence/x3c_kernels_rtx-5090_2026-10-17.json`,
+`evidence/x3c_kernels_rtx-a5000_2026-10-17.json`. No core change. Each change was kept by M0.7's rule (≥ max(0.5%,
+3 sd) on some row) and classified as M0.7's D10 does.
+
+| Change | Class | Saving per decode token, RTX 5090 resident 1K / 4K | Verdict |
+|---|---|---|---|
+| The residual add in the combine (`moe_combine@1`'s optional `add`; `std.moe`'s `add`, `std.blocks.prenorm` calling an ffn's `add`) | bitwise | 0.030 / 0.034 ms (1.16 / 1.21% ± 0.07 / 0.03) | kept (under 3 sd on the A5000) |
+| `moe_router@1`: router GEMV from bf16 + softmax top-k in one launch, decode / verify calls ≤ 16 rows | bounded | 0.137 / 0.141 ms (5.3 / 5.0%) | kept, every row |
+| The router's launch writes the gate/up input's q8_1 (`route_prepare`, `Prepared` handles of M0.7's D6) | bitwise | 0.039 / 0.038 ms (1.6 / 1.4%) | kept |
+
+- **Totals, decode per token:**
+  - RTX 5090 resident: −0.21 ms (2.62 → 2.42 ms at 1K). `holon_tg` 383 → 413 tok/s at 1K (×1.078) and 357 → 383 at
+    4K (×1.074).
+  - RTX 5090 offload store at 47%: −0.21 ms.
+  - A5000: −0.22 ms resident, −0.19 / −0.21 ms at 47%.
+  - Prefill is unchanged: prompt chunks above 16 rows compose the f32 linear and `moe_topk@1`, as before.
+  - The ≈ 0.25 ms the re-band assumed comes out at 0.21 on the 5090. So §13's FreeToken decode rows move up by about
+    4% (5080: ≈ 0.21 / 5.0 ms), less than the band's 4–5% upper end.
+- **Judge:**
+  - L0 on sm_86 and sm_120a.
+  - The router's L2 (1-token steps against the mmvq floor, A5000) passes: top-1 98.57% (≥ 98.29%), KL p99 0.037
+    (floor 0.040), ΔPPL vs floor +0.14% ± 0.11%.
+  - Snapshots: the bitwise commits are identical to their predecessors, and the offload store is identical to
+    all-resident at every commit (§1 acceptance 2 holds).
+
+Decided while building:
+- **The router's fused path stops at 16 rows.**
+  - A single-kernel GEMV loses to cuBLAS's GEMM at prompt sizes without an SGEMM-style tiling. So a row's logits
+    follow its call's path (as `qlinear`'s mmvq / mmq do), and the contract says so: deterministic, not row-invariant
+    across paths.
+  - Inside the fused path a row's logits are the same at any row count (one order per hidden).
+  - The selection is `topk_moe_cuda`'s arithmetic with register-only arrays (the vendored kernel is untouched). It is
+    bitwise `moe_topk` on the kernel's own logits, so the change is bounded only through the logits' f32 order.
+- **The tile's last block selects:** a counter per tile, reset by that block, so graph replays need no memset. It
+  reads the logits through L2. There are no spin waits, so co-scheduling with the store's side-stream copies cannot
+  deadlock. The cost is ≈ 0.75 µs of fences and the atomic, plus ≈ 2.8 µs of selection on the A5000. The GEMV alone
+  takes 2.8 µs, against the 8.9 µs of the cast + cuBLAS + top-k it replaces.
+- **Where the q8_1 is written:** the prepared gate/up input is written by the router kernel, not by a separate
+  quantize. It shares the `ggml_cuda.q8_1[in=…]` buffer and generation counter with `qlinear`'s `prepare_input`, so
+  any later write into that buffer makes the handle stale, and the consumer quantizes from x.
+- **Found on the way:** x4_gap's "stacked gate/up (+0.07 ms)" and part of its "q8_1 (+0.07 ms)" rows were measurement
+  effects. Under PDL on sm_120 a kernel's measured duration includes its wait on the previous kernel: the 5090's
+  expert GEMV row fell by 71 µs with no change to it once its quantize was gone. On the A5000, without PDL, the
+  resident and arena GEMVs are within 2%.
+- **Not built** (README "Not done"):
+  - ≈ 30 per-step index and copy kernels in the core executor (≈ 40 µs per token on the 5090): a core change, so out
+    of scope here and reported to the coordinator.
+  - The offload store's per-step edit application (≈ 0.5%, under the rule).
+  - PDL early-launch triggering in the router.
+  - A faster selection tail.
+- **Locks:** decode routing is no longer cuBLAS's bits, and MoE sites name `moe_router@1` (not `moe_topk@1`). The
+  existing locks are propagated once, at X's close, with the router's L2 above as its bounded verdict.
