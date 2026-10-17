@@ -220,18 +220,23 @@ miss path that changes the graph shape (a new node between resolve and combine) 
   can tell them apart in mixed steps: padding rows are masked (no fetch, no CPU job, no counts); prefill rows never
   count or admit (M6 and panel C: counting prompts costs 4–6%); decode and verify rows count every routed entry at
   resolve time, rejected drafts included (acceptance is known only after the step; deterministic either way).
-- **F11's rule, as M6 replayed it** (`spikes/x0_offload/m6/replay.py`), specified in its contract and oracle: counts
-  +1.0 per counted entry (order-independent), ×0.915 in f32 on every step with at least one decode / verify row
-  (graphed or eager; prefill-only steps do not decay); per layer, the step's distinct misses (candidates, by count
+- **F11's rule, as M6 replayed it** (`spikes/x0_offload/m6/replay.py`), specified in its contract and oracle, in this
+  order per step: decay (×0.915 in f32, on every step with at least one decode / verify row, graphed or eager;
+  prefill-only steps do not decay), then increments (+1.0 per counted entry, order-independent), then pairing: per
+  layer, the step's distinct misses (candidates, by count
   descending) pair with the layer's residents the step does not need (victims, by count ascending), ties by expert
   id; a candidate is admitted only if its count is strictly greater, the pairing stops at the first pair that fails,
   and each layer keeps its seeded quota. An admitted miss is gathered straight into its victim's slots (gate / up and
   down: the same layer, so the same classes); the rest go to staging. An expert needed by both a decode and a prefill
   row in one step has one slot: its admitted slot if admitted, else its staging or ring slot, read by both.
 - **Lending under the device-owned default.** A ring-path step's slots are lent by the device: at the step's launch
-  the policy's own resolve contract picks n residents of each class through its `lend(n, class) → slots` device op
-  (F11: the coldest by count, ties by layer, then expert id; F4: the oldest; a later policy its own rule, with its
-  own oracle) and the std apply kernel only unmaps and logs the slots it is handed (counts unchanged, panel B-r4.4-1); and after the prompt they return to admission as empty slots, refilled by fetch-on-miss — no host edit,
+  the policy's own resolve contract picks **whole experts** through its `lend(n) → experts` device op until every
+  class has at least n lent slots (an expert's gate / up and down slots go together, so no expert is half-resident;
+  F11: the coldest by count, ties by layer, then expert id; F4: the oldest; a later policy its own rule, with its own
+  oracle), and the std apply kernel only unmaps and logs them (counts unchanged, panel B-r4.4-1, A-r4.4-2). A lent
+  slot stays owned by its layer: on return it is that layer's first victim, ranked below every resident and filled
+  unconditionally by the next admission, so the cache never shrinks (an L1 test: cache size unchanged after a lend
+  and its return, panel A-r4.4-1); and after the prompt they return to admission as empty slots, refilled by fetch-on-miss — no host edit,
   no refill copy (panel C's replay: ≤ 1.3% even with random picks, against ≈ 12% for a standing 0.5 GB reserve).
   Host-edit policies keep two-phase lending. "Prefill rows never change residency" means they never admit; lending
   evicts by rule.
@@ -447,7 +452,8 @@ Plants (`judge/holon_judge/planted.py`), predicted verdicts fixed now; each repo
 exactness snapshots run twice — with F11 (≥ 64 in-graph admissions and ≥ 2 device lendings at the capped fit) and
 with `profile_decay` (≥ 8 swap rounds, where the two-phase plants bite). Because every placement is exact, a policy
 bug shows only as lost speed, so an L1 **policy-parity check** compares F11's per-step residency, read from the
-delta log, with the M6 replay's `lfu` (f32, the device's tie-breaks) on a captured trace — exactly:
+delta log, with the M6 replay's `lfu` (f32, the device's tie-breaks, D4's step order) — exactly — on a captured
+decode-only trace, and with the replay extended by the lending and return rule on a trace with prompts:
 
 | Plant | Breaks | Predicted |
 |---|---|---|
@@ -709,7 +715,10 @@ Decisions (by §8's rules, fixed before measuring):
 | A-r4.3d-4 F11 with the exclusive RAM tier | D10: the in-graph victim becomes SSD-only; RAM slot released via the delta log |
 | B-r4.3-2 the row mask only marks padding | D4 / §5: a row-kind code in `moe_resolve@1` |
 | B-r4.3-3 D3 / D4 text not updated for F11 | D3 instances, D4 regions and two-phase scope updated |
-| B-r4.4-1 the lending pick is a policy rule | D4: a `lend(n, class)` op in the policy-owned resolve contract; the apply kernel only unmaps and logs |
+| A-r4.4-1 lent slots are never refilled | D4: a returned slot is its layer's first victim, filled unconditionally; L1 cache-size test |
+| A-r4.4-2 per-class lending leaves experts half-resident | D4: lending picks whole experts until every class has n slots |
+| A-r4.4-3 parity cannot be exact as written | D4: step order decay → increments → pairing; parity on decode-only traces and on a replay extended with lending |
+| B-r4.4-1 the lending pick is a policy rule | D4: a `lend(n)` op in the policy-owned resolve contract; the apply kernel only unmaps and logs |
 | C-r4.3-3 F11's win assumes F5a | §13: tune chooses policy and split together for F5b candidates; ABBA rule for lfu vs lru |
 
 **Drifts from `docs/design.md`, recorded:** §7.4 (the CPU handshake lives in a kernel plugin, not
