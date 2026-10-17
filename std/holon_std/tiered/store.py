@@ -109,7 +109,8 @@ class SlotClass:
 class TieredStore:
     def __init__(self, ctx, *, name: str, items: int, roles: int, top_k: int, staging: int, prefill: int = 0,
                  ring_tokens: int = 0, ring_copy: str = "sm", policy: Ref | str = "",
-                 tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "") -> None:
+                 tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
+                 ram: str = "") -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
         # `staging`: slots for the graphed steps' misses; `prefill`: a prefill pass's (lent in its step when more, so
         # a pinned cache must be able to lend that many: else the staging slots hold them, as before D8);
@@ -120,7 +121,7 @@ class TieredStore:
         if ring_copy not in ("sm", "dma"):
             raise ValueError(f"{name}: ring_copy {ring_copy!r}: sm or dma")
         self.ring_copy = ring_copy
-        self.tiers = [ctx.unit(Ref(t)) for t in tiers]
+        self.tiers = [ctx.unit(Ref(t), ram=ram) for t in tiers]    # `ram`: the RAM tier's units per class
         if not 1 <= len(self.tiers) <= 2 or not self.tiers[0].device_readable or \
                 any(t.device_readable for t in self.tiers[1:]):
             raise NotImplementedError(f"{name}: a device-readable host tier, then at most one file tier, not "
@@ -331,7 +332,14 @@ class TieredStore:
                                     pref_units=self.roles, device="host", mapped=True)
             self.descriptors = {}
             for c in classes:
-                rows = [list(self.tiers[1].read(c.name, n)[1]) for n in range(len(c.pieces))]
+                rows = []
+                for n in range(len(c.pieces)):
+                    kind, extents = self.tiers[1].read(c.name, n)
+                    if kind != "pread":                  # the copy task's one kind (a page-cache tier: O_DIRECT off)
+                        raise ValueError(f"{self.name}: {type(self.tiers[1]).__name__} read "
+                                         f"{c.name}'s piece {n} as {kind!r}: a file tier's descriptors are 'pread' "
+                                         "extents (fd, O_DIRECT, offset, nbytes)")
+                    rows.append([tuple(x) for x in extents])
                 width = max(map(len, rows))
                 self.descriptors[c.name] = torch.tensor([x + [(0, 0, 0, 0)] * (width - len(x)) for x in rows],
                                                         dtype=torch.int64)

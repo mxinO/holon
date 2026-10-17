@@ -107,8 +107,9 @@ def test_the_protocol_fails_open(lib, memop):
 
 
 def test_the_copy_task_reads_each_requested_piece_into_its_unit(lib, tmp_path):
-    """F9's copy task: per role, the requested pieces' extents (unaligned, two per piece, an O_DIRECT descriptor read
-    through its aligned superset) read in order into the requested units, on two threads; nothing else written; the
+    """F9's copy task: per role, the requested pieces' extents (unaligned, two per piece; an O_DIRECT extent read
+    through its aligned superset, a page-cache one — O_DIRECT off, a page-cache tier's — directly) read in order into
+    the requested units, on two threads; nothing else written; the
     oracle (std.moe.reference `copy_task`) agrees; a request past the pieces fails the task."""
     import os
 
@@ -125,7 +126,7 @@ def test_the_copy_task_reads_each_requested_piece_into_its_unit(lib, tmp_path):
     pieces = [[(7, 1000), (5000, 2000)], [(9001, 3000), (40000, 0)], [(100, 50), (120000, 2950)]]
     desc = torch.tensor([[(fd, f, off, n) for off, n in piece] for piece in pieces for fd, f in [(direct, flag)]],
                         dtype=torch.int64)
-    desc[1, :, 0:2] = torch.tensor([plain, 0])              # one piece through a buffered descriptor
+    desc[1, :, 0:2] = torch.tensor([plain, 0])              # one piece through the page cache (O_DIRECT off)
     want = torch.zeros(5, 3000, dtype=torch.uint8)
     req = torch.tensor([[2, 0], [2, 4], [0, 1], [0, 0]], dtype=torch.int32)
     units = want.clone()

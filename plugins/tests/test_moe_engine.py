@@ -500,8 +500,9 @@ def test_exclusive_tiers_serve_what_the_resident_store_does(tiny_moe, tmp_path):
     rest (std.tiered.gguf_direct@1), every expert lives in one of VRAM, RAM and the SSD: SSD misses are read by the
     copy task, F11's victims demoted into RAM (the admitted staged, then moved), decode SSD reads kept — and the
     outputs are the resident store's bit for bit, F11's VRAM residency its replay's, the RAM units owned once each and
-    the map's tier codes where they say. Without a slower tier, or under a device policy with no heat (F4), the store
-    refuses a short RAM."""
+    the map's tier codes where they say. Without a slower tier, or under a device policy with no heat (F4) or a host
+    policy that edits (F2–F3), the store refuses a short RAM; a file tier's descriptors other than 'pread' extents are
+    refused at prepare (the copy task reads that kind only; a page-cache tier is one with O_DIRECT off)."""
     from holon_judge.placement import parity, route_dump
 
     checkpoint, prompts = tiny_moe
@@ -529,6 +530,12 @@ def test_exclusive_tiers_serve_what_the_resident_store_does(tiny_moe, tmp_path):
                     {"moe.placement": "placement.profile_decay@1"}):
         with pytest.raises(NotImplementedError, match="fewer pieces"):
             _engine(file, host_memory=1 << 24, plugin_options=short | refused)
+    from holon_std.tiered.gguf_direct import GgufDirect
+
+    read = GgufDirect.read                                    # a file tier answering another descriptor kind
+    with mock.patch.object(GgufDirect, "read", lambda self, c, n: ("memcpy", read(self, c, n)[1])), \
+            pytest.raises(ValueError, match="'pread' extents"):
+        _engine(file, host_memory=1 << 24, plugin_options=short)
 
 
 @pytest.fixture(scope="module")

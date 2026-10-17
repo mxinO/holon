@@ -13,5 +13,3 @@ provides = ["unit.std.tiered.store@1", "unit.std.tiered.pinned@1", "unit.std.tie
 [properties]
 numerics = "exact"
 
-[options]   # the EngineConfig.plugin_options keys this plugin reads
-"moe.ram" = { help = "the pinned RAM tier's units per class: <class>=<slots or fraction>,… (* for the rest); fewer than every piece makes RAM exclusive (a slower tier in moe.tiers holds the rest)", default = "every piece" }

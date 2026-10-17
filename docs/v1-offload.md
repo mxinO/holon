@@ -56,7 +56,8 @@ for that model, with exact defaults and reproducible runs.
      existing `check_core_diff.sh` and `git diff --stat`): **F10** promote-on-fetch (host and in-graph parts, the
      hardest case: its `moe_resolve` variant is a contract the plugin owns, with its own `reference.py` and CPU
      provider, D3), **A1** route tail skip (`approx`), and **a tier this document does not design** — the
-     mmap / page-cache low-RAM tier the research note ranks first among the extras (ARC as a bonus).
+     page-cache low-RAM tier the research note ranks first among the extras ("mmap", in effect): a `pread` tier with
+     O_DIRECT off, its own storage decisions in `prepare` / `holds` (ARC as a bonus).
    - Every core seam (§4) is proven first with a toy plugin in `core/tests`.
 2. **Exactness** (D4, §6):
    - **every placement is exact on the GPU path:** with the CPU share off (the default unless D4's rule picks the
@@ -152,7 +153,7 @@ the step's routing counts and return **edits** (D4). Plugin kinds, all chosen by
 | expert store | `moe.store = "std.moe.offload@1"` (absent: resident) | a std unit `ctx.unit(Ref)` binds | resident, offload |
 | placement policy (host) | `moe.placement = "plugins.placement.profile_decay@1"` | `PlacementPolicy` protocol in `std.tiered`: `seed(profile, budget) → edits`, `after_commit(counts, view) → edits`, `device_state() → {name: spec}`, `resolve_variant: str | None` (the contract name; None = `moe_resolve@1`) | lfu (default), static, profile_decay, lru |
 | miss path (device + CPU) | kernel selection through facts | `moe_resolve@1` (or a variant contract a policy plugin owns), `expert_fetch@1`, `cpu_experts@1`, `moe_patch_rows@1` (§5) | fetch, CPU |
-| expert tier (host) | `moe.tiers = ["std.tiered.pinned@1", "std.tiered.gguf_direct@1"]` | `Tier` protocol in `std.tiered`: `capacity(class) → slots`, `admit(expert, slot)`, `evict(expert)`, `device_readable: bool`, `read(expert) → descriptor` (`host_slot` for a device-readable tier; `pread(fd, offset, n)` or `memcpy(src, n)` for others), which the store hands to a generic copy task of `cpu_task@1` into pinned staging — so tiers stay pure Python | pinned RAM, SSD |
+| expert tier (host) | `moe.tiers = ["std.tiered.pinned@1", "std.tiered.gguf_direct@1"]` | `Tier` protocol in `std.tiered` (the tier owns its storage; settings, e.g. the RAM tier's `ram`, forwarded by the store): `device_readable: bool`, `holds(class, pieces) → how many it holds`, `prepare(ctx, class, unit_bytes, extents, staging, granule)` (takes its storage: a device-readable tier its mapped host pool, a file tier its descriptors), `units(class)` (a device-readable tier's pool), `read(class, piece) → descriptor` (`host_slot` for a device-readable tier holding every piece; for any other tier only `pread` — extents (fd, O_DIRECT on or off, offset, nbytes) —, which the store hands to a generic copy task of `cpu_task@1` into pinned staging and refuses at prepare in any other kind) — so tiers stay pure Python | pinned RAM, SSD |
 | route transform (`approx`) | `moe.route_transform = "<name>"` — explicit option only, never by kernel priority; the name selects the contract `op.moe_route_transform.<name>@1` | std owns only the signature `(ids, weights, map) → ids, weights`; each transform is a contract its plugin owns (`op.moe_route_transform.<name>@1`, own oracle and CPU provider); a negative id means **dropped** (the rank's null slot, no fetch, no CPU job, no count), defined in `moe_resolve@1` before the tag | none in X before the tag; A1 after |
 
 A new policy, tier or transform is a plugin naming its own Ref. A policy that needs device state declares it
@@ -1374,6 +1375,10 @@ Decided while building, against the text above:
 - **Heat across layers**: RAM's coldest is compared on F11's scores of every layer, which within a decode step are one
   decay apart before and after the calling layer (deterministic; a small skew, recorded).
 - **The SSD tier's evidence is a network filesystem's**: M7's local NVMe rates (2.6 GB/s) are not re-measured here.
+- **One descriptor kind** (panel B, after the step): a file tier's `read` answers `pread` extents only, each with its
+  own O_DIRECT flag (the copy task reads that and nothing else; the store refuses another kind at prepare), so a
+  page-cache tier is a plugin-only Tier (O_DIRECT off). The RAM tier's per-class units are the store's setting `ram`,
+  forwarded from std.moe's `moe.ram` (std.tiered names no MoE option).
 
 After merging steps 3c and 3d (the router-prepared q8_1 input and the fused residual add), the snapshot trace was
 re-run on the A5000: F11 at 25% and the RAM-capped F11 (half the pieces in RAM, 12 GiB) byte-identical to the new

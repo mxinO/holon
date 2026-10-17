@@ -52,7 +52,8 @@ class Tier(Protocol):
     device_readable: bool         # kernels read its units in place (a mapped host pool)
 
     def holds(self, cls: str, pieces: int) -> int:
-        """How many of a class's `pieces` it holds at once (all: an inclusive tier). Known while kernels are bound."""
+        """How many of a class's `pieces` it holds at once (all: an inclusive tier). Known while kernels are bound;
+        the store forwards a tier its settings as keyword arguments at construction (the RAM tier's `ram`)."""
 
     def prepare(self, ctx, cls: str, unit_bytes: int, extents: list[list[Extent]], staging: int = 0,
                 granule: int = 0) -> None:
@@ -67,6 +68,7 @@ class Tier(Protocol):
         the `staging` after them where slower reads land."""
 
     def read(self, cls: str, piece: int) -> tuple:
-        """Where piece's bytes are: ("host_slot", unit) in a device-readable tier that holds every piece; ("pread",
-        ((fd, direct, offset, nbytes), …)) in a file tier, its extents in order (`direct`: the fd reads with
-        O_DIRECT) — the descriptor `cpu_task@1`'s copy task reads."""
+        """Where piece's bytes are: ("host_slot", unit) in a device-readable tier that holds every piece; in a file
+        tier always ("pread", ((fd, direct, offset, nbytes), …)), its extents in order, each read with O_DIRECT or
+        not (`direct`: through the page cache when 0) — the one kind `cpu_task@1`'s copy task reads (the store
+        refuses any other at prepare)."""
