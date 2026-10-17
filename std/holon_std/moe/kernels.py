@@ -31,7 +31,8 @@ then `staging` slots, then cache slots.
   @2's (`reference.linear_experts`, over the arena).
 
 - `moe_resolve@1`: instance `(ids [T, k] int32, kinds [T] uint8, residency [E, R] int32, host [E, R] int32, limits [R]
-  int32, counts [E] int32, misses [1] int32, errors [1] int32, delta [D, 3] int32, n_delta [1] int32, group: int) ->
+  int32, counts [E] int32, routed [E] int32, misses [1] int32, errors [1] int32, delta [D, 3] int32, n_delta [1] int32,
+  group: int) ->
   (slots [R, T, k] int32, fetch [R, 2, staging] int32, n_fetch [R] int32)`, for one layer's R roles (gate/up, down:
   each in its own arena of `limits[r]` slots). `kinds` per token (`PADDING`, `DECODE` for decode and verify rows,
   `PREFILL`); `residency[e, r]` the arena slot of expert e's role r, or −1 − tier when it is not in VRAM; `host[e, r]`
@@ -42,8 +43,10 @@ then `staging` slots, then cache slots.
   i]` the slot it is gathered into, here staging slot `k + i` (the entries read it). `n_fetch[r]` counts them all, even
   past `staging` (the caller must prevent it: `misses[0]` becomes the largest `n_fetch` it has seen, and a miss past
   `staging` reads the last staging slot). `counts[e]` += 1 per entry of a `DECODE` row routed to e, resident or not
-  (prefill rows never count). Deterministic; `fetch` past `n_fetch` unspecified. Facts: experts, top_k, roles, staging.
-  `delta`, `n_delta` and `group` (the layer's index in the map) serve the variants: @1 leaves them as they are.
+  (prefill rows never count); `routed[e]` = 1 when any live entry, of any row kind, routes e (the step's needs). The
+  calls of one step accumulate into `counts` and `routed`, which the caller zeroes per step. Deterministic; `fetch`
+  past `n_fetch` unspecified. Facts: experts, top_k, roles, staging. `delta` (the layer's region of the delta log),
+  `n_delta` (its count) and `group` (the layer's index in the map) serve the variants: @1 leaves them as they are.
 - Variants (docs/v1-offload.md D3): `moe_resolve.<policy>@1`, a contract its placement policy's plugin owns (its own
   oracle and CPU provider), takes @1's arguments, then the policy's device state by name (`device_state`), and keeps
   @1's terms except where it says otherwise. It may change `residency` (the regions its policy owns) and then logs

@@ -20,6 +20,7 @@ from . import kernels
 from .units import CHUNK, ExpertLinear, bind_experts
 
 GATE_UP, DOWN = 0, 1                           # roles
+KEY = "std.moe.offload"                        # the store's shared-object key (`ctx.shared`, the engine's lookup)
 
 
 def _store(ctx, experts: int, top_k: int):
@@ -44,7 +45,7 @@ class Offload(nn.Module):
 
     def __init__(self, ctx, *, layer: int, experts: int, top_k: int) -> None:
         super().__init__()
-        self.store = ctx.shared("std.moe.offload", lambda root: _store(root, experts, top_k))
+        self.store = ctx.shared(KEY, lambda root: _store(root, experts, top_k))
         if ctx is not self.store.ctx:
             raise NotImplementedError("std.moe.offload@1: an auxiliary model's experts (an MTP layer's) need its "
                                       "sub-steps' row kinds; not yet")

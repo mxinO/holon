@@ -25,6 +25,7 @@ from holon.core.engine import Engine, EngineConfig
 from holon_judge import placement, snapshot
 from holon_judge.planted import PLANTS
 from holon_judge.recording import PromptSet
+from holon_std.moe.offload import KEY
 
 ENGINE = dict(dtype=torch.bfloat16, page_size=16, max_seqs=64, max_step_tokens=4096, max_model_len=8192,
               cuda_graphs=True, overlap=True, paged_min_tokens=16384)
@@ -53,7 +54,7 @@ def main() -> None:
             with PLANTS[plant]() if plant else contextlib.nullcontext():
                 engine = Engine(EngineConfig(model=model, **ENGINE, **kw))
                 meta["build_s"] = round(time.time() - t, 1)
-                store = engine.ctx.shared_objects.get("std.moe.offload")
+                store = engine.ctx.shared_objects.get(KEY)
                 dump = placement.route_dump(engine) if store is not None else contextlib.nullcontext()
                 try:
                     with dump as routes:

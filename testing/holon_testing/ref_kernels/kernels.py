@@ -194,9 +194,11 @@ class MoeResolve:
     def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.staging = staging
 
-    def __call__(self, ids, kinds, residency, host, limits, counts, misses, errors, delta, n_delta, group):
-        slots, fetch, n_fetch, increments, bits = moe.moe_resolve(ids, kinds, residency, host, limits, self.staging)
+    def __call__(self, ids, kinds, residency, host, limits, counts, routed, misses, errors, delta, n_delta, group):
+        slots, fetch, n_fetch, increments, seen, bits = moe.moe_resolve(ids, kinds, residency, host, limits,
+                                                                        self.staging)
         counts += increments
+        routed |= seen
         misses.clamp_(min=int(n_fetch.max()))
         errors |= bits
         return slots, fetch, n_fetch

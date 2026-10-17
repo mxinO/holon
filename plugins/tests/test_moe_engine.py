@@ -2,6 +2,7 @@
 `Qwen3MoeForCausalLM`, written as a GGUF with quantized expert stacks, must serve what transformers computes on the
 same (dequantized) weights (docs/m02-moe.md, step 1)."""
 import json
+from unittest import mock
 
 import gguf
 import numpy as np
@@ -9,6 +10,7 @@ import pytest
 import torch
 from holon.api import SamplingParams
 from holon.core.engine import Engine, EngineConfig
+from holon_std.moe.offload import KEY
 from holon_testing.gguf_files import write
 from safetensors.torch import save_file
 from transformers import AutoModelForCausalLM, Qwen3MoeConfig, Qwen3MoeForCausalLM
@@ -198,7 +200,7 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
             "gate_up.q8_0.64x64=4,*=2", {"moe.placement.profile": profile.name}, None, 1), ("*=0", {}, None, 0)):
         engine = _engine(file, host_memory=1 << 24, paged_min_tokens=floor, plugin_options={
             **static, "moe.cache": cache, **extra})
-        store = engine.ctx.shared_objects["std.moe.offload"]
+        store = engine.ctx.shared_objects[KEY]
         counts = []                                                    # each committed step's routing counts
         store.policy.after_commit = lambda step, view, counts=counts: counts.append(step.sum()) or []
         assert _served(engine, prompts) == want, cache
@@ -236,7 +238,7 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
         engine = _engine(file, host_memory=1 << 24, plugin_options={
             "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.placement": policy,
             "moe.placement.profile": "routes.json"})
-        store = engine.ctx.shared_objects["std.moe.offload"]
+        store = engine.ctx.shared_objects[KEY]
         with route_dump(engine) as trace:
             assert _served(engine, prompts) == want, policy
         resident = store.residency.host >= 0
@@ -247,10 +249,10 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
             assert trace.admissions > 0 and resident[..., 0].sum(-1).tolist() == [2, 2]
         if not policy:
             assert parity(trace)["first_differing_step"] is None and trace.mirrored
-            at, picked = int(store.n_delta[0]), store.lend(1)           # one slot of each class: one whole expert
+            at, picked = store.n_delta.clone(), store.lend(1)           # one slot of each class: one whole expert
             assert picked.sum() == 1 and (store.residency.device[picked] == -1).all()
             (g, e), = np.argwhere(picked.numpy()).tolist()
-            assert store.delta[at].tolist() == [g, -1, e] and int(store.n_delta[0]) == at + 1     # logged
+            assert store.delta[g, at[g]].tolist() == [g, -1, e] and (store.n_delta - at).tolist() == [g == 0, g == 1]
 
 
 def test_only_decode_steps_count_and_decay(tiny_moe, tmp_path):
@@ -272,6 +274,33 @@ def test_only_decode_steps_count_and_decay(tiny_moe, tmp_path):
         assert report["first_differing_step"] is None and trace.mirrored and (report["admissions"] > 0 or
                                                                               max(map(len, prompts)) == 1), report
         assert not trace.steps[0]["counts"].any()                   # the prefill step: three prompts, none counted
+
+
+def test_the_delta_log_holds_a_steps_admissions_and_lending(tiny_moe, tmp_path):
+    """The delta log has a region of 2 × items records per layer (docs/v1-offload.md D4): a decode step of k · rows ≥ E
+    routes whose first layer admits and then lends every resident expert of every layer (in the forward, after the
+    step's first resolve, as the ring will) logs it all without overflow, the host mirror follows the device, and the
+    outputs stay the resident store's."""
+    from holon_judge.placement import route_dump
+    from holon_std.tiered.resolver import DeviceResolver
+
+    checkpoint, prompts = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
+    want = _served(_engine(file, max_seqs=4), prompts)
+    engine = _engine(file, max_seqs=4, host_memory=1 << 24, plugin_options={
+        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5"})
+    store, call, lent = engine.ctx.shared_objects[KEY], DeviceResolver.__call__, []
+
+    def resolve(self, ids, first):
+        slots = call(self, ids, first)
+        if not self.group and not first and not lent and bool((store.kinds == 1).sum() >= 4):   # 4 rows × top-2
+            lent.append(int(store.lend(store.items * store.roles).sum()))
+        return slots
+    with route_dump(engine) as trace, mock.patch.object(DeviceResolver, "__call__", resolve):
+        assert _served(engine, prompts) == want
+    step = next(s for s in trace.steps if (s["records"][:, 1] < 0).any())
+    assert lent == [8] and (step["records"][:, 1] < 0).sum() == 8 and (step["records"][:, 1] >= 0).any()
+    assert store.delta.shape[1] == 2 * store.items and trace.mirrored and not store.residency.host.max() >= 0
 
 
 @pytest.fixture(scope="module")
@@ -319,7 +348,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     file, prompts, want = gpu_moe
     engine = _gpu_engine(file, host_memory=1 << 26, plugin_options={"moe.store": "std.moe.offload@1",
                                                                    "moe.cache": cache, "moe.placement": policy})
-    store = engine.ctx.shared_objects["std.moe.offload"]
+    store = engine.ctx.shared_objects[KEY]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query.sum()) * 2 * 2 * bool(
         (step.n_query == step.n_logits).all()), int(t["counts"].sum()))) or commit(step, t)   # decode, verify steps

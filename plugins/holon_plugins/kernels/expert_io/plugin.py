@@ -19,7 +19,7 @@ from . import extension
 RESOLVE, FETCH = "moe_resolve", "expert_fetch"
 POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
 ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
-STATIC_BYTES = 6 * 4                       # its six static shared words
+STATIC_BYTES = 7 * 4                       # its static shared words (and the variants' alignment word)
 
 
 class Modules:
@@ -40,13 +40,14 @@ class MoeResolve:
     def __init__(self, modules: Modules, op: str, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.lib, self.policy, self.roles, self.staging = modules(ctx.fingerprint.sm), POLICIES[op], roles, staging
 
-    def __call__(self, ids, kinds, residency, host, limits, counts, misses, errors, delta, n_delta, group, **state):
+    def __call__(self, ids, kinds, residency, host, limits, counts, routed, misses, errors, delta, n_delta, group,
+                 **state):
         tokens, k = ids.shape
         slots = torch.empty(self.roles, tokens, k, dtype=torch.int32, device=ids.device)
         fetch = torch.empty(self.roles, 2, self.staging, dtype=torch.int32, device=ids.device)
         n_fetch = torch.empty(self.roles, dtype=torch.int32, device=ids.device)
-        self.lib.resolve(self.policy, ids, kinds, residency, host, limits, counts, misses, errors, delta, n_delta,
-                         group, [state[n] for n in STATE[self.policy]], self.plant, slots, fetch, n_fetch)
+        self.lib.resolve(self.policy, ids, kinds, residency, host, limits, counts, routed, misses, errors, delta,
+                         n_delta, group, [state[n] for n in STATE[self.policy]], self.plant, slots, fetch, n_fetch)
         return slots, fetch, n_fetch
 
     def lend(self, n: int, residency: torch.Tensor, classes: torch.Tensor, **state) -> torch.Tensor:
@@ -87,7 +88,7 @@ class Plugin:
         props = frozenset({"graph_safe", "deterministic"})
         requires = Constraint(sms=frozenset(extension.ARCHS))
         for op, code in POLICIES.items():
-            words = 0 if code == 0 else 6           # the variants' per-expert tables
+            words = 0 if code == 0 else 9           # the variants' per-expert tables (and one word)
 
             def supports(f, w=words) -> bool:
                 return f["roles"] <= ROLES and (f["roles"] + w) * f["experts"] * 4 + STATIC_BYTES <= SHARED_BYTES

@@ -32,7 +32,7 @@ struct State {
 };
 
 __host__ __device__ inline int shared_words(int policy, int roles, int experts) {
-    return (roles + (policy == STATIC ? 0 : 6)) * experts;
+    return policy == STATIC ? roles * experts : (roles + 9) * experts + 1;    // + 1: the pairs' 8-byte alignment
 }
 
 // One CTA per call. need[r][e]: 1 if role r of expert e is routed and missing; an admitted expert's entry becomes
@@ -44,7 +44,7 @@ template <int P>
 __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __restrict__ kinds,
                           int32_t * __restrict__ residency, const int32_t * __restrict__ host,
                           const int32_t * __restrict__ limits, int32_t * __restrict__ counts,
-                          int32_t * __restrict__ misses, int32_t * __restrict__ errors, int32_t * __restrict__ delta,
+                          int32_t * __restrict__ routed, int32_t * __restrict__ misses, int32_t * __restrict__ errors, int32_t * __restrict__ delta,
                           int32_t * __restrict__ n_delta, int group, int cap, State st,
                           int32_t * __restrict__ slots, int32_t * __restrict__ fetch, int32_t * __restrict__ n_fetch,
                           int tokens, int k, int experts, int roles, int staging) {
@@ -55,22 +55,22 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
     int32_t * first = dec + experts;                   // its first DECODE entry (LRU's candidate order)
     int32_t * cand = first + experts;                  // candidates, by rank
     int32_t * vict = cand + experts;                   // victims, by rank
-    int32_t * kind = vict + experts;                   // 1: a candidate, 2: a victim
-    __shared__ int has_decode, n_cand, n_vict, n_admit, base, now;
+    // The candidates and the victims, unranked, as (order key, expert id) pairs packed so one comparison ranks them
+    // (8-byte aligned: a word skipped when the tables before them hold an odd number).
+    int64_t * cands = reinterpret_cast<int64_t *>(vict + experts + ((roles + 5) * experts & 1));
+    int64_t * victs = cands + experts;
+    __shared__ int has_decode, n_cand, n_vict, n_admit, base;
     const int entries = tokens * k, tid = threadIdx.x;
-    for (int i = tid; i < shared_words(P, roles, experts); i += blockDim.x) {
-        shared[i] = 0;
+    for (int i = tid; i < shared_words(P, roles, experts); i += blockDim.x) {   // `first` starts past every entry
+        shared[i] = i >= (roles + 2) * experts && i < (roles + 3) * experts ? INT_MAX : 0;
     }
     if (tid == 0) {
         has_decode = n_cand = n_vict = 0;
+        if (P != STATIC) {
+            base = *n_delta;                           // the layer's log: only this call appends to it now
+        }
     }
     __syncthreads();
-    if (P != STATIC) {
-        for (int e = tid; e < experts; e += blockDim.x) {
-            first[e] = INT_MAX;
-        }
-        __syncthreads();
-    }
     for (int i = tid; i < entries; i += blockDim.x) {
         const int e = ids[i], kd = kinds[i / k];
         if (kd == PADDING || e < 0) {
@@ -84,6 +84,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
                 has_decode = 1;
             }
         }
+        routed[e] = 1;
         if (P != STATIC) {
             live[e] = 1;
         }
@@ -94,94 +95,102 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         }
     }
     __syncthreads();
-    if (P != STATIC && has_decode) {                   // a step with decode rows: decay (or tick), then count
-        if (P == LRU && tid == 0) {
-            now = st.clock[0] = st.clock[0] + 1;
-        }
-        __syncthreads();
+    if (P != STATIC && has_decode) {                   // a step with decode rows: decay (or tick), count, classify
+        const int now = P == LRU ? st.clock[0] + 1 : 0;
         for (int e = tid; e < experts; e += blockDim.x) {
+            int key = 0;
             if (P == LFU) {                            // in f32, rounded each time: x0.915, then +1.0 per entry
                 float s = __fmul_rn(st.score[e], LFU_DECAY);
                 for (int c = 0; c < dec[e]; ++c) {
                     s = __fadd_rn(s, 1.0f);
                 }
                 st.score[e] = s;
-            } else if (dec[e]) {
-                st.last[e] = now;
+                key = __float_as_int(s);               // non-negative: its bits order as the floats do
+            } else {
+                key = dec[e] ? now : st.last[e];
+                if (dec[e]) {
+                    st.last[e] = now;
+                }
             }
-        }
-        __syncthreads();
-        for (int e = tid; e < experts; e += blockDim.x) {
             bool missing = true, whole = true;
             for (int r = 0; r < roles; ++r) {
                 const int at = residency[e * roles + r];
                 missing = missing && at < 0;
                 whole = whole && at >= k + staging && at < limits[r];
             }
-            if (dec[e] && missing) {
-                kind[e] = 1;
-                atomicAdd(&n_cand, 1);
-            } else if (whole && (!live[e] || (st.plant & PLANT_VICTIM_NEEDED))) {
-                kind[e] = 2;
-                atomicAdd(&n_vict, 1);
+            const bool is_cand = dec[e] && missing;
+            const bool is_vict = !is_cand && whole && (!live[e] || (st.plant & PLANT_VICTIM_NEEDED));
+            // Candidates hottest (LFU: score descending; LRU: routed first) first, victims coldest (least recent) first,
+            // ties by expert id: ascending in the packed order.
+            const int ckey = P == LFU ? INT_MAX - key : first[e];
+            if (is_cand) {
+                cands[atomicAdd(&n_cand, 1)] = (int64_t(ckey) << 32) | e;
+            } else if (is_vict) {
+                victs[atomicAdd(&n_vict, 1)] = (int64_t(key) << 32) | e;
             }
-            // The order's key, in `first`: LFU's score (non-negative: its bits order as the floats do); LRU's first
-            // decode entry (a candidate) or last stamp (a victim).
-            first[e] = P == LFU ? __float_as_int(st.score[e]) : kind[e] == 1 ? first[e] : st.last[e];
+            // The order's key, in `first`: LFU's score; LRU's first decode entry (a candidate) or last stamp (a
+            // victim).
+            first[e] = P == LRU && is_cand ? first[e] : key;
         }
         __syncthreads();
-        for (int e = tid; e < experts; e += blockDim.x) {   // ranks: candidates hottest (oldest route) first, victims
-            const int ke = kind[e], key = first[e];         // coldest (least recent) first; ties by expert id
-            if (!ke) {
-                continue;
-            }
-            int rank = 0;
-            for (int x = 0; x < experts; ++x) {
-                const int kx = first[x];
-                const bool lower = kx < key || (kx == key && x < e);
-                rank += kind[x] == ke && (ke == 1 && P == LFU ? kx > key || (kx == key && x < e) : lower);
-            }
-            (ke == 1 ? cand : vict)[rank] = e;
+        const int pairs = min(n_cand, n_vict);         // a call with no candidate (or no victim) admits nothing
+        if (P == LRU && tid == 0) {
+            st.clock[0] = now;
         }
-        __syncthreads();
-        if (tid == 0) {
-            n_admit = min(n_cand, n_vict);
-        }
-        __syncthreads();
-        if (P == LFU) {                                // admitted while strictly hotter; the first failing pair stops it
-            for (int i = tid; i < min(n_cand, n_vict); i += blockDim.x) {
-                if (!(first[cand[i]] > first[vict[i]])) {
-                    atomicMin(&n_admit, i);
+        if (pairs) {
+            if (tid == 0) {
+                n_admit = pairs;
+            }
+            // Ranks over the unranked lists (their order is not deterministic, the ranks are).
+            for (int j = tid; j < n_cand + n_vict; j += blockDim.x) {
+                const bool c = j < n_cand;
+                const int64_t * list = c ? cands : victs;
+                const int64_t mine = list[c ? j : j - n_cand];
+                const int n = c ? n_cand : n_vict;
+                int rank = 0;
+#pragma unroll 8
+                for (int y = 0; y < n; ++y) {
+                    rank += list[y] < mine;
+                }
+                if (rank < pairs) {                    // a candidate or victim ranked past the pairs is never used
+                    (c ? cand : vict)[rank] = int(mine & 0xffffffff);
+                }
+            }
+            __syncthreads();
+            if (P == LFU) {                            // admitted while strictly hotter; the first failing pair stops it
+                for (int i = tid; i < pairs; i += blockDim.x) {
+                    if (!(first[cand[i]] > first[vict[i]])) {
+                        atomicMin(&n_admit, i);
+                    }
+                }
+                __syncthreads();
+            }
+            if (tid == 0) {
+                *n_delta = base + n_admit;
+            }
+            for (int i = tid; i < n_admit; i += blockDim.x) {   // the victim's slots, read before any is rewritten
+                const int a = cand[i], b = vict[(st.plant & PLANT_SHARED_VICTIM) && i == 1 ? 0 : i];
+                for (int r = 0; r < roles; ++r) {
+                    need[r * experts + a] = -2 - residency[b * roles + r];
+                }
+            }
+            __syncthreads();
+            for (int i = tid; i < n_admit; i += blockDim.x) {
+                const int a = cand[i], b = vict[(st.plant & PLANT_SHARED_VICTIM) && i == 1 ? 0 : i];
+                for (int r = 0; r < roles; ++r) {
+                    residency[a * roles + r] = -2 - need[r * experts + a];
+                    residency[b * roles + r] = -1;
+                }
+                if (base + i < cap) {
+                    delta[(base + i) * 3] = group;
+                    delta[(base + i) * 3 + 1] = a;
+                    delta[(base + i) * 3 + 2] = b;
+                } else {
+                    atomicOr(errors, OVERFLOW);
                 }
             }
             __syncthreads();
         }
-        if (tid == 0) {
-            base = atomicAdd(n_delta, n_admit);
-        }
-        __syncthreads();
-        for (int i = tid; i < n_admit; i += blockDim.x) {   // the victim's slots, read before any is rewritten
-            const int a = cand[i], b = vict[(st.plant & PLANT_SHARED_VICTIM) && i == 1 ? 0 : i];
-            for (int r = 0; r < roles; ++r) {
-                need[r * experts + a] = -2 - residency[b * roles + r];
-            }
-            if (base + i < cap) {
-                delta[(base + i) * 3] = group;
-                delta[(base + i) * 3 + 1] = a;
-                delta[(base + i) * 3 + 2] = b;
-            } else {
-                atomicOr(errors, OVERFLOW);
-            }
-        }
-        __syncthreads();
-        for (int i = tid; i < n_admit; i += blockDim.x) {
-            const int a = cand[i], b = vict[(st.plant & PLANT_SHARED_VICTIM) && i == 1 ? 0 : i];
-            for (int r = 0; r < roles; ++r) {
-                residency[a * roles + r] = -2 - need[r * experts + a];
-                residency[b * roles + r] = -1;
-            }
-        }
-        __syncthreads();
     }
     const int warp = tid / 32, lane = tid % 32;
     if (warp < roles) {
@@ -266,7 +275,8 @@ cudaStream_t stream() { return at::cuda::getCurrentCUDAStream().stream(); }
 
 // `state`: the policy's device state (LFU: score [E] f32; LRU: last [E], clock [1] int32).
 void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, at::Tensor & residency,
-             const at::Tensor & host, const at::Tensor & limits, at::Tensor & counts, at::Tensor & misses,
+             const at::Tensor & host, const at::Tensor & limits, at::Tensor & counts, at::Tensor & routed,
+             at::Tensor & misses,
              at::Tensor & errors, at::Tensor & delta, at::Tensor & n_delta, int64_t group,
              const std::vector<at::Tensor> & state, int64_t plant, at::Tensor & slots, at::Tensor & fetch,
              at::Tensor & n_fetch) {
@@ -282,6 +292,7 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
     check(host, ids, at::kInt, {experts, roles}, "host");
     check(limits, ids, at::kInt, {roles}, "limits");
     check(counts, ids, at::kInt, {experts}, "counts");
+    check(routed, ids, at::kInt, {experts}, "routed");
     check(misses, ids, at::kInt, {1}, "misses");
     check(errors, ids, at::kInt, {1}, "errors");
     check(delta, ids, at::kInt, {delta.size(0), 3}, "delta");
@@ -307,7 +318,8 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
     auto kernel = policy == LFU ? k_resolve<LFU> : policy == LRU ? k_resolve<LRU> : k_resolve<STATIC>;
     kernel<<<1, RESOLVE_THREADS, smem, stream()>>>(
         ids.data_ptr<int32_t>(), kinds.data_ptr<uint8_t>(), residency.data_ptr<int32_t>(), host.data_ptr<int32_t>(),
-        limits.data_ptr<int32_t>(), counts.data_ptr<int32_t>(), misses.data_ptr<int32_t>(), errors.data_ptr<int32_t>(),
+        limits.data_ptr<int32_t>(), counts.data_ptr<int32_t>(), routed.data_ptr<int32_t>(), misses.data_ptr<int32_t>(),
+        errors.data_ptr<int32_t>(),
         delta.data_ptr<int32_t>(), n_delta.data_ptr<int32_t>(), int(group), int(delta.size(0)), st,
         slots.data_ptr<int32_t>(), fetch.data_ptr<int32_t>(), n_fetch.data_ptr<int32_t>(), tokens, k, experts, roles,
         staging);

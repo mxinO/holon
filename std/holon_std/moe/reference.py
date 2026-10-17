@@ -64,7 +64,8 @@ def moe_combine(y: torch.Tensor, weights: torch.Tensor, dtype: torch.dtype) -> t
 def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, host: torch.Tensor,
                 limits: torch.Tensor, staging: int) -> tuple[torch.Tensor, ...]:
     """The `moe_resolve@1` oracle: `(slots [R, T, k], fetch [R, 2, staging] (−1 past n_fetch), n_fetch [R], counts [E],
-    errors)`, `counts` the increments of this call, `errors` the bits it sets."""
+    routed [E], errors)`, `counts` the increments of this call, `routed` the experts it saw routed, `errors` the bits it
+    sets."""
     from .kernels import DECODE, PADDING, RANGE
 
     t, k = ids.shape
@@ -94,7 +95,9 @@ def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor,
                 errors |= RANGE
     counted = routed[live & (kinds[:, None] == DECODE)]
     counts = torch.bincount(counted, minlength=experts)
-    return slots.int(), fetch.int(), n_fetch.int(), counts.int(), errors
+    routed_ = torch.zeros(experts, dtype=torch.int32)
+    routed_[routed[live]] = 1
+    return slots.int(), fetch.int(), n_fetch.int(), counts.int(), routed_, errors
 
 
 def expert_fetch(fetch: torch.Tensor, n: int, src: torch.Tensor, dst: torch.Tensor) -> torch.Tensor:

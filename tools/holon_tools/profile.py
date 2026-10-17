@@ -11,8 +11,7 @@ import pathlib
 import numpy as np
 from holon.api import SamplingParams
 from holon.core.engine import Engine, EngineConfig
-
-KEY = "std.moe.offload"           # the offload store's shared-object key
+from holon_std.moe.offload import KEY
 
 
 def profile(config: EngineConfig, prompts: list[list[int]], max_tokens: int) -> dict:
@@ -22,9 +21,9 @@ def profile(config: EngineConfig, prompts: list[list[int]], max_tokens: int) -> 
     try:
         store = engine.ctx.shared_objects[KEY]
         total = np.zeros(store.residency.host.shape[:2], dtype=np.int64)
-        store.taps.append(lambda step, telemetry: np.add(total, telemetry["counts"].numpy(), out=total))
+        store.taps.append(lambda step, record: np.add(total, record["counts"], out=total))
         engine.generate(prompts, SamplingParams(temperature=0.0, max_tokens=max_tokens, ignore_eos=True))
-        return {"layers": {str(layer): total[g].tolist() for g, layer in enumerate(sorted(store._order))}}
+        return {"layers": {str(layer): total[g].tolist() for g, layer in enumerate(store.layers)}}
     finally:
         engine.close()
 

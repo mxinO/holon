@@ -75,20 +75,23 @@ def test_resolve_matches_the_oracle(plugins, device, tokens, staging):
         live = case["ids"][case["kinds"] != PADDING]
         e1, e2 = live[live >= 0][:2].tolist()
         case["residency"][e1, 0], case["residency"][e2, 1] = K + 1, K + 1200
-    slots, fetch, n_fetch, increments, bits = reference.moe_resolve(
+    slots, fetch, n_fetch, increments, seen, bits = reference.moe_resolve(
         case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], staging)
     dev = {name: t.clone().to(device) for name, t in case.items()}
     misses = torch.full((1,), 3, dtype=torch.int32, device=device)
     errors = torch.zeros(1, dtype=torch.int32, device=device)
     delta, n_delta = _log(4, 2, device)
-    got = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"], dev["counts"], misses,
-                  errors, delta, n_delta, 5)
+    routed = torch.zeros(E, dtype=torch.int32, device=device)
+    routed[0] = 1                                                            # the step's earlier calls' needs stay
+    got = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"], dev["counts"], routed,
+                  misses, errors, delta, n_delta, 5)
     assert int(errors[0]) == bits == (RANGE if corrupt else 0)
     assert torch.equal(got[0].cpu(), slots) and torch.equal(got[2].cpu(), n_fetch)
     for r in range(ROLES):
         n = min(int(n_fetch[r]), staging)
         assert torch.equal(got[1][r, :, :n].cpu(), fetch[r, :, :n])
     assert torch.equal(dev["counts"].cpu(), case["counts"] + increments)
+    assert torch.equal(routed.cpu(), seen | (torch.arange(E) == 0).int())
     assert int(misses[0]) == max(3, int(n_fetch.max()))
     assert torch.equal(dev["residency"].cpu(), case["residency"]) and int(n_delta[0]) == 2 and (delta == -9).all()
     # the contract's own terms, on the oracle: null slot j for padding rows and dropped routes, staging past them
@@ -130,12 +133,15 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, tokens, k
     delta, n_delta = _log(capacity, 2, device)
     dev = {name: t.clone().to(device) for name, t in (case | state).items()}
     misses, errors = torch.zeros(1, dtype=torch.int32, device=device), torch.zeros(1, dtype=torch.int32, device=device)
+    routed = torch.zeros(E, dtype=torch.int32, device=device)
     slots, fetch, n_fetch = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"],
-                                    dev["counts"], misses, errors, delta, n_delta, 3, **{n: dev[n] for n in state})
+                                    dev["counts"], routed, misses, errors, delta, n_delta, 3,
+                                    **{n: dev[n] for n in state})
     assert torch.equal(slots.cpu(), want["slots"]) and torch.equal(n_fetch.cpu(), want["n_fetch"])
     for r in range(ROLES):
         assert torch.equal(fetch[r, :, :int(n_fetch[r])].cpu(), want["fetch"][r, :, :int(n_fetch[r])])
     assert torch.equal(dev["counts"].cpu(), case["counts"] + want["counts"]) and int(misses[0]) == n_fetch.max()
+    assert torch.equal(routed.cpu(), want["routed"])
     assert torch.equal(dev["residency"].cpu(), want["residency"])
     for name in state:
         assert torch.equal(dev[name].cpu(), want[name].to(dev[name].dtype)), name

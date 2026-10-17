@@ -1,10 +1,10 @@
 """Routes and residency of the offload store, step by step, and the L1 policy-parity check (docs/v1-offload.md §6).
 
 `route_dump(engine)` taps the engine's offload store (`std.moe.offload@1`'s `std.tiered.store@1`, through its route
-taps) while it runs: per committed step, its routing counts [layers, experts] of decode and verify rows (the store's
-`after_commit` telemetry), the experts any of its rows routed (read from the resolves of eagerly run steps; a graphed
-step holds decode and verify rows only, whose routes the counts give), the delta records the device logged, and the
-residency (whole experts) the store's host mirror holds after the step — the device's map, from its delta log.
+taps) while it runs: per committed step, its routing counts [layers, experts] of decode and verify rows, the experts
+any of its rows routed (the resolves' `routed` mask, graphed steps included), the delta records the device logged,
+and the residency (whole experts) the store's host mirror holds after the step — the device's map, from its delta
+log.
 
 At the end, with every launched step committed, the device's map must be the mirror (`Trace.mirrored`): a kernel
 that changed the map without logging it shows there.
@@ -18,11 +18,8 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 from collections.abc import Iterator
-from unittest import mock
 
 import numpy as np
-
-KEY = "std.moe.offload"           # the offload store's shared-object key
 
 
 @dataclasses.dataclass
@@ -39,31 +36,19 @@ class Trace:
 
 @contextlib.contextmanager
 def route_dump(engine) -> Iterator[Trace]:
-    from holon_std.tiered.resolver import DeviceResolver
-    from holon_std.tiered.store import PADDING
+    from holon_std.moe.offload import KEY
 
     store = engine.ctx.shared_objects[KEY]
     trace = Trace((store.residency.host >= 0).all(-1).copy())
     if "score" in store.state:
         trace.score = store.state["score"].cpu().numpy().copy()
-    needed: dict[int, np.ndarray] = {}                 # step -> experts its eager resolves saw routed
-    call = DeviceResolver.__call__
 
-    def resolve(self, ids, first):
-        if self.store is store:
-            live = ids[((store.kinds[first:first + len(ids)] != PADDING)[:, None] & (ids >= 0))].long().cpu().numpy()
-            needed.setdefault(store.step, np.zeros(trace.seed.shape, dtype=bool))[self.group, live] = True
-        return call(self, ids, first)
-
-    def tap(step, telemetry) -> None:
-        counts = telemetry["counts"].numpy().copy()
-        trace.steps.append({"step": step.step, "counts": counts, "needed": needed.pop(step.step, counts > 0),
-                            "records": telemetry["delta"][:int(telemetry["n_delta"][0])].numpy().copy(),
-                            "resident": (store.residency.host >= 0).all(-1)})
+    def tap(step, record) -> None:
+        trace.steps.append({"step": step.step, "counts": record["counts"].copy(), "needed": record["routed"].copy(),
+                            "records": record["records"].copy(), "resident": (store.residency.host >= 0).all(-1)})
     store.taps.append(tap)
     try:
-        with mock.patch.object(DeviceResolver, "__call__", resolve):
-            yield trace
+        yield trace
         if not engine.has_work():                      # every launched step committed: the log told the host all
             trace.mirrored = np.array_equal(store.residency.device.cpu().numpy(), store.residency.host)
     finally:

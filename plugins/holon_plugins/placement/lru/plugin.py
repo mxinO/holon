@@ -37,10 +37,11 @@ class Resolve:
     def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.staging = staging
 
-    def __call__(self, ids, kinds, residency, host, limits, counts, misses, errors, delta, n_delta, group, last,
+    def __call__(self, ids, kinds, residency, host, limits, counts, routed, misses, errors, delta, n_delta, group, last,
                  clock):
         out = reference.moe_resolve_lru(ids, kinds, residency, host, limits, self.staging, last, clock, group)
         counts += out["counts"]
+        routed |= out["routed"]
         misses.clamp_(min=int(out["n_fetch"].max()))
         residency.copy_(out["residency"])
         last.copy_(out["last"])

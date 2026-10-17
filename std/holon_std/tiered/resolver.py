@@ -33,8 +33,9 @@ class DeviceResolver:
             for t in store.zeroed:
                 t.zero_()
             store.residency.apply(store.edit_errors)
-        slots, fetch, n = self.resolve(ids, kinds, self.residency, self.host, self.limits, self.counts, store.misses,
-                                       store.errors, store.delta, store.n_delta, self.group, **self.state)
+        slots, fetch, n = self.resolve(ids, kinds, self.residency, self.host, self.limits, self.counts,
+                                       store.routed[self.group], store.misses, store.errors, store.delta[self.group],
+                                       store.n_delta[self.group:self.group + 1], self.group, **self.state)
         for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
             gather(fetch[r], n[r:r + 1], c.units(), c.slots())
         return slots

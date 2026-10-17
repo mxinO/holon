@@ -48,6 +48,7 @@ from .resolver import DeviceResolver
 PADDING, DECODE, PREFILL = 0, 1, 2           # row kinds (std.moe.kernels, `moe_resolve@1`)
 ALIGN = 4096                                 # each class's arena starts at a multiple of it (and of the pool's unit)
 LAND = 2                                     # d: launches between a swap's unmap and its map (D4)
+LOG = 2                                      # the delta log's records per group, per item
 FLOOR = 4                                    # F2: each group's hottest items before the global ranking
 POLICY = "placement.lfu@1"                   # F11, the default where the RAM tier holds every expert (D10, §13)
 
@@ -121,8 +122,9 @@ class TieredStore:
         self.errors = ctx.static(f"{name}.errors", (1,), torch.int32)   # `moe_resolve@1`'s, zeroed each step
         self.edit_errors = ctx.static(f"{name}.edit_errors", (1,), torch.int32)   # host edits' preconditions
         self.peak_misses = 0                    # the most distinct misses a layer had (`misses`, at commits)
-        self.taps: list[Callable[[object, dict], None]] = []    # route taps: (step, telemetry) at each commit
-        self.step = 0                                           # the step being launched (`before_launch`)
+        # Route taps: (step, record) at each commit; the record holds the step's routing `counts` [G, E] of decode
+        # and verify rows, the experts any of its rows `routed` [G, E] (bool) and the delta log's `records` [n, 3].
+        self.taps: list[Callable[[object, dict], None]] = []
         self._copies: dict[int, list[MemOp]] = {}               # launch -> the swaps' copies handed in then
 
     # -- while the model is finalized and bound ------------------------------------------------------------------------
@@ -151,23 +153,32 @@ class TieredStore:
             self.limits = self.ctx.static(f"{self.name}.limits", (len(self._order), self.roles), torch.int32)
             self.state = {n: self.ctx.static(f"{self.name}.state.{n}", (len(self._order), *s), getattr(torch, dtype))
                           for n, (s, dtype) in self.policy.device_state().items()}
-            # A step's map changes: at most every item of every group (an admission moves one in, one out).
-            log = self.ctx.static(f"{self.name}.delta", (shape[0] * self.items + 1, 3), torch.int32)   # + a sink
-            self.delta, self.n_delta = log[:-1], self.ctx.static(f"{self.name}.n_delta", (1,), torch.int32)
+            self.routed = self.ctx.static(f"{self.name}.routed", shape[:2], torch.int32)
+            # The delta log, a region per group: a step's records of a group are its admissions (at most its misses,
+            # E − R for R resident), its lent items (at most R) and the lent slots' returns (at most as many): 2E bound
+            # them (+ a sink row for `lend`'s scatter).
+            log = self.ctx.static(f"{self.name}.delta", (shape[0], LOG * self.items + 1, 3), torch.int32)
+            self.delta, self.n_delta = log[:, :-1], self.ctx.static(f"{self.name}.n_delta", shape[:1], torch.int32)
             self._log = log
-            self.telemetry = {"counts": self.counts, "misses": self.misses, "errors": self.errors,
-                              "edit_errors": self.edit_errors, "delta": self.delta, "n_delta": self.n_delta}
-            self.zeroed = [self.counts, self.errors, self.edit_errors, self.n_delta]    # by the step's first resolve
+            self.telemetry = {"counts": self.counts, "routed": self.routed, "misses": self.misses,
+                              "errors": self.errors, "edit_errors": self.edit_errors, "delta": self.delta,
+                              "n_delta": self.n_delta}
+            self.zeroed = [self.counts, self.routed, self.errors, self.edit_errors, self.n_delta]   # each step
         g = self._order[group]
         self.resolvers.append(DeviceResolver(self.ctx, self, g, [self.groups[group][r] for r in range(self.roles)],
                                              {n: t[g] for n, t in self.state.items()}))
         return self.resolvers[-1]
 
+    @property
+    def layers(self) -> list[int]:
+        """The group (layer) ids, in map order: row g of the map, the counts and the records is layer `layers[g]`."""
+        return sorted(self.groups)
+
     def watch(self, errors: torch.Tensor) -> None:
         """A kernel's error word (`linear_experts_arena@1`'s `errors`): zeroed each step, a commit that finds it set
         stops the engine."""
         if not any(errors is t for t in self.zeroed):
-            self.telemetry[f"kernel_errors.{len(self.zeroed) - 4}"] = errors
+            self.telemetry[f"kernel_errors.{len(self.zeroed) - 5}"] = errors
             self.zeroed.append(errors)
 
     # -- engine hooks -------------------------------------------------------------------------------------------------
@@ -234,7 +245,7 @@ class TieredStore:
         self._written = 0
 
     def before_launch(self, step) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list[MemOp]]:
-        self.step, kinds, at = step.step, self._kinds, 0
+        kinds, at = self._kinds, 0
         kinds[:self._written] = PADDING
         if step.row_kind is not None:                                # the scheduler's; else a guess (see above)
             decode = (step.row_kind != RowKind.PREFILL).tolist()
@@ -257,9 +268,12 @@ class TieredStore:
         if self.peak_misses > self.staging:
             raise RuntimeError(f"{self.name}: a layer had {self.peak_misses} distinct misses, {self.staging} staging "
                                "slots")
-        self.residency.commit(step.step, telemetry["delta"][:int(telemetry["n_delta"][0])].numpy())
+        delta, n = telemetry["delta"].numpy(), telemetry["n_delta"].numpy()
+        record = {"counts": telemetry["counts"].numpy(), "routed": telemetry["routed"].numpy().astype(bool),
+                  "records": np.concatenate([delta[g, :n[g]] for g in range(len(n))])}
+        self.residency.commit(step.step, record["records"])
         for tap in self.taps:
-            tap(step, telemetry)
+            tap(step, record)
         if swaps := self.policy.after_commit(telemetry["counts"].numpy(), self.residency.host):
             self._swap(step.step, swaps)
 
@@ -272,16 +286,17 @@ class TieredStore:
         (a lent slot its layer's first victim) is step 3b's."""
         picked = self.resolvers[0].resolve.lend(n, self.residency.device, self._class_index, **self.state)
         self.residency.device.masked_fill_(picked[..., None], -1)
-        flat = picked.reshape(-1)
-        at = (self.n_delta + flat.cumsum(0) - 1).long()
-        sink = len(self.delta)
-        at = torch.where(flat & (at < sink), at, sink)
         groups, items = picked.shape
-        g = torch.arange(groups, device=flat.device).repeat_interleave(items)
-        record = torch.stack([g, torch.full_like(g, -1), torch.arange(items, device=flat.device).repeat(groups)], 1)
-        self._log.index_copy_(0, at, record.int())
-        self.errors.bitwise_or_(((self.n_delta + flat.sum()) > sink).int() * 2)          # OVERFLOW
-        self.n_delta += flat.sum().int()
+        sink = self.delta.shape[1]
+        at = (self.n_delta[:, None] + picked.cumsum(1) - 1).long()           # each group's records after its own
+        at = torch.where(picked & (at < sink), at, sink)
+        g = torch.arange(groups, device=picked.device)[:, None].expand(groups, items)
+        e = torch.arange(items, device=picked.device)[None].expand(groups, items)
+        self._log.view(-1, 3).index_copy_(0, (g * (sink + 1) + at).reshape(-1),
+                                          torch.stack([g, -torch.ones_like(g), e], -1).reshape(-1, 3).int())
+        lent = picked.sum(1).int()
+        self.errors.bitwise_or_(((self.n_delta + lent) > sink).any().int() * 2)          # OVERFLOW
+        self.n_delta += lent
         return picked
 
     def _swap(self, commit: int, swaps: list[tuple[int, int, bool]]) -> None:

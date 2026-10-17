@@ -48,6 +48,7 @@ import sys
 from collections.abc import Callable, Iterator
 from unittest import mock
 
+import numpy as np
 import torch
 
 
@@ -883,7 +884,7 @@ def closing_tokens_masked() -> Iterator[None]:
 
 
 def _store_tap(tap: Callable) -> contextlib.AbstractContextManager:
-    """`tap(store, step, telemetry)` on every tiered store built inside the context (as a route tap)."""
+    """`tap(store, step, record)` on every tiered store built inside the context (as a route tap)."""
     from holon_std.tiered import store as tiered
 
     init = tiered.TieredStore.__init__
@@ -908,8 +909,8 @@ def resolve_off_by_one() -> Iterator[None]:
         fired[_when()] += 1
         return torch.where((slots >= k) & (slots < k + staging), k + (slots - k + 1) % staging, slots)
 
-    def missed(store, step, telemetry):
-        fired["steps with misses"] += int(telemetry["misses"][0]) > 0
+    def missed(store, step, record):
+        fired["steps with misses"] += bool((record["routed"] & ~(store.residency.host >= 0).all(-1)).any())
     with mock.patch.object(DeviceResolver, "__call__", planted), _store_tap(missed):
         yield
     print(f"plant resolve-off-by-one fired: {dict(fired)}", file=sys.stderr)
@@ -957,7 +958,7 @@ def map_stale_slot() -> Iterator[None]:
 
         def rotated(commit, entries, later=0):
             if later:
-                groups = list(self._order)
+                groups = self.layers
                 by: dict = {}
                 for n, (g, _, r, _, _) in enumerate(entries):
                     by.setdefault((r, self.groups[groups[g]][r].name), []).append(n)
@@ -991,12 +992,12 @@ def owner_race(checked: bool = True) -> Iterator[None]:
 
     fired, apply = collections.Counter(), maps.ResidencyMap.apply
 
-    def lend(store, step, telemetry):
-        records = telemetry["delta"][:int(telemetry["n_delta"][0])].numpy()
+    def lend(store, step, record):
+        records = record["records"]
         if not len(records):
             return
         g = int(collections.Counter(records[:, 0].tolist()).most_common(1)[0][0])
-        view, groups = store.residency.host, list(store._order)
+        view, groups = store.residency.host, store.layers
         whole = (view[g] >= 0).all(-1)
         score = store.state["score"][g].float().cpu().numpy()
         x = int(min(whole.nonzero()[0], key=lambda e: (score[e], e)))
@@ -1025,7 +1026,8 @@ def _lfu_kernel(bit: int, name: str, fires: Callable) -> Iterator[None]:
     fired, commit = collections.Counter(), tiered.TieredStore.after_commit
 
     def counted(self, step, telemetry):
-        records = telemetry["delta"][:int(telemetry["n_delta"][0])].numpy()
+        delta, n = telemetry["delta"].numpy(), telemetry["n_delta"].numpy()
+        records = np.concatenate([delta[g, :n[g]] for g in range(len(n))])
         fired["admissions"] += len(records)
         fired["fired"] += fires(records, telemetry["counts"].numpy())
         return commit(self, step, telemetry)

@@ -29,7 +29,8 @@ DECAY = np.float32(0.915)
 def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, host: torch.Tensor,
                     limits: torch.Tensor, staging: int, score: torch.Tensor, group: int) -> dict:
     """One call: `slots [R, T, k]`, `fetch [R, 2, staging]` (−1 past n_fetch), `n_fetch [R]`, `counts [E]` (this call's
-    increments), `errors` (bits), and the state after it: `residency`, `score`, the delta `records`."""
+    increments), `routed [E]` (the experts it saw routed), `errors` (bits), and the state after it: `residency`,
+    `score`, the delta `records`."""
     t, k = ids.shape
     experts, roles = residency.shape
     ids, kinds = ids.long().cpu(), kinds.long().cpu()
@@ -39,6 +40,8 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
     routed = ids.clamp_min(0)
     counts = torch.bincount(routed[live & (kinds[:, None] == DECODE)], minlength=experts)
     needed = set(routed[live].tolist())
+    seen = torch.zeros(experts, dtype=torch.int32)
+    seen[sorted(needed)] = 1
     records = []
     if (counts > 0).any():
         for e in range(experts):
@@ -75,7 +78,8 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
             else:                                                       # corrupt: null slot j, flagged
                 errors |= RANGE
     return {"slots": slots.int(), "fetch": fetch.int(), "n_fetch": n_fetch.int(), "counts": counts.int(),
-            "errors": errors, "residency": after.int(), "score": torch.from_numpy(score), "records": records}
+            "routed": seen, "errors": errors, "residency": after.int(), "score": torch.from_numpy(score),
+            "records": records}
 
 
 def lend(n: int, residency: torch.Tensor, classes: torch.Tensor, score: torch.Tensor) -> torch.Tensor:
