@@ -1233,8 +1233,9 @@ Decided while building:
 - **The first inputs by a scratch element:** each row's device-held token is gathered from `last_token` and written at
   its first input, or, for a row whose first input is the host's, at one element past the step's tokens. Two kernels
   instead of four, the same in both paths.
-- **The head reads `h` itself** when every token is a logits row (graphed steps always): the head's units return new
-  tensors (`rmsnorm@1`), so a drafter reading `h` after it is unaffected.
+- **The head reads `h` itself** when every token is a logits row (graphed steps always): `rmsnorm@1` returns a new
+  tensor and, as its contract now states (the panel's finding; L0 checks both providers), never writes `x`, so a
+  drafter or prompt logprobs reading `h` after it see it unchanged.
 - **Two arenas, not one compact layout:** the small arena has fixed offsets like the large one (graphs bake its
   addresses); packing each step's fields by size would have made the addresses depend on what a step writes. It
   repeats the fields that do not scale with tokens (block-table rows, masks): ≈ 8 MB per page group at 256 sequences
@@ -1247,4 +1248,7 @@ Decided while building:
   copy and in-graph `prepare`; the tokens' copy inside the graph (one graph per output buffer).
 - **Also (std, `cdd4785`):** the ffn unit interface's optional member is `add_residual(x, residual)` (was `add`;
   `moe_combine@1`'s instance `add` is unchanged), and the `linear_experts@2` / `linear_experts_arena@1` contract text
-  says a prepared handle exposes `.x`, the tensor it stands for, for consumers that do not know it.
+  says a prepared handle exposes `.x`, the tensor it stands for, for consumers that do not know it; the panel found
+  the in-tree experts providers did not honour it (ggml's took only its own `Prepared`, the reference a tensor), so
+  both now read any other handle's `.x` (`7305168`, tested on both). `_Prep.host_staged` names the host-staged path
+  explicitly (`d73a2a2`).

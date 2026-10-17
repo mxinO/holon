@@ -31,12 +31,15 @@ def test_rmsnorm_and_fused_add(dtype, offset):
     facts = {"dim": 4096, "eps": 1e-6, "offset": offset, "dtype": str(dtype).removeprefix("torch.")}
     x, r = (torch.randn(37, 4096, device="cuda", dtype=dtype) for _ in range(2))
     w = torch.randn(4096, device="cuda", dtype=dtype)
+    x0 = x.clone()
     fast, ref = _pair("rmsnorm@1", **facts)
     _close(fast(x, w), ref(x, w))
     q = torch.randn(37, 8, 128, device="cuda", dtype=dtype)                     # per-head (q/k norm) shape
+    q0 = q.clone()
     facts_h = {**facts, "dim": 128}
     fast, ref = _pair("rmsnorm@1", **facts_h)
     _close(fast(q, w[:128]), ref(q, w[:128]))
+    assert torch.equal(x, x0) and torch.equal(q, q0), "rmsnorm@1 wrote its input"   # the contract: x unmodified
     fast, ref = _pair("add_rmsnorm@1", **facts)
     want_y, want_r = ref(x.clone(), r.clone(), w)
     got_y, got_r = fast(x.clone(), r.clone(), w)
