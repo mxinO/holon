@@ -5,18 +5,33 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   over E in f32, the k largest (ties to the lower index), divided by their sum (clamped at 6.1e-5) when
   `renormalize`. Ids are unique and in range in every row; a row with any NaN or +inf logit gets such ids and
   unspecified weights. Facts: experts, top_k, renormalize.
-- `linear_experts@2`: instance `(x [T, R, in], parts, ids [T, k]) -> y [T, k, out_y]` of `out_dtype`: row j of token
-  t applies expert `ids[t, j]` to `x[t, 0]` (R = 1) or `x[t, j]` (R = k). `parts` holds the stack's tensors by role,
-  as `QTensor.parts`, per expert (`{"blocks": [E, out, row_bytes]}` for ggml layouts, where @1 took [E·out,
-  row_bytes]; `{"weight": [E, out, in]}` for `dense/<dtype>`). With `glu = "swiglu"` the stack is a merged gate/up
-  stack (per expert `out/2` gate rows, then `out/2` up rows; a part with one value per expert is [2, E], gate's row
-  then up's) and `y = silu(gate) · up` in f32 (out_y = out/2); with `glu = "none"`, out_y = out. A dense layout's
-  activation operand is rounded to the weight dtype before the product, with f32 accumulation. Facts: layout,
-  experts, in, out, top_k, rows_per_token, glu, act_dtype, out_dtype, act_quant (`ACT_QUANT` for quantized layouts,
-  as `qlinear@2`'s; `a16` for dense ones). An instance may define `prepare` as `qlinear@2`'s (logical shape [E,
-  out, in]); a spec's `config["act"]` is refused under mixed steps as `qlinear@2`'s.
+- `moe_router@1`: instance `(x [T, H] of dtype, router [E, H] f32) -> (weights [T, k] f32, ids [T, k] int32)`: the
+  router and `moe_topk@1` in one op — `moe_topk@1`'s result, in its terms, for the logits `x · routerᵀ` summed in f32
+  from x's exact f32 values, in an order the provider fixes (deterministic; it may depend on the call's row count, as a
+  linear's kernel path does), not necessarily the f32 `linear`'s bits (bounded against the composition). std.moe uses it
+  where a provider serves its facts, else composes the f32 `linear` and `moe_topk@1`. Facts: hidden, experts, top_k,
+  renormalize, dtype. An instance may define `route_prepare(x, router, experts) -> (weights, ids, x_experts)`: its
+  result and the experts' input for `x`, `x[:, None]` or a handle standing for it that the `linear_experts@2` (or
+  `linear_experts_arena@1`) instance `experts` reads — x made ready for it in the router's own launch (as qlinear@2's
+  `prepare_input`, std.ops.kernels: the provider's, keyed and generation-checked, falling back to the handle's x).
+- `linear_experts@2`: instance `(x [T, R, in], parts, ids [T, k]) -> y [T, k, out_y]` of `out_dtype`: row j of token t
+  applies expert `ids[t, j]` to `x[t, 0]` (R = 1) or `x[t, j]` (R = k). `parts` holds the stack's tensors by role, as
+  `QTensor.parts`, per expert (`{"blocks": [E, out, row_bytes]}` for ggml layouts, where @1 took [E·out, row_bytes];
+  `{"weight": [E, out, in]}` for `dense/<dtype>`). With `glu = "swiglu"` the stack is a merged gate/up stack (per expert
+  `out/2` gate rows, then `out/2` up rows; a part with one value per expert is [2, E], gate's row then up's) and `y =
+  silu(gate) · up` in f32 (out_y = out/2); with `glu = "none"`, out_y = out. A dense layout's activation operand is
+  rounded to the weight dtype before the product, with f32 accumulation. An instance may accept, in place of `x`, a
+  handle its own provider's `moe_router@1` prepared for it (`route_prepare`; once stale, it reads the handle's x).
+  Every such handle exposes `.x`, the tensor it stands for, so a consumer that does not know the handle (another
+  provider's instance, a composition) falls back on `handle.x`.
+  Facts: layout, experts, in, out, top_k, rows_per_token, glu, act_dtype, out_dtype, act_quant (`ACT_QUANT` for
+  quantized layouts, as `qlinear@2`'s; `a16` for dense ones). An instance may define `prepare` as `qlinear@2`'s (logical
+  shape [E, out, in]); a spec's `config["act"]` is refused under mixed steps as `qlinear@2`'s.
 - `moe_combine@1`: instance `(y [T, k, H] of y_dtype, weights [T, k] f32, out [T, H])`: writes `Σ_j w[t, j] · y[t,
-  j]`, accumulated in f32 in slot order, into `out` (of `dtype`). Facts: hidden, top_k, dtype, y_dtype.
+  j]`, accumulated in f32 in slot order, into `out` (of `dtype`). Facts: hidden, top_k, dtype, y_dtype. An instance
+  may define `add(y, weights, residual [T, H] of dtype, out)`: writes `residual + s`, s that sum rounded to `dtype`,
+  added in f32 and rounded to `dtype` again — what `residual + out` gives after the call, so the layer's residual add
+  costs no launch of its own (docs/v1-offload.md §14, step 3c).
 
 Expert offload (docs/v1-offload.md §5): an offload store keeps each slot class's experts in an arena `[S, unit]`
 whose first `top_k` slots are null slots (zero weights; slot j for routing rank j, so a token's slots stay unique),
@@ -26,9 +41,10 @@ then `staging` slots, then cache slots.
   out_y]` as @2's, except that `parts` hold an arena of S slots per role, `ids` are arena slots (< S), and a call's
   ids name at most `experts + top_k` distinct slots (a layer's E experts, plus one null slot per rank). Its facts are
   @2's for the layer (`experts` = E) plus `slots`, the most slots an arena of the stack's class holds (a call's may
-  hold fewer). An instance has `errors`, a device int32 word [1] its calls or violation bits into (zero: none; bits
-  are the provider's), which the caller zeroes. Same results as @2 over the stack those slots hold: the oracle is
-  @2's (`reference.linear_experts`, over the arena).
+  hold fewer). It may accept a prepared handle in place of `x` as @2's (exposing `.x`, the tensor it stands for, which
+  a consumer that does not know the handle reads instead). An instance has `errors`, a device int32 word [1] its
+  calls or violation bits into (zero: none; bits are the provider's), which the caller zeroes. Same results as @2
+  over the stack those slots hold: the oracle is @2's (`reference.linear_experts`, over the arena).
 
 - `moe_resolve@1`: instance `(ids [T, k] int32, kinds [T] uint8, residency [E, R] int32, host [E, R] int32, limits [R]
   int32, counts [E] int32, routed [E] int32, ring [E, R] int32, stage [R, F] int32, empty [R, P] int32, n_empty [1]
@@ -159,6 +175,7 @@ CPU jobs; signal] → expert_fetch → linear_experts_arena (gate/up, down) → 
 from __future__ import annotations
 
 MOE_TOPK, LINEAR_EXPERTS, MOE_COMBINE = "moe_topk@1", "linear_experts@2", "moe_combine@1"
+MOE_ROUTER = "moe_router@1"
 MOE_RESOLVE, EXPERT_FETCH, LINEAR_EXPERTS_ARENA = "moe_resolve@1", "expert_fetch@1", "linear_experts_arena@1"
 EXPERT_PREFETCH = "expert_prefetch@1"
 CPU_TASK, CPU_EXPERTS, MOE_PATCH_ROWS = "cpu_task@1", "cpu_experts@1", "moe_patch_rows@1"

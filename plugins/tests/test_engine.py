@@ -322,6 +322,29 @@ def test_overlap_matches_depth_0_with_stops_mid_batch(tiny_checkpoint, tiny_case
     assert any(len(o) < 12 and o[-1] == stop for o in outs[True])
 
 
+@pytest.mark.parametrize("state_memory", [1 << 20, 12 * 2048], ids=["roomy", "preempting"])
+def test_host_staged_inputs_equal_the_device_derived(tiny_checkpoint, tiny_case, state_memory):
+    # Without a drafter the host stages positions, lengths and write indices (Executor.host_starts); the device path
+    # derives them from the SeqTable. Every step's inputs and the SeqTable after it must agree exactly.
+    prompts, expected = tiny_case
+    runs = []
+    for host in (True, False):
+        engine = _tiny_engine(tiny_checkpoint, state_memory=state_memory)
+        ex, seen = engine.executor, []
+        ex.host_starts, prepare = host, ex._prepare
+
+        def record(ctx, prepare=prepare, ex=ex, seen=seen):
+            prepare(ctx)
+            seen.append([t.clone() for t in (ctx.batch.dev.input_ids, ctx.batch.dev.positions, ctx.prep.lens,
+                                             ex.num_computed, ex.last_token,
+                                             *(p.write_index for p in ctx.pages.values()))])
+        ex._prepare = record
+        assert engine.generate(prompts, GREEDY) == expected
+        runs.append(seen + [[ex.num_computed, ex.last_token]])
+    assert len(runs[0]) == len(runs[1]) > 20
+    assert all(torch.equal(a, b) for x, y in zip(*runs, strict=True) for a, b in zip(x, y, strict=True))
+
+
 @pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
 def test_decode_launch_never_waits_for_the_device():
     from holon.core import platform

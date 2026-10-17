@@ -1,0 +1,2767 @@
+{
+ "gpu": "rtx-a5000",
+ "date": "2026-10-17",
+ "models": {
+  "qwen3-30b-a3b": "unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf",
+  "qwen3-8b": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf"
+ },
+ "commit": "5452833",
+ "method": {
+  "inventory": "spikes/x3d_core/profile.py under nsys (--cuda-graph-trace=node), batch-1 decode after a 1,024-token prompt: eager steps with NVTX ranges per step-loop phase name each kernel; a graphed step's kernels take the eager step's phases by position (inventory.py). Durations are profiled (node tracing inflates small kernels); `gap_us` is the idle time before each",
+  "ab": "spikes/x3d_core/ab.py: one engine per deployment, the changes switched in process (each arm's graphs captured again; base = bdd8422's executor methods and uploader, spikes/x3d_core/base.py), graphed decode at batch 1 by per-step wall after a prompt of 1,024 and 4,096 tokens and eager prefill of one prompt; a warm-up round, then ABBA rounds; a change's saving against the previous arm, its sd that of the per-round differences",
+  "end_to_end": "bench/holon_tg.py -n 128 -r 3 --depths 1024 4096 --engine-args '--max-seqs 1 \u2026', one process per run, base bdd8422 against the final commit, ABBA rounds"
+ },
+ "inventory": {
+  "qwen3-30b-a3b/resident": {
+   "before": {
+    "step_gpu_us_profiled": 5346.8,
+    "phases": {
+     "upload": {
+      "kernels": 0,
+      "copies": 6,
+      "us": 3.39,
+      "span_us": 12.8
+     },
+     "plan_bounds:kv": {
+      "kernels": 1,
+      "copies": 0,
+      "us": 2.11,
+      "span_us": 3.1
+     },
+     "prepare": {
+      "kernels": 19,
+      "copies": 2,
+      "us": 47.53,
+      "span_us": 52.27
+     },
+     "prepare_device:kv": {
+      "kernels": 2,
+      "copies": 1,
+      "us": 4.67,
+      "span_us": 4.89
+     },
+     "logits": {
+      "kernels": 4,
+      "copies": 0,
+      "us": 437.53,
+      "span_us": 437.77
+     },
+     "sample": {
+      "kernels": 2,
+      "copies": 1,
+      "us": 12.0,
+      "span_us": 14.83
+     },
+     "store": {
+      "kernels": 5,
+      "copies": 0,
+      "us": 10.66,
+      "span_us": 11.06
+     },
+     "launch": {
+      "kernels": 0,
+      "copies": 1,
+      "us": 1.6,
+      "span_us": 5.82
+     }
+    },
+    "rows": [
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 8 B",
+      "us": 0.48,
+      "gap_us": 0.0
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 136 B",
+      "us": 0.51,
+      "gap_us": 1.95
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 8 B",
+      "us": 0.48,
+      "gap_us": 1.82
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 8 B",
+      "us": 0.48,
+      "gap_us": 1.86
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 8 B",
+      "us": 0.48,
+      "gap_us": 1.86
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 193 B",
+      "us": 0.96,
+      "gap_us": 1.92
+     },
+     {
+      "phase": "plan_bounds:kv",
+      "name": "unrolled_elementwise_kernel",
+      "us": 2.11,
+      "gap_us": 0.99
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.2,
+      "gap_us": 2.53
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.89,
+      "gap_us": 0.19
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.85,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.04,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.01,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.98,
+      "gap_us": 0.22
+     },
+     {
+      "phase": "prepare",
+      "name": "memcpy D2D 8 B",
+      "us": 1.55,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.82,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "unrolled_elementwise_kernel",
+      "us": 1.76,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.96,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.33,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.9,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.17,
+      "gap_us": 0.27
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.01,
+      "gap_us": 0.19
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.92,
+      "gap_us": 0.08
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.46,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "unrolled_elementwise_kernel",
+      "us": 1.57,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.41,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.82,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.57,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "memcpy D2D 8 B",
+      "us": 1.31,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.82,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.7,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "memcpy D2D 4 B",
+      "us": 1.15,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "logits",
+      "name": "index_elementwise_kernel",
+      "us": 3.9,
+      "gap_us": -0.06
+     },
+     {
+      "phase": "logits",
+      "name": "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o204820481_tensorptrbf16gmemalign16o20481_tensorptrbf16gmemalign128o204820481___False_4_0",
+      "us": 2.62,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "logits",
+      "name": "quantize_q8_1",
+      "us": 1.47,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "sample",
+      "name": "index_elementwise_kernel",
+      "us": 2.78,
+      "gap_us": -0.13
+     },
+     {
+      "phase": "sample",
+      "name": "memset",
+      "us": 0.93,
+      "gap_us": 1.02
+     },
+     {
+      "phase": "sample",
+      "name": "reduce_kernel",
+      "us": 8.29,
+      "gap_us": 1.94
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 1.89,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 2.88,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 2.4,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "store",
+      "name": "unrolled_elementwise_kernel",
+      "us": 1.6,
+      "gap_us": 0.08
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 1.89,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "launch",
+      "name": "memcpy D2H 8 B",
+      "us": 1.6,
+      "gap_us": 4.22
+     }
+    ]
+   },
+   "after": {
+    "step_gpu_us_profiled": 5279.8,
+    "phases": {
+     "upload": {
+      "kernels": 0,
+      "copies": 1,
+      "us": 1.57,
+      "span_us": 1.57
+     },
+     "plan_bounds:kv": {
+      "kernels": 1,
+      "copies": 0,
+      "us": 2.08,
+      "span_us": 8.06
+     },
+     "prepare": {
+      "kernels": 3,
+      "copies": 0,
+      "us": 9.13,
+      "span_us": 11.93
+     },
+     "prepare_device:kv": {
+      "kernels": 2,
+      "copies": 1,
+      "us": 6.02,
+      "span_us": 6.78
+     },
+     "logits": {
+      "kernels": 3,
+      "copies": 0,
+      "us": 432.27,
+      "span_us": 432.41
+     },
+     "sample": {
+      "kernels": 2,
+      "copies": 1,
+      "us": 11.71,
+      "span_us": 14.36
+     },
+     "store": {
+      "kernels": 2,
+      "copies": 0,
+      "us": 4.68,
+      "span_us": 4.84
+     },
+     "launch": {
+      "kernels": 0,
+      "copies": 1,
+      "us": 1.57,
+      "span_us": 6.27
+     }
+    },
+    "rows": [
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 1104 B",
+      "us": 1.57,
+      "gap_us": 0.0
+     },
+     {
+      "phase": "plan_bounds:kv",
+      "name": "unrolled_elementwise_kernel",
+      "us": 2.08,
+      "gap_us": 5.98
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.14,
+      "gap_us": 2.51
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.14,
+      "gap_us": 0.19
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.85,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "vectorized_elementwise_kernel",
+      "us": 2.26,
+      "gap_us": 0.22
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "vectorized_elementwise_kernel",
+      "us": 2.24,
+      "gap_us": 0.32
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "memcpy D2D 4 B",
+      "us": 1.52,
+      "gap_us": 0.22
+     },
+     {
+      "phase": "logits",
+      "name": "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o204820481_tensorptrbf16gmemalign16o20481_tensorptrbf16gmemalign128o204820481___False_4_0",
+      "us": 2.53,
+      "gap_us": -0.06
+     },
+     {
+      "phase": "logits",
+      "name": "quantize_q8_1",
+      "us": 1.47,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "sample",
+      "name": "index_elementwise_kernel",
+      "us": 2.62,
+      "gap_us": -0.1
+     },
+     {
+      "phase": "sample",
+      "name": "memset",
+      "us": 0.93,
+      "gap_us": 1.02
+     },
+     {
+      "phase": "sample",
+      "name": "reduce_kernel",
+      "us": 8.16,
+      "gap_us": 1.73
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 2.66,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 2.02,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "launch",
+      "name": "memcpy D2H 8 B",
+      "us": 1.57,
+      "gap_us": 4.7
+     }
+    ]
+   }
+  },
+  "qwen3-30b-a3b/offload-0.47": {
+   "before": {
+    "step_gpu_us_profiled": 5774.1,
+    "phases": {
+     "upload": {
+      "kernels": 0,
+      "copies": 6,
+      "us": 3.17,
+      "span_us": 11.79
+     },
+     "plan_bounds:kv": {
+      "kernels": 1,
+      "copies": 0,
+      "us": 1.95,
+      "span_us": 2.88
+     },
+     "writes": {
+      "kernels": 0,
+      "copies": 1,
+      "us": 0.83,
+      "span_us": 2.14
+     },
+     "prepare": {
+      "kernels": 19,
+      "copies": 2,
+      "us": 45.71,
+      "span_us": 50.03
+     },
+     "prepare_device:kv": {
+      "kernels": 2,
+      "copies": 1,
+      "us": 4.36,
+      "span_us": 4.62
+     },
+     "logits": {
+      "kernels": 4,
+      "copies": 0,
+      "us": 428.35,
+      "span_us": 428.55
+     },
+     "sample": {
+      "kernels": 2,
+      "copies": 1,
+      "us": 12.38,
+      "span_us": 15.16
+     },
+     "store": {
+      "kernels": 5,
+      "copies": 0,
+      "us": 10.07,
+      "span_us": 10.41
+     },
+     "launch": {
+      "kernels": 0,
+      "copies": 1,
+      "us": 0.96,
+      "span_us": 4.9
+     },
+     "observe": {
+      "kernels": 1,
+      "copies": 11,
+      "us": 22.68,
+      "span_us": 45.36
+     }
+    },
+    "rows": [
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 8 B",
+      "us": 0.45,
+      "gap_us": 0.0
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 136 B",
+      "us": 0.48,
+      "gap_us": 1.73
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 8 B",
+      "us": 0.45,
+      "gap_us": 1.7
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 8 B",
+      "us": 0.48,
+      "gap_us": 1.73
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 8 B",
+      "us": 0.45,
+      "gap_us": 1.73
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 193 B",
+      "us": 0.86,
+      "gap_us": 1.73
+     },
+     {
+      "phase": "plan_bounds:kv",
+      "name": "unrolled_elementwise_kernel",
+      "us": 1.95,
+      "gap_us": 0.93
+     },
+     {
+      "phase": "writes",
+      "name": "memcpy H2D 1 B",
+      "us": 0.83,
+      "gap_us": 1.31
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.88,
+      "gap_us": 2.37
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.7,
+      "gap_us": 0.22
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.83,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.56,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.82,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.86,
+      "gap_us": 0.22
+     },
+     {
+      "phase": "prepare",
+      "name": "memcpy D2D 8 B",
+      "us": 1.41,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.54,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "unrolled_elementwise_kernel",
+      "us": 1.6,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.82,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.72,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.79,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.82,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.66,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 2.11,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.55,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "unrolled_elementwise_kernel",
+      "us": 1.92,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.63,
+      "gap_us": 0.13
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.74,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.5,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare",
+      "name": "memcpy D2D 8 B",
+      "us": 1.25,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.7,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.57,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "memcpy D2D 4 B",
+      "us": 1.09,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "logits",
+      "name": "index_elementwise_kernel",
+      "us": 3.71,
+      "gap_us": -0.06
+     },
+     {
+      "phase": "logits",
+      "name": "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o204820481_tensorptrbf16gmemalign16o20481_tensorptrbf16gmemalign128o204820481___False_4_0",
+      "us": 2.43,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "logits",
+      "name": "quantize_q8_1",
+      "us": 1.41,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "sample",
+      "name": "index_elementwise_kernel",
+      "us": 3.68,
+      "gap_us": -0.1
+     },
+     {
+      "phase": "sample",
+      "name": "memset",
+      "us": 0.8,
+      "gap_us": 0.96
+     },
+     {
+      "phase": "sample",
+      "name": "reduce_kernel",
+      "us": 7.9,
+      "gap_us": 1.92
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 1.82,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 2.62,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 2.4,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "store",
+      "name": "unrolled_elementwise_kernel",
+      "us": 1.47,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 1.76,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "launch",
+      "name": "memcpy D2H 8 B",
+      "us": 0.96,
+      "gap_us": 3.94
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 24576 B",
+      "us": 2.05,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 24576 B",
+      "us": 2.37,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 4 B",
+      "us": 1.12,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 4 B",
+      "us": 1.18,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 4 B",
+      "us": 1.18,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "elementwise_kernel",
+      "us": 2.66,
+      "gap_us": 5.74
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 147456 B",
+      "us": 6.46,
+      "gap_us": 4.67
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 192 B",
+      "us": 1.18,
+      "gap_us": 1.92
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 96 B",
+      "us": 1.12,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 4 B",
+      "us": 1.09,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 4 B",
+      "us": 1.09,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 4 B",
+      "us": 1.18,
+      "gap_us": 1.15
+     }
+    ]
+   },
+   "after": {
+    "step_gpu_us_profiled": 5668.8,
+    "phases": {
+     "upload": {
+      "kernels": 0,
+      "copies": 1,
+      "us": 1.34,
+      "span_us": 1.34
+     },
+     "plan_bounds:kv": {
+      "kernels": 1,
+      "copies": 0,
+      "us": 1.95,
+      "span_us": 9.13
+     },
+     "writes": {
+      "kernels": 0,
+      "copies": 1,
+      "us": 0.83,
+      "span_us": 2.17
+     },
+     "prepare": {
+      "kernels": 3,
+      "copies": 0,
+      "us": 8.58,
+      "span_us": 11.4
+     },
+     "prepare_device:kv": {
+      "kernels": 2,
+      "copies": 1,
+      "us": 5.63,
+      "span_us": 6.01
+     },
+     "logits": {
+      "kernels": 3,
+      "copies": 0,
+      "us": 424.8,
+      "span_us": 424.83
+     },
+     "sample": {
+      "kernels": 2,
+      "copies": 1,
+      "us": 12.39,
+      "span_us": 15.27
+     },
+     "store": {
+      "kernels": 2,
+      "copies": 0,
+      "us": 4.51,
+      "span_us": 4.67
+     },
+     "launch": {
+      "kernels": 0,
+      "copies": 1,
+      "us": 0.99,
+      "span_us": 5.29
+     },
+     "observe": {
+      "kernels": 1,
+      "copies": 11,
+      "us": 22.72,
+      "span_us": 45.03
+     }
+    },
+    "rows": [
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 1104 B",
+      "us": 1.34,
+      "gap_us": 0.0
+     },
+     {
+      "phase": "plan_bounds:kv",
+      "name": "unrolled_elementwise_kernel",
+      "us": 1.95,
+      "gap_us": 7.18
+     },
+     {
+      "phase": "writes",
+      "name": "memcpy H2D 1 B",
+      "us": 0.83,
+      "gap_us": 1.34
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.91,
+      "gap_us": 2.3
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.85,
+      "gap_us": 0.42
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.82,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "vectorized_elementwise_kernel",
+      "us": 2.11,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "vectorized_elementwise_kernel",
+      "us": 2.05,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "memcpy D2D 4 B",
+      "us": 1.47,
+      "gap_us": 0.22
+     },
+     {
+      "phase": "logits",
+      "name": "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o204820481_tensorptrbf16gmemalign16o20481_tensorptrbf16gmemalign128o204820481___False_4_0",
+      "us": 2.43,
+      "gap_us": -0.13
+     },
+     {
+      "phase": "logits",
+      "name": "quantize_q8_1",
+      "us": 1.41,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "sample",
+      "name": "index_elementwise_kernel",
+      "us": 3.62,
+      "gap_us": -0.13
+     },
+     {
+      "phase": "sample",
+      "name": "memset",
+      "us": 0.83,
+      "gap_us": 0.93
+     },
+     {
+      "phase": "sample",
+      "name": "reduce_kernel",
+      "us": 7.94,
+      "gap_us": 2.08
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 2.59,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 1.92,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "launch",
+      "name": "memcpy D2H 8 B",
+      "us": 0.99,
+      "gap_us": 4.3
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 24576 B",
+      "us": 2.05,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 24576 B",
+      "us": 2.37,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 4 B",
+      "us": 1.12,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 4 B",
+      "us": 1.18,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 4 B",
+      "us": 1.18,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "elementwise_kernel",
+      "us": 2.66,
+      "gap_us": 5.82
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 147456 B",
+      "us": 6.5,
+      "gap_us": 4.19
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 192 B",
+      "us": 1.18,
+      "gap_us": 1.95
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 96 B",
+      "us": 1.12,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 4 B",
+      "us": 1.09,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 4 B",
+      "us": 1.09,
+      "gap_us": 1.15
+     },
+     {
+      "phase": "observe",
+      "name": "memcpy D2H 4 B",
+      "us": 1.18,
+      "gap_us": 1.15
+     }
+    ]
+   }
+  },
+  "qwen3-8b": {
+   "before": {
+    "step_gpu_us_profiled": 8618.4,
+    "phases": {
+     "upload": {
+      "kernels": 0,
+      "copies": 6,
+      "us": 3.87,
+      "span_us": 13.23
+     },
+     "plan_bounds:kv": {
+      "kernels": 1,
+      "copies": 0,
+      "us": 2.4,
+      "span_us": 3.52
+     },
+     "prepare": {
+      "kernels": 19,
+      "copies": 2,
+      "us": 51.17,
+      "span_us": 56.3
+     },
+     "prepare_device:kv": {
+      "kernels": 2,
+      "copies": 1,
+      "us": 5.37,
+      "span_us": 5.67
+     },
+     "logits": {
+      "kernels": 4,
+      "copies": 0,
+      "us": 760.92,
+      "span_us": 761.16
+     },
+     "sample": {
+      "kernels": 2,
+      "copies": 1,
+      "us": 13.22,
+      "span_us": 16.44
+     },
+     "store": {
+      "kernels": 5,
+      "copies": 0,
+      "us": 12.11,
+      "span_us": 12.57
+     },
+     "launch": {
+      "kernels": 0,
+      "copies": 1,
+      "us": 1.5,
+      "span_us": 5.24
+     }
+    },
+    "rows": [
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 8 B",
+      "us": 0.58,
+      "gap_us": 0.0
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 136 B",
+      "us": 0.61,
+      "gap_us": 1.95
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 8 B",
+      "us": 0.56,
+      "gap_us": 1.95
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 8 B",
+      "us": 0.58,
+      "gap_us": 1.79
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 8 B",
+      "us": 0.58,
+      "gap_us": 1.81
+     },
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 193 B",
+      "us": 0.96,
+      "gap_us": 1.86
+     },
+     {
+      "phase": "plan_bounds:kv",
+      "name": "unrolled_elementwise_kernel",
+      "us": 2.4,
+      "gap_us": 1.12
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.62,
+      "gap_us": 2.88
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 2.11,
+      "gap_us": 0.19
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.33,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.36,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.49,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 2.24,
+      "gap_us": 0.26
+     },
+     {
+      "phase": "prepare",
+      "name": "memcpy D2D 8 B",
+      "us": 1.76,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 2.08,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "unrolled_elementwise_kernel",
+      "us": 2.02,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.42,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.62,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.82,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.3,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.18,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 2.21,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 2.85,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "unrolled_elementwise_kernel",
+      "us": 1.79,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.63,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 2.08,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.79,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare",
+      "name": "memcpy D2D 8 B",
+      "us": 1.47,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "vectorized_elementwise_kernel",
+      "us": 2.08,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "vectorized_elementwise_kernel",
+      "us": 1.95,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "memcpy D2D 4 B",
+      "us": 1.34,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "logits",
+      "name": "index_elementwise_kernel",
+      "us": 4.58,
+      "gap_us": -0.06
+     },
+     {
+      "phase": "logits",
+      "name": "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o409640961_tensorptrbf16gmemalign16o40961_tensorptrbf16gmemalign128o409640961___False_2_0",
+      "us": 2.94,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "logits",
+      "name": "quantize_q8_1",
+      "us": 1.7,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "sample",
+      "name": "index_elementwise_kernel",
+      "us": 3.04,
+      "gap_us": -0.06
+     },
+     {
+      "phase": "sample",
+      "name": "memset",
+      "us": 0.9,
+      "gap_us": 1.09
+     },
+     {
+      "phase": "sample",
+      "name": "reduce_kernel",
+      "us": 9.28,
+      "gap_us": 2.19
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 2.19,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 2.98,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 2.94,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "store",
+      "name": "unrolled_elementwise_kernel",
+      "us": 1.82,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 2.18,
+      "gap_us": 0.06
+     },
+     {
+      "phase": "launch",
+      "name": "memcpy D2H 8 B",
+      "us": 1.5,
+      "gap_us": 3.74
+     }
+    ]
+   },
+   "after": {
+    "step_gpu_us_profiled": 8521.8,
+    "phases": {
+     "upload": {
+      "kernels": 0,
+      "copies": 1,
+      "us": 1.44,
+      "span_us": 1.44
+     },
+     "plan_bounds:kv": {
+      "kernels": 1,
+      "copies": 0,
+      "us": 2.37,
+      "span_us": 8.99
+     },
+     "prepare": {
+      "kernels": 3,
+      "copies": 0,
+      "us": 10.37,
+      "span_us": 13.54
+     },
+     "prepare_device:kv": {
+      "kernels": 2,
+      "copies": 1,
+      "us": 7.29,
+      "span_us": 8.09
+     },
+     "logits": {
+      "kernels": 3,
+      "copies": 0,
+      "us": 750.68,
+      "span_us": 750.85
+     },
+     "sample": {
+      "kernels": 2,
+      "copies": 1,
+      "us": 13.28,
+      "span_us": 16.23
+     },
+     "store": {
+      "kernels": 2,
+      "copies": 0,
+      "us": 5.28,
+      "span_us": 5.48
+     },
+     "launch": {
+      "kernels": 0,
+      "copies": 1,
+      "us": 1.5,
+      "span_us": 6.28
+     }
+    },
+    "rows": [
+     {
+      "phase": "upload",
+      "name": "memcpy H2D 1104 B",
+      "us": 1.44,
+      "gap_us": 0.0
+     },
+     {
+      "phase": "plan_bounds:kv",
+      "name": "unrolled_elementwise_kernel",
+      "us": 2.37,
+      "gap_us": 6.62
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.52,
+      "gap_us": 2.85
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.52,
+      "gap_us": 0.22
+     },
+     {
+      "phase": "prepare",
+      "name": "index_elementwise_kernel",
+      "us": 3.33,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "vectorized_elementwise_kernel",
+      "us": 2.74,
+      "gap_us": 0.19
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "vectorized_elementwise_kernel",
+      "us": 2.53,
+      "gap_us": 0.32
+     },
+     {
+      "phase": "prepare_device:kv",
+      "name": "memcpy D2D 4 B",
+      "us": 2.02,
+      "gap_us": 0.29
+     },
+     {
+      "phase": "logits",
+      "name": "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o409640961_tensorptrbf16gmemalign16o40961_tensorptrbf16gmemalign128o409640961___False_2_0",
+      "us": 2.72,
+      "gap_us": -0.03
+     },
+     {
+      "phase": "logits",
+      "name": "quantize_q8_1",
+      "us": 1.66,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "sample",
+      "name": "index_elementwise_kernel",
+      "us": 3.2,
+      "gap_us": -0.06
+     },
+     {
+      "phase": "sample",
+      "name": "memset",
+      "us": 0.93,
+      "gap_us": 1.09
+     },
+     {
+      "phase": "sample",
+      "name": "reduce_kernel",
+      "us": 9.15,
+      "gap_us": 1.92
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 2.98,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "store",
+      "name": "index_elementwise_kernel",
+      "us": 2.3,
+      "gap_us": 0.1
+     },
+     {
+      "phase": "launch",
+      "name": "memcpy D2H 8 B",
+      "us": 1.5,
+      "gap_us": 4.78
+     }
+    ]
+   }
+  }
+ },
+ "ab": {
+  "qwen3-30b-a3b/resident": {
+   "model": "unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf",
+   "engine_args": "",
+   "rounds": 8,
+   "steps": 256,
+   "times_ms": {
+    "base": [
+     {
+      "prefill_512": 135.3204883635044,
+      "prefill_4096": 1095.3062176704407,
+      "decode_1024": 5.129270153702237,
+      "decode_4096": 5.602305376669392
+     },
+     {
+      "prefill_512": 138.15145194530487,
+      "prefill_4096": 1121.9408363103867,
+      "decode_1024": 5.21855047554709,
+      "decode_4096": 5.6872244604164734
+     },
+     {
+      "prefill_512": 137.81054690480232,
+      "prefill_4096": 1123.1177635490894,
+      "decode_1024": 5.22433509468101,
+      "decode_4096": 5.693130413419567
+     },
+     {
+      "prefill_512": 138.6132277548313,
+      "prefill_4096": 1127.4656280875206,
+      "decode_1024": 5.245428590569645,
+      "decode_4096": 5.710133409593254
+     },
+     {
+      "prefill_512": 138.19271698594093,
+      "prefill_4096": 1127.1891333162785,
+      "decode_1024": 5.2429317438509315,
+      "decode_4096": 5.711786827305332
+     },
+     {
+      "prefill_512": 138.6752426624298,
+      "prefill_4096": 1126.7275214195251,
+      "decode_1024": 5.2409208146855235,
+      "decode_4096": 5.707949923817068
+     },
+     {
+      "prefill_512": 138.71989026665688,
+      "prefill_4096": 1128.0146725475788,
+      "decode_1024": 5.241769278654829,
+      "decode_4096": 5.7020837848540395
+     },
+     {
+      "prefill_512": 138.34813237190247,
+      "prefill_4096": 1128.3098496496677,
+      "decode_1024": 5.240203463472426,
+      "decode_4096": 5.710198500310071
+     }
+    ],
+    "prep": [
+     {
+      "prefill_512": 134.8763406276703,
+      "prefill_4096": 1099.87061470747,
+      "decode_1024": 5.122540169395506,
+      "decode_4096": 5.595452428678982
+     },
+     {
+      "prefill_512": 137.07362860441208,
+      "prefill_4096": 1121.1688742041588,
+      "decode_1024": 5.1892641495214775,
+      "decode_4096": 5.6617203808855265
+     },
+     {
+      "prefill_512": 138.01812753081322,
+      "prefill_4096": 1123.6361376941204,
+      "decode_1024": 5.204051500186324,
+      "decode_4096": 5.677624751115218
+     },
+     {
+      "prefill_512": 138.47728073596954,
+      "prefill_4096": 1127.351000905037,
+      "decode_1024": 5.216916048084386,
+      "decode_4096": 5.68669565836899
+     },
+     {
+      "prefill_512": 138.54756206274033,
+      "prefill_4096": 1127.8237141668797,
+      "decode_1024": 5.217042416916229,
+      "decode_4096": 5.680779431713745
+     },
+     {
+      "prefill_512": 138.37270438671112,
+      "prefill_4096": 1127.3493841290474,
+      "decode_1024": 5.221269791945815,
+      "decode_4096": 5.689267243724316
+     },
+     {
+      "prefill_512": 139.51538875699043,
+      "prefill_4096": 1128.0264034867287,
+      "decode_1024": 5.218616730417125,
+      "decode_4096": 5.683961135218851
+     },
+     {
+      "prefill_512": 138.83067667484283,
+      "prefill_4096": 1127.7951560914516,
+      "decode_1024": 5.216601464780979,
+      "decode_4096": 5.692544960766099
+     }
+    ],
+    "upload": [
+     {
+      "prefill_512": 135.8441524207592,
+      "prefill_4096": 1105.5485233664513,
+      "decode_1024": 5.138632477610372,
+      "decode_4096": 5.614495908957906
+     },
+     {
+      "prefill_512": 136.9106024503708,
+      "prefill_4096": 1115.6507544219494,
+      "decode_1024": 5.172260105609894,
+      "decode_4096": 5.652195643051527
+     },
+     {
+      "prefill_512": 138.17183673381805,
+      "prefill_4096": 1125.3347285091877,
+      "decode_1024": 5.196884594624862,
+      "decode_4096": 5.6696143437875435
+     },
+     {
+      "prefill_512": 138.26660811901093,
+      "prefill_4096": 1127.3324377834797,
+      "decode_1024": 5.210039220401086,
+      "decode_4096": 5.673449573805556
+     },
+     {
+      "prefill_512": 138.08554410934448,
+      "prefill_4096": 1126.861561089754,
+      "decode_1024": 5.2071852260269225,
+      "decode_4096": 5.681592534529045
+     },
+     {
+      "prefill_512": 138.5696493089199,
+      "prefill_4096": 1127.5877989828587,
+      "decode_1024": 5.224046195507981,
+      "decode_4096": 5.6839879107428715
+     },
+     {
+      "prefill_512": 138.04664462804794,
+      "prefill_4096": 1128.179993480444,
+      "decode_1024": 5.212295043747872,
+      "decode_4096": 5.699644694686867
+     },
+     {
+      "prefill_512": 138.85939121246338,
+      "prefill_4096": 1127.4374723434448,
+      "decode_1024": 5.220093982643448,
+      "decode_4096": 5.677114822901785
+     }
+    ],
+    "telemetry": [
+     {
+      "prefill_512": 136.10625639557838,
+      "prefill_4096": 1110.22212728858,
+      "decode_1024": 5.153902107849717,
+      "decode_4096": 5.621616946882568
+     },
+     {
+      "prefill_512": 136.8626430630684,
+      "prefill_4096": 1112.832099199295,
+      "decode_1024": 5.1608843059511855,
+      "decode_4096": 5.627359438221902
+     },
+     {
+      "prefill_512": 138.12223076820374,
+      "prefill_4096": 1125.2939142286777,
+      "decode_1024": 5.193821125430986,
+      "decode_4096": 5.664413096383214
+     },
+     {
+      "prefill_512": 138.4551301598549,
+      "prefill_4096": 1126.8050894141197,
+      "decode_1024": 5.201130450586788,
+      "decode_4096": 5.672213766956702
+     },
+     {
+      "prefill_512": 138.3589208126068,
+      "prefill_4096": 1127.434566617012,
+      "decode_1024": 5.2110632677795365,
+      "decode_4096": 5.67161878279876
+     },
+     {
+      "prefill_512": 138.41356337070465,
+      "prefill_4096": 1127.7139857411385,
+      "decode_1024": 5.224353924859315,
+      "decode_4096": 5.679097739630379
+     },
+     {
+      "prefill_512": 138.26477900147438,
+      "prefill_4096": 1127.8172619640827,
+      "decode_1024": 5.224969223490916,
+      "decode_4096": 5.680841524736024
+     },
+     {
+      "prefill_512": 138.56052607297897,
+      "prefill_4096": 1127.2315867245197,
+      "decode_1024": 5.214158823946491,
+      "decode_4096": 5.668841185979545
+     }
+    ]
+   }
+  },
+  "qwen3-30b-a3b/offload-0.47": {
+   "model": "unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf",
+   "engine_args": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=*=0.47",
+   "rounds": 8,
+   "steps": 256,
+   "times_ms": {
+    "base": [
+     {
+      "prefill_512": 431.75722658634186,
+      "prefill_4096": 837.6560658216476,
+      "decode_1024": 5.547916516661644,
+      "decode_4096": 6.000701425364241
+     },
+     {
+      "prefill_512": 431.8508915603161,
+      "prefill_4096": 851.2450940907001,
+      "decode_1024": 5.6182471016654745,
+      "decode_4096": 6.094245924032293
+     },
+     {
+      "prefill_512": 433.2890696823597,
+      "prefill_4096": 852.3693531751633,
+      "decode_1024": 5.6437329621985555,
+      "decode_4096": 6.097442397731356
+     },
+     {
+      "prefill_512": 432.72681161761284,
+      "prefill_4096": 851.027000695467,
+      "decode_1024": 5.638315880787559,
+      "decode_4096": 6.10136185423471
+     },
+     {
+      "prefill_512": 432.5113072991371,
+      "prefill_4096": 852.4698577821255,
+      "decode_1024": 5.658229216351174,
+      "decode_4096": 6.097216508351266
+     },
+     {
+      "prefill_512": 430.83877488970757,
+      "prefill_4096": 853.7622801959515,
+      "decode_1024": 5.670409387676045,
+      "decode_4096": 6.10607689304743
+     },
+     {
+      "prefill_512": 432.1957007050514,
+      "prefill_4096": 853.2879836857319,
+      "decode_1024": 5.676983331795782,
+      "decode_4096": 6.133665898232721
+     },
+     {
+      "prefill_512": 432.47460946440697,
+      "prefill_4096": 852.118480950594,
+      "decode_1024": 5.653906657244079,
+      "decode_4096": 6.106838380219415
+     }
+    ],
+    "prep": [
+     {
+      "prefill_512": 432.3648288846016,
+      "prefill_4096": 839.3033258616924,
+      "decode_1024": 5.563482569414191,
+      "decode_4096": 6.003329035593197
+     },
+     {
+      "prefill_512": 431.9935031235218,
+      "prefill_4096": 849.139578640461,
+      "decode_1024": 5.594448623014614,
+      "decode_4096": 6.072858624975197
+     },
+     {
+      "prefill_512": 432.51025304198265,
+      "prefill_4096": 851.8438898026943,
+      "decode_1024": 5.642685151542537,
+      "decode_4096": 6.072898439015262
+     },
+     {
+      "prefill_512": 432.10186436772346,
+      "prefill_4096": 851.7527133226395,
+      "decode_1024": 5.610638778307475,
+      "decode_4096": 6.104015978053212
+     },
+     {
+      "prefill_512": 432.12150409817696,
+      "prefill_4096": 852.0479388535023,
+      "decode_1024": 5.644618140649982,
+      "decode_4096": 6.093314499594271
+     },
+     {
+      "prefill_512": 432.45359510183334,
+      "prefill_4096": 852.6756390929222,
+      "decode_1024": 5.601535376626998,
+      "decode_4096": 6.0760205233236775
+     },
+     {
+      "prefill_512": 433.4028661251068,
+      "prefill_4096": 852.2282876074314,
+      "decode_1024": 5.606905950116925,
+      "decode_4096": 6.09290786087513
+     },
+     {
+      "prefill_512": 431.95049092173576,
+      "prefill_4096": 853.7796922028065,
+      "decode_1024": 5.615387693978846,
+      "decode_4096": 6.071679454180412
+     }
+    ],
+    "upload": [
+     {
+      "prefill_512": 431.8671450018883,
+      "prefill_4096": 843.8387401401997,
+      "decode_1024": 5.575423681875691,
+      "decode_4096": 6.014463768224232
+     },
+     {
+      "prefill_512": 432.02153220772743,
+      "prefill_4096": 847.2954109311104,
+      "decode_1024": 5.589090578723699,
+      "decode_4096": 6.038734834874049
+     },
+     {
+      "prefill_512": 433.55876579880714,
+      "prefill_4096": 852.1292880177498,
+      "decode_1024": 5.599381111096591,
+      "decode_4096": 6.10390528163407
+     },
+     {
+      "prefill_512": 432.4159137904644,
+      "prefill_4096": 852.8132364153862,
+      "decode_1024": 5.623040575301275,
+      "decode_4096": 6.0878614749526605
+     },
+     {
+      "prefill_512": 432.76240676641464,
+      "prefill_4096": 854.7583520412445,
+      "decode_1024": 5.616824797471054,
+      "decode_4096": 6.0795542085543275
+     },
+     {
+      "prefill_512": 432.2083070874214,
+      "prefill_4096": 853.6479324102402,
+      "decode_1024": 5.601260214461945,
+      "decode_4096": 6.090344002586789
+     },
+     {
+      "prefill_512": 432.98809230327606,
+      "prefill_4096": 851.7766669392586,
+      "decode_1024": 5.615020039840601,
+      "decode_4096": 6.058498955098912
+     },
+     {
+      "prefill_512": 432.4011281132698,
+      "prefill_4096": 853.4969128668308,
+      "decode_1024": 5.59775868896395,
+      "decode_4096": 6.054600569768809
+     }
+    ],
+    "telemetry": [
+     {
+      "prefill_512": 433.34727361798286,
+      "prefill_4096": 845.9694162011147,
+      "decode_1024": 5.55975099268835,
+      "decode_4096": 6.010987170157023
+     },
+     {
+      "prefill_512": 432.03844875097275,
+      "prefill_4096": 847.0671512186527,
+      "decode_1024": 5.574047521804459,
+      "decode_4096": 6.023221751092933
+     },
+     {
+      "prefill_512": 432.40223452448845,
+      "prefill_4096": 852.2863984107971,
+      "decode_1024": 5.590676955762319,
+      "decode_4096": 6.053453747881576
+     },
+     {
+      "prefill_512": 432.3776923120022,
+      "prefill_4096": 852.1295376121998,
+      "decode_1024": 5.611071770545095,
+      "decode_4096": 6.054779383703135
+     },
+     {
+      "prefill_512": 432.0717044174671,
+      "prefill_4096": 852.8394997119904,
+      "decode_1024": 5.600890246569179,
+      "decode_4096": 6.0626423510257155
+     },
+     {
+      "prefill_512": 431.576244533062,
+      "prefill_4096": 853.417806327343,
+      "decode_1024": 5.627809674479067,
+      "decode_4096": 6.0657298599835485
+     },
+     {
+      "prefill_512": 432.473823428154,
+      "prefill_4096": 852.6550233364105,
+      "decode_1024": 5.636152025545016,
+      "decode_4096": 6.087428730097599
+     },
+     {
+      "prefill_512": 432.3259964585304,
+      "prefill_4096": 853.141076862812,
+      "decode_1024": 5.598930190899409,
+      "decode_4096": 6.0891938774148
+     }
+    ]
+   }
+  },
+  "qwen3-8b": {
+   "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf",
+   "engine_args": "",
+   "rounds": 8,
+   "steps": 256,
+   "times_ms": {
+    "base": [
+     {
+      "prefill_512": 117.25086718797684,
+      "prefill_4096": 979.2266674339771,
+      "decode_1024": 8.563951356336474,
+      "decode_4096": 9.16405805037357
+     },
+     {
+      "prefill_512": 120.23523822426796,
+      "prefill_4096": 1002.0717196166515,
+      "decode_1024": 8.712133043445647,
+      "decode_4096": 9.303704093326814
+     },
+     {
+      "prefill_512": 120.23955583572388,
+      "prefill_4096": 1003.1407848000526,
+      "decode_1024": 8.720270285266452,
+      "decode_4096": 9.301973332185298
+     },
+     {
+      "prefill_512": 120.68216130137444,
+      "prefill_4096": 1005.1369294524193,
+      "decode_1024": 8.735869894735515,
+      "decode_4096": 9.31374121864792
+     },
+     {
+      "prefill_512": 120.78506499528885,
+      "prefill_4096": 1005.4192543029785,
+      "decode_1024": 8.731751891900785,
+      "decode_4096": 9.31900687282905
+     },
+     {
+      "prefill_512": 120.45371532440186,
+      "prefill_4096": 1005.5209174752235,
+      "decode_1024": 8.730420624488033,
+      "decode_4096": 9.302591352025047
+     },
+     {
+      "prefill_512": 120.37437781691551,
+      "prefill_4096": 1005.6360773742199,
+      "decode_1024": 8.71921879297588,
+      "decode_4096": 9.29766008630395
+     },
+     {
+      "prefill_512": 119.62785944342613,
+      "prefill_4096": 1005.0588995218277,
+      "decode_1024": 8.728167638764717,
+      "decode_4096": 9.320239696535282
+     }
+    ],
+    "prep": [
+     {
+      "prefill_512": 118.06530877947807,
+      "prefill_4096": 986.8518859148026,
+      "decode_1024": 8.580168432672508,
+      "decode_4096": 9.180399909382686
+     },
+     {
+      "prefill_512": 120.32414227724075,
+      "prefill_4096": 1000.9222254157066,
+      "decode_1024": 8.676471930812113,
+      "decode_4096": 9.26794737461023
+     },
+     {
+      "prefill_512": 120.1569065451622,
+      "prefill_4096": 1004.4214986264706,
+      "decode_1024": 8.694797201314941,
+      "decode_4096": 9.28379203833174
+     },
+     {
+      "prefill_512": 120.53199484944344,
+      "prefill_4096": 1005.3525045514107,
+      "decode_1024": 8.70359870896209,
+      "decode_4096": 9.295308715081774
+     },
+     {
+      "prefill_512": 120.00961229205132,
+      "prefill_4096": 1005.7032220065594,
+      "decode_1024": 8.705395870492794,
+      "decode_4096": 9.297986413002945
+     },
+     {
+      "prefill_512": 120.19552290439606,
+      "prefill_4096": 1004.4338591396809,
+      "decode_1024": 8.699391211848706,
+      "decode_4096": 9.282535829697736
+     },
+     {
+      "prefill_512": 120.20786479115486,
+      "prefill_4096": 1004.8259384930134,
+      "decode_1024": 8.6902483162703,
+      "decode_4096": 9.276797572965734
+     },
+     {
+      "prefill_512": 120.33271044492722,
+      "prefill_4096": 1004.9053318798542,
+      "decode_1024": 8.701959930476733,
+      "decode_4096": 9.286861473810859
+     }
+    ],
+    "upload": [
+     {
+      "prefill_512": 118.30051243305206,
+      "prefill_4096": 993.150781840086,
+      "decode_1024": 8.605337527114898,
+      "decode_4096": 9.204981644870713
+     },
+     {
+      "prefill_512": 119.15941908955574,
+      "prefill_4096": 1001.1320561170578,
+      "decode_1024": 8.657024663989432,
+      "decode_4096": 9.252375981304795
+     },
+     {
+      "prefill_512": 120.19779533147812,
+      "prefill_4096": 1004.3954141438007,
+      "decode_1024": 8.687252367963083,
+      "decode_4096": 9.275672608055174
+     },
+     {
+      "prefill_512": 120.32227963209152,
+      "prefill_4096": 1005.6902505457401,
+      "decode_1024": 8.69203987531364,
+      "decode_4096": 9.283543346100487
+     },
+     {
+      "prefill_512": 120.72335556149483,
+      "prefill_4096": 1004.8324353992939,
+      "decode_1024": 8.693439027410932,
+      "decode_4096": 9.285698251915164
+     },
+     {
+      "prefill_512": 120.27375772595406,
+      "prefill_4096": 1004.1536055505276,
+      "decode_1024": 8.689422975294292,
+      "decode_4096": 9.274582131183706
+     },
+     {
+      "prefill_512": 120.25823816657066,
+      "prefill_4096": 1005.0469972193241,
+      "decode_1024": 8.682669242261909,
+      "decode_4096": 9.266824374208227
+     },
+     {
+      "prefill_512": 120.112095028162,
+      "prefill_4096": 1004.3344385921955,
+      "decode_1024": 8.685004824656062,
+      "decode_4096": 9.267359637306072
+     }
+    ],
+    "telemetry": [
+     {
+      "prefill_512": 119.00731921195984,
+      "prefill_4096": 996.3715896010399,
+      "decode_1024": 8.638123821583577,
+      "decode_4096": 9.223594926879741
+     },
+     {
+      "prefill_512": 119.28600817918777,
+      "prefill_4096": 996.7859871685505,
+      "decode_1024": 8.649864525068551,
+      "decode_4096": 9.234431068762206
+     },
+     {
+      "prefill_512": 120.06150558590889,
+      "prefill_4096": 1004.4957622885704,
+      "decode_1024": 8.691107505001128,
+      "decode_4096": 9.27838210191112
+     },
+     {
+      "prefill_512": 120.44307962059975,
+      "prefill_4096": 1005.5277645587921,
+      "decode_1024": 8.691372408065945,
+      "decode_4096": 9.281176811782643
+     },
+     {
+      "prefill_512": 120.33334374427795,
+      "prefill_4096": 1005.0616003572941,
+      "decode_1024": 8.69269875693135,
+      "decode_4096": 9.280635640607215
+     },
+     {
+      "prefill_512": 120.40140852332115,
+      "prefill_4096": 1005.0573386251926,
+      "decode_1024": 8.688152956892736,
+      "decode_4096": 9.272892057197168
+     },
+     {
+      "prefill_512": 120.84924429655075,
+      "prefill_4096": 1004.7477185726166,
+      "decode_1024": 8.68520067888312,
+      "decode_4096": 9.272574534406886
+     },
+     {
+      "prefill_512": 120.24268135428429,
+      "prefill_4096": 1004.9986056983471,
+      "decode_1024": 8.68457644537557,
+      "decode_4096": 9.278744997573085
+     }
+    ]
+   }
+  }
+ },
+ "changes": {
+  "prep": {
+   "what": "without a drafter the host stages positions, page lengths, write indices and the store's slots and lengths; the device moves only its last tokens and writes the SeqTable; no logits gather when every token is a logits row",
+   "class": "bitwise",
+   "rows": {
+    "qwen3-30b-a3b/resident/prefill_512": {
+     "ms": 0.015,
+     "pct": 0.012,
+     "sd_pct": 0.433,
+     "median_ms": {
+      "before": 138.2704,
+      "after": 138.425
+     }
+    },
+    "qwen3-30b-a3b/resident/prefill_4096": {
+     "ms": -0.6187,
+     "pct": -0.056,
+     "sd_pct": 0.153,
+     "median_ms": {
+      "before": 1126.9583,
+      "after": 1127.3502
+     }
+    },
+    "qwen3-30b-a3b/resident/decode_1024": {
+     "ms": 0.0221,
+     "pct": 0.423,
+     "sd_pct": 0.135,
+     "median_ms": {
+      "before": 5.2406,
+      "after": 5.2168
+     }
+    },
+    "qwen3-30b-a3b/resident/decode_4096": {
+     "ms": 0.0196,
+     "pct": 0.344,
+     "sd_pct": 0.126,
+     "median_ms": {
+      "before": 5.705,
+      "after": 5.6824
+     }
+    },
+    "qwen3-30b-a3b/offload-0.47/prefill_512": {
+     "ms": -0.1568,
+     "pct": -0.037,
+     "sd_pct": 0.209,
+     "median_ms": {
+      "before": 432.3352,
+      "after": 432.2432
+     }
+    },
+    "qwen3-30b-a3b/offload-0.47/prefill_4096": {
+     "ms": 0.1456,
+     "pct": 0.017,
+     "sd_pct": 0.161,
+     "median_ms": {
+      "before": 852.2439,
+      "after": 851.9459
+     }
+    },
+    "qwen3-30b-a3b/offload-0.47/decode_1024": {
+     "ms": 0.0285,
+     "pct": 0.503,
+     "sd_pct": 0.534,
+     "median_ms": {
+      "before": 5.6488,
+      "after": 5.6088
+     }
+    },
+    "qwen3-30b-a3b/offload-0.47/decode_4096": {
+     "ms": 0.0188,
+     "pct": 0.308,
+     "sd_pct": 0.28,
+     "median_ms": {
+      "before": 6.0994,
+      "after": 6.0745
+     }
+    },
+    "qwen3-8b/prefill_512": {
+     "ms": -0.0219,
+     "pct": -0.021,
+     "sd_pct": 0.436,
+     "median_ms": {
+      "before": 120.307,
+      "after": 120.2017
+     }
+    },
+    "qwen3-8b/prefill_4096": {
+     "ms": -0.7757,
+     "pct": -0.08,
+     "sd_pct": 0.294,
+     "median_ms": {
+      "before": 1005.0979,
+      "after": 1004.6299
+     }
+    },
+    "qwen3-8b/decode_1024": {
+     "ms": 0.0237,
+     "pct": 0.271,
+     "sd_pct": 0.19,
+     "median_ms": {
+      "before": 8.7242,
+      "after": 8.6971
+     }
+    },
+    "qwen3-8b/decode_4096": {
+     "ms": 0.0189,
+     "pct": 0.203,
+     "sd_pct": 0.171,
+     "median_ms": {
+      "before": 9.3031,
+      "after": 9.2832
+     }
+    }
+   },
+   "verdict": {
+    "passes_on": [],
+    "pays": false
+   }
+  },
+  "upload": {
+   "what": "steps of at most a decode / verify step's tokens stage into an arena of that size, fields smallest first: one host-to-device copy",
+   "class": "bitwise",
+   "rows": {
+    "qwen3-30b-a3b/resident/prefill_512": {
+     "ms": 0.1197,
+     "pct": 0.083,
+     "sd_pct": 0.5,
+     "median_ms": {
+      "before": 138.425,
+      "after": 138.1287
+     }
+    },
+    "qwen3-30b-a3b/resident/prefill_4096": {
+     "ms": -0.114,
+     "pct": -0.011,
+     "sd_pct": 0.278,
+     "median_ms": {
+      "before": 1127.3502,
+      "after": 1127.097
+     }
+    },
+    "qwen3-30b-a3b/resident/decode_1024": {
+     "ms": 0.0031,
+     "pct": 0.059,
+     "sd_pct": 0.197,
+     "median_ms": {
+      "before": 5.2168,
+      "after": 5.2086
+     }
+    },
+    "qwen3-30b-a3b/resident/decode_4096": {
+     "ms": 0.002,
+     "pct": 0.034,
+     "sd_pct": 0.229,
+     "median_ms": {
+      "before": 5.6824,
+      "after": 5.6753
+     }
+    },
+    "qwen3-30b-a3b/offload-0.47/prefill_512": {
+     "ms": -0.1655,
+     "pct": -0.038,
+     "sd_pct": 0.126,
+     "median_ms": {
+      "before": 432.2432,
+      "after": 432.4085
+     }
+    },
+    "qwen3-30b-a3b/offload-0.47/prefill_4096": {
+     "ms": -0.8732,
+     "pct": -0.103,
+     "sd_pct": 0.236,
+     "median_ms": {
+      "before": 851.9459,
+      "after": 852.4713
+     }
+    },
+    "qwen3-30b-a3b/offload-0.47/decode_1024": {
+     "ms": 0.0077,
+     "pct": 0.137,
+     "sd_pct": 0.36,
+     "median_ms": {
+      "before": 5.6088,
+      "after": 5.6003
+     }
+    },
+    "qwen3-30b-a3b/offload-0.47/decode_4096": {
+     "ms": 0.0074,
+     "pct": 0.121,
+     "sd_pct": 0.391,
+     "median_ms": {
+      "before": 6.0745,
+      "after": 6.069
+     }
+    },
+    "qwen3-8b/prefill_512": {
+     "ms": 0.0596,
+     "pct": 0.049,
+     "sd_pct": 0.444,
+     "median_ms": {
+      "before": 120.2017,
+      "after": 120.228
+     }
+    },
+    "qwen3-8b/prefill_4096": {
+     "ms": -0.6649,
+     "pct": -0.068,
+     "sd_pct": 0.234,
+     "median_ms": {
+      "before": 1004.6299,
+      "after": 1004.3649
+     }
+    },
+    "qwen3-8b/decode_1024": {
+     "ms": 0.0075,
+     "pct": 0.086,
+     "sd_pct": 0.161,
+     "median_ms": {
+      "before": 8.6971,
+      "after": 8.6861
+     }
+    },
+    "qwen3-8b/decode_4096": {
+     "ms": 0.0076,
+     "pct": 0.081,
+     "sd_pct": 0.147,
+     "median_ms": {
+      "before": 9.2832,
+      "after": 9.271
+     }
+    }
+   },
+   "verdict": {
+    "passes_on": [],
+    "pays": false
+   }
+  },
+  "telemetry": {
+   "what": "the shared objects' telemetry gathered as bytes on the device and copied to the host once",
+   "class": "bitwise",
+   "rows": {
+    "qwen3-30b-a3b/resident/prefill_512": {
+     "ms": -0.0487,
+     "pct": -0.036,
+     "sd_pct": 0.156,
+     "median_ms": {
+      "before": 138.1287,
+      "after": 138.3118
+     }
+    },
+    "qwen3-30b-a3b/resident/prefill_4096": {
+     "ms": -0.1772,
+     "pct": -0.016,
+     "sd_pct": 0.188,
+     "median_ms": {
+      "before": 1127.097,
+      "after": 1127.0183
+     }
+    },
+    "qwen3-30b-a3b/resident/decode_1024": {
+     "ms": -0.0004,
+     "pct": -0.007,
+     "sd_pct": 0.188,
+     "median_ms": {
+      "before": 5.2086,
+      "after": 5.2061
+     }
+    },
+    "qwen3-30b-a3b/resident/decode_4096": {
+     "ms": 0.0083,
+     "pct": 0.145,
+     "sd_pct": 0.176,
+     "median_ms": {
+      "before": 5.6753,
+      "after": 5.6702
+     }
+    },
+    "qwen3-30b-a3b/offload-0.47/prefill_512": {
+     "ms": 0.2012,
+     "pct": 0.046,
+     "sd_pct": 0.182,
+     "median_ms": {
+      "before": 432.4085,
+      "after": 432.3518
+     }
+    },
+    "qwen3-30b-a3b/offload-0.47/prefill_4096": {
+     "ms": 0.0313,
+     "pct": 0.003,
+     "sd_pct": 0.139,
+     "median_ms": {
+      "before": 852.4713,
+      "after": 852.4707
+     }
+    },
+    "qwen3-30b-a3b/offload-0.47/decode_1024": {
+     "ms": 0.0023,
+     "pct": 0.041,
+     "sd_pct": 0.306,
+     "median_ms": {
+      "before": 5.6003,
+      "after": 5.5999
+     }
+    },
+    "qwen3-30b-a3b/offload-0.47/decode_4096": {
+     "ms": 0.0101,
+     "pct": 0.165,
+     "sd_pct": 0.482,
+     "median_ms": {
+      "before": 6.069,
+      "after": 6.0587
+     }
+    },
+    "qwen3-8b/prefill_512": {
+     "ms": -0.1596,
+     "pct": -0.134,
+     "sd_pct": 0.297,
+     "median_ms": {
+      "before": 120.228,
+      "after": 120.288
+     }
+    },
+    "qwen3-8b/prefill_4096": {
+     "ms": -0.0388,
+     "pct": -0.004,
+     "sd_pct": 0.21,
+     "median_ms": {
+      "before": 1004.3649,
+      "after": 1004.8732
+     }
+    },
+    "qwen3-8b/decode_1024": {
+     "ms": -0.0036,
+     "pct": -0.042,
+     "sd_pct": 0.142,
+     "median_ms": {
+      "before": 8.6861,
+      "after": 8.6867
+     }
+    },
+    "qwen3-8b/decode_4096": {
+     "ms": -0.0014,
+     "pct": -0.016,
+     "sd_pct": 0.12,
+     "median_ms": {
+      "before": 9.271,
+      "after": 9.2756
+     }
+    }
+   },
+   "verdict": {
+    "passes_on": [],
+    "pays": false
+   }
+  }
+ },
+ "end_to_end": {
+  "qwen3-30b-a3b/resident": {
+   "tg128 @ d1024": {
+    "tok_s": {
+     "base": [
+      191.32,
+      190.09,
+      189.96,
+      189.75
+     ],
+     "final": [
+      192.01,
+      191.14,
+      189.87,
+      190.19
+     ]
+    },
+    "median_tok_s": {
+     "base": 190.025,
+     "final": 190.665
+    },
+    "median_ms_per_token": {
+     "base": 5.2625,
+     "final": 5.2448
+    },
+    "speedup": 1.0034,
+    "ms_per_token_saved": 0.0143,
+    "sd_ms": 0.0132
+   },
+   "tg128 @ d4096": {
+    "tok_s": {
+     "base": [
+      177.58,
+      176.4,
+      176.32,
+      175.96
+     ],
+     "final": [
+      178.21,
+      177.57,
+      177.18,
+      176.67
+     ]
+    },
+    "median_tok_s": {
+     "base": 176.36,
+     "final": 177.375
+    },
+    "median_ms_per_token": {
+     "base": 5.6702,
+     "final": 5.6378
+    },
+    "speedup": 1.0058,
+    "ms_per_token_saved": 0.0269,
+    "sd_ms": 0.0076
+   }
+  },
+  "qwen3-30b-a3b/offload-0.47": {
+   "tg128 @ d1024": {
+    "tok_s": {
+     "base": [
+      132.76,
+      132.24,
+      136.25,
+      133.79
+     ],
+     "final": [
+      133.69,
+      137.43,
+      135.32,
+      138.17
+     ]
+    },
+    "median_tok_s": {
+     "base": 133.27499999999998,
+     "final": 136.375
+    },
+    "median_ms_per_token": {
+     "base": 7.5033,
+     "final": 7.3327
+    },
+    "speedup": 1.0233,
+    "ms_per_token_saved": 0.1311,
+    "sd_ms": 0.1573
+   },
+   "tg128 @ d4096": {
+    "tok_s": {
+     "base": [
+      144.06,
+      143.72,
+      152.69,
+      146.69
+     ],
+     "final": [
+      142.94,
+      147.5,
+      147.44,
+      151.26
+     ]
+    },
+    "median_tok_s": {
+     "base": 145.375,
+     "final": 147.47
+    },
+    "median_ms_per_token": {
+     "base": 6.8788,
+     "final": 6.781
+    },
+    "speedup": 1.0144,
+    "ms_per_token_saved": 0.0242,
+    "sd_ms": 0.2075
+   }
+  },
+  "qwen3-8b": {
+   "tg128 @ d1024": {
+    "tok_s": {
+     "base": [
+      117.4,
+      115.85,
+      115.77,
+      115.95
+     ],
+     "final": [
+      117.05,
+      116.49,
+      116.52,
+      116.49
+     ]
+    },
+    "median_tok_s": {
+     "base": 115.9,
+     "final": 116.505
+    },
+    "median_ms_per_token": {
+     "base": 8.6281,
+     "final": 8.5833
+    },
+    "speedup": 1.0052,
+    "ms_per_token_saved": 0.0294,
+    "sd_ms": 0.0371
+   },
+   "tg128 @ d4096": {
+    "tok_s": {
+     "base": [
+      109.65,
+      108.37,
+      108.51,
+      107.97
+     ],
+     "final": [
+      109.23,
+      108.43,
+      108.5,
+      108.6
+     ]
+    },
+    "median_tok_s": {
+     "base": 108.44,
+     "final": 108.55
+    },
+    "median_ms_per_token": {
+     "base": 9.2217,
+     "final": 9.2123
+    },
+    "speedup": 1.001,
+    "ms_per_token_saved": 0.0057,
+    "sd_ms": 0.0366
+   }
+  }
+ },
+ "judge": {
+  "snapshots": {
+   "trace": "spikes/x2_store/exact.py (the judge's snapshot trace over judge/prompts/v1.jsonl), RTX A5000",
+   "5452833 vs bdd8422, Qwen3-30B-A3B resident": "identical",
+   "5452833 vs bdd8422, Qwen3-30B-A3B moe.cache=*=0.47": "identical",
+   "5452833 vs bdd8422, Qwen3-8B": "identical",
+   "offload *=0.47 vs resident at 5452833": "identical",
+   "the dropped telemetry commit (on top of 5452833) vs bdd8422, all three": "identical"
+  },
+  "tests": "plugins/tests/test_engine.py::test_host_staged_inputs_equal_the_device_derived (roomy, preempting): every step's inputs and the SeqTable equal between the host-staged and the device-derived paths; a write index off by one fails it"
+ },
+ "notes": [
+  "The A5000 rows drift about 2% over a run as the card warms (sd 0.13-0.5% per round): none of the changes resolves against max(0.5%, 3 sd) here; the verdicts come from the RTX 5090 record.",
+  "Inventory durations are profiled (nsys --cuda-graph-trace=node); the A/B saves about 1 us per kernel removed."
+ ],
+ "commits": {
+  "prep": "b60328f",
+  "upload": "5452833",
+  "telemetry": "dropped (measured as a commit on top of 5452833)",
+  "std nits": "cdd4785"
+ }
+}

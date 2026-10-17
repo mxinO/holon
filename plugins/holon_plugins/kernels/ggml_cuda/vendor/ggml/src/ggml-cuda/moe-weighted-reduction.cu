@@ -1,9 +1,16 @@
 #include "moe-weighted-reduction.cuh"
 
+// Holon: a + b in f32 without flushing subnormals (fast math would), as torch's bf16 residual add computes it
+static __device__ __forceinline__ float holon_add_rn(float a, const float b) {
+    asm("add.rn.f32 %0, %0, %1;" : "+f"(a) : "f"(b));
+    return a;
+}
+
 static __global__ void moe_weighted_reduction_f32(const float * __restrict__ experts,
                                                   const float * __restrict__ expert_scale,
                                                   const float * __restrict__ weights,
                                                   nv_bfloat16 * __restrict__ dst, // Holon: bf16 out
+                                                  const nv_bfloat16 * __restrict__ residual, // Holon: or NULL
                                                   const int64_t n_embd,
                                                   const int     n_expert_used) {
     const int64_t token = blockIdx.x;
@@ -21,13 +28,17 @@ static __global__ void moe_weighted_reduction_f32(const float * __restrict__ exp
         const float   scale = expert_scale != nullptr ? expert_scale[row] : 1.0f;
         sum += (experts[row * n_embd + col] * scale) * weights[row];
     }
-    dst[token * n_embd + col] = __float2bfloat16(sum);
+    // Holon: plus the residual stream, as `residual + bf16(sum)`: the sum rounded first, then the add
+    dst[token * n_embd + col] = residual == nullptr ? __float2bfloat16(sum) :
+        __float2bfloat16(holon_add_rn(__bfloat162float(residual[token * n_embd + col]),
+                                      __bfloat162float(__float2bfloat16(sum))));
 }
 
 static void launch_moe_weighted_reduction(const float * experts,
                                           const float * expert_scale,
                                           const float * weights,
                                           nv_bfloat16 * dst,
+                                          const nv_bfloat16 * residual,
                                           int64_t       n_embd,
                                           int64_t       n_tokens,
                                           int           n_expert_used,
@@ -35,14 +46,15 @@ static void launch_moe_weighted_reduction(const float * experts,
     constexpr int threads = 256;
     const dim3 blocks(n_tokens, (n_embd + threads - 1) / threads, 1);
     moe_weighted_reduction_f32
-        <<<blocks, threads, 0, stream>>>(experts, expert_scale, weights, dst, n_embd, n_expert_used);
+        <<<blocks, threads, 0, stream>>>(experts, expert_scale, weights, dst, residual, n_embd, n_expert_used);
 }
 
 void ggml_cuda_op_moe_weighted_reduction(ggml_backend_cuda_context & ctx,
                                          const ggml_tensor *         experts,
                                          const ggml_tensor *         expert_scale,
                                          const ggml_tensor *         weights,
-                                         ggml_tensor *               dst) {
+                                         ggml_tensor *               dst,
+                                         const ggml_tensor *         residual) {
     GGML_ASSERT(experts->type == GGML_TYPE_F32);
     GGML_ASSERT(weights->type == GGML_TYPE_F32);
     GGML_ASSERT(expert_scale == nullptr || expert_scale->type == GGML_TYPE_F32);
@@ -51,6 +63,8 @@ void ggml_cuda_op_moe_weighted_reduction(ggml_backend_cuda_context & ctx,
     GGML_ASSERT(ggml_is_contiguous(weights));
     GGML_ASSERT(expert_scale == nullptr || ggml_is_contiguous(expert_scale));
     GGML_ASSERT(ggml_is_contiguous(dst));
+    GGML_ASSERT(residual == nullptr || (residual->type == GGML_TYPE_BF16 && ggml_is_contiguous(residual) &&
+                                        ggml_are_same_shape(residual, dst))); // Holon: dst = residual + the sum
 
     const int64_t n_embd        = experts->ne[0];
     const int64_t n_expert_used = experts->ne[1];
@@ -60,6 +74,8 @@ void ggml_cuda_op_moe_weighted_reduction(ggml_backend_cuda_context & ctx,
     launch_moe_weighted_reduction((const float *) experts->data,
                                   expert_scale ? (const float *) expert_scale->data : nullptr,
                                   (const float *) weights->data,
-                                  (nv_bfloat16 *) dst->data, n_embd, n_tokens, (int) n_expert_used, stream);
+                                  (nv_bfloat16 *) dst->data,
+                                  residual ? (const nv_bfloat16 *) residual->data : nullptr,
+                                  n_embd, n_tokens, (int) n_expert_used, stream);
     CUDA_CHECK(cudaGetLastError());
 }

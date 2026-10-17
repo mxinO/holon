@@ -1151,11 +1151,13 @@ verification (v2).
   and locks record the choice in `[engine]`. `Engine.stats()` counts real drafts and verify rows by drafts accepted.
   Every running row of a speculating step is a verify row of the step's width 1 + k (rows with fewer real drafts pad
   with token 0); block tables carry overflow columns at the null unit for positions past `max_model_len`.
-- **The SeqTable seam (implemented, M0 acceptance §3.4-5).** Every step's positions, lengths and page write indices
-  are derived on the device from the SeqTable's `num_computed` (`Executor._prepare`, inside the graph for decode); the
-  host writes the starts it knows exactly (prefill chunks, padding rows, requests without an uncommitted verify
-  row) through a per-row mask, so a verify row's outcome never has to reach the host before the next step is
-  planned. Verify rows read their drafts from `SeqTable.draft_tokens`; the verifier returns the tokens and
+- **The SeqTable seam (implemented, M0 acceptance §3.4-5).** With a drafter, every step's positions, lengths and
+  page write indices are derived on the device from the SeqTable's `num_computed` (`Executor._prepare`, inside the
+  graph for decode); the host writes the starts it knows exactly (prefill chunks, padding rows, requests without an
+  uncommitted verify row) through a per-row mask, so a verify row's outcome never has to reach the host before the
+  next step is planned. Without one every start is the host's, so they are staged from the host with the step's
+  other inputs and the device moves only what it alone holds: the last tokens into the inputs and the SeqTable
+  writes (v1 step 3d). Verify rows read their drafts from `SeqTable.draft_tokens`; the verifier returns the tokens and
   `n_accept`; the sample stage writes `last_token`, `num_computed = start + 1 + n_accept` and `n_accept`; rewind and
   the drafter follow. Commit appends the accepted tokens (stopping at a stop token or length) and makes the host
   length exact again. Requests with an uncommitted verify row skip steps whose decode kernel plans from host lengths

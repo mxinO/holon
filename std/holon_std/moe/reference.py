@@ -19,6 +19,11 @@ def moe_topk(logits: torch.Tensor, top_k: int, renormalize: bool) -> tuple[torch
     return weights.contiguous(), ids.int().contiguous()
 
 
+def moe_router(x: torch.Tensor, router: torch.Tensor, top_k: int, renormalize: bool) -> tuple[torch.Tensor, ...]:
+    """The `moe_router@1` oracle: `moe_topk` of the f32 logits `x · routerᵀ`."""
+    return moe_topk(torch.nn.functional.linear(x.float(), router.float()), top_k, renormalize)
+
+
 def expert_parts(parts: dict[str, torch.Tensor], experts: int, merged: bool) -> list[list[dict[str, torch.Tensor]]]:
     """A `linear_experts@2` stack's parts per expert, then per unit it was merged from (gate's, then up's when
     `merged`; else one): a part of rank ≥ 3 is per row, [E, rows, …], each unit taking its share of the expert's rows;
@@ -53,12 +58,14 @@ def linear_experts(x: torch.Tensor, weight: torch.Tensor, ids: torch.Tensor, glu
     return y
 
 
-def moe_combine(y: torch.Tensor, weights: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-    """The `moe_combine@1` oracle: `Σ_j w[t, j] · y[t, j]` in f32, slot by slot, cast to `dtype`."""
+def moe_combine(y: torch.Tensor, weights: torch.Tensor, dtype: torch.dtype,
+                residual: torch.Tensor | None = None) -> torch.Tensor:
+    """The `moe_combine@1` oracle: `Σ_j w[t, j] · y[t, j]` in f32, slot by slot, cast to `dtype`; plus `residual`
+    (its `add`) after that cast."""
     acc = torch.zeros(y.shape[0], y.shape[2], dtype=torch.float32, device=y.device)
     for j in range(y.shape[1]):
         acc += weights[:, j, None].float() * y[:, j].float()
-    return acc.to(dtype)
+    return acc.to(dtype) if residual is None else residual + acc.to(dtype)
 
 
 def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, host: torch.Tensor,

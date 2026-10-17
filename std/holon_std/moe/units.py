@@ -136,7 +136,13 @@ class ExpertLinear(nn.Module):
                 "glu": self.glu, "act_dtype": _dtype(self.act_dtype), "out_dtype": "float32",
                 "act_quant": "a16" if self.layout is None else _act_quant(ctx)}
 
-    def forward(self, x: torch.Tensor, ids: torch.Tensor) -> torch.Tensor:
+    @property
+    def kernel(self):
+        """Its bound `linear_experts@2` instance."""
+        return self._kernel
+
+    def forward(self, x, ids: torch.Tensor) -> torch.Tensor:
+        """`x` [T, R, in], or a handle a `moe_router@1` instance prepared for this kernel (std.moe.kernels)."""
         return self._kernel(x, self.parts, ids)
 
 
@@ -195,8 +201,9 @@ def _store(ctx, **site):
 
 
 class MoE(nn.Module):
-    """Mixture of experts: softmax top-k routing over an f32 router, gate/up/down expert stacks with SwiGLU, the
-    weighted combine. The expert path runs in f32 (design D3), CHUNK tokens at a time."""
+    """Mixture of experts: softmax top-k routing over an f32 router (`moe_router@1`, or the f32 linear and
+    `moe_topk@1`), gate/up/down expert stacks with SwiGLU, the weighted combine. The expert path runs in f32 (design
+    D3), CHUNK tokens at a time."""
 
     def __init__(self, ctx, *, hidden: int, experts: int, top_k: int, inter: int, renormalize: bool,
                  layer: int = 0) -> None:
@@ -218,8 +225,14 @@ class MoE(nn.Module):
         self._down: ExpertLinear | None = None
         dtype = _dtype(ctx.dtype)
         topk = {"experts": experts, "top_k": top_k, "renormalize": renormalize}
-        self._topk = ctx.select_kernel(kernels.MOE_TOPK, site=f"std.moe[experts={experts},top_k={top_k}]",
-                                       **topk).impl(ctx, **topk)
+        site = f"std.moe[experts={experts},top_k={top_k}]"
+        # the router and top-k in one kernel where a provider serves them (bounded: its own f32 order), else the f32
+        # linear and `moe_topk@1`
+        router = topk | {"hidden": hidden, "dtype": dtype}
+        self._router = (ctx.select_kernel(kernels.MOE_ROUTER, site=site, **router).impl(ctx, **router)
+                        if ctx.candidates(kernels.MOE_ROUTER, router) else None)
+        self._topk = None if self._router else ctx.select_kernel(kernels.MOE_TOPK, site=site, **topk).impl(ctx, **topk)
+        self._prepare = getattr(self._router, "route_prepare", None)
         combine = {"hidden": hidden, "top_k": top_k, "dtype": dtype, "y_dtype": "float32"}
         self._combine = ctx.select_kernel(kernels.MOE_COMBINE, site=f"std.moe[hidden={hidden},top_k={top_k}]",
                                           **combine).impl(ctx, **combine)
@@ -231,21 +244,47 @@ class MoE(nn.Module):
                              f"(gate {self.gate.layout_fact()}, up {self.up.layout_fact()})")
         self._down = self._store.stack(self.down)
 
+    def _route(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """(weights, ids, the gate/up input) for up to CHUNK tokens: the router's route_prepare where it has one, else
+        its routing (or the f32 linear and top-k) and `x[:, None]`."""
+        if self._prepare is not None:
+            return self._prepare(x, self.router, self._gate_up.kernel)
+        weights, ids = (self._router(x, self.router) if self._router is not None
+                        else self._topk(nn.functional.linear(x.float(), self.router)))
+        return weights, ids, x[:, None]
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self._forward(x, None)
+
+    def add_residual(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
+        """`residual + self(x)`, the add in the combine's kernel where it has one (`moe_combine@1`'s `add`): bitwise
+        the composition (the ffn unit interface's optional member, std.blocks.prenorm)."""
+        if not hasattr(self._combine, "add"):
+            return residual + self._forward(x, None)
+        return self._forward(x, residual)
+
+    def _forward(self, x: torch.Tensor, residual: torch.Tensor | None) -> torch.Tensor:
         """The router and top-k per CHUNK tokens; the expert path per pass of the store's size (a CHUNK, or whole
         CHUNKs in a streaming offload step: the step's last partial chunk is a pass of its own, so every row's chunk
-        and kernel path are a chunk's)."""
+        and kernel path are a chunk's); with `residual`, its add in the combine."""
         out, tokens = torch.empty_like(x), x.shape[0]
         size, full = self._store.pass_tokens(tokens), tokens // CHUNK * CHUNK
         passes = [(a, min(a + size, full)) for a in range(0, full, size)] + [(full, tokens)] * (full < tokens)
         for a, b in passes:
             xc = x[a:b]
-            routes = [self._topk(nn.functional.linear(xc[c:c + CHUNK].float(), self.router))
-                      for c in range(0, b - a, CHUNK)]
-            weights, ids = routes[0] if len(routes) == 1 else (torch.cat(t) for t in zip(*routes, strict=True))
+            routes = [self._route(xc[c:c + CHUNK]) for c in range(0, b - a, CHUNK)]
+            if len(routes) == 1:                       # the gate/up input: maybe prepared by the router's launch
+                weights, ids, xin = routes[0]
+            else:
+                weights, ids = (torch.cat(t) for t in zip(*(r[:2] for r in routes), strict=True))
+                xin = xc[:, None]
             ids, weights = self._store.transform(ids, weights, a)
             gate_up, down = self._store.route(ids, a, xc)
-            h = self._gate_up(xc[:, None], gate_up)                   # [t, k, inter] f32, SwiGLU applied
-            self._combine(self._store.patch(self._down(h, down)), weights, out[a:b])
+            h = self._gate_up(xin, gate_up)                           # [t, k, inter] f32, SwiGLU applied
+            y = self._store.patch(self._down(h, down))                # (F5b: the CPU's rows in place)
+            if residual is None:
+                self._combine(y, weights, out[a:b])
+            else:
+                self._combine.add(y, weights, residual[a:b], out[a:b])
         self._store.finish()
         return out

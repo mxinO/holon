@@ -326,7 +326,10 @@ def _moe(layer: int | None = None, init: Callable[[dict], dict] | None = None,
         here = layer is None or kw.get("layer") == layer
         construct(self, ctx, **(init(kw) if init and here else kw))
         if here and topk:
-            self._topk = functools.partial(lambda f, logits: topk(*f(logits), kw["experts"]), self._topk)
+            def route(f, x):                    # (weights, ids, the gate/up input): the routing planted
+                weights, ids, xin = f(x)
+                return *topk(weights, ids, kw["experts"]), xin
+            self._route = functools.partial(route, self._route)
         if here and combine:
             self._combine = functools.partial(lambda f, y, w, out: f(*combine(y, w), out), self._combine)
     with mock.patch.object(units.MoE, "__init__", planted_init), \
@@ -362,18 +365,19 @@ def ggml_experts_wrong_type() -> Iterator[None]:
 @contextlib.contextmanager
 def ggml_experts_stale_q8_1(every: int = 97) -> Iterator[None]:
     """Every `every`-th expert call reads the activations of the previous call with the same `in` and rows per token
-    (what a stale q8_1 input would hold; it models a stale per-token input, not a stale compacted buffer). Reports
-    how often it fired on each path."""
+    (what a stale q8_1 input would hold; it models a stale per-token input, not a stale compacted buffer); a call
+    given a router-prepared input is handed the stale rows instead of it. Reports how often it fired on each path."""
     from holon_plugins.kernels.ggml_cuda import plugin
 
     call, last, calls, fired = plugin.LinearExperts.__call__, {}, itertools.count(1), collections.Counter()
 
     def planted(self, x, parts, ids):
-        key = (self.k, x.shape[1])
-        prev, last[key] = last.get(key), x.clone()
-        if next(calls) % every == 0 and prev is not None and len(prev) >= len(x):
-            fired["mmvq" if len(x) <= self.mmvq_tokens else "mmq"] += 1
-            x = prev[:len(x)]
+        rows = x.x if isinstance(x, plugin.Prepared) else x           # a router-prepared input (step 3c)
+        key = (self.k, rows.shape[1])
+        prev, last[key] = last.get(key), rows.clone()
+        if next(calls) % every == 0 and prev is not None and len(prev) >= len(rows):
+            fired[("mmvq" if len(rows) <= self.mmvq_tokens else "mmq") + ("" if x is rows else ", prepared")] += 1
+            x = prev[:len(rows)]
         return call(self, x, parts, ids)
     with mock.patch.object(plugin.LinearExperts, "__call__", planted):
         yield
