@@ -204,8 +204,8 @@ one mmq chunk and one mmvq chunk.
   eager warm-up run each graph key gets before capture. Padding rows get unique in-range ids from `moe_topk`, which
   both kernels require: an invalid id reads out of bounds on mmvq; a duplicate *inside a row* shifts mmq's
   `expert_bounds` (`nex_prev` counts slots, the compaction counts each token once per expert), leaving a stale
-  compacted row whose leftover workspace entries can write over another token's output. Rows sharing experts with
-  other rows are ordinary routing.
+  compacted row whose leftover workspace entries can write over another token's output (no longer since 2026-10-17:
+  §4.6's retired plant). Rows sharing experts with other rows are ordinary routing.
 - Padding cost: a padding row routes to 8 more experts (≈ 16 MB of expert reads per layer at IQ3). Batch-1 decode
   (tg128) is never padded; serving batches 3, 5–7 pay it. Measured in step 5; the remedy, finer graph buckets for MoE
   models, is a core change and waits for that measurement.
@@ -301,6 +301,11 @@ kernels (with the wait rule of §4.3), finer graph buckets for MoE (core).
     padded bucket — fail where it is mmq (batches 12 and 20 everywhere; batch 5, bucket 8, for UD-IQ3_XXS on sm_86),
     pass where it is mmvq (batch 3 everywhere); a pass on mmq is recorded with its cause (the stale entries are not
     controlled there).
+  - *Retired 2026-10-17 (docs/v1-offload.md D4, the X vendor patches):* the patched expert-id helper keeps one compact
+    entry per (token, slot) pair, so a duplicate id inside a row no longer leaves stale entries that overwrite a real
+    row: the plant's graphs-vs-eager run passes on mmq (Q4_K_M, batch 12, RTX A5000: graphs on top-1 98.31% vs 98.42%
+    eager; 86.20% before). Both plants (L0 and `moe-padding-duplicate-ids`) are removed. Ids must still be unique
+    within a row (an expert's pairs past its T columns are not computed), so per-rank null slots stay required.
 - **The bf16 HF path** (acceptance 7), on an RTX PRO 6000 node: golden = the bf16 checkpoint in fp32 on the CPU (the
   one the quantization-error report records); floor = HF bf16 with the D3-mirroring MoE block, no q8_1; candidate =
   the engine in bf16 (stacked loading, `triton_experts`). The floor's dense MoE block rounds the down input to bf16
