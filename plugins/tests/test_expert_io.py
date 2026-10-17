@@ -162,25 +162,48 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, tokens, k
     assert (staged[staged < K + E] >= K).all() and len(admitted) == len(records)
 
 
-def test_lfu_decays_then_counts_in_f32():
-    """D4's order on one expert: × 0.915, then + 1.0 per decode entry (rounded each time in f32); a prefill row's
-    entry neither decays nor counts; equal scores pair by expert id; a candidate only strictly hotter is admitted."""
-    from holon_plugins.placement.lfu import reference as lfu
-
+def _lfu_call(plugins, device: str, ids, kinds, resident: dict[int, int], score: dict[int, float]) -> dict:
+    """One `moe_resolve.lfu@1` call at top-2 through the device's provider: the experts `resident` maps to their first
+    slot (both roles), the rest missing; the map, scores and delta records after it."""
+    provider = "placement.lfu" if device == "cpu" else "kernels.expert_io"
+    resolve = kernel(plugins, device, "moe_resolve.lfu@1", provider, experts=E, top_k=2, roles=ROLES, staging=1)
     residency = torch.full((E, ROLES), -1, dtype=torch.int32)
-    residency[[4, 5, 6]] = torch.tensor([[K + 1, K + 2], [K + 3, K + 4], [K + 5, K + 6]], dtype=torch.int32)
-    limits, host = torch.full((ROLES,), K + 9, dtype=torch.int32), torch.zeros(E, ROLES, dtype=torch.int32)
-    score = torch.zeros(E)
-    score[[1, 2, 4, 5, 6]] = torch.tensor([1.0, 0.0, 0.5, 1.915, 0.5])
-    ids = torch.tensor([[1, 2], [1, 3], [7, 2]], dtype=torch.int32)
-    kinds = torch.tensor([DECODE, DECODE, PREFILL], dtype=torch.uint8)
-    out = lfu.moe_resolve_lfu(ids, kinds, residency, host, limits, 1, score, 0)
+    for e, slot in resident.items():
+        residency[e] = torch.tensor([slot, slot + 1])
+    scores = torch.zeros(E)
+    for e, v in score.items():
+        scores[e] = v
+    dev = {n: t.to(device) for n, t in {"ids": torch.tensor(ids, dtype=torch.int32), "residency": residency,
+                                        "kinds": torch.tensor(kinds, dtype=torch.uint8), "score": scores}.items()}
+    words = [torch.zeros(1, dtype=torch.int32, device=device) for _ in range(3)]
+    zeros = {n: torch.zeros(E, *shape, dtype=torch.int32, device=device) for n, shape in
+             (("host", (ROLES,)), ("counts", ()), ("routed", ()), ("delta", (3,)))}
+    resolve(dev["ids"], dev["kinds"], dev["residency"], zeros["host"], torch.full((ROLES,), 40, dtype=torch.int32,
+            device=device), zeros["counts"], zeros["routed"], words[0], words[1], zeros["delta"], words[2], 0,
+            score=dev["score"])
+    delta = zeros["delta"]
+    return {"residency": dev["residency"].cpu(), "score": dev["score"].cpu().numpy(),
+            "records": [tuple(r) for r in delta[:int(words[2][0])].cpu().tolist()]}
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_lfu_decays_then_counts_in_f32(plugins, device):
+    """D4's order, through both providers: × 0.915, then + 1.0 per decode entry, each rounded in f32 (an expert at 1.5
+    with 7 decode entries ends at 8.372499, where one add of 7 would give 8.3725); a prefill row's entry neither decays
+    nor counts; equal scores pair by expert id; a candidate is admitted only when strictly hotter than its victim (a
+    candidate at 0.5 with one entry reaches 1.4575, exactly what a victim at 1.5928961 decays to: not admitted)."""
     f = np.float32
+    out = _lfu_call(plugins, device, [[1, 2], [1, 3], [7, 2]], [DECODE, DECODE, PREFILL], {4: 11, 5: 13, 6: 15},
+                    {1: 1.0, 2: 0.0, 4: 0.5, 5: 1.915, 6: 0.5})
     assert out["score"][1] == f(f(f(1.0) * f(0.915)) + f(1.0)) + f(1.0) and out["score"][7] == 0
     # candidates 1 (2.915), 2, 3 (1.0, a tie: 2 first) against victims 4, 6 (0.4575, a tie: 4 first), 5 (1.752…)
     assert out["records"] == [(0, 1, 4), (0, 2, 6)]                 # 3 (1.0) is not hotter than 5: the pairing stops
-    assert out["residency"][1].tolist() == [K + 1, K + 2] and out["residency"][2].tolist() == [K + 5, K + 6]
+    assert out["residency"][1].tolist() == [11, 12] and out["residency"][2].tolist() == [15, 16]
     assert out["residency"][4].tolist() == out["residency"][6].tolist() == [-1, -1]
+    out = _lfu_call(plugins, device, [[9, 1]] * 7, [DECODE] * 7, {}, {9: 1.5})
+    assert out["score"][9] == f(8.372499) != f(f(f(1.5) * f(0.915)) + f(7))
+    out = _lfu_call(plugins, device, [[2, 3]], [DECODE], {4: 11}, {2: 0.5, 4: 1.5928961})
+    assert out["score"][2] == out["score"][4] == f(1.4575) and out["records"] == []
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU")
