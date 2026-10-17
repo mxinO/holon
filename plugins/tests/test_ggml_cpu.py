@@ -5,7 +5,8 @@ other side, so the budget is tight for nine rows in ten and one such flip's size
 and a token's row bitwise the same alone (one job, one thread) as grouped with other tokens and jobs at 1 and 7
 threads — the batch-invariance check, which catches a kernel that splits K for grouped tokens (L0's own mutation
 test); a malformed job table fails the task instead of reading past a buffer. Synthetic Q8_0 / Q4_0 experts always;
-the development vehicle's own classes (Q4_K with Q6_K or Q4_K down, UD-IQ3_XXS's) when its files are cached."""
+the development vehicle's own classes (Q4_K with Q6_K or Q4_K down, UD-IQ3_XXS's) when its files are cached. Prebuild
+links each tier in its own process."""
 import pathlib
 
 import gguf
@@ -98,3 +99,19 @@ def test_cpu_experts_match_the_oracle_and_a_token_is_bitwise_alone_or_grouped(pl
     bad[2, 1] = e                                                       # a unit past the pool
     with pytest.raises(RuntimeError, match="malformed job table"):
         kernel(bad, x, gu, dn, rows.clone())
+
+
+def test_prebuild_links_each_tier_in_its_own_process(monkeypatch, tmp_path):
+    """torch names a module linked a second time in one process `<name>_v1`, which load() never finds: a second tier
+    built beside the first is a fresh process's (found on an AVX-512 desktop, X's close)."""
+    from holon_plugins.kernels.ggml_cpu import extension, prebuild
+
+    calls = []
+    monkeypatch.setattr(extension, "module_path", lambda tier: tmp_path / tier)          # nothing built yet
+    monkeypatch.setattr(extension, "build", lambda tier, verbose: calls.append(("in-process", tier)))
+    monkeypatch.setattr(prebuild.subprocess, "run", lambda cmd, check: calls.append((cmd[1:3], cmd[-1])))
+    prebuild.main([])
+    assert calls == [(["-m", "holon_plugins.kernels.ggml_cpu.prebuild"], t) for t in sorted(extension.TIERS)]
+    calls.clear()
+    prebuild.main(["--tier", "x86-avx512"])                                             # one tier: in this process
+    assert calls == [("in-process", "x86-avx512")]
