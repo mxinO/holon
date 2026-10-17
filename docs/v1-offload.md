@@ -227,8 +227,11 @@ object through `BuildCtx.shared` (S0). The store owns:
   — 64 per class for the vehicle at `max_seqs` 8 without drafting, ≈ 0.28 GB with the null slots across its three
   classes (Q4_K gate_up 1.77 MB, Q4_K down 0.885 MB, Q6_K down 1.29 MB; §7), and E = 128 for the n-gram-drafter lock;
   "distinct misses of a layer ≤ staging" is an invariant with an L1 test, since F5a has no fallback. Every step that
-  carries a prefill chunk, mixed steps included, takes the ring-borrow path (slots lent from the arena tail, D8);
-  then cache slots;
+  carries a prefill chunk, mixed steps included, takes the ring-borrow path (slots lent from the arena tail, D8).
+  A launch there that is not compacted (a mixed step, or a chunk at or below a class's limit) needs all of the
+  layer's misses resident at once, so the store lends at least min(E, k × the step's tokens) slots per class for such
+  a step (the whole layer, 128 per class, for a mixed step on the vehicle), returned under D4's two-phase rule; the
+  L1 "distinct misses ≤ slots" invariant covers ring-path steps too (panel A-r4.3-1); then cache slots;
 - the **residency map** `[L, E, roles] → slot | −1−tier` (tier codes say where a miss lives: RAM, SSD);
 - the host tiers, the policy object, the split table, the per-step count and delta buffers (D4).
 
@@ -625,6 +628,7 @@ mixers (with FN / GLM); the end-of-answer checkpoint (plan §10). Its own doc mu
 | A-r4-3 the gate / up merge reads and moves offloaded stacks | D5 / S4: extent pairs, no concatenation or move under the offload store |
 | A-r4-4 short prefill chunks take mmvq in the reference | D4: chunks at or below the mmvq limit are never compacted |
 | A-r4.2-1 the mmvq limit is per type | D4: the compaction rule and padding target are per class; decode / verify / mixed never compacted |
+| A-r4.3-1 uncompacted ring-path steps need all of a layer's misses at once | D5: lend ≥ min(E, k × tokens) per class for such steps; L1 invariant extended |
 | B-r4.2-1 S4's sequence form has no producer | S4 keeps one extent per part; gate / up pairs stay inside the store (its `merge` member: the resident store concatenates, the offload store records pairs) |
 
 **Drifts from `docs/design.md`, recorded:** §7.4 (the CPU handshake lives in a kernel plugin, not
