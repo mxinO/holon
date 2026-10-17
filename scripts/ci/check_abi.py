@@ -187,13 +187,24 @@ def _entries(listing: str) -> set[tuple[str, str]]:
     return out
 
 
-def _value(text: str) -> object:
-    """A listed default's value where it is built from literals and sets (`frozenset([])` is `frozenset()`), else its
-    syntax tree."""
-    try:
-        return eval(text, {"__builtins__": {}}, {"frozenset": frozenset, "set": set})   # noqa: S307 — our listing
-    except Exception:  # noqa: BLE001 — not a literal: compared as written
-        return ast.dump(ast.parse(text, mode="eval").body)
+class _Sets(ast.NodeTransformer):
+    """`frozenset(…)` and `set(…)` of literals as one constant per value: `frozenset([])` is `frozenset()`."""
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        self.generic_visit(node)
+        if isinstance(node.func, ast.Name) and node.func.id in ("frozenset", "set") and not node.keywords \
+                and len(node.args) <= 1:
+            try:
+                items = ast.literal_eval(node.args[0]) if node.args else ()
+            except ValueError:
+                return node
+            return ast.Constant((node.func.id, tuple(sorted(items, key=repr))))
+        return node
+
+
+def _value(text: str) -> str:
+    """A listed default, compared by its syntax tree with sets of literals normalised (never evaluated)."""
+    return ast.dump(_Sets().visit(ast.parse(text, mode="eval")))
 
 
 def extends(old: str, new: str, defaults: dict[tuple[str, str], str]) -> bool:

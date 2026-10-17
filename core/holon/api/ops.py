@@ -24,9 +24,11 @@ class Constraint:
     devices: frozenset[str] = frozenset({"cuda"})
     cpu_isa: frozenset[str] = frozenset()  # exactly these CPU tiers (`Fingerprint.cpu_isa`; a binary per flag set)
 
-    def allows(self, device: str, sm: int | None) -> bool:
-        return device in self.devices and (sm is None or not ((self.sm_min and sm < self.sm_min) or (
-            self.sm_max and sm > self.sm_max) or (self.sms and sm not in self.sms)))
+    def allows(self, device: str, sm: int | None, *, cpu_isa: str = "") -> bool:
+        """Whether a kernel runs on `device` of SM `sm` (None: unchecked) with a CPU of tier `cpu_isa`."""
+        return device in self.devices and (not self.cpu_isa or cpu_isa in self.cpu_isa) and (sm is None or not (
+            (self.sm_min and sm < self.sm_min) or (self.sm_max and sm > self.sm_max)
+            or (self.sms and sm not in self.sms)))
 
 
 KERNEL_PROPS = frozenset({"graph_safe", "deterministic", "needs_host_lens", "serves_decode_rows"})  # KernelSpec.props

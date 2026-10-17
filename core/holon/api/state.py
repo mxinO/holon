@@ -80,7 +80,7 @@ class MemOp:
     dst_units: np.ndarray
     phase: Literal["pre_forward", "post_sample"] = "pre_forward"
     after: int | None = None     # the step (`BatchPlan.step`) whose device work is done before the copy starts;
-                                 # None: it may start at once
+                                 # None: it may start at once, while steps launched before still run
     lands_by: int | None = None  # the step whose launch waits for the copy to land: a late copy stalls it, never
                                  # skips it (later than `after`, and not launched yet)
 

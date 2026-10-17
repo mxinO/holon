@@ -181,6 +181,8 @@ CONTRACTS = "op.rmsnorm@1  (std.ops)\n"
     ("1.0", LISTING.format("1.1").replace(POOL, POOL.replace("*, n", "n")), "needs a major"),
     ("1.0", LISTING.format("1.1").replace("  sample(self)", "  sample(self, *, x: 'int' = 0)"), "needs a major"),
     ("1.0", LISTING.format("1.1").replace("C(x=1)", "C(x=1, y=2)").replace(C_X, C_X + "  #1 y: int = 2\n"), None),
+    ("1.0", LISTING.format("1.1").replace("C(x=1)", "C(x=1, y=frozenset())")             # as its class lists it
+     .replace(C_X, C_X + "  #1 y: frozenset[str] = frozenset([])\n"), None),
     ("1.0", LISTING.format("1.1").replace("C(x=1)", "C(x=1, y=3)").replace(C_X, C_X + "  #1 y: int = 2\n"),
      "needs a major"),                                              # the default instance changed
     ("1.0", LISTING.format("1.1").replace("C(x=1)", "C(x=2, y=2)").replace(C_X, C_X + "  #1 y: int = 2\n"),
