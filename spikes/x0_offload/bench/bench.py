@@ -33,6 +33,10 @@ NAMES = {v: k for k, v in T.items()}
 # its Q6_K-down and Q4_K-down layers), GLM-like Maya-S expert.
 BLOBS = {"1.46MB": 1_460_000 // 256 * 256, "2.8MB": 2_856_960, "7.1MB": 7_100_000 // 256 * 256}
 MB = 1e6
+# Host arenas tile the real experts over this many slots (distinct addresses): a CPU sweep over > 1 GB of experts
+# reads DRAM even on a desktop L3 of up to 96 MB, as decode does (each layer's experts are revisited only after the
+# other 47 layers' ~1 GB).
+SLOTS = 384
 _CORES: list[int] = []
 
 
@@ -150,10 +154,11 @@ class Experts:
     def __init__(self, ext, name: str, gu: int, down: int, gate, up, dn):
         self.name, self.gu, self.down, self.cls = name, gu, down, ext.ExpertClass(HIDDEN, INTER, gu, down)
         n = len(gate)
-        self.arena = ext.HostArena(EXPERTS * self.cls.bytes)
-        view = self.arena.tensor().view(EXPERTS, self.cls.bytes)
+        self.slots = SLOTS
+        self.arena = ext.HostArena(SLOTS * self.cls.bytes)
+        view = self.arena.tensor().view(SLOTS, self.cls.bytes)
         g = self.cls.down_off // 2
-        for e in range(EXPERTS):        # tile the n source experts over all slots (distinct addresses)
+        for e in range(SLOTS):          # tile the n source experts over all slots (distinct addresses)
             view[e, :g] = torch.from_numpy(np.ascontiguousarray(gate[e % n]))
             view[e, g:2 * g] = torch.from_numpy(np.ascontiguousarray(up[e % n]))
             view[e, 2 * g:] = torch.from_numpy(np.ascontiguousarray(dn[e % n]))
@@ -286,14 +291,14 @@ def m3(ext, classes, threads_list, tokens_list=(1, 2, 4, 8)) -> dict:
     out = {}
     for ex in classes:
         res = {"gate_up": NAMES[ex.gu], "down": NAMES[ex.down], "expert_bytes": ex.cls.bytes,
-               "real_experts": ex.real, "rows": []}
+               "real_experts": ex.real, "slots": ex.slots, "rows": []}
         for nt in threads_list:
             cpu = ext.Cpu(cores[:nt])
             assert cpu.threads() == nt
             for tokens in tokens_list:
                 for njobs in ((1, 8) if tokens == 1 else (1,)):
-                    iters = max(64, 2 * EXPERTS // njobs)
-                    ts = cpu.time(ex.cls, ex.ptr, EXPERTS, njobs, tokens, iters + 16, 0)[16:]
+                    iters = max(64, ex.slots // njobs)
+                    ts = cpu.time(ex.cls, ex.ptr, ex.slots, njobs, tokens, iters + 16, 0)[16:]
                     us = statistics.median(ts) / njobs
                     res["rows"].append({"threads": nt, "tokens": tokens, "jobs": njobs, "us_per_expert": us,
                                         "gbps": ex.cls.bytes / us / 1e3, "batch_us": summarize(ts)})
@@ -337,11 +342,12 @@ def bitwise(ext, ex, cores, nmax: int) -> dict:
 
 def m2(ext, ex, m1_res, threads_list, duration_ms=300) -> dict:
     cores, feeder = worker_cores(), host_core()
-    half = EXPERTS // 2
+    half = ex.slots // 2
     size = ex.cls.bytes
     dev = torch.empty(16 * size, dtype=torch.uint8, device="cuda")
-    # GPU blobs: experts 64..127 (whole expert blobs), staged into 16 device slots round robin; CPU: experts 0..63
-    ids = list(range(half, EXPERTS))
+    # GPU blobs: the upper half of the slots (whole expert blobs), staged into 16 device slots round robin; the CPU
+    # computes the lower half
+    ids = list(range(half, ex.slots))
     th, td = blob_table([ex.ptr + e * size for e in ids], [dev.data_ptr() + (i % 16) * size for i in range(len(ids))],
                         size)
     th8, td8 = th[:8].contiguous(), td[:8].contiguous()
@@ -398,7 +404,7 @@ def m2(ext, ex, m1_res, threads_list, duration_ms=300) -> dict:
 
 def m5(ext, ex, nthreads: int, rows_list=(1, 2, 4, 8), k_list=(1, 2, 4, 8, 10), reps=60) -> dict:
     cores = worker_cores()
-    hs = ext.Handshake(ex.cls, ex.ptr, EXPERTS, LAYERS, max(rows_list), cores[:nthreads])
+    hs = ext.Handshake(ex.cls, ex.ptr, ex.slots, LAYERS, max(rows_list), cores[:nthreads])
     hs.start()
     step = torch.zeros((), dtype=torch.int64, device="cuda")
     outs = torch.zeros(LAYERS, max(rows_list), HIDDEN, device="cuda")
