@@ -1254,3 +1254,35 @@ Decided while building:
   the in-tree experts providers did not honour it (ggml's took only its own `Prepared`, the reference a tensor), so
   both now read any other handle's `.x` (`7305168`, tested on both). `_Prep.host_staged` names the host-staged path
   explicitly (`d73a2a2`).
+
+### Step 4 (2026-10-17): the development gate's natural-fit rows on the RTX 5080
+
+Evidence: `spikes/x4_gate/README.md`, `evidence/x4_gate_rtx-5080_2026-10-17.json` (one desktop, one day, every arm
+interleaved; llama.cpp and FreeToken at x4_refs' pins).
+
+- **Natural fit:** 52.4% of the experts (3,220 / 1,610 / 1,610 cache slots), not ≈ 47%.
+  - The fill at a 33,792-token floor reaches 52.7%, but its counts do not start when pinned (≈ 18 MB short), so the
+    lock pins 8 experts fewer.
+- **Offload lock (F5a, scratch copy, committed at X's close per D15):**
+  - Settings: batch 1, 33,792 context, `lfu`, `moe.ring_copy=dma`, and a held-out routing profile as F2's warm
+    start.
+  - Verdict: L2 passes against the mmq floor (top-1 98.264%, KL p99 5.38e-2, ΔPPL vs floor −0.04%), and the
+    snapshot is run-identical ×3.
+- **`ring_copy` is `dma`.** Prefill is +37.5% / +10.0% / +2.5% at 1K / 4K / 32K, and decode is unchanged.
+- **The profile is kept.** Decode gains +2–4%.
+- **`lfu` stays the default.** `lru` is +0.04% at 4K, within 2 sd, and slower at 1K and 32K.
+- **Decode passes every natural-fit row:**
+  - FreeToken 1.08 / 1.06 / 1.03×;
+  - the pinned cache 1.21 / 1.25 / 1.12×;
+  - the default-mmap cache ≥ 1.34×;
+  - the static splits ≥ 1.79×.
+- **These land inside or above §13's bands after 3c and 3d.**
+- **Prefill passes against llama.cpp** (≥ 2.4×), **but misses against FreeToken at 4K (0.92×) and 32K (0.88×)**.
+  - 8K-token steps give only +2.3% at 32K, so they do not close it.
+  - **By §8 the FreeToken prefill rows go to the owner.**
+- **Exactness on the 5080:** natural F11, capped F11, natural `profile_decay` and natural `lru` snapshots are
+  byte-identical to each other, ×3 each, and F11 equals its replay oracle at every step.
+- **Capped rows** are recorded for step 6. Holon at 25% misses 338 MB per token at 4K, above the replay's ≈ 200.
+- **Two fixes, each with a test that failed before:**
+  - a fill arena's minimum now holds the staged-pass layout (batch 1 crashed at startup);
+  - profiles of hub-cache checkpoints are now found (above, step 3a's bullet).
