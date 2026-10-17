@@ -151,6 +151,7 @@ GPU = Fingerprint("rtx-4090", 89, 24, "cu130-torch2.11")
     ("a/big", None, GPU, "--no-size-check"),               # 1 TiB on a 24 GiB card: refused before the fetch
     ("a/big", None, None, "/fetched/a"),                   # --no-size-check
     ("a/big", None, Fingerprint("cpu", 0, 0, "cu130-torch2.11"), "/fetched/a"),    # a CPU device: no check
+    ("a/big+host", None, GPU, "/fetched/a"),               # --host-memory > 0: the build's per-pool report judges
     ("x/m", None, GPU, "no weight source resolves it\n  a: a cannot serve x/m\n  b: b cannot serve x/m"),
     ("both/m", None, GPU, "several weight sources resolve it"),
     ("both/m", "b", GPU, "/fetched/b"),                    # --source b asks only b
@@ -158,18 +159,18 @@ GPU = Fingerprint("rtx-4090", 89, 24, "cu130-torch2.11")
 def test_model_references_resolve_through_one_weight_source(tmp_path, monkeypatch, ref, kind, fp, want):
     """`holon serve <ref>` (release design §14.3): a path is itself; else the weight sources' `resolve` hooks claim it
     (a ValueError is a hint shown when none does), exactly one must, and its fetch runs once, unless the claim is larger
-    than the GPU."""
+    than the GPU and the deployment gives plugins no host memory (docs/v1-offload.md, the CLI row)."""
     from holon.core import cli
 
     monkeypatch.syspath_prepend(str(tmp_path))
     plugins = PluginSet({name: _package(tmp_path, name, f'[resources]\nprovides=["weight_source.{name}@1"]\n',
                                         "weight_source", plugin=RESOLVES.replace("{name}", name)) for name in "ab"})
-    ref = ref.replace("<path>", str(tmp_path))
+    ref, host = ref.replace("<path>", str(tmp_path)).removesuffix("+host"), int(ref.endswith("+host")) << 30
     if want.startswith("/") or want == "<path>":
-        assert cli.local_model(ref, plugins, kind, [], fp) == want.replace("<path>", str(tmp_path))
+        assert cli.local_model(ref, plugins, kind, [], fp, host) == want.replace("<path>", str(tmp_path))
     else:
         with pytest.raises((SystemExit, PluginError), match=want):
-            cli.local_model(ref, plugins, kind, [], fp)
+            cli.local_model(ref, plugins, kind, [], fp, host)
     asked = {name: plugins.load(name).asked for name in plugins.loaded}
     assert asked == ({} if want == "<path>" else {"b": [ref]} if kind else {"a": [ref], "b": [ref]})
     assert sum(plugins.load(name).fetched for name in asked) == want.startswith("/")
