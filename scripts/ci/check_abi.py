@@ -187,18 +187,33 @@ def _entries(listing: str) -> set[tuple[str, str]]:
     return out
 
 
-def extends(old: str, new: str) -> bool:
+def _value(text: str) -> object:
+    """A listed default's value where it is built from literals and sets (`frozenset([])` is `frozenset()`), else its
+    syntax tree."""
+    try:
+        return eval(text, {"__builtins__": {}}, {"frozenset": frozenset, "set": set})   # noqa: S307 — our listing
+    except Exception:  # noqa: BLE001 — not a literal: compared as written
+        return ast.dump(ast.parse(text, mode="eval").body)
+
+
+def extends(old: str, new: str, defaults: dict[tuple[str, str], str]) -> bool:
     """Whether the line `new` lists what `old` does with additions only: a member with keyword-only parameters added,
-    each with a default; a field whose default, a dataclass instance, shows the fields added to its class (with their
-    defaults, or its class would need a major bump)."""
+    each with a default; a field whose default, a dataclass instance, shows the fields added to its class at their
+    defaults (`defaults`: (class, field) -> its listed default), so the instance is the same."""
     if old.strip().startswith("#"):
         (field, _, x), (same, _, y) = old.partition(" = "), new.partition(" = ")
         try:
             x, y = ast.parse(x, mode="eval").body, ast.parse(y, mode="eval").body
         except SyntaxError:
             return False
-        return (field == same and isinstance(x, ast.Call) and isinstance(y, ast.Call)
-                and ast.dump(x) == ast.dump(ast.Call(y.func, y.args, y.keywords[:len(x.keywords)])))
+        if not (field == same and isinstance(x, ast.Call) and isinstance(y, ast.Call) and isinstance(y.func, ast.Name)
+                and ast.dump(x) == ast.dump(ast.Call(y.func, y.args, y.keywords[:len(x.keywords)]))):
+            return False
+        try:
+            return all(_value(ast.unparse(k.value)) == _value(defaults[y.func.id, k.arg])
+                       for k in y.keywords[len(x.keywords):])
+        except (KeyError, SyntaxError):
+            return False
     try:
         a, b = (ast.parse(f"def {line.strip()}: ...").body[0] for line in (old, new))
     except SyntaxError:
@@ -222,9 +237,12 @@ def bump_error(old: str, new: str) -> str | None:
             return False
         return "required, implemented by plugins" in head or (head.startswith("dataclass ") and " = " not in line)
 
+    defaults = {(head.split()[1], line.split()[1].rstrip(":")): line.partition(" = ")[2] for head, line in after
+                if head.startswith("dataclass ") and line.strip().startswith("#") and " = " in line}
+
     def extended(head: str, line: str) -> bool:      # by a line of the same item, which plugins only call or read
         return ("implemented by core" in head or head.startswith("dataclass ")) and any(
-            h == head and extends(line, new) for h, new in after - before)
+            h == head and extends(line, new, defaults) for h, new in after - before)
 
     breaking = sorted(line for head, line in before - after if not extended(head, line)) + sorted(
         line for head, line in after - before if breaks(head, line))
