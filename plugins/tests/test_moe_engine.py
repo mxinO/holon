@@ -411,11 +411,11 @@ def test_the_delta_log_holds_a_steps_admissions_and_lending(tiny_moe, tmp_path):
         "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5"})
     store, call, lent = engine.ctx.shared_objects[KEY], DeviceResolver.__call__, []
 
-    def resolve(self, ids, first):
-        slots = call(self, ids, first)
+    def resolve(self, ids, first, *share, **kw):
+        resolved = call(self, ids, first, *share, **kw)                 # (slots, cpu)
         if not self.group and not first and not lent and bool((store.kinds == 1).sum() >= 4):   # 4 rows × top-2
             lent.append(int(store.lend(torch.full((2,), store.items * store.roles)).sum()))
-        return slots
+        return resolved
     with route_dump(engine) as trace, mock.patch.object(DeviceResolver, "__call__", resolve):
         assert _served(engine, prompts) == want
     step = next(s for s in trace.steps if (s["records"][:, 1] < 0).any())
@@ -462,6 +462,90 @@ def test_a_route_transform_drops_routes_end_to_end(tiny_moe, tmp_path):
                             plugin_options={"moe.route_transform": "drop_last"}), plugins=PluginSet(found))
 
 
+def test_the_cpus_share_computes_a_passs_lowest_ranked_misses(tiny_moe, tmp_path):
+    """F5b (docs/v1-offload.md D4–D7) on the CPU providers: with a split table (`moe.cpu_plan`; past its end the last
+    entry's share), a pass of at most the graphed steps' tokens (decode, or a short prompt chunk) gives the CPU
+    `plan[n]` of its n misses — computed by
+    `cpu_experts@1`'s oracle, the activations quantized as ggml-cpu quantizes them, patched in before the combine —,
+    larger passes none: outputs close to the resident store's (bounded), run-identical, F11's residency still its
+    replay's step by step (the CPU's misses never admitted). On a host of another CPU tier the split is off (S5) and the
+    outputs are the resident store's bit for bit."""
+    from holon_judge.placement import parity, route_dump
+    from holon_std.moe.cpu import plan_table
+    from holon_std.moe.offload import CPU
+
+    assert plan_table("1,1,2", 6) == [0, 1, 1, 2, 2, 3, 4] and plan_table("0,0", 4) is None
+    with pytest.raises(ValueError, match="must lie in"):
+        plan_table("2", 4)
+    checkpoint, prompts = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
+    want = _served(_engine(file), prompts)
+    split = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.cpu_plan": "1,1,2,2"}
+    runs = []
+    for policy in ("std.tiered.static@1", "std.tiered.static@1", ""):
+        engine = _engine(file, host_memory=1 << 24, plugin_options=split | {"moe.placement": policy})
+        share, entries = engine.ctx.shared_objects[CPU], []
+
+        def collect(slot, y, cpu, f=share.collect, entries=entries):
+            entries.append(int((cpu >= 0).sum()))
+            f(slot, y, cpu)
+        share.collect = collect
+        with route_dump(engine) as trace:
+            runs.append(_served(engine, prompts))
+        assert sum(entries) > 0 and len(entries) < 2 * len(trace.steps)         # passes of at most 3 tokens
+        assert 0 < sum(s["cpu"].sum() for s in trace.steps) <= sum(entries)        # an expert per job, a row per token
+        if not policy:
+            assert parity(trace)["first_differing_step"] is None and trace.admissions > 0
+    assert runs[0] == runs[1]                                                  # run-identical
+    close = [np.allclose(a, b, atol=0.05) for (_, _, a), (_, _, b) in zip(runs[0][1], want[1], strict=True)]
+    assert all(close)
+    engine = _engine(file, host_memory=1 << 24, plugin_options=split | {"moe.cpu_isa": "another-tier"})
+    assert CPU not in engine.ctx.shared_objects and _served(engine, prompts) == want
+
+
+def test_exclusive_tiers_serve_what_the_resident_store_does(tiny_moe, tmp_path):
+    """docs/v1-offload.md D10, F9: with RAM holding a quarter of the pieces (`moe.ram`) and the checkpoint's file the
+    rest (std.tiered.gguf_direct@1), every expert lives in one of VRAM, RAM and the SSD: SSD misses are read by the
+    copy task, F11's victims demoted into RAM (the admitted staged, then moved), decode SSD reads kept — and the
+    outputs are the resident store's bit for bit, F11's VRAM residency its replay's, the RAM units owned once each and
+    the map's tier codes where they say. Without a slower tier, or under a device policy with no heat (F4) or a host
+    policy that edits (F2–F3), the store refuses a short RAM; a file tier's descriptors other than 'pread' extents are
+    refused at prepare (the copy task reads that kind only; a page-cache tier is one with O_DIRECT off)."""
+    from holon_judge.placement import parity, route_dump
+
+    checkpoint, prompts = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
+    want = _served(_engine(file), prompts)
+    short = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25",
+             "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    for policy in ("", "std.tiered.static@1"):
+        engine = _engine(file, host_memory=1 << 24, plugin_options=short | {"moe.placement": policy})
+        store = engine.ctx.shared_objects[KEY]
+        with route_dump(engine) as trace:
+            assert _served(engine, prompts) == want, policy
+        assert store.exclusive and {c.held for c in store.classes.values()} == {4} and trace.mirrored
+        if not policy:
+            assert parity(trace)["first_differing_step"] is None and trace.admissions > 0
+        res, host = store.residency.device.numpy(), store.host_units.numpy()
+        assert ((res == -1) == (host >= 0)).all() and ((res >= 0).all(-1) == (res >= 0).any(-1)).all()
+        for k, c in enumerate(store.classes.values()):        # each RAM unit holds one piece, the one the map says
+            owner = store.owner[k].numpy()
+            g, e = np.divmod(owner[owner >= 0], store.items)
+            role = [next(r for r, x in store.groups[store.layers[gg]].items() if x is c) for gg in g]
+            assert len(set(owner[owner >= 0])) == len(g) and (host[g, e, role] == np.flatnonzero(owner >= 0)).all()
+        engine.close()
+    for refused in ({"moe.tiers": "std.tiered.pinned@1"}, {"moe.placement": "placement.lru@1"},
+                    {"moe.placement": "placement.profile_decay@1"}):
+        with pytest.raises(NotImplementedError, match="fewer pieces"):
+            _engine(file, host_memory=1 << 24, plugin_options=short | refused)
+    from holon_std.tiered.gguf_direct import GgufDirect
+
+    read = GgufDirect.read                                    # a file tier answering another descriptor kind
+    with mock.patch.object(GgufDirect, "read", lambda self, c, n: ("memcpy", read(self, c, n)[1])), \
+            pytest.raises(ValueError, match="'pread' extents"):
+        _engine(file, host_memory=1 << 24, plugin_options=short)
+
+
 @pytest.fixture(scope="module")
 def gpu_moe(tmp_path_factory):
     """A random Qwen3-MoE as a GGUF of two expert classes, hidden and expert widths 1024 (an mmq tile then runs
@@ -505,19 +589,21 @@ def _no_host_sync(cls, *methods, mode="error"):
 
 
 def _gpu_engine(model, **kw) -> Engine:
-    return Engine(EngineConfig(model=str(model), device="cuda", dtype=torch.bfloat16, page_size=16, max_seqs=4,
-                               max_step_tokens=256, max_model_len=512, cuda_graphs=True, overlap=True, **kw))
+    return Engine(EngineConfig(**dict(model=str(model), device="cuda", dtype=torch.bfloat16, page_size=16, max_seqs=4,
+                                      max_step_tokens=256, max_model_len=512, cuda_graphs=True, overlap=True) | kw))
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("policy, cache", [("", ""), ("", "*=0.25"), ("", "*=0"), ("placement.lru@1", "*=0.25"),
                                            ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25"),
-                                           ("", "*=0.5 ring"), ("", "*=0.5 dma")])
+                                           ("", "*=0.5 ring"), ("", "*=0.5 dma"), ("", "*=0.25 ssd"),
+                                           ("std.tiered.static@1", "*=0.25 ssd")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
     """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
     resolve, its F11 and F4 variants and zero-copy gather from mapped host pools), decode steps replayed from CUDA
     graphs and prefill chunked past the mmvq limit: the offload store's streams and prompt logprobs are the resident
-    store's, bit for bit, under every placement policy (arenas of 42, 18, 10 slots: stream-k unpatched). F11's
+    store's, bit for bit, under every placement policy (arenas of 42, 18, 10 slots: stream-k unpatched), and with RAM
+    holding a quarter of the experts (exclusive tiers, D10: SSD reads on the I/O worker inside decode graphs). F11's
     residency, step by step, is its replay oracle's (L1 parity), with admissions in graphed and eager steps, the ring's
     copies on SMs or on copy engines; a borrowing step's lending and ring never wait for the device (with copy
     engines, but for one explicit sync to read the copy list). A
@@ -528,9 +614,12 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
 
     file, prompts, want = gpu_moe
     cache, ring = cache.partition(" ")[::2]          # "ring" / "dma": steps of 32 prompt tokens or more stream (D8),
-    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={       # their copies on SMs / copy engines
+    ssd = ring == "ssd"                              # their copies on SMs / copy engines; "ssd": RAM holds a quarter
+    ring = "" if ssd else ring
+    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
-        "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm"})
+        "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm"} | (
+        {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}))
     store = engine.ctx.shared_objects[KEY]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query.sum()) * 2 * 4 * bool(
@@ -547,7 +636,11 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     variant = {"": "moe_resolve.lfu@1", "placement.lru@1": "moe_resolve.lru@1"}.get(policy, "moe_resolve@1")
     assert {(k.rpartition("/")[2], v["provider"]) for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")
             } == {(variant, "kernels.expert_io"), ("expert_fetch@1", "kernels.expert_io"),
-                  ("expert_prefetch@1", "kernels.expert_io")}
+                  ("expert_prefetch@1", "kernels.expert_io")} | ({("moe_tiers@1", "kernels.expert_io"),
+                                                                 ("cpu_task@1", "kernels.cpu_task")} if ssd else set())
+    if ssd:                                          # the SSD reads ran on the I/O worker, fail-open untouched
+        io = engine.ctx.shared_objects["cpu_task.io"].native
+        assert store.exclusive and io.served() > 0 and io.flag() == 0
     if not policy:
         report = parity(trace)
         assert report["first_differing_step"] is None and (report["admissions"] > 0) == (cache in ("*=0.25", "*=0.5"))
@@ -568,4 +661,60 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     held, nbytes = torch.cuda.memory_allocated(), store.arena.capacity * store.arena.unit_bytes
     store.arena._set(0)                         # as the ledger frees it: no view outlives the arena pool's buffer
     assert held - torch.cuda.memory_allocated() >= nbytes > 0
+    engine.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
+    """F5b on the native path (kernels.expert_io's resolve and row patch, kernels.cpu_task's worker in decode graphs,
+    kernels.ggml_cpu's experts): steps of up to 4 tokens give the CPU half the misses (rounded up) at a quarter cached;
+    prompt logprobs stay close to the resident store's at the same step size (bounded), two engines serve the same
+    bits (static placement; F11's residency is its replay's, the CPU's misses never admitted; with exclusive tiers too,
+    the I/O worker reading SSD pieces beside the CPU's), and a dead worker fails
+    open: the wait gives up after its time bound and the step's commit stops the engine."""
+    from holon_judge.placement import parity, route_dump
+
+    file, prompts, _ = gpu_moe
+    small = {"max_step_tokens": 4}                            # every prompt pass small enough for a CPU share
+    engine = _gpu_engine(file, **small)
+    want = _served(engine, prompts)
+    engine.close()
+    split = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.cpu_plan": "1,1,2,2",
+             "cpu_task.threads": 2, "cpu_task.timeout": 0.5}
+    short = {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.5"}   # + exclusive tiers
+    runs = []
+    for policy, ram in (("std.tiered.static@1", {}), ("std.tiered.static@1", {}), ("", short), ("", {})):
+        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=split | ram | {"moe.placement": policy},
+                             **small)
+        with route_dump(engine) as trace:
+            runs.append(_served(engine, prompts))
+        worker = engine.ctx.shared_objects["cpu_task.compute"].native
+        assert worker.served() > 0 and worker.flag() == 0 and engine.stats()["graphs"] > 0
+        assert sum(s["cpu"].sum() for s in trace.steps) > 0
+        if not policy:
+            assert parity(trace)["first_differing_step"] is None and trace.admissions > 0
+        if ram:                                   # the I/O worker beside the compute one, both clean
+            io = engine.ctx.shared_objects["cpu_task.io"].native
+            assert io.served() > 0 and io.flag() == 0
+            close = [np.abs(np.array(a) - np.array(b)) for (_, _, a), (_, _, b) in zip(runs[-1][1], want[1],
+                                                                                       strict=True) if a]
+            assert np.median(np.concatenate([c.ravel() for c in close])) < 0.03
+        if policy or ram:
+            engine.close()
+    assert runs[0] == runs[1]
+    assert {(k.rpartition("/")[2], v["provider"]) for k, v in engine.ctx.kernels.items() if k.startswith("std.moe.cpu")
+            } == {("cpu_task@1", "kernels.cpu_task"), ("cpu_experts@1", "kernels.ggml_cpu"),
+                  ("moe_patch_rows@1", "kernels.expert_io")}
+    diff = np.concatenate([np.abs(np.array(a) - np.array(b)).ravel() for (_, _, a), (_, _, b) in
+                           zip(runs[0][1], want[1], strict=True) if a])
+    same = np.mean([x[0] == y[0] for (_, ids, _), (_, ref, _) in zip(runs[0][1], want[1], strict=True)
+                    for x, y in zip(ids, ref, strict=True)])
+    assert np.median(diff) < 0.03 and diff.mean() < 0.05 and same > 0.85         # (measured 0.011, 0.016, 0.94; a
+    #                                                                                routing flip moves a position)
+    worker.kill()                                             # the coordinator stops answering
+    engine.add(prompts[1], GREEDY)
+    with pytest.raises(RuntimeError, match="kernel_errors"):
+        while engine.has_work():
+            engine.step()
+    assert worker.flag() & 2
     engine.close()

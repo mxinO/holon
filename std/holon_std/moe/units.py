@@ -170,9 +170,14 @@ class Resident:
         return down
 
     @staticmethod
-    def route(ids: torch.Tensor, first: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """The ids each stack reads for tokens `first`…: the experts' own."""
+    def route(ids: torch.Tensor, first: int, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """The ids each stack reads for tokens `first`… (inputs `x`): the experts' own."""
         return ids, ids
+
+    @staticmethod
+    def patch(y: torch.Tensor) -> torch.Tensor:
+        """The experts' outputs, as computed."""
+        return y
 
     @staticmethod
     def transform(ids: torch.Tensor, weights: torch.Tensor, first: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -274,11 +279,12 @@ class MoE(nn.Module):
                 weights, ids = (torch.cat(t) for t in zip(*(r[:2] for r in routes), strict=True))
                 xin = xc[:, None]
             ids, weights = self._store.transform(ids, weights, a)
-            gate_up, down = self._store.route(ids, a)
+            gate_up, down = self._store.route(ids, a, xc)
             h = self._gate_up(xin, gate_up)                           # [t, k, inter] f32, SwiGLU applied
+            y = self._store.patch(self._down(h, down))                # (F5b: the CPU's rows in place)
             if residual is None:
-                self._combine(self._down(h, down), weights, out[a:b])
+                self._combine(y, weights, out[a:b])
             else:
-                self._combine.add(self._down(h, down), weights, residual[a:b], out[a:b])
+                self._combine.add(y, weights, residual[a:b], out[a:b])
         self._store.finish()
         return out

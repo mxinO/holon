@@ -8,8 +8,11 @@ Resolve at E = 128, k = 8, two roles, 1 to 2049 tokens: decode, prefill and padd
 dropped route of a rank; past its staging slots (the miss count raised, overflowing misses on the last staging
 slot); corrupt map entries (null slots read, the RANGE bit set). The variants besides: whole experts resident or
 missing, states full of ties, calls without decode rows (nothing changes), a full delta log (OVERFLOW); every output,
-the map, the state and the log compared. Fetch: units gathered from a mapped host pool's device view (zero-copy) and
-from device memory into the slots the list names, only the first n of the list, nothing else written."""
+the map, the state and the log compared. Up to 64 tokens a split table gives the CPU its share (F5b): its experts
+neither fetched nor admitted, their entries on null slots, the job table and the CPU entries compared too. Fetch:
+units gathered from a mapped host pool's device view (zero-copy) and from device memory into the slots the list
+names, only the first n of the list, nothing else written. `moe_patch_rows@1`: the CPU's inputs published and its
+rows patched in, nothing else."""
 import importlib
 
 import numpy as np
@@ -19,7 +22,17 @@ from holon.core import platform
 from holon.core.build import BuildContext
 from holon.core.plugins import PluginSet, discover
 from holon_std.moe import reference
-from holon_std.moe.kernels import DECODE, EXPERT_FETCH, EXPERT_PREFETCH, MOE_RESOLVE, PADDING, PREFILL, RANGE
+from holon_std.moe.kernels import (
+    DECODE,
+    EXPERT_FETCH,
+    EXPERT_PREFETCH,
+    MOE_PATCH_ROWS,
+    MOE_RESOLVE,
+    MOE_TIERS,
+    PADDING,
+    PREFILL,
+    RANGE,
+)
 
 E, K, ROLES = 128, 8, 2
 DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU"))]
@@ -71,6 +84,23 @@ def _stage(case: dict, staging: int, ring: bool) -> torch.Tensor:
     return (K + 1700 + torch.stack([torch.randperm(E, generator=g) for _ in range(ROLES)])).int()
 
 
+def _share(tokens: int, device: str, share: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
+    """A split table (the CPU takes half the misses, rounded up) and a job table, for calls of up to 64 tokens; a
+    zero table and a one-row job table past them (or without a `share`)."""
+    if tokens > 64 or not share:
+        return torch.zeros(E + 1, dtype=torch.int32, device=device), torch.full((1, 4), -9, dtype=torch.int32,
+                                                                                device=device)
+    plan = ((torch.arange(E + 1) + 1) // 2).int().to(device)
+    return plan, torch.full((1 + min(E, 64 * K), 4 + 64), -9, dtype=torch.int32, device=device)
+
+
+def _jobs(table: torch.Tensor, rows: list[list[int]]) -> None:
+    """The job table holds `rows` (the oracle's), its count first."""
+    assert int(table[0, 0]) == len(rows)
+    for i, row in enumerate(rows):
+        assert table[1 + i, :len(row)].cpu().tolist() == row
+
+
 def _log(capacity: int, n: int, device: str) -> tuple[torch.Tensor, torch.Tensor]:
     return (torch.full((capacity, 3), -9, dtype=torch.int32, device=device),
             torch.full((1,), n, dtype=torch.int32, device=device))
@@ -96,8 +126,10 @@ def test_resolve_matches_the_oracle(plugins, device, sources, tokens, staging):
         live = case["ids"][case["kinds"] != PADDING]
         e1, e2 = live[live >= 0][:2].tolist()
         case["residency"][e1, 0], case["residency"][e2, 1] = K + 1, K + 2000
-    slots, fetch, n_fetch, increments, seen, bits = reference.moe_resolve(
-        case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], staging, case["ring"], stage)
+    plan, jobs = _share(tokens, device)
+    slots, fetch, n_fetch, increments, seen, bits, cpu, rows = reference.moe_resolve(
+        case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], staging, case["ring"], stage,
+        plan.cpu())
     dev = {name: t.clone().to(device) for name, t in (case | {"stage": stage}).items()}
     misses = torch.full((1,), 3, dtype=torch.int32, device=device)
     errors = torch.zeros(1, dtype=torch.int32, device=device)
@@ -105,9 +137,12 @@ def test_resolve_matches_the_oracle(plugins, device, sources, tokens, staging):
     routed = torch.zeros(E, dtype=torch.int32, device=device)
     routed[0] = 1                                                            # the step's earlier calls' needs stay
     got = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"], dev["counts"], routed,
-                  dev["ring"], dev["stage"], dev["empty"], dev["n_empty"], misses, errors, delta, n_delta, 5)
+                  dev["ring"], dev["stage"], dev["empty"], dev["n_empty"], misses, errors, delta, n_delta, 5, plan,
+                  jobs)
     assert int(errors[0]) == bits == (RANGE if corrupt else 0)
-    assert torch.equal(got[0].cpu(), slots) and torch.equal(got[2].cpu(), n_fetch)
+    assert torch.equal(got[0].cpu(), slots) and torch.equal(got[2].cpu(), n_fetch) and torch.equal(got[3].cpu(), cpu)
+    _jobs(jobs, rows)
+    assert bool(rows) == (tokens == 64) or tokens < 64                     # 64 tokens miss some; past them, none
     for r in range(ROLES):
         n = min(int(n_fetch[r]), stage.shape[1])
         assert torch.equal(got[1][r, :, :n].cpu(), fetch[r, :, :n])
@@ -116,7 +151,7 @@ def test_resolve_matches_the_oracle(plugins, device, sources, tokens, staging):
     assert int(misses[0]) == max(3, int(n_fetch.max()))
     assert torch.equal(dev["residency"].cpu(), case["residency"]) and int(n_delta[0]) == 2 and (delta == -9).all()
     # the contract's own terms, on the oracle: null slot j for padding rows and dropped routes, staging past them
-    null = (case["kinds"][:, None] == PADDING) | (case["ids"] < 0)
+    null = (case["kinds"][:, None] == PADDING) | (case["ids"] < 0) | (cpu >= 0)     # the CPU's entries too
     assert (slots[:, null] == torch.arange(K).expand(tokens, K)[null]).all()
     if not corrupt:
         lo, live = K + 1700 if ring else K, slots[:, ~null]
@@ -157,18 +192,24 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, 
         case["kinds"][:] = DECODE
     elif kinds in ("prefill", "overflow"):
         case["kinds"][:] = DECODE if kinds == "overflow" else PREFILL
+    share = kinds == "mixed"                                # the CPU's share: one case of each variant
+    plan, jobs = _share(tokens, device, share)
     want = oracle(case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], E, *state.values(), 3,
-                  case["ring"], stage, case["empty"], int(case["n_empty"][0]))
+                  case["ring"], stage, case["empty"], int(case["n_empty"][0]), plan.cpu())
     capacity = 2 + (len(want["records"]) - 1 if kinds == "overflow" else E)
     delta, n_delta = _log(capacity, 2, device)
     dev = {name: t.clone().to(device) for name, t in (case | state | {"stage": stage}).items()}
     misses, errors = torch.zeros(1, dtype=torch.int32, device=device), torch.zeros(1, dtype=torch.int32, device=device)
     routed = torch.zeros(E, dtype=torch.int32, device=device)
     routed[:3] = 3                                     # an earlier call's marks (scope included) stay
-    slots, fetch, n_fetch = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"],
-                                    dev["counts"], routed, dev["ring"], dev["stage"], dev["empty"], dev["n_empty"],
-                                    misses, errors, delta, n_delta, 3, **{n: dev[n] for n in state})
+    slots, fetch, n_fetch, cpu = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"],
+                                         dev["counts"], routed, dev["ring"], dev["stage"], dev["empty"],
+                                         dev["n_empty"], misses, errors, delta, n_delta, 3, plan, jobs,
+                                         **{n: dev[n] for n in state})
     assert torch.equal(slots.cpu(), want["slots"]) and torch.equal(n_fetch.cpu(), want["n_fetch"])
+    assert torch.equal(cpu.cpu(), want["cpu"])
+    _jobs(jobs, want["jobs"])
+    assert not {a for _, a, _ in want["records"]} & {row[0] for row in want["jobs"]}   # the CPU's are never admitted
     for r in range(ROLES):
         assert torch.equal(fetch[r, :, :int(n_fetch[r])].cpu(), want["fetch"][r, :, :int(n_fetch[r])])
     assert torch.equal(dev["counts"].cpu(), case["counts"] + want["counts"]) and int(misses[0]) == n_fetch.max()
@@ -184,6 +225,7 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, 
     # the contract's own terms, on the oracle
     counted = kinds != "prefill"
     assert bool(len(records)) == ((tokens < 300 or ring) and counted) and bool(want["counts"].sum() > 0) == counted
+    assert bool(want["jobs"]) == (share and tokens <= 64)
     assert not (ring and counted) or any(b < -1 for _, _, b in want["records"])       # empty slots taken first
     admitted = {a for _, a, _ in want["records"]}
     for _, a, b in want["records"]:          # whole experts: a took b's slot in every role, b now in the RAM tier
@@ -217,7 +259,8 @@ def _lfu_call(plugins, device: str, ids, kinds, resident: dict[int, int], score:
     empty = torch.zeros(ROLES, 1, dtype=torch.int32, device=device)
     resolve(dev["ids"], dev["kinds"], dev["residency"], zeros["host"], torch.full((ROLES,), 40, dtype=torch.int32,
             device=device), zeros["counts"], zeros["routed"], ring, stage, empty, words[0].clone(), words[0],
-            words[1], zeros["delta"], words[2], 0, score=dev["score"])
+            words[1], zeros["delta"], words[2], 0, torch.zeros(E + 1, dtype=torch.int32, device=device),
+            torch.zeros(1, 4, dtype=torch.int32, device=device), score=dev["score"])
     delta = zeros["delta"]
     return {"residency": dev["residency"].cpu(), "score": dev["score"].cpu().numpy(),
             "records": [tuple(r) for r in delta[:int(words[2][0])].cpu().tolist()]}
@@ -342,3 +385,119 @@ def test_prefetch_copies_the_listed_units_before_its_wait(plugins, device):
     engines.wait(6)
     assert torch.equal(dst.cpu(), want) and torch.equal(want[4], data[8]) and not torch.equal(want[11], data[0])
     assert torch.equal(dma.cpu(), want)
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_patch_rows_publish_and_patch_the_cpus_entries(plugins, device):
+    """`moe_patch_rows@1` (F5b): `publish` copies the rows of tokens with a CPU entry (as f32) into the CPU's input
+    rows, others untouched; the call replaces exactly the CPU's entries of y with their rows."""
+    provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
+    patch = kernel(plugins, device, MOE_PATCH_ROWS, provider, hidden=64, top_k=K, dtype="bfloat16")
+    g = torch.Generator().manual_seed(2)
+    x = torch.randn(5, 64, generator=g).bfloat16()
+    cpu = torch.full((5, K), -1, dtype=torch.int32)
+    cpu[1, 3], cpu[3, 0], cpu[3, 7] = 1 * K + 3, 3 * K, 3 * K + 7
+    out, rows, y = torch.full((8, 64), 5.0), torch.randn(8 * K, 64, generator=g), torch.randn(5, K, 64, generator=g)
+    want_out, want_y = reference.moe_publish_rows(x, cpu, out), reference.moe_patch_rows(y, rows, cpu)
+    dev = [t.to(device) for t in (x, cpu, out, rows, y)]
+    patch.publish(dev[0], dev[1], dev[2])
+    patch(dev[4], dev[3], dev[1])
+    assert torch.equal(dev[2].cpu(), want_out) and torch.equal(dev[4].cpu(), want_y)
+    assert torch.equal(want_out[[1, 3]], x[[1, 3]].float()) and (want_out[[0, 2, 4, 5]] == 5).all()
+    assert torch.equal(want_y[3, 7], rows[3 * K + 7]) and torch.equal(want_y[3, 1:7], y[3, 1:7])
+
+
+def _tiered(seed: int, groups: int = 3, experts: int = 32, free: int = 3) -> dict[str, torch.Tensor]:
+    """Exclusive tiers: a map of every layer (whole experts: a quarter in VRAM, some in RAM, the rest on the SSD),
+    the RAM units of three classes (layer 2's down role in a class of its own) with `free` units left, heat with
+    ties."""
+    g = torch.Generator().manual_seed(seed)
+    classes = torch.tensor([[0, 1], [0, 1], [0, 2]], dtype=torch.int32)[:groups]
+    capacity = torch.zeros(3, dtype=torch.int32)
+    residency = torch.full((groups, experts, ROLES), -2, dtype=torch.int32)
+    host = torch.full((groups, experts, ROLES), -1, dtype=torch.int32)
+    slot = K + E                                             # cache slots past the staging slots
+    owner = torch.full((3, 64), -1, dtype=torch.int32)
+    for gg in range(groups):
+        for e in torch.randperm(experts, generator=g).tolist():
+            roll = float(torch.rand(1, generator=g))
+            if roll < 0.25:
+                residency[gg, e] = slot
+                slot += 1
+            elif roll < 0.6:
+                for r in range(ROLES):
+                    c = int(classes[gg, r])
+                    u = int(capacity[c])
+                    owner[c, u], host[gg, e, r] = gg * experts + e, u
+                    capacity[c] += 1
+                residency[gg, e] = -1
+    capacity += free
+    piece = torch.arange(groups * experts * ROLES, dtype=torch.int32).view(groups, experts, ROLES) // ROLES
+    heat = (torch.randint(0, 6, (groups, experts), generator=g) * 0.5).float()
+    return {"residency": residency, "host": host, "classes": classes, "owner": owner, "capacity": capacity,
+            "piece": piece, "heat": heat}
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("policy", ["lfu", ""])
+@pytest.mark.parametrize("tokens, free", [(1, 0), (6, 3), (12, 0), (40, 20)])
+def test_tiers_match_the_oracle(plugins, device, policy, tokens, free):
+    """`moe_tiers@1` after a resolve (F11's, or @1's) with exclusive tiers: admissions staged and moved into their
+    victims' slots, victims demoted into the admitted's RAM units, free units or RAM's coldest expert's (displaced to
+    the SSD) or sent to the SSD; decode SSD misses kept the same way; every SSD read listed with its unit; the map, RAM
+    units, owners, fetch list, reads, demotions and moves the oracle's, exactly. Without heat (@1) nothing is
+    displaced."""
+    from holon_plugins.placement.lfu.reference import moe_resolve_lfu
+
+    experts, layer = 32, 2
+    t = _tiered(tokens + 7 * free, free=free)
+    g = torch.Generator().manual_seed(tokens)
+    ids = torch.stack([torch.randperm(experts, generator=g)[:K] for _ in range(tokens)]).int()
+    kinds = torch.full((tokens,), DECODE, dtype=torch.uint8)
+    kinds[torch.rand(tokens, generator=g) < 0.2] = PREFILL
+    stage = (K + torch.arange(E)).expand(ROLES, E).int().contiguous()
+    limits = torch.full((ROLES,), K + E + 200, dtype=torch.int32)
+    residency = t["residency"][layer].clone()
+    if policy:
+        out = moe_resolve_lfu(ids, kinds, residency, t["host"][layer], limits, E, t["heat"][layer], layer, stage=stage)
+        fetch, n_fetch, records, after = out["fetch"], out["n_fetch"], out["records"], out["residency"]
+        t["heat"][layer] = out["score"]
+    else:
+        fetch, n_fetch = reference.moe_resolve(ids, kinds, residency, t["host"][layer], limits, E, stage=stage)[1:3]
+        records, after = [], residency
+    t["residency"][layer] = after
+    heat = t["heat"] if policy else None
+    want = reference.moe_tiers(ids, kinds, layer, fetch, n_fetch, stage, records, t["residency"], t["host"],
+                               t["piece"], t["classes"], t["owner"], t["capacity"], heat)
+    provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
+    tiers = kernel(plugins, device, MOE_TIERS, provider, experts=experts, top_k=K, roles=ROLES)
+    delta = torch.tensor([(layer, a, b) for _, a, b in records] or [[0, 0, 0]], dtype=torch.int32).view(-1, 3)
+    dev = {n: v.clone().to(device) for n, v in (t | {"fetch": fetch, "n_fetch": n_fetch, "stage": stage, "ids": ids,
+                                                       "kinds": kinds, "delta": delta}).items()}
+    io = torch.zeros(ROLES, 1 + E, 2, dtype=torch.int32, device=device)
+    moves = torch.zeros(ROLES, 4, E, dtype=torch.int32, device=device)
+    n_moves = torch.zeros(ROLES, 2, dtype=torch.int32, device=device)
+    tiers(dev["ids"], dev["kinds"], layer, dev["fetch"], dev["n_fetch"], dev["stage"], dev["delta"],
+          torch.zeros(1, dtype=torch.int32, device=device), torch.tensor([len(records)], dtype=torch.int32,
+                                                                         device=device),
+          dev["residency"], dev["host"], dev["piece"], dev["classes"], dev["owner"], dev["capacity"],
+          dev["heat"] if policy else None, io, moves, n_moves)
+    for name in ("fetch", "residency", "host", "owner", "n_moves"):
+        assert torch.equal(dev[name].cpu() if name in dev else n_moves.cpu(), want[name]), name
+    for r in range(ROLES):
+        assert io[r, 0, 0] == len(want["io"][r]) and io[r, 1:1 + len(want["io"][r])].cpu().tolist() == \
+            [list(x) for x in want["io"][r]]
+        for part, n in ((slice(0, 2), want["n_moves"][r, 0]), (slice(2, 4), want["n_moves"][r, 1])):
+            assert torch.equal(moves[r, part, :n].cpu(), want["moves"][r, part, :n])
+    # the contract's own terms, on the oracle: exclusive (a RAM unit has one owner, a piece one place), SSD reads land
+    res, host, own = want["residency"], want["host"], want["owner"]
+    for c in range(3):
+        held = own[c, :int(t["capacity"][c])]
+        assert len(set(held[held >= 0].tolist())) == int((held >= 0).sum())
+    assert ((res == -1) == (host >= 0)).all() and ((res >= 0) | (res == -1) | (res == -2)).all()
+    reads = sum(len(x) for x in want["io"])
+    assert reads == sum(int((fetch[r, 0, :int(n_fetch[r])] <= -2).sum()) for r in range(ROLES))
+    if policy and tokens == 1:                                    # (the cases' coverage, checked once)
+        assert records and (want["n_moves"][:, 0] > 0).all()         # victims demoted
+    if tokens == 40:
+        assert (want["residency"] == -2).sum() < (t["residency"] == -2).sum()   # SSD reads kept in free units

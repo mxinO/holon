@@ -29,6 +29,13 @@ Copyright (c) 2023-2026 The ggml authors. License text below and in
 - `plugins/holon_plugins/kernels/ggml_cuda/plugin.py` (`repack`, `tail_bytes`) — adapted: the byte layouts of
   llama.cpp's HF converter (`conversion/base.py` `_nvfp4_pack`, `repack_mxfp4_blocks`) and its CUDA buffers' row
   padding (`ggml-cuda.cu`).
+- `plugins/holon_plugins/kernels/ggml_cpu/vendor/` — ggml-cpu's activation quantizers and dot products (`quants.c`,
+  its x86 `arch/x86/quants.c`, `ggml-quants.c` and their headers), unmodified upstream files fetched by
+  `plugins/holon_plugins/kernels/ggml_cpu/vendor.sh`; `plugins/holon_plugins/kernels/ggml_cpu/SHA256SUMS` pins them.
+- `plugins/holon_plugins/kernels/ggml_cpu/csrc/shim.c` — adapted: ggml's block sizes, `ggml_abort` and the CPU
+  backend's FP4 scale tables, after `ggml/src/ggml.c` and `ggml/src/ggml-cpu/ggml-cpu.c`.
+- `plugins/holon_plugins/kernels/ggml_cpu/csrc/cpu_experts.cpp` (`traits`) — adapted: the CPU backend's dot product
+  and activation type per weight type, after `ggml/src/ggml-cpu/ggml-cpu.c` (`type_traits_cpu`).
 
 ### flash-linear-attention, as copied into vLLM — MIT and Apache-2.0
 

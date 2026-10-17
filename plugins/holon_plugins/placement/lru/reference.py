@@ -27,11 +27,11 @@ RANGE, OVERFLOW = 1, 2           # error bits (`moe_resolve@1` and its variants)
 def moe_resolve_lru(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, host: torch.Tensor,
                     limits: torch.Tensor, staging: int, last: torch.Tensor, clock: torch.Tensor, group: int,
                     ring: torch.Tensor | None = None, stage: torch.Tensor | None = None,
-                    empty: torch.Tensor | None = None, n_empty: int = 0) -> dict:
+                    empty: torch.Tensor | None = None, n_empty: int = 0, plan: torch.Tensor | None = None) -> dict:
     """One call: `slots [R, T, k]`, `fetch [R, 2, F]` (−1 past n_fetch), `n_fetch [R]`, `counts [E]` (this call's
     increments), `routed [E]` (the experts it saw routed), `errors` (bits), and the state after it: `residency`,
     `last`, `clock`, `n_empty`, the delta `records`. `ring` defaults to none, `stage` to the staging slots k + i,
-    `empty` to none."""
+    `empty` to none; and the CPU's share (`plan`, default none; `cpu_share`), its `cpu [T, k]` and job rows `jobs`."""
     t, k = ids.shape
     experts, roles = residency.shape
     ids, kinds = ids.long().cpu(), kinds.long().cpu()
@@ -43,6 +43,7 @@ def moe_resolve_lru(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
     live = (kinds[:, None] != PADDING) & (ids >= 0)
     decode = live & (kinds[:, None] == DECODE)
     routed = ids.clamp_min(0)
+    taken, cpu, jobs = cpu_share(ids, kinds, before, ring, host, plan)
     counts = torch.bincount(routed[decode], minlength=experts)
     needed = set(routed[live].tolist())
     seen = torch.zeros(experts, dtype=torch.int32)
@@ -56,7 +57,7 @@ def moe_resolve_lru(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
         for a, j in decode.nonzero().tolist():                         # entries in order: token, then rank
             first.setdefault(int(routed[a, j]), a * k + j)
         cache = [all(k + staging <= int(before[e, r]) < int(limits[r]) for r in range(roles)) for e in range(experts)]
-        cands = sorted((e for e in first if (before[e] < 0).all()), key=first.get)
+        cands = sorted((e for e in first if (before[e] < 0).all() and e not in taken), key=first.get)
         victims = sorted((e for e in range(experts) if cache[e] and e not in needed), key=lambda e: (int(last[e]), e))
         spare = min(len(cands), n_empty)
         for i, a in enumerate(cands[:spare]):                          # the empty slots first, from the top
@@ -66,6 +67,7 @@ def moe_resolve_lru(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
         for a, b in zip(cands[spare:], victims, strict=False):
             after[a], after[b] = before[b], -1
             records.append((group, a, b))
+    seen[sorted(taken)] |= 4                                            # the CPU's
     admitted = {a for _, a, _ in records}
     slots = torch.arange(k).expand(roles, t, k).clone()                 # null slot j by default
     width = stage.shape[1]
@@ -74,13 +76,16 @@ def moe_resolve_lru(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
     errors = 0
     for r in range(roles):
         missing = sorted({e for e in routed[live].tolist()
-                          if before[e, r] < 0 and (ring[e, r] < 0 or e in admitted)})
+                          if before[e, r] < 0 and (ring[e, r] < 0 or e in admitted)} - taken)
         staged = {e: i for i, e in enumerate(e for e in missing if e not in admitted)}
         n_fetch[r] = len(missing)
         for i, e in enumerate(missing[:width]):
-            fetch[r, :, i] = torch.tensor([host[e, r], after[e, r] if e in admitted else stage[r, staged[e]]])
+            fetch[r, :, i] = torch.tensor([host[e, r] if host[e, r] >= 0 else -2 - e,            # (−2 − e: on no
+                                           after[e, r] if e in admitted else stage[r, staged[e]]])  # read tier)
         for a, j in live.nonzero().tolist():
             e = int(routed[a, j])
+            if e in taken:
+                continue                                                # the CPU's: null slot j
             if e in staged:
                 slots[r, a, j] = stage[r, min(staged[e], width - 1)]
                 continue
@@ -91,7 +96,29 @@ def moe_resolve_lru(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
                 errors |= RANGE
     return {"slots": slots.int(), "fetch": fetch.int(), "n_fetch": n_fetch.int(), "counts": counts.int(),
             "routed": seen, "errors": errors, "residency": after.int(), "last": last, "clock": clock,
-            "n_empty": n_empty, "records": records}
+            "n_empty": n_empty, "records": records, "cpu": cpu, "jobs": jobs}
+
+
+def cpu_share(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, ring: torch.Tensor,
+              host: torch.Tensor, plan: torch.Tensor | None) -> tuple[set[int], torch.Tensor, list[list[int]]]:
+    """`moe_resolve@1`'s CPU share (F5b, std.moe.kernels), which this variant keeps: of the call's n candidates —
+    routed, missing in every role, in the read host tier (−1) — the last min(plan[n], n) by (best routing rank, expert
+    id); `cpu [T, k]` (t·k + j for their entries, else −1); the job rows by expert id."""
+    t, k = ids.shape
+    live = (kinds[:, None] != PADDING) & (ids >= 0)
+    best: dict[int, int] = {}
+    for a, j in live.nonzero().tolist():
+        best[int(ids[a, j])] = min(best.get(int(ids[a, j]), k), j)
+    held = ((residency == -1) & (ring < 0)).all(-1)
+    cands = sorted((best[e], e) for e in best if held[e])
+    c = 0 if plan is None or not cands else min(int(plan[len(cands)]), len(cands))
+    taken = {e for _, e in cands[len(cands) - c:]}
+    cpu, jobs = torch.full((t, k), -1, dtype=torch.int32), []
+    for e in sorted(taken):
+        entries = [a * k + j for a, j in live.nonzero().tolist() if int(ids[a, j]) == e]
+        cpu.view(-1)[entries] = torch.tensor(entries, dtype=torch.int32)
+        jobs.append([e, int(host[e, 0]), int(host[e, 1]), len(entries), *entries])
+    return taken, cpu, jobs
 
 
 def lend(need, residency: torch.Tensor, classes: torch.Tensor, last: torch.Tensor,

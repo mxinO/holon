@@ -236,10 +236,12 @@ def row_paths(path: str | pathlib.Path, rows: int, fingerprint) -> dict[str, str
             for name, (kind, k, out) in engine_shapes(path).items()}
 
 
-def q8_1_experts(path: str | pathlib.Path, kernel_path: str):
+def q8_1_experts(path: str | pathlib.Path, kernel_path: str, split: dict | None = None):
     """Tier B's expert stacks for the floors' D3 block (`moe.mirror(experts=…)`): each applies llama.cpp's MUL_MAT_ID
     on `kernel_path` (`q8_1.linear_experts`, f32) with the type and stored-sum offsets of the file's stack; a merged
-    gate/up stack takes gate's type (gate and up share one in every file in scope) and both offsets."""
+    gate/up stack takes gate's type (gate and up share one in every file in scope) and both offsets. With `split`
+    (`cpu_split`'s, a frozen placement and its split table), the floor is path-aware (docs/v1-offload.md §6): the
+    entries F5b's rule sends to the CPU — at one token per step — take ggml-cpu's activations (`q8_1.CPU`) instead."""
     from . import q8_1
 
     stacks: dict[str, dict[str, tuple[str, np.ndarray]]] = {}
@@ -268,8 +270,22 @@ def q8_1_experts(path: str | pathlib.Path, kernel_path: str):
         if len({kind for kind, _ in parts}) != 1:
             raise ValueError(f"{block}: gate and up experts of different types")
         offs = offsets(name, parts, weight.shape[0], weight.device)
-        return q8_1.linear_experts(x, weight, None, ids, parts[0][0], kernel_path, glu, offs, torch.float32)
+        y = q8_1.linear_experts(x, weight, None, ids, parts[0][0], kernel_path, glu, offs, torch.float32)
+        if split is not None and (cpu := cpu_entries(split, int(re.search(r"layers\.(\d+)\.", block)[1]), ids)).any():
+            y = torch.where(cpu[..., None], q8_1.linear_experts(x, weight, None, ids, parts[0][0], q8_1.CPU, glu, None,
+                                                                torch.float32), y)
+        return y
     return experts
+
+
+def cpu_entries(split: dict, layer: int, ids: torch.Tensor) -> torch.Tensor:
+    """F5b's rule per token (each token its own step, as an L2 candidate at one token per step runs): of a row's misses
+    (experts the frozen placement does not hold), the CPU takes `plan[n]` of n, the lowest-ranked ([T, k] bool)."""
+    resident = torch.tensor(split["layers"][str(layer)], dtype=ids.dtype, device=ids.device)
+    plan = torch.tensor(split["plan"], device=ids.device)
+    miss = ~torch.isin(ids, resident) & (ids >= 0)
+    n = miss.sum(1, keepdim=True)
+    return miss & (miss.cumsum(1) > n - plan[n.clamp(max=len(plan) - 1)].clamp(max=n))
 
 
 def mmvq_step(path: str | pathlib.Path) -> int:
