@@ -169,8 +169,8 @@ class TieredStore:
             free[c.name] = list(range(c.size - 1, c.null + c.staging - 1, -1))      # popped lowest first
             arenas[c.name] = c.slots(), c.host.view(torch.uint8, (c.host.capacity, c.unit_bytes))
         self.residency.host[...] = -1                   # −1 − tier 0: every piece in the host tier
-        if len(seed) * self.roles != sum(budget.taken.values()):
-            raise RuntimeError(f"{self.name}: the placement policy seeded items it did not take from the budget")
+        if sorted(seed) != sorted(budget.granted):
+            raise RuntimeError(f"{self.name}: the placement policy seeded other items than it took from the budget")
         for g, i in seed:
             for r, c in self.groups[groups[g]].items():
                 slot = self.residency.host[g, i, r] = free[c.name].pop()
@@ -216,7 +216,7 @@ class _Budget:
     pinned slots; an item takes a slot in each of its roles' classes."""
 
     def __init__(self, store: TieredStore, nbytes: int) -> None:
-        self.left, self.taken = nbytes, dict.fromkeys(store.classes, 0)
+        self.left, self.taken, self.granted = nbytes, dict.fromkeys(store.classes, 0), []
         self.classes = [list(store.groups[g].values()) for g in store._order]      # per group (in map order)
 
     def take(self, group: int, item: int) -> bool:
@@ -225,6 +225,7 @@ class _Budget:
         if cost > self.left or any(self.taken[c.name] + classes.count(c) > c.cap for c in classes):
             return False
         self.left -= cost
+        self.granted.append((group, item))
         for c in classes:
             self.taken[c.name] += 1
         return True
