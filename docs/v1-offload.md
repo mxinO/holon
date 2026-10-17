@@ -1002,7 +1002,7 @@ Built (commits from `7e4a49b`; the panel's 3a findings in their own commits, lis
   before the layer's resolve), layer l + 1's while layer l computes, and its resolve reads them in place (the
   resolve's `ring` table: no fetch); the step's expert passes are one per chunk of up to 4,096 tokens (the router and
   top-k still per 512-token chunk, the step's last partial chunk a pass of its own), and kernels.ggml_cuda's arena
-  binding takes 2,048 rows per mmq call (`ID_PAIRS` ÷ top-8; each row bitwise a 512-row call's, L0). A smaller prompt
+  binding takes 2,048 rows per mmq call (`ID_PAIRS` ÷ top-8; each row bitwise a 512-row call's, L0; 4,096 since the step-3 panel's fixes, below). A smaller prompt
   step borrows its misses' staging the same way when its pass could exceed the staging slots. At the step's end every
   borrowed slot returns to its layer as an empty slot — the layer's first victim, which the policy's next admissions
   fill unconditionally (`moe_resolve@1`'s `empty` stack; records `(layer, a, −2 − j)`): the cache never shrinks (CPU
@@ -1033,16 +1033,16 @@ Decided while building, against the text above:
   pass's routing) puts R1 ≤ 0.3% ahead on whole traces and 1.0–1.4% on single long prompts; keeping R1's experts needs
   either paid copies at the return (which the replay shows erase the gain) or a ring layout where a layer's keepers are
   never reused by later layers, which the double buffer does not have.
-- **Prompt-time admission is not built** (the coordinator's item 5, folded into the panel's item 4): the same replay
+- **Prompt-time admission is not built** (deferred since, §13: its own policy plugin if step 4 needs it; the coordinator's item 5, folded into the panel's item 4): the same replay
   finds that counting prefill rows at a routing-proportional weight (`12 × the expert's prefill entries ÷ the step's
   prefill rows`) and letting their misses compete as candidates — admitted only where they land free (staged or
   streamed into the victim's slot) — beats D4's "prefill never admits" by 2.1% / 0.7% (agent / mixed, whole traces) and
   9% / 6% on single long prompts at 47% cached, never worse in any held-out cell; counting +1 per entry (variant B)
   loses 4–7%. That changes D4: it goes to the panel before it is built.
-- **Lending reads the map back**: DMA needs host addresses, so a borrowing step synchronizes at its first resolve (the
+- **Lending reads the map back** (superseded by the step-3 panel's fixes, below: lending is the device's): DMA needs host addresses, so a borrowing step synchronizes at its first resolve (the
   map, the empty stacks, then each `lend` call's picks: two or three syncs per borrowing step, none after); empty slots
   are borrowed first (the replay's assumption too), so consecutive prompt steps do not drain the cache.
-- **Ring sizing**: two halves of the largest per-class miss count over the layers (lending makes misses, so the
+- **Ring sizing** (superseded below): two halves of the largest per-class miss count over the layers (lending makes misses, so the
   sizing iterates, at most four `lend` calls); one half if fewer slots are lent, routed staging if not even that.
 - **Only device-owned policies borrow** (F11, F4); host policies (`static`, `profile_decay`) keep a pass's staging and
   never stream (D4's two-phase lending for host policies is not built). So does a layout whose cache cannot lend a
@@ -1050,9 +1050,9 @@ Decided while building, against the text above:
   the policy is device-owned, the step has at least `ring_tokens` tokens and a pass's misses fit the prefill staging
   (every expert of a layer), so the startup profile — on minimum pools, where a fill cache holds nothing to lend —
   measures the large pass the served steps run (review fix, failing-without test).
-- **`moe.ring_tokens` stays at 512**, §13's crossover on the 5080: deriving it per class from M6's coverage and the
+- **`moe.ring_tokens` stays at 512** (measured on the A5000 since, below), §13's crossover on the 5080: deriving it per class from M6's coverage and the
   class's compute needs the bar card's compute (step 4). On the A5000 streaming wins at 1K already (below).
-- **4,096-row mmq calls are not built**: the id helper sorts 16,384 pairs per call (1,024 threads × 16); 4,096 rows
+- **4,096-row mmq calls are not built** (built since, below): the id helper sorts 16,384 pairs per call (1,024 threads × 16); 4,096 rows
   at top-8 need a larger instance in the vendored helper (a vendor-patch extension with its own L0). The 2,048-row
   calls are what §13's gap diagnosis modelled at ≈ 10.0K tok/s on the 5080 (≈ 11.9K with 4,096-row calls).
 - **Victims are per call, the parity oracle's per step**: the resolve marks its victims' scope (`routed` |= 2 by the
@@ -1063,3 +1063,60 @@ Decided while building, against the text above:
   transform's CPU test compares within rounding.
 - **The delta log** is a region of 2 × items records per layer (panel A: admissions ≤ misses, lends ≤ residents,
   returns ≤ lends), ≈ 147 KB copied to the host per step on the vehicle.
+
+### Step 3's panel fixes (2026-10-18)
+
+Panel A, B and C's findings on step 3, in their own commits (README "Step 3's panel fixes"); the panel's decision on
+prompt-time admission (deferred, §13) is recorded there.
+- **Graph padding is `RowKind.PADDING`** (`6cebfbb`, additive, ABI 1.3's listing): `padded()` gave padding rows
+  the bucket's decode or verify kind, so a unit reading the padded plan's kinds would have counted padding.
+- **No row-kind guess** (`ce10352`): the store refuses a launched plan without `row_kind`; the startup profile's and
+  capture's plans never reach `before_launch` (the executor calls it only in `launch`).
+- **4,096-row mmq calls** (`d070b40`, vendor patch): mmq's id helper sorts up to 32,768 pairs per call — past one
+  block's 16,384, a device-wide path (cub's device radix sort on the compact path's keys and bits, then its rows,
+  bounds and checks in four more kernels, scratch from the call's workspace); the per-slot and compact paths and the
+  locks are unchanged. L0: a 4,096-row call's rows are bitwise the 512-row calls', and the new path flags its three
+  preconditions as the others. Only eager prefill passes reach it (`linear_experts_arena@1` takes a whole D8 pass).
+- **Lending is the device's** (`7846044`, `4773e5f`, `b191782`): a borrowing step's lent slots, ring and stage tables
+  are written by its own kernels, with no host sync (a GPU test runs `Lent` under sync-debug errors).
+  - `lend(need per class)` (each variant's contract; CUDA: sorts and scans): whole experts in the policy's order,
+    ties by expert id then layer — so lending spreads over the layers (8–9 experts per layer for a 1K prompt at 25%,
+    420 in all) instead of emptying the first layers (576 before: 18 layers' every cached expert) —, for each class
+    the first `need` of them holding its slots.
+  - The ring's halves are sized after lending: `ROUNDS` = 4 rounds of twice the most misses of a layer, less what
+    is held, the last asking for the worst case; a ring still short (a cache that cannot lend more) stages instead,
+    the device's choice (`ring_ok`, the stage width in telemetry; no single-buffer ring any more: small caches stage
+    where 3b streamed). Each class's lent slots are pooled (empty slots first); a layer's role takes its half's slots
+    in expert order; a step's misses past the ring go to the graphed staging slots.
+  - The copies are `expert_prefetch@1` from device tables: the fetch kernel (zero-copy reads of the mapped host
+    pool) on its own stream, one small CTA per class — DMA needs host addresses, which only a sync gives; the SM copy
+    costs the pass compute (A5000, 4K at 25%: 4,716 tok/s with one CTA, 3,968 with the staging fetch's eight, DMA
+    5,127).
+  - The return is the device's too, in the lend records' order (call, then expert id), which the host mirror
+    replays at the commit (`ResidencyMap.commit(…, returned=True)`); a step is booked as borrowing when its forward
+    borrows (a graphed step of one-token last chunks never does).
+- **F11's cost** (`4283bbf`): the +0.04 ms per token was all-cached; with candidates ≈ 0.06 ms at 47% and ≈ 0.09 ms
+  at 25% (step 3a's bullet above).
+
+Measured (an A5000 copying host to device at 26 GB/s; step 3b's prefill figures came from one copying at 12.4 GB/s —
+that is why its 1K prefill sat at its own bound, 896 tok/s, not ≈ 2.5× below):
+- **1K prefill, nsys** (25% cached): before, 600 ms per step, copies busy 573 ms (14.8 GB, 25.9 GB/s): PCIe-bound, the
+  bytes 12% over the layers' misses because lending emptied whole layers; after (lending spread, one copy CTA per
+  class), 618 ms, the copies busy 603 ms — still PCIe-bound, ≈ 83% of the bound the misses alone set (≈ 0.51 s; the
+  SM copies run a little under the DMA's rate).
+- **Stage against ring** (tok/s, one request of N tokens, median of 6; `prefill.py`):
+
+| N | 512 | 1K | 2K | 4K |
+|---|---|---|---|---|
+| all-resident | 3,489 | 3,585 | 3,550 | 3,482 |
+| 25%: stage / ring | 853 / 852 | 973 / 1,686 | 957 / 3,307 | 978 / 4,680 |
+| 47%: stage / ring | 1,079 / 1,186 | 1,228 / 2,337 | 1,204 / 4,446 | 1,226 / 4,777 |
+
+  D8's crossover on the A5000 is ≈ 512 tokens (equal at 25%, the ring 10% ahead at 47%): `moe.ring_tokens` stays at
+  512, measured. Against the DMA ring with 2,048-row calls (3b's code on this card): 1K +5% / +34%, 2K +25% / +32%
+  (lending spread), 4K −4% / −1% (4,096-row calls gained ≈ 5–7%, the SM copies cost ≈ 8–9%).
+- **TPOT p99 on the agent trace** (`tpot.py`: mixed steps, `chunk_with_decode` 512, `max_seqs` 8, 47% cached; two
+  rounds per arm): before (lending on the host, two or three syncs per borrowing step) 131.3 / 128.8 ms with
+  borrowing on, 133.7 / 131.9 off; after 126.0 / 121.5 on, 132.0 / 124.0 off — borrowing never cost TPOT p99 here,
+  and without its syncs it is ≈ 3% under the arm without borrowing (rounds vary by ≈ 5%). The per-request maximum
+  gap's p99: before 669 / 735 ms on against 609 / 550 off; after 536 / 523 on against 629 / 631 off.

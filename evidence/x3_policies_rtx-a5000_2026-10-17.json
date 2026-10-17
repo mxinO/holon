@@ -2418,5 +2418,1240 @@
    "passes_512": 0.482,
    "note": "fill cache, minimum pools; the old sizing (512-token passes when not lending) monkeypatched"
   }
+ },
+ "step_3_panel": {
+  "gpu_note": "an RTX A5000 copying host to device at 26 GB/s (measured); step_3b's prefill came from one copying at 12.4 GB/s",
+  "exactness_and_parity": {
+   "commit": "7846044",
+   "runs": [
+    {
+     "name": "lfu10_decode_s8",
+     "cache": "*=0.10",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "decode",
+     "run": 0,
+     "options": {
+      "seqs": "8"
+     },
+     "reference": "resident_decode_seqs8",
+     "build_s": 23.0,
+     "run_s": 106.1,
+     "peak_misses": 52,
+     "steps": 258,
+     "staging": 64,
+     "borrowed": {
+      "ring": 3,
+      "stage": 0
+     },
+     "admissions": 11409,
+     "records": 11913,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 614,
+      "down.q6_k.2048x768": 307,
+      "down.q4_k.2048x768": 307
+     },
+     "parity": {
+      "steps": 258,
+      "decode_steps": 255,
+      "borrowing_steps": 3,
+      "lends": 3,
+      "admissions": 11409,
+      "first_differing_step": null,
+      "device_is_mirror": true
+     },
+     "vs_resident": "identical"
+    },
+    {
+     "name": "lfu10_mixed",
+     "cache": "*=0.10",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "decode",
+     "run": 0,
+     "options": {
+      "seqs": "8",
+      "chunk": "256",
+      "step": "512"
+     },
+     "reference": "resident_decode_chunk256_seqs8_step512",
+     "build_s": 21.3,
+     "run_s": 132.2,
+     "peak_misses": 123,
+     "steps": 293,
+     "staging": 64,
+     "borrowed": {
+      "ring": 3,
+      "stage": 35
+     },
+     "admissions": 9866,
+     "records": 10370,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 614,
+      "down.q6_k.2048x768": 307,
+      "down.q4_k.2048x768": 307
+     },
+     "parity": {
+      "steps": 293,
+      "decode_steps": 290,
+      "borrowing_steps": 38,
+      "lends": 3,
+      "admissions": 9866,
+      "first_differing_step": null,
+      "device_is_mirror": true
+     },
+     "vs_resident": "identical"
+    },
+    {
+     "name": "lfu25",
+     "cache": "*=0.25",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "snapshot",
+     "run": 0,
+     "options": {},
+     "reference": "resident",
+     "build_s": 28.3,
+     "run_s": 31.2,
+     "peak_misses": 89,
+     "steps": 67,
+     "staging": 128,
+     "borrowed": {
+      "ring": 1,
+      "stage": 0
+     },
+     "admissions": 2252,
+     "records": 2672,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     },
+     "parity": {
+      "steps": 67,
+      "decode_steps": 64,
+      "borrowing_steps": 1,
+      "lends": 3,
+      "admissions": 2252,
+      "first_differing_step": null,
+      "device_is_mirror": true
+     },
+     "vs_resident": "identical"
+    },
+    {
+     "name": "lfu25",
+     "cache": "*=0.25",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "snapshot",
+     "run": 1,
+     "options": {},
+     "reference": "resident",
+     "build_s": 22.8,
+     "run_s": 31.2,
+     "peak_misses": 89,
+     "steps": 67,
+     "staging": 128,
+     "borrowed": {
+      "ring": 1,
+      "stage": 0
+     },
+     "admissions": 2252,
+     "records": 2672,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     },
+     "parity": {
+      "steps": 67,
+      "decode_steps": 64,
+      "borrowing_steps": 1,
+      "lends": 3,
+      "admissions": 2252,
+      "first_differing_step": null,
+      "device_is_mirror": true
+     },
+     "vs_resident": "identical",
+     "vs_run_0": "identical"
+    },
+    {
+     "name": "lfu25",
+     "cache": "*=0.25",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "snapshot",
+     "run": 2,
+     "options": {},
+     "reference": "resident",
+     "build_s": 26.4,
+     "run_s": 31.1,
+     "peak_misses": 89,
+     "steps": 67,
+     "staging": 128,
+     "borrowed": {
+      "ring": 1,
+      "stage": 0
+     },
+     "admissions": 2252,
+     "records": 2672,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     },
+     "parity": {
+      "steps": 67,
+      "decode_steps": 64,
+      "borrowing_steps": 1,
+      "lends": 3,
+      "admissions": 2252,
+      "first_differing_step": null,
+      "device_is_mirror": true
+     },
+     "vs_resident": "identical",
+     "vs_run_0": "identical"
+    },
+    {
+     "name": "lfu25_decode_s8",
+     "cache": "*=0.25",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "decode",
+     "run": 0,
+     "options": {
+      "seqs": "8"
+     },
+     "reference": "resident_decode_seqs8",
+     "build_s": 22.9,
+     "run_s": 72.4,
+     "peak_misses": 43,
+     "steps": 258,
+     "staging": 64,
+     "borrowed": {
+      "ring": 3,
+      "stage": 0
+     },
+     "admissions": 23249,
+     "records": 23669,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     },
+     "parity": {
+      "steps": 258,
+      "decode_steps": 255,
+      "borrowing_steps": 3,
+      "lends": 3,
+      "admissions": 23249,
+      "first_differing_step": null,
+      "device_is_mirror": true
+     },
+     "vs_resident": "identical"
+    },
+    {
+     "name": "lfu25_mixed",
+     "cache": "*=0.25",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "decode",
+     "run": 0,
+     "options": {
+      "seqs": "8",
+      "chunk": "256",
+      "step": "512"
+     },
+     "reference": "resident_decode_chunk256_seqs8_step512",
+     "build_s": 23.3,
+     "run_s": 91.0,
+     "peak_misses": 102,
+     "steps": 293,
+     "staging": 64,
+     "borrowed": {
+      "ring": 3,
+      "stage": 35
+     },
+     "admissions": 19773,
+     "records": 20193,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     },
+     "parity": {
+      "steps": 293,
+      "decode_steps": 290,
+      "borrowing_steps": 38,
+      "lends": 3,
+      "admissions": 19773,
+      "first_differing_step": null,
+      "device_is_mirror": true
+     },
+     "vs_resident": "identical"
+    },
+    {
+     "name": "lfu25_ngram",
+     "cache": "*=0.25",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "ngram",
+     "trace": "snapshot",
+     "run": 0,
+     "options": {},
+     "reference": "resident_ngram",
+     "build_s": 37.6,
+     "run_s": 38.8,
+     "peak_misses": 97,
+     "steps": 66,
+     "staging": 128,
+     "borrowed": {
+      "ring": 1,
+      "stage": 0
+     },
+     "admissions": 1535,
+     "records": 1955,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     },
+     "parity": {
+      "steps": 66,
+      "decode_steps": 63,
+      "borrowing_steps": 1,
+      "lends": 3,
+      "admissions": 1535,
+      "first_differing_step": null,
+      "device_is_mirror": true
+     },
+     "vs_resident": "identical"
+    },
+    {
+     "name": "lfu47",
+     "cache": "*=0.47",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "snapshot",
+     "run": 0,
+     "options": {},
+     "reference": "resident",
+     "build_s": 31.0,
+     "run_s": 17.0,
+     "peak_misses": 68,
+     "steps": 67,
+     "staging": 128,
+     "borrowed": {
+      "ring": 1,
+      "stage": 0
+     },
+     "admissions": 3255,
+     "records": 3551,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 2888,
+      "down.q6_k.2048x768": 1444,
+      "down.q4_k.2048x768": 1444
+     },
+     "parity": {
+      "steps": 67,
+      "decode_steps": 64,
+      "borrowing_steps": 1,
+      "lends": 2,
+      "admissions": 3255,
+      "first_differing_step": null,
+      "device_is_mirror": true
+     },
+     "vs_resident": "identical"
+    },
+    {
+     "name": "lfu_fill",
+     "cache": "",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "snapshot",
+     "run": 0,
+     "options": {},
+     "reference": "resident",
+     "build_s": 33.3,
+     "run_s": 3.8,
+     "peak_misses": 3,
+     "steps": 67,
+     "staging": 128,
+     "borrowed": {
+      "ring": 1,
+      "stage": 0
+     },
+     "admissions": 280,
+     "records": 292,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 6024,
+      "down.q6_k.2048x768": 3011,
+      "down.q4_k.2048x768": 3013
+     },
+     "parity": {
+      "steps": 67,
+      "decode_steps": 64,
+      "borrowing_steps": 1,
+      "lends": 1,
+      "admissions": 280,
+      "first_differing_step": null,
+      "device_is_mirror": true
+     },
+     "vs_resident": "identical"
+    },
+    {
+     "name": "lru25",
+     "cache": "*=0.25",
+     "policy": "placement.lru@1",
+     "plant": "",
+     "spec": "",
+     "trace": "snapshot",
+     "run": 0,
+     "options": {},
+     "reference": "resident",
+     "build_s": 27.3,
+     "run_s": 31.3,
+     "peak_misses": 89,
+     "steps": 67,
+     "staging": 128,
+     "borrowed": {
+      "ring": 1,
+      "stage": 0
+     },
+     "admissions": 9503,
+     "records": 9923,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     },
+     "vs_resident": "identical"
+    },
+    {
+     "name": "p_lent_dec_s8",
+     "cache": "*=0.25",
+     "policy": "placement.lfu@1",
+     "plant": "lent-slot-still-mapped",
+     "spec": "",
+     "trace": "decode",
+     "run": 0,
+     "options": {
+      "seqs": "8"
+     },
+     "reference": "resident_decode_seqs8",
+     "build_s": 36.4,
+     "run_s": 64.7,
+     "peak_misses": 40,
+     "steps": 258,
+     "staging": 64,
+     "borrowed": {
+      "ring": 3,
+      "stage": 0
+     },
+     "admissions": 28703,
+     "records": 29087,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     },
+     "parity": {
+      "steps": 258,
+      "decode_steps": 255,
+      "borrowing_steps": 3,
+      "lends": 1,
+      "admissions": 28703,
+      "first_differing_step": 4,
+      "device_is_mirror": false
+     },
+     "vs_resident": "step 4: deltas differ for (request, sequence) [(3, 0), (7, 0)]"
+    },
+    {
+     "name": "p_lent_lfu25",
+     "cache": "*=0.25",
+     "policy": "placement.lfu@1",
+     "plant": "lent-slot-still-mapped",
+     "spec": "",
+     "trace": "snapshot",
+     "run": 0,
+     "options": {},
+     "reference": "resident",
+     "build_s": 30.2,
+     "error": "RuntimeError: moe: step 1's kernels flagged errors {'kernel_errors.0': 4} (errors: 1 = a corrupt residency entry, 2 = the delta log overflowed; edit_errors: a host edit's precondition failed; kernel_errors: the kernel's bits)",
+     "run_s": 1.5,
+     "peak_misses": 0,
+     "steps": 0,
+     "staging": 128,
+     "borrowed": {
+      "ring": 0,
+      "stage": 0
+     },
+     "admissions": 0,
+     "records": 0,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     }
+    },
+    {
+     "name": "p_owner_ring",
+     "cache": "*=0.25",
+     "policy": "placement.lfu@1",
+     "plant": "owner-race",
+     "spec": "",
+     "trace": "decode",
+     "run": 0,
+     "options": {
+      "seqs": "8"
+     },
+     "reference": "resident_decode_seqs8",
+     "build_s": 22.6,
+     "error": "RuntimeError: moe: step 5's kernels flagged errors {'edit_errors': 1} (errors: 1 = a corrupt residency entry, 2 = the delta log overflowed; edit_errors: a host edit's precondition failed; kernel_errors: the kernel's bits)",
+     "run_s": 4.5,
+     "peak_misses": 27,
+     "steps": 4,
+     "staging": 64,
+     "borrowed": {
+      "ring": 3,
+      "stage": 0
+     },
+     "admissions": 1023,
+     "records": 1445,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     }
+    },
+    {
+     "name": "pd25",
+     "cache": "*=0.25",
+     "policy": "placement.profile_decay@1",
+     "plant": "",
+     "spec": "",
+     "trace": "snapshot",
+     "run": 0,
+     "options": {},
+     "reference": "resident",
+     "build_s": 33.7,
+     "run_s": 39.8,
+     "peak_misses": 96,
+     "steps": 67,
+     "staging": 128,
+     "borrowed": {
+      "ring": 0,
+      "stage": 0
+     },
+     "admissions": 0,
+     "records": 0,
+     "swap_rounds": 16,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 1536,
+      "down.q6_k.2048x768": 768,
+      "down.q4_k.2048x768": 768
+     },
+     "vs_resident": "identical"
+    },
+    {
+     "name": "resident",
+     "cache": "resident",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "snapshot",
+     "run": 0,
+     "options": {},
+     "reference": "resident",
+     "build_s": 11.0,
+     "run_s": 3.9
+    },
+    {
+     "name": "resident_decode_chunk256_seqs8_step512",
+     "cache": "resident",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "decode",
+     "run": 0,
+     "options": {
+      "seqs": "8",
+      "chunk": "256",
+      "step": "512"
+     },
+     "reference": "resident_decode_chunk256_seqs8_step512",
+     "build_s": 5.7,
+     "run_s": 9.2
+    },
+    {
+     "name": "resident_decode_seqs8",
+     "cache": "resident",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "",
+     "trace": "decode",
+     "run": 0,
+     "options": {
+      "seqs": "8"
+     },
+     "reference": "resident_decode_seqs8",
+     "build_s": 9.3,
+     "run_s": 8.1
+    },
+    {
+     "name": "resident_ngram",
+     "cache": "resident",
+     "policy": "placement.lfu@1",
+     "plant": "",
+     "spec": "ngram",
+     "trace": "snapshot",
+     "run": 0,
+     "options": {},
+     "reference": "resident_ngram",
+     "build_s": 20.0,
+     "run_s": 7.3
+    },
+    {
+     "name": "static47",
+     "cache": "*=0.47",
+     "policy": "std.tiered.static@1",
+     "plant": "",
+     "spec": "",
+     "trace": "snapshot",
+     "run": 0,
+     "options": {},
+     "reference": "resident",
+     "build_s": 24.0,
+     "run_s": 32.4,
+     "peak_misses": 67,
+     "steps": 67,
+     "staging": 128,
+     "borrowed": {
+      "ring": 0,
+      "stage": 0
+     },
+     "admissions": 0,
+     "records": 0,
+     "swap_rounds": null,
+     "cached_per_class": {
+      "gate_up.q4_k.1536x2048": 2888,
+      "down.q6_k.2048x768": 1444,
+      "down.q4_k.2048x768": 1444
+     },
+     "vs_resident": "identical"
+    }
+   ],
+   "plants_fired": [
+    "plant lent-slot-still-mapped fired: {'lent': 384}",
+    "plant lent-slot-still-mapped fired: {'lent': 384}",
+    "plant owner-race fired: {'edits': 3}"
+   ]
+  },
+  "prefill_tok_s": {
+   "after": {
+    "commit": "b191782",
+    "arms": [
+     {
+      "name": "resident",
+      "cache": "resident",
+      "ring_tokens": "0"
+     },
+     {
+      "name": "stage25",
+      "cache": "*=0.25",
+      "ring_tokens": "0"
+     },
+     {
+      "name": "ring25",
+      "cache": "*=0.25",
+      "ring_tokens": "512"
+     },
+     {
+      "name": "stage47",
+      "cache": "*=0.47",
+      "ring_tokens": "0"
+     },
+     {
+      "name": "ring47",
+      "cache": "*=0.47",
+      "ring_tokens": "512"
+     }
+    ],
+    "rounds": 2,
+    "results": {
+     "resident": {
+      "512": {
+       "median_tok_s": 3488.8,
+       "runs": [
+        3506.8,
+        3627.8,
+        3470.8,
+        3352.7,
+        3517.8,
+        3356.1
+       ]
+      },
+      "1024": {
+       "median_tok_s": 3585.2,
+       "runs": [
+        3574.1,
+        3608.5,
+        3704.8,
+        3415.5,
+        3525.8,
+        3596.3
+       ]
+      },
+      "2048": {
+       "median_tok_s": 3550.0,
+       "runs": [
+        3581.5,
+        3616.6,
+        3624.8,
+        3475.1,
+        3518.5,
+        3510.5
+       ]
+      },
+      "4096": {
+       "median_tok_s": 3481.9,
+       "runs": [
+        3485.8,
+        3561.2,
+        3599.6,
+        3385.1,
+        3459.1,
+        3478.1
+       ]
+      }
+     },
+     "stage25": {
+      "512": {
+       "median_tok_s": 852.8,
+       "runs": [
+        845.1,
+        938.2,
+        853.7,
+        845.6,
+        934.9,
+        851.8
+       ]
+      },
+      "1024": {
+       "median_tok_s": 973.0,
+       "runs": [
+        913.3,
+        974.0,
+        983.2,
+        909.0,
+        972.1,
+        980.1
+       ]
+      },
+      "2048": {
+       "median_tok_s": 956.5,
+       "runs": [
+        931.5,
+        959.1,
+        963.4,
+        932.1,
+        955.9,
+        957.1
+       ]
+      },
+      "4096": {
+       "median_tok_s": 977.5,
+       "runs": [
+        938.2,
+        980.4,
+        988.3,
+        932.6,
+        974.5,
+        983.9
+       ]
+      }
+     },
+     "ring25": {
+      "512": {
+       "median_tok_s": 852.1,
+       "runs": [
+        856.3,
+        855.8,
+        854.8,
+        848.2,
+        849.4,
+        849.5
+       ]
+      },
+      "1024": {
+       "median_tok_s": 1685.7,
+       "runs": [
+        1677.5,
+        1690.2,
+        1686.5,
+        1684.4,
+        1686.6,
+        1685.0
+       ]
+      },
+      "2048": {
+       "median_tok_s": 3306.7,
+       "runs": [
+        3304.4,
+        3292.1,
+        3284.3,
+        3313.0,
+        3309.1,
+        3310.4
+       ]
+      },
+      "4096": {
+       "median_tok_s": 4679.8,
+       "runs": [
+        4726.8,
+        4691.2,
+        4685.2,
+        4674.4,
+        4669.8,
+        4645.3
+       ]
+      }
+     },
+     "stage47": {
+      "512": {
+       "median_tok_s": 1079.3,
+       "runs": [
+        1072.7,
+        1177.7,
+        1083.7,
+        1070.1,
+        1178.8,
+        1074.9
+       ]
+      },
+      "1024": {
+       "median_tok_s": 1227.8,
+       "runs": [
+        1152.2,
+        1228.9,
+        1238.7,
+        1153.9,
+        1226.6,
+        1236.7
+       ]
+      },
+      "2048": {
+       "median_tok_s": 1203.6,
+       "runs": [
+        1178.1,
+        1205.1,
+        1210.7,
+        1173.2,
+        1202.1,
+        1209.1
+       ]
+      },
+      "4096": {
+       "median_tok_s": 1225.7,
+       "runs": [
+        1179.3,
+        1227.5,
+        1234.8,
+        1174.6,
+        1223.8,
+        1233.4
+       ]
+      }
+     },
+     "ring47": {
+      "512": {
+       "median_tok_s": 1185.6,
+       "runs": [
+        1191.9,
+        1191.1,
+        1191.9,
+        1178.1,
+        1179.6,
+        1180.0
+       ]
+      },
+      "1024": {
+       "median_tok_s": 2337.4,
+       "runs": [
+        2342.8,
+        2348.1,
+        2338.7,
+        2336.0,
+        2334.8,
+        2330.9
+       ]
+      },
+      "2048": {
+       "median_tok_s": 4445.8,
+       "runs": [
+        4448.7,
+        4469.3,
+        4448.5,
+        4435.2,
+        4443.2,
+        4401.2
+       ]
+      },
+      "4096": {
+       "median_tok_s": 4777.3,
+       "runs": [
+        4785.2,
+        4783.6,
+        4769.4,
+        4785.9,
+        4771.0,
+        4750.1
+       ]
+      }
+     }
+    }
+   },
+   "dma_4096_row_calls": {
+    "commit": "d070b40",
+    "arms": [
+     {
+      "name": "ring25",
+      "cache": "*=0.25",
+      "ring_tokens": "512"
+     },
+     {
+      "name": "ring47",
+      "cache": "*=0.47",
+      "ring_tokens": "512"
+     }
+    ],
+    "rounds": 2,
+    "results": {
+     "ring25": {
+      "1024": {
+       "median_tok_s": 1542.3,
+       "runs": [
+        1651.8,
+        1551.7,
+        1489.2,
+        1670.2,
+        1532.8,
+        1447.1
+       ]
+      },
+      "2048": {
+       "median_tok_s": 2818.7,
+       "runs": [
+        2803.9,
+        3163.7,
+        2833.6,
+        2503.0,
+        2837.1,
+        2469.9
+       ]
+      },
+      "4096": {
+       "median_tok_s": 5127.0,
+       "runs": [
+        4793.7,
+        5274.2,
+        5030.9,
+        5381.4,
+        5223.1,
+        4984.8
+       ]
+      }
+     },
+     "ring47": {
+      "1024": {
+       "median_tok_s": 1746.6,
+       "runs": [
+        1483.1,
+        1921.5,
+        1556.7,
+        1710.5,
+        1821.3,
+        1782.8
+       ]
+      },
+      "2048": {
+       "median_tok_s": 3238.8,
+       "runs": [
+        3043.4,
+        3487.3,
+        3780.2,
+        3244.6,
+        3233.0,
+        3010.4
+       ]
+      },
+      "4096": {
+       "median_tok_s": 5180.7,
+       "runs": [
+        4874.3,
+        5428.8,
+        5270.2,
+        5380.0,
+        5010.9,
+        5091.1
+       ]
+      }
+     }
+    }
+   },
+   "before_round_1": {
+    "commit": "ce10352",
+    "log": [
+     "resident {512: 3493.1, 1024: 3615.4, 2048: 3627.9, 4096: 3566.0} None",
+     "stage25 {512: 841.6, 1024: 955.2, 2048: 943.0, 4096: 961.1} {'ring': 0, 'stage': 13}",
+     "ring25 {512: 809.6, 1024: 1604.1, 2048: 2644.7, 4096: 4887.5} {'ring': 13, 'stage': 0}",
+     "stage47 {512: 1019.6, 1024: 1150.3, 2048: 1126.9, 4096: 1148.7} {'ring': 0, 'stage': 13}",
+     "ring47 {512: 1004.8, 1024: 1744.1, 2048: 3380.3, 4096: 4819.2} {'ring': 13, 'stage': 0}"
+    ]
+   },
+   "copy_launch_sweep_4k_25pct": {
+    "commit": "4773e5f",
+    "8x256x8": 3968.3,
+    "8x256x8_high_priority_stream": 4013.2,
+    "2x512x8": 4400.0,
+    "1x1024x8": 4593.9,
+    "4x256x8": 4338.4,
+    "2x128x16": 4680.3,
+    "4x128x16": 4431.2,
+    "1x256x16": 4715.5
+   }
+  },
+  "tpot_agent_trace": {
+   "before": {
+    "commit": "ce10352",
+    "cache": "*=0.47",
+    "trace": "agent",
+    "max_seqs": 8,
+    "chunk_with_decode": 512,
+    "runs": [
+     {
+      "arm": "on",
+      "round": 0,
+      "requests": 126,
+      "steps": 3535,
+      "borrowed": {
+       "ring": 42,
+       "stage": 110
+      },
+      "tpot_ms": {
+       "p50": 93.23,
+       "p99": 131.31
+      },
+      "max_gap_ms": {
+       "p50": 526.1,
+       "p99": 668.8
+      },
+      "mixed_steps": 151
+     },
+     {
+      "arm": "off",
+      "round": 0,
+      "requests": 126,
+      "steps": 3767,
+      "borrowed": {
+       "ring": 0,
+       "stage": 0
+      },
+      "tpot_ms": {
+       "p50": 82.76,
+       "p99": 133.65
+      },
+      "max_gap_ms": {
+       "p50": 328.5,
+       "p99": 608.9
+      },
+      "mixed_steps": 154
+     },
+     {
+      "arm": "off",
+      "round": 1,
+      "requests": 126,
+      "steps": 3420,
+      "borrowed": {
+       "ring": 0,
+       "stage": 0
+      },
+      "tpot_ms": {
+       "p50": 104.57,
+       "p99": 131.94
+      },
+      "max_gap_ms": {
+       "p50": 357.2,
+       "p99": 550.3
+      },
+      "mixed_steps": 156
+     },
+     {
+      "arm": "on",
+      "round": 1,
+      "requests": 126,
+      "steps": 3530,
+      "borrowed": {
+       "ring": 41,
+       "stage": 108
+      },
+      "tpot_ms": {
+       "p50": 96.0,
+       "p99": 128.83
+      },
+      "max_gap_ms": {
+       "p50": 546.5,
+       "p99": 735.2
+      },
+      "mixed_steps": 148
+     }
+    ]
+   },
+   "after": {
+    "commit": "b191782",
+    "cache": "*=0.47",
+    "trace": "agent",
+    "max_seqs": 8,
+    "chunk_with_decode": 512,
+    "runs": [
+     {
+      "arm": "on",
+      "round": 0,
+      "requests": 126,
+      "steps": 3580,
+      "borrowed": {
+       "ring": 38,
+       "stage": 112
+      },
+      "tpot_ms": {
+       "p50": 92.28,
+       "p99": 125.99
+      },
+      "max_gap_ms": {
+       "p50": 355.1,
+       "p99": 536.3
+      },
+      "mixed_steps": 150
+     },
+     {
+      "arm": "off",
+      "round": 0,
+      "requests": 126,
+      "steps": 3648,
+      "borrowed": {
+       "ring": 0,
+       "stage": 0
+      },
+      "tpot_ms": {
+       "p50": 88.19,
+       "p99": 132.01
+      },
+      "max_gap_ms": {
+       "p50": 338.3,
+       "p99": 629.3
+      },
+      "mixed_steps": 155
+     },
+     {
+      "arm": "off",
+      "round": 1,
+      "requests": 126,
+      "steps": 3667,
+      "borrowed": {
+       "ring": 0,
+       "stage": 0
+      },
+      "tpot_ms": {
+       "p50": 87.66,
+       "p99": 124.04
+      },
+      "max_gap_ms": {
+       "p50": 336.4,
+       "p99": 631.3
+      },
+      "mixed_steps": 153
+     },
+     {
+      "arm": "on",
+      "round": 1,
+      "requests": 126,
+      "steps": 3590,
+      "borrowed": {
+       "ring": 39,
+       "stage": 111
+      },
+      "tpot_ms": {
+       "p50": 92.9,
+       "p99": 121.49
+      },
+      "max_gap_ms": {
+       "p50": 348.8,
+       "p99": 523.4
+      },
+      "mixed_steps": 149
+     }
+    ]
+   }
+  },
+  "nsys_1k_step_25pct": {
+   "before": {
+    "commit": "ce10352",
+    "step_ms": 599.9,
+    "h2d_gb": 14.82,
+    "copy_busy_ms": 572.7,
+    "lent_experts": 576
+   },
+   "after": {
+    "commit": "b191782",
+    "step_ms": 618.4,
+    "copy_busy_ms": 603.1,
+    "compute_busy_ms": 238.9,
+    "lent_experts": 420
+   }
+  },
+  "nsys_4k_step_25pct": {
+   "dma_4096": {
+    "commit": "d070b40",
+    "step_ms": 851.9,
+    "compute_busy_ms": 715.7,
+    "mmq_ms": 498.2
+   },
+   "device_8_ctas": {
+    "commit": "4773e5f",
+    "step_ms": 1038.3,
+    "compute_busy_ms": 973.0,
+    "mmq_ms": 612.1
+   }
+  },
+  "f11_candidates_batch1_1k": {
+   "commit": "4283bbf",
+   "share_47pct": 0.295,
+   "share_25pct": 0.623,
+   "ms_per_token_47pct": 0.06,
+   "ms_per_token_25pct": 0.09
+  }
  }
 }

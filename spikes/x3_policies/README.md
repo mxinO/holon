@@ -151,3 +151,69 @@ tokens (`std.moe@1`'s binding; its larger calls are not this step's). 32K was no
 empty (R0) — keeping the streamed experts by decode score (R1) or the pass's routing (R2) gains ≤ 0.3% on whole
 traces and costs paid copies or a different ring layout. Counting prefill rows at a routing-proportional weight (Bw12)
 gains 2.1% / 0.7% (agent / mixed, 47%), never loses in a held-out cell; it changes D4 and goes to the panel unbuilt.
+
+# Step 3's panel fixes: device lending, 4,096-row mmq calls, D8's crossover measured
+
+The step-3 panel's findings (A: padding rows' kind; B: the store's row-kind guess; C: 1K prefill, 4,096-row calls,
+lending's host syncs, F11's cost), each in its own commit — `6cebfbb` (RowKind.PADDING), `ce10352` (no guess),
+`d070b40` (mmq's id helper past 16,384 pairs), `7846044` + `4773e5f` + `b191782` (lending on the device), `4283bbf`
+(F11's cost) — and design §14 "Step 3's panel fixes". The A5000 here copies host to device at 26 GB/s
+(measured); step 3b's prefill table above came from one that copies at 12.4 GB/s.
+
+```bash
+python spikes/x3_policies/prefill.py <gguf> <json> 2 512 1024 2048 4096 -- "resident|resident|0" "stage25|*=0.25|0" \
+    "ring25|*=0.25|512" "stage47|*=0.47|0" "ring47|*=0.47|512"
+python spikes/x3_policies/tpot.py <gguf> <json> 2 "*=0.47" on off
+python spikes/x3_policies/candidates.py <gguf> "*=0.47" "*=0.25"
+```
+
+**Exactness and parity with lending on the device** (`7846044`; the later commits change a booking edge case no
+trace here reaches and the copies' launch shape): every run snapshot-identical to all-resident, F11 equal to `replay`
+at every step with the device's map the host mirror:
+
+| Configuration | Trace | Admissions | Borrowing steps (ring / stage) | Run-identical |
+|---|---|---|---|---|
+| F11 `*=0.25` ×3 | snapshot | 2,252 | 1 / 0 | ×3 |
+| F11 `*=0.47`; fill | snapshot | 3,255; 280 | 1 / 0 | — |
+| F11 `*=0.25`, n-gram drafter | snapshot | 1,535 | 1 / 0 | — |
+| F11 `*=0.25` / `*=0.10`, `max_seqs` 8 | decode | 23,249 / 11,409 | 3 / 0 | — |
+| F11 `*=0.25` / `*=0.10`, mixed steps | decode | 19,773 / 9,866 | 3 / 35 | — |
+| F4 `*=0.25`; F2–F3 `*=0.25`; F1 `*=0.47` | snapshot | 9,503; 16 rounds; — | 1 / 0; never; never | — |
+
+Plants: `lent-slot-still-mapped` (384 lent experts kept mapped) — on the decode trace the parity check and the
+snapshot both differ at step 4 and the device's map is not the mirror; on the snapshot trace the id-error word stops
+the engine at step 1. `owner-race` under borrowing: stopped by its precondition flag at step 5.
+
+**1K prefill, nsys** (`*=0.25`, one 1,024-token step): before, 600 ms, copies busy 573 ms (14.8 GB at 25.9 GB/s) —
+PCIe-bound, its bytes 12% over the layers' misses: lending took the first 18 layers' every cached expert (576 experts;
+ties by layer); after, lending spreads (420 experts, 8–9 per layer: ties by expert id, a need per class), 618 ms, the
+SM copies busy 603 ms — still PCIe-bound (the misses alone take ≈ 0.51 s at this link's rate).
+
+**Stage against ring, and 4,096-row calls** (tok/s, one request of N tokens in one step, median of 6 over 2
+interleaved rounds; `b191782`; before: `ce10352`, the DMA ring with layer-ordered lending and 2,048-row calls; DMA
+4,096: `d070b40`):
+
+| Arm | 512 | 1K | 2K | 4K |
+|---|---|---|---|---|
+| all-resident (`std.moe@1`, 512-row calls) | 3,489 | 3,585 | 3,550 | 3,482 |
+| `*=0.25` staged (lent staging, 512-token passes) | 853 | 973 | 957 | 978 |
+| `*=0.25` ring (D8) | 852 | 1,686 | 3,307 | 4,680 |
+| `*=0.25` ring, before / DMA 4,096 | 810 / — | 1,604 / 1,542 | 2,645 / 2,819 | 4,888 / 5,127 |
+| `*=0.47` staged | 1,079 | 1,228 | 1,204 | 1,226 |
+| `*=0.47` ring (D8) | 1,186 | 2,337 | 4,446 | 4,777 |
+| `*=0.47` ring, before / DMA 4,096 | 1,005 / — | 1,744 / 1,747 | 3,380 / 3,239 | 4,819 / 5,181 |
+
+D8's crossover on the A5000 is ≈ 512 tokens (the ring equals staging at 25%, is 10% ahead at 47%), as
+`moe.ring_tokens`' default. 4,096-row calls gain 5–7% at 4K on the DMA ring; the ring's SM copies (no host
+addresses without a sync) cost ≈ 8–9% at 4K, where the pass is compute-bound (one copy CTA per class: 4,716 tok/s at
+25%; eight: 3,968), and nothing where it is PCIe-bound.
+
+**Decode latency on the agent trace** (`tpot.py`, 47% cached, `max_seqs` 8, `chunk_with_decode` 512; ms):
+
+| | TPOT p99, borrowing on | off | max gap p99, on | off |
+|---|---|---|---|---|
+| before (`ce10352`: host lending, 2–3 syncs per borrowing step) | 131.3 / 128.8 | 133.7 / 131.9 | 669 / 735 | 609 / 550 |
+| after (`b191782`: device lending) | 126.0 / 121.5 | 132.0 / 124.0 | 536 / 523 | 629 / 631 |
+
+**F11's cost with candidates** (`candidates.py`): 29.5% of batch-1 decode layer calls have candidates at 47%
+cached, 62.3% at 25% → ≈ 0.06 / 0.09 ms per token (the +0.04 above is all-cached).
