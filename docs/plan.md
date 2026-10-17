@@ -604,6 +604,10 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   SSD under the prefix index, exact, deterministic resume); **FN** Qwen3.8-Flash-Next (QSA + indexer, PLE n-gram
   table, hyper-connections; Qwen3.6-35B-A3B as its first step) compared with Strata; **GLM** GLM-5.3-Flash (MLA + DSA
   indexer, KDA, mHC) compared with Project Maya (owner, 2026-10-17). Qwen3.5-122B-A10B is dropped.
+- **F10 with RAM short** (`docs/v1-offload.md` §14, step 8): promote-on-fetch's spares are unlogged on the device, so
+  the host mirror lags them and exclusive tiers refuse F10. A std minor — a delta-log record "push b's slots onto the
+  layer's empty stack", replayed by `ResidencyMap.commit` outside borrowing steps — makes the mirror exact; it lands at
+  the start of the GLM milestone, which needs F10 with RAM short.
 - VMM ledger + live rebalance KV ↔ experts through `quiesce` (run-identical after shrink/regrow).
 - PIECEWISE graphs for mixed prefill/decode steps (mixing itself is M0.7's core budget `chunk_with_decode`, design
   §7.1; mixing verify rows is its follow-up, `docs/m07-perf.md` §9); depth 2; radix PrefixIndex if profiles warrant.

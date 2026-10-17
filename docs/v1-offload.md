@@ -881,7 +881,8 @@ builds from the vendored llama.cpp's pin (51ce9c1) unless step 6 aligns it with 
 re-added slots; Movers are S2 MemOps); §6.1 (the fill step and pinned split in the budget order); §6.4 and D8
 (per-layer ready events and layer-wise loading stay planned; prefix tiers move to milestone K); §7.10 (adaptive
 placement may run in snapshots when the consumer is placement-invariant); §9's expert-cache row (no VMM in the first
-wave). Design is updated with X's code, as M0.7 did.
+wave). Design is updated with X's code, as M0.7 did — done at step 8 (`docs/design.md` D8, §4.2, §4.5, §6.1, §6.4,
+§6.5, §7.4, §7.10, §9).
 
 ## 14. Step 2 as built (2026-10-17)
 
@@ -1489,8 +1490,8 @@ Decided while building, against the text above:
   delta log's records says "slot kept by the device"); the record comes when another expert takes the spare
   (`(group, a, owner)`), so until then the mirror maps the owner at the spare's slots. Nothing in std reads those
   entries (no host edits, lending picks only device-resident experts, exclusive tiers refuse F10); the judge's
-  `route_dump` reads the mirror, so under F10 its `mirrored` is false and its residency counts owners — F10's parity
-  check reads the device's map instead (the spike's `run.py`, the test).
+  `route_dump` read the mirror, so under F10 its residency counted owners — F10's parity check reads the device's map
+  instead (the spike's `run.py`, the test). Since step 8 `route_dump` reads the device's map too (below).
 - **The spares start absent** and the first decode call's boundary sets them up by LRU, ties by expert id (M6 set
   them up at the seed from the profile's coldest; the store zeroes a policy's state at the seed). An owner promoted
   back takes its own spare unlogged and unfetched (no list holds a spare's slots, so its bytes are intact).
@@ -1499,10 +1500,40 @@ Decided while building, against the text above:
 - **F10 under exclusive tiers is refused** (no heat to rank RAM by, and its unlogged evictions would bypass
   `moe_tiers@1`'s placement of victims), though D10's replay found F10's spares best in 4 of 9 RAM-short cells:
   RAM-short F10 needs the std record above.
-- **A1's best rank is over the expert pass's rows**, graph padding and other requests included (the transform sees no
-  row kinds): a request's drops depend on its batch, as Strata's do (it turns the skip off with parallel slots); the
-  human gate's L2 ran at one request per step.
+- **A1's best rank is over the expert pass's rows**, other requests' included (the transform sees no row kinds): a
+  request's drops depend on its batch, as Strata's do (it turns the skip off with parallel slots); the human gate's L2
+  ran at one request per step. Graph padding counted too until step 8, which hands its rows in dropped (below).
 - **The page-cache tier's own decisions:** every piece, no pinned or device memory, files opened buffered with
   random-access advice. Its decode against `gguf_direct` is not claimed: the checkpoint sits on a network filesystem
   whose client cache served both (16.5 tok/s each once warm).
 - **Not built:** ARC (the bonus).
+
+### Step 8, part 1 (2026-10-18): the step-7 panel's fixes, the held-out proof's finding, records, suite
+
+The step-7 panel's findings, each its own commit with a test that fails without it:
+
+| Finding | Fix | Commit |
+|---|---|---|
+| A: `route_dump` records the host mirror's residency, so F10's dumps count its spares' owners resident | it records the device's map as each step left it (`device_maps`: copied on the device at the next launch, which precedes the commit under overlap, else read at the commit; one copy per step, judge runs only); the `resolve-off-by-one` plant's "steps with misses" reads it too. F10's CPU test checks every step's residency against the device's (fails with the mirror); the overlapped lfu parity tests fail if the map is read at the commit | `bc21f87` |
+| C: nothing keeps an `approx` plugin out of a default lock | `propagate.write`, the only lock writer of `tune` and `propagate`, refuses a plan binding a plugin whose manifest declares `numerics = "approx"` unless `--allow-approx` (a human gate); tested with A1's installed manifest | `0bcf164` |
+| C: A1's best rank counts graph padding rows | the store hands a route transform padding rows' ids as −1 (it knows each token's row kind): a post-tag std bug fix, `moe_route_transform@1`'s signature unchanged | `3572b98` |
+| B: the plugin independence contract lists kernels by name (it had missed `kernels.promote` and `kernels.triton_fp8`; policies, tiers, transforms and models had none) | one import-linter independence contract over `holon_plugins.<family>.*` for every family: a new plugin is covered as it lands, a new family adds one expression; a planted cross-plugin import breaks it | `a293763` |
+
+**The held-out proof's finding: F10's mirror gap.** F10 landed plugin-only, as acceptance 1 asks, and in doing so
+found what the tagged std API cannot say. D4's host refill of F10's spares has no form a plugin can use (a
+device-owned policy may not edit, and no host edit hands a slot to a device-owned region), and no delta record says
+"a slot kept by the device", so the spares are the device's own and unlogged: the host mirror maps a spare's owner
+until another expert takes the spare, and F10 is refused under exclusive tiers, whose victim placement
+(`moe_tiers@1`) needs every eviction logged. The fix is a **std minor**: a delta-log record "push b's slots onto the
+layer's empty stack", replayed by `ResidencyMap.commit` outside borrowing steps too (today it pushes only a borrowing
+step's lent slots), with which a spare is an empty slot the device logged and the mirror stays exact. It is scheduled
+at the **start of the GLM milestone**, which needs F10 with RAM short (D10's replay: F10's spares least in 4 of 9
+RAM-short cells; Maya's structure); X needs neither (its default is F11 with RAM holding every expert). Plan §10
+lists it.
+
+**A1's human gate** (step 7's README; rank 7, tail skip against the no-skip candidate at F11's own placement, frozen
+at the end of a decode trace, one token per step, top-20 bucketed KL): at 25% cached KL mean 9.63e-3, top-1 97.32%,
+ΔPPL +0.62% ± 0.19%; at the natural 47% fit 7.32e-3, 97.68%, −0.12% ± 0.16% (more cached, fewer misses to drop).
+Against the mmvq floor at a frozen 25% placement it is outside the exact budgets (top-1 97.15%, ΔPPL +1.01%), as §6
+expected; decode at 25% cached under F11 gains +11.2% (46.45 → 51.67 tok/s), inside Strata's +10–24%. A1 stays
+`approx`: opt-in by `moe.route_transform = tail_skip`, a lock binding it only with `--allow-approx`.
