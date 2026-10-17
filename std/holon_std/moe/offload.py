@@ -6,7 +6,8 @@ gathered into staging slots — and `linear_experts_arena@1` runs over each clas
 
 Options (EngineConfig.plugin_options): `moe.placement` (a policy's unit Ref; default `placement.lfu@1`, F11, while
 the RAM tier holds every expert, also the RAM-short default (F11 with deferred admission); `std.tiered.static@1` is F1),
-`moe.placement.profile` (routing counts, JSON `{"layers": {"<layer>": [count per expert]}}`, named relative to the
+`moe.placement.profile` (routing counts written by `holon_tools profile`, JSON `{"checkpoint": [[file, bytes], …],
+"layers": {"<layer>": [count per expert]}}`, refused on another checkpoint's files, named relative to the
 checkpoint's directory), `moe.tiers` (host tiers' Refs, comma-separated; default `std.tiered.pinned@1`), `moe.ram`
 (the RAM tier's units per class, forwarded to it: fewer than every expert makes RAM exclusive, a slower tier holding
 the rest), `moe.cache` (cache slots per class, pinned: `<class>=<n>` or `<class>=<fraction>`, `*` for every class not

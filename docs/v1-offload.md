@@ -1442,7 +1442,7 @@ interleaved; llama.cpp and FreeToken at x4_refs' pins).
     - An all-pinned arena short of its size refuses at the store's first launch (D4), rather than taking the paged
       floor or running without its cache.
       - Launches follow the final materialize, and the startup profile never launches.
-      - This is panel B's form (`ab4d6c1`): no core field and no reading of the ledger, which is not in the plugin
+      - This is panel B's form (`bc3f25c`): no core field and no reading of the ledger, which is not in the plugin
         ABI.
     - On the 5080 the fill's 3,236 / 1,618 / 1,618 (52.7%) now pin as they are. The scratch lock was regenerated at
       them with the same L2 and a snapshot run-identical ×3.

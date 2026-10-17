@@ -230,7 +230,7 @@ The two std changes below are bug fixes found at the gate, made after the tag, a
     final there.
     - Panel A found that `8c5a826`'s first version decided "this materialize was sized" by probing core internals: the
       ledger, `Pool.min_units`. A budget that left every pool at its minimum read as unsized, so it ran with no cache.
-    - Panel B asked for the check at the first `before_launch` instead. That is `ab4d6c1`, which needs no core field
+    - Panel B asked for the check at the first `before_launch` instead. That is `bc3f25c`, which needs no core field
       and no ledger access.
   - Test: a fill's counts pin exactly at its floor and serve. Two cases refuse at the first launch:
     - one expert more per class than the fill;
