@@ -7,7 +7,8 @@ placement policy, optionally with a planted bug or the n-gram drafter:
 `<cache>` is `resident` or a `moe.cache` value; `<policy>` a `moe.placement` Ref (empty: the default, F11);
 `<plant>` a judge plant; `<spec>` `ngram` for the n-gram drafter (3 drafts, the rejection verifier); `<t>` `decode`: the
 decode-heavy parity trace instead of the snapshot trace (the first 8 prompts, 256 greedy tokens each); `<o>`:
-`seqs=<n>` (max_seqs) and `ring=<n>` (moe.ring_tokens), comma-separated. Every
+`seqs=<n>` (max_seqs), `ring=<n>` (moe.ring_tokens), `chunk=<n>` (chunk_with_decode: mixed steps) and `step=<n>`
+(max_step_tokens), comma-separated. Every
 engine keeps enough KV that the trace never preempts. Each run writes its snapshot and a summary (admissions and delta
 records from the route dump, the policy's swap rounds, F11's L1 parity against its replay oracle, the error that
 stopped the engine if one did); the first run of each F11 configuration also writes its route trace (`.npz`).
@@ -51,12 +52,13 @@ def main() -> None:
                 kw = kw | dict(host_memory=20 << 30, plugin_options=kw.get("plugin_options", {}) | {
                     "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy} | (
                     {"moe.ring_tokens": int(extra["ring"])} if "ring" in extra else {}))
-            if "seqs" in extra:
-                kw["max_seqs"] = int(extra["seqs"])
+            for key, field in (("seqs", "max_seqs"), ("chunk", "chunk_with_decode"), ("step", "max_step_tokens")):
+                if key in extra:
+                    kw[field] = int(extra[key])
             meta = {"name": name, "cache": cache, "policy": policy or "placement.lfu@1", "plant": plant,
                     "spec": spec, "trace": kind[0] if kind and kind[0] else "snapshot", "run": run, "options": extra,
                     "reference": "resident" + "_ngram" * bool(spec) + "_decode" * bool(kind and kind[0])
-                    + (f"_s{extra['seqs']}" if "seqs" in extra else "")}
+                    + "".join(f"_{k}{v}" for k, v in sorted(extra.items()) if k != "ring")}
             t = time.time()
             with PLANTS[plant]() if plant else contextlib.nullcontext():
                 engine = Engine(EngineConfig(model=model, **(ENGINE | kw)))

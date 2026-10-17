@@ -284,15 +284,17 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe, tmp_path, polic
     missing experts through a ring of lent slots (`moe.ring_tokens`), a smaller one stages its misses in lent slots
     (its staging slots hold a graphed step's, 3 rows × top-2); the slots come back empty, each its layer's first
     victim: the outputs are the resident store's, the cache never shrinks (per class, resident pieces + empty slots
-    stay the seed's), and F11's residency, empty slots included, is its replay oracle's at every step."""
+    stay the seed's), and F11's residency, empty slots included, is its replay oracle's at every step — mixed steps
+    (decode rows and a prompt chunk, `chunk_with_decode`) included."""
     from holon_judge.placement import parity, route_dump
 
     checkpoint, prompts = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
     want = _served(_engine(file), prompts)
-    engine = _engine(file, host_memory=1 << 24, plugin_options={
+    engine = _engine(file, host_memory=1 << 24, chunk_with_decode=4, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.placement": policy, "moe.ring_tokens": 10})
-    store = engine.ctx.shared_objects[KEY]
+    store, mixed = engine.ctx.shared_objects[KEY], []
+    store.taps.append(lambda step, record: mixed.append(step.n_decode > 0))
     assert store.staging == 6 and store.prefill == 8
     held = []
 
@@ -303,9 +305,11 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe, tmp_path, polic
                 per[store.class_table[g, r]] += int((row[:, r] >= 0).sum()) + len(store.residency.empty[g])
         held.append(per)
     store.taps.append(size)
+    fresh = [[(t + 11) % 512 for t in p] for p in prompts]        # no prefix-cache hit: their prompts mix with decodes
     with route_dump(engine) as trace:
         assert _served(engine, prompts) == want
-    assert store.borrowed["ring"] and store.borrowed["stage"], store.borrowed
+        assert engine.generate(fresh, GREEDY) == _engine(file).generate(fresh, GREEDY)
+    assert store.borrowed["ring"] and store.borrowed["stage"] and any(mixed), store.borrowed
     assert all((h == held[0]).all() for h in held) and held[0].tolist() == [8, 8]
     assert trace.mirrored
     if not policy:
