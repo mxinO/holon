@@ -5,6 +5,7 @@ generate 1), `--rounds` per arm after a warm-up round (one engine at a time: nam
 with each arm's CPU share from the route taps.
 
     python spikes/x6_cpu/decode.py <model.gguf> <out.json> "<name>|<plugin options k=v;k=v>" ... [--batch 1]
+           (`host_memory=<bytes>` among an arm's options sets its engine's: a RAM-capped arm)
            [--tokens 128] [--depth 512] [--rounds 3] [--engine-args "<holon serve flags>"]
 """
 import argparse
@@ -44,8 +45,11 @@ def main() -> None:
     results = {}
     for arm in a.arms:                                   # one engine at a time: measure all rounds, keep the numbers
         name, _, opts = arm.partition("|")
+        seen = [k for k in results if k.split("#")[0] == name]
+        name += f"#{len(seen)}" if seen else ""
         extra = dict(kv.split("=", 1) for kv in opts.split(";") if kv)
-        cfg = dataclasses.replace(base, max_seqs=a.batch, prefix_cache=False,
+        host = int(extra.pop("host_memory", base.host_memory))     # (an engine setting: a RAM-capped arm's)
+        cfg = dataclasses.replace(base, max_seqs=a.batch, prefix_cache=False, host_memory=host,
                                   plugin_options=base.plugin_options | extra)
         t0 = time.time()
         engine = Engine(cfg)
@@ -69,7 +73,10 @@ def main() -> None:
                 rates.append(a.batch * a.tokens / (total - one))
         resident = None if store is None else int((store.residency.host >= 0).all(-1).sum())
         decode = [s for s in steps if s[2]]
-        results[name] = {"options": extra, "tok_s": rates, "median": statistics.median(rates), "build_s": round(built),
+        io = engine.ctx.shared_objects.get("cpu_task.io")
+        results[name] = {"options": extra, "host_memory": host, "tok_s": rates,
+                         "io_served": io.native.served() if io else None, "median": statistics.median(rates),
+                         "build_s": round(built),
                          "resident_experts": resident,
                          "cpu_experts_per_token": float(np.sum([s[1] for s in decode]) / max(1, a.batch * len(decode))),
                          "worker": None if "cpu_task.compute" not in engine.ctx.shared_objects else

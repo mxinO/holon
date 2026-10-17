@@ -130,7 +130,7 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
     placed: set[tuple[int, int]] = set()
 
     def free_units() -> list[int] | None:
-        units = [next((u for u in range(int(capacity[c])) if owner[c, u] < 0), None) for c in cls]
+        units = [next((u for u in range(int(capacity[c])) if owner[c, u] == -1), None) for c in cls]
         return None if None in units else units
 
     def coldest(than: float) -> tuple[int, int] | None:
@@ -142,7 +142,8 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
             if classes[gg].tolist() != cls:
                 continue
             for e in range(experts):
-                if (residency[gg, e] == -1).all() and (gg, e) not in placed and not (gg == g and e in routed):
+                if (residency[gg, e] == -1).all() and (host[gg, e] >= 0).all() and (gg, e) not in placed and \
+                        not (gg == g and e in routed):
                     key = (float(heat[gg, e]), gg, e)
                     best = key if best is None or key < best else best
         return None if best is None or not best[0] < than else best[1:]
@@ -178,8 +179,8 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
                 fetch[r, 1, entry[r, slots[r]]] = stage[r, staged[r] + j]
                 moves[r, 2:4, n_moves[r, 1]] = torch.tensor([int(stage[r, staged[r] + j]), slots[r]])
                 n_moves[r, 1] += 1
-            if source[r] >= 0:
-                owner[c, source[r]] = -1                                 # (b takes it, below, if it came from RAM)
+            if source[r] >= 0:                                           # b takes it (below), else freed after the
+                owner[c, source[r]] = -1 if b >= 0 else -2               # call (the gather still reads it)
         if b >= 0:
             units = place(b, source if all(u >= 0 for u in source) else None)
             if units is not None:
@@ -200,6 +201,7 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
             unit = kept[r] if kept is not None else int(capacity[c]) + i
             io[r].append((int(piece[g, e, r]), unit))
             fetch[r, 0, i] = unit
+    owner[owner == -2] = -1
     return {"fetch": fetch, "residency": residency, "host": host, "owner": owner, "io": io, "moves": moves,
             "n_moves": n_moves}
 

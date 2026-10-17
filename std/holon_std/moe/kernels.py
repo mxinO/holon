@@ -113,7 +113,7 @@ signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (mo
      b's slot → that unit, after the fetch read it), else a free unit of each of its classes, else the units of RAM's
      coldest expert of its classes (least heat, then group, then id; not routed by the call, not placed by it) when b
      is strictly hotter — that expert goes to the SSD —, else the SSD. An admission into an empty slot (b ≤ −2) needs
-     no move. An admitted a's RAM units go to b or are freed.
+     no move. An admitted a's RAM units go to b, or are freed for the next call (the gather still reads them).
   2. Its SSD misses (fetch sources −2 − e) routed by a `DECODE` row and not admitted, in a call with one: kept in RAM
      (D10's keep rule) as b would be placed (free units, else the coldest when strictly colder), else not.
   3. The SSD reads: per role the pieces (`piece`) and the units they land in — a kept piece its RAM unit, any other

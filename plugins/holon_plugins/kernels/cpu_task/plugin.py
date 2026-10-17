@@ -47,7 +47,7 @@ class Service:
             raise ValueError(f"{self.name}: {n} threads on cores {self.cores}")
         self.memop = {"spin": False, "memop": True}[str(opts.get("cpu_task.wait", "spin"))]
         self.timeout_ns = int(float(opts.get("cpu_task.timeout", TIMEOUT)) * 1e9)
-        self.tasks, self.native, self.words = [], None, None
+        self.tasks, self.native, self.words, self.left = [], None, None, False
 
     def bind(self, task) -> int:
         if self.native is not None:
@@ -69,8 +69,11 @@ class Service:
             self.native = self.lib.Worker(host.data_ptr(), device.data_ptr(), [t.native for t in self.tasks],
                                           self.cores, self.timeout_ns, self.memop)
 
-    def shutdown(self) -> None:
-        if self.native is not None and self.native.stop():
+    def shutdown(self) -> None:                     # (idempotent: a store may stop its I/O worker first)
+        if self.left or self.native is None:
+            return
+        self.left = self.native.stop()
+        if self.left:
             # A coordinator stuck in a task past the time bound was left behind: it may still write the words and its
             # tasks' buffers, so this object (and through its tasks, theirs) is leaked on purpose, never freed.
             ctypes.pythonapi.Py_IncRef(ctypes.py_object(self))

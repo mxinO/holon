@@ -519,7 +519,8 @@ def test_exclusive_tiers_serve_what_the_resident_store_does(tiny_moe, tmp_path):
             role = [next(r for r, x in store.groups[store.layers[gg]].items() if x is c) for gg in g]
             assert len(set(owner[owner >= 0])) == len(g) and (host[g, e, role] == np.flatnonzero(owner >= 0)).all()
         engine.close()
-    for refused in ({"moe.tiers": "std.tiered.pinned@1"}, {"moe.placement": "placement.lru@1"}):
+    for refused in ({"moe.tiers": "std.tiered.pinned@1"}, {"moe.placement": "placement.lru@1"},
+                    {"moe.placement": "placement.profile_decay@1"}):
         with pytest.raises(NotImplementedError, match="fewer pieces"):
             _engine(file, host_memory=1 << 24, plugin_options=short | refused)
 
@@ -647,7 +648,8 @@ def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
     """F5b on the native path (kernels.expert_io's resolve and row patch, kernels.cpu_task's worker in decode graphs,
     kernels.ggml_cpu's experts): steps of up to 4 tokens give the CPU half the misses (rounded up) at a quarter cached;
     prompt logprobs stay close to the resident store's at the same step size (bounded), two engines serve the same
-    bits (static placement; F11's residency is its replay's, the CPU's misses never admitted), and a dead worker fails
+    bits (static placement; F11's residency is its replay's, the CPU's misses never admitted; with exclusive tiers too,
+    the I/O worker reading SSD pieces beside the CPU's), and a dead worker fails
     open: the wait gives up after its time bound and the step's commit stops the engine."""
     from holon_judge.placement import parity, route_dump
 
@@ -658,9 +660,11 @@ def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
     engine.close()
     split = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.cpu_plan": "1,1,2,2",
              "cpu_task.threads": 2, "cpu_task.timeout": 0.5}
+    short = {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.5"}   # + exclusive tiers
     runs = []
-    for policy in ("std.tiered.static@1", "std.tiered.static@1", ""):
-        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=split | {"moe.placement": policy}, **small)
+    for policy, ram in (("std.tiered.static@1", {}), ("std.tiered.static@1", {}), ("", short), ("", {})):
+        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=split | ram | {"moe.placement": policy},
+                             **small)
         with route_dump(engine) as trace:
             runs.append(_served(engine, prompts))
         worker = engine.ctx.shared_objects["cpu_task.compute"].native
@@ -668,7 +672,13 @@ def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
         assert sum(s["cpu"].sum() for s in trace.steps) > 0
         if not policy:
             assert parity(trace)["first_differing_step"] is None and trace.admissions > 0
-        else:
+        if ram:                                   # the I/O worker beside the compute one, both clean
+            io = engine.ctx.shared_objects["cpu_task.io"].native
+            assert io.served() > 0 and io.flag() == 0
+            close = [np.abs(np.array(a) - np.array(b)) for (_, _, a), (_, _, b) in zip(runs[-1][1], want[1],
+                                                                                       strict=True) if a]
+            assert np.median(np.concatenate([c.ravel() for c in close])) < 0.03
+        if policy or ram:
             engine.close()
     assert runs[0] == runs[1]
     assert {(k.rpartition("/")[2], v["provider"]) for k, v in engine.ctx.kernels.items() if k.startswith("std.moe.cpu")

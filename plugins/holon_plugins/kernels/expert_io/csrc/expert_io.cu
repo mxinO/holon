@@ -479,12 +479,13 @@ struct Tiers {
 };
 
 constexpr int TIER_THREADS = 256;
+constexpr int FREED = -2;                              // an owner freed by the call: reusable from the next one
 
 // The first free unit of class c (-1: none), every thread joining.
 __device__ int first_free(const Tiers & T, int c, int * red) {
     int best = INT_MAX;
     for (int u = threadIdx.x; u < T.capacity[c]; u += blockDim.x) {
-        if (T.owner[c * T.units + u] < 0) {
+        if (T.owner[c * T.units + u] == -1) {
             best = min(best, u);
             break;                                     // a thread's later units are larger
         }
@@ -512,7 +513,8 @@ __device__ int coldest(const Tiers & T, int g, int roles, int experts, float tha
         const int gg = x / experts, e = x % experts;
         bool ok = !(gg == g && flags[e] & (1 | 4));    // routed by the call (1), placed by it (4)
         for (int r = 0; r < roles && ok; ++r) {
-            ok = T.classes[gg * roles + r] == T.classes[g * roles + r] && T.residency[x * roles + r] == -1;
+            ok = T.classes[gg * roles + r] == T.classes[g * roles + r] && T.residency[x * roles + r] == -1 &&
+                 T.host[x * roles + r] >= 0;
         }
         if (ok) {
             const float h = T.heat[x];
@@ -656,8 +658,8 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
                     const int m = T.n_moves[r * 2 + 1]++;
                     T.moves[(r * 4 + 2) * F + m] = to;
                     T.moves[(r * 4 + 3) * F + m] = slot;
-                } else if (src[r] >= 0) {              // into an empty slot: its RAM unit freed
-                    T.owner[T.classes[g * roles + r] * T.units + src[r]] = -1;
+                } else if (src[r] >= 0) {              // into an empty slot: its RAM unit freed after the call (the
+                    T.owner[T.classes[g * roles + r] * T.units + src[r]] = FREED;   // gather still reads it)
                 }
             }
         }
@@ -719,6 +721,14 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
             }
         }
         __syncthreads();
+    }
+    for (int r = 0; r < roles; ++r) {                  // the units freed by the call: free from the next one
+        int32_t * owner = T.owner + T.classes[g * roles + r] * T.units;
+        for (int u = tid; u < T.capacity[T.classes[g * roles + r]]; u += blockDim.x) {
+            if (owner[u] == FREED) {
+                owner[u] = -1;
+            }
+        }
     }
 }
 

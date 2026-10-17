@@ -23,6 +23,7 @@
 #include <torch/extension.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
@@ -525,6 +526,9 @@ class Copy {
         int64_t got = 0;
         while (got < hi - lo) {
             const ssize_t n = pread(fd, buf + got, size_t(hi - lo - got), lo + got);
+            if (n < 0 && errno == EINTR) {
+                continue;                             // a signal: read on
+            }
             if (n <= 0) {
                 break;                                // the file's end (an O_DIRECT tail), or an error
             }

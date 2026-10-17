@@ -26,6 +26,7 @@ class PlacementPolicy(Protocol):
     resolve_variant: str | None   # the resolve contract its device state needs; None: `moe_resolve@1`
     device_owned: bool            # the device's resolver owns the whole cache: the host seeds it, never edits it
     heat: str | None              # (optional) the device state an exclusive RAM tier ranks experts by (D10: "hotter")
+    frozen: bool                  # (optional) a host policy that never swaps after the seed
 
     def device_state(self) -> dict[str, tuple[tuple[int, ...], str]]:
         """Device buffers its resolve contract keeps across steps, per group: name -> (shape, dtype). The store holds

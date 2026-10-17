@@ -176,10 +176,12 @@ class TieredStore:
             for c in self.classes.values():
                 c.held = self.tiers[0].holds(c.name, len(c.pieces))
             self.exclusive = any(c.held < len(c.pieces) for c in self.classes.values())
-            if self.exclusive and (len(self.tiers) < 2 or self.policy.device_owned and
-                                   getattr(self.policy, "heat", None) is None):
+            ranked = self.policy.device_owned and getattr(self.policy, "heat", None) is not None
+            if self.exclusive and (len(self.tiers) < 2 or not (ranked or getattr(self.policy, "frozen", False))):
                 raise NotImplementedError(f"{self.name}: RAM holds fewer pieces than the store: a slower tier must "
-                                          f"hold the rest, and {self.policy_ref} name the heat it ranks by")
+                                          f"hold the rest, and the policy ({self.policy_ref}) own the cache on the "
+                                          "device naming the heat it ranks by, or never edit it (host edits would "
+                                          "copy from RAM units the graph moves)")
             if not self.policy.device_owned or any(cap < self.prefill for cap in pinned) or self.exclusive:
                 # A host policy lends two-phase (not built), a small pinned cache cannot lend a pass's staging, an
                 # exclusive RAM tier would demote what it lends (not built): the staging slots hold a prefill pass's
@@ -490,6 +492,13 @@ class TieredStore:
             self._swap(step.step, swaps)
 
     def shutdown(self) -> None:
+        """The I/O worker first (its reads use the file tier's descriptors), then the tiers — unless the worker left
+        its coordinator behind (still in a read past its time bound): then the descriptors stay open."""
+        service = getattr(self.io, "service", None) if self.exclusive else None    # (a native worker's)
+        if service is not None:
+            service.shutdown()
+            if service.left:
+                return
         for t in self.tiers:
             getattr(t, "shutdown", lambda: None)()
 

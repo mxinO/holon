@@ -10,6 +10,7 @@ class Static:
     resolve_variant = None
     device_owned = False
     heat = None                   # under exclusive RAM: no displacement (keeps take free units only)
+    frozen = True                 # never edits after the seed: exclusive tiers allow it
 
     def __init__(self, ctx, **site) -> None:
         pass

@@ -4,9 +4,9 @@ as spikes/x3_policies/run.py records them (the same engine settings), for step 6
 
     python spikes/x6_cpu/run.py <model.gguf> <out dir> "<name>|<runs>|<plant>|<plugin options k=v;k=v>" ...
 
-Empty options: all-resident (`std.moe@1`). Each run writes `<name>_<run>.json` (its snapshot) and `.meta.json` (the
-store's and the CPU worker's counts, F11's L1 parity under `placement.lfu@1`, the error that stopped the engine if one
-did)."""
+Empty options: all-resident (`std.moe@1`); `host_memory=<bytes>` among them sets the engine's (default 21 GiB). Each
+run writes `<name>_<run>.json` (its snapshot) and `.meta.json` (the store's and the CPU worker's counts, F11's L1
+parity under `placement.lfu@1`, the error that stopped the engine if one did)."""
 import contextlib
 import gc
 import json
@@ -32,8 +32,9 @@ def main() -> None:
     for config in sys.argv[3:]:
         name, runs, plant, opts = config.split("|")
         options = dict(kv.split("=", 1) for kv in opts.split(";") if kv)
+        host = int(options.pop("host_memory", 21 << 30))          # (an engine setting: a RAM-capped run's)
         for run in range(int(runs)):
-            kw = dict(host_memory=21 << 30, plugin_options=options) if options else {}
+            kw = dict(host_memory=host, plugin_options=options) if options else {}
             meta = {"name": name, "plant": plant, "options": options, "run": run}
             t = time.time()
             with PLANTS[plant]() if plant else contextlib.nullcontext():
