@@ -1439,7 +1439,10 @@ interleaved; llama.cpp and FreeToken at x4_refs' pins).
     cache's `blobs/` is shared.
   - **`8c5a826`:** a pinned arena is a fill pool too.
     - Its minimum is a prefill pass's staging, its preference the pinned size, so pinned and fill profile alike.
-    - A sized materialize that leaves an all-pinned arena short refuses to start (D4) rather than taking the paged
-      floor.
+    - An all-pinned arena short of its size refuses at the store's first launch (D4), rather than taking the paged
+      floor or running without its cache.
+      - Launches follow the final materialize, and the startup profile never launches.
+      - This is panel B's form (`ab4d6c1`): no core field and no reading of the ledger, which is not in the plugin
+        ABI.
     - On the 5080 the fill's 3,236 / 1,618 / 1,618 (52.7%) now pin as they are. The scratch lock was regenerated at
       them with the same L2 and a snapshot run-identical ×3.

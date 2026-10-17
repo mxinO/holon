@@ -225,10 +225,18 @@ The two std changes below are bug fixes found at the gate, made after the tag, a
     the fill was profiled at its minimum.
   - Now both modes request one fill pool. Its minimum is a prefill pass's staging and its preference the pinned size.
     Both modes profile the same minimum and grow above the floor alike.
-  - A sized materialize that leaves an all-pinned arena short of its size refuses to start, rather than taking the
-    paged floor.
-  - Test: a fill's counts pin exactly at its floor, and one expert more per class is refused. That pin started before
-    the fix, taking the floor.
+  - An all-pinned arena short of its size refuses at the store's first launch, rather than taking the paged floor.
+    Launches come only after the final materialize, since the startup profile never launches, so the arena's size is
+    final there.
+    - Panel A found that `8c5a826`'s first version decided "this materialize was sized" by probing core internals: the
+      ledger, `Pool.min_units`. A budget that left every pool at its minimum read as unsized, so it ran with no cache.
+    - Panel B asked for the check at the first `before_launch` instead. That is `ab4d6c1`, which needs no core field
+      and no ledger access.
+  - Test: a fill's counts pin exactly at its floor and serve. Two cases refuse at the first launch:
+    - one expert more per class than the fill;
+    - a budget that leaves every pool at its minimum.
+
+    Before the fix the first case started by taking the floor, and the second served with no cache.
   - Verified on the 5080: the fill's 3,236 / 1,618 / 1,618 now start pinned (`state.kv` 2,113, the fill's), with the
     lock regenerated (above).
   - On the A5000 the vehicle's fill (6,004 / 3,003 / 3,001 at the 33,792-token floor) pinned as-is both before and
