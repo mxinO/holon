@@ -16,7 +16,7 @@ an anonymous map registered with `cudaHostRegister`) against `cudaHostAlloc`, wi
 | model | Qwen3-30B-A3B Q4_K_M (unsloth GGUF): 48 layers × 128 experts top-8; three classes — gate/up Q4_K (6,144 pieces of 1.77 MB), down Q4_K and down Q6_K (3,072 pieces each, 0.88 and 1.29 MB) |
 | engine | bf16, graphs on, overlap on, `max_seqs` 64, `max_step_tokens` 4096, `max_model_len` 8192, `paged_min_tokens` 16384 (every run keeps the KV the trace needs, so the schedule is the trace's), `host_memory` 20 GiB |
 | software | torch 2.11.0+cu130; `kernels.ggml_cuda` at its pin **without** the forced-tiling / compact-launch patches (on their own branch, not merged yet) |
-| commit | `0775b35` (evidence: `evidence/x2_store_rtx-a5000_2026-10-17.json`) |
+| commit | `c7d59dd` (the gather runs at `0775b35`: its kernel is unchanged since; evidence: `evidence/x2_store_rtx-a5000_2026-10-17.json`) |
 
 ```bash
 python spikes/x2_store/exact.py <gguf> <runs> "resident@16384;*=1.0@16384;@16384;*=0.47@16384"   # ~6 min
@@ -26,7 +26,7 @@ python bench/holon_tg.py --model <gguf> -n 128 -r 5 --engine-args "--max-seqs 1 
     --plugin-options moe.store=std.moe.offload@1 moe.cache=*=1.0"                          # interleaved
 python spikes/x2_store/gather_alloc.py --out <runs>/gather_alloc_<i>.json                         # 4 processes
 python spikes/x2_store/streamk.py                                                                  # placement probe
-python spikes/x2_store/record.py <runs> evidence/x2_store_rtx-a5000_2026-10-17.json 0775b35 <commands…>
+python spikes/x2_store/record.py <runs> evidence/x2_store_rtx-a5000_2026-10-17.json c7d59dd <commands…>
 ```
 
 ## Results
@@ -53,7 +53,7 @@ unpatched, the mmq grid grows with the arena's slots (7.9 ms against 2.5 ms per 
 measured on the patch branch), so no prefill timing from this unpatched branch feeds the roofline.
 
 **Offload-path overhead** (decode tg128 at batch 1, depth 0; three interleaved rounds of five repetitions each):
-`std.moe@1` 5.173 ms per token, the offload store with every expert cached 5.371 ms: **+0.20 ms per token
+`std.moe@1` 5.160 ms per token, the offload store with every expert cached 5.357 ms: **+0.20 ms per token
 (+3.8%)** — per MoE layer one resolve and two gather launches that find nothing to copy, and the step's row kinds
 and counts. Inside §13's 0.25–0.5 ms band's low end (that band also holds F11's pick and decay, step 3).
 
