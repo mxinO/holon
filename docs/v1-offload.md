@@ -550,7 +550,9 @@ rule; F8 only at ≥ 15% on < 1K-token chunks with a fixed share; A1 never in a 
 | 7 | Held-out plugins after the tag: F10, A1, the mmap / page-cache tier (acceptance 1) | plugin-only diffs; A1 judged as `approx` | 3 |
 | 8 | Close: full suite, panel code review, one propagation of the existing locks; D13 if time allows | acceptance 5–7 | 2 |
 
-F5b comes after the development gate on purpose: F5a-only must already be competitive, and tune then shows what the
+**Order as run (2026-10-18):** step 3c (MoE glue kernels, §13) runs before step 4; step 6 runs before step 5, because an
+in-graph SSD miss is a `cpu_task@1` copy task, so F9 needs `kernels.cpu_task` first; 3c and 6 → 5 run in parallel
+branches. F5b comes after the development gate on purpose: F5a-only must already be competitive, and tune then shows what the
 CPU adds.
 
 ## 10. Risks and deferred
