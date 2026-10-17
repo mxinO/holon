@@ -345,6 +345,16 @@ default only where RAM holds every expert** (X's development gate). Before step 
 tier with an SSD rate and compares F11 with SSD-only victims, F11 with deferred admission (the miss staged this
 step, its victim demoted D2H, the map flipped at a fixed later step) and F10 with spares (Maya's structure); the
 RAM-short default is the least modelled time, confirmed by step 5's RAM-capped run (panel C-r4.4-1).
+**Replayed (2026-10-17, `spikes/x0_offload/m6/README_exclusive.md`, `evidence/x5_exclusive_tier_replay_2026-10-17.json`):
+the RAM-short default is F11 with deferred admission.** Over M6's held-out pairs at 10 / 25 / 47% VRAM and RAM
+holding 25 / 50 / 75% of the rest (SSD at 2.6 GB/s): SSD-only victims lose everywhere (1.2–3.7× the best; ≈ 235 MB
+per token of SSD re-reads at 25% cached, worse than D10's estimate because RAM drains); deferred admission is least
+in 5 of 9 cells and F10's spares in the other 4 by ≤ 2.7% with the flip at +2, and deferred admission wins all 45
+pair-cells with the flip at +1. Rules for step 5: the flip lands at the first launch where the demotion and staged
+copy are stream-ordered before it (+1 where the copy runs on the step stream, else +2 — an in-graph admission needs
+no host lag); a victim goes to a free RAM slot if one exists, else displaces RAM's coldest expert if hotter, else
+becomes SSD-only; a demand SSD read that is not admitted to VRAM stays in RAM (it is already in host memory; −2 to
+−28%). RAM-short is a fit mode, not a fast path: 1.9–8.3× slower than RAM holding every expert on these drives.
 
 **D11 — No predictive prefetch.** Strata's Foresight measured 0.91–1.00× on every box (R §3.1 E1) and Maya's
 read-ahead lost too (R §3.1b EG1). Re-open only if M6 shows next-layer recall ≥ 85% and M1 ≥ 30% idle PCIe time in
@@ -637,6 +647,43 @@ row measured below its bar goes **to the owner**, not to step 6 (F5b adds ≈ 1.
 cannot close it); the capped rows and the F1 row are judged after step 6 with tune's lock, as §1 says. M1's gather
 rate is re-measured at step 2 on the store's own allocation (`mmap` + `cudaHostRegister`, with and without huge
 pages), since M1 used `cudaHostAlloc` (panel C-r4.5-5).
+
+**Reference engines on the RTX 5080** (`spikes/x4_refs/README.md`, `evidence/x4_refs_rtx-5080_2026-10-17.json`;
+llama.cpp f74e2fa with `--moe-cache-mib`, FreeToken 21d9578; 3 interleaved rounds). Decode tok/s at 1K / 4K / 32K,
+natural fit (≈ 47%) | capped (≈ 25%):
+
+| Arm | Natural | Capped |
+|---|---|---|
+| llama.cpp `--fit` default | 78.2 / 76.3 / 61.5 | 46.6 / 45.7 / 39.9 |
+| llama.cpp tuned `--n-cpu-moe` | 88.4 / 83.1 / 67.2 (66% resident) | 47.4 / 45.5 / 40.6 |
+| llama.cpp `--moe-cache-mib`, default (mmap) | 159.1 / 109.2 / 81.7 | 54.6 / 46.9 / 42.5 |
+| llama.cpp `--moe-cache-mib`, pinned (`--load-mode none`) | 188.8 / 147.2 / 102.0 | 100.3 / 87.0 / 70.5 |
+| FreeToken (`auto` = `offload`) | 213.8 / 175.3 / 111.4 | 115.6 / 109.5 / 76.6 |
+
+llama.cpp's host sync is ≈ 19.5 µs per MoE layer (0.94 ms of a 5.4 ms step); its GPU work is 3.93 ms per token
+(the roofline assumed 4.5); its cache hits 95.2% at 47%. FreeToken prefills 2.7K / 10.7K / 5.4K tok/s (it streams
+every expert once per chunk of up to 8K). **Re-banded:** the natural-fit row against the pinned cache is
+1.02–1.11× / 1.00–1.07× / 0.98–1.02× at 1K / 4K / 32K (bar 1.1×; 1.09–1.17× even if Holon's kernels matched
+llama.cpp's), against FreeToken 0.84–1.04× (bar 1.0×), against llama.cpp's default cache 1.22–1.53×; the static-split
+rows clear 1.5× at 1K / 4K and straddle at 32K. By §8's rule the cache rows go to the owner before step 4.
+
+**Where the gap is** (`spikes/x4_gap/README.md`, `evidence/x4_gap_rtx-5090_2026-10-17.json`,
+`evidence/x4_gap_rtx-5080_2026-10-17.json`): it is placement policy and prefill design, not kernels.
+- All-resident decode on the RTX 5090: Holon 389 / 362 tok/s at 1K / 4K against llama-server 340 / 294 and FreeToken
+  341 / 322 — §13's 0.93× came from llama-bench, which has no server loop; Holon's remaining 0.41 ms per token
+  against FreeToken is glue, router GEMV, the stacked gate/up GEMV and q8_1 quantization. Offload overhead fully
+  cached: Holon +0.22 ms, FreeToken +0.53–0.60 ms.
+- Offload decode at 47% on the RTX 5080: Holon's step-2 static policy misses 592 MB per token against FreeToken's
+  52 MB (gather rates ≈ 41 vs 43 GB/s); replayed `lfu` on Holon's own routing predicts 0.97–0.99× FreeToken and
+  1.12–1.15× llama.cpp's pinned cache (1.03–1.05× / 1.19–1.22× at FreeToken's miss bytes). The last ≈ 0.4 ms is
+  FreeToken admitting the prompt's experts during prefill — step 3b re-checks D4's "prefill never admits" with
+  M6's replay before changing it.
+- Prefill at 4K on the 5080: FreeToken 10.7K tok/s (all experts streamed once, overlapped); Holon as built 2.0K
+  (1.38 s of 2.0 s refetching per 512-token pass); measured probes 4.9K with 4,096-token expert passes and 6.6K with
+  2,048-row mmq calls; modelled D8 with overlap ≈ 10.0K (2,048-row mmq) to ≈ 11.9K (4,096-row, needs the helper's
+  `ID_PAIRS` above 16,384). Step 3b builds D8 with large passes, copy-engine overlap and ≥ 2,048-row mmq calls.
+So the cache rows' prediction moves back toward the bars, with the FreeToken decode row the tightest; the owner
+decides the bars with step 4's measurements.
 
 **Contradictions with the research note, recorded:** CPU compute is not a second link beside PCIe (they share host
 memory); ggml-cpu's AVX2 and AVX-512 builds agree bitwise; "≤ 4 threads saturate DRAM" (S6) holds only for Q4_K
