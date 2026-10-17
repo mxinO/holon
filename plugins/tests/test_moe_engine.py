@@ -4,6 +4,7 @@ same (dequantized) weights (docs/m02-moe.md, step 1)."""
 import contextlib
 import json
 import pathlib
+import types
 import warnings
 from unittest import mock
 
@@ -102,6 +103,11 @@ def test_the_gate_up_merge_puts_gate_first_and_binds_one_kernel(tiny_moe, tmp_pa
     cfg = json.loads((checkpoint / "config.json").read_text())
     merged = [k for k in sites if "glu=swiglu" in k and f"out={2 * cfg['moe_intermediate_size']}" in k]
     assert len(merged) == 1 and len(sites) == 2, sites                 # the merged gate/up stack and down
+    # A prepared handle another provider made is read as the tensor it stands for, `.x` (std.moe.kernels).
+    unit = next(m for m in engine.executor.model.modules() if hasattr(m, "_gate_up") and m._gate_up is not None)
+    assert engine.ctx.kernels[merged[0]]["provider"] == "testing.ref_kernels"
+    x, ids = torch.randn(3, 1, cfg["hidden_size"]), torch.tensor([[0, 5], [7, 2], [3, 4]], dtype=torch.int32)
+    assert torch.equal(unit._gate_up(types.SimpleNamespace(x=x), ids), unit._gate_up(x, ids))
 
 
 def test_gate_and_up_of_different_layouts_fail_at_startup(tiny_moe, tmp_path):

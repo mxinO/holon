@@ -451,8 +451,8 @@ class LinearExperts(_Matmul):
 
     def __call__(self, x, parts: dict[str, torch.Tensor], ids: torch.Tensor) -> torch.Tensor:
         xq = None
-        if isinstance(x, Prepared):                    # `MoeRouter.route_prepare`'s handle (maybe stale: then x)
-            xq, x = self._prepared(x), x.x
+        if not isinstance(x, torch.Tensor):            # a prepared handle: ours (maybe stale: then x), or another's
+            xq, x = self._prepared(x) if isinstance(x, Prepared) else None, x.x
         x, ids, blocks = x.contiguous(), ids.contiguous(), parts["blocks"]
         # NVFP4's scale2 per expert: [E], or [2, E] (gate's row, up's) for a merged gate/up stack
         scale2 = parts.get("scale2")
