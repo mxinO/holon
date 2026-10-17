@@ -53,6 +53,7 @@ class BuildContext:
         self.taps: dict[int, list[Any]] = {}   # layer -> consumers of the residual stream after it (`Model.trunk`)
         self.sources: dict[str, str] = {}      # path -> identity of every checkpoint `weight_source` opened (plans)
         self.shared_objects: dict[str, Any] = {}   # key -> the engine's one object (`shared`)
+        self.sealed = False                        # the engine has run their first hooks: no new ones
         self.cpu_kernels = False               # a selected kernel runs on the CPU's tier: the lock class names it
 
     def unit_factory(self, ref: Ref) -> Any:
@@ -124,6 +125,8 @@ class BuildContext:
 
     def shared(self, key: str, factory: Any) -> Any:
         if key not in self.shared_objects:
+            if self.sealed:
+                raise PluginError(f"shared object {key!r} built after the engine's build: its hooks would not run")
             self.shared_objects[key] = factory(self)
         return self.shared_objects[key]
 

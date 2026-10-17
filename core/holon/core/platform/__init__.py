@@ -43,7 +43,8 @@ def cpu_tier(machine: str | None = None, flags: set[str] | None = None) -> str:
 
 
 def pin_loop(core: int) -> None:
-    """Run the calling thread, the engine loop, on CPU `core` only (e.g. one no CPU worker spins on)."""
+    """Run the calling thread, the engine loop, on CPU `core` only (e.g. one no CPU worker spins on); threads it starts
+    later (torch's CPU pool, if it starts one) inherit that."""
     os.sched_setaffinity(0, {core})
 
 
@@ -129,16 +130,24 @@ def pinned_empty(n: int, dtype: torch.dtype, device: torch.device) -> torch.Tens
 def host_memory(nbytes: int, device: torch.device, mapped: bool) -> torch.Tensor:
     """Exactly `nbytes` of host memory in whole pages (an anonymous map), page-locked for CUDA by registering it — not
     torch's pinned allocator, which rounds up to a power of two —, with `mapped` also addressable by kernels
-    (`device_alias`). Plain memory off CUDA. Release it with `free_host` before dropping it."""
-    out = torch.frombuffer(mmap.mmap(-1, nbytes), dtype=torch.uint8)     # the tensor keeps the map alive
+    (`device_alias`). Plain memory off CUDA. It is unregistered and unmapped with the last tensor viewing it."""
+    region = _Pinned(-1, nbytes)
+    out = torch.frombuffer(region, dtype=torch.uint8)                    # its views keep the map alive
     if device.type == "cuda":
-        _check(torch.cuda.cudart().cudaHostRegister(out.data_ptr(), nbytes, 1 | 2 * mapped), "cudaHostRegister")
-    return out                                                           # (flags: portable, mapped)
+        _check(torch.cuda.cudart().cudaHostRegister(out.data_ptr(), nbytes, 1 | 2 * mapped),  # portable, mapped
+               "cudaHostRegister")
+        region.registered = out.data_ptr()
+    return out
 
 
-def free_host(t: torch.Tensor, device: torch.device) -> None:
-    if device.type == "cuda":
-        _check(torch.cuda.cudart().cudaHostUnregister(t.data_ptr()), "cudaHostUnregister")
+class _Pinned(mmap.mmap):
+    """An anonymous map that unregisters itself before it is unmapped."""
+
+    registered: int | None = None
+
+    def __del__(self) -> None:
+        if self.registered is not None:
+            _check(torch.cuda.cudart().cudaHostUnregister(self.registered), "cudaHostUnregister")
 
 
 def device_alias(t: torch.Tensor, device: torch.device) -> torch.Tensor:
@@ -147,8 +156,11 @@ def device_alias(t: torch.Tensor, device: torch.device) -> torch.Tensor:
     if device.type != "cuda":
         return t
     view = type("Mapped", (), {"__cuda_array_interface__": {
-        "shape": (t.numel(),), "typestr": "|u1", "data": (t.data_ptr(), False), "version": 3}})
-    return torch.as_tensor(view(), device=device)
+        "shape": (t.numel(),), "typestr": "|u1", "data": (t.data_ptr(), False), "version": 3}, "host": t})
+    alias = torch.as_tensor(view(), device=device)              # keeps `view`, which keeps the host memory
+    if alias.data_ptr() != t.data_ptr():          # not the current device: torch copied instead
+        raise RuntimeError(f"no alias of host memory on {device} (make it the current device)")
+    return alias
 
 
 def _check(err: object, what: str) -> None:

@@ -77,7 +77,7 @@ class GGUFSource:
                     raise ValueError(f"{t.name}: an MXFP4 scale is NaN (e8m0 0xFF)")     # as std.weights.hf's
                 layout = Layout(Scheme(f"ggml.{t.type.name.lower()}"), "gguf.native")
                 yield t.name, QTensor(layout, t.shape, {"blocks": torch.from_numpy(data)},
-                                      {"blocks": Extent(str(self.path), t.offset, data.nbytes)})
+                                      {"blocks": Extent(str(self.path.resolve()), t.offset, data.nbytes)})
 
     def tokenizer(self) -> Any:
         from .tokenizer import build

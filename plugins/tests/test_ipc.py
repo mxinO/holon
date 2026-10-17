@@ -3,6 +3,7 @@ import asyncio
 import contextlib
 import dataclasses
 import multiprocessing
+import pathlib
 import time
 
 import pytest
@@ -71,6 +72,33 @@ def _failing_engine(config, endpoints, lock=None):
         engine.step = failing_step
         return engine
     serve(factory, endpoints)
+
+
+def _closing_engine(config, endpoints, lock=None):
+    """Engine-process target that records its engine's `close` (runs in the spawned child)."""
+    from holon.core.engine import Engine
+    from holon.core.ipc import serve
+
+    def factory():
+        engine = Engine(config)
+        close = engine.close
+        engine.close = lambda: (close(), pathlib.Path(config.plugin_options["tests.closed"]).touch())
+        return engine
+    serve(factory, endpoints)
+
+
+def test_shutdown_closes_the_engine(tiny_checkpoint, tmp_path):  # noqa: F811
+    """`shutdown` drains, then closes the engine, so the logits processor and shared objects stop their helpers
+    (docs/v1-offload.md S0)."""
+    marker = tmp_path / "closed"
+
+    async def run():
+        config = dataclasses.replace(_config(tiny_checkpoint), plugin_options={"tests.closed": str(marker)})
+        async with engine_process(config, target=_closing_engine) as client:
+            await client.stats()
+
+    asyncio.run(asyncio.wait_for(run(), timeout=60))
+    assert marker.exists()
 
 
 def test_a_failing_step_ends_every_request_with_an_error(tiny_checkpoint, tiny_case):  # noqa: F811

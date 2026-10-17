@@ -41,8 +41,6 @@ class Pool:
         self._set(0)
 
     def _set(self, capacity: int) -> None:
-        if self.host and self.buffer is not None:
-            platform.free_host(self.buffer, self.device)
         self.capacity = capacity
         nbytes = capacity * self.unit_bytes
         self.buffer = (None if not nbytes else platform.host_memory(nbytes, self.device, self.mapped) if self.host
@@ -132,14 +130,21 @@ def copy_units(src: Pool, src_units, dst: Pool, dst_units) -> None:
     if (src.unit_bytes, src.segments) != (dst.unit_bytes, dst.segments):
         raise ValueError(f"copy {src.name!r} → {dst.name!r}: unit shapes differ")
     s, d = src.units(), dst.units()
+    # Between host and device segment by segment: torch copies a strided unit across them through a synchronous
+    # temporary, which would read the source when enqueued, or block the host until the copy is done.
+    segments = [slice(None)] if src.host == dst.host else range(src.segments)
     for a, b in zip(np.asarray(src_units).tolist(), np.asarray(dst_units).tolist(), strict=True):
-        d[:, b].copy_(s[:, a], non_blocking=True)
+        for i in segments:
+            d[i, b].copy_(s[i, a], non_blocking=True)
 
 
 def run_mem_ops(ops, pools: dict[str, Pool], phase: str) -> None:
-    """Run the step's MemOps of `phase` (design §7.3), in order, on the current stream."""
+    """Run the step's MemOps of `phase` (design §7.3), in order, on the current stream (a copy between host pools would
+    run at once instead: refused)."""
     for op in ops:
         if op.phase == phase:
+            if pools[op.src_pool].host and pools[op.dst_pool].host:
+                raise ValueError(f"copy {op.src_pool!r} → {op.dst_pool!r}: two host pools")
             copy_units(pools[op.src_pool], op.src_units, pools[op.dst_pool], op.dst_units)
 
 
@@ -157,7 +162,11 @@ class Copies:
     def add(self, ops: list, step: int) -> None:
         """The asynchronous ops handed in while step `step` is being launched (before its device work)."""
         for op in ops:
-            if op.lands_by is not None and op.lands_by < max(step, (op.after or -1) + 1):
+            src, dst = self.pools[op.src_pool], self.pools[op.dst_pool]
+            if (src.unit_bytes, src.segments) != (dst.unit_bytes, dst.segments) or src.host and dst.host:
+                raise ValueError(f"copy {src.name!r} → {dst.name!r}: unit shapes differ, or two host pools (a host "
+                                 "copy would run at once, out of the copy stream's order)")
+            if op.lands_by is not None and op.lands_by < max(step, -1 if op.after is None else op.after + 1):
                 raise ValueError(f"MemOp {op.src_pool} → {op.dst_pool}: lands_by {op.lands_by} must be after step "
                                  f"{op.after} and not before the step being launched ({step})")
             if op.after is not None and op.after >= step:
@@ -219,7 +228,11 @@ class Ledger:
                              f"units ({min_units * unit_bytes / 2**30:.3f} GiB), {left / 2**30:.3f} GiB left"
                              + "".join(f"; {p.name} holds {p.capacity} units "
                                        f"({p.capacity * p.unit_bytes / 2**30:.3f} GiB)" for p in held))
-        pool._set(units)                  # allocated once, now, for the engine's lifetime
+        try:
+            pool._set(units)              # allocated once, now, for the engine's lifetime
+        except BaseException:
+            del self.pools[name]
+            raise
         return pool
 
     def request(self, name: str, *, unit_bytes: int, min_units: int, pref_units: int | None = None,
@@ -239,6 +252,10 @@ class Ledger:
 
     def pool(self, name: str) -> Pool:
         return self.pools[name]
+
+    def device_bytes(self) -> int:
+        """What the device pools hold: the `state_memory` that sizes them again (host pools have their own budget)."""
+        return sum(p.capacity * p.unit_bytes for p in self.pools.values() if not p.host)
 
     def materialize(self, budget_bytes: int | None) -> None:
         """(Re)allocate every device pool within `budget_bytes`, or at minimum sizes if None; frees previous buffers.
@@ -262,7 +279,9 @@ class Ledger:
         fixed = [p for p in pools if p.pref_units is not None and not p.fill]
         fills = sorted((p for p in pools if p.fill), key=lambda p: -p.priority)     # stable: in request order
         paged = [p for p in pools if p.tokens_per_unit is not None]
-        pref_bytes = sum(p.pref_units * p.unit_bytes for p in fixed)
+        # Fixed pools at their preference only if every other pool still gets its minimum.
+        pref_bytes = sum(p.pref_units * p.unit_bytes for p in fixed) + sum(p.min_units * p.unit_bytes
+                                                                           for p in fills + paged)
         sizes = {p.name: p.pref_units if pref_bytes <= budget else p.min_units for p in fixed}
         sizes |= {p.name: p.min_units for p in fills}
         left = budget - sum(sizes[p.name] * p.unit_bytes for p in fixed + fills)
@@ -281,7 +300,8 @@ class Ledger:
         return sizes
 
     def free(self, host: bool = False) -> None:
-        """Release the device pools' buffers; with `host`, the host pools' too (the engine is closing)."""
+        """Release the device pools' buffers; with `host`, the host pools' too (the engine is closing; host memory goes
+        with the last tensor viewing it, device views included)."""
         for p in self.pools.values():
             if host or not p.host:
                 p._set(0)

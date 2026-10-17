@@ -107,9 +107,12 @@ def serve(engine_factory: Callable[[], Any], endpoints: Endpoints,
             elif msg == "flush_prefix":
                 deltas += engine.flush_prefix()
             elif msg == "shutdown":
-                deltas += engine.drain()
-                if deltas:
-                    outbox.send_multipart([b"deltas", _encode(deltas)])
+                try:
+                    deltas += engine.drain()
+                    if deltas:
+                        outbox.send_multipart([b"deltas", _encode(deltas)])
+                finally:
+                    engine.close()              # the processor's and shared objects' helpers stop (`ShutsDown`)
                 return
             timeout = 0
         try:

@@ -190,8 +190,9 @@ class Engine:
             self.processor = p.load(p.single("logits_processor", cfg.slots["logits_processor"])).build(
                 self.ctx, VocabView(self.spec.vocab, self.eos, source.tokenizer))
 
-        # Shared objects (`BuildCtx.shared`): their last pool requests, then a reset after every materialize.
-        self.shared = list(self.ctx.shared_objects.values())
+        # Shared objects (`BuildCtx.shared`): their last pool requests, then a reset after every materialize. They are
+        # all built by now: the hooks run for these.
+        self.shared, self.ctx.sealed = list(self.ctx.shared_objects.values()), True
         for o in self.shared:
             if hasattr(o, "before_materialize"):
                 o.before_materialize(self.ctx)
@@ -240,6 +241,7 @@ class Engine:
             platform.pin_loop(cfg.loop_core)
 
         self._inflight: _Inflight | None = None
+        self._stopped: str | None = None                  # why the engine stopped (a shared object's commit failed)
         self._ids = itertools.count()
         self._prompt_lp: dict[Seq, Logprobs] = {}         # sequences still accumulating prompt logprobs
         self._siblings: dict[Seq, list[Seq]] = {}         # n > 1: waiting for the first sequence's prefill
@@ -375,15 +377,19 @@ class Engine:
 
     def close(self) -> None:
         """Release the device memory now (graphs, state pools, weights) instead of whenever the garbage collector
-        breaks the engine's reference cycles; the engine is unusable afterwards."""
-        self.drain()
-        for o in (self.processor, *self.shared):
-            getattr(o, "shutdown", lambda: None)()
-        platform.synchronize(self.device)               # the copy stream too, before host pools go
-        self.executor = self._inflight = None
-        self.ledger.free(host=True)
-        gc.collect()
-        platform.release_cache(self.device)
+        breaks the engine's reference cycles; the engine is unusable afterwards (closing again does nothing)."""
+        if self.executor is None:
+            return
+        try:
+            self.drain()
+        finally:                                         # a failing commit still stops the helpers
+            for o in (self.processor, *self.shared):
+                getattr(o, "shutdown", lambda: None)()
+            platform.synchronize(self.device)            # the copy stream too, before host pools go
+            self.executor = self._inflight = None
+            self.ledger.free(host=True)
+            gc.collect()
+            platform.release_cache(self.device)
 
     def stats(self) -> dict[str, int]:
         out = {"waiting": len(self.sched.waiting), "running": len(self.sched.running),
@@ -422,6 +428,8 @@ class Engine:
         if it holds a constrained row, whose processor needs that row's tokens before the sequence's next row (so a
         constrained sequence decodes every step and the step's other rows lose their overlap: M0.5 design D2) — or
         this one at once (depth 0, and steps that report prompt logprobs, whose extraction needs the host)."""
+        if self._stopped:
+            raise RuntimeError(f"the engine stopped: {self._stopped}")
         prev, self._inflight = self._inflight, None
         deltas = self._unblock() if self._blocked else []
         if prev is not None and self.processor is not None and any(m and seq.constrained for seq, _, m in prev.rows):
@@ -527,7 +535,11 @@ class Engine:
         out = step.out
         out.done.synchronize()
         for observe, telemetry in out.observed:         # shared objects, before any token is emitted
-            observe(step.plan, telemetry)
+            try:
+                observe(step.plan, telemetry)
+            except Exception as e:                       # the steps launched after this one are discarded
+                self._stopped = f"after_commit of step {step.plan.step}: {type(e).__name__}: {e}"
+                raise
         tokens = out.tokens.tolist() if out.tokens is not None else []
         accepts = iter(out.accepts.tolist() if out.accepts is not None else [])
         drafts = out.drafts.tolist() if out.drafts is not None else None

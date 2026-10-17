@@ -7,6 +7,7 @@ every materialize. Its forward copies two one-value "maps" into telemetry: one t
 a MemOp brings from the host pool. At the commit of step c it decides both maps' value for launch c + 2 (c itself), so
 every step's telemetry shows the decision of two commits before, whatever the overlap depth and graphs."""
 import dataclasses
+import gc
 import os
 
 import numpy as np
@@ -16,8 +17,8 @@ from holon.api import Constraint, KernelSpec, MemOp, SamplingParams
 from holon.core import plans, platform
 from holon.core.build import BuildContext
 from holon.core.engine import Engine, EngineConfig
-from holon.core.memory import Copies, Ledger, OutOfUnits
-from holon.core.plugins import PluginSet, discover
+from holon.core.memory import Copies, Ledger, OutOfUnits, run_mem_ops
+from holon.core.plugins import PluginError, PluginSet, discover
 from holon_testing.ref_kernels.kernels import RMSNorm
 
 UNIT = 64                              # bytes per unit of the toy's pools
@@ -32,6 +33,7 @@ class Toy:
         self.map = ctx.static("toy.map", (1,), torch.int64)
         self.telemetry = {name: ctx.static(f"toy.{name}", (1,), torch.int64) for name in ("seen", "landed", "calls")}
         self.decided: dict[int, int] = {}          # launch -> the value decided for it
+        self.fail = False                          # its commit raises
         self.observed: dict[int, tuple[int, int, int]] = {}    # committed step -> (seen, landed, calls)
 
     def before_materialize(self, ctx) -> None:
@@ -52,6 +54,8 @@ class Toy:
         return writes + [(self.map, np.array([value]))], [landing]
 
     def after_commit(self, step, telemetry) -> None:
+        if self.fail:
+            raise RuntimeError("the toy failed")
         self.observed[step.step] = tuple(int(telemetry[name][0]) for name in ("seen", "landed", "calls"))
         c = step.step
         self.host.view(torch.int64, (2, UNIT // 8))[c % 2, 0] = c     # read by launch c + 2's copy only
@@ -98,8 +102,9 @@ def test_shared_objects_live_with_the_engine_and_edit_at_launch_c_plus_2(tiny, d
     """S0, S1, S2 and S3 in one engine: one object for every kernel instance, built with the engine's own context
     (an auxiliary model's context gets the same one); its pools requested before the first materialize, reseeded after
     each (the GPU's startup profile materializes twice); a step's device writes and its MemOp landing ahead of its
-    forward, the telemetry each step leaves read at its commit — at depth 0, at depth 1 and from CUDA graphs; shut down
-    after the drain; the loop pinned to `loop_core`."""
+    forward, the telemetry each step leaves read at its commit — at depth 0, at depth 1 and from CUDA graphs; a failing
+    commit stops the engine; shut down after the drain; the loop pinned to `loop_core`; no new shared object once the
+    hooks have run."""
     core = max(os.sched_getaffinity(0))
     affinity = os.sched_getaffinity(0)
     dtype = torch.float32 if device == "cpu" else torch.bfloat16
@@ -133,8 +138,18 @@ def test_shared_objects_live_with_the_engine_and_edit_at_launch_c_plus_2(tiny, d
     assert len(decode) == 1 and decode.pop() > 0                  # zeroed every step: no step counts another's
     if device == "cuda":
         assert engine.stats()["graphs"] > 0
+    with pytest.raises(PluginError, match="its hooks would not run"):
+        engine.ctx.shared("tests.late", Toy)
+    toy.fail = True
+    engine.add(list(range(3)), SamplingParams(temperature=0.0, max_tokens=4))
+    with pytest.raises(RuntimeError, match="the toy failed"):
+        engine.step()                                 # depth 0 commits the step at once
+        engine.close()                                # depth 1: the drain does, and the helpers still stop
+    assert ("shutdown" in toy.events) == overlap
+    with pytest.raises(RuntimeError, match="the engine stopped: after_commit of step"):
+        engine.step()
     engine.close()
-    assert toy.events[-1] == "shutdown" and toy.host.buffer is None
+    assert toy.events.count("shutdown") == 1 and toy.host.buffer is None
 
 
 def test_host_pools_are_exact_once_and_within_their_budget():
@@ -157,17 +172,17 @@ def test_host_pools_are_exact_once_and_within_their_budget():
 
 
 @pytest.mark.parametrize("budget, sizes", [
-    (10_000, (6, 4, 88)),         # fill pools at their preference, paged state takes the rest
-    (2_600, (6, 2, 16)),          # the higher priority grows first; paged state keeps its floor (15 units + null)
-    (2_000, (1, 1, 16)),          # no room past the floor: fill pools at their minimum
-    (1_500, (1, 1, 11)),          # paged state below its floor, down to its own minimum (9 units + null)
+    (10_000, (6, 6, 4, 84)),      # fill pools at their preference, paged state takes the rest
+    (2_600, (6, 3, 1, 16)),       # the higher priority grows first; paged state keeps its floor (15 units + null)
+    (2_000, (6, 1, 1, 12)),       # no room past the floor: fill pools at their minimum
+    (1_500, (2, 1, 1, 11)),       # the fixed pool at its minimum, so paged state has its own (9 units + null)
     (1_300, None),
 ])
 def test_fill_pools_grow_by_priority_past_the_paged_floor(budget, sizes):
-    """S3: after fixed pools, fill pools take their minimum, then grow by priority up to `pref_units` once paged state
-    has `paged_min_tokens` (the floor); paged state takes what is left."""
+    """S3: fixed pools at their preference if every other pool keeps its minimum; then fill pools grow by priority up
+    to `pref_units` once paged state has `paged_min_tokens` (the floor); paged state takes what is left."""
     ledger = Ledger(torch.device("cpu"), paged_min_tokens=60)
-    ledger.request("fixed", unit_bytes=100, min_units=2, pref_units=2)
+    fixed = ledger.request("fixed", unit_bytes=100, min_units=2, pref_units=6)
     low = ledger.plugin_pool("low", unit_bytes=100, min_units=1, pref_units=4, fill=True)
     high = ledger.plugin_pool("high", unit_bytes=100, min_units=1, pref_units=6, fill=True, priority=1)
     kv = ledger.request("kv", unit_bytes=100, min_units=9, tokens_per_unit=4, null_unit=True)
@@ -176,42 +191,52 @@ def test_fill_pools_grow_by_priority_past_the_paged_floor(budget, sizes):
             ledger.materialize(budget)
         return
     ledger.materialize(budget)
-    assert (high.capacity, low.capacity, kv.capacity) == sizes
+    assert (fixed.capacity, high.capacity, low.capacity, kv.capacity) == sizes
 
 
 @pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=CUDA)])
 def test_units_demoted_to_host_and_back_are_bitwise_and_a_late_copy_stalls_its_step(device):
-    """S2: MemOps between device and host pools on the copy stream — after a step's work, landing by a later step's
-    launch, which waits for a late copy rather than reading what was there; the mapped host pool's device alias
-    reads the demoted bytes in place."""
+    """S2: MemOps between device and host pools (two segments a unit) on the copy stream — after a step's work,
+    without blocking the host, landing by a later step's launch, which waits for a late copy rather than reading what
+    was there; the mapped host pool's device alias is its memory; it is released with its last user."""
     device = torch.device(device)
+    cuda = device.type == "cuda"
     ledger = Ledger(device, host_memory=1 << 20)
-    host = ledger.plugin_pool("host", unit_bytes=4096, min_units=2, device="host", mapped=True)
-    dev = ledger.plugin_pool("dev", unit_bytes=4096, min_units=4)
+    host = ledger.plugin_pool("host", unit_bytes=4096, segments=2, min_units=2, device="host", mapped=True)
+    dev = ledger.plugin_pool("dev", unit_bytes=4096, segments=2, min_units=4)
     ledger.materialize(None)
-    units = dev.view(torch.uint8, (4, 4096))
-    units[:2] = torch.randint(0, 256, (2, 4096), dtype=torch.uint8, device=device)
-    units[2:] = 0
-    want = units[:2].cpu()
+    units = dev.view(torch.uint8, (2, 4, 2048))             # [segments, units, bytes]
+    data = torch.randint(0, 256, (2, 2, 2048), dtype=torch.uint8, device=device)
+    want = data.cpu()
+    units[:, :2] = data                                     # (warm: loading a kernel, or making the first stream,
+    units.zero_()                                           # waits for the device)
     copies = Copies(device, ledger.pools)
-    copies.add([MemOp("plugin.dev", np.array([0, 1]), "plugin.host", np.array([0, 1]), after=1)], 1)   # held
+    if cuda:
+        torch.cuda._sleep(200_000_000)                      # step 1 is late, and its end writes the units
+    units[:, :2] = data
     step1 = platform.Event(device)
     step1.record()
-    copies.launched(1, step1)                                  # demoted once step 1's work is done
-    if device.type == "cuda":                                  # the copy stream is late
-        with torch.cuda.stream(copies.stream._stream):
-            torch.cuda._sleep(200_000_000)
+    copies.add([MemOp("plugin.dev", np.array([0, 1]), "plugin.host", np.array([0, 1]), after=1, lands_by=2)], 1)
+    copies.launched(1, step1)                               # demoted after step 1, the host not waiting for it
     copies.add([MemOp("plugin.host", np.array([0, 1]), "plugin.dev", np.array([2, 3]), after=1, lands_by=3)], 2)
-    if device.type == "cuda":
-        assert not copies.landing[3][0]._event.query()         # not landed when step 3 launches
+    if cuda:
+        assert not any(event._event.query() for event in copies.landing[2] + copies.landing[3])
     copies.launching(3)
-    assert torch.equal(units[2:].cpu(), want)                  # read in stream order after the wait
-    assert torch.equal(host.view(torch.uint8, (2, 4096)), want)
-    assert torch.equal(host.device_view(torch.uint8, (2, 4096)).sum(1).cpu(), want.sum(1, dtype=torch.int64))
+    assert torch.equal(units[:, 2:].cpu(), want)            # read in stream order after the wait
+    assert torch.equal(host.view(torch.uint8, (2, 2, 2048)), want)
+    host.device_view(torch.uint8, (2, 2, 2048))[1, 1, 7] = 7
+    platform.synchronize(device)
+    assert host.view(torch.uint8, (2, 2, 2048))[1, 1, 7] == 7
     with pytest.raises(ValueError, match="lands_by 2 must be after step 2"):
         copies.add([MemOp("plugin.dev", np.array([0]), "plugin.host", np.array([0]), after=2, lands_by=2)], 2)
-    platform.synchronize(device)
-    ledger.free(host=True)
+    host_to_host = MemOp("plugin.host", np.array([0]), "plugin.host", np.array([1]), after=3)
+    with pytest.raises(ValueError, match="two host pools"):         # a CPU copy, out of stream order
+        copies.add([host_to_host], 3)
+    with pytest.raises(ValueError, match="two host pools"):
+        run_mem_ops([dataclasses.replace(host_to_host, after=None)], ledger.pools, "pre_forward")
+    del ledger, host, dev, units, copies                    # dropped, not closed
+    gc.collect()
+    platform.host_memory(2 * 4096, device, mapped=True)     # registers, likely at `address`: unregistered first
 
 
 def test_kernels_are_selected_by_the_cpu_tier_and_name_it_in_the_lock_class():
