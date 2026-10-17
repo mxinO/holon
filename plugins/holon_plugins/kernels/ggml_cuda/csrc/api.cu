@@ -269,13 +269,13 @@ int holon_ggml_use_mmvq_id(int type, int64_t tokens) {
     return tokens <= get_mmvq_mmid_max_batch((ggml_type) type, device_cc());
 }
 
-size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int64_t experts) {
+size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int64_t slots) {
     // as ggml_cuda_mul_mat_q allocates with ids: ids_src1, ids_dst (padded by J - 1 <= 127 for its unconditional
     // reads), expert_bounds and the slots of the compact launch's z entries (mmid.cuh), then q8_1 as a dense call
     // over the tokens·k (token, slot) rows; no stream-k fixup (mmq with ids always tiles); mmvq with ids needs less
     const size_t ids_src1 = GGML_PAD(tokens*k*sizeof(int32_t), POOL_ALIGN);
     const size_t ids_dst = GGML_PAD((tokens*k + 127)*sizeof(int32_t), POOL_ALIGN);
-    const size_t bounds = GGML_PAD((2*ggml_cuda_mm_ids_nz(experts, tokens, k) + 1)*sizeof(int32_t), POOL_ALIGN);
+    const size_t bounds = GGML_PAD((2*ggml_cuda_mm_ids_nz(slots, tokens, k, slots) + 1)*sizeof(int32_t), POOL_ALIGN);
     return ids_src1 + ids_dst + bounds + workspace_bytes(in, tokens*k, 0);
 }
 
@@ -306,13 +306,13 @@ void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, 
 
 void holon_ggml_mmq_id(int type, int prec, const void * w, int64_t experts, int64_t out, int64_t in, const void * x,
                        int x_bf16, int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y,
-                       void * workspace, size_t workspace_bytes, void * stream) {
+                       int64_t slots, void * workspace, size_t workspace_bytes, void * stream) {
     call_context c(stream, workspace, workspace_bytes);
     const ggml_tensor src0 = experts_view((ggml_type) type, w, experts, out, in, 0, out);
     const ggml_tensor src1 = tensor3(act(x_bf16), x, in, rows_per_token, tokens);
     const ggml_tensor ids_t = matrix(GGML_TYPE_I32, ids, k, tokens);
     ggml_tensor dst = with_prec(tensor3(GGML_TYPE_F32, y, out, k, tokens), prec);
-    ggml_cuda_mul_mat_q(c.ctx, &src0, &src1, &ids_t, &dst);
+    ggml_cuda_mul_mat_q(c.ctx, &src0, &src1, &ids_t, &dst, nullptr, slots);
 }
 
 void holon_ggml_swiglu(const float * x, int64_t rows, int64_t n, const float * gate_scale, const float * up_scale,

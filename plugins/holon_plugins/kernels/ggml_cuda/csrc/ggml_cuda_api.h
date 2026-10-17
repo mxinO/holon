@@ -79,8 +79,9 @@ void holon_ggml_dequantize(int type, const void * src, int64_t n, void * y, int 
 // Whether llama.cpp runs `tokens` tokens of `type` on mmvq (else mmq) here: get_mmvq_mmid_max_batch.
 int holon_ggml_use_mmvq_id(int type, int64_t tokens);
 
-// Workspace bytes for expert calls of at most `tokens` tokens (any type, any path) on the current device.
-size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int64_t experts);
+// Workspace bytes for expert calls of at most `tokens` tokens whose ids name at most `slots` distinct slots (any
+// type, any path) on the current device.
+size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int64_t slots);
 
 // mmvq: tokens <= the mmvq limit. swiglu: `w` is a merged stack (per expert out/2 gate rows, then out/2 up rows) and
 // y = silu(gate · gate_scale[e]) * up · up_scale[e] with out_y = out/2 (llama.cpp's fused gate); else out_y = out and
@@ -89,10 +90,11 @@ void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, 
                         int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y, int swiglu,
                         const float * gate_scale, const float * up_scale, void * workspace, size_t workspace_bytes,
                         void * stream);
-// mmq: any tokens (one call is sized by the workspace), out_y = out.
+// mmq: any tokens (one call is sized by the workspace), out_y = out. `ids` name at most `slots` distinct slots of the
+// stack (it bounds the launch; the rows of further slots are not computed).
 void holon_ggml_mmq_id(int type, int prec, const void * w, int64_t experts, int64_t out, int64_t in, const void * x,
                        int x_bf16, int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y,
-                       void * workspace, size_t workspace_bytes, void * stream);
+                       int64_t slots, void * workspace, size_t workspace_bytes, void * stream);
 
 // y[r, i] = silu(x[r, i]) * x[r, n + i] for `rows` rows of 2n f32 values (gate, then up), y f32; with `ids` (one
 // expert per row), gate and up first times gate_scale[ids[r]] and up_scale[ids[r]].

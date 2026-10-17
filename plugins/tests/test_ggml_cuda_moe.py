@@ -23,7 +23,7 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
   and in compacted launches padded with null-slot rows to the type's mmvq limit + 1 (Q4_K, Q6_K, IQ2_XXS, IQ2_S,
   IQ3_XXS; gate/up and down). A slot repeated inside one token's ids stays outside the contract: the expert's pairs
   past its T columns are never computed (llama.cpp's helper instead left stale entries that wrote over a real row,
-  which the §4.6 padding plant relied on; it no longer fires on mmq).
+  which M0.2's padding plant relied on; retired, docs/m02-moe.md §4.6).
 - `moe_topk`: the reference's picks up to near-ties (fast-math `__expf` moves probabilities by a few ulps), its
   weights; ±inf and all-NaN rows give unique in-range ids; token counts off the kernel's 8-row blocks.
 - `moe_combine`: within 1 bf16 ulp of the reference, plus the f32 accumulation's rounding (the kernel's FMA) for
@@ -141,7 +141,8 @@ def experts(ctx, name: str, k: int, out: int, rows_per_token: int, glu: str = "n
     spec = ctx.select_kernel("linear_experts@2", site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
     kernel, device = spec.impl(ctx, **facts), torch.cuda.current_device()
-    return Sized(kernel, lambda x, parts, ids: kernel.lib.workspace_bytes_id(device, k, min(len(ids), CHUNK), K, n))
+    return Sized(kernel, lambda x, parts, ids: kernel.lib.workspace_bytes_id(device, k, min(len(ids), CHUNK), K,
+                                                                            kernel.slots))
 
 
 def uniform(tokens: int, n: int, seed: int) -> torch.Tensor:
@@ -420,7 +421,8 @@ STAGES = {"gate_up": (H, 2 * INTER, 1), "down": (INTER, H, K)}          # in, ou
 class Arena:
     """The EP experts of a stack placed among the slots of a class arena (D5), every other slot poisoned (0xFF bytes:
     NaN scales) but the top K when there is room for them: the per-rank null slots, zero weights. Called with ids
-    < EP (an expert) or EP + j (rank j's null slot)."""
+    < EP (an expert) or EP + j (rank j's null slot). The kernel is bound to the layer's EP experts, so mmq's compact
+    launch covers min(slots, T·k, EP + K) entries."""
 
     kernel: Sized
     parts: dict[str, torch.Tensor]
@@ -444,7 +446,7 @@ def arena(ctx, s: Stack, stage: str, slots: int, placement: str) -> Arena:
     if null:
         blocks[free:] = 0
     table = torch.cat([place, torch.arange(free, slots)] if null else [place]).int().cuda()
-    return Arena(experts(ctx, s.name, k, out, rows, n=slots), {"blocks": blocks}, table)
+    return Arena(experts(ctx, s.name, k, out, rows, n=EP), {"blocks": blocks}, table)
 
 
 def placed_inputs(stage: str, tokens: int, seed: int) -> tuple[torch.Tensor, torch.Tensor]:

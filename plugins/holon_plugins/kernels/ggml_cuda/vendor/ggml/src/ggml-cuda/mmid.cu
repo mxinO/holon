@@ -51,8 +51,12 @@ static __global__ void mm_ids_helper(
         const int slot = keys[q] >> pair_bits;
         const int pair = keys[q] & ((1u << pair_bits) - 1);
         if (uint32_t(slot) != (q > 0 ? keys[q - 1] >> pair_bits : slot_before)) {
-            expert_bounds[z] = r;
-            expert_bounds[n_z + 1 + z] = slot;
+            if (z < n_z) {
+                expert_bounds[z] = r;
+                expert_bounds[n_z + 1 + z] = slot;
+            } else if (z == n_z) {
+                expert_bounds[z] = r; // the end of the last listed slot's rows
+            }
             ++z;
         }
         ids_dst[r] = pair;
@@ -64,7 +68,7 @@ static __global__ void mm_ids_helper(
         }
     }
     // the entries past the active slots are empty and name slot 0, which mmq never reads for them
-    for (int i = n_active + tid; i <= n_z; i += threads) {
+    for (int i = min(n_active, n_z + 1) + tid; i <= n_z; i += threads) {
         expert_bounds[i] = n_pairs;
         if (i < n_z) {
             expert_bounds[n_z + 1 + i] = 0;
@@ -86,7 +90,7 @@ static void launch_mm_ids_helper(
 
 void ggml_cuda_launch_mm_ids_helper(
         const int32_t * __restrict__ ids, int32_t * __restrict__ ids_src1, int32_t * __restrict__ ids_dst, int32_t * __restrict__ expert_bounds,
-        const int n_experts, const int n_tokens, const int n_expert_used, const int nchannels_y, const int si1, const int sis1, const bool write_inverse, cudaStream_t stream) {
+        const int n_experts, const int n_z, const int n_tokens, const int n_expert_used, const int nchannels_y, const int si1, const int sis1, const bool write_inverse, cudaStream_t stream) {
     GGML_ASSERT(int64_t(n_tokens)*n_expert_used <= GGML_CUDA_MM_IDS_MAX_PAIRS && "too many (token, expert) pairs for mm_ids_helper");
     const int n_pairs = n_tokens*n_expert_used;
     int pair_bits = 0;
@@ -98,7 +102,6 @@ void ggml_cuda_launch_mm_ids_helper(
         ++slot_bits;
     }
     GGML_ASSERT(pair_bits + slot_bits <= 32 && "too few bits in mm_ids_helper's keys");
-    const int n_z = ggml_cuda_mm_ids_nz(n_experts, n_tokens, n_expert_used);
 
 #define LAUNCH_MM_IDS_HELPER(threads, items)                                                                            \
     launch_mm_ids_helper<threads, items>(ids, ids_src1, ids_dst, expert_bounds, n_z, n_pairs, pair_bits, slot_bits,   \
