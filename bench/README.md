@@ -21,6 +21,7 @@ Same GPU, same model, same requests; every engine in its own environment; client
 | `qmm_sweep.py` | M0.7 step 0: the ggml matmul's time per call against rows (mmvq, mmq with and without the f32 → bf16 cast) for every qlinear shape and activation mode of the given locks, graph-timed on real weights; a read-only stream |
 | `d8_gate.py` | M0.7 step 5: D8's megakernel gate (f and its projection) from paired `step_profile.py`, `qmm_sweep.py` and `glu_sweep.py` records, profile-free (the GEMVs priced per call, less their isolated q8_1 quantize) |
 | `mtp_decision.py` | release design D3's MTP default rule from `run.py` records of a plain lock against MTP over it (`holon@mtp`): per-round TPOT, p95 gap and p95 TTFT ratios, the power estimate after 4 rounds, the verdict |
+| `offload_ctx.py` | v1 offload's reference rows (docs/v1-offload.md acceptance 3, D14): batch-1 decode and prefill at 1K / 4K / 32K on natural-text prompts, llama-server and FreeToken arms interleaved over rounds, peak VRAM; `spikes/x4_refs/` |
 | `clock_check.py` | the clock screen of a desktop before its evidence is recorded: SM clock percentiles and slowdown share under sustained decode |
 
 `workloads.py`, `driver.py` and `worker.py` are stdlib-only so they run unchanged in every engine's environment. The
@@ -36,6 +37,7 @@ HTTP backends fit the same protocol: `add` posts a streaming request, `step` ret
 | llama.cpp, upstream | `f12aaa344c97` (2026-10-16) | the same build; the newest upstream, an ungated second column (re-pinned when the suite ran, release step 8) |
 | [SGLang](https://github.com/sgl-project/sglang) | release 0.5.21 (2026-10-01) | own venv: torch 2.13.0+cu130 and its pinned kernels; HF checkpoints only |
 | [FreeToken](https://github.com/FlashML-org/FreeToken) | `74a387777708` (2026-10-10) | own venv: torch 2.14.1+cu130, `[accel]` (FlashInfer, sglang-kernel); its extension built against that torch |
+| llama.cpp and FreeToken, offload (`setup_baselines.sh offload`) | `f74e2fa6a31c` / `21d9578bde22` (2026-10-16) | `llama.cpp-offload` (with `--moe-cache-mib`) and `freetoken-offload`: v1 offload's references (`spikes/x4_refs/`) |
 
 Both use their defaults otherwise (mini-sglang: overlap scheduling, CUDA graphs, radix cache; nano-vllm: CUDA
 graphs, prefix cache, 256-token KV blocks). Every backend gets the same `--max-batch` (max running sequences) and
