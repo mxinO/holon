@@ -234,7 +234,8 @@ The store is built once per engine by its factory on the **root** build context,
 layer) get the same object and its pools are not namespaced (panel A-r2-11). It learns its classes from the units
 that bind to it: each expert stack adopts its `QTensor` without copying (the GGUF source maps the file) and hands the
 store its layout and S4 extents; under the offload store the gate / up merge records per-expert extent pairs (gate
-rows, then up rows) and never concatenates or moves the stacks (today's merge reads and copies them to the device,
+rows, then up rows) and never concatenates or moves the stacks (a `merge` member of the store: the resident store concatenates as
+today, so `MoE.finalize_weights` has no branch) (today's merge reads and copies them to the device,
 which would read ≈ 12 GB on the vehicle at startup, panel A-r4-3). At S0's `before_materialize` — after every model, aux models included, is built and
 loaded, before the first materialize — the store forms its classes (role, ggml type, shape), requests its VRAM fill
 pools and host pools, and fills the host pools from the extents with `O_DIRECT` reads (panel A-r3-2, B-r3-2: no
@@ -353,7 +354,7 @@ None names experts, KV or formats. Each is proven first with a toy plugin.
 | S1 | **Step hooks** | planner `prepare_device` only → a shared object may register `before_launch(step) → (writes, mem_ops)` (device writes and MemOps enqueued before the replay, stream-ordered) and `after_commit(step, telemetry)` (declared device telemetry buffers, copied D2H with the step's tokens into a per-launch pinned double buffer) | a toy counter and a map edit applied at launch c+2 under depth 1 and on the synchronous paths alike | 80 |
 | S2 | **Host pools and async cross-device MemOps** | device pools only; eager equal-shape MemOps → `BuildCtx.pool(…, device="host", mapped=True)`, requested at the latest in S0's `before_materialize` and allocated once, outside the device profile cycle, with `cudaHostAlloc` or `mmap` + `cudaHostRegister`, exact bytes against EngineConfig `host_memory`, a device alias; a MemOp may cross host ↔ device and carry `after` (an event of a step) and `lands_by` (a later step whose launch waits on it); the core runs it on a copy stream | a toy unit demotes a unit to host and back, bitwise; a late copy stalls the `lands_by` step, never skips it | 200 |
 | S3 | **Fill pools** | fixed plugin pools → `BuildCtx.pool(…, fill=True, priority=p)`, filled after EngineConfig `paged_min_tokens`, capped at `pref_units`; a lock pins sizes through the owning plugin's own option (D4), so the core records nothing new | a toy fill pool and paged state split a budget | 40 |
-| S4 | **Weight extents** | `QTensor` parts carry tensors only → an optional per-part `extent(path, offset, nbytes)` (or a sequence of them: a merged gate / up part is a pair) for unmodified file slices (absent when a kernel's `prepare` repacked them) | the toy weight source reports extents that read back bitwise | 20 |
+| S4 | **Weight extents** | `QTensor` parts carry tensors only → an optional per-part `extent(path, offset, nbytes)` for unmodified file slices (absent when a kernel's `prepare` repacked them) | the toy weight source reports extents that read back bitwise | 20 |
 | S5 | **CPU facts** | `Fingerprint` has none → `Fingerprint.cpu_isa` (a tier = a prebuilt compiler flag set such as `x86-avx2`, `x86-avx512`, never `-march=native` or a CPU model) and `Constraint.cpu_isa`. A lock that runs CPU kernels carries the tier inside its class's first segment (`rtx-5080+x86-avx2/cu130-torch2.11`, keeping the two-segment layout lock discovery globs); for a host of tier t the lookup order is `gpu+t/…`, then `gpu/…`, then another tier's lock unverified; the **store** forces F5a there (tune records the split's tier in a store option, and the store zeroes `plan[n]` when it differs from `ctx.fingerprint.cpu_isa`) | a toy CPU kernel selected by tier; class ranking with and without a tier | 40 |
 | — | **CLI size check** | refuses checkpoints larger than VRAM → refuses only when it is larger than VRAM **and** EngineConfig `host_memory` is 0 (the default, so today's behaviour stands); with `host_memory` > 0 the deployment opted in and the build's per-pool report judges fit (generic, no store named, invariant 1; GLM's 93 GB file on a 32 GB card with ≈ 58 GB of host budget must not be refused) | — | 10 |
 
@@ -621,6 +622,7 @@ mixers (with FN / GLM); the end-of-answer checkpoint (plan §10). Its own doc mu
 | A-r4-2 later waits after a timeout | D6: every wait returns at once once the error flag is set |
 | A-r4-3 the gate / up merge reads and moves offloaded stacks | D5 / S4: extent pairs, no concatenation or move under the offload store |
 | A-r4-4 short prefill chunks take mmvq in the reference | D4: chunks at or below the mmvq limit are never compacted |
+| B-r4.2-1 S4's sequence form has no producer | S4 keeps one extent per part; gate / up pairs stay inside the store (its `merge` member: the resident store concatenates, the offload store records pairs) |
 
 **Drifts from `docs/design.md`, recorded:** §7.4 (the CPU handshake lives in a kernel plugin, not
 `holon.core.platform`); §6.5 and §4.2 (placement policies and tiers are std protocols bound by open options, not
