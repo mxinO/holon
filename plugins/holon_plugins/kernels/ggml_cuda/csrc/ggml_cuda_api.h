@@ -112,10 +112,11 @@ void holon_ggml_topk_moe(const float * logits, int64_t tokens, int64_t experts, 
 
 // The router and softmax routing in one launch, for up to holon_ggml_moe_router_rows() tokens (topk-moe.cu,
 // ggml_cuda_holon_moe_router): holon_ggml_topk_moe's weights and ids for the logits x · router.T, x [tokens, hidden]
-// (bf16 or f32; 8-byte aligned) read as its exact f32 values, `router` [experts, hidden] f32 (16-byte aligned; hidden
-// a multiple of 512), summed in f32 in an order fixed per hidden (the same for a row at any tokens). `logits`
-// [tokens, experts] f32 is scratch; `done` holds holon_ggml_moe_router_tiles(tokens) zeroed counters, zeroed again on
-// return. `x_q8_1`, if not NULL, receives x as holon_ggml_quantize_q8_1 writes it, in the same launch.
+// (bf16, 8-byte aligned, or f32, 16-byte aligned) read as its exact f32 values, `router` [experts, hidden] f32
+// (16-byte aligned; hidden a multiple of 512; k <= 32), summed in f32 in an order fixed per hidden (the same for a
+// row at any tokens). `logits` [tokens, experts] f32 is scratch; `done` holds holon_ggml_moe_router_tiles(tokens)
+// zeroed counters, zeroed again on return. `x_q8_1`, if not NULL, receives x as holon_ggml_quantize_q8_1 writes it,
+// in the same launch.
 int64_t holon_ggml_moe_router_rows(void);
 int64_t holon_ggml_moe_router_tiles(int64_t tokens);
 void holon_ggml_moe_router(const void * x, int x_bf16, const float * router, int64_t tokens, int64_t hidden,

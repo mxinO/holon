@@ -15,8 +15,8 @@ class PreNorm(nn.Module):
         self.mixer = ctx.unit(mixer, layer=layer, hidden=hidden)
         self.post_norm = ctx.unit(norm, dim=hidden)
         self.ffn = ctx.unit(ffn, layer=layer, hidden=hidden)
+        self._ffn_add = getattr(self.ffn, "add", None)
 
     def forward(self, h: torch.Tensor, ctx) -> torch.Tensor:
         x, h = self.post_norm.add(self.mixer(self.input_norm(h), ctx), h)   # fused residual add + norm
-        add = getattr(self.ffn, "add", None)
-        return h + self.ffn(x) if add is None else add(x, h)
+        return h + self.ffn(x) if self._ffn_add is None else self._ffn_add(x, h)

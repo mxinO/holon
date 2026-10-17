@@ -239,10 +239,14 @@ class MoE(nn.Module):
                              f"(gate {self.gate.layout_fact()}, up {self.up.layout_fact()})")
         self._down = self._store.stack(self.down)
 
-    def _route(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        if self._router is not None:
-            return self._router(x, self.router)
-        return self._topk(nn.functional.linear(x.float(), self.router))
+    def _route(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """(weights, ids, the gate/up input) for up to CHUNK tokens: the router's route_prepare where it has one, else
+        its routing (or the f32 linear and top-k) and `x[:, None]`."""
+        if self._prepare is not None:
+            return self._prepare(x, self.router, self._gate_up.kernel)
+        weights, ids = (self._router(x, self.router) if self._router is not None
+                        else self._topk(nn.functional.linear(x.float(), self.router)))
+        return weights, ids, x[:, None]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self._forward(x, None)
@@ -263,11 +267,11 @@ class MoE(nn.Module):
         passes = [(a, min(a + size, full)) for a in range(0, full, size)] + [(full, tokens)] * (full < tokens)
         for a, b in passes:
             xc = x[a:b]
-            if self._prepare is not None and b - a <= CHUNK:  # the router prepares the gate/up input in its launch
-                weights, ids, xin = self._prepare(xc, self.router, self._gate_up.kernel)
+            routes = [self._route(xc[c:c + CHUNK]) for c in range(0, b - a, CHUNK)]
+            if len(routes) == 1:                       # the gate/up input: maybe prepared by the router's launch
+                weights, ids, xin = routes[0]
             else:
-                routes = [self._route(xc[c:c + CHUNK]) for c in range(0, b - a, CHUNK)]
-                weights, ids = routes[0] if len(routes) == 1 else (torch.cat(t) for t in zip(*routes, strict=True))
+                weights, ids = (torch.cat(t) for t in zip(*(r[:2] for r in routes), strict=True))
                 xin = xc[:, None]
             ids, weights = self._store.transform(ids, weights, a)
             gate_up, down = self._store.route(ids, a)

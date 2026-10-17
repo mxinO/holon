@@ -349,7 +349,7 @@ int64_t holon_ggml_moe_router_tiles(int64_t tokens) { return (tokens + HOLON_ROU
 void holon_ggml_moe_router(const void * x, int x_bf16, const float * router, int64_t tokens, int64_t hidden,
                            int64_t experts, int64_t k, int renormalize, float * logits, uint32_t * done,
                            float * weights, int32_t * ids, void * x_q8_1, void * stream) {
-    GGML_ASSERT((uintptr_t) x % 8 == 0 && (uintptr_t) router % 16 == 0);
+    GGML_ASSERT((uintptr_t) x % (x_bf16 ? 8 : 16) == 0 && (uintptr_t) router % 16 == 0);
     // the sum's clamp, as holon_ggml_topk_moe's (llama-graph.cpp)
     ggml_cuda_holon_moe_router(x, x_bf16, router, tokens, hidden, experts, k, renormalize ? 6.103515625e-5f : -INFINITY,
                                logits, done, weights, ids, x_q8_1, (cudaStream_t) stream);

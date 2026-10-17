@@ -267,8 +267,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         TORCH_CHECK(experts > 0 && experts <= 512 && (experts & (experts - 1)) == 0, "experts: a power of 2 <= 512");
         TORCH_CHECK(k > 0 && k <= experts && tokens > 0 && tokens <= holon_ggml_moe_router_rows(),
                     "1 <= k <= experts, 0 < tokens <= ", holon_ggml_moe_router_rows());
-        TORCH_CHECK(reinterpret_cast<uintptr_t>(x.data_ptr()) % 8 == 0 &&
-                    reinterpret_cast<uintptr_t>(router.data_ptr()) % 16 == 0, "x, router: 8- and 16-byte aligned");
+        TORCH_CHECK(k <= 32, "k <= 32");
+        TORCH_CHECK(reinterpret_cast<uintptr_t>(x.data_ptr()) % (x.scalar_type() == at::kBFloat16 ? 8 : 16) == 0 &&
+                    reinterpret_cast<uintptr_t>(router.data_ptr()) % 16 == 0,
+                    "x, router: 8-byte (bf16) or 16-byte (f32) and 16-byte aligned");
         check_q8_1(xq, x, tokens, hidden);
         holon_ggml_moe_router(x.data_ptr(), bf16(x, "x"), router.data_ptr<float>(), tokens, hidden, experts, k,
                               renormalize, logits.data_ptr<float>(), reinterpret_cast<uint32_t *>(done.data_ptr<int32_t>()),

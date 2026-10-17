@@ -334,7 +334,7 @@ def test_mixed_types_in_one_layer(ctx, sm):
         pytest.skip("the IQ3_S / IQ4_XS limits that split 7 tokens across the paths are sm_86's")
     unit, (sg, su, sd) = moe_layer(ctx, "iq3_s", "iq4_xs")
     x = layer_input(7, seed=9)
-    weights, ids = unit._route(x)
+    weights, ids, _ = unit._route(x)
     h = unit._gate_up(x[:, None], ids)
     y = unit.down(h, ids)
     assert unit._gate_up._kernel.calls == {"mmq/q8_1": 1} and unit.down._kernel.calls == {"mmvq/q8_1": 1}
@@ -663,19 +663,20 @@ def test_moe_topk_non_finite_rows(ctx, n):
     torch.testing.assert_close(ids[5], reference.moe_topk(rows[5:6], K, True)[1][0].cuda(), rtol=0, atol=0)
 
 
-@pytest.mark.parametrize("n,hidden", [(16, 512), (128, H), (512, 1536)])
+@pytest.mark.parametrize("n,hidden", [(16, 4096), (128, H), (512, 1536)])
 def test_moe_router(ctx, lib, n, hidden):
     """`moe_router@1` (docs/v1-offload.md §14, step 3c), its fused path (up to `rows` tokens): its logits within the
     f32 budget of the f64 product from x's exact values, bf16 and f32 x; its weights and ids bitwise `moe_topk` on
     those logits, near-ties and NaN rows included (k unique ids in range); a row's logits the same at any token count
-    and tile (row-invariant: 1- to 16-row calls against each other); the tile counters left zeroed, so a second call
+    and tile (row-invariant: 1- to 16-row calls against each other), exact ties included (two equal router rows; the
+    q8_1 loop runs several rounds at 16 experts of 4,096); the tile counters left zeroed, so a second call
     (a graph replay) gives the same bits; x's q8_1 activations, written in the same launch, bitwise quantize_q8_1's.
     Through the plugin: the fused path's bits up to `rows` tokens, above them the composition's (the f32 linear, then
     `moe_topk`)."""
     gen = torch.Generator().manual_seed(n)
     router = (torch.randn(n, hidden, generator=gen) / hidden ** 0.5).cuda()
+    router[1] = router[0]                                               # tied logits: the lower id first
     x32 = torch.randn(700, hidden, generator=gen).cuda()
-    x32[100:200] = x32[100:200].round(decimals=1)                         # near-ties among the logits
     x32[7, 5] = float("nan")
     rows = lib.moe_router_rows()
     done = torch.zeros(lib.moe_router_tiles(rows), dtype=torch.int32, device="cuda")
@@ -710,22 +711,25 @@ def test_moe_router(ctx, lib, n, hidden):
         assert route(x32[:0].bfloat16(), router)[1].shape == (0, k)
 
 
-def test_the_router_prepares_the_gate_up_input(ctx):
+def test_the_router_prepares_the_gate_up_input(ctx, lib):
     """`route_prepare` (step 3c): at every token count on the gate/up's mmvq path the handle it returns gives the
     gate/up output bitwise that of the layer input itself (its q8_1 written by the router's launch, read in place of
-    a quantize); a handle whose buffer a later write took falls back to its x; above the path it returns the tensor."""
+    a quantize: other activations written into the handle's buffer are what it reads); a handle whose buffer a later
+    write took falls back to its x; above the path it returns the tensor."""
     unit, _ = moe_layer(ctx, "q4_k", "q4_k")
     gate_up = unit._gate_up.kernel
     assert unit._prepare is not None and 0 < gate_up.mmvq_tokens <= 8
     for t in range(1, gate_up.mmvq_tokens + 2):
         x, other = layer_input(t, seed=t), layer_input(t, seed=100 + t)
         weights, ids, xin = unit._prepare(x, unit.router, gate_up)
-        assert all(map(bitwise, (weights, ids), unit._route(x)))
+        assert all(map(bitwise, (weights, ids), unit._router(x, unit.router)))
         want = unit._gate_up(x[:, None], ids)
         if t > gate_up.mmvq_tokens:
             assert isinstance(xin, torch.Tensor) and torch.equal(xin, x[:, None])
             continue
         assert isinstance(xin, Prepared) and torch.equal(unit._gate_up(xin, ids), want)
+        lib.quantize_q8_1(TYPES["q4_k"], other, xin.buffer)             # the buffer, generation unchanged: read
+        assert torch.equal(unit._gate_up(xin, ids), unit._gate_up(other[:, None], ids)), "the handle's q8_1 unread"
         unit._prepare(other, unit.router, gate_up)                     # the buffer's next write
         assert torch.equal(unit._gate_up(xin, ids), want), "a stale handle read the buffer"
 
@@ -795,17 +799,15 @@ def test_swiglu_kernel_within_the_fp32_budget(lib):
 def test_router_logits_within_the_fp32_budget(ctx, monkeypatch):
     # D3: the router is an f32 product of the bf16 hidden states (an f64 reference at the fp32 budget); a bf16
     # router or TF32 (`allow_tf32`, e.g. via `set_float32_matmul_precision("high")`) must miss it. The layer routes
-    # through `moe_router@1` (its logits: test_moe_router); its composition, where no provider serves the router (the
-    # f32 linear, then `moe_topk@1`), is held here.
+    # through `moe_router@1`: its fused path's logits are test_moe_router's; its prompt chunks (here 300 rows) compose
+    # the f32 linear and `moe_topk`, held here.
     unit, _ = moe_layer(ctx, "q4_k", "q4_k")
     assert unit._router is not None and unit._topk is None
     x = torch.randn(300, H, generator=torch.Generator().manual_seed(17)).bfloat16().cuda()
     want = x.double() @ unit.router.double().T
     seen = []
-    route = topk(ctx, EQ)
-    monkeypatch.setattr(unit, "_router", None)
-    monkeypatch.setattr(unit, "_prepare", None)
-    monkeypatch.setattr(unit, "_topk", lambda logits: seen.append(logits.clone()) or route(logits))
+    route = unit._router.topk
+    monkeypatch.setattr(unit._router, "topk", lambda logits: seen.append(logits.clone()) or route(logits))
 
     def logits() -> torch.Tensor:
         seen.clear()
@@ -830,7 +832,7 @@ def test_moe_layer_binds_its_activation_dtypes_and_f32_outputs(ctx):
     assert sites["swiglu"]["facts"]["act_dtype"] == "bfloat16"         # gate/up: the layer input
     assert sites["none"]["facts"]["act_dtype"] == "float32"            # down: the f32 SwiGLU output
     x = layer_input(3, seed=16)
-    _, ids = unit._route(x)
+    _, ids, _ = unit._route(x)
     h = unit._gate_up(x[:, None], ids)
     assert h.dtype == unit.down(h, ids).dtype == torch.float32 and unit(x).dtype == torch.bfloat16
 

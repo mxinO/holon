@@ -1,7 +1,7 @@
 """llama.cpp's quantized CUDA kernels (vendored at a pinned commit, M0.1 design §4.4, M0.2 design §4.3) as
 `qlinear@2`, `qembedding@1` and `linear_experts@2` kernels for ggml block layouts (`"ggml.<type>/gguf.native"`) and
 the HF FP4 layouts (`"nvfp4/hf"`, `"mxfp4/hf"`, repacked by `prepare`), and its MoE routing and combine as
-`moe_topk@1` and `moe_combine@1` (op contracts: std.ops.kernels, std.moe.kernels).
+`moe_topk@1`, `moe_router@1` and `moe_combine@1` (op contracts: std.ops.kernels, std.moe.kernels).
 
 `qlinear` dispatches from the row count: `mmvq` up to `mmvq_rows`, else `mmq` in 512-row chunks (llama.cpp's
 ubatch); both write `out_dtype` (bf16 or f32) directly, mmq's stream-k partials kept in f32 until its one rounding
@@ -590,7 +590,7 @@ def _supports_moe_topk(f: dict) -> bool:
 
 
 def _supports_moe_router(f: dict) -> bool:
-    return _supports_moe_topk(f) and f["hidden"] % 512 == 0 and f["dtype"] in DTYPES
+    return _supports_moe_topk(f) and f["top_k"] <= 32 and f["hidden"] % 512 == 0 and f["dtype"] in DTYPES
 
 
 def _supports_moe_combine(f: dict) -> bool:
