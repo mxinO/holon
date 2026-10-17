@@ -229,8 +229,9 @@ miss path that changes the graph shape (a new node between resolve and combine) 
   down: the same layer, so the same classes); the rest go to staging. An expert needed by both a decode and a prefill
   row in one step has one slot: its admitted slot if admitted, else its staging or ring slot, read by both.
 - **Lending under the device-owned default.** A ring-path step's slots are lent by the device: at the step's launch
-  the apply kernel unmaps the n coldest residents of each class (ties by layer, then expert id; counts unchanged),
-  logs them, and after the prompt they return to admission as empty slots, refilled by fetch-on-miss — no host edit,
+  the policy's own resolve contract picks n residents of each class through its `lend(n, class) → slots` device op
+  (F11: the coldest by count, ties by layer, then expert id; F4: the oldest; a later policy its own rule, with its
+  own oracle) and the std apply kernel only unmaps and logs the slots it is handed (counts unchanged, panel B-r4.4-1); and after the prompt they return to admission as empty slots, refilled by fetch-on-miss — no host edit,
   no refill copy (panel C's replay: ≤ 1.3% even with random picks, against ≈ 12% for a standing 0.5 GB reserve).
   Host-edit policies keep two-phase lending. "Prefill rows never change residency" means they never admit; lending
   evicts by rule.
@@ -708,6 +709,7 @@ Decisions (by §8's rules, fixed before measuring):
 | A-r4.3d-4 F11 with the exclusive RAM tier | D10: the in-graph victim becomes SSD-only; RAM slot released via the delta log |
 | B-r4.3-2 the row mask only marks padding | D4 / §5: a row-kind code in `moe_resolve@1` |
 | B-r4.3-3 D3 / D4 text not updated for F11 | D3 instances, D4 regions and two-phase scope updated |
+| B-r4.4-1 the lending pick is a policy rule | D4: a `lend(n, class)` op in the policy-owned resolve contract; the apply kernel only unmaps and logs |
 | C-r4.3-3 F11's win assumes F5a | §13: tune chooses policy and split together for F5b candidates; ABBA rule for lfu vs lru |
 
 **Drifts from `docs/design.md`, recorded:** §7.4 (the CPU handshake lives in a kernel plugin, not
