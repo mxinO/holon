@@ -21,6 +21,7 @@ class Plugin:
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="testing.ref_kernels", impl=impl, requires=Constraint(devices=frozenset({"cpu"})),
                 supports=(lambda f: f["layout"] in KV_LAYOUTS) if paged else
-                _reads(WEIGHT_SCHEMES[op]) if op in WEIGHT_SCHEMES else None,
+                _reads(WEIGHT_SCHEMES[op]) if op in WEIGHT_SCHEMES else
+                (lambda f: f["copy"] in ("sm", "dma")) if op == "expert_prefetch" else None,
                 props=frozenset({"deterministic"} if paged else {"deterministic", "graph_safe"}),
                 config={"fused": ["qlinear_glu@1"]} if op == "qlinear" else {}))

@@ -301,6 +301,23 @@ def test_fetch_gathers_the_listed_units(plugins, device, mapped):
     assert torch.equal(want[K + 29], data[2]) and not torch.equal(want[K + 4], data[0])
 
 
+def test_prefetch_is_selected_for_its_copy_mode():
+    """`expert_prefetch@1`'s `copy` fact reaches selection: a provider declaring one mode only (here a toy above the
+    CPU provider's priority, `sm` only) serves that mode and is never selected for the other."""
+    from holon.api import Constraint, KernelSpec
+
+    plugins = PluginSet(discover())
+    ctx = BuildContext(plugins, torch.device("cpu"))
+    ctx.candidates(EXPERT_PREFETCH, {"unit_bytes": 16, "copy": "sm"})          # loads the installed providers
+    plugins.regs.kernels.add("expert_prefetch", KernelSpec(
+        op="expert_prefetch", provider="tests.sm_only", impl=object, requires=Constraint(devices=frozenset({"cpu"})),
+        priority=100, supports=lambda f: f["copy"] == "sm"))
+    picked = {copy: ctx.select_kernel(EXPERT_PREFETCH, site=copy, unit_bytes=16, copy=copy).provider
+              for copy in ("sm", "dma")}
+    assert picked == {"sm": "tests.sm_only", "dma": "testing.ref_kernels"}
+    assert ctx.kernels["dma/expert_prefetch@1"]["facts"]["copy"] == "dma"             # the lock records the mode
+
+
 @pytest.mark.parametrize("device", DEVICES)
 def test_prefetch_copies_the_listed_units_before_its_wait(plugins, device):
     """`expert_prefetch@1` (D8's ring): `expert_fetch@1`'s copy from a mapped host pool (the store's allocation), its
@@ -308,7 +325,8 @@ def test_prefetch_copies_the_listed_units_before_its_wait(plugins, device):
     for the key; nothing else written."""
     provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
     unit = 4096 + 48
-    prefetch = kernel(plugins, device, EXPERT_PREFETCH, provider, unit_bytes=unit)
+    prefetch, engines = (kernel(plugins, device, EXPERT_PREFETCH, provider, unit_bytes=unit, copy=copy)
+                         for copy in ("sm", "dma"))
     g = torch.Generator().manual_seed(1)
     data = torch.randint(0, 256, (10, unit), dtype=torch.uint8, generator=g)
     host = platform.host_memory(data.numel(), torch.device(device), mapped=True)
@@ -319,8 +337,8 @@ def test_prefetch_copies_the_listed_units_before_its_wait(plugins, device):
     want = reference.expert_fetch(fetch, 4, data, dst.cpu())
     dma = dst.clone()
     prefetch.start(5, fetch.to(device), torch.tensor([4], dtype=torch.int32, device=device), src, dst)
-    prefetch.start(6, fetch, torch.tensor([4], dtype=torch.int32), host.view(10, unit), dma)   # the host's list
+    engines.start(6, fetch, torch.tensor([4], dtype=torch.int32), host.view(10, unit), dma)    # the host's list
     prefetch.wait(5)
-    prefetch.wait(6)
+    engines.wait(6)
     assert torch.equal(dst.cpu(), want) and torch.equal(want[4], data[8]) and not torch.equal(want[11], data[0])
     assert torch.equal(dma.cpu(), want)

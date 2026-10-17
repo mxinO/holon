@@ -214,7 +214,7 @@ class ExpertFetch:
 
 
 class ExpertPrefetch:
-    def __init__(self, ctx, *, unit_bytes: int) -> None:
+    def __init__(self, ctx, *, unit_bytes: int, copy: str) -> None:      # either mode: a CPU step copies at once
         pass
 
     def start(self, key, fetch, n, src, dst):       # at once: a CPU step has nothing to overlap

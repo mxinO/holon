@@ -221,7 +221,8 @@ class TieredStore:
             for c in self.classes.values():
                 facts = {"unit_bytes": c.unit_bytes}
                 self.prefetch[c.name] = self.ctx.select_kernel(
-                    EXPERT_PREFETCH, site=f"std.tiered[{self.name}].{c.name}", **facts).impl(self.ctx, **facts)
+                    EXPERT_PREFETCH, site=f"std.tiered[{self.name}].{c.name}", **(facts | {"copy": self.ring_copy})
+                ).impl(self.ctx, **facts, copy=self.ring_copy)
         g = self._order[group]
         self.resolvers.append(DeviceResolver(self.ctx, self, g, [self.groups[group][r] for r in range(self.roles)],
                                              {n: t[g] for n, t in self.state.items()}))
