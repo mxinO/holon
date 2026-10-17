@@ -596,15 +596,14 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   v2). It needs prebuilt wheels with Holon's CUDA extensions compiled for the pinned torch / CUDA stack and every
   supported SM, a CI build and test matrix on each card class, and `pip install holonlm` serving without a local CUDA
   toolkit.
-- **Expert caching/offload** (`docs/v1-offload.md`): Strata's strategy set as plugins, exact by default — a
-  profile-seeded VRAM expert cache with decayed-count swaps, LRU and static placement, decode misses split between
-  CPU compute (ggml CPU kernels, batch-invariant) and PCIe fetch through the in-graph handshake (S6), prefill streaming
-  of non-resident experts, an SSD expert tier — on additive core seams (design D8). Targets (owner, 2026-10-17):
-  **Qwen3.8-Flash-Next** compared with Strata and **GLM-5.3-Flash** compared with Project Maya, each a model
-  milestone of its own (Flash-Next: QSA + indexer, PLE n-gram table, hyper-connections; GLM: MLA + DSA indexer, KDA,
-  mHC); Qwen3-30B-A3B on the RTX 5080 is the development vehicle. Qwen3.5-122B-A10B is dropped.
-- KV offload to pinned RAM / SSD (demote-on-evict tiers under the prefix index, cancellable `BLOCKED` loads; KV
-  streaming for sparse-attention mixers with the model milestones), in `docs/v1-offload.md`.
+- **Expert caching/offload** (`docs/v1-offload.md`, four milestones): **X** expert offload — Strata's and Maya's
+  strategy set as plugins (profile-seeded VRAM cache with decayed-count swaps, LRU, static, promote-on-fetch; misses
+  fetched over PCIe by default so every placement is exact, CPU compute with ggml CPU kernels as a bounded opt-in
+  where it gains ≥ 5%; prefill streaming of non-resident experts; an SSD expert tier) on additive core seams,
+  closing on Qwen3-30B-A3B on the RTX 5080 vs FreeToken and llama.cpp; **K** KV and checkpoint tiers (pinned RAM /
+  SSD under the prefix index, exact, deterministic resume); **FN** Qwen3.8-Flash-Next (QSA + indexer, PLE n-gram
+  table, hyper-connections; Qwen3.6-35B-A3B as its first step) compared with Strata; **GLM** GLM-5.3-Flash (MLA + DSA
+  indexer, KDA, mHC) compared with Project Maya (owner, 2026-10-17). Qwen3.5-122B-A10B is dropped.
 - VMM ledger + live rebalance KV ↔ experts through `quiesce` (run-identical after shrink/regrow).
 - PIECEWISE graphs for mixed prefill/decode steps (mixing itself is M0.7's core budget `chunk_with_decode`, design
   §7.1; mixing verify rows is its follow-up, `docs/m07-perf.md` §9); depth 2; radix PrefixIndex if profiles warrant.
