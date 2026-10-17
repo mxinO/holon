@@ -339,8 +339,11 @@ class TieredStore:
     # -- a step's forward ---------------------------------------------------------------------------------------------
     def large_passes(self, tokens: int) -> bool:
         """A step of `tokens` takes one expert pass per chunk of up to 4,096 tokens (D8): when its prompt could stream
-        through the ring — by its size, so that the startup profile's worst step runs such passes too."""
-        return self.lending and bool(self.ring_tokens) and tokens >= self.ring_tokens
+        through the ring — by its size and the store's terms, never the layout's, so that the startup profile's worst
+        step (on minimum pools, where a fill cache holds nothing to lend) runs such passes too. A pass's misses fit a
+        prefill pass's staging (`prefill` = every item), lent or not."""
+        return (self.policy.device_owned and bool(self.ring_tokens) and tokens >= self.ring_tokens
+                and self.prefill >= self.items)
 
     def begin(self) -> None:
         """At the step's first resolve (after its words are zeroed and its edits applied): its lent slots, if any."""

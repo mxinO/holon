@@ -320,6 +320,18 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe, tmp_path, polic
         assert report["first_differing_step"] is None and report["lends"] and report["admissions"], report
 
 
+def test_the_startup_profile_runs_a_streaming_pass(tiny_moe, tmp_path):
+    """The worst step of the startup profile runs on minimum pools, where a fill cache holds nothing to lend: its
+    expert passes are still a streaming step's (sized by the step's tokens, not by the layout)."""
+    checkpoint, _ = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
+    engine = _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
+                                                                 "moe.ring_tokens": 10})
+    engine.ledger.materialize(None)                       # the profile's minimum pools
+    offload = engine.executor.model.layers[0].ffn._store
+    assert not engine.ctx.shared_objects[KEY].lending and offload.pass_tokens(10) == PASS
+
+
 def test_a_cache_too_small_to_lend_stages_instead(tiny_moe, tmp_path):
     """A layout whose cache cannot lend a prefill pass's staging (a fill pool of 3 experts per class over the paged
     floor, F11 with the ring on) keeps its staging slots at a pass's size and never borrows: it serves as before."""

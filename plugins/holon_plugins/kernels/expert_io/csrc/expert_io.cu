@@ -96,7 +96,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
                 has_decode = 1;
             }
         }
-        routed[e] = 1;
+        atomicOr(&routed[e], 1);                       // an earlier call's scope bit stays
         if (P != STATIC) {
             live[e] = 1;
         }

@@ -164,6 +164,7 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, 
     dev = {name: t.clone().to(device) for name, t in (case | state | {"stage": stage}).items()}
     misses, errors = torch.zeros(1, dtype=torch.int32, device=device), torch.zeros(1, dtype=torch.int32, device=device)
     routed = torch.zeros(E, dtype=torch.int32, device=device)
+    routed[:3] = 3                                     # an earlier call's marks (scope included) stay
     slots, fetch, n_fetch = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"],
                                     dev["counts"], routed, dev["ring"], dev["stage"], dev["empty"], dev["n_empty"],
                                     misses, errors, delta, n_delta, 3, **{n: dev[n] for n in state})
@@ -171,7 +172,9 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, 
     for r in range(ROLES):
         assert torch.equal(fetch[r, :, :int(n_fetch[r])].cpu(), want["fetch"][r, :, :int(n_fetch[r])])
     assert torch.equal(dev["counts"].cpu(), case["counts"] + want["counts"]) and int(misses[0]) == n_fetch.max()
-    assert torch.equal(routed.cpu(), want["routed"]) and int(dev["n_empty"][0]) == want["n_empty"]
+    earlier = torch.zeros(E, dtype=torch.int32)
+    earlier[:3] = 3
+    assert torch.equal(routed.cpu(), want["routed"] | earlier) and int(dev["n_empty"][0]) == want["n_empty"]
     assert torch.equal(dev["residency"].cpu(), want["residency"])
     for name in state:
         assert torch.equal(dev[name].cpu(), want[name].to(dev[name].dtype)), name
