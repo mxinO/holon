@@ -227,9 +227,19 @@ class MoE(nn.Module):
         self._down = self._store.stack(self.down)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self._forward(x, None)
+
+    def add(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
+        """`residual + self(x)`, the add in the combine's kernel where it has one (`moe_combine@1`'s `add`): bitwise
+        the composition (std.blocks' optional ffn capability)."""
+        if not hasattr(self._combine, "add"):
+            return residual + self._forward(x, None)
+        return self._forward(x, residual)
+
+    def _forward(self, x: torch.Tensor, residual: torch.Tensor | None) -> torch.Tensor:
         """The router and top-k per CHUNK tokens; the expert path per pass of the store's size (a CHUNK, or whole
         CHUNKs in a streaming offload step: the step's last partial chunk is a pass of its own, so every row's chunk
-        and kernel path are a chunk's)."""
+        and kernel path are a chunk's); with `residual`, its add in the combine."""
         out, tokens = torch.empty_like(x), x.shape[0]
         size, full = self._store.pass_tokens(tokens), tokens // CHUNK * CHUNK
         passes = [(a, min(a + size, full)) for a in range(0, full, size)] + [(full, tokens)] * (full < tokens)
@@ -241,6 +251,9 @@ class MoE(nn.Module):
             ids, weights = self._store.transform(ids, weights, a)
             gate_up, down = self._store.route(ids, a)
             h = self._gate_up(xc[:, None], gate_up)                   # [t, k, inter] f32, SwiGLU applied
-            self._combine(self._down(h, down), weights, out[a:b])
+            if residual is None:
+                self._combine(self._down(h, down), weights, out[a:b])
+            else:
+                self._combine.add(self._down(h, down), weights, residual[a:b], out[a:b])
         self._store.finish()
         return out

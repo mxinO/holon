@@ -29,7 +29,7 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
 - `moe_topk`: the reference's picks up to near-ties (fast-math `__expf` moves probabilities by a few ulps), its
   weights; ±inf and all-NaN rows give unique in-range ids; token counts off the kernel's 8-row blocks.
 - `moe_combine`: within 1 bf16 ulp of the reference, plus the f32 accumulation's rounding (the kernel's FMA) for
-  sums that cancel.
+  sums that cancel; its `add` bitwise `residual + out` (cancelling and subnormal residuals too).
 - Precision (f64 references written out here): our f32 SwiGLU within the fp32 budget, which a bf16 SwiGLU misses,
   with per-expert gate and up scales too; a std.moe layer binds `linear_experts` with act_dtype bf16 and out_dtype
   f32, and its expert outputs are f32.
@@ -672,6 +672,7 @@ def test_moe_combine_within_one_ulp(ctx):
         gen = torch.Generator().manual_seed(tokens)
         y = (torch.randn(tokens, K, 2048, generator=gen) * 10 ** torch.empty(tokens, K, 1).uniform_(-3, 3,
                                                                                                     generator=gen))
+        y[..., 128:192] = 0                                                  # sums of 0 (subnormal residuals below)
         weights = torch.rand(tokens, K, generator=gen).softmax(-1)
         out = torch.full((tokens, 2048), float("nan"), dtype=torch.bfloat16, device="cuda")
         combine(y.cuda(), weights.cuda(), out)
@@ -680,6 +681,16 @@ def test_moe_combine_within_one_ulp(ctx):
                             want - torch.nextafter(want, torch.full_like(want, -float("inf")))).float()
         rounding = 2 * K * l0.U32 * (weights[..., None] * y).abs().sum(1).cuda()   # k f32 roundings each side
         assert ((out.float() - want.float()).abs() <= ulp + rounding).all(), f"T={tokens}: more than 1 ulp off"
+        # `add`: bitwise the unfused residual add after the combine, also where they cancel and on subnormals
+        residual = (torch.randn(tokens, 2048, generator=gen) * 10 ** torch.empty(tokens, 1).uniform_(-3, 3,
+                                                                                                generator=gen))
+        residual = residual.to(torch.bfloat16).cuda()
+        residual[:, :64] = -out[:, :64]
+        residual[:, 64:128] = -out[:, 64:128] * 1.0078125
+        residual[:, 128:192] = 3e-39 * torch.randn(tokens, 64, generator=gen).cuda()
+        fused = torch.full_like(out, float("nan"))
+        combine.add(y.cuda(), weights.cuda(), residual, fused)
+        assert torch.equal(fused, residual + out), f"T={tokens}: the fused add is not residual + the combine"
 
 
 def test_swiglu_kernel_within_the_fp32_budget(lib):

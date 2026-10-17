@@ -16,7 +16,10 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   as `qlinear@2`'s; `a16` for dense ones). An instance may define `prepare` as `qlinear@2`'s (logical shape [E,
   out, in]); a spec's `config["act"]` is refused under mixed steps as `qlinear@2`'s.
 - `moe_combine@1`: instance `(y [T, k, H] of y_dtype, weights [T, k] f32, out [T, H])`: writes `Σ_j w[t, j] · y[t,
-  j]`, accumulated in f32 in slot order, into `out` (of `dtype`). Facts: hidden, top_k, dtype, y_dtype.
+  j]`, accumulated in f32 in slot order, into `out` (of `dtype`). Facts: hidden, top_k, dtype, y_dtype. An instance
+  may define `add(y, weights, residual [T, H] of dtype, out)`: writes `residual + s`, s that sum rounded to `dtype`,
+  added in f32 and rounded to `dtype` again — what `residual + out` gives after the call, so the layer's residual add
+  costs no launch of its own (docs/v1-offload.md §14, step 3c).
 
 Expert offload (docs/v1-offload.md §5): an offload store keeps each slot class's experts in an arena `[S, unit]`
 whose first `top_k` slots are null slots (zero weights; slot j for routing rank j, so a token's slots stay unique),

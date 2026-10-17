@@ -341,10 +341,11 @@ void holon_ggml_topk_moe(const float * logits, int64_t tokens, int64_t experts, 
 }
 
 void holon_ggml_moe_combine(const float * y, const float * weights, int64_t tokens, int64_t k, int64_t hidden,
-                            void * out, void * stream) {
+                            const void * residual, void * out, void * stream) {
     call_context c(stream, nullptr, 0);
     const ggml_tensor experts = tensor3(GGML_TYPE_F32, y, hidden, k, tokens);
     const ggml_tensor weights_t = matrix(GGML_TYPE_F32, weights, k, tokens);
     ggml_tensor dst = matrix(GGML_TYPE_BF16, out, hidden, tokens);
-    ggml_cuda_op_moe_weighted_reduction(c.ctx, &experts, nullptr, &weights_t, &dst);
+    const ggml_tensor residual_t = matrix(GGML_TYPE_BF16, residual, hidden, tokens);
+    ggml_cuda_op_moe_weighted_reduction(c.ctx, &experts, nullptr, &weights_t, &dst, residual ? &residual_t : nullptr);
 }

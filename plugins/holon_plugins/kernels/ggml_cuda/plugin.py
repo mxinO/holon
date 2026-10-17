@@ -23,7 +23,8 @@ counts them), else quantizes `x` itself. `qlinear_glu` (D6): mmvq's fused gate a
 f32, followed for swiglu by our f32 SwiGLU. Its workspace (`ggml_cuda.id[…]`) holds mmq's id maps besides the
 activations. `moe_topk` is `topk-moe.cu` (softmax, top k, renormalised) and `moe_combine`
 `moe-weighted-reduction.cu`, both patched to the contracts' layouts (ids at row stride k; the combine stores bf16
-into the caller's `out`).
+into the caller's `out`, and its `add` the residual stream plus the rounded sum, rounded again: docs/v1-offload.md
+§14, step 3c).
 
 Activation modes (docs/m06-lowp.md D3, D8, §4.5, §4.7): one spec per mode, `config["act"]` naming each path's
 activation format. `q8_1` (every class, every type, `act_quant` a4 or a8): q8_1 activations on both paths, so
@@ -487,6 +488,11 @@ class MoeCombine:
     def __call__(self, y: torch.Tensor, weights: torch.Tensor, out: torch.Tensor) -> None:
         if len(y):
             self.lib.moe_combine(y.contiguous(), weights.contiguous(), out)
+
+    def add(self, y: torch.Tensor, weights: torch.Tensor, residual: torch.Tensor, out: torch.Tensor) -> None:
+        """`residual` + the combine into `out`, in the combine's kernel (bitwise the unfused add)."""
+        if len(y):
+            self.lib.moe_combine(y.contiguous(), weights.contiguous(), out, residual.contiguous())
 
 
 def _supports_matmul(f: dict, act_quant: tuple[str, ...], types) -> bool:

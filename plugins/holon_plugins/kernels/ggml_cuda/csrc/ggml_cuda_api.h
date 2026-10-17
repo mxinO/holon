@@ -109,8 +109,10 @@ void holon_ggml_topk_moe(const float * logits, int64_t tokens, int64_t experts, 
                          float * weights, int32_t * ids, void * stream);
 
 // out[t] = sum_j weights[t, j] * y[t, j] in f32, slot by slot, stored bf16: y [tokens, k, hidden] f32, out bf16.
+// With `residual` [tokens, hidden] bf16 (not NULL): out[t] = residual[t] + that bf16 sum, added in f32 and rounded
+// once more, as the unfused `residual + out` computes it.
 void holon_ggml_moe_combine(const float * y, const float * weights, int64_t tokens, int64_t k, int64_t hidden,
-                            void * out, void * stream);
+                            const void * residual, void * out, void * stream);
 
 #ifdef __cplusplus
 }

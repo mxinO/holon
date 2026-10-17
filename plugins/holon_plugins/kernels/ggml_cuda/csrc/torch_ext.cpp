@@ -234,7 +234,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         holon_ggml_topk_moe(logits.data_ptr<float>(), tokens, experts, k, renormalize, weights.data_ptr<float>(),
                             ids.data_ptr<int32_t>(), stream());
     });
-    m.def("moe_combine", [](const at::Tensor & y, const at::Tensor & weights, at::Tensor & out) {
+    m.def("moe_combine", [](const at::Tensor & y, const at::Tensor & weights, at::Tensor & out,
+                            const std::optional<at::Tensor> & residual) {
         const c10::cuda::CUDAGuard guard(y.device());
         TORCH_CHECK(y.dim() == 3, "y: 3 dimensions");
         const int64_t tokens = y.size(0), k = y.size(1), hidden = y.size(2);
@@ -244,8 +245,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         check_f32(y, "y");
         check_f32(weights, "weights");
         TORCH_CHECK(out.scalar_type() == at::kBFloat16, "out: bfloat16");
+        if (residual) {
+            check(*residual, y, {tokens, hidden}, "residual");
+            TORCH_CHECK(residual->scalar_type() == at::kBFloat16, "residual: bfloat16");
+        }
         TORCH_CHECK(tokens > 0 && hidden > 0, "no tokens");
-        holon_ggml_moe_combine(y.data_ptr<float>(), weights.data_ptr<float>(), tokens, k, hidden, out.data_ptr(),
-                               stream());
-    });
+        holon_ggml_moe_combine(y.data_ptr<float>(), weights.data_ptr<float>(), tokens, k, hidden,
+                               residual ? residual->data_ptr() : nullptr, out.data_ptr(), stream());
+    }, py::arg("y"), py::arg("weights"), py::arg("out"), py::arg("residual") = py::none());
 }

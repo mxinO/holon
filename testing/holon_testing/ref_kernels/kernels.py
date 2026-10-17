@@ -189,6 +189,9 @@ class MoeCombine:
     def __call__(self, y, weights, out):
         out.copy_(moe.moe_combine(y, weights, self.dtype))
 
+    def add(self, y, weights, residual, out):
+        out.copy_(moe.moe_combine(y, weights, self.dtype, residual))
+
 
 class MoeResolve:
     def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:

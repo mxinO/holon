@@ -53,12 +53,14 @@ def linear_experts(x: torch.Tensor, weight: torch.Tensor, ids: torch.Tensor, glu
     return y
 
 
-def moe_combine(y: torch.Tensor, weights: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-    """The `moe_combine@1` oracle: `Σ_j w[t, j] · y[t, j]` in f32, slot by slot, cast to `dtype`."""
+def moe_combine(y: torch.Tensor, weights: torch.Tensor, dtype: torch.dtype,
+                residual: torch.Tensor | None = None) -> torch.Tensor:
+    """The `moe_combine@1` oracle: `Σ_j w[t, j] · y[t, j]` in f32, slot by slot, cast to `dtype`; plus `residual`
+    (its `add`) after that cast."""
     acc = torch.zeros(y.shape[0], y.shape[2], dtype=torch.float32, device=y.device)
     for j in range(y.shape[1]):
         acc += weights[:, j, None].float() * y[:, j].float()
-    return acc.to(dtype)
+    return acc.to(dtype) if residual is None else residual + acc.to(dtype)
 
 
 def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, host: torch.Tensor,
