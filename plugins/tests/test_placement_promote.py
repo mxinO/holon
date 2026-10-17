@@ -43,22 +43,25 @@ def _state(case: dict, steady: bool, seed: int) -> dict[str, torch.Tensor]:
 @pytest.mark.parametrize("steady", [False, True])
 @pytest.mark.parametrize("sources", ["staging", "ring"])
 @pytest.mark.parametrize("tokens, kinds", [(1, "decode"), (6, "decode"), (12, "mixed"), (300, "mixed"),
-                                           (64, "prefill"), (6, "overflow")])
+                                           (64, "prefill"), (6, "overflow"), (64, "narrow")])
 def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, kinds):  # noqa: F811
     """Every output and write: slots, the fetch list (staged misses by id, then the promoted into their slots), counts,
-    misses, the map, the empty slots left, the state (stamps, clock, spares, set-up), the delta log after the records
-    already in it — and the overflow case, one record short. A promoted owner takes its spare back unlogged, the others
+    misses, the map, the empty slots left, the state (stamps, clock, spares), the delta log after the records already
+    in it — and the overflow case, one record short; the narrow case's staged and promoted misses pass its 16 fetch
+    entries (all counted, only the first 16 written). A promoted owner takes its spare back unlogged, the others
     take the empty slots (with a ring), then the spares, logged; each absent spare (all of them at a seed) is refilled
     from the least recently routed resident; a prefill chunk changes nothing but @1's; the CPU's share (F5b) comes from
     the misses left after promoting."""
     resolve = kernel(plugins, device, OP, PROVIDERS[device], experts=E, top_k=K, roles=ROLES, staging=E)
     ring = sources == "ring"
     case = routing(tokens, seed=tokens + len(kinds) + steady, whole=True, ring=ring)
-    if kinds in ("decode", "overflow"):
+    if kinds in ("decode", "overflow", "narrow"):
         case["kinds"][:] = DECODE
     elif kinds == "prefill":
         case["kinds"][:] = PREFILL
     state, stage = _state(case, steady, tokens), _stage(case, E, ring)
+    if kinds == "narrow":
+        stage = stage[:, :16].contiguous()
     plan, jobs = _share(tokens, device, kinds == "mixed")
     want = reference.moe_resolve_promote(case["ids"], case["kinds"], case["residency"], case["host"], case["limits"],
                                          E, *state.values(), 3, case["ring"], stage, case["empty"],
@@ -91,6 +94,7 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
     assert int(errors[0]) == (2 if overflow else 0)                       # OVERFLOW
     # the contract's own terms, on the oracle
     decode = kinds != "prefill"
+    assert kinds != "narrow" or (want["n_fetch"] > 16).all()
     if not decode:
         assert torch.equal(want["residency"], case["residency"]) and not records.numel()
         return
@@ -109,7 +113,7 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
         held = held if (held >= 0).all() else spare[spare[:, 0] == a + 1][0, 1:]
         for r in range(ROLES):
             row = (want["fetch"][r, 0, :int(want["n_fetch"][r])] == case["host"][a, r]).nonzero()
-            assert want["fetch"][r, 1, row].item() == held[r]
+            assert want["fetch"][r, 1, row].item() == held[r] if len(row) else want["n_fetch"][r] > len(stage[r])
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU")
@@ -156,7 +160,9 @@ def _routes(engine):
         trace["steps"].append({"order": [list(dict.fromkeys(c)) for c in calls], "lends": record["lends"],
                                "resident": (store.residency.device >= 0).all(-1).cpu().numpy(),
                                "empty": store.n_empty.cpu().numpy().copy(),
-                               "promoted": int((record["records"][:, 1] >= 0).sum())})
+                               "promoted": int((record["records"][:, 1] >= 0).sum()),
+                               "into_empty": int(((record["records"][:, 1] >= 0) &
+                                                  (record["records"][:, 2] <= -2)).sum())})
         for c in calls:
             c.clear()
     store.taps.append(tap)
@@ -197,7 +203,8 @@ def test_promote_serves_the_resident_stores_outputs(tiny_moe_deep, tmp_path):  #
     with _routes(engine) as trace:
         assert _served(engine, prompts) == want
     assert store.borrowed["ring"] and store.borrowed["stage"], store.borrowed
-    assert sum(s["promoted"] for s in trace["steps"]) > 0 and (store.state["spare"][:, :, 0] > 0).all()
+    assert sum(s["into_empty"] for s in trace["steps"]) > 0 and (store.state["spare"][:, :, 0] > 0).all()
+    assert sum(s["promoted"] for s in trace["steps"]) > sum(s["into_empty"] for s in trace["steps"])
     assert _parity(store, trace) is None
 
 

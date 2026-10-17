@@ -16,7 +16,7 @@ from holon.api import Constraint, KernelSpec
 from . import extension
 
 OP, RESOLVE = "moe_resolve.promote", "moe_resolve@1"
-SHARED_BYTES = 48 << 10                     # the promotion CTA's four [E] tables
+SHARED_BYTES = 48 << 10                     # the promotion CTA's four [E] tables, beside its static words
 
 
 class Resolve:
@@ -54,7 +54,7 @@ class Resolve:
 class Plugin:
     def register(self, regs) -> None:
         def supports(f) -> bool:
-            return 4 * f["experts"] * 4 <= SHARED_BYTES
+            return 4 * f["experts"] * 4 + 64 <= SHARED_BYTES
         regs.kernels.add(OP, KernelSpec(op=OP, provider="kernels.promote", impl=Resolve,
                                         requires=Constraint(sms=frozenset(extension.ARCHS)), supports=supports,
                                         props=frozenset({"graph_safe", "deterministic"}), priority=10))

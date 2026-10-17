@@ -16,9 +16,10 @@ A call with a routed (not dropped) entry of a `DECODE` row, in this order:
    then the spares no promoted expert owns, in entry order (record `(group, a, o)`, o the spare's owner: a took o's
    slots). A spare taken is absent.
 3. Resolve: `moe_resolve@1` over the map after the promotions — a promoted expert is resident, so its entries read
-   its new slot; the CPU's share (F5b) is taken from the misses left —; then each promoted expert is fetched straight
-   into its slots, its fetch entries after the call's staged misses (staged misses by expert id, then the promoted in
-   promotion order; `n_fetch` and `misses` count both).
+   its new slot; the CPU's share (F5b) is taken from the misses left —; then each promoted expert but an owner is
+   fetched straight into its slots, its fetch entries after the call's staged misses (staged misses by expert id, then
+   the promoted in promotion order; `n_fetch` and `misses` count both). An owner's bytes are still in its spare: no
+   slot of a spare is written while it is one (it is in no ring, stage or empty list), so taking it back costs no copy.
 4. Refill (the step boundary): each absent spare, in entry order, takes the layer's least recently routed resident
    (every role in cache slots, by `last` then expert id; the call's own routes and promotions included, as in M6's
    replay) while more than one resident is left, and none while the layer holds every expert (M6: a layer keeps
@@ -72,7 +73,7 @@ def moe_resolve_promote(ids: torch.Tensor, kinds: torch.Tensor, residency: torch
     def cache(e: int) -> bool:
         return all(k + staging <= int(after[e, r]) < int(limits[r]) for r in range(roles))
 
-    records, promoted = [], []
+    records, fetched = [], []
     if decode.any():
         seen[sorted(needed)] |= 2                                       # the victims' scope
         clock += 1                                                      # 1. stamp
@@ -101,6 +102,7 @@ def moe_resolve_promote(ids: torch.Tensor, kinds: torch.Tensor, residency: torch
                 records.append((group, a, int(spare[s, 0]) - 1))
         for s in used:
             spare[s] = 0
+        fetched = [a for a in promoted if a not in owner]
     taken, cpu, jobs = cpu_share(ids, kinds, after, ring, host, plan)   # 3. @1 over the map after promotion
     seen[sorted(taken)] |= 4                                            # the CPU's
     slots = torch.arange(k).expand(roles, t, k).clone()                 # null slot j by default
@@ -111,7 +113,8 @@ def moe_resolve_promote(ids: torch.Tensor, kinds: torch.Tensor, residency: torch
     for r in range(roles):
         missing = sorted({e for e in routed[live].tolist() if after[e, r] < 0 and ring[e, r] < 0} - taken)
         staged = {e: i for i, e in enumerate(missing)}
-        listed = [(e, int(stage[r, i])) for i, e in enumerate(missing)] + [(a, int(after[a, r])) for a in promoted]
+        listed = [(e, int(stage[r, min(i, width - 1)])) for i, e in enumerate(missing)]   # past F: @1's last slot
+        listed += [(a, int(after[a, r])) for a in fetched]
         n_fetch[r] = len(listed)
         for i, (e, slot) in enumerate(listed[:width]):
             fetch[r, :, i] = torch.tensor([host[e, r] if host[e, r] >= 0 else -2 - e, slot])  # (−2 − e: on no

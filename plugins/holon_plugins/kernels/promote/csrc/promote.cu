@@ -40,8 +40,8 @@ __device__ inline bool cached(const Layer & L, int e, int roles, int lo) {
     return whole;
 }
 
-// Before the resolve. `out`: [0] the promoted count (-1: the call has no decode entry), then the promoted experts in
-// promotion order.
+// Before the resolve. `out`: [0] how many promoted experts are fetched (-1: the call has no decode entry), then they,
+// in promotion order (an owner taking its spare back is not: nothing wrote its slots since it left them).
 __global__ void k_promote(const int32_t * __restrict__ ids, const uint8_t * __restrict__ kinds, Layer L,
                           int32_t * __restrict__ routed, int32_t * __restrict__ errors, int32_t * __restrict__ delta,
                           int32_t * __restrict__ n_delta, int cap, int group, int32_t * __restrict__ out, int tokens,
@@ -128,7 +128,7 @@ __global__ void k_promote(const int32_t * __restrict__ ids, const uint8_t * __re
                 }
             }
         }
-        int took = 0, s = 0, records = 0;
+        int took = 0, s = 0, records = 0, fetched = 0;
         for (int i = 0; i < n_prom; ++i) {
             const int a = order[i];
             int b = -1;
@@ -166,8 +166,8 @@ __global__ void k_promote(const int32_t * __restrict__ ids, const uint8_t * __re
                     atomicOr(errors, OVERFLOW);
                 }
                 ++records;
+                out[1 + fetched++] = a;                // an owner's bytes are still in its spare: no fetch
             }
-            out[1 + i] = a;
         }
         for (int x = 0; x < n_spare; ++x) {
             if (from[x]) {
@@ -178,7 +178,7 @@ __global__ void k_promote(const int32_t * __restrict__ ids, const uint8_t * __re
         }
         *L.n_empty = n_empty - took;
         *n_delta = base + records;
-        out[0] = n_prom;
+        out[0] = fetched;
     }
 }
 
@@ -190,7 +190,7 @@ __global__ void k_settle(const int32_t * __restrict__ out, Layer L, const int32_
     extern __shared__ int32_t shared[];
     int32_t * key = shared;                            // [E]: a resident's last stamp (-1: not a resident)
     __shared__ int absent[MAX_SPARES], n_absent, n_res;
-    const int tid = threadIdx.x, n_prom = out[0], lo = k + staging;
+    const int tid = threadIdx.x, n_prom = out[0], lo = k + staging;   // the fetched promotions
     if (n_prom < 0) {
         return;
     }
