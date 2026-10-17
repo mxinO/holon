@@ -22,6 +22,7 @@ class Constraint:
     sm_max: int | None = None
     sms: frozenset[int] = frozenset()      # exactly these (e.g. the SMs a prebuilt binary carries)
     devices: frozenset[str] = frozenset({"cuda"})
+    cpu_isa: frozenset[str] = frozenset()  # exactly these CPU tiers (`Fingerprint.cpu_isa`; a binary per flag set)
 
     def allows(self, device: str, sm: int | None) -> bool:
         return device in self.devices and (sm is None or not ((self.sm_min and sm < self.sm_min) or (

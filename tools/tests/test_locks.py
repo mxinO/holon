@@ -90,6 +90,22 @@ def test_nearest_class_prefers_own_then_same_gpu_then_same_sm(tmp_path):
     assert lock.plan.fingerprint_class == fp.cls and not unverified
 
 
+def test_nearest_class_prefers_the_cpu_tier_then_no_tier_then_another_tier(tmp_path):
+    """A lock running CPU kernels has the CPU's tier in its class (docs/v1-offload.md S5): a host of tier t takes
+    `gpu+t/…`, then `gpu/…` (both verified), then another tier's lock, unverified."""
+    fp = Fingerprint(gpu="rtx-5080", sm=120, vram_gib=16, toolchain="cu130-torch2.11", cpu_isa="x86-avx2")
+    assert plans.lock_class(fp, cpu_kernels=True) == "rtx-5080+x86-avx2/cu130-torch2.11"
+    assert plans.lock_class(fp, cpu_kernels=False) == plans.lock_class(dataclasses.replace(fp, cpu_isa=""), True) \
+        == fp.cls
+    want = []
+    for cls in ("rtx-5080+x86-avx512/cu130-torch2.11", fp.cls, "rtx-5080+x86-avx2/cu130-torch2.11"):
+        locks.append(tmp_path, Lock(_plan(cls=cls), sm=120))
+        lock, unverified, _ = plans.nearest_class(tmp_path, MODEL, fp)
+        want.append((lock.plan.fingerprint_class, unverified))
+    assert want == [("rtx-5080+x86-avx512/cu130-torch2.11", True), (fp.cls, False),
+                    ("rtx-5080+x86-avx2/cu130-torch2.11", False)]
+
+
 def test_outdated_locks_are_treated_as_missing(tmp_path):
     fp = Fingerprint(gpu="rtx-a5000", sm=86, vram_gib=24, toolchain="cu130-torch2.11")
     locks.append(tmp_path, Lock(_plan(src="old"), sm=86))

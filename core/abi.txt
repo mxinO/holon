@@ -51,6 +51,7 @@ dataclass Constraint frozen
   #1 sm_max: int | None = None
   #2 sms: frozenset[int] = frozenset([])
   #3 devices: frozenset[str] = frozenset(['cuda'])
+  #4 cpu_isa: frozenset[str] = frozenset([])
   allows(self, device: 'str', sm: 'int | None') -> 'bool'
 dataclass DeviceBatch
   #0 input_ids: torch.Tensor
@@ -87,6 +88,7 @@ dataclass Fingerprint frozen
   #2 vram_gib: int
   #3 toolchain: str
   #4 num_sms: int = 0
+  #5 cpu_isa: str = ''
 protocol FrontendBundle() required, implemented by plugins
   render_chat(self, messages: 'list[dict[str, Any]]', tools: 'list[dict[str, Any]] | None' = None, add_generation_prompt: 'bool' = True, **template_kwargs: 'Any') -> 'list[int]'
   model_name: str
@@ -114,7 +116,7 @@ dataclass KernelSpec frozen
   #0 op: str
   #1 provider: str
   #2 impl: Callable[..., Any]
-  #3 requires: Constraint = Constraint(sm_min=None, sm_max=None, sms=frozenset(), devices=frozenset({'cuda'}))
+  #3 requires: Constraint = Constraint(sm_min=None, sm_max=None, sms=frozenset(), devices=frozenset({'cuda'}), cpu_isa=frozenset())
   #4 supports: Callable[[Any], bool] | None = None
   #5 props: frozenset[str] = frozenset([])
   #6 config: dict[str, Any] = dict()

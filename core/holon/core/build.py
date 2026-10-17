@@ -53,6 +53,7 @@ class BuildContext:
         self.taps: dict[int, list[Any]] = {}   # layer -> consumers of the residual stream after it (`Model.trunk`)
         self.sources: dict[str, str] = {}      # path -> identity of every checkpoint `weight_source` opened (plans)
         self.shared_objects: dict[str, Any] = {}   # key -> the engine's one object (`shared`)
+        self.cpu_kernels = False               # a selected kernel runs on the CPU's tier: the lock class names it
 
     def unit_factory(self, ref: Ref) -> Any:
         """The registered factory (usually the unit class) serving `ref`, loading its plugin if needed."""
@@ -71,6 +72,7 @@ class BuildContext:
             spec = self._selected[key] = self._choose(op, facts)
         self.kernels[f"{site}/{op}"] = {"provider": spec.provider, "facts": facts, "props": sorted(spec.props),
                                         "config": spec.config}
+        self.cpu_kernels |= bool(spec.requires.cpu_isa)
         return spec
 
     def candidates(self, op: str, facts: dict[str, Any]) -> list[KernelSpec]:
@@ -79,9 +81,10 @@ class BuildContext:
         for plugin in self.plugins.providers(f"kernel.{name}", major):
             if self.plugins.available(plugin, self.device.type):
                 self.plugins.load(plugin)
-        sm = self.fingerprint.sm or None
+        sm, tier = self.fingerprint.sm or None, self.fingerprint.cpu_isa
         return [s for s in self.plugins.regs.kernels.get(name)
-                if s.requires.allows(self.device.type, sm) and (s.supports is None or s.supports(facts))]
+                if s.requires.allows(self.device.type, sm) and (not s.requires.cpu_isa or tier in s.requires.cpu_isa)
+                and (s.supports is None or s.supports(facts))]
 
     def _choose(self, op: str, facts: dict[str, Any]) -> KernelSpec:
         name = parse_versioned(op)[0]

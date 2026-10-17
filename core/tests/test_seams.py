@@ -1,18 +1,20 @@
 """The core seams of v1 expert offload (docs/v1-offload.md §4), proven with toys before a plugin uses them: S0 shared
-objects and their lifecycle, S1 step hooks, S2 host pools and asynchronous MemOps, S3 fill pools.
+objects and their lifecycle, S1 step hooks, S2 host pools and asynchronous MemOps, S3 fill pools, S5 CPU tiers.
 
 The engine's toy is a kernel provider for `rmsnorm` (the reference norm) whose instances share one object
 (`BuildCtx.shared`). It requests a host pool and a fill pool before the pools are materialized and seeds them after
 every materialize. Its forward copies two one-value "maps" into telemetry: one the object writes before a launch, one
 a MemOp brings from the host pool. At the commit of step c it decides both maps' value for launch c + 2 (c itself), so
 every step's telemetry shows the decision of two commits before, whatever the overlap depth and graphs."""
+import dataclasses
 import os
 
 import numpy as np
 import pytest
 import torch
 from holon.api import Constraint, KernelSpec, MemOp, SamplingParams
-from holon.core import platform
+from holon.core import plans, platform
+from holon.core.build import BuildContext
 from holon.core.engine import Engine, EngineConfig
 from holon.core.memory import Copies, Ledger, OutOfUnits
 from holon.core.plugins import PluginSet, discover
@@ -211,3 +213,23 @@ def test_units_demoted_to_host_and_back_are_bitwise_and_a_late_copy_stalls_its_s
     platform.synchronize(device)
     ledger.free(host=True)
 
+
+def test_kernels_are_selected_by_the_cpu_tier_and_name_it_in_the_lock_class():
+    """S5: a kernel constrained to CPU tiers runs only on those, and a plan binding one has the tier in its class's
+    first segment; the host's tier is the best flag set its CPU lists."""
+    assert platform.cpu_tier("x86_64", {"sse4_2", "avx2", "fma", "f16c"}) == "x86-avx2"
+    assert platform.cpu_tier("x86_64", {"avx512f", "avx512bw", "avx512dq", "avx512vl", "avx2", "fma", "f16c"}) == \
+        "x86-avx512"
+    assert (platform.cpu_tier("x86_64", {"avx"}), platform.cpu_tier("riscv64", set())) == ("x86", "")
+    assert platform.fingerprint(torch.device("cpu")).cpu_isa == platform.cpu_tier()
+    plugins = PluginSet({})
+    for provider, tiers, priority in (("plain", (), 0), ("avx2", ("x86-avx2", "x86-avx512"), 1),
+                                      ("avx512", ("x86-avx512",), 2)):
+        plugins.regs.kernels.add("toy", KernelSpec("toy", provider, None, Constraint(
+            devices=frozenset({"cpu"}), cpu_isa=frozenset(tiers)), priority=priority))
+    for tier, chosen in (("x86-avx2", "avx2"), ("x86-avx512", "avx512"), ("arm64", "plain")):
+        ctx = BuildContext(plugins, torch.device("cpu"))
+        ctx.fingerprint = dataclasses.replace(ctx.fingerprint, gpu="rtx-5080", cpu_isa=tier)
+        assert ctx.select_kernel("toy@1", site="s").provider == chosen
+        assert plans.lock_class(ctx.fingerprint, ctx.cpu_kernels) == (
+            f"rtx-5080+{tier}/{ctx.fingerprint.toolchain}" if chosen != "plain" else ctx.fingerprint.cls)

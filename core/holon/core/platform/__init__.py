@@ -10,16 +10,36 @@ import torch
 
 from holon.api import Fingerprint
 
+# CPU tiers by machine, best first: prebuilt compiler flag sets (never `-march=native`); a host's is the best whose
+# flags its CPU lists.
+CPU_TIERS = {"x86_64": (("x86-avx512", frozenset({"avx512f", "avx512bw", "avx512dq", "avx512vl", "avx2", "fma",
+                                                    "f16c"})),
+                        ("x86-avx2", frozenset({"avx2", "fma", "f16c"})),
+                        ("x86", frozenset())),
+             "aarch64": (("arm64", frozenset()),)}
+
 
 def fingerprint(device: torch.device) -> Fingerprint:
     """Static facts of `device`; the GPU class is the product name without vendor words, e.g. "rtx-5090"."""
     toolchain = f"cu{(torch.version.cuda or 'none').replace('.', '')}-torch{'.'.join(torch.__version__.split('.')[:2])}"
     if device.type != "cuda":
-        return Fingerprint(gpu="cpu", sm=0, vram_gib=0, toolchain=toolchain)
+        return Fingerprint(gpu="cpu", sm=0, vram_gib=0, toolchain=toolchain, cpu_isa=cpu_tier())
     p = torch.cuda.get_device_properties(device)
     words = [w for w in re.split(r"[\s_]+", p.name.lower()) if w not in ("nvidia", "geforce")]
     return Fingerprint(gpu="-".join(words), sm=10 * p.major + p.minor, vram_gib=round(p.total_memory / 2**30),
-                       toolchain=toolchain, num_sms=p.multi_processor_count)
+                       toolchain=toolchain, num_sms=p.multi_processor_count, cpu_isa=cpu_tier())
+
+
+def cpu_tier(machine: str | None = None, flags: set[str] | None = None) -> str:
+    """The best of `CPU_TIERS` this host's CPU runs (the kernel's flag list); "" for an unknown machine."""
+    if flags is None:
+        try:
+            with open("/proc/cpuinfo") as f:          # x86's "flags", arm's "Features"
+                line = next((ln for ln in f if ln.startswith(("flags", "Features"))), "")
+            flags = set(line.partition(":")[2].split())
+        except OSError:
+            flags = set()
+    return next((name for name, need in CPU_TIERS.get(machine or os.uname().machine, ()) if need <= flags), "")
 
 
 def pin_loop(core: int) -> None:
