@@ -55,7 +55,7 @@ from holon.core.plugins import PluginSet, discover
 from holon_judge import l0, q8_1
 from holon_judge.planted import PLANTS
 from holon_plugins.kernels.ggml_cuda import extension
-from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, FP4, ID_ERRORS, NATIVE_FP4, PREC, TYPES
+from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, FP4, ID_ERRORS, NATIVE_FP4, PREC, TYPES, Prepared, q8_1_bytes
 from holon_std.moe import reference
 
 from .test_ggml_cuda import (
@@ -669,8 +669,9 @@ def test_moe_router(ctx, lib, n, hidden):
     f32 budget of the f64 product from x's exact values, bf16 and f32 x; its weights and ids bitwise `moe_topk` on
     those logits, near-ties and NaN rows included (k unique ids in range); a row's logits the same at any token count
     and tile (row-invariant: 1- to 16-row calls against each other); the tile counters left zeroed, so a second call
-    (a graph replay) gives the same bits. Through the plugin: the fused path's bits up to `rows` tokens, above them
-    the composition's (the f32 linear, then `moe_topk`)."""
+    (a graph replay) gives the same bits; x's q8_1 activations, written in the same launch, bitwise quantize_q8_1's.
+    Through the plugin: the fused path's bits up to `rows` tokens, above them the composition's (the f32 linear, then
+    `moe_topk`)."""
     gen = torch.Generator().manual_seed(n)
     router = (torch.randn(n, hidden, generator=gen) / hidden ** 0.5).cuda()
     x32 = torch.randn(700, hidden, generator=gen).cuda()
@@ -686,7 +687,11 @@ def test_moe_router(ctx, lib, n, hidden):
                 logits = torch.full((len(rows_), n), float("nan"), device="cuda")
                 w, ids = torch.empty(len(rows_), k, device="cuda"), torch.empty(len(rows_), k, dtype=torch.int32,
                                                                                     device="cuda")
-                lib.moe_router(rows_, router, logits, done, w, ids, renormalize)
+                xq, want = (torch.full((q8_1_bytes(len(rows_), hidden),), 7, dtype=torch.uint8, device="cuda")
+                            for _ in range(2))
+                lib.moe_router(rows_, router, logits, done, w, ids, renormalize, xq=xq)
+                lib.quantize_q8_1(TYPES["q4_k"], rows_, want)
+                assert torch.equal(xq, want), "x's q8_1 is not quantize_q8_1's"
                 return logits, w, ids
             whole = [call(x[a:a + rows]) for a in range(0, len(x), rows)]
             logits, w, ids = (torch.cat(t) for t in zip(*whole, strict=True))
@@ -703,6 +708,26 @@ def test_moe_router(ctx, lib, n, hidden):
                 assert all(map(bitwise, route(x[:rows], router), (w[:rows], ids[:rows])))
                 assert all(map(bitwise, route(x, router), choose(torch.nn.functional.linear(x.float(), router))))
         assert route(x32[:0].bfloat16(), router)[1].shape == (0, k)
+
+
+def test_the_router_prepares_the_gate_up_input(ctx):
+    """`route_prepare` (step 3c): at every token count on the gate/up's mmvq path the handle it returns gives the
+    gate/up output bitwise that of the layer input itself (its q8_1 written by the router's launch, read in place of
+    a quantize); a handle whose buffer a later write took falls back to its x; above the path it returns the tensor."""
+    unit, _ = moe_layer(ctx, "q4_k", "q4_k")
+    gate_up = unit._gate_up.kernel
+    assert unit._prepare is not None and 0 < gate_up.mmvq_tokens <= 8
+    for t in range(1, gate_up.mmvq_tokens + 2):
+        x, other = layer_input(t, seed=t), layer_input(t, seed=100 + t)
+        weights, ids, xin = unit._prepare(x, unit.router, gate_up)
+        assert all(map(bitwise, (weights, ids), unit._route(x)))
+        want = unit._gate_up(x[:, None], ids)
+        if t > gate_up.mmvq_tokens:
+            assert isinstance(xin, torch.Tensor) and torch.equal(xin, x[:, None])
+            continue
+        assert isinstance(xin, Prepared) and torch.equal(unit._gate_up(xin, ids), want)
+        unit._prepare(other, unit.router, gate_up)                     # the buffer's next write
+        assert torch.equal(unit._gate_up(xin, ids), want), "a stale handle read the buffer"
 
 
 def bitwise(a: torch.Tensor, b: torch.Tensor) -> bool:
@@ -779,6 +804,7 @@ def test_router_logits_within_the_fp32_budget(ctx, monkeypatch):
     seen = []
     route = topk(ctx, EQ)
     monkeypatch.setattr(unit, "_router", None)
+    monkeypatch.setattr(unit, "_prepare", None)
     monkeypatch.setattr(unit, "_topk", lambda logits: seen.append(logits.clone()) or route(logits))
 
     def logits() -> torch.Tensor:

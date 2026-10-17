@@ -448,13 +448,14 @@ bool ggml_cuda_should_use_topk_moe(const ggml_tensor * gating_op,
 
 // Holon: the MoE router in one launch (docs/v1-offload.md §14, step 3c), for decode and verify steps: logits =
 // x · Wᵀ in f32, x [n_rows, hidden] (bf16 or f32) read as its exact f32 values and W [n_experts, hidden] f32, then
-// topk_moe_cuda's selection on them (holon_topk_select). Block (e, t) computes expert e for the t-th tile of HOLON_ROUTER_ROWS rows: warp
-// q of HOLON_ROUTER_WARPS sums the q-th of equal slices of hidden — lane l the products x[r, h] * W[e, h] over h =
-// 4 l + 4 * WARP_SIZE * i + j of the slice, i ascending, j = 0..3, one fma each, then warp_reduce_sum's xor tree —
-// and the slices' sums are added in slice order: one order per hidden, the same for a row at any row count. The
-// tile's logits go to `logits` [n_rows, n_experts]; the last of the tile's blocks to finish (a counter per tile in
-// `done`, zero before the launch and reset by that block) selects the tile's rows, one warp per row, as
-// topk_moe_cuda does from those logits.
+// topk_moe_cuda's selection on them (holon_topk_select). Block (e, t) computes expert e for the t-th tile of
+// HOLON_ROUTER_ROWS rows: warp q of HOLON_ROUTER_WARPS sums the q-th of equal slices of hidden — lane l the products
+// x[r, h] * W[e, h] over h = 4 l + 4 * WARP_SIZE * i + j of the slice, i ascending, j = 0..3, one fma each, then
+// warp_reduce_sum's xor tree — and the slices' sums are added in slice order: one order per hidden, the same for a
+// row at any row count. The tile's logits go to `logits` [n_rows, n_experts]; the last of the tile's blocks to finish
+// (a counter per tile in `done`, zero before the launch and reset by that block) selects the tile's rows, one warp
+// per row. With `x_q8_1`, the blocks' warps also write the tile's rows of x as quantize_q8_1 does (the experts' mmvq
+// input, which then needs no launch of its own).
 static __device__ __forceinline__ float4 holon_router_load4(const float * x) { return *(const float4 *) x; }
 
 static __device__ __forceinline__ float4 holon_router_load4(const nv_bfloat16 * x) {
@@ -533,6 +534,26 @@ static __device__ __forceinline__ void holon_topk_select(const float * logits, f
     }
 }
 
+// x[0..QK8_1) as quantize_q8_1 writes one block_q8_1 (quantize.cu), lane i holding value i: the same arithmetic
+static __device__ __forceinline__ void holon_quantize_q8_1_block(const float xi, block_q8_1 * y, const int lane) {
+    float amax = fabsf(xi);
+    float sum = xi;
+
+    amax = warp_reduce_max<QK8_1>(amax);
+    sum  = warp_reduce_sum<QK8_1>(sum);
+
+    const float  d = amax / 127.0f;
+    const int8_t q = amax == 0.0f ? 0 : roundf(xi / d);
+
+    y->qs[lane] = q;
+    if (lane == 0) {
+        y->ds = make_half2(d, sum);
+    }
+}
+
+static __device__ __forceinline__ float holon_router_load1(const float * x) { return *x; }
+static __device__ __forceinline__ float holon_router_load1(const nv_bfloat16 * x) { return __bfloat162float(*x); }
+
 template <int n_experts, typename src_t>
 __launch_bounds__(HOLON_ROUTER_WARPS * WARP_SIZE)
 __global__ void holon_moe_router(const src_t *         x,
@@ -541,6 +562,7 @@ __global__ void holon_moe_router(const src_t *         x,
                                  unsigned int *        done,
                                  float *               weights,
                                  int32_t *             ids,
+                                 block_q8_1 *          x_q8_1,
                                  const int             n_rows,
                                  const int             hidden,
                                  const int             n_expert_used,
@@ -557,6 +579,13 @@ __global__ void holon_moe_router(const src_t *         x,
         acc[r] = 0.0f;
     }
     ggml_cuda_pdl_sync();
+    if (x_q8_1 != nullptr) {      // the tile's rows of x as quantize_q8_1 writes them (no padding: hidden % 512 == 0)
+        const int nb = hidden / QK8_1;
+        for (int b = blockIdx.x * HOLON_ROUTER_WARPS + q; b < rows * nb; b += gridDim.x * HOLON_ROUTER_WARPS) {
+            const int64_t i = (int64_t) (row0 + b / nb) * hidden + b % nb * QK8_1;
+            holon_quantize_q8_1_block(holon_router_load1(x + i + lane), x_q8_1 + i / QK8_1, lane);
+        }
+    }
 #pragma unroll 4
     for (int h = 4 * lane; h < slice; h += 4 * WARP_SIZE) {
         const float4 wv = __ldg((const float4 *) (wq + h));      // W is never written: read-only
@@ -617,12 +646,13 @@ __global__ void holon_moe_router(const src_t *         x,
 template <typename src_t>
 static void holon_moe_router_cuda(const src_t * x, const float * w, const int n_rows, const int hidden,
                                   const int n_experts, const int n_expert_used, const float clamp_val, float * logits,
-                                  unsigned int * done, float * weights, int32_t * ids, cudaStream_t stream) {
+                                  unsigned int * done, float * weights, int32_t * ids, block_q8_1 * xq,
+                                  cudaStream_t stream) {
     const ggml_cuda_kernel_launch_params params(dim3(n_experts, (n_rows + HOLON_ROUTER_ROWS - 1) / HOLON_ROUTER_ROWS, 1),
                                                 dim3(WARP_SIZE, HOLON_ROUTER_WARPS, 1), 0, stream);
     switch (n_experts) {
 #define HOLON_ROUTER_CASE(E) case E: ggml_cuda_kernel_launch(holon_moe_router<E, src_t>, params, x, w, logits, done, \
-                                     weights, ids, n_rows, hidden, n_expert_used, clamp_val); break;
+                                     weights, ids, xq, n_rows, hidden, n_expert_used, clamp_val); break;
         HOLON_ROUTER_CASE(1) HOLON_ROUTER_CASE(2) HOLON_ROUTER_CASE(4) HOLON_ROUTER_CASE(8) HOLON_ROUTER_CASE(16)
         HOLON_ROUTER_CASE(32) HOLON_ROUTER_CASE(64) HOLON_ROUTER_CASE(128) HOLON_ROUTER_CASE(256)
         HOLON_ROUTER_CASE(512)
@@ -634,15 +664,15 @@ static void holon_moe_router_cuda(const src_t * x, const float * w, const int n_
 void ggml_cuda_holon_moe_router(const void * x, const bool x_bf16, const float * w, const int n_rows,
                                 const int hidden, const int n_experts, const int n_expert_used,
                                 const float clamp_val, float * logits, unsigned int * done, float * weights,
-                                int32_t * ids, cudaStream_t stream) {
+                                int32_t * ids, void * x_q8_1, cudaStream_t stream) {
     GGML_ASSERT(hidden % (4 * WARP_SIZE * HOLON_ROUTER_WARPS) == 0 && n_expert_used <= n_experts &&
                 n_expert_used <= WARP_SIZE && n_rows <= HOLON_ROUTER_MAX_ROWS);
     if (x_bf16) {
         holon_moe_router_cuda((const nv_bfloat16 *) x, w, n_rows, hidden, n_experts, n_expert_used, clamp_val,
-                              logits, done, weights, ids, stream);
+                              logits, done, weights, ids, (block_q8_1 *) x_q8_1, stream);
     } else {
         holon_moe_router_cuda((const float *) x, w, n_rows, hidden, n_experts, n_expert_used, clamp_val, logits,
-                              done, weights, ids, stream);
+                              done, weights, ids, (block_q8_1 *) x_q8_1, stream);
     }
     CUDA_CHECK(cudaGetLastError());
 }

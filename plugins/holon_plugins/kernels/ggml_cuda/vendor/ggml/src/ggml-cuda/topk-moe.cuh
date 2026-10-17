@@ -34,11 +34,11 @@ bool ggml_cuda_should_use_topk_moe(const ggml_tensor * gating_op,
 // `n_expert_used` of the softmax over x · Wᵀ in f32 (x [n_rows, hidden] bf16 or f32, W [n_experts, hidden] f32;
 // hidden a multiple of 4 · WARP_SIZE · HOLON_ROUTER_WARPS), divided by their sum clamped at `clamp_val` (-INFINITY: not
 // renormalised); `logits` [n_rows, n_experts] f32 its scratch, `done` one zeroed counter per HOLON_ROUTER_ROWS rows,
-// left zeroed.
+// left zeroed; `x_q8_1`, unless NULL, receives x as quantize_row_q8_1_cuda writes it (the experts' mmvq input).
 #define HOLON_ROUTER_WARPS 4
 #define HOLON_ROUTER_ROWS 4
 #define HOLON_ROUTER_MAX_ROWS 16
 
 void ggml_cuda_holon_moe_router(const void * x, bool x_bf16, const float * w, int n_rows, int hidden, int n_experts,
                                 int n_expert_used, float clamp_val, float * logits, unsigned int * done,
-                                float * weights, int32_t * ids, cudaStream_t stream);
+                                float * weights, int32_t * ids, void * x_q8_1, cudaStream_t stream);

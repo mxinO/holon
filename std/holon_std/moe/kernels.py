@@ -10,14 +10,19 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   from x's exact f32 values, in an order the provider fixes per row: a row's logits are the same at any T and in any
   call (row-invariant), not necessarily the f32 `linear`'s bits (bounded against the composition). std.moe uses it
   where a provider serves its facts, else composes the f32 `linear` and `moe_topk@1`. Facts: hidden, experts, top_k,
-  renormalize, dtype.
+  renormalize, dtype. An instance may define `route_prepare(x, router, experts) -> (weights, ids, x_experts)`: its
+  result and the experts' input for `x`, `x[:, None]` or a handle standing for it that the `linear_experts@2` (or
+  `linear_experts_arena@1`) instance `experts` reads — x made ready for it in the router's own launch (as qlinear@2's
+  `prepare_input`, std.ops.kernels: the provider's, keyed and generation-checked, falling back to the handle's x).
 - `linear_experts@2`: instance `(x [T, R, in], parts, ids [T, k]) -> y [T, k, out_y]` of `out_dtype`: row j of token
   t applies expert `ids[t, j]` to `x[t, 0]` (R = 1) or `x[t, j]` (R = k). `parts` holds the stack's tensors by role,
   as `QTensor.parts`, per expert (`{"blocks": [E, out, row_bytes]}` for ggml layouts, where @1 took [E·out,
   row_bytes]; `{"weight": [E, out, in]}` for `dense/<dtype>`). With `glu = "swiglu"` the stack is a merged gate/up
   stack (per expert `out/2` gate rows, then `out/2` up rows; a part with one value per expert is [2, E], gate's row
   then up's) and `y = silu(gate) · up` in f32 (out_y = out/2); with `glu = "none"`, out_y = out. A dense layout's
-  activation operand is rounded to the weight dtype before the product, with f32 accumulation. Facts: layout,
+  activation operand is rounded to the weight dtype before the product, with f32 accumulation. An instance may accept,
+  in place of `x`, a handle its own provider's `moe_router@1` prepared for it (`route_prepare`; once stale, it reads
+  the handle's x). Facts: layout,
   experts, in, out, top_k, rows_per_token, glu, act_dtype, out_dtype, act_quant (`ACT_QUANT` for quantized layouts,
   as `qlinear@2`'s; `a16` for dense ones). An instance may define `prepare` as `qlinear@2`'s (logical shape [E,
   out, in]); a spec's `config["act"]` is refused under mixed steps as `qlinear@2`'s.

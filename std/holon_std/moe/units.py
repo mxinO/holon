@@ -136,7 +136,13 @@ class ExpertLinear(nn.Module):
                 "glu": self.glu, "act_dtype": _dtype(self.act_dtype), "out_dtype": "float32",
                 "act_quant": "a16" if self.layout is None else _act_quant(ctx)}
 
-    def forward(self, x: torch.Tensor, ids: torch.Tensor) -> torch.Tensor:
+    @property
+    def kernel(self):
+        """Its bound `linear_experts@2` instance."""
+        return self._kernel
+
+    def forward(self, x, ids: torch.Tensor) -> torch.Tensor:
+        """`x` [T, R, in], or a handle a `moe_router@1` instance prepared for this kernel (std.moe.kernels)."""
         return self._kernel(x, self.parts, ids)
 
 
@@ -221,6 +227,7 @@ class MoE(nn.Module):
         self._router = (ctx.select_kernel(kernels.MOE_ROUTER, site=site, **router).impl(ctx, **router)
                         if ctx.candidates(kernels.MOE_ROUTER, router) else None)
         self._topk = None if self._router else ctx.select_kernel(kernels.MOE_TOPK, site=site, **topk).impl(ctx, **topk)
+        self._prepare = getattr(self._router, "route_prepare", None)
         combine = {"hidden": hidden, "top_k": top_k, "dtype": dtype, "y_dtype": "float32"}
         self._combine = ctx.select_kernel(kernels.MOE_COMBINE, site=f"std.moe[hidden={hidden},top_k={top_k}]",
                                           **combine).impl(ctx, **combine)
@@ -256,11 +263,15 @@ class MoE(nn.Module):
         passes = [(a, min(a + size, full)) for a in range(0, full, size)] + [(full, tokens)] * (full < tokens)
         for a, b in passes:
             xc = x[a:b]
-            routes = [self._route(xc[c:c + CHUNK]) for c in range(0, b - a, CHUNK)]
-            weights, ids = routes[0] if len(routes) == 1 else (torch.cat(t) for t in zip(*routes, strict=True))
+            if self._prepare is not None and b - a <= CHUNK:  # the router prepares the gate/up input in its launch
+                weights, ids, xin = self._prepare(xc, self.router, self._gate_up.kernel)
+            else:
+                routes = [self._route(xc[c:c + CHUNK]) for c in range(0, b - a, CHUNK)]
+                weights, ids = routes[0] if len(routes) == 1 else (torch.cat(t) for t in zip(*routes, strict=True))
+                xin = xc[:, None]
             ids, weights = self._store.transform(ids, weights, a)
             gate_up, down = self._store.route(ids, a)
-            h = self._gate_up(xc[:, None], gate_up)                   # [t, k, inter] f32, SwiGLU applied
+            h = self._gate_up(xin, gate_up)                           # [t, k, inter] f32, SwiGLU applied
             if residual is None:
                 self._combine(self._down(h, down), weights, out[a:b])
             else:

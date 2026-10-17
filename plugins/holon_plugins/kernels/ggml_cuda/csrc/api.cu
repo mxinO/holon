@@ -283,7 +283,8 @@ size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int6
 }
 
 void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, int64_t in, const void * x, int x_bf16,
-                        int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y, int swiglu,
+                        const void * x_q8_1, int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k,
+                        float * y, int swiglu,
                         const float * gate_scale, const float * up_scale, void * workspace, size_t workspace_bytes,
                         void * stream) {
     call_context c(stream, workspace, workspace_bytes);
@@ -292,7 +293,8 @@ void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, 
     // the fused gate as llama.cpp builds it: src0 the up rows, `gate` the gate rows, both at the stack's expert stride
     const ggml_tensor src0 = experts_view(t, w, experts, out, in, out - out_y, out_y);
     const ggml_tensor gate = experts_view(t, w, experts, out, in, 0, out_y);
-    const ggml_tensor src1 = tensor3(act(x_bf16), x, in, rows_per_token, tokens);
+    const ggml_tensor src1 = x_q8_1 ? tensor3(GGML_TYPE_Q8_1, x_q8_1, in, rows_per_token, tokens)
+                                    : tensor3(act(x_bf16), x, in, rows_per_token, tokens);
     const ggml_tensor ids_t = matrix(GGML_TYPE_I32, ids, k, tokens);
     ggml_tensor dst = tensor3(GGML_TYPE_F32, y, out_y, k, tokens);
     // NVFP4's per-expert scales in the fused epilogue: up's (or the stack's) as x_scale, gate's as gate_scale
@@ -346,11 +348,11 @@ int64_t holon_ggml_moe_router_tiles(int64_t tokens) { return (tokens + HOLON_ROU
 
 void holon_ggml_moe_router(const void * x, int x_bf16, const float * router, int64_t tokens, int64_t hidden,
                            int64_t experts, int64_t k, int renormalize, float * logits, uint32_t * done,
-                           float * weights, int32_t * ids, void * stream) {
+                           float * weights, int32_t * ids, void * x_q8_1, void * stream) {
     GGML_ASSERT((uintptr_t) x % 8 == 0 && (uintptr_t) router % 16 == 0);
     // the sum's clamp, as holon_ggml_topk_moe's (llama-graph.cpp)
     ggml_cuda_holon_moe_router(x, x_bf16, router, tokens, hidden, experts, k, renormalize ? 6.103515625e-5f : -INFINITY,
-                               logits, done, weights, ids, (cudaStream_t) stream);
+                               logits, done, weights, ids, x_q8_1, (cudaStream_t) stream);
 }
 
 void holon_ggml_moe_combine(const float * y, const float * weights, int64_t tokens, int64_t k, int64_t hidden,

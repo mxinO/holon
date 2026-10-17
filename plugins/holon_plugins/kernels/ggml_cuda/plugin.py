@@ -408,6 +408,7 @@ class QEmbedding:
 class LinearExperts(_Matmul):
     def __init__(self, ext: Extension, act: dict[str, str], ctx, **facts) -> None:
         super().__init__(ext, act, ctx, facts)
+        self.ext, self.rows_per_token = ext, facts["rows_per_token"]
         self.experts, self.top_k, self.swiglu = facts["experts"], facts["top_k"], facts["glu"] == "swiglu"
         self.out_y = self.out // 2 if self.swiglu else self.out
         # llama.cpp's choice per chunk from its token count (fixed per graph bucket): mmvq with ids, else mmq
@@ -426,8 +427,32 @@ class LinearExperts(_Matmul):
             f"ggml_cuda.id[in={self.k},top_k={self.top_k},experts={self.experts},rows={self.chunk}]",
             self.lib.workspace_bytes_id(self.device, self.k, self.chunk, self.top_k, self.slots))
         self.f32 = self._f32_workspace(ctx, self.chunk * facts["rows_per_token"], facts["act_dtype"])
+        # prepared inputs (`MoeRouter.route_prepare`): QLinear's buffer for this `in`, the same generations
+        self.q8_1 = ctx.workspace(f"ggml_cuda.q8_1[in={self.k}]", q8_1_bytes(MMVQ_MAX, self.k))
 
-    def __call__(self, x: torch.Tensor, parts: dict[str, torch.Tensor], ids: torch.Tensor) -> torch.Tensor:
+    def prepare_buffer(self, tokens: int) -> torch.Tensor | None:
+        """Where `tokens` tokens' q8_1 activations go for this instance's mmvq to read (one input row per token, on
+        the mmvq path), else None."""
+        return self.q8_1[:q8_1_bytes(tokens, self.k)] if self.rows_per_token == 1 and 0 < tokens <= self.mmvq_tokens \
+            else None
+
+    def prepared(self, x: torch.Tensor, buffer: torch.Tensor) -> Prepared:
+        """`x` [T, in] with its q8_1 activations just written into `buffer` (`prepare_buffer`'s): a handle standing for
+        `x[:, None]`, valid until the buffer's next write."""
+        generation = self.ext.written[self.q8_1.data_ptr()] = next(self.ext.generations)
+        return Prepared(x[:, None], ("mmvq", "q8_1", len(x), self.k), buffer, generation)
+
+    def _prepared(self, x: Prepared) -> torch.Tensor | None:
+        """The q8_1 activations `x` carries, if this call's mmvq computes exactly them and no later write has
+        overwritten them; else None."""
+        if x.key != ("mmvq", "q8_1", len(x.x), self.k) or self.prepare_buffer(len(x.x)) is None:
+            return None
+        return x.buffer if self.ext.written.get(x.buffer.data_ptr()) == x.generation else None
+
+    def __call__(self, x, parts: dict[str, torch.Tensor], ids: torch.Tensor) -> torch.Tensor:
+        xq = None
+        if isinstance(x, Prepared):                    # `MoeRouter.route_prepare`'s handle (maybe stale: then x)
+            xq, x = self._prepared(x), x.x
         x, ids, blocks = x.contiguous(), ids.contiguous(), parts["blocks"]
         # NVFP4's scale2 per expert: [E], or [2, E] (gate's row, up's) for a merged gate/up stack
         scale2 = parts.get("scale2")
@@ -443,7 +468,7 @@ class LinearExperts(_Matmul):
             if len(ids_c) <= self.mmvq_tokens:
                 self._count("mmvq")
                 self.lib.mmvq_id(self.type, blocks.view(-1, blocks.shape[-1]), xs, ids_c, ys, self.swiglu,
-                                 gate_scale, up_scale, self.workspace)
+                                 gate_scale, up_scale, self.workspace, xq=xq)
                 continue
             self._count("mmq")
             w, xs = self._mmq_blocks(parts).view(-1, blocks.shape[-1]), self._mmq_input(xs, self.f32)
@@ -498,7 +523,7 @@ class MoeRouter:
         self.logits = ctx.workspace(f"ggml_cuda.router[experts={experts}]", self.rows * experts * 4)
         self.done = ctx.static("ggml_cuda.router_done", (self.lib.moe_router_tiles(self.rows),), torch.int32)
 
-    def __call__(self, x: torch.Tensor, router: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, x: torch.Tensor, router: torch.Tensor, xq: torch.Tensor | None = None):
         if not 0 < len(x) <= self.rows:
             return self.topk(torch.nn.functional.linear(x.float(), router))
         x = x.contiguous()
@@ -507,8 +532,16 @@ class MoeRouter:
         weights = torch.empty(len(x), self.top_k, device=x.device)
         ids = torch.empty(len(x), self.top_k, dtype=torch.int32, device=x.device)
         logits = self.logits.view(torch.float32)[:len(x) * router.shape[0]].view(len(x), -1)
-        self.lib.moe_router(x, router, logits, self.done, weights, ids, self.renormalize)
+        self.lib.moe_router(x, router, logits, self.done, weights, ids, self.renormalize, xq=xq)
         return weights, ids
+
+    def route_prepare(self, x: torch.Tensor, router: torch.Tensor, experts):
+        """`moe_router@1`'s result and the experts' input `x[:, None]`: for this provider's `linear_experts` instance
+        `experts` on its mmvq path, a handle to x's q8_1 activations written by the router's launch (no quantize of
+        its own; std.moe.kernels), else the tensor."""
+        buffer = experts.prepare_buffer(len(x)) if isinstance(experts, LinearExperts) and len(x) <= self.rows else None
+        weights, ids = self(x, router, buffer)
+        return weights, ids, x[:, None] if buffer is None else experts.prepared(x, buffer)
 
 
 class MoeCombine:
