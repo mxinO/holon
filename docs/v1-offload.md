@@ -220,6 +220,8 @@ miss path that changes the graph shape (a new node between resolve and combine) 
 - **Pinned sizes.** The lock pins the VRAM expert-slot counts and the RAM-tier slot counts through the store's own
   plugin option (slots per class; with it set the store requests fixed pools, min = pref; startup refuses if they do
   not fit), so placement never follows free memory at start (Maya's top non-determinism, R §3.1b).
+  A pinned arena that does not fit is refused at the store's first launch (the startup profile never launches, so
+  the arena's size is final there): the engine reports ready and the first request fails with the store's message.
 - **Placement invariance on the bar card.** Besides the bitwise references on a 24 GB card (§6), the RTX 5080's
   snapshots at the natural fit, the capped fit and with adaptive placement must be byte-identical to each other.
 - **Row kinds.** `moe_resolve@1` takes a per-row kind code — padding, decode / verify, prefill — so in-graph policies
