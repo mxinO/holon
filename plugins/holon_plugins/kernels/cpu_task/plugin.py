@@ -17,6 +17,7 @@ The native module is built ahead of time (`python -m holon_plugins.kernels.cpu_t
 instance cannot be created and the error names that command."""
 from __future__ import annotations
 
+import ctypes
 import functools
 import os
 import pathlib
@@ -64,12 +65,15 @@ class Service:
         if self.native is None and self.tasks:              # host pools are allocated once: start once
             n = (len(self.tasks) + 1) * LINE
             host, device = self.words.view(torch.uint8, (n,)), self.words.device_view(torch.uint8, (n,))
+            self.views = host, device                      # the words stay mapped while this object lives
             self.native = self.lib.Worker(host.data_ptr(), device.data_ptr(), [t.native for t in self.tasks],
                                           self.cores, self.timeout_ns, self.memop)
 
     def shutdown(self) -> None:
-        if self.native is not None:
-            self.native.stop()
+        if self.native is not None and self.native.stop():
+            # A coordinator stuck in a task past the time bound was left behind: it may still write the words and its
+            # tasks' buffers, so this object (and through its tasks, theirs) is leaked on purpose, never freed.
+            ctypes.pythonapi.Py_IncRef(ctypes.py_object(self))
 
 
 class CpuTask:

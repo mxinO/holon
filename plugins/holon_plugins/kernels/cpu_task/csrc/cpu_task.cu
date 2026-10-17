@@ -19,9 +19,13 @@
 #include <cuda.h>
 #include <cuda/atomic>
 #include <pthread.h>
+#include <unistd.h>
 #include <torch/extension.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cstdlib>
+#include <cstring>
 #include <chrono>
 #include <cstdint>
 #include <exception>
@@ -349,22 +353,23 @@ class Worker {
             watchdog_ = std::thread(watch, st_);
         }
     }
-    ~Worker() { stop(); }
+    ~Worker() { stop(); }      // (a coordinator left behind must find its words and tasks: the owner keeps them)
 
     // After a drain. A coordinator still in a task after the time bound (a task that never returns) is left behind
     // with its state, so a close always ends; a request still open is abandoned (a wait reads it as an error).
-    void stop() {
+    bool stop() {
         if (!st_->running.exchange(false)) {
-            return;
+            return false;
         }
         const auto until = Clock::now() + std::chrono::nanoseconds(st_->timeout_ns);
         while (!st_->exited.load(std::memory_order_acquire) && Clock::now() < until) {
             std::this_thread::sleep_for(std::chrono::microseconds(100));
         }
-        if (st_->exited.load(std::memory_order_acquire)) {
-            coordinator_.join();
-        } else {
+        const bool left = !st_->exited.load(std::memory_order_acquire);
+        if (left) {
             coordinator_.detach();
+        } else {
+            coordinator_.join();
         }
         if (watchdog_.joinable()) {
             watchdog_.join();
@@ -373,6 +378,7 @@ class Worker {
             uint32_t req = REQ;
             st_->word(s).compare_exchange_strong(req, ABANDONED, __ATOMIC_RELEASE);
         }
+        return left;
     }
 
     // Tests: the coordinator stops answering (a dead worker), the watchdog lives on.
@@ -421,6 +427,155 @@ class Worker {
     std::thread coordinator_, watchdog_;
 };
 
+// The generic copy task (F9, docs/v1-offload.md D3, D6): the pieces a request table names, read from their
+// descriptors' extents into host units, by the I/O worker's threads (each thread its own blocking reads: two threads
+// keep two reads in flight, M7). A descriptor row is (fd, direct, offset, nbytes) — nbytes 0 past a piece's extents —;
+// an O_DIRECT descriptor is read as its aligned superset into the thread's aligned bounce buffer, then copied. The
+// request table (`[1 + F, 2]`: n, then (piece, unit)) is the GPU's, in mapped memory: copied once per run.
+struct CopyRole {
+    const int64_t * desc;                             // [P, X, 4]
+    int64_t pieces, extents;
+    uint8_t * units;                                   // [U, unit]
+    int64_t count, unit;
+    const int32_t * req;                               // [1 + F, 2]
+    int64_t width;
+};
+
+class Copy {
+  public:
+    static constexpr int64_t ALIGN = 4096;
+    static constexpr int MAX_THREADS = 64;
+
+    explicit Copy(std::vector<CopyRole> roles) : roles_(std::move(roles)) {
+        int64_t most = 0;
+        for (const auto & r : roles_) {
+            for (int64_t i = 0; i < r.pieces * r.extents; ++i) {
+                most = std::max(most, r.desc[i * 4 + 3]);
+            }
+        }
+        bounce_bytes_ = (most + 3 * ALIGN) / ALIGN * ALIGN;
+    }
+    ~Copy() {
+        for (void * b : bounce_) {
+            std::free(b);
+        }
+    }
+
+    static int run(void * arg, const holon_cpu_env * env) {
+        auto * c = static_cast<Copy *>(arg);
+        if (env->thread == 0) {
+            c->err_.store(c->prepare(env->threads), std::memory_order_relaxed);
+        }
+        env->barrier(env);
+        if (c->err_.load(std::memory_order_relaxed)) {
+            return c->err_.load(std::memory_order_relaxed);
+        }
+        int err = 0;
+        for (size_t i; (i = c->next_.fetch_add(1, std::memory_order_relaxed)) < c->work_.size();) {
+            const auto [role, piece, unit] = c->work_[i];
+            const CopyRole & r = c->roles_[role];
+            uint8_t * dst = r.units + unit * r.unit;
+            for (int64_t x = 0; x < r.extents && !err; ++x) {
+                const int64_t * d = r.desc + (piece * r.extents + x) * 4;
+                if (d[3]) {
+                    err = c->read(int(d[0]), d[1] != 0, d[2], d[3], dst, c->bounce_[env->thread]);
+                    dst += d[3];
+                }
+            }
+        }
+        return err;
+    }
+
+  private:
+    int prepare(int threads) {
+        if (threads > MAX_THREADS) {
+            return 1;
+        }
+        while (int(bounce_.size()) < threads) {
+            void * b = nullptr;
+            if (posix_memalign(&b, ALIGN, size_t(bounce_bytes_))) {
+                return 1;
+            }
+            bounce_.push_back(b);
+        }
+        work_.clear();
+        for (size_t r = 0; r < roles_.size(); ++r) {
+            const CopyRole & role = roles_[r];
+            const int32_t n = role.req[0];
+            if (n < 0 || n > role.width) {
+                return 2;
+            }
+            for (int32_t i = 0; i < n; ++i) {
+                const int32_t piece = role.req[2 + 2 * i], unit = role.req[3 + 2 * i];
+                if (piece < 0 || piece >= role.pieces || unit < 0 || unit >= role.count) {
+                    return 2;
+                }
+                work_.emplace_back(int(r), piece, unit);
+            }
+        }
+        next_.store(0, std::memory_order_relaxed);
+        return 0;
+    }
+
+    // `nbytes` at `offset` of `fd` into `dst`: pread loops (a short read is retried; EOF before the end is an error).
+    int read(int fd, bool direct, int64_t offset, int64_t nbytes, uint8_t * dst, void * bounce) const {
+        const int64_t lo = direct ? offset / ALIGN * ALIGN : offset;
+        const int64_t hi = direct ? (offset + nbytes + ALIGN - 1) / ALIGN * ALIGN : offset + nbytes;
+        uint8_t * buf = direct ? static_cast<uint8_t *>(bounce) : dst;
+        int64_t got = 0;
+        while (got < hi - lo) {
+            const ssize_t n = pread(fd, buf + got, size_t(hi - lo - got), lo + got);
+            if (n <= 0) {
+                break;                                // the file's end (an O_DIRECT tail), or an error
+            }
+            got += n;
+            if (direct && got % ALIGN) {
+                break;
+            }
+        }
+        if (got < offset + nbytes - lo) {
+            return 3;
+        }
+        if (direct) {
+            std::memcpy(dst, buf + (offset - lo), size_t(nbytes));
+        }
+        return 0;
+    }
+
+    std::vector<CopyRole> roles_;
+    std::vector<void *> bounce_;
+    int64_t bounce_bytes_ = 0;
+    std::vector<std::tuple<int, int64_t, int64_t>> work_;
+    std::atomic<size_t> next_{0};
+    std::atomic<int> err_{0};
+};
+
+// The copy task's handle over its tensors (kept alive with it).
+struct CopyTask {
+    std::vector<at::Tensor> keep;
+    std::unique_ptr<Copy> copy;
+
+    explicit CopyTask(const std::vector<std::tuple<at::Tensor, at::Tensor, at::Tensor>> & roles) {
+        std::vector<CopyRole> out;
+        for (const auto & [desc, units, req] : roles) {
+            TORCH_CHECK(!desc.is_cuda() && desc.scalar_type() == at::kLong && desc.dim() == 3 && desc.size(2) == 4 &&
+                        desc.is_contiguous(), "copy: descriptors [P, X, 4] int64 on the host");
+            TORCH_CHECK(!units.is_cuda() && units.scalar_type() == at::kByte && units.dim() == 2 &&
+                        units.is_contiguous(), "copy: units [U, unit] uint8 on the host");
+            TORCH_CHECK(!req.is_cuda() && req.scalar_type() == at::kInt && req.dim() == 2 && req.size(1) == 2 &&
+                        req.is_contiguous(), "copy: requests [1 + F, 2] int32 on the host");
+            keep.insert(keep.end(), {desc, units, req});
+            out.push_back({desc.data_ptr<int64_t>(), desc.size(0), desc.size(1), units.data_ptr<uint8_t>(),
+                           units.size(0), units.size(1), req.data_ptr<int32_t>(), req.size(0) - 1});
+        }
+        copy = std::make_unique<Copy>(std::move(out));
+    }
+
+    Task native() {
+        return Task{HOLON_CPU_TASK_ABI, reinterpret_cast<int64_t>(&Copy::run), reinterpret_cast<int64_t>(copy.get())};
+    }
+};
+
 // A task for the protocol's tests: thread 0 sleeps `ns`, every thread counts itself before a barrier and thread 0
 // checks the count after it (into `out[1]`), `out[0]` counts the runs; it fails when asked.
 struct Probe {
@@ -460,8 +615,18 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def("wait", &Worker::wait, "on the current stream: later work waits for the slot's answer (fail-open)")
         .def("flag", &Worker::flag, "the sticky error bits: 1 a task failed, 2 a wait timed out")
         .def("served", &Worker::served, "requests answered so far")
-        .def("stop", &Worker::stop, "join the threads (after a drain); a request still open is answered failed")
+        .def("stop", &Worker::stop, "join the threads (after a drain); a request still open is abandoned; True: the "
+             "coordinator, in a task past the time bound, was left behind (its words and tasks must outlive it)")
         .def("kill", &Worker::kill, "tests: the coordinator stops answering");
+    pybind11::class_<CopyTask>(m, "CopyTask")
+        .def(pybind11::init<const std::vector<std::tuple<at::Tensor, at::Tensor, at::Tensor>> &>(),
+             "per role: descriptors [P, X, 4] int64 (fd, direct, offset, nbytes), units [U, unit] uint8, requests "
+             "[1 + F, 2] int32 (n, then (piece, unit)): the copy task (F9) over them")
+        .def("native", &CopyTask::native, "the task ABI's handle")
+        .def("run", [](CopyTask & t, int threads) {
+            Pool pool(std::vector<int>(size_t(std::max(threads, 1)), -1));     // unpinned threads, for this run
+            return pool.run(&Copy::run, t.copy.get());
+        }, pybind11::call_guard<pybind11::gil_scoped_release>(), "run now on `threads` threads: 0, or an error");
     pybind11::class_<Probe>(m, "Probe")
         .def(pybind11::init([](int64_t ns, int fail, at::Tensor out) {
                  TORCH_CHECK(out.scalar_type() == at::kLong && out.numel() == 2 && !out.is_cuda(), "out: int64 [2]");

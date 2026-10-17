@@ -74,7 +74,7 @@ def split(rate: Callable[[dict[str, str]], float], n: int, isa: str, threads: tu
     the last entry's share); `isa`: this host's CPU tier."""
     def options(share: float, t: int) -> dict[str, str]:
         return {"moe.cpu_plan": plan(share, n), "moe.cpu_isa": isa, "cpu_task.threads": str(t)}
-    f5a = rate({})
+    f5a = rate({"moe.cpu_plan": ""})                 # F5a whatever the engine flags say
     by_threads = {t: rate(options(0.5, t)) for t in threads}
     t = max(by_threads, key=by_threads.__getitem__)
     by_share = {s: by_threads[t] if s == 0.5 else rate(options(s, t)) for s in shares}

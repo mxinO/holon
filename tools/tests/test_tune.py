@@ -40,7 +40,7 @@ def test_f5b_enters_the_lock_only_at_a_five_percent_gain():
 
     def rate(peak: float):
         def measure(options):
-            if not options:
+            if not options.get("moe.cpu_plan"):
                 return 100.0
             share = int(options["moe.cpu_plan"].split(",")[-1]) / 10
             return peak - 20 * abs(share - 0.4) - (0 if options["cpu_task.threads"] == "4" else 1)

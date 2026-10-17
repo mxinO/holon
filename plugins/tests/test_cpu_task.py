@@ -88,10 +88,10 @@ def test_the_protocol_fails_open(lib, memop):
     torch.cuda.synchronize()
     assert int(errors[0]) & 2 and worker.flag() & 2 and 0.25 < time.perf_counter() - t0 < 1.5   # (memop: abandoned)
     t0 = time.perf_counter()
-    worker.stop()                          # the coordinator, still in the slow task, is left behind after the bound
+    assert worker.stop()                   # the coordinator, still in the slow task, is left behind after the bound
     assert time.perf_counter() - t0 < 1.0
-    while not int(out[2][0]):              # it finishes the task (whose buffers the test keeps until then)
-        time.sleep(0.05)
+    while not worker.served():             # its words and task outlive it (the plugin leaks them on purpose; here:
+        time.sleep(0.05)                   # until it has answered, its last touch of them)
 
     worker, keep = _worker(lib, [lib.Probe(0, 0, out[0])], memop, timeout=0.3)
     worker.kill()                                                     # the coordinator stops answering

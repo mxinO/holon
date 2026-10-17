@@ -60,7 +60,7 @@ then `staging` slots, then cache slots.
   `jobs` (`cpu_experts@1`'s table, in mapped host memory) by expert id ascending: `jobs[0, 0]` = c, zero included,
   then row 1 + i = (expert, `host[e, 0]`, `host[e, 1]`, n_tok, its entries t·k + j ascending). A call without the
   CPU's share passes a zero `plan` (and a table of its own); the caller sizes `jobs` for its calls with a share (T ≤
-  T', c ≤ J): a share past it is cut to what fits and `errors[0]` |= `JOBS`.
+  T', c ≤ J): past it `errors[0]` |= `JOBS` and the table's contents are unspecified.
 - Variants (docs/v1-offload.md D3): `moe_resolve.<policy>@1`, a contract its placement policy's plugin owns (its own
   oracle and CPU provider), takes @1's arguments, then the policy's device state by name (`device_state`), and keeps
   @1's terms except where it says otherwise. It may change `residency` (the regions its policy owns) and the layer's

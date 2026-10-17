@@ -72,10 +72,12 @@ def cpu_split(engine) -> dict | None:
     share, store = engine.ctx.shared_objects.get(CPU), engine.ctx.shared_objects.get(KEY)
     if share is None:
         return None
+    if engine.cfg.max_step_tokens != 1:          # the floor applies the rule per token: one token per pass only
+        raise ValueError(f"F5b's floor needs one token per step, not max_step_tokens {engine.cfg.max_step_tokens}")
     if store.policy_ref != "std.tiered.static@1":
         raise ValueError(f"F5b under {store.policy_ref}: a path-aware floor needs a frozen placement (static)")
     resident = (store.residency.host >= 0).all(-1)
-    return {"plan": share.plan.tolist(), "tokens": share.tokens,
+    return {"plan": share.plan.tolist(), "tokens": share.tokens, "max_step_tokens": 1,
             "layers": {str(layer): np.flatnonzero(resident[g]).tolist() for g, layer in enumerate(store.layers)}}
 
 

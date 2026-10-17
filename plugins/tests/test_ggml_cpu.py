@@ -85,7 +85,7 @@ def test_cpu_experts_match_the_oracle_and_a_token_is_bitwise_alone_or_grouped(pl
             alone[entry] = out[entry]
     err = (alone[used] - want[used]).abs().amax(-1) / want[used].pow(2).mean(-1).sqrt()
     assert (err < BUDGET).float().mean() >= 0.9 and err.max() < FLIP, err
-    for threads in (1, 7, 40):                                          # 40: shares under a chunk (stolen)
+    for threads in (1, 7, 40):
         got = rows.clone()
         kernel(jobs, x, gu, dn, got, threads=threads)
         assert torch.equal(got, alone), threads                        # entries not named are left as they were
