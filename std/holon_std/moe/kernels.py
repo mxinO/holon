@@ -62,6 +62,11 @@ then `staging` slots, then cache slots.
   classes [G, R] int64, **state of every group) -> picked [G, E] bool`: the whole experts (resident in every role) to
   lend, in its policy's order, until each class c (`classes[g, r]`: role r's slots of group g are in class c) has min(n,
   its resident slots) of them; the caller unmaps and logs them, and later returns their slots to their layers as empty.
+- `moe_route_transform@1` (signature only; `approx`, bound by the explicit option `moe.route_transform = <name>`,
+  never by kernel priority): instance `(ids [T, k] int32, weights [T, k] f32, residency [E, R] int32) -> (ids, weights)`
+  between `moe_topk@1` and the resolve, with the layer's map; a negative id is dropped (the rank's null slot: no fetch,
+  no count, a zero contribution). Each transform's semantics are a contract its plugin owns,
+  `moe_route_transform.<name>@1`, with its own oracle and provider (docs/v1-offload.md D3). Facts: experts, top_k.
 - `expert_fetch@1`: instance `(fetch [2, F] int32, n [1] int32, src [U, unit] uint8, dst [S, unit] uint8)`: copies unit
   `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, F), in the graph (`src` may be a mapped host pool's
   device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging.

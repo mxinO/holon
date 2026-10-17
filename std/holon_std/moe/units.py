@@ -169,6 +169,10 @@ class Resident:
         return ids, ids
 
     @staticmethod
+    def transform(ids: torch.Tensor, weights: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return ids, weights
+
+    @staticmethod
     def pass_tokens(tokens: int) -> int:
         """Tokens per expert pass: one chunk."""
         return CHUNK
@@ -194,6 +198,9 @@ class MoE(nn.Module):
         super().__init__()
         self.layer = layer
         self._store = _store(ctx, layer=layer, experts=experts, top_k=top_k)
+        if ctx.options.get("plugins", {}).get("moe.route_transform") and isinstance(self._store, Resident):
+            raise ValueError("std.moe@1: moe.route_transform drops routes, which only an offload store serves "
+                             "(moe.store = std.moe.offload@1)")
         self.router = nn.Parameter(torch.empty(experts, hidden, dtype=torch.float32), requires_grad=False)
         stack = {"experts": experts, "top_k": top_k, "device": self._store.device}
         self.gate = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1, act_dtype=ctx.dtype,
@@ -231,6 +238,7 @@ class MoE(nn.Module):
             routes = [self._topk(nn.functional.linear(xc[c:c + CHUNK].float(), self.router))
                       for c in range(0, b - a, CHUNK)]
             weights, ids = routes[0] if len(routes) == 1 else (torch.cat(t) for t in zip(*routes, strict=True))
+            ids, weights = self._store.transform(ids, weights)
             gate_up, down = self._store.route(ids, a)
             h = self._gate_up(xc[:, None], gate_up)                   # [t, k, inter] f32, SwiGLU applied
             self._combine(self._down(h, down), weights, out[a:b])

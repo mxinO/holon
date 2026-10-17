@@ -2,6 +2,7 @@
 `Qwen3MoeForCausalLM`, written as a GGUF with quantized expert stacks, must serve what transformers computes on the
 same (dequantized) weights (docs/m02-moe.md, step 1)."""
 import json
+import pathlib
 from unittest import mock
 
 import gguf
@@ -337,6 +338,45 @@ def test_the_delta_log_holds_a_steps_admissions_and_lending(tiny_moe, tmp_path):
     step = next(s for s in trace.steps if (s["records"][:, 1] < 0).any())
     assert lent == [8] and (step["records"][:, 1] < 0).sum() == 8 and (step["records"][:, 1] >= 0).any()
     assert store.delta.shape[1] == 2 * store.items and trace.mirrored and not store.residency.host.max() >= 0
+
+
+def test_a_route_transform_drops_routes_end_to_end(tiny_moe, tmp_path):
+    """The route-transform call site (docs/v1-offload.md D3, `moe.route_transform`): a transform plugin's contract
+    runs between the top-k and the resolve, with the layer's map; a dropped route (here every token's last rank) reads
+    its rank's null slot and counts nowhere, so the outputs are those of the top-k with that rank's weight zeroed (to
+    rounding on the CPU, whose reference GEMMs round a row by the expert's batch: dropping one changes the others'). A
+    resident store refuses the option."""
+    from holon.api import Manifest
+    from holon.core.plugins import Installed, PluginSet, discover
+    from holon_judge.placement import route_dump
+    from holon_judge.planted import _moe
+
+    from .fixtures.drop_last.plugin import DropLast
+
+    checkpoint, prompts = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
+    with _moe(topk=lambda weights, ids, experts: (torch.cat([weights[:, :-1], 0 * weights[:, -1:]], 1), ids)):
+        want = _served(_engine(file), prompts)
+    found = discover()
+    fixture = pathlib.Path(__file__).parent / "fixtures" / "drop_last"
+    found["tests.drop_last"] = Installed(Manifest.load(fixture / "plugin.toml"), "tests.fixtures.drop_last", fixture)
+    options = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.route_transform": "drop_last"}
+    engine = Engine(EngineConfig(model=str(file), device="cpu", dtype=torch.float32, page_size=4, max_seqs=3,
+                                 max_step_tokens=10, max_model_len=40, state_memory=1 << 20, host_memory=1 << 24,
+                                 plugin_options=options), plugins=PluginSet(found))
+    calls = DropLast.calls
+    with route_dump(engine) as trace:
+        streams, lps = _served(engine, prompts)
+    assert streams == want[0]
+    for (token, top_ids, _), (token_w, top_ids_w, _) in zip(lps, want[1], strict=True):
+        torch.testing.assert_close(torch.tensor(token), torch.tensor(token_w), atol=1e-4, rtol=1e-4)
+        assert top_ids == top_ids_w
+    counts = np.stack([s["counts"].sum(1) for s in trace.steps])       # per step and layer: one route per decode row
+    assert DropLast.calls > calls and (counts[:, 0] == counts[:, 1]).all() and counts.max() == 3
+    with pytest.raises(ValueError, match="only an offload store serves"):
+        Engine(EngineConfig(model=str(file), device="cpu", dtype=torch.float32, page_size=4, max_seqs=3,
+                            max_step_tokens=10, max_model_len=40, state_memory=1 << 20,
+                            plugin_options={"moe.route_transform": "drop_last"}), plugins=PluginSet(found))
 
 
 @pytest.fixture(scope="module")

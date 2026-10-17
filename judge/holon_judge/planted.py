@@ -26,7 +26,8 @@
   miss read from the neighbouring slot; a two-phase swap's copy unordered and unwaited (with an unseeded delay on
   the copy stream), or its map to another swap's slot; a host edit in F11's device-owned cache (with the
   precondition check, and without it); F11's victims chosen without the step's needs, or two admissions into one
-  victim's slot (the kernel's plant bits). Each reports how often it fired.
+  victim's slot (the kernel's plant bits); a lent slot returned while still mapped to its expert. Each reports how
+  often it fired.
 
 The GGUF plants patch names, so they rely on how the engine reaches them: `_loaded` replaces `load_weights` and
 `resolve_model` in `holon.core.engine`'s namespace (it imports them by name), and the kernel plants wrap
@@ -1037,6 +1038,25 @@ def _lfu_kernel(bit: int, name: str, fires: Callable) -> Iterator[None]:
     print(f"plant {name} fired: {dict(fired)}", file=sys.stderr)
 
 
+@contextlib.contextmanager
+def lent_slot_still_mapped() -> Iterator[None]:
+    """A prefill step's lending (D4) logs its experts unmapped but leaves them mapped: their slots serve the step's
+    ring or staging and come back as empty slots while the experts still name them. Reports the experts lent."""
+    from holon_std.tiered import store as tiered
+
+    lend, fired = tiered.TieredStore.lend, collections.Counter()
+
+    def planted(self, n):
+        before = self.residency.device.clone()
+        picked = lend(self, n)
+        self.residency.device.copy_(before)                     # the unmap undone
+        fired["lent"] += int(picked.sum())
+        return picked
+    with mock.patch.object(tiered.TieredStore, "lend", planted):
+        yield
+    print(f"plant lent-slot-still-mapped fired: {dict(fired)}", file=sys.stderr)
+
+
 def _shared(records, counts) -> int:
     """Admissions into a victim slot an earlier admission of the step took."""
     seen, n = set(), 0
@@ -1084,6 +1104,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "lfu-victim-needed": lambda: _lfu_kernel(1, "lfu-victim-needed",           # victims the step's decode rows route
                                              lambda r, c: int(sum(c[g, b] > 0 for g, _, b in r.tolist()))),
     "lfu-shared-victim": lambda: _lfu_kernel(2, "lfu-shared-victim", _shared),
+    "lent-slot-still-mapped": lent_slot_still_mapped,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)

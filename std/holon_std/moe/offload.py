@@ -11,7 +11,8 @@ checkpoint's directory), `moe.tiers` (host tiers' Refs,
 comma-separated; default `std.tiered.pinned@1`), `moe.cache` (cache slots per class, pinned: `<class>=<n>` or
 `<class>=<fraction>`, `*` for every class not named; default: fill free VRAM), `moe.ring_tokens` (D8: a step of at
 least this many prompt tokens streams every layer's missing experts through lent ring slots in passes of up to
-`PASS` tokens; 0: never; default 512)."""
+`PASS` tokens; 0: never; default 512), `moe.route_transform` (`approx`: the name of a route transform, whose contract
+`moe_route_transform.<name>@1` its plugin provides; its dropped routes, negative ids, are dropped end to end)."""
 from __future__ import annotations
 
 import torch
@@ -61,7 +62,9 @@ class Offload(nn.Module):
         if (self.store.items, self.store.top_k) != (experts, top_k):
             raise ValueError(f"std.moe.offload@1: layer {layer} has {experts} experts top-{top_k}, the store "
                              f"{self.store.items} top-{self.store.top_k}")
-        self.layer, self._resolver = layer, None
+        self.layer, self._resolver, self._transform = layer, None, None
+        self._transform_name = ctx.options.get("plugins", {}).get("moe.route_transform")
+        self._facts = {"experts": experts, "top_k": top_k}
 
     def merge(self, gate: ExpertLinear, up: ExpertLinear) -> ArenaExperts | None:
         """The gate/up stack as pieces of the store: per expert, gate's extent then up's (nothing is read or moved)."""
@@ -80,6 +83,16 @@ class Offload(nn.Module):
 
     def bind_kernels(self, ctx) -> None:
         self._resolver = self.store.resolver(self.layer)
+        if self._transform_name:                     # docs/v1-offload.md D3: an explicit option, never by priority
+            op = f"moe_route_transform.{self._transform_name}@1"
+            self._transform = ctx.select_kernel(op, site=f"std.moe.offload[{self.layer}]",
+                                                **self._facts).impl(ctx, **self._facts)
+
+    def transform(self, ids: torch.Tensor, weights: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """The route transform's (`moe.route_transform`), with the layer's map; else the routes as they are."""
+        if self._transform is None:
+            return ids, weights
+        return self._transform(ids, weights, self._resolver.residency)
 
     def pass_tokens(self, tokens: int) -> int:
         """The expert pass of the step: one per large chunk in a streaming step (D8), else std.moe@1's chunk."""

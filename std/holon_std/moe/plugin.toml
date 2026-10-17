@@ -33,4 +33,5 @@ module = "reference"
 "moe.placement.profile" = { help = "routing counts seeding placement: a JSON file {\"layers\": {\"<layer>\": [count per expert]}} named relative to the checkpoint's directory" }
 "moe.tiers" = { help = "the offload store's host tiers (unit Refs, comma-separated)", default = "std.tiered.pinned@1" }
 "moe.ring_tokens" = { help = "prompt tokens of a step from which it streams every layer's missing experts through lent ring slots, in large expert passes (0: never)", default = "512" }
+"moe.route_transform" = { help = "approx: a route transform's name (its plugin's contract moe_route_transform.<name>@1); offload store only" }
 "moe.cache" = { help = "VRAM cache slots per class, pinned: <class>=<slots or fraction>,… (* for the rest)", default = "fill free VRAM" }
