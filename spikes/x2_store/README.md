@@ -23,7 +23,7 @@ python spikes/x2_store/exact.py <gguf> <runs> "resident@16384;*=1.0@16384;@16384
 python spikes/x2_store/exact.py <gguf> <runs> "*=0.25@16384" 3                                    # run-identical
 python bench/holon_tg.py --model <gguf> -n 128 -r 5 --engine-args "--max-seqs 1"                  # 3 rounds each,
 python bench/holon_tg.py --model <gguf> -n 128 -r 5 --engine-args "--max-seqs 1 --host-memory 21474836480 \
-    --plugin-options moe.store=std.moe.offload@1 moe.offload.cache=*=1.0"                          # interleaved
+    --plugin-options moe.store=std.moe.offload@1 moe.cache=*=1.0"                          # interleaved
 python spikes/x2_store/gather_alloc.py --out <runs>/gather_alloc_<i>.json                         # 4 processes
 python spikes/x2_store/streamk.py                                                                  # placement probe
 python spikes/x2_store/record.py <runs> evidence/x2_store_rtx-a5000_2026-10-17.json 0775b35 <commands…>
@@ -36,18 +36,21 @@ short ones through every decode bucket, seeded sampling, logprobs, prompt logpro
 `std.moe@1` all-resident with `holon_judge snapshot-diff` (cached experts: the static seed over each run's arena pool,
 recomputed from its recorded size):
 
-| Fit (`moe.offload.cache`) | Cached experts (of 6,144) | Peak distinct misses per layer pass (staging 128) | Snapshot vs all-resident |
+| Fit (`moe.cache`) | Cached experts (of 6,144) | Peak distinct misses per layer pass (staging 128) | Snapshot vs all-resident |
 |---|---|---|---|
 | `*=1.0` (every expert) | 6,144 | 0 | identical |
 | fill (free VRAM above the KV floor) | 6,119 | 1 | identical |
 | `*=0.47` | 2,888 | 67 | identical |
 | `*=0.25` (×3 fresh engines) | 1,536 | 96 | identical, and run-identical |
 
-The unpatched expert-id mmq is placement-invariant on this card at these shapes: `streamk.py` (Q4_K gate/up
-2048 → 2×768 and Q6_K down 768 → 2048, 9–512 tokens, arenas of 128–6,280 slots with the experts at random slots)
-ran no stream-k fixup kernel and gave bitwise-equal expert rows at every arena size. D4's patches remain needed
-where stream-k engages (the RTX 5080 at 16–85 slots, D4); the exactness runs are repeated once the patches are
-merged.
+The unpatched expert-id mmq is placement-invariant at the vehicle's arena sizes: `streamk.py` (Q4_K gate/up 2048 →
+2×768 and Q6_K down 768 → 2048, 9–512 tokens, arenas of 128–6,280 slots with the experts at random slots) ran no
+stream-k fixup kernel and gave bitwise-equal expert rows at every arena size — stream-k does not engage at ≥ 136
+slots on any card. It does at small arenas: the GPU engine test's model (8 experts of width 1024, arenas of 10–26
+slots) takes stream-k on sm_86 and differs from the 8-slot stack; those cases are strict xfails until the forced-tiling
+patch (D4) is merged. For the vehicle the D4 patches matter for the class arenas' launch cost, not for exactness:
+unpatched, the mmq grid grows with the arena's slots (7.9 ms against 2.5 ms per launch at S ≈ 3,000, T = 512, as
+measured on the patch branch), so no prefill timing from this unpatched branch feeds the roofline.
 
 **Offload-path overhead** (decode tg128 at batch 1, depth 0; three interleaved rounds of five repetitions each):
 `std.moe@1` 5.173 ms per token, the offload store with every expert cached 5.371 ms: **+0.20 ms per token
@@ -69,6 +72,7 @@ rate. `platform.host_memory` needs no change for the gather.
 
 ## What it decides
 
-- Step 2's check passes on the A5000: every fit is bitwise all-resident, run-identical at the capped fit.
+- Step 2's check passes on the A5000: every fit is bitwise all-resident, run-identical at the capped fit. Prefill
+  speed waits for the D4 patches (the arena launch cost above).
 - The roofline's overhead term is ≈ 0.2 ms per token at F5a with static placement.
 - The store keeps `mmap` + `cudaHostRegister` (exact bytes, D10); huge pages are neither needed nor harmful.

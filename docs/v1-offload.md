@@ -792,8 +792,10 @@ bound by `moe.store` (absent: `std.moe.resident@1`, today's path), the contracts
 `expert_fetch@1` (oracles in `std.moe.reference`, CPU providers in `testing.ref_kernels`, CUDA in the new
 `kernels.expert_io`), F1 and F5a. Evidence: `spikes/x2_store/README.md`, `evidence/x2_store_rtx-a5000_2026-10-17.json`
 — on the A5000 every fit (all, fill, 47%, 25%) is snapshot-identical to `std.moe@1` all-resident, run-identical ×3 at
-25%, with the unpatched ggml kernels (no stream-k at these shapes on sm_86); the offload path costs +0.20 ms per
-decode token with every expert cached; `mmap` + `cudaHostRegister` gathers at `cudaHostAlloc`'s rate (0.94–1.01×,
+25%, with the unpatched ggml kernels (stream-k never engages at the vehicle's arena sizes, ≥ 136 slots, on any card:
+for the vehicle the D4 patches cut the arenas' mmq launch cost, which grows with the slots, so no unpatched prefill
+timing feeds the roofline; a small-arena GPU test does take stream-k and waits for them); the offload path costs
++0.20 ms per decode token with every expert cached; `mmap` + `cudaHostRegister` gathers at `cudaHostAlloc`'s rate (0.94–1.01×,
 noise between processes), huge pages or not.
 
 Decided while building, against the text above:
@@ -802,16 +804,20 @@ Decided while building, against the text above:
   staging until step 3's ring borrowing; then staging shrinks to D5's decode-sized count.
 - **One VRAM pool holds every class's arena.** The policy seeds whole experts within its bytes (and each class's
   cap), then each class's arena — null, staging, the seeded cache slots — is laid out in it; per-class fill pools
-  grow one after another and starved the later classes. `moe.offload.cache` (`<class>=<slots or fraction>`, `*` for
+  grow one after another and starved the later classes. `moe.cache` (`<class>=<slots or fraction>`, `*` for
   the rest) therefore **caps** a class's cache slots and pins the pool's size; the seed decides each arena's (with
   `static`, deterministically). Kernels over an arena are bound with `experts` = the class's largest arena (every
   piece cached); a call's arena may hold fewer slots — `linear_experts@2`'s doc says so, every provider honours it.
 - **Row kinds come from the step's plan in `before_launch`:** a mixed step's leading rows and rows whose every query
   token has logits are decode / verify, the rest prefill, tokens past them graph padding — so a one-token last
   prompt chunk counts as decode outside mixed steps (D4 says prefill never counts; step 3 settles it with F11's
-  parity oracle). Counts are zeroed by a `before_launch` write, not in the graph.
+  parity oracle). The step's first resolve zeroes its counts and applies its map edits in the forward; host edits
+  reach the device as their own entries (a scatter), never as the host's copy of the map, so device-owned regions
+  keep what the device wrote. `misses` is a running maximum since the last materialize.
 - **Not yet:** the delta log (its producer is step 3's device-owned resolvers), edits after the seed (two-phase
   edits land with `profile_decay`; the store refuses them), an auxiliary model's experts through the store (an MTP
   layer needs its sub-steps' row kinds; refused at build), `lfu` as the default (step 3; `static` until then).
-- The `Tier` protocol's members take the class name (a tier holds pieces of every class); the profile is JSON
-  `{"counts": [[per expert] per layer]}` (`moe.placement.profile`).
+- The `Tier` protocol's members take the class name (a tier holds pieces of every class); the profile
+  (`moe.placement.profile`) is a JSON file `{"layers": {"<layer>": [count per expert]}}` named relative to the
+  checkpoint's directory, so a plan records no host path. The store's options share the `moe.` prefix: `moe.store`,
+  `moe.placement`, `moe.placement.profile`, `moe.tiers`, `moe.cache`.

@@ -3,7 +3,7 @@ all-resident, and the offload store at given cache fits (docs/v1-offload.md §6,
 
     python spikes/x2_store/exact.py <model.gguf> <out dir> "resident@16384;*=1.0@16384;@16384;*=0.25@16384" [runs]
 
-A fit is `resident` or a `moe.offload.cache` value (empty: fill), after `@` the paged-state floor in tokens; every
+A fit is `resident` or a `moe.cache` value (empty: fill), after `@` the paged-state floor in tokens; every
 engine keeps enough KV that the trace never preempts, so the schedule is the trace's. Compare with
 `python -m holon_judge snapshot-diff` or `record.py`.
 """
@@ -30,7 +30,7 @@ def main() -> None:
         fit, _, floor = spec.partition("@")
         for run in range(runs):
             kw = {} if fit == "resident" else dict(host_memory=20 << 30, plugin_options={
-                "moe.store": "std.moe.offload@1", "moe.offload.cache": fit})
+                "moe.store": "std.moe.offload@1", "moe.cache": fit})
             t = time.time()
             engine = Engine(EngineConfig(model=model, paged_min_tokens=int(floor or 32768), **ENGINE, **kw))
             built = time.time() - t
