@@ -693,7 +693,11 @@ decides the bars with step 4's measurements.
 the FreeToken row needs it; then prompt-time admission (+1.5–2% on whole traces, +9% / +6% on single long prompts at
 47%), **deferred**: built only if step 4's FreeToken decode row lands within ≈ 2% of its bar, and then as its own
 policy plugin (`placement.lfu_prompt@1`, which needs a std "adopt a lent slot" record before the tag), not as a
-change to D4 or F11 (panel A's four determinism conditions apply). 32K is replayed before the owner decides.
+change to D4 or F11 (panel A's four determinism conditions apply). **32K** (`spikes/x4_gap/README_32k.md`, measured
+Holon bases on the 5080 plus the replayed `lfu` bytes): vs FreeToken 0.99× natural [0.97–1.01] / 1.02× capped
+[0.97–1.06]; vs the pinned cache 1.08× [1.06–1.11] / 1.10× [1.06–1.15]; the default-cache and static-split rows pass
+(≥ 1.35× / ≥ 1.64×). With step 3c's ≈ 0.25 ms the 32K cache rows reach ≈ 1.02–1.04× FreeToken and ≈ 1.11–1.12× the
+pinned cache: on or just over their bars, with no margin.
 
 **Contradictions with the research note, recorded:** CPU compute is not a second link beside PCIe (they share host
 memory); ggml-cpu's AVX2 and AVX-512 builds agree bitwise; "≤ 4 threads saturate DRAM" (S6) holds only for Q4_K
