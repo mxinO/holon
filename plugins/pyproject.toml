@@ -37,6 +37,7 @@ dependencies = [                  # std units are reached through Ref, never imp
 "placement.lru" = "holon_plugins.placement.lru"
 "placement.profile_decay" = "holon_plugins.placement.profile_decay"
 "placement.promote" = "holon_plugins.placement.promote"
+"transforms.tail_skip" = "holon_plugins.transforms.tail_skip"
 
 [build-system]
 requires = ["hatchling"]

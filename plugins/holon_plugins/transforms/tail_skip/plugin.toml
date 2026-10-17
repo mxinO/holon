@@ -1,0 +1,19 @@
+[plugin]
+name = "transforms.tail_skip"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+core_abi = ">=1.0,<2.0"
+
+[resources]   # A1's route transform: its contract (oracle: reference.py), the CPU provider and the CUDA one (Triton)
+provides = ["op.moe_route_transform.tail_skip@1", "kernel.moe_route_transform.tail_skip@1"]
+
+[properties]
+numerics = "approx"
+
+[dependencies]
+python = ["triton"]
+
+[reference]
+module = "reference"
