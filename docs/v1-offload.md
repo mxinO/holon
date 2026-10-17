@@ -1,6 +1,7 @@
 # v1 — expert offload: MoE models larger than VRAM on one consumer GPU
 
-Status: **draft rev 4.2** (2026-10-17), for the panel's re-review. Rev 1 drew 52 findings (A 20, B 15, C 17), rev 2
+Status: **rev 4.2, panel-clean** (2026-10-17: all three reviewers report nothing remaining after four rounds); its
+parameters freeze when step 0's evidence lands. Rev 1 drew 52 findings (A 20, B 15, C 17), rev 2
 27 (A 11, B 8, C 8), rev 3 20 (A 8, B 7, C 5); §12 logs each and where it is answered. No code yet. Evidence base: the local research note
 `docs/brainstorm/v1-offload-research.md` (not published; "R §n"), which cites every reference engine by `file:line`
 in its local clone; Project Maya is R §3.1b.
