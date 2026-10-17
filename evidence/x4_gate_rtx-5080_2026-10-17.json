@@ -5291,6 +5291,247 @@
   },
   "all_identical": true
  },
+ "followups": {
+  "pinned_fill": {
+   "rtx-5080": {
+    "fill": {
+     "pin": "gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618",
+     "cached_share": 0.5267,
+     "cached_experts": 3236,
+     "state_kv_pages": 2113
+    },
+    "pinned_as_is": {
+     "pin": "gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618",
+     "cached_share": 0.5267,
+     "cached_experts": 3236,
+     "state_kv_pages": 2113
+    },
+    "before_the_fix": "OutOfUnits: memory budget 11.747 GiB too small: state.kv (2101 < 2113 units)"
+   },
+   "rtx-a5000": {
+    "fill_pin": "gate_up.q4_k.1536x2048=6004,down.q6_k.2048x768=3003,down.q4_k.2048x768=3001",
+    "note": "pinned as-is starts before and after the fix on this card (state.kv 2,113 both)"
+   },
+   "lock_regenerated": {
+    "cache": "gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618",
+    "verdict_log": [
+     "verdict: approve",
+     "overall     32783  98.264%    99.084%  1.80e-04  5.38e-02  3.57e+00  +0.119% \u00b1 0.093%   4.02%",
+     "floor       32783  98.219%    99.056%  1.81e-04  5.88e-02  4.76e+00  +0.162% \u00b1 0.096%   4.05%",
+     "vs floor                                                             -0.042% \u00b1 0.091%",
+     "budget            \u226597.969%            \u22643.63e-04 \u22641.18e-01                     \u22640.479%",
+     "PASS"
+    ],
+    "snapshot": {
+     "runs": 3,
+     "run_identical": true,
+     "steps": 2163
+    }
+   },
+   "ab_3220_vs_3236_rtx-5080_2_rounds": {
+    "holon_nat": {
+     "1024": {
+      "decode_tps": 236.1522,
+      "prefill_tps": 4659.4926
+     },
+     "4096": {
+      "decode_tps": 192.37574999999998,
+      "prefill_tps": 9841.4032
+     },
+     "32768": {
+      "decode_tps": 118.35050000000001,
+      "prefill_tps": 4716.42345
+     }
+    },
+    "holon_nat3236": {
+     "1024": {
+      "decode_tps": 236.6603,
+      "prefill_tps": 4690.75465
+     },
+     "4096": {
+      "decode_tps": 193.186,
+      "prefill_tps": 9852.51135
+     },
+     "32768": {
+      "decode_tps": 118.54124999999999,
+      "prefill_tps": 4714.37895
+     }
+    }
+   }
+  },
+  "miss_bytes": {
+   "counter": "ctx.py counted a step's misses against the request's last map (right for static only); now against the map the step ran with",
+   "a5000_4k_25pct": {
+    "cache": "*=0.25",
+    "profile": "profile_x4_gate.json",
+    "placement": "placement.lfu@1",
+    "context": 4096,
+    "cached_experts": {
+     "seed": 1536,
+     "before_prompt": 1536,
+     "after_prompt": 1082,
+     "quota": 1536
+    },
+    "prompt_steps": 1,
+    "empty_after_prompt": 454,
+    "lent_of_before": 454,
+    "decode_steps": 255,
+    "routed_per_token": 384.0,
+    "true_miss_mb_per_token": 214.5,
+    "end_residency_miss_mb_per_token": 330.7,
+    "true_by_quarter": [
+     283.5,
+     151.9,
+     182.4,
+     240.6
+    ],
+    "admissions_per_token": 63.8,
+    "replay_lfu_from_decode_start": {
+     "hit_rate": 0.7095,
+     "miss_mb_per_token": 321.4
+    },
+    "replay_lfu_from_before_prompt": {
+     "hit_rate": 0.8136,
+     "miss_mb_per_token": 206.9
+    },
+    "replay_lfu_from_seed": {
+     "hit_rate": 0.8135,
+     "miss_mb_per_token": 207.0
+    }
+   },
+   "a5000_ctx_corrected": {
+    "25%": {
+     "1024": {
+      "prefill_tps": 928.6347,
+      "decode_tps": 58.1344,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 53.8588,
+      "hit_rate": 0.8597,
+      "miss_mb_per_token": 156.3453
+     },
+     "4096": {
+      "prefill_tps": 3499.6158,
+      "decode_tps": 45.1527,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 74.5686,
+      "hit_rate": 0.8058,
+      "miss_mb_per_token": 215.4543
+     },
+     "32768": {
+      "prefill_tps": 2897.4002,
+      "decode_tps": 37.6171,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 76.2235,
+      "hit_rate": 0.8015,
+      "miss_mb_per_token": 220.6339
+     }
+    },
+    "natural": {
+     "1024": {
+      "prefill_tps": 1428.991,
+      "decode_tps": 152.5923,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 5.1882,
+      "hit_rate": 0.9865,
+      "miss_mb_per_token": 15.054
+     },
+     "4096": {
+      "prefill_tps": 5230.2341,
+      "decode_tps": 100.7401,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 18.8549,
+      "hit_rate": 0.9509,
+      "miss_mb_per_token": 54.4275
+     },
+     "32768": {
+      "prefill_tps": 3132.9868,
+      "decode_tps": 75.4811,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 15.4314,
+      "hit_rate": 0.9598,
+      "miss_mb_per_token": 44.5774
+     }
+    },
+    "25%_4k_only": {
+     "4096": {
+      "prefill_tps": 3527.3435,
+      "decode_tps": 45.2318,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 74.2431,
+      "hit_rate": 0.8067,
+      "miss_mb_per_token": 214.5077
+     }
+    }
+   },
+   "rtx-5080_ctx_corrected": {
+    "natural": {
+     "1024": {
+      "prefill_tps": 4654.1761,
+      "decode_tps": 236.3254,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 6.4667,
+      "hit_rate": 0.9832,
+      "miss_mb_per_token": 18.7557
+     },
+     "4096": {
+      "prefill_tps": 9852.5238,
+      "decode_tps": 192.5373,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 14.6549,
+      "hit_rate": 0.9618,
+      "miss_mb_per_token": 42.402
+     },
+     "32768": {
+      "prefill_tps": 4727.7779,
+      "decode_tps": 118.4393,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 14.9451,
+      "hit_rate": 0.9611,
+      "miss_mb_per_token": 43.1865
+     }
+    },
+    "25%": {
+     "1024": {
+      "prefill_tps": 3218.0276,
+      "decode_tps": 122.4138,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 58.4549,
+      "hit_rate": 0.8478,
+      "miss_mb_per_token": 169.7687
+     },
+     "4096": {
+      "prefill_tps": 9627.7489,
+      "decode_tps": 106.5172,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 70.5529,
+      "hit_rate": 0.8163,
+      "miss_mb_per_token": 204.5764
+     },
+     "32768": {
+      "prefill_tps": 4681.6255,
+      "decode_tps": 76.8343,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 76.2078,
+      "hit_rate": 0.8015,
+      "miss_mb_per_token": 220.6352
+     }
+    }
+   }
+  }
+ },
  "arms": {
   "tune": [
    {

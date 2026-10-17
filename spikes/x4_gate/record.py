@@ -208,6 +208,8 @@ def main() -> None:
         "step8192_probe": abba(stats(rows(a.runs / "step8k")), "holon_nat", "holon_s8k", "prefill_tps")
         | {"decode": abba(stats(rows(a.runs / "step8k")), "holon_nat", "holon_s8k", "decode_tps")},
         "exactness": exactness(a.runs / "exact"),
+        "followups": json.loads((a.runs / "followups.json").read_text()) if (a.runs / "followups.json").exists()
+        else None,
         "arms": {n: json.loads((HERE / f"arms_{n}.json").read_text())
                  for n in ("tune", "natural", "capped", "step8k")},
     }

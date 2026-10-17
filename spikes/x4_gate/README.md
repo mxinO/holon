@@ -40,7 +40,14 @@ plus the two fixes below); llama.cpp `f74e2fa6a31c` and FreeToken `21d9578bde22`
   - The pinned layout's startup profile peaks ≈ 18 MB higher than the fill's: the fill profiles on minimum pools,
     where the cache cannot lend, so its streaming step stages instead.
   - Pinned with 4, 6 or 8 fewer experts, the engine starts.
-- **The lock pins 8 experts less: 3,220 / 1,610 / 1,610, 52.4%** (9.20 of 17.55 GB, `state.kv` 2,142 pages).
+- **The gate ran with the lock pinning 8 experts less: 3,220 / 1,610 / 1,610, 52.4%** (9.20 of 17.55 GB,
+  `state.kv` 2,142 pages).
+- **Follow-up (`8c5a826`):** a pinned arena is now a fill pool too, so the fill's counts pin as they are. On the 5080
+  the fill's 3,236 / 1,618 / 1,618 now start pinned, with `state.kv` at 2,113 like the fill.
+  - The scratch lock was regenerated at those counts: the same L2 (top-1 98.264%, KL p99 5.38e-2, ΔPPL vs floor
+    −0.042%) and a run-identical snapshot ×3.
+  - Against the 3,220 the gate measured, 2 interleaved rounds give +0.2% / +0.4% / +0.2% decode at 1K / 4K / 32K.
+    The gate's ratios stand.
 
 **Lock** (`holon_tools tune <gguf> --plans <scratch copy of plans/> --batch 1 --golden … --floor
 v1-bfloat16-mmq-floor …`):
@@ -70,7 +77,6 @@ Holon arms at the natural pin, 4 interleaved rounds each (`arms_tune.json`; tok/
 | prefill, `ring_copy=dma` | **4,534 (+37.5%)** | **9,803 (+10.0%)** | **4,707 (+2.5%)** |
 | decode, sm / dma | 228.9 / 229.0 | 188.1 / 188.1 | 116.5 / 116.5 |
 | decode, no profile / held-out profile | 228.9 / **238.2 (+4.1%)** | 188.1 / **193.7 (+3.0%)** | 116.5 / **119.0 (+2.2%)** |
-| decode miss MB per token, no profile / profile | 13.6 / 8.3 | 62.7 / 49.6 | 59.6 / 53.1 |
 | decode, `lfu` / `lru` | 228.9 / 227.6 (−0.5%) | 188.1 / 188.2 (+0.04%, sd 0.10) | 116.5 / 116.2 (−0.3%) |
 
 - **`moe.ring_copy = dma`.** It is faster at every prefill context by far more than 2 sd, and decode is unchanged. The
@@ -80,7 +86,8 @@ Holon arms at the natural pin, 4 interleaved rounds each (`arms_tune.json`; tok/
     prompts on excerpts of `docs/design.md`, `plan.md`, `v1-offload.md` and `release.md` at `4b6de6c`, tokenized
     with Qwen3's tokenizer (sha256 `a2d626ed…`; 128 greedy tokens each).
   - The output is `profile_x4_gate.json` (sha256 `9f2edfe2…`) beside the checkpoint.
-  - It cuts decode misses by 11–39% and gains 2–4% decode.
+  - It gains 2–4% decode. These rounds' miss counts were the old counter's (see "Capped-fit miss bytes"), so they are
+    not quoted.
 - **`lfu` stays the default.** `lru` does not beat it by more than 2 sd at 4K (+0.04%, within the noise; §13's rule),
   and loses at 1K and 32K. `lru` fetches 5% more (65.8 against 62.7 MB per token at 4K) yet runs as fast there:
   its resolve is cheaper than F11's pairing.
@@ -117,7 +124,9 @@ Ratio of Holon to the reference (median). After the verdict, in brackets: §13's
 | FreeToken | 220.6 / 2,712 | 183.0 / 10,670 | 115.1 / 5,392 |
 | llama.cpp cache, pinned | 196.8 / 1,903 | 154.9 / 1,724 | 106.0 / 1,594 |
 
-Holon's decode hit rate is 99.3% / 95.6% / 95.3%, missing 8.3 / 49.6 / 53.1 MB per token.
+Holon misses 18.8 / 42.4 / 43.2 MB per decode token (hit rate 98.3% / 96.2% / 96.1%). This was measured in a
+follow-up run on the 5080 with the corrected counter (below). The gate rounds' own counts (8.3 / 49.6 / 53.1) were the
+old counter's.
 
 **At x4_refs' 47.1%** (the share §13's bands were written for). The references reproduce x4_refs within 0.6%
 (FreeToken 212.8 / 174.6 / 111.1, pinned cache 188.6 / 147.0 / 101.9). Holon decodes 224.2 / 179.7 / 113.4 and
@@ -160,8 +169,9 @@ Holon is `holon_25` (`moe.cache=*=0.25`, the same lock settings otherwise).
 | cache, mmap (1.1×) | 2.26 [2.29] | 2.29 [2.26] | 1.82 [1.78–1.95] | 4.30 | 14.32 | 6.92 |
 | cache, pinned (1.1×) | 1.22 [1.19–1.32] | 1.22 [1.15–1.29] | **1.09** [1.08–1.17] | 2.10 | 6.87 | 3.58 |
 
-Holon decodes 122.9 / 106.8 / 77.0 tok/s. It misses 174 / 338 / 340 MB per token, well above the replay's
-≈ 200–230 MB at 4K / 32K (§13). That gap is where F5b, or a look at the 25% seed, would act at step 6.
+Holon decodes 122.9 / 106.8 / 77.0 tok/s. In the corrected follow-up run on the 5080 it misses 170 / 205 / 221 MB
+per token, as §13's replay predicted (≈ 200–230 MB). The 174 / 338 / 340 the gate rounds reported was a counting
+artefact, explained in "Capped-fit miss bytes" below.
 
 ## Exactness on the RTX 5080 (D4, §6)
 
@@ -190,8 +200,73 @@ Holon decodes 122.9 / 106.8 / 77.0 tok/s. It misses 174 / 338 / 340 MB per token
     directory. `holon_tools profile` wrote beside the snapshot link, so the first profiled arm failed with
     `FileNotFoundError`.
   - Both now use `TieredStore.profile_dir`. Design §14 records it.
-- **Not fixed (recorded):** a fill's slot counts do not start when pinned (≈ 18 MB, above). A lock pins a few
-  experts below the fill until the fill and pinned startup profiles agree.
+- **Fixed in the follow-ups:** a fill's slot counts did not start when pinned (`8c5a826`, below).
+
+## Follow-ups (panel A and the coordinator, after the gate)
+
+The branch first took the v1-offload branch (steps 6 and 5, the std offload API tag `v1-offload-std-api`) in `1588c0e`:
+- `std/holon_std/tiered/store.py` keeps the tiers' preparation and `9b49cee`'s fill minimum;
+- the design doc keeps both §14 additions.
+
+The two std changes below are bug fixes found at the gate, made after the tag, and kept minimal: each is one rule in
+`std.tiered`, with no protocol or contract change. They are called out for the panel.
+
+- **`80681f0`: profiles name their checkpoint.** Panel A on `63c6e4b`: profiles of different files collide in a
+  hub cache's shared `blobs/`.
+  - A profile now records the files it was counted on (`"checkpoint": [[name, bytes], …]`, as the store reads them;
+    a hub blob is named by its content hash). The store refuses it on any other checkpoint.
+  - `holon_tools profile` names it `<checkpoint stem>.profile.json` by default.
+  - Test: the tool, run through its CLI on a snapshot link, writes `moe-a.profile.json` beside the blob, and a
+    second quant in that directory is refused. Both checks failed before the fix.
+  - The gate's `profile_x4_gate.json` got its `checkpoint` record with the counts unchanged (a local file, not in the
+    repo).
+- **`8c5a826`: a pinned arena is a fill pool too.** Panel A on the ≈ 18 MB the pinned counts were short.
+  - Before: a pinned arena was a fixed pool. It was sized before the paged floor and profiled at full size, while
+    the fill was profiled at its minimum.
+  - Now both modes request one fill pool. Its minimum is a prefill pass's staging and its preference the pinned size.
+    Both modes profile the same minimum and grow above the floor alike.
+  - A sized materialize that leaves an all-pinned arena short of its size refuses to start, rather than taking the
+    paged floor.
+  - Test: a fill's counts pin exactly at its floor, and one expert more per class is refused. That pin started before
+    the fix, taking the floor.
+  - Verified on the 5080: the fill's 3,236 / 1,618 / 1,618 now start pinned (`state.kv` 2,113, the fill's), with the
+    lock regenerated (above).
+  - On the A5000 the vehicle's fill (6,004 / 3,003 / 3,001 at the 33,792-token floor) pinned as-is both before and
+    after the fix, so the A5000 does not show the shortfall.
+- **`3a1c7b5`: the capped-fit miss bytes.** Holon at 25% did not miss 338 MB per token at 4K. That number was
+  `ctx.py`'s counter: it compared every step's routed experts with the request's last residency map. That is right
+  for x4_gap's static placement, wrong under `lfu`.
+  - **Measurement** (`capped.py`, RTX A5000, the lock's settings at `*=0.25`, the gate's warm-up then its 4K prompt,
+    the store's route dump):
+
+    | Count, MB per decode token at 4K, 25% | Value |
+    |---|---|
+    | true: a step's routed experts not resident when it ran | **214.5** (hit rate 80.7%) |
+    | old counter (against the last map) | 330.7 |
+    | M6's `lfu` replay on the same routing, from the residency before the prompt | 206.9 |
+    | the same replay from the profile seed | 207.0 |
+    | the same replay from the residency after the prompt (its quotas fixed, so it cannot refill) | 321.4 |
+    | true, by quarter of the 255 decode steps | 283.5 / 151.9 / 182.4 / 240.6 |
+
+  - **The 3.7% left over (214.5 against 206.9) is the prompt's ring step** (D8): it lent 454 of the 1,536 cached
+    experts and returned them empty (D4's R0 return).
+    - The first decode steps refill those slots unconditionally, as empty slots are each layer's first victims, which
+      shows in the first quarter's 283.5 MB.
+    - Step 3b chose R0 for the same reason: R1 replayed only 1.0–1.4% ahead on single long prompts, and it pays copies
+      at the return.
+    - Neither the profile seed (207.0 against 206.9 from the warm-up's residency) nor F11's count semantics (the
+      device equals its oracle at every step) adds misses.
+    - Not a bug in the store; nothing to fix there.
+  - **Corrected counts in the gate's own sequence** (warm-up, then 1K, 4K, 32K in one engine), MB per decode token:
+
+    | Card | 25% | natural (3,220) |
+    |---|---|---|
+    | A5000 | 156 / 216 / 221 | 15.1 / 54.4 / 44.6 |
+    | RTX 5080 | 170 / 205 / 221 | 18.8 / 42.4 / 43.2 |
+
+    The 25% row is what §13's replay predicted: 214.7 MB at 32K (`README_32k.md`).
+  - Throughput and the gate's ratios are unaffected: the counter only reported.
+  - The tables above now quote the corrected counts; the evidence keeps both under `followups`.
 
 ## Reproduce
 
@@ -211,6 +286,7 @@ python spikes/x4_gap/ctx.py run --name gate_nat --arms spikes/x4_gate/arms_natur
 python -m holon_judge snapshot --model <gguf> --prompts judge/prompts/v1.jsonl --runs 3 --engine-args '<the lock's flags>'
 python spikes/x3_policies/run.py <gguf> <exact>/x3 3 "nat|<pin>|||||copy=dma" "cap|*=0.25|||||copy=dma" \
     "adapt|<pin>|placement.profile_decay@1||||copy=dma" "lru|<pin>|placement.lru@1||||copy=dma"
+python spikes/x4_gate/capped.py <gguf> [--cache '*=0.25'] [--context 4096]    # follow-up: miss bytes per step
 python spikes/x4_gate/record.py --runs <runs> --lock <lock> --date 2026-10-17 --commit 63c6e4b \
     --out evidence/x4_gate_rtx-5080_2026-10-17.json
 ```

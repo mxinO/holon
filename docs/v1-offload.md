@@ -1424,7 +1424,22 @@ interleaved; llama.cpp and FreeToken at x4_refs' pins).
   - **By §8 the FreeToken prefill rows go to the owner.**
 - **Exactness on the 5080:** natural F11, capped F11, natural `profile_decay` and natural `lru` snapshots are
   byte-identical to each other, ×3 each, and F11 equals its replay oracle at every step.
-- **Capped rows** are recorded for step 6. Holon at 25% misses 338 MB per token at 4K, above the replay's ≈ 200.
+- **Capped rows** are recorded for step 6. Holon at 25% misses 205 MB per token at 4K on the 5080, as the replay
+  predicted. The 338 MB first reported was x4_gap `ctx.py`'s counter, which compared steps with the request's last
+  map; that is right only for a frozen placement (fixed in `3a1c7b5`).
+  - On the A5000, the true count is 214.5 MB against 206.9 for M6's `lfu` replay from the same start.
+  - The 3.7% difference is the prompt's ring step: it lent 454 of 1,536 cached experts and returned them empty (D4's
+    R0), and decode refills them.
 - **Two fixes, each with a test that failed before:**
   - a fill arena's minimum now holds the staged-pass layout (batch 1 crashed at startup);
   - profiles of hub-cache checkpoints are now found (above, step 3a's bullet).
+- **Follow-ups after the std API tag** (bug fixes found at the gate, kept minimal, called out for the panel):
+  - **`80681f0`:** a profile records the files it was counted on (`[name, bytes]` as the store reads them), and the
+    store refuses it on another checkpoint. `holon_tools profile` defaults to `<stem>.profile.json`, because a hub
+    cache's `blobs/` is shared.
+  - **`8c5a826`:** a pinned arena is a fill pool too.
+    - Its minimum is a prefill pass's staging, its preference the pinned size, so pinned and fill profile alike.
+    - A sized materialize that leaves an all-pinned arena short refuses to start (D4) rather than taking the paged
+      floor.
+    - On the 5080 the fill's 3,236 / 1,618 / 1,618 (52.7%) now pin as they are. The scratch lock was regenerated at
+      them with the same L2 and a snapshot run-identical ×3.
