@@ -53,25 +53,20 @@ class MoeResolve:
                          slots, fetch, n_fetch, self.staging)
         return slots, fetch, n_fetch
 
-    def lend(self, n: int, residency: torch.Tensor, classes: torch.Tensor, **state) -> torch.Tensor:
-        """Whole resident experts, coldest (LFU: by score; LRU: oldest) first, ties by layer then expert id, until every
-        class has min(n, its resident slots) of them."""
-        whole = (residency >= 0).all(-1).view(-1)                           # [G·E], in (layer, expert) order
-        key = (state["score"] if self.policy == 1 else state["last"]).reshape(-1)
+    def lend(self, need: torch.Tensor, residency: torch.Tensor, classes: torch.Tensor, **state) -> torch.Tensor:
+        """Whole resident experts in the policy's order (LFU: by score; LRU: least recently routed), ties by expert id
+        then layer; for each class c the first need[c] of them holding a slot of c. Device ops, no host sync."""
+        groups, experts, _ = residency.shape
+        whole = (residency >= 0).all(-1).t().reshape(-1)                      # [E·G], in (expert, layer) order
+        key = (state["score"] if self.policy == 1 else state["last"]).t().reshape(-1)
         key = torch.where(whole, key, torch.full_like(key, torch.finfo(torch.float32).max if key.is_floating_point()
                                                           else torch.iinfo(key.dtype).max))
-        order = torch.sort(key, stable=True).indices                        # stable: ties keep (layer, expert) order
-        experts = residency.shape[1]
-        slots = torch.zeros(len(key), int(classes.max()) + 1, dtype=torch.int64, device=key.device)
-        for r in range(classes.shape[1]):                                   # [G·E, C]: the slots each expert holds
-            slots.scatter_add_(1, classes[:, r].repeat_interleave(experts)[:, None], whole.long()[:, None])
-        held = slots[order].cumsum(0)
-        need = held[-1].clamp(max=n)
-        reached = (held >= need).long().argmax(0)                           # each class's first index meeting its need
-        take = int(torch.where(need > 0, reached + 1, 0).max())
-        picked = torch.zeros(len(key), dtype=torch.bool, device=key.device)
-        picked[order[:take]] = True
-        return picked.view(residency.shape[:2])
+        order = torch.sort(key, stable=True).indices                        # stable: ties keep (expert, layer) order
+        holds = torch.zeros(groups, len(need), dtype=torch.bool, device=key.device).scatter_(1, classes, True)
+        held = holds.repeat(experts, 1)[order] & whole[order, None]          # [E·G, C] in the order
+        take = (held & (held.cumsum(0) <= need.to(key.device)[None])).any(1)
+        picked = torch.zeros_like(whole).scatter_(0, order, take)
+        return picked.view(experts, groups).t()
 
 
 STATE = {0: (), 1: ("score",), 2: ("last", "clock")}       # each policy's state, as its contract names it
@@ -86,15 +81,17 @@ class ExpertFetch:
 
 
 class ExpertPrefetch:
-    """D8's ring copies: DMA on a stream of its own, each key's end an event the compute stream waits on."""
+    """D8's ring copies: the fetch kernel (zero-copy reads of the mapped host pool) on a stream of its own, after the
+    work enqueued so far; each key's end an event the compute stream waits on. Its tables are the device's: no host
+    sync."""
 
     def __init__(self, modules: Modules, ctx, *, unit_bytes: int) -> None:
         self.lib, self.stream, self.landed = modules(ctx.fingerprint.sm), torch.cuda.Stream(ctx.device), {}
 
-    def start(self, key: int, pairs, src: torch.Tensor, dst: torch.Tensor) -> None:
+    def start(self, key: int, fetch: torch.Tensor, n: torch.Tensor, src: torch.Tensor, dst: torch.Tensor) -> None:
         self.stream.wait_stream(torch.cuda.current_stream(dst.device))     # after the work enqueued so far
-        pairs = torch.as_tensor(pairs, dtype=torch.int64).reshape(-1, 2).contiguous()
-        self.lib.copy_pairs(src, dst, pairs, self.stream.cuda_stream)
+        with torch.cuda.stream(self.stream):
+            self.lib.fetch(fetch, n, src, dst)
         self.landed[key] = torch.cuda.Event()
         self.landed[key].record(self.stream)
 

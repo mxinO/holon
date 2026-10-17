@@ -1048,15 +1048,15 @@ def lent_slot_still_mapped() -> Iterator[None]:
 
     lend, fired = tiered.TieredStore.lend, collections.Counter()
 
-    def planted(self, n):
+    def planted(self, *args):
         before = self.residency.device.clone()
-        picked = lend(self, n)
+        picked = lend(self, *args)
         self.residency.device.copy_(before)                     # the unmap undone
-        fired["lent"] += int(picked.sum())
+        fired["lent"] += picked.sum()                          # a tensor: the step goes on without a host sync
         return picked
     with mock.patch.object(tiered.TieredStore, "lend", planted):
         yield
-    print(f"plant lent-slot-still-mapped fired: {dict(fired)}", file=sys.stderr)
+    print(f"plant lent-slot-still-mapped fired: { {k: int(v) for k, v in fired.items()} }", file=sys.stderr)
 
 
 def _shared(records, counts) -> int:

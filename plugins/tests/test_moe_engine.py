@@ -1,6 +1,7 @@
 """Qwen3-MoE end to end on the CPU (test-only reference kernels) against an independent oracle: a tiny random HF
 `Qwen3MoeForCausalLM`, written as a GGUF with quantized expert stacks, must serve what transformers computes on the
 same (dequantized) weights (docs/m02-moe.md, step 1)."""
+import contextlib
 import json
 import pathlib
 from unittest import mock
@@ -14,6 +15,7 @@ from holon.core.batching import host_plan
 from holon.core.engine import Engine, EngineConfig
 from holon_std.moe.offload import KEY, PASS
 from holon_std.moe.units import CHUNK
+from holon_std.tiered.ring import Lent
 from holon_testing.gguf_files import write
 from safetensors.torch import save_file
 from transformers import AutoModelForCausalLM, Qwen3MoeConfig, Qwen3MoeForCausalLM
@@ -27,12 +29,22 @@ GREEDY = SamplingParams(temperature=0.0, max_tokens=12, ignore_eos=True)
 @pytest.fixture(scope="module")
 def tiny_moe(tmp_path_factory):
     """A random two-layer Qwen3-MoE (8 experts, top-2), and its prompts."""
+    return _tiny_moe(tmp_path_factory, 2)
+
+
+@pytest.fixture(scope="module")
+def tiny_moe_deep(tmp_path_factory):
+    """Four layers of it (a ring's two halves fit a half-cached layout once lending spreads over the layers)."""
+    return _tiny_moe(tmp_path_factory, 4)
+
+
+def _tiny_moe(tmp_path_factory, layers: int):
     torch.manual_seed(0)
     cfg = Qwen3MoeConfig(vocab_size=512, hidden_size=64, intermediate_size=128, moe_intermediate_size=32,
-                         num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=16,
+                         num_hidden_layers=layers, num_attention_heads=4, num_key_value_heads=2, head_dim=16,
                          num_experts=8, num_experts_per_tok=2, norm_topk_prob=True, tie_word_embeddings=False,
                          eos_token_id=None)
-    path = tmp_path_factory.mktemp("tiny_qwen3_moe")
+    path = tmp_path_factory.mktemp(f"tiny_qwen3_moe{layers}")
     model = Qwen3MoeForCausalLM(cfg)
     with torch.no_grad():                                  # a router sharp enough that routing matters
         for layer in model.model.layers:
@@ -253,7 +265,7 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
             assert trace.admissions > 0 and resident[..., 0].sum(-1).tolist() == [2, 2]
         if not policy:
             assert parity(trace)["first_differing_step"] is None and trace.mirrored
-            at, picked = store.n_delta.clone(), store.lend(1)           # one slot of each class: one whole expert
+            at, picked = store.n_delta.clone(), store.lend(torch.ones(2, dtype=torch.int64))   # a slot per class
             assert picked.sum() == 1 and (store.residency.device[picked] == -1).all()
             (g, e), = np.argwhere(picked.numpy()).tolist()
             assert store.delta[g, at[g]].tolist() == [g, -1, e] and (store.n_delta - at).tolist() == [g == 0, g == 1]
@@ -285,7 +297,7 @@ def test_only_decode_steps_count_and_decay(tiny_moe, tmp_path):
 
 
 @pytest.mark.parametrize("policy", ["", "placement.lru@1"])
-def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe, tmp_path, policy):
+def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe_deep, tmp_path, policy):
     """D4's device lending and D8 on the CPU: a step of 10 prompt tokens (its whole budget) streams every layer's
     missing experts through a ring of lent slots (`moe.ring_tokens`), a smaller one stages its misses in lent slots
     (its staging slots hold a graphed step's, 3 rows × top-2); the slots come back empty, each its layer's first
@@ -294,7 +306,7 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe, tmp_path, polic
     (decode rows and a prompt chunk, `chunk_with_decode`) included."""
     from holon_judge.placement import parity, route_dump
 
-    checkpoint, prompts = tiny_moe
+    checkpoint, prompts = tiny_moe_deep
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
     want = _served(_engine(file), prompts)
     engine = _engine(file, host_memory=1 << 24, chunk_with_decode=4, plugin_options={
@@ -318,7 +330,7 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe, tmp_path, polic
         assert _served(engine, prompts) == want
         assert engine.generate(fresh, GREEDY) == _engine(file).generate(fresh, GREEDY)
     assert store.borrowed["ring"] and store.borrowed["stage"] and any(mixed), store.borrowed
-    assert all((h == held[0]).all() for h in held) and held[0].tolist() == [8, 8]
+    assert all((h == held[0]).all() for h in held) and held[0].tolist() == [16, 16]
     assert trace.mirrored
     if not policy:
         report = parity(trace)
@@ -339,14 +351,26 @@ def test_the_startup_profile_runs_a_streaming_pass(tiny_moe, tmp_path):
 
 def test_a_cache_too_small_to_lend_stages_instead(tiny_moe, tmp_path):
     """A layout whose cache cannot lend a prefill pass's staging (a fill pool of 3 experts per class over the paged
-    floor, F11 with the ring on) keeps its staging slots at a pass's size and never borrows: it serves as before."""
+    floor, F11 with the ring on) keeps its staging slots at a pass's size and never borrows: it serves as before. One
+    that lends a pass's staging but not a ring's two halves (two half-cached layers: every lent expert is a miss of
+    one of them) stages its ring steps in lent slots instead — the device's choice — under parity."""
+    from holon_judge.placement import parity, route_dump
+
     checkpoint, prompts = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
+    want = _served(_engine(file), prompts)
     engine = _engine(file, host_memory=1 << 24, paged_min_tokens=1790, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.ring_tokens": 10})
     store = engine.ctx.shared_objects[KEY]
     assert not store.lending and store.stage.shape[1] == store.prefill
-    assert _served(engine, prompts) == _served(_engine(file), prompts) and store.borrowed == {"ring": 0, "stage": 0}
+    assert _served(engine, prompts) == want and store.borrowed == {"ring": 0, "stage": 0}
+    engine = _engine(file, host_memory=1 << 24, plugin_options={
+        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.ring_tokens": 10})
+    store = engine.ctx.shared_objects[KEY]
+    with route_dump(engine) as trace:
+        assert _served(engine, prompts) == want
+    assert store.lending and store.borrowed["ring"] == 0 and store.borrowed["stage"] > 0
+    assert parity(trace)["first_differing_step"] is None and trace.mirrored
 
 
 def test_the_delta_log_holds_a_steps_admissions_and_lending(tiny_moe, tmp_path):
@@ -367,7 +391,7 @@ def test_the_delta_log_holds_a_steps_admissions_and_lending(tiny_moe, tmp_path):
     def resolve(self, ids, first):
         slots = call(self, ids, first)
         if not self.group and not first and not lent and bool((store.kinds == 1).sum() >= 4):   # 4 rows × top-2
-            lent.append(int(store.lend(store.items * store.roles).sum()))
+            lent.append(int(store.lend(torch.full((2,), store.items * store.roles)).sum()))
         return slots
     with route_dump(engine) as trace, mock.patch.object(DeviceResolver, "__call__", resolve):
         assert _served(engine, prompts) == want
@@ -422,7 +446,7 @@ def gpu_moe(tmp_path_factory):
     and the resident store's outputs on the GPU."""
     torch.manual_seed(1)
     cfg = Qwen3MoeConfig(vocab_size=512, hidden_size=1024, intermediate_size=1024, moe_intermediate_size=1024,
-                         num_hidden_layers=2, num_attention_heads=8, num_key_value_heads=2, head_dim=128,
+                         num_hidden_layers=4, num_attention_heads=8, num_key_value_heads=2, head_dim=128,
                          num_experts=8, num_experts_per_tok=2, norm_topk_prob=True, tie_word_embeddings=False,
                          eos_token_id=None)
     path = tmp_path_factory.mktemp("gpu_moe")
@@ -439,6 +463,23 @@ def gpu_moe(tmp_path_factory):
     return path / "moe.gguf", prompts, want
 
 
+@contextlib.contextmanager
+def _no_host_sync(cls, *methods):
+    """`cls`'s methods raise on any operation that waits for the device (a borrowing step's lending and ring)."""
+    def strict(fn):
+        def run(*args, **kw):
+            torch.cuda.set_sync_debug_mode("error")
+            try:
+                return fn(*args, **kw)
+            finally:
+                torch.cuda.set_sync_debug_mode("default")
+        return run
+    with contextlib.ExitStack() as stack:
+        for name in methods:
+            stack.enter_context(mock.patch.object(cls, name, strict(getattr(cls, name))))
+        yield
+
+
 def _gpu_engine(model, **kw) -> Engine:
     return Engine(EngineConfig(model=str(model), device="cuda", dtype=torch.bfloat16, page_size=16, max_seqs=4,
                                max_step_tokens=256, max_model_len=512, cuda_graphs=True, overlap=True, **kw))
@@ -452,25 +493,26 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
     resolve, its F11 and F4 variants and zero-copy gather from mapped host pools), decode steps replayed from CUDA
     graphs and prefill chunked past the mmvq limit: the offload store's streams and prompt logprobs are the resident
-    store's, bit for bit, under every placement policy (arenas of 26, 14, 10 slots: stream-k unpatched). F11's
-    residency, step by step, is its replay oracle's (L1 parity), with admissions in graphed and eager steps. A corrupt
-    map entry is flagged by the resolve and stops the engine at the commit; the kernels' id-error word is watched too.
-    The arena pool is released when the ledger frees its pools (the startup profile reads free memory then)."""
+    store's, bit for bit, under every placement policy (arenas of 42, 18, 10 slots: stream-k unpatched). F11's
+    residency, step by step, is its replay oracle's (L1 parity), with admissions in graphed and eager steps; a
+    borrowing step's lending and ring never wait for the device. A corrupt map entry is flagged by the resolve and
+    stops the engine at the commit; the kernels' id-error word is watched too. The arena pool is released when the
+    ledger frees its pools (the startup profile reads free memory then)."""
     from holon_judge.placement import parity, route_dump
 
     file, prompts, want = gpu_moe
     cache, ring = cache.partition(" ")[::2]          # "ring": steps of 32 prompt tokens or more stream (D8)
-    engine = _gpu_engine(file, host_memory=1 << 26, plugin_options={
+    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
         "moe.ring_tokens": 32 if ring else 512})
     store = engine.ctx.shared_objects[KEY]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
-    store.after_commit = lambda step, t: routed.append((int(step.n_query.sum()) * 2 * 2 * bool(
+    store.after_commit = lambda step, t: routed.append((int(step.n_query.sum()) * 2 * 4 * bool(
         (step.n_query == step.n_logits).all()), int(t["counts"].sum()))) or commit(step, t)   # decode, verify steps
-    with route_dump(engine) as trace:
+    with route_dump(engine) as trace, _no_host_sync(Lent, "begin", "sources", "done"):
         assert _served(engine, prompts) == want
     assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
-    assert all(a == b for a, b in routed) and max(routed)[0] > 4      # top-2 x 2 layers; graph padding never counts
+    assert all(a == b for a, b in routed) and max(routed)[0] > 8      # top-2 x 4 layers; graph padding never counts
     variant = {"": "moe_resolve.lfu@1", "placement.lru@1": "moe_resolve.lru@1"}.get(policy, "moe_resolve@1")
     assert {(k.rpartition("/")[2], v["provider"]) for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")
             } == {(variant, "kernels.expert_io"), ("expert_fetch@1", "kernels.expert_io"),

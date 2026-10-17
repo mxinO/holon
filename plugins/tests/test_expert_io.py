@@ -245,27 +245,36 @@ def test_lfu_decays_then_counts_in_f32(plugins, device):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU")
 @pytest.mark.parametrize("policy", sorted(VARIANTS))
-@pytest.mark.parametrize("n", [0, 1, 7, 10_000])
-def test_lend_matches_the_oracle(plugins, policy, n):
-    """`lend` picks whole experts only, coldest first (ties by layer, then expert id) until every class has min(n,
-    its resident slots) lent: 6 layers over 3 classes (the second role's class differs by layer), states with ties,
-    and some experts resident in one role only (never lent)."""
+@pytest.mark.parametrize("need", [(0, 0, 0), (1, 0, 0), (0, 7, 3), (5, 2, 9), (10_000,) * 3])
+def test_lend_matches_the_oracle(plugins, policy, need):
+    """`lend` picks whole experts only, coldest first (ties by expert id, then layer), for each class c the first
+    need[c] holding a slot of c: 6 layers over 3 classes (the second role's class differs by layer), states with ties,
+    and some experts resident in one role only (never lent). On the device without a host sync."""
     resolve = kernel(plugins, "cuda", f"moe_resolve.{policy}@1", "kernels.expert_io", experts=E, top_k=K, roles=ROLES,
                      staging=E)
     oracle = importlib.import_module(f"holon_plugins.placement.{policy}.reference").lend
-    g = torch.Generator().manual_seed(n)
+    g = torch.Generator().manual_seed(sum(need))
     residency = torch.where(torch.rand(6, E, 1, generator=g) < 0.4, 50, -1).int().expand(6, E, ROLES).clone()
     residency[torch.rand(6, E, ROLES, generator=g) < 0.03] = -1
     classes = torch.tensor([[0, 1], [0, 1], [0, 2], [0, 1], [0, 2], [0, 2]])
-    state = {n_: torch.stack([_state(policy, 6 * n + layer)[n_] for layer in range(6)]) for n_ in VARIANTS[policy]}
-    want = oracle(n, residency, classes, *state.values())
-    got = resolve.lend(n, residency.cuda(), classes.cuda(), **{k: v.cuda() for k, v in state.items()})
+    state = {n_: torch.stack([_state(policy, 6 * sum(need) + layer)[n_] for layer in range(6)])
+             for n_ in VARIANTS[policy]}
+    want = oracle(np.array(need), residency, classes, *state.values())
+    args = torch.tensor(need).cuda(), residency.cuda(), classes.cuda()
+    dev = {k: v.cuda() for k, v in state.items()}
+    torch.cuda.set_sync_debug_mode("error")
+    try:
+        got = resolve.lend(*args, **dev)
+    finally:
+        torch.cuda.set_sync_debug_mode("default")
     assert torch.equal(got.cpu(), want)
     whole = (residency >= 0).all(-1)
     assert not (want & ~whole).any()
-    lent = torch.bincount(classes[:, None, :].expand(6, E, ROLES)[want].reshape(-1), minlength=3)
-    held = torch.bincount(classes[:, None, :].expand(6, E, ROLES)[whole].reshape(-1), minlength=3)
-    assert (lent >= held.clamp(max=n)).all() and (n or not want.any())
+    holds = torch.zeros(6, 3, dtype=torch.bool)
+    holds[torch.arange(6)[:, None], classes] = True
+    for c in range(3):                          # each class's need met, or every holder lent
+        holders = whole & holds[:, c, None]
+        assert int((want & holders).sum()) >= min(need[c], int(holders.sum()))
 
 
 @pytest.mark.parametrize("device", DEVICES)
@@ -294,19 +303,19 @@ def test_fetch_gathers_the_listed_units(plugins, device, mapped):
 
 @pytest.mark.parametrize("device", DEVICES)
 def test_prefetch_copies_the_listed_units_before_its_wait(plugins, device):
-    """`expert_prefetch@1` (D8's ring): units of a pinned host pool (the store's allocation) into the listed slots, a
-    run of consecutive ones in one copy, landed once the current stream has waited for the key; nothing else
-    written."""
+    """`expert_prefetch@1` (D8's ring): `expert_fetch@1`'s copy from a mapped host pool (the store's allocation), its
+    table and count on the device, landed once the current stream has waited for the key; nothing else written."""
     provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
     unit = 4096 + 48
     prefetch = kernel(plugins, device, EXPERT_PREFETCH, provider, unit_bytes=unit)
     g = torch.Generator().manual_seed(1)
     data = torch.randint(0, 256, (10, unit), dtype=torch.uint8, generator=g)
-    src = platform.host_memory(data.numel(), torch.device(device), mapped=False).view(10, unit)
-    src.copy_(data)
+    host = platform.host_memory(data.numel(), torch.device(device), mapped=True)
+    host.view(10, unit).copy_(data)
+    src = platform.device_alias(host, torch.device(device)).view(10, unit)
     dst = torch.randint(0, 256, (30, unit), dtype=torch.uint8, generator=g).to(device)
-    pairs = [[7, 3], [8, 4], [9, 5], [2, 20], [0, 11]]
-    want = reference.expert_prefetch(pairs, data, dst.cpu())
-    prefetch.start(5, pairs, src, dst)
+    fetch = torch.tensor([[7, 8, 9, 2, 0], [3, 4, 5, 20, 11]], dtype=torch.int32)
+    want = reference.expert_fetch(fetch, 4, data, dst.cpu())
+    prefetch.start(5, fetch.to(device), torch.tensor([4], dtype=torch.int32, device=device), src, dst)
     prefetch.wait(5)
-    assert torch.equal(dst.cpu(), want) and torch.equal(want[4], data[8])
+    assert torch.equal(dst.cpu(), want) and torch.equal(want[4], data[8]) and not torch.equal(want[11], data[0])

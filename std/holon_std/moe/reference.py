@@ -111,11 +111,3 @@ def expert_fetch(fetch: torch.Tensor, n: int, src: torch.Tensor, dst: torch.Tens
     for unit, slot in fetch[:, :n].T.tolist():
         out[slot] = src[unit].to(out.device)
     return out
-
-
-def expert_prefetch(pairs, src: torch.Tensor, dst: torch.Tensor) -> torch.Tensor:
-    """The `expert_prefetch@1` oracle (a `start` and its `wait`): `dst` with unit `src[u]` in slot s for each (u, s)."""
-    out = dst.clone()
-    for unit, slot in torch.as_tensor(pairs).tolist():
-        out[slot] = src[unit].to(out.device)
-    return out

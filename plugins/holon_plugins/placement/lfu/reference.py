@@ -16,8 +16,9 @@ holds every expert under this policy, D10), is logged in that order, and is gath
 call's other misses are fetched as @1's. A call without such an entry (a prefill chunk) changes nothing but what @1
 does.
 
-`lend(n, residency, classes, score)` picks whole resident experts, coldest by score first, ties by layer, then expert
-id, until every class has min(n, its resident slots) lent slots (an expert's role slots go together)."""
+`lend(need, residency, classes, score)` picks whole resident experts in their order — coldest by score first, ties by
+expert id, then layer —: for each class c the first `need[c]` of them holding a slot of c (an expert's role slots go
+together, so one picked for a class lends its slots of the others too)."""
 from __future__ import annotations
 
 import numpy as np
@@ -99,23 +100,23 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
             "n_empty": n_empty, "records": records}
 
 
-def lend(n: int, residency: torch.Tensor, classes: torch.Tensor, score: torch.Tensor) -> torch.Tensor:
+def lend(need, residency: torch.Tensor, classes: torch.Tensor, score: torch.Tensor) -> torch.Tensor:
     """`picked [G, E] bool` (see the module's text)."""
-    groups, experts, roles = residency.shape
+    groups, experts, _ = residency.shape
     whole = (residency >= 0).all(-1)
-    order = sorted((float(score[g, e]), g, e) for g in range(groups) for e in range(experts) if whole[g, e])
-    held = np.zeros(int(classes.max()) + 1, dtype=np.int64)
-    for _, g, _e in order:
-        for r in range(roles):
-            held[int(classes[g, r])] += 1
-    need, lent = np.minimum(held, n), np.zeros_like(held)
-    picked = torch.zeros(groups, experts, dtype=torch.bool)
-    for _, g, e in order:
-        if (lent >= need).all():
-            break
-        picked[g, e] = True
-        for r in range(roles):
-            lent[int(classes[g, r])] += 1
+    order = sorted((float(score[g, e]), e, g) for g in range(groups) for e in range(experts) if whole[g, e])
+    return _pick(order, np.asarray(need), classes, (groups, experts))
+
+
+def _pick(order: list[tuple], need: np.ndarray, classes: torch.Tensor, shape: tuple[int, int]) -> torch.Tensor:
+    """The first need[c] experts of `order` ((key, expert, layer)) holding a slot of class c, for every c."""
+    picked, taken = torch.zeros(shape, dtype=torch.bool), np.zeros(len(need), dtype=np.int64)
+    for _, e, g in order:
+        holds = sorted({int(c) for c in classes[g]})
+        for c in holds:
+            if taken[c] < need[c]:
+                picked[g, e] = True
+            taken[c] += 1
     return picked
 
 
@@ -124,9 +125,9 @@ def replay(seed: np.ndarray, steps: list[dict], score: np.ndarray | None = None,
     """The L1 parity oracle: F11's residency [G, E] (whole experts) and empty slots per layer [G] after each step of
     a trace, from the seeded residency (and scores, zero at a seed). A step holds its routing `counts` [G, E] of decode
     rows, the experts any of its rows routed (`needed` [G, E]; default: the counts'), and `lends` (None: the step
-    borrowed no slots): a borrowing step takes every empty slot at its start, then makes its `lend(n)` calls, each of
-    the coldest whole experts by score (ties by layer, then expert id) until each class (`classes` [G, R]) has min(n,
-    its resident slots) more; all those slots return empty to their layers at the step's end.
+    borrowed no slots): a borrowing step takes every empty slot at its start, then makes its `lend(need)` calls (each
+    `need` per class, `classes` [G, R] the slot classes), as the module's text says; all those slots return empty to
+    their layers at the step's end.
     The M6 replay's `lfu` (`simulate`, `_pair_swap` with gain 0), with the scores in f32 (× 0.915, then + 1.0 per
     entry), decayed only on steps with decode rows, empty slots filled first."""
     res = seed.astype(bool).copy()
@@ -137,9 +138,9 @@ def replay(seed: np.ndarray, steps: list[dict], score: np.ndarray | None = None,
         c, lent = step["counts"], np.zeros(len(seed), dtype=np.int64)
         if step.get("lends") is not None:                              # the empty slots, borrowed first
             lent, empty = empty, np.zeros_like(empty)
-        for n in step.get("lends") or ():
+        for need in () if step.get("lends") is None else step["lends"]:
             whole = torch.from_numpy(np.where(res, 0, -1)[..., None].repeat(classes.shape[1], -1))
-            picked = lend(n, whole, torch.from_numpy(classes), torch.from_numpy(u)).numpy()
+            picked = lend(need, whole, torch.from_numpy(classes), torch.from_numpy(u)).numpy()
             res &= ~picked
             lent += picked.sum(1)
         if c.any():

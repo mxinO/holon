@@ -57,8 +57,8 @@ class Resolve:
         errors |= out["errors"]
         return out["slots"], out["fetch"], out["n_fetch"]
 
-    def lend(self, n: int, residency, classes, score) -> torch.Tensor:
-        return reference.lend(n, residency, classes, score)
+    def lend(self, need, residency, classes, score) -> torch.Tensor:
+        return reference.lend(need.cpu().numpy(), residency, classes, score)
 
 
 class Plugin:

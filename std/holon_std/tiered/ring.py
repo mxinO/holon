@@ -1,132 +1,143 @@
-"""A prefill step's lent slots (docs/v1-offload.md D4, D5, D8): at the step's first resolve the policy's `lend(n)`
-unmaps whole experts — the coldest — and their slots serve the step; at its end they return to their layers as empty
-slots, each its layer's first victim (the policy's next admissions fill them), so the cache never shrinks.
+"""A prefill step's lent slots (docs/v1-offload.md D4, D5, D8), all on the device — tables written by the step's
+own kernels, no host sync: at the step's first resolve its layers' empty slots, then the policy's `lend(need)` —
+whole experts, the coldest — serve the step; at its end they return to their layers as empty slots, each its
+layer's first victim (the policy's next admissions fill them), so the cache never shrinks.
 
-Two uses (`mode`):
-- `ring` (a step of at least `ring_tokens` prompt tokens): every piece a layer misses streams into a double buffer of
-  lent slots, layer l + 1's while layer l computes, on a copy engine (`expert_prefetch@1`); a layer's resolve reads them
-  in place (its `ring` table), so its expert passes, up to 4,096 tokens, fetch nothing.
-- `stage`: the layer's routed misses are staged into lent slots (the resolve's `stage` list) where the store's own
+Two uses (`mode`, the host's choice at launch):
+- `ring` (a step of at least `ring_tokens` prompt tokens, on a layout whose every class can lend twice a layer's
+  experts): every piece a layer misses streams into its half of a double buffer of lent slots, layer l + 1's while
+  layer l computes (`expert_prefetch@1`, after the work enqueued so far); a layer's resolve reads them in place (its
+  `ring` table), so its expert passes, up to 4,096 tokens, fetch nothing but what a pass's own admissions unmap
+  (into the graphed steps' staging slots). Lending makes misses, so the halves are sized after it: `ROUNDS` rounds of
+  `lend(twice the most misses of a layer, per class, less what is held)`, the last asking for the worst case (twice
+  the layer's experts). Should the slots still fall short — a cache that can lend no more —, the step stages instead
+  (its ring empty, its stage list the lent slots: the device's choice, reported in `ring_ok`).
+- `stage`: the layer's routed misses are staged into lent slots (the resolve's `stage` list), where the store's own
   staging slots, sized for graphed steps, would not hold a pass's.
 
-The step synchronizes once or twice at its start (the lending is the device's: the host reads the map back to know
-the slots), never after."""
+Each class's lent slots are pooled (`pool`), the empty slots first; a layer's role takes its ring slots from the pool
+of its class at its half's offset, its pieces in expert order; its stage list is the pool's first `prefill` slots."""
 from __future__ import annotations
 
-import numpy as np
 import torch
 
 BUFFERS = 2                                   # the ring's halves: layer l streams while layer l − 1 computes
+ROUNDS = 4                                    # `lend` calls of a ring step (one suffices for staging)
+SHORT = 4                                     # the store's error bit: a step's lent slots fell short of its use
 
 
 class Lent:
     def __init__(self, store, mode: str) -> None:
         self.store, self.mode = store, mode
-        self.lends: list[int] = []            # the `lend(n)` calls made, in order (the parity oracle's input)
 
     # -- at the step's first resolve -----------------------------------------------------------------------------------
     def begin(self) -> None:
-        store = self.store
-        groups, classes = len(store.layers), store.class_table
-        before = store.residency.device.cpu().numpy().copy()        # a sync: the device's map, every step before done
-        empty, n_empty = store.empty.cpu().numpy().copy(), store.n_empty.cpu().numpy().copy()
-        store.n_empty.zero_()                                        # the empty slots first: they serve the step too
-        self.slots = {c: [] for c in range(classes.max() + 1)}       # the lent slots per class
-        self.owners = []                                             # (layer, its slots per role), as they return
-        for g in range(groups):
-            for j in range(n_empty[g]):
-                self._own(g, empty[g, :, j], classes)
-        lent = np.zeros(before.shape[:2], dtype=bool)
-        n = self._want(before, classes)
-        for _ in range(4):                                           # lending makes misses: lend until they fit
-            short = n - self._held()
-            if (short <= 0).all():
-                break
-            self.lends.append(int(short.max()))
-            picked = store.lend(self.lends[-1]).cpu().numpy()
-            for g, e in zip(*np.nonzero(picked & ~lent), strict=True):
-                self._own(int(g), before[g, e], classes)
-            lent |= picked
-            n = self._want(np.where(lent[..., None], -1, before), classes)
-        held, per = self._held(), n // BUFFERS if self.mode == "ring" else n
-        if self.mode == "ring" and (held < per).any():               # not even one layer's worth: stage instead
-            self.mode, per = "stage", self._need_stage(classes)
-        if (held < per).any():
-            raise RuntimeError(f"{store.name}: {held.tolist()} slots lent per class, {per.tolist()} needed (a cache "
-                               "too small to stage a prefill pass)")
-        self.after, self.half = np.where(lent[..., None], -1, before), per
-        self.buffers = BUFFERS if (held >= BUFFERS * per).all() else 1
-        if self.mode == "stage":                                     # a layer's stage list: its roles' classes' slots
-            width = store._width[store._step] = int(per.min())
-            self.stages = {key: _on([self.slots[c][:width] for c in key], store.ctx.device)
-                           for key in {tuple(row) for row in classes.tolist()}}
-            return
-        self.pairs: dict[int, np.ndarray] = {}
-        for g in range(min(self.buffers, groups)):
-            self._start(g)
+        s = self.store
+        res, classes = s.residency.device, s._class_index                    # [G, E, R], [G, R]
+        groups, experts, roles = res.shape
+        s.n_before.copy_(s.n_empty)                                          # the empty slots serve the step first
+        s.n_empty.zero_()
+        s.lent_call.fill_(-1)
+        held = torch.zeros(len(s.classes), dtype=torch.int64, device=res.device)
+        held.index_add_(0, classes.reshape(-1), s.n_before.long().repeat_interleave(roles))
+        stage = torch.full_like(held, s.prefill)
+        for k in range(ROUNDS if self.mode == "ring" else 1):
+            want = self._want(res, classes) if self.mode == "ring" else stage
+            if k == ROUNDS - 1:                                              # the last: the worst case
+                want = torch.where(held < want, 2 * experts, want)
+            s.lend_needs[k] = (want - held).clamp_min(0)
+            picked = s.lend(s.lend_needs[k], k).long()
+            for r in range(roles):
+                held.index_add_(0, classes[:, r], picked.sum(1))
+        want = self._want(res, classes) if self.mode == "ring" else stage
+        ring_ok = (held >= want).all() if self.mode == "ring" else torch.zeros((), dtype=torch.bool, device=res.device)
+        s.ring_ok.copy_(ring_ok.view(1))
+        s.errors.bitwise_or_((~ring_ok & (held < stage).any()).int() * SHORT)
+        self._pool(res, classes)
+        # a pass's misses past the ring (an earlier pass's admissions unmapped them) go to the graphed steps' staging
+        # slots; a stage step's to the pool's first ones
+        graphed = torch.cat([s.stage, s.stage[:, -1:].expand(roles, s.prefill - s.stage.shape[1])], 1)
+        s.stage_tab.copy_(torch.where(ring_ok, graphed[None], s.pool[:, :s.prefill][classes]))
+        if self.mode == "ring":
+            self._ring(res, classes, want // BUFFERS, ring_ok)
+            for g in range(min(BUFFERS, groups)):
+                self._start(g)
+        s.stage_width.copy_(torch.where(ring_ok, s.staging, s.prefill).view(1))
 
-    def _own(self, g: int, slots: np.ndarray, classes: np.ndarray) -> None:
-        """Slots (one per role) of layer g serve the step, and return to g at its end."""
-        for r, slot in enumerate(slots.tolist()):
-            self.slots[classes[g, r]].append(int(slot))
-        self.owners.append((g, np.asarray(slots)))
+    def _want(self, res: torch.Tensor, classes: torch.Tensor) -> torch.Tensor:
+        """Per class: twice the most pieces a layer of it misses."""
+        missing = (res < 0).sum(1)                                           # [G, R]
+        want = torch.zeros(len(self.store.classes), dtype=torch.int64, device=res.device)
+        return want.scatter_reduce_(0, classes.reshape(-1), missing.reshape(-1), "amax") * BUFFERS
 
-    def _held(self) -> np.ndarray:
-        return np.array([len(s) for s in self.slots.values()], dtype=np.int64)
+    def _pool(self, res: torch.Tensor, classes: torch.Tensor) -> None:
+        """Each class's lent slots in `pool` (past them −1): the layers' empty slots, then the lent experts'."""
+        s = self.store
+        groups, experts, roles = res.shape
+        empty = torch.arange(experts, device=res.device) < s.n_before[:, None, None]         # [G, 1, E]
+        lent = (s.lent_call >= 0)[:, None, :]                                                # [G, 1, E]
+        slots = torch.cat([s.empty, s.lent_slots.permute(0, 2, 1)], 2).reshape(-1)         # [G, R, 2E]
+        ok = torch.cat([empty.expand(groups, roles, experts), lent.expand(groups, roles, experts)], 2).reshape(-1)
+        cls = classes[:, :, None].expand(groups, roles, 2 * experts).reshape(-1)
+        mine = (cls[None] == torch.arange(len(s.classes), device=res.device)[:, None]) & ok[None]   # [C, N]
+        sink = s.pool.shape[1] - 1
+        s.pool.fill_(-1).scatter_(1, torch.where(mine, mine.cumsum(1) - 1, sink), slots.expand(len(mine), -1))
 
-    def _want(self, residency: np.ndarray, classes: np.ndarray) -> np.ndarray:
-        """Slots per class the step needs: two layers' worth of misses (ring) or a pass's staging (stage)."""
-        if self.mode == "stage":
-            return self._need_stage(classes)
-        want = np.zeros(classes.max() + 1, dtype=np.int64)
-        for g in range(len(residency)):
-            for r in range(classes.shape[1]):
-                c = classes[g, r]
-                want[c] = max(want[c], BUFFERS * int((residency[g, :, r] < 0).sum()))
-        return want
-
-    def _need_stage(self, classes: np.ndarray) -> np.ndarray:
-        return np.full(classes.max() + 1, self.store.prefill, dtype=np.int64)
+    def _ring(self, res: torch.Tensor, classes: torch.Tensor, half: torch.Tensor, ring_ok: torch.Tensor) -> None:
+        """The ring slots of every layer's missing pieces (its half at `half` per class), and their copies' tables;
+        none when the slots fell short."""
+        s = self.store
+        groups, experts, roles = res.shape
+        missing = (res < 0) & ring_ok                                        # [G, E, R]
+        rank = missing.cumsum(1) - 1
+        base = (torch.arange(groups, device=res.device) % BUFFERS)[:, None] * half[classes]   # [G, R]
+        at = (base[:, None, :] + rank).clamp(0, s.pool.shape[1] - 1)
+        ring = torch.where(missing, s.pool[classes[:, None, :].expand_as(at), at], -1)
+        s.ring.copy_(ring)
+        index = torch.where(missing, rank, experts).permute(0, 2, 1)         # [G, R, E]: each piece's entry
+        table = torch.full((groups, roles, 2, experts + 1), -1, dtype=torch.int32, device=res.device)
+        table[:, :, 0].scatter_(2, index, s.host_units.permute(0, 2, 1).contiguous())
+        table[:, :, 1].scatter_(2, index, ring.permute(0, 2, 1).contiguous())
+        s.ring_fetch.copy_(table[..., :experts])
+        s.ring_n.copy_(missing.sum(1))
 
     # -- per layer ----------------------------------------------------------------------------------------------------
     def _start(self, g: int) -> None:
         """Layer g's missing pieces into its half of the ring, after the work enqueued so far."""
-        store, half = self.store, g % self.buffers
-        classes = store.class_table[g].tolist()
-        ring = np.full(self.after.shape[1:], -1, dtype=np.int32)
-        for r, c in enumerate(classes):
-            cls = store.layer_classes[g][r]
-            base = half * int(self.half[c])
-            missing = np.flatnonzero(self.after[g, :, r] < 0)
-            ring[missing, r] = np.asarray(self.slots[c][base:base + len(missing)])
-            pairs = np.stack([store._host[g, missing, r], ring[missing, r]], 1)
-            store.prefetch[cls.name].start(g, pairs, cls.host.view(torch.uint8, (len(cls.pieces), cls.unit_bytes)),
-                                           cls.slots())
-        self.pairs[g] = ring
+        s = self.store
+        for r, cls in enumerate(s.layer_classes[g]):
+            s.prefetch[cls.name].start(g, s.ring_fetch[g, r], s.ring_n[g, r:r + 1], cls.units(), cls.slots())
 
     def sources(self, g: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Before layer g's first pass: its ring (landed) and stage tables."""
-        store = self.store
-        if self.mode == "stage":
-            return store.ring[g], self.stages[tuple(store.class_table[g].tolist())]
-        for r in range(store.roles):
-            store.prefetch[store.layer_classes[g][r].name].wait(g)
-        store.ring[g].copy_(_on(self.pairs.pop(g), store.ctx.device), non_blocking=True)
-        return store.ring[g], store.stage
+        s = self.store
+        if self.mode == "ring":
+            for cls in s.layer_classes[g]:
+                s.prefetch[cls.name].wait(g)
+        return s.ring[g], s.stage_tab[g]
 
     def done(self, g: int) -> None:
         """After layer g's expert passes: its ring forgotten, layer g + 2's started; after the last, the lent slots
         returned to their layers, empty."""
-        store = self.store
+        s = self.store
         if self.mode == "ring":
-            store.ring[g].fill_(-1)
-            if g + self.buffers < len(store.layers):
-                self._start(g + self.buffers)
-        if g == len(store.layers) - 1:
-            store.give_back(self.owners)
+            s.ring[g].fill_(-1)
+            if g + BUFFERS < len(s.layers):
+                self._start(g + BUFFERS)
+        if g == len(s.layers) - 1:
+            self._give_back()
 
-
-def _on(values, device: torch.device) -> torch.Tensor:
-    """Host ints on the device through pinned memory: an asynchronous copy, no host sync."""
-    t = torch.as_tensor(np.asarray(values), dtype=torch.int32)
-    return t.pin_memory().to(device, non_blocking=True) if device.type == "cuda" else t
+    def _give_back(self) -> None:
+        """Every layer's lent experts' slots on top of its empty stack, in the order they were lent (`lend` call,
+        then expert id: the order of their delta records)."""
+        s = self.store
+        groups, experts, roles = s.lent_slots.shape
+        lent = s.lent_call >= 0
+        ids = torch.arange(experts, device=lent.device)
+        key = torch.where(lent, s.lent_call * experts + ids, ROUNDS * experts)
+        order = key.argsort(dim=1, stable=True)
+        rank = torch.empty_like(order).scatter_(1, order, ids.expand(groups, experts))
+        at = torch.where(lent, s.n_before[:, None] + rank, experts)[:, None, :].expand(groups, roles, experts)
+        stacks = torch.cat([s.empty, s.empty[..., :1]], 2)
+        s.empty.copy_(stacks.scatter_(2, at, s.lent_slots.permute(0, 2, 1).contiguous())[..., :experts])
+        s.n_empty.copy_(s.n_before + lent.sum(1))

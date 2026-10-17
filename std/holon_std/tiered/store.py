@@ -43,7 +43,7 @@ from holon.api import Extent, MemOp, Ref, RowKind
 from . import files
 from .residency import LAG, ResidencyMap
 from .resolver import EXPERT_PREFETCH, DeviceResolver
-from .ring import Lent
+from .ring import ROUNDS, Lent
 
 PADDING, DECODE, PREFILL = 0, 1, 2           # row kinds (std.moe.kernels, `moe_resolve@1`)
 ALIGN = 4096                                 # each class's arena starts at a multiple of it (and of the pool's unit)
@@ -126,17 +126,17 @@ class TieredStore:
         self.errors = ctx.static(f"{name}.errors", (1,), torch.int32)   # `moe_resolve@1`'s, zeroed each step
         self.edit_errors = ctx.static(f"{name}.edit_errors", (1,), torch.int32)   # host edits' preconditions
         self.peak_misses = 0                    # the most distinct misses a layer had (`misses`, at commits)
-        self._width: dict[int, int] = {}        # step -> the slots its misses were staged into, past the staging
         # Route taps: (step, record) at each commit; the record holds the step's routing `counts` [G, E] of decode
         # and verify rows, the experts any of its rows `routed` [G, E] (bool) and its victims' `scope` (what the call
         # holding its decode rows routed, under a variant), the delta log's `records` [n, 3] and,
-        # when it borrowed slots (its empty ones, then lent), its `lends` (the `lend(n)` calls; else None).
+        # when it borrowed slots (its empty ones, then lent), its `lends` (each `lend(need)` call's need per class;
+        # else None).
         self.taps: list[Callable[[object, dict], None]] = []
         self._copies: dict[int, list[MemOp]] = {}               # launch -> the swaps' copies handed in then
         self._mode: str | None = None                           # the step being launched borrows: ring or stage
+        self._borrowing: dict[int, str] = {}                    # step -> how it borrowed, until its commit
         self.lending = False                                    # the layout lends (`after_materialize`)
         self.lent: Lent | None = None                           # its lent slots, from its first resolve to its end
-        self._lends: dict[int, list[int]] = {}                  # step -> its `lend(n)` calls, for the route taps
         self.borrowed = {"ring": 0, "stage": 0}                 # steps that borrowed slots, by use (since a seed)
 
     # -- while the model is finalized and bound ------------------------------------------------------------------------
@@ -187,6 +187,24 @@ class TieredStore:
             self.ring = self.ctx.static(f"{self.name}.ring", shape, torch.int32)      # this step's ring slots
             self.empty = self.ctx.static(f"{self.name}.empty", (shape[0], self.roles, self.items), torch.int32)
             self.n_empty = self.ctx.static(f"{self.name}.n_empty", shape[:1], torch.int32)
+            # A borrowing step's tables (`Lent`, on the device): the empty slots it found, the lent experts' slots and
+            # `lend` call, each call's need per class, each class's pool of lent slots, the ring's copies, the stage
+            # lists, and whether the ring held (else the step staged) with the stage width its misses had.
+            n_classes = len(self.classes)
+            self.n_before = self.ctx.static(f"{self.name}.n_before", shape[:1], torch.int32)
+            self.lent_slots = self.ctx.static(f"{self.name}.lent_slots", shape, torch.int32)
+            self.lent_call = self.ctx.static(f"{self.name}.lent_call", shape[:2], torch.int32)
+            self.lend_needs = self.ctx.static(f"{self.name}.lend_needs", (ROUNDS, n_classes), torch.int64)
+            self.pool = self.ctx.static(f"{self.name}.pool", (n_classes, 2 * self.roles * math.prod(shape[:2]) + 1),
+                                        torch.int32)
+            self.ring_fetch = self.ctx.static(f"{self.name}.ring_fetch", (shape[0], self.roles, 2, self.items),
+                                              torch.int32)
+            self.ring_n = self.ctx.static(f"{self.name}.ring_n", (shape[0], self.roles), torch.int32)
+            self.stage_tab = self.ctx.static(f"{self.name}.stage_tab", (shape[0], self.roles, self.prefill),
+                                             torch.int32)
+            self.ring_ok = self.ctx.static(f"{self.name}.ring_ok", (1,), torch.int32)
+            self.stage_width = self.ctx.static(f"{self.name}.stage_width", (1,), torch.int32)
+            self.telemetry |= {"lends": self.lend_needs, "ring_ok": self.ring_ok, "stage_width": self.stage_width}
             # The staging slots' list: a graphed step's, or (a layout too small to lend) a prefill pass's.
             self.stages = {n: self.ctx.static(f"{self.name}.stage.{n}", (self.roles, n), torch.int32)
                            for n in {self.staging, self.prefill}}
@@ -288,7 +306,6 @@ class TieredStore:
             t.zero_()
         self._written, self.peak_misses = 0, 0
         self.borrowed = dict.fromkeys(self.borrowed, 0)
-        self._width.clear()
 
     def before_launch(self, step) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list[MemOp]]:
         self._step, kinds, at = step.step, self._kinds, 0
@@ -300,7 +317,7 @@ class TieredStore:
             kinds[at:at + q] = DECODE if d else PREFILL
             at += q
         prompt = int(sum(q for q, d in zip(step.n_query.tolist(), decode, strict=True) if not d))
-        if not self.lending:
+        if not (self.lending and self.policy.device_owned):
             self._mode = None
         elif prompt and self.ring_tokens and prompt >= self.ring_tokens:
             self._mode = "ring"
@@ -308,6 +325,8 @@ class TieredStore:
             self._mode = "stage"                                 # a pass's misses may pass the staging slots
         else:
             self._mode = None
+        if self._mode is not None:
+            self._borrowing[step.step] = self._mode
         reach, self._written = max(at, self._written), at          # the last step's rows become padding
         writes = [(self.kinds[:reach], kinds[:reach])] * bool(reach) + self.residency.writes(step.step)
         return writes, self._copies.pop(step.step, [])
@@ -317,7 +336,9 @@ class TieredStore:
             raise RuntimeError(f"{self.name}: step {step.step}'s kernels flagged errors {errors} (errors: 1 = a "
                                "corrupt residency entry, 2 = the delta log overflowed; edit_errors: a host edit's "
                                "precondition failed; kernel_errors: the kernel's bits)")
-        misses, width = int(telemetry["misses"][0]), self._width.pop(step.step, self.stage.shape[1])
+        mode = self._borrowing.pop(step.step, None)
+        misses = int(telemetry["misses"][0])
+        width = int(telemetry["stage_width"][0]) if mode else self.stage.shape[1]
         self.peak_misses = max(self.peak_misses, misses)
         if misses > width:
             raise RuntimeError(f"{self.name}: a layer had {misses} distinct misses, {width} slots to stage them")
@@ -326,8 +347,10 @@ class TieredStore:
         record = {"counts": telemetry["counts"].numpy(), "routed": (routed & 1).astype(bool),
                   "scope": (routed & 2).astype(bool),           # what the call with decode rows routed (variants)
                   "records": np.concatenate([delta[g, :n[g]] for g in range(len(n))]),
-                  "lends": self._lends.pop(step.step, None)}       # None: the step borrowed no slots
-        self.residency.commit(step.step, record["records"])
+                  "lends": telemetry["lends"].numpy().copy() if mode else None}   # None: borrowed nothing
+        if mode:
+            self.borrowed["ring" if mode == "ring" and int(telemetry["ring_ok"][0]) else "stage"] += 1
+        self.residency.commit(step.step, record["records"], returned=mode is not None)
         for tap in self.taps:
             tap(step, record)
         if swaps := self.policy.after_commit(telemetry["counts"].numpy(), self.residency.host):
@@ -344,10 +367,10 @@ class TieredStore:
 
     def begin(self) -> None:
         """At the step's first resolve (after its words are zeroed and its edits applied): its lent slots, if any."""
-        if self._mode is not None and self.policy.device_owned:
+        if self._mode is not None:
+            self.lend_needs.zero_()
             self.lent = Lent(self, self._mode)
             self.lent.begin()
-            self.borrowed[self.lent.mode] += 1
 
     def sources(self, g: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Layer g's ring and stage tables for the step (at its first pass)."""
@@ -357,34 +380,18 @@ class TieredStore:
         if self.lent is not None:
             self.lent.done(g)
             if g == len(self.groups) - 1:
-                self._lends[self._step], self.lent = self.lent.lends, None
-
-    def give_back(self, owners: list[tuple[int, np.ndarray]]) -> None:
-        """The lent slots back to their layers, on top of their empty stacks (device writes; the host mirror at the
-        step's commit)."""
-        if not owners:
-            return
-        layers = np.array([g for g, _ in owners])
-        rank = np.zeros(len(owners), dtype=np.int64)
-        for g in np.unique(layers):
-            rank[layers == g] = np.arange((layers == g).sum())
-        device = self.ctx.device
-        g_t, rank_t = torch.from_numpy(layers).to(device), torch.from_numpy(rank).to(device)
-        slots = torch.from_numpy(np.stack([s for _, s in owners]).astype(np.int32)).to(device)
-        at = self.n_empty[g_t].long() + rank_t
-        for r in range(self.roles):
-            self.empty[g_t, r, at] = slots[:, r]
-        self.n_empty.index_add_(0, g_t, torch.ones_like(g_t, dtype=torch.int32))
-        self.residency.give_back(self._step, owners)
+                self.lent = None
 
     # -- the policy's means -------------------------------------------------------------------------------------------
-    def lend(self, n: int) -> torch.Tensor:
-        """Device lending under a device-owned policy (D4; step 3b's ring calls it in a ring step's forward, eagerly,
-        after the step's first resolve, which zeroes the log and the error words): the whole experts its resolve
-        contract's `lend` picks, until every class has `n` slots (or all it has), are unmapped and logged `(group, −1,
-        item)`; their scores stay. Returns the picks [groups, items]. Called by a prefill step's `Lent` at its start;
-        the slots return to their layers, empty, at its end (`give_back`)."""
-        picked = self.resolvers[0].resolve.lend(n, self.residency.device, self._class_index, **self.state)
+    def lend(self, need: torch.Tensor, call: int = 0) -> torch.Tensor:
+        """Device lending under a device-owned policy (D4; a prefill step's `Lent` calls it at the step's first
+        resolve, which zeroes the log and the error words, eagerly, no host sync): the whole experts its resolve
+        contract's `lend` picks for `need` (slots per class) are unmapped and logged `(group, −1, item)`, their slots
+        kept with the call's number for their return to their layers, empty, at the step's end; their scores stay.
+        Returns the picks [groups, items]."""
+        picked = self.resolvers[0].resolve.lend(need, self.residency.device, self._class_index, **self.state)
+        self.lent_slots.copy_(torch.where(picked[..., None], self.residency.device, self.lent_slots))
+        self.lent_call.masked_fill_(picked, call)
         self.residency.device.masked_fill_(picked[..., None], -1)
         groups, items = picked.shape
         sink = self.delta.shape[1]

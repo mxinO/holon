@@ -379,38 +379,10 @@ void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & s
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-// expert_prefetch@1: unit src[u] -> slot dst[s] for each (u, s) of `pairs`, as DMA on `stream` (a copy engine), a
-// run of consecutive units into consecutive slots in one copy. `src` is pinned host memory.
-void copy_pairs(const at::Tensor & src, at::Tensor & dst, const at::Tensor & pairs, int64_t stream_handle) {
-    TORCH_CHECK(!src.is_cuda() && src.is_pinned() && dst.is_cuda() && src.dim() == 2 && dst.dim() == 2 &&
-                src.size(1) == dst.size(1) && src.is_contiguous() && dst.is_contiguous() && src.scalar_type() == at::kByte &&
-                dst.scalar_type() == at::kByte, "src [U, unit] pinned host bytes, dst [S, unit] CUDA bytes");
-    TORCH_CHECK(!pairs.is_cuda() && pairs.scalar_type() == at::kLong && pairs.dim() == 2 && pairs.size(1) == 2 &&
-                pairs.is_contiguous(), "pairs [n, 2] int64 on the host");
-    const c10::cuda::CUDAGuard guard(dst.device());
-    const int64_t unit = dst.size(1), n = pairs.size(0);
-    const int64_t * p = pairs.data_ptr<int64_t>();
-    const auto * from = static_cast<const uint8_t *>(src.data_ptr());
-    auto * to = static_cast<uint8_t *>(dst.data_ptr());
-    auto s = reinterpret_cast<cudaStream_t>(stream_handle);
-    for (int64_t i = 0; i < n;) {
-        int64_t run = 1;
-        while (i + run < n && p[2 * (i + run)] == p[2 * i] + run && p[2 * (i + run) + 1] == p[2 * i + 1] + run) {
-            ++run;
-        }
-        TORCH_CHECK(p[2 * i] >= 0 && p[2 * i] + run <= src.size(0) && p[2 * i + 1] >= 0 && p[2 * i + 1] + run <= dst.size(0),
-                    "pair ", i, " outside src or dst");
-        C10_CUDA_CHECK(cudaMemcpyAsync(to + p[2 * i + 1] * unit, from + p[2 * i] * unit, run * unit,
-                                       cudaMemcpyHostToDevice, s));
-        i += run;
-    }
-}
-
 }  // namespace
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("resolve", &resolve, "moe_resolve@1 (policy 0) or a variant into slots, fetch, n_fetch (and the counts, misses, "
           "errors, delta log, map and state in place)");
-    m.def("copy_pairs", &copy_pairs, "expert_prefetch@1: dst[s] = src[u] for (u, s) in pairs, DMA on a stream");
     m.def("fetch", &gather, "expert_fetch@1: dst[fetch[1, i]] = src[fetch[0, i]] for i < min(n, staging)");
 }

@@ -12,8 +12,9 @@ in every role (a victim's entries become −1: the RAM tier holds every expert),
 straight into those slots; the call's other misses are fetched as @1's. A call without such an entry (a prefill chunk)
 changes nothing but what @1 does.
 
-`lend(n, residency, classes, last, clock)` picks whole resident experts, least recently routed first, ties by layer,
-then expert id, until every class has min(n, its resident slots) lent slots."""
+`lend(need, residency, classes, last, clock)` picks whole resident experts in their order — least recently routed
+first, ties by expert id, then layer —: for each class c the first `need[c]` of them holding a slot of c (an expert's
+role slots go together)."""
 from __future__ import annotations
 
 import numpy as np
@@ -93,22 +94,17 @@ def moe_resolve_lru(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
             "n_empty": n_empty, "records": records}
 
 
-def lend(n: int, residency: torch.Tensor, classes: torch.Tensor, last: torch.Tensor,
+def lend(need, residency: torch.Tensor, classes: torch.Tensor, last: torch.Tensor,
          clock: torch.Tensor) -> torch.Tensor:
     """`picked [G, E] bool` (see the module's text)."""
-    groups, experts, roles = residency.shape
+    groups, experts, _ = residency.shape
     whole = (residency >= 0).all(-1)
-    order = sorted((int(last[g, e]), g, e) for g in range(groups) for e in range(experts) if whole[g, e])
-    held = np.zeros(int(classes.max()) + 1, dtype=np.int64)
-    for _, g, _e in order:
-        for r in range(roles):
-            held[int(classes[g, r])] += 1
-    need, lent = np.minimum(held, n), np.zeros_like(held)
-    picked = torch.zeros(groups, experts, dtype=torch.bool)
-    for _, g, e in order:
-        if (lent >= need).all():
-            break
-        picked[g, e] = True
-        for r in range(roles):
-            lent[int(classes[g, r])] += 1
+    order = sorted((int(last[g, e]), e, g) for g in range(groups) for e in range(experts) if whole[g, e])
+    need = np.asarray(need)
+    picked, taken = torch.zeros(groups, experts, dtype=torch.bool), np.zeros(len(need), np.int64)
+    for _, e, g in order:
+        for c in sorted({int(c) for c in classes[g]}):
+            if taken[c] < need[c]:
+                picked[g, e] = True
+            taken[c] += 1
     return picked

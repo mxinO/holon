@@ -60,10 +60,11 @@ then `staging` slots, then cache slots.
   caller) — and a miss it admits is gathered straight into its slot (its fetch entry names that slot, not a staging
   slot), a ring piece too (its ring slot then goes unread). A call with `DECODE` rows (the one that picks victims)
   also sets `routed[e]` |= 2 for every expert its live entries route: its victims' scope. Its instance also has
-  `lend(n, residency [G, E, R] int32, classes [G, R] int64, **state of every group) -> picked [G, E] bool`: the whole
-  experts (resident in every role) to lend, in its policy's order, until each class c (`classes[g, r]`: role r's slots
-  of group g are in class c) has min(n, its resident slots) of them; the caller unmaps and logs them, and later
-  returns their slots to their layers as empty.
+  `lend(need [C] int64, residency [G, E, R] int32, classes [G, R] int64, **state of every group) -> picked [G, E]
+  bool`, on the device without a host sync: the whole experts (resident in every role) in its policy's order, ties by
+  expert id then group; for each class c (`classes[g, r]`: role r's slots of group g are in class c) the first
+  `need[c]` of them holding a slot of c; the caller unmaps and logs them, and later returns their slots to their
+  layers as empty.
 - `moe_route_transform@1` (signature only; `approx`, bound by the explicit option `moe.route_transform = <name>`,
   never by kernel priority): instance `(ids [T, k] int32, weights [T, k] f32, residency [E, R] int32) -> (ids, weights)`
   between `moe_topk@1` and the resolve, with the layer's map as the resolve reads it (after the step's lending, its
@@ -73,11 +74,11 @@ then `staging` slots, then cache slots.
 - `expert_fetch@1`: instance `(fetch [2, F] int32, n [1] int32, src [U, unit] uint8, dst [S, unit] uint8)`: copies unit
   `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, F), in the graph (`src` may be a mapped host pool's
   device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging.
-- `expert_prefetch@1` (D8's ring, eager steps only): an instance has `start(key: int, pairs, src [U, unit] uint8, dst
-  [S, unit] uint8)` — `src` a host pool (pinned host memory), `dst` an arena: copies unit `src[u]` to slot `dst[s]` for
-  each (u, s) of `pairs` (host int64 [n, 2]) on the provider's own copy stream (a copy engine), after all the work
-  enqueued on the current stream so far, and returns at once; and `wait(key)`: the current stream's later work waits
-  until key's copies have landed (each key waited for once). Facts: unit_bytes.
+- `expert_prefetch@1` (D8's ring, eager steps only): an instance has `start(key: int, fetch [2, F] int32, n [1] int32,
+  src [U, unit] uint8, dst [S, unit] uint8)` — `expert_fetch@1`'s copy (`src` a mapped host pool's device view, the
+  tables on the device) on the provider's own stream, after all the work enqueued on the current stream so far,
+  returning at once —; and `wait(key)`: the current stream's later work waits until key's copies have landed (each key
+  waited for once). Facts: unit_bytes.
 """
 from __future__ import annotations
 

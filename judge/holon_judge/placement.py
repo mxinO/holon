@@ -68,5 +68,5 @@ def parity(trace: Trace) -> dict:
                    None)
     return {"steps": len(trace.steps), "decode_steps": sum(bool(s["counts"].any()) for s in trace.steps),
             "borrowing_steps": sum(s["lends"] is not None for s in trace.steps),
-            "lends": sum(len(s["lends"] or ()) for s in trace.steps),
+            "lends": sum(int((np.asarray(s["lends"]) > 0).any(1).sum()) for s in trace.steps if s["lends"] is not None),
             "admissions": trace.admissions, "first_differing_step": differs, "device_is_mirror": trace.mirrored}

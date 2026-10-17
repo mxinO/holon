@@ -217,8 +217,8 @@ class ExpertPrefetch:
     def __init__(self, ctx, *, unit_bytes: int) -> None:
         pass
 
-    def start(self, key, pairs, src, dst):          # at once: a CPU step has nothing to overlap
-        dst.copy_(moe.expert_prefetch(pairs, src, dst))
+    def start(self, key, fetch, n, src, dst):       # at once: a CPU step has nothing to overlap
+        dst.copy_(moe.expert_fetch(fetch, int(n[0]), src, dst))
 
     def wait(self, key):
         pass
