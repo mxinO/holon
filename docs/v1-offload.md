@@ -339,10 +339,10 @@ gathers are kernels.
 | F5b split on | bounded | L2 against a **path-aware floor**: the Tier B floor emulates q8_1 for GPU experts and Q8_K for exactly the experts the frozen split sends to the CPU (a `Blocking(256, f32)` mode in the judge's q8_1 emulation plus the split rule); KL ratio predicted on the CPU before the GPU run (Q8_K's error is 1.3–2.7× q8_1's, panel C10); run-identical ×3 |
 | A1 tail skip | approx | human gate: L2 KL, top-1, task check; never in a default lock |
 
-Floors: the development vehicle's all-resident reference is its RTX 4090 lock on the same file (the offload store
-at F5a on the RTX 5080 must match the 4090's all-resident output only where the two classes' kernels agree, so the
-bitwise check runs on one card: the 5080 offload store against the 5080 all-resident store with the experts forced
-resident through a smaller context); the A5000 runs the bf16 floor as today. FN and GLM take their engine floors the same way (no
+Floors and references: the file fits a 24 GB card, so the bitwise checks run on one card — the A5000 locally and the
+RTX 4090 for the class check — comparing `std.moe@1` all-resident against the offload store at full, natural-5080 and
+capped fits, and with adaptive placement on. On the RTX 5080 itself the snapshot is run-identical ×3. The A5000
+runs the bf16 floor as today. FN and GLM take their engine floors the same way (no
 RTX PRO 6000 engine runs needed).
 
 Plants (`judge/holon_judge/planted.py`), predicted verdicts fixed now; each reports how often it fired, and the
