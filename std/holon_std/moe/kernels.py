@@ -20,9 +20,15 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
 
 Expert offload (docs/v1-offload.md §5): an offload store keeps each slot class's experts in an arena `[S, unit]`
 whose first `top_k` slots are null slots (zero weights; slot j for routing rank j, so a token's slots stay unique),
-then `staging` slots, then cache slots; `linear_experts@2` runs over the arena with slot ids — its facts stay the
-layer's (`experts` = E), its stack holds S slots of which a call names at most E + top_k. A `linear_experts@2` instance
-may expose `errors`, a device int32 word its calls or violation bits into (a caller that reads it zeroes it).
+then `staging` slots, then cache slots.
+
+- `linear_experts_arena@1`: `linear_experts@2` over an arena: instance `(x [T, R, in], parts, ids [T, k]) -> y [T, k,
+  out_y]` as @2's, except that `parts` hold an arena of S slots per role, `ids` are arena slots (< S), and a call's
+  ids name at most `experts + top_k` distinct slots (a layer's E experts, plus one null slot per rank). Its facts are
+  @2's for the layer (`experts` = E) plus `slots`, the most slots an arena of the stack's class holds (a call's may
+  hold fewer). An instance has `errors`, a device int32 word [1] its calls or violation bits into (zero: none; bits
+  are the provider's), which the caller zeroes. Same results as @2 over the stack those slots hold: the oracle is
+  @2's (`reference.linear_experts`, over the arena).
 
 - `moe_resolve@1`: instance `(ids [T, k] int32, kinds [T] uint8, residency [E, R] int32, host [E, R] int32, limits [R]
   int32, counts [E] int32, misses [1] int32, errors [1] int32) -> (slots [R, T, k] int32, fetch [R, staging] int32,
@@ -43,7 +49,7 @@ may expose `errors`, a device int32 word its calls or violation bits into (a cal
 from __future__ import annotations
 
 MOE_TOPK, LINEAR_EXPERTS, MOE_COMBINE = "moe_topk@1", "linear_experts@2", "moe_combine@1"
-MOE_RESOLVE, EXPERT_FETCH = "moe_resolve@1", "expert_fetch@1"
+MOE_RESOLVE, EXPERT_FETCH, LINEAR_EXPERTS_ARENA = "moe_resolve@1", "expert_fetch@1", "linear_experts_arena@1"
 PADDING, DECODE, PREFILL = 0, 1, 2   # `moe_resolve@1`'s row kinds
 RANGE = 1                            # `moe_resolve@1`'s error bit: a resident slot outside the arena's cache slots
 ACT_QUANT = ("a4", "a8")            # `act_quant` of quantized stacks (`a16` is not offered for them)

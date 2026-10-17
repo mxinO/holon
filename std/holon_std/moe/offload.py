@@ -2,7 +2,7 @@
 every MoE layer: docs/v1-offload.md D5). Expert stacks stay where the weight source maps them; the merge records each
 expert's gate and up extents (gate's rows, then up's: the resident merge's layout) and down's, one piece per role in
 the class of its (role, ggml type, shape). Per chunk of tokens the layer's ids resolve to arena slots — misses
-gathered into staging slots — and `linear_experts@2` runs over each class's arena.
+gathered into staging slots — and `linear_experts_arena@1` runs over each class's arena.
 
 Options (EngineConfig.plugin_options): `moe.placement` (a policy's unit Ref; default `std.tiered.static@1`, F1),
 `moe.placement.profile` (routing counts, JSON `{"layers": {"<layer>": [count per expert]}}`, named relative to the
@@ -15,6 +15,7 @@ import torch
 from holon.api import Extent, QTensor, Ref
 from torch import nn
 
+from . import kernels
 from .units import CHUNK, ExpertLinear, bind_experts
 
 GATE_UP, DOWN = 0, 1                           # roles
@@ -86,10 +87,9 @@ class ArenaExperts(nn.Module):
         self._kernel = None
 
     def bind_kernels(self, ctx) -> None:
-        facts = self._facts(ctx) | {"out": self.out, "glu": self.glu}     # the layer's: E experts (arena: more slots)
-        self._kernel = bind_experts(ctx, facts)
-        if (errors := getattr(self._kernel, "errors", None)) is not None:
-            self._store.watch(errors)
+        facts = self._facts(ctx) | {"out": self.out, "glu": self.glu, "slots": self.cls.max_slots}
+        self._kernel = bind_experts(ctx, facts, kernels.LINEAR_EXPERTS_ARENA, "std.moe.arena")
+        self._store.watch(self._kernel.errors)
         if hasattr(self._kernel, "prepare"):
             q = QTensor(self.layout, (facts["experts"], self.out, self.in_features), {"blocks": torch.empty(0)})
             if self._kernel.prepare(q) is not q:

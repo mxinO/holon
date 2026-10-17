@@ -16,6 +16,7 @@ provides = [
     "op.moe_combine@1",
     "op.moe_resolve@1",
     "op.expert_fetch@1",
+    "op.linear_experts_arena@1",
 ]
 
 [properties]

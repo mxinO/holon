@@ -52,6 +52,11 @@ class SlotClass:
     size: int = 0                               # made per use, so none outlives a materialize
 
     @property
+    def max_slots(self) -> int:
+        """Its arena's size when every piece is cached (`linear_experts_arena@1`'s `slots`)."""
+        return self.null + self.staging + len(self.pieces)
+
+    @property
     def cap(self) -> int:
         """The most cache slots it may have."""
         n = len(self.pieces)
@@ -124,8 +129,8 @@ class TieredStore:
                               first=g == 0)
 
     def watch(self, errors: torch.Tensor) -> None:
-        """A kernel's error word (`linear_experts@2` instances may have one): zeroed each step, a commit that finds
-        it set stops the engine."""
+        """A kernel's error word (`linear_experts_arena@1`'s `errors`): zeroed each step, a commit that finds it set
+        stops the engine."""
         if not any(errors is t for t in self.zeroed):
             self.telemetry[f"kernel_errors.{len(self.zeroed) - 2}"] = errors
             self.zeroed.append(errors)

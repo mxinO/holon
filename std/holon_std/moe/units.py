@@ -140,10 +140,10 @@ class ExpertLinear(nn.Module):
         return self._kernel(x, self.parts, ids)
 
 
-def bind_experts(ctx, facts: dict):
-    """The `linear_experts@2` kernel instance for `facts`, selected at its site."""
-    site = "std.moe.experts[" + ",".join(f"{k}={v}" for k, v in facts.items()) + "]"
-    spec = ctx.select_kernel(kernels.LINEAR_EXPERTS, site=site, **facts)
+def bind_experts(ctx, facts: dict, op: str = kernels.LINEAR_EXPERTS, site: str = "std.moe.experts"):
+    """The `op` kernel instance (`linear_experts@2`, or `linear_experts_arena@1`) for `facts`, selected at its site."""
+    site = site + "[" + ",".join(f"{k}={v}" for k, v in facts.items()) + "]"
+    spec = ctx.select_kernel(op, site=site, **facts)
     _one_act_mode(ctx, spec, site)
     return spec.impl(ctx, **facts)
 

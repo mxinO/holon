@@ -272,6 +272,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, cac
     assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
     assert all(a == b for a, b in routed) and max(routed)[0] > 4      # top-2 x 2 layers; graph padding never counts
     assert {v["provider"] for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")} == {"kernels.expert_io"}
+    experts = {k.rpartition("/")[2]: v["provider"] for k, v in engine.ctx.kernels.items() if "linear_experts" in k}
+    assert experts == {"linear_experts_arena@1": "kernels.ggml_cuda"}            # arenas never bind @2
     words = [t for name, t in store.telemetry.items() if name.startswith("kernel_errors")]
     assert len(words) == 1 and all(m._kernel.errors is words[0] for m in engine.executor.model.modules()
                                    if hasattr(m, "cls"))          # the ggml id-error word, one per engine
