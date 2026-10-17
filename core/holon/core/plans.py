@@ -29,9 +29,11 @@ CORE_UNIT = "holon"          # the core pins its own source like a unit: a core 
 CORE_DIR = pathlib.Path(__file__).resolve().parents[1]
 TREE = CORE_DIR.parents[1]   # the source tree holding the core: its `plans/` and `uv.lock`
 RUNTIME = ("holonlm", "holonlm-std", "holonlm-plugins")     # what a user installs; `uv_lock` hashes their closure
-# EngineConfig fields a plan does not record: identified elsewhere (model_id, class, sites), per-host budgets, or how
-# the deployment was arrived at (pins and preferences show as sites; the clamp as `max_model_len`).
-NOT_PLANNED = {"model", "device", "kernels", "kernel_preferences", "memory_fraction", "state_memory", "clamp_context"}
+# EngineConfig fields a plan does not record: identified elsewhere (model_id, class, sites), per-host budgets and
+# cores (a plugin pins the pool sizes that matter in its own options), or how the deployment was arrived at (pins and
+# preferences show as sites; the clamp as `max_model_len`).
+NOT_PLANNED = {"model", "device", "kernels", "kernel_preferences", "memory_fraction", "state_memory", "clamp_context",
+               "host_memory", "paged_min_tokens", "loop_core"}
 _NOT_SOURCE_DIRS = {"__pycache__", "build", "dist"}
 _NOT_SOURCE_SUFFIXES = {".pyc", ".pyo", ".so"}
 
@@ -80,11 +82,18 @@ def plan_of(engine: Any, model_id: str | None = None, commit: str = "unknown") -
     sources = {k: opened[str(v)] for k, v in settings["plugin_options"].items() if str(v) in opened}
     unplanned = sources.keys() | frontend_options(engine.plugins.installed)
     settings["plugin_options"] = {k: v for k, v in settings["plugin_options"].items() if k not in unplanned}
-    cls = platform.fingerprint(engine.device).cls
+    cls = lock_class(platform.fingerprint(engine.device), engine.ctx.cpu_kernels)
     return Plan(model_id=model_id or engine.source.identity(), fingerprint_class=cls,
                 recipe=canonical_hash(engine.spec), commit=commit, uv_lock=uv_lock(TREE / "uv.lock"), units=units,
                 sites=sites, engine={k: str(v).removeprefix("torch.") if isinstance(v, torch.dtype) else v
                                      for k, v in settings.items()}, sources=sources)
+
+
+def lock_class(fp: Fingerprint, cpu_kernels: bool) -> str:
+    """The class of a plan's locks: the fingerprint's, and with kernels that run on the CPU (whose results differ by
+    instruction set) the CPU's tier inside its first segment, e.g. "rtx-5080+x86-avx2/cu130-torch2.11" (lock discovery
+    globs two segments)."""
+    return f"{fp.gpu}+{fp.cpu_isa}/{fp.toolchain}" if cpu_kernels and fp.cpu_isa else fp.cls
 
 
 def frontend_options(installed: Mapping[str, Installed]) -> set[str]:
@@ -227,8 +236,10 @@ def find(plans: str | pathlib.Path, identity: str, fp: Fingerprint, current: Map
 def nearest_class(plans: str | pathlib.Path, model_id: str, fp: Fingerprint,
                   current: Mapping[str, str] | None = None) -> tuple[Lock, bool, pathlib.Path] | None:
     """The lock to start from, whether it is `unverified` (borrowed from another class), and its file: this class
-    first, then the same GPU on another toolchain, the same SM, the same toolchain. With `current` (unit -> src
-    installed now) a lock pinning other code is outdated and treated as missing (design §4.4). None: no usable lock."""
+    first — the CPU's tier's (`lock_class`) before the one without a tier, both verified —, then the same GPU and
+    toolchain on another tier, the same GPU on another toolchain, the same SM, the same toolchain. With `current` (unit
+    -> src installed now) a lock pinning other code is outdated and treated as missing (design §4.4). None: no usable
+    lock."""
     def usable(lock: Lock) -> bool:
         return current is None or all(current.get(name) == pin.src for name, pin in lock.plan.units.items())
 
@@ -239,7 +250,10 @@ def nearest_class(plans: str | pathlib.Path, model_id: str, fp: Fingerprint,
         if not found or not usable(lock := read(path := found[-1])):
             continue
         gpu, _, toolchain = cls.partition("/")
-        rank = (cls == fp.cls, gpu == fp.gpu, lock.sm == fp.sm, toolchain == fp.toolchain)
+        gpu, _, tier = gpu.partition("+")
+        own = gpu == fp.gpu and toolchain == fp.toolchain
+        rank = (own and tier in ("", fp.cpu_isa), gpu == fp.gpu, lock.sm == fp.sm, toolchain == fp.toolchain,
+                tier == fp.cpu_isa)
         if best is None or rank > best[0]:
             best = (rank, lock, path)
     return None if best is None else (best[1], not best[0][0], best[2])

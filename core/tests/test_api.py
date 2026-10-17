@@ -108,7 +108,7 @@ def test_manifest_loads_design_example(tmp_path: pathlib.Path):
     (">=1.0,<2.0", "[options]\n'a.b' = { help = 'x', choices = 'a8' }\n", "strings"),
     (">=1.0,<2.0", "[options]\n'a.b' = { help = 'x', choices = [4, 8] }\n", "strings"),
     (None, "", "core_abi missing"),                                  # required (release design §7)
-    (">=0.2,<0.3", "[surprise]\n", "does not admit this core's plugin ABI 1.1"),   # checked before the keys
+    (">=0.2,<0.3", "[surprise]\n", "does not admit this core's plugin ABI 1.2"),   # checked before the keys
     ("~=0.1", "", "expected clauses"),
 ])
 def test_manifest_rejects_mistakes_with_path(tmp_path: pathlib.Path, abi, extra, match):
@@ -155,8 +155,11 @@ def test_dataclass_replace_on_ref_is_not_supported():
 
 
 LISTING = ("abi {}\nprotocol Sampler() required, implemented by plugins\n  sample(self)\nconst X = 1\n"
-           "dataclass D\n  #0 a: int\n  #1 b: int = 0\n")
+           "protocol Ctx() required, implemented by core\n  pool(self, name: 'str', *, n: 'int' = 0) -> 'Pool'\n"
+           "dataclass C\n  #0 x: int = 1\ndataclass E\n  #0 c: C = C(x=1)\ndataclass D\n  #0 a: int\n  #1 b: int = 0\n")
 FIELD = "  #1 b: int = 0\n"
+POOL = "  pool(self, name: 'str', *, n: 'int' = 0) -> 'Pool'\n"
+C_X = "  #0 x: int = 1\n"
 CONTRACTS = "op.rmsnorm@1  (std.ops)\n"
 
 
@@ -172,6 +175,18 @@ CONTRACTS = "op.rmsnorm@1  (std.ops)\n"
     ("1.0", LISTING.format("1.1") + "  #2 c: int = 1\n", None),                       # a field appended with a default
     ("1.0", LISTING.format("1.1") + "  #2 c: int\n", "needs a major"),               # without: callers lack it
     ("1.0", LISTING.format("1.1").replace(FIELD, "  #1 c: int = 1\n  #2 b: int = 0\n"), "needs a major"),  # inserted
+    # A member plugins only call gains keyword-only parameters with defaults; a default shows its class's new field.
+    ("1.0", LISTING.format("1.1").replace(POOL, POOL.replace("0)", "0, host: 'bool' = False)")), None),
+    ("1.0", LISTING.format("1.1").replace(POOL, POOL.replace("0)", "0, host: 'bool')")), "needs a major"),
+    ("1.0", LISTING.format("1.1").replace(POOL, POOL.replace("*, n", "n")), "needs a major"),
+    ("1.0", LISTING.format("1.1").replace("  sample(self)", "  sample(self, *, x: 'int' = 0)"), "needs a major"),
+    ("1.0", LISTING.format("1.1").replace("C(x=1)", "C(x=1, y=2)").replace(C_X, C_X + "  #1 y: int = 2\n"), None),
+    ("1.0", LISTING.format("1.1").replace("C(x=1)", "C(x=1, y=frozenset())")             # as its class lists it
+     .replace(C_X, C_X + "  #1 y: frozenset[str] = frozenset([])\n"), None),
+    ("1.0", LISTING.format("1.1").replace("C(x=1)", "C(x=1, y=3)").replace(C_X, C_X + "  #1 y: int = 2\n"),
+     "needs a major"),                                              # the default instance changed
+    ("1.0", LISTING.format("1.1").replace("C(x=1)", "C(x=2, y=2)").replace(C_X, C_X + "  #1 y: int = 2\n"),
+     "needs a major"),
 ])
 def test_abi_listing_needs_the_right_bump(monkeypatch, old, new, error):
     """`scripts/ci/check_abi.py`: what an ABI change requires of the version; contracts are the plugins' own and

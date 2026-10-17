@@ -70,13 +70,19 @@ class Pages:
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class MemOp:
-    """An ordered device copy executed in-stream by the core (design §7.3)."""
+    """An ordered copy of units between pools of one unit shape, executed in-stream by the core (design §7.3): around
+    the step's forward (`phase`), or, with `after` or `lands_by`, asynchronously on the core's copy stream, in the
+    order they may start; the pools may be host and device pools (`BuildCtx.pool`)."""
 
     src_pool: str
     src_units: np.ndarray
     dst_pool: str
     dst_units: np.ndarray
     phase: Literal["pre_forward", "post_sample"] = "pre_forward"
+    after: int | None = None     # the step (`BatchPlan.step`) whose device work is done before the copy starts;
+                                 # None: it may start at once, while steps launched before still run
+    lands_by: int | None = None  # the step whose launch waits for the copy to land: a late copy stalls it, never
+                                 # skips it (later than `after`, and not launched yet)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

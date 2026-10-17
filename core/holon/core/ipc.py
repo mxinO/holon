@@ -86,6 +86,13 @@ def serve(engine_factory: Callable[[], Any], endpoints: Endpoints,
         outbox.send_multipart(_failed(e))
         raise
     outbox.send_multipart([b"ready", _encode(ready)])
+    try:
+        _serve(engine, inbox, outbox)
+    finally:                                      # shut down, failed or orphaned: the helpers stop (`ShutsDown`)
+        engine.close()
+
+
+def _serve(engine: Any, inbox: Any, outbox: Any) -> None:
     parent = os.getppid()
     while os.getppid() == parent:                 # the launcher died without shutting us down: free the GPU
         deltas: list[TokenDelta] = []

@@ -14,6 +14,8 @@ class Fingerprint:
     vram_gib: int
     toolchain: str           # e.g. "cu130-torch2.11"
     num_sms: int = 0         # implied by the SKU; kernels size their grids with it
+    cpu_isa: str = ""        # the CPU's tier: the best prebuilt compiler flag set it runs, e.g. "x86-avx2",
+                             # "x86-avx512" (never a CPU model); in a lock's class only when CPU kernels run
 
     @property
     def cls(self) -> str:

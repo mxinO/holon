@@ -113,7 +113,7 @@ def repeat(build: Callable[[int | None], EngineLike], requests: list[Request], r
         ledger = getattr(engine, "ledger", None)
         if ledger is not None:
             pools.append({name: p.capacity for name, p in ledger.pools.items()})
-            budget = sum(p.capacity * p.unit_bytes for p in ledger.pools.values())
+            budget = ledger.device_bytes()
         else:
             pools.append({})
         snaps.append(record(engine, requests))

@@ -319,19 +319,20 @@ approvals, and the `isolation-check` CI job.
 
 ### 4.5 Versioning
 
-- **The plugin ABI was frozen at 1.0 at the release** (release design §7) and is 1.1 since v0.1.1 (an additive
-  `TokenDelta` field). `holon.api.ABI` is the version; every
-  manifest declares the range it works with (`core_abi = ">=1.0,<2.0"`), checked before anything else when the
-  manifest is read. `core/abi.txt` lists the frozen surface (`holon.api`'s names and signatures, dataclass fields
-  in order, Protocol members marked required or optional, `SLOTS`, `EngineConfig`, the `BuildCtx.options` keys, the
+- **The plugin ABI was frozen at 1.0 at the release** (release design §7), is 1.1 since v0.1.1 (an additive
+  `TokenDelta` field) and 1.2 with v1 offload's core seams (`docs/v1-offload.md` §4). `holon.api.ABI` is the version;
+  every manifest declares the range it works with (`core_abi = ">=1.0,<2.0"`), checked before anything else when the
+  manifest is read. `core/abi.txt` lists the frozen surface (`holon.api`'s names and signatures, dataclass fields in
+  order, Protocol members marked required or optional, `SLOTS`, `EngineConfig`, the `BuildCtx.options` keys, the
   manifest schema, the string vocabularies, the IPC frames); `scripts/ci/check_abi.py` renders it from the code and
-  holds every change to the rule against the base branch: an addition (a name, an optional Protocol or member, a
-  field with a default, a manifest key, a slot) is a minor bump; a removal or change, a required member added to a
-  Protocol plugins implement, or a field without a default is a major bump — a reviewed core ABI change
-  (invariant 9) with a codemod for the first-party plugins. Each distribution's provided contracts (`op.*`,
-  `unit.*`, …) are its own ABI, listed in `std/contracts.txt` and `plugins/contracts.txt`: a new one is free, a
-  removed or changed one needs a new major. Per-slot versions (`slot_abi`) return, additively, when a slot first
-  needs one.
+  holds every change to the rule against the base branch: an addition (a name, an optional Protocol or member, a field
+  with a default, a manifest key, a slot; keyword-only parameters with defaults added to a member plugins only call,
+  of a Protocol the core implements or of a dataclass, and so a field default showing the fields its class gained) is
+  a minor bump; a removal or change, a required member added to a Protocol plugins implement, or a field without a
+  default is a major bump — a reviewed core ABI change (invariant 9) with a codemod for the first-party plugins. Each
+  distribution's provided contracts (`op.*`, `unit.*`, …) are its own ABI, listed in `std/contracts.txt` and
+  `plugins/contracts.txt`: a new one is free, a removed or changed one needs a new major. Per-slot versions
+  (`slot_abi`) return, additively, when a slot first needs one.
 - **Cut before the freeze** (release step 6, `docs/release.md` §15): the names nothing used — the slots of §4.2's
   planned list, `SchedulePolicy`, `PlanTransform`, the `Platform` Protocol, `Event`, the `Ledger` Protocol, `Scale`, `ShapeKey`,
   manifest `[tunables]` (and `Tunable`, `Binding.tunables`), `variant_of`, `implements`, `graph_policy` and

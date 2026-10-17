@@ -1,12 +1,12 @@
 """`propagate`: the outcomes of design §4.6 with scripted checks, and the command line end to end on a CPU model."""
 import dataclasses
-import types
 
 import pytest
 import torch
 from holon.api import Binding, Lock, Plan, UnitPin
 from holon.core import plans
 from holon.core.engine import EngineConfig
+from holon.core.memory import Ledger
 from holon_judge import golden
 from holon_judge.snapshot import Snapshot
 from holon_tools import locks, propagate
@@ -137,13 +137,17 @@ def test_write_stores_lock_and_snapshot(tmp_path, current):
 
 def test_snapshot_engines_share_one_pool_size(monkeypatch):
     # Pool sizes set the schedule a trace records: every snapshot engine gets the first one's pools (a later build would
-    # measure less free memory), or those of the lock's stored snapshot (recorded in another process).
+    # measure less free memory), or those of the lock's stored snapshot (recorded in another process). A host pool has
+    # its own budget: it is no device memory to pass on.
     built = []
 
     class Measuring:                                             # each build would measure 10 bytes less
         def __init__(self, config):
             capacity = config.state_memory or 1000 - 10 * len(built)
-            self.ledger = types.SimpleNamespace(pools={"kv": types.SimpleNamespace(capacity=capacity, unit_bytes=1)})
+            self.ledger = Ledger(torch.device("cpu"), host_memory=64)
+            self.ledger.request("kv", unit_bytes=1, min_units=capacity, pref_units=capacity)
+            self.ledger.plugin_pool("tier", unit_bytes=64, min_units=1, device="host")
+            self.ledger.materialize(None)
             built.append(config.state_memory)
 
         def has_work(self):

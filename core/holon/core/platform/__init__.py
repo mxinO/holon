@@ -1,6 +1,8 @@
 """Device abstraction (design §8). The only place in the core allowed to touch `torch.cuda` (invariant 6)."""
 from __future__ import annotations
 
+import mmap
+import os
 import re
 from collections.abc import Callable
 
@@ -8,16 +10,42 @@ import torch
 
 from holon.api import Fingerprint
 
+# CPU tiers by machine, best first: prebuilt compiler flag sets (never `-march=native`); a host's is the best whose
+# flags its CPU lists.
+CPU_TIERS = {"x86_64": (("x86-avx512", frozenset({"avx512f", "avx512bw", "avx512dq", "avx512vl", "avx2", "fma",
+                                                    "f16c"})),
+                        ("x86-avx2", frozenset({"avx2", "fma", "f16c"})),
+                        ("x86", frozenset())),
+             "aarch64": (("arm64", frozenset()),)}
+
 
 def fingerprint(device: torch.device) -> Fingerprint:
     """Static facts of `device`; the GPU class is the product name without vendor words, e.g. "rtx-5090"."""
     toolchain = f"cu{(torch.version.cuda or 'none').replace('.', '')}-torch{'.'.join(torch.__version__.split('.')[:2])}"
     if device.type != "cuda":
-        return Fingerprint(gpu="cpu", sm=0, vram_gib=0, toolchain=toolchain)
+        return Fingerprint(gpu="cpu", sm=0, vram_gib=0, toolchain=toolchain, cpu_isa=cpu_tier())
     p = torch.cuda.get_device_properties(device)
     words = [w for w in re.split(r"[\s_]+", p.name.lower()) if w not in ("nvidia", "geforce")]
     return Fingerprint(gpu="-".join(words), sm=10 * p.major + p.minor, vram_gib=round(p.total_memory / 2**30),
-                       toolchain=toolchain, num_sms=p.multi_processor_count)
+                       toolchain=toolchain, num_sms=p.multi_processor_count, cpu_isa=cpu_tier())
+
+
+def cpu_tier(machine: str | None = None, flags: set[str] | None = None) -> str:
+    """The best of `CPU_TIERS` this host's CPU runs (the kernel's flag list); "" for an unknown machine."""
+    if flags is None:
+        try:
+            with open("/proc/cpuinfo") as f:          # x86's "flags", arm's "Features"
+                line = next((ln for ln in f if ln.startswith(("flags", "Features"))), "")
+            flags = set(line.partition(":")[2].split())
+        except OSError:
+            flags = set()
+    return next((name for name, need in CPU_TIERS.get(machine or os.uname().machine, ()) if need <= flags), "")
+
+
+def pin_loop(core: int) -> None:
+    """Run the calling thread, the engine loop, on CPU `core` only (e.g. one no CPU worker spins on); threads it starts
+    later (torch's CPU pool, if it starts one) inherit that."""
+    os.sched_setaffinity(0, {core})
 
 
 def visible_sms() -> list[int]:
@@ -99,8 +127,62 @@ def pinned_empty(n: int, dtype: torch.dtype, device: torch.device) -> torch.Tens
     return torch.empty(n, dtype=dtype, pin_memory=device.type == "cuda")
 
 
+def host_memory(nbytes: int, device: torch.device, mapped: bool) -> torch.Tensor:
+    """Exactly `nbytes` of host memory in whole pages (an anonymous map), page-locked for CUDA by registering it — not
+    torch's pinned allocator, which rounds up to a power of two —, with `mapped` also addressable by kernels
+    (`device_alias`). Plain memory off CUDA. It is unregistered and unmapped with the last tensor viewing it. The map is
+    private (never shared with a child process). Page-locking took ≈ 0.33 s per GiB on the RTX A5000 development host
+    with 4 KiB pages, and 2–8 s per GiB with `madvise(MADV_HUGEPAGE)` (compaction), so huge pages are not asked for;
+    re-measure on the bar cards (step 0)."""
+    region = _Pinned(-1, nbytes, flags=mmap.MAP_PRIVATE)                # anonymous: fileno -1
+    out = torch.frombuffer(region, dtype=torch.uint8)                    # its views keep the map alive
+    if device.type == "cuda":
+        _check(torch.cuda.cudart().cudaHostRegister(out.data_ptr(), nbytes, 1 | 2 * mapped),  # portable, mapped
+               "cudaHostRegister")
+        region.registered = out.data_ptr()
+    return out
+
+
+class _Pinned(mmap.mmap):
+    """An anonymous map that unregisters itself before it is unmapped."""
+
+    registered: int | None = None
+
+    def __del__(self) -> None:
+        if self.registered is None:
+            return
+        try:
+            err = int(torch.cuda.cudart().cudaHostUnregister(self.registered))
+        except Exception:  # noqa: BLE001 — the interpreter is shutting down: the process's memory goes with it
+            return
+        if err not in _CUDA_GONE:
+            _check(err, "cudaHostUnregister")
+
+
+_CUDA_GONE = (0, 4, 709)     # success, cudaErrorCudartUnloading, cudaErrorContextIsDestroyed (CUDA shut down first)
+
+
+def device_alias(t: torch.Tensor, device: torch.device) -> torch.Tensor:
+    """`host_memory(…, mapped=True)` as a tensor on `device` over the same bytes (unified addressing: registered
+    memory has its host address on the device); `t` itself off CUDA."""
+    if device.type != "cuda":
+        return t
+    view = type("Mapped", (), {"__cuda_array_interface__": {
+        "shape": (t.numel(),), "typestr": "|u1", "data": (t.data_ptr(), False), "version": 3}, "host": t})
+    alias = torch.as_tensor(view(), device=device)              # keeps `view`, which keeps the host memory
+    if alias.data_ptr() != t.data_ptr():          # not the current device: torch copied instead
+        raise RuntimeError(f"no alias of host memory on {device} (make it the current device)")
+    return alias
+
+
+def _check(err: object, what: str) -> None:
+    if int(err):
+        raise RuntimeError(f"{what}: {torch.cuda.cudart().cudaGetErrorString(err)}")
+
+
 class Event:
-    """Orders host work after device work: `record()` in stream order, `synchronize()` waits for it on the host."""
+    """Orders host work after device work: `record()` in stream order, `synchronize()` waits for it on the host,
+    `wait()` makes work enqueued next on the current stream wait for it on the device."""
 
     def __init__(self, device: torch.device) -> None:
         self._event = torch.cuda.Event() if device.type == "cuda" else None
@@ -112,6 +194,31 @@ class Event:
     def synchronize(self) -> None:
         if self._event is not None:
             self._event.synchronize()
+
+    def wait(self) -> None:
+        if self._event is not None:
+            torch.cuda.current_stream().wait_event(self._event)
+
+
+class Stream:
+    """A stream beside the step's (the core's copies); off CUDA, work runs at once, in order."""
+
+    def __init__(self, device: torch.device) -> None:
+        self.device = device
+        self._stream = torch.cuda.Stream(device) if device.type == "cuda" else None
+
+    def run(self, fn: Callable[[], object], after: Event | None = None) -> Event:
+        """Enqueue `fn()`'s device work on this stream, after `after`; the event recorded once it is done."""
+        done = Event(self.device)
+        if self._stream is None:
+            fn()
+            return done
+        with torch.cuda.stream(self._stream):
+            if after is not None:
+                after.wait()
+            fn()
+            done.record()
+        return done
 
 
 class no_host_sync:  # noqa: N801 — used as a context manager

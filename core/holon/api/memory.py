@@ -28,3 +28,7 @@ class Pool(Protocol):
 
     def alloc(self, n: int) -> np.ndarray: ...
 
+    def device_view(self, dtype: torch.dtype, shape: tuple[int, ...]) -> torch.Tensor:
+        """A mapped host pool's buffer (`BuildCtx.pool(device="host", mapped=True)`) as a device tensor over the same
+        memory, which kernels read and write in place across the bus (`view` is its host side)."""
+

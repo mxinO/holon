@@ -157,7 +157,7 @@ class EngineChecks:
         engine = self._fresh(dataclasses.replace(self.config, state_memory=self.config.state_memory or
                                                  self.pool_bytes))
         if self.pool_bytes is None:
-            self.pool_bytes = sum(p.capacity * p.unit_bytes for p in engine.ledger.pools.values())
+            self.pool_bytes = engine.ledger.device_bytes()
         return engine
 
     def l2(self) -> tuple[bool, str]:
