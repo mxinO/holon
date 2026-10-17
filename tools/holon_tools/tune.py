@@ -24,7 +24,7 @@ from holon.core.engine import Engine, EngineConfig
 OPS = ("attention.paged_decode", "rmsnorm", "add_rmsnorm", "rope", "silu_mul")
 GAIN = 0.05                                    # D4: F5b enters a lock only at a ≥ 5% decode gain
 THREADS = (2, 4, 6)                            # the compute worker's threads (S6, M3: DRAM saturates at 2–4)
-SHARES = (0.25, 0.4, 0.5, 0.6, 0.75)           # the CPU's share of a pass's misses
+SHARES = (0.25, 0.4, 0.5, 0.6, 0.75, 1.0)      # the CPU's share of a pass's misses
 
 
 def candidates(engine: Engine, ops: tuple[str, ...] = OPS) -> dict[str, list[str]]:

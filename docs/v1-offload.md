@@ -1139,3 +1139,126 @@ that is why its 1K prefill sat at its own bound, 896 tok/s, not ≈ 2.5× below)
   borrowing on, 133.7 / 131.9 off; after 126.0 / 121.5 on, 132.0 / 124.0 off — borrowing never cost TPOT p99 here,
   and without its syncs it is ≈ 3% under the arm without borrowing (rounds vary by ≈ 5%). The per-request maximum
   gap's p99: before 669 / 735 ms on against 609 / 550 off; after 536 / 523 on against 629 / 631 off.
+
+### Step 6 as built (2026-10-17): F5b — kernels.cpu_task, kernels.ggml_cpu, the CPU's share, the path-aware floor
+
+Order as run: step 6 before step 5 (§9). Built:
+- **`kernels.cpu_task`** (`[build]`, D6): S6's protocol — a word per slot (one per MoE layer) in a mapped host pool the
+  worker requests in `before_materialize`, spin (1-thread kernels) or memop waits (`cpu_task.wait`), a persistent
+  coordinator plus a spinning pool per kind of work (`compute`; `io`, step 5's), pinned to `cpu_task.cores`
+  (`cpu_task.io_cores`; a list is a pool, its first `threads` taken; default one per physical core past the first),
+  and the task ABI (`csrc/holon_cpu_task.h`: a task runs on every thread, meeting at the pool's barrier). Fail-open: a
+  task error answers FAILED; the spin wait gives up after `cpu_task.timeout` (60 s); the memop flavour's watchdog
+  abandons an unanswered request; the CPU's and the GPU's flag words (one writer each) are sticky, every later wait
+  returns at once and the coordinator answers without running; any answer but DONE ORs bit 1 into the error word the
+  store checks at commit (bit 2: a timeout). A stop after the drain leaves a coordinator still in a task past the bound
+  behind (its state and buffers leaked on purpose), so `close` always ends.
+- **`kernels.ggml_cpu`** (`[build]`, D7): ggml-cpu's quantizers and dot products vendored unmodified at
+  **kernels.ggml_cuda's pin** (cbe28bb3: §13's "unless step 6 aligns it" — aligned), a shim for ggml-base's few symbols;
+  one module per CPU tier (`x86-avx2`, `x86-avx512`; `Constraint.cpu_isa`, so F5b locks carry the tier), only the
+  vendored C taking the tier's flags (the loader and the f32 SwiGLU are baseline x86-64: a module loads on any host and
+  rounds its SwiGLU alike on every tier). `cpu_experts@1`: a layer's jobs over GGUF blocks in place, rows split across
+  threads (work stealing), never K; the Q8_K- and Q8_0-dot types. L0 (A5000, `x86-avx2`): within the oracle's budget
+  (the oracle emulates Q8_K / Q8_0 exactly; a SwiGLU value at a rounding tie may flip, so 9 rows in 10 within 1e-4 of
+  the row RMS, every row within one flip, 2e-2), a token bitwise alone vs grouped at 1, 7 and 40 threads on synthetic
+  Q8_0 / Q4_0 and the vehicle's Q4_K / Q6_K, Q4_K / Q4_K and UD-IQ3_XXS classes; the K-split mutation caught.
+- **`moe_resolve@1`** takes `plan` and `jobs` (one change; the variants keep its terms): of a call's n CPU candidates
+  (missing in every role, in the read tier) the CPU takes min(plan[n], n), **the lowest-ranked** (best routing rank,
+  then id: Strata's rule), never fetched nor admitted (they count), `routed |= 4`, their entries on null slots; the job
+  table in mapped memory; `cpu [T, k]` out; a share past the table flags JOBS. **`moe_patch_rows@1`**: `publish` the CPU
+  tokens' inputs, then the CPU's rows into the experts' output before the combine. CUDA (kernels.expert_io), oracles and
+  CPU providers agree exactly.
+- **`std.moe.cpu.CpuShare`** (the shared object of F5b; options `moe.cpu_plan`, `moe.cpu_isa`): per pass, resolve →
+  publish; signal → fetch → GEMMs → wait → patch → combine (the signal before the fetch: the CPU's jobs overlap the
+  PCIe reads). The table spells plan[1…N]; past N the last entry's share.
+- **Path-aware floor** (§6): `q8_1.py`'s `cpu` path (ggml-cpu's Q8_K / Q8_0 activations, exactly, no stored-sum
+  correction), `gguf.q8_1_experts(split)` applying F5b's rule per token to the frozen placement
+  (`placement.cpu_split`, which requires one token per step and records it), `golden --cpu-split`, the split's digest
+  in the candidate's recording and compare's check that floor and candidate share it.
+- **`holon_tools tune --cpu-split [--no-lock] [--json]`**: F5a's decode rate, then the worker's threads (2, 4, 6) at
+  half the misses, then the share (0.25 … 1.0) at the best count; the options (`moe.cpu_plan` spelled to k × the
+  graphed tokens, `moe.cpu_isa`, `cpu_task.threads`) enter the lock only at a ≥ 5% gain (D4), else F5a stays. On the
+  RTX 5080 step 4 runs the same command.
+- Plants `cpu-wait-skipped` (the first layer's patch skips its wait: 1 of 48 layers, § 6's ≈ 1%) and
+  `cpu-gate-up-order` (kernels.ggml_cpu's plant bit).
+
+Evidence (`spikes/x6_cpu/README.md`, `evidence/x6_cpu_rtx-a5000_2026-10-17.json`), RTX A5000, the vehicle:
+- **F5b's gain** (tune, batch 1, 25% cached, F11, natural prompts, 6 workers on one NUMA node): F5a 68.1 tok/s; at half
+  the misses 83.7 / 93.5 / 93.6 with 2 / 4 / 6 threads; shares 0.25 / 0.4 / 0.5 / 0.6 / 0.75 / 1.0: 76.8 / 79.6 /
+  93.6 / 94.9 / 105.3 / 52.4 — **+55% at 0.75** (`1,2,2,3,4,5,5,6`), F5b taken (a first run without the 1.0 arm: 67.8
+  → 103.9, +53%, the same pick). The A5000's PCIe 4.0 gather (≈ 26 GB/s) is half the
+  5080's, so the CPU takes more here than M2's n / 2. A separate A/B (`decode.py`, share 0.5, 4 threads): 78.2 → 94.8
+  tok/s.
+- **Exactness of F5a unchanged**: the snapshot trace's F11 at 25% and 47%, and F1 at 25%, byte-identical to
+  `std.moe@1` all-resident, F11's parity with its replay at every step.
+- **F5b, adaptive placement on** (F11 at 25%, the tuned split): run-identical ×3 (6,048 handshakes, 92,134 CPU
+  experts per run, flag 0), F11's residency its replay's with the CPU's misses excluded.
+- **F5b bounded L2** (F1 frozen at 25%, the tuned split, one token per step, 1.58 M handshakes, 32,783 positions):
+  **PASS** against the path-aware floor — top-1 98.54% (≥ 98.14%), KL p50 1.26e-4 (≤ 2.49e-4), p99 3.92e-2 (≤ 8.60e-2),
+  ΔPPL −0.08% ± 0.09% vs the floor. The floor's KL, computed on the CPU before the GPU run: p50 1.25e-4 / p99 4.30e-2
+  against the plain mmvq floor's 1.18e-4 / 3.98e-2 (1.06× / 1.08×: Q8_K's larger error reaches the CPU's share only).
+- **Plants**: `cpu-wait-skipped` fails run-identical (2 runs differ from each other from step 3; fired 36 eager + 30
+  captured patches per run) — the race, as §6 predicted; `cpu-gate-up-order` fails L2 (top-1 62.7%, KL p99 12.8,
+  ΔPPL +473%; fired in all 48 layers' CPU expert instances), and F5a configurations build none (it cannot fire there).
+
+Decided while building, against the text above:
+- **The split table is a share of the misses** (plan[n] = round(share · n)) measured as one parameter by end-to-end
+  decode, not each entry by M2's microbenchmark: M2 found the optimum flat within ±1 (1–3%), and the decode rate is
+  the quantity the 5% rule judges.
+- **The share is the pass's size, not its row kind**: a pass of at most a graphed step's tokens takes it — a decode
+  step of any batch, and a prompt chunk as short (which is how the teacher-forced L2 at one token per step measures the
+  split; deployment-level, D4). F8 (a share for larger prefill chunks) is not built.
+- **The CPU candidates are the misses held in RAM** (tier −1): with step 5's SSD tier, plan[n] counts those (D4's "n
+  distinct misses" read as the CPU-eligible ones).
+- **Tier binaries**: the AVX-512 module could not be run on this host (an AVX2 CPU); its L0 runs on an AVX-512 host.
+
+### Step 5 as built (2026-10-17): F9, the exclusive RAM tier, F11 with deferred admission
+
+Built after step 6 (§9's order; an SSD miss is a `cpu_task@1` copy task):
+- **The Tier protocol owns its storage** (panel B): `holds(cls, pieces)` (known at the bind), `prepare(ctx, cls,
+  unit_bytes, extents, staging, granule)` — a device-readable tier requests its mapped host pool (units of the store's
+  granule, so MemOps still copy whole units) of `holds` pieces plus `staging` units where slower reads land, and fills
+  it when it holds every piece —, `units(cls)` (that pool), `read(cls, piece) → descriptor` (`("host_slot", unit)`, or
+  `("pread", ((fd, direct, offset, nbytes), …))`). `std.tiered.pinned@1` ported (`moe.ram` caps it per class, pinned
+  as `moe.cache` is: fewer than every piece makes RAM exclusive); **`std.tiered.gguf_direct@1`** (F9): every piece
+  where the checkpoint holds it, `O_DIRECT` descriptors (buffered where the filesystem has none).
+- **`cpu_task@1`'s copy task**: per role the requested pieces' extents read into their units by the I/O worker
+  (`cpu_task.io_threads`, 2 by M7: two blocking reads in flight), an `O_DIRECT` extent through its aligned superset and
+  a per-thread bounce buffer; a bad request or a short read fails the task (fail-open, the commit stops the engine).
+- **`moe_tiers@1`** (std.moe; CUDA in kernels.expert_io, oracle, CPU provider; L0 exact): one CTA after a layer
+  call's resolve keeps RAM exclusive, D10's replayed rules in order — each admission (F11's pairing, unchanged) is
+  **staged**, its victim **demoted** after the gather (into the admitted expert's RAM units when it came from RAM, else
+  a free unit of each class, else the units of RAM's coldest expert of its classes when strictly colder — displaced to
+  the SSD —, else the SSD), then the staged copy **moved** into the victim's slots; a decode SSD miss not admitted is
+  **kept** in RAM the same way; every SSD read is listed (its RAM unit if kept, else a staging unit). Heat is the
+  policy's declared state (`heat`: F11's score). **The flip lands in the same call**: staged → demoted → moved, all
+  stream-ordered before any later reader (the next pass or step), so D10's "+1 where the copy runs on the step stream"
+  holds with no host lag. A unit an admission frees is reusable from the next call (the gather still reads it).
+- **`moe_resolve@1`'s arguments are unchanged by F9** (panel B asked for one change): the tiers' work is its own op
+  after the resolve; the resolve only names a piece no device-readable tier holds by its fetch source −2 − e. The
+  variants (`lfu`, `lru`, a held-out F10) keep their contracts.
+- **The store under exclusive tiers**: per call resolve → [the CPU's share] → `moe_tiers` → the reads (signal, wait on
+  the I/O worker) → fetch → demote → move; the seed reads VRAM's pieces from the file through the staging units and
+  fills RAM by F2's order past VRAM (units reloaded where the device's owner table says they hold something else, so
+  the startup profile's re-materialize reloads nothing it need not); F5b's CPU candidates are the RAM-held misses.
+
+Evidence (`spikes/x6_cpu/README.md`), RTX A5000, the vehicle at 25% cached, the checkpoint on a network filesystem
+(not a local NVMe):
+- **Exact, RAM-capped**: `host_memory` 12 GiB (below the experts' 17.6 GB), RAM holding half the pieces: the snapshot
+  trace byte-identical to `std.moe@1` all-resident under F11 (2,115 admissions, the replay's residency at every step,
+  the device's map the mirror's) and under F1. The CPU and GPU engine tests run lfu and static at a quarter in RAM,
+  bitwise resident, and F5b with exclusive tiers (both workers clean, bounded).
+- **Decode** (batch 1, 512 tokens, the prompt set's first prompt, ×2 interleaved arms of 3 rounds): RAM holding every
+  expert 70.9 / 71.2 tok/s; RAM half (12 GiB) 18.6 / 17.5 (0.25×); RAM 37.5% (10 GiB) 11.3 / 11.6 (0.16×) — RAM-short
+  is a fit mode (D10's 1.9–8.3×), here bound by the file's network reads. **F11 stays the default where RAM holds every
+  expert** (the default `moe.tiers` is the pinned tier alone).
+
+Decided while building, against the text above:
+- **No lending and no ring under exclusive tiers**: a lent expert would need a demotion first (not built); the store
+  keeps a pass's staging (the vehicle: 128 slots per class, ≈ 0.5 GB of cache) and prefill stages its misses, SSD ones
+  through the reads. RAM-short prefill is slow by design.
+- **Policies**: exclusive tiers take a device-owned policy naming its heat (F11) or a frozen one (`frozen`: F1); F4
+  (no heat) and `profile_decay` (host swaps would copy from RAM units the graph moves) are refused at startup.
+- **Heat across layers**: RAM's coldest is compared on F11's scores of every layer, which within a decode step are one
+  decay apart before and after the calling layer (deterministic; a small skew, recorded).
+- **The SSD tier's evidence is a network filesystem's**: M7's local NVMe rates (2.6 GB/s) are not re-measured here.

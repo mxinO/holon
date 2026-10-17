@@ -1,0 +1,844 @@
+{
+ "gpu": "NVIDIA RTX A5000",
+ "commit": "7f8980e",
+ "step6": {
+  "tune_cpu_split_25pct_batch1": {
+   "cpu_split": {
+    "f5a": 68.05906963731846,
+    "threads_at_half": {
+     "2": 83.65834344379057,
+     "4": 93.50770710759562,
+     "6": 93.6297502523751
+    },
+    "shares": {
+     "0.25": 76.7775767011262,
+     "0.4": 79.5670136890138,
+     "0.5": 93.6297502523751,
+     "0.6": 94.93814674065577,
+     "0.75": 105.26070887518644,
+     "1.0": 52.446220586438535
+    },
+    "best": {
+     "share": 0.75,
+     "threads": 6
+    },
+    "gain": 0.5466081072825804,
+    "taken": true
+   },
+   "kernel_rates": {}
+  },
+  "snapshots": {
+   "f11_25_0": {
+    "name": "f11_25",
+    "plant": "",
+    "options": {
+     "moe.store": "std.moe.offload@1",
+     "moe.cache": "*=0.25"
+    },
+    "run": 0,
+    "build_s": 23.5,
+    "run_s": 17.1,
+    "steps": 67,
+    "admissions": 2252,
+    "peak_misses": 89,
+    "cpu_experts": 0,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "parity": {
+     "steps": 67,
+     "decode_steps": 64,
+     "borrowing_steps": 1,
+     "lends": 3,
+     "admissions": 2252,
+     "first_differing_step": null,
+     "device_is_mirror": true
+    },
+    "vs_resident": "identical"
+   },
+   "f11_47_0": {
+    "name": "f11_47",
+    "plant": "",
+    "options": {
+     "moe.store": "std.moe.offload@1",
+     "moe.cache": "*=0.47"
+    },
+    "run": 0,
+    "build_s": 25.9,
+    "run_s": 10.1,
+    "steps": 67,
+    "admissions": 3255,
+    "peak_misses": 68,
+    "cpu_experts": 0,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 2888,
+     "down.q6_k.2048x768": 1444,
+     "down.q4_k.2048x768": 1444
+    },
+    "parity": {
+     "steps": 67,
+     "decode_steps": 64,
+     "borrowing_steps": 1,
+     "lends": 2,
+     "admissions": 3255,
+     "first_differing_step": null,
+     "device_is_mirror": true
+    },
+    "vs_resident": "identical"
+   },
+   "f5b_f11_25_0": {
+    "name": "f5b_f11_25",
+    "plant": "",
+    "options": {
+     "moe.store": "std.moe.offload@1",
+     "moe.cache": "*=0.25",
+     "moe.cpu_plan": "1,2,2,3,4,5,5,6",
+     "cpu_task.threads": "6",
+     "cpu_task.cores": "4-9",
+     "moe.cpu_isa": "x86-avx2"
+    },
+    "run": 0,
+    "build_s": 25.5,
+    "run_s": 8.7,
+    "steps": 67,
+    "admissions": 2185,
+    "peak_misses": 23,
+    "cpu_experts": 92134,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "worker": {
+     "served": 6048,
+     "flag": 0,
+     "threads": 6
+    },
+    "parity": {
+     "steps": 67,
+     "decode_steps": 64,
+     "borrowing_steps": 1,
+     "lends": 3,
+     "admissions": 2185,
+     "first_differing_step": null,
+     "device_is_mirror": true
+    },
+    "vs_resident": "step 3: deltas differ for (request, sequence) [(3, 0), (15, 0), (31, 0)]"
+   },
+   "f5b_f11_25_1": {
+    "name": "f5b_f11_25",
+    "plant": "",
+    "options": {
+     "moe.store": "std.moe.offload@1",
+     "moe.cache": "*=0.25",
+     "moe.cpu_plan": "1,2,2,3,4,5,5,6",
+     "cpu_task.threads": "6",
+     "cpu_task.cores": "4-9",
+     "moe.cpu_isa": "x86-avx2"
+    },
+    "run": 1,
+    "build_s": 24.7,
+    "run_s": 8.4,
+    "steps": 67,
+    "admissions": 2185,
+    "peak_misses": 23,
+    "cpu_experts": 92134,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "worker": {
+     "served": 6048,
+     "flag": 0,
+     "threads": 6
+    },
+    "parity": {
+     "steps": 67,
+     "decode_steps": 64,
+     "borrowing_steps": 1,
+     "lends": 3,
+     "admissions": 2185,
+     "first_differing_step": null,
+     "device_is_mirror": true
+    },
+    "vs_resident": "step 3: deltas differ for (request, sequence) [(3, 0), (15, 0), (31, 0)]"
+   },
+   "f5b_f11_25_2": {
+    "name": "f5b_f11_25",
+    "plant": "",
+    "options": {
+     "moe.store": "std.moe.offload@1",
+     "moe.cache": "*=0.25",
+     "moe.cpu_plan": "1,2,2,3,4,5,5,6",
+     "cpu_task.threads": "6",
+     "cpu_task.cores": "4-9",
+     "moe.cpu_isa": "x86-avx2"
+    },
+    "run": 2,
+    "build_s": 25.4,
+    "run_s": 8.4,
+    "steps": 67,
+    "admissions": 2185,
+    "peak_misses": 23,
+    "cpu_experts": 92134,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "worker": {
+     "served": 6048,
+     "flag": 0,
+     "threads": 6
+    },
+    "parity": {
+     "steps": 67,
+     "decode_steps": 64,
+     "borrowing_steps": 1,
+     "lends": 3,
+     "admissions": 2185,
+     "first_differing_step": null,
+     "device_is_mirror": true
+    },
+    "vs_resident": "step 3: deltas differ for (request, sequence) [(3, 0), (15, 0), (31, 0)]"
+   },
+   "plant_wait_0": {
+    "name": "plant_wait",
+    "plant": "cpu-wait-skipped",
+    "options": {
+     "moe.store": "std.moe.offload@1",
+     "moe.cache": "*=0.25",
+     "moe.cpu_plan": "1,2,2,3,4,5,5,6",
+     "cpu_task.threads": "6",
+     "cpu_task.cores": "4-9",
+     "moe.cpu_isa": "x86-avx2"
+    },
+    "run": 0,
+    "build_s": 24.9,
+    "run_s": 7.2,
+    "steps": 67,
+    "admissions": 2431,
+    "peak_misses": 23,
+    "cpu_experts": 79845,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "worker": {
+     "served": 6048,
+     "flag": 0,
+     "threads": 6
+    },
+    "parity": {
+     "steps": 67,
+     "decode_steps": 64,
+     "borrowing_steps": 1,
+     "lends": 3,
+     "admissions": 2431,
+     "first_differing_step": null,
+     "device_is_mirror": true
+    },
+    "vs_resident": "step 3: deltas differ for (request, sequence) [(0, 0), (2, 0), (3, 0), (4, 0), (5, 0), (5, 1), (6, 0), (7, 0), (8, 0), (9, 0), (10, 0), (11, 0), (12, 0), (13, 0), (14, 0), (15, 0), (16, 0), (31, 0)]"
+   },
+   "plant_wait_1": {
+    "name": "plant_wait",
+    "plant": "cpu-wait-skipped",
+    "options": {
+     "moe.store": "std.moe.offload@1",
+     "moe.cache": "*=0.25",
+     "moe.cpu_plan": "1,2,2,3,4,5,5,6",
+     "cpu_task.threads": "6",
+     "cpu_task.cores": "4-9",
+     "moe.cpu_isa": "x86-avx2"
+    },
+    "run": 1,
+    "build_s": 25.9,
+    "run_s": 7.1,
+    "steps": 67,
+    "admissions": 2413,
+    "peak_misses": 23,
+    "cpu_experts": 78512,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "worker": {
+     "served": 6048,
+     "flag": 0,
+     "threads": 6
+    },
+    "parity": {
+     "steps": 67,
+     "decode_steps": 64,
+     "borrowing_steps": 1,
+     "lends": 3,
+     "admissions": 2413,
+     "first_differing_step": null,
+     "device_is_mirror": true
+    },
+    "vs_resident": "step 3: deltas differ for (request, sequence) [(0, 0), (2, 0), (3, 0), (4, 0), (5, 0), (5, 1), (6, 0), (7, 0), (8, 0), (9, 0), (10, 0), (11, 0), (12, 0), (14, 0), (15, 0), (16, 0), (31, 0)]"
+   },
+   "resident_0": {
+    "name": "resident",
+    "plant": "",
+    "options": {},
+    "run": 0,
+    "build_s": 12.3,
+    "run_s": 4.0,
+    "vs_resident": "identical"
+   },
+   "static_25_0": {
+    "name": "static_25",
+    "plant": "",
+    "options": {
+     "moe.store": "std.moe.offload@1",
+     "moe.cache": "*=0.25",
+     "moe.placement": "std.tiered.static@1"
+    },
+    "run": 0,
+    "build_s": 26.5,
+    "run_s": 24.1,
+    "steps": 67,
+    "admissions": 0,
+    "peak_misses": 96,
+    "cpu_experts": 0,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "vs_resident": "identical"
+   }
+  },
+  "f5b_run_identical_to_run0": {
+   "f5b_f11_25_0": true,
+   "f5b_f11_25_1": true,
+   "f5b_f11_25_2": true,
+   "plant_wait_0": false,
+   "plant_wait_1": false
+  },
+  "plant_cpu_wait_skipped": {
+   "fired": [
+    "{'eager': 36, 'captured': 30}",
+    "{'eager': 36, 'captured': 30}"
+   ],
+   "run_identical": false
+  },
+  "tune_first_run_without_share_1": {
+   "cpu_split": {
+    "f5a": 67.78220300516816,
+    "threads_at_half": {
+     "2": 85.34192129301248,
+     "4": 93.80003313164698,
+     "6": 94.2845607751848
+    },
+    "shares": {
+     "0.25": 76.4936140670049,
+     "0.4": 78.4664682766822,
+     "0.5": 94.2845607751848,
+     "0.6": 94.14770186970485,
+     "0.75": 103.94097842656802
+    },
+    "best": {
+     "share": 0.75,
+     "threads": 6
+    },
+    "gain": 0.533455299743546,
+    "taken": true
+   },
+   "kernel_rates": {}
+  },
+  "decode_ab_share_half_4_threads": {
+   "args": {
+    "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    "out": "smoke.json",
+    "arms": [
+     "f5a|moe.store=std.moe.offload@1;moe.cache=*=0.25",
+     "f5b|moe.store=std.moe.offload@1;moe.cache=*=0.25;moe.cpu_plan=1,1,2,2,3,3,4,4;cpu_task.threads=4;cpu_task.cores=4-7"
+    ],
+    "batch": 1,
+    "tokens": 128,
+    "depth": 512,
+    "rounds": 2,
+    "engine_args": "--max-model-len 2048 --host-memory 21474836480 --loop-core 2"
+   },
+   "gpu": "NVIDIA RTX A5000",
+   "results": {
+    "f5a": {
+     "options": {
+      "moe.store": "std.moe.offload@1",
+      "moe.cache": "*=0.25"
+     },
+     "tok_s": [
+      78.18247241746424,
+      78.18904004183847
+     ],
+     "median": 78.18575622965136,
+     "build_s": 41,
+     "resident_experts": 1536,
+     "cpu_experts_per_token": 0.0,
+     "worker": null
+    },
+    "f5b": {
+     "options": {
+      "moe.store": "std.moe.offload@1",
+      "moe.cache": "*=0.25",
+      "moe.cpu_plan": "1,1,2,2,3,3,4,4",
+      "cpu_task.threads": "4",
+      "cpu_task.cores": "4-7"
+     },
+     "tok_s": [
+      94.74699147609205,
+      94.86499798490411
+     ],
+     "median": 94.80599473049807,
+     "build_s": 31,
+     "resident_experts": 1532,
+     "cpu_experts_per_token": 49.046875,
+     "worker": {
+      "served": 19008,
+      "flag": 0,
+      "cores": [
+       4,
+       5,
+       6,
+       7
+      ]
+     }
+    }
+   }
+  },
+  "l2_f5b": {
+   "overall": {
+    "n": 32783,
+    "top1": 0.9853887685690754,
+    "top1_confident": 0.9927430155417821,
+    "kl_mean": 0.003014922549294665,
+    "kl_p50": 0.00012633995193750302,
+    "kl_p99": 0.039222453376747395,
+    "kl_max": 1.302295289948767,
+    "dppl": -0.00024026682311925686,
+    "dppl_se": 0.0010178272533662124,
+    "missing": 0.03483665314339749
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9838940914498369,
+    "top1_confident": 0.9919955149967297,
+    "kl_mean": 0.0031099664013007414,
+    "kl_p50": 0.00012464006252720948,
+    "kl_p99": 0.04300785757723042,
+    "kl_max": 1.5248763493066173,
+    "dppl": 0.0005364754648910618,
+    "dppl_se": 0.0007352165031113164,
+    "missing": 0.03539029374980935
+   },
+   "budgets": {
+    "top1_min": 0.9813940914498369,
+    "kl_p50_max": 0.00024928012505441897,
+    "kl_p99_max": 0.08601571515446084,
+    "dppl_max": 0.004754769640402359
+   },
+   "failures": [],
+   "passed": true
+  },
+  "l2_plant_cpu_gate_up_order": {
+   "overall": {
+    "n": 32783,
+    "top1": 0.6274593539334411,
+    "top1_confident": 0.6348148378858193,
+    "kl_mean": 1.6290156119088646,
+    "kl_p50": 0.469550893221944,
+    "kl_p99": 12.811215833052437,
+    "kl_max": 43.91863477352769,
+    "dppl": 4.729193878261296,
+    "dppl_se": 0.5046489661500252,
+    "missing": 0.48509593386816335
+   },
+   "floor": {
+    "n": 32783,
+    "top1": 0.9838940914498369,
+    "top1_confident": 0.9919955149967297,
+    "kl_mean": 0.0031099664013007414,
+    "kl_p50": 0.00012464006252720948,
+    "kl_p99": 0.04300785757723042,
+    "kl_max": 1.5248763493066173,
+    "dppl": 0.0005364754648910618,
+    "dppl_se": 0.0007352165031113164,
+    "missing": 0.03539029374980935
+   },
+   "budgets": {
+    "top1_min": 0.9813940914498369,
+    "kl_p50_max": 0.00024928012505441897,
+    "kl_p99_max": 0.08601571515446084,
+    "dppl_max": 0.005099382874951361
+   },
+   "failures": [
+    "top-1 62.7459% < 98.1394%",
+    "KL p50 4.696e-01 > 2.493e-04",
+    "KL p99 1.281e+01 > 8.602e-02",
+    "|\u0394PPL vs floor| 472.612% > 0.510%"
+   ],
+   "passed": false
+  },
+  "floors_vs_golden": {
+   "plain_mmvq": {
+    "overall": {
+     "n": 32783,
+     "top1": 0.985358264954397,
+     "top1_confident": 0.9932102033824399,
+     "kl_mean": 0.0030791591962027656,
+     "kl_p50": 0.00011759579519842561,
+     "kl_p99": 0.039753018243976174,
+     "kl_max": 2.787186577044165,
+     "dppl": -0.0006436916100163488,
+     "dppl_se": 0.0010733682893305535,
+     "missing": 0.034325717597535305
+    },
+    "floor": null,
+    "budgets": null,
+    "failures": [],
+    "passed": null
+   },
+   "path_aware_split": {
+    "overall": {
+     "n": 32783,
+     "top1": 0.9838940914498369,
+     "top1_confident": 0.9919955149967297,
+     "kl_mean": 0.0031099664013007414,
+     "kl_p50": 0.00012464006252720948,
+     "kl_p99": 0.04300785757723042,
+     "kl_max": 1.5248763493066173,
+     "dppl": 0.0005364754648910618,
+     "dppl_se": 0.0007352165031113164,
+     "missing": 0.03539029374980935
+    },
+    "floor": null,
+    "budgets": null,
+    "failures": [],
+    "passed": null
+   }
+  }
+ },
+ "step5": {
+  "snapshots": {
+   "short_lfu_0": {
+    "name": "short_lfu",
+    "plant": "",
+    "options": {
+     "moe.store": "std.moe.offload@1",
+     "moe.cache": "*=0.25",
+     "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+     "moe.ram": "*=0.5"
+    },
+    "run": 0,
+    "build_s": 41.8,
+    "run_s": 124.8,
+    "steps": 67,
+    "admissions": 2115,
+    "peak_misses": 96,
+    "cpu_experts": 0,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "parity": {
+     "steps": 67,
+     "decode_steps": 64,
+     "borrowing_steps": 0,
+     "lends": 0,
+     "admissions": 2115,
+     "first_differing_step": null,
+     "device_is_mirror": true
+    },
+    "vs_resident": "identical"
+   },
+   "short_static_0": {
+    "name": "short_static",
+    "plant": "",
+    "options": {
+     "moe.store": "std.moe.offload@1",
+     "moe.cache": "*=0.25",
+     "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+     "moe.ram": "*=0.5",
+     "moe.placement": "std.tiered.static@1"
+    },
+    "run": 0,
+    "build_s": 25.4,
+    "run_s": 358.3,
+    "steps": 67,
+    "admissions": 0,
+    "peak_misses": 96,
+    "cpu_experts": 0,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "vs_resident": "identical"
+   }
+  },
+  "decode": {
+   "args": {
+    "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    "out": "decode512.json",
+    "arms": [
+     "incl|moe.store=std.moe.offload@1;moe.cache=*=0.25",
+     "short50|moe.store=std.moe.offload@1;moe.cache=*=0.25;moe.tiers=std.tiered.pinned@1,std.tiered.gguf_direct@1;moe.ram=*=0.5;host_memory=12884901888",
+     "short37|moe.store=std.moe.offload@1;moe.cache=*=0.25;moe.tiers=std.tiered.pinned@1,std.tiered.gguf_direct@1;moe.ram=*=0.375;host_memory=10737418240",
+     "incl|moe.store=std.moe.offload@1;moe.cache=*=0.25",
+     "short50|moe.store=std.moe.offload@1;moe.cache=*=0.25;moe.tiers=std.tiered.pinned@1,std.tiered.gguf_direct@1;moe.ram=*=0.5;host_memory=12884901888",
+     "short37|moe.store=std.moe.offload@1;moe.cache=*=0.25;moe.tiers=std.tiered.pinned@1,std.tiered.gguf_direct@1;moe.ram=*=0.375;host_memory=10737418240"
+    ],
+    "batch": 1,
+    "tokens": 512,
+    "depth": 512,
+    "rounds": 3,
+    "engine_args": "--max-model-len 4096 --host-memory 21474836480 --loop-core 2"
+   },
+   "gpu": "NVIDIA RTX A5000",
+   "results": {
+    "incl": {
+     "options": {
+      "moe.store": "std.moe.offload@1",
+      "moe.cache": "*=0.25"
+     },
+     "host_memory": 21474836480,
+     "tok_s": [
+      70.86787674329484,
+      71.18864112064479,
+      70.76270016950431
+     ],
+     "io_served": null,
+     "median": 70.86787674329484,
+     "build_s": 50,
+     "resident_experts": 1536,
+     "cpu_experts_per_token": 0.0,
+     "worker": null
+    },
+    "short50": {
+     "options": {
+      "moe.store": "std.moe.offload@1",
+      "moe.cache": "*=0.25",
+      "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+      "moe.ram": "*=0.5"
+     },
+     "host_memory": 12884901888,
+     "tok_s": [
+      16.763977904929373,
+      18.628866958030137,
+      27.584331092167037
+     ],
+     "io_served": 99648,
+     "median": 18.628866958030137,
+     "build_s": 33,
+     "resident_experts": 1536,
+     "cpu_experts_per_token": 0.0,
+     "worker": null
+    },
+    "short37": {
+     "options": {
+      "moe.store": "std.moe.offload@1",
+      "moe.cache": "*=0.25",
+      "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+      "moe.ram": "*=0.375"
+     },
+     "host_memory": 10737418240,
+     "tok_s": [
+      11.330064990449184,
+      11.609132205193525,
+      9.628781713477553
+     ],
+     "io_served": 99648,
+     "median": 11.330064990449184,
+     "build_s": 30,
+     "resident_experts": 1536,
+     "cpu_experts_per_token": 0.0,
+     "worker": null
+    },
+    "incl#1": {
+     "options": {
+      "moe.store": "std.moe.offload@1",
+      "moe.cache": "*=0.25"
+     },
+     "host_memory": 21474836480,
+     "tok_s": [
+      71.29005777403967,
+      71.16851382712743,
+      70.94791795459382
+     ],
+     "io_served": null,
+     "median": 71.16851382712743,
+     "build_s": 27,
+     "resident_experts": 1536,
+     "cpu_experts_per_token": 0.0,
+     "worker": null
+    },
+    "short50#1": {
+     "options": {
+      "moe.store": "std.moe.offload@1",
+      "moe.cache": "*=0.25",
+      "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+      "moe.ram": "*=0.5"
+     },
+     "host_memory": 12884901888,
+     "tok_s": [
+      17.341043076795987,
+      17.58885113070043,
+      17.54580866649474
+     ],
+     "io_served": 99648,
+     "median": 17.54580866649474,
+     "build_s": 26,
+     "resident_experts": 1536,
+     "cpu_experts_per_token": 0.0,
+     "worker": null
+    },
+    "short37#1": {
+     "options": {
+      "moe.store": "std.moe.offload@1",
+      "moe.cache": "*=0.25",
+      "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+      "moe.ram": "*=0.375"
+     },
+     "host_memory": 10737418240,
+     "tok_s": [
+      11.572020086087766,
+      11.755305280702938,
+      11.610227736144163
+     ],
+     "io_served": 99648,
+     "median": 11.610227736144163,
+     "build_s": 22,
+     "resident_experts": 1536,
+     "cpu_experts_per_token": 0.0,
+     "worker": null
+    }
+   }
+  },
+  "decode_128_tokens_superseded": {
+   "args": {
+    "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    "out": "decode.json",
+    "arms": [
+     "incl|moe.store=std.moe.offload@1;moe.cache=*=0.25",
+     "short50|moe.store=std.moe.offload@1;moe.cache=*=0.25;moe.tiers=std.tiered.pinned@1,std.tiered.gguf_direct@1;moe.ram=*=0.5;host_memory=12884901888",
+     "short37|moe.store=std.moe.offload@1;moe.cache=*=0.25;moe.tiers=std.tiered.pinned@1,std.tiered.gguf_direct@1;moe.ram=*=0.375;host_memory=10737418240",
+     "incl|moe.store=std.moe.offload@1;moe.cache=*=0.25",
+     "short50|moe.store=std.moe.offload@1;moe.cache=*=0.25;moe.tiers=std.tiered.pinned@1,std.tiered.gguf_direct@1;moe.ram=*=0.5;host_memory=12884901888"
+    ],
+    "batch": 1,
+    "tokens": 128,
+    "depth": 512,
+    "rounds": 2,
+    "engine_args": "--max-model-len 4096 --host-memory 21474836480 --loop-core 0"
+   },
+   "gpu": "NVIDIA RTX A5000",
+   "results": {
+    "incl": {
+     "options": {
+      "moe.store": "std.moe.offload@1",
+      "moe.cache": "*=0.25"
+     },
+     "host_memory": 21474836480,
+     "tok_s": [
+      75.94972767018675,
+      78.09011498797898
+     ],
+     "io_served": null,
+     "median": 77.01992132908286,
+     "build_s": 41,
+     "resident_experts": 1536,
+     "cpu_experts_per_token": 0.0,
+     "worker": null
+    },
+    "short50": {
+     "options": {
+      "moe.store": "std.moe.offload@1",
+      "moe.cache": "*=0.25",
+      "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+      "moe.ram": "*=0.5"
+     },
+     "host_memory": 12884901888,
+     "tok_s": [
+      24.806367083415605,
+      21.036652720143387
+     ],
+     "io_served": 19680,
+     "median": 22.921509901779494,
+     "build_s": 27,
+     "resident_experts": 1536,
+     "cpu_experts_per_token": 0.0,
+     "worker": null
+    },
+    "short37": {
+     "options": {
+      "moe.store": "std.moe.offload@1",
+      "moe.cache": "*=0.25",
+      "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+      "moe.ram": "*=0.375"
+     },
+     "host_memory": 10737418240,
+     "tok_s": [
+      24.703210285993542,
+      143.83870631855552
+     ],
+     "io_served": 19680,
+     "median": 84.27095830227454,
+     "build_s": 23,
+     "resident_experts": 1536,
+     "cpu_experts_per_token": 0.0,
+     "worker": null
+    },
+    "incl#1": {
+     "options": {
+      "moe.store": "std.moe.offload@1",
+      "moe.cache": "*=0.25"
+     },
+     "host_memory": 21474836480,
+     "tok_s": [
+      77.98740512882492,
+      77.91244726150526
+     ],
+     "io_served": null,
+     "median": 77.94992619516509,
+     "build_s": 27,
+     "resident_experts": 1536,
+     "cpu_experts_per_token": 0.0,
+     "worker": null
+    },
+    "short50#1": {
+     "options": {
+      "moe.store": "std.moe.offload@1",
+      "moe.cache": "*=0.25",
+      "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+      "moe.ram": "*=0.5"
+     },
+     "host_memory": 12884901888,
+     "tok_s": [
+      25.364428109926923,
+      23.948298820023133
+     ],
+     "io_served": 19680,
+     "median": 24.65636346497503,
+     "build_s": 26,
+     "resident_experts": 1536,
+     "cpu_experts_per_token": 0.0,
+     "worker": null
+    }
+   }
+  }
+ },
+ "commands": {
+  "tune": "python -m holon_tools tune <gguf> --cpu-split --no-lock --batch 1 --tokens 128 --ops rmsnorm --max-seqs 1 --max-model-len 4096 --host-memory 21474836480 --loop-core 2 --plugin-options moe.store=std.moe.offload@1 moe.cache=*=0.25 cpu_task.cores=4-9",
+  "snapshots": "python spikes/x6_cpu/run.py <gguf> <dir> <name|runs|plant|options> ...",
+  "l2": "python spikes/x6_cpu/l2.py <gguf> cand split.json <options>; holon_judge golden --q8-1 mmvq --cpu-split split.json ...; holon_judge compare --golden v1-fp32 --candidate cand --floor floor",
+  "decode": "python spikes/x6_cpu/decode.py <gguf> out.json <arm|options> ... --rounds 3 --tokens 512"
+ }
+}
