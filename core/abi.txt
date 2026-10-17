@@ -282,6 +282,7 @@ enum RowKind
   PREFILL = 0
   DECODE = 1
   VERIFY = 2
+  PADDING = 3
 const SLOTS
   draft_policy: single
   drafter: multi

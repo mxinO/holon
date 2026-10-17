@@ -7,8 +7,8 @@ from holon.api import BatchPlan, RowKind, TokenSrc
 
 
 def padded(plan: BatchPlan, rows: int, slot: int, width: int = 1) -> BatchPlan:
-    """`plan` with rows of `width` tokens, all producing logits (decode rows, or verify rows), appended up to `rows`,
-    all on `slot` at position 0 (graph padding)."""
+    """`plan` with rows of `width` tokens, all producing logits (shaped as decode rows, or verify rows), appended up
+    to `rows`, all on `slot` at position 0 (graph padding: `RowKind.PADDING`)."""
     extra = rows - len(plan.slots)
     if extra == 0:
         return plan
@@ -18,7 +18,7 @@ def padded(plan: BatchPlan, rows: int, slot: int, width: int = 1) -> BatchPlan:
                     pad(plan.token_src, TokenSrc.HOST))
     out.mem_ops, out.publishes, out.draft_k = plan.mem_ops, plan.publishes, plan.draft_k
     if plan.row_kind is not None:
-        out.row_kind = pad(plan.row_kind, RowKind.VERIFY if width > 1 else RowKind.DECODE)
+        out.row_kind = pad(plan.row_kind, RowKind.PADDING)
     return out
 
 

@@ -32,6 +32,7 @@ class RowKind(enum.IntEnum):
     PREFILL = 0              # a prompt chunk (its last one may sample)
     DECODE = 1               # one input token, sampled
     VERIFY = 2               # an input token and its drafts, all sampled
+    PADDING = 3              # graph padding past the step's rows (`padded`): computes nothing anyone reads
 
 
 class TokenSrc(enum.IntEnum):
@@ -133,7 +134,8 @@ class BatchPlan:
     draft_k: int = 0                     # drafts this step's rows verify (verify width − 1), or a prefill step's drafts
                                          # for its prompt-ending rows; 0: no speculation
     n_decode: int = 0                    # a mixed step's leading decode rows (the rest are prefill chunks); 0: unmixed
-    row_kind: np.ndarray | None = None   # [B] RowKind per row, on every step the scheduler plans; None: not known
+    row_kind: np.ndarray | None = None   # [B] RowKind per row, on every step the scheduler plans (graph padding:
+                                         # PADDING); None: not known (startup profile and capture plans)
 
 
 @dataclasses.dataclass(slots=True, eq=False)
