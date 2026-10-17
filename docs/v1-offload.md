@@ -611,24 +611,30 @@ Decisions (by §8's rules, fixed before measuring):
 | M2 contention (6 threads) | CPU expert 63–65 µs alone, 112–114 under the gather (1.8×), 148 under DMA (2.3×); the gather 47.5 → 27.5 GB/s, DMA 46.6 → 34.1 GB/s beside the CPU. CPU and PCIe share host memory: together ≈ 55 GB/s, so the split adds ≈ 15% miss throughput, not a second link | `plan[n]` ≈ n / 2 for Q4_K_M (5080: 1 1 2 2 3 3 4 5 5 6; 5090: 1 1 2 2 3 3 4 4 5 6 for n = 1…10; flat within ±1), ≈ 0.4 n for IQ2_XS; F5b's modelled decode gain ≈ 2% at 1 miss per layer, 5–6% at 2, 8% at 4, 10% at 6 — it clears D4's 5% bar only from ≈ 2 misses per layer (hit ≤ ≈ 75%): likely at the capped fit, marginal at the natural fit. With F5b on, between-step copies use the gather, never DMA beside the CPU lane |
 | M5 handshake (4 threads, 48 layers) | 2.1–2.9 µs per layer at rows 1–2, ≤ 3.8 at rows 4, 2.6–6.5 at rows 8 (the CPU rows' read-back); device- vs host-planned within 0.4 µs; ≥ 96.6% of CPU time hidden behind equal GPU work; all in-graph CPU results bitwise equal to ggml-cpu | D5's device-planned resolve stands; `cpu_task@1` as designed |
 | M7 local NVMe (`O_DIRECT`) | 1.7–2.4 GB/s at queue depth 1 (0.74–0.80 ms per 1.46 MB, 1.3 ms per 2.8 MB); 2.5–2.7 GB/s from depth 2 or two `pread` workers | F9: 2 I/O workers at depth 2; a disk miss ≈ 20× a RAM miss on these drives; re-measured on a Gen4 / Gen5 SSD before GLM's RAM-short runs. The bar desktops hold every expert of the vehicle, Flash-Next and GLM's Maya-S in RAM, so F9 matters for smaller hosts |
-| Prefill: one layer's expert GEMMs (mmq) vs streaming its non-resident experts | 5080: 0.78 / 1.27 / 2.72 / 10.97 ms at 64 / 256 / 1024 / 4096 tokens; 5090: 0.42 / 0.71 / 1.50 / 6.00 ms; streaming 4.3 ms at 47% resident, 6.1 ms at 25% | D8: from 64 tokens the vehicle routes 127–128 of 128 experts, so streaming and routed-only staging move the same bytes and D8 always streams; it hides behind compute only from ≈ 2K-token chunks on the 5080 (3–4K on the 5090), so offload locks take larger prefill chunks (tune picks; Strata reads 8K) |
+| Prefill: one layer's expert GEMMs (mmq) vs streaming its non-resident experts | 5080: 0.78 / 1.27 / 2.72 / 10.97 ms at 64 / 256 / 1024 / 4096 tokens; 5090: 0.42 / 0.71 / 1.50 / 6.00 ms; streaming 4.3 ms at 47% resident, 6.1 ms at 25% | D8, with M6's real coverage (the bench's uniform routing touched 127–128 of 128 experts from 64 tokens; real routing touches 51% at 64, 68–71% at 256, 83–85% at 1024 — panel C-r4.5-1): on the 5080 routed-only staging wins below ≈ 512 tokens (e.g. 3.5 vs 5.8 ms per layer at 64 tokens, 25% cached) and streaming above (7.4 vs 5.8 ms at 1024); the crossover is re-derived per class from these numbers. Streaming hides behind compute only from ≈ 2K-token chunks on the 5080 (3–4K on the 5090), so offload locks take larger prefill chunks for long prompts (tune picks; Strata reads 8K) |
 
-**Roofline for acceptance 3** (written before step 4 measures; RTX 5080, Qwen3-30B-A3B, batch 1, 32K): all-resident GPU work
-≈ 4.5 ms per token (estimated from existing locks), fetch at 47.5 GB/s, CPU experts at ≈ 45 GB/s alone, M6's bytes
-per token (`lfu`: ≈ 102 MB fetched at 47%, ≈ 311 MB at 25%; `lru` ≈ 10–30% more), llama.cpp's cache with ≈ 25 µs of
-host sync per layer, FreeToken's gather at ≈ 31 GB/s:
+**Roofline for acceptance 3** (written before step 4 measures; RTX 5080, Qwen3-30B-A3B, **batch 1**, 32K), as bands:
+all-resident GPU work ≈ 4.5 ms per token (estimated from existing locks); Holon's own offload-path overhead (resolve,
+gather launch, F11's pick and decay, telemetry) 0.25–0.5 ms, measured at step 2 as F5a fully resident against
+`std.moe@1`; fetch at 47.5 GB/s; CPU experts ≈ 45 GB/s alone; M6's batch-1 bytes (chat and code, `lfu`: ≈ 50–70 MB
+per token at 47%, ≈ 198–227 MB at 25%; `lru` ≈ 10–30% more); llama.cpp's cache with 10–50 µs of host sync per
+layer; FreeToken's gather bounded at M1's rate (the same kind of kernel; panel C-r4.5-2…4):
 
 | Row | Natural fit (≈ 47%) | Capped (≈ 25%) |
 |---|---|---|
-| Holon F5a, ms per token | ≈ 6.6 | ≈ 11.0 (≈ 10.2 with F5b) |
-| vs llama.cpp static split (bar 1.5×) | ≈ 2.6× | ≈ 2.0× |
-| vs llama.cpp `--moe-cache-mib` (bar 1.1×) | ≈ 1.15–1.2× (borderline) | ≈ 1.15× (≈ 1.25× with F5b) |
-| vs FreeToken (bar 1.0×) | ≈ 1.25× | ≈ 1.2× |
-| F1 (static) vs llama.cpp static split (bar 0.95×) | ≈ 0.95–1.0× with F5a, above with F5b | — |
-| Prefill vs llama.cpp (bar 1.0×) | both PCIe-bound at the same bytes per chunk; ≥ 1.0× with Holon's larger chunks | same |
+| Holon F5a, ms per token | ≈ 5.8–6.5 | ≈ 9.1–9.7 (F5b ≈ 3–5% at 1.4–1.7 misses per layer; not counted) |
+| vs llama.cpp static split (bar 1.5×) | ≈ 2.7–3× | ≈ 2.4× |
+| vs llama.cpp `--moe-cache-mib` (bar 1.1×) | ≈ 1.0–1.4× (straddles the bar) | ≈ 1.05–1.4× (straddles) |
+| vs FreeToken (bar 1.0×) | ≈ 1.0–1.1× (thin) | ≈ 1.0–1.1× (thin) |
+| F1 (static) vs llama.cpp static split (bar 0.95×) | ≈ 0.95–1.0× with F5a | — |
+| Prefill vs llama.cpp (bar 1.0×) | staging below ≈ 512 tokens, streaming above with larger chunks; ≥ 1.0× predicted | same |
 
-Every row is predicted to pass; the `--moe-cache-mib` natural-fit row is the tightest. By §8's rule nothing moves;
-if step 4 measures it below the bar, it is judged again after step 6 with tune's lock.
+The static-split rows pass with margin; the cache rows (`--moe-cache-mib`, FreeToken) straddle or touch their bars —
+like-for-like cache engines on the same PCIe link differ mainly by overhead and policy. By §8's rule: a natural-fit
+row measured below its bar goes **to the owner**, not to step 6 (F5b adds ≈ 1.5–2% at 0.7 misses per layer and
+cannot close it); the capped rows and the F1 row are judged after step 6 with tune's lock, as §1 says. M1's gather
+rate is re-measured at step 2 on the store's own allocation (`mmap` + `cudaHostRegister`, with and without huge
+pages), since M1 used `cudaHostAlloc` (panel C-r4.5-5).
 
 **Contradictions with the research note, recorded:** CPU compute is not a second link beside PCIe (they share host
 memory); ggml-cpu's AVX2 and AVX-512 builds agree bitwise; "≤ 4 threads saturate DRAM" (S6) holds only for Q4_K
@@ -757,6 +763,11 @@ builds from the vendored llama.cpp's pin (51ce9c1) unless step 6 aligns it with 
 | A-r4.3d-4 F11 with the exclusive RAM tier | D10: the in-graph victim becomes SSD-only; RAM slot released via the delta log |
 | B-r4.3-2 the row mask only marks padding | D4 / §5: a row-kind code in `moe_resolve@1` |
 | B-r4.3-3 D3 / D4 text not updated for F11 | D3 instances, D4 regions and two-phase scope updated |
+| C-r4.5-1 [major] D8's always-stream rests on uniform routing | §13: M6's coverage; staging below ≈ 512 tokens on the 5080, streaming above |
+| C-r4.5-2 [major] roofline lacks Holon's overhead; the tight row's fallback cannot work | §13: overhead term measured at step 2; bands; a natural-fit miss goes to the owner |
+| C-r4.5-3 agent-trace bytes for a batch-1 gate | §13: batch-1 bytes; capped rows pass without F5b |
+| C-r4.5-4 FreeToken at 31 GB/s | §13: bounded at M1's rate; the row is thin |
+| C-r4.5-5 M1 measured another allocation | §13 / step 2: the gather re-measured on `mmap` + `cudaHostRegister`, ± huge pages |
 | A-r4.4-1 lent slots are never refilled | D4: a returned slot is its layer's first victim, filled unconditionally; L1 cache-size test |
 | A-r4.4-2 per-class lending leaves experts half-resident | D4: lending picks whole experts until every class has n slots |
 | A-r4.4-3 parity cannot be exact as written | D4: step order decay → increments → pairing; parity on decode-only traces and on a replay extended with lending |
