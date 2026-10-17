@@ -36,6 +36,12 @@ def m1(d):
                  "CTAs ≥ 95%", "gather / best DMA"], rows))
 
 
+def isa(d):
+    eq = d["m3_isa_bitwise_equal"]
+    print("AVX-512 build vs AVX2 build, the same expert and tokens bitwise equal: "
+          + ", ".join(f"{k.split(' (')[0]} {'yes' if v else 'no'}" for k, v in eq.items()))
+
+
 def m3(d, key):
     m = d[key]
     rows = []
@@ -114,8 +120,8 @@ def main():
         d = json.loads(Path(path).read_text())
         print(f"\n## {d['tag']} ({d['env']['gpu']}, CPU {d['env']['isa_tier']})\n")
         for name, fn in (("m1", m1), ("m3_native", lambda d: m3(d, "m3_native")),
-                         ("m3_avx2", lambda d: m3(d, "m3_avx2")), ("m2", m2), ("m5", m5), ("m7", m7),
-                         ("prefill", prefill)):
+                         ("m3_avx2", lambda d: m3(d, "m3_avx2")), ("m3_isa_bitwise_equal", isa), ("m2", m2),
+                         ("m5", m5), ("m7", m7), ("prefill", prefill)):
             if name in d:
                 print(f"\n### {name}\n")
                 fn(d)
