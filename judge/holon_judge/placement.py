@@ -30,6 +30,7 @@ class Trace:
     seed: np.ndarray                                   # [layers, experts] resident at the seed
     steps: list[dict] = dataclasses.field(default_factory=list)   # step, counts, needed, records, resident
     mirrored: bool | None = None                       # at the end: the device's map is the host mirror's
+    score: np.ndarray | None = None                    # F11's scores at the start
 
     @property
     def admissions(self) -> int:
@@ -43,6 +44,8 @@ def route_dump(engine) -> Iterator[Trace]:
 
     store = engine.ctx.shared_objects[KEY]
     trace = Trace((store.residency.host >= 0).all(-1).copy())
+    if "score" in store.state:
+        trace.score = store.state["score"].cpu().numpy().copy()
     needed: dict[int, np.ndarray] = {}                 # step -> experts its eager resolves saw routed
     call = DeviceResolver.__call__
 
@@ -71,7 +74,7 @@ def parity(trace: Trace) -> dict:
     """The replay against the device, step by step: the first step that differs (None: none), and what was compared."""
     from holon_plugins.placement.lfu.reference import replay
 
-    want = replay(trace.seed, [s["counts"] for s in trace.steps], [s["needed"] for s in trace.steps])
+    want = replay(trace.seed, [s["counts"] for s in trace.steps], [s["needed"] for s in trace.steps], trace.score)
     differs = next((s["step"] for w, s in zip(want, trace.steps, strict=True) if not np.array_equal(w, s["resident"])),
                    None)
     return {"steps": len(trace.steps), "decode_steps": sum(bool(s["counts"].any()) for s in trace.steps),

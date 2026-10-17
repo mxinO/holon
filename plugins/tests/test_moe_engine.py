@@ -255,20 +255,23 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
 
 def test_only_decode_steps_count_and_decay(tiny_moe, tmp_path):
     """F11 decays and admits once per step, from its decode rows (docs/v1-offload.md D4): a one-token last prompt
-    chunk in a prefill step of several prompts is a prefill row, even past the step's first 512-token expert pass
-    (prompts of 1, 513 and 1 tokens in one step), so the replay oracle still matches the device step by step."""
+    chunk is a prefill row (the scheduler's `row_kind`), beside other prompts even past the step's first 512-token
+    expert pass (prompts of 1, 513 and 1 tokens in one step) and in a step of nothing else (three one-token prompts),
+    so the replay oracle still matches the device step by step."""
     from holon_judge.placement import parity, route_dump
 
     checkpoint, _ = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
     engine = _engine(file, max_step_tokens=1100, max_model_len=600, host_memory=1 << 24, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25"})
-    prompts = [torch.randint(0, 512, (n,), generator=torch.Generator().manual_seed(n)).tolist() for n in (1, 513, 1)]
-    with route_dump(engine) as trace:
-        engine.generate(prompts, SamplingParams(temperature=0.0, max_tokens=6, ignore_eos=True))
-    report = parity(trace)
-    assert report["first_differing_step"] is None and report["admissions"] > 0 and trace.mirrored, report
-    assert not trace.steps[0]["counts"].any()                       # the prefill step: three prompts, none counted
+    mixed = [torch.randint(0, 512, (n,), generator=torch.Generator().manual_seed(n)).tolist() for n in (1, 513, 1)]
+    for prompts in (mixed, [[5], [6], [7]]):               # the second from the first's residency and scores
+        with route_dump(engine) as trace:
+            engine.generate(prompts, SamplingParams(temperature=0.0, max_tokens=6, ignore_eos=True))
+        report = parity(trace)
+        assert report["first_differing_step"] is None and trace.mirrored and (report["admissions"] > 0 or
+                                                                              max(map(len, prompts)) == 1), report
+        assert not trace.steps[0]["counts"].any()                   # the prefill step: three prompts, none counted
 
 
 @pytest.fixture(scope="module")

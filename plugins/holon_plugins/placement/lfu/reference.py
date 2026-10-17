@@ -98,12 +98,15 @@ def lend(n: int, residency: torch.Tensor, classes: torch.Tensor, score: torch.Te
     return picked
 
 
-def replay(seed: np.ndarray, counts: list[np.ndarray], needed: list[np.ndarray] | None = None) -> list[np.ndarray]:
+def replay(seed: np.ndarray, counts: list[np.ndarray], needed: list[np.ndarray] | None = None,
+           score: np.ndarray | None = None) -> list[np.ndarray]:
     """The L1 parity oracle: F11's residency [G, E] (whole experts) after each step of a trace, from the seeded
     residency and each step's routing counts [G, E] of decode rows (and the experts any of its rows routed to; by
     default those counts' — a decode-only trace). The M6 replay's `lfu` (`simulate`, `_pair_swap` with gain 0), with
-    the scores in f32 (× 0.915, then + 1.0 per entry), decayed only on steps with decode rows."""
-    res, u = seed.astype(bool).copy(), np.zeros(seed.shape, dtype=np.float32)
+    the scores in f32 (× 0.915, then + 1.0 per entry), decayed only on steps with decode rows; `score`: the scores at
+    the trace's start (zero: a seed)."""
+    res = seed.astype(bool).copy()
+    u = np.zeros(seed.shape, dtype=np.float32) if score is None else score.astype(np.float32).copy()
     out = []
     for s, c in enumerate(counts):
         if c.any():

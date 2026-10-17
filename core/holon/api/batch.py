@@ -26,6 +26,14 @@ class Status(enum.Enum):
     FINISHED = "finished"
 
 
+class RowKind(enum.IntEnum):
+    """What a step's row computes (`BatchPlan.row_kind`)."""
+
+    PREFILL = 0              # a prompt chunk (its last one may sample)
+    DECODE = 1               # one input token, sampled
+    VERIFY = 2               # an input token and its drafts, all sampled
+
+
 class TokenSrc(enum.IntEnum):
     """Where a query row's input token comes from (overlap-safe placeholders)."""
 
@@ -125,6 +133,7 @@ class BatchPlan:
     draft_k: int = 0                     # drafts this step's rows verify (verify width − 1), or a prefill step's drafts
                                          # for its prompt-ending rows; 0: no speculation
     n_decode: int = 0                    # a mixed step's leading decode rows (the rest are prefill chunks); 0: unmixed
+    row_kind: np.ndarray | None = None   # [B] RowKind per row, on every step the scheduler plans; None: not known
 
 
 @dataclasses.dataclass(slots=True, eq=False)

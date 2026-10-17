@@ -899,7 +899,7 @@ trace recorded (up to 23,163 admissions over 255 decode steps), and the device's
 every plant fires and is caught (table in the README). All at `52e1bed`, after the review fixes below.
 
 Decided while building, against the text above:
-- **Scheduler row kinds (B-s2-6) not built: it is an ABI major.** Filling `BatchPlan.n_decode` on every step changes
+- **Scheduler row kinds (B-s2-6) not built: it is an ABI major** (built additively in step 3b: `BatchPlan.row_kind`). Filling `BatchPlan.n_decode` on every step changes
   the field's meaning ("a mixed step's leading decode rows; 0: unmixed", `core/holon/api/batch.py:127`), which
   readers rely on: `std.mixers.gqa`'s planner splits any step with `n_decode` > 0 into a decode and a prefill call
   (`std/holon_std/mixers/gqa/units.py:51-55`), `std.mixers.gdn` plans such a step per row kind and never as a decode or

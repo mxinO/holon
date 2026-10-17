@@ -13,12 +13,12 @@ binds kernels. Then, through the engine's hooks:
   class's pinned slots); then each class's arena `[S, unit]` is laid out in the pool — `top_k` null slots (zero
   weights, one per routing rank), `staging` slots, then the cache slots its seeded pieces fill —, the map reset to
   the tier and the seed copied in, the policy's device state zeroed;
-- `before_launch`: the step's row kinds per token (decode and verify rows: a mixed step's leading rows, or every row
-  of a step whose rows all have logits for every query token; prefill rows the others — so a one-token last prompt
-  chunk counts as decode only in a step of nothing else, and a step's decode rows lie in its first expert pass; graph
-  padding past them), written as far as this step's or the last one's tokens reach; the map edits due, which
-  the step's first resolve applies, zeroing the step's counts, error words and delta log too (in the forward: in a
-  graph, on the stream); the copies of two-phase swaps due;
+- `before_launch`: the step's row kinds per token (decode and verify rows: the plan's `row_kind`, which the scheduler
+  fills on every step — for a plan without it, a mixed step's leading rows or every row of a step whose rows all have
+  logits for every query token; prefill rows the others, so a step's decode rows lie in its first expert pass; graph
+  padding past them), written as far as this step's or the last one's tokens reach; the map edits due, which the
+  step's first resolve applies, zeroing the step's counts, error words and delta log too (in the forward: in a graph,
+  on the stream); the copies of two-phase swaps due;
 - `after_commit`: the error words, the staging invariant (a layer's distinct misses fit its staging slots: F5a has no
   fallback; `misses` is the running maximum since the last materialize), the host mirror brought to the step (host
   edits launched by it, then the device's delta log), the route taps, then the policy's swaps from the step's counts.
@@ -39,7 +39,7 @@ from collections.abc import Callable
 
 import numpy as np
 import torch
-from holon.api import Extent, MemOp, Ref
+from holon.api import Extent, MemOp, Ref, RowKind
 
 from . import files
 from .residency import LAG, ResidencyMap
@@ -236,9 +236,13 @@ class TieredStore:
     def before_launch(self, step) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list[MemOp]]:
         self.step, kinds, at = step.step, self._kinds, 0
         kinds[:self._written] = PADDING
-        uniform = not step.n_decode and bool((step.n_query == step.n_logits).all())    # a decode or verify step
-        for row, q in enumerate(step.n_query.tolist()):
-            kinds[at:at + q] = DECODE if row < step.n_decode or uniform else PREFILL
+        if step.row_kind is not None:                                # the scheduler's; else a guess (see above)
+            decode = (step.row_kind != RowKind.PREFILL).tolist()
+        else:
+            uniform = not step.n_decode and bool((step.n_query == step.n_logits).all())
+            decode = [row < step.n_decode or uniform for row in range(len(step.n_query))]
+        for q, d in zip(step.n_query.tolist(), decode, strict=True):
+            kinds[at:at + q] = DECODE if d else PREFILL
             at += q
         reach, self._written = max(at, self._written), at          # the last step's rows become padding
         writes = [(self.kinds[:reach], kinds[:reach])] * bool(reach) + self.residency.writes(step.step)
