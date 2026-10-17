@@ -380,18 +380,25 @@ class Engine:
         breaks the engine's reference cycles; the engine is unusable afterwards (closing again does nothing)."""
         if self.executor is None:
             return
+        failed = None                                    # raised once everything is released, the first error
         try:
             if not self._stopped:                        # a stopped engine's later steps are discarded
                 self.drain()
-        finally:                                         # a failing commit still stops the helpers
+        except Exception as e:                           # a failing commit still stops the helpers
+            failed = e
+        try:
             platform.synchronize(self.device)            # (every stream) helpers and host pools go once it is idle
-            for o in (self.processor, *self.shared):
-                getattr(o, "shutdown", lambda: None)()
-            self.executor = self._inflight = None
-            self.shared, self.ctx.shared_objects = [], {}   # what they hold, host memory included, goes too
-            self.ledger.free(host=True)
-            gc.collect()
-            platform.release_cache(self.device)
+        except Exception as e:                           # a lost device (a sticky error): its work is gone anyway
+            failed = failed or e
+        for o in (self.processor, *self.shared):
+            getattr(o, "shutdown", lambda: None)()
+        self.executor = self._inflight = None
+        self.shared, self.ctx.shared_objects = [], {}    # what they hold, host memory included, goes too
+        self.ledger.free(host=True)
+        gc.collect()
+        if failed is not None:
+            raise failed
+        platform.release_cache(self.device)
 
     def stats(self) -> dict[str, int]:
         out = {"waiting": len(self.sched.waiting), "running": len(self.sched.running),

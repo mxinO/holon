@@ -170,6 +170,22 @@ def test_shared_objects_live_with_the_engine_and_edit_at_launch_c_plus_2(tiny, d
     assert not engine.shared and not engine.ctx.shared_objects
 
 
+def test_close_stops_helpers_and_releases_even_on_a_lost_device(tiny, monkeypatch):
+    """Engine.close with a failing commit in its drain and a device that cannot synchronize (a sticky CUDA error): the
+    shutdown hooks still run and host memory goes, and the commit's error is the one raised."""
+    engine = Engine(EngineConfig(str(tiny), device="cpu", dtype=torch.float32, page_size=16, max_seqs=2,
+                                 max_step_tokens=8, max_model_len=64, kernels={"rmsnorm": "tests.toy"},
+                                 host_memory=3 * UNIT, state_memory=1 << 20), _plugins())
+    toy = engine.ctx.shared_objects["tests.toy"]
+    engine.add(list(range(3)), SamplingParams(temperature=0.0, max_tokens=4))
+    engine.step()                                    # launched, committed by close's drain
+    toy.fail = True
+    monkeypatch.setattr(platform, "synchronize", lambda device: (_ for _ in ()).throw(RuntimeError("device lost")))
+    with pytest.raises(RuntimeError, match="the toy failed"):
+        engine.close()
+    assert toy.events[-1] == "shutdown" and toy.host.buffer is None and not engine.ctx.shared_objects
+
+
 @pytest.mark.parametrize("pref, units", [(5, 4), (3, 3)])     # 4 units left: as many as allowed, up to `pref_units`
 def test_host_pools_are_exact_once_and_within_their_budget(pref, units):
     """S2: host pools are allocated as requested — as many units between `min_units` and `pref_units` as the host
