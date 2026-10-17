@@ -42,12 +42,12 @@ def test_a_graph_runs_each_slots_task_once_per_signal_on_every_thread(lib, memop
     errors = torch.zeros(1, dtype=torch.int32, device="cuda")
     stream = torch.cuda.Stream()
     with torch.cuda.stream(stream):
-        worker.signal(0)                     # eager first (the graph's capture runs nothing)
+        worker.signal(0, errors)                     # eager first (the graph's capture runs nothing)
         worker.wait(0, errors)
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph, stream=stream):
             for s in range(3):
-                worker.signal(s)
+                worker.signal(s, errors)
                 worker.wait(s, errors)
     torch.cuda.synchronize()
     for _ in range(50):
@@ -62,13 +62,14 @@ def test_a_graph_runs_each_slots_task_once_per_signal_on_every_thread(lib, memop
 def test_the_protocol_fails_open(lib, memop):
     """A failing task raises bit 1 and the flag; then a slow task's wait returns at once and the worker answers it
     without running it. A task outliving the time bound raises bit 2 (spin: the wait gives up; memop: the watchdog
-    answers); so does a dead worker; every wait after returns at once."""
+    answers), and a stop does not wait for it past the bound; a dead worker raises bit 2; every wait after returns at
+    once."""
     out = [torch.zeros(2, dtype=torch.int64) for _ in range(3)]
     probes = [lib.Probe(0, 0, out[0]), lib.Probe(0, 1, out[1]), lib.Probe(int(3e9), 0, out[2])]
     worker, keep = _worker(lib, probes, memop, timeout=0.3)
     errors = torch.zeros(1, dtype=torch.int32, device="cuda")
     for s in range(3):
-        worker.signal(s)
+        worker.signal(s, errors)
         worker.wait(s, errors)
     t0 = time.perf_counter()
     torch.cuda.synchronize()
@@ -80,20 +81,24 @@ def test_the_protocol_fails_open(lib, memop):
     worker, keep = _worker(lib, probes, memop, timeout=0.3)
     errors.zero_()
     t0 = time.perf_counter()
-    worker.signal(1)
+    worker.signal(1, errors)
     worker.wait(1, errors)
-    worker.signal(0)
+    worker.signal(0, errors)
     worker.wait(0, errors)
     torch.cuda.synchronize()
-    assert int(errors[0]) == 2 and worker.flag() & 2 and 0.25 < time.perf_counter() - t0 < 1.5
-    worker.stop()
+    assert int(errors[0]) & 2 and worker.flag() & 2 and 0.25 < time.perf_counter() - t0 < 1.5   # (memop: abandoned)
+    t0 = time.perf_counter()
+    worker.stop()                          # the coordinator, still in the slow task, is left behind after the bound
+    assert time.perf_counter() - t0 < 1.0
+    while not int(out[2][0]):              # it finishes the task (whose buffers the test keeps until then)
+        time.sleep(0.05)
 
     worker, keep = _worker(lib, [lib.Probe(0, 0, out[0])], memop, timeout=0.3)
     worker.kill()                                                     # the coordinator stops answering
     errors.zero_()
     t0 = time.perf_counter()
     for _ in range(5):
-        worker.signal(0)
+        worker.signal(0, errors)
         worker.wait(0, errors)
     torch.cuda.synchronize()
     assert int(errors[0]) & 2 and time.perf_counter() - t0 < 1.5      # one time bound, not five

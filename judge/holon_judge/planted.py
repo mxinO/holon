@@ -905,8 +905,8 @@ def resolve_off_by_one() -> Iterator[None]:
 
     call, fired = DeviceResolver.__call__, collections.Counter()
 
-    def planted(self, ids, first, *share):
-        slots, cpu = call(self, ids, first, *share)
+    def planted(self, ids, first, *share, **kw):
+        slots, cpu = call(self, ids, first, *share, **kw)
         k, staging = self.store.top_k, self.store.staging
         fired[_when()] += 1
         return torch.where((slots >= k) & (slots < k + staging), k + (slots - k + 1) % staging, slots), cpu

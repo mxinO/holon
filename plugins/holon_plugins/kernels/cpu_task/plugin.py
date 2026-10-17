@@ -83,7 +83,7 @@ class CpuTask:
         return self.service.bind(task)
 
     def signal(self, slot: int) -> None:
-        self.service.native.signal(slot)
+        self.service.native.signal(slot, self.errors)
 
     def wait(self, slot: int) -> None:
         self.service.native.wait(slot, self.errors)

@@ -60,7 +60,7 @@ then `staging` slots, then cache slots.
   `jobs` (`cpu_experts@1`'s table, in mapped host memory) by expert id ascending: `jobs[0, 0]` = c, zero included,
   then row 1 + i = (expert, `host[e, 0]`, `host[e, 1]`, n_tok, its entries t·k + j ascending). A call without the
   CPU's share passes a zero `plan` (and a table of its own); the caller sizes `jobs` for its calls with a share (T ≤
-  T', c ≤ J).
+  T', c ≤ J): a share past it is cut to what fits and `errors[0]` |= `JOBS`.
 - Variants (docs/v1-offload.md D3): `moe_resolve.<policy>@1`, a contract its placement policy's plugin owns (its own
   oracle and CPU provider), takes @1's arguments, then the policy's device state by name (`device_state`), and keeps
   @1's terms except where it says otherwise. It may change `residency` (the regions its policy owns) and the layer's
@@ -129,6 +129,6 @@ MOE_RESOLVE, EXPERT_FETCH, LINEAR_EXPERTS_ARENA = "moe_resolve@1", "expert_fetch
 EXPERT_PREFETCH = "expert_prefetch@1"
 CPU_TASK, CPU_EXPERTS, MOE_PATCH_ROWS = "cpu_task@1", "cpu_experts@1", "moe_patch_rows@1"
 PADDING, DECODE, PREFILL = 0, 1, 2   # `moe_resolve@1`'s row kinds
-RANGE, OVERFLOW = 1, 2               # error bits: a resident slot outside the arena's cache slots; a delta record past
-                                     # the log (the variants)
+RANGE, OVERFLOW, JOBS = 1, 2, 8      # error bits: a resident slot outside the arena's cache slots; a delta record past
+                                     # the log (the variants); the CPU's share past its job table
 ACT_QUANT = ("a4", "a8")            # `act_quant` of quantized stacks (`a16` is not offered for them)

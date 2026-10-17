@@ -141,7 +141,7 @@ def test_resolve_matches_the_oracle(plugins, device, sources, tokens, staging):
     assert int(errors[0]) == bits == (RANGE if corrupt else 0)
     assert torch.equal(got[0].cpu(), slots) and torch.equal(got[2].cpu(), n_fetch) and torch.equal(got[3].cpu(), cpu)
     _jobs(jobs, rows)
-    assert bool(rows) == (tokens <= 64) or tokens < 64                     # 64 tokens always miss some
+    assert bool(rows) == (tokens == 64) or tokens < 64                     # 64 tokens miss some; past them, none
     for r in range(ROLES):
         n = min(int(n_fetch[r]), stage.shape[1])
         assert torch.equal(got[1][r, :, :n].cpu(), fetch[r, :, :n])

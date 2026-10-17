@@ -12,7 +12,8 @@
 namespace {
 
 constexpr int PADDING = 0, DECODE = 1;                 // row kinds (std.moe.kernels)
-constexpr int RANGE = 1, OVERFLOW = 2;                 // error bits: a corrupt slot; a delta record past the log
+constexpr int RANGE = 1, OVERFLOW = 2, JOBS = 8;       // error bits: a corrupt slot; a delta record past the log;
+                                                       // the CPU's share past its job table
 constexpr int RESOLVE_THREADS = 256;                   // 8 warps: one per role for the scans
 constexpr int FETCH_CTAS = 8, FETCH_THREADS = 256, FETCH_UNROLL = 8;   // step 0's M1: saturates PCIe
 // The ring's copies run beside a prefill pass's compute, so they hold as few SMs as still keep PCIe near full (one
@@ -135,6 +136,10 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
     __syncthreads();
     if (tid == 0) {
         take = n_cpu ? min(L.plan[n_cpu], n_cpu) : 0;
+        if (take > L.J) {                              // the caller sized the table short: take what fits, flag it
+            take = L.J;
+            atomicOr(errors, JOBS);
+        }
     }
     __syncthreads();
     for (int i = tid; i < n_cpu; i += blockDim.x) {    // ranked by (best rank, id): the last `take` are the CPU's
@@ -174,10 +179,16 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             int32_t * job = L.jobs + int64_t(1 + best[e]) * L.W;
             int n = 0;
             for (int i = 0; i < entries; ++i) {        // its entries, ascending
-                if (ids[i] == e && kinds[i / k] != PADDING && n < L.W - 4) {
-                    job[4 + n++] = i;
+                if (ids[i] == e && kinds[i / k] != PADDING) {
+                    if (n < L.W - 4) {
+                        job[4 + n] = i;
+                    } else {
+                        atomicOr(errors, JOBS);
+                    }
+                    ++n;
                 }
             }
+            n = min(n, L.W - 4);
             atomicOr(&routed[e], 4);                   // the CPU's (the route taps see it)
             job[0] = e;
             job[1] = L.host[e * roles];

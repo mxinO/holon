@@ -118,11 +118,11 @@ class Offload(nn.Module):
     def route(self, ids: torch.Tensor, first: int, x: torch.Tensor) -> torch.Tensor:
         """Each role's arena slots for `ids` (the step's tokens `first`…, inputs `x`), misses fetched; with F5b, a
         small pass's CPU share is published to the CPU (its entries read null slots: zeros until `patch`)."""
-        share = self._cpu is not None and len(ids) <= self._cpu.tokens
-        slots, cpu = self._resolver(ids, first, *(self._cpu.args() if share else ()))
-        self._pending = cpu if share else None
-        if share:
-            self._cpu.publish(self._slot, x, cpu)
+        if self._cpu is None or len(ids) > self._cpu.tokens:
+            self._pending = None
+            return self._resolver(ids, first)[0]
+        slots, self._pending = self._resolver(ids, first, *self._cpu.args(),
+                                              before_fetch=lambda cpu: self._cpu.publish(self._slot, x, cpu))
         return slots
 
     def patch(self, y: torch.Tensor) -> torch.Tensor:

@@ -11,7 +11,7 @@
 //
 // Fail-open (D6): a task error answers FAILED; the spin wait gives up after `timeout_ns`, which covers a dead or hung
 // worker; the memop wait cannot time out, so a watchdog thread answers a request left unanswered that long. Either
-// sets a sticky flag word (TASK, TIMEOUT), and once it is set every later wait returns at once and the coordinator
+// sets a sticky flag (TASK, TIMEOUT), and once one is set every later wait returns at once and the coordinator
 // answers every request FAILED without running it: a graph never waits forever and a drain always ends. Each wait ORs
 // the flag (and its slot's failure) into the caller's `errors` word, which the caller checks at the step's commit.
 #include <ATen/cuda/CUDAContext.h>
@@ -25,6 +25,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -52,25 +53,27 @@ __device__ __forceinline__ uint64_t globaltimer() {
 
 __global__ void k_signal(uint32_t * word) { SysRef(*word).store(REQ, cuda::memory_order_release); }
 
-// `spin`: wait for the answer (or the flag, or the time bound); else (after a memop wait) only report.
-__global__ void k_wait(uint32_t * word, uint32_t * flag, int32_t * errors, uint64_t timeout_ns, int spin) {
-    SysRef w(*word), f(*flag);
-    uint32_t bits = f.load(cuda::memory_order_acquire);
+// `spin`: wait for the answer (or a flag, or the time bound); else (after a memop wait) only report. `flags` is the
+// flags' line: the CPU's word (TASK, the watchdog's TIMEOUT), then the GPU's (a spin wait's TIMEOUT): one writer each.
+__global__ void k_wait(uint32_t * word, uint32_t * flags, int32_t * errors, uint64_t timeout_ns, int spin) {
+    SysRef w(*word), f(flags[0]), g(flags[1]);
+    uint32_t bits = f.load(cuda::memory_order_acquire) | g.load(cuda::memory_order_acquire);
     if (spin && !bits) {
         const uint64_t t0 = globaltimer();
         while (w.load(cuda::memory_order_acquire) < DONE) {
-            if ((bits = f.load(cuda::memory_order_relaxed)) != 0) {
+            if ((bits = f.load(cuda::memory_order_relaxed) | g.load(cuda::memory_order_relaxed)) != 0) {
                 break;
             }
             if (globaltimer() - t0 > timeout_ns) {
                 bits = TIMEOUT;
-                f.fetch_or(TIMEOUT, cuda::memory_order_relaxed);
+                g.store(TIMEOUT, cuda::memory_order_relaxed);
                 break;
             }
             __nanosleep(64);
         }
     }
-    if (w.load(cuda::memory_order_acquire) == FAILED) {
+    const uint32_t answer = w.load(cuda::memory_order_acquire);
+    if (answer > DONE) {                               // failed, or abandoned: its rows are not the task's
         bits |= TASK;
     }
     if (bits) {
@@ -235,57 +238,152 @@ const Driver & driver() {
     return d;
 }
 
+// The words are shared with the GPU (mapped memory): GCC's atomic builtins on them, as std::atomic_ref would.
+struct Word {
+    uint32_t * p;
+    uint32_t load(int order) const { return __atomic_load_n(p, order); }
+    void store(uint32_t v, int order) const { __atomic_store_n(p, v, order); }
+    void fetch_or(uint32_t v, int order) const { __atomic_fetch_or(p, v, order); }
+    bool compare_exchange_strong(uint32_t & want, uint32_t v, int order) const {
+        return __atomic_compare_exchange_n(p, &want, v, false, order, __ATOMIC_RELAXED);
+    }
+};
+
+// What the worker's threads use: shared with them, so a coordinator stuck in a task can be left behind at a stop.
+struct State {
+    uint32_t * words;                                  // (slots + 1) lines; the last: the CPU's flag, the GPU's
+    std::vector<std::pair<holon_cpu_task_fn, void *>> tasks;
+    std::vector<int> cores;
+    int64_t timeout_ns;
+    std::atomic<bool> running{true}, dead{false}, exited{false};
+    std::atomic<int64_t> served{0};
+
+    Word word(size_t s) const { return Word{words + s * STRIDE}; }
+    Word cpu_flag() const { return word(tasks.size()); }
+    Word gpu_flag() const { return Word{words + tasks.size() * STRIDE + 1}; }
+    uint32_t flag() const { return cpu_flag().load(__ATOMIC_ACQUIRE) | gpu_flag().load(__ATOMIC_ACQUIRE); }
+};
+
+// The coordinator: pool thread 0, answering every request (failed at once while a flag is set).
+void serve(std::shared_ptr<State> st) {
+    pin_to(st->cores[0]);
+    {
+        Pool pool(st->cores);
+        Backoff b;
+        b.reset();
+        while (st->running.load(std::memory_order_relaxed)) {
+            bool any = false;
+            for (size_t s = 0; s < st->tasks.size() && !st->dead.load(std::memory_order_relaxed); ++s) {
+                if (st->word(s).load(__ATOMIC_ACQUIRE) != REQ) {
+                    continue;
+                }
+                any = true;
+                const auto [fn, arg] = st->tasks[s];
+                const bool failed = st->flag() != 0 || pool.run(fn, arg) != 0;
+                if (failed) {
+                    st->cpu_flag().fetch_or(TASK, __ATOMIC_RELAXED);
+                }
+                uint32_t req = REQ;                        // not answered meanwhile by the watchdog
+                st->word(s).compare_exchange_strong(req, failed ? FAILED : DONE, __ATOMIC_RELEASE);
+                st->served.fetch_add(1, std::memory_order_relaxed);
+            }
+            if (any) {
+                b.reset();
+            } else {
+                b.wait();
+            }
+        }
+    }
+    st->exited.store(true, std::memory_order_release);
+}
+
+// memop only: abandons a request older than the time bound (or any once a flag is set).
+void watch(std::shared_ptr<State> st) {
+    std::vector<Clock::time_point> since(st->tasks.size());
+    std::vector<bool> pending(st->tasks.size());
+    while (st->running.load(std::memory_order_relaxed)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        const auto now = Clock::now();
+        for (size_t s = 0; s < st->tasks.size(); ++s) {
+            if (st->word(s).load(__ATOMIC_ACQUIRE) != REQ) {
+                pending[s] = false;
+                continue;
+            }
+            if (!pending[s]) {
+                pending[s] = true;
+                since[s] = now;
+            }
+            if (st->flag() || now - since[s] > std::chrono::nanoseconds(st->timeout_ns)) {
+                st->cpu_flag().fetch_or(TIMEOUT, __ATOMIC_RELAXED);
+                uint32_t req = REQ;
+                st->word(s).compare_exchange_strong(req, ABANDONED, __ATOMIC_RELEASE);
+            }
+        }
+    }
+}
+
 class Worker {
   public:
-    // `host` and `device`: the same mapped pinned memory, (slots + 1) lines: a word per slot, then the flag.
+    // `host` and `device`: the same mapped pinned memory, (slots + 1) lines: a word per slot, then the flags.
     Worker(int64_t host, int64_t device, std::vector<Task> tasks, std::vector<int64_t> cores, int64_t timeout_ns,
            bool memop)
-        : words_(reinterpret_cast<uint32_t *>(host)), dev_(reinterpret_cast<uint32_t *>(device)),
-          timeout_ns_(timeout_ns), memop_(memop) {
+        : st_(std::make_shared<State>()), dev_(reinterpret_cast<uint32_t *>(device)), memop_(memop) {
         TORCH_CHECK(!cores.empty(), "cpu_task: a worker needs at least one core");
+        st_->words = reinterpret_cast<uint32_t *>(host);
+        st_->timeout_ns = timeout_ns;
         for (const auto & [abi, fn, arg] : tasks) {
             TORCH_CHECK(abi == HOLON_CPU_TASK_ABI, "cpu_task: a task of ABI ", abi, ", the worker's is ",
                         HOLON_CPU_TASK_ABI);
-            tasks_.push_back({reinterpret_cast<holon_cpu_task_fn>(fn), reinterpret_cast<void *>(arg)});
+            st_->tasks.emplace_back(reinterpret_cast<holon_cpu_task_fn>(fn), reinterpret_cast<void *>(arg));
         }
-        for (size_t s = 0; s <= tasks_.size(); ++s) {
-            word(s).store(0, __ATOMIC_RELAXED);
+        for (size_t s = 0; s <= st_->tasks.size(); ++s) {
+            st_->word(s).store(0, __ATOMIC_RELAXED);
         }
+        st_->gpu_flag().store(0, __ATOMIC_RELAXED);
         if (memop) {
             driver();
         }
-        cores_.assign(cores.begin(), cores.end());
-        coordinator_ = std::thread([this] { serve(); });
+        st_->cores.assign(cores.begin(), cores.end());
+        coordinator_ = std::thread(serve, st_);
         if (memop) {
-            watchdog_ = std::thread([this] { watch(); });
+            watchdog_ = std::thread(watch, st_);
         }
     }
     ~Worker() { stop(); }
 
+    // After a drain. A coordinator still in a task after the time bound (a task that never returns) is left behind
+    // with its state, so a close always ends; a request still open is abandoned (a wait reads it as an error).
     void stop() {
-        if (!running_.exchange(false)) {
+        if (!st_->running.exchange(false)) {
             return;
         }
-        coordinator_.join();
+        const auto until = Clock::now() + std::chrono::nanoseconds(st_->timeout_ns);
+        while (!st_->exited.load(std::memory_order_acquire) && Clock::now() < until) {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+        if (st_->exited.load(std::memory_order_acquire)) {
+            coordinator_.join();
+        } else {
+            coordinator_.detach();
+        }
         if (watchdog_.joinable()) {
             watchdog_.join();
         }
-        for (size_t s = 0; s < tasks_.size(); ++s) {           // nothing is in flight after a drain; never strand one
+        for (size_t s = 0; s < st_->tasks.size(); ++s) {
             uint32_t req = REQ;
-            word(s).compare_exchange_strong(req, ABANDONED, __ATOMIC_RELEASE);
+            st_->word(s).compare_exchange_strong(req, ABANDONED, __ATOMIC_RELEASE);
         }
     }
 
     // Tests: the coordinator stops answering (a dead worker), the watchdog lives on.
-    void kill() {
-        dead_.store(true, std::memory_order_release);
-    }
+    void kill() { st_->dead.store(true, std::memory_order_release); }
 
-    int64_t flag() const { return word(tasks_.size()).load(__ATOMIC_ACQUIRE); }
-    int64_t served() const { return served_.load(std::memory_order_relaxed); }
+    int64_t flag() const { return st_->flag(); }
+    int64_t served() const { return st_->served.load(std::memory_order_relaxed); }
 
-    void signal(int64_t slot) {
+    void signal(int64_t slot, const at::Tensor & like) {
         check(slot);
+        const c10::cuda::CUDAGuard guard(like.device());
         const cudaStream_t s = at::cuda::getCurrentCUDAStream().stream();
         if (memop_) {
             cu_check(driver().write32(s, reinterpret_cast<CUdeviceptr>(dev_ + slot * STRIDE), REQ,
@@ -306,95 +404,20 @@ class Worker {
             cu_check(driver().wait32(s, reinterpret_cast<CUdeviceptr>(w), DONE, CU_STREAM_WAIT_VALUE_GEQ),
                      "cuStreamWaitValue32");
         }
-        k_wait<<<1, 1, 0, s>>>(w, dev_ + tasks_.size() * STRIDE, errors.data_ptr<int32_t>(), uint64_t(timeout_ns_),
-                               !memop_);
+        k_wait<<<1, 1, 0, s>>>(w, dev_ + st_->tasks.size() * STRIDE, errors.data_ptr<int32_t>(),
+                               uint64_t(st_->timeout_ns), !memop_);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
   private:
-    struct Bound {
-        holon_cpu_task_fn fn;
-        void * arg;
-    };
-
-    // The words are shared with the GPU (mapped memory): GCC's atomic builtins on them, as std::atomic_ref would.
-    struct Word {
-        uint32_t * p;
-        uint32_t load(int order) const { return __atomic_load_n(p, order); }
-        void store(uint32_t v, int order) const { __atomic_store_n(p, v, order); }
-        void fetch_or(uint32_t v, int order) const { __atomic_fetch_or(p, v, order); }
-        bool compare_exchange_strong(uint32_t & want, uint32_t v, int order) const {
-            return __atomic_compare_exchange_n(p, &want, v, false, order, __ATOMIC_RELAXED);
-        }
-    };
-    Word word(size_t s) const { return Word{words_ + s * STRIDE}; }
-
     void check(int64_t slot) const {
-        TORCH_CHECK(slot >= 0 && slot < int64_t(tasks_.size()), "cpu_task: slot ", slot, " of ", tasks_.size());
+        TORCH_CHECK(slot >= 0 && slot < int64_t(st_->tasks.size()), "cpu_task: slot ", slot, " of ",
+                    st_->tasks.size());
     }
 
-    // The coordinator: pool thread 0, answering every request (failed at once while the flag is set).
-    void serve() {
-        pin_to(cores_[0]);
-        Pool pool(cores_);
-        Backoff b;
-        b.reset();
-        while (running_.load(std::memory_order_relaxed)) {
-            bool any = false;
-            for (size_t s = 0; s < tasks_.size() && !dead_.load(std::memory_order_relaxed); ++s) {
-                if (word(s).load(__ATOMIC_ACQUIRE) != REQ) {
-                    continue;
-                }
-                any = true;
-                const bool failed = flag() != 0 || pool.run(tasks_[s].fn, tasks_[s].arg) != 0;
-                if (failed) {
-                    word(tasks_.size()).fetch_or(TASK, __ATOMIC_RELAXED);
-                }
-                uint32_t req = REQ;                        // not answered meanwhile by the watchdog
-                word(s).compare_exchange_strong(req, failed ? FAILED : DONE, __ATOMIC_RELEASE);
-                served_.fetch_add(1, std::memory_order_relaxed);
-            }
-            if (any) {
-                b.reset();
-            } else {
-                b.wait();
-            }
-        }
-    }
-
-    // memop only: abandons a request older than the time bound (or any once the flag is set).
-    void watch() {
-        std::vector<Clock::time_point> since(tasks_.size());
-        std::vector<bool> pending(tasks_.size());
-        while (running_.load(std::memory_order_relaxed)) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            const auto now = Clock::now();
-            for (size_t s = 0; s < tasks_.size(); ++s) {
-                if (word(s).load(__ATOMIC_ACQUIRE) != REQ) {
-                    pending[s] = false;
-                    continue;
-                }
-                if (!pending[s]) {
-                    pending[s] = true;
-                    since[s] = now;
-                }
-                if (flag() || now - since[s] > std::chrono::nanoseconds(timeout_ns_)) {
-                    word(tasks_.size()).fetch_or(TIMEOUT, __ATOMIC_RELAXED);
-                    uint32_t req = REQ;
-                    word(s).compare_exchange_strong(req, ABANDONED, __ATOMIC_RELEASE);
-                }
-            }
-        }
-    }
-
-    uint32_t * words_;
+    std::shared_ptr<State> st_;
     uint32_t * dev_;
-    const int64_t timeout_ns_;
     const bool memop_;
-    std::vector<Bound> tasks_;
-    std::vector<int> cores_;
-    std::atomic<bool> running_{true}, dead_{false};
-    std::atomic<int64_t> served_{0};
     std::thread coordinator_, watchdog_;
 };
 
@@ -432,7 +455,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def(pybind11::init<int64_t, int64_t, std::vector<Task>, std::vector<int64_t>, int64_t, bool>(),
              "host and device addresses of (slots + 1) 64-byte lines of mapped pinned memory, a task per slot (ABI, "
              "function, argument), the cores (the first runs the coordinator), the wait's time bound, memop or spin")
-        .def("signal", &Worker::signal, "on the current stream: the slot's task runs once the stream reaches here")
+        .def("signal", &Worker::signal, "on the current stream (of `like`'s device): the slot's task runs once the "
+             "stream reaches here")
         .def("wait", &Worker::wait, "on the current stream: later work waits for the slot's answer (fail-open)")
         .def("flag", &Worker::flag, "the sticky error bits: 1 a task failed, 2 a wait timed out")
         .def("served", &Worker::served, "requests answered so far")

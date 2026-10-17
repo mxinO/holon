@@ -114,3 +114,25 @@ def test_the_tier_b_floor_emulates_q8_1_in_the_experts(moe_files, tiny_prompts, 
     assert floor.meta["q8_1"] == kernel_path and floor.meta["moe_block"].startswith("d3-reference@")
     assert not floor.same_tensors(plain)                                  # q8_1 rounding reached the experts
     assert compare(gold, floor).overall.kl_p99 < 1e-2
+
+
+def test_a_cpu_split_floor_takes_ggml_cpus_activations_for_the_cpus_experts(moe_files, tiny_prompts, gold):
+    """§6's path-aware floor (docs/v1-offload.md F5b): its rule picks, token by token, the experts the contract's
+    (std.moe.reference `cpu_share`, one token per call) sends to the CPU of a frozen placement, and those entries take
+    ggml-cpu's activations; the floor moves off the plain one and stays near the golden."""
+    from holon_std.moe import reference
+
+    checkpoint, file, _ = moe_files
+    split = {"plan": [0, 1, 1], "tokens": 1, "layers": {"0": [0, 3, 5], "1": [1, 2, 6]}}
+    g = torch.Generator().manual_seed(0)
+    ids = torch.stack([torch.randperm(8, generator=g)[:2] for _ in range(60)]).int()
+    residency = torch.full((8, 2), -1, dtype=torch.int32)
+    residency[split["layers"]["0"]] = 9
+    ring, host, kinds = torch.full((8, 2), -1), torch.zeros(8, 2, dtype=torch.int32), torch.ones(1, dtype=torch.uint8)
+    for t in range(len(ids)):
+        _, cpu, _ = reference.cpu_share(ids[t:t + 1], kinds, residency, ring, host, torch.tensor(split["plan"]))
+        assert torch.equal(cpu >= 0, judge_gguf.cpu_entries(split, 0, ids[t:t + 1]))
+    plain = golden.record(str(file), tiny_prompts, dtype=torch.bfloat16, config=str(checkpoint), q8_1="mmvq")
+    floor = golden.record(str(file), tiny_prompts, dtype=torch.bfloat16, config=str(checkpoint), q8_1="mmvq",
+                          cpu_split=split)
+    assert floor.meta["cpu_split"] and not floor.same_tensors(plain) and compare(gold, floor).overall.kl_p99 < 1e-2

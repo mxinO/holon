@@ -345,8 +345,9 @@ class TieredStore:
         if errors := {name: int(t[0]) for name, t in telemetry.items() if "errors" in name and int(t[0])}:
             raise RuntimeError(f"{self.name}: step {step.step}'s kernels flagged errors {errors} (errors: 1 = a "
                                "corrupt residency entry, 2 = the delta log overflowed, 4 = a step's lent slots fell "
-                               "short of a pass's staging; edit_errors: a host edit's "
-                               "precondition failed; kernel_errors: the kernel's bits)")
+                               "short of a pass's staging, 8 = the CPU's share past its job table; edit_errors: a "
+                               "host edit's precondition failed; kernel_errors: the kernel's bits, the CPU worker's "
+                               "1 = a task failed, 2 = a wait timed out)")
         mode = self._borrowing.pop(step.step, None)
         misses = int(telemetry["misses"][0])
         width = int(telemetry["stage_width"][0]) if mode else self.stage.shape[1]

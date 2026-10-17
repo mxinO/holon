@@ -46,9 +46,10 @@ class DeviceResolver:
         return torch.where(self.ring >= 0, self.ring, self.residency)
 
     def __call__(self, ids: torch.Tensor, first: int, plan: torch.Tensor | None = None,
-                 jobs: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+                 jobs: torch.Tensor | None = None, before_fetch=None) -> tuple[torch.Tensor, torch.Tensor]:
         """Slots [roles, T, k] for `ids` [T, k], the step's tokens `first`… (their row kinds), the misses fetched; and
-        `cpu` [T, k], the entries the CPU computes (F5b: its share by `plan`, its jobs in `jobs`; none without)."""
+        `cpu` [T, k], the entries the CPU computes (F5b: its share by `plan`, its jobs in `jobs`; none without), handed
+        to `before_fetch(cpu)` before the fetch (the CPU's jobs start, then the GPU's misses come over PCIe: D5)."""
         store = self.store
         kinds = store.kinds[first:first + len(ids)]
         if len(kinds) != len(ids):
@@ -60,6 +61,8 @@ class DeviceResolver:
             store.delta[self.group], store.n_delta[self.group:self.group + 1], self.group,
             store.no_plan if plan is None else plan, store.no_jobs if jobs is None else jobs, **self.state)
         self._prepared = False
+        if before_fetch is not None:
+            before_fetch(cpu)
         for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
             gather(fetch[r], n[r:r + 1], c.units(), c.slots())
         return slots, cpu

@@ -12,11 +12,16 @@ that changed the map without logging it shows there.
 `parity(trace)` replays a trace recorded under `placement.lfu@1` (F11) with the oracle extended from the M6 replay's
 `lfu` to D4's spec (placement.lfu's `reference.replay`) from the seeded residency, and compares every step's
 residency with the device's, exactly. A policy bug shows only as lost speed, since every placement is exact: this is
-the check that sees it."""
+the check that sees it.
+
+`cpu_split(engine)` is F5b's frozen split (§6): the split table and the static placement's experts per layer, what a
+path-aware floor needs to know which experts the CPU computed (`holon_judge golden --cpu-split`)."""
 from __future__ import annotations
 
 import contextlib
 import dataclasses
+import hashlib
+import json
 from collections.abc import Iterator
 
 import numpy as np
@@ -57,6 +62,25 @@ def route_dump(engine) -> Iterator[Trace]:
             trace.mirrored = np.array_equal(store.residency.device.cpu().numpy(), store.residency.host)
     finally:
         store.taps.remove(tap)
+
+
+def cpu_split(engine) -> dict | None:
+    """The engine's F5b split, `{"plan": plan[0 … E], "tokens": the most tokens of a pass with a CPU share, "layers":
+    {"<layer>": [resident experts]}}`; None without F5b. Only a frozen placement (`std.tiered.static@1`) has one."""
+    from holon_std.moe.offload import CPU, KEY
+
+    share, store = engine.ctx.shared_objects.get(CPU), engine.ctx.shared_objects.get(KEY)
+    if share is None:
+        return None
+    if store.policy_ref != "std.tiered.static@1":
+        raise ValueError(f"F5b under {store.policy_ref}: a path-aware floor needs a frozen placement (static)")
+    resident = (store.residency.host >= 0).all(-1)
+    return {"plan": share.plan.tolist(), "tokens": share.tokens,
+            "layers": {str(layer): np.flatnonzero(resident[g]).tolist() for g, layer in enumerate(store.layers)}}
+
+
+def split_digest(split: dict) -> str:
+    return hashlib.sha256(json.dumps(split, sort_keys=True).encode()).hexdigest()[:16]
 
 
 def parity(trace: Trace) -> dict:

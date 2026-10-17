@@ -397,11 +397,11 @@ def test_the_delta_log_holds_a_steps_admissions_and_lending(tiny_moe, tmp_path):
         "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5"})
     store, call, lent = engine.ctx.shared_objects[KEY], DeviceResolver.__call__, []
 
-    def resolve(self, ids, first):
-        slots = call(self, ids, first)
+    def resolve(self, ids, first, *share, **kw):
+        resolved = call(self, ids, first, *share, **kw)                 # (slots, cpu)
         if not self.group and not first and not lent and bool((store.kinds == 1).sum() >= 4):   # 4 rows × top-2
             lent.append(int(store.lend(torch.full((2,), store.items * store.roles)).sum()))
-        return slots
+        return resolved
     with route_dump(engine) as trace, mock.patch.object(DeviceResolver, "__call__", resolve):
         assert _served(engine, prompts) == want
     step = next(s for s in trace.steps if (s["records"][:, 1] < 0).any())

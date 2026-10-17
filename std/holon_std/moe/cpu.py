@@ -1,7 +1,8 @@
 """F5b, the CPU's share of a layer's misses (docs/v1-offload.md D4–D7): the engine's one `CpuShare` (a shared object of
 the offload store's layers), present when the deployment gives a split table.
 
-Per expert pass of at most `tokens` tokens (a graphed step's: its decode and verify rows), a layer's graph runs
+Per expert pass of at most `tokens` tokens — a graphed step's most (its decode and verify rows), so a decode step of
+any batch, and a prompt chunk as short as that —, a layer's graph runs
 
     moe_resolve(plan, jobs) → [publish: its CPU rows' inputs; signal] → expert_fetch → linear_experts_arena ×2
         → [wait] → moe_patch_rows → moe_combine
@@ -9,8 +10,10 @@ Per expert pass of at most `tokens` tokens (a graphed step's: its decode and ver
 `moe_resolve@1` takes `plan[n]` of the layer's n CPU candidates (the lowest-ranked) and writes their jobs; the CPU
 experts (`cpu_experts@1`, a native task the `cpu_task@1` worker runs: one slot per layer) compute them from the host
 tier's blocks while the GPU fetches and computes the rest; their output rows replace the null slots' zeros before the
-combine. Larger passes (prefill) take no CPU share (a zero plan). The job table, the input rows and the output rows are
-mapped host pools, written and read in place by both sides (zero-copy, S6).
+combine. Larger passes take no CPU share (a zero plan): the rule is the pass's size, deployment-level (D4), never the
+row kind, so a short prompt chunk takes the share a decode step of its size takes (the L2 run at one token per step
+measures the split that way); F8, a separate share for larger prefill chunks, is not built. The job table, the input
+rows and the output rows are mapped host pools, written and read in place by both sides (zero-copy, S6).
 
 Options (EngineConfig.plugin_options, from `holon_tools tune`): `moe.cpu_plan` — `plan[1], plan[2], …, plan[N]`, the
 CPU's share of n misses (D4: deployment-level, never per request); past N the last entry's share, plan[n] =

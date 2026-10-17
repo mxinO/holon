@@ -4,6 +4,11 @@
 
 Ops are tuned one at a time (coordinate descent), the others held at their current pins. Only the decode path's ops
 are tuned: a decode benchmark says nothing about prefill kernels.
+
+`split` decides F5b, the CPU's share of an offloaded MoE's misses (docs/v1-offload.md D4, §8), by the same decode
+benchmark: the CPU worker's thread count at half the misses, then the share at that count (M2 found plan[n] ≈ n / 2 and
+flat within ±1, so a share of the misses per miss count is the table); the lock takes the best only if it gains at
+least `GAIN` over F5a, with the CPU tier it was measured on.
 """
 from __future__ import annotations
 
@@ -17,6 +22,9 @@ from holon.api import SamplingParams, parse_versioned
 from holon.core.engine import Engine, EngineConfig
 
 OPS = ("attention.paged_decode", "rmsnorm", "add_rmsnorm", "rope", "silu_mul")
+GAIN = 0.05                                    # D4: F5b enters a lock only at a ≥ 5% decode gain
+THREADS = (2, 4, 6)                            # the compute worker's threads (S6, M3: DRAM saturates at 2–4)
+SHARES = (0.25, 0.4, 0.5, 0.6, 0.75)           # the CPU's share of a pass's misses
 
 
 def candidates(engine: Engine, ops: tuple[str, ...] = OPS) -> dict[str, list[str]]:
@@ -53,14 +61,39 @@ def tune(pins: Mapping[str, str], ops: Mapping[str, list[str]], rate: Callable[[
     return best, rates
 
 
+def plan(share: float, n: int) -> str:
+    """`moe.cpu_plan` for a share of the misses: plan[m] = m · share rounded half up, m = 1 … n."""
+    return ",".join(str(min(m, int(m * share + 0.5))) for m in range(1, n + 1))
+
+
+def split(rate: Callable[[dict[str, str]], float], n: int, isa: str, threads: tuple[int, ...] = THREADS,
+          shares: tuple[float, ...] = SHARES) -> tuple[dict[str, str], dict]:
+    """F5b by measurement: `rate(options)` (higher is better) for F5a (no options), for each thread count at half the
+    misses, then for each share at the best count; the plugin options of the best when it gains at least `GAIN` over
+    F5a (else none: the lock stays F5a), and every rate. `n`: the most misses of a pass the table spells out (past it
+    the last entry's share); `isa`: this host's CPU tier."""
+    def options(share: float, t: int) -> dict[str, str]:
+        return {"moe.cpu_plan": plan(share, n), "moe.cpu_isa": isa, "cpu_task.threads": str(t)}
+    f5a = rate({})
+    by_threads = {t: rate(options(0.5, t)) for t in threads}
+    t = max(by_threads, key=by_threads.__getitem__)
+    by_share = {s: by_threads[t] if s == 0.5 else rate(options(s, t)) for s in shares}
+    best = max(by_share, key=by_share.__getitem__)
+    gain = by_share[best] / f5a - 1
+    record = {"f5a": f5a, "threads_at_half": by_threads, "shares": by_share, "best": {"share": best, "threads": t},
+              "gain": gain, "taken": gain >= GAIN}
+    return (options(best, t) if gain >= GAIN else {}), record
+
+
 def decode_rate(config: EngineConfig, batch: int = 8, prompt_len: int = 32, tokens: int = 64,
-                repeats: int = 3) -> float:
-    """Generated tokens/s for `batch` random prompts, the median of `repeats` runs after a warm-up (repeats hit the
-    prefix cache, so the time is decode)."""
+                repeats: int = 3, prompts: list[list[int]] | None = None) -> float:
+    """Generated tokens/s for `batch` prompts (`prompts`' first, else random ones of `prompt_len` tokens), the median of
+    `repeats` runs after a warm-up (repeats hit the prefix cache, so the time is decode)."""
     gc.collect()                                  # free the previous candidate's engine first
     engine = Engine(config)
     gen = random.Random(0)
-    prompts = [[gen.randrange(engine.spec.vocab) for _ in range(prompt_len)] for _ in range(batch)]
+    prompts = prompts[:batch] if prompts else [[gen.randrange(engine.spec.vocab) for _ in range(prompt_len)]
+                                               for _ in range(batch)]
     params = SamplingParams(temperature=0.0, max_tokens=tokens, ignore_eos=True)
     engine.generate(prompts, params)
     times = []

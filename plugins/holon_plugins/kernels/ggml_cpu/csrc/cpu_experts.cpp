@@ -118,7 +118,7 @@ class Rows {
             if (lo >= hi) {
                 return false;
             }
-            const size_t nlo = front ? std::min(lo + CHUNK, hi) : lo, nhi = front ? hi : std::max(hi - CHUNK, lo);
+            const size_t n = std::min(CHUNK, hi - lo), nlo = front ? lo + n : lo, nhi = front ? hi : hi - n;
             if (v.compare_exchange_weak(cur, pack(nlo, nhi), std::memory_order_relaxed)) {
                 a = front ? lo : nhi;
                 b = front ? nlo : hi;
@@ -163,8 +163,10 @@ struct Bound {
     int64_t dn_count, dn_unit;
     float * rows;
     int plant = 0;
-    // scratch, sized for the most items (min(jobs · tokens, tokens · k)) at bind time
+    // scratch, sized for the most items (min(jobs · tokens, tokens · k)) at bind time; the job table's copy (the
+    // shared mapped table may be rewritten while a task runs past a wait that gave up: never read it twice)
     std::vector<uint8_t> xq, aq;
+    std::vector<int32_t> table;
     std::vector<float> h;
     std::vector<int> off;                              // each job's first item (njobs + 1)
     int njobs = 0, err = 0;
@@ -178,10 +180,11 @@ struct Bound {
         if (njobs < 0 || njobs > e->max_jobs || threads > Rows::MAX_THREADS) {
             return BAD_TABLE;
         }
+        std::copy(jobs, jobs + int64_t(1 + njobs) * width, table.begin());
         const int64_t entries = int64_t(e->tokens) * e->top_k;
         off[0] = 0;
         for (int j = 0; j < njobs; ++j) {
-            const int32_t * job = jobs + int64_t(1 + j) * width;
+            const int32_t * job = table.data() + int64_t(1 + j) * width;
             const int n = job[3];
             if (job[1] < 0 || job[1] >= gu_count || job[2] < 0 || job[2] >= dn_count || n < 1 || n > e->tokens) {
                 return BAD_TABLE;
@@ -201,7 +204,7 @@ struct Bound {
         return 0;
     }
 
-    const int32_t * job(int j) const { return jobs + int64_t(1 + j) * width; }
+    const int32_t * job(int j) const { return table.data() + int64_t(1 + j) * width; }
 
     static int run(void * arg, const holon_cpu_env * env) {
         auto * b = static_cast<Bound *>(arg);
@@ -367,6 +370,7 @@ struct Task {
         b.aq.resize(items * ex.aq_row);
         b.h.resize(items * 2 * size_t(ex.inter));
         b.off.resize(ex.max_jobs + 1);
+        b.table.resize(int64_t(1 + ex.max_jobs) * b.width);
     }
 
     std::tuple<int64_t, int64_t, int64_t> native() {
