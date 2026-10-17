@@ -1,9 +1,13 @@
 // CPU expert compute for step 0 (M2, M3, M5): one MoE expert = down(SwiGLU(gate·x, up·x)) over GGUF blocks in
 // place, with ggml-cpu's own `from_float` (activation quantization) and `vec_dot` (one row · one token).
 //
-// A batch is a layer's CPU jobs: J experts of one class, each with the same T tokens. Rows are split across the
-// pool's threads in contiguous ranges (never K), so every (row, token) result is one ggml vec_dot whatever the
-// thread count or the batch: D7's contract holds by construction, and the bench checks it bitwise.
+// A batch is a layer's CPU jobs: J experts of one class, each with the same T tokens. Rows (never K) are split
+// across the pool's threads, each thread taking 16-row chunks from the front of its own share and, once done,
+// stealing from the back of the others' (`Rows`). Every (row, token) result is one ggml vec_dot whatever the thread
+// count, the batch or which thread ran it: D7's contract holds by construction, and the bench checks it bitwise.
+// Stealing keeps one slowed core from stalling the lockstep pool: on the desktops an IRQ- or sibling-loaded core
+// intermittently ran 1.7x slower, which a static split turns into a 1.6x slower batch; a shared claim counter
+// absorbed it but cost 10-20% when no core was slowed.
 //
 //   phase 1  quantize x per (job, token) to gate/up's vec_dot type
 //   phase 2  gate and up rows (J x 2 x inter), each row read once for all T tokens
@@ -13,6 +17,7 @@
 #include <immintrin.h>
 #include <pthread.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -144,6 +149,43 @@ class Pool {
   alignas(64) std::atomic<bool> stop_{false};
 };
 
+// Per-thread row ranges [lo, hi), packed in one word each: the owner takes chunks from the front, idle threads
+// steal from the back.
+class Rows {
+ public:
+  void reset(size_t total, int n) {
+    for (int t = 0; t < n; ++t) slots_[t].v.store(pack(total * t / n, total * (t + 1) / n), std::memory_order_relaxed);
+  }
+  bool next(int t, int n, size_t& a, size_t& b) {
+    if (take(t, true, a, b)) return true;
+    for (int k = 1; k < n; ++k)
+      if (take((t + k) % n, false, a, b)) return true;
+    return false;
+  }
+
+ private:
+  static constexpr size_t kChunk = 16;
+  static uint64_t pack(size_t lo, size_t hi) { return uint64_t(lo) << 32 | uint64_t(hi); }
+  bool take(int t, bool front, size_t& a, size_t& b) {
+    auto& v = slots_[t].v;
+    uint64_t cur = v.load(std::memory_order_relaxed);
+    while (true) {
+      const size_t lo = cur >> 32, hi = cur & 0xffffffffu;
+      if (lo >= hi) return false;
+      const size_t nlo = front ? std::min(lo + kChunk, hi) : lo, nhi = front ? hi : std::max(hi - kChunk, lo);
+      if (v.compare_exchange_weak(cur, pack(nlo, nhi), std::memory_order_relaxed)) {
+        a = front ? lo : nhi;
+        b = front ? nlo : hi;
+        return true;
+      }
+    }
+  }
+  struct alignas(64) Slot {
+    std::atomic<uint64_t> v{0};
+  };
+  Slot slots_[64];
+};
+
 // One expert class: hidden, inter, gate/up type, down type. An expert blob is gate [inter rows] | up [inter rows] |
 // down [hidden rows], each row `in` values of ggml blocks, exactly as the GGUF stores one expert's slices.
 struct ExpertClass {
@@ -191,6 +233,9 @@ class Batch {
       a = total * t / n;
       b = total * (t + 1) / n;
     };
+    if (n > 64) throw std::invalid_argument("batch: at most 64 threads");
+    gu_.reset(size_t(njobs) * 2 * c.inter, n);
+    down_.reset(size_t(njobs) * c.hidden, n);
     uint8_t* xq = xq_.data();
     uint8_t* aq = aq_.data();
     float* h = h_.data();
@@ -201,15 +246,15 @@ class Batch {
         c.q_gu(jobs[i / tokens].x + (i % tokens) * c.hidden, xq + i * c.xq_row, c.hidden);
       pool.barrier();
       const size_t gu_rows = 2 * size_t(c.inter);
-      split(size_t(njobs) * gu_rows, t, a, b);  // phase 2
-      for (size_t r = a; r < b; ++r) {
-        const size_t j = r / gu_rows, rr = r % gu_rows;
-        const uint8_t* w = jobs[j].w + rr * c.gu_row;
-        for (int k = 0; k < tokens; ++k) {
-          const size_t i = j * tokens + k;
-          c.dot_gu(c.hidden, h + i * gu_rows + rr, 0, w, 0, xq + i * c.xq_row, 0, 1);
+      while (gu_.next(t, n, a, b))  // phase 2
+        for (size_t r = a; r < b; ++r) {
+          const size_t j = r / gu_rows, rr = r % gu_rows;
+          const uint8_t* w = jobs[j].w + rr * c.gu_row;
+          for (int k = 0; k < tokens; ++k) {
+            const size_t i = j * tokens + k;
+            c.dot_gu(c.hidden, h + i * gu_rows + rr, 0, w, 0, xq + i * c.xq_row, 0, 1);
+          }
         }
-      }
       pool.barrier();
       split(items, t, a, b);  // phase 3
       thread_local std::vector<float> act;
@@ -221,14 +266,14 @@ class Batch {
         c.q_down(act.data(), aq + i * c.aq_row, c.inter);
       }
       pool.barrier();
-      split(size_t(njobs) * c.hidden, t, a, b);  // phase 4
-      for (size_t r = a; r < b; ++r) {
-        const size_t j = r / c.hidden, rr = r % c.hidden;
-        const uint8_t* w = jobs[j].w + c.down_off + rr * c.down_row;
-        for (int k = 0; k < tokens; ++k)
-          c.dot_down(c.inter, jobs[j].y + size_t(k) * c.hidden + rr, 0, w, 0, aq + (j * tokens + k) * c.aq_row, 0,
-                     1);
-      }
+      while (down_.next(t, n, a, b))  // phase 4
+        for (size_t r = a; r < b; ++r) {
+          const size_t j = r / c.hidden, rr = r % c.hidden;
+          const uint8_t* w = jobs[j].w + c.down_off + rr * c.down_row;
+          for (int k = 0; k < tokens; ++k)
+            c.dot_down(c.inter, jobs[j].y + size_t(k) * c.hidden + rr, 0, w, 0, aq + (j * tokens + k) * c.aq_row,
+                       0, 1);
+        }
     };
     pool.run(body);
   }
@@ -236,6 +281,7 @@ class Batch {
  private:
   std::vector<uint8_t> xq_, aq_;
   std::vector<float> h_;
+  Rows gu_, down_;
 };
 
 }  // namespace x0
