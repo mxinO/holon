@@ -380,15 +380,14 @@ def m2(ext, ex, m1_res, threads_list, duration_ms=300) -> dict:
         r = ext.contend(cpu, ex.cls, ex.ptr, half, 1, mode, th8, td8, ctas, 256, unroll, feeder, duration_ms)
         return {k: None if v != v else v for k, v in r.items()}  # NaN: that path did not run
 
-    for mode in ("dma", "gather"):
-        r = run(0, mode)
-        out["steady"].append({"threads": 0, "mode": mode, **r})
-        log(f"M2 {mode} alone: {r['gpu_gbps']:.1f} GB/s")
-    for nt in threads_list:
-        for mode in ("none", "dma", "gather"):
-            r = run(nt, mode)
-            out["steady"].append({"threads": nt, "mode": mode, **r})
-            log(f"M2 {nt} thr + {mode}: cpu {r['cpu_us_per_expert']:.1f} us/expert, gpu {r['gpu_gbps']}")
+    # three interleaved rounds per cell, the median of each metric: one window can catch a slowed core (README)
+    cells = [(0, "dma"), (0, "gather")] + [(nt, mode) for nt in threads_list for mode in ("none", "dma", "gather")]
+    rounds = [[run(nt, mode) for nt, mode in cells] for _ in range(3)]
+    for i, (nt, mode) in enumerate(cells):
+        rs = [rd[i] for rd in rounds]
+        med = {k: None if rs[0][k] is None else statistics.median(r[k] for r in rs) for k in rs[0]}
+        out["steady"].append({"threads": nt, "mode": mode, **med, "rounds": rs})
+        log(f"M2 {nt} thr + {mode}: cpu {med['cpu_us_per_expert']} us/expert, gpu {med['gpu_gbps']} GB/s")
     # the per-miss-count split, measured: n misses, k on the CPU, n - k gathered, started together
     for nt in [t for t in threads_list if t >= 2]:
         cpu = ext.Cpu(cores[:nt])
