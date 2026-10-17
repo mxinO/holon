@@ -60,13 +60,16 @@ class Launched:
 class _Prep:
     """Static device inputs of a step's device prep (`Executor._prepare`)."""
 
-    row_of_token: torch.Tensor     # [T] batch row of each token
-    offset: torch.Tensor           # [T] index of each token within its row
-    n_query: torch.Tensor          # [B]
-    exact: torch.Tensor            # [B] the host knows this row's start exactly
-    start: torch.Tensor            # [B] that start (ignored where not exact)
-    from_device: torch.Tensor      # [B] the row's first input token is the device's last token
-    lens: torch.Tensor             # [B] out: tokens held after the step (shared with every page group's Pages)
+    lens: torch.Tensor             # [B] tokens held after the step (shared with every page group's Pages)
+    start: torch.Tensor            # [B] the row's start (where the host knows it exactly)
+    input_at: torch.Tensor         # [B] where the device's last token goes: the row's first input, or a scratch element
+    logits_slots: torch.Tensor     # [L] the slot of each logits row
+    logits_end: torch.Tensor | None = None    # [L] host-exact steps: the row's length after the step
+    # Steps whose starts the device may hold (verify rows): positions, lengths and write indices derived on the device.
+    row_of_token: torch.Tensor | None = None  # [T] batch row of each token
+    offset: torch.Tensor | None = None        # [T] index of each token within its row
+    n_query: torch.Tensor | None = None       # [B]
+    exact: torch.Tensor | None = None         # [B] the host knows this row's start
     draft_index: torch.Tensor | None = None   # [R*k] verify rows: input positions of the drafts
     draft_from: torch.Tensor | None = None    # [R*k] where each draft is in the SeqTable (flat)
     mask: torch.Tensor | None = None          # [M, mask_width] the logits processor's masks of the constrained rows
@@ -137,12 +140,17 @@ class Executor:
         masks = {"mask": (logits_rows * processor.mask_width, torch.int32),
                  "mask_rows": (logits_rows, torch.int64)} if processor is not None else {}
         self.uploader = Uploader(device, masks | state.upload_fields(seqs, tokens) | {
-            "input_ids": (tokens, torch.int64), "positions": (tokens, torch.int64),
+            "input_ids": (tokens + 1, torch.int64), "positions": (tokens, torch.int64),    # + the scratch element
             "query_start": (seqs + 1, torch.int64), "slots": (seqs, torch.int64),
             "logits_index": (tokens, torch.int64), "logits_rows": (tokens, torch.int64),   # verify rows: 1 + k each
-            "row_of_token": (tokens, torch.int64), "offset": (tokens, torch.int64), "n_query": (seqs, torch.int64),
-            "exact": (seqs, torch.bool), "start": (seqs, torch.int64), "from_device": (seqs, torch.bool),
+            "start": (seqs, torch.int64), "input_at": (seqs, torch.int64), "logits_slots": (tokens, torch.int64),
+            "logits_end": (tokens, torch.int64), "row_of_token": (tokens, torch.int64),
+            "offset": (tokens, torch.int64), "n_query": (seqs, torch.int64), "exact": (seqs, torch.bool),
             "draft_index": (tokens, torch.int64), "draft_from": (tokens, torch.int64)} | self._sub_fields(cfg))
+        self._input_ids, self._scratch = self.uploader.dev["input_ids"], tokens
+        # Without a drafter no row verifies, so every row's start is the host's (design §7.3): a step's positions,
+        # lengths and write indices are staged from the host, and the device moves only the tokens it holds.
+        self.host_starts = drafter is None
         # The device SeqTable (one row per slot, plus the padding slot): authoritative while steps are in flight.
         rows, cols = seqs + 1, max(cfg.max_draft_tokens, 1)
         self.last_token = torch.zeros(rows, dtype=torch.int64, device=device)
@@ -406,7 +414,11 @@ class Executor:
     def _logits(self, ctx: StepContext, h: torch.Tensor) -> torch.Tensor:
         """The step's logits rows (fp32), masked where the logits processor constrains them: every path that samples
         or verifies runs this (prefill, decode and verify; graphed and eager)."""
-        logits = self.model.head(h[ctx.batch.dev.logits_index]).float()
+        plan = ctx.batch.plan
+        # Every token a logits row (decode and verify steps): the head reads the trunk's output itself, which it
+        # returns new tensors from (a drafter reads `h` after it).
+        rows = h if (plan.n_logits == plan.n_query).all() else h[ctx.batch.dev.logits_index]
+        logits = self.model.head(rows).float()
         if ctx.prep.mask is not None:
             self.processor.apply(logits, ctx.prep.mask, ctx.prep.mask_rows)
         return logits
@@ -419,11 +431,12 @@ class Executor:
     def _store(self, ctx: StepContext, tokens: torch.Tensor, accepts: torch.Tensor | None = None) -> torch.Tensor:
         """Advance the device SeqTable for the sampled rows: the next input token and the computed length — for a
         verify row, only up to the drafts it accepted (the state its rejected drafts wrote is past that length)."""
-        dev = ctx.batch.dev
+        dev, prep = ctx.batch.dev, ctx.prep
         if accepts is None:
-            slots = dev.slots[dev.logits_rows]
+            slots = prep.logits_slots
             self.last_token[slots] = tokens
-            self.num_computed[slots] = ctx.prep.lens[dev.logits_rows].long()
+            self.num_computed[slots] = prep.logits_end if prep.logits_end is not None else \
+                prep.lens[dev.logits_rows].long()
             if self.drafter is not None:             # the drafter reads it after every step
                 self.seq_table.n_accept.index_fill_(0, slots, 0)     # device-only: capturable
             return tokens
@@ -439,10 +452,13 @@ class Executor:
                  masks: tuple[list[MaskRow], np.ndarray] | None = None) -> StepContext:
         """The host half of a step's inputs: index arrays, the starts the host knows exactly (`exact` rows; all by
         default) and the constrained rows' masks, staged into static device buffers with asynchronous copies, plus
-        host-side planning. Positions, lengths and write indices are derived on the device by `_prepare`."""
+        host-side planning. Positions, lengths and write indices are staged too when every start is the host's (no
+        drafter), else derived on the device by `_prepare`."""
         n = plan.n_query
         rows, tokens = len(n), int(n.sum())
         qstart = np.concatenate([[0], np.cumsum(n)])
+        offset = np.arange(tokens) - np.repeat(qstart[:-1], n)
+        start, logits_rows = plan.start_upper.astype(np.int64), np.repeat(np.arange(rows), plan.n_logits)
         up = self.uploader
         up.begin()
         batch = Batch(plan, DeviceBatch(
@@ -451,15 +467,25 @@ class Executor:
             query_start=up.put("query_start", qstart),
             slots=up.put("slots", plan.slots.astype(np.int64)),
             logits_index=up.put("logits_index", _last_tokens(qstart, plan.n_logits)),
-            logits_rows=up.put("logits_rows", np.repeat(np.arange(rows), plan.n_logits)),
+            logits_rows=up.put("logits_rows", logits_rows),
         ))
-        prep = _Prep(row_of_token=up.put("row_of_token", np.repeat(np.arange(rows), n)),
-                     offset=up.put("offset", np.arange(tokens) - np.repeat(qstart[:-1], n)),
-                     n_query=up.put("n_query", n.astype(np.int64)),
-                     exact=up.put("exact", np.ones(rows, dtype=bool) if exact is None else exact),
-                     start=up.put("start", plan.start_upper.astype(np.int64)),
-                     from_device=up.put("from_device", plan.token_src == TokenSrc.DEVICE_LAST),
-                     lens=up.dev["pages.lens"][:rows])
+        from_device = plan.token_src == TokenSrc.DEVICE_LAST
+        prep = _Prep(lens=up.dev["pages.lens"][:rows], start=up.put("start", start),
+                     input_at=up.put("input_at", np.where(from_device, qstart[:-1], self._scratch)),
+                     logits_slots=up.put("logits_slots", plan.slots[logits_rows].astype(np.int64)))
+        positions = None
+        if self.host_starts:
+            if exact is not None and not exact.all():
+                raise RuntimeError("a step without drafts has rows whose start only the device knows")
+            positions = np.repeat(start, n) + offset
+            up.put("positions", positions)
+            up.put("pages.lens", (start + n).astype(np.int32))
+            prep.logits_end = up.put("logits_end", (start + n)[logits_rows])
+        else:
+            prep.row_of_token = up.put("row_of_token", np.repeat(np.arange(rows), n))
+            prep.offset = up.put("offset", offset)
+            prep.n_query = up.put("n_query", n.astype(np.int64))
+            prep.exact = up.put("exact", np.ones(rows, dtype=bool) if exact is None else exact)
         verify = np.flatnonzero(plan.n_logits > 1)
         if len(verify):                          # a verify row's inputs after the first are its drafts (on device)
             k = int(n[verify[0]]) - 1
@@ -476,7 +502,7 @@ class Executor:
             self.processor.fill(constrained, up.stage("mask", len(index) * width)[0].reshape(-1, width))
             prep.mask_rows = up.put("mask_rows", np.concatenate([index, np.full(total - len(index), total)]))
             prep.mask = up.dev["mask"][: len(prep.mask_rows) * width].view(-1, width)
-        pages = self.state.pages(plan, up)
+        pages = self.state.pages(plan, up, positions)
         drafting = plan.draft_k and plan.n_logits.any() and hasattr(self.drafter, "substeps")
         widths = self.drafter.substeps(plan.draft_k) if drafting else []
         subs = [self._substep(plan, pages, i, q) for i, q in enumerate(widths)]
@@ -531,8 +557,21 @@ class Executor:
             self.sub_planners[g][i].prepare_device(sub.metas[g], sub)
 
     def _prepare(self, ctx: StepContext) -> None:
-        """The device half: the SeqTable's starts for host-exact rows, then positions, lengths, write indices and
-        inputs still on the device — all into static buffers, so this runs inside a captured graph too."""
+        """The device half: inputs still on the device and the SeqTable's starts, then (unless the host staged them)
+        positions, lengths and write indices — all into static buffers, so this runs inside a captured graph too."""
+        dev, prep = ctx.batch.dev, ctx.prep
+        # A row's first input is the device's last token where it holds it (the other rows write the scratch element).
+        self._input_ids[prep.input_at] = self.last_token[dev.slots]
+        if prep.exact is None:
+            self.num_computed[dev.slots] = prep.start
+        else:
+            self._derive(ctx)
+        for group, planner in self.planners.items():
+            planner.prepare_device(ctx.metas[group], ctx)
+
+    def _derive(self, ctx: StepContext) -> None:
+        """Positions, lengths and write indices from the SeqTable's starts, for steps whose starts the device may hold
+        (the host's where `exact`), and a verify row's drafts."""
         dev, prep = ctx.batch.dev, ctx.prep
         self.num_computed[dev.slots] = torch.where(prep.exact, prep.start, self.num_computed[dev.slots])
         start = self.num_computed[dev.slots]
@@ -543,8 +582,6 @@ class Executor:
         positions = start[prep.row_of_token] + prep.offset
         dev.positions.copy_(positions.clamp(max=limit - 1) if self.drafter is not None else positions)
         prep.lens.copy_(start + prep.n_query)
-        first = dev.query_start[:-1]
-        dev.input_ids[first] = torch.where(prep.from_device, self.last_token[dev.slots], dev.input_ids[first])
         if prep.draft_index is not None:
             # A verify row's drafts past its `n_draft` (capped so its tokens stay within the limit) are token 0.
             table, cols = self.seq_table, self.seq_table.draft_tokens.shape[1]
@@ -557,8 +594,6 @@ class Executor:
         for pages in ctx.pages.values():
             unit = pages.table[slot_of_token, positions // pages.page].long()
             pages.write_index.copy_(unit * pages.page + positions % pages.page)
-        for group, planner in self.planners.items():
-            planner.prepare_device(ctx.metas[group], ctx)
 
     def _prompt_logprobs(self, h: torch.Tensor, plan: BatchPlan, prompt: list[PromptRows],
                          chunk: int = PROMPT_LOGPROB_CHUNK) -> list[Logprobs]:
