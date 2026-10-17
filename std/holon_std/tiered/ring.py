@@ -4,9 +4,10 @@ whole experts, the coldest — serve the step; at its end they return to their l
 layer's first victim (the policy's next admissions fill them), so the cache never shrinks.
 
 Two uses (`mode`, the host's choice at launch):
-- `ring` (a step of at least `ring_tokens` prompt tokens, on a layout whose every class can lend twice a layer's
-  experts): every piece a layer misses streams into its half of a double buffer of lent slots, layer l + 1's while
-  layer l computes (`expert_prefetch@1`, after the work enqueued so far); a layer's resolve reads them in place (its
+- `ring` (a step of at least `ring_tokens` prompt tokens): every piece a layer misses streams into its half of a double
+  buffer of lent slots, layer l + 1's while layer l computes (`expert_prefetch@1`, after the work enqueued so far:
+  the store's `ring_copy` "sm" copies from the device's tables on a few SMs, no host sync; "dma" reads the copy list
+  back once — the step's one host sync — and copies on copy engines); a layer's resolve reads them in place (its
   `ring` table), so its expert passes, up to 4,096 tokens, fetch nothing but what a pass's own admissions unmap
   (into the graphed steps' staging slots). Lending makes misses, so the halves are sized after it: `ROUNDS` rounds of
   `lend(twice the most misses of a layer, per class, less what is held)`, the last asking for the worst case (twice
@@ -62,6 +63,12 @@ class Lent:
         s.stage_tab.copy_(torch.where(ring_ok, graphed[None], lent))
         if self.mode == "ring":
             self._ring(res, classes, want // BUFFERS, ring_ok)
+            if s.ring_copy == "dma":                                         # the step's one host sync
+                fetch, n = s.ring_host
+                fetch.copy_(s.ring_fetch, non_blocking=True)
+                n.copy_(s.ring_n, non_blocking=True)
+                if res.is_cuda:
+                    torch.cuda.current_stream(res.device).synchronize()
             for g in range(min(BUFFERS, groups)):
                 self._start(g)
         s.stage_width.copy_(torch.where(ring_ok, s.staging, s.prefill).view(1))
@@ -108,7 +115,12 @@ class Lent:
         """Layer g's missing pieces into its half of the ring, after the work enqueued so far."""
         s = self.store
         for r, cls in enumerate(s.layer_classes[g]):
-            s.prefetch[cls.name].start(g, s.ring_fetch[g, r], s.ring_n[g, r:r + 1], cls.units(), cls.slots())
+            if s.ring_copy == "dma":                     # the copy list on the host, from the pinned host pool
+                fetch, n = s.ring_host
+                host = cls.host.view(torch.uint8, (len(cls.pieces), cls.unit_bytes))
+                s.prefetch[cls.name].start(g, fetch[g, r], n[g, r:r + 1], host, cls.slots())
+            else:
+                s.prefetch[cls.name].start(g, s.ring_fetch[g, r], s.ring_n[g, r:r + 1], cls.units(), cls.slots())
 
     def sources(self, g: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Before layer g's first pass: its ring (landed) and stage tables."""

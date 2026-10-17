@@ -101,13 +101,18 @@ class SlotClass:
 
 class TieredStore:
     def __init__(self, ctx, *, name: str, items: int, roles: int, top_k: int, staging: int, prefill: int = 0,
-                 ring_tokens: int = 0, policy: Ref | str = "", tiers: tuple[str, ...] = ("std.tiered.pinned@1",),
-                 cache: str = "", profile: str = "") -> None:
+                 ring_tokens: int = 0, ring_copy: str = "sm", policy: Ref | str = "",
+                 tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "") -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
         # `staging`: slots for the graphed steps' misses; `prefill`: a prefill pass's (lent in its step when more, so
         # a pinned cache must be able to lend that many: else the staging slots hold them, as before D8);
         # `ring_tokens`: the prompt tokens of a step from which it streams through the ring (D8; 0: never)
+        # `ring_copy`: the ring's copies on the device's SMs from its own tables ("sm"), or by copy engines from the
+        # tables read back once per streaming step ("dma")
         self.staging, self.prefill, self.ring_tokens = staging, max(prefill, staging), ring_tokens
+        if ring_copy not in ("sm", "dma"):
+            raise ValueError(f"{name}: ring_copy {ring_copy!r}: sm or dma")
+        self.ring_copy = ring_copy
         self.tiers = [ctx.unit(Ref(t)) for t in tiers]
         if len(self.tiers) != 1 or not self.tiers[0].device_readable:
             raise NotImplementedError(f"{name}: one device-readable host tier (F5a), not {list(tiers)}")
@@ -203,6 +208,9 @@ class TieredStore:
             self.stage_tab = self.ctx.static(f"{self.name}.stage_tab", (shape[0], self.roles, self.prefill),
                                              torch.int32)
             self.ring_ok = self.ctx.static(f"{self.name}.ring_ok", (1,), torch.int32)
+            pinned = self.ctx.device.type == "cuda"         # "dma": the copy list read back into pinned memory
+            self.ring_host = (torch.empty(self.ring_fetch.shape, dtype=torch.int32, pin_memory=pinned),
+                              torch.empty(self.ring_n.shape, dtype=torch.int32, pin_memory=pinned))
             self.stage_width = self.ctx.static(f"{self.name}.stage_width", (1,), torch.int32)
             self.telemetry |= {"lends": self.lend_needs, "ring_ok": self.ring_ok, "stage_width": self.stage_width}
             # The staging slots' list: a graphed step's, or (a layout too small to lend) a prefill pass's.

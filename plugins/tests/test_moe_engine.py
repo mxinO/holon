@@ -296,8 +296,8 @@ def test_only_decode_steps_count_and_decay(tiny_moe, tmp_path):
                                       np.ones(1, np.int32), np.zeros(1, np.int64)))
 
 
-@pytest.mark.parametrize("policy", ["", "placement.lru@1"])
-def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe_deep, tmp_path, policy):
+@pytest.mark.parametrize("policy, copy", [("", "sm"), ("placement.lru@1", "sm"), ("", "dma")])
+def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe_deep, tmp_path, policy, copy):
     """D4's device lending and D8 on the CPU: a step of 10 prompt tokens (its whole budget) streams every layer's
     missing experts through a ring of lent slots (`moe.ring_tokens`), a smaller one stages its misses in lent slots
     (its staging slots hold a graphed step's, 3 rows × top-2); the slots come back empty, each its layer's first
@@ -310,7 +310,8 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe_deep, tmp_path, 
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
     want = _served(_engine(file), prompts)
     engine = _engine(file, host_memory=1 << 24, chunk_with_decode=4, plugin_options={
-        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.placement": policy, "moe.ring_tokens": 10})
+        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.placement": policy, "moe.ring_tokens": 10,
+        "moe.ring_copy": copy})
     store, mixed = engine.ctx.shared_objects[KEY], []
     store.taps.append(lambda step, record: mixed.append(step.n_decode > 0))
     offload = engine.executor.model.layers[0].ffn._store
@@ -495,29 +496,43 @@ def _gpu_engine(model, **kw) -> Engine:
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("policy, cache", [("", ""), ("", "*=0.25"), ("", "*=0"), ("placement.lru@1", "*=0.25"),
                                            ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25"),
-                                           ("", "*=0.5 ring")])
+                                           ("", "*=0.5 ring"), ("", "*=0.5 dma")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
     """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
     resolve, its F11 and F4 variants and zero-copy gather from mapped host pools), decode steps replayed from CUDA
     graphs and prefill chunked past the mmvq limit: the offload store's streams and prompt logprobs are the resident
     store's, bit for bit, under every placement policy (arenas of 42, 18, 10 slots: stream-k unpatched). F11's
-    residency, step by step, is its replay oracle's (L1 parity), with admissions in graphed and eager steps; a
-    borrowing step's lending and ring never wait for the device. A corrupt map entry is flagged by the resolve and
-    stops the engine at the commit; the kernels' id-error word is watched too. The arena pool is released when the
-    ledger frees its pools (the startup profile reads free memory then)."""
+    residency, step by step, is its replay oracle's (L1 parity), with admissions in graphed and eager steps, the ring's
+    copies on SMs or on copy engines; a borrowing step's lending and ring never wait for the device (with copy
+    engines, but for one explicit sync to read the copy list). A
+    corrupt map entry is flagged by the resolve and stops the engine at the commit; the kernels' id-error word is
+    watched too. The arena pool is released when the ledger frees its pools (the startup profile reads free memory
+    then)."""
     from holon_judge.placement import parity, route_dump
 
     file, prompts, want = gpu_moe
-    cache, ring = cache.partition(" ")[::2]          # "ring": steps of 32 prompt tokens or more stream (D8)
-    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
+    cache, ring = cache.partition(" ")[::2]          # "ring" / "dma": steps of 32 prompt tokens or more stream (D8),
+    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={       # their copies on SMs / copy engines
         "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
-        "moe.ring_tokens": 32 if ring else 512})
+        "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm"})
     store = engine.ctx.shared_objects[KEY]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query.sum()) * 2 * 4 * bool(
         (step.n_query == step.n_logits).all()), int(t["counts"].sum()))) or commit(step, t)   # decode, verify steps
-    with route_dump(engine) as trace, _no_host_sync(Lent, "begin", "sources", "done"):
+    syncs, sync = [], torch.cuda.Stream.synchronize               # "dma": one explicit sync per streaming step
+
+    def counted(stream):                                           # the one sync allowed: counted, not raised
+        syncs.append(stream)
+        mode = torch.cuda.get_sync_debug_mode()
+        torch.cuda.set_sync_debug_mode("default")
+        try:
+            return sync(stream)
+        finally:
+            torch.cuda.set_sync_debug_mode(mode)
+    with (route_dump(engine) as trace, _no_host_sync(Lent, "begin", "sources", "done"),
+          mock.patch.object(torch.cuda.Stream, "synchronize", counted)):
         assert _served(engine, prompts) == want
+    assert len(syncs) == (store.borrowed["ring"] if ring == "dma" else 0), (len(syncs), store.borrowed)
     assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
     assert all(a == b for a, b in routed) and max(routed)[0] > 8      # top-2 x 4 layers; graph padding never counts
     variant = {"": "moe_resolve.lfu@1", "placement.lru@1": "moe_resolve.lru@1"}.get(policy, "moe_resolve@1")

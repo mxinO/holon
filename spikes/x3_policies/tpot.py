@@ -2,10 +2,11 @@
 prompts cut from judge/prompts/v1.jsonl) replayed through the offload store with mixed steps (`chunk_with_decode`
 512, `max_seqs` 8), with borrowing on (the store as built: prompt steps lend cache slots, D4 / D8) and off (the
 layout step 3a had: staging slots for a whole prefill pass, nothing lent, 512-token passes — set here by patching the
-store, not an engine option). Per arm and round: TPOT p50 / p99 over requests, the per-request maximum
-inter-token gap p50 / p99, the steps that borrowed; arms interleaved by round, each a fresh engine:
+store, not an engine option); `dma`: borrowing on, the ring's copies on copy engines (`moe.ring_copy`). Per arm
+and round: TPOT p50 / p99 over requests, the per-request maximum inter-token gap p50 / p99, the steps that borrowed;
+arms interleaved by round, each a fresh engine:
 
-    python spikes/x3_policies/tpot.py <model.gguf> <out.json> <rounds> <cache> <arm>...    # arm: on | off
+    python spikes/x3_policies/tpot.py <model.gguf> <out.json> <rounds> <cache> <arm>...   # arm: on | dma | off
 """
 import contextlib
 import gc
@@ -66,7 +67,8 @@ def main() -> None:
                 backend.engine = Engine(EngineConfig(
                     model=model, dtype=torch.bfloat16, max_seqs=8, max_step_tokens=4096,
                     max_model_len=-(-(longest + 1) // 256) * 256, chunk_with_decode=512, host_memory=20 << 30,
-                    plugin_options={"moe.store": "std.moe.offload@1", "moe.cache": cache}))
+                    plugin_options={"moe.store": "std.moe.offload@1", "moe.cache": cache,
+                                    "moe.ring_copy": "dma" if arm == "dma" else "sm"}))
                 backend._rids, backend.temperature = {}, 0.0
                 store = backend.engine.ctx.shared_objects["std.moe.offload"]
                 replay(backend, warmup_sessions(sessions), salt="agent/warmup", corpus=corpus)

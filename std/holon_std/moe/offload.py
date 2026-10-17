@@ -11,8 +11,10 @@ checkpoint's directory), `moe.tiers` (host tiers' Refs,
 comma-separated; default `std.tiered.pinned@1`), `moe.cache` (cache slots per class, pinned: `<class>=<n>` or
 `<class>=<fraction>`, `*` for every class not named; default: fill free VRAM), `moe.ring_tokens` (D8: a step of at
 least this many prompt tokens streams every layer's missing experts through lent ring slots in passes of up to
-`PASS` tokens; 0: never; default 512), `moe.route_transform` (`approx`: the name of a route transform, whose contract
-`moe_route_transform.<name>@1` its plugin provides; its dropped routes, negative ids, are dropped end to end)."""
+`PASS` tokens; 0: never; default 512), `moe.ring_copy` (`sm`: the ring's copies a small kernel beside the pass,
+no host sync; `dma`: copy engines, one host sync per streaming step; default `sm`), `moe.route_transform`
+(`approx`: the name of a route transform, whose contract `moe_route_transform.<name>@1` its plugin provides; its
+dropped routes, negative ids, are dropped end to end)."""
 from __future__ import annotations
 
 import torch
@@ -35,6 +37,7 @@ def _store(ctx, experts: int, top_k: int):
     return ctx.unit(Ref("std.tiered.store@1", name="moe", items=experts, roles=2, top_k=top_k,
                         staging=min(experts, top_k * _rows(ctx)), prefill=min(experts, top_k * CHUNK),
                         ring_tokens=int(opts.get("moe.ring_tokens", RING_TOKENS)),
+                        ring_copy=str(opts.get("moe.ring_copy", "sm")),
                         policy=str(opts.get("moe.placement", "")),
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
                         cache=str(opts.get("moe.cache", "")), profile=profile))

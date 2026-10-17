@@ -75,10 +75,11 @@ then `staging` slots, then cache slots.
   `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, F), in the graph (`src` may be a mapped host pool's
   device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging.
 - `expert_prefetch@1` (D8's ring, eager steps only): an instance has `start(key: int, fetch [2, F] int32, n [1] int32,
-  src [U, unit] uint8, dst [S, unit] uint8)` — `expert_fetch@1`'s copy (`src` a mapped host pool's device view, the
-  tables on the device) on the provider's own stream, after all the work enqueued on the current stream so far,
-  returning at once —; and `wait(key)`: the current stream's later work waits until key's copies have landed (each key
-  waited for once). Facts: unit_bytes.
+  src [U, unit] uint8, dst [S, unit] uint8)` — `expert_fetch@1`'s copy on the provider's own stream, after all the work
+  enqueued on the current stream so far, returning at once: with `fetch` and `n` on the device, from a mapped host
+  pool's device view `src` (no host sync); with them on the host, from the pinned host pool `src` (copy engines) —;
+  and `wait(key)`: the current stream's later work waits until key's copies have landed (each key waited for once).
+  Facts: unit_bytes.
 """
 from __future__ import annotations
 

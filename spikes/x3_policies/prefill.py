@@ -5,7 +5,7 @@ request of N prompt tokens of natural text (judge/prompts/v1.jsonl, concatenated
 chunk), the prefix cache off, generating one token; tok/s = N / the request's wall time, median of R runs after a
 warm-up, arms interleaved by round:
 
-    python spikes/x3_policies/prefill.py <model.gguf> <out.json> <rounds> <N>... -- "<name>|<cache>|<ring_tokens>" ...
+    python spikes/x3_policies/prefill.py <gguf> <out.json> <rounds> <N>... -- "<name>|<cache>|<ring_tokens>[|dma]" ...
 """
 import gc
 import json
@@ -28,9 +28,10 @@ def main() -> None:
     stream = [t for p in PromptSet.load("judge/prompts/v1.jsonl").prompts for t in p.ids]
     results = {name: {n: [] for n in sizes} for name, *_ in arms}
     for _ in range(rounds):
-        for name, cache, ring in arms:
+        for name, cache, ring, *copy in arms:
             kw = {} if cache == "resident" else dict(host_memory=20 << 30, plugin_options={
-                "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.ring_tokens": int(ring)})
+                "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.ring_tokens": int(ring),
+                "moe.ring_copy": copy[0] if copy else "sm"})
             engine = Engine(EngineConfig(model=model, dtype=torch.bfloat16, max_seqs=1, max_step_tokens=max(sizes),
                                          max_model_len=max(sizes) + 64, prefix_cache=False, **kw))
             engine.generate([stream[:512]], ONE)                                  # warm-up
@@ -51,7 +52,8 @@ def main() -> None:
     summary = {name: {n: {"median_tok_s": round(statistics.median(v), 1), "runs": [round(x, 1) for x in v]}
                       for n, v in by.items()} for name, by in results.items()}
     with open(out, "w") as f:
-        json.dump({"arms": [{"name": a[0], "cache": a[1], "ring_tokens": a[2]} for a in arms], "rounds": rounds,
+        json.dump({"arms": [{"name": a[0], "cache": a[1], "ring_tokens": a[2], "ring_copy": (a[3:] or ["sm"])[0]}
+                            for a in arms], "rounds": rounds,
                    "results": summary}, f, indent=1)
     print(json.dumps(summary), flush=True)
 

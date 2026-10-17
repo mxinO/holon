@@ -304,7 +304,8 @@ def test_fetch_gathers_the_listed_units(plugins, device, mapped):
 @pytest.mark.parametrize("device", DEVICES)
 def test_prefetch_copies_the_listed_units_before_its_wait(plugins, device):
     """`expert_prefetch@1` (D8's ring): `expert_fetch@1`'s copy from a mapped host pool (the store's allocation), its
-    table and count on the device, landed once the current stream has waited for the key; nothing else written."""
+    table and count on the device (SM copies) or on the host (copy engines), landed once the current stream has waited
+    for the key; nothing else written."""
     provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
     unit = 4096 + 48
     prefetch = kernel(plugins, device, EXPERT_PREFETCH, provider, unit_bytes=unit)
@@ -316,6 +317,10 @@ def test_prefetch_copies_the_listed_units_before_its_wait(plugins, device):
     dst = torch.randint(0, 256, (30, unit), dtype=torch.uint8, generator=g).to(device)
     fetch = torch.tensor([[7, 8, 9, 2, 0], [3, 4, 5, 20, 11]], dtype=torch.int32)
     want = reference.expert_fetch(fetch, 4, data, dst.cpu())
+    dma = dst.clone()
     prefetch.start(5, fetch.to(device), torch.tensor([4], dtype=torch.int32, device=device), src, dst)
+    prefetch.start(6, fetch, torch.tensor([4], dtype=torch.int32), host.view(10, unit), dma)   # the host's list
     prefetch.wait(5)
+    prefetch.wait(6)
     assert torch.equal(dst.cpu(), want) and torch.equal(want[4], data[8]) and not torch.equal(want[11], data[0])
+    assert torch.equal(dma.cpu(), want)

@@ -390,11 +390,66 @@ void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & s
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+// expert_prefetch@1 from the host's copy list: unit src[fetch[0, i]] -> slot dst[fetch[1, i]] for i < n, as one batch
+// of copy-engine DMA on `stream`, a run of consecutive units into consecutive slots one copy. `src` is pinned host
+// memory; the list is read before this returns.
+void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at::Tensor & dst, int64_t stream_handle) {
+    TORCH_CHECK(!src.is_cuda() && src.is_pinned() && dst.is_cuda() && src.dim() == 2 && dst.dim() == 2 &&
+                src.size(1) == dst.size(1) && src.is_contiguous() && dst.is_contiguous() && src.scalar_type() == at::kByte &&
+                dst.scalar_type() == at::kByte, "src [U, unit] pinned host bytes, dst [S, unit] CUDA bytes");
+    TORCH_CHECK(!fetch.is_cuda() && fetch.scalar_type() == at::kInt && fetch.dim() == 2 && fetch.size(0) == 2 &&
+                n <= fetch.size(1), "fetch [2, F] int32 on the host, n <= F");
+    const c10::cuda::CUDAGuard guard(dst.device());
+    const auto f = fetch.contiguous();
+    const int32_t * u = f.data_ptr<int32_t>();
+    const int32_t * s = u + f.size(1);
+    const int64_t unit = dst.size(1);
+    const auto * from = static_cast<const uint8_t *>(src.data_ptr());
+    auto * to = static_cast<uint8_t *>(dst.data_ptr());
+    std::vector<void *> dsts;
+    std::vector<const void *> srcs;
+    std::vector<size_t> sizes;
+    for (int64_t i = 0; i < n;) {
+        int64_t run = 1;
+        while (i + run < n && u[i + run] == u[i] + run && s[i + run] == s[i] + run) {
+            ++run;
+        }
+        TORCH_CHECK(u[i] >= 0 && u[i] + run <= src.size(0) && s[i] >= 0 && s[i] + run <= dst.size(0),
+                    "copy ", i, " outside src or dst");
+        dsts.push_back(to + int64_t(s[i]) * unit);
+        srcs.push_back(from + int64_t(u[i]) * unit);
+        sizes.push_back(size_t(run * unit));
+        i += run;
+    }
+    if (dsts.empty()) {
+        return;
+    }
+    auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
+#if CUDART_VERSION >= 12080
+    cudaMemcpyAttributes attrs = {};
+    attrs.srcAccessOrder = cudaMemcpySrcAccessOrderStream;
+    attrs.flags = cudaMemcpyFlagPreferOverlapWithCompute;
+    size_t index = 0;
+#if CUDART_VERSION >= 13000
+    C10_CUDA_CHECK(cudaMemcpyBatchAsync(dsts.data(), srcs.data(), sizes.data(), dsts.size(), &attrs, &index, 1, stream));
+#else
+    size_t failed = 0;
+    C10_CUDA_CHECK(cudaMemcpyBatchAsync(dsts.data(), const_cast<void **>(srcs.data()), sizes.data(), dsts.size(), &attrs,
+                                        &index, 1, &failed, stream));
+#endif
+#else
+    for (size_t i = 0; i < dsts.size(); ++i) {
+        C10_CUDA_CHECK(cudaMemcpyAsync(dsts[i], srcs[i], sizes[i], cudaMemcpyHostToDevice, stream));
+    }
+#endif
+}
+
 }  // namespace
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("resolve", &resolve, "moe_resolve@1 (policy 0) or a variant into slots, fetch, n_fetch (and the counts, misses, "
           "errors, delta log, map and state in place)");
+    m.def("copy_batch", &copy_batch, "expert_prefetch@1 from the host's list: copy-engine DMA on a stream");
     m.def("fetch", &gather, "expert_fetch@1 (beside: expert_prefetch@1's, on few SMs): dst[fetch[1, i]] = src[fetch[0, i]] "
           "for i < min(n, staging)");
 }

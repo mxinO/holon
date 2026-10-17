@@ -51,14 +51,15 @@ def main() -> None:
             if cache != "resident":
                 kw = kw | dict(host_memory=20 << 30, plugin_options=kw.get("plugin_options", {}) | {
                     "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy} | (
-                    {"moe.ring_tokens": int(extra["ring"])} if "ring" in extra else {}))
+                    {"moe.ring_tokens": int(extra["ring"])} if "ring" in extra else {}) | (
+                    {"moe.ring_copy": extra["copy"]} if "copy" in extra else {}))
             for key, field in (("seqs", "max_seqs"), ("chunk", "chunk_with_decode"), ("step", "max_step_tokens")):
                 if key in extra:
                     kw[field] = int(extra[key])
             meta = {"name": name, "cache": cache, "policy": policy or "placement.lfu@1", "plant": plant,
                     "spec": spec, "trace": kind[0] if kind and kind[0] else "snapshot", "run": run, "options": extra,
                     "reference": "resident" + "_ngram" * bool(spec) + "_decode" * bool(kind and kind[0])
-                    + "".join(f"_{k}{v}" for k, v in sorted(extra.items()) if k != "ring")}
+                    + "".join(f"_{k}{v}" for k, v in sorted(extra.items()) if k not in ("ring", "copy"))}
             t = time.time()
             with PLANTS[plant]() if plant else contextlib.nullcontext():
                 engine = Engine(EngineConfig(model=model, **(ENGINE | kw)))

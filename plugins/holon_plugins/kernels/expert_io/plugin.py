@@ -81,17 +81,20 @@ class ExpertFetch:
 
 
 class ExpertPrefetch:
-    """D8's ring copies: the fetch kernel (zero-copy reads of the mapped host pool) on a stream of its own, after the
-    work enqueued so far; each key's end an event the compute stream waits on. Its tables are the device's: no host
-    sync."""
+    """D8's ring copies on a stream of its own, after the work enqueued so far, each key's end an event the compute
+    stream waits on: from the device's tables, the fetch kernel on few SMs (zero-copy reads of the mapped host pool);
+    from the host's, copy-engine DMA from the pinned host pool (`cudaMemcpyBatchAsync`)."""
 
     def __init__(self, modules: Modules, ctx, *, unit_bytes: int) -> None:
         self.lib, self.stream, self.landed = modules(ctx.fingerprint.sm), torch.cuda.Stream(ctx.device), {}
 
     def start(self, key: int, fetch: torch.Tensor, n: torch.Tensor, src: torch.Tensor, dst: torch.Tensor) -> None:
         self.stream.wait_stream(torch.cuda.current_stream(dst.device))     # after the work enqueued so far
-        with torch.cuda.stream(self.stream):
-            self.lib.fetch(fetch, n, src, dst, True)
+        if fetch.is_cuda:                                                  # the device's tables: SM copies
+            with torch.cuda.stream(self.stream):
+                self.lib.fetch(fetch, n, src, dst, True)
+        else:                                                              # the host's: copy engines
+            self.lib.copy_batch(fetch, int(n[0]), src, dst, self.stream.cuda_stream)
         self.landed[key] = torch.cuda.Event()
         self.landed[key].record(self.stream)
 
