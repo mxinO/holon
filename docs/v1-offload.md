@@ -1537,3 +1537,15 @@ at the end of a decode trace, one token per step, top-20 bucketed KL): at 25% ca
 Against the mmvq floor at a frozen 25% placement it is outside the exact budgets (top-1 97.15%, ΔPPL +1.01%), as §6
 expected; decode at 25% cached under F11 gains +11.2% (46.45 → 51.67 tok/s), inside Strata's +10–24%. A1 stays
 `approx`: opt-in by `moe.route_transform = tail_skip`, a lock binding it only with `--allow-approx`.
+
+**Suite and CI** (one RTX A5000, the worktree's own venv, under `MemoryMax`): `pytest core std plugins judge testing
+tools` at `a293763` (the four fixes): **1519 passed, 66 skipped in 24 min 4 s**, plus the core-diff report's test since
+(`337cb8a`, 0.1 s; `core/tests/test_api.py` 44 passed at the final code). `main` (`c0c8b71`) on the same card the same
+day: 1248 passed, 2 failed, 52 skipped in 23 min 5 s (its two failures — a Qwen3.5 plant patching a GQA member main's
+std lacks, and the demo harness's venv check — are main's checkout's, not X's; both pass here). X adds 269 tests and
+≈ 1 min (+4%): the new plugins', seams' and store's own tests. `scripts/ci/run_all.sh main`: green in 41 s (import
+contracts 8 kept; ABI 1.3; core LOC 4,603 / 6,000).
+- **Found at the close:** `check_core_diff.sh` always reported "core-diff (empty)" under `run_all.sh`, which runs it in
+  `scripts/ci`, where its relative `core/` pathspec matched nothing; fixed with a top-level pathspec and a test
+  (`337cb8a`). Against `main` it now lists X's 27 core files; from the API tag to step 7's merge `git diff --stat` shows
+  no core path and only step 4's recorded std follow-ups, so the held-out proof stands.
