@@ -1,5 +1,5 @@
-// The offload store's in-graph kernels (std.moe.kernels: `moe_resolve@1`, `expert_fetch@1`; the placement plugins'
-// variants `moe_resolve.lfu@1`, `moe_resolve.lru@1`). Every call runs on the tensors' device and torch's current
+// The offload store's in-graph kernels (std.moe.kernels: `moe_resolve@1`, `expert_fetch@1`, `moe_patch_rows@1`; the
+// placement plugins' variants `moe_resolve.lfu@1`, `moe_resolve.lru@1`). Every call runs on the tensors' device and torch's current
 // stream, reads its sizes from the device only, and is CUDA-graph capturable.
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -35,7 +35,7 @@ struct State {
 };
 
 __host__ __device__ inline int shared_words(int policy, int roles, int experts) {
-    return policy == STATIC ? roles * experts : (roles + 9) * experts + 1;    // + 1: the pairs' 8-byte alignment
+    return policy == STATIC ? (roles + 2) * experts : (roles + 11) * experts + 1;   // + 1: the pairs' 8-byte alignment
 }
 
 // The layer's tables of one call (std.moe.kernels' terms).
@@ -48,38 +48,49 @@ struct Layer {
     const int32_t * empty;                             // [R, P]: the layer's empty cache slots, the first n_empty
     int32_t * n_empty;
     int F, P;
+    const int32_t * plan;                              // [E + 1]: the CPU's share of n candidates (F5b)
+    int32_t * jobs;                                    // [J + 1, W]: the CPU's job table (mapped host memory)
+    int J, W;
 };
 
 // One CTA per call. need[r][e]: 1 if role r of expert e is routed and missing (not resident, not in the ring); an
 // admitted expert's entry becomes -2 - its new slot, a staged one's its staging rank. A warp per role ranks the misses
-// by id (ballot scans), so staging slots and fetch entries are deterministic; then every entry gets its slot. The
-// variants first update their state, then rank their candidates (the call's decode misses, missing in every role of
-// the map) and victims (resident in every role, routed by no live entry of the call) in their policy's order; the
-// first candidates take the layer's empty slots, the rest pair with the victims, and the admissions enter the map.
+// by id (ballot scans), so staging slots and fetch entries are deterministic; then every entry gets its slot. First
+// the CPU takes its share of the misses (F5b: `plan`, by (best routing rank, expert id), the last ones), which are
+// neither fetched nor admitted and are written to the job table. The variants then update their state, rank their
+// candidates (the call's decode misses, missing in every role of the map, not the CPU's) and victims (resident in
+// every role, routed by no live entry of the call) in their policy's order; the first candidates take the layer's
+// empty slots, the rest pair with the victims, and the admissions enter the map.
 template <int P>
 __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __restrict__ kinds, Layer L,
                           int32_t * __restrict__ counts, int32_t * __restrict__ routed, int32_t * __restrict__ misses,
                           int32_t * __restrict__ errors, int32_t * __restrict__ delta, int32_t * __restrict__ n_delta,
                           int group, int cap, State st, int32_t * __restrict__ slots, int32_t * __restrict__ fetch,
-                          int32_t * __restrict__ n_fetch, int tokens, int k, int experts, int roles, int staging) {
+                          int32_t * __restrict__ n_fetch, int32_t * __restrict__ cpu, int tokens, int k, int experts,
+                          int roles, int staging) {
     extern __shared__ int32_t shared[];
     int32_t * need = shared;                           // [roles, experts]
-    int32_t * live = need + roles * experts;           // [experts]: routed by a live entry of the call (variants)
+    int32_t * best = need + roles * experts;           // [experts]: its least routing rank (INT_MAX: not routed); then
+                                                       // its CPU job's index, or -1
+    int32_t * ckeys = best + experts;                  // the CPU candidates' keys (rank · E + id), unordered
+    int32_t * live = ckeys + experts;                  // [experts]: routed by a live entry of the call (variants)
     int32_t * dec = live + experts;                    // its DECODE entries
     int32_t * first = dec + experts;                   // its first DECODE entry (LRU's candidate order)
     int32_t * cand = first + experts;                  // candidates, by rank
     int32_t * vict = cand + experts;                   // victims, by rank
     // The candidates and the victims, unranked, as (order key, expert id) pairs packed so one comparison ranks them
     // (8-byte aligned: a word skipped when the tables before them hold an odd number).
-    int64_t * cands = reinterpret_cast<int64_t *>(vict + experts + ((roles + 5) * experts & 1));
+    int64_t * cands = reinterpret_cast<int64_t *>(vict + experts + ((roles + 7) * experts & 1));
     int64_t * victs = cands + experts;
-    __shared__ int has_decode, n_cand, n_vict, n_admit, base, spare;
+    __shared__ int has_decode, n_cand, n_vict, n_admit, base, spare, n_cpu, take;
     const int entries = tokens * k, tid = threadIdx.x;
-    for (int i = tid; i < shared_words(P, roles, experts); i += blockDim.x) {   // `first` starts past every entry
-        shared[i] = i >= (roles + 2) * experts && i < (roles + 3) * experts ? INT_MAX : 0;
+    for (int i = tid; i < shared_words(P, roles, experts); i += blockDim.x) {   // `best`, `first` past every entry
+        const bool high = (i >= roles * experts && i < (roles + 1) * experts) ||
+                          (i >= (roles + 4) * experts && i < (roles + 5) * experts);
+        shared[i] = high ? INT_MAX : 0;
     }
     if (tid == 0) {
-        has_decode = n_cand = n_vict = 0;
+        has_decode = n_cand = n_vict = n_cpu = 0;
         if (P != STATIC) {
             base = *n_delta;                           // the layer's log: only this call appends to it now
             spare = *L.n_empty;
@@ -100,6 +111,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             }
         }
         atomicOr(&routed[e], 1);                       // an earlier call's scope bit stays
+        atomicMin(&best[e], i % k);
         if (P != STATIC) {
             live[e] = 1;
         }
@@ -108,6 +120,73 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
                 need[r * experts + e] = 1;
             }
         }
+    }
+    __syncthreads();
+    // The CPU's share: candidates routed, missing in every role and held by the tier the device reads (-1).
+    for (int e = tid; e < experts; e += blockDim.x) {
+        bool held = best[e] != INT_MAX;
+        for (int r = 0; r < roles; ++r) {
+            held = held && L.residency[e * roles + r] == -1 && L.ring[e * roles + r] < 0;
+        }
+        if (held) {
+            ckeys[atomicAdd(&n_cpu, 1)] = best[e] * experts + e;
+        }
+    }
+    __syncthreads();
+    if (tid == 0) {
+        take = n_cpu ? min(L.plan[n_cpu], n_cpu) : 0;
+    }
+    __syncthreads();
+    for (int i = tid; i < n_cpu; i += blockDim.x) {    // ranked by (best rank, id): the last `take` are the CPU's
+        const int key = ckeys[i];
+        int rank = 0;
+        for (int y = 0; y < n_cpu; ++y) {
+            rank += ckeys[y] < key;
+        }
+        if (rank >= n_cpu - take) {
+            const int e = key % experts;
+            best[e] = -2;                              // taken; its job index below
+            for (int r = 0; r < roles; ++r) {
+                need[r * experts + e] = 0;
+            }
+        }
+    }
+    __syncthreads();
+    for (int e = tid; e < experts; e += blockDim.x) {
+        best[e] = best[e] == -2 ? -2 : -1;
+    }
+    __syncthreads();
+    if (take && tid < 32) {                            // job indices by id (a warp's ballot scan); the jobs' heads
+        int seen = 0;
+        for (int b = 0; b < experts; b += 32) {
+            const int e = b + tid;
+            const bool mine = e < experts && best[e] == -2;
+            const unsigned all = __ballot_sync(0xffffffffu, mine);
+            if (mine) {
+                best[e] = seen + __popc(all & ((1u << tid) - 1));
+            }
+            seen += __popc(all);
+        }
+    }
+    __syncthreads();
+    for (int e = tid; e < experts; e += blockDim.x) {
+        if (best[e] >= 0) {
+            int32_t * job = L.jobs + int64_t(1 + best[e]) * L.W;
+            int n = 0;
+            for (int i = 0; i < entries; ++i) {        // its entries, ascending
+                if (ids[i] == e && kinds[i / k] != PADDING && n < L.W - 4) {
+                    job[4 + n++] = i;
+                }
+            }
+            atomicOr(&routed[e], 4);                   // the CPU's (the route taps see it)
+            job[0] = e;
+            job[1] = L.host[e * roles];
+            job[2] = L.host[e * roles + 1];
+            job[3] = n;
+        }
+    }
+    if (tid == 0) {
+        L.jobs[0] = take;
     }
     __syncthreads();
     if (P != STATIC && has_decode) {                   // a step with decode rows: decay (or tick), count, classify
@@ -136,7 +215,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             if (live[e]) {                             // routed by the call that picks victims: the victims' scope
                 routed[e] |= 2;
             }
-            const bool is_cand = dec[e] && missing;
+            const bool is_cand = dec[e] && missing && best[e] < 0;    // not the CPU's
             const bool is_vict = !is_cand && whole && (!live[e] || (st.plant & PLANT_VICTIM_NEEDED));
             // Candidates hottest (LFU: score descending; LRU: routed first) first, victims coldest (least recent) first,
             // ties by expert id: ascending in the packed order.
@@ -249,9 +328,11 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
     for (int i = tid; i < entries; i += blockDim.x) {
         const int e = ids[i], j = i % k;
         const bool live_entry = kinds[i / k] != PADDING && e >= 0;
+        const bool on_cpu = live_entry && best[e] >= 0;
+        cpu[i] = on_cpu ? i : -1;
         for (int r = 0; r < roles; ++r) {
             int32_t at = j;
-            if (live_entry) {
+            if (live_entry && !on_cpu) {
                 at = L.residency[e * roles + r];
                 const int32_t rg = L.ring[e * roles + r];
                 if (at < 0 && rg < 0) {                // staged
@@ -313,8 +394,8 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
              const at::Tensor & host, const at::Tensor & limits, at::Tensor & counts, at::Tensor & routed,
              const at::Tensor & ring, const at::Tensor & stage, const at::Tensor & empty, at::Tensor & n_empty,
              at::Tensor & misses, at::Tensor & errors, at::Tensor & delta, at::Tensor & n_delta, int64_t group,
-             const std::vector<at::Tensor> & state, int64_t plant, at::Tensor & slots, at::Tensor & fetch,
-             at::Tensor & n_fetch, int64_t staging) {
+             const std::vector<at::Tensor> & state, int64_t plant, const at::Tensor & plan, at::Tensor & jobs,
+             at::Tensor & slots, at::Tensor & fetch, at::Tensor & n_fetch, at::Tensor & cpu, int64_t staging) {
     const c10::cuda::CUDAGuard guard(ids.device());
     TORCH_CHECK(ids.is_cuda() && ids.dim() == 2 && residency.dim() == 2 && stage.dim() == 2 && empty.dim() == 2 &&
                 delta.dim() == 2, "ids [T, k] on CUDA");
@@ -339,6 +420,10 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
     check(slots, ids, at::kInt, {roles, tokens, k}, "slots");
     check(fetch, ids, at::kInt, {roles, 2, width}, "fetch");
     check(n_fetch, ids, at::kInt, {roles}, "n_fetch");
+    check(plan, ids, at::kInt, {experts + 1}, "plan");
+    check(jobs, ids, at::kInt, {jobs.size(0), jobs.size(1)}, "jobs");
+    check(cpu, ids, at::kInt, {tokens, k}, "cpu");
+    TORCH_CHECK(jobs.dim() == 2 && jobs.size(1) >= 4, "jobs [J + 1, 4 + T']");
     State st{nullptr, nullptr, nullptr, int(plant)};
     if (policy == LFU) {
         TORCH_CHECK(state.size() == 1, "lfu: score");
@@ -355,14 +440,72 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
     }
     Layer L{residency.data_ptr<int32_t>(), host.data_ptr<int32_t>(), limits.data_ptr<int32_t>(), ring.data_ptr<int32_t>(),
             stage.data_ptr<int32_t>(), empty.data_ptr<int32_t>(), n_empty.data_ptr<int32_t>(), int(width),
-            int(empty.size(1))};
+            int(empty.size(1)), plan.data_ptr<int32_t>(), jobs.data_ptr<int32_t>(), int(jobs.size(0) - 1),
+            int(jobs.size(1))};
     const size_t smem = shared_words(int(policy), int(roles), int(experts)) * sizeof(int32_t);
     auto kernel = policy == LFU ? k_resolve<LFU> : policy == LRU ? k_resolve<LRU> : k_resolve<STATIC>;
     kernel<<<1, RESOLVE_THREADS, smem, stream()>>>(
         ids.data_ptr<int32_t>(), kinds.data_ptr<uint8_t>(), L, counts.data_ptr<int32_t>(), routed.data_ptr<int32_t>(),
         misses.data_ptr<int32_t>(), errors.data_ptr<int32_t>(), delta.data_ptr<int32_t>(), n_delta.data_ptr<int32_t>(),
         int(group), int(delta.size(0)), st, slots.data_ptr<int32_t>(), fetch.data_ptr<int32_t>(),
-        n_fetch.data_ptr<int32_t>(), tokens, k, experts, roles, staging);
+        n_fetch.data_ptr<int32_t>(), cpu.data_ptr<int32_t>(), tokens, k, experts, roles, staging);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+// moe_patch_rows@1: a token's input row (as f32) into the CPU's mapped rows when one of its entries is the CPU's; an
+// entry's CPU output row into y. A CTA per row.
+template <typename T>
+__global__ void k_publish(const T * __restrict__ x, const int32_t * __restrict__ cpu, float * __restrict__ out, int k,
+                          int hidden) {
+    const int t = blockIdx.x;
+    bool any = false;
+    for (int j = 0; j < k; ++j) {
+        any = any || cpu[t * k + j] >= 0;
+    }
+    if (any) {
+        for (int c = threadIdx.x; c < hidden; c += blockDim.x) {
+            out[int64_t(t) * hidden + c] = float(x[int64_t(t) * hidden + c]);
+        }
+    }
+}
+
+__global__ void k_patch(float * __restrict__ y, const float * __restrict__ rows, const int32_t * __restrict__ cpu,
+                        int hidden) {
+    const int i = blockIdx.x, at = cpu[i];
+    if (at >= 0) {
+        for (int c = threadIdx.x; c < hidden; c += blockDim.x) {
+            y[int64_t(i) * hidden + c] = rows[int64_t(at) * hidden + c];
+        }
+    }
+}
+
+void publish(const at::Tensor & x, const at::Tensor & cpu, at::Tensor & out) {
+    const c10::cuda::CUDAGuard guard(x.device());
+    TORCH_CHECK(x.is_cuda() && x.dim() == 2 && x.is_contiguous() && cpu.dim() == 2 && cpu.size(0) == x.size(0),
+                "x [T, H] contiguous on CUDA, cpu [T, k]");
+    check(cpu, x, at::kInt, {x.size(0), cpu.size(1)}, "cpu");
+    check(out, x, at::kFloat, {out.size(0), x.size(1)}, "out");
+    TORCH_CHECK(out.size(0) >= x.size(0), "out has fewer rows than x");
+    if (!x.size(0)) {
+        return;
+    }
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::kBFloat16, at::kHalf, x.scalar_type(), "publish", [&] {
+        k_publish<scalar_t><<<x.size(0), 256, 0, stream()>>>(x.data_ptr<scalar_t>(), cpu.data_ptr<int32_t>(),
+                                                             out.data_ptr<float>(), int(cpu.size(1)), int(x.size(1)));
+    });
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void patch(at::Tensor & y, const at::Tensor & rows, const at::Tensor & cpu) {
+    const c10::cuda::CUDAGuard guard(y.device());
+    TORCH_CHECK(y.is_cuda() && y.dim() == 3 && y.scalar_type() == at::kFloat && y.is_contiguous(), "y [T, k, H] f32");
+    check(cpu, y, at::kInt, {y.size(0), y.size(1)}, "cpu");
+    check(rows, y, at::kFloat, {rows.size(0), y.size(2)}, "rows");
+    if (!y.size(0)) {
+        return;
+    }
+    k_patch<<<y.size(0) * y.size(1), 256, 0, stream()>>>(y.data_ptr<float>(), rows.data_ptr<float>(),
+                                                          cpu.data_ptr<int32_t>(), int(y.size(2)));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -449,6 +592,8 @@ void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at:
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("resolve", &resolve, "moe_resolve@1 (policy 0) or a variant into slots, fetch, n_fetch (and the counts, misses, "
           "errors, delta log, map and state in place)");
+    m.def("publish", &publish, "moe_patch_rows@1's publish: x's rows with a CPU entry into the CPU's mapped rows");
+    m.def("patch", &patch, "moe_patch_rows@1: y[t, j] = rows[cpu[t, j]] where it is >= 0");
     m.def("copy_batch", &copy_batch, "expert_prefetch@1 from the host's list: copy-engine DMA on a stream");
     m.def("fetch", &gather, "expert_fetch@1 (beside: expert_prefetch@1's, on few SMs): dst[fetch[1, i]] = src[fetch[0, i]] "
           "for i < min(n, staging)");

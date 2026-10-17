@@ -164,9 +164,14 @@ class Resident:
         return down
 
     @staticmethod
-    def route(ids: torch.Tensor, first: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """The ids each stack reads for tokens `first`…: the experts' own."""
+    def route(ids: torch.Tensor, first: int, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """The ids each stack reads for tokens `first`… (inputs `x`): the experts' own."""
         return ids, ids
+
+    @staticmethod
+    def patch(y: torch.Tensor) -> torch.Tensor:
+        """The experts' outputs, as computed."""
+        return y
 
     @staticmethod
     def transform(ids: torch.Tensor, weights: torch.Tensor, first: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -239,8 +244,8 @@ class MoE(nn.Module):
                       for c in range(0, b - a, CHUNK)]
             weights, ids = routes[0] if len(routes) == 1 else (torch.cat(t) for t in zip(*routes, strict=True))
             ids, weights = self._store.transform(ids, weights, a)
-            gate_up, down = self._store.route(ids, a)
+            gate_up, down = self._store.route(ids, a, xc)
             h = self._gate_up(xc[:, None], gate_up)                   # [t, k, inter] f32, SwiGLU applied
-            self._combine(self._down(h, down), weights, out[a:b])
+            self._combine(self._store.patch(self._down(h, down)), weights, out[a:b])
         self._store.finish()
         return out

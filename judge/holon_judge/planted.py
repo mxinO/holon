@@ -27,7 +27,8 @@
   the copy stream), or its map to another swap's slot; a host edit in F11's device-owned cache (with the
   precondition check, and without it); F11's victims chosen without the step's needs, or two admissions into one
   victim's slot (the kernel's plant bits); a lent slot returned while still mapped to its expert. Each reports how
-  often it fired.
+  often it fired. F5b (bounded L2 with frozen placement, run-identical ×3 with adaptive placement): the CPU's rows
+  read without waiting for the CPU in one layer; the CPU experts' gate / up halves swapped.
 
 The GGUF plants patch names, so they rely on how the engine reaches them: `_loaded` replaces `load_weights` and
 `resolve_model` in `holon.core.engine`'s namespace (it imports them by name), and the kernel plants wrap
@@ -904,11 +905,11 @@ def resolve_off_by_one() -> Iterator[None]:
 
     call, fired = DeviceResolver.__call__, collections.Counter()
 
-    def planted(self, ids, first):
-        slots = call(self, ids, first)
+    def planted(self, ids, first, *share):
+        slots, cpu = call(self, ids, first, *share)
         k, staging = self.store.top_k, self.store.staging
         fired[_when()] += 1
-        return torch.where((slots >= k) & (slots < k + staging), k + (slots - k + 1) % staging, slots)
+        return torch.where((slots >= k) & (slots < k + staging), k + (slots - k + 1) % staging, slots), cpu
 
     def missed(store, step, record):
         fired["steps with misses"] += bool((record["routed"] & ~(store.residency.host >= 0).all(-1)).any())
@@ -1059,6 +1060,41 @@ def lent_slot_still_mapped() -> Iterator[None]:
     print(f"plant lent-slot-still-mapped fired: { {k: int(v) for k, v in fired.items()} }", file=sys.stderr)
 
 
+@contextlib.contextmanager
+def cpu_wait_skipped(layers: tuple[int, ...] = (0,)) -> Iterator[None]:
+    """F5b: the graph reads the CPU's rows of the layers in `layers` (by default the first: 1 in 48 on the vehicle,
+    § 6's ≈ 1%) without waiting for the CPU — the row patch races the worker writing them. Reports the patches that
+    skipped their wait (captured ones on every replay)."""
+    from holon_std.moe import cpu
+
+    collect, fired, slots = cpu.CpuShare.collect, collections.Counter(), set(layers)
+
+    def planted(self, slot, y, rows):
+        if slot not in slots:
+            return collect(self, slot, y, rows)
+        fired[_when()] += 1
+        self.patch(y, self.device["rows"], rows)
+    with mock.patch.object(cpu.CpuShare, "collect", planted):
+        yield
+    print(f"plant cpu-wait-skipped fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def cpu_gate_up_order() -> Iterator[None]:
+    """F5b: the CPU experts read the merged gate / up halves swapped (silu(up) · gate; kernels.ggml_cpu's plant bit).
+    Reports the CPU expert instances built with it."""
+    from holon_plugins.kernels.ggml_cpu import plugin
+
+    init, fired = plugin.CpuExperts.__init__, collections.Counter()
+
+    def planted(self, *args, **kw):
+        init(self, *args, **kw)
+        self.plant, fired["instances"] = 1, fired["instances"] + 1
+    with mock.patch.object(plugin.CpuExperts, "__init__", planted):
+        yield
+    print(f"plant cpu-gate-up-order fired: {dict(fired)}", file=sys.stderr)
+
+
 def _shared(records, counts) -> int:
     """Admissions into a victim slot an earlier admission of the step took."""
     seen, n = set(), 0
@@ -1107,6 +1143,8 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
                                              lambda r, c: int(sum(c[g, b] > 0 for g, _, b in r.tolist()))),
     "lfu-shared-victim": lambda: _lfu_kernel(2, "lfu-shared-victim", _shared),
     "lent-slot-still-mapped": lent_slot_still_mapped,
+    # The CPU's share of the misses (F5b; bounded L2 with placement frozen, run-identical with adaptive placement on)
+    "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)

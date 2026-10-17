@@ -14,7 +14,8 @@ least this many prompt tokens streams every layer's missing experts through lent
 `PASS` tokens; 0: never; default 512), `moe.ring_copy` (`sm`: the ring's copies a small kernel beside the pass,
 no host sync; `dma`: copy engines, one host sync per streaming step; default `sm`), `moe.route_transform`
 (`approx`: the name of a route transform, whose contract `moe_route_transform.<name>@1` its plugin provides; its
-dropped routes, negative ids, are dropped end to end)."""
+dropped routes, negative ids, are dropped end to end), `moe.cpu_plan` and `moe.cpu_isa` (F5b, the CPU's share of the
+misses: `cpu.py`)."""
 from __future__ import annotations
 
 import torch
@@ -22,10 +23,12 @@ from holon.api import Extent, QTensor, Ref
 from torch import nn
 
 from . import kernels
+from .cpu import CpuShare, plan_table
 from .units import CHUNK, ExpertLinear, bind_experts
 
 GATE_UP, DOWN = 0, 1                           # roles
 KEY = "std.moe.offload"                        # the store's shared-object key (`ctx.shared`, the engine's lookup)
+CPU = "std.moe.cpu"                            # F5b's (`CpuShare`)
 RING_TOKENS = 512                              # D8: a step of this many prompt tokens streams (§13: the 5080's)
 PASS = 4096                                    # a streaming step's expert pass, at most (D8)
 
@@ -66,8 +69,14 @@ class Offload(nn.Module):
             raise ValueError(f"std.moe.offload@1: layer {layer} has {experts} experts top-{top_k}, the store "
                              f"{self.store.items} top-{self.store.top_k}")
         self.layer, self._resolver, self._transform = layer, None, None
-        self._transform_name = ctx.options.get("plugins", {}).get("moe.route_transform")
+        opts = ctx.options.get("plugins", {})
+        self._transform_name = opts.get("moe.route_transform")
         self._facts = {"experts": experts, "top_k": top_k}
+        # F5b: the CPU's share, unless the split was measured on another CPU tier (S5: F5a there)
+        plan, isa = plan_table(str(opts.get("moe.cpu_plan", "")), experts), str(opts.get("moe.cpu_isa", ""))
+        self._cpu = ctx.shared(CPU, lambda root: CpuShare(root, self.store, plan=plan, tokens=_rows(root))) \
+            if plan and isa in ("", ctx.fingerprint.cpu_isa) else None
+        self._stacks, self._slot, self._pending = [], None, None
 
     def merge(self, gate: ExpertLinear, up: ExpertLinear) -> ArenaExperts | None:
         """The gate/up stack as pieces of the store: per expert, gate's extent then up's (nothing is read or moved)."""
@@ -77,15 +86,19 @@ class Offload(nn.Module):
         stack = ArenaExperts(self, gate, "swiglu", 2 * gate.out_features, GATE_UP,
                              [_extents(gate), _extents(up)])
         gate.weight = up.weight = gate.parts = up.parts = None
+        self._stacks.append(stack)
         return stack
 
     def stack(self, down: ExpertLinear) -> ArenaExperts:
         stack = ArenaExperts(self, down, "none", down.out_features, DOWN, [_extents(down)])
         down.weight = down.parts = None
+        self._stacks.append(stack)
         return stack
 
     def bind_kernels(self, ctx) -> None:
         self._resolver = self.store.resolver(self.layer)
+        if self._cpu is not None:
+            self._slot = self._cpu.bind(ctx, *self._stacks)
         if self._transform_name:                     # docs/v1-offload.md D3: an explicit option, never by priority
             op = f"moe_route_transform.{self._transform_name}@1"
             self._transform = ctx.select_kernel(op, site=f"std.moe.offload[{self.layer}]",
@@ -102,9 +115,21 @@ class Offload(nn.Module):
         """The expert pass of the step: one per large chunk in a streaming step (D8), else std.moe@1's chunk."""
         return PASS if self.store.large_passes(tokens) else CHUNK
 
-    def route(self, ids: torch.Tensor, first: int) -> torch.Tensor:
-        """Each role's arena slots for `ids` (the step's tokens `first`…), misses fetched."""
-        return self._resolver(ids, first)
+    def route(self, ids: torch.Tensor, first: int, x: torch.Tensor) -> torch.Tensor:
+        """Each role's arena slots for `ids` (the step's tokens `first`…, inputs `x`), misses fetched; with F5b, a
+        small pass's CPU share is published to the CPU (its entries read null slots: zeros until `patch`)."""
+        share = self._cpu is not None and len(ids) <= self._cpu.tokens
+        slots, cpu = self._resolver(ids, first, *(self._cpu.args() if share else ()))
+        self._pending = cpu if share else None
+        if share:
+            self._cpu.publish(self._slot, x, cpu)
+        return slots
+
+    def patch(self, y: torch.Tensor) -> torch.Tensor:
+        """The experts' outputs `y` [T, k, H] of the pass `route` resolved, its CPU share's rows in place."""
+        if self._pending is not None:
+            self._cpu.collect(self._slot, y, self._pending)
+        return y
 
     def finish(self) -> None:
         self._resolver.done()
@@ -124,6 +149,9 @@ class ArenaExperts(nn.Module):
         for e in range(like.experts):
             self.cls = owner.store.add(owner.layer, e, role, name, unit, [x[e] for x in extents])
         self._kernel = None
+
+    def layout_fact(self, ctx) -> str:
+        return self._facts(ctx)["layout"]
 
     def bind_kernels(self, ctx) -> None:
         facts = self._facts(ctx) | {"out": self.out, "glu": self.glu, "slots": self.cls.max_slots}

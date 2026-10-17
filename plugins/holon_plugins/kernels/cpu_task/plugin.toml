@@ -1,0 +1,28 @@
+[plugin]
+name = "kernels.cpu_task"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+core_abi = ">=1.2,<2.0"   # shared objects (the worker), host pools (its words)
+
+[resources]
+provides = ["kernel.cpu_task@1"]
+requires = ["op.cpu_task@1"]
+
+[properties]
+numerics = "exact"
+
+[support]
+platforms = ["cuda"]
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"cpu_task.threads" = { help = "compute worker threads, the coordinator included (CPU experts)", default = "4" }
+"cpu_task.io_threads" = { help = "I/O worker threads (SSD reads)", default = "2" }
+"cpu_task.cores" = { help = "CPUs of the compute threads, e.g. 2-5", default = "one per physical core past the first" }
+"cpu_task.io_cores" = { help = "CPUs of the I/O threads", default = "the physical cores after the compute threads'" }
+"cpu_task.wait" = { help = "how the GPU waits: spin (a 1-thread kernel) or memop (stream memory operations, no SM held: display GPUs)", default = "spin", choices = ["spin", "memop"] }
+"cpu_task.timeout" = { help = "seconds a wait waits before it fails open (the step's commit then stops the engine)", default = "60" }
+
+[build]
+module = "prebuild"

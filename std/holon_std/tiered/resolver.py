@@ -45,22 +45,24 @@ class DeviceResolver:
         self.prepare(first)
         return torch.where(self.ring >= 0, self.ring, self.residency)
 
-    def __call__(self, ids: torch.Tensor, first: int) -> torch.Tensor:
-        """Slots [roles, T, k] for `ids` [T, k], the step's tokens `first`… (their row kinds); the misses fetched."""
+    def __call__(self, ids: torch.Tensor, first: int, plan: torch.Tensor | None = None,
+                 jobs: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+        """Slots [roles, T, k] for `ids` [T, k], the step's tokens `first`… (their row kinds), the misses fetched; and
+        `cpu` [T, k], the entries the CPU computes (F5b: its share by `plan`, its jobs in `jobs`; none without)."""
         store = self.store
         kinds = store.kinds[first:first + len(ids)]
         if len(kinds) != len(ids):
             raise ValueError(f"tokens {first}…{first + len(ids)} past the step's {len(store.kinds)} row kinds")
         self.prepare(first)
-        slots, fetch, n = self.resolve(ids, kinds, self.residency, self.host, self.limits, self.counts,
-                                       store.routed[self.group], self.ring, self.stage, store.empty[self.group],
-                                       store.n_empty[self.group:self.group + 1], store.misses, store.errors,
-                                       store.delta[self.group], store.n_delta[self.group:self.group + 1], self.group,
-                                       **self.state)
+        slots, fetch, n, cpu = self.resolve(
+            ids, kinds, self.residency, self.host, self.limits, self.counts, store.routed[self.group], self.ring,
+            self.stage, store.empty[self.group], store.n_empty[self.group:self.group + 1], store.misses, store.errors,
+            store.delta[self.group], store.n_delta[self.group:self.group + 1], self.group,
+            store.no_plan if plan is None else plan, store.no_jobs if jobs is None else jobs, **self.state)
         self._prepared = False
         for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
             gather(fetch[r], n[r:r + 1], c.units(), c.slots())
-        return slots
+        return slots, cpu
 
     def done(self) -> None:
         """After the layer's expert passes (the step's ring moves on)."""

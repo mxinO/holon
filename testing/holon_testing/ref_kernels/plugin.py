@@ -1,4 +1,5 @@
 from holon.api import Constraint, KernelSpec
+from holon_std.moe.reference import Q8_0_DOT, Q8_K_DOT
 
 from .kernels import BY_OP, PagedAttention
 
@@ -8,6 +9,12 @@ KV_LAYOUTS = ("kv.hnd", "kv.hnd.fp8", "kv.hnd.q8_0")    # every KV layout the pa
 HF = {"fp8_e4m3", "nvfp4", "mxfp4"}
 WEIGHT_SCHEMES = {"qlinear": {"ggml", *HF}, "qlinear_glu": {"ggml", *HF}, "qembedding": {"ggml"},
                   "linear_experts": {"ggml", "dense", *HF}, "linear_experts_arena": {"ggml"}}
+
+
+def _cpu_dot(facts) -> bool:
+    """The layouts whose ggml-cpu activation type the oracle emulates (std.moe.reference `quantize_cpu`)."""
+    kinds = [facts[k].split("/")[0].removeprefix("ggml.") for k in ("gate_up", "down")]
+    return all(k in Q8_0_DOT | Q8_K_DOT for k in kinds)
 
 
 def _reads(schemes: set[str]):
@@ -22,6 +29,7 @@ class Plugin:
                 op=op, provider="testing.ref_kernels", impl=impl, requires=Constraint(devices=frozenset({"cpu"})),
                 supports=(lambda f: f["layout"] in KV_LAYOUTS) if paged else
                 _reads(WEIGHT_SCHEMES[op]) if op in WEIGHT_SCHEMES else
-                (lambda f: f["copy"] in ("sm", "dma")) if op == "expert_prefetch" else None,
+                (lambda f: f["copy"] in ("sm", "dma")) if op == "expert_prefetch" else
+                _cpu_dot if op == "cpu_experts" else None,
                 props=frozenset({"deterministic"} if paged else {"deterministic", "graph_safe"}),
                 config={"fused": ["qlinear_glu@1"]} if op == "qlinear" else {}))

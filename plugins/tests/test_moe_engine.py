@@ -448,6 +448,47 @@ def test_a_route_transform_drops_routes_end_to_end(tiny_moe, tmp_path):
                             plugin_options={"moe.route_transform": "drop_last"}), plugins=PluginSet(found))
 
 
+def test_the_cpus_share_computes_a_passs_lowest_ranked_misses(tiny_moe, tmp_path):
+    """F5b (docs/v1-offload.md D4–D7) on the CPU providers: with a split table (`moe.cpu_plan`; past its end the last
+    entry's share), a pass of at most the graphed steps' tokens (decode, or a short prompt chunk) gives the CPU
+    `plan[n]` of its n misses — computed by
+    `cpu_experts@1`'s oracle, the activations quantized as ggml-cpu quantizes them, patched in before the combine —,
+    larger passes none: outputs close to the resident store's (bounded), run-identical, F11's residency still its
+    replay's step by step (the CPU's misses never admitted). On a host of another CPU tier the split is off (S5) and the
+    outputs are the resident store's bit for bit."""
+    from holon_judge.placement import parity, route_dump
+    from holon_std.moe.cpu import plan_table
+    from holon_std.moe.offload import CPU
+
+    assert plan_table("1,1,2", 6) == [0, 1, 1, 2, 2, 3, 4] and plan_table("0,0", 4) is None
+    with pytest.raises(ValueError, match="must lie in"):
+        plan_table("2", 4)
+    checkpoint, prompts = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
+    want = _served(_engine(file), prompts)
+    split = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.cpu_plan": "1,1,2,2"}
+    runs = []
+    for policy in ("std.tiered.static@1", "std.tiered.static@1", ""):
+        engine = _engine(file, host_memory=1 << 24, plugin_options=split | {"moe.placement": policy})
+        share, entries = engine.ctx.shared_objects[CPU], []
+
+        def collect(slot, y, cpu, f=share.collect, entries=entries):
+            entries.append(int((cpu >= 0).sum()))
+            f(slot, y, cpu)
+        share.collect = collect
+        with route_dump(engine) as trace:
+            runs.append(_served(engine, prompts))
+        assert sum(entries) > 0 and len(entries) < 2 * len(trace.steps)         # passes of at most 3 tokens
+        assert 0 < sum(s["cpu"].sum() for s in trace.steps) <= sum(entries)        # an expert per job, a row per token
+        if not policy:
+            assert parity(trace)["first_differing_step"] is None and trace.admissions > 0
+    assert runs[0] == runs[1]                                                  # run-identical
+    close = [np.allclose(a, b, atol=0.05) for (_, _, a), (_, _, b) in zip(runs[0][1], want[1], strict=True)]
+    assert all(close)
+    engine = _engine(file, host_memory=1 << 24, plugin_options=split | {"moe.cpu_isa": "another-tier"})
+    assert CPU not in engine.ctx.shared_objects and _served(engine, prompts) == want
+
+
 @pytest.fixture(scope="module")
 def gpu_moe(tmp_path_factory):
     """A random Qwen3-MoE as a GGUF of two expert classes, hidden and expert widths 1024 (an mmq tile then runs
@@ -491,8 +532,8 @@ def _no_host_sync(cls, *methods, mode="error"):
 
 
 def _gpu_engine(model, **kw) -> Engine:
-    return Engine(EngineConfig(model=str(model), device="cuda", dtype=torch.bfloat16, page_size=16, max_seqs=4,
-                               max_step_tokens=256, max_model_len=512, cuda_graphs=True, overlap=True, **kw))
+    return Engine(EngineConfig(**dict(model=str(model), device="cuda", dtype=torch.bfloat16, page_size=16, max_seqs=4,
+                                      max_step_tokens=256, max_model_len=512, cuda_graphs=True, overlap=True) | kw))
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
@@ -554,4 +595,51 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     held, nbytes = torch.cuda.memory_allocated(), store.arena.capacity * store.arena.unit_bytes
     store.arena._set(0)                         # as the ledger frees it: no view outlives the arena pool's buffer
     assert held - torch.cuda.memory_allocated() >= nbytes > 0
+    engine.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
+    """F5b on the native path (kernels.expert_io's resolve and row patch, kernels.cpu_task's worker in decode graphs,
+    kernels.ggml_cpu's experts): steps of up to 4 tokens give the CPU half the misses (rounded up) at a quarter cached;
+    prompt logprobs stay close to the resident store's at the same step size (bounded), two engines serve the same
+    bits (static placement; F11's residency is its replay's, the CPU's misses never admitted), and a dead worker fails
+    open: the wait gives up after its time bound and the step's commit stops the engine."""
+    from holon_judge.placement import parity, route_dump
+
+    file, prompts, _ = gpu_moe
+    small = {"max_step_tokens": 4}                            # every prompt pass small enough for a CPU share
+    engine = _gpu_engine(file, **small)
+    want = _served(engine, prompts)
+    engine.close()
+    split = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.cpu_plan": "1,1,2,2",
+             "cpu_task.threads": 2, "cpu_task.timeout": 0.5}
+    runs = []
+    for policy in ("std.tiered.static@1", "std.tiered.static@1", ""):
+        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=split | {"moe.placement": policy}, **small)
+        with route_dump(engine) as trace:
+            runs.append(_served(engine, prompts))
+        worker = engine.ctx.shared_objects["cpu_task.compute"].native
+        assert worker.served() > 0 and worker.flag() == 0 and engine.stats()["graphs"] > 0
+        assert sum(s["cpu"].sum() for s in trace.steps) > 0
+        if not policy:
+            assert parity(trace)["first_differing_step"] is None and trace.admissions > 0
+        else:
+            engine.close()
+    assert runs[0] == runs[1]
+    assert {(k.rpartition("/")[2], v["provider"]) for k, v in engine.ctx.kernels.items() if k.startswith("std.moe.cpu")
+            } == {("cpu_task@1", "kernels.cpu_task"), ("cpu_experts@1", "kernels.ggml_cpu"),
+                  ("moe_patch_rows@1", "kernels.expert_io")}
+    diff = np.concatenate([np.abs(np.array(a) - np.array(b)).ravel() for (_, _, a), (_, _, b) in
+                           zip(runs[0][1], want[1], strict=True) if a])
+    same = np.mean([x[0] == y[0] for (_, ids, _), (_, ref, _) in zip(runs[0][1], want[1], strict=True)
+                    for x, y in zip(ids, ref, strict=True)])
+    assert np.median(diff) < 0.03 and diff.mean() < 0.05 and same > 0.85         # (measured 0.011, 0.016, 0.94; a
+    #                                                                                routing flip moves a position)
+    worker.kill()                                             # the coordinator stops answering
+    engine.add(prompts[1], GREEDY)
+    with pytest.raises(RuntimeError, match="kernel_errors"):
+        while engine.has_work():
+            engine.step()
+    assert worker.flag() & 2
     engine.close()

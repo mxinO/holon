@@ -32,10 +32,11 @@ then `staging` slots, then cache slots.
 
 - `moe_resolve@1`: instance `(ids [T, k] int32, kinds [T] uint8, residency [E, R] int32, host [E, R] int32, limits [R]
   int32, counts [E] int32, routed [E] int32, ring [E, R] int32, stage [R, F] int32, empty [R, P] int32, n_empty [1]
-  int32, misses [1] int32, errors [1] int32, delta [D, 3] int32, n_delta [1] int32, group: int) -> (slots [R, T, k]
-  int32, fetch [R, 2, F] int32, n_fetch [R] int32)`, for one layer's R roles (gate/up, down: each in its own arena of
-  `limits[r]` slots). `kinds` per token (`PADDING`, `DECODE` for decode and verify rows, `PREFILL`); `residency[e, r]`
-  the arena slot of expert e's role r, or −1 − tier when it is not in VRAM; `ring[e, r]`, for this call, the slot a
+  int32, misses [1] int32, errors [1] int32, delta [D, 3] int32, n_delta [1] int32, group: int, plan [E + 1] int32,
+  jobs [1 + J, 4 + T'] int32) -> (slots [R, T, k] int32, fetch [R, 2, F] int32, n_fetch [R] int32, cpu [T, k] int32)`,
+  for one layer's R roles (gate/up, down: each in its own arena of `limits[r]` slots). `kinds` per token (`PADDING`,
+  `DECODE` for decode and verify rows, `PREFILL`); `residency[e, r]` the arena slot of expert e's role r, or −1 − tier
+  when it is not in VRAM; `ring[e, r]`, for this call, the slot a
   non-resident piece was streamed into (−1: none); `host[e, r]` its unit in the host tier the device reads. Entry (t,
   j) of a padding row, or with `ids[t, j]` < 0 (a dropped route), gets null slot j: no fetch, no count. Otherwise a
   resident expert gets its slot, a ring piece its ring slot — a cache slot, in [k + staging, limits[r]); any other is
@@ -50,6 +51,16 @@ then `staging` slots, then cache slots.
   staging (the caller's own staging slots, [k, k + staging): the cache slots start past them). `empty` (the layer's
   empty cache slots per role, the first `n_empty` of them), `delta` (the layer's region of the delta log), `n_delta`
   (its count) and `group` (the layer's index in the map) serve the variants: @1 leaves them as they are.
+  The CPU's share (F5b, docs/v1-offload.md D4): the call's CPU candidates are the experts a live entry routes that are
+  missing in every role (neither resident nor in the ring) and held by the host tier the device reads (tier code −1)
+  in every role; of its n of them the CPU takes c = min(`plan[n]`, n) — the last c by (best routing rank, expert id)
+  ascending, the best rank being the least j of the expert's live entries (Strata's rule: the lowest-ranked misses).
+  They are not fetched (no fetch entry; a variant never admits them, though they count), `routed[e]` |= 4 marks them,
+  their entries read null slot j and get `cpu[t, j]` = t·k + j (every other entry −1), and they are written to
+  `jobs` (`cpu_experts@1`'s table, in mapped host memory) by expert id ascending: `jobs[0, 0]` = c, zero included,
+  then row 1 + i = (expert, `host[e, 0]`, `host[e, 1]`, n_tok, its entries t·k + j ascending). A call without the
+  CPU's share passes a zero `plan` (and a table of its own); the caller sizes `jobs` for its calls with a share (T ≤
+  T', c ≤ J).
 - Variants (docs/v1-offload.md D3): `moe_resolve.<policy>@1`, a contract its placement policy's plugin owns (its own
   oracle and CPU provider), takes @1's arguments, then the policy's device state by name (`device_state`), and keeps
   @1's terms except where it says otherwise. It may change `residency` (the regions its policy owns) and the layer's
@@ -80,12 +91,43 @@ then `staging` slots, then cache slots.
   until key's copies have landed (each key waited for once). Facts: unit_bytes, copy — the copy list's placement an
   instance serves: `sm`, `fetch` and `n` on the device and `src` a mapped host pool's device view (no host sync);
   `dma`, them on the host and `src` the pinned host pool (copy engines). A provider declares the modes it supports.
+
+The CPU's share of the misses (F5b, docs/v1-offload.md D5–D7): per layer the graph runs `moe_resolve → [publish the
+CPU jobs; signal] → expert_fetch → linear_experts_arena (gate/up, down) → [wait] → moe_patch_rows → moe_combine`.
+
+- `cpu_task@1` (D6): an instance (facts: `pool`, the worker's kind: `compute`, `io`) has `bind(task) -> slot` (at
+  build), `signal(slot)` and `wait(slot)` (graph ops on the current stream: the slot's task runs once the stream
+  reaches the signal, the device's writes before it visible to the task; work after the wait runs once the task has
+  answered, its writes visible), and `errors`, a device int32 word [1] that waits OR bits into (1: a task failed, 2: a
+  wait timed out), which the caller zeroes per step and checks at the step's commit. Fail-open: a task error answers
+  at once, a wait gives up after a time bound, and once either happened every later wait returns at once (so a graph
+  never waits forever and a drain ends). A task is the CPU kernel's (`cpu_experts@1`'s `task`): callable (runs it now),
+  with `native` its handle for a native worker — `(ABI version, function, argument)` of the task ABI
+  (kernels.cpu_task's csrc/holon_cpu_task.h), absent where only a synchronous run is possible. The oracle runs a task.
+- `cpu_experts@1` (a CPU kernel): instance `(jobs [1 + J, 4 + T] int32, x [T, hidden] f32, gate_up [U, gu_unit] uint8,
+  down [V, down_unit] uint8, rows [T·k, hidden] f32, threads: int = 1)`, host tensors: for each job (`moe_resolve@1`'s
+  table) the expert whose gate/up piece is unit `gate_up[u]` (gate's `inter` rows, then up's, as the GGUF stores them)
+  and down piece `down[v]`, applied to x[entry // k] for each of its entries, into `rows[entry]`; rows of other entries
+  are left as they are. Each input row is quantized to gate/up's ggml-cpu `vec_dot_type` (Q8_K for the k- and
+  i-quants, Q8_0 for Q4_0, Q5_0, Q8_0, IQ4_NL), each (weight row, token) one ggml-cpu dot, `silu(g) · u` in f32 as
+  `g / (1 + exp(−g)) · u`, quantized to down's `vec_dot_type`, one dot per (row, token). A token's row is bitwise the
+  same whatever the other tokens of its job, the other jobs and the thread count (rows are split across threads,
+  never K): D7. `task(jobs, x, gate_up, down, rows)`: a `cpu_task@1` task over those buffers (host memory the device
+  maps, fixed for the engine's life). Facts: gate_up, down (their layouts), hidden, inter, top_k, tokens (T), jobs
+  (J). Providers carry the CPU's tier (`Constraint.cpu_isa`): ggml-cpu's reductions differ by ISA. The oracle
+  (`reference.cpu_experts`) dequantizes the weights and quantizes the activations as ggml-cpu does, accumulating in
+  float64: it bounds a kernel within the L0 budget; ggml-cpu itself is the bitwise reference.
+- `moe_patch_rows@1`: instance `publish(x [T, H], cpu [T, k] int32, out [T', H] f32)`: `out[t]` = x[t] in f32 for every
+  token with an entry `cpu[t, j]` ≥ 0 (others untouched; `out` the CPU's mapped input rows); `__call__(y [T, k, H]
+  f32, rows [T'·k, H] f32, cpu [T, k] int32)`: `y[t, j]` = `rows[cpu[t, j]]` where it is ≥ 0, in place (`rows` the
+  CPU's mapped output rows), before `moe_combine@1`. Facts: hidden, top_k, dtype (x's).
 """
 from __future__ import annotations
 
 MOE_TOPK, LINEAR_EXPERTS, MOE_COMBINE = "moe_topk@1", "linear_experts@2", "moe_combine@1"
 MOE_RESOLVE, EXPERT_FETCH, LINEAR_EXPERTS_ARENA = "moe_resolve@1", "expert_fetch@1", "linear_experts_arena@1"
 EXPERT_PREFETCH = "expert_prefetch@1"
+CPU_TASK, CPU_EXPERTS, MOE_PATCH_ROWS = "cpu_task@1", "cpu_experts@1", "moe_patch_rows@1"
 PADDING, DECODE, PREFILL = 0, 1, 2   # `moe_resolve@1`'s row kinds
 RANGE, OVERFLOW = 1, 2               # error bits: a resident slot outside the arena's cache slots; a delta record past
                                      # the log (the variants)

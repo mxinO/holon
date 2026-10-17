@@ -1,0 +1,26 @@
+[plugin]
+name = "kernels.ggml_cpu"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+core_abi = ">=1.2,<2.0"   # Constraint.cpu_isa
+
+[resources]
+provides = ["kernel.cpu_experts@1"]
+requires = ["op.cpu_experts@1"]
+
+[properties]
+numerics = "bounded"
+
+[support]
+platforms = ["cuda"]
+
+[provenance]
+source = "https://github.com/ggml-org/llama.cpp"
+commit = "cbe28bb3cb0758f0c566a9a3561766821aeb0748"
+license = "MIT"
+files = ["vendor/", "SHA256SUMS", "vendor.sh", "csrc/shim.c", "csrc/cpu_experts.cpp"]   # csrc: adapted
+
+[build]
+module = "prebuild"

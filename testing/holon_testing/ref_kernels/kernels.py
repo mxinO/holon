@@ -195,14 +195,17 @@ class MoeResolve:
         self.staging = staging
 
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
-                 errors, delta, n_delta, group):
-        slots, fetch, n_fetch, increments, seen, bits = moe.moe_resolve(ids, kinds, residency, host, limits,
-                                                                        self.staging, ring, stage)
+                 errors, delta, n_delta, group, plan, jobs):
+        slots, fetch, n_fetch, increments, seen, bits, cpu, rows = moe.moe_resolve(ids, kinds, residency, host, limits,
+                                                                                  self.staging, ring, stage, plan)
         counts += increments
         routed |= seen
         misses.clamp_(min=int(n_fetch.max()))
         errors |= bits
-        return slots, fetch, n_fetch
+        jobs[0, 0] = len(rows)
+        for i, row in enumerate(rows):
+            jobs[1 + i, :len(row)] = torch.tensor(row)
+        return slots, fetch, n_fetch, cpu
 
 
 class ExpertFetch:
@@ -222,6 +225,47 @@ class ExpertPrefetch:
 
     def wait(self, key):
         pass
+
+
+class CpuTask:
+    """`cpu_task@1` on a CPU engine: a slot's task runs at its signal (a CPU step has nothing to overlap)."""
+
+    def __init__(self, ctx, *, pool: str) -> None:
+        self.tasks, self.errors = [], ctx.static(f"cpu_task.{pool}.errors", (1,), torch.int32)
+
+    def bind(self, task) -> int:
+        self.tasks.append(task)
+        return len(self.tasks) - 1
+
+    def signal(self, slot: int) -> None:
+        moe.cpu_task(self.tasks[slot])
+
+    def wait(self, slot: int) -> None:
+        pass
+
+
+class CpuExperts:
+    """`cpu_experts@1`'s oracle; a task over fixed buffers runs it (synchronous only: no `native`)."""
+
+    def __init__(self, ctx, *, gate_up: str, down: str, inter: int, top_k: int, **facts) -> None:
+        self.gate_up, self.down, self.inter, self.top_k = gate_up, down, inter, top_k
+
+    def __call__(self, jobs, x, gate_up, down, rows, threads: int = 1) -> None:
+        rows.copy_(moe.cpu_experts(jobs, x, gate_up, down, rows, self.gate_up, self.down, self.inter, self.top_k))
+
+    def task(self, jobs, x, gate_up, down, rows):
+        return lambda: self(jobs, x, gate_up, down, rows)
+
+
+class MoePatchRows:
+    def __init__(self, ctx, **facts) -> None:
+        pass
+
+    def publish(self, x, cpu, out) -> None:
+        out.copy_(moe.moe_publish_rows(x, cpu, out))
+
+    def __call__(self, y, rows, cpu) -> None:
+        y.copy_(moe.moe_patch_rows(y, rows, cpu))
 
 
 class CausalConv1d:
@@ -274,6 +318,7 @@ BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul"
          "qlinear": QLinear, "qlinear_glu": QLinearGlu, "qembedding": QEmbedding, "linear_experts": LinearExperts,
          "linear_experts_arena": LinearExperts,
          "moe_topk": MoeTopk, "moe_combine": MoeCombine, "moe_resolve": MoeResolve, "expert_fetch": ExpertFetch,
-         "expert_prefetch": ExpertPrefetch,
+         "expert_prefetch": ExpertPrefetch, "cpu_task": CpuTask, "cpu_experts": CpuExperts,
+         "moe_patch_rows": MoePatchRows,
          "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule, "gated_rmsnorm": GatedRMSNorm,
          "gdn_rewind": GDNRewind, "kv_write": KvWrite}

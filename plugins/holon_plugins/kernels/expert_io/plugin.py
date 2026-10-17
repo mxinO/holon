@@ -1,8 +1,10 @@
-"""The offload store's in-graph kernels as `moe_resolve@1` (one CTA: the layer's misses ranked by expert id, slots
-for every entry), its variants `moe_resolve.lfu@1` (F11) and `moe_resolve.lru@1` (F4) — the same CTA first updates
-the policy's state and admits misses into victims' slots —, and `expert_fetch@1` (the zero-copy gather of missed
-units from a mapped host pool into their slots, 8 CTAs × 256 threads of 16-byte loads: step 0's M1, docs/v1-offload.md
-§13). Op contracts: std.moe.kernels, and the placement plugins' (placement.lfu, placement.lru). A variant's `lend`
+"""The offload store's in-graph kernels as `moe_resolve@1` (one CTA: the CPU's share of the misses, the rest ranked by
+expert id, slots for every entry), its variants `moe_resolve.lfu@1` (F11) and `moe_resolve.lru@1` (F4) — the same CTA
+first updates the policy's state and admits misses into victims' slots —, and `expert_fetch@1` (the zero-copy gather
+of missed units from a mapped host pool into their slots, 8 CTAs × 256 threads of 16-byte loads: step 0's M1,
+docs/v1-offload.md §13), `expert_prefetch@1` and `moe_patch_rows@1` (F5b: a token's row into the CPU's mapped input
+rows, the CPU's output rows into the experts' output). Op contracts: std.moe.kernels, and the placement plugins'
+(placement.lfu, placement.lru). A variant's `lend`
 runs eagerly (ring steps are never graphed) in torch ops. `MoeResolve.plant` is judge-only: the judge's calibration
 plants set its bits; production never does. After the std offload API's tag no new policy codes land here (a later
 variant ships its own CUDA provider, docs/v1-offload.md D3).
@@ -18,10 +20,10 @@ from holon.api import Constraint, KernelSpec
 
 from . import extension
 
-RESOLVE, FETCH, PREFETCH = "moe_resolve", "expert_fetch", "expert_prefetch"
+RESOLVE, FETCH, PREFETCH, PATCH = "moe_resolve", "expert_fetch", "expert_prefetch", "moe_patch_rows"
 POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
 ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
-STATIC_BYTES = 7 * 4                       # its static shared words (and the variants' alignment word)
+STATIC_BYTES = 9 * 4                       # its static shared words (and the variants' alignment word)
 
 
 class Modules:
@@ -43,15 +45,16 @@ class MoeResolve:
         self.lib, self.policy, self.roles, self.staging = modules(ctx.fingerprint.sm), POLICIES[op], roles, staging
 
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
-                 errors, delta, n_delta, group, **state):
+                 errors, delta, n_delta, group, plan, jobs, **state):
         tokens, k = ids.shape
         slots = torch.empty(self.roles, tokens, k, dtype=torch.int32, device=ids.device)
         fetch = torch.empty(self.roles, 2, stage.shape[1], dtype=torch.int32, device=ids.device)
         n_fetch = torch.empty(self.roles, dtype=torch.int32, device=ids.device)
+        cpu = torch.empty(tokens, k, dtype=torch.int32, device=ids.device)
         self.lib.resolve(self.policy, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty,
                          misses, errors, delta, n_delta, group, [state[n] for n in STATE[self.policy]], self.plant,
-                         slots, fetch, n_fetch, self.staging)
-        return slots, fetch, n_fetch
+                         plan, jobs, slots, fetch, n_fetch, cpu, self.staging)
+        return slots, fetch, n_fetch, cpu
 
     def lend(self, need: torch.Tensor, residency: torch.Tensor, classes: torch.Tensor, **state) -> torch.Tensor:
         """Whole resident experts in the policy's order (LFU: by score; LRU: least recently routed), ties by expert id
@@ -105,13 +108,27 @@ class ExpertPrefetch:
         torch.cuda.current_stream().wait_event(self.landed.pop(key))
 
 
+class MoePatchRows:
+    def __init__(self, modules: Modules, ctx, *, hidden: int, top_k: int, dtype: str) -> None:
+        self.lib = modules(ctx.fingerprint.sm)
+
+    def publish(self, x, cpu, out) -> None:
+        self.lib.publish(x, cpu, out)
+
+    def __call__(self, y, rows, cpu) -> None:
+        self.lib.patch(y, rows, cpu)
+
+
 class Plugin:
     def register(self, regs) -> None:
         modules = Modules()
         props = frozenset({"graph_safe", "deterministic"})
         requires = Constraint(sms=frozenset(extension.ARCHS))
+        regs.kernels.add(PATCH, KernelSpec(
+            op=PATCH, provider="kernels.expert_io", impl=functools.partial(MoePatchRows, modules), requires=requires,
+            props=props, priority=10))
         for op, code in POLICIES.items():
-            words = 0 if code == 0 else 9           # the variants' per-expert tables (and one word)
+            words = 2 if code == 0 else 11          # the CPU share's per-expert tables, the variants' (and one word)
 
             def supports(f, w=words) -> bool:
                 return f["roles"] <= ROLES and (f["roles"] + w) * f["experts"] * 4 + STATIC_BYTES <= SHARED_BYTES

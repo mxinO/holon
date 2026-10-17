@@ -179,6 +179,9 @@ class TieredStore:
             self.state = {n: self.ctx.static(f"{self.name}.state.{n}", (len(self._order), *s), getattr(torch, dtype))
                           for n, (s, dtype) in self.policy.device_state().items()}
             self.routed = self.ctx.static(f"{self.name}.routed", shape[:2], torch.int32)
+            # a call without a CPU share (`moe_resolve@1`'s `plan`, `jobs`): it takes nothing, its table unread
+            self.no_plan = self.ctx.static(f"{self.name}.no_plan", (self.items + 1,), torch.int32)
+            self.no_jobs = self.ctx.static(f"{self.name}.no_jobs", (1, 4), torch.int32)
             # The delta log, a region per group: a step's records of a group are its admissions (at most its misses,
             # E − R for R resident), its lent items (at most R) and the lent slots' returns (at most as many): 2E bound
             # them (+ a sink row for `lend`'s scatter).
@@ -354,6 +357,7 @@ class TieredStore:
         routed = telemetry["routed"].numpy()
         record = {"counts": telemetry["counts"].numpy(), "routed": (routed & 1).astype(bool),
                   "scope": (routed & 2).astype(bool),           # what the call with decode rows routed (variants)
+                  "cpu": (routed & 4).astype(bool),             # the experts the CPU took (F5b: never admitted)
                   "records": np.concatenate([delta[g, :n[g]] for g in range(len(n))]),
                   "lends": telemetry["lends"].numpy().copy() if mode else None}   # None: borrowed nothing
         if mode:
