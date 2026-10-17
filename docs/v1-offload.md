@@ -50,7 +50,8 @@ for that model, with exact defaults and reproducible runs.
    - Shipped in X: placement policies `lfu` (F11, the default by §8's rule), `static` (F1), `profile_decay` (F2–F3,
      Strata parity) and `lru` (F4); miss paths PCIe fetch
      (F5a) and CPU compute (F5b) with a per-miss-count split; the SSD tier (F9); prefill streaming (F7).
-   - **Held-out proof:** the std offload API is tagged at the end of step 3. After the tag, three strategies land as
+   - **Held-out proof:** the std offload API is tagged at the end of step 6, once every std change of X has landed
+     (steps 5–6 still change std: the Tier protocol's storage, F9, F5b; panel B-s2-1). After the tag, three strategies land as
      commits whose diff touches only their own plugin directory and tests (no core, no std diff; checked with the
      existing `check_core_diff.sh` and `git diff --stat`): **F10** promote-on-fetch (host and in-graph parts, the
      hardest case: its `moe_resolve` variant is a contract the plugin owns, with its own `reference.py` and CPU
@@ -522,10 +523,10 @@ rule; F8 only at ≥ 15% on < 1K-token chunks with a fixed share; A1 never in a 
 | 0 | M1–M3, M5–M7; host RAM per class | evidence; the panel reviews the parameters they set | 3 |
 | 1 | S0–S5 and the CLI change with toy proofs (ABI 1.2); the forced-tiling and compact-helper vendor patches | core tests; `check_abi --base` additive; LOC; L0 placement-invariance | 5 |
 | 2 | `std.tiered`, the offload store and options, class arenas with null and staging slots, `moe_resolve` / `expert_fetch` (CUDA + oracle + CPU provider), the pinned tier, `static` (F1), F5a | all-resident bitwise to `std.moe@1`; L0 | 5 |
-| 3 | `lfu` (F11) and `lru` (F4), each with its own resolve contract, `profile_decay` (F2–F3) with two-phase edits, route tap and profile tool, prefill streaming (F7); **tag the std offload API** | snapshots with adaptive placement on, ×3, and the n-gram drafter run; cross-placement identity; plants 1–3 and `owner_race` | 5 |
+| 3 | `lfu` (F11) and `lru` (F4), each with its own resolve contract, `profile_decay` (F2–F3) with two-phase edits, route tap and profile tool, prefill streaming (F7), the route-transform call site, scheduler row kinds | snapshots with adaptive placement on, ×3, and the n-gram drafter run; cross-placement identity; plants 1–3 and `owner_race` | 5 |
 | 4 | Development gate, natural-fit rows, on the RTX 5080 vs FreeToken and llama.cpp (F5a lock); tune | acceptance 3 natural-fit rows vs the roofline; L4 | 3 |
 | 5 | The replay's exclusive-tier comparison (D10), then F9 (SSD tier with I/O workers, exclusive RAM tier) and the RAM-short default | exactness; a RAM-capped run | 3 |
-| 6 | `kernels.cpu_task`, `kernels.ggml_cpu`, F5b with `plan[n]`, the path-aware floor; capped-fit rows and the F1 row with tune's lock | L0 incl. bitwise per token and per thread count; bounded L2; plants 4–5; tune's ≥ 5% rule decides the dev lock; acceptance 3 capped-fit and F1 rows | 5 |
+| 6 | `kernels.cpu_task`, `kernels.ggml_cpu`, F5b with `plan[n]`, the path-aware floor; capped-fit rows and the F1 row with tune's lock | L0 incl. bitwise per token and per thread count; bounded L2; plants 4–5; tune's ≥ 5% rule decides the dev lock; acceptance 3 capped-fit and F1 rows; **tag the std offload API** | 5 |
 | 7 | Held-out plugins after the tag: F10, A1, the mmap / page-cache tier (acceptance 1) | plugin-only diffs; A1 judged as `approx` | 3 |
 | 8 | Close: full suite, panel code review, one propagation of the existing locks; D13 if time allows | acceptance 5–7 | 2 |
 
@@ -624,7 +625,7 @@ layer; FreeToken's gather bounded at M1's rate (the same kind of kernel; panel C
 |---|---|---|
 | Holon F5a, ms per token | ≈ 5.8–6.5 | ≈ 9.1–9.7 (F5b ≈ 3–5% at 1.4–1.7 misses per layer; not counted) |
 | vs llama.cpp static split (bar 1.5×) | ≈ 2.7–3× | ≈ 2.4× |
-| vs llama.cpp `--moe-cache-mib` (bar 1.1×) | ≈ 1.0–1.4× (straddles the bar) | ≈ 1.05–1.4× (straddles) |
+| vs llama.cpp `--moe-cache-mib` (bar 1.1×) | ≈ 0.92–1.47×, central ≈ 1.18× (after step 2: measured overhead 0.20 ms + F11 ≈ 0.25–0.35 ms; Holon's all-resident 30B runs 0.93× llama.cpp on sm_120, `docs/release.md`) — the band's width is llama.cpp's unknown per-layer sync, measured before step 4 | ≈ 1.05–1.4× (straddles) |
 | vs FreeToken (bar 1.0×) | ≈ 1.0–1.1× (thin) | ≈ 1.0–1.1× (thin) |
 | F1 (static) vs llama.cpp static split (bar 0.95×) | ≈ 0.95–1.0× with F5a | — |
 | Prefill vs llama.cpp (bar 1.0×) | staging below ≈ 512 tokens, streaming above with larger chunks; ≥ 1.0× predicted | same |
