@@ -72,6 +72,16 @@ def physical_cores() -> list[int]:
     return cores
 
 
+def worker_cores() -> list[int]:
+    """Compute cores: all physical cores but the first, which keeps the OS, the Python thread and the GPU feeder
+    (a pool thread on the first core ran 1.7x slower than on any other on the desktops)."""
+    return physical_cores()[1:]
+
+
+def host_core() -> int:
+    return physical_cores()[0]
+
+
 def sh(cmd: str) -> str:
     return subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.strip()
 
@@ -272,7 +282,7 @@ def m1(ext) -> dict:
 
 
 def m3(ext, classes, threads_list, tokens_list=(1, 2, 4, 8)) -> dict:
-    cores = physical_cores()
+    cores = worker_cores()
     out = {}
     for ex in classes:
         res = {"gate_up": NAMES[ex.gu], "down": NAMES[ex.down], "expert_bytes": ex.cls.bytes,
@@ -326,8 +336,7 @@ def bitwise(ext, ex, cores, nmax: int) -> dict:
 
 
 def m2(ext, ex, m1_res, threads_list, duration_ms=300) -> dict:
-    cores = physical_cores()
-    feeder = cores[-1]
+    cores, feeder = worker_cores(), host_core()
     half = EXPERTS // 2
     size = ex.cls.bytes
     dev = torch.empty(16 * size, dtype=torch.uint8, device="cuda")
@@ -388,7 +397,7 @@ def m2(ext, ex, m1_res, threads_list, duration_ms=300) -> dict:
 
 
 def m5(ext, ex, nthreads: int, rows_list=(1, 2, 4, 8), k_list=(1, 2, 4, 8, 10), reps=60) -> dict:
-    cores = physical_cores()
+    cores = worker_cores()
     hs = ext.Handshake(ex.cls, ex.ptr, EXPERTS, LAYERS, max(rows_list), cores[:nthreads])
     hs.start()
     step = torch.zeros((), dtype=torch.int64, device="cuda")
@@ -493,7 +502,7 @@ def m7(ext, directory: str, file_gib: int, seconds: float) -> dict:
     if size < 2 << 30:
         return {"skipped": f"less than 8 GiB free at the local mount ({free >> 30} GiB)"}
     out = {"file_bytes": size, "rows": []}
-    cores = physical_cores()
+    cores = worker_cores()
     try:
         secs = ext.nvme_fill(str(path), size)
         out["fill_gbps"] = size / secs / 1e9
@@ -583,7 +592,7 @@ def main():
     ap.add_argument("--nvme-dir", default=None)
     ap.add_argument("--nvme-gib", type=int, default=16)
     ap.add_argument("--nvme-seconds", type=float, default=1.5)
-    ap.add_argument("--threads", default="1,2,4,6,8", help="M3 thread counts")
+    ap.add_argument("--threads", default="1,2,4,6,7", help="M3 thread counts")
     ap.add_argument("--m2-threads", default="1,2,4,6")
     ap.add_argument("--m5-threads", type=int, default=4)
     ap.add_argument("--quick", action="store_true")
@@ -595,20 +604,23 @@ def main():
     torch.cuda.set_stream(torch.cuda.Stream())  # cudaMemcpyBatchAsync refuses the legacy default stream
     build = Path(ARGS.build) / ARGS.tag
     ext = _EXT = build_ext(ARGS.isa, ARGS.llama, build)
-    cores, allowed = physical_cores(), os.sched_getaffinity(0)
+    allowed = os.sched_getaffinity(0)
+    physical_cores()
     torch.set_num_threads(1)  # torch's CPU pool would share the one core below with 0.1 s OpenMP spins
-    os.sched_setaffinity(0, {cores[-1]})  # the Python thread stays off the worker cores (S6)
+    for tid in os.listdir("/proc/self/task"):  # this thread and every runtime thread stay off the worker cores (S6)
+        os.sched_setaffinity(int(tid), {host_core()})
     only = set(ARGS.only.split(","))
     out = Path(ARGS.out)
     res = json.loads(out.read_text()) if ARGS.merge and out.exists() else {}
     res.setdefault("runs", []).append({"command": " ".join([Path(sys.argv[0]).name] + sys.argv[1:]),
                                        "date": time.strftime("%Y-%m-%d"), "env": env_facts(ext)})
-    res.update({"tag": ARGS.tag, "env": res["runs"][-1]["env"], "cores_used": cores})
+    res.update({"tag": ARGS.tag, "env": res["runs"][-1]["env"], "host_core": host_core(),
+                "worker_cores": worker_cores()})
 
     def save():
         out.write_text(json.dumps(res, indent=1, default=float) + "\n")
 
-    threads = [int(t) for t in ARGS.threads.split(",") if int(t) <= len(cores)]
+    threads = [int(t) for t in ARGS.threads.split(",") if int(t) <= len(worker_cores())]
     if "m1" in only:
         res["m1"] = m1(ext)
         save()
@@ -648,7 +660,7 @@ def main():
             child.unlink()
             save()
     if "m2" in only:
-        m2_threads = [int(t) for t in ARGS.m2_threads.split(",") if int(t) < len(cores)]
+        m2_threads = [int(t) for t in ARGS.m2_threads.split(",") if int(t) <= len(worker_cores())]
         res["m2"] = m2(ext, q4k_q6k, res.get("m1"), m2_threads, 150 if ARGS.quick else 300)
         save()
     if "m5" in only:
