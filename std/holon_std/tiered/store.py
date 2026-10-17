@@ -106,8 +106,8 @@ class TieredStore:
         self.tiers = [ctx.unit(Ref(t)) for t in tiers]
         if len(self.tiers) != 1 or not self.tiers[0].device_readable:
             raise NotImplementedError(f"{name}: one device-readable host tier (F5a), not {list(tiers)}")
-        policy = policy or POLICY                       # the one tier holds every expert (pinned RAM, inclusive)
-        self.policy = ctx.unit(policy if isinstance(policy, Ref) else Ref(policy), items=items, roles=roles)
+        ref = policy if isinstance(policy, Ref) else Ref(policy or POLICY)    # POLICY: the one tier holds every expert
+        self.policy, self.policy_ref = ctx.unit(ref, items=items, roles=roles), ref.target       # (pinned, inclusive)
         self._cache, self._profile = _parse_cache(cache), profile
         self.classes: dict[str, SlotClass] = {}
         self.groups: dict[int, dict[int, SlotClass]] = {}       # group -> role -> its class

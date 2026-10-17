@@ -848,7 +848,8 @@ route taps; `TieredStore.lend`); `holon_judge.placement` (`route_dump`, the L1 p
 the A5000 F11 (2,115 in-graph admissions per run at 25%), F2–F3 (16 swap rounds) and F4 snapshots are byte-identical
 to `std.moe@1` all-resident and run-identical ×3 (F11, F2–F3), the n-gram-drafter run too; natural, capped and
 adaptive placements are identical to each other; F11's per-step residency equals its replay oracle exactly on every
-trace recorded (up to 23,163 admissions over 255 decode steps); every plant fires and is caught (table in the README).
+trace recorded (up to 23,163 admissions over 255 decode steps), and the device's map ends equal to the host mirror;
+every plant fires and is caught (table in the README). All at `52e1bed`, after the review fixes below.
 
 Decided while building, against the text above:
 - **Scheduler row kinds (B-s2-6) not built: it is an ABI major.** Filling `BatchPlan.n_decode` on every step changes

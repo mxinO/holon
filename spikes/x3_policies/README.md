@@ -16,7 +16,7 @@ they should?
 | model | Qwen3-30B-A3B Q4_K_M (unsloth GGUF): 48 layers × 128 experts top-8; classes gate/up Q4_K, down Q4_K, down Q6_K |
 | engine | bf16, graphs on, overlap on, `max_seqs` 64, `max_step_tokens` 4096, `max_model_len` 8192, `paged_min_tokens` 16384, `host_memory` 20 GiB |
 | traces | the judge's snapshot trace (64 requests; seeded sampling, logprobs, prompt logprobs, a prefix-cache hit); a decode-heavy parity trace (the first 8 prompts of `v1.jsonl`, 256 greedy tokens each) |
-| commit | `115c49b` (evidence: `evidence/x3_policies_rtx-a5000_2026-10-17.json`) |
+| commit | `52e1bed` (evidence: `evidence/x3_policies_rtx-a5000_2026-10-17.json`) |
 
 ```bash
 python spikes/x3_policies/run.py <gguf> <dir> <runs> "<name>|<cache>|<policy>|<plant>|<spec>[|decode]" ...
@@ -35,7 +35,7 @@ python spikes/x3_policies/bench_resolve.py                         # resolve var
 | F2–F3 `*=0.25` (×3) | 1,536 | 16 swap rounds per run | identical | ×3 |
 | F4 `*=0.25` | 1,536 | 9,280 admissions | identical | — |
 | F11 `*=0.47` (the 5080's natural fit) | 2,888 | 3,123 admissions | identical | — |
-| F11 fill (every expert fits the A5000) | 6,144 | 0 | identical | — |
+| F11 fill (free VRAM above the KV floor) | 6,081 | 139 admissions | identical | — |
 | F1 static `*=0.47`, `*=0.25` | 2,888, 1,536 | — | identical | — |
 | F11 `*=0.25`, n-gram drafter (3 drafts; verify rows) | 1,536 | 1,394 admissions | identical (to all-resident with the drafter) | — |
 | F11 `*=0.25`, decode trace | 1,536 | 23,163 admissions | identical | — |
@@ -45,12 +45,13 @@ byte-identical to each other (cross-placement identity).
 
 **L1 policy parity** (`judge/holon_judge/placement.py`): the device's residency read from the delta log equals
 `placement.lfu`'s `replay` at every step — 67 steps (64 with decode rows, 2,115 admissions) of the snapshot trace at
-25% in each of the 3 runs, 64 at 47%, 63 with the drafter, and 258 steps (255 decode, 23,163 admissions) of the
-decode trace at 25% (and at 10%: 11,301 admissions, at the kernel before the ranking change below). How sharp it is
-on these traces (`mutate.py`): a decay of 0.9 instead of 0.915 differs from step 7–9, candidate ties broken the
-other way from step 2–4, victim ties from step 3 (decode trace); increments before the decay, one add of the step's
-count, f64 decay, ≥ instead of >, and no stop at the first failing pair never change a pick on these traces (the
-last cannot: with candidates sorted descending and victims ascending, a failing pair fails every later one). The
+25% in each of the 3 runs, 64 at 47%, 64 at the fill, 63 with the drafter, and 258 steps (255 decode) of the decode
+trace at 25% (23,163 admissions) and at 10% (11,301); and once every step has committed the device's map is the host
+mirror in every run. How sharp it is on these traces (`mutate.py`): a decay of 0.9 instead of 0.915 differs from step
+6–9, candidate ties broken the other way from step 2–4, victim ties from step 3–4 (decode traces), increments before
+the decay from step 65 (decode trace at 10%); one add of the step's count, f64 decay, ≥ instead of >, and no stop at
+the first failing pair never change a pick on these traces (the last cannot: with candidates sorted descending and
+victims ascending, a failing pair fails every later one). The
 rounding rules are L0's: the kernel's scores are compared bit for bit with the oracle's, and an L0 case checks the
 decay-then-count order by hand.
 
@@ -64,7 +65,7 @@ ms). Snapshot run times are not compared: route dumps synchronize eager steps an
 | Plant | Target run | Predicted | Observed | Fired | Other configuration |
 |---|---|---|---|---|---|
 | `resolve-off-by-one` | F11 `*=0.25` | snapshot differs | differs from step 0 | 2,496 eager + 1,440 captured resolves, 67 steps with misses | F11 `*=1.0`: identical (no misses) |
-| `map-before-landing` | F2–F3 `*=0.25` ×3 | fails run-identical or the snapshot | both: all 3 differ from all-resident (run 0 at step 16, runs 1–2 at step 10) and run 0 ≠ run 1 | 2,850 / 2,808 / 2,838 copies | F11 `*=0.25`: identical (no host copies) |
+| `map-before-landing` | F2–F3 `*=0.25` ×3 | fails run-identical or the snapshot | both: all 3 differ from all-resident (run 0 at step 16, runs 1–2 at step 10) and run 0 ≠ run 1 | 2,836 / 2,866 / 2,794 copies | F11 `*=0.25`: identical (no host copies) |
 | `map-stale-slot` | F2–F3 `*=0.25` | snapshot differs | differs at step 10 | 2,752 rotated maps | F11 `*=0.25`: identical |
 | `owner-race` | F11 `*=0.25` | the precondition flag stops the engine | stopped at step 6 (`edit_errors`) | 3 edits | F1 `*=0.25`: identical (nothing to fire on) |
 | `owner-race-unchecked` | F11 `*=0.25` ×3 | run-identical fails | the snapshot differs at step 7 in all 3 runs, which are identical to each other (the overwrite lands before the victim's next read); the parity check also differs, at step 5 | 64 edits per run | — |

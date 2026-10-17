@@ -50,7 +50,7 @@ class Offload(nn.Module):
                                       "sub-steps' row kinds; not yet")
         policy = self.store.policy
         if (policy.resolve_variant or policy.device_state()) and _rows(ctx) > CHUNK:
-            raise NotImplementedError(f"std.moe.offload@1: {policy.resolve_variant}'s state changes once per call "
+            raise NotImplementedError(f"std.moe.offload@1: {self.store.policy_ref}'s state changes once per call "
                                       f"with decode rows (D4), and {_rows(ctx)} decode and verify tokens of a step "
                                       f"would pass one expert pass ({CHUNK} tokens)")
         if (self.store.items, self.store.top_k) != (experts, top_k):
