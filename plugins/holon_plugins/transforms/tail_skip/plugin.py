@@ -13,7 +13,10 @@ OP = "moe_route_transform.tail_skip"
 
 
 def _rank(ctx) -> int:
-    return int(ctx.options.get("plugins", {}).get("tail_skip.rank", reference.RANK))
+    rank = int(ctx.options.get("plugins", {}).get("tail_skip.rank", reference.RANK))
+    if rank < 1:
+        raise ValueError(f"transforms.tail_skip: tail_skip.rank {rank}: at least 1 (0 would drop every miss)")
+    return rank
 
 
 class Reference:

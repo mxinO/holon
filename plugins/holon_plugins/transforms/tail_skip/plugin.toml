@@ -17,3 +17,6 @@ python = ["triton"]
 
 [reference]
 module = "reference"
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"tail_skip.rank" = { help = "a missed expert whose best routing rank in a pass is at least this is dropped (0 < rank; at the router's top_k or above nothing is)", default = "7" }
