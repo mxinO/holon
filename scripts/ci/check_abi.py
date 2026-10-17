@@ -1,9 +1,10 @@
 """The plugin ABI's listing (release design §7): what plugins may rely on, rendered from the code and compared with
 `core/abi.txt`. A difference fails unless the listing is regenerated (`--write`) with `holon.api.ABI` bumped: an
-addition needs a minor bump; a removal or change, a member added to a required Protocol plugins implement, or a
-dataclass field added without a default needs a major one (below 1.0: the minor number, as manifests' ranges read
-it). Also fails when the core looks up a hook by name (`hasattr` / `getattr` with a literal) that no Protocol of
-`holon.api` declares.
+addition needs a minor bump — so do keyword-only parameters with defaults added to a member plugins only call (of a
+Protocol the core implements, or of a dataclass), and a field's default listing the fields its class gained —; a
+removal or change, a member added to a required Protocol plugins implement, or a dataclass field added without a
+default needs a major one (below 1.0: the minor number, as manifests' ranges read it). Also fails when the core looks
+up a hook by name (`hasattr` / `getattr` with a literal) that no Protocol of `holon.api` declares.
 
 Listed: every public name of `holon.api` (dataclass fields by index with types and defaults; Protocol members with
 their signatures, required or optional, and who implements the Protocol), the optional hooks (`holon.api.hooks`),
@@ -186,19 +187,47 @@ def _entries(listing: str) -> set[tuple[str, str]]:
     return out
 
 
+def extends(old: str, new: str) -> bool:
+    """Whether the line `new` lists what `old` does with additions only: a member with keyword-only parameters added,
+    each with a default; a field whose default, a dataclass instance, shows the fields added to its class (with their
+    defaults, or its class would need a major bump)."""
+    if old.strip().startswith("#"):
+        (field, _, x), (same, _, y) = old.partition(" = "), new.partition(" = ")
+        try:
+            x, y = ast.parse(x, mode="eval").body, ast.parse(y, mode="eval").body
+        except SyntaxError:
+            return False
+        return (field == same and isinstance(x, ast.Call) and isinstance(y, ast.Call)
+                and ast.dump(x) == ast.dump(ast.Call(y.func, y.args, y.keywords[:len(x.keywords)])))
+    try:
+        a, b = (ast.parse(f"def {line.strip()}: ...").body[0] for line in (old, new))
+    except SyntaxError:
+        return False
+    n, y = len(a.args.kwonlyargs), b.args
+    kept = ast.arguments(posonlyargs=y.posonlyargs, args=y.args, vararg=y.vararg, kwonlyargs=y.kwonlyargs[:n],
+                         kw_defaults=y.kw_defaults[:n], kwarg=y.kwarg, defaults=y.defaults)
+    return (ast.dump(ast.FunctionDef(a.name, a.args, [], [], a.returns))
+            == ast.dump(ast.FunctionDef(b.name, kept, [], [], b.returns)) and None not in y.kw_defaults[n:])
+
+
 def bump_error(old: str, new: str) -> str | None:
     """Why the listing `new` may not replace `old` under its version, or None. A removal or change, a member added to a
     required Protocol plugins implement (plugins of the old ABI lack it), or a dataclass field added without a default
     (callers of the old ABI do not pass it) needs a major bump (below 1.0: the minor number, as manifests' ranges read
-    it); any other addition a minor one."""
+    it); any other addition a minor one, keyword-only parameters with defaults added to a member of a Protocol the core
+    implements or of a dataclass included (`extends`)."""
     was, now, before, after = _version(old), _version(new), _entries(old), _entries(new)
     def breaks(head: str, line: str) -> bool:
         if line == head or (head, head) not in before:            # a new item
             return False
         return "required, implemented by plugins" in head or (head.startswith("dataclass ") and " = " not in line)
 
-    breaking = sorted(line for _, line in before - after) + sorted(line for head, line in after - before
-                                                                   if breaks(head, line))
+    def extended(head: str, line: str) -> bool:      # by a line of the same item, which plugins only call or read
+        return ("implemented by core" in head or head.startswith("dataclass ")) and any(
+            h == head and extends(line, new) for h, new in after - before)
+
+    breaking = sorted(line for head, line in before - after if not extended(head, line)) + sorted(
+        line for head, line in after - before if breaks(head, line))
     major = now[0] > was[0] or (was[0] == 0 and now[:2] > was[:2])
     if breaking and not major:
         return f"a removal, change, required plugin member or field without a default needs a major ABI bump " \
