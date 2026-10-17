@@ -381,12 +381,14 @@ class Engine:
         if self.executor is None:
             return
         try:
-            self.drain()
+            if not self._stopped:                        # a stopped engine's later steps are discarded
+                self.drain()
         finally:                                         # a failing commit still stops the helpers
+            platform.synchronize(self.device)            # (every stream) helpers and host pools go once it is idle
             for o in (self.processor, *self.shared):
                 getattr(o, "shutdown", lambda: None)()
-            platform.synchronize(self.device)            # the copy stream too, before host pools go
             self.executor = self._inflight = None
+            self.shared, self.ctx.shared_objects = [], {}   # what they hold, host memory included, goes too
             self.ledger.free(host=True)
             gc.collect()
             platform.release_cache(self.device)
@@ -447,11 +449,12 @@ class Engine:
         if self.policy is not None and any(m > 1 for _, _, m in step.rows):
             self.spec_counts.update(verify_steps=1, verify_steps_graphed=step.out.graphed,
                              verify_steps_overlapped=prev is not None)
+        keep = self.cfg.overlap and not step.sync
+        if keep:                                         # tracked before `prev`'s commit, which may fail
+            self._inflight = step
         if prev is not None:
             deltas += self._commit(prev)
-        if self.cfg.overlap and not step.sync:
-            self._inflight = step
-        else:
+        if not keep:
             deltas += self._commit(step)
         return deltas
 

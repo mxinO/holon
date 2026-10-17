@@ -116,8 +116,9 @@ class BuildCtx(Protocol):
 
         `fill`: sized after a floor of paged state (`EngineConfig.paged_min_tokens`) instead, higher `priority` first,
         up to `pref_units`; paged state takes the rest. `device="host"`: page-locked host memory of exactly its bytes,
-        allocated at once and kept for the engine's lifetime, within `EngineConfig.host_memory` (`pref_units` if that
-        allows, else `min_units`); request it at the latest in `before_materialize` (`hooks.RequestsPools`).
+        allocated at once and kept for the engine's lifetime, within `EngineConfig.host_memory` (as many units between
+        `min_units` and `pref_units` as it allows); request it at the latest in `before_materialize`
+        (`hooks.RequestsPools`).
         `mapped`: device kernels may also read and write it in place (`Pool.device_view`). MemOps copy units between
         host and device pools (`MemOp.after`, `lands_by`)."""
 

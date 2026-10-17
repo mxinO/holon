@@ -130,8 +130,11 @@ def pinned_empty(n: int, dtype: torch.dtype, device: torch.device) -> torch.Tens
 def host_memory(nbytes: int, device: torch.device, mapped: bool) -> torch.Tensor:
     """Exactly `nbytes` of host memory in whole pages (an anonymous map), page-locked for CUDA by registering it — not
     torch's pinned allocator, which rounds up to a power of two —, with `mapped` also addressable by kernels
-    (`device_alias`). Plain memory off CUDA. It is unregistered and unmapped with the last tensor viewing it."""
-    region = _Pinned(-1, nbytes)
+    (`device_alias`). Plain memory off CUDA. It is unregistered and unmapped with the last tensor viewing it. The map is
+    private (never shared with a child process). Page-locking took ≈ 0.33 s per GiB on the RTX A5000 development host
+    with 4 KiB pages, and 2–8 s per GiB with `madvise(MADV_HUGEPAGE)` (compaction), so huge pages are not asked for;
+    re-measure on the bar cards (step 0)."""
+    region = _Pinned(-1, nbytes, flags=mmap.MAP_PRIVATE)                # anonymous: fileno -1
     out = torch.frombuffer(region, dtype=torch.uint8)                    # its views keep the map alive
     if device.type == "cuda":
         _check(torch.cuda.cudart().cudaHostRegister(out.data_ptr(), nbytes, 1 | 2 * mapped),  # portable, mapped
@@ -146,8 +149,17 @@ class _Pinned(mmap.mmap):
     registered: int | None = None
 
     def __del__(self) -> None:
-        if self.registered is not None:
-            _check(torch.cuda.cudart().cudaHostUnregister(self.registered), "cudaHostUnregister")
+        if self.registered is None:
+            return
+        try:
+            err = int(torch.cuda.cudart().cudaHostUnregister(self.registered))
+        except Exception:  # noqa: BLE001 — the interpreter is shutting down: the process's memory goes with it
+            return
+        if err not in _CUDA_GONE:
+            _check(err, "cudaHostUnregister")
+
+
+_CUDA_GONE = (0, 4, 709)     # success, cudaErrorCudartUnloading, cudaErrorContextIsDestroyed (CUDA shut down first)
 
 
 def device_alias(t: torch.Tensor, device: torch.device) -> torch.Tensor:

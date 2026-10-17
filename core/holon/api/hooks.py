@@ -154,6 +154,8 @@ class ShutsDown(Protocol):
 
 
 # -- shared objects (`BuildCtx.shared`) -------------------------------------------------------------------------------
+# One that starts threads (CPU workers, I/O workers) sets their CPU affinity itself: otherwise they inherit the
+# engine loop's, which `EngineConfig.loop_core` pins to one core.
 class RequestsPools(Protocol):
     def before_materialize(self, ctx: BuildCtx) -> None:
         """Once, after every model (auxiliary models included) is built and loaded, before the pools are first
@@ -170,12 +172,14 @@ class EditsBeforeLaunch(Protocol):
     def before_launch(self, step: BatchPlan) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list[MemOp]]:
         """Before the step is launched: device writes — `(dst, values)`: `values` copied into the device tensor `dst`
         (the object's own static buffer, say) — and MemOps, which the core enqueues ahead of the step's forward in
-        stream order. An edit decided at the commit of step c applies at launch c + 2 on every path: a commit always
-        precedes the launch two steps after it."""
+        stream order. It returns them and enqueues no device work itself: what consumes the writes runs in the forward
+        (e.g. a unit's apply kernel). An edit decided at the commit of step c applies at launch c + 2 on every path: a
+        commit always precedes the launch two steps after it."""
 
 
 class ObservesCommits(Protocol):
-    telemetry: Mapping[str, torch.Tensor]   # device buffers a step writes, copied to the host with its tokens
+    telemetry: Mapping[str, torch.Tensor]   # device buffers a step writes, copied to the host with its tokens: static
+                                            # (`BuildCtx.static`; read at the first launch, never reallocated)
 
     def after_commit(self, step: BatchPlan, telemetry: Mapping[str, torch.Tensor]) -> None:
         """At the step's commit, before its tokens are emitted: `telemetry` holds host copies of the declared buffers

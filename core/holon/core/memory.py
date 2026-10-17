@@ -130,12 +130,23 @@ def copy_units(src: Pool, src_units, dst: Pool, dst_units) -> None:
     if (src.unit_bytes, src.segments) != (dst.unit_bytes, dst.segments):
         raise ValueError(f"copy {src.name!r} → {dst.name!r}: unit shapes differ")
     s, d = src.units(), dst.units()
-    # Between host and device segment by segment: torch copies a strided unit across them through a synchronous
-    # temporary, which would read the source when enqueued, or block the host until the copy is done.
-    segments = [slice(None)] if src.host == dst.host else range(src.segments)
-    for a, b in zip(np.asarray(src_units).tolist(), np.asarray(dst_units).tolist(), strict=True):
-        for i in segments:
-            d[i, b].copy_(s[i, a], non_blocking=True)
+    pairs = zip(np.asarray(src_units).tolist(), np.asarray(dst_units).tolist(), strict=True)
+    if src.host == dst.host:
+        for a, b in pairs:
+            d[:, b].copy_(s[:, a], non_blocking=True)
+        return
+    # Between host and device, segment by segment (torch copies a strided tensor across them through a synchronous
+    # temporary, which would read the source when enqueued, or block the host until the copy is done), each run of
+    # units consecutive in both pools at once.
+    runs: list[list[int]] = []
+    for a, b in pairs:
+        if runs and runs[-1][0] + runs[-1][2] == a and runs[-1][1] + runs[-1][2] == b:
+            runs[-1][2] += 1
+        else:
+            runs.append([a, b, 1])
+    for a, b, n in runs:
+        for i in range(src.segments):
+            d[i, b: b + n].copy_(s[i, a: a + n], non_blocking=True)
 
 
 def run_mem_ops(ops, pools: dict[str, Pool], phase: str) -> None:
@@ -208,9 +219,10 @@ class Ledger:
                     device: str = "device", mapped: bool = False, fill: bool = False, priority: int = 0) -> Pool:
         """A plugin's pool (`BuildCtx.pool`), namespaced so it cannot collide with the core's."""
         name, pref_units = f"plugin.{name}", max(pref_units, min_units)
-        if device not in ("device", "host") or (mapped and device != "host") or (fill and device == "host"):
-            raise ValueError(f"pool {name!r}: a device pool (fill or not) or a host pool (mapped or not), not "
-                             f"device={device!r}, mapped={mapped}, fill={fill}")
+        if device not in ("device", "host") or (mapped and device != "host") or (fill and device == "host") or (
+                priority and not fill):
+            raise ValueError(f"pool {name!r}: a device pool (fill, with a priority, or not) or a host pool (mapped or "
+                             f"not), not device={device!r}, mapped={mapped}, fill={fill}, priority={priority}")
         if device == "device":
             return self.request(name, unit_bytes=unit_bytes, segments=segments, min_units=min_units,
                                 pref_units=pref_units, priority=priority, fill=fill)
@@ -221,7 +233,7 @@ class Ledger:
                             host=True, mapped=mapped)
         held = [p for p in self.pools.values() if p.host and p.capacity]
         left = self.host_memory - sum(p.capacity * p.unit_bytes for p in held)
-        units = pref_units if pref_units * unit_bytes <= left else min_units
+        units = max(min_units, min(pref_units, left // unit_bytes))    # as many as the budget allows
         if units * unit_bytes > left:
             del self.pools[name]
             raise OutOfUnits(f"host memory {self.host_memory / 2**30:.3f} GiB too small: {name} needs {min_units} "
