@@ -33,6 +33,7 @@ NAMES = {v: k for k, v in T.items()}
 # its Q6_K-down and Q4_K-down layers), GLM-like Maya-S expert.
 BLOBS = {"1.46MB": 1_460_000 // 256 * 256, "2.8MB": 2_856_960, "7.1MB": 7_100_000 // 256 * 256}
 MB = 1e6
+_CORES: list[int] = []
 
 
 # ---------------------------------------------------------------------------------------------- build / host
@@ -56,6 +57,10 @@ def build_ext(isa: str, llama: Path, build: Path):
 
 
 def physical_cores() -> list[int]:
+    """One logical CPU per physical core of the process's CPUs, read once (before main() pins its own thread)."""
+    global _CORES
+    if _CORES:
+        return _CORES
     seen, cores = set(), []
     for c in sorted(os.sched_getaffinity(0)):
         sib = Path(f"/sys/devices/system/cpu/cpu{c}/topology/thread_siblings_list")
@@ -63,6 +68,7 @@ def physical_cores() -> list[int]:
         if key not in seen:
             seen.add(key)
             cores.append(c)
+    _CORES = cores
     return cores
 
 
@@ -273,6 +279,7 @@ def m3(ext, classes, threads_list, tokens_list=(1, 2, 4, 8)) -> dict:
                "real_experts": ex.real, "rows": []}
         for nt in threads_list:
             cpu = ext.Cpu(cores[:nt])
+            assert cpu.threads() == nt
             for tokens in tokens_list:
                 for njobs in ((1, 8) if tokens == 1 else (1,)):
                     iters = max(64, 2 * EXPERTS // njobs)
@@ -588,7 +595,7 @@ def main():
     torch.cuda.set_stream(torch.cuda.Stream())  # cudaMemcpyBatchAsync refuses the legacy default stream
     build = Path(ARGS.build) / ARGS.tag
     ext = _EXT = build_ext(ARGS.isa, ARGS.llama, build)
-    cores = physical_cores()
+    cores, allowed = physical_cores(), os.sched_getaffinity(0)
     torch.set_num_threads(1)  # torch's CPU pool would share the one core below with 0.1 s OpenMP spins
     os.sched_setaffinity(0, {cores[-1]})  # the Python thread stays off the worker cores (S6)
     only = set(ARGS.only.split(","))
@@ -634,7 +641,8 @@ def main():
             log("M3 again with the AVX2 build (child process)")
             subprocess.run([sys.executable, __file__, "--tag", ARGS.tag, "--out", str(child), "--only", "m3",
                             "--isa", "avx2", "--threads", ARGS.threads, "--build", ARGS.build, "--llama",
-                            str(ARGS.llama)] + (["--quick"] if ARGS.quick else []), check=True)
+                            str(ARGS.llama)] + (["--quick"] if ARGS.quick else []), check=True,
+                           preexec_fn=lambda: os.sched_setaffinity(0, allowed))  # not this thread's one core
             sub = json.loads(child.read_text())
             res["m3_avx2"], res["env"]["avx2_build"] = sub["m3_avx2"], sub["env"]["ggml_cpu_build"]
             child.unlink()
