@@ -65,7 +65,8 @@ class _Prep:
     inputs: torch.Tensor           # the step's input-ids buffer: `DeviceBatch.input_ids`, then a scratch element
     input_at: torch.Tensor         # [B] where the device's last token goes: the row's first input, or the scratch
     logits_slots: torch.Tensor     # [L] the slot of each logits row
-    logits_end: torch.Tensor | None = None    # [L] host-exact steps: the row's length after the step
+    host_staged: bool = False                 # positions, lengths and write indices came from the host
+    logits_end: torch.Tensor | None = None    # [L] host-staged steps: the row's length after the step
     # Steps whose starts the device may hold (verify rows): positions, lengths and write indices derived on the device.
     row_of_token: torch.Tensor | None = None  # [T] batch row of each token
     offset: torch.Tensor | None = None        # [T] index of each token within its row
@@ -440,7 +441,7 @@ class Executor:
         if accepts is None:
             slots = prep.logits_slots
             self.last_token[slots] = tokens
-            self.num_computed[slots] = prep.logits_end if prep.logits_end is not None else \
+            self.num_computed[slots] = prep.logits_end if prep.host_staged else \
                 prep.lens[dev.logits_rows].long()
             if self.drafter is not None:             # the drafter reads it after every step
                 self.seq_table.n_accept.index_fill_(0, slots, 0)     # device-only: capturable
@@ -486,7 +487,7 @@ class Executor:
             positions = np.repeat(start, n) + offset
             up.put("positions", positions)
             up.put("pages.lens", (start + n).astype(np.int32))
-            prep.logits_end = up.put("logits_end", (start + n)[logits_rows])
+            prep.host_staged, prep.logits_end = True, up.put("logits_end", (start + n)[logits_rows])
         else:
             prep.row_of_token = up.put("row_of_token", np.repeat(np.arange(rows), n))
             prep.offset = up.put("offset", offset)
@@ -568,7 +569,7 @@ class Executor:
         dev, prep = ctx.batch.dev, ctx.prep
         # A row's first input is the device's last token where it holds it (the other rows write the scratch element).
         prep.inputs[prep.input_at] = self.last_token[dev.slots]
-        if prep.exact is None:
+        if prep.host_staged:
             self.num_computed[dev.slots] = prep.start
         else:
             self._derive(ctx)
