@@ -1621,10 +1621,11 @@ extern DECL_MMQ_CASE_W4A4(GGML_TYPE_NVFP4);
 // -------------------------------------------------------------------------------------------------------------------------
 
 // Holon: x_scale, NVFP4's per-tensor scale2 applied to dst (dense); dst may be bf16 (dense); ids_slots, the most
-// distinct slots `ids` names (it bounds the compact launch, mmid.cuh)
+// distinct slots `ids` names (it bounds the compact launch), and ids_errors, a device word the id helper ors its
+// GGML_CUDA_MM_IDS_ERR_* bits into (mmid.cuh)
 void ggml_cuda_mul_mat_q(
         ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
-        const float * x_scale = nullptr, int64_t ids_slots = INT64_MAX);
+        const float * x_scale = nullptr, int64_t ids_slots = INT64_MAX, int32_t * ids_errors = nullptr);
 
 bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t n_experts);
 

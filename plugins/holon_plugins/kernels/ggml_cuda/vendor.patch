@@ -30,7 +30,7 @@ diff -ruN a/ggml/src/ggml-cuda/common.cuh b/ggml/src/ggml-cuda/common.cuh
 diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 --- a/ggml/src/ggml-cuda/mmid.cu
 +++ b/ggml/src/ggml-cuda/mmid.cu
-@@ -1,179 +1,124 @@
+@@ -1,179 +1,232 @@
  #include "common.cuh"
  #include "mmid.cuh"
  
@@ -46,11 +46,35 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 -
 -    __device__ uint32_t it() const {
 -        return data & 0x003FFFFF;
--    }
--
++// Holon: the helper is rewritten (docs/v1-offload.md D4). Both paths order the compact rows as ggml does, slots
++// ascending and each slot's (token, iex) pairs in order, give every pair its own row (a slot repeated inside a row
++// included), put pairs with an id outside [0, n_experts) last (no slot lists them), and report a violated
++// precondition in `errors` (GGML_CUDA_MM_IDS_ERR_*, or'd; NULL: none):
++// - per slot (ggml_cuda_mm_ids_per_slot: the launch lists every slot, a small scan): one warp per slot scanning every
++//   pair, as ggml's; z is the slot;
++// - compact: one block radix-sorts the pairs, keys `slot << pair_bits | pair` sorted on the slot bits (stable), and
++//   lists the active slots; mmq launches over ggml_cuda_mm_ids_nz of them, which bounds it by the call's slots
++//   instead of the stack's.
++
++static __device__ __forceinline__ void mm_ids_error(int32_t * errors, const int bit) {
++    if (errors) {
++        atomicOr(errors, bit);
+     }
++}
+ 
 -    __device__ uint32_t iex_used() const {
 -        return data >> 22;
--    }
++// pair (token·n_expert_used + iex) -> its compact row r: ids_dst[r], and ids_src1[r] (its src1 row) or, with
++// write_inverse, ids_src1[pair] = r
++static __device__ __forceinline__ void mm_ids_write_row(
++        int32_t * __restrict__ ids_src1, int32_t * __restrict__ ids_dst, const int pair, const int r, const int n_expert_used,
++        const int nchannels_y, const int sis1, const bool write_inverse) {
++    ids_dst[r] = pair;
++    if (write_inverse) {
++        ids_src1[pair] = r;
++    } else {
++        ids_src1[r] = (pair / n_expert_used)*sis1 + (pair % n_expert_used) % nchannels_y;
+     }
 -};
 -static_assert(sizeof(mm_ids_helper_store) == 4, "unexpected size for mm_ids_helper_store");
 -
@@ -58,27 +82,46 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 -template <int n> struct mm_ids_pow2 { static constexpr int value = 2*mm_ids_pow2<(n + 1)/2>::value; };
 -template <>      struct mm_ids_pow2<1> { static constexpr int value = 1; };
 -template <>      struct mm_ids_pow2<0> { static constexpr int value = 1; };
--
++}
+ 
 -// Helper function for mul_mat_id, converts ids to a more convenient format.
 -// ids_src1 describes how to permute the flattened column indices of src1 in order to get a compact src1 tensor sorted by expert.
 -// ids_dst describes the same mapping but for the dst tensor.
 -// The upper and lower bounds for the ith expert in the compact src1 tensor are stored in expert_bounds[i:i+1].
--template <int n_expert_used_template>
++// Block b < n_experts lists slot b's pairs; block n_experts the pairs with an id out of range, after all the others.
+ template <int n_expert_used_template>
 -__launch_bounds__(ggml_cuda_get_physical_warp_size(), 1)
-+// Holon: the helper is rewritten to build a compact list of the active slots in O(tokens·n_expert_used) instead of
-+// one block per slot scanning every id (an arena of S slots made the scan and mmq's grid S-sized; mmq now launches
-+// over ggml_cuda_mm_ids_nz entries, mmid.cuh). One block radix-sorts the (slot, token·n_expert_used + iex) pairs, each
-+// a 32-bit key `slot << pair_bits | pair`, on the slot bits only: the sort is stable, so the order is ggml's, slots
-+// ascending and each slot's pairs in token order. Every pair is its own compact row.
-+template <int threads, int items>
-+__launch_bounds__(threads, 1)
- static __global__ void mm_ids_helper(
+-static __global__ void mm_ids_helper(
++__launch_bounds__(WARP_SIZE, 1)
++static __global__ void mm_ids_helper_per_slot(
          const int32_t * __restrict__ ids, int32_t * __restrict__ ids_src1, int32_t * __restrict__ ids_dst, int32_t * __restrict__ expert_bounds,
 -        const int n_tokens, const int n_expert_used_var, const int nchannels_y, const int si1, const int sis1, const bool write_inverse) {
 -    constexpr int warp_size = ggml_cuda_get_physical_warp_size();
--    const int n_expert_used = n_expert_used_template == 0 ? n_expert_used_var : n_expert_used_template;
--    const int expert = blockIdx.x;
--
++        const int n_experts, const int n_pairs, const int n_expert_used_var, const int nchannels_y, const int si1, const int sis1,
++        const bool write_inverse, const int max_cols, int32_t * __restrict__ errors) {
+     const int n_expert_used = n_expert_used_template == 0 ? n_expert_used_var : n_expert_used_template;
+     const int expert = blockIdx.x;
++    const int lane = threadIdx.x;
++    const unsigned lanes_below = (1u << lane) - 1;
++    extern __shared__ int pairs_mm_ids_helper[]; // this block's pairs, in order
++
++    int nex_prev = 0;   // pairs before this block's (this lane's share)
++    int it_compact = 0; // this block's pairs
++    for (int p0 = 0; p0 < n_pairs; p0 += WARP_SIZE) {
++        const int p = p0 + lane;
++        const int id = p < n_pairs ? ids[(p / n_expert_used)*si1 + p % n_expert_used] : INT_MAX;
++        const bool valid = 0 <= id && id < n_experts;
++        const bool mine = p < n_pairs && (expert < n_experts ? id == expert : !valid);
++        nex_prev += valid && id < expert;
++        const unsigned ballot = __ballot_sync(0xFFFFFFFF, mine);
++        if (mine) {
++            pairs_mm_ids_helper[it_compact + __popc(ballot & lanes_below)] = p;
++        }
++        it_compact += __popc(ballot);
++    }
++    nex_prev = warp_reduce_sum<WARP_SIZE>(nex_prev);
++    __syncwarp();
+ 
 -    extern __shared__ char data_mm_ids_helper[];
 -    mm_ids_helper_store * store = (mm_ids_helper_store *) data_mm_ids_helper;
 -
@@ -100,17 +143,22 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 -            if (iex_used != -1) {
 -                store[it_compact] = mm_ids_helper_store(it, iex_used);
 -            }
-+        const int n_z, const int n_pairs, const int pair_bits, const int slot_bits, const int n_expert_used, const int nchannels_y,
-+        const int si1, const int sis1, const bool write_inverse) {
-+    using block_sort = cub::BlockRadixSort<uint32_t, threads, items>;
-+    using block_scan = cub::BlockScan<int, threads>;
-+    extern __shared__ __align__(16) char data_mm_ids_helper[]; // the sort's, then the scan's temporary storage
-+    __shared__ uint32_t last_slot[threads];
- 
+-
 -            if (warp_reduce_any<warp_size>(iex_used != -1)) {
 -                it_compact++;
 -            }
--        }
++    for (int i = lane; i < it_compact; i += WARP_SIZE) {
++        mm_ids_write_row(ids_src1, ids_dst, pairs_mm_ids_helper[i], nex_prev + i, n_expert_used, nchannels_y, sis1, write_inverse);
++    }
++    if (lane != 0) {
++        return;
++    }
++    expert_bounds[expert] = nex_prev; // block n_experts: the end of the last slot's rows
++    if (expert < n_experts) {
++        expert_bounds[n_experts + 1 + expert] = expert;
++        if (it_compact > max_cols) {
++            mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_COLUMNS);
+         }
 -    } else {
 -        // Implementation optimized for specific numbers of experts used:
 -        // a warp holds a whole number of token slots, so the slot count is padded to a power of 2
@@ -124,10 +172,25 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 -                ids[it*si1 + iex] : INT_MAX;
 -            const int iex_used = expert_used == expert ? iex : -1;
 -            nex_prev += expert_used < expert;
--
++    } else if (it_compact > 0) {
++        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
++    }
++}
+ 
 -            // Whether the threads at this token position have used the expert:
 -            const int it_compact_add_self = warp_reduce_any<neu_padded>(iex_used != -1);
--
++template <int threads, int items>
++__launch_bounds__(threads, 1)
++static __global__ void mm_ids_helper_compact(
++        const int32_t * __restrict__ ids, int32_t * __restrict__ ids_src1, int32_t * __restrict__ ids_dst, int32_t * __restrict__ expert_bounds,
++        const int n_experts, const int n_z, const int n_pairs, const int pair_bits, const int slot_bits, const int n_expert_used,
++        const int nchannels_y, const int si1, const int sis1, const bool write_inverse, const int max_cols, int32_t * __restrict__ errors) {
++    using block_sort = cub::BlockRadixSort<uint32_t, threads, items>;
++    using block_scan = cub::BlockScan<int, threads>;
++    extern __shared__ __align__(16) char data_mm_ids_helper[]; // the sort's, then the scan's temporary storage
++    __shared__ uint32_t last_slot[threads];
++    __shared__ int n_valid;   // the rows with an id in range: the pairs past them have slot n_experts
+ 
 -            // Do a scan over threads at lower token positions in warp to get the correct index for writing data:
 -            int it_compact_add_lower = 0;
 +    const int tid = threadIdx.x;
@@ -141,7 +204,11 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 -            }
 +    for (int q = 0; q < items; ++q) {
 +        const int i = tid*items + q;
-+        keys[q] = i < n_pairs ? uint32_t(ids[(i / n_expert_used)*si1 + i % n_expert_used]) << pair_bits | i : UINT32_MAX;
++        const int id = i < n_pairs ? ids[(i / n_expert_used)*si1 + i % n_expert_used] : n_experts;
++        keys[q] = uint32_t(0 <= id && id < n_experts ? id : n_experts) << pair_bits | i;
++    }
++    if (tid == 0) {
++        n_valid = n_pairs;
 +    }
 +    block_sort(*(typename block_sort::TempStorage *) data_mm_ids_helper).Sort(keys, pair_bits, pair_bits + slot_bits);
 +    last_slot[tid] = keys[items - 1] >> pair_bits;
@@ -152,7 +219,12 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +    int n_heads = 0;
 +#pragma unroll
 +    for (int q = 0; q < items; ++q) {
-+        n_heads += tid*items + q < n_pairs && keys[q] >> pair_bits != (q > 0 ? keys[q - 1] >> pair_bits : slot_before);
++        const uint32_t slot = keys[q] >> pair_bits;
++        const bool head = tid*items + q < n_pairs && slot != (q > 0 ? keys[q - 1] >> pair_bits : slot_before);
++        n_heads += head && slot < uint32_t(n_experts);
++        if (head && slot == uint32_t(n_experts)) {
++            n_valid = tid*items + q;
++        }
 +    }
 +    int z;
 +    int n_active;
@@ -166,9 +238,8 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +        if (r >= n_pairs) {
 +            break;
 +        }
-+        const int slot = keys[q] >> pair_bits;
-+        const int pair = keys[q] & ((1u << pair_bits) - 1);
-+        if (uint32_t(slot) != (q > 0 ? keys[q - 1] >> pair_bits : slot_before)) {
++        const uint32_t slot = keys[q] >> pair_bits;
++        if (slot < uint32_t(n_experts) && slot != (q > 0 ? keys[q - 1] >> pair_bits : slot_before)) {
 +            if (z < n_z) {
 +                expert_bounds[z] = r;
 +                expert_bounds[n_z + 1 + z] = slot;
@@ -180,7 +251,8 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 -            it_compact += __shfl_sync(0xFFFFFFFF, it_compact_add_lower + it_compact_add_self, warp_size - 1, warp_size);
 +            ++z;
          }
--    }
++        mm_ids_write_row(ids_src1, ids_dst, keys[q] & ((1u << pair_bits) - 1), r, n_expert_used, nchannels_y, sis1, write_inverse);
+     }
 -    nex_prev = warp_reduce_sum<warp_size>(nex_prev);
 -    ggml_cuda_syncwarp();
 -
@@ -189,39 +261,47 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 -        const int it       = store_it.it();
 -        const int iex_used = store_it.iex_used();
 -        ids_dst[nex_prev + itc] = it*n_expert_used + iex_used;
-+        ids_dst[r] = pair;
-         // ids_src1 holds the forward map, or the inverse map (token slot -> compact row) for quant dedup
-         if (write_inverse) {
+-        // ids_src1 holds the forward map, or the inverse map (token slot -> compact row) for quant dedup
+-        if (write_inverse) {
 -            ids_src1[it*n_expert_used + iex_used] = nex_prev + itc;
-+            ids_src1[pair] = r;
-         } else {
+-        } else {
 -            ids_src1[nex_prev + itc] = it*sis1 + iex_used % nchannels_y;
-+            ids_src1[r] = (pair / n_expert_used)*sis1 + (pair % n_expert_used) % nchannels_y;
++    __syncthreads();
++    // the entries past the active slots are empty and name slot 0, which mmq never reads for them
++    for (int i = min(n_active, n_z + 1) + tid; i <= n_z; i += threads) {
++        expert_bounds[i] = n_valid;
++        if (i < n_z) {
++            expert_bounds[n_z + 1 + i] = 0;
          }
      }
 -
 -    if (threadIdx.x != 0) {
 -        return;
--    }
++    __syncthreads();
++    for (int i = tid; i < min(n_active, n_z); i += threads) {
++        if (expert_bounds[i + 1] - expert_bounds[i] > max_cols) {
++            mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_COLUMNS);
++        }
+     }
 -
 -    expert_bounds[expert] = nex_prev;
 -
 -    if (expert < static_cast<int>(gridDim.x) - 1) {
 -        return;
-+    // the entries past the active slots are empty and name slot 0, which mmq never reads for them
-+    for (int i = min(n_active, n_z + 1) + tid; i <= n_z; i += threads) {
-+        expert_bounds[i] = n_pairs;
-+        if (i < n_z) {
-+            expert_bounds[n_z + 1 + i] = 0;
-+        }
++    if (tid == 0 && n_active > n_z) {
++        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_SLOTS);
++    }
++    if (tid == 0 && n_valid < n_pairs) {
++        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
      }
 -
 -    expert_bounds[gridDim.x] = nex_prev + it_compact;
  }
  
 -template <int n_expert_used_template>
+-static void launch_mm_ids_helper(
 +template <int threads, int items>
- static void launch_mm_ids_helper(
++static void launch_mm_ids_helper_compact(
          const int32_t * __restrict__ ids, int32_t * __restrict__ ids_src1, int32_t * __restrict__ ids_dst, int32_t * __restrict__ expert_bounds,
 -        const int n_experts, const int n_tokens, const int n_expert_used_var, const int nchannels_y, const int si1, const int sis1, const bool write_inverse, cudaStream_t stream) {
 -    GGML_ASSERT(n_tokens          < (1 << 22) && "too few bits in mm_ids_helper_store");
@@ -238,13 +318,15 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 -    GGML_ASSERT(nbytes_shared <= smpbo);
 -    mm_ids_helper<n_expert_used_template><<<num_blocks, block_size, nbytes_shared, stream>>>
 -        (ids, ids_src1, ids_dst, expert_bounds, n_tokens, n_expert_used_var, nchannels_y, si1, sis1, write_inverse);
-+        const int n_z, const int n_pairs, const int pair_bits, const int slot_bits, const int n_expert_used, const int nchannels_y,
-+        const int si1, const int sis1, const bool write_inverse, cudaStream_t stream) {
++        const int n_experts, const int n_z, const int n_pairs, const int pair_bits, const int slot_bits, const int n_expert_used,
++        const int nchannels_y, const int si1, const int sis1, const bool write_inverse, const int max_cols, int32_t * errors,
++        cudaStream_t stream) {
 +    const size_t nbytes_shared = std::max(sizeof(typename cub::BlockRadixSort<uint32_t, threads, items>::TempStorage),
 +                                          sizeof(typename cub::BlockScan<int, threads>::TempStorage));
-+    CUDA_SET_SHARED_MEMORY_LIMIT((mm_ids_helper<threads, items>), nbytes_shared);
-+    mm_ids_helper<threads, items><<<1, threads, nbytes_shared, stream>>>
-+        (ids, ids_src1, ids_dst, expert_bounds, n_z, n_pairs, pair_bits, slot_bits, n_expert_used, nchannels_y, si1, sis1, write_inverse);
++    CUDA_SET_SHARED_MEMORY_LIMIT((mm_ids_helper_compact<threads, items>), nbytes_shared);
++    mm_ids_helper_compact<threads, items><<<1, threads, nbytes_shared, stream>>>
++        (ids, ids_src1, ids_dst, expert_bounds, n_experts, n_z, n_pairs, pair_bits, slot_bits, n_expert_used, nchannels_y, si1,
++         sis1, write_inverse, max_cols, errors);
  }
  
  void ggml_cuda_launch_mm_ids_helper(
@@ -275,22 +357,41 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 -        default:
 -            launch_mm_ids_helper< 0>(ids, ids_src1, ids_dst, expert_bounds, n_experts, n_tokens, n_expert_used, nchannels_y, si1, sis1, write_inverse, stream);
 -            break;
-+        const int n_experts, const int n_z, const int n_tokens, const int n_expert_used, const int nchannels_y, const int si1, const int sis1, const bool write_inverse, cudaStream_t stream) {
++        const int n_experts, const int n_z, const int n_tokens, const int n_expert_used, const int nchannels_y, const int si1, const int sis1,
++        const bool write_inverse, const int max_cols, int32_t * errors, cudaStream_t stream) {
 +    GGML_ASSERT(int64_t(n_tokens)*n_expert_used <= GGML_CUDA_MM_IDS_MAX_PAIRS && "too many (token, expert) pairs for mm_ids_helper");
 +    const int n_pairs = n_tokens*n_expert_used;
++
++    if (ggml_cuda_mm_ids_per_slot(n_experts, n_pairs, n_z)) {
++#define LAUNCH_MM_IDS_HELPER(k)                                                                                           \
++        mm_ids_helper_per_slot<k><<<n_experts + 1, WARP_SIZE, n_pairs*sizeof(int), stream>>>(ids, ids_src1, ids_dst,     \
++            expert_bounds, n_experts, n_pairs, n_expert_used, nchannels_y, si1, sis1, write_inverse, max_cols, errors)
++        switch (n_expert_used) { // a constant divisor for the common ones
++            case  2: LAUNCH_MM_IDS_HELPER( 2); break;
++            case  4: LAUNCH_MM_IDS_HELPER( 4); break;
++            case  6: LAUNCH_MM_IDS_HELPER( 6); break;
++            case  8: LAUNCH_MM_IDS_HELPER( 8); break;
++            case 10: LAUNCH_MM_IDS_HELPER(10); break;
++            case 16: LAUNCH_MM_IDS_HELPER(16); break;
++            default: LAUNCH_MM_IDS_HELPER( 0); break;
++        }
++#undef LAUNCH_MM_IDS_HELPER
++        return;
++    }
++
 +    int pair_bits = 0;
 +    while ((1 << pair_bits) < n_pairs) {
 +        ++pair_bits;
 +    }
-+    int slot_bits = 1;
-+    while ((int64_t(1) << slot_bits) < n_experts) {
++    int slot_bits = 1; // slots 0..n_experts, n_experts marking an id out of range
++    while ((int64_t(1) << slot_bits) <= n_experts) {
 +        ++slot_bits;
 +    }
 +    GGML_ASSERT(pair_bits + slot_bits <= 32 && "too few bits in mm_ids_helper's keys");
 +
-+#define LAUNCH_MM_IDS_HELPER(threads, items)                                                                            \
-+    launch_mm_ids_helper<threads, items>(ids, ids_src1, ids_dst, expert_bounds, n_z, n_pairs, pair_bits, slot_bits,   \
-+                                         n_expert_used, nchannels_y, si1, sis1, write_inverse, stream)
++#define LAUNCH_MM_IDS_HELPER(threads, items)                                                                              \
++    launch_mm_ids_helper_compact<threads, items>(ids, ids_src1, ids_dst, expert_bounds, n_experts, n_z, n_pairs, pair_bits, \
++        slot_bits, n_expert_used, nchannels_y, si1, sis1, write_inverse, max_cols, errors, stream)
 +    if (n_pairs <= 128) {
 +        LAUNCH_MM_IDS_HELPER(32, 4);
 +    } else if (n_pairs <= 512) {
@@ -310,28 +411,50 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 diff -ruN a/ggml/src/ggml-cuda/mmid.cuh b/ggml/src/ggml-cuda/mmid.cuh
 --- a/ggml/src/ggml-cuda/mmid.cuh
 +++ b/ggml/src/ggml-cuda/mmid.cuh
-@@ -1,5 +1,20 @@
+@@ -1,5 +1,42 @@
  #pragma once
  
 +// Holon: the most (token, expert) pairs one call sorts (mm_ids_helper's largest instance: 1024 threads x 16)
 +#define GGML_CUDA_MM_IDS_MAX_PAIRS 16384
 +
-+// Holon: the compact launch's z entries: one per active slot; a slot needs a (token, expert) pair, and a call's ids
-+// name at most n_slots_used distinct slots (an arena of n_experts slots serves one layer's experts at a time)
-+static inline int ggml_cuda_mm_ids_nz(const int64_t n_experts, const int64_t n_tokens, const int64_t n_expert_used,
-+                                      const int64_t n_slots_used) {
-+    return (int) std::min({n_experts, n_tokens*n_expert_used, n_slots_used});
++// Holon: violated preconditions the helper reports (or'd into its `errors` word); the rows it names are not computed
++#define GGML_CUDA_MM_IDS_ERR_SLOTS   1 // more distinct slots than the call's bound (ids_slots)
++#define GGML_CUDA_MM_IDS_ERR_RANGE   2 // an id outside [0, the stack's slots)
++#define GGML_CUDA_MM_IDS_ERR_COLUMNS 4 // a slot with more pairs than mmq's column tiles (an id repeated in a row)
++
++// Holon: the per-slot helper (ggml's: one warp per slot, scanning every pair; z is the slot) for a launch that lists
++// every slot and a small scan, where it is the faster one (measured on sm_86, docs/v1-offload.md D4; its shared
++// memory holds 4096 pairs); else the compact one
++static inline bool ggml_cuda_mm_ids_per_slot(const int64_t n_experts, const int64_t n_pairs, const int64_t n_z) {
++    return n_z == n_experts && n_experts*n_pairs <= 1024*1024 && n_pairs <= 4096;
 +}
 +
-+// Holon: sorts the (slot, token·n_expert_used + iex) pairs of `ids` (slots ascending, then token order) into compact
++// Holon: at most this many more z entries than active slots: the launch lists every slot (the per-slot helper)
++#define GGML_CUDA_MM_IDS_SPARE_Z 64
++
++// Holon: the launch's z entries: one per active slot, at most min(slots, pairs, n_slots_used) (a slot needs a
++// (token, expert) pair, and a call's ids name at most n_slots_used distinct slots: an arena of n_experts slots serves
++// one layer's experts at a time); every slot instead where that is at most GGML_CUDA_MM_IDS_SPARE_Z more and the
++// per-slot helper applies (a stack of a layer's own experts: the launch ggml makes)
++static inline int ggml_cuda_mm_ids_nz(const int64_t n_experts, const int64_t n_tokens, const int64_t n_expert_used,
++                                      const int64_t n_slots_used) {
++    const int64_t n_pairs = n_tokens*n_expert_used;
++    const int64_t n_z = std::min({n_experts, n_pairs, n_slots_used});
++    const bool every_slot = n_experts - n_z <= GGML_CUDA_MM_IDS_SPARE_Z && ggml_cuda_mm_ids_per_slot(n_experts, n_pairs, n_experts);
++    return (int) (every_slot ? n_experts : n_z);
++}
++
++// Holon: orders the (slot, token·n_expert_used + iex) pairs of `ids` (slots ascending, then token order) into compact
 +// rows r: ids_dst[r] is the pair's token·n_expert_used + iex; ids_src1[r] its src1 row (or, with write_inverse,
-+// ids_src1[pair] = r). expert_bounds holds n_z + 1 bounds, the first compact row of each active slot in ascending
-+// order and then n_pairs, followed by the n_z slots themselves (0 past the active ones); n_z = ggml_cuda_mm_ids_nz.
-+// Slots past the first n_z active ones (ids naming more than n_slots_used) are dropped: their rows are not computed.
++// ids_src1[pair] = r). expert_bounds holds n_z + 1 bounds, the first compact row of each listed slot in ascending
++// order and then the end of their rows, followed by the n_z slots themselves (0 past the active ones);
++// n_z = ggml_cuda_mm_ids_nz. Pairs mmq does not compute (an id out of range, slots past n_z, a slot's pairs past
++// max_cols, mmq's column tiles) set their GGML_CUDA_MM_IDS_ERR_* bit in *errors (if not NULL).
  void ggml_cuda_launch_mm_ids_helper(
          const int32_t * ids, int32_t * ids_src1, int32_t * ids_dst, int32_t * expert_bounds,
 -        int n_experts, int n_tokens, int n_expert_used, int nchannels_y, int si1, int sis1, bool write_inverse, cudaStream_t stream);
-+        int n_experts, int n_z, int n_tokens, int n_expert_used, int nchannels_y, int si1, int sis1, bool write_inverse, cudaStream_t stream);
++        int n_experts, int n_z, int n_tokens, int n_expert_used, int nchannels_y, int si1, int sis1, bool write_inverse,
++        int max_cols, int32_t * errors, cudaStream_t stream);
 diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
 --- a/ggml/src/ggml-cuda/mmq.cu
 +++ b/ggml/src/ggml-cuda/mmq.cu
@@ -361,7 +484,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
 -    GGML_ASSERT(        src1->type == GGML_TYPE_F32);
 -    GGML_ASSERT(        dst->type  == GGML_TYPE_F32);
 +        ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
-+        const float * x_scale, const int64_t ids_slots) {
++        const float * x_scale, const int64_t ids_slots, int32_t * ids_errors) {
 +    GGML_ASSERT(        src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_BF16); // Holon: bf16 activations,
 +    GGML_ASSERT(        dst->type  == GGML_TYPE_F32 || (dst->type == GGML_TYPE_BF16 && !ids)); // bf16 out (dense)
 +    GGML_ASSERT(!x_scale || (!ids && src0->type == GGML_TYPE_NVFP4)); // Holon: NVFP4's scale2 (dense)
@@ -404,16 +527,17 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
  
      // gate/up activations are broadcast across experts (ne11 == 1): quantize each token once and
      // scatter to its slots. ids_src1 then holds the inverse map (token slot -> compact row).
-@@ -296,7 +300,7 @@
+@@ -296,7 +300,8 @@
          const int sis1 = nb12 / nb11;
  
          ggml_cuda_launch_mm_ids_helper((const int32_t *) ids->data, ids_src1.get(), ids_dst.get(), expert_bounds.get(),
 -            ne02, ne12, n_expert_used, ne11, si1, sis1, /*write_inverse =*/ dedup_bcast, stream);
-+            ne02, n_z, ne12, n_expert_used, ne11, si1, sis1, /*write_inverse =*/ dedup_bcast, stream);
++            ne02, n_z, ne12, n_expert_used, ne11, si1, sis1, /*write_inverse =*/ dedup_bcast,
++            /*max_cols =*/ (ne12 + J_best - 1)/J_best*J_best, ids_errors, stream); // Holon: mmq's column tiles per slot
          CUDA_CHECK(cudaGetLastError());
      }
  
-@@ -327,10 +331,10 @@
+@@ -327,10 +332,10 @@
                                          ne10_padded, ne11_flat, ne12_flat, ne13_flat, stream);
              }
          } else if (dedup_bcast) {
@@ -426,7 +550,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
                                     ne10_padded, ne11_flat, ne12_flat, ne13_flat, stream);
          }
          CUDA_CHECK(cudaGetLastError());
-@@ -341,12 +345,13 @@
+@@ -341,12 +346,13 @@
                                           ne11 * ne10_padded * sizeof(block_q8_1) / (QK8_1 * sizeof(int));
      const int64_t s13 = ne12*s12;
  
@@ -749,16 +873,17 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  }
  
  template <ggml_type type, bool fallback, ggml_prec prec_src1>
-@@ -1581,7 +1620,13 @@
+@@ -1581,7 +1620,14 @@
  
  // -------------------------------------------------------------------------------------------------------------------------
  
 +// Holon: x_scale, NVFP4's per-tensor scale2 applied to dst (dense); dst may be bf16 (dense); ids_slots, the most
-+// distinct slots `ids` names (it bounds the compact launch, mmid.cuh)
++// distinct slots `ids` names (it bounds the compact launch), and ids_errors, a device word the id helper ors its
++// GGML_CUDA_MM_IDS_ERR_* bits into (mmid.cuh)
  void ggml_cuda_mul_mat_q(
 -        ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst);
 +        ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
-+        const float * x_scale = nullptr, int64_t ids_slots = INT64_MAX);
++        const float * x_scale = nullptr, int64_t ids_slots = INT64_MAX, int32_t * ids_errors = nullptr);
  
  bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t n_experts);
 +

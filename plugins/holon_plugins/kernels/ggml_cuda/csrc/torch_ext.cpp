@@ -77,7 +77,8 @@ void check_f32(const at::Tensor & t, const char * name) { TORCH_CHECK(t.scalar_t
 // out = 2·out_y for the fused SwiGLU (mmvq only), else out_y.
 void experts(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const at::Tensor & x, const at::Tensor & ids,
              at::Tensor & y, bool swiglu, const std::optional<at::Tensor> & gate_scale,
-             const std::optional<at::Tensor> & up_scale, at::Tensor & ws, int64_t slots = 0) {
+             const std::optional<at::Tensor> & up_scale, at::Tensor & ws, int64_t slots = 0,
+             const std::optional<at::Tensor> & errors = std::nullopt) {
     const c10::cuda::CUDAGuard guard(x.device());
     TORCH_CHECK(x.dim() == 3 && ids.dim() == 2 && y.dim() == 3, "x, ids, y: 3, 2 and 3 dimensions");
     const int64_t tokens = ids.size(0), k = ids.size(1), rows = x.size(1), in = x.size(2), out_y = y.size(2);
@@ -102,8 +103,8 @@ void experts(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const a
     } else {
         TORCH_CHECK(!swiglu && !gate_scale && !up_scale, "mmq with ids: no fused SwiGLU or scales");
         holon_ggml_mmq_id(type, prec, w.data_ptr(), w.size(0) / out, out, in, x.data_ptr(), bf16(x, "x"), rows,
-                          ids.data_ptr<int32_t>(), tokens, k, y.data_ptr<float>(), slots, ws.data_ptr(), ws.numel(),
-                          stream());
+                          ids.data_ptr<int32_t>(), tokens, k, y.data_ptr<float>(), slots,
+                          errors ? errors->data_ptr<int32_t>() : nullptr, ws.data_ptr(), ws.numel(), stream());
     }
 }
 
@@ -189,9 +190,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         experts(true, type, 0, w, x, ids, y, swiglu, gate_scale, up_scale, ws);
     });
     m.def("mmq_id", [](int64_t type, int64_t prec, const at::Tensor & w, const at::Tensor & x, const at::Tensor & ids,
-                       at::Tensor & y, at::Tensor & ws, int64_t slots) {
+                       at::Tensor & y, at::Tensor & ws, int64_t slots, const std::optional<at::Tensor> & errors) {
         TORCH_CHECK(slots > 0, "mmq with ids: slots > 0");
-        experts(false, type, prec, w, x, ids, y, false, std::nullopt, std::nullopt, ws, slots);
+        TORCH_CHECK(!errors || (errors->scalar_type() == at::kInt && errors->device() == x.device() && errors->numel() >= 1),
+                    "errors: one int32 on x's device");
+        experts(false, type, prec, w, x, ids, y, false, std::nullopt, std::nullopt, ws, slots, errors);
     });
     m.def("swiglu", [](const at::Tensor & x, at::Tensor & y, const std::optional<at::Tensor> & gate_scale,
                        const std::optional<at::Tensor> & up_scale, const std::optional<at::Tensor> & ids) {

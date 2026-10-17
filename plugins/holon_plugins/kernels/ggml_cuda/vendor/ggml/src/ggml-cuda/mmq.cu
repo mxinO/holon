@@ -134,7 +134,7 @@ ggml_prec ggml_cuda_mmq_get_prec_src1(const ggml_tensor * src0, const ggml_tenso
 
 void ggml_cuda_mul_mat_q(
         ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
-        const float * x_scale, const int64_t ids_slots) {
+        const float * x_scale, const int64_t ids_slots, int32_t * ids_errors) {
     GGML_ASSERT(        src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_BF16); // Holon: bf16 activations,
     GGML_ASSERT(        dst->type  == GGML_TYPE_F32 || (dst->type == GGML_TYPE_BF16 && !ids)); // bf16 out (dense)
     GGML_ASSERT(!x_scale || (!ids && src0->type == GGML_TYPE_NVFP4)); // Holon: NVFP4's scale2 (dense)
@@ -300,7 +300,8 @@ void ggml_cuda_mul_mat_q(
         const int sis1 = nb12 / nb11;
 
         ggml_cuda_launch_mm_ids_helper((const int32_t *) ids->data, ids_src1.get(), ids_dst.get(), expert_bounds.get(),
-            ne02, n_z, ne12, n_expert_used, ne11, si1, sis1, /*write_inverse =*/ dedup_bcast, stream);
+            ne02, n_z, ne12, n_expert_used, ne11, si1, sis1, /*write_inverse =*/ dedup_bcast,
+            /*max_cols =*/ (ne12 + J_best - 1)/J_best*J_best, ids_errors, stream); // Holon: mmq's column tiles per slot
         CUDA_CHECK(cudaGetLastError());
     }
 

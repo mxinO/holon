@@ -91,10 +91,12 @@ void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, 
                         const float * gate_scale, const float * up_scale, void * workspace, size_t workspace_bytes,
                         void * stream);
 // mmq: any tokens (one call is sized by the workspace), out_y = out. `ids` name at most `slots` distinct slots of the
-// stack (it bounds the launch; the rows of further slots are not computed).
+// stack (it bounds the launch). A violated precondition (more slots, an id out of range, a slot repeated inside rows
+// beyond mmq's column tiles) leaves the rows it names uncomputed and ors its bit (mmid.cuh, GGML_CUDA_MM_IDS_ERR_*)
+// into the device word `errors` (if not NULL).
 void holon_ggml_mmq_id(int type, int prec, const void * w, int64_t experts, int64_t out, int64_t in, const void * x,
                        int x_bf16, int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y,
-                       int64_t slots, void * workspace, size_t workspace_bytes, void * stream);
+                       int64_t slots, int32_t * errors, void * workspace, size_t workspace_bytes, void * stream);
 
 // y[r, i] = silu(x[r, i]) * x[r, n + i] for `rows` rows of 2n f32 values (gate, then up), y f32; with `ids` (one
 // expert per row), gate and up first times gate_scale[ids[r]] and up_scale[ids[r]].

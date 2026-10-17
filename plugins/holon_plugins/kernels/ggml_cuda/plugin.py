@@ -67,6 +67,10 @@ QLINEAR, QLINEAR_GLU, QEMBEDDING = "qlinear", "qlinear_glu", "qembedding"
 LINEAR_EXPERTS, MOE_TOPK, MOE_COMBINE = "linear_experts", "moe_topk", "moe_combine"
 CHUNK = 512                     # mmq rows per call: llama.cpp's ubatch; sizes the workspace and the f32 buffer
 ID_PAIRS = 16384                # the most (token, expert) pairs mmq's id helper sorts per call (mmid.cuh)
+# The bits mmq's id helper ors into `LinearExperts.errors` for a violated precondition (GGML_CUDA_MM_IDS_ERR_*)
+ID_ERRORS = {"slots": 1,        # more distinct slots in a call's ids than `LinearExperts.slots`
+             "range": 2,        # an id outside the stack's slots
+             "columns": 4}      # a slot with more pairs than mmq's column tiles (an id repeated in a row)
 # Supported ggml types (design §4.6) and their ggml type ids.
 TYPES = {"q4_0": 2, "q4_1": 3, "q5_0": 6, "q5_1": 7, "q8_0": 8, "q2_k": 10, "q3_k": 11, "q4_k": 12, "q5_k": 13,
          "q6_k": 14, "iq2_xxs": 16, "iq2_xs": 17, "iq3_xxs": 18, "iq1_s": 19, "iq4_nl": 20, "iq3_s": 21, "iq2_s": 22,
@@ -405,6 +409,9 @@ class LinearExperts(_Matmul):
         # or a padding row (an offload arena's null slots, docs/v1-offload.md D5); it bounds mmq's compact launch, which
         # is how a stack of more slots than experts (a class arena) costs no more than the layer's own stack
         self.slots = self.experts + self.top_k
+        # a device int32 word, or'd with ID_ERRORS bits by every mmq call with ids (the rows a violation names are not
+        # computed; mmvq with ids does not check), one per build context, zero until a violation; the reader zeroes it
+        self.errors = ctx.static("ggml_cuda.id_errors", (1,), torch.int32)
         # its size depends on in, k (the id maps, the activations per slot) and E (expert_bounds): all three name it
         self.workspace = ctx.workspace(
             f"ggml_cuda.id[in={self.k},top_k={self.top_k},experts={self.experts}]",
@@ -432,13 +439,14 @@ class LinearExperts(_Matmul):
             self._count("mmq")
             w, xs = self._mmq_blocks(parts).view(-1, blocks.shape[-1]), self._mmq_input(xs, self.f32)
             if not self.swiglu:
-                self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, ys, self.workspace, self.slots)
+                self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, ys, self.workspace, self.slots, self.errors)
                 if up_scale is not None:
                     self._scale_slots(ys, up_scale, ids_c)
                 continue
             if gate_up is None:
                 gate_up = torch.empty(min(tokens, CHUNK), self.top_k, self.out, device=x.device)
-            self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, gate_up[:len(ids_c)], self.workspace, self.slots)
+            self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, gate_up[:len(ids_c)], self.workspace, self.slots,
+                            self.errors)
             self._swiglu(gate_up[:len(ids_c)], ys, gate_scale, up_scale, ids_c)
         return y
 

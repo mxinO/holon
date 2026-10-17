@@ -18,12 +18,14 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
   agree across the limit. Mixed types in one std.moe layer at 7 tokens (sm_86: IQ3_S gate/up on mmq, IQ4_XS down on
   mmvq); ids straight from `moe_topk`; CUDA graphs replayed with routing unlike the capture's at every decode
   bucket.
-- Placement (docs/v1-offload.md D4): mmq with ids always tiles, over a compact list of the active slots, so an
-  expert's rows are bitwise the same in arenas of 12, 13, 16 and 74 slots under any placement, at every tile width,
-  and in compacted launches padded with null-slot rows to the type's mmvq limit + 1 (Q4_K, Q6_K, IQ2_XXS, IQ2_S,
-  IQ3_XXS; gate/up and down). A slot repeated inside one token's ids stays outside the contract: the expert's pairs
-  past its T columns are never computed (llama.cpp's helper instead left stale entries that wrote over a real row,
-  which M0.2's padding plant relied on; retired, docs/m02-moe.md §4.6).
+- Placement (docs/v1-offload.md D4): mmq with ids always tiles, over a compact list of the active slots (or every
+  slot, where that is at most 64 more), so an expert's rows are bitwise the same in arenas of 12, 13, 16, 74 and 128
+  slots under any placement, at every tile width, and in compacted launches padded with null-slot rows to the type's
+  mmvq limit + 1, on both id helpers (per slot, compact; Q4_K, Q6_K, IQ2_XXS, IQ2_S, IQ3_XXS; gate/up and down).
+- Violated preconditions set their bit in the kernel's `errors` word and leave only their own rows uncomputed: an id
+  out of range, more slots than the binding's bound, a slot repeated inside rows beyond mmq's column tiles (within
+  them it is computed; llama.cpp's helper instead left stale entries that wrote over a real row, which M0.2's padding
+  plant relied on; retired, docs/m02-moe.md §4.6).
 - `moe_topk`: the reference's picks up to near-ties (fast-math `__expf` moves probabilities by a few ulps), its
   weights; ±inf and all-NaN rows give unique in-range ids; token counts off the kernel's 8-row blocks.
 - `moe_combine`: within 1 bf16 ulp of the reference, plus the f32 accumulation's rounding (the kernel's FMA) for
@@ -53,7 +55,7 @@ from holon.core.plugins import PluginSet, discover
 from holon_judge import l0, q8_1
 from holon_judge.planted import PLANTS
 from holon_plugins.kernels.ggml_cuda import extension
-from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, FP4, NATIVE_FP4, PREC, TYPES
+from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, FP4, ID_ERRORS, NATIVE_FP4, PREC, TYPES
 from holon_std.moe import reference
 
 from .test_ggml_cuda import (
@@ -453,11 +455,23 @@ def placed_inputs(stage: str, tokens: int, seed: int) -> tuple[torch.Tensor, tor
     return (gate_up_input if stage == "gate_up" else down_input)(tokens, seed), uniform(tokens, EP, seed)
 
 
+# mmq's two id helpers (mmid.cuh), each with an arena size that takes it for a binding of EP experts (top_k K: at most
+# EP + K slots per call): per slot where the launch lists every slot (at most 64 more than EP + K, SLOTS included),
+# compact where the arena has more
+HELPERS = {"per_slot": EP + K, "compact": 128}
+
+
+def helper(fn) -> str:
+    """The id helper `fn()` launches."""
+    return next(h for h in HELPERS for name in launched(fn) if f"mm_ids_helper_{h}" in name)
+
+
 @pytest.mark.parametrize("name", PLACED)
 @pytest.mark.parametrize("stage", sorted(STAGES))
 def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name, stage):
     """D4's placement invariance on mmq with ids: an expert's rows are bitwise the same wherever an arena places it
-    (each of SLOTS with a random placement; at EP also reversed: permutations) and at every mmq tile width (token
+    (each of SLOTS with a random placement, per-slot id helper, and 128 slots, compact helper; at EP also reversed:
+    permutations) and at every mmq tile width (token
     counts from the mmvq limit + 1 to a 512-token chunk: J from 8 or 16 up to 128), all against one launch over EP
     slots in order at 512 tokens. llama.cpp switched mmq with ids to stream-k below 90 % tile efficiency, splitting K
     at points that move with the slot count: on every GPU at least one of SLOTS did (the dense schedule over the same
@@ -469,7 +483,7 @@ def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name
     assert path == "mmq/q8_1"
     device, typ = torch.cuda.current_device(), TYPES[name]
     assert any(lib.mmq_schedule(device, typ, PREC["q8_1"], out * n, 64)[0] == 2 for n in SLOTS)
-    launches = [(n, "random", t) for n in SLOTS for t in (64, CHUNK)] + [(EP, "reversed", 64)]
+    launches = [(n, "random", t) for n in (*SLOTS, HELPERS["compact"]) for t in (64, CHUNK)] + [(EP, "reversed", 64)]
     a = arena(ctx, s, stage, SLOTS[-1], "random")
     tiles = sorted({a.kernel.mmvq_tokens + 1, 16, 24, 32, 40, 48, 80, 96, 112, 128, 200})
     widths = {lib.mmq_schedule(device, typ, PREC["q8_1"], out, t)[2] for t in tiles}
@@ -481,28 +495,75 @@ def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name
 
 @pytest.mark.parametrize("name", PLACED)
 @pytest.mark.parametrize("stage", sorted(STAGES))
-def test_compacted_launches_equal_the_chunk_s(ctx, name, stage):
+@pytest.mark.parametrize("path", sorted(HELPERS))
+def test_compacted_launches_equal_the_chunk_s(ctx, name, stage, path):
     """D4's compaction: a launch over a subset of a chunk's rows, in any order, padded with null-slot rows (zero
     activations, rank j's ids on its own null slot, repeated across the padding rows) up to the type's mmvq limit + 1
     so the kernel takes mmq, gives those rows bitwise as the chunk's launch does, and zero padding rows; a subset
-    above the limit needs no padding. Chunks of 64 rows, and of 8, between the limits on Turing and newer (Q4_K,
-    Q6_K, IQ2_XXS 8: the chunk takes mmvq and is never compacted; IQ2_S, IQ3_XXS 7: mmq, compacted)."""
+    above the limit needs no padding. On both id helpers. Chunks of 64 rows, and of 8, between the limits on Turing
+    and Ampere (Q4_K, Q6_K, IQ2_XXS 8: the chunk takes mmvq and is never compacted; IQ2_S, IQ3_XXS 7: mmq,
+    compacted); on Ada and Blackwell every type's expert mmvq limit is 8, so the 8-row chunk takes mmvq throughout."""
     k, out, _ = STAGES[stage]
-    a = arena(ctx, stack(name, EP, out, k, seed=21), stage, SLOTS[-1], "random")
+    a = arena(ctx, stack(name, EP, out, k, seed=21), stage, HELPERS[path], "random")
     t, gen = a.kernel.mmvq_tokens, torch.Generator().manual_seed(24)
     for chunk in (8, 64):
         x, ids = placed_inputs(stage, chunk, seed=chunk)
-        y, path = a(x, ids)
+        y, path_ = a(x, ids)
+        if chunk == 64:
+            assert helper(lambda x=x, ids=ids: a(x, ids)) == path
         if chunk <= t:
-            assert path == "mmvq/q8_1"
+            assert path_ == "mmvq/q8_1"
             continue
         for r in sorted({1, t, min(2 * t, chunk - 1)}):
             rows, pad = torch.randperm(chunk, generator=gen)[:r].cuda(), max(0, t + 1 - r)
             xg = torch.cat([x[rows], x.new_zeros(pad, *x.shape[1:])])
             ids_g = torch.cat([ids[rows], (EP + torch.arange(K, dtype=torch.int32, device="cuda")).expand(pad, K)])
-            yg, path = a(xg, ids_g)
+            yg, path_ = a(xg, ids_g)
             what = f"{name} {stage}: {r} of {chunk} rows + {pad} padding"
-            assert path == "mmq/q8_1" and torch.equal(yg[:r], y[rows]) and not yg[r:].any(), what
+            assert path_ == "mmq/q8_1" and torch.equal(yg[:r], y[rows]) and not yg[r:].any(), what
+
+
+@pytest.mark.parametrize("path", sorted(HELPERS))
+def test_violated_preconditions_are_flagged(ctx, path):
+    """mmq's id helpers report a violated precondition in the kernel's `errors` word and leave the rows it names
+    uncomputed, every other row as without it: an id out of range (past the stack, or negative); more distinct slots
+    than the binding's bound (compact helper only: the per-slot one lists every slot); a slot with more pairs than
+    mmq's column tiles (three rows with all k ids on one expert at 16 tokens, one tile of 16). An id repeated inside a
+    row within that bound is computed: both slots hold the expert's product, unflagged."""
+    a = arena(ctx, stack("q4_k", EP, 2 * INTER, H, seed=21), "gate_up", HELPERS[path], "random")
+    tokens, errors = 16, a.kernel.errors
+    x, ids = placed_inputs("gate_up", tokens, seed=25)
+    slots = a.table[ids.long()]
+
+    def run(kernel, s):
+        errors.zero_()
+        return kernel(x, a.parts, s), int(errors)
+
+    ref, err = run(a.kernel, slots)
+    assert err == 0 and helper(lambda: run(a.kernel, slots)) == path
+    uses = {s: int((slots == s).sum()) for s in slots.unique().tolist()}
+    j0 = min(range(K), key=lambda j: uses[int(slots[0, j])])           # token 0's least used slot, repeated
+    assert uses[int(slots[0, j0])] < tokens
+    dup, j1 = slots.clone(), (j0 + 1) % K
+    dup[0, j1] = slots[0, j0]
+    y, err = run(a.kernel, dup)
+    keep = torch.ones(tokens, K, dtype=torch.bool, device="cuda")
+    keep[0, j1] = False
+    assert err == 0 and torch.equal(y[0, j1], y[0, j0]) and torch.equal(y[keep], ref[keep]), "repeat within the bound"
+    over = slots.clone()
+    over[-3:] = slots[0, 0]
+    y, err = run(a.kernel, over)
+    assert err == ID_ERRORS["columns"] and torch.equal(y[:-3], ref[:-3]), "repeat beyond the column tiles"
+    bad, keep = slots.clone(), torch.ones(tokens, K, dtype=torch.bool, device="cuda")
+    bad[3, 2], bad[5, 7] = HELPERS[path], -1
+    keep[3, 2] = keep[5, 7] = False
+    y, err = run(a.kernel, bad)
+    assert err == ID_ERRORS["range"] and torch.equal(y[keep], ref[keep]), "ids out of range"
+    if path == "compact":
+        narrow = experts(ctx, "q4_k", H, 2 * INTER, 1, n=2)               # bound to 2 + K = 10 of the 12 slots
+        y, err = run(narrow, slots)
+        listed = torch.isin(slots, slots.unique()[:narrow.slots])
+        assert err == ID_ERRORS["slots"] and torch.equal(y[listed], ref[listed]), "more slots than the bound"
 
 
 def topk(ctx, n: int, k: int = K, renormalize: bool = True):
