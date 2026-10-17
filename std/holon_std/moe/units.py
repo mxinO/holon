@@ -190,8 +190,9 @@ def _store(ctx, **site):
 
 
 class MoE(nn.Module):
-    """Mixture of experts: softmax top-k routing over an f32 router, gate/up/down expert stacks with SwiGLU, the
-    weighted combine. The expert path runs in f32 (design D3), CHUNK tokens at a time."""
+    """Mixture of experts: softmax top-k routing over an f32 router (`moe_router@1`, or the f32 linear and
+    `moe_topk@1`), gate/up/down expert stacks with SwiGLU, the weighted combine. The expert path runs in f32 (design
+    D3), CHUNK tokens at a time."""
 
     def __init__(self, ctx, *, hidden: int, experts: int, top_k: int, inter: int, renormalize: bool,
                  layer: int = 0) -> None:
@@ -213,8 +214,13 @@ class MoE(nn.Module):
         self._down: ExpertLinear | None = None
         dtype = _dtype(ctx.dtype)
         topk = {"experts": experts, "top_k": top_k, "renormalize": renormalize}
-        self._topk = ctx.select_kernel(kernels.MOE_TOPK, site=f"std.moe[experts={experts},top_k={top_k}]",
-                                       **topk).impl(ctx, **topk)
+        site = f"std.moe[experts={experts},top_k={top_k}]"
+        # the router and top-k in one kernel where a provider serves them (bounded: its own f32 order), else the f32
+        # linear and `moe_topk@1`
+        router = topk | {"hidden": hidden, "dtype": dtype}
+        self._router = (ctx.select_kernel(kernels.MOE_ROUTER, site=site, **router).impl(ctx, **router)
+                        if ctx.candidates(kernels.MOE_ROUTER, router) else None)
+        self._topk = None if self._router else ctx.select_kernel(kernels.MOE_TOPK, site=site, **topk).impl(ctx, **topk)
         combine = {"hidden": hidden, "top_k": top_k, "dtype": dtype, "y_dtype": "float32"}
         self._combine = ctx.select_kernel(kernels.MOE_COMBINE, site=f"std.moe[hidden={hidden},top_k={top_k}]",
                                           **combine).impl(ctx, **combine)
@@ -225,6 +231,11 @@ class MoE(nn.Module):
             raise ValueError(f"layer {self.layer}: gate and up experts must share a layout to merge "
                              f"(gate {self.gate.layout_fact()}, up {self.up.layout_fact()})")
         self._down = self._store.stack(self.down)
+
+    def _route(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        if self._router is not None:
+            return self._router(x, self.router)
+        return self._topk(nn.functional.linear(x.float(), self.router))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self._forward(x, None)
@@ -245,8 +256,7 @@ class MoE(nn.Module):
         passes = [(a, min(a + size, full)) for a in range(0, full, size)] + [(full, tokens)] * (full < tokens)
         for a, b in passes:
             xc = x[a:b]
-            routes = [self._topk(nn.functional.linear(xc[c:c + CHUNK].float(), self.router))
-                      for c in range(0, b - a, CHUNK)]
+            routes = [self._route(xc[c:c + CHUNK]) for c in range(0, b - a, CHUNK)]
             weights, ids = routes[0] if len(routes) == 1 else (torch.cat(t) for t in zip(*routes, strict=True))
             ids, weights = self._store.transform(ids, weights, a)
             gate_up, down = self._store.route(ids, a)

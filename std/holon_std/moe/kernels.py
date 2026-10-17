@@ -5,6 +5,12 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   over E in f32, the k largest (ties to the lower index), divided by their sum (clamped at 6.1e-5) when
   `renormalize`. Ids are unique and in range in every row; a row with any NaN or +inf logit gets such ids and
   unspecified weights. Facts: experts, top_k, renormalize.
+- `moe_router@1`: instance `(x [T, H] of dtype, router [E, H] f32) -> (weights [T, k] f32, ids [T, k] int32)`: the
+  router and `moe_topk@1` in one op — `moe_topk@1`'s result, in its terms, for the logits `x · routerᵀ` summed in f32
+  from x's exact f32 values, in an order the provider fixes per row: a row's logits are the same at any T and in any
+  call (row-invariant), not necessarily the f32 `linear`'s bits (bounded against the composition). std.moe uses it
+  where a provider serves its facts, else composes the f32 `linear` and `moe_topk@1`. Facts: hidden, experts, top_k,
+  renormalize, dtype.
 - `linear_experts@2`: instance `(x [T, R, in], parts, ids [T, k]) -> y [T, k, out_y]` of `out_dtype`: row j of token
   t applies expert `ids[t, j]` to `x[t, 0]` (R = 1) or `x[t, j]` (R = k). `parts` holds the stack's tensors by role,
   as `QTensor.parts`, per expert (`{"blocks": [E, out, row_bytes]}` for ggml layouts, where @1 took [E·out,
@@ -87,6 +93,7 @@ then `staging` slots, then cache slots.
 from __future__ import annotations
 
 MOE_TOPK, LINEAR_EXPERTS, MOE_COMBINE = "moe_topk@1", "linear_experts@2", "moe_combine@1"
+MOE_ROUTER = "moe_router@1"
 MOE_RESOLVE, EXPERT_FETCH, LINEAR_EXPERTS_ARENA = "moe_resolve@1", "expert_fetch@1", "linear_experts_arena@1"
 EXPERT_PREFETCH = "expert_prefetch@1"
 PADDING, DECODE, PREFILL = 0, 1, 2   # `moe_resolve@1`'s row kinds

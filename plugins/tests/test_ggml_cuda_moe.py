@@ -334,7 +334,7 @@ def test_mixed_types_in_one_layer(ctx, sm):
         pytest.skip("the IQ3_S / IQ4_XS limits that split 7 tokens across the paths are sm_86's")
     unit, (sg, su, sd) = moe_layer(ctx, "iq3_s", "iq4_xs")
     x = layer_input(7, seed=9)
-    weights, ids = unit._topk(torch.nn.functional.linear(x.float(), unit.router))
+    weights, ids = unit._route(x)
     h = unit._gate_up(x[:, None], ids)
     y = unit.down(h, ids)
     assert unit._gate_up._kernel.calls == {"mmq/q8_1": 1} and unit.down._kernel.calls == {"mmvq/q8_1": 1}
@@ -663,6 +663,59 @@ def test_moe_topk_non_finite_rows(ctx, n):
     torch.testing.assert_close(ids[5], reference.moe_topk(rows[5:6], K, True)[1][0].cuda(), rtol=0, atol=0)
 
 
+@pytest.mark.parametrize("n,hidden", [(16, 512), (128, H), (512, 1536)])
+def test_moe_router(ctx, lib, n, hidden):
+    """`moe_router@1` (docs/v1-offload.md §14, step 3c), its fused path (up to `rows` tokens): its logits within the
+    f32 budget of the f64 product from x's exact values, bf16 and f32 x; its weights and ids bitwise `moe_topk` on
+    those logits, near-ties and NaN rows included (k unique ids in range); a row's logits the same at any token count
+    and tile (row-invariant: 1- to 16-row calls against each other); the tile counters left zeroed, so a second call
+    (a graph replay) gives the same bits. Through the plugin: the fused path's bits up to `rows` tokens, above them
+    the composition's (the f32 linear, then `moe_topk`)."""
+    gen = torch.Generator().manual_seed(n)
+    router = (torch.randn(n, hidden, generator=gen) / hidden ** 0.5).cuda()
+    x32 = torch.randn(700, hidden, generator=gen).cuda()
+    x32[100:200] = x32[100:200].round(decimals=1)                         # near-ties among the logits
+    x32[7, 5] = float("nan")
+    rows = lib.moe_router_rows()
+    done = torch.zeros(lib.moe_router_tiles(rows), dtype=torch.int32, device="cuda")
+    for k, renormalize in ((min(K, n), True), (2, False)):
+        route, choose = (select(ctx, "moe_router@1", hidden=hidden, experts=n, top_k=k, renormalize=renormalize,
+                                dtype="bfloat16"), topk(ctx, n, k, renormalize))
+        for x in (x32.bfloat16(), x32):
+            def call(rows_: torch.Tensor, k=k, renormalize=renormalize):
+                logits = torch.full((len(rows_), n), float("nan"), device="cuda")
+                w, ids = torch.empty(len(rows_), k, device="cuda"), torch.empty(len(rows_), k, dtype=torch.int32,
+                                                                                    device="cuda")
+                lib.moe_router(rows_, router, logits, done, w, ids, renormalize)
+                return logits, w, ids
+            whole = [call(x[a:a + rows]) for a in range(0, len(x), rows)]
+            logits, w, ids = (torch.cat(t) for t in zip(*whole, strict=True))
+            assert not done.any(), "tile counters left set"
+            finite = torch.ones(len(x), dtype=torch.bool)
+            finite[7] = False
+            r = l0.check(logits[finite], x[finite].double() @ router.double().T, torch.float32, hidden)
+            assert r.passed, r
+            assert logits[7].isnan().all() and all(len(set(row)) == k for row in ids.tolist())
+            assert all(map(bitwise, choose(logits), (w, ids)))
+            for a, b in ((0, 1), (5, 8), (13, 16), (690, 700)):           # row-invariant, and repeatable
+                assert all(map(bitwise, call(x[a:b]), (logits[a:b], w[a:b], ids[a:b]))), f"rows {a}:{b}"
+            if x.dtype == torch.bfloat16:
+                assert all(map(bitwise, route(x[:rows], router), (w[:rows], ids[:rows])))
+                assert all(map(bitwise, route(x, router), choose(torch.nn.functional.linear(x.float(), router))))
+        assert route(x32[:0].bfloat16(), router)[1].shape == (0, k)
+
+
+def bitwise(a: torch.Tensor, b: torch.Tensor) -> bool:
+    """Equal bits, NaN in the same places."""
+    return a.dtype == b.dtype and torch.equal(a.isnan(), b.isnan()) and torch.equal(a.nan_to_num(), b.nan_to_num())
+
+
+def select(ctx, op: str, **facts):
+    spec = ctx.select_kernel(op, site="l0", **facts)
+    assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
+    return spec.impl(ctx, **facts)
+
+
 def test_moe_combine_within_one_ulp(ctx):
     facts = {"hidden": 2048, "top_k": K, "dtype": "bfloat16", "y_dtype": "float32"}
     spec = ctx.select_kernel("moe_combine@1", site="l0", **facts)
@@ -716,12 +769,16 @@ def test_swiglu_kernel_within_the_fp32_budget(lib):
 
 def test_router_logits_within_the_fp32_budget(ctx, monkeypatch):
     # D3: the router is an f32 product of the bf16 hidden states (an f64 reference at the fp32 budget); a bf16
-    # router or TF32 (`allow_tf32`, e.g. via `set_float32_matmul_precision("high")`) must miss it.
+    # router or TF32 (`allow_tf32`, e.g. via `set_float32_matmul_precision("high")`) must miss it. The layer routes
+    # through `moe_router@1` (its logits: test_moe_router); its composition, where no provider serves the router (the
+    # f32 linear, then `moe_topk@1`), is held here.
     unit, _ = moe_layer(ctx, "q4_k", "q4_k")
+    assert unit._router is not None and unit._topk is None
     x = torch.randn(300, H, generator=torch.Generator().manual_seed(17)).bfloat16().cuda()
     want = x.double() @ unit.router.double().T
     seen = []
-    route = unit._topk
+    route = topk(ctx, EQ)
+    monkeypatch.setattr(unit, "_router", None)
     monkeypatch.setattr(unit, "_topk", lambda logits: seen.append(logits.clone()) or route(logits))
 
     def logits() -> torch.Tensor:
@@ -747,7 +804,7 @@ def test_moe_layer_binds_its_activation_dtypes_and_f32_outputs(ctx):
     assert sites["swiglu"]["facts"]["act_dtype"] == "bfloat16"         # gate/up: the layer input
     assert sites["none"]["facts"]["act_dtype"] == "float32"            # down: the f32 SwiGLU output
     x = layer_input(3, seed=16)
-    _, ids = unit._topk(torch.nn.functional.linear(x.float(), unit.router))
+    _, ids = unit._route(x)
     h = unit._gate_up(x[:, None], ids)
     assert h.dtype == unit.down(h, ids).dtype == torch.float32 and unit(x).dtype == torch.bfloat16
 

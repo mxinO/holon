@@ -182,6 +182,14 @@ class MoeTopk:
         return moe.moe_topk(logits, self.top_k, self.renormalize)
 
 
+class MoeRouter:
+    def __init__(self, ctx, *, top_k: int, renormalize: bool, **facts) -> None:
+        self.top_k, self.renormalize = top_k, renormalize
+
+    def __call__(self, x, router):
+        return moe.moe_router(x, router, self.top_k, self.renormalize)
+
+
 class MoeCombine:
     def __init__(self, ctx, *, dtype: str, **facts) -> None:
         self.dtype = getattr(torch, dtype)
@@ -276,7 +284,8 @@ BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul"
          "attention.paged_verify": PagedAttention, "attention.causal": CausalAttention,
          "qlinear": QLinear, "qlinear_glu": QLinearGlu, "qembedding": QEmbedding, "linear_experts": LinearExperts,
          "linear_experts_arena": LinearExperts,
-         "moe_topk": MoeTopk, "moe_combine": MoeCombine, "moe_resolve": MoeResolve, "expert_fetch": ExpertFetch,
+         "moe_topk": MoeTopk, "moe_router": MoeRouter, "moe_combine": MoeCombine, "moe_resolve": MoeResolve,
+         "expert_fetch": ExpertFetch,
          "expert_prefetch": ExpertPrefetch,
          "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule, "gated_rmsnorm": GatedRMSNorm,
          "gdn_rewind": GDNRewind, "kv_write": KvWrite}

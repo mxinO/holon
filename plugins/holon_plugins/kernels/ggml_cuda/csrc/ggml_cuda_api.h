@@ -108,6 +108,18 @@ void holon_ggml_swiglu(const float * x, int64_t rows, int64_t n, const float * g
 void holon_ggml_topk_moe(const float * logits, int64_t tokens, int64_t experts, int64_t k, int renormalize,
                          float * weights, int32_t * ids, void * stream);
 
+// The router and softmax routing in one launch, for up to holon_ggml_moe_router_rows() tokens (topk-moe.cu,
+// ggml_cuda_holon_moe_router): holon_ggml_topk_moe's weights and ids for the logits x · router.T, x [tokens, hidden]
+// (bf16 or f32; 8-byte aligned) read as its exact f32 values, `router` [experts, hidden] f32 (16-byte aligned; hidden
+// a multiple of 512), summed in f32 in an order fixed per hidden (the same for a row at any tokens). `logits`
+// [tokens, experts] f32 is scratch; `done` holds holon_ggml_moe_router_tiles(tokens) zeroed counters, zeroed again on
+// return.
+int64_t holon_ggml_moe_router_rows(void);
+int64_t holon_ggml_moe_router_tiles(int64_t tokens);
+void holon_ggml_moe_router(const void * x, int x_bf16, const float * router, int64_t tokens, int64_t hidden,
+                           int64_t experts, int64_t k, int renormalize, float * logits, uint32_t * done,
+                           float * weights, int32_t * ids, void * stream);
+
 // out[t] = sum_j weights[t, j] * y[t, j] in f32, slot by slot, stored bf16: y [tokens, k, hidden] f32, out bf16.
 // With `residual` [tokens, hidden] bf16 (not NULL): out[t] = residual[t] + that bf16 sum, added in f32 and rounded
 // once more, as the unfused `residual + out` computes it.

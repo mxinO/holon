@@ -340,6 +340,19 @@ void holon_ggml_topk_moe(const float * logits, int64_t tokens, int64_t experts, 
     ggml_cuda_op_topk_moe(c.ctx, &logits_t, &weights_t, &ids_t, renormalize ? &clamp : nullptr, nullptr, nullptr, args);
 }
 
+int64_t holon_ggml_moe_router_rows(void) { return HOLON_ROUTER_MAX_ROWS; }
+
+int64_t holon_ggml_moe_router_tiles(int64_t tokens) { return (tokens + HOLON_ROUTER_ROWS - 1) / HOLON_ROUTER_ROWS; }
+
+void holon_ggml_moe_router(const void * x, int x_bf16, const float * router, int64_t tokens, int64_t hidden,
+                           int64_t experts, int64_t k, int renormalize, float * logits, uint32_t * done,
+                           float * weights, int32_t * ids, void * stream) {
+    GGML_ASSERT((uintptr_t) x % 8 == 0 && (uintptr_t) router % 16 == 0);
+    // the sum's clamp, as holon_ggml_topk_moe's (llama-graph.cpp)
+    ggml_cuda_holon_moe_router(x, x_bf16, router, tokens, hidden, experts, k, renormalize ? 6.103515625e-5f : -INFINITY,
+                               logits, done, weights, ids, (cudaStream_t) stream);
+}
+
 void holon_ggml_moe_combine(const float * y, const float * weights, int64_t tokens, int64_t k, int64_t hidden,
                             const void * residual, void * out, void * stream) {
     call_context c(stream, nullptr, 0);

@@ -325,7 +325,7 @@ def _moe(layer: int | None = None, init: Callable[[dict], dict] | None = None,
         here = layer is None or kw.get("layer") == layer
         construct(self, ctx, **(init(kw) if init and here else kw))
         if here and topk:
-            self._topk = functools.partial(lambda f, logits: topk(*f(logits), kw["experts"]), self._topk)
+            self._route = functools.partial(lambda f, x: topk(*f(x), kw["experts"]), self._route)
         if here and combine:
             self._combine = functools.partial(lambda f, y, w, out: f(*combine(y, w), out), self._combine)
     with mock.patch.object(units.MoE, "__init__", planted_init), \

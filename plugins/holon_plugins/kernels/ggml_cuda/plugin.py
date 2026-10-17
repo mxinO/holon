@@ -21,7 +21,8 @@ counts them), else quantizes `x` itself. `qlinear_glu` (D6): mmvq's fused gate a
 `linear_experts` is llama.cpp's MUL_MAT_ID per 512-token chunk: mmvq with ids up to the type's limit
 (`get_mmvq_mmid_max_batch`), for `glu="swiglu"` through its fused gate on the merged stack, else mmq with ids into
 f32, followed for swiglu by our f32 SwiGLU. Its workspace (`ggml_cuda.id[…]`) holds mmq's id maps besides the
-activations. `moe_topk` is `topk-moe.cu` (softmax, top k, renormalised) and `moe_combine`
+activations. `moe_topk` is `topk-moe.cu` (softmax, top k, renormalised), `moe_router` our router kernel beside it
+(the f32 router GEMV from bf16 activations, then `moe_topk`'s selection, in one launch), and `moe_combine`
 `moe-weighted-reduction.cu`, both patched to the contracts' layouts (ids at row stride k; the combine stores bf16
 into the caller's `out`, and its `add` the residual stream plus the rounded sum, rounded again: docs/v1-offload.md
 §14, step 3c).
@@ -65,7 +66,7 @@ from holon.api import Constraint, KernelSpec, Layout, QTensor, Scheme
 from . import extension
 
 QLINEAR, QLINEAR_GLU, QEMBEDDING = "qlinear", "qlinear_glu", "qembedding"
-LINEAR_EXPERTS, MOE_TOPK, MOE_COMBINE = "linear_experts", "moe_topk", "moe_combine"
+LINEAR_EXPERTS, MOE_TOPK, MOE_ROUTER, MOE_COMBINE = "linear_experts", "moe_topk", "moe_router", "moe_combine"
 LINEAR_EXPERTS_ARENA = "linear_experts_arena"     # the same kernel over an offload store's arena (ids are its slots)
 CHUNK = 512                     # mmq rows per call: llama.cpp's ubatch; sizes the workspace and the f32 buffer
 ID_PAIRS = 32768                # the most (token, expert) pairs mmq's id helper sorts per call (mmid.cuh)
@@ -481,6 +482,35 @@ class MoeTopk:
         return weights, ids
 
 
+class MoeRouter:
+    """`moe_router@1`: decode and verify calls (up to `rows` tokens) in one launch — topk-moe.cu's router kernel, ours
+    through vendor.patch: per row and expert four warps' f32 fma chains over quarters of hidden, each closed by the
+    warp's xor tree, added in order, then `moe_topk`'s selection on those logits in the last block of the row's tile;
+    larger calls (prompt chunks) as `moe_topk@1` composed with the f32 linear, as before (a row's logits follow its
+    call's path, as `qlinear`'s mmvq / mmq). Its logits scratch is a workspace, its tile counters a static buffer each
+    call leaves zeroed."""
+
+    def __init__(self, ext: Extension, ctx, *, hidden: int, experts: int, top_k: int, renormalize: bool,
+                 dtype: str) -> None:
+        self.top_k, self.renormalize, self.lib = top_k, renormalize, ext(ctx.fingerprint.sm)
+        self.topk = MoeTopk(ext, ctx, experts=experts, top_k=top_k, renormalize=renormalize)
+        self.rows = self.lib.moe_router_rows()
+        self.logits = ctx.workspace(f"ggml_cuda.router[experts={experts}]", self.rows * experts * 4)
+        self.done = ctx.static("ggml_cuda.router_done", (self.lib.moe_router_tiles(self.rows),), torch.int32)
+
+    def __call__(self, x: torch.Tensor, router: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        if not 0 < len(x) <= self.rows:
+            return self.topk(torch.nn.functional.linear(x.float(), router))
+        x = x.contiguous()
+        if x.data_ptr() % 16:                                # the kernel's vector loads
+            x = x.clone()
+        weights = torch.empty(len(x), self.top_k, device=x.device)
+        ids = torch.empty(len(x), self.top_k, dtype=torch.int32, device=x.device)
+        logits = self.logits.view(torch.float32)[:len(x) * router.shape[0]].view(len(x), -1)
+        self.lib.moe_router(x, router, logits, self.done, weights, ids, self.renormalize)
+        return weights, ids
+
+
 class MoeCombine:
     def __init__(self, ext: Extension, ctx, **facts) -> None:
         self.lib = ext(ctx.fingerprint.sm)
@@ -526,6 +556,10 @@ def _supports_moe_topk(f: dict) -> bool:
     return 0 < e <= 512 and e & (e - 1) == 0 and 0 < f["top_k"] <= e     # topk-moe.cu's instances
 
 
+def _supports_moe_router(f: dict) -> bool:
+    return _supports_moe_topk(f) and f["hidden"] % 512 == 0 and f["dtype"] in DTYPES
+
+
 def _supports_moe_combine(f: dict) -> bool:
     return f["dtype"] == "bfloat16" and f["y_dtype"] == "float32"
 
@@ -551,4 +585,5 @@ class Plugin:
                     functools.partial(supports, act_quant=act_quant, types=types), sms, priority, act)
         add(QEMBEDDING, functools.partial(QEmbedding, ext), _supports_qembedding)
         add(MOE_TOPK, functools.partial(MoeTopk, ext), _supports_moe_topk)
+        add(MOE_ROUTER, functools.partial(MoeRouter, ext), _supports_moe_router)
         add(MOE_COMBINE, functools.partial(MoeCombine, ext), _supports_moe_combine)

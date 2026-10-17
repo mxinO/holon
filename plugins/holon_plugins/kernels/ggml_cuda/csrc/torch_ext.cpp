@@ -234,6 +234,35 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         holon_ggml_topk_moe(logits.data_ptr<float>(), tokens, experts, k, renormalize, weights.data_ptr<float>(),
                             ids.data_ptr<int32_t>(), stream());
     });
+    m.def("moe_router_rows", [] { return holon_ggml_moe_router_rows(); });
+    m.def("moe_router_tiles", [](int64_t tokens) { return holon_ggml_moe_router_tiles(tokens); });
+    m.def("moe_router", [](const at::Tensor & x, const at::Tensor & router, at::Tensor & logits, at::Tensor & done,
+                           at::Tensor & weights, at::Tensor & ids, bool renormalize) {
+        const c10::cuda::CUDAGuard guard(x.device());
+        TORCH_CHECK(x.dim() == 2 && router.dim() == 2 && ids.dim() == 2, "x, router, ids: 2 dimensions");
+        const int64_t tokens = x.size(0), hidden = x.size(1), experts = router.size(0), k = ids.size(1);
+        check(x, x, {tokens, hidden}, "x");
+        check(router, x, {experts, hidden}, "router");
+        check(logits, x, {tokens, experts}, "logits");
+        check(weights, x, {tokens, k}, "weights");
+        check(ids, x, {tokens, k}, "ids");
+        check_f32(router, "router");
+        check_f32(logits, "logits");
+        check_f32(weights, "weights");
+        TORCH_CHECK(ids.scalar_type() == at::kInt, "ids: int32");
+        TORCH_CHECK(done.scalar_type() == at::kInt && done.device() == x.device() && done.is_contiguous() &&
+                    done.numel() >= holon_ggml_moe_router_tiles(tokens), "done: ", holon_ggml_moe_router_tiles(tokens),
+                    " int32 counters");
+        TORCH_CHECK(hidden % 512 == 0, "hidden: a multiple of 512");
+        TORCH_CHECK(experts > 0 && experts <= 512 && (experts & (experts - 1)) == 0, "experts: a power of 2 <= 512");
+        TORCH_CHECK(k > 0 && k <= experts && tokens > 0 && tokens <= holon_ggml_moe_router_rows(),
+                    "1 <= k <= experts, 0 < tokens <= ", holon_ggml_moe_router_rows());
+        TORCH_CHECK(reinterpret_cast<uintptr_t>(x.data_ptr()) % 8 == 0 &&
+                    reinterpret_cast<uintptr_t>(router.data_ptr()) % 16 == 0, "x, router: 8- and 16-byte aligned");
+        holon_ggml_moe_router(x.data_ptr(), bf16(x, "x"), router.data_ptr<float>(), tokens, hidden, experts, k,
+                              renormalize, logits.data_ptr<float>(), reinterpret_cast<uint32_t *>(done.data_ptr<int32_t>()),
+                              weights.data_ptr<float>(), ids.data_ptr<int32_t>(), stream());
+    });
     m.def("moe_combine", [](const at::Tensor & y, const at::Tensor & weights, at::Tensor & out,
                             const std::optional<at::Tensor> & residual) {
         const c10::cuda::CUDAGuard guard(y.device());
