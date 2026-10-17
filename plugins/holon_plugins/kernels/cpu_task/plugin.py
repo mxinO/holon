@@ -8,7 +8,8 @@ first materialize, its threads start after it (pinned, the first one coordinatin
 
 Options (EngineConfig.plugin_options), from tune for a lock: `cpu_task.threads` (compute threads, the coordinator
 included; default 4: S6 and M3 saturate DRAM with 2–4 for Q4_K experts), `cpu_task.io_threads` (default 2: M7's two
-`pread` workers), `cpu_task.cores` / `cpu_task.io_cores` (CPU lists such as "2-5,8"; default: one per physical core of
+`pread` workers), `cpu_task.cores` / `cpu_task.io_cores` (CPU lists such as "2-5,8", the first `threads` of them
+taken; default: one per physical core of
 the process's CPUs, past the first — the OS's and the engine loop's —, compute first, then I/O), `cpu_task.wait`
 (`spin`: 1-thread kernels, 2–3 µs per handshake; `memop`: stream memory operations, no SM held, for display GPUs;
 default spin), `cpu_task.timeout` (seconds a wait waits before it fails open; default 60).
@@ -41,7 +42,7 @@ class Service:
         threads, cores, default = POOLS[pool]
         self.lib, self.name = extension.load(ctx.fingerprint.sm), f"cpu_task.{pool}"
         n = int(opts.get(f"cpu_task.{threads}", default))
-        self.cores = parse_cores(str(opts[f"cpu_task.{cores}"])) if f"cpu_task.{cores}" in opts else \
+        self.cores = parse_cores(str(opts[f"cpu_task.{cores}"]))[:n] if f"cpu_task.{cores}" in opts else \
             default_cores(pool, n, int(opts.get("cpu_task.threads", POOLS["compute"][2])))
         if len(self.cores) != n:
             raise ValueError(f"{self.name}: {n} threads on cores {self.cores}")
@@ -122,8 +123,11 @@ def parse_cores(text: str) -> list[int]:
 
 def default_cores(pool: str, n: int, compute: int) -> list[int]:
     """One CPU per physical core of the process's, past the first: the compute threads first, then the I/O ones
-    (wrapping round when there are too few)."""
+    (wrapping round when there are too few). A thread pinned to one CPU (an engine loop's `loop_core`, before a second
+    engine of the process is built) leaves the choice to the machine's online CPUs."""
     allowed, seen, cores = sorted(os.sched_getaffinity(0)), set(), []
+    if len(allowed) == 1:
+        allowed = parse_cores(pathlib.Path("/sys/devices/system/cpu/online").read_text().strip())
     for cpu in allowed:
         siblings = pathlib.Path(f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list")
         core = siblings.read_text().strip() if siblings.is_file() else str(cpu)
