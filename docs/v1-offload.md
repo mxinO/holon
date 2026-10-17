@@ -833,3 +833,71 @@ Decided while building, against the text above:
   `holon_tools profile` (step 3) writes them there, a profile lies beside the checkpoint; a bundle-shipped profile
   then needs the store to resolve the model plugin's bundle, decided with the tool. The store's options share the `moe.` prefix: `moe.store`,
   `moe.placement`, `moe.placement.profile`, `moe.tiers`, `moe.cache`.
+
+### Step 3a as built (2026-10-17): the placement policies
+
+Built: `placement.lfu@1` (F11, the offload store's default: the only tier, pinned RAM, holds every expert),
+`placement.lru@1` (F4) and `placement.profile_decay@1` (F2–F3), each its own plugin under
+`plugins/holon_plugins/placement/`; the device-owned two own their resolve contracts `moe_resolve.lfu@1` /
+`moe_resolve.lru@1` (oracle `reference.py` and CPU provider in the plugin, CUDA provider in `kernels.expert_io`), each
+with its `lend(n)`; F2's warm start for every policy (`std.tiered.static@1` included); std completions in `std.tiered`
+(policies built with `items` / `roles`; per-group device state `[groups, *shape]`, zeroed at each seed and passed to
+the policy's variant by name; the delta log in the telemetry; host-edit preconditions; two-phase swaps as S2 MemOps;
+route taps; `TieredStore.lend`); `holon_judge.placement` (`route_dump`, the L1 policy-parity check); six plants;
+`holon_tools profile`. Evidence: `spikes/x3_policies/README.md`, `evidence/x3_policies_rtx-a5000_2026-10-17.json` — on
+the A5000 F11 (2,115 in-graph admissions per run at 25%), F2–F3 (16 swap rounds) and F4 snapshots are byte-identical
+to `std.moe@1` all-resident and run-identical ×3 (F11, F2–F3), the n-gram-drafter run too; natural, capped and
+adaptive placements are identical to each other; F11's per-step residency equals its replay oracle exactly on every
+trace recorded (up to 23,163 admissions over 255 decode steps); every plant fires and is caught (table in the README).
+
+Decided while building, against the text above:
+- **Scheduler row kinds (B-s2-6) not built: it is an ABI major.** Filling `BatchPlan.n_decode` on every step changes
+  the field's meaning ("a mixed step's leading decode rows; 0: unmixed", `core/holon/api/batch.py:127`), which
+  readers rely on: `std.mixers.gqa`'s planner splits any step with `n_decode` > 0 into a decode and a prefill call
+  (`std/holon_std/mixers/gqa/units.py:51-55`), `std.mixers.gdn` plans such a step per row kind and never as a decode or
+  verify step (`std/holon_std/mixers/gdn/units.py:74-77`), and the core runs it eagerly (`core/holon/core/executor.py:320`,
+  counted as mixed at `core/holon/core/engine.py:455`) — every decode step would lose its graph. Under §4.5 that is a
+  change, not an addition. The additive way is a new `BatchPlan` field with a default (e.g. the leading decode and
+  verify rows of every step, or a per-row kind array), filled by the scheduler — a minor, for the owner to decide.
+  Until then the store keeps its heuristic: a one-token last prompt chunk counts (and decays) as decode outside mixed
+  steps (step 2's deviation stands). The parity check is unaffected: `route_dump` records what the device counted, and
+  each step's routed experts from its eager resolves.
+- **The fetch list names each miss's slot.** An admitted miss is gathered straight into its victim's slots (D4), so
+  `moe_resolve@1` returns `fetch [R, 2, staging]` (host unit, then the slot) and `expert_fetch@1` takes those pairs
+  (its `first` argument is gone); `moe_resolve@1` also takes the delta log (`delta`, `n_delta`) and the layer's index,
+  which @1 leaves alone and the variants append to. Both contracts changed in place: they are not on main, and the std
+  offload API is tagged at step 6.
+- **The delta log** is `[groups × items, 3]` int32 records, appended in a deterministic order (layer by layer, pairing
+  order within one), with an `OVERFLOW` bit past its end: `(layer, a, b)` — a took b's slots in every role, b went to
+  the RAM tier (−1) —, `(layer, −1, b)` — b lent. The host mirror is brought to each commit c (host edits launched by
+  c, then step c's records), the same on the overlapped and synchronous paths, and the policy reads it.
+- **Host edits carry a precondition** (the value the entry must hold at the apply); one that fails is not applied and
+  sets the store's `edit_errors` word, so the commit stops the engine (D4's device error flag; never a trap).
+- **Two-phase swaps.** A host policy returns swaps (as many items in as out per layer); the store unmaps the outgoing
+  item at launch c + 2, hands in a MemOp copying the incoming item's host units into its slots with `after` = c + 2
+  and `lands_by` = c + 2 + d (d = 2), and maps it at c + 2 + d. MemOps copy whole pool units of one shape, so the
+  arena pool and the host pools share one unit, the classes' greatest common divisor (36,864 bytes on the vehicle;
+  arenas aligned to its least common multiple with 4,096). `profile_decay` counts steps with decode rows (as the
+  replay counts decode steps) and skips a round while its last swaps are not in the host's view.
+- **Decay and counts once per step**: a variant decays (or ticks) in each call that holds a `DECODE` row, so the
+  store requires a step's decode and verify rows to lie in one expert pass (`max_seqs` × (1 + `max_draft_tokens`) ≤
+  `std.moe@1`'s 512-token chunk; refused otherwise). F11's arithmetic is exact f32 (× 0.915 rounded, then one rounded
+  + 1.0 per entry, no FMA); its victims are experts resident in every role routed by no live entry of the call;
+  candidates missing in every role, routed by a decode or verify row.
+- **`lend(n)`** returns the picks as a `[layers, experts]` mask; the CUDA provider is eager torch ops (ring steps are
+  never graphed), the CPU provider the oracle; `TieredStore.lend` unmaps and logs them and must run in the step's
+  forward after its first resolve (which zeroes the log) — the ring that calls it is step 3b.
+- **Cost:** a variant's resolve adds ≈ 4.7 µs per layer call on the A5000 (≈ 0.23 ms per decode step over 48 layers;
+  §13's band for F11's pick and decay is 0.25–0.35 ms) after its ranking moved its keys to shared memory (≈ 10 µs
+  before).
+- **Plants:** `lfu-victim-needed` and `lfu-shared-victim` set plant bits the variant kernel reads (`MoeResolve.plant`,
+  zero otherwise). Two predictions were too weak: both kernel plants put one slot twice in a row, which the patched
+  mmq's id-error word catches (the engine stops at step 3) before a wrong byte is emitted; and `owner-race` with its
+  check removed is deterministic — the snapshot differs (and the parity check with it) in every run, run-identical
+  holds. `map-before-landing` failed both checks (all three runs differ from all-resident; run 0 differs from runs
+  1–2). L2 was not run for the plants (§6 predicts it fails too); the exact checks above are their verdicts.
+- **Profiles** are written beside the checkpoint by `holon_tools profile` (`--name`, default `profile.json`) — for a
+  hub-cache checkpoint that is the snapshot directory; shipping them in model bundles stays open (§5).
+- **What the parity check leaves to step 3b:** traces with prompts in mixed steps, device lending and its return
+  (cache size unchanged), and the one-slot-per-expert rule across a step's row kinds; `route_dump` already takes a
+  step's routed experts from its eager resolves for them.

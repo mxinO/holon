@@ -1,0 +1,845 @@
+{
+ "gpu": "rtx-a5000",
+ "model": "unsloth/Qwen3-30B-A3B-GGUF Q4_K_M",
+ "commit": "115c49b",
+ "engine": "bf16, graphs on, overlap on, max_seqs 64, max_step_tokens 4096, max_model_len 8192, paged_min_tokens 16384, host_memory 20 GiB",
+ "commands": [
+  "python spikes/x3_policies/run.py <gguf> <ev> 1 \"resident|resident|||\" \"resident_ngram|resident|||ngram\" \"lfu47|*=0.47|||\" \"static47|*=0.47|std.tiered.static@1||\" \"static25|*=0.25|std.tiered.static@1||\" \"lru25|*=0.25|placement.lru@1||\" \"lfu25_ngram|*=0.25|||ngram\" \"resident_decode|resident||||decode\" \"lfu25_decode|*=0.25||||decode\" \"lfu_fill||||\"",
+  "python spikes/x3_policies/run.py <gguf> <ev> 3 \"lfu25|*=0.25|||\" \"pd25|*=0.25|placement.profile_decay@1||\"",
+  "python spikes/x3_policies/run.py <gguf> <plants> 1 \"resident|resident|||\" \"p_off_lfu25|*=0.25||resolve-off-by-one|\" \"p_off_lfu100|*=1.0||resolve-off-by-one|\" \"p_stale_pd25|*=0.25|placement.profile_decay@1|map-stale-slot|\" \"p_stale_lfu25|*=0.25||map-stale-slot|\" \"p_owner_lfu25|*=0.25||owner-race|\" \"p_owner_static25|*=0.25|std.tiered.static@1|owner-race|\" \"p_vneed_lfu25|*=0.25||lfu-victim-needed|\" \"p_vneed_pd25|*=0.25|placement.profile_decay@1|lfu-victim-needed|\" \"p_shared_lfu25|*=0.25||lfu-shared-victim|\" \"p_shared_pd25|*=0.25|placement.profile_decay@1|lfu-shared-victim|\" \"p_land_lfu25|*=0.25||map-before-landing|\"",
+  "python spikes/x3_policies/run.py <gguf> <plants> 3 \"p_land_pd25|*=0.25|placement.profile_decay@1|map-before-landing|\" \"p_ownerx_lfu25|*=0.25||owner-race-unchecked|\"",
+  "python spikes/x3_policies/record.py <dir> <json> 115c49b",
+  "python spikes/x3_policies/mutate.py <dir>/<name>_routes.npz",
+  "python spikes/x3_policies/bench_resolve.py  # x3, identical"
+ ],
+ "exactness": [
+  {
+   "name": "lfu25",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "",
+   "spec": "",
+   "run": 0,
+   "build_s": 39.0,
+   "run_s": 37.1,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 2115,
+   "records": 2115,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "parity": {
+    "steps": 67,
+    "decode_steps": 64,
+    "admissions": 2115,
+    "first_differing_step": null
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "lfu25",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "",
+   "spec": "",
+   "run": 1,
+   "build_s": 25.3,
+   "run_s": 37.2,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 2115,
+   "records": 2115,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "parity": {
+    "steps": 67,
+    "decode_steps": 64,
+    "admissions": 2115,
+    "first_differing_step": null
+   },
+   "vs_resident": "identical",
+   "vs_run_0": "identical"
+  },
+  {
+   "name": "lfu25",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "",
+   "spec": "",
+   "run": 2,
+   "build_s": 24.2,
+   "run_s": 37.1,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 2115,
+   "records": 2115,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "parity": {
+    "steps": 67,
+    "decode_steps": 64,
+    "admissions": 2115,
+    "first_differing_step": null
+   },
+   "vs_resident": "identical",
+   "vs_run_0": "identical"
+  },
+  {
+   "name": "lfu25_decode",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "",
+   "spec": "",
+   "trace": "decode",
+   "run": 0,
+   "build_s": 25.1,
+   "run_s": 87.6,
+   "peak_misses": 96,
+   "steps": 258,
+   "admissions": 23163,
+   "records": 23163,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "parity": {
+    "steps": 258,
+    "decode_steps": 255,
+    "admissions": 23163,
+    "first_differing_step": null
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "lfu25_ngram",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "",
+   "spec": "ngram",
+   "run": 0,
+   "build_s": 31.6,
+   "run_s": 44.9,
+   "peak_misses": 96,
+   "steps": 66,
+   "admissions": 1394,
+   "records": 1394,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "parity": {
+    "steps": 66,
+    "decode_steps": 63,
+    "admissions": 1394,
+    "first_differing_step": null
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "lfu47",
+   "cache": "*=0.47",
+   "policy": "placement.lfu@1",
+   "plant": "",
+   "spec": "",
+   "run": 0,
+   "build_s": 26.5,
+   "run_s": 21.4,
+   "peak_misses": 67,
+   "steps": 67,
+   "admissions": 3123,
+   "records": 3123,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 2888,
+    "down.q6_k.2048x768": 1444,
+    "down.q4_k.2048x768": 1444
+   },
+   "parity": {
+    "steps": 67,
+    "decode_steps": 64,
+    "admissions": 3123,
+    "first_differing_step": null
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "lfu_fill",
+   "cache": "",
+   "policy": "placement.lfu@1",
+   "plant": "",
+   "spec": "",
+   "trace": "snapshot",
+   "run": 0,
+   "build_s": 24.2,
+   "run_s": 4.2,
+   "peak_misses": 0,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 6144,
+    "down.q6_k.2048x768": 3072,
+    "down.q4_k.2048x768": 3072
+   },
+   "parity": {
+    "steps": 67,
+    "decode_steps": 64,
+    "admissions": 0,
+    "first_differing_step": null
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "lru25",
+   "cache": "*=0.25",
+   "policy": "placement.lru@1",
+   "plant": "",
+   "spec": "",
+   "run": 0,
+   "build_s": 28.9,
+   "run_s": 37.2,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 9280,
+   "records": 9280,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "pd25",
+   "cache": "*=0.25",
+   "policy": "placement.profile_decay@1",
+   "plant": "",
+   "spec": "",
+   "run": 0,
+   "build_s": 36.9,
+   "run_s": 39.9,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": 16,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "pd25",
+   "cache": "*=0.25",
+   "policy": "placement.profile_decay@1",
+   "plant": "",
+   "spec": "",
+   "run": 1,
+   "build_s": 23.8,
+   "run_s": 39.9,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": 16,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "vs_resident": "identical",
+   "vs_run_0": "identical"
+  },
+  {
+   "name": "pd25",
+   "cache": "*=0.25",
+   "policy": "placement.profile_decay@1",
+   "plant": "",
+   "spec": "",
+   "run": 2,
+   "build_s": 23.1,
+   "run_s": 40.0,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": 16,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "vs_resident": "identical",
+   "vs_run_0": "identical"
+  },
+  {
+   "name": "resident",
+   "cache": "resident",
+   "policy": "placement.lfu@1",
+   "plant": "",
+   "spec": "",
+   "run": 0,
+   "build_s": 11.9,
+   "run_s": 4.2
+  },
+  {
+   "name": "resident_decode",
+   "cache": "resident",
+   "policy": "placement.lfu@1",
+   "plant": "",
+   "spec": "",
+   "trace": "decode",
+   "run": 0,
+   "build_s": 69.0,
+   "run_s": 8.3
+  },
+  {
+   "name": "resident_ngram",
+   "cache": "resident",
+   "policy": "placement.lfu@1",
+   "plant": "",
+   "spec": "ngram",
+   "run": 0,
+   "build_s": 12.7,
+   "run_s": 7.6
+  },
+  {
+   "name": "static25",
+   "cache": "*=0.25",
+   "policy": "std.tiered.static@1",
+   "plant": "",
+   "spec": "",
+   "run": 0,
+   "build_s": 33.9,
+   "run_s": 44.4,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "static47",
+   "cache": "*=0.47",
+   "policy": "std.tiered.static@1",
+   "plant": "",
+   "spec": "",
+   "run": 0,
+   "build_s": 27.4,
+   "run_s": 32.5,
+   "peak_misses": 67,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 2888,
+    "down.q6_k.2048x768": 1444,
+    "down.q4_k.2048x768": 1444
+   },
+   "vs_resident": "identical"
+  }
+ ],
+ "plants": [
+  {
+   "name": "p_land_lfu25",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "map-before-landing",
+   "spec": "",
+   "run": 0,
+   "build_s": 23.3,
+   "run_s": 20.5,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 2115,
+   "records": 2115,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "parity": {
+    "steps": 67,
+    "decode_steps": 64,
+    "admissions": 2115,
+    "first_differing_step": null
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "p_land_pd25",
+   "cache": "*=0.25",
+   "policy": "placement.profile_decay@1",
+   "plant": "map-before-landing",
+   "spec": "",
+   "run": 0,
+   "build_s": 32.9,
+   "run_s": 22.1,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": 16,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "vs_resident": "step 16: deltas differ for (request, sequence) [(28, 0)]"
+  },
+  {
+   "name": "p_land_pd25",
+   "cache": "*=0.25",
+   "policy": "placement.profile_decay@1",
+   "plant": "map-before-landing",
+   "spec": "",
+   "run": 1,
+   "build_s": 22.9,
+   "run_s": 21.9,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": 16,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "vs_resident": "step 10: deltas differ for (request, sequence) [(23, 0)]",
+   "vs_run_0": "step 10: deltas differ for (request, sequence) [(23, 0)]"
+  },
+  {
+   "name": "p_land_pd25",
+   "cache": "*=0.25",
+   "policy": "placement.profile_decay@1",
+   "plant": "map-before-landing",
+   "spec": "",
+   "run": 2,
+   "build_s": 21.3,
+   "run_s": 22.0,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": 16,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "vs_resident": "step 10: deltas differ for (request, sequence) [(23, 0)]",
+   "vs_run_0": "step 10: deltas differ for (request, sequence) [(23, 0)]"
+  },
+  {
+   "name": "p_off_lfu100",
+   "cache": "*=1.0",
+   "policy": "placement.lfu@1",
+   "plant": "resolve-off-by-one",
+   "spec": "",
+   "run": 0,
+   "build_s": 24.1,
+   "run_s": 4.4,
+   "peak_misses": 0,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 6144,
+    "down.q6_k.2048x768": 3072,
+    "down.q4_k.2048x768": 3072
+   },
+   "parity": {
+    "steps": 67,
+    "decode_steps": 64,
+    "admissions": 0,
+    "first_differing_step": null
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "p_off_lfu25",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "resolve-off-by-one",
+   "spec": "",
+   "run": 0,
+   "build_s": 23.8,
+   "run_s": 12.8,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 2151,
+   "records": 2151,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "parity": {
+    "steps": 67,
+    "decode_steps": 64,
+    "admissions": 2151,
+    "first_differing_step": null
+   },
+   "vs_resident": "step 0: deltas differ for (request, sequence) [(0, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0), (7, 0), (8, 0), (9, 0), (10, 0), (11, 0), (12, 0), (13, 0), (15, 0), (16, 0), (17, 0), (19, 0), (20, 0), (21, 0), (22, 0), (23, 0), (24, 0), (25, 0), (26, 0), (27, 0), (28, 0), (29, 0), (31, 0), (32, 0), (33, 0), (34, 0), (35, 0), (36, 0), (37, 0), (38, 0), (39, 0), (40, 0), (41, 0), (42, 0), (43, 0), (45, 0), (46, 0), (47, 0), (48, 0), (50, 0), (51, 0), (53, 0), (54, 0), (55, 0), (57, 0), (58, 0), (59, 0), (60, 0), (62, 0), (63, 0)]"
+  },
+  {
+   "name": "p_owner_lfu25",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "owner-race",
+   "spec": "",
+   "run": 0,
+   "build_s": 24.0,
+   "error": "RuntimeError: moe: step 6's kernels flagged errors {'edit_errors': 1} (errors: 1 = a corrupt residency entry, 2 = the delta log overflowed; edit_errors: a host edit's precondition failed; kernel_errors: the kernel's bits)",
+   "run_s": 6.2,
+   "peak_misses": 96,
+   "steps": 5,
+   "admissions": 658,
+   "records": 658,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   }
+  },
+  {
+   "name": "p_owner_static25",
+   "cache": "*=0.25",
+   "policy": "std.tiered.static@1",
+   "plant": "owner-race",
+   "spec": "",
+   "run": 0,
+   "build_s": 29.3,
+   "run_s": 24.1,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "p_ownerx_lfu25",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "owner-race-unchecked",
+   "spec": "",
+   "run": 0,
+   "build_s": 28.9,
+   "run_s": 20.5,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 2028,
+   "records": 2028,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "parity": {
+    "steps": 67,
+    "decode_steps": 64,
+    "admissions": 2028,
+    "first_differing_step": 5
+   },
+   "vs_resident": "step 7: deltas differ for (request, sequence) [(54, 0)]"
+  },
+  {
+   "name": "p_ownerx_lfu25",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "owner-race-unchecked",
+   "spec": "",
+   "run": 1,
+   "build_s": 36.8,
+   "run_s": 20.7,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 2028,
+   "records": 2028,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "parity": {
+    "steps": 67,
+    "decode_steps": 64,
+    "admissions": 2028,
+    "first_differing_step": 5
+   },
+   "vs_resident": "step 7: deltas differ for (request, sequence) [(54, 0)]",
+   "vs_run_0": "identical"
+  },
+  {
+   "name": "p_ownerx_lfu25",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "owner-race-unchecked",
+   "spec": "",
+   "run": 2,
+   "build_s": 23.8,
+   "run_s": 20.8,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 2028,
+   "records": 2028,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "parity": {
+    "steps": 67,
+    "decode_steps": 64,
+    "admissions": 2028,
+    "first_differing_step": 5
+   },
+   "vs_resident": "step 7: deltas differ for (request, sequence) [(54, 0)]",
+   "vs_run_0": "identical"
+  },
+  {
+   "name": "p_shared_lfu25",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "lfu-shared-victim",
+   "spec": "",
+   "trace": "snapshot",
+   "run": 0,
+   "build_s": 23.2,
+   "error": "RuntimeError: moe: step 3's kernels flagged errors {'kernel_errors.0': 4} (errors: 1 = a corrupt residency entry, 2 = the delta log overflowed; edit_errors: a host edit's precondition failed; kernel_errors: the kernel's bits)",
+   "run_s": 5.4,
+   "peak_misses": 96,
+   "steps": 2,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   }
+  },
+  {
+   "name": "p_shared_pd25",
+   "cache": "*=0.25",
+   "policy": "placement.profile_decay@1",
+   "plant": "lfu-shared-victim",
+   "spec": "",
+   "run": 0,
+   "build_s": 22.3,
+   "run_s": 21.7,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": 16,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "p_stale_lfu25",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "map-stale-slot",
+   "spec": "",
+   "run": 0,
+   "build_s": 33.9,
+   "run_s": 20.5,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 2115,
+   "records": 2115,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "parity": {
+    "steps": 67,
+    "decode_steps": 64,
+    "admissions": 2115,
+    "first_differing_step": null
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "p_stale_pd25",
+   "cache": "*=0.25",
+   "policy": "placement.profile_decay@1",
+   "plant": "map-stale-slot",
+   "spec": "",
+   "run": 0,
+   "build_s": 27.3,
+   "run_s": 20.9,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": 16,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "vs_resident": "step 10: deltas differ for (request, sequence) [(11, 0), (12, 0), (14, 0), (16, 0), (28, 0), (57, 0)]"
+  },
+  {
+   "name": "p_vneed_lfu25",
+   "cache": "*=0.25",
+   "policy": "placement.lfu@1",
+   "plant": "lfu-victim-needed",
+   "spec": "",
+   "trace": "snapshot",
+   "run": 0,
+   "build_s": 27.3,
+   "error": "RuntimeError: moe: step 3's kernels flagged errors {'kernel_errors.0': 4} (errors: 1 = a corrupt residency entry, 2 = the delta log overflowed; edit_errors: a host edit's precondition failed; kernel_errors: the kernel's bits)",
+   "run_s": 5.3,
+   "peak_misses": 96,
+   "steps": 2,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": null,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   }
+  },
+  {
+   "name": "p_vneed_pd25",
+   "cache": "*=0.25",
+   "policy": "placement.profile_decay@1",
+   "plant": "lfu-victim-needed",
+   "spec": "",
+   "run": 0,
+   "build_s": 21.9,
+   "run_s": 21.9,
+   "peak_misses": 96,
+   "steps": 67,
+   "admissions": 0,
+   "records": 0,
+   "swap_rounds": 16,
+   "cached_per_class": {
+    "gate_up.q4_k.1536x2048": 1536,
+    "down.q6_k.2048x768": 768,
+    "down.q4_k.2048x768": 768
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "resident",
+   "cache": "resident",
+   "policy": "placement.lfu@1",
+   "plant": "",
+   "spec": "",
+   "run": 0,
+   "build_s": 10.9,
+   "run_s": 4.1
+  }
+ ],
+ "plants_fired": [
+  "plant resolve-off-by-one fired: {'eager': 2496, 'captured': 1440, 'steps with misses': 67}",
+  "plant resolve-off-by-one fired: {'eager': 2496, 'captured': 1440, 'steps with misses': 0}",
+  "plant map-stale-slot fired: {'maps': 2752}",
+  "plant map-stale-slot fired: {}",
+  "plant owner-race fired: {'edits': 3}",
+  "plant owner-race fired: {}",
+  "plant lfu-victim-needed fired: {'admissions': 0, 'fired': 0}",
+  "plant lfu-victim-needed fired: {'admissions': 0, 'fired': 0}",
+  "plant lfu-shared-victim fired: {'admissions': 0, 'fired': 0}",
+  "plant lfu-shared-victim fired: {'admissions': 0, 'fired': 0}",
+  "plant map-before-landing fired: {}",
+  "plant map-before-landing fired: {'copies': 2850}",
+  "plant map-before-landing fired: {'copies': 2808}",
+  "plant map-before-landing fired: {'copies': 2838}",
+  "plant owner-race-unchecked fired: {'edits': 64}",
+  "plant owner-race-unchecked fired: {'edits': 64}",
+  "plant owner-race-unchecked fired: {'edits': 64}",
+  "plant lfu-victim-needed fired: {'admissions': 1153, 'fired': 648}",
+  "plant lfu-shared-victim fired: {'admissions': 521, 'fired': 48}"
+ ],
+ "parity_mutations": {
+  "lfu25": {
+   "oracle": "None",
+   "decay (x0.9 instead of x0.915)": "9",
+   "order (increments before the decay)": "None",
+   "bulk (one f32 add of the step's count)": "None",
+   "f64 (the decay in f64)": "None",
+   "needs (victims excluding only decode-routed experts)": "None",
+   "tie (candidate ties by highest id)": "2",
+   "vtie (victim ties by highest id)": "None",
+   "strict (admit on >= instead of >)": "None",
+   "nostop (no stop at the first failing pair)": "None"
+  },
+  "lfu25_decode": {
+   "oracle": "None",
+   "decay (x0.9 instead of x0.915)": "7",
+   "order (increments before the decay)": "None",
+   "bulk (one f32 add of the step's count)": "None",
+   "f64 (the decay in f64)": "None",
+   "needs (victims excluding only decode-routed experts)": "None",
+   "tie (candidate ties by highest id)": "4",
+   "vtie (victim ties by highest id)": "3",
+   "strict (admit on >= instead of >)": "None",
+   "nostop (no stop at the first failing pair)": "None"
+  }
+ },
+ "resolve_us_per_call": [
+  "1 moe_resolve@1 4.1 us per call",
+  "1 moe_resolve.lfu@1 8.8 us per call",
+  "1 moe_resolve.lru@1 8.0 us per call",
+  "8 moe_resolve@1 4.2 us per call",
+  "8 moe_resolve.lfu@1 9.1 us per call",
+  "8 moe_resolve.lru@1 8.2 us per call",
+  "64 moe_resolve@1 5.5 us per call",
+  "64 moe_resolve.lfu@1 10.3 us per call",
+  "64 moe_resolve.lru@1 9.0 us per call"
+ ],
+ "note": "the plant runs' lfu-victim-needed and lfu-shared-victim rows are re-runs with the plant's firing count taken before the store's error check (the code otherwise at 115c49b)"
+}

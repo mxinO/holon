@@ -48,7 +48,7 @@ def main() -> None:
                 kw = kw | dict(host_memory=20 << 30, plugin_options=kw.get("plugin_options", {}) | {
                     "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy})
             meta = {"name": name, "cache": cache, "policy": policy or "placement.lfu@1", "plant": plant,
-                    "spec": spec, "run": run}
+                    "spec": spec, "trace": kind[0] if kind else "snapshot", "run": run}
             t = time.time()
             with PLANTS[plant]() if plant else contextlib.nullcontext():
                 engine = Engine(EngineConfig(model=model, **ENGINE, **kw))

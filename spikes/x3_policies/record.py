@@ -1,6 +1,7 @@
-"""The evidence record of `run.py`'s runs: each run's summary, its snapshot against all-resident's (`resident_0`;
-with the n-gram drafter `resident_ngram_0`) and against its own configuration's first run (run-identical), by
-`holon_judge snapshot.diff`, and the plants' firing reports from the runs' logs:
+"""The evidence record of `run.py`'s runs: each run's summary, its snapshot against all-resident's on its trace
+(`resident_0`; with the n-gram drafter `resident_ngram_0`, on the decode trace `resident_decode_0`) and against its
+own configuration's first run (run-identical), by `holon_judge snapshot.diff`, and the plants' firing reports from
+the runs' logs:
 
     python spikes/x3_policies/record.py <runs dir> <evidence.json> <commit> <command> ...
 """
@@ -19,7 +20,8 @@ def main() -> None:
     for meta_path in sorted(runs.glob("*.meta.json")):
         meta = json.loads(meta_path.read_text())
         snap = runs / f"{meta['name']}_{meta['run']}.json"
-        reference = runs / ("resident_ngram_0.json" if meta["spec"] else "resident_0.json")
+        decode = meta.get("trace") == "decode"
+        reference = runs / f"resident{'_ngram' * bool(meta['spec'])}{'_decode' * decode}_0.json"
         if snap.is_file() and not meta["name"].startswith("resident"):
             mine = Snapshot.load(snap)
             meta["vs_resident"] = diff(Snapshot.load(reference), mine) or "identical"
