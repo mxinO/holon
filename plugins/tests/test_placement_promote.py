@@ -192,7 +192,10 @@ def test_promote_serves_the_resident_stores_outputs(tiny_moe_deep, tmp_path):  #
     """F10 end to end on the CPU providers, half the experts cached (each layer: 3 spares, 1 resident once set up),
     prompts streamed through a ring of lent slots and staged in lent slots (mixed steps too, `chunk_with_decode`):
     outputs bitwise the resident store's; the residency and empty slots the replay oracle's at every step; promotions
-    into spares and into the empty slots lending returned."""
+    into spares and into the empty slots lending returned. The judge's `route_dump` records each step's residency
+    from the device's map, as `_routes` does: the host mirror would count the spares' owners resident."""
+    from holon_judge.placement import route_dump
+
     checkpoint, prompts = tiny_moe_deep
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
     want = _served(_engine(file), prompts)
@@ -200,9 +203,11 @@ def test_promote_serves_the_resident_stores_outputs(tiny_moe_deep, tmp_path):  #
         "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.placement": "placement.promote@1",
         "moe.ring_tokens": 10})
     store = engine.ctx.shared_objects[KEY]
-    with _routes(engine) as trace:
+    with _routes(engine) as trace, route_dump(engine) as dump:
         assert _served(engine, prompts) == want
     assert store.borrowed["ring"] and store.borrowed["stage"], store.borrowed
+    assert all(np.array_equal(a["resident"], b["resident"]) for a, b in zip(trace["steps"], dump.steps, strict=True))
+    assert not dump.mirrored and np.array_equal(dump.seed, trace["seed"])
     assert sum(s["into_empty"] for s in trace["steps"]) > 0 and (store.state["spare"][:, :, 0] > 0).all()
     assert sum(s["promoted"] for s in trace["steps"]) > sum(s["into_empty"] for s in trace["steps"])
     assert _parity(store, trace) is None
