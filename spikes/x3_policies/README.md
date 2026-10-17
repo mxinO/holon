@@ -63,8 +63,11 @@ call, each call from the same map and state so that it pairs (restoring copies 5
 8.8 µs before the review: no early exit, an all-pairs ranking over every expert), ≈ 0.7 µs when a call has none (it
 exits before ranking). End to end, decode tg128 at 1K context, batch 1, every expert cached (`bench/holon_tg.py`, 2–3
 interleaved rounds): `std.moe@1` 5.343 ms per token, the offload store under `static` 5.663 (+0.32: step 2's path),
-under F11 5.703 (+0.04 over `static`), under F4 5.675. Snapshot run times are not compared: route dumps synchronize
-eager steps and two runs shared the host.
+under F11 5.703 (+0.04 over `static`), under F4 5.675 — the all-cached figure, where no call has candidates. With
+candidates (corrected after the step-3 panel): at batch 1 and 1K context 29.5% of decode layer calls have them at
+47% cached and 62.3% at 25% (route dumps, 128 tokens), so F11 adds ≈ 0.06 ms per token at the natural fit and
+≈ 0.09 ms at 25% (2.5 µs per call with candidates, 0.7 without, × 48 layers). Snapshot run times are not compared:
+route dumps synchronize eager steps and two runs shared the host.
 
 **Plants** (`judge/holon_judge/planted.py`; predicted in design §6 before running):
 

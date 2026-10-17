@@ -967,6 +967,9 @@ Decided while building, against the text above:
   to pair at 1 / 8 / 64 decode rows on the A5000, ≈ 0.7 µs when a call has none (it exits before ranking; the
   ranking runs over compacted lists of packed keys, a victim ranked past the candidates stops counting); end to end
   with every expert cached, 5.663 ms per token under `static` against 5.703 under F11 (+0.04; `std.moe@1` 5.343).
+  That +0.04 ms is the all-cached figure, where no call has candidates (corrected after the step-3 panel, C): at
+  batch 1 and 1K context 29.5% of decode layer calls have candidates at 47% cached and 62.3% at 25% (measured), so
+  F11 adds ≈ 0.06 ms per token at the natural fit and ≈ 0.09 ms at 25% (panel C's estimate: 0.08 / 0.11).
 - **Plants:** `lfu-victim-needed` and `lfu-shared-victim` set plant bits the variant kernel reads (`MoeResolve.plant`,
   zero otherwise; judge-only). A needed victim's rows then read staging slot k (the victim was no miss), not its
   overwritten slot, as §6 describes. Their verdict (panel C, recorded): on an mmq step the patched mmq's id-error word
