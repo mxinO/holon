@@ -608,6 +608,19 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   the host mirror lags them and exclusive tiers refuse F10. A std minor — a delta-log record "push b's slots onto the
   layer's empty stack", replayed by `ResidencyMap.commit` outside borrowing steps — makes the mirror exact; it lands at
   the start of the GLM milestone, which needs F10 with RAM short.
+- **Auxiliary-model (MTP) experts through the offload store** (a std minor, in the FN milestone): the store refuses
+  an aux model's experts today (`std/holon_std/moe/offload.py:61`: an MTP layer's sub-steps need their own row
+  kinds); FN's MTP-on rows (Flash-Next IQ2_XS on the RTX 5080, `docs/v1-offload.md` §7) need them.
+- **Lending and the prefill ring under exclusive tiers** (a std minor, in the GLM milestone): with RAM short the
+  store keeps a prefill pass's staging and stages every miss (a lent expert would need a demotion first;
+  `docs/v1-offload.md` §14, step 5), so RAM-short prefill is slow by design; GLM's RAM-short prefill bar needs them.
+- **Bitwise placement invariance as a term of `linear_experts_arena@1`** (a std minor): the offload store's
+  exactness rests on the provider's results being slot-, arena- and grouping-invariant, which only
+  `kernels.ggml_cuda`'s L0 checks today (`docs/design.md` §6.5); written into the contract, every arena provider's
+  L0 would check it.
+- Smaller deferrals of milestone X are listed where they were decided (`docs/v1-offload.md` §14): two-phase lending
+  for host-edit policies, prompt-time admission, F8, ARC, the AVX-512 tier's L0 on an AVX-512 host, PDL in the
+  router, the remaining per-step kernels.
 - VMM ledger + live rebalance KV ↔ experts through `quiesce` (run-identical after shrink/regrow).
 - PIECEWISE graphs for mixed prefill/decode steps (mixing itself is M0.7's core budget `chunk_with_decode`, design
   §7.1; mixing verify rows is its follow-up, `docs/m07-perf.md` §9); depth 2; radix PrefixIndex if profiles warrant.

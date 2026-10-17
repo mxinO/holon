@@ -943,9 +943,10 @@ holding a `Ref`, not slots (§4.2); copies between steps are S2 MemOps, not `Mov
 
 What to do with a miss is the consumer's decision: the offload store fetches every miss over PCIe by default (F5a),
 or a share of them is computed on the CPU in RAM through `cpu_task@1` (§7.4) where it gains ≥ 5% (F5b, `bounded`).
-The expert path is placement-invariant (the GPU computes an expert's rows alike in any slot, arena size or launch
-grouping: forced-tiling and compact-slot vendor patches), so under F5a every placement and policy is `exact`
-(§7.10).
+Under F5a every placement and policy is `exact` (§7.10) with an arena provider whose results are slot-, arena- and
+grouping-invariant — an expert's rows computed alike in any slot, arena size or launch grouping: `kernels.ggml_cuda`,
+by its forced-tiling and compact-slot vendor patches and its L0. Making that bitwise invariance a term of
+`linear_experts_arena@1` itself, so every provider's L0 checks it, is a std-minor follow-up (plan §10).
 
 ---
 

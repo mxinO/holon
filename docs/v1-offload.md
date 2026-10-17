@@ -68,8 +68,9 @@ for that model, with exact defaults and reproducible runs.
    - with the CPU split on: run-identical over 3 fresh engines on the snapshot trace, and bounded (L2 within budget)
      against a path-aware floor (§6).
 3. **Development gate** (milestone X's close), Qwen3-30B-A3B Q4_K_M on the RTX 5080, same file and host, no drafting,
-   medians of interleaved rounds, contexts ≤ 32K (the model's native limit is 40K), at the natural fit (≈ 47% of
-   experts in VRAM at 32K) **and** capped to ≈ 25%. Every row is predicted from step 0's roofline before it is
+   medians of interleaved rounds, contexts ≤ 32K (the model's native limit is 40K), at the card's natural fit
+   (52.4% of the experts in VRAM at 32K, measured on the RTX 5080 at step 4; the design estimated ≈ 47%) **and**
+   capped to ≈ 25%. Every row is predicted from step 0's roofline before it is
    measured. The natural-fit rows are judged at step 4 with the F5a lock; the capped-fit rows and the F1 row with
    the lock tune picks after step 6 (F5b may be what makes them pass: the vehicle routes ≈ 1.1 GB of experts per
    token, so at 25% cached decode is miss-bound, panel C-r2-1):
@@ -94,10 +95,12 @@ for that model, with exact defaults and reproducible runs.
    Holon-exact against Strata's defaults is reported, not gated. Plan §9's kill line (< 0.8× → rework the offload
    path before adding features) applies to the like-for-like rows.
 5. **Memory:** pinned host memory is allocated exactly (no power-of-two rounding) and accounted against
-   `host_memory`; VRAM and host splits are pinned by the lock; startup refuses with a per-pool report when a pinned
-   split does not fit.
-6. **Core:** only the seams of §4, each an additive ABI minor (ABI 1.2), toy-proven; ≈ 480 new code lines
-   (estimates in §4), core ≤ 6000 (4248 today). Suite time grows only by the new plugins' own tests.
+   `host_memory`; VRAM and host splits are pinned by the lock; a pinned split that does not fit is refused with a
+   per-pool report (host pools refused at startup; a pinned VRAM arena at the first launch, D4).
+6. **Core:** only the seams of §4 and the scheduler's row kinds, each an additive ABI minor, toy-proven — ABI 1.2
+   (S0–S5) and 1.3 (row kinds: `BatchPlan.row_kind`, `RowKind`); step 3d's executor change adds no ABI. As built:
+   +355 code lines (4,248 → 4,603 of 6,000; §4 estimated ≈ 480). Suite time grows only by the new plugins' own
+   tests.
 7. **Locks:** offload deployments get locks on the classes they run on; the existing locks are propagated once, at
    X's close (D15).
 
@@ -1417,6 +1420,16 @@ interleaved; llama.cpp and FreeToken at x4_refs' pins).
 - **Natural fit:** 52.4% of the experts (3,220 / 1,610 / 1,610 cache slots), not ≈ 47%.
   - The fill at a 33,792-token floor reaches 52.7%, but its counts do not start when pinned (≈ 18 MB short), so the
     lock pins 8 experts fewer.
+- **Each arm's expert share in VRAM**, beside Holon's (the cache engines at Holon's share; the static splits at
+  their own choice and at the cap; x4_refs measured the static shares):
+
+  | Arm | Natural | Capped |
+  |---|---|---|
+  | Holon (`moe.cache`) | 52.4%: 3,220 of 6,144 experts (9.20 of 17.55 GB) | 25.0%: 1,536 (`*=0.25`) |
+  | FreeToken (`--moe-cache-rate`) | 0.524: 3,220 experts | 0.25 |
+  | llama.cpp `--moe-cache-mib` | 8,773 MiB: 52.4% | 4,200 MiB: 25.1% |
+  | llama.cpp `--fit` | default 1 GiB margin: 61.3% | `-fitt 7150`: 24.7% |
+  | llama.cpp `--n-cpu-moe` | 16 (the tuned best that fits 32K): 66.4% | 36: 25.0% |
 - **Offload lock (F5a, scratch copy, committed at X's close per D15):**
   - Settings: batch 1, 33,792 context, `lfu`, `moe.ring_copy=dma`, and a held-out routing profile as F2's warm
     start.
