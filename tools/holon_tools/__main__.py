@@ -135,9 +135,9 @@ def _tune(a: argparse.Namespace) -> int:
 
 def _profile(a: argparse.Namespace) -> int:
     model = checkpoint_dir(a.model)
-    counts = profile.profile(engine_config(str(model), a), [p.ids for p in PromptSet.load(a.prompts).prompts],
-                             a.max_tokens)
-    print(f"wrote {profile.write(pathlib.Path(model), a.name, counts)}: moe.placement.profile={a.name}")
+    counts, directory = profile.profile(engine_config(str(model), a),
+                                        [p.ids for p in PromptSet.load(a.prompts).prompts], a.max_tokens)
+    print(f"wrote {profile.write(directory, a.name, counts)}: moe.placement.profile={a.name}")
     return 0
 
 

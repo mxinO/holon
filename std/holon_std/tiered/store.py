@@ -440,6 +440,12 @@ class TieredStore:
         self.residency.edit(commit, map_, later=LAND)
 
     # -- helpers ------------------------------------------------------------------------------------------------------
+    @property
+    def profile_dir(self) -> pathlib.Path:
+        """The directory a profile's name is relative to: the experts' file's, as the weight source reads it (a hub
+        cache's snapshot links resolve into its blob directory), so `holon_tools profile` writes where this reads."""
+        return pathlib.Path(next(iter(self.classes.values())).pieces[0][3][0].path).parent
+
     def _profile_counts(self) -> np.ndarray:
         """`profile`'s routing counts by group: a JSON file `{"layers": {"<group>": [count per item]}}` beside the
         checkpoint (its name relative to the checkpoint's directory, so plans record no host path); groups it does not
@@ -450,8 +456,7 @@ class TieredStore:
         name = pathlib.PurePath(self._profile)
         if name.is_absolute() or ".." in name.parts:
             raise ValueError(f"{self.name}: profile {self._profile!r}: a name relative to the checkpoint's directory")
-        checkpoint = pathlib.Path(next(iter(self.classes.values())).pieces[0][3][0].path).parent
-        for group, row in json.loads((checkpoint / name).read_text())["layers"].items():
+        for group, row in json.loads((self.profile_dir / name).read_text())["layers"].items():
             if int(group) not in self._order or len(row) != self.items:
                 raise ValueError(f"{self.name}: profile {self._profile}: group {group} with {len(row)} counts; the "
                                  f"groups are {sorted(self._order)} of {self.items} items")

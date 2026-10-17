@@ -252,13 +252,16 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     with pytest.raises(RuntimeError, match="distinct misses"):
         while engine.has_work():
             engine.step()
-    routes = tool.profile(EngineConfig(model=str(file), device="cpu", dtype=torch.float32, page_size=4, max_seqs=3,
-                                       max_step_tokens=10, max_model_len=40, state_memory=1 << 20,
-                                       host_memory=1 << 24), prompts, 4)
+    link = tmp_path / "snapshot" / file.name                      # a hub cache's snapshot link to its blob
+    link.parent.mkdir()
+    link.symlink_to(file)
+    routes, where = tool.profile(EngineConfig(model=str(link), device="cpu", dtype=torch.float32, page_size=4,
+                                              max_seqs=3, max_step_tokens=10, max_model_len=40, state_memory=1 << 20,
+                                              host_memory=1 << 24), prompts, 4)
     assert sorted(routes["layers"]) == ["0", "1"] and sum(map(sum, routes["layers"].values())) == 4 * 3 * 2 * 2
-    assert tool.write(file, "routes.json", routes) == tmp_path / "routes.json"
+    assert tool.write(where, "routes.json", routes) == tmp_path / "routes.json"      # where the store reads it
     for policy in ("", "placement.lru@1", "placement.profile_decay@1"):
-        engine = _engine(file, host_memory=1 << 24, plugin_options={
+        engine = _engine(link, host_memory=1 << 24, plugin_options={
             "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.placement": policy,
             "moe.placement.profile": "routes.json"})
         store = engine.ctx.shared_objects[KEY]

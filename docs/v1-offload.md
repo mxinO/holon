@@ -992,7 +992,9 @@ Decided while building, against the text above:
   holds. `map-before-landing` failed both checks (all three runs differ from all-resident; run 0 differs from runs
   1–2). L2 was not run for the plants (§6 predicts it fails too); the exact checks above are their verdicts.
 - **Profiles** are written beside the checkpoint by `holon_tools profile` (`--name`, default `profile.json`) — for a
-  hub-cache checkpoint that is the snapshot directory; shipping them in model bundles stays open (§5).
+  hub-cache checkpoint that is its blob directory (step 4's fix: the store reads beside the file the weight source
+  resolves, and the tool wrote beside the snapshot link, so a hub-cache profile was never found; both now take
+  `TieredStore.profile_dir`); shipping them in model bundles stays open (§5).
 - **What the parity check leaves to step 3b:** traces with prompts in mixed steps, device lending and its return
   (cache size unchanged), and the one-slot-per-expert rule across a step's row kinds; `route_dump` already takes a
   step's routed experts from its eager resolves for them.

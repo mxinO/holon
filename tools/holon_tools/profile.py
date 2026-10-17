@@ -14,8 +14,9 @@ from holon.core.engine import Engine, EngineConfig
 from holon_std.moe.offload import KEY
 
 
-def profile(config: EngineConfig, prompts: list[list[int]], max_tokens: int) -> dict:
-    """Greedy generations of `max_tokens` from `prompts` under the offload store; their decode rows' routes."""
+def profile(config: EngineConfig, prompts: list[list[int]], max_tokens: int) -> tuple[dict, pathlib.Path]:
+    """Greedy generations of `max_tokens` from `prompts` under the offload store; their decode rows' routes, and the
+    directory the store reads profiles from (beside the checkpoint's file)."""
     engine = Engine(dataclasses.replace(config, plugin_options={**config.plugin_options,
                                                                 "moe.store": "std.moe.offload@1"}))
     try:
@@ -23,16 +24,16 @@ def profile(config: EngineConfig, prompts: list[list[int]], max_tokens: int) -> 
         total = np.zeros(store.residency.host.shape[:2], dtype=np.int64)
         store.taps.append(lambda step, record: np.add(total, record["counts"], out=total))
         engine.generate(prompts, SamplingParams(temperature=0.0, max_tokens=max_tokens, ignore_eos=True))
-        return {"layers": {str(layer): total[g].tolist() for g, layer in enumerate(store.layers)}}
+        return {"layers": {str(layer): total[g].tolist() for g, layer in enumerate(store.layers)}}, store.profile_dir
     finally:
         engine.close()
 
 
-def write(checkpoint: pathlib.Path, name: str, counts: dict) -> pathlib.Path:
-    """`counts` as the profile `name` beside the checkpoint (a file's directory, or a checkpoint directory)."""
+def write(directory: pathlib.Path, name: str, counts: dict) -> pathlib.Path:
+    """`counts` as the profile `name` in `directory` (`profile`'s: where the store reads it)."""
     path = pathlib.PurePath(name)
     if path.is_absolute() or ".." in path.parts:
         raise ValueError(f"profile {name!r}: a name relative to the checkpoint's directory")
-    out = (checkpoint if checkpoint.is_dir() else checkpoint.parent) / path
+    out = directory / path
     out.write_text(json.dumps(counts) + "\n")
     return out
