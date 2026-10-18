@@ -1618,7 +1618,22 @@ share). Decode: FreeToken 1.06 / 1.04 / 1.02×, the pinned cache 1.19 / 1.23 / *
 static splits ≥ 1.79×; prefill FreeToken 1.72 / **0.93** / **0.88×**, every llama.cpp arm ≥ 2.50×. Every decode row
 still passes; the pinned cache at 32K sits on its bar (1.104×). Holon decodes 1.3–1.5% below step 4 at the natural fit
 and 2.6–3.0% below at the capped fit (+0.07–0.28 ms per token, growing with the misses), while FreeToken and
-llama.cpp reproduce step 4 within 0.5%; not bisected (steps 5–7 changed the miss path after step 4 measured).
+llama.cpp reproduce step 4 within 0.5%.
+
+**The decode regression, bisected afterwards on an RTX A5000** (`spikes/x8_close/README.md`; the capped arm, ABBA
+×4–6, each commit's own source tree and kernels). Step 4 measured `63c6e4b`, before steps 5–6 merged, and the
+regression comes with that merge (`1588c0e`): +0.05–0.06 ms per decode token (+0.45%) against `63c6e4b`.
+`478aa33` and `2d5ec61` are equal (+0.003 ms), so step 7 and close part 1 are clear.
+- **Mechanism:** step 6's CPU share phase in `k_resolve` (`7596aae`) ran on every call, F5a too: a scan of the map,
+  a dependent read of `plan[n]` and five barriers, all unused under a zero plan. The resolve went from 7.44 to
+  8.97 µs per layer; no other kernel moved.
+- **Fix `b45e86f`:** the kernel runs that phase only for a nonzero plan. The plan is loaded at the start and reduced
+  after the entries; the contract is unchanged.
+- **Recovery:** the resolve takes 7.85 µs, and decode is +0.015 ms over `63c6e4b` (was +0.065 / +0.068 at 1K / 4K).
+- **Exactness:** F11 (the defaults and the lock's settings), `lru` and F1 snapshots at 25% are byte-identical to
+  all-resident; F5b's equals the code before the fix.
+- **Not shown here:** the A5000's regression is a quarter of the 5080's capped one, and the fix is not re-measured on
+  the 5080.
 
 **The offload locks.**
 - **Natural fit, F5a — committed** (`plans/unsloth/…/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-5080/cu130-torch2.11/1.lock`,

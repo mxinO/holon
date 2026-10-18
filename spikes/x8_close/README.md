@@ -132,8 +132,94 @@ Holon at the natural lock (3,236 / 1,618 / 1,618, 52.7%), the caches at the same
 Every decode row still passes; the pinned cache at 32K sits on its bar (1.104×). Holon decodes 234.7 / 190.9 / 117.5
 tok/s, 1.3–1.5% below step 4's 238.3 / 193.7 / 119.0 (at 3,220 slots), and 2.6–3.0% below at the capped fit (119.2
 / 104.0 / 75.4 against 122.9 / 106.8 / 77.0), while FreeToken and llama.cpp reproduce step 4 within 0.5%: about
-0.07–0.28 ms more per decode token, growing with the misses. Not bisected; steps 5–7 changed the miss path
-(`moe_resolve@1`'s CPU candidates and job table, step 6) after step 4's measurement.
+0.07–0.28 ms more per decode token, growing with the misses. Bisected on an RTX A5000 afterwards (below): step 6's
+CPU share phase in `moe_resolve@1`, run on every call under F5a too; fixed in `b45e86f`.
+
+## The decode regression after step 4, bisected (RTX A5000)
+
+Run after the close, on one RTX A5000 of the shared dev host. The question was which commit after step 4 made Holon's
+offload decode slower, and whether the A5000 shows it.
+
+**Method.**
+- Arm: x8_close's `holon_25`, the capped arm (F11 `lfu`, F5a, `ring_copy` `dma`, the held-out profile,
+  `moe.cache=*=0.25`, batch 1, graphs on, a 33,792-token context).
+- Driver: `spikes/x4_gap/ctx.py`, one fresh process per arm, ABBA, 4 rounds (6 for the last table), contexts 1K and
+  4K, 256 tokens. Figures are ms per decode token, means.
+- Each commit runs from its own source tree (`git archive`), put first on `PYTHONPATH`. A `.dist-info` overlay carries
+  that commit's own entry points; the venv's would name step 7's plugins, which older trees do not have. Each tree's
+  kernels are prebuilt into `~/.cache/holon`.
+- Kernel times: an nsys diff of the 4K request (graph nodes traced), then `resolve_mb.py` for variants of the kernel.
+
+**Where.** Step 4 measured `63c6e4b`, before steps 5 and 6 merged (`1588c0e`), not `478aa33`. Deltas against
+`63c6e4b`, from the same interleaved rounds:
+
+| Commit | 1K | 4K |
+|---|---|---|
+| `478aa33` (step 4's merge; steps 5–6 in it) | +0.051 ms (+0.45%) | +0.062 ms (+0.45%) |
+| `2d5ec61` (the close) | +0.054 ms (+0.48%) | +0.065 ms (+0.46%) |
+| `1588c0e` (steps 5–6 merged into step 4) | +0.050 ms (+0.45%) | +0.059 ms (+0.42%) |
+| `8c5a826` (step 4's follow-ups) | +0.063 ms (+0.56%) | +0.065 ms (+0.46%) |
+
+- `2d5ec61` against `478aa33`: +0.003 / +0.002 ms (sd 0.012). Step 7 and close part 1 are clear: route_dump's copy is
+  judge-only, and the padding mask runs only with a route transform.
+- Per round, sd is 0.01–0.03 ms.
+- The whole delta comes with steps 5 and 6.
+- Placement is the same in every arm: 53.9 / 74.6 misses per token at 1K / 4K.
+
+**Mechanism.**
+- The nsys diff moves one kernel, `k_resolve<lfu>`: 7.44 → 8.97 µs per call. There are 48 calls per token, so
+  that is +74 µs. `k_fetch` and every other kernel stay within 0.3%.
+- Step 6 (`7596aae`) runs the CPU share's phase on every call, under F5a too. The phase is:
+  - a scan of every expert's map entries (global reads);
+  - thread 0's dependent read of `plan[n]`;
+  - five barriers.
+- A zero plan cannot use any of it: c = min(0, n) = 0.
+- On this card the cost hardly grows with the misses: +0.065 ms at 54 misses per token, +0.068 at 75.
+
+**Fix (`b45e86f`).**
+- The kernel loads the plan at its start and reduces it with `__syncthreads_or` after the entries.
+- It runs the share's phase only for a nonzero plan; with one, the path is as before.
+- The contract (`std.moe.kernels`) is unchanged: a zero plan takes nothing, and `jobs[0, 0]` = 0 is still written.
+
+Variants in `resolve_mb.py` (48 resolves per graph, min of 7, in µs per graph):
+
+| Variant | µs per graph |
+|---|---|
+| `63c6e4b` | 214 |
+| `2d5ec61` | 256 |
+| plan read before the entries' barrier | 237 |
+| the fix | 231 |
+| no plan read at all | 224 |
+| that, without the share's `best` bookkeeping | 223 |
+
+- Skipping the phase without reading the plan saves 0.14 µs per call more. It would need a contract change (a
+  table of no rows meaning no share), so it is not taken.
+- The last ≈ 0.2 µs per call is the step-6 kernel's layout (larger shared tables, more arguments), not any one phase.
+
+**Recovery.** nsys: `k_resolve<lfu>` at 7.85 µs. ABBA ×6, against `63c6e4b`:
+
+| | 1K | 4K |
+|---|---|---|
+| `2d5ec61` | +0.065 ms (+0.58%) | +0.068 ms (+0.49%) |
+| the fix | +0.016 ms (+0.14%) | +0.015 ms (+0.11%) |
+
+Against `2d5ec61` the fix is −0.049 / −0.053 ms (sd 0.011), about 75% of the regression.
+
+**Exactness.** The judge's snapshot trace, `spikes/x7_heldout/run.py`, at the fix and 25%:
+- F11 at the defaults, F11 at the lock's settings, `lru` and F1 are each byte-identical to all-resident.
+- F5b (`moe.cpu_plan=1,2,2,3,4,5,5,6`, 6 threads) is byte-identical to the same run at `2d5ec61`, so the share's path
+  did not change.
+
+**Tests.**
+- `test_expert_io.py` and `test_placement_promote.py`: 169 passed.
+- `test_moe_engine.py`, `test_tier_pagecache.py`, `test_transform_tail_skip.py` and `test_tune.py`: 49 passed.
+- No new test. The regression costs time only: outputs were identical before the fix and are after it. The oracle
+  tests already cover a zero plan and a share.
+
+**Open.**
+- The A5000 shows about a quarter of the RTX 5080's +0.25 ms at the capped 4K row. The fix is not measured on the
+  5080, and no cluster desktop was used.
+- Any of the 5080's gap beyond this kernel is not explained on this card.
 
 ## The offload locks
 
@@ -196,5 +282,8 @@ python -m holon_tools tune $M --batch 1 --golden judge/goldens/qwen3-30b-a3b-q4_
     --host-memory 21474836480 --slots logits_processor=grammar.xgrammar --plugin-options moe.store=std.moe.offload@1 \
     moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.cache=$PIN moe.ring_copy=dma --approve
 python -m holon_tools propagate <model> --golden … --floor … --prompts … <the lock's [engine] as flags>  # each lock
+python spikes/x4_gap/ctx.py run --name bisect --arms <arms: holon_25 per commit, wrap 'env PYTHONPATH=<tree>'> \
+    --rounds 4 --model $M --contexts 1024 4096 --ctx 33792 --out-dir <runs>      # the bisect (A5000)
+PYTHONPATH=<tree> python spikes/x8_close/resolve_mb.py <label>                    # the resolve alone, per tree
 python spikes/x8_close/record.py --runs <dir> --date 2026-10-18 --commit 40811a0 --out evidence/x8_close_rtx-5080_2026-10-18.json
 ```

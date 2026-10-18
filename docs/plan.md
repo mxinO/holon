@@ -625,8 +625,9 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   FreeToken prefill shortfall accepted (owner, 2026-10-18). Found on the way: placement invariance needed two vendor
   patches (forced tiling, a compact id helper); prompt-time admission and two-phase lending for host policies stayed
   deferred; F10 showed the std API cannot log a spare (the std minor below); the AVX-512 `ggml_cpu` module never
-  loaded after prebuild (fixed at the close); Holon's offload decode sits 1.3–3% below step 4's at the closing code
-  (not bisected). Next: K, FN (its MTP-on rows need the aux-model item below), GLM; the follow-ups below.
+  loaded after prebuild (fixed at the close); Holon's offload decode sat 1.3–3% below step 4's at the closing code —
+  bisected on an A5000 to step 6's CPU share phase in `moe_resolve@1`, run under F5a too, and fixed (`b45e86f`; the
+  5080's rows not re-measured). Next: K, FN (its MTP-on rows need the aux-model item below), GLM; the follow-ups below.
 - **F5b locks** (`docs/v1-offload.md` §14, step 8 part 2): `propagate`'s L2 scores a lock's own settings, which F5b's
   path-aware floor refuses (one token per step), so no tool writes a lock with a CPU split; and S5's lookup ranks a
   tier-carrying lock first, so a benchmark deployment (the capped fit) would become a host's default. Both are the
