@@ -58,10 +58,12 @@ struct Layer {
 // admitted expert's entry becomes -2 - its new slot, a staged one's its staging rank. A warp per role ranks the misses
 // by id (ballot scans), so staging slots and fetch entries are deterministic; then every entry gets its slot. First
 // the CPU takes its share of the misses (F5b: `plan`, by (best routing rank, expert id), the last ones), which are
-// neither fetched nor admitted and are written to the job table. The variants then update their state, rank their
-// candidates (the call's decode misses, missing in every role of the map, not the CPU's) and victims (resident in
-// every role, routed by no live entry of the call) in their policy's order; the first candidates take the layer's
-// empty slots, the rest pair with the victims, and the admissions enter the map.
+// neither fetched nor admitted and are written to the job table. A zero plan takes none, so a call without the CPU's
+// share (F5a) skips that phase (its barriers and global reads cost ≈ 1 µs a layer on the decode's critical path).
+// The variants then update their state, rank their candidates (the call's decode misses, missing in every role of the
+// map, not the CPU's) and victims (resident in every role, routed by no live entry of the call) in their policy's
+// order; the first candidates take the layer's empty slots, the rest pair with the victims, and the admissions enter
+// the map.
 template <int P>
 __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __restrict__ kinds, Layer L,
                           int32_t * __restrict__ counts, int32_t * __restrict__ routed, int32_t * __restrict__ misses,
@@ -71,8 +73,8 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
                           int roles, int staging) {
     extern __shared__ int32_t shared[];
     int32_t * need = shared;                           // [roles, experts]
-    int32_t * best = need + roles * experts;           // [experts]: its least routing rank (INT_MAX: not routed); then
-                                                       // its CPU job's index, or -1
+    int32_t * best = need + roles * experts;           // [experts]: its least routing rank (INT_MAX: not routed); then,
+                                                       // with a CPU share, its CPU job's index, or -1
     int32_t * ckeys = best + experts;                  // the CPU candidates' keys (rank · E + id), unordered
     int32_t * live = ckeys + experts;                  // [experts]: routed by a live entry of the call (variants)
     int32_t * dec = live + experts;                    // its DECODE entries
@@ -85,6 +87,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
     int64_t * victs = cands + experts;
     __shared__ int has_decode, n_cand, n_vict, n_admit, base, spare, n_cpu, take;
     const int entries = tokens * k, tid = threadIdx.x;
+    const int32_t plan = tid <= experts ? L.plan[tid] : 0;   // loaded now, read after the entries: its latency hides
     for (int i = tid; i < shared_words(P, roles, experts); i += blockDim.x) {   // `best`, `first` past every entry
         const bool high = (i >= roles * experts && i < (roles + 1) * experts) ||
                           (i >= (roles + 4) * experts && i < (roles + 5) * experts);
@@ -122,84 +125,92 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             }
         }
     }
-    __syncthreads();
-    // The CPU's share: candidates routed, missing in every role and held by the tier the device reads (-1).
-    for (int e = tid; e < experts; e += blockDim.x) {
-        bool held = best[e] != INT_MAX;
-        for (int r = 0; r < roles; ++r) {
-            held = held && L.residency[e * roles + r] == -1 && L.ring[e * roles + r] < 0;
-        }
-        if (held) {
-            ckeys[atomicAdd(&n_cpu, 1)] = best[e] * experts + e;
-        }
+    bool planned = plan != 0;                          // a CPU share is possible: the plan is not all zero
+    for (int n = tid + blockDim.x; n <= experts; n += blockDim.x) {
+        planned = planned || L.plan[n] != 0;
     }
-    __syncthreads();
-    if (tid == 0) {
-        take = n_cpu ? min(L.plan[n_cpu], n_cpu) : 0;
-        if (take > L.J) {                              // the caller sized the table short: take what fits, flag it
-            take = L.J;
-            atomicOr(errors, JOBS);
-        }
-    }
-    __syncthreads();
-    for (int i = tid; i < n_cpu; i += blockDim.x) {    // ranked by (best rank, id): the last `take` are the CPU's
-        const int key = ckeys[i];
-        int rank = 0;
-        for (int y = 0; y < n_cpu; ++y) {
-            rank += ckeys[y] < key;
-        }
-        if (rank >= n_cpu - take) {
-            const int e = key % experts;
-            best[e] = -2;                              // taken; its job index below
+    const bool share = __syncthreads_or(planned);
+    if (share) {
+        // The CPU's share: candidates routed, missing in every role and held by the tier the device reads (-1).
+        for (int e = tid; e < experts; e += blockDim.x) {
+            bool held = best[e] != INT_MAX;
             for (int r = 0; r < roles; ++r) {
-                need[r * experts + e] = 0;
+                held = held && L.residency[e * roles + r] == -1 && L.ring[e * roles + r] < 0;
+            }
+            if (held) {
+                ckeys[atomicAdd(&n_cpu, 1)] = best[e] * experts + e;
             }
         }
-    }
-    __syncthreads();
-    for (int e = tid; e < experts; e += blockDim.x) {
-        best[e] = best[e] == -2 ? -2 : -1;
-    }
-    __syncthreads();
-    if (take && tid < 32) {                            // job indices by id (a warp's ballot scan); the jobs' heads
-        int seen = 0;
-        for (int b = 0; b < experts; b += 32) {
-            const int e = b + tid;
-            const bool mine = e < experts && best[e] == -2;
-            const unsigned all = __ballot_sync(0xffffffffu, mine);
-            if (mine) {
-                best[e] = seen + __popc(all & ((1u << tid) - 1));
+        __syncthreads();
+        if (tid == 0) {
+            take = n_cpu ? min(L.plan[n_cpu], n_cpu) : 0;
+            if (take > L.J) {                          // the caller sized the table short: take what fits, flag it
+                take = L.J;
+                atomicOr(errors, JOBS);
             }
-            seen += __popc(all);
         }
-    }
-    __syncthreads();
-    for (int e = tid; e < experts; e += blockDim.x) {
-        if (best[e] >= 0) {
-            int32_t * job = L.jobs + int64_t(1 + best[e]) * L.W;
-            int n = 0;
-            for (int i = 0; i < entries; ++i) {        // its entries, ascending
-                if (ids[i] == e && kinds[i / k] != PADDING) {
-                    if (n < L.W - 4) {
-                        job[4 + n] = i;
-                    } else {
-                        atomicOr(errors, JOBS);
-                    }
-                    ++n;
+        __syncthreads();
+        for (int i = tid; i < n_cpu; i += blockDim.x) {    // ranked by (best rank, id): the last `take` are the CPU's
+            const int key = ckeys[i];
+            int rank = 0;
+            for (int y = 0; y < n_cpu; ++y) {
+                rank += ckeys[y] < key;
+            }
+            if (rank >= n_cpu - take) {
+                const int e = key % experts;
+                best[e] = -2;                          // taken; its job index below
+                for (int r = 0; r < roles; ++r) {
+                    need[r * experts + e] = 0;
                 }
             }
-            n = min(n, L.W - 4);
-            atomicOr(&routed[e], 4);                   // the CPU's (the route taps see it)
-            job[0] = e;
-            job[1] = L.host[e * roles];
-            job[2] = L.host[e * roles + 1];
-            job[3] = n;
         }
+        __syncthreads();
+        for (int e = tid; e < experts; e += blockDim.x) {
+            best[e] = best[e] == -2 ? -2 : -1;
+        }
+        __syncthreads();
+        if (take && tid < 32) {                        // job indices by id (a warp's ballot scan); the jobs' heads
+            int seen = 0;
+            for (int b = 0; b < experts; b += 32) {
+                const int e = b + tid;
+                const bool mine = e < experts && best[e] == -2;
+                const unsigned all = __ballot_sync(0xffffffffu, mine);
+                if (mine) {
+                    best[e] = seen + __popc(all & ((1u << tid) - 1));
+                }
+                seen += __popc(all);
+            }
+        }
+        __syncthreads();
+        for (int e = tid; e < experts; e += blockDim.x) {
+            if (best[e] >= 0) {
+                int32_t * job = L.jobs + int64_t(1 + best[e]) * L.W;
+                int n = 0;
+                for (int i = 0; i < entries; ++i) {    // its entries, ascending
+                    if (ids[i] == e && kinds[i / k] != PADDING) {
+                        if (n < L.W - 4) {
+                            job[4 + n] = i;
+                        } else {
+                            atomicOr(errors, JOBS);
+                        }
+                        ++n;
+                    }
+                }
+                n = min(n, L.W - 4);
+                atomicOr(&routed[e], 4);               // the CPU's (the route taps see it)
+                job[0] = e;
+                job[1] = L.host[e * roles];
+                job[2] = L.host[e * roles + 1];
+                job[3] = n;
+            }
+        }
+        if (tid == 0) {
+            L.jobs[0] = take;
+        }
+        __syncthreads();
+    } else if (tid == 0) {
+        L.jobs[0] = 0;
     }
-    if (tid == 0) {
-        L.jobs[0] = take;
-    }
-    __syncthreads();
     if (P != STATIC && has_decode) {                   // a step with decode rows: decay (or tick), count, classify
         const int now = P == LRU ? st.clock[0] + 1 : 0;
         for (int e = tid; e < experts; e += blockDim.x) {
@@ -226,7 +237,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             if (live[e]) {                             // routed by the call that picks victims: the victims' scope
                 routed[e] |= 2;
             }
-            const bool is_cand = dec[e] && missing && best[e] < 0;    // not the CPU's
+            const bool is_cand = dec[e] && missing && !(share && best[e] >= 0);    // not the CPU's
             const bool is_vict = !is_cand && whole && (!live[e] || (st.plant & PLANT_VICTIM_NEEDED));
             // Candidates hottest (LFU: score descending; LRU: routed first) first, victims coldest (least recent) first,
             // ties by expert id: ascending in the packed order.
@@ -340,7 +351,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
     for (int i = tid; i < entries; i += blockDim.x) {
         const int e = ids[i], j = i % k;
         const bool live_entry = kinds[i / k] != PADDING && e >= 0;
-        const bool on_cpu = live_entry && best[e] >= 0;
+        const bool on_cpu = live_entry && share && best[e] >= 0;
         cpu[i] = on_cpu ? i : -1;
         for (int r = 0; r < roles; ++r) {
             int32_t at = j;
