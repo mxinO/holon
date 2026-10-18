@@ -16,6 +16,13 @@ Two uses (`mode`, the host's choice at launch):
 - `stage`: the layer's routed misses are staged into lent slots (the resolve's `stage` list), where the store's own
   staging slots, sized for graphed steps, would not hold a pass's.
 
+A ring step under `ring_lend = "tail"` (docs/v1-moe-prefill.md D11) first lends the tail — call 0, the policy's
+`lend_tail`: the experts holding the last n slots of the tail's class, whole —, then makes the rounds (calls
+1…ROUNDS, unchanged): the range is the step's expert passes' (D10's buffers), so it is no pool, ring or stage slot
+and is not counted as held; the experts' other slots and the empty slots outside it serve as X's do. After call 0 no
+resident holds a slot of the range, so the rounds' picks lie outside it and no admission of the step maps one (its
+victims are residents; the empty slots are the step's).
+
 Each class's lent slots are pooled (`pool`), the empty slots first; a layer's role takes its ring slots from the pool
 of its class at its half's offset, its pieces in expert order; its stage list is the pool's first `prefill` slots."""
 from __future__ import annotations
@@ -23,13 +30,16 @@ from __future__ import annotations
 import torch
 
 BUFFERS = 2                                   # the ring's halves: layer l streams while layer l − 1 computes
-ROUNDS = 4                                    # `lend` calls of a ring step (one suffices for staging)
+ROUNDS = 4                                    # `lend` calls of a ring step, 1…ROUNDS (one suffices for staging)
 SHORT = 4                                     # the store's error bit: a step's lent slots fell short of its use
 
 
 class Lent:
-    def __init__(self, store, mode: str) -> None:
-        self.store, self.mode = store, mode
+    def __init__(self, store, mode: str, tail: tuple[int, int] | None = None) -> None:
+        # `tail`: (the class, its last n slots) a tail step lends first; each class's slots from `end` on are not lent
+        # to the ring and staging (its arena's end, the tail's start)
+        self.store, self.mode, self.tail = store, mode, tail
+        self.end = store.lend_ends["tail" if tail else "coldest"]
 
     # -- at the step's first resolve -----------------------------------------------------------------------------------
     def begin(self) -> None:
@@ -39,17 +49,19 @@ class Lent:
         s.n_before.copy_(s.n_empty)                                          # the empty slots serve the step first
         s.n_empty.zero_()
         s.lent_call.fill_(-1)
-        held = torch.zeros(len(s.classes), dtype=torch.int64, device=res.device)
-        held.index_add_(0, classes.reshape(-1), s.n_before.long().repeat_interleave(roles))
+        if self.tail is not None:                                            # call 0: the tail's holders, whole
+            cls, n = self.tail
+            s.lend_needs[0, cls].fill_(n)                                     # (a fill: no host sync)
+            s.lend_tail(cls, n)
+        held = self._held(classes)
         stage = torch.full_like(held, s.prefill)
-        for k in range(ROUNDS if self.mode == "ring" else 1):
+        for k in range(1, 1 + (ROUNDS if self.mode == "ring" else 1)):
             want = self._want(res, classes) if self.mode == "ring" else stage
-            if k == ROUNDS - 1:                                              # the last: the worst case
+            if k == ROUNDS:                                                  # the last: the worst case
                 want = torch.where(held < want, 2 * experts, want)
             s.lend_needs[k] = (want - held).clamp_min(0)
-            picked = s.lend(s.lend_needs[k], k).long()
-            for r in range(roles):
-                held.index_add_(0, classes[:, r], picked.sum(1))
+            s.lend(s.lend_needs[k], k)
+            held = self._held(classes)
         want = self._want(res, classes) if self.mode == "ring" else stage
         ring_ok = (held >= want).all() if self.mode == "ring" else torch.zeros((), dtype=torch.bool, device=res.device)
         s.ring_ok.copy_(ring_ok.view(1))
@@ -77,14 +89,30 @@ class Lent:
         want = torch.zeros(len(self.store.classes), dtype=torch.int64, device=res.device)
         return want.scatter_reduce_(0, classes.reshape(-1), missing.reshape(-1), "amax") * BUFFERS
 
+    def _lent(self, classes: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per layer and role, its empty stack's slots and its experts' lent slots [G, R, 2E], and which of them serve
+        the step's ring and staging: the empty slots it found and the lent experts', outside the tail."""
+        s = self.store
+        groups, roles, experts = s.empty.shape
+        empty = torch.arange(experts, device=classes.device) < s.n_before[:, None, None]     # [G, 1, E]
+        lent = (s.lent_call >= 0)[:, None, :]                                                # [G, 1, E]
+        slots = torch.cat([s.empty, s.lent_slots.permute(0, 2, 1)], 2)                     # [G, R, 2E]
+        ok = torch.cat([empty.expand(groups, roles, experts), lent.expand(groups, roles, experts)], 2)
+        return slots, ok & (slots < self.end[classes][:, :, None])
+
+    def _held(self, classes: torch.Tensor) -> torch.Tensor:
+        """Per class, the lent slots serving the step's ring and staging."""
+        _, ok = self._lent(classes)
+        held = torch.zeros(len(self.store.classes), dtype=torch.int64, device=classes.device)
+        return held.index_add_(0, classes[:, :, None].expand_as(ok).reshape(-1), ok.reshape(-1).long())
+
     def _pool(self, res: torch.Tensor, classes: torch.Tensor) -> None:
-        """Each class's lent slots in `pool` (past them −1): the layers' empty slots, then the lent experts'."""
+        """Each class's lent slots in `pool` (past them −1): the layers' empty slots, then the lent experts', outside
+        the tail."""
         s = self.store
         groups, experts, roles = res.shape
-        empty = torch.arange(experts, device=res.device) < s.n_before[:, None, None]         # [G, 1, E]
-        lent = (s.lent_call >= 0)[:, None, :]                                                # [G, 1, E]
-        slots = torch.cat([s.empty, s.lent_slots.permute(0, 2, 1)], 2).reshape(-1)         # [G, R, 2E]
-        ok = torch.cat([empty.expand(groups, roles, experts), lent.expand(groups, roles, experts)], 2).reshape(-1)
+        slots, ok = self._lent(classes)
+        slots, ok = slots.reshape(-1), ok.reshape(-1)
         cls = classes[:, :, None].expand(groups, roles, 2 * experts).reshape(-1)
         mine = (cls[None] == torch.arange(len(s.classes), device=res.device)[:, None]) & ok[None]   # [C, N]
         sink = s.pool.shape[1] - 1
@@ -140,13 +168,14 @@ class Lent:
             self._give_back()
 
     def _give_back(self) -> None:
-        """Every layer's lent experts' slots on top of its empty stack, in the order they were lent (`lend` call,
-        then expert id: the order of their delta records)."""
+        """Every layer's lent experts' slots on top of its empty stack, in the order they were lent (call — the tail's
+        0, then the rounds' —, then expert id: the order of their delta records); the empty slots it found stay below
+        them, as they were."""
         s = self.store
         groups, experts, roles = s.lent_slots.shape
         lent = s.lent_call >= 0
         ids = torch.arange(experts, device=lent.device)
-        key = torch.where(lent, s.lent_call * experts + ids, ROUNDS * experts)
+        key = torch.where(lent, s.lent_call * experts + ids, (1 + ROUNDS) * experts)
         order = key.argsort(dim=1, stable=True)
         rank = torch.empty_like(order).scatter_(1, order, ids.expand(groups, experts))
         at = torch.where(lent, s.n_before[:, None] + rank, experts)[:, None, :].expand(groups, roles, experts)

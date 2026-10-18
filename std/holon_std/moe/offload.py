@@ -14,7 +14,10 @@ the rest), `moe.cache` (cache slots per class, pinned: `<class>=<n>` or `<class>
 named; default: fill free VRAM), `moe.ring_tokens` (D8: a step of at least this many prompt tokens streams every
 layer's missing experts through lent ring slots in passes of up to the stacks' kernels' `pass_rows` tokens; 0: never;
 default 512), `moe.ring_copy` (`sm`: the ring's copies a small kernel beside the pass, no host sync; `dma`: copy
-engines, one host sync per streaming step; default `sm`), `moe.route_transform`
+engines, one host sync per streaming step; default `sm`), `moe.ring_lend` (what a streaming step lends: `coldest`,
+the policy's coldest whole experts, X's; `tail`, first the experts holding the last slots of the largest class arena,
+a contiguous range its expert passes take their buffers from, then the coldest: docs/v1-moe-prefill.md D10, D11;
+default `coldest`), `moe.route_transform`
 (`approx`: the name of a route transform, whose contract `moe_route_transform.<name>@1` its plugin provides; its
 dropped routes, negative ids, are dropped end to end), `moe.cpu_plan` and `moe.cpu_isa` (F5b, the CPU's share of the
 misses: `cpu.py`)."""
@@ -26,7 +29,7 @@ from torch import nn
 
 from . import kernels
 from .cpu import CpuShare, plan_table
-from .units import CHUNK, ExpertLinear, bind_experts, pass_rows
+from .units import ALIGN, CHUNK, ExpertLinear, bind_experts, pass_rows, passed, takes_buffers
 
 GATE_UP, DOWN = 0, 1                           # roles
 KEY = "std.moe.offload"                        # the store's shared-object key (`ctx.shared`, the engine's lookup)
@@ -42,6 +45,7 @@ def _store(ctx, experts: int, top_k: int):
                         staging=min(experts, top_k * _rows(ctx)), prefill=min(experts, top_k * CHUNK),
                         ring_tokens=int(opts.get("moe.ring_tokens", RING_TOKENS)),
                         ring_copy=str(opts.get("moe.ring_copy", "sm")),
+                        ring_lend=str(opts.get("moe.ring_lend", "coldest")),
                         policy=str(opts.get("moe.placement", "")),
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
                         cache=str(opts.get("moe.cache", "")), profile=profile,
@@ -71,6 +75,7 @@ class Offload(nn.Module):
             raise ValueError(f"std.moe.offload@1: layer {layer} has {experts} experts top-{top_k}, the store "
                              f"{self.store.items} top-{self.store.top_k}")
         self.layer, self._resolver, self._transform = layer, None, None
+        self._max_pass = ctx.options.get("max_step_tokens")       # a pass's most tokens (none: the kernels' pass_rows)
         opts = ctx.options.get("plugins", {})
         self._transform_name = opts.get("moe.route_transform")
         self._facts = {"experts": experts, "top_k": top_k}
@@ -99,6 +104,7 @@ class Offload(nn.Module):
 
     def bind_kernels(self, ctx) -> None:
         self._resolver = self.store.resolver(self.layer)
+        self.store.tail_bytes.append(self._tail_bytes)           # read at materialize, its stacks' kernels bound
         if self._cpu is not None:
             self._slot = self._cpu.bind(ctx, *self._stacks)
         if self._transform_name:                     # docs/v1-offload.md D3: an explicit option, never by priority
@@ -119,6 +125,37 @@ class Offload(nn.Module):
         """The expert pass of the step: in a streaming step (D8) as many tokens as both stacks' kernels take at
         their chunks' bits (docs/v1-moe-prefill.md D1), else std.moe@1's chunk."""
         return pass_rows(self._stacks) if self.store.large_passes(tokens) else CHUNK
+
+    def _layout(self, tokens: int) -> list[int]:
+        """D10's buffers of a pass of `tokens`, in bytes: one `scratch` for both stacks' kernels (the larger
+        `scratch_bytes`), then gate/up's `out` and down's — 0 for a kernel that does not take them."""
+        k = self.store.top_k
+        return [max((s.kernel.scratch_bytes(tokens) for s in self._stacks if takes_buffers(s.kernel)), default=0),
+                *(tokens * k * s.out_y * 4 if takes_buffers(s.kernel) else 0 for s in self._stacks)]
+
+    def _tail_bytes(self) -> int:
+        """The bytes a lent tail must hold for this layer's largest pass (its stacks' `pass_rows` within the step
+        budget), each buffer at an ALIGN boundary of a range starting anywhere."""
+        tokens = min(pass_rows(self._stacks), self._max_pass or pass_rows(self._stacks))
+        return sum(-(-n // ALIGN) * ALIGN for n in self._layout(tokens)) + ALIGN - 1
+
+    def pass_buffers(self, tokens: int) -> tuple | None:
+        """D10's buffers of a pass of `tokens` in the step's lent tail (D11: (gate/up's out, down's out, scratch),
+        None for a kernel that takes none); None where the step lends no tail (the pass allocates them)."""
+        tail = self.store.tail_view()
+        if tail is None:
+            return None
+        at, views = -tail.data_ptr() % ALIGN, []
+        for nbytes in self._layout(tokens):
+            views.append(tail[at:at + nbytes] if nbytes else None)
+            at += -(-nbytes // ALIGN) * ALIGN
+        if at > len(tail):                       # past the bound configuration's pass (never): allocated instead
+            return None
+        scratch, *outs = views
+        k = self.store.top_k
+        h, y = (None if v is None else v.view(torch.float32).view(tokens, k, s.out_y)
+                for v, s in zip(outs, self._stacks, strict=True))
+        return h, y, scratch
 
     def route(self, ids: torch.Tensor, first: int, x: torch.Tensor) -> torch.Tensor:
         """Each role's arena slots for `ids` (the step's tokens `first`…, inputs `x`), misses fetched; with F5b, a
@@ -148,7 +185,7 @@ class ArenaExperts(nn.Module):
         super().__init__()
         self._facts, self.layout, self.in_features = like.facts, like.layout, like.in_features   # (not a child)
         self._store = owner.store
-        self.glu, self.out = glu, out
+        self.glu, self.out, self.out_y = glu, out, out // 2 if glu == "swiglu" else out
         name = f"{('gate_up', 'down')[role]}.{like.layout.scheme.elem.removeprefix('ggml.')}.{out}x{like.in_features}"
         unit = sum(x[0].nbytes for x in extents)
         for e in range(like.experts):
@@ -173,10 +210,13 @@ class ArenaExperts(nn.Module):
         """Its bound `linear_experts_arena@1` instance."""
         return self._kernel
 
-    def forward(self, x, slots: torch.Tensor) -> torch.Tensor:
-        """`x` [T, R, in], or a handle a `moe_router@1` instance prepared for this kernel (std.moe.kernels)."""
+    def forward(self, x, slots: torch.Tensor, out: torch.Tensor | None = None,
+                scratch: torch.Tensor | None = None) -> torch.Tensor:
+        """`x` [T, R, in], or a handle a `moe_router@1` instance prepared for this kernel (std.moe.kernels); D10's
+        buffers where the kernel takes them."""
         arena = self.cls.slots()
-        return self._kernel(x, {"blocks": arena.view(len(arena), self.out, -1)}, slots)
+        return self._kernel(x, {"blocks": arena.view(len(arena), self.out, -1)}, slots,
+                            **passed(self._kernel, out=out, scratch=scratch))
 
 
 def _extents(stack: ExpertLinear) -> list[Extent]:

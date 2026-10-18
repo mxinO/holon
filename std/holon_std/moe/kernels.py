@@ -32,6 +32,15 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   call of n·`CHUNK` rows gives each row the bits the `CHUNK`-row call of that row's own chunk gives it. Nothing is
   promised for a call that is not a whole number of `CHUNK`s, nor across placements (`linear_experts_arena@1`'s own
   term). std.moe passes at most the smaller of a layer's two stacks' `pass_rows` per call.
+  Passed buffers (docs/v1-moe-prefill.md D10): an instance that defines `scratch_bytes(tokens) -> int` (the bytes of
+  scratch a call of `tokens` tokens takes; 0 where it needs none) accepts the optional keywords `out` (the result,
+  [T, k, out_y] f32, contiguous: written and returned) and `scratch` (a contiguous uint8 buffer of at least
+  `scratch_bytes(T)` bytes, 256-byte aligned, for the call's transients); std calls every other instance without
+  them. The instance keeps no reference to either past the call; both are read and written on the current stream,
+  after the work enqueued before the call; one `scratch` may serve the successive calls of a pass (gate/up, then
+  down); `out` must not overlap `scratch` or `x`. A short, misaligned or overlapping buffer is refused (ValueError)
+  before anything is launched. The results are bitwise those of the call without them, wherever they live. Without
+  `scratch` the instance allocates what it needs (a buffer passed inside a captured graph is the graph's: static).
 - `moe_combine@1`: instance `(y [T, k, H] of y_dtype, weights [T, k] f32, out [T, H])`: writes `Σ_j w[t, j] · y[t,
   j]`, accumulated in f32 in slot order, into `out` (of `dtype`). Facts: hidden, top_k, dtype, y_dtype. An instance
   may define `add(y, weights, residual [T, H] of dtype, out)`: writes `residual + s`, s that sum rounded to `dtype`,
@@ -97,7 +106,16 @@ then `staging` slots, then cache slots.
   bool`, on the device without a host sync: the whole experts (resident in every role) in its policy's order, ties by
   expert id then group; for each class c (`classes[g, r]`: role r's slots of group g are in class c) the first
   `need[c]` of them holding a slot of c; the caller unmaps and logs them, and later returns their slots to their
-  layers as empty.
+  layers as empty. Its instance may also have `lend_tail(cls: int, n: int, residency [G, E, R] int32, classes [G, R]
+  int64, limits [G, R] int32, **state of every group) -> picked [G, E] bool` (docs/v1-moe-prefill.md D11), on the
+  device without a host sync: the experts holding any of class `cls`'s last `n` slots (a role r of class `cls` at a
+  slot ≥ `limits[g, r]` − n, the class's arena size less n), whole — the caller evicts them in every role, unmaps,
+  logs and returns them as `lend`'s —, after the policy has released its own slots in that range that no expert maps
+  (spares: such a slot stops being one). The caller lends the range itself to the step's expert passes (D10's `out`
+  and `scratch`), and the experts' other slots and the layer's empty slots outside it to the step's ring and staging,
+  until the step's end. Its class is the store's choice, the same under every policy: the largest class arena — the
+  class of the first role (gate/up) that the most layers have, ties to the lower class index. A policy without
+  `lend_tail` cannot lend a tail (the store refuses `moe.ring_lend = tail` under it).
 - `moe_route_transform@1` (signature only; `approx`, bound by the explicit option `moe.route_transform = <name>`,
   never by kernel priority): instance `(ids [T, k] int32, weights [T, k] f32, residency [E, R] int32) -> (ids, weights)`
   between `moe_topk@1` and the resolve, with the layer's map as the resolve reads it (after the step's lending, its

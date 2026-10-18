@@ -43,6 +43,7 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
 Skips without a GPU; builds the extension (prebuild) into the user cache if it is missing.
 """
 import dataclasses
+import math
 import os
 import types
 
@@ -447,7 +448,9 @@ def test_ids_from_moe_topk(ctx, qwen_stacks):
 @pytest.mark.parametrize("name", ["q4_k", "iq3_xxs", "nvfp4/hf"])
 def test_graph_replay_follows_the_routing(ctx, qwen_stacks, name):
     """Captured at every decode bucket (mmvq up to the limit, mmq above), replayed with other ids and inputs: the
-    result is the eager one on the new routing, bitwise (NVFP4: its per-expert scale2 gathered on the device)."""
+    result is the eager one on the new routing, bitwise (NVFP4: its per-expert scale2 gathered on the device) — and
+    so with passed buffers (docs/v1-moe-prefill.md D10), static, NaN-poisoned: gate/up's and down's `out`, and one
+    `scratch` for both calls."""
     if name == "nvfp4/hf":
         gate_up, down, pg, pd, _ = nvfp4_stacks(ctx, EQ)
     else:
@@ -475,6 +478,17 @@ def test_graph_replay_follows_the_routing(ctx, qwen_stacks, name):
         ids.copy_(uniform(tokens, EQ, seed=tokens + 1))
         graph.replay()
         assert torch.equal(y, layer()), f"{name} T={tokens}: replay on new routing differs from eager"
+        h, out = torch.full((tokens, K, INTER), torch.nan, device="cuda"), torch.full_like(y, torch.nan)
+        scratch = torch.full((max(gate_up.scratch_bytes(tokens), down.scratch_bytes(tokens)),), 0xFF,
+                             dtype=torch.uint8, device="cuda")
+        assert (gate_up.scratch_bytes(tokens) > 0) == (tokens > gate_up.mmvq_tokens)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            down(gate_up(x, pg, ids, out=h, scratch=scratch), pd, ids, out=out, scratch=scratch)
+        x.copy_(layer_input(tokens, seed=tokens + 2)[:, None])
+        ids.copy_(uniform(tokens, EQ, seed=tokens + 2))
+        graph.replay()
+        assert torch.equal(out, layer()), f"{name} T={tokens}: replay with passed buffers differs from eager"
 
 
 # per SM, the types D0 proves there (`PASS_PROVEN`: the lock classes' expert types and FN's MoE quants)
@@ -569,8 +583,9 @@ def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name
 def test_an_arena_call_of_many_chunks_gives_the_chunks_rows(ctx, name, stage):
     """D8's expert passes: the arena binding (`linear_experts_arena@1`) takes 4,096 rows per mmq call at top-8 (32,768
     pairs: the id helper's device-wide path, past one block's 16,384), in whole 512-row chunks, and each row is bitwise
-    what a 512-row call — the reference chunk's — gives it, with every expert of the layer in its arena. On that path
-    the helper flags as the others do: ids out of range, more slots than the bound, a slot past mmq's column tiles."""
+    what a 512-row call — the reference chunk's — gives it, with every expert of the layer in its arena; with passed
+    buffers too (`passed_buffers`). On that path the helper flags as the others do: ids out of range, more slots than
+    the bound, a slot past mmq's column tiles."""
     k, out, rows = STAGES[stage]
     s = stack(name, EP, out, k, seed=31)
     facts = {"layout": f"ggml.{name}/gguf.native", "experts": EP, "in": k, "out": out, "top_k": K,
@@ -583,6 +598,7 @@ def test_an_arena_call_of_many_chunks_gives_the_chunks_rows(ctx, name, stage):
     y = kernel(x, parts, ids)
     assert torch.equal(y, torch.cat([kernel(x[a:a + CHUNK], parts, ids[a:a + CHUNK]) for a in range(0, 4608, CHUNK)]))
     assert any("mm_ids_device" in n for n in launched(lambda: kernel(x[:4096], parts, ids[:4096])))
+    passed_buffers(ctx, facts, parts, x, ids)
     if name != "q4_k" or stage != "gate_up":
         return
     x, ids, errors = x[:4096], ids[:4096], kernel.errors
@@ -603,6 +619,39 @@ def test_an_arena_call_of_many_chunks_gives_the_chunks_rows(ctx, name, stage):
     errors.zero_()
     narrow(x, parts, ids)
     assert int(errors) == ID_ERRORS["slots"], "more slots than the bound"
+
+
+def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Tensor) -> None:
+    """D10 (docs/v1-moe-prefill.md) on an arena binding, glu none and swiglu: NaN-poisoned `out` and `scratch` of
+    `scratch_bytes` (one for every launch of a call: 4,096 rows, then a chunk, or then an mmvq tail) give the
+    allocating call's bits, and the persistent workspace is the decode size's; a short, misaligned or overlapping
+    buffer is refused before anything is launched."""
+    for glu in ("none", "swiglu"):
+        f = facts | {"glu": glu}
+        kernel = ctx.select_kernel("linear_experts_arena@1", site="l0", **f).impl(ctx, **f)
+        assert kernel.resident_rows == max(kernel.mmvq_tokens, 1) and kernel.scratch_bytes(kernel.mmvq_tokens) == 0
+        for tokens in (len(ids), len(ids) - CHUNK + 1):
+            want = kernel(x[:tokens], parts, ids[:tokens])
+            out, scratch = torch.full_like(want, torch.nan), torch.full((kernel.scratch_bytes(tokens),), 0xFF,
+                                                                        dtype=torch.uint8, device="cuda")
+            got = kernel(x[:tokens], parts, ids[:tokens], out=out, scratch=scratch)
+            assert got is out and torch.equal(out, want), f"{glu}, T={tokens}: passed buffers"
+    shape, nbytes = (len(ids), K, kernel.out_y), kernel.scratch_bytes(len(ids))
+    room = torch.empty(nbytes + 512, dtype=torch.uint8, device="cuda")
+    at = -room.data_ptr() % 256
+    scratch, size = room[at:at + nbytes], math.prod(shape) * 4
+    flat = torch.empty(x.nbytes + size, dtype=torch.uint8, device="cuda")          # out's first bytes are x's last
+    for kw, why in (({"scratch": scratch[:-1]}, "scratch"), ({"scratch": room[at + 1:at + 1 + nbytes]}, "scratch"),
+                    ({"out": scratch[:size].view(torch.float32).view(shape), "scratch": scratch}, "overlaps"),
+                    ({"out": torch.empty(*shape[:2], shape[2] + 1, device="cuda")}, "contiguous f32"),
+                    ({"out": flat[x.nbytes - 256:][:size].view(torch.float32).view(shape),
+                      "x": flat[:x.nbytes].view(x.dtype).view(x.shape)}, "overlaps")):
+        xs = kw.pop("x", x)
+
+        def call(kw=kw, xs=xs, why=why):
+            with pytest.raises(ValueError, match=why):
+                kernel(xs, parts, ids, **kw)
+        assert not launched(call), why
 
 
 @pytest.mark.parametrize("name", PLACED)
