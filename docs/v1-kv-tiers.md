@@ -1365,7 +1365,8 @@ the step-1 core). K-M4's mixed-I/O check fired one of step 0's stop rules; the l
 
 Results against the predictions are in the evidence records (`evidence/k0_m1_rerender_rtx-5090_2026-10-18.json`,
 `k0_m2_copy_*`, `k0_m4_nvme_*`, `k0_m5_replay_cpu_2026-10-18.json`) and the spikes' READMEs (`spikes/k0_tiers/`). The
-RTX 5090's K-M2/K-M4 runs follow step 1.
+RTX 5090's K-M2/K-M4 runs, after step 1, match the RTX 5080's (mixed I/O 0.79× / 0.76×, the other rules pass), and its
+shorter step makes an unpaced batch-DMA load costlier still: decode 2.07× median beside it, 1.04× beside the SM gather.
 
 ### Step 1 as built (2026-10-18)
 

@@ -16,7 +16,7 @@ two bar cards (RTX 5080 and RTX 5090 desktops), with the RTX A5000 development h
 | | |
 |---|---|
 | GPUs | RTX 5080 and RTX 5090 (sm_120), PCIe 5.0 x16, one consumer desktop per class; RTX A5000 (sm_86, PCIe 4.0) as the development reference |
-| software | CUDA 13.0 (container on the desktops), torch 2.11.0+cu130, Python 3.12; this directory's extension built per GPU class under `$TORCH_EXTENSIONS_DIR`. On the desktop, the K worktree's own uv-synced environment (the cluster venv's editable install pointed at a removed worktree and lacked `msgspec`); its `core/` carried the lead's uncommitted step-1 edits, tiers off (`platform.host_memory` and `memory.copy_units` unchanged from b5b1e7f). The A5000 runs imported the main checkout's core at b5b1e7f |
+| software | CUDA 13.0 (container on the desktops), torch 2.11.0+cu130, Python 3.12; this directory's extension built per GPU class under `$TORCH_EXTENSIONS_DIR`. On the desktops, a uv-synced environment of the K worktree (the cluster venv was stale). The RTX 5080 runs imported a `core/` with step 1's then-uncommitted edits, tiers off (`platform.host_memory` and `memory.copy_units` unchanged from b5b1e7f); the RTX 5090 runs, the K worktree at 0accff8 (step 1 committed). The A5000 runs imported the main checkout's core at b5b1e7f |
 | host pools | the core's own `holon.core.memory.Pool` (so `platform.host_memory`: an anonymous mmap + `cudaHostRegister`, portable, mapped so the SM path can address it), exactly as S2 allocates them |
 | device pools | `Pool` too: layer-major `[segments, capacity, chunk]` |
 | K-M3 models | RTX 5080: Qwen3.8-27B UD-IQ3_S with its rtx-5080 lock (q8_0 KV, `max_seqs` 4); RTX 5090: UD-Q4_K_M with its rtx-5090 lock; RTX A5000: UD-Q4_K_M with the rtx-3090 lock's settings (the 24 GB class; bf16 KV) |
@@ -100,98 +100,130 @@ rate.
 
 ## Results
 
-**A STOP rule fired on the RTX 5080: mixed reads and writes on one drive run at 0.84× (50/50) and 0.76× (75/25) of the
-modelled shared lane (bar: within 15%).** Per the brief, the bar-desktop work stopped there: the RTX 5090 was not
-measured. The other three rules pass on the RTX 5080. Evidence: `evidence/k0_m2_copy_rtx-5080_2026-10-18.json`
-(K-M2, K-M3), `evidence/k0_m4_nvme_rtx-5080_2026-10-18.json`, and the RTX A5000 references
-`evidence/k0_m2_copy_rtx-a5000_2026-10-18.json`, `evidence/k0_m4_nvme_rtx-a5000_2026-10-18.json` (its link gives
-13.2 GB/s each way, and its storage is a network filesystem, so its absolute rates are a dev reference only). Every
-copy in every cell was verified byte-equal.
+**One decision rule fired on both bar cards: mixed reads and writes on one drive run at 0.79–0.84× (50/50) and 0.76×
+(75/25) of the modelled shared lane (bar: within 15%).** The RTX 5080 run stopped there and reported. The lead ruled
+it a tier-side performance issue that does not block, and the RTX 5090 was then measured with the same protocol. The
+other three rules pass on both cards. Every copy in every cell was verified byte-equal.
 
-| Decision rule (RTX 5080) | Measured | Verdict |
-|---|---|---|
-| 2-thread O_DIRECT reads of 557,056 B units ≥ 1.75 GB/s | 2.17 GB/s | pass |
-| mixed within 15% of the modelled shared lane | 0.843× (50/50), 0.760× (75/25) | **STOP** |
-| BatchAsync or SM gather ≥ 0.8× blob on fragmented 34,816 B | 0.99× both (0.987× at worst) | pass |
-| 154 MB stores ≤ 2% of decode at the `answer` rate | −0.7% (within noise of 0) | pass |
+Evidence:
+- `evidence/k0_m2_copy_rtx-5080_2026-10-18.json` and `evidence/k0_m2_copy_rtx-5090_2026-10-18.json` (K-M2, K-M3);
+- `evidence/k0_m4_nvme_rtx-5080_2026-10-18.json` and `evidence/k0_m4_nvme_rtx-5090_2026-10-18.json`;
+- the RTX A5000 references `evidence/k0_m2_copy_rtx-a5000_2026-10-18.json` and
+  `evidence/k0_m4_nvme_rtx-a5000_2026-10-18.json`. Its link gives 13.2 GB/s each way and its storage is a network
+  filesystem, so its absolute rates are a dev reference only.
 
-### K-M2 — copy paths (RTX 5080; A5000 in brackets)
+| Decision rule | RTX 5080 | RTX 5090 | Verdict |
+|---|---|---|---|
+| 2-thread O_DIRECT reads of 557,056 B units ≥ 1.75 GB/s | 2.17 GB/s | 2.17 GB/s | pass |
+| mixed within 15% of the modelled shared lane | 0.843× / 0.760× | 0.786× / 0.764× | **fires** (ruled non-blocking) |
+| BatchAsync or SM gather ≥ 0.8× blob on fragmented 34,816 B | 0.99× (0.987× at worst) | 0.99× (0.987× at worst) | pass |
+| 154 MB stores ≤ 2% of decode at the `answer` rate | −0.7% | −0.1% | pass (≈ 0) |
 
-| | Prediction | Measured |
-|---|---|---|
-| blob H2D / D2H | ≈ 47.5 / 45–53 GB/s [22–26] | **47.6 / 49.1 GB/s** (torch pinned 47.7 / 46.8) [13.2 / 13.2: the dev host's link] |
-| per-run loop, fragmented 34,816 B | ≤ 0.5× blob, host-bound, 5–10 µs per chunk | **0.13× (6.0–6.3 GB/s); 5.6–5.9 µs per chunk, 218 ms for a 32K load (37,184 chunks)** [0.26–0.30×, 9.5–12 µs] — the GPU itself is slow on separate 34 KB copies (≈ 5.8 µs each even with the host ahead), so the loop is device- as well as host-bound |
-| BatchAsync, fragmented 34,816 B | 0.7–0.95× blob; host 0.1–0.3 µs per chunk | **0.99–1.00× H2D at 16K / 32K (0.93× at 1K); D2H 0.82–0.92×. Host 0.35 µs per chunk at 16K (5.4 ms submit + 0.2 ms numpy build), 0.67 µs at 32K (25 ms + 0.1–10 ms): the submit grows faster than the list** |
-| BatchAsync, 65,536 B / 61,440 B / 3 MiB | ≥ 0.9× | 0.96–0.97× / 1.01–1.02× / 0.96–0.98× H2D; 0.92× / 0.98–1.03× / 0.93–1.02× D2H (0.84–0.87× at the 1K loads) |
-| SM gather H2D, fragmented 34,816 B | ≥ 0.9× with 8–32 CTAs | **0.99× (47.2–47.3 GB/s); ≥ 95% of the best from 8 CTAs; best 32 × 256, unroll 2** |
-| SM scatter D2H into mapped host | ≥ 0.8× | **0.84–0.86×** for KV chunks, 0.89–0.94× for the other shapes [A5000: 0.45–0.5×] |
-| layouts and runs | only addresses differ | unit-major and layer-major host pools move alike (± 3%); runs of 4 / 16 change nothing for BatchAsync and the SM copy, and lift the per-run loop to 24 / 41 GB/s |
-
-S2 host memory page-locks at 0.25 s per GiB on the desktop (0.34 on the A5000).
-
-### K-M3 — decode beside copies (RTX 5080: 27B UD-IQ3_S, rtx-5080 lock, 4 rows from 4,096 to 9,912 tokens)
-
-The clock screen was steady (SM p10 / p50 2,677 / 2,685 MHz, no slowdown samples). Copies run back to back through
-whole segments, so every measured step overlaps them (the worst case for 3b, whose 32K load spans ≈ 1.5 steps).
-
-| arm | step p50 ms | median × | p90 × | mean × | copies GB/s |
-|---|---|---|---|---|---|
-| control | 22.30 | 1 | 1 | 1 | – |
-| `h2d_dma` (one batch per 1.29 GB load) | 31.69 | **1.42** | **1.55** | 1.44 | 40.3 |
-| `h2d_paced512x1` (18 MB pieces, one in flight) | 22.81 | 1.023 | 1.037 | 1.026 | 32.7 |
-| `h2d_paced2048x1` (71 MB pieces) | 23.06 | 1.034 | 1.076 | 1.043 | 33.7 |
-| `h2d_each` (one copy per chunk) | 61.29 | 2.75 | 2.68 | 2.75 | 21.1 |
-| `h2d_sm` (8 CTAs) | 23.86 | 1.070 | 1.077 | 1.074 | 43.3 |
-| `d2h_answer` (one 154 MB store per 16 steps) | 22.12 | 0.992 | 0.993 | 0.993 | – |
-| `d2h_answer_paced` | 22.16 | 0.994 | 0.999 | 0.994 | – |
-| `d2h_stress` (stores back to back) | 25.13 | 1.127 | 1.103 | 1.127 | 42.9 |
-| `d2h_stress_paced` (8 segments at a time) | 22.86 | 1.025 | 1.021 | 1.026 | 39.3 |
-
-**Why unpaced DMA hurts: head-of-line blocking on the copy engine.** A 64 KiB or 1 MiB copy issued on another stream
-while a batched load is in flight waits for the load to finish (p90 25.6 ms on the 5080, 99 ms on the A5000; idle
-0.03–0.08 ms). A 4 KiB copy does not (it goes inline in the command stream). The engine's per-step H2D copies are
-evidently above that size, so a decode step waits for the whole load. Pacing helps only with **one** piece in flight
-(two pieces in flight block like the whole load: 24.6 ms p90), at a rate cost (32.7–33.9 GB/s alone, 0.69–0.71×
-blob, from the host round trip between pieces). The flag `PreferOverlapWithCompute` changes nothing. The SM copy
-uses no copy engine (probes 0.05–0.1 ms) but takes SMs and DRAM bandwidth (+7% per step while it runs). D2H stores
-block the engine's D2H read-backs the same way (0.39 ms p50 under stress on the 5080, 8.8 ms on the A5000), which
-pacing removes (0.21 ms).
-
-### K-M4 — NVMe (RTX 5080 desktop, node-local NVMe)
+### K-M2 — copy paths (RTX 5080 / RTX 5090; A5000 in brackets)
 
 | | Prediction | Measured |
 |---|---|---|
-| O_DIRECT reads, 557,056 B units, 1 / 2 / 3 / 4 threads | 1.6–2.2 / 2.4–2.8 / no gain past 2–3 | **1.38 / 2.17 / 2.55 / 2.58 GB/s** (C threads: 1.39 / 2.17): below at 1–2 threads; gains to 3 |
-| checkpoint SSM unit, 48 × 3 MiB iovecs | within 10% of the unit rate | 2.68–2.69 GB/s at 1–2 threads, **equal to one 151 MB iovec (1.00×)** and 1.23× the unit's 2-thread rate; conv unit 48 × 61,440 B: 2.20 / 2.58 |
-| buffered + `DONTNEED` reads | ≤ O_DIRECT | 0.86 / 1.59 / 2.11 / 2.47 GB/s at 1–4 threads: slower, as predicted |
-| burst writes | 1.5–3 GB/s | **2.19–2.21 GB/s at 1–4 threads** (flat); 48-iovec checkpoints 2.22; buffered + `DONTNEED` 2.20 |
-| sustained writes past SLC | 0.5–1.5 GB/s | **no cliff: 1,063 GB in 600 s at 1.77 GB/s mean (2 s windows 1.6–2.0)**; the drive had 2.5 TB free, so the cache (if any) is beyond 1 TB |
-| mixed vs modelled shared lane | within 15% | **0.843× (50/50), 0.760× (75/25)** with 2 + 2 threads; 0.840× with 1 + 1 at 50/50; free-running 2 + 2 the writes take 78% of the bytes and reads fall to 0.43 GB/s (0.98× the model at that share) |
-| engine loop beside 2 I/O threads | < 3% slower | **no measurable slowdown** (every row within −6% … +1%, the noise of the paired baselines) |
+| blob H2D / D2H | ≈ 47.5 / 45–53 GB/s [22–26] | **47.6 / 49.1 and 47.4 / 47.9 GB/s** [13.2 / 13.2: the dev host's link] |
+| per-run loop, fragmented 34,816 B | ≤ 0.5× blob, host-bound, 5–10 µs per chunk | **0.13× (6.0–6.6 GB/s); 5.6–5.9 µs per chunk, 209–218 ms for a 32K load (37,184 chunks)** [0.26–0.30×, 9.5–12 µs]. The GPU itself is slow on separate 34 KB copies (≈ 5.8 µs each even with the host ahead), so the loop is device- as well as host-bound |
+| BatchAsync, fragmented 34,816 B | 0.7–0.95× blob; host 0.1–0.3 µs per chunk | **0.99–1.00× H2D at 16K / 32K (0.93× at 1K); D2H 0.82–0.94×.** Host per chunk: **0.31–0.35 µs at 16K** (5.0–5.4 ms submit + 0.1–0.2 ms numpy build); **0.56–0.67 µs at 32K** (21–25 ms submit + 0.1–10 ms build). The submit grows faster than the list |
+| BatchAsync, 65,536 B / 61,440 B / 3 MiB | ≥ 0.9× | 0.96–0.98× / 1.01–1.02× / 0.96–1.00× H2D; 0.92× / 0.98–1.03× / 0.93–1.03× D2H (0.84–0.87× at the 1K loads) |
+| SM gather H2D, fragmented 34,816 B | ≥ 0.9× with 8–32 CTAs | **0.99× (46.8–47.3 GB/s); within 95% of the best from 8 CTAs; best 16–32 × 256, unroll 2–4** |
+| SM scatter D2H into mapped host | ≥ 0.8× | **0.84–0.88×** for KV chunks, 0.89–0.95× for the other shapes [A5000: 0.45–0.5×] |
+| layouts and runs | only addresses differ | unit-major and layer-major host pools move alike (± 4%); runs of 4 / 16 change nothing for BatchAsync and the SM copy, and lift the per-run loop to 24 / 41 GB/s |
 
-**The GIL starves the I/O threads instead.** Beside a loop that holds the GIL (3 ms Python bodies back to back), 2
-Python `preadv` threads read 0.76 GB/s (C threads beside the same loop: 2.17); with 3 ms of Python per 15 ms step,
-1.81 GB/s at 2 threads and 2.13 at 3. Each `preadv` releases the GIL, but the thread must take it back between
-calls, and a busy loop hands it over only at the 5 ms switch interval.
+S2 host memory page-locks at 0.25 s per GiB on both desktops (0.34 on the A5000).
 
-O_DIRECT alignment: every GDN segment (61,440 B, 3 MiB) and the unit-major KV unit (557,056 B) is a multiple of
-4,096, so no bounce buffer is needed for them; only the 34,816 B layer-major KV chunk is not (it is a multiple of
-512, and this filesystem accepted 512-aligned lengths and offsets with O_DIRECT).
+### K-M3 — decode beside copies
 
-### What the numbers suggest for K (for the owner; nothing here is decided)
+- RTX 5080: 27B UD-IQ3_S with the rtx-5080 lock.
+- RTX 5090: UD-Q4_K_M with the rtx-5090 lock.
+- Both: 4 rows growing from 4,096 to 9,912 tokens.
 
-- **`state_copy@1`.** On raw rate the two paths tie on fragmented 34,816 B H2D (0.99×), the SM gather slightly
-  ahead on small loads (0.99× vs 0.93× at 1K). Beside decode, an unpaced batch fails 3b's bar by itself (1.42×
-  median, 1.55× p90 while in flight); the SM gather costs +7% at 43 GB/s, and paced DMA +2–4% at 33 GB/s. For loads,
-  the SM gather (8–32 CTAs) is the faster path and needs no pacing thread. For D2H stores, the batch is the faster
-  path (0.89–0.92× vs 0.84–0.86× for KV chunks, up to 1.03× for checkpoints), paced in ≈ 25 MB pieces if stores
-  ever run back to back. Today's per-run loop is out (0.13×).
-- **`h2d_rate`.** ≈ 47 GB/s idle, ≈ 43 GB/s for the SM gather beside 4 decoding rows (33 GB/s for paced DMA).
-- **`stall_bytes`.** A load due now stalls a step for bytes / rate: ≈ 48 MB copies in ≈ 1.1 ms at 43 GB/s, 5% of the
-  5080's 22 ms 4-row step. A 1K-token load (35.7 MB) fits under that; a 154 MB payload (3.6 ms) does not.
-- **`io_threads`.** 3 (reads 2.55 GB/s vs 2.17 at 2; writes flat from 1), and the I/O should not need the GIL
-  between calls (native threads), or a busy engine loop throttles it.
-- **Lane rates.** Read ≈ 2.2–2.6 GB/s (units at 2–3 threads), 2.7 GB/s for 151 MB checkpoints; write 2.2 GB/s
-  burst, 1.77 GB/s sustained over 1 TB. The serial shared-lane model overestimates read-heavy mixes by 16–24%.
-- **Close flush.** ≈ 0.56 s per GB at 1.77 GB/s (≈ 9 s for 16 GB, ≈ 56 s for 100 GB).
-- **D9's SSD rate.** 2.2–2.7 GB/s here (design: 2.6).
+Both clock screens were steady (SM p10 / p50 2,677 / 2,685 and 2,595 / 2,640 MHz, no slowdown samples; the 5090 at
+its power cap). Copies run back to back through whole segments, so every measured step overlaps them. That is the
+worst case for 3b, whose 32K load spans ≈ 1.5–2 steps.
+
+| arm | 5080 step p50 ms | median × | p90 × | 5090 step p50 ms | median × | p90 × | copies GB/s (5080 / 5090) |
+|---|---|---|---|---|---|---|---|
+| control | 22.30 | 1 | 1 | 14.72 | 1 | 1 | – |
+| `h2d_dma` (one batch per 1.29 GB load) | 31.69 | **1.42** | **1.55** | 30.53 | **2.07** | **2.85** | 40.3 / 39.9 |
+| `h2d_paced512x1` (18 MB pieces, one in flight) | 22.81 | 1.023 | 1.037 | 14.95 | 1.015 | 1.031 | 32.7 / 32.2 |
+| `h2d_paced2048x1` (71 MB pieces) | 23.06 | 1.034 | 1.076 | 15.40 | 1.046 | 1.087 | 33.7 / 33.4 |
+| `h2d_each` (one copy per chunk) | 61.29 | 2.75 | 2.68 | 64.46 | 4.38 | 4.25 | 21.1 / 20.1 |
+| `h2d_sm` (8 CTAs) | 23.86 | 1.070 | 1.077 | 15.33 | 1.042 | 1.047 | 43.3 / 41.5 |
+| `d2h_answer` (one 154 MB store per 16 steps) | 22.12 | 0.992 | 0.993 | 14.67 | 0.997 | 0.997 | – |
+| `d2h_answer_paced` | 22.16 | 0.994 | 0.999 | 14.73 | 1.000 | 0.994 | – |
+| `d2h_stress` (stores back to back) | 25.13 | 1.127 | 1.103 | 18.11 | 1.231 | 1.197 | 42.9 / 42.3 |
+| `d2h_stress_paced` (8 segments at a time) | 22.86 | 1.025 | 1.021 | 15.13 | 1.028 | 1.030 | 39.3 / 38.8 |
+
+**Why unpaced DMA hurts: head-of-line blocking on the copy engine.**
+- A 64 KiB or 1 MiB copy issued on another stream while a batched load is in flight waits for the load to finish:
+  p90 25.6 / 27.1 ms on the 5080 / 5090, 99 ms on the A5000, against 0.03–0.08 ms idle.
+- A 4 KiB copy does not wait (it goes inline in the command stream).
+- The engine's per-step H2D copies are evidently above that size, so a decode step waits for the whole load. The
+  shorter the step, the larger the ratio: the 5090's 14.7 ms step against the 5080's 22.3.
+- Pacing helps only with **one** piece in flight; two pieces in flight block like the whole load (25 ms p90). It
+  costs rate: 32.2–33.9 GB/s alone, 0.68–0.71× blob, from the host round trip between pieces.
+- The `PreferOverlapWithCompute` flag changes nothing.
+- The SM copy uses no copy engine (probes 0.05–0.35 ms), but takes SMs and DRAM bandwidth: +4–7% per step while it
+  runs.
+- D2H stores block the engine's D2H read-backs the same way: 0.39 / 0.53 ms p50 under stress, 8.8 ms on the A5000.
+  Pacing halves that (0.21 / 0.33 ms).
+
+### K-M4 — NVMe (node-local NVMe of each desktop; the two drives behave alike)
+
+| | Prediction | RTX 5080 desktop | RTX 5090 desktop |
+|---|---|---|---|
+| O_DIRECT reads of 557,056 B units, 1 / 2 / 3 / 4 threads | 1.6–2.2 / 2.4–2.8 / no gain past 2–3 | **1.38 / 2.17 / 2.55 / 2.58 GB/s** | **1.37 / 2.17 / 2.54 / 2.58 GB/s** |
+| the same from C threads, 1 / 2 | – | 1.39 / 2.17 | 1.38 / 2.17 |
+| checkpoint SSM unit as 48 × 3 MiB iovecs, 1–2 threads | within 10% of the unit rate | 2.68–2.69 GB/s | 2.64–2.66 GB/s |
+| ratios for that row | – | 1.00× one 151 MB iovec, 1.23× the unit's 2-thread rate | 1.00× / 1.21× |
+| conv unit as 48 × 61,440 B iovecs, 1 / 2 threads | – | 2.20 / 2.58 | 2.22 / 2.59 |
+| buffered + `DONTNEED` reads, 1–4 threads | ≤ O_DIRECT | 0.86 / 1.59 / 2.11 / 2.47 | 0.86 / 1.58 / 2.10 / 2.47 |
+| burst writes, 1–4 threads | 1.5–3 GB/s | **2.19–2.21** (flat) | **2.09–2.13** (flat) |
+| burst writes, other cells | – | 48-iovec checkpoints 2.22; buffered 2.20 | 2.17; 2.16 |
+| sustained writes past SLC | 0.5–1.5 GB/s | **no cliff:** 1,063 GB in 600 s, 1.77 GB/s mean | **no cliff:** 1,078 GB in 600 s, 1.80 GB/s mean |
+| mixed vs model, 2 + 2 threads at 50/50 · 75/25 | within 15% | **0.843× · 0.760×** | **0.786× · 0.764×** |
+| mixed vs model, 1 + 1 threads at 50/50 | – | 0.840× | 0.786× |
+| mixed, free-running 2 + 2 | – | writes take 78% of the bytes; reads 0.43 GB/s; 0.98× the model at that share | writes 79%; reads 0.42 GB/s; 0.91× |
+| engine loop beside 2 I/O threads | < 3% slower | no measurable slowdown (all rows −7% … +2%, the noise of paired baselines) | same |
+
+Both drives had ≥ 2.5 TB free, so their caches, if any, reach beyond 1 TB.
+
+**The GIL starves the I/O threads instead.**
+- Beside a loop that holds the GIL (3 ms Python bodies back to back), 2 Python `preadv` threads read 0.76–0.80
+  GB/s. C threads beside the same loop read 2.17.
+- With 3 ms of Python per 15 ms step: 1.81–1.83 GB/s at 2 threads, 2.13–2.16 at 3.
+- Each `preadv` releases the GIL. But the thread must take it back between calls, and a busy loop hands it over only
+  at the 5 ms switch interval.
+
+**O_DIRECT alignment.**
+- Every GDN segment (61,440 B, 3 MiB) and the unit-major KV unit (557,056 B) is a multiple of 4,096, so none of them
+  needs a bounce buffer.
+- Only the 34,816 B layer-major KV chunk is not. It is a multiple of 512, and both filesystems accepted 512-aligned
+  lengths and offsets with O_DIRECT.
+
+### What the numbers suggest for K (the lead's decisions are in `docs/v1-kv-tiers.md` §13, rev 8.1)
+
+- **`state_copy@1`.**
+  - On raw rate, the two paths tie on fragmented 34,816 B H2D (0.99×). The SM gather is slightly ahead on small
+    loads (0.99× against 0.93× at 1K).
+  - Beside decode, an unpaced batch fails 3b's bar by itself: 1.42× / 2.07× median, 1.55× / 2.85× p90 while in
+    flight on the 5080 / 5090.
+  - The SM gather costs +4–7% per step at 41–43 GB/s; paced DMA costs +1.5–2.3% at 32–33 GB/s.
+  - For loads, the SM gather (8–32 CTAs) is the faster path and needs no pacing thread.
+  - For D2H stores, the batch is the faster path: 0.89–0.94× against 0.84–0.88× for KV chunks, up to 1.03× for
+    checkpoints. Pace it in ≈ 25 MB pieces if stores ever run back to back.
+  - Today's per-run loop is out (0.13×).
+- **`h2d_rate`.** ≈ 47 GB/s idle; ≈ 41–43 GB/s for the SM gather beside 4 decoding rows; 32–33 GB/s for paced DMA.
+- **`stall_bytes`.** A load due now stalls a step for bytes / rate. At 5% of a 4-row step that is ≈ 48 MB on the 5080
+  (22 ms) and ≈ 30 MB on the 5090 (14.7 ms), at 41–43 GB/s. A 1K-token load (35.7 MB) is about that size; a 154 MB
+  payload (3.6 ms) is well above it.
+- **`io_threads`.** 3: reads reach 2.54–2.55 GB/s against 2.17 at 2, and writes are flat from 1 thread. The I/O should
+  also not need the GIL between calls (native threads), or a busy engine loop throttles it.
+- **Lane rates.**
+  - Read: ≈ 2.2–2.6 GB/s for units at 2–3 threads; 2.65–2.7 GB/s for 151 MB checkpoints.
+  - Write: 2.1–2.2 GB/s burst; 1.77–1.80 GB/s sustained over 1 TB.
+  - The serial shared-lane model overestimates read-heavy mixes by 16–24% on both drives.
+- **Close flush.** ≈ 0.56 s per GB at 1.8 GB/s: ≈ 9 s for 16 GB, ≈ 56 s for 100 GB.
+- **D9's SSD rate.** 2.2–2.7 GB/s here; the design assumes 2.6.
