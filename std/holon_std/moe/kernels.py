@@ -27,6 +27,11 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   Facts: layout, experts, in, out, top_k, rows_per_token, glu, act_dtype, out_dtype, act_quant (`ACT_QUANT` for
   quantized layouts, as `qlinear@2`'s; `a16` for dense ones). An instance may define `prepare` as `qlinear@2`'s (logical
   shape [E, out, in]); a spec's `config["act"]` is refused under mixed steps as `qlinear@2`'s.
+  An instance may expose `pass_rows` (an int, a multiple of `CHUNK`; `CHUNK` without it), the most rows a call may
+  carry at its `CHUNK`-row calls' bits (docs/v1-moe-prefill.md D0, §4): for every n ≥ 1 with n·`CHUNK` ≤ `pass_rows`, a
+  call of n·`CHUNK` rows gives each row the bits the `CHUNK`-row call of that row's own chunk gives it. Nothing is
+  promised for a call that is not a whole number of `CHUNK`s, nor across placements (`linear_experts_arena@1`'s own
+  term). std.moe passes at most the smaller of a layer's two stacks' `pass_rows` per call.
 - `moe_combine@1`: instance `(y [T, k, H] of y_dtype, weights [T, k] f32, out [T, H])`: writes `Σ_j w[t, j] · y[t,
   j]`, accumulated in f32 in slot order, into `out` (of `dtype`). Facts: hidden, top_k, dtype, y_dtype. An instance
   may define `add(y, weights, residual [T, H] of dtype, out)`: writes `residual + s`, s that sum rounded to `dtype`,
@@ -184,3 +189,4 @@ PADDING, DECODE, PREFILL = 0, 1, 2   # `moe_resolve@1`'s row kinds
 RANGE, OVERFLOW, JOBS = 1, 2, 8      # error bits: a resident slot outside the arena's cache slots; a delta record past
                                      # the log (the variants); the CPU's share past its job table
 ACT_QUANT = ("a4", "a8")            # `act_quant` of quantized stacks (`a16` is not offered for them)
+CHUNK = 512                          # tokens per router call, and the expert path's unit of rows (`pass_rows`)

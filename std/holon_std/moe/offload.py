@@ -11,10 +11,10 @@ the RAM tier holds every expert, also the RAM-short default (F11 with deferred a
 checkpoint's directory), `moe.tiers` (host tiers' Refs, comma-separated; default `std.tiered.pinned@1`), `moe.ram`
 (the RAM tier's units per class, forwarded to it: fewer than every expert makes RAM exclusive, a slower tier holding
 the rest), `moe.cache` (cache slots per class, pinned: `<class>=<n>` or `<class>=<fraction>`, `*` for every class not
-named; default: fill free VRAM), `moe.ring_tokens` (D8: a step of at
-least this many prompt tokens streams every layer's missing experts through lent ring slots in passes of up to
-`PASS` tokens; 0: never; default 512), `moe.ring_copy` (`sm`: the ring's copies a small kernel beside the pass,
-no host sync; `dma`: copy engines, one host sync per streaming step; default `sm`), `moe.route_transform`
+named; default: fill free VRAM), `moe.ring_tokens` (D8: a step of at least this many prompt tokens streams every
+layer's missing experts through lent ring slots in passes of up to the stacks' kernels' `pass_rows` tokens; 0: never;
+default 512), `moe.ring_copy` (`sm`: the ring's copies a small kernel beside the pass, no host sync; `dma`: copy
+engines, one host sync per streaming step; default `sm`), `moe.route_transform`
 (`approx`: the name of a route transform, whose contract `moe_route_transform.<name>@1` its plugin provides; its
 dropped routes, negative ids, are dropped end to end), `moe.cpu_plan` and `moe.cpu_isa` (F5b, the CPU's share of the
 misses: `cpu.py`)."""
@@ -26,13 +26,12 @@ from torch import nn
 
 from . import kernels
 from .cpu import CpuShare, plan_table
-from .units import CHUNK, ExpertLinear, bind_experts
+from .units import CHUNK, ExpertLinear, bind_experts, pass_rows
 
 GATE_UP, DOWN = 0, 1                           # roles
 KEY = "std.moe.offload"                        # the store's shared-object key (`ctx.shared`, the engine's lookup)
 CPU = "std.moe.cpu"                            # F5b's (`CpuShare`)
 RING_TOKENS = 512                              # D8: a step of this many prompt tokens streams (§13: the 5080's)
-PASS = 4096                                    # a streaming step's expert pass, at most (D8)
 
 
 def _store(ctx, experts: int, top_k: int):
@@ -117,8 +116,9 @@ class Offload(nn.Module):
         return self._transform(torch.where(padding, -1, ids), weights, self._resolver.present(first))
 
     def pass_tokens(self, tokens: int) -> int:
-        """The expert pass of the step: one per large chunk in a streaming step (D8), else std.moe@1's chunk."""
-        return PASS if self.store.large_passes(tokens) else CHUNK
+        """The expert pass of the step: in a streaming step (D8) as many tokens as both stacks' kernels take at
+        their chunks' bits (docs/v1-moe-prefill.md D1), else std.moe@1's chunk."""
+        return pass_rows(self._stacks) if self.store.large_passes(tokens) else CHUNK
 
     def route(self, ids: torch.Tensor, first: int, x: torch.Tensor) -> torch.Tensor:
         """Each role's arena slots for `ids` (the step's tokens `first`…, inputs `x`), misses fetched; with F5b, a

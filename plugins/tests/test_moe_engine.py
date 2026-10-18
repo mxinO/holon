@@ -16,10 +16,11 @@ from holon.api import RowKind, SamplingParams
 from holon.core.batching import host_plan
 from holon.core.engine import Engine, EngineConfig
 from holon_std.moe.kernels import DECODE, PADDING
-from holon_std.moe.offload import KEY, PASS
+from holon_std.moe.offload import KEY
 from holon_std.moe.units import CHUNK
 from holon_std.tiered.ring import Lent
 from holon_testing.gguf_files import write
+from holon_testing.ref_kernels.kernels import LinearExperts
 from safetensors.torch import save_file
 from transformers import AutoModelForCausalLM, Qwen3MoeConfig, Qwen3MoeForCausalLM
 
@@ -109,6 +110,29 @@ def test_the_gate_up_merge_puts_gate_first_and_binds_one_kernel(tiny_moe, tmp_pa
     assert engine.ctx.kernels[merged[0]]["provider"] == "testing.ref_kernels"
     x, ids = torch.randn(3, 1, cfg["hidden_size"]), torch.tensor([[0, 5], [7, 2], [3, 4]], dtype=torch.int32)
     assert torch.equal(unit._gate_up(types.SimpleNamespace(x=x), ids), unit._gate_up(x, ids))
+
+
+def test_a_prefill_step_passes_whole_chunks_then_its_tail(tiny_moe, tmp_path):
+    """docs/v1-moe-prefill.md D1 on the resident store: a step's expert passes take the smaller of the two stacks'
+    `pass_rows` (the reference provider's: 4,096 within a 4,100-token step budget) in whole chunks, and the step's
+    last partial chunk is a pass of its own, so every row's chunk and kernel path are a chunk's: calls of 512 then 88
+    rows at 600 tokens, 1,024 then 3 at 1,027, 4,096 then 4 at 4,100, each for gate/up then down in every layer."""
+    checkpoint, _ = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
+    engine = _engine(file, max_step_tokens=4100, max_model_len=4200, state_memory=8 << 20)
+    layers = len(engine.executor.model.layers)
+    assert {m._store.pass_tokens(4100) for m in engine.executor.model.modules() if hasattr(m, "_gate_up")} == {4096}
+    sizes, call = [], LinearExperts.__call__
+
+    def recorded(self, x, parts, ids):
+        sizes.append(len(ids))
+        return call(self, x, parts, ids)
+    for tokens, passes in ((600, [512, 88]), (1027, [1024, 3]), (4100, [4096, 4])):
+        sizes.clear()
+        prompt = torch.randint(0, 512, (tokens,), generator=torch.Generator().manual_seed(tokens)).tolist()
+        with mock.patch.object(LinearExperts, "__call__", recorded):
+            engine.generate([prompt], SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True))
+        assert sizes == [n for n in passes for _ in range(2)] * layers, (tokens, sizes)
 
 
 def test_gate_and_up_of_different_layouts_fail_at_startup(tiny_moe, tmp_path):
@@ -354,7 +378,8 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe_deep, tmp_path, 
     store.taps.append(lambda step, record: mixed.append(step.n_decode > 0))
     offload = engine.executor.model.layers[0].ffn._store
     assert store.staging == 6 and store.prefill == 8 and store.lending
-    assert offload.pass_tokens(10) == PASS and offload.pass_tokens(9) == CHUNK     # the worst step profiles a pass
+    # the worst step profiles a pass (of the bound kernels' pass_rows: one chunk within this 10-token step budget)
+    assert store.large_passes(10) and not store.large_passes(9) and offload.pass_tokens(10) == CHUNK
     held = []
 
     def size(step, record):           # per class: resident pieces + empty slots
@@ -390,7 +415,8 @@ def test_the_startup_profile_runs_a_streaming_pass(tiny_moe, tmp_path):
     assert store.arena.min_units * store.arena.unit_bytes >= staged      # what it lays out below, alignment aside
     engine.ledger.materialize(None)                       # the profile's minimum pools
     offload = engine.executor.model.layers[0].ffn._store
-    assert not store.lending and offload.pass_tokens(10) == PASS
+    assert not store.lending and store.large_passes(10)
+    assert offload.pass_tokens(10) == min(s.kernel.pass_rows for s in offload._stacks) == CHUNK
 
 
 def test_a_cache_too_small_to_lend_stages_instead(tiny_moe, tmp_path):

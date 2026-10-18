@@ -7,7 +7,7 @@ from torch import nn
 
 from . import kernels
 
-CHUNK = 512                        # tokens per pass through the expert path: bounds its f32 activations
+CHUNK = kernels.CHUNK              # tokens per router call; an expert pass is whole CHUNKs (`pass_tokens`)
 
 
 def _dtype(t: torch.dtype) -> str:
@@ -146,6 +146,12 @@ class ExpertLinear(nn.Module):
         return self._kernel(x, self.parts, ids)
 
 
+def pass_rows(stacks) -> int:
+    """The rows per call every one of `stacks`' bound kernels takes at its chunks' bits (`pass_rows`, a multiple of
+    CHUNK; CHUNK where a kernel does not say)."""
+    return min(getattr(s.kernel, "pass_rows", CHUNK) for s in stacks)
+
+
 def bind_experts(ctx, facts: dict, op: str = kernels.LINEAR_EXPERTS, site: str = "std.moe.experts"):
     """The `op` kernel instance (`linear_experts@2`, or `linear_experts_arena@1`) for `facts`, selected at its site."""
     site = site + "[" + ",".join(f"{k}={v}" for k, v in facts.items()) + "]"
@@ -160,13 +166,15 @@ class Resident:
 
     def __init__(self, ctx, **site) -> None:
         self.device = ctx.device                       # where expert stacks are held
+        self._stacks: list[ExpertLinear] = []          # the layer's gate/up and down stacks (`pass_tokens`)
 
-    @staticmethod
-    def merge(gate: ExpertLinear, up: ExpertLinear) -> ExpertLinear | None:
-        return ExpertLinear.merge(gate, up)
+    def merge(self, gate: ExpertLinear, up: ExpertLinear) -> ExpertLinear | None:
+        merged = ExpertLinear.merge(gate, up)
+        self._stacks += [merged] if merged is not None else []
+        return merged
 
-    @staticmethod
-    def stack(down: ExpertLinear) -> ExpertLinear:
+    def stack(self, down: ExpertLinear) -> ExpertLinear:
+        self._stacks.append(down)
         return down
 
     @staticmethod
@@ -183,10 +191,10 @@ class Resident:
     def transform(ids: torch.Tensor, weights: torch.Tensor, first: int) -> tuple[torch.Tensor, torch.Tensor]:
         return ids, weights
 
-    @staticmethod
-    def pass_tokens(tokens: int) -> int:
-        """Tokens per expert pass: one chunk."""
-        return CHUNK
+    def pass_tokens(self, tokens: int) -> int:
+        """Tokens per expert pass: as many as both stacks' kernels take at their chunks' bits (docs/v1-moe-prefill.md
+        D1), on a step of at least a chunk."""
+        return pass_rows(self._stacks) if tokens >= CHUNK else CHUNK
 
     @staticmethod
     def finish() -> None:
@@ -202,8 +210,8 @@ def _store(ctx, **site):
 
 class MoE(nn.Module):
     """Mixture of experts: softmax top-k routing over an f32 router (`moe_router@1`, or the f32 linear and
-    `moe_topk@1`), gate/up/down expert stacks with SwiGLU, the weighted combine. The expert path runs in f32 (design
-    D3), CHUNK tokens at a time."""
+    `moe_topk@1`), gate/up/down expert stacks with SwiGLU, the weighted combine. The router runs CHUNK tokens at a
+    time; the expert path, in f32 (design D3), a pass of the store's size (whole CHUNKs)."""
 
     def __init__(self, ctx, *, hidden: int, experts: int, top_k: int, inter: int, renormalize: bool,
                  layer: int = 0) -> None:
@@ -264,9 +272,9 @@ class MoE(nn.Module):
         return self._forward(x, residual)
 
     def _forward(self, x: torch.Tensor, residual: torch.Tensor | None) -> torch.Tensor:
-        """The router and top-k per CHUNK tokens; the expert path per pass of the store's size (a CHUNK, or whole
-        CHUNKs in a streaming offload step: the step's last partial chunk is a pass of its own, so every row's chunk
-        and kernel path are a chunk's); with `residual`, its add in the combine."""
+        """The router and top-k per CHUNK tokens; the expert path per pass of the store's size (whole CHUNKs, up to
+        what the stacks' kernels take at their chunks' bits: the step's last partial chunk is a pass of its own, so
+        every row's chunk and kernel path are a chunk's); with `residual`, its add in the combine."""
         out, tokens = torch.empty_like(x), x.shape[0]
         size, full = self._store.pass_tokens(tokens), tokens // CHUNK * CHUNK
         passes = [(a, min(a + size, full)) for a in range(0, full, size)] + [(full, tokens)] * (full < tokens)

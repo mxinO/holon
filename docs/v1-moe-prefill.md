@@ -673,6 +673,37 @@ code.
 
 The panel reviews this revision before step 1, the code at step 4, and again at the close.
 
+### 7.1 Step records
+
+**Step 1 (D0, D1).**
+- **What landed.**
+  - `std.moe.kernels` states the `pass_rows` term and owns `CHUNK`.
+  - `Resident` and `Offload` take the min of their stacks' kernels' `pass_rows` (`units.pass_rows`); `PASS` is
+    retired.
+  - kernels.ggml_cuda sets `pass_rows` from `PASS_PROVEN`, capped by `max_step_tokens` and `ggml_cuda.pass_rows`
+    (declared in `[options]`), and sizes its workspaces for it.
+  - testing's CPU `LinearExperts` runs per `CHUNK` and declares `pass_rows` (4,096 within the step budget).
+  - `holon_testing.pass_rows.check_pass_rows` is the shared L0 helper.
+- **`PASS_PROVEN`** is derived from `plans/` (the GGUF expert types of every lock that binds `linear_experts`):
+  - sm_86: q4_k, q6_k;
+  - sm_89: q4_k, q6_k, mxfp4, nvfp4;
+  - sm_120: q4_k, q6_k, iq3_xxs, iq3_s, iq4_xs, plus §5.1's q5_k;
+  - FN's six mmq types on every SM.
+  - `PLACED` is that table's types on the running SM.
+- **Decided while building.** A call's last partial chunk runs as a call of its own inside the instance too, so a
+  row's kernel path is its chunk's whatever the caller cuts. Without this, a direct caller's 2,049-row call would put
+  its last row on mmq, not mmvq.
+- **Checks.**
+  - L0 on sm_86: `test_ggml_cuda_moe.py` 124 passed in 177 s (main: 106 in 172 s; `PLACED` grew from 5 to 8 types).
+  - Memcheck on sm_86 (now with 2,048 and 4,608 rows where `pass_rows` > 512): 0 errors.
+  - The CPU call-size test (`test_a_prefill_step_passes_whole_chunks_then_its_tail`) fails on main's 512-token pass
+    and on the `pass_eats_tail` mutation.
+  - CPU suite `test_moe_engine.py`: 22 passed.
+  - Static CI (`run_all.sh` against `b5b1e7f`) is clean.
+  - Identity (`spikes/moe_prefill/identity.py`) on the A5000, the resident 30B and the natural-fit offload flags:
+    main's and the branch's prompt-logprob hashes are identical at 1,027 and 4,096 tokens, each run-identical ×2.
+    The branch's resident pass is 4,096 tokens, main's 512.
+
 ## 8. Risks
 
 - **Thin margins at 32K.** Holon's attention lead is unmeasured on sm_120 (C-M3). The 5080 32K row reaches its bar

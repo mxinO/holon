@@ -21,7 +21,7 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
 - Placement (docs/v1-offload.md D4): mmq with ids always tiles, over a compact list of the active slots (or every
   slot, where that is at most 64 more), so an expert's rows are bitwise the same in arenas of 12, 13, 16, 74 and 128
   slots under any placement, at every tile width, and in compacted launches padded with null-slot rows to the type's
-  mmvq limit + 1, on both id helpers (per slot, compact; Q4_K, Q6_K, IQ2_XXS, IQ2_S, IQ3_XXS; gate/up and down).
+  mmvq limit + 1, on both id helpers (per slot, compact; the SM's `PASS_PROVEN` types; gate/up and down).
 - Violated preconditions set their bit in the kernel's `errors` word and leave only their own rows uncomputed: an id
   out of range, more slots than the binding's bound, a slot repeated inside rows beyond mmq's column tiles (within
   them it is computed; llama.cpp's helper instead left stale entries that wrote over a real row, which M0.2's padding
@@ -56,8 +56,20 @@ from holon.core.plugins import PluginSet, discover
 from holon_judge import l0, q8_1
 from holon_judge.planted import PLANTS
 from holon_plugins.kernels.ggml_cuda import extension
-from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, FP4, ID_ERRORS, NATIVE_FP4, PREC, TYPES, Prepared, q8_1_bytes
+from holon_plugins.kernels.ggml_cuda.plugin import (
+    CHUNK,
+    FP4,
+    ID_ERRORS,
+    NATIVE_FP4,
+    PASS_PROVEN,
+    PASS_ROWS,
+    PREC,
+    TYPES,
+    Prepared,
+    q8_1_bytes,
+)
 from holon_std.moe import reference
+from holon_testing.pass_rows import check_pass_rows
 
 from .test_ggml_cuda import (
     SLACK,
@@ -144,8 +156,8 @@ def experts(ctx, name: str, k: int, out: int, rows_per_token: int, glu: str = "n
     spec = ctx.select_kernel("linear_experts@2", site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
     kernel, device = spec.impl(ctx, **facts), torch.cuda.current_device()
-    return Sized(kernel, lambda x, parts, ids: kernel.lib.workspace_bytes_id(device, k, min(len(ids), CHUNK), K,
-                                                                            kernel.slots))
+    return Sized(kernel, lambda x, parts, ids: kernel.lib.workspace_bytes_id(device, k, min(len(ids), kernel.pass_rows),
+                                                                            K, kernel.slots))
 
 
 def uniform(tokens: int, n: int, seed: int) -> torch.Tensor:
@@ -252,15 +264,31 @@ def test_linear_experts_every_type(ctx, lib, name):
 
 
 @pytest.mark.parametrize("name", sorted(TYPES))
-def test_linear_experts_every_type_at_prefill_chunks(ctx, name):
+def test_linear_experts_every_type_at_prefill_chunks(ctx, sm, name):
     """mmq's prefill kernels on every type: the tile width J follows the chunk's tokens (128 at a 512-token chunk,
     64 at the sweep's 64), and each J is its own kernel. A small stack (8 experts, 256 rows) keeps it to ~1M
-    outputs; 513 tokens adds the one-token mmvq tail chunk."""
+    outputs; 513 tokens adds the one-token mmvq tail chunk. D0's passes (docs/v1-moe-prefill.md): `pass_rows` is
+    PASS_ROWS on a pair of `PASS_PROVEN` (this SM's), else CHUNK, and a call of up to 4,608 rows gives each row its
+    512-row chunk's bits (holon_testing's check). On Qwen3-30B-A3B's 128 experts (Q4_K, Q6_K), calls of 512, 2,048
+    and 4,096 rows take each of the id helpers: per slot, compact, device-wide."""
     n, out = 8, 256
     kernel, s = experts(ctx, name, H, out, 1, n=n), stack(name, n, out, H, seed=5)
+    assert kernel.pass_rows == (PASS_ROWS if (sm, name, "q8_1") in PASS_PROVEN else CHUNK)
     for tokens in (CHUNK, CHUNK + 1):
         ids, x = uniform(tokens, n, seed=tokens), gate_up_input(tokens, seed=tokens)
         check(kernel(x, s.parts, ids), emulated(kernel, s, x, ids), H, f"{name} T={tokens}", True)
+    ids, x = uniform(9 * CHUNK, n, seed=9), gate_up_input(9 * CHUNK, seed=9)
+    check_pass_rows(kernel, s.parts, x, ids, name)
+    if name not in ("q4_k", "q6_k"):
+        return
+    kernel, s = experts(ctx, name, H, out, 1, n=EQ), stack(name, EQ, out, H, seed=6)
+    x, ids, helpers = gate_up_input(PASS_ROWS, seed=7), uniform(PASS_ROWS, EQ, seed=7), set()
+    for tokens in (CHUNK, 4 * CHUNK, PASS_ROWS):
+        names = launched(lambda t=tokens: kernel(x[:t], s.parts, ids[:t]))
+        helpers |= {h for h in ("per_slot", "compact", "device") if any(f"mm_ids_{h}" in m or f"mm_ids_helper_{h}" in m
+                                                                         for m in names)}
+        check_pass_rows(kernel, s.parts, x[:tokens], ids[:tokens], f"{name} E={EQ} T={tokens}")
+    assert helpers == {"per_slot", "compact", "device"}, helpers
 
 
 @pytest.mark.parametrize("name", ["q4_k", "iq3_xxs", "q6_k", "q4_0", "q2_k"])
@@ -414,7 +442,10 @@ def test_graph_replay_follows_the_routing(ctx, qwen_stacks, name):
         assert torch.equal(y, layer()), f"{name} T={tokens}: replay on new routing differs from eager"
 
 
-PLACED = ["q4_k", "q6_k", "iq2_xxs", "iq2_s", "iq3_xxs"]     # the vehicle's (Q4_K_M) and the IQ2 / IQ3 MoE quants'
+# per SM, the types D0 proves there (`PASS_PROVEN`: the lock classes' expert types and FN's MoE quants)
+SM = 10 * torch.cuda.get_device_capability()[0] + torch.cuda.get_device_capability()[1] if torch.cuda.is_available() \
+    else 0
+PLACED = sorted({t for s, t, _ in PASS_PROVEN if s == SM})
 EP = 12                                                     # experts placed in an arena, k = 8 of them per token
 SLOTS = (EP, EP + 1, 16, 74)                                # docs/v1-offload.md D4's slot counts
 STAGES = {"gate_up": (H, 2 * INTER, 1), "down": (INTER, H, K)}          # in, out, input rows per token
@@ -507,7 +538,7 @@ def test_an_arena_call_of_many_chunks_gives_the_chunks_rows(ctx, name, stage):
              "rows_per_token": rows, "glu": "none", "act_dtype": "bfloat16", "out_dtype": "float32", "act_quant": "a8",
              "slots": EP + K}
     kernel = ctx.select_kernel("linear_experts_arena@1", site="l0", **facts).impl(ctx, **facts)
-    assert kernel.chunk == 4096
+    assert kernel.pass_rows == 4096
     parts = {"blocks": torch.cat([s.parts["blocks"], torch.zeros_like(s.parts["blocks"][:K])])}
     x, ids = placed_inputs(stage, 4608, seed=32)
     y = kernel(x, parts, ids)

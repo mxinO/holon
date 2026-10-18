@@ -11,6 +11,7 @@ from holon_std.ffn import reference as ffn
 from holon_std.mixers.gdn import reference as gdn
 from holon_std.mixers.gqa import reference as gqa
 from holon_std.moe import reference as moe
+from holon_std.moe.kernels import CHUNK
 from holon_std.ops import reference as ops
 from holon_std.weights.hf import reference as hf
 
@@ -131,23 +132,32 @@ class QEmbedding(_Dequantized):
 # Tier A fits a 64 GB budget, at the cost of a decode per layer and step (MXFP4 in torch: ≈ 1 s a layer; gguf-py's
 # k-quants and i-quants, on one core: ≈ 10–20 s a layer, so a 30B GGUF Tier A of those types takes hours).
 CACHE_BYTES = 128 << 20
+PASS_ROWS = 4096                # `LinearExperts.pass_rows` without a step budget (kernels.ggml_cuda's at top-8)
 
 
 class LinearExperts:
     """Expert stacks: ggml layouts dequantized per expert (gguf-py, MXFP4 in torch), HF layouts per expert and unit by
     std.weights.hf's reference — cached when small (`CACHE_BYTES`), else per call; dense ones as stored, the
     activation rounded to their dtype (the contract). A cached decode is checked against the stack's bytes: an offload
-    store's arena (up to `experts` slots) changes between calls."""
+    store's arena (up to `experts` slots) changes between calls. A call runs CHUNK rows at a time, so it declares
+    `pass_rows` (PASS_ROWS, within the step budget): std.moe's CPU tests take large passes, at the chunks' bits."""
 
     def __init__(self, ctx, *, layout: str, experts: int, out: int, glu: str, out_dtype: str, **facts) -> None:
         self.quantized = None if layout.startswith("dense/") else _Dequantized(ctx, layout=layout)
         self.experts, self.out, self.glu, self.out_dtype = experts, out, glu, getattr(torch, out_dtype)
         self._stacks: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}   # stack -> (its bytes, their decode)
         self.errors = torch.zeros(1, dtype=torch.int32)        # `linear_experts_arena@1`'s word: never set here
+        steps = ctx.options.get("max_step_tokens") or PASS_ROWS
+        self.pass_rows = max(CHUNK, min(PASS_ROWS, steps) // CHUNK * CHUNK)
 
     def __call__(self, x, parts, ids):
         if not isinstance(x, torch.Tensor):            # another provider's prepared handle: the tensor it stands for
             x = x.x
+        if len(ids) <= CHUNK:
+            return self._chunk(x, parts, ids)
+        return torch.cat([self._chunk(x[a:a + CHUNK], parts, ids[a:a + CHUNK]) for a in range(0, len(ids), CHUNK)])
+
+    def _chunk(self, x, parts, ids):
         if self.quantized is None:
             weight = parts["weight"]
             y = moe.linear_experts(x, weight, ids, self.glu, operand_dtype=weight.dtype)
