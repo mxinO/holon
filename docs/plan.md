@@ -684,7 +684,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   all-resident prefill is 1.6–2.0× Holon's on the RTX 5090. Work: a faster large-batch MoE GEMM path (e.g. dequant to
   a tensor-core GEMM for big chunks instead of mmq's int8 path), measured against FreeToken and llama.cpp, all-resident
   and offloaded. **Step 0 (2026-10-18)** is `spikes/moe_prefill/README.md`, run on an A5000 with all experts resident;
-  the design is `docs/v1-moe-prefill.md` (rev 3: the three-lens panel's two rounds and the lead's decisions applied).
+  the design is `docs/v1-moe-prefill.md` (rev 4: the three-lens panel's three rounds and the lead's decisions applied).
   - The cause is mmq's launch shape, not int8 against tensor cores. FreeToken runs the same ggml mmq.
   - Holon's resident stacks call it at 512 rows. Its grouped grid launches every slot's column tiles, 76–92% of them
     empty.
@@ -697,7 +697,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
     are owner items.
   - Dequant + bf16 GEMMs are rejected on achieved rates, pending the bar cards' step 0 (D7). Before its single
     propagation round the track also lands FN's needs: IQ1_M's mmq tile loader and Q2_0, passed buffers on
-    `linear_experts`, and contiguous-tail lending.
+    `linear_experts`, and contiguous-tail lending through the placement policy's contract (`lend_tail`).
 - **One version file:** a root `VERSION` read by every distribution at build time (hatchling's version source),
   `holon.__version__` from the installed metadata, and the plan's runtime-closure hash reading `VERSION` for the
   workspace's own packages (`uv.lock` records them as dynamic). It changes the core, so it lands with the next relock

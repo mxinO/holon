@@ -1,9 +1,13 @@
 # v1 — MoE prefill speed
 
-Status: **design rev 3 (2026-10-18).** Step 0 is measured on the A5000. Rev 2 answered the three-lens panel's first
-round (A correctness, B architecture, C performance: 3 blockers, 19 majors, 23 minors). Rev 3 answers its second round
-(3 majors, 15 minors) and takes in FN's requests (§10), with the lead's decisions on both. It awaits the panel's
-re-review.
+Status: **design rev 4 (2026-10-18).** Step 0 is measured on the A5000.
+- Rev 2 answered the three-lens panel's first round (A correctness, B architecture, C performance: 3 blockers, 19
+  majors, 23 minors).
+- Rev 3 answered its second round and took in FN's requests.
+- Rev 4 answers its third round (A 3 majors and 4 minors, B 1 major and 3 minors, C's last minor) and FN's arena rule:
+  D11 now goes through the policy contract, and D10's contract is written out (§10).
+
+All are applied with the lead's decisions. Rev 4 awaits the panel's re-review.
 
 This is the follow-up that plan §10 opened when milestone X closed (`docs/v1-offload.md` §13, "Owner decision on the
 gate").
@@ -204,8 +208,8 @@ dense-mmq bound.
     - The q8_1 / W4A4 activation quantization is row-local (`quantize.cu:164-207`).
     - All three id helpers order rows slot-ascending, then by token (`mmid.cu:9-20`). D1 moves resident calls from
       the per-slot helper to the compact and device-wide ones.
-  - **CPU providers** (the oracle and `testing`'s) multiply per expert batch and keep the default `CHUNK`, so CPU
-    tests keep their bits.
+  - **The oracle** (`std.moe.reference.linear_experts`) multiplies per expert batch, so it is not a provider of large
+    passes. `testing`'s CPU provider loops per `CHUNK` and declares `pass_rows` (D0). CPU tests keep their bits.
   - *Why:* this is the gap's largest row (−449 of 1,176 ms at 4K).
 - **D2 — A map-free compact grouped launch** (Holon's own `vendor.patch` code; FreeToken's `mmq_flat_tile` shape was
   studied, not copied; A-3, lead decision).
@@ -266,6 +270,8 @@ dense-mmq bound.
   - **Cost:** +0.47 GB of live peak (§6). On the 5080 offload lock that is ≈ 166 cached experts (share 52.7% →
     ≈ 50.0%). x4_gate's measured share-to-decode slope predicts ≈ −3.0% / −3.7% / −2.4% decode at 1K / 4K / 32K (C2-m1):
     the FreeToken decode rows go 1.06× → ≈ 1.02× (4K) and 1.03× → ≈ 1.005× (32K).
+  - **Taking D6 on the 5080 offload lock waives acceptance 5's decode tolerance there.** That is the trade O1 asks
+    the owner to make.
   - **Batched locks:** an 8K prompt step also stalls decode twice as long (inter-token gap p99), since
     `chunk_with_decode` is 0.
   - **Default:** no D6 on offload locks; decode wins (lead decision).
@@ -326,31 +332,72 @@ dense-mmq bound.
 
 - **D10 — Passed buffers for `linear_experts@2` / `linear_experts_arena@1`** (std minor; FN's request).
   - **Today** the scratch is `torch.empty` inside kernels.ggml_cuda (`plugin.py:464`, `:481`). Large passes on FN's
-    shape need dense [rows, N] buffers of 0.9–1.8 GB, which std.moe must be able to place in lent memory.
-  - **The call** takes optional keywords: `out` (the [T, k, out_y] f32 result) and `scratch` (a byte buffer of at
-    least the instance's `scratch_bytes(tokens)`, for the gate/up intermediate and the id workspaces of the call).
-    The provider uses them in place of its own allocations.
-  - **Results are bitwise the same** with or without passed buffers, and independent of where those buffers live.
-  - **L0:** passed buffers NaN-poisoned beforehand, bitwise against the allocating call; a too-small `scratch`
-    refused before launch; a call with buffers inside a captured graph replays on new routing.
+    shape need dense [rows, N] buffers of 0.9–1.8 GB, which std.moe must be able to place in lent memory (D11).
+  - **Who accepts them** (B3-2). Only an instance that defines `scratch_bytes(tokens)` accepts the optional keywords
+    `out` (the [T, k, out_y] f32 result) and `scratch` (a byte buffer of at least `scratch_bytes(tokens)`). std calls
+    every other instance without them, as it does for `add` and `route_prepare` (`units.py:235`, `:262`). So
+    `kernels.triton_experts` and third-party providers are unaffected.
+  - **What `scratch_bytes` covers, per path** (B3-4):
+    - mmq with ids: the per-call transients, i.e. gate/up's f32 intermediate (none where D4's fused store runs) and
+      the call's q8_1 rows and id maps;
+    - mmvq calls (≤ `mmvq_tokens` rows): 0, since they use the persistent decode-size workspace.
+    - The persistent named id workspace shrinks to decode / verify size (`mmvq_tokens` and the graphed buckets'
+      rows). An mmq call above that size without `scratch` allocates its own transients, as today, so nothing is
+      refused and today's callers keep working.
+  - **Contract terms** (B3-3, A3):
+    - the provider keeps no reference to `out` or `scratch` past the call;
+    - both are read and written on the compute stream, ordered with the work enqueued before the call;
+    - one `scratch` may be reused by the successive calls of a pass (gate/up, then down);
+    - `out` must not alias `scratch` or `x`, and `scratch` must be 256-byte aligned (the device-wide helper asserts
+      it, `mmid.cu:319`). Both are refused before launch.
+    - Under `ring_copy = dma`, the refill of returned slots is ordered against these buffers exactly as X's lent ring
+      slots are: after the step's compute stream.
+    - **Lent memory is eager-only.** Graphed steps never borrow (`store.py:532`), so a buffer passed inside a captured
+      graph is a static allocation whose address the graph keeps.
+  - **Results are bitwise the same** with or without passed buffers, wherever those buffers live.
+  - **The fallback's peak stays profiled** (A3). When lending falls short or no tail forms, the step stages and the
+    instance allocates its own transients. The startup profile's worst-case step runs that fallback, so the KV pool
+    is sized for its peak.
   - Today's callers pass nothing, so no snapshot moves.
 
-- **D11 — Contiguous-tail lending from one class arena** (std.tiered, a std minor; FN's request; FreeToken / Strata
-  style).
-  - **What it lends.** A streaming step borrows the class arena's last n slots as one contiguous byte range,
-    regardless of their temperature. The resident experts there are evicted: map entries become missing, and the
-    delta log records the evictions.
-  - **The return.** At the step's end the slots return empty (D4's R0 return), as X's lending does.
-  - **Why.** X's `lend(n)` takes the coldest whole experts wherever they sit, so it cannot form the dense buffers
-    D10 needs.
-  - **Mode.** The lending mode is a plugin option, `moe.ring_lend` = `coldest` | `tail`, declared in std.moe's
-    `[options]`. The default is `coldest` (X's behaviour); FN's lock sets `tail`.
-  - **Exactness.** Every placement is exact (X's acceptance 2), so tail lending changes speed, not outputs. On the
-    offload snapshots: `tail` is identical to all-resident and to `coldest`, and to main's.
-  - **Policy parity.** `placement.lfu`'s replay models the tail evictions and the empty return. The policy-parity
-    check compares the device's map with the host mirror per step.
-  - **L0 / CPU:** the lent range is contiguous and of the requested bytes; evicted slots are empty at the return; the
-    `lent-slot-still-mapped` plant still fails.
+- **D11 — Contiguous-tail lending, through the policy contract** (a std minor; FN's request; FreeToken / Strata
+  style; lead decision on A3-1, A3-3 and B3-1).
+  - **The contract.** `moe_resolve@1`'s variant contract gains an optional `lend_tail(class, n)` term beside `lend`.
+    The policy, not the store, picks: its instance returns the experts holding any of class c's last n slots
+    (`kernels.py:88-95` keeps `lend`'s terms otherwise).
+  - **What the store does with the pick:**
+    - **Whole experts** (A3-1). An expert holding any tail slot is evicted in every role. Its slots in other classes
+      join the step's lent set there, which is not contiguous.
+    - **Empty slots in the range** sitting in a layer's empty stack are taken out as the whole stack entry, all
+      roles, since `empty [G, R, E]` shares one count per layer (`store.py:212-213`).
+    - **Spares in the range** are released by the policy first: promote's spares hold an evicted owner's bytes
+      (`promote/reference.py:21-27`). A spare that is lent stops being one, and its owner's next promotion fetches.
+    - **The return.** At the step's end every slot returns to its layer as a whole empty entry (D4's R0), as X's
+      lending does. The records are `(g, −1, item)` per evicted expert, as `lend`'s.
+  - **Which class arena** (FN rev 3 panel A, F3). The tail is lent from the largest class arena, i.e. the gate/up
+    class of the layers' most common gate/up type; FN's files mix gate/up types per layer. Ties go to the lower class
+    index. The rule is the store's, stated in the contract text, so every policy lends from the same arena.
+  - **One owner per step for the D10 bytes** (lead decision; A3-2).
+    - The tail range handed to D10 as `out` / `scratch` is excluded, for the whole step, from `Lent`'s `pool`, from
+      the `stage_tab`, and from the empty stacks (`ring.py:60-63`, `:80-91`).
+    - The ring and the staging take their slots from the rest of the lent set: the other classes' slots of the
+      evicted experts, then the empties outside the range.
+    - A CPU and L0 assertion checks per step that no pool, stage or ring slot, and no mapped id, falls in the D10
+      range.
+  - **Who may lend a tail.** `placement.lfu` implements `lend_tail` (FN's lock). `moe.ring_lend = tail` is refused at
+    bind under a policy that does not declare it, so lru, promote and profile_decay refuse until they implement it,
+    with their own reference and replay.
+  - **Mode.** `moe.ring_lend` = `coldest` (default, X's behaviour) | `tail`, declared in std.moe's `[options]`.
+  - **Exactness.** Every placement is exact (X's acceptance 2), so tail lending changes speed, not outputs.
+  - **Checks:**
+    - **policy parity** with `tail` for every policy that accepts it: lfu's replay models `lend_tail`, the whole-expert
+      eviction, the spare release (none in lfu) and the whole-entry return;
+    - a **tail-path plant**, `tail_unmap_undone` (the tail's unmap undone, so an evicted expert stays mapped to a slot
+      D10 writes), with its fired count asserted, predicted to fail parity and the `prompt_logprobs` identity.
+      `lent-slot-still-mapped` patches `TieredStore.lend`, which the tail path never calls (`planted.py:1051-1066`),
+      so it cannot stand in;
+    - the `prompt_logprobs` identity (acceptance 4) runs with `tail` on FN's mode and the 30B offload lock's
+      settings.
   - No current lock sets `tail`, so no snapshot moves.
 
 ## 4. Contracts and plugins (no core)
@@ -364,8 +411,8 @@ dense-mmq bound.
 | the same, gate/up's store | f32 [T, k, 2·inter], then `swiglu_f32` | fused `silu(g)·u` [T, k, inter] | bitwise (D4) |
 | the same, a new type's tile loader (IQ1_M: DS_LAYOUT_D4, the MMA and dp4a instances, `should_use_mmq`, the ampere config, an f32 `x_df`); `TYPES` gains iq1_m and q2_0 | IQ1_M: mmvq only | an mmq tile loader (×8 int8 values, per-16 f32 scales) | bitwise in q8_1's class (D9) |
 | kernels.ggml_cuda manifest `[options]`, `plugin.py` `PASS_PROVEN` | none | `ggml_cuda.pass_rows` (512 / 2,048 / 4,096 / 8,192); the proven (SM, type, path) table | — (D0) |
-| `linear_experts@2` / `linear_experts_arena@1` text; kernels.ggml_cuda's and `testing`'s instances | the instance allocates | **std minor:** optional `out` and `scratch` keywords, the instance's `scratch_bytes(tokens)` | bitwise (D10) |
-| `std.tiered` lending; std.moe manifest `[options]` | coldest whole experts (`lend(n)`) | `moe.ring_lend` = `coldest` (default) / `tail`: the class arena's contiguous tail, evicted slots returning empty | exact, as every placement (D11) |
+| `linear_experts@2` / `linear_experts_arena@1` text; kernels.ggml_cuda's and `testing`'s instances | the instance allocates | **std minor:** an instance defining `scratch_bytes(tokens)` accepts `out` / `scratch`, with the lifetime, aliasing, alignment and stream terms of D10; the persistent id workspace shrinks to decode size | bitwise (D10) |
+| `moe_resolve@1` variant contract; `std.tiered` lending and `Lent`; `placement.lfu`; std.moe manifest `[options]` | `lend(n)`: coldest whole experts | **std minor:** an optional `lend_tail(class, n)` term (whole experts in every role, spares released, whole-entry return, the largest-class rule); `Lent` keeps the D10 range out of pool, stage and empty stacks; lfu implements it; `moe.ring_lend` = `coldest` (default) / `tail`, refused under a policy without `lend_tail` | exact, as every placement (D11) |
 | `testing`'s CPU `LinearExperts` | per expert batch | loops per `CHUNK` inside a call; declares `pass_rows` | bitwise against its `CHUNK` calls (D0) |
 | kernels.ggml_cuda `MoeRouter` | > 16 rows: cast + f32 linear + `moe_topk` | ≥ `CHUNK` rows: its own f32 router GEMM + selection | bounded (D3) |
 | kernels.ggml_cuda `QLinear` | mmq per 512 rows | per `pass_rows` | bounded (D5) |
@@ -388,8 +435,8 @@ and the router kernel serves `moe_router@1`'s facts. `kernels.triton_experts` de
 | D0 / D1 | bitwise | **end-to-end:** the `prompt_logprobs` hash of every prompt row at 1,027 and 4,096 tokens, main against the branch, on the resident 30B, natural-fit offload and capped (F5b) configurations, modelled on `judge/holon_judge/kernel_identity.py` (A-2). **Snapshots:** compared with main's without writing locks (B-m3). **CPU unit test:** records `LinearExperts` call sizes per pass at 600 / 1,027 / 4,100 tokens and fails when a tail merges (the `pass_eats_tail` mutation, A-2, B-m5). **L0:** see below | identical; the mutation fails |
 | D2 | bitwise | L0 below. The output is pre-filled with NaN and passed to `lib.mmq_id` (as `gemm.py` does; `LinearExperts.__call__` allocates its own, A2). The L0 asserts with `launched()` that `mul_mat_q_stream_k_fixup` never launches on the ids path, replacing the fixup mutation, which may be a no-op (A2). The mutation "the decode skips each entry's last partial tile" leaves NaN rows. Also: graph replay of a captured bucket on new routing; graphs-vs-eager at batch 64; memcheck everywhere, racecheck on sm_120 | identical; the mutation fails; no fixup launch |
 | D9 | bitwise in q8_1's class | L0 against `q8_1.linear_experts` for IQ1_M, every invariance test of §5.1 with iq1_m, memcheck on sm_120 | within q8_1's emulation; row-invariant |
-| D10 | bitwise | L0: NaN-poisoned passed `out` / `scratch` against the allocating call; a short `scratch` refused before launch; graph replay with passed buffers | identical |
-| D11 | exact (placement) | CPU: the tail range is contiguous and of the requested bytes, its evictions logged, the slots empty at the return; `placement.lfu`'s replay and the policy-parity check with `tail`; offload snapshots with `tail` identical to all-resident and main's; the `lent-slot-still-mapped` plant still fails | identical |
+| D10 | bitwise | L0: NaN-poisoned passed `out` / `scratch` against the allocating call; a short, misaligned or aliasing buffer refused before launch; an instance without `scratch_bytes` called without the keywords (std); graph replay with static buffers | identical |
+| D11 | exact (placement) | CPU / L0: the tail range is contiguous and of the requested bytes; evicted experts are unmapped in every role; empties leave the stacks as whole entries and return as whole entries; per step no pool, stage or ring slot and no mapped id falls in the D10 range; `tail` refused at bind under lru / promote / profile_decay. Judge: policy parity with `tail` for every accepting policy (lfu today); the `prompt_logprobs` identity with `tail`; the plant `tail_unmap_undone` with its fired count asserted | identical; the plant fails parity and the identity |
 | D4 | bitwise | L0: the fused output is bitwise `swiglu_f32` of the unfused output, for every glu type, with subnormal and NVFP4-scaled inputs | identical |
 | D3 | bounded | L0 at 512–4,096 rows: logits within the f32 budget of the f64 product; selection bitwise `moe_topk`; row-invariant across ≥ 512-row calls. L2: Tier B prefill against the mmq floor. **Plants:** `router_prefill_bf16_logits` (logits rounded to bf16: near the bound) and `router_prefill_short_k` (hidden less its last 256: far) | passes; KL p99 at or under the floor (the decode router's precedent: 0.037 against 0.040). The near plant's verdict is predicted at step 3 from a CPU estimate before the GPU run; the far plant fails |
 | D5 | bounded | L2 (Tier B prefill); `holon_judge bounded --chunked`. **Plants:** `qlinear_partials_bf16` (stream-k partials rounded to bf16 before the fixup: near) and `qlinear_large_no_fixup` (far). The fixup launches are counted so the record shows each plant fired on that card and shape (A-5) | passes; the far plant fails where it fires; the near plant's verdict is predicted as D3's |
@@ -468,6 +515,8 @@ and the id maps).
 | 8,192 (D6) | 604 MB | 738 MB | 208 MB | **946 MB** | +886 MB |
 
 - **D4** removes the gate/up output, but the peak is the SwiGLU + down term, so the peak is unchanged.
+- **D10** moves the id workspaces above decode size from persistent buffers to per-call transients, or to passed
+  `scratch`. The peak is unchanged: the startup profile runs the worst-case step on the allocating fallback.
 - **D5** adds ≈ 25 MB (30B) or ≈ 66 MB (8B) of `qlinear` workspace at 4,096.
 - **Per class** (96 KiB of KV per token on the 30B):
   - **16 GB RTX 5080, resident UD-IQ3_XXS** (`max_step_tokens` 2,048, `max_model_len` 16,384): M0.2 recorded 18.6K KV
@@ -492,12 +541,12 @@ and the id maps).
 | 1 | D0 + D1 (`pass_rows`, the std minor, both stores, the shared `holon_testing` helper); `ggml_cuda.pass_rows` per class from step 0 | §5.1's L0; the CPU call-size test; the logits-hash identity on the A5000; snapshots against main (no lock writes); KV tokens per class | 1–1.5 |
 | 2 | D2 (`vendor.patch`, `vendor.sh --check`, "Holon:" markers, `test_link`) | L0 + NaN poison + both mutations on sm_86 / 89 / 120, memcheck, racecheck on sm_120; per-call `gemm.py` at equal I/O dtype, interleaved repeats (C-m4), ≤ FreeToken's at 512–4,096 tokens; batched decode B16–64 ABBA | 2–3 |
 | 3 | D4, then D3 and D5, each measured alone | D4's L0 and identity; D3 / D5 keep-or-revert by M0.7's rule, L2 with near and far plants (a passing near plant records L2's blindness at that scale) | 3–4 |
-| 3b | FN's requests: D10 (passed buffers, std minor) and D11 (tail lending, std.tiered, `moe.ring_lend`) | D10 / D11 L0 and CPU checks; offload snapshots with `tail` identical; policy parity with `tail` | 2–3 |
+| 3b | FN's requests: D10 (passed buffers and their contract terms; the decode-size persistent workspace) and D11 (`lend_tail` in the `moe_resolve` variant contract, lfu's implementation with its reference and replay, `Lent`'s D10 exclusion, the bind-time refusal, `moe.ring_lend`) | D10 / D11 L0 and CPU checks; policy parity with `tail`; the tail plant's fired count; the `prompt_logprobs` identity with `tail` | 3–4 |
 | 3c | D9: IQ1_M's mmq hunk (or its fallback), with IQ1_M and Q2_0 in `TYPES` | D9's L0 on sm_86 / sm_120, memcheck; per-call speed against IQ2_S's loader | 2–3 |
 | 4 | The bars on the bar cards (§5.2's method) | acceptance 1, 2, 3, 5, 6 | 1–2 |
 | 5 | Close: **one** propagation round over the 18 classes, covering D1–D5, D9 / Q2_0, D10, D11 and `pass_rows`; the 5080 offload lock re-filled and re-pinned; `pytest` on a GPU, `scripts/ci/run_all.sh`, panel code review, plan §10 status. FN's step 4 then finds D0, D2, D9, D10 and D11 on main | acceptance 4, 7; its L2 verdicts as its own evidence | 1.5–2 |
 
-**Schedule:** about 14–20 working days, in the order 0 → 1 → 2 → 3 → 3b → 3c → 4 → 5. Steps 3b and 3c do not depend on
+**Schedule:** about 15–21 working days, in the order 0 → 1 → 2 → 3 → 3b → 3c → 4 → 5. Steps 3b and 3c do not depend on
 3 and may run beside it on another GPU. Nothing merges to main before step 5, so no lock is ever left pinning other
 code.
 
@@ -526,7 +575,8 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
   - Then the 32K row is predicted at ≈ 1.00–1.06× against the gated FreeToken arm (modelled until step 0 measures
     it), and ≈ 0.98–0.99× against FreeToken's ungated 8,192-token default (reported, not gated).
   - With D6: ≈ 1.00–1.02× against the default, at ≈ −3.0% / −3.7% / −2.4% decode at 1K / 4K / 32K. The FreeToken
-    decode rows go 1.06× → ≈ 1.02× and 1.03× → ≈ 1.005×: still at or above their bar, but with no margin.
+    decode rows go 1.06× → ≈ 1.02× and 1.03× → ≈ 1.005×: still at or above their bar, but with no margin. Taking D6
+    there **waives acceptance 5's decode tolerance** (≤ max(0.5%, 2 sd)) on that lock.
 - **O2: the bars and arms.**
   - Confirm acceptance 1–2, with FreeToken's gated arm at the lock's step budget and its default reported only.
   - Rows at or under their bar in §1.1:
@@ -544,6 +594,28 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
   `v1-flash-next.md:376`).
 
 ## 10. Review log
+
+### Rev 3 → rev 4 (the panel's third round, 2026-10-18; FN's arena rule; the lead's decisions)
+
+Every finding was verified at the cited lines.
+
+| # | Finding | Verified | Disposition |
+|---|---|---|---|
+| A3-1 | Tail lending must evict whole experts; empties share one count per layer | yes (`store.py:212-213`, `ring.py:142-155`, `lfu/reference.py:19-21`) | D11: whole experts in every role, empties out and back as whole entries, `(g, −1, item)` records |
+| A3-2 | D10's bytes and the ring / stage pool can overlap | yes (`ring.py:60-63`, `:80-91`) | one owner per step: the D10 range is out of pool, `stage_tab` and the empty stacks; per-step CPU / L0 assertion; `tail` in the `prompt_logprobs` identity (lead decision 2) |
+| A3-3 = B3-1 | The tail path bypasses the policy: it breaks promote's spares, parity covers lfu only, and the plant cannot fire | yes (`store.py:549-556`, `kernels.py:88-95`, `promote/reference.py:21-27`, `placement.py:120-124`, `planted.py:1051-1066`) | `lend_tail(class, n)` in the `moe_resolve` variant contract (a std minor); lfu implements it; `tail` refused at bind elsewhere; the plant `tail_unmap_undone` with an asserted fired count; parity for every accepting policy (lead decision 1) |
+| A3-m | D10 alignment | yes (`mmid.cu:319`) | 256-byte alignment refused before launch |
+| A3-m | D10 aliasing; graph addresses | yes (`store.py:532`) | `out` must not alias `scratch` / `x`; lent memory is eager-only |
+| A3-m | D10's fallback memory | — | the startup profile runs the allocating fallback's peak |
+| A3-m | A stale D1 sentence on CPU providers | yes | restricted to the oracle |
+| B3-2 | std must gate the keywords | yes (`units.py:235`, `:262`) | only instances defining `scratch_bytes` accept them |
+| B3-3 | Lifetime and aliasing unstated; the dma refill | — | no retention past the call; compute-stream ordering; the dma refill ordered as X's lent ring slots; scratch reusable within a pass |
+| B3-4 | Unclear memory saving | yes | `scratch_bytes` per path stated; the persistent workspace shrinks to decode size, and larger calls allocate or take `scratch` |
+| C3-m (via FN) | D6 waives acceptance 5 on the 5080 offload lock | — | stated in D6 and O1 |
+| FN rev 3 F3 | The arena-choice rule | — | the largest class arena (the gate/up class of the most common type), ties to the lower index, in the contract text |
+
+Step 3b grows to 3–4 days (`lend_tail`, lfu's reference and replay, `Lent`'s exclusion, the plant). The schedule
+becomes 15–21 days.
 
 ### Rev 2 → rev 3 (the panel's second round, 2026-10-18; FN's requests; the lead's decisions)
 
