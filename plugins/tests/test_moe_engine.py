@@ -121,7 +121,8 @@ def test_a_prefill_step_passes_whole_chunks_then_its_tail(tiny_moe, tmp_path, st
     then down in every layer."""
     checkpoint, _ = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
-    offload = {"host_memory": 1 << 24, "plugin_options": {"moe.store": "std.moe.offload@1"}} if store == "offload" else {}
+    offload = {"host_memory": 1 << 24, "plugin_options": {"moe.store": "std.moe.offload@1"}}
+    offload = offload if store == "offload" else {}
     engine = _engine(file, max_step_tokens=4100, max_model_len=4200, state_memory=8 << 20, **offload)
     layers = len(engine.executor.model.layers)
     assert {m._store.pass_tokens(4100) for m in engine.executor.model.modules() if hasattr(m, "_gate_up")} == {4096}

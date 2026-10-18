@@ -539,8 +539,8 @@ def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name
     (each of SLOTS with a random placement, per-slot id helper, and 128 slots, compact helper; at EP also reversed:
     permutations) and at every mmq tile width (token counts from the mmvq limit + 1 to 320 on the 128-slot arena,
     whose launch lists at most EP + K entries: J from 16 up to 128, chosen against the tokens up to J_AGAINST_T and
-    above against the entries' mean rows, docs/v1-moe-prefill.md D2), all against one launch over EP slots in order at 512 tokens.
-    llama.cpp switched mmq with ids to stream-k below 90 % tile efficiency, splitting K at points that move with the
+    above against the entries' mean rows, docs/v1-moe-prefill.md D2), all against one launch over EP slots in order at
+    512 tokens. llama.cpp switched mmq with ids to stream-k below 90 % tile efficiency, splitting K at points that move with the
     slot count: on every GPU at least one of SLOTS did (the dense schedule over the same grid says so), and its rows
     differed."""
     k, out, _ = STAGES[stage]
