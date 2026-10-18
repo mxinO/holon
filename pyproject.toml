@@ -29,6 +29,8 @@ holonlm-plugins = { workspace = true }
 holonlm-tools = { workspace = true }
 holonlm-testing = { workspace = true }
 torch = { index = "pytorch-cu130" }
+# gguf-py from llama.cpp's own tree (FN D1): PyPI's 0.19.0 stops at Q1_0, without Q2_0 (type 42); the commit FN cites
+gguf = { git = "https://github.com/ggml-org/llama.cpp", rev = "27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd", subdirectory = "gguf-py" }
 
 [[tool.uv.index]]
 name = "pytorch-cu130"
