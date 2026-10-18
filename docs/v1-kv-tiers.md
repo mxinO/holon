@@ -1,9 +1,9 @@
 # v1 — milestone K: KV and checkpoint tiers under the prefix index
 
-Status: **rev 4, after the panel's third round** (2026-10-18). Nothing is built and nothing has been measured for K
+Status: **rev 5, after the panel's fourth round** (2026-10-18). Nothing is built and nothing has been measured for K
 yet. Every number below is a CPU-side estimate from earlier evidence (cited), fixed as a prediction before step 0
 and step 4 measure it. Rev 2 answered the three-reviewer panel (A correctness, B architecture, C numerics and
-performance); revs 3 and 4 answer its re-reviews. The finding-by-finding dispositions are in §13.
+performance); revs 3 to 5 answer its re-reviews. The finding-by-finding dispositions are in §13.
 
 Scope: plan §10's K line ("KV and checkpoint tiers (pinned RAM / SSD under the prefix index, exact, deterministic
 resume)", `docs/plan.md:603-604`), the end-of-answer checkpoint item (`docs/plan.md:675-681`), and the requirements
@@ -34,7 +34,7 @@ The held-out proof holds out a checkpoint policy and a tier the protocol was not
 **What changed from rev 2.**
 - **Fencing.** Every host unit a step reads is fenced by that step's end event, passed in `loaded(load, done)`. All
   tier reuse and I/O on such a unit waits for it.
-- **Progress.** Load pins with no waiter are host-waited when nothing else can run.
+- **Progress.** Rev 3 host-waited load pins that had no waiter. Rev 5 removes load pins altogether (D6, D7).
 - **Admission.** Payload stores are mandatory, and admission options govern pages only.
 - **std.** It gains a structural `Level` protocol below its host level. SSD is its first instance, and the held-out
   zlib store is a `Level`.
@@ -157,8 +157,8 @@ caches on an agent trace, with outputs that do not depend on where state was kep
      rebases and takes 1.5.
    - `check_abi --base` and the line check are relative to **K's step-1 base**: the main-branch commit K's seams
      rebase onto, after FN's seams if FN lands first.
-   - **At most +320 code lines over that base** (§4 itemizes ≈ 306; rev 2 had ≤ +300 for ≈ 285).
-   - A property test shows that `could_fit` and eviction agree under random traffic with demotions, promotions, pins
+   - **At most +320 code lines over that base** (§4 itemizes ≈ 290; rev 2 had ≤ +300 for ≈ 285).
+   - A property test shows that `could_fit` and eviction agree under random traffic with demotions, promotions, loads
      and tier drops.
    - With tiers off, every existing lock's snapshot stays byte-identical.
 6. **Locks.**
@@ -272,8 +272,14 @@ class Level(Protocol):     # std.state_tier's, below its host level; argument ty
 - **Argument types** (B-1). Plugins cannot import std's names, so the protocol's docstring defines them structurally,
   using `holon.api` types and builtins only:
   - `ctx` is the `TierCtx` (§4);
-  - the host units (`src`, `dst`) are a sequence of per-unit writable byte buffers (`memoryview`s), one contiguous
-    segment per unit, valid until the ticket completes;
+  - the host units (`src`, `dst`) are a sequence with one entry per unit. Each entry is a sequence of that unit's
+    writable segment buffers (`memoryview`s): an iovec for `preadv` / `pwritev`, valid until the ticket completes
+    (round 4).
+    - S2 payload host pools are segment-major: the 27B's GDN checkpoint unit is 48 segments, one per layer, so its
+      entry has 48 views.
+    - KV units in the unit-major layout of D10 have a one-element entry.
+    - K-M4 checks O_DIRECT alignment for the payload segment sizes; a size that is not aligned goes through a
+      bounce buffer or buffered I/O (D11);
   - a ticket is any object with `done() -> bool` and `wait() -> None`;
   - the rates are a plain mapping: `{"read": bytes/s, "write": bytes/s, "mixed": bytes/s, "lane": str | None}`.
     `mixed` is a check only (D4), and levels naming the same `lane` share one virtual lane.
@@ -309,9 +315,11 @@ Plugin kinds:
 - **Logical at decision time, physical after the ticket** (A5, C5). Which entries are resident, demoted, promoted,
   dropped or hit, which units are free, and when a request may run are all functions of the calls made so far and the
   steps scheduled. Copy and I/O completion never enter them.
-  - A unit is free the moment its entry is demoted or dropped. Its reuse is ordered after the copy that reads it:
-    the next launch waits, on the device, for every store whose source units were freed since the last launch. A
-    load into reused units is issued after those stores.
+  - **The free rule.** A unit is free the moment its entry is demoted or dropped. A copy may still be in flight on
+    it: a store reading it, or a load writing it (an evicted loading entry, round 4). Its reuse is ordered after
+    that copy:
+    - the next launch waits, on the device, for every such copy on units freed since the last launch;
+    - a load into reused units is issued with those copies in its `after`.
   - The tier obeys the same rule for its own storage. A host unit whose bytes go to SSD is free when the write is
     decided, and the read or copy that reuses it waits on the write's ticket.
   - **Fences on host units** (A-1, B-N1, C-1). A host unit is touched by device copies on the tier's streams, by a
@@ -400,11 +408,13 @@ write-through as `std.state_tier`'s default, with write-back as an option (T1b):
   recency is the tier's (it receives `hit` calls).
 
 *VRAM eviction.*
-- **Eligible:** resident, `kids == 0`, units held only by the index, and not load-pinned. A **releasable** pin also
-  counts as eligible: one whose waiters are all gone, or all in the `releasing` set being considered. Evicting such
-  an entry first host-waits its load (`Fence.synchronize`), calls `loaded(load, done = its completion)` and unpins,
-  then demotes the entry as a pure free. Its lower copy is still there, because a tier never drops a copy before
-  `loaded` and reports drops only through `dropped()` (round 3, A-2).
+- **Eligible:** resident, `kids == 0`, units held only by the index. There are no load pins (round 4).
+- **A loading entry can be eligible**, once no live request references it. Evicting it is still a pure free:
+  - the core calls `loaded(load, done = the load's own fence)` and demotes it;
+  - its units go on the free rule's list (D4), so the next launch waits on the device for the H2D still writing
+    them; there is no host wait;
+  - its lower copy is still there, because a tier never drops a copy before `loaded` and reports drops only through
+    `dropped()`.
 - **Victim choice:** the slot `eviction_policy` gets the eligible entries lazily, least recently used first, and
   returns one. Without a plugin, the first is taken, which is today's order. The plugin bounds its own scan.
 - **Outcome:** a victim with a lower copy is demoted (VRAM units freed). Otherwise it is offered to the tier as an
@@ -423,23 +433,29 @@ in the tier is the tier's own obligation; dropping an interior copy loses hits, 
 - **Claim:** each such unit belongs to an eligible entry or to an ancestor that becomes one. A request holds exactly
   the chain it follows (`prefix.py:8-10`, kept by `_swap`), so an unheld resident entry has only unheld resident
   descendants, and evicting resident leaves upward frees it. Non-resident children are not counted (`kids`).
-- Load pins are references, so pinned units are not counted, and are not eligible either, unless the pin is
-  releasable (above).
-  - `could_fit(seq, n, releasing)` counts a unit as freeable when its references, once `releasing` is gone, are only
-    the index's and those of releasable pins (round 3, A-2).
-  - Without this, a running decoder R ranked above a gated request G that holds the shortfall in a pinned load would
-    find `could_fit` false and preempt itself (`sched.py:166-169, 177-185`) instead of preempting G.
-  - The decision reads only schedule state: which requests wait on which loads. Only the host-wait depends on
-    timing.
-- **The property test** (KS1) drives random publish / hit / release / preempt / abort / demote / promote / pin /
+- **Every live waiter holds its own reference** (round 4; checked against the code paths). So a loading entry that
+  a live request waits on is never eligible, and no pin is needed. A request joins a load's wait set in four ways,
+  and each takes a reference:
+  - promotion at admission (D7 step 5: the request's own reference, as `_take(shared=True)` does for any hit,
+    `state.py:173-175`);
+  - hitting an entry already loading (it is resident, so it is in the taken prefix);
+  - promote-into-place (the request's own units);
+  - `_swap` onto a loading entry (`state.py:355-364` increfs the new units).
+- **Round 2's wedge** (A-2) is gone. An aborted or preempted gated request releases its references, so its loading
+  entries become index-only and eligible. The waiting request's `reserve` evicts them as pure frees, and its first
+  step waits on the device for the loads.
+- **Round 3's self-preemption** (A-2) is gone too, with today's formula. When a running decoder R is short and a
+  lower-ranked gated request G holds the shortfall in loading entries, `could_fit(R, n, [G, …])` counts those units
+  (once G is released, only the index holds them), so `_fit` preempts G, not R (`sched.py:166-169, 177-185`).
+- **The property test** (KS1) drives random publish / hit / release / preempt / abort / demote / promote / load /
   tier-drop / eviction-store-refusal sequences against a toy tier. After every operation it checks:
   - prefix closure of the resident set;
   - that every entry's parent exists;
   - `kids` against a recount;
   - that `could_fit(seq, n, releasing)` is true exactly when releasing those requests and evicting yields the units,
-    with releasable pins in the mix (round 3, A-2).
+    with loads in flight in the mix, evicted loading entries included.
   - `test_state_liveness.py` also checks that no running request preempts itself while a lower-ranked gated request
-    holds the shortfall in a pinned load.
+    holds the shortfall in loading entries.
 
   It extends `core/tests/test_state_liveness.py`'s random-traffic harness.
 
@@ -451,10 +467,10 @@ in the tier is the tier's own obligation; dropping an interior copy loses hits, 
 3. VRAM units for the non-resident tail are allocated from free units plus evictions of eligible entries that have
    a lower copy (pure frees). A promotion never preempts and never issues an eviction store.
 4. On a shortfall, the tail is trimmed to what was allocated, and the fixed point runs again on the trimmed chain.
-5. The tail entries take those units (the index's reference, plus the request's own as for any hit), are
-   **load-pinned**, and the tier's `load` copies their pages in. The `after` events are the last launched step and
-   any pending stores on reused units, so a unit freed at the previous commit, still touched by the in-flight step,
-   is never overwritten under it (`engine.py:575-576`).
+5. The tail entries take those units (the index's reference, plus the request's own as for any hit), and the tier's
+   `load` copies their pages in. The `after` events are the last launched step and any copies still in flight on
+   reused units (D4's free rule), so a unit freed at the previous commit, still touched by the in-flight step, is
+   never overwritten under it (`engine.py:575-576`).
 6. A payload adopted from the tier goes **host → the request's slot units directly**. The tier's `Load` names the host
    copy (an S2 host pool of the payload's unit shape). The kind's own `adopt(view, host_payload)` MemOps run as
    today's `pre_forward` adopt in the first step that reads it (`state.py:203-213`), after that step's launch has
@@ -487,23 +503,24 @@ blocks. The rules:
 - A payload registered on an entry that already has one, in VRAM or in the tier, is freed, as `attach` does today.
   Both runs then keep the same (earlier) bytes.
 
-*Pins and cancellation* (A6). A load is pinned (one extra reference on its units, so `could_fit` and eviction both
-skip them) from its issue until a launch has waited on it. That launch is the first step reading it, or the next
-step if every request waiting on it is gone. Then the core calls the tier's `loaded(load, done)`, with that step's
-end event.
-- **Waiterless pins and progress** (A-2). A pin whose waiters are all gone (aborted, or preempted by a higher-ranked
-  request) is released by the next launch. When a schedule would produce no rows while such pins exist, the core
-  does not raise "no progress". Instead it:
-  1. host-waits those loads (`Fence.synchronize`);
-  2. calls `loaded(load, done)` with the load's own completion as `done`;
-  3. unpins them and schedules again.
+*Loads without pins, and cancellation* (A6; round 4 drops load pins). A load holds no reference of its own. Its
+units are kept by the index and by every live waiter (D6), and their reuse after an eviction is ordered by D4's free
+rule. The core calls the tier's `loaded(load, done)` exactly once:
+- with `done` = the end event of the first step that reads the load (it waited on the load at launch);
+- or with `done` = the load's own fence, if no step reads it: the entry is evicted while loading, or its last waiter
+  is gone (then at the next launch). The core keeps the entry's `loading` mark, so a later hitter still joins the
+  wait set and waits on the device.
 
-  Only the waits depend on timing. The decision to wait (no rows, pins present) is schedule state. Once the pins are
-  released, `could_fit` counts their units, so the waiting request fits, or the usual rules apply. This case is in
-  KS2's progress proof and in `test_state_liveness.py`.
+The rest of the rules:
 - Preempting or aborting a load-gated request releases its references and clears its wait set, and the scheduler
-  forgets its gate. Its entries stay index-owned, and the load lands under its pin.
-- No load is cancelled, so no copy lands in units somebody else owns, and no event is waited on before it exists.
+  forgets its gate. Its entries stay index-owned, the load lands, and the entries are eligible if nothing else
+  holds them.
+- No load is cancelled, so no copy lands in units somebody else owns without the next launch waiting for it.
+- **Who enqueues an SSD load's H2D:** the level's I/O thread, on read completion, through the tier's stream, never
+  the engine thread. A launch that waits on a load whose H2D is not yet enqueued (its `Fence.wait` first waits on the
+  host until it is) is the only remaining host wait. Its time is reported in `stats()` as `load_enqueue_wait_s`. The
+  progress rule needs no special case: with no pins, an idle schedule either has a gated request to pull forward
+  (D4) or units `could_fit` counts.
 
 *Staging payloads* (A4, C1). With a tier, the checkpoint pool (`recurrent.checkpoints`) holds only payloads between
 `publish` (the step's launch) and registration (its commit):
@@ -811,12 +828,13 @@ additive minor when ARC is built. K does not add them.
 | # | Seam | Today → change | Toy proof | Lines |
 |---|---|---|---|---|
 | KS1 | **Residency in the index** | Device copies only; eviction drops (`prefix.py:89-133`) → `Entry` gains `lower`, payload-copy flags, `kids` (resident children), `depth`, `hits`. A resident-only LRU. D6's eligibility, demote / eviction store / drop with subtree; `dropped()` handling; stores' `Fence` kept for units freed while read, waited by the next launch and passed as `after` to loads into reused units | the property test (D6); demote then promote bitwise; reuse of a unit with a store in flight waits for it under the deferred stream | 75 |
-| KS2 | **Promotion, promote-into-place, load gating** | Hits adopt VRAM only → D7's admission (prefix first, pure-free evictions, trim and re-run), promote-into-place in `publish`, load pins, per-request wait sets waited at launch, `loaded(load, done)`, the scheduler's gate (`clock() ≥ due`), idle pull-forward, host-waiting waiterless pins when no rows remain, releasable pins counted by `could_fit` and evicted after a host-wait (round 3, A-2), preempt and abort clearing gates | resume step identical with the toy tier's delay at 0, 1 and 2 steps (run-identical step lists); a trimmed hit recomputing demoted blocks reads the cached bytes; preempt and abort of a gated request with a delayed copy (no unit reused before landing); progress with every slot held by gated requests and a request waiting (A6a); progress when an aborted gated request's pin holds the units a waiting request needs and nothing runs (A-2); a running decoder preempts the lower-ranked gated request holding its shortfall, never itself (round 3, A-2) | 93 |
+| KS2 | **Promotion, promote-into-place, load gating** | Hits adopt VRAM only → D7's admission (prefix first, pure-free evictions, trim and re-run), promote-into-place in `publish`, per-request wait sets waited at launch, `loaded(load, done)` once per load, D4's free rule extended to loads (no load pins, round 4), the scheduler's gate (`clock() ≥ due`), idle pull-forward, preempt and abort clearing gates | resume step identical with the toy tier's delay at 0, 1 and 2 steps (run-identical step lists); a trimmed hit recomputing demoted blocks reads the cached bytes; preempt and abort of a gated request with a delayed copy (no unit reused before landing); progress with every slot held by gated requests and a request waiting (A6a); progress when an aborted gated request's loading entries hold the units a waiting request needs and nothing runs (round 2, A-2); a running decoder preempts the lower-ranked gated request holding its shortfall, never itself (round 3, A-2); an evicted loading entry's units are not written before the next launch waits on the load | 77 |
 | KS3 | **Stores, staging payloads, tentatives** | Payloads permanent from registration; release drops nothing to store → paged `store` at insert (`after` = last launched) and at eviction; payload `store` at registration (`after` = producing step) freeing the staging unit; host-payload adopt through the kind's `adopt` in the reading step; `Payload.tentative` with per-request `keep_tentative`; `dropped_publishes`; `SeqView.branch_at`; `evict_payloads` checks `num_free` before copying the entry list (behaviour-preserving) and is skipped for staging pools when a tier is bound (C-4) | tentative decode payloads: a preempted request resumes from the last; finish leaves k; the depth-1 extra row's payload registers only where committed tokens cover it; a staging unit reused while its D2H is delayed is not overwritten early | 63 |
 | KS4 | **Slot `tier`, attach, identity, restore** | None (release §15.1) → slot and protocol types (`Fence`, `Stream`, `TierCtx`, `BlockRecord`, `Load`, `StateTier`); the tier's S1 hooks called directly; `attach` after the final materialize (host pools allowed then, before graph capture); `plans.state_identity`; `Option.planned` honoured by `plan_of`; restore inserts non-resident entries parents first; `flush_prefix` → `clear`; `close` | restart a toy engine with a persistent toy tier: resume bitwise; another identity is cleared; `planned = false` options leave `plan_id` unchanged | 55 |
 | KS5 | **Slot `eviction_policy`** | LRU only → eligible candidates lazily, LRU first, to `victim`; default the first | a toy policy pinning depth ≤ 1 keeps the root under pressure; property test with it on | 20 |
 
-≈ 306 lines; the budget is ≤ +320 over K's step-1 base (rev 3: ≈ 298; rev 2: ≈ 285 within +300; rev 1: 480). Step 1 first
+≈ 290 lines; the budget is ≤ +320 over K's step-1 base (rev 4: ≈ 306; rev 3: ≈ 298; rev 2: ≈ 285 within +300; rev 1:
+480). Step 1 first
 prototypes KS1 and KS2 on CPU
 against `core/tests/test_prefix.py` and prices them. If the prototype exceeds the itemized lines by more than 20%, it
 goes to the owner before the rest is built (B2).
@@ -896,8 +914,8 @@ follows publish within 1–2 steps. Tiers-off configurations stay clean.
 |---|---|---|---|
 | `promote_unwaited` | CPU + GPU | a launch does not wait on its rows' loads | tier invariance fails (stale bytes) |
 | `adopt_source_reused` (A-1, B-N1, C-1) | CPU | `loaded` ignores `done`: a host payload unit a step's adopt reads is reused by a later store or an SSD read without waiting for that step's end (deferred stream, plus an I/O thread delayed into the window) | the adopted recurrent state is corrupt; tier invariance fails |
-| `pin_wedge` (A-2) | CPU | waiterless pins are not host-waited when no rows remain | the liveness test raises "no progress" on its abort-under-pressure trace |
-| `pin_self_preempt` (round 3, A-2) | CPU | `could_fit` ignores releasable pins | the liveness test reports a running decoder preempting itself while a lower-ranked gated request holds the shortfall; the property test fails |
+| `load_reuse_unwaited` (round 4) | CPU + GPU | units of an evicted loading entry are reused without the next launch waiting on the load's fence; the H2D delayed | the late H2D overwrites the new owner's bytes; tier invariance fails |
+| `waiter_unref` (round 4) | CPU | a request joining a loading entry's wait set by `_swap` takes no reference | the loading entry is evicted under a live waiter: the property test fails (`could_fit` counts held units) and tier invariance fails |
 | `load_before_store` (round 3, A-1) | CPU + GPU | the tier omits a host unit's write fence from the reading H2D's `after` and from the `Load`'s fence; the D2H stream deferred; eviction then promotion within 1–2 steps, plus a sibling request adopting the same host payload | the promoted pages or the adopted state read the unit before its store lands; tier invariance fails |
 | `store_early` (A2) | GPU | a paged store is issued after the committed step, not the last launched | host copies stale; tier invariance fails on a trace where the in-flight step completes published blocks |
 | `store_unwaited` | CPU + GPU | reuse of a unit freed while its store reads it does not wait | host copy corrupt; tier invariance fails under pressure |
@@ -946,7 +964,7 @@ analysis and K-M5 are CPU-only.
 |---|---|---|
 | K-M1 | Re-render divergence. The pi agent test re-run once with the capture proxy's `--raw` (local only): per turn, the longest common prefix of (previous prompt + generated tokens) and the next prompt, in tokens and relative to the answer's end; also with a template that strips reasoning | `answer`'s k; 3g's prediction; whether `answer` is on by default |
 | K-M2 | Copy paths on S2 pools' own allocation (mmap + `cudaHostRegister`, X's C-r4.5-5) at KV chunk sizes (34,816 B, 65,536 B), GDN conv segments (61,440 B) and checkpoint segments (≈ 3 MiB), H2D and D2H, fragmented runs: the per-run loop, `cudaMemcpyBatchAsync`, the SM gather; host time per call. In the same script (K-M3 folded in, C17): four decode streams of the 27B with 0.5–2 GB H2D loads and 154 MB D2H stores in flight | `state_copy@1`'s path; `h2d_rate`; `stall_bytes`; 3b's prediction; whether stores need a rate cap |
-| K-M4 | NVMe `pwritev` / `preadv` of unit-major units (557,056 B) and checkpoints, O_DIRECT and buffered, 1–4 threads, reads, **sustained writes** past the SLC cache, and **mixed reads and writes** on one drive, with the engine loop's step time measured beside them (GIL) | `io_threads`; the read and write rates the shared lane charges, and the mixed rate as its check (C-8, round 3 C-1); the close-flush estimate; D9's SSD rate |
+| K-M4 | NVMe `pwritev` / `preadv` of unit-major units (557,056 B) and checkpoints as per-segment iovecs (48 segments on the 27B; O_DIRECT alignment of each segment size checked), O_DIRECT and buffered, 1–4 threads, reads, **sustained writes** past the SLC cache, and **mixed reads and writes** on one drive, with the engine loop's step time measured beside them (GIL) | `io_threads`; the read and write rates the shared lane charges, and the mixed rate as its check (C-8, round 3 C-1); the close-flush estimate; D9's SSD rate |
 | K-M5 | CPU replay of the **real core index code** with a toy tier on `agent_park`, `claude_code` and `agent`: hit tokens per level, load bytes, evictions, staging peak, per-step host time vs VRAM / RAM / SSD sizes, with step times from the locks | 3c–3e predictions; default `host.bytes`; the staging size; C13's scan cost |
 
 **`agent_park`** (`bench/workloads.py`, seed 0). Four clients run closed-loop. Each owns three sessions and serves them
@@ -1010,7 +1028,7 @@ it holds the base, is outside this count.
 **Risks.**
 - **The copy path is the critical path to 3a and 3b.** If neither DMA batching nor the SM gather reaches 0.8× on
   fragmented chunks, loads cost whole steps, and 3b misses for 32K resumes. Hence K-M2 runs first.
-- **The core estimate.** B2's shrink rests on ≈ 306 lines. Step 1 prices it on a prototype before building the rest.
+- **The core estimate.** B2's shrink rests on ≈ 290 lines. Step 1 prices it on a prototype before building the rest.
 - **Re-rendering decides `answer`'s worth.** If agents' templates re-serialize tool calls or strip reasoning, the
   answer checkpoint helps little. `prompt_end` and `branch` still carry the gain (K-M1, 3g).
 - **The held-out policy is predicted to need a core field.** That would be a recorded proof finding and a minor, not
@@ -1048,7 +1066,7 @@ it holds the base, is outside this count.
   - "what to evict are plugins" (`:883`) and the eviction-policy contract (`:894`) become KS5's `victim`; demotion is
     the core's, by the lower copy;
   - add `Payload.tentative`, `branch_at` and the staging rule.
-- §6.4 (`:918-923`): the tier, not a per-request choice, owns loads. Loads land in index-owned, pinned units and are
+- §6.4 (`:918-923`): the tier, not a per-request choice, owns loads. Loads land in index-owned units whose reuse waits on the load and are
   never cancelled. BLOCKED stays for logits processors only.
 - §9's KV offload row (`:1338`): `std.state_tier`, slot `tier`, KS1–KS5.
 - The host-pool timing rule (B-N6). Host pools may also be allocated at a tier's `attach`, after the final
@@ -1081,7 +1099,7 @@ How the requirements X's panel left for K (`docs/v1-offload.md` §11) are answer
 | Requirement | Answered in |
 |---|---|
 | A10: demoted children must not keep a VRAM parent unevictable while `could_fit` counts it freeable; VRAM entries prefix-closed; leaf-first lower eviction; a property test that `could_fit` and evict agree | D6 (resident-child counts, resident LRU), KS1, the property test, plants `kids_any_level` and `interior_drop` (std) |
-| Write-safe cancellation | D7: loads land in index-owned, pinned units and are never cancelled; frees wait on stores; plants `store_unwaited`, `promote_unwaited` |
+| Write-safe cancellation | D7: loads land in index-owned units and are never cancelled; frees wait on in-flight stores and loads (D4); plants `store_unwaited`, `promote_unwaited`, `load_reuse_unwaited` |
 | C9b: deterministic resume | D4's virtual clock and KS2's gate; plant `gate_on_landing` |
 | C14: acceptance that bites | 3a–3i with link and device rates, fragmented units, and 3b's gap metric with a control arm |
 | Core seam: `Payload.tier`, `HitLen.cost`, demote, cancellable `BLOCKED(future)`, an `on_finish` publish; name `tier` | §4's name mapping |
@@ -1230,3 +1248,17 @@ None is rejected.
 - ABI: unchanged, 1.4 or 1.5 by merge order; it has two fewer fields than rev 3.
 - Schedule: unchanged at 26 days. The two new plants and the liveness case fit in steps 1–3.
 - Acceptance 5's cross-reference to FN now matches FN rev 2 (32c99f2): seams C1–C3, ≤ +45 lines over its own base.
+
+### Rev 5 (2026-10-18): the panel's fourth round (all minor)
+
+| Finding | Disposition | Where / why |
+|---|---|---|
+| A and B: the `Level` host-unit contract is wrong for payloads (S2 payload host pools are segment-major, 48 segments per GDN checkpoint on the 27B) | accepted | D3: a host unit is a sequence of segment `memoryview`s, an iovec for `preadv` / `pwritev`. KV units in the unit-major layout have a one-element entry. K-M4 checks O_DIRECT alignment for every payload segment size |
+| B: drop load pins (lead decision: the simpler design) | accepted after verification | D6, D7: no load pins. D4's free rule now covers loads: a unit freed while a copy writes it is reused only after the next launch waits on that copy. An evicted loading entry gets `loaded(load, done = the load's own fence)`, with no host wait. **Verified first** that every live waiter holds its own reference, through promotion (`_take(shared=True)`, `state.py:173-175`), a hit on a loading entry, promote-into-place (own units) and `_swap` (`state.py:355-364`). So a loading entry with a waiter is never eligible. Round 2's wedge: the aborted waiter's entries become index-only and are evicted as pure frees. Round 3's self-preemption: today's `could_fit` counts G's units once G is in `releasing`, so `_fit` preempts G. No scenario needs a pin, so none is kept. Removed: pins, waiterless and releasable pin paths, both host waits, plants `pin_wedge` and `pin_self_preempt`. Added: plants `load_reuse_unwaited` and `waiter_unref`. Kept: the liveness case that a running decoder never preempts itself for a lower-ranked gated request's shortfall |
+| C: the host-wait stall at eviction | resolved by the above | No host wait at eviction. The only host wait left is a launch waiting on an SSD load whose H2D the level's I/O thread has not yet enqueued. The I/O thread enqueues the H2D on read completion, never the engine thread, and the wait is reported in `stats()` as `load_enqueue_wait_s` |
+
+**Budget, ABI, schedule.**
+- KS2: 93 → **77** lines (pins and both pin paths removed; the free rule's extension to loads +2).
+- Core: ≈ 290 lines itemized, within the unchanged **≤ +320** over K's step-1 base.
+- ABI: unchanged, 1.4 or 1.5 by merge order.
+- Schedule: unchanged at 26 days.
