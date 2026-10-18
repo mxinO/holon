@@ -1,8 +1,9 @@
 # v1 — MoE prefill speed
 
-Status: **design rev 2 (2026-10-18).** Step 0 is measured on the A5000. Rev 2 answers the three-lens panel (A
-correctness, B architecture, C performance: 3 blockers, 19 majors, 23 minors; §10) with the lead's decisions. It awaits
-the panel's re-review.
+Status: **design rev 3 (2026-10-18).** Step 0 is measured on the A5000. Rev 2 answered the three-lens panel's first
+round (A correctness, B architecture, C performance: 3 blockers, 19 majors, 23 minors). Rev 3 answers its second round
+(3 majors, 15 minors) and takes in FN's requests (§10), with the lead's decisions on both. It awaits the panel's
+re-review.
 
 This is the follow-up that plan §10 opened when milestone X closed (`docs/v1-offload.md` §13, "Owner decision on the
 gate").
@@ -26,9 +27,14 @@ Close the MoE prefill gap to FreeToken without leaving Holon's exactness classes
 The bars are **proposed for the owner to confirm** (§9). The predictions per item set are in §1.1 and are fixed
 before any code. Every bar is measured by §5.2's method.
 
-1. **The recorded shortfall rows.** RTX 5080, Qwen3-30B-A3B Q4_K_M at the natural fit (the offload lock, re-filled
-   and re-pinned at the close, §5.3):
-   - prefill ≥ 1.0× FreeToken at 4K and 32K;
+1. **The recorded shortfall rows, against FreeToken's gated arm.** RTX 5080, Qwen3-30B-A3B Q4_K_M at the natural fit
+   (the offload lock, re-filled and re-pinned at the close, §5.3):
+   - prefill ≥ 1.0× FreeToken **gated** (acceptance 3) at 4K and 32K.
+   - The 0.92× / 0.88× shortfall was recorded against FreeToken's default 8,192-token chunks. At 4K the two arms are
+     the same run, since a 4K prompt is one chunk either way.
+   - At 32K the gated reference is a different, slower FreeToken. Step 0 measures it at 4,096 and 8,192 chunks; until
+     then it is modelled ≈ 4–7% slower than the reference that recorded 0.88× (C-N-M1: it streams every expert once
+     per chunk, 8 times instead of 4). The record states the measured distance beside the bar.
    - the 1K row stays ≥ 1.5×;
    - every llama.cpp prefill row stays ≥ 2.1×.
 2. **All-resident.** RTX 5090, same model (the lock's settings with `max_model_len` 33,792 and `max_seqs` 1, stated in
@@ -48,13 +54,18 @@ before any code. Every bar is measured by §5.2's method.
        the resident 30B, the natural-fit offload and the capped fit (F5b on: identical to main's capped run,
        run-identical ×3);
      - the snapshot traces are identical to main's;
-     - L0 holds every type × SM pair the locks use (derived from `plans/`), plus FN's types and shape.
-   - **D3, D5 bounded:** L2 passing against the Tier B prefill floor, plus the bounded chunked check; plants near the
-     bound must fail.
+     - L0 holds every type × SM pair the locks use (derived from `plans/`), plus FN's types and shape, and FN's
+       requests: the passed buffers and the tail lending (D10, D11).
+   - **D3, D5 bounded:** L2 passing against the Tier B prefill floor, plus the bounded chunked check.
+     - Far plants must fail.
+     - A near-bound plant (`router_prefill_bf16_logits`, `qlinear_partials_bf16`) that passes L2 records L2's
+       blindness at that scale, and D3 / D5 are kept: they are bounded by design and the plants sit at the bound
+       (lead decision).
 5. **Decode keeps its bits and its speed.**
    - **Bits:**
      - steps of ≤ `mmvq_tokens` (8) rows are untouched;
-     - D3 applies only to router calls of ≥ `CHUNK` rows, so batched decode and verify keep main's router bits;
+     - D3 applies only to router calls of ≥ `CHUNK` rows, so batched decode and verify keep main's router bits while
+       a step's router chunk stays under 512 rows: `max_seqs · (1 + max_draft_tokens)` < 512, true for every lock today;
      - batched decode above 8 rows runs mmq with ids inside graphs, so D2 changes its launch but not its bits
        (graphs-vs-eager bitwise).
    - **Speed:** a same-session ABBA against main's build, `holon_tg` at batch 1 (1K / 4K) and batch 16 / 32 / 64 on
@@ -63,8 +74,10 @@ before any code. Every bar is measured by §5.2's method.
    - every lock's startup KV pool stays ≥ its `max_model_len` and its recorded capability (each pass size is capped
      per class to keep this);
    - startup KV tokens are recorded per lock, main against the branch;
-   - the 5080 offload lock's expert-cache share stays within 1% after its re-fill.
-7. **No core diff** and no ABI bump. One std minor: `pass_rows` (§4). Suite time does not grow (lean tests, §5.1).
+   - the 5080 offload lock's expert-cache share falls after its re-fill by no more than the growth of its persistent
+     buffers (D5's ≈ 25 MB ≈ 9 experts, ≈ 0.3% of the share), and its decode rows meet acceptance 5's tolerance.
+7. **No core diff** and no ABI bump. The std minors are `pass_rows` (§4), the passed buffers (D10) and tail lending
+   (D11). Suite time does not grow (lean tests, §5.1).
 
 ### 1.1 Predictions per item set (A5000 step 0; the bar cards restate them at step 0)
 
@@ -74,7 +87,7 @@ The base is the measured all-4,096 probe (D1 and D5 in, A5000 GPU-busy ms):
 |---|---|---|---|
 | 1K | 212 | 172 | 172 |
 | 4K | 686 | 584 | 584 |
-| 32K | 10,013 | 9,184 | ≈ 9,423 (its 4K-call GEMM rate per token, step 0's per-call bench) |
+| 32K | 10,013 | 9,184 | ≈ 9,423, **modelled** (its 4K-call GEMM rate per token); step 0 measures it |
 
 Item savings at 1K / 4K / 32K (ms):
 
@@ -85,8 +98,15 @@ Item savings at 1K / 4K / 32K (ms):
 | D4 | −5 | −21 | −166 | upper bound: the fused write-back assumed free |
 | D6 | — | — | −239 | |
 
-The offload rows scale the A5000 fractions from today's measured 5080 ratios (0.92× / 0.88×). There D1 does not apply
-(the arena already makes 4,096-row calls), and the A5000 base is the 4,096-expert-row arm with dense at 512 rows.
+**Offload rows.** They scale the A5000 fractions from today's measured 5080 ratios (0.92× / 0.88×). D1 does not apply
+there (the arena already makes 4,096-row calls), so the A5000 base is the 4,096-expert-row arm (703 ms at 4K) with
+dense calls at 512 rows; D5 saves 20 ms there (C2-m3).
+
+**Gated cells are modelled until step 0 measures FreeToken at 4,096 and 8,192 chunks** (lead decision; C-N-M1):
+- resident: FreeToken +2.6% at 32K (its 4K-call GEMM rate);
+- offload: +2.6% (C's first model) up to +4–7%. Gating doubles FreeToken's full-expert streams at 32K, so the band
+  runs from the first to the second.
+- Step 0's measurements replace every gated cell.
 
 **Rows at or below their bar are bold** (the "≤ bar" column). Rows within 3% of the bar take ≥ 5 rounds (§5.2).
 
@@ -94,11 +114,11 @@ The offload rows scale the A5000 fractions from today's measured 5080 ratios (0.
 |---|---|---|---|---|
 | 5090 resident 1K (≥ 0.95×) | **0.94–0.96×** | 0.96–0.99× | — | D1–D3 + D5 |
 | 5090 resident 4K (≥ 1.0×) | **0.97–0.99×** | **1.00**–1.03× | — | both: at the bar at the low end |
-| 5090 resident 32K, gated (≥ 1.0×) | 1.01–1.02× | 1.03–1.04× | 1.03–1.04× (FreeToken also at 8,192) | within 3% |
+| 5090 resident 32K, gated (≥ 1.0×), modelled | 1.01–1.02× | 1.03–1.04× | 1.03–1.04× (FreeToken also at 8,192) | within 3% |
 | 5090 resident 32K, FreeToken default (reported) | **0.98–1.00×** | **1.00**–1.02× | 1.03–1.04× | — |
-| 5080 offload 4K (≥ 1.0×) | 1.06–1.11× | 1.08–1.15× | — | — |
-| 5080 offload 32K, gated (≥ 1.0×) | **0.99–1.00×** | 1.01–1.02× | not built on this lock (§9 O1) | within 3% |
-| 5080 offload 32K, FreeToken default (reported) | **0.96–0.98×** | **0.98–0.99×** | 1.00–1.02× at ≈ −3.4% decode at 32K | §9 O1 |
+| 5080 offload 4K (≥ 1.0×) | 1.08–1.11× | 1.12–1.15× | — | — (before a transfer-bound haircut; step 0's nsys decides) |
+| 5080 offload 32K, gated (≥ 1.0×), modelled | **0.99**–1.04× | **1.00**–1.06× | not built on this lock (§9 O1) | within 3% at the low end |
+| 5080 offload 32K, FreeToken default (reported; the 0.88× reference) | **0.96–0.98×** | **0.98–0.99×** | 1.00–1.02× at ≈ −2.4% decode at 32K | §9 O1 |
 | 5080 offload 1K (≥ 1.5×) | ≈ 1.7× | ≈ 1.7× | — | — |
 
 - **D4 is part of the set** (lead decision, C-B1). Without it the 5090 4K and 1K rows sit under their bars.
@@ -151,11 +171,18 @@ dense-mmq bound.
   - **What it is.** An optional attribute of a bound `linear_experts@2` / `linear_experts_arena@1` instance: the most
     rows per call the instance gives at the bits of its `CHUNK`-row calls (§4 states the promise). The default is
     `CHUNK`.
-  - **Who sets it.** The provider sets it per type, arch and path, after its L0 holds there. For mmq with ids in
-    kernels.ggml_cuda it is `max(CHUNK, min(PASS_ROWS, ID_PAIRS ÷ top_k, its cap) ÷ CHUNK × CHUNK)`. A path that is
-    not proven keeps `CHUNK`. FN's IQ1_M fallback, if it is ever needed, sets its own (D9).
+  - **Who sets it.** The provider sets it per type, arch and path, from a pinned **proven table** in `plugin.py`
+    (`PASS_PROVEN`: (SM, type, path) → proven, like `CROSSOVER`; B2-N3).
+    - The shared `holon_testing` helper iterates that table, so an entry exists only where its L0 runs. A pair not in
+      the table keeps `CHUNK`.
+    - For a proven mmq-with-ids pair it is `max(CHUNK, min(PASS_ROWS, ID_PAIRS ÷ top_k, its cap) ÷ CHUNK × CHUNK)`.
+    - FN's IQ1_M fallback, if it is ever needed, sets its own (D9).
+  - **The reference provider** (`testing`'s CPU `LinearExperts`) loops per `CHUNK` inside a call, which satisfies
+    §4's promise exactly, so it declares `pass_rows` too (B2-N4). CPU tests keep exercising large and multi-chunk
+    passes; offload on the CPU equals resident on the CPU.
   - **Its cap** is `max_step_tokens` from the build context (missing: no cap), and below that the provider's plugin
-    option `ggml_cuda.pass_rows`.
+    option `ggml_cuda.pass_rows`. That option is declared in kernels.ggml_cuda's manifest `[options]`, with choices
+    512 / 2,048 / 4,096 / 8,192 (B2-N2: `check_locks.py` refuses an undeclared option).
     - That option is a lock setting, written by hand through `propagate` (a checked settings change, as
       `engine:max_step_tokens` diffs are reported today; `tools/tests/test_propagate.py:197`). tune does not choose it
       (B-M4: tune benchmarks decode only).
@@ -222,6 +249,8 @@ dense-mmq bound.
     up's) with `swiglu_f32`'s plain fast-math `*` (`csrc/api.cu:114-128`, flush-to-zero), not `mmq_store`'s
     `ggml_cuda_mul_rn`. It writes `silu(g)·u` as [T, k, inter].
   - **Untouched:** arenas, F5b's CPU reader and mmvq's fused gate.
+  - **Applies where `inter % 64 == 0`** (the half-tile split: 768 and FN's 640 both pass). Other shapes keep the
+    unfused store and `swiglu_f32` (A2).
   - **Saving:** an upper bound of −21 ms at 4K and −166 at 32K, assuming the fused write-back is free. It does not
     lower the live memory peak (§6).
 - **D5 — Dense `qlinear` mmq calls of `pass_rows` rows** (bounded).
@@ -234,15 +263,16 @@ dense-mmq bound.
   - **Mechanism.** `ID_PAIRS` and the vendored `GGML_CUDA_MM_IDS_MAX_PAIRS` are raised statically to 65,536 (the
     device-wide helper path, its L0 extended). A class gets 8,192 only through its lock's `max_step_tokens` and
     `ggml_cuda.pass_rows`, set by hand through `propagate`.
-  - **Cost:** +0.47 GB of live peak (§6). On the 5080 offload lock that is ≈ 166 cached experts (5%), predicted
-    ≈ −3.4% decode at 32K (C-B2, from x4_gate's measured share-to-decode slope).
+  - **Cost:** +0.47 GB of live peak (§6). On the 5080 offload lock that is ≈ 166 cached experts (share 52.7% →
+    ≈ 50.0%). x4_gate's measured share-to-decode slope predicts ≈ −3.0% / −3.7% / −2.4% decode at 1K / 4K / 32K (C2-m1):
+    the FreeToken decode rows go 1.06× → ≈ 1.02× (4K) and 1.03× → ≈ 1.005× (32K).
   - **Batched locks:** an 8K prompt step also stalls decode twice as long (inter-token gap p99), since
     `chunk_with_decode` is 0.
   - **Default:** no D6 on offload locks; decode wins (lead decision).
 - **D7 — Not taken (recorded):**
   - **Dequant to bf16 + a tensor-core grouped GEMM** (cuBLAS / Triton / CUTLASS). Rejected on achieved rates
     (C-M2), not peaks. On the A5000:
-    - mmq reaches ≈ 27% of its int8 peak (48–61 TOPS) and cuBLAS bf16 ≈ 78% (80–90 TFLOPS);
+    - mmq reaches ≈ 22–27% of the ≈ 222 TOPS int8 peak (48–61 TOPS), and cuBLAS bf16 ≈ 78% (80–90 TFLOPS);
     - dequant costs 2.5 ms per layer pass and 1.2 GB of scratch;
     - so at 4,096 tokens dequant + bf16 loses, but at 8,192-token passes it would win (7.3 + 2.5 against 10.9 ms).
   - **On the GeForce lock classes** bf16 with f32 accumulation runs at 1/4 of the int8 peak (GA102 / AD102; GB20x
@@ -258,20 +288,70 @@ dense-mmq bound.
     (D9). A dequant path is only D9's fallback, behind D0's seam with its own `pass_rows`, so this rejection is
     unaffected.
 - **D8 — Ownership** (B-M5; FN design rev 2, `32c99f2`, its D1′).
-  - This track owns `LinearExperts`' prefill dispatch and `vendor.patch`. Before FN's step 4 it lands steps 1–2
-    (D0's seam and D2) and step 6 (D9). FN depends on all three.
+  - This track owns `LinearExperts`' prefill dispatch and `vendor.patch`. Everything FN needs lands **before step
+    5's single propagation round**, so FN's step 4 finds it on main:
+    - D0's seam;
+    - D2;
+    - D9 with Q2_0's `TYPES` entry;
+    - D10;
+    - D11.
   - Every hunk carries a "Holon:" marker, and `test_link`'s marker check (`test_ggml_cuda_moe.py:234-235`) adds
     `mmq.cu` and `mmq.cuh` (B-m7).
 
 - **D9 — IQ1_M's native mmq tile loader** (a `vendor.patch` hunk for FN; bitwise in q8_1's class).
-  - **Why it fits int8.** IQ1_M weights scaled by 8 are 8·g ± 1, which fits int8. Their per-16 scales are
-    d·(2s + 1) ÷ 8, the same layout family as IQ2_XS and IQ2_S, whose mmq loaders it follows. So IQ1_M gets q8_1
-    activations, int8 MMA, and every row-invariance and placement L0 of this plan.
+  - **Why it fits int8.** IQ1_M weights scaled by 8 are 8·g ± 1 ∈ {±1, ±7, ±9} (the grid nibble is in {0, 1, 2}, and
+    delta is −1 ± 0.125, `dequantize.cuh:397-403`), so they fit int8. Their per-16 scales are d·(2s + 1) ÷ 8, the same
+    layout family as IQ2_XS and IQ2_S, whose mmq loaders it follows.
+  - **Exact in q8_1's class** (A2):
+    - the scale is exact in f32 (fp16 d, at most 4 more bits, a power-of-two divide);
+    - a 16-value int32 sum is ≤ 16·9·127, so it cannot overflow;
+    - accumulation follows the J- and position-independent `q8_0_16` MMA pattern;
+    - there is no stored-sum term (IQ1_M stays out of `_MMQ_SUMS` / `_MMVQ_SUMS`, as its mmvq uses the quantized
+      `sumy`, `vecdotq.cuh:1311-1315`).
+  - **The hunk**, all marked "Holon:" (FN rev 2's review; A2):
+    - IQ1_M → `MMQ_Q8_1_DS_LAYOUT_D4` in `mmq_get_q8_1_ds_layout` (its default aborts);
+    - the MMA vec-dot instance and the dp4a one (`mmq.cuh` ≈ :653, :786);
+    - IQ1_M in `ggml_cuda_should_use_mmq` and in the ampere config table, which blackwell falls through to;
+    - the template instance file;
+    - **the condition: the per-16 scale is stored as an f32 `x_df`** (the IQ2_XS / IQ2_S layout with D4
+      activations). A half2 `x_dm`, upstream IQ1_S's DS4 style, would need up to 15 significant bits and has 11, so
+      it would round.
   - **The vendored ggml lacks it today:** it has IQ1_M's mmvq but no mmq instance (FN `v1-flash-next.md:73`).
   - **Fallback**, if the loader fails its L0 or its speed: a grouped dequant of 16 experts per launch into bf16 tiles,
     behind D0's seam with that path's own `pass_rows`. It is bounded, judged against its own floor.
-  - **Ordering.** D9 is a later step of this track (step 6). It lands before FN's step 4, but outside step 5's
-    18-class propagation round: no current lock uses IQ1_M, so no lock moves.
+  - **Ordering** (lead decision; A2-major = B2-N1). D9 and Q2_0's `TYPES` entry land at step 3c, **before step 5**.
+    A lock's `src` hashes every file of the plugin (`plans.py:41-52`), so landing them after step 5 would leave all
+    18 classes pinning other code and serving defaults (`cli.py:167`). Before step 5, the single round covers them;
+    they move no snapshot (no lock uses IQ1_M or Q2_0).
+
+- **D10 — Passed buffers for `linear_experts@2` / `linear_experts_arena@1`** (std minor; FN's request).
+  - **Today** the scratch is `torch.empty` inside kernels.ggml_cuda (`plugin.py:464`, `:481`). Large passes on FN's
+    shape need dense [rows, N] buffers of 0.9–1.8 GB, which std.moe must be able to place in lent memory.
+  - **The call** takes optional keywords: `out` (the [T, k, out_y] f32 result) and `scratch` (a byte buffer of at
+    least the instance's `scratch_bytes(tokens)`, for the gate/up intermediate and the id workspaces of the call).
+    The provider uses them in place of its own allocations.
+  - **Results are bitwise the same** with or without passed buffers, and independent of where those buffers live.
+  - **L0:** passed buffers NaN-poisoned beforehand, bitwise against the allocating call; a too-small `scratch`
+    refused before launch; a call with buffers inside a captured graph replays on new routing.
+  - Today's callers pass nothing, so no snapshot moves.
+
+- **D11 — Contiguous-tail lending from one class arena** (std.tiered, a std minor; FN's request; FreeToken / Strata
+  style).
+  - **What it lends.** A streaming step borrows the class arena's last n slots as one contiguous byte range,
+    regardless of their temperature. The resident experts there are evicted: map entries become missing, and the
+    delta log records the evictions.
+  - **The return.** At the step's end the slots return empty (D4's R0 return), as X's lending does.
+  - **Why.** X's `lend(n)` takes the coldest whole experts wherever they sit, so it cannot form the dense buffers
+    D10 needs.
+  - **Mode.** The lending mode is a plugin option, `moe.ring_lend` = `coldest` | `tail`, declared in std.moe's
+    `[options]`. The default is `coldest` (X's behaviour); FN's lock sets `tail`.
+  - **Exactness.** Every placement is exact (X's acceptance 2), so tail lending changes speed, not outputs. On the
+    offload snapshots: `tail` is identical to all-resident and to `coldest`, and to main's.
+  - **Policy parity.** `placement.lfu`'s replay models the tail evictions and the empty return. The policy-parity
+    check compares the device's map with the host mirror per step.
+  - **L0 / CPU:** the lent range is contiguous and of the requested bytes; evicted slots are empty at the return; the
+    `lent-slot-still-mapped` plant still fails.
+  - No current lock sets `tail`, so no snapshot moves.
 
 ## 4. Contracts and plugins (no core)
 
@@ -282,7 +362,11 @@ dense-mmq bound.
 | kernels.ggml_cuda `LinearExperts` (`plugin.py:405-480`) | chunk 4,096 for arenas, 512 otherwise | `pass_rows` per type / arch / path, capped by `max_step_tokens` and `ggml_cuda.pass_rows`; workspaces sized for it | bitwise (D0, D1) |
 | kernels.ggml_cuda `vendor.patch` (`mmq.cu` J_best, `mmq.cuh` launch, the tile decode and the fixup gate) | J against T; grid nty × ⌈T ÷ J⌉ × n_z | J against T·k ÷ n_z; grid nty × (n_z + ⌊T·k ÷ J⌋ + 1); binary-search decode; no ids fixup | bitwise (D2) |
 | the same, gate/up's store | f32 [T, k, 2·inter], then `swiglu_f32` | fused `silu(g)·u` [T, k, inter] | bitwise (D4) |
-| the same, a new type's tile loader (IQ1_M; `TYPES` and the mmq type switch) | IQ1_M: mmvq only | mmq tile loader (×8 int8 values, per-16 scales) | bitwise in q8_1's class (D9) |
+| the same, a new type's tile loader (IQ1_M: DS_LAYOUT_D4, the MMA and dp4a instances, `should_use_mmq`, the ampere config, an f32 `x_df`); `TYPES` gains iq1_m and q2_0 | IQ1_M: mmvq only | an mmq tile loader (×8 int8 values, per-16 f32 scales) | bitwise in q8_1's class (D9) |
+| kernels.ggml_cuda manifest `[options]`, `plugin.py` `PASS_PROVEN` | none | `ggml_cuda.pass_rows` (512 / 2,048 / 4,096 / 8,192); the proven (SM, type, path) table | — (D0) |
+| `linear_experts@2` / `linear_experts_arena@1` text; kernels.ggml_cuda's and `testing`'s instances | the instance allocates | **std minor:** optional `out` and `scratch` keywords, the instance's `scratch_bytes(tokens)` | bitwise (D10) |
+| `std.tiered` lending; std.moe manifest `[options]` | coldest whole experts (`lend(n)`) | `moe.ring_lend` = `coldest` (default) / `tail`: the class arena's contiguous tail, evicted slots returning empty | exact, as every placement (D11) |
+| `testing`'s CPU `LinearExperts` | per expert batch | loops per `CHUNK` inside a call; declares `pass_rows` | bitwise against its `CHUNK` calls (D0) |
 | kernels.ggml_cuda `MoeRouter` | > 16 rows: cast + f32 linear + `moe_topk` | ≥ `CHUNK` rows: its own f32 router GEMM + selection | bounded (D3) |
 | kernels.ggml_cuda `QLinear` | mmq per 512 rows | per `pass_rows` | bounded (D5) |
 
@@ -302,7 +386,10 @@ and the router kernel serves `moe_router@1`'s facts. `kernels.triton_experts` de
 | Change | Class | Check | Predicted |
 |---|---|---|---|
 | D0 / D1 | bitwise | **end-to-end:** the `prompt_logprobs` hash of every prompt row at 1,027 and 4,096 tokens, main against the branch, on the resident 30B, natural-fit offload and capped (F5b) configurations, modelled on `judge/holon_judge/kernel_identity.py` (A-2). **Snapshots:** compared with main's without writing locks (B-m3). **CPU unit test:** records `LinearExperts` call sizes per pass at 600 / 1,027 / 4,100 tokens and fails when a tail merges (the `pass_eats_tail` mutation, A-2, B-m5). **L0:** see below | identical; the mutation fails |
-| D2 | bitwise | L0 below, with the output **NaN-poisoned** before each call (A-minor) and two mutations: the decode skips each entry's last partial tile (rows stay NaN), and the ids path keeps `fixup_needed` (A-3); graph replay of a captured bucket on new routing; graphs-vs-eager at batch 64; memcheck everywhere, racecheck on sm_120 | identical; both mutations fail |
+| D2 | bitwise | L0 below. The output is pre-filled with NaN and passed to `lib.mmq_id` (as `gemm.py` does; `LinearExperts.__call__` allocates its own, A2). The L0 asserts with `launched()` that `mul_mat_q_stream_k_fixup` never launches on the ids path, replacing the fixup mutation, which may be a no-op (A2). The mutation "the decode skips each entry's last partial tile" leaves NaN rows. Also: graph replay of a captured bucket on new routing; graphs-vs-eager at batch 64; memcheck everywhere, racecheck on sm_120 | identical; the mutation fails; no fixup launch |
+| D9 | bitwise in q8_1's class | L0 against `q8_1.linear_experts` for IQ1_M, every invariance test of §5.1 with iq1_m, memcheck on sm_120 | within q8_1's emulation; row-invariant |
+| D10 | bitwise | L0: NaN-poisoned passed `out` / `scratch` against the allocating call; a short `scratch` refused before launch; graph replay with passed buffers | identical |
+| D11 | exact (placement) | CPU: the tail range is contiguous and of the requested bytes, its evictions logged, the slots empty at the return; `placement.lfu`'s replay and the policy-parity check with `tail`; offload snapshots with `tail` identical to all-resident and main's; the `lent-slot-still-mapped` plant still fails | identical |
 | D4 | bitwise | L0: the fused output is bitwise `swiglu_f32` of the unfused output, for every glu type, with subnormal and NVFP4-scaled inputs | identical |
 | D3 | bounded | L0 at 512–4,096 rows: logits within the f32 budget of the f64 product; selection bitwise `moe_topk`; row-invariant across ≥ 512-row calls. L2: Tier B prefill against the mmq floor. **Plants:** `router_prefill_bf16_logits` (logits rounded to bf16: near the bound) and `router_prefill_short_k` (hidden less its last 256: far) | passes; KL p99 at or under the floor (the decode router's precedent: 0.037 against 0.040). The near plant's verdict is predicted at step 3 from a CPU estimate before the GPU run; the far plant fails |
 | D5 | bounded | L2 (Tier B prefill); `holon_judge bounded --chunked`. **Plants:** `qlinear_partials_bf16` (stream-k partials rounded to bf16 before the fixup: near) and `qlinear_large_no_fixup` (far). The fixup launches are counted so the record shows each plant fired on that card and shape (A-5) | passes; the far plant fails where it fires; the near plant's verdict is predicted as D3's |
@@ -315,8 +402,8 @@ and the router kernel serves `moe_router@1`'s facts. `kernels.triton_experts` de
 - sm_120 (5080 / 5090): q4_k, q5_k, q6_k, iq3_s, iq3_xxs, iq4_xs.
 
 - **FN's requirements** (FN rev 2, D1′):
-  - its types are IQ2_S, IQ2_XXS, IQ1_M (D9, step 6), Q2_0, IQ3_XXS, IQ3_S, IQ4_NL and IQ4_XS; Q2_0 joins `TYPES` with
-    FN or with this track's step 6, whichever lands first;
+  - its types are IQ2_S, IQ2_XXS, IQ1_M (D9), Q2_0, IQ3_XXS, IQ3_S, IQ4_NL and IQ4_XS; IQ1_M and Q2_0 join `TYPES` in
+    this track's step 3c;
   - its MoE shape is E = 512, top-10, H = 2,560, I = 640, which runs the device-wide helper. At top-10 `pass_rows` is
     3,072: ⌊32,768 ÷ 10⌋ rounded down to whole `CHUNK`s.
   - Both go into the same tests below, with no new suites.
@@ -327,8 +414,15 @@ and the router kernel serves `moe_router@1`'s facts. `kernels.triton_experts` de
   512-row comparison (every type, small stack). It also gains one 128-expert stack (q4_k, q6_k) at T = 512 / 2,048 /
   4,096, which crosses all three helpers (A-minor).
 - `test_an_arena_call_of_many_chunks…` stays at two types.
-- `PLACED` (:417) gains only the lock types it lacks (iq3_s, iq4_xs, q5_k, mxfp4, nvfp4), plus FN's (iq1_m, q2_0,
-  iq4_nl). FN's shape is one more stack in the every-type test.
+- `PLACED` (:417) is parametrized **per SM** from the derived list plus FN's types, not from their union (B2-N5).
+  - On the sm_86 development card that is q4_k and q6_k plus FN's types.
+  - The sm_89 / sm_120 nodes add their own lock types.
+  - FN's shape is one more stack in the every-type test.
+- D10's and D11's checks extend the existing arena and store tests (`test_ggml_cuda_moe.py`'s arena tests,
+  `plugins/tests/test_moe_engine.py`'s lending tests). They are not new suites.
+- **Step 1's named test edits** (B2-N4): `test_moe_engine.py:19` (imports `PASS`), `:357` and `:393` (assert
+  `pass_tokens(10) == PASS`) assert against the bound kernels' `pass_rows` instead. The CPU call-size test uses the
+  reference provider's `pass_rows` (4,096 by default), so it exercises D1's min and cap (A2).
 - The device-wide helper is not added to `HELPERS` (it is asserted at :516).
 - D3's router is tested at 512–4,096 rows.
 - `pytest --durations` before and after is recorded in the step's record.
@@ -394,13 +488,18 @@ and the id maps).
 
 | Step | Work | Checks | Days |
 |---|---|---|---|
-| 0 | **A5000: done.** **Bar cards** (5090, 5080; one persistent container each): achieved mmq TOPS against cuBLAS bf16 TFLOPS at T·k = 32K / 64K, dequant ms per layer, the break-even pass size (D7); nsys breakdowns of resident (5090) and natural-fit offload (5080) at 1K / 4K / 32K, attention included; row 2's I/O split (`gemm.py --freetoken` with f32 activations, so its store is f32 too); the batched-decode J sweep at T = 16–64 (C-M6); startup KV tokens on the 16 GB lock and one 24 GB lock with the `--pass-tokens` / `--expert-rows` probes; the `peak_alloc` rise explained; the fixed prompt set | every §1.1 cell restated per class from these; rows at or below their bar to the owner before step 1 | 1–2 |
+| 0 | **A5000: done.** **Bar cards** (5090, 5080; one persistent container each): **FreeToken at 4,096 and 8,192 chunks, resident on the 5090 and offload on the 5080, at 4K and 32K** (the gated arm, measured: C2-N-M1); achieved mmq TOPS against cuBLAS bf16 TFLOPS at T·k = 32K / 64K, dequant ms per layer, the break-even pass size (D7); nsys breakdowns of resident (5090) and natural-fit offload (5080) at 1K / 4K / 32K, attention included; row 2's I/O split (`gemm.py --freetoken` with f32 activations, so its store is f32 too); the batched-decode J sweep at T = 16–64 (C-M6); startup KV tokens on the 16 GB lock and one 24 GB lock with the `--pass-tokens` / `--expert-rows` probes; the `peak_alloc` rise explained; the fixed prompt set | every §1.1 cell restated per class from these, the gated cells from the measured FreeToken; the gated reference's distance from the 0.88× reference stated; rows at or below their bar to the owner before step 1 | 1.5–2 |
 | 1 | D0 + D1 (`pass_rows`, the std minor, both stores, the shared `holon_testing` helper); `ggml_cuda.pass_rows` per class from step 0 | §5.1's L0; the CPU call-size test; the logits-hash identity on the A5000; snapshots against main (no lock writes); KV tokens per class | 1–1.5 |
 | 2 | D2 (`vendor.patch`, `vendor.sh --check`, "Holon:" markers, `test_link`) | L0 + NaN poison + both mutations on sm_86 / 89 / 120, memcheck, racecheck on sm_120; per-call `gemm.py` at equal I/O dtype, interleaved repeats (C-m4), ≤ FreeToken's at 512–4,096 tokens; batched decode B16–64 ABBA | 2–3 |
-| 3 | D4, then D3 and D5, each measured alone | D4's L0 and identity; D3 / D5 keep-or-revert by M0.7's rule, L2 with near and far plants | 3–4 |
+| 3 | D4, then D3 and D5, each measured alone | D4's L0 and identity; D3 / D5 keep-or-revert by M0.7's rule, L2 with near and far plants (a passing near plant records L2's blindness at that scale) | 3–4 |
+| 3b | FN's requests: D10 (passed buffers, std minor) and D11 (tail lending, std.tiered, `moe.ring_lend`) | D10 / D11 L0 and CPU checks; offload snapshots with `tail` identical; policy parity with `tail` | 2–3 |
+| 3c | D9: IQ1_M's mmq hunk (or its fallback), with IQ1_M and Q2_0 in `TYPES` | D9's L0 on sm_86 / sm_120, memcheck; per-call speed against IQ2_S's loader | 2–3 |
 | 4 | The bars on the bar cards (§5.2's method) | acceptance 1, 2, 3, 5, 6 | 1–2 |
-| 5 | Close: one propagation round over the 18 classes (D1–D5, `pass_rows`), the 5080 offload lock re-filled and re-pinned, `pytest` on a GPU, `scripts/ci/run_all.sh`, panel code review, plan §10 status | acceptance 4, 7; its L2 verdicts as its own evidence | 1–2 |
-| 6 | D9: IQ1_M's mmq tile loader (or its fallback); before FN's step 4, outside step 5's propagation (no lock uses IQ1_M) | L0 against `q8_1.linear_experts` for IQ1_M; the §5.1 invariance tests with iq1_m and FN's shape; memcheck on sm_120; per-call speed against IQ2_S's loader | 2–3 |
+| 5 | Close: **one** propagation round over the 18 classes, covering D1–D5, D9 / Q2_0, D10, D11 and `pass_rows`; the 5080 offload lock re-filled and re-pinned; `pytest` on a GPU, `scripts/ci/run_all.sh`, panel code review, plan §10 status. FN's step 4 then finds D0, D2, D9, D10 and D11 on main | acceptance 4, 7; its L2 verdicts as its own evidence | 1.5–2 |
+
+**Schedule:** about 14–20 working days, in the order 0 → 1 → 2 → 3 → 3b → 3c → 4 → 5. Steps 3b and 3c do not depend on
+3 and may run beside it on another GPU. Nothing merges to main before step 5, so no lock is ever left pinning other
+code.
 
 The panel reviews this revision before step 1, the code at step 4, and again at the close.
 
@@ -424,13 +523,18 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
 
 - **O1 (escalated by the lead; not blocking): D6 on the 5080 offload lock trades 32K prefill against decode.**
   - Default: no D6 on offload locks, so decode wins.
-  - Then the 32K row is predicted at ≈ 1.01–1.02× against the gated FreeToken arm, and ≈ 0.98–0.99× against
-    FreeToken's ungated 8,192-token default (reported, not gated).
-  - With D6: ≈ 1.00–1.02× against the default, at ≈ −3.4% decode at 32K (the FreeToken decode row 1.03× → ≈ 0.995×).
+  - Then the 32K row is predicted at ≈ 1.00–1.06× against the gated FreeToken arm (modelled until step 0 measures
+    it), and ≈ 0.98–0.99× against FreeToken's ungated 8,192-token default (reported, not gated).
+  - With D6: ≈ 1.00–1.02× against the default, at ≈ −3.0% / −3.7% / −2.4% decode at 1K / 4K / 32K. The FreeToken
+    decode rows go 1.06× → ≈ 1.02× and 1.03× → ≈ 1.005×: still at or above their bar, but with no margin.
 - **O2: the bars and arms.**
   - Confirm acceptance 1–2, with FreeToken's gated arm at the lock's step budget and its default reported only.
-  - Rows at or under their bar in §1.1: 5090 1K and 4K without D4; 5090 4K and the 5080 32K-gated row at the bar's
-    low end even with D4. They are re-sent after the bar cards' step 0.
+  - Rows at or under their bar in §1.1:
+    - 5090 1K and 4K, without D4;
+    - 5090 4K and the 5080 32K-gated row at the bar's low end, even with D4.
+  - These are re-sent with the measured gated arm after the bar cards' step 0.
+  - Acceptance 1's 32K row is now against the gated FreeToken, which step 0 measures as slower than the reference
+    that recorded 0.88× (≈ 4–7% modelled). The owner confirms the relabel.
 - **O3: pass size per class.** `ggml_cuda.pass_rows` lowers the step-size gain on classes whose KV capacity cannot
   absorb 4,096 (likely the 24 GB 30B classes at 2,048 and the 16 GB class at 512 or 2,048). The values are set by
   hand at the close from step 0's measurements.
@@ -440,6 +544,39 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
   `v1-flash-next.md:376`).
 
 ## 10. Review log
+
+### Rev 2 → rev 3 (the panel's second round, 2026-10-18; FN's requests; the lead's decisions)
+
+Every finding was verified at the cited lines.
+
+| # | Finding | Verified | Disposition |
+|---|---|---|---|
+| A2-M = B2-N1 | D9 / Q2_0 after step 5 would outdate the 18 locks (the plugin `src` hash) | yes (`plans.py:41-52`; `cli.py:167`) | D9 and Q2_0 land at step 3c, before step 5's single round (lead decision 1) |
+| A2-m | The D2 fixup mutation may be a no-op; NaN poison needs a passed output | yes | `launched()` asserts no `mul_mat_q_stream_k_fixup` on the ids path; a NaN-filled output is passed to `lib.mmq_id` |
+| A2-m | The CPU call-size test needs `pass_rows` above `CHUNK` | yes | the reference provider declares `pass_rows` (B2-N4), 4,096 by default |
+| A2-m | "Verify keeps the router bits" is conditional | yes | the condition `max_seqs·(1 + k) < 512` stated (acceptance 5) |
+| A2-m | D9's exactness condition; the missing hunk parts | yes (`dequantize.cuh:397-403`, `vecdotq.cuh:1311-1315`) | f32 `x_df`; DS_LAYOUT_D4, `should_use_mmq`, the ampere config, the MMA and dp4a instances (D9) |
+| A2-m | D4 needs `inter % 64 == 0` | yes | stated, with the unfused fallback |
+| A2-m | Near-plant verdicts | — | a passing near plant records L2's blindness; D3 / D5 kept (lead decision 4) |
+| B2-N2 | `ggml_cuda.pass_rows` must be declared | yes (`check_locks.py:9, :42-44`; no `[options]` in kernels.ggml_cuda's manifest) | `[options]` with choices 512 / 2,048 / 4,096 / 8,192 |
+| B2-N3 | "After its L0 holds" needs a table | — | `PASS_PROVEN` (SM, type, path), iterated by the shared helper |
+| B2-N4 | Offload CPU tests become trivial | yes (`test_moe_engine.py:19, :357, :393`) | the reference loops per `CHUNK` and declares `pass_rows`; the test edits named in step 1 |
+| B2-N5 | `PLACED` grows to 13 types | — | parametrized per SM |
+| C2-N-M1 | The gated FreeToken arm is modelled; offload streaming not modelled | — | step 0 measures FreeToken at 4,096 and 8,192 chunks (5090 resident, 5080 offload, 4K and 32K); gated cells labelled modelled, the offload band widened to +2.6…7%; acceptance 1 relabelled gated, with the distance from the 0.88× reference stated (lead decision 3) |
+| C2-m1 | D6's decode cost is stale | yes (x4_gate's slope at +0.47 GB) | −3.0% / −3.7% / −2.4% at 1K / 4K / 32K; O1 "at the bar" |
+| C2-m2 | 5080 32K gated with D4 reads 1.00–1.02 | yes | the cell restated within the widened band (1.00–1.06×) |
+| C2-m3 | 5080 4K low ends do not reproduce | yes | 1.08–1.11× / 1.12–1.15×, before a transfer-bound haircut |
+| C2-m4 | Acceptance 6 against acceptance 5 | yes | acceptance 6 bounded by the persistent-buffer growth (≈ 0.3% of the share), referencing acceptance 5 |
+| C2-m5 | D7 wording | yes | "≈ 22–27% of ≈ 222 TOPS" |
+
+**FN's requests** (FN rev 2, its panel C's second round), taken into this track before step 5 (lead decision 2):
+
+| Request | Disposition |
+|---|---|
+| A workspace / output argument on `linear_experts@2` / `linear_experts_arena@1` (`plugin.py:464, :481` allocate today) | D10, a std minor; its L0 in §5; step 3b |
+| Contiguous-tail lending from one class arena, evicted slots returning empty | D11 (`moe.ring_lend` = `tail`); its CPU and parity checks in §5; step 3b |
+| IQ1_M: the DS_LAYOUT_D4 case, the MMA and dp4a instances (`mmq.cuh:653, :786`) | D9's hunk list; step 3c |
+| D9 and Q2_0 before step 5 | step 3c |
 
 ### Rev 1.2 → rev 2 (the three-lens panel, 2026-10-18; the lead's decisions; FN rev 2's requirements)
 
@@ -509,7 +646,8 @@ the cited lines.
 
 **FN rev 2 (`32c99f2`, its D1′):**
 - FN's eight types and its shape (E = 512, top-10, H 2,560, I 640) join L0 (§5.1);
-- IQ1_M's native mmq tile loader becomes D9, step 6, before FN's step 4 and outside the propagation round;
+- IQ1_M's native mmq tile loader becomes D9, step 6, before FN's step 4 and outside the propagation round (superseded
+  in rev 3: step 3c, inside the single round);
 - the fallback is a grouped dequant behind `pass_rows`.
 
 **Rev 1.1 → rev 1.2** (the same reviewer; 2 major, 5 minor). The fixes:

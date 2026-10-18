@@ -684,18 +684,20 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   all-resident prefill is 1.6–2.0× Holon's on the RTX 5090. Work: a faster large-batch MoE GEMM path (e.g. dequant to
   a tensor-core GEMM for big chunks instead of mmq's int8 path), measured against FreeToken and llama.cpp, all-resident
   and offloaded. **Step 0 (2026-10-18)** is `spikes/moe_prefill/README.md`, run on an A5000 with all experts resident;
-  the design is `docs/v1-moe-prefill.md` (rev 2: the three-lens panel's findings and the lead's decisions applied).
+  the design is `docs/v1-moe-prefill.md` (rev 3: the three-lens panel's two rounds and the lead's decisions applied).
   - The cause is mmq's launch shape, not int8 against tensor cores. FreeToken runs the same ggml mmq.
   - Holon's resident stacks call it at 512 rows. Its grouped grid launches every slot's column tiles, 76–92% of them
     empty.
   - Planned fixes (D0–D5): larger exact calls per class through the bound kernel's `pass_rows`, a map-free compact
     grouped launch, SwiGLU fused into the gate/up GEMM, and a router for prompt chunks plus larger dense calls
     (bounded).
-  - Predicted on the A5000's numbers: resident 0.96–0.99× / 1.00–1.03× / 1.03–1.04× FreeToken (gated arm) at 1K / 4K
-    / 32K, and the 5080 offload rows 1.08–1.15× / 1.01–1.02× at 4K / 32K. The 32K row against FreeToken's ungated
-    8K chunks (≈ 0.98–0.99×) and D6's decode trade are owner items.
-  - Dequant + bf16 GEMMs are rejected on achieved rates, pending the bar cards' step 0 (D7). IQ1_M's mmq tile loader
-    for FN is this track's step 6.
+  - Predicted on the A5000's numbers: resident 0.96–0.99× / 1.00–1.03× / 1.03–1.04× FreeToken (gated arm, modelled)
+    at 1K / 4K / 32K, and the 5080 offload rows 1.12–1.15× / 1.00–1.06× at 4K / 32K. Step 0 on the bar cards measures
+    FreeToken's gated arm. The 32K row against FreeToken's ungated 8K chunks (≈ 0.98–0.99×) and D6's decode trade
+    are owner items.
+  - Dequant + bf16 GEMMs are rejected on achieved rates, pending the bar cards' step 0 (D7). Before its single
+    propagation round the track also lands FN's needs: IQ1_M's mmq tile loader and Q2_0, passed buffers on
+    `linear_experts`, and contiguous-tail lending.
 - **One version file:** a root `VERSION` read by every distribution at build time (hatchling's version source),
   `holon.__version__` from the installed metadata, and the plan's runtime-closure hash reading `VERSION` for the
   workspace's own packages (`uv.lock` records them as dynamic). It changes the core, so it lands with the next relock
