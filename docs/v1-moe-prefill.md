@@ -1,14 +1,16 @@
 # v1 — MoE prefill speed
 
-Status: **design rev 5 (2026-10-18).** Step 0 is measured on the A5000.
+Status: **design rev 6 (2026-10-18).** Step 0 is measured on the A5000.
 - Rev 2 answered the three-lens panel's first round (A correctness, B architecture, C performance: 3 blockers, 19
   majors, 23 minors).
 - Rev 3 answered its second round and took in FN's requests.
 - Rev 4 answered its third round: D11 goes through the policy contract, and D10's contract is written out.
-- Rev 5 answers the fourth round (A's and C's shared major: the tail step's order and counting; C's minor on the
-  fallback buffer; B clean).
+- Rev 5 answered the fourth round (A's and C's shared major: the tail step's order and counting; C's minor on the
+  fallback buffer).
+- Rev 6 answers the fifth round: A's minor on `lend_tail`'s call number and C's minor on who owns the pass's
+  fallback buffer. B is clean.
 
-All are applied with the lead's decisions (§10). Rev 5 awaits the panel's re-review.
+All are applied with the lead's decisions (§10). Rev 6 awaits the panel's re-review.
 
 This is the follow-up that plan §10 opened when milestone X closed (`docs/v1-offload.md` §13, "Owner decision on the
 gate").
@@ -361,8 +363,11 @@ dense-mmq bound.
       reach `prefill`, the step stages into them. If some class's do not, it sets `SHORT` and `after_commit` raises
       (`ring.py:44-56`, `store.py:482-488`).
     - D11's bind check keeps tail mode away from that raise.
-    - Where no tail is lent (`coldest`, or the resident store), the instance's **allocating fallback** allocates one
-      buffer of `scratch_bytes(pass_rows)` per pass and reuses it for gate/up and then down.
+    - **Where no tail is lent** (`coldest`, or the resident store), `std.moe` allocates the pass's buffer itself (C5).
+      Gate/up and down are separate instances, so neither can own a per-pass buffer:
+      - the buffer is sized to the larger of the two instances' `scratch_bytes(pass_rows)`;
+      - it is passed as `scratch` to both calls, gate/up then down;
+      - an instance allocates its own transients only for callers that pass nothing.
     - The startup profile's worst-case step runs that fallback, so the KV pool is sized for its peak. Step 0 checks
       that the reserved memory after a 32K prefill is ≤ the profiled peak.
   - Today's callers pass nothing, so no snapshot moves.
@@ -400,6 +405,15 @@ dense-mmq bound.
     - **Counting.** `held` and `want` for the tail's class count only slots outside the range. Counting the range
       would let `ring_ok` pass while `pool` holds −1 entries, and the ring would read them.
     - lfu's replay models both calls in this order.
+    - **Bookkeeping** (A5). `lend_tail` takes its own call number. Otherwise `_give_back`, which sorts the lent slots
+      by `lent_call · E + id` against a `ROUNDS · E` sentinel (`ring.py:147-152`), would interleave the tail's slots
+      with the first round's and corrupt the empty stacks.
+      - `lend_tail` is call 0, and the coldest rounds become calls 1…`ROUNDS` (in `coldest` mode, call 0 lends
+        nothing).
+      - `lend_needs` is sized `ROUNDS + 1` (`store.py:227`), and the sentinel becomes `(ROUNDS + 1) · E`.
+      - The `lends` telemetry record (`store.py:240`, `:501`) gains row 0: the tail's need, n at its class and 0
+        elsewhere. lfu's replay (`lfu/reference.py:168-170`) and `placement.parity` (`placement.py:85`) read that
+        shape, replaying row 0 as `lend_tail` when it is non-zero.
   - **The bind check** (the fallback, lead pick).
     - The rule: at bind, and at each materialize where X decides the layout's lending, `moe.ring_lend = tail` is
       refused when the tail class's lendable cache slots outside the range (its arena less the null, staging and
@@ -412,8 +426,11 @@ dense-mmq bound.
   - **Mode.** `moe.ring_lend` = `coldest` (default, X's behaviour) | `tail`, declared in std.moe's `[options]`.
   - **Exactness.** Every placement is exact (X's acceptance 2), so tail lending changes speed, not outputs.
   - **Checks:**
-    - a CPU check of a tail step on a cache with **no spare empties**, at FN's E = 512: `lend_tail`, then the `lend`
-      rounds; `held` excludes the range; `ring_ok` and the pool hold no −1 entries in use; no `SHORT`;
+    - a CPU check of a tail step on a cache with **no spare empties**, at FN's E = 512:
+      - `lend_tail` as call 0, then the `lend` rounds;
+      - `held` excludes the range;
+      - the pool holds no −1 entries in use, and there is no `SHORT`;
+      - after the give-back, the empty stacks and `n_empty` equal the replay's (A5);
     - the bind-time refusal on a configuration whose tail class cannot reach `prefill` outside the range;
     - **policy parity** with `tail` for every policy that accepts it: lfu's replay models `lend_tail`, the whole-expert
       eviction, the spare release (none in lfu) and the whole-entry return;
@@ -571,7 +588,7 @@ and the id maps).
 | 4 | The bars on the bar cards (§5.2's method) | acceptance 1, 2, 3, 5, 6 | 1–2 |
 | 5 | Close: **one** propagation round over the 18 classes, covering D1–D5, D9 / Q2_0, D10, D11 and `pass_rows`; the 5080 offload lock re-filled and re-pinned; `pytest` on a GPU, `scripts/ci/run_all.sh`, panel code review, plan §10 status. FN's step 4 then finds D0, D2, D9, D10 and D11 on main | acceptance 4, 7; its L2 verdicts as its own evidence | 1.5–2 |
 
-**Schedule:** about 15.5–21.5 working days, in the order 0 → 1 → 2 → 3 → 3b → 3c → 4 → 5. Steps 3b and 3c do not depend on
+**Schedule:** about 15.5–22 working days, in the order 0 → 1 → 2 → 3 → 3b → 3c → 4 → 5. Steps 3b and 3c do not depend on
 3 and may run beside it on another GPU. Nothing merges to main before step 5, so no lock is ever left pinning other
 code.
 
@@ -619,6 +636,14 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
   `v1-flash-next.md:376`).
 
 ## 10. Review log
+
+### Rev 5 → rev 6 (the panel's fifth round, 2026-10-18; B clean)
+
+| # | Finding | Verified | Disposition |
+|---|---|---|---|
+| A5-m | `lend_tail` needs its own call number, or `_give_back` (sorted by `lent_call · E + id` against a `ROUNDS · E` sentinel) corrupts the empty stacks | yes (`ring.py:147-152`; `store.py:227, :240, :501`; `lfu/reference.py:168-170`) | `lend_tail` is call 0, the coldest rounds 1…`ROUNDS`; `lend_needs` sized `ROUNDS + 1`; the sentinel `(ROUNDS + 1) · E`; the `lends` record gains row 0, read by lfu's replay and `placement.parity`; the E = 512 CPU tail step checks the empty stacks and `n_empty` after the give-back against the replay's |
+| C5-m | Gate/up and down are separate instances, so no instance can own a per-pass buffer | yes (`MoE._forward` calls two `ExpertLinear`s) | `std.moe` allocates one buffer per pass, sized to the larger `scratch_bytes(pass_rows)`, passed as `scratch` to both; an instance allocates only for callers that pass nothing |
+| C5-nit | The step-day total | yes | 15.5–22 days |
 
 ### Rev 4 → rev 5 (the panel's fourth round, 2026-10-18; B clean)
 

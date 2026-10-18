@@ -684,7 +684,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   all-resident prefill is 1.6–2.0× Holon's on the RTX 5090. Work: a faster large-batch MoE GEMM path (e.g. dequant to
   a tensor-core GEMM for big chunks instead of mmq's int8 path), measured against FreeToken and llama.cpp, all-resident
   and offloaded. **Step 0 (2026-10-18)** is `spikes/moe_prefill/README.md`, run on an A5000 with all experts resident;
-  the design is `docs/v1-moe-prefill.md` (rev 5: the three-lens panel's four rounds and the lead's decisions applied).
+  the design is `docs/v1-moe-prefill.md` (rev 6: the three-lens panel's five rounds and the lead's decisions applied).
   - The cause is mmq's launch shape, not int8 against tensor cores. FreeToken runs the same ggml mmq.
   - Holon's resident stacks call it at 512 rows. Its grouped grid launches every slot's column tiles, 76–92% of them
     empty.
