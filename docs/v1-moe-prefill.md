@@ -1,6 +1,7 @@
 # v1 — MoE prefill speed
 
-Status: **design rev 6 (2026-10-18); building.** Step 0 is measured on the A5000; its bar-card predictions are §2.1.
+Status: **design rev 6 (2026-10-18); building.** Step 0 is measured on the A5000 and the bar cards: predictions §2.1,
+measurements and the restated cells §2.2 (no decision rule tripped).
 - Rev 2 answered the three-lens panel's first round (A correctness, B architecture, C performance: 3 blockers, 19
   majors, 23 minors).
 - Rev 3 answered its second round and took in FN's requests.
@@ -86,7 +87,7 @@ before any code. Every bar is measured by §5.2's method.
 7. **No core diff** and no ABI bump. The std minors are `pass_rows` (§4), the passed buffers (D10) and tail lending
    (D11). Suite time does not grow (lean tests, §5.1).
 
-### 1.1 Predictions per item set (A5000 step 0; the bar cards restate them at step 0)
+### 1.1 Predictions per item set (A5000 step 0; restated from the bar cards in §2.2)
 
 The base is the measured all-4,096 probe (D1 and D5 in, A5000 GPU-busy ms):
 
@@ -198,6 +199,57 @@ is 8,192.
 | P13 | Startup KV tokens, 24 GB locks | 4090 (its lock); 3090 (its lock at the recorded 30,208-token context, 64 seats) | 4090: main ≈ 26K, 4,096 −4.2K, 2,048 −1.8K, every recorded row kept. 3090: main ≥ 30.2K; 4,096 breaks the 30,208-token row, and 2,048 breaks it unless main ≥ 32.0K | O3 |
 | P14 | The `peak_alloc` rise (22.20 → 22.37 GiB at 4,096 passes) | A5000 | a pass-size transient the startup profile does not see: the run's allocation peak over the profiled peak grows by ≈ 0.17 GiB from 512 to 4,096 passes; a memory snapshot at the run's peak names it | §6 |
 | P15 | Reserved bytes after a 32K prefill, over what was allocated at start, against the profiled peak (C4-m) | A5000, 5090 | over the profile already as shipped (the tool's A5000 smoke test read 0.48 GiB reserved against a 0.34 GiB profile after a 4K prompt), by more at 4,096 passes; the 10% `memory_fraction` margin absorbs both | §6, D10's fallback |
+
+### 2.2 Step 0 on the bar cards: measured (2026-10-18)
+
+Records: `evidence/mp0_prefill_rtx-5090_2026-10-18.json`, `mp0_prefill_rtx-5080_…`, `mp0_prefill_rtx-a5000_…`,
+`mp0_kv_rtx-4090_…`, `mp0_kv_rtx-3090_…` (code at main's `b5b1e7f`; the commit adds docs and spikes only). Both bar
+desktops held their clocks (5090 p10 / p50 2,587–2,602 / 2,632–2,647 MHz; 5080 2,760 / 2,760). Time to the first
+token, medians of the fixed prompt set over 2 rounds (10 / 10 / 6 per cell); "×" is FreeToken's time over Holon's.
+
+| # | Measured | Against the prediction |
+|---|---|---|
+| P1 | FreeToken gated / default at 32K: **5090 3.240 / 3.022 s (+7.2%)**, **5080 offload 6.270 / 5.979 s (+4.9%)**, A5000 9.338 / 9.210 s (+1.4%); 1K and 4K equal within 0.6% on every card | 5090 off (+7.2% against +2.6%); 5080 in its band; A5000 under |
+| P2 | 5090 as shipped: 0.632 / 0.503 / 0.666× | held |
+| P3 | 5090 all-4,096 probe: 0.843 / 0.852 / 0.880× (0.944× against the gated arm at 32K) | 32K under the band (attention, P10) |
+| P4 | 5080 natural fit: 1.795 / 0.936 / 0.873× (0.916× against the gated arm); the recorded 0.92× / 0.88× reproduce | held |
+| P5 | Dense mmq: 5090 191–240 TOPS, 5080 101–129; cuBLAS bf16 at T·k = 32K / 64K: **5090 205–226 TFLOPS, 5080 106–114** (at their f32-accumulate peaks); mmq / bf16 0.93–1.18 | mmq held; bf16 far above the band (78%-of-peak assumed), so mmq's edge is ≈ 1.0–1.2×, not 1.1–1.5× |
+| P6 | Dequant per layer: 5090 1.12–1.15 ms, 5080 2.05–2.09 ms | held |
+| P7 | Per layer at 4,096 tokens, shipped mmq with ids against the bf16 bound + dequant: **mmq wins, 5090 by 1.17–1.23×, 5080 by 1.10–1.18×**. Break-even pass: against shipped mmq ≈ 6.1K (5090) and ≈ 5.3K (5080) tokens; against FreeToken's f32 rate (D2's target) ≈ 7.9K / 9.0K; against the dense-mmq bound never | **D7's rule holds** (mmq wins at the locks' 4,096) but with less margin than predicted; an 8,192 pass (D6) sits at the break-even against D2's rate on the 5090 |
+| P8 | FreeToken f32 / bf16 per call: 5090 1.01–1.06 (1.03–1.06 at 4,096), 5080 1.00–1.06, A5000 0.93–1.06 (noise). Holon / FreeToken-f32 at 4,096: 5090 1.04 (gate/up), 1.16 (down); 5080 1.12, 1.26–1.30; A5000 1.14–1.15, 1.26–1.35 | the store costs FreeToken 0–6%; the 5090's gate/up gap is under the band |
+| P9 | J sweep, Holon / FreeToken-f32 per call at T = 16 / 24 / 32 / 40–64: 5090 0.86–0.95 / 0.95–0.99 / 1.0–1.13 / 1.1–1.4; 5080 0.92–1.00 / 0.96–1.06 / 1.07–1.18 / 1.15–1.49; A5000 0.90–0.99 / 0.97–1.19 / 1.04–1.32 / 1.25–1.95 | **off at T ≤ 24**: J against the mean (FreeToken's proxy) is up to 14% slower at 16 rows. D2's own launch is measured against main at T = 16–64 at step 2; if it is slower at any of them, C-M6's fallback (J against T up to 64 rows) is taken |
+| P10 | 5090 nsys at 4K as shipped: expert GEMMs 211 of 332 ms busy (64%). **Attention at 32K: Holon 2,172–2,178 ms, FreeToken 2,038 (default) / 2,220 (gated)** | the attention lead is gone against the default arm (−6.6%); it holds (+1.9%) against the gated arm only |
+| P11 | 5080 nsys at 4K: FreeToken streams 372 ms of its 387 ms wall (transfer-bound); Holon 412 ms busy, compute-bound (streaming 200 ms, overlapped), expert GEMMs 200 ms (48%). The Holon profile ran with a filled cache: under nsys the lock's pinned arena does not fit (C-M7) | FreeToken held; Holon's expert share over the band |
+| P12 | 16 GB lock (5080 UD-IQ3_XXS, 32 seats, 16,384): KV tokens 18,752 as shipped; 18,560 at 2,048 passes (−192); 18,176 with dense 2,048 too (−576); a 16,000-token prompt served in each | better than predicted (−0.2K, not −1.8K): the class takes 2,048 (its step budget) |
+| P13 | 4090 lock: 26,736 → 25,776 at 4,096 (−960), 26,352 at 2,048. 3090 lock: **42,800** → 42,224 at 4,096 (−576), 42,416 at 2,048 | off: the 3090's pool keeps its 30,208-token row at 4,096 (≥ 30,224 needed); every 24 GB class takes 4,096 |
+| P14 | A5000: the run's allocation peak over its start is 0.125 GiB as shipped and 0.391 at 4,096 passes; the profiled peaks are 0.339 and 0.425 GiB (KV −928 tokens) | off: the run never exceeds the profile; the 0.17 GiB `peak_alloc` rise is the profile's slack (0.21 GiB as shipped, set by its sampling and logprob phases) taken up by the larger pass, so §6's live-peak sum over-states D1's KV cost on every class |
+| P15 | Reserved over start after the run, against the profiled peak (GiB): A5000 0.477 / 0.339 shipped, 0.757 / 0.425 at 4,096; 5090 0.453 / 0.339, 0.786 / 0.425; 5080 offload 0.755 / 0.425; 16 GB lock 0.661–0.776 / 0.563; 4090 0.937–1.245 / 0.974; 3090 0.943–1.261 / 0.974 | held, and the margin is thin on the 16 GB lock: its excess at 2,048 passes (0.21 GiB) against the 10% margin (≈ 0.25 GiB). D10's fallback buffer must not add to it |
+
+**§1.1 restated from the bar cards** (the base is each card's measured probe: 5090 the all-4,096 arm, 5080 the natural
+fit, which has D1 already; items from their nsys: D2 to FreeToken's per-token GEMM rate at the same call size, the low
+end at equal I/O, P8; D3 59% of the router, the A5000's ratio; D4 the SwiGLU pass, an upper bound; D5 on the 5080 the
+5090's and the A5000's measured dense ratios, 0.74–0.82; D6 FreeToken's own 8,192-chunk GEMM gain):
+
+| Row (bar) | D1–D3 + D5 | + D4 (the set) | + D6 | ≤ bar |
+|---|---|---|---|---|
+| 5090 resident 1K (≥ 0.95×) | 0.983–0.996× | 1.010–1.025× | — | — |
+| 5090 resident 4K (≥ 1.0×) | **0.966–0.983×** | 1.008–1.027× | — | without D4; within 3% with it |
+| 5090 resident 32K, gated (≥ 1.0×) | **0.999**–1.007× | 1.018–1.026× | 0.964–0.971× (the gated arm then runs 8,192 too: the default's) | within 3% |
+| 5090 resident 32K, default (reported) | 0.931–0.939× | 0.949–0.957× | 0.964–0.971× | — |
+| 5080 offload 4K (≥ 1.0×) | 1.101–1.135× | 1.152–1.189× | — | — |
+| 5080 offload 32K, gated (≥ 1.0×) | **0.989–1.002×** | 1.008–1.021× | not built on this lock (O1) | within 3% |
+| 5080 offload 32K, default (reported; the 0.88× reference, measured 0.873×) | 0.943–0.955× | 0.961–0.974× | 0.977–0.990× at ≈ −2.4% decode (O1) | — |
+| 5080 offload 1K (≥ 1.5×) | 1.944–1.966× | 1.976–1.999× | — | — |
+
+- **No decision rule tripped.** D7's rejection stands at the locks' pass size on both bar cards (P7), and no gated
+  cell falls below its bar with the full set. Three cells sit within 3% of their bars (5090 4K and 32K gated, 5080
+  32K gated): ≥ 5 rounds at step 4. Without D4 the 5090 4K row is under its bar and both 32K gated rows reach it only
+  at their high ends; D4's saving is an upper bound, so these go to the owner (O2) with the measured gated arm.
+- **The gated reference's distance:** FreeToken's gated arm is 4.9% slower than the arm that recorded 0.88× on the
+  5080 (7.2% on the 5090); Holon's natural fit stands at 0.916× against it today.
+- **Changed risks.** The 32K default rows lost the attention lead (P10); the 5080 4K row is compute-bound for Holon,
+  so D2–D5 pay there in full (P11); D1's KV cost is a fraction of §6's (P12–P14): no class needs `ggml_cuda.pass_rows`
+  below its step budget (O3: 2,048 on the 2,048-token locks, 4,096 elsewhere).
 
 ## 3. Decisions
 

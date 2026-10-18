@@ -1,0 +1,22 @@
+[
+ {
+  "name": "holon_ship",
+  "engine": "holon",
+  "args": "--flags '--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-step-tokens 4096 --overlap --page-size 16 --slots logits_processor=grammar.xgrammar --source gguf --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn kv_write=kernels.triton_attn linear_experts=kernels.ggml_cuda moe_combine=kernels.ggml_cuda moe_router=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer'"
+ },
+ {
+  "name": "holon_all4k",
+  "engine": "holon",
+  "args": "--pass-tokens 4096 --expert-rows 4096 --dense-rows 4096 --flags '--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-step-tokens 4096 --overlap --page-size 16 --slots logits_processor=grammar.xgrammar --source gguf --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn kv_write=kernels.triton_attn linear_experts=kernels.ggml_cuda moe_combine=kernels.ggml_cuda moe_router=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer'"
+ },
+ {
+  "name": "ft_fused",
+  "engine": "freetoken",
+  "args": "--flags '--moe-strategy fused'"
+ },
+ {
+  "name": "ft_fused_g4096",
+  "engine": "freetoken",
+  "args": "--flags '--moe-strategy fused --max-extend-length 4096'"
+ }
+]

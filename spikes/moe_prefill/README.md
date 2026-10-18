@@ -201,3 +201,13 @@ python spikes/moe_prefill/record.py --timed <dir>/timed --nsys <dir>/nsys --gemm
 ```
 
 Every command ran pinned to one GPU (`CUDA_VISIBLE_DEVICES`) under a memory cap.
+
+## Bar cards (docs/v1-moe-prefill.md §2.1–§2.2)
+
+The same driver on the RTX 5090 (resident, the 5090 lock's flags), the RTX 5080 (the natural-fit offload lock) and
+the A5000 again, with the fixed prompt set (`--reps 5 5 3`), FreeToken's gated arm (`--max-extend-length 4096`), the
+startup memory terms, and the startup KV tokens of the 16 GB, 4090 and 3090 locks (`kv_*.json`; `--pass-tokens` /
+`--expert-rows` probes): `arms_<card>.json`, `arms_<card>_nsys.json` (`arms_5080_nsys_fill.json`: the Holon offload
+arm with a filled cache, as the lock's pinned arena does not fit under nsys), `gemm.py --freetoken --f32` (equal I/O)
+and `--tokens 16 … 64` (the batched-decode J sweep). Records: `evidence/mp0_*_<class>_2026-10-18.json`
+(`record.py --timed … --nsys … --gemm … --kv …`).

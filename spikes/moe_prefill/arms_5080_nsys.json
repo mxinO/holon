@@ -1,0 +1,26 @@
+[
+ {
+  "name": "nsys_holon_nat",
+  "engine": "holon",
+  "args": "--profile --flags '--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-step-tokens 4096 --overlap --page-size 16 --plugin-options moe.cache=gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618 moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.ring_copy=dma moe.store=std.moe.offload@1 --slots logits_processor=grammar.xgrammar --source gguf --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_combine=kernels.ggml_cuda moe_resolve.lfu=kernels.expert_io moe_router=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer --host-memory 21474836480'",
+  "nsys": "nsys profile -t cuda,nvtx --capture-range=cudaProfilerApi --capture-range-end=stop -f true -o {out}"
+ },
+ {
+  "name": "nsys_holon_nat_dense4k",
+  "engine": "holon",
+  "args": "--profile --dense-rows 4096 --flags '--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-step-tokens 4096 --overlap --page-size 16 --plugin-options moe.cache=gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618 moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.ring_copy=dma moe.store=std.moe.offload@1 --slots logits_processor=grammar.xgrammar --source gguf --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_combine=kernels.ggml_cuda moe_resolve.lfu=kernels.expert_io moe_router=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer --host-memory 21474836480'",
+  "nsys": "nsys profile -t cuda,nvtx --capture-range=cudaProfilerApi --capture-range-end=stop -f true -o {out}"
+ },
+ {
+  "name": "nsys_ft_nat",
+  "engine": "freetoken",
+  "args": "--profile --flags '--moe-cache-rate 0.527'",
+  "nsys": "nsys profile -t cuda,nvtx --capture-range=cudaProfilerApi --capture-range-end=stop -f true -o {out}"
+ },
+ {
+  "name": "nsys_ft_nat_g4096",
+  "engine": "freetoken",
+  "args": "--profile --flags '--moe-cache-rate 0.527 --max-extend-length 4096'",
+  "nsys": "nsys profile -t cuda,nvtx --capture-range=cudaProfilerApi --capture-range-end=stop -f true -o {out}"
+ }
+]
