@@ -1,0 +1,312 @@
+{
+ "measurement": "K step 1's core plants, each against the core test it must fail (CPU)",
+ "command": "python spikes/k1_core/plants.py",
+ "commit": "f5a36fd3d4b9b5cca1ecf1510925f3681a52933a",
+ "dirty": false,
+ "gpu_only": {
+  "store_no_after": "a store issued after the committed step, not the last launched one: a stream-timing plant for step 2 (GPU)"
+ },
+ "plants": {
+  "abandon_under_request": {
+   "file": "prefix.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_clear_leaves_requests_their_units_and_loads_with_any_lru_order"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_clear_leaves_requests_their_units_and_loads_with_any_lru_order"
+   ]
+  },
+  "no_waiterless": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_state_liveness.py"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[20-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[26-True]"
+   ]
+  },
+  "no_rerun_fixed_point": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_hit_is_trimmed_to_its_units_and_to_payloads_the_tier_still_holds"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_hit_is_trimmed_to_its_units_and_to_payloads_the_tier_still_holds"
+   ]
+  },
+  "promote_after_last_only": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_promotion_into_units_freed_under_a_store_waits_for_it"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_promotion_into_units_freed_under_a_store_waits_for_it"
+   ]
+  },
+  "branch_from_kids": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_staging_unit_is_reused_only_after_its_payload_is_stored"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_staging_unit_is_reused_only_after_its_payload_is_stored"
+   ]
+  },
+  "promote_not_pure": {
+   "file": "prefix.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_hit_is_trimmed_to_its_units_and_to_payloads_the_tier_still_holds"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_hit_is_trimmed_to_its_units_and_to_payloads_the_tier_still_holds"
+   ]
+  },
+  "staging_not_freed": {
+   "file": "prefix.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_staging_unit_is_reused_only_after_its_payload_is_stored"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_staging_unit_is_reused_only_after_its_payload_is_stored"
+   ]
+  },
+  "store_no_copy": {
+   "file": "prefix.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_joining_request_waits_for_the_load_and_an_eviction_store_after_it"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_joining_request_waits_for_the_load_and_an_eviction_store_after_it"
+   ]
+  },
+  "double_fence": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_state_liveness.py"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[20-True]"
+   ]
+  },
+  "climb_with_policy": {
+   "file": "prefix.py",
+   "tests": [
+    "core/tests/test_prefix.py::test_an_eviction_policy_keeps_the_roots_under_pressure"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_prefix.py::test_an_eviction_policy_keeps_the_roots_under_pressure"
+   ]
+  },
+  "drop_top_only": {
+   "file": "prefix.py",
+   "tests": [
+    "core/tests/test_state_liveness.py"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[3-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[4-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[5-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[6-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[7-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[13-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[14-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[15-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[17-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[18-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[20-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[21-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[22-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[23-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[24-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[25-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[26-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[27-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[28-True]",
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[29-True]"
+   ]
+  },
+  "promote_in_place_no_after": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_recomputed_block_only_the_tier_holds_is_promoted_into_place"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_recomputed_block_only_the_tier_holds_is_promoted_into_place"
+   ]
+  },
+  "swap_onto_lower": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_tiers.py::test_steps_and_outputs_never_depend_on_when_copies_land"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_tiers.py::test_steps_and_outputs_never_depend_on_when_copies_land"
+   ]
+  },
+  "joiner_no_wait": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_joining_request_waits_for_the_load_and_an_eviction_store_after_it"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_joining_request_waits_for_the_load_and_an_eviction_store_after_it"
+   ]
+  },
+  "publish_no_wait": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_recomputed_block_only_the_tier_holds_is_promoted_into_place"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_recomputed_block_only_the_tier_holds_is_promoted_into_place"
+   ]
+  },
+  "payload_load_after_empty": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_recomputed_block_only_the_tier_holds_is_promoted_into_place"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_recomputed_block_only_the_tier_holds_is_promoted_into_place"
+   ]
+  },
+  "gate_off": {
+   "file": "sched.py",
+   "tests": [
+    "core/tests/test_tiers.py::test_steps_and_outputs_never_depend_on_when_copies_land"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_tiers.py::test_steps_and_outputs_never_depend_on_when_copies_land"
+   ]
+  },
+  "pull_latest": {
+   "file": "sched.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_when_only_gated_requests_are_left_the_earliest_due_runs"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_when_only_gated_requests_are_left_the_earliest_due_runs"
+   ]
+  },
+  "resident_lower_kept": {
+   "file": "prefix.py",
+   "tests": [
+    "core/tests/test_tiers.py::test_steps_and_outputs_never_depend_on_when_copies_land"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_tiers.py::test_steps_and_outputs_never_depend_on_when_copies_land"
+   ]
+  },
+  "no_poll_at_commit": {
+   "file": "engine.py",
+   "tests": [
+    "core/tests/test_tiers.py::test_steps_and_outputs_never_depend_on_when_copies_land"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_tiers.py::test_steps_and_outputs_never_depend_on_when_copies_land"
+   ]
+  },
+  "hit_none": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_unit_freed_under_a_store_is_reused_only_after_it_and_a_hit_reads_the_tier"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_unit_freed_under_a_store_is_reused_only_after_it_and_a_hit_reads_the_tier"
+   ]
+  },
+  "release_keeps_due": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_state_liveness.py"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_state_liveness.py::test_shared_prefix_traffic_always_finishes[26-True]"
+   ]
+  },
+  "no_poll_after_promote": {
+   "file": "prefix.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_hit_is_trimmed_to_its_units_and_to_payloads_the_tier_still_holds"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_hit_is_trimmed_to_its_units_and_to_payloads_the_tier_still_holds"
+   ]
+  },
+  "no_refit_after_poll": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_hit_is_trimmed_to_its_units_and_to_payloads_the_tier_still_holds"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_hit_is_trimmed_to_its_units_and_to_payloads_the_tier_still_holds"
+   ]
+  },
+  "waits_from_trimmed": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_joining_request_waits_for_the_load_and_an_eviction_store_after_it"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_joining_request_waits_for_the_load_and_an_eviction_store_after_it"
+   ]
+  },
+  "no_settle": {
+   "file": "state.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_a_request_keeps_its_last_tentative_payloads"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_a_request_keeps_its_last_tentative_payloads"
+   ]
+  },
+  "policy_unguarded": {
+   "file": "prefix.py",
+   "tests": [
+    "core/tests/test_prefix.py::test_an_eviction_policy_keeps_the_roots_under_pressure"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_prefix.py::test_an_eviction_policy_keeps_the_roots_under_pressure"
+   ]
+  },
+  "clear_via_drop": {
+   "file": "prefix.py",
+   "tests": [
+    "core/tests/test_payloads.py::test_clear_leaves_requests_their_units_and_loads_with_any_lru_order"
+   ],
+   "verdict": "fails",
+   "failed": [
+    "core/tests/test_payloads.py::test_clear_leaves_requests_their_units_and_loads_with_any_lru_order"
+   ]
+  }
+ },
+ "caught": "28 / 28"
+}
