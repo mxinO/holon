@@ -2,9 +2,9 @@
  "name": "fn0_n3_roofline",
  "date": "2026-10-18",
  "gpu": "rtx-5080",
- "commit": "0e6f5b58539b3fbc5e6342288d64f2f25cdd3871",
+ "commit": "72e06886d4d622d7f380d6fb44a88f916f617249",
  "command": "python spikes/fn0/n3_roofline.py --card rtx-5080 ...",
- "method": "**Decode** (per token): t = (dense bytes + GDN state + hit bytes) / BW + miss bytes / PCIe + per-step overhead.\n- dense bytes per token: every non-expert tensor of the file but the embedding and the PLE table (GGUF headers);\n  GDN state: 36 layers x 48 x 128 x 128 fp32, read and written;\n- hit rate: Holon's `placement.lfu@1` per layer, seeded from the expert profile, replayed on Strata's own decode\n  routing (`--dump-routing`, tail skip off) at \u00a77's cache (`slots_per_layer`; checked against Strata's measured hit\n  rate at Strata's own cache size);\n- BW: 85% of the card's DRAM bandwidth; PCIe and the overhead from X's two Holon rows on the RTX 5080 (Qwen3-30B-A3B\n  lfu and static at 25%: the slope of time over miss bytes gives the F5a fetch rate, the rest the per-step overhead,\n  scaled from X's ~11 to FN's 16 launches per layer);\n- MTP: Holon's verify passes accept as Strata's do (the same pack, full head, min-p 0), so the MTP ratio is the\n  drafting-off ratio; A1 (tail skip) gains what Strata's tail skip gains between its no-approx and defaults rows.\n\n**Prefill** (per request): Strata's phase timers (`STRATA_PREFILL_TIMING`, St prefill.cpp:2000-2012) give each\nphase's share of its prompt time; Holon's time is Strata's gated time x the sum of share x f over phases, f being\nHolon's cost per phase relative to Strata's: 1.0 for the ggml mmq expert and dense GEMMs (assumes the MoE prefill\ntrack's D1-D5 and IQ1_M's native loader, D1'), and bands for the parts FN writes in Triton (HC in fp32 ieee, GDN,\nQSA). Below 1,024 tokens Strata's CPU share runs and Holon's chunk is bound below by streaming the non-resident\nexperts over PCIe (`max`).",
+ "method": "**Decode** (per token): t = (dense bytes + GDN state + hit bytes) / BW + miss bytes / PCIe + per-step overhead.\n- dense bytes per token: every non-expert tensor of the file but the embedding and the PLE table (GGUF headers);\n  GDN state: 36 layers x 48 x 128 x 128 fp32, read and written;\n- hit rate: Holon's `placement.lfu@1` per layer, seeded from the expert profile, replayed on Strata's own decode\n  routing (`--dump-routing`, tail skip off) at \u00a77's cache (`slots_per_layer`; checked against Strata's measured hit\n  rate at Strata's own cache size);\n- BW: 85% of the card's DRAM bandwidth; PCIe and the overhead from X's two Holon rows on the RTX 5080 (Qwen3-30B-A3B\n  lfu and static at 25%: the slope of time over miss bytes gives the F5a fetch rate, the rest the per-step overhead,\n  scaled from X's ~11 to FN's 16 launches per layer);\n- MTP: Holon's verify passes accept as Strata's do (the same pack, full head, min-p 0), so the MTP ratio is the\n  drafting-off ratio; A1 (tail skip) gains what Strata's tail skip gains between its no-approx and defaults rows.\n\n**Prefill** (per request): Strata's phase timers (`STRATA_PREFILL_TIMING`, St prefill.cpp:2000-2012) give each\nphase's share of its prompt time; Holon's time is Strata's gated time x the sum of share x f over phases, f being\nHolon's cost per phase relative to Strata's: 1.0 for the ggml mmq expert and dense GEMMs (assumes the MoE prefill\ntrack's D1-D5 and IQ1_M's native loader, D1'), and bands for the parts FN writes in Triton (HC in fp32 ieee, GDN,\nQSA). A step is also bound below by streaming the non-resident experts its tokens route to over PCIe: at 1K the\nrouted share of them comes from windows of the decode routing trace (1,024 consecutive tokens; 1.0 beyond the\ntrace's length).",
  "inputs": {
   "x_fit": {
    "f5a_fetch_gbps": 40.32,
@@ -109,11 +109,12 @@
      "high": 92.9
     },
     "prefill": {
-     "central": 1681.0,
+     "central": 1807.8,
      "low": 1339.1,
-     "high": 1681.0
+     "high": 2086.2
     },
-    "prefill_stream_cap": 1681.0
+    "prefill_stream_cap": 2124.5,
+    "routed_nonresident_share": 0.791
    },
    "ratios": {
     "noapprox_off_decode": {
@@ -137,14 +138,14 @@
      "high": 0.981
     },
     "noapprox_prefill": {
-     "central": 1.036,
+     "central": 1.115,
      "low": 0.826,
-     "high": 1.036
+     "high": 1.286
     },
     "defaults_prefill": {
-     "central": 1.086,
+     "central": 1.168,
      "low": 0.865,
-     "high": 1.086
+     "high": 1.348
     }
    },
    "strata_phase_shares": {
@@ -189,7 +190,8 @@
      "low": 2042.1,
      "high": 3032.9
     },
-    "prefill_stream_cap": 6724.0
+    "prefill_stream_cap": 6724.0,
+    "routed_nonresident_share": 1.0
    },
    "ratios": {
     "noapprox_off_decode": {
@@ -265,7 +267,8 @@
      "low": 2216.8,
      "high": 3289.2
     },
-    "prefill_stream_cap": 13447.9
+    "prefill_stream_cap": 13447.9,
+    "routed_nonresident_share": 1.0
    },
    "ratios": {
     "noapprox_off_decode": {

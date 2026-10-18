@@ -1023,3 +1023,129 @@ document.
 - **5090 expert cache:** 21.6 → 21.45 GB, still 43%.
 - **Schedule:** unchanged, 45 days of work and 36 on the critical path. The forced-dense mode and the MTP arm fit in
   step 5; the MTP source layout fits in step 2.
+
+## 13. Step 0 record (2026-10-18)
+
+**Status: step 0 measured; N3's decision rule tripped** (rows predicted below 0.9×, §8). Escalated to the owner before
+step 1. Step 1 waits for K's core round anyway. Step 2 is not started beyond what the oracle check needed (the judge's
+`qwen4exp` reader and the tiny model, below). Predictions were committed before any run
+(`evidence/fn0_predictions_2026-10-18.json`).
+
+**N0, the harness** (`bench/offload_ctx.py`, `spikes/fn0/arms_*.json`, `bench/setup_baselines.sh fn`):
+- **Strata.** Built at `296b59d` with its pinned ggml (llama.cpp `3cf03257`), for sm_120, with `-march=native` on the
+  bar cards' host class. Its packs come from `tools/iq_pack.py`, 1.5 GB each; the experts are read from the GGUF.
+- **MTP pack** `mtp-q2_0.gguf`: sha256 `a22206a4d74eafbf31063a84610292535fb3b49af9a339963817fd04aed81e4d`. Produced by
+  `tools/mtp_fetch.py fetch` (checkpoint `de4b8e4d`, all 31 tensors sha256-verified) and then
+  `tools/mtp_pack.py --experts q2_0`.
+- **Raw ids and EOS.** The client drives `--serve` with raw ids (`GEN 256 <ids>`). `--eos-ids 999999` works as
+  ignore-EOS: every timed request ended at its length, so no span needed pre-screening.
+- **No reuse.** With `--prompt-cache 0`, every timed request logged 0 reused tokens. `--max-context 33792` is set.
+- **Drafting off.** A native pack refuses `--spec` < 2, so drafting off is `--spec 2` without `--mtp`, with
+  `--suffix-draft 0`. With no drafts, `--spec 2` and `--spec 4` decode alike (89.1 vs 90.8 tok/s).
+- **Calibration** (`tools/calibrate.py`, setup's command, recorded in `evidence/fn0_calibrate_<card>`):
+  - RTX 5080: `--pcie-frac 0.55 --spec-min-p 0.70 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97`;
+  - RTX 5090: `--adapt-every 1 --adapt-swaps 80 --adapt-decay 0.97`.
+  - Every Strata arm takes them. The MTP-matched arms keep `--spec-min-p 0`.
+- **Corpus.** N = 189,707 tokens, sha256 `de504e58…`. The 32K candidates overlap by 1,151 tokens.
+
+**N1** (5 rounds × 3 spans, the median of the 15 values; tok/s; prefill / decode at 1K · 4K · 32K):
+
+| Card, file | Row | Prefill | Decode | Accepted per pass | Strata's cache |
+|---|---|---|---|---|---|
+| RTX 5080 IQ2_XS | no-approx, off | 1,622 · 2,727 · 3,086 | 89.9 · 89.5 · 83.9 | — | 7,658 slots, 10.26 GiB (31%) |
+| | no-approx, MTP | 1,570 · 2,703 · 3,062 | 131.1 · 108.8 · 118.5 | 2.84 · 2.46 · 3.01 | |
+| | defaults, off | 1,548 · 2,675 · 3,701 | 99.3 · 96.4 · 92.0 | — | |
+| | defaults, MTP | 1,522 · 2,656 · 3,674 | 154.6 · 129.2 · 142.6 | 2.37 · 1.79 · 2.46 | |
+| | llama.cpp 27c7a76 (`-fit`, 3 rounds) | 401 · 418 · 403 | 36.5 · 36.1 · 34.3 | — | |
+| RTX 5090 IQ3_S | no-approx, off | 2,124 · 4,607 · 5,650 | 113.3 · 110.5 · 105.8 | — | 13,183 slots, 25.03 GiB (54%) |
+| | no-approx, MTP | 2,086 · 4,572 · 5,622 | 189.9 · 147.9 · 177.0 | 3.01 · 2.49 · 3.05 | |
+| | defaults, off | 1,955 · 4,001 · 6,500 | 121.2 · 118.0 · 114.8 | — | |
+| | defaults, MTP | 1,909 · 3,996 · 6,464 | 206.7 · 177.0 · 197.3 | 2.64 · 2.13 · 2.94 | |
+| | llama.cpp 27c7a76 (`-fit`, 3 rounds) | 479 · 507 · 477 | 47.1 · 47.0 · 46.6 | — | |
+
+- **Against the predictions** (`evidence/fn0_predictions_2026-10-18.json`):
+  - Strata's decode came in above them: no-approx off 90 vs 70 (RTX 5080) and 113 vs 95 (RTX 5090); MTP-matched
+    131 / 109 / 119 vs 110 / 105 / 95 on the 5080.
+  - Its prefill was within the band: 1.62K / 2.73K / 3.09K vs 1.6K / 3.0K / 3.0K (5080), 2.12K / 4.61K / 5.65K vs
+    2.0K / 5.0K / 5.0K (5090).
+  - llama.cpp's decode was above its prediction (36 vs 25–30; 47 vs 35–45) and its prefill below (≈ 400 vs 500–700).
+- **FreeToken `21d9578` cannot serve these files:**
+  - IQ2_XS fails with "no ggml MoE kernel for iq1_m with T=2048";
+  - IQ3_S drops every prompt over 8,192 tokens despite `--max-seq-len-override 33792`. At 1K / 4K only (3 rounds), it
+    runs at 907 / 3,202 prefill and 112.5 / 113.1 decode tok/s on the RTX 5090
+    (`evidence/fn0_n1_freetoken_rtx-5090_2026-10-18.json`).
+  - Its row stays reported-only (D11).
+
+**Found on the way:**
+- **Strata's VRAM fit is much larger than §7's Holon budget.** It reserves 700 MiB, uses no 0.9 factor, and borrows
+  4.18 GiB of its cache for the prompt path, which gives 31% / 54% cached against §7's 19% / 43%.
+  - Its decode hit rate is 86–89% on the 5080 and 92–93% on the 5090.
+  - Holon's `lfu`, replayed on Strata's own decode routing at Strata's cache size, gives 87.8% / 95.3%, so the replay
+    matches. At §7's cache it gives 78.2% / 92.7%.
+- **D11's 1K premise is wrong but harmless.** Strata reads a 1,024-token prompt as a 1,023-token chunk, so its CPU
+  share (on by default below 1,024; its log says mean KL ≈ 0.004) is armed. Measured with
+  `STRATA_PREFILL_CPU_SHARE=0` it makes no difference: 1,623 vs 1,623 and 2,120 vs 2,124 tok/s (3 rounds,
+  `evidence/fn0_n1_cpu_share_<card>`).
+- **The MTP bytes differ.** Strata's runtime draft layer (`tools/mtp_rt.py`) re-quantizes the pack's BF16 dense parts
+  to Q8_0. "Identical bytes" (D9) holds for the pack, not for Strata's runtime: Holon's BF16 reads are larger per
+  draft.
+- **What Strata's defaults gain over no-approx, beyond its tail skip:**
+  - int8 KV adds +20% / +15% to 32K prefill;
+  - the suffix drafter with the calibrated draft floor adds +18% / +20% to 4K MTP decode.
+- **The non-lendable step peak** (`spikes/fn0/n3_peak.py`; one GDN and one QSA layer with the shipped FLA kernel, HC
+  unfused) is **222 KB per token** at 2K–8K steps (predicted 200). §7's 8K-step cache on the 5080 drops from 6.7 to
+  6.5 GB.
+
+**N2** (`spikes/fn0/n2_rows.py`, `evidence/fn0_n2_rows_<card>`):
+- **Zero-copy row gather.** 6.7 / 7.4 µs for 1 token, then 0.50 / 0.43 µs per token from 1K tokens on (RTX 5080 /
+  5090). That is 3.4× the predicted 0.15 µs, but 4 ms per 8K step is still negligible.
+- **O_DIRECT 4 KiB reads.** The SSD saturates at about 380K IOPS (1.56 GB/s) from queue depth 64 with 2 submitting
+  threads; p50 is 150 µs at queue depth 64. Predicted: 450K at 64 and 600K at 256.
+  - At 16 rows per token without deduplication, that serves about 24K prefill tok/s.
+  - **D5's read-ahead:** queue depth 64 over 2 threads.
+
+**N3, the proxy roofline** (`spikes/fn0/n3_roofline.py`, `evidence/fn0_n3_roofline_<card>`; method in its
+docstring):
+- **Inputs:**
+  - `lfu` replayed on Strata's decode routing at §7's cache (with the measured peak);
+  - X's F5a fetch rate (40.3 GB/s) and per-step overhead (1.82 ms, scaled to 16 launches per layer: 2.64 ms);
+  - Strata's prefill phase shares, with Holon's cost per phase: HC ×1.5, GDN ×1.1, QSA ×1.2, IQ1_M dequant ×0.5, and
+    mmq ×1.0, which assumes the MoE prefill track's D1–D5;
+  - the PCIe streaming bound of a step's routed non-resident experts.
+- **Holon / Strata, central [band]:**
+
+| Row | RTX 5080: 1K · 4K · 32K | RTX 5090: 1K · 4K · 32K |
+|---|---|---|
+| no-approx, off, decode | 0.96 · 0.95 · 1.01 [0.89–1.09] | 1.11 · 1.11 · 1.17 [1.01–1.29] |
+| no-approx, MTP, decode (same acceptance) | as off | as off |
+| no-approx, prefill | 1.12 · 0.97 · 0.92 [0.72–1.29] | 1.05 · 1.00 · 0.95 [0.73–1.15] |
+| defaults vs Holon + A1, off, decode | as no-approx (A1 assumed to gain what Strata's tail skip gains) | as no-approx |
+| defaults vs Holon + A1, MTP, decode | 0.91 · **0.87 · 0.88** | 1.09 · 0.99 · 1.15 |
+| defaults vs Holon + A1, prefill (q8_0 KV gain not modelled) | 1.17 · 0.99 · **0.77** | 1.14 · 1.15 · **0.83** |
+
+- **Rows predicted below 0.9× (central):**
+  - RTX 5080: defaults MTP decode at 4K and 32K; defaults prefill at 32K.
+  - RTX 5090: defaults prefill at 32K.
+- **The no-approx rows** are all ≥ 0.92 at the centre, but the RTX 5080's decode sits at the 1.0× bar (0.95–1.01)
+  and several bands reach below 0.9.
+- **Causes:**
+  - 32K defaults prefill: Strata's int8 KV, against Holon's q8_0 KV, which has no prefill gain in the model;
+  - defaults MTP: Strata's suffix drafter (a non-goal for Holon);
+  - the 5080's decode margin: §7's smaller cache.
+
+**The oracle check (N4's 32K run)** (`spikes/fn0/n4_oracle.py`):
+- **The judge reads FN's GGUFs** (`judge/holon_judge/gguf.py`, `golden.py`, `moe.py`): the `qwen4exp` name map, split
+  files, the indexer's fused q/k, lazy PLE rows with the hash constants checked, the scoped tie rule, the mixer as the
+  final norm, and the head in row blocks.
+- **On the tiny model the streamed golden equals HF's whole forward bit for bit** (`judge/tests/test_golden_qwen4exp.py`,
+  in the golden venv).
+- **The 32K `recall-32k` prompt on IQ2_XS, CPU, 32 threads:** HF's attention did not run out of memory, so the
+  query-block mode is not needed. Peak RSS was 47 GB. A layer takes 85–190 s (QSA ≈ 170 s), and the whole prompt takes
+  about 2 h. Final numbers are in `evidence/fn0_n4_oracle_2026-10-18.json`.
+
+**For the owner** (no redesign done):
+- whether the defaults rows are gated against Holon + A1 as they stand, given the suffix drafter (a non-goal) and
+  int8 vs q8_0 KV;
+- whether §7's budget should approach Strata's fit (700 MiB reserve, prompt-path borrowing) to restore the 5080's
+  decode margin;
+- whether no-approx Strata should run with `STRATA_PREFILL_CPU_SHARE=0`, exact by construction at no measured cost.

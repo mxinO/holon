@@ -18,8 +18,9 @@ medians of its gated runs (N1). Fixed before the comparison and recorded with th
 phase's share of its prompt time; Holon's time is Strata's gated time x the sum of share x f over phases, f being
 Holon's cost per phase relative to Strata's: 1.0 for the ggml mmq expert and dense GEMMs (assumes the MoE prefill
 track's D1-D5 and IQ1_M's native loader, D1'), and bands for the parts FN writes in Triton (HC in fp32 ieee, GDN,
-QSA). Below 1,024 tokens Strata's CPU share runs and Holon's chunk is bound below by streaming the non-resident
-experts over PCIe (`max`).
+QSA). A step is also bound below by streaming the non-resident experts its tokens route to over PCIe: at 1K the
+routed share of them comes from windows of the decode routing trace (1,024 consecutive tokens; 1.0 beyond the
+trace's length).
 
     python spikes/fn0/n3_roofline.py --card rtx-5080 --out <record.json>
 """
@@ -35,6 +36,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "bench"))
+import routing  # noqa: E402  (spikes/fn0/routing.py, beside this file)
 import run  # noqa: E402
 
 CARDS = {   # file, dense GB, expert MB per (layer, expert), DRAM GB/s x 0.85, §7's cache (GB, 8K steps), Holon PCIe
@@ -87,6 +89,20 @@ def factor(ph: dict[str, float], which: int) -> float:
     return sum(v * F.get(k, (1.0, 1.0, 1.0))[which] for k, v in ph.items()) / total
 
 
+def routed_share(trace: str, profile: str, slots: int, window: int) -> float:
+    """The mean share of a layer's non-resident experts (the profile's first `slots` resident) that `window`
+    consecutive tokens of the trace route to; 1.0 when the trace is shorter than the window."""
+    tokens, order = routing.read(trace), routing.profile(profile)
+    if window > len(tokens):
+        return 1.0
+    shares = []
+    for a in range(0, len(tokens) - window + 1, 256):
+        hit = sum(len(set(tokens[a:a + window, layer].ravel().tolist()) - set(order[layer][:slots]))
+                  for layer in range(LAYERS))
+        shares.append(hit / (LAYERS * (512 - slots)))
+    return statistics.mean(shares)
+
+
 def lfu_hit(table: dict[str, float], slots: float) -> float:
     pts = sorted((int(k), v) for k, v in table.items())
     for (s0, h0), (s1, h1) in zip(pts, pts[1:], strict=False):
@@ -101,6 +117,8 @@ def main() -> None:
     ap.add_argument("--strata", required=True, help="the gated Strata run's record.json (bench/offload_ctx.py)")
     ap.add_argument("--diag", required=True, help="the diagnostic run's server log (prefill timers)")
     ap.add_argument("--lfu", required=True, help="spikes/fn0/routing.py's output for this card's trace")
+    ap.add_argument("--trace", required=True, help="the card's Strata decode routing trace (--dump-routing)")
+    ap.add_argument("--profile", required=True, help="Strata's data/expert-profile.bin")
     ap.add_argument("--peak-kb", type=float, default=200.0, help="the measured non-lendable peak per token (N3)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -126,15 +144,17 @@ def main() -> None:
         pf_lo = statistics.median(factor(p, 2) for p in ph[c])               # the slow bound: high f
         pf_hi = statistics.median(factor(p, 1) for p in ph[c])
         s_pf = med("strata_na_off", "prefill_tps")
-        stream_s = (LAYERS * 512 - cache_gb * 1e3 / card["expert_mb"]) * card["expert_mb"] / 1e3 / PCIE_STREAM
-        cap = c / stream_s if c <= 8192 else c / (c / 8192 * stream_s)
+        share = routed_share(a.trace, a.profile, round(slots), min(c, 8192))
+        stream_s = share * (LAYERS * 512 - cache_gb * 1e3 / card["expert_mb"]) * card["expert_mb"] / 1e3 / PCIE_STREAM
+        cap = min(c, 8192) / stream_s
         h_pf = {w: min(s_pf / f, cap) for w, f in (("central", pf), ("low", pf_lo), ("high", pf_hi))}
         rows[str(c)] = {
             "strata": {"na_off_decode": round(s_off, 2), "na_mtp_decode": round(s_mtp, 2),
                        "def_off_decode": round(d_off, 2), "def_mtp_decode": round(d_mtp, 2),
                        "na_prefill": round(s_pf, 1), "def_prefill": round(med("strata_def_off", "prefill_tps"), 1)},
             "holon": {"decode_off": {k: round(v, 1) for k, v in dec.items()},
-                      "prefill": {k: round(v, 1) for k, v in h_pf.items()}, "prefill_stream_cap": round(cap, 1)},
+                      "prefill": {k: round(v, 1) for k, v in h_pf.items()}, "prefill_stream_cap": round(cap, 1),
+                      "routed_nonresident_share": round(share, 3)},
             "ratios": {
                 "noapprox_off_decode": {k: round(v / s_off, 3) for k, v in dec.items()},
                 "noapprox_mtp_decode": {k: round(v / s_off, 3) for k, v in dec.items()},     # same acceptance
