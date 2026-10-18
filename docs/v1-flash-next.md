@@ -1,6 +1,6 @@
 # v1 — FN: Qwen3.8-Flash-Next on Holon, then its expert offload compared with Strata
 
-Status: **rev 3 (2026-10-18), the second panel round applied.**
+Status: **rev 4 (2026-10-18), the third panel round applied: minors only, no majors.**
 - **Round 1 (rev 1 → rev 2):**
   - Panel A (architecture): 1 blocker, 7 majors, 9 minors.
   - Panel B (correctness): 2 blockers, 8 majors, 12 minors.
@@ -9,6 +9,7 @@ Status: **rev 3 (2026-10-18), the second panel round applied.**
   - Panel A: 1 major, 3 minors.
   - Panel B: 2 majors, 7 minors.
   - Panel C: 1 major, 7 minors.
+- **Round 3 (rev 3 → rev 4):** A 3, B 3, C 1 minor + 2 nits.
 
 Every finding was checked against the code; the disposition of each is in §12. The lead's decisions for both rounds
 are applied; §11 records them.
@@ -30,7 +31,9 @@ Parameters marked "est." freeze when step 0's evidence lands (§8).
 **Depends on the MoE prefill track** (`docs/v1-moe-prefill.md`):
 - That track owns `LinearExperts`' prefill dispatch and `kernels.ggml_cuda`'s `vendor.patch`.
 - It lands first, with its own lock propagation, before FN's step 4.
-- FN rebases onto it and uses its D1–D3 and D5.
+- FN rebases onto it and uses its D1–D5, including D4, which fuses SwiGLU into gate/up's mmq store.
+- At FN's top-10 shape the track's `pass_rows` is **3,072**: ⌊32,768 ÷ 10⌋ rounded down to whole 512-row `CHUNK`s
+  (track doc §5's FN rows).
 - **What FN needs from it** (the lead has sent these to that track; FN refers to them by these names):
   - **(T1)** a workspace / output argument on `linear_experts@2` and `linear_experts_arena@1`;
   - **(T2)** contiguous-tail lending from one class arena, with the evicted slots returning empty;
@@ -157,9 +160,17 @@ GGUF headers were parsed by HTTP range; the parsed offsets sum to each shard's s
    - the MTP verify path bounded (L2);
    - accepted tokens per verify pass ≥ 2.2 at 3 drafts on the chat and agent prompts. The count is Strata's: accepted
      drafts + 1.
-   - **Absolute decode check:** bounded's `divergence` (decode rescored by a prefill reference) on the long trace is
-     gated against the same measure on a dense control trace (every decode position ≤ 2,051): KL p99 sparse ≤
-     max(2 × dense, dense + 2.5 SE).
+   - **Absolute decode check:** bounded's `divergence` (decode rescored by a prefill reference) is measured on the
+     long trace twice:
+     - **sparse:** the model as built;
+     - **dense control:** the same trace under a test-only forced-dense QSA mode (identity selection in prefill and
+       decode alike).
+     - Gate: KL p99 sparse ≤ max(2 × dense, dense + 2.5 SE).
+     - **An MTP-on sparse arm** runs the same gate against the same dense control, so the sparse verify kernel gets an
+       absolute check too.
+     - **Pre-registered on the RTX PRO 6000 before any lock:** the unplanted build passes, and
+       `qsa_decode_select_shift` fails, in both arms. If the plant passes, the statistic is tightened before any
+       lock: first p95, then a per-position paired KL difference.
    - **GPU unit-level bitwise check of `qwen4_exp.ple_block@1`:** chunked vs one-shot, and replay-rewind vs k decode
      steps. The fp32 conv is a per-channel 4-tap sum with no cross-row reduction, so both pairs must match bitwise.
 3. **Kernels.** L0 for every new kernel against its `reference.py` on sm_86, sm_89 and sm_120, memcheck clean.
@@ -283,9 +294,14 @@ at a time through the judge's existing `_streamed`.**
       the logits with the GGUF's `lm_head`.
     - **Not committed:** the tiny GGUF. It is a sha256-pinned artifact that CI fetches, so §6.1 runs in CI instead of
       skipping as `qwen3_5_files.py:86-87` does when the converter is absent.
-  - **The MTP pack:** the tool also writes a Strata-format MTP pack for the tiny model with St `tools/mtp_pack.py`
-    (HF names, fused `gate_up_proj`, BF16 dense parts, F32 norms, MSE-scaled Q2_0). Holon's MTP rules load this file
-    on the real model, so the pack format gets its own oracle (§6.1).
+  - **The MTP pack:** the tool also writes a Strata-format MTP pack for the tiny model.
+    - First it writes the tiny model's `mtp.*` tensors in `tools/mtp_fetch.py`'s layout: one raw bf16 file per tensor
+      plus `mtp-manifest.json` (St `tools/mtp_fetch.py:1-12`).
+    - Then St `tools/mtp_pack.py` packs them unchanged: HF names, fused `gate_up_proj`, BF16 dense parts, F32 norms,
+      MSE-scaled Q2_0.
+    - Holon's MTP rules load this file on the real model, so the pack format gets its own oracle (§6.1).
+  - **Tiny MoE sizes:** `moe_intermediate_size` and the shared expert's are 64, a multiple of Q2_0's 64-value block,
+    so the pack's Q2_0 experts are well formed.
 - **MTP oracle:**
   - The pooled form: a reference transcribed from SG's module. It reads HF names and applies 1 + w itself, run on the
     pack's own dequantized tensors.
@@ -422,9 +438,18 @@ MoE first.**
 - **Prompt corpus:**
   - The text of `v1-long.jsonl`, `v1-qwen3_5.jsonl` and `v1.jsonl`, concatenated in that order and tokenized with the
     model's tokenizer. Est. ≈ 200K tokens; `v1.jsonl`'s ids are Qwen3's, so its text is re-tokenized.
-  - Spans per context start at fixed offsets, wrapping: o_k = k × ⌊N / 6⌋ for k = 0…5, where N is the corpus
-    length. That gives 6 candidates per context; the first 3 that survive (all 6 if `--eos-ids` works) are used.
-  - At 32K the 6 candidates overlap by less than half when N ≥ 200K.
+  - **Context-specific offsets.** For context C ∈ {1K, 4K, 32K}, with index c = 0, 1, 2, the candidate starts are
+    o_{C,k} = (k × ⌊N / 6⌋ + c × ⌊N / 18⌋) mod N, for k = 0…5 (N is the corpus length).
+    - No two contexts share a start.
+    - At 32K the candidates overlap by less than half when N ≥ 200K.
+  - **The warm-up span** is the corpus's last 2,048 tokens. Starts are shifted forward so that none lies inside it.
+  - **Exactly 3 spans per context** are used: the first 3 candidates, or the first 3 to survive EOS screening if
+    `--eos-ids` fails.
+  - **No prefix reuse.** Both engines run with prefix reuse as deployed. Every timed request must log 0 reused
+    tokens (Holon's `cached_tokens`; Strata's prompt-cache log, `--prompt-cache`, St `generate.cpp:784`). A request
+    that reuses any token is invalid, and the cell's span is replaced by the next candidate.
+    - If either engine's logs cannot show reuse, prefix reuse is turned off in both: Holon's prefix cache off, Strata
+      `--prompt-cache 0`.
   - The ids, offsets and the corpus's sha256 go in the evidence.
 - **Strata, no approximation:**
   - `STRATA_ROUTE_TAIL_SKIP=0 --kv fp16 --ple-io ram`, after `--calibrate` on that card and file (`docs/DETAILS.md:489-503`; its settings are recorded);
@@ -445,7 +470,7 @@ MoE first.**
   - Accepted tokens per pass are recorded for both engines in every MTP row.
 - **RAM-short pairing:** Holon's SSD tier against Strata's `--ple-io direct`.
 - **Statistics** (fixed now):
-  - ≥ 5 interleaved rounds (reversed on odd rounds), each with ≥ 3 distinct prompt spans per context;
+  - ≥ 5 interleaved rounds (reversed on odd rounds), each with exactly 3 distinct prompt spans per context;
   - **paired**: each (round, span) pair gives one Holon / Strata ratio, measured in the same round on the same span;
   - the cell statistic is the median of those ratios, with a 95% bootstrap CI that resamples the pairs;
   - **pass** if the CI's lower bound ≥ bar − 0.02;
@@ -456,7 +481,8 @@ MoE first.**
     tokens. Prefill lending returns evicted slots empty, in both engines, so decode starts with a dip.
 - **Reported rows:** FreeToken and llama.cpp, one arm each, 3 rounds.
 - **Cost:**
-  - ≈ 2.5–3 h per card per full set (≥ 5 rounds × ≥ 3 spans × 8 gated arms, plus the reported arms);
+  - ≈ 2.5–3 h per card per full set (5 rounds × 3 spans × 8 gated arms, plus the reported arms; more spans would
+    double it);
   - calibration, ≈ 30 min per card and file;
   - at least two full sets (N1 and step 9), plus step 7's iterations.
   - Disk for files, packs and MTP sources is checked before scheduling.
@@ -481,14 +507,23 @@ MoE first.**
     - **T2:** contiguous-tail lending from one class arena, the largest (the gate/up class of the most common type),
       regardless of temperature, as FreeToken and Strata do (St `generate.cpp:536-538, 3731-3741`, `pf_borrow`).
       The evicted slots return empty.
-  - **What is lent:** the MoE's transient buffers for one pass — gate/up output, SwiGLU output, fp32 down output,
-    q8_1 rows, ≈ 215 KB per token. A pass is 4,096 tokens (the track's D1 cap; its D6 8K passes are conditional),
-    so ≈ 0.88 GB is lent during an 8K step.
+  - **What is lent:** D10's `out` and `scratch` for one call, at the call's live peak. D4 removes the gate/up
+    output, so the peak is the SwiGLU output (25.6 KB per token) + the fp32 down output (102.4 KB) + the q8_1 rows
+    and id maps (≈ 12 KB): **≈ 140 KB per token**.
+  - A pass is the track's `pass_rows`, 3,072 at top-10. So **≈ 0.43 GB** is lent during any step of ≥ 3,072 tokens,
+    and ≈ 0.29 GB during a 2K step.
+  - **The arena-choice rule stays FN's stated one:** the largest class arena. The lead forwards the rule to the
+    track.
   - FN's only use: the offload deployment turns lending on, through the lock (d).
 - **(d) The step size is a lock setting per card** (`max_step_tokens`, with lending on or off).
   - One deployment at `--ctx 33792` serves the 1K, 4K and 32K rows: the 1K and 4K prompts are single steps, and the
     8K-step peak is reserved in every row.
-  - Tune chooses it by weighing 32K prefill against decode.
+  - **Who writes it.** tune benchmarks decode only, so it does not choose prefill settings (track D0). FN's two locks
+    carry three hand-set values, chosen from step 7's prefill and decode measurements and changed only through
+    `propagate`:
+    - `max_step_tokens` = 8,192 (proposed);
+    - `ggml_cuda.pass_rows` = 4,096, the cap, which yields the proven 3,072 at top-10;
+    - `moe.ring_lend` = `tail`.
 - **(e) F5b rows** are reported separately. Gated rows use the lock's configuration, and X's F5b-lock escalation still
   stands.
 - **(f) The profile** comes from `route_dump` on the RTX PRO 6000 (held-out prompts) and ships in the bundle.
@@ -520,6 +555,8 @@ MoE first.**
   - `std.mixers.gdn`, `std.moe.offload` (aux experts), `std.weights.gguf`;
   - `kernels.ggml_cpu` (Q2_0 type). `kernels.ggml_cuda`'s T1–T5 are the MoE prefill track's, and propagate with
     it;
+  - **FN's lock settings, hand-set and changed only through `propagate`** (D12d): `ggml_cuda.pass_rows` = 4,096
+    (yielding 3,072 at top-10), `max_step_tokens` = 8,192, `moe.ring_lend` = `tail`;
   - `drafters/mtp` and `drafters/dflash` (no lock uses either; checked `plans/`);
   - the workspace gguf-py relock.
 - **Order:** the MoE prefill track propagates its own changes first. Of FN and K, whichever closes second propagates
@@ -573,7 +610,12 @@ MoE first.**
 - `hc_gr_mix@1`, `hc_gr_combine@1` (fp32, ieee);
 - `rows_gather@1` (bitwise dequant: IQ4_NL / Q4_0 / Q5_0 / Q8_0 / BF16);
 - `qwen4_exp.ple_rows@1` (int64, bitwise; fresh-slot EOS);
-- `qwen4_exp.ple_block@1` (fp32; in-step payloads; replay rewind);
+- `qwen4_exp.ple_block@1` (fp32; in-step payloads; replay rewind). Its contract states the bitwise test's
+  preconditions:
+  - chunked and one-shot, or rewind and decode, get identical K / V projection inputs: the test feeds both the same
+    projected rows, since `qlinear`'s bits may depend on rows per call (the track's D5);
+  - every reduction (the grouped norms, the √2560 dot) is per row, in an order independent of the row count and the
+    launch shape;
 - `qsa_index@1` (pooling from stored raw keys);
 - `qsa_select@1` (fp32 ieee; lower-index ties; sub-batched workspace);
 - `qsa_attend@1` (prefill, decode, verify; gqa's KV formats).
@@ -597,7 +639,7 @@ MoE first.**
 | Attention | 4 / 2 heads × 64 |
 | Indexer | 2 × 32, ratio 4, budget 16 |
 | GDN | 2 / 6 × 32 |
-| MoE | 8 experts top-2 + shared |
+| MoE | 8 experts top-2, I = 64; shared expert I = 64 (multiples of Q2_0's 64-value block) |
 | PLE | 4 heads × 16, `ngram_vocab_size_base` 1000 |
 | MTP | 1 layer |
 
@@ -629,7 +671,7 @@ Everything is randomised (D2). The 100-token prompts contain an EOS; they are ch
 | snapshot ×3 incl. an 8K request with MTP | run-identical |
 | MTP verify L2; accepted per pass | pass; ≥ 2.2 |
 | N4's zero-tie rate on layer 3 | reported (it decides how often the tie rule matters) |
-| decode divergence, long trace vs dense control (acceptance 2) | pass: KL p99 sparse ≤ max(2 × dense, dense + 2.5 SE) |
+| decode divergence, long trace vs its forced-dense control, MTP off and MTP on (acceptance 2) | pass: KL p99 sparse ≤ max(2 × dense, dense + 2.5 SE); pre-registered with `qsa_decode_select_shift` failing in both arms |
 | GPU unit test, `qwen4_exp.ple_block@1`: chunked vs one-shot, replay-rewind vs k decode steps | bitwise |
 | offload vs all-resident (capped, `lfu`, MTP experts in the store) | byte-identical |
 | PLE RAM vs SSD | byte-identical |
@@ -641,7 +683,7 @@ Each plant changes only its own path.
 | Plant | Breaks | Predicted |
 |---|---|---|
 | `qsa_select_shift` | prefill selection shifted one block past the budget | L2 fails on `v1-long`, passes on `v1-qwen3_5` |
-| `qsa_decode_select_shift` | the same, in decode and verify only | L2 clean (teacher-forced) and the bounded checks clean (both sides decode with the plant); **the decode-divergence gate fails** (sparse KL p99 rises, the dense control does not) |
+| `qsa_decode_select_shift` | the same, in decode and verify only | L2 clean (teacher-forced) and the bounded checks clean (both sides decode with the plant); **the decode-divergence gate fails in both arms** (sparse KL p99 rises, the forced-dense control does not); pre-registered on the RTX PRO 6000 before any lock |
 | `qsa_pool_rope_last` | pooled key rotated at 4b + 3 | L2 fails on `v1-long`; if not, the long set gains recall prompts before any lock |
 | `hc_inject_unscaled` | no `/n` in the inject | L2 fails |
 | `ple_gate_no_sqrt` | the gate without the signed √ | L2 fails |
@@ -662,7 +704,9 @@ cache is the budget less KV and per-request state.
 - **Context:** ≈ 0.9 GB, derived from the same evidence. X's 30B pool budget was 11.747 GiB = 12.61 GB with 1.05 GB
   of weights and its ≈ 0.6 GB step peak, so 0.9 × (16.61 − c − 1.05) − 0.6 = 12.61 gives c ≈ 0.88.
 - **Weights:** IQ2_XS 3.76 GB / IQ3_S 4.51 GB, plus Strata's MTP pack 0.89 GB, resident.
-- **Staging and null slots:** ≈ 40 per class × 4 classes ≈ 0.2 GB.
+- **Staging and null slots:** ≈ 40 per class.
+  - IQ2_XS has 4 expert classes (gate / up IQ2_S, IQ2_XXS, IQ1_M; down Q2_0): ≈ 0.2 GB.
+  - IQ3_S has 6 (gate / up IQ2_S, IQ3_XXS, IQ3_S, IQ4_XS; down IQ4_NL, Q2_0): ≈ 0.34 GB.
 
 **Per-request state:**
 - **KV at 32K:** 13 × 2,432 B per token ≈ 1.04 GB bf16, 0.63 GB as q8_0.
@@ -674,29 +718,29 @@ cache is the budget less KV and per-request state.
 **The step peak:**
 - **Not lendable** (R, HC, GDN with FLA's chunk state — `h` alone is ≈ 24.6 KB per token, `chunk_delta_h.py:378` —
   QSA, selection sub-batches): **≈ 200 KB per token**. Step 0 measures it.
-- **Lendable** (the MoE scratch for one pass, D12c): ≈ 215 KB per token × the pass. A pass is min(step, 4,096)
-  tokens, the MoE prefill track's D1 cap.
+- **Lendable** (D10's `out` + `scratch` for one call, at its live peak with D4, D12c): ≈ 140 KB per token × the
+  pass. A pass is min(step, `pass_rows`), and `pass_rows` is 3,072 at top-10.
 
 **RTX 5080, IQ2_XS:** 0.9 × (16.61 − 0.9 − 4.65) = 9.95 GB, less KV and state 1.39 and staging 0.2, leaves 8.36 GB
 for the cache and the non-lendable peak.
 
-| `max_step_tokens` (one per card; tune's axis) | 2K | 4K | 8K |
+| `max_step_tokens` (one per card; hand-set, D12d) | 2K | 4K | 8K |
 |---|---|---|---|
 | Non-lendable peak | 0.41 GB | 0.82 | 1.64 |
-| Lent during prefill (scratch for one pass; the ring's ≈ 1.1 GB comes on top, as in X) | 0.44 | 0.88 | 0.88 |
+| Lent during prefill (one call's buffers; the ring's ≈ 1.1 GB comes on top, as in X) | 0.29 | 0.43 | 0.43 |
 | **Decode expert cache, with lending** | **7.9 GB (22%)** | **7.5 (21%)** | **6.7 (19%)** |
-| Decode expert cache, without lending | 7.5 (21%) | 6.7 (19%) | 5.8 (16%) |
-| Prefill cap from streaming non-resident and lent experts at ≈ 47.5 GB/s | ≈ 27.8 GB per step → ≈ 3.5K tok/s | ≈ 28.6 → ≈ 6.8K | ≈ 29.3 → ≈ 13K |
+| Decode expert cache, without lending | 7.7 (22%) | 7.1 (20%) | 6.3 (18%) |
+| Prefill cap from streaming non-resident and lent experts at ≈ 47.5 GB/s | ≈ 27.7 GB per step → ≈ 3.5K tok/s | ≈ 28.1 → ≈ 6.9K | ≈ 28.8 → ≈ 13.5K |
 
 Notes on the 5080:
 - **One deployment per card:** `--ctx 33792` serves every row, so the 8K step's peak is reserved in the 1K and 4K
-  rows too. The proposed lock is 8K steps with lending; tune decides.
+  rows too. The proposed lock is 8K steps with lending, set by hand from step 7's measurements (D12d).
 - **Lent slots return empty** (T2), so a 32K decode starts with a dipped hit rate. Each cell reports the hit rate over
   the first 32 decode tokens (D11). Strata's borrowing does the same.
 - **MTP experts in the store** instead of resident: ≈ +0.7 GB of cache.
 
-**RTX 5090, IQ3_S:** 0.9 × (33.88 − 0.9 − 5.40) = 24.82 GB, less 1.39, 0.2 and 1.64 (8K steps), gives ≈ 21.6 GB:
-43% of 50.29 GB. Its prefill cap is similar, ≈ 13K tok/s at 8K steps.
+**RTX 5090, IQ3_S:** 0.9 × (33.88 − 0.9 − 5.40) = 24.82 GB, less 1.39, 0.34 (6 classes) and 1.64 (8K steps), gives
+≈ 21.45 GB: 43% of 50.29 GB. Its prefill cap is similar, ≈ 13.5K tok/s at 8K steps.
 
 **RTX PRO 6000, all-resident:** 40.1 / 55.7 GB of weights (IQ2_XS / IQ3_S, with MTP). KV up to 128K is 4.1 GB.
 
@@ -738,7 +782,7 @@ On the RTX 5080 and 5090 desktops, one heavy job at a time under `MemoryMax`.
 | 4 | Triton kernels with L0 on 3 SMs and memcheck; first tuning against the launch and `qsa_select` targets; the GPU unit bitwise test of `qwen4_exp.ple_block@1`; rebase onto the MoE prefill track (T1–T5); IQ1_M loader L0 cases (or its fallback) | acceptance 3; the PLE unit bitwise test | 7 |
 | 5 | The full model on the RTX PRO 6000: goldens and floors, L2, bounded, the decode-divergence gate, snapshot, MTP; **kernel-only all-resident comparison with Strata** (both fit, as `x4_gap` did); N5 | acceptance 1b, 2; plants | 5 |
 | 6 | Offload: aux experts (a, the store's `before_launch`), F5b interleave (b), lending on through the lock (c, using T1–T2), PLE SSD tier, profile, exactness | acceptance 4; plants | 5 |
-| 7 | **Perf closure** on the bar cards: nsys per layer, fusions, CUDA rewrites by D10's rule, step-size and lending tune axes | every row within its roofline band, or the gap explained | 4 |
+| 7 | **Perf closure** on the bar cards: nsys per layer, fusions, CUDA rewrites by D10's rule; measures `max_step_tokens` × lending for D12d's hand-set lock values | every row within its roofline band, or the gap explained | 4 |
 | 8 | Locks (`tune --new-model`) on the RTX 5080 and RTX 5090 | L2, snapshot, fit vs §7 | 2 |
 | 9 | The comparison (D11) | acceptance 5 | 3 |
 | 10 | Close: suite, panel code review, propagation if FN closes second, plan §10 | acceptance 6–8 | 2 |
@@ -818,6 +862,16 @@ With one agent the steps run in series: 45 days.
 - **C minors:** 200 KB per token non-lendable (step 0 measures it); staging subtracted; the pass size stated; the step
   is per card; one budget formula; `--eos-ids`; paired statistics with a stated corpus; the early-decode hit rate;
   the MTP pack's provenance; 2.5–3 h per card per full set (§7, D9, D11).
+
+**Round 3 (2026-10-18):**
+- **A-F1:** `pass_rows` is 3,072 at top-10. The lent bytes and §7 are re-derived. The lock values are set by hand
+  through `propagate`, not by tune (D12d, D16).
+- **A-F2:** FN depends on the track's D1–D5; D4 shrinks the lent buffers to ≈ 140 KB per token.
+- **A-F3:** FN keeps "the largest class arena"; the rule is forwarded to the track.
+- **B:** a forced-dense control on the same trace, with an MTP-on arm, pre-registered with the plant; the PLE test's
+  preconditions in the contract; tiny `moe_intermediate_size` 64 and `mtp_fetch.py`'s layout.
+- **C:** context-specific offsets, the warm-up span off every start, and 0 reused tokens per timed request; IQ3_S's 6
+  classes (5090 cache ≈ 21.45 GB); exactly 3 spans.
 
 No open questions remain for the owner. Any acceptance-5 cell that D11's rule escalates goes to the owner when it is
 measured.
@@ -944,3 +998,25 @@ measured.
 | C2-m7 | Locks name a file nobody else can make | **Accepted:** the pack's sha256 and producing commands are recorded; porting the MSE quantizer is deferred (D9). |
 | cost note | 2.5–3 h per card per full set | **Accepted** (D11; it fits in step 9). |
 
+**Rev 3 → rev 4: dispositions** (round 3, minors only). Every finding was checked against the cited code or
+document.
+
+| # | Finding | Disposition |
+|---|---|---|
+| A-F1 | `pass_rows` is 3,072 at top-10, not 4,096; who writes the value | **Accepted.** Verified in the track's doc (§5's FN rows: ⌊32,768 ÷ 10⌋ in whole `CHUNK`s). Its D0 says `ggml_cuda.pass_rows` is a hand-set lock option written through `propagate`, and that tune benchmarks decode only. Lent bytes and §7 re-derived; D12d and D16 state FN's lock values (`pass_rows` 4,096 → 3,072 effective, `max_step_tokens` 8,192, `moe.ring_lend` `tail`), all hand-set. |
+| A-F2 | Depend on D1–D5, including D4; re-derive the lent bytes | **Accepted.** With D4 the gate/up output is gone; the live peak is SwiGLU (25.6 KB) + down (102.4 KB) + workspaces (≈ 12 KB) ≈ 140 KB per token. The lent amount is 0.43 GB per 3,072-row pass. |
+| A-F3 | The arena-choice rule | **Accepted as the lead decided:** FN keeps "the largest class arena"; the rule is forwarded to the track. |
+| B3-1 | The dense control; pre-registration; MTP arm | **Accepted:** a test-only forced-dense mode on the same trace; pre-registered on the RTX PRO 6000 before any lock (unplanted passes, plant fails, else the statistic is tightened); an MTP-on sparse arm (acceptance 2, §6.2). |
+| B3-2 | The PLE bitwise test's preconditions | **Accepted:** stated in `qwen4_exp.ple_block@1`'s contract (§5). |
+| B3-3 | Tiny `moe_intermediate_size`; the MTP source layout | **Accepted:** I = 64 for routed and shared experts; the tool writes `mtp_fetch.py`'s raw-bf16 + manifest layout (verified: St `tools/mtp_fetch.py:1-12`) before `mtp_pack.py`. |
+| C3-m | Span offsets, warm-up span, prefix reuse | **Accepted:** context-specific offsets; the warm-up span (the corpus's last 2,048 tokens) is off every start; 0 reused tokens required per timed request, or reuse off in both (Strata `--prompt-cache`, St `generate.cpp:784`). |
+| C3-n1 | IQ3_S has 6 expert classes | **Accepted.** Verified from the parsed header's types: gate / up IQ2_S, IQ3_XXS, IQ3_S, IQ4_XS; down IQ4_NL, Q2_0. Staging ≈ 0.34 GB; 5090 cache ≈ 21.45 GB. |
+| C3-n2 | The span count vs the cost | **Accepted:** exactly 3 spans per context; the 2.5–3 h estimate stands. |
+
+**Budget and schedule after rev 4:**
+- **Core:** unchanged, ≤ +47 lines.
+- **5080 expert cache:** with lending unchanged (7.9 / 7.5 / 6.7 GB at 2K / 4K / 8K steps). Without lending it rises
+  to 7.7 / 7.1 / 6.3 GB. The 8K prefill cap is ≈ 13.5K tok/s.
+- **5090 expert cache:** 21.6 → 21.45 GB, still 43%.
+- **Schedule:** unchanged, 45 days of work and 36 on the critical path. The forced-dense mode and the MTP arm fit in
+  step 5; the MTP source layout fits in step 2.
