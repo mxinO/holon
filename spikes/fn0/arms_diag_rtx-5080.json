@@ -1,0 +1,11 @@
+[
+ {
+  "name": "strata_na_off_diag",
+  "engine": "strata",
+  "env": {
+   "STRATA_ROUTE_TAIL_SKIP": "0",
+   "STRATA_PREFILL_TIMING": "1"
+  },
+  "flags": "--pack local/fn/strata/packs/iq2_xs --expert-profile bench/.envs/src/Strata/data/expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --spec 2 --suffix-draft 0 --dump-routing local/tmp/fn-build/routing-rtx-5080.bin --pcie-frac 0.55 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97"
+ }
+]

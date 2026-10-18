@@ -1,0 +1,29 @@
+[
+ {
+  "name": "strata_na_off",
+  "engine": "strata",
+  "env": {
+   "STRATA_ROUTE_TAIL_SKIP": "0"
+  },
+  "flags": "--pack local/fn/strata/packs/iq2_xs --expert-profile bench/.envs/src/Strata/data/expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --spec 2 --suffix-draft 0 --pcie-frac 0.55 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97"
+ },
+ {
+  "name": "strata_na_mtp",
+  "engine": "strata",
+  "env": {
+   "STRATA_ROUTE_TAIL_SKIP": "0",
+   "STRATA_MTP_FULL_HEAD": "1"
+  },
+  "flags": "--pack local/fn/strata/packs/iq2_xs --expert-profile bench/.envs/src/Strata/data/expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --mtp local/fn/strata/mtp/rt --spec 4 --spec-min-p 0 --suffix-draft 0 --pcie-frac 0.55 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97"
+ },
+ {
+  "name": "strata_def_off",
+  "engine": "strata",
+  "flags": "--pack local/fn/strata/packs/iq2_xs --expert-profile bench/.envs/src/Strata/data/expert-profile.bin --expert-cache auto --prefill auto --kv int8 --spec 2 --suffix-draft 0 --pcie-frac 0.55 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97"
+ },
+ {
+  "name": "strata_def_mtp",
+  "engine": "strata",
+  "flags": "--pack local/fn/strata/packs/iq2_xs --expert-profile bench/.envs/src/Strata/data/expert-profile.bin --expert-cache auto --prefill auto --kv int8 --mtp local/fn/strata/mtp/rt --spec 4 --spec-min-p 0.7 --pcie-frac 0.55 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97"
+ }
+]

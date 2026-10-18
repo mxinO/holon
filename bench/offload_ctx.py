@@ -354,7 +354,7 @@ def run_arm(arm: dict, a: argparse.Namespace, log: pathlib.Path) -> dict:
         raise SystemExit(f"GPU {a.gpu} stayed busy: {busy}")
     py = {"freetoken": a.python, "holon": a.holon_python}.get(arm["engine"], sys.executable)
     cmd = [py, str(pathlib.Path(__file__)), "worker", "--engine", arm["engine"], "--model", a.model, "--ctx",
-           str(a.ctx), "--flags", arm["flags"], "--requests", str(log.parent / "requests.json")]
+           str(a.ctx), f"--flags={arm['flags']}", "--requests", str(log.parent / "requests.json")]   # one '-'-led value
     if arm["engine"] in ("llama", "strata"):
         cmd += ["--server", a.server if arm["engine"] == "llama" else a.strata,
                 "--log", str(log.with_suffix(".server.log")), "--wrap", arm.get("wrap", "")]
