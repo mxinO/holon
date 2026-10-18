@@ -1,7 +1,9 @@
 """The judge on Qwen3.8-Flash-Next (FN D2), in the golden venv (transformers 5.19.0, `local/envs/golden-qwen4`): the
-tiny model's GGUF, written by llama.cpp's converter, reads back as the checkpoint (`gguf.hf_state`, PLE's rows lazily),
-and the streamed golden of it equals HF's whole forward bit for bit under the indexer's tie rule, which the prompt's
-selections exercise (boundary ties occur)."""
+tiny model's GGUF, rebuilt by llama.cpp's converter to its pinned sha256, reads back as the checkpoint
+(`gguf.hf_state`, PLE's rows lazily); the streamed golden of it equals HF's whole forward bit for bit under the
+indexer's tie rule, which the prompt's selections exercise (boundary ties occur); and the committed fixtures are what
+the tool writes."""
+import hashlib
 import os
 import pathlib
 
@@ -24,8 +26,10 @@ def tiny(tmp_path_factory):
 
 def test_the_judge_reads_the_converted_file_as_the_checkpoint(tiny):
     from holon_judge import gguf
+    from holon_testing import qwen4exp_files as q
 
     model, _, file = tiny
+    assert hashlib.sha256(file.read_bytes()).hexdigest() == q.GGUF_SHA256
     ref = model.state_dict()
     table = next(k for k in ref if k.endswith("ngram_embedding.weight"))
     got = dict(gguf.hf_state(file))
@@ -66,3 +70,12 @@ def test_the_streamed_golden_is_hfs_forward(tiny):
     ref = golden.topk_rows(logits, torch.tensor(ids[1:]), 20)
     assert torch.equal(rec.topk_ids, ref[0]) and torch.equal(rec.target_lp, ref[2])
     assert rec.meta["deviations"] == [golden.TIE_RULE] and any(ties)
+
+
+def test_the_committed_fixtures_are_the_tools():
+    from holon_testing import qwen4exp_files as q
+
+    tensors, meta = q.fixtures(q.tiny_hf())                  # a fresh model: the golden test wraps the indexers
+    committed, committed_meta = q.load_fixtures()
+    assert tensors.keys() == committed.keys() and all(torch.equal(tensors[k], committed[k]) for k in tensors)
+    assert all(int(meta[k]) > 0 and meta[k] == committed_meta[k] for k in meta)        # boundary ties occur
