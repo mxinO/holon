@@ -31,7 +31,7 @@ done
 if [ "${1:-}" = "--check" ]; then
   tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
   cp -r "$HERE/vendor" "$tmp/vendor"
-  patch -s -R -p1 -d "$tmp/vendor" < "$HERE/vendor.patch"
+  patch -s -R -E -p1 -d "$tmp/vendor" < "$HERE/vendor.patch"   # -E: removes the files it creates (Holon's own)
   (cd "$tmp/vendor" && sha256sum --quiet -c "$HERE/SHA256SUMS")
   diff <(cd "$tmp/vendor" && find . -type f | sed 's|^\./||' | sort) <(awk '{print $2}' "$HERE/SHA256SUMS" | sort)
   echo "ok   vendor/ = llama.cpp ${COMMIT:0:8} + vendor.patch"

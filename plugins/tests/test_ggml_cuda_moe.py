@@ -243,7 +243,8 @@ def test_link(sm):
     undefined = subprocess.run(["nm", "-D", "--undefined-only", str(extension.module_path(sm))],
                                capture_output=True, text=True, check=True).stdout
     assert not [s for s in undefined.split() if "ggml" in s or "gguf" in s]
-    for f in ("topk-moe.cu", "moe-weighted-reduction.cu", "mmq.cu", "mmq.cuh"):
+    for f in ("topk-moe.cu", "moe-weighted-reduction.cu", "mmq.cu", "mmq.cuh", "mmq-load-tiles.cuh",
+              "mmq-config-ampere.cuh", "template-instances/mmq-instance-iq1_m.cu"):
         assert "Holon:" in (extension.CUDA_DIR / f).read_text()
 
 

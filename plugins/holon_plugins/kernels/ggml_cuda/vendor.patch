@@ -616,10 +616,48 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cuh b/ggml/src/ggml-cuda/mmid.cuh
 -        int n_experts, int n_tokens, int n_expert_used, int nchannels_y, int si1, int sis1, bool write_inverse, cudaStream_t stream);
 +        int n_experts, int n_z, int n_tokens, int n_expert_used, int nchannels_y, int si1, int sis1, bool write_inverse,
 +        int max_cols, int32_t * errors, void * scratch, cudaStream_t stream);
+diff -ruN a/ggml/src/ggml-cuda/mmq-config-ampere.cuh b/ggml/src/ggml-cuda/mmq-config-ampere.cuh
+--- a/ggml/src/ggml-cuda/mmq-config-ampere.cuh
++++ b/ggml/src/ggml-cuda/mmq-config-ampere.cuh
+@@ -275,6 +275,24 @@
+     CASE(GGML_TYPE_IQ2_S, 256, 1, 128, 112, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
+     CASE(GGML_TYPE_IQ2_S, 256, 1, 128, 128, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
+ 
++    // Holon: IQ1_M in IQ2_S's layout (docs/v1-moe-prefill.md D9)
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, true);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, true);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,  32, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, true);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,  64, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, true);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128, 128, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, true);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,  24, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,  32, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,  40, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,  48, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,  64, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,  80, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,  96, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128, 112, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
++    CASE(GGML_TYPE_IQ1_M, 256, 1, 128, 128, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
++
+     CASE(GGML_TYPE_IQ3_XXS, 256, 1, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_0, MMQ_ITER_K, true, true);
+     CASE(GGML_TYPE_IQ3_XXS, 256, 1, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_0, MMQ_ITER_K, true, true);
+     CASE(GGML_TYPE_IQ3_XXS, 256, 1, 128,  32, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_0, MMQ_ITER_K, true, true);
 diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
 --- a/ggml/src/ggml-cuda/mmq.cu
 +++ b/ggml/src/ggml-cuda/mmq.cu
-@@ -93,7 +93,7 @@
+@@ -48,6 +48,9 @@
+         case GGML_TYPE_IQ1_S:
+             mul_mat_q_case<GGML_TYPE_IQ1_S, GGML_PREC_Q8>(ctx, args, stream);
+             break;
++        case GGML_TYPE_IQ1_M: // Holon: D9
++            mul_mat_q_case<GGML_TYPE_IQ1_M, GGML_PREC_Q8>(ctx, args, stream);
++            break;
+         case GGML_TYPE_IQ2_XXS:
+             mul_mat_q_case<GGML_TYPE_IQ2_XXS, GGML_PREC_Q8>(ctx, args, stream);
+             break;
+@@ -93,7 +96,7 @@
  
  // overrides the src1 precision requested by the graph, "auto" keeps the requested one
  static ggml_prec ggml_cuda_mmq_get_prec_env() {
@@ -628,7 +666,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
      if (env_c == nullptr) {
          return GGML_PREC_UNDEFINED;
      }
-@@ -115,7 +115,7 @@
+@@ -115,7 +118,7 @@
  
  // src1 is quantized to Q8_1 unless the FP4 types can use 4-bit activations, in which case they
  // default to the native W4A4 instructions on Blackwell.
@@ -637,7 +675,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
      static const ggml_prec prec_env = ggml_cuda_mmq_get_prec_env();
  
      ggml_prec prec = prec_env;
-@@ -133,9 +133,11 @@
+@@ -133,9 +136,11 @@
  }
  
  void ggml_cuda_mul_mat_q(
@@ -652,7 +690,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
      GGML_ASSERT(!ids || ids->type  == GGML_TYPE_I32); // Optional, used for batched GGML_MUL_MAT_ID.
  
      GGML_TENSOR_BINARY_OP_LOCALS;
-@@ -184,22 +186,24 @@
+@@ -184,22 +189,24 @@
      const ggml_prec prec_src1 = ggml_cuda_mmq_get_prec_src1(src0, dst, cc);
  
      const bool use_native_fp4 = prec_src1 == GGML_PREC_Q4;
@@ -685,7 +723,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
          }
  
          int ntiles_J_best = INT_MAX;
-@@ -251,7 +255,7 @@
+@@ -251,7 +258,7 @@
                                          ne11, ne12, ne13, stream);
  
              } else {
@@ -694,7 +732,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
                                         ne11, ne12, ne13, stream);
              }
              CUDA_CHECK(cudaGetLastError());
-@@ -269,7 +273,7 @@
+@@ -269,7 +276,7 @@
              ne00, ne01, ne1, s01, ne11, s1,
              ne02, ne12, s02, s12, s2,
              ne03, ne13, s03, s13, s3,
@@ -703,7 +741,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
          ggml_cuda_mul_mat_q_switch_type(ctx, args, stream, prec_src1);
          return;
      }
-@@ -284,7 +288,7 @@
+@@ -284,7 +291,7 @@
  
      ggml_cuda_pool_alloc<int32_t> ids_src1(ctx.pool(), ne_get_rows);
      ggml_cuda_pool_alloc<int32_t> ids_dst(ctx.pool(), ne_get_rows + J_best-1); // Needs to be padded for unconditional memory access.
@@ -712,7 +750,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
  
      // gate/up activations are broadcast across experts (ne11 == 1): quantize each token once and
      // scatter to its slots. ids_src1 then holds the inverse map (token slot -> compact row).
-@@ -295,8 +299,13 @@
+@@ -295,8 +302,13 @@
          const int si1  = ids->nb[1] / ggml_element_size(ids);
          const int sis1 = nb12 / nb11;
  
@@ -727,7 +765,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
          CUDA_CHECK(cudaGetLastError());
      }
  
-@@ -327,10 +336,10 @@
+@@ -327,10 +339,10 @@
                                          ne10_padded, ne11_flat, ne12_flat, ne13_flat, stream);
              }
          } else if (dedup_bcast) {
@@ -740,7 +778,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
                                     ne10_padded, ne11_flat, ne12_flat, ne13_flat, stream);
          }
          CUDA_CHECK(cudaGetLastError());
-@@ -341,12 +350,13 @@
+@@ -341,12 +353,13 @@
                                           ne11 * ne10_padded * sizeof(block_q8_1) / (QK8_1 * sizeof(int));
      const int64_t s13 = ne12*s12;
  
@@ -756,6 +794,14 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
          ne03, ne13, s03, s13, s3,
          ne12, J_best};
  
+@@ -376,6 +389,7 @@
+         case GGML_TYPE_Q6_K:
+ // -------------------------------------------------
+         case GGML_TYPE_IQ1_S:
++        case GGML_TYPE_IQ1_M: // Holon: D9
+         case GGML_TYPE_IQ2_XXS:
+         case GGML_TYPE_IQ2_XS:
+         case GGML_TYPE_IQ2_S:
 diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
 --- a/ggml/src/ggml-cuda/mmq.cuh
 +++ b/ggml/src/ggml-cuda/mmq.cuh
@@ -769,7 +815,24 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
  enum mmq_q8_1_ds_layout {
      MMQ_Q8_1_DS_LAYOUT_D4,
-@@ -430,9 +431,29 @@
+@@ -91,6 +92,8 @@
+             return MMQ_Q8_1_DS_LAYOUT_D4;
+         case GGML_TYPE_IQ1_S:
+             return MMQ_Q8_1_DS_LAYOUT_DS4;
++        case GGML_TYPE_IQ1_M: // Holon: f32 scale per 32 activations, as IQ2_XS / IQ2_S (docs/v1-moe-prefill.md D9)
++            return MMQ_Q8_1_DS_LAYOUT_D4;
+         case GGML_TYPE_IQ4_XS:
+         case GGML_TYPE_IQ4_NL:
+             return MMQ_Q8_1_DS_LAYOUT_D4;
+@@ -410,6 +413,7 @@
+         case GGML_TYPE_IQ3_XXS: return MMQ_DP4A_TXS_Q8_0;
+         case GGML_TYPE_IQ3_S:   return MMQ_DP4A_TXS_Q8_0;
+         case GGML_TYPE_IQ1_S:   return MMQ_DP4A_TXS_Q8_0;
++        case GGML_TYPE_IQ1_M:   return MMQ_DP4A_TXS_Q8_0_16; // Holon: IQ2_XS / IQ2_S's (D9)
+         case GGML_TYPE_IQ4_XS:  return MMQ_DP4A_TXS_Q8_0;
+         case GGML_TYPE_IQ4_NL:  return MMQ_DP4A_TXS_Q8_0;
+         default:                return tile_x_sizes{0, 0, 0};
+@@ -430,9 +434,29 @@
  #include "mmq-load-tiles.cuh"
  #include "mmq-vec-dot.cuh"
  
@@ -800,7 +863,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      constexpr int warp_size = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps    = ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1) / warp_size;
      constexpr int I         = ggml_cuda_mmq_get_I(type, J, fallback, prec_src1);
-@@ -457,12 +478,12 @@
+@@ -457,12 +481,12 @@
  
              if constexpr (type == GGML_TYPE_NVFP4) {
                  if (y_scale_used) {
@@ -816,7 +879,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
                  GGML_UNUSED(y_scale_used);
              }
          }
-@@ -472,7 +493,8 @@
+@@ -472,7 +496,8 @@
  template<ggml_type type, int J, bool fallback, ggml_prec prec_src1>
  static __device__ __forceinline__ void ggml_cuda_mmq_write_back_mma(
              const float * __restrict__ sum, const int * __restrict__ ids_dst, float * __restrict__ dst,
@@ -826,7 +889,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
      typedef tile<16, 16, int, DATA_LAYOUT_J_MAJOR> tile_C;
-@@ -507,12 +529,12 @@
+@@ -507,12 +532,12 @@
  
                  if constexpr (type == GGML_TYPE_NVFP4) {
                      if (y_scale_used) {
@@ -842,7 +905,33 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
                      GGML_UNUSED(y_scale_used);
                  }
              }
-@@ -876,7 +898,8 @@
+@@ -618,6 +643,12 @@
+                     ggml_cuda_mmq_load_tiles_iq1_s<type, J, fallback>,
+                     ggml_cuda_mmq_vec_dot_q8_1_q8_1_dp4a<type, J, fallback>,
+                     ggml_cuda_mmq_write_back_dp4a<type, J, fallback, prec_src1>);
++            case GGML_TYPE_IQ1_M: // Holon: int8 weights, per-16 f32 scales: IQ2_S's vec dot (D9)
++                return ggml_cuda_mmq_util_funcs(
++                    VDR_IQ1_M_Q8_1_MMQ,
++                    ggml_cuda_mmq_load_tiles_iq1_m<type, J, fallback>,
++                    ggml_cuda_mmq_vec_dot_q8_0_16_q8_1_dp4a<type, J, fallback>,
++                    ggml_cuda_mmq_write_back_dp4a<type, J, fallback, prec_src1>);
+             case GGML_TYPE_IQ2_XXS:
+                 return ggml_cuda_mmq_util_funcs(
+                     VDR_IQ2_XXS_Q8_1_MMQ,
+@@ -788,6 +819,12 @@
+                 ggml_cuda_mmq_load_tiles_iq1_s<type, J, fallback>,
+                 ggml_cuda_mmq_vec_dot_q8_1_q8_1_mma<type, J, fallback>,
+                 ggml_cuda_mmq_write_back_mma<type, J, fallback, prec_src1>);
++        case GGML_TYPE_IQ1_M: // Holon: int8 weights, per-16 f32 scales: IQ2_S's vec dot (D9)
++            return ggml_cuda_mmq_util_funcs(
++                -1,
++                ggml_cuda_mmq_load_tiles_iq1_m<type, J, fallback>,
++                ggml_cuda_mmq_vec_dot_q8_0_16_q8_1_mma<type, J, fallback, prec_src1>,
++                ggml_cuda_mmq_write_back_mma<type, J, fallback, prec_src1>);
+         case GGML_TYPE_IQ2_XXS:
+             return ggml_cuda_mmq_util_funcs(
+                 -1,
+@@ -876,7 +913,8 @@
          const int * __restrict__ ids_dst, float * __restrict__ dst, float * __restrict__ tmp_fixup,
          const float * __restrict__ y_scale,
          const int stride_row_x, const int ncols_y, const int stride_col_dst,
@@ -852,7 +941,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
      constexpr int              warp_size  = ggml_cuda_get_physical_warp_size();
      constexpr int              nwarps     = ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1) / warp_size;
-@@ -941,13 +964,51 @@
+@@ -941,13 +979,51 @@
          __syncthreads();
      }
  
@@ -907,7 +996,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
  // The mul_mat_q kernel implements "stream-k" work partitioning as described in https://arxiv.org/abs/2301.03598
  
-@@ -960,7 +1021,7 @@
+@@ -960,7 +1036,7 @@
          const uint3 blocks_per_ne00, const int nrows_x, const int ncols_dst, const int stride_row_x, const int ncols_y, const int stride_col_dst,
          const uint3 channel_ratio, const uint3 nchannels_y, const int stride_channel_x, const int stride_channel_y, const int stride_channel_dst,
          const uint3 sample_ratio, const uint3 nsamples_y, const int stride_sample_x, const int stride_sample_y, const int stride_sample_dst,
@@ -916,7 +1005,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
      // Skip unused template specializations for faster compilation:
      if (ggml_cuda_mmq_get_config(type, J, fallback, prec_src1).type == GGML_TYPE_COUNT) {
-@@ -991,15 +1052,17 @@
+@@ -991,15 +1067,17 @@
      }
      __syncthreads();
  
@@ -939,7 +1028,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          int col_high   = ncols_dst;
          int col_diff   = ncols_dst;
          int offset_y       = wt*stride_sample_y   + zt*stride_channel_y;
-@@ -1013,6 +1076,7 @@
+@@ -1013,6 +1091,7 @@
  
          if (ids_dst) {
              col_low  = expert_bounds[zt + 0];
@@ -947,7 +1036,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
              col_high = expert_bounds[zt + 1];
              col_diff = col_high - col_low;
  
-@@ -1051,13 +1115,13 @@
+@@ -1051,13 +1130,13 @@
          const int tile_x_max_i = nrows_x  - it*I - 1;
          const int tile_y_max_j = col_diff - jt*J - 1;
  
@@ -964,7 +1053,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          return;
      }
  
-@@ -1065,8 +1129,10 @@
+@@ -1065,8 +1144,10 @@
      constexpr int blocks_per_iter = ITER_K / qk;
  
      // kbc == k block continuous, current index in continuous ijk space.
@@ -977,7 +1066,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
      kbc      -= fastmodulo(kbc,      blocks_per_ne00) % blocks_per_iter;
      kbc_stop -= fastmodulo(kbc_stop, blocks_per_ne00) % blocks_per_iter;
-@@ -1075,19 +1141,12 @@
+@@ -1075,19 +1156,12 @@
      int kb0_start = fastmodulo(kbc, blocks_per_ne00);
      int kb0_stop  = min(blocks_per_ne00.z, uint32_t(kb0_start + kbc_stop - kbc));
      while (kbc < kbc_stop && kb0_stop == int(blocks_per_ne00.z)) {
@@ -1000,7 +1089,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          int col_high   = ncols_dst;
          int col_diff   = ncols_dst;
          int offset_y       = wt*stride_sample_y   + zt*stride_channel_y;
-@@ -1101,6 +1160,7 @@
+@@ -1101,6 +1175,7 @@
  
          if (ids_dst) {
              col_low  = expert_bounds[zt + 0];
@@ -1008,7 +1097,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
              col_high = expert_bounds[zt + 1];
              col_diff = col_high - col_low;
  
-@@ -1145,13 +1205,13 @@
+@@ -1145,13 +1220,13 @@
          const int tile_x_max_i = nrows_x  - it*I - 1;
          const int tile_y_max_j = col_diff - jt*J - 1;
  
@@ -1025,7 +1114,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
          kbc += blocks_per_ne00.z;
          kbc -= fastmodulo(kbc, blocks_per_ne00);
-@@ -1164,19 +1224,12 @@
+@@ -1164,19 +1239,12 @@
          return;
      }
  
@@ -1048,7 +1137,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      int col_high   = ncols_dst;
      int col_diff   = ncols_dst;
      int offset_y       = wt*stride_sample_y   + zt*stride_channel_y;
-@@ -1190,6 +1243,7 @@
+@@ -1190,6 +1258,7 @@
  
      if (ids_dst) {
          col_low  = expert_bounds[zt + 0];
@@ -1056,7 +1145,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          col_high = expert_bounds[zt + 1];
          col_diff = col_high - col_low;
  
-@@ -1229,13 +1283,13 @@
+@@ -1229,13 +1298,13 @@
      const int tile_x_max_i = nrows_x  - it*I - 1;
      const int tile_y_max_j = col_diff - jt*J - 1;
  
@@ -1073,7 +1162,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  }
  
  template <ggml_type type, int J, bool fallback, ggml_prec prec_src1>
-@@ -1244,7 +1298,7 @@
+@@ -1244,7 +1313,7 @@
          const int32_t * __restrict__ ids_dst, const int32_t * __restrict__ expert_bounds, float * __restrict__ dst,
          float * __restrict__ tmp_last_tile, const uint3 blocks_per_ne00, const int nrows_x, const int ncols_dst,
          const int stride_col_dst, const uint3 nchannels_y, const int stride_channel_dst, const uint3 nsamples_y,
@@ -1082,7 +1171,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      constexpr int warp_size       = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps          = (ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1) / 2) / warp_size;
      constexpr int I               = ggml_cuda_mmq_get_I(type, J, fallback, prec_src1);
-@@ -1324,7 +1378,9 @@
+@@ -1324,7 +1393,9 @@
  
      if (!ids_dst) {
          const int offset_dst = wt*stride_sample_dst + zt*stride_channel_dst + jt*J*stride_col_dst + it*I;
@@ -1093,7 +1182,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
          const int i_max = nrows_x   - it*I - 1;
          const int j_max = ncols_dst - jt*J - 1;
-@@ -1340,7 +1396,7 @@
+@@ -1340,7 +1411,7 @@
                  return;
              }
  
@@ -1102,7 +1191,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          }
          return;
      }
-@@ -1384,6 +1440,8 @@
+@@ -1384,6 +1455,8 @@
      int64_t nsamples_x; int64_t nsamples_y; int64_t stride_sample_x; int64_t stride_sample_y; int64_t stride_sample_dst;
      int64_t ncols_max;
      int J_best; // Tile width in ne11(dense)/ne12(MoE) direction to use for optimal performance.
@@ -1111,7 +1200,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  };
  
  static size_t mmq_get_nbytes_shared(const ggml_cuda_mmq_config & config, const int cc) {
-@@ -1411,8 +1469,12 @@
+@@ -1411,8 +1484,12 @@
      CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1>), nbytes_shared);
  
      const int nty  = (args.nrows_x   + config.I - 1) / config.I;
@@ -1126,7 +1215,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      const dim3 block_nums_xy_tiling(nty, ntx, ntzw);
  
      GGML_ASSERT(args.nchannels_y % args.nchannels_x == 0);
-@@ -1433,7 +1495,7 @@
+@@ -1433,7 +1510,7 @@
               blocks_per_ne00_fd, args.nrows_x, args.ncols_dst, args.stride_row_x, args.ncols_y, args.nrows_dst,
               channel_ratio_fd, nchannels_y_fd, args.stride_channel_x, args.stride_channel_y, args.stride_channel_dst,
               sample_ratio_fd, nsamples_y_fd, args.stride_sample_x, args.stride_sample_y, args.stride_sample_dst,
@@ -1135,7 +1224,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          return;
      }
  
-@@ -1442,16 +1504,22 @@
+@@ -1442,16 +1519,22 @@
      const int ntiles_dst = ntx * nty * ntzw;
      const int tiles_nwaves = (ntiles_dst + nsm - 1) / nsm;
      const int tiles_efficiency_percent = 100 * ntiles_dst / (nsm*tiles_nwaves);
@@ -1161,7 +1250,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      }
  
      const dim3 block_nums_fixup(block_nums_stream_k.x, config.I/warp_size, 1);
-@@ -1462,7 +1530,7 @@
+@@ -1462,7 +1545,7 @@
           blocks_per_ne00_fd, args.nrows_x, args.ncols_dst, args.stride_row_x, args.ncols_y, args.nrows_dst,
           channel_ratio_fd, nchannels_y_fd, args.stride_channel_x, args.stride_channel_y, args.stride_channel_dst,
           sample_ratio_fd, nsamples_y_fd, args.stride_sample_x, args.stride_sample_y, args.stride_sample_dst,
@@ -1170,7 +1259,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
      if (!fixup_needed) {
          return;
-@@ -1472,7 +1540,7 @@
+@@ -1472,7 +1555,7 @@
      mul_mat_q_stream_k_fixup<type, J, fallback, prec_src1><<<block_nums_fixup, block_dims_fixup, 0, stream>>>
          (args.ids_dst, args.expert_bounds, args.dst, tmp_fixup.ptr, blocks_per_ne00_fd, args.nrows_x, args.ncols_dst,
           args.nrows_dst, nchannels_y_fd, args.stride_channel_dst, nsamples_y_fd, args.stride_sample_dst,
@@ -1179,7 +1268,15 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  }
  
  template <ggml_type type, bool fallback, ggml_prec prec_src1>
-@@ -1581,7 +1649,14 @@
+@@ -1566,6 +1649,7 @@
+ extern DECL_MMQ_CASE(GGML_TYPE_Q6_K);
+ // -----------------------------------------
+ extern DECL_MMQ_CASE(GGML_TYPE_IQ1_S);
++extern DECL_MMQ_CASE(GGML_TYPE_IQ1_M); // Holon: D9 (template-instances/mmq-instance-iq1_m.cu)
+ extern DECL_MMQ_CASE(GGML_TYPE_IQ2_XXS);
+ extern DECL_MMQ_CASE(GGML_TYPE_IQ2_XS);
+ extern DECL_MMQ_CASE(GGML_TYPE_IQ2_S);
+@@ -1581,7 +1665,14 @@
  
  // -------------------------------------------------------------------------------------------------------------------------
  
@@ -1195,6 +1292,86 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
 +
 +// Holon: the src1 precision ggml_cuda_mul_mat_q will use for these tensors (the C API checks it before launching)
 +ggml_prec ggml_cuda_mmq_get_prec_src1(const ggml_tensor * src0, const ggml_tensor * dst, int cc);
+diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-tiles.cuh
+--- a/ggml/src/ggml-cuda/mmq-load-tiles.cuh
++++ b/ggml/src/ggml-cuda/mmq-load-tiles.cuh
+@@ -1095,6 +1095,76 @@
+     }
+ }
+ 
++// Holon: IQ1_M's tile loader (docs/v1-moe-prefill.md D9), in IQ2_XS / IQ2_S's layout. A weight is
++// d·(2s + 1)·(g + delta) with g in {0, 1, 2} and delta = -1 ± 1/8, so 8·(g + delta) = 8·g - 7 or 8·g - 9 is an int8 in
++// {±1, ±7, ±9}, and the per-16 scale d·(2s + 1)/8 (fp16 d times at most 4 bits, over a power of two) is exact as the
++// f32 x_df. With D4 activations the q8_0_16 vec dots then take the quantized values' exact products: no stored sums.
++template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq1_m(
++        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
++    constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
++    constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
++    constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
++    constexpr int sram_stride = ggml_cuda_mmq_get_sram_stride(type, J, fallback, GGML_PREC_Q8);
++
++#if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
++    int   * x_qs = (int   *)  x_tile;
++    float * x_df = (float *) (x_qs + MMQ_TILE_NE_K*2);
++#else
++    constexpr tile_x_sizes txs = mmq_get_dp4a_tile_x_sizes(GGML_TYPE_IQ1_M, I);
++    int   * x_qs = (int   *)  x_tile;
++    float * x_df = (float *) (x_qs + txs.qs);
++#endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
++
++    constexpr int threads_per_row = MMQ_ITER_K / (4 * QR1_M); // one 32-value sub-block each
++    constexpr int nrows = warp_size / threads_per_row;
++    const int kqsx = threadIdx.x % threads_per_row;
++
++#pragma unroll
++    for (int i0 = 0; i0 < I; i0 += nwarps * nrows) {
++        int i = i0 + threadIdx.y*nrows + threadIdx.x/threads_per_row;
++
++        if (fallback) {
++            i = min(i, i_max);
++        }
++
++        const block_iq1_m * bxi = (const block_iq1_m *) x + kbx0 + i*stride;
++
++        const int       qs_packed = get_int_b4(bxi->qs, kqsx);
++        const uint8_t * qs        = (const uint8_t *) &qs_packed;
++
++#pragma unroll
++        for (int l = 0; l < QR1_M/2; ++l) {
++            const int qhl  = bxi->qh[2*kqsx + l/2] >> (4*(l%2));
++            const int grid = iq1s_grid_gpu[qs[l] | ((qhl & 0x07) << 8)];
++            const int off  = qhl & 0x08 ? 0x09090909 : 0x07070707; // 8·delta = -9 or -7 per byte
++
++            const int grid0 = __vsub4(((grid >> 0) & 0x0F0F0F0F) << 3, off);
++            const int grid1 = __vsub4(((grid >> 4) & 0x0F0F0F0F) << 3, off);
++
++#if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
++            x_qs[i*sram_stride + 8*kqsx + (2*l+0)] = grid0;
++            x_qs[i*sram_stride + 8*kqsx + (2*l+1)] = grid1;
++#else
++            x_qs[i*(2*MMQ_TILE_NE_K + 1) + 8*kqsx + (2*l+0)] = grid0;
++            x_qs[i*(2*MMQ_TILE_NE_K + 1) + 8*kqsx + (2*l+1)] = grid1;
++#endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
++        }
++
++        const uint16_t * sc = (const uint16_t *) bxi->scales;
++        iq1m_scale_t scale;
++        scale.u16 = (sc[0] >> 12) | ((sc[1] >> 8) & 0x00F0) | ((sc[2] >> 4) & 0x0F00) | (sc[3] & 0xF000);
++        const float d   = __half2float(scale.f16);
++        const int   tmp = sc[kqsx/2] >> (6*(kqsx%2));
++#if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
++        x_df[i*sram_stride                             + 2*kqsx+0] = d * (2*((tmp >> 0) & 0x07) + 1) / 8;
++        x_df[i*sram_stride                             + 2*kqsx+1] = d * (2*((tmp >> 3) & 0x07) + 1) / 8;
++#else
++        x_df[i*(2*MMQ_TILE_NE_K*2/QI8_0) + i/(QI8_0/4) + 2*kqsx+0] = d * (2*((tmp >> 0) & 0x07) + 1) / 8;
++        x_df[i*(2*MMQ_TILE_NE_K*2/QI8_0) + i/(QI8_0/4) + 2*kqsx+1] = d * (2*((tmp >> 3) & 0x07) + 1) / 8;
++#endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
++    }
++}
++
+ template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq2_xxs(
+         const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
+     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
 diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
 --- a/ggml/src/ggml-cuda/mmvq.cu
 +++ b/ggml/src/ggml-cuda/mmvq.cu
@@ -1651,6 +1828,15 @@ diff -ruN a/ggml/src/ggml-cuda/quantize.cuh b/ggml/src/ggml-cuda/quantize.cuh
                                      const int32_t * ids_src1_inv,
                                      void *          vy,
                                      ggml_type       type_src0,
+diff -ruN a/ggml/src/ggml-cuda/template-instances/mmq-instance-iq1_m.cu b/ggml/src/ggml-cuda/template-instances/mmq-instance-iq1_m.cu
+--- a/ggml/src/ggml-cuda/template-instances/mmq-instance-iq1_m.cu
++++ b/ggml/src/ggml-cuda/template-instances/mmq-instance-iq1_m.cu
+@@ -0,0 +1,5 @@
++// Holon: IQ1_M's mmq instance (docs/v1-moe-prefill.md D9); upstream has none, so this file is Holon's own.
++
++#include "../mmq.cuh"
++
++DECL_MMQ_CASE(GGML_TYPE_IQ1_M);
 diff -ruN a/ggml/src/ggml-cuda/topk-moe.cu b/ggml/src/ggml-cuda/topk-moe.cu
 --- a/ggml/src/ggml-cuda/topk-moe.cu
 +++ b/ggml/src/ggml-cuda/topk-moe.cu
