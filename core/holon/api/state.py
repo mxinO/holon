@@ -93,10 +93,12 @@ class HitLen:
 @dataclasses.dataclass(frozen=True, slots=True)
 class Payload:
     """What a StateKind publishes into the PrefixIndex for one block: units of the pool named `pool` (the index holds
-    the publisher's reference on them)."""
+    the publisher's reference on them). `tentative`: kept only while it is one of its request's last
+    `keep_tentative` (`hooks.KeepsTentatives`; an ordinary payload once the request is released)."""
 
     units: tuple[int, ...]
     pool: str
+    tentative: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -117,6 +119,8 @@ class SeqView(Protocol):
     num_computed: int            # host mirror (upper bound while a step is in flight)
     tokens: tuple[int, ...]
     prompt_len: int
+    branch_at: int               # where its admission's matched prefix ends if that block has cached continuations
+                                 # (the request leaves a cached chain there), else 0
 
     def units(self, spec: str) -> tuple[int, ...]: ...
 

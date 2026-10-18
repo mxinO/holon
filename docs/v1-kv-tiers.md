@@ -1,8 +1,8 @@
 # v1 — milestone K: KV and checkpoint tiers under the prefix index
 
-Status: **rev 8, after the panel's seventh round** (2026-10-18). Nothing is built and nothing has been measured for K
-yet. Every number below is a CPU-side estimate from earlier evidence (cited), fixed as a prediction before step 0
-and step 4 measure it. Rev 2 answered the three-reviewer panel (A correctness, B architecture, C numerics and
+Status: **rev 8.1, step-0 findings** (2026-10-18): rev 8 (panel-clean) plus the lead's decisions on step 0's
+measurements, recorded in §13 "Rev 8.1"; step 1's core seams are built (§13 "Step 1 as built"). Every other number
+below is a CPU-side estimate from earlier evidence (cited), fixed as a prediction before step 4 measures it. Rev 2 answered the three-reviewer panel (A correctness, B architecture, C numerics and
 performance); revs 3 to 8 answer its re-reviews. The finding-by-finding dispositions are in §13.
 
 Scope: plan §10's K line ("KV and checkpoint tiers (pinned RAM / SSD under the prefix index, exact, deterministic
@@ -355,6 +355,9 @@ Plugin kinds:
     `bytes / write_rate`, on that one lane, so serialization alone models the sharing (round 3, C-1). Charging the
     mixed rate on a shared lane would count the sharing twice. K-M4's mixed-I/O rate is kept only as a check: the
     lane's modelled throughput under a read/write mix must be within 15% of it, else the owner hears before step 4.
+    **Rev 8.1:** it was not (0.84× at 50/50, 0.76× at 75/25 on the RTX 5080's drive), so while both reads and writes
+    are queued on the lane, each is charged at its rate divided by the measured mixed factor (tune measures it per
+    host, K-M4's method); with only one kind queued, reads go at `read_rate` and writes at `write_rate`.
   - Every load is charged to the lanes, promote-into-place loads included, though those are never gated (A-7).
   - A load of at most `stall_bytes` is due now: the step waits for it.
   - A request with loads is runnable at the first step whose clock is ≥ its due time (KS2). A 512-token prefill step
@@ -652,6 +655,9 @@ per second. A remote tier slower than recompute would bring back `HitLen.cost`; 
   - the SM scatter/gather kernel, 0.97–1.02× DMA in X's M1 (`docs/v1-offload.md:645`).
 
   K-M2 picks between them. Without a provider (CPU, tests), the copier falls back to the per-run loop.
+  **Rev 8.1:** loads default to the SM gather. K-M2 measured both at 0.99× the blob rate on fragmented 34,816 B
+  chunks, but K-M3 measured one batch-DMA load in flight slowing 4-row decode 1.42× (head-of-line blocking on the
+  copy engine) against 1.07× for the gather. D2H stores use batch DMA. The 27B locks pin the provider at step 4.
 - C8's point stands: a block-contiguous *host* layout does not reduce the device-side chunk count, so it is dropped
   as a copy fallback.
 - The SSD level does use a **unit-major host layout** (a host pool of one segment per unit). A 27B page is then one
@@ -676,6 +682,10 @@ two engines on one host would otherwise overwrite each other's slots, and runtim
   the units of one `max_model_len` load, so an SSD load seldom forces a write-back (C12).
 - Below the watermark, std's step hook demotes host LRU leaves to SSD. The decisions read logical counts only (D4):
   the host unit is free when the write is decided, and a reuse waits on the write's ticket.
+- **Rev 8.1: tentative payloads are never written back.** At host eviction a tentative checkpoint is dropped, not
+  written to SSD: K-M5 measured 73–88 GB written per `agent_park` run with an SSD below 4–8 GiB of host, 94% of it
+  checkpoints, mostly never read back. A tentative becomes ordinary when its request is released, and the core
+  tells the tier (`StateTier.settled`), so this policy sees the current flag.
 - An entry being written back is logically on SSD. A hit on it is an SSD read with an SSD due time, and its load
   reads the slot. The rev 2 shortcut of reusing host bytes still physically there is dropped (A-5). It raced with a
   reallocation of the logically free unit, and keeping it would need a second fence for a rare case.
@@ -1085,6 +1095,7 @@ it holds the base, is outside this count.
   so it rarely runs. K-M5 replays the real index code to measure both.
 
 **Deferred.**
+- `flush_prefix` under a running request: its next publish names a parent the flush dropped (a KeyError, as before K);
 - `HitLen.cost` (D9);
 - layer-wise loading and per-layer events (D12);
 - K4 (FN, GLM; D15);
@@ -1336,6 +1347,46 @@ the SSD again.
 - Budget: within ≤ +320.
 - ABI: unchanged (1.4 or 1.5 by merge order); `loaded`'s call rule is restated in its docstring.
 - Schedule: unchanged at 26 days.
+
+### Rev 8.1 (2026-10-18): step-0 findings
+
+Step 0 measured K-M1 (RTX 5090), K-M2/K-M3/K-M4 (RTX 5080; the RTX A5000 as a dev reference) and K-M5 (CPU replay of
+the step-1 core). K-M4's mixed-I/O check fired one of step 0's stop rules; the lead decided, and the owner was told:
+
+| Finding | Decision |
+|---|---|
+| K-M4: mixed reads and writes on one drive at 0.84× (50/50) / 0.76× (75/25) of the modelled shared lane | D4: the lane charges the measured mixed factor while both kinds are queued (perf-only, tier-side) |
+| K-M5: SSD write-back of `answer` checkpoints is 94% of 73–88 GB written per `agent_park` run, mostly never read back | D11: tentative payloads are never written back; they drop at host eviction |
+| K-M5 finding 2: a kept tentative stays flagged after its request is released | the core makes it ordinary at release and tells the tier (`StateTier.settled`, KS3) |
+| K-M3: one batch-DMA load in flight slows decode 1.42×; the SM gather 1.07× | D10: `state_copy@1` loads by the SM gather by default; the 27B locks pin it at step 4 |
+| K-M5: `answer:<k>` floods today's 4-unit pool without a tier; 16 GiB of host and 5 staging units suffice | `answer:<k>` needs a bound tier: the engine refuses a kind with `keep_tentative` and no tier. The 27B locks' defaults: `host.bytes` 16 GiB, staging 5 units |
+| K-M1: 38 of 38 answers re-rendered verbatim | `answer` on by default (k = 1 suffices; 2 kept for templates that re-serialize) |
+| K-M5 finding 1 (= the step-1 review's B2): the core could load a copy the tier had dropped in a hook or during another load | the core polls `dropped()` at each commit, after each store and after each load, and re-runs the hit's fixed point after its loads (KS2) |
+
+Results against the predictions are in the evidence records (`evidence/k0_m1_rerender_rtx-5090_2026-10-18.json`,
+`k0_m2_copy_*`, `k0_m4_nvme_*`, `k0_m5_replay_cpu_2026-10-18.json`) and the spikes' READMEs (`spikes/k0_tiers/`). The
+RTX 5090's K-M2/K-M4 runs follow step 1.
+
+### Step 1 as built (2026-10-18)
+
+KS1–KS5 as §4 describes, ABI 1.4, +320 code lines over b5b1e7f (the budget). KS1+KS2 were priced on the prototype
+at ≈ +180 lines against the itemized 154 (+17%, under the +20% stop line). Additions and deviations:
+- `Pool.segments` in the API (a tier addresses units by segment), `Seq.branch_at` behind `SeqView.branch_at`,
+  `StateTier.settled` (rev 8.1);
+- `RestoresPayloads.adopt` copies from `payload.pool` (the kind's pool or a tier's host copy): std's recurrent kind
+  changes in step 2;
+- with an eviction policy the upward climb is off (each victim through the policy); a policy returning nothing falls
+  back to the least recently used entry, and one returning a non-candidate raises;
+- the plugins' `build(ctx)` for the two new slots is documented in the Protocols' docstrings, not as Protocols of its
+  own: the budget did not allow them (≈ +6 lines);
+- the core's restore skips records that do not re-hash to their key, whose parent is unknown or that lack pages;
+- an entry's payloads in the tier are adopted through one load (a tier may evict only within `store`, `load` and its
+  step hooks, which the core polls after);
+- tiers-off snapshots are byte-identical to b5b1e7f on the RTX A5000 (Qwen3-8B, the 27B hybrid, the 30B with
+  offload; `evidence/k1_tiers_off_snapshots_rtx-a5000_2026-10-18.json`); 26 of the step-1 review's 27 planted bugs
+  fail a test, and the 27th (an eviction policy left unguarded) hangs it;
+- found on the way, not K's: publishing after `flush_prefix` while a request runs raises a KeyError in
+  `PrefixIndex.insert` (the request's chain names a parent that is gone), as at b5b1e7f. It is a follow-up (§10).
 
 ### Rev 8 (2026-10-18): the panel's seventh round
 

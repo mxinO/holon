@@ -37,8 +37,8 @@ from holon.core import engine, ipc
 LISTING = ROOT / "core" / "abi.txt"
 CONTRACTS = {"std": ROOT / "std" / "contracts.txt", "plugins": ROOT / "plugins" / "contracts.txt"}
 # Protocols the core implements and plugins call (the rest are implemented by plugins).
-CORE_IMPLEMENTS = {"BuildCtx", "EngineClient", "KernelRegistry", "Pool", "PrefixView",
-                   "Registries", "Registry", "SeqView", "StepCtx", "TargetView"}
+CORE_IMPLEMENTS = {"BuildCtx", "EngineClient", "EntryView", "KernelRegistry", "Pool", "PrefixView",
+                   "Registries", "Registry", "SeqView", "StepCtx", "Stream", "TargetView", "TierCtx"}
 OWN_ATTRIBUTES = {"parent"}   # looked up on the core's own objects (a child build context's parent), not on plugins
 
 

@@ -82,6 +82,10 @@ class _View:
     def prompt_len(self) -> int:
         return self._seq.prompt_len
 
+    @property
+    def branch_at(self) -> int:
+        return self._seq.branch_at
+
     def units(self, spec: str) -> list[int]:
         per = self._slot_units.get(spec)
         if per is not None:                       # Slot state: the request's slot owns its units (api.Slot)
@@ -122,6 +126,12 @@ class StateManager:
     MemOps before the request's first forward) and the kind publishes payloads at positions it chooses (`publish`
     MemOps after a step that ends there, or filled by the forward of a step that contains it on the spec's `in_step`
     grid), registered at the step's commit once committed tokens cover them.
+
+    With a tier (docs/v1-kv-tiers.md D7) a hit may reach blocks only the tier holds: they get device units (free ones,
+    or ones that evicting blocks the tier holds frees), the tier loads them, and the request waits for its loads — on
+    the device at its first step's launch, and before that until the tier's clock reaches their due time (`due`, the
+    scheduler's gate). A payload in the tier is loaded to a host unit and adopted from there. A block a request
+    publishes that only the tier holds takes the request's own units and is loaded into them (promote into place).
     """
 
     def __init__(self, bound: list[BoundSpec], max_seqs: int, max_tokens: int, device: torch.device,
@@ -140,7 +150,12 @@ class StateManager:
         self._slot_units = {b.spec.name: 1 + b.spec.shape.draft_slots for b in bound if isinstance(b.spec.shape, Slot)}
         self._cutting = [b.kind for b in bound if hasattr(b.kind, "cut")]
         self._publishing = [b for b in bound if hasattr(b.kind, "next_publish")]
-        self._adopting: dict[int, list[tuple[list[MemOp], Payload]]] = {}      # slot -> adopt ops not yet launched
+        self._adopting: dict[int, list[tuple[list[MemOp], Payload | None]]] = {}   # slot -> adopts not yet launched
+        self.waits: dict[int, list] = {}                       # slot -> the loads its next step waits for
+        self.due: dict[int, float] = {}                        # slot -> when it may run (load-gated, not yet run)
+        self._tentative: dict[int, dict[str, list]] = {}       # slot -> spec -> its kept tentatives (key, payload)
+        self._keep = {b.spec.name: getattr(b.kind, "keep_tentative", 0) for b in bound}
+        self.dropped_publishes = 0                             # publishes that found no payload unit
         self.tables: dict[str, BlockTable] = {}
         self._table_of: dict[str, BlockTable] = {}            # paged spec name -> its group's table
         for b in bound:
@@ -165,18 +180,34 @@ class StateManager:
             return False
         seq.slot = self._free_slots.pop()
         self.held[seq.slot], self.chain[seq.slot] = {}, []
-        entries = []
-        if self.index is not None and seq.params.prompt_logprobs is None:   # those need every position computed
-            keys = self.index.keys(seq.tokens, 0, (len(seq.tokens) - 1) // self.index.block, None)
-            entries = self.index.match(keys, seq.tokens)
+        entries, seq.branch_at, idx = [], 0, self.index
+        if idx is not None and seq.params.prompt_logprobs is None:   # those need every position computed
+            keys = idx.keys(seq.tokens, 0, (len(seq.tokens) - 1) // idx.block, None)
+            entries = idx.match(keys, seq.tokens)
+            seq.branch_at = len(entries) * idx.block if entries and entries[-1].children else 0
             entries = entries[:self._hit_blocks(seq, entries)]
-            for e in entries:
+            resident = [e for e in entries if e.key in idx.entries]          # a prefix: taken first (D7)
+            for e in resident:
                 for name, units in e.units.items():
                     self._take(seq.slot, name, np.asarray(units, dtype=np.int32), shared=True)
+            if len(resident) < len(entries):
+                entries = self._promote(seq, entries, len(resident))
+            if idx.tier is not None:          # the tier may have dropped a payload while it loaded: the hit shrinks
+                entries = entries[:self._hit_blocks(seq, entries)]
+            for name, mine in self.held[seq.slot].items():           # what a trimmed hit took past its end goes back
+                self._pool(name).decref(np.asarray(mine[self._span(name, len(entries)).start:], dtype=np.int32))
+                del mine[self._span(name, len(entries)).start:]
+            if loads := list({id(e.loading): e.loading for e in entries if e.loading is not None}.values()):
+                self.waits[seq.slot] = loads      # the loads writing its blocks (another request's, or its own)
             self.chain[seq.slot] = [e.key for e in entries]
             if entries:
                 self._adopt(seq, entries[-1])
-        seq.num_computed = len(entries) * (self.index.block if self.index else 0)
+            if idx.tier is not None:
+                idx.tier.hit(list(self.chain[seq.slot]), [(e.key, name) for e in entries[-1:] for name, p in
+                                                          e.payloads.items() if not p.units])
+            if self.waits.get(seq.slot):
+                self.due[seq.slot] = max(load.due for load in self.waits[seq.slot])
+        seq.num_computed = len(entries) * (idx.block if idx else 0)
         self._resize(seq)
         try:
             self.on_admit(seq)
@@ -203,14 +234,73 @@ class StateManager:
     def _adopt(self, seq: Seq, entry) -> None:
         """Queue the non-paged kinds' adopt MemOps for a hit ending at `entry`; their payloads stay pinned until the
         ops are launched, so a publish cannot evict and reuse those units in between."""
-        view, todo = _View(seq, self.held[seq.slot], self._slot_units), []
-        for b in self.bound:
-            payload = entry.payloads.get(b.spec.name)
-            if payload is not None and not isinstance(b.spec.shape, Paged):
-                self.index.payload_pools[payload.pool].incref(payload.units)
+        view, todo, idx = _View(seq, self.held[seq.slot], self._slot_units), [], self.index
+        adopting = [(b, p) for b in self.bound if (p := entry.payloads.get(b.spec.name)) and not isinstance(
+            b.spec.shape, Paged)]
+        if tier := [(entry.key, b.spec.name) for b, p in adopting if not p.units]:   # one load of the tier's copies
+            load = idx.tier.load([], {}, tier, idx.after())
+            idx.loads[id(load)] = [load, set(), False]
+            self.waits.setdefault(seq.slot, []).append(load)
+            idx.poll()                       # what it dropped to make room: never what this load reads
+        for b, payload in adopting:
+            if payload.units:
+                idx.payload_pools[payload.pool].incref(payload.units)
                 todo.append((b.kind.adopt(view, payload), payload))
+            else:                    # in the tier: from its host copy straight into the request's units (D7)
+                todo.append((b.kind.adopt(view, load.payloads[entry.key, b.spec.name]), None))
         if todo:
             self._adopting[seq.slot] = todo
+
+    def _promote(self, seq: Seq, entries: list, resident: int) -> list:
+        """Device units for the hit's blocks only the tier holds, from free units and pure evictions — never more: a
+        short tail is trimmed and the fixed point runs again —, then the tier loads them (D7); the caller gives back
+        what the hit no longer reaches."""
+        idx, paged = self.index, [b for b in self.bound if isinstance(b.spec.shape, Paged)]
+        per = {b.spec.name: idx.block // self._page(b.spec.name) for b in paged}
+        n = len(entries)
+        for b in paged:
+            idx.evict(b.spec.name, (n - resident) * per[b.spec.name], pure=True)
+            n = min(n, resident + b.pool.num_free // per[b.spec.name])
+        n = self._hit_blocks(seq, entries[:n]) if n < len(entries) else n
+        if n > resident:
+            units = {b.spec.name: b.pool.alloc((n - resident) * per[b.spec.name]) for b in paged}
+            for name, us in units.items():
+                self._take(seq.slot, name, us, shared=False)
+            idx.promote(entries[resident:n], {name: us.tolist() for name, us in units.items()}, idx.after())
+        return entries[:n]
+
+    def launching(self, seqs: list[Seq]) -> list:
+        """At a step's launch, before its device work: wait (on the device) for its requests' loads and for copies on
+        units freed since the last launch (D4); the loads it reads, for `launched`."""
+        if self.index is None or not (self.waits or self.index.freed):
+            return []
+        loads = list({id(load): load for seq in seqs for load in self.waits.pop(seq.slot, ())}.values())
+        for fence in [*loads, *self.index.freed.values()]:
+            fence.wait()
+        self.index.freed.clear()
+        for seq in seqs:
+            self.due.pop(seq.slot, None)
+        return loads
+
+    def launched(self, loads: list, done) -> None:
+        """After a launch ending at `done`: tell the tier, once per load, of its first reader, and of loads no request
+        waits for and no step read (their entries still mark them, so a later hitter waits)."""
+        if (idx := self.index) is None:
+            return
+        idx.last = done
+        for load in loads:
+            if (track := idx.loads.pop(id(load), None)) is not None:     # else read by an earlier step
+                for key in track[1]:
+                    idx.get(key).loading = None
+                if not track[2]:
+                    idx.tier.loaded(load, done)
+        waited = {id(load) for ws in self.waits.values() for load in ws}
+        for i, track in list(idx.loads.items()):
+            if i not in waited and not track[2]:
+                idx.tier.loaded(track[0], track[0])
+                track[2] = True
+                if not track[1]:
+                    del idx.loads[i]
 
     def cut(self, seq: Seq, n: int) -> int:
         """The tokens (1 … n) a prefill row of `seq` may take, so the step ends where a kind publishes (without a
@@ -232,7 +322,7 @@ class StateManager:
             for seq in seqs:
                 for adopt, payload in self._adopting.pop(seq.slot, ()):
                     ops += adopt
-                    pins.append(payload)
+                    pins += [payload] if payload is not None else []
         if self._publishing and self.index is not None:
             rows = zip(seqs, plan.n_query.tolist(), plan.n_logits.tolist(), strict=True)
             for row, (seq, n, n_logits) in enumerate(rows):
@@ -246,9 +336,10 @@ class StateManager:
                               and (at - start) % b.spec.in_step == 0)
                     if at is None or (at != start + n and not inside):
                         continue
-                    if (pool := getattr(b.kind, "payload_pool", None)) is not None:
-                        self.index.evict_payloads(pool, 1)
+                    if (pool := getattr(b.kind, "payload_pool", None)) is not None and self.index.tier is None:
+                        self.index.evict_payloads(pool, 1)       # with a tier the pool only stages (D7)
                     if (made := b.kind.publish(view, at, in_step=True) if inside else b.kind.publish(view, at)) is None:
+                        self.dropped_publishes += 1
                         continue
                     payload, mem_ops = made
                     if inside:
@@ -273,21 +364,30 @@ class StateManager:
         for payload in pins:
             self.index.payload_pools[payload.pool].decref(payload.units)
 
-    def register(self, seq: Seq, spec: str, at: int, payload: Payload) -> None:
+    def register(self, seq: Seq, spec: str, at: int, payload: Payload, done=None) -> None:
         """At a step's commit: add a payload published at `at` to the block ending there, if committed tokens cover
-        `at` and the block is cached; otherwise free it."""
+        `at` and the block is cached; otherwise free it. `done`: the end of the step that wrote it (a tier stores it
+        after that). Of a request's tentative payloads only its last `keep_tentative` stay; one registered after its
+        request was released is an ordinary payload."""
         block, held = self.index.block, False
+        if payload.tentative and seq.slot < 0:
+            payload = dataclasses.replace(payload, tentative=False)
         if 0 < at <= len(seq.tokens) and at % block == 0:
             chain, i = self.chain.get(seq.slot), at // block
             if chain is not None and len(chain) >= i:        # the request's own published chain: no re-hash
-                entry = self.index.entries.get(chain[i - 1])
+                entry = self.index.get(chain[i - 1])
             else:
                 keys = self.index.keys(seq.tokens, 0, i, None)
                 found = self.index.match(keys, seq.tokens)
                 entry = found[-1] if len(found) == len(keys) else None
-            held = entry is not None and self.index.attach(entry, spec, payload)
+            held = entry is not None and self.index.attach(entry, spec, payload, [done] if done is not None else [])
         if not held:
             self.index.payload_pools[payload.pool].decref(payload.units)
+        elif payload.tentative:
+            kept = self._tentative.setdefault(seq.slot, {}).setdefault(spec, [])
+            kept.append((entry.key, entry.payloads[spec]))
+            if len(kept) > self._keep[spec]:
+                self.index.settle(*kept.pop(0), spec, drop=True)
 
     def reserve(self, seq: Seq, new_tokens: int) -> bool:
         """The units admitted `seq` needs for `new_tokens` more tokens, evicting unused cached blocks if a pool is
@@ -331,22 +431,28 @@ class StateManager:
         chain = self.chain.get(seq.slot)
         if self.index is None or chain is None:
             return
-        block = self.index.block
-        for i in range(len(chain), min(seq.num_computed, len(seq.tokens)) // block):
+        idx, stored = self.index, []
+        for i in range(len(chain), min(seq.num_computed, len(seq.tokens)) // idx.block):
             prev = chain[-1] if chain else None
-            tokens = tuple(seq.tokens[i * block:(i + 1) * block])
-            key = self.index.key(prev, tokens)
-            e = self.index.entries.get(key)
+            tokens = tuple(seq.tokens[i * idx.block:(i + 1) * idx.block])
+            key = idx.key(prev, tokens)
+            e = idx.get(key)
+            mine = {name: tuple(us[self._span(name, i)]) for name, us in self.held[seq.slot].items()}
             if e is None:
-                self.index.insert(key, prev, tokens, {name: tuple(us[self._span(name, i)])
-                                                      for name, us in self.held[seq.slot].items()})
+                stored.append(idx.insert(key, prev, tokens, mine))
             elif e.parent == prev and e.tokens == tokens:
+                if key in idx.lower:           # only the tier holds it: into this request's own units (D7)
+                    idx.promote([e], {name: list(us) for name, us in mine.items()}, idx.after())
                 for name, units in e.units.items():
                     self._swap(seq.slot, name, self._span(name, i), units)
+                if e.loading is not None:
+                    self.waits.setdefault(seq.slot, []).append(e.loading)
             else:                                            # a hash collision: stop publishing this chain
                 self.chain[seq.slot] = None
-                return
+                break
             chain.append(key)
+        if stored and idx.tier is not None:   # write-through, after the last launched step (it may still write them)
+            idx.store(stored)
 
     def _span(self, spec: str, block_index: int) -> slice:
         per = self.index.block // self._page(spec)
@@ -391,7 +497,14 @@ class StateManager:
         for name, units in self.held.pop(seq.slot).items():
             self._pool(name).decref(np.asarray(units, dtype=np.int32))
         for _, payload in self._adopting.pop(seq.slot, ()):
-            self.index.payload_pools[payload.pool].decref(payload.units)
+            if payload is not None:
+                self.index.payload_pools[payload.pool].decref(payload.units)
+        for d in (self.waits, self.due):
+            d.pop(seq.slot, None)
+        settled = [(key, spec) for spec, kept in self._tentative.pop(seq.slot, {}).items() for key, p in kept
+                   if self.index.settle(key, p, spec, drop=False)]   # its kept tentatives are ordinary from now on
+        if settled and self.index.tier is not None:
+            self.index.tier.settled(settled)
         del self.chain[seq.slot]
         self.capacity.pop(seq.slot, None)
         self._free_slots.append(seq.slot)

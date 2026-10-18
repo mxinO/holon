@@ -19,6 +19,7 @@ class Pool(Protocol):
 
     name: str
     unit_bytes: int
+    segments: int                    # a unit is one chunk in each segment
     capacity: int
     num_free: int                    # units not allocated
 

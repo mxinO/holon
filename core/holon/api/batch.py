@@ -93,6 +93,7 @@ class Seq:
     constrained: bool = False            # a logits processor masks its rows (launched only with every token committed)
     status: Status = Status.WAITING
     finish_reason: str | None = None
+    branch_at: int = 0                   # set at admission (`SeqView.branch_at`)
 
     def __post_init__(self) -> None:
         if not self.prompt_len:

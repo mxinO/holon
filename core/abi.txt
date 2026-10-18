@@ -1,4 +1,4 @@
-abi 1.3
+abi 1.4
 
 # holon.api
 dataclass Abort
@@ -26,6 +26,12 @@ dataclass BatchPlan
 dataclass Binding frozen
   #0 impl: str
   #1 config: dict[str, Any] = dict()
+dataclass BlockRecord frozen
+  #0 key: int
+  #1 parent: int | None
+  #2 tokens: tuple[int, ...]
+  #3 units: Mapping[str, tuple[int, ...]]
+  #4 payloads: Mapping[str, Payload]
 protocol BuildCtx() required, implemented by core
   unit(self, ref: 'Ref', **site: 'Any') -> 'Unit'
   select_kernel(self, op: 'str', *, site: 'str', **facts: 'Any') -> 'KernelSpec'
@@ -78,11 +84,20 @@ dataclass EngineRequest
   #1 token_ids: list[int]
   #2 params: SamplingParams
   #3 resume_output: int = 0
+protocol EntryView() required, implemented by core
+  key: int
+  depth: int
+  hits: int
+protocol EvictionPolicy() required, implemented by plugins
+  victim(self, candidates: 'Iterator[EntryView]') -> 'EntryView | None'
 dataclass Extent frozen
   #0 path: str
   #1 offset: int
   #2 nbytes: int
 const FINISH_REASONS = ('stop', 'length', 'abort', 'error')
+protocol Fence() required, implemented by plugins
+  wait(self) -> 'None'
+  synchronize(self) -> 'None'
 dataclass Fingerprint frozen
   #0 gpu: str
   #1 sm: int
@@ -129,6 +144,9 @@ dataclass LayerDecl frozen
 dataclass Layout frozen
   #0 scheme: Scheme
   #1 name: str
+protocol Load(Fence) required, implemented by plugins
+  due: float
+  payloads: Mapping[tuple[int, str], Payload]
 dataclass Lock frozen
   #0 plan: Plan
   #1 snapshot: str | None = None
@@ -200,6 +218,7 @@ dataclass Option frozen
   #0 help: str
   #1 default: str | None = None
   #2 choices: tuple[str, ...] = ()
+  #3 planned: bool = True
 dataclass Paged frozen
   #0 unit_bytes: int
   #1 tokens_per_unit: int
@@ -213,6 +232,7 @@ const ParseEvent = holon.api.frontend.Text | holon.api.frontend.Reasoning | holo
 dataclass Payload frozen
   #0 units: tuple[int, ...]
   #1 pool: str
+  #2 tentative: bool = False
 dataclass Plan frozen
   #0 model_id: str
   #1 fingerprint_class: str
@@ -234,6 +254,7 @@ protocol Pool() required, implemented by core
   device_view(self, dtype: 'torch.dtype', shape: 'tuple[int, ...]') -> 'torch.Tensor'
   name: str
   unit_bytes: int
+  segments: int
   capacity: int
   num_free: int
 protocol PrefixView() required, implemented by core
@@ -286,12 +307,14 @@ enum RowKind
 const SLOTS
   draft_policy: single
   drafter: multi
+  eviction_policy: single
   frontend: multi
   kernel: per_site
   logits_processor: ordered_multi
   model: single
   sampler: single
   state_kind: per_site
+  tier: single
   unit: per_site
   verifier: single
   weight_source: per_site
@@ -342,6 +365,7 @@ dataclass Seq
   #11 constrained: bool = False
   #12 status: Status = <Status.WAITING: 'waiting'>
   #13 finish_reason: str | None = None
+  #14 branch_at: int = 0
 dataclass SeqTable
   #0 num_computed: torch.Tensor
   #1 last_token: torch.Tensor
@@ -355,6 +379,7 @@ protocol SeqView() required, implemented by core
   num_computed: int
   tokens: tuple[int, ...]
   prompt_len: int
+  branch_at: int
 dataclass Slot frozen
   #0 unit_bytes: int
   #1 draft_slots: int = 0
@@ -372,6 +397,18 @@ dataclass StateSpec frozen
   #6 alignment: int = 1
   #7 page_group: str | None = None
   #8 in_step: int = 0
+protocol StateTier() required, implemented by plugins
+  attach(self, ctx: 'TierCtx') -> 'list[BlockRecord]'
+  clock(self) -> 'float'
+  store(self, blocks: 'Sequence[BlockRecord]', after: 'Sequence[Fence]', evicting: 'bool') -> 'tuple[set[tuple[int, str | None]], Fence]'
+  load(self, keys: 'Sequence[int]', units: 'Mapping[str, Sequence[int]]', payloads: 'Sequence[tuple[int, str]]', after: 'Sequence[Fence]') -> 'Load'
+  loaded(self, load: 'Load', done: 'Fence | None') -> 'None'
+  hit(self, keys: 'Sequence[int]', adopted: 'Sequence[tuple[int, str]]') -> 'None'
+  settled(self, payloads: 'Sequence[tuple[int, str]]') -> 'None'
+  drop(self, keys: 'Sequence[int]', spec: 'str | None' = None) -> 'None'
+  dropped(self) -> 'list[tuple[int, str | None]]'
+  clear(self) -> 'None'
+  close(self) -> 'None'
 enum Status
   WAITING = 'waiting'
   RUNNING = 'running'
@@ -386,6 +423,8 @@ protocol StepCtx() required, implemented by core
   batch: Batch
   seq_table: SeqTable
   sampler: Sampler
+protocol Stream() required, implemented by core
+  run(self, fn: 'Callable[[], object]', after: 'Sequence[Fence]' = ()) -> 'Fence'
 protocol TargetView() required, implemented by core
   shared(self, name: 'str') -> 'torch.nn.Module'
   tensors(self) -> 'Iterable[tuple[str, torch.Tensor | QTensor]]'
@@ -393,6 +432,15 @@ protocol TargetView() required, implemented by core
   spec: ModelSpec
 dataclass Text
   #0 text: str
+protocol TierCtx() required, implemented by core
+  host_pool(self, name: 'str', *, unit_bytes: 'int', segments: 'int', units: 'int', mapped: 'bool' = False) -> 'Pool'
+  stream(self) -> 'Stream'
+  pools: Mapping[str, Pool]
+  identity: str | None
+  max_seqs: int
+  max_model_len: int
+  block: int
+  options: Mapping[str, object]
 dataclass TokenDelta
   #0 rid: str
   #1 token_ids: list[int]
@@ -480,6 +528,8 @@ protocol FinalizesWeights() optional, implemented by plugins
   finalize_weights(self, ctx: 'BuildCtx') -> 'None'
 protocol GraphKeyed() optional, implemented by plugins
   graph_key: Any
+protocol KeepsTentatives() optional, implemented by plugins
+  keep_tentative: int
 protocol KnowsCapacity() optional, implemented by plugins
   capacity(self, seq: 'SeqView') -> 'int'
 protocol MixesRowKinds() optional, implemented by plugins
