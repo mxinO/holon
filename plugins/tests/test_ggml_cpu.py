@@ -44,8 +44,16 @@ def _experts(name: str, file: str | None, layer: int):
         rng = np.random.default_rng(0)
         gu = np.stack([gguf.quants.quantize(rng.standard_normal((512, 512), dtype=np.float32) * 0.05,
                                             gguf.GGMLQuantizationType.Q8_0).reshape(-1) for _ in range(4)])
-        dn = np.stack([gguf.quants.quantize(rng.standard_normal((512, 256), dtype=np.float32) * 0.05,
-                                            gguf.GGMLQuantizationType[down.upper()]).reshape(-1) for _ in range(4)])
+        if down == "q2_0":            # random codes: ggml's quantizer (d = amax) never writes code 3 (+2), the files do
+            blocks = np.zeros((4, 512 * 256 // 64, 18), np.uint8)
+            blocks[..., :2] = (rng.uniform(0.01, 0.05, blocks.shape[:2]).astype(np.float16)).view(np.uint8).reshape(
+                *blocks.shape[:2], 2)
+            blocks[..., 2:] = rng.integers(0, 256, (*blocks.shape[:2], 16), dtype=np.uint8)
+            assert (((blocks[..., 2:, None] >> np.arange(0, 8, 2, dtype=np.uint8)) & 3) == 3).any()
+            dn = blocks.reshape(4, -1)
+        else:
+            dn = np.stack([gguf.quants.quantize(rng.standard_normal((512, 256), dtype=np.float32) * 0.05,
+                                                gguf.GGMLQuantizationType[down.upper()]).reshape(-1) for _ in range(4)])
         return "ggml.q8_0/gguf.native", f"ggml.{down}/gguf.native", 512, 256, torch.from_numpy(gu), torch.from_numpy(dn)
     path = next(VEHICLE.glob(f"*/{file}"), None)
     if path is None:
