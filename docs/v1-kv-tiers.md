@@ -631,7 +631,22 @@ turn.
 - Maya's multi-session ratio (GLM);
 - VMM rebalance (plan §10).
 
-## 11. Open questions for the owner
+## 11. Lead's decisions on rev 1's open questions (2026-10-18; the owner directed "continue until FN and GLM are finished",
+so these are decided within the milestone and recorded here; the panel may challenge them)
+
+1. **Write-through by default, host inclusive of VRAM** (D5): taken — eviction never stalls on a copy, swap-on-
+   preemption is free; the research note's write-back proposal is superseded.
+2. **No `HitLen.cost`**: taken, with the startup refusal of a tier slower than recompute; X §11's outline is updated.
+3. **`branch` and `answer:<k>` on by default in the 27B agent locks**: only if the gate shows their gain; their snapshot
+   moves are judged `bounded` and approved under the delegated rule.
+4. **Gate against `llama-server` with `--cache-ram` and `--ctx-checkpoints`**; SGLang HiCache and vLLM's offload
+   connector report-only on Qwen3-8B: taken.
+5. **Project Maya's multi-session ratio bar moves to the GLM milestone**: taken.
+6. **SSD persistence keyed on `plan_id`** (exact; any code change invalidates the files): taken.
+7. **`agent_park` as the gate trace, plus one pi re-run with local raw capture**: taken.
+
+Original questions as drafted:
+
 
 1. **Write-through by default, host inclusive of VRAM** (D5). This reverses the research note's write-back proposal
    (R line 578) to keep stalls out of eviction and make preemption swaps free. Agree?
