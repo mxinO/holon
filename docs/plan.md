@@ -684,13 +684,18 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   all-resident prefill is 1.6–2.0× Holon's on the RTX 5090. Work: a faster large-batch MoE GEMM path (e.g. dequant to
   a tensor-core GEMM for big chunks instead of mmq's int8 path), measured against FreeToken and llama.cpp, all-resident
   and offloaded. **Step 0 (2026-10-18)** is `spikes/moe_prefill/README.md`, run on an A5000 with all experts resident;
-  the design is `docs/v1-moe-prefill.md` (rev 1.2, one reviewer's rounds applied, before the panel).
+  the design is `docs/v1-moe-prefill.md` (rev 2: the three-lens panel's findings and the lead's decisions applied).
   - The cause is mmq's launch shape, not int8 against tensor cores. FreeToken runs the same ggml mmq.
   - Holon's resident stacks call it at 512 rows. Its grouped grid launches every slot's column tiles, 76–92% of them
     empty.
-  - The bitwise fixes (4,096-row resident calls, a compact tile map) are predicted at ≈ 0.93× / 0.97× FreeToken at
-    4K / 32K, ≈ 0.97× / 0.98× with SwiGLU fused into the GEMM, and ≈ 1.03× / 1.015× with the bounded router and dense
-    items. Dequant + bf16 GEMMs are rejected (D7).
+  - Planned fixes (D0–D5): larger exact calls per class through the bound kernel's `pass_rows`, a map-free compact
+    grouped launch, SwiGLU fused into the gate/up GEMM, and a router for prompt chunks plus larger dense calls
+    (bounded).
+  - Predicted on the A5000's numbers: resident 0.96–0.99× / 1.00–1.03× / 1.03–1.04× FreeToken (gated arm) at 1K / 4K
+    / 32K, and the 5080 offload rows 1.08–1.15× / 1.01–1.02× at 4K / 32K. The 32K row against FreeToken's ungated
+    8K chunks (≈ 0.98–0.99×) and D6's decode trade are owner items.
+  - Dequant + bf16 GEMMs are rejected on achieved rates, pending the bar cards' step 0 (D7). IQ1_M's mmq tile loader
+    for FN is this track's step 6.
 - **One version file:** a root `VERSION` read by every distribution at build time (hatchling's version source),
   `holon.__version__` from the installed metadata, and the plan's runtime-closure hash reading `VERSION` for the
   workspace's own packages (`uv.lock` records them as dynamic). It changes the core, so it lands with the next relock

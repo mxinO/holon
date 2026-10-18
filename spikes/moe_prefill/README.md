@@ -32,7 +32,9 @@ in core, std or plugins changed: the probes patch module constants in the worker
 - **nsys** (`-t cuda,nvtx --capture-range=cudaProfilerApi`): one profiled request per length after the timed ones.
   `breakdown.py` gives each kernel the innermost NVTX region open at its launch: `experts`, `dense`, `router` or
   `combine`, pushed around each engine's Python calls in this process only. Inside a region kernels are split by
-  name; outside, x4_gap's rules apply. Profiled walls are within 1–3% of the timed ones.
+  name; outside, x4_gap's rules apply. Profiled walls are within 1–4% of the timed ones for Holon
+  and at 4K / 32K for FreeToken; FreeToken's profiled 1K wall is 226 against 176 ms timed (+28%, host gaps under
+  the profiler).
 - **Per-call bench `gemm.py`:** one layer's expert GEMMs, CUDA-event timed, median of 20.
   - Routing: top-8 distinct per token, popularity ∝ rank^-0.5 (the top 10% of experts take ≈ 27% of routes; M6's
     range is 23–36%).
