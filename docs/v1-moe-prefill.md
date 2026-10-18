@@ -675,6 +675,18 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
 
 ### 7.1 Step records
 
+**Step 3 predictions (written before each item's GPU run).**
+- **D5, L2 on the A5000** (Tier B prefill: the mmq floor; `--max-step-tokens 4096 --max-seqs 4`, so dense calls of
+  1–8 chunks):
+  - D5 passes, within one SE of the pre-D5 tree's ΔPPL (`6b256ed`: KL p99 6.03e-2, ΔPPL +0.225%; budget KL p99 ≤ 1.18e-1,
+    ΔPPL ≤ 0.573%).
+  - On sm_86 only the 30B's `attn_k` / `attn_v` (out 512) take the stream-k fixup past one chunk, at 1,024 and 3,072
+    rows (`mmq_schedule`); `attn_q`, `attn_output` and the head tile at every size. So the plants fire there only.
+  - `qlinear-partials-bf16` (near): **passes**. A partial rounded to bf16 errs by ≤ 2⁻⁹ relative, about what the
+    output's own bf16 rounding adds, on a fraction of the k/v rows: L2 is blind at that scale (recorded as such).
+  - `qlinear-large-no-fixup` (far): **fails**. Every fixed-up tile loses the partials of the blocks before its end, so
+    k / v of those rows are wrong.
+
 **Step 1 (D0, D1).**
 - **What landed.**
   - `std.moe.kernels` states the `pass_rows` term and owns `CHUNK`.
