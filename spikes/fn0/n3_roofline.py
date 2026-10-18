@@ -198,7 +198,8 @@ def main() -> None:
             "strata_phase_shares": {k: round(statistics.median(p.get(k, 0) for p in ph[c]) /
                                              statistics.median(sum(p.values()) for p in ph[c]), 4)
                                     for k in sorted({k for p in ph[c] for k in p})}}
-    below = sorted({f"{c} {r}" for c, row in rows.items() for r, v in row["ratios"].items() if v["central"] < 0.9})
+    below = sorted({f"{c} {r}" for c, row in rows.items() for r, v in row["ratios"].items()
+                    if v["central"] < (0.9 if r.endswith("prefill") else 1.0)})       # each cell's bar (acceptance 5)
     rec = {"name": "fn0_n3_roofline", "date": datetime.date.today().isoformat(), "gpu": a.card,
            "commit": run.git("rev-parse", "HEAD"), "command": f"python spikes/fn0/n3_roofline.py --card {a.card} ...",
            "method": __doc__.split("\n\n", 1)[1].rsplit("\n\n", 1)[0],
@@ -209,10 +210,11 @@ def main() -> None:
                       "lfu_hit_rate": {k: round(v, 4) for k, v in hits.items()},
                       "union_experts_per_layer_per_pass": round(union, 2), "non_lendable_peak_kb": a.peak_kb,
                       "phase_factors": F, "prefill_stream_gbps": PCIE_STREAM},
-           "rows": rows, "rows_below_0_9_central": below}
+           "rows": rows, "bars": {"decode": 1.0, "prefill": 0.9},
+           "rows_below_bar_central": below}
     pathlib.Path(a.out).write_text(json.dumps(rec, indent=1) + "\n")
     print(json.dumps({c: {r: v["central"] for r, v in row["ratios"].items()} for c, row in rows.items()}, indent=1))
-    print("below 0.9 (central):", below)
+    print("below their bar (central):", below)
 
 
 if __name__ == "__main__":

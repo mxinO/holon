@@ -2,7 +2,7 @@
  "name": "fn0_n3_roofline",
  "date": "2026-10-18",
  "gpu": "rtx-5080",
- "commit": "5d9c868b1390edef69591fdbaa425a23fd468d70",
+ "commit": "2a6135c75d1ffeaca96e21b5ab3832a196fb0ad3",
  "command": "python spikes/fn0/n3_roofline.py --card rtx-5080 ...",
  "method": "**The cache per row**: \u00a77's budget at the card's lock step (the RTX 5080's lock steps 4K, lead decision; the 5090's 8K)\nless the measured non-lendable peak over \u00a77's 200 KB per token; the drafting-off rows deploy without the 0.89 GB MTP\npack, the MTP rows with it; and, for the RTX 5080, step 7's target (\u2265 8.2 GB with the pack, \u00a713).\n\n**Decode, drafting off** (per token): t = (dense bytes + GDN state + hit bytes) / BW + miss bytes / PCIe + overhead.\n- dense bytes per token: every non-expert tensor of the file but the embedding and the PLE table (GGUF headers);\n  GDN state: 36 layers x 48 x 128 x 128 fp32, read and written;\n- hit rate: Holon's `placement.lfu@1` per layer, seeded from the expert profile, replayed on Strata's own decode\n  routing (`--dump-routing`, tail skip off; it matches Strata's measured rate at Strata's cache size);\n- BW: 85% of the card's DRAM bandwidth; PCIe and the overhead from X's two Holon rows on the RTX 5080 (Qwen3-30B-A3B\n  lfu and static at 25%: the slope of time over miss bytes gives the F5a fetch rate, the rest the per-step overhead,\n  scaled from X's ~11 to FN's 16 launches per layer).\n\n**Decode, MTP** (per verify pass of 4 rows, 3 drafts): the pass reads the dense bytes once and each distinct expert of\nits 4 tokens once \u2014 lfu replayed on 4-token window unions (one decay per pass) \u2014 plus 3 draft steps of the MTP head\n(its 0.18 GB of dense parts, the full-vocabulary head, 10 of its Q2_0 experts, one layer's overhead each) and the MTP\nhead over the pass's verify rows (0.275 ms, panel C's 0.25-0.3); a pass\nyields Strata's own recorded accepted tokens per pass in the matched row (the same pack, full head, min-p 0).\nA1 (tail skip) gains what Strata's tail skip gains between its no-approx and defaults drafting-off rows; the defaults\nMTP rows also carry Strata's suffix drafter and calibrated draft floor, which Holon does not have (a non-goal).\n\n**Prefill** (per request): Strata's phase timers (`STRATA_PREFILL_TIMING`, St prefill.cpp:2000-2012) give each phase's\nshare of its prompt time; Holon's time is Strata's gated time x the sum of share x f, f being Holon's cost per phase\nrelative to Strata's: 1.0 for the ggml mmq expert and dense GEMMs (assumes the MoE prefill track's D1-D5 and IQ1_M's\nnative loader, D1'); bands for the parts FN writes in Triton (HC in fp32 ieee, GDN, QSA); and Strata's \"dequant\"\nphase \u2014 the per-expert gather and its issue gaps, on IQ3_S too, not IQ1_M's dequantization \u2014 at 0.3 [0.1, 0.5]:\nHolon's arena mmq reads the slots in place (no gather), leaving the issue gaps. A step\nis bound below by streaming the non-resident experts its tokens route to over PCIe (at 1K the routed share from 1,024-\ntoken windows of the trace; 1.0 beyond the trace's length). The defaults rows give Holon's q8_0 KV (read in-kernel by\n`qsa_attend@1`) Strata's own int8 gain (its defaults over its no-approx prefill, where above 1).",
  "inputs": {
@@ -384,9 +384,17 @@
    }
   }
  },
- "rows_below_0_9_central": [
+ "bars": {
+  "decode": 1.0,
+  "prefill": 0.9
+ },
+ "rows_below_bar_central": [
   "1024 defaults_mtp_decode",
   "1024 noapprox_mtp_decode",
-  "4096 defaults_mtp_decode"
+  "1024 target_noapprox_mtp_decode",
+  "32768 defaults_mtp_decode",
+  "4096 defaults_mtp_decode",
+  "4096 noapprox_mtp_decode",
+  "4096 target_noapprox_mtp_decode"
  ]
 }
