@@ -18,7 +18,8 @@ pack, the MTP rows with it; and, for the RTX 5080, step 7's target (≥ 8.2 GB w
 
 **Decode, MTP** (per verify pass of 4 rows, 3 drafts): the pass reads the dense bytes once and each distinct expert of
 its 4 tokens once — lfu replayed on 4-token window unions (one decay per pass) — plus 3 draft steps of the MTP head
-(its 0.18 GB of dense parts, the full-vocabulary head, 10 of its Q2_0 experts, one layer's overhead each); a pass
+(its 0.18 GB of dense parts, the full-vocabulary head, 10 of its Q2_0 experts, one layer's overhead each) and the MTP
+head over the pass's verify rows (0.275 ms, panel C's 0.25-0.3); a pass
 yields Strata's own recorded accepted tokens per pass in the matched row (the same pack, full head, min-p 0).
 A1 (tail skip) gains what Strata's tail skip gains between its no-approx and defaults drafting-off rows; the defaults
 MTP rows also carry Strata's suffix drafter and calibrated draft floor, which Holon does not have (a non-goal).
@@ -27,7 +28,8 @@ MTP rows also carry Strata's suffix drafter and calibrated draft floor, which Ho
 share of its prompt time; Holon's time is Strata's gated time x the sum of share x f, f being Holon's cost per phase
 relative to Strata's: 1.0 for the ggml mmq expert and dense GEMMs (assumes the MoE prefill track's D1-D5 and IQ1_M's
 native loader, D1'); bands for the parts FN writes in Triton (HC in fp32 ieee, GDN, QSA); and Strata's "dequant"
-phase — the per-expert gather and its issue gaps, on IQ3_S too, not IQ1_M's dequantization — at 1.0 [0.5, 1.5]. A step
+phase — the per-expert gather and its issue gaps, on IQ3_S too, not IQ1_M's dequantization — at 0.3 [0.1, 0.5]:
+Holon's arena mmq reads the slots in place (no gather), leaving the issue gaps. A step
 is bound below by streaming the non-resident experts its tokens route to over PCIe (at 1K the routed share from 1,024-
 token windows of the trace; 1.0 beyond the trace's length). The defaults rows give Holon's q8_0 KV (read in-kernel by
 `qsa_attend@1`) Strata's own int8 gain (its defaults over its no-approx prefill, where above 1).
@@ -58,6 +60,7 @@ CARDS = {   # file, dense GB, expert MB per (layer, expert), DRAM GB/s x 0.85, t
                  "step": 8192, "cache_gb": 21.45, "target_gb": None},
 }
 MTP_PACK_GB, MTP_DENSE_GB, MTP_EXPERT_MB, DRAFTS, WINDOW = 0.889, 0.181, 1.382, 3, 4
+MTP_HEAD_MS = 0.275            # the MTP head over a pass's verify rows (panel C: 0.25-0.3 ms)
 LAYERS, TOPK, GDN_STATE_GB = 48, 10, 36 * 48 * 128 * 128 * 4 * 2 / 1e9
 # X's Holon rows, RTX 5080, Qwen3-30B-A3B Q4_K_M at 25% (evidence/x8_close_rtx-5080_2026-10-18.json, 1K): lfu and F1
 X_ROWS = {"lfu": {"ms": 1e3 / 119.1672, "miss_mb": 169.7687, "hit": 0.8478},
@@ -67,7 +70,7 @@ X_LAUNCHES, FN_LAUNCHES = 11, 16
 # Holon's cost per Strata prefill phase (central, low, high)
 F = {"hc read": (1.5, 1.0, 2.0), "gdn": (1.1, 0.9, 1.5), "gdn conv+gates": (1.1, 0.9, 1.5),
      "gdn recurrence": (1.1, 0.9, 1.5), "gdn out proj": (1.0, 1.0, 1.0), "qsa attn": (1.2, 1.0, 1.6),
-     "qsa select": (1.2, 1.0, 1.6), "qsa indexer": (1.2, 1.0, 1.6), "dequant": (1.0, 0.5, 1.5),
+     "qsa select": (1.2, 1.0, 1.6), "qsa indexer": (1.2, 1.0, 1.6), "dequant": (0.3, 0.1, 0.5),
      "gemm gate/up": (1.0, 1.0, 1.3), "gemm down": (1.0, 1.0, 1.3)}
 PCIE_STREAM = 47.5                                      # GB/s, the prefill ring's copies (X's M1)
 PHASE = re.compile(r" ([a-z+/ ]+?) (\d+) \([\d.]+%\)")
@@ -125,7 +128,7 @@ def mtp_pass_ms(card: dict, hit: float, union: float, pcie: float, over: float, 
     verify = ((card["dense_gb"] + GDN_STATE_GB + hit * experts) / card["bw"] * 1e3 + (1 - hit) * experts * 1e3 / pcie
               + over + qsa)
     draft = (MTP_DENSE_GB + card["head_gb"] + TOPK * MTP_EXPERT_MB / 1e3) / card["bw"] * 1e3 + over / LAYERS
-    return verify + DRAFTS * draft
+    return verify + DRAFTS * draft + MTP_HEAD_MS
 
 
 def main() -> None:

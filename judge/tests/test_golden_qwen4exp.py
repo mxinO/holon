@@ -83,7 +83,7 @@ def test_the_floors_moe_mirror_is_hfs_block_with_its_shared_expert():
         assert moe.mirror(block) == 1
         got = block(x)
         shared = torch.sigmoid(block.shared_expert_gate(x)) * block.shared_expert(x)
-    assert (got - want).abs().max() < 1e-6 < (want - shared).abs().max()          # the shared term is in, gated
+    assert (got - want).abs().max() < 1e-6 and shared.abs().max() > 1e-4         # the gated shared term is in
 
 
 @pytest.mark.skipif(not os.environ.get("FN_STRATA"), reason="needs FN_STRATA (Strata at 296b59d: tools/mtp_pack.py)")

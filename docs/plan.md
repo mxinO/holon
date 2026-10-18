@@ -689,6 +689,10 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   all-resident prefill is 1.6–2.0× Holon's on the RTX 5090. Work: a faster large-batch MoE GEMM path (e.g. dequant to
   a tensor-core GEMM for big chunks instead of mmq's int8 path), measured against FreeToken and llama.cpp, all-resident
   and offloaded.
+- **Q2_0 for PyPI installs (release item, FN step 2's review):** the workspace takes gguf-py from llama.cpp's tree
+  (`27c7a76`, which has Q2_0, type 42), but a user's install resolves std's `gguf>=0.17` from PyPI, whose 0.19.0 stops
+  at Q1_0, so reading Qwen3.8-Flash-Next's files fails there. Before a release that serves FN: either std carries its
+  own size entry for the type ids gguf-py lacks, or the floor rises once a PyPI gguf with Q2_0 exists.
 - **One version file:** a root `VERSION` read by every distribution at build time (hatchling's version source),
   `holon.__version__` from the installed metadata, and the plan's runtime-closure hash reading `VERSION` for the
   workspace's own packages (`uv.lock` records them as dynamic). It changes the core, so it lands with the next relock

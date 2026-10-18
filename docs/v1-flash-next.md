@@ -1122,35 +1122,55 @@ docstring). Rev 2 takes panel C's review of the step-0 evidence (below):
   (its 0.18 GB dense parts, the full-vocabulary head, 10 Q2_0 experts). It yields Strata's recorded accepted tokens
   per pass from the matched rows.
 - **Prefill factors:** X's F5a fetch rate (40.3 GB/s) and per-step overhead (2.64 ms at 16 launches per layer).
-  Strata's phase shares are scaled by HC ×1.5, GDN ×1.1, QSA ×1.2, mmq ×1.0 (assuming the MoE prefill track's D1–D5),
-  and Strata's "dequant" phase — **relabelled: the per-expert gather and its issue gaps**, present on IQ3_S too — at
-  ×1.0 [0.5, 1.5]. Rev 1 read it as IQ1_M's dequantization at ×0.5.
-- **Other bounds and gains:** the PCIe streaming bound of a step's routed non-resident experts; q8_0 KV gaining
-  Strata's own int8 gain in the defaults rows (`qsa_attend@1` reads q8_0 in-kernel, §5).
-- **Holon / Strata, central [band] (rev 2, which supersedes rev 1's table):**
+  Strata's phase shares are scaled by HC ×1.5, GDN ×1.1, QSA ×1.2 and mmq ×1.0 (assuming the MoE prefill track's
+  D1–D5).
+- **Strata's "dequant" phase is relabelled** as the per-expert gather and its issue gaps; it is present on IQ3_S too.
+  Rev 1 read it as IQ1_M's dequantization at ×0.5.
+  - **Rev 3 factor: ×0.3 [0.1, 0.5].** Holon's arena mmq reads the cache slots in place, so there is no gather; only
+    the issue gaps remain (panel C).
+- **Other bounds and gains:**
+  - the PCIe streaming bound of a step's routed non-resident experts;
+  - q8_0 KV gaining Strata's own int8 gain in the defaults rows (`qsa_attend@1` reads q8_0 in-kernel, §5);
+  - **rev 3 adds the MTP head's own cost** over each pass's verify rows: 0.275 ms (panel C: 0.25–0.3).
+- **Bars: decode 1.0×, prefill 0.9×** (acceptance 5). Rev 2's table measured every cell against 0.9×; that is
+  corrected here.
+- **Holon / Strata, central [band] (rev 3, which supersedes revs 1 and 2).**
 
-| Row | RTX 5080: 1K · 4K · 32K | RTX 5090: 1K · 4K · 32K |
+| Gated row (bar) | RTX 5080: 1K · 4K · 32K | RTX 5090: 1K · 4K · 32K |
 |---|---|---|
-| no-approx, off, decode | 1.03 · 1.01 · 1.08 [0.95–1.17] | 1.13 · 1.13 · 1.18 [1.02–1.31] |
-| no-approx, MTP, decode | **0.896** · 0.92 · 1.09 [0.87–1.13] | 0.98 · 1.06 · 1.07 [0.93–1.13] |
-| no-approx, prefill | 0.96 · 0.92 · **0.899** [0.70–1.18] | 0.97 · 0.93 · 0.91 [0.71–1.10] |
-| defaults vs Holon + A1, off, decode (A1 gains what Strata's tail skip gains) | as no-approx | as no-approx |
-| defaults vs Holon + A1, MTP, decode | **0.85 · 0.84** · 0.94 | 0.97 · 0.94 · 1.05 |
-| defaults vs Holon + A1, prefill (q8_0 gains int8's +20% / +15% at 32K) | 1.01 · 0.94 · **0.899** | 1.05 · 1.07 · 0.91 |
-| *RTX 5080 at step 7's target (≥ 8.2 GB with the pack; 9.09 GB without):* no-approx off · MTP decode | 1.06 · 1.04 · 1.11 · 0.94 · 0.97 · 1.15 | — |
+| no-approx, drafting off, decode (1.0×) | 1.03 · 1.01 · 1.08 [0.95–1.17] | 1.13 · 1.13 · 1.18 [1.02–1.31] |
+| no-approx, MTP-matched, decode (1.0×) | **0.89 · 0.91** · 1.08 [0.86–1.12] | **0.97** · 1.04 · 1.05 [0.92–1.11] |
+| no-approx, prefill (0.9×) | 1.19 · 0.99 · 0.93 [0.73–1.36] | 1.05 · 1.03 · 0.97 [0.76–1.18] |
+| *RTX 5080 at step 7's memory target:* drafting off · MTP-matched decode | 1.06 · 1.04 · 1.11 · **0.93 · 0.96** · 1.13 | — |
 
-- **Rows below 0.9× (central):**
-  - RTX 5080: no-approx MTP decode at 1K (0.896); defaults MTP decode at 1K and 4K (0.85, 0.84); no-approx and
-    defaults prefill at 32K (both 0.899).
-  - RTX 5090: none.
-- **At step 7's memory target** the RTX 5080's MTP rows rise to 0.94 / 0.97 / 1.15, and its drafting-off decode to
-  1.04–1.11.
-- **Causes (amended after panel C):**
-  - **The defaults MTP rows: Strata's suffix drafter and its calibrated draft floor.** This is the real cause; Holon
-    has no suffix drafter (a non-goal). Rev 1's "int8 KV" cause for the defaults prefill was mostly a modelling gap:
-    with q8_0 gaining int8's own gain, the 32K defaults prefill moves from 0.77 / 0.83 to 0.90 / 0.91.
-  - **The RTX 5080's MTP and 32K prefill rows:** §7's smaller cache. The verify unions miss more, and the gather
-    phase now carries its full weight.
+| Report-only row (lead's recommendation, owner item) | RTX 5080 | RTX 5090 |
+|---|---|---|
+| defaults vs Holon + A1, drafting off, decode | as no-approx | as no-approx |
+| defaults vs Holon + A1, MTP, decode | 0.84 · 0.83 · 0.93 | 0.95 · 0.93 · 1.04 |
+| defaults vs Holon + A1, prefill | 1.25 · 1.01 · 0.93 | 1.14 · 1.18 · 0.97 |
+
+- **Gated cells predicted to miss their bar (central):**
+  - **RTX 5080 MTP-matched decode at 1K and 4K** (0.89, 0.91). They still miss at step 7's memory target (0.93,
+    0.96).
+  - **RTX 5090 MTP-matched decode at 1K** (0.97).
+  - Per D11, these go to the owner when they are measured.
+  - Every prefill cell clears 0.9× at the center; the 5080's drafting-off decode clears 1.0× (bands down to 0.95).
+- **Model error.** Cells within a few percent of their bar (rev 2's 0.896 / 0.899; here the 5080's 4K drafting-off
+  decode at 1.01 and 32K prefill at 0.93, and the 5090's 1K MTP at 0.97) sit inside the model's error band. They are
+  re-predicted after step 7 from measured costs.
+- **Levers on the MTP decode cells beyond memory** (panel C; candidates, not commitments):
+  - **F5b's CPU split in the RTX 5080 lock.** Lead decision 5 allows it once the judge's path-aware floor passes; it
+    is a step 6–7 candidate.
+  - **MTP experts in the store** instead of resident: ≈ +0.7 GB of cache (§7).
+  - **A multi-token F5b CPU path** that reads each weight once per verify window, as Strata's pool does.
+    - Panel C's estimate: at equal cache, Holon's MTP gain over drafting off is 1.40 against Strata's 1.47, so closing
+      that gap is worth up to ≈ 5% on these cells.
+    - A candidate for step 7, not a commitment.
+- **Causes:**
+  - The MTP cells: §7's smaller cache (the 4-token verify unions miss more) and Strata's multi-token CPU pass.
+  - The defaults MTP rows: also Strata's suffix drafter and calibrated draft floor, which Holon does not have (a
+    non-goal). Rev 1's "int8 KV" cause for the defaults prefill was mostly a modelling gap.
+- `stable_topk` moves to `std.mixers.qsa`'s reference once step 3 writes it (panel A, optional).
 
 **The oracle check (N4's 32K run)** (`spikes/fn0/n4_oracle.py`):
 - **The judge reads FN's GGUFs** (`judge/holon_judge/gguf.py`, `golden.py`, `moe.py`): the `qwen4exp` name map, split
@@ -1240,7 +1260,7 @@ Steps 1 and 3 wait for milestone K's core seams.
 | A-m3 | Two definitions of the tie rule; a global `Tensor.topk` patch in the fixtures; the test wrapped a shared model | **Accepted.** One definition (`qwen4exp.wrap_indexers`, scoped to each indexer's call, with an optional tie counter). The fixtures import it (`holonlm-testing` now depends on `holonlm-judge`), and the tests wrap models of their own. |
 | A-m4 | std's `gguf>=0.17` floor vs Q2_0 | **Accepted: release item.** A user's PyPI gguf lacks Q2_0, so either std gets its own size entry for type ids gguf-py lacks, or the floor rises once a PyPI gguf with Q2_0 exists. No code change now. |
 
-**Step 0's evidence review (panel C), dispositions:**
+**Step 0's evidence review (panel C), dispositions** (the `-R2` rows are the panel's second round, on the step-2 fixes and roofline rev 2):
 
 | # | Finding | Disposition |
 |---|---|---|
@@ -1248,4 +1268,10 @@ Steps 1 and 3 wait for milestone K's core seams.
 | C-M2 | q8_0's gain left out of the model | **Accepted.** `qsa_attend@1` reads q8_0 in-kernel in prefill, decode and verify (§5). The defaults rows model q8_0's gain, and the escalation text now names the suffix drafter as the real cause. |
 | C-m | Strata's "dequant" phase mislabelled | **Accepted.** Relabelled as the per-expert gather and its issue gaps, at ×1.0 [0.5, 1.5]. |
 | C-m | The MTP rows were not modelled | **Accepted.** `lfu` is replayed on 4-token window unions, with the recorded acceptance and the per-draft head and dense bytes. |
+| C-R2-M (major) | The decode bar is 1.0×, not 0.9× | **Accepted** (rev 3). The gated table is restated against 1.0× for decode and 0.9× for prefill. The 1K / 4K MTP cells are predicted to miss, even at step 7's memory target; levers beyond memory are named, and the cells go to the owner when measured (D11). |
+| C-R2-m | The gather factor | **Accepted:** ×0.3 [0.1, 0.5]. Holon's arena mmq reads slots in place. |
+| C-R2-m | The MTP head's cost over the verify rows | **Accepted:** 0.275 ms per pass. |
+| C-R2-m | The 0.896 / 0.899 cells | **Accepted:** they sit inside the model's error band and are re-predicted after step 7 from measured costs. |
+| A-R2-m | The Q2_0 release item; the judge's std dependency; `stable_topk`'s home | **Accepted.** Plan §10 has the release item. `judge/pyproject.toml` declares `holonlm-std` (pre-existing: the judge imports `holon_std` at 40 sites; relocked). `stable_topk` moves to `std.mixers.qsa`'s reference in step 3. |
+| B-R2-n | The mirror test should show the shared term is nonzero | **Accepted:** it asserts `shared.abs().max() > 1e-4`. |
 | C-m | N1's no-approx arms ran with the CPU share on | **Accepted, noted.** N1 ran with Strata's CPU share on (the as-run arms, with their environments, are inside each `evidence/fn0_n1_*` record's `arms`). It measured as immaterial (`evidence/fn0_n1_cpu_share_<card>`). The committed `spikes/fn0/arms_*` files now set it off. |
