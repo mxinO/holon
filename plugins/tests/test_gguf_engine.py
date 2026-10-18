@@ -6,7 +6,7 @@ import gguf
 import numpy as np
 import pytest
 import torch
-from holon.api import SamplingParams
+from holon.api import QTensor, SamplingParams
 from holon.core.engine import Engine, EngineConfig
 from holon.core.plugins import PluginError
 from holon_testing.gguf_files import write
@@ -60,6 +60,22 @@ def test_a_quantized_gguf_serves_what_its_dequantized_weights_serve(tiny_checkpo
     sites = {(f["layout"], f["in"], f["out"]) for f in (s["facts"] for k, s in ours.ctx.kernels.items()
                                                         if k.endswith("/qlinear@2"))}
     assert sites == {(f"ggml.{t}/gguf.native", k, o) for t, k, o in engine_shapes(file).values()}
+
+
+def test_quantized_parts_say_where_their_bytes_lie_in_the_file(tiny_checkpoint, tmp_path):  # noqa: F811
+    """Weight extents (docs/v1-offload.md S4): each quantized tensor's blocks read back bitwise from its extent, so an
+    offload tier can read them again from the file."""
+    from holon_std.weights.gguf.source import GGUFSource
+
+    file = tmp_path / "tiny.gguf"
+    write(tiny_checkpoint, file, Q.Q8_0, types={"ffn_down": Q.Q4_0})
+    quantized = [q for _, q in GGUFSource(file).tensors() if isinstance(q, QTensor)]
+    assert len(quantized) > 4 and all(q.extents.keys() == q.parts.keys() for q in quantized)
+    with open(file, "rb") as f:
+        for q in quantized:
+            extent = q.extents["blocks"]
+            f.seek(extent.offset)
+            assert extent.path == str(file) and f.read(extent.nbytes) == q.parts["blocks"].numpy().tobytes()
 
 
 def test_a_unit_that_cannot_read_a_layout_fails_at_load(tiny_checkpoint, tmp_path):  # noqa: F811

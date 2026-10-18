@@ -1,0 +1,61 @@
+{
+ "gpu": "rtx-a5000",
+ "model": "unsloth/Qwen3-30B-A3B-GGUF Q4_K_M",
+ "commit": "e074e9f",
+ "kernels": "kernels.ggml_cuda with the D4 patches (forced tiling, compact active-slot launch), merged at 0c8741e",
+ "command": "python spikes/x2_store/exact.py <gguf> <runs> \"resident@16384;*=1.0@16384;*=0.47@16384;*=0.25@16384\"",
+ "resident": {
+  "build_s": 10.9,
+  "run_s": 4.0,
+  "pools": {
+   "state.kv": 2701
+  }
+ },
+ "offload": [
+  {
+   "name": "offload_1.0_0",
+   "fit": "*=1.0",
+   "build_s": 23.4,
+   "run_s": 4.1,
+   "peak_misses": 0,
+   "pools": {
+    "plugin.moe.arena": 20447,
+    "plugin.moe.host.down.q4_k.2048x768": 3072,
+    "plugin.moe.host.down.q6_k.2048x768": 3072,
+    "plugin.moe.host.gate_up.q4_k.1536x2048": 6144,
+    "state.kv": 1106
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "offload_0.47_0",
+   "fit": "*=0.47",
+   "build_s": 23.6,
+   "run_s": 18.0,
+   "peak_misses": 67,
+   "pools": {
+    "plugin.moe.arena": 9933,
+    "plugin.moe.host.down.q4_k.2048x768": 3072,
+    "plugin.moe.host.down.q6_k.2048x768": 3072,
+    "plugin.moe.host.gate_up.q4_k.1536x2048": 6144,
+    "state.kv": 6905
+   },
+   "vs_resident": "identical"
+  },
+  {
+   "name": "offload_0.25_0",
+   "fit": "*=0.25",
+   "build_s": 22.2,
+   "run_s": 24.0,
+   "peak_misses": 96,
+   "pools": {
+    "plugin.moe.arena": 5567,
+    "plugin.moe.host.down.q4_k.2048x768": 3072,
+    "plugin.moe.host.down.q6_k.2048x768": 3072,
+    "plugin.moe.host.gate_up.q4_k.1536x2048": 6144,
+    "state.kv": 9349
+   },
+   "vs_resident": "identical"
+  }
+ ]
+}

@@ -4,14 +4,25 @@ version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "unit"
 license = "Apache-2.0"
-core_abi = ">=1.0,<2.0"
+core_abi = ">=1.2,<2.0"   # the offload store: shared objects, host and fill pools, extents
 
 [resources]
 provides = [
     "unit.std.moe@1",
+    "unit.std.moe.resident@1",
+    "unit.std.moe.offload@1",
     "op.moe_topk@1",
+    "op.moe_router@1",
     "op.linear_experts@2",
     "op.moe_combine@1",
+    "op.moe_resolve@1",
+    "op.expert_fetch@1",
+    "op.expert_prefetch@1",
+    "op.linear_experts_arena@1",
+    "op.cpu_task@1",
+    "op.cpu_experts@1",
+    "op.moe_patch_rows@1",
+    "op.moe_tiers@1",
 ]
 
 [properties]
@@ -22,3 +33,14 @@ module = "reference"
 
 [options]   # the EngineConfig.plugin_options keys this plugin reads
 "quant.act" = { help = "activation precision of quantized weights' matmuls", default = "a8", choices = ["a4", "a8"] }
+"moe.store" = { help = "the expert store's unit Ref: std.moe.offload@1 offloads experts to host memory", default = "std.moe.resident@1" }
+"moe.placement" = { help = "the offload store's placement policy (a unit Ref): placement.lfu@1 (F11; first-party plugins), placement.lru@1, placement.profile_decay@1, std.tiered.static@1", default = "placement.lfu@1" }
+"moe.placement.profile" = { help = "routing counts seeding placement, written by `holon_tools profile` (default name <checkpoint stem>.profile.json): a JSON file {\"checkpoint\": [[file, bytes], ...], \"layers\": {\"<layer>\": [count per expert]}} beside the checkpoint's file (named relative to its directory), refused on another checkpoint's files" }
+"moe.tiers" = { help = "the offload store's host tiers (unit Refs, comma-separated)", default = "std.tiered.pinned@1" }
+"moe.ring_tokens" = { help = "prompt tokens of a step from which it streams every layer's missing experts through lent ring slots, in large expert passes (0: never)", default = "512" }
+"moe.ring_copy" = { help = "how the ring's copies run: sm (a small kernel beside the pass, no host sync) or dma (copy engines, one host sync per streaming step to read the copy list)", default = "sm", choices = ["sm", "dma"] }
+"moe.route_transform" = { help = "approx: a route transform's name (its plugin's contract moe_route_transform.<name>@1); offload store only" }
+"moe.cache" = { help = "VRAM cache slots per class, pinned: <class>=<slots or fraction>,… (* for the rest)", default = "fill free VRAM" }
+"moe.cpu_plan" = { help = "F5b, the CPU's share of a pass's misses: plan[1],…,plan[N] (the CPU takes plan[n] of n; past N the last entry's share; empty: none)", default = "" }
+"moe.cpu_isa" = { help = "the CPU tier the split was measured on (from tune): on a host of another tier the split is off", default = "" }
+"moe.ram" = { help = "the RAM tier's units per class (the store forwards it to its first tier): <class>=<slots or fraction>,… (* for the rest); fewer than every piece makes RAM exclusive (a slower tier in moe.tiers holds the rest)", default = "every piece" }

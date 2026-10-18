@@ -9,7 +9,10 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from .batch import StepCtx
+    import numpy as np
+    import torch
+
+    from .batch import BatchPlan, StepCtx
     from .decoding import DraftPolicy
     from .mixer import Planner
     from .model import AuxSpec, BuildCtx, Resolved
@@ -146,7 +149,42 @@ class Reports(Protocol):
 
 class ShutsDown(Protocol):
     def shutdown(self) -> None:
-        """On a logits processor, by `Engine.close`: stop its helpers."""
+        """On a logits processor or a shared object (`BuildCtx.shared`), by `Engine.close` after the drain: stop its
+        helpers."""
+
+
+# -- shared objects (`BuildCtx.shared`) -------------------------------------------------------------------------------
+# One that starts threads (CPU workers, I/O workers) sets their CPU affinity itself: otherwise they inherit the
+# engine loop's, which `EngineConfig.loop_core` pins to one core.
+class RequestsPools(Protocol):
+    def before_materialize(self, ctx: BuildCtx) -> None:
+        """Once, after every model (auxiliary models included) is built and loaded, before the pools are first
+        materialized: the last point to request pools, host pools included (`BuildCtx.pool`)."""
+
+
+class ResetsState(Protocol):
+    def after_materialize(self, ctx: BuildCtx) -> None:
+        """After every materialize of the pools (the startup profile's minimum one included), before graphs are
+        captured: their buffers are new, so reset and seed the device state kept in them."""
+
+
+class EditsBeforeLaunch(Protocol):
+    def before_launch(self, step: BatchPlan) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list[MemOp]]:
+        """Before the step is launched: device writes — `(dst, values)`: `values` copied into the device tensor `dst`
+        (the object's own static buffer, say) — and MemOps, which the core enqueues ahead of the step's forward in
+        stream order. It returns them and enqueues no device work itself: what consumes the writes runs in the forward
+        (e.g. a unit's apply kernel). An edit decided at the commit of step c applies at launch c + 2 on every path: a
+        commit always precedes the launch two steps after it."""
+
+
+class ObservesCommits(Protocol):
+    telemetry: Mapping[str, torch.Tensor]   # device buffers a step writes, copied to the host with its tokens: static
+                                            # (`BuildCtx.static`; read at the first launch, never reallocated)
+
+    def after_commit(self, step: BatchPlan, telemetry: Mapping[str, torch.Tensor]) -> None:
+        """At the step's commit, before its tokens are emitted: `telemetry` holds host copies of the declared buffers
+        as the step left them (each launch has its own, valid during the call). Raising stops the engine, and steps
+        launched after this one are discarded."""
 
 
 # -- model plugins ----------------------------------------------------------------------------------------------------

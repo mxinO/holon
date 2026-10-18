@@ -292,13 +292,15 @@ def invalid_after(guarded: str) -> str | None:
 
 
 def make_venv(dest: pathlib.Path) -> pathlib.Path:
-    """A disposable venv with this interpreter's pytest version, installed offline (uv's cache); its bin directory."""
+    """A disposable venv with this interpreter's pytest version, installed offline from uv's cache as copies (a
+    hardlink, uv's default on the cache's filesystem, would let an edit of the venv change the cache); its bin
+    directory."""
     uv = shutil.which("uv")
     if uv is None:
         raise SystemExit("the demo needs uv on PATH (each run's venv)")
     subprocess.run([uv, "venv", "-q", "--python", sys.executable, str(dest)], check=True)
-    subprocess.run([uv, "pip", "install", "-q", "--offline", "--python", str(dest / "bin" / "python"),
-                    f"pytest=={importlib.metadata.version('pytest')}"], check=True)
+    subprocess.run([uv, "pip", "install", "-q", "--offline", "--link-mode", "copy", "--python",
+                    str(dest / "bin" / "python"), f"pytest=={importlib.metadata.version('pytest')}"], check=True)
     return dest / "bin"
 
 

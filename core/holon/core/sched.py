@@ -44,7 +44,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from holon.api import BatchPlan, Seq, Status, TokenSrc
+from holon.api import BatchPlan, RowKind, Seq, Status, TokenSrc
 
 from .batching import host_plan
 from .state import StateManager
@@ -80,7 +80,7 @@ class Scheduler:
             self.waiting.append(seq)
 
     def schedule(self) -> tuple[BatchPlan, list[Seq]] | None:
-        rows, n_decode = self._rows()
+        rows, n_decode, decoding = self._rows()
         if not rows:
             return None
         seqs, n_query, n_logits = (list(c) for c in zip(*rows, strict=True))
@@ -96,27 +96,35 @@ class Scheduler:
         plan = host_plan(self._step, np.array([s.slot for s in seqs], dtype=np.int32), np.array(starts, np.int32),
                          np.array(n_query, np.int32), np.array(n_logits, np.int32), np.array(tokens, np.int64), src)
         plan.draft_k, plan.n_decode = self._k, n_decode
+        kind = np.where(plan.n_query > 1, RowKind.VERIFY, RowKind.DECODE)            # the leading decoding rows
+        plan.row_kind = np.where(np.arange(len(seqs)) < decoding, kind, RowKind.PREFILL).astype(np.int8)
         return plan, seqs
 
-    def _rows(self) -> tuple[list[tuple[Seq, int, int]], int]:
-        """The step's rows (seq, query tokens, logits rows) and how many leading ones are mixed-in decode rows."""
+    def _rows(self) -> tuple[list[tuple[Seq, int, int]], int, int]:
+        """The step's rows (seq, query tokens, logits rows), how many leading ones are mixed-in decode rows, and how
+        many leading ones decode or verify (`BatchPlan.row_kind`)."""
         cap = self.chunk_with_decode
         if not cap:
-            return self._prefill(self.max_step_tokens) or self._decode(), 0
+            rows = self._prefill(self.max_step_tokens)
+            return (rows, 0, 0) if rows else self._decoding(self._decode())
         if self.draft_k is None:                  # mixed: decode rows first, then a capped chunk
             decode = self._decode()
             if not decode:
-                return self._prefill(self.max_step_tokens), 0
+                return self._prefill(self.max_step_tokens), 0, 0
             chunks = self._prefill(min(cap, self.max_step_tokens - len(decode)))
-            return decode + chunks, len(decode) if chunks else 0
+            return decode + chunks, len(decode) if chunks else 0, len(decode)
         ready, cap = bool(self._ready()), min(cap, self.max_step_tokens)    # a drafter: alternate while both can run
         if self._prefilled and ready:
             rows = self._decode()
             self._prefilled = not rows
-            return rows or self._prefill(cap), 0
+            return self._decoding(rows) if rows else (self._prefill(cap), 0, 0)
         rows = self._prefill(cap if ready else self.max_step_tokens)
         self._prefilled = bool(rows)
-        return rows or self._decode(), 0
+        return (rows, 0, 0) if rows else self._decoding(self._decode())
+
+    @staticmethod
+    def _decoding(rows: list[tuple[Seq, int, int]]) -> tuple[list[tuple[Seq, int, int]], int, int]:
+        return rows, 0, len(rows)
 
     def _prefill(self, budget: int) -> list[tuple[Seq, int, int]]:
         rows, ahead = [], None

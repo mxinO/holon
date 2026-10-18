@@ -1,0 +1,16 @@
+[plugin]
+name = "placement.lru"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "unit"
+license = "Apache-2.0"
+core_abi = ">=1.0,<2.0"
+
+[resources]   # the policy, its resolve contract (oracle: reference.py) and the contract's CPU provider
+provides = ["unit.placement.lru@1", "op.moe_resolve.lru@1", "kernel.moe_resolve.lru@1"]
+
+[properties]
+numerics = "exact"
+
+[reference]
+module = "reference"

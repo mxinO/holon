@@ -1,0 +1,709 @@
+{
+ "gpu": "rtx-a5000",
+ "model": "unsloth/Qwen3-30B-A3B-GGUF Q4_K_M",
+ "commit": "c7d59dd",
+ "commands": [
+  "python spikes/x2_store/exact.py <Qwen3-30B-A3B-Q4_K_M.gguf> <runs> \"resident@16384;*=1.0@16384;@16384;*=0.47@16384\" 1",
+  "python spikes/x2_store/exact.py <Qwen3-30B-A3B-Q4_K_M.gguf> <runs> \"*=0.25@16384\" 3",
+  "python bench/holon_tg.py --model <gguf> -n 128 -r 5 --engine-args \"--max-seqs 1\" (3 rounds, interleaved with the next)",
+  "python bench/holon_tg.py --model <gguf> -n 128 -r 5 --engine-args \"--max-seqs 1 --host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=*=1.0\"",
+  "python spikes/x2_store/gather_alloc.py --out <json> (4 processes, at 0775b35: the gather kernel is unchanged since)"
+ ],
+ "exactness": {
+  "resident": {
+   "steps": 68,
+   "pools": {
+    "state.kv": 2665
+   }
+  },
+  "offload": [
+   {
+    "fit": "*=0.25",
+    "run": 0,
+    "pools": {
+     "plugin.moe.arena": 5567,
+     "plugin.moe.host.down.q4_k.2048x768": 3072,
+     "plugin.moe.host.down.q6_k.2048x768": 3072,
+     "plugin.moe.host.gate_up.q4_k.1536x2048": 6144,
+     "state.kv": 9594
+    },
+    "peak_misses": 96,
+    "name": "offload_0.25_0",
+    "vs_resident": "identical"
+   },
+   {
+    "fit": "*=0.25",
+    "run": 1,
+    "pools": {
+     "plugin.moe.arena": 5567,
+     "plugin.moe.host.down.q4_k.2048x768": 3072,
+     "plugin.moe.host.down.q6_k.2048x768": 3072,
+     "plugin.moe.host.gate_up.q4_k.1536x2048": 6144,
+     "state.kv": 9366
+    },
+    "peak_misses": 96,
+    "name": "offload_0.25_1",
+    "vs_resident": "identical"
+   },
+   {
+    "fit": "*=0.25",
+    "run": 2,
+    "pools": {
+     "plugin.moe.arena": 5567,
+     "plugin.moe.host.down.q4_k.2048x768": 3072,
+     "plugin.moe.host.down.q6_k.2048x768": 3072,
+     "plugin.moe.host.gate_up.q4_k.1536x2048": 6144,
+     "state.kv": 9366
+    },
+    "peak_misses": 96,
+    "name": "offload_0.25_2",
+    "vs_resident": "identical"
+   },
+   {
+    "fit": "*=0.47",
+    "run": 0,
+    "pools": {
+     "plugin.moe.arena": 9933,
+     "plugin.moe.host.down.q4_k.2048x768": 3072,
+     "plugin.moe.host.down.q6_k.2048x768": 3072,
+     "plugin.moe.host.gate_up.q4_k.1536x2048": 6144,
+     "state.kv": 6893
+    },
+    "peak_misses": 67,
+    "name": "offload_0.47_0",
+    "vs_resident": "identical"
+   },
+   {
+    "fit": "*=1.0",
+    "run": 0,
+    "pools": {
+     "plugin.moe.arena": 20447,
+     "plugin.moe.host.down.q4_k.2048x768": 3072,
+     "plugin.moe.host.down.q6_k.2048x768": 3072,
+     "plugin.moe.host.gate_up.q4_k.1536x2048": 6144,
+     "state.kv": 1106
+    },
+    "peak_misses": 0,
+    "name": "offload_1.0_0",
+    "vs_resident": "identical"
+   },
+   {
+    "fit": "",
+    "run": 0,
+    "pools": {
+     "plugin.moe.arena": 20365,
+     "plugin.moe.host.down.q4_k.2048x768": 3072,
+     "plugin.moe.host.down.q6_k.2048x768": 3072,
+     "plugin.moe.host.gate_up.q4_k.1536x2048": 6144,
+     "state.kv": 1025
+    },
+    "peak_misses": 1,
+    "name": "offload_fill_0",
+    "vs_resident": "identical"
+   }
+  ]
+ },
+ "overhead": {
+  "tg128_batch1": {
+   "resident": [
+    {
+     "mean": 194.07,
+     "runs": [
+      194.87,
+      193.37,
+      194.53,
+      193.17,
+      194.39
+     ]
+    },
+    {
+     "mean": 193.79,
+     "runs": [
+      194.91,
+      193.37,
+      194.47,
+      192.95,
+      193.28
+     ]
+    },
+    {
+     "mean": 193.8,
+     "runs": [
+      194.72,
+      192.92,
+      193.29,
+      194.11,
+      193.96
+     ]
+    }
+   ],
+   "offload": [
+    {
+     "mean": 187.0,
+     "runs": [
+      187.18,
+      186.99,
+      187.01,
+      186.99,
+      186.85
+     ]
+    },
+    {
+     "mean": 186.66,
+     "runs": [
+      187.16,
+      186.97,
+      186.31,
+      187.07,
+      185.82
+     ]
+    },
+    {
+     "mean": 185.23,
+     "runs": [
+      185.33,
+      184.57,
+      185.42,
+      185.38,
+      185.43
+     ]
+    }
+   ]
+  },
+  "ms_per_token_median": {
+   "resident": 5.16,
+   "offload": 5.3573
+  },
+  "offload_minus_resident_ms": 0.1974
+ },
+ "gather_alloc": {
+  "runs": [
+   {
+    "command": "python spikes/x2_store/gather_alloc.py",
+    "gpu": "rtx-a5000/cu130-torch2.11",
+    "commit": "0775b3551c1b9898f1bf66fea50cd4fb7cfd9fa0",
+    "torch": "2.11.0+cu130",
+    "gather": {
+     "ctas": 8,
+     "threads": 256,
+     "unroll": 8,
+     "blobs_per_call": 64,
+     "calls_per_graph": 20,
+     "arena_bytes": 2147483648
+    },
+    "results": {
+     "2.65MB": {
+      "cudaHostAlloc": {
+       "gb_s": 26.53,
+       "rounds": [
+        26.53,
+        26.5,
+        26.59,
+        26.51,
+        26.6
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.0
+      },
+      "mmap_shared": {
+       "gb_s": 26.39,
+       "rounds": [
+        24.45,
+        26.1,
+        26.39,
+        26.64,
+        26.4
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 0.995
+      },
+      "mmap_private": {
+       "gb_s": 25.35,
+       "rounds": [
+        25.04,
+        25.31,
+        25.35,
+        25.35,
+        25.38
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 0.956
+      },
+      "mmap_private_hugepage": {
+       "gb_s": 25.03,
+       "rounds": [
+        24.79,
+        25.01,
+        25.03,
+        25.05,
+        25.1
+       ],
+       "anon_huge_kb": 2095104,
+       "vs_cudaHostAlloc": 0.943
+      }
+     },
+     "3.06MB": {
+      "cudaHostAlloc": {
+       "gb_s": 26.62,
+       "rounds": [
+        26.58,
+        26.62,
+        26.55,
+        26.62,
+        26.62
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.0
+      },
+      "mmap_shared": {
+       "gb_s": 26.51,
+       "rounds": [
+        25.46,
+        26.51,
+        26.67,
+        25.91,
+        26.52
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 0.996
+      },
+      "mmap_private": {
+       "gb_s": 26.67,
+       "rounds": [
+        26.46,
+        26.67,
+        26.68,
+        26.68,
+        26.67
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.002
+      },
+      "mmap_private_hugepage": {
+       "gb_s": 26.66,
+       "rounds": [
+        26.45,
+        26.66,
+        26.66,
+        26.67,
+        26.68
+       ],
+       "anon_huge_kb": 2093056,
+       "vs_cudaHostAlloc": 1.002
+      }
+     }
+    }
+   },
+   {
+    "command": "python spikes/x2_store/gather_alloc.py",
+    "gpu": "rtx-a5000/cu130-torch2.11",
+    "commit": "0775b3551c1b9898f1bf66fea50cd4fb7cfd9fa0",
+    "torch": "2.11.0+cu130",
+    "gather": {
+     "ctas": 8,
+     "threads": 256,
+     "unroll": 8,
+     "blobs_per_call": 64,
+     "calls_per_graph": 20,
+     "arena_bytes": 2147483648
+    },
+    "results": {
+     "2.65MB": {
+      "cudaHostAlloc": {
+       "gb_s": 26.6,
+       "rounds": [
+        26.59,
+        26.6,
+        26.6,
+        26.6,
+        26.52
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.0
+      },
+      "mmap_shared": {
+       "gb_s": 25.81,
+       "rounds": [
+        25.81,
+        25.97,
+        25.24,
+        25.43,
+        26.64
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 0.97
+      },
+      "mmap_private": {
+       "gb_s": 26.61,
+       "rounds": [
+        25.3,
+        26.61,
+        26.6,
+        26.62,
+        26.63
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.0
+      },
+      "mmap_private_hugepage": {
+       "gb_s": 26.52,
+       "rounds": [
+        24.07,
+        24.35,
+        26.52,
+        26.53,
+        26.55
+       ],
+       "anon_huge_kb": 2095104,
+       "vs_cudaHostAlloc": 0.997
+      }
+     },
+     "3.06MB": {
+      "cudaHostAlloc": {
+       "gb_s": 26.59,
+       "rounds": [
+        26.56,
+        26.62,
+        26.59,
+        26.59,
+        26.62
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.0
+      },
+      "mmap_shared": {
+       "gb_s": 26.67,
+       "rounds": [
+        26.36,
+        26.66,
+        26.67,
+        26.68,
+        26.68
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.003
+      },
+      "mmap_private": {
+       "gb_s": 26.68,
+       "rounds": [
+        26.39,
+        26.68,
+        26.68,
+        26.68,
+        26.68
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.003
+      },
+      "mmap_private_hugepage": {
+       "gb_s": 26.63,
+       "rounds": [
+        26.22,
+        26.62,
+        26.63,
+        26.65,
+        26.66
+       ],
+       "anon_huge_kb": 2093056,
+       "vs_cudaHostAlloc": 1.002
+      }
+     }
+    }
+   },
+   {
+    "command": "python spikes/x2_store/gather_alloc.py",
+    "gpu": "rtx-a5000/cu130-torch2.11",
+    "commit": "0775b3551c1b9898f1bf66fea50cd4fb7cfd9fa0",
+    "torch": "2.11.0+cu130",
+    "gather": {
+     "ctas": 8,
+     "threads": 256,
+     "unroll": 8,
+     "blobs_per_call": 64,
+     "calls_per_graph": 20,
+     "arena_bytes": 2147483648
+    },
+    "results": {
+     "2.65MB": {
+      "cudaHostAlloc": {
+       "gb_s": 26.6,
+       "rounds": [
+        26.59,
+        26.6,
+        26.6,
+        26.52,
+        26.6
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.0
+      },
+      "mmap_shared": {
+       "gb_s": 26.64,
+       "rounds": [
+        25.7,
+        26.64,
+        26.64,
+        26.64,
+        26.65
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.002
+      },
+      "mmap_private": {
+       "gb_s": 25.84,
+       "rounds": [
+        24.86,
+        24.93,
+        25.84,
+        26.62,
+        26.63
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 0.971
+      },
+      "mmap_private_hugepage": {
+       "gb_s": 26.53,
+       "rounds": [
+        24.4,
+        26.53,
+        26.56,
+        26.53,
+        26.58
+       ],
+       "anon_huge_kb": 2095104,
+       "vs_cudaHostAlloc": 0.997
+      }
+     },
+     "3.06MB": {
+      "cudaHostAlloc": {
+       "gb_s": 26.63,
+       "rounds": [
+        26.63,
+        26.63,
+        26.49,
+        26.63,
+        26.56
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.0
+      },
+      "mmap_shared": {
+       "gb_s": 26.68,
+       "rounds": [
+        26.42,
+        26.68,
+        26.68,
+        26.68,
+        26.69
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.002
+      },
+      "mmap_private": {
+       "gb_s": 26.69,
+       "rounds": [
+        26.37,
+        26.69,
+        26.68,
+        26.69,
+        26.69
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.002
+      },
+      "mmap_private_hugepage": {
+       "gb_s": 26.63,
+       "rounds": [
+        26.19,
+        26.63,
+        26.64,
+        26.63,
+        26.64
+       ],
+       "anon_huge_kb": 2093056,
+       "vs_cudaHostAlloc": 1.0
+      }
+     }
+    }
+   },
+   {
+    "command": "python spikes/x2_store/gather_alloc.py",
+    "gpu": "rtx-a5000/cu130-torch2.11",
+    "commit": "0775b3551c1b9898f1bf66fea50cd4fb7cfd9fa0",
+    "torch": "2.11.0+cu130",
+    "gather": {
+     "ctas": 8,
+     "threads": 256,
+     "unroll": 8,
+     "blobs_per_call": 64,
+     "calls_per_graph": 20,
+     "arena_bytes": 2147483648
+    },
+    "results": {
+     "2.65MB": {
+      "cudaHostAlloc": {
+       "gb_s": 26.58,
+       "rounds": [
+        26.58,
+        26.59,
+        26.52,
+        26.6,
+        26.49
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.0
+      },
+      "mmap_shared": {
+       "gb_s": 26.64,
+       "rounds": [
+        25.43,
+        26.64,
+        26.62,
+        26.64,
+        26.65
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.002
+      },
+      "mmap_private": {
+       "gb_s": 26.62,
+       "rounds": [
+        24.82,
+        26.62,
+        26.62,
+        26.63,
+        26.64
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.002
+      },
+      "mmap_private_hugepage": {
+       "gb_s": 26.57,
+       "rounds": [
+        25.83,
+        26.57,
+        26.54,
+        26.59,
+        26.64
+       ],
+       "anon_huge_kb": 2095104,
+       "vs_cudaHostAlloc": 1.0
+      }
+     },
+     "3.06MB": {
+      "cudaHostAlloc": {
+       "gb_s": 26.56,
+       "rounds": [
+        26.53,
+        26.56,
+        26.49,
+        26.57,
+        26.56
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.0
+      },
+      "mmap_shared": {
+       "gb_s": 26.69,
+       "rounds": [
+        26.13,
+        26.69,
+        26.69,
+        26.69,
+        26.65
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 1.005
+      },
+      "mmap_private": {
+       "gb_s": 26.11,
+       "rounds": [
+        26.33,
+        25.76,
+        25.84,
+        26.53,
+        26.11
+       ],
+       "anon_huge_kb": 0,
+       "vs_cudaHostAlloc": 0.983
+      },
+      "mmap_private_hugepage": {
+       "gb_s": 25.78,
+       "rounds": [
+        25.33,
+        26.68,
+        26.02,
+        25.78,
+        25.78
+       ],
+       "anon_huge_kb": 2093056,
+       "vs_cudaHostAlloc": 0.971
+      }
+     }
+    }
+   }
+  ],
+  "vs_cudaHostAlloc": {
+   "2.65MB": {
+    "cudaHostAlloc": {
+     "median": 1.0,
+     "range": [
+      1.0,
+      1.0
+     ]
+    },
+    "mmap_shared": {
+     "median": 0.9985,
+     "range": [
+      0.97,
+      1.002
+     ]
+    },
+    "mmap_private": {
+     "median": 0.9855,
+     "range": [
+      0.956,
+      1.002
+     ]
+    },
+    "mmap_private_hugepage": {
+     "median": 0.997,
+     "range": [
+      0.943,
+      1.0
+     ]
+    }
+   },
+   "3.06MB": {
+    "cudaHostAlloc": {
+     "median": 1.0,
+     "range": [
+      1.0,
+      1.0
+     ]
+    },
+    "mmap_shared": {
+     "median": 1.0025,
+     "range": [
+      0.996,
+      1.005
+     ]
+    },
+    "mmap_private": {
+     "median": 1.002,
+     "range": [
+      0.983,
+      1.003
+     ]
+    },
+    "mmap_private_hugepage": {
+     "median": 1.001,
+     "range": [
+      0.971,
+      1.002
+     ]
+    }
+   }
+  }
+ }
+}

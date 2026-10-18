@@ -6,6 +6,7 @@ from .batch import (
     Batch,
     BatchPlan,
     DeviceBatch,
+    RowKind,
     SamplingParams,
     Seq,
     SeqTable,
@@ -66,7 +67,7 @@ from .model import (
 from .ops import KERNEL_PROPS, Constraint, KernelRegistry, KernelSpec, Plugin, Registries, Registry
 from .plan import Binding, Lock, Plan, UnitPin
 from .platform import Fingerprint
-from .quant import Layout, QTensor, Scheme
+from .quant import Extent, Layout, QTensor, Scheme
 from .state import (
     HitLen,
     InStepPublish,
@@ -87,13 +88,14 @@ from .terms import Ref, canonical_hash, parse_versioned, to_term
 __all__ = [
     "ABI", "ERROR_KINDS", "FINISH_REASONS", "KERNEL_PROPS", "SLOTS", "Abort", "AuxSpec", "Batch", "BatchPlan",
     "Binding", "BuildCtx", "Cardinality", "Constraint", "DeviceBatch", "DraftPolicy", "Drafter", "DrafterPlugin",
-    "EngineClient", "EngineRequest", "Fingerprint", "FrontendBundle", "FrontendPlugin", "HitLen", "InStepPublish",
-    "KernelRegistry", "KernelSpec", "LayerDecl", "Layout", "Lock", "LogitsProcessor", "LogitsProcessorPlugin",
-    "Logprobs", "Manifest", "MaskRow", "MemOp", "Mixer", "ModelPlugin", "ModelSpec", "Option", "Paged", "Pages",
-    "ParseEvent", "Payload", "Plan", "Planner", "Plugin", "Pool", "PrefixView", "Provenance", "QTensor", "Reasoning",
-    "Ref", "Registries", "Registry", "RequestError", "Resolved", "Resource", "Rewindable", "SampleOut", "Sampler",
-    "SamplerPlugin", "SamplingParams", "Scheme", "Seq", "SeqTable", "SeqView", "Slot", "StateKind",
-    "StateKindFactory", "StateSpec", "Status", "StepCtx", "TargetView", "Text", "TokenDelta", "TokenSrc", "Tokenizer",
-    "ToolArgsDelta", "ToolCallEnd", "ToolCallStart", "Unit", "UnitPin", "Verifier", "VocabView", "WeightMap",
-    "WeightRule", "WeightSource", "canonical_hash", "parse_versioned", "rewind_modules", "sequence_seed", "to_term",
+    "EngineClient", "EngineRequest", "Extent", "Fingerprint", "FrontendBundle", "FrontendPlugin", "HitLen",
+    "InStepPublish", "KernelRegistry", "KernelSpec", "LayerDecl", "Layout", "Lock", "LogitsProcessor",
+    "LogitsProcessorPlugin", "Logprobs", "Manifest", "MaskRow", "MemOp", "Mixer", "ModelPlugin", "ModelSpec", "Option",
+    "Paged", "Pages", "ParseEvent", "Payload", "Plan", "Planner", "Plugin", "Pool", "PrefixView", "Provenance",
+    "QTensor", "Reasoning", "Ref", "Registries", "Registry", "RequestError", "Resolved", "Resource", "Rewindable",
+    "RowKind", "SampleOut", "Sampler", "SamplerPlugin", "SamplingParams", "Scheme", "Seq", "SeqTable", "SeqView",
+    "Slot", "StateKind", "StateKindFactory", "StateSpec", "Status", "StepCtx", "TargetView", "Text", "TokenDelta",
+    "TokenSrc", "Tokenizer", "ToolArgsDelta", "ToolCallEnd", "ToolCallStart", "Unit", "UnitPin", "Verifier",
+    "VocabView", "WeightMap", "WeightRule", "WeightSource", "canonical_hash", "parse_versioned", "rewind_modules",
+    "sequence_seed", "to_term",
 ]

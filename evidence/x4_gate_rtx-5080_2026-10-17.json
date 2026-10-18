@@ -1,0 +1,5655 @@
+{
+ "name": "x4_gate",
+ "date": "2026-10-17",
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "model": "unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf",
+ "commit": "63c6e4b",
+ "references": {
+  "llama.cpp": "f74e2fa6a31c (llama-server, --moe-cache-mib)",
+  "FreeToken": "21d9578bde22"
+ },
+ "method": "spikes/x4_gap/ctx.py (bench/offload_ctx.py's method with a Holon worker): every arm in a fresh process, an untimed 512 + 64 warm-up, one request per context of natural-text prompt ids (1,024 / 4,096 / 32,768 tokens) generating 256 tokens, batch 1, greedy, ignore_eos; every engine allocates a 33,792-token context; arms interleaved, reversed on odd rounds; medians",
+ "fit": {
+  "fill": {
+   "ctx": 33792,
+   "floor": 33792,
+   "cache_option": "",
+   "pin": "gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618",
+   "classes": {
+    "gate_up.q4_k.1536x2048": {
+     "unit_bytes": 1769472,
+     "pieces": 6144,
+     "null": 8,
+     "staging": 8,
+     "cache_slots": 3236,
+     "arena_slots": 3252
+    },
+    "down.q6_k.2048x768": {
+     "unit_bytes": 1290240,
+     "pieces": 3072,
+     "null": 8,
+     "staging": 8,
+     "cache_slots": 1618,
+     "arena_slots": 1634
+    },
+    "down.q4_k.2048x768": {
+     "unit_bytes": 884736,
+     "pieces": 3072,
+     "null": 8,
+     "staging": 8,
+     "cache_slots": 1618,
+     "arena_slots": 1634
+    }
+   },
+   "cached_experts": 3236,
+   "experts": 6144,
+   "cached_share": 0.5267,
+   "cached_bytes": 9245122560,
+   "expert_bytes": 17553162240,
+   "pools": {
+    "state.kv": {
+     "capacity": 2113,
+     "unit_bytes": 1572864
+    },
+    "plugin.moe.host.gate_up.q4_k.1536x2048": {
+     "capacity": 294912,
+     "unit_bytes": 36864
+    },
+    "plugin.moe.host.down.q6_k.2048x768": {
+     "capacity": 107520,
+     "unit_bytes": 36864
+    },
+    "plugin.moe.host.down.q4_k.2048x768": {
+     "capacity": 73728,
+     "unit_bytes": 36864
+    },
+    "plugin.moe.arena": {
+     "capacity": 252507,
+     "unit_bytes": 36864
+    }
+   },
+   "free_mib": 1782,
+   "total_mib": 15841,
+   "cached_byte_share": 0.5267
+  },
+  "pinned": {
+   "ctx": 33792,
+   "floor": 33792,
+   "max_step_tokens": 4096,
+   "cache_option": "gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610",
+   "pin": "gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610",
+   "classes": {
+    "gate_up.q4_k.1536x2048": {
+     "unit_bytes": 1769472,
+     "pieces": 6144,
+     "null": 8,
+     "staging": 8,
+     "cache_slots": 3220,
+     "arena_slots": 3236
+    },
+    "down.q6_k.2048x768": {
+     "unit_bytes": 1290240,
+     "pieces": 3072,
+     "null": 8,
+     "staging": 8,
+     "cache_slots": 1610,
+     "arena_slots": 1626
+    },
+    "down.q4_k.2048x768": {
+     "unit_bytes": 884736,
+     "pieces": 3072,
+     "null": 8,
+     "staging": 8,
+     "cache_slots": 1610,
+     "arena_slots": 1626
+    }
+   },
+   "cached_experts": 3220,
+   "experts": 6144,
+   "cached_share": 0.5241,
+   "cached_bytes": 9199411200,
+   "expert_bytes": 17553162240,
+   "pools": {
+    "state.kv": {
+     "capacity": 2142,
+     "unit_bytes": 1572864
+    },
+    "plugin.moe.host.gate_up.q4_k.1536x2048": {
+     "capacity": 294912,
+     "unit_bytes": 36864
+    },
+    "plugin.moe.host.down.q6_k.2048x768": {
+     "capacity": 107520,
+     "unit_bytes": 36864
+    },
+    "plugin.moe.host.down.q4_k.2048x768": {
+     "capacity": 73728,
+     "unit_bytes": 36864
+    },
+    "plugin.moe.arena": {
+     "capacity": 251265,
+     "unit_bytes": 36864
+    }
+   },
+   "free_mib": 1782,
+   "total_mib": 15841,
+   "cached_byte_share": 0.5241
+  },
+  "fill_step8192": {
+   "ctx": 33792,
+   "floor": 33792,
+   "max_step_tokens": 8192,
+   "cache_option": "",
+   "pin": "gate_up.q4_k.1536x2048=3200,down.q6_k.2048x768=1598,down.q4_k.2048x768=1602",
+   "classes": {
+    "gate_up.q4_k.1536x2048": {
+     "unit_bytes": 1769472,
+     "pieces": 6144,
+     "null": 8,
+     "staging": 8,
+     "cache_slots": 3200,
+     "arena_slots": 3216
+    },
+    "down.q6_k.2048x768": {
+     "unit_bytes": 1290240,
+     "pieces": 3072,
+     "null": 8,
+     "staging": 8,
+     "cache_slots": 1598,
+     "arena_slots": 1614
+    },
+    "down.q4_k.2048x768": {
+     "unit_bytes": 884736,
+     "pieces": 3072,
+     "null": 8,
+     "staging": 8,
+     "cache_slots": 1602,
+     "arena_slots": 1618
+    }
+   },
+   "cached_experts": 3200,
+   "experts": 6144,
+   "cached_share": 0.5208,
+   "cached_bytes": 9141460992,
+   "expert_bytes": 17553162240,
+   "pools": {
+    "state.kv": {
+     "capacity": 2113,
+     "unit_bytes": 1572864
+    },
+    "plugin.moe.host.gate_up.q4_k.1536x2048": {
+     "capacity": 294912,
+     "unit_bytes": 36864
+    },
+    "plugin.moe.host.down.q6_k.2048x768": {
+     "capacity": 107520,
+     "unit_bytes": 36864
+    },
+    "plugin.moe.host.down.q4_k.2048x768": {
+     "capacity": 73728,
+     "unit_bytes": 36864
+    },
+    "plugin.moe.arena": {
+     "capacity": 249717,
+     "unit_bytes": 36864
+    }
+   },
+   "free_mib": 1862,
+   "total_mib": 15841,
+   "cached_byte_share": 0.5208
+  },
+  "pin_the_fill_as_is": {
+   "cache": "gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618",
+   "error": "OutOfUnits: memory budget 11.747 GiB too small: state.kv (2101 < 2113 units)"
+  },
+  "pinned_probes": {
+   "fewer_experts": [
+    4,
+    6,
+    8
+   ],
+   "all_start": true
+  },
+  "chosen": "gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610",
+  "step8192_pin": "gate_up.q4_k.1536x2048=3184,down.q6_k.2048x768=1590,down.q4_k.2048x768=1594"
+ },
+ "lock": {
+  "text": "# Written by the holon tools; never edit by hand (AGENTS.md).\ndigest = \"sha256:6f3bde44032c81ed0ed2d4f85640ea22600e411ec40cef48e83f3ae91d48c029\"\nplan_id = \"sha256:a3a2b2ab8febf0931ee83e77e2e6b3e591eea356eda858c805038fd7cc9f30b7\"\nmodel_id = \"unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09\"\nfingerprint_class = \"rtx-5080/cu130-torch2.11\"\nsm = 120\nrecipe = \"sha256:84cd63c06c395d04b267fc54b0e710c7630edad0110d51789c18f89b19f7f6d2\"\n\n[deploy]\ncommit = \"63c6e4bfd3e4c32a61ad8394403a487cb675a99a\"\nuv_lock = \"sha256:09b707086b4104f6072e8b128fba0858f08012bb24ecbe4cbf5039010644eaa5\"\n\n[engine]\nchunk_with_decode = 0\ncuda_graphs = true\ndtype = \"bfloat16\"\nmax_draft_tokens = 0\nmax_model_len = 33792\nmax_seqs = 1\nmax_step_tokens = 4096\noverlap = true\npage_size = 16\nplugin_options = { \"moe.cache\" = \"gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610\", \"moe.placement\" = \"placement.lfu@1\", \"moe.placement.profile\" = \"profile_x4_gate.json\", \"moe.ring_copy\" = \"dma\", \"moe.store\" = \"std.moe.offload@1\" }\nprefix_cache = true\nslots = { logits_processor = \"grammar.xgrammar\" }\nsource = \"gguf\"\n\n[snapshot]\ntrace = \"sha256:bde56abbac4d2e9a7706144f29acffc39c7a92e9b11dba6fd50b035ea2ebd546\"\nuncovered = []\n\n[units]\n\"grammar.xgrammar\" = { src = \"sha256:685a1ba40b70d71d6ea8c2ef33645268234e92cb8e64dff55032f1b76e90d8cf\", version = \"1.0.0\" }\nholon = { src = \"sha256:94f5de31d785a1ce21b360b1be17ef526d4243c5c06cbfd20f2cfd5a5b4bfeb6\", version = \"0.1.1\" }\n\"kernels.expert_io\" = { src = \"sha256:53b05cb68d0a1952ce3d35a0d362afbabdfee25f1cd07fbc64f9fd453e8b0945\", version = \"1.0.0\" }\n\"kernels.flashinfer\" = { src = \"sha256:438dfe292ad17a0b37f62858242300ffb7188f055647b645e37160c4d497438a\", version = \"1.0.0\" }\n\"kernels.ggml_cuda\" = { src = \"sha256:78b35d24d91e570ed1bd21ee499ed4e74aeec96ca596fe3d55a0f4fad5fa8a90\", version = \"1.0.0\" }\n\"kernels.triton_attn\" = { src = \"sha256:aee5583511e125f3ebb65f07df097dbe47bd558a237b46f0f9e504389ff47945\", version = \"1.0.0\" }\n\"models.qwen3_moe\" = { src = \"sha256:9220a019f4f0f0b13846c95df9236118c908c0f83458e56276ef0168c27db62e\", version = \"1.0.0\" }\n\"placement.lfu\" = { sem = \"sha256:99f026a373ea40f30d11a7690f53825264ba8513c667878e5ac11dd0f1b9a93b\", src = \"sha256:3d0c9d654941d8d845e2ccfb21506fcab60c9d9814bf963a69f3903cbd164ad2\", version = \"1.0.0\" }\n\"std.blocks\" = { src = \"sha256:0752e7076ddc43a609d18337e244c03f9aaf705617b770b0d19934825c46c701\", version = \"1.0.0\" }\n\"std.mixers.gqa\" = { sem = \"sha256:da941a3b055f935dfb5ff9c0898b31cac918a1dfd5168eed6690d8acd25f8fcb\", src = \"sha256:450a98ed91d00d61b657adc8e11f35a207de6f6922db13603974f4bfc84d2986\", version = \"1.0.0\" }\n\"std.moe\" = { sem = \"sha256:d68d7c91d8e1db6fbc18a90b97e8932f96806a5ac97efcecbb876592270c9911\", src = \"sha256:5d1b68b76ae9c3be61efa21d5f8f8f7949a7b1a2dd37774c0ce1ce4fb2caa973\", version = \"1.0.0\" }\n\"std.ops\" = { sem = \"sha256:c2bc5197346b521199c88ec892402ed02b8dfbb082cefa5b9e041fc1c09f54a3\", src = \"sha256:3c5efbf1e6a8fb699ccc94126dd71708b63bb77f2e62454c16f91edd10755fea\", version = \"1.0.0\" }\n\"std.sampling\" = { sem = \"sha256:3f9a80781e878ec96e0bc4ed2ec5fd13a51f1332899a19467dad5fd8328e597b\", src = \"sha256:b5629e228a727d9cdd52fecb5d33748b93a8075b3dfaceeb3649955de9ee0b83\", version = \"1.0.0\" }\n\"std.state.paged\" = { src = \"sha256:887effb79cbf8ccbc8dfacf0ffa3462fed9b230162358a5de27166007d1bc144\", version = \"1.0.0\" }\n\"std.tiered\" = { src = \"sha256:49d89f2e7f1e75bbe51d3fee567d1e082666a73f3bb991e3470c12407dc65971\", version = \"1.0.0\" }\n\"std.weights.gguf\" = { src = \"sha256:ea3140520886f4412455879e945597ac79ddc98caf1d4852b3439d8e29fff109\", version = \"1.0.0\" }\n\n[sites]\n\"kv/attention.paged_decode@1\" = { config = { facts = { head_dim = 128, heads = 32, kv_dtype = \"bfloat16\", kv_heads = 4, layout = \"kv.hnd\", max_seqs = 1, page = 16, q_dtype = \"bfloat16\" }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"kv/attention.paged_prefill@1\" = { config = { facts = { head_dim = 128, heads = 32, kv_dtype = \"bfloat16\", kv_heads = 4, layout = \"kv.hnd\", max_seqs = 1, page = 16, q_dtype = \"bfloat16\" }, props = [\"deterministic\", \"needs_host_lens\", \"serves_decode_rows\"] }, impl = \"kernels.flashinfer\" }\n\"kv/attention.paged_verify@1\" = { config = { facts = { head_dim = 128, heads = 32, kv_dtype = \"bfloat16\", kv_heads = 4, layout = \"kv.hnd\", max_seqs = 1, page = 16, q_dtype = \"bfloat16\" }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=0]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=0]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=10]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=10]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=11]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=11]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=12]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=12]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=13]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=13]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=14]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=14]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=15]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=15]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=16]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=16]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=17]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=17]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=18]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=18]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=19]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=19]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=1]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=1]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=20]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=20]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=21]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=21]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=22]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=22]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=23]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=23]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=24]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=24]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=25]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=25]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=26]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=26]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=27]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=27]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=28]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=28]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=29]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=29]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=2]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=2]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=30]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=30]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=31]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=31]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=32]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=32]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=33]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=33]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=34]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=34]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=35]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=35]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=36]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=36]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=37]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=37]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=38]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=38]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=39]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=39]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=3]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=3]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=40]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=40]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=41]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=41]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=42]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=42]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=43]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=43]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=44]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=44]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=45]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=45]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=46]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=46]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=47]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=47]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=4]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=4]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=5]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=5]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=6]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=6]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=7]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=7]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=8]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=8]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=9]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[1000000.0,128,33792]\", dtype = \"bfloat16\", eps = 1e-06, gated = false, head_dim = 128, heads = 32, kv_heads = 4, layout = \"kv.hnd\", max_positions = 33792, norm = \"rmsnorm@1\", offset = 0.0, page = 16, rope = \"rope@1\", rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=9]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.moe.arena[layout=ggml.q4_k/gguf.native,experts=128,in=2048,out=1536,top_k=8,rows_per_token=1,glu=swiglu,act_dtype=bfloat16,out_dtype=float32,act_quant=a8,slots=6160]/linear_experts_arena@1\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", experts = 128, glu = \"swiglu\", in = 2048, layout = \"ggml.q4_k/gguf.native\", out = 1536, out_dtype = \"float32\", rows_per_token = 1, slots = 6160, top_k = 8 }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.moe.arena[layout=ggml.q4_k/gguf.native,experts=128,in=768,out=2048,top_k=8,rows_per_token=8,glu=none,act_dtype=float32,out_dtype=float32,act_quant=a8,slots=3088]/linear_experts_arena@1\" = { config = { facts = { act_dtype = \"float32\", act_quant = \"a8\", experts = 128, glu = \"none\", in = 768, layout = \"ggml.q4_k/gguf.native\", out = 2048, out_dtype = \"float32\", rows_per_token = 8, slots = 3088, top_k = 8 }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.moe.arena[layout=ggml.q6_k/gguf.native,experts=128,in=768,out=2048,top_k=8,rows_per_token=8,glu=none,act_dtype=float32,out_dtype=float32,act_quant=a8,slots=3088]/linear_experts_arena@1\" = { config = { facts = { act_dtype = \"float32\", act_quant = \"a8\", experts = 128, glu = \"none\", in = 768, layout = \"ggml.q6_k/gguf.native\", out = 2048, out_dtype = \"float32\", rows_per_token = 8, slots = 3088, top_k = 8 }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.moe[experts=128,top_k=8]/moe_router@1\" = { config = { facts = { dtype = \"bfloat16\", experts = 128, hidden = 2048, renormalize = true, top_k = 8 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.moe[hidden=2048,top_k=8]/moe_combine@1\" = { config = { facts = { dtype = \"bfloat16\", hidden = 2048, top_k = 8, y_dtype = \"float32\" }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qembedding[layout=ggml.q4_k/gguf.native,vocab=151936,hidden=2048,dtype=bfloat16]/qembedding@1\" = { config = { facts = { dtype = \"bfloat16\", hidden = 2048, layout = \"ggml.q4_k/gguf.native\", vocab = 151936 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=2048,out=4608,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 2048, layout = \"ggml.q4_k/gguf.native\", out = 4608, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=2048,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 2048, layout = \"ggml.q4_k/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=4096,out=2048,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 4096, layout = \"ggml.q4_k/gguf.native\", out = 2048, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q6_k/gguf.native,in=2048,out=151936,act_dtype=bfloat16,out_dtype=float32,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 2048, layout = \"ggml.q6_k/gguf.native\", out = 151936, out_dtype = \"float32\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q6_k/gguf.native,in=2048,out=512,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 2048, layout = \"ggml.q6_k/gguf.native\", out = 512, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.rmsnorm[dim=128]/add_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06, offset = 0.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.ops.rmsnorm[dim=128]/rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06, offset = 0.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.ops.rmsnorm[dim=2048]/add_rmsnorm@1\" = { config = { facts = { dim = 2048, dtype = \"bfloat16\", eps = 1e-06, offset = 0.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.ops.rmsnorm[dim=2048]/rmsnorm@1\" = { config = { facts = { dim = 2048, dtype = \"bfloat16\", eps = 1e-06, offset = 0.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.ops.rope[head_dim=128]/rope@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 128, max_positions = 33792, rotary_dim = 128, theta = 1000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.tiered[moe].down.q4_k.2048x768/expert_fetch@1\" = { config = { facts = { staging = 8, unit_bytes = 884736 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.expert_io\" }\n\"std.tiered[moe].down.q4_k.2048x768/expert_prefetch@1\" = { config = { facts = { copy = \"dma\", unit_bytes = 884736 }, props = [\"deterministic\"] }, impl = \"kernels.expert_io\" }\n\"std.tiered[moe].down.q6_k.2048x768/expert_fetch@1\" = { config = { facts = { staging = 8, unit_bytes = 1290240 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.expert_io\" }\n\"std.tiered[moe].down.q6_k.2048x768/expert_prefetch@1\" = { config = { facts = { copy = \"dma\", unit_bytes = 1290240 }, props = [\"deterministic\"] }, impl = \"kernels.expert_io\" }\n\"std.tiered[moe].gate_up.q4_k.1536x2048/expert_fetch@1\" = { config = { facts = { staging = 8, unit_bytes = 1769472 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.expert_io\" }\n\"std.tiered[moe].gate_up.q4_k.1536x2048/expert_prefetch@1\" = { config = { facts = { copy = \"dma\", unit_bytes = 1769472 }, props = [\"deterministic\"] }, impl = \"kernels.expert_io\" }\n\"std.tiered[moe]/moe_resolve.lfu@1\" = { config = { facts = { experts = 128, roles = 2, staging = 8, top_k = 8 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.expert_io\" }\n",
+  "verdict_log": [
+   "attention.paged_decode: kernels.triton_attn 222.4 tok/s, kernels.flashinfer 63.8 tok/s",
+   "verdict: approve",
+   "overall     32783  98.264%    99.084%  1.80e-04  5.38e-02  3.57e+00  +0.119% \u00b1 0.093%   4.02%",
+   "floor       32783  98.219%    99.056%  1.81e-04  5.88e-02  4.76e+00  +0.162% \u00b1 0.096%   4.05%",
+   "vs floor                                                             -0.042% \u00b1 0.091%",
+   "budget            \u226597.969%            \u22643.63e-04 \u22641.18e-01                     \u22640.479%",
+   "chat         8061  98.573%    99.268%  1.57e-04  3.55e-02  1.22e+00  +0.121% \u00b1 0.155%   3.15%",
+   "code         8930  98.432%    99.078%  9.21e-05  7.52e-02  3.57e+00  +0.234% \u00b1 0.167%   3.72%",
+   "recall       8849  97.559%    98.931%  9.35e-04  3.38e-02  1.21e+00  +0.265% \u00b1 0.127%   3.54%",
+   "agent        6943  98.589%    99.070%  5.49e-07  9.17e-02  1.38e+00  -0.215% \u00b1 0.244%   6.04%",
+   "PASS"
+  ]
+ },
+ "tuning": {
+  "summary": {
+   "holon_sm": {
+    "1024": {
+     "prefill_tps": {
+      "median": 3297.892,
+      "mean": 3297.8519,
+      "sd": 2.0752,
+      "min": 3295.3003,
+      "max": 3300.323,
+      "n": 4
+     },
+     "decode_tps": {
+      "median": 228.8607,
+      "mean": 228.9142,
+      "sd": 0.1201,
+      "min": 228.8422,
+      "max": 229.0931,
+      "n": 4
+     },
+     "decode_steps": {
+      "median": 255.0,
+      "mean": 255.0,
+      "sd": 0.0,
+      "min": 255,
+      "max": 255,
+      "n": 4
+     },
+     "routed_per_token": {
+      "median": 384.0,
+      "mean": 384.0,
+      "sd": 0.0,
+      "min": 384.0,
+      "max": 384.0,
+      "n": 4
+     },
+     "misses_per_token": {
+      "median": 4.5765,
+      "mean": 4.5765,
+      "sd": 0.0,
+      "min": 4.5765,
+      "max": 4.5765,
+      "n": 4
+     },
+     "hit_rate": {
+      "median": 0.9881,
+      "mean": 0.9881,
+      "sd": 0.0,
+      "min": 0.9881,
+      "max": 0.9881,
+      "n": 4
+     },
+     "miss_mb_per_token": {
+      "median": 13.5622,
+      "mean": 13.5622,
+      "sd": 0.0,
+      "min": 13.5622,
+      "max": 13.5622,
+      "n": 4
+     }
+    },
+    "4096": {
+     "prefill_tps": {
+      "median": 8909.1718,
+      "mean": 8911.3539,
+      "sd": 5.3595,
+      "min": 8907.7425,
+      "max": 8919.3294,
+      "n": 4
+     },
+     "decode_tps": {
+      "median": 188.1021,
+      "mean": 188.1099,
+      "sd": 0.0987,
+      "min": 188.0056,
+      "max": 188.2299,
+      "n": 4
+     },
+     "decode_steps": {
+      "median": 255.0,
+      "mean": 255.0,
+      "sd": 0.0,
+      "min": 255,
+      "max": 255,
+      "n": 4
+     },
+     "routed_per_token": {
+      "median": 384.0,
+      "mean": 384.0,
+      "sd": 0.0,
+      "min": 384.0,
+      "max": 384.0,
+      "n": 4
+     },
+     "misses_per_token": {
+      "median": 21.3569,
+      "mean": 21.3569,
+      "sd": 0.0,
+      "min": 21.3569,
+      "max": 21.3569,
+      "n": 4
+     },
+     "hit_rate": {
+      "median": 0.9444,
+      "mean": 0.9444,
+      "sd": 0.0,
+      "min": 0.9444,
+      "max": 0.9444,
+      "n": 4
+     },
+     "miss_mb_per_token": {
+      "median": 62.7284,
+      "mean": 62.7284,
+      "sd": 0.0,
+      "min": 62.7284,
+      "max": 62.7284,
+      "n": 4
+     }
+    },
+    "32768": {
+     "prefill_tps": {
+      "median": 4591.7378,
+      "mean": 4592.9977,
+      "sd": 4.9564,
+      "min": 4588.5841,
+      "max": 4599.9309,
+      "n": 4
+     },
+     "decode_tps": {
+      "median": 116.4743,
+      "mean": 116.4771,
+      "sd": 0.0281,
+      "min": 116.4466,
+      "max": 116.513,
+      "n": 4
+     },
+     "decode_steps": {
+      "median": 255.0,
+      "mean": 255.0,
+      "sd": 0.0,
+      "min": 255,
+      "max": 255,
+      "n": 4
+     },
+     "routed_per_token": {
+      "median": 384.0,
+      "mean": 384.0,
+      "sd": 0.0,
+      "min": 384.0,
+      "max": 384.0,
+      "n": 4
+     },
+     "misses_per_token": {
+      "median": 20.3412,
+      "mean": 20.3412,
+      "sd": 0.0,
+      "min": 20.3412,
+      "max": 20.3412,
+      "n": 4
+     },
+     "hit_rate": {
+      "median": 0.947,
+      "mean": 0.947,
+      "sd": 0.0,
+      "min": 0.947,
+      "max": 0.947,
+      "n": 4
+     },
+     "miss_mb_per_token": {
+      "median": 59.5745,
+      "mean": 59.5745,
+      "sd": 0.0,
+      "min": 59.5745,
+      "max": 59.5745,
+      "n": 4
+     }
+    }
+   },
+   "holon_dma": {
+    "1024": {
+     "prefill_tps": {
+      "median": 4534.0673,
+      "mean": 4504.3285,
+      "sd": 63.5687,
+      "min": 4409.087,
+      "max": 4540.0925,
+      "n": 4
+     },
+     "decode_tps": {
+      "median": 229.0336,
+      "mean": 229.023,
+      "sd": 0.0666,
+      "min": 228.9334,
+      "max": 229.0911,
+      "n": 4
+     },
+     "decode_steps": {
+      "median": 255.0,
+      "mean": 255.0,
+      "sd": 0.0,
+      "min": 255,
+      "max": 255,
+      "n": 4
+     },
+     "routed_per_token": {
+      "median": 384.0,
+      "mean": 384.0,
+      "sd": 0.0,
+      "min": 384.0,
+      "max": 384.0,
+      "n": 4
+     },
+     "misses_per_token": {
+      "median": 4.5765,
+      "mean": 4.5765,
+      "sd": 0.0,
+      "min": 4.5765,
+      "max": 4.5765,
+      "n": 4
+     },
+     "hit_rate": {
+      "median": 0.9881,
+      "mean": 0.9881,
+      "sd": 0.0,
+      "min": 0.9881,
+      "max": 0.9881,
+      "n": 4
+     },
+     "miss_mb_per_token": {
+      "median": 13.5622,
+      "mean": 13.5622,
+      "sd": 0.0,
+      "min": 13.5622,
+      "max": 13.5622,
+      "n": 4
+     }
+    },
+    "4096": {
+     "prefill_tps": {
+      "median": 9802.6565,
+      "mean": 9802.715,
+      "sd": 4.2271,
+      "min": 9798.4472,
+      "max": 9807.0997,
+      "n": 4
+     },
+     "decode_tps": {
+      "median": 188.0781,
+      "mean": 188.0882,
+      "sd": 0.0936,
+      "min": 187.9879,
+      "max": 188.2087,
+      "n": 4
+     },
+     "decode_steps": {
+      "median": 255.0,
+      "mean": 255.0,
+      "sd": 0.0,
+      "min": 255,
+      "max": 255,
+      "n": 4
+     },
+     "routed_per_token": {
+      "median": 384.0,
+      "mean": 384.0,
+      "sd": 0.0,
+      "min": 384.0,
+      "max": 384.0,
+      "n": 4
+     },
+     "misses_per_token": {
+      "median": 21.3569,
+      "mean": 21.3569,
+      "sd": 0.0,
+      "min": 21.3569,
+      "max": 21.3569,
+      "n": 4
+     },
+     "hit_rate": {
+      "median": 0.9444,
+      "mean": 0.9444,
+      "sd": 0.0,
+      "min": 0.9444,
+      "max": 0.9444,
+      "n": 4
+     },
+     "miss_mb_per_token": {
+      "median": 62.7284,
+      "mean": 62.7284,
+      "sd": 0.0,
+      "min": 62.7284,
+      "max": 62.7284,
+      "n": 4
+     }
+    },
+    "32768": {
+     "prefill_tps": {
+      "median": 4707.1578,
+      "mean": 4707.0512,
+      "sd": 4.8774,
+      "min": 4702.3129,
+      "max": 4711.5764,
+      "n": 4
+     },
+     "decode_tps": {
+      "median": 116.4532,
+      "mean": 116.4554,
+      "sd": 0.0062,
+      "min": 116.4507,
+      "max": 116.4642,
+      "n": 4
+     },
+     "decode_steps": {
+      "median": 255.0,
+      "mean": 255.0,
+      "sd": 0.0,
+      "min": 255,
+      "max": 255,
+      "n": 4
+     },
+     "routed_per_token": {
+      "median": 384.0,
+      "mean": 384.0,
+      "sd": 0.0,
+      "min": 384.0,
+      "max": 384.0,
+      "n": 4
+     },
+     "misses_per_token": {
+      "median": 20.3412,
+      "mean": 20.3412,
+      "sd": 0.0,
+      "min": 20.3412,
+      "max": 20.3412,
+      "n": 4
+     },
+     "hit_rate": {
+      "median": 0.947,
+      "mean": 0.947,
+      "sd": 0.0,
+      "min": 0.947,
+      "max": 0.947,
+      "n": 4
+     },
+     "miss_mb_per_token": {
+      "median": 59.5745,
+      "mean": 59.5745,
+      "sd": 0.0,
+      "min": 59.5745,
+      "max": 59.5745,
+      "n": 4
+     }
+    }
+   },
+   "holon_lru": {
+    "1024": {
+     "prefill_tps": {
+      "median": 3299.2353,
+      "mean": 3299.4692,
+      "sd": 10.7854,
+      "min": 3287.1392,
+      "max": 3312.2669,
+      "n": 4
+     },
+     "decode_tps": {
+      "median": 227.644,
+      "mean": 227.6405,
+      "sd": 0.0318,
+      "min": 227.6027,
+      "max": 227.6713,
+      "n": 4
+     },
+     "decode_steps": {
+      "median": 255.0,
+      "mean": 255.0,
+      "sd": 0.0,
+      "min": 255,
+      "max": 255,
+      "n": 4
+     },
+     "routed_per_token": {
+      "median": 384.0,
+      "mean": 384.0,
+      "sd": 0.0,
+      "min": 384.0,
+      "max": 384.0,
+      "n": 4
+     },
+     "misses_per_token": {
+      "median": 4.8235,
+      "mean": 4.8235,
+      "sd": 0.0,
+      "min": 4.8235,
+      "max": 4.8235,
+      "n": 4
+     },
+     "hit_rate": {
+      "median": 0.9874,
+      "mean": 0.9874,
+      "sd": 0.0,
+      "min": 0.9874,
+      "max": 0.9874,
+      "n": 4
+     },
+     "miss_mb_per_token": {
+      "median": 14.3134,
+      "mean": 14.3134,
+      "sd": 0.0,
+      "min": 14.3134,
+      "max": 14.3134,
+      "n": 4
+     }
+    },
+    "4096": {
+     "prefill_tps": {
+      "median": 8899.1031,
+      "mean": 8900.3901,
+      "sd": 2.8854,
+      "min": 8898.6765,
+      "max": 8904.6778,
+      "n": 4
+     },
+     "decode_tps": {
+      "median": 188.1753,
+      "mean": 188.1747,
+      "sd": 0.035,
+      "min": 188.1313,
+      "max": 188.2167,
+      "n": 4
+     },
+     "decode_steps": {
+      "median": 255.0,
+      "mean": 255.0,
+      "sd": 0.0,
+      "min": 255,
+      "max": 255,
+      "n": 4
+     },
+     "routed_per_token": {
+      "median": 384.0,
+      "mean": 384.0,
+      "sd": 0.0,
+      "min": 384.0,
+      "max": 384.0,
+      "n": 4
+     },
+     "misses_per_token": {
+      "median": 22.4314,
+      "mean": 22.4314,
+      "sd": 0.0,
+      "min": 22.4314,
+      "max": 22.4314,
+      "n": 4
+     },
+     "hit_rate": {
+      "median": 0.9416,
+      "mean": 0.9416,
+      "sd": 0.0,
+      "min": 0.9416,
+      "max": 0.9416,
+      "n": 4
+     },
+     "miss_mb_per_token": {
+      "median": 65.8411,
+      "mean": 65.8411,
+      "sd": 0.0,
+      "min": 65.8411,
+      "max": 65.8411,
+      "n": 4
+     }
+    },
+    "32768": {
+     "prefill_tps": {
+      "median": 4591.9762,
+      "mean": 4593.1037,
+      "sd": 4.1239,
+      "min": 4589.6645,
+      "max": 4598.7979,
+      "n": 4
+     },
+     "decode_tps": {
+      "median": 116.151,
+      "mean": 116.1484,
+      "sd": 0.0214,
+      "min": 116.1238,
+      "max": 116.1678,
+      "n": 4
+     },
+     "decode_steps": {
+      "median": 255.0,
+      "mean": 255.0,
+      "sd": 0.0,
+      "min": 255,
+      "max": 255,
+      "n": 4
+     },
+     "routed_per_token": {
+      "median": 384.0,
+      "mean": 384.0,
+      "sd": 0.0,
+      "min": 384.0,
+      "max": 384.0,
+      "n": 4
+     },
+     "misses_per_token": {
+      "median": 21.6,
+      "mean": 21.6,
+      "sd": 0.0,
+      "min": 21.6,
+      "max": 21.6,
+      "n": 4
+     },
+     "hit_rate": {
+      "median": 0.9437,
+      "mean": 0.9437,
+      "sd": 0.0,
+      "min": 0.9437,
+      "max": 0.9437,
+      "n": 4
+     },
+     "miss_mb_per_token": {
+      "median": 63.3514,
+      "mean": 63.3514,
+      "sd": 0.0,
+      "min": 63.3514,
+      "max": 63.3514,
+      "n": 4
+     }
+    }
+   },
+   "holon_sm_prof": {
+    "1024": {
+     "prefill_tps": {
+      "median": 3382.5422,
+      "mean": 3382.6102,
+      "sd": 3.0109,
+      "min": 3379.7101,
+      "max": 3385.6462,
+      "n": 4
+     },
+     "decode_tps": {
+      "median": 238.1875,
+      "mean": 238.1834,
+      "sd": 0.0476,
+      "min": 238.1214,
+      "max": 238.2372,
+      "n": 4
+     },
+     "decode_steps": {
+      "median": 255.0,
+      "mean": 255.0,
+      "sd": 0.0,
+      "min": 255,
+      "max": 255,
+      "n": 4
+     },
+     "routed_per_token": {
+      "median": 384.0,
+      "mean": 384.0,
+      "sd": 0.0,
+      "min": 384.0,
+      "max": 384.0,
+      "n": 4
+     },
+     "misses_per_token": {
+      "median": 2.8314,
+      "mean": 2.8314,
+      "sd": 0.0,
+      "min": 2.8314,
+      "max": 2.8314,
+      "n": 4
+     },
+     "hit_rate": {
+      "median": 0.9926,
+      "mean": 0.9926,
+      "sd": 0.0,
+      "min": 0.9926,
+      "max": 0.9926,
+      "n": 4
+     },
+     "miss_mb_per_token": {
+      "median": 8.3372,
+      "mean": 8.3372,
+      "sd": 0.0,
+      "min": 8.3372,
+      "max": 8.3372,
+      "n": 4
+     }
+    },
+    "4096": {
+     "prefill_tps": {
+      "median": 8920.6355,
+      "mean": 8921.3769,
+      "sd": 4.7297,
+      "min": 8916.4838,
+      "max": 8927.7529,
+      "n": 4
+     },
+     "decode_tps": {
+      "median": 193.6606,
+      "mean": 193.6778,
+      "sd": 0.0401,
+      "min": 193.6529,
+      "max": 193.7369,
+      "n": 4
+     },
+     "decode_steps": {
+      "median": 255.0,
+      "mean": 255.0,
+      "sd": 0.0,
+      "min": 255,
+      "max": 255,
+      "n": 4
+     },
+     "routed_per_token": {
+      "median": 384.0,
+      "mean": 384.0,
+      "sd": 0.0,
+      "min": 384.0,
+      "max": 384.0,
+      "n": 4
+     },
+     "misses_per_token": {
+      "median": 16.9098,
+      "mean": 16.9098,
+      "sd": 0.0,
+      "min": 16.9098,
+      "max": 16.9098,
+      "n": 4
+     },
+     "hit_rate": {
+      "median": 0.956,
+      "mean": 0.956,
+      "sd": 0.0,
+      "min": 0.956,
+      "max": 0.956,
+      "n": 4
+     },
+     "miss_mb_per_token": {
+      "median": 49.6353,
+      "mean": 49.6353,
+      "sd": 0.0,
+      "min": 49.6353,
+      "max": 49.6353,
+      "n": 4
+     }
+    },
+    "32768": {
+     "prefill_tps": {
+      "median": 4602.0867,
+      "mean": 4602.8421,
+      "sd": 4.5516,
+      "min": 4599.0176,
+      "max": 4608.1773,
+      "n": 4
+     },
+     "decode_tps": {
+      "median": 118.9927,
+      "mean": 118.9929,
+      "sd": 0.0161,
+      "min": 118.9745,
+      "max": 119.0117,
+      "n": 4
+     },
+     "decode_steps": {
+      "median": 255.0,
+      "mean": 255.0,
+      "sd": 0.0,
+      "min": 255,
+      "max": 255,
+      "n": 4
+     },
+     "routed_per_token": {
+      "median": 384.0,
+      "mean": 384.0,
+      "sd": 0.0,
+      "min": 384.0,
+      "max": 384.0,
+      "n": 4
+     },
+     "misses_per_token": {
+      "median": 18.1373,
+      "mean": 18.1373,
+      "sd": 0.0,
+      "min": 18.1373,
+      "max": 18.1373,
+      "n": 4
+     },
+     "hit_rate": {
+      "median": 0.9528,
+      "mean": 0.9528,
+      "sd": 0.0,
+      "min": 0.9528,
+      "max": 0.9528,
+      "n": 4
+     },
+     "miss_mb_per_token": {
+      "median": 53.1031,
+      "mean": 53.1031,
+      "sd": 0.0,
+      "min": 53.1031,
+      "max": 53.1031,
+      "n": 4
+     }
+    }
+   }
+  },
+  "ring_copy_prefill": {
+   "1024": {
+    "holon_sm": 3297.892,
+    "holon_dma": 4534.0673,
+    "gain": 0.3748,
+    "sd": 63.5687,
+    "beyond_2sd": true,
+    "n": [
+     4,
+     4
+    ]
+   },
+   "4096": {
+    "holon_sm": 8909.1718,
+    "holon_dma": 9802.6565,
+    "gain": 0.1003,
+    "sd": 5.3595,
+    "beyond_2sd": true,
+    "n": [
+     4,
+     4
+    ]
+   },
+   "32768": {
+    "holon_sm": 4591.7378,
+    "holon_dma": 4707.1578,
+    "gain": 0.0251,
+    "sd": 4.9564,
+    "beyond_2sd": true,
+    "n": [
+     4,
+     4
+    ]
+   }
+  },
+  "ring_copy_decode": {
+   "1024": {
+    "holon_sm": 228.8607,
+    "holon_dma": 229.0336,
+    "gain": 0.0008,
+    "sd": 0.1201,
+    "beyond_2sd": false,
+    "n": [
+     4,
+     4
+    ]
+   },
+   "4096": {
+    "holon_sm": 188.1021,
+    "holon_dma": 188.0781,
+    "gain": -0.0001,
+    "sd": 0.0987,
+    "beyond_2sd": false,
+    "n": [
+     4,
+     4
+    ]
+   },
+   "32768": {
+    "holon_sm": 116.4743,
+    "holon_dma": 116.4532,
+    "gain": -0.0002,
+    "sd": 0.0281,
+    "beyond_2sd": false,
+    "n": [
+     4,
+     4
+    ]
+   }
+  },
+  "profile_decode": {
+   "1024": {
+    "holon_sm": 228.8607,
+    "holon_sm_prof": 238.1875,
+    "gain": 0.0408,
+    "sd": 0.1201,
+    "beyond_2sd": true,
+    "n": [
+     4,
+     4
+    ]
+   },
+   "4096": {
+    "holon_sm": 188.1021,
+    "holon_sm_prof": 193.6606,
+    "gain": 0.0296,
+    "sd": 0.0987,
+    "beyond_2sd": true,
+    "n": [
+     4,
+     4
+    ]
+   },
+   "32768": {
+    "holon_sm": 116.4743,
+    "holon_sm_prof": 118.9927,
+    "gain": 0.0216,
+    "sd": 0.0281,
+    "beyond_2sd": true,
+    "n": [
+     4,
+     4
+    ]
+   }
+  },
+  "lru_over_lfu_decode": {
+   "1024": {
+    "holon_sm": 228.8607,
+    "holon_lru": 227.644,
+    "gain": -0.0053,
+    "sd": 0.1201,
+    "beyond_2sd": true,
+    "n": [
+     4,
+     4
+    ]
+   },
+   "4096": {
+    "holon_sm": 188.1021,
+    "holon_lru": 188.1753,
+    "gain": 0.0004,
+    "sd": 0.0987,
+    "beyond_2sd": false,
+    "n": [
+     4,
+     4
+    ]
+   },
+   "32768": {
+    "holon_sm": 116.4743,
+    "holon_lru": 116.151,
+    "gain": -0.0028,
+    "sd": 0.0281,
+    "beyond_2sd": true,
+    "n": [
+     4,
+     4
+    ]
+   }
+  }
+ },
+ "gate": {
+  "natural": {
+   "summary": {
+    "holon_nat": {
+     "1024": {
+      "prefill_tps": {
+       "median": 4637.8385,
+       "mean": 4637.4579,
+       "sd": 2.4674,
+       "min": 4634.8223,
+       "max": 4639.7128,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 238.2529,
+       "mean": 238.2253,
+       "sd": 0.0802,
+       "min": 238.1349,
+       "max": 238.288,
+       "n": 3
+      },
+      "decode_steps": {
+       "median": 255,
+       "mean": 255.0,
+       "sd": 0.0,
+       "min": 255,
+       "max": 255,
+       "n": 3
+      },
+      "routed_per_token": {
+       "median": 384.0,
+       "mean": 384.0,
+       "sd": 0.0,
+       "min": 384.0,
+       "max": 384.0,
+       "n": 3
+      },
+      "misses_per_token": {
+       "median": 2.8314,
+       "mean": 2.8314,
+       "sd": 0.0,
+       "min": 2.8314,
+       "max": 2.8314,
+       "n": 3
+      },
+      "hit_rate": {
+       "median": 0.9926,
+       "mean": 0.9926,
+       "sd": 0.0,
+       "min": 0.9926,
+       "max": 0.9926,
+       "n": 3
+      },
+      "miss_mb_per_token": {
+       "median": 8.3372,
+       "mean": 8.3372,
+       "sd": 0.0,
+       "min": 8.3372,
+       "max": 8.3372,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 9846.1736,
+       "mean": 9848.4863,
+       "sd": 6.1011,
+       "min": 9843.8797,
+       "max": 9855.4057,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 193.6559,
+       "mean": 193.6275,
+       "sd": 0.0757,
+       "min": 193.5417,
+       "max": 193.6848,
+       "n": 3
+      },
+      "decode_steps": {
+       "median": 255,
+       "mean": 255.0,
+       "sd": 0.0,
+       "min": 255,
+       "max": 255,
+       "n": 3
+      },
+      "routed_per_token": {
+       "median": 384.0,
+       "mean": 384.0,
+       "sd": 0.0,
+       "min": 384.0,
+       "max": 384.0,
+       "n": 3
+      },
+      "misses_per_token": {
+       "median": 16.9098,
+       "mean": 16.9098,
+       "sd": 0.0,
+       "min": 16.9098,
+       "max": 16.9098,
+       "n": 3
+      },
+      "hit_rate": {
+       "median": 0.956,
+       "mean": 0.956,
+       "sd": 0.0,
+       "min": 0.956,
+       "max": 0.956,
+       "n": 3
+      },
+      "miss_mb_per_token": {
+       "median": 49.6353,
+       "mean": 49.6353,
+       "sd": 0.0,
+       "min": 49.6353,
+       "max": 49.6353,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 4716.4067,
+       "mean": 4720.4297,
+       "sd": 7.1204,
+       "min": 4716.2314,
+       "max": 4728.651,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 118.9753,
+       "mean": 118.9846,
+       "sd": 0.0481,
+       "min": 118.9418,
+       "max": 119.0366,
+       "n": 3
+      },
+      "decode_steps": {
+       "median": 255,
+       "mean": 255.0,
+       "sd": 0.0,
+       "min": 255,
+       "max": 255,
+       "n": 3
+      },
+      "routed_per_token": {
+       "median": 384.0,
+       "mean": 384.0,
+       "sd": 0.0,
+       "min": 384.0,
+       "max": 384.0,
+       "n": 3
+      },
+      "misses_per_token": {
+       "median": 18.1373,
+       "mean": 18.1373,
+       "sd": 0.0,
+       "min": 18.1373,
+       "max": 18.1373,
+       "n": 3
+      },
+      "hit_rate": {
+       "median": 0.9528,
+       "mean": 0.9528,
+       "sd": 0.0,
+       "min": 0.9528,
+       "max": 0.9528,
+       "n": 3
+      },
+      "miss_mb_per_token": {
+       "median": 53.1031,
+       "mean": 53.1031,
+       "sd": 0.0,
+       "min": 53.1031,
+       "max": 53.1031,
+       "n": 3
+      }
+     }
+    },
+    "llama_fit": {
+     "1024": {
+      "prefill_tps": {
+       "median": 1316.055,
+       "mean": 1315.746,
+       "sd": 2.5138,
+       "min": 1313.092,
+       "max": 1318.091,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 79.916,
+       "mean": 79.946,
+       "sd": 0.6855,
+       "min": 79.276,
+       "max": 80.646,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 1193.628,
+       "mean": 1193.2487,
+       "sd": 1.2037,
+       "min": 1191.901,
+       "max": 1194.217,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 76.655,
+       "mean": 76.4217,
+       "sd": 0.9312,
+       "min": 75.396,
+       "max": 77.214,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 1158.058,
+       "mean": 1158.0563,
+       "sd": 1.1045,
+       "min": 1156.951,
+       "max": 1159.16,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 60.533,
+       "mean": 60.8553,
+       "sd": 0.96,
+       "min": 60.098,
+       "max": 61.935,
+       "n": 3
+      }
+     }
+    },
+    "llama_ncmoe16": {
+     "1024": {
+      "prefill_tps": {
+       "median": 1333.111,
+       "mean": 1333.476,
+       "sd": 0.9998,
+       "min": 1332.71,
+       "max": 1334.607,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 87.813,
+       "mean": 87.7633,
+       "sd": 0.5771,
+       "min": 87.163,
+       "max": 88.314,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 1242.49,
+       "mean": 1242.315,
+       "sd": 1.103,
+       "min": 1241.135,
+       "max": 1243.32,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 82.587,
+       "mean": 82.8043,
+       "sd": 1.2621,
+       "min": 81.665,
+       "max": 84.161,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 1182.159,
+       "mean": 1181.8163,
+       "sd": 1.0058,
+       "min": 1180.684,
+       "max": 1182.606,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 66.542,
+       "mean": 66.6443,
+       "sd": 0.2714,
+       "min": 66.439,
+       "max": 66.952,
+       "n": 3
+      }
+     }
+    },
+    "cache_nat": {
+     "1024": {
+      "prefill_tps": {
+       "median": 1161.54,
+       "mean": 1161.8603,
+       "sd": 1.6944,
+       "min": 1160.349,
+       "max": 1163.692,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 174.733,
+       "mean": 174.6277,
+       "sd": 0.2363,
+       "min": 174.357,
+       "max": 174.793,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 1019.33,
+       "mean": 1019.9227,
+       "sd": 1.7653,
+       "min": 1018.53,
+       "max": 1021.908,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 120.672,
+       "mean": 120.499,
+       "sd": 0.4455,
+       "min": 119.993,
+       "max": 120.832,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 1031.685,
+       "mean": 1032.098,
+       "sd": 0.8658,
+       "min": 1031.516,
+       "max": 1033.093,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 88.741,
+       "mean": 88.5537,
+       "sd": 0.3597,
+       "min": 88.139,
+       "max": 88.781,
+       "n": 3
+      }
+     }
+    },
+    "cache_nat_pinned": {
+     "1024": {
+      "prefill_tps": {
+       "median": 1902.858,
+       "mean": 1901.4867,
+       "sd": 4.0979,
+       "min": 1896.879,
+       "max": 1904.723,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 196.789,
+       "mean": 196.7243,
+       "sd": 0.1379,
+       "min": 196.566,
+       "max": 196.818,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 1724.309,
+       "mean": 1722.9637,
+       "sd": 2.971,
+       "min": 1719.558,
+       "max": 1725.024,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 154.935,
+       "mean": 154.937,
+       "sd": 0.046,
+       "min": 154.892,
+       "max": 154.984,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 1593.899,
+       "mean": 1592.546,
+       "sd": 3.0293,
+       "min": 1589.076,
+       "max": 1594.663,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 106.002,
+       "mean": 105.992,
+       "sd": 0.0246,
+       "min": 105.964,
+       "max": 106.01,
+       "n": 3
+      }
+     }
+    },
+    "ft_nat": {
+     "1024": {
+      "prefill_tps": {
+       "median": 2711.637,
+       "mean": 2711.5883,
+       "sd": 8.1126,
+       "min": 2703.4514,
+       "max": 2719.6764,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 220.582,
+       "mean": 220.6498,
+       "sd": 0.1353,
+       "min": 220.5617,
+       "max": 220.8056,
+       "n": 3
+      },
+      "ft_layer_calls": {
+       "median": 12240,
+       "mean": 12240.0,
+       "sd": 0.0,
+       "min": 12240,
+       "max": 12240,
+       "n": 3
+      },
+      "ft_active_per_layer": {
+       "median": 8.0,
+       "mean": 8.0,
+       "sd": 0.0,
+       "min": 8.0,
+       "max": 8.0,
+       "n": 3
+      },
+      "ft_missing_per_layer": {
+       "median": 0.1235,
+       "mean": 0.1235,
+       "sd": 0.0,
+       "min": 0.1235,
+       "max": 0.1235,
+       "n": 3
+      },
+      "ft_miss_rate": {
+       "median": 0.0154,
+       "mean": 0.0154,
+       "sd": 0.0,
+       "min": 0.0154,
+       "max": 0.0154,
+       "n": 3
+      },
+      "ft_fetched_per_layer": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_cpu_per_layer": {
+       "median": 0.1235,
+       "mean": 0.1235,
+       "sd": 0.0,
+       "min": 0.1235,
+       "max": 0.1235,
+       "n": 3
+      },
+      "ft_fetch_rate": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_prefill_hit_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      },
+      "ft_prefill_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 10669.686,
+       "mean": 10687.9147,
+       "sd": 32.5295,
+       "min": 10668.5869,
+       "max": 10725.4712,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 183.0351,
+       "mean": 183.0755,
+       "sd": 0.1046,
+       "min": 182.9971,
+       "max": 183.1942,
+       "n": 3
+      },
+      "ft_layer_calls": {
+       "median": 12240,
+       "mean": 12240.0,
+       "sd": 0.0,
+       "min": 12240,
+       "max": 12240,
+       "n": 3
+      },
+      "ft_active_per_layer": {
+       "median": 8.0,
+       "mean": 8.0,
+       "sd": 0.0,
+       "min": 8.0,
+       "max": 8.0,
+       "n": 3
+      },
+      "ft_missing_per_layer": {
+       "median": 0.2972,
+       "mean": 0.2972,
+       "sd": 0.0,
+       "min": 0.2972,
+       "max": 0.2972,
+       "n": 3
+      },
+      "ft_miss_rate": {
+       "median": 0.0372,
+       "mean": 0.0372,
+       "sd": 0.0,
+       "min": 0.0372,
+       "max": 0.0372,
+       "n": 3
+      },
+      "ft_fetched_per_layer": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_cpu_per_layer": {
+       "median": 0.2972,
+       "mean": 0.2972,
+       "sd": 0.0,
+       "min": 0.2972,
+       "max": 0.2972,
+       "n": 3
+      },
+      "ft_fetch_rate": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_prefill_hit_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      },
+      "ft_prefill_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 5392.3209,
+       "mean": 5393.9184,
+       "sd": 6.0907,
+       "min": 5388.7857,
+       "max": 5400.6486,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 115.1241,
+       "mean": 115.1391,
+       "sd": 0.04,
+       "min": 115.1088,
+       "max": 115.1844,
+       "n": 3
+      },
+      "ft_layer_calls": {
+       "median": 12240,
+       "mean": 12240.0,
+       "sd": 0.0,
+       "min": 12240,
+       "max": 12240,
+       "n": 3
+      },
+      "ft_active_per_layer": {
+       "median": 8.0,
+       "mean": 8.0,
+       "sd": 0.0,
+       "min": 8.0,
+       "max": 8.0,
+       "n": 3
+      },
+      "ft_missing_per_layer": {
+       "median": 0.2931,
+       "mean": 0.2931,
+       "sd": 0.0,
+       "min": 0.2931,
+       "max": 0.2931,
+       "n": 3
+      },
+      "ft_miss_rate": {
+       "median": 0.0366,
+       "mean": 0.0366,
+       "sd": 0.0,
+       "min": 0.0366,
+       "max": 0.0366,
+       "n": 3
+      },
+      "ft_fetched_per_layer": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_cpu_per_layer": {
+       "median": 0.2931,
+       "mean": 0.2931,
+       "sd": 0.0,
+       "min": 0.2931,
+       "max": 0.2931,
+       "n": 3
+      },
+      "ft_fetch_rate": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_prefill_hit_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      },
+      "ft_prefill_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      }
+     }
+    },
+    "holon_47": {
+     "1024": {
+      "prefill_tps": {
+       "median": 4137.1252,
+       "mean": 4179.1414,
+       "sd": 74.2928,
+       "min": 4135.3775,
+       "max": 4264.9214,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 224.204,
+       "mean": 224.1856,
+       "sd": 0.0765,
+       "min": 224.1015,
+       "max": 224.2512,
+       "n": 3
+      },
+      "decode_steps": {
+       "median": 255,
+       "mean": 255.0,
+       "sd": 0.0,
+       "min": 255,
+       "max": 255,
+       "n": 3
+      },
+      "routed_per_token": {
+       "median": 384.0,
+       "mean": 384.0,
+       "sd": 0.0,
+       "min": 384.0,
+       "max": 384.0,
+       "n": 3
+      },
+      "misses_per_token": {
+       "median": 6.5804,
+       "mean": 6.5804,
+       "sd": 0.0,
+       "min": 6.5804,
+       "max": 6.5804,
+       "n": 3
+      },
+      "hit_rate": {
+       "median": 0.9829,
+       "mean": 0.9829,
+       "sd": 0.0,
+       "min": 0.9829,
+       "max": 0.9829,
+       "n": 3
+      },
+      "miss_mb_per_token": {
+       "median": 19.2754,
+       "mean": 19.2754,
+       "sd": 0.0,
+       "min": 19.2754,
+       "max": 19.2754,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 9829.6472,
+       "mean": 9830.4574,
+       "sd": 2.1197,
+       "min": 9828.8623,
+       "max": 9832.8627,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 179.7244,
+       "mean": 179.722,
+       "sd": 0.0847,
+       "min": 179.6362,
+       "max": 179.8055,
+       "n": 3
+      },
+      "decode_steps": {
+       "median": 255,
+       "mean": 255.0,
+       "sd": 0.0,
+       "min": 255,
+       "max": 255,
+       "n": 3
+      },
+      "routed_per_token": {
+       "median": 384.0,
+       "mean": 384.0,
+       "sd": 0.0,
+       "min": 384.0,
+       "max": 384.0,
+       "n": 3
+      },
+      "misses_per_token": {
+       "median": 30.3569,
+       "mean": 30.3569,
+       "sd": 0.0,
+       "min": 30.3569,
+       "max": 30.3569,
+       "n": 3
+      },
+      "hit_rate": {
+       "median": 0.9209,
+       "mean": 0.9209,
+       "sd": 0.0,
+       "min": 0.9209,
+       "max": 0.9209,
+       "n": 3
+      },
+      "miss_mb_per_token": {
+       "median": 89.0286,
+       "mean": 89.0286,
+       "sd": 0.0,
+       "min": 89.0286,
+       "max": 89.0286,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 4714.3268,
+       "mean": 4715.5551,
+       "sd": 5.1859,
+       "min": 4711.0937,
+       "max": 4721.2449,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 113.3558,
+       "mean": 113.3721,
+       "sd": 0.0292,
+       "min": 113.3546,
+       "max": 113.4058,
+       "n": 3
+      },
+      "decode_steps": {
+       "median": 255,
+       "mean": 255.0,
+       "sd": 0.0,
+       "min": 255,
+       "max": 255,
+       "n": 3
+      },
+      "routed_per_token": {
+       "median": 384.0,
+       "mean": 384.0,
+       "sd": 0.0,
+       "min": 384.0,
+       "max": 384.0,
+       "n": 3
+      },
+      "misses_per_token": {
+       "median": 30.3451,
+       "mean": 30.3451,
+       "sd": 0.0,
+       "min": 30.3451,
+       "max": 30.3451,
+       "n": 3
+      },
+      "hit_rate": {
+       "median": 0.921,
+       "mean": 0.921,
+       "sd": 0.0,
+       "min": 0.921,
+       "max": 0.921,
+       "n": 3
+      },
+      "miss_mb_per_token": {
+       "median": 88.5139,
+       "mean": 88.5139,
+       "sd": 0.0,
+       "min": 88.5139,
+       "max": 88.5139,
+       "n": 3
+      }
+     }
+    },
+    "cache_47": {
+     "1024": {
+      "prefill_tps": {
+       "median": 1080.624,
+       "mean": 1080.5083,
+       "sd": 1.8951,
+       "min": 1078.558,
+       "max": 1082.343,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 158.487,
+       "mean": 158.7183,
+       "sd": 0.7243,
+       "min": 158.138,
+       "max": 159.53,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 929.486,
+       "mean": 929.0933,
+       "sd": 0.7274,
+       "min": 928.254,
+       "max": 929.54,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 108.609,
+       "mean": 108.776,
+       "sd": 0.5037,
+       "min": 108.377,
+       "max": 109.342,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 938.576,
+       "mean": 938.505,
+       "sd": 0.8258,
+       "min": 937.646,
+       "max": 939.293,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 81.421,
+       "mean": 81.4023,
+       "sd": 0.4373,
+       "min": 80.956,
+       "max": 81.83,
+       "n": 3
+      }
+     }
+    },
+    "cache_47_pinned": {
+     "1024": {
+      "prefill_tps": {
+       "median": 1831.525,
+       "mean": 1831.7723,
+       "sd": 2.1945,
+       "min": 1829.712,
+       "max": 1834.08,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 188.603,
+       "mean": 188.58,
+       "sd": 0.2593,
+       "min": 188.31,
+       "max": 188.827,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 1643.92,
+       "mean": 1643.4953,
+       "sd": 0.9069,
+       "min": 1642.454,
+       "max": 1644.112,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 147.047,
+       "mean": 147.0987,
+       "sd": 0.0947,
+       "min": 147.041,
+       "max": 147.208,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 1523.291,
+       "mean": 1523.199,
+       "sd": 0.9464,
+       "min": 1522.21,
+       "max": 1524.096,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 101.917,
+       "mean": 101.942,
+       "sd": 0.0814,
+       "min": 101.876,
+       "max": 102.033,
+       "n": 3
+      }
+     }
+    },
+    "ft_47": {
+     "1024": {
+      "prefill_tps": {
+       "median": 2710.2442,
+       "mean": 2712.14,
+       "sd": 3.9454,
+       "min": 2709.5003,
+       "max": 2716.6754,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 212.7814,
+       "mean": 212.7748,
+       "sd": 0.0323,
+       "min": 212.7397,
+       "max": 212.8032,
+       "n": 3
+      },
+      "ft_layer_calls": {
+       "median": 12240,
+       "mean": 12240.0,
+       "sd": 0.0,
+       "min": 12240,
+       "max": 12240,
+       "n": 3
+      },
+      "ft_active_per_layer": {
+       "median": 8.0,
+       "mean": 8.0,
+       "sd": 0.0,
+       "min": 8.0,
+       "max": 8.0,
+       "n": 3
+      },
+      "ft_missing_per_layer": {
+       "median": 0.1725,
+       "mean": 0.1725,
+       "sd": 0.0,
+       "min": 0.1725,
+       "max": 0.1725,
+       "n": 3
+      },
+      "ft_miss_rate": {
+       "median": 0.0216,
+       "mean": 0.0216,
+       "sd": 0.0,
+       "min": 0.0216,
+       "max": 0.0216,
+       "n": 3
+      },
+      "ft_fetched_per_layer": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_cpu_per_layer": {
+       "median": 0.1725,
+       "mean": 0.1725,
+       "sd": 0.0,
+       "min": 0.1725,
+       "max": 0.1725,
+       "n": 3
+      },
+      "ft_fetch_rate": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_prefill_hit_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      },
+      "ft_prefill_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 10674.8379,
+       "mean": 10682.2367,
+       "sd": 17.7143,
+       "min": 10669.4213,
+       "max": 10702.451,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 174.6061,
+       "mean": 174.5965,
+       "sd": 0.035,
+       "min": 174.5577,
+       "max": 174.6257,
+       "n": 3
+      },
+      "ft_layer_calls": {
+       "median": 12240,
+       "mean": 12240.0,
+       "sd": 0.0,
+       "min": 12240,
+       "max": 12240,
+       "n": 3
+      },
+      "ft_active_per_layer": {
+       "median": 8.0,
+       "mean": 8.0,
+       "sd": 0.0,
+       "min": 8.0,
+       "max": 8.0,
+       "n": 3
+      },
+      "ft_missing_per_layer": {
+       "median": 0.3784,
+       "mean": 0.3784,
+       "sd": 0.0,
+       "min": 0.3784,
+       "max": 0.3784,
+       "n": 3
+      },
+      "ft_miss_rate": {
+       "median": 0.0473,
+       "mean": 0.0473,
+       "sd": 0.0,
+       "min": 0.0473,
+       "max": 0.0473,
+       "n": 3
+      },
+      "ft_fetched_per_layer": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_cpu_per_layer": {
+       "median": 0.3784,
+       "mean": 0.3784,
+       "sd": 0.0,
+       "min": 0.3784,
+       "max": 0.3784,
+       "n": 3
+      },
+      "ft_fetch_rate": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_prefill_hit_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      },
+      "ft_prefill_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 5395.9633,
+       "mean": 5395.9914,
+       "sd": 2.5006,
+       "min": 5393.505,
+       "max": 5398.5059,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 111.108,
+       "mean": 111.1141,
+       "sd": 0.0183,
+       "min": 111.0996,
+       "max": 111.1346,
+       "n": 3
+      },
+      "ft_layer_calls": {
+       "median": 12240,
+       "mean": 12240.0,
+       "sd": 0.0,
+       "min": 12240,
+       "max": 12240,
+       "n": 3
+      },
+      "ft_active_per_layer": {
+       "median": 8.0,
+       "mean": 8.0,
+       "sd": 0.0,
+       "min": 8.0,
+       "max": 8.0,
+       "n": 3
+      },
+      "ft_missing_per_layer": {
+       "median": 0.3904,
+       "mean": 0.3904,
+       "sd": 0.0,
+       "min": 0.3904,
+       "max": 0.3904,
+       "n": 3
+      },
+      "ft_miss_rate": {
+       "median": 0.0488,
+       "mean": 0.0488,
+       "sd": 0.0,
+       "min": 0.0488,
+       "max": 0.0488,
+       "n": 3
+      },
+      "ft_fetched_per_layer": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_cpu_per_layer": {
+       "median": 0.3904,
+       "mean": 0.3904,
+       "sd": 0.0,
+       "min": 0.3904,
+       "max": 0.3904,
+       "n": 3
+      },
+      "ft_fetch_rate": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_prefill_hit_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      },
+      "ft_prefill_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      }
+     }
+    }
+   },
+   "rows": [
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "ft_nat",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 238.2529,
+     "reference": 220.582,
+     "ratio": 1.08,
+     "ratio_range": [
+      1.078,
+      1.08
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       0.95,
+       0.97,
+       1.0
+      ],
+      "after_3c_3d": [
+       1.002,
+       1.023,
+       1.055
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "ft_nat",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 4637.8385,
+     "reference": 2711.637,
+     "ratio": 1.71,
+     "ratio_range": [
+      1.704,
+      1.716
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "ft_nat",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 193.6559,
+     "reference": 183.0351,
+     "ratio": 1.058,
+     "ratio_range": [
+      1.056,
+      1.058
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       0.92,
+       0.95,
+       0.98
+      ],
+      "after_3c_3d": [
+       0.96,
+       0.991,
+       1.023
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "ft_nat",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9846.1736,
+     "reference": 10669.686,
+     "ratio": 0.923,
+     "ratio_range": [
+      0.918,
+      0.924
+     ],
+     "bar": 1.0,
+     "verdict": "miss",
+     "predicted": null
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "ft_nat",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 118.9753,
+     "reference": 115.1241,
+     "ratio": 1.033,
+     "ratio_range": [
+      1.033,
+      1.034
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       0.97,
+       0.99,
+       1.01
+      ],
+      "after_3c_3d": [
+       0.998,
+       1.018,
+       1.039
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "ft_nat",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4716.4067,
+     "reference": 5392.3209,
+     "ratio": 0.875,
+     "ratio_range": [
+      0.873,
+      0.877
+     ],
+     "bar": 1.0,
+     "verdict": "miss",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "llama_fit",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 238.2529,
+     "reference": 79.916,
+     "ratio": 2.981,
+     "ratio_range": [
+      2.953,
+      3.006
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.65,
+       2.65,
+       2.65
+      ],
+      "after_3c_3d": [
+       2.795,
+       2.795,
+       2.795
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "llama_fit",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 4637.8385,
+     "reference": 1316.055,
+     "ratio": 3.524,
+     "ratio_range": [
+      3.516,
+      3.533
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "llama_fit",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 193.6559,
+     "reference": 76.655,
+     "ratio": 2.526,
+     "ratio_range": [
+      2.507,
+      2.569
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.18,
+       2.18,
+       2.18
+      ],
+      "after_3c_3d": [
+       2.275,
+       2.275,
+       2.275
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "llama_fit",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9846.1736,
+     "reference": 1193.628,
+     "ratio": 8.249,
+     "ratio_range": [
+      8.243,
+      8.269
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "llama_fit",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 118.9753,
+     "reference": 60.533,
+     "ratio": 1.965,
+     "ratio_range": [
+      1.92,
+      1.981
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.76,
+       1.8,
+       1.84
+      ],
+      "after_3c_3d": [
+       1.81,
+       1.851,
+       1.892
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "llama_fit",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4716.4067,
+     "reference": 1158.058,
+     "ratio": 4.073,
+     "ratio_range": [
+      4.069,
+      4.087
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "llama_ncmoe16",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 238.2529,
+     "reference": 87.813,
+     "ratio": 2.713,
+     "ratio_range": [
+      2.696,
+      2.734
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.35,
+       2.35,
+       2.35
+      ],
+      "after_3c_3d": [
+       2.479,
+       2.479,
+       2.479
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "llama_ncmoe16",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 4637.8385,
+     "reference": 1333.111,
+     "ratio": 3.479,
+     "ratio_range": [
+      3.473,
+      3.481
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "llama_ncmoe16",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 193.6559,
+     "reference": 82.587,
+     "ratio": 2.345,
+     "ratio_range": [
+      2.3,
+      2.372
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.0,
+       2.0,
+       2.0
+      ],
+      "after_3c_3d": [
+       2.087,
+       2.087,
+       2.087
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "llama_ncmoe16",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9846.1736,
+     "reference": 1242.49,
+     "ratio": 7.925,
+     "ratio_range": [
+      7.917,
+      7.941
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "llama_ncmoe16",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 118.9753,
+     "reference": 66.542,
+     "ratio": 1.788,
+     "ratio_range": [
+      1.777,
+      1.792
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.61,
+       1.64,
+       1.68
+      ],
+      "after_3c_3d": [
+       1.656,
+       1.687,
+       1.728
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "llama_ncmoe16",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4716.4067,
+     "reference": 1182.159,
+     "ratio": 3.99,
+     "ratio_range": [
+      3.988,
+      4.005
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cache_nat",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 238.2529,
+     "reference": 174.733,
+     "ratio": 1.364,
+     "ratio_range": [
+      1.362,
+      1.367
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.3,
+       1.3,
+       1.3
+      ],
+      "after_3c_3d": [
+       1.371,
+       1.371,
+       1.371
+      ]
+     },
+     "vs_band": "below"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cache_nat",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 4637.8385,
+     "reference": 1161.54,
+     "ratio": 3.993,
+     "ratio_range": [
+      3.983,
+      3.999
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cache_nat",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 193.6559,
+     "reference": 120.672,
+     "ratio": 1.605,
+     "ratio_range": [
+      1.602,
+      1.614
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.52,
+       1.52,
+       1.52
+      ],
+      "after_3c_3d": [
+       1.586,
+       1.586,
+       1.586
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cache_nat",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9846.1736,
+     "reference": 1019.33,
+     "ratio": 9.659,
+     "ratio_range": [
+      9.633,
+      9.676
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cache_nat",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 118.9753,
+     "reference": 88.741,
+     "ratio": 1.341,
+     "ratio_range": [
+      1.34,
+      1.351
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.32,
+       1.35,
+       1.38
+      ],
+      "after_3c_3d": [
+       1.358,
+       1.388,
+       1.419
+      ]
+     },
+     "vs_band": "below"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cache_nat",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4716.4067,
+     "reference": 1031.685,
+     "ratio": 4.572,
+     "ratio_range": [
+      4.565,
+      4.584
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cache_nat_pinned",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 238.2529,
+     "reference": 196.789,
+     "ratio": 1.211,
+     "ratio_range": [
+      1.21,
+      1.212
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.07,
+       1.1,
+       1.13
+      ],
+      "after_3c_3d": [
+       1.129,
+       1.16,
+       1.192
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cache_nat_pinned",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 4637.8385,
+     "reference": 1902.858,
+     "ratio": 2.437,
+     "ratio_range": [
+      2.433,
+      2.446
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cache_nat_pinned",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 193.6559,
+     "reference": 154.935,
+     "ratio": 1.25,
+     "ratio_range": [
+      1.249,
+      1.25
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.09,
+       1.13,
+       1.17
+      ],
+      "after_3c_3d": [
+       1.137,
+       1.179,
+       1.221
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cache_nat_pinned",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9846.1736,
+     "reference": 1724.309,
+     "ratio": 5.71,
+     "ratio_range": [
+      5.707,
+      5.731
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cache_nat_pinned",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 118.9753,
+     "reference": 106.002,
+     "ratio": 1.122,
+     "ratio_range": [
+      1.122,
+      1.123
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.06,
+       1.08,
+       1.11
+      ],
+      "after_3c_3d": [
+       1.09,
+       1.111,
+       1.142
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cache_nat_pinned",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4716.4067,
+     "reference": 1593.899,
+     "ratio": 2.959,
+     "ratio_range": [
+      2.958,
+      2.976
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    }
+   ]
+  },
+  "47%": {
+   "rows": [
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "ft_47",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 224.204,
+     "reference": 212.7814,
+     "ratio": 1.054,
+     "ratio_range": [
+      1.053,
+      1.054
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       0.95,
+       0.97,
+       1.0
+      ],
+      "after_3c_3d": [
+       1.002,
+       1.023,
+       1.055
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "ft_47",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 4137.1252,
+     "reference": 2710.2442,
+     "ratio": 1.526,
+     "ratio_range": [
+      1.522,
+      1.574
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "ft_47",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 179.7244,
+     "reference": 174.6061,
+     "ratio": 1.029,
+     "ratio_range": [
+      1.029,
+      1.03
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       0.92,
+       0.95,
+       0.98
+      ],
+      "after_3c_3d": [
+       0.96,
+       0.991,
+       1.023
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "ft_47",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9829.6472,
+     "reference": 10674.8379,
+     "ratio": 0.921,
+     "ratio_range": [
+      0.918,
+      0.922
+     ],
+     "bar": 1.0,
+     "verdict": "miss",
+     "predicted": null
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "ft_47",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 113.3558,
+     "reference": 111.108,
+     "ratio": 1.02,
+     "ratio_range": [
+      1.02,
+      1.021
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       0.97,
+       0.99,
+       1.01
+      ],
+      "after_3c_3d": [
+       0.998,
+       1.018,
+       1.039
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "ft_47",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4714.3268,
+     "reference": 5395.9633,
+     "ratio": 0.874,
+     "ratio_range": [
+      0.873,
+      0.875
+     ],
+     "bar": 1.0,
+     "verdict": "miss",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "llama_fit",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 224.204,
+     "reference": 79.916,
+     "ratio": 2.805,
+     "ratio_range": [
+      2.779,
+      2.829
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.65,
+       2.65,
+       2.65
+      ],
+      "after_3c_3d": [
+       2.795,
+       2.795,
+       2.795
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "llama_fit",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 4137.1252,
+     "reference": 1316.055,
+     "ratio": 3.144,
+     "ratio_range": [
+      3.137,
+      3.248
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "llama_fit",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 179.7244,
+     "reference": 76.655,
+     "ratio": 2.345,
+     "ratio_range": [
+      2.326,
+      2.385
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.18,
+       2.18,
+       2.18
+      ],
+      "after_3c_3d": [
+       2.275,
+       2.275,
+       2.275
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "llama_fit",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9829.6472,
+     "reference": 1193.628,
+     "ratio": 8.235,
+     "ratio_range": [
+      8.23,
+      8.25
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "llama_fit",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 113.3558,
+     "reference": 60.533,
+     "ratio": 1.873,
+     "ratio_range": [
+      1.83,
+      1.887
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.76,
+       1.8,
+       1.84
+      ],
+      "after_3c_3d": [
+       1.81,
+       1.851,
+       1.892
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "llama_fit",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4714.3268,
+     "reference": 1158.058,
+     "ratio": 4.071,
+     "ratio_range": [
+      4.064,
+      4.081
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "llama_ncmoe16",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 224.204,
+     "reference": 87.813,
+     "ratio": 2.553,
+     "ratio_range": [
+      2.538,
+      2.573
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.35,
+       2.35,
+       2.35
+      ],
+      "after_3c_3d": [
+       2.479,
+       2.479,
+       2.479
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "llama_ncmoe16",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 4137.1252,
+     "reference": 1333.111,
+     "ratio": 3.103,
+     "ratio_range": [
+      3.099,
+      3.2
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "llama_ncmoe16",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 179.7244,
+     "reference": 82.587,
+     "ratio": 2.176,
+     "ratio_range": [
+      2.134,
+      2.202
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.0,
+       2.0,
+       2.0
+      ],
+      "after_3c_3d": [
+       2.087,
+       2.087,
+       2.087
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "llama_ncmoe16",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9829.6472,
+     "reference": 1242.49,
+     "ratio": 7.911,
+     "ratio_range": [
+      7.905,
+      7.922
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "llama_ncmoe16",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 113.3558,
+     "reference": 66.542,
+     "ratio": 1.704,
+     "ratio_range": [
+      1.693,
+      1.707
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.61,
+       1.64,
+       1.68
+      ],
+      "after_3c_3d": [
+       1.656,
+       1.687,
+       1.728
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "llama_ncmoe16",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4714.3268,
+     "reference": 1182.159,
+     "ratio": 3.988,
+     "ratio_range": [
+      3.984,
+      3.999
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cache_47",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 224.204,
+     "reference": 158.487,
+     "ratio": 1.415,
+     "ratio_range": [
+      1.405,
+      1.418
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.3,
+       1.3,
+       1.3
+      ],
+      "after_3c_3d": [
+       1.371,
+       1.371,
+       1.371
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cache_47",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 4137.1252,
+     "reference": 1080.624,
+     "ratio": 3.828,
+     "ratio_range": [
+      3.821,
+      3.954
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cache_47",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 179.7244,
+     "reference": 108.609,
+     "ratio": 1.655,
+     "ratio_range": [
+      1.643,
+      1.659
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.52,
+       1.52,
+       1.52
+      ],
+      "after_3c_3d": [
+       1.586,
+       1.586,
+       1.586
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cache_47",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9829.6472,
+     "reference": 929.486,
+     "ratio": 10.575,
+     "ratio_range": [
+      10.574,
+      10.593
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cache_47",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 113.3558,
+     "reference": 81.421,
+     "ratio": 1.392,
+     "ratio_range": [
+      1.385,
+      1.401
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.32,
+       1.35,
+       1.38
+      ],
+      "after_3c_3d": [
+       1.358,
+       1.388,
+       1.419
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cache_47",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4714.3268,
+     "reference": 938.576,
+     "ratio": 5.023,
+     "ratio_range": [
+      5.016,
+      5.035
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cache_47_pinned",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 224.204,
+     "reference": 188.603,
+     "ratio": 1.189,
+     "ratio_range": [
+      1.187,
+      1.191
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.07,
+       1.1,
+       1.13
+      ],
+      "after_3c_3d": [
+       1.129,
+       1.16,
+       1.192
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cache_47_pinned",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 4137.1252,
+     "reference": 1831.525,
+     "ratio": 2.259,
+     "ratio_range": [
+      2.255,
+      2.331
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cache_47_pinned",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 179.7244,
+     "reference": 147.047,
+     "ratio": 1.222,
+     "ratio_range": [
+      1.22,
+      1.223
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.09,
+       1.13,
+       1.17
+      ],
+      "after_3c_3d": [
+       1.137,
+       1.179,
+       1.221
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cache_47_pinned",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9829.6472,
+     "reference": 1643.92,
+     "ratio": 5.979,
+     "ratio_range": [
+      5.978,
+      5.987
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cache_47_pinned",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 113.3558,
+     "reference": 101.917,
+     "ratio": 1.112,
+     "ratio_range": [
+      1.111,
+      1.113
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.06,
+       1.08,
+       1.11
+      ],
+      "after_3c_3d": [
+       1.09,
+       1.111,
+       1.142
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cache_47_pinned",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4714.3268,
+     "reference": 1523.291,
+     "ratio": 3.095,
+     "ratio_range": [
+      3.091,
+      3.102
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    }
+   ]
+  },
+  "capped": {
+   "summary": {
+    "holon_25": {
+     "1024": {
+      "prefill_tps": {
+       "median": 3207.3965,
+       "mean": 3208.3956,
+       "sd": 3.8492,
+       "min": 3205.1445,
+       "max": 3212.6458,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 122.9478,
+       "mean": 122.9689,
+       "sd": 0.0394,
+       "min": 122.9446,
+       "max": 123.0144,
+       "n": 3
+      },
+      "decode_steps": {
+       "median": 255,
+       "mean": 255.0,
+       "sd": 0.0,
+       "min": 255,
+       "max": 255,
+       "n": 3
+      },
+      "routed_per_token": {
+       "median": 384.0,
+       "mean": 384.0,
+       "sd": 0.0,
+       "min": 384.0,
+       "max": 384.0,
+       "n": 3
+      },
+      "misses_per_token": {
+       "median": 60.1882,
+       "mean": 60.1882,
+       "sd": 0.0,
+       "min": 60.1882,
+       "max": 60.1882,
+       "n": 3
+      },
+      "hit_rate": {
+       "median": 0.8433,
+       "mean": 0.8433,
+       "sd": 0.0,
+       "min": 0.8433,
+       "max": 0.8433,
+       "n": 3
+      },
+      "miss_mb_per_token": {
+       "median": 173.8795,
+       "mean": 173.8795,
+       "sd": 0.0,
+       "min": 173.8795,
+       "max": 173.8795,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 9628.0359,
+       "mean": 9628.0289,
+       "sd": 5.0581,
+       "min": 9622.9673,
+       "max": 9633.0835,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 106.8236,
+       "mean": 106.8171,
+       "sd": 0.025,
+       "min": 106.7895,
+       "max": 106.8382,
+       "n": 3
+      },
+      "decode_steps": {
+       "median": 255,
+       "mean": 255.0,
+       "sd": 0.0,
+       "min": 255,
+       "max": 255,
+       "n": 3
+      },
+      "routed_per_token": {
+       "median": 384.0,
+       "mean": 384.0,
+       "sd": 0.0,
+       "min": 384.0,
+       "max": 384.0,
+       "n": 3
+      },
+      "misses_per_token": {
+       "median": 117.4039,
+       "mean": 117.4039,
+       "sd": 0.0,
+       "min": 117.4039,
+       "max": 117.4039,
+       "n": 3
+      },
+      "hit_rate": {
+       "median": 0.6943,
+       "mean": 0.6943,
+       "sd": 0.0,
+       "min": 0.6943,
+       "max": 0.6943,
+       "n": 3
+      },
+      "miss_mb_per_token": {
+       "median": 338.2346,
+       "mean": 338.2346,
+       "sd": 0.0,
+       "min": 338.2346,
+       "max": 338.2346,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 4682.2364,
+       "mean": 4681.4543,
+       "sd": 2.7189,
+       "min": 4678.4301,
+       "max": 4683.6965,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 77.0373,
+       "mean": 77.0352,
+       "sd": 0.0102,
+       "min": 77.0242,
+       "max": 77.0442,
+       "n": 3
+      },
+      "decode_steps": {
+       "median": 255,
+       "mean": 255.0,
+       "sd": 0.0,
+       "min": 255,
+       "max": 255,
+       "n": 3
+      },
+      "routed_per_token": {
+       "median": 384.0,
+       "mean": 384.0,
+       "sd": 0.0,
+       "min": 384.0,
+       "max": 384.0,
+       "n": 3
+      },
+      "misses_per_token": {
+       "median": 117.7608,
+       "mean": 117.7608,
+       "sd": 0.0,
+       "min": 117.7608,
+       "max": 117.7608,
+       "n": 3
+      },
+      "hit_rate": {
+       "median": 0.6933,
+       "mean": 0.6933,
+       "sd": 0.0,
+       "min": 0.6933,
+       "max": 0.6933,
+       "n": 3
+      },
+      "miss_mb_per_token": {
+       "median": 339.6477,
+       "mean": 339.6477,
+       "sd": 0.0,
+       "min": 339.6477,
+       "max": 339.6477,
+       "n": 3
+      }
+     }
+    },
+    "cap_fit": {
+     "1024": {
+      "prefill_tps": {
+       "median": 732.124,
+       "mean": 732.6863,
+       "sd": 1.3187,
+       "min": 731.742,
+       "max": 734.193,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 46.024,
+       "mean": 46.105,
+       "sd": 0.9122,
+       "min": 45.236,
+       "max": 47.055,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 665.599,
+       "mean": 665.9197,
+       "sd": 0.5842,
+       "min": 665.566,
+       "max": 666.594,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 45.366,
+       "mean": 45.2077,
+       "sd": 0.5151,
+       "min": 44.632,
+       "max": 45.625,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 678.764,
+       "mean": 678.8423,
+       "sd": 0.4793,
+       "min": 678.407,
+       "max": 679.356,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 40.278,
+       "mean": 40.261,
+       "sd": 0.1224,
+       "min": 40.131,
+       "max": 40.374,
+       "n": 3
+      }
+     }
+    },
+    "cap_ncmoe36": {
+     "1024": {
+      "prefill_tps": {
+       "median": 705.941,
+       "mean": 705.761,
+       "sd": 0.7318,
+       "min": 704.956,
+       "max": 706.386,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 46.658,
+       "mean": 46.213,
+       "sd": 0.8749,
+       "min": 45.205,
+       "max": 46.776,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 653.293,
+       "mean": 653.6003,
+       "sd": 0.9222,
+       "min": 652.871,
+       "max": 654.637,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 46.14,
+       "mean": 45.959,
+       "sd": 0.5016,
+       "min": 45.392,
+       "max": 46.345,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 660.104,
+       "mean": 660.2627,
+       "sd": 0.4868,
+       "min": 659.875,
+       "max": 660.809,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 40.389,
+       "mean": 40.3783,
+       "sd": 0.4411,
+       "min": 39.932,
+       "max": 40.814,
+       "n": 3
+      }
+     }
+    },
+    "cap_cache": {
+     "1024": {
+      "prefill_tps": {
+       "median": 746.183,
+       "mean": 746.3667,
+       "sd": 0.7427,
+       "min": 745.733,
+       "max": 747.184,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 54.409,
+       "mean": 54.2757,
+       "sd": 0.2318,
+       "min": 54.008,
+       "max": 54.41,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 672.141,
+       "mean": 672.329,
+       "sd": 0.4729,
+       "min": 671.979,
+       "max": 672.867,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 46.614,
+       "mean": 46.5413,
+       "sd": 0.1617,
+       "min": 46.356,
+       "max": 46.654,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 676.508,
+       "mean": 676.5303,
+       "sd": 0.6898,
+       "min": 675.852,
+       "max": 677.231,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 42.31,
+       "mean": 42.259,
+       "sd": 0.1732,
+       "min": 42.066,
+       "max": 42.401,
+       "n": 3
+      }
+     }
+    },
+    "cap_cache_pinned": {
+     "1024": {
+      "prefill_tps": {
+       "median": 1524.288,
+       "mean": 1523.7743,
+       "sd": 1.5555,
+       "min": 1522.027,
+       "max": 1525.008,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 100.544,
+       "mean": 100.5327,
+       "sd": 0.0392,
+       "min": 100.489,
+       "max": 100.565,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 1401.136,
+       "mean": 1401.117,
+       "sd": 0.1385,
+       "min": 1400.97,
+       "max": 1401.245,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 87.241,
+       "mean": 87.2393,
+       "sd": 0.0275,
+       "min": 87.211,
+       "max": 87.266,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 1307.643,
+       "mean": 1307.6923,
+       "sd": 0.2172,
+       "min": 1307.504,
+       "max": 1307.93,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 70.541,
+       "mean": 70.534,
+       "sd": 0.0214,
+       "min": 70.51,
+       "max": 70.551,
+       "n": 3
+      }
+     }
+    },
+    "cap_ft": {
+     "1024": {
+      "prefill_tps": {
+       "median": 2705.2389,
+       "mean": 2705.1296,
+       "sd": 1.0117,
+       "min": 2704.0677,
+       "max": 2706.0822,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 115.2446,
+       "mean": 115.2566,
+       "sd": 0.1021,
+       "min": 115.161,
+       "max": 115.3641,
+       "n": 3
+      },
+      "ft_layer_calls": {
+       "median": 12240,
+       "mean": 12240.0,
+       "sd": 0.0,
+       "min": 12240,
+       "max": 12240,
+       "n": 3
+      },
+      "ft_active_per_layer": {
+       "median": 8.0,
+       "mean": 8.0,
+       "sd": 0.0,
+       "min": 8.0,
+       "max": 8.0,
+       "n": 3
+      },
+      "ft_missing_per_layer": {
+       "median": 1.4203,
+       "mean": 1.4203,
+       "sd": 0.0,
+       "min": 1.4203,
+       "max": 1.4203,
+       "n": 3
+      },
+      "ft_miss_rate": {
+       "median": 0.1775,
+       "mean": 0.1775,
+       "sd": 0.0,
+       "min": 0.1775,
+       "max": 0.1775,
+       "n": 3
+      },
+      "ft_fetched_per_layer": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_cpu_per_layer": {
+       "median": 1.4203,
+       "mean": 1.4203,
+       "sd": 0.0,
+       "min": 1.4203,
+       "max": 1.4203,
+       "n": 3
+      },
+      "ft_fetch_rate": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_prefill_hit_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      },
+      "ft_prefill_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      }
+     },
+     "4096": {
+      "prefill_tps": {
+       "median": 10658.144,
+       "mean": 10663.0102,
+       "sd": 8.9845,
+       "min": 10657.5084,
+       "max": 10673.3781,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 109.12,
+       "mean": 109.1442,
+       "sd": 0.055,
+       "min": 109.1055,
+       "max": 109.2072,
+       "n": 3
+      },
+      "ft_layer_calls": {
+       "median": 12240,
+       "mean": 12240.0,
+       "sd": 0.0,
+       "min": 12240,
+       "max": 12240,
+       "n": 3
+      },
+      "ft_active_per_layer": {
+       "median": 8.0,
+       "mean": 8.0,
+       "sd": 0.0,
+       "min": 8.0,
+       "max": 8.0,
+       "n": 3
+      },
+      "ft_missing_per_layer": {
+       "median": 1.4621,
+       "mean": 1.4621,
+       "sd": 0.0,
+       "min": 1.4621,
+       "max": 1.4621,
+       "n": 3
+      },
+      "ft_miss_rate": {
+       "median": 0.1828,
+       "mean": 0.1828,
+       "sd": 0.0,
+       "min": 0.1828,
+       "max": 0.1828,
+       "n": 3
+      },
+      "ft_fetched_per_layer": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_cpu_per_layer": {
+       "median": 1.4621,
+       "mean": 1.4621,
+       "sd": 0.0,
+       "min": 1.4621,
+       "max": 1.4621,
+       "n": 3
+      },
+      "ft_fetch_rate": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_prefill_hit_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      },
+      "ft_prefill_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      }
+     },
+     "32768": {
+      "prefill_tps": {
+       "median": 5396.8792,
+       "mean": 5396.0821,
+       "sd": 2.1203,
+       "min": 5393.6788,
+       "max": 5397.6883,
+       "n": 3
+      },
+      "decode_tps": {
+       "median": 76.3428,
+       "mean": 76.3354,
+       "sd": 0.0294,
+       "min": 76.303,
+       "max": 76.3605,
+       "n": 3
+      },
+      "ft_layer_calls": {
+       "median": 12240,
+       "mean": 12240.0,
+       "sd": 0.0,
+       "min": 12240,
+       "max": 12240,
+       "n": 3
+      },
+      "ft_active_per_layer": {
+       "median": 8.0,
+       "mean": 8.0,
+       "sd": 0.0,
+       "min": 8.0,
+       "max": 8.0,
+       "n": 3
+      },
+      "ft_missing_per_layer": {
+       "median": 1.6867,
+       "mean": 1.6867,
+       "sd": 0.0,
+       "min": 1.6867,
+       "max": 1.6867,
+       "n": 3
+      },
+      "ft_miss_rate": {
+       "median": 0.2108,
+       "mean": 0.2108,
+       "sd": 0.0,
+       "min": 0.2108,
+       "max": 0.2108,
+       "n": 3
+      },
+      "ft_fetched_per_layer": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_cpu_per_layer": {
+       "median": 1.6867,
+       "mean": 1.6867,
+       "sd": 0.0,
+       "min": 1.6867,
+       "max": 1.6867,
+       "n": 3
+      },
+      "ft_fetch_rate": {
+       "median": 0.0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0.0,
+       "max": 0.0,
+       "n": 3
+      },
+      "ft_prefill_hit_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      },
+      "ft_prefill_rows": {
+       "median": 0,
+       "mean": 0.0,
+       "sd": 0.0,
+       "min": 0,
+       "max": 0,
+       "n": 3
+      }
+     }
+    }
+   },
+   "rows": [
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "cap_ft",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 122.9478,
+     "reference": 115.2446,
+     "ratio": 1.067,
+     "ratio_range": [
+      1.066,
+      1.068
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       0.99,
+       1.05,
+       1.11
+      ],
+      "after_3c_3d": [
+       1.021,
+       1.083,
+       1.145
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "cap_ft",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 3207.3965,
+     "reference": 2705.2389,
+     "ratio": 1.186,
+     "ratio_range": [
+      1.184,
+      1.188
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "cap_ft",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 106.8236,
+     "reference": 109.12,
+     "ratio": 0.979,
+     "ratio_range": [
+      0.978,
+      0.979
+     ],
+     "bar": 1.0,
+     "verdict": "miss",
+     "predicted": {
+      "written": [
+       0.89,
+       0.94,
+       1.0
+      ],
+      "after_3c_3d": [
+       0.913,
+       0.965,
+       1.026
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "cap_ft",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9628.0359,
+     "reference": 10658.144,
+     "ratio": 0.903,
+     "ratio_range": [
+      0.902,
+      0.904
+     ],
+     "bar": 1.0,
+     "verdict": "miss",
+     "predicted": null
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "cap_ft",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 77.0373,
+     "reference": 76.3428,
+     "ratio": 1.009,
+     "ratio_range": [
+      1.009,
+      1.01
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       0.97,
+       1.02,
+       1.06
+      ],
+      "after_3c_3d": [
+       0.989,
+       1.04,
+       1.081
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "FreeToken (auto)",
+     "reference_arm": "cap_ft",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4682.2364,
+     "reference": 5396.8792,
+     "ratio": 0.868,
+     "ratio_range": [
+      0.867,
+      0.868
+     ],
+     "bar": 1.0,
+     "verdict": "miss",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "cap_fit",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 122.9478,
+     "reference": 46.024,
+     "ratio": 2.671,
+     "ratio_range": [
+      2.613,
+      2.719
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.61,
+       2.61,
+       2.61
+      ],
+      "after_3c_3d": [
+       2.692,
+       2.692,
+       2.692
+      ]
+     },
+     "vs_band": "below"
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "cap_fit",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 3207.3965,
+     "reference": 732.124,
+     "ratio": 4.381,
+     "ratio_range": [
+      4.366,
+      4.39
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "cap_fit",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 106.8236,
+     "reference": 45.366,
+     "ratio": 2.355,
+     "ratio_range": [
+      2.341,
+      2.394
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.26,
+       2.26,
+       2.26
+      ],
+      "after_3c_3d": [
+       2.32,
+       2.32,
+       2.32
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "cap_fit",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9628.0359,
+     "reference": 665.599,
+     "ratio": 14.465,
+     "ratio_range": [
+      14.436,
+      14.474
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "cap_fit",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 77.0373,
+     "reference": 40.278,
+     "ratio": 1.913,
+     "ratio_range": [
+      1.908,
+      1.92
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.86,
+       1.95,
+       2.04
+      ],
+      "after_3c_3d": [
+       1.897,
+       1.989,
+       2.08
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "llama.cpp static split, --fit",
+     "reference_arm": "cap_fit",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4682.2364,
+     "reference": 678.764,
+     "ratio": 6.898,
+     "ratio_range": [
+      6.887,
+      6.904
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "cap_ncmoe36",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 122.9478,
+     "reference": 46.658,
+     "ratio": 2.635,
+     "ratio_range": [
+      2.628,
+      2.721
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.56,
+       2.56,
+       2.56
+      ],
+      "after_3c_3d": [
+       2.64,
+       2.64,
+       2.64
+      ]
+     },
+     "vs_band": "below"
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "cap_ncmoe36",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 3207.3965,
+     "reference": 705.941,
+     "ratio": 4.543,
+     "ratio_range": [
+      4.537,
+      4.557
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "cap_ncmoe36",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 106.8236,
+     "reference": 46.14,
+     "ratio": 2.315,
+     "ratio_range": [
+      2.304,
+      2.354
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.27,
+       2.27,
+       2.27
+      ],
+      "after_3c_3d": [
+       2.33,
+       2.33,
+       2.33
+      ]
+     },
+     "vs_band": "below"
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "cap_ncmoe36",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9628.0359,
+     "reference": 653.293,
+     "ratio": 14.738,
+     "ratio_range": [
+      14.7,
+      14.755
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "cap_ncmoe36",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 77.0373,
+     "reference": 40.389,
+     "ratio": 1.907,
+     "ratio_range": [
+      1.887,
+      1.929
+     ],
+     "bar": 1.5,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.83,
+       1.91,
+       2.0
+      ],
+      "after_3c_3d": [
+       1.866,
+       1.948,
+       2.04
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "llama.cpp static split, tuned --n-cpu-moe",
+     "reference_arm": "cap_ncmoe36",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4682.2364,
+     "reference": 660.104,
+     "ratio": 7.093,
+     "ratio_range": [
+      7.08,
+      7.098
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cap_cache",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 122.9478,
+     "reference": 54.409,
+     "ratio": 2.26,
+     "ratio_range": [
+      2.26,
+      2.278
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.22,
+       2.22,
+       2.22
+      ],
+      "after_3c_3d": [
+       2.289,
+       2.289,
+       2.289
+      ]
+     },
+     "vs_band": "below"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cap_cache",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 3207.3965,
+     "reference": 746.183,
+     "ratio": 4.298,
+     "ratio_range": [
+      4.29,
+      4.308
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cap_cache",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 106.8236,
+     "reference": 46.614,
+     "ratio": 2.292,
+     "ratio_range": [
+      2.289,
+      2.305
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       2.2,
+       2.2,
+       2.2
+      ],
+      "after_3c_3d": [
+       2.258,
+       2.258,
+       2.258
+      ]
+     },
+     "vs_band": "above"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cap_cache",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9628.0359,
+     "reference": 672.141,
+     "ratio": 14.324,
+     "ratio_range": [
+      14.301,
+      14.335
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cap_cache",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 77.0373,
+     "reference": 42.31,
+     "ratio": 1.821,
+     "ratio_range": [
+      1.817,
+      1.832
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.75,
+       1.83,
+       1.91
+      ],
+      "after_3c_3d": [
+       1.785,
+       1.866,
+       1.948
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, default (mmap)",
+     "reference_arm": "cap_cache",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4682.2364,
+     "reference": 676.508,
+     "ratio": 6.921,
+     "ratio_range": [
+      6.908,
+      6.93
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cap_cache_pinned",
+     "context": 1024,
+     "metric": "decode_tps",
+     "holon": 122.9478,
+     "reference": 100.544,
+     "ratio": 1.223,
+     "ratio_range": [
+      1.223,
+      1.224
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.15,
+       1.21,
+       1.28
+      ],
+      "after_3c_3d": [
+       1.186,
+       1.248,
+       1.32
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cap_cache_pinned",
+     "context": 1024,
+     "metric": "prefill_tps",
+     "holon": 3207.3965,
+     "reference": 1524.288,
+     "ratio": 2.104,
+     "ratio_range": [
+      2.102,
+      2.111
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cap_cache_pinned",
+     "context": 4096,
+     "metric": "decode_tps",
+     "holon": 106.8236,
+     "reference": 87.241,
+     "ratio": 1.224,
+     "ratio_range": [
+      1.224,
+      1.225
+     ],
+     "bar": 1.1,
+     "verdict": "pass",
+     "predicted": {
+      "written": [
+       1.12,
+       1.19,
+       1.26
+      ],
+      "after_3c_3d": [
+       1.15,
+       1.221,
+       1.293
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cap_cache_pinned",
+     "context": 4096,
+     "metric": "prefill_tps",
+     "holon": 9628.0359,
+     "reference": 1401.136,
+     "ratio": 6.872,
+     "ratio_range": [
+      6.867,
+      6.876
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cap_cache_pinned",
+     "context": 32768,
+     "metric": "decode_tps",
+     "holon": 77.0373,
+     "reference": 70.541,
+     "ratio": 1.092,
+     "ratio_range": [
+      1.092,
+      1.093
+     ],
+     "bar": 1.1,
+     "verdict": "miss",
+     "predicted": {
+      "written": [
+       1.06,
+       1.1,
+       1.15
+      ],
+      "after_3c_3d": [
+       1.081,
+       1.122,
+       1.173
+      ]
+     },
+     "vs_band": "inside"
+    },
+    {
+     "row": "llama.cpp --moe-cache-mib, pinned (--load-mode none)",
+     "reference_arm": "cap_cache_pinned",
+     "context": 32768,
+     "metric": "prefill_tps",
+     "holon": 4682.2364,
+     "reference": 1307.643,
+     "ratio": 3.581,
+     "ratio_range": [
+      3.577,
+      3.582
+     ],
+     "bar": 1.0,
+     "verdict": "pass",
+     "predicted": null
+    }
+   ]
+  }
+ },
+ "step8192_probe": {
+  "1024": {
+   "holon_nat": 4644.7614,
+   "holon_s8k": 4597.8737,
+   "gain": -0.0101,
+   "sd": 73.1427,
+   "beyond_2sd": false,
+   "n": [
+    3,
+    3
+   ]
+  },
+  "4096": {
+   "holon_nat": 9849.7966,
+   "holon_s8k": 9850.7994,
+   "gain": 0.0001,
+   "sd": 7.6177,
+   "beyond_2sd": false,
+   "n": [
+    3,
+    3
+   ]
+  },
+  "32768": {
+   "holon_nat": 4717.5915,
+   "holon_s8k": 4826.6751,
+   "gain": 0.0231,
+   "sd": 6.7128,
+   "beyond_2sd": true,
+   "n": [
+    3,
+    3
+   ]
+  },
+  "decode": {
+   "1024": {
+    "holon_nat": 238.1278,
+    "holon_s8k": 236.6685,
+    "gain": -0.0061,
+    "sd": 0.0942,
+    "beyond_2sd": true,
+    "n": [
+     3,
+     3
+    ]
+   },
+   "4096": {
+    "holon_nat": 193.7405,
+    "holon_s8k": 192.2845,
+    "gain": -0.0075,
+    "sd": 0.1197,
+    "beyond_2sd": true,
+    "n": [
+     3,
+     3
+    ]
+   },
+   "32768": {
+    "holon_nat": 118.9733,
+    "holon_s8k": 118.2956,
+    "gain": -0.0057,
+    "sd": 0.0186,
+    "beyond_2sd": true,
+    "n": [
+     3,
+     3
+    ]
+   }
+  }
+ },
+ "exactness": {
+  "lock_snapshot": {
+   "runs": 3,
+   "run_identical": true,
+   "steps": 2163,
+   "diffs": [
+    null,
+    null
+   ]
+  },
+  "placements": {
+   "adapt_0": {
+    "identical_to": "adapt_0",
+    "diff": null,
+    "cache": "gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610",
+    "policy": "placement.profile_decay@1",
+    "admissions": 0,
+    "swap_rounds": 16,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 3220,
+     "down.q6_k.2048x768": 1610,
+     "down.q4_k.2048x768": 1610
+    },
+    "borrowed": {
+     "ring": 0,
+     "stage": 0
+    },
+    "peak_misses": 60,
+    "parity_first_differing_step": null
+   },
+   "adapt_1": {
+    "identical_to": "adapt_0",
+    "diff": null,
+    "cache": "gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610",
+    "policy": "placement.profile_decay@1",
+    "admissions": 0,
+    "swap_rounds": 16,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 3220,
+     "down.q6_k.2048x768": 1610,
+     "down.q4_k.2048x768": 1610
+    },
+    "borrowed": {
+     "ring": 0,
+     "stage": 0
+    },
+    "peak_misses": 60,
+    "parity_first_differing_step": null
+   },
+   "adapt_2": {
+    "identical_to": "adapt_0",
+    "diff": null,
+    "cache": "gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610",
+    "policy": "placement.profile_decay@1",
+    "admissions": 0,
+    "swap_rounds": 16,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 3220,
+     "down.q6_k.2048x768": 1610,
+     "down.q4_k.2048x768": 1610
+    },
+    "borrowed": {
+     "ring": 0,
+     "stage": 0
+    },
+    "peak_misses": 60,
+    "parity_first_differing_step": null
+   },
+   "cap_0": {
+    "identical_to": "adapt_0",
+    "diff": null,
+    "cache": "*=0.25",
+    "policy": "placement.lfu@1",
+    "admissions": 2228,
+    "swap_rounds": null,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "borrowed": {
+     "ring": 1,
+     "stage": 0
+    },
+    "peak_misses": 90,
+    "parity_first_differing_step": null
+   },
+   "cap_1": {
+    "identical_to": "adapt_0",
+    "diff": null,
+    "cache": "*=0.25",
+    "policy": "placement.lfu@1",
+    "admissions": 2228,
+    "swap_rounds": null,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "borrowed": {
+     "ring": 1,
+     "stage": 0
+    },
+    "peak_misses": 90,
+    "parity_first_differing_step": null
+   },
+   "cap_2": {
+    "identical_to": "adapt_0",
+    "diff": null,
+    "cache": "*=0.25",
+    "policy": "placement.lfu@1",
+    "admissions": 2228,
+    "swap_rounds": null,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 1536,
+     "down.q6_k.2048x768": 768,
+     "down.q4_k.2048x768": 768
+    },
+    "borrowed": {
+     "ring": 1,
+     "stage": 0
+    },
+    "peak_misses": 90,
+    "parity_first_differing_step": null
+   },
+   "lru_0": {
+    "identical_to": "adapt_0",
+    "diff": null,
+    "cache": "gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610",
+    "policy": "placement.lru@1",
+    "admissions": 17423,
+    "swap_rounds": null,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 3220,
+     "down.q6_k.2048x768": 1610,
+     "down.q4_k.2048x768": 1610
+    },
+    "borrowed": {
+     "ring": 1,
+     "stage": 0
+    },
+    "peak_misses": 60,
+    "parity_first_differing_step": null
+   },
+   "lru_1": {
+    "identical_to": "adapt_0",
+    "diff": null,
+    "cache": "gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610",
+    "policy": "placement.lru@1",
+    "admissions": 17423,
+    "swap_rounds": null,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 3220,
+     "down.q6_k.2048x768": 1610,
+     "down.q4_k.2048x768": 1610
+    },
+    "borrowed": {
+     "ring": 1,
+     "stage": 0
+    },
+    "peak_misses": 60,
+    "parity_first_differing_step": null
+   },
+   "lru_2": {
+    "identical_to": "adapt_0",
+    "diff": null,
+    "cache": "gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610",
+    "policy": "placement.lru@1",
+    "admissions": 17423,
+    "swap_rounds": null,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 3220,
+     "down.q6_k.2048x768": 1610,
+     "down.q4_k.2048x768": 1610
+    },
+    "borrowed": {
+     "ring": 1,
+     "stage": 0
+    },
+    "peak_misses": 60,
+    "parity_first_differing_step": null
+   },
+   "nat_0": {
+    "identical_to": "adapt_0",
+    "diff": null,
+    "cache": "gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610",
+    "policy": "placement.lfu@1",
+    "admissions": 3664,
+    "swap_rounds": null,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 3220,
+     "down.q6_k.2048x768": 1610,
+     "down.q4_k.2048x768": 1610
+    },
+    "borrowed": {
+     "ring": 1,
+     "stage": 0
+    },
+    "peak_misses": 60,
+    "parity_first_differing_step": null
+   },
+   "nat_1": {
+    "identical_to": "adapt_0",
+    "diff": null,
+    "cache": "gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610",
+    "policy": "placement.lfu@1",
+    "admissions": 3664,
+    "swap_rounds": null,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 3220,
+     "down.q6_k.2048x768": 1610,
+     "down.q4_k.2048x768": 1610
+    },
+    "borrowed": {
+     "ring": 1,
+     "stage": 0
+    },
+    "peak_misses": 60,
+    "parity_first_differing_step": null
+   },
+   "nat_2": {
+    "identical_to": "adapt_0",
+    "diff": null,
+    "cache": "gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610",
+    "policy": "placement.lfu@1",
+    "admissions": 3664,
+    "swap_rounds": null,
+    "cached_per_class": {
+     "gate_up.q4_k.1536x2048": 3220,
+     "down.q6_k.2048x768": 1610,
+     "down.q4_k.2048x768": 1610
+    },
+    "borrowed": {
+     "ring": 1,
+     "stage": 0
+    },
+    "peak_misses": 60,
+    "parity_first_differing_step": null
+   }
+  },
+  "all_identical": true
+ },
+ "followups": {
+  "pinned_fill": {
+   "rtx-5080": {
+    "fill": {
+     "pin": "gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618",
+     "cached_share": 0.5267,
+     "cached_experts": 3236,
+     "state_kv_pages": 2113
+    },
+    "pinned_as_is": {
+     "pin": "gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618",
+     "cached_share": 0.5267,
+     "cached_experts": 3236,
+     "state_kv_pages": 2113
+    },
+    "before_the_fix": "OutOfUnits: memory budget 11.747 GiB too small: state.kv (2101 < 2113 units)"
+   },
+   "rtx-a5000": {
+    "fill_pin": "gate_up.q4_k.1536x2048=6004,down.q6_k.2048x768=3003,down.q4_k.2048x768=3001",
+    "note": "pinned as-is starts before and after the fix on this card (state.kv 2,113 both)"
+   },
+   "lock_regenerated": {
+    "cache": "gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618",
+    "verdict_log": [
+     "verdict: approve",
+     "overall     32783  98.264%    99.084%  1.80e-04  5.38e-02  3.57e+00  +0.119% \u00b1 0.093%   4.02%",
+     "floor       32783  98.219%    99.056%  1.81e-04  5.88e-02  4.76e+00  +0.162% \u00b1 0.096%   4.05%",
+     "vs floor                                                             -0.042% \u00b1 0.091%",
+     "budget            \u226597.969%            \u22643.63e-04 \u22641.18e-01                     \u22640.479%",
+     "PASS"
+    ],
+    "snapshot": {
+     "runs": 3,
+     "run_identical": true,
+     "steps": 2163
+    }
+   },
+   "ab_3220_vs_3236_rtx-5080_2_rounds": {
+    "holon_nat": {
+     "1024": {
+      "decode_tps": 236.1522,
+      "prefill_tps": 4659.4926
+     },
+     "4096": {
+      "decode_tps": 192.37574999999998,
+      "prefill_tps": 9841.4032
+     },
+     "32768": {
+      "decode_tps": 118.35050000000001,
+      "prefill_tps": 4716.42345
+     }
+    },
+    "holon_nat3236": {
+     "1024": {
+      "decode_tps": 236.6603,
+      "prefill_tps": 4690.75465
+     },
+     "4096": {
+      "decode_tps": 193.186,
+      "prefill_tps": 9852.51135
+     },
+     "32768": {
+      "decode_tps": 118.54124999999999,
+      "prefill_tps": 4714.37895
+     }
+    }
+   }
+  },
+  "miss_bytes": {
+   "counter": "ctx.py counted a step's misses against the request's last map (right for static only); now against the map the step ran with",
+   "a5000_4k_25pct": {
+    "cache": "*=0.25",
+    "profile": "profile_x4_gate.json",
+    "placement": "placement.lfu@1",
+    "context": 4096,
+    "cached_experts": {
+     "seed": 1536,
+     "before_prompt": 1536,
+     "after_prompt": 1082,
+     "quota": 1536
+    },
+    "prompt_steps": 1,
+    "empty_after_prompt": 454,
+    "lent_of_before": 454,
+    "decode_steps": 255,
+    "routed_per_token": 384.0,
+    "true_miss_mb_per_token": 214.5,
+    "end_residency_miss_mb_per_token": 330.7,
+    "true_by_quarter": [
+     283.5,
+     151.9,
+     182.4,
+     240.6
+    ],
+    "admissions_per_token": 63.8,
+    "replay_lfu_from_decode_start": {
+     "hit_rate": 0.7095,
+     "miss_mb_per_token": 321.4
+    },
+    "replay_lfu_from_before_prompt": {
+     "hit_rate": 0.8136,
+     "miss_mb_per_token": 206.9
+    },
+    "replay_lfu_from_seed": {
+     "hit_rate": 0.8135,
+     "miss_mb_per_token": 207.0
+    }
+   },
+   "a5000_ctx_corrected": {
+    "25%": {
+     "1024": {
+      "prefill_tps": 928.6347,
+      "decode_tps": 58.1344,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 53.8588,
+      "hit_rate": 0.8597,
+      "miss_mb_per_token": 156.3453
+     },
+     "4096": {
+      "prefill_tps": 3499.6158,
+      "decode_tps": 45.1527,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 74.5686,
+      "hit_rate": 0.8058,
+      "miss_mb_per_token": 215.4543
+     },
+     "32768": {
+      "prefill_tps": 2897.4002,
+      "decode_tps": 37.6171,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 76.2235,
+      "hit_rate": 0.8015,
+      "miss_mb_per_token": 220.6339
+     }
+    },
+    "natural": {
+     "1024": {
+      "prefill_tps": 1428.991,
+      "decode_tps": 152.5923,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 5.1882,
+      "hit_rate": 0.9865,
+      "miss_mb_per_token": 15.054
+     },
+     "4096": {
+      "prefill_tps": 5230.2341,
+      "decode_tps": 100.7401,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 18.8549,
+      "hit_rate": 0.9509,
+      "miss_mb_per_token": 54.4275
+     },
+     "32768": {
+      "prefill_tps": 3132.9868,
+      "decode_tps": 75.4811,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 15.4314,
+      "hit_rate": 0.9598,
+      "miss_mb_per_token": 44.5774
+     }
+    },
+    "25%_4k_only": {
+     "4096": {
+      "prefill_tps": 3527.3435,
+      "decode_tps": 45.2318,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 74.2431,
+      "hit_rate": 0.8067,
+      "miss_mb_per_token": 214.5077
+     }
+    }
+   },
+   "rtx-5080_ctx_corrected": {
+    "natural": {
+     "1024": {
+      "prefill_tps": 4654.1761,
+      "decode_tps": 236.3254,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 6.4667,
+      "hit_rate": 0.9832,
+      "miss_mb_per_token": 18.7557
+     },
+     "4096": {
+      "prefill_tps": 9852.5238,
+      "decode_tps": 192.5373,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 14.6549,
+      "hit_rate": 0.9618,
+      "miss_mb_per_token": 42.402
+     },
+     "32768": {
+      "prefill_tps": 4727.7779,
+      "decode_tps": 118.4393,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 14.9451,
+      "hit_rate": 0.9611,
+      "miss_mb_per_token": 43.1865
+     }
+    },
+    "25%": {
+     "1024": {
+      "prefill_tps": 3218.0276,
+      "decode_tps": 122.4138,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 58.4549,
+      "hit_rate": 0.8478,
+      "miss_mb_per_token": 169.7687
+     },
+     "4096": {
+      "prefill_tps": 9627.7489,
+      "decode_tps": 106.5172,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 70.5529,
+      "hit_rate": 0.8163,
+      "miss_mb_per_token": 204.5764
+     },
+     "32768": {
+      "prefill_tps": 4681.6255,
+      "decode_tps": 76.8343,
+      "decode_steps": 255,
+      "routed_per_token": 384.0,
+      "misses_per_token": 76.2078,
+      "hit_rate": 0.8015,
+      "miss_mb_per_token": 220.6352
+     }
+    }
+   }
+  }
+ },
+ "arms": {
+  "tune": [
+   {
+    "name": "holon_sm",
+    "engine": "holon",
+    "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610 moe.placement=placement.lfu@1 moe.ring_copy=sm"
+   },
+   {
+    "name": "holon_dma",
+    "engine": "holon",
+    "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610 moe.placement=placement.lfu@1 moe.ring_copy=dma"
+   },
+   {
+    "name": "holon_sm_prof",
+    "engine": "holon",
+    "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610 moe.placement=placement.lfu@1 moe.ring_copy=sm moe.placement.profile=profile_x4_gate.json"
+   },
+   {
+    "name": "holon_lru",
+    "engine": "holon",
+    "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610 moe.placement=placement.lru@1 moe.ring_copy=sm"
+   }
+  ],
+  "natural": [
+   {
+    "name": "holon_nat",
+    "engine": "holon",
+    "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.cache=gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610 moe.ring_copy=dma --kernels attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_router=kernels.ggml_cuda moe_combine=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda add_rmsnorm=kernels.flashinfer rmsnorm=kernels.flashinfer rope=kernels.flashinfer expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io moe_resolve.lfu=kernels.expert_io"
+   },
+   {
+    "name": "llama_fit",
+    "engine": "llama",
+    "flags": " -lv 4"
+   },
+   {
+    "name": "llama_ncmoe16",
+    "engine": "llama",
+    "flags": "--n-cpu-moe 16 -lv 4"
+   },
+   {
+    "name": "cache_nat",
+    "engine": "llama",
+    "flags": "-cmoe --moe-cache-mib 8773 -lv 4"
+   },
+   {
+    "name": "cache_nat_pinned",
+    "engine": "llama",
+    "flags": "-cmoe --moe-cache-mib 8773 --load-mode none -lv 4"
+   },
+   {
+    "name": "ft_nat",
+    "engine": "freetoken",
+    "flags": "--moe-cache-rate 0.524"
+   },
+   {
+    "name": "holon_47",
+    "engine": "holon",
+    "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.cache=*=0.47 moe.ring_copy=dma --kernels attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_router=kernels.ggml_cuda moe_combine=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda add_rmsnorm=kernels.flashinfer rmsnorm=kernels.flashinfer rope=kernels.flashinfer expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io moe_resolve.lfu=kernels.expert_io"
+   },
+   {
+    "name": "cache_47",
+    "engine": "llama",
+    "flags": "-cmoe --moe-cache-mib 7900 -lv 4"
+   },
+   {
+    "name": "cache_47_pinned",
+    "engine": "llama",
+    "flags": "-cmoe --moe-cache-mib 7900 --load-mode none -lv 4"
+   },
+   {
+    "name": "ft_47",
+    "engine": "freetoken",
+    "flags": "--moe-cache-rate 0.470"
+   }
+  ],
+  "capped": [
+   {
+    "name": "holon_25",
+    "engine": "holon",
+    "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.cache=*=0.25 moe.ring_copy=dma --kernels attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_router=kernels.ggml_cuda moe_combine=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda add_rmsnorm=kernels.flashinfer rmsnorm=kernels.flashinfer rope=kernels.flashinfer expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io moe_resolve.lfu=kernels.expert_io"
+   },
+   {
+    "name": "cap_fit",
+    "engine": "llama",
+    "flags": "-fitt 7150 -lv 4"
+   },
+   {
+    "name": "cap_ncmoe36",
+    "engine": "llama",
+    "flags": "--n-cpu-moe 36 -lv 4"
+   },
+   {
+    "name": "cap_cache",
+    "engine": "llama",
+    "flags": "-cmoe --moe-cache-mib 4200 -lv 4"
+   },
+   {
+    "name": "cap_cache_pinned",
+    "engine": "llama",
+    "flags": "-cmoe --moe-cache-mib 4200 --load-mode none -lv 4"
+   },
+   {
+    "name": "cap_ft",
+    "engine": "freetoken",
+    "flags": "--moe-cache-rate 0.250"
+   }
+  ],
+  "step8k": [
+   {
+    "name": "holon_nat",
+    "engine": "holon",
+    "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.cache=gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610 moe.ring_copy=dma --kernels attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_router=kernels.ggml_cuda moe_combine=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda add_rmsnorm=kernels.flashinfer rmsnorm=kernels.flashinfer rope=kernels.flashinfer expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io moe_resolve.lfu=kernels.expert_io"
+   },
+   {
+    "name": "holon_s8k",
+    "engine": "holon",
+    "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.cache=gate_up.q4_k.1536x2048=3184,down.q6_k.2048x768=1590,down.q4_k.2048x768=1594 moe.ring_copy=dma --kernels attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_router=kernels.ggml_cuda moe_combine=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda add_rmsnorm=kernels.flashinfer rmsnorm=kernels.flashinfer rope=kernels.flashinfer expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io moe_resolve.lfu=kernels.expert_io --max-step-tokens 8192"
+   }
+  ]
+ }
+}

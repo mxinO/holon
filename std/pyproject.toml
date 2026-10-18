@@ -12,6 +12,7 @@ dependencies = ["holonlm", "gguf>=0.17", "safetensors>=0.5", "huggingface-hub>=1
 "std.blocks" = "holon_std.blocks"
 "std.ffn" = "holon_std.ffn"
 "std.moe" = "holon_std.moe"
+"std.tiered" = "holon_std.tiered"
 "std.mixers.gqa" = "holon_std.mixers.gqa"
 "std.mixers.gdn" = "holon_std.mixers.gdn"
 "std.state.paged" = "holon_std.state.paged"

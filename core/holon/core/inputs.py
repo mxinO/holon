@@ -26,7 +26,8 @@ class Uploader:
         """`fields`: name -> (maximum length, dtype)."""
         self._layout: dict[str, tuple[int, int, torch.dtype]] = {}       # name -> (byte offset, length, dtype)
         size = 0
-        for name, (n, dtype) in fields.items():
+        # Smallest first, so a small step's inputs lie together: its written ranges merge into one copy.
+        for name, (n, dtype) in sorted(fields.items(), key=lambda f: f[1][0] * f[1][1].itemsize):
             self._layout[name] = (size, n, dtype)
             size += -(-n * dtype.itemsize // _ALIGN) * _ALIGN
         self._device_arena = torch.zeros(size, dtype=torch.uint8, device=device)
@@ -84,3 +85,32 @@ def _merged(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
         else:
             out.append([lo, hi])
     return [(lo, hi) for lo, hi in out]
+
+
+class Writes:
+    """Device writes handed in at launch (`before_launch`: `(dst, values)` pairs, `dst` of a dtype numpy holds), staged
+    through two alternating pinned host buffers that grow to the largest launch's writes, so the launch never waits for
+    the device."""
+
+    def __init__(self, device: torch.device) -> None:
+        self.device = device
+        self._host: list[torch.Tensor | None] = [None, None]
+        self._done = [platform.Event(device), platform.Event(device)]
+        self._turn = 0
+
+    def run(self, writes: list[tuple[torch.Tensor, np.ndarray]]) -> None:
+        if not writes:
+            return
+        self._turn ^= 1
+        self._done[self._turn].synchronize()
+        sizes = [-(-dst.numel() * dst.element_size() // _ALIGN) * _ALIGN for dst, _ in writes]
+        host = self._host[self._turn]
+        if host is None or host.numel() < sum(sizes):
+            host = self._host[self._turn] = platform.pinned_empty(sum(sizes), torch.uint8, self.device)
+        at = 0
+        for (dst, values), size in zip(writes, sizes, strict=True):
+            staged = host[at: at + dst.numel() * dst.element_size()].view(dst.dtype).view(dst.shape)
+            staged.numpy()[...] = values
+            dst.copy_(staged, non_blocking=True)
+            at += size
+        self._done[self._turn].record()

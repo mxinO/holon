@@ -6,7 +6,7 @@ A model is primarily a pure function `recipe(cfg, source) -> ModelSpec` that com
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from .terms import Ref
 
@@ -109,9 +109,25 @@ class BuildCtx(Protocol):
         """Kernel scratch memory, accounted by the ledger (design §5.6 rule 1)."""
 
     def pool(self, name: str, *, unit_bytes: int, segments: int = 1, min_units: int = 0,
-             pref_units: int = 0) -> Pool:
+             pref_units: int = 0, device: Literal["device", "host"] = "device", mapped: bool = False,
+             fill: bool = False, priority: int = 0) -> Pool:
         """A plugin's own pool of units, sized by the ledger with the fixed pools (design §6.1): `pref_units` when
-        the budget allows, else `min_units`."""
+        the budget allows, else `min_units`.
+
+        `fill`: sized after a floor of paged state (`EngineConfig.paged_min_tokens`) instead, higher `priority` first,
+        up to `pref_units`; paged state takes the rest. `device="host"`: page-locked host memory of exactly its bytes,
+        allocated at once and kept for the engine's lifetime, within `EngineConfig.host_memory` (as many units between
+        `min_units` and `pref_units` as it allows); request it at the latest in `before_materialize`
+        (`hooks.RequestsPools`).
+        `mapped`: device kernels may also read and write it in place (`Pool.device_view`). MemOps copy units between
+        host and device pools (`MemOp.after`, `lands_by`)."""
+
+    def shared(self, key: str, factory: Callable[[BuildCtx], Any]) -> Any:
+        """One object per engine for `key` (by convention the provider's resource name, e.g. "cpu_task.worker"): the
+        first call builds it with `factory(ctx)`, where `ctx` is the engine's own context even when an auxiliary
+        model's units ask (so its pools are not namespaced); every later call returns it. The core calls the hooks it
+        defines: `RequestsPools`, `ResetsState`, `EditsBeforeLaunch`, `ObservesCommits`, `ShutsDown`
+        (`holon.api.hooks`)."""
 
     def aux_model(self, namespace: str, spec: AuxSpec, tensors: Iterable[tuple[str, torch.Tensor | QTensor]],
                   options: Mapping[str, Any] | None = None) -> torch.nn.Module:

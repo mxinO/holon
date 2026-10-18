@@ -192,7 +192,7 @@ def metrics(golden: Recording, cand: Recording) -> tuple[Metrics, dict[str, Metr
 
 _PROVENANCE = ("source", "model", "revision", "dtype", "device", "hardware", "threads", "prompts", "prompts_sha256",
                "weight_source", "max_step_tokens", "q8_1", "act", "kv", "moe_block", "experts", "calls", "head_calls",
-               "gpu_class")
+               "gpu_class", "cpu_split")
 
 
 def _provenance(rec: Recording) -> dict:
@@ -215,6 +215,9 @@ def _path_failures(floor: dict, cand: dict) -> list[str]:
     if floor.get("kv") != cand.get("kv"):
         return [f"the floor's KV format is {floor.get('kv') or 'the model dtype'}, the candidate's "
                 f"{cand.get('kv') or 'the model dtype'}"]
+    if floor.get("cpu_split") != cand.get("cpu_split"):     # F5b: the floor is path-aware for exactly that split
+        return [f"the floor's CPU split is {floor.get('cpu_split') or 'none'}, the candidate's "
+                f"{cand.get('cpu_split') or 'none'}"]
     if not floor.get("q8_1"):                    # A16: the floor quantizes no activations, so no call may either
         counted = [*(cand.get("calls") or {}).items(), *(cand.get("head_calls") or {}).items()]
         return [f"{n} calls on {k}, the floor quantizes no activations (bf16 only)" for k, n in counted

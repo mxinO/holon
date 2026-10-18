@@ -4,7 +4,8 @@ import random
 import numpy as np
 import pytest
 import torch
-from holon.api import SamplingParams, Seq, Status
+from holon.api import RowKind, SamplingParams, Seq, Status
+from holon.core.batching import padded
 from holon.core.memory import Ledger, OutOfUnits
 from holon.core.sched import Scheduler
 
@@ -59,6 +60,10 @@ def _run(sched: Scheduler, seqs: list[Seq], max_steps: int = 10_000) -> int:
         decoding = [seq.status is Status.RUNNING for seq in rows]
         n, chunk = plan.n_decode, int(plan.n_query[plan.n_decode:].sum())
         assert decoding == [True] * n + [False] * (len(rows) - n) or (not n and all(decoding)), step
+        kinds = [RowKind.PREFILL if not d else RowKind.VERIFY if q > 1 else RowKind.DECODE
+                 for d, q in zip(decoding, plan.n_query, strict=True)]
+        assert plan.row_kind.tolist() == kinds, step                        # every step, mixed or not
+        assert padded(plan, len(rows) + 2, 0).row_kind.tolist() == kinds + [RowKind.PADDING] * 2   # graph padding
         assert int(plan.n_query.sum()) <= max(sched.max_step_tokens, len(rows) if all(decoding) else 0)
         assert (n > 0) == (0 < n < len(rows)) and (not n or (cap and not drafting))
         if not cap:

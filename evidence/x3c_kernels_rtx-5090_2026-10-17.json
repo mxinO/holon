@@ -1,0 +1,767 @@
+{
+ "gpu": "rtx-5090",
+ "date": "2026-10-17",
+ "model": "unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf",
+ "commit": "3015a3c",
+ "method": "spikes/x3c_kernels/ab.py: one engine per deployment, the changes switched in process (each arm's graphs captured again), graphed decode at batch 1 by per-step wall after a prompt of 1,024 and 4,096 tokens (and eager prefill of one prompt); a warm-up round, then ABBA rounds; a change's saving against the previous arm, its sd that of the per-round differences",
+ "ab": {
+  "resident": {
+   "engine_args": "",
+   "rounds": 8,
+   "steps": 256,
+   "times_ms": {
+    "base": [
+     {
+      "prefill_512": 39.976628999284,
+      "prefill_4096": 318.38976799917873,
+      "decode_1024": 2.6177298398408766,
+      "decode_4096": 2.8163180937497145
+     },
+     {
+      "prefill_512": 40.11655900103506,
+      "prefill_4096": 321.5836230010609,
+      "decode_1024": 2.623568835929291,
+      "decode_4096": 2.8228708046924567
+     },
+     {
+      "prefill_512": 40.34039699763525,
+      "prefill_4096": 336.39220799523173,
+      "decode_1024": 2.6231601679569394,
+      "decode_4096": 2.823248730464911
+     },
+     {
+      "prefill_512": 40.48028599936515,
+      "prefill_4096": 337.72346199839376,
+      "decode_1024": 2.6264592148663723,
+      "decode_4096": 2.823347796862663
+     },
+     {
+      "prefill_512": 40.52284600038547,
+      "prefill_4096": 336.6569870049716,
+      "decode_1024": 2.623717472658882,
+      "decode_4096": 2.8236849062466263
+     },
+     {
+      "prefill_512": 40.51097400224535,
+      "prefill_4096": 341.3033090037061,
+      "decode_1024": 2.623874132837045,
+      "decode_4096": 2.82571046875546
+     },
+     {
+      "prefill_512": 40.387134002230596,
+      "prefill_4096": 339.77025599597255,
+      "decode_1024": 2.6259407578095306,
+      "decode_4096": 2.825342378883988
+     },
+     {
+      "prefill_512": 40.53728299913928,
+      "prefill_4096": 351.06057899974985,
+      "decode_1024": 2.6265563398339964,
+      "decode_4096": 2.8260472929844127
+     }
+    ],
+    "residual": [
+     {
+      "prefill_512": 39.76111899828538,
+      "prefill_4096": 318.6827070021536,
+      "decode_1024": 2.587963230467949,
+      "decode_4096": 2.782521039051744
+     },
+     {
+      "prefill_512": 39.974879000510555,
+      "prefill_4096": 320.06180100142956,
+      "decode_1024": 2.592152117188107,
+      "decode_4096": 2.7881218320544576
+     },
+     {
+      "prefill_512": 40.24104800191708,
+      "prefill_4096": 330.0630700032343,
+      "decode_1024": 2.595490699206948,
+      "decode_4096": 2.790366667966282
+     },
+     {
+      "prefill_512": 40.46658700099215,
+      "prefill_4096": 335.1371349999681,
+      "decode_1024": 2.5946215234284864,
+      "decode_4096": 2.79071667188191
+     },
+     {
+      "prefill_512": 40.43853600160219,
+      "prefill_4096": 341.47990299970843,
+      "decode_1024": 2.59292907421127,
+      "decode_4096": 2.7891792968830487
+     },
+     {
+      "prefill_512": 40.43948699836619,
+      "prefill_4096": 341.36393399967346,
+      "decode_1024": 2.5957070859305986,
+      "decode_4096": 2.791932898446703
+     },
+     {
+      "prefill_512": 40.38446400227258,
+      "prefill_4096": 344.2486040003132,
+      "decode_1024": 2.593348714867716,
+      "decode_4096": 2.7909140156339163
+     },
+     {
+      "prefill_512": 40.46725300577236,
+      "prefill_4096": 340.20246899308404,
+      "decode_1024": 2.595374929683203,
+      "decode_4096": 2.7906393789010053
+     }
+    ],
+    "router": [
+     {
+      "prefill_512": 39.930718994583,
+      "prefill_4096": 319.00204499834217,
+      "decode_1024": 2.450931496099429,
+      "decode_4096": 2.6426776015568976
+     },
+     {
+      "prefill_512": 40.26764800073579,
+      "prefill_4096": 319.7364919979009,
+      "decode_1024": 2.4550524570372545,
+      "decode_4096": 2.646725164055397
+     },
+     {
+      "prefill_512": 40.44718600198394,
+      "prefill_4096": 338.8854450022336,
+      "decode_1024": 2.457910648416828,
+      "decode_4096": 2.649922570299168
+     },
+     {
+      "prefill_512": 40.52324600343127,
+      "prefill_4096": 340.328568003315,
+      "decode_1024": 2.4585877929723665,
+      "decode_4096": 2.65101733202755
+     },
+     {
+      "prefill_512": 40.46006599674001,
+      "prefill_4096": 340.1921799959382,
+      "decode_1024": 2.455733710945651,
+      "decode_4096": 2.6495151953156437
+     },
+     {
+      "prefill_512": 40.474397006619256,
+      "prefill_4096": 337.75616200000513,
+      "decode_1024": 2.4558512890564543,
+      "decode_4096": 2.6494055507839676
+     },
+     {
+      "prefill_512": 40.477362999808975,
+      "prefill_4096": 339.1943370006629,
+      "decode_1024": 2.4583507812678818,
+      "decode_4096": 2.6503309492227345
+     },
+     {
+      "prefill_512": 40.517633002309594,
+      "prefill_4096": 341.2989450007444,
+      "decode_1024": 2.458384550777737,
+      "decode_4096": 2.6498272187609473
+     }
+    ],
+    "prepare": [
+     {
+      "prefill_512": 39.91713999857893,
+      "prefill_4096": 319.3141329975333,
+      "decode_1024": 2.413718601559367,
+      "decode_4096": 2.606107671880409
+     },
+     {
+      "prefill_512": 40.223506999609526,
+      "prefill_4096": 319.534273003228,
+      "decode_1024": 2.413808093734815,
+      "decode_4096": 2.6070644648541474
+     },
+     {
+      "prefill_512": 40.44770600012271,
+      "prefill_4096": 333.2223649995285,
+      "decode_1024": 2.419090609379282,
+      "decode_4096": 2.611043433574878
+     },
+     {
+      "prefill_512": 40.4646370006958,
+      "prefill_4096": 338.8234960002592,
+      "decode_1024": 2.4195382617051564,
+      "decode_4096": 2.6113268671963397
+     },
+     {
+      "prefill_512": 40.49035599746276,
+      "prefill_4096": 343.9325309955166,
+      "decode_1024": 2.41823331251112,
+      "decode_4096": 2.6116596093572753
+     },
+     {
+      "prefill_512": 40.463746001478285,
+      "prefill_4096": 344.82406600000104,
+      "decode_1024": 2.4173989023381637,
+      "decode_4096": 2.611619218754413
+     },
+     {
+      "prefill_512": 40.51271299977088,
+      "prefill_4096": 341.51954400294926,
+      "decode_1024": 2.419686027366197,
+      "decode_4096": 2.612721929693862
+     },
+     {
+      "prefill_512": 40.53796300286194,
+      "prefill_4096": 341.5239840032882,
+      "decode_1024": 2.420042464848393,
+      "decode_4096": 2.6116807226514993
+     }
+    ]
+   }
+  },
+  "offload-0.47": {
+   "engine_args": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=*=0.47",
+   "rounds": 8,
+   "steps": 256,
+   "times_ms": {
+    "base": [
+     {
+      "decode_1024": 2.9417073749868905,
+      "decode_4096": 3.136224906256757
+     },
+     {
+      "decode_1024": 2.944709070305862,
+      "decode_4096": 3.134836039066613
+     },
+     {
+      "decode_1024": 2.9450518359226407,
+      "decode_4096": 3.135662281238183
+     },
+     {
+      "decode_1024": 2.945995496077103,
+      "decode_4096": 3.1398402617242027
+     },
+     {
+      "decode_1024": 2.9459552617083773,
+      "decode_4096": 3.138928152338849
+     },
+     {
+      "decode_1024": 2.951718621091004,
+      "decode_4096": 3.142183597674375
+     },
+     {
+      "decode_1024": 2.9515152617136664,
+      "decode_4096": 3.142350507800984
+     },
+     {
+      "decode_1024": 2.9520024374960485,
+      "decode_4096": 3.1430740117173173
+     }
+    ],
+    "residual": [
+     {
+      "decode_1024": 2.910436703132291,
+      "decode_4096": 3.1023221015686886
+     },
+     {
+      "decode_1024": 2.913194222657012,
+      "decode_4096": 3.1027565078147745
+     },
+     {
+      "decode_1024": 2.912800468777732,
+      "decode_4096": 3.1034763007937727
+     },
+     {
+      "decode_1024": 2.9152265468610494,
+      "decode_4096": 3.1077794374994028
+     },
+     {
+      "decode_1024": 2.9160109140491386,
+      "decode_4096": 3.1075825234267995
+     },
+     {
+      "decode_1024": 2.9195299882758263,
+      "decode_4096": 3.109698601576838
+     },
+     {
+      "decode_1024": 2.919424207021848,
+      "decode_4096": 3.1093121093590526
+     },
+     {
+      "decode_1024": 2.920921890648742,
+      "decode_4096": 3.109983117184356
+     }
+    ],
+    "router": [
+     {
+      "decode_1024": 2.7522971562632392,
+      "decode_4096": 2.943540640643505
+     },
+     {
+      "decode_1024": 2.7547355664125917,
+      "decode_4096": 2.9429473984521337
+     },
+     {
+      "decode_1024": 2.754149402363737,
+      "decode_4096": 2.94425113673924
+     },
+     {
+      "decode_1024": 2.7554348203011614,
+      "decode_4096": 2.947036078126075
+     },
+     {
+      "decode_1024": 2.7578224570277143,
+      "decode_4096": 2.949300359375684
+     },
+     {
+      "decode_1024": 2.7586596406479202,
+      "decode_4096": 2.948797308590656
+     },
+     {
+      "decode_1024": 2.7602324765609865,
+      "decode_4096": 2.9498294101415468
+     },
+     {
+      "decode_1024": 2.7612346952992084,
+      "decode_4096": 2.9493127656223805
+     }
+    ],
+    "prepare": [
+     {
+      "decode_1024": 2.730323625002029,
+      "decode_4096": 2.9190166992236755
+     },
+     {
+      "decode_1024": 2.7305894062408242,
+      "decode_4096": 2.919344585933459
+     },
+     {
+      "decode_1024": 2.7304138125145982,
+      "decode_4096": 2.9209469882687245
+     },
+     {
+      "decode_1024": 2.7312500937455297,
+      "decode_4096": 2.9239504882809797
+     },
+     {
+      "decode_1024": 2.7342328828012796,
+      "decode_4096": 2.925685546870227
+     },
+     {
+      "decode_1024": 2.7347601835856494,
+      "decode_4096": 2.9255267617145364
+     },
+     {
+      "decode_1024": 2.736768761735675,
+      "decode_4096": 2.925836550787153
+     },
+     {
+      "decode_1024": 2.7369106757646477,
+      "decode_4096": 2.9259033476591867
+     }
+    ]
+   }
+  }
+ },
+ "changes": {
+  "residual": {
+   "what": "the layer's residual add in the MoE combine's kernel (moe_combine@1's add)",
+   "class": "bitwise",
+   "rows": {
+    "resident/prefill_512": {
+     "ms": 0.0873,
+     "pct": 0.217,
+     "sd_pct": 0.171,
+     "median_ms": {
+      "before": 40.4337,
+      "after": 40.4115
+     }
+    },
+    "resident/prefill_4096": {
+     "ms": 1.4551,
+     "pct": 0.419,
+     "sd_pct": 1.526,
+     "median_ms": {
+      "before": 337.1902,
+      "after": 337.6698
+     }
+    },
+    "resident/decode_1024": {
+     "ms": 0.0304,
+     "pct": 1.16,
+     "sd_pct": 0.066,
+     "median_ms": {
+      "before": 2.6238,
+      "after": 2.594
+     }
+    },
+    "resident/decode_4096": {
+     "ms": 0.034,
+     "pct": 1.205,
+     "sd_pct": 0.033,
+     "median_ms": {
+      "before": 2.8235,
+      "after": 2.7905
+     }
+    },
+    "offload-0.47/decode_1024": {
+     "ms": 0.0314,
+     "pct": 1.065,
+     "sd_pct": 0.027,
+     "median_ms": {
+      "before": 2.946,
+      "after": 2.9156
+     }
+    },
+    "offload-0.47/decode_4096": {
+     "ms": 0.0325,
+     "pct": 1.036,
+     "sd_pct": 0.025,
+     "median_ms": {
+      "before": 3.1394,
+      "after": 3.1077
+     }
+    }
+   },
+   "verdict": {
+    "passes_on": [
+     "resident/decode_1024",
+     "resident/decode_4096",
+     "offload-0.47/decode_1024",
+     "offload-0.47/decode_4096"
+    ],
+    "pays": true
+   }
+  },
+  "router": {
+   "what": "moe_router@1: the router GEMV from bf16 and the softmax top-k in one launch (decode / verify)",
+   "class": "bounded",
+   "rows": {
+    "resident/prefill_512": {
+     "ms": -0.1156,
+     "pct": -0.288,
+     "sd_pct": 0.243,
+     "median_ms": {
+      "before": 40.4115,
+      "after": 40.4672
+     }
+    },
+    "resident/prefill_4096": {
+     "ms": -0.6443,
+     "pct": -0.205,
+     "sd_pct": 1.349,
+     "median_ms": {
+      "before": 337.6698,
+      "after": 339.0399
+     }
+    },
+    "resident/decode_1024": {
+     "ms": 0.1371,
+     "pct": 5.286,
+     "sd_pct": 0.052,
+     "median_ms": {
+      "before": 2.594,
+      "after": 2.4569
+     }
+    },
+    "resident/decode_4096": {
+     "ms": 0.1406,
+     "pct": 5.041,
+     "sd_pct": 0.033,
+     "median_ms": {
+      "before": 2.7905,
+      "after": 2.6497
+     }
+    },
+    "offload-0.47/decode_1024": {
+     "ms": 0.1591,
+     "pct": 5.457,
+     "sd_pct": 0.028,
+     "median_ms": {
+      "before": 2.9156,
+      "after": 2.7566
+     }
+    },
+    "offload-0.47/decode_4096": {
+     "ms": 0.1597,
+     "pct": 5.142,
+     "sd_pct": 0.029,
+     "median_ms": {
+      "before": 3.1077,
+      "after": 2.9479
+     }
+    }
+   },
+   "verdict": {
+    "passes_on": [
+     "resident/decode_1024",
+     "resident/decode_4096",
+     "offload-0.47/decode_1024",
+     "offload-0.47/decode_4096"
+    ],
+    "pays": true
+   }
+  },
+  "prepare": {
+   "what": "the router's launch writes the gate/up input's q8_1 (route_prepare): no quantize launch",
+   "class": "bitwise",
+   "rows": {
+    "resident/prefill_512": {
+     "ms": 0.0051,
+     "pct": 0.013,
+     "sd_pct": 0.084,
+     "median_ms": {
+      "before": 40.4672,
+      "after": 40.4642
+     }
+    },
+    "resident/prefill_4096": {
+     "ms": -0.7875,
+     "pct": -0.233,
+     "sd_pct": 1.11,
+     "median_ms": {
+      "before": 339.0399,
+      "after": 340.1715
+     }
+    },
+    "resident/decode_1024": {
+     "ms": 0.0387,
+     "pct": 1.574,
+     "sd_pct": 0.049,
+     "median_ms": {
+      "before": 2.4569,
+      "after": 2.4187
+     }
+    },
+    "resident/decode_4096": {
+     "ms": 0.0383,
+     "pct": 1.445,
+     "sd_pct": 0.04,
+     "median_ms": {
+      "before": 2.6497,
+      "after": 2.6115
+     }
+    },
+    "offload-0.47/decode_1024": {
+     "ms": 0.0237,
+     "pct": 0.858,
+     "sd_pct": 0.027,
+     "median_ms": {
+      "before": 2.7566,
+      "after": 2.7327
+     }
+    },
+    "offload-0.47/decode_4096": {
+     "ms": 0.0236,
+     "pct": 0.801,
+     "sd_pct": 0.016,
+     "median_ms": {
+      "before": 2.9479,
+      "after": 2.9247
+     }
+    }
+   },
+   "verdict": {
+    "passes_on": [
+     "resident/decode_1024",
+     "resident/decode_4096",
+     "offload-0.47/decode_1024",
+     "offload-0.47/decode_4096"
+    ],
+    "pays": true
+   }
+  }
+ },
+ "end_to_end": {
+  "resident": {
+   "tg128 @ d1024": {
+    "tok_s": {
+     "base": [
+      383.29,
+      383.46,
+      383.25,
+      383.41
+     ],
+     "final": [
+      413.26,
+      413.07,
+      413.32,
+      413.43
+     ]
+    },
+    "median_tok_s": {
+     "base": 383.35,
+     "final": 413.28999999999996
+    },
+    "speedup": 1.0781,
+    "ms_per_token_saved": 0.1888,
+    "sd_ms": 0.0013
+   },
+   "tg128 @ d4096": {
+    "tok_s": {
+     "base": [
+      357.22,
+      357.18,
+      356.95,
+      356.95
+     ],
+     "final": [
+      383.51,
+      383.11,
+      383.44,
+      383.59
+     ]
+    },
+    "median_tok_s": {
+     "base": 357.065,
+     "final": 383.475
+    },
+    "speedup": 1.074,
+    "ms_per_token_saved": 0.1924,
+    "sd_ms": 0.0022
+   }
+  }
+ },
+ "nsys": {
+  "resident/base": {
+   "window_us_per_token": 2668.3,
+   "busy_us_per_token": 2570.8,
+   "idle_us_per_token": 97.5,
+   "categories": {
+    "router (gate GEMV + top-k)": {
+     "us_per_token": 289.4,
+     "launches_per_token": 144.0
+    },
+    "embedding / glue": {
+     "us_per_token": 182.7,
+     "launches_per_token": 127.06
+    },
+    "activation quant (q8_1)": {
+     "us_per_token": 279.5,
+     "launches_per_token": 193.0
+    },
+    "MoE combine": {
+     "us_per_token": 66.8,
+     "launches_per_token": 48.0
+    },
+    "MoE expert GEMV (mmvq, ids)": {
+     "us_per_token": 912.9,
+     "launches_per_token": 96.0
+    },
+    "dense linear GEMV (mmvq)": {
+     "us_per_token": 532.1,
+     "launches_per_token": 120.0
+    },
+    "norms": {
+     "us_per_token": 145.6,
+     "launches_per_token": 97.0
+    }
+   }
+  },
+  "resident/final": {
+   "window_us_per_token": 2449.3,
+   "busy_us_per_token": 2387.9,
+   "idle_us_per_token": 61.4,
+   "categories": {
+    "router (gate GEMV + top-k)": {
+     "us_per_token": 260.2,
+     "launches_per_token": 48.0
+    },
+    "embedding / glue": {
+     "us_per_token": 44.3,
+     "launches_per_token": 31.06
+    },
+    "activation quant (q8_1)": {
+     "us_per_token": 165.1,
+     "launches_per_token": 145.0
+    },
+    "MoE combine": {
+     "us_per_token": 79.2,
+     "launches_per_token": 48.0
+    },
+    "MoE expert GEMV (mmvq, ids)": {
+     "us_per_token": 842.4,
+     "launches_per_token": 96.0
+    },
+    "dense linear GEMV (mmvq)": {
+     "us_per_token": 533.0,
+     "launches_per_token": 120.0
+    },
+    "norms": {
+     "us_per_token": 154.0,
+     "launches_per_token": 97.0
+    }
+   }
+  }
+ },
+ "judge": {
+  "l0": {
+   "rtx-a5000 (sm_86)": "plugins/tests/test_ggml_cuda_moe.py, test_moe_engine.py, test_quantized_units.py, judge/tests at 7ea4b34: 228 passed, 5 skipped; mutations caught: a flushing (ftz) residual add, the selection's renormalising sum in another lane order",
+   "rtx-5090 (sm_120a)": "plugins/tests/test_ggml_cuda_moe.py at 3015a3c: 107 passed, 1 skipped"
+  },
+  "l2_router": {
+   "command": "python -m holon_judge l2 --model <gguf> --prompts judge/prompts/v1.jsonl --golden judge/goldens/qwen3-30b-a3b-q4_k_m/v1-fp32.safetensors --floor judge/goldens/qwen3-30b-a3b-q4_k_m/v1-bfloat16-mmvq-floor.safetensors --max-step-tokens 1 --max-seqs 4",
+   "gpu": "NVIDIA RTX A5000",
+   "after (5473c4a)": {
+    "top1": 0.98569,
+    "kl_p99": 0.03740288351975489,
+    "dppl": 0.0007327829180205973,
+    "dppl_se": 0.00092892813436278,
+    "floor_top1": 0.98536,
+    "floor_kl_p99": 0.039753018243976174,
+    "budgets": {
+     "top1_min": 0.9828582649543971,
+     "kl_p50_max": 0.00023519159039685122,
+     "kl_p99_max": 0.07950603648795235,
+     "dppl_max": 0.005208187025233953
+    },
+    "failures": [],
+    "dppl_vs_floor": [
+     0.0013773611238363185,
+     0.0010832748100935814
+    ],
+    "drafter": null,
+    "passed": true
+   },
+   "before (c79f968)": {
+    "top1": 0.98594,
+    "kl_p99": 0.038113285350112415,
+    "dppl": -0.0010180901574844332,
+    "dppl_se": 0.0006617429794291168,
+    "floor_top1": 0.98536,
+    "floor_kl_p99": 0.039753018243976174,
+    "budgets": {
+     "top1_min": 0.9828582649543971,
+     "kl_p50_max": 0.00023519159039685122,
+     "kl_p99_max": 0.07950603648795235,
+     "dppl_max": 0.005453408619353537
+    },
+    "failures": [],
+    "dppl_vs_floor": [
+     -0.00037463969989969025,
+     0.0011813634477414146
+    ],
+    "drafter": null,
+    "passed": true
+   }
+  },
+  "snapshots": {
+   "trace": "spikes/x2_store/exact.py (judge snapshot trace, v1.jsonl), resident and moe.cache=*=0.47, RTX A5000",
+   "8e606ec (residual) vs c79f968": "identical, both fits",
+   "5473c4a (router) vs 8e606ec": "differs (bounded: step 6, request 5), both fits",
+   "3015a3c (q8_1) vs 5473c4a": "identical, both fits",
+   "7ea4b34 (review fixes) vs 3015a3c": "identical, both fits",
+   "offload *=0.47 vs resident, at 8e606ec, 3015a3c and 7ea4b34": "identical"
+  }
+ },
+ "clock": {
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "seconds": 45.4,
+  "batch": 1,
+  "tok_s": 405.6,
+  "samples": 434,
+  "sm_mhz": {
+   "p10": 2835.0,
+   "p50": 2857.0,
+   "p90": 2865.0
+  },
+  "mem_mhz": 13801.0,
+  "power_w": 436.4,
+  "slowdown_share": 0.0,
+  "power_cap_share": 0.023,
+  "steady": true
+ }
+}

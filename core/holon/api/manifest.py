@@ -16,7 +16,7 @@ from typing import Any, Literal, get_args
 
 from .terms import parse_versioned
 
-ABI = "1.1"    # the plugin ABI this core implements (design §4.5); manifests declare the range they need (`core_abi`)
+ABI = "1.3"    # the plugin ABI this core implements (design §4.5); manifests declare the range they need (`core_abi`)
 _COMPARE = {">=": operator.ge, ">": operator.gt, "<=": operator.le, "<": operator.lt, "==": operator.eq}
 
 

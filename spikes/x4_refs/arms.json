@@ -1,0 +1,67 @@
+[
+ {
+  "name": "nat_fit",
+  "engine": "llama",
+  "flags": " -lv 4"
+ },
+ {
+  "name": "nat_ncmoe16",
+  "engine": "llama",
+  "flags": "--n-cpu-moe 16 -lv 4"
+ },
+ {
+  "name": "nat_ncmoe25",
+  "engine": "llama",
+  "flags": "--n-cpu-moe 25 -lv 4"
+ },
+ {
+  "name": "nat_cache",
+  "engine": "llama",
+  "flags": "-cmoe --moe-cache-mib 7900 -lv 4"
+ },
+ {
+  "name": "nat_cache_pinned",
+  "engine": "llama",
+  "flags": "-cmoe --moe-cache-mib 7900 --load-mode none -lv 4"
+ },
+ {
+  "name": "nat_ft_auto",
+  "engine": "freetoken",
+  "flags": "--moe-cache-rate 0.47"
+ },
+ {
+  "name": "nat_ft_offload",
+  "engine": "freetoken",
+  "flags": "--moe-strategy offload --moe-cache-rate 0.47"
+ },
+ {
+  "name": "cap_fit",
+  "engine": "llama",
+  "flags": "-fitt 7150 -lv 4"
+ },
+ {
+  "name": "cap_ncmoe36",
+  "engine": "llama",
+  "flags": "--n-cpu-moe 36 -lv 4"
+ },
+ {
+  "name": "cap_cache",
+  "engine": "llama",
+  "flags": "-cmoe --moe-cache-mib 4200 -lv 4"
+ },
+ {
+  "name": "cap_cache_pinned",
+  "engine": "llama",
+  "flags": "-cmoe --moe-cache-mib 4200 --load-mode none -lv 4"
+ },
+ {
+  "name": "cap_ft_auto",
+  "engine": "freetoken",
+  "flags": "--moe-cache-rate 0.25"
+ },
+ {
+  "name": "cap_ft_offload",
+  "engine": "freetoken",
+  "flags": "--moe-strategy offload --moe-cache-rate 0.25"
+ }
+]

@@ -134,7 +134,7 @@ ggml_prec ggml_cuda_mmq_get_prec_src1(const ggml_tensor * src0, const ggml_tenso
 
 void ggml_cuda_mul_mat_q(
         ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
-        const float * x_scale) {
+        const float * x_scale, const int64_t ids_slots, int32_t * ids_errors) {
     GGML_ASSERT(        src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_BF16); // Holon: bf16 activations,
     GGML_ASSERT(        dst->type  == GGML_TYPE_F32 || (dst->type == GGML_TYPE_BF16 && !ids)); // bf16 out (dense)
     GGML_ASSERT(!x_scale || (!ids && src0->type == GGML_TYPE_NVFP4)); // Holon: NVFP4's scale2 (dense)
@@ -287,7 +287,8 @@ void ggml_cuda_mul_mat_q(
 
     ggml_cuda_pool_alloc<int32_t> ids_src1(ctx.pool(), ne_get_rows);
     ggml_cuda_pool_alloc<int32_t> ids_dst(ctx.pool(), ne_get_rows + J_best-1); // Needs to be padded for unconditional memory access.
-    ggml_cuda_pool_alloc<int32_t> expert_bounds(ctx.pool(), ne02 + 1);
+    const int n_z = ggml_cuda_mm_ids_nz(ne02, ne12, n_expert_used, ids_slots); // Holon: compact z entries, then their slots (mmid.cuh)
+    ggml_cuda_pool_alloc<int32_t> expert_bounds(ctx.pool(), 2*n_z + 1);
 
     // gate/up activations are broadcast across experts (ne11 == 1): quantize each token once and
     // scatter to its slots. ids_src1 then holds the inverse map (token slot -> compact row).
@@ -298,8 +299,13 @@ void ggml_cuda_mul_mat_q(
         const int si1  = ids->nb[1] / ggml_element_size(ids);
         const int sis1 = nb12 / nb11;
 
+        ggml_cuda_pool_alloc<char> ids_scratch(ctx.pool()); // Holon: the device-wide helper's (mmid.cuh)
+        if (const size_t nbytes = ggml_cuda_mm_ids_scratch_bytes(ne12*n_expert_used)) {
+            ids_scratch.alloc(nbytes);
+        }
         ggml_cuda_launch_mm_ids_helper((const int32_t *) ids->data, ids_src1.get(), ids_dst.get(), expert_bounds.get(),
-            ne02, ne12, n_expert_used, ne11, si1, sis1, /*write_inverse =*/ dedup_bcast, stream);
+            ne02, n_z, ne12, n_expert_used, ne11, si1, sis1, /*write_inverse =*/ dedup_bcast,
+            /*max_cols =*/ (ne12 + J_best - 1)/J_best*J_best, ids_errors, ids_scratch.ptr, stream); // Holon: mmq's column tiles per slot
         CUDA_CHECK(cudaGetLastError());
     }
 
@@ -344,12 +350,13 @@ void ggml_cuda_mul_mat_q(
                                          ne11 * ne10_padded * sizeof(block_q8_1) / (QK8_1 * sizeof(int));
     const int64_t s13 = ne12*s12;
 
-    // Note that ne02 is used instead of ne12 because the number of y channels determines the z dimension of the CUDA grid.
+    // Note that n_z is used instead of ne12 because the number of y channels determines the z dimension of the CUDA grid.
+    // Holon: n_z compact entries, not the ne02 slots; each names its slot after expert_bounds (mmid.cuh)
     const mmq_args args = {
         src0_d, src0->type, (const int *) src1_q8_1.get(), ids_dst.get(), expert_bounds.get(), dst_d,
         src1_scale.ptr,
         ne00, ne01, ne_get_rows, s01, ne_get_rows, s1,
-        ne02, ne02, s02, s12, s2,
+        n_z, n_z, s02, s12, s2,
         ne03, ne13, s03, s13, s3,
         ne12, J_best};
 

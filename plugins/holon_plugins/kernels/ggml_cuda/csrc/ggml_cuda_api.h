@@ -79,20 +79,26 @@ void holon_ggml_dequantize(int type, const void * src, int64_t n, void * y, int 
 // Whether llama.cpp runs `tokens` tokens of `type` on mmvq (else mmq) here: get_mmvq_mmid_max_batch.
 int holon_ggml_use_mmvq_id(int type, int64_t tokens);
 
-// Workspace bytes for expert calls of at most `tokens` tokens (any type, any path) on the current device.
-size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int64_t experts);
+// Workspace bytes for expert calls of at most `tokens` tokens whose ids name at most `slots` distinct slots (any
+// type, any path) on the current device.
+size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int64_t slots);
 
-// mmvq: tokens <= the mmvq limit. swiglu: `w` is a merged stack (per expert out/2 gate rows, then out/2 up rows) and
+// mmvq: tokens <= the mmvq limit; `x_q8_1`, if not NULL, is x already quantized (holon_ggml_quantize_q8_1 of its
+// tokens · rows_per_token rows), read instead of quantizing x (docs/v1-offload.md §14, step 3c). swiglu: `w` is a merged stack (per expert out/2 gate rows, then out/2 up rows) and
 // y = silu(gate · gate_scale[e]) * up · up_scale[e] with out_y = out/2 (llama.cpp's fused gate); else out_y = out and
 // y = x @ W_e.T · up_scale[e]. Scales: `experts` f32 values each, or NULL (NVFP4 only).
 void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, int64_t in, const void * x, int x_bf16,
-                        int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y, int swiglu,
+                        const void * x_q8_1, int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k,
+                        float * y, int swiglu,
                         const float * gate_scale, const float * up_scale, void * workspace, size_t workspace_bytes,
                         void * stream);
-// mmq: any tokens (one call is sized by the workspace), out_y = out.
+// mmq: any tokens (one call is sized by the workspace), out_y = out. `ids` name at most `slots` distinct slots of the
+// stack (it bounds the launch). A violated precondition (more slots, an id out of range, a slot repeated inside rows
+// beyond mmq's column tiles) leaves the rows it names uncomputed and ors its bit (mmid.cuh, GGML_CUDA_MM_IDS_ERR_*)
+// into the device word `errors` (if not NULL).
 void holon_ggml_mmq_id(int type, int prec, const void * w, int64_t experts, int64_t out, int64_t in, const void * x,
                        int x_bf16, int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y,
-                       void * workspace, size_t workspace_bytes, void * stream);
+                       int64_t slots, int32_t * errors, void * workspace, size_t workspace_bytes, void * stream);
 
 // y[r, i] = silu(x[r, i]) * x[r, n + i] for `rows` rows of 2n f32 values (gate, then up), y f32; with `ids` (one
 // expert per row), gate and up first times gate_scale[ids[r]] and up_scale[ids[r]].
@@ -104,9 +110,24 @@ void holon_ggml_swiglu(const float * x, int64_t rows, int64_t n, const float * g
 void holon_ggml_topk_moe(const float * logits, int64_t tokens, int64_t experts, int64_t k, int renormalize,
                          float * weights, int32_t * ids, void * stream);
 
+// The router and softmax routing in one launch, for up to holon_ggml_moe_router_rows() tokens (topk-moe.cu,
+// ggml_cuda_holon_moe_router): holon_ggml_topk_moe's weights and ids for the logits x · router.T, x [tokens, hidden]
+// (bf16, 8-byte aligned, or f32, 16-byte aligned) read as its exact f32 values, `router` [experts, hidden] f32
+// (16-byte aligned; hidden a multiple of 512; k <= 32), summed in f32 in an order fixed per hidden (the same for a
+// row at any tokens). `logits` [tokens, experts] f32 is scratch; `done` holds holon_ggml_moe_router_tiles(tokens)
+// zeroed counters, zeroed again on return. `x_q8_1`, if not NULL, receives x as holon_ggml_quantize_q8_1 writes it,
+// in the same launch.
+int64_t holon_ggml_moe_router_rows(void);
+int64_t holon_ggml_moe_router_tiles(int64_t tokens);
+void holon_ggml_moe_router(const void * x, int x_bf16, const float * router, int64_t tokens, int64_t hidden,
+                           int64_t experts, int64_t k, int renormalize, float * logits, uint32_t * done,
+                           float * weights, int32_t * ids, void * x_q8_1, void * stream);
+
 // out[t] = sum_j weights[t, j] * y[t, j] in f32, slot by slot, stored bf16: y [tokens, k, hidden] f32, out bf16.
+// With `residual` [tokens, hidden] bf16 (not NULL): out[t] = residual[t] + that bf16 sum, added in f32 and rounded
+// once more, as the unfused `residual + out` computes it.
 void holon_ggml_moe_combine(const float * y, const float * weights, int64_t tokens, int64_t k, int64_t hidden,
-                            void * out, void * stream);
+                            const void * residual, void * out, void * stream);
 
 #ifdef __cplusplus
 }

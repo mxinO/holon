@@ -22,6 +22,10 @@ dependencies = [                  # std units are reached through Ref, never imp
 "kernels.triton_experts" = "holon_plugins.kernels.triton_experts"
 "kernels.triton_fp8" = "holon_plugins.kernels.triton_fp8"
 "kernels.ggml_cuda" = "holon_plugins.kernels.ggml_cuda"
+"kernels.expert_io" = "holon_plugins.kernels.expert_io"
+"kernels.cpu_task" = "holon_plugins.kernels.cpu_task"
+"kernels.ggml_cpu" = "holon_plugins.kernels.ggml_cpu"
+"kernels.promote" = "holon_plugins.kernels.promote"
 "kernels.fla" = "holon_plugins.kernels.fla"
 "kernels.gdn_triton" = "holon_plugins.kernels.gdn_triton"
 "drafters.mtp" = "holon_plugins.drafters.mtp"
@@ -29,6 +33,12 @@ dependencies = [                  # std units are reached through Ref, never imp
 "drafters.ngram" = "holon_plugins.drafters.ngram"
 "frontends.http" = "holon_plugins.frontends.http"
 "grammar.xgrammar" = "holon_plugins.grammar.xgrammar"
+"placement.lfu" = "holon_plugins.placement.lfu"
+"placement.lru" = "holon_plugins.placement.lru"
+"placement.profile_decay" = "holon_plugins.placement.profile_decay"
+"placement.promote" = "holon_plugins.placement.promote"
+"transforms.tail_skip" = "holon_plugins.transforms.tail_skip"
+"tiers.pagecache" = "holon_plugins.tiers.pagecache"
 
 [build-system]
 requires = ["hatchling"]

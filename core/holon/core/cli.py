@@ -190,10 +190,11 @@ def repo_ref(ref: str, rows: list[tuple[str, object]]) -> str:
 
 
 def local_model(ref: str, plugins: PluginSet, kind: str | None, rows: list[tuple[str, object]],
-                fp: Fingerprint | None) -> str:
+                fp: Fingerprint | None, host_memory: int = 0) -> str:
     """The local path `holon serve` serves `ref` from: an existing path as it is; else the one weight source's claim
     of `ref` (after `repo_ref`), logged, refused before fetching when larger than the GPU's memory (`fp`; None: no
-    check), then fetched."""
+    check) unless the deployment gives plugins host memory (`host_memory`; the build's per-pool report judges the fit
+    then), then fetched."""
     if pathlib.Path(ref).exists():
         return ref
     try:
@@ -202,7 +203,7 @@ def local_model(ref: str, plugins: PluginSet, kind: str | None, rows: list[tuple
         raise SystemExit(f"holon: {e}") from None
     size = f"{claim.nbytes / 2**30:.1f} GiB" if claim.nbytes else "size unknown"
     _say(f"{ref}: {claim.what} ({size})")
-    if fp is not None and fp.vram_gib > 0 and claim.nbytes and claim.nbytes > fp.vram_gib * 2**30:
+    if fp is not None and fp.vram_gib > 0 and not host_memory and claim.nbytes and claim.nbytes > fp.vram_gib * 2**30:
         raise SystemExit(f"holon: {claim.what} is {size}, more than this GPU's {fp.vram_gib} GiB: it cannot fit "
                          "(`holon models` lists the models locked for it; --no-size-check skips this check)")
     return claim.fetch()
@@ -333,7 +334,7 @@ def main(argv: list[str] | None = None) -> None:
     fp, current = platform.fingerprint(device), plans.current_srcs(installed)
     rows = locked_models(args.plans, fp, current)          # names this card's file even under --no-lock
     sized = None if args.no_size_check or device.type != "cuda" else fp
-    model = local_model(args.model, plugins, flags.get("source"), rows, sized)
+    model = local_model(args.model, plugins, flags.get("source"), rows, sized, flags.get("host_memory", 0))
     source, model_plugin = resolve_model(plugins, EngineConfig(model, source=flags.get("source")))
     found = None if args.no_lock else find_lock(args.plans, source, fp, current)
     history = serve_history(model, flags, found, auto_context(model_plugin, source))

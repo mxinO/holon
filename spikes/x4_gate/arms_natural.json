@@ -1,0 +1,52 @@
+[
+ {
+  "name": "holon_nat",
+  "engine": "holon",
+  "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.cache=gate_up.q4_k.1536x2048=3220,down.q6_k.2048x768=1610,down.q4_k.2048x768=1610 moe.ring_copy=dma --kernels attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_router=kernels.ggml_cuda moe_combine=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda add_rmsnorm=kernels.flashinfer rmsnorm=kernels.flashinfer rope=kernels.flashinfer expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io moe_resolve.lfu=kernels.expert_io"
+ },
+ {
+  "name": "llama_fit",
+  "engine": "llama",
+  "flags": " -lv 4"
+ },
+ {
+  "name": "llama_ncmoe16",
+  "engine": "llama",
+  "flags": "--n-cpu-moe 16 -lv 4"
+ },
+ {
+  "name": "cache_nat",
+  "engine": "llama",
+  "flags": "-cmoe --moe-cache-mib 8773 -lv 4"
+ },
+ {
+  "name": "cache_nat_pinned",
+  "engine": "llama",
+  "flags": "-cmoe --moe-cache-mib 8773 --load-mode none -lv 4"
+ },
+ {
+  "name": "ft_nat",
+  "engine": "freetoken",
+  "flags": "--moe-cache-rate 0.524"
+ },
+ {
+  "name": "holon_47",
+  "engine": "holon",
+  "flags": "--host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.cache=*=0.47 moe.ring_copy=dma --kernels attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_router=kernels.ggml_cuda moe_combine=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda add_rmsnorm=kernels.flashinfer rmsnorm=kernels.flashinfer rope=kernels.flashinfer expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io moe_resolve.lfu=kernels.expert_io"
+ },
+ {
+  "name": "cache_47",
+  "engine": "llama",
+  "flags": "-cmoe --moe-cache-mib 7900 -lv 4"
+ },
+ {
+  "name": "cache_47_pinned",
+  "engine": "llama",
+  "flags": "-cmoe --moe-cache-mib 7900 --load-mode none -lv 4"
+ },
+ {
+  "name": "ft_47",
+  "engine": "freetoken",
+  "flags": "--moe-cache-rate 0.470"
+ }
+]

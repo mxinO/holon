@@ -52,7 +52,7 @@ to host-side policies and live tunables).
 | D5 | Self-improvement is an **optional capability** for capable agents and explicit user intent (e.g. a strong agent served by Holon). The engine itself ships best-known, human-tuned defaults and never depends on it. When used, auto-promotion is limited to policy/kernel/tunable scope under the judge; core, judge, ABI and `approx` numerics need a human (§10.5). |
 | D6 | References (mini-sglang, nano-vllm, vLLM Model Runner V2, SGLang, FreeToken, Strata) are studied, not copied: control-plane code is our own plugin-native implementation. Only kernels may be borrowed, under §5.6. |
 | D7 | Hardware: development on RTX A5000s (sm_86). Consumer performance evidence on consumer desktop machines — RTX 5080 16 GB and RTX 5090 32 GB (sm_120), RTX 4090 (sm_89). Optional Blackwell workstation (RTX PRO 6000 96 GB, sm_120) for sm_120 kernel work and large-memory tasks. Datacenter path (H100, GB200) later. Shared test machines are used through one persistent container per machine: builds, tests and benchmarks run inside it repeatedly rather than as many short batch jobs. |
-| D8 | Expert caching/offload arrives in v1. Built in M0: the device SeqTable, MemOps (publish / adopt), BLOCKED requests and `drain`; spiked only: the stream-memop CPU handshake (S6). Its offload slots, payload tiers, hit costs, load futures, per-layer events and Pool resize members return as additive ABI minors, each a reviewed core change (invariant 9; owner, 2026-10-15). |
+| D8 | Expert caching/offload arrives in v1. Built in M0: the device SeqTable, MemOps (publish / adopt), BLOCKED requests and `drain`; spiked only: the stream-memop CPU handshake (S6). Its core needs return as additive ABI minors, each a reviewed core change (invariant 9; owner, 2026-10-15). **As built** (`docs/v1-offload.md`): the offload program is four milestones — X expert offload, K KV and checkpoint tiers, FN Qwen3.8-Flash-Next, GLM GLM-5.3-Flash —; X added the seams S0–S5 (ABI 1.2) and the scheduler's row kinds (1.3) and no slot; payload tiers, hit costs, load futures and per-layer events are milestone K's, Pool resize (VMM) X's second wave. |
 | D9 | Quantization priority follows the deployment target. Consumer/edge GPUs: llama.cpp GGUF sub-4-bit formats (k-quants, i-quants, e.g. `unsloth/Qwen3.8-27B-GGUF`) — v0. HF-ecosystem GPTQ/AWQ INT4 and FP8 — v1. NVFP4/MXFP4, which mainly serve large-memory datacenter GPUs — v2. |
 
 ---
@@ -217,10 +217,13 @@ first-party distributions provide are listed per distribution (`std/contracts.tx
 | `multi` | any number, keyed by name | frontend, drafter (v0: one per deployment) |
 
 These are ABI 1.0's slots (`holon.api.SLOTS`): each has plugins and the core loads them. Slots planned for later
-features join when their first plugin does, each a minor ABI addition: `launcher` (§8), `placement_policy`, `tier`,
-`mover` and `connector` (offload, §6.5, §9), `eviction_policy` (prefix index, §6.3), `checkpoint_policy` and `codec`
-(§9), `plan_transform` (§8), `encoder` (VLM), `exporter` (§7.9), `schedule_policy` (scheduling and its mixing
-budget are the core's in v0, §7.1). Where later sections name them, they describe those plans.
+features join when their first plugin does, each a minor ABI addition: `launcher` (§8), `connector` (KV offload,
+§9), `eviction_policy` (prefix index, §6.3), `checkpoint_policy` and `codec` (§9), `plan_transform` (§8), `encoder`
+(VLM), `exporter` (§7.9), `schedule_policy` (scheduling and its mixing budget are the core's in v0, §7.1). Where
+later sections name them, they describe those plans. **Not re-added (v1 offload):** `placement_policy`, `tier` and
+`mover` — the core never calls them, so placement policies, tiers and route transforms are protocols of `std.tiered`
+(or contracts their plugins own) bound by open plugin options holding a `Ref` (`moe.placement`, `moe.tiers`,
+`moe.route_transform`), and movers are S2's MemOps (§6.5).
 
 A `Ref("a.b.c@1")` is served by the installed plugin whose name is the longest prefix of the unit name (e.g.
 `std.ops` serves `std.ops.rmsnorm`), and whose version major equals the Ref's major. Everything the resolver needs
@@ -319,19 +322,22 @@ approvals, and the `isolation-check` CI job.
 
 ### 4.5 Versioning
 
-- **The plugin ABI was frozen at 1.0 at the release** (release design §7) and is 1.1 since v0.1.1 (an additive
-  `TokenDelta` field). `holon.api.ABI` is the version; every
-  manifest declares the range it works with (`core_abi = ">=1.0,<2.0"`), checked before anything else when the
-  manifest is read. `core/abi.txt` lists the frozen surface (`holon.api`'s names and signatures, dataclass fields
-  in order, Protocol members marked required or optional, `SLOTS`, `EngineConfig`, the `BuildCtx.options` keys, the
+- **The plugin ABI was frozen at 1.0 at the release** (release design §7), is 1.1 since v0.1.1 (an additive
+  `TokenDelta` field), 1.2 with v1 offload's core seams S0–S5 (`docs/v1-offload.md` §4: shared objects and their
+  lifecycle, step hooks, host pools and async MemOps, fill pools, weight extents, CPU facts) and 1.3 with the
+  scheduler's row kinds (`BatchPlan.row_kind`, `RowKind`, graph padding included). `holon.api.ABI` is the version;
+  every manifest declares the range it works with (`core_abi = ">=1.0,<2.0"`), checked before anything else when the
+  manifest is read. `core/abi.txt` lists the frozen surface (`holon.api`'s names and signatures, dataclass fields in
+  order, Protocol members marked required or optional, `SLOTS`, `EngineConfig`, the `BuildCtx.options` keys, the
   manifest schema, the string vocabularies, the IPC frames); `scripts/ci/check_abi.py` renders it from the code and
-  holds every change to the rule against the base branch: an addition (a name, an optional Protocol or member, a
-  field with a default, a manifest key, a slot) is a minor bump; a removal or change, a required member added to a
-  Protocol plugins implement, or a field without a default is a major bump — a reviewed core ABI change
-  (invariant 9) with a codemod for the first-party plugins. Each distribution's provided contracts (`op.*`,
-  `unit.*`, …) are its own ABI, listed in `std/contracts.txt` and `plugins/contracts.txt`: a new one is free, a
-  removed or changed one needs a new major. Per-slot versions (`slot_abi`) return, additively, when a slot first
-  needs one.
+  holds every change to the rule against the base branch: an addition (a name, an optional Protocol or member, a field
+  with a default, a manifest key, a slot; keyword-only parameters with defaults added to a member plugins only call,
+  of a Protocol the core implements or of a dataclass, and so a field default showing the fields its class gained) is
+  a minor bump; a removal or change, a required member added to a Protocol plugins implement, or a field without a
+  default is a major bump — a reviewed core ABI change (invariant 9) with a codemod for the first-party plugins. Each
+  distribution's provided contracts (`op.*`, `unit.*`, …) are its own ABI, listed in `std/contracts.txt` and
+  `plugins/contracts.txt`: a new one is free, a removed or changed one needs a new major. Per-slot versions
+  (`slot_abi`) return, additively, when a slot first needs one.
 - **Cut before the freeze** (release step 6, `docs/release.md` §15): the names nothing used — the slots of §4.2's
   planned list, `SchedulePolicy`, `PlanTransform`, the `Platform` Protocol, `Event`, the `Ledger` Protocol, `Scale`, `ShapeKey`,
   manifest `[tunables]` (and `Tunable`, `Binding.tunables`), `variant_of`, `implements`, `graph_policy` and
@@ -803,6 +809,14 @@ class Pool:                       # plugins see name, unit_bytes, capacity, num_
   (4) all remaining memory to `Paged` pools, divided in proportion to bytes-per-token of each spec; specs in one
   page group (`page_group`) get one shared unit count. Startup fails
   with a per-pool report if any `min_units` cannot be met.
+- **Fill pools and pinned sizes (v1 offload, S3).** A plugin pool may declare `fill=True` with a priority: before
+  step (4), `EngineConfig.paged_min_tokens` (default one `max_model_len` sequence) goes to paged state, then fill
+  pools by priority up to their `pref_units`, then paged state takes the rest — so an expert cache takes what is left
+  above a paged floor. A lock pins a fill pool's size through its owning plugin's own option (min = pref), so
+  placement never follows free memory; a pinned pool that does not get its size is refused by its plugin at the first
+  launch (the startup profile never launches). Host pools (`device="host"`, `mapped`, S2) are allocated once, exactly
+  (no power-of-two rounding), before the first materialize and outside the device profile, against
+  `EngineConfig.host_memory`.
 - v0 implements `fixed`; a pool's buffer is stable for its lifetime. The VMM contract (stable base address, device
   capacity scalar, declared resize mode, shrink callbacks) is planned with `vmm` (cuMem-backed live resize,
   Strata-style) in v1, each member a minor ABI addition; plugins using today's `Pool` members need no change.
@@ -906,24 +920,33 @@ while True:
   the Seq runs while ops wait on per-layer ready events `ctx.ready(spec, layer)`.
 - Load futures **reserve their destination pages** in the ledger when issued and are **cancellable**: abort and
   preemption cancel the future and release its pages.
-- Load futures and per-layer ready events are planned with offload (minor ABI additions); `BLOCKED` exists in v0 (a
-  logits processor's `ready` uses it). Designing them up front is what keeps a connector API from growing as vLLM's
-  did (~45 methods).
+- Load futures and per-layer ready events are planned (minor ABI additions); `BLOCKED` exists in v0 (a logits
+  processor's `ready` uses it). Designing them up front is what keeps a connector API from growing as vLLM's did
+  (~45 methods). v1's expert offload needed neither: its prefill stream (next layer's experts during this layer)
+  waits on events inside a kernel plugin (`expert_prefetch@1`), so layer-wise loading and core ready events stay
+  planned, with prefix-index tiers, for milestone K (`docs/v1-offload.md` §11).
 
 ### 6.5 TieredStore (std library, not core)
 
-`holonlm-std-tiered`: `TieredStore[K]` over `Tier`s (vram/pinned/ram/ssd/remote), a `ResidencyMap`, `Mover`s and
-`PlacementPolicy` plugins, with two resolver styles:
+`std.tiered` (built for expert offload, `docs/v1-offload.md` §5, §14): a `TieredStore` over host tiers, a
+`ResidencyMap` (one device map, a host mirror kept from the device's per-step delta log, host edits applied at a
+fixed launch with a precondition), and the `PlacementPolicy` and `Tier` protocols — plugins bound by open options
+holding a `Ref`, not slots (§4.2); copies between steps are S2 MemOps, not `Mover`s. Two resolver styles:
 
 - `HostPlannedResolver` — misses known before the step (KV prefix/offload, KVMem-style window selection); runs in
-  `Planner.plan_bounds`; emits transfers (MemOps) + per-layer events.
+  `Planner.plan_bounds`; emits transfers (MemOps) + per-layer events. Planned, with milestone K.
 - `DeviceResolver` — misses known only inside the step (experts, sparse-KV); fixed-shape, in-graph lookup
-  `ids → slot | -1`; host-side `adapt(stats)` (decayed-LFU, profile-seeded, LRU) writes a double-buffered residency map that is swapped
-  in between steps (or under `quiesce`, §7.3), never under an in-flight graph.
+  `ids → slot`, misses gathered over PCIe into staging slots. A device-owned policy (decayed-count admission, the
+  default; LRU; promote-on-fetch) owns its resolve contract and changes the map in the graph, logging each change; a
+  host policy (static, profile-seeded swaps) returns edits applied two-phase on the step stream (unmap at launch
+  c + 2, copy, map after it lands) — no double buffer and no `quiesce` (§7.3).
 
-What to do with a miss is the consumer's decision: the MoE op computes `-1` experts on CPU through the stream-memop
-handshake with a native CPU worker (§7.4, FreeToken) or fetches them over PCIe (Strata's `pcie_frac` split). The MoE op declares `placement_invariant`;
-if false, residency policies are judged `bounded` rather than `exact` (§10.3).
+What to do with a miss is the consumer's decision: the offload store fetches every miss over PCIe by default (F5a),
+or a share of them is computed on the CPU in RAM through `cpu_task@1` (§7.4) where it gains ≥ 5% (F5b, `bounded`).
+Under F5a every placement and policy is `exact` (§7.10) with an arena provider whose results are slot-, arena- and
+grouping-invariant — an expert's rows computed alike in any slot, arena size or launch grouping: `kernels.ggml_cuda`,
+by its forced-tiling and compact-slot vendor patches and its L0. Making that bitwise invariance a term of
+`linear_experts_arena@1` itself, so every provider's L0 checks it, is a std-minor follow-up (plan §10).
 
 ---
 
@@ -1070,7 +1093,10 @@ device inputs (`DEVICE_LAST`) are already consistent.
   and the graph pool does not fragment the budget.
 - **CPU work inside a FULL graph** (CPU expert compute, Strata/FreeToken style) uses a one-word handshake per
   layer with a persistent native CPU worker (spike S6): the graph signals REQ, the worker computes on pinned
-  memory and answers DONE, the graph waits. `holon.core.platform` exposes this as a signal/wait pair with two
+  memory and answers DONE, the graph waits. **As built (v1 offload):** the handshake is a kernel plugin,
+  `kernels.cpu_task` (`cpu_task@1`: signal / wait graph ops and the worker service, fail-open: a failed task or a
+  timed-out wait raises an error word the commit checks), not `holon.core.platform`; the core keeps the lifecycle
+  only (shared objects shut down after `drain`, S0; the loop pinned by `EngineConfig.loop_core`). It offers two
   implementations chosen per fingerprint class by measurement — a one-thread spin kernel (1.9–2.8 µs per
   handshake on the A5000 server and RTX 4090/5080/5090 desktops; the default) and stream memory operations
   (`cuStreamWriteValue`/`WaitValue`, 6–10 µs under load; for display GPUs with a kernel watchdog, laptops and
@@ -1079,8 +1105,8 @@ device inputs (`DEVICE_LAST`) are already consistent.
   sharing a core with a spinning worker slows the loop 1.4–2.3× on 8-core desktops. Expert inputs
   and outputs are read and written in pinned memory directly (no memcpy nodes, which cost ≈ 14 µs per layer). GPU
   work between signal and wait overlaps the CPU. Contract: stop the worker only after draining in-flight replays
-  (or abort, drain, stop); residency-map swaps are written to the inactive buffer and flipped **on the replay
-  stream between replays** — no `quiesce` needed; `quiesce` is for changes not ordered on the stream (host or
+  (or abort, drain, stop); residency-map edits are applied **on the replay stream at a fixed launch** (§6.5) — no
+  `quiesce` needed; `quiesce` is for changes not ordered on the stream (host or
   worker state, side-stream VRAM refills, worker restarts). No Python or GIL on this path.
 - All dynamic inputs go through static buffers requested at startup with `ctx.static(name, max_shape)`.
 
@@ -1149,11 +1175,13 @@ verification (v2).
   and locks record the choice in `[engine]`. `Engine.stats()` counts real drafts and verify rows by drafts accepted.
   Every running row of a speculating step is a verify row of the step's width 1 + k (rows with fewer real drafts pad
   with token 0); block tables carry overflow columns at the null unit for positions past `max_model_len`.
-- **The SeqTable seam (implemented, M0 acceptance §3.4-5).** Every step's positions, lengths and page write indices
-  are derived on the device from the SeqTable's `num_computed` (`Executor._prepare`, inside the graph for decode); the
-  host writes the starts it knows exactly (prefill chunks, padding rows, requests without an uncommitted verify
-  row) through a per-row mask, so a verify row's outcome never has to reach the host before the next step is
-  planned. Verify rows read their drafts from `SeqTable.draft_tokens`; the verifier returns the tokens and
+- **The SeqTable seam (implemented, M0 acceptance §3.4-5).** With a drafter, every step's positions, lengths and
+  page write indices are derived on the device from the SeqTable's `num_computed` (`Executor._prepare`, inside the
+  graph for decode); the host writes the starts it knows exactly (prefill chunks, padding rows, requests without an
+  uncommitted verify row) through a per-row mask, so a verify row's outcome never has to reach the host before the
+  next step is planned. Without one every start is the host's, so they are staged from the host with the step's
+  other inputs and the device moves only what it alone holds: the last tokens into the inputs and the SeqTable
+  writes (v1 step 3d). Verify rows read their drafts from `SeqTable.draft_tokens`; the verifier returns the tokens and
   `n_accept`; the sample stage writes `last_token`, `num_computed = start + 1 + n_accept` and `n_accept`; rewind and
   the drafter follow. Commit appends the accepted tokens (stopping at a stop token or length) and makes the host
   length exact again. Requests with an uncommitted verify row skip steps whose decode kernel plans from host lengths
@@ -1256,7 +1284,7 @@ Two acceptance modes are used in v0 (plan and judge):
 
 | Mode | How | Meaning |
 |---|---|---|
-| **run-identical** | production Plan replaying the model's **snapshot trace**: a fixed multi-Seq, teacher-forced trace with fixed arrival order and batch composition that covers every captured graph bucket, chunked prefill, depth 1, a prefix hit, `n > 1`, prompt logprobs and — where the deployment enables them — spec decoding and grammar; sampling seeded per (Seq, position); adaptive policies frozen; changed-line coverage recorded | byte-identical output run to run. Used for model isolation ("goldens unchanged") and for auto-advance in propagation (§4.6) |
+| **run-identical** | production Plan replaying the model's **snapshot trace**: a fixed multi-Seq, teacher-forced trace with fixed arrival order and batch composition that covers every captured graph bucket, chunked prefill, depth 1, a prefix hit, `n > 1`, prompt logprobs and — where the deployment enables them — spec decoding and grammar; sampling seeded per (Seq, position); adaptive policies frozen unless their consumer is placement-invariant (v1's expert offload under F5a: adaptive placement runs in the snapshot, §6.5); changed-line coverage recorded | byte-identical output run to run. Used for model isolation ("goldens unchanged") and for auto-advance in propagation (§4.6) |
 | **bounded** | production Plan | within judge L2 budgets |
 
 - run-identical needs kernels that are deterministic **run to run** (no split-K or atomic accumulation in pinned
@@ -1307,9 +1335,9 @@ milestone measures how small the core diff is.
 
 | Feature | Plugins | Core seams used |
 |---|---|---|
-| KV offload (RAM/SSD, remote) | tiers, mover, placement policy, connector (planned slots) | `BLOCKED`; PrefixIndex tier payloads and per-layer events (planned: minor ABI additions) |
+| KV offload (RAM/SSD, remote) | milestone K (`docs/v1-offload.md` §11): `std.tiered` tiers, a connector (planned slot) | `BLOCKED`; S2 host pools; PrefixIndex tier payloads and per-layer events (planned: minor ABI additions) |
 | KVMem-style bounded window | `windowed_retrieval` StateKind, HostPlannedResolver, re-RoPE prepare kernel | StateKind emits positions; namespace |
-| Expert cache / offload | expert TieredStore, DeviceResolver, placement policies, MoE op with CPU miss compute | stable Pools, `drain`; planned: the stream-memop CPU handshake (spiked in S6), VMM resize (v1) |
+| Expert cache / offload (v1, milestone X) | `std.moe.offload@1` over `std.tiered` (DeviceResolver, pinned RAM and `O_DIRECT` SSD tiers); placement policies (`placement.*`), tiers (`tiers.*`), route transforms (`transforms.*`, `approx`); `kernels.expert_io` (resolve, gather, prefetch), `kernels.cpu_task` and `kernels.ggml_cpu` (CPU miss compute) | S0 shared objects, S1 step hooks, S2 host pools and async MemOps, S3 fill pools, S4 weight extents, S5 CPU facts (ABI 1.2), row kinds (1.3); planned: VMM resize (X's second wave) |
 | Quant formats | weight-source dialect, scheme, layout, kernels (`prepare`) | kernel registry, per-slice `adopt_weights` |
 | Linear attention (GDN, KDA, Mamba2) | mixer + `Slot` state (`draft_slots`), page-boundary checkpoints (in v0 the recurrent state kind's options; checkpoint policy and codec slots planned) | fixed-point prefix hits, device Rewindable |
 | DeepSeek sparse attention / V4 compressed KV | `dsa_mla` mixer: MLA `Paged` + indexer `Paged(page_group)` + compressed `Paged(tokens_per_unit)` | `page_group`, `tokens_per_unit`, `alignment` |

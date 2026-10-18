@@ -3,6 +3,7 @@ import asyncio
 import contextlib
 import dataclasses
 import multiprocessing
+import pathlib
 import time
 
 import pytest
@@ -19,14 +20,31 @@ def _config(path):
                         max_step_tokens=10, max_model_len=40, state_memory=1 << 20)
 
 
-def test_engine_process_serves_concurrent_streams(tiny_checkpoint, tiny_case):  # noqa: F811
+def _closing_engine(config, endpoints, lock=None):
+    """Engine-process target that records its engine's `close` (runs in the spawned child)."""
+    from holon.core.engine import Engine
+    from holon.core.ipc import serve
+
+    def factory():
+        engine = Engine(config)
+        close = engine.close
+        engine.close = lambda: (close(), pathlib.Path(config.plugin_options["tests.closed"]).touch())
+        return engine
+    serve(factory, endpoints)
+
+
+def test_engine_process_serves_concurrent_streams(tiny_checkpoint, tiny_case, tmp_path):  # noqa: F811
+    """Concurrent streams, n > 1, a rejection, an abort, stats and a processor ready late; at shutdown the engine is
+    closed, so the logits processor and shared objects stop their helpers (docs/v1-offload.md S0)."""
     prompts, expected = tiny_case
-    config = dataclasses.replace(_config(tiny_checkpoint), slots={"logits_processor": "testing.toy_mask"})
+    marker = tmp_path / "closed"
+    config = dataclasses.replace(_config(tiny_checkpoint), slots={"logits_processor": "testing.toy_mask"},
+                                 plugin_options={"tests.closed": str(marker)})
     waits = SamplingParams(temperature=0.0, max_tokens=12, ignore_eos=True,      # its processor is ready at the 20th
                            ext={"toy.even_after@1": {"marker": -1, "polls": 19}})   # poll; it constrains nothing
 
     async def run():
-        async with engine_process(config) as client:
+        async with engine_process(config, target=_closing_engine) as client:
             async def collect(prompt, params):
                 out: dict[int, list[int]] = {}
                 async for d in client.generate(prompt, params):
@@ -52,6 +70,7 @@ def test_engine_process_serves_concurrent_streams(tiny_checkpoint, tiny_case):  
     assert results[5][1].kind == "client"
     assert first.token_ids and stats["running"] + stats["waiting"] == 0
     assert blocked[0][0] == expected[0] and elapsed > 19 * BLOCKED_POLL_S / 2
+    assert marker.exists()
 
 
 def _failing_engine(config, endpoints, lock=None):

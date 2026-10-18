@@ -585,7 +585,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 | ~~Before the release freezes the ABI~~ — **retired by the owner (2026-10-14)** | legibility benchmark (agent cost to add a model vs a mini-sglang fork). An exploratory 1 + 1 pilot passed on both sides at ≈ 1.4–1.8× Holon's cost (one run each, within noise); Holon's advantage is isolation (no shared code touched), not agent cost per model (`docs/release.md` §4.0; record `evidence/legibility_pilot_2026-10-14.json`) | — |
 | Any | propagation sweep time; approvals/day | > 30 min or > 1/day → async propagation (design §4.6 trigger) |
 | M0.1 / M0.2 / M0.3 | GGUF decode **and prefill** tok/s vs llama.cpp on the same card and quant (RTX 5080), dense and MoE | < 0.8× on either after a perf pass → fix the GGUF kernel path (ported i-quant `mmq` or own Triton kernels for the slow types) before adding features |
-| v1 offload | MoE larger than VRAM on RTX 5080: decode tok/s vs FreeToken and Strata on the same node | < 0.8× → rework the offload path before adding features |
+| v1 offload | MoE larger than VRAM, same file and card: decode tok/s vs Strata on Qwen3.8-Flash-Next (RTX 5080 / 5090), vs Project Maya on GLM-5.3-Flash (RTX 5090), vs FreeToken and llama.cpp on the development vehicle Qwen3-30B-A3B (RTX 5080) (`docs/v1-offload.md` §1) | < 0.8× → rework the offload path before adding features |
 
 ---
 
@@ -596,13 +596,70 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   v2). It needs prebuilt wheels with Holon's CUDA extensions compiled for the pinned torch / CUDA stack and every
   supported SM, a CI build and test matrix on each card class, and `pip install holonlm` serving without a local CUDA
   toolkit.
-- **Expert caching/offload** on the M0 seams (SeqTable, MemOps, `drain`) plus additive core seams (design D8; the S6 stream-memop CPU worker was
-  spiked only):
-  TieredStore, in-graph DeviceResolver with double-buffered residency, placement policies (LRU, profile-seeded
-  decayed LFU), CPU miss compute (GGUF experts computed on the CPU, Strata-style, with ggml CPU kernels) — MoE
-  models larger than VRAM on RTX 5080 16 GB (consumer desktop): Qwen3.5-35B-A3B at Q4_K_M and above, then larger
-  MoE (e.g. Qwen3.5-122B-A10B, Qwen3.8-Flash-Next) — compared with FreeToken and Strata on the same nodes.
-- KV offload to pinned RAM / SSD (connector-chosen BLOCKED vs layer-wise, cancellable futures, demote/pin eviction).
+- **Expert caching/offload** (`docs/v1-offload.md`, four milestones): **X** expert offload — Strata's and Maya's
+  strategy set as plugins (profile-seeded VRAM cache with decayed-count swaps, LRU, static, promote-on-fetch; misses
+  fetched over PCIe by default so every placement is exact, CPU compute with ggml CPU kernels as a bounded opt-in
+  where it gains ≥ 5%; prefill streaming of non-resident experts; an SSD expert tier) on additive core seams,
+  closing on Qwen3-30B-A3B on the RTX 5080 vs FreeToken and llama.cpp; **K** KV and checkpoint tiers (pinned RAM /
+  SSD under the prefix index, exact, deterministic resume); **FN** Qwen3.8-Flash-Next (QSA + indexer, PLE n-gram
+  table, hyper-connections; Qwen3.6-35B-A3B as its first step) compared with Strata; **GLM** GLM-5.3-Flash (MLA + DSA
+  indexer, KDA, mHC) compared with Project Maya (owner, 2026-10-17). Qwen3.5-122B-A10B is dropped.
+
+  **X status (2026-10-18): closed, acceptance met with the recorded shortfall** (FreeToken prefill at 4K / 32K).
+  Design and evidence: `docs/v1-offload.md` (rev 4.5, panel-clean; §13 step 0's measurements and decisions, §14 the
+  build record per step, "Step 8, part 2" the close); records `evidence/x0_*` … `x7_heldout_*`,
+  `x8_close_rtx-5080_2026-10-18.json`.
+
+  | # | Result |
+  |---|---|
+  | 1 | Plugins: F11 `lfu` (the default), F1 `static`, F2–F3 `profile_decay`, F4 `lru`, F5a, F5b (`plan[n]`), F7 (the prefill ring), F9 (SSD tier); held out after the std API tag, plugin-only: F10 promote-on-fetch, A1 tail skip (`approx`), a page-cache tier |
+  | 2 | Exact by default: every placement and policy byte-identical to all-resident (A5000; cross-placement identity ×3 on the RTX 5080); F5b `bounded` (L2 passing against the path-aware floor, run-identical ×3) on the A5000 and the RTX 5080 |
+  | 3 | Gate, Qwen3-30B-A3B Q4_K_M on the RTX 5080. Natural fit (52.7%): decode vs FreeToken 1.06 / 1.04 / 1.02× at 1K / 4K / 32K, vs llama.cpp's pinned cache 1.19 / 1.23 / 1.10×, its static splits ≥ 1.79×. Capped fit (25%, F5b +11.7% by tune): FreeToken 1.20 / 1.04 / 1.06×, the pinned cache 1.37 / 1.30 / 1.14×; F1 ≥ 0.97× llama.cpp's static split at both fits. **Shortfall, accepted by the owner:** prefill vs FreeToken 0.92–0.93× at 4K and 0.87–0.88× at 32K (≥ 2.1× every llama.cpp arm) |
+  | 4 | Program bars (Strata, Project Maya): FN's and GLM's |
+  | 5 | Memory: exact pinned host pools; pinned splits refused with a report (host pools at startup, a VRAM arena at its first launch) |
+  | 6 | Core: ABI 1.2 (S0–S5) and 1.3 (row kinds), each toy-proven; 4,603 / 6,000 lines (+355) |
+  | 7 | Locks: 22 of 22 propagated once and approved (16 dense bitwise; 6 MoE moved by the bounded router, L2 passing); the RTX 5080's natural-fit offload lock. The capped F5b lock's verdicts pass, but it is not written (escalated: no tool writes an F5b lock, and S5's lookup would make it the AVX-512 RTX 5080's default) |
+
+  Decisions: `lfu` the default (M6's replay, confirmed on the 5080); F5a by default, F5b only where tune and the
+  rows gain ≥ 5% (the capped fit; −6% at the natural fit); `ring_copy` `dma`; the profile a warm start only; the
+  FreeToken prefill shortfall accepted (owner, 2026-10-18). Found on the way: placement invariance needed two vendor
+  patches (forced tiling, a compact id helper); prompt-time admission and two-phase lending for host policies stayed
+  deferred; F10 showed the std API cannot log a spare (the std minor below); the AVX-512 `ggml_cpu` module never
+  loaded after prebuild (fixed at the close); Holon's offload decode sat 1.3–3% below step 4's at the closing code —
+  bisected on an A5000 to step 6's CPU share phase in `moe_resolve@1`, run under F5a too, and fixed (`b45e86f`; on
+  the 5080 decode is back at step 4's numbers, and the offload lock is propagated, `8615e26`). Next: K, FN (its MTP-on rows need the aux-model item below), GLM; the follow-ups below.
+- **F5b locks** (`docs/v1-offload.md` §14, step 8 part 2): `propagate`'s L2 scores a lock's own settings, which F5b's
+  path-aware floor refuses (one token per step), so no tool writes a lock with a CPU split; and S5's lookup ranks a
+  tier-carrying lock first, so a benchmark deployment (the capped fit) would become a host's default. Both are the
+  lead's decision before an F5b lock lands. Until then `scripts/ci/check_locks.py` refuses any lock whose class carries
+  a CPU tier (`<gpu>+x86-…`): one committed by hand would silently become the default of every host of that tier.
+- **A decode-run L2 in propagation** (panel, X's close): `propagate` scores prompts in chunks, so its L2 cannot see
+  kernels that run only in decode (the router's `moe_router@1` kept `moe_topk@1` in the chunks; step 8 part 2). Locks
+  whose decode-only kernels changed need an L2 over a decode run — Tier B at the mmvq step size, or one token per
+  step — before they are approved.
+- **Tune's F5b benchmark is biased** (panel, X's close): one prompt set, arms run one after another and a median of 3
+  measured +5.4% at the natural fit where the interleaved rows measured −6%. Interleave the arms over several natural
+  prompts (as `spikes/x6_cpu/decode.py` does) before FN or GLM rely on tune's split.
+- **A warm-up launch before `holon serve` reports ready** (panel, X's close): a pinned arena that does not fit is
+  refused at its first launch (D4), which can be the first request's. Launch once before ready, with a test that an
+  oversized pinned arena fails before the server reports ready.
+- **F10 with RAM short** (`docs/v1-offload.md` §14, step 8): promote-on-fetch's spares are unlogged on the device, so
+  the host mirror lags them and exclusive tiers refuse F10. A std minor — a delta-log record "push b's slots onto the
+  layer's empty stack", replayed by `ResidencyMap.commit` outside borrowing steps — makes the mirror exact; it lands at
+  the start of the GLM milestone, which needs F10 with RAM short.
+- **Auxiliary-model (MTP) experts through the offload store** (a std minor, in the FN milestone): the store refuses
+  an aux model's experts today (`std/holon_std/moe/offload.py:61`: an MTP layer's sub-steps need their own row
+  kinds); FN's MTP-on rows (Flash-Next IQ2_XS on the RTX 5080, `docs/v1-offload.md` §7) need them.
+- **Lending and the prefill ring under exclusive tiers** (a std minor, in the GLM milestone): with RAM short the
+  store keeps a prefill pass's staging and stages every miss (a lent expert would need a demotion first;
+  `docs/v1-offload.md` §14, step 5), so RAM-short prefill is slow by design; GLM's RAM-short prefill bar needs them.
+- **Bitwise placement invariance as a term of `linear_experts_arena@1`** (a std minor): the offload store's
+  exactness rests on the provider's results being slot-, arena- and grouping-invariant, which only
+  `kernels.ggml_cuda`'s L0 checks today (`docs/design.md` §6.5); written into the contract, every arena provider's
+  L0 would check it.
+- Smaller deferrals of milestone X are listed where they were decided (`docs/v1-offload.md` §14): two-phase lending
+  for host-edit policies, prompt-time admission, F8, ARC, the AVX-512 tier's L0 on an AVX-512 host, PDL in the
+  router, the remaining per-step kernels.
 - VMM ledger + live rebalance KV ↔ experts through `quiesce` (run-identical after shrink/regrow).
 - PIECEWISE graphs for mixed prefill/decode steps (mixing itself is M0.7's core budget `chunk_with_decode`, design
   §7.1; mixing verify rows is its follow-up, `docs/m07-perf.md` §9); depth 2; radix PrefixIndex if profiles warrant.
@@ -622,6 +679,11 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   where templates or agents keep the reasoning in later prompts and answers are long. It needs the answer's tokens
   as the template re-renders them (a checkpoint at the last aligned position the next prompt shares) and a payload
   unit per finished request.
+- **MoE prefill speed** (owner, 2026-10-18; `docs/v1-offload.md` §13): offload's development gate passed every decode row
+  but trails FreeToken's prefill at 4K / 32K (0.92× / 0.88×); the cause is the expert GEMMs, not offload — FreeToken's
+  all-resident prefill is 1.6–2.0× Holon's on the RTX 5090. Work: a faster large-batch MoE GEMM path (e.g. dequant to
+  a tensor-core GEMM for big chunks instead of mmq's int8 path), measured against FreeToken and llama.cpp, all-resident
+  and offloaded.
 - **One version file:** a root `VERSION` read by every distribution at build time (hatchling's version source),
   `holon.__version__` from the installed metadata, and the plan's runtime-closure hash reading `VERSION` for the
   workspace's own packages (`uv.lock` records them as dynamic). It changes the core, so it lands with the next relock
@@ -635,8 +697,8 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   change with its own lock migration.
 
 **v2 — breadth**
-- DeepSeek-class: DSA indexer (page groups), V4 compressed KV (`tokens_per_unit`) — correctness on reduced-layer
-  configs locally, performance on datacenter GPUs.
+- DeepSeek-class: DSA indexer (page groups; GLM-5.3-Flash brings it into v1, `docs/v1-offload.md` D2), V4
+  compressed KV (`tokens_per_unit`) — correctness on reduced-layer configs locally, performance on datacenter GPUs.
 - PD disaggregation, EP, DP-attention, PP on datacenter GPUs (H100/GB200); draft-model drafter (nested ModelPlugin).
 - Tree verification, KVMem-style retrieval window, batch-invariant deterministic Plan (if needed), L3 quality judge,
   ROCm/CPU platforms, multi-model serving.

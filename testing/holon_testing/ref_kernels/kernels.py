@@ -136,19 +136,28 @@ CACHE_BYTES = 128 << 20
 class LinearExperts:
     """Expert stacks: ggml layouts dequantized per expert (gguf-py, MXFP4 in torch), HF layouts per expert and unit by
     std.weights.hf's reference — cached when small (`CACHE_BYTES`), else per call; dense ones as stored, the
-    activation rounded to their dtype (the contract)."""
+    activation rounded to their dtype (the contract). A cached decode is checked against the stack's bytes: an offload
+    store's arena (up to `experts` slots) changes between calls."""
 
     def __init__(self, ctx, *, layout: str, experts: int, out: int, glu: str, out_dtype: str, **facts) -> None:
         self.quantized = None if layout.startswith("dense/") else _Dequantized(ctx, layout=layout)
         self.experts, self.out, self.glu, self.out_dtype = experts, out, glu, getattr(torch, out_dtype)
+        self._stacks: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}   # stack -> (its bytes, their decode)
+        self.errors = torch.zeros(1, dtype=torch.int32)        # `linear_experts_arena@1`'s word: never set here
 
     def __call__(self, x, parts, ids):
+        if not isinstance(x, torch.Tensor):            # another provider's prepared handle: the tensor it stands for
+            x = x.x
         if self.quantized is None:
             weight = parts["weight"]
             y = moe.linear_experts(x, weight, ids, self.glu, operand_dtype=weight.dtype)
         else:
-            if self.experts * self.out * x.shape[-1] * 4 <= CACHE_BYTES:
-                stack = self.quantized.dequantized(parts, lambda p: self._decode(p, range(self.experts)))
+            first = next(iter(parts.values()))
+            if len(first) * self.out * x.shape[-1] * 4 <= CACHE_BYTES:
+                key = (first.data_ptr(), first.shape)          # the decode is kept while the bytes stay the same
+                if key not in self._stacks or not torch.equal(self._stacks[key][0], first):
+                    self._stacks[key] = first.clone(), self._decode(parts, range(len(first)))
+                stack = self._stacks[key][1]
             else:
                 stack = self._decode(parts, ids.unique().tolist())
             y = moe.linear_experts(x, stack, ids, self.glu)
@@ -156,13 +165,13 @@ class LinearExperts:
 
     def _decode(self, parts, experts) -> torch.Tensor:
         """The f32 stack [E, out, in] with `experts` decoded (the others zero)."""
-        q = self.quantized
+        q, n = self.quantized, len(next(iter(parts.values())))
         if q.ggml is not None:
             rows = [q._dequantize({"blocks": parts["blocks"][e]}) for e in experts]
         else:
-            units = moe.expert_parts(parts, self.experts, merged=self.glu == "swiglu")
+            units = moe.expert_parts(parts, n, merged=self.glu == "swiglu")
             rows = [torch.cat([hf.dequantize(q.elem, u) for u in units[e]]) for e in experts]
-        stack = rows[0].new_zeros(self.experts, *rows[0].shape)
+        stack = rows[0].new_zeros(n, *rows[0].shape)
         stack[list(experts)] = torch.stack(rows)
         return stack
 
@@ -175,12 +184,124 @@ class MoeTopk:
         return moe.moe_topk(logits, self.top_k, self.renormalize)
 
 
+class MoeRouter:
+    def __init__(self, ctx, *, top_k: int, renormalize: bool, **facts) -> None:
+        self.top_k, self.renormalize = top_k, renormalize
+
+    def __call__(self, x, router):
+        return moe.moe_router(x, router, self.top_k, self.renormalize)
+
+
 class MoeCombine:
     def __init__(self, ctx, *, dtype: str, **facts) -> None:
         self.dtype = getattr(torch, dtype)
 
     def __call__(self, y, weights, out):
         out.copy_(moe.moe_combine(y, weights, self.dtype))
+
+    def add(self, y, weights, residual, out):
+        out.copy_(moe.moe_combine(y, weights, self.dtype, residual))
+
+
+class MoeResolve:
+    def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
+        self.staging = staging
+
+    def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
+                 errors, delta, n_delta, group, plan, jobs):
+        slots, fetch, n_fetch, increments, seen, bits, cpu, rows = moe.moe_resolve(ids, kinds, residency, host, limits,
+                                                                                  self.staging, ring, stage, plan)
+        counts += increments
+        routed |= seen
+        misses.clamp_(min=int(n_fetch.max()))
+        errors |= bits
+        jobs[0, 0] = len(rows)
+        for i, row in enumerate(rows):
+            jobs[1 + i, :len(row)] = torch.tensor(row)
+        return slots, fetch, n_fetch, cpu
+
+
+class ExpertFetch:
+    def __init__(self, ctx, *, unit_bytes: int, staging: int) -> None:
+        pass
+
+    def __call__(self, fetch, n, src, dst):
+        dst.copy_(moe.expert_fetch(fetch, int(n[0]), src, dst))
+
+
+class ExpertPrefetch:
+    def __init__(self, ctx, *, unit_bytes: int, copy: str) -> None:      # either mode: a CPU step copies at once
+        pass
+
+    def start(self, key, fetch, n, src, dst):       # at once: a CPU step has nothing to overlap
+        dst.copy_(moe.expert_fetch(fetch, int(n[0]), src, dst))
+
+    def wait(self, key):
+        pass
+
+
+class CpuTask:
+    """`cpu_task@1` on a CPU engine: a slot's task runs at its signal (a CPU step has nothing to overlap)."""
+
+    def __init__(self, ctx, *, pool: str) -> None:
+        self.tasks, self.errors = [], ctx.static(f"cpu_task.{pool}.errors", (1,), torch.int32)
+
+    def bind(self, task) -> int:
+        self.tasks.append(task)
+        return len(self.tasks) - 1
+
+    def signal(self, slot: int) -> None:
+        moe.cpu_task(self.tasks[slot])
+
+    def wait(self, slot: int) -> None:
+        pass
+
+    def copy(self, roles):
+        return lambda: moe.copy_task(roles)
+
+
+class CpuExperts:
+    """`cpu_experts@1`'s oracle; a task over fixed buffers runs it (synchronous only: no `native`)."""
+
+    def __init__(self, ctx, *, gate_up: str, down: str, inter: int, top_k: int, **facts) -> None:
+        self.gate_up, self.down, self.inter, self.top_k = gate_up, down, inter, top_k
+
+    def __call__(self, jobs, x, gate_up, down, rows, threads: int = 1) -> None:
+        rows.copy_(moe.cpu_experts(jobs, x, gate_up, down, rows, self.gate_up, self.down, self.inter, self.top_k))
+
+    def task(self, jobs, x, gate_up, down, rows):
+        return lambda: self(jobs, x, gate_up, down, rows)
+
+
+class MoeTiers:
+    """`moe_tiers@1`'s oracle, writing in place what the contract writes."""
+
+    def __init__(self, ctx, **facts) -> None:
+        pass
+
+    def __call__(self, ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece, classes,
+                 owner, capacity, heat, io, moves, n_moves) -> None:
+        records = [tuple(r) for r in delta[int(start[0]):int(n_delta[0])].tolist()]
+        out = moe.moe_tiers(ids, kinds, group, fetch, n_fetch, stage, records, residency, host, piece, classes, owner,
+                            capacity, heat)
+        for name, t in (("fetch", fetch), ("residency", residency), ("host", host), ("owner", owner),
+                        ("moves", moves), ("n_moves", n_moves)):
+            t.copy_(out[name])
+        for r, rows in enumerate(out["io"]):
+            io[r, 0, 0] = len(rows)
+            for i, row in enumerate(rows):
+                io[r, 1 + i] = torch.tensor(row)
+
+
+class MoePatchRows:
+    def __init__(self, ctx, **facts) -> None:
+        pass
+
+    def publish(self, x, cpu, out) -> None:
+        out.copy_(moe.moe_publish_rows(x, cpu, out))
+
+    def __call__(self, y, rows, cpu) -> None:
+        y.copy_(moe.moe_patch_rows(y, rows, cpu))
 
 
 class CausalConv1d:
@@ -231,6 +352,9 @@ BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul"
          "attention.paged_prefill": PagedAttention, "attention.paged_decode": PagedAttention,
          "attention.paged_verify": PagedAttention, "attention.causal": CausalAttention,
          "qlinear": QLinear, "qlinear_glu": QLinearGlu, "qembedding": QEmbedding, "linear_experts": LinearExperts,
-         "moe_topk": MoeTopk,
-         "moe_combine": MoeCombine, "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule,
-         "gated_rmsnorm": GatedRMSNorm, "gdn_rewind": GDNRewind, "kv_write": KvWrite}
+         "linear_experts_arena": LinearExperts,
+         "moe_topk": MoeTopk, "moe_router": MoeRouter, "moe_combine": MoeCombine, "moe_resolve": MoeResolve,
+         "expert_fetch": ExpertFetch, "expert_prefetch": ExpertPrefetch, "cpu_task": CpuTask, "cpu_experts": CpuExperts,
+         "moe_patch_rows": MoePatchRows, "moe_tiers": MoeTiers,
+         "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule, "gated_rmsnorm": GatedRMSNorm,
+         "gdn_rewind": GDNRewind, "kv_write": KvWrite}

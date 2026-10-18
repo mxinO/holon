@@ -13,6 +13,10 @@ weights' per-group offset (`w = scale·k + b`, `k` the integer factor) multiplie
   These are the MMA kernels', which llama.cpp runs on NVIDIA cc >= 7.5 (`turing_mma_available`), i.e. on every
   class we build (sm_86, sm_89, sm_120a); the dp4a kernels of older GPUs differ (e.g. Q4_0 there uses its sums).
 
+A third path, `cpu`, is ggml-cpu's (docs/v1-offload.md F5b, the CPU experts, §6's path-aware floor): Q8_K activations
+(per 256 values an f32 scale; Q8_0 for the types whose dot takes it) as std.moe.reference `quantize_cpu` emulates
+them, exactly, and dots with no stored-sum correction (ggml-cpu's k-quant dots use the quantized values' sums).
+
 So `y = W x̃ + Σ_g b_g (S_g − Σ_g x̃)` over the groups `g` whose offset uses a stored sum `S_g`. The offsets `b` are
 read from the blocks by gguf-py with the integer factors zeroed. Everything else (fp16 products, summation order,
 fast-math) is left to the L0 budget. Types are ggml names in lowercase (`"q4_k"`). Expert stacks (`linear_experts`,
@@ -25,8 +29,9 @@ import dataclasses
 import gguf
 import numpy as np
 import torch
+from holon_std.moe.reference import Q8_0_DOT, quantize_cpu
 
-MMVQ, MMQ = "mmvq", "mmq"
+MMVQ, MMQ, CPU = "mmvq", "mmq", "cpu"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -49,7 +54,9 @@ _IQ1S_DELTA = 0.125
 
 
 def blocking(ggml_type: str, path: str) -> Blocking:
-    """The q8_1 activation blocking of `path` for weights of `ggml_type`."""
+    """The q8_1 activation blocking of `path` for weights of `ggml_type` (`cpu`: ggml-cpu's Q8_K, or Q8_0)."""
+    if path == CPU:
+        return Blocking(32, torch.float16) if ggml_type in Q8_0_DOT else Blocking(256, torch.float32)
     if path == MMVQ:
         return Blocking(32, torch.float16, 32 if ggml_type in _MMVQ_SUMS else 0)
     if path != MMQ:
@@ -112,7 +119,10 @@ def linear_experts(x: torch.Tensor, weight: torch.Tensor, blocks: np.ndarray | N
     b = blocking(ggml_type, path)
     if b.sum_group and offs is None:
         offs = offsets(blocks, ggml_type, b.sum_group).view(e, out, -1)
-    xt, corr = _activations(x.reshape(-1, x.shape[-1]), b, dtype)          # T·R rows
+    if path == CPU:                                                        # T·R rows
+        xt, corr = quantize_cpu(x.reshape(-1, x.shape[-1]), f"ggml.{ggml_type}/gguf.native").to(dtype), None
+    else:
+        xt, corr = _activations(x.reshape(-1, x.shape[-1]), b, dtype)
     source = torch.arange(t * k, device=x.device) // (k // x.shape[1])     # the input row of each (token, slot)
     flat = ids.reshape(-1).long()
     y = torch.zeros(t * k, out, dtype=dtype, device=x.device)
