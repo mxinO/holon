@@ -1167,3 +1167,31 @@ docstring):
 5. **The tiny GGUF is rebuilt, not fetched.** The small fixtures are committed; a pinned script rebuilds the GGUF and
    checks its sha256; CI skips only the GGUF-dependent part (D2's deviation).
 6. **Step 2's remainder continues; steps 1 and 3 wait** for milestone K's core seams.
+
+**Step 2, done** (2026-10-18; every part that needs no core seam):
+- **The golden venv** `local/envs/golden-qwen4`: transformers 5.19.0, tokenizers 0.23.3, and `-e` installs of judge,
+  std and testing with `--no-deps`.
+- **The judge edits of D2:**
+  - the `qwen4exp` name map and value rules;
+  - split files, with every shard hashed in `file_meta`, and gguf-py's version plus its `quants.py` sha256;
+  - lazy PLE rows, with the hash constants checked against HF's;
+  - the tie rule, scoped to the indexer's call;
+  - the hyper-connection mixer as the final norm, and the head in row blocks;
+  - MoE found by its block, and the shared expert in the floor's mirror;
+  - floors that pass unquantized tensors the map lacks.
+  - Query blocks are not needed (N4).
+- **gguf-py at LC `27c7a76`** in the workspace lock. Its `quants.py` only adds Q1_0 / Q2_0, so existing types
+  dequantize as before. The locks' relock is FN's single propagation (D16).
+- **Q2_0 on the CPU path:** `q2_0` is in `Q8_0_DOT` and in `kernels.ggml_cpu`'s `cpu_experts@1`, using ggml-cpu's own
+  Q2_0 · Q8_0 dot; L0 covers a synthetic class. The judge's mmq / mmvq blockings already match Q2_0: D4, no stored
+  sums.
+- **`v1-long`** (sha256 `d8858951…`).
+- **The tiny model:**
+  - its GGUF and MTP pack are rebuilt byte for byte to pinned sha256s;
+  - the fixtures are committed in `testing/holon_testing/qwen4exp_fixtures.safetensors`: two prompts with 31 boundary
+    ties;
+  - in the golden venv, the streamed golden equals HF's forward bit for bit.
+- **N4** is done.
+
+**Deferred to step 3, with the MTP head (D9):** the pooled MTP reference transcribed from SG's module, which the §6.1
+check runs on the pack's dequantized tensors. Steps 1 and 3 wait for milestone K's core seams.
