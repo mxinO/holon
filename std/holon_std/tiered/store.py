@@ -637,11 +637,11 @@ class TieredStore:
 
     # -- helpers ------------------------------------------------------------------------------------------------------
     def _tail(self, slots: Callable[[SlotClass], int]) -> tuple[int, int] | None:
-        """The tail under `ring_lend = "tail"` (D11): the largest class arena — the first role's class most groups
-        have, ties to the lower class index — and its last n slots, enough for the clients' `tail_bytes`; refused
-        where that class's other cache slots (`slots(c)` cache slots, less the tail's) cannot lend a prefill pass's
-        staging (D5): a tail step then always stages, never short."""
-        if self.ring_lend != "tail":
+        """The tail under `ring_lend = "tail"` (D11), where steps stream: the largest class arena — the first role's
+        class most groups have, ties to the lower class index — and its last n slots, enough for the clients'
+        `tail_bytes`; refused where that class's other cache slots (`slots(c)` cache slots, less the tail's) cannot
+        lend a prefill pass's staging (D5): a tail step then always stages, never short."""
+        if self.ring_lend != "tail" or not self.ring_tokens:        # (`resolver` stops streaming where none lends)
             return None
         classes = list(self.classes.values())
         first = [classes.index(self.groups[g][0]) for g in self._order]

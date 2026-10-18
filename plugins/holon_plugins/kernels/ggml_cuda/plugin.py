@@ -500,10 +500,14 @@ class LinearExperts(_Matmul):
 
     def scratch_bytes(self, tokens: int) -> int:
         """`scratch`'s bytes for a call of `tokens` tokens (std.moe.kernels, docs/v1-moe-prefill.md D10): its mmq
-        launches' transients — the id maps and q8_1 rows (`workspace_bytes_id`), then gate/up's f32 output before our
-        SwiGLU —, one launch at a time; 0 where it runs mmvq only (the persistent workspace serves that)."""
+        launches' transients, one launch at a time — the id maps and q8_1 rows (`workspace_bytes_id`) past the
+        persistent workspace's rows, then gate/up's f32 output before our SwiGLU —; 0 where it runs mmvq only."""
         rows = self._mmq_rows(tokens)
-        return self._id_bytes(rows) + self._gate_up_bytes(rows) if rows else 0
+        return self._ids_bytes(rows) + self._gate_up_bytes(rows)
+
+    def _ids_bytes(self, rows: int) -> int:
+        """`scratch`'s id maps and q8_1 rows for an mmq launch of `rows` (none: the persistent workspace holds them)."""
+        return self._id_bytes(rows) if rows > self.resident_rows else 0
 
     def _gate_up_bytes(self, rows: int) -> int:
         return -(-rows * self.top_k * self.out * 4 // POOL_ALIGN) * POOL_ALIGN if self.swiglu else 0
@@ -524,19 +528,19 @@ class LinearExperts(_Matmul):
             raise ValueError("kernels.ggml_cuda: out overlaps x or scratch")
 
     def _transients(self, tokens: int, device: torch.device, scratch: torch.Tensor | None):
-        """The mmq launches' workspace and gate/up's f32 output (None for mmvq-only calls; D10): carved from `scratch`
-        where given; else the persistent workspace and a new f32 buffer up to its rows, and above them a new buffer of
-        `scratch_bytes`, carved alike."""
-        rows = self._mmq_rows(tokens)
-        if not rows:
-            return None, None
-        if scratch is None and rows <= self.resident_rows:
-            return self.workspace, torch.empty(rows, self.top_k, self.out, device=device) if self.swiglu else None
+        """The mmq launches' workspace and gate/up's f32 output (D10), carved from `scratch` as `scratch_bytes` lays
+        it out (a new buffer of that size where the caller passed none): the id maps past the persistent workspace's
+        rows (else the persistent workspace), then the f32 output."""
+        rows, nbytes = self._mmq_rows(tokens), self.scratch_bytes(tokens)
+        if not nbytes:
+            return self.workspace, None
         if scratch is None:
-            scratch = torch.empty(self.scratch_bytes(tokens), dtype=torch.uint8, device=device)
-        ids = self._id_bytes(rows)
-        gate_up = scratch[ids:ids + self._gate_up_bytes(rows)].view(torch.float32)[:rows * self.top_k * self.out]
-        return scratch[:ids], gate_up.view(rows, self.top_k, self.out) if self.swiglu else None
+            scratch = torch.empty(nbytes, dtype=torch.uint8, device=device)
+        ids, gate_up = self._ids_bytes(rows), None
+        if self.swiglu:
+            gate_up = scratch[ids:ids + self._gate_up_bytes(rows)].view(torch.float32)[:rows * self.top_k * self.out]
+            gate_up = gate_up.view(rows, self.top_k, self.out)
+        return scratch[:ids] if ids else self.workspace, gate_up
 
     def __call__(self, x, parts: dict[str, torch.Tensor], ids: torch.Tensor, *, out: torch.Tensor | None = None,
                  scratch: torch.Tensor | None = None) -> torch.Tensor:

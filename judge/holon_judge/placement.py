@@ -13,8 +13,8 @@ that changed the map without logging it shows there.
 `parity(trace)` replays a trace recorded under `placement.lfu@1` (F11) with the oracle extended from the M6 replay's
 `lfu` to D4's spec (placement.lfu's `reference.replay`) from the residency, slots and empty slots the trace starts
 with (a tail step's lending, docs/v1-moe-prefill.md D11, reads the slots), and compares every step's residency and
-empty slots with the device's, exactly. A policy bug shows only as lost speed, since every placement is exact: this is
-the check that sees it.
+empty slots (their stacks, as the delta log orders them) with the device's, exactly. A policy bug shows only as lost
+speed, since every placement is exact: this is the check that sees it.
 
 `cpu_split(engine)` is F5b's frozen split (§6): the split table and the static placement's experts per layer, what a
 path-aware floor needs to know which experts the CPU computed (`holon_judge golden --cpu-split`)."""
@@ -91,7 +91,8 @@ def route_dump(engine) -> Iterator[Trace]:
                             "cpu": record["cpu"].copy(),
                             "records": record["records"].copy(), "lends": record["lends"],
                             "resident": resident(store, step.step),
-                            "empty": np.array([len(e) for e in store.residency.empty])})
+                            "empty": np.array([len(e) for e in store.residency.empty]),
+                            "stacks": [np.array(e).reshape(-1, store.roles) for e in store.residency.empty]})
     with device_maps() as resident:
         store.taps.append(tap)
         try:
@@ -130,8 +131,8 @@ def parity(trace: Trace) -> dict:
 
     want = replay(trace.seed, trace.steps, trace.score, trace.classes, trace.slots, trace.sizes, trace.stacks)
     differs = next((s["step"] for w, s in zip(want, trace.steps, strict=True)
-                    if not (np.array_equal(w["resident"], s["resident"]) and np.array_equal(w["empty"], s["empty"]))),
-                   None)
+                    if not (np.array_equal(w["resident"], s["resident"]) and np.array_equal(w["empty"], s["empty"])
+                            and all(map(np.array_equal, w["stacks"], s["stacks"])))), None)
     return {"steps": len(trace.steps), "decode_steps": sum(bool(s["counts"].any()) for s in trace.steps),
             "borrowing_steps": sum(s["lends"] is not None for s in trace.steps),
             "lends": sum(int((np.asarray(s["lends"]) > 0).any(1).sum()) for s in trace.steps if s["lends"] is not None),

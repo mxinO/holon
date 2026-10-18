@@ -624,13 +624,18 @@ def test_an_arena_call_of_many_chunks_gives_the_chunks_rows(ctx, name, stage):
 def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Tensor) -> None:
     """D10 (docs/v1-moe-prefill.md) on an arena binding, glu none and swiglu: NaN-poisoned `out` and `scratch` of
     `scratch_bytes` (one for every launch of a call: 4,096 rows, then a chunk, or then an mmvq tail) give the
-    allocating call's bits, and the persistent workspace is the decode size's; a short, misaligned or overlapping
-    buffer is refused before anything is launched."""
-    for glu in ("none", "swiglu"):
+    allocating call's bits, and the persistent workspace is the decode size's — mmvq's rows, or a binding's graphed
+    decode rows (64 here), whose id maps it keeps: their `scratch` is gate/up's f32 output only —; a short,
+    misaligned or overlapping buffer is refused before anything is launched."""
+    decode = BuildContext(ctx.plugins, ctx.device, options={"max_seqs": 64})
+    for glu, bound in (("none", ctx), ("swiglu", ctx), ("swiglu", decode)):
         f = facts | {"glu": glu}
-        kernel = ctx.select_kernel("linear_experts_arena@1", site="l0", **f).impl(ctx, **f)
-        assert kernel.resident_rows == max(kernel.mmvq_tokens, 1) and kernel.scratch_bytes(kernel.mmvq_tokens) == 0
-        for tokens in (len(ids), len(ids) - CHUNK + 1):
+        kernel = bound.select_kernel("linear_experts_arena@1", site="l0", **f).impl(bound, **f)
+        assert kernel.resident_rows == max(kernel.mmvq_tokens, 1 if bound is ctx else 64)
+        assert kernel.scratch_bytes(kernel.mmvq_tokens) == 0
+        if bound is decode:
+            assert kernel.scratch_bytes(64) == 64 * K * kernel.out * 4 < kernel.scratch_bytes(65)
+        for tokens in (len(ids), len(ids) - CHUNK + 1) if bound is ctx else (64, 65):
             want = kernel(x[:tokens], parts, ids[:tokens])
             out, scratch = torch.full_like(want, torch.nan), torch.full((kernel.scratch_bytes(tokens),), 0xFF,
                                                                         dtype=torch.uint8, device="cuda")
