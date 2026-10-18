@@ -604,6 +604,33 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   SSD under the prefix index, exact, deterministic resume); **FN** Qwen3.8-Flash-Next (QSA + indexer, PLE n-gram
   table, hyper-connections; Qwen3.6-35B-A3B as its first step) compared with Strata; **GLM** GLM-5.3-Flash (MLA + DSA
   indexer, KDA, mHC) compared with Project Maya (owner, 2026-10-17). Qwen3.5-122B-A10B is dropped.
+
+  **X status (2026-10-18): closed, acceptance met with the recorded shortfall** (FreeToken prefill at 4K / 32K).
+  Design and evidence: `docs/v1-offload.md` (rev 4.5, panel-clean; §13 step 0's measurements and decisions, §14 the
+  build record per step, "Step 8, part 2" the close); records `evidence/x0_*` … `x7_heldout_*`,
+  `x8_close_rtx-5080_2026-10-18.json`.
+
+  | # | Result |
+  |---|---|
+  | 1 | Plugins: F11 `lfu` (the default), F1 `static`, F2–F3 `profile_decay`, F4 `lru`, F5a, F5b (`plan[n]`), F7 (the prefill ring), F9 (SSD tier); held out after the std API tag, plugin-only: F10 promote-on-fetch, A1 tail skip (`approx`), a page-cache tier |
+  | 2 | Exact by default: every placement and policy byte-identical to all-resident (A5000; cross-placement identity ×3 on the RTX 5080); F5b `bounded` (L2 passing against the path-aware floor, run-identical ×3) on the A5000 and the RTX 5080 |
+  | 3 | Gate, Qwen3-30B-A3B Q4_K_M on the RTX 5080. Natural fit (52.7%): decode vs FreeToken 1.06 / 1.04 / 1.02× at 1K / 4K / 32K, vs llama.cpp's pinned cache 1.19 / 1.23 / 1.10×, its static splits ≥ 1.79×. Capped fit (25%, F5b +11.7% by tune): FreeToken 1.20 / 1.04 / 1.06×, the pinned cache 1.37 / 1.30 / 1.14×; F1 ≥ 0.97× llama.cpp's static split at both fits. **Shortfall, accepted by the owner:** prefill vs FreeToken 0.92–0.93× at 4K and 0.87–0.88× at 32K (≥ 2.1× every llama.cpp arm) |
+  | 4 | Program bars (Strata, Project Maya): FN's and GLM's |
+  | 5 | Memory: exact pinned host pools; pinned splits refused with a report (host pools at startup, a VRAM arena at its first launch) |
+  | 6 | Core: ABI 1.2 (S0–S5) and 1.3 (row kinds), each toy-proven; 4,603 / 6,000 lines (+355) |
+  | 7 | Locks: 22 of 22 propagated once and approved (16 dense bitwise; 6 MoE moved by the bounded router, L2 passing); the RTX 5080's natural-fit offload lock. The capped F5b lock's verdicts pass, but it is not written (escalated: no tool writes an F5b lock, and S5's lookup would make it the AVX-512 RTX 5080's default) |
+
+  Decisions: `lfu` the default (M6's replay, confirmed on the 5080); F5a by default, F5b only where tune and the
+  rows gain ≥ 5% (the capped fit; −6% at the natural fit); `ring_copy` `dma`; the profile a warm start only; the
+  FreeToken prefill shortfall accepted (owner, 2026-10-18). Found on the way: placement invariance needed two vendor
+  patches (forced tiling, a compact id helper); prompt-time admission and two-phase lending for host policies stayed
+  deferred; F10 showed the std API cannot log a spare (the std minor below); the AVX-512 `ggml_cpu` module never
+  loaded after prebuild (fixed at the close); Holon's offload decode sits 1.3–3% below step 4's at the closing code
+  (not bisected). Next: K, FN (its MTP-on rows need the aux-model item below), GLM; the follow-ups below.
+- **F5b locks** (`docs/v1-offload.md` §14, step 8 part 2): `propagate`'s L2 scores a lock's own settings, which F5b's
+  path-aware floor refuses (one token per step), so no tool writes a lock with a CPU split; and S5's lookup ranks a
+  tier-carrying lock first, so a benchmark deployment (the capped fit) would become a host's default. Both are the
+  lead's decision before an F5b lock lands.
 - **F10 with RAM short** (`docs/v1-offload.md` §14, step 8): promote-on-fetch's spares are unlogged on the device, so
   the host mirror lags them and exclusive tiers refuse F10. A std minor — a delta-log record "push b's slots onto the
   layer's empty stack", replayed by `ResidencyMap.commit` outside borrowing steps — makes the mirror exact; it lands at

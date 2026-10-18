@@ -112,5 +112,9 @@ and saves 2064 prefix tokens. Timings for Qwen3-0.6B on an RTX A5000: a first lo
 - The trace's long context stops at the prompt set's longest prompt (2048 tokens); buckets above 64 (`max_seqs` >
   64), spec decoding and grammar are not exercised.
 - CI `isolation-check` (re-run propagate on trusted GPU runners and reject unreproducible locks), sweeping all models.
+- A lock with an offloaded MoE's CPU split (F5b, `docs/v1-offload.md` §6): L2 scores the lock's own settings, and
+  F5b's path-aware floor needs a frozen placement at one token per step, so `propagate` and `tune --cpu-split` (without
+  `--no-lock`) stop with the judge's `ValueError`; F5b's bounded L2 runs by hand (`spikes/x6_cpu/l2.py`, then
+  `holon_judge golden --cpu-split` and `compare`). Plan §10's "F5b locks".
 - The engine/supervisor starting from the newest lock (`nearest_class` + `lock_overrides`), with an `unverified`
   lock's pins as soft preferences: a borrowed lock may pin kernels this GPU cannot run.
