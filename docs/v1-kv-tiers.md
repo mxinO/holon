@@ -1,9 +1,9 @@
 # v1 — milestone K: KV and checkpoint tiers under the prefix index
 
-Status: **rev 6, after the panel's fifth round** (2026-10-18). Nothing is built and nothing has been measured for K
+Status: **rev 7, after the panel's sixth round** (2026-10-18). Nothing is built and nothing has been measured for K
 yet. Every number below is a CPU-side estimate from earlier evidence (cited), fixed as a prediction before step 0
 and step 4 measure it. Rev 2 answered the three-reviewer panel (A correctness, B architecture, C numerics and
-performance); revs 3 to 6 answer its re-reviews. The finding-by-finding dispositions are in §13.
+performance); revs 3 to 7 answer its re-reviews. The finding-by-finding dispositions are in §13.
 
 Scope: plan §10's K line ("KV and checkpoint tiers (pinned RAM / SSD under the prefix index, exact, deterministic
 resume)", `docs/plan.md:603-604`), the end-of-answer checkpoint item (`docs/plan.md:675-681`), and the requirements
@@ -410,8 +410,9 @@ write-through as `std.state_tier`'s default, with write-back as an option (T1b):
 *VRAM eviction.*
 - **Eligible:** resident, `kids == 0`, units held only by the index. There are no load pins (round 4).
 - **A loading entry can be eligible**, once no live request references it. Evicting it is still a pure free:
-  - the core demotes it. Once every entry of its load is evicted and no step reads the load, the core calls
-    `loaded(load, done = None)`: the load is abandoned (D7);
+  - the core demotes it. Once every entry of its load is evicted and no step has read the load, the core calls
+    `loaded(load, done = None)`: the load is abandoned (D7). This holds even if a waiterless `loaded(load, fence)`
+    came first, in an earlier round (round 6);
   - its units go on the free rule's list (D4), so the next launch waits on the device for the H2D still writing
     them. An abandoned SSD load whose H2D was never enqueued is skipped, so that wait is a no-op, not a stall on its
     read (round 5);
@@ -459,6 +460,9 @@ in the tier is the tier's own obligation; dropping an interior copy loses hits, 
   - `test_state_liveness.py` also checks that no running request preempts itself while a lower-ranked gated request
     holds the shortfall in loading entries. It runs with a RAM load and with an SSD load whose read is delayed past
     the eviction (round 5). In the SSD cell the abandoned load is skipped, and `load_enqueue_wait_s` stays 0.
+    A third cell aborts the gated request, then evicts its loading entries two rounds later with the SSD read still
+    delayed. The waiterless `loaded(load, fence)` is followed by `loaded(load, None)`, and `load_enqueue_wait_s`
+    stays 0 (round 6).
 
   It extends `core/tests/test_state_liveness.py`'s random-traffic harness.
 
@@ -488,6 +492,16 @@ in the tier is the tier's own obligation; dropping an interior copy loses hits, 
      logical, and the host unit's reuse waits for the adopting step's end.
    - A request that joins a loading entry later issues its own payload load. Its adopt is therefore fenced by its
      own reading step's end, never by a `loaded` the tier already received for the earlier load.
+   - **One SSD read per payload** (round 6). The joiner's payload load must not issue a second read, nor decide
+     whether to on timing. So the payload counts as on host, or on its way there, from the moment the first load
+     that reads it is *decided*, whether or not the read has completed. The joiner's load:
+     - reuses that read's ticket;
+     - is charged nothing new on the lane;
+     - gets `due = max(first read's due, now)`;
+     - has a fence that chains on the first read (host-side on its ticket), then on the host unit's write fence.
+
+     Abandonment never cancels a level read, only a not-yet-enqueued H2D, so a joiner chained on a read whose first
+     load was abandoned still gets its bytes.
 7. The request is **load-gated** until the clock reaches its due time (D4).
 
 *Publish onto a demoted or loading entry: promote into place* (A1, the blocker). Today a request that recomputes
@@ -512,12 +526,15 @@ blocks. The rules:
 
 *Loads without pins, and cancellation* (A6; round 4 drops load pins). A load holds no reference of its own. Its
 units are kept by the index and by every live waiter (D6), and their reuse after an eviction is ordered by D4's free
-rule. The core calls the tier's `loaded(load, done)` exactly once:
+rule. The core calls the tier's `loaded(load, done)` with a fence **at most once**:
 - with `done` = the end event of the first step that reads the load (it waited on the load at launch);
-- with `done` = the load's own fence, if its last waiter is gone and no step reads it (at the next launch). The core
-  keeps the entries' `loading` mark, so a later hitter still joins the wait set for the pages and waits on the device;
-- with `done = None` when every entry of the load has been evicted before any step read it: the load is
-  **abandoned** (round 5). The tier sets an abandoned flag under the lock its I/O thread takes before enqueuing the
+- with `done` = the load's own fence, if its last waiter is gone and no step reads it (at the next launch). This
+  waiterless call is a notification, and the core waits on nothing for it. The core keeps the entries' `loading`
+  mark, so a later hitter still joins the wait set for the pages and waits on the device.
+
+It calls `loaded(load, None)` **at most once** as well: when every entry of the load has been evicted before any step
+read it, whether or not a waiterless `loaded(load, fence)` came first, in an earlier round (round 6). The load is then
+**abandoned** (round 5). The tier sets an abandoned flag under the lock its I/O thread takes before enqueuing the
   H2D. Either the H2D is never issued (the load's fence is then a no-op), or it was issued already and its fence
   exists for the free rule to wait on. An abandoned SSD load therefore never stalls the next launch on its read.
 
@@ -793,9 +810,10 @@ class StateTier(Protocol):         # slot `tier`: single, opt-in; the plugin's `
               ) -> tuple[set[tuple[int, str | None]], Fence]: ...  # accepted (key, spec; None: the pages)
     def load(self, keys: Sequence[int], units: Mapping[str, Sequence[int]],
              payloads: Sequence[tuple[int, str]], after: Sequence[Fence]) -> Load: ...
-    def loaded(self, load: Load, done: Fence | None) -> None: ...  # `done`: the reading step's end, the load's
-                                                                    # own fence, or None: abandoned (skip the H2D
-                                                                    # if not yet enqueued)
+    def loaded(self, load: Load, done: Fence | None) -> None: ...  # at most once with a fence (the reading step's
+                                                                    # end, or the load's own fence if waiterless),
+                                                                    # and at most once with None: abandoned (skip
+                                                                    # the H2D if not yet enqueued)
     def hit(self, keys: Sequence[int], adopted: Sequence[tuple[int, str]]) -> None: ...
     def drop(self, keys: Sequence[int], spec: str | None = None) -> None: ...
     def dropped(self) -> list[tuple[int, str | None]]: ...     # its own evictions since the last call
@@ -927,7 +945,7 @@ follows publish within 1–2 steps. Tiers-off configurations stay clean.
 | Plant | Where | Breaks | Predicted |
 |---|---|---|---|
 | `promote_unwaited` | CPU + GPU | a launch does not wait on its rows' loads | tier invariance fails (stale bytes) |
-| `adopt_source_reused` (A-1, B-N1, C-1; extended in round 5) | CPU | `loaded` ignores `done`: a host payload unit a step's adopt reads is reused by a later store or an SSD read without waiting for that step's end (deferred stream, plus an I/O thread delayed into the window). Second variant: a request that joins a loading entry later adopts the payload through the earlier load instead of its own | the adopted recurrent state is corrupt; tier invariance fails, in both variants |
+| `adopt_source_reused` (A-1, B-N1, C-1; extended in round 5) | CPU | `loaded` ignores `done`: a host payload unit a step's adopt reads is reused by a later store or an SSD read without waiting for that step's end (deferred stream, plus an I/O thread delayed into the window). Second variant: a request that joins a loading entry later adopts the payload through the earlier load instead of its own. The second variant also counts SSD reads, which must be one per payload (round 6) | the adopted recurrent state is corrupt; tier invariance fails, in both variants. A second read of the same payload fails the count |
 | `load_reuse_unwaited` (round 4) | CPU + GPU | units of an evicted loading entry are reused without the next launch waiting on the load's fence; the H2D delayed | the late H2D overwrites the new owner's bytes; tier invariance fails |
 | `waiter_unref` (round 4) | CPU | a request joining a loading entry's wait set by `_swap` takes no reference | the loading entry is evicted under a live waiter: the property test fails (`could_fit` counts held units) and tier invariance fails |
 | `load_before_store` (round 3, A-1) | CPU + GPU | the tier omits a host unit's write fence from the reading H2D's `after` and from the `Load`'s fence; the D2H stream deferred; eviction then promotion within 1–2 steps, plus a sibling request adopting the same host payload | the promoted pages or the adopted state read the unit before its store lands; tier invariance fails |
@@ -1290,3 +1308,20 @@ and an evicted loading entry's units waited on the load's fence even when the H2
 **Budget, ABI, schedule.** Core ≈ 292 lines (KS2 77 → 79 for the abandon call and per-adopt payload loads), within
 the unchanged ≤ +320. ABI unchanged (1.4 or 1.5 by merge order); `loaded`'s `done` becomes optional. Schedule
 unchanged at 26 days.
+
+### Rev 7 (2026-10-18): the panel's sixth round
+
+B was clean on rev 6. A and C each found one minor issue, both confirmed against rev 6's D7. Rev 6's "exactly once"
+`loaded` blocked abandonment after a waiterless call. Rev 6 also left open whether a late joiner's payload load reads
+the SSD again.
+
+| Finding | Disposition | Where / why |
+|---|---|---|
+| A: abandonment cannot follow a waiterless `loaded` (abort and eviction in different rounds reopen the stall of up to ≈ 0.5 s) | accepted (the lead's smallest-surface fix) | D6, D7, §4: `loaded` takes a fence at most once and `None` at most once, so `None` may follow a waiterless `loaded(load, fence)`. The tier sets the abandoned flag under the same enqueue lock. The waiterless call stays a notification that never waits. The round-3 liveness case gains the cell "abort, evict two rounds later, SSD read delayed", with `load_enqueue_wait_s` = 0 |
+| C: a late joiner's payload load must not issue a second SSD read, nor decide that on timing | accepted | D7 step 6: the payload is on host or in transit from the moment the first load is decided. The joiner reuses the read ticket, is charged nothing new on the lane, gets `due = max(first read's due, now)`, and its fence chains on the first read. Abandonment never cancels a level read. The joining variant of `adopt_source_reused` counts SSD reads: one per payload |
+
+**Budget, ABI, schedule.**
+- Core: ≈ 292 lines, unchanged. Both rules live in the tier, except one condition in the core's abandon call.
+- Budget: within ≤ +320.
+- ABI: unchanged (1.4 or 1.5 by merge order); `loaded`'s call rule is restated in its docstring.
+- Schedule: unchanged at 26 days.
