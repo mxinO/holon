@@ -203,3 +203,46 @@ def test_abi_listing_needs_the_right_bump(monkeypatch, old, new, error):
     for resource in ("state_kind.paged@1", "grammar.constraint@1", "transform.qwen3_5.squeeze@1"):
         assert f"{resource}  (" in listed
     assert "kernel." not in listed and "arch." not in listed and "model." not in listed
+
+
+def test_the_core_diff_report_names_core_changes_from_scripts_ci(tmp_path):
+    """`scripts/ci/check_core_diff.sh` (invariant 9's report) lists the core files changed since a base; run_all.sh
+    calls it from scripts/ci, where a relative `core/` pathspec matched nothing, so it always reported none."""
+    script = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "ci" / "check_core_diff.sh"
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", "-c",
+                        "commit.gpgsign=false", *args], check=True, capture_output=True)
+
+    def report(base):
+        return subprocess.run(["bash", str(script), base], cwd=tmp_path / "scripts" / "ci", capture_output=True,
+                              text=True, check=True).stdout
+    (tmp_path / "scripts" / "ci").mkdir(parents=True)
+    (tmp_path / "core").mkdir()
+    (tmp_path / "core" / "a.py").write_text("a = 1\n")
+    git("init", "-q")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    git("branch", "base")
+    assert report("base").startswith("ok   core-diff (empty)")
+    (tmp_path / "core" / "a.py").write_text("a = 2\n")
+    git("commit", "-qam", "change")
+    assert "core/a.py" in report("base")
+
+
+def test_check_locks_refuses_a_lock_carrying_a_cpu_tier(tmp_path):
+    """`scripts/ci/check_locks.py` refuses a lock class with a CPU tier (`<gpu>+<tier>/…`) until the policy for tier
+    and benchmark-only locks is decided (docs/plan.md §10, F5b locks): the lookup would make it a host's default."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    lock = root / "plans" / "nvidia" / "Qwen3-8B-NVFP4@70613544a162fdd3" / "rtx-5080" / "cu130-torch2.11" / "1.lock"
+
+    def check(cls: str) -> subprocess.CompletedProcess:
+        plans = tmp_path / cls.replace("/", "_") / "plans"
+        target = plans / "nvidia" / "Qwen3-8B-NVFP4@70613544a162fdd3" / cls / "1.lock"
+        target.parent.mkdir(parents=True)
+        target.write_text(lock.read_text())
+        return subprocess.run([sys.executable, str(root / "scripts" / "ci" / "check_locks.py"), "--plans", str(plans)],
+                              capture_output=True, text=True)
+    assert check("rtx-5080/cu130-torch2.11").returncode == 0
+    tiered = check("rtx-5080+x86-avx512/cu130-torch2.11")
+    assert tiered.returncode == 1 and "carries a CPU tier" in tiered.stdout

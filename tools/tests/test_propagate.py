@@ -133,6 +133,15 @@ def test_write_stores_lock_and_snapshot(tmp_path, current):
     assert propagate.trace_hash(stored) == out.lock.snapshot
     with pytest.raises(ValueError, match="nothing to write"):
         propagate.write(tmp_path, propagate.Outcome("unchanged", {}, []))
+    # A plan binding an `approx` plugin (A1's tail skip, as installed) is a human gate, never a default lock: refused
+    # whatever its verdict, written only with the explicit override.
+    plan = _plan()
+    approx = dataclasses.replace(plan, units=plan.units | {"transforms.tail_skip": UnitPin("1.0.0", "bbbb")})
+    out = propagate.decide(None, Scripted(approx, [_snap(), _snap()]), 86)
+    assert out.verdict == "approve" and propagate.approx(approx) == ["transforms.tail_skip"]
+    with pytest.raises(ValueError, match=r"binds approx plugins \['transforms.tail_skip'\]"):
+        propagate.write(tmp_path, out)
+    assert propagate.write(tmp_path, out, allow_approx=True).name == "2.lock"
 
 
 def test_snapshot_engines_share_one_pool_size(monkeypatch):

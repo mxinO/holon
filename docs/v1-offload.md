@@ -1,9 +1,11 @@
 # v1 — expert offload: MoE models larger than VRAM on one consumer GPU
 
-Status: **rev 4.2, panel-clean** (2026-10-17: all three reviewers report nothing remaining after four rounds); its
+Status: **closed (2026-10-18), acceptance met with the recorded shortfall (FreeToken prefill 4K / 32K)** — §14 "Step
+8, part 2" lists every item's verdict; the capped F5b lock is escalated (acceptance 7). Design history: **rev 4.2,
+panel-clean** (2026-10-17: all three reviewers report nothing remaining after four rounds); its
 parameters freeze when step 0's evidence lands. Rev 4.3 applies M6's evidence (§13: the default policy is `lfu`); rev 4.4 its panel round (10 + 7 findings), panel-clean
 again on 2026-10-17; rev 4.5 sets the parameters from the desktop benches (§13) — the design is frozen. Rev 1 drew 52 findings (A 20, B 15, C 17), rev 2
-27 (A 11, B 8, C 8), rev 3 20 (A 8, B 7, C 5); §12 logs each and where it is answered. No code yet. Evidence base: the local research note
+27 (A 11, B 8, C 8), rev 3 20 (A 8, B 7, C 5); §12 logs each and where it is answered (all before any code). Evidence base: the local research note
 `docs/brainstorm/v1-offload-research.md` (not published; "R §n"), which cites every reference engine by `file:line`
 in its local clone; Project Maya is R §3.1b.
 
@@ -68,8 +70,9 @@ for that model, with exact defaults and reproducible runs.
    - with the CPU split on: run-identical over 3 fresh engines on the snapshot trace, and bounded (L2 within budget)
      against a path-aware floor (§6).
 3. **Development gate** (milestone X's close), Qwen3-30B-A3B Q4_K_M on the RTX 5080, same file and host, no drafting,
-   medians of interleaved rounds, contexts ≤ 32K (the model's native limit is 40K), at the natural fit (≈ 47% of
-   experts in VRAM at 32K) **and** capped to ≈ 25%. Every row is predicted from step 0's roofline before it is
+   medians of interleaved rounds, contexts ≤ 32K (the model's native limit is 40K), at the card's natural fit
+   (52.4% of the experts in VRAM at 32K, measured on the RTX 5080 at step 4; the design estimated ≈ 47%) **and**
+   capped to ≈ 25%. Every row is predicted from step 0's roofline before it is
    measured. The natural-fit rows are judged at step 4 with the F5a lock; the capped-fit rows and the F1 row with
    the lock tune picks after step 6 (F5b may be what makes them pass: the vehicle routes ≈ 1.1 GB of experts per
    token, so at 25% cached decode is miss-bound, panel C-r2-1):
@@ -94,10 +97,12 @@ for that model, with exact defaults and reproducible runs.
    Holon-exact against Strata's defaults is reported, not gated. Plan §9's kill line (< 0.8× → rework the offload
    path before adding features) applies to the like-for-like rows.
 5. **Memory:** pinned host memory is allocated exactly (no power-of-two rounding) and accounted against
-   `host_memory`; VRAM and host splits are pinned by the lock; startup refuses with a per-pool report when a pinned
-   split does not fit.
-6. **Core:** only the seams of §4, each an additive ABI minor (ABI 1.2), toy-proven; ≈ 480 new code lines
-   (estimates in §4), core ≤ 6000 (4248 today). Suite time grows only by the new plugins' own tests.
+   `host_memory`; VRAM and host splits are pinned by the lock; a pinned split that does not fit is refused with a
+   per-pool report (host pools refused at startup; a pinned VRAM arena at the first launch, D4).
+6. **Core:** only the seams of §4 and the scheduler's row kinds, each an additive ABI minor, toy-proven — ABI 1.2
+   (S0–S5) and 1.3 (row kinds: `BatchPlan.row_kind`, `RowKind`); step 3d's executor change adds no ABI. As built:
+   +355 code lines (4,248 → 4,603 of 6,000; §4 estimated ≈ 480). Suite time grows only by the new plugins' own
+   tests.
 7. **Locks:** offload deployments get locks on the classes they run on; the existing locks are propagated once, at
    X's close (D15).
 
@@ -881,7 +886,8 @@ builds from the vendored llama.cpp's pin (51ce9c1) unless step 6 aligns it with 
 re-added slots; Movers are S2 MemOps); §6.1 (the fill step and pinned split in the budget order); §6.4 and D8
 (per-layer ready events and layer-wise loading stay planned; prefix tiers move to milestone K); §7.10 (adaptive
 placement may run in snapshots when the consumer is placement-invariant); §9's expert-cache row (no VMM in the first
-wave). Design is updated with X's code, as M0.7 did.
+wave). Design is updated with X's code, as M0.7 did — done at step 8 (`docs/design.md` D8, §4.2, §4.5, §6.1, §6.4,
+§6.5, §7.4, §7.10, §9).
 
 ## 14. Step 2 as built (2026-10-17)
 
@@ -1416,6 +1422,16 @@ interleaved; llama.cpp and FreeToken at x4_refs' pins).
 - **Natural fit:** 52.4% of the experts (3,220 / 1,610 / 1,610 cache slots), not ≈ 47%.
   - The fill at a 33,792-token floor reaches 52.7%, but its counts do not start when pinned (≈ 18 MB short), so the
     lock pins 8 experts fewer.
+- **Each arm's expert share in VRAM**, beside Holon's (the cache engines at Holon's share; the static splits at
+  their own choice and at the cap; x4_refs measured the static shares):
+
+  | Arm | Natural | Capped |
+  |---|---|---|
+  | Holon (`moe.cache`) | 52.4%: 3,220 of 6,144 experts (9.20 of 17.55 GB) | 25.0%: 1,536 (`*=0.25`) |
+  | FreeToken (`--moe-cache-rate`) | 0.524: 3,220 experts | 0.25 |
+  | llama.cpp `--moe-cache-mib` | 8,773 MiB: 52.4% | 4,200 MiB: 25.1% |
+  | llama.cpp `--fit` | default 1 GiB margin: 61.3% | `-fitt 7150`: 24.7% |
+  | llama.cpp `--n-cpu-moe` | 16 (the tuned best that fits 32K): 66.4% | 36: 25.0% |
 - **Offload lock (F5a, scratch copy, committed at X's close per D15):**
   - Settings: batch 1, 33,792 context, `lfu`, `moe.ring_copy=dma`, and a held-out routing profile as F2's warm
     start.
@@ -1489,8 +1505,8 @@ Decided while building, against the text above:
   delta log's records says "slot kept by the device"); the record comes when another expert takes the spare
   (`(group, a, owner)`), so until then the mirror maps the owner at the spare's slots. Nothing in std reads those
   entries (no host edits, lending picks only device-resident experts, exclusive tiers refuse F10); the judge's
-  `route_dump` reads the mirror, so under F10 its `mirrored` is false and its residency counts owners — F10's parity
-  check reads the device's map instead (the spike's `run.py`, the test).
+  `route_dump` read the mirror, so under F10 its residency counted owners — F10's parity check reads the device's map
+  instead (the spike's `run.py`, the test). Since step 8 `route_dump` reads the device's map too (below).
 - **The spares start absent** and the first decode call's boundary sets them up by LRU, ties by expert id (M6 set
   them up at the seed from the profile's coldest; the store zeroes a policy's state at the seed). An owner promoted
   back takes its own spare unlogged and unfetched (no list holds a spare's slots, so its bytes are intact).
@@ -1499,10 +1515,222 @@ Decided while building, against the text above:
 - **F10 under exclusive tiers is refused** (no heat to rank RAM by, and its unlogged evictions would bypass
   `moe_tiers@1`'s placement of victims), though D10's replay found F10's spares best in 4 of 9 RAM-short cells:
   RAM-short F10 needs the std record above.
-- **A1's best rank is over the expert pass's rows**, graph padding and other requests included (the transform sees no
-  row kinds): a request's drops depend on its batch, as Strata's do (it turns the skip off with parallel slots); the
-  human gate's L2 ran at one request per step.
+- **A1's best rank is over the expert pass's rows**, other requests' included (the transform sees no row kinds): a
+  request's drops depend on its batch, as Strata's do (it turns the skip off with parallel slots); the human gate's L2
+  ran at one request per step. Graph padding counted too until step 8, which hands its rows in dropped (below).
 - **The page-cache tier's own decisions:** every piece, no pinned or device memory, files opened buffered with
   random-access advice. Its decode against `gguf_direct` is not claimed: the checkpoint sits on a network filesystem
   whose client cache served both (16.5 tok/s each once warm).
 - **Not built:** ARC (the bonus).
+
+### Step 8, part 1 (2026-10-18): the step-7 panel's fixes, the held-out proof's finding, records, suite
+
+The step-7 panel's findings, each its own commit with a test that fails without it:
+
+| Finding | Fix | Commit |
+|---|---|---|
+| A: `route_dump` records the host mirror's residency, so F10's dumps count its spares' owners resident | it records the device's map as each step left it (`device_maps`: copied on the device at the next launch, which precedes the commit under overlap, else read at the commit; one copy per step, judge runs only); the `resolve-off-by-one` plant's "steps with misses" reads it too. F10's CPU test checks every step's residency against the device's (fails with the mirror); the overlapped lfu parity tests fail if the map is read at the commit | `bc21f87` |
+| C: nothing keeps an `approx` plugin out of a default lock | `propagate.write`, the only lock writer of `tune` and `propagate`, refuses a plan binding a plugin whose manifest declares `numerics = "approx"` unless `--allow-approx` (a human gate); tested with A1's installed manifest | `0bcf164` |
+| C: A1's best rank counts graph padding rows | the store hands a route transform padding rows' ids as −1 (it knows each token's row kind): a post-tag std bug fix, `moe_route_transform@1`'s signature unchanged | `3572b98` |
+| B: the plugin independence contract lists kernels by name (it had missed `kernels.promote` and `kernels.triton_fp8`; policies, tiers, transforms and models had none) | one import-linter independence contract over `holon_plugins.<family>.*` for every family: a new plugin is covered as it lands, a new family adds one expression; a planted cross-plugin import breaks it | `a293763` |
+
+**The held-out proof's finding: F10's mirror gap.** F10 landed plugin-only, as acceptance 1 asks, and in doing so
+found what the tagged std API cannot say. D4's host refill of F10's spares has no form a plugin can use (a
+device-owned policy may not edit, and no host edit hands a slot to a device-owned region), and no delta record says
+"a slot kept by the device", so the spares are the device's own and unlogged: the host mirror maps a spare's owner
+until another expert takes the spare, and F10 is refused under exclusive tiers, whose victim placement
+(`moe_tiers@1`) needs every eviction logged. The fix is a **std minor**: a delta-log record "push b's slots onto the
+layer's empty stack", replayed by `ResidencyMap.commit` outside borrowing steps too (today it pushes only a borrowing
+step's lent slots), with which a spare is an empty slot the device logged and the mirror stays exact. It is scheduled
+at the **start of the GLM milestone**, which needs F10 with RAM short (D10's replay: F10's spares least in 4 of 9
+RAM-short cells; Maya's structure); X needs neither (its default is F11 with RAM holding every expert). Plan §10
+lists it.
+
+**A1's human gate** (step 7's README; rank 7, tail skip against the no-skip candidate at F11's own placement, frozen
+at the end of a decode trace, one token per step, top-20 bucketed KL): at 25% cached KL mean 9.63e-3, top-1 97.32%,
+ΔPPL +0.62% ± 0.19%; at the natural 47% fit 7.32e-3, 97.68%, −0.12% ± 0.16% (more cached, fewer misses to drop).
+Against the mmvq floor at a frozen 25% placement it is outside the exact budgets (top-1 97.15%, ΔPPL +1.01%), as §6
+expected; decode at 25% cached under F11 gains +11.2% (46.45 → 51.67 tok/s), inside Strata's +10–24%. A1 stays
+`approx`: opt-in by `moe.route_transform = tail_skip`, a lock binding it only with `--allow-approx`.
+
+**Suite and CI** (one RTX A5000, the worktree's own venv, under `MemoryMax`): `pytest core std plugins judge testing
+tools` at `a293763` (the four fixes): **1519 passed, 66 skipped in 24 min 4 s**, plus the core-diff report's test since
+(`337cb8a`, 0.1 s; `core/tests/test_api.py` 44 passed at the final code). `main` (`c0c8b71`) on the same card the same
+day: 1248 passed, 2 failed, 52 skipped in 23 min 5 s (its two failures — a Qwen3.5 plant patching a GQA member main's
+std lacks, and the demo harness's venv check — are main's checkout's, not X's; both pass here). X adds 269 tests and
+≈ 1 min (+4%): the new plugins', seams' and store's own tests. `scripts/ci/run_all.sh main`: green in 41 s (import
+contracts 8 kept; ABI 1.3; core LOC 4,603 / 6,000).
+- **Found at the close:** `check_core_diff.sh` always reported "core-diff (empty)" under `run_all.sh`, which runs it in
+  `scripts/ci`, where its relative `core/` pathspec matched nothing; fixed with a top-level pathspec and a test
+  (`337cb8a`). Against `main` it now lists X's 27 core files; from the API tag to step 7's merge `git diff --stat` shows
+  no core path and only step 4's recorded std follow-ups, so the held-out proof stands.
+
+### Step 8, part 2 (2026-10-18): the close — F5b on the RTX 5080, the capped-fit and F1 rows, the offload locks, D15
+
+Evidence: `spikes/x8_close/README.md`, `evidence/x8_close_rtx-5080_2026-10-18.json` (one RTX 5080 desktop, one day,
+every arm interleaved, 3 rounds; llama.cpp and FreeToken at x4_refs' pins; the propagation on four card classes).
+
+**F5b's tune (D4, §13's prediction +5–8%).** `holon_tools tune --cpu-split` at the capped fit under F11 (the
+natural lock's settings, `moe.cache=*=0.25`): F5a 100.1 tok/s; 2 / 4 / 6 threads at half the misses 104.6 / 111.9 /
+111.6; at 4 threads, shares 0.25 / 0.4 / 0.5 / 0.6 / 0.75 / 1.0: 101.3 / 104.1 / 111.9 / 111.8 / 109.7 / 66.1 —
+**+11.7% at share 0.5, 4 threads, so F5b is taken** (`moe.cpu_plan=1,1,2,2,3,3,4,4` = M2's n / 2, `moe.cpu_isa=x86-avx512`,
+`cpu_task.threads=4`). The interleaved rows measure +15.6% / +9.0% / +7.4% at 1K / 4K / 32K (each beyond 2 sd):
+above §13's band at 1K and 4K, inside it at 32K. Prefill is unchanged (a prompt pass is larger than the share's pass).
+At the natural fit F5b needs a fill of its own (its buffers leave the lock's 3,236 one unit short, refused at the
+first launch, D4: 3,221 / 1,692 / 1,529 with F5b on); there tune measures +5.4% (203.3 → 214.3 tok/s, share 0.5,
+6 threads), but the interleaved rows, F5b against F5a at that same fit, measure **−6.7% / −5.9% / −6.0%** at 1K / 4K /
+32K (each beyond 2 sd): **F5b is not taken at the natural fit**, as §13 expected (≈ 0.3 misses per layer; the
+handshakes cost more than the CPU's share saves). Tune's benchmark repeats one short prompt's generation (prefix
+hits, the same routing each time), which at a high hit rate misstates the split; its capped verdict is the rows'.
+
+**The capped-fit rows (acceptance 3, judged with tune's lock).** Ratio of Holon to the reference, F5a | F5b:
+
+| Row (bar) | decode 1K | 4K | 32K | prefill 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| FreeToken (1.0×) | 1.03 \| 1.20 | **0.95** \| 1.04 | **0.99** \| 1.06 | 1.20 | **0.92** | **0.87** |
+| llama.cpp `-fitt 7150` (1.5×) | 2.55 \| 2.95 | 2.29 \| 2.50 | 1.89 \| 2.03 | 4.29 | 14.32 | 6.84 |
+| llama.cpp `--n-cpu-moe 36` (1.5×) | 2.51 \| 2.90 | 2.24 \| 2.44 | 1.85 \| 1.99 | 4.47 | 14.61 | 7.03 |
+| llama.cpp cache, mmap (1.1×) | 2.17 \| 2.51 | 2.20 \| 2.40 | 1.75 \| 1.88 | 4.23 | 14.25 | 6.88 |
+| llama.cpp cache, pinned (1.1×) | 1.18 \| 1.37 | 1.19 \| 1.30 | **1.06** \| 1.14 | 2.11 | 6.94 | 3.61 |
+
+Holon decodes 119.2 / 104.0 / 75.4 tok/s with F5a and 137.7 / 113.3 / 80.9 with F5b (FreeToken 115.2 / 109.2 / 76.2,
+the pinned cache 100.7 / 87.4 / 70.9). **With F5b every capped decode row passes**; F5a alone misses three cells, as
+§13's re-band warned. Prefill passes against every llama.cpp arm and misses FreeToken at 4K and 32K at both fits (the
+shortfall the owner accepted at step 4).
+
+**The F1 row** (Holon `static` against llama.cpp's static split, decode ≥ 0.95×). A host policy keeps a prefill
+pass's staging (it never lends), so F1's own fits are 3,093 / 1,614 / 1,479 (50.3%; 3,089 / 1,613 / 1,476 with F5b);
+the lock's 3,236 are refused at the first launch under `static` (D4, as designed).
+
+| F1 against (bar 0.95×) | 1K | 4K | 32K |
+|---|---|---|---|
+| natural, F5a \| F5b: `--fit` (61.3% on the GPU) | 2.30 \| 2.59 | 1.40 \| 1.46 | **0.88** \| 1.04 |
+| natural, F5a \| F5b: `--n-cpu-moe 16` (66.4%) | 2.13 \| 2.40 | 1.27 \| 1.33 | **0.82** \| 0.97 |
+| capped, F5a \| F5b: `-fitt 7150` | 1.79 \| 2.20 | 1.22 \| 1.58 | 0.97 \| 1.17 |
+| capped, F5a \| F5b: `--n-cpu-moe 36` | 1.76 \| 2.17 | 1.20 \| 1.55 | **0.949** \| 1.15 |
+
+**With tune's split the F1 row passes at every context and both fits.** With F5a it misses at 32K: a static map at
+≈ 50% sends half the routed experts per token over PCIe, while llama.cpp computes its CPU layers in RAM (§13
+predicted 0.95–1.0× with F5a; it holds at 1K and 4K only).
+
+**The natural fit re-checked at the closing code** (the lock's 3,236 / 1,618 / 1,618, 52.7%; the caches at the same
+share). Decode: FreeToken 1.06 / 1.04 / 1.02×, the pinned cache 1.19 / 1.23 / **1.10×**, the mmap cache ≥ 1.32×, the
+static splits ≥ 1.79×; prefill FreeToken 1.72 / **0.93** / **0.88×**, every llama.cpp arm ≥ 2.50×. Every decode row
+still passes; the pinned cache at 32K sits on its bar (1.104×). Holon decodes 1.3–1.5% below step 4 at the natural fit
+and 2.6–3.0% below at the capped fit (+0.07–0.28 ms per token, growing with the misses), while FreeToken and
+llama.cpp reproduce step 4 within 0.5%.
+
+**The decode regression, bisected afterwards on an RTX A5000** (`spikes/x8_close/README.md`; the capped arm, ABBA
+×4–6, each commit's own source tree and kernels). Step 4 measured `63c6e4b`, before steps 5–6 merged, and the
+regression comes with that merge (`1588c0e`): +0.05–0.06 ms per decode token (+0.45%) against `63c6e4b`.
+`478aa33` and `2d5ec61` are equal (+0.003 ms), so step 7 and close part 1 are clear.
+- **Mechanism:** step 6's CPU share phase in `k_resolve` (`7596aae`) ran on every call, F5a too: a scan of the map,
+  a dependent read of `plan[n]` and five barriers, all unused under a zero plan. The resolve went from 7.44 to
+  8.97 µs per layer; no other kernel moved.
+- **Fix `b45e86f`:** the kernel runs that phase only for a nonzero plan. The plan is loaded at the start and reduced
+  after the entries; the contract is unchanged.
+- **Recovery:** the resolve takes 7.85 µs, and decode is +0.015 ms over `63c6e4b` (was +0.065 / +0.068 at 1K / 4K).
+- **Exactness:** F11 (the defaults and the lock's settings), `lru` and F1 snapshots at 25% are byte-identical to
+  all-resident; F5b's equals the code before the fix.
+- **On the RTX 5080** (afterwards, ABBA ×4 of `63c6e4b` against the fix): capped +0.005 / −0.004 ms at 1K / 4K,
+  natural +0.011 / +0.010 ms. Holon decodes 122.9 / 106.8 and 237.5 / 193.3 tok/s, back at step 4's numbers.
+  - No remainder grows with the misses: `k_fetch` and the DMA ring's copies are unchanged.
+  - The rest is `k_resolve`'s layout residue, +0.22 µs per call.
+  - The natural-fit offload lock was propagated to the fix (1 → 2, `8615e26`): its trace is byte-identical, L2 is
+    unchanged and passes, the snapshot ×3 is run-identical, and it was approved (delegated).
+  - Record: `evidence/x8_bisect_2026-10-18.json`.
+
+**The offload locks.**
+- **Natural fit, F5a — committed** (`plans/unsloth/…/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-5080/cu130-torch2.11/1.lock`,
+  `9f1b855`): `holon_tools tune` from the RTX 5090's lock with the gate's settings (batch 1, 33,792 context, `lfu`,
+  `ring_copy` `dma`, the held-out routing profile, the fill's 3,236 / 1,618 / 1,618); `attention.paged_decode` stays
+  triton_attn (220.6 against FlashInfer's 60.4 tok/s). Verdict `approve`: L2 against the mmq floor top-1 98.264%
+  (≥ 97.969%), KL p99 5.38e-2 (≤ 0.118), ΔPPL vs floor −0.042% ± 0.091% (≤ 0.479%); the snapshot trace ×3
+  run-identical (2,163 steps). Approved (delegated). `--host-memory` is a deployment's, not planned; the profile is a
+  file beside the checkpoint (bundling profiles stays open, §5) — under F5a outputs never depend on it, only speed.
+- **Capped fit, F5b — verdicts passing, the lock not written (escalated to the lead):**
+  - L0: `kernels.ggml_cpu` on this desktop's `x86-avx512` CPU, 5 of 5 (the vehicle's classes, bitwise alone or
+    grouped at 1 / 7 / 40 threads) — step 6's deferred AVX-512 L0, closed.
+  - Bounded L2 (F1 frozen at 25%, one token per step, tune's split; 32,783 positions, 1,575,360 handshakes, flag 0)
+    **PASS** against the path-aware floor: top-1 98.649% (≥ 98.411%), KL p50 1.08e-4 (≤ 2.33e-4), p99 3.90e-2
+    (≤ 8.05e-2), ΔPPL vs floor +0.152% ± 0.088% (≤ 0.469%). The floor against the golden: 98.661%, 1.17e-4, 4.03e-2
+    (the plain mmvq floor 98.536%, 1.18e-4, 3.98e-2).
+  - The snapshot trace ×3 with F11's adaptive placement and the split on: **run-identical** (2,163 steps).
+  - Not written, for two reasons. (1) No tool writes an F5b lock: `propagate`'s L2 scores the lock's own settings,
+    and the judge refuses F5b's floor at more than one token per step (`ValueError: F5b's floor needs one token per
+    step, not max_step_tokens 4096`), so `tune --cpu-split` without `--no-lock` fails the same way; F5b's bounded L2
+    runs only as above, by hand. (2) Under S5 a lock carrying a CPU tier is ranked first on a host of that tier, so on
+    an AVX-512 RTX 5080 this capped benchmark deployment (25% of the experts, 137.7 tok/s at 1K) would be served by
+    default over the natural lock (234.7). The lead decides: a home for benchmark-only locks (or none), and
+    `propagate`'s L2 for a split (the frozen-placement, one-token run as above) — plan §10.
+
+**The one propagation (D15).** Every newest lock of `plans/`, class by class on its desktop, at its own `[engine]`
+with nothing added: verdicts first (`propagate` without `--approve`), then `--approve` for the passing ones, then
+snapshots ×3 at the new lock. Every core unit pin moved (S0–S5, row kinds, step 3d), so every lock needed its approval.
+
+| Class | Lock | Trace | L2 top-1 / floor / budget | KL p99 / budget | ΔPPL vs floor / budget | Approved | ×3 |
+|---|---|---|---|---|---|---|---|
+| rtx-5080 | 30B UD-IQ3_XXS (9 → 10) | moved | 98.252 / 98.331 / ≥ 98.081 | 5.68e-2 / 0.119 | +0.035 ± 0.127 / 0.568 | yes | yes |
+| rtx-5080 | 8B Q4_K_M (11 → 12) | identical | 98.426 / 98.356 / ≥ 98.106 | 3.54e-2 / 0.072 | −0.056 ± 0.091 / 0.477 | yes | yes |
+| rtx-5080 | 8B UD-IQ3_XXS (11 → 12) | identical | 98.899 / 98.871 / ≥ 98.621 | 1.33e-2 / 0.031 | +0.055 ± 0.077 / 0.442 | yes | yes |
+| rtx-5080 | 27B UD-IQ3_S (9 → 10) | identical | 97.495 / 97.540 / ≥ 97.290 | 0.639 / 1.42 | +0.009 ± 0.805 / 2.001 | yes | yes |
+| rtx-5080 | 8B NVFP4 (6 → 7) | identical | 98.774 / 98.691 / ≥ 98.441 | 1.29e-2 / 0.025 | −0.096 ± 0.053 / 0.359 | yes | yes |
+| rtx-5080 | 8B FP8 (4 → 5) | identical | 98.142 / 98.173 / ≥ 97.923 | 4.26e-2 / 0.084 | −0.066 ± 0.127 / 0.516 | yes | yes |
+| rtx-4090 | 8B bf16 (15 → 16) | identical | 98.990 / 98.929 / ≥ 98.679 | 4.70e-3 / 0.012 | −0.076 ± 0.037 / 0.343 | yes | yes |
+| rtx-4090 | 30B Q4_K_M (9 → 10) | moved | 98.258 / 98.219 / ≥ 97.969 | 6.11e-2 / 0.118 | −0.083 ± 0.139 / 0.588 | yes | yes |
+| rtx-4090 | 27B UD-Q4_K_M (9 → 10) | identical | 97.114 / 96.947 / ≥ 96.697 | 0.893 / 1.30 | −1.822 ± 0.749 / 2.123 | yes | yes |
+| rtx-4090 | 8B NVFP4 (6 → 7) | identical | 98.697 / 98.691 / ≥ 98.441 | 1.22e-2 / 0.025 | −0.100 ± 0.065 / 0.359 | yes | yes |
+| rtx-4090 | 30B NVFP4 (6 → 7) | moved | 98.399 / 98.359 / ≥ 98.109 | 4.85e-2 / 0.098 | +0.104 ± 0.116 / 0.503 | yes | yes |
+| rtx-4090 | 30B MXFP4_MOE (5 → 6) | moved | 98.429 / 98.469 / ≥ 98.219 | 2.64e-2 / 0.056 | +0.089 ± 0.089 / 0.471 | yes | yes |
+| rtx-4090 | 8B FP8 (4 → 5) | identical | 98.194 / 98.173 / ≥ 97.923 | 4.17e-2 / 0.084 | −0.127 ± 0.092 / 0.481 | yes | yes |
+| rtx-4090 | 8B Q4_K_M (3 → 4) | identical | 98.472 / 98.356 / ≥ 98.106 | 3.63e-2 / 0.072 | −0.046 ± 0.093 / 0.484 | yes | yes |
+| rtx-5090 | 8B bf16 (9 → 10) | identical | 98.929 / 98.929 / ≥ 98.679 | 4.79e-3 / 0.012 | −0.047 ± 0.041 / 0.353 | yes | yes |
+| rtx-5090 | 8B Q4_K_M (3 → 4) | identical | 98.453 / 98.356 / ≥ 98.106 | 3.64e-2 / 0.072 | −0.035 ± 0.087 / 0.469 | yes | yes |
+| rtx-5090 | 30B Q4_K_M (3 → 4) | moved | 98.338 / 98.219 / ≥ 97.969 | 5.67e-2 / 0.118 | −0.010 ± 0.110 / 0.524 | yes | yes |
+| rtx-5090 | 27B UD-Q4_K_M (4 → 5) | identical | 97.156 / 96.947 / ≥ 96.697 | 0.743 / 1.30 | +0.378 ± 0.685 / 1.963 | yes | yes |
+| rtx-3090 | 8B bf16 (3 → 4) | identical | 98.954 / 98.929 / ≥ 98.679 | 4.65e-3 / 0.012 | −0.027 ± 0.031 / 0.328 | yes | yes |
+| rtx-3090 | 8B Q4_K_M (3 → 4) | identical | 98.338 / 98.356 / ≥ 98.106 | 3.67e-2 / 0.072 | +0.015 ± 0.074 / 0.435 | yes | yes |
+| rtx-3090 | 30B Q4_K_M (3 → 4) | moved | 98.325 / 98.219 / ≥ 97.969 | 5.81e-2 / 0.118 | +0.081 ± 0.133 / 0.582 | yes | yes |
+| rtx-3090 | 27B UD-Q4_K_M (5 → 6) | identical | 97.093 / 96.947 / ≥ 96.697 | 0.733 / 1.30 | −1.420 ± 1.077 / 2.943 | yes | yes |
+
+**22 of 22 approved (delegated), none escalated; `scripts/ci/check_locks.py` and `--release` green.** The 16 dense
+locks advanced bitwise (traces byte-identical to their previous locks'). The 6 MoE locks' traces moved, as step 3c
+said they would (`moe_router@1`, bounded); their L2 passes with the same figures as their previous locks' — `propagate`
+scores prompts in chunks above 16 rows, which keep `moe_topk@1`, so the router's own bounded verdict remains step 3c's
+(one token per step against the mmvq floor, A5000: top-1 98.57%, KL p99 0.037, ΔPPL +0.14% ± 0.11%). The 27B's
+ΔPPL on the RTX 4090 (−1.822% against a 2.123% budget) and on the RTX 3090 (−1.420% against 2.943%) are their
+previous locks' figures (byte-identical traces), not new.
+
+**Found on the way.**
+- **`40811a0` kernels.ggml_cpu: the AVX-512 module never loaded after `holon prebuild`.** Prebuild linked both tiers
+  in one process, and torch names a module linked a second time with other arguments `<name>_v1`, which
+  `extension.load` never finds: on the AVX-512 desktop F5b's first engine failed with `NotBuilt`. The A5000 (AVX2)
+  never loads that tier. Prebuild now links each tier in its own process (a test that fails without it).
+- **An RTX 3090 desktop lost its GPU during the 27B's verdict** (`unspecified launch failure`, then no device on the
+  node); the class was re-run from the start on another desktop (its four verdicts are the table's).
+- **The demo harness's two venv tests failed in the first suite run**: uv's cache had lost its index entry for
+  pytest 9.1.1, so `make_venv`'s offline install found nothing; after one online install into a throwaway venv the
+  file passes (12 of 12). Environmental, not code.
+
+**Acceptance (§1), item by item.**
+
+| # | Item | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Strategies are plugins | **met** | F11 (the default), F1, F2–F3, F4, F5a, F5b with its `plan[n]`, F7 and F9 shipped in X (steps 2–6); every seam toy-proven in `core/tests`; after the tag `v1-offload-std-api`, F10, A1 and the page-cache tier landed as plugin-only commits (step 7: `check_core_diff.sh` empty, no std path). The proof's finding — RAM-short F10 needs a std delta record — is a std minor at GLM's start (plan §10) |
+| 2 | Exactness | **met** | GPU path: every placement and policy byte-identical to `std.moe@1` all-resident on the A5000 (steps 2–7: every fit, adaptive placement on, the n-gram drafter, RAM-capped tiers); on the RTX 5080 the natural, capped, `profile_decay` and `lru` snapshots identical to each other ×3 (step 4) and the natural lock run-identical ×3 (here). CPU split: bounded L2 passing against the path-aware floor and run-identical ×3 with adaptive placement on, on the A5000 (step 6) and the RTX 5080 (here). Scoped to arena providers whose results are slot-, arena- and grouping-invariant (`docs/design.md` §6.5) |
+| 3 | Development gate | **met with the recorded shortfall** | Natural fit (52.4% at step 4; the lock's 52.7%): every decode row passes (step 4; re-checked here: FreeToken ≥ 1.02×, the pinned cache ≥ 1.10×, on its bar at 32K). Capped fit with tune's lock (F5b, +11.7%): every decode row passes (FreeToken ≥ 1.04×, the pinned cache ≥ 1.14×, the mmap cache ≥ 1.88×, the static splits ≥ 1.99×). F1 ≥ 0.97× at both fits with F5b. Prefill ≥ 2.1× every llama.cpp arm at both fits. **Shortfall: FreeToken's prefill at 4K / 32K** (0.92–0.93× / 0.87–0.88× at both fits), accepted by the owner at step 4 (the expert GEMMs; plan §10's MoE prefill item) |
+| 4 | Program bars (Strata, Project Maya) | **deferred** | by design to FN and GLM (their own milestones and docs, plan §10) |
+| 5 | Memory | **met** | host pools allocated exactly (`mmap` + `cudaHostRegister`, exact bytes against `host_memory`, S2) and refused at startup with a per-pool report; the store's options pin the VRAM (`moe.cache`) and RAM-tier (`moe.ram`) slot counts; a pinned arena that does not fit is refused at its first launch (D4; met here when F1 and F5b were tried at F11's pin) |
+| 6 | Core | **met** | ABI 1.2 (S0–S5) and 1.3 (row kinds), additive by `check_abi`, each toy-proven; +355 code lines (4,603 / 6,000); X's tests +269, suite time +4% (step 8, part 1) |
+| 7 | Locks | **met with a recorded shortfall** | the RTX 5080's natural-fit offload lock written and approved; the 22 existing locks propagated once, 22 of 22 approved. Shortfall: the capped F5b lock's verdicts pass (L0, bounded L2, run-identical ×3) but it is not written — no tool writes an F5b lock, and S5's lookup would serve it by default on AVX-512 RTX 5080 hosts; escalated to the lead |
+
+**Suite and CI** (one RTX A5000, the worktree's own venv, under `MemoryMax`): `pytest core std plugins judge testing
+tools` at `9f1b855` (the code of `40811a0`, with the propagated locks): **1521 passed, 66 skipped in 21 min 7 s** (part
+1's 1519 plus the prebuild test and the core-diff report's test). The first run at `40811a0` had the demo harness's two
+environmental failures above (1519 passed). `scripts/ci/run_all.sh main`: green in 40 s (import contracts 8 kept;
+ABI 1.3; core LOC 4,603 / 6,000; `check_locks.py` and `--release` green).
+
+**Drifts from the design, named at the close:** acceptance 3's natural fit is 52.4–52.7%, not ≈ 47%; staging is
+sized for graphed steps and prefill borrows (§7 as built); F10 has no host part (step 7); two-phase lending for host
+policies, prompt-time admission, F8, ARC and PDL in the router not built (§14, plan §10); the capped F5b lock not
+written (above). Every item is recorded where it was decided.

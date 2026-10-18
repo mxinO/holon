@@ -88,7 +88,8 @@ type = "forbidden"
 source_modules = ["holon_plugins"]
 forbidden_modules = ["holon_std"]
 
-# Add every new std unit / model / kernel package to the matching independence list below.
+# Add every new std unit to the std independence list below; plugins are matched by family (`holon_plugins.<family>.*`),
+# so a new plugin is covered as it lands and only a new family adds an entry.
 [[tool.importlinter.contracts]]
 name = "std units are injected, never imported by each other"
 type = "independence"
@@ -98,12 +99,11 @@ modules = ["holon_std.ops", "holon_std.blocks", "holon_std.ffn", "holon_std.moe"
            "holon_std.sampling", "holon_std.weights.hf", "holon_std.weights.gguf", "holon_std.spec.greedy"]
 
 [[tool.importlinter.contracts]]
-name = "kernel plugins are selected by the core, never imported by each other"
+name = "first-party plugins are selected or bound by Ref, never imported by each other"
 type = "independence"
-modules = ["holon_plugins.kernels.flashinfer", "holon_plugins.kernels.triton_attn",
-           "holon_plugins.kernels.triton_experts", "holon_plugins.kernels.ggml_cuda", "holon_plugins.kernels.fla",
-           "holon_plugins.kernels.expert_io", "holon_plugins.kernels.cpu_task", "holon_plugins.kernels.ggml_cpu",
-           "holon_plugins.kernels.gdn_triton"]
+modules = ["holon_plugins.drafters.*", "holon_plugins.frontends.*", "holon_plugins.grammar.*",
+           "holon_plugins.kernels.*", "holon_plugins.models.*", "holon_plugins.placement.*",
+           "holon_plugins.tiers.*", "holon_plugins.transforms.*"]
 
 [[tool.importlinter.contracts]]
 name = "production code never imports the test-only plugins"

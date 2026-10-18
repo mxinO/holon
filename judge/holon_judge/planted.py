@@ -907,6 +907,8 @@ def resolve_off_by_one() -> Iterator[None]:
     Reports the resolves it wrapped (captured ones fire on every replay) and the steps with misses."""
     from holon_std.tiered.resolver import DeviceResolver
 
+    from .placement import device_maps
+
     call, fired = DeviceResolver.__call__, collections.Counter()
 
     def planted(self, ids, first, *share, **kw):
@@ -915,9 +917,9 @@ def resolve_off_by_one() -> Iterator[None]:
         fired[_when()] += 1
         return torch.where((slots >= k) & (slots < k + staging), k + (slots - k + 1) % staging, slots), cpu
 
-    def missed(store, step, record):
-        fired["steps with misses"] += bool((record["routed"] & ~(store.residency.host >= 0).all(-1)).any())
-    with mock.patch.object(DeviceResolver, "__call__", planted), _store_tap(missed):
+    def missed(store, step, record):          # against the device's map as the step left it (not the host mirror)
+        fired["steps with misses"] += bool((record["routed"] & ~resident(store, step.step)).any())
+    with mock.patch.object(DeviceResolver, "__call__", planted), device_maps() as resident, _store_tap(missed):
         yield
     print(f"plant resolve-off-by-one fired: {dict(fired)}", file=sys.stderr)
 

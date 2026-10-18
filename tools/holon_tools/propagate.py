@@ -13,6 +13,10 @@ advancing without it is an explicit opt-in.
 A plan with uncovered sites (kernels that are not run-to-run deterministic) may have no run-identical snapshot; its
 lock then records none, and every change to it goes through L2 and approval (design §7.10).
 
+A plan that binds an `approx` plugin (its manifest's `numerics`, e.g. A1's route tail skip, docs/v1-offload.md §6) is
+a human gate, never a default lock: `write` refuses it unless the caller passes `allow_approx` (the CLI's
+`--allow-approx`), whatever the verdict.
+
 The commit is recorded in the lock but does not make a plan "changed": a lock committed in commit C can never name
 C, so counting it would make every re-run (CI's isolation-check) write another lock. The core is pinned as a unit
 instead, so core changes are seen. Not yet checked for approval: "no L2 metric regresses beyond δ vs the current
@@ -29,6 +33,7 @@ import torch
 from holon.api import Binding, Lock, Plan, UnitPin, canonical_hash
 from holon.core import plans
 from holon.core.engine import Engine, EngineConfig
+from holon.core.plugins import Installed, discover
 from holon_judge import snapshot
 from holon_judge.compare import compare
 from holon_judge.engine import score
@@ -184,11 +189,21 @@ def snapshot_path(plans_dir: str | pathlib.Path, plan: Plan, digest: str) -> pat
                         digest.removeprefix("sha256:") + ".json")
 
 
-def write(plans_dir: str | pathlib.Path, outcome: Outcome) -> pathlib.Path:
-    """Append the outcome's lock and store its snapshot, if it has one."""
+def approx(plan: Plan, installed: dict[str, Installed] | None = None) -> list[str]:
+    """The plan's plugins whose manifests declare `numerics = "approx"`."""
+    installed = discover() if installed is None else installed
+    return sorted(n for n in plan.units if n in installed and installed[n].manifest.numerics == "approx")
+
+
+def write(plans_dir: str | pathlib.Path, outcome: Outcome, allow_approx: bool = False) -> pathlib.Path:
+    """Append the outcome's lock and store its snapshot, if it has one; a lock binding an `approx` plugin only with
+    `allow_approx`."""
     lock, snap = outcome.lock, outcome.snapshot
     if lock is None:
         raise ValueError(f"nothing to write for outcome {outcome.verdict!r}")
+    if (found := approx(lock.plan)) and not allow_approx:
+        raise ValueError(f"the plan binds approx plugins {found}: a human gate, never a default lock "
+                         "(docs/v1-offload.md §6); write it only with --allow-approx")
     if snap is not None and lock.snapshot is not None:
         path = snapshot_path(plans_dir, lock.plan, lock.snapshot)
         if not path.exists():
