@@ -1,7 +1,7 @@
 # v1 — MoE prefill speed
 
-Status: **design rev 6 (2026-10-18); building.** Step 0 is measured on the A5000 and the bar cards: predictions §2.1,
-measurements and the restated cells §2.2 (no decision rule tripped).
+Status: **design rev 6 (2026-10-18); building: steps 0–2 done** (§2.1–§2.2, §7.1). Step 0 tripped no decision rule;
+C-M6's fallback is taken (J against T up to 64 tokens).
 - Rev 2 answered the three-lens panel's first round (A correctness, B architecture, C performance: 3 blockers, 19
   majors, 23 minors).
 - Rev 3 answered its second round and took in FN's requests.
@@ -703,6 +703,70 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
   - Identity (`spikes/moe_prefill/identity.py`) on the A5000, the resident 30B and the natural-fit offload flags:
     main's and the branch's prompt-logprob hashes are identical at 1,027 and 4,096 tokens, each run-identical ×2.
     The branch's resident pass is 4,096 tokens, main's 512.
+  - On the cluster (records `evidence/mp2_checks_<class>_2026-10-18.json`):
+    - L0: sm_89 (RTX 4090) 135 passed; sm_120 (RTX 5090) 131 passed, and (RTX 5080) 131 passed.
+    - Memcheck: 0 errors on both SMs.
+    - Identity, main against the branch: resident on the 4090 and the 5090; the natural fit and the capped fit with
+      F5b on the 5080. All identical. F5b's CPU share serves decode passes only, so the capped prompt rows are the
+      GPU's, and they equal the natural fit's (placement-exact).
+  - Startup KV tokens with the branch: 16 GB lock 18,560 (main 18,752); 4090 lock 25,776 (main 26,736); A5000 at
+    33,792 / 1 seat 48,192 (main 50,272). The persistent id workspace sized for 4,096 rows is most of the A5000's
+    difference; D10 moves it to transients (step 3b).
+
+**Step 2 (D2).**
+- **What landed** (a `vendor.patch` hunk, "Holon:" markers, `vendor.sh --check` clean):
+  - `mmq_tile`, one `__device__` function, replaces the three tile decodes of `mul_mat_q`;
+  - the stream-k work split counts the flat range;
+  - `ggml_cuda_mul_mat_q` computes `n_z` first and picks J against T·k ÷ n_z;
+  - the launch makes the flat grid nty × (n_z + ⌊T·k ÷ J⌋ + 1);
+  - `fixup_needed` is gated to `!ids_dst` and asserted;
+  - `test_link` checks the markers in `mmq.cu` / `mmq.cuh`.
+- **C-M6 decided by the sweep.** J against the mean made the down stack up to 8% slower at 16 rows on the 5090 and the
+  5080 (A/B against main's build). So, by the rule, **J stays against T for calls of ≤ 64 tokens**.
+- **Decided while building.** With J against T a call's tokens fit one column tile, and there the flat range only adds
+  blocks and a binary search: 2–7% slower per call than main on the A5000. **The flat range is used only where a call
+  spans several column tiles** (⌈T ÷ J⌉ > 1, so ntx > 1, which the kernel reads); otherwise the launch is upstream's,
+  one tile per entry. The bits are the same either way.
+- **Checks.**
+  - L0 (`test_ggml_cuda_moe.py` + `test_ggml_cuda.py`): sm_86 266 passed; sm_89 277; sm_120 279 (5090 and 5080).
+    Suite time on sm_86: `test_ggml_cuda_moe.py` 126 passed in 252 s on a loaded host (step 1: 177 s; main: 172 s);
+    the new test adds ≈ 15 s.
+    The new `test_every_tile_of_every_entry_is_written` fills the output with NaN and calls `lib.mmq_id` at 9–4,096
+    tokens over E = 128 and all three helpers, with uniform, same-8-experts and skewed routings. Every row is written
+    and equals the 4,096-token call's row, and no fixup kernel is launched. The tile-width test's sweep follows D2's
+    rule (J 16–128).
+  - Mutations, on every SM:
+    - "the decode skips each entry's last partial tile" fails 50 (sm_86), 62 (sm_89) and 56 (sm_120) tests;
+    - "the ids path takes the stream-k fixup" aborts the test process in the first call with ids.
+  - Memcheck: 0 errors on sm_86, sm_89 and sm_120. Racecheck on sm_120 (5090, 5080): 0 hazards.
+  - Identity, main against the branch:
+    - the A5000: resident and natural;
+    - the 4090 and 5090: resident;
+    - the 5080: natural and capped F5b.
+    - All identical; graph replay (`test_graph_replay_follows_the_routing`, buckets to 256) passes.
+  - Per call, D2 against main, interleaved ×3, layers 0 and 6, mean of the stacks' ratios:
+    - ≤ 64 tokens: 0.99–1.02 on the A5000, 5090 and 5080;
+    - 512 tokens: 0.65 / 0.67 / 0.67;
+    - 4,096 tokens: 0.84 / 0.83 / 0.81.
+  - Batched decode ABBA on the 5090 (`holon_tg` at depth 1,024, ×2 rounds of 3): B16 0.996×, B32 0.996×, B64 1.006×
+    main's tokens/s, inside the run-to-run spread (±7%).
+  - Per-step prefill timings: time to the first token, ms, medians of the fixed prompt set over 3 interleaved rounds
+    (main, step 1, step 2). The ratios are each against main, and against FreeToken's default / gated arms of §2.2.
+
+    | Card, configuration | main | step 1 (D0, D1) | step 2 (+ D2) | step 2 / FreeToken default (gated) |
+    |---|---|---|---|---|
+    | 5090 resident 1K | 80.5 | 61.9 (1.30×) | 54.8 (1.47×) | 0.92× |
+    | 5090 resident 4K | 342.1 | 212.1 (1.61×) | 194.7 (1.76×) | 0.88× |
+    | 5090 resident 32K | 4,548 | 3,534 (1.29×) | 3,392 (1.34×) | 0.89× (0.96×) |
+    | 5080 natural fit 1K | 210.8 | 210.8 (1.00×) | 206.8 (1.02×) | 1.83× |
+    | 5080 natural fit 4K | 408.5 | 408.5 (1.00×) | 367.2 (1.11×) | 1.04× |
+    | 5080 natural fit 32K | 6,847 | 6,847 (1.00×) | 6,513 (1.05×) | 0.92× (0.96×) |
+    | A5000 resident 1K / 4K / 32K | 281 / 1,207 / 14,032 | 217 / 704 / 10,168 | 193 / 641 / 9,654 | 0.92 / 0.91 / 0.95× |
+
+    - D1 does not move the offload rows: the arena already took 4,096-row calls.
+    - D2 realised 80–90% of §2.2's band at its low end: 5090 −17 / −142 ms at 4K / 32K against −19…−22 /
+      −155…−179; 5080 −41 / −335 against −46…−52 / −368…−411.
+    - The 5080 4K row already meets its bar.
 
 ## 8. Risks
 
