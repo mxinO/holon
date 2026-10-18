@@ -811,6 +811,14 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
 
 ## 10. Review log
 
+### Building: deviations from rev 6 (steps 1–2, 2026-10-18; recorded for the panel)
+
+| # | Deviation | Why | Effect |
+|---|---|---|---|
+| B-dev1 | `LinearExperts` cuts a call itself, into whole-`CHUNK` calls of up to `pass_rows` rows, then the last partial chunk as a call of its own (D0 left the cut to the caller) | a direct caller's 2,049-row call would otherwise put its last row on mmq, not mmvq: its bits would depend on the caller's cut | every row's kernel path is its chunk's for any caller; std.moe's passes unchanged (they cut the same way) |
+| B-dev2 | D2's flat range is launched only where a call's tokens span several column tiles (⌈T ÷ J⌉ > 1, read in the kernel as ntx > 1); otherwise upstream's launch, one tile per entry (D2 said the flat grid always) | with C-M6's fallback (J against T up to 64 tokens) every entry fits one tile, and the flat range's extra blocks and binary search cost 2–7% per call against main on the A5000 | ≤ 64-token calls run main's launch exactly (A/B 0.99–1.02 on three cards); bits the same either way |
+| B-dec | C-M6's fallback taken: J against T for calls of ≤ 64 tokens | D2's own A/B: the mean's 8-row tiles made the down stack up to 8% slower at 16 tokens on the 5090 and 5080 | batched decode keeps main's speed (5090 B16 / 32 / 64: 0.996 / 0.996 / 1.006×); a lower threshold (16) would gain up to ≈ 30% per call at 24–64 tokens: held for the perf reviewer (lead) |
+
 ### Rev 5 → rev 6 (the panel's fifth round, 2026-10-18; B clean)
 
 | # | Finding | Verified | Disposition |
