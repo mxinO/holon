@@ -151,8 +151,9 @@ caches on an agent trace, with outputs that do not depend on where state was kep
    - The `dropped_publishes` counter (`stats()`) is 0 on `agent_park` at the tuned pool size.
 5. **Core.**
    - Only §4's seams KS1–KS5, one additive ABI minor, each toy-proven. K's ABI is **1.4 or 1.5 by merge order**:
-     milestone FN also proposes 1.4 (seams C1, the residual width, and C2, state from blocks and FFN units, ≈ +60
-     lines). K's and FN's core changes are serialized. Whichever lands its seams first takes 1.4, and the other
+     milestone FN also proposes 1.4. FN rev 2 (32c99f2) has seams C1 (residual width), C2 (block-declared state, no
+     FFN branch) and C3 (`BuildCtx.unit_class`), with a budget of ≤ +45 lines over its own step-1 base. K's and
+     FN's core changes are serialized. Whichever lands its seams first takes 1.4, and the other
      rebases and takes 1.5.
    - `check_abi --base` and the line check are relative to **K's step-1 base**: the main-branch commit K's seams
      rebase onto, after FN's seams if FN lands first.
@@ -1228,3 +1229,4 @@ None is rejected.
 - Core: ≈ 306 lines itemized (KS2 85 → 93), within the unchanged **≤ +320** over K's step-1 base.
 - ABI: unchanged, 1.4 or 1.5 by merge order; it has two fewer fields than rev 3.
 - Schedule: unchanged at 26 days. The two new plants and the liveness case fit in steps 1–3.
+- Acceptance 5's cross-reference to FN now matches FN rev 2 (32c99f2): seams C1–C3, ≤ +45 lines over its own base.
