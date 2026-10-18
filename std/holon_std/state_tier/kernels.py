@@ -9,6 +9,7 @@ slower.
   of segment s is row s · capacity + u. The row lists are on the host (CPU int64), n ≥ 0, the `dst_rows` distinct,
   and no row is both read and written by one call. `C` is a multiple of 16 and both views 16-byte aligned. Not graph
   safe (the lists change per call); deterministic (a byte copy). Facts: `direction` ("h2d": a load into device
-  pools; "d2h": a store into host pools) and `chunk` (C).
+  pools; "d2h": a store into host pools) and `chunk` (C); optionally `copy` ("sm": an SM gather or scatter, no copy
+  engine; "dma": copy-engine DMA), else the provider's default per direction (rev 8.2: loads by the SM gather).
 """
 STATE_COPY = "state_copy@1"

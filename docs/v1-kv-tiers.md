@@ -1384,6 +1384,25 @@ Results against the predictions are in the evidence records (`evidence/k0_m1_rer
 RTX 5090's K-M2/K-M4 runs, after step 1, match the RTX 5080's (mixed I/O 0.79× / 0.76×, the other rules pass), and its
 shorter step makes an unpaced batch-DMA load costlier still: decode 2.07× median beside it, 1.04× beside the SM gather.
 
+### Step 2 as built (in progress)
+
+- **`state_copy@1` providers** (`kernels.expert_io`): loads by the SM gather (8 CTAs × 256 threads, unroll 2; rows over
+  64 KiB tiled across the CTAs), stores by one `cudaMemcpyBatchAsync` merging consecutive rows; the fact `copy`
+  overrides either. L0 bitwise against the oracle on sm_86 and sm_120 (16 cells), memcheck clean. `expert_io`'s source
+  moves, so the two Qwen3-30B-A3B rtx-5080 locks pinning it are owed a propagation (D14's single round).
+- **Measured on the RTX 5080** (`evidence/k2_state_copy_rtx-5080_2026-10-18.json`,
+  `evidence/k2_mixed_nvme_rtx-5080_2026-10-18.json`, `spikes/k2_tiers/`):
+  - the gather beside compute-bound prefill (27B, 512-token chunks): a 0.57 or 1.29 GB load per step costs nothing
+    measurable; loads back to back cost 1.175× (predicted 1.03–1.08×: the gather holds 8 of 84 SMs, likely an extra
+    wave of the step's kernels; not profiled). The cost tracks copy time, ≈ 5 ms per 1.29 GB load;
+  - the host cost of a load, the tier's row lists included: 67 µs at 16K and 115 µs at 32K (≈ 4 ns per chunk). A DMA
+    store's submit is 4.6 ms at 16K and 19.9 ms at 32K (the driver's), so large write-backs may take `copy = sm`;
+  - the mixed NVMe factor under rev 8.2's reads-first dispatch (one writer, 2–3 readers): 0.77–0.80, as without it:
+    the drive's own interference. D4's lane charges ≈ 0.79 while both kinds are queued (tune measures it per host).
+- **std.state_tier's host level and the recurrent kind's policies** (`2b3ce54`): as §5 and D8 describe; the host
+  level's split of `host.bytes` between pages and payloads is the option `host.pages` (a share, default 0.25: K-M5's
+  page peak was ≤ 4.8 of 16 GiB).
+
 ### Rev 8.2 (2026-10-18): the panel's review of step 1
 
 The core was found correct, with no blocker. Dispositions:
