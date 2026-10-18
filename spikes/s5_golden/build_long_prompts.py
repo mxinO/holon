@@ -37,9 +37,10 @@ def wiki_articles() -> list[str]:
     lines = parquet("datasets--Salesforce--wikitext/snapshots/*/wikitext-103-raw-v1/train-00000-of-00002.parquet",
                     "text")
     starts = [i for i, x in enumerate(lines) if x.startswith(" = ") and not x.startswith(" = = ")] + [len(lines)]
-    detok = lambda s: re.sub(r" ([,.;:)'])", r"\1", s.replace(" @-@ ", "-").replace(" @,@ ", ",")
-                             .replace(" @.@ ", ".").replace("( ", "("))
-    return [detok("".join(lines[a:b])).strip() for a, b in zip(starts, starts[1:])]
+    def detok(s: str) -> str:
+        return re.sub(r" ([,.;:)'])", r"\1", s.replace(" @-@ ", "-").replace(" @,@ ", ",").replace(" @.@ ", ".")
+                      .replace("( ", "("))
+    return [detok("".join(lines[a:b])).strip() for a, b in zip(starts, starts[1:], strict=False)]
 
 
 class Builder:
@@ -109,7 +110,7 @@ def summary(b: Builder, total: int) -> dict:
     head = "Here are several news articles.\n\n"
     tail = "\n\nGive the key points of each article, in order, as a short list per article."
     arts, highlights, used = [], [], 0
-    for i, r in enumerate(rows):
+    for r in rows:
         text = f"Article {len(arts) + 1}:\n{r['article']}"
         point = f"Article {len(arts) + 1}:\n" + "\n".join(f"- {h.strip()}" for h in r["highlights"].split("\n"))
         k = b.n(text) + b.n(point) + 4
@@ -127,7 +128,7 @@ def math_think(b: Builder, total: int) -> dict:
     rows = parquet("datasets--open-r1--OpenR1-Math-220k/snapshots/*/data/train-00000-of-00010.parquet")
     best = None
     for r in rows[:4000]:
-        for gen, ok in zip(r["generations"], r["correctness_math_verify"]):
+        for gen, ok in zip(r["generations"], r["correctness_math_verify"], strict=True):
             if not ok or "</think>" not in gen:
                 continue
             k = b.n(r["problem"]) + b.n(gen)
