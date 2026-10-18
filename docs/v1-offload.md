@@ -1632,8 +1632,13 @@ regression comes with that merge (`1588c0e`): +0.05–0.06 ms per decode token (
 - **Recovery:** the resolve takes 7.85 µs, and decode is +0.015 ms over `63c6e4b` (was +0.065 / +0.068 at 1K / 4K).
 - **Exactness:** F11 (the defaults and the lock's settings), `lru` and F1 snapshots at 25% are byte-identical to
   all-resident; F5b's equals the code before the fix.
-- **Not shown here:** the A5000's regression is a quarter of the 5080's capped one, and the fix is not re-measured on
-  the 5080.
+- **On the RTX 5080** (afterwards, ABBA ×4 of `63c6e4b` against the fix): capped +0.005 / −0.004 ms at 1K / 4K,
+  natural +0.011 / +0.010 ms. Holon decodes 122.9 / 106.8 and 237.5 / 193.3 tok/s, back at step 4's numbers.
+  - No remainder grows with the misses: `k_fetch` and the DMA ring's copies are unchanged.
+  - The rest is `k_resolve`'s layout residue, +0.22 µs per call.
+  - The natural-fit offload lock was propagated to the fix (1 → 2, `8615e26`): its trace is byte-identical, L2 is
+    unchanged and passes, the snapshot ×3 is run-identical, and it was approved (delegated).
+  - Record: `evidence/x8_bisect_2026-10-18.json`.
 
 **The offload locks.**
 - **Natural fit, F5a — committed** (`plans/unsloth/…/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-5080/cu130-torch2.11/1.lock`,

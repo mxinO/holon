@@ -216,10 +216,32 @@ Against `2d5ec61` the fix is −0.049 / −0.053 ms (sd 0.011), about 75% of the
 - No new test. The regression costs time only: outputs were identical before the fix and are after it. The oracle
   tests already cover a zero plan and a share.
 
-**Open.**
-- The A5000 shows about a quarter of the RTX 5080's +0.25 ms at the capped 4K row. The fix is not measured on the
-  5080, and no cluster desktop was used.
-- Any of the 5080's gap beyond this kernel is not explained on this card.
+**On the RTX 5080** (afterwards, one desktop, the fix's code at `384265b`; `evidence/x8_bisect_2026-10-18.json`).
+`63c6e4b` against the fix, ABBA ×4, fresh processes. The capped fit is `moe.cache=*=0.25`. The natural fit is step
+4's 3,220 / 1,610 / 1,610, since `63c6e4b` cannot pin the lock's 3,236. ms per decode token, the fix minus
+`63c6e4b`:
+
+| Fit | 1K | 4K | Holon, the fix (tok/s) |
+|---|---|---|---|
+| capped (25%; 58 / 71 misses per token) | +0.005 ms (sd 0.002), +0.07% | −0.004 ms (sd 0.002), −0.04% | 122.9 / 106.8 |
+| natural (52.4%; 6.5 / 14.7 misses) | +0.011 ms (sd 0.002), +0.27% | +0.010 ms (sd 0.002), +0.19% | 237.5 / 193.3 |
+
+- **Step 4's numbers are back.** Step 4 measured 122.9 / 106.8 capped and 238.3 / 193.7 natural; the close measured
+  119.2 / 104.0 and 234.7 / 190.9.
+- **No remainder grows with the misses.** The capped fit has five to ten times the natural fit's misses and shows none.
+- **Kernels** (nsys at 4K):
+  - `k_fetch` is unchanged (capped 54.99 / 54.93 µs per call, natural 12.02 / 12.02), and so are the DMA ring's
+    host-to-device copies.
+  - `k_resolve<lfu>` is 6.21 → 6.42 µs capped and 5.25 → 5.47 µs natural. That +0.22 µs per call (≈ +10 µs per
+    token) is the step-6 layout residue the A5000 showed; it is the natural fit's +0.010 ms.
+- **Not measured:** how much of the close's larger 5080 gap (≈ 0.25 ms) was this kernel. There was no pre-fix arm in
+  this allocation; the fix closes all of it.
+- **The natural-fit offload lock propagated to the fix** (1 → 2, `8615e26`). Its `kernels.expert_io` pin had moved, so
+  until then `holon serve` treated 1.lock as outdated.
+  - The snapshot trace is byte-identical to 1.lock's.
+  - L2 is unchanged and passes: top-1 98.264% (≥ 97.969%), KL p99 5.38e-2 (≤ 0.118), ΔPPL vs floor −0.042% ±
+    0.091% (≤ 0.479%).
+  - The snapshot ×3 is run-identical (2,163 steps). Approved (delegated).
 
 ## The offload locks
 
@@ -285,5 +307,7 @@ python -m holon_tools propagate <model> --golden … --floor … --prompts … <
 python spikes/x4_gap/ctx.py run --name bisect --arms <arms: holon_25 per commit, wrap 'env PYTHONPATH=<tree>'> \
     --rounds 4 --model $M --contexts 1024 4096 --ctx 33792 --out-dir <runs>      # the bisect (A5000)
 PYTHONPATH=<tree> python spikes/x8_close/resolve_mb.py <label>                    # the resolve alone, per tree
+python -m holon_tools propagate $M --golden … --floor … --prompts judge/prompts/v1.jsonl --approve <1.lock's [engine]> \
+    --host-memory 21474836480                                                     # the 5080 lock, 1 -> 2
 python spikes/x8_close/record.py --runs <dir> --date 2026-10-18 --commit 40811a0 --out evidence/x8_close_rtx-5080_2026-10-18.json
 ```

@@ -626,8 +626,8 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   patches (forced tiling, a compact id helper); prompt-time admission and two-phase lending for host policies stayed
   deferred; F10 showed the std API cannot log a spare (the std minor below); the AVX-512 `ggml_cpu` module never
   loaded after prebuild (fixed at the close); Holon's offload decode sat 1.3–3% below step 4's at the closing code —
-  bisected on an A5000 to step 6's CPU share phase in `moe_resolve@1`, run under F5a too, and fixed (`b45e86f`; the
-  5080's rows not re-measured). Next: K, FN (its MTP-on rows need the aux-model item below), GLM; the follow-ups below.
+  bisected on an A5000 to step 6's CPU share phase in `moe_resolve@1`, run under F5a too, and fixed (`b45e86f`; on
+  the 5080 decode is back at step 4's numbers, and the offload lock is propagated, `8615e26`). Next: K, FN (its MTP-on rows need the aux-model item below), GLM; the follow-ups below.
 - **F5b locks** (`docs/v1-offload.md` §14, step 8 part 2): `propagate`'s L2 scores a lock's own settings, which F5b's
   path-aware floor refuses (one token per step), so no tool writes a lock with a CPU split; and S5's lookup ranks a
   tier-carrying lock first, so a benchmark deployment (the capped fit) would become a host's default. Both are the
@@ -643,13 +643,6 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 - **A warm-up launch before `holon serve` reports ready** (panel, X's close): a pinned arena that does not fit is
   refused at its first launch (D4), which can be the first request's. Launch once before ready, with a test that an
   oversized pinned arena fails before the server reports ready.
-- **The step-6 resolve fix on the RTX 5080** (`b45e86f`; `spikes/x8_close/README.md`, the bisect). On the next RTX 5080
-  run: ABBA of `63c6e4b` (step 4's code) vs the fix at both fits (natural and capped, 1K and 4K); if a
-  miss-proportional remainder persists (the 5080's regression grew with misses, up to ≈ 0.28 ms at the capped fit, the
-  A5000's didn't), take an nsys diff of `k_fetch` and the ring's DMA copies (step 5's Tier views / the dma ring) as the
-  A5000 bisect did for `k_resolve`. The same run propagates the RTX 5080's natural-fit offload lock: it pins
-  `kernels.expert_io`'s source, which the fix changed, so until then `holon serve` treats it as outdated (defaults) and
-  `check_locks.py --release` fails on it.
 - **F10 with RAM short** (`docs/v1-offload.md` §14, step 8): promote-on-fetch's spares are unlogged on the device, so
   the host mirror lags them and exclusive tiers refuse F10. A std minor — a delta-log record "push b's slots onto the
   layer's empty stack", replayed by `ResidencyMap.commit` outside borrowing steps — makes the mirror exact; it lands at
