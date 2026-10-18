@@ -1,13 +1,14 @@
 # v1 — MoE prefill speed
 
-Status: **design rev 4 (2026-10-18).** Step 0 is measured on the A5000.
+Status: **design rev 5 (2026-10-18).** Step 0 is measured on the A5000.
 - Rev 2 answered the three-lens panel's first round (A correctness, B architecture, C performance: 3 blockers, 19
   majors, 23 minors).
 - Rev 3 answered its second round and took in FN's requests.
-- Rev 4 answers its third round (A 3 majors and 4 minors, B 1 major and 3 minors, C's last minor) and FN's arena rule:
-  D11 now goes through the policy contract, and D10's contract is written out (§10).
+- Rev 4 answered its third round: D11 goes through the policy contract, and D10's contract is written out.
+- Rev 5 answers the fourth round (A's and C's shared major: the tail step's order and counting; C's minor on the
+  fallback buffer; B clean).
 
-All are applied with the lead's decisions. Rev 4 awaits the panel's re-review.
+All are applied with the lead's decisions (§10). Rev 5 awaits the panel's re-review.
 
 This is the follow-up that plan §10 opened when milestone X closed (`docs/v1-offload.md` §13, "Owner decision on the
 gate").
@@ -355,9 +356,15 @@ dense-mmq bound.
     - **Lent memory is eager-only.** Graphed steps never borrow (`store.py:532`), so a buffer passed inside a captured
       graph is a static allocation whose address the graph keeps.
   - **Results are bitwise the same** with or without passed buffers, wherever those buffers live.
-  - **The fallback's peak stays profiled** (A3). When lending falls short or no tail forms, the step stages and the
-    instance allocates its own transients. The startup profile's worst-case step runs that fallback, so the KV pool
-    is sized for its peak.
+  - **When there is no lent buffer** (A3, A4; C4-m):
+    - X's `Lent` does not always stage when lending falls short. If the ring falls short but every class's lent slots
+      reach `prefill`, the step stages into them. If some class's do not, it sets `SHORT` and `after_commit` raises
+      (`ring.py:44-56`, `store.py:482-488`).
+    - D11's bind check keeps tail mode away from that raise.
+    - Where no tail is lent (`coldest`, or the resident store), the instance's **allocating fallback** allocates one
+      buffer of `scratch_bytes(pass_rows)` per pass and reuses it for gate/up and then down.
+    - The startup profile's worst-case step runs that fallback, so the KV pool is sized for its peak. Step 0 checks
+      that the reserved memory after a 32K prefill is ≤ the profiled peak.
   - Today's callers pass nothing, so no snapshot moves.
 
 - **D11 — Contiguous-tail lending, through the policy contract** (a std minor; FN's request; FreeToken / Strata
@@ -381,15 +388,33 @@ dense-mmq bound.
     - The tail range handed to D10 as `out` / `scratch` is excluded, for the whole step, from `Lent`'s `pool`, from
       the `stage_tab`, and from the empty stacks (`ring.py:60-63`, `:80-91`).
     - The ring and the staging take their slots from the rest of the lent set: the other classes' slots of the
-      evicted experts, then the empties outside the range.
+      evicted experts, then the empties outside the range, then what step 2 of the order below lends.
     - A CPU and L0 assertion checks per step that no pool, stage or ring slot, and no mapped id, falls in the D10
       range.
+  - **The order of a tail step** (lead decision on A4-major = C4-major; `ring.py:42-56`, `:101-102`):
+    1. `lend_tail(class, n)` first, which evicts the range's holders whole.
+    2. Then X's `lend(need)` rounds, unchanged, for every class's remaining ring and stage need, the tail's class
+       included. After step 1 no resident holds a range slot, so the policy's coldest picks fall outside the range.
+    - **What it fixes.** Without step 2, the tail's class would get no ring or stage slots except the empties outside
+      the range. A short step would then set `SHORT` and raise instead of staging.
+    - **Counting.** `held` and `want` for the tail's class count only slots outside the range. Counting the range
+      would let `ring_ok` pass while `pool` holds −1 entries, and the ring would read them.
+    - lfu's replay models both calls in this order.
+  - **The bind check** (the fallback, lead pick).
+    - The rule: at bind, and at each materialize where X decides the layout's lending, `moe.ring_lend = tail` is
+      refused when the tail class's lendable cache slots outside the range (its arena less the null, staging and
+      range slots) cannot reach `prefill`.
+    - The range is sized from D10's `scratch_bytes(pass_rows)` and `out` at the bound configuration.
+    - So a tail step can always stage, and `SHORT` is unreachable in tail mode.
   - **Who may lend a tail.** `placement.lfu` implements `lend_tail` (FN's lock). `moe.ring_lend = tail` is refused at
     bind under a policy that does not declare it, so lru, promote and profile_decay refuse until they implement it,
     with their own reference and replay.
   - **Mode.** `moe.ring_lend` = `coldest` (default, X's behaviour) | `tail`, declared in std.moe's `[options]`.
   - **Exactness.** Every placement is exact (X's acceptance 2), so tail lending changes speed, not outputs.
   - **Checks:**
+    - a CPU check of a tail step on a cache with **no spare empties**, at FN's E = 512: `lend_tail`, then the `lend`
+      rounds; `held` excludes the range; `ring_ok` and the pool hold no −1 entries in use; no `SHORT`;
+    - the bind-time refusal on a configuration whose tail class cannot reach `prefill` outside the range;
     - **policy parity** with `tail` for every policy that accepts it: lfu's replay models `lend_tail`, the whole-expert
       eviction, the spare release (none in lfu) and the whole-entry return;
     - a **tail-path plant**, `tail_unmap_undone` (the tail's unmap undone, so an evicted expert stays mapped to a slot
@@ -537,16 +562,16 @@ and the id maps).
 
 | Step | Work | Checks | Days |
 |---|---|---|---|
-| 0 | **A5000: done.** **Bar cards** (5090, 5080; one persistent container each): **FreeToken at 4,096 and 8,192 chunks, resident on the 5090 and offload on the 5080, at 4K and 32K** (the gated arm, measured: C2-N-M1); achieved mmq TOPS against cuBLAS bf16 TFLOPS at T·k = 32K / 64K, dequant ms per layer, the break-even pass size (D7); nsys breakdowns of resident (5090) and natural-fit offload (5080) at 1K / 4K / 32K, attention included; row 2's I/O split (`gemm.py --freetoken` with f32 activations, so its store is f32 too); the batched-decode J sweep at T = 16–64 (C-M6); startup KV tokens on the 16 GB lock and one 24 GB lock with the `--pass-tokens` / `--expert-rows` probes; the `peak_alloc` rise explained; the fixed prompt set | every §1.1 cell restated per class from these, the gated cells from the measured FreeToken; the gated reference's distance from the 0.88× reference stated; rows at or below their bar to the owner before step 1 | 1.5–2 |
+| 0 | **A5000: done.** **Bar cards** (5090, 5080; one persistent container each): **FreeToken at 4,096 and 8,192 chunks, resident on the 5090 and offload on the 5080, at 4K and 32K** (the gated arm, measured: C2-N-M1); achieved mmq TOPS against cuBLAS bf16 TFLOPS at T·k = 32K / 64K, dequant ms per layer, the break-even pass size (D7); nsys breakdowns of resident (5090) and natural-fit offload (5080) at 1K / 4K / 32K, attention included; row 2's I/O split (`gemm.py --freetoken` with f32 activations, so its store is f32 too); the batched-decode J sweep at T = 16–64 (C-M6); startup KV tokens on the 16 GB lock and one 24 GB lock with the `--pass-tokens` / `--expert-rows` probes; the `peak_alloc` rise explained, and the reserved memory after a 32K prefill ≤ the profiled peak (C4-m); the fixed prompt set | every §1.1 cell restated per class from these, the gated cells from the measured FreeToken; the gated reference's distance from the 0.88× reference stated; rows at or below their bar to the owner before step 1 | 1.5–2 |
 | 1 | D0 + D1 (`pass_rows`, the std minor, both stores, the shared `holon_testing` helper); `ggml_cuda.pass_rows` per class from step 0 | §5.1's L0; the CPU call-size test; the logits-hash identity on the A5000; snapshots against main (no lock writes); KV tokens per class | 1–1.5 |
 | 2 | D2 (`vendor.patch`, `vendor.sh --check`, "Holon:" markers, `test_link`) | L0 + NaN poison + both mutations on sm_86 / 89 / 120, memcheck, racecheck on sm_120; per-call `gemm.py` at equal I/O dtype, interleaved repeats (C-m4), ≤ FreeToken's at 512–4,096 tokens; batched decode B16–64 ABBA | 2–3 |
 | 3 | D4, then D3 and D5, each measured alone | D4's L0 and identity; D3 / D5 keep-or-revert by M0.7's rule, L2 with near and far plants (a passing near plant records L2's blindness at that scale) | 3–4 |
-| 3b | FN's requests: D10 (passed buffers and their contract terms; the decode-size persistent workspace) and D11 (`lend_tail` in the `moe_resolve` variant contract, lfu's implementation with its reference and replay, `Lent`'s D10 exclusion, the bind-time refusal, `moe.ring_lend`) | D10 / D11 L0 and CPU checks; policy parity with `tail`; the tail plant's fired count; the `prompt_logprobs` identity with `tail` | 3–4 |
+| 3b | FN's requests: D10 (passed buffers and their contract terms; the decode-size persistent workspace; the one-buffer allocating fallback) and D11 (`lend_tail` in the `moe_resolve` variant contract; the tail-then-coldest order with `held` / `want` excluding the range; lfu's implementation with its reference and replay of both calls; `Lent`'s D10 exclusion; the bind check; `moe.ring_lend`) | D10 / D11 L0 and CPU checks, the E = 512 no-spare-empties tail step included; policy parity with `tail`; the tail plant's fired count; the `prompt_logprobs` identity with `tail`; **perf with `tail` on the 30B offload lock at 4K and 32K** (C4): `ring_ok` true and no `SHORT`, prefill against `coldest`, and miss bytes per token over the first decode tokens against `coldest` | 3.5–4.5 |
 | 3c | D9: IQ1_M's mmq hunk (or its fallback), with IQ1_M and Q2_0 in `TYPES` | D9's L0 on sm_86 / sm_120, memcheck; per-call speed against IQ2_S's loader | 2–3 |
 | 4 | The bars on the bar cards (§5.2's method) | acceptance 1, 2, 3, 5, 6 | 1–2 |
 | 5 | Close: **one** propagation round over the 18 classes, covering D1–D5, D9 / Q2_0, D10, D11 and `pass_rows`; the 5080 offload lock re-filled and re-pinned; `pytest` on a GPU, `scripts/ci/run_all.sh`, panel code review, plan §10 status. FN's step 4 then finds D0, D2, D9, D10 and D11 on main | acceptance 4, 7; its L2 verdicts as its own evidence | 1.5–2 |
 
-**Schedule:** about 15–21 working days, in the order 0 → 1 → 2 → 3 → 3b → 3c → 4 → 5. Steps 3b and 3c do not depend on
+**Schedule:** about 15.5–21.5 working days, in the order 0 → 1 → 2 → 3 → 3b → 3c → 4 → 5. Steps 3b and 3c do not depend on
 3 and may run beside it on another GPU. Nothing merges to main before step 5, so no lock is ever left pinning other
 code.
 
@@ -594,6 +619,17 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
   `v1-flash-next.md:376`).
 
 ## 10. Review log
+
+### Rev 4 → rev 5 (the panel's fourth round, 2026-10-18; B clean)
+
+Both findings were verified at the cited lines.
+
+| # | Finding | Verified | Disposition |
+|---|---|---|---|
+| A4-M = C4-M | In tail mode the tail's class gets no ring or stage slots but the empties outside the range. A short step sets `SHORT` and `after_commit` raises instead of staging; the counts can admit −1 pool entries | yes (`ring.py:42-56`, `:101-102`; `store.py:482-488`) | `lend_tail` first, then X's coldest `lend(need)` rounds for every class's remaining need; `held` / `want` for the tail's class exclude the range; lfu's replay models both calls; a CPU tail step at E = 512 with no spare empties; a bind check refusing `tail` when the tail class's lendable slots outside the range cannot reach `prefill`; D10's "the step stages" corrected to X's stage-or-`SHORT`→raise; step 3b's perf check with `tail` on the 30B offload lock (C) |
+| C4-m | The allocating fallback's size and its reserved memory | — | one `scratch_bytes(pass_rows)` buffer per pass, reused for gate/up and down; step 0 checks that the reserved memory after a 32K prefill is ≤ the profiled peak |
+
+Step 3b becomes 3.5–4.5 days; the schedule is 15.5–21.5 days.
 
 ### Rev 3 → rev 4 (the panel's third round, 2026-10-18; FN's arena rule; the lead's decisions)
 
