@@ -37,6 +37,12 @@ int holon_ggml_mmq_schedule(int type, int prec, int64_t out, int64_t rows, int *
 // current device.
 size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows);
 
+// The judge's plants on a dense mmq call's stream-k fixup past one 512-row chunk (docs/v1-moe-prefill.md D5): `bits`
+// 1 rounds the partials to bf16 before the fixup, 2 skips it, 0 none; returns the previous bits. One process-wide
+// setting. `holon_ggml_mmq_fixups` reads (then zeroes) such fixups launched, and of them those planted.
+int holon_ggml_mmq_plant(int bits);
+void holon_ggml_mmq_fixups(long long * launched, long long * planted);
+
 // Tests only: the most bytes one call took from its workspace since the last read (then 0), to hold the sizes above
 // to what llama.cpp allocates on every call. One process-wide counter: not per device, not thread-safe.
 size_t holon_ggml_workspace_high_water(void);

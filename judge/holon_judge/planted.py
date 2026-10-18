@@ -14,6 +14,8 @@
 - GGUF Tier B (`l2 --plant`): bugs in the quantized kernels' use (`kernels.ggml_cuda`); L2 fails, except the rare
   stale workspace, which measures Tier B's sensitivity (predicted before running: fails the decode run, likely passes
   the looser prefill run).
+- Dense mmq calls past one 512-row chunk (docs/v1-moe-prefill.md D5): the stream-k partials rounded to bf16 before
+  the fixup (near the bound), or the fixup skipped (far); each counts the fixups it saw and planted.
 - FP4 in `kernels.ggml_cuda` (docs/m06-lowp.md §4.8: N2–N6, N8, N8b, M1, M4): its repack, `scale2` paths, mmq
   precision and zeroed tail broken, and a checkpoint's `scale2` misread; each also fails L0 where L0 reaches it
   (plugins/tests/test_ggml_cuda*.py), N6 as the pre-launch precision check's error on sm_120.
@@ -341,6 +343,28 @@ def _moe(layer: int | None = None, init: Callable[[dict], dict] | None = None,
 def _swap_gate_up_experts(name: str) -> str:
     swap = {".ffn_gate_exps.": ".ffn_up_exps.", ".ffn_up_exps.": ".ffn_gate_exps."}
     return next((name.replace(a, b) for a, b in swap.items() if a in name), name)
+
+
+@contextlib.contextmanager
+def qlinear_fixup(bits: int, name: str) -> Iterator[None]:
+    """docs/v1-moe-prefill.md D5 (dense `qlinear` mmq calls of up to `call_rows` rows): kernels.ggml_cuda's mmq plant
+    `bits` on every stream-k fixup of a dense call past one 512-row chunk — 1, `qlinear-partials-bf16`, rounds the
+    blocks' partials to bf16 before the fixup adds them (near the bound); 2, `qlinear-large-no-fixup`, skips the fixup
+    (far). Reports how many such fixups launched and how many it planted: zero means the plant never fired on that
+    card and shape (calls that tile need no fixup)."""
+    import torch
+    from holon_plugins.kernels.ggml_cuda import extension
+
+    major, minor = torch.cuda.get_device_capability()
+    lib = extension.load(10 * major + minor)
+    lib.mmq_fixups()                                       # zero the counters
+    before = lib.mmq_plant(bits)
+    try:
+        yield
+    finally:
+        lib.mmq_plant(before)
+        launched, planted = lib.mmq_fixups()
+        print(f"plant {name} fired: {{'fixups': {launched}, 'planted': {planted}}}", file=sys.stderr)
 
 
 @contextlib.contextmanager
@@ -1137,6 +1161,8 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     **hf_quant_plants(18), **fp4_plants(18), **fp8_plants(18),
     # MoE Tier B
     "ggml-experts-wrong-type": ggml_experts_wrong_type, "ggml-experts-stale-q8_1": ggml_experts_stale_q8_1,
+    "qlinear-partials-bf16": lambda: qlinear_fixup(1, "qlinear-partials-bf16"),
+    "qlinear-large-no-fixup": lambda: qlinear_fixup(2, "qlinear-large-no-fixup"),
     "rare-ggml-experts-stale-q8_1": lambda: ggml_experts_stale_q8_1(every=9973),
     **QWEN35_PLANTS,
     # The fused q/k norm + rope + KV write (docs/m07-perf.md D3)

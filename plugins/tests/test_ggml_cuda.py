@@ -120,7 +120,7 @@ def qlinear(ctx, name: str, k: int, out_dtype: str = "bfloat16", out: int = OUT,
     spec = ctx.select_kernel(op, site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
     kernel, device = spec.impl(ctx, **facts), torch.cuda.current_device()
-    return Sized(kernel, lambda x, parts: kernel.lib.workspace_bytes(device, k, min(len(_rows(x)), CHUNK)))
+    return Sized(kernel, lambda x, parts: kernel.lib.workspace_bytes(device, k, min(len(_rows(x)), kernel.call_rows)))
 
 
 def _rows(x) -> torch.Tensor:
@@ -371,6 +371,26 @@ def test_mmq_schedules(ctx, sm, name):
             plain = f32(x, {"blocks": parts["blocks"]}) * parts["scale2"]          # today's: f32, then the multiply
             assert torch.equal(f32(x, parts), plain) and torch.equal(kernel(x, parts), plain.to(torch.bfloat16))
             assert kernel.calls == {f"mmq/{kernel.act['mmq']}": 1}
+
+
+def test_the_large_call_plants_fire_on_the_fixup(ctx, sm):
+    """docs/v1-moe-prefill.md D5's plants (judge `qlinear-partials-bf16`, `qlinear-large-no-fixup`): on a dense call
+    of two chunks that takes the stream-k fixup, the counter sees the fixup, and each plant changes the output (the
+    partials rounded to bf16; the fixup skipped) and is counted; a one-chunk call is never planted."""
+    lib, k, rows = extension.load(sm), 4096, 2 * CHUNK
+    assert lib.mmq_schedule(0, TYPES["q4_k"], PREC["q8_1"], OUT, rows)[0] == 2
+    kernel = qlinear(ctx, "q4_k", k, "float32")
+    w, x = {"blocks": device_blocks(random_blocks("q4_k", OUT, k, seed=3))}, activations(rows, k, seed=3)
+    lib.mmq_fixups()
+    clean, one = kernel(x, w), kernel(x[:CHUNK], w)
+    assert lib.mmq_fixups() == (1, 0)
+    for bits in (1, 2):
+        lib.mmq_plant(bits)
+        try:
+            planted, chunk = kernel(x, w), kernel(x[:CHUNK], w)
+        finally:
+            lib.mmq_plant(0)
+        assert lib.mmq_fixups() == (1, 1) and not torch.equal(planted, clean) and torch.equal(chunk, one), bits
 
 
 def _launches(kernel, x: torch.Tensor, w: dict[str, torch.Tensor]) -> set[str]:

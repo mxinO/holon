@@ -26,6 +26,13 @@ constexpr size_t POOL_ALIGN = 256;
 // never reads it, and the update is one max per call.
 size_t high_water = 0;
 
+} // namespace
+
+int holon_mmq_plant = 0;                        // mmq.cuh's plant hook: off unless the judge sets it
+long long holon_mmq_fixups[2] = {0, 0};
+
+namespace {
+
 // llama.cpp's scratch allocator, as a bump allocator over the caller's workspace: no cudaMalloc, so a call is safe
 // inside CUDA graph capture. It lives for one call (llama.cpp frees everything before returning).
 struct workspace_pool : ggml_cuda_pool {
@@ -170,6 +177,18 @@ int holon_ggml_mmq_schedule(int type, int prec, int64_t out, int64_t rows, int *
     const int64_t waves = (ntiles + dev.nsm - 1)/dev.nsm;
     const int64_t nblocks = 100*ntiles/(dev.nsm*waves) >= 90 ? ntiles : dev.nsm;
     return ntiles % nblocks == 0 ? 1 : 2;
+}
+
+int holon_ggml_mmq_plant(int bits) {
+    const int before = holon_mmq_plant;
+    holon_mmq_plant = bits;
+    return before;
+}
+
+void holon_ggml_mmq_fixups(long long * launched, long long * planted) {
+    *launched = holon_mmq_fixups[0];
+    *planted = holon_mmq_fixups[1];
+    holon_mmq_fixups[0] = holon_mmq_fixups[1] = 0;
 }
 
 size_t holon_ggml_workspace_high_water(void) {

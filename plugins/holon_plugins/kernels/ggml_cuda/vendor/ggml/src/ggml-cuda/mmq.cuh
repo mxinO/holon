@@ -10,6 +10,19 @@
 #define MMQ_ITER_K_FP4         512
 #define MMQ_NWARPS               8
 
+// Holon: the judge's plants on a dense call's stream-k fixup past one 512-row chunk (docs/v1-moe-prefill.md D5, set by
+// holon_ggml_mmq_plant: bit 1 rounds the partials to bf16 before the fixup, bit 2 skips the fixup), and the count of
+// such fixups launched, then of those planted (holon_ggml_mmq_fixups); defined in csrc/api.cu
+extern int holon_mmq_plant;
+extern long long holon_mmq_fixups[2];
+
+static __global__ void holon_mmq_round_bf16(float * __restrict__ x, const int64_t n) { // Holon: the plant's rounding
+    const int64_t i = int64_t(blockIdx.x)*blockDim.x + threadIdx.x;
+    if (i < n) {
+        x[i] = __bfloat162float(__float2bfloat16(x[i]));
+    }
+}
+
 typedef void (*ggml_cuda_mmq_load_tiles_t)(const char * __restrict__ x, int * x_tile, const int kbx0, const int i_max, const int stride);
 typedef void (*ggml_cuda_mmq_vec_dot_t)(const int * __restrict__ x, const int * __restrict__ y, float * __restrict__ sum, const int k00);
 typedef void (*ggml_cuda_mmq_write_back_t)(const float * __restrict__ sum, const int32_t * __restrict__ get_rows_to_sorted,
@@ -1544,6 +1557,18 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
 
     if (!fixup_needed) {
         return;
+    }
+
+    if (!args.ids_dst && args.ncols_dst > 512) { // Holon: the plants (holon_mmq_plant), on fixups past one chunk
+        holon_mmq_fixups[0]++;
+        holon_mmq_fixups[1] += holon_mmq_plant != 0;
+        if (holon_mmq_plant & 1) {
+            const int64_t n = 2 * int64_t(block_nums_stream_k.x) * config.J*config.I;
+            holon_mmq_round_bf16<<<(n + 255)/256, 256, 0, stream>>>(tmp_fixup.ptr, n);
+        }
+        if (holon_mmq_plant & 2) {
+            return;
+        }
     }
 
     CUDA_CHECK(cudaGetLastError());

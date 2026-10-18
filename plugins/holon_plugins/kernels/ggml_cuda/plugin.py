@@ -3,9 +3,10 @@
 the HF FP4 layouts (`"nvfp4/hf"`, `"mxfp4/hf"`, repacked by `prepare`), and its MoE routing and combine as
 `moe_topk@1`, `moe_router@1` and `moe_combine@1` (op contracts: std.ops.kernels, std.moe.kernels).
 
-`qlinear` dispatches from the row count: `mmvq` up to `mmvq_rows`, else `mmq` in 512-row chunks (llama.cpp's
-ubatch); both write `out_dtype` (bf16 or f32) directly, mmq's stream-k partials kept in f32 until its one rounding
-(docs/m07-perf.md D4).
+`qlinear` dispatches from the row count: `mmvq` up to `mmvq_rows`, else `mmq` in calls of whole 512-row chunks
+(llama.cpp's ubatch) up to `call_rows`, the last partial chunk a call of its own (docs/v1-moe-prefill.md D5: bounded,
+as mmq's stream-k split points move with a call's rows); both write `out_dtype` (bf16 or f32) directly, mmq's
+stream-k partials kept in f32 until its one rounding (docs/m07-perf.md D4).
 `mmvq_rows` is llama.cpp's threshold for the type at the class's compute capability, or the class's entry for the
 shape where a repeated sweep found mmq faster (docs/m07-perf.md D2, `CROSSOVER`); the judge's floors ask it too.
 Both quantize the activations in a workspace shared by every instance with the same `in`. `qembedding` is
@@ -236,15 +237,27 @@ def mmvq_rows(fingerprint, name: str, mode: str, k: int, out: int, lib=None) -> 
     return entry
 
 
+def _cap(ctx) -> int:
+    """The most rows one mmq call may take in this build: PASS_ROWS within the build's `max_step_tokens` and the
+    `ggml_cuda.pass_rows` option (each where set)."""
+    caps = [PASS_ROWS, ctx.options.get("max_step_tokens"), ctx.options.get("plugins", {}).get(PASS_OPTION)]
+    return min(int(c) for c in caps if c is not None)
+
+
 def pass_rows(ctx, name: str, mode: str, top_k: int) -> int:
     """The most rows a `linear_experts` call of ggml type `name` in mmq activation mode `mode` takes at its CHUNK-row
-    calls' bits (D0): CHUNK unless (SM, type, mode) is in PASS_PROVEN, else the most whole CHUNKs within PASS_ROWS, the
-    id helper's pairs, the build's `max_step_tokens` and the `ggml_cuda.pass_rows` option (each where set)."""
+    calls' bits (D0): CHUNK unless (SM, type, mode) is in PASS_PROVEN, else the most whole CHUNKs within `_cap` and
+    the id helper's pairs."""
     if (ctx.fingerprint.sm, name, mode) not in PASS_PROVEN:
         return CHUNK
-    caps = [PASS_ROWS, ID_PAIRS // top_k, ctx.options.get("max_step_tokens"),
-            ctx.options.get("plugins", {}).get(PASS_OPTION)]
-    return max(CHUNK, min(int(c) for c in caps if c is not None) // CHUNK * CHUNK)
+    return max(CHUNK, min(_cap(ctx), ID_PAIRS // top_k) // CHUNK * CHUNK)
+
+
+def calls(rows: int, size: int) -> list[tuple[int, int]]:
+    """A call of `rows` rows cut into calls of whole CHUNKs, up to `size` (a multiple of CHUNK) rows each, then the
+    last partial chunk as a call of its own: each row's kernel path is its chunk's, whatever the caller's cut."""
+    full = rows // CHUNK * CHUNK
+    return [(a, min(a + size, full)) for a in range(0, full, size)] + [(full, rows)] * (full < rows)
 
 
 def rule_module(sm: int):
@@ -353,8 +366,11 @@ class QLinear(_Matmul):
         # mmvq up to `mmvq_rows` (the class's, for this shape and mode; fixed per graph bucket), else mmq
         self.mmvq_rows = mmvq_rows(ctx.fingerprint, self.name, act["mmq"], self.k, self.out, self.lib)
         self._uses_mmq(self.mmvq_rows, facts["layout"])
-        self.workspace = ctx.workspace(f"ggml_cuda[in={self.k}]", self.lib.workspace_bytes(self.device, self.k, CHUNK))
-        self.f32 = self._f32_workspace(ctx, CHUNK, facts["act_dtype"])
+        # mmq's rows per call (D5), which size its workspaces
+        self.call_rows = max(CHUNK, _cap(ctx) // CHUNK * CHUNK)
+        self.workspace = ctx.workspace(f"ggml_cuda[in={self.k},rows={self.call_rows}]",
+                                       self.lib.workspace_bytes(self.device, self.k, self.call_rows))
+        self.f32 = self._f32_workspace(ctx, self.call_rows, facts["act_dtype"])
         self.q8_1 = ctx.workspace(f"ggml_cuda.q8_1[in={self.k}]", q8_1_bytes(MMVQ_MAX, self.k))   # prepared inputs
 
     def prepare_input(self, x: torch.Tensor) -> Prepared:
@@ -388,9 +404,9 @@ class QLinear(_Matmul):
             return y
         self._count("mmq")
         blocks = self._mmq_blocks(parts)
-        for start in range(0, rows, CHUNK):              # scale2 in f32, then one rounding to out_dtype (D4)
-            self.lib.mmq(self.type, self.prec, blocks, self._mmq_input(x[start:start + CHUNK], self.f32),
-                         y[start:start + CHUNK], scale2, self.workspace)
+        for start, end in calls(rows, self.call_rows):     # scale2 in f32, then one rounding to out_dtype (D4)
+            self.lib.mmq(self.type, self.prec, blocks, self._mmq_input(x[start:end], self.f32), y[start:end], scale2,
+                         self.workspace)
         return y
 
 
@@ -487,12 +503,7 @@ class LinearExperts(_Matmul):
         tokens = len(ids)
         y = torch.empty(tokens, self.top_k, self.out_y, device=x.device)
         gate_up = None          # mmq's f32 gate/up output before our SwiGLU, a per-call activation
-        # calls of whole CHUNKs (up to pass_rows), then the last partial chunk on its own: each row's path is its
-        # chunk's, whatever the caller's cut
-        full = tokens // CHUNK * CHUNK
-        calls = [(a, min(a + self.pass_rows, full)) for a in range(0, full, self.pass_rows)] + [(full, tokens)] * (
-            full < tokens)
-        for start, end in calls:
+        for start, end in calls(tokens, self.pass_rows):
             xs, ids_c, ys = x[start:end], ids[start:end], y[start:end]
             if len(ids_c) <= self.mmvq_tokens:
                 self._count("mmvq")

@@ -140,6 +140,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         return holon_ggml_workspace_bytes(in, rows);
     });
     m.def("workspace_high_water", [] { return holon_ggml_workspace_high_water(); });
+    m.def("mmq_plant", [](int64_t bits) { return holon_ggml_mmq_plant(int(bits)); });
+    m.def("mmq_fixups", [] {
+        long long launched = 0, planted = 0;
+        holon_ggml_mmq_fixups(&launched, &planted);
+        return std::make_tuple(int64_t(launched), int64_t(planted));
+    });
     m.def("mmvq", [](int64_t type, const at::Tensor & w, const at::Tensor & x, at::Tensor & y,
                      const std::optional<at::Tensor> & s, at::Tensor & ws, const std::optional<at::Tensor> & gate,
                      const std::optional<at::Tensor> & xq) { matmul(true, type, 0, w, x, y, s, ws, gate, xq); },
