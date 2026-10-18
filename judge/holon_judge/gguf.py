@@ -35,16 +35,35 @@ _QWEN35 = {"post_attention_norm.weight": "post_attention_layernorm.weight",
            "ssm_out.weight": "linear_attn.out_proj.weight", "ssm_conv1d.weight": "linear_attn.conv1d.weight",
            "ssm_norm.weight": "linear_attn.norm.weight", "ssm_a": "linear_attn.A_log",
            "ssm_dt.bias": "linear_attn.dt_bias"}
-NAME_MAP_HASH = hashlib.sha256(json.dumps([_GLOBAL, _LAYER, _EXPERTS, _QWEN35], sort_keys=True).encode()
-                               ).hexdigest()[:16]
+# Qwen3.8-Flash-Next (`qwen4exp`, llama.cpp 27c7a76 conversion/qwen4exp.py): `qwen35`'s GDN and attention names, plus
+# the hyper-connection mixers, the shared expert, PLE and QSA's indexer, whose fused q/k projection the converter splits
+# (`_INDEXER`, fused back here). The PLE table is not read whole (`ple_rows`).
+_QWEN4EXP_GLOBAL = {f"output_hc_{g}.weight": f"model.hyper_connection_mixer.{h}.weight"
+                    for g, h in (("norm", "hc_norm"), ("down", "input_mix_weight_down"), ("up", "input_mix_weight_up"))}
+_QWEN4EXP = {f"hc_{g}_{p}.weight": f"{h}_hyper_connection.{w}.weight" for g, h in (("attn", "attn"), ("ffn", "mlp"))
+             for p, w in (("norm", "hc_norm"), ("down", "input_mix_weight_down"), ("up", "input_mix_weight_up"),
+                          ("inject", "block_inject_weight"))} | {
+    "ffn_gate_shexp.weight": "mlp.shared_expert.gate_proj.weight",
+    "ffn_up_shexp.weight": "mlp.shared_expert.up_proj.weight",
+    "ffn_down_shexp.weight": "mlp.shared_expert.down_proj.weight",
+    "ffn_gate_inp_shexp.weight": "mlp.shared_expert_gate.weight",
+    "ple_key.weight": "ple.key_proj.weight", "ple_value.weight": "ple.value_proj.weight",
+    "ple_norm_key.weight": "ple.norm_key.weight", "ple_norm_query.weight": "ple.norm_query.weight",
+    "ple_norm_conv.weight": "ple.norm_conv.weight", "ple_conv1d.weight": "ple.conv1d.weight",
+    "indexer.q_norm.weight": "self_attn.indexer.q_layernorm.weight",
+    "indexer.k_norm.weight": "self_attn.indexer.k_layernorm.weight"}
+_INDEXER = {"indexer.q_proj.weight": "q", "indexer.k_proj.weight": "k"}
+PLE_TABLE = "per_layer_token_embd.weight"
+NAME_MAP_HASH = hashlib.sha256(json.dumps([_GLOBAL, _LAYER, _EXPERTS, _QWEN35, _QWEN4EXP_GLOBAL, _QWEN4EXP, _INDEXER],
+                                          sort_keys=True).encode()).hexdigest()[:16]
 
 
 def hf_name(name: str) -> str:
-    if name in _GLOBAL:
-        return _GLOBAL[name]
+    if name in _GLOBAL or name in _QWEN4EXP_GLOBAL:
+        return _GLOBAL.get(name) or _QWEN4EXP_GLOBAL[name]
     m = re.fullmatch(r"blk\.(\d+)\.(.+)", name)
-    if m is not None and m[2] in _QWEN35:
-        return f"model.layers.{m[1]}.{_QWEN35[m[2]]}"
+    if m is not None and (m[2] in _QWEN35 or m[2] in _QWEN4EXP):
+        return f"model.layers.{m[1]}.{_QWEN35.get(m[2]) or _QWEN4EXP[m[2]]}"
     m = re.fullmatch(r"blk\.(\d+)\.(\w+)\.weight", name)
     if m is None or m[2] not in _LAYER:
         raise KeyError(f"no HF name for GGUF tensor {name!r}")
@@ -52,13 +71,16 @@ def hf_name(name: str) -> str:
 
 
 def _qwen35(fields) -> dict | None:
-    """The `qwen35` facts the judge needs to undo llama.cpp's conversion (None for other architectures)."""
-    if bytes(fields["general.architecture"].parts[-1]).decode() != "qwen35":
+    """The `qwen35` / `qwen4exp` facts the judge needs to undo llama.cpp's conversion (None for other
+    architectures)."""
+    arch = bytes(fields["general.architecture"].parts[-1]).decode()
+    if arch not in ("qwen35", "qwen4exp"):
         return None
-    value = lambda k: int(fields[f"qwen35.{k}"].parts[-1][0])                  # noqa: E731
-    blocks = value("block_count") - (value("nextn_predict_layers") if "qwen35.nextn_predict_layers" in fields else 0)
+    value = lambda k: int(fields[f"{arch}.{k}"].parts[-1][0])                  # noqa: E731
+    blocks = value("block_count") - (value("nextn_predict_layers") if f"{arch}.nextn_predict_layers" in fields else 0)
     hk, hv = value("ssm.group_count"), value("ssm.time_step_rank")
-    return {"layers": blocks, "hk": hk, "hv": hv, "dv": value("ssm.inner_size") // hv, "dk": value("ssm.state_size")}
+    return {"arch": arch, "layers": blocks, "hk": hk, "hv": hv, "dv": value("ssm.inner_size") // hv,
+            "dk": value("ssm.state_size")}
 
 
 def _untile(x: torch.Tensor, f: dict, dim: int, start: int = 0) -> torch.Tensor:
@@ -86,38 +108,65 @@ def _qwen35_order(name: str, x: torch.Tensor, f: dict) -> torch.Tensor:
 
 
 def _qwen35_value(name: str, x: torch.Tensor, f: dict) -> torch.Tensor:
-    """Undo the converter's value changes: zero-centred norms (all but the GDN norm) stored as w + 1, `ssm_a` as
-    −exp(A_log), conv1d squeezed, value heads tiled."""
+    """Undo the converter's value changes: zero-centred norms (all but the GDN norm; `qwen4exp`'s PLE norms too) stored
+    as w + 1, `ssm_a` as −exp(A_log), the conv1d weights squeezed, value heads tiled, the shared expert's gate 1-D."""
     part = name.split(".", 2)[-1] if name.startswith("blk.") else name
-    if part.endswith("norm.weight") and part != "ssm_norm.weight":
+    if (part.endswith("norm.weight") or part.startswith("ple_norm_")) and part != "ssm_norm.weight":
         return x - 1
+    if part == "ffn_gate_inp_shexp.weight":
+        return x.reshape(1, -1)
     x = _qwen35_order(name, torch.log(-x) if part == "ssm_a" else x, f)
-    return x[:, None, :] if part == "ssm_conv1d.weight" else x
+    return x[:, None, :] if part in ("ssm_conv1d.weight", "ple_conv1d.weight") else x
 
 
 _DENSE = {gguf.GGMLQuantizationType.F32, gguf.GGMLQuantizationType.F16, gguf.GGMLQuantizationType.BF16}
 
 
+def shards(path: str | pathlib.Path) -> list[pathlib.Path]:
+    """A split GGUF's files in order (`name-00001-of-0000N.gguf`, D14), given its first; a whole file alone."""
+    path = pathlib.Path(path)
+    count = gguf.GGUFReader(path).fields.get("split.count")
+    n = int(count.parts[-1][0]) if count is not None else 1
+    if n == 1:
+        return [path]
+    m = re.fullmatch(rf"(.*)-00001-of-{n:05d}\.gguf", path.name)
+    if m is None:
+        raise ValueError(f"{path.name}: the first of {n} splits must be named <name>-00001-of-{n:05d}.gguf")
+    return [path.with_name(f"{m[1]}-{i:05d}-of-{n:05d}.gguf") for i in range(1, n + 1)]
+
+
+def _tensors(path: str | pathlib.Path) -> Iterator:
+    for p in shards(path):
+        yield from gguf.GGUFReader(p).tensors
+
+
 def hf_state(path: str | pathlib.Path, select: Callable[[str], bool] = lambda name: True
              ) -> Iterator[tuple[str, torch.Tensor]]:
     """The HF state-dict entries (fp32) the file's tensors make (those whose GGUF name `select` keeps, e.g. one
-    layer's `blk.<i>.`), dequantized by gguf-py one tensor at a time; a layer's gate and up expert stacks are fused as
-    transformers stores them (`gate_up_proj` [E, 2I, H])."""
+    layer's `blk.<i>.`), dequantized by gguf-py one tensor at a time, from every shard of a split file; a layer's gate
+    and up expert stacks are fused as transformers stores them (`gate_up_proj` [E, 2I, H]), and so are QSA's indexer
+    q and k (`index_qk_proj`). PLE's table is not read (`ple_rows` gathers its rows); its hash constants come from the
+    file's keys as the n-gram embedding's int64 buffers (`ple_buffers`)."""
     pending: dict[str, dict[str, torch.Tensor]] = {}
-    reader = gguf.GGUFReader(path)
-    q35 = _qwen35(reader.fields)
-    for t in reader.tensors:
+    fields = gguf.GGUFReader(path).fields
+    q35 = _qwen35(fields)
+    for t in _tensors(path):
         if q35 is not None and re.match(rf"blk\.{q35['layers']}\.", t.name):
             continue                                   # the MTP block (M0.4)
-        if not select(t.name):
+        if t.name == PLE_TABLE or not select(t.name):
             continue
         x = gguf.quants.dequantize(np.asarray(t.data), t.tensor_type).astype(np.float32, copy=False)
         x = torch.from_numpy(x.reshape([int(n) for n in reversed(t.shape)]).copy())
         if q35 is not None:
             x = _qwen35_value(t.name, x, q35)
-        m = re.fullmatch(r"blk\.(\d+)\.(ffn_(?:gate|up|down)_exps)\.weight", t.name)
+        m = re.fullmatch(r"blk\.(\d+)\.(ffn_(?:gate|up|down)_exps|indexer\.[qk]_proj)\.weight", t.name)
         if m is None:
             yield hf_name(t.name), x
+        elif m[2].startswith("indexer."):
+            pending.setdefault(f"{m[1]}.indexer", {})[_INDEXER[f"{m[2]}.weight"]] = x
+            if len(pending[f"{m[1]}.indexer"]) == 2:
+                p = pending.pop(f"{m[1]}.indexer")
+                yield f"model.layers.{m[1]}.self_attn.indexer.index_qk_proj.weight", torch.cat([p["q"], p["k"]])
         elif _EXPERTS[m[2]] == "down":
             yield f"model.layers.{m[1]}.mlp.experts.down_proj", x
         else:
@@ -125,6 +174,37 @@ def hf_state(path: str | pathlib.Path, select: Callable[[str], bool] = lambda na
             if len(pending[m[1]]) == 2:
                 p = pending.pop(m[1])
                 yield f"model.layers.{m[1]}.mlp.experts.gate_up_proj", torch.cat([p["gate"], p["up"]], dim=1)
+    if q35 is not None and q35["arch"] == "qwen4exp":
+        yield from ((n, x) for n, x in ple_buffers(path).items() if select(f"blk.{n.split('.')[2]}."))
+
+
+def ple_buffers(path: str | pathlib.Path) -> dict[str, torch.Tensor]:
+    """The n-gram embedding's int64 buffers (HF `Qwen4ExpTextNGramEmbedding`) from the file's `ple.*` keys, per PLE
+    layer: the hash multipliers, each head's table offset and size."""
+    fields = gguf.GGUFReader(path).fields
+    ints = lambda k: torch.tensor([int(v) for v in fields[f"qwen4exp.ple.{k}"].contents()], dtype=torch.long)  # noqa: E731
+    out = {}
+    for layer in (int(v) for v in fields["qwen4exp.ple.layers"].contents()):
+        emb = f"model.layers.{layer}.ple.ple_embedding"
+        out |= {f"{emb}.layer_multipliers": ints("layer_multipliers"), f"{emb}.ngram_heads_offsets":
+                ints("head_offsets"), f"{emb}.ngram_heads_vocab_sizes": ints("head_vocab_sizes")}
+    return out
+
+
+class PleRows:
+    """PLE's table read lazily (D2: the whole table in fp32 is 205 GB): `rows(ids)` dequantizes only the rows asked
+    for, with gguf-py, from the shard that holds it."""
+
+    def __init__(self, path: str | pathlib.Path):
+        t = next(t for t in _tensors(path) if t.name == PLE_TABLE)
+        self.kind, self.blocks = t.tensor_type, np.asarray(t.data)          # [rows, row bytes] (quantized) or values
+        self.dim = int(t.shape[0])
+
+    def rows(self, ids: torch.Tensor) -> torch.Tensor:
+        flat = ids.reshape(-1).cpu().numpy()
+        uniq, inverse = np.unique(flat, return_inverse=True)
+        x = gguf.quants.dequantize(self.blocks[uniq], self.kind).astype(np.float32, copy=False).reshape(-1, self.dim)
+        return torch.from_numpy(x[inverse].reshape(*ids.shape, self.dim)).to(ids.device)
 
 
 def hf_types(path: str | pathlib.Path) -> dict[str, str]:
@@ -374,15 +454,23 @@ def _nmse(x: torch.Tensor, ref: torch.Tensor) -> float:
 
 def file_meta(path: str | pathlib.Path) -> dict:
     """Provenance without local paths: the file (hub repo and stem for a hub-cache file), its sha256 (the blob name
-    for a hub-cache symlink), the gguf-py that dequantized it and the name map's hash."""
+    for a hub-cache symlink; a split file's every shard, D1), the gguf-py that dequantized it — its version and the
+    sha256 of its `quants.py`, since llama.cpp's own tree calls itself the PyPI release's version — and the name map's
+    hash."""
     from importlib.metadata import version
 
     p = pathlib.Path(path)
     hub = [part for part in p.parts if part.startswith("models--")]
     model = f"{hub[-1].removeprefix('models--').replace('--', '/')}/{p.stem}" if hub else p.stem
+    digests = [_digest(f) for f in shards(p)]
+    with open(gguf.quants.__file__, "rb") as f:
+        quants = hashlib.file_digest(f, "sha256").hexdigest()[:16]
+    return {"model": model, "gguf_sha256": digests[0], **({"shards_sha256": digests} if len(digests) > 1 else {}),
+            "gguf_py": version("gguf"), "gguf_py_quants": quants, "name_map": NAME_MAP_HASH}
+
+
+def _digest(p: pathlib.Path) -> str:
     if p.is_symlink() and re.fullmatch(r"[0-9a-f]{64}", p.resolve().name):
-        digest = p.resolve().name
-    else:
-        with open(p, "rb") as f:
-            digest = hashlib.file_digest(f, "sha256").hexdigest()
-    return {"model": model, "gguf_sha256": digest, "gguf_py": version("gguf"), "name_map": NAME_MAP_HASH}
+        return p.resolve().name
+    with open(p, "rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
