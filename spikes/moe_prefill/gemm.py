@@ -8,7 +8,10 @@ module, against two bounds of the same work, CUDA-event timed (median of `--iter
 - `bf16_mm`: cuBLAS bf16 (f32 accumulation) at T·k rows on one dequantized expert matrix — a dequant + tensor-core
   path's GEMM alone; `dequant` the whole stack's dequantization to bf16 (that path's per-pass cost).
 - `--freetoken` (run in FreeToken's venv): its `mul_mat_id` instead, on the same stacks and routing (bf16 in and out,
-  as its MoE calls it: its down input is bf16) — the per-call time of its grouped launch at equal work.
+  as its MoE calls it: its down input is bf16) — the per-call time of its grouped launch at equal work; with `--f32`
+  its activations are f32, so it stores f32 as Holon's call does (equal I/O: docs/v1-moe-prefill.md row 2's split).
+- Past `ID_PAIRS` (T·k > 32,768: 8,192 tokens at top-8) Holon's call is not run (its id helper's bound); the bounds
+  and the dequant still are (D7's break-even at 8,192-token passes).
 - `--j-check`: whether mmq's column-tile width J changes a row's bits — the first n tokens' rows of one call of T
   tokens (J = 128) against a call of those n tokens alone (J chosen against n: 16 → 16, 32 → 32, 64 → 64), both stacks.
 - Routing: per token k distinct experts drawn without replacement with popularity ∝ rank^-s (s = 0.5: the top 10% of
@@ -59,6 +62,7 @@ def main() -> None:
     ap.add_argument("--skew", type=float, default=0.5)
     ap.add_argument("--iters", type=int, default=20)
     ap.add_argument("--freetoken", action="store_true")
+    ap.add_argument("--f32", action="store_true", help="--freetoken with f32 activations (and so f32 out)")
     ap.add_argument("--j-check", action="store_true")
     ap.add_argument("--json")
     a = ap.parse_args()
@@ -74,7 +78,8 @@ def main() -> None:
     gen = torch.Generator().manual_seed(0)
     rows = (freetoken if a.freetoken else j_check if a.j_check else holon)(a, stacks, e, gen, dev)
     out = {"gpu": torch.cuda.get_device_name(), "layer": a.layer, "experts": e, "top_k": a.top_k, "inter": inter,
-           "hidden": hidden, "skew": a.skew, "engine": "freetoken" if a.freetoken else "holon", "rows": rows}
+           "hidden": hidden, "skew": a.skew, "engine": "freetoken" if a.freetoken else "holon",
+           "activations": "f32" if a.f32 else "as the engine calls it", "rows": rows}
     if a.json:
         with open(a.json, "w") as f:
             json.dump(out, f, indent=1)
@@ -89,7 +94,7 @@ def freetoken(a, stacks: dict, e: int, gen: torch.Generator, dev) -> list[dict]:
         blocks = padded[:blocks.numel()].view(blocks.shape)
         for t in a.tokens:
             ids = routing(t, e, a.top_k, a.skew, gen).to(dev)
-            x = torch.randn(t, r, n_in, device=dev, dtype=torch.bfloat16)
+            x = torch.randn(t, r, n_in, device=dev, dtype=torch.float32 if a.f32 else torch.bfloat16)
             ms = timed(functools.partial(ggml.mul_mat_id, blocks, typ, x if r > 1 else x[:, 0], ids), a.iters)
             gmac = t * a.top_k * n_in * n_out / 1e9
             rows.append({"stack": name, "tokens": t, "mul_mat_id_ms": round(ms, 4), "tops": round(2 * gmac / ms, 1)})
@@ -140,9 +145,12 @@ def holon(a, stacks: dict, e: int, gen: torch.Generator, dev) -> list[dict]:
         for t in a.tokens:
             ids = routing(t, e, k, a.skew, gen).to(dev)
             x = torch.randn(t, r, n_in, device=dev, dtype=torch.bfloat16 if r == 1 else torch.float32)
-            y = torch.empty(t, k, n_out, device=dev)
-            ws = torch.empty(lib.workspace_bytes_id(0, n_in, t, k, slots), dtype=torch.uint8, device=dev)
-            mmq_id = timed(functools.partial(lib.mmq_id, typ, prec, flat, x, ids, y, ws, slots, errors), a.iters)
+            mmq_id = None
+            if t * k <= ggml.ID_PAIRS:
+                y = torch.empty(t, k, n_out, device=dev)
+                ws = torch.empty(lib.workspace_bytes_id(0, n_in, t, k, slots), dtype=torch.uint8, device=dev)
+                mmq_id = timed(functools.partial(lib.mmq_id, typ, prec, flat, x, ids, y, ws, slots, errors), a.iters)
+                del y, ws
             xd = torch.randn(t * k, n_in, device=dev, dtype=torch.bfloat16)
             yd = torch.empty(t * k, n_out, device=dev)
             wsd = torch.empty(lib.workspace_bytes(0, n_in, t * k), dtype=torch.uint8, device=dev)
@@ -151,10 +159,11 @@ def holon(a, stacks: dict, e: int, gen: torch.Generator, dev) -> list[dict]:
             gmac = t * k * n_in * n_out / 1e9
             per = torch.bincount(ids.view(-1).long().cpu(), minlength=e)
             tiles = int(((per + 127) // 128).sum())         # J = 128 column tiles holding tokens, of ceil(T/128)·slots
-            row = {"stack": name, "type": typ, "tokens": t, "mmq_id_ms": round(mmq_id, 4),
+            row = {"stack": name, "type": typ, "tokens": t, "mmq_id_ms": mmq_id and round(mmq_id, 4),
                    "dense_mmq_ms": round(dense, 4), "bf16_mm_ms": round(bf16, 4), "dequant_stack_ms": round(deq, 4),
-                   "mmq_id_tops": round(2 * gmac / mmq_id, 1), "dense_mmq_tops": round(2 * gmac / dense, 1),
-                   "bf16_mm_tflops": round(2 * gmac / bf16, 1), "grouping_overhead": round(mmq_id / dense, 2),
+                   "mmq_id_tops": mmq_id and round(2 * gmac / mmq_id, 1), "dense_mmq_tops": round(2 * gmac / dense, 1),
+                   "bf16_mm_tflops": round(2 * gmac / bf16, 1),
+                   "grouping_overhead": mmq_id and round(mmq_id / dense, 2),
                    "tiles_used": tiles, "tiles_launched": -(-t // 128) * min(slots, t * k),
                    "column_fill": round(t * k / (tiles * 128), 3)}
             rows.append(row)

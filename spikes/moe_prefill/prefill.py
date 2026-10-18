@@ -5,8 +5,13 @@ whose kernels are attributed to regions by NVTX ranges pushed around each engine
 - Prompts: spans of natural text (`bench/offload_ctx.py`'s corpus), a distinct start per (repetition, length), so no
   prompt is a prefix of another (FreeToken's radix cache stays cold; Holon runs with its prefix cache off).
 - Each arm runs in a fresh process: an untimed 512-token warm-up, then `--reps` rounds over the lengths (one-token
-  requests, greedy), then with `--profile` one more request per length between cudaProfilerStart/Stop, each inside an
-  NVTX range `req:<length>` (for `nsys --capture-range=cudaProfilerApi`).
+  requests, greedy; one count for every length, or one per length: the fixed prompt set of docs/v1-moe-prefill.md
+  §5.2 is `--reps 5 5 3` at 1K / 4K / 32K), then with `--profile` one more request per length between
+  cudaProfilerStart/Stop, each inside an NVTX range `req:<length>` (for `nsys --capture-range=cudaProfilerApi`).
+- Memory (Holon): the KV tokens the paged pools hold at startup, the startup profile's peak (the worst step's
+  allocation peak plus the graphs' pool, what `state_memory` subtracts), and over the timed requests the allocation
+  peak and the reserved bytes beyond what was allocated after startup. `--ctx` / `--max-seqs` set the engine's
+  context and seats (a lock's, for its startup KV tokens).
 - Holon probes, set in the worker process only (nothing shipped changes): `--pass-tokens` std.moe's resident expert
   pass (512 as shipped: `Resident.pass_tokens`), `--expert-rows` kernels.ggml_cuda's mmq rows per `linear_experts`
   call (its `CHUNK` while the instance is built), `--dense-rows` its `qlinear` mmq rows per call (`CHUNK`).
@@ -15,7 +20,8 @@ whose kernels are attributed to regions by NVTX ranges pushed around each engine
   `dense` (`GgmlLinearKernel.apply`), `router` (`fused_topk`).
 
     python spikes/moe_prefill/prefill.py worker --engine holon|freetoken --model <gguf> [--lengths 1024 4096 32768]
-        [--reps 3] [--profile] [--pass-tokens N] [--expert-rows N] [--dense-rows N] [--flags '<engine flags>']
+        [--reps 3 | --reps 5 5 3] [--profile] [--pass-tokens N] [--expert-rows N] [--dense-rows N]
+        [--ctx 33792] [--max-seqs 1] [--flags '<engine flags>']
     python spikes/moe_prefill/prefill.py run --arms <arms.json> --model <gguf> --out <dir> [--rounds 2] \\
         [--holon-python <venv python>] [--freetoken-python <venv python>]
 """
@@ -64,10 +70,18 @@ def ranged(obj, attr: str, label: str) -> None:
 def holon_engine(a: argparse.Namespace):
     import dataclasses
 
+    from holon.core import platform
     from holon.core.cli import engine_config, engine_flags
     from holon.core.engine import Engine
     from holon_plugins.kernels.ggml_cuda import plugin as ggml
     from holon_std.moe import units
+
+    profiled = []                                   # the startup profile's terms (`Executor.state_memory`)
+    for name in ("peak_memory", "reserved_growth"):
+        def recorded(device, fn, f=getattr(platform, name)):
+            profiled.append(f(device, fn))
+            return profiled[-1]
+        setattr(platform, name, recorded)
 
     if a.pass_tokens:
         units.Resident.pass_tokens = staticmethod(lambda tokens: a.pass_tokens)
@@ -90,7 +104,10 @@ def holon_engine(a: argparse.Namespace):
     flags = argparse.ArgumentParser()
     engine_flags(flags)
     cfg = engine_config(a.model, flags.parse_args(shlex.split(a.flags)))
-    engine = Engine(dataclasses.replace(cfg, max_seqs=1, max_model_len=CTX, prefix_cache=False))
+    engine = Engine(dataclasses.replace(cfg, max_seqs=a.max_seqs, max_model_len=a.ctx, prefix_cache=False))
+    pools = [p for p in engine.ledger.pools.values() if p.tokens_per_unit]
+    memory = {"kv_tokens": min((p.capacity - p.has_null) * p.tokens_per_unit for p in pools),
+              "profiled_peak_gib": round(sum(profiled) / 2**30, 3), "max_model_len": engine.cfg.max_model_len}
 
     def request(ids: list[int]) -> float:
         from holon.api import SamplingParams
@@ -100,7 +117,7 @@ def holon_engine(a: argparse.Namespace):
             for d in engine.step():
                 done |= d.rid == rid and d.finish_reason is not None
         return time.perf_counter() - t0
-    return request, engine.close
+    return request, engine.close, memory
 
 
 def freetoken_engine(a: argparse.Namespace):
@@ -126,30 +143,41 @@ def freetoken_engine(a: argparse.Namespace):
         t0 = time.perf_counter()
         llm.generate([ids], SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True))
         return time.perf_counter() - t0
-    return request, lambda: None
+    return request, lambda: None, {}
 
 
 def worker(a: argparse.Namespace) -> None:
     import torch
     corpus = workloads.corpus(offload_ctx.CORPUS)
-    request, close = (holon_engine if a.engine == "holon" else freetoken_engine)(a)
+    request, close, memory = (holon_engine if a.engine == "holon" else freetoken_engine)(a)
+    reps = dict(zip(a.lengths, a.reps * len(a.lengths) if len(a.reps) == 1 else a.reps, strict=True))
     request([corpus[i] for i in range(512)])                         # warm-up
+    torch.cuda.synchronize()
+    base, startup_peak = torch.cuda.memory_allocated(), torch.cuda.max_memory_allocated()
+    torch.cuda.reset_peak_memory_stats()
     times = {str(c): [] for c in a.lengths}
-    for rep in range(a.reps):
+    for rep in range(max(reps.values())):
         for c in a.lengths:
-            torch.cuda.synchronize()
-            times[str(c)].append(request(prompt(corpus, c, rep)))
+            if rep < reps[c]:
+                torch.cuda.synchronize()
+                times[str(c)].append(request(prompt(corpus, c, rep)))
+    torch.cuda.synchronize()
+    if memory:
+        memory |= {"allocated_after_start_gib": round(base / 2**30, 3),
+                   "run_peak_over_start_gib": round((torch.cuda.max_memory_allocated() - base) / 2**30, 3),
+                   "reserved_over_start_gib": round((torch.cuda.memory_reserved() - base) / 2**30, 3)}
     if a.profile:
         torch.cuda.synchronize()
         torch.cuda.profiler.start()
         for c in a.lengths:
             torch.cuda.nvtx.range_push(f"req:{c}")
-            request(prompt(corpus, c, a.reps))
+            request(prompt(corpus, c, reps[c]))
             torch.cuda.synchronize()
             torch.cuda.nvtx.range_pop()
         torch.cuda.profiler.stop()
     out = {c: {"s": [round(t, 4) for t in ts], "tok_s": [round(int(c) / t, 1) for t in ts]} for c, ts in times.items()}
-    out["peak_alloc_gib"] = round(torch.cuda.max_memory_allocated() / 2**30, 2)
+    out["peak_alloc_gib"] = round(max(startup_peak, torch.cuda.max_memory_allocated()) / 2**30, 2)
+    out["memory"] = memory
     close()
     print("RESULT " + json.dumps(out), flush=True)
 
@@ -170,7 +198,8 @@ def orchestrate(a: argparse.Namespace) -> None:
             log = out / f"r{rnd}_{arm['name']}.log"
             nsys = shlex.split(arm.get("nsys", "").replace("{out}", str(out / f"{arm['name']}")))
             cmd = [*nsys, python[arm["engine"]], str(pathlib.Path(__file__)), "worker", "--engine", arm["engine"],
-                   "--model", a.model, "--lengths", *map(str, a.lengths), *shlex.split(arm.get("args", ""))]
+                   "--model", a.model, "--lengths", *map(str, a.lengths), "--reps", *map(str, a.reps),
+                   *shlex.split(arm.get("args", ""))]
             print(f"round {rnd} {arm['name']}", flush=True)
             with open(log, "w") as f:
                 p = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=dict(os.environ))
@@ -189,11 +218,12 @@ def main() -> None:
     w = sub.add_parser("worker")
     w.add_argument("--engine", choices=("holon", "freetoken"), required=True)
     w.add_argument("--flags", default="")
-    w.add_argument("--reps", type=int, default=3)
     w.add_argument("--profile", action="store_true")
     w.add_argument("--pass-tokens", type=int, default=0)
     w.add_argument("--expert-rows", type=int, default=0)
     w.add_argument("--dense-rows", type=int, default=0)
+    w.add_argument("--ctx", type=int, default=CTX)
+    w.add_argument("--max-seqs", type=int, default=1)
     o = sub.add_parser("run")
     o.add_argument("--arms", required=True)
     o.add_argument("--out", required=True)
@@ -203,6 +233,7 @@ def main() -> None:
     for p in (w, o):
         p.add_argument("--model", required=True)
         p.add_argument("--lengths", type=int, nargs="+", default=[1024, 4096, 32768])
+        p.add_argument("--reps", type=int, nargs="+", default=[3], help="per length, or one for every length")
     a = ap.parse_args()
     with contextlib.suppress(KeyboardInterrupt):
         worker(a) if a.cmd == "worker" else orchestrate(a)
