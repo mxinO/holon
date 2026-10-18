@@ -1,7 +1,7 @@
 """L0 for the Gated DeltaNet kernels (docs/m03-qwen38.md D3, §4.7): `kernels.fla`'s `gated_delta_rule` and
-`kernels.gdn_triton`'s `causal_conv1d` and `gated_rmsnorm`, selected through the build context, on Qwen3.8-27B's
-shapes (Hk 16, Hv 48: head ratio 3, conv channels 10240) and Qwen3.5's (Hv 32: ratio 2, 8192 channels), Dk = Dv = 128,
-K = 4, in both v-head orders, plus a small shape at head dim 64.
+`kernels.gdn_triton`'s `causal_conv1d` and `gated_rmsnorm` (with FN's sigmoid `out_gate` too), selected through the
+build context, on Qwen3.8-27B's shapes (Hk 16, Hv 48: head ratio 3, conv channels 10240) and Qwen3.5's (Hv 32: ratio 2,
+8192 channels), Dk = Dv = 128, K = 4, in both v-head orders, plus a small shape at head dim 64.
 
 - Batches mix lengths around the 64-token chunk (1, 2, 63, 64, 65, 200, 1000), rows with and without has_init, slot 0
   and the last slot, and a zero-token row. Every unit starts poisoned with NaN except those of has_init rows and of
@@ -408,14 +408,17 @@ def test_conv1d_many_rows_and_kernel_sizes(kernel):
 # --- gated_rmsnorm -------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
-@pytest.mark.parametrize(("t", "h", "d"), [(0, 48, 128), (37, 48, 128), (300, 32, 128), (5, 6, 64)])
-def test_gated_rmsnorm_matches_the_oracle(t, h, d, dtype):
-    norm = select("gated_rmsnorm@1", dim=d, eps=EPS, dtype=str(dtype).removeprefix("torch."))
+@pytest.mark.parametrize(("t", "h", "d", "gate"), [(0, 48, 128, "silu"), (37, 48, 128, "silu"), (300, 32, 128, "silu"),
+                                                  (5, 6, 64, "silu"), (37, 48, 128, "sigmoid")])  # FN's GDN (D8)
+def test_gated_rmsnorm_matches_the_oracle(t, h, d, gate, dtype):
+    facts = {"dim": d, "eps": EPS, "dtype": str(dtype).removeprefix("torch.")} | (
+        {"out_gate": gate} if gate != "silu" else {})
+    norm = select("gated_rmsnorm@1", **facts)
     o = (torch.randn(t, h, d, device="cuda") * 3).to(dtype)
     zw = torch.randn(t, h + 1, d, device="cuda").to(dtype)                    # z as a strided view
     z, w = zw[:, 1:], (1 + 0.2 * torch.randn(d, device="cuda")).to(dtype)
     for weight in (w, w.float()):                               # an f32 weight: the product stays in f32
-        got, want = norm(o, z, weight), ref.gated_rmsnorm(o, z, weight, EPS)
+        got, want = norm(o, z, weight), ref.gated_rmsnorm(o, z, weight, EPS, gate)
         r = l0.check(got, want, dtype, d)
         assert r.passed, r
         print(f"gated_rmsnorm {t}x{h}x{d} {dtype} weight {weight.dtype}: usage {r.usage:.3f}")

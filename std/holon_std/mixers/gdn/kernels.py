@@ -25,8 +25,10 @@ from zero state and never reads its unit, so a unit reused by a new sequence nee
   (`v_head_order = "grouped"`, HF's) or `j % Hk` (`"tiled"`, GGUF's). Facts: heads_k, heads_v, head_k_dim,
   head_v_dim, v_head_order, dtype.
 - `gated_rmsnorm@1`: instance `(o [T, H, D], z [T, H, D], weight [D]) -> [T, H, D]`: per head
-  `weight · (o · rsqrt(mean(o²) + eps)) · silu(z)`, the norm in f32 cast to o's dtype before the weight (HF's
-  `RMSNormGated`), the gate in f32. Facts: dim, eps, dtype.
+  `weight · (o · rsqrt(mean(o²) + eps)) · act(z)`, the norm in f32 cast to o's dtype before the weight (HF's
+  `RMSNormGated`), the gate in f32, act = silu, or sigmoid with the fact `out_gate="sigmoid"` (Qwen3.8-Flash-Next's
+  GDN, docs/v1-flash-next.md D8; given only when not silu, so the facts every other site records stay as they were).
+  Facts: dim, eps, dtype[, out_gate].
 - `gdn_rewind@1` (after a verify step, every layer of a state group at once; docs/m07-perf.md D5): instance
   `(state [L, units, C, K-1], window [L, R', C, K-1], x [L, T', C], a [L, T', Hv], b [L, T', Hv], slots [R],
   accepted [S], width) -> None`, with R ≤ R' rows of `width` tokens (row r's at r·width in each layer's x, a and b; its
@@ -41,3 +43,4 @@ CAUSAL_CONV1D, GATED_DELTA_RULE, GATED_RMSNORM = "causal_conv1d@1", "gated_delta
 GDN_REWIND = "gdn_rewind@1"
 MASKED = -1e4                      # gdn_rewind's gates past the accepted tokens: the delta rule's identity step
 ORDERS = ("grouped", "tiled")
+OUT_GATES = ("silu", "sigmoid")                # gated_rmsnorm's activation of z (`out_gate`; silu by default)

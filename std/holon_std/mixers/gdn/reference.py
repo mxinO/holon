@@ -81,11 +81,14 @@ def gated_delta_rule(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, a: torch
     return o.to(v.dtype)
 
 
-def gated_rmsnorm(o: torch.Tensor, z: torch.Tensor, weight: torch.Tensor, eps: float) -> torch.Tensor:
-    """HF's `RMSNormGated`: the norm in f32 cast to o's dtype, times the weight, times silu(z) in f32."""
+def gated_rmsnorm(o: torch.Tensor, z: torch.Tensor, weight: torch.Tensor, eps: float,
+                  out_gate: str = "silu") -> torch.Tensor:
+    """HF's `RMSNormGated`: the norm in f32 cast to o's dtype, times the weight, times act(z) in f32 (silu, or
+    sigmoid: `out_gate`)."""
     x = o.float()
     normed = (x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)).to(o.dtype)
-    return ((weight * normed).float() * F.silu(z.float())).to(o.dtype)
+    gate = F.silu(z.float()) if out_gate == "silu" else torch.sigmoid(z.float())
+    return ((weight * normed).float() * gate).to(o.dtype)
 
 
 def gdn_rewind(state: torch.Tensor, window: torch.Tensor, x: torch.Tensor, a: torch.Tensor, b: torch.Tensor,

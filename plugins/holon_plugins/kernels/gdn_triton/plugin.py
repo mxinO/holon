@@ -18,11 +18,11 @@ class CausalConv1d:
 
 
 class GatedRMSNorm:
-    def __init__(self, ctx, *, dim: int, eps: float, dtype: str) -> None:
-        self.eps = eps
+    def __init__(self, ctx, *, dim: int, eps: float, dtype: str, out_gate: str = "silu") -> None:
+        self.eps, self.sigmoid = eps, out_gate == "sigmoid"
 
     def __call__(self, o, z, weight):
-        return gated_rmsnorm(o, z, weight, self.eps)
+        return gated_rmsnorm(o, z, weight, self.eps, self.sigmoid)
 
 
 def _half(f: dict) -> bool:
@@ -32,7 +32,8 @@ def _half(f: dict) -> bool:
 class Plugin:
     def register(self, regs) -> None:
         for op, impl, supports in ((CONV, CausalConv1d, lambda f: _half(f) and 2 <= f["kernel_size"] <= 8),
-                                   (NORM, GatedRMSNorm, lambda f: _half(f) and f["dim"] in (64, 128, 256))):
+                                   (NORM, GatedRMSNorm, lambda f: _half(f) and f["dim"] in (64, 128, 256)
+                                    and f.get("out_gate", "silu") in ("silu", "sigmoid"))):
             regs.kernels.add(op, KernelSpec(op=op, provider="kernels.gdn_triton", impl=impl,
                                             requires=Constraint(sm_min=80), supports=supports,
                                             props=frozenset({"graph_safe", "deterministic"})))

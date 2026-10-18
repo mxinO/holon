@@ -110,9 +110,9 @@ def causal_conv1d(x: torch.Tensor, weight: torch.Tensor, state: torch.Tensor, sl
 
 @triton.jit
 def _gated_rmsnorm(o_ptr, z_ptr, w_ptr, out_ptr, rows, H, D, eps, so_t, so_h, sz_t, sz_h,
-                   ROWS: tl.constexpr, BLOCK_D: tl.constexpr, W_IN_F32: tl.constexpr):
+                   ROWS: tl.constexpr, BLOCK_D: tl.constexpr, W_IN_F32: tl.constexpr, SIGMOID: tl.constexpr):
     """HF's RMSNormGated per (token, head) row: the norm in f32 rounded to o's dtype, times the weight (in the
-    product's dtype: o's, or f32 for an f32 weight), times silu(z) in f32."""
+    product's dtype: o's, or f32 for an f32 weight), times silu(z) (or sigmoid(z): SIGMOID) in f32."""
     row = tl.program_id(0) * ROWS + tl.arange(0, ROWS)
     d = tl.arange(0, BLOCK_D)
     ok = (row < rows)[:, None] & (d < D)[None, :]
@@ -125,11 +125,13 @@ def _gated_rmsnorm(o_ptr, z_ptr, w_ptr, out_ptr, rows, H, D, eps, so_t, so_h, sz
     gated = w[None, :] * normed
     if not W_IN_F32:
         gated = gated.to(out_ptr.dtype.element_ty).to(tl.float32)
-    y = gated * (z / (1.0 + tl.exp(-z)))
+    act = 1.0 / (1.0 + tl.exp(-z))
+    y = gated * (act if SIGMOID else z * act)
     tl.store(out_ptr + row.to(tl.int64)[:, None] * D + d[None, :], y.to(out_ptr.dtype.element_ty), mask=ok)
 
 
-def gated_rmsnorm(o: torch.Tensor, z: torch.Tensor, weight: torch.Tensor, eps: float) -> torch.Tensor:
+def gated_rmsnorm(o: torch.Tensor, z: torch.Tensor, weight: torch.Tensor, eps: float, sigmoid: bool = False
+                  ) -> torch.Tensor:
     """`[T, H, D]` (o's dtype) for `o, z [T, H, D]` (last dims contiguous) and `weight [D]`."""
     t, h, d = o.shape
     if o.stride(2) != 1 or z.stride(2) != 1:
@@ -141,5 +143,5 @@ def gated_rmsnorm(o: torch.Tensor, z: torch.Tensor, weight: torch.Tensor, eps: f
     w_f32 = torch.promote_types(weight.dtype, o.dtype) == torch.float32 and o.dtype != torch.float32
     _gated_rmsnorm[(triton.cdiv(t * h, NORM_ROWS),)](
         o, z, weight, out, t * h, h, d, eps, o.stride(0), o.stride(1), z.stride(0), z.stride(1), NORM_ROWS,
-        triton.next_power_of_2(d), w_f32, num_warps=4)
+        triton.next_power_of_2(d), w_f32, sigmoid, num_warps=4)
     return out

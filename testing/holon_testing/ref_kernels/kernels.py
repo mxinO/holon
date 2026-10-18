@@ -333,11 +333,11 @@ class GatedDeltaRule:
 
 
 class GatedRMSNorm:
-    def __init__(self, ctx, *, dim: int, eps: float, dtype: str) -> None:
-        self.eps = eps
+    def __init__(self, ctx, *, dim: int, eps: float, dtype: str, out_gate: str = "silu") -> None:
+        self.eps, self.out_gate = eps, out_gate
 
     def __call__(self, o, z, weight):
-        return gdn.gated_rmsnorm(o, z, weight, self.eps)
+        return gdn.gated_rmsnorm(o, z, weight, self.eps, self.out_gate)
 
 
 class GDNRewind:
