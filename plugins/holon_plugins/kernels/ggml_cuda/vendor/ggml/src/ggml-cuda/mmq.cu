@@ -200,10 +200,10 @@ void ggml_cuda_mul_mat_q(
         if (ids) {
             // Holon: each launch entry holds ne12*n_expert_used/n_z rows on average, and the launch covers only the
             // tiles that hold rows (launch_mul_mat_q, docs/v1-moe-prefill.md D2), so J is chosen against that mean on
-            // every GPU (upstream: against ne12, or on RDNA3 and RDNA4 against the mean over ne02 slots); up to 64
-            // tokens (batched decode) against ne12, as upstream: there the mean's narrower tiles re-read the weights of
-            // the experts that hold more rows (16 tokens: up to 8% slower on the RTX 5080 and 5090, D2's sweep)
-            ncols_opt = ne12 <= 64 ? ne12 : (ne12*ids->ne[0] + n_z - 1) / std::max(n_z, 1);
+            // every GPU (upstream: against ne12, or on RDNA3 and RDNA4 against the mean over ne02 slots); up to
+            // GGML_CUDA_MMQ_IDS_J_TOKENS tokens against ne12, as upstream: there the mean's narrower tiles re-read the
+            // weights of the experts that hold more rows (16 tokens: up to 8% slower on the RTX 5080 and 5090)
+            ncols_opt = ne12 <= GGML_CUDA_MMQ_IDS_J_TOKENS ? ne12 : (ne12*ids->ne[0] + n_z - 1) / std::max(n_z, 1);
         }
 
         int ntiles_J_best = INT_MAX;

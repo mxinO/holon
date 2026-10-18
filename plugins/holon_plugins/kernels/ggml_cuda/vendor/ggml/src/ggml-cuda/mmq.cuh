@@ -973,19 +973,18 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     }
 }
 
-// Holon: the output tile of flat tile index t, the column tile jt fastest (docs/v1-moe-prefill.md D2). Dense, and with
-// ids where a call's tokens fit one column tile (expert_bounds null here): jt, then the channel zt (with ids the
-// compact entry), the sample wt, the row tile it, over ntx column tiles. Otherwise with ids the column tiles of the n_z
-// entries form one range of ntx blocks per row tile: entry z's start at z + expert_bounds[z]/J (each entry's
-// ceil(rows/J) tiles fit before the next start, as ceil(c/J) <= 1 + floor(b1/J) - floor(b0/J)), so t's entry is the
-// last whose start is <= t's (a binary search) and its column tile t's offset from that start; a tile past the
-// entry's rows exits (jt*J >= its rows).
-template <int J>
+// Holon: the output tile of flat tile index t, the column tile jt fastest (docs/v1-moe-prefill.md D2). Upstream's
+// order: jt, then the channel zt (with ids the compact entry), the sample wt, the row tile it, over ntx column tiles.
+// `flat` (the launch's flat range, with ids): the column tiles of the n_z entries form one range of ntx blocks per row
+// tile: entry z's start at z + expert_bounds[z]/J (each entry's ceil(rows/J) tiles fit before the next start, as
+// ceil(c/J) <= 1 + floor(b1/J) - floor(b0/J)), so t's entry is the last whose start is <= t's (a binary search) and
+// its column tile t's offset from that start; a tile past the entry's rows exits (jt*J >= its rows).
+template <int J, bool flat>
 static __device__ __forceinline__ void mmq_tile(
         const int t, const uint3 ntx, const uint3 nchannels_y, const uint3 nsamples_y, const int32_t * expert_bounds,
         int & it, int & wt, int & zt, int & jt) {
     uint2 q = fast_div_modulo(t, ntx);
-    if (expert_bounds) {
+    if constexpr (flat) {
         it = q.x;
         wt = 0;
         int lo = 0;
@@ -1012,7 +1011,10 @@ static __device__ __forceinline__ void mmq_tile(
 
 // The mul_mat_q kernel implements "stream-k" work partitioning as described in https://arxiv.org/abs/2301.03598
 
-template <ggml_type type, int J, bool fallback, ggml_prec prec_src1>
+// Holon: `flat_ids`, the launch's flat range of column tiles (mmq_tile), as an instance of its own: compiled into
+// every instance, the search raised some instances' registers past their occupancy (Q6_K at J = 32 on sm_86: 128 ->
+// 146, 1.6-7.8% slower per call); without it an instance decodes its tiles as upstream's
+template <ggml_type type, int J, bool fallback, ggml_prec prec_src1, bool flat_ids = false>
 __launch_bounds__(ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1), ggml_cuda_mmq_get_occupancy(type, J, fallback, prec_src1))
 static __global__ void mul_mat_q(
         const char * __restrict__ x, const int * __restrict__ y, const int32_t * __restrict__ ids_dst,
@@ -1052,13 +1054,18 @@ static __global__ void mul_mat_q(
     }
     __syncthreads();
 
-    // Holon: the column tiles of all entries as one range (mmq_tile) where the launch made them one (ntx > 1)
-    const int32_t * flat = ids_dst && ntx.z > 1 ? expert_bounds : nullptr;
-
     if constexpr (!ggml_cuda_mmq_get_stream_k(type, J, fallback, prec_src1)) {
-        int it, wt, zt, jt; // Holon: the grid's (it, (wt, zt), jt) as one flat index (mmq_tile)
-        mmq_tile<J>((blockIdx.x*gridDim.z + blockIdx.z)*gridDim.y + blockIdx.y, ntx, nchannels_y, nsamples_y, flat,
-                    it, wt, zt, jt);
+        int it, wt, zt, jt;
+        if constexpr (flat_ids) { // Holon: the flat range (mmq_tile)
+            mmq_tile<J, true>(blockIdx.x*gridDim.y + blockIdx.y, ntx, nchannels_y, nsamples_y, expert_bounds,
+                              it, wt, zt, jt);
+        } else {
+            const uint2 tmp2 = fast_div_modulo(blockIdx.z, nchannels_y);
+            wt = tmp2.x;
+            zt = tmp2.y;
+            jt = blockIdx.y;
+            it = blockIdx.x;
+        }
 
         // Defaults for regular matrix multiplication:
         int col_low    = 0;
@@ -1129,10 +1136,10 @@ static __global__ void mul_mat_q(
     constexpr int blocks_per_iter = ITER_K / qk;
 
     // kbc == k block continuous, current index in continuous ijk space.
-    // Holon: as one range, ntx column tiles per row tile cover every entry (mmq_tile)
-    const int64_t nkb = int64_t(flat ? 1 : nsamples_y.z*nchannels_y.z)*ntx.z*nty*blocks_per_ne00.z;
-    int kbc      = int64_t(blockIdx.x)    *nkb / gridDim.x;
-    int kbc_stop = int64_t(blockIdx.x + 1)*nkb / gridDim.x;
+    // Holon: as the flat range, ntx column tiles per row tile cover every entry (mmq_tile)
+    const uint32_t ntiles = flat_ids ? ntx.z*nty : nsamples_y.z*nchannels_y.z*ntx.z*nty;
+    int kbc      = int64_t(blockIdx.x)    *(ntiles*blocks_per_ne00.z) / gridDim.x;
+    int kbc_stop = int64_t(blockIdx.x + 1)*(ntiles*blocks_per_ne00.z) / gridDim.x;
 
     kbc      -= fastmodulo(kbc,      blocks_per_ne00) % blocks_per_iter;
     kbc_stop -= fastmodulo(kbc_stop, blocks_per_ne00) % blocks_per_iter;
@@ -1142,7 +1149,7 @@ static __global__ void mul_mat_q(
     int kb0_stop  = min(blocks_per_ne00.z, uint32_t(kb0_start + kbc_stop - kbc));
     while (kbc < kbc_stop && kb0_stop == int(blocks_per_ne00.z)) {
         int it, wt, zt, jt; // Holon: mmq_tile
-        mmq_tile<J>(fastdiv(kbc, blocks_per_ne00), ntx, nchannels_y, nsamples_y, flat, it, wt, zt, jt);
+        mmq_tile<J, flat_ids>(fastdiv(kbc, blocks_per_ne00), ntx, nchannels_y, nsamples_y, expert_bounds, it, wt, zt, jt);
 
         // Defaults for regular matrix multiplication:
         int col_low    = 0;
@@ -1225,7 +1232,7 @@ static __global__ void mul_mat_q(
     }
 
     int it, wt, zt, jt; // Holon: mmq_tile
-    mmq_tile<J>(fastdiv(kbc, blocks_per_ne00), ntx, nchannels_y, nsamples_y, flat, it, wt, zt, jt);
+    mmq_tile<J, flat_ids>(fastdiv(kbc, blocks_per_ne00), ntx, nchannels_y, nsamples_y, expert_bounds, it, wt, zt, jt);
 
     // Defaults for regular matrix multiplication:
     int col_low    = 0;
@@ -1467,6 +1474,8 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
 
     CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1>), nbytes_shared);
     CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1>), nbytes_shared);
+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1, true>), nbytes_shared); // Holon: flat_ids
+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, true>), nbytes_shared);
 
     const int nty  = (args.nrows_x   + config.I - 1) / config.I;
     // Holon: with ids, where a call's tokens span several column tiles, the column tiles of all nchannels_y compact
@@ -1476,6 +1485,7 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
     const int ntx  = flat ? args.nchannels_y + args.ncols_dst/config.J + 1 : (args.ncols_max + config.J - 1) / config.J;
     const int ntzw = flat ? 1 : args.nchannels_y * args.nsamples_y;
     const dim3 block_nums_xy_tiling(nty, ntx, ntzw);
+    const auto kernel = flat ? mul_mat_q<type, J, fallback, prec_src1, true> : mul_mat_q<type, J, fallback, prec_src1>;
 
     GGML_ASSERT(args.nchannels_y % args.nchannels_x == 0);
     GGML_ASSERT(args.nsamples_y  % args.nsamples_x  == 0);
@@ -1490,7 +1500,7 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
     const uint3 sample_ratio_fd    = init_fastdiv_values(sample_ratio);
 
     if (!config.stream_k) {
-        mul_mat_q<type, J, fallback, prec_src1><<<block_nums_xy_tiling, block_dims, nbytes_shared, stream>>>
+        kernel<<<block_nums_xy_tiling, block_dims, nbytes_shared, stream>>>
             (args.x, args.y, args.ids_dst, args.expert_bounds, args.dst, nullptr, args.y_scale,
              blocks_per_ne00_fd, args.nrows_x, args.ncols_dst, args.stride_row_x, args.ncols_y, args.nrows_dst,
              channel_ratio_fd, nchannels_y_fd, args.stride_channel_x, args.stride_channel_y, args.stride_channel_dst,
@@ -1525,7 +1535,7 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
     const dim3 block_nums_fixup(block_nums_stream_k.x, config.I/warp_size, 1);
     const dim3 block_dims_fixup(block_dims.x, block_dims.y/2, block_dims.z);
 
-    mul_mat_q<type, J, fallback, prec_src1><<<block_nums_stream_k, block_dims, nbytes_shared, stream>>>
+    kernel<<<block_nums_stream_k, block_dims, nbytes_shared, stream>>>
         (args.x, args.y, args.ids_dst, args.expert_bounds, args.dst, tmp_fixup.ptr, args.y_scale,
          blocks_per_ne00_fd, args.nrows_x, args.ncols_dst, args.stride_row_x, args.ncols_y, args.nrows_dst,
          channel_ratio_fd, nchannels_y_fd, args.stride_channel_x, args.stride_channel_y, args.stride_channel_dst,

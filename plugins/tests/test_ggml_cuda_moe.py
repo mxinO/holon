@@ -268,27 +268,17 @@ def test_linear_experts_every_type_at_prefill_chunks(ctx, sm, name):
     """mmq's prefill kernels on every type: the tile width J follows the chunk's tokens (128 at a 512-token chunk,
     64 at the sweep's 64), and each J is its own kernel. A small stack (8 experts, 256 rows) keeps it to ~1M
     outputs; 513 tokens adds the one-token mmvq tail chunk. D0's passes (docs/v1-moe-prefill.md): `pass_rows` is
-    PASS_ROWS on a pair of `PASS_PROVEN` (this SM's), else CHUNK, and a call of up to 4,608 rows gives each row its
-    512-row chunk's bits (holon_testing's check). On Qwen3-30B-A3B's 128 experts (Q4_K, Q6_K), calls of 512, 2,048
-    and 4,096 rows take each of the id helpers: per slot, compact, device-wide."""
+    PASS_ROWS on a pair of `PASS_PROVEN` (this SM's), else CHUNK, and where it is larger a call of up to 4,608 rows
+    gives each row its 512-row chunk's bits (holon_testing's check; Qwen3-30B-A3B's 128 experts: the NaN test)."""
     n, out = 8, 256
     kernel, s = experts(ctx, name, H, out, 1, n=n), stack(name, n, out, H, seed=5)
     assert kernel.pass_rows == (PASS_ROWS if (sm, name, "q8_1") in PASS_PROVEN else CHUNK)
     for tokens in (CHUNK, CHUNK + 1):
         ids, x = uniform(tokens, n, seed=tokens), gate_up_input(tokens, seed=tokens)
         check(kernel(x, s.parts, ids), emulated(kernel, s, x, ids), H, f"{name} T={tokens}", True)
-    ids, x = uniform(9 * CHUNK, n, seed=9), gate_up_input(9 * CHUNK, seed=9)
-    check_pass_rows(kernel, s.parts, x, ids, name)
-    if name not in ("q4_k", "q6_k"):
-        return
-    kernel, s = experts(ctx, name, H, out, 1, n=EQ), stack(name, EQ, out, H, seed=6)
-    x, ids, helpers = gate_up_input(PASS_ROWS, seed=7), uniform(PASS_ROWS, EQ, seed=7), set()
-    for tokens in (CHUNK, 4 * CHUNK, PASS_ROWS):
-        names = launched(lambda t=tokens: kernel(x[:t], s.parts, ids[:t]))
-        helpers |= {h for h in ("per_slot", "compact", "device") if any(f"mm_ids_{h}" in m or f"mm_ids_helper_{h}" in m
-                                                                         for m in names)}
-        check_pass_rows(kernel, s.parts, x[:tokens], ids[:tokens], f"{name} E={EQ} T={tokens}")
-    assert helpers == {"per_slot", "compact", "device"}, helpers
+    if kernel.pass_rows > CHUNK:
+        ids, x = uniform(9 * CHUNK, n, seed=9), gate_up_input(9 * CHUNK, seed=9)
+        check_pass_rows(kernel, s.parts, x, ids, name)
 
 
 @pytest.mark.parametrize("name", ["q4_k", "iq3_xxs", "q6_k", "q4_0", "q2_k"])
@@ -363,7 +353,8 @@ def test_every_tile_of_every_entry_is_written(ctx, lib, name):
     output pre-filled with NaN every row of every entry is written, through each id helper (calls of 9 to 4,096 rows
     at E = 128), with routings that give one entry many tiles (every token on 8 experts, a skewed popularity) or many
     entries one partial tile (uniform); each row's bits are its row's in the 4,096-row call (the tile width does not
-    move them), and no stream-k fixup is launched."""
+    move them), that call's rows are its 512-row chunks' calls' (D0's `pass_rows` at E = 128), calls of 512, 2,048
+    and 4,096 rows take the per-slot, compact and device-wide helpers, and no stream-k fixup is launched."""
     device, errors, slots = torch.cuda.current_device(), torch.zeros(1, dtype=torch.int32, device="cuda"), EQ + K
     rng = torch.Generator().manual_seed(17)
     hot = 1 / torch.arange(1, EQ + 1, dtype=torch.float64)[torch.randperm(EQ, generator=rng)]
@@ -376,18 +367,25 @@ def test_every_tile_of_every_entry_is_written(ctx, lib, name):
         w = s.w.view(-1, s.w.shape[-1])
         x = (gate_up_input if stage == "gate_up" else down_input)(PASS_ROWS, seed=19)
 
-        def call(n, ids, x=x, w=w, k=k, out=out):
+        def call(n, ids, a=0, x=x, w=w, k=k, out=out):
             y = torch.full((n, K, out), float("nan"), device="cuda")
             ws = torch.empty(lib.workspace_bytes_id(device, k, n, K, slots), dtype=torch.uint8, device="cuda")
-            lib.mmq_id(TYPES[name], PREC["q8_1"], w, x[:n], ids[:n], y, ws, slots, errors)
+            lib.mmq_id(TYPES[name], PREC["q8_1"], w, x[a:a + n], ids[a:a + n], y, ws, slots, errors)
             return y
         for routing, ids in routings.items():
+            what = f"{name} {stage} {routing}"
             assert all(len(set(row)) == K for row in ids[:64].tolist())
             ref = call(PASS_ROWS, ids)
-            for n in (9, 64, CHUNK, 4 * CHUNK, PASS_ROWS):
-                y, what = call(n, ids), f"{name} {stage} {routing} T={n}"
-                assert not y.isnan().any() and torch.equal(y, ref[:n]), what
-            assert not any("stream_k_fixup" in c for c in launched(lambda ids=ids: call(PASS_ROWS, ids))), routing
+            assert not ref.isnan().any(), what
+            for n in (9, 64, CHUNK, 4 * CHUNK):
+                y = call(n, ids)
+                assert not y.isnan().any() and torch.equal(y, ref[:n]), f"{what} T={n}"
+            chunks = torch.cat([call(CHUNK, ids, a) for a in range(0, PASS_ROWS, CHUNK)])
+            assert torch.equal(ref, chunks), f"{what}: the 4,096-row call against its chunks' calls"
+            names = set().union(*(launched(lambda n=n, ids=ids: call(n, ids)) for n in (CHUNK, 4 * CHUNK, PASS_ROWS)))
+            assert not any("stream_k_fixup" in c for c in names), what
+            helpers = ("mm_ids_helper_per_slot", "mm_ids_helper_compact", "mm_ids_device")
+            assert all(any(h in c for c in names) for h in helpers), f"{what}: {sorted(names)}"
     assert int(errors) == 0
 
 
@@ -526,7 +524,7 @@ def placed_inputs(stage: str, tokens: int, seed: int) -> tuple[torch.Tensor, tor
 # EP + K slots per call): per slot where the launch lists every slot (at most 64 more than EP + K, SLOTS included),
 # compact where the arena has more
 HELPERS = {"per_slot": EP + K, "compact": 128}
-J_AGAINST_T = 64        # mmq with ids picks J against a call's tokens up to this many, above against its entries' mean
+J_AGAINST_T = 16        # mmq with ids picks J against a call's tokens up to this many, above against its entries' mean
 
 
 def helper(fn) -> str:
@@ -540,8 +538,8 @@ def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name
     """D4's placement invariance on mmq with ids: an expert's rows are bitwise the same wherever an arena places it
     (each of SLOTS with a random placement, per-slot id helper, and 128 slots, compact helper; at EP also reversed:
     permutations) and at every mmq tile width (token counts from the mmvq limit + 1 to 320 on the 128-slot arena,
-    whose launch lists at most EP + K entries: J from 16 up to 128, chosen against the tokens up to 64 and above against
-    the entries' mean rows, docs/v1-moe-prefill.md D2), all against one launch over EP slots in order at 512 tokens.
+    whose launch lists at most EP + K entries: J from 16 up to 128, chosen against the tokens up to J_AGAINST_T and
+    above against the entries' mean rows, docs/v1-moe-prefill.md D2), all against one launch over EP slots in order at 512 tokens.
     llama.cpp switched mmq with ids to stream-k below 90 % tile efficiency, splitting K at points that move with the
     slot count: on every GPU at least one of SLOTS did (the dense schedule over the same grid says so), and its rows
     differed."""
@@ -554,7 +552,7 @@ def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name
     assert any(lib.mmq_schedule(device, typ, PREC["q8_1"], out * n, 64)[0] == 2 for n in SLOTS)
     launches = [(n, "random", t) for n in (*SLOTS, HELPERS["compact"]) for t in (64, CHUNK)] + [(EP, "reversed", 64)]
     a = arena(ctx, s, stage, HELPERS["compact"], "random")
-    tiles = sorted({a.kernel.mmvq_tokens + 1, 16, 24, 32, 48, 64, 96, 128, 160, 200, 256, 320})
+    tiles = sorted({a.kernel.mmvq_tokens + 1, 16, 24, 32, 48, 64, 96, 112, 128, 160, 180, 200, 256, 320})
     rows = [t if t <= J_AGAINST_T else -(-t * K // a.kernel.slots) for t in tiles]     # what J is chosen against
     widths = {lib.mmq_schedule(device, typ, PREC["q8_1"], out, r)[2] for r in rows}
     assert min(widths) <= 16 and max(widths) == 128 and len(widths) >= 9

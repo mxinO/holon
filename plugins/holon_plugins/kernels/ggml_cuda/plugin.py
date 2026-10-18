@@ -77,11 +77,12 @@ PASS_ROWS = 4096                # the largest expert pass of a prefill chunk (do
 PASS_OPTION = "ggml_cuda.pass_rows"     # a lock's cap on `pass_rows` (manifest [options]; KV capacity per class)
 # An expert pass of a prefill chunk (docs/v1-moe-prefill.md D0, D1; v1-offload.md D8): mmq with ids takes the pass's
 # rows in one call where the id helper sorts them (4,096 at top-8: its device-wide path past one block's 16,384
-# pairs), in whole CHUNKs, so a row's chunk and path stay the reference's (the pass's caller cuts its last partial
-# chunk off), on the (SM, ggml type, mmq activation mode) pairs whose L0 shows a row's bits the same in a call of any
-# whole number of CHUNKs as in its own chunk's call (holon_testing.pass_rows, every entry run on its SM by
-# plugins/tests/test_ggml_cuda_moe.py): the lock classes' expert types per SM (from plans/: the 3090's, the 4090's,
-# the 5080's and 5090's) and FN's MoE types (docs/v1-flash-next.md D1′). Every other pair keeps CHUNK.
+# pairs), in whole CHUNKs, so a row's chunk and path stay the reference's (a call's last partial chunk runs as a call
+# of its own: `LinearExperts.__call__` cuts it, whatever its caller passes). That holds on the (SM, ggml type, mmq
+# activation mode) pairs whose L0 shows a row's bits the same in a call of any whole number of CHUNKs as in its own
+# chunk's call (holon_testing.pass_rows, every entry run on its SM by plugins/tests/test_ggml_cuda_moe.py): the lock
+# classes' expert types per SM (from plans/: the 3090's, the 4090's, the 5080's and 5090's) and FN's MoE types
+# (docs/v1-flash-next.md D1′). Every other pair keeps CHUNK.
 _FN_TYPES = ("iq2_s", "iq2_xxs", "iq3_s", "iq3_xxs", "iq4_nl", "iq4_xs")
 PASS_PROVEN = frozenset({(86, t, "q8_1") for t in ("q4_k", "q6_k", *_FN_TYPES)}
                         | {(89, t, "q8_1") for t in ("q4_k", "q6_k", "mxfp4", "nvfp4", *_FN_TYPES)}

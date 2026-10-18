@@ -112,14 +112,17 @@ def test_the_gate_up_merge_puts_gate_first_and_binds_one_kernel(tiny_moe, tmp_pa
     assert torch.equal(unit._gate_up(types.SimpleNamespace(x=x), ids), unit._gate_up(x, ids))
 
 
-def test_a_prefill_step_passes_whole_chunks_then_its_tail(tiny_moe, tmp_path):
-    """docs/v1-moe-prefill.md D1 on the resident store: a step's expert passes take the smaller of the two stacks'
-    `pass_rows` (the reference provider's: 4,096 within a 4,100-token step budget) in whole chunks, and the step's
-    last partial chunk is a pass of its own, so every row's chunk and kernel path are a chunk's: calls of 512 then 88
-    rows at 600 tokens, 1,024 then 3 at 1,027, 4,096 then 4 at 4,100, each for gate/up then down in every layer."""
+@pytest.mark.parametrize("store", ["resident", "offload"])
+def test_a_prefill_step_passes_whole_chunks_then_its_tail(tiny_moe, tmp_path, store):
+    """docs/v1-moe-prefill.md D1 on both stores (offload: a streaming step, the ring on): a step's expert passes take
+    the smaller of the two stacks' `pass_rows` (the reference provider's: 4,096 within a 4,100-token step budget) in
+    whole chunks, and the step's last partial chunk is a pass of its own, so every row's chunk and kernel path are a
+    chunk's: calls of 512 then 88 rows at 600 tokens, 1,024 then 3 at 1,027, 4,096 then 4 at 4,100, each for gate/up
+    then down in every layer."""
     checkpoint, _ = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
-    engine = _engine(file, max_step_tokens=4100, max_model_len=4200, state_memory=8 << 20)
+    offload = {"host_memory": 1 << 24, "plugin_options": {"moe.store": "std.moe.offload@1"}} if store == "offload" else {}
+    engine = _engine(file, max_step_tokens=4100, max_model_len=4200, state_memory=8 << 20, **offload)
     layers = len(engine.executor.model.layers)
     assert {m._store.pass_tokens(4100) for m in engine.executor.model.modules() if hasattr(m, "_gate_up")} == {4096}
     sizes, call = [], LinearExperts.__call__

@@ -47,7 +47,8 @@ then `staging` slots, then cache slots.
   ids name at most `experts + top_k` distinct slots (a layer's E experts, plus one null slot per rank). Its facts are
   @2's for the layer (`experts` = E) plus `slots`, the most slots an arena of the stack's class holds (a call's may
   hold fewer). It may accept a prepared handle in place of `x` as @2's (exposing `.x`, the tensor it stands for, which
-  a consumer that does not know the handle reads instead). An instance has `errors`, a device int32 word [1] its
+  a consumer that does not know the handle reads instead). It may expose `pass_rows` as @2's (the same promise, at the
+  bits of its `CHUNK`-row calls over the same slots). An instance has `errors`, a device int32 word [1] its
   calls or violation bits into (zero: none; bits are the provider's), which the caller zeroes. Same results as @2
   over the stack those slots hold: the oracle is @2's (`reference.linear_experts`, over the arena).
 

@@ -149,7 +149,9 @@ class ExpertLinear(nn.Module):
 def pass_rows(stacks) -> int:
     """The rows per call every one of `stacks`' bound kernels takes at its chunks' bits (`pass_rows`, a multiple of
     CHUNK; CHUNK where a kernel does not say)."""
-    return min(getattr(s.kernel, "pass_rows", CHUNK) for s in stacks)
+    rows = min(getattr(s.kernel, "pass_rows", CHUNK) for s in stacks)
+    assert rows >= CHUNK and rows % CHUNK == 0, f"std.moe: pass_rows {rows} is not a whole number of {CHUNK}-row chunks"
+    return rows
 
 
 def bind_experts(ctx, facts: dict, op: str = kernels.LINEAR_EXPERTS, site: str = "std.moe.experts"):
