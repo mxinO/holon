@@ -1139,9 +1139,15 @@ docstring):
   final norm, and the head in row blocks.
 - **On the tiny model the streamed golden equals HF's whole forward bit for bit** (`judge/tests/test_golden_qwen4exp.py`,
   in the golden venv).
-- **The 32K `recall-32k` prompt on IQ2_XS, CPU, 32 threads:** HF's attention did not run out of memory, so the
-  query-block mode is not needed. Peak RSS was 47 GB. A layer takes 85–190 s (QSA ≈ 170 s), and the whole prompt takes
-  about 2 h. Final numbers are in `evidence/fn0_n4_oracle_2026-10-18.json`.
+- **The 32K `recall-32k` prompt (31,878 tokens) on IQ2_XS, CPU, 32 threads, under a 180 GB cap** (predicted: 2 h
+  [1–4], 50 GB [30–80], query blocks needed):
+  - It finished in 5,504 s (1.5 h) at a peak RSS of 47.1 GB. A GDN layer takes a median 87 s and a QSA layer 172 s;
+    the dequantization of each layer's experts dominates.
+  - HF's attention did not materialise [24, T, T] (torch's CPU SDPA tiles a boolean mask), so **D2's query-block mode
+    is not needed**, and the golden's metadata records the one-shot mode.
+  - **Tie rate on the real model:** 57 boundary ties in 357,924 sparse selections (0.016%) over the 12 QSA layers. The
+    tie rule rarely changes the full model's selections, unlike the tiny model's ReLU sums.
+  - Record: `evidence/fn0_n4_oracle_cpu_2026-10-18.json`.
 
 **For the owner** (no redesign done):
 - whether the defaults rows are gated against Holon + A1 as they stand, given the suffix drafter (a non-goal) and
