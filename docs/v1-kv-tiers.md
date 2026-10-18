@@ -1,9 +1,9 @@
 # v1 — milestone K: KV and checkpoint tiers under the prefix index
 
-Status: **rev 2, after the challenge panel** (2026-10-18). Nothing is built and nothing has been measured for K yet.
-Every number below is a CPU-side estimate from earlier evidence (cited), fixed as a prediction before step 0 and step
-4 measure it. Rev 2 answers the three-reviewer panel (A correctness, B architecture, C numerics and performance); the
-finding-by-finding disposition is §13.
+Status: **rev 3, after the panel's second round** (2026-10-18). Nothing is built and nothing has been measured for
+K yet. Every number below is a CPU-side estimate from earlier evidence (cited), fixed as a prediction before step 0
+and step 4 measure it. Rev 2 answered the three-reviewer panel (A correctness, B architecture, C numerics and
+performance); rev 3 answers its re-review. The finding-by-finding dispositions are in §13.
 
 Scope: plan §10's K line ("KV and checkpoint tiers (pinned RAM / SSD under the prefix index, exact, deterministic
 resume)", `docs/plan.md:603-604`), the end-of-answer checkpoint item (`docs/plan.md:675-681`), and the requirements
@@ -23,13 +23,24 @@ Evidence base:
 
 **What changed from rev 1, in one paragraph.** The core now sees only the VRAM boundary: an entry is resident or not,
 and one plugin in a new single slot `tier` holds everything below (B2). The host and SSD levels, their eviction, the
-copies, the write-back, the virtual clock and the manifest all move to std (`std.state_tier`). The core is ≈ 285
+copies, the write-back, the virtual clock and the manifest all move to std (`std.state_tier`). The core is ≈ 300
 lines instead of 480, with no new device stream, no batched-copy call and no `Payload.tier` (B4). Every tier state
 change is logical at decision time, and physical reuse waits on copies and tickets (A5, C5). Resume is gated by a
 virtual clock with a per-step cost model (C9), not by a fixed step or by `BLOCKED` (A6). The VRAM checkpoint pool
 becomes staging only, so payloads live in the tier from registration and adopt straight from host (A4, C1). A publish
 that meets a demoted entry promotes it into the request's own units (A1). Victim choice in VRAM is a plugin slot (B1).
 The held-out proof holds out a checkpoint policy and a tier the protocol was not shaped around (B3).
+
+**What changed from rev 2.**
+- **Fencing.** Every host unit a step reads is fenced by that step's end event, passed in `loaded(load, done)`. All
+  tier reuse and I/O on such a unit waits for it.
+- **Progress.** Load pins with no waiter are host-waited when nothing else can run.
+- **Admission.** Payload stores are mandatory, and admission options govern pages only.
+- **std.** It gains a structural `Level` protocol below its host level. SSD is its first instance, and the held-out
+  zlib store is a `Level`.
+- **Plans.** `host.bytes` stays planned.
+- **Clock.** The clock never runs behind a load a launch waited for.
+- **Bars and checks.** 3b, 3h, the null test and the bounded check are tightened as the panel showed.
 
 ## 0. The references in one table
 
@@ -60,9 +71,10 @@ caches on an agent trace, with outputs that do not depend on where state was kep
 
 1. **Strategies are plugins** (D1, D3).
    - Shipped in K:
-     - the tier `std.state_tier` (slot `tier`): a pinned-RAM level and an optional SSD level, with store admission as
-       an option (`publish`, the default; `hit:<n>`, HiCache's selective mode; `evict`, write-back) and O_DIRECT as
-       an option of the SSD level (Maya KG3's buffered files are `direct = false`);
+     - the tier `std.state_tier` (slot `tier`): a pinned-RAM host level, with page store admission as an option
+       (`publish`, the default; `hit:<n>`, HiCache's selective mode; `evict`, write-back). Below it sit `Level`s
+       bound by `Ref` in `state_tier.levels` (D3). The first `Level` is `std.state_tier`'s SSD level, with O_DIRECT
+       as an option (Maya KG3's buffered files are `direct = false`);
      - the checkpoint policies of `std.state.recurrent`: `branch` and `answer:<k>` (new), and `prompt_end` and
        `every:<n>` (existing);
      - the VRAM victim policy `evict.root_pin` (Strata C1's "root pinned, others LRU") in the new slot
@@ -74,20 +86,30 @@ caches on an agent trace, with outputs that do not depend on where state was kep
        `recurrent.policy`. It tests whether `SeqView` exposes enough. The prediction is that it needs the untrimmed
        match length, which K does not add. If so, that is recorded as K's proof finding (as X's F10 was,
        `docs/v1-offload.md:1544-1555`) and added as a minor in the same milestone;
-     - `state_tiers.zlib`: a host tier the protocol was not shaped around. It is exclusive (stores only at VRAM
-       eviction), keeps lossless zlib blobs of variable size in plain memory, decompresses on a CPU thread into its
-       own S2 staging pool, and puts the CPU stage in its virtual clock. It must pass tier invariance like
-       `std.state_tier`.
+     - `state_tiers.zlib`: a `Level` the protocol was not shaped around. It keeps lossless zlib blobs of variable
+       size in plain memory instead of fixed slots, and compresses and decompresses on a CPU thread between its
+       blobs and the host level's units.
+       - It takes pages and payloads alike when the host level evicts them.
+       - It reports its CPU rates for the lanes.
+       - Its capacity counts uncompressed units, so its refusals are decided before any compression and stay
+         deterministic. Compression only saves memory.
+       - It must pass tier invariance like the SSD level.
+       - Expected diff: ≈ 120 lines plus tests, in its own directory, binding through `state_tier.levels`.
    - Every core seam (§4) is proven first with a toy kind and a toy tier in `core/tests`.
 2. **Exactness** (D4, §6).
    - **Tier invariance.** The reference is the same configuration with each session's turns run back to back and no
      filler, so nothing is demoted. The tested run interleaves the sessions with a filler that forces every return
      through the tested level. The output streams and each request's `cached_tokens` are byte-identical (panel C2).
-     This holds for host only, host + SSD, and SSD restored after a restart.
+     - It holds for host only, host + SSD, and SSD restored after a restart, under page admission `publish` or
+       `evict`.
+     - Under `hit:<n>`, the filler's evictions drop unadmitted blocks that the reference keeps. The hit sets then
+       differ by construction (A-4), so that configuration is judged by run-identity and `bounded` only.
+     - The judge refuses to compare runs whose `cached_tokens` differ.
      - Development: Qwen3-8B on the A5000.
      - 27B: the roomy-vs-tight pair runs on the RTX 5090, where the roomy run fits; the RTX 5080 runs the lock's trace
        for run-identity only.
-     - A tiers-off null test shows that the checkpoint pool's size alone does not change output bytes (4 vs 16 units).
+     - A tiers-off null test shows that the checkpoint pool's size alone does not change output bytes: 4 vs 16 units,
+       `prompt_end` only (so neither run loses a payload), with `cached_tokens` asserted equal (C-5).
    - On a concurrent trace with ≥ 32 loads per level: run-identical step lists and outputs over 3 fresh engines, with
      unseeded I/O and copy delays injected.
    - The new checkpoint policies are judged as today's prefix hits are:
@@ -103,21 +125,26 @@ caches on an agent trace, with outputs that do not depend on where state was kep
    | # | Measure | Bar |
    |---|---|---|
    | 3a | Resume microbench: a parked conversation of 4K / 16K / 32K tokens plus a 256-token append, resumed from VRAM, from RAM and from SSD. Units forced fragmented (a scattering prelude; runs per load reported). Two cells: idle, and beside three decoding sessions. ≥ 10 in-process reps per cell over conversations parked once (C18) | RAM: TTFT ≤ VRAM TTFT + 1.5 × KV bytes / 47.5 GB/s + one decode step. SSD: TTFT ≤ VRAM TTFT + 1.5 × (bytes / SSD rate + bytes / 47.5 GB/s) + one decode step |
-   | 3b | Three sessions decoding while a fourth resumes 32K tokens from RAM. 30 reps (10 parked conversations × 3 rounds), ≈ 360 inter-token gaps per arm. Control arm: the same conversation resumed from VRAM, with the same append step | over the steps from the resume's admission to its first token: the three decoders' median gap ≤ 1.1× the control's and p90 ≤ 1.2× |
+   | 3b | Three sessions decoding while a fourth resumes 32K tokens from RAM. 30 reps (10 parked conversations × 3 rounds). Control arm: the same conversation resumed from VRAM. Gaps are taken over the **gated steps only**, from the resume's admission to the step before its append: ≈ 180–240 gaps per arm. The append step's gap, the same work in both arms, is reported apart as a ratio (C-3) | the three decoders' median gated-step gap ≤ 1.1× the control's, and p90 ≤ 1.2× |
    | 3b-SSD | as 3b, the resume from SSD (report) | reported; engine-loop host time per step during the read reported |
    | 3c | `agent_park` trace (§8): 12 sessions over 4 clients, parked and resumed. Compared with Holon VRAM-only (today). Turns 1–5 and 6+ reported apart | TTFT p50 ≤ 0.25×, output throughput ≥ 1.2× |
    | 3d | `agent_park` vs `llama-server` with `--cache-ram` sized like Holon's host level, plus `--ctx-checkpoints`; same file, card and KV format; the llama.cpp build pinned in the evidence (the default 8 GiB arm reported) | TTFT p50 and p90 ≤ 1.0×, output throughput ≥ 1.0× |
    | 3e | `claude_code` truncated to 2 turns per session (16K shared system prompt, `bench/README.md:58-60`): TTFT of each session's first request, `branch` on vs off, tiers on in both arms | p50 ≤ 0.2× |
-   | 3f | Restart (`state_tier.ssd.persist = close`): two engines with the same parking history; one resumes a parked 16K conversation without a restart, the other closes, restarts and resumes it (C3) | TTFT within 3a's SSD bar plus the restore's verification time (reported); outputs and `cached_tokens` byte-identical between the two |
+   | 3f | Restart (`state_tier.ssd.persist = close`): two engines with the same parking history; one resumes a parked 16K conversation without a restart, the other closes, restarts and resumes it (C3) | TTFT within 3a's SSD bar. The restore's crc verification runs inside `attach` and is startup time, reported per persisted GB (C-9). Outputs and `cached_tokens` byte-identical between the two |
    | 3g | pi agent test re-run on the RTX 5090 (report, not gated: agent outputs are not reproducible) | the share of uncached input that is the previous turn's own output, predicted to fall from 44% to ≤ 10% if K-M1 shows verbatim re-rendering |
-   | 3h | Tier overhead on the RTX 5090: `agent_park` with VRAM capped to the RTX 5080's KV capacity, against a roomy run (15.3 GiB weights + ≈ 5 GiB KV + ≈ 5 GiB checkpoints) (C11) | TTFT p50 ≤ 1.1× roomy + one decode step |
+   | 3h | Tier overhead on the RTX 5090: `agent_park` with VRAM capped to the RTX 5080's KV capacity, against a roomy run (C11, C-7). The roomy arm runs tiers off, with ≈ 40 checkpoint units and ≥ 150K KV tokens: ≈ 15.3 + 4.9 + 5.7 ≈ 26 GiB plus graphs and activations, which fits in 32 GB. The ratio includes the per-hit host adopt (≈ 3.2 ms of H2D against ≈ 0.3 ms of D2D in the roomy arm) | TTFT p50 ≤ 1.1× roomy + one RTX 5090 decode step (≈ 11.4 ms) |
    | 3i | Qwen3-30B-A3B offload with the host level on the RTX 5080: decode TPOT while loads run beside X's expert fetches (report, C20) | reported |
 
 4. **Memory** (§7).
    - The host level is allocated exactly from S2 host pools, after the final materialize, and accounted against
      `host_memory` after X's pools.
-   - `std.state_tier` refuses at startup a host level smaller than its in-flight bound (`max_seqs` × the units of one
-     `max_model_len` load), with a per-pool report. Inclusion is no longer required (D5).
+   - Its size, `state_tier.host.bytes`, is planned and pinned by the lock, as X's pinned pools are (B-N3).
+   - `attach` refuses with a per-pool report:
+     - if `host_memory` cannot give that size;
+     - if the size is below the in-flight bound: `max_seqs` × the units of one `max_model_len` load, plus room for
+       the staging pool's payloads, so a payload store is never refused (D5).
+
+     Inclusion is no longer required.
    - The SSD level refuses a directory without its bytes.
    - With tiers off, VRAM is unchanged. With tiers on, no new device pool is added, and the checkpoint pool is sized
      by §7's staging formula.
@@ -129,7 +156,7 @@ caches on an agent trace, with outputs that do not depend on where state was kep
      rebases and takes 1.5.
    - `check_abi --base` and the line check are relative to **K's step-1 base**: the main-branch commit K's seams
      rebase onto, after FN's seams if FN lands first.
-   - **At most +300 code lines over that base** (§4 itemizes ≈ 285).
+   - **At most +320 code lines over that base** (§4 itemizes ≈ 298; rev 2 had ≤ +300 for ≈ 285).
    - A property test shows that `could_fit` and eviction agree under random traffic with demotions, promotions, pins
      and tier drops.
    - With tiers off, every existing lock's snapshot stays byte-identical.
@@ -165,9 +192,9 @@ Non-goals of K:
 | # | Strategy | Reference | Class | K default |
 |---|---|---|---|---|
 | T1 | Host-RAM level for KV pages and payloads, per block, write-through at publish | vLLM native offload, HiCache `write_through`, llama.cpp `--cache-ram`, Strata C1/C2 | core + T | on in the 27B agent locks |
-| T1s | Selective store (`state_tier.host.admit = hit:2`) | HiCache `write_through_selective` | T (option) | off |
-| T1b | Write-back at VRAM eviction (`admit = evict`) | R §4.2 K2, LMCache | T (option) | off |
-| T2 | SSD level below RAM: slot files, O_DIRECT, written back when RAM evicts | HiCache L3, LMCache disk, Strata C3 | T | opt-in (`state_tier.ssd.dir`) |
+| T1s | Selective page store (`state_tier.host.admit = hit:2`; payloads are always stored, D5) | HiCache `write_through_selective` | T (option) | off |
+| T1b | Page write-back at VRAM eviction (`admit = evict`) | R §4.2 K2, LMCache | T (option) | off |
+| T2 | SSD `Level` below RAM: slot files, O_DIRECT, written back when RAM evicts | HiCache L3, LMCache disk, Strata C3 | T (`Level`) | opt-in (`state_tier.levels = "ssd"`, `state_tier.ssd.dir`) |
 | T2b | Buffered SSD files (`state_tier.ssd.direct = false`) | Maya KG3 | T (option) | off |
 | T3 | Persistence: a manifest written at clean close restores the index at startup | Maya `SLOT_KEEP`, Strata C3, R K3 | core + T | opt-in (`state_tier.ssd.persist = close`) |
 | P1 | Conversation parking = the prefix index with T1 / T2 (no separate feature) | Strata C2, llama.cpp `--cache-ram` | — | with T1 |
@@ -179,7 +206,7 @@ Non-goals of K:
 | C3 | **`answer:<k>`:** a tentative checkpoint at each aligned position a decode row reaches; the request keeps its last k | plan §10 item; Strata's opt-in tail checkpoints | K + core | on if K-M1 shows the gain, k from K-M1 |
 | C5 | `every:<n>` (exists) | Strata, Maya every 16K | K | off |
 | H1 | `policies.last_turn` | Maya KG2 last-turn start | K plugin | held-out |
-| H2 | `state_tiers.zlib` | none (an unanticipated shape) | T plugin | held-out |
+| H2 | `state_tiers.zlib` | none (an unanticipated shape: variable-size blobs, a CPU stage) | `Level` plugin | held-out |
 | — | ARC, layer-wise load-back, K4 streaming, `prefill:<n>` | — | — | deferred (§10) |
 
 **D2 — Vehicle, comparisons, and what moves out.**
@@ -211,7 +238,7 @@ core-owned (design §6.3). Its invariants decide liveness, and only VRAM units b
   - its levels, their storage, capacity and eviction;
   - its copies across the link (streams, batched DMA or an SM gather kernel through a kernel op);
   - its I/O threads, its virtual clock and its manifest;
-  - store admission.
+  - page store admission (payload stores are mandatory, D5).
 - **A state kind owns** where checkpoints are taken (D8).
 - **The core never names** a tier, a level, a format or a model (invariant 1, `scripts/ci/check_core_denylist.py:8-11`).
 
@@ -220,6 +247,28 @@ LRUs, the SSD watermark, write-back tickets and restore in the core: 250 lines o
 `prefix.py`. The scheduler needs none of it. A VRAM eviction either finds a lower copy or drops the subtree, so lower
 eviction never blocks device progress. A10's concern (demoted children pinning a VRAM parent) needs only resident-child
 counts. N levels inside std change nothing the core decides.
+
+*Levels below host are std's `Level`s, bound by `Ref`* (B-N2). A new medium or codec must not re-implement a whole
+tier: the clock and its lanes, leaf-first LRU, the copier, admission and the determinism contract. So
+`std.state_tier` keeps all of those, plus the host level, and binds the levels below host by `Ref` in
+`state_tier.levels`, as X's `moe.tiers` binds its tiers (`docs/v1-offload.md:1365-1372`). The list holds built-in
+names or `Ref`s, slowest last. A `Level` is structural, so plugins implement it without importing std:
+
+```python
+class Level(Protocol):     # std.state_tier's, below its host level
+    def bind(self, ctx, shapes: Mapping[str, tuple[int, int]], identity: str | None) -> Mapping[str, int]:
+        ...  # shape -> (unit bytes, segments); returns logical capacity in units per shape
+    def write(self, key: int, spec: str | None, src: HostUnits) -> Ticket: ...   # from host units it may not keep
+    def read(self, key: int, spec: str | None, dst: HostUnits) -> Ticket: ...    # into host units
+    def drop(self, key: int, spec: str | None) -> None: ...
+    def rates(self) -> Rates: ...      # read, write and mixed bytes per second; a lane it shares, if any
+    def restore(self) -> list[BlockRecord]: ...    # persistent levels; [] otherwise
+    def close(self, records: Sequence[BlockRecord]) -> None: ...   # persistent levels write their manifest
+```
+
+- `std.state_tier` decides every placement, refusal and eviction on logical unit counts. A level only moves bytes
+  and reports rates. The determinism contract is therefore kept in one place (§4).
+- A `Ticket` has `done()` and `wait()`. `HostUnits` names host-pool units and is valid until the ticket completes.
 
 *Why not X's `Tier`.* `std.tiered`'s `Tier` (`std/holon_std/tiered/protocols.py:46-74`) is a std protocol for
 read-only, in-graph expert reads. The core cannot call a std protocol, and K's tier is called by the core between
@@ -230,15 +279,18 @@ read-only, so the SSD level has its own few lines (B9).
 
 *Selection.* `EngineConfig.slots["tier"] = "std.state_tier"`, opt-in like the logits processor
 (`core/holon/core/engine.py:189-191`). There is no new `EngineConfig` field, so `plan_id`s do not move with tiers off,
-and `--slots tier=…` selects the tier as its help says (B7). Its options are plugin options. Host paths and per-host
-sizes are declared `planned = false` (KS4, B6). The slot `tier` takes over design §4.2's planned `connector` slot
+and `--slots tier=…` selects the tier as its help says (B7). Its options are plugin options.
+- Only `ssd.dir`, `ssd.io_threads` and `ssd.bytes` are declared `planned = false` (KS4, B6). For `ssd.bytes`, the
+  manifest records the slot-file geometry, and restore discards slots out of range (A-6b).
+- `host.bytes` decides the hit set, so it stays planned and the lock pins it (B-N3). The slot `tier` takes over design §4.2's planned `connector` slot
 for prefix-index offload. A v2 PD transfer can implement the same protocol, or its own slot then.
 
 Plugin kinds:
 
 | Kind | Selected by | Contract | Instances in K |
 |---|---|---|---|
-| tier | `slots["tier"]` (single, opt-in) | `StateTier` (KS4, §4) | `std.state_tier`; held-out `state_tiers.zlib` |
+| tier | `slots["tier"]` (single, opt-in) | `StateTier` (KS4, §4) | `std.state_tier` |
+| level below host | `state_tier.levels` (built-in names or `Ref`s, slowest last) | std's structural `Level` (D3) | `ssd`; held-out `state_tiers.zlib` |
 | VRAM victim policy | `slots["eviction_policy"]` (single, opt-in) | `EvictionPolicy.victim(candidates)` (KS5) | `evict.root_pin` |
 | checkpoint policy | `recurrent.policy = "prompt_end,branch,answer:2"` (built-in names or `Ref`s) | std's structural `CheckpointPolicy.next(view) → (at, tentative) \| None` | prompt_end, every, branch, answer; held-out `policies.last_turn` |
 
@@ -254,19 +306,36 @@ Plugin kinds:
     load into reused units is issued after those stores.
   - The tier obeys the same rule for its own storage. A host unit whose bytes go to SSD is free when the write is
     decided, and the read or copy that reuses it waits on the write's ticket.
+  - **Fences on host units** (A-1, B-N1, C-1). A host unit is touched by device copies on the tier's streams, by a
+    step's own `pre_forward` adopt on the compute stream, and by CPU I/O on the levels' threads. The tier keeps each
+    unit's last device fence: the end event of the store that wrote it, or the `done` event of the step that read
+    it, from `loaded(load, done)`. Any reuse of the unit waits for that fence first:
+    - stream-side (`Fence.wait`) for a copy into it;
+    - host-side (`Fence.synchronize`, on the I/O thread) for a level's `read` into it, or a `write` from it.
+
+    The second case also covers a write-back `pwritev` of a unit whose write-through D2H is still in flight. Fences
+    order bytes only, never decisions.
 - **Resume by a virtual clock** (C9, replacing rev 1's fixed `r`).
   - The tier keeps a clock in virtual seconds, advanced at each launch by a fixed per-step cost model
     `a + b·tokens + c·rows` (tune measures `a`, `b` and `c` per lock).
   - A load gets a due time chained over the lanes it passes, each a virtual queue:
-    `due_read = max(read_lane, now) + bytes / read_rate`, then
+    `due_read = max(nvme_lane, now) + bytes / mixed_rate`, then
     `due = max(h2d_lane, due_read) + bytes / h2d_rate`.
-    A forced write-back (C12) adds its bytes to the write lane ahead of the read that needs the units.
+  - A forced write-back (C12) adds its bytes ahead of the read that needs the units.
+  - A level's reads and writes share one device lane at the mixed-I/O rate K-M4 measures, not two independent lanes
+    (C-8). The lane's charge is `bytes / mixed_rate` for each read and each write.
+  - Every load is charged to the lanes, promote-into-place loads included, though those are never gated (A-7).
   - A load of at most `stall_bytes` is due now: the step waits for it.
   - A request with loads is runnable at the first step whose clock is ≥ its due time (KS2). A 512-token prefill step
     advances the clock by its own cost (≈ 0.22 s on the 27B), so a resume behind prefill-heavy steps is not
     penalised in decode steps.
   - If nothing else is runnable, the earliest-due load-gated request runs at once, and its step waits for the copy.
     That is deterministic, because whether anything else was runnable is schedule state.
+  - **The clock never runs behind a waited load** (C-2). When a launch waits on a load, `loaded` sets
+    `clock = max(clock, due)`. For a gated load that is a no-op (its due time has passed). After a pull-forward or a
+    promote-into-place, the clock catches up with the copy the step really waited for, so later due times are not
+    stacked on time the model never counted. This is still deterministic: which launch waits on which load is
+    schedule state.
   - The launch of the first step that reads a load waits for it on the device: a late copy stalls that step and never
     reorders anything.
 - **What tier invariance does not cover.** Whether a hit happens at all depends on capacities, as today. Comparisons
@@ -290,9 +359,16 @@ write-through as `std.state_tier`'s default, with write-back as an option (T1b):
   step s, already launched, may still be computing (`engine.py:454-463, 507`; `state.py:335`). A paged store is
   issued with `after` = the last launched step's end event. A payload store is issued with `after` = the end event of
   the step that wrote it, the only writer of a staging unit (D7).
-- **Store admission is the tier's.** `store` may refuse. A VRAM eviction of a resident entry with no lower copy asks
-  again with `evicting = True`. If refused, the entry is dropped with its subtree, which is all non-resident (the
-  resident set is prefix-closed), so nothing is orphaned.
+- **Page store admission is the tier's; payload stores are mandatory** (A-3).
+  - `store` may refuse a page copy. A VRAM eviction of a resident entry with no lower copy asks again with
+    `evicting = True`. If refused, the entry is dropped with its subtree, which is all non-resident (the resident set
+    is prefix-closed), so nothing is orphaned.
+  - A payload store at registration must be accepted. The staging unit is freed right after it, so a refusal would
+    lose the payload: hybrids would get no recurrent hits, and an invariance check would pass vacuously. A tier
+    keeps payloads accepted by sizing its host level for them (acceptance 4). A refusal is a contract violation, and
+    the core raises.
+  - `std.state_tier`'s admission options (`publish`, `hit:<n>`, `evict`) therefore govern pages only. A level below
+    host, the zlib held-out included, takes payloads as it takes pages: when the host level evicts them.
 
 **D6 — Eviction invariants** (panel A10, B1).
 
@@ -350,8 +426,12 @@ in the tier is the tier's own obligation; dropping an interior copy loses hits, 
    copy (an S2 host pool of the payload's unit shape). The kind's own `adopt(view, host_payload)` MemOps run as
    today's `pre_forward` adopt in the first step that reads it (`state.py:203-213`), after that step's launch has
    waited for the load (a pending SSD read included). No VRAM payload unit is taken, and nothing is pinned in VRAM.
-
-   The cost is the payload's H2D inside that step: 154 MB ≈ 3.2 ms on the 27B.
+   - The cost is the payload's H2D inside that step: 154 MB ≈ 3.2 ms on the 27B.
+   - That read runs on the compute stream, not on the tier's streams. So the core calls `loaded(load, done)` with
+     the reading step's **end event**, and the tier fences every host unit the load or the adopt read on it (D4)
+     before any reuse (A-1, B-N1, C-1).
+   - This also covers a superseded tentative that the core drops while another request adopts it: the drop is
+     logical, and the host unit's reuse waits for the adopting step's end.
 7. The request is **load-gated** until the clock reaches its due time (D4).
 
 *Publish onto a demoted or loading entry: promote into place* (A1, the blocker). Today a request that recomputes
@@ -364,6 +444,9 @@ blocks. The rules:
   launched step, which may still be writing them. The request then reads turn 1's cached bytes from its next step,
   exactly as the roomy run does after its swap. Prefix closure holds, because publish runs in chain order, so the
   parent is resident by then.
+  - The load is not gated, but it is charged to the lanes (D4).
+  - From SSD, the next step's launch may host-wait until the read is enqueued: ≈ 7 ms per 512-token chunk on the
+    27B. That stall is reported in 3b-SSD (A-7).
 - **Entry loading** (another request's promotion in flight): `_swap` onto its units, and the load joins this
   request's wait set.
 - **Rule for every step:** the launch waits on the device for every load in the wait sets of its rows' requests, then
@@ -373,7 +456,18 @@ blocks. The rules:
 
 *Pins and cancellation* (A6). A load is pinned (one extra reference on its units, so `could_fit` and eviction both
 skip them) from its issue until a launch has waited on it. That launch is the first step reading it, or the next
-step if every request waiting on it is gone. Then the core calls the tier's `loaded`.
+step if every request waiting on it is gone. Then the core calls the tier's `loaded(load, done)`, with that step's
+end event.
+- **Waiterless pins and progress** (A-2). A pin whose waiters are all gone (aborted, or preempted by a higher-ranked
+  request) is released by the next launch. When a schedule would produce no rows while such pins exist, the core
+  does not raise "no progress". Instead it:
+  1. host-waits those loads (`Fence.synchronize`);
+  2. calls `loaded(load, done)` with the load's own completion as `done`;
+  3. unpins them and schedules again.
+
+  Only the waits depend on timing. The decision to wait (no rows, pins present) is schedule state. Once the pins are
+  released, `could_fit` counts their units, so the waiting request fits, or the usual rules apply. This case is in
+  KS2's progress proof and in `test_state_liveness.py`.
 - Preempting or aborting a load-gated request releases its references and clears its wait set, and the scheduler
   forgets its gate. Its entries stay index-owned, and the load lands under its pin.
 - No load is cancelled, so no copy lands in units somebody else owns, and no event is waited on before it exists.
@@ -432,7 +526,8 @@ stays planned (D12).
 
 *Payload recency in the tier.* A turn leaves `prompt_end` and k answer payloads on its chain. Later turns match
 through those entries without adopting them. The tier therefore orders payload copies by store or adopt (`hit`'s
-`adopted` argument), not by entry hits, so stale interior payloads go before live KV.
+`adopted` argument: one `(key, spec)` per adopted payload spec, B-N7), not by entry hits, so stale interior payloads
+go before live KV.
 
 *Policies are std's; a new one is a plugin.* `recurrent.policy` is a comma list of built-in names or `Ref`s to
 plugins with the structural `next(view) → (at, tentative) | None`. Plugins cannot import std
@@ -476,10 +571,11 @@ per second. A remote tier slower than recompute would bring back `HitLen.cost`; 
   host pool are the tier's own, not S2 MemOps (which require equal unit shapes, `memory.py:130`).
 - Payload adopts (D7) are the kind's MemOps from a host pool of the payload's own shape, so they stay S2-legal.
 
-**D11 — The SSD level** (`std.state_tier`, option `ssd.dir`).
+**D11 — The SSD level** (`std.state_tier`'s first `Level`, option `ssd.dir`).
 
 *Layout.* One preallocated slot file per unit shape (`fallocate`), sized by `ssd.bytes`. A slot holds one unit-major
-unit.
+unit. At `bind`, the level takes an exclusive `flock` on `ssd.dir`, and refuses a directory another engine holds:
+two engines on one host would otherwise overwrite each other's slots, and runtime reads are not crc-checked (A-6a).
 
 *I/O.*
 - `os.preadv` / `os.pwritev` of whole units on `ssd.io_threads` (default 2: X's M7 reached 2.5–2.7 GB/s from two
@@ -492,8 +588,9 @@ unit.
   the units of one `max_model_len` load, so an SSD load seldom forces a write-back (C12).
 - Below the watermark, std's step hook demotes host LRU leaves to SSD. The decisions read logical counts only (D4):
   the host unit is free when the write is decided, and a reuse waits on the write's ticket.
-- An entry being written back is logically on SSD. A hit on it is a read with an SSD due time, even if its host bytes
-  are still physically there. A tier may use them, because the due time is already fixed (A5).
+- An entry being written back is logically on SSD. A hit on it is an SSD read with an SSD due time, and its load
+  reads the slot. The rev 2 shortcut of reusing host bytes still physically there is dropped (A-5). It raced with a
+  reallocation of the logically free unit, and keeping it would need a second fence for a rare case.
 - Copies redundant with a faster level (an SSD copy of an entry whose host copy exists) are dropped first at each
   level (A9).
 
@@ -501,19 +598,34 @@ unit.
 - The manifest is a **snapshot written only at a clean `Engine.close`**:
   1. every resident and host-level entry not yet on SSD is written back (sustained write rate, K-M4);
   2. the data is `fdatasync`ed;
-  3. the manifest is written to a temporary file with one record per block (key chain via parent, tokens, slot per
-     spec and payload, and a crc32 of the slot's data, computed by the I/O thread from the host copy before the
-     write), `fsync`ed and renamed into place, and the directory `fsync`ed.
+  3. the manifest is written to a temporary file, `fsync`ed and renamed into place, and the directory `fsync`ed. It
+     holds:
+     - the slot-file geometry (unit bytes and slot count per shape);
+     - one record per block: key chain via parent, tokens, slot per spec and payload, and a crc32 of the slot's
+       data, computed by the I/O thread from the host copy before the write.
+
+     Tentative payloads of requests still running at close are written as ordinary payloads, as their release would
+     have made them (A-6c).
 - **At startup**, the manifest is read, then unlinked and the directory `fsync`ed, before any slot is rewritten. A
   record can therefore never name a slot that was reused after it was written. This has the effect of durable
   tombstones for every slot at once, without one per reuse.
-- Restore verifies each restored slot's crc on the I/O threads (persisted bytes / read rate, reported in 3f).
-  Records failing it are discarded with their descendants. Records are sorted parents first (host eviction is
-  leaf-first, so the snapshot order is not), and orphans are discarded.
+- Restore runs **inside `attach`**, before the index is visible, so a discard can never depend on timing (C-9):
+  - records naming slots past the current files' geometry (a smaller `ssd.bytes`) are discarded (A-6b);
+  - each remaining slot's crc is verified on the I/O threads; records that fail are discarded with their
+    descendants;
+  - records are sorted parents first (host eviction is leaf-first, so the snapshot order is not), and orphans are
+    discarded.
+
+  Verification is startup time, ≈ 0.38 s per persisted GB at 2.6 GB/s (≈ 38 s for a full 100 GB level), reported
+  in 3f. `zlib.crc32` runs at ≈ 4.6 GB/s per thread (panel C's timing), so the drive bounds it.
 - A crash leaves no manifest, so nothing is restored. That is strict on purpose: persistence is for planned restarts.
-- **Identity** (A13, B6): `plans.state_identity(engine)`, the plan's id computed without `planned = false` options and
-  without the clamp-dependent `max_model_len` (`engine.py:262`). If the plan cannot be computed (`plans.py:151-155`),
-  a tier asking for persistence fails at startup. Keys are re-hashed from tokens at restore; Python's `hash` of an
+- **Identity** (A13, B6, B-N3): `plans.state_identity(engine)`, the plan's id computed without three things:
+  - the tier plugin's own options, which are byte-neutral by tier invariance (`host.bytes` included, which stays
+    planned in `plan_id`);
+  - `planned = false` options;
+  - the clamp-dependent `max_model_len` (`engine.py:262`).
+
+  If the plan cannot be computed (`plans.py:151-155`), a tier asking for persistence fails at startup. Keys are re-hashed from tokens at restore; Python's `hash` of an
   int tuple is not salted, but nothing relies on it across processes.
 
 *Why not X's I/O path.* `kernels.cpu_task`'s workers serve in-graph reads signalled by the GPU, file → host only,
@@ -588,25 +700,40 @@ class BlockRecord:                 # new: one index entry as a tier sees it
     key: int
     parent: int | None
     tokens: tuple[int, ...]
-    units: Mapping[str, tuple[int, ...]]      # spec -> device units of its paged copy (empty: payloads only)
-    payloads: Mapping[str, Payload]           # spec -> payload to store (device staging units)
+    units: Mapping[str, tuple[int, ...]]      # store: spec -> device units of its paged copy (empty: payloads only)
+                                              # restore: spec -> () for each spec whose paged copy the tier holds
+    payloads: Mapping[str, Payload]           # store: spec -> payload (device staging units)
+                                              # restore: spec -> Payload((), "") for each payload it holds
 
-class Copy(Protocol):
+class Fence(Protocol):             # new: a point in device order
     def wait(self) -> None: ...    # the current stream waits for it (the host first waits until it is enqueued)
+    def synchronize(self) -> None: ...   # the host waits for it
 
-class Load(Copy, Protocol):
+class Stream(Protocol):            # new: a copy stream the core makes (deferred off CUDA under the test fixture)
+    def run(self, fn: Callable[[], object], after: Sequence[Fence] = ()) -> Fence: ...
+
+class Load(Fence, Protocol):
     due: float                                         # on the tier's clock
     payloads: Mapping[tuple[int, str], Payload]        # (key, spec) -> its host copy, for the kind's adopt
 
-class StateTier(Protocol):         # slot `tier`: single, opt-in (`EngineConfig.slots`)
+class TierCtx(Protocol):           # new: what `attach` gets
+    pools: Mapping[str, Pool]      # the device pools it may copy: paged specs' and payload pools
+    namespace: int
+    identity: str | None           # plans.state_identity; None if the plan cannot be computed
+    max_seqs: int; max_model_len: int; block: int
+    options: Mapping[str, object]
+    def host_pool(self, name: str, *, unit_bytes: int, segments: int, units: int, mapped: bool = False) -> Pool: ...
+    def stream(self) -> Stream: ...
+
+class StateTier(Protocol):         # slot `tier`: single, opt-in; the plugin's `build(ctx: BuildCtx) -> StateTier`
     def attach(self, ctx: TierCtx) -> list[BlockRecord]: ...   # after the final materialize; restored records
     def clock(self) -> float: ...                               # virtual seconds at the step being scheduled
-    def store(self, blocks: Sequence[BlockRecord], after: Sequence[Event], evicting: bool
-              ) -> tuple[set[tuple[int, str | None]], Copy]: ...  # accepted (key, spec; None: the pages)
+    def store(self, blocks: Sequence[BlockRecord], after: Sequence[Fence], evicting: bool
+              ) -> tuple[set[tuple[int, str | None]], Fence]: ...  # accepted (key, spec; None: the pages)
     def load(self, keys: Sequence[int], units: Mapping[str, Sequence[int]],
-             payloads: Sequence[tuple[int, str]], after: Sequence[Event]) -> Load: ...
-    def loaded(self, load: Load) -> None: ...                  # a launch waited on it: unpin
-    def hit(self, keys: Sequence[int], adopted: tuple[int, str] | None) -> None: ...
+             payloads: Sequence[tuple[int, str]], after: Sequence[Fence]) -> Load: ...
+    def loaded(self, load: Load, done: Fence) -> None: ...     # waited by a launch; `done`: that step's end
+    def hit(self, keys: Sequence[int], adopted: Sequence[tuple[int, str]]) -> None: ...
     def drop(self, keys: Sequence[int], spec: str | None = None) -> None: ...
     def dropped(self) -> list[tuple[int, str | None]]: ...     # its own evictions since the last call
     def clear(self) -> None: ...                               # flush_prefix
@@ -619,26 +746,44 @@ class EvictionPolicy(Protocol):    # slot `eviction_policy`: single, opt-in
     def victim(self, candidates: Iterator[EntryView]) -> EntryView | None: ...
 ```
 
-`TierCtx` carries the device pools a tier may copy, `host_pool(…)` (S2 host pools allocated now, against what
-`host_memory` has left), `stream()` (a core platform stream, deferred under the CPU test fixture), the namespace, the
-identity (or None), `max_seqs`, `max_model_len`, the block size, and the plugin options. The tier registers itself
-through `BuildCtx.shared` at build to get S1's step hooks, which advance its clock. `SeqView` gains
-`branch_at: int`. Payload kinds may declare `keep_tentative: int`. Manifest `Option` gains `planned: bool = True`.
-SLOTS gain `tier` and `eviction_policy`, both single.
+Notes on the block (B-N4):
+- **Build.** The tier plugin's `build(ctx: BuildCtx) -> StateTier` runs at engine build, as the logits processor's
+  does (`engine.py:189-191`), so it can bind its `state_copy@1` site.
+- **Step hooks.** The core calls the tier object's own S1 hooks (`before_launch`, `after_commit`) directly, beside
+  the shared objects' (`executor.py:183-184`), with no detour through `BuildCtx.shared`. The hooks advance its clock.
+- **Fences.** The core's events are `Fence`s (its platform event, which already has `wait` and `synchronize`); the
+  tier's copy and load handles are too. `holon.api` had no `Event`; `Fence` and `Stream` are new.
+- **Host pools.** `host_pool` allocates S2 host pools now, against what `host_memory` has left.
 
-**The determinism contract** (the tier's obligation, in `StateTier`'s docstring and enforced by the judge): every
-return value and every `dropped()` list is a function of the calls received and the step hooks, never of copy or I/O
-completion; reuse of its own storage waits on its own tickets; a copy being loaded is never evicted before `loaded`.
+Other additions:
+- `SeqView` gains `branch_at: int`;
+- payload kinds may declare `keep_tentative: int`;
+- manifest `Option` gains `planned: bool = True`;
+- SLOTS gain `tier` and `eviction_policy`, both single.
+
+ARC cannot be written as `victim(candidates)` alone: it needs to observe inserts, hits and evictions and keep ghost
+lists (B-N5). It would add optional observer members to `EvictionPolicy` (`inserted`, `touched`, `evicted`), an
+additive minor when ARC is built. K does not add them.
+
+**The determinism contract** (the tier's obligation, in `StateTier`'s docstring and enforced by the judge):
+- every return value and every `dropped()` list is a function of the calls received and the step hooks, never of
+  copy or I/O completion;
+- payload stores are accepted (D5);
+- reuse of its own storage waits on its own tickets, and reuse of a host unit, or CPU I/O on it, waits on the unit's
+  last fence: a store's end, or the `done` given to `loaded` (D4);
+- a copy being loaded is never evicted before `loaded`, and `loaded` advances the clock to at least the load's due
+  time.
 
 | # | Seam | Today → change | Toy proof | Lines |
 |---|---|---|---|---|
-| KS1 | **Residency in the index** | Device copies only; eviction drops (`prefix.py:89-133`) → `Entry` gains `lower`, payload-copy flags, `kids` (resident children), `depth`, `hits`. A resident-only LRU. D6's eligibility, demote / eviction store / drop with subtree; `dropped()` handling; stores' `Copy` kept for units freed while read, waited by the next launch and passed as `after` to loads into reused units | the property test (D6); demote then promote bitwise; reuse of a unit with a store in flight waits for it under the deferred stream | 75 |
-| KS2 | **Promotion, promote-into-place, load gating** | Hits adopt VRAM only → D7's admission (prefix first, pure-free evictions, trim and re-run), promote-into-place in `publish`, load pins, per-request wait sets waited at launch, the scheduler's gate (`clock() ≥ due`), idle pull-forward, preempt and abort clearing gates | resume step identical with the toy tier's delay at 0, 1 and 2 steps (run-identical step lists); a trimmed hit recomputing demoted blocks reads the cached bytes; preempt and abort of a gated request with a delayed copy (no unit reused before landing); progress with every slot held by gated requests and a request waiting (A6a) | 80 |
-| KS3 | **Stores, staging payloads, tentatives** | Payloads permanent from registration; release drops nothing to store → paged `store` at insert (`after` = last launched) and at eviction; payload `store` at registration (`after` = producing step) freeing the staging unit; host-payload adopt through the kind's `adopt` in the reading step; `Payload.tentative` with per-request `keep_tentative`; `dropped_publishes`; `SeqView.branch_at` | tentative decode payloads: a preempted request resumes from the last; finish leaves k; the depth-1 extra row's payload registers only where committed tokens cover it; a staging unit reused while its D2H is delayed is not overwritten early | 60 |
-| KS4 | **Slot `tier`, attach, identity, restore** | None (release §15.1) → slot and protocol types; `attach` after the final materialize (host pools allowed then, before graph capture); `plans.state_identity`; `Option.planned` honoured by `plan_of`; restore inserts non-resident entries parents first; `flush_prefix` → `clear`; `close` | restart a toy engine with a persistent toy tier: resume bitwise; another identity is cleared; `planned = false` options leave `plan_id` unchanged | 50 |
+| KS1 | **Residency in the index** | Device copies only; eviction drops (`prefix.py:89-133`) → `Entry` gains `lower`, payload-copy flags, `kids` (resident children), `depth`, `hits`. A resident-only LRU. D6's eligibility, demote / eviction store / drop with subtree; `dropped()` handling; stores' `Fence` kept for units freed while read, waited by the next launch and passed as `after` to loads into reused units | the property test (D6); demote then promote bitwise; reuse of a unit with a store in flight waits for it under the deferred stream | 75 |
+| KS2 | **Promotion, promote-into-place, load gating** | Hits adopt VRAM only → D7's admission (prefix first, pure-free evictions, trim and re-run), promote-into-place in `publish`, load pins, per-request wait sets waited at launch, `loaded(load, done)`, the scheduler's gate (`clock() ≥ due`), idle pull-forward, host-waiting waiterless pins when no rows remain, preempt and abort clearing gates | resume step identical with the toy tier's delay at 0, 1 and 2 steps (run-identical step lists); a trimmed hit recomputing demoted blocks reads the cached bytes; preempt and abort of a gated request with a delayed copy (no unit reused before landing); progress with every slot held by gated requests and a request waiting (A6a); progress when an aborted gated request's pin holds the units a waiting request needs and nothing runs (A-2) | 85 |
+| KS3 | **Stores, staging payloads, tentatives** | Payloads permanent from registration; release drops nothing to store → paged `store` at insert (`after` = last launched) and at eviction; payload `store` at registration (`after` = producing step) freeing the staging unit; host-payload adopt through the kind's `adopt` in the reading step; `Payload.tentative` with per-request `keep_tentative`; `dropped_publishes`; `SeqView.branch_at`; `evict_payloads` checks `num_free` before copying the entry list (behaviour-preserving) and is skipped for staging pools when a tier is bound (C-4) | tentative decode payloads: a preempted request resumes from the last; finish leaves k; the depth-1 extra row's payload registers only where committed tokens cover it; a staging unit reused while its D2H is delayed is not overwritten early | 63 |
+| KS4 | **Slot `tier`, attach, identity, restore** | None (release §15.1) → slot and protocol types (`Fence`, `Stream`, `TierCtx`, `BlockRecord`, `Load`, `StateTier`); the tier's S1 hooks called directly; `attach` after the final materialize (host pools allowed then, before graph capture); `plans.state_identity`; `Option.planned` honoured by `plan_of`; restore inserts non-resident entries parents first; `flush_prefix` → `clear`; `close` | restart a toy engine with a persistent toy tier: resume bitwise; another identity is cleared; `planned = false` options leave `plan_id` unchanged | 55 |
 | KS5 | **Slot `eviction_policy`** | LRU only → eligible candidates lazily, LRU first, to `victim`; default the first | a toy policy pinning depth ≤ 1 keeps the root under pressure; property test with it on | 20 |
 
-≈ 285 lines; the budget is ≤ +300 over K's step-1 base (rev 1: 480). Step 1 first prototypes KS1 and KS2 on CPU
+≈ 298 lines; the budget is ≤ +320 over K's step-1 base (rev 2: ≈ 285 within +300; rev 1: 480). Step 1 first
+prototypes KS1 and KS2 on CPU
 against `core/tests/test_prefix.py` and prices them. If the prototype exceeds the itemized lines by more than 20%, it
 goes to the owner before the rest is built (B2).
 
@@ -658,23 +803,24 @@ Seam names, from X's outline (`docs/v1-offload.md:599-600`):
 ## 5. std library and plugins
 
 - **`std.state_tier`** (`std/holon_std/state_tier/`, slot `tier`).
-  - Levels:
-    - host: S2 host pools per device unit shape, payload pools in the payload's own shape, unit-major KV pools when
-      an SSD level is configured (D10);
-    - SSD: optional.
+  - The host level: S2 host pools per device unit shape, payload pools in the payload's own shape, unit-major KV
+    pools when a `Level` is configured below it (D10).
+  - The levels below host: `state_tier.levels`, a list of built-in names or `Ref`s to structural `Level`s (D3). The
+    built-in `ssd` is the first (D11).
   - Options:
-    - `host.bytes` (default: what `host_memory` has left; `planned = false`);
-    - `host.admit` = `publish` | `hit:<n>` | `evict`;
+    - `host.bytes`: planned, pinned by the lock; `attach` refuses if `host_memory` cannot give it (B-N3);
+    - `host.admit` = `publish` | `hit:<n>` | `evict` (pages only; payloads are always stored);
     - `host.reserve`;
-    - `ssd.dir`, `ssd.bytes`, `ssd.io_threads` (all `planned = false`);
-    - `ssd.direct`;
-    - `ssd.persist` = `off` | `close`;
-    - the clock: `step_cost` (`a,b,c`), `h2d_rate`, `read_rate`, `write_rate`, `stall_bytes` (tune).
+    - `levels`;
+    - `ssd.dir`, `ssd.bytes`, `ssd.io_threads` (only these three are `planned = false`);
+    - `ssd.direct`, `ssd.persist` = `off` | `close`;
+    - the clock: `step_cost` (`a,b,c`), `h2d_rate`, `stall_bytes`; levels report their own rates (tune measures
+      them).
   - Leaf-first LRU per level, with copies redundant with a faster level dropped first (A9), and payloads ordered by
     store or adopt recency (D8).
-  - The determinism contract (§4), the copier (D10), the manifest (D11).
+  - The determinism contract and the host-unit fences (§4, D4), the copier (D10).
   - The in-flight floor check at attach (acceptance 4).
-  - ≈ 550 lines.
+  - ≈ 450 lines for the tier and the `Level` protocol, plus ≈ 180 for the SSD level with its manifest.
 - **`std.state.recurrent`.**
   - `recurrent.policy` becomes a comma list of built-in names or `Ref`s (structural `CheckpointPolicy`).
   - New built-ins `branch` and `answer:<k>` (which sets `keep_tentative`).
@@ -684,7 +830,8 @@ Seam names, from X's outline (`docs/v1-offload.md:599-600`):
   with the kernel's existing code.
 - **`evict.root_pin`** (`plugins/holon_plugins/evict/root_pin/`, slot `eviction_policy`): skips candidates with
   `depth ≤ d` and `hits ≥ h` while others exist. ≈ 40 lines.
-- **Held-out (after the tag):** `policies.last_turn`, `state_tiers.zlib` (§1).
+- **Held-out (after the tag):** `policies.last_turn` (≈ 40 lines) and `state_tiers.zlib`, a `Level` (≈ 120 lines
+  plus tests; §1).
 - **Bench.**
   - `bench/workloads.py` gains `agent_park` (§8).
   - `bench/tier_resume.py` (3a, 3b) parks a set of conversations once with a filler and resumes each.
@@ -697,8 +844,8 @@ Seam names, from X's outline (`docs/v1-offload.md:599-600`):
 | Configuration | Class | Check |
 |---|---|---|
 | Any level, capacity and admission; restore after restart | exact (tier-invariant) | `holon_judge tiers`. Serial `after`-chained trace (8 sessions × 4 turns, history resent): the tested run interleaves with a filler forcing every return through the tested level; the reference runs each session's turns back to back with no filler. Streams and per-request `cached_tokens` byte-identical, ≥ 8 loads per level counted. Concurrent variant: run-identical step lists and outputs × 3 with ≥ 32 loads per level and unseeded delays. CPU tiny model; Qwen3-8B on the A5000; the 27B pair on the RTX 5090 |
-| Null test | exact | tiers off, checkpoint pool 4 vs 16 units, back-to-back trace: byte-identical |
-| `branch` (in-step, prefill-produced) | as `prompt_end`: bitwise the recomputed state at the same chunk boundaries (a CPU test with equal chunking); bounded across chunkings and vs recompute (L1.5) | the bounded multi-turn check (`docs/design.md:1297-1303`) with a shared-system-prompt session set added |
+| Null test | exact | tiers off, `prompt_end` only, checkpoint pool 4 vs 16 units, back-to-back trace: `cached_tokens` asserted equal, outputs byte-identical |
+| `branch` (in-step, prefill-produced) | as `prompt_end`: bitwise the recomputed state at the same chunk boundaries (a CPU test with equal chunking); bounded across chunkings and vs recompute (L1.5) | the bounded multi-turn check (`docs/design.md:1297-1303`) with a shared-system-prompt session set added. `bounded.Trace.run` submits each turn as one wave (`judge/holon_judge/bounded.py:70-79`), so `branch_at` would never be set inside a wave. The added sessions therefore start in a later wave than the first, and `branch_off_by_one`'s fired count must be > 0 (C-6) |
 | `answer:<k>` (decode-produced) | bounded | the same bounded multi-turn check and floor (it resends history, generated tokens included; `bounded.py` has one floor, so no separate one) |
 
 Snapshot traces of existing locks are untouched with tiers off. Tier comparisons compare output streams and
@@ -714,6 +861,8 @@ follows publish within 1–2 steps. Tiers-off configurations stay clean.
 | Plant | Where | Breaks | Predicted |
 |---|---|---|---|
 | `promote_unwaited` | CPU + GPU | a launch does not wait on its rows' loads | tier invariance fails (stale bytes) |
+| `adopt_source_reused` (A-1, B-N1, C-1) | CPU | `loaded` ignores `done`: a host payload unit a step's adopt reads is reused by a later store or an SSD read without waiting for that step's end (deferred stream, plus an I/O thread delayed into the window) | the adopted recurrent state is corrupt; tier invariance fails |
+| `pin_wedge` (A-2) | CPU | waiterless pins are not host-waited when no rows remain | the liveness test raises "no progress" on its abort-under-pressure trace |
 | `store_early` (A2) | GPU | a paged store is issued after the committed step, not the last launched | host copies stale; tier invariance fails on a trace where the in-flight step completes published blocks |
 | `store_unwaited` | CPU + GPU | reuse of a unit freed while its store reads it does not wait | host copy corrupt; tier invariance fails under pressure |
 | `load_no_after` (C10) | GPU | a promotion's copy ignores `after` (the finished request's extra row overwrites it) | tier invariance fails |
@@ -761,7 +910,7 @@ analysis and K-M5 are CPU-only.
 |---|---|---|
 | K-M1 | Re-render divergence. The pi agent test re-run once with the capture proxy's `--raw` (local only): per turn, the longest common prefix of (previous prompt + generated tokens) and the next prompt, in tokens and relative to the answer's end; also with a template that strips reasoning | `answer`'s k; 3g's prediction; whether `answer` is on by default |
 | K-M2 | Copy paths on S2 pools' own allocation (mmap + `cudaHostRegister`, X's C-r4.5-5) at KV chunk sizes (34,816 B, 65,536 B), GDN conv segments (61,440 B) and checkpoint segments (≈ 3 MiB), H2D and D2H, fragmented runs: the per-run loop, `cudaMemcpyBatchAsync`, the SM gather; host time per call. In the same script (K-M3 folded in, C17): four decode streams of the 27B with 0.5–2 GB H2D loads and 154 MB D2H stores in flight | `state_copy@1`'s path; `h2d_rate`; `stall_bytes`; 3b's prediction; whether stores need a rate cap |
-| K-M4 | NVMe `pwritev` / `preadv` of unit-major units (557,056 B) and checkpoints, O_DIRECT and buffered, 1–4 threads, reads and **sustained writes** past the SLC cache, with the engine loop's step time measured beside them (GIL) | `io_threads`; `read_rate`, `write_rate`; the close-flush estimate; D9's SSD rate |
+| K-M4 | NVMe `pwritev` / `preadv` of unit-major units (557,056 B) and checkpoints, O_DIRECT and buffered, 1–4 threads, reads, **sustained writes** past the SLC cache, and **mixed reads and writes** on one drive, with the engine loop's step time measured beside them (GIL) | `io_threads`; the read, write and mixed rates (the shared lane, C-8); the close-flush estimate; D9's SSD rate |
 | K-M5 | CPU replay of the **real core index code** with a toy tier on `agent_park`, `claude_code` and `agent`: hit tokens per level, load bytes, evictions, staging peak, per-step host time vs VRAM / RAM / SSD sizes, with step times from the locks | 3c–3e predictions; default `host.bytes`; the staging size; C13's scan cost |
 
 **`agent_park`** (`bench/workloads.py`, seed 0). Four clients run closed-loop. Each owns three sessions and serves them
@@ -783,13 +932,13 @@ round-robin, one request at a time.
 |---|---|
 | 3a, 16K from RAM | KV 570 MB ≈ 12.0 ms of copy, and a payload adopt of 154 MB ≈ 3.2 ms in both arms. Bar: VRAM + 18.0 ms + one step (33.7 ms). Predicted extra ≈ 12–28 ms if `state_copy@1` reaches ≥ 0.8× of 47.5 GB/s on fragmented units; fails with the per-run loop |
 | 3a, 32K from SSD | 1.29 GB at ≈ 2.6 GB/s ≈ 0.50 s + 27 ms H2D. With the default watermark no write-back is forced; a forced one adds 1.29 GB at the sustained write rate (K-M4). Bar ≈ 0.79 s + one step |
-| 3b | copy-engine DMA plus ≈ 5% of DRAM bandwidth during the copy (47.5 of 960 GB/s); the 32K load is due ≈ 2 steps out, with the append step in both arms → median gap ≤ 1.05×, p90 ≤ 1.15× (bar 1.1× / 1.2×) |
-| 3c | VRAM-only: the 4-unit pool keeps no returning session's payloads, so every hit trims to 0, and each turn recomputes its context (≈ 8K mean, ≈ 3.5 s). Tiered: ≈ 300 MB loaded (≈ 6 ms) plus the append: ≈ 400 tokens with `answer` (≈ 0.18 s), ≈ 700 without (≈ 0.3 s) → TTFT p50 ≈ 0.2–0.35 s, ratio ≈ 0.05–0.1× (bar 0.25×). Throughput gain 1.3–2× from removed prefill (bar 1.2×) |
+| 3b | copy-engine DMA plus ≈ 5% of DRAM bandwidth during the copy (47.5 of 960 GB/s); the 32K load is due ≈ 2 steps out, so ≈ 2 gated steps per rep → gated-step median gap ≤ 1.05×, p90 ≤ 1.15× (bar 1.1× / 1.2×); the append step's ratio ≈ 1.0× (reported) |
+| 3c | VRAM-only: the 4-unit pool keeps no returning session's payloads, so every hit trims to 0, and each turn recomputes its context (≈ 9–10K at resume by C's σ = 0.6 sim, ≈ 4 s; C-10). Tiered: ≈ 300 MB loaded (≈ 6 ms) plus the append: ≈ 400 tokens with `answer` (≈ 0.18 s), ≈ 700 without (≈ 0.3 s) → TTFT p50 ≈ 0.2–0.35 s, ratio ≈ 0.05–0.1× (bar 0.25×). Throughput gain 1.3–2× from removed prefill (bar 1.2×) |
 | 3d | `llama-server`'s save is synchronous (an observed 2.65 s stall), and whole-state blobs repeat the system prompt per conversation. Prefill parity at depth (Holon 1.05× the gate build at 8K, 1.01× upstream, same evidence) → ≤ 1.0× predicted. No margin estimate until step 4; the bar is fixed now |
 | 3e | sessions 1–2 recompute 16K (≈ 7 s); sessions 3–16 hit 16,384 → first-turn TTFT ≈ 0.1–0.2 s → p50 ratio ≈ 0.03× (bar 0.2×) |
-| 3f | 16K resume as 3a's SSD cell; restore verification ≈ persisted bytes / 2.6 GB/s (≈ 6 s for 16 GB) |
+| 3f | 16K resume as 3a's SSD cell; restore verification inside `attach`, startup time ≈ 0.38 s per persisted GB (≈ 6 s for 16 GB) |
 | 3g | 44% (27,646 / 62,682) of uncached input → ≤ 10% if K-M1 finds the answers re-rendered verbatim up to their tool calls |
-| 3h | loads ≈ 6 ms against one ≈ 15.7 ms step of granularity → ≤ 1.05× roomy + one step (bar 1.1× + one step) |
+| 3h | RTX 5090 decode step ≈ 11.4 ms (tg128 87.34 tok/s, `evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json`); ≈ 300 MB of KV ≈ 6 ms plus the host adopt ≈ 3.2 ms per hit, against roomy's ≈ 0.3 ms D2D → ≤ 1.05× roomy + one step (bar 1.1× + one step) |
 
 **Decision rules** (fixed now):
 - A predicted row that step 4 measures below its bar goes to the owner, with the measured cause, before any
@@ -808,22 +957,24 @@ relative to that base.
 | Step | Work | Checks | Days |
 |---|---|---|---|
 | 0 | K-M1, K-M2 (with K-M3), K-M4, K-M5; the `agent_park` generator | evidence; the panel reviews the parameters they set | 2 |
-| 1 | CPU prototype of KS1–KS2 and its pricing; then KS1–KS5 with toy proofs; the property test; the deferred CPU stream fixture; the design.md edits (§11) | core tests; `check_abi --base <K's base>` additive; ≤ +300 lines over K's base; denylist; tiers-off snapshots unchanged on the A5000 | 6 |
+| 1 | CPU prototype of KS1–KS2 and its pricing; then KS1–KS5 with toy proofs; the property test; the deferred CPU stream fixture; the design.md edits (§11) | core tests; `check_abi --base <K's base>` additive; ≤ +320 lines over K's base; denylist; tiers-off snapshots unchanged on the A5000 | 6 |
 | 2 | `std.state_tier` host level and copier; `state_copy@1` providers; `branch`, `answer`; `holon_judge tiers`; the CPU logic plants | tier invariance (CPU, Qwen3-8B on the A5000); null test; run-identical × 3 with delays; bounded multi-turn for the policies; CPU plants and the A5000 stream-timing plants | 5 |
-| 3 | SSD level: write-back, watermark, persistence and restore; `evict.root_pin`; **tag the API** | tier invariance with SSD; 3f's two-engine restart test; `torn_manifest`, `stale_slot`, `read_unwaited`, `free_on_ticket` | 4 |
+| 3 | The `Level` protocol and the SSD level: write-back, watermark, shared NVMe lane, `flock`, persistence and restore with geometry; `evict.root_pin`; **tag the API** | tier invariance with SSD; 3f's two-engine restart test; `torn_manifest`, `stale_slot`, `read_unwaited`, `free_on_ticket`, `adopt_source_reused` with a delayed I/O thread | 5 |
 | 4 | The gate on the RTX 5080 and 5090: 3a–3i, the 27B tier-invariance pair on the 5090; tune sets the clock, rates, `host.bytes` and the staging size; the 27B agent locks | acceptance 3; `dropped_publishes` 0; the locks' bounded and run-identical verdicts | 4 |
-| 5 | Held-out plugins after the tag: `policies.last_turn`, `state_tiers.zlib` | plugin-only diffs (or the recorded proof finding and its minor); tier invariance for the zlib tier | 3 |
+| 5 | Held-out plugins after the tag: `policies.last_turn`, the `state_tiers.zlib` `Level` | plugin-only diffs (or the recorded proof finding and its minor); tier invariance with the zlib level | 2 |
 | 6 | Close: full suite, `run_all.sh`, panel code review; lock propagation if K closes second (D14) | acceptance 4–6 | 2 |
 
-26 working days (rev 1: 22): +1 for the prototype, +1 for the copier and plants, +1 for the held-out tier, +1 for the
-gate's added rows. Waiting for FN's core round, if it holds the base, is outside this count.
+26 working days (rev 1: 22). Against rev 1: +1 for the prototype, +1 for the copier and plants, +1 for the held-out
+work, +1 for the gate's added rows. Against rev 2, the total is unchanged: step 3 gains a day for the `Level`
+protocol, and step 5 loses one, because zlib is a `Level` rather than a whole tier. Waiting for FN's core round, if
+it holds the base, is outside this count.
 
 ## 10. Risks and deferred
 
 **Risks.**
 - **The copy path is the critical path to 3a and 3b.** If neither DMA batching nor the SM gather reaches 0.8× on
   fragmented chunks, loads cost whole steps, and 3b misses for 32K resumes. Hence K-M2 runs first.
-- **The core estimate.** B2's shrink rests on ≈ 285 lines. Step 1 prices it on a prototype before building the rest.
+- **The core estimate.** B2's shrink rests on ≈ 298 lines. Step 1 prices it on a prototype before building the rest.
 - **Re-rendering decides `answer`'s worth.** If agents' templates re-serialize tool calls or strip reasoning, the
   answer checkpoint helps little. `prompt_end` and `branch` still carry the gain (K-M1, 3g).
 - **The held-out policy is predicted to need a core field.** That would be a recorded proof finding and a minor, not
@@ -840,7 +991,7 @@ gate's added rows. Waiting for FN's core round, if it holds the base, is outside
 - `HitLen.cost` (D9);
 - layer-wise loading and per-layer events (D12);
 - K4 (FN, GLM; D15);
-- ARC as an `eviction_policy` plugin;
+- ARC as an `eviction_policy` plugin, with the optional observer members it needs (B-N5);
 - `prefill:<n>` tentative in-step checkpoints (B13);
 - a per-pool payload LRU for the tiers-off path (C13);
 - a save / restore API;
@@ -864,6 +1015,11 @@ gate's added rows. Waiting for FN's core round, if it holds the base, is outside
 - §6.4 (`:918-923`): the tier, not a per-request choice, owns loads. Loads land in index-owned, pinned units and are
   never cancelled. BLOCKED stays for logits processors only.
 - §9's KV offload row (`:1338`): `std.state_tier`, slot `tier`, KS1–KS5.
+- The host-pool timing rule (B-N6). Host pools may also be allocated at a tier's `attach`, after the final
+  materialize. Three places say `before_materialize` is the last point, and each gains that exception:
+  - design §6.1 (`docs/design.md:817`);
+  - `BuildCtx.pool`'s docstring (`core/holon/api/model.py:120`);
+  - `RequestsPools.before_materialize` (`core/holon/api/hooks.py:162`).
 - Decision D8's row: K's seams as built.
 
 ## 12. Lead's decisions on rev 1's open questions (2026-10-18)
@@ -964,3 +1120,51 @@ None was rejected outright. Three were taken in a changed form, with reasons bel
 **Coordinator's additions.** The core budget is stated relative to K's step-1 base (≤ +300). The ABI is 1.4 or 1.5
 by merge order with FN. `check_abi --base` and the line check are taken against that base. Only the track that
 closes second propagates the locks (D14).
+
+### Rev 3 (2026-10-18): the panel's second round
+
+Round 2 found A: 3 major and 4 minor; B: 3 major and 4 minor; C: 3 major and 7 minor. All of round 1 was confirmed
+fixed, except that B2 with B3 and B6 were partly open, which B-N2 and B-N3 complete. Each new finding was checked
+against the code at this branch's base:
+- the adopt is a `pre_forward` MemOp on the compute stream (`executor.py:348`, `memory.py:152-159`);
+- "no progress" raises when `idle_for` is 0 (`engine.py:343, 447-453`);
+- unplanned options leave plans (`plans.py:80-84`);
+- `holon.api` has no `Event` (`core/holon/api/__init__.py`);
+- three docstrings say `before_materialize` is the last point (`model.py:120`, `hooks.py:162`, `design.md:817`);
+- `evict_payloads` copies the entry list before its early return (`prefix.py:117`);
+- `bounded.Trace.run` submits one wave per turn (`bounded.py:70-79`);
+- the RTX 5090's 27B tg128 is 87.34 tok/s (≈ 11.4 ms per step).
+
+The lead decided A-1/B-N1/C-1, A-2, A-3, B-N2, B-N3, C-2, C-3, C-8 and C-9; the rest are taken as the reviewers
+proposed. None is rejected. Two are taken in a changed form, and one in part.
+
+| Finding | Disposition | Where / why |
+|---|---|---|
+| A-1 = B-N1 = C-1 (major) host payload unit reused under an in-flight adopt | accepted | `loaded(load, done)` with the reading step's end event. Every reuse of, or CPU I/O on, a host unit waits on its last fence: stream-side for copies, host-side for level I/O. This also covers a write-back `pwritev` racing a D2H (D4, D7, §4 contract). Plant `adopt_source_reused` (CPU deferred stream plus a delayed I/O thread) |
+| A-2 (major) waiterless pins wedge the scheduler | accepted | D7: when a schedule would produce no rows while waiterless pins exist, host-wait them, `loaded`, unpin, reschedule. In KS2's progress proof and the liveness test; plant `pin_wedge` |
+| A-3 (major) refused payload stores undefined | accepted (the simpler rule) | D5: payload stores at registration are mandatory, and admission options govern pages only. The host level is sized so payloads are never refused (acceptance 4). zlib, as a `Level`, takes payloads with pages at host eviction |
+| A-4 tier invariance cannot hold under `hit:<n>` | accepted | acceptance 2: the byte-identity claim covers `publish` and `evict` admission. `hit:<n>` is judged by run-identity and `bounded`, and the judge refuses to compare runs whose `cached_tokens` differ |
+| A-5 the write-back host-bytes shortcut races reuse | changed | D11: the shortcut is dropped, so a hit on an entry being written back reads its slot. The reviewer's fence-based fix would keep a second fence for a rare case |
+| A-6 persistence edges (a, b, c) | accepted | (a) `flock` on `ssd.dir` at `bind`; (b) the manifest records geometry, and out-of-range slots are discarded; (c) running requests' tentatives are written as ordinary payloads at close |
+| A-7 promote-into-place loads not charged to the lanes | accepted | D4 charges every load; D7 reports the SSD host-wait in 3b-SSD |
+| B-N2 (major) a new medium means a whole tier | accepted | D3: std's structural `Level` (bind, write, read, drop, rates, restore, close), bound by `Ref` in `state_tier.levels` as `moe.tiers` is. SSD is the first `Level`; zlib is a `Level`, ≈ 120 lines plus tests |
+| B-N3 (major) `host.bytes` unplanned contradicts step 4 and X | accepted | `host.bytes` planned and pinned; `attach` refuses if `host_memory` cannot give it. `planned = false` covers only `ssd.dir`, `ssd.io_threads` and `ssd.bytes`. `state_identity` leaves out the tier's options |
+| B-N4 ABI types undefined | accepted | §4: `Fence`, `Stream`, `TierCtx` listed; `build(ctx: BuildCtx)` factory; S1 hooks called directly; `BlockRecord` on restore defined |
+| B-N5 ARC cannot be a `victim` plugin | accepted in part | §4 and §10 state that ARC needs optional observer members, an additive minor when ARC is built. K adds none, because nothing in K would read them |
+| B-N6 §11 misses the host-pool timing rule | accepted | §11: design §6.1, `BuildCtx.pool`, `RequestsPools` |
+| B-N7 `hit` allows one adopted payload | accepted | `adopted: Sequence[tuple[int, str]]` |
+| C-2 (major) the clock falls behind on pull-forward | accepted | D4: `loaded` sets `clock = max(clock, due)`, a no-op for gated loads |
+| C-3 (major) 3b's p90 cannot see interference | accepted | 3b: median and p90 over gated steps only (≈ 180–240 gaps); the append step's ratio reported apart |
+| C-4 `evict_payloads` is not rare | changed | KS3: check `num_free` before the list copy (no behaviour change), and skip staging pools when a tier is bound. +3 core lines |
+| C-5 the null test can fail for the wrong reason | accepted | `prompt_end` only; `cached_tokens` asserted equal |
+| C-6 `branch` never fires in the bounded check | accepted | §6: the added sessions start in a later wave; `branch_off_by_one` must fire |
+| C-7 3h underspecified | accepted | 3h: the roomy arm specified (tiers off, ≈ 40 units, ≥ 150K tokens, ≈ 26 GiB); the host-adopt cost stated; the RTX 5090's 11.4 ms step |
+| C-8 SSD lanes share one drive | accepted | D4: one shared NVMe lane at K-M4's mixed rate |
+| C-9 when verification runs | accepted | D11: inside `attach`; startup time per GB in 3f |
+| C-10 3c baseline context low | accepted | 3c: ≈ 9–10K at resume, ≈ 4 s; the ratio is unchanged |
+
+**Budget, ABI, schedule.**
+- Core: ≈ 298 lines itemized (KS2 +5 for waiterless pins, KS3 +3 for C-4, KS4 +5 for the API types), so the budget
+  rises from ≤ +300 to **≤ +320** over K's step-1 base.
+- ABI: unchanged, 1.4 or 1.5 by merge order. `Fence`, `Stream` and `TierCtx` join the same additive minor.
+- Schedule: unchanged at 26 days (step 3 +1 for the `Level` protocol, step 5 −1).
