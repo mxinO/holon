@@ -139,13 +139,15 @@ class ToyTier:
         self.calls.append(("load", list(keys), list(payloads), list(after)))
         jobs, read, out = [], [], {}
         for i, key in enumerate(keys):
-            host = self.copies[key, None]                        # the core loads only what the tier holds
+            assert (key, None) in self.copies, "the core loads a page copy the tier dropped"
+            host = self.copies[key, None]
             for spec, us in units.items():
                 per = len(us) // len(keys)
                 jobs.append((spec, host[spec], us[i * per:(i + 1) * per]))
                 read += [(spec, u) for u in host[spec]]
             self.loading[key] += 1
         for key, spec in payloads:
+            assert (key, spec) in self.copies, "the core loads a payload copy the tier dropped"
             (pool, hu), = self.copies[key, spec].items()
             out[key, spec] = Payload(tuple(hu), self.host[pool].name)
             read += [(pool, u) for u in hu]

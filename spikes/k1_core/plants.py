@@ -3,8 +3,9 @@ paired with the core test it must fail. Run from the repository root:
 
     python spikes/k1_core/plants.py [--discover] [--only NAME ...] [--out evidence/k1_core_plants_cpu_<date>.json]
 
-Default: run each plant's paired tests against the planted copy (`PYTHONPATH` first) and check they fail (a plant
-whose tests pass, or time out, is reported). `--discover`: run the tier tests against each plant and list the tests
+Default: run every paired test unplanted first (they must pass), then each plant's paired tests against the planted
+copy (`PYTHONPATH` first). A plant is caught only when its tests fail by an assertion — AssertionError, the tests' own
+or the toy tier's contract checks —, never by a crash, a collection error or a timeout. `--discover`: run the tier tests against each plant and list the tests
 that fail (how the pairs were chosen). The stream-timing plant `store_no_after` (a store after the committed step,
 not the last launched one) needs the GPU and stays with step 2's GPU plants."""
 from __future__ import annotations
@@ -17,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from xml.etree import ElementTree
 
 T = "core/tests/"
 TIER_TESTS = [T + f for f in ("test_tiers.py", "test_payloads.py", "test_state_liveness.py", "test_prefix.py",
@@ -51,10 +53,12 @@ PLANTS = {
     "promote_in_place_no_after": ("state.py", "idx.promote([e], {name: list(us) for name, us in mine.items()}, "
                                   "idx.after())", "idx.promote([e], {name: list(us) for name, us in mine.items()}, [])",
                                   [PAY + "test_a_recomputed_block_only_the_tier_holds_is_promoted_into_place"]),
-    "swap_onto_lower": ("state.py", "                if key in idx.lower:           # only the tier holds it: into "
-                        "this request's own units (D7)\n                    idx.promote([e], {name: list(us) for "
-                        "name, us in mine.items()}, idx.after())\n", "",
-                        [TIERS + "test_steps_and_outputs_never_depend_on_when_copies_land"]),
+    "swap_onto_lower": ("state.py", "                    idx.promote([e], {name: list(us) for name, us in mine.items()}"
+                        ", idx.after())\n", "                    idx._hold(mine)\n                    e.units = mine\n"
+                        "                    idx.entries[key] = idx.lower.pop(key)\n                    if e.parent is "
+                        "not None:\n                        idx.entries[e.parent].kids += 1\n",
+                        [PAY + "test_a_recomputed_block_only_the_tier_holds_is_promoted_into_place",
+                         TIERS + "test_tier_invariance_with_demotions_promotions_and_late_copies"]),
     "joiner_no_wait": ("state.py", "{id(e.loading): e.loading for e in entries if e.loading is not None}",
                        "{id(e.loading): e.loading for e in entries[len(resident):] if e.loading is not None}",
                        [PAY + "test_a_joining_request_waits_for_the_load_and_an_eviction_store_after_it"]),
@@ -100,23 +104,34 @@ PLANTS = {
 }
 
 
-def run(name: str, tests: list[str], scratch: pathlib.Path, timeout: int) -> tuple[str, list[str]]:
-    f, old, new, _ = PLANTS[name]
-    copy = scratch / name
+def run(name: str | None, tests: list[str], scratch: pathlib.Path, timeout: int) -> tuple[str, list[str]]:
+    """Run `tests` against a copy of core/holon with plant `name` (None: unplanted); (verdict, failing tests): verdict
+    "fails" (by assertions only), "passes", "crash" (another exception or a collection error), "timeout" or "stale"."""
+    copy = scratch / (name or "baseline")
     shutil.copytree("core/holon", copy / "holon")
-    path = copy / "holon" / "core" / f
-    src = path.read_text()
-    if src.count(old) != 1:
-        return f"stale ({src.count(old)} matches)", []
-    path.write_text(src.replace(old, new))
-    env = dict(os.environ, PYTHONPATH=str(copy), CUDA_VISIBLE_DEVICES="")
+    if name is not None:
+        f, old, new, _ = PLANTS[name]
+        path = copy / "holon" / "core" / f
+        src = path.read_text()
+        if src.count(old) != 1:
+            return f"stale ({src.count(old)} matches)", []
+        path.write_text(src.replace(old, new))
+    env, report = dict(os.environ, PYTHONPATH=str(copy), CUDA_VISIBLE_DEVICES=""), copy / "report.xml"
     try:
-        r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-rf", *tests],
-                           env=env, capture_output=True, text=True, timeout=timeout)
+        subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", f"--junitxml={report}",
+                        *tests], env=env, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return "timeout", []
-    failed = [line.split()[1] for line in r.stdout.splitlines() if line.startswith("FAILED ")]
-    return ("fails" if r.returncode else "passes"), failed
+    if not report.exists():
+        return "crash", []
+    cases = ElementTree.parse(report).getroot().iter("testcase")
+    bad = {f"{c.get('classname')}::{c.get('name')}": (c.find("failure"), c.find("error")) for c in cases}
+    failed = [t for t, (f, e) in bad.items() if f is not None or e is not None]
+    if not failed:
+        return "passes", []
+    asserting = all(e is None and f is not None and f.get("message", "").startswith(("AssertionError", "assert "))
+                    for f, e in (bad[t] for t in failed))
+    return ("fails" if asserting else "crash"), failed
 
 
 def main() -> None:
@@ -128,6 +143,11 @@ def main() -> None:
     args = ap.parse_args()
     rows = {}
     with tempfile.TemporaryDirectory() as tmp:
+        tests = sorted({t for name in args.only or PLANTS for t in PLANTS[name][3]})
+        baseline = run(None, TIER_TESTS if args.discover else tests, pathlib.Path(tmp), args.timeout)
+        print(f"baseline (unplanted): {baseline[0]} {baseline[1]}", flush=True)
+        if baseline[0] != "passes":
+            sys.exit("the unplanted tests do not pass")
         for name in args.only or PLANTS:
             verdict, failed = run(name, TIER_TESTS if args.discover else PLANTS[name][3], pathlib.Path(tmp),
                                   args.timeout)
@@ -144,6 +164,7 @@ def main() -> None:
                                          text=True).stdout.strip()),
             "gpu_only": {"store_no_after": "a store issued after the committed step, not the last launched one: "
                                            "a stream-timing plant for step 2 (GPU)"},
+            "baseline": "passes", "caught_means": "every failing paired test fails by an assertion",
             "plants": rows, "caught": f"{caught} / {len(rows)}"}, indent=1) + "\n")
 
 

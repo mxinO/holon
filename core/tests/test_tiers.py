@@ -21,6 +21,7 @@ from holon.core.engine import Engine, EngineConfig
 from holon_testing.deferred import Deferred
 
 GREEDY = SamplingParams(temperature=0.0, max_tokens=6, ignore_eos=True)
+BLOCK = 16                                              # the tiny model's prefix-index block (one page)
 
 
 @pytest.fixture(scope="module")
@@ -44,22 +45,28 @@ def _engine(tiny, pages: int, tier: dict | None = None, max_seqs: int = 1) -> En
                                host_memory=64 << 20 if tier is not None else 0, plugin_options=options))
 
 
-def _turns(engine: Engine, sessions: dict[int, list[int]], order: list[int], rng: random.Random) -> dict:
-    """Each session in `order` takes a turn: its history plus new tokens, answered greedily; (session, turn) ->
-    (output, cached_tokens)."""
-    out, turns = {}, dict.fromkeys(sessions, 0)
-    for s in order:
-        prompt = sessions[s] + [rng.randrange(128) for _ in range(rng.randrange(5, 30))]
-        rid = engine.add(prompt, GREEDY)
-        tokens, cached = [], None
-        while engine.has_work():
-            for d in engine.step():
-                if d.rid == rid:
-                    tokens += d.token_ids
-                    cached = d.cached_tokens if d.cached_tokens is not None else cached
-        sessions[s] = prompt + tokens
-        out[s, turns[s]] = (tokens, cached)
-        turns[s] += 1
+def _ask(engine: Engine, prompt: list[int]) -> tuple[list[int], int | None]:
+    """One request answered greedily on its own: (output, cached_tokens)."""
+    rid, tokens, cached = engine.add(prompt, GREEDY), [], None
+    while engine.has_work():
+        for d in engine.step():
+            if d.rid == rid:
+                tokens += d.token_ids
+                cached = d.cached_tokens if d.cached_tokens is not None else cached
+    return tokens, cached
+
+
+def _turns(engine: Engine, sessions: dict, prompts: dict, s: int, rng: random.Random) -> dict:
+    """Session s takes a turn: first its previous prompt again, cut to whole blocks (a regenerate: its hit leaves its
+    last block to recompute, a block the tier may hold alone by then), then its history plus new tokens; (kind,
+    session, turn) -> (output, cached_tokens)."""
+    out, turn = {}, sum(1 for k in prompts if k[0] == s)
+    if turn:
+        last = prompts[s, turn - 1]
+        out["regenerate", s, turn] = _ask(engine, last[:len(last) // BLOCK * BLOCK])
+    prompts[s, turn] = sessions[s] + [rng.randrange(128) for _ in range(rng.randrange(5, 30))]
+    tokens, cached = out["turn", s, turn] = _ask(engine, prompts[s, turn])
+    sessions[s] = prompts[s, turn] + tokens
     return out
 
 
@@ -67,46 +74,54 @@ def _turns(engine: Engine, sessions: dict[int, list[int]], order: list[int], rng
 def test_tier_invariance_with_demotions_promotions_and_late_copies(tiny, monkeypatch, seed):
     deferred = Deferred(seed, most=2)
     monkeypatch.setattr(platform, "Stream", lambda device: deferred.stream())
-    starts = {s: [random.Random(seed * 10 + s).randrange(128) for _ in range(40)] for s in range(4)}
+    starts = {s: [random.Random(seed * 10 + s).randrange(128) for _ in range(70)] for s in range(4)}
     reference = {}
     roomy = _engine(tiny, pages=256)
     for s in starts:                                      # back to back: every return hits on the device
-        reference |= _turns(roomy, {s: list(starts[s])}, [s] * 4, random.Random(s))
+        sessions, prompts, rng = {s: list(starts[s])}, {}, random.Random(s)
+        for _ in range(4):
+            reference |= _turns(roomy, sessions, prompts, s, rng)
     roomy.close()
     tight = _engine(tiny, pages=20, tier={"delay": 1, "seed": seed})
-    rngs = {s: random.Random(s) for s in starts}
-    sessions, tested = {s: list(starts[s]) for s in starts}, {}
-    for turn in range(4):                                 # interleaved: each return comes through the tier
+    promoted = _count_promote_into_place(tight)
+    rngs, sessions, prompts, tested = {s: random.Random(s) for s in starts}, {s: list(starts[s]) for s in starts}, {}, {}
+    for _ in range(4):                                    # interleaved: each return comes through the tier
         for s in starts:
-            out = _turns(tight, sessions, [s], rngs[s])
-            tested[s, turn] = out[s, 0]
+            tested |= _turns(tight, sessions, prompts, s, rngs[s])
     tier = tight.tier
     assert tested == reference
-    assert tier.counts["loaded_blocks"] >= 8 and any(c[0] == "load" for c in tier.calls)
+    assert tier.counts["loaded_blocks"] >= 8 and promoted() > 0     # promotions, and recomputed blocks into place
     assert tight.stats()["testing.toy_tier.loads"] == tier.counts["loads"]
     tight.close()
+
+
+def _count_promote_into_place(engine: Engine):
+    """Count the blocks `publish` promotes into place: the count, as a function."""
+    publish, promote, n = engine.state.publish, engine.state.index.promote, [0]
+
+    def publishing(seq):
+        engine.state.index.promote = lambda entries, *a: (n.__setitem__(0, n[0] + len(entries)), promote(entries,
+                                                                                                         *a))[1]
+        publish(seq)
+        engine.state.index.promote = promote
+    engine.state.publish = publishing
+    return lambda: n[0]
 
 
 def _closed_loop(engine: Engine, conversations: int, turns: int, aborts: int = 0, start: int = 20
                  ) -> tuple[list, dict]:
     """`conversations` clients, each sending its next turn once its previous answer is done, all at once: the steps
     (slots and tokens per row) and every answer. The first `aborts` requests found load-gated are aborted and sent
-    again. Counts the blocks promoted into place in `engine.promoted`."""
-    steps, schedule, publish, promote = [], engine.sched.schedule, engine.state.publish, engine.state.index.promote
-    engine.promoted = 0
+    again. Counts the blocks promoted into place in `engine.promoted()`."""
+    steps, schedule = [], engine.sched.schedule
+    engine.promoted = _count_promote_into_place(engine)
 
     def recorded():
         out = schedule()
         if out is not None:
             steps.append((out[0].slots.tolist(), out[0].n_query.tolist()))
         return out
-
-    def publishing(seq):
-        engine.state.index.promote = lambda entries, *a: (setattr(engine, "promoted", engine.promoted + len(entries)),
-                                                          promote(entries, *a))[1]
-        publish(seq)
-        engine.state.index.promote = promote
-    engine.sched.schedule, engine.state.publish = recorded, publishing
+    engine.sched.schedule = recorded
     rng, history, answers, live = random.Random(7), {}, {}, {}
     for c in range(conversations):
         history[c] = [rng.randrange(128) for _ in range(rng.randrange(start, start + 40))]
@@ -141,7 +156,7 @@ def test_steps_and_outputs_never_depend_on_when_copies_land(tiny, monkeypatch):
         counts = engine.tier.counts
         assert counts["dropped"] and not engine.tier.untold()
         if delay:            # promotions trimmed short of units, recomputed blocks promoted into place; loads of
-            assert min(engine.promoted, counts["abandoned"], counts["waiterless"]) > 0      # aborted requests
+            assert min(engine.promoted(), counts["abandoned"], counts["waiterless"]) > 0    # aborted requests
         engine.close()
     assert runs[0] == runs[1] == runs[2]
     assert runs[3][0] != runs[0][0]                     # the gate (a due time two launches out) moved steps

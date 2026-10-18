@@ -466,14 +466,6 @@ def _overwrite(state, ledger, n):
 
 
 def test_clear_leaves_requests_their_units_and_loads_with_any_lru_order():
-    state, ledger, _ = _state()                              # no tier: a match moves block 0 behind block 1
-    a = _admit(state, range(1, 18))
-    _run_through(state, ledger, a, 16)
-    state.release(a)
-    b = _admit(state, list(range(1, 9)) + [99] * 9)
-    assert b.num_computed == EVERY
-    state.index.clear()
-    assert not state.index.entries and ledger.pool("state.kv").num_free == 64 - len(state.held[b.slot]["kv"])
     state, ledger, deferred, tier = _tiered(kv_units=8)
     _demoted(state, ledger, range(1, 18), 16)
     _overwrite(state, ledger, 30)
@@ -482,6 +474,14 @@ def test_clear_leaves_requests_their_units_and_loads_with_any_lru_order():
     assert tier.counts["abandoned"] == 0 and _launch(state, ledger, [(b, 1)]) == [16]
     deferred.drain()
     assert _kv(state, ledger, b, 16) == list(range(1, 17)) and not state.index.lower
+    state, ledger, _ = _state()                              # no tier: a match moves block 0 behind block 1
+    a = _admit(state, range(1, 18))
+    _run_through(state, ledger, a, 16)
+    state.release(a)
+    b = _admit(state, list(range(1, 9)) + [99] * 9)
+    assert b.num_computed == EVERY
+    state.index.clear()
+    assert not state.index.entries and ledger.pool("state.kv").num_free == 64 - len(state.held[b.slot]["kv"])
 
 
 def test_a_hit_is_trimmed_to_its_units_and_to_payloads_the_tier_still_holds():
@@ -542,7 +542,9 @@ def test_a_joining_request_waits_for_the_load_and_an_eviction_store_after_it():
     b = _admit(state, range(1, 18))
     state.release(b)
     _launch(state, ledger, [(_admit(state, [7] * 5), 1)])    # a launch: the tier hears b's load has no reader
-    for key in state.index.loads[next(iter(state.index.loads))][1]:
+    unread = [keys for _, keys, _ in state.index.loads.values() if keys]
+    assert len(unread) == 1, "b's page load is read by a step that never waited for it"
+    for key in unread[0]:
         tier._evict((key, None))                             # and drops their copies: they stay resident, unheld
     state.index.poll()
     state.index.evict("kv", 64)                              # eviction stores, after the load into those units
