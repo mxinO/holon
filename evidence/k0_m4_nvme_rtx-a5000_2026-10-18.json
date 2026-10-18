@@ -1,0 +1,911 @@
+{
+ "runs": [
+  {
+   "command": "bench.py --tag rtx-a5000 --only m4 --out-dir <repo>/evidence --nvme-dir <repo>/local/tmp/k-build/km24 --storage network filesystem --read-gib 8 --write-gib 4",
+   "date": "2026-10-18",
+   "env": {
+    "gpu": "NVIDIA RTX A5000",
+    "sm": "8.6",
+    "torch": "2.11.0+cu130",
+    "torch_cuda": "13.0",
+    "python": "3.12.13",
+    "commit": "8c37948a9049349260edd09fae914afba31df432",
+    "dirty": true,
+    "cuda_visible_devices": "5"
+   }
+  }
+ ],
+ "tag": "rtx-a5000",
+ "env": {
+  "gpu": "NVIDIA RTX A5000",
+  "sm": "8.6",
+  "torch": "2.11.0+cu130",
+  "torch_cuda": "13.0",
+  "python": "3.12.13",
+  "commit": "8c37948a9049349260edd09fae914afba31df432",
+  "dirty": true,
+  "cuda_visible_devices": "5"
+ },
+ "predictions": {
+  "m2": {
+   "blob_h2d_gbps": {
+    "rtx-5080": [
+     46.6,
+     48.4
+    ],
+    "rtx-5090": [
+     46.6,
+     48.4
+    ],
+    "rtx-a5000": [
+     22.0,
+     26.0
+    ],
+    "note": "one big copy from S2 host memory; X's M1 46.6-48.4 (47.5 nominal)"
+   },
+   "blob_d2h_gbps": {
+    "rtx-5080": [
+     45.0,
+     53.0
+    ],
+    "rtx-5090": [
+     45.0,
+     53.0
+    ],
+    "rtx-a5000": [
+     22.0,
+     26.0
+    ]
+   },
+   "loop_fragmented_34816": "<= 0.5x blob and host-bound; 5-10 us of host time per chunk (0.15-0.3 s for a fragmented 32K load of 32,768 chunks; the design says ~0.3 s)",
+   "batch_fragmented_34816": "0.7-0.95x blob (uncertain); >= 0.9x at 65,536 B and >= 3 MiB; host time 0.1-0.3 us per chunk",
+   "sm_fragmented_34816": "gather H2D >= 0.9x blob with 8-32 CTAs; scatter D2H to mapped host >= 0.8x"
+  },
+  "m3": {
+   "h2d_loads": "decode step median slowdown <= 5% with 0.5-2 GB H2D loads in flight (copy-engine DMA plus ~5% of DRAM bandwidth), p90 <= 15% (3b's bar: 1.1x median, 1.2x p90)",
+   "d2h_stores": "154 MB D2H stores at the answer rate cost < 0.5% of decode (write-through stays default unless stores cost > 2%)"
+  },
+  "m4": {
+   "bar_desktops": "O_DIRECT reads of 557,056 B units 1.6-2.2 GB/s at 1 thread, 2.4-2.8 GB/s at 2, no gain past 2-3; burst writes 1.5-3 GB/s; sustained past SLC 0.5-1.5 GB/s; buffered reads slower or equal with DONTNEED; measured mixed throughput within 15% of the modelled shared lane; per-segment checkpoint iovecs (48 segments) within 10% of the unit rate; engine-loop slowdown beside 2 I/O threads < 3% (preadv releases the GIL)",
+   "read_1t_gbps": [
+    1.6,
+    2.2
+   ],
+   "read_2t_gbps": [
+    2.4,
+    2.8
+   ],
+   "burst_write_gbps": [
+    1.5,
+    3.0
+   ],
+   "sustained_write_gbps": [
+    0.5,
+    1.5
+   ],
+   "mixed_vs_model": 0.15,
+   "segments_vs_unit": 0.1,
+   "loop_slowdown_2t": 0.03
+  }
+ },
+ "decision_rules": {
+  "read_2t": "STOP if the 2-thread O_DIRECT read rate of 557,056 B units is < 1.75 GB/s (bar desktops)",
+  "mixed": "STOP if the measured mixed rate is off the modelled shared-lane rate by > 15% (bar desktops)",
+  "copy": "STOP if neither cudaMemcpyBatchAsync nor the SM gather reaches 0.8x of the blob rate on fragmented 34,816 B chunks (bar desktops)",
+  "stores": "STOP if 154 MB stores cost > 2% of decode at the answer rate (bar desktops)"
+ },
+ "m4": {
+  "storage": "network filesystem",
+  "alignment": {
+   "sizes": {
+    "kv_27b_q8_0_layer_chunk": {
+     "bytes": 34816,
+     "mod_512": 0,
+     "mod_4096": 2048
+    },
+    "kv_27b_unit_major_unit": {
+     "bytes": 557056,
+     "mod_512": 0,
+     "mod_4096": 0
+    },
+    "kv_8b_bf16_layer_chunk": {
+     "bytes": 65536,
+     "mod_512": 0,
+     "mod_4096": 0
+    },
+    "gdn_conv_segment": {
+     "bytes": 61440,
+     "mod_512": 0,
+     "mod_4096": 0
+    },
+    "gdn_ssm_segment": {
+     "bytes": 3145728,
+     "mod_512": 0,
+     "mod_4096": 0
+    },
+    "gdn_conv_unit": {
+     "bytes": 2949120,
+     "mod_512": 0,
+     "mod_4096": 0
+    },
+    "gdn_ssm_unit": {
+     "bytes": 150994944,
+     "mod_512": 0,
+     "mod_4096": 0
+    }
+   },
+   "direct_probe": {
+    "len_4096k": true,
+    "len_512k": true,
+    "off_512k": true
+   }
+  },
+  "read_file_how": "fallocate",
+  "read_file_bytes": 8455716864,
+  "fill_gbps": 1.1628011433018401,
+  "write_file_how": "fallocate",
+  "rows": [
+   {
+    "kind": "read",
+    "mode": "direct",
+    "shape": "unit_557056",
+    "threads": 1,
+    "gbps": 0.3819286030974908,
+    "bytes": 764280832,
+    "seconds": 2.0011091753840446,
+    "ops": 1372,
+    "lat_p50_ms": 1.2549050152301788,
+    "lat_p99_ms": 5.780801177024841
+   },
+   {
+    "kind": "read",
+    "mode": "direct",
+    "shape": "unit_557056",
+    "threads": 2,
+    "gbps": 0.7152769730905706,
+    "bytes": 1432190976,
+    "seconds": 2.0022886656224728,
+    "ops": 2571,
+    "lat_p50_ms": 1.49540975689888,
+    "lat_p99_ms": 2.8049908578395844
+   },
+   {
+    "kind": "read",
+    "mode": "direct",
+    "shape": "unit_557056",
+    "threads": 3,
+    "gbps": 0.834863154769091,
+    "bytes": 1672282112,
+    "seconds": 2.003061342984438,
+    "ops": 3002,
+    "lat_p50_ms": 1.9290447235107422,
+    "lat_p99_ms": 3.447316586971283
+   },
+   {
+    "kind": "read",
+    "mode": "direct",
+    "shape": "unit_557056",
+    "threads": 4,
+    "gbps": 0.9472941227109676,
+    "bytes": 1896775680,
+    "seconds": 2.002309139817953,
+    "ops": 3405,
+    "lat_p50_ms": 2.2210031747817993,
+    "lat_p99_ms": 4.824239760637283
+   },
+   {
+    "kind": "read",
+    "mode": "direct",
+    "shape": "ssm_48x3MiB",
+    "threads": 1,
+    "gbps": 1.6283355958439074,
+    "bytes": 3321888768,
+    "seconds": 2.040051680058241,
+    "ops": 22,
+    "lat_p50_ms": 93.62849965691566,
+    "lat_p99_ms": 112.25350573658943
+   },
+   {
+    "kind": "read",
+    "mode": "direct",
+    "shape": "ssm_48x3MiB",
+    "threads": 2,
+    "gbps": 1.582668535308277,
+    "bytes": 3321888768,
+    "seconds": 2.0989162884652615,
+    "ops": 22,
+    "lat_p50_ms": 189.71212580800056,
+    "lat_p99_ms": 218.22400018572807
+   },
+   {
+    "kind": "read",
+    "mode": "direct",
+    "shape": "ssm_one_iovec",
+    "threads": 1,
+    "gbps": 1.5113338168346542,
+    "bytes": 3170893824,
+    "seconds": 2.098076406866312,
+    "ops": 21,
+    "lat_p50_ms": 92.73577854037285,
+    "lat_p99_ms": 170.49342393875122
+   },
+   {
+    "kind": "read",
+    "mode": "direct",
+    "shape": "ssm_one_iovec",
+    "threads": 2,
+    "gbps": 1.4616188431135655,
+    "bytes": 3170893824,
+    "seconds": 2.1694396175444126,
+    "ops": 21,
+    "lat_p50_ms": 201.70355588197708,
+    "lat_p99_ms": 228.86699810624123
+   },
+   {
+    "kind": "read",
+    "mode": "direct",
+    "shape": "conv_48x61440",
+    "threads": 1,
+    "gbps": 1.002100722119354,
+    "bytes": 2005401600,
+    "seconds": 2.0011976398527622,
+    "ops": 680,
+    "lat_p50_ms": 2.8406307101249695,
+    "lat_p99_ms": 5.514621734619141
+   },
+   {
+    "kind": "read",
+    "mode": "direct",
+    "shape": "conv_48x61440",
+    "threads": 2,
+    "gbps": 1.0606493966954214,
+    "bytes": 2126315520,
+    "seconds": 2.004729863256216,
+    "ops": 721,
+    "lat_p50_ms": 5.105912685394287,
+    "lat_p99_ms": 11.72228530049324
+   },
+   {
+    "kind": "read",
+    "mode": "buffered_dontneed",
+    "shape": "unit_557056",
+    "threads": 1,
+    "gbps": 0.3058139869696176,
+    "bytes": 612204544,
+    "seconds": 2.001885361969471,
+    "ops": 1099,
+    "lat_p50_ms": 1.7943494021892548,
+    "lat_p99_ms": 2.6533342897892
+   },
+   {
+    "kind": "read",
+    "mode": "buffered_dontneed",
+    "shape": "unit_557056",
+    "threads": 2,
+    "gbps": 0.49798746776267033,
+    "bytes": 997130240,
+    "seconds": 2.002319946885109,
+    "ops": 1790,
+    "lat_p50_ms": 2.205941826105118,
+    "lat_p99_ms": 3.987744450569153
+   },
+   {
+    "kind": "read",
+    "mode": "buffered_dontneed",
+    "shape": "unit_557056",
+    "threads": 3,
+    "gbps": 0.6655397445479289,
+    "bytes": 1332477952,
+    "seconds": 2.002101246267557,
+    "ops": 2392,
+    "lat_p50_ms": 2.53855437040329,
+    "lat_p99_ms": 4.214949905872345
+   },
+   {
+    "kind": "read",
+    "mode": "buffered_dontneed",
+    "shape": "unit_557056",
+    "threads": 4,
+    "gbps": 0.7773703483826235,
+    "bytes": 1555857408,
+    "seconds": 2.001436524093151,
+    "ops": 2793,
+    "lat_p50_ms": 2.8281770646572113,
+    "lat_p99_ms": 6.222426891326904
+   },
+   {
+    "kind": "read",
+    "mode": "buffered_dontneed",
+    "shape": "ssm_48x3MiB",
+    "threads": 1,
+    "gbps": 0.3947005709925377,
+    "bytes": 905969664,
+    "seconds": 2.2953340597450733,
+    "ops": 6,
+    "lat_p50_ms": 381.462424993515,
+    "lat_p99_ms": 408.4368646144867
+   },
+   {
+    "kind": "read",
+    "mode": "buffered_dontneed",
+    "shape": "ssm_48x3MiB",
+    "threads": 2,
+    "gbps": 0.6722359313922189,
+    "bytes": 1509949440,
+    "seconds": 2.2461599707603455,
+    "ops": 10,
+    "lat_p50_ms": 446.9514489173889,
+    "lat_p99_ms": 465.763583779335
+   },
+   {
+    "kind": "read",
+    "mode": "buffered_dontneed",
+    "shape": "ssm_one_iovec",
+    "threads": 1,
+    "gbps": 0.4233024475563392,
+    "bytes": 905969664,
+    "seconds": 2.1402419693768024,
+    "ops": 6,
+    "lat_p50_ms": 360.3232428431511,
+    "lat_p99_ms": 397.4340856075287
+   },
+   {
+    "kind": "read",
+    "mode": "buffered_dontneed",
+    "shape": "ssm_one_iovec",
+    "threads": 2,
+    "gbps": 0.4507456493333907,
+    "bytes": 1056964608,
+    "seconds": 2.3449247032403946,
+    "ops": 7,
+    "lat_p50_ms": 592.513132840395,
+    "lat_p99_ms": 852.2317856550217
+   },
+   {
+    "kind": "read",
+    "mode": "buffered_dontneed",
+    "shape": "conv_48x61440",
+    "threads": 1,
+    "gbps": 0.3956238312079042,
+    "bytes": 793313280,
+    "seconds": 2.005221165716648,
+    "ops": 269,
+    "lat_p50_ms": 7.078688591718674,
+    "lat_p99_ms": 19.793495535850525
+   },
+   {
+    "kind": "read",
+    "mode": "buffered_dontneed",
+    "shape": "conv_48x61440",
+    "threads": 2,
+    "gbps": 0.6535324990070244,
+    "bytes": 1309409280,
+    "seconds": 2.00358709320426,
+    "ops": 444,
+    "lat_p50_ms": 8.90658050775528,
+    "lat_p99_ms": 12.828860431909561
+   },
+   {
+    "kind": "write",
+    "mode": "direct",
+    "shape": "unit_557056",
+    "threads": 1,
+    "gbps": 0.4364822029778616,
+    "bytes": 873463808,
+    "seconds": 2.001144152134657,
+    "ops": 1568,
+    "lat_p50_ms": 1.2642629444599152,
+    "lat_p99_ms": 1.7127282917499542
+   },
+   {
+    "kind": "write",
+    "mode": "direct",
+    "shape": "unit_557056",
+    "threads": 2,
+    "gbps": 0.6893710275579571,
+    "bytes": 1380384768,
+    "seconds": 2.002382915467024,
+    "ops": 2478,
+    "lat_p50_ms": 1.5284493565559387,
+    "lat_p99_ms": 2.872917801141739
+   },
+   {
+    "kind": "write",
+    "mode": "direct",
+    "shape": "unit_557056",
+    "threads": 3,
+    "gbps": 0.8903705995275017,
+    "bytes": 1782579200,
+    "seconds": 2.002064310014248,
+    "ops": 3200,
+    "lat_p50_ms": 1.7648525536060333,
+    "lat_p99_ms": 3.86703759431839
+   },
+   {
+    "kind": "write",
+    "mode": "direct",
+    "shape": "unit_557056",
+    "threads": 4,
+    "gbps": 1.009743973953083,
+    "bytes": 2021556224,
+    "seconds": 2.0020483173429966,
+    "ops": 3629,
+    "lat_p50_ms": 2.0680688321590424,
+    "lat_p99_ms": 4.056457430124283
+   },
+   {
+    "kind": "write",
+    "mode": "direct",
+    "shape": "ssm_48x3MiB",
+    "threads": 2,
+    "gbps": 1.5218393765432001,
+    "bytes": 3321888768,
+    "seconds": 2.1828116811811924,
+    "ops": 22,
+    "lat_p50_ms": 194.36023011803627,
+    "lat_p99_ms": 254.76038828492165
+   },
+   {
+    "kind": "write",
+    "mode": "direct",
+    "shape": "conv_48x61440",
+    "threads": 2,
+    "gbps": 1.0497293448411822,
+    "bytes": 2105671680,
+    "seconds": 2.0059186592698097,
+    "ops": 714,
+    "lat_p50_ms": 5.266644060611725,
+    "lat_p99_ms": 9.844686836004257
+   },
+   {
+    "kind": "write",
+    "mode": "buffered_dontneed",
+    "shape": "unit_557056",
+    "threads": 1,
+    "gbps": 0.8949256431157802,
+    "bytes": 1792049152,
+    "seconds": 2.002455919981003,
+    "ops": 3217,
+    "lat_p50_ms": 0.4692487418651581,
+    "lat_p99_ms": 1.4297626912593842
+   },
+   {
+    "kind": "write",
+    "mode": "buffered_dontneed",
+    "shape": "unit_557056",
+    "threads": 2,
+    "gbps": 1.2771588386320822,
+    "bytes": 2568028160,
+    "seconds": 2.0107351429760456,
+    "ops": 4610,
+    "lat_p50_ms": 0.6232820451259613,
+    "lat_p99_ms": 6.07633963227272
+   }
+  ],
+  "c_reference": [
+   {
+    "kind": "read",
+    "threads": 1,
+    "gbps": 0.3981208307640072,
+    "ops": 1431.0,
+    "seconds": 2.002274371
+   },
+   {
+    "kind": "read",
+    "threads": 2,
+    "gbps": 0.6831342817683784,
+    "ops": 2454.0,
+    "seconds": 2.001093285
+   },
+   {
+    "kind": "write",
+    "threads": 2,
+    "gbps": 0.6677894794494844,
+    "ops": 2398.0,
+    "seconds": 2.000361385
+   }
+  ],
+  "mixed": [
+   {
+    "read_share_target": 0.5,
+    "threads_each": 2,
+    "read_share": 0.4997415130105118,
+    "read": {
+     "gbps": 0.5374773356251309,
+     "bytes": 1615462400,
+     "seconds": 3.0056381784379482,
+     "ops": 2900,
+     "lat_p50_ms": 1.92255899310112,
+     "lat_p99_ms": 3.7155188620090485
+    },
+    "write": {
+     "gbps": 0.5384143147978061,
+     "bytes": 1617133568,
+     "seconds": 3.003511466085911,
+     "ops": 2903,
+     "lat_p50_ms": 1.9571073353290558,
+     "lat_p99_ms": 3.7147998809814453
+    },
+    "measured_gbps": 1.0755106822871154,
+    "model_gbps": 0.70262480204479,
+    "measured_over_model": 1.5307041242454678,
+    "model_inputs": {
+     "read": 0.7152576179554453,
+     "write": 0.6904428640964102
+    }
+   },
+   {
+    "read_share_target": 0.75,
+    "threads_each": 2,
+    "read_share": 0.7496945010183299,
+    "read": {
+     "gbps": 0.6819935678329445,
+     "bytes": 2050523136,
+     "seconds": 3.006660521030426,
+     "ops": 3681,
+     "lat_p50_ms": 1.5243589878082275,
+     "lat_p99_ms": 3.0608251690864563
+    },
+    "write": {
+     "gbps": 0.227945844391081,
+     "bytes": 684621824,
+     "seconds": 3.0034406892955303,
+     "ops": 1229,
+     "lat_p50_ms": 2.0464546978473663,
+     "lat_p99_ms": 3.6206692457199097
+    },
+    "measured_gbps": 0.9096953050963752,
+    "model_gbps": 0.7088804825819578,
+    "measured_over_model": 1.2832844568988397,
+    "model_inputs": {
+     "read": 0.7152576179554453,
+     "write": 0.6904428640964102
+    }
+   },
+   {
+    "read_share_target": null,
+    "threads_each": 2,
+    "read_share": 0.5074754378470739,
+    "read": {
+     "gbps": 0.44025718889383547,
+     "bytes": 1323565056,
+     "seconds": 3.0063451305031776,
+     "ops": 2376,
+     "lat_p50_ms": 2.201307564973831,
+     "lat_p99_ms": 10.283347219228745
+    },
+    "write": {
+     "gbps": 0.4276706357628855,
+     "bytes": 1284571136,
+     "seconds": 3.0036458633840084,
+     "ops": 2306,
+     "lat_p50_ms": 2.231210470199585,
+     "lat_p99_ms": 9.290225803852081
+    },
+    "measured_gbps": 0.8675438377108323,
+    "model_gbps": 0.7028167065779459,
+    "measured_over_model": 1.234381353760004,
+    "model_inputs": {
+     "read": 0.7152576179554453,
+     "write": 0.6904428640964102
+    }
+   },
+   {
+    "read_share_target": 0.5,
+    "threads_each": 1,
+    "read_share": 0.5,
+    "read": {
+     "gbps": 0.3363521716145462,
+     "bytes": 1011056640,
+     "seconds": 3.005946520715952,
+     "ops": 1815,
+     "lat_p50_ms": 1.3500005006790161,
+     "lat_p99_ms": 4.122525453567505
+    },
+    "write": {
+     "gbps": 0.3364174207054856,
+     "bytes": 1011056640,
+     "seconds": 3.0053635090589523,
+     "ops": 1815,
+     "lat_p50_ms": 1.523774117231369,
+     "lat_p99_ms": 5.099035799503326
+    },
+    "measured_gbps": 0.6727043432290924,
+    "model_gbps": 0.4548276730841406,
+    "measured_over_model": 1.479031253018428,
+    "model_inputs": {
+     "read": 0.5230307574554379,
+     "write": 0.4023600232860269
+    }
+   }
+  ],
+  "gil": {
+   "body_iters": 42568,
+   "rows": [
+    {
+     "mode": "busy",
+     "io_threads": 1,
+     "io_kind": "read",
+     "alone_ms": {
+      "p50": 3.0266717076301575,
+      "mean": 3.2460116098324456,
+      "p10": 2.969350665807724,
+      "p90": 4.168964922428131,
+      "n": 150
+     },
+     "body_ms": {
+      "p50": 2.942178398370743,
+      "mean": 3.888554945588112,
+      "p10": 2.8087198734283447,
+      "p90": 4.688084125518799,
+      "n": 150
+     },
+     "slowdown_p50": -0.027916245110564675,
+     "slowdown_mean": 0.1979485636494176,
+     "io_gbps_during": 0.24303090804956365
+    },
+    {
+     "mode": "busy",
+     "io_threads": 2,
+     "io_kind": "read",
+     "alone_ms": {
+      "p50": 2.928914502263069,
+      "mean": 3.335550477107366,
+      "p10": 2.872742712497711,
+      "p90": 4.258159548044205,
+      "n": 150
+     },
+     "body_ms": {
+      "p50": 2.878015860915184,
+      "mean": 2.892857243617376,
+      "p10": 2.411153167486191,
+      "p90": 3.2069124281406403,
+      "n": 150
+     },
+     "slowdown_p50": -0.017377988093731478,
+     "slowdown_mean": -0.13271969245505155,
+     "io_gbps_during": 0.3780599918520678
+    },
+    {
+     "mode": "busy",
+     "io_threads": 3,
+     "io_kind": "read",
+     "alone_ms": {
+      "p50": 3.0999109148979187,
+      "mean": 3.1191868086655936,
+      "p10": 2.485319972038269,
+      "p90": 4.209019243717194,
+      "n": 150
+     },
+     "body_ms": {
+      "p50": 4.280531778931618,
+      "mean": 4.2970431844393415,
+      "p10": 4.11783903837204,
+      "p90": 4.457816481590271,
+      "n": 150
+     },
+     "slowdown_p50": 0.3808563847301971,
+     "slowdown_mean": 0.37761649045881995,
+     "io_gbps_during": 0.3813277047318789
+    },
+    {
+     "mode": "busy",
+     "io_threads": 4,
+     "io_kind": "read",
+     "alone_ms": {
+      "p50": 4.418494179844856,
+      "mean": 4.427579566836357,
+      "p10": 4.286438226699829,
+      "p90": 4.582222551107407,
+      "n": 150
+     },
+     "body_ms": {
+      "p50": 4.431247711181641,
+      "mean": 4.351058602333069,
+      "p10": 3.6117658019065857,
+      "p90": 4.889652132987976,
+      "n": 150
+     },
+     "slowdown_p50": 0.002886397677054786,
+     "slowdown_mean": -0.01728279827571,
+     "io_gbps_during": 0.4529043013211466
+    },
+    {
+     "mode": "busy",
+     "io_threads": 2,
+     "io_kind": "write",
+     "alone_ms": {
+      "p50": 4.464313387870789,
+      "mean": 4.422570765018463,
+      "p10": 4.193365573883057,
+      "p90": 4.539337009191513,
+      "n": 150
+     },
+     "body_ms": {
+      "p50": 4.425499588251114,
+      "mean": 4.093414023518562,
+      "p10": 2.517852932214737,
+      "p90": 4.948023706674576,
+      "n": 150
+     },
+     "slowdown_p50": -0.008694237220247314,
+     "slowdown_mean": -0.07442656296275829,
+     "io_gbps_during": 0.23784025595136363
+    },
+    {
+     "mode": "busy",
+     "io_threads": 2,
+     "io_kind": "read (C threads)",
+     "alone_ms": {
+      "p50": 4.651566967368126,
+      "mean": 4.501845811804135,
+      "p10": 4.267416894435883,
+      "p90": 4.870064556598663,
+      "n": 150
+     },
+     "body_ms": {
+      "p50": 2.9942505061626434,
+      "mean": 3.3704867213964462,
+      "p10": 2.6495009660720825,
+      "p90": 4.391103982925415,
+      "n": 150
+     },
+     "slowdown_p50": -0.35629207809582464,
+     "slowdown_mean": -0.2513100487451594,
+     "io_gbps_during": 0.7459327554360027
+    },
+    {
+     "mode": "step_15ms",
+     "io_threads": 1,
+     "io_kind": "read",
+     "alone_ms": {
+      "p50": 3.2137781381607056,
+      "mean": 3.9634408429265022,
+      "p10": 3.034450113773346,
+      "p90": 4.15995717048645,
+      "n": 100
+     },
+     "body_ms": {
+      "p50": 4.043057560920715,
+      "mean": 3.844020664691925,
+      "p10": 2.8302520513534546,
+      "p90": 4.392795264720917,
+      "n": 100
+     },
+     "slowdown_p50": 0.25803879020554255,
+     "slowdown_mean": -0.030130430342540593,
+     "io_gbps_during": 0.41914953314507836
+    },
+    {
+     "mode": "step_15ms",
+     "io_threads": 2,
+     "io_kind": "read",
+     "alone_ms": {
+      "p50": 3.8784611970186234,
+      "mean": 3.8658856227993965,
+      "p10": 2.9900148510932922,
+      "p90": 4.424549639225006,
+      "n": 100
+     },
+     "body_ms": {
+      "p50": 2.5895480066537857,
+      "mean": 2.7909690514206886,
+      "p10": 2.4314597249031067,
+      "p90": 4.087083041667938,
+      "n": 100
+     },
+     "slowdown_p50": -0.33232592125857197,
+     "slowdown_mean": -0.2780518298418593,
+     "io_gbps_during": 0.7250049208716807
+    },
+    {
+     "mode": "step_15ms",
+     "io_threads": 3,
+     "io_kind": "read",
+     "alone_ms": {
+      "p50": 2.7395766228437424,
+      "mean": 2.8312477096915245,
+      "p10": 2.4965330958366394,
+      "p90": 3.3262446522712708,
+      "n": 100
+     },
+     "body_ms": {
+      "p50": 2.6174746453762054,
+      "mean": 2.7225706726312637,
+      "p10": 2.393178641796112,
+      "p90": 3.016941249370575,
+      "n": 100
+     },
+     "slowdown_p50": -0.04456965227743559,
+     "slowdown_mean": -0.03838485650275425,
+     "io_gbps_during": 0.8397736774747923
+    },
+    {
+     "mode": "step_15ms",
+     "io_threads": 4,
+     "io_kind": "read",
+     "alone_ms": {
+      "p50": 3.1129885464906693,
+      "mean": 3.066992424428463,
+      "p10": 2.6472285389900208,
+      "p90": 3.4916065633296967,
+      "n": 100
+     },
+     "body_ms": {
+      "p50": 2.9247626662254333,
+      "mean": 3.0891913175582886,
+      "p10": 2.7272291481494904,
+      "p90": 3.6136172711849213,
+      "n": 100
+     },
+     "slowdown_p50": -0.060464687696145436,
+     "slowdown_mean": 0.007238000639653519,
+     "io_gbps_during": 0.8689871088876576
+    },
+    {
+     "mode": "step_15ms",
+     "io_threads": 2,
+     "io_kind": "write",
+     "alone_ms": {
+      "p50": 3.1430628150701523,
+      "mean": 3.098074197769165,
+      "p10": 2.8637051582336426,
+      "p90": 3.1946860253810883,
+      "n": 100
+     },
+     "body_ms": {
+      "p50": 2.8704311698675156,
+      "mean": 2.8373752534389496,
+      "p10": 2.6551522314548492,
+      "p90": 2.9364190995693207,
+      "n": 100
+     },
+     "slowdown_p50": -0.08674075614888777,
+     "slowdown_mean": -0.08414870906511451,
+     "io_gbps_during": 0.5842057173277995
+    },
+    {
+     "mode": "step_15ms",
+     "io_threads": 2,
+     "io_kind": "read (C threads)",
+     "alone_ms": {
+      "p50": 3.1483974307775497,
+      "mean": 3.0963628366589546,
+      "p10": 2.9497966170310974,
+      "p90": 3.176022320985794,
+      "n": 100
+     },
+     "body_ms": {
+      "p50": 2.8525441884994507,
+      "mean": 2.7988119050860405,
+      "p10": 2.511247992515564,
+      "p90": 2.893000841140747,
+      "n": 100
+     },
+     "slowdown_p50": -0.09396947138437761,
+     "slowdown_mean": -0.09609691992492009,
+     "io_gbps_during": 0.7599870435669426
+    }
+   ]
+  },
+  "sustained": {
+   "skipped": "less than 20 GiB writable while leaving 20% of the filesystem free"
+  },
+  "test_file_removed": true
+ },
+ "verdicts": {
+  "read_2t_gbps": 0.7152769730905706,
+  "read_2t_rule": "n/a (dev reference)",
+  "mixed_over_model": [
+   1.5307041242454678,
+   1.2832844568988397
+  ],
+  "mixed_rule": "n/a (dev reference)",
+  "ssm_segments_over_one_iovec_2t": 1.0828189187386565,
+  "ssm_segments_over_unit_2t": 2.2126652958921333
+ },
+ "notes": {
+  "worktree": "holon imported from the main checkout at b5b1e7f (clean core); this spike's files from the K worktree",
+  "environment": "development host, the main checkout's .venv"
+ }
+}

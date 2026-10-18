@@ -1,7 +1,7 @@
 """Backend-agnostic trace replay with client-side timing (stdlib-only: runs inside every backend's environment).
 
 The driver owns the clock: it releases requests at their arrival times (or `gap` after the turn they continue, or
-`arrival` after the session they follow, `after`),
+`arrival` after the session they follow, `after`, or round-robin per `client`: `bench/workloads.py`),
 calls `Backend.step()` while work is in flight, and timestamps every token when `step()` hands it back — so an
 engine that reports a token one step late (overlap scheduling) is charged for it, as a client would be. A request's
 row keeps its first and last token times and its largest inter-token gap (between two steps that hand it tokens;
@@ -72,8 +72,14 @@ def replay(backend: Backend, sessions: list[dict], salt: str,
     system = tokens(salt, "system", max(s["system"] for s in sessions), corpus)
     by_id = {s["id"]: s for s in sessions}
     new = {s["id"]: appends(salt, s, corpus) for s in sessions}
-    ready = [(s["arrival"], s["id"], 0, []) for s in sessions if "after" not in s]   # (release, sid, turn, history)
+    clients: dict[int, list[int]] = {}                # client -> its sessions, served round-robin
+    for s in sessions:
+        clients.setdefault(s.get("client"), []).append(s["id"])
+    clients.pop(None)
+    ready = [(s["arrival"], s["id"], 0, []) for s in sessions if "after" not in s     # (release, sid, turn, history)
+             and ("client" not in s or clients[s["client"]][0] == s["id"])]
     followers = {s["after"]: s for s in sessions if "after" in s}
+    parked: dict[int, tuple[int, list[int]]] = {}    # a client's session between turns: (next turn, history)
     heapq.heapify(ready)
     live: dict[int, Request] = {}
     done: list[Request] = []
@@ -111,7 +117,16 @@ def replay(backend: Backend, sessions: list[dict], salt: str,
             if finished:
                 done.append(live.pop(rid))
                 s = by_id[r.sid]
-                if r.turn + 1 < len(s["turns"]):
+                if "client" in s:                    # the client's next session in turn sends its next turn
+                    parked[r.sid] = (r.turn + 1, r.prompt + r.generated)
+                    order = clients[s["client"]]
+                    at = order.index(r.sid)
+                    for sid in order[at + 1:] + order[:at + 1]:
+                        turn_, history = parked.get(sid, (0, []))
+                        if turn_ < len(by_id[sid]["turns"]):
+                            heapq.heappush(ready, (r.last + by_id[sid]["turns"][turn_]["gap"], sid, turn_, history))
+                            break
+                elif r.turn + 1 < len(s["turns"]):
                     nxt = s["turns"][r.turn + 1]
                     heapq.heappush(ready, (r.last + nxt["gap"], r.sid, r.turn + 1, r.prompt + r.generated))
                 elif (f := followers.get(r.sid)) is not None:

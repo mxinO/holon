@@ -61,6 +61,12 @@ rejects temperature 0, so it samples at 1e-5 (argmax in practice); the others ar
   25.8K tokens. Run with `--corpus` and the client's `--temperature 1.0`.
 - **long_prompt**: three streams decoding from t=0 (prompt 256, output 1024), then a 30,000-token prompt (output 32)
   at t = 2 s: how long the streams stall behind its prefill (their max inter-token gap), and its TTFT behind them.
+- **agent_park**: parked agent conversations, milestone K's gate trace (`docs/v1-kv-tiers.md` §8): four closed-loop
+  clients each serve three sessions round-robin (`client`), one request at a time, so a session's state is parked
+  while its client's other sessions take a turn. The 12 sessions share a 4,096-token system prompt and open with a
+  512-token task; then 10–14 turns each add a tool result (log-normal, median 384, σ 0.6, ≤ 2K) to an output of
+  reasoning plus a tool call (median 300, σ 0.6, ≤ 2K), after a gap of 0.5–3 s. 159 requests; contexts end at
+  12.2–19.6K tokens, ≈ 137K distinct tokens at the end.
 
 With `--corpus`, prompts are spans of natural text: the system prompt from a seeded offset, and each session's turns
 one walk through the text outside it from the session's own offset, so no context repeats a span of itself. Records

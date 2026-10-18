@@ -1,11 +1,13 @@
 """Deterministic benchmark workloads, stored as JSONL token-length specs (one session per line).
 
 A session is a list of turns, released at `arrival` seconds, or with `after` that many seconds after session `after`'s
-last turn finished (a closed loop: one client running sessions one after another). Turn 0's prompt is `system` tokens
-shared by every session of the trace followed by `append` tokens of its own; turn i > 0 is released `gap` seconds
-after turn i-1 finished and its prompt is turn i-1's prompt + the tokens turn i-1 generated + `append` new tokens (a
-tool result and/or user message). Every turn generates exactly `output` tokens (ignore_eos). A plain request is a
-one-turn session without a system prompt.
+last turn finished (a closed loop: one client running sessions one after another). Sessions with a `client` are served
+round-robin by that client, one request at a time: its first session starts at `arrival`, and when a request of it
+finishes, its next session in turn (by id, skipping finished ones) sends its next turn `gap` seconds later. Turn 0's
+prompt is `system` tokens shared by every session of the trace followed by `append` tokens of its own; turn i > 0 is
+released `gap` seconds after turn i-1 finished and its prompt is turn i-1's prompt + the tokens turn i-1 generated +
+`append` new tokens (a tool result and/or user message). Every turn generates exactly `output` tokens (ignore_eos).
+A plain request is a one-turn session without a system prompt.
 
 Specs hold lengths only; token ids are drawn at replay time from a seeded stream (`tokens`), so every backend sees
 the same prompts: uniform ids by default, or spans of a natural-text corpus (`corpus`: a judge prompt set's token
@@ -108,6 +110,24 @@ def agent(sessions: int, rate: float, seed: int, system: int = 1536, later: tupl
     return out
 
 
+def agent_park(clients: int, per_client: int, seed: int, system: int = 4096) -> list[dict]:
+    """Parked agent conversations (docs/v1-kv-tiers.md §8): `clients` closed-loop clients each serve `per_client`
+    sessions round-robin, so a session waits while its client's other sessions take a turn and its state is parked.
+    The sessions share a `system`-token prompt and open with a 512-token task; then 10–14 turns each add a tool result
+    (log-normal, median 384, σ 0.6, at most 2K) to an output of reasoning plus a tool call (median 300, σ 0.6, at most
+    2K, resent verbatim), after a gap of 0.5–3 s. Contexts end at ≈ 13–19K tokens."""
+    rng, out = random.Random(seed), []
+    for c in range(clients):
+        for k in range(per_client):
+            turns = [turn(512, _lognormal(rng, 300, 0.6, 16, 2048))]
+            for _ in range(rng.randint(10, 14)):
+                turns.append(turn(_lognormal(rng, 384, 0.6, 16, 2048), _lognormal(rng, 300, 0.6, 16, 2048),
+                                  rng.uniform(0.5, 3.0)))
+            out.append({"id": c * per_client + k, "arrival": round(2.0 * c, 4), "system": system, "client": c,
+                        "turns": turns})
+    return out
+
+
 def lanes(sessions: list[dict], n: int, seed: int) -> list[dict]:
     """`n` clients each running its share of `sessions` one after another (closed loop): session i starts after
     session i - n has finished and a pause (exponential, mean 2 s); the first n start 5 s apart. However fast the
@@ -149,6 +169,8 @@ def main() -> None:
     traces["claude_code"] = lanes(agent(16, 0.025, args.seed, system=16384, later=(10, 16)), 2, args.seed)
     # Three streams fit every lock (max_seqs >= 4); 30k tokens fit a 32k context (M0.5's 36 s stall, M0.7 D1).
     traces["long_prompt"] = long_prompt(3, 256, 1024, 30000, 2.0)
+    # Milestone K's gate trace: 12 parked conversations over 4 clients (docs/v1-kv-tiers.md §8).
+    traces["agent_park"] = agent_park(4, 3, args.seed)
     for name, sessions in traces.items():
         write(out / f"{name}.jsonl", sessions)
         turns = sum(len(s["turns"]) for s in sessions)

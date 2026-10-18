@@ -9,7 +9,11 @@ arguments parse, whether its text carries tool-call or reasoning markup, and whe
 (`openai_facts`). An OpenAI stream's TTFT assumes the server sends its first chunk with the first token, as Holon
 does; one that sends a role-only chunk first would read near zero. `--metrics` adds the prefix tokens the server
 saved for each request (its `/metrics` counter before and after; `null` when requests overlapped). `--raw` also
-keeps the bodies, for local inspection only.
+keeps the bodies, for local inspection only (never committed). With `--raw`, an OpenAI chat request is forwarded with
+`return_token_ids: true` (unless the client set it), and its raw line also keeps the generated token ids (choice 0's,
+the terminating token included) and the reported `usage`; the client then sees the stream's added `token_ids` fields
+and one chunk per engine delta (some with an empty delta). K-M1 (docs/v1-kv-tiers.md §8) chains it behind
+`bench/demo/pi_run.py`'s own proxy: `pi_run.py --server http://127.0.0.1:<this port>`.
 
 Usage:
   python bench/capture_proxy.py --upstream http://<server>:8000 --port 18080 --out <requests.jsonl> [--metrics]
@@ -163,6 +167,22 @@ def openai_facts(answer: bytes) -> dict:
     return out
 
 
+def openai_token_ids(answer: bytes) -> list[int]:
+    """The generated token ids of choice 0 of an OpenAI chat answer asked with `return_token_ids` (stream or not)."""
+    ids: list[int] = []
+    for line in answer.decode(errors="replace").splitlines():
+        try:
+            event = json.loads(line[5:].strip() if line.startswith("data:") else line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        for choice in event.get("choices") or []:
+            if choice.get("index", 0) == 0:
+                ids += choice.get("token_ids") or []
+    return ids
+
+
 def _object(text: str) -> bool:
     try:
         return isinstance(json.loads(text or "{}"), dict)
@@ -198,10 +218,19 @@ def serve(upstream: str, port: int, out: str, raw: str | None, metrics: bool = F
                 saved = _saved(upstream.rstrip("/"))
             after = None
             try:
+                body = json.loads(data) if data else None
+            except ValueError:
+                body = None
+            chat = self.path.split("?")[0] == CHAT
+            sent = data
+            if raw and chat and isinstance(body, dict) and "return_token_ids" not in body:
+                sent = json.dumps(body | {"return_token_ids": True}).encode()
+            try:
                 start, first, answer = time.perf_counter(), None, bytearray()
                 conn = http.client.HTTPConnection(target.hostname, target.port, timeout=3600)
-                headers = {k: v for k, v in self.headers.items() if k.lower() not in ("host", "connection")}
-                conn.request(self.command, self.path, data, headers)
+                headers = {k: v for k, v in self.headers.items()          # http.client sets the length
+                           if k.lower() not in ("host", "connection", "content-length")}
+                conn.request(self.command, self.path, sent, headers)
                 resp = conn.getresponse()
                 self.send_response(resp.status)
                 for k, v in resp.getheaders():
@@ -226,20 +255,17 @@ def serve(upstream: str, port: int, out: str, raw: str | None, metrics: bool = F
                         alone = not shared and flight["started"] == mine      # none ran beside it
             prefix = {"prefix_tokens_saved": after - saved if alone and None not in (saved, after) else None} \
                 if counted else {}
-            try:
-                body = json.loads(data) if data else None
-            except ValueError:
-                body = None
             record = summary(self.command, self.path, {k.lower(): v for k, v in self.headers.items()}, body,
                              resp.status) | {"ttft_ms": first and round((first - start) * 1e3, 1),
                                              "total_ms": round((end - start) * 1e3, 1)} | prefix | (
-                openai_facts if self.path.split("?")[0] == CHAT else facts)(answer)
+                openai_facts if chat else facts)(answer)
             with lock:
                 with open(out, "a") as f:
                     f.write(json.dumps(record) + "\n")
                 if raw:
+                    extra = {"token_ids": openai_token_ids(answer), "usage": record.get("usage")} if chat else {}
                     with open(raw, "a") as f:
-                        f.write(json.dumps({"path": self.path, "body": body}) + "\n")
+                        f.write(json.dumps({"path": self.path, "body": body} | extra) + "\n")
 
         do_GET = do_POST = _forward
 
