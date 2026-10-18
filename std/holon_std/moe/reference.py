@@ -263,7 +263,7 @@ def cpu_experts(jobs: torch.Tensor, x: torch.Tensor, gate_up: torch.Tensor, down
 
 
 # ggml-cpu's activation type per weight type (`type_traits_cpu[...].vec_dot_type`) for the types the CPU path serves
-Q8_0_DOT = {"q4_0", "q5_0", "q8_0", "iq4_nl"}
+Q8_0_DOT = {"q2_0", "q4_0", "q5_0", "q8_0", "iq4_nl"}
 Q8_K_DOT = {"q2_k", "q3_k", "q4_k", "q5_k", "q6_k", "iq1_s", "iq1_m", "iq2_xxs", "iq2_xs", "iq2_s", "iq3_xxs", "iq3_s",
             "iq4_xs"}
 

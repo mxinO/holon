@@ -14,6 +14,7 @@ static size_t block_size(enum ggml_type type, int64_t * blck) {
     switch (type) {
         case GGML_TYPE_F32: *blck = 1; return sizeof(float);
         case GGML_TYPE_F16: *blck = 1; return sizeof(ggml_fp16_t);
+        case GGML_TYPE_Q2_0: *blck = QK2_0; return sizeof(block_q2_0);
         case GGML_TYPE_Q4_0: *blck = QK4_0; return sizeof(block_q4_0);
         case GGML_TYPE_Q5_0: *blck = QK5_0; return sizeof(block_q5_0);
         case GGML_TYPE_Q8_0: *blck = QK8_0; return sizeof(block_q8_0);
