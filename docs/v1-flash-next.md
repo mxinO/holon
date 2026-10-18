@@ -1,628 +1,784 @@
 # v1 — FN: Qwen3.8-Flash-Next on Holon, then its expert offload compared with Strata
 
-Status: **rev 1, draft for the challenge panel** (2026-10-18). No panel round yet (§12). Parameters marked "est."
-freeze when step 0's evidence lands (§8).
+Status: **rev 2 (2026-10-18), the first panel round applied.**
+- Panel A (architecture): 1 blocker, 7 majors, 9 minors.
+- Panel B (correctness): 2 blockers, 8 majors, 12 minors.
+- Panel C (performance and fairness): 1 blocker, 8 majors, 10 minors.
+
+Every finding was checked against the code. The disposition of each is in §12. The lead's 13 decisions are applied
+(§11 records them).
+
+Parameters marked "est." freeze when step 0's evidence lands (§8).
 
 **Scope.** Plan §10 ("Expert caching/offload", milestone FN) and `docs/v1-offload.md`:
-- D2 sets the target;
-- §1 acceptance 4 sets the program bars FN answers to;
-- §4.7 lists FN's core needs;
-- plan §10 has FN's two follow-ups: aux-model (MTP) experts through the offload store, and tune's interleaved F5b
+- D2: the target;
+- §1 acceptance 4: the program bars;
+- §4.7: FN's core needs;
+- plan §10's two FN follow-ups: aux-model (MTP) experts through the offload store, and tune's interleaved F5b
   benchmark.
 
-FN builds on milestone X as merged (`b5b1e7f`: offload store, ABI 1.3), on M0.3 (Qwen3.8's GDN, gated attention,
-q8_0 KV) and on M0.4 (MTP as an aux model).
+**Builds on:**
+- milestone X as merged (`b5b1e7f`: offload store, ABI 1.3);
+- M0.3 (Qwen3.8's GDN, gated attention, q8_0 KV);
+- M0.4 (MTP as an aux model).
+
+**Depends on the MoE prefill track** (`docs/v1-moe-prefill.md`):
+- That track owns `LinearExperts`' prefill dispatch and `kernels.ggml_cuda`'s `vendor.patch`.
+- It lands first, with its own lock propagation.
+- FN rebases onto it and uses its D1–D3 and D5 (D1′).
 
 **References** (local clones; FN cites `file:line` from them):
 
-| Ref | Version | Abbreviation |
+| Abbreviation | Reference | Version |
 |---|---|---|
-| Strata | `296b59d` (2026-10-14), MIT | **St** |
-| FreeToken | `21d9578` (2026-10-16), Apache-2.0 | **FT**: `python/freetoken/` |
-| llama.cpp | `27c7a76` (2026-10-17) | **LC**: `src/` |
-| HF transformers 5.19.0 | `transformers/models/qwen4_exp/modeling_qwen4_exp.py` / `modular_qwen4_exp.py` | **HFm** / **HFx** |
-| sglang 0.5.21 | `srt/models/qwen4_exp_mtp.py` | **SG** |
+| **St** | Strata | `296b59d` (2026-10-14), MIT |
+| **FT** | FreeToken, `python/freetoken/` | `21d9578` (2026-10-16), Apache-2.0 |
+| **LC** | llama.cpp, `src/` | `27c7a76` (2026-10-17) |
+| **HFm** / **HFx** | HF transformers 5.19.0, `models/qwen4_exp/modeling_qwen4_exp.py` / `modular_qwen4_exp.py` | — |
+| **SG** | sglang 0.5.21, `srt/models/qwen4_exp_mtp.py` | — |
 
-`docs/brainstorm/v1-offload-research.md` §3.1 ("R §3.1") is X's study of Strata's tiers.
+"R §3.1" is X's study of Strata's tiers, `docs/brainstorm/v1-offload-research.md` §3.1.
 
-## 0. The model in one table
+## 0. The model
 
-From `config.json` (`Qwen4ExpForConditionalGeneration`, text `qwen4_exp_text`) and the GGUF headers (§0.1).
+From `config.json` (`Qwen4ExpForConditionalGeneration`, text model `qwen4_exp_text`) and the GGUF headers (§0.1).
 
 | Part | Fact | Source |
 |---|---|---|
 | Trunk | 48 layers, hidden H = 2560, vocab 248,320, untied head, **no input / post / final norms** | HFm:1276-1301, 1485; LC qwen4exp.cpp:511-521 |
 | Mixers | layers 3, 7, …, 47 (12) are **QSA**; the other 36 are **GDN** | HFx:182-192; St `geometry.hpp:26, 75-77` |
-| QSA attention | 24 q / 2 kv heads, head_dim 256, `q_proj` = per head `[q(256) ‖ gate(256)]`, sigmoid output gate, zero-centred q/k norms, NeoX RoPE on the first 64 dims (θ = 1e7; the interleaved mRoPE [11,11,10] is plain 1-D RoPE for text) | HFm:811-893, 77-142 |
-| QSA indexer | `index_qk_proj` → q 4 × 128 (zero-centred `q_layernorm`, RoPE at the query position), raw k 1 × 128 (cached unnormed and unrotated) | HFm:665-771 |
-| QSA selection | complete 4-token blocks of the visible tokens; `kbar_b = rope(k_layernorm(bf16(mean_fp32(k[4b..4b+3]))), pos 4b)`; `s_b = Σ_h relu(⟨q_h, kbar_b⟩) / √128`; per query, top min(512, n_blocks) blocks ∪ the open tail block; dense exactly while p + 1 ≤ 2,051 | HFm:720-760; FT attention.py:173-174 |
-| GDN | Qwen3.8's (16 k / 48 v heads × 128, conv 4, fp32 state); the gated norm uses **`sigmoid(z)`** where Qwen3.5/3.8 use `silu(z)` | HFx:313-327; LC qwen4exp.cpp:639-643; St `layer.hpp:8-17` |
-| Hyper-connections | residual R = [T, 4 · 2560], initialised as the embedding repeated 4×. Two `GatedResidual`s per layer (attention, FFN) plus an output mixer, specified below. No stream-to-stream matrix. | HFm:995-1023, 1472 |
-| MoE | router [512, 2560], fp32 softmax over 512 experts, top-10, renormalised; SwiGLU experts I = 640; shared expert SwiGLU I = 640 × `sigmoid(x · w_shexp_gate)` (one scalar per token); `out = routed + gated shared`; input is the HC-mixed x, with no pre-norm | HFm:952-992; St `shared_expert.hpp:3-8` |
-| PLE n-gram | Applied once, at 0-based layer 1: `ple_layer_ids` [2] is 1-indexed (HFm:1260); GGUF `ple.layers` [1]; St `ple.hpp:44`. **Table:** 16 hash heads (8 bigram, 8 trigram) × 160 dims, 320,001,536 rows × 160 (IQ4_NL: 90 B per row, 28.80 GB). **Hash:** `(t0·m0) ^ (t1·m1) [^ (t2·m2)] mod vocab_h + offset_h`, with a window cut at EOS 248044. **Block:** `R += G + silu(conv_dil3(norm(G)))` with `G_s = gate_s(⟨norm(K E)_s, norm(R)_s⟩/√2560) · V E`; depthwise conv with kernel 4 and **dilation 3** (taps t−9, t−6, t−3, t) | HFm:1104-1247; HFx:576-632; LC qwen4exp.cpp:1216-1459; St `ple.hpp:3-13`, `ple.cu:137-163` |
-| MTP | 1 layer, outside HF (HFm:1314, 1590 ignore `mtp.*`). Per stream, `R_s = fc_e(enorm(e)) + fc_h(hnorm(h)_s)`, where h is the trunk's final R before the output mixer. Then a full QSA + MoE (own 512 experts) + shared HC layer, its output mixer, and the shared `lm_head`. No PLE. | LC qwen4exp.cpp:289-301, 524-616; SG qwen4_exp_mtp.py:72-114 |
+| QSA attention | 24 q / 2 kv heads, head_dim 256; `q_proj` per head = `[q(256) ‖ gate(256)]`; sigmoid output gate; zero-centred q/k norms; NeoX RoPE on the first 64 dims, θ = 1e7 (the interleaved mRoPE [11,11,10] is plain 1-D RoPE for text) | HFm:811-893, 77-142 |
+| QSA indexer | `index_qk_proj` → q: 4 × 128, zero-centred `q_layernorm`, RoPE at the query position; raw k: 1 × 128, cached unnormed and unrotated | HFm:665-771 |
+| QSA selection | Blocks are complete 4-token groups of the visible tokens. `kbar_b = rope(k_layernorm(bf16(mean_fp32(k[4b..4b+3]))), pos 4b)`; `s_b = Σ_h relu(⟨q_h, kbar_b⟩) / √128`. Per query: top min(512, n_blocks) blocks ∪ the open tail block (`scores.topk`, tie order unspecified, HFm:749). Exactly dense while p + 1 ≤ 2,051. | HFm:720-760; FT attention.py:173-174 |
+| GDN | Qwen3.8's (16 k / 48 v heads × 128, conv 4, fp32 state). The gated norm uses **`sigmoid(z)`** where Qwen3.5 / 3.8 use `silu(z)`; this is the only difference | HFx:313-327; LC qwen4exp.cpp:639-643; St `layer.hpp:8-17` |
+| Hyper-connections | residual R = [T, 4 · 2560], initialised as the embedding repeated 4×. Two `GatedResidual`s per layer (attention, FFN) and an output mixer (see below). No stream-to-stream matrix. | HFm:995-1023, 1472 |
+| MoE | router [512, 2560], fp32 softmax over 512, top-10, renormalised; SwiGLU experts I = 640. Shared expert: SwiGLU I = 640 × `sigmoid(x · w_shexp_gate)`, one scalar per token. `out = routed + gated shared`. Input is the HC-mixed x, with no pre-norm. | HFm:952-992; St `shared_expert.hpp:3-8` |
+| PLE n-gram | Once, at 0-based layer 1 (`ple_layer_ids` [2] is 1-indexed, HFm:1260; GGUF `ple.layers` [1]). Table, hash and block: below. | HFm:1104-1247; HFx:576-632; LC qwen4exp.cpp:1216-1459; St `ple.hpp:3-13`, `ple.cu:123-163` |
+| MTP | 1 layer, outside HF (HFm:1314, 1590 ignore `mtp.*`). See below. | LC qwen4exp.cpp:289-301, 501, 524-616; SG qwen4_exp_mtp.py:72-114; St `generate.cpp:683-685` |
 
-**Hyper-connections in detail** (HFm:995-1023):
-- `Rn = grouped zero-centred RMSNorm(R)`, with statistics per 2560-wide stream.
-- **mix:** `x = mean_s(sigmoid(W_up · silu(W_down · Rn / 4))_s ⊙ Rn_s)`, giving [T, 2560].
-- **inject:** `w = 2 · sigmoid(W_inj · Rn / 4)`, giving [T, 4].
-- **combine:** `R_s += w_s · y`.
-- Weight shapes: `W_down` [320, 10240], `W_up` [10240, 320], `W_inj` [4, 10240].
+**Hyper-connections** (HFm:995-1023):
+- `Rn = grouped zero-centred RMSNorm(R)`, statistics per 2560-wide stream.
+- **mix:** `x = mean_s(sigmoid(W_up · silu(W_down · Rn / 4))_s ⊙ Rn_s)`.
+- **inject:** `w = 2 · sigmoid(W_inj · Rn / 4)`.
+- **combine:** `R_s += w_s · y`. This adds to the un-normed R.
+- Weights: `W_down` [320, 10240], `W_up` [10240, 320], `W_inj` [4, 10240].
+- The output mixer is the mix without the inject.
 
-**Open discrepancy (MTP):** LC normalises `hnorm` per stream with a [2560, 4] weight (qwen4exp.cpp:296-297, 581); SG
-normalises over all 10240 features (SG qwen4_exp_mtp.py:76-83). D9 settles it.
+**PLE** (HFm:1104-1247):
+- **Table:** 16 hash heads (8 bigram, 8 trigram) × 160, giving 320,001,536 × 160 rows. As IQ4_NL that is 90 B per row, 28.80 GB in total.
+- **Hash:** `(t0·m0) ^ (t1·m1) [^ (t2·m2)] mod vocab_h + offset_h`.
+  - The window is cut at EOS 248044.
+  - A fresh sequence's previous ids are EOS (HFm:1130).
+- **Block:**
+  - `K = norm_key(W_k E)`, `V = W_v E`, `Q = norm_query(R)`.
+  - `u_s = ⟨K_s, Q_s⟩ / √2560`.
+  - `g_s = sigmoid(sign(u_s) · √max(|u_s|, 1e-6))` (HFm:1239; St `ple.cu:123-126`).
+  - `G_s = g_s · V`.
+  - `R += G + silu(conv(norm_conv(G)))`.
+  - The conv is depthwise with kernel 4 and **dilation 3**: taps t−9, t−6, t−3, t.
 
-### 0.1 Files (GGUF headers parsed by HTTP range; offsets sum to the shard sizes exactly)
+**MTP:**
+- `R_s = fc_e(enorm(e)) + fc_h(hnorm(h))_s`, where h is the trunk's final R before the output mixer (LC
+  qwen4exp.cpp:501).
+- Then one QSA + MoE (its own 512 experts) + shared-expert HC layer, its output mixer, and the shared `lm_head`. No
+  PLE.
+- **hnorm has two published forms:**
+  - LC: per stream (qwen4exp.cpp:296-297, 581).
+  - SG and Strata's default: **pooled**, one RMS over all 10240 features (SG qwen4_exp_mtp.py:76-83; St
+    `generate.cpp:683-685`, `--mtp-hnorm stream` opt-in).
+  - FN pins pooled (D9).
 
-| File (2 shards) | Total | Routed experts | PLE table | Rest (resident) | Per expert per layer | Expert types (layers) |
+### 0.1 Files
+
+GGUF headers were parsed by HTTP range; the parsed offsets sum to each shard's size exactly.
+
+| File (2 shards) | Total | Routed experts | PLE table | Rest | Per expert per layer | Expert types (layers) |
 |---|---|---|---|---|---|---|
-| ISTA-DASLab GSQ-RCO **IQ2_XS** | 68.03 GB | 35.45 | 28.80 | 3.76 | 1.44 MB | gate = up: IQ2_S 34, IQ2_XXS 11, **IQ1_M 3** (8, 13, 37); down: **Q2_0** 48 |
-| ISTA-DASLab GSQ-RCO **IQ3_S** | 83.61 GB | 50.29 | 28.80 | 4.51 | 2.05 MB | gate = up: IQ2_S 20, IQ3_XXS 17, IQ3_S 10, IQ4_XS 1; down: IQ4_NL 39, **Q2_0** 9 |
-| ISTA-DASLab GSQ-RCO IQ3_XXS | 75.84 GB | 42.91 | 28.80 | 4.12 | 1.75 MB | down: Q2_0 30, IQ4_NL 18 |
-| unsloth UD-Q4_K_XL | 111.33 GB | 77.02 | 28.80 | 5.51 | 3.13 MB | gate / up Q4_K; down mostly Q5_1 |
+| ISTA-DASLab GSQ-RCO **IQ2_XS** | 68.03 GB | 35.45 | 28.80 | 3.76 | 1.443 MB | gate = up: IQ2_S 34, IQ2_XXS 11, **IQ1_M 3** (layers 8, 13, 37); down: **Q2_0** 48 |
+| ISTA-DASLab GSQ-RCO **IQ3_S** | 83.61 GB | 50.29 | 28.80 | 4.51 | 2.047 MB | gate = up: IQ2_S 20, IQ3_XXS 17, IQ3_S 10, IQ4_XS 1; down: IQ4_NL 39, **Q2_0** 9 |
 
-Notes on the files:
-- **Contents.**
-  - Each file holds 1,224 tensors and **no MTP tensors**. MTP ships separately: unsloth and bartowski `mtp-*.gguf` (BF16 7.77 GB, Q8_0 4.14 GB, the MTP layer alone ≈ 2.78 GB at Q8_0), SC117 `mtp-q2_0` (0.89 GB).
-  - Strata packs its own MTP from the BF16 checkpoint: Q2_0 experts, 708 MB resident (St `mtp.hpp:15-19`; `setup.py:6537-6545`).
-- **Q2_0 is upstream ggml, not custom.**
-  - It is type 42: 64 values in 18 B, code `(c − 1)·d`. It is in LC `ggml.h` and in Holon's vendored commit `cbe28bb3`: `ggml_cuda/vendor/.../ggml.h:432`, with mmq / mmvq / get_rows / convert cases (`mmvq.cu:43`, `mmq.cuh:569-572`, `dequantize.cuh:26-42`) and in ggml-cpu's `quants.c`.
-  - Holon's `TYPES` tables omit it (`kernels/ggml_cuda/plugin.py:83-85`, `kernels/ggml_cpu/plugin.py:22-23`).
-  - gguf-py 0.19.0's enum stops at Q1_0 = 41, so `weights/gguf/reader.py:82` fails on any ISTA file today.
-  - It is the same format as Strata's (St `dequant_s2.hpp:3-6`).
-- **IQ1_M** has mmvq in the vendored ggml (`mmvq.cu:61`) but no mmq (no template instance; `mmq.cuh` has no case). So the IQ2_XS file's three IQ1_M layers need a prefill path (D1).
-- **Shards.** Holon's GGUF source refuses split files (`std/holon_std/weights/gguf/hub.py:44`), and every Flash-Next file is split. Shard 2 is exactly the PLE table, 28,800,138,432 B (St `ngram.hpp:193-197`).
-- **Other fields.** Tokenizer pre `qwen35` (already in `weights/gguf/tokenizer.py:21`). HC weights are BF16 in ISTA and Q8_0 in unsloth. The router is BF16.
+- **MTP is not in these files** (1,224 tensors, no `nextn`). Strata's MTP pack is a GGUF of its own:
+  - routed experts in Q2_0, with a per-block scale that minimises squared error (not ggml's reference rounding);
+  - dense parts in **BF16**;
+  - HF names, fused `gate_up_proj`.
+  - 0.89 GB in total (St `tools/mtp_pack.py:9-16`; `setup.py:6537-6545`).
+- **Q2_0 is upstream ggml type 42** (64 values in 18 B, value `(c − 1)·d`):
+  - The vendored `cbe28bb3` has it in `ggml.h:432`, mmvq (`mmvq.cu:43`), mmq (`mmq.cuh:569-572`), dequantize
+    (`dequantize.cuh:26-42`) and ggml-cpu's `quants.c`.
+  - It is missing from Holon's `TYPES` tables (`kernels/ggml_cuda/plugin.py:83-85`, `kernels/ggml_cpu/plugin.py:22-23`)
+    and from PyPI gguf-py 0.19.0, whose enum stops at Q1_0 = 41. So `weights/gguf/reader.py:82` and the judge's
+    `GGUFReader` fail on these files.
+  - LC `27c7a76`'s own gguf-py has it (`constants.py:6202, 6419`; `quants.py:679`).
+- **IQ1_M** has an mmvq kernel (`mmvq.cu:61`) but no mmq loader (no template instance, no case in `mmq.cuh`). Strata
+  falls back to FP16 for it, 16 experts per launch (St `prefill.cpp:997-1000`). For FN's choice see D1′.
+- Both files are **split**, and Holon refuses split files (`std/holon_std/weights/gguf/hub.py:44`). Shard 2 is
+  exactly the PLE table.
+- The tokenizer's pre-tokenizer is `qwen35`, which Holon already has (`weights/gguf/tokenizer.py:21`).
 
 ## 1. Goal and acceptance
 
 **Goal.** Serve Qwen3.8-Flash-Next from its GGUF files, text-only:
-- exactly against an independent fp32 oracle;
+- exact against an independent fp32 oracle;
 - all-resident on a 96 GB card;
 - through X's offload store on 16 GB and 32 GB cards;
-- then meet the program bars against Strata, the strongest engine for this model.
+- then meet the program bars against Strata.
 
-1. **Model** (`models.qwen4_exp`, `derived_from` `models.qwen3_5`; `arch.gguf.qwen4exp@1`,
-   `arch.Qwen4ExpForConditionalGeneration@1`):
-   - **(a) Tiny model.** A random-weight reduced config (§6.1) matches the HF reference on the CPU. Logits are
-     within fp32 tolerance, and every QSA (layer, position) selects the same token set. A prefix hit is bitwise equal
-     to recomputing.
-   - **(b) Full model, L2 Tier B.** All-resident on the RTX PRO 6000, for ISTA IQ2_XS and IQ3_S, against layer-streamed
-     fp32 goldens (D2). It runs on two prompt sets:
-     - `v1-qwen3_5.jsonl`;
-     - a new long set, `v1-long.jsonl` (8 prompts, 4K–32K tokens), where the indexer actually selects. The short set
-       crosses the 2,051-token dense limit in only 3 of 24 prompts (its longest is 2,146 tokens).
+1. **Model:** `models.qwen4_exp`, `derived_from` `models.qwen3_5`, serving `arch.gguf.qwen4exp@1` and
+   `arch.Qwen4ExpForConditionalGeneration@1`.
+   - **(a) Tiny model on the CPU.** A random-weight reduced config (§6.1), with every norm, conv, `A_log` and
+     `dt_bias` randomised, written by LC's converter, matches HF.
+     - Logits within 1e-4.
+     - Identical QSA token sets per (layer, position), with lower-index ties.
+     - A prefix hit is bitwise equal to recomputing.
+   - **(b) Full model.** L2 Tier B, all-resident on the RTX PRO 6000, for ISTA IQ2_XS and IQ3_S, against
+     layer-streamed fp32 goldens (D2). Prompt sets:
+     - `v1-qwen3_5.jsonl`. Only 3 of its 24 prompts pass the 2,051-token dense limit.
+     - A new `v1-long.jsonl`: 8 prompts of 4K–32K tokens, 4 of them recall prompts.
 2. **Bounded and run-identical** (full model, RTX PRO 6000):
-   - chunked vs one-shot prefill, with chunk edges that straddle 4-token blocks and the PLE conv window;
-   - prefix-hit resume vs recompute;
-   - graphs vs eager;
-   - overlap 1 vs 0;
-   - the snapshot trace run-identical over 3 fresh engines;
-   - MTP on: the verify path bounded (L2) and the snapshot run-identical. Mean accepted tokens per pass at 3 drafts
-     ≥ 2.2 on the chat and agent prompts (Strata: 2.4–3.2, St `docs/HOW_IT_WORKS.md:43-46`).
-3. **Kernels:** L0 for every new kernel against its `reference.py` on sm_86, sm_89 and sm_120, with
-   `compute-sanitizer` memcheck clean.
-4. **Offload exactness** (X's acceptance 2 carried to FN):
-   - The offload store at a capped fit, with `lfu` and the MTP layer's experts through the store, is snapshot
-     byte-identical to all-resident on the RTX PRO 6000.
-   - On the RTX 5080 and 5090, cross-placement identity holds over 3 runs.
-   - The PLE table's RAM and SSD tiers are byte-identical.
-   - F5b, where tune picks it, is bounded (L2 against the path-aware floor, run-identical over 3 runs).
-5. **Program bars** (`docs/v1-offload.md` §1.4, proposed there; owner to confirm). The protocol is D11; rows are
-   medians of interleaved rounds at 1K / 4K / 32K:
+   - chunked vs one-shot prefill (chunk 250: straddles 4-token blocks and the PLE window, and is not a multiple of 4);
+   - prefix-hit resume vs recompute, with a 4K system prompt from `v1-long` (sparse decode after a restore);
+   - graphs vs eager, overlap 1 vs 0;
+   - snapshot run-identical ×3, with a ≥ 8K-token request and MTP on;
+   - the MTP verify path bounded (L2);
+   - accepted tokens per verify pass ≥ 2.2 at 3 drafts on the chat and agent prompts. The count is Strata's: accepted
+     drafts + 1.
+3. **Kernels.** L0 for every new kernel against its `reference.py` on sm_86, sm_89 and sm_120, memcheck clean.
+   - Decode-step targets on the RTX 5080: ≤ 16 kernel launches per layer, all graphed; `qsa_select` ≤ 20 µs per
+     layer at 32K context (8K blocks, ≤ 8 query rows).
+4. **Offload exactness.**
+   - On the RTX PRO 6000, the offload store at a capped fit, with `lfu` and the MTP experts in the store, is
+     snapshot byte-identical to all-resident.
+   - On the 5080 and 5090: cross-placement identity ×3.
+   - The PLE RAM and SSD tiers are byte-identical.
+   - F5b, where it is used, is bounded against the path-aware floor.
+5. **Program bars** (`docs/v1-offload.md` §1.4; protocol D11; statistics D11):
 
    | Against | Card, file | Decode | Prefill |
    |---|---|---|---|
    | Strata, no approximation | RTX 5080 IQ2_XS; RTX 5090 IQ3_S | ≥ 1.0× | ≥ 0.9× |
-   | Strata defaults vs Holon with A1 | same | ≥ 1.0× | ≥ 0.9× |
+   | Strata defaults vs Holon + A1 | same | ≥ 1.0× | ≥ 0.9× |
 
-   - Each row is measured twice: with drafting off, and with MTP matched (D11).
-   - Holon exact against Strata's defaults is reported, not gated.
-   - FreeToken (`models/qwen4_exp`) and llama.cpp (`qwen4exp`, static split and `--moe-cache-mib`) are reported rows
-     wherever they run the file (open question 8).
+   - Each row is gated twice: drafting off, and MTP matched. Contexts are 1K / 4K / 32K.
+   - Holon runs **its lock's configuration**. F5b rows that differ from the lock are reported separately.
+   - Holon exact vs Strata's defaults is reported, not gated.
+   - FreeToken (`models/qwen4_exp`) and llama.cpp (`qwen4exp`) are reported only: one arm each, 3 rounds.
    - Plan §9's kill line (< 0.8×) applies to the like-for-like rows.
 6. **Memory** (§7):
-   - **RTX 5080:** IQ2_XS at 32K with MTP.
-   - **RTX 5090:** IQ3_S at 32K with MTP.
-   - Each fit is reported against §7's prediction.
-   - Every pinned byte (experts, the PLE table) is accounted against `host_memory`.
-7. **Locks:**
-   - `rtx-5080` (IQ2_XS, offload) and `rtx-5090` (IQ3_S, offload), written by `tune --new-model`, approved on
-     passing verdicts.
-   - The existing locks are propagated once, at the close (D16).
-8. **Core:** only C1 and C2 (§4), each an additive ABI minor (→ ABI 1.4), toy-proven, ≤ 60 code lines in total.
+   - **Fits:** RTX 5080 IQ2_XS at 32K with MTP; RTX 5090 IQ3_S at 32K with MTP. The step size per card and context
+     is a lock setting, and the measured fit is reported against §7.
+   - **Pinned host bytes:** every one is accounted against `host_memory`.
+7. **Locks:** `rtx-5080` (IQ2_XS, offload, Strata's MTP pack) and `rtx-5090` (IQ3_S, the same), written by
+   `tune --new-model`.
+   - Existing locks are propagated once, by whichever of FN and K closes second (D16).
+8. **Core:** C1–C3 (§4) only, additive.
+   - ABI **1.4 or 1.5 by merge order with K**: whichever lands its seams first takes 1.4.
+   - ≤ +45 code lines relative to FN's step-1 base, toy-proven.
 
 **Non-goals:**
-- the vision tower (mmproj);
-- KV streaming for QSA (Strata C4, milestone K);
+- the vision tower;
+- KV streaming for QSA (K4: owned by FN as its first follow-up after the close, in plan §10);
 - Strata's suffix drafter and adaptive draft depth;
-- NVFP4 packs, Q8_0 / BF16 PLE tables, the Coder variant (256 experts; expected to work, not gated);
+- NVFP4 packs, Q8_0 / BF16 PLE tables, the Coder variant;
 - multi-GPU;
-- Qwen3.6-35B-A3B (D13, owner to confirm);
-- the plan's MoE prefill-speed item, unless step 0's roofline needs it (R2, escalated).
+- Qwen3.6-35B-A3B: optional later evidence for `std.ffn.sum` and `gated_swiglu` (D13);
+- the MoE prefill speed work itself (the MoE prefill track, D1′).
 
 ## 2. Decisions
 
-**D1 — Files and quant types: ISTA GSQ-RCO IQ2_XS (RTX 5080) and IQ3_S (RTX 5090), the bars' files.** These are
-Strata's recommended family (St `setup.py:243-309, 383-389`), so the comparison runs on identical bytes.
+**D1 — Files: ISTA GSQ-RCO IQ2_XS on the RTX 5080 and IQ3_S on the RTX 5090.**
+- These are the bars' files and Strata's recommended family (St `setup.py:243-309, 383-389`), so both engines read
+  identical bytes.
 - **Q2_0:**
-  - add it to `kernels.ggml_cuda`'s and `kernels.ggml_cpu`'s `TYPES` (the vendored kernels exist, so no
-    `vendor.patch` change);
-  - add a Holon-side type entry in `std/holon_std/weights/gguf/reader.py` for ids gguf-py lacks: `{42: (64, 18)}`,
-    named `q2_0`.
-- **IQ1_M** (IQ2_XS gate/up at layers 8, 13, 37):
-  - decode runs mmvq;
-  - prefill rows above the mmvq limit run a new `linear_experts` path in `kernels.ggml_cuda`: dequantize the
-    called slots to bf16 (the vendored `convert.cu` IQ1_M case) into a workspace, then a grouped bf16 GEMM.
-  - It is deterministic and slot-invariant. The cost is 3 of 48 layers' gate/up.
-  - The same path later serves plan §10's MoE prefill-speed item.
-  - Its floor is path-aware: no q8_1 emulation on those layers' prefill rows (§6).
-- **Rejected:** switching the RTX 5080 bar to IQ3_XXS (no IQ1_M, 42.9 GB of experts) or Q2_0. That would change the
-  bar's file, which is the owner's call (open question 6).
+  - add `q2_0` to both `TYPES` tables;
+  - add `q2_0` to the judge's `Q8_0_DOT`: ggml-cpu dots Q2_0 against Q8_0 activations, so the CPU reference and F5b's
+    floor need it (`std/holon_std/moe/reference.py:266`);
+  - move the workspace's gguf-py to LC `27c7a76`'s tree. This is one source for std, the judge and the golden. Its
+    relock is covered by FN's single propagation (D16).
 
-**D2 — The oracle is HF transformers' `qwen4_exp`, at a pinned version, in a golden-only environment; the full
-model's golden and floor are layer-streamed.**
-- The workspace pins transformers 5.6.2 (`std/pyproject.toml:8`), which has no `qwen4_exp`. Bumping it would re-lock
-  the runtime closure and propagate every existing lock for nothing.
-- `holon_judge golden` therefore runs from a separate venv, `local/envs/golden-qwen4`: transformers 5.19.0 plus
-  `-e judge`, installed with `--link-mode copy`. The golden records that version in its metadata.
-- **Tiny-model fixtures:** CI cannot import the class. A tool in `testing/holon_testing/qwen4exp_files.py` (run in
-  the golden venv) writes the random tiny model, its GGUF and HF's fp32 outputs as committed fixtures (§6.1). CI's
-  CPU test compares Holon against the fixture.
-- **Full model:**
-  - 177B parameters are 708 GB in fp32 and 354 GB in bf16, so neither the CPU golden nor the bf16 floor fits whole.
-  - `golden --stream-layers` builds the HF model on the meta device. It runs every prompt through one decoder layer
-    at a time: the layer's dequantized fp32 weights (≈ 10 GB of experts), the residual for all prompts' tokens in RAM
-    (≈ 7 GB for ≈ 160K tokens), the QSA and PLE state per prompt. It then frees the layer.
-  - The floor is the same driver in bf16 on the RTX PRO 6000 with `--q8-1`, one layer resident at a time.
-  - The driver calls HF's own decoder layer, rotary, mixer and head modules. It does not re-implement the model.
-  - It is generic over HF decoder-layer models: a judge feature, not a model special case.
-- **MTP:** HF has no MTP, so MTP is judged by its verify path's L2 and by acceptance (acceptance 2).
-- **Cost:** HF's indexer loops per query in Python (HFm:720-760). A 32K prompt costs minutes per QSA layer (est.),
-  acceptable once per golden.
+**D1′ — IQ1_M is a native mmq tile loader, delivered in the MoE prefill track's `vendor.patch`, so it stays exact.**
+- **The encoding** (checked against the vendored code):
+  - IQ1_M stores grid values in {−1, 0, 1}, a delta of ±1/8 per group of 8 (bit `0x08` of `qh`), and 3-bit scales
+    per 16 values (`vecdotq.cuh:1286-1326`).
+  - Scaled by 8, a weight is `8·g ± 1` ∈ {−9, −7, −1, 1, 7, 9}: int8.
+  - Its scale per 16 values is `d · (2s + 1) / 8`.
+- **The loader:** that is the layout of the `q8_0_16` mmq path that IQ2_XS and IQ2_S already use
+  (`ggml_cuda_mmq_vec_dot_q8_0_16_q8_1_dp4a` in `mmq.cuh`'s IQ2_XS / IQ2_S cases). An `iq1_m` loader writes int8
+  `8·(g + δ)` and per-16 float scales, and reuses that vec dot.
+  - The weights are dequantized exactly, and activations stay q8_1.
+  - So Tier B's floor needs no special case.
+- **Ownership:** the MoE prefill track owns `vendor.patch`. FN asks it to take this hunk and supplies its L0 cases. If
+  the timing does not allow, FN adds the hunk after rebasing, with the track's sign-off.
+- **Fallback, only if the loader fails L0:** dequantize to bf16 into grouped scratch (16 experts per launch, as Strata
+  does), behind the track's `pass_rows` seam. Its floor casts those rows' weights to bf16. Its scratch is bounded and
+  counted in §7.
+- **FN's requirements on the MoE prefill track's L0 and step 0:**
+  - FN's types: IQ2_S, IQ2_XXS, IQ1_M, Q2_0, IQ3_XXS, IQ3_S, IQ4_NL, IQ4_XS;
+  - FN's shape: E = 512, top-10, H = 2560, I = 640.
+  - FN's "seed of the speed item" claim (rev 1) is struck.
 
-**D3 — Hyper-connections: the trunk carries R flattened as [T, n · H] in fp32; the embed unit expands; the model's
-`norm` is the HC output mixer; one core fact gives drafters and the profile R's width and dtype (C1).**
-- **Why 2-D:** every core site that touches h indexes rows on dim 0 — `_logits`, prompt logprobs, `_worst_step`,
-  `head` (`core/holon/core/executor.py:232-233, 426-427, 615`). A flattened `[T, 10240]` keeps them unchanged; the
-  `[T, n, H]` view is the units' business.
-- **Why a core fact:** the MTP head needs R itself, not the mixed x (§0). The executor's startup profile hands the
-  drafter `zeros(T, spec.hidden, cfg.dtype)` (`executor.py:266`), which would mis-shape it.
-- **Why fp32:**
-  - R accumulates 96 sublayer updates, each scaled by `w ∈ (0, 2)`. Strata (St `gr.hpp:16-19`) and llama.cpp keep
-    it fp32; HF and FT keep it bf16.
-  - Cost: 40 KB per token, and about 2% of a 4K prefill chunk's time in extra R traffic (est.: 96 read-writes of
-    168 MB at ≈ 900 GB/s ≈ 35 ms more than bf16).
-  - The golden is fp32 and the floor bf16, so fp32 R moves the candidate toward the golden.
+**D2 — The oracle: HF transformers' `qwen4_exp` at 5.19.0, in a golden-only venv. The full model streams one layer
+at a time through the judge's existing `_streamed`.**
+- **The venv** (`local/envs/golden-qwen4`):
+  - transformers 5.19.0 and tokenizers ≥ 0.23.1;
+  - `-e judge -e std` with `--no-deps`, or with uv overrides of std's `transformers==5.6.2` pin
+    (`std/pyproject.toml:8`; `golden.py:19` imports `holon_std`);
+  - `--link-mode copy`.
+  - The workspace keeps 5.6.2.
+- **Documented deviation from HF:** the fixture tool and the golden driver wrap the indexer's `topk` with a stable
+  descending sort, so lower blocks win ties.
+  - Why: ReLU sums make exact 0.0 ties common. Panel B found 5–11 boundary ties per 100-token tiny prompt, and HF's
+    `topk` broke 4–11 of them differently.
+  - The rule is recorded in every golden's metadata as a deviation from HF.
+- **The streamed driver already exists:** `_streamed` (`judge/holon_judge/golden.py:229-266`). FN's judge edits:
+  - detect MoE by the presence of a `*SparseMoeBlock`, not by `model_type.endswith("_moe")` (`golden.py:293-294`);
+  - add the shared expert and its gate to the floor's mirror, q8_1-emulated (today `moe.py:34-46` drops them);
+  - a final-norm hook, because Qwen4Exp's head is `hyper_connection_mixer`, not `model.norm` (`golden.py:264`);
+  - the head computed in row chunks (a 32K × 248,320 fp32 logits tensor is 32.5 GB);
+  - a lazy PLE row gather in place of `ngram_embedding`. It dequantizes only the hashed rows from the GGUF (the full
+    table in fp32 is 205 GB), and asserts that the GGUF's hash constants equal HF's recomputed buffers;
+  - split-file reading;
+  - the tie rule above.
+- **The floor:** the same driver in bf16 on the RTX PRO 6000 with `--q8-1 mmq|mmvq`, one layer resident at a time.
+- **HF's own attention at 32K:** N3 runs one 32K prompt under `MemoryMax`, recording time and peak RSS. If the
+  attention materialises [24, T, T], the driver calls the layer per query block.
+- **Tiny fixtures:**
+  - `testing/holon_testing/qwen4exp_files.py`, run in the golden venv, builds the random model.
+  - It randomises every `Qwen4ExpTextRMSNorm`, the PLE conv, `A_log` and `dt_bias`, as `qwen3_5_files.py:36-37`
+    does. HF's init zeroes the PLE conv (HFm:1336, 1352), and the tool asserts these weights are nonzero.
+  - The vocab is 248,320, as the converter requires.
+  - LC's converter at `27c7a76` writes the GGUF, an independent writer for the conventions: norm + 1, `ssm_a`, the
+    conv layout, the HC reshapes.
+  - HF's fp32 outputs are committed as fixtures.
+- **MTP oracle:**
+  - The pooled form: a reference transcribed from SG's module.
+  - The stream form: LC's MTP graph on the tiny GGUF.
+  - On the real model, MTP is judged by the verify path's L2 and by acceptance.
+
+**D3 — Hyper-connections: the trunk carries R flattened to [T, n·H] in fp32. A wrapper embed expands it; the model's
+`norm` is the output mixer. C1 states R's width and dtype for drafters and the profile.**
+- **2-D:** every core site indexes rows on dim 0 (`executor.py:232-233, 426-427, 615`).
+- **A core fact:** MTP needs R, and the profile hands drafters `zeros(T, spec.hidden, cfg.dtype)` (`executor.py:266`).
+  The profile now also asserts that the trunk's real output matches the declared fact, so a mis-declared recipe fails
+  at startup.
+- **fp32:** R accumulates 96 scaled updates. Strata and llama.cpp keep it fp32. It is 40 KB per token.
 - **Rejected:**
-  - (a) block 0 expands and the last block collapses, with no core change. MTP needs R, and taps would see a shape the
-    contract does not state.
-  - (b) a 3-D h in the core: more contract text, no gain.
+  - expand in block 0 and collapse in the last block: MTP needs R;
+  - a 3-D h: no gain.
 
-**D4 — PLE lives in the HC block of layer 1 and owns per-request recurrent state; blocks may declare state (C2).**
-- PLE reads and writes R before layer 1's attention mix (HFm:1276-1301). It therefore sits in the block, not in the
-  mixer (which sees x) or the embed (which runs before layer 0).
-- **State per request** (HFm:1128-1145, 1193, 1213):
-  - the conv history, 9 = (4 − 1)·3 rows × 10240 in the model dtype (184 KB);
-  - the last two token ids;
-  - kept as a `Slot` spec of kind `recurrent@1` with `draft_slots` (verify and rewind as GDN's conv state does,
-    `std/holon_std/mixers/gdn/units.py:117-124`) and GDN's checkpoint alignment, so a prefix hit restores it with
-    GDN's state.
-- **Today:** only mixers declare state (`core/holon/core/assembly.py:139-161`).
+**D4 — PLE lives in the gated-residual block of layer 1, with recurrent per-request state declared through the block
+(C2, C3).**
+- **State per request:**
+  - the conv history: 9 = (4 − 1)·3 rows × 10240 in **fp32**, 368 KB. The rows are an fp32 norm output, so storing
+    them in bf16 would make chunked vs one-shot, hit vs recompute, and verify vs decode differ;
+  - the last two token ids (EOS for a fresh slot).
+- **The spec:** a `Slot` spec of kind `recurrent@1`.
+  - `alignment` and `in_step` are Ref parameters the recipe sets to GDN's 64. A std unit cannot know GDN's chunk.
+  - The kind checkpoints at `lcm(alignment, page_size)` (`std/holon_std/state/recurrent/kind.py:26, 54`), and a
+    prefix hit is the fixed point over every kind (`core/holon/core/state.py:190-201`). With matching alignments the
+    PLE payloads sit on GDN's blocks, so hits are not silently zero.
+  - `ple_block@1` writes its in-step payloads (the 9 conv rows before each listed position) the way GDN's conv does.
+- **Verify:** GDN's way — `draft_slots` 0, then replay.
+  - The unit saves the window and the step's conv inputs.
+  - Its `rewind` writes the window and the last two ids at the accepted end. The core's `rewind_modules` visits every
+    submodule (`core/holon/api/state.py:135-140`).
 - **Rejected:**
-  - a GDN mixer wrapper that declares PLE's spec: it cannot see R;
-  - recomputing the conv window from the previous 9 tokens' rows: those need R at earlier positions, so the window
-    is not recomputable from tokens alone.
+  - a GDN wrapper mixer: it cannot see R, and two mixers in group `recurrent` are refused (`assembly.py:155-157`);
+  - recomputing the conv window from tokens: it needs past R.
 
-**D5 — The PLE table is a row table in X's host tiers: RAM by default, SSD when RAM is short.**
-- The table is a new std unit, `std.tiered.rows@1`: a general large row table read a few rows per token.
-- **RAM tier (default):**
-  - The table (28.80 GB) is loaded once into a mapped host pool (S2; `mmap` + `cudaHostRegister`, exact bytes).
-  - Loading reads shard 2 from its extents (S4) through `tiered/files.py` (O_DIRECT, 8 threads).
-  - A GPU kernel hashes ids, gathers the 16 rows of 90 B per token zero-copy and dequantizes in-kernel: 1.4 KB per
-    token, 5.9 MB per 4K chunk.
-- **SSD tier (RAM short; Strata's default `--ple-io direct`, St `generate.cpp:399-403`):**
-  - **Prefill:** a shared object's `before_launch` (S1) knows the chunk's ids on the host. Its `cpu_task` I/O workers
-    `pread` 4 KiB pages with O_DIRECT, deduplicated and sorted, one chunk ahead, into a pinned staging pool
-    (double-buffered as St `prefill.cpp:2160-2172` does).
-  - **Decode:** the ids exist only on the device (overlap), so the gather kernel posts its rows and the graph waits,
-    through X's in-graph `cpu_task@1` copy contract (`std/holon_std/moe/kernels.py:150-155`): 16 reads per token, 64
-    per verify window of 4.
-  - **Row cache:** none in rev 1. Strata keeps 1M rows (St `ple_reader.hpp:14-16`). Step 7 measures whether one
-    pays.
-- **Not reused:** `TieredStore` itself. Its per-piece Python list and `[P, X, 4]` descriptors are sized for
-  thousands of experts, not 320M rows (`std/holon_std/tiered/store.py:65, 172, 348`).
-- **Reused:** the S2 pools, `files.read` and the `cpu_task` copy contract. No new seam, as §4.7 expected.
+**D5 — The PLE table is a std row table, `std.tiered.rows@1`. RAM is the default; SSD is the fallback.**
+- **RAM tier:**
+  - a mapped host pool (S2) loaded from shard 2's extents (S4) via `tiered/files.py`;
+  - the GPU gathers 16 rows × 90 B per token zero-copy and dequantizes them in-kernel.
+- **SSD tier:**
+  - Prefill rows are read ahead by a shared object's `before_launch` (S1) with O_DIRECT 4 KiB page reads, deduplicated
+    and sorted, double-buffered. `before_launch` sees only the plan (`hooks.py:172`, `BatchPlan.host_tokens`), so
+    after a prefix hit the first two positions of a chunk cannot be hashed on the host. Those rows take the in-graph
+    read path.
+  - Decode rows are read in-graph through X's `cpu_task@1` copy contract (`std/holon_std/moe/kernels.py:150-155`).
+  - No row cache in rev 2; step 6 measures whether one pays.
+- **Pairing in D11:** the SSD tier runs against Strata's `--ple-io direct` when a desktop cannot hold the RAM tier.
+- **Reuse:** S2, `files.read` and `cpu_task`. No new core seam.
 
-**D6 — QSA is a new std mixer, `std.mixers.qsa@1` (`derived_from` `std.mixers.gqa`), with two paged specs in
-separate groups.**
+**D6 — QSA is `std.mixers.qsa@1` (`derived_from` gqa), with two paged specs in separate groups.**
 - **The specs:**
-  - `"kv"` keeps gqa's layout and every `kv.format` (bf16, q8_0, fp8: `std/holon_std/mixers/gqa/kernels.py:58`).
-  - `"idx"` holds, per page of `page_size` tokens: raw index keys (page × 128 bf16) and pooled keys
-    (page / 4 × 128 fp32, as St `qsa.hpp:79-85`).
-  - Per token per layer: 2,048 B (bf16 KV) + 256 + 128 B.
-- **Why two specs:** both get their own `BlockTable` and planner group. Pages advance in lockstep, because both count
-  the same tokens. The dense kernels keep reading `"kv"` unchanged.
-- **Correction to `docs/v1-offload.md` §4.7:** the core refuses one page group shared by two paged specs
-  (`core/holon/core/state.py:149-150`). FN does not need it. GLM's DSA decides for itself.
-- **Pooling and selection:**
-  - **Pooling:** a block's pooled key is written when its 4th token is appended. A block completed by rejected drafts
-    is rewritten when its positions are appended again, before any query can see it complete. So verify and rewind
-    need no extra state.
-  - **Selection:** scores in fp32; an exact top-k over blocks, with ties going to the lower block (St
-    `qsa_select.hpp:12-15`). Block granularity is exact because scores are constant within a block.
-  - **The dense limit:** while a query's n ≤ 2,051, selection is the identity, so the mixer runs gqa's dense kernels.
-    One kernel switch per sequence; each run is deterministic.
-  - **Prefill:** every query row selects for itself, causally (HFm:720-760; St `prefill.cpp:2740-2935`).
+  - `"kv"` is gqa's layout and its formats.
+  - `"idx"` holds, per page, the raw index keys (page × 128 bf16) and the pooled keys (page / 4 × 128 fp32).
+  - `page_size % 4 == 0` is required.
+  - Two groups, because the core refuses a page group shared by paged specs (`state.py:149-150`). This corrects
+    `docs/v1-offload.md` §4.7.
+- **Pooling:**
+  - A block is pooled when its 4th token is appended, reading the **stored** raw keys, never in-register values.
+  - A block completed by rejected drafts is rewritten when its positions are appended again.
+- **Selection:**
+  - fp32 scores (Triton `input_precision="ieee"`); an exact top-k, ties going to the lower block (D2's rule).
+  - The score workspace is sub-batched: 512 queries per pass at most (St `sel_batch`, `prefill.cpp:993`).
+- **Dense and sparse rule:** a step runs the dense gqa kernels only when every one of its rows has a host-known
+  length ≤ 2,051. Otherwise it runs the sparse kernels, and each query whose own length is ≤ 2,051 selects all its
+  blocks. Verify rows count by their upper bound.
+- **Raw keys for every token cost 96 MB at 32K.** They are kept on purpose: rewind and prefix hits stay stateless.
+  Strata keeps only the open block's tail (B-m11, §12).
 
-**D7 — The shared expert composes beside `std.moe@1`, at block level (§4.7). The order is routed MoE first.**
-- **New units:**
-  - `std.ffn.sum@1(parts)` runs its FFN parts in order and adds their outputs.
-  - `std.ffn.gated_swiglu@1` is SwiGLU × `sigmoid(x · w_gate)`.
-- **Why MoE first:** `std.moe@1` consumes the router-prepared q8_1 inside its own call
-  (`std/holon_std/moe/units.py:247-254, 273-289`). A shared expert after it cannot stale the handle (§4.7). An L0
-  test on FN's layer asserts the experts never re-quantize (the handle's generation check,
-  `kernels/ggml_cuda/plugin.py:434-450`).
-- **Unchanged:** `std.moe@1` is untouched, so X's offload store applies through its `moe.store` option as before. The
-  shared expert stays resident.
+**D7 — The shared expert composes beside `std.moe@1`: `std.ffn.sum@1(parts)` and `std.ffn.gated_swiglu@1`, routed
+MoE first.**
+- The router-prepared q8_1 is consumed inside `std.moe@1`'s own call (`moe/units.py:247-254, 273-289`). An L0 test
+  asserts that FN's layer never re-quantizes (the generation check, `kernels/ggml_cuda/plugin.py:434-450`).
+- `std.moe@1` is not edited.
 
-**D8 — GDN gets an output-gate fact; no new mixer.**
-- `std.mixers.gdn@1` gains `out_gate: "silu" | "sigmoid"` (default `silu`, so every Qwen3.8 trace is unchanged).
-- `gated_rmsnorm@1` gains the matching fact; `kernels.gdn_triton` serves both.
-- The edit changes the unit's `src`, so Qwen3.8-27B's locks propagate once at the close (D16).
+**D8 — GDN gains `out_gate` (`silu` | `sigmoid`).**
+- It is passed to the unit and the kernel facts only when not the default, so the Qwen3.8 locks' recorded facts do
+  not move.
+- A provider that does not know the fact fails loudly (`gdn_triton/plugin.py:20`).
 
-**D9 — MTP is an aux model: a new head, the existing drafter carrying R. Its hnorm form is decided by acceptance.**
-- **New head:** `std.spec.mtp_hc_head@1` (`derived_from` `std.spec.mtp_head`):
-  - per-stream `fc_e(enorm(e)) + fc_h(hnorm(R)_s)`;
-  - one HC layer (QSA in the aux namespace, `std.ffn.sum@1` of MoE + shared expert);
-  - the output mixer;
-  - the target's `lm_head`.
-- **Drafter:** `drafters/mtp` carries `spec.residual`'s width and dtype, not `norm(h)`, when its head asks for the
-  residual. Today it carries `(max_seqs + 1, hidden)` of `norm(h)`
-  (`plugins/holon_plugins/drafters/mtp/plugin.py:33-35, 52-63`).
-- **Weights:** from a separate MTP GGUF (`ctx.weight_source(path)`):
-  - matched to Strata for the bars: Q2_0 experts and Q8_0 projections, quantized from unsloth's BF16 MTP file by the
-    pinned llama.cpp's `llama-quantize`, or SC117's `mtp-q2_0` if its types match;
-  - Holon's own default: unsloth's `mtp-Q8_0`.
-- **hnorm:** both forms are implemented as a head parameter. Step 5 runs both on the RTX PRO 6000 and keeps the one
-  with higher acceptance; the other is dropped. The GGUF's `nextn.hnorm` is {2560, 4}, which suggests LC's per-stream
-  form.
-- **Experts:** through the offload store (D12's std minor), or resident when tune measures that faster.
+**D9 — MTP is an aux model: `std.spec.mtp_hc_head@1`, with Strata's own MTP pack, pooled hnorm, full-vocab drafts.**
+- **The head:**
+  - `fc_e(enorm(e)) + fc_h(hnorm_pooled(R))_s` per stream;
+  - one gated-residual layer (QSA in the aux namespace, `std.ffn.sum@1`);
+  - `head.out(x)`, its output mixer, before the target's `lm_head`.
+- **The drafter:**
+  - `drafters/mtp` reads `head.carries == "residual"` and carries `spec.residual`'s width and dtype instead of
+    `norm(h)`.
+  - It calls `lm_head(head.out(x))`. Today it calls `lm_head(x)` (`drafters/mtp/plugin.py:70-74`).
+- **Weights:** Strata's `mtp/mtp-q2_0.gguf` for both engines (HF names, fused `gate_up_proj`, BF16 dense parts), via a
+  name and layout map in the model plugin's MTP rules.
+  - Both locks name this file.
+  - Unsloth's Q8_0 MTP (2.78 GB) would be a different deployment.
+- **hnorm is pinned to pooled:** Strata's default and SG's. The `stream` parameter is kept only for LC's cross-check.
+- **Draft vocabulary:** full on Holon. Strata's matched rows run `STRATA_MTP_FULL_HEAD=1` (St `generate.cpp:3502`);
+  its subset head stays on in its defaults row as a speed feature, since drafts never change the output.
+- **MTP experts:** through the offload store (D12a), or resident if tune measures that faster.
 
-**D10 — The new kernels are Triton, in new kernel plugins; Strata's CUDA is the performance target.**
-- **The plugins:**
-  - `kernels.qsa_triton`: index append + pool, block scores + top-k, sparse decode attention (split-K over the
-    selected blocks + merge), sparse prefill attention;
-  - `kernels.hc_triton`: `hc_mix@1` (norm + down + silu + up + sigmoid + mean + inject, with the previous half's
-    combine folded in as St `fused_gr.hpp:1-17`), `hc_combine@1`, the PLE block (grouped norms, gate, dilated conv
-    with state);
-  - `kernels.rows_io`: the n-gram hash and the row gather from a mapped pool or a staging pool.
-- **Where they come from:**
-  - FreeToken's Triton kernels (FT `kernel/triton/{hc,ple}.py`, `kernel/triton/qsa/*.py`, Apache-2.0) are adapted
-    with notices and `derived_from` records.
-  - Strata's (MIT) are references for fusion and launch shape.
-- **Rewrites:** a kernel moves to CUDA only if step 6's profile shows it above 5% of a step and a CUDA prototype gains
-  ≥ 10%.
-- **Why new plugins:** existing plugins keep their `src`.
+**D10 — The kernels are Triton, in new kernel plugins (`kernels.qsa_triton`, `kernels.hc_triton`, `kernels.rows_io`).**
+- They are adapted from FreeToken (Apache-2.0, with notices); Strata's CUDA (MIT) is the performance reference.
+- Selection scores and the HC projections use `input_precision="ieee"`.
+- The PLE kernels belong to the model plugin (D13′).
+- A kernel moves to CUDA in step 7 (perf closure) if it is above 5% of a step and a prototype gains ≥ 10%.
 
-**D11 — The comparison protocol** (acceptance 5).
-- **Same everything:** same files and bytes, card, context, prompts (X's natural prompts, greedy, 256 output tokens)
-  and host, interleaved rounds. Strata is pinned at `296b59d` and re-checked against its newest release at the close
-  (`docs/v1-offload.md` §10).
+**D11 — The comparison protocol.**
+- **The harness:** `bench/offload_ctx.py` gains a Strata backend and a Holon backend.
+  - Strata's server is chat-only (`serve/server.py:6`), so the Strata backend speaks the engine's `--serve` protocol
+    with raw token ids, as `serve/server.py` does after tokenizing. One-shot `--tokens-file` runs
+    (`generate.cpp:704-705`) are a cross-check.
+  - Every engine is timed from the client with offload_ctx's formulas (C / prompt time; (n − 1) / (last − first)),
+    in fresh processes, one engine resident at a time.
+  - Strata runs with `--max-context 33792`.
+- **EOS:** Strata has no ignore-EOS switch (searched `generate.cpp` and `server.py`). The prompt spans (natural text,
+  no chat template) are pre-screened: a span where either engine emits EOS within 256 tokens is dropped for every
+  engine before the gated rounds.
 - **Strata, no approximation:**
-  - `STRATA_ROUTE_TAIL_SKIP=0 STRATA_IQ_MT_MIN=1` (§1.4's settings; St `expert_source.cpp:3663-3678`,
-    `native_expert.cpp:238`);
-  - plus `--kv fp16`, so both engines keep 16-bit KV. Strata's setup picks int8 above 8K (St `setup.py:6286-6294`).
-    This refines §1.4; open question 3.
-  - plus `--ple-io ram` against Holon's RAM tier, so the row is engine against engine, not disk against RAM.
-  - Its speed features stay on: adaptive placement, the PCIe split, the prefill CPU share, tensor-core prompt kernels.
-    They round differently but approximate nothing; Holon's counterpart is F5b where tune picks it.
-- **Strata defaults:** its setup's command for the card (St `setup.py:6570-6576`):
-  - `--expert-cache auto --prefill auto --spec 4 --spec-min-p 0.5`, with the suffix drafter;
-  - int8 KV above 8K;
-  - PLE O_DIRECT.
-  - Against it, Holon runs A1 + q8_0 KV above 8K + MTP, with its default PLE tier.
+  - `STRATA_ROUTE_TAIL_SKIP=0 --kv fp16 --ple-io ram`, after `--calibrate` on that card and file (`docs/DETAILS.md:489-503`; its settings are recorded);
+  - KV streaming is off at these contexts (`--kv-resident` only at ≥ 64K, St `setup.py:6604-6620`), and this is
+    recorded;
+  - `STRATA_IQ_MT_MIN` is left at its default. It is a reproducibility switch, not an approximation, and costs Strata
+    1–3% (`docs/DETAILS.md:97-104`);
+  - the prefill CPU share stays on (below 1,024-token chunks only, `prefill.cpp:178-181`). The 1K prompts are exactly
+    1,024 tokens.
+- **Strata defaults:**
+  - setup's command for the card: `--expert-cache auto --prefill auto --spec 4 --spec-min-p 0.5`, the suffix
+    drafter, int8 KV above 8K, PLE O_DIRECT, calibrated (St `setup.py:6570-6576`);
+  - against Holon with A1, q8_0 KV above 8K and MTP.
 - **Drafting:**
-  - **Off:** Strata without `--mtp` and with `--suffix-draft 0` (St `generate.cpp:7238-7243`); Holon without a
-    drafter.
-  - **Matched:** both MTP at 3 drafts, the same MTP weights' types (D9), Strata `--spec 4 --spec-min-p 0
-    --suffix-draft 0`.
-  - Both off and matched rows are gated (open question 4).
-- **Measures:** Holon `bench/holon_tg.py` and `llama_bench.py`-style prefill; Strata `serve/server.py` with
-  `tools/strata_bench.py`'s timings (St `tools/strata_bench.py:1-26, 131-136`). Evidence goes in
-  `evidence/fn_strata_<gpu-class>_<date>.json`.
+  - **Off:** Strata without `--mtp` and with `--suffix-draft 0` (St `generate.cpp:2134`); Holon with no drafter.
+  - **Matched:** both run Strata's MTP pack at 3 drafts. Strata uses `--spec 4 --spec-min-p 0 --suffix-draft 0`,
+    `STRATA_MTP_FULL_HEAD=1`, and pooled hnorm (its default).
+  - Accepted tokens per pass are recorded for both engines in every MTP row.
+- **RAM-short pairing:** Holon's SSD tier against Strata's `--ple-io direct`.
+- **Statistics** (fixed now):
+  - ≥ 5 interleaved rounds (reversed on odd rounds), each with ≥ 3 distinct prompt spans per context;
+  - the cell statistic is the ratio of medians, with a 95% bootstrap CI (resampling rounds × spans);
+  - **pass** if the CI's lower bound ≥ bar − 0.02;
+  - **fail** if the CI's upper bound < bar;
+  - otherwise **escalate** to the owner.
+  - There are 48 gated cells: 2 cards × 2 baselines × 2 drafting modes × 3 contexts × 2 metrics. Each cell reports
+    accepted tokens per pass and the expert hit rate.
+- **Reported rows:** FreeToken and llama.cpp, one arm each, 3 rounds.
+- **Cost:** ≈ 2 h per card per full set, plus calibration (≈ 30 min per card and file). Disk for files, packs and
+  MTP sources is checked before scheduling.
 
-**D12 — Offload deployment: X's defaults, plus two follow-ups X left to FN.**
-- **Defaults:** `lfu` (F11) with F5a; F7's prefill ring; a Flash-Next routing profile from `route_dump` on the RTX
-  PRO 6000 (natural prompts, held-out split), shipped in the bundle.
-- **Follow-up (a), the aux-model experts std minor** (plan §10):
-  - Today `std.moe.offload@1` refuses an aux model's experts (`std/holon_std/moe/offload.py:63-65`).
-  - FN adds the MTP layer as the store's next layer group. Its resolve calls take row kinds from the drafter's
-    sub-steps: one decode row per sequence per sub-step, written by the drafter's `before_launch` with the target's.
-  - Counts are zeroed at the target's group 0 only, and the store binds kernels after the aux model is built.
-  - **Exactness:** the snapshot with MTP experts through the store is byte-identical to MTP all-resident.
-- **Follow-up (b), tune's F5b benchmark** (plan §10): interleave the arms over several natural prompts (as
-  `spikes/x6_cpu/decode.py:2-4`) before FN's locks use its ≥ 5% rule (`tools/holon_tools/tune.py:25, 70-104`).
-- **F5b locks:** X escalated that no tool writes an F5b lock and that `check_locks.py` refuses tier-carrying locks.
-  Until the lead decides, FN's F5b rows are benchmark deployments and its locks are F5a (open question 5).
+**D12 — Offload: X's defaults (`lfu`, F5a, F7), plus the following.**
+- **(a) Aux-model experts std minor** (plan §10):
+  - The MTP layer becomes the store's next layer group. Today it is refused (`std/holon_std/moe/offload.py:63-65`).
+  - Its resolve takes row kinds from the drafter's sub-steps, written in the drafter's `before_launch`.
+  - Counts are zeroed at the target's group 0, and kernels bind after the aux model is built.
+  - L0 checks the store's per-group count deltas for sub-steps.
+- **(b) Tune's F5b benchmark is interleaved** before FN uses its ≥ 5% rule (`tools/holon_tools/tune.py:25, 70-104`).
+- **(c) Prefill scratch is lent from arena slots.**
+  - During a prefill step, `std.moe.offload@1` serves the MoE's transient buffers from lent arena slots, as it
+    already lends ring slots, and returns them after the pass: gate/up output, SwiGLU output, the fp32 down output,
+    and the q8_1 rows. That is ≈ 215 KB per token.
+  - So a large step does not permanently shrink the decode cache, as Strata's `pf_borrow` does (St
+    `generate.cpp:536-538, 3731-3741`).
+  - This is plugin-internal; the buffers are sized as in the MoE prefill track's §6.
+- **(d) The step size per card and context is a lock setting** (`max_step_tokens`, with lending on or off) that tune
+  chooses by weighing prefill against decode.
+- **(e) F5b rows** are reported separately. Gated rows use the lock's configuration, and X's F5b-lock escalation still
+  stands.
+- **(f) The profile** comes from `route_dump` on the RTX PRO 6000 (held-out prompts) and ships in the bundle.
 
-**D13 — Qwen3.6-35B-A3B leaves FN's critical path** (proposed; plan §10 names it FN's first step; owner to confirm).
-- FN's own oracle (D2) covers the shared expert, the sigmoid gates and GDN. FN's MTP covers aux-model experts.
-- The 35B adds a model plugin variant (`qwen35moe`) and its own locks, about 3 days, without retiring any FN risk.
-- It becomes a short follow-up on FN's units: `models.qwen3_5` with `std.ffn.sum@1`.
+**D13 — Qwen3.6-35B-A3B is off the critical path.** It is optional later evidence for `std.ffn.sum` and
+`gated_swiglu` on an existing trunk.
 
-**D14 — Split GGUF files are one checkpoint.**
-- `std.weights.gguf`'s hub and source read a `-0000i-of-0000n` set as one source: tensor tables merged, each
-  tensor's extent naming its shard (S4 already carries a path per part).
-- The refusal at `hub.py:44` goes.
-- Both FN's files and unsloth's need this.
+**D13′ — Std naming.**
+- The hyper-connection units are named for FN's gated-residual form: `std.hyper.gr_block@1`, `std.hyper.gr_mix@1`
+  (the output mixer), and the kernels `hc_gr_mix@1` / `hc_gr_combine@1`. GLM's mHC, which has a stream-mixing matrix,
+  will add siblings beside them.
+- `std.hyper.expand@1` (repeating the embedding) is form-free.
+- The PLE unit (`qwen4_exp.ple@1`) and its kernel contracts (`ple_rows@1`, `ple_block@1`) stay in `models.qwen4_exp`
+  until a second user appears. `std.tiered.rows@1` is in std.
 
-**D15 — Text-only.** The GGUFs carry no vision tensors; `image_token_id` positions hash as that id in PLE (LC
-qwen4exp.cpp:1229-1234), which text never produces.
+**D14 — Split GGUFs are one checkpoint** in `std.weights.gguf`, with extents per shard. The judge gains the same.
+
+**D15 — Text-only.**
 
 **D16 — Locks and propagation.**
-- New locks:
-  - `rtx-5080`: IQ2_XS, offload, MTP;
-  - `rtx-5090`: IQ3_S, offload, MTP.
-- No RTX PRO 6000 lock (a correctness card).
-- FN edits existing `src` in four places: `std.mixers.gdn`, `drafters/mtp`, `std.weights.gguf`, and the
-  `ggml_cuda` / `ggml_cpu` type tables. The existing locks therefore propagate once at the close: bitwise for the
-  dense ones, and L2 where a decode-only kernel changed (plan §10's decode-run L2 item applies).
+- **New locks:** `rtx-5080` (IQ2_XS) and `rtx-5090` (IQ3_S), both offload with Strata's MTP pack. No RTX PRO 6000
+  lock.
+- **FN changes `src` in:**
+  - the core (every lock);
+  - `std.mixers.gdn`, `std.moe.offload`, `std.weights.gguf`;
+  - `kernels.ggml_cuda` / `kernels.ggml_cpu` (types; possibly the IQ1_M hunk);
+  - `drafters/mtp` and `drafters/dflash` (no lock uses either; checked `plans/`);
+  - the workspace gguf-py relock.
+- **Order:** the MoE prefill track propagates its own changes first. Of FN and K, whichever closes second propagates
+  every lock once (K's D14).
 
 ## 3. What Holon has today (relevant pieces)
 
 | Piece | State |
 |---|---|
-| Model trunk | `embed → blocks → norm → lm_head`; h is `[T, H]` by contract (`core/holon/core/build.py:265-295`; `api/model.py:142-147`) |
-| State | only mixers declare it (`assembly.py:139-161`); `paged@1`, `recurrent@1` with checkpoints and draft slots; a page group shared by two paged specs is refused (`state.py:149-150`) |
-| Attention | `std.mixers.gqa@1` with the sigmoid output gate (`gqa/units.py:166-172`), KV formats bf16 / q8_0 / fp8, fused `qk_rope_kv` |
-| GDN | `std.mixers.gdn@1` (Qwen3.8's 16/48 heads), silu-gated norm, chunk 64 checkpoints |
-| MoE | `std.moe@1`: softmax top-k (`topk-moe.cu` instantiates up to 512 experts, `:341`), router-prepared q8_1; no shared expert anywhere (`docs/m02-moe.md:381-382`) |
-| Offload | X's store: `lfu` / `static` / `profile_decay` / `lru`, F5a / F5b, F7, F9, page-cache tier, aux models refused; the resolve fits E = 512 in shared memory ((roles + 11) · 512 · 4 B + 36 B ≤ 48 KiB, `kernels/expert_io/plugin.py:25-26, 144-147`) |
-| MTP | `std.spec.mtp_head@1` + `drafters/mtp` over the target's `norm(h)` |
-| GGUF | single files; types without Q2_0; tokenizer pre `qwen35` |
-| Core | 4,603 / 6,000 code lines (`scripts/ci/check_core_loc.py`), ABI 1.3 |
+| Model trunk | `embed → blocks → norm → lm_head`, h `[T, H]` (`core/holon/core/build.py:265-295`). The core passes the model's `norm` Ref to every block (`build.py:273`). |
+| Unit classes | `BuildContext.unit_factory` exists only in the core (`build.py:59`). The ABI's `BuildCtx` has only `unit(ref)` (`api/model.py:87`). |
+| State | Only mixers declare state (`assembly.py:139-161`). A Slot-only group without a planner gets the default planner, whose meta has no `graph_key`, so CUDA graphs are silently disabled (`executor.py:285-287, 313-315`). Shared paged page groups are refused (`state.py:149-150`). |
+| GDN | Two Slot specs, `draft_slots` 0, `alignment = in_step = 64`, replay rewind (`gdn/units.py:7-13, 117-124`) |
+| Judge | `_streamed` per-layer driver (`golden.py:229-266`); MoE detection by `_moe` suffix (`:293-294`); mirror without a shared expert (`moe.py:34-46`); bounded trace ≤ 1,408 tokens (`bounded.py:53-68`); snapshot long request 2,048 + 8 (`snapshot.py:129-147`) |
+| MoE, offload, MTP, GGUF | as rev 1. Resolve fits E = 512 (`kernels/expert_io/plugin.py:25-26, 144-147`). `topk-moe.cu` instantiates 512 (`:341`). |
+| Core | 4,603 / 6,000 code lines, ABI 1.3 |
 
-## 4. Core seams (additive ABI minors → ABI 1.4)
+## 4. Core seams (ABI 1.4 or 1.5 by merge order; ≤ +45 lines over FN's step-1 base)
 
 | # | Seam | Today → change | Toy proof | Lines |
 |---|---|---|---|---|
-| C1 | **Residual width** | Today h is `[T, hidden]` everywhere, and the profile hands drafters `zeros(T, hidden, cfg.dtype)`. → `ModelSpec.residual: Residual \| None = None`, where `Residual(width: int, dtype: str)` and None means `(hidden, model dtype)`. The trunk's h, taps and `Drafter.run`'s h are `[T, residual.width]` of `residual.dtype`. The executor's profile uses it. `TargetView.spec` already exposes the spec to drafters. The embed, block and norm units are unchanged in the core: they read n from their Ref params. | A toy model whose embed expands to `[T, 2H]` fp32 and whose norm collapses it. Trunk, `forward`, prompt logprobs, `_worst_step`, a tap and a toy drafter in the profile all see the stated shape, in graphs and eager. Plugins refuse widths they cannot take: dflash refuses `width ≠ hidden` (`dflash/plugin.py:136`). | ≈ 15 |
-| C2 | **State declared by blocks and FFN units** | Today `_bind_layers` binds only `layer.mixer`'s `state_specs` / `planner`. → It binds every Ref a layer is built from: `ModelSpec.block` over all layers, each `LayerDecl.ffn` over its layers, and the mixers as today. The same hooks (`state_specs(params, layers, ctx)`, `planner`) apply, and "a group declared twice" stays an error. Aux models get the same through `AuxSpec`'s layer declarations. | `test_payloads.py` gets a toy block holding a `Slot` running sum at one listed layer. It covers cut, publish, prefix hit, adopt, and draft-slot rewind beside a toy mixer's state. A toy FFN with paged state is bound and sized. | ≈ 20 |
+| C1 | **Residual width** | h is `[T, hidden]` → `ModelSpec.residual: Residual \| None = None`, with `Residual(width, dtype)`. Trunk, taps and `Drafter.run` carry `[T, width]` of `dtype`. The profile builds the drafter's input from it and asserts that the trunk's real output matches. | A toy model with an expand embed `[T, 2H]` fp32 and a collapsing norm. Trunk, `forward`, prompt logprobs, `_worst_step`, a tap and a toy drafter are checked in the profile, eager and captured. A mis-declared width fails at startup. | ≈ 15 |
+| C2 | **State declared by the block** | Only `layer.mixer` → also `ModelSpec.block`, over all layers, with the same `state_specs` / `planner` hooks. A non-paged group without a planner is refused at bind for every declarer (mixers too), instead of graphs silently going off. | In `test_payloads.py`: a toy block declares, **through a nested Ref** (C3), a Slot running sum at one layer with alignment 64 / in_step 64. Beside it, a toy mixer kind with alignment 16. Asserts a prefix-hit length > 0, cut and in-step publish, adopt and replay rewind, and graphs captured. | ≈ 22 |
+| C3 | **`BuildCtx.unit_class(ref)`** | A plugin cannot reach a nested Ref's class → the registered class serving `ref` (`unit_factory` exposed), so a composite unit forwards `state_specs` / `planner` / alignment from the unit it wraps without importing it | Covered by C2's nested Ref | ≈ 5 |
 
-- **Not core:** HC units and kernels, QSA, PLE and its row table, the shared expert, MTP's head, split GGUF, Q2_0 /
-  IQ1_M, the aux-model store minor, tune.
+- **Dropped from rev 1:** C2's FFN branch. FFN `forward(x)` has no StepCtx (`blocks/units.py:11-25`), and
+  `sub_planners` refuses recurrent aux state (`assembly.py:125-127`).
 - **Generality:**
-  - "hyper", "residual" and "row" are allowed by `check_core_denylist.py`; no model, mixer or format name enters.
-  - C1 serves GLM's mHC as is (`docs/v1-offload.md` §4.7).
-  - C2 serves any block-level stateful unit, for example a later Engram table (FT
-    `models/deepseek_v41/engram_table.py`).
-- **ABI:** both are additive: a field with a default, and optional hooks on existing protocols. Regenerate
-  `core/abi.txt`, bump `ABI` to 1.4 (`core/holon/api/manifest.py:19`) and pass `check_abi --base`.
+  - `check_core_denylist.py` gains `qsa|ngram|indexer`.
+  - C1 serves GLM's mHC.
+  - C2 and C3 serve any composite stateful block.
+- **ABI:** all three are additive (a defaulted field, optional hooks on the block, a member of a core-implemented
+  protocol). Regenerate `core/abi.txt`, and check `check_abi --base` and the line count against FN's step-1 base.
+  Whichever of K and FN merges its seams second rebases and takes the next minor.
 
-## 5. std units, kernel contracts, model plugin
-
-**std units** (new unless marked):
+## 5. Units, contracts, model plugin
 
 | Unit | Role |
 |---|---|
-| `std.hyper.embed@1(inner, n)` | the inner embed's `[T, H]` repeated to `[T, n·H]` in the residual dtype |
-| `std.hyper.block@1(n, rank, pre={layer: Ref})` | per layer: `pre` (PLE at layer 1) → `hc_mix` → mixer → `hc_combine` → `hc_mix` → ffn → `hc_combine`; the norm site param is ignored (no pre-norms); declares `pre`'s state (C2) |
-| `std.hyper.head_norm@1(n, rank)` | the output mixer (mix without inject), as `ModelSpec.norm` |
-| `std.ple.ngram@1(table, …)` | n-gram ids, the row gather (`std.tiered.rows@1`), K/V projections, grouped norms, gate, the dilated conv with its `recurrent@1` state, `R += G + silu(conv)` |
-| `std.tiered.rows@1` | a large row table in a mapped host pool (RAM) or a file with O_DIRECT readers (SSD); `gather(row_ids) → rows` on the device |
+| `std.hyper.expand@1(inner, n)` | the inner embed repeated to `[T, n·H]`, fp32 |
+| `std.hyper.gr_block@1(n, rank, pre=Ref?, pre_at=(1,))` | `pre` → mix → mixer → combine → mix → ffn → combine. Ignores the `norm` site parameter (the core passes the model's norm, here the output mixer). Forwards `pre`'s state via `unit_class` (C2, C3). |
+| `std.hyper.gr_mix@1(n, rank)` | the output mixer, used as `ModelSpec.norm` |
+| `qwen4_exp.ple@1` (model plugin) | ids, the row gather, K/V, norms, the signed-√ gate, the dilated conv with fp32 state and replay rewind |
+| `std.tiered.rows@1` | the row table, RAM or SSD |
 | `std.mixers.qsa@1` | D6 |
 | `std.ffn.sum@1`, `std.ffn.gated_swiglu@1` | D7 |
-| `std.mixers.gdn@1` (edit) | `out_gate` (D8) |
 | `std.spec.mtp_hc_head@1` | D9 |
-| `std.weights.gguf` (edit) | split files (D14), the Q2_0 type entry (D1) |
-| `std.moe.offload@1` (edit) | aux-model experts (D12) |
+| edits | `std.mixers.gdn` (`out_gate`), `std.weights.gguf` (split files), `std.moe.offload` (aux experts, scratch lending), `drafters/mtp` (residual carry, `head.out`), `drafters/dflash` (refuses `residual.width ≠ hidden`) |
 
-**Kernel contracts** (each with `reference.py` and a CPU provider in `testing/holon_testing/ref_kernels`):
+**Contracts** (each with `reference.py` and a CPU provider):
+- `hc_gr_mix@1`, `hc_gr_combine@1` (fp32, ieee);
+- `rows_gather@1` (bitwise dequant: IQ4_NL / Q4_0 / Q5_0 / Q8_0 / BF16);
+- `ple_rows@1` (int64, bitwise; fresh-slot EOS);
+- `ple_block@1` (fp32; in-step payloads; replay rewind);
+- `qsa_index@1` (pooling from stored raw keys);
+- `qsa_select@1` (fp32 ieee; lower-index ties; sub-batched workspace);
+- `qsa_attend@1` (prefill, decode, verify; gqa's KV formats).
 
-| Contract | Signature (sketch) | Notes |
-|---|---|---|
-| `hc_mix@1` | `(R [T, nH], norm_w, W_down, W_up, W_inj?) → x [T, H], w [T, n]` | fp32 activations; bf16 or quantized weights through `qlinear@2` for the projections in prefill; one fused kernel for decode rows |
-| `hc_combine@1` | `(R, y [T, H], w) → R` in place | may be folded into the next `hc_mix` (a fused variant with its own contract) |
-| `ple_rows@1` | `(input_ids, prev-token state, positions, consts) → row_ids [T, 16]` | int64; the EOS cut; bitwise against the oracle |
-| `rows_gather@1` | `(row_ids, table view \| staging, type) → E [T, 2560]` | IQ4_NL / Q4_0 / Q5_0 / Q8_0 / BF16 rows dequantized; bitwise |
-| `ple_block@1` | `(R, E, K/V outputs, norms, conv_w, conv state) → R, conv state` | fp32; the state of draft slots as GDN's |
-| `qsa_index@1` | `(raw k [T,128], positions, idx pages) → pooled keys written` | pools blocks completed in the step; the norm and RoPE at the block's first position |
-| `qsa_select@1` | `(q_idx [T,4,128], idx pages, lengths) → block ids [T, ≤512]` | fp32 scores; exact top-k, ties to the lower block; device lengths for verify and sub-steps |
-| `qsa_attend@1` (prefill / decode / verify) | `(q, kv pages, block ids, tail) → o` | split-K over selected blocks + merge for decode; KV formats as gqa's |
-| `linear_experts@2` IQ1_M path | as @2 | D1: dequantize the called slots to bf16, then a grouped GEMM above the mmvq limit |
-
-**Model plugin `models.qwen4_exp`** (`plugins/holon_plugins/models/qwen4_exp/`, `derived_from = "models.qwen3_5@b5b1e7f"`):
-- **Recipe:** `ModelSpec(hidden=2560, residual=Residual(10240, "float32"), block=Ref("std.hyper.block@1", n=4,
-  rank=320, pre={1: Ref("std.ple.ngram@1", …)}), embed=Ref("std.hyper.embed@1", …), norm=Ref("std.hyper.head_norm@1",
-  …), …)`.
-- **Layers:** `qsa` at `full_attention_interval`, else `gdn(out_gate="sigmoid")`; every ffn is
-  `std.ffn.sum@1(moe, gated_swiglu)`.
-- **GGUF rules:**
-  - LC's names: `hc_{attn,ffn}_{norm,down,up,inject}`, `output_hc_*`, `indexer.*`, `ple_*`, `per_layer_token_embd`,
-    `ffn_*_shexp`, `ffn_gate_inp_shexp`;
-  - norms stored as w + 1, `ssm_a` = −exp(A_log), V heads tiled: FT `gguf.py:1-4, 154-159`; LC
-    `conversion/qwen4exp.py:153-169`;
-  - hparams from `qwen4exp.*` (`hyper_connection.*`, `attention.indexer.*`, `ple.*`).
-- **HF rules:** for the tiny model and the BF16 checkpoint.
-- **`draft_head("mtp")`:** `AuxSpec(Ref("std.spec.mtp_hc_head@1"), …)` over the MTP file.
+**`models.qwen4_exp`:**
+- The recipe sets `residual=Residual(10240, "float32")`, `block=Ref("std.hyper.gr_block@1", n=4, rank=320,
+  pre=Ref("qwen4_exp.ple@1", alignment=64, in_step=64, …), pre_at=(1,))`. `alignment` and `in_step` are GDN's chunk,
+  asserted against `std.mixers.gdn`'s constant in the plugin's test.
+- Layers are `qsa` / `gdn(out_gate="sigmoid")`; every FFN is `std.ffn.sum@1(moe, gated_swiglu)`.
+- The GGUF rules use LC's tensor names and transforms.
+- The MTP rules map Strata's `mtp-q2_0.gguf`.
 
 ## 6. Numerics and judge (thresholds and predicted verdicts fixed now)
 
-### 6.1 CPU: tiny model vs HF
+### 6.1 CPU: the tiny model vs the HF fixture
 
-**Config:** 8 layers (QSA at 3 and 7, PLE at 1), H = 64, n = 4, rank 16, vocab 512 with EOS 511.
+**Config:** 8 layers (QSA at 3 and 7, PLE at 1), H = 64, n = 4, rank 16, vocab 248,320.
 
 | Group | Values |
 |---|---|
-| Attention | 4 / 2 heads × 64, rotary 16 |
-| Indexer | 2 heads × 32, ratio 4, **budget 16** (selection bites past 19 tokens) |
-| GDN | 2 / 6 heads × 32 |
+| Attention | 4 / 2 heads × 64 |
+| Indexer | 2 × 32, ratio 4, budget 16 |
+| GDN | 2 / 6 × 32 |
 | MoE | 8 experts top-2 + shared |
-| PLE | 4 heads × 16, `ngram_vocab_size_base` 1000, one split |
+| PLE | 4 heads × 16, `ngram_vocab_size_base` 1000 |
 | MTP | 1 layer |
 
-Constraints: HFx:196-265, LC qwen4exp.cpp:76-123.
-
-**Sequence:** 100-token prompts with an EOS mid-sequence, chunked at 7 and 13 (straddling 4-blocks and the PLE
-window), then 24 decode steps, with random fp32 weights.
+Everything is randomised (D2). The 100-token prompts contain an EOS; they are chunked at 7 and 13, then decoded for
+24 steps.
 
 | Check | Threshold | Predicted |
 |---|---|---|
-| logits vs the HF fp32 fixture | max \|Δ\| ≤ 1e-4, top-1 identical | pass |
-| selected token sets per QSA (layer, position) | identical | pass (fp32 both, random weights: no near-ties) |
+| logits, chunked and one-shot, vs the fixture | max \|Δ\| ≤ 1e-4, top-1 identical | pass |
+| QSA token sets per (layer, position) | identical under the lower-index rule; the test asserts that boundary ties occur | pass |
 | PLE row ids | bitwise | pass |
-| prefix hit vs recompute, chunked vs one-shot | bitwise (CPU, same path) | pass |
-| MTP head vs LC's formula (both hnorm forms) | max \|Δ\| ≤ 1e-4 against a small formula reference in the test | pass |
+| prefix hit vs recompute | bitwise | pass |
+| MTP head, pooled vs SG's transcription; stream vs LC's graph | ≤ 1e-4 | pass |
+| plants `qsa_dense_limit_off_by_one`, `ple_conv_dilation_1`, `ple_eos_cut_off` | the tiny test fails | fail (the conv is nonzero) |
 
-### 6.2 Full model, L2 and bounded
+### 6.2 Full model
 
 **Setup:**
-- Goldens: fp32, layer-streamed (D2), for ISTA IQ2_XS and IQ3_S on `v1-qwen3_5.jsonl` + `v1-long.jsonl`.
-- Floors: bf16 HF with `--q8-1 mmq|mmvq` per path. Path-aware: IQ1_M prefill rows unemulated (D1); F5b's CPU set
-  under Q8_K blocking, as X's.
-- Candidate: Holon Tier B on the RTX PRO 6000, all-resident.
-- Pass rules: L2's (`docs/design.md:1395`).
+- Goldens: fp32, streamed, for IQ2_XS and IQ3_S, on `v1-qwen3_5` and `v1-long`.
+- Floors: bf16, with `--q8-1` per path and the shared expert mirrored. IQ1_M needs no special case under D1′; under
+  its fallback, those rows' weights are cast to bf16. F5b's CPU set uses Q8_K blocking with `q2_0` in `Q8_0_DOT`.
+- Pass rules: `docs/design.md:1395`.
 
-| Check | Predicted | Why |
-|---|---|---|
-| L2, IQ2_XS and IQ3_S, both sets | pass; KL p99 ≤ 1.3× floor | fp32 R and HC beat the floor's bf16 residual. QSA selection flips between golden and candidate (bf16 inputs) are < 1% of selected blocks on the long set, reported. |
-| bounded: chunked, prefix hit, graphs vs eager, overlap 1 vs 0 | pass | — |
-| snapshot ×3 | run-identical | — |
-| MTP verify path L2 | pass | — |
-| MTP acceptance | ≥ 2.2 per pass at 3 drafts | the better hnorm form; the other predicted ≤ 1.6 |
-| offload (capped, `lfu`, MTP experts in the store) vs all-resident | byte-identical | — |
-| PLE RAM vs SSD tier | byte-identical | — |
+| Check | Predicted |
+|---|---|
+| L2, both files, both sets | pass; KL p99 ≤ 1.3× floor; selection flips < 1% of blocks on `v1-long` (reported) |
+| bounded: chunk 250, prefix hit (4K system prompt), graphs vs eager, overlap | pass |
+| snapshot ×3 incl. an 8K request with MTP | run-identical |
+| MTP verify L2; accepted per pass | pass; ≥ 2.2 |
+| N3's zero-tie rate on layer 3 | reported (it decides how often the tie rule matters) |
+| offload vs all-resident (capped, `lfu`, MTP experts in the store) | byte-identical |
+| PLE RAM vs SSD | byte-identical |
 
 ### 6.3 Plants
 
-Each plant changes only its own path; the bounded baseline stays clean.
+Each plant changes only its own path.
 
 | Plant | Breaks | Predicted |
 |---|---|---|
-| `qsa_select_shift` | selected blocks shifted by one past the budget | L2 **fails on `v1-long`**, passes on `v1-qwen3_5` (shows why the long set exists) |
-| `qsa_pool_rope_last` | pooled key rotated at 4b + 3 instead of 4b | L2 fails on `v1-long` (KL p99). If it passes, the long set lacks recall prompts and grows before any lock. |
-| `qsa_dense_limit_off_by_one` | dense up to 2,052 | L2 passes (one position); caught by the tiny CPU test (selected sets differ at 20) — recorded as the CPU test's plant |
-| `hc_inject_unscaled` | inject without the `/n` | L2 fails everywhere |
-| `ple_conv_dilation_1` | conv taps t−3..t | L2 fails (KL p99) |
-| `ple_state_not_carried` | the conv window reads zeros at a chunk start | bounded chunked-vs-one-shot fails; one-shot L2 clean |
-| `shexp_gate_off` | shared expert added ungated | L2 fails |
-| `mtp_stream0` | MTP reads stream 0 for every stream | acceptance drops ≥ 0.4 tokens per pass; outputs unchanged |
-| `aux_rowkind_target` | the MTP layer's resolve uses the target's row kinds | snapshot with MTP experts through the store differs from all-resident |
+| `qsa_select_shift` | prefill selection shifted one block past the budget | L2 fails on `v1-long`, passes on `v1-qwen3_5` |
+| `qsa_decode_select_shift` | the same, in decode and verify only | L2 clean (teacher-forced); the bounded prefix-hit check and the 8K snapshot fail |
+| `qsa_pool_rope_last` | pooled key rotated at 4b + 3 | L2 fails on `v1-long`; if not, the long set gains recall prompts before any lock |
+| `hc_inject_unscaled` | no `/n` in the inject | L2 fails |
+| `ple_gate_no_sqrt` | the gate without the signed √ | L2 fails |
+| `ple_state_not_carried` | the conv window is zeroed at a chunk start | bounded chunk-250 check fails; one-shot L2 clean |
+| `ple_state_bf16` | the conv history stored in bf16 | bounded chunked and prefix-hit checks fail; L2 clean |
+| `shexp_gate_off` | the shared expert ungated | L2 fails (the floor mirrors the gate) |
+| `mtp_stream0` | MTP reads stream 0 for every stream | acceptance drops ≥ 0.4 per pass; outputs unchanged |
+| `aux_row_padding` | one real MTP row marked PADDING (reads the null slot) | snapshot with MTP experts in the store ≠ all-resident |
 | `rows_off_by_one` | the SSD tier reads the neighbouring row | RAM-vs-SSD identity fails; L2 fails |
 
-The EOS cut is checked by the tiny CPU test only: EOS 248044 is rare inside prompts.
+## 7. Memory fit (est.; step 0 and tune measure)
 
-## 7. Memory fit (estimates; step 0 measures)
+**Anchor.** X measured the RTX 5080's pool budget at 11.747 GiB (12.61 GB), with the 30B's 1.05 GB of weights at a
+0.9 fraction (`evidence/x4_gate_rtx-5080_2026-10-17.json`). FN's weights are 3.76 GB, plus Strata's MTP pack at
+0.89 GB: 3.6 GB more. That costs 3.24 GB of budget and gives back the 30B's own step peak (≈ 0.6 GB). That leaves
+≈ 10.0 GB for FN's pools and its step peak.
 
-Budget = VRAM after the CUDA context × `memory_fraction` (≈ 1.4 GB idle on the RTX 5080 at 0.9), less the worst
-step's peak.
+**Per-request state:**
+- **KV at 32K:** 13 × 2,432 B per token ≈ 1.04 GB bf16, 0.63 GB as q8_0.
+- **GDN:** (`max_seqs` + 1) × (1 + `draft_slots` 0) = 2 slots × 36 × 3.06 MiB ≈ 0.23 GB, plus one checkpoint
+  ≈ 0.12 GB.
+  - Rev 1's 8 slots were wrong (A-M2).
+- **PLE:** 368 KB per slot.
 
-**Per-token and per-request costs:**
-- **KV per token:** 12 QSA layers × 2,432 B (bf16 KV + index keys), plus the MTP layer's, ≈ 31.6 KB. That is ≈ 1.04
-  GB at 32K; with q8_0 KV, ≈ 19 KB (0.63 GB).
-- **GDN state:** 36 × ≈ 3.1 MiB per slot. Slots = (`max_seqs` + 1) × (1 + drafts) = 8 at `max_seqs` 1 with 3 drafts
-  ≈ 0.92 GB, plus 2 checkpoints ≈ 0.23 GB.
-- **PLE state:** 184 KB per slot.
+**The step peak:**
+- **Not lendable** (the trunk: R, HC, GDN, QSA, selection sub-batches): ≈ 150 KB per token.
+- **Lendable** (MoE scratch, D12c): ≈ 215 KB per token.
 
-| Card, file, context | Non-expert | MTP | KV | GDN + ckpt | Activations | Expert cache | Host pinned |
-|---|---|---|---|---|---|---|---|
-| RTX 5080 16 GB, IQ2_XS, 32K, MTP | 3.76 GB | 0.8 GB resident (or in the store) | 1.04 | 1.15 | ≈ 0.8 (2K chunks) | ≈ 7.6 GB ≈ 21% of 35.45 (≈ 8.4 GB ≈ 24% with MTP experts in the store) | experts 35.5 + PLE 28.8 ≈ 64.3 GB (35.5 with PLE on SSD) |
-| RTX 5090 32 GB, IQ3_S, 32K, MTP | 4.51 GB | 0.8 | 1.04 | 1.15 | ≈ 1.0 | ≈ 23.9 GB ≈ 47% of 50.29 | 50.3 + 28.8 ≈ 79.1 GB |
-| RTX PRO 6000 96 GB, IQ2_XS / IQ3_S, all-resident | 3.76 / 4.51 | 2.8 (Q8_0) | ≤ 4.2 at 128K | 1.15 | ≈ 1.5 | all: 35.45 / 50.29 | PLE 28.8 |
+| RTX 5080, IQ2_XS, 32K, MTP pack resident | 2K steps | 4K steps | 8K steps |
+|---|---|---|---|
+| Non-lendable peak | 0.31 GB | 0.61 | 1.23 |
+| MoE scratch lent from the cache during prefill | 0.44 | 0.88 | 1.76 |
+| **Decode expert cache, with lending** | **8.3 GB (23%)** | **8.0 (23%)** | **7.4 (21%)** |
+| Decode expert cache, without lending | 7.9 (22%) | 7.1 (20%) | 5.6 (16%) |
+| Prefill cap from streaming non-resident experts (≈ 26 GB per step at ≈ 47.5 GB/s) | ≈ 3.6K tok/s | ≈ 7.1K | ≈ 14K |
 
-- **Routed bytes per token:** 48 × 10 × 1.44 MB = 691 MB (IQ2_XS); 984 MB (IQ3_S).
-- **Decode traffic at the 5080's fit:** under skewed routing `lfu` hits above the cached fraction. If hits are ≈
-  50% (est.; N4 replays Flash-Next traces), misses move ≈ 0.35 GB per token over PCIe. That is the decode
-  roofline's main term, hence D12's F5b question.
-- **Host RAM per desktop class** is checked before scheduling (not recorded here). The 5090's 79 GB pinned is the
-  largest ask; a class short of it runs the PLE SSD tier.
+Notes on the 5080:
+- **At 4K context:** KV is 0.13 GB, which adds ≈ 0.9 GB of cache.
+- **Proposed lock settings:** the 1K and 4K rows run single-step prompts; the 32K row runs 8K steps with lending.
+  Tune decides.
+- **MTP experts in the store** instead of resident: ≈ +0.7 GB of cache.
+
+**Other cards:**
+- **RTX 5090, IQ3_S, 32K:** ≈ (34.36 − 0.6) × 0.9 − 4.51 − 0.89 − 1.39 − 1.23 (8K non-lendable) ≈ 22.4 GB, 45%
+  of 50.29 GB. Its prefill cap is similar (≈ 26 GB streamed per step).
+- **RTX PRO 6000, all-resident:** 40.1 / 55.7 GB of weights (IQ2_XS / IQ3_S, with MTP); KV up to 128K is 4.1 GB.
+
+**Host pinned memory:**
+- IQ2_XS: experts 35.5 + PLE 28.8 ≈ 64.3 GB.
+- IQ3_S: 79.1 GB.
+- Add 0.7 GB with MTP experts in the store.
+- With the PLE SSD tier: only the experts.
+- Host RAM per class is checked before scheduling (not recorded here).
+
+**Decode, proxy anchors** (C-m1):
+- Hit rate 75–90%: Strata reports that band on single 12–16 GB cards (`docs/DETAILS.md:1694`), and X's 30B hit
+  ≈ 80% at 25% cached. So misses are 69–173 MB per token on IQ2_XS.
+- Dense weights read per token are 3.42 GB, including 1.26 GB of BF16 HC: ≈ 3.8–4.2 ms on the 5080.
+- F5b's gain is marginal at ≈ 2 misses per layer.
+- These replace rev 1's "≈ 50% hits". This section supersedes `docs/v1-offload.md` §7's FN rows.
 
 ## 8. Step 0 — measure before freezing
 
-On the RTX 5080 and 5090 desktops (the bar cards), one heavy job at a time under `MemoryMax`. Results go in `evidence/`.
+On the RTX 5080 and 5090 desktops, one heavy job at a time under `MemoryMax`.
 
 | # | Measure | Decides |
 |---|---|---|
-| N1 | Strata at `296b59d`, defaults and no-approx, drafting off and matched, 1K / 4K / 32K, both cards. llama.cpp (`qwen4exp`, at its pinned commit) and FreeToken where they run. | the bars' denominators; whether open question 3's KV refinement matters |
-| N2 | The zero-copy row gather: 16 random 90 B rows per token from a 28.8 GB mapped pool, at 1 – 4,096 tokens. O_DIRECT 4 KiB random reads at queue depth 16 – 256 (X's M7 covers expert-sized reads only). | D5's SSD prefetch depth; whether the RAM tier's gather is under 1% of a decode step |
-| N3 | The oracle: HF 5.19.0 tiny model in the golden venv; the streamed driver on 2 layers of the real file | D2's feasibility and cost |
-| N4 | After step 5 (needs the model): routing traces on the RTX PRO 6000; X's M6 replay at 20–50% cached; per-layer prefill expert time vs chunk | the roofline for every acceptance-5 row, written before step 8 measures them; R2's trigger |
+| N0 | The harness: offload_ctx's Strata backend (the `--serve` protocol, raw ids) and Holon backend; Strata built at `296b59d`; its packs for both files; its MTP pack; `--calibrate` per card and file; EOS pre-screening of the spans | D11 runnable |
+| N1 | Strata no-approx and defaults, drafting off and matched, 1K / 4K / 32K, both cards (D11's statistics); FreeToken and llama.cpp once | the denominators; replaces rev 1's 2.3K tok/s community reference (PCIe-bound at 1K, not our file) |
+| N2 | The zero-copy row gather (1–4,096 tokens) and O_DIRECT 4 KiB reads at queue depth 16–256 | D5's SSD read-ahead depth |
+| N3 | Proxy roofline: routing traces from llama.cpp's `qwen4exp` (eval-callback top-k dump) or Strata's routing dump; X's M1 / M3 rates; Strata's phase timers (St `prefill.cpp:2811, 2915`), hit rate and chosen chunk from its logs; dense bytes and launch counts | every acceptance-5 row predicted **at step 0**; a row predicted < 0.9× goes to the owner before step 1 ends |
+| N4 | (step 2) HF 5.19.0 tiny model; `_streamed` on layers 1 (PLE) and 3 (QSA), and one 32K `v1-long` prompt with time and peak RSS; the zero-tie rate | D2's driver form (query-chunked or not); its cost |
+| N5 | (step 5) Holon's own routing traces on the RTX PRO 6000; the M6 replay at 20–50% cached | re-checks N3's roofline |
 
 ## 9. Steps
 
 | Step | Work | Checks | Days |
 |---|---|---|---|
-| 0 | N1–N3; host RAM per class | evidence; the panel reviews the parameters they set | 2 |
-| 1 | C1 and C2 with toy proofs (ABI 1.4) | core tests; `check_abi --base`; LOC; denylist | 2 |
-| 2 | The oracle: golden venv, `golden --stream-layers`, the qwen4exp GGUF → HF name map in `judge/holon_judge/gguf.py`, `v1-long.jsonl` (+ sha256), the tiny-model tool and fixtures | the driver reproduces HF's whole-model forward bitwise on the tiny model; 2 real layers stream | 3 |
-| 3 | std units with reference kernels and CPU providers (§5), split GGUF, the Q2_0 type entry, `models.qwen4_exp`, GDN `out_gate` | §6.1 on the CPU; Qwen3.8's snapshot unchanged with `out_gate` default | 4 |
-| 4 | CUDA / Triton kernels (D10), Q2_0 and IQ1_M in `ggml_cuda` / `ggml_cpu`, the IQ1_M prefill path, the q8_1 handle L0 (D7) | L0 on sm_86 / 89 / 120 + memcheck | 5 |
-| 5 | Full model all-resident on the RTX PRO 6000: goldens and floors, L2, bounded, snapshot; MTP head and drafter carrying R, the hnorm A/B; the routing traces (N4) | acceptance 1b, 2; plants 1–7 | 4 |
-| 6 | Offload: the aux-model experts minor, the PLE row table's SSD tier with prefill prefetch, the Flash-Next profile, offload exactness on the RTX PRO 6000, tune's interleaved F5b benchmark; roofline (N4) | acceptance 4; plants 8–9; profiles; tune's F5b on a known case reproduces X's interleaved −6% | 4 |
-| 7 | Locks on the RTX 5080 (IQ2_XS) and RTX 5090 (IQ3_S): `tune --new-model`, verdicts, approval | L2, snapshot, memory fit vs §7 | 2 |
-| 8 | The comparison (D11): acceptance 5 rows, FreeToken and llama.cpp rows | evidence; every row vs the roofline | 3 |
-| 9 | Close: full suite, panel code review, one propagation of the existing locks, plan §10 status | acceptance 6–8 | 2 |
+| 0 | N0–N3 (GPU desktops) | evidence; predicted rows | 4 |
+| 1 | C1–C3, the planner-required bind check, toy proofs, denylist | core tests; ABI against the step-1 base; LOC | 3 |
+| 2 | The oracle: golden venv; the judge edits of D2; gguf-py at LC's tree; `q2_0` in `Q8_0_DOT`; split files in the judge; `v1-long` with recall prompts (+ sha256); the tiny tool with LC's converter and fixtures; N4 | the driver equals HF's whole forward bitwise on the tiny model; N4 | 4 |
+| 3 | std units and the model plugin with references and CPU providers; split GGUF; `out_gate`; Q2_0 types | §6.1; Qwen3.8's snapshot unchanged | 5 |
+| 4 | Triton kernels with L0 on 3 SMs and memcheck; first tuning against the launch and `qsa_select` targets; rebase onto the MoE prefill track; IQ1_M loader L0 (or its fallback) | acceptance 3 | 7 |
+| 5 | The full model on the RTX PRO 6000: goldens and floors, L2, bounded, snapshot, MTP; **kernel-only all-resident comparison with Strata** (both fit, as `x4_gap` did); N5 | acceptance 1b, 2; plants | 5 |
+| 6 | Offload: aux experts (a), F5b interleave (b), scratch lending (c), PLE SSD tier, profile, exactness | acceptance 4; plants | 5 |
+| 7 | **Perf closure** on the bar cards: nsys per layer, fusions, CUDA rewrites by D10's rule, step-size and lending tune axes | every row within its roofline band, or the gap explained | 4 |
+| 8 | Locks (`tune --new-model`) on the RTX 5080 and RTX 5090 | L2, snapshot, fit vs §7 | 2 |
+| 9 | The comparison (D11) | acceptance 5 | 3 |
+| 10 | Close: suite, panel code review, propagation if FN closes second, plan §10 | acceptance 6–8 | 2 |
 
-**Order:** 2 and 3 run in parallel after 1; 4 can start with QSA and HC as soon as 3's references exist. FN changes
-the core in step 1 only, so another track (K) rebases on it once. Total ≈ 31 days.
+**Schedule.** The work sums to 44 days.
+
+**Critical path:** 0 ∥ 1 (4) → 2 ∥ 3 (5; step 3's CPU check waits for step 2's fixtures) → 4 (5; its QSA / HC work
+starts during step 3) → 5 (5) → 6 (5) → 7 (4) → 8 (2) → 9 (3) → 10 (2) = **35 days**.
+
+That figure assumes:
+- two agents in steps 0–4;
+- the MoE prefill track (its estimate: 9–14 days) landing before step 4 ends. If it slips, step 5 starts with
+  IQ3_S, which has no IQ1_M.
+
+Not counted: waiting on K's core round if K holds the core when FN's step 1 is ready.
+
+With one agent the steps run in series: 44 days.
 
 ## 10. Risks
 
-- **R1: decode at the 5080's fit is miss-bound.** With ≈ 21–24% of experts cached, decode depends on `lfu`'s hit
-  rate and PCIe.
-  - Strata uses a CPU-heavy split there (R §3.1); Holon's answer is F5b. The F5b-lock question (D12) can block the
-    lock, though not the measured row.
-  - The roofline (N4) predicts the row before step 8 measures it. A row predicted below 0.9× goes to the owner
-    before step 7.
-- **R2: prefill vs Strata.**
-  - X's prefill already trails FreeToken by 0.88–0.93× on 30B-A3B, from the expert GEMMs (plan §10's MoE
-    prefill-speed item).
-  - Strata's 5080 prefill is ≈ 2.3K tok/s at 4K (St's 2026-10-05 community RTX 5080 report under `bench/results/`, README:131-136; IQ3_S, not our file).
-  - If N4's roofline predicts < 0.9×, pulling that item into FN is a scope change to escalate. D1's dequant-GEMM
-    path is its seed.
-- **R3: the oracle's cost and version.**
-  - The streamed golden is new judge code, and HF's per-query indexer loop is slow.
-  - transformers 5.19.0 vs the workspace's 5.6.2 splits the judge's environments. Mitigation: the golden venv is used
-    only for recording, and its version sits in every golden's metadata.
-- **R4: an LC vs HF disagreement in GGUF conventions** (for example the dropped FP8 `weight_scale` of the PLE table:
-  LC `conversion/base.py:442-457`, FT `ple_disk.py:111`).
-  - Step 2's driver dequantizes the GGUF, so golden and candidate share the file's table whatever its scale. The
-    file-vs-checkpoint error is reported, not gated.
-  - The ISTA table is IQ4_NL at 7.6% per-row error vs BF16 (St `docs/DETAILS.md:1914-1919`), which sets
-    Flash-Next's quality on these files, not Holon's numerics.
-- **R5: QSA near-ties.** fp32-vs-bf16 score differences can flip a selected block, a bounded effect. The long set's
-  flip rate is reported; KL p99 is the gate.
-- **R6: Strata moves fast** (`docs/v1-offload.md` §10). The pin is `296b59d`; the close re-checks the newest
-  release.
-- **R7: pinned host memory.** 64–79 GB pinned. The SSD tier for PLE is the fallback; S2 accounts every byte.
+- **R1: decode at the 5080's fit.** At 21–23% cached the decode is miss- and dense-bound. N3's roofline is
+  pre-registered; a row predicted below the bar goes to the owner at step 0. F5b is the reported fallback.
+- **R2: prefill.** It depends on the MoE prefill track (D2, compact launches) and on D12c's lending. N3 predicts it at
+  step 0. A shortfall after the track lands is escalated, not absorbed.
+- **R3: the oracle.**
+  - The streamed golden at 32K: N4 measures it.
+  - The tie rule: documented, and its rate measured.
+  - Two judge environments: the golden venv is used only for recording.
+- **R4: LC vs HF GGUF conventions**, for example the PLE table's FP8 `weight_scale`. Golden and candidate share the
+  file's table; the error against the checkpoint is reported.
+- **R5: QSA near-ties** between fp32 and bf16 inputs: bounded; the flip rate is reported.
+- **R6: Strata moves fast.** It is pinned and re-checked at the close.
+- **R7: pinned host memory** (64–79 GB). The SSD tier is paired with Strata's direct I/O.
+- **R8: dependency order.** The MoE prefill track and K both touch shared code. The order is fixed: the MoE prefill
+  track first, then FN and K by merge order. One propagation, by the second to close.
 
-**Deferred:**
-- KV streaming for QSA (K4);
-- a PLE row cache (step 6 decides);
-- CUDA rewrites past D10's rule;
-- Qwen3.6-35B-A3B (D13);
-- Strata's suffix drafter;
-- `--ple-io mmap` parity.
+**Deferred:** K4 (FN's follow-up in plan §10), a PLE row cache, Strata's suffix drafter, `token_embd` on the host
+(0.34 GB, a later tune option), and Qwen3.6-35B-A3B.
 
-## 11. Open questions for the owner
+## 11. Lead decisions applied (2026-10-18; rev 1's open questions closed)
 
-1. **D13:** take Qwen3.6-35B-A3B off FN's critical path (plan §10 names it the first step)?
-2. **D2:** a golden-only venv with transformers 5.19.0, rather than bumping the workspace (relock + a propagation of every lock)?
-3. **D11:** Strata's no-approximation settings add `--kv fp16` (both engines on 16-bit KV) and `--ple-io ram` beside
-   §1.4's two variables.
-4. **D11:** gate both the drafting-off rows and the MTP-matched rows, or one of them?
-5. **D12:** X's F5b-lock escalation. If tune picks F5b on the 5080 at ≈ 22% fit, FN's lock needs that decision.
-6. **D1:** keep IQ2_XS as the 5080's bar file? It needs the IQ1_M prefill path; IQ3_XXS or Q2_0 avoid it.
-7. **R2:** if the roofline predicts prefill < 0.9× Strata, pull plan §10's MoE prefill-speed item into FN?
-8. **Acceptance 5:** FreeToken and llama.cpp rows reported only, or gated as in X (≥ 1.0× FreeToken)?
+1. Qwen3.6-35B-A3B is off the critical path (D13).
+2. A golden-only venv, with the tie rule recorded (D2).
+3. Strata `--kv fp16 --ple-io ram`; `STRATA_IQ_MT_MIN` dropped; `--calibrate`; the SSD pairing (D11).
+4. Drafting-off and MTP-matched rows both gated, with the statistics; Strata's MTP pack, pooled hnorm, full-vocab
+   drafts (D9, D11).
+5. Gate on the lock's configuration; F5b reported separately (D12e).
+6. IQ2_XS stays the 5080's file; IQ1_M becomes a native loader, with grouped scratch as the fallback (D1′).
+7. The MoE prefill track owns the prefill dispatch and `vendor.patch` and lands first; the proxy roofline moves to
+   step 0 (D1′, N3).
+8. FreeToken and llama.cpp are reported only (D11).
+9. Core order with K, the budget relative to the step-1 base, C3, no FFN branch, stronger toys (§4).
+10. Prefill scratch is lent; the step size is a lock setting (D12c–d, §7).
+11. Perf closure (step 7) and the kernel-only comparison (step 5).
+12. K4 goes into plan §10, owned by FN.
+13. HC units are named for their form; PLE stays in the model plugin (D13′).
+
+No open questions remain for the owner. Any acceptance-5 cell that D11's rule escalates goes to the owner when it is
+measured.
 
 ## 12. Review log
 
-- **Rev 1** (2026-10-18): drafted from cited source studies of Strata, FreeToken, llama.cpp, HF 5.19.0 and sglang,
-  of Holon at `b5b1e7f`, and of nine parsed GGUF headers. Three things were found on the way:
-  - Q2_0 is upstream (D1);
-  - shared page groups are refused by the core (D6, a correction to `docs/v1-offload.md` §4.7);
-  - split GGUFs are refused (D14).
+**Rev 1** (2026-10-18): drafted from cited source studies. Found on the way:
+- Q2_0 is upstream;
+- shared page groups are refused by the core;
+- split GGUFs are refused.
 
-  No panel round yet.
+**Rev 1 → rev 2: dispositions.** Every finding was checked against the cited code before its disposition.
+
+**Panel A (architecture):**
+
+| # | Finding | Disposition |
+|---|---|---|
+| A-B1 | No public way to reach a nested Ref's class | **Accepted.** Verified: `unit_factory` exists only in the core (`build.py:59`); `BuildCtx` has only `unit` (`api/model.py:87`). Added C3 `unit_class`; C2's toy declares its state through a nested Ref. |
+| A-M1 | PLE checkpoints must align with GDN's | **Accepted.** Verified at `kind.py:26, 54-70` and `state.py:190-201`. The `alignment` / `in_step` Ref parameters are set by the recipe; `ple_block` writes in-step; the toy asserts a hit > 0 across alignments. |
+| A-M2 | GDN verify is replay, not draft slots | **Accepted.** Verified: `gdn/units.py:7-13, 121-124` (`draft_slots` 0). PLE uses replay through `rewind_modules` (`api/state.py:135-140`); §7 has 2 slots. |
+| A-M3 | PLE state dtype | **Accepted:** fp32, 368 KB (D4). Same as B-M6. |
+| A-M4 | A Slot group without a planner disables graphs silently | **Accepted.** Verified: `_PagesPlanner.plan_bounds` returns None for non-paged state (`assembly.py:82-83`), giving no `graph_key` and `graphs = None` (`executor.py:285-287, 313-315`). C2 refuses it at bind; the toy captures graphs. |
+| A-M5 | ABI 1.4 collision with K; K's line budget | **Accepted.** Merge order decides 1.4 / 1.5. The budget is relative to the step-1 base (≤ +45). The second to close propagates (K's D14). |
+| A-M6 | K4 is owned by no one | **Accepted.** Plan §10 makes FN the owner, as its first follow-up. D11 records Strata's `--kv-resident` as off at ≤ 32K (`setup.py:6604-6620`). |
+| A-M7 | Std contracts encode FN's form | **Accepted:** the `gr_*` names (D13′); PLE moves to the model plugin. |
+| A-m1 | An int-keyed Ref dict fails | **Accepted.** Verified at `terms.py:81-83`. `pre=Ref`, `pre_at=(1,)`. |
+| A-m2 | The profile should assert the actual width; the dflash claim is wrong | **Accepted:** C1 asserts it; a dflash refusal is added (no lock uses dflash). |
+| A-m3 | The FFN branch is unusable | **Accepted:** dropped. |
+| A-m4 | D16's list is incomplete | **Accepted:** D16 completed. |
+| A-m5 | Pass `out_gate` only when not the default | **Accepted:** D8. |
+| A-m6 | Denylist additions | **Accepted:** `qsa\|ngram\|indexer`. |
+| A-m7 | `before_launch` cannot hash after a hit | **Accepted:** those rows take the in-graph path (D5). |
+| A-m8 | The MTP head / drafter interface | **Accepted:** `head.carries`, `head.out` (D9). |
+| A-m9 | The block receives the model's norm | **Accepted:** documented as ignored (§5). |
+
+**Panel B (correctness):**
+
+| # | Finding | Disposition |
+|---|---|---|
+| B-B1 | `topk` tie order vs the lower-index rule | **Accepted:** the stable rule in the tool and the driver, recorded as a deviation from HF; the tiny test asserts that ties occur; N4 measures the rate. |
+| B-B2 | The judge's MoE floor is wrong for `qwen4_exp` | **Accepted.** Verified at `golden.py:293-294, 264` and `moe.py:34-46`. The edits are listed in D2 and step 2; `_streamed` is reused. |
+| B-M1 | The PLE table in the golden | **Accepted:** a lazy row gather and a hash-constant assert. |
+| B-M2 | Q2_0 outside std | **Accepted, modified:** gguf-py at LC's tree (it has Q2_0, `quants.py:679`) instead of a shim; `q2_0` in `Q8_0_DOT` (verified missing at `reference.py:266`); split files in the judge. |
+| B-M3 | Sparse decode is untested beyond L0 | **Accepted.** Verified at `bounded.py:53-68` and `snapshot.py:129-147`. A 4K system prompt, an 8K snapshot request with MTP (per-model parameters, so no other model's snapshot is re-recorded), and plant `qsa_decode_select_shift`. |
+| B-M4 | Zeroed tiny weights; an independent GGUF writer | **Accepted:** randomised (verified HF zero init per the finding; the tool asserts nonzero); LC's converter; vocab 248,320. |
+| B-M5 | The PLE gate's signed √ was missing | **Accepted:** §0, `ple_block`, plant `ple_gate_no_sqrt`. |
+| B-M6 | Conv history dtype; pooling source | **Accepted:** fp32 state; pooling from stored keys; plant `ple_state_bf16`. |
+| B-M7 | `aux_rowkind_target` cannot fail | **Accepted.** Verified: row kinds only mask and count (`store.py:461-467`). Replaced by `aux_row_padding` plus an L0 count-delta check. |
+| B-M8 | The golden venv does not install | **Accepted:** `--no-deps` or overrides; tokenizers ≥ 0.23.1. |
+| B-m1 | The dense / sparse rule | **Accepted:** D6. |
+| B-m2 | "Chunked bitwise on the CPU" is unproven | **Accepted:** chunked is checked vs HF at 1e-4; bitwise only hit vs recompute. |
+| B-m3 | Plant chunk size | **Accepted:** 250. |
+| B-m4 | The IQ1_M bf16 path is not exact | **Superseded by D1′:** the native loader is exact; the fallback's floor casts. |
+| B-m5 | Triton TF32 | **Accepted:** `ieee`. |
+| B-m6 | Golden head memory | **Accepted:** chunked. |
+| B-m7 | N3's layers | **Accepted:** layers 1 and 3, plus a 32K prompt (N4). |
+| B-m8 | hnorm and the MTP oracle | **Accepted:** pooled pinned (St `generate.cpp:683-685`); Strata's per-pass definition; SG for pooled, LC for stream. |
+| B-m9 | A fresh slot's ids | **Accepted:** EOS. |
+| B-m10 | `page_size % 4` | **Accepted.** |
+| B-m11 | Keep only the open block's raw tail | **Rejected.** It saves 96 MB at 32K (≈ 1.3% of the 5080's cache). A tail ring would be per-request state that verify and prefix hits must carry; per-token raw keys keep both stateless. Revisit with K4. |
+| B-m12 | `v1-long` needs recall prompts | **Accepted:** 4 of 8. |
+
+**Panel C (performance and fairness):**
+
+| # | Finding | Disposition |
+|---|---|---|
+| C-B1 | The 32K prefill bar vs the fit | **Accepted.** Prefill scratch is lent (D12c); the step size is a lock setting (D12d); §7 shows it per step. Verified Strata's `--prefill auto` and borrowing at `generate.cpp:536-538, 3738-3741`. |
+| C-M1 | The roofline comes too late | **Accepted:** proxy roofline at step 0 (N3); N5 re-checks. |
+| C-M2 | The MoE prefill track | **Accepted:** dependency, types and shape added to its L0; D1's dequant path scoped to a fallback; "seed" claim struck. The track's D7 rejection of dequant + GEMM is noted. |
+| C-M3 | The Strata harness | **Accepted:** offload_ctx backends; raw ids through `--serve`; client timing; `--max-context 33792`. No ignore-EOS switch in Strata (searched), so spans are pre-screened. |
+| C-M4 | MTP bytes differ | **Accepted:** Strata's own pack for both; full-vocab drafts in matched rows (`STRATA_MTP_FULL_HEAD=1`, `generate.cpp:3502`); both locks name the file. |
+| C-M5 | Variance and multiple testing | **Accepted:** D11's statistics. |
+| C-M6 | Strata's calibration | **Accepted:** `--calibrate` per card and file, recorded. |
+| C-M7 | Decode loss points | **Accepted:** launch and `qsa_select` targets (acceptance 3); kernel-only comparison at step 5; profiling on the bar cards; perf-closure step 7. |
+| C-M8 | Golden at 32K | **Accepted:** N4 measures it; a query-chunked driver if needed. |
+| C-m1 | Hit-rate anchor | **Accepted:** 75–90% (§7). |
+| C-m2 | IQ1_M scratch | **Accepted, for the fallback only:** 16 experts per launch. |
+| C-m3 | Select workspace | **Accepted:** sub-batched, counted. |
+| C-m4 | `IQ_MT_MIN`; CPU share | **Accepted:** dropped; recorded. |
+| C-m5 | RAM tier pairing | **Accepted:** SSD vs `--ple-io direct`. |
+| C-m6 | GDN draft copies | **Count rejected, rest accepted.** GDN declares `draft_slots` 0 (verified, `gdn/units.py:121-124`), so 2 slots, 0.23 GB, accounted. `token_embd` on the host deferred. |
+| C-m7 | The 2.3K tok/s reference | **Accepted:** N1 replaces it. |
+| C-m8 | Schedule | **Accepted:** re-estimated (§9). |
+| C-m9 | F5b rows | **Accepted:** D12e. |
+| C-m10 | Citations | **Accepted:** the suffix flag is at `generate.cpp:2134`; MTP dense parts are BF16; X §7's FN rows are superseded. **Rejected:** quoting the community report's directory path verbatim, because its name contains a CPU model string that `check_private.py` refuses; it is cited by date and card. |
