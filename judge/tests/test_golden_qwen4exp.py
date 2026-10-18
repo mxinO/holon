@@ -40,6 +40,7 @@ def test_the_judge_reads_the_converted_file_as_the_checkpoint(tiny):
     assert all((got[k] - ref[k]).abs().max() <= 1.2e-7 for k in rounded)
     ids = torch.tensor([[0, 5, 4095], [17, 17, 1000]])
     assert torch.equal(gguf.PleRows(file).rows(ids), ref[table][ids])
+    assert gguf.emulate_q8_1(model, file, "mmq") == {}      # a floor passes unquantized tensors the map lacks (indexer)
 
 
 def test_the_streamed_golden_is_hfs_forward(tiny):

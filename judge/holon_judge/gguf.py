@@ -245,11 +245,11 @@ def emulate_q8_1(model: torch.nn.Module, path: str | pathlib.Path, kernel_path: 
     for t in reader.tensors:
         if q35 is not None and re.match(rf"blk\.{q35['layers']}\.", t.name):
             continue
-        if t.name.endswith("_exps.weight"):            # expert stacks: the floors' D3 block (`q8_1_experts`)
-            continue
+        if t.name.endswith("_exps.weight") or t.tensor_type in _DENSE:   # expert stacks: the floors' D3 block
+            continue                                   # (`q8_1_experts`); unquantized tensors (norms, BF16 projections)
         owner = hf_name(t.name).removesuffix(".weight")
-        if t.tensor_type in _DENSE or owner not in linears:
-            continue                                   # norms, and the embedding (get_rows reads it exactly)
+        if owner not in linears:
+            continue                                   # the embedding (get_rows reads it exactly)
         kind, blocks = t.tensor_type.name.lower(), np.asarray(t.data)
         route = kernel_path[owner] if isinstance(kernel_path, dict) else kernel_path
         g = q8_1.blocking(kind, route).sum_group
