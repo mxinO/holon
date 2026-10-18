@@ -191,7 +191,7 @@ class Engine:
             self.processor = p.load(p.single("logits_processor", cfg.slots["logits_processor"])).build(
                 self.ctx, VocabView(self.spec.vocab, self.eos, source.tokenizer))
         # A state tier below the device and the device's eviction policy (docs/v1-kv-tiers.md; opt-in, single).
-        self.tier, evicting = (p.load(p.single(slot, cfg.slots[slot])).build(self.ctx) if slot in cfg.slots else None
+        self.tier, victims = (p.load(p.single(slot, cfg.slots[slot])).build(self.ctx) if slot in cfg.slots else None
                                for slot in ("tier", "eviction_policy"))
 
         # Shared objects (`BuildCtx.shared`): their last pool requests, then a reset after every materialize. They are
@@ -215,12 +215,12 @@ class Engine:
                                   index=prefix_index(self.spec, bound, cfg.prefix_cache, self.ledger.pools),
                                   overflow=self._overflow(drafter))
         host_lens = any(getattr(planner, "needs_host_lens", False) for planner in planners.values())
-        if self.state.index is None and (self.tier, evicting) != (None, None) or self.tier is None and any(
+        if self.state.index is None and (self.tier, victims) != (None, None) or self.tier is None and any(
                 getattr(b.kind, "keep_tentative", 0) for b in bound):
             raise PluginError("slots tier and eviction_policy act on the prefix cache (off here), and a state kind "
                               "keeping tentative payloads needs a tier (docs/v1-kv-tiers.md D8)")
         if self.state.index is not None:
-            self.state.index.policy = evicting
+            self.state.index.policy = victims
         self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len,
                                draft_k=self._draft_k if self.policy is not None else None,
                                lookahead=getattr(drafter, "lookahead", None), host_lens_only=host_lens,

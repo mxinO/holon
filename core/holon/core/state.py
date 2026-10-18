@@ -154,7 +154,6 @@ class StateManager:
         self.waits: dict[int, list] = {}                       # slot -> the loads its next step waits for
         self.due: dict[int, float] = {}                        # slot -> when it may run (load-gated, not yet run)
         self._tentative: dict[int, dict[str, list]] = {}       # slot -> spec -> its kept tentatives (key, payload)
-        self._keep = {b.spec.name: getattr(b.kind, "keep_tentative", 0) for b in bound}
         self.dropped_publishes = 0                             # publishes that found no payload unit
         self.tables: dict[str, BlockTable] = {}
         self._table_of: dict[str, BlockTable] = {}            # paged spec name -> its group's table
@@ -187,9 +186,8 @@ class StateManager:
             seq.branch_at = len(entries) * idx.block if entries and entries[-1].children else 0
             entries = entries[:self._hit_blocks(seq, entries)]
             resident = [e for e in entries if e.key in idx.entries]          # a prefix: taken first (D7)
-            for e in resident:
-                for name, units in e.units.items():
-                    self._take(seq.slot, name, np.asarray(units, dtype=np.int32), shared=True)
+            for name in resident[0].units if resident else ():          # one incref per spec, not per block
+                self._take(seq.slot, name, np.asarray([u for e in resident for u in e.units[name]], np.int32), True)
             if len(resident) < len(entries):
                 entries = self._promote(seq, entries, len(resident))
             if idx.tier is not None:          # the tier may have dropped a payload while it loaded: the hit shrinks
@@ -290,16 +288,18 @@ class StateManager:
         idx.last = done
         for load in loads:
             if (track := idx.loads.pop(id(load), None)) is not None:     # else read by an earlier step
-                for key in track[1]:
+                _, keys, told = track
+                for key in keys:
                     idx.get(key).loading = None
-                if not track[2]:
+                if not told:
                     idx.tier.loaded(load, done)
         waited = {id(load) for ws in self.waits.values() for load in ws}
         for i, track in list(idx.loads.items()):
-            if i not in waited and not track[2]:
-                idx.tier.loaded(track[0], track[0])
-                track[2] = True
-                if not track[1]:
+            load, keys, told = track
+            if i not in waited and not told:
+                idx.tier.loaded(load, load)
+                track[2] = True                                      # told: a later reader does not tell again
+                if not keys:
                     del idx.loads[i]
 
     def cut(self, seq: Seq, n: int) -> int:
@@ -386,7 +386,7 @@ class StateManager:
         elif payload.tentative:
             kept = self._tentative.setdefault(seq.slot, {}).setdefault(spec, [])
             kept.append((entry.key, entry.payloads[spec]))
-            if len(kept) > self._keep[spec]:
+            if len(kept) > next(b.kind.keep_tentative for b in self.bound if b.spec.name == spec):
                 self.index.settle(*kept.pop(0), spec, drop=True)
 
     def reserve(self, seq: Seq, new_tokens: int) -> bool:

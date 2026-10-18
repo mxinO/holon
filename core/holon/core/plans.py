@@ -80,7 +80,7 @@ def plan_of(engine: Any, model_id: str | None = None, commit: str = "unknown") -
     # An option naming another checkpoint (a drafter's) is planned as that checkpoint's identity, not its host path.
     opened = engine.ctx.sources
     sources = {k: opened[str(v)] for k, v in settings["plugin_options"].items() if str(v) in opened}
-    unplanned = sources.keys() | frontend_options(engine.plugins.installed)
+    unplanned = sources.keys() | unplanned_options(engine.plugins.installed)
     settings["plugin_options"] = {k: v for k, v in settings["plugin_options"].items() if k not in unplanned}
     cls = lock_class(platform.fingerprint(engine.device), engine.ctx.cpu_kernels)
     return Plan(model_id=model_id or engine.source.identity(), fingerprint_class=cls,
@@ -96,7 +96,7 @@ def lock_class(fp: Fingerprint, cpu_kernels: bool) -> str:
     return f"{fp.gpu}+{fp.cpu_isa}/{fp.toolchain}" if cpu_kernels and fp.cpu_isa else fp.cls
 
 
-def frontend_options(installed: Mapping[str, Installed]) -> set[str]:
+def unplanned_options(installed: Mapping[str, Installed]) -> set[str]:
     """The plugin options declared only by frontend plugins, which the engine never loads, or `planned = false`: they
     cannot shape outputs, so plans leave them out. An undeclared option stays planned (release design §14.2)."""
     slots: dict[str, set[str | None]] = {}

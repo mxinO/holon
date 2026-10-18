@@ -1,7 +1,8 @@
 # v1 — milestone K: KV and checkpoint tiers under the prefix index
 
-Status: **rev 8.1, step-0 findings** (2026-10-18): rev 8 (panel-clean) plus the lead's decisions on step 0's
-measurements, recorded in §13 "Rev 8.1"; step 1's core seams are built (§13 "Step 1 as built"). Every other number
+Status: **rev 8.2, step-1 panel review** (2026-10-18): rev 8 (panel-clean), the lead's decisions on step 0's
+measurements (§13 "Rev 8.1") and the panel's review of step 1 (§13 "Rev 8.2"); step 1's core seams are built (§13
+"Step 1 as built"). Every other number
 below is a CPU-side estimate from earlier evidence (cited), fixed as a prediction before step 4 measures it. Rev 2 answered the three-reviewer panel (A correctness, B architecture, C numerics and
 performance); revs 3 to 8 answer its re-reviews. The finding-by-finding dispositions are in §13.
 
@@ -132,7 +133,7 @@ caches on an agent trace, with outputs that do not depend on where state was kep
    | 3e | `claude_code` truncated to 2 turns per session (16K shared system prompt, `bench/README.md:58-60`): TTFT of each session's first request, `branch` on vs off, tiers on in both arms | p50 ≤ 0.2× |
    | 3f | Restart (`state_tier.ssd.persist = close`): two engines with the same parking history; one resumes a parked 16K conversation without a restart, the other closes, restarts and resumes it (C3) | TTFT within 3a's SSD bar. The restore's crc verification runs inside `attach` and is startup time, reported per persisted GB (C-9). Outputs and `cached_tokens` byte-identical between the two |
    | 3g | pi agent test re-run on the RTX 5090 (report, not gated: agent outputs are not reproducible) | the share of uncached input that is the previous turn's own output, predicted to fall from 44% to ≤ 10% if K-M1 shows verbatim re-rendering |
-   | 3h | Tier overhead on the RTX 5090: `agent_park` with VRAM capped to the RTX 5080's KV capacity, against a roomy run (C11, C-7). The roomy arm runs tiers off, with ≈ 40 checkpoint units and ≥ 150K KV tokens: ≈ 15.3 + 4.9 + 5.7 ≈ 26 GiB plus graphs and activations, which fits in 32 GB. The ratio includes the per-hit host adopt (≈ 3.2 ms of H2D against ≈ 0.3 ms of D2D in the roomy arm) | TTFT p50 ≤ 1.1× roomy + one RTX 5090 decode step (≈ 11.4 ms) |
+   | 3h | Tier overhead on the RTX 5090: `agent_park` with VRAM capped to the RTX 5080's KV capacity, against a roomy run (C11, C-7). The roomy arm runs tiers off, with ≈ 40 checkpoint units and ≥ 150K KV tokens: ≈ 15.3 + 4.9 + 5.7 ≈ 26 GiB plus graphs and activations, which fits in 32 GB. The ratio includes the per-hit host adopt (≈ 3.2 ms of H2D against ≈ 0.3 ms of D2D in the roomy arm) | TTFT p50 ≤ 1.1× roomy + one RTX 5090 decode step (14.7 ms, rev 8.2) |
    | 3i | Qwen3-30B-A3B offload with the host level on the RTX 5080: decode TPOT while loads run beside X's expert fetches (report, C20) | reported |
 
 4. **Memory** (§7).
@@ -156,7 +157,8 @@ caches on an agent trace, with outputs that do not depend on where state was kep
      other rebases and takes 1.5.
    - `check_abi --base` and the line check are relative to **K's step-1 base**: the main-branch commit K's seams
      rebase onto, after FN's seams if FN lands first.
-   - **At most +320 code lines over that base** (§4 itemizes ≈ 292; rev 2 had ≤ +300 for ≈ 285).
+   - **At most +320 code lines over that base** (§4 itemizes ≈ 292; rev 2 had ≤ +300 for ≈ 285). Rev 8.2: the lead
+     raised it to +326 for the two frozen slot factories (the owner told); step 1 is at +326.
    - A property test shows that `could_fit` and eviction agree under random traffic with demotions, promotions, loads
      and tier drops.
    - With tiers off, every existing lock's snapshot stays byte-identical.
@@ -554,9 +556,10 @@ The rest of the rules:
 - No load is cancelled, so no copy lands in units somebody else owns without the next launch waiting for it.
 - **Who enqueues an SSD load's H2D:** the level's I/O thread, on read completion, through the tier's stream, never
   the engine thread, after checking the abandoned flag under the lock.
-- **I/O order** (round 7). The tier dispatches I/O jobs (level reads, write-backs, and the H2D enqueues that follow
-  reads) **FIFO in the order they were decided**. A job's dependencies (the write that frees its unit, the read a
-  joiner chains on) were decided earlier, so they are always earlier jobs, and no job waits on one queued behind it.
+- **I/O order** (round 7; rev 8.2). The tier dispatches I/O jobs (level reads, write-backs, and the H2D enqueues
+  that follow reads) **in the order they were decided, except that a read may go before a queued write that does not
+  free its own units** (D11's read priority). A job's dependencies (the write that frees its unit, the read a
+  joiner chains on) were decided earlier and are never overtaken, so no job waits on one queued behind it.
 - **The only remaining host wait** is a launch that waits on a live load whose H2D is not yet enqueued (its
   `Fence.wait` first waits on the host until it is): a reader due early, a pull-forward, a promote-into-place, or a
   free of some but not all of a load's entries. Its time is reported in `stats()` as `load_enqueue_wait_s`. The
@@ -610,7 +613,9 @@ stays planned (D12).
   (`docs/plan.md:679-680`).
 - **Why k > 1 may be needed.** A template that re-renders the answer differently (a tool call's arguments
   re-serialized from JSON, say) diverges inside the answer, so the useful checkpoint is the last crossing before
-  that point. K-M1 measures where re-rendered answers diverge, fixes k (default 2) and predicts 3g.
+  that point. K-M1 measures where re-rendered answers diverge, fixes k and predicts 3g. **Rev 8.2:** K-M1 found 38 of
+  38 answers re-rendered verbatim, so `answer:1` is the default and `answer:2` an opt-in for templates that
+  re-serialize (panel C).
 - Decode-produced checkpoints are `bounded` (`docs/m03-qwen38.md:22-23`), the same class as today's hits across
   generated KV pages (`docs/design.md:900-902`).
 - Verify rows publish nothing (`state.py:239`), so with MTP on the policy is idle. The 27B locks run without drafting.
@@ -655,7 +660,7 @@ per second. A remote tier slower than recompute would bring back `HitLen.cost`; 
   - the SM scatter/gather kernel, 0.97–1.02× DMA in X's M1 (`docs/v1-offload.md:645`).
 
   K-M2 picks between them. Without a provider (CPU, tests), the copier falls back to the per-run loop.
-  **Rev 8.1:** loads default to the SM gather. K-M2 measured both at 0.99× the blob rate on fragmented 34,816 B
+  **Rev 8.1:** loads default to the SM gather (rev 8.2: pinned at 8 CTAs; paced DMA stays tune's alternative). K-M2 measured both at 0.99× the blob rate on fragmented 34,816 B
   chunks, but K-M3 measured one batch-DMA load in flight slowing 4-row decode 1.42× (head-of-line blocking on the
   copy engine) against 1.07× for the gather. D2H stores use batch DMA. The 27B locks pin the provider at step 4.
 - C8's point stands: a block-contiguous *host* layout does not reduce the device-side chunk count, so it is dropped
@@ -686,6 +691,15 @@ two engines on one host would otherwise overwrite each other's slots, and runtim
   written to SSD: K-M5 measured 73–88 GB written per `agent_park` run with an SSD below 4–8 GiB of host, 94% of it
   checkpoints, mostly never read back. A tentative becomes ordinary when its request is released, and the core
   tells the tier (`StateTier.settled`), so this policy sees the current flag.
+- **Rev 8.2: superseded payloads are not written back either** (panel C). At host eviction a payload is dropped
+  rather than written back if walking down single-child links from its entry reaches an entry holding an ordinary
+  payload of the same spec: a later checkpoint of the same chain makes it redundant. An entry with two or more
+  children keeps its payload (it is a branch point). The panel's replay of this rule on K-M5's harness cuts payload
+  write-back by 42–81% with no TTFT loss; writing back only adopted payloads was rejected (its replay regresses TTFT p50 from 0.40 s to 3.11 s).
+- **Rev 8.2: reads go first on the SSD** (panel C). While a read is queued, at most one write job is in flight, and a
+  read never overtakes the write that frees its own host units. "Both kinds queued" in D4's mixed charge means the
+  virtual lane's state, not the threads'. Step 2 re-measures the mixed factor under exactly this dispatch (one writer,
+  two or three readers).
 - An entry being written back is logically on SSD. A hit on it is an SSD read with an SSD due time, and its load
   reads the slot. The rev 2 shortcut of reusing host bytes still physically there is dropped (A-5). It raced with a
   reallocation of the logically free unit, and keeping it would need a second fence for a rare case.
@@ -871,7 +885,8 @@ additive minor when ARC is built. K does not add them.
 - payload stores are accepted (D5);
 - reuse of its own storage waits on its own tickets, and reuse of a host unit, or CPU I/O on it, waits on all the
   unit's outstanding fences: stores' ends, and every `done` given to `loaded`, which add and never replace (D4);
-- I/O jobs are dispatched FIFO in the order they were decided; abandonment completes a pending enqueue as a no-op
+- I/O jobs are dispatched in the order they were decided, reads before writes that do not free their units (D11,
+  rev 8.2); abandonment completes a pending enqueue as a no-op
   and wakes its waiters (D7);
 - every device read of a host unit follows the unit's last write fence: in the `after` of the tier's H2D, and inside
   the `Load` fence for host payloads a kind's adopt reads (D4);
@@ -1032,20 +1047,21 @@ round-robin, one request at a time.
   keeps ≥ 90% of a returning session's KV resident through turn 5 and 35–50% after. So KV demotion is exercised mostly
   in the second half, which is why 3c reports turns 1–5 and 6+ apart and why 3h exists.
 
-**Predictions** (RTX 5080, 27B UD-IQ3_S; 47.5 GB/s H2D; prefill 2.2–2.5K tok/s; decode step ≈ 15.7 ms, tg128
-63.75 tok/s from the same evidence file).
+**Predictions** (RTX 5080, 27B UD-IQ3_S; 47.5 GB/s H2D; prefill 2.2–2.5K tok/s). **Rev 8.2** (panel C): a decode
+step is the measured 4-row step at the lock's settings, 22.3 ms on the RTX 5080 and 14.7 ms on the RTX 5090 (K-M3),
+not the single-row tg128 step (15.7 / 11.4 ms) rev 8 used; "one decode step" in the bars of 3a and 3h means it.
 
 | Row | Prediction |
 |---|---|
-| 3a, 16K from RAM | KV 570 MB ≈ 12.0 ms of copy, and a payload adopt of 154 MB ≈ 3.2 ms in both arms. Bar: VRAM + 18.0 ms + one step (33.7 ms). Predicted extra ≈ 12–28 ms if `state_copy@1` reaches ≥ 0.8× of 47.5 GB/s on fragmented units; fails with the per-run loop |
+| 3a, 16K from RAM | KV 570 MB ≈ 12.0 ms of copy, and a payload adopt of 154 MB ≈ 3.2 ms in both arms. Bar: VRAM + 18.0 ms + one step (40.3 ms). Predicted extra ≈ 12–28 ms if `state_copy@1` reaches ≥ 0.8× of 47.5 GB/s on fragmented units; fails with the per-run loop |
 | 3a, 32K from SSD | 1.29 GB at ≈ 2.6 GB/s ≈ 0.50 s + 27 ms H2D. With the default watermark no write-back is forced; a forced one adds 1.29 GB at the sustained write rate (K-M4). Bar ≈ 0.79 s + one step |
-| 3b | copy-engine DMA plus ≈ 5% of DRAM bandwidth during the copy (47.5 of 960 GB/s); the 32K load is due ≈ 2 steps out, so ≈ 2 gated steps per rep → gated-step median gap ≤ 1.05×, p90 ≤ 1.15× (bar 1.1× / 1.2×); the append step's ratio ≈ 1.0× (reported) |
+| 3b | **Rev 8.2:** the load by the SM gather at 8 CTAs (K-M3: 1.04× on the RTX 5090, 1.07× on the RTX 5080 beside 4-row decode; an unpaced batch DMA 2.07× / 1.42×) → gated-step median gap ≈ 1.04–1.07×, p90 ≤ 1.15× (bar 1.1× / 1.2×); the append step's ratio ≈ 1.0× (reported). Step 2 measures the gather beside compute-bound prefill and its host cost per load, the work-list build included; paced DMA stays tune's alternative |
 | 3c | VRAM-only: the 4-unit pool keeps no returning session's payloads, so every hit trims to 0, and each turn recomputes its context (≈ 9–10K at resume by C's σ = 0.6 sim, ≈ 4 s; C-10). Tiered: ≈ 300 MB loaded (≈ 6 ms) plus the append: ≈ 400 tokens with `answer` (≈ 0.18 s), ≈ 700 without (≈ 0.3 s) → TTFT p50 ≈ 0.2–0.35 s, ratio ≈ 0.05–0.1× (bar 0.25×). Throughput gain 1.3–2× from removed prefill (bar 1.2×) |
 | 3d | `llama-server`'s save is synchronous (an observed 2.65 s stall), and whole-state blobs repeat the system prompt per conversation. Prefill parity at depth (Holon 1.05× the gate build at 8K, 1.01× upstream, same evidence) → ≤ 1.0× predicted. No margin estimate until step 4; the bar is fixed now |
 | 3e | sessions 1–2 recompute 16K (≈ 7 s); sessions 3–16 hit 16,384 → first-turn TTFT ≈ 0.1–0.2 s → p50 ratio ≈ 0.03× (bar 0.2×) |
 | 3f | 16K resume as 3a's SSD cell; restore verification inside `attach`, startup time ≈ 0.38 s per persisted GB (≈ 6 s for 16 GB) |
 | 3g | 44% (27,646 / 62,682) of uncached input → ≤ 10% if K-M1 finds the answers re-rendered verbatim up to their tool calls |
-| 3h | RTX 5090 decode step ≈ 11.4 ms (tg128 87.34 tok/s, `evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json`); ≈ 300 MB of KV ≈ 6 ms plus the host adopt ≈ 3.2 ms per hit, against roomy's ≈ 0.3 ms D2D → ≤ 1.05× roomy + one step (bar 1.1× + one step) |
+| 3h | RTX 5090 decode step 14.7 ms (rev 8.2: K-M3's 4-row step; tg128's single-row step is 11.4 ms, `evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json`); ≈ 300 MB of KV ≈ 6 ms plus the host adopt ≈ 3.2 ms per hit, against roomy's ≈ 0.3 ms D2D → ≤ 1.05× roomy + one step (bar 1.1× + one step) |
 
 **Decision rules** (fixed now):
 - A predicted row that step 4 measures below its bar goes to the owner, with the measured cause, before any
@@ -1368,9 +1384,27 @@ Results against the predictions are in the evidence records (`evidence/k0_m1_rer
 RTX 5090's K-M2/K-M4 runs, after step 1, match the RTX 5080's (mixed I/O 0.79× / 0.76×, the other rules pass), and its
 shorter step makes an unpaced batch-DMA load costlier still: decode 2.07× median beside it, 1.04× beside the SM gather.
 
+### Rev 8.2 (2026-10-18): the panel's review of step 1
+
+The core was found correct, with no blocker. Dispositions:
+
+| Finding | Disposition | Where |
+|---|---|---|
+| A1: the engine tier test never reached promote-into-place, abandonment or the waiterless notice | accepted | `test_steps_and_outputs_never_depend_on_when_copies_land`: 8 conversations over 4 sequences in 20 pages, longer contexts, 3 aborts of load-gated requests; it asserts promote-into-place, abandoned and waiterless counts > 0 (8 / 7 / 3 at delay 2). The `swap_onto_lower` plant now fails it |
+| A2: the unguarded-policy plant hung its test | accepted | the test's policy raises on a second `victim` call: the unguarded core fails at once |
+| A3: the 27 plants could not be re-run | accepted | `spikes/k1_core/plants.py` pairs each of 28 core plants with the test it must fail; `evidence/k1_core_plants_cpu_2026-10-18.json` records 28 / 28. `store_no_after` stays a GPU plant for step 2 |
+| B1: freeze the two slot factories | accepted, at +326 | `hooks.StateTierPlugin.build(ctx) -> StateTier` and `hooks.EvictionPolicyPlugin.build(ctx) -> EvictionPolicy` in the ABI listing (in `holon.api.hooks`, beside `BuildsPolicy`: exporting them from `holon.api` would have cost 11 lines of import block). Core is +326 over b5b1e7f, the lead's raised cap for them |
+| B2: tidy-ups | accepted | load tracks unpacked where read; `plans.frontend_options` → `unplanned_options`; the engine's `evicting` → `victims`; restore's `if p:` |
+| C1 (major): SSD write-back | accepted | D11, rev 8.2: a payload superseded down single-child links is dropped, not written back; branch points keep theirs (std, step 3) |
+| C2 (major): read priority on SSD dispatch | accepted | D11 and §4's contract, rev 8.2; the mixed factor re-measured under it in step 2 |
+| C3: the gather and 3b | accepted | D10: the SM gather pinned at 8 CTAs, paced DMA tune's alternative; 3b's prediction ≈ 1.04–1.07×; step 2 measures the gather beside prefill and its per-load host cost |
+| C4: `answer:1` the default | accepted | D8 |
+| C5: host-side wins | one taken, one skipped | admission takes a hit's resident units with one incref per spec (taken, it saves a line). Promote-into-place batched into one `load` per commit is **skipped**: it does not fit under the cap (≈ +3 lines) |
+| C6: predictions on the measured 4-row step | accepted | §8: 22.3 / 14.7 ms; the bars' "one decode step" is that step (3a's RAM bar 40.3 ms, 3h's 14.7 ms) |
+
 ### Step 1 as built (2026-10-18)
 
-KS1–KS5 as §4 describes, ABI 1.4, +320 code lines over b5b1e7f (the budget). KS1+KS2 were priced on the prototype
+KS1–KS5 as §4 describes, ABI 1.4, +326 code lines over b5b1e7f (+320 before rev 8.2's frozen slot factories). KS1+KS2 were priced on the prototype
 at ≈ +180 lines against the itemized 154 (+17%, under the +20% stop line). Additions and deviations:
 - `Pool.segments` in the API (a tier addresses units by segment), `Seq.branch_at` behind `SeqView.branch_at`,
   `StateTier.settled` (rev 8.1);
@@ -1378,14 +1412,13 @@ at ≈ +180 lines against the itemized 154 (+17%, under the +20% stop line). Add
   changes in step 2;
 - with an eviction policy the upward climb is off (each victim through the policy); a policy returning nothing falls
   back to the least recently used entry, and one returning a non-candidate raises;
-- the plugins' `build(ctx)` for the two new slots is documented in the Protocols' docstrings, not as Protocols of its
-  own: the budget did not allow them (≈ +6 lines);
+- the plugins' `build(ctx)` for the two new slots: `hooks.StateTierPlugin`, `hooks.EvictionPolicyPlugin` (rev 8.2);
 - the core's restore skips records that do not re-hash to their key, whose parent is unknown or that lack pages;
 - an entry's payloads in the tier are adopted through one load (a tier may evict only within `store`, `load` and its
   step hooks, which the core polls after);
 - tiers-off snapshots are byte-identical to b5b1e7f on the RTX A5000 (Qwen3-8B, the 27B hybrid, the 30B with
-  offload; `evidence/k1_tiers_off_snapshots_rtx-a5000_2026-10-18.json`); 26 of the step-1 review's 27 planted bugs
-  fail a test, and the 27th (an eviction policy left unguarded) hangs it;
+  offload; `evidence/k1_tiers_off_snapshots_rtx-a5000_2026-10-18.json`); every core plant fails its test
+  (`evidence/k1_core_plants_cpu_2026-10-18.json`);
 - found on the way, not K's: publishing after `flush_prefix` while a request runs raises a KeyError in
   `PrefixIndex.insert` (the request's chain names a parent that is gone), as at b5b1e7f. It is a follow-up (§10).
 

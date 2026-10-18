@@ -114,7 +114,8 @@ class PrefixIndex:
             if self.key(r.parent, r.tokens) == r.key and (p or r.parent is None) and set(r.units) == set(self.pools):
                 self.lower[r.key] = Entry(r.key, r.parent, tuple(r.tokens), {}, p.depth + 1 if p else 0, lower=True,
                                           payloads={spec: Payload((), x.pool) for spec, x in r.payloads.items()})
-                (p.children if p else set()).add(r.key)
+                if p:
+                    p.children.add(r.key)
 
     def cached(self, name: str) -> np.ndarray:
         """Which units of spec `name`'s pool the index references (a live mask, sized with the pool)."""

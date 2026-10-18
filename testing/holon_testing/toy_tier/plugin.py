@@ -173,7 +173,7 @@ class ToyTier:
         for r in load.read:                                     # its readers end before the units' reuse
             self.fences[r].append(done if done is not None else load.fence)
         self.t = max(self.t, load.due)
-        self.counts["abandoned" if done is None else "loaded"] += 1
+        self.counts["abandoned" if done is None else "waiterless" if done is load else "loaded"] += 1
 
     def hit(self, keys, adopted) -> None:
         self.calls.append(("hit", list(keys), list(adopted)))

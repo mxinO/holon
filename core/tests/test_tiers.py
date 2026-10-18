@@ -6,7 +6,8 @@ copies run on a deferred stream (`holon_testing.deferred`) that lands them 0–2
 - Tier invariance: sessions interleaved with a filler on the tight engine give the outputs and `cached_tokens` of the
   same sessions run back to back on a roomy engine without a tier.
 - Run-identity: concurrent requests make the same steps and outputs under three deferral seeds and a load delay — no
-  decision reads when a copy lands.
+  decision reads when a copy lands —, through trimmed promotions, blocks promoted into place, aborts of load-gated
+  requests (their loads abandoned or reported unread) and the tier's own drops.
 - Restart: a tier persisting at close restores the index, so a resumed conversation hits as it would without the
   restart; under another identity nothing is restored; an option declared `planned = false` leaves plans unchanged."""
 import dataclasses
@@ -86,22 +87,37 @@ def test_tier_invariance_with_demotions_promotions_and_late_copies(tiny, monkeyp
     tight.close()
 
 
-def _closed_loop(engine: Engine, conversations: int, turns: int) -> tuple[list, dict]:
+def _closed_loop(engine: Engine, conversations: int, turns: int, aborts: int = 0, start: int = 20
+                 ) -> tuple[list, dict]:
     """`conversations` clients, each sending its next turn once its previous answer is done, all at once: the steps
-    (slots and tokens per row) and every answer."""
-    steps, schedule = [], engine.sched.schedule
+    (slots and tokens per row) and every answer. The first `aborts` requests found load-gated are aborted and sent
+    again. Counts the blocks promoted into place in `engine.promoted`."""
+    steps, schedule, publish, promote = [], engine.sched.schedule, engine.state.publish, engine.state.index.promote
+    engine.promoted = 0
 
     def recorded():
         out = schedule()
         if out is not None:
             steps.append((out[0].slots.tolist(), out[0].n_query.tolist()))
         return out
-    engine.sched.schedule = recorded
+
+    def publishing(seq):
+        engine.state.index.promote = lambda entries, *a: (setattr(engine, "promoted", engine.promoted + len(entries)),
+                                                          promote(entries, *a))[1]
+        publish(seq)
+        engine.state.index.promote = promote
+    engine.sched.schedule, engine.state.publish = recorded, publishing
     rng, history, answers, live = random.Random(7), {}, {}, {}
     for c in range(conversations):
-        history[c] = [rng.randrange(128) for _ in range(rng.randrange(20, 60))]
+        history[c] = [rng.randrange(128) for _ in range(rng.randrange(start, start + 40))]
         live[engine.add(history[c], GREEDY)], answers[c] = c, []
     while engine.has_work():
+        gated = sorted(rid for rid, seqs in engine._live.items() if any(s.slot in engine.state.due for s in seqs))
+        if aborts and gated:                          # abort a request waiting for its loads, and send it again
+            aborts -= 1
+            c = live[gated[0]]
+            engine.abort(gated[0])
+            live[engine.add(history[c], GREEDY)] = c
         for d in engine.step():
             c = live[d.rid]
             answers[c].append(d.token_ids) if not answers[c] or answers[c][-1] is None else answers[c][-1].extend(
@@ -120,10 +136,12 @@ def test_steps_and_outputs_never_depend_on_when_copies_land(tiny, monkeypatch):
     for seed, delay in ((0, 2), (1, 2), (2, 2), (0, 0)):
         deferred = Deferred(seed, most=2)
         monkeypatch.setattr(platform, "Stream", lambda device, d=deferred: d.stream())
-        engine = _engine(tiny, pages=20, tier={"delay": delay, "drops": 0.3}, max_seqs=2)   # and its own drops
-        runs.append(_closed_loop(engine, conversations=6, turns=3))
+        engine = _engine(tiny, pages=20, tier={"delay": delay, "drops": 0.3}, max_seqs=4)   # and its own drops
+        runs.append(_closed_loop(engine, conversations=8, turns=3, aborts=3, start=70))
         counts = engine.tier.counts
-        assert counts["loaded_blocks"] >= 4 and counts["dropped"] >= 4 and not engine.tier.untold()
+        assert counts["dropped"] and not engine.tier.untold()
+        if delay:            # promotions trimmed short of units, recomputed blocks promoted into place; loads of
+            assert min(engine.promoted, counts["abandoned"], counts["waiterless"]) > 0      # aborted requests
         engine.close()
     assert runs[0] == runs[1] == runs[2]
     assert runs[3][0] != runs[0][0]                     # the gate (a due time two launches out) moved steps

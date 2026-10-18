@@ -115,7 +115,13 @@ def test_an_eviction_policy_keeps_the_roots_under_pressure():
     index.policy = type("Lazy", (), {"victim": lambda self, candidates: None})()
     index.evict("kv", pool.num_free + 1)                                    # none: the least recently used instead
     assert set(index.entries) == {a[0]}
-    index.policy = type("Wrong", (), {"victim": lambda self, candidates: index.entries[a[0]]})()
+    asked = []                                                              # a second ask would loop forever
+
+    def wrong(candidates):
+        assert not asked, "asked again: the core took a non-candidate"
+        asked.append(1)
+        return index.entries[a[0]]
+    index.policy = type("Wrong", (), {"victim": lambda self, candidates: wrong(candidates)})()
     pool.incref(np.asarray(index.entries[a[0]].units["kv"]))                # held: not eligible
     with pytest.raises(RuntimeError, match="not one of the eligible"):
         index.evict("kv", pool.capacity)

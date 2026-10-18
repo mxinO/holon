@@ -85,9 +85,8 @@ class TierCtx(Protocol):
 
 
 class StateTier(Protocol):
-    """The slot `tier` (single, opt-in: `EngineConfig.slots["tier"]`), built with the engine by its plugin's
-    `build(ctx: BuildCtx) -> StateTier` (it may bind kernel sites; its storage comes at `attach`). Optional hooks
-    (`holon.api.hooks`): EditsBeforeLaunch, ObservesCommits, Reports."""
+    """The slot `tier` (single, opt-in: `EngineConfig.slots["tier"]`), built with the engine by its plugin
+    (`hooks.StateTierPlugin`). Optional hooks (`holon.api.hooks`): EditsBeforeLaunch, ObservesCommits, Reports."""
 
     def attach(self, ctx: TierCtx) -> list[BlockRecord]:
         """Once, after the device pools' final materialize and before graph capture: allocate its storage; the blocks
@@ -142,8 +141,8 @@ class EntryView(Protocol):
 
 
 class EvictionPolicy(Protocol):
-    """The slot `eviction_policy` (single, opt-in), built by its plugin's `build(ctx: BuildCtx) -> EvictionPolicy`:
-    which device entry to evict next. Without one, the least recently used eligible entry."""
+    """The slot `eviction_policy` (single, opt-in), built by its plugin (`hooks.EvictionPolicyPlugin`): which device
+    entry to evict next. Without one, the least recently used eligible entry."""
 
     def victim(self, candidates: Iterator[EntryView]) -> EntryView | None:
         """One of `candidates` (the eligible entries, least recently used first, produced lazily: bound the scan)."""

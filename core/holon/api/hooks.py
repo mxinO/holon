@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .model import AuxSpec, BuildCtx, Resolved
     from .quant import QTensor
     from .state import HitLen, MemOp, Payload, PrefixView, SeqView, StateSpec
+    from .tier import EvictionPolicy, StateTier
 
 
 # -- units (built modules) ------------------------------------------------------------------------------------------
@@ -147,6 +148,18 @@ class Rewindable(Protocol):
     def rewind(self, ctx: StepCtx) -> None:
         """Device-side, graph-capturable: after the verifier wrote `ctx.seq_table.n_accept` for the step's verify rows,
         keep only what their accepted tokens produced."""
+
+
+class StateTierPlugin(Protocol):
+    def build(self, ctx: BuildCtx) -> StateTier:
+        """On the `tier` slot's plugin: the engine's tier, built with the engine (it may bind kernel sites; its
+        storage comes at `attach`). Required for that slot."""
+
+
+class EvictionPolicyPlugin(Protocol):
+    def build(self, ctx: BuildCtx) -> EvictionPolicy:
+        """On the `eviction_policy` slot's plugin: the engine's policy, configured by the deployment's options.
+        Required for that slot."""
 
 
 class Reports(Protocol):

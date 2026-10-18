@@ -524,6 +524,8 @@ protocol DraftsInSubsteps() optional, implemented by plugins
   substeps(self, k: 'int') -> 'list[int]'
 protocol EditsBeforeLaunch() optional, implemented by plugins
   before_launch(self, step: 'BatchPlan') -> 'tuple[list[tuple[torch.Tensor, np.ndarray]], list[MemOp]]'
+protocol EvictionPolicyPlugin() optional, implemented by plugins
+  build(self, ctx: 'BuildCtx') -> 'EvictionPolicy'
 protocol FinalizesWeights() optional, implemented by plugins
   finalize_weights(self, ctx: 'BuildCtx') -> 'None'
 protocol GraphKeyed() optional, implemented by plugins
@@ -563,6 +565,8 @@ protocol SamplesDrafts() optional, implemented by plugins
   q_support: int
 protocol ShutsDown() optional, implemented by plugins
   shutdown(self) -> 'None'
+protocol StateTierPlugin() optional, implemented by plugins
+  build(self, ctx: 'BuildCtx') -> 'StateTier'
 protocol TrainedContext() optional, implemented by plugins
   trained_context(self, cfg: 'Mapping[str, Any]', source: 'str') -> 'int | None'
 protocol WritesAhead() optional, implemented by plugins
