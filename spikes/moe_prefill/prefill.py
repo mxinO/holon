@@ -77,11 +77,13 @@ def holon_engine(a: argparse.Namespace):
     from holon_std.moe import units
 
     profiled = []                                   # the startup profile's terms (`Executor.state_memory`)
-    for name in ("peak_memory", "reserved_growth"):
-        def recorded(device, fn, f=getattr(platform, name)):
+    def recorded(f):
+        def g(device, fn):
             profiled.append(f(device, fn))
             return profiled[-1]
-        setattr(platform, name, recorded)
+        return g
+    for name in ("peak_memory", "reserved_growth"):
+        setattr(platform, name, recorded(getattr(platform, name)))
 
     if a.pass_tokens:
         units.Resident.pass_tokens = staticmethod(lambda tokens: a.pass_tokens)

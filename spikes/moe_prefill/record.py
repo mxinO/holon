@@ -20,14 +20,15 @@ ENGINES = {"holon": "this repository at the record's commit (std.moe@1; the stor
                         "--max-extend-length 4096, its default chunk is 8,192",
            "model": "Qwen3-30B-A3B Q4_K_M (unsloth/Qwen3-30B-A3B-GGUF); the 16 GB lock's: UD-IQ3_XXS"}
 COMMANDS = [
-    "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/arms_<card>.json --model <gguf> --out <dir>/timed "
-    "--rounds 2 --reps 5 5 3 --holon-python <holon venv python> --freetoken-python <freetoken venv python>",
+    "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/arms_<card>.json --model <gguf> "
+    "--out <dir>/timed --rounds 2 --reps 5 5 3 --holon-python <holon venv python> "
+    "--freetoken-python <freetoken venv python>",
     "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/arms_<card>_nsys.json --model <gguf> "
     "--out <dir>/nsys --rounds 1 --reps 1 ...",
     "nsys export --type sqlite -o <report>.sqlite <report>.nsys-rep; "
     "python spikes/moe_prefill/breakdown.py <report>.sqlite > <report>.json",
-    "python spikes/moe_prefill/gemm.py --model <gguf> --layer 0|6 --tokens 16 24 32 40 48 56 64 512 1024 2048 4096 8192 "
-    "[--freetoken [--f32]] --json <out>",
+    "python spikes/moe_prefill/gemm.py --model <gguf> --layer 0|6 "
+    "--tokens 16 24 32 40 48 56 64 512 1024 2048 4096 8192 [--freetoken [--f32]] --json <out>",
     "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/kv_<lock>.json --model <gguf> --out <dir>/kv "
     "--rounds 1 --reps 1 --lengths <a prompt below the lock's context>",
 ]
@@ -52,7 +53,8 @@ def timed(raw: list[dict]) -> dict:
         ft = next((a for a in summary if a.startswith("ft") and pick(a)), None)
         if ft:
             out[f"holon_over_freetoken_{kind}"] = {
-                arm: {n: round(summary[ft][n]["median_s"] / v["median_s"], 3) for n, v in by.items() if n in summary[ft]}
+                arm: {n: round(summary[ft][n]["median_s"] / v["median_s"], 3)
+                      for n, v in by.items() if n in summary[ft]}
                 for arm, by in summary.items() if not arm.startswith("ft")}
             out[f"freetoken_{kind}_arm"] = ft
     return out

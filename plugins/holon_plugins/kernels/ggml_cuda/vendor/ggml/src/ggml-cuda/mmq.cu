@@ -190,19 +190,20 @@ void ggml_cuda_mul_mat_q(
     const size_t y_block_size       = use_native_fp4 ? sizeof(block_fp4_mmq) : sizeof(block_q8_1_mmq);
     const size_t y_values_per_block = use_native_fp4 ? QK_FP4_MMQ            : QK8_1_MMQ;
 
+    // Holon: the launch's compact z entries (mmid.cuh), here first: the tile width is chosen against them
+    const int n_z = ids ? ggml_cuda_mm_ids_nz(ne02, ne12, ids->ne[0], ids_slots) : 0;
+
     int J_best        = 0;
     int nthreads_best = 0;
     {
         int64_t ncols_opt = ne11;
         if (ids) {
-            const int64_t n_expert_used = ids->ne[0];
-            ncols_opt = ne12;
-
-            // Each expert only sees ne12*n_expert_used/ne02 tokens on average.
-            // On RDNA3 and RDNA4 it is faster to pick the tile size against this value instead of ne12.
-            if (GGML_CUDA_CC_IS_RDNA3(cc) || GGML_CUDA_CC_IS_RDNA4(cc)) {
-                ncols_opt = (ne12*n_expert_used + ne02 - 1) / ne02;
-            }
+            // Holon: each launch entry holds ne12*n_expert_used/n_z rows on average, and the launch covers only the
+            // tiles that hold rows (launch_mul_mat_q, docs/v1-moe-prefill.md D2), so J is chosen against that mean on
+            // every GPU (upstream: against ne12, or on RDNA3 and RDNA4 against the mean over ne02 slots); up to 64
+            // tokens (batched decode) against ne12, as upstream: there the mean's narrower tiles re-read the weights of
+            // the experts that hold more rows (16 tokens: up to 8% slower on the RTX 5080 and 5090, D2's sweep)
+            ncols_opt = ne12 <= 64 ? ne12 : (ne12*ids->ne[0] + n_z - 1) / std::max(n_z, 1);
         }
 
         int ntiles_J_best = INT_MAX;
@@ -287,7 +288,6 @@ void ggml_cuda_mul_mat_q(
 
     ggml_cuda_pool_alloc<int32_t> ids_src1(ctx.pool(), ne_get_rows);
     ggml_cuda_pool_alloc<int32_t> ids_dst(ctx.pool(), ne_get_rows + J_best-1); // Needs to be padded for unconditional memory access.
-    const int n_z = ggml_cuda_mm_ids_nz(ne02, ne12, n_expert_used, ids_slots); // Holon: compact z entries, then their slots (mmid.cuh)
     ggml_cuda_pool_alloc<int32_t> expert_bounds(ctx.pool(), 2*n_z + 1);
 
     // gate/up activations are broadcast across experts (ne11 == 1): quantize each token once and

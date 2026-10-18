@@ -243,7 +243,7 @@ def test_link(sm):
     undefined = subprocess.run(["nm", "-D", "--undefined-only", str(extension.module_path(sm))],
                                capture_output=True, text=True, check=True).stdout
     assert not [s for s in undefined.split() if "ggml" in s or "gguf" in s]
-    for f in ("topk-moe.cu", "moe-weighted-reduction.cu"):
+    for f in ("topk-moe.cu", "moe-weighted-reduction.cu", "mmq.cu", "mmq.cuh"):
         assert "Holon:" in (extension.CUDA_DIR / f).read_text()
 
 
@@ -354,6 +354,41 @@ def test_routings_and_sizes(ctx, lib, qwen_stacks, name):
     for kern, s, inp, k in ((gate_up, sg, x, H), (down, sd, h, INTER)):
         r = l0.check(kern(inp[:t], s.parts, ids[:t]), kern(inp, s.parts, ids)[:t], torch.bfloat16, k)
         assert r.passed, f"{name} in={k}: mmvq at {t} tokens vs mmq at {t + 1}: {r}"
+
+
+@pytest.mark.parametrize("name", ["q4_k", "q6_k"])
+def test_every_tile_of_every_entry_is_written(ctx, lib, name):
+    """D2 (docs/v1-moe-prefill.md): mmq with ids launches only column tiles that hold rows, each block finding its
+    entry by a binary search over the entries' bounds, at a tile width chosen against the mean rows per entry. Into an
+    output pre-filled with NaN every row of every entry is written, through each id helper (calls of 9 to 4,096 rows
+    at E = 128), with routings that give one entry many tiles (every token on 8 experts, a skewed popularity) or many
+    entries one partial tile (uniform); each row's bits are its row's in the 4,096-row call (the tile width does not
+    move them), and no stream-k fixup is launched."""
+    device, errors, slots = torch.cuda.current_device(), torch.zeros(1, dtype=torch.int32, device="cuda"), EQ + K
+    rng = torch.Generator().manual_seed(17)
+    hot = 1 / torch.arange(1, EQ + 1, dtype=torch.float64)[torch.randperm(EQ, generator=rng)]
+    routings = {"uniform": uniform(PASS_ROWS, EQ, seed=17),
+                "same 8 experts": torch.randperm(EQ, generator=rng)[:K][torch.rand(PASS_ROWS, K, generator=rng)
+                                                                         .argsort(-1)].int().cuda(),
+                "skewed": torch.multinomial(hot.expand(PASS_ROWS, EQ), K, generator=rng).int().cuda()}
+    for stage, (k, out, _) in STAGES.items():
+        s = stack(name, EQ, out, k, seed=18)
+        w = s.w.view(-1, s.w.shape[-1])
+        x = (gate_up_input if stage == "gate_up" else down_input)(PASS_ROWS, seed=19)
+
+        def call(n, ids, x=x, w=w, k=k, out=out):
+            y = torch.full((n, K, out), float("nan"), device="cuda")
+            ws = torch.empty(lib.workspace_bytes_id(device, k, n, K, slots), dtype=torch.uint8, device="cuda")
+            lib.mmq_id(TYPES[name], PREC["q8_1"], w, x[:n], ids[:n], y, ws, slots, errors)
+            return y
+        for routing, ids in routings.items():
+            assert all(len(set(row)) == K for row in ids[:64].tolist())
+            ref = call(PASS_ROWS, ids)
+            for n in (9, 64, CHUNK, 4 * CHUNK, PASS_ROWS):
+                y, what = call(n, ids), f"{name} {stage} {routing} T={n}"
+                assert not y.isnan().any() and torch.equal(y, ref[:n]), what
+            assert not any("stream_k_fixup" in c for c in launched(lambda ids=ids: call(PASS_ROWS, ids))), routing
+    assert int(errors) == 0
 
 
 def test_mixed_types_in_one_layer(ctx, sm):
@@ -491,6 +526,7 @@ def placed_inputs(stage: str, tokens: int, seed: int) -> tuple[torch.Tensor, tor
 # EP + K slots per call): per slot where the launch lists every slot (at most 64 more than EP + K, SLOTS included),
 # compact where the arena has more
 HELPERS = {"per_slot": EP + K, "compact": 128}
+J_AGAINST_T = 64        # mmq with ids picks J against a call's tokens up to this many, above against its entries' mean
 
 
 def helper(fn) -> str:
@@ -503,11 +539,12 @@ def helper(fn) -> str:
 def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name, stage):
     """D4's placement invariance on mmq with ids: an expert's rows are bitwise the same wherever an arena places it
     (each of SLOTS with a random placement, per-slot id helper, and 128 slots, compact helper; at EP also reversed:
-    permutations) and at every mmq tile width (token
-    counts from the mmvq limit + 1 to a 512-token chunk: J from 8 or 16 up to 128), all against one launch over EP
-    slots in order at 512 tokens. llama.cpp switched mmq with ids to stream-k below 90 % tile efficiency, splitting K
-    at points that move with the slot count: on every GPU at least one of SLOTS did (the dense schedule over the same
-    grid says so), and its rows differed."""
+    permutations) and at every mmq tile width (token counts from the mmvq limit + 1 to 320 on the 128-slot arena,
+    whose launch lists at most EP + K entries: J from 16 up to 128, chosen against the tokens up to 64 and above against
+    the entries' mean rows, docs/v1-moe-prefill.md D2), all against one launch over EP slots in order at 512 tokens.
+    llama.cpp switched mmq with ids to stream-k below 90 % tile efficiency, splitting K at points that move with the
+    slot count: on every GPU at least one of SLOTS did (the dense schedule over the same grid says so), and its rows
+    differed."""
     k, out, _ = STAGES[stage]
     s = stack(name, EP, out, k, seed=21)
     x, ids = placed_inputs(stage, CHUNK, seed=22)
@@ -516,12 +553,14 @@ def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name
     device, typ = torch.cuda.current_device(), TYPES[name]
     assert any(lib.mmq_schedule(device, typ, PREC["q8_1"], out * n, 64)[0] == 2 for n in SLOTS)
     launches = [(n, "random", t) for n in (*SLOTS, HELPERS["compact"]) for t in (64, CHUNK)] + [(EP, "reversed", 64)]
-    a = arena(ctx, s, stage, SLOTS[-1], "random")
-    tiles = sorted({a.kernel.mmvq_tokens + 1, 16, 24, 32, 40, 48, 80, 96, 112, 128, 200})
-    widths = {lib.mmq_schedule(device, typ, PREC["q8_1"], out, t)[2] for t in tiles}
+    a = arena(ctx, s, stage, HELPERS["compact"], "random")
+    tiles = sorted({a.kernel.mmvq_tokens + 1, 16, 24, 32, 48, 64, 96, 128, 160, 200, 256, 320})
+    rows = [t if t <= J_AGAINST_T else -(-t * K // a.kernel.slots) for t in tiles]     # what J is chosen against
+    widths = {lib.mmq_schedule(device, typ, PREC["q8_1"], out, r)[2] for r in rows}
     assert min(widths) <= 16 and max(widths) == 128 and len(widths) >= 9
-    for n, placement, tokens in launches + [(SLOTS[-1], "random", t) for t in tiles]:
-        y, path = (a if n == SLOTS[-1] else arena(ctx, s, stage, n, placement))(x[:tokens], ids[:tokens])
+    for n, placement, tokens in launches + [(HELPERS["compact"], "random", t) for t in tiles]:
+        same = (n, placement) == (HELPERS["compact"], "random")
+        y, path = (a if same else arena(ctx, s, stage, n, placement))(x[:tokens], ids[:tokens])
         assert path == "mmq/q8_1" and torch.equal(y, ref[:tokens]), f"{name} {stage}: {n} slots {placement}, T={tokens}"
 
 
