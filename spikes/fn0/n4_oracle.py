@@ -18,7 +18,7 @@ import time
 
 import torch
 import transformers
-from holon_judge import gguf, golden
+from holon_judge import gguf, golden, qwen4exp
 from holon_judge.recording import Prompt, PromptSet
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -38,19 +38,13 @@ def main() -> None:
     prompts = PromptSet("v1-long.jsonl", "", [Prompt(row["id"], row["category"], row["ids"])])
     path = pathlib.Path(a.gguf)
     model = golden._skeleton(pathlib.Path(a.config))
-    golden._lazy_ple(model, path, "cpu")
-    ties = {"queries": 0, "sparse": 0, "boundary_ties": 0}
-    stable = golden._stable_topk
+    ties = {"sparse": 0, "boundary_ties": 0}             # per sparse selection (the record of 2026-10-18 also counted
+                                                         # every top-k call: "queries")
 
-    def counting(x: torch.Tensor, k: int, dim: int = -1, largest: bool = True, sorted: bool = True):
-        out = stable(x, k, dim, largest, sorted)
-        ties["queries"] += 1
-        if x.dim() == 1 and k < x.numel():
-            ties["sparse"] += 1
-            values = torch.sort(x, descending=True, stable=True).values
-            ties["boundary_ties"] += int(values[k - 1] == values[k])
-        return out
-    golden._stable_topk = counting
+    def count(tied: bool) -> None:
+        ties["sparse"] += 1
+        ties["boundary_ties"] += tied
+    qwen4exp.prepare(model, path, "cpu", torch.float32, on_tie=count)
     times, t0 = [], [time.perf_counter()]
     record = {"name": "fn0_n4_oracle", "date": datetime.date.today().isoformat(), "device": "cpu",
               "threads": a.threads, "torch": torch.__version__, "transformers": transformers.__version__,

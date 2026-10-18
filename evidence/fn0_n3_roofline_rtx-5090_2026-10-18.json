@@ -2,9 +2,9 @@
  "name": "fn0_n3_roofline",
  "date": "2026-10-18",
  "gpu": "rtx-5090",
- "commit": "72e06886d4d622d7f380d6fb44a88f916f617249",
+ "commit": "4f540ef54f0102c9fc2a1a0e4a3e8007ac7634a3",
  "command": "python spikes/fn0/n3_roofline.py --card rtx-5090 ...",
- "method": "**Decode** (per token): t = (dense bytes + GDN state + hit bytes) / BW + miss bytes / PCIe + per-step overhead.\n- dense bytes per token: every non-expert tensor of the file but the embedding and the PLE table (GGUF headers);\n  GDN state: 36 layers x 48 x 128 x 128 fp32, read and written;\n- hit rate: Holon's `placement.lfu@1` per layer, seeded from the expert profile, replayed on Strata's own decode\n  routing (`--dump-routing`, tail skip off) at \u00a77's cache (`slots_per_layer`; checked against Strata's measured hit\n  rate at Strata's own cache size);\n- BW: 85% of the card's DRAM bandwidth; PCIe and the overhead from X's two Holon rows on the RTX 5080 (Qwen3-30B-A3B\n  lfu and static at 25%: the slope of time over miss bytes gives the F5a fetch rate, the rest the per-step overhead,\n  scaled from X's ~11 to FN's 16 launches per layer);\n- MTP: Holon's verify passes accept as Strata's do (the same pack, full head, min-p 0), so the MTP ratio is the\n  drafting-off ratio; A1 (tail skip) gains what Strata's tail skip gains between its no-approx and defaults rows.\n\n**Prefill** (per request): Strata's phase timers (`STRATA_PREFILL_TIMING`, St prefill.cpp:2000-2012) give each\nphase's share of its prompt time; Holon's time is Strata's gated time x the sum of share x f over phases, f being\nHolon's cost per phase relative to Strata's: 1.0 for the ggml mmq expert and dense GEMMs (assumes the MoE prefill\ntrack's D1-D5 and IQ1_M's native loader, D1'), and bands for the parts FN writes in Triton (HC in fp32 ieee, GDN,\nQSA). A step is also bound below by streaming the non-resident experts its tokens route to over PCIe: at 1K the\nrouted share of them comes from windows of the decode routing trace (1,024 consecutive tokens; 1.0 beyond the\ntrace's length).",
+ "method": "**The cache per row**: \u00a77's budget at the card's lock step (the RTX 5080's lock steps 4K, lead decision; the 5090's 8K)\nless the measured non-lendable peak over \u00a77's 200 KB per token; the drafting-off rows deploy without the 0.89 GB MTP\npack, the MTP rows with it; and, for the RTX 5080, step 7's target (\u2265 8.2 GB with the pack, \u00a713).\n\n**Decode, drafting off** (per token): t = (dense bytes + GDN state + hit bytes) / BW + miss bytes / PCIe + overhead.\n- dense bytes per token: every non-expert tensor of the file but the embedding and the PLE table (GGUF headers);\n  GDN state: 36 layers x 48 x 128 x 128 fp32, read and written;\n- hit rate: Holon's `placement.lfu@1` per layer, seeded from the expert profile, replayed on Strata's own decode\n  routing (`--dump-routing`, tail skip off; it matches Strata's measured rate at Strata's cache size);\n- BW: 85% of the card's DRAM bandwidth; PCIe and the overhead from X's two Holon rows on the RTX 5080 (Qwen3-30B-A3B\n  lfu and static at 25%: the slope of time over miss bytes gives the F5a fetch rate, the rest the per-step overhead,\n  scaled from X's ~11 to FN's 16 launches per layer).\n\n**Decode, MTP** (per verify pass of 4 rows, 3 drafts): the pass reads the dense bytes once and each distinct expert of\nits 4 tokens once \u2014 lfu replayed on 4-token window unions (one decay per pass) \u2014 plus 3 draft steps of the MTP head\n(its 0.18 GB of dense parts, the full-vocabulary head, 10 of its Q2_0 experts, one layer's overhead each); a pass\nyields Strata's own recorded accepted tokens per pass in the matched row (the same pack, full head, min-p 0).\nA1 (tail skip) gains what Strata's tail skip gains between its no-approx and defaults drafting-off rows; the defaults\nMTP rows also carry Strata's suffix drafter and calibrated draft floor, which Holon does not have (a non-goal).\n\n**Prefill** (per request): Strata's phase timers (`STRATA_PREFILL_TIMING`, St prefill.cpp:2000-2012) give each phase's\nshare of its prompt time; Holon's time is Strata's gated time x the sum of share x f, f being Holon's cost per phase\nrelative to Strata's: 1.0 for the ggml mmq expert and dense GEMMs (assumes the MoE prefill track's D1-D5 and IQ1_M's\nnative loader, D1'); bands for the parts FN writes in Triton (HC in fp32 ieee, GDN, QSA); and Strata's \"dequant\"\nphase \u2014 the per-expert gather and its issue gaps, on IQ3_S too, not IQ1_M's dequantization \u2014 at 1.0 [0.5, 1.5]. A step\nis bound below by streaming the non-resident experts its tokens route to over PCIe (at 1K the routed share from 1,024-\ntoken windows of the trace; 1.0 beyond the trace's length). The defaults rows give Holon's q8_0 KV (read in-kernel by\n`qsa_attend@1`) Strata's own int8 gain (its defaults over its no-approx prefill, where above 1).",
  "inputs": {
   "x_fit": {
    "f5a_fetch_gbps": 40.32,
@@ -16,22 +16,24 @@
    "dense_gb": 4.1765,
    "expert_mb": 2.0464,
    "bw": 1523.2,
-   "cache_gb": 21.45
+   "head_gb": 0.521,
+   "step": 8192,
+   "cache_gb": 21.45,
+   "target_gb": null
   },
-  "cache_gb": 21.27,
-  "slots_per_layer": 216.5,
-  "lfu_hit_rate": 0.9267,
-  "lfu_replay": {
-   "64": 0.7216,
-   "96": 0.7985,
-   "108": 0.8211,
-   "114": 0.831,
-   "128": 0.8519,
-   "160": 0.8874,
-   "218": 0.9277,
-   "240": 0.9388,
-   "275": 0.953
+  "cache_gb": {
+   "off": 22.159,
+   "mtp": 21.27
   },
+  "slots_per_layer": {
+   "off": 225.6,
+   "mtp": 216.5
+  },
+  "lfu_hit_rate": {
+   "off": 0.9318,
+   "mtp": 0.8905
+  },
+  "union_experts_per_layer_per_pass": 26.5,
   "non_lendable_peak_kb": 222.0,
   "phase_factors": {
    "hc read": [
@@ -75,9 +77,9 @@
     1.6
    ],
    "dequant": [
+    1.0,
     0.5,
-    0.25,
-    1.0
+    1.5
    ],
    "gemm gate/up": [
     1.0,
@@ -97,6 +99,7 @@
    "strata": {
     "na_off_decode": 113.33,
     "na_mtp_decode": 189.9,
+    "accepted_per_pass": 2.94,
     "def_off_decode": 121.19,
     "def_mtp_decode": 206.71,
     "na_prefill": 2123.5,
@@ -104,47 +107,53 @@
    },
    "holon": {
     "decode_off": {
-     "central": 125.9,
-     "low": 114.4,
-     "high": 139.8
+     "central": 127.8,
+     "low": 116.1,
+     "high": 142.2
+    },
+    "decode_mtp": {
+     "central": 186.9,
+     "low": 177.4,
+     "high": 197.5
     },
     "prefill": {
-     "central": 2229.1,
-     "low": 1818.1,
+     "central": 2060.9,
+     "low": 1579.2,
      "high": 2229.1
     },
     "prefill_stream_cap": 2229.1,
-    "routed_nonresident_share": 0.752
+    "routed_nonresident_share": 0.752,
+    "q8_0_kv_gain": 1.0
    },
    "ratios": {
     "noapprox_off_decode": {
-     "central": 1.111,
-     "low": 1.01,
-     "high": 1.234
+     "central": 1.128,
+     "low": 1.024,
+     "high": 1.255
     },
     "noapprox_mtp_decode": {
-     "central": 1.111,
-     "low": 1.01,
-     "high": 1.234
-    },
-    "defaults_off_decode": {
-     "central": 1.111,
-     "low": 1.01,
-     "high": 1.234
-    },
-    "defaults_mtp_decode": {
-     "central": 1.091,
-     "low": 0.992,
-     "high": 1.212
+     "central": 0.984,
+     "low": 0.934,
+     "high": 1.04
     },
     "noapprox_prefill": {
-     "central": 1.05,
-     "low": 0.856,
+     "central": 0.971,
+     "low": 0.744,
      "high": 1.05
     },
+    "defaults_off_decode": {
+     "central": 1.128,
+     "low": 1.024,
+     "high": 1.255
+    },
+    "defaults_mtp_decode": {
+     "central": 0.967,
+     "low": 0.918,
+     "high": 1.022
+    },
     "defaults_prefill": {
-     "central": 1.14,
-     "low": 0.93,
+     "central": 1.054,
+     "low": 0.808,
      "high": 1.14
     }
    },
@@ -174,6 +183,7 @@
    "strata": {
     "na_off_decode": 110.22,
     "na_mtp_decode": 147.81,
+    "accepted_per_pass": 2.49,
     "def_off_decode": 117.56,
     "def_mtp_decode": 177.01,
     "na_prefill": 4608.6,
@@ -181,48 +191,54 @@
    },
    "holon": {
     "decode_off": {
-     "central": 122.6,
-     "low": 111.8,
-     "high": 135.8
+     "central": 124.5,
+     "low": 113.3,
+     "high": 138.1
+    },
+    "decode_mtp": {
+     "central": 156.2,
+     "low": 148.4,
+     "high": 164.9
     },
     "prefill": {
-     "central": 4599.5,
-     "low": 3553.9,
-     "high": 5277.2
+     "central": 4285.7,
+     "low": 3363.6,
+     "high": 5064.5
     },
     "prefill_stream_cap": 6703.8,
-    "routed_nonresident_share": 1.0
+    "routed_nonresident_share": 1.0,
+    "q8_0_kv_gain": 1.0
    },
    "ratios": {
     "noapprox_off_decode": {
-     "central": 1.112,
-     "low": 1.014,
-     "high": 1.232
+     "central": 1.129,
+     "low": 1.028,
+     "high": 1.253
     },
     "noapprox_mtp_decode": {
-     "central": 1.112,
-     "low": 1.014,
-     "high": 1.232
-    },
-    "defaults_off_decode": {
-     "central": 1.112,
-     "low": 1.014,
-     "high": 1.232
-    },
-    "defaults_mtp_decode": {
-     "central": 0.991,
-     "low": 0.903,
-     "high": 1.097
+     "central": 1.057,
+     "low": 1.004,
+     "high": 1.116
     },
     "noapprox_prefill": {
-     "central": 0.998,
-     "low": 0.771,
-     "high": 1.145
+     "central": 0.93,
+     "low": 0.73,
+     "high": 1.099
+    },
+    "defaults_off_decode": {
+     "central": 1.129,
+     "low": 1.028,
+     "high": 1.253
+    },
+    "defaults_mtp_decode": {
+     "central": 0.941,
+     "low": 0.894,
+     "high": 0.994
     },
     "defaults_prefill": {
-     "central": 1.15,
-     "low": 0.888,
-     "high": 1.319
+     "central": 1.071,
+     "low": 0.841,
+     "high": 1.266
     }
    },
    "strata_phase_shares": {
@@ -251,6 +267,7 @@
    "strata": {
     "na_off_decode": 105.15,
     "na_mtp_decode": 179.07,
+    "accepted_per_pass": 3.05,
     "def_off_decode": 114.25,
     "def_mtp_decode": 197.27,
     "na_prefill": 5650.4,
@@ -258,48 +275,54 @@
    },
    "holon": {
     "decode_off": {
-     "central": 122.6,
-     "low": 111.8,
-     "high": 135.8
+     "central": 124.5,
+     "low": 113.3,
+     "high": 138.1
+    },
+    "decode_mtp": {
+     "central": 191.4,
+     "low": 181.8,
+     "high": 202.0
     },
     "prefill": {
-     "central": 5363.1,
-     "low": 4139.8,
-     "high": 6214.8
+     "central": 5128.2,
+     "low": 3999.1,
+     "high": 6055.3
     },
     "prefill_stream_cap": 13407.5,
-    "routed_nonresident_share": 1.0
+    "routed_nonresident_share": 1.0,
+    "q8_0_kv_gain": 1.15
    },
    "ratios": {
     "noapprox_off_decode": {
-     "central": 1.166,
-     "low": 1.063,
-     "high": 1.292
+     "central": 1.184,
+     "low": 1.078,
+     "high": 1.313
     },
     "noapprox_mtp_decode": {
-     "central": 1.166,
-     "low": 1.063,
-     "high": 1.292
-    },
-    "defaults_off_decode": {
-     "central": 1.166,
-     "low": 1.063,
-     "high": 1.292
-    },
-    "defaults_mtp_decode": {
-     "central": 1.15,
-     "low": 1.048,
-     "high": 1.274
+     "central": 1.069,
+     "low": 1.015,
+     "high": 1.128
     },
     "noapprox_prefill": {
-     "central": 0.949,
-     "low": 0.733,
-     "high": 1.1
+     "central": 0.908,
+     "low": 0.708,
+     "high": 1.072
+    },
+    "defaults_off_decode": {
+     "central": 1.184,
+     "low": 1.078,
+     "high": 1.313
+    },
+    "defaults_mtp_decode": {
+     "central": 1.054,
+     "low": 1.001,
+     "high": 1.113
     },
     "defaults_prefill": {
-     "central": 0.825,
-     "low": 0.637,
-     "high": 0.956
+     "central": 0.908,
+     "low": 0.708,
+     "high": 1.072
     }
    },
    "strata_phase_shares": {
@@ -325,7 +348,5 @@
    }
   }
  },
- "rows_below_0_9_central": [
-  "32768 defaults_prefill"
- ]
+ "rows_below_0_9_central": []
 }

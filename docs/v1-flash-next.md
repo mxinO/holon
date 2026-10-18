@@ -526,7 +526,9 @@ MoE first.**
   - **Who writes it.** tune benchmarks decode only, so it does not choose prefill settings (track D0). FN's two locks
     carry three hand-set values, chosen from step 7's prefill and decode measurements and changed only through
     `propagate`:
-    - `max_step_tokens` = 8,192 (proposed);
+    - `max_step_tokens`: **4,096 on the RTX 5080** (lead decision after step 0: its 32K prefill is compute-bound at
+      ≈ 2.85K tok/s, under the 4K step's streaming cap of ≈ 6.9K, and 4K steps free ≈ 0.9 GB of cache, §13); 8,192
+      on the RTX 5090;
     - `ggml_cuda.pass_rows` = 4,096, the cap, which yields the proven 3,072 at top-10;
     - `moe.ring_lend` = `tail`.
 - **(e) F5b rows** are reported separately. Gated rows use the lock's configuration, and X's F5b-lock escalation still
@@ -561,7 +563,7 @@ MoE first.**
   - `kernels.ggml_cpu` (Q2_0 type). `kernels.ggml_cuda`'s T1–T5 are the MoE prefill track's, and propagate with
     it;
   - **FN's lock settings, hand-set and changed only through `propagate`** (D12d): `ggml_cuda.pass_rows` = 4,096
-    (yielding 3,072 at top-10), `max_step_tokens` = 8,192, `moe.ring_lend` = `tail`;
+    (yielding 3,072 at top-10), `max_step_tokens` = 4,096 (RTX 5080) / 8,192 (RTX 5090), `moe.ring_lend` = `tail`;
   - `drafters/mtp` and `drafters/dflash` (no lock uses either; checked `plans/`);
   - the workspace gguf-py relock.
 - **Order:** the MoE prefill track propagates its own changes first. Of FN and K, whichever closes second propagates
@@ -623,7 +625,8 @@ MoE first.**
     launch shape;
 - `qsa_index@1` (pooling from stored raw keys);
 - `qsa_select@1` (fp32 ieee; lower-index ties; sub-batched workspace);
-- `qsa_attend@1` (prefill, decode, verify; gqa's KV formats).
+- `qsa_attend@1` (prefill, decode, verify; gqa's KV formats). **It reads q8_0 KV in-kernel in all three** (panel C,
+  step 0): the defaults rows' q8_0 must gain what Strata's int8 gains at 32K (+15–20% prefill), not dequantize first.
 
 **`models.qwen4_exp`:**
 - The recipe sets `residual=Residual(10240, "float32")`, `block=Ref("std.hyper.gr_block@1", n=4, rank=320,
@@ -740,7 +743,7 @@ for the cache and the non-lendable peak.
 
 Notes on the 5080:
 - **One deployment per card:** `--ctx 33792` serves every row, so the 8K step's peak is reserved in the 1K and 4K
-  rows too. The proposed lock is 8K steps with lending, set by hand from step 7's measurements (D12d).
+  rows too. The lock steps **4K** with lending (lead decision after step 0, D12d), reserving the 4K step's peak.
 - **Lent slots return empty** (T2), so a 32K decode starts with a dipped hit rate. Each cell reports the hit rate over
   the first 32 decode tokens (D11). Strata's borrowing does the same.
 - **MTP experts in the store** instead of resident: ≈ +0.7 GB of cache.
@@ -1107,34 +1110,47 @@ step 1. Step 1 waits for K's core round anyway. Step 2 is not started beyond wha
   - At 16 rows per token without deduplication, that serves about 24K prefill tok/s.
   - **D5's read-ahead:** queue depth 64 over 2 threads.
 
-**N3, the proxy roofline** (`spikes/fn0/n3_roofline.py`, `evidence/fn0_n3_roofline_<card>`; method in its
-docstring):
-- **Inputs:**
-  - `lfu` replayed on Strata's decode routing at §7's cache (with the measured peak);
-  - X's F5a fetch rate (40.3 GB/s) and per-step overhead (1.82 ms, scaled to 16 launches per layer: 2.64 ms);
-  - Strata's prefill phase shares, with Holon's cost per phase: HC ×1.5, GDN ×1.1, QSA ×1.2, IQ1_M dequant ×0.5, and
-    mmq ×1.0, which assumes the MoE prefill track's D1–D5;
-  - the PCIe streaming bound of a step's routed non-resident experts.
-- **Holon / Strata, central [band]:**
+**N3, the proxy roofline** (`spikes/fn0/n3_roofline.py` rev 2, `evidence/fn0_n3_roofline_<card>`; method in its
+docstring). Rev 2 takes panel C's review of the step-0 evidence (below):
+- **Caches per row.** §7's budget at the lock's step, with the measured 222 KB/token peak.
+  - RTX 5080 at 4K steps: 7.41 GB with the MTP pack for the MTP rows; 8.30 GB without it for the drafting-off rows.
+  - RTX 5090 at 8K steps: 21.27 / 22.16 GB.
+- **`lfu` replays on Strata's decode routing:**
+  - single tokens for drafting off: 82.8% / 93.2% (5080 / 5090);
+  - 4-token window unions for MTP verify passes (26.9 distinct experts per layer per pass): 71.6% / 89.1%.
+- **MTP rows.** A pass reads the dense bytes once and the union's experts once, plus 3 draft steps of the MTP head
+  (its 0.18 GB dense parts, the full-vocabulary head, 10 Q2_0 experts). It yields Strata's recorded accepted tokens
+  per pass from the matched rows.
+- **Prefill factors:** X's F5a fetch rate (40.3 GB/s) and per-step overhead (2.64 ms at 16 launches per layer).
+  Strata's phase shares are scaled by HC ×1.5, GDN ×1.1, QSA ×1.2, mmq ×1.0 (assuming the MoE prefill track's D1–D5),
+  and Strata's "dequant" phase — **relabelled: the per-expert gather and its issue gaps**, present on IQ3_S too — at
+  ×1.0 [0.5, 1.5]. Rev 1 read it as IQ1_M's dequantization at ×0.5.
+- **Other bounds and gains:** the PCIe streaming bound of a step's routed non-resident experts; q8_0 KV gaining
+  Strata's own int8 gain in the defaults rows (`qsa_attend@1` reads q8_0 in-kernel, §5).
+- **Holon / Strata, central [band] (rev 2, which supersedes rev 1's table):**
 
 | Row | RTX 5080: 1K · 4K · 32K | RTX 5090: 1K · 4K · 32K |
 |---|---|---|
-| no-approx, off, decode | 0.96 · 0.95 · 1.01 [0.89–1.09] | 1.11 · 1.11 · 1.17 [1.01–1.29] |
-| no-approx, MTP, decode (same acceptance) | as off | as off |
-| no-approx, prefill | 1.12 · 0.97 · 0.92 [0.72–1.29] | 1.05 · 1.00 · 0.95 [0.73–1.15] |
-| defaults vs Holon + A1, off, decode | as no-approx (A1 assumed to gain what Strata's tail skip gains) | as no-approx |
-| defaults vs Holon + A1, MTP, decode | 0.91 · **0.87 · 0.88** | 1.09 · 0.99 · 1.15 |
-| defaults vs Holon + A1, prefill (q8_0 KV gain not modelled) | 1.17 · 0.99 · **0.77** | 1.14 · 1.15 · **0.83** |
+| no-approx, off, decode | 1.03 · 1.01 · 1.08 [0.95–1.17] | 1.13 · 1.13 · 1.18 [1.02–1.31] |
+| no-approx, MTP, decode | **0.896** · 0.92 · 1.09 [0.87–1.13] | 0.98 · 1.06 · 1.07 [0.93–1.13] |
+| no-approx, prefill | 0.96 · 0.92 · **0.899** [0.70–1.18] | 0.97 · 0.93 · 0.91 [0.71–1.10] |
+| defaults vs Holon + A1, off, decode (A1 gains what Strata's tail skip gains) | as no-approx | as no-approx |
+| defaults vs Holon + A1, MTP, decode | **0.85 · 0.84** · 0.94 | 0.97 · 0.94 · 1.05 |
+| defaults vs Holon + A1, prefill (q8_0 gains int8's +20% / +15% at 32K) | 1.01 · 0.94 · **0.899** | 1.05 · 1.07 · 0.91 |
+| *RTX 5080 at step 7's target (≥ 8.2 GB with the pack; 9.09 GB without):* no-approx off · MTP decode | 1.06 · 1.04 · 1.11 · 0.94 · 0.97 · 1.15 | — |
 
-- **Rows predicted below 0.9× (central):**
-  - RTX 5080: defaults MTP decode at 4K and 32K; defaults prefill at 32K.
-  - RTX 5090: defaults prefill at 32K.
-- **The no-approx rows** are all ≥ 0.92 at the centre, but the RTX 5080's decode sits at the 1.0× bar (0.95–1.01)
-  and several bands reach below 0.9.
-- **Causes:**
-  - 32K defaults prefill: Strata's int8 KV, against Holon's q8_0 KV, which has no prefill gain in the model;
-  - defaults MTP: Strata's suffix drafter (a non-goal for Holon);
-  - the 5080's decode margin: §7's smaller cache.
+- **Rows below 0.9× (central):**
+  - RTX 5080: no-approx MTP decode at 1K (0.896); defaults MTP decode at 1K and 4K (0.85, 0.84); no-approx and
+    defaults prefill at 32K (both 0.899).
+  - RTX 5090: none.
+- **At step 7's memory target** the RTX 5080's MTP rows rise to 0.94 / 0.97 / 1.15, and its drafting-off decode to
+  1.04–1.11.
+- **Causes (amended after panel C):**
+  - **The defaults MTP rows: Strata's suffix drafter and its calibrated draft floor.** This is the real cause; Holon
+    has no suffix drafter (a non-goal). Rev 1's "int8 KV" cause for the defaults prefill was mostly a modelling gap:
+    with q8_0 gaining int8's own gain, the 32K defaults prefill moves from 0.77 / 0.83 to 0.90 / 0.91.
+  - **The RTX 5080's MTP and 32K prefill rows:** §7's smaller cache. The verify unions miss more, and the gather
+    phase now carries its full weight.
 
 **The oracle check (N4's 32K run)** (`spikes/fn0/n4_oracle.py`):
 - **The judge reads FN's GGUFs** (`judge/holon_judge/gguf.py`, `golden.py`, `moe.py`): the `qwen4exp` name map, split
@@ -1157,9 +1173,18 @@ docstring):
    rows, which compare engine with engine. Report the defaults rows without gating them: they measure features outside
    FN's scope (the suffix drafter is a non-goal, and int8 KV is a format choice). Pending the owner's answer; work does
    not block on it.
-2. **The memory fit becomes a perf-closure target (step 7).** Aim for Strata's fit: its ≈ 700 MiB reserve and ≈ 31%
-   of the experts cached on the RTX 5080, through the memory fraction, the reserve and prompt-path borrowing.
-   - **Row at risk:** RTX 5080, no-approx decode, predicted at 0.95–1.01×.
+2. **The memory fit becomes a perf-closure target (step 7)**, restated after panel C (M1):
+   - **The target:** ≥ 23% (≈ 8.2 GB) of the experts cached on the RTX 5080 with the MTP pack resident. It is set
+     against Strata's MTP arm (7,016 slots, 28.5%), not its drafting-off arm's 31%.
+   - **Three levers:**
+     - **4K steps** on the 5080 lock (lead decision; D12d, D16): +0.9 GB.
+     - **A fixed reserve in place of the 0.9 fraction:** +≈ 0.8 GB at 0.97.
+       - The core's existing `memory_fraction` and `state_memory` settings already reach it (`EngineConfig`,
+         `engine.py:75-76`), so no core change is needed.
+       - A reserve stated in MiB would be a new core option. **K/FN core-round item.**
+     - **`token_embd` on the host:** +0.34 GB.
+   - **Row at risk:** RTX 5080, no-approx decode, 0.95–1.01× in rev 1. In rev 2 the risk shifts to the 5080's MTP and
+     32K prefill rows (above).
 3. **`STRATA_PREFILL_CPU_SHARE=0` in the no-approx rows** (D11 corrected; `spikes/fn0/arms_strata_<card>.json`).
 4. **FreeToken is N/A per file** (reported only anyway):
    - IQ2_XS: no ggml MoE kernel for IQ1_M;
@@ -1193,5 +1218,34 @@ docstring):
   - in the golden venv, the streamed golden equals HF's forward bit for bit.
 - **N4** is done.
 
-**Deferred to step 3, with the MTP head (D9):** the pooled MTP reference transcribed from SG's module, which the §6.1
-check runs on the pack's dequantized tensors. Steps 1 and 3 wait for milestone K's core seams.
+**The pooled MTP reference is done too** (panel B F6 corrects this record: SGLang 0.5.21's `qwen4_exp_mtp.py` was in the
+local uv cache all along):
+- `judge/holon_judge/qwen4exp.py` (`mtp_pooled`, `pack_state`) transcribes it onto transformers' modules.
+- It reads the tiny Strata-format pack as the checkpoint's tensors within 1e-4. The pack's Q2_0 experts keep the
+  source layout (gate rows before up rows, expert order).
+
+Steps 1 and 3 wait for milestone K's core seams.
+
+**Step 2's code review (panel A: architecture; panel B: correctness), dispositions:**
+
+| # | Finding | Disposition |
+|---|---|---|
+| B-F1 (major) | `_LazyRows` ignored the golden's dtype; the bf16 floor and the shared-expert mirror were untested | **Accepted.** `LazyRows` returns the golden's dtype. New tests (golden venv): a CPU bf16 floor of the tiny model runs to completion (top-1 > 90% of the fp32 golden's), and `moe.mirror` on an fp32 tiny block matches HF's `SparseMoeBlock` within 1e-6, with the gated shared term nonzero. |
+| B-F2 | The Q2_0 L0 never exercised code 3 (+2): ggml's quantizer (d = amax) does not write it | **Accepted.** The synthetic Q2_0 class is built from random code bytes and fp16 scales, and the test asserts that code 3 occurs. |
+| B-F3 = A-m2 | The tie rule was recorded only on the GGUF path | **Accepted.** `archs.prepare` runs wherever the golden builds a model (GGUF, streamed HF, whole HF), and records the deviation whenever an indexer is wrapped. |
+| B-F4 | The fixtures read the indexer's mask as a bool | **Accepted.** `tiny_hf` pins `attn_implementation="sdpa"`, and the fixtures also accept eager's float mask (`mask == 0`). The fixtures are unchanged. |
+| B-F5 | A quantized indexer projection failed with a bare KeyError; some readers saw only shard 1 | **Accepted.** `_linear` refuses a quantized `indexer.q_proj` / `k_proj` with a clear message. `emulate_q8_1`, `q8_1_experts`, `hf_types`, `engine_shapes` and `mmvq_step` read every shard (`_tensors`). |
+| B-F6 | SG's module was available; do the pooled MTP reference now | **Accepted.** `qwen4exp.mtp_pooled` and `pack_state`; the tiny pack checked within 1e-4 (above). |
+| A-m1 | Qwen4Exp specifics in the generic `golden.py` | **Accepted.** `judge/holon_judge/qwen4exp.py` holds them (the tie rule, lazy PLE rows with the hash check, the mixer as the final norm, the MTP reference); `golden.py` calls `archs.prepare` / `archs.final_norm`. |
+| A-m3 | Two definitions of the tie rule; a global `Tensor.topk` patch in the fixtures; the test wrapped a shared model | **Accepted.** One definition (`qwen4exp.wrap_indexers`, scoped to each indexer's call, with an optional tie counter). The fixtures import it (`holonlm-testing` now depends on `holonlm-judge`), and the tests wrap models of their own. |
+| A-m4 | std's `gguf>=0.17` floor vs Q2_0 | **Accepted: release item.** A user's PyPI gguf lacks Q2_0, so either std gets its own size entry for type ids gguf-py lacks, or the floor rises once a PyPI gguf with Q2_0 exists. No code change now. |
+
+**Step 0's evidence review (panel C), dispositions:**
+
+| # | Finding | Disposition |
+|---|---|---|
+| C-M1 | Step 7's memory target measured against the wrong Strata arm | **Accepted.** ≥ 23% (≈ 8.2 GB) with the pack, against Strata's MTP arm's 28.5%. Levers: 4K steps (decided; D12d, D16), a fixed reserve through the existing `memory_fraction` / `state_memory` (a MiB-reserve option is a K/FN core-round item), and `token_embd` on the host. The roofline's drafting-off rows are sized without the MTP pack. |
+| C-M2 | q8_0's gain left out of the model | **Accepted.** `qsa_attend@1` reads q8_0 in-kernel in prefill, decode and verify (§5). The defaults rows model q8_0's gain, and the escalation text now names the suffix drafter as the real cause. |
+| C-m | Strata's "dequant" phase mislabelled | **Accepted.** Relabelled as the per-expert gather and its issue gaps, at ×1.0 [0.5, 1.5]. |
+| C-m | The MTP rows were not modelled | **Accepted.** `lfu` is replayed on 4-token window unions, with the recorded acceptance and the per-draft head and dense bytes. |
+| C-m | N1's no-approx arms ran with the CPU share on | **Accepted, noted.** N1 ran with Strata's CPU share on (the as-run arms, with their environments, are inside each `evidence/fn0_n1_*` record's `arms`). It measured as immaterial (`evidence/fn0_n1_cpu_share_<card>`). The committed `spikes/fn0/arms_*` files now set it off. |

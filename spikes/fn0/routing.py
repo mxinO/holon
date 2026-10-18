@@ -47,9 +47,10 @@ def profile(path: str) -> list[list[int]]:
     return order
 
 
-def lfu_hits(tokens: np.ndarray, slots: int, seed: list[list[int]] | None = None) -> float:
+def lfu_hits(tokens: np.ndarray, slots: int, seed: list[list[int]] | None = None, window: int = 1) -> float:
     """Decode hit rate of `placement.lfu@1` with `slots` per layer, empty at the start or seeded with each layer's first
-    `slots` experts of `seed` (scores zero)."""
+    `slots` experts of `seed` (scores zero). With `window` > 1, each step is a verify pass over `window` consecutive
+    tokens: one decay, every token's entries counted, and the rate over the pass's distinct experts (each read once)."""
     hits = total = 0
     for layer in range(tokens.shape[1]):
         score = np.zeros(EXPERTS, np.float32)
@@ -57,12 +58,14 @@ def lfu_hits(tokens: np.ndarray, slots: int, seed: list[list[int]] | None = None
         if seed is not None:
             resident[seed[layer][:slots]] = True
         free = slots - int(resident.sum())
-        for routed in tokens[:, layer]:
+        steps = tokens[:len(tokens) // window * window, layer].reshape(-1, window * tokens.shape[2])
+        for entries in steps:
+            routed = np.unique(entries)
             hit = resident[routed]
             hits += int(hit.sum())
             total += len(routed)
             score *= DECAY
-            np.add.at(score, routed, np.float32(1.0))
+            np.add.at(score, entries, np.float32(1.0))
             cands = sorted((int(e) for e in routed[~hit]), key=lambda e: (-score[e], e))
             take = min(free, len(cands))
             resident[cands[:take]] = True
@@ -76,6 +79,12 @@ def lfu_hits(tokens: np.ndarray, slots: int, seed: list[list[int]] | None = None
                     break
                 resident[a], resident[b] = True, False
     return hits / total
+
+
+def union_size(tokens: np.ndarray, window: int) -> float:
+    """Distinct experts per layer a pass of `window` consecutive tokens routes to, on average."""
+    steps = tokens[:len(tokens) // window * window].reshape(-1, window, tokens.shape[1], tokens.shape[2])
+    return float(np.mean([len(np.unique(s[:, layer])) for s in steps for layer in range(tokens.shape[1])]))
 
 
 def main() -> None:
