@@ -3,7 +3,8 @@
   "name": "strata_na_off",
   "engine": "strata",
   "env": {
-   "STRATA_ROUTE_TAIL_SKIP": "0"
+   "STRATA_ROUTE_TAIL_SKIP": "0",
+   "STRATA_PREFILL_CPU_SHARE": "0"
   },
   "flags": "--pack local/fn/strata/packs/iq3_s --expert-profile bench/.envs/src/Strata/data/expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --spec 2 --suffix-draft 0 --adapt-every 1 --adapt-swaps 80 --adapt-decay 0.97"
  },
@@ -12,7 +13,8 @@
   "engine": "strata",
   "env": {
    "STRATA_ROUTE_TAIL_SKIP": "0",
-   "STRATA_MTP_FULL_HEAD": "1"
+   "STRATA_MTP_FULL_HEAD": "1",
+   "STRATA_PREFILL_CPU_SHARE": "0"
   },
   "flags": "--pack local/fn/strata/packs/iq3_s --expert-profile bench/.envs/src/Strata/data/expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --mtp local/fn/strata/mtp/rt --spec 4 --spec-min-p 0 --suffix-draft 0 --adapt-every 1 --adapt-swaps 80 --adapt-decay 0.97"
  },

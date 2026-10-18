@@ -294,8 +294,10 @@ at a time through the judge's existing `_streamed`.**
   - At vocab 248,320, full logits for one prompt would be ≈ 123 MB and the f32 GGUF ≈ 130 MB. So:
     - **Committed:** HF's output-mixer x [T, 64], the selected token sets and the PLE row ids. The test recomputes
       the logits with the GGUF's `lm_head`.
-    - **Not committed:** the tiny GGUF. It is a sha256-pinned artifact that CI fetches, so §6.1 runs in CI instead of
-      skipping as `qwen3_5_files.py:86-87` does when the converter is absent.
+    - **Not committed:** the tiny GGUF. A pinned script rebuilds it (`python -m holon_testing.qwen4exp_files` in the
+      golden venv with LC `27c7a76`) and checks its sha256. CI skips only the GGUF-dependent checks when LC's
+      converter is absent, as `qwen3_5_files.py:86-87` does. **Deviation from rev 3** ("CI fetches the artifact";
+      lead decision, step 0): no host for the artifact exists.
   - **The MTP pack:** the tool also writes a Strata-format MTP pack for the tiny model.
     - First it writes the tiny model's `mtp.*` tensors in `tools/mtp_fetch.py`'s layout: one raw bf16 file per tensor
       plus `mtp-manifest.json` (St `tools/mtp_fetch.py:1-12`).
@@ -459,8 +461,9 @@ MoE first.**
     recorded;
   - `STRATA_IQ_MT_MIN` is left at its default. It is a reproducibility switch, not an approximation, and costs Strata
     1–3% (`docs/DETAILS.md:97-104`);
-  - the prefill CPU share stays on (below 1,024-token chunks only, `prefill.cpp:178-181`). The 1K prompts are exactly
-    1,024 tokens.
+  - the prefill CPU share is off: `STRATA_PREFILL_CPU_SHARE=0` (lead decision, step 0). Rev 4 assumed it never ran on
+    the 1,024-token prompts, but Strata reads them as 1,023-token chunks, below the share's 1,024-token limit
+    (`prefill.cpp:178-181`), and the share is not exact (its log: mean KL ≈ 0.004). Off, it measured no slower (§13).
 - **Strata defaults:**
   - setup's command for the card: `--expert-cache auto --prefill auto --spec 4 --spec-min-p 0.5`, the suffix
     drafter, int8 KV above 8K, PLE O_DIRECT, calibrated (St `setup.py:6570-6576`);
@@ -1149,9 +1152,18 @@ docstring):
     tie rule rarely changes the full model's selections, unlike the tiny model's ReLU sums.
   - Record: `evidence/fn0_n4_oracle_cpu_2026-10-18.json`.
 
-**For the owner** (no redesign done):
-- whether the defaults rows are gated against Holon + A1 as they stand, given the suffix drafter (a non-goal) and
-  int8 vs q8_0 KV;
-- whether §7's budget should approach Strata's fit (700 MiB reserve, prompt-path borrowing) to restore the 5080's
-  decode margin;
-- whether no-approx Strata should run with `STRATA_PREFILL_CPU_SHARE=0`, exact by construction at no measured cost.
+**Lead decisions on the stop (2026-10-18):**
+1. **Owner item; the lead recommends report-only for the Strata defaults rows.** Gate the no-approx and MTP-matched
+   rows, which compare engine with engine. Report the defaults rows without gating them: they measure features outside
+   FN's scope (the suffix drafter is a non-goal, and int8 KV is a format choice). Pending the owner's answer; work does
+   not block on it.
+2. **The memory fit becomes a perf-closure target (step 7).** Aim for Strata's fit: its ≈ 700 MiB reserve and ≈ 31%
+   of the experts cached on the RTX 5080, through the memory fraction, the reserve and prompt-path borrowing.
+   - **Row at risk:** RTX 5080, no-approx decode, predicted at 0.95–1.01×.
+3. **`STRATA_PREFILL_CPU_SHARE=0` in the no-approx rows** (D11 corrected; `spikes/fn0/arms_strata_<card>.json`).
+4. **FreeToken is N/A per file** (reported only anyway):
+   - IQ2_XS: no ggml MoE kernel for IQ1_M;
+   - IQ3_S: prompts over 8,192 tokens are dropped, so its 32K cell is N/A; 1K and 4K are recorded.
+5. **The tiny GGUF is rebuilt, not fetched.** The small fixtures are committed; a pinned script rebuilds the GGUF and
+   checks its sha256; CI skips only the GGUF-dependent part (D2's deviation).
+6. **Step 2's remainder continues; steps 1 and 3 wait** for milestone K's core seams.
