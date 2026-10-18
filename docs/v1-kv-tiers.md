@@ -1,9 +1,9 @@
 # v1 — milestone K: KV and checkpoint tiers under the prefix index
 
-Status: **rev 7, after the panel's sixth round** (2026-10-18). Nothing is built and nothing has been measured for K
+Status: **rev 8, after the panel's seventh round** (2026-10-18). Nothing is built and nothing has been measured for K
 yet. Every number below is a CPU-side estimate from earlier evidence (cited), fixed as a prediction before step 0
 and step 4 measure it. Rev 2 answered the three-reviewer panel (A correctness, B architecture, C numerics and
-performance); revs 3 to 7 answer its re-reviews. The finding-by-finding dispositions are in §13.
+performance); revs 3 to 8 answer its re-reviews. The finding-by-finding dispositions are in §13.
 
 Scope: plan §10's K line ("KV and checkpoint tiers (pinned RAM / SSD under the prefix index, exact, deterministic
 resume)", `docs/plan.md:603-604`), the end-of-answer checkpoint item (`docs/plan.md:675-681`), and the requirements
@@ -151,10 +151,9 @@ caches on an agent trace, with outputs that do not depend on where state was kep
    - The `dropped_publishes` counter (`stats()`) is 0 on `agent_park` at the tuned pool size.
 5. **Core.**
    - Only §4's seams KS1–KS5, one additive ABI minor, each toy-proven. K's ABI is **1.4 or 1.5 by merge order**:
-     milestone FN also proposes 1.4. FN rev 2 (32c99f2) has seams C1 (residual width), C2 (block-declared state, no
-     FFN branch) and C3 (`BuildCtx.unit_class`), with a budget of ≤ +45 lines over its own step-1 base. K's and
-     FN's core changes are serialized. Whichever lands its seams first takes 1.4, and the other
-     rebases and takes 1.5.
+     milestone FN also proposes 1.4. FN rev 3 (7a80674) has seams C1–C3, ≤ +47 lines over its own step-1 base, and
+     no FFN branch. K's and FN's core changes are serialized. Whichever lands its seams first takes 1.4, and the
+     other rebases and takes 1.5.
    - `check_abi --base` and the line check are relative to **K's step-1 base**: the main-branch commit K's seams
      rebase onto, after FN's seams if FN lands first.
    - **At most +320 code lines over that base** (§4 itemizes ≈ 292; rev 2 had ≤ +300 for ≈ 285).
@@ -324,8 +323,13 @@ Plugin kinds:
     decided, and the read or copy that reuses it waits on the write's ticket.
   - **Fences on host units** (A-1, B-N1, C-1). A host unit is touched by device copies on the tier's streams, by a
     step's own `pre_forward` adopt on the compute stream, and by CPU I/O on the levels' threads. The tier keeps each
-    unit's last device fence: the end event of the store that wrote it, or the `done` event of the step that read
-    it, from `loaded(load, done)`. Any reuse of the unit waits for that fence first:
+    unit's **set of outstanding fences**, not only the latest (round 7). A fence is added, never replacing one,
+    by:
+    - the end event of the store that wrote the unit;
+    - the `done` of every step that read it, from `loaded(load, done)`;
+    - the load's own fence, from a waiterless or abandoned `loaded`.
+
+    Fences are pruned as they complete. Any reuse of the unit waits for all the outstanding ones first:
     - stream-side (`Fence.wait`) for a copy into it;
     - host-side (`Fence.synchronize`, on the I/O thread) for a level's `read` into it, or a `write` from it.
 
@@ -535,8 +539,10 @@ rule. The core calls the tier's `loaded(load, done)` with a fence **at most once
 It calls `loaded(load, None)` **at most once** as well: when every entry of the load has been evicted before any step
 read it, whether or not a waiterless `loaded(load, fence)` came first, in an earlier round (round 6). The load is then
 **abandoned** (round 5). The tier sets an abandoned flag under the lock its I/O thread takes before enqueuing the
-  H2D. Either the H2D is never issued (the load's fence is then a no-op), or it was issued already and its fence
-  exists for the free rule to wait on. An abandoned SSD load therefore never stalls the next launch on its read.
+H2D. Either the H2D is never issued, or it was issued already and its fence exists for the free rule to wait on.
+- If it is never issued, abandonment **completes the pending-enqueue condition as a no-op and wakes its waiters**
+  (round 7). A `Fence.wait` already blocked on that load then returns at once, and so does any later one.
+- An abandoned SSD load therefore never stalls a launch on its read.
 
 The rest of the rules:
 - Preempting or aborting a load-gated request releases its references and clears its wait set, and the scheduler
@@ -545,6 +551,9 @@ The rest of the rules:
 - No load is cancelled, so no copy lands in units somebody else owns without the next launch waiting for it.
 - **Who enqueues an SSD load's H2D:** the level's I/O thread, on read completion, through the tier's stream, never
   the engine thread, after checking the abandoned flag under the lock.
+- **I/O order** (round 7). The tier dispatches I/O jobs (level reads, write-backs, and the H2D enqueues that follow
+  reads) **FIFO in the order they were decided**. A job's dependencies (the write that frees its unit, the read a
+  joiner chains on) were decided earlier, so they are always earlier jobs, and no job waits on one queued behind it.
 - **The only remaining host wait** is a launch that waits on a live load whose H2D is not yet enqueued (its
   `Fence.wait` first waits on the host until it is): a reader due early, a pull-forward, a promote-into-place, or a
   free of some but not all of a load's entries. Its time is reported in `stats()` as `load_enqueue_wait_s`. The
@@ -850,8 +859,10 @@ additive minor when ARC is built. K does not add them.
 - every return value and every `dropped()` list is a function of the calls received and the step hooks, never of
   copy or I/O completion;
 - payload stores are accepted (D5);
-- reuse of its own storage waits on its own tickets, and reuse of a host unit, or CPU I/O on it, waits on the unit's
-  last fence: a store's end, or the `done` given to `loaded` (D4);
+- reuse of its own storage waits on its own tickets, and reuse of a host unit, or CPU I/O on it, waits on all the
+  unit's outstanding fences: stores' ends, and every `done` given to `loaded`, which add and never replace (D4);
+- I/O jobs are dispatched FIFO in the order they were decided; abandonment completes a pending enqueue as a no-op
+  and wakes its waiters (D7);
 - every device read of a host unit follows the unit's last write fence: in the `after` of the tier's H2D, and inside
   the `Load` fence for host payloads a kind's adopt reads (D4);
 - a copy being loaded is never evicted before `loaded`, and `loaded` advances the clock to at least the load's due
@@ -945,14 +956,14 @@ follows publish within 1–2 steps. Tiers-off configurations stay clean.
 | Plant | Where | Breaks | Predicted |
 |---|---|---|---|
 | `promote_unwaited` | CPU + GPU | a launch does not wait on its rows' loads | tier invariance fails (stale bytes) |
-| `adopt_source_reused` (A-1, B-N1, C-1; extended in round 5) | CPU | `loaded` ignores `done`: a host payload unit a step's adopt reads is reused by a later store or an SSD read without waiting for that step's end (deferred stream, plus an I/O thread delayed into the window). Second variant: a request that joins a loading entry later adopts the payload through the earlier load instead of its own. The second variant also counts SSD reads, which must be one per payload (round 6) | the adopted recurrent state is corrupt; tier invariance fails, in both variants. A second read of the same payload fails the count |
+| `adopt_source_reused` (A-1, B-N1, C-1; extended in round 5) | CPU | `loaded` ignores `done`: a host payload unit a step's adopt reads is reused by a later store or an SSD read without waiting for that step's end (deferred stream, plus an I/O thread delayed into the window). Second variant: a request that joins a loading entry later adopts the payload through the earlier load instead of its own. The second variant also counts SSD reads, which must be one per payload (round 6). It also runs the abandon-while-waited cell with its delayed I/O thread (round 7), and the call order where G is aborted and J is due in the same step, and G's `loaded` is processed second; with a replace-the-latest fence rule, J's fence would be overwritten (round 7) | the adopted recurrent state is corrupt; tier invariance fails, in both variants. A second read of the same payload fails the count |
 | `load_reuse_unwaited` (round 4) | CPU + GPU | units of an evicted loading entry are reused without the next launch waiting on the load's fence; the H2D delayed | the late H2D overwrites the new owner's bytes; tier invariance fails |
 | `waiter_unref` (round 4) | CPU | a request joining a loading entry's wait set by `_swap` takes no reference | the loading entry is evicted under a live waiter: the property test fails (`could_fit` counts held units) and tier invariance fails |
 | `load_before_store` (round 3, A-1) | CPU + GPU | the tier omits a host unit's write fence from the reading H2D's `after` and from the `Load`'s fence; the D2H stream deferred; eviction then promotion within 1–2 steps, plus a sibling request adopting the same host payload | the promoted pages or the adopted state read the unit before its store lands; tier invariance fails |
 | `store_early` (A2) | GPU | a paged store is issued after the committed step, not the last launched | host copies stale; tier invariance fails on a trace where the in-flight step completes published blocks |
 | `store_unwaited` | CPU + GPU | reuse of a unit freed while its store reads it does not wait | host copy corrupt; tier invariance fails under pressure |
 | `load_no_after` (C10) | GPU | a promotion's copy ignores `after` (the finished request's extra row overwrites it) | tier invariance fails |
-| `read_unwaited` (C10) | CPU | an H2D is issued before its SSD read ticket completes | tier invariance fails (SSD trace) |
+| `read_unwaited` (C10) | CPU | an H2D is issued before its SSD read ticket completes. Also run in the abandon-while-waited cell (round 7): with the I/O thread delayed, a launch is already waiting on the load when it is abandoned | tier invariance fails (SSD trace). In the abandon-while-waited cell, a correct tier wakes the waiter at abandonment, so `load_enqueue_wait_s` stays 0 and the cell does not time out |
 | `promote_wrong_unit` | CPU | a promotion copies the neighbouring host unit | tier invariance fails; bounded L2 fails |
 | `swap_onto_lower` (A1) | CPU | publish onto a non-resident entry keeps the request's own bytes | tier invariance fails on the serial trace (turn 2's recomputed answer) |
 | `gate_on_landing` | CPU | a gated request runs at the first step after its copy lands instead of at its due time | run-identical step lists fail with deferral |
@@ -1324,4 +1335,21 @@ the SSD again.
 - Core: ≈ 292 lines, unchanged. Both rules live in the tier, except one condition in the core's abandon call.
 - Budget: within ≤ +320.
 - ABI: unchanged (1.4 or 1.5 by merge order); `loaded`'s call rule is restated in its docstring.
+- Schedule: unchanged at 26 days.
+
+### Rev 8 (2026-10-18): the panel's seventh round
+
+B was clean on rev 7. A and C each found one tier-side minor issue, both confirmed against rev 7's D4 and D7. Rev 7
+kept only a unit's *last* fence, so a later waiterless `loaded` could replace a reader's `done`. Rev 7 also left the
+I/O threads' job order, and what an abandonment does to a launch already waiting, unstated.
+
+| Finding | Disposition | Where / why |
+|---|---|---|
+| A: a host unit's fence must combine fences, not keep the latest | accepted (the lead's simpler rule) | D4, §4: each host unit keeps its set of outstanding fences. Stores' ends, reading steps' `done`, and waiterless or abandoned `loaded` fences only add; they are pruned as they complete, and reuse waits on all of them. The joining variant of `adopt_source_reused` adds the call order "G aborted, J due in the same step, G's `loaded` processed second" |
+| C: I/O ordering | accepted | D7, §4 contract: I/O jobs are dispatched FIFO in the order they were decided, so a dependency is always an earlier job. Abandonment completes the pending-enqueue condition as a no-op and wakes its waiters. The abandon-while-waited case runs in the existing delayed-I/O-thread plants (`read_unwaited`, `adopt_source_reused`) |
+| Coordinator: FN cross-reference | done | acceptance 5: FN rev 3 (7a80674), C1–C3, ≤ +47 lines, no FFN branch |
+
+**Budget, ABI, schedule.**
+- Core: unchanged at ≈ 292 lines, because both rules are the tier's. The budget stays ≤ +320.
+- ABI: unchanged (1.4 or 1.5 by merge order). The §4 contract gains the two rules.
 - Schedule: unchanged at 26 days.
