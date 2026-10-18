@@ -70,6 +70,16 @@ def hf_name(name: str) -> str:
     return f"model.layers.{m[1]}.{_LAYER[m[2]]}.weight"
 
 
+def _linear(name: str) -> str:
+    """The HF linear a quantized GGUF tensor computes (a floor emulates it). QSA's indexer q and k are one HF linear
+    (`index_qk_proj`) split in two: a floor could not emulate them as one matmul of one type, so they must stay
+    unquantized (they are BF16 in the files FN serves)."""
+    if re.fullmatch(r"blk\.\d+\.indexer\.[qk]_proj\.weight", name):
+        raise ValueError(f"{name}: a quantized QSA indexer projection has no single HF linear to emulate; the judge "
+                         "supports these projections unquantized only")
+    return hf_name(name)
+
+
 def _qwen35(fields) -> dict | None:
     """The `qwen35` / `qwen4exp` facts the judge needs to undo llama.cpp's conversion (None for other
     architectures)."""
@@ -210,7 +220,7 @@ class PleRows:
 def hf_types(path: str | pathlib.Path) -> dict[str, str]:
     """The ggml type (lowercase) of each HF state entry `hf_state` makes (a fused gate/up stack: gate's)."""
     out = {}
-    for t in gguf.GGUFReader(path).tensors:
+    for t in _tensors(path):
         if m := re.fullmatch(r"blk\.(\d+)\.ffn_(gate|up|down)_exps\.weight", t.name):
             name = f"model.layers.{m[1]}.mlp.experts.{'down' if m[2] == 'down' else 'gate_up'}_proj"
             if m[2] == "up":
@@ -240,14 +250,13 @@ def emulate_q8_1(model: torch.nn.Module, path: str | pathlib.Path, kernel_path: 
 
     linears = {prefix + name: m for name, m in model.named_modules() if isinstance(m, torch.nn.Linear)}
     types = {}
-    reader = gguf.GGUFReader(path)
-    q35 = _qwen35(reader.fields)
-    for t in reader.tensors:
+    q35 = _qwen35(gguf.GGUFReader(path).fields)
+    for t in _tensors(path):
         if q35 is not None and re.match(rf"blk\.{q35['layers']}\.", t.name):
             continue
         if t.name.endswith("_exps.weight") or t.tensor_type in _DENSE:   # expert stacks: the floors' D3 block
             continue                                   # (`q8_1_experts`); unquantized tensors (norms, BF16 projections)
-        owner = hf_name(t.name).removesuffix(".weight")
+        owner = _linear(t.name).removesuffix(".weight")
         if owner not in linears:
             continue                                   # the embedding (get_rows reads it exactly)
         kind, blocks = t.tensor_type.name.lower(), np.asarray(t.data)
@@ -275,10 +284,9 @@ def engine_shapes(path: str | pathlib.Path) -> dict[str, tuple[str, int, int]]:
     in: its own shape, or its merged group's (`MERGES`: same type and input; `Linear.merge`). Read once per path (a
     27B file's reader takes ≈ 10 s), keyed by the path argument, not the file's content; callers must not modify the
     result."""
-    reader = gguf.GGUFReader(path)
-    q35 = _qwen35(reader.fields)
-    linears = {hf_name(t.name).removesuffix(".weight"): (t.tensor_type.name.lower(), int(t.shape[0]), int(t.shape[1]))
-               for t in reader.tensors if t.tensor_type not in _DENSE and t.name != "token_embd.weight"
+    q35 = _qwen35(gguf.GGUFReader(path).fields)
+    linears = {_linear(t.name).removesuffix(".weight"): (t.tensor_type.name.lower(), int(t.shape[0]), int(t.shape[1]))
+               for t in _tensors(path) if t.tensor_type not in _DENSE and t.name != "token_embd.weight"
                and not t.name.endswith("_exps.weight")
                and not (q35 is not None and re.match(rf"blk\.{q35['layers']}\.", t.name))}
     return merged(linears)
@@ -325,7 +333,7 @@ def q8_1_experts(path: str | pathlib.Path, kernel_path: str, split: dict | None 
     from . import q8_1
 
     stacks: dict[str, dict[str, tuple[str, np.ndarray]]] = {}
-    for t in gguf.GGUFReader(path).tensors:
+    for t in _tensors(path):
         m = re.fullmatch(r"blk\.(\d+)\.(ffn_(?:gate|up|down)_exps)\.weight", t.name)
         if m:
             blocks = np.asarray(t.data)                                     # [E, out, row_bytes] -> rows
@@ -383,7 +391,7 @@ def mmvq_step(path: str | pathlib.Path) -> int:
     path = pathlib.Path(path)
     if path.suffix == ".gguf":
         matmuls = {(t.tensor_type.name.lower(), t.name.endswith("_exps.weight"), int(t.shape[0]), int(t.shape[1]))
-                   for t in gguf.GGUFReader(path).tensors
+                   for t in _tensors(path)
                    if t.tensor_type not in _DENSE and t.name != "token_embd.weight"}  # get_rows reads the embedding
     else:
         with hf_quant.opened(path, meta=True) as (get, names):

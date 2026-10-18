@@ -17,7 +17,7 @@ import transformers
 from holon.api import Fingerprint
 from holon_std.weights.hf import reference as hf_reference
 
-from . import hf_quant, modes, moe, w4a4
+from . import archs, hf_quant, modes, moe, w4a4
 from . import kv as kv_format
 from . import q8_1 as q8_1_emulator
 from .placement import split_digest
@@ -142,12 +142,10 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
                                          "config_sha256": config_sha256} | _moe_meta(mirrored) | _emulation_meta(q8_1) \
             | per_shape | ({"cpu_split": split_digest(cpu_split)} if cpu_split else {})
         skeleton = _skeleton(hf_config)
-        if lazy := _lazy_ple(skeleton, path, device):
-            source |= {"ple": "lazy rows", "deviations": [TIE_RULE]}
+        source |= archs.prepare(skeleton, path, device, dtype)
         with kv_format.emulate(kv):
             rows, wall = _streamed(skeleton, lambda select: dict(gguf.hf_state(path, select)), "blk.",
                                    prompts, k, dtype, device, mirrored, prepare)
-        del lazy
     elif stream or hf_quant.quantized(path):
         is_moe = _is_moe(path)
         mirrored = dtype != torch.float32 and not pure_hf and is_moe
@@ -168,10 +166,11 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
                     moe.mirror(module, None if quantized else dtype,
                                modes.experts(kinds, q8_1, act or "q8_1") if q8_1 else None, prefix)
 
-            rows, wall = _streamed(_skeleton(path), state, "model.layers.", prompts, k, dtype, device, mirrored,
-                                   prepare)
+            skeleton = _skeleton(path)
+            changes = archs.prepare(skeleton, None, device, dtype)
+            rows, wall = _streamed(skeleton, state, "model.layers.", prompts, k, dtype, device, mirrored, prepare)
         source = model_meta(path) | _moe_meta(mirrored) | _emulation_meta(q8_1, act) | (
-            {"hf_reference": _hash(hf_reference)} if quantized else {})
+            {"hf_reference": _hash(hf_reference)} if quantized else {}) | changes
     else:
         if q8_1:
             raise ValueError(f"{path}: a dense checkpoint has no quantized linears to emulate")
@@ -189,7 +188,7 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
                     block.gate.weight.data = block.gate.weight.data.float()
             moe.mirror(hf, operand_dtype=dtype)
         hf = place(hf, device)
-        source = model_meta(path) | _moe_meta(mirrored)
+        source = model_meta(path) | _moe_meta(mirrored) | archs.prepare(hf, None, device, dtype)
         _torch_paths(hf)
         t0 = time.perf_counter()
         with kv_format.emulate(kv):
@@ -266,7 +265,7 @@ def _streamed(model: torch.nn.Module, state, layers: str, prompts: PromptSet, k:
         prepare(block, prefix)
         hidden = [block(h, **kwargs) for h, (_, kwargs) in zip(hidden, kept[i], strict=True)]
         block.to("meta")
-    final = model.model.norm if hasattr(model.model, "norm") else model.model.hyper_connection_mixer   # Qwen4Exp's
+    final = archs.final_norm(model)
     rows = [_head(model.lm_head, final(h)[0, :-1], torch.tensor(p.ids[1:], device=device), k)
             for h, p in zip(hidden, prompts.prompts, strict=True)]
     return rows, time.perf_counter() - t0
@@ -278,66 +277,6 @@ def _head(lm_head: torch.nn.Module, x: torch.Tensor, target: torch.Tensor, k: in
     32.5 GB)."""
     out = [topk_rows(lm_head(x[a:a + rows]), target[a:a + rows], k) for a in range(0, len(target), rows)]
     return tuple(torch.cat(t) for t in zip(*out, strict=True))
-
-
-# D2's documented deviation from HF: QSA's indexer breaks score ties toward the lower block (HF's `topk` leaves the
-# order unspecified, and its ReLU sums make exact 0.0 ties common).
-TIE_RULE = "qsa indexer: stable top-k, ties to the lower block"
-
-
-def _stable_topk(x: torch.Tensor, k: int, dim: int = -1, largest: bool = True, sorted: bool = True):
-    values, indices = torch.sort(x, dim=dim, descending=largest, stable=True)
-    return torch.return_types.topk((values.narrow(dim, 0, k), indices.narrow(dim, 0, k)))
-
-
-def _indexer_forward(forward):
-    """An indexer's forward with `Tensor.topk` stable for the duration of its own call only (the router's and the
-    recording's top-k keep torch's)."""
-    def call(*args, **kwargs):
-        topk, torch.Tensor.topk = torch.Tensor.topk, _stable_topk
-        try:
-            return forward(*args, **kwargs)
-        finally:
-            torch.Tensor.topk = topk
-    return call
-
-
-class _LazyRows(torch.nn.Module):
-    """PLE's n-gram table in a streamed golden (D2): the hashed rows dequantized from the GGUF on demand."""
-
-    def __init__(self, rows, device: str):
-        super().__init__()
-        self.table, self.weight = rows, torch.empty(0, device=device)     # HF reads `.weight.device`
-
-    def forward(self, ids: torch.Tensor) -> torch.Tensor:
-        return self.table.rows(ids).to(self.weight.device)
-
-
-def _lazy_ple(model: torch.nn.Module, path: pathlib.Path, device: str) -> list[torch.nn.Module]:
-    """Swap every n-gram embedding's table for `_LazyRows` and every QSA indexer's top-k for the tie rule; the file's
-    hash constants must equal the ones HF computes from the config. Returns the swapped embeddings (none for a model
-    without PLE)."""
-    from . import gguf
-
-    for m in model.modules():
-        if type(m).__name__.endswith("QSAIndexer"):
-            m.forward = _indexer_forward(m.forward)
-    embeddings = [m for m in model.modules() if type(m).__name__.endswith("NGramEmbedding")]
-    if not embeddings:
-        return []
-    from transformers.models.qwen4_exp import modeling_qwen4_exp as hf
-
-    rows, buffers = gguf.PleRows(path), gguf.ple_buffers(path)
-    for m in embeddings:
-        mine = {"layer_multipliers": hf._build_layer_multipliers(m.unigram_vocab_size, m.ngram_size,
-                                                                 m.ple_layer_index, m.seed),
-                "ngram_heads_offsets": torch.tensor(m.head_offsets), "ngram_heads_vocab_sizes":
-                torch.tensor(m.head_vocab_sizes)}
-        theirs = {n.rsplit(".", 1)[1]: t for n, t in buffers.items() if f".{m.layer_idx}.ple." in n}
-        if any(not torch.equal(mine[n], theirs[n]) for n in mine):
-            raise ValueError(f"{path.name}: PLE hash constants of layer {m.layer_idx} differ from HF's")
-        m.ngram_embedding = _LazyRows(rows, device)
-    return embeddings
 
 
 def place(model: torch.nn.Module, device: str) -> torch.nn.Module:

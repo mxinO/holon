@@ -54,6 +54,7 @@ def tiny_config():
         split_ngram_parts=4, indexer_n_heads=2, indexer_kv_heads=1, indexer_head_dim=32, indexer_budget=16,
         indexer_compress_ratio=4, output_gate_type="sigmoid", eos_token_id=EOS, bos_token_id=EOS,
         tie_word_embeddings=False, mtp_num_hidden_layers=1,
+        attn_implementation="sdpa",                    # the indexer returns a bool mask (fixtures read it)
         rope_parameters={"rope_type": "default", "rope_theta": 1e7, "partial_rotary_factor": 0.25,
                          "mrope_section": [3, 3, 2], "mrope_interleaved": True})
 
@@ -168,21 +169,19 @@ def prompts() -> list[list[int]]:
     return out
 
 
-def stable_topk(x: torch.Tensor, k: int, dim: int = -1, largest: bool = True, sorted: bool = True):
-    """D2's tie rule: a stable sort, so equal scores go to the lower index."""
-    values, indices = torch.sort(x, dim=dim, descending=largest, stable=True)
-    return torch.return_types.topk((values.narrow(dim, 0, k), indices.narrow(dim, 0, k)))
-
-
 @torch.inference_mode()
 def fixtures(model: torch.nn.Module) -> tuple[dict[str, torch.Tensor], dict[str, str]]:
     """HF's reference per prompt `p<i>`: `ids` [T] (the prompt and its greedy tokens), `x` [T, H] (the output mixer's
     output, one-shot), `sets.<layer>` [T, budget + ratio - 1] (each position's selected tokens, ascending, -1 padded)
-    and `ple_ids` [T, heads]; the boundary ties per prompt in the metadata."""
+    and `ple_ids` [T, heads]; the boundary ties per prompt in the metadata. Wraps `model`'s indexers with the judge's
+    tie rule (`holon_judge.qwen4exp`), so pass a model of its own."""
+    from holon_judge.qwen4exp import wrap_indexers
+
     c = model.config
     width = c.indexer_budget + c.indexer_compress_ratio - 1
     seen: dict[str, torch.Tensor] = {}
     ties = [0]
+    wrap_indexers(model, lambda tied: ties.__setitem__(0, ties[0] + tied))
     hooks = []
     for i, layer in enumerate(model.model.layers):
         if layer.layer_type == "indexed_attention":
@@ -191,13 +190,6 @@ def fixtures(model: torch.nn.Module) -> tuple[dict[str, torch.Tensor], dict[str,
         if layer.ple is not None:
             hooks.append(layer.ple.ple_embedding.ngram_embedding.register_forward_hook(
                 lambda m, a, out: seen.__setitem__("ple_ids", a[0][0])))
-
-    def counting(x, k, dim=-1, largest=True, sorted=True):
-        if x.dim() == 1 and k < x.numel():
-            values = torch.sort(x, descending=True, stable=True).values
-            ties[0] += int(values[k - 1] == values[k])
-        return stable_topk(x, k, dim, largest, sorted)
-    topk, torch.Tensor.topk = torch.Tensor.topk, counting       # only the indexer calls topk in this model's forward
     tensors, meta = {}, {}
     try:
         for p, ids in enumerate(prompts()):
@@ -210,14 +202,14 @@ def fixtures(model: torch.nn.Module) -> tuple[dict[str, torch.Tensor], dict[str,
                 if name == "ple_ids":
                     tensors[f"p{p}.ple_ids"] = mask.contiguous()
                     continue
+                selected = mask if mask.dtype == torch.bool else mask == 0      # sdpa's bool mask, or eager's float
                 sets = torch.full((len(ids), width), -1, dtype=torch.int32)
                 for t in range(len(ids)):
-                    sel = mask[t].nonzero().flatten()
+                    sel = selected[t].nonzero().flatten()
                     sets[t, :len(sel)] = sel.int()
                 tensors[f"p{p}.{name}"] = sets
             meta[f"p{p}.boundary_ties"] = str(ties[0])
     finally:
-        torch.Tensor.topk = topk
         for h in hooks:
             h.remove()
     return tensors, meta

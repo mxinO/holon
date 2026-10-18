@@ -1,8 +1,9 @@
 """The judge on Qwen3.8-Flash-Next (FN D2), in the golden venv (transformers 5.19.0, `local/envs/golden-qwen4`): the
 tiny model's GGUF, rebuilt by llama.cpp's converter to its pinned sha256, reads back as the checkpoint
 (`gguf.hf_state`, PLE's rows lazily); the streamed golden of it equals HF's whole forward bit for bit under the
-indexer's tie rule, which the prompt's selections exercise (boundary ties occur); and the committed fixtures are what
-the tool writes."""
+indexer's tie rule, which the prompt's selections exercise (boundary ties occur), and its bf16 floor runs on the CPU;
+the floors' MoE mirror is HF's sparse-MoE block with the gated shared expert; the committed fixtures are what the tool
+writes; and the MTP head's pooled reference reads the tiny Strata-format pack as the checkpoint's tensors."""
 import hashlib
 import os
 import pathlib
@@ -43,34 +44,75 @@ def test_the_judge_reads_the_converted_file_as_the_checkpoint(tiny):
     assert gguf.emulate_q8_1(model, file, "mmq") == {}      # a floor passes unquantized tensors the map lacks (indexer)
 
 
-def test_the_streamed_golden_is_hfs_forward(tiny):
-    from holon_judge import golden
-    from holon_judge.recording import Prompt, PromptSet
-
-    model, path, file = tiny
+def _prompt(model) -> list[int]:
     torch.manual_seed(1)
     ids = torch.randint(0, 248000, (100,)).tolist()
     ids[40] = model.config.eos_token_id
-    ties = []
-    stable = golden._stable_topk
+    return ids
 
-    def counting(x, k, dim=-1, largest=True, sorted=True):
-        values = torch.sort(x, descending=True, stable=True).values
-        ties.append(k < x.numel() and bool(values[k - 1] == values[k]))
-        return stable(x, k, dim, largest, sorted)
-    rec = golden.record(str(file), PromptSet("tiny", "", [Prompt("p", "chat", ids)]), config=str(path), k=20)
-    golden._stable_topk = counting
-    try:
-        for m in model.modules():
-            if type(m).__name__.endswith("QSAIndexer"):
-                m.forward = golden._indexer_forward(m.forward)
-        with torch.inference_mode():
-            logits = model(torch.tensor([ids])).logits[0, :-1]
-    finally:
-        golden._stable_topk = stable
+
+def test_the_streamed_golden_is_hfs_forward_and_its_bf16_floor_runs(tiny):
+    from holon_judge import golden, qwen4exp
+    from holon_judge.recording import Prompt, PromptSet
+    from holon_testing import qwen4exp_files as q
+
+    _, path, file = tiny
+    model = q.tiny_hf()                                          # its own: the tie rule wraps its indexers
+    ids, ties = _prompt(model), []
+    prompts = PromptSet("tiny", "", [Prompt("p", "chat", ids)])
+    rec = golden.record(str(file), prompts, config=str(path), k=20)
+    qwen4exp.wrap_indexers(model, ties.append)
+    with torch.inference_mode():
+        logits = model(torch.tensor([ids])).logits[0, :-1]
     ref = golden.topk_rows(logits, torch.tensor(ids[1:]), 20)
     assert torch.equal(rec.topk_ids, ref[0]) and torch.equal(rec.target_lp, ref[2])
-    assert rec.meta["deviations"] == [golden.TIE_RULE] and any(ties)
+    assert rec.meta["deviations"] == [qwen4exp.TIE_RULE] and any(ties)
+    floor = golden.record(str(file), prompts, dtype=torch.bfloat16, config=str(path), k=20)    # lazy rows in bf16
+    assert floor.meta["dtype"] == "bfloat16" and floor.target_lp.isfinite().all()
+    assert (floor.topk_ids[:, 0] == rec.topk_ids[:, 0]).float().mean() > 0.9
+
+
+def test_the_floors_moe_mirror_is_hfs_block_with_its_shared_expert():
+    from holon_judge import moe
+    from holon_testing import qwen4exp_files as q
+
+    block = q.tiny_hf().model.layers[0].mlp
+    x = torch.randn(1, 50, block.gate.hidden_dim, generator=torch.Generator().manual_seed(2))
+    with torch.inference_mode():
+        want = block(x)
+        assert moe.mirror(block) == 1
+        got = block(x)
+        shared = torch.sigmoid(block.shared_expert_gate(x)) * block.shared_expert(x)
+    assert (got - want).abs().max() < 1e-6 < (want - shared).abs().max()          # the shared term is in, gated
+
+
+@pytest.mark.skipif(not os.environ.get("FN_STRATA"), reason="needs FN_STRATA (Strata at 296b59d: tools/mtp_pack.py)")
+def test_the_mtp_pooled_reference_reads_the_strata_pack_as_the_checkpoint(tiny, tmp_path):
+    from holon_judge import qwen4exp
+    from holon_testing import qwen4exp_files as q
+
+    model = q.tiny_hf()
+    pack = q.mtp_pack(model, tmp_path, pathlib.Path(os.environ["FN_STRATA"]), pathlib.Path(os.environ["FN_LLAMA_CPP"]))
+    assert hashlib.sha256(pack.read_bytes()).hexdigest() == q.MTP_PACK_SHA256
+    packed = qwen4exp.pack_state(pack)
+    source = {k: v.float() for k, v in q.mtp_tensors(model).items()}
+    experts = [k for k in source if k.endswith(("gate_up_proj", "down_proj")) and ".experts." in k]
+    for k in experts:                       # Q2_0 in the pack: its layout is the source's (gate rows before up rows)
+        err = lambda x, k=k: ((x - source[k]).pow(2).mean() / source[k].pow(2).mean()).item()   # noqa: E731
+        swapped = packed[k].roll(packed[k].shape[1] // 2, dims=1) if "gate_up" in k else packed[k].flip(0)
+        assert err(packed[k]) < 0.25 < err(swapped)
+        source[k] = packed[k]
+    ids = torch.tensor(_prompt(model))
+    with torch.inference_mode():
+        trunk = {}
+        hook = model.model.hyper_connection_mixer.register_forward_pre_hook(
+            lambda m, args: trunk.__setitem__("h", args[0][0]))
+        model.model(ids[None])
+        hook.remove()
+        embeds = model.model.embed_tokens(ids)
+    want = qwen4exp.mtp_pooled(source, model.config, embeds, trunk["h"])
+    got = qwen4exp.mtp_pooled(packed, model.config, embeds, trunk["h"])
+    assert (got - want).abs().max() < 1e-4
 
 
 def test_the_committed_fixtures_are_the_tools():
