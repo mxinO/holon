@@ -170,7 +170,9 @@ GGUF headers were parsed by HTTP range; the parsed offsets sum to each shard's s
        absolute check too.
      - **Pre-registered on the RTX PRO 6000 before any lock:** the unplanted build passes, and
        `qsa_decode_select_shift` fails, in both arms. If the plant passes, the statistic is tightened before any
-       lock: first p95, then a per-position paired KL difference.
+       lock: first p95, then a per-position paired KL difference. That difference pairs positions only when both
+       modes are scored teacher-forced on the same tokens (one trace's ids, rescored by each mode), not on two free
+       decodes, whose tokens diverge.
    - **GPU unit-level bitwise check of `qwen4_exp.ple_block@1`:** chunked vs one-shot, and replay-rewind vs k decode
      steps. The fp32 conv is a per-channel 4-tap sum with no cross-row reduction, so both pairs must match bitwise.
 3. **Kernels.** L0 for every new kernel against its `reference.py` on sm_86, sm_89 and sm_120, memcheck clean.
@@ -507,9 +509,9 @@ MoE first.**
     - **T2:** contiguous-tail lending from one class arena, the largest (the gate/up class of the most common type),
       regardless of temperature, as FreeToken and Strata do (St `generate.cpp:536-538, 3731-3741`, `pf_borrow`).
       The evicted slots return empty.
-  - **What is lent:** D10's `out` and `scratch` for one call, at the call's live peak. D4 removes the gate/up
-    output, so the peak is the SwiGLU output (25.6 KB per token) + the fp32 down output (102.4 KB) + the q8_1 rows
-    and id maps (≈ 12 KB): **≈ 140 KB per token**.
+  - **What is lent:** D10's `out` and `scratch` for one pass, at the pass's live peak, which spans two calls. With
+    D4, gate/up's `out` is the SwiGLU output (25.6 KB per token); it stays live as the down call's input, beside the
+    down call's fp32 `out` (102.4 KB) and the q8_1 rows and id maps (≈ 12 KB): **≈ 140 KB per token**.
   - A pass is the track's `pass_rows`, 3,072 at top-10. So **≈ 0.43 GB** is lent during any step of ≥ 3,072 tokens,
     and ≈ 0.29 GB during a 2K step.
   - **The arena-choice rule stays FN's stated one:** the largest class arena. The lead forwards the rule to the
@@ -718,8 +720,9 @@ cache is the budget less KV and per-request state.
 **The step peak:**
 - **Not lendable** (R, HC, GDN with FLA's chunk state — `h` alone is ≈ 24.6 KB per token, `chunk_delta_h.py:378` —
   QSA, selection sub-batches): **≈ 200 KB per token**. Step 0 measures it.
-- **Lendable** (D10's `out` + `scratch` for one call, at its live peak with D4, D12c): ≈ 140 KB per token × the
-  pass. A pass is min(step, `pass_rows`), and `pass_rows` is 3,072 at top-10.
+- **Lendable** (D10's `out` + `scratch` for one pass, at its live peak across gate/up's `out` and the down call,
+  with D4, D12c): ≈ 140 KB per token × the pass. A pass is min(step, `pass_rows`), and `pass_rows` is 3,072 at
+  top-10.
 
 **RTX 5080, IQ2_XS:** 0.9 × (16.61 − 0.9 − 4.65) = 9.95 GB, less KV and state 1.39 and staging 0.2, leaves 8.36 GB
 for the cache and the non-lendable peak.
@@ -727,7 +730,7 @@ for the cache and the non-lendable peak.
 | `max_step_tokens` (one per card; hand-set, D12d) | 2K | 4K | 8K |
 |---|---|---|---|
 | Non-lendable peak | 0.41 GB | 0.82 | 1.64 |
-| Lent during prefill (one call's buffers; the ring's ≈ 1.1 GB comes on top, as in X) | 0.29 | 0.43 | 0.43 |
+| Lent during prefill (one pass's buffers, gate/up's `out` with the down call's; the ring's ≈ 1.1 GB comes on top, as in X) | 0.29 | 0.43 | 0.43 |
 | **Decode expert cache, with lending** | **7.9 GB (22%)** | **7.5 (21%)** | **6.7 (19%)** |
 | Decode expert cache, without lending | 7.7 (22%) | 7.1 (20%) | 6.3 (18%) |
 | Prefill cap from streaming non-resident and lent experts at ≈ 47.5 GB/s | ≈ 27.7 GB per step → ≈ 3.5K tok/s | ≈ 28.1 → ≈ 6.9K | ≈ 28.8 → ≈ 13.5K |
