@@ -768,6 +768,65 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
       −155…−179; 5080 −41 / −335 against −46…−52 / −368…−411.
     - The 5080 4K row already meets its bar.
 
+**Step 3c (D9, IQ1_M and Q2_0).**
+- **What landed** (`d4e11f4`; a `vendor.patch` hunk, every part marked "Holon:", `vendor.sh --check` clean):
+  - `ggml_cuda_mmq_load_tiles_iq1_m` (`mmq-load-tiles.cuh`), after IQ2_S's: per 32-value sub-block, each weight
+    `8·g − 7` or `8·g − 9` (the grid nibble g ∈ {0, 1, 2}, delta's sign bit) as an int8 in {±1, ±7, ±9} through
+    `__vsub4`, and the per-16 scale `d·(2s + 1)/8` as an f32 `x_df` in IQ2_XS / IQ2_S's layout (the SRAM layout
+    `Q3_K`);
+  - IQ1_M → `MMQ_Q8_1_DS_LAYOUT_D4`; the MMA and dp4a entries in `ggml_cuda_mmq_get_util_funcs` (IQ2_S's
+    `q8_0_16` vec dots); `MMQ_DP4A_TXS_Q8_0_16`; IQ2_S's 16 ampere config rows for IQ1_M (blackwell falls through);
+    IQ1_M in `ggml_cuda_should_use_mmq` and in `mmq.cu`'s type switch; `extern DECL_MMQ_CASE(GGML_TYPE_IQ1_M)`;
+  - `template-instances/mmq-instance-iq1_m.cu`, created by the patch: upstream has none (neither the pinned
+    `cbe28bb3` nor a 2026-10-16 checkout), so it is Holon's own and not in `vendor.sh`'s FILES or `SHA256SUMS`;
+  - `TYPES` gains `iq1_m` (29) and `q2_0` (42) (the vendored `ggml.h`); Q2_0 already had upstream mmq, mmvq,
+    convert and get_rows;
+  - `PASS_PROVEN`: FN's types now include iq1_m and q2_0, on all three SMs (sm_86, sm_89, sm_120), as the other FN
+    types are. Only sm_86's L0 has run: the lead's sm_89 / sm_120 L0 (`PLACED` per SM) covers the other two before
+    step 5, and an entry whose L0 fails there is removed (B-dev5);
+  - `test_link` checks the markers in `mmq-load-tiles.cuh`, `mmq-config-ampere.cuh` and the new instance too.
+- **The q8_1 emulator needs no change.** IQ1_M's mmq is D4 with no stored-sum term (the offset is inside the int8
+  weights), and its mmvq uses the quantized sums (`vecdotq.cuh:1311-1315`); Q2_0 is D4 on mmq and sum-free on mmvq.
+  `blocking`'s defaults give both; the docstring now says so.
+- **Decided while building.**
+  - `vendor.sh --check` reverses the patch with `patch -E`, so the file the patch creates is removed again and the
+    file list equals `SHA256SUMS` (without it `patch -R` leaves an empty file and the check fails). A refresh applies
+    the patch forward and creates it (B-dev3).
+  - gguf-py 0.19 has no Q2_0 (`GGMLQuantizationType` stops at Q1_0), so the tests read its blocks themselves
+    (`test_ggml_cuda.dequantize`, `BLOCK_SIZES`): fp16 d, 2-bit codes, `(c − 1)·d`, as `ggml-quants.c`'s
+    `dequantize_row_q2_0` and a later gguf-py's `Q2_0` define it. Convert and get_rows match it bit for bit (B-dev4).
+  - IQ1_M has no fp16 d of its own: `random_blocks` writes the realistic d into the top nibbles of its four uint16
+    scales (random bytes there would make about one block in 32 an inf or NaN scale).
+- **Checks** (sm_86, RTX A5000; `evidence/mp3c_checks_rtx-a5000_2026-10-18.json`; run on the tree committed as
+  `d4e11f4`, which differs from it in docstrings only):
+  - L0, `test_ggml_cuda.py` + `test_ggml_cuda_moe.py`: **294 passed, 8 skipped in 336 s** (before, at `7cd24de`:
+    266 passed, 8 skipped in 292 s). The 28 new cases are the two types in every `sorted(TYPES)` test (dense
+    `qlinear` at `in` 768–12,288 on both paths, the mmq schedules, convert and get_rows; `linear_experts` every type
+    and at prefill chunks, D0's 4,608-row pass check included) and in sm_86's `PLACED` tests (placement and tile-width
+    invariance, compacted launches, both stages and helpers). No new suite.
+  - Mutation: the loader's two delta offsets swapped fails 7 of the 14 IQ1_M tests (every one that runs its mmq:
+    dense at every `in`, the schedules, both every-type MoE tests); the invariance tests pass under it, as they compare
+    the kernel with itself.
+  - Memcheck: MoE (26 layouts and modes) and dense (22 types): 0 errors.
+  - Static CI (`run_all.sh b5b1e7f`): clean, `vendor.sh --check` included.
+  - Per call, IQ1_M's loader against IQ2_S's, FN's gate/up stack (E = 512, top-10, [E, 1,280, 2,560], bf16 in,
+    random blocks, skewed routing), interleaved ×5, median ms:
+
+    | Tokens per call | IQ1_M | IQ2_S | IQ1_M / IQ2_S |
+    |---|---|---|---|
+    | 512 | 2.81 | 3.22 | 0.87 |
+    | 1,024 | 3.72 | 4.18 | 0.89 |
+    | 2,048 | 5.94 | 5.77 | 1.03 |
+    | 3,072 | 6.87 | 7.26 | 0.95 |
+
+    - `python spikes/moe_prefill/loader_speed.py --tokens 512 1024 2048 3072 --rounds 5`.
+    - Down is not measured: FN's I = 640 is not a multiple of 256, so neither type can hold it.
+    - 3,072 is the largest call at top-10 (`ID_PAIRS` ÷ 10 = 3,276 tokens: FN's `pass_rows`), so 4,096 is not run.
+    - The loader holds IQ2_S's speed, so the grouped-dequant fallback is not needed.
+- **Not in this step** (found while building): §5.1's "FN's shape is one more stack in the every-type test" is not in
+  `test_ggml_cuda_moe.py` (no E = 512, top-10 stack). Suite time grew by 44 s (+15%) from the two types; acceptance
+  7 asks that it not grow.
+
 ## 8. Risks
 
 - **Thin margins at 32K.** Holon's attention lead is unmeasured on sm_120 (C-M3). The 5080 32K row reaches its bar
@@ -811,12 +870,15 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
 
 ## 10. Review log
 
-### Building: deviations from rev 6 (steps 1–2, 2026-10-18; recorded for the panel)
+### Building: deviations from rev 6 (steps 1–2 and 3c, 2026-10-18; recorded for the panel)
 
 | # | Deviation | Why | Effect |
 |---|---|---|---|
 | B-dev1 | `LinearExperts` cuts a call itself, into whole-`CHUNK` calls of up to `pass_rows` rows, then the last partial chunk as a call of its own (D0 left the cut to the caller) | a direct caller's 2,049-row call would otherwise put its last row on mmq, not mmvq: its bits would depend on the caller's cut | every row's kernel path is its chunk's for any caller; std.moe's passes unchanged (they cut the same way) |
 | B-dev2 | D2's flat range is launched only where a call's tokens span several column tiles (⌈T ÷ J⌉ > 1, read in the kernel as ntx > 1); otherwise upstream's launch, one tile per entry (D2 said the flat grid always) | with C-M6's fallback (J against T up to 64 tokens) every entry fits one tile, and the flat range's extra blocks and binary search cost 2–7% per call against main on the A5000 | ≤ 64-token calls run main's launch exactly (A/B 0.99–1.02 on three cards); bits the same either way |
+| B-dev3 | `vendor.sh --check` reverses `vendor.patch` with `patch -E` (D9 named the template instance file but not how the check treats a file upstream lacks) | the IQ1_M instance is Holon's own, created by the patch; `patch -R` alone leaves it empty, and the check's file list then differs from `SHA256SUMS` | the check passes with the patch-created file; a refresh still creates it by applying the patch |
+| B-dev4 | Q2_0's L0 oracle reads its blocks in the test helper, not through gguf-py (§5 assumes gguf-py's dequantization for every type) | gguf-py 0.19 (`uv.lock`) has no Q2_0 | the reader is ggml-quants.c's `dequantize_row_q2_0` definition; convert and get_rows equal it bit for bit; `testing`'s reference provider still cannot serve a Q2_0 file (FN's concern) |
+| B-dev5 | iq1_m and q2_0 are in `PASS_PROVEN` on sm_89 and sm_120 before their L0 runs there (D0: an entry exists only where its L0 runs) | the lead's instruction: `PASS_PROVEN` lists FN's types on every SM, and the cluster L0 (`PLACED` per SM) runs them | pending the lead's sm_89 / sm_120 L0 before step 5; a failing pair is removed |
 | B-dec | C-M6's fallback taken: J against T for calls of ≤ 64 tokens | D2's own A/B: the mean's 8-row tiles made the down stack up to 8% slower at 16 tokens on the 5090 and 5080 | batched decode keeps main's speed (5090 B16 / 32 / 64: 0.996 / 0.996 / 1.006×); a lower threshold (16) would gain up to ≈ 30% per call at 24–64 tokens: held for the perf reviewer (lead) |
 
 ### Rev 5 → rev 6 (the panel's fifth round, 2026-10-18; B clean)
