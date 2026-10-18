@@ -84,7 +84,8 @@ def test_tier_invariance_with_demotions_promotions_and_late_copies(tiny, monkeyp
     roomy.close()
     tight = _engine(tiny, pages=20, tier={"delay": 1, "seed": seed})
     promoted = _count_promote_into_place(tight)
-    rngs, sessions, prompts, tested = {s: random.Random(s) for s in starts}, {s: list(starts[s]) for s in starts}, {}, {}
+    rngs, sessions = {s: random.Random(s) for s in starts}, {s: list(starts[s]) for s in starts}
+    prompts, tested = {}, {}
     for _ in range(4):                                    # interleaved: each return comes through the tier
         for s in starts:
             tested |= _turns(tight, sessions, prompts, s, rngs[s])

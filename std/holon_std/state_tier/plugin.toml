@@ -1,0 +1,24 @@
+[plugin]
+name = "std.state_tier"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "tier"
+license = "Apache-2.0"
+core_abi = ">=1.4,<2.0"   # the slot `tier` (docs/v1-kv-tiers.md §4)
+
+[resources]
+provides = ["op.state_copy@1"]
+
+[properties]
+numerics = "exact"         # a hit's bytes are the same whichever level held them (D4)
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"state_tier.host.bytes" = { help = "pinned host memory for the host level (e.g. 16GiB), within host_memory", default = "8GiB" }
+"state_tier.host.pages" = { help = "the share of host.bytes for pages; the rest holds payloads (checkpoints)", default = "0.25" }
+"state_tier.host.admit" = { help = "which page copies the host level takes: publish (every block), hit:<n> (blocks matched n times), evict (at eviction only); payloads always", default = "publish" }
+"state_tier.step_cost" = { help = "the clock's seconds per step: a,b,c for a + b·tokens + c·rows (tune measures them)", default = "0.015,0.0004,0.0005" }
+"state_tier.h2d_rate" = { help = "bytes per second the clock charges a load on the H2D lane", default = "43e9" }
+"state_tier.stall_bytes" = { help = "a load this small is due at once: its step waits for it", default = "32MiB" }
+
+[dependencies]
+python = ["numpy", "torch"]
