@@ -204,9 +204,11 @@ class Engine:
                                          if hasattr(o, "after_materialize")]
 
         self._hits: dict[Seq, int | None] = {}            # first admission's prefix hit, None once reported
+        self._first: dict[Seq, int] = {}                  # first admission's branch_at, kept across re-admissions
 
         def admit(seq: Seq) -> None:
             self._hits.setdefault(seq, seq.num_computed)   # the prefix hit of its first admission only
+            seq.branch_at = self._first.setdefault(seq, seq.branch_at)
             sampler.admit(seq.slot, seq.params)
             if admit_draft is not None:
                 admit_draft(seq.slot, seq.tokens)
@@ -386,6 +388,7 @@ class Engine:
             self.sched.finish(seq, reason)
             self._prompt_lp.pop(seq, None)
             self._hits.pop(seq, None)
+            self._first.pop(seq, None)
             deltas.append(TokenDelta(rid, [], seq.index, finish_reason=reason, error=error, kind=kind))
         if seqs and seqs[0].constrained:
             self._blocked.pop(rid, None)
@@ -657,6 +660,8 @@ class Engine:
                 [t[:k] for t in lps[2][at: at + len(out)]])
             prompt_lp = self._prompt_lp.pop(seq, None) if self._prompt_lp else None
             cached = self._hits.pop(seq, None) if reason else self._hits.get(seq)
+            if reason:
+                self._first.pop(seq, None)
             if cached is not None and not reason:
                 self._hits[seq] = None
             deltas.append(TokenDelta(seq.rid, out, seq.index, logprobs, prompt_lp, reason, cached_tokens=cached))

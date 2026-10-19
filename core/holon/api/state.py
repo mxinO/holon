@@ -119,8 +119,9 @@ class SeqView(Protocol):
     num_computed: int            # host mirror (upper bound while a step is in flight)
     tokens: tuple[int, ...]
     prompt_len: int
-    branch_at: int               # where its admission's matched prefix ends if that block has cached continuations
-                                 # (the request leaves a cached chain there), else 0
+    branch_at: int               # where its first admission's matched prefix ends if that block has cached
+                                 # continuations (the request leaves a cached chain there), else 0; kept when a
+                                 # preempted request is admitted again
 
     def units(self, spec: str) -> tuple[int, ...]: ...
 
