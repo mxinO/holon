@@ -25,14 +25,14 @@ mmq with ids into f32, followed for swiglu by our f32 SwiGLU — or, where mmq c
 tiles of 128, MMA layouts), with SwiGLU in mmq's store, bitwise the same (docs/v1-moe-prefill.md D4: no f32 gate/up
 output). `pass_rows` is 512 (llama.cpp's ubatch), or on an (SM, type, mode) whose L0 proves a row's bits the same in any
 call of whole 512-row chunks (`PASS_PROVEN`) up to `PASS_ROWS`, capped by the id helper's pairs, the step budget and the
-`ggml_cuda.pass_rows` option; a call's last partial chunk runs on its own. Its persistent workspace (`ggml_cuda.id[…]`,
-sized for decode and verify: the graphed steps' rows) holds mmq's id maps besides the activations; a larger call takes
-mmq's transients from the caller's `scratch` (`scratch_bytes`, docs/v1-moe-prefill.md D10), or allocates them, and
-writes into the caller's `out` if given. `moe_topk` is `topk-moe.cu` (softmax, top k, renormalised), `moe_router` our
-router kernel beside it (the f32 router GEMV from bf16 activations, then `moe_topk`'s selection, in one launch), and
-`moe_combine` `moe-weighted-reduction.cu`, both patched to the contracts' layouts (ids at row stride k; the combine
-stores bf16 into the caller's `out`, and its `add` the residual stream plus the rounded sum, rounded again:
-docs/v1-offload.md §14, step 3c).
+`ggml_cuda.pass_rows` option; a call's last partial chunk runs on its own. Its workspace (`ggml_cuda.id[…]`, sized for
+`pass_rows`) holds mmq's id maps besides the activations; gate/up's f32 output, where SwiGLU is not in mmq's store,
+comes from the caller's `scratch` (`scratch_bytes`, docs/v1-moe-prefill.md D10) or is allocated, and a call writes into
+the caller's `out` if given. `moe_topk` is `topk-moe.cu` (softmax, top k, renormalised), `moe_router` our router kernel
+beside it (the f32 router GEMV from bf16 activations, then `moe_topk`'s selection, in one launch), and `moe_combine`
+`moe-weighted-reduction.cu`, both patched to the contracts' layouts (ids at row stride k; the combine stores bf16 into
+the caller's `out`, and its `add` the residual stream plus the rounded sum, rounded again: docs/v1-offload.md §14, step
+3c).
 
 Activation modes (docs/m06-lowp.md D3, D8, §4.5, §4.7): one spec per mode, `config["act"]` naming each path's
 activation format. `q8_1` (every class, every type, `act_quant` a4 or a8): q8_1 activations on both paths, so
@@ -474,16 +474,15 @@ class LinearExperts(_Matmul):
         # a device int32 word, or'd with ID_ERRORS bits by every mmq call with ids (the rows a violation names are not
         # computed; mmvq with ids does not check), one per build context, zero until a violation; the reader zeroes it
         self.errors = ctx.static("ggml_cuda.id_errors", (1,), torch.int32)
-        # The persistent id workspace holds decode and verify calls (mmvq's, and mmq's up to the graphed steps' rows);
-        # a larger mmq call takes its transients from the caller's `scratch`, or allocates them (D10). Its size
-        # depends on in, k (the id maps, the activations per slot), E (expert_bounds) and the rows: all four name it.
-        steps = ctx.options.get("max_seqs", 1) * (1 + ctx.options.get("max_draft_tokens", 0))
-        self.resident_rows = min(self.pass_rows, max(self.mmvq_tokens, steps))
+        # The persistent id workspace holds every call's id maps and q8_1 activations, up to `pass_rows` rows: one per
+        # `in` (the 5080 offload lock's prefill pays 0.2% when a call's come from a buffer gate/up and down share, the
+        # caller's `scratch`, or a fresh one: docs/v1-moe-prefill.md §10 L3-2). Its size depends on in, k (the id maps,
+        # the activations per slot), E (expert_bounds) and the rows: all four name it.
         self.workspace = ctx.workspace(
-            f"ggml_cuda.id[in={self.k},top_k={self.top_k},experts={self.experts},rows={self.resident_rows}]",
-            self._id_bytes(self.resident_rows))
+            f"ggml_cuda.id[in={self.k},top_k={self.top_k},experts={self.experts},rows={self.pass_rows}]",
+            self.lib.workspace_bytes_id(self.device, self.k, self.pass_rows, self.top_k, self.slots))
         # host-path caches (D10): a call's layout per token count, the last passed buffer checked, its views per count
-        self._layouts: dict[int, tuple[int, int, int]] = {}
+        self._layouts: dict[int, tuple[int, int]] = {}
         self._checked: torch.Tensor | None = None
         self._carved: tuple[torch.Tensor | None, dict] = (None, {})
         self.f32 = self._f32_workspace(ctx, self.pass_rows * facts["rows_per_token"], facts["act_dtype"])
@@ -513,30 +512,20 @@ class LinearExperts(_Matmul):
         """The rows of a call's largest mmq launch (0: it runs mmvq only)."""
         return max((b - a for a, b in calls(tokens, self.pass_rows) if b - a > self.mmvq_tokens), default=0)
 
-    def _id_bytes(self, rows: int) -> int:
-        return self.lib.workspace_bytes_id(self.device, self.k, rows, self.top_k, self.slots)
-
-    def _layout(self, tokens: int) -> tuple[int, int, int]:
-        """A call's (largest mmq launch's rows, its id maps' bytes in `scratch`, gate/up's f32 output bytes), kept per
-        token count: every call's host path reads it, and a prefill step's runs between syncs (each 0.1–0.3% of its
-        time, measured on the 5080)."""
+    def _layout(self, tokens: int) -> tuple[int, int]:
+        """A call's (largest mmq launch's rows, gate/up's f32 output bytes), kept per token count: every call's host
+        path reads it."""
         got = self._layouts.get(tokens)
         if got is None:
             rows = self._mmq_rows(tokens)
-            got = self._layouts[tokens] = (rows, self._ids_bytes(rows), self._gate_up_bytes(rows))
+            got = self._layouts[tokens] = (rows, self._gate_up_bytes(rows))
         return got
 
     def scratch_bytes(self, tokens: int) -> int:
         """`scratch`'s bytes for a call of `tokens` tokens (std.moe.kernels, docs/v1-moe-prefill.md D10): its mmq
-        launches' transients, one launch at a time — the id maps and q8_1 rows (`workspace_bytes_id`) past the
-        persistent workspace's rows, then gate/up's f32 output before our SwiGLU (none where D4's store applies
-        SwiGLU) —; 0 where it runs mmvq only."""
-        _, ids, gate_up = self._layout(tokens)
-        return ids + gate_up
-
-    def _ids_bytes(self, rows: int) -> int:
-        """`scratch`'s id maps and q8_1 rows for an mmq launch of `rows` (none: the persistent workspace holds them)."""
-        return self._id_bytes(rows) if rows > self.resident_rows else 0
+        launches' transient, one launch at a time: gate/up's f32 output before our SwiGLU (none where D4's store
+        applies SwiGLU; the id maps and q8_1 rows are the persistent workspace's); 0 where it runs mmvq only."""
+        return self._layout(tokens)[1]
 
     def _gate_up_bytes(self, rows: int) -> int:
         return -(-rows * self.top_k * self.out * 4 // POOL_ALIGN) * POOL_ALIGN if self.swiglu and not self.glu_store \
@@ -561,21 +550,17 @@ class LinearExperts(_Matmul):
         self._checked = scratch if scratch is not None else self._checked
 
     def _transients(self, tokens: int, device: torch.device, scratch: torch.Tensor | None):
-        """The mmq launches' workspace and gate/up's f32 output (D10), carved from `scratch` as `scratch_bytes` lays
-        it out (a new buffer of that size where the caller passed none): the id maps past the persistent workspace's
-        rows (else the persistent workspace), then the f32 output."""
-        rows, ids, gate_up_bytes = self._layout(tokens)
-        if not ids + gate_up_bytes:
+        """The mmq launches' workspace (the persistent one) and gate/up's f32 output (D10), carved from `scratch` as
+        `scratch_bytes` lays it out (a new buffer of that size where the caller passed none)."""
+        rows, gate_up_bytes = self._layout(tokens)
+        if not gate_up_bytes:
             return self.workspace, None
         if scratch is None:
-            scratch = torch.empty(ids + gate_up_bytes, dtype=torch.uint8, device=device)
+            scratch = torch.empty(gate_up_bytes, dtype=torch.uint8, device=device)
         elif scratch is self._carved[0] and tokens in self._carved[1]:     # a persistent buffer's views, kept
             return self._carved[1][tokens]
-        gate_up = None
-        if gate_up_bytes:
-            gate_up = scratch[ids:ids + gate_up_bytes].view(torch.float32)[:rows * self.top_k * self.out]
-            gate_up = gate_up.view(rows, self.top_k, self.out)
-        got = scratch[:ids] if ids else self.workspace, gate_up
+        gate_up = scratch[:gate_up_bytes].view(torch.float32)[:rows * self.top_k * self.out]
+        got = self.workspace, gate_up.view(rows, self.top_k, self.out)
         if scratch is not self._carved[0]:
             self._carved = scratch, {}
         self._carved[1][tokens] = got

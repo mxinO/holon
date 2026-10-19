@@ -481,7 +481,7 @@ def test_graph_replay_follows_the_routing(ctx, qwen_stacks, name):
         h, out = torch.full((tokens, K, INTER), torch.nan, device="cuda"), torch.full_like(y, torch.nan)
         scratch = torch.full((max(gate_up.scratch_bytes(tokens), down.scratch_bytes(tokens)),), 0xFF,
                              dtype=torch.uint8, device="cuda")
-        assert (gate_up.scratch_bytes(tokens) > 0) == (tokens > gate_up.mmvq_tokens)
+        assert (gate_up.scratch_bytes(tokens) > 0) == (tokens > gate_up.mmvq_tokens and not gate_up.glu_store)
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
             down(gate_up(x, pg, ids, out=h, scratch=scratch), pd, ids, out=out, scratch=scratch)
@@ -623,27 +623,23 @@ def test_an_arena_call_of_many_chunks_gives_the_chunks_rows(ctx, name, stage):
 
 
 def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Tensor) -> None:
-    """D10 (docs/v1-moe-prefill.md) on an arena binding, glu none and swiglu: NaN-poisoned `out` and `scratch` of
-    `scratch_bytes` (one for every launch of a call: 4,096 rows, then a chunk, or then an mmvq tail) give the
-    allocating call's bits, and the persistent workspace is the decode size's — mmvq's rows, or a binding's graphed
-    decode rows (64 here), whose id maps it keeps: their `scratch` is gate/up's f32 output only (the decode binding
-    runs SwiGLU unfused, so both stores are covered: D4's has no f32 output) —; a short, misaligned or overlapping
-    buffer is refused before anything is launched."""
-    decode = BuildContext(ctx.plugins, ctx.device, options={"max_seqs": 64})
-    for glu, bound in (("none", ctx), ("swiglu", ctx), ("swiglu", decode)):
+    """D10 (docs/v1-moe-prefill.md) on an arena binding, glu none and swiglu (D4's store, and unfused): NaN-poisoned
+    `out` and `scratch` of `scratch_bytes` (one for every launch of a call: 4,096 rows, then a chunk, or then an mmvq
+    tail) give the allocating call's bits; `scratch` is gate/up's f32 output only (the persistent workspace holds every
+    call's id maps), none for D4's store; mmvq calls do none of D10's work; a short, misaligned or overlapping buffer is
+    refused before anything is launched."""
+    for glu, fused in (("none", True), ("swiglu", True), ("swiglu", False)):
         f = facts | {"glu": glu}
-        kernel = bound.select_kernel("linear_experts_arena@1", site="l0", **f).impl(bound, **f)
-        assert kernel.resident_rows == max(kernel.mmvq_tokens, 1 if bound is ctx else 64)
+        kernel = ctx.select_kernel("linear_experts_arena@1", site="l0", **f).impl(ctx, **f)
+        kernel.glu_store &= fused
         assert kernel.scratch_bytes(kernel.mmvq_tokens) == 0
         small, empty = kernel.mmvq_tokens, torch.empty(0, dtype=torch.uint8, device="cuda")
         want = kernel(x[:small], parts, ids[:small])
         with (mock.patch.object(kernel, "_transients", side_effect=AssertionError),        # mmvq calls do none of
               mock.patch.object(kernel, "scratch_bytes", side_effect=AssertionError)):     # D10's work (host-bound)
             assert torch.equal(kernel(x[:small], parts, ids[:small], scratch=empty), want)
-        if bound is decode:
-            kernel.glu_store = False
-            assert kernel.scratch_bytes(64) == 64 * K * kernel.out * 4 < kernel.scratch_bytes(65)
-        for tokens in (len(ids), len(ids) - CHUNK + 1) if bound is ctx else (64, 65):
+        assert kernel.scratch_bytes(64) == (0 if glu == "none" or kernel.glu_store else 64 * K * kernel.out * 4)
+        for tokens in (len(ids), len(ids) - CHUNK + 1):
             want = kernel(x[:tokens], parts, ids[:tokens])
             out, scratch = torch.full_like(want, torch.nan), torch.full((kernel.scratch_bytes(tokens),), 0xFF,
                                                                         dtype=torch.uint8, device="cuda")
