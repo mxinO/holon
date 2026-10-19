@@ -151,13 +151,14 @@ def ple_rows(ids, history, slots, query_start, has_init, multipliers, sizes, off
 
 
 def ple_block(key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start, has_init, streams: int,
-              dilation: int, eps: float) -> None:
+              dilation: int, eps: float):
+    """Updates `r` and `state` in place; returns C [T, n·H] f32, the conv's inputs."""
     import torch
 
     t, width = r.shape
     rows, taps, window = len(slots), conv.shape[1], state.shape[1]
     if t == 0 or rows == 0:
-        return
+        return torch.zeros(t, width, dtype=torch.float32, device=r.device)
     gated = torch.empty(t, width, dtype=torch.float32, device=r.device)
     normed = torch.empty_like(gated)
     _ple_gate[(t,)](key, value, r, w_key, w_query, w_conv, gated, normed, width // streams, eps, key.stride(0),
@@ -167,3 +168,4 @@ def ple_block(key, value, r, w_key, w_query, w_conv, conv, state, slots, query_s
         TOKENS, CHANNELS // 4)
     _ple_state[(rows, triton.cdiv(width, CHANNELS))](normed, state, slots, query_start, has_init, width, window,
                                                      triton.next_power_of_2(window), CHANNELS)
+    return normed

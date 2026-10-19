@@ -13,18 +13,21 @@ given by `query_start` [R+1] (int32 prefix sums of each row's token count); T = 
   wrapping), and for each of that n-gram's `heads_per_ngram` heads h: `floor_mod(mixed, sizes[h]) + offsets[h]`.
   Then `history[slots[r]]` holds the last two ids of (history ‖ row). Facts: ngram, heads_per_ngram, eos.
 - `qwen4_exp.ple_block@1`: instance `(key [T, n·H], value [T, H], r [T, n·H] f32, w_key, w_query, w_conv [n·H],
-  conv [n·H, K], state [units, (K−1)·dilation, n·H] f32, slots [R], query_start [R+1], has_init [R]) -> None`: PLE's
+  conv [n·H, K], state [units, (K−1)·dilation, n·H] f32, slots [R], query_start [R+1], has_init [R])
+  -> C [T, n·H] f32`: PLE's
   block (`modeling_qwen4_exp.py:1227-1247`), float32 throughout:
   - `K = norm(key) · (1 + w_key)` and `Q = norm(r) · (1 + w_query)`, each RMS-normed per stream of H (eps);
   - `u_s = ⟨K_s, Q_s⟩ / √H`; `g_s = sigmoid(sign(u_s) · √max(|u_s|, 1e-6))`; `G_s = g_s · value`;
   - `C = norm(G) · (1 + w_conv)` per stream; `conv` depthwise over time with `dilation`: at token t,
     `Σ_k conv[:, k] · C[t − (K − 1 − k) · dilation]`, the positions before the row's first token read from
     `state[slots[r]]` (zeros without has_init);
-  - in place `r += G + silu(conv)`; then `state[slots[r]]` holds the last (K−1)·dilation rows of (state ‖ the row's C).
+  - in place `r += G + silu(conv)`; then `state[slots[r]]` holds the last (K−1)·dilation rows of (state ‖ the row's C);
+  - returns C, the conv's inputs: the unit builds in-step checkpoints (the window before a position) and a verify
+    row's rewind (the window after its accepted tokens) from it; a verify step passes a scratch copy of its rows' state
+    (their real state stays as before the step until the rewind).
   Every reduction (the norms, ⟨K_s, Q_s⟩) is per token, in an order independent of the token count and launch shape,
   and the conv is a per-channel sum, so a row split into chunks (the same key and value rows in) is bitwise one shot
   (acceptance 2's unit test). Facts: streams, hidden, kernel, dilation, eps, dtype (key's and value's).
-  In-step payloads and replay rewind join this contract with the block-state seam (C2).
 """
 from __future__ import annotations
 

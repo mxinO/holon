@@ -406,8 +406,8 @@ class PleBlock:
         self.streams, self.dilation, self.eps = streams, dilation, eps
 
     def __call__(self, key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start, has_init):
-        ple.ple_block(key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start, has_init, self.streams,
-                      self.dilation, self.eps)
+        return ple.ple_block(key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start, has_init,
+                             self.streams, self.dilation, self.eps)
 
 
 BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul": SiluMul,

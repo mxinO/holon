@@ -88,7 +88,7 @@ class GRBlock(nn.Module):
                  eps: float = 1e-6, pre: Ref | None = None, pre_at: tuple[int, ...] = ()) -> None:
         super().__init__()
         site = f"std.hyper.gr_block[layer={layer}]"
-        self.pre = ctx.unit(pre, layer=layer, hidden=hidden, n=n) if pre is not None and layer in pre_at else None
+        self.pre = ctx.unit(pre, layer=layer, hidden=hidden) if pre is not None and layer in pre_at else None
         self.attn_hc = _HC(ctx, n=n, hidden=hidden, rank=rank, eps=eps, inject=True, site=site)
         self.mixer = ctx.unit(mixer, layer=layer, hidden=hidden)
         self.ffn_hc = _HC(ctx, n=n, hidden=hidden, rank=rank, eps=eps, inject=True, site=site)

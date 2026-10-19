@@ -90,14 +90,16 @@ class QSA(nn.Module):
         self.attn = ctx.unit(_gqa(params), layer=layer, hidden=hidden)
         self.hi, self.dk, self.ratio, self.budget = index_heads, index_head_dim, ratio, budget
         self.limit = kernels.dense_limit(budget, ratio)
-        self.index_qk_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=(index_heads + 1) * index_head_dim))
+        self.index_q_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=index_heads * index_head_dim))
+        self.index_k_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=index_head_dim))
         self.index_q_norm = ctx.unit(qk_norm, dim=index_head_dim) if qk_norm else None
         self.index_k_norm = nn.Parameter(torch.empty(index_head_dim, dtype=ctx.dtype), requires_grad=False)
         self.index_rope = ctx.unit(rope, head_dim=index_head_dim)
         rotary, theta = rope.param("rotary_dim") or index_head_dim, rope.param("theta")
         positions = ctx.options.get("max_model_len", 8192)
         self.cos_sin = ctx.static(f"std.mixers.qsa.cos_sin[{rotary},{theta}]", (positions, rotary), torch.float32)
-        self.cos_sin.copy_(cos_sin(positions, rotary, theta))         # the pooled keys' rotation (rope@1's table)
+        with torch.device("cpu"):                                     # (a build runs under the meta device)
+            self.cos_sin.copy_(cos_sin(positions, rotary, theta))     # the pooled keys' rotation (rope@1's table)
         dtype, site = str(ctx.dtype).removeprefix("torch."), f"std.mixers.qsa[layer={layer}]"
         kv, idx = ctx.state("kv", layer), ctx.state("idx", layer)
         page = kv[0].shape.tokens_per_unit if kv is not None else 16
@@ -126,8 +128,7 @@ class QSA(nn.Module):
     def _indexer(self, x: torch.Tensor, positions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """The indexer's queries [T, Hi, Dk] (normed and rotated at their positions) and raw keys [T, Dk]."""
         t = x.shape[0]
-        q, k = self.index_qk_proj(x).split([self.hi * self.dk, self.dk], dim=-1)
-        q = q.reshape(t, self.hi, self.dk)
+        q, k = self.index_q_proj(x).reshape(t, self.hi, self.dk), self.index_k_proj(x)
         if self.index_q_norm is not None:
             q = self.index_q_norm(q.contiguous())
         q, _ = self.index_rope(q, k.reshape(t, 1, self.dk).clone(), positions)

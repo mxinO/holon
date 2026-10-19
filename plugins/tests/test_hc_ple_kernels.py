@@ -10,9 +10,10 @@ PLE kernels (`kernels.ple_triton`: `qwen4_exp.ple_rows@1`, `qwen4_exp.ple_block@
   last combine applied) leaves R as the oracle's block does.
 - `qwen4_exp.ple_rows@1` bitwise (rows and history), with wrapping int64 products, EOS at a row's start, inside it and
   in the history, decode rows, a zero-token row and rows without has_init.
-- `qwen4_exp.ple_block@1` within `l0.check(f32, H)` of the oracle (r and state); state units of rows without has_init
-  are NaN and must not be read, and units no row writes stay untouched. The GPU unit test of acceptance 2: every row
-  split into chunks, down to 1-token decode steps, bitwise one shot (r and state). Replay rewind joins with C2.
+- `qwen4_exp.ple_block@1` within `l0.check(f32, H)` of the oracle (r, state and the returned conv inputs C); state
+  units of rows without has_init are NaN and must not be read, and units no row writes stay untouched. Acceptance 2's
+  GPU unit test, chunked half: every row split into chunks, down to 1-token decode steps, bitwise one shot (r, state
+  and C); its replay-rewind half runs the PLE unit (`test_qwen4_exp_units.py`).
 
 Skips without a GPU.
 """
@@ -147,10 +148,11 @@ def test_ple_block():
         if not init:
             state[s] = float("nan")                                             # must not be read
     ours_r, ours_state = r.cuda(), state.cuda()
-    _block_kernel()(key.cuda(), value.cuda(), ours_r, *[w.cuda() for w in weights], conv.cuda(), ours_state,
-                    slots.cuda(), query_start.cuda(), has_init.cuda())
-    ple.ple_block(key, value, r, *weights, conv, state, slots, query_start, has_init, STREAMS, DILATION, EPS)
+    ours_c = _block_kernel()(key.cuda(), value.cuda(), ours_r, *[w.cuda() for w in weights], conv.cuda(), ours_state,
+                             slots.cuda(), query_start.cuda(), has_init.cuda())
+    c = ple.ple_block(key, value, r, *weights, conv, state, slots, query_start, has_init, STREAMS, DILATION, EPS)
     _check(ours_r, r, torch.float32, HIDDEN, "ple_block r")
+    _check(ours_c, c, torch.float32, HIDDEN, "ple_block C")
     _check(ours_state, state, torch.float32, HIDDEN, "ple_block state")   # untouched units: equal NaN or values
 
 
@@ -163,16 +165,17 @@ def test_ple_block_chunks():
                                            for x in _block_inputs(int(query_start[-1]), 3)]
     kernel = _block_kernel()
     one_r, one_state = r.clone(), state.clone()
-    kernel(key, value, one_r, *weights, conv, one_state, slots.cuda(), query_start.cuda(), has_init.cuda())
-    done = [0] * len(rows)
+    one_c = kernel(key, value, one_r, *weights, conv, one_state, slots.cuda(), query_start.cuda(), has_init.cuda())
+    done, c = [0] * len(rows), torch.empty_like(one_c)
     for step in range(max(len(c) for c in cuts.values())):
         part = [(i, cuts.get(s, [n])[step]) for i, (s, _, n) in enumerate(rows) if step < len(cuts.get(s, [n]))]
         tokens = torch.cat([torch.arange(n) + int(query_start[i]) + done[i] for i, n in part]).cuda()
         p_slots, p_start, _ = _rows([(rows[i][0], False, n) for i, n in part])
         p_init = torch.tensor([rows[i][1] or done[i] > 0 for i, _ in part])
         chunk = r[tokens]
-        kernel(key[tokens], value[tokens], chunk, *weights, conv, state, p_slots.cuda(), p_start.cuda(), p_init.cuda())
+        c[tokens] = kernel(key[tokens], value[tokens], chunk, *weights, conv, state, p_slots.cuda(), p_start.cuda(),
+                           p_init.cuda())
         r[tokens] = chunk
         for i, n in part:
             done[i] += n
-    assert torch.equal(r, one_r) and torch.equal(state, one_state)
+    assert torch.equal(r, one_r) and torch.equal(state, one_state) and torch.equal(c, one_c)

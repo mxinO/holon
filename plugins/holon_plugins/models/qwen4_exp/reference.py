@@ -47,7 +47,8 @@ def _norm(x: torch.Tensor, weight: torch.Tensor, streams: int, eps: float) -> to
 
 def ple_block(key: torch.Tensor, value: torch.Tensor, r: torch.Tensor, w_key: torch.Tensor, w_query: torch.Tensor,
               w_conv: torch.Tensor, conv: torch.Tensor, state: torch.Tensor, slots: torch.Tensor,
-              query_start: torch.Tensor, has_init: torch.Tensor, streams: int, dilation: int, eps: float) -> None:
+              query_start: torch.Tensor, has_init: torch.Tensor, streams: int, dilation: int, eps: float
+              ) -> torch.Tensor:
     hidden = value.shape[1]
     k = _norm(key.float(), w_key, streams, eps).reshape(len(key), streams, hidden)
     q = _norm(r.float(), w_query, streams, eps).reshape(len(r), streams, hidden)
@@ -64,3 +65,4 @@ def ple_block(key: torch.Tensor, value: torch.Tensor, r: torch.Tensor, w_key: to
         y = sum(conv[:, k].float() * seq[window - (taps - 1 - k) * dilation:][: e - s] for k in range(taps))
         r[s:e] += gated[s:e] + F.silu(y)
         state[slots[i]] = seq[-window:]
+    return c
