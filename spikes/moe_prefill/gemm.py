@@ -145,11 +145,20 @@ def holon(a, stacks: dict, e: int, gen: torch.Generator, dev) -> list[dict]:
         for t in a.tokens:
             ids = routing(t, e, k, a.skew, gen).to(dev)
             x = torch.randn(t, r, n_in, device=dev, dtype=torch.bfloat16 if r == 1 else torch.float32)
-            mmq_id = None
+            mmq_id, glu = None, {}
             if t * k <= ggml.ID_PAIRS:
                 y = torch.empty(t, k, n_out, device=dev)
                 ws = torch.empty(lib.workspace_bytes_id(0, n_in, t, k, slots), dtype=torch.uint8, device=dev)
                 mmq_id = timed(functools.partial(lib.mmq_id, typ, prec, flat, x, ids, y, ws, slots, errors), a.iters)
+                if name == "gate_up" and hasattr(lib, "mmq_id_glu"):          # D4: SwiGLU in mmq's store
+                    yg = torch.empty(t, k, n_out // 2, device=dev)
+
+                    def unfused():
+                        lib.mmq_id(typ, prec, flat, x, ids, y, ws, slots, errors)
+                        lib.swiglu(y, yg, None, None, None)
+                    glu = {"glu_unfused_ms": round(timed(unfused, a.iters), 4),
+                           "glu_fused_ms": round(timed(functools.partial(lib.mmq_id_glu, typ, prec, flat, x, ids, yg, ws,
+                                                                         slots, errors, None, None), a.iters), 4)}
                 del y, ws
             xd = torch.randn(t * k, n_in, device=dev, dtype=torch.bfloat16)
             yd = torch.empty(t * k, n_out, device=dev)
@@ -165,7 +174,7 @@ def holon(a, stacks: dict, e: int, gen: torch.Generator, dev) -> list[dict]:
                    "bf16_mm_tflops": round(2 * gmac / bf16, 1),
                    "grouping_overhead": mmq_id and round(mmq_id / dense, 2),
                    "tiles_used": tiles, "tiles_launched": -(-t // 128) * min(slots, t * k),
-                   "column_fill": round(t * k / (tiles * 128), 3)}
+                   "column_fill": round(t * k / (tiles * 128), 3)} | glu
             rows.append(row)
             print(json.dumps(row), flush=True)
         assert int(errors.item()) == 0, int(errors.item())
