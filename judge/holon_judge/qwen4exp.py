@@ -2,9 +2,10 @@
 needs beyond its forward, through `archs`' hooks.
 
 - **The tie rule** (D2's documented deviation from HF): QSA's indexer breaks score ties toward the lower block. HF's
-  `topk` leaves the order unspecified, and its ReLU sums make exact 0.0 ties common. One definition here; the fixture
-  tool (`holon_testing.qwen4exp_files`) uses it too. Only an indexer's own call sees it: `Tensor.topk` is stable for
-  the duration of that call, so the router's and the recording's top-k keep torch's.
+  `topk` leaves the order unspecified, and its ReLU sums make exact 0.0 ties common. One definition: `stable_topk`, in
+  std.mixers.qsa's reference (the oracle's); the fixture tool (`holon_testing.qwen4exp_files`) uses this wrapper.
+  Only an indexer's own call sees it: `Tensor.topk` is stable for the duration of that call, so the router's and the
+  recording's top-k keep torch's.
 - **PLE's table read lazily**: the whole table in fp32 is 205 GB, so a GGUF golden dequantizes only the hashed rows
   (`gguf.PleRows`), in the golden's dtype, after checking the file's hash constants against the ones HF computes.
 - **The final norm** is the hyper-connection output mixer.
@@ -20,14 +21,9 @@ import pathlib
 from collections.abc import Callable
 
 import torch
+from holon_std.mixers.qsa.reference import stable_topk
 
 TIE_RULE = "qsa indexer: stable top-k, ties to the lower block"
-
-
-def stable_topk(x: torch.Tensor, k: int, dim: int = -1, largest: bool = True, sorted: bool = True):
-    """The tie rule: a stable sort, so equal scores keep their order (the lower block first)."""
-    values, indices = torch.sort(x, dim=dim, descending=largest, stable=True)
-    return torch.return_types.topk((values.narrow(dim, 0, k), indices.narrow(dim, 0, k)))
 
 
 def wrap_indexers(model: torch.nn.Module, on_tie: Callable[[bool], None] | None = None) -> int:

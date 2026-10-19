@@ -24,6 +24,13 @@ def rope(x: torch.Tensor, position: int, table: torch.Tensor) -> torch.Tensor:
     return torch.cat((a * cos - b * sin, b * cos + a * sin, x[..., 2 * half:]), dim=-1)
 
 
+def stable_topk(x: torch.Tensor, k: int, dim: int = -1, largest: bool = True, sorted: bool = True):
+    """D2's tie rule: a stable sort, so equal scores keep their order (the lower block first). `torch.topk`'s
+    signature, so the judge's scoped wrapper of HF's indexer (`holon_judge.qwen4exp.wrap_indexers`) uses it too."""
+    values, indices = torch.sort(x, dim=dim, descending=largest, stable=True)
+    return torch.return_types.topk((values.narrow(dim, 0, k), indices.narrow(dim, 0, k)))
+
+
 def _where(table: torch.Tensor, seq: int, position: int, page: int) -> tuple[int, int]:
     return int(table[seq, position // page]), position % page
 
@@ -62,7 +69,7 @@ def qsa_select(q: torch.Tensor, pooled: torch.Tensor, table: torch.Tensor, seq: 
             keys = pooled[table[int(seq[t]), first // page].long(), (first % page) // ratio].double()
             scores = (keys @ q[t].double().T).relu().sum(-1) / math.sqrt(q.shape[-1])
             scores = scores.float()                                  # the contract's float32 scores
-            chosen = torch.sort(scores, descending=True, stable=True).indices[:min(top, n)].sort().values
+            chosen = stable_topk(scores, min(top, n)).indices.sort().values
             out[t, :len(chosen)] = chosen.int()
         if (p + 1) % ratio:
             out[t, min(top, n)] = n

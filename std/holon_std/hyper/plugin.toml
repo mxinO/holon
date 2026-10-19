@@ -7,7 +7,8 @@ license = "Apache-2.0"
 core_abi = ">=1.0,<2.0"
 
 [resources]
-provides = ["op.hc_gr_mix@1", "op.hc_gr_combine@1"]
+provides = ["op.hc_gr_mix@1", "op.hc_gr_combine@1", "unit.std.hyper.expand@1", "unit.std.hyper.gr_mix@1",
+            "unit.std.hyper.gr_block@1"]
 
 [properties]
 numerics = "exact"
