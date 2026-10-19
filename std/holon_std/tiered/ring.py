@@ -53,15 +53,23 @@ class Lent:
             cls, n = self.tail
             s.lend_needs[0, cls].fill_(n)                                     # (a fill: no host sync)
             s.lend_tail(cls, n)
-        held = self._held(classes)
+        # Held slots per class: the empty slots found, outside the tail (its recount once, after call 0), then each
+        # round's picks, which lie outside it (no resident holds a range slot after call 0). Counted as they come:
+        # this runs host-bound at the step's first resolve, so a recount per round would cost the step its launches.
+        if self.tail is None:
+            held = torch.zeros(len(s.classes), dtype=torch.int64, device=res.device)
+            held.index_add_(0, classes.reshape(-1), s.n_before.long().repeat_interleave(roles))
+        else:
+            held = self._held(classes)
         stage = torch.full_like(held, s.prefill)
         for k in range(1, 1 + (ROUNDS if self.mode == "ring" else 1)):
             want = self._want(res, classes) if self.mode == "ring" else stage
             if k == ROUNDS:                                                  # the last: the worst case
                 want = torch.where(held < want, 2 * experts, want)
             s.lend_needs[k] = (want - held).clamp_min(0)
-            s.lend(s.lend_needs[k], k)
-            held = self._held(classes)
+            picked = s.lend(s.lend_needs[k], k).long()
+            for r in range(roles):
+                held.index_add_(0, classes[:, r], picked.sum(1))
         want = self._want(res, classes) if self.mode == "ring" else stage
         ring_ok = (held >= want).all() if self.mode == "ring" else torch.zeros((), dtype=torch.bool, device=res.device)
         s.ring_ok.copy_(ring_ok.view(1))
