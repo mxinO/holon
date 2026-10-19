@@ -178,7 +178,8 @@ GGUF headers were parsed by HTTP range; the parsed offsets sum to each shard's s
 3. **Kernels.** L0 for every new kernel against its `reference.py` on sm_86, sm_89 and sm_120, memcheck clean.
    - Decode-step target on the RTX 5080: `qsa_select` ≤ 20 µs per layer at 32K context (8K blocks) for 4 query rows of
      one sequence; 8 rows are reported, not gated (panel C, step 4).
-   - ≤ 16 kernel launches per layer, all graphed, is a step-7 gate (§14's launch table).
+   - ≤ 768 kernel launches per decode token, all graphed (48 layers × 16: a per-token average, so layers may differ),
+     is a step-7 gate (§14's launch table).
 4. **Offload exactness.**
    - On the RTX PRO 6000, the offload store at a capped fit, with `lfu` and the MTP experts in the store, is
      snapshot byte-identical to all-resident.
@@ -793,7 +794,7 @@ On the RTX 5080 and 5090 desktops, one heavy job at a time under `MemoryMax`.
 | 4 | Triton kernels with L0 on 3 SMs and memcheck; first tuning against the launch and `qsa_select` targets; the GPU unit bitwise test of `qwen4_exp.ple_block@1`; rebase onto the MoE prefill track (T1–T5); IQ1_M loader L0 cases (or its fallback) | acceptance 3; the PLE unit bitwise test | 7 |
 | 5 | The full model on the RTX PRO 6000: goldens and floors, L2, bounded, the decode-divergence gate, snapshot, MTP; **kernel-only all-resident comparison with Strata** (both fit, as `x4_gap` did); N5 | acceptance 1b, 2; plants | 5 |
 | 6 | Offload: aux experts (a, the store's `before_launch`), F5b interleave (b), lending on through the lock (c, using T1–T2), PLE SSD tier, profile, exactness | acceptance 4; plants | 5 |
-| 7 | **Perf closure** on the bar cards: nsys per layer, fusions, CUDA rewrites by D10's rule; measures `max_step_tokens` × lending for D12d's hand-set lock values | every row within its roofline band, or the gap explained; ≤ 16 launches per decode layer (gate) | 4 |
+| 7 | **Perf closure** on the bar cards: nsys per layer, fusions, CUDA rewrites by D10's rule; measures `max_step_tokens` × lending for D12d's hand-set lock values | every row within its roofline band, or the gap explained; ≤ 768 launches per decode token (48 × 16; gate) | 4 |
 | 8 | Locks (`tune --new-model`) on the RTX 5080 and RTX 5090 | L2, snapshot, fit vs §7 | 2 |
 | 9 | The comparison (D11) | acceptance 5 | 3 |
 | 10 | Close: suite, panel code review, propagation if FN closes second, plan §10 | acceptance 6–8 | 2 |
@@ -1139,20 +1140,22 @@ docstring). Rev 2 takes panel C's review of the step-0 evidence (below):
     56.7 / 65.9 µs for a 4-row verify pass (RTX A5000, real indexer inputs, cold caches; §14), scaled to the
     50-series by ×0.67 [0.55, 0.85] (their clocks and bandwidth): ≈ 0.34 / 0.35 ms per decode token, 0.46 / 0.53 ms
     per pass.
-  - **rev 4 carries a launch band.** The overhead is scaled to 16 launches per layer (step 7's gate); each decode cell
-    is also given at 24, today's projection for a full layer (§14's launch table). The fusions that close the gap
-    have owners (§14).
+  - **rev 4 carries a launch band.** The overhead is scaled to 16 launches per layer on average (step 7's gate, ≤ 768
+    per decode token); each decode cell is also given at ≈ 22, today's layer-weighted projection, and the band's upper
+    end is 24 (every layer at the QSA layers' count; §14's launch table). The fusions that close the gap have owners
+    (§14).
 - **Bars: decode 1.0×, prefill 0.9×** (acceptance 5). Rev 2's table measured every cell against 0.9×; that is
   corrected here.
-- **Holon / Strata, central [band] → at 24 launches per layer (rev 4; supersedes revs 1–3).** The central and band
-  assume step 7's 16 launches; the arrow gives the central at 24.
+- **Holon / Strata, central [band] → at ≈ 22 launches per layer (rev 4; supersedes revs 1–3).** The central and band
+  assume step 7's 16 launches per layer on average; the arrow gives the central at today's layer-weighted projection
+  (≈ 22). At the band's upper end (24) the 5080's drafting-off cells are 0.92 · 0.90 · 0.96.
 
 | Gated row (bar) | RTX 5080: 1K · 4K · 32K | RTX 5090: 1K · 4K · 32K |
 |---|---|---|
-| no-approx, drafting off, decode (1.0×) | 1.03 · 1.01 · 1.07 [0.93–1.16] → **0.92 · 0.90 · 0.96** | 1.13 · 1.12 · 1.17 [1.01–1.30] → **0.96 · 0.96** · 1.00 |
-| no-approx, MTP-matched, decode (1.0×) | **0.89 · 0.90** · 1.06 [0.86–1.11] → **0.84 · 0.85** · 1.01 | **0.97** · 1.02 · 1.03 [0.92–1.09] → **0.89 · 0.94 · 0.95** |
+| no-approx, drafting off, decode (1.0×) | 1.032 · 1.005 · 1.071 [0.93–1.16] → **0.95 · 0.92 · 0.98** | 1.13 · 1.12 · 1.17 [1.01–1.30] → 1.00 · **0.995** · 1.04 |
+| no-approx, MTP-matched, decode (1.0×) | **0.89 · 0.90** · 1.06 [0.86–1.11] → **0.85 · 0.86** · 1.02 | **0.97** · 1.02 · 1.03 [0.92–1.09] → **0.91 · 0.96 · 0.97** |
 | no-approx, prefill (0.9×) | 1.19 · 0.99 · 0.93 [0.73–1.36] | 1.05 · 1.03 · 0.97 [0.76–1.18] |
-| *RTX 5080 at step 7's memory target:* drafting off · MTP-matched decode | 1.06 · 1.03 · 1.10 · **0.93 · 0.95** · 1.12 → 0.94 · 0.92 · 0.98 · 0.88 · 0.89 · 1.06 | — |
+| *RTX 5080 at step 7's memory target:* drafting off · MTP-matched decode | 1.06 · 1.03 · 1.10 · **0.93 · 0.95** · 1.12 → 0.97 · 0.94 · 1.01 · 0.89 · 0.91 · 1.07 | — |
 
 | Report-only row (lead's recommendation, owner item) | RTX 5080 | RTX 5090 |
 |---|---|---|
@@ -1168,9 +1171,9 @@ docstring). Rev 2 takes panel C's review of the step-0 evidence (below):
     A5000's QSA times to the 5080 unscaled.
   - Per D11, these go to the owner when they are measured.
   - Every prefill cell clears 0.9× at the center.
-- **At 24 launches per layer** (today's projection), every drafting-off decode cell of the RTX 5080 misses (0.92 /
-  0.90 / 0.96) and the 5090's 1K / 4K do (0.96 / 0.96); its MTP cells miss at every length. Step 7's ≤ 16 gate and
-  the named fusions (§14) are what keep these cells at their central values.
+- **At ≈ 22 launches per layer** (today's layer-weighted projection), every drafting-off decode cell of the RTX 5080
+  misses (0.95 / 0.92 / 0.98) and the 5090's 4K does (0.995); its MTP cells miss at every length. Step 7's ≤ 768 per
+  token gate and the named fusions (§14) are what keep these cells at their central values.
 - **Model error.** Cells within a few percent of their bar (rev 2's 0.896 / 0.899; here the 5080's 4K drafting-off
   decode at 1.005 and 32K prefill at 0.93, and the 5090's 1K MTP at 0.97) sit inside the model's error band. They are
   re-predicted after step 7 from measured costs; the QSA term and its scale are measured on the 50-series in the
@@ -1355,7 +1358,9 @@ core edits.
 **Launches per layer (decode).** Step 4's kernels, counted by the profiler at a decode shape. The rest of the layer
 (projections, q / k norms and rope with the KV write, o_proj, the MoE's router, top-k, experts and shared expert, and
 GDN's conv / rule / norm on the GDN layers) is today's units, counted at step 5 when the unit runs. Full layers project
-to ≈ 20–24 launches (panel C); N3 carries a 16–24 band (§13, rev 4), and ≤ 16 is a step-7 gate (acceptance 3).
+to ≈ 20–24 launches, ≈ 22 layer-weighted (QSA layers ≈ 24, panel C); N3 carries the 16–24 band with 22 as its
+projection point (§13, rev 4). The step-7 gate is a per-token average: ≤ 768 launches per decode token (48 × 16,
+acceptance 3).
 
 | Piece | Before (2a761fb) | Now |
 |---|---|---|
@@ -1365,8 +1370,9 @@ to ≈ 20–24 launches (panel C); N3 carries a 16–24 band (§13, rev 4), and 
 | Step 4's share of a QSA layer | 19 | 10 |
 
 The fusions that close 20–24 → 16, with owners:
-- **FN, step 7:** GDN's fused input projection; the block's last HC combine folded into the MoE combine's epilogue,
-  within the same block only (R complete on return: the trunk contract); router and top-k in one launch.
+- **FN, step 7:** GDN's fused input projection; QSA's q, kv and indexer projections in one call, so the QSA layers
+  are not left near 19; the block's last HC combine folded into the MoE combine's epilogue, within the same block only
+  (R complete on return: the trunk contract); router and top-k in one launch.
 - **FN, step 7, after the MoE prefill track has landed:** the shared expert run as an extra expert slot in the routed
   calls. It edits `kernels.ggml_cuda`, so it goes through the MoE prefill track's ownership rules and FN's own
   propagation.
@@ -1401,7 +1407,7 @@ per-layer buffer in 24 copies (1.6 GB) so no call finds its keys in L2; `qsa_att
 | B-2 | A 0.0 tie; an attend mutation | **Done.** `test_select_ties` asserts a boundary tie at 0.0 (a zero key for 85% of blocks); the plant "open block reads p + 1" fails `test_attend`. |
 | B-3 | inject / down dtypes | **Fixed.** Each weight is read in float32 (no cast of inject to down's dtype); the L0 uses an f32 inject beside a bf16 down. |
 | B-4 | The fp16 comment | **Reworded** as triton_attn's. |
-| C-M1 | Launches | **Done in part.** `_rstd` folds into `_down`, the attention half's combine into the FFN half's mix (5 HC launches per layer, after A's major), `_write_raw` + `_pool` into `_index`. The serial last-split merge variant was measured (+24 µs at decode) and rejected; the output gate folds into the attend's store instead (same count). Table above; ≤ 16 is a step-7 gate. |
+| C-M1 | Launches | **Done in part.** `_rstd` folds into `_down`, the attention half's combine into the FFN half's mix (5 HC launches per layer, after A's major), `_write_raw` + `_pool` into `_index`. The serial last-split merge variant was measured (+24 µs at decode) and rejected; the output gate folds into the attend's store instead (same count). Table above; the step-7 gate (now ≤ 768 launches per decode token). |
 | C-M2 | Key reads per tile | **Measured, not adopted:** three row-grouped forms, none faster from 2 to 512 rows on sm_86 (above). Shape invariance holds. |
 | C-m1 | Measurement | **Done:** 24 copies of every per-layer buffer (1.6 GB) and real indexer q / k from N4's oracle run (`spikes/fn0/n4_oracle.py --capture`). |
 | C-m2 | Top-k variants | **Measured, dropped** (above). The CUDA radix top-k stays a step-7 contingency. |
@@ -1414,5 +1420,6 @@ per-layer buffer in 24 copies (1.6 GB) so no call finds its keys in L2; `qsa_att
 | C (major, round 2) | Launch budget: full layers ≈ 20–24, not 16 | **Done:** N3 carries a 16–24 band (§13 rev 4: the 24-launch centrals), and the closing fusions are named with owners (above). |
 | C (round 2) | The QSA term on the 5080 | **Done:** ×0.67 [0.55, 0.85]; rev 4's first-cut 0.99 for the 5080's 4K drafting-off decode was an artifact of the unscaled A5000 input (now 1.005). |
 | C (round 2) | A fixed 32-block score tile; 512 rows; the merge wording | **Done:** the tile is a cluster-session measurement; select at 512 rows recorded (1.04 ms); "rejected" scoped to the serial last-split variant. |
+| C (follow-up) | The band's projection point; the gate's form | **Done:** N3 adds ≈ 22 (layer-weighted) as the projection point, 24 the band's upper end; the gate is ≤ 768 launches per decode token (48 × 16); QSA's projections in one call named as an FN step-7 fusion. |
 | A-1 | PLE's kernels | **Moved** to `kernels.ple_triton` (cuda, `bounded`); the model plugin keeps the contracts and oracles, numerics undeclared. |
 | A-2 | Model constants in std | **Removed** (`RATIO`, `BUDGET`, `SUB_BATCH`). |

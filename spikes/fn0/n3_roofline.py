@@ -14,8 +14,9 @@ pack, the MTP rows with it; and, for the RTX 5080, step 7's target (≥ 8.2 GB w
   routing (`--dump-routing`, tail skip off; it matches Strata's measured rate at Strata's cache size);
 - QSA (the 12 layers' selection and sparse attention): measured per layer in FN's step 4 on the RTX A5000 (real
   indexer inputs, cold caches; `QSA_US`), scaled to the card by ×0.67 [0.55, 0.85]; 0.03 ms dense below 2,052 tokens;
-- launches: the overhead is scaled to 16 launches per layer (step 7's gate); `launches_24` gives each decode cell at
-  24, today's projection for a full layer (panel C);
+- launches: the overhead is scaled to 16 launches per layer (step 7's gate, a per-token average: <= 768 per decode
+  token); `launches_22` gives each decode cell at today's layer-weighted projection, `launches_24` at the band's upper
+  end (every layer at the QSA layers' count) (panel C);
 - BW: 85% of the card's DRAM bandwidth; PCIe and the overhead from X's two Holon rows on the RTX 5080 (Qwen3-30B-A3B
   lfu and static at 25%: the slope of time over miss bytes gives the F5a fetch rate, the rest the per-step overhead,
   scaled from X's ~11 to FN's 16 launches per layer).
@@ -70,7 +71,9 @@ LAYERS, TOPK, GDN_STATE_GB = 48, 10, 36 * 48 * 128 * 128 * 4 * 2 / 1e9
 X_ROWS = {"lfu": {"ms": 1e3 / 119.1672, "miss_mb": 169.7687, "hit": 0.8478},
           "static": {"ms": 1e3 / 83.6541, "miss_mb": 321.0333, "hit": 0.7072}}
 X_DENSE_GB, X_ROUTED, X_EXPERT_MB, X_BW = 1.0, 384, 2.857, 960 * 0.85
-X_LAUNCHES, FN_LAUNCHES, FN_LAUNCHES_HIGH = 11, 16, 24     # FN's band: step 7's gate, today's projection (panel C)
+# FN's launches per layer: step 7's gate (a per-token average: <= 768 per decode token), today's layer-weighted
+# projection, and the band's upper end (every layer at the QSA layers' count) (panel C)
+X_LAUNCHES, FN_LAUNCHES, FN_LAUNCHES_PROJECTED, FN_LAUNCHES_HIGH = 11, 16, 22, 24
 # QSA per layer, `qsa_select` + `qsa_attend` (bf16 KV, gated), measured (FN step 4) on real indexer inputs with cold
 # caches on the RTX A5000 (evidence/fn4_qsa_rtx-a5000_2026-10-19.json, fn4_qsa_4k_rtx-a5000_2026-10-19.json) and
 # scaled to the 50-series by QSA_SCALE (central, low, high: their clocks and bandwidth; panel C ×≈0.67); by (context,
@@ -78,9 +81,10 @@ X_LAUNCHES, FN_LAUNCHES, FN_LAUNCHES_HIGH = 11, 16, 24     # FN's band: step 7's
 QSA_LAYERS, QSA_US = 12, {(4096, 1): 23.43 + 18.22, (4096, 4): 22.15 + 34.50,
                           (32768, 1): 25.34 + 18.68, (32768, 4): 28.81 + 37.12}
 QSA_SCALE = {"central": 0.67, "low": 0.85, "high": 0.55}
-# per band: the overhead factor, the QSA band and FN's launches per layer ("launches_24": today's projection)
+# per band: the overhead factor, the QSA band and FN's launches per layer ("launches_22": today's projection,
+# "launches_24": the band's upper end)
 BANDS = (("central", 1.0, "central", FN_LAUNCHES), ("low", 1.3, "low", FN_LAUNCHES), ("high", 0.7, "high", FN_LAUNCHES),
-         ("launches_24", 1.0, "central", FN_LAUNCHES_HIGH))
+         ("launches_22", 1.0, "central", FN_LAUNCHES_PROJECTED), ("launches_24", 1.0, "central", FN_LAUNCHES_HIGH))
 # Holon's cost per Strata prefill phase (central, low, high)
 F = {"hc read": (1.5, 1.0, 2.0), "gdn": (1.1, 0.9, 1.5), "gdn conv+gates": (1.1, 0.9, 1.5),
      "gdn recurrence": (1.1, 0.9, 1.5), "gdn out proj": (1.0, 1.0, 1.0), "qsa attn": (1.2, 1.0, 1.6),
@@ -236,9 +240,10 @@ def main() -> None:
                       "phase_factors": F, "prefill_stream_gbps": PCIE_STREAM},
            "rows": rows, "bars": {"decode": 1.0, "prefill": 0.9},
            "rows_below_bar_central": below,
-           "rows_below_bar_at_24_launches": sorted({f"{c} {r}" for c, row in rows.items()
-                                                    for r, v in row["ratios"].items()
-                                                    if "launches_24" in v and v["launches_24"] < 1.0})}
+           **{f"rows_below_bar_at_{n}_launches": sorted({f"{c} {r}" for c, row in rows.items()
+                                                         for r, v in row["ratios"].items()
+                                                         if f"launches_{n}" in v and v[f"launches_{n}"] < 1.0})
+              for n in (FN_LAUNCHES_PROJECTED, FN_LAUNCHES_HIGH)}}
     pathlib.Path(a.out).write_text(json.dumps(rec, indent=1) + "\n")
     print(json.dumps({c: {r: v["central"] for r, v in row["ratios"].items()} for c, row in rows.items()}, indent=1))
     print("below their bar (central):", below)
