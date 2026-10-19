@@ -571,6 +571,16 @@ class LinearExperts(_Matmul):
                              f"{'swiglu' if self.swiglu else 'none'}")
         gate_scale, up_scale = (scale2[0], scale2[1]) if scale2 is not None and self.swiglu else (None, scale2)
         tokens = len(ids)
+        # Decode and verify: mmvq only, which reads no `scratch`. An eager small step is host-bound, so this path does
+        # none of D10's carving.
+        if tokens <= self.mmvq_tokens:
+            self._check_buffers(x, tokens, out, None)
+            y = torch.empty(tokens, self.top_k, self.out_y, device=x.device) if out is None else out
+            if tokens:
+                self._count("mmvq")
+                self.lib.mmvq_id(self.type, blocks.view(-1, blocks.shape[-1]), x, ids, y, self.swiglu, gate_scale,
+                                 up_scale, self.workspace, xq=xq)
+            return y
         self._check_buffers(x, tokens, out, scratch)
         y = torch.empty(tokens, self.top_k, self.out_y, device=x.device) if out is None else out
         workspace, gate_up = self._transients(tokens, x.device, scratch)

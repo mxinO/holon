@@ -46,6 +46,7 @@ import dataclasses
 import math
 import os
 import types
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -634,6 +635,11 @@ def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Te
         kernel = bound.select_kernel("linear_experts_arena@1", site="l0", **f).impl(bound, **f)
         assert kernel.resident_rows == max(kernel.mmvq_tokens, 1 if bound is ctx else 64)
         assert kernel.scratch_bytes(kernel.mmvq_tokens) == 0
+        small, empty = kernel.mmvq_tokens, torch.empty(0, dtype=torch.uint8, device="cuda")
+        want = kernel(x[:small], parts, ids[:small])
+        with (mock.patch.object(kernel, "_transients", side_effect=AssertionError),        # mmvq calls do none of
+              mock.patch.object(kernel, "scratch_bytes", side_effect=AssertionError)):     # D10's work (host-bound)
+            assert torch.equal(kernel(x[:small], parts, ids[:small], scratch=empty), want)
         if bound is decode:
             kernel.glu_store = False
             assert kernel.scratch_bytes(64) == 64 * K * kernel.out * 4 < kernel.scratch_bytes(65)
