@@ -1,8 +1,9 @@
 """Our Triton kernels for the gated-residual hyper-connections (`hc_gr_mix@1`, `hc_gr_combine@1`; std.hyper). Written
 for Holon after studying FreeToken's `kernel/triton/hc.py` (its separate norm, SiLU and mix kernels around cuBLAS
 projections): here the norm (its sums of squares too) is folded into the down projection and the mix into the up
-projection's epilogue, and a pending combine rides along, so a mix is two launches; every product in float32 with IEEE
-sums (D10), each weight read in float32. Correct and graph-safe; tuned in FN's step 7."""
+projection's epilogue, and a pending combine (the same block's previous half) rides along, so a mix is two launches;
+every product in float32 with IEEE sums (D10), each weight read in float32. Correct and graph-safe; tuned in FN's step
+7."""
 from __future__ import annotations
 
 import torch
@@ -97,8 +98,9 @@ def _combine(r_ptr, y_ptr, w_ptr, H, S: tl.constexpr, BLOCK: tl.constexpr):
     tl.store(p, tl.load(p, mask=c < H, other=0.0) + w * y, mask=c < H)
 
 
-def hc_gr_mix(r, norm, down, up, inject, y, w_prev, streams: int, eps: float, dtype: torch.dtype):
-    """Two launches: `_down` (its rstd folded in) and `_up_mix`; a pending combine (y, w_prev) rides along."""
+def hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, streams: int, eps: float, dtype: torch.dtype):
+    """Two launches: `_down` (its rstd folded in) and `_up_mix`; a pending combine (y_prev, w_prev: the same block's
+    previous half) rides along. The returned w is a new tensor, never w_prev."""
     t, width = r.shape
     hidden, rank = width // streams, down.shape[0]
     if hidden % BK or r.stride(1) != 1 or r.stride(0) != width:
@@ -107,11 +109,11 @@ def hc_gr_mix(r, norm, down, up, inject, y, w_prev, streams: int, eps: float, dt
     w = None if inject is None else torch.empty(t, streams, dtype=torch.float32, device=r.device)
     if t == 0:
         return x, w
-    pending = y is not None
+    pending = y_prev is not None
     rstd = torch.empty(t, streams, dtype=torch.float32, device=r.device)
     a = torch.empty(t, rank, dtype=torch.float32, device=r.device)
     sink = w if w is not None else rstd                           # never written without inject
-    y, w_prev = (y.contiguous(), w_prev.contiguous()) if pending else (rstd, rstd)
+    y, w_prev = (y_prev.contiguous(), w_prev.contiguous()) if pending else (rstd, rstd)
     down = down.contiguous()
     inj = inject.contiguous() if inject is not None else down
     _down[(triton.cdiv(t, BM), triton.cdiv(rank + (streams if inject is not None else 0), BN))](

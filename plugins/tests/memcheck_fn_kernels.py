@@ -18,7 +18,7 @@ from tests.test_attention_kv_quant import fp8_device
 
 
 def main() -> None:
-    qsa.test_index()
+    qsa.test_index(torch.bfloat16)
     qsa.test_select_ties()
     layouts = [("kv.hnd", torch.bfloat16), ("kv.hnd", torch.float16), ("kv.hnd.q8_0", torch.bfloat16)]
     for layout, dtype in layouts + ([("kv.hnd.fp8", torch.bfloat16)] if fp8_device() else []):

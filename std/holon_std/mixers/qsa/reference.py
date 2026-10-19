@@ -94,5 +94,5 @@ def qsa_attend(q: torch.Tensor, kv, blocks: torch.Tensor, table: torch.Tensor, s
         v = cache[units, 1, :, offsets].repeat_interleave(rep, dim=1)
         scores = torch.einsum("hd,nhd->hn", q[t].float(), k) / math.sqrt(q.shape[-1])
         o = torch.einsum("hn,nhd->hd", scores.softmax(-1), v)
-        out[t] = (o if gate is None else o * torch.sigmoid(gate[t].float())).to(q.dtype)
+        out[t] = (o if gate is None else o * torch.sigmoid(gate[t].float())).to(q.dtype)   # padding rows stay 0
     return out

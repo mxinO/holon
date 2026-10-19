@@ -3,7 +3,8 @@ Qwen3.8-Flash-Next's shapes (indexer 4 × 128, rotary 64 at θ 1e7; attention 24
 budget 2,048), through the build context.
 
 - `qsa_index@1` (one launch): prefill in two chunks per sequence, the second starting inside a block (its pooled keys
-  read raw keys of the first chunk and of its own), and padding tokens. `raw` bitwise; `pooled` within
+  read raw keys of the first chunk and of its own), and padding tokens; k in bf16 and in f32 (pooled from k as raw
+  stores it). `raw` bitwise; `pooled` within
   `l0.check(f32, Dk)`; slots no token writes stay untouched.
 - `qsa_select@1`, exactly equal to the oracle where its float32 scores have no near-ties: pooled keys drawn from six
   vectors, one of them zero, so every boundary is a large tie that D2's lower-block rule decides, a tie at ReLU's 0.0
@@ -14,8 +15,8 @@ budget 2,048), through the build context.
 - `qsa_attend@1` for prefill, decode and verify rows (sparse past 2,051 tokens, dense below, padding) in bf16 and fp16,
   and from the q8_0 and fp8 caches (fp8 from sm_89), within the attention budget of test_attention_kernels against the
   oracle reading the same stored cache, with and without the output gate (a strided view, as gqa's gated q layout
-  gives it); batches whose shapes split the selected tokens 32, 8, 4 ways and not at all. A plant must fail: the open
-  block reading one token more.
+  gives it; NaN in padding rows' gates still gives 0); batches whose shapes split the selected tokens 32, 8, 4 ways
+  and not at all. A plant must fail: the open block reading one token more.
 
 Skips without a GPU.
 """
@@ -60,12 +61,13 @@ def _addresses(rows: list[tuple[int, int, int]]) -> tuple[torch.Tensor, torch.Te
     return torch.tensor(seq, dtype=torch.int32), torch.tensor(pos, dtype=torch.int64)
 
 
-def test_index():
+@pytest.mark.parametrize("k_dtype", [torch.bfloat16, torch.float32])         # f32 k: pooled as stored (bf16)
+def test_index(k_dtype):
     lengths, cut = {3: 37, 0: 130, 6: 5}, {3: 13, 0: 66, 6: 2}        # second chunks start inside a block
     table = _table(max(lengths.values()), 0)
     units = int(table.max()) + 1
     g = torch.Generator().manual_seed(0)
-    keys = {s: torch.randn(n, DK, generator=g).bfloat16() for s, n in lengths.items()}
+    keys = {s: torch.randn(n, DK, generator=g).to(k_dtype) for s, n in lengths.items()}
     weight = torch.randn(DK, generator=g) * 0.1
     cos_sin = ref.cos_sin(max(lengths.values()), ROT, THETA)
     raw = torch.full((units, PAGE, DK), 7.0, dtype=torch.bfloat16)
@@ -76,7 +78,7 @@ def test_index():
     for chunk in (lambda s: (0, cut[s]), lambda s: (cut[s], lengths[s])):
         rows = [(-1, 0, 2)] + [(s, *(lambda a, b: (a, b - a))(*chunk(s))) for s in lengths] + [(-1, 0, 1)]
         seq, pos = _addresses(rows)
-        k = torch.cat([torch.zeros(n, DK, dtype=torch.bfloat16) if s < 0 else keys[s][p:p + n] for s, p, n in rows])
+        k = torch.cat([torch.zeros(n, DK, dtype=k_dtype) if s < 0 else keys[s][p:p + n] for s, p, n in rows])
         ref.qsa_index(k, raw, pooled, table, seq, pos, weight, cos_sin, RATIO, 1e-6)
         kernel(k.cuda(), *ours, table.cuda(), seq.cuda(), pos.cuda(), weight.cuda(), cos_sin.cuda())
     assert torch.equal(ours[0].cpu(), raw)
@@ -208,6 +210,7 @@ def test_attend(layout, dtype):
             if (int(pos[t]) + 1) % RATIO:
                 blocks[t, len(chosen)] = n
         qg = torch.randn(len(seq), HQ, 2 * D, generator=g).to(dtype)        # gqa's gated layout: q, then gate
+        qg[seq < 0, :, D:] = float("nan")                # stale padding: its output must still be 0
         q, gate = qg[..., :D].contiguous(), qg[..., D:]
         for gated in (False, True):
             ours = kernel(q.cuda(), kv, blocks.cuda(), table.cuda(), seq.cuda(), pos.cuda(),

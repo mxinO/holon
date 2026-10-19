@@ -25,7 +25,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--capture", required=True, help="spikes/fn0/n4_oracle.py --capture's file")
 ap.add_argument("--layer", type=int, default=3)
 ap.add_argument("--tokens", type=int, default=None, help="the prompt's first this many tokens (default: all)")
-ap.add_argument("--rows", default="1,2,4,8")
+ap.add_argument("--rows", default="1,2,4,8,512", help="query rows; above 8, of one sequence only (a prefill sub-batch)")
 ap.add_argument("--buffers", type=int, default=24)
 ap.add_argument("--rounds", type=int, default=4, help="passes over the buffers per graph")
 ap.add_argument("--out", default=None)
@@ -80,9 +80,10 @@ def timed(calls) -> float:
 
 def case(rows: int, seqs: int) -> dict:
     """`rows` queries at the end of the prompt: of one sequence (consecutive positions) or one per sequence."""
-    if seqs == 1:
-        seq, positions, q = (torch.zeros(rows, dtype=torch.int32, device="cuda"),
-                             torch.arange(ctx_len - rows, ctx_len, device="cuda"), queries[-rows:])
+    if seqs == 1:                          # beyond the 8 captured queries, they repeat (a prefill sub-batch's timing)
+        seq, positions = (torch.zeros(rows, dtype=torch.int32, device="cuda"),
+                          torch.arange(ctx_len - rows, ctx_len, device="cuda"))
+        q = queries.repeat(-(-rows // 8), 1, 1)[-rows:]
     else:
         seq, positions, q = (torch.arange(rows, dtype=torch.int32, device="cuda"),
                              torch.full((rows,), ctx_len - 1, device="cuda"), queries[-rows:])
@@ -104,7 +105,7 @@ def case(rows: int, seqs: int) -> dict:
 
 results = []
 for rows in map(int, args.rows.split(",")):
-    for seqs in sorted({1, rows}):
+    for seqs in sorted({1, rows}) if rows <= 8 else (1,):
         results.append(case(rows, seqs))
         print(results[-1], flush=True)
 if args.out:

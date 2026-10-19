@@ -34,7 +34,8 @@ def _index(k_ptr, raw_ptr, pooled_ptr, table_ptr, seq_ptr, pos_ptr, w_ptr, cs_pt
            PAGE: tl.constexpr, D: tl.constexpr, RATIO: tl.constexpr, ROT: tl.constexpr):
     """One token: store its raw key; when it completes a block, pool the block: mean (f32, rounded to raw's dtype),
     norm, rope. The block's keys are what the cache holds after this call: a position this call stores is read from
-    k (the value it stores; its row is t − (p − position) when the call carries it), any other from `raw`."""
+    k in raw's dtype (the value it stores; its row is t − (p − position): each sequence's tokens are consecutive rows
+    in position order, the contract's precondition), any other from `raw`."""
     t = tl.program_id(0).to(tl.int64)
     s = tl.load(seq_ptr + t)
     p = tl.load(pos_ptr + t)
@@ -53,8 +54,9 @@ def _index(k_ptr, raw_ptr, pooled_ptr, table_ptr, seq_ptr, pos_ptr, w_ptr, cs_pt
             for i in tl.static_range(RATIO):
                 j = tl.maximum(t - (RATIO - 1 - i), 0)
                 mine = (t >= RATIO - 1 - i) & (tl.load(seq_ptr + j) == s) & (tl.load(pos_ptr + j) == start + i)
-                kx = tl.load(k_ptr + j * stride_k + d, mask=(d < D) & mine, other=0.0)
-                ky = tl.load(k_ptr + j * stride_k + partner, mask=(d < D) & mine, other=0.0)
+                kx = tl.load(k_ptr + j * stride_k + d, mask=(d < D) & mine, other=0.0).to(raw_ptr.dtype.element_ty)
+                ky = tl.load(k_ptr + j * stride_k + partner, mask=(d < D) & mine,
+                             other=0.0).to(raw_ptr.dtype.element_ty)            # as stored: in raw's dtype
                 rx = tl.load(base + i * D + d, mask=(d < D) & ~mine, other=0.0)
                 ry = tl.load(base + i * D + partner, mask=(d < D) & ~mine, other=0.0)
                 x += tl.where(mine, kx, rx).to(tl.float32)
@@ -275,8 +277,9 @@ def _merge(part_ptr, lse_ptr, gate_ptr, out_ptr, stride_gate, stride_gate_head, 
     o = tl.sum(tl.load(part_ptr + at[:, None] * D + d[None, :]) * w[:, None], 0)
     total = tl.sum(w, 0)
     o = o / tl.where(total > 0, total, 1.0)
-    if GATED:
-        o *= tl.sigmoid(tl.load(gate_ptr + t * stride_gate + head * stride_gate_head + d).to(tl.float32))
+    if GATED:                                   # a padding row stays 0 whatever its gate holds (NaN included)
+        g = tl.load(gate_ptr + t * stride_gate + head * stride_gate_head + d).to(tl.float32)
+        o = tl.where(total > 0, o * tl.sigmoid(g), 0.0)
     tl.store(out_ptr + t * stride_out + head * stride_out_head + d, o.to(out_ptr.dtype.element_ty))
 
 

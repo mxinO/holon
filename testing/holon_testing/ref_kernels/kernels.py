@@ -355,8 +355,8 @@ class HcMix:
     def __init__(self, ctx, *, streams: int, hidden: int, rank: int, eps: float, dtype: str, inject: bool) -> None:
         self.streams, self.eps, self.dtype = streams, eps, getattr(torch, dtype)
 
-    def __call__(self, r, norm, down, up, inject, y=None, w=None):
-        return hyper.hc_gr_mix(r, norm, down, up, inject, y, w, self.streams, self.eps, self.dtype)
+    def __call__(self, r, norm, down, up, inject, y_prev=None, w_prev=None):
+        return hyper.hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, self.streams, self.eps, self.dtype)
 
 
 class HcCombine:

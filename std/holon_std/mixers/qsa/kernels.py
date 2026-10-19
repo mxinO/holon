@@ -13,6 +13,7 @@ complete block. Block b of a sequence lives in its page (ratio·b) // page, at (
 
 **Addressing** (every op): `seq` [T] int32, each token's row of `table` [slots, max_pages] (int32 unit ids; −1: a
 padding token, which reads nothing and writes nothing), and `positions` [T] int64, its position in that sequence.
+**Precondition:** each sequence's tokens are consecutive rows of the call, in position order (the batch layout).
 
 - `qsa_index@1`: instance `(k [T, Dk], raw, pooled, table, seq, positions, weight [Dk], cos_sin) -> None`: stores each
   token's k into `raw` at its position, then, for every token that completes a block (p % ratio = ratio − 1), pools that

@@ -4,8 +4,10 @@ PLE kernels (`kernels.ple_triton`: `qwen4_exp.ple_rows@1`, `qwen4_exp.ple_block@
 248044; conv 4 taps at dilation 3), through the build context.
 
 - `hc_gr_mix@1` within `l0.check` of the oracle (x at its dtype, w in float32, over n·H terms), with and without
-  `inject` (f32 beside bf16 `down`), with and without a pending combine, for 0, 1, 7 and 77 tokens; the residual a
-  pending combine leaves bitwise what `hc_gr_combine@1` leaves, and that within float32's elementwise budget.
+  `inject` (f32 beside bf16 `down`), with and without a pending combine (y_prev, w_prev: the same block's previous
+  half), for 0, 1, 7 and 77 tokens; the residual a pending combine leaves bitwise what `hc_gr_combine@1` leaves, and
+  that within float32's elementwise budget. A block as the unit runs it (mix, combine riding in the next mix, its
+  last combine applied) leaves R as the oracle's block does.
 - `qwen4_exp.ple_rows@1` bitwise (rows and history), with wrapping int64 products, EOS at a row's start, inside it and
   in the history, decode rows, a zero-token row and rows without has_init.
 - `qwen4_exp.ple_block@1` within `l0.check(f32, H)` of the oracle (r and state); state units of rows without has_init
@@ -59,7 +61,7 @@ def test_hc(inject):
         r = torch.randn(t, width, generator=g) * torch.linspace(0.5, 4.0, STREAMS).repeat_interleave(HIDDEN)
         y = torch.randn(t, HIDDEN, generator=g).bfloat16()
         w_prev = 2 * torch.rand(t, STREAMS, generator=g)
-        for pending in (False, True):                    # a pending combine (the previous block's) rides along
+        for pending in (False, True):                    # a pending combine (the block's previous half) rides along
             extra = (y, w_prev) if pending else (None, None)
             ours = r.cuda()
             x, w = mix(ours, *weights, *[e.cuda() if e is not None else None for e in extra])
@@ -75,6 +77,17 @@ def test_hc(inject):
                 alone = r.cuda()
                 combine(alone, y.cuda(), w_prev.cuda())
                 assert torch.equal(alone, ours)
+        if inject and t:                                 # a block as the unit runs it: R complete when it returns
+            y_attn, y_ffn = (torch.randn(t, HIDDEN, generator=g).bfloat16() for _ in range(2))
+            ours = r.cuda()
+            _, w_attn = mix(ours, *weights)
+            _, w_ffn = mix(ours, *weights, y_attn.cuda(), w_attn)          # the attention half's combine rides here
+            combine(ours, y_ffn.cuda(), w_ffn)                              # the block's last combine, applied
+            r_ref = r.clone()
+            _, w_a = hc.hc_gr_mix(r_ref, norm, down, up, gate, None, None, STREAMS, EPS, torch.bfloat16)
+            _, w_f = hc.hc_gr_mix(r_ref, norm, down, up, gate, y_attn, w_a, STREAMS, EPS, torch.bfloat16)
+            hc.hc_gr_combine(r_ref, y_ffn, w_f)
+            _check(ours, r_ref, torch.float32, width, f"block, {t} tokens")
 
 
 # (slot, has_init, tokens): a prefill, decode rows, a zero-token row, rows with and without has_init

@@ -14,10 +14,10 @@ def stream_norm(r: torch.Tensor, weight: torch.Tensor, streams: int, eps: float)
 
 
 def hc_gr_mix(r: torch.Tensor, norm: torch.Tensor, down: torch.Tensor, up: torch.Tensor,
-              inject: torch.Tensor | None, y: torch.Tensor | None, w: torch.Tensor | None, streams: int, eps: float,
-              dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor | None]:
-    if y is not None:
-        hc_gr_combine(r, y, w)
+              inject: torch.Tensor | None, y_prev: torch.Tensor | None, w_prev: torch.Tensor | None, streams: int,
+              eps: float, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor | None]:
+    if y_prev is not None:
+        hc_gr_combine(r, y_prev, w_prev)
     rn = stream_norm(r, norm, streams, eps)
     u = torch.sigmoid(F.silu(rn @ down.float().T / streams) @ up.float().T)
     x = (u * rn).reshape(len(r), streams, r.shape[1] // streams).mean(1).to(dtype)

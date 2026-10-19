@@ -13,7 +13,9 @@ pack, the MTP rows with it; and, for the RTX 5080, step 7's target (≥ 8.2 GB w
 - hit rate: Holon's `placement.lfu@1` per layer, seeded from the expert profile, replayed on Strata's own decode
   routing (`--dump-routing`, tail skip off; it matches Strata's measured rate at Strata's cache size);
 - QSA (the 12 layers' selection and sparse attention): measured per layer in FN's step 4 on the RTX A5000 (real
-  indexer inputs, cold caches; `QSA_US`), carried as is; 0.03 ms dense below 2,052 tokens;
+  indexer inputs, cold caches; `QSA_US`), scaled to the card by ×0.67 [0.55, 0.85]; 0.03 ms dense below 2,052 tokens;
+- launches: the overhead is scaled to 16 launches per layer (step 7's gate); `launches_24` gives each decode cell at
+  24, today's projection for a full layer (panel C);
 - BW: 85% of the card's DRAM bandwidth; PCIe and the overhead from X's two Holon rows on the RTX 5080 (Qwen3-30B-A3B
   lfu and static at 25%: the slope of time over miss bytes gives the F5a fetch rate, the rest the per-step overhead,
   scaled from X's ~11 to FN's 16 launches per layer).
@@ -68,12 +70,17 @@ LAYERS, TOPK, GDN_STATE_GB = 48, 10, 36 * 48 * 128 * 128 * 4 * 2 / 1e9
 X_ROWS = {"lfu": {"ms": 1e3 / 119.1672, "miss_mb": 169.7687, "hit": 0.8478},
           "static": {"ms": 1e3 / 83.6541, "miss_mb": 321.0333, "hit": 0.7072}}
 X_DENSE_GB, X_ROUTED, X_EXPERT_MB, X_BW = 1.0, 384, 2.857, 960 * 0.85
-X_LAUNCHES, FN_LAUNCHES = 11, 16
+X_LAUNCHES, FN_LAUNCHES, FN_LAUNCHES_HIGH = 11, 16, 24     # FN's band: step 7's gate, today's projection (panel C)
 # QSA per layer, `qsa_select` + `qsa_attend` (bf16 KV, gated), measured (FN step 4) on real indexer inputs with cold
 # caches on the RTX A5000 (evidence/fn4_qsa_rtx-a5000_2026-10-19.json, fn4_qsa_4k_rtx-a5000_2026-10-19.json) and
-# carried to the 50-series cards as is; by (context, query rows of one sequence): a decode token, a 4-row verify pass
+# scaled to the 50-series by QSA_SCALE (central, low, high: their clocks and bandwidth; panel C ×≈0.67); by (context,
+# query rows of one sequence): a decode token, a 4-row verify pass
 QSA_LAYERS, QSA_US = 12, {(4096, 1): 23.43 + 18.22, (4096, 4): 22.15 + 34.50,
                           (32768, 1): 25.34 + 18.68, (32768, 4): 28.81 + 37.12}
+QSA_SCALE = {"central": 0.67, "low": 0.85, "high": 0.55}
+# per band: the overhead factor, the QSA band and FN's launches per layer ("launches_24": today's projection)
+BANDS = (("central", 1.0, "central", FN_LAUNCHES), ("low", 1.3, "low", FN_LAUNCHES), ("high", 0.7, "high", FN_LAUNCHES),
+         ("launches_24", 1.0, "central", FN_LAUNCHES_HIGH))
 # Holon's cost per Strata prefill phase (central, low, high)
 F = {"hc read": (1.5, 1.0, 2.0), "gdn": (1.1, 0.9, 1.5), "gdn conv+gates": (1.1, 0.9, 1.5),
      "gdn recurrence": (1.1, 0.9, 1.5), "gdn out proj": (1.0, 1.0, 1.0), "qsa attn": (1.2, 1.0, 1.6),
@@ -92,14 +99,14 @@ def x_fit() -> tuple[float, float]:
     return 1 / slope, over
 
 
-def qsa_ms(context: int, rows: int) -> float:
+def qsa_ms(context: int, rows: int, scale: float) -> float:
     """The QSA layers' selection and attention per pass (dense below 2,052 tokens: D6's rule)."""
-    return QSA_LAYERS * QSA_US[(context, rows)] / 1e3 if context > 2051 else 0.03
+    return QSA_LAYERS * QSA_US[(context, rows)] * scale / 1e3 if context > 2051 else 0.03
 
 
-def decode_ms(card: dict, hit: float, pcie: float, over: float, context: int) -> float:
+def decode_ms(card: dict, hit: float, pcie: float, over: float, context: int, scale: float) -> float:
     routed = LAYERS * TOPK * card["expert_mb"] / 1e3                     # GB per token
-    qsa = qsa_ms(context, 1)
+    qsa = qsa_ms(context, 1, scale)
     return ((card["dense_gb"] + GDN_STATE_GB + hit * routed) / card["bw"] * 1e3 + (1 - hit) * routed * 1e3 / pcie
             + over + qsa)
 
@@ -133,10 +140,10 @@ def routed_share(trace: str, profile: str, slots: int, window: int) -> float:
     return statistics.mean(shares)
 
 
-def mtp_pass_ms(card: dict, hit: float, union: float, pcie: float, over: float, context: int) -> float:
+def mtp_pass_ms(card: dict, hit: float, union: float, pcie: float, over: float, context: int, scale: float) -> float:
     """A verify pass of WINDOW rows (`union` distinct experts per layer, `hit` of them resident), and its drafts."""
     experts = LAYERS * union * card["expert_mb"] / 1e3
-    qsa = qsa_ms(context, WINDOW)
+    qsa = qsa_ms(context, WINDOW, scale)
     verify = ((card["dense_gb"] + GDN_STATE_GB + hit * experts) / card["bw"] * 1e3 + (1 - hit) * experts * 1e3 / pcie
               + over + qsa)
     draft = (MTP_DENSE_GB + card["head_gb"] + TOPK * MTP_EXPERT_MB / 1e3) / card["bw"] * 1e3 + over / LAYERS
@@ -174,9 +181,14 @@ def main() -> None:
         d_off, d_mtp = med("strata_def_off", "decode_tps"), med("strata_def_mtp", "decode_tps")
         accepted = med("strata_na_mtp", "tokens_per_pass")
         a1 = d_off / s_off                                               # Strata's own approximation gain
-        bands = (("central", 1.0), ("low", 1.3), ("high", 0.7))
-        dec = {w: 1e3 / decode_ms(card, hits["off"], pcie, over * k, c) for w, k in bands}
-        mtp = {w: accepted * 1e3 / mtp_pass_ms(card, hits["mtp"], union, pcie, over * k, c) for w, k in bands}
+        def dec_tps(hit: str, k: float, q: str, n: int, c: int = c) -> float:
+            return 1e3 / decode_ms(card, hits[hit], pcie, over * k * n / FN_LAUNCHES, c, QSA_SCALE[q])
+
+        def mtp_tps(hit: str, k: float, q: str, n: int, c: int = c, accepted: float = accepted) -> float:
+            return accepted * 1e3 / mtp_pass_ms(card, hits[hit], union, pcie, over * k * n / FN_LAUNCHES, c,
+                                                QSA_SCALE[q])
+        dec = {w: dec_tps("off", k, q, n) for w, k, q, n in BANDS}
+        mtp = {w: mtp_tps("mtp", k, q, n) for w, k, q, n in BANDS}
         pf = {w: statistics.median(factor(p, i) for p in ph[c]) for w, i in (("central", 0), ("low", 2), ("high", 1))}
         s_pf, d_pf = med("strata_na_off", "prefill_tps"), med("strata_def_off", "prefill_tps")
         step = min(c, card["step"])
@@ -194,10 +206,10 @@ def main() -> None:
             "defaults_mtp_decode": {k: v * a1 / d_mtp for k, v in mtp.items()},
             "defaults_prefill": {k: min(v * kv, cap) / d_pf for k, v in h_pf.items()}}
         if card["target_gb"]:
-            ratios |= {"target_noapprox_off_decode": {
-                w: 1e3 / decode_ms(card, hits["target_off"], pcie, over * k, c) / s_off for w, k in bands},
-                "target_noapprox_mtp_decode": {w: accepted * 1e3 / mtp_pass_ms(
-                    card, hits["target_mtp"], union, pcie, over * k, c) / s_mtp for w, k in bands}}
+            ratios |= {"target_noapprox_off_decode": {w: dec_tps("target_off", k, q, n) / s_off
+                                                      for w, k, q, n in BANDS},
+                       "target_noapprox_mtp_decode": {w: mtp_tps("target_mtp", k, q, n) / s_mtp
+                                                      for w, k, q, n in BANDS}}
         rows[str(c)] = {
             "strata": {"na_off_decode": round(s_off, 2), "na_mtp_decode": round(s_mtp, 2), "accepted_per_pass":
                        round(accepted, 3), "def_off_decode": round(d_off, 2), "def_mtp_decode": round(d_mtp, 2),
@@ -223,7 +235,10 @@ def main() -> None:
                       "union_experts_per_layer_per_pass": round(union, 2), "non_lendable_peak_kb": a.peak_kb,
                       "phase_factors": F, "prefill_stream_gbps": PCIE_STREAM},
            "rows": rows, "bars": {"decode": 1.0, "prefill": 0.9},
-           "rows_below_bar_central": below}
+           "rows_below_bar_central": below,
+           "rows_below_bar_at_24_launches": sorted({f"{c} {r}" for c, row in rows.items()
+                                                    for r, v in row["ratios"].items()
+                                                    if "launches_24" in v and v["launches_24"] < 1.0})}
     pathlib.Path(a.out).write_text(json.dumps(rec, indent=1) + "\n")
     print(json.dumps({c: {r: v["central"] for r, v in row["ratios"].items()} for c, row in rows.items()}, indent=1))
     print("below their bar (central):", below)

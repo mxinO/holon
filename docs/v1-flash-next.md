@@ -1134,39 +1134,47 @@ docstring). Rev 2 takes panel C's review of the step-0 evidence (below):
   - the PCIe streaming bound of a step's routed non-resident experts;
   - q8_0 KV gaining Strata's own int8 gain in the defaults rows (`qsa_attend@1` reads q8_0 in-kernel, §5);
   - **rev 3 adds the MTP head's own cost** over each pass's verify rows: 0.275 ms (panel C: 0.25–0.3).
-  - **rev 4 (step 4, panel C-m3) replaces the QSA guess** (0.24 ms per pass beyond 2,051 tokens) with the measured
+  - **rev 4 (step 4, panel C) replaces the QSA guess** (0.24 ms per pass beyond 2,051 tokens) with the measured
     selection + sparse attention of the 12 QSA layers: per layer 41.7 / 44.0 µs for a decode row at 4K / 32K and
-    56.7 / 65.9 µs for a 4-row verify pass (RTX A5000, real indexer inputs, cold caches; §14), carried to the 50-series
-    as is: 0.50 / 0.53 ms per decode token, 0.68 / 0.79 ms per pass.
+    56.7 / 65.9 µs for a 4-row verify pass (RTX A5000, real indexer inputs, cold caches; §14), scaled to the
+    50-series by ×0.67 [0.55, 0.85] (their clocks and bandwidth): ≈ 0.34 / 0.35 ms per decode token, 0.46 / 0.53 ms
+    per pass.
+  - **rev 4 carries a launch band.** The overhead is scaled to 16 launches per layer (step 7's gate); each decode cell
+    is also given at 24, today's projection for a full layer (§14's launch table). The fusions that close the gap
+    have owners (§14).
 - **Bars: decode 1.0×, prefill 0.9×** (acceptance 5). Rev 2's table measured every cell against 0.9×; that is
   corrected here.
-- **Holon / Strata, central [band] (rev 4, step 4's measured QSA term; supersedes revs 1–3).**
+- **Holon / Strata, central [band] → at 24 launches per layer (rev 4; supersedes revs 1–3).** The central and band
+  assume step 7's 16 launches; the arrow gives the central at 24.
 
 | Gated row (bar) | RTX 5080: 1K · 4K · 32K | RTX 5090: 1K · 4K · 32K |
 |---|---|---|
-| no-approx, drafting off, decode (1.0×) | 1.03 · **0.99** · 1.05 [0.93–1.13] | 1.13 · 1.09 · 1.14 [1.00–1.26] |
-| no-approx, MTP-matched, decode (1.0×) | **0.89 · 0.89** · 1.05 [0.86–1.09] | **0.97** · 1.01 · 1.02 [0.92–1.07] |
+| no-approx, drafting off, decode (1.0×) | 1.03 · 1.01 · 1.07 [0.93–1.16] → **0.92 · 0.90 · 0.96** | 1.13 · 1.12 · 1.17 [1.01–1.30] → **0.96 · 0.96** · 1.00 |
+| no-approx, MTP-matched, decode (1.0×) | **0.89 · 0.90** · 1.06 [0.86–1.11] → **0.84 · 0.85** · 1.01 | **0.97** · 1.02 · 1.03 [0.92–1.09] → **0.89 · 0.94 · 0.95** |
 | no-approx, prefill (0.9×) | 1.19 · 0.99 · 0.93 [0.73–1.36] | 1.05 · 1.03 · 0.97 [0.76–1.18] |
-| *RTX 5080 at step 7's memory target:* drafting off · MTP-matched decode | 1.06 · 1.01 · 1.08 · **0.93 · 0.94** · 1.11 | — |
+| *RTX 5080 at step 7's memory target:* drafting off · MTP-matched decode | 1.06 · 1.03 · 1.10 · **0.93 · 0.95** · 1.12 → 0.94 · 0.92 · 0.98 · 0.88 · 0.89 · 1.06 | — |
 
 | Report-only row (lead's recommendation, owner item) | RTX 5080 | RTX 5090 |
 |---|---|---|
 | defaults vs Holon + A1, drafting off, decode | as no-approx | as no-approx |
-| defaults vs Holon + A1, MTP, decode | 0.84 · 0.82 · 0.91 | 0.95 · 0.90 · 1.00 |
+| defaults vs Holon + A1, MTP, decode | 0.84 · 0.83 · 0.92 | 0.95 · 0.91 · 1.02 |
 | defaults vs Holon + A1, prefill | 1.25 · 1.01 · 0.93 | 1.14 · 1.18 · 0.97 |
 
-- **Gated cells predicted to miss their bar (central):**
-  - **RTX 5080 MTP-matched decode at 1K and 4K** (0.89, 0.89). They still miss at step 7's memory target (0.93,
-    0.94).
-  - **RTX 5080 drafting-off decode at 4K** (0.99; rev 4, from the measured QSA term). It clears at step 7's memory
-    target (1.01).
+- **Gated cells predicted to miss their bar (central, 16 launches):**
+  - **RTX 5080 MTP-matched decode at 1K and 4K** (0.89, 0.90). They still miss at step 7's memory target (0.93,
+    0.95).
   - **RTX 5090 MTP-matched decode at 1K** (0.97).
+  - The 5080's 4K drafting-off decode is 1.005. Rev 4's first cut put it at 0.99: an artifact of carrying the
+    A5000's QSA times to the 5080 unscaled.
   - Per D11, these go to the owner when they are measured.
   - Every prefill cell clears 0.9× at the center.
+- **At 24 launches per layer** (today's projection), every drafting-off decode cell of the RTX 5080 misses (0.92 /
+  0.90 / 0.96) and the 5090's 1K / 4K do (0.96 / 0.96); its MTP cells miss at every length. Step 7's ≤ 16 gate and
+  the named fusions (§14) are what keep these cells at their central values.
 - **Model error.** Cells within a few percent of their bar (rev 2's 0.896 / 0.899; here the 5080's 4K drafting-off
-  decode at 0.99 and 32K prefill at 0.93, and the 5090's 1K MTP at 0.97) sit inside the model's error band. They are
-  re-predicted after step 7 from measured costs. The QSA term is the A5000's: the 50-series' bandwidth and clocks
-  should lower it, and step 7 measures it there.
+  decode at 1.005 and 32K prefill at 0.93, and the 5090's 1K MTP at 0.97) sit inside the model's error band. They are
+  re-predicted after step 7 from measured costs; the QSA term and its scale are measured on the 50-series in the
+  cluster session.
 - **Levers on the MTP decode cells beyond memory** (panel C; candidates, not commitments):
   - **F5b's CPU split in the RTX 5080 lock.** Lead decision 5 allows it once the judge's path-aware floor passes; it
     is a step 6–7 candidate.
@@ -1294,10 +1302,12 @@ core edits.
 
 **What landed:**
 - Op contracts with their oracles (`reference.py`) and CPU providers (`testing.ref_kernels`):
-  - `std.hyper`: `hc_gr_mix@1` (a pending combine rides along), `hc_gr_combine@1`. They are named for the
-    gated-residual form, so GLM's mHC adds siblings.
+  - `std.hyper`: `hc_gr_mix@1` (a block's attention-half combine rides in its FFN-half mix), `hc_gr_combine@1`.
+    R is complete at every block boundary (the contract): the trunk, taps, C1's consumers, drafters and the output
+    mixer never see a pending combine. They are named for the gated-residual form, so GLM's mHC adds siblings.
   - `std.mixers.qsa`: `qsa_index@1`, `qsa_select@1` (shape-invariant), `qsa_attend@1` (every gqa layout read in the
-    kernel, q8_0 included; the output gate applied at the store).
+    kernel, q8_0 included; the output gate applied at the store). Precondition: each sequence's tokens are
+    consecutive rows in position order.
   - `models.qwen4_exp`: `qwen4_exp.ple_rows@1`, `qwen4_exp.ple_block@1` (contracts and oracles only; numerics
     undeclared, as the other model plugins).
   - GDN: `gated_rmsnorm`'s `out_gate` fact.
@@ -1311,15 +1321,17 @@ core edits.
   block (dilation 3); the indexer's mask under D2's tie rule, with ties occurring; the attention under that mask.
 - L0 on the RTX A5000 (`test_qsa_kernels.py`, `test_hc_ple_kernels.py`):
   - HC mix within `l0` (bf16 / f32 over n·H terms) at 0–77 tokens, with and without inject (f32 beside bf16 `down`)
-    and a pending combine; the residual it leaves bitwise what `hc_gr_combine` leaves;
+    and a pending combine; the residual it leaves bitwise what `hc_gr_combine` leaves; a whole block as the unit
+    runs it (R complete on return) within `l0` of the oracle's block;
   - PLE rows bitwise; the PLE block within `l0(f32, H)`, plus acceptance 2's GPU unit test (chunked and 1-token steps
     bitwise one shot; replay rewind waits for C2);
-  - `qsa_index` in one launch (raw keys bitwise, pooled within `l0`, blocks completed across and within calls);
+  - `qsa_index` in one launch (raw keys bitwise, pooled within `l0`, blocks completed across and within calls; k in
+    bf16 and in f32, pooled as raw stores it);
   - `qsa_select` exactly equal to the oracle on tie-heavy keys (a boundary tie at ReLU's 0.0 asserted), a valid top-k
     on continuous keys, 8,192 and 8,195 blocks; shape-invariant (a query's scores and selection bitwise alone and in a
     128-row call); sub-batching bit-neutral;
-  - `qsa_attend` within the attention budget for bf16 / fp16 / q8_0 (fp8 from sm_89), gated and not, at 32, 8, 4 and 1
-    splits; the plant "the open block reads p + 1" fails.
+  - `qsa_attend` within the attention budget for bf16 / fp16 / q8_0 (fp8 from sm_89), gated and not (NaN gates on
+    padding rows still give 0), at 32, 8, 4 and 1 splits; the plant "the open block reads p + 1" fails.
 - Memcheck is clean (`tests.memcheck_fn_kernels`).
 - GDN's silu path is bitwise main's: a Qwen3.8-27B UD-IQ3_S snapshot (the v1-qwen3_5 trace, 354 steps, fixed pools)
   is byte-identical to main's GDN code, and the kernel's silu outputs equal main's on 25M elements.
@@ -1335,21 +1347,29 @@ core edits.
   dropped (m2): 2 bits a round (3 thresholds packed in one reduction; 16.8 against 14.0 µs on real scores), skipping
   the leading bits a lower and an upper bound share (no gain on real scores, slower on synthetic ones), Triton's
   `tl.histogram` and `tl.topk`. A CUDA radix select stays a step-7 contingency.
-- **Attend:** split by shape alone (32 ways for decode, none for prefill). Merging in the last split to finish (M1)
-  saved a launch but cost 24 µs at decode (one program reads every split serially): rejected. The output gate rides in
-  the store instead, which saves gqa's two gate launches.
+- **Attend:** split by shape alone (32 ways for decode, none for prefill). The variant measured for M1 — the last
+  split to finish merging every split of its kv head's 12 query heads itself, serially — saved a launch but cost 24 µs
+  at decode: that variant is rejected (a merge spread over more programs was not tried). The output gate rides in the
+  store instead, which saves gqa's two gate launches.
 
 **Launches per layer (decode).** Step 4's kernels, counted by the profiler at a decode shape. The rest of the layer
 (projections, q / k norms and rope with the KV write, o_proj, the MoE's router, top-k, experts and shared expert, and
-GDN's conv / rule / norm on the GDN layers) is today's units, counted at step 5 when the unit runs; the panel's estimate
-for the whole layer was ≈ 24–30 before these changes. ≤ 16 is a step-7 gate (acceptance 3).
+GDN's conv / rule / norm on the GDN layers) is today's units, counted at step 5 when the unit runs. Full layers project
+to ≈ 20–24 launches (panel C); N3 carries a 16–24 band (§13, rev 4), and ≤ 16 is a step-7 gate (acceptance 3).
 
 | Piece | Before (2a761fb) | Now |
 |---|---|---|
-| HC: two mixes, two combines | 10 (rstd, cat, down, up ×2; combine ×2) | 4 (down, up ×2; each combine rides in the next mix) |
+| HC: two mixes, two combines | 10 (rstd, cat, down, up ×2; combine ×2) | 5 (down, up ×2; the attention half's combine rides in the FFN half's mix; the block's last combine before it returns) |
 | QSA: index · select · attend · output gate | 2 · 3 (with a fill) · 2 · 2 (gqa's sigmoid, mul) | 1 · 2 · 2 (1 for prefill) · 0 |
 | PLE (layer 1 only): rows · block | 2 · 3 | 2 · 3 |
-| Step 4's share of a QSA layer | 19 | 9 |
+| Step 4's share of a QSA layer | 19 | 10 |
+
+The fusions that close 20–24 → 16, with owners:
+- **FN, step 7:** GDN's fused input projection; the block's last HC combine folded into the MoE combine's epilogue,
+  within the same block only (R complete on return: the trunk contract); router and top-k in one launch.
+- **FN, step 7, after the MoE prefill track has landed:** the shared expert run as an extra expert slot in the routed
+  calls. It edits `kernels.ggml_cuda`, so it goes through the MoE prefill track's ownership rules and FN's own
+  propagation.
 
 **QSA latency** (`evidence/fn4_qsa_rtx-a5000_2026-10-19.json`, `..._4k_...`; `bench/fn_kernels.py`): CUDA-graph replay
 on N4's real indexer inputs (layer 3 of `recall-32k`, 31,878 tokens, 7,969 blocks; layer 7 within 1.5 µs), every
@@ -1357,16 +1377,19 @@ per-layer buffer in 24 copies (1.6 GB) so no call finds its keys in L2; `qsa_att
 
 | Query rows | `qsa_select`, one sequence | one per sequence | `qsa_attend`, one sequence |
 |---|---|---|---|
-| 1 | 25.3 µs | — | 18.7 µs |
-| 2 | 27.3 µs | 45.2 µs | 22.5 µs |
-| **4 (the target's shape)** | **28.8 µs** | 57.4 µs | 37.1 µs |
-| 8 (reported) | 31.9 µs | 95.5 µs | 48.4 µs |
+| 1 | 25.3 µs | — | 18.6 µs |
+| 2 | 27.3 µs | 45.1 µs | 22.5 µs |
+| **4 (the target's shape)** | **28.8 µs** | 57.5 µs | 37.1 µs |
+| 8 (reported) | 32.5 µs | 95.6 µs | 48.5 µs |
 | 1 / 4 at 4K (1,024 blocks) | 23.4 / 22.2 µs | — | 18.2 / 34.5 µs |
+| 512 (a prefill sub-batch) | 1,041 µs | — | 2,610 µs |
 
 - **Target: ≤ 20 µs at 4 rows of one sequence on the RTX 5080** (restated, acceptance 3); not yet measured there. On
   the A5000 it is 28.8 µs: the top-k's ≈ 14–17 µs (31 dependent block reductions at ≈ 0.45 µs) and ≈ 10 µs of scores.
-  The 5080's clocks (≈ 1.5×) and bandwidth (1.25×) put it near 19–20 µs: tight. The contingency is a CUDA radix
-  top-k, then the score epilogue narrowing the top bits.
+  N3 scales the QSA term to the 5080 by ×0.67 [0.55, 0.85] (its clocks and bandwidth), which puts this near 19–20 µs:
+  tight. To measure in the cluster session: a fixed 32-block score tile (more programs per row; still one tile for
+  every shape, so still shape-invariant). The contingency is a CUDA radix top-k, then the score epilogue narrowing the
+  top bits.
 - **N3** now uses these numbers for its QSA term (§13, rev 4).
 
 **The panel's review of 5b2576f and 2a761fb, dispositions:**
@@ -1378,11 +1401,18 @@ per-layer buffer in 24 copies (1.6 GB) so no call finds its keys in L2; `qsa_att
 | B-2 | A 0.0 tie; an attend mutation | **Done.** `test_select_ties` asserts a boundary tie at 0.0 (a zero key for 85% of blocks); the plant "open block reads p + 1" fails `test_attend`. |
 | B-3 | inject / down dtypes | **Fixed.** Each weight is read in float32 (no cast of inject to down's dtype); the L0 uses an f32 inject beside a bf16 down. |
 | B-4 | The fp16 comment | **Reworded** as triton_attn's. |
-| C-M1 | Launches | **Done in part.** `_rstd` folds into `_down`, the combine into the next mix (HC: 2 per half), `_write_raw` + `_pool` into `_index`. The merge-in-attend fusion was measured (+24 µs at decode) and rejected; the output gate folds into the attend's store instead (same count). Table above; ≤ 16 is a step-7 gate. |
+| C-M1 | Launches | **Done in part.** `_rstd` folds into `_down`, the attention half's combine into the FFN half's mix (5 HC launches per layer, after A's major), `_write_raw` + `_pool` into `_index`. The serial last-split merge variant was measured (+24 µs at decode) and rejected; the output gate folds into the attend's store instead (same count). Table above; ≤ 16 is a step-7 gate. |
 | C-M2 | Key reads per tile | **Measured, not adopted:** three row-grouped forms, none faster from 2 to 512 rows on sm_86 (above). Shape invariance holds. |
 | C-m1 | Measurement | **Done:** 24 copies of every per-layer buffer (1.6 GB) and real indexer q / k from N4's oracle run (`spikes/fn0/n4_oracle.py --capture`). |
 | C-m2 | Top-k variants | **Measured, dropped** (above). The CUDA radix top-k stays a step-7 contingency. |
 | C-m3 | N3's QSA term | **Done:** rev 4 of §13. One more gated cell is predicted to miss: the RTX 5080's 4K drafting-off decode (0.99; 1.01 at step 7's memory target). |
 | C | Acceptance 3's target | **Restated:** ≤ 20 µs at 4 rows of one sequence; 8 rows reported, not gated. |
+| A (major, round 2) | A layer's last combine carried into the next layer's mix (and the output mixer) left R incomplete at block boundaries: taps, C1, the MTP head and `_logits`' copy-or-not would see or double-apply it | **Fixed** (lead decision): fusion within a block only. The contract states R is complete at every block boundary; the attention half's combine rides in the FFN half's mix and the block applies its last combine before returning (5 HC launches per layer). A test runs a whole block that way against the oracle's. |
+| A-minor (round 2) | `w` both an input and an output | **Renamed** `y_prev`, `w_prev`; the contract states `w_prev` is only read and the returned `w` is always a new tensor, so they never alias. |
+| B-1 (round 2) | Fused `qsa_index`: in-call k in k's dtype; an unstated precondition | **Fixed:** in-call k reads are cast to raw's dtype before the mean (tested with f32 k and bf16 raw); the contract states that each sequence's tokens are consecutive rows in position order. |
+| B-2 (round 2) | `_merge`: a NaN gate on a padding row gives NaN | **Fixed:** the gate multiply is masked by `total > 0`; the test puts NaN in padding rows' gates and expects 0. |
+| C (major, round 2) | Launch budget: full layers ≈ 20–24, not 16 | **Done:** N3 carries a 16–24 band (§13 rev 4: the 24-launch centrals), and the closing fusions are named with owners (above). |
+| C (round 2) | The QSA term on the 5080 | **Done:** ×0.67 [0.55, 0.85]; rev 4's first-cut 0.99 for the 5080's 4K drafting-off decode was an artifact of the unscaled A5000 input (now 1.005). |
+| C (round 2) | A fixed 32-block score tile; 512 rows; the merge wording | **Done:** the tile is a cluster-session measurement; select at 512 rows recorded (1.04 ms); "rejected" scoped to the serial last-split variant. |
 | A-1 | PLE's kernels | **Moved** to `kernels.ple_triton` (cuda, `bounded`); the model plugin keeps the contracts and oracles, numerics undeclared. |
 | A-2 | Model constants in std | **Removed** (`RATIO`, `BUDGET`, `SUB_BATCH`). |
