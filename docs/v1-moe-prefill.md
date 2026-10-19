@@ -5,7 +5,9 @@ decision rule; C-M6's fallback is taken (J against T up to 16 tokens; 64 on sm_8
 keep rule on both lock classes** and is reverted (§10 L3-1); steps 3b / 3c's 0.1–0.3% prefill cost is gone (L3-2: the
 id workspace at `pass_rows` again). **Step 3d:** D3′ (the router per pass) is kept: it passes M0.7's rule on the 5090's
 32K row and the 5080's 4K row (not on every row). The 5090 4K row stays under its bar with every item (O2, with the
-owner); the sm_89 record is a gate before step 5 (§10 L3-4).
+owner); the sm_89 record is a gate before step 5 (§10 L3-4). **Step 4:** every prefill bar is met in one session
+(5090 4K 1.008×, 32K 1.016× gated; 5080 4K 1.141×, 32K 1.006× gated); the 5080 offload lock's 4K decode row misses
+acceptance 5's tolerance by 0.05 pp (§7.1).
 - Rev 2 answered the three-lens panel's first round (A correctness, B architecture, C performance: 3 blockers, 19
   majors, 23 minors).
 - Rev 3 answered its second round and took in FN's requests.
@@ -912,6 +914,60 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
   interleaved runs each on the shared host): main 387.5 / 331.6 s (278 tests), the integrated tree 383.9 / 371.5 s
   (331 tests: the two new types, D2–D4's and 3b's tests). ≈ +5% at the medians, inside the host's run-to-run spread
   (56 s on main).
+
+**Step 4 (the bars, 2026-10-19).** Records: `evidence/mp4_bars_rtx-5090_2026-10-19.json`,
+`evidence/mp4_bars_rtx-5080_2026-10-19.json`. The step-4 tree is `22717b3` (the code of `fed13f1`: D0–D2, D3′, D4, D5,
+D9–D11 and the panels' fixes); main is `b5b1e7f`.
+- **Method** (§5.2): one engine process per arm and round; an untimed warm-up over the set's shapes on prompts of its
+  own; the fixed prompt set (5 / 5 / 3 at 1K / 4K / 32K); 6 balanced rounds (ABCD, DCBA, …) of main, the step-4 tree,
+  FreeToken default and FreeToken gated, all in one session; 60 s idle between arms; each arm's SM clock sampled while
+  busy; real round indices. Step 0's desktops: the 5090 session held p50 2,587–2,647 MHz (step 0: 2,632–2,647; arms
+  2,775–2,820 under load), the 5080 2,760 (step 0: 2,760). No gated or Holon arm drifted more than 0.74% across rounds.
+  One repetition was flagged (FreeToken default, 5090, 1K, round 0, prompt 1: 83 ms); its round was re-run and the
+  repetition flagged again (208 ms): reported with the flag, on a reported row. FreeToken default's 5080 4K arm drifted
+  1.05% across rounds (a reported row; the gated arms ≤ 0.29%).
+- **The bars** (time to the first token; the step-4 tree's speed over the reference: median of 6 round geomeans, sd
+  over rounds; "median paired" is the median of all paired ratios):
+
+  | Row (bar) | Step-4 tree, ms | Reference, ms | Ratio (sd) | Median paired | Bar |
+  |---|---|---|---|---|---|
+  | 5090 resident 1K vs FreeToken gated (≥ 0.95×) | 50.7 | 50.6 | 1.029 (0.002) | 1.000 | **met** |
+  | 5090 resident 4K vs FreeToken gated (≥ 1.0×) | 170.4 | 171.7 | **1.008** (0.001) | 1.008 | **met** (by > 2 sd) |
+  | 5090 resident 32K vs FreeToken gated (≥ 1.0×) | 3,178 | 3,227 | **1.016** (0.001) | 1.017 | **met** |
+  | 5090 resident 32K vs FreeToken default (reported) | 3,178 | 3,019 | 0.950 (0.003) | 0.950 | — |
+  | 5080 natural fit 1K vs FreeToken gated (≥ 1.5×) | 205.1 | 376.2 | 1.863 (0.010) | 1.836 | **met** |
+  | 5080 natural fit 4K vs FreeToken gated (≥ 1.0×) | 333.2 | 380.2 | **1.141** (0.001) | 1.141 | **met** |
+  | 5080 natural fit 32K vs FreeToken gated (≥ 1.0×) | 6,241 | 6,277 | **1.006** (0.000) | 1.006 | **met** |
+  | 5080 natural fit 32K vs FreeToken default (reported; the 0.88× reference) | 6,241 | 5,988 | 0.960 (0.000) | 0.960 | — |
+
+  - Against main: 5090 1.599 / 2.011 / 1.424× at 1K / 4K / 32K; 5080 (main's lock against the re-fill) 1.025 /
+    1.226 / 1.097×.
+  - The 5080 arms ran at their pins: main at its lock's 3,236 / 1,618 / 1,618, the step-4 tree at the re-fill
+    3,229 / 1,700 / 1,529 (its natural fill at the lock's settings, §10 step 3d). FreeToken at its natural share,
+    0.527.
+- **llama.cpp rows** (`spikes/x4_gap/ctx.py`, the x4 gate's method, 3 rounds; prefill tokens/s ratios):
+  - 5090 resident against llama-server resident: 1.78 / 2.36 / 1.45× (≥ 1.0×: **met**).
+  - 5080 natural fit against llama.cpp's four offload configurations (`--fit`, `--n-cpu-moe 16`, `--moe-cache-mib`
+    mmap and pinned): 2.51–3.64× at 1K, 7.07–12.0× at 4K, 3.27–5.07× at 32K (≥ 2.1×: **met**; the least is the
+    pinned cache at 1K).
+- **Decode** (acceptance 5, ≤ max(0.5%, 2 sd)):
+  - 5090, `holon_tg` (4 alternating rounds, tokens/s over main's): batch 1 at depth 1,024 1.0019×, at 4,096 0.9976×
+    (sd 0.0003): within; batch 16 / 32 / 64 at 1,024: 1.020 / 1.022 / 1.054×.
+  - 5080 offload, the re-filled lock against main's lock (`ctx.py`, 256 decode tokens, 3 rounds; repeated in a
+    second session): 1.0065 / **0.9942** / 1.0028× at 1K / 4K / 32K (second session 1.0062 / 0.9945 / 1.0029). **The
+    4K row misses the tolerance by 0.05 pp** (sd < 0.001). The re-fill's down split is not the cause: at main's split
+    (3,229 / 1,618 / 1,618) the row is 0.9891×. The 5090's resident batch-1 row at 4K (0.9976×) suggests a small
+    decode cost at that depth in the code, not the lock: for the lead.
+- **Memory** (acceptance 6):
+  - startup KV, main → the step-4 tree: 5090 resident (33,792, one seat) 122,528 → 121,184 tokens; 5080 offload lock
+    33,792 → 33,808; the 16 GB lock 18,752 (step 0) → 18,416 (≥ its 16,384).
+  - The 16 GB soak (UD-IQ3_XXS at its lock's flags; 6 rounds of a 16,000-token prompt, then 32 seats of 512-token
+    prompts decoding 128 tokens): no OOM; `num_alloc_retries` 0 every round; device allocations 4 in the first round,
+    0 after; the least free device memory 192 MiB; allocation peak 14.13 GiB. `ggml_cuda.pass_rows` stays at the
+    class's 2,048 (no retries).
+  - Allocator counters zero in steady state on every timed prompt of every Holon arm, both cards.
+- **sm_89:** still blocked (every 4090 we can reach is held by other jobs or in maintenance);
+  the gate before step 5 (§10 L3-4) is unrun.
 
 **Step 3b (D10, D11).**
 - **What landed.**
