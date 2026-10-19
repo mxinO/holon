@@ -225,6 +225,8 @@ def test_the_policies_plants_fail_bounded(tiny_hybrid, plant, broken):
         report = bounded.compare_configs(build, configs, trace, k=5)
     assert {name for name, r in report["results"].items() if not r["passed"]} == broken, bounded.table(report)
     assert fired["fired"] > 0
+    waves = report["results"]["baseline"]["kl"]["by_wave"]           # the late sessions' KL reported apart
+    assert set(waves) == {"first", "late"} and all(w["n"] > 0 and w["p99"] >= w["p50"] for w in waves.values())
 
 
 def test_a_branch_checkpoint_resumes_bitwise_as_recomputed_with_equal_chunks(tiny_hybrid):

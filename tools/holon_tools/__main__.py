@@ -131,6 +131,8 @@ def _tune(a: argparse.Namespace) -> int:
     store = engine.ctx.shared_objects.get("std.moe.offload")
     misses = store and store.top_k * base.max_seqs * (1 + base.max_draft_tokens)   # a graphed pass's most
     isa = engine.ctx.fingerprint.cpu_isa
+    page_unit = max((p.unit_bytes for p in engine.ledger.pools.values() if p.tokens_per_unit and not p.host),
+                    default=0)                       # the SSD level's I/O unit: a page, unit-major (D10)
     engine.close()
     del engine, store
     record = {}
@@ -151,7 +153,7 @@ def _tune(a: argparse.Namespace) -> int:
 
     if a.ssd_rates:                                  # this host's drive (D4): the level's clock rates
         threads = int(base.plugin_options.get("state_tier.io_threads", 3))
-        got = record["ssd_rates"] = tune.ssd_rates(a.ssd_rates, threads)
+        got = record["ssd_rates"] = tune.ssd_rates(a.ssd_rates, a.ssd_unit or page_unit, threads)
         rates = {f"state_tier.ssd.{k}": f"{got[k]:.4g}" for k in ("read", "write", "mixed", "read_beside")}
         print("ssd rates: " + ", ".join(f"{k} {v}" for k, v in rates.items()) + f" (O_DIRECT {got['o_direct']})")
         if base.plugin_options.get("state_tier.levels") == "ssd":
@@ -225,6 +227,8 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--ssd-rates", metavar="DIR",
                            help="measure the SSD level's rates on the drive under DIR (taken into the lock when the "
                                 "engine flags bind the level, state_tier.levels=ssd)")
+            p.add_argument("--ssd-unit", type=int, help="the I/O unit of --ssd-rates, bytes (default: the engine's "
+                           "largest page unit)")
             p.add_argument("--no-lock", action="store_true", help="measure and report only; write no lock")
             p.add_argument("--json", help="write the measured rates here")
 

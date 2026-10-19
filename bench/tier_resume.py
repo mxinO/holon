@@ -48,6 +48,8 @@ from run import lock_flags, read_lock
 LINK = 47.5e9                     # X's M1 blob rate (the bars' H2D link rate, C6)
 SSD_RATE = 2.68e9                 # K-M4's large-block O_DIRECT read rate on the RTX 5080's drive (C6)
 APPEND = 256
+COUNTS = ("gated_steps", "gated_loads", "load_enqueue_wait_s", "level_reads", "level_read_bytes", "write_backs",
+          "write_back_bytes")                    # the tier's counts per resume (3a)
 GREEDY = SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True)
 
 
@@ -177,10 +179,11 @@ def cell_3a(b: Bench, args, sampler: Sampler) -> dict:
                 if arm == "ssd":
                     b.down()
                 before, t0 = len(b.loads), time.time()
-                reads0 = b.tier.counts["level_read_bytes"]
+                counts0 = dict(b.tier.counts)
                 ttft, cached = b.resume(prompt)
+                tier = {k: b.tier.counts[k] - counts0.get(k, 0) for k in COUNTS}   # the resume's own (C-1)
                 row = {"round": r, "order": "abc" if r % 2 == 0 else "cba", "ttft_ms": ttft, "cached": cached,
-                       "loads": b.loads[before:], "level_read_bytes": b.tier.counts["level_read_bytes"] - reads0,
+                       "loads": b.loads[before:], "level_read_bytes": tier["level_read_bytes"], "tier": tier,
                        "clocks": sampler.summary(t0, time.time())}
                 if r >= 0:
                     rows[arm].append(row)
@@ -193,7 +196,9 @@ def cell_3a(b: Bench, args, sampler: Sampler) -> dict:
                 "ssd": med["vram"] + 1.5 * (ssd / args.ssd_rate + ssd / LINK) * 1e3 + args.step_ms}
         out["lengths"][n] = {"kv_bytes": kv, "ssd_bytes": ssd, "median_ttft_ms": med, "p90_ttft_ms": {
             a: pct([x["ttft_ms"] for x in rows[a]], 0.9) for a in arms}, "bars_ms": bars,
-            "pass": {a: med[a] <= bars[a] for a in bars}, "rows": rows}
+            "pass": {a: med[a] <= bars[a] for a in bars},
+            "tier_median": {a: {k: statistics.median(x["tier"][k] for x in rows[a]) for k in COUNTS} for a in arms},
+            "rows": rows}
         log(f"3a {n}: median VRAM {med['vram']:.1f}, RAM {med['ram']:.1f} (bar {bars['ram']:.1f}), SSD "
             f"{med['ssd']:.1f} (bar {bars['ssd']:.1f})")
     return out
@@ -204,19 +209,25 @@ def cell_3f(args, sampler: Sampler) -> dict:
     root = pathlib.Path(args.ssd_dir)
     params = SamplingParams(temperature=0.0, max_tokens=16, ignore_eos=True)
 
-    def history(b: Bench) -> tuple[list[int], list[int]]:
+    def history(b: Bench) -> list[tuple[list[int], list[int]]]:
         prompts = [b.park(16384) for _ in range(args.reps)]
         b.demote()
         b.down()
-        return prompts[-1], b.tokens(APPEND)
+        return [(p, b.tokens(APPEND)) for p in prompts[-args.resumes:]]
+
+    def resumes(b: Bench) -> tuple[list[float], list[int], list[list[int]]]:
+        got = []
+        for prompt, append in convs:                         # each from the level, in the same order
+            ttft, cached = b.resume(prompt, append, params)
+            got.append((ttft, cached, b.output))
+        return [g[0] for g in got], [g[1] for g in got], [g[2] for g in got]
     a = Bench(args, str(root / "a"), "close")
-    prompt, append = history(a)
-    ttft_a, cached_a = a.resume(prompt, append, params)
-    out_a = a.output
+    convs = history(a)
+    ttft_a, cached_a, out_a = resumes(a)
     pools = [a.pools()]
     a.close()
     b = Bench(args, str(root / "b"), "close")
-    assert history(b) == (prompt, append), "the parking history differs"
+    assert history(b) == convs, "the parking history differs"
     persisted = b.tier.counts["write_back_bytes"]
     pools.append(b.pools())
     b.close()
@@ -248,19 +259,21 @@ def cell_3f(args, sampler: Sampler) -> dict:
     restored = b2.tier.counts["restored_blocks"]
     pools.append(b2.pools())
     restored_payloads = sum(s is not None for _, s in b2.tier.low)
-    ttft_b, cached_b = b2.resume(prompt, append, params)
-    out_b = b2.output
+    ttft_b, cached_b, out_b = resumes(b2)
     b2.level_reads = b2.tier.counts["level_read_bytes"]
     b2.engine.tier.level.persist = "off"                    # no snapshot of the measured run
     ssd = 16384 * args.kv_bytes_per_token + sum(p.unit_bytes for k, p in b2.tier.dev.items() if k not in b2.tier.pages)
     b2.close()
     bar = args.vram_ms + 1.5 * (ssd / args.ssd_rate + ssd / LINK) * 1e3 + args.step_ms
-    return {"ttft_ms": {"no_restart": ttft_a, "restarted": ttft_b}, "cached": {"no_restart": cached_a,
-            "restarted": cached_b}, "outputs_identical": out_a == out_b, "restored_blocks": restored,
+    med_b = statistics.median(ttft_b)
+    return {"resumes": len(convs), "ttft_ms": {"no_restart": ttft_a, "restarted": ttft_b},
+            "median_ttft_ms": {"no_restart": statistics.median(ttft_a), "restarted": med_b},
+            "cached": {"no_restart": cached_a, "restarted": cached_b}, "outputs_identical": out_a == out_b,
+            "restored_blocks": restored,
             "restored_payloads": restored_payloads, "device_pools": pools,
             "startup_s": startup, "restart_parts_s": spent, "persisted_bytes": persisted,
             "restore_s_per_persisted_gb": spent.get("SsdLevel.restore", 0) / (persisted / 1e9), "bar_ms": bar,
-            "pass": ttft_b <= bar and out_a == out_b and cached_a == cached_b}
+            "pass": med_b <= bar and out_a == out_b and cached_a == cached_b}
 
 
 def cell_3b(b: Bench, args, sampler: Sampler) -> dict:
@@ -348,6 +361,7 @@ def main() -> None:
     ap.add_argument("--ssd", action="store_true", help="3b: resume from the SSD level (3b-SSD)")
     ap.add_argument("--lengths", type=int, nargs="+", default=[4096, 16384, 32768])
     ap.add_argument("--reps", type=int, default=10)
+    ap.add_argument("--resumes", type=int, default=5, help="3f: parked conversations each engine resumes (median)")
     ap.add_argument("--rounds", type=int, default=3)
     ap.add_argument("--beside", action="store_true", help="3a: three sessions decoding during the resumes")
     ap.add_argument("--step-ms", type=float, required=True, help="one decode step at the lock's settings (§8)")

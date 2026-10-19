@@ -152,10 +152,12 @@ def clock(samples: list[tuple[int, int, float]]) -> tuple[float, float, float]:
     return tuple(max(0.0, float(v)) for v in np.linalg.lstsq(x / y[:, None], np.ones_like(y), rcond=None)[0])
 
 
-def ssd_rates(directory: str, threads: int = 3, seconds: float = 6.0, gib: int = 16, unit: int = 557_056) -> dict:
+def ssd_rates(directory: str, unit: int, threads: int = 3, seconds: float = 6.0, write_seconds: float = 60.0,
+              gib: int = 16) -> dict:
     """The SSD level's rates on the drive under `directory` (files made and removed there), through
-    `std.state_tier`'s `IoThreads` over its `SsdLevel` (`threads` deep, O_DIRECT units of `unit` bytes, a 27B q8_0
-    page), after a fill one write at a time: `read`, reads alone; `write`, writes alone for 2 × `seconds`; then reads
+    `std.state_tier`'s `IoThreads` over its `SsdLevel` (`threads` deep, O_DIRECT units of `unit` bytes: the engine's
+    page unit), after a fill one write at a time: `read`, reads alone; `write`, sustained: writes alone for
+    `write_seconds`, past the drive's write cache, the rate over the last half; then reads
     and background writes for `seconds` at a 50% read share, half the reads after an urgent write: `mixed` (the bytes
     moved over D4's serial-lane model from the pure rates) and `read_beside` (the reads' rate over the pure read
     rate at their share). Bytes per second, and the windows."""
@@ -213,7 +215,8 @@ def ssd_rates(directory: str, threads: int = 3, seconds: float = 6.0, gib: int =
             write().ticket.wait()
         fill = {"seconds": time.perf_counter() - start, "bytes": {"write": min(slots // 2, 4000) * unit}}
         r = window(seconds, 1.0)                            # reads first: not behind a burst of writes
-        w = window(2 * seconds, None)
+        w0 = window(write_seconds / 2, None)                # the drive's cache fills
+        w = window(write_seconds / 2, None)                 # sustained
         m = window(seconds, 0.5, 0.5)
     finally:
         io.close()
@@ -226,4 +229,5 @@ def ssd_rates(directory: str, threads: int = 3, seconds: float = 6.0, gib: int =
     model = 1 / (f / rate["read"] + (1 - f) / rate["write"])
     return {"read": rate["read"], "write": rate["write"], "mixed": sum(m["bytes"].values()) / m["seconds"] / model,
             "read_beside": m["bytes"]["read"] / m["seconds"] / (rate["read"] * f), "read_share": f, "threads": threads,
-            "o_direct": direct, "windows": {"fill": fill, "read": r, "write": w, "mixed": m}}
+            "unit": unit, "o_direct": direct, "windows": {"fill": fill, "read": r, "write_first_half": w0, "write": w,
+                                                           "mixed": m}}

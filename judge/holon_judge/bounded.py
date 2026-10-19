@@ -149,6 +149,7 @@ class Divergence:
     p99: float
     p50_se: float             # session-bootstrap standard errors of the quantiles
     p99_se: float
+    by_wave: dict = dataclasses.field(default_factory=dict)   # reported: "first" / "late" sessions' p50, p99, n
 
     def checks(self, floor: Divergence) -> dict[str, tuple[bool, float]]:
         out = {}
@@ -199,8 +200,9 @@ def agreement(reference, turns: list[Turn], sessions: int, k: int) -> Agreement:
     return Agreement(Mean.of(agree, session), Mean.of(agree[sure], session[sure]), Mean.of(regret, session))
 
 
-def divergence(reference, turns: list[Turn], sessions: int, k: int) -> Divergence:
-    """KL(reference ‖ configuration) at the generated positions, from the logprobs the configuration emitted."""
+def divergence(reference, turns: list[Turn], sessions: int, k: int, starts: tuple[int, ...] = ()) -> Divergence:
+    """KL(reference ‖ configuration) at the generated positions, from the logprobs the configuration emitted; with
+    `starts` (each session's first wave), also the first wave's sessions apart from the late ones (reported)."""
     ref, session = _reference(reference, turns, sessions, k)
     ids = torch.tensor([x[:k] for _, _, lps in turns for lp in lps for x in lp.top_ids])
     top = torch.tensor([x[:k] for _, _, lps in turns for lp in lps for x in lp.top], dtype=torch.float32)
@@ -208,7 +210,11 @@ def divergence(reference, turns: list[Turn], sessions: int, k: int) -> Divergenc
     kl, _ = kl_topk(ref, cand)
     (p50, p99), (p50_se, p99_se) = (t.tolist() for t in _quantiles(kl, session, torch.tensor([0.5, 0.99],
                                                                                               dtype=torch.float64)))
-    return Divergence(Mean.of(kl, session), p50, p99, p50_se, p99_se)
+    late = torch.tensor([bool(starts and starts[i] > 0) for i in range(sessions)])[session]
+    by_wave = {name: {"n": int(mask.sum()), **dict(zip(("p50", "p99"), torch.quantile(
+        kl[mask].double(), torch.tensor([0.5, 0.99], dtype=torch.float64)).tolist(), strict=True))}
+        for name, mask in (("first", ~late), ("late", late)) if mask.any()} if starts else {}
+    return Divergence(Mean.of(kl, session), p50, p99, p50_se, p99_se, by_wave)
 
 
 def compare_configs(build, configs: dict[str, dict], trace: Trace, k: int = 20, baseline: dict = BASELINE,
@@ -228,7 +234,8 @@ def compare_configs(build, configs: dict[str, dict], trace: Trace, k: int = 20, 
     reference = build(**(BASELINE | {"cuda_graphs": False, "max_step_tokens": max(trace.max_len, 4096)}
                          | (reference or {})))
     sessions = len(trace.chunks)
-    scored = {name: (agreement(reference, plain, sessions, k), divergence(reference, lp, sessions, k), stats)
+    scored = {name: (agreement(reference, plain, sessions, k), divergence(reference, lp, sessions, k, trace.starts),
+                     stats)
               for name, (plain, lp, stats) in runs.items()}
     _free(reference)
     floor_a, floor_d, _ = scored["baseline"]
