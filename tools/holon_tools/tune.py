@@ -12,10 +12,18 @@ least `GAIN` over F5a, with the CPU tier it was measured on.
 
 `clock` fits a tier's `state_tier.step_cost` (docs/v1-kv-tiers.md D4: a + b·tokens + c·rows seconds per step) to timed
 steps of this lock's engine: prefill steps of one row at several chunk sizes and decode steps at every row count.
+
+`ssd_rates` measures the SSD level's clock rates on this host's drive (D4: `ssd.read`, `ssd.write`, `ssd.mixed`,
+`ssd.read_beside`) through the tier's own I/O threads and level, as K-M4 and step 3 did.
 """
 from __future__ import annotations
 
+import collections
 import gc
+import itertools
+import mmap
+import os
+import pathlib
 import random
 import statistics
 import time
@@ -142,3 +150,80 @@ def clock(samples: list[tuple[int, int, float]]) -> tuple[float, float, float]:
     x = np.array([[1.0, t, r] for t, r, _ in samples])
     y = np.array([s for _, _, s in samples])
     return tuple(max(0.0, float(v)) for v in np.linalg.lstsq(x / y[:, None], np.ones_like(y), rcond=None)[0])
+
+
+def ssd_rates(directory: str, threads: int = 3, seconds: float = 6.0, gib: int = 16, unit: int = 557_056) -> dict:
+    """The SSD level's rates on the drive under `directory` (files made and removed there), through
+    `std.state_tier`'s `IoThreads` over its `SsdLevel` (`threads` deep, O_DIRECT units of `unit` bytes, a 27B q8_0
+    page), after a fill one write at a time: `read`, reads alone; `write`, writes alone for 2 × `seconds`; then reads
+    and background writes for `seconds` at a 50% read share, half the reads after an urgent write: `mixed` (the bytes
+    moved over D4's serial-lane model from the pure rates) and `read_beside` (the reads' rate over the pure read
+    rate at their share). Bytes per second, and the windows."""
+    from holon_std.state_tier.iothreads import IoThreads
+    from holon_std.state_tier.ssd import SsdLevel
+    root = pathlib.Path(directory) / f"holon_tune_ssd_{os.getpid()}"
+    level = SsdLevel({"dir": str(root), "bytes": gib << 30, "persist": "off"}, threads)
+    slots = level.bind(None, {"kv": (unit, 1, 1.0)}, None)["kv"]
+    direct = level.dfd["kv"] is not None
+    io, rng, keys = IoThreads(threads, "tune.ssd"), random.Random(0), itertools.count()
+    bufs = [mmap.mmap(-1, unit) for _ in range(4 * threads + 8)]           # page-aligned host units
+    free, held = collections.deque(range(slots)), collections.deque()
+
+    def src(i: int) -> dict:
+        return {"kv": [[memoryview(bufs[i % len(bufs)])]]}
+
+    def write(urgent: bool = False):
+        if len(held) > slots // 2:                          # the oldest copy gives its slot back (long since written)
+            old, slot = held.popleft()
+            level.drop(old, None)
+            free.append(slot)
+        key, slot = next(keys), free.popleft()
+        held.append((key, slot))
+        return io.submit(lambda: level.write(key, None, src(key), {"kv": [slot]}), read=urgent)
+
+    def read(i: int):
+        key = rng.choice(list(itertools.islice(held, 0, max(1, len(held) - 4 * threads))))[0]
+        return io.submit(lambda: level.read(key, None, src(i)), read=True)
+
+    def window(secs: float, share: float | None, dependent: float = 0.0) -> dict:
+        done, live, i, start = dict.fromkeys(("read", "write", "urgent"), 0), [], 0, time.perf_counter()
+        while time.perf_counter() - start < secs:
+            for kind, job in [x for x in live if x[1].ticket.done()]:
+                done[kind] += unit
+                live.remove((kind, job))
+            reads, writes = (sum(k == kind for k, _ in live) for kind in ("read", "write"))
+            got = sum(done.values()) or 1
+            if share is not None and reads < threads and (share >= 1 or done["read"] / got <= share):
+                if rng.random() < dependent:
+                    live.append(("urgent", write(urgent=True)))
+                live.append(("read", read(i)))
+            elif (share is None or share < 1) and writes < threads:
+                live.append(("write", write()))
+            else:
+                time.sleep(2e-4)
+            i += 1
+        io.drain()
+        secs = time.perf_counter() - start
+        for kind, _ in live:
+            done[kind] += unit
+        return {"seconds": secs, "bytes": done}
+    try:
+        start = time.perf_counter()
+        for _ in range(min(slots // 2, 4000)):              # copies to read back, written one at a time
+            write().ticket.wait()
+        fill = {"seconds": time.perf_counter() - start, "bytes": {"write": min(slots // 2, 4000) * unit}}
+        r = window(seconds, 1.0)                            # reads first: not behind a burst of writes
+        w = window(2 * seconds, None)
+        m = window(seconds, 0.5, 0.5)
+    finally:
+        io.close()
+        level.close([])
+        for f in sorted(root.rglob("*"), reverse=True):
+            f.unlink() if f.is_file() else f.rmdir()
+        root.rmdir()
+    rate = {k: sum(x["bytes"].values()) / x["seconds"] for k, x in (("write", w), ("read", r))}
+    f = m["bytes"]["read"] / sum(m["bytes"].values())
+    model = 1 / (f / rate["read"] + (1 - f) / rate["write"])
+    return {"read": rate["read"], "write": rate["write"], "mixed": sum(m["bytes"].values()) / m["seconds"] / model,
+            "read_beside": m["bytes"]["read"] / m["seconds"] / (rate["read"] * f), "read_share": f, "threads": threads,
+            "o_direct": direct, "windows": {"fill": fill, "read": r, "write": w, "mixed": m}}

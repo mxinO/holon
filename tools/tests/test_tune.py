@@ -65,3 +65,9 @@ def test_f5b_enters_the_lock_only_at_a_five_percent_gain():
     assert record["best"] == {"share": 0.4, "threads": 4} and record["taken"]
     options, record = tune.split(rate(104.0), 10, "x86-avx2")
     assert options == {} and not record["taken"] and 0 < record["gain"] < tune.GAIN
+
+
+def test_ssd_rates_go_through_the_level_and_leave_no_files(tmp_path):
+    got = tune.ssd_rates(str(tmp_path), threads=2, seconds=0.2, gib=1, unit=1 << 16)
+    assert all(got[k] > 0 for k in ("read", "write", "mixed", "read_beside")) and 0 < got["read_share"] < 1
+    assert not list(tmp_path.iterdir())

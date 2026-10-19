@@ -220,8 +220,30 @@ def cell_3f(args, sampler: Sampler) -> dict:
     persisted = b.tier.counts["write_back_bytes"]
     pools.append(b.pools())
     b.close()
+    from holon_std.state_tier.ssd import SsdLevel
+    from holon_std.state_tier.tier import HostTier
+    spent: dict[str, float] = {}
+
+    def timed(cls, name: str):                               # the restart's parts, apart from the engine build
+        fn = getattr(cls, name)
+
+        def wrapper(self, *a, **kw):
+            t = time.perf_counter()
+            try:
+                return fn(self, *a, **kw)
+            finally:
+                spent[f"{cls.__name__}.{name}"] = time.perf_counter() - t
+        return wrapper
+    patched = [(SsdLevel, "restore"), (SsdLevel, "bind"), (HostTier, "attach")]
+    saved = {(c, n): getattr(c, n) for c, n in patched}
+    for c, n in patched:
+        setattr(c, n, timed(c, n))
     t0 = time.perf_counter()
-    b2 = Bench(args, str(root / "b"), "close")
+    try:
+        b2 = Bench(args, str(root / "b"), "close")
+    finally:
+        for (c, n), fn in saved.items():
+            setattr(c, n, fn)
     startup = time.perf_counter() - t0
     restored = b2.tier.counts["restored_blocks"]
     pools.append(b2.pools())
@@ -236,13 +258,14 @@ def cell_3f(args, sampler: Sampler) -> dict:
     return {"ttft_ms": {"no_restart": ttft_a, "restarted": ttft_b}, "cached": {"no_restart": cached_a,
             "restarted": cached_b}, "outputs_identical": out_a == out_b, "restored_blocks": restored,
             "restored_payloads": restored_payloads, "device_pools": pools,
-            "startup_s": startup, "persisted_bytes": persisted, "bar_ms": bar,
+            "startup_s": startup, "restart_parts_s": spent, "persisted_bytes": persisted,
+            "restore_s_per_persisted_gb": spent.get("SsdLevel.restore", 0) / (persisted / 1e9), "bar_ms": bar,
             "pass": ttft_b <= bar and out_a == out_b and cached_a == cached_b}
 
 
 def cell_3b(b: Bench, args, sampler: Sampler) -> dict:
     """Decoders' step gaps while a fourth request resumes 32K from RAM (or SSD) vs plain decode steps."""
-    n, gated, control, append_tier, append_ctrl, host_ms = 32768, [], [], [], [], []
+    n, gated, control, append_tier, append_ctrl, host_ms, loop_gated, loop_ctrl = 32768, [], [], [], [], [], [], []
     convs = [b.park(n) for _ in range(args.reps)]            # parked once, each resumed once per round
     for _ in range(3):
         b.start_decoder()
@@ -252,7 +275,9 @@ def cell_3b(b: Bench, args, sampler: Sampler) -> dict:
     def timed_steps(k: int) -> list[float]:
         gaps, t = [], time.perf_counter()
         for _ in range(k):
+            c = time.thread_time()
             b.step()
+            loop_ctrl.append((time.thread_time() - c) * 1e3)
             now = time.perf_counter()
             gaps.append((now - t) * 1e3)
             t = now
@@ -268,7 +293,9 @@ def cell_3b(b: Bench, args, sampler: Sampler) -> dict:
             cpu0 = time.process_time()
             seq = None
             while True:                                      # gated: until its first step runs
+                c = time.thread_time()                       # the engine loop's own CPU time (this thread)
                 b.step()
+                loop = (time.thread_time() - c) * 1e3
                 now = time.perf_counter()
                 seq = seq or next(iter(b.engine._live.get(rid, ())), None)
                 started = seq is not None and seq.num_computed > len(prompt) // 64 * 64
@@ -276,6 +303,7 @@ def cell_3b(b: Bench, args, sampler: Sampler) -> dict:
                     append_tier.append((now - t) * 1e3)
                     break
                 gaps.append((now - t) * 1e3)
+                loop_gated.append(loop)
                 steps += 1
                 t = now
             host_ms.append((time.process_time() - cpu0) * 1e3 / max(1, steps + 1))
@@ -298,7 +326,11 @@ def cell_3b(b: Bench, args, sampler: Sampler) -> dict:
     res = {"gaps": len(gated), "gated_median_ms": statistics.median(gated) if gated else None,
            "control_median_ms": statistics.median(control), "gated_p90_ms": pct(gated, 0.9) if gated else None,
            "control_p90_ms": pct(control, 0.9), "append_ratio": statistics.median(append_tier) / statistics.median(
-               append_ctrl), "host_ms_per_step": statistics.median(host_ms), "rows": rows}
+               append_ctrl), "process_cpu_ms_per_step": statistics.median(host_ms),
+           "loop_cpu_ms_per_step": {"gated": statistics.median(loop_gated) if loop_gated else None,
+                                    "control": statistics.median(loop_ctrl),
+                                    "gated_p90": pct(loop_gated, 0.9) if loop_gated else None},
+           "blocking_sync": args.blocking_sync, "rows": rows}
     if gated:
         res |= {"median_ratio": res["gated_median_ms"] / res["control_median_ms"],
                 "p90_ratio": res["gated_p90_ms"] / res["control_p90_ms"]}
@@ -327,10 +359,15 @@ def main() -> None:
     ap.add_argument("--staging", type=int, default=5)
     ap.add_argument("--ssd-bytes", default="64GiB")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--blocking-sync", action="store_true", help="CUDA waits sleep, so the engine loop's CPU time is "
+                    "host work (worker.blocking_sync)")
     ap.add_argument("--options", nargs="*", default=[], metavar="KEY=VALUE", help="more plugin options (e.g. the "
                     "tuned state_tier.step_cost)")
     ap.add_argument("--json")
     args = ap.parse_args()
+    if args.blocking_sync:                                   # before the engine creates the CUDA context
+        from worker import blocking_sync
+        blocking_sync()
     sampler = Sampler()
     if args.cell == "3f":
         res = cell_3f(args, sampler)

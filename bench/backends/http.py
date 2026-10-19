@@ -101,8 +101,10 @@ class Backend:
     def _run(self, rid: int, prompt: list[int], max_tokens: int) -> None:
         try:
             state: dict = {}
-            gap, last = 0.0, None
+            gap, last, done = 0.0, None, False
             for event in self.server.stream(self.path, self.body(prompt, max_tokens)):
+                if "error" in event:                 # a server's in-stream error (e.g. its KV pool exhausted)
+                    raise RuntimeError(f"request {rid}: {event['error']}")
                 now = time.perf_counter()
                 gap, last = (max(gap, now - last) if last is not None else 0.0), now
                 toks, done = self.parse(event, state)
@@ -111,6 +113,8 @@ class Backend:
                     self.gaps.append(gap)
                 if toks or done:
                     self.arrived.put((rid, toks, done))
+            if not done:                             # a stream that ends unfinished fails the run, never hangs it
+                raise RuntimeError(f"request {rid}: the stream ended before the request finished")
         except BaseException as e:  # noqa: BLE001 — surfaced by step() on the driver's thread
             self.arrived.put(e)
 
