@@ -53,3 +53,34 @@ def test_expand_and_the_output_mixer():
     assert r.dtype == torch.float32 and torch.equal(r, expand.inner.weight[ids].repeat(1, N))
     x, w = hc.hc_gr_mix(r, mix.hc.norm, mix.hc.down, mix.hc.up, None, None, None, N, EPS, torch.float32)
     assert w is None and torch.equal(mix(r), x)
+
+
+@torch.no_grad()
+def test_qsa_sparse_path_selecting_every_block_is_the_dense_attention():
+    """`std.mixers.qsa@1` in a model-only build: with a budget above every sequence, the sparse path (pages made for
+    the call, index, select, attend with the output gate) selects every block, so it equals gqa's dense attention."""
+    ctx = _ctx()
+    norm = Ref("std.ops.rmsnorm@1", eps=EPS, offset=1.0)
+    qsa = ctx.unit(Ref("std.mixers.qsa@1", heads=4, kv_heads=2, head_dim=64, qk_norm=norm, output_gate="sigmoid",
+                       rope=Ref("std.ops.rope@1", theta=1e7, rotary_dim=16), index_heads=2, index_head_dim=32,
+                       budget=2048), layer=0, hidden=H)
+    _fill(qsa, 5)
+    ids = [list(range(1, 41)), list(range(50, 73))]
+    step = StepContext.whole_sequences(ids, "cpu")
+    x = torch.randn(sum(map(len, ids)), H, generator=torch.Generator().manual_seed(6))
+    dense = qsa(x, step)
+    qsa.limit = 0                                             # every step sparse
+    torch.testing.assert_close(qsa(x, step), dense, rtol=1e-5, atol=1e-5)
+
+
+@torch.no_grad()
+def test_ffn_sum_of_routed_parts_and_a_gated_shared_expert():
+    ctx = _ctx()
+    parts = (Ref("std.ffn.swiglu@1", inter=32), Ref("std.ffn.gated_swiglu@1", inter=16))
+    ffn = ctx.unit(Ref("std.ffn.sum@1", parts=parts), hidden=H, layer=0)
+    _fill(ffn, 7)
+    x = torch.randn(T, H, generator=torch.Generator().manual_seed(8))
+    shared = ffn.parts[1]
+    want = ffn.parts[0](x) + shared.down_proj(torch.nn.functional.silu(shared.gate_proj(x)) * shared.up_proj(x)) \
+        * torch.sigmoid(shared.gate(x))
+    torch.testing.assert_close(ffn(x), want, rtol=1e-5, atol=1e-5)

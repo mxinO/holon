@@ -32,3 +32,29 @@ class SwiGLU(nn.Module):
             return self.down_proj(self._act(self._gate_up(x)) if fused is None else fused)
         h = getattr(self.gate_proj, "prepare_input", lambda x: x)(x)    # one input, two projections (D6)
         return self.down_proj(self._act(torch.cat([self.gate_proj(h), self.up_proj(h)], dim=-1)))
+
+
+class GatedSwiGLU(SwiGLU):
+    """A shared expert gated per token (docs/v1-flash-next.md D7): `swiglu(x) · σ(gate · x)`, `gate` [1, hidden]."""
+
+    def __init__(self, ctx, *, hidden: int, inter: int, layer: int = 0) -> None:
+        super().__init__(ctx, hidden=hidden, inter=inter, layer=layer)
+        self.gate = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return super().forward(x) * torch.sigmoid(self.gate(x))
+
+
+class Sum(nn.Module):
+    """FFN parts summed (D7): each `parts` Ref built at this layer, their outputs added in order (e.g. routed experts,
+    then a gated shared expert)."""
+
+    def __init__(self, ctx, *, hidden: int, parts: tuple[Ref, ...], layer: int = 0) -> None:
+        super().__init__()
+        self.parts = nn.ModuleList(ctx.unit(p, hidden=hidden, layer=layer) for p in parts)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.parts[0](x)
+        for part in self.parts[1:]:
+            out = out + part(x)
+        return out
