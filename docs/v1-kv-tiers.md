@@ -97,7 +97,9 @@ caches on an agent trace, with outputs that do not depend on where state was kep
        - It must pass tier invariance like the SSD level.
        - Expected diff: ≈ 120 lines plus tests, in its own directory, binding through `state_tier.levels`.
      - Rev 8.5: `state_tiers.zlib` landed after the first tag (af0672d) and passes tier invariance; its `write` took
-       the `slots` argument when rev 8.5 moved the tag. `policies.last_turn` is still owed (step 5).
+       the `slots` argument when rev 8.5 moved the tag. Step 5: `policies.last_turn` landed plugin-only and the
+       prediction held: it needs the untrimmed match length (`SeqView.matched`), K's proof finding; the minor is
+       for the lead (§13, "Step 5").
    - Every core seam (§4) is proven first with a toy kind and a toy tier in `core/tests`.
 2. **Exactness** (D4, §6).
    - **Tier invariance.** The reference is the same configuration with each session's turns run back to back and no
@@ -1453,6 +1455,82 @@ the restart check pass as before (7,402 level reads; 338 blocks restored, none a
 `stale_slot` and `torn_manifest` with the crc check off are caught (`evidence/k3_judge_tiers_ssd_rtx-a5000_2026-10-19.json`,
 `gpu_qwen3-8b_ssd_rev85`). The full CI suite: 1638 passed, 66 skipped, 1 failed (the crc-off plant's patch missed
 the verification's new argument; fixed, the level's judge cells re-run: 5 passed).
+
+### Step 5 (2026-10-19): the held-out policy, design.md, close prep
+
+**`policies.last_turn`** (`b4db4e9`, strictly after `b596ba7`): Maya KG2's checkpoint at the last turn's start, a
+`std.state.recurrent` policy unit by `Ref` (`recurrent.policy = "prompt_end,policies.last_turn@1"`), in
+`plugins/holon_plugins/policies/last_turn/`. The diff is plugin-only, as `state_tiers.zlib`'s was: its directory and
+test plus its entry point (`plugins/pyproject.toml`) and its contracts line (`plugins/contracts.txt`); 7 files, 97
+insertions (`git diff --stat`), `check_core_diff.sh` against its parent: empty.
+
+**The proof's finding, as predicted (§1):** the policy needs the request's untrimmed match length and `SeqView` does
+not carry it. `num_computed` is the trimmed hit; `branch_at` is the matched chain's end only when its last block has
+cached continuations, and a turn that extends its history leaves none (its previous request was the chain's leaf).
+`plugins/tests/test_policies_last_turn.py` shows it on the tiny hybrid: a second turn whose admission matches 192
+tokens (the first turn's prompt and output) is seen by a policy as `num_computed` 128 (the prompt-end checkpoint) and
+`branch_at` 0. The policy's rule (checkpoint at the match's end, a whole number of index blocks, so aligned for every
+kind; untentative) is tested on a view carrying the length, and the unit refuses to build on this core, naming the
+field. The workaround that stays plugin-only does not exist: a kind's `hit_length` sees the matched chain but not
+which request it belongs to, and a policy unit sees only the `SeqView`.
+
+**The minor it needs** (not landed; for the lead): `Seq.matched` and `SeqView.matched`, the untrimmed match length
+set at admission beside `branch_at` (`core/holon/core/state.py`'s `admit`, the `_View` property, `holon.api.batch.Seq`
+and the `SeqView` protocol): ≈ 5 core code lines, over the lead's +326 cap, and an ABI addition, which needs a minor
+bump: K's ABI is 1.4 with the tag fixed at `b596ba7`, and D14 gives 1.5 to whichever of K and FN merges second. With
+it, `policies.last_turn` builds with no change of its own (its check reads the protocol's fields). As X's F10 was, it
+can be scheduled: K's close (as ABI 1.5, FN then taking 1.6) or the next core round.
+
+Core is unchanged in step 5. The full CI suite with `policies.last_turn`: 1646 passed, 66 skipped; `run_all.sh` clean (the ABI
+listing and the plugins' contracts line included).
+
+**design.md's edit list (§11)**, checked against `docs/design.md` and the API docstrings: every item landed in step 1
+with the seams, none is outstanding.
+
+| §11 item | Where it is |
+|---|---|
+| §4.2: `tier` and `eviction_policy` in the slot table; `tier` out of "Not re-added", replacing the planned `connector` | the slot table's `single` row; the paragraph after it |
+| §4.5: the ABI minor and its contents | §4.5's ABI 1.4 entry (KS1–KS5 and the listed names) |
+| §6.2: `hit_length`'s tier cost | `(length; no cost: K D9)` |
+| §6.3: residency, the victim policy, `Payload.tentative`, `branch_at`, the staging rule | §6.3's residency, `eviction_policy` and "Tiers (milestone K)" paragraphs |
+| §6.4: the tier owns loads, never cancelled; `BLOCKED` stays the logits processor's | §6.4's load paragraphs |
+| §9's KV offload row | the row naming `std.state_tier`, KS1–KS5 |
+| the host-pool timing rule, three places | design §6.1; `BuildCtx.pool`'s docstring (`core/holon/api/model.py`); `RequestsPools.before_materialize` (`core/holon/api/hooks.py`) |
+| D8's row: K's seams as built | D8 |
+
+The post-tag std follow-ups (the staging refusal, required `recurrent.checkpoints`, the SSD read rate) are std's
+behaviour, not the design's contracts, and need no design.md edit.
+
+**Close prep: the locks K outdates** (`python -m holon_tools impact b5b1e7f..HEAD`, at `b4db4e9`). Every lock pins the
+core's source, and K changed the core, so all 23 lock histories are outdated, each newest lock below; the 27B ones also
+pin changed std units. Not run: the single propagation round is the close's, by whichever of K and FN closes second
+(D14).
+
+| model | class | newest lock | changed units it pins |
+|---|---|---|---|
+| `Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@84e3f62a338c23dd` | rtx-4090 | 6 | holon |
+| `Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4` | rtx-4090 | 5 | holon |
+| `Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4` | rtx-5080 | 5 | holon |
+| `Qwen/Qwen3-8B@f1add50ee1c6e469` | rtx-3090 | 4 | holon |
+| `Qwen/Qwen3-8B@f1add50ee1c6e469` | rtx-4090 | 16 | holon |
+| `Qwen/Qwen3-8B@f1add50ee1c6e469` | rtx-5090 | 10 | holon |
+| `nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99` | rtx-4090 | 7 | holon |
+| `nvidia/Qwen3-8B-NVFP4@70613544a162fdd3` | rtx-4090 | 7 | holon |
+| `nvidia/Qwen3-8B-NVFP4@70613544a162fdd3` | rtx-5080 | 7 | holon |
+| `unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09` | rtx-3090 | 4 | holon |
+| `unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09` | rtx-4090 | 10 | holon |
+| `unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09` | rtx-5080 | 2 | holon |
+| `unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09` | rtx-5090 | 4 | holon |
+| `unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS@dbe47df66091cac6` | rtx-5080 | 10 | holon |
+| `unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243` | rtx-3090 | 4 | holon |
+| `unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243` | rtx-4090 | 4 | holon |
+| `unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243` | rtx-5080 | 12 | holon |
+| `unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243` | rtx-5090 | 4 | holon |
+| `unsloth/Qwen3-8B-GGUF/Qwen3-8B-UD-IQ3_XXS@495e28b50d2373d0` | rtx-5080 | 12 | holon |
+| `unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e` | rtx-5080 | 11 | holon, kernels.state_copy, std.state.recurrent, std.state_tier |
+| `unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7` | rtx-3090 | 6 | holon, std.state.recurrent |
+| `unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7` | rtx-4090 | 10 | holon, std.state.recurrent |
+| `unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7` | rtx-5090 | 6 | holon, kernels.state_copy, std.state.recurrent, std.state_tier |
 
 ### Step 4: the panel's review (2026-10-19)
 
