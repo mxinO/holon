@@ -564,7 +564,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 diff -ruN a/ggml/src/ggml-cuda/mmid.cuh b/ggml/src/ggml-cuda/mmid.cuh
 --- a/ggml/src/ggml-cuda/mmid.cuh
 +++ b/ggml/src/ggml-cuda/mmid.cuh
-@@ -1,5 +1,54 @@
+@@ -1,5 +1,55 @@
  #pragma once
  
 +// Holon: the most (token, expert) pairs one block sorts (mm_ids_helper's largest instance: 1024 threads x 16)
@@ -575,8 +575,9 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cuh b/ggml/src/ggml-cuda/mmid.cuh
 +#define GGML_CUDA_MM_IDS_MAX_PAIRS 32768
 +
 +// Holon: mmq with ids picks its tile width against a call's tokens up to this many (upstream's rule: batched decode),
-+// above against the launch's mean rows per entry (docs/v1-moe-prefill.md D2; the threshold from its per-call sweep)
-+#define GGML_CUDA_MMQ_IDS_J_TOKENS 16
++// above against the launch's mean rows per entry (docs/v1-moe-prefill.md D2): 16 where D2's per-call sweep measured it
++// (sm_86, sm_120), 64 on Ada until it is measured there
++static inline int64_t ggml_cuda_mmq_ids_j_tokens(const int cc) { return cc == 890 /* Ada */ ? 64 : 16; }
 +
 +// Holon: the scratch bytes the helper takes for a call of n_pairs pairs (the device-wide path's; 0 for the others)
 +size_t ggml_cuda_mm_ids_scratch_bytes(int n_pairs);
@@ -684,9 +685,9 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
 +            // Holon: each launch entry holds ne12*n_expert_used/n_z rows on average, and the launch covers only the
 +            // tiles that hold rows (launch_mul_mat_q, docs/v1-moe-prefill.md D2), so J is chosen against that mean on
 +            // every GPU (upstream: against ne12, or on RDNA3 and RDNA4 against the mean over ne02 slots); up to
-+            // GGML_CUDA_MMQ_IDS_J_TOKENS tokens against ne12, as upstream: there the mean's narrower tiles re-read the
++            // ggml_cuda_mmq_ids_j_tokens tokens against ne12, as upstream: there the mean's narrower tiles re-read the
 +            // weights of the experts that hold more rows (16 tokens: up to 8% slower on the RTX 5080 and 5090)
-+            ncols_opt = ne12 <= GGML_CUDA_MMQ_IDS_J_TOKENS ? ne12 : (ne12*ids->ne[0] + n_z - 1) / std::max(n_z, 1);
++            ncols_opt = ne12 <= ggml_cuda_mmq_ids_j_tokens(cc) ? ne12 : (ne12*ids->ne[0] + n_z - 1) / std::max(n_z, 1);
          }
  
          int ntiles_J_best = INT_MAX;

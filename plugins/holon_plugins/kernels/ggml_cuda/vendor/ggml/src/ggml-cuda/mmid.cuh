@@ -8,8 +8,9 @@
 #define GGML_CUDA_MM_IDS_MAX_PAIRS 32768
 
 // Holon: mmq with ids picks its tile width against a call's tokens up to this many (upstream's rule: batched decode),
-// above against the launch's mean rows per entry (docs/v1-moe-prefill.md D2; the threshold from its per-call sweep)
-#define GGML_CUDA_MMQ_IDS_J_TOKENS 16
+// above against the launch's mean rows per entry (docs/v1-moe-prefill.md D2): 16 where D2's per-call sweep measured it
+// (sm_86, sm_120), 64 on Ada until it is measured there
+static inline int64_t ggml_cuda_mmq_ids_j_tokens(const int cc) { return cc == 890 /* Ada */ ? 64 : 16; }
 
 // Holon: the scratch bytes the helper takes for a call of n_pairs pairs (the device-wide path's; 0 for the others)
 size_t ggml_cuda_mm_ids_scratch_bytes(int n_pairs);

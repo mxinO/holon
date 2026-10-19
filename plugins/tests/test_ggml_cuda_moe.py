@@ -524,7 +524,8 @@ def placed_inputs(stage: str, tokens: int, seed: int) -> tuple[torch.Tensor, tor
 # EP + K slots per call): per slot where the launch lists every slot (at most 64 more than EP + K, SLOTS included),
 # compact where the arena has more
 HELPERS = {"per_slot": EP + K, "compact": 128}
-J_AGAINST_T = 16        # mmq with ids picks J against a call's tokens up to this many, above against its entries' mean
+# mmq with ids picks J against a call's tokens up to this many, above against its entries' mean (mmid.cuh)
+J_AGAINST_T = 64 if SM == 89 else 16
 
 
 def helper(fn) -> str:
