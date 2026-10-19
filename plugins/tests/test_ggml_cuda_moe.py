@@ -635,7 +635,7 @@ def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Te
         assert kernel.scratch_bytes(kernel.mmvq_tokens) == 0
         small, empty = kernel.mmvq_tokens, torch.empty(0, dtype=torch.uint8, device="cuda")
         want = kernel(x[:small], parts, ids[:small])
-        with (mock.patch.object(kernel, "_transients", side_effect=AssertionError),        # mmvq calls do none of
+        with (mock.patch.object(kernel, "_gate_up_out", side_effect=AssertionError),        # mmvq calls do none of
               mock.patch.object(kernel, "scratch_bytes", side_effect=AssertionError)):     # D10's work (host-bound)
             assert torch.equal(kernel(x[:small], parts, ids[:small], scratch=empty), want)
         assert kernel.scratch_bytes(64) == (0 if glu == "none" or kernel.glu_store else 64 * K * kernel.out * 4)
